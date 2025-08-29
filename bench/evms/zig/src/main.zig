@@ -139,9 +139,8 @@ pub fn main() !void {
     defer allocator.free(calldata);
 
     // Set up EVM infrastructure
-    var memory_db = evm.MemoryDatabase.init(allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var database = evm.Database.init(allocator);
+    defer database.deinit();
 
     const block_info = evm.BlockInfo{
         .number = 1,
@@ -151,6 +150,8 @@ pub fn main() !void {
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
         .prev_randao = [_]u8{0} ** 32,
+        .blob_base_fee = 1000000000,
+        .blob_versioned_hashes = &.{},
     };
 
     const context = evm.TransactionContext{
@@ -159,8 +160,7 @@ pub fn main() !void {
         .chain_id = 1,
     };
 
-    const db_as_database = @as(evm.Database, db_interface);
-    var evm_instance = try evm.DefaultEvm.init(allocator, db_as_database, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm_instance = try evm.DefaultEvm.init(allocator, database, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm_instance.deinit();
 
     // We attempt to deploy via CREATE first. If the provided bytecode is actually
@@ -171,11 +171,10 @@ pub fn main() !void {
     // Run benchmarks - create fresh EVM instance for each run to ensure consistent state
     for (0..num_runs) |run_idx| {
         // Create fresh EVM instance for each run to avoid state corruption
-        var fresh_memory_db = evm.MemoryDatabase.init(allocator);
-        defer fresh_memory_db.deinit();
-        const fresh_db_interface = evm.DatabaseInterface.init(&fresh_memory_db);
+        var fresh_database = evm.Database.init(allocator);
+        defer fresh_database.deinit();
 
-        var fresh_evm = try evm.DefaultEvm.init(allocator, fresh_db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+        var fresh_evm = try evm.DefaultEvm.init(allocator, fresh_database, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
         defer fresh_evm.deinit();
 
         // 1) Try CREATE deployment path with provided bytecode as init code
@@ -238,11 +237,11 @@ pub fn main() !void {
 
         if (use_direct_install) {
             // Directly install provided bytecode as runtime
-            const fresh_code_hash = try fresh_memory_db.set_code(init_code);
+            const fresh_code_hash = try fresh_database.set_code(init_code);
             // Choose a fixed address for direct install
             // Use a non-precompile address (avoid 0x01..0x0a)
             target_address = Address{ .bytes = [_]u8{0} ** 19 ++ [_]u8{0x11} };
-            try fresh_memory_db.set_account(target_address.bytes, evm.Account{
+            try fresh_database.set_account(target_address.bytes, evm.Account{
                 .nonce = 0,
                 .balance = 0,
                 .code_hash = fresh_code_hash,

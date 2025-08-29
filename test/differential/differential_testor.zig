@@ -164,6 +164,8 @@ pub const DifferentialTestor = struct {
             .difficulty = 0,
             .base_fee = 0,
             .prev_randao = [_]u8{0} ** 32,
+            .blob_base_fee = 0,
+            .blob_versioned_hashes = &.{},
         };
         
         const tx_context = guillotine_evm.TransactionContext{

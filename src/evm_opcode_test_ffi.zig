@@ -14,7 +14,7 @@ const DefaultEvm = Evm.DefaultEvm;
 // Wrapper to own the EVM and its backing in-memory DB for testing
 const EvmWrapper = struct {
     evm: *DefaultEvm,
-    memory_db: *Evm.MemoryDatabase,
+    database: *Evm.Database,
 };
 
 // C-facing types
@@ -59,13 +59,12 @@ fn cbytes_to_slice(b: CBytes) []const u8 {
 }
 
 export fn zigEvmCreate() ?*anyopaque {
-    const memory_db = allocator.create(Evm.MemoryDatabase) catch return null;
-    memory_db.* = Evm.MemoryDatabase.init(allocator);
-    const db_interface = memory_db.to_database_interface();
+    const database = allocator.create(Evm.Database) catch return null;
+    database.* = Evm.Database.init(allocator);
 
     const evm = allocator.create(DefaultEvm) catch {
-        memory_db.deinit();
-        allocator.destroy(memory_db);
+        database.deinit();
+        allocator.destroy(database);
         return null;
     };
 
@@ -77,6 +76,8 @@ export fn zigEvmCreate() ?*anyopaque {
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 0,
         .prev_randao = [_]u8{0} ** 32,
+        .blob_base_fee = 0,
+        .blob_versioned_hashes = &.{},
     };
     
     const context = Evm.TransactionContext{
@@ -85,22 +86,21 @@ export fn zigEvmCreate() ?*anyopaque {
         .chain_id = 1,
     };
     
-    const db_as_database = @as(@import("evm").Database, db_interface.*);
-    evm.* = DefaultEvm.init(allocator, db_as_database, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN) catch {
-        memory_db.deinit();
-        allocator.destroy(memory_db);
+    evm.* = DefaultEvm.init(allocator, database.*, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN) catch {
+        database.deinit();
+        allocator.destroy(database);
         allocator.destroy(evm);
         return null;
     };
 
     const wrapper = allocator.create(EvmWrapper) catch {
         evm.deinit();
-        memory_db.deinit();
-        allocator.destroy(memory_db);
+        database.deinit();
+        allocator.destroy(database);
         allocator.destroy(evm);
         return null;
     };
-    wrapper.* = .{ .evm = evm, .memory_db = memory_db };
+    wrapper.* = .{ .evm = evm, .database = database };
     return @ptrCast(wrapper);
 }
 
@@ -108,9 +108,9 @@ export fn zigEvmDestroy(evm_ptr: ?*anyopaque) void {
     if (evm_ptr) |ptr| {
         const wrapper: *EvmWrapper = @ptrCast(@alignCast(ptr));
         wrapper.evm.deinit();
-        wrapper.memory_db.deinit();
+        wrapper.database.deinit();
         allocator.destroy(wrapper.evm);
-        allocator.destroy(wrapper.memory_db);
+        allocator.destroy(wrapper.database);
         allocator.destroy(wrapper);
     }
 }

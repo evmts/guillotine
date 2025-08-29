@@ -174,6 +174,8 @@ export fn guillotine_init() c_int {
         .coinbase = ZERO_ADDRESS,
         .base_fee = 0,
         .prev_randao = [_]u8{0} ** 32,
+        .blob_base_fee = 0,
+        .blob_versioned_hashes = &.{},
     };
 
     const tx_context = evm_root.TransactionContext{
@@ -347,6 +349,8 @@ export fn guillotine_vm_create() ?*GuillotineVm {
         .coinbase = ZERO_ADDRESS,
         .base_fee = 0,
         .prev_randao = [_]u8{0} ** 32,
+        .blob_base_fee = 0,
+        .blob_versioned_hashes = &.{},
     };
 
     const tx_context = evm_root.TransactionContext{
