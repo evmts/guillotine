@@ -127,7 +127,7 @@ pub const ExecutionDiff = struct {
 pub const DifferentialTestor = struct {
     revm_instance: revm.Revm,
     guillotine_instance: guillotine_evm.Evm(.{}),
-    guillotine_db: guillotine_evm.Database,
+    guillotine_db: *guillotine_evm.Database,
     allocator: std.mem.Allocator,
     caller: primitives.Address,
     contract: primitives.Address,
@@ -146,8 +146,9 @@ pub const DifferentialTestor = struct {
 
         try revm_vm.setBalance(caller, 10000000);
 
-        // Setup Guillotine EVM
-        var db = guillotine_evm.Database.init(allocator);
+        // Setup Guillotine EVM - allocate database on heap
+        const db = try allocator.create(guillotine_evm.Database);
+        db.* = guillotine_evm.Database.init(allocator);
 
         try db.set_account(caller.bytes, .{
             .balance = 10000000,
@@ -178,15 +179,15 @@ pub const DifferentialTestor = struct {
 
         const evm = try guillotine_evm.Evm(.{}).init(
             allocator,
-            &db,
+            db,
             block_info,
             tx_context,
             0, // gas_price
             caller, // origin
             .CANCUN,
         );
-
-        return DifferentialTestor{
+        
+        const testor = DifferentialTestor{
             .revm_instance = revm_vm,
             .guillotine_instance = evm,
             .guillotine_db = db,
@@ -194,12 +195,15 @@ pub const DifferentialTestor = struct {
             .caller = caller,
             .contract = contract,
         };
+
+        return testor;
     }
 
     pub fn deinit(self: *DifferentialTestor) void {
         self.revm_instance.deinit();
         self.guillotine_instance.deinit();
         self.guillotine_db.deinit();
+        self.allocator.destroy(self.guillotine_db);
     }
 
     /// Simple bytecode testing - deploys bytecode and executes it on both EVMs
@@ -212,6 +216,7 @@ pub const DifferentialTestor = struct {
         const code_hash = try self.guillotine_db.set_code(bytecode);
         const log = std.log.scoped(.differential_testor);
         log.debug("Set code with hash: {x}", .{code_hash});
+        log.debug("Contract address is: {x}", .{self.contract.bytes});
 
         try self.guillotine_db.set_account(self.contract.bytes, .{
             .balance = 0,
@@ -235,6 +240,10 @@ pub const DifferentialTestor = struct {
         } else {
             log.err("WARNING: Account not found after deployment!", .{});
         }
+        
+        // Double check the database pointer is the same
+        log.debug("Database pointer in testor: {*}", .{&self.guillotine_db});
+        log.debug("Database pointer in EVM: {*}", .{self.guillotine_instance.database});
 
         // Execute and diff
         var diff = try self.executeAndDiff(self.caller, self.contract, 0, &.{}, 100000);
@@ -356,7 +365,7 @@ pub const DifferentialTestor = struct {
             },
         };
 
-        std.debug.print("DIFFERENTIAL: About to call Guillotine with gas={}\n", .{gas_limit});
+        std.debug.print("DIFFERENTIAL: About to call Guillotine with gas={}, to={x}\n", .{ gas_limit, to.bytes });
         const result = self.guillotine_instance.call(params);
         std.debug.print("DIFFERENTIAL: Guillotine call complete, success={}, gas_left={}\n", .{ result.success, result.gas_left });
 
