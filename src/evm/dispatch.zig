@@ -250,6 +250,57 @@ pub fn Dispatch(comptime FrameType: type) type {
             // Create iterator to traverse bytecode
             var iter = bytecode.createIterator();
             log.debug("Created bytecode iterator", .{});
+            
+            // Calculate gas cost for first basic block
+            var first_block_gas: u32 = 0;
+            var temp_iter = bytecode.createIterator();
+            const opcode_info = @import("opcode_data.zig").OPCODE_INFO;
+            
+            // Scan until we hit a JUMPDEST or end of bytecode to calculate first block gas
+            var found_terminator = false;
+            while (true) {
+                const maybe = temp_iter.next();
+                if (maybe == null) break;
+                const op_data = maybe.?;
+                
+                switch (op_data) {
+                    .regular => |data| {
+                        first_block_gas += opcode_info[data.opcode].gas_cost;
+                        // Stop at JUMP/JUMPI/STOP/RETURN/REVERT/INVALID/SELFDESTRUCT
+                        switch (data.opcode) {
+                            0x56, 0x57, 0x00, 0xf3, 0xfd, 0xfe, 0xff => {
+                                found_terminator = true;
+                                break;
+                            },
+                            else => {},
+                        }
+                    },
+                    .push => |data| {
+                        const push_opcode = 0x60 + data.size - 1;
+                        first_block_gas += opcode_info[push_opcode].gas_cost;
+                    },
+                    .jumpdest => {
+                        found_terminator = true;
+                        break;
+                    },
+                    .stop, .invalid => {
+                        first_block_gas += opcode_info[0x00].gas_cost; // STOP gas cost
+                        found_terminator = true;
+                        break;
+                    },
+                    else => {
+                        // For fusion operations, approximate gas cost
+                        first_block_gas += 6; // PUSH + operation
+                    },
+                }
+                if (found_terminator) break;
+            }
+            
+            // Add first_block_gas entry if there's any gas to charge
+            if (first_block_gas > 0) {
+                try schedule_items.append(allocator, .{ .first_block_gas = .{ .gas = first_block_gas } });
+                log.debug("Added first_block_gas: {}", .{first_block_gas});
+            }
 
             var opcode_count: usize = 0;
             while (true) {
@@ -493,6 +544,56 @@ pub fn Dispatch(comptime FrameType: type) type {
             // Create tracing handlers that will be used throughout
             const trace_before_handler = createTraceHandler(TracerType, tracer_instance, true);
             const trace_after_handler = createTraceHandler(TracerType, tracer_instance, false);
+
+            // Calculate gas cost for first basic block (same as non-tracing version)
+            var first_block_gas: u32 = 0;
+            var temp_iter = bytecode.createIterator();
+            const opcode_info = @import("opcode_data.zig").OPCODE_INFO;
+            
+            // Scan until we hit a JUMPDEST or end of bytecode to calculate first block gas
+            var found_terminator = false;
+            while (true) {
+                const maybe = temp_iter.next();
+                if (maybe == null) break;
+                const op_data = maybe.?;
+                
+                switch (op_data) {
+                    .regular => |data| {
+                        first_block_gas += opcode_info[data.opcode].gas_cost;
+                        // Stop at JUMP/JUMPI/STOP/RETURN/REVERT/INVALID/SELFDESTRUCT
+                        switch (data.opcode) {
+                            0x56, 0x57, 0x00, 0xf3, 0xfd, 0xfe, 0xff => {
+                                found_terminator = true;
+                                break;
+                            },
+                            else => {},
+                        }
+                    },
+                    .push => |data| {
+                        const push_opcode = 0x60 + data.size - 1;
+                        first_block_gas += opcode_info[push_opcode].gas_cost;
+                    },
+                    .jumpdest => {
+                        found_terminator = true;
+                        break;
+                    },
+                    .stop, .invalid => {
+                        first_block_gas += opcode_info[0x00].gas_cost; // STOP gas cost
+                        found_terminator = true;
+                        break;
+                    },
+                    else => {
+                        // For fusion operations, approximate gas cost
+                        first_block_gas += 6; // PUSH + operation
+                    },
+                }
+                if (found_terminator) break;
+            }
+            
+            // Add first_block_gas entry if there's any gas to charge
+            if (first_block_gas > 0) {
+                try schedule_items.append(allocator, .{ .first_block_gas = .{ .gas = first_block_gas } });
+            }
 
             // Create iterator to traverse bytecode
             var iter = bytecode.createIterator();
@@ -757,6 +858,14 @@ pub fn Dispatch(comptime FrameType: type) type {
             // Create iterator to traverse bytecode and find JUMPDEST locations
             var iter = bytecode.createIterator();
             var schedule_index: usize = 0;
+            
+            // Skip first_block_gas if present
+            if (schedule.len > 0) {
+                switch (schedule[0]) {
+                    .first_block_gas => schedule_index = 1,
+                    else => {},
+                }
+            }
 
             while (true) {
                 const instr_pc = iter.pc;
