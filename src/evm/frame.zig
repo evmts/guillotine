@@ -1,12 +1,12 @@
 //! Lightweight execution context for EVM operations.
 //!
-//! StackFrame handles direct opcode execution including stack manipulation,
+//! Frame handles direct opcode execution including stack manipulation,
 //! arithmetic, memory access, and storage operations. It does NOT handle:
 //! - PC tracking and jumps (managed by Plan)
 //! - CALL/CREATE operations (managed by Host/EVM)
 //! - Environment queries (provided by Host)
 //!
-//! The StackFrame is designed for efficient opcode dispatch with configurable
+//! The Frame is designed for efficient opcode dispatch with configurable
 //! components for stack size, memory limits, and gas tracking.
 const std = @import("std");
 const builtin = @import("builtin");
@@ -28,7 +28,7 @@ const Address = primitives.Address.Address;
 const to_u256 = primitives.Address.to_u256;
 const from_u256 = primitives.Address.from_u256;
 const keccak_asm = @import("keccak_asm.zig");
-const stack_frame_handlers = @import("stack_frame_handlers.zig");
+const frame_handlers = @import("frame_handlers.zig");
 const SelfDestruct = @import("self_destruct.zig").SelfDestruct;
 const DefaultEvm = @import("evm.zig").DefaultEvm;
 const CallParams = @import("call_params.zig").CallParams;
@@ -37,24 +37,24 @@ const logs = @import("logs.zig");
 const Log = logs.Log;
 const block_info_mod = @import("block_info.zig");
 const block_info_config_mod = @import("block_info_config.zig");
-// LogList functionality is inlined into StackFrame for optimal packing
+// LogList functionality is inlined into Frame for optimal packing
 const dispatch_mod = @import("dispatch.zig");
 
-/// Creates a configured StackFrame type for EVM execution.
+/// Creates a configured Frame type for EVM execution.
 ///
-/// The StackFrame is parameterized by compile-time configuration to enable
+/// The Frame is parameterized by compile-time configuration to enable
 /// optimal code generation and platform-specific optimizations.
-pub fn StackFrame(comptime config: FrameConfig) type {
+pub fn Frame(comptime config: FrameConfig) type {
     comptime config.validate();
 
     return struct {
-        /// Status code type returned by StackFrame.interpret when stack frame executes successfully
+        /// Status code type returned by Frame.interpret when frame executes successfully
         pub const Success = enum {
             Stop,
             Return,
             SelfDestruct,
         };
-        /// Error code type returned by StackFrame.interpret when stack frame executes unsuccessfully
+        /// Error code type returned by Frame.interpret when frame executes unsuccessfully
         pub const Error = error{
             StackOverflow,
             StackUnderflow,
@@ -74,7 +74,7 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         pub const OpcodeHandler = *const fn (frame: *Self, dispatch: Dispatch) Error!Success;
         /// The struct in charge of efficiently dispatching opcode handlers and providing them metadata
         pub const Dispatch = dispatch_mod.Dispatch(Self);
-        /// The config passed into StackFrame(config)
+        /// The config passed into Frame(config)
         pub const frame_config = config;
         /// The "word" type used by the evm. Defaults to u256. "Word" is the type used by Stack and throughout the Evm
         /// If set to something else the EVM will update to that new word size. e.g. run kekkak128 instead of kekkak256
@@ -108,11 +108,11 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         pub const BlockInfo = block_info_mod.BlockInfo(config.block_info_config);
 
         /// A fixed size array of opcode handlers indexed by opcode number
-        pub const opcode_handlers: [256]OpcodeHandler = stack_frame_handlers.getOpcodeHandlers(Self);
+        pub const opcode_handlers: [256]OpcodeHandler = frame_handlers.getOpcodeHandlers(Self);
 
         const Self = @This();
 
-        //           StackFrame Structure Layout Analysis - OPTIMIZED
+        //           Frame Structure Layout Analysis - OPTIMIZED
         //
         //   Total Size: ~420 bytes (with default BlockInfo config)
         //   Alignment: 8 bytes (natural alignment for pointers)
@@ -267,11 +267,14 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         //   - Allows fine-tuned memory/precision tradeoffs
 
         // CACHE LINE 1 (0-63 bytes) - SUPER HOT PATH
+=======
+  
+>>>>>>> 2c9f61126cfaba4b16b2fe035739eeb2888dc6b3:src/evm/frame.zig
         stack: Stack, // 16B - Stack operations
         gas_remaining: GasType, // 8B - Gas tracking (i64)
         memory: Memory, // 16B - Memory operations
         database: config.DatabaseType, // 8B - Storage access
-        log_items: ?[*]Log, // 8B - Log array pointer (null = 0 logs)
+        log_items: [*]Log = &[_]Log{}, // 8B - Log array pointer
         evm_ptr: *anyopaque, // 8B - EVM instance pointer
         value: WordType, // 32B - Call value (inline)
         caller: Address, // 20B - Calling address
@@ -281,6 +284,7 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         allocator: std.mem.Allocator, // 16B - Memory allocator
         block_info: BlockInfo, // ~188B - Block context
         self_destruct: ?*SelfDestruct = null, // 8B - Self destruct list
+
         //
         /// Initialize a new execution frame.
         ///
@@ -307,7 +311,7 @@ pub fn StackFrame(comptime config: FrameConfig) type {
                 .gas_remaining = std.math.cast(GasType, @max(gas_remaining, 0)) orelse return Error.InvalidAmount,
                 .memory = memory,
                 .database = database,
-                .log_items = null, // No logs initially
+                .log_items = &[_]Log{},
                 .evm_ptr = evm_ptr,
                 .caller = caller,
                 .value = value,
@@ -397,11 +401,13 @@ pub fn StackFrame(comptime config: FrameConfig) type {
                 const cursor = Self.Dispatch{ .cursor = traced_schedule.ptr + start_index, .jump_table = &traced_jump_table };
                 break :blk cursor.cursor[0].opcode_handler(self, cursor);
             } else blk: {
+                log.debug("DISPATCH INIT: bytecode len={d}", .{bytecode.runtime_code.len});
                 const schedule = Dispatch.init(self.allocator, &bytecode, handlers) catch |e| {
                     log.err("Failed to create dispatch schedule: {any}", .{e});
                     log.err("  Bytecode runtime_code len: {d}", .{bytecode.runtime_code.len});
                     return Error.AllocationError;
                 };
+                log.debug("DISPATCH INIT COMPLETE: schedule len={d}, opcode_count={d}", .{ schedule.len, bytecode.runtime_code.len });
                 defer Dispatch.deinitSchedule(self.allocator, schedule);
                 if (schedule.len < 3) {
                     log.err("Dispatch schedule is too short! len={d}", .{schedule.len});
@@ -418,7 +424,9 @@ pub fn StackFrame(comptime config: FrameConfig) type {
                 var start_index: usize = 0;
                 switch (schedule[0]) {
                     .first_block_gas => |meta| {
+                        log.debug("First block gas charge: {d} (current gas: {d})", .{ meta.gas, self.gas_remaining });
                         if (meta.gas > 0) try self.consumeGasChecked(meta.gas);
+                        log.debug("Gas after first block charge: {d}", .{self.gas_remaining});
                         start_index = 1;
                     },
                     else => {},
@@ -456,9 +464,14 @@ pub fn StackFrame(comptime config: FrameConfig) type {
                 try new_memory.set_data(0, bytes);
             }
 
-            const new_log_items: ?[*]Log = if (self.log_items) |items| blk: {
+            const new_log_items: [*]Log = blk: {
+                const items = self.log_items;
+                // Check if we have the default empty array
+                if (@intFromPtr(items) == @intFromPtr(&[_]Log{})) break :blk &[_]Log{};
+                
                 const header = @as(*const LogHeader, @ptrFromInt(@intFromPtr(items) - @sizeOf(LogHeader)));
-                if (header.count == 0) break :blk null;
+                if (header.count == 0) break :blk &[_]Log{};
+>>>>>>> 2c9f61126cfaba4b16b2fe035739eeb2888dc6b3:src/evm/frame.zig
 
                 const full_size = @sizeOf(LogHeader) + header.capacity * @sizeOf(Log);
                 const new_log_memory = allocator.alloc(u8, full_size) catch return Error.AllocationError;
@@ -486,7 +499,7 @@ pub fn StackFrame(comptime config: FrameConfig) type {
                 }
 
                 break :blk new_items;
-            } else null;
+            };
 
             const new_output = if (self.output.len > 0) blk: {
                 const output_copy = allocator.alloc(u8, self.output.len) catch return Error.AllocationError;
@@ -562,7 +575,10 @@ pub fn StackFrame(comptime config: FrameConfig) type {
 
         /// Clean up log memory
         pub fn deinitLogs(self: *Self, allocator: std.mem.Allocator) void {
-            const items = self.log_items orelse return;
+            const items = self.log_items;
+            
+            // Check if we have the default empty array
+            if (@intFromPtr(items) == @intFromPtr(&[_]Log{})) return;
 
             const header = @as(*LogHeader, @ptrFromInt(@intFromPtr(items) - @sizeOf(LogHeader)));
 
@@ -577,7 +593,8 @@ pub fn StackFrame(comptime config: FrameConfig) type {
 
         /// Add a log entry to the list
         pub fn appendLog(self: *Self, allocator: std.mem.Allocator, log_entry: Log) error{OutOfMemory}!void {
-            if (self.log_items == null) {
+            // Check if we're starting with the default empty array
+            if (@intFromPtr(self.log_items) == @intFromPtr(&[_]Log{})) {
                 const initial_capacity: u16 = 4;
                 const full_size = @sizeOf(LogHeader) + initial_capacity * @sizeOf(Log);
                 const memory = try allocator.alloc(u8, full_size);
@@ -590,7 +607,7 @@ pub fn StackFrame(comptime config: FrameConfig) type {
 
                 self.log_items = items;
             } else {
-                const items = self.log_items.?;
+                const items = self.log_items;
                 const header = @as(*LogHeader, @ptrFromInt(@intFromPtr(items) - @sizeOf(LogHeader)));
 
                 if (header.count >= header.capacity) {
@@ -619,14 +636,16 @@ pub fn StackFrame(comptime config: FrameConfig) type {
 
         /// Get slice of current log entries
         pub fn getLogSlice(self: *const Self) []const Log {
-            const items = self.log_items orelse return &[_]Log{};
+            const items = self.log_items;
+            if (@intFromPtr(items) == @intFromPtr(&[_]Log{})) return &[_]Log{};
             const header = @as(*const LogHeader, @ptrFromInt(@intFromPtr(items) - @sizeOf(LogHeader)));
             return items[0..header.count];
         }
 
         /// Get number of logs
         pub fn getLogCount(self: *const Self) u16 {
-            const items = self.log_items orelse return 0;
+            const items = self.log_items;
+            if (@intFromPtr(items) == @intFromPtr(&[_]Log{})) return 0;
             const header = @as(*const LogHeader, @ptrFromInt(@intFromPtr(items) - @sizeOf(LogHeader)));
             return header.count;
         }

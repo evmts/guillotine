@@ -162,7 +162,7 @@ pub fn Handlers(comptime FrameType: type) type {
 // ====== TESTS ======
 
 const testing = std.testing;
-const StackFrame = @import("stack_frame.zig").StackFrame;
+const Frame = @import("frame.zig").Frame;
 const dispatch_mod = @import("dispatch.zig");
 const NoOpTracer = @import("tracer.zig").NoOpTracer;
 const bytecode_mod = @import("bytecode.zig");
@@ -201,13 +201,13 @@ const test_config_u32 = FrameConfig{
     .memory_limit = 0xFFFFFF,
 };
 
-const TestFrame = StackFrame(test_config_u256);
+const TestFrame = Frame(test_config_u256);
 const TestBytecode = bytecode_mod.Bytecode(.{ .max_bytecode_size = test_config_u256.max_bytecode_size });
 
-const TestFrameU64 = StackFrame(test_config_u64);
+const TestFrameU64 = Frame(test_config_u64);
 const TestBytecodeU64 = bytecode_mod.Bytecode(.{ .max_bytecode_size = test_config_u64.max_bytecode_size });
 
-const TestFrameU32 = StackFrame(test_config_u32);
+const TestFrameU32 = Frame(test_config_u32);
 const TestBytecodeU32 = bytecode_mod.Bytecode(.{ .max_bytecode_size = test_config_u32.max_bytecode_size });
 
 fn createTestFrame(allocator: std.mem.Allocator) !TestFrame {

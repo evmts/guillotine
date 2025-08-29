@@ -16,7 +16,7 @@ const ArrayList = std.ArrayListAligned;
 pub fn Dispatch(comptime FrameType: type) type {
     return struct {
         const Self = @This();
-        // We define opcodehandler locally rather than using StackFrame.OpcodeHandler to avoid circular dependency
+        // We define opcodehandler locally rather than using Frame.OpcodeHandler to avoid circular dependency
         const OpcodeHandler = *const fn (frame: *FrameType, dispatch: Self) FrameType.Error!FrameType.Success;
         /// The optimized instruction stream containing opcode handlers and their metadata.
         /// Each item is exactly 64 bits for optimal cache line usage.
@@ -232,13 +232,15 @@ pub fn Dispatch(comptime FrameType: type) type {
             bytecode: anytype,
             opcode_handlers: *const [256]OpcodeHandler,
         ) ![]Self.Item {
-
+            const log = @import("log.zig");
+            log.debug("Dispatch.init starting...", .{});
 
             var schedule_items = ArrayList(Self.Item, null){};
             errdefer schedule_items.deinit(allocator);
 
             // Create iterator to traverse bytecode
             var iter = bytecode.createIterator();
+
 
             // Calculate gas cost for first basic block
             var first_block_gas: u32 = 0;
@@ -288,6 +290,11 @@ pub fn Dispatch(comptime FrameType: type) type {
             // Add first_block_gas entry if there's any gas to charge
             if (first_block_gas > 0) {
                 try schedule_items.append(allocator, .{ .first_block_gas = .{ .gas = first_block_gas } });
+                log.debug("Added first_block_gas: {d}", .{first_block_gas});
+                // TEMPORARY DEBUG: Log expected gas for our test bytecode
+                if (bytecode.runtime_code.len == 38) { // Our specific test case
+                    log.warn("DEBUG: This looks like PUSH32+PUSH1+SDIV bytecode, first_block_gas={}", .{first_block_gas});
+                }
             }
 
             var opcode_count: usize = 0;
@@ -316,15 +323,18 @@ pub fn Dispatch(comptime FrameType: type) type {
                     .push => |data| {
                         // PUSH operation - add handler first, then metadata
                         const push_opcode = 0x60 + data.size - 1; // PUSH1 = 0x60, PUSH2 = 0x61, etc.
+                        log.debug("Dispatch: Adding PUSH{} handler, value={x}, schedule_items.len={}", .{ data.size, data.value, schedule_items.items.len });
                         try schedule_items.append(allocator, .{ .opcode_handler = opcode_handlers.*[push_opcode] });
                         if (data.size <= 8 and data.value <= std.math.maxInt(u64)) {
                             // Inline value for small pushes that fit in u64
                             const inline_value: u64 = @intCast(data.value);
+                            log.debug("Dispatch: Adding inline metadata for PUSH{}, value={}", .{ data.size, inline_value });
                             try schedule_items.append(allocator, .{ .push_inline = .{ .value = inline_value } });
                         } else {
                             // Pointer to value for large pushes
                             const value_ptr = try allocator.create(FrameType.WordType);
                             value_ptr.* = data.value;
+                            log.debug("Dispatch: Adding pointer metadata for PUSH{}, value={x}", .{ data.size, data.value });
                             try schedule_items.append(allocator, .{ .push_pointer = .{ .value = value_ptr } });
                         }
                     },
@@ -376,6 +386,7 @@ pub fn Dispatch(comptime FrameType: type) type {
             try schedule_items.append(allocator, .{ .opcode_handler = opcode_handlers.*[@intFromEnum(Opcode.STOP)] });
 
             const final_schedule = try schedule_items.toOwnedSlice(allocator);
+            log.debug("Dispatch.init complete, schedule length: {}", .{final_schedule.len});
             return final_schedule;
         }
 

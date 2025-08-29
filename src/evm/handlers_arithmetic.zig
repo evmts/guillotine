@@ -54,8 +54,10 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// SDIV opcode (0x05) - Signed integer division.
         pub fn sdiv(self: *FrameType, dispatch: Dispatch) Error!Success {
+            log.debug("SDIV handler called, stack size: {}", .{self.stack.size()});
             const denominator = try self.stack.pop();
             const numerator = try self.stack.peek();
+            log.debug("SDIV: numerator={x}, denominator={x}", .{numerator, denominator});
             var result: WordType = undefined;
             if (denominator == 0) {
                 result = 0;
@@ -193,7 +195,7 @@ pub fn Handlers(comptime FrameType: type) type {
 // ====== TESTS ======
 
 const testing = std.testing;
-const StackFrame = @import("stack_frame.zig").StackFrame;
+const Frame = @import("frame.zig").Frame;
 const dispatch_mod = @import("dispatch.zig");
 const NoOpTracer = @import("tracer.zig").NoOpTracer;
 const bytecode_mod = @import("bytecode.zig");
@@ -210,7 +212,7 @@ const test_config = FrameConfig{
     .memory_limit = 0xFFFFFF,
 };
 
-const TestFrame = StackFrame(test_config);
+const TestFrame = Frame(test_config);
 const TestBytecode = bytecode_mod.Bytecode(.{ .max_bytecode_size = test_config.max_bytecode_size });
 
 fn createTestFrame(allocator: std.mem.Allocator) !TestFrame {

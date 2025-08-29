@@ -9,7 +9,7 @@ pub const Log = struct {
     data: []const u8,
 };
 
-/// Sentinel value used for null-terminated log arrays in StackFrame
+/// Sentinel value used for null-terminated log arrays in Frame
 pub const SENTINEL: Log = .{
     .address = Address.ZERO_ADDRESS,
     .topics = &[_]u256{},

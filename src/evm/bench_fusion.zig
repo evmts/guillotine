@@ -1,7 +1,7 @@
 //! Benchmarks for EVM bytecode fusion optimizations
 const std = @import("std");
 const evm = @import("root.zig");
-const StackFrame = @import("stack_frame.zig").StackFrame;
+const Frame = @import("stack_frame.zig").Frame;
 const FrameConfig = @import("stack_frame.zig").FrameConfig;
 const Planner = @import("planner.zig").Planner;
 const PlannerConfig = @import("planner_config.zig").PlannerConfig;
@@ -23,7 +23,7 @@ const bench_frame_config = FrameConfig{
     .memory_limit = 0xFFFFFF,
 };
 
-const BenchStackFrame = StackFrame(bench_frame_config);
+const BenchFrame = Frame(bench_frame_config);
 
 // Simple timer for benchmarking
 const Timer = struct {
@@ -91,7 +91,7 @@ pub fn benchPushAddFusion(allocator: std.mem.Allocator, iterations: usize) !void
             planner.bytecode = bytecode_obj;
             planner.bytecode_initialized = true;
             
-            const plan = try planner.create_instruction_stream(allocator, BenchStackFrame.opcode_handlers);
+            const plan = try planner.create_instruction_stream(allocator, BenchFrame.opcode_handlers);
             defer plan.deinit();
             
             total_ns += timer.lap();
@@ -122,7 +122,7 @@ pub fn benchPushAddFusion(allocator: std.mem.Allocator, iterations: usize) !void
             planner.bytecode = bytecode_obj;
             planner.bytecode_initialized = true;
             
-            const plan = try planner.create_instruction_stream(allocator, BenchStackFrame.opcode_handlers);
+            const plan = try planner.create_instruction_stream(allocator, BenchFrame.opcode_handlers);
             defer plan.deinit();
             
             total_ns += timer.lap();
@@ -166,7 +166,7 @@ pub fn benchInstructionStreamSize(allocator: std.mem.Allocator) !void {
         planner.bytecode = bytecode_obj;
         planner.bytecode_initialized = true;
         
-        const plan = try planner.create_instruction_stream(allocator, BenchStackFrame.opcode_handlers);
+        const plan = try planner.create_instruction_stream(allocator, BenchFrame.opcode_handlers);
         defer plan.deinit();
         
         std.log.info("Without fusion: {} instruction elements", .{plan.instructionStream.len});
@@ -189,7 +189,7 @@ pub fn benchInstructionStreamSize(allocator: std.mem.Allocator) !void {
         planner.bytecode = bytecode_obj;
         planner.bytecode_initialized = true;
         
-        const plan = try planner.create_instruction_stream(allocator, BenchStackFrame.opcode_handlers);
+        const plan = try planner.create_instruction_stream(allocator, BenchFrame.opcode_handlers);
         defer plan.deinit();
         
         std.log.info("With fusion:    {} instruction elements", .{plan.instructionStream.len});
@@ -238,7 +238,7 @@ pub fn benchExecutionPerformance(allocator: std.mem.Allocator, iterations: usize
     
     for (0..iterations) |_| {
         var host = BenchHost{};
-        var frame = try BenchStackFrame.init(allocator, bytecode.items, 10_000_000, {}, host);
+        var frame = try BenchFrame.init(allocator, bytecode.items, 10_000_000, {}, host);
         defer frame.deinit(allocator);
         
         // Simulate execution of fused operations

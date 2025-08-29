@@ -19,7 +19,7 @@ pub const FrameInterpreter = evm.createFrameInterpreter(.{});
 pub const DebugFrameInterpreter = evm.createFrameInterpreter(.{
     .TracerType = tracer_mod.DebuggingTracer,
 });
-pub const DebugFrame = evm.StackFrame(.{
+pub const DebugFrame = evm.Frame(.{
     .TracerType = tracer_mod.DebuggingTracer,
 });
 

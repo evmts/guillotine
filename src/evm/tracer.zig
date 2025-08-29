@@ -1187,7 +1187,7 @@ fn getOpcodeName(opcode: u8) []const u8 {
 //     try std.testing.expect(std.mem.indexOf(u8, json, "0xdeadbeef") != null);
 // }
 
-// Tests from main branch (commented out as they use StackFrame instead of Frame)
+// Tests from main branch (commented out as they use Frame instead of Frame)
 // // test "tracer captures basic frame state with writer" {
 //     const allocator = std.testing.allocator;
 // 

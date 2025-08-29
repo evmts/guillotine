@@ -1,7 +1,7 @@
-/// Benchmarks for StackFrame performance vs REVM
+/// Benchmarks for Frame performance vs REVM
 const std = @import("std");
 const zbench = @import("zbench");
-const StackFrame = @import("stack_frame.zig").StackFrame;
+const Frame = @import("frame.zig").Frame;
 const FrameConfig = @import("frame_config.zig").FrameConfig;
 const Opcode = @import("opcode.zig").Opcode;
 const primitives = @import("primitives");
@@ -283,9 +283,9 @@ fn initBytecodes(allocator: std.mem.Allocator) !void {
     jump_bytecode = try loadFixtureBytecode(allocator, "src/evm/fixtures/opcodes-jump-basic/bytecode.txt");
 }
 
-// Benchmark functions for StackFrame
-fn benchmarkStackFrameERC20(allocator: std.mem.Allocator) void {
-    const F = StackFrame(.{ .has_database = true });
+// Benchmark functions for Frame
+fn benchmarkFrameERC20(allocator: std.mem.Allocator) void {
+    const F = Frame(.{ .has_database = true });
 
     const host = createBenchHost();
     var memory_db = MemoryDatabase.init(allocator);
@@ -299,8 +299,8 @@ fn benchmarkStackFrameERC20(allocator: std.mem.Allocator) void {
     // Just initialization for now - actual execution would require planner/interpreter
 }
 
-fn benchmarkStackFrameSnailtracer(allocator: std.mem.Allocator) void {
-    const F = StackFrame(.{ .has_database = true });
+fn benchmarkFrameSnailtracer(allocator: std.mem.Allocator) void {
+    const F = Frame(.{ .has_database = true });
 
     const host = createBenchHost();
     var memory_db = MemoryDatabase.init(allocator);
@@ -311,24 +311,24 @@ fn benchmarkStackFrameSnailtracer(allocator: std.mem.Allocator) void {
     defer frame.deinit(allocator);
 }
 
-fn benchmarkStackFrameTenKHashes(allocator: std.mem.Allocator) void {
-    const F = StackFrame(.{});
+fn benchmarkFrameTenKHashes(allocator: std.mem.Allocator) void {
+    const F = Frame(.{});
 
     const host = createBenchHost();
     var frame = F.init(allocator, 100000000, {}, host, null) catch unreachable;
     defer frame.deinit(allocator);
 }
 
-fn benchmarkStackFrameArithmetic(allocator: std.mem.Allocator) void {
-    const F = StackFrame(.{});
+fn benchmarkFrameArithmetic(allocator: std.mem.Allocator) void {
+    const F = Frame(.{});
 
     const host = createBenchHost();
     var frame = F.init(allocator, 100000, {}, host, null) catch unreachable;
     defer frame.deinit(allocator);
 }
 
-fn benchmarkStackFrameJumps(allocator: std.mem.Allocator) void {
-    const F = StackFrame(.{});
+fn benchmarkFrameJumps(allocator: std.mem.Allocator) void {
+    const F = Frame(.{});
 
     const host = createBenchHost();
     var frame = F.init(allocator, 100000, {}, host, null) catch unreachable;
@@ -400,7 +400,7 @@ fn benchmarkRevmJumps(allocator: std.mem.Allocator) void {
 
 // Schedule generation benchmarks
 fn benchmarkScheduleGenERC20(allocator: std.mem.Allocator) void {
-    const F = StackFrame(.{});
+    const F = Frame(.{});
 
     const host = createBenchHost();
     var frame = F.init(allocator, erc20_bytecode, 1000000, {}, host, null) catch unreachable;
@@ -411,7 +411,7 @@ fn benchmarkScheduleGenERC20(allocator: std.mem.Allocator) void {
 }
 
 fn benchmarkScheduleGenSnailtracer(allocator: std.mem.Allocator) void {
-    const F = StackFrame(.{});
+    const F = Frame(.{});
 
     const host = createBenchHost();
     var frame = F.init(allocator, snailtracer_bytecode, 10000000, {}, host, null) catch unreachable;
@@ -449,16 +449,16 @@ pub fn main() !void {
     });
     defer bench.deinit();
 
-    try stdout.print("\n🚀 StackFrame vs REVM Benchmarks\n", .{});
+    try stdout.print("\n🚀 Frame vs REVM Benchmarks\n", .{});
     try stdout.print("==================================\n\n", .{});
     try stdout.flush();
 
-    // Add StackFrame benchmarks
-    try bench.add("StackFrame/ERC20", benchmarkStackFrameERC20, .{});
-    try bench.add("StackFrame/Snailtracer", benchmarkStackFrameSnailtracer, .{});
-    try bench.add("StackFrame/TenKHashes", benchmarkStackFrameTenKHashes, .{});
-    try bench.add("StackFrame/Arithmetic", benchmarkStackFrameArithmetic, .{});
-    try bench.add("StackFrame/Jumps", benchmarkStackFrameJumps, .{});
+    // Add Frame benchmarks
+    try bench.add("Frame/ERC20", benchmarkFrameERC20, .{});
+    try bench.add("Frame/Snailtracer", benchmarkFrameSnailtracer, .{});
+    try bench.add("Frame/TenKHashes", benchmarkFrameTenKHashes, .{});
+    try bench.add("Frame/Arithmetic", benchmarkFrameArithmetic, .{});
+    try bench.add("Frame/Jumps", benchmarkFrameJumps, .{});
 
     // Add REVM benchmarks
     try bench.add("REVM/ERC20", benchmarkRevmERC20, .{});
@@ -492,13 +492,13 @@ test "benchmark fixture loading" {
     try std.testing.expect(snailtracer.len > 5000); // Snailtracer is large
 }
 
-test "benchmark StackFrame initialization" {
+test "benchmark Frame initialization" {
     const allocator = std.testing.allocator;
 
     const bytecode = try loadFixtureBytecode(allocator, "src/evm/fixtures/opcodes-arithmetic/bytecode.txt");
     defer allocator.free(bytecode);
 
-    const F = StackFrame(.{});
+    const F = Frame(.{});
     const host = createBenchHost();
 
     var frame = try F.init(allocator, bytecode, 100000, {}, host, null);

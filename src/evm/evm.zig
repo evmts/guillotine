@@ -41,7 +41,7 @@ pub fn Evm(comptime config: EvmConfig) type {
         const Self = @This();
 
         /// Frame type for the evm
-        pub const Frame = @import("stack_frame.zig").StackFrame(config.frame_config);
+        pub const Frame = @import("frame.zig").Frame(config.frame_config);
         /// Static wrappers for EIP-214 (STATICCALL) constraint enforcement
         const static_wrappers = @import("static_wrappers.zig");
         const StaticDatabase = static_wrappers.StaticDatabase;

@@ -696,7 +696,7 @@ pub fn Handlers(comptime FrameType: type) type {
 // ====== TESTS ======
 
 const testing = std.testing;
-const StackFrame = @import("stack_frame.zig").StackFrame;
+const Frame = @import("frame.zig").Frame;
 const dispatch_mod = @import("dispatch.zig");
 const NoOpTracer = @import("tracer.zig").NoOpTracer;
 const bytecode_mod = @import("bytecode.zig");
@@ -715,7 +715,7 @@ const test_config = FrameConfig{
     .memory_limit = 0xFFFFFF,
 };
 
-const TestFrame = StackFrame(test_config);
+const TestFrame = Frame(test_config);
 const TestBytecode = bytecode_mod.Bytecode(.{ .max_bytecode_size = test_config.max_bytecode_size });
 
 // Mock host for testing

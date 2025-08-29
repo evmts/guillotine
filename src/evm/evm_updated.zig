@@ -12,7 +12,7 @@
 //! coordinating between Frames, the Planner, and state storage.
 //!
 //! The EVM utilizes Planners to analyze bytecode and produce optimized execution data structures
-//! The EVM utilizes the StackFrame struct to track the evm state and implement all low level execution details
+//! The EVM utilizes the Frame struct to track the evm state and implement all low level execution details
 //! EVM passes itself as a host to the Frame so Frame can get data from EVM that is not on frame and execute inner calls
 const std = @import("std");
 const primitives = @import("primitives");
@@ -40,8 +40,8 @@ pub fn Evm(comptime config: EvmConfig) type {
     return struct {
         const Self = @This();
 
-        /// StackFrame type for the evm (NEW: using stack_frame.zig)
-        pub const StackFrame = @import("stack_frame.zig").StackFrame(config.frame_config);
+        /// Frame type for the evm (NEW: using stack_frame.zig)
+        pub const Frame = @import("stack_frame.zig").Frame(config.frame_config);
         /// Planner/preanalysis processes the bytecode for the interpreter
         pub const Planner: type = @import("planner.zig").Planner(.{
             .WordType = config.frame_config.WordType,
@@ -774,7 +774,7 @@ pub fn Evm(comptime config: EvmConfig) type {
             return CallResult.success_with_output(result.gas_left, out32);
         }
 
-        /// Execute frame using the new StackFrame implementation
+        /// Execute frame using the new Frame implementation
         fn execute_frame(
             self: *Self,
             code: []const u8,
@@ -814,8 +814,8 @@ pub fn Evm(comptime config: EvmConfig) type {
             // Get or create optimized plan
             const plan = try self.planner.analyze(code);
             
-            // Create and execute frame using new StackFrame
-            var frame = try StackFrame.init(
+            // Create and execute frame using new Frame
+            var frame = try Frame.init(
                 self.allocator,
                 code,
                 gas_i32,
@@ -826,7 +826,7 @@ pub fn Evm(comptime config: EvmConfig) type {
             defer frame.deinit(self.allocator);
 
             // Execute using the optimized instruction stream
-            const schedule_ptr: [*]const StackFrame.Schedule.Item = @ptrCast(plan.instructionStream.ptr);
+            const schedule_ptr: [*]const Frame.Schedule.Item = @ptrCast(plan.instructionStream.ptr);
             
             // Start execution at first handler
             const first_handler = schedule_ptr[0].opcode_handler;
@@ -884,14 +884,14 @@ pub fn Evm(comptime config: EvmConfig) type {
             const host = @import("host.zig").Host.init(self);
             const gas_i32 = @as(i32, @intCast(@min(gas, std.math.maxInt(i32))));
 
-            // Use StackFrame for init code execution
-            var frame = try StackFrame.init(self.allocator, code, gas_i32, self.database, host);
+            // Use Frame for init code execution
+            var frame = try Frame.init(self.allocator, code, gas_i32, self.database, host);
             defer frame.deinit(self.allocator);
             frame.contract_address = address;
 
             // Get plan and execute
             const plan = try self.planner.analyze(code);
-            const schedule_ptr: [*]const StackFrame.Schedule.Item = @ptrCast(plan.instructionStream.ptr);
+            const schedule_ptr: [*]const Frame.Schedule.Item = @ptrCast(plan.instructionStream.ptr);
             const first_handler = schedule_ptr[0].opcode_handler;
             
             const result = first_handler(frame, schedule_ptr + 1) catch |err| {

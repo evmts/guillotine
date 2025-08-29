@@ -182,11 +182,11 @@ pub const DifferentialTestor = struct {
             db,
             block_info,
             tx_context,
-            0, // gas_price
-            caller, // origin
+            0,
+            caller,
             .CANCUN,
         );
-        
+
         const testor = DifferentialTestor{
             .revm_instance = revm_vm,
             .guillotine_instance = evm,
@@ -215,8 +215,8 @@ pub const DifferentialTestor = struct {
 
         const code_hash = try self.guillotine_db.set_code(bytecode);
         const log = std.log.scoped(.differential_testor);
-        log.debug("Set code with hash: {any}", .{code_hash});
-        log.debug("Contract address is: {any}", .{self.contract.bytes});
+        log.debug("Set code with hash: {x}", .{code_hash});
+        log.debug("Contract address is: {x}", .{self.contract.bytes});
 
         try self.guillotine_db.set_account(self.contract.bytes, .{
             .balance = 0,
@@ -224,7 +224,7 @@ pub const DifferentialTestor = struct {
             .code_hash = code_hash,
             .storage_root = [_]u8{0} ** 32,
         });
-        log.debug("Set account for address: {any}", .{self.contract.bytes});
+        log.debug("Set account for address: {x}", .{self.contract.bytes});
 
         // Verify deployment
         const deployed_code = try self.guillotine_db.get_code_by_address(self.contract.bytes);
@@ -236,11 +236,10 @@ pub const DifferentialTestor = struct {
         // Also check if account exists
         const account_check = try self.guillotine_db.get_account(self.contract.bytes);
         if (account_check) |acc| {
-            log.debug("Account found: balance={}, nonce={}, code_hash={any}", .{ acc.balance, acc.nonce, acc.code_hash });
+            log.debug("Account found: balance={}, nonce={}, code_hash={x}", .{ acc.balance, acc.nonce, acc.code_hash });
         } else {
             log.err("WARNING: Account not found after deployment!", .{});
         }
-        
         // Double check the database pointer is the same
         log.debug("Database pointer in testor: {*}", .{&self.guillotine_db});
         log.debug("Database pointer in EVM: {*}", .{self.guillotine_instance.database});
@@ -462,10 +461,11 @@ pub const DifferentialTestor = struct {
         }
 
         log.err("🛠️  DEBUGGING HINTS:", .{});
-        log.err("   • Check if Guillotine implements all opcodes used", .{});
-        log.err("   • Verify gas calculation matches EVM specification", .{});
-        log.err("   • Ensure memory and stack operations are correct", .{});
-        log.err("   • Compare against EVM specification for edge cases", .{});
+        log.err("   • Create a more minimal reproduction against frame.zig bytecode.zig or dispatch.zig", .{});
+        log.err("   • Compare traces of guillotine and revm", .{});
+        log.err("   • Add debug logging", .{});
+        log.err("   • Create more minimal reproduction", .{});
+        log.err("   • If the bytecode works with revm you know it's a bug in our evm. If it doesn't there is a bug in the bytecode", .{});
         if (diff.trace_diffs.len > 0) {
             log.err("   • Enable detailed tracing to debug execution differences", .{});
         }

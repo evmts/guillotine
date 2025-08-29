@@ -19,38 +19,38 @@ const stack_frame_bitwise_synthetic = @import("handlers_bitwise_synthetic.zig");
 const stack_frame_memory_synthetic = @import("handlers_memory_synthetic.zig");
 const stack_frame_jump_synthetic = @import("handlers_jump_synthetic.zig");
 
-/// Returns the opcode handlers array for a given StackFrame type
-pub fn getOpcodeHandlers(comptime StackFrameType: type) [256]StackFrameType.OpcodeHandler {
-    // Import handler modules with StackFrameType
-    const ArithmeticHandlers = stack_frame_arithmetic.Handlers(StackFrameType);
-    const ComparisonHandlers = stack_frame_comparison.Handlers(StackFrameType);
-    const BitwiseHandlers = stack_frame_bitwise.Handlers(StackFrameType);
-    const StackHandlers = stack_frame_stack.Handlers(StackFrameType);
-    const MemoryHandlers = stack_frame_memory.Handlers(StackFrameType);
-    const StorageHandlers = stack_frame_storage.Handlers(StackFrameType);
-    const JumpHandlers = stack_frame_jump.Handlers(StackFrameType);
-    const SystemHandlers = stack_frame_system.Handlers(StackFrameType);
-    const ContextHandlers = stack_frame_context.Handlers(StackFrameType);
-    const KeccakHandlers = stack_frame_keccak.Handlers(StackFrameType);
-    const LogHandlers = stack_frame_log.Handlers(StackFrameType);
+/// Returns the opcode handlers array for a given Frame type
+pub fn getOpcodeHandlers(comptime FrameType: type) [256]FrameType.OpcodeHandler {
+    // Import handler modules with FrameType
+    const ArithmeticHandlers = stack_frame_arithmetic.Handlers(FrameType);
+    const ComparisonHandlers = stack_frame_comparison.Handlers(FrameType);
+    const BitwiseHandlers = stack_frame_bitwise.Handlers(FrameType);
+    const StackHandlers = stack_frame_stack.Handlers(FrameType);
+    const MemoryHandlers = stack_frame_memory.Handlers(FrameType);
+    const StorageHandlers = stack_frame_storage.Handlers(FrameType);
+    const JumpHandlers = stack_frame_jump.Handlers(FrameType);
+    const SystemHandlers = stack_frame_system.Handlers(FrameType);
+    const ContextHandlers = stack_frame_context.Handlers(FrameType);
+    const KeccakHandlers = stack_frame_keccak.Handlers(FrameType);
+    const LogHandlers = stack_frame_log.Handlers(FrameType);
     // Import synthetic handler modules
-    const ArithmeticSyntheticHandlers = stack_frame_arithmetic_synthetic.Handlers(StackFrameType);
-    const BitwiseSyntheticHandlers = stack_frame_bitwise_synthetic.Handlers(StackFrameType);
-    const MemorySyntheticHandlers = stack_frame_memory_synthetic.Handlers(StackFrameType);
-    const JumpSyntheticHandlers = stack_frame_jump_synthetic.Handlers(StackFrameType);
+    const ArithmeticSyntheticHandlers = stack_frame_arithmetic_synthetic.Handlers(FrameType);
+    const BitwiseSyntheticHandlers = stack_frame_bitwise_synthetic.Handlers(FrameType);
+    const MemorySyntheticHandlers = stack_frame_memory_synthetic.Handlers(FrameType);
+    const JumpSyntheticHandlers = stack_frame_jump_synthetic.Handlers(FrameType);
 
     // The default opcode handler used for any opcode that is not supported by the EVM
     const invalid = struct {
-        fn handler(frame: *StackFrameType, dispatch: StackFrameType.Dispatch) StackFrameType.Error!StackFrameType.Success {
+        fn handler(frame: *FrameType, dispatch: FrameType.Dispatch) FrameType.Error!FrameType.Success {
             _ = frame;
             _ = dispatch;
-            return StackFrameType.Error.InvalidOpcode;
+            return FrameType.Error.InvalidOpcode;
         }
     }.handler;
 
     @setEvalBranchQuota(10000);
-    var h: [256]StackFrameType.OpcodeHandler = undefined;
-    const invalid_handler: StackFrameType.OpcodeHandler = &invalid;
+    var h: [256]FrameType.OpcodeHandler = undefined;
+    const invalid_handler: FrameType.OpcodeHandler = &invalid;
     for (&h) |*handler| handler.* = invalid_handler;
     h[@intFromEnum(Opcode.STOP)] = &SystemHandlers.stop;
     h[@intFromEnum(Opcode.ADD)] = &ArithmeticHandlers.add;
