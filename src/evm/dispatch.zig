@@ -215,6 +215,70 @@ pub fn Dispatch(comptime FrameType: type) type {
         }
 
         // ========================
+        // Helper Functions
+        // ========================
+
+        /// Calculate gas cost for the first basic block of bytecode.
+        /// Returns the total gas cost from the start until the first JUMPDEST, terminator opcode, or end of bytecode.
+        pub fn calculateFirstBlockGas(bytecode: anytype) u64 {
+            var gas: u64 = 0;
+            var iter = bytecode.createIterator();
+            const opcode_info = @import("opcode_data.zig").OPCODE_INFO;
+
+            while (true) {
+                const maybe = iter.next();
+                if (maybe == null) break;
+                const op_data = maybe.?;
+
+                switch (op_data) {
+                    .regular => |data| {
+                        const gas_to_add = @as(u64, opcode_info[data.opcode].gas_cost);
+                        const new_gas = std.math.add(u64, gas, gas_to_add) catch std.math.maxInt(u64);
+                        if (new_gas == std.math.maxInt(u64)) {
+                            return new_gas;
+                        }
+                        gas = new_gas;
+                        // Stop at JUMP/JUMPI/STOP/RETURN/REVERT/INVALID/SELFDESTRUCT
+                        switch (data.opcode) {
+                            0x56, 0x57, 0x00, 0xf3, 0xfd, 0xfe, 0xff => {
+                                return gas;
+                            },
+                            else => {},
+                        }
+                    },
+                    .push => |data| {
+                        const push_opcode = 0x60 + data.size - 1;
+                        const gas_to_add = @as(u64, opcode_info[push_opcode].gas_cost);
+                        const new_gas = std.math.add(u64, gas, gas_to_add) catch std.math.maxInt(u64);
+                        if (new_gas == std.math.maxInt(u64)) {
+                            return new_gas;
+                        }
+                        gas = new_gas;
+                    },
+                    .jumpdest => {
+                        // JUMPDEST terminates the block but its gas is not included
+                        return gas;
+                    },
+                    .stop, .invalid => {
+                        const gas_to_add = @as(u64, opcode_info[0x00].gas_cost); // STOP gas cost
+                        gas = std.math.add(u64, gas, gas_to_add) catch std.math.maxInt(u64);
+                        return gas;
+                    },
+                    else => {
+                        // For fusion operations, approximate gas cost
+                        const new_gas = std.math.add(u64, gas, 6) catch std.math.maxInt(u64);
+                        if (new_gas == std.math.maxInt(u64)) {
+                            return new_gas;
+                        }
+                        gas = new_gas;
+                    },
+                }
+            }
+
+            return gas;
+        }
+
+        // ========================
         // Initialization
         // ========================
 
@@ -241,69 +305,8 @@ pub fn Dispatch(comptime FrameType: type) type {
             // Create iterator to traverse bytecode
             var iter = bytecode.createIterator();
 
-
             // Calculate gas cost for first basic block
-            var first_block_gas: u64 = 0;
-            var temp_iter = bytecode.createIterator();
-            const opcode_info = @import("opcode_data.zig").OPCODE_INFO;
-
-            // Scan until we hit a JUMPDEST or end of bytecode to calculate first block gas
-            var found_terminator = false;
-            while (true) {
-                const maybe = temp_iter.next();
-                if (maybe == null) break;
-                const op_data = maybe.?;
-
-                switch (op_data) {
-                    .regular => |data| {
-                        const gas_to_add = @as(u64, opcode_info[data.opcode].gas_cost);
-                        const new_gas = std.math.add(u64, first_block_gas, gas_to_add) catch std.math.maxInt(u64);
-                        if (new_gas == std.math.maxInt(u64)) {
-                            first_block_gas = new_gas;
-                            break;
-                        }
-                        first_block_gas = new_gas;
-                        // Stop at JUMP/JUMPI/STOP/RETURN/REVERT/INVALID/SELFDESTRUCT
-                        switch (data.opcode) {
-                            0x56, 0x57, 0x00, 0xf3, 0xfd, 0xfe, 0xff => {
-                                found_terminator = true;
-                                break;
-                            },
-                            else => {},
-                        }
-                    },
-                    .push => |data| {
-                        const push_opcode = 0x60 + data.size - 1;
-                        const gas_to_add = @as(u64, opcode_info[push_opcode].gas_cost);
-                        const new_gas = std.math.add(u64, first_block_gas, gas_to_add) catch std.math.maxInt(u64);
-                        if (new_gas == std.math.maxInt(u64)) {
-                            first_block_gas = new_gas;
-                            break;
-                        }
-                        first_block_gas = new_gas;
-                    },
-                    .jumpdest => {
-                        found_terminator = true;
-                        break;
-                    },
-                    .stop, .invalid => {
-                        const gas_to_add = @as(u64, opcode_info[0x00].gas_cost); // STOP gas cost
-                        first_block_gas = std.math.add(u64, first_block_gas, gas_to_add) catch std.math.maxInt(u64);
-                        found_terminator = true;
-                        break;
-                    },
-                    else => {
-                        // For fusion operations, approximate gas cost
-                        const new_gas = std.math.add(u64, first_block_gas, 6) catch std.math.maxInt(u64);
-                        if (new_gas == std.math.maxInt(u64)) {
-                            first_block_gas = new_gas;
-                            break;
-                        }
-                        first_block_gas = new_gas; // PUSH + operation
-                    },
-                }
-                if (found_terminator) break;
-            }
+            const first_block_gas = calculateFirstBlockGas(bytecode);
 
             // Add first_block_gas entry if there's any gas to charge
             if (first_block_gas > 0) {
@@ -555,68 +558,8 @@ pub fn Dispatch(comptime FrameType: type) type {
             const trace_before_handler = createTraceHandler(TracerType, tracer_instance, true);
             const trace_after_handler = createTraceHandler(TracerType, tracer_instance, false);
 
-            // Calculate gas cost for first basic block (same as non-tracing version)
-            var first_block_gas: u64 = 0;
-            var temp_iter = bytecode.createIterator();
-            const opcode_info = @import("opcode_data.zig").OPCODE_INFO;
-
-            // Scan until we hit a JUMPDEST or end of bytecode to calculate first block gas
-            var found_terminator = false;
-            while (true) {
-                const maybe = temp_iter.next();
-                if (maybe == null) break;
-                const op_data = maybe.?;
-
-                switch (op_data) {
-                    .regular => |data| {
-                        const gas_to_add = @as(u64, opcode_info[data.opcode].gas_cost);
-                        const new_gas = std.math.add(u64, first_block_gas, gas_to_add) catch std.math.maxInt(u64);
-                        if (new_gas == std.math.maxInt(u64)) {
-                            first_block_gas = new_gas;
-                            break;
-                        }
-                        first_block_gas = new_gas;
-                        // Stop at JUMP/JUMPI/STOP/RETURN/REVERT/INVALID/SELFDESTRUCT
-                        switch (data.opcode) {
-                            0x56, 0x57, 0x00, 0xf3, 0xfd, 0xfe, 0xff => {
-                                found_terminator = true;
-                                break;
-                            },
-                            else => {},
-                        }
-                    },
-                    .push => |data| {
-                        const push_opcode = 0x60 + data.size - 1;
-                        const gas_to_add = @as(u64, opcode_info[push_opcode].gas_cost);
-                        const new_gas = std.math.add(u64, first_block_gas, gas_to_add) catch std.math.maxInt(u64);
-                        if (new_gas == std.math.maxInt(u64)) {
-                            first_block_gas = new_gas;
-                            break;
-                        }
-                        first_block_gas = new_gas;
-                    },
-                    .jumpdest => {
-                        found_terminator = true;
-                        break;
-                    },
-                    .stop, .invalid => {
-                        const gas_to_add = @as(u64, opcode_info[0x00].gas_cost); // STOP gas cost
-                        first_block_gas = std.math.add(u64, first_block_gas, gas_to_add) catch std.math.maxInt(u64);
-                        found_terminator = true;
-                        break;
-                    },
-                    else => {
-                        // For fusion operations, approximate gas cost
-                        const new_gas = std.math.add(u64, first_block_gas, 6) catch std.math.maxInt(u64);
-                        if (new_gas == std.math.maxInt(u64)) {
-                            first_block_gas = new_gas;
-                            break;
-                        }
-                        first_block_gas = new_gas; // PUSH + operation
-                    },
-                }
-                if (found_terminator) break;
-            }
+            // Calculate gas cost for first basic block
+            const first_block_gas = calculateFirstBlockGas(bytecode);
 
             // Add first_block_gas entry if there's any gas to charge
             if (first_block_gas > 0) {
@@ -1864,6 +1807,78 @@ test "JumpTable - sorting validation catches unsorted entries" {
     // Verify they're actually sorted
     for (entries[0..entries.len -| 1], entries[1..]) |current, next| {
         try testing.expect(current.pc < next.pc);
+    }
+}
+
+test "Dispatch - calculateFirstBlockGas helper function" {
+    const allocator = testing.allocator;
+    
+    // Test empty bytecode
+    {
+        const Bytecode = bytecode_mod.Bytecode(TestFrame.BytecodeConfig);
+        const bytecode = try Bytecode.init(allocator, &[_]u8{});
+        defer bytecode.deinit(allocator);
+        
+        const gas = TestDispatch.calculateFirstBlockGas(&bytecode);
+        try testing.expect(gas == 0);
+    }
+    
+    // Test single STOP instruction
+    {
+        const Bytecode = bytecode_mod.Bytecode(TestFrame.BytecodeConfig);
+        const bytecode = try Bytecode.init(allocator, &[_]u8{@intFromEnum(Opcode.STOP)});
+        defer bytecode.deinit(allocator);
+        
+        const gas = TestDispatch.calculateFirstBlockGas(&bytecode);
+        try testing.expect(gas == 0); // STOP has 0 gas cost
+    }
+    
+    // Test block ending with JUMPDEST
+    {
+        const Bytecode = bytecode_mod.Bytecode(TestFrame.BytecodeConfig);
+        const bytecode = try Bytecode.init(allocator, &[_]u8{
+            @intFromEnum(Opcode.PUSH1), 42,   // 3 gas
+            @intFromEnum(Opcode.ADD),         // 3 gas
+            @intFromEnum(Opcode.JUMPDEST),    // 1 gas (but terminates block)
+        });
+        defer bytecode.deinit(allocator);
+        
+        const gas = TestDispatch.calculateFirstBlockGas(&bytecode);
+        try testing.expect(gas == 6); // PUSH1(3) + ADD(3), JUMPDEST not included
+    }
+    
+    // Test block ending with JUMP
+    {
+        const Bytecode = bytecode_mod.Bytecode(TestFrame.BytecodeConfig);
+        const bytecode = try Bytecode.init(allocator, &[_]u8{
+            @intFromEnum(Opcode.PUSH1), 10,   // 3 gas
+            @intFromEnum(Opcode.PUSH1), 20,   // 3 gas
+            @intFromEnum(Opcode.MUL),         // 5 gas
+            @intFromEnum(Opcode.JUMP),        // 8 gas
+        });
+        defer bytecode.deinit(allocator);
+        
+        const gas = TestDispatch.calculateFirstBlockGas(&bytecode);
+        try testing.expect(gas == 19); // 3 + 3 + 5 + 8
+    }
+    
+    // Test overflow handling
+    {
+        // Create bytecode that would overflow gas calculation
+        var large_bytecode = std.ArrayList(u8).init(allocator);
+        defer large_bytecode.deinit();
+        
+        // Add many expensive operations that would overflow
+        for (0..10000) |_| {
+            try large_bytecode.append(@intFromEnum(Opcode.SSTORE)); // Very expensive operation
+        }
+        
+        const Bytecode = bytecode_mod.Bytecode(TestFrame.BytecodeConfig);
+        const bytecode = try Bytecode.init(allocator, large_bytecode.items);
+        defer bytecode.deinit(allocator);
+        
+        const gas = TestDispatch.calculateFirstBlockGas(&bytecode);
+        try testing.expect(gas == std.math.maxInt(u64));
     }
 }
 
