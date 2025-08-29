@@ -87,7 +87,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// CALLVALUE opcode (0x34) - Get deposited value by the instruction/transaction responsible for this execution.
         /// Stack: [] → [value]
         pub fn callvalue(self: *FrameType, dispatch: Dispatch) Error!Success {
-            const value = self.value;
+            const value = self.value.*;
             try self.stack.push(value);
             const next = dispatch.getNext();
             return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
@@ -236,7 +236,8 @@ pub fn Handlers(comptime FrameType: type) type {
                 else => return Error.AllocationError,
             };
 
-            const code_data = metadata.bytecode_ptr.*;
+            // Create a slice from the bytecode pointer and size
+            const code_data = metadata.bytecode_ptr[0..metadata.size];
 
             // Copy code to memory with proper zero-padding
             var i: usize = 0;
