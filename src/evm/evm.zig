@@ -778,7 +778,6 @@ pub fn Evm(comptime config: EvmConfig) type {
             is_static: bool,
             snapshot_id: Journal.SnapshotIdType,
         ) !CallResult {
-            // Bind snapshot and call input for this frame duration
             const prev_snapshot = self.current_snapshot_id;
             self.current_snapshot_id = snapshot_id;
             defer self.current_snapshot_id = prev_snapshot;
@@ -787,23 +786,17 @@ pub fn Evm(comptime config: EvmConfig) type {
             self.current_input = input;
             defer self.current_input = prev_input;
 
-            // Increment depth and track static context
             self.depth += 1;
             defer self.depth -= 1;
 
-            // Store caller and value in call stack for this depth
             self.call_stack[self.depth - 1] = CallStackEntry{ .caller = caller, .value = value };
 
-            // Convert gas to the frame's GasType
             const gas_cast = @as(Frame.GasType, @intCast(@min(gas, @as(u64, @intCast(std.math.maxInt(Frame.GasType))))));
 
-            // EIP-214: Data-oriented design - encode static constraints in dependencies
+            // EIP-214: encode static constraints in dependencies
             // Static calls use null self_destruct to prevent SELFDESTRUCT operations
             const self_destruct_param = if (is_static) null else &self.self_destruct;
 
-            // Create host interface
-            const evm_ptr = @as(*anyopaque, @ptrCast(self));
-            
             // For static calls, wrap database and host to enforce EIP-214 constraints
             if (is_static) {
                 // Allocate static wrappers that live for the frame duration
@@ -814,7 +807,7 @@ pub fn Evm(comptime config: EvmConfig) type {
                 
                 // Static calls - we'll need to enforce constraints in the EVM methods themselves
                 // Pass call context data directly to frame
-                var frame = try Frame.init(self.allocator, gas_cast, self.database, caller, value, input, self.block_info, evm_ptr, self_destruct_param);
+                var frame = try Frame.init(self.allocator, gas_cast, self.database, caller, value, input, self.block_info, @as(*anyopaque, @ptrCast(self)), self_destruct_param);
                 frame.contract_address = address;
                 defer frame.deinit(self.allocator);
 
@@ -826,7 +819,7 @@ pub fn Evm(comptime config: EvmConfig) type {
 
                 // Map frame outcome to CallResult
                 const gas_left: u64 = @intCast(@max(frame.gas_remaining, 0));
-                const out_items = frame.output_data.items;
+                const out_items = frame.output;
                 const out_buf = if (out_items.len > 0) blk: {
                     const b = try self.allocator.alloc(u8, out_items.len);
                     @memcpy(b, out_items);
@@ -841,7 +834,7 @@ pub fn Evm(comptime config: EvmConfig) type {
                 }
             } else {
                 // Non-static call - pass call context data directly to frame
-                var frame = try Frame.init(self.allocator, gas_cast, self.database, caller, value, input, self.block_info, evm_ptr, self_destruct_param);
+                var frame = try Frame.init(self.allocator, gas_cast, self.database, caller, value, input, self.block_info, @as(*anyopaque, @ptrCast(self)), self_destruct_param);
                 frame.contract_address = address;
                 defer frame.deinit(self.allocator);
 
@@ -861,7 +854,7 @@ pub fn Evm(comptime config: EvmConfig) type {
 
                 // Map frame outcome to CallResult
                 const gas_left: u64 = @intCast(@max(frame.gas_remaining, 0));
-                const out_items = frame.output_data.items;
+                const out_items = frame.output;
                 const out_buf = if (out_items.len > 0) blk: {
                     const b = try self.allocator.alloc(u8, out_items.len);
                     @memcpy(b, out_items);
