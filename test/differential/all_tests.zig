@@ -6,4 +6,5 @@ test {
     _ = @import("jump_handlers_test.zig");
     _ = @import("memory_operations_test.zig");
     _ = @import("storage_operations_test.zig");
+    _ = @import("debug_stack_test.zig");
 }
