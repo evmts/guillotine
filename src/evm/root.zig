@@ -13,7 +13,6 @@ const std = @import("std");
 
 // Core frame and execution modules
 pub const FrameConfig = @import("frame_config.zig").FrameConfig;
-pub const Frame = @import("frame.zig").Frame;
 pub const StackFrame = @import("stack_frame.zig").StackFrame;
 pub const StackFrameDispatch = @import("dispatch.zig").Dispatch;
 pub const frame_mod = @import("stack_frame.zig");
@@ -80,7 +79,6 @@ pub const kzg_setup = @import("kzg_setup.zig");
 test {
     // Test core modules
     _ = FrameConfig;
-    _ = Frame;
     _ = StackFrameDispatch;
     _ = StackFrame;
 

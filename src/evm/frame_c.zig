@@ -14,13 +14,12 @@ const Address = @import("primitives").Address.Address;
 // Since the configuration is comptime we can't do this dynamically over FFI
 // We might just want to make an instance for every hardfork as it's own different build target we expose
 pub const FrameInterpreter = evm.createFrameInterpreter(.{});
-pub const Frame = evm.Frame(.{}); // Still need Frame type for some operations
 
 // Create debug frame interpreter type with debugging tracer
 pub const DebugFrameInterpreter = evm.createFrameInterpreter(.{
     .TracerType = tracer_mod.DebuggingTracer,
 });
-pub const DebugFrame = evm.Frame(.{
+pub const DebugFrame = evm.StackFrame(.{
     .TracerType = tracer_mod.DebuggingTracer,
 });
 
@@ -52,151 +51,151 @@ pub const EVM_ERROR_UNKNOWN: c_int = -99;
 // Minimal host implementation for C API
 const CApiHost = struct {
     const Self = @This();
-    
+
     pub fn get_balance(self: *Self, address: Address) u256 {
         _ = self;
         _ = address;
         return 0;
     }
-    
+
     pub fn get_code(self: *Self, address: Address) []const u8 {
         _ = self;
         _ = address;
         return &.{};
     }
-    
+
     pub fn get_code_hash(self: *Self, address: Address) [32]u8 {
         _ = self;
         _ = address;
         return [_]u8{0} ** 32;
     }
-    
+
     pub fn get_account(self: *Self, address: Address) error{AccountNotFound}!evm.Account {
         _ = self;
         _ = address;
         return error.AccountNotFound;
     }
-    
+
     pub fn get_input(self: *Self) []const u8 {
         _ = self;
         return &.{};
     }
-    
+
     pub fn get_return_data(self: *Self) []const u8 {
         _ = self;
         return &.{};
     }
-    
+
     pub fn get_gas_price(self: *Self) u256 {
         _ = self;
         return 0;
     }
-    
+
     pub fn get_chain_id(self: *Self) u16 {
         _ = self;
         return 1;
     }
-    
+
     pub fn get_block_hash(self: *Self, block_number: u64) ?[32]u8 {
         _ = self;
         _ = block_number;
         return null;
     }
-    
+
     pub fn get_block_info(self: *Self) evm.BlockInfo {
         _ = self;
         return evm.BlockInfo.init();
     }
-    
+
     pub fn get_blob_hash(self: *Self, index: u256) ?[32]u8 {
         _ = self;
         _ = index;
         return null;
     }
-    
+
     pub fn get_blob_base_fee(self: *Self) u256 {
         _ = self;
         return 0;
     }
-    
+
     pub fn get_is_static(self: *Self) bool {
         _ = self;
         return false;
     }
-    
+
     pub fn access_address(self: *Self, address: Address) !u64 {
         _ = self;
         _ = address;
         return 0;
     }
-    
+
     pub fn access_storage_slot(self: *Self, address: Address, slot: u256) !u64 {
         _ = self;
         _ = address;
         _ = slot;
         return 0;
     }
-    
+
     pub fn get_storage(self: *Self, address: Address, slot: u256) u256 {
         _ = self;
         _ = address;
         _ = slot;
         return 0;
     }
-    
+
     pub fn set_storage(self: *Self, address: Address, slot: u256, value: u256) !void {
         _ = self;
         _ = address;
         _ = slot;
         _ = value;
     }
-    
+
     pub fn get_transient_storage(self: *Self, address: Address, slot: u256) !u256 {
         _ = self;
         _ = address;
         _ = slot;
         return 0;
     }
-    
+
     pub fn set_transient_storage(self: *Self, address: Address, slot: u256, value: u256) !void {
         _ = self;
         _ = address;
         _ = slot;
         _ = value;
     }
-    
+
     pub fn mark_for_destruction(self: *Self, address: Address, beneficiary: Address) !void {
         _ = self;
         _ = address;
         _ = beneficiary;
     }
-    
+
     pub fn get_tx_origin(self: *Self) Address {
         _ = self;
         return [_]u8{0} ** 20;
     }
-    
+
     pub fn get_caller(self: *Self) Address {
         _ = self;
         return [_]u8{0} ** 20;
     }
-    
+
     pub fn get_call_value(self: *Self) u256 {
         _ = self;
         return 0;
     }
-    
+
     pub fn account_exists(self: *Self, address: Address) bool {
         _ = self;
         _ = address;
         return false;
     }
-    
+
     pub fn create_snapshot(self: *Self) u32 {
         _ = self;
         return 0;
     }
-    
+
     pub fn emit_log(self: *Self, contract_address: Address, topics: []const u256, data: []const u8) void {
         _ = self;
         _ = contract_address;
@@ -204,30 +203,30 @@ const CApiHost = struct {
         _ = data;
         // No-op for C API
     }
-    
+
     pub fn register_created_contract(self: *Self, address: Address) void {
         _ = self;
         _ = address;
         // No-op for C API
     }
-    
+
     pub fn was_created_in_tx(self: *Self, address: Address) bool {
         _ = self;
         _ = address;
         return false;
     }
-    
+
     pub fn revert_to_snapshot(self: *Self, snapshot_id: u16) void {
         _ = self;
         _ = snapshot_id;
         // No-op for C API
     }
-    
+
     pub fn get_depth(self: *Self) u11 {
         _ = self;
         return 0;
     }
-    
+
     pub fn record_storage_change(self: *Self, address: Address, slot: u256, original_value: u256) void {
         _ = self;
         _ = address;
@@ -235,25 +234,25 @@ const CApiHost = struct {
         _ = original_value;
         // No-op for C API
     }
-    
+
     pub fn get_original_storage(self: *Self, address: Address, slot: u256) u256 {
         _ = self;
         _ = address;
         _ = slot;
         return 0;
     }
-    
+
     pub fn is_hardfork_at_least(self: *Self, target: evm.Hardfork) bool {
         _ = self;
         _ = target;
         return true;
     }
-    
+
     pub fn get_hardfork(self: *Self) evm.Hardfork {
         _ = self;
         return evm.Hardfork.SHANGHAI;
     }
-    
+
     pub fn inner_call(self: *Self, params: evm.CallParams) !evm.CallResult {
         _ = self;
         _ = params;
@@ -365,7 +364,7 @@ pub export fn evm_frame_create(bytecode: [*]const u8, bytecode_len: usize, initi
     };
     errdefer allocator.free(handle.bytecode_owned);
 
-    // Initialize frame interpreter  
+    // Initialize frame interpreter
     handle.interpreter = FrameInterpreter.init(allocator, handle.bytecode_owned, @intCast(initial_gas), {}, createCApiHost()) catch {
         allocator.free(handle.bytecode_owned);
         allocator.destroy(handle);
