@@ -1005,7 +1005,7 @@ pub fn Evm(comptime config: EvmConfig) type {
         /// Revert state changes to a previous snapshot
         pub fn revert_to_snapshot(self: *Self, snapshot_id: Journal.SnapshotIdType) void {
             // Get the journal entries that need to be reverted before removing them
-            var entries_to_revert = std.ArrayList(Journal.EntryType).init(self.allocator);
+            var entries_to_revert = std.ArrayList(Journal.EntryType){};
             defer entries_to_revert.deinit(self.allocator);
 
             // Collect entries that belong to snapshots newer than or equal to the target snapshot
