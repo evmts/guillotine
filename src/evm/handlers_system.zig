@@ -724,7 +724,7 @@ const MockEvm = struct {
             .create_result = .{
                 .success = true,
                 .gas_remaining = 100_000,
-                .created_address = Address.zero(),
+                .created_address = primitives.ZERO_ADDRESS,
             },
         };
     }
@@ -761,9 +761,21 @@ const MockEvm = struct {
 fn createTestFrame(allocator: std.mem.Allocator, evm: ?*MockEvm) !TestFrame {
     const gas_remaining: TestFrame.GasType = 1_000_000;
     const database = null; // No database needed for these tests
+    const caller = primitives.ZERO_ADDRESS;
+    const value: u256 = 0;
+    const calldata = &[_]u8{};
+    const block_info = @import("block_info.zig").DefaultBlockInfo{
+        .number = 1,
+        .timestamp = 1000,
+        .difficulty = 100,
+        .gas_limit = 30000000,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .base_fee = 1000000000,
+        .prev_randao = [_]u8{0} ** 32,
+    };
     const evm_ptr = if (evm) |e| @as(*anyopaque, @ptrCast(e)) else @as(*anyopaque, @ptrFromInt(0x1000)); // Use a dummy pointer for tests without EVM
     const self_destruct = null; // No self-destruct needed for most system tests
-    return try TestFrame.init(allocator, gas_remaining, database, evm_ptr, self_destruct);
+    return try TestFrame.init(allocator, gas_remaining, database, caller, value, calldata, block_info, evm_ptr, self_destruct);
 }
 
 // Mock dispatch that simulates successful execution flow
@@ -815,17 +827,66 @@ test "RETURN opcode - with data" {
 
     // Write some data to memory
     const test_data = [_]u8{ 0xDE, 0xAD, 0xBE, 0xEF };
-    try frame.memory.set_data(0, &test_data);
+    try frame.memory.set_data(frame.allocator, 0, &test_data);
 
     // Test: return 4 bytes from offset 0
     try frame.stack.push(0); // offset
     try frame.stack.push(4); // size
 
     const dispatch = createMockDispatch();
-    const result = try TestFrame.SystemHandlers.@"return"(frame, dispatch);
+    const result = try TestFrame.SystemHandlers.@"return"(&frame, dispatch);
     
     try testing.expectEqual(TestFrame.Success.Return, result);
     try testing.expectEqualSlices(u8, &test_data, frame.output);
+}
+
+test "DEBUG: RETURN opcode - 32 bytes with 0x42" {
+    log.warn("=== DEBUG TEST START ===", .{});
+    var frame = try createTestFrame(testing.allocator, null);
+    defer frame.deinit(testing.allocator);
+
+    log.warn("Initial memory size: {}", .{frame.memory.size()});
+    
+    // Store 0x42 at offset 0 (as a u256)
+    const value: u256 = 0x42;
+    frame.memory.set_u256_evm(frame.allocator, 0, value) catch |err| {
+        log.err("Failed to set u256: {}", .{err});
+        return err;
+    };
+    
+    log.warn("Memory size after MSTORE: {}", .{frame.memory.size()});
+    
+    // Read back the value to verify it was stored
+    const stored = frame.memory.get_u256_evm(frame.allocator, 0) catch |err| {
+        log.err("Failed to get u256: {}", .{err});
+        return err;
+    };
+    log.warn("Stored value: 0x{x}", .{stored});
+    
+    // Test: return 32 bytes from offset 0
+    try frame.stack.push(0);  // offset
+    try frame.stack.push(32); // size
+    
+    log.warn("Stack prepared: offset=0, size=32", .{});
+
+    const dispatch = createMockDispatch();
+    const result = try TestFrame.SystemHandlers.@"return"(&frame, dispatch);
+    
+    log.warn("RETURN result: {}", .{result});
+    log.warn("Output length: {}", .{frame.output.len});
+    if (frame.output.len > 0) {
+        log.warn("Output data: {x}", .{frame.output});
+    }
+    
+    try testing.expectEqual(TestFrame.Success.Return, result);
+    try testing.expectEqual(@as(usize, 32), frame.output.len);
+    
+    // Expected: 32 bytes with 0x42 in the last position (big-endian)
+    var expected = [_]u8{0} ** 32;
+    expected[31] = 0x42;
+    try testing.expectEqualSlices(u8, &expected, frame.output);
+    
+    log.warn("=== DEBUG TEST END ===", .{});
 }
 
 test "REVERT opcode - empty revert" {
@@ -1117,7 +1178,7 @@ test "SELFDESTRUCT opcode - to max address" {
 test "Address conversion - from_u256 edge cases" {
     // Test zero
     const zero = TestFrame.SystemHandlers.from_u256(0);
-    try testing.expectEqual(Address.zero(), zero);
+    try testing.expectEqual(primitives.ZERO_ADDRESS, zero);
 
     // Test max u160 (max valid address)
     const max_u160 = std.math.maxInt(u160);
@@ -1140,7 +1201,7 @@ test "Address conversion - from_u256 edge cases" {
 
 test "Address conversion - to_u256 edge cases" {
     // Test zero
-    const zero_addr = Address.zero();
+    const zero_addr = primitives.ZERO_ADDRESS;
     const zero_u256 = TestFrame.SystemHandlers.to_u256(zero_addr);
     try testing.expectEqual(@as(u256, 0), zero_u256);
 
