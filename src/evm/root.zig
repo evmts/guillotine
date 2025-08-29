@@ -82,6 +82,7 @@ test {
     _ = FrameConfig;
     _ = FrameDispatch;
     _ = Frame;
+    _ = @import("dispatch.zig");
 
     // Test stack and memory
     _ = StackConfig;
@@ -117,6 +118,24 @@ test {
     _ = OpcodeData;
     _ = OpcodeSynthetic;
     _ = opcode_synthetic;
+
+    // Test handler modules
+    _ = @import("handlers_arithmetic.zig");
+    _ = @import("handlers_arithmetic_synthetic.zig");
+    _ = @import("handlers_bitwise.zig");
+    _ = @import("handlers_bitwise_synthetic.zig");
+    _ = @import("handlers_comparison.zig");
+    _ = @import("handlers_context.zig");
+    _ = @import("handlers_jump.zig");
+    _ = @import("handlers_jump_synthetic.zig");
+    _ = @import("handlers_keccak.zig");
+    _ = @import("handlers_log.zig");
+    _ = @import("handlers_memory.zig");
+    _ = @import("handlers_memory_synthetic.zig");
+    _ = @import("handlers_stack.zig");
+    _ = @import("handlers_storage.zig");
+    _ = @import("handlers_system.zig");
+    _ = @import("frame_handlers.zig");
 
     // Test additional modules
     _ = BlockInfo;
