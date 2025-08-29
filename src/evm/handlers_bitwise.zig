@@ -11,44 +11,44 @@ pub fn Handlers(comptime FrameType: type) type {
         pub const WordType = FrameType.WordType;
 
         /// AND opcode (0x16) - Bitwise AND operation.
-        pub fn @"and"(self: *FrameType, dispatch: Dispatch) Error!noreturn {
+        pub fn @"and"(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const top_minus_1 = try self.stack.pop();
             const top = try self.stack.peek();
             try self.stack.set_top(top & top_minus_1);
-            const next = dispatch.getNext();
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
+            const next_cursor = cursor + 1;
+            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor});
         }
 
         /// OR opcode (0x17) - Bitwise OR operation.
-        pub fn @"or"(self: *FrameType, dispatch: Dispatch) Error!noreturn {
+        pub fn @"or"(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const top_minus_1 = try self.stack.pop();
             const top = try self.stack.peek();
             try self.stack.set_top(top | top_minus_1);
-            const next = dispatch.getNext();
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
+            const next_cursor = cursor + 1;
+            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor});
         }
 
         /// XOR opcode (0x18) - Bitwise XOR operation.
-        pub fn xor(self: *FrameType, dispatch: Dispatch) Error!noreturn {
+        pub fn xor(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const top_minus_1 = try self.stack.pop();
             const top = try self.stack.peek();
             try self.stack.set_top(top ^ top_minus_1);
-            const next = dispatch.getNext();
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
+            const next_cursor = cursor + 1;
+            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor});
         }
 
         /// NOT opcode (0x19) - Bitwise NOT operation.
-        pub fn not(self: *FrameType, dispatch: Dispatch) Error!noreturn {
+        pub fn not(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const top = try self.stack.peek();
             try self.stack.set_top(~top);
-            const next = dispatch.getNext();
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
+            const next_cursor = cursor + 1;
+            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor});
         }
 
         /// BYTE opcode (0x1a) - Extract byte from word.
         /// Takes byte index from stack top, value from second position.
         /// Returns the byte at that index or 0 if index >= 32.
-        pub fn byte(self: *FrameType, dispatch: Dispatch) Error!noreturn {
+        pub fn byte(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const byte_index = try self.stack.pop();
             const value = try self.stack.peek();
             const result = if (byte_index >= 32) 0 else blk: {
@@ -58,35 +58,35 @@ pub fn Handlers(comptime FrameType: type) type {
                 break :blk (value >> @as(ShiftType, @intCast(shift_amount))) & 0xFF;
             };
             try self.stack.set_top(result);
-            const next = dispatch.getNext();
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
+            const next_cursor = cursor + 1;
+            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor});
         }
 
         /// SHL opcode (0x1b) - Shift left operation.
-        pub fn shl(self: *FrameType, dispatch: Dispatch) Error!noreturn {
+        pub fn shl(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const shift = try self.stack.pop();
             const value = try self.stack.peek();
             const ShiftType = std.math.Log2Int(WordType);
             const result = if (shift >= @bitSizeOf(WordType)) 0 else value << @as(ShiftType, @intCast(shift));
             try self.stack.set_top(result);
-            const next = dispatch.getNext();
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
+            const next_cursor = cursor + 1;
+            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor});
         }
 
         /// SHR opcode (0x1c) - Logical shift right operation.
-        pub fn shr(self: *FrameType, dispatch: Dispatch) Error!noreturn {
+        pub fn shr(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const shift = try self.stack.pop();
             const value = try self.stack.peek();
             const ShiftType = std.math.Log2Int(WordType);
             const result = if (shift >= @bitSizeOf(WordType)) 0 else value >> @as(ShiftType, @intCast(shift));
             try self.stack.set_top(result);
-            const next = dispatch.getNext();
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
+            const next_cursor = cursor + 1;
+            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor});
         }
 
         /// SAR opcode (0x1d) - Arithmetic shift right operation.
         /// Preserves the sign bit during shift.
-        pub fn sar(self: *FrameType, dispatch: Dispatch) Error!noreturn {
+        pub fn sar(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const shift = try self.stack.pop();
             const value = try self.stack.peek();
             const word_bits = @bitSizeOf(WordType);
@@ -101,8 +101,8 @@ pub fn Handlers(comptime FrameType: type) type {
                 break :blk @as(WordType, @bitCast(result_signed));
             };
             try self.stack.set_top(result);
-            const next = dispatch.getNext();
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
+            const next_cursor = cursor + 1;
+            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor});
         }
     };
 }
@@ -138,19 +138,21 @@ fn createTestFrame(allocator: std.mem.Allocator) !TestFrame {
 // Mock dispatch that simulates successful execution flow
 fn createMockDispatch() TestFrame.Dispatch {
     const mock_handler = struct {
-        fn handler(frame: TestFrame, dispatch: TestFrame.Dispatch) TestFrame.Error!TestFrame.Success {
+        fn handler(frame: *TestFrame, cursor: [*]const TestFrame.Dispatch.Item) TestFrame.Error!noreturn {
             _ = frame;
-            _ = dispatch;
-            return TestFrame.Success.stop;
+            _ = cursor;
+            return TestFrame.Error.Stop;
         }
     }.handler;
 
-    var cursor: [1]dispatch_mod.ScheduleElement(TestFrame) = undefined;
+    var cursor: [1]TestFrame.Dispatch.Item = undefined;
     cursor[0] = .{ .opcode_handler = &mock_handler };
+
+    const empty_jump_table = TestFrame.Dispatch.JumpTable{ .entries = &[_]TestFrame.Dispatch.JumpTableEntry{} };
 
     return TestFrame.Dispatch{
         .cursor = &cursor,
-        .bytecode_length = 0,
+        .jump_table = &empty_jump_table,
     };
 }
 
@@ -163,7 +165,7 @@ test "AND opcode - basic bitwise AND" {
     try frame.stack.push(0xF0);
 
     const dispatch = createMockDispatch();
-    _ = try TestFrame.BitwiseHandlers.@"and"(frame, dispatch);
+    _ = try TestFrame.BitwiseHandlers.@"and"(&frame, dispatch.cursor);
 
     try testing.expectEqual(@as(u256, 0xF0), try frame.stack.pop());
     try testing.expectEqual(@as(usize, 0), frame.stack.len());
@@ -178,7 +180,7 @@ test "OR opcode - basic bitwise OR" {
     try frame.stack.push(0x0F);
 
     const dispatch = createMockDispatch();
-    _ = try TestFrame.BitwiseHandlers.@"or"(frame, dispatch);
+    _ = try TestFrame.BitwiseHandlers.@"or"(&frame, dispatch.cursor);
 
     try testing.expectEqual(@as(u256, 0xFF), try frame.stack.pop());
 }
@@ -192,7 +194,7 @@ test "XOR opcode - basic bitwise XOR" {
     try frame.stack.push(0xAA);
 
     const dispatch = createMockDispatch();
-    _ = try TestFrame.BitwiseHandlers.xor(frame, dispatch);
+    _ = try TestFrame.BitwiseHandlers.xor(&frame, dispatch.cursor);
 
     try testing.expectEqual(@as(u256, 0x55), try frame.stack.pop());
 }
@@ -205,7 +207,7 @@ test "NOT opcode - bitwise NOT" {
     try frame.stack.push(0);
 
     const dispatch = createMockDispatch();
-    _ = try TestFrame.BitwiseHandlers.not(frame, dispatch);
+    _ = try TestFrame.BitwiseHandlers.not(&frame, dispatch.cursor);
 
     try testing.expectEqual(std.math.maxInt(u256), try frame.stack.pop());
 }
@@ -218,7 +220,7 @@ test "NOT opcode - bitwise NOT of 1" {
     try frame.stack.push(1);
 
     const dispatch = createMockDispatch();
-    _ = try TestFrame.BitwiseHandlers.not(frame, dispatch);
+    _ = try TestFrame.BitwiseHandlers.not(&frame, dispatch.cursor);
 
     try testing.expectEqual(std.math.maxInt(u256) - 1, try frame.stack.pop());
 }
@@ -232,7 +234,7 @@ test "BYTE opcode - extract first byte" {
     try frame.stack.push(0); // byte index
 
     const dispatch = createMockDispatch();
-    _ = try TestFrame.BitwiseHandlers.byte(frame, dispatch);
+    _ = try TestFrame.BitwiseHandlers.byte(&frame, dispatch.cursor);
 
     try testing.expectEqual(@as(u256, 0xFF), try frame.stack.pop());
 }
@@ -246,7 +248,7 @@ test "BYTE opcode - extract last byte" {
     try frame.stack.push(31); // byte index
 
     const dispatch = createMockDispatch();
-    _ = try TestFrame.BitwiseHandlers.byte(frame, dispatch);
+    _ = try TestFrame.BitwiseHandlers.byte(&frame, dispatch.cursor);
 
     try testing.expectEqual(@as(u256, 0xFF), try frame.stack.pop());
 }
@@ -260,7 +262,7 @@ test "BYTE opcode - out of bounds" {
     try frame.stack.push(32); // out of bounds
 
     const dispatch = createMockDispatch();
-    _ = try TestFrame.BitwiseHandlers.byte(frame, dispatch);
+    _ = try TestFrame.BitwiseHandlers.byte(&frame, dispatch.cursor);
 
     try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
 }
@@ -274,7 +276,7 @@ test "SHL opcode - basic shift left" {
     try frame.stack.push(4);
 
     const dispatch = createMockDispatch();
-    _ = try TestFrame.BitwiseHandlers.shl(frame, dispatch);
+    _ = try TestFrame.BitwiseHandlers.shl(&frame, dispatch.cursor);
 
     try testing.expectEqual(@as(u256, 16), try frame.stack.pop());
 }
@@ -288,7 +290,7 @@ test "SHL opcode - shift overflow" {
     try frame.stack.push(256);
 
     const dispatch = createMockDispatch();
-    _ = try TestFrame.BitwiseHandlers.shl(frame, dispatch);
+    _ = try TestFrame.BitwiseHandlers.shl(&frame, dispatch.cursor);
 
     try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
 }
@@ -302,7 +304,7 @@ test "SHR opcode - basic shift right" {
     try frame.stack.push(4);
 
     const dispatch = createMockDispatch();
-    _ = try TestFrame.BitwiseHandlers.shr(frame, dispatch);
+    _ = try TestFrame.BitwiseHandlers.shr(&frame, dispatch.cursor);
 
     try testing.expectEqual(@as(u256, 1), try frame.stack.pop());
 }
@@ -316,7 +318,7 @@ test "SHR opcode - shift overflow" {
     try frame.stack.push(256);
 
     const dispatch = createMockDispatch();
-    _ = try TestFrame.BitwiseHandlers.shr(frame, dispatch);
+    _ = try TestFrame.BitwiseHandlers.shr(&frame, dispatch.cursor);
 
     try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
 }
@@ -330,7 +332,7 @@ test "SAR opcode - positive number" {
     try frame.stack.push(2);
 
     const dispatch = createMockDispatch();
-    _ = try TestFrame.BitwiseHandlers.sar(frame, dispatch);
+    _ = try TestFrame.BitwiseHandlers.sar(&frame, dispatch.cursor);
 
     try testing.expectEqual(@as(u256, 4), try frame.stack.pop());
 }
@@ -346,7 +348,7 @@ test "SAR opcode - negative number" {
     try frame.stack.push(2);
 
     const dispatch = createMockDispatch();
-    _ = try TestFrame.BitwiseHandlers.sar(frame, dispatch);
+    _ = try TestFrame.BitwiseHandlers.sar(&frame, dispatch.cursor);
 
     // -4 in two's complement
     const neg_4 = std.math.maxInt(u256) - 3;
@@ -363,7 +365,7 @@ test "SAR opcode - shift overflow negative" {
     try frame.stack.push(256);
 
     const dispatch = createMockDispatch();
-    _ = try TestFrame.BitwiseHandlers.sar(frame, dispatch);
+    _ = try TestFrame.BitwiseHandlers.sar(&frame, dispatch.cursor);
 
     try testing.expectEqual(std.math.maxInt(u256), try frame.stack.pop());
 }
@@ -377,7 +379,7 @@ test "SAR opcode - shift overflow positive" {
     try frame.stack.push(256);
 
     const dispatch = createMockDispatch();
-    _ = try TestFrame.BitwiseHandlers.sar(frame, dispatch);
+    _ = try TestFrame.BitwiseHandlers.sar(&frame, dispatch.cursor);
 
     try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
 }
@@ -393,7 +395,7 @@ test "AND opcode - with zeros" {
     try frame.stack.push(0);
 
     const dispatch = createMockDispatch();
-    _ = try TestFrame.BitwiseHandlers.@"and"(frame, dispatch);
+    _ = try TestFrame.BitwiseHandlers.@"and"(&frame, dispatch.cursor);
 
     try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
 }
@@ -408,7 +410,7 @@ test "AND opcode - with max value" {
     try frame.stack.push(std.math.maxInt(u256));
 
     const dispatch = createMockDispatch();
-    _ = try TestFrame.BitwiseHandlers.@"and"(frame, dispatch);
+    _ = try TestFrame.BitwiseHandlers.@"and"(&frame, dispatch.cursor);
 
     try testing.expectEqual(@as(u256, value), try frame.stack.pop());
 }
@@ -423,7 +425,7 @@ test "OR opcode - with zeros" {
     try frame.stack.push(0);
 
     const dispatch = createMockDispatch();
-    _ = try TestFrame.BitwiseHandlers.@"or"(frame, dispatch);
+    _ = try TestFrame.BitwiseHandlers.@"or"(&frame, dispatch.cursor);
 
     try testing.expectEqual(@as(u256, value), try frame.stack.pop());
 }
@@ -437,7 +439,7 @@ test "OR opcode - with max value" {
     try frame.stack.push(std.math.maxInt(u256));
 
     const dispatch = createMockDispatch();
-    _ = try TestFrame.BitwiseHandlers.@"or"(frame, dispatch);
+    _ = try TestFrame.BitwiseHandlers.@"or"(&frame, dispatch.cursor);
 
     try testing.expectEqual(std.math.maxInt(u256), try frame.stack.pop());
 }
@@ -452,7 +454,7 @@ test "XOR opcode - same values" {
     try frame.stack.push(value);
 
     const dispatch = createMockDispatch();
-    _ = try TestFrame.BitwiseHandlers.xor(frame, dispatch);
+    _ = try TestFrame.BitwiseHandlers.xor(&frame, dispatch.cursor);
 
     try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
 }
@@ -467,7 +469,7 @@ test "XOR opcode - with zero" {
     try frame.stack.push(0);
 
     const dispatch = createMockDispatch();
-    _ = try TestFrame.BitwiseHandlers.xor(frame, dispatch);
+    _ = try TestFrame.BitwiseHandlers.xor(&frame, dispatch.cursor);
 
     try testing.expectEqual(@as(u256, value), try frame.stack.pop());
 }
@@ -482,7 +484,7 @@ test "XOR opcode - with max value" {
     try frame.stack.push(std.math.maxInt(u256));
 
     const dispatch = createMockDispatch();
-    _ = try TestFrame.BitwiseHandlers.xor(frame, dispatch);
+    _ = try TestFrame.BitwiseHandlers.xor(&frame, dispatch.cursor);
 
     try testing.expectEqual(~value, try frame.stack.pop());
 }
@@ -495,7 +497,7 @@ test "NOT opcode - max value" {
     try frame.stack.push(std.math.maxInt(u256));
 
     const dispatch = createMockDispatch();
-    _ = try TestFrame.BitwiseHandlers.not(frame, dispatch);
+    _ = try TestFrame.BitwiseHandlers.not(&frame, dispatch.cursor);
 
     try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
 }
@@ -509,10 +511,10 @@ test "NOT opcode - double negation" {
     try frame.stack.push(value);
 
     var dispatch = createMockDispatch();
-    _ = try TestFrame.BitwiseHandlers.not(frame, dispatch);
+    _ = try TestFrame.BitwiseHandlers.not(&frame, dispatch.cursor);
 
     dispatch = createMockDispatch();
-    _ = try TestFrame.BitwiseHandlers.not(frame, dispatch);
+    _ = try TestFrame.BitwiseHandlers.not(&frame, dispatch.cursor);
 
     try testing.expectEqual(value, try frame.stack.pop());
 }
@@ -528,7 +530,7 @@ test "BYTE opcode - extract middle byte" {
     try frame.stack.push(15);
 
     const dispatch = createMockDispatch();
-    _ = try TestFrame.BitwiseHandlers.byte(frame, dispatch);
+    _ = try TestFrame.BitwiseHandlers.byte(&frame, dispatch.cursor);
 
     try testing.expectEqual(@as(u256, 0xAB), try frame.stack.pop());
 }
@@ -542,7 +544,7 @@ test "BYTE opcode - large index" {
     try frame.stack.push(100); // way out of bounds
 
     const dispatch = createMockDispatch();
-    _ = try TestFrame.BitwiseHandlers.byte(frame, dispatch);
+    _ = try TestFrame.BitwiseHandlers.byte(&frame, dispatch.cursor);
 
     try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
 }
@@ -558,21 +560,21 @@ test "BYTE opcode - extract from complex value" {
     try frame.stack.push(value);
     try frame.stack.push(31);
     var dispatch = createMockDispatch();
-    _ = try TestFrame.BitwiseHandlers.byte(frame, dispatch);
+    _ = try TestFrame.BitwiseHandlers.byte(&frame, dispatch.cursor);
     try testing.expectEqual(@as(u256, 0xEF), try frame.stack.pop());
 
     // Extract byte 30 = 0xCD
     try frame.stack.push(value);
     try frame.stack.push(30);
     dispatch = createMockDispatch();
-    _ = try TestFrame.BitwiseHandlers.byte(frame, dispatch);
+    _ = try TestFrame.BitwiseHandlers.byte(&frame, dispatch.cursor);
     try testing.expectEqual(@as(u256, 0xCD), try frame.stack.pop());
 
     // Extract byte 24 = 0x01
     try frame.stack.push(value);
     try frame.stack.push(24);
     dispatch = createMockDispatch();
-    _ = try TestFrame.BitwiseHandlers.byte(frame, dispatch);
+    _ = try TestFrame.BitwiseHandlers.byte(&frame, dispatch.cursor);
     try testing.expectEqual(@as(u256, 0x01), try frame.stack.pop());
 }
 
@@ -586,7 +588,7 @@ test "SHL opcode - shift by 0" {
     try frame.stack.push(0);
 
     const dispatch = createMockDispatch();
-    _ = try TestFrame.BitwiseHandlers.shl(frame, dispatch);
+    _ = try TestFrame.BitwiseHandlers.shl(&frame, dispatch.cursor);
 
     try testing.expectEqual(@as(u256, value), try frame.stack.pop());
 }
@@ -600,7 +602,7 @@ test "SHL opcode - large shifts" {
     try frame.stack.push(255);
 
     const dispatch = createMockDispatch();
-    _ = try TestFrame.BitwiseHandlers.shl(frame, dispatch);
+    _ = try TestFrame.BitwiseHandlers.shl(&frame, dispatch.cursor);
 
     const expected = @as(u256, 1) << 255;
     try testing.expectEqual(expected, try frame.stack.pop());
@@ -615,7 +617,7 @@ test "SHL opcode - partial overflow" {
     try frame.stack.push(252);
 
     const dispatch = createMockDispatch();
-    _ = try TestFrame.BitwiseHandlers.shl(frame, dispatch);
+    _ = try TestFrame.BitwiseHandlers.shl(&frame, dispatch.cursor);
 
     const expected = @as(u256, 0xF) << 252;
     try testing.expectEqual(expected, try frame.stack.pop());
@@ -631,7 +633,7 @@ test "SHR opcode - shift by 0" {
     try frame.stack.push(0);
 
     const dispatch = createMockDispatch();
-    _ = try TestFrame.BitwiseHandlers.shr(frame, dispatch);
+    _ = try TestFrame.BitwiseHandlers.shr(&frame, dispatch.cursor);
 
     try testing.expectEqual(@as(u256, value), try frame.stack.pop());
 }
@@ -645,7 +647,7 @@ test "SHR opcode - exact division by power of 2" {
     try frame.stack.push(8);
 
     const dispatch = createMockDispatch();
-    _ = try TestFrame.BitwiseHandlers.shr(frame, dispatch);
+    _ = try TestFrame.BitwiseHandlers.shr(&frame, dispatch.cursor);
 
     try testing.expectEqual(@as(u256, 1), try frame.stack.pop());
 }
@@ -660,7 +662,7 @@ test "SAR opcode - shift by 0" {
     try frame.stack.push(0);
 
     const dispatch = createMockDispatch();
-    _ = try TestFrame.BitwiseHandlers.sar(frame, dispatch);
+    _ = try TestFrame.BitwiseHandlers.sar(&frame, dispatch.cursor);
 
     try testing.expectEqual(neg_value, try frame.stack.pop());
 }
@@ -676,7 +678,7 @@ test "SAR opcode - sign bit preservation" {
     try frame.stack.push(4);
 
     const dispatch = createMockDispatch();
-    _ = try TestFrame.BitwiseHandlers.sar(frame, dispatch);
+    _ = try TestFrame.BitwiseHandlers.sar(&frame, dispatch.cursor);
 
     const neg_16 = std.math.maxInt(u256) - 15;
     try testing.expectEqual(neg_16, try frame.stack.pop());
@@ -692,7 +694,7 @@ test "SAR opcode - positive large shift" {
     try frame.stack.push(255);
 
     const dispatch = createMockDispatch();
-    _ = try TestFrame.BitwiseHandlers.sar(frame, dispatch);
+    _ = try TestFrame.BitwiseHandlers.sar(&frame, dispatch.cursor);
 
     try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
 }
@@ -710,27 +712,27 @@ test "bitwise operations - De Morgan's laws" {
     try frame.stack.push(a);
     try frame.stack.push(b);
     var dispatch = createMockDispatch();
-    _ = try TestFrame.BitwiseHandlers.@"and"(frame, dispatch);
+    _ = try TestFrame.BitwiseHandlers.@"and"(&frame, dispatch.cursor);
 
     dispatch = createMockDispatch();
-    _ = try TestFrame.BitwiseHandlers.not(frame, dispatch);
+    _ = try TestFrame.BitwiseHandlers.not(&frame, dispatch.cursor);
     const left_side = try frame.stack.pop();
 
     // Calculate (~A | ~B)
     try frame.stack.push(a);
     dispatch = createMockDispatch();
-    _ = try TestFrame.BitwiseHandlers.not(frame, dispatch);
+    _ = try TestFrame.BitwiseHandlers.not(&frame, dispatch.cursor);
     const not_a = try frame.stack.pop();
 
     try frame.stack.push(b);
     dispatch = createMockDispatch();
-    _ = try TestFrame.BitwiseHandlers.not(frame, dispatch);
+    _ = try TestFrame.BitwiseHandlers.not(&frame, dispatch.cursor);
     const not_b = try frame.stack.pop();
 
     try frame.stack.push(not_a);
     try frame.stack.push(not_b);
     dispatch = createMockDispatch();
-    _ = try TestFrame.BitwiseHandlers.@"or"(frame, dispatch);
+    _ = try TestFrame.BitwiseHandlers.@"or"(&frame, dispatch.cursor);
     const right_side = try frame.stack.pop();
 
     try testing.expectEqual(left_side, right_side);
@@ -748,11 +750,11 @@ test "shift operations - round trip" {
     try frame.stack.push(shift);
 
     var dispatch = createMockDispatch();
-    _ = try TestFrame.BitwiseHandlers.shl(frame, dispatch);
+    _ = try TestFrame.BitwiseHandlers.shl(&frame, dispatch.cursor);
 
     try frame.stack.push(shift);
     dispatch = createMockDispatch();
-    _ = try TestFrame.BitwiseHandlers.shr(frame, dispatch);
+    _ = try TestFrame.BitwiseHandlers.shr(&frame, dispatch.cursor);
 
     // Due to overflow, only lower bits are preserved
     const mask = (@as(u256, 1) << (256 - shift)) - 1;
@@ -777,7 +779,7 @@ test "BYTE opcode - all bytes of a pattern" {
         try frame.stack.push(i);
 
         const dispatch = createMockDispatch();
-        _ = try TestFrame.BitwiseHandlers.byte(frame, dispatch);
+        _ = try TestFrame.BitwiseHandlers.byte(&frame, dispatch.cursor);
 
         try testing.expectEqual(@as(u256, i), try frame.stack.pop());
     }

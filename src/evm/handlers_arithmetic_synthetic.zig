@@ -12,7 +12,8 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// PUSH_ADD_INLINE - Fused PUSH+ADD with inline value (≤8 bytes).
         /// Pushes a value and immediately adds it to the top of stack.
-        pub fn push_add_inline(self: *FrameType, dispatch: Dispatch) Error!noreturn {
+        pub fn push_add_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
             // Extract inline value from schedule metadata
             const metadata = dispatch.getInlineMetadata();
             const push_value = metadata.value;
@@ -24,11 +25,12 @@ pub fn Handlers(comptime FrameType: type) type {
 
             // Continue to next operation (skip metadata)
             const next = dispatch.skipMetadata();
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
         }
 
         /// PUSH_ADD_POINTER - Fused PUSH+ADD with pointer value (>8 bytes).
-        pub fn push_add_pointer(self: *FrameType, dispatch: Dispatch) Error!noreturn {
+        pub fn push_add_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
             // Extract pointer value from schedule metadata
             const metadata = dispatch.getPointerMetadata();
             const push_value = metadata.value.*;
@@ -40,11 +42,12 @@ pub fn Handlers(comptime FrameType: type) type {
 
             // Continue to next operation (skip metadata)
             const next = dispatch.skipMetadata();
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
         }
 
         /// PUSH_MUL_INLINE - Fused PUSH+MUL with inline value (≤8 bytes).
-        pub fn push_mul_inline(self: *FrameType, dispatch: Dispatch) Error!noreturn {
+        pub fn push_mul_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
             const metadata = dispatch.getInlineMetadata();
             const push_value = metadata.value;
 
@@ -53,11 +56,12 @@ pub fn Handlers(comptime FrameType: type) type {
             try self.stack.push(result);
 
             const next = dispatch.skipMetadata();
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
         }
 
         /// PUSH_MUL_POINTER - Fused PUSH+MUL with pointer value (>8 bytes).
-        pub fn push_mul_pointer(self: *FrameType, dispatch: Dispatch) Error!noreturn {
+        pub fn push_mul_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
             const metadata = dispatch.getPointerMetadata();
             const push_value = metadata.value.*;
 
@@ -66,11 +70,12 @@ pub fn Handlers(comptime FrameType: type) type {
             try self.stack.push(result);
 
             const next = dispatch.skipMetadata();
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
         }
 
         /// PUSH_DIV_INLINE - Fused PUSH+DIV with inline value (≤8 bytes).
-        pub fn push_div_inline(self: *FrameType, dispatch: Dispatch) Error!noreturn {
+        pub fn push_div_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
             const metadata = dispatch.getInlineMetadata();
             const divisor = metadata.value;
 
@@ -79,11 +84,12 @@ pub fn Handlers(comptime FrameType: type) type {
             try self.stack.push(result);
 
             const next = dispatch.skipMetadata();
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
         }
 
         /// PUSH_DIV_POINTER - Fused PUSH+DIV with pointer value (>8 bytes).
-        pub fn push_div_pointer(self: *FrameType, dispatch: Dispatch) Error!noreturn {
+        pub fn push_div_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
             const metadata = dispatch.getPointerMetadata();
             const divisor = metadata.value.*;
 
@@ -92,11 +98,12 @@ pub fn Handlers(comptime FrameType: type) type {
             try self.stack.push(result);
 
             const next = dispatch.skipMetadata();
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
         }
 
         /// PUSH_SUB_INLINE - Fused PUSH+SUB with inline value (≤8 bytes).
-        pub fn push_sub_inline(self: *FrameType, dispatch: Dispatch) Error!noreturn {
+        pub fn push_sub_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
             const metadata = dispatch.getInlineMetadata();
             const push_value = metadata.value;
 
@@ -105,11 +112,12 @@ pub fn Handlers(comptime FrameType: type) type {
             try self.stack.push(result);
 
             const next = dispatch.skipMetadata();
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
         }
 
         /// PUSH_SUB_POINTER - Fused PUSH+SUB with pointer value (>8 bytes).
-        pub fn push_sub_pointer(self: *FrameType, dispatch: Dispatch) Error!noreturn {
+        pub fn push_sub_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
             const metadata = dispatch.getPointerMetadata();
             const push_value = metadata.value.*;
 
@@ -118,7 +126,7 @@ pub fn Handlers(comptime FrameType: type) type {
             try self.stack.push(result);
 
             const next = dispatch.skipMetadata();
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
         }
     };
 }

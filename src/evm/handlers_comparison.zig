@@ -11,66 +11,66 @@ pub fn Handlers(comptime FrameType: type) type {
         pub const WordType = FrameType.WordType;
 
         /// LT opcode (0x10) - Less than comparison.
-        pub fn lt(self: *FrameType, dispatch: Dispatch) Error!noreturn {
+        pub fn lt(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const top_minus_1 = try self.stack.pop();
             const top = try self.stack.peek();
             const result: WordType = if (top < top_minus_1) 1 else 0;
             try self.stack.set_top(result);
-            const next = dispatch.getNext();
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
+            const next_cursor = cursor + 1;
+            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor});
         }
 
         /// GT opcode (0x11) - Greater than comparison.
-        pub fn gt(self: *FrameType, dispatch: Dispatch) Error!noreturn {
+        pub fn gt(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const top_minus_1 = try self.stack.pop();
             const top = try self.stack.peek();
             const result: WordType = if (top > top_minus_1) 1 else 0;
             try self.stack.set_top(result);
-            const next = dispatch.getNext();
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
+            const next_cursor = cursor + 1;
+            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor});
         }
 
         /// SLT opcode (0x12) - Signed less than comparison.
-        pub fn slt(self: *FrameType, dispatch: Dispatch) Error!noreturn {
+        pub fn slt(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const top_minus_1 = try self.stack.pop();
             const top = try self.stack.peek();
             const a_signed = @as(std.meta.Int(.signed, @bitSizeOf(WordType)), @bitCast(top));
             const b_signed = @as(std.meta.Int(.signed, @bitSizeOf(WordType)), @bitCast(top_minus_1));
             const result: WordType = if (a_signed < b_signed) 1 else 0;
             try self.stack.set_top(result);
-            const next = dispatch.getNext();
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
+            const next_cursor = cursor + 1;
+            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor});
         }
 
         /// SGT opcode (0x13) - Signed greater than comparison.
-        pub fn sgt(self: *FrameType, dispatch: Dispatch) Error!noreturn {
+        pub fn sgt(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const top_minus_1 = try self.stack.pop();
             const top = try self.stack.peek();
             const a_signed = @as(std.meta.Int(.signed, @bitSizeOf(WordType)), @bitCast(top));
             const b_signed = @as(std.meta.Int(.signed, @bitSizeOf(WordType)), @bitCast(top_minus_1));
             const result: WordType = if (a_signed > b_signed) 1 else 0;
             try self.stack.set_top(result);
-            const next = dispatch.getNext();
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
+            const next_cursor = cursor + 1;
+            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor});
         }
 
         /// EQ opcode (0x14) - Equality comparison.
-        pub fn eq(self: *FrameType, dispatch: Dispatch) Error!noreturn {
+        pub fn eq(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const top_minus_1 = try self.stack.pop();
             const top = try self.stack.peek();
             const result: WordType = if (top == top_minus_1) 1 else 0;
             try self.stack.set_top(result);
-            const next = dispatch.getNext();
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
+            const next_cursor = cursor + 1;
+            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor});
         }
 
         /// ISZERO opcode (0x15) - Check if value is zero.
-        pub fn iszero(self: *FrameType, dispatch: Dispatch) Error!noreturn {
+        pub fn iszero(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const value = try self.stack.peek();
             const result: WordType = if (value == 0) 1 else 0;
             try self.stack.set_top(result);
-            const next = dispatch.getNext();
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
+            const next_cursor = cursor + 1;
+            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor});
         }
     };
 }
