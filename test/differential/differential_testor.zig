@@ -127,7 +127,7 @@ pub const ExecutionDiff = struct {
 pub const DifferentialTestor = struct {
     revm_instance: revm.Revm,
     guillotine_instance: guillotine_evm.Evm(.{}),
-    guillotine_db: guillotine_evm.MemoryDatabase,
+    guillotine_db: guillotine_evm.Database,
     allocator: std.mem.Allocator,
     caller: primitives.Address,
     contract: primitives.Address,
@@ -147,7 +147,7 @@ pub const DifferentialTestor = struct {
         try revm_vm.setBalance(caller, 10000000);
         
         // Setup Guillotine EVM
-        var db = guillotine_evm.MemoryDatabase.init(allocator);
+        var db = guillotine_evm.Database.init(allocator);
         
         try db.set_account(caller.bytes, .{
             .balance = 10000000,
@@ -178,7 +178,7 @@ pub const DifferentialTestor = struct {
         
         const evm = try guillotine_evm.Evm(.{}).init(
             allocator,
-            db.to_database_interface(),
+            db,
             block_info,
             tx_context,
             0, // gas_price
