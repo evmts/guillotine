@@ -326,7 +326,9 @@ pub fn StackFrame(comptime config: FrameConfig) type {
             self.stack.deinit(allocator);
             self.memory.deinit(allocator);
             self.deinitLogs(allocator);
-            // Output is allocated from arena and cleaned up automatically
+            if (self.output.len > 0) {
+                allocator.free(self.output);
+            }
         }
 
         /// Execute this frame without tracing (backward compatibility method).
@@ -533,15 +535,16 @@ pub fn StackFrame(comptime config: FrameConfig) type {
             return @as(*DefaultEvm, @ptrCast(@alignCast(self.evm_ptr)));
         }
         
-        /// Set output data (allocates using arena allocator for automatic cleanup)
+        /// Set output data (allocates on heap)
         pub fn setOutput(self: *Self, data: []const u8) Error!void {
+            if (self.output.len > 0) {
+                self.allocator.free(self.output);
+            }
             if (data.len == 0) {
                 self.output = &[_]u8{};
                 return;
             }
-            // Use arena allocator from EVM for automatic cleanup
-            const arena_allocator = self.getEvm().getCallArenaAllocator();
-            const new_output = arena_allocator.alloc(u8, data.len) catch {
+            const new_output = self.allocator.alloc(u8, data.len) catch {
                 return Error.AllocationError;
             };
             @memcpy(new_output, data);
