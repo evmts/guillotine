@@ -1,4 +1,3 @@
-/// DEPRECATED: Use bytecode4.zig instead
 /// EVM bytecode representation and validation
 ///
 /// Provides safe bytecode handling with:
@@ -55,7 +54,6 @@ const CACHE_LINE_SIZE = 64; // Common cache line size for x86-64 and ARM64
 const PREFETCH_DISTANCE = 256; // How far ahead to prefetch in bytes
 
 /// Factory function to create a Bytecode type with the given configuration
-/// @deprecated Use bytecode4.zig instead
 pub fn Bytecode(comptime cfg: BytecodeConfig) type {
     comptime cfg.validate();
 
@@ -189,7 +187,6 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
         // NEW: SIMD-optimized packed bitmap (4 bits per byte position)
         packed_bitmap: []PackedBits,
 
-        /// @deprecated Use bytecode4.zig instead
         pub fn init(allocator: std.mem.Allocator, code: []const u8) ValidationError!Self {
             // First, try to parse metadata to separate runtime code
             const metadata = parseSolidityMetadataFromBytes(code);
@@ -225,7 +222,6 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
 
         /// Initialize bytecode from initcode (EIP-3860)
         /// Validates that initcode size doesn't exceed the maximum allowed
-        /// @deprecated Use bytecode4.zig instead
         pub fn initFromInitcode(allocator: std.mem.Allocator, initcode: []const u8) ValidationError!Self {
             if (initcode.len > cfg.max_initcode_size) {
                 return error.InitcodeTooLarge;
@@ -256,7 +252,6 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
             return words * INITCODE_GAS_PER_WORD;
         }
 
-        /// @deprecated Use bytecode4.zig instead
         pub fn deinit(self: *Self) void {
             self.allocator.free(self.is_push_data);
             self.allocator.free(self.is_op_start);
@@ -266,7 +261,6 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
         }
 
         /// Create an iterator for efficient bytecode traversal
-        /// @deprecated Use bytecode4.zig instead
         pub fn createIterator(self: *const Self) Iterator {
             return Iterator{
                 .bytecode = self,
@@ -276,7 +270,6 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
 
         /// Get fusion data for a bytecode position marked as fusion candidate
         /// This method uses the pre-computed packed bitmap instead of re-analyzing
-        /// @deprecated Use bytecode4.zig instead
         pub fn getFusionData(self: *const Self, pc: PcType) OpcodeData {
             if (pc >= self.len()) return OpcodeData{ .regular = .{ .opcode = 0x00 } }; // STOP fallback
 
@@ -358,7 +351,6 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
 
         /// Check if a position is a valid jump destination
         /// Uses precomputed bitmap for O(1) lookup
-        /// @deprecated Use bytecode4.zig instead
         pub fn isValidJumpDest(self: Self, pc: PcType) bool {
             if (pc >= self.len()) return false;
             // https://ziglang.org/documentation/master/#as
@@ -459,7 +451,7 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
 
         // (removed SIMD fusion detection; scalar detection in getStats)
 
-        /// Build bitmaps and validate bytecode
+        /// Build bitmaps and validate bytecode in a single pass
         fn buildBitmapsAndValidate(self: *Self) ValidationError!void {
             const N = self.runtime_code.len;
             // Empty bytecode is valid, allocate minimal bitmaps
@@ -476,25 +468,9 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
                 return;
             }
 
-            // Phase A: validate opcodes and PUSH bounds without allocating
-            var i: PcType = 0;
-            while (i < N) {
-                const op = self.runtime_code[i];
-                // Validate opcode value
-                _ = std.meta.intToEnum(Opcode, op) catch return error.InvalidOpcode;
-                // If PUSH, ensure data fits
-                if (op >= @intFromEnum(Opcode.PUSH1) and op <= @intFromEnum(Opcode.PUSH32)) {
-                    const n: PcType = op - (@intFromEnum(Opcode.PUSH1) - 1);
-                    if (i + n >= N) return error.TruncatedPush;
-                    i += n + 1;
-                } else {
-                    i += 1;
-                }
-            }
-
             const bitmap_bytes = (N + BITMAP_MASK) >> BITMAP_SHIFT;
 
-            // Phase B: allocate bitmaps and populate
+            // Allocate bitmaps upfront for single-pass population
             const use_aligned = comptime !builtin.is_test;
             if (use_aligned) {
                 const aligned_bitmap_bytes = (bitmap_bytes + CACHE_LINE_SIZE - 1) & ~@as(usize, CACHE_LINE_SIZE - 1);
@@ -524,7 +500,8 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
                 packed_bits.* = PackedBits{ .is_push_data = false, .is_op_start = false, .is_jumpdest = false, .is_fusion_candidate = false };
             }
 
-            i = 0;
+            // Single pass: validate opcodes, mark bitmaps, detect JUMPDEST and fusions
+            var i: PcType = 0;
             while (i < N) {
                 @branchHint(.likely);
 
@@ -537,24 +514,64 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
                     });
                 }
 
+                // Mark operation start
                 self.is_op_start[i >> BITMAP_SHIFT] |= @as(u8, 1) << @intCast(i & BITMAP_MASK);
-                // NEW: Also set packed bitmap
                 self.packed_bitmap[i].is_op_start = true;
+                
                 const op = self.runtime_code[i];
-
-                // Opcodes are validated above; now mark bitmaps
-                const opcode_enum = @as(Opcode, @enumFromInt(op));
-                // Check if it's a PUSH opcode
+                
+                // Validate opcode
+                const opcode_enum = std.meta.intToEnum(Opcode, op) catch return error.InvalidOpcode;
+                
+                // Check if it's a JUMPDEST (and not push data)
+                if (op == @intFromEnum(Opcode.JUMPDEST)) {
+                    self.is_jumpdest[i >> BITMAP_SHIFT] |= @as(u8, 1) << @intCast(i & BITMAP_MASK);
+                    self.packed_bitmap[i].is_jumpdest = true;
+                }
+                
+                // Check for fusion candidates if enabled
+                if (comptime fusions_enabled) {
+                    // Check if this is a PUSH that could be part of a fusion
+                    if (op >= @intFromEnum(Opcode.PUSH1) and op <= @intFromEnum(Opcode.PUSH32)) {
+                        const push_size: PcType = op - (@intFromEnum(Opcode.PUSH1) - 1);
+                        const next_op_idx = i + 1 + push_size;
+                        
+                        // Ensure we can read the next opcode
+                        if (next_op_idx < N) {
+                            const next_op = self.runtime_code[next_op_idx];
+                            // Check for fusable patterns
+                            const is_fusable = switch (next_op) {
+                                @intFromEnum(Opcode.ADD), 
+                                @intFromEnum(Opcode.MUL), 
+                                @intFromEnum(Opcode.SUB), 
+                                @intFromEnum(Opcode.DIV), 
+                                @intFromEnum(Opcode.AND), 
+                                @intFromEnum(Opcode.OR), 
+                                @intFromEnum(Opcode.XOR), 
+                                @intFromEnum(Opcode.JUMP), 
+                                @intFromEnum(Opcode.JUMPI) => true,
+                                else => false,
+                            };
+                            
+                            if (is_fusable) {
+                                self.packed_bitmap[i].is_fusion_candidate = true;
+                            }
+                        }
+                    }
+                }
+                
+                // Handle PUSH instructions
                 if (@intFromEnum(opcode_enum) >= @intFromEnum(Opcode.PUSH1) and
                     @intFromEnum(opcode_enum) <= @intFromEnum(Opcode.PUSH32))
                 {
                     const n: PcType = op - (@intFromEnum(Opcode.PUSH1) - 1);
                     if (i + n >= N) return error.TruncatedPush;
+                    
+                    // Mark push data bytes
                     var j: PcType = 0;
                     while (j < n) : (j += 1) {
                         const idx = i + 1 + j;
                         self.is_push_data[idx >> BITMAP_SHIFT] |= @as(u8, 1) << @intCast(idx & BITMAP_MASK);
-                        // NEW: Also set packed bitmap
                         self.packed_bitmap[idx].is_push_data = true;
                     }
                     i += n + 1;
@@ -562,12 +579,7 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
                     i += 1;
                 }
             }
-            if (comptime cfg.vector_length > 0) {
-                self.markJumpdestSimd(cfg.vector_length);
-            } else {
-                self.markJumpdestScalar();
-            }
-            if (comptime fusions_enabled) self.markFusionCandidates();
+            // Single pass complete - no need for separate JUMPDEST marking or fusion detection
         }
 
         /// Validate immediate JUMP/JUMPI targets encoded via preceding PUSH
