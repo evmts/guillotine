@@ -84,7 +84,7 @@ pub fn Frame(comptime config: FrameConfig) type {
             return if (builtin.target.cpu.arch == .wasm32 or builtin.target.cpu.arch == .wasm64)
                 .auto
             else
-                .always_tail;
+                .auto; // Changed from .always_tail to .auto to fix LLVM musttail errors
         }
         /// The "word" type used by the evm. Defaults to u256. "Word" is the type used by Stack and throughout the Evm
         /// If set to something else the EVM will update to that new word size. e.g. run kekkak128 instead of kekkak256
