@@ -221,7 +221,7 @@ pub fn binding(self: Webui, element: [:0]const u8, comptime callback: anytype) !
             }
 
             // Call the user's callback with the properly converted parameters
-            @call(.auto, callback, param_tup);
+            @call(.always_tail, callback, param_tup);
         }
     };
 
