@@ -151,9 +151,8 @@ pub fn Stack(comptime config: StackConfig) type {
         // Generic dup function for DUP1-DUP16
         pub fn dup_n(self: *Self, n: u8) Error!void {
             // Check if we have n items on stack
-            const current_size = @intFromPtr(self.stack_base()) - @intFromPtr(self.stack_ptr);
-            const required_bytes = @as(usize, n) * @sizeOf(WordType);
-            if (current_size < required_bytes) {
+            const current_elements = self.size();
+            if (current_elements < n) {
                 @branchHint(.cold);
                 return Error.StackUnderflow;
             }
@@ -194,9 +193,8 @@ pub fn Stack(comptime config: StackConfig) type {
         // Generic swap function for SWAP1-SWAP16
         pub fn swap_n(self: *Self, n: u8) Error!void {
             // Check if we have n+1 items on stack
-            const current_size = @intFromPtr(self.stack_base()) - @intFromPtr(self.stack_ptr);
-            const required_bytes = @as(usize, n + 1) * @sizeOf(WordType);
-            if (current_size < required_bytes) {
+            const current_elements = self.size();
+            if (current_elements < n + 1) {
                 @branchHint(.cold);
                 return Error.StackUnderflow;
             }
@@ -721,6 +719,37 @@ test "All DUP operations DUP1-DUP16" {
         _ = try stack.pop(); // Remove one original item
         try std.testing.expectError(error.StackUnderflow, stack.dup_n(dup_n));
     }
+}
+
+test "Bug: dup_n and swap_n violate EVM spec for non-u256 word sizes" {
+    const allocator = std.testing.allocator;
+    // The EVM spec says DUP operations work on stack ELEMENTS, not bytes
+    // The bug is that when WordType != u256, the implementation doesn't follow EVM spec
+    
+    // Test 1: With u64 WordType, we should still need 16 elements for DUP16
+    const StackType64 = Stack(.{ .WordType = u64, .stack_size = 32 });
+    var stack64 = try StackType64.init(allocator);
+    defer stack64.deinit(allocator);
+    
+    // Push 16 u64 elements - this should be enough for DUP16 per EVM spec
+    var i: u8 = 0;
+    while (i < 16) : (i += 1) {
+        try stack64.push(@as(u64, i));
+    }
+    
+    // Per EVM spec, DUP16 should work with 16 elements regardless of WordType
+    // But let's check what the current implementation does
+    // Current: 16 elements * 8 bytes = 128 bytes
+    // Check: 128 < 16 * 8 = 128? No, so it passes (correct by accident)
+    try stack64.dup_n(16);
+    try std.testing.expectEqual(@as(usize, 17), stack64.size());
+    
+    // Now let's test swap_n which has the same bug
+    // Current swap_n checks if we have (n+1) * sizeof(WordType) bytes
+    // For SWAP16 with u64, that's 17 * 8 = 136 bytes
+    // We have 17 elements * 8 = 136 bytes, so it should work
+    try stack64.swap_n(16);
+    try std.testing.expectEqual(@as(usize, 17), stack64.size());
 }
 
 test "All SWAP operations SWAP1-SWAP16" {
