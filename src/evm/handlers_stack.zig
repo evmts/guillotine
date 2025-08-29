@@ -16,7 +16,7 @@ pub fn Handlers(comptime FrameType: type) type {
         pub fn pop(self: *FrameType, dispatch: Dispatch) Error!Success {
             _ = self.stack.pop_unsafe();
             const next = dispatch.getNext();
-            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// PUSH0 opcode (0x5f) - Push 0 onto stack.
@@ -24,7 +24,7 @@ pub fn Handlers(comptime FrameType: type) type {
         pub fn push0(self: *FrameType, dispatch: Dispatch) Error!Success {
             self.stack.push_unsafe(0);
             const next = dispatch.getNext();
-            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// Generate a push handler for PUSH1-PUSH32
@@ -41,7 +41,7 @@ pub fn Handlers(comptime FrameType: type) type {
                         self.stack.push_unsafe(meta.value.*);
                     }
                     const next = dispatch.skipMetadata();
-                    return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+                    return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
                 }
             }.pushHandler;
         }
@@ -53,7 +53,7 @@ pub fn Handlers(comptime FrameType: type) type {
                 pub fn dupHandler(self: *FrameType, dispatch: Dispatch) Error!Success {
                     self.stack.dup_n_unsafe(dup_n);
                     const next = dispatch.getNext();
-                    return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+                    return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
                 }
             }.dupHandler;
         }
@@ -65,7 +65,7 @@ pub fn Handlers(comptime FrameType: type) type {
                 pub fn swapHandler(self: *FrameType, dispatch: Dispatch) Error!Success {
                     self.stack.swap_n_unsafe(swap_n);
                     const next = dispatch.getNext();
-                    return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+                    return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
                 }
             }.swapHandler;
         }
@@ -109,13 +109,13 @@ fn createMockDispatch() TestFrame.Dispatch {
             return TestFrame.Success.Stop;
         }
     }.handler;
-    
+
     const schedule_item = dispatch_mod.ScheduleItem{
         .opcode_handler = &mock_handler,
         .metadata = undefined,
     };
     const schedule_ptr = &schedule_item;
-    
+
     return TestFrame.Dispatch{
         .cursor = schedule_ptr,
         .jump_table = null,
@@ -128,10 +128,10 @@ test "POP opcode - basic pop" {
 
     // Push value then pop it
     try frame.stack.push(42);
-    
+
     const dispatch = createMockDispatch();
     _ = try TestFrame.StackHandlers.pop(frame, dispatch);
-    
+
     try testing.expectEqual(@as(usize, 0), frame.stack.len());
 }
 
@@ -142,7 +142,7 @@ test "POP opcode - stack underflow" {
     // Try to pop from empty stack
     const dispatch = createMockDispatch();
     const result = TestFrame.StackHandlers.pop(frame, dispatch);
-    
+
     try testing.expectError(TestFrame.Error.StackUnderflow, result);
 }
 
@@ -152,7 +152,7 @@ test "PUSH0 opcode - push zero" {
 
     const dispatch = createMockDispatch();
     _ = try TestFrame.StackHandlers.push0(frame, dispatch);
-    
+
     try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
     try testing.expectEqual(@as(usize, 0), frame.stack.len());
 }
@@ -162,11 +162,11 @@ test "DUP1 opcode - duplicate top" {
     defer frame.deinit(testing.allocator);
 
     try frame.stack.push(42);
-    
+
     const DupHandler = TestFrame.StackHandlers.generateDupHandler(1);
     const dispatch = createMockDispatch();
     _ = try DupHandler(frame, dispatch);
-    
+
     try testing.expectEqual(@as(usize, 2), frame.stack.len());
     try testing.expectEqual(@as(u256, 42), try frame.stack.pop());
     try testing.expectEqual(@as(u256, 42), try frame.stack.pop());
@@ -180,11 +180,11 @@ test "DUP16 opcode - duplicate 16th item" {
     for (1..17) |i| {
         try frame.stack.push(@as(u256, i));
     }
-    
+
     const DupHandler = TestFrame.StackHandlers.generateDupHandler(16);
     const dispatch = createMockDispatch();
     _ = try DupHandler(frame, dispatch);
-    
+
     try testing.expectEqual(@as(usize, 17), frame.stack.len());
     try testing.expectEqual(@as(u256, 1), try frame.stack.pop()); // Duplicated value from bottom
 }
@@ -195,11 +195,11 @@ test "SWAP1 opcode - swap top two" {
 
     try frame.stack.push(1);
     try frame.stack.push(2);
-    
+
     const SwapHandler = TestFrame.StackHandlers.generateSwapHandler(1);
     const dispatch = createMockDispatch();
     _ = try SwapHandler(frame, dispatch);
-    
+
     try testing.expectEqual(@as(u256, 1), try frame.stack.pop());
     try testing.expectEqual(@as(u256, 2), try frame.stack.pop());
 }
@@ -212,14 +212,14 @@ test "SWAP16 opcode - swap with 16th item" {
     for (1..18) |i| {
         try frame.stack.push(@as(u256, i));
     }
-    
+
     const SwapHandler = TestFrame.StackHandlers.generateSwapHandler(16);
     const dispatch = createMockDispatch();
     _ = try SwapHandler(frame, dispatch);
-    
+
     // Top should now be 1, and 17th position should be 17
     try testing.expectEqual(@as(u256, 1), try frame.stack.pop());
-    
+
     // Pop 15 more to get to what was the 17th position
     for (0..15) |_| {
         _ = try frame.stack.pop();
@@ -233,7 +233,7 @@ test "PUSH handler - inline metadata" {
 
     // Test PUSH1 with inline value
     const PushHandler = TestFrame.StackHandlers.generatePushHandler(1);
-    
+
     // Create dispatch with inline metadata
     const mock_handler = struct {
         fn handler(frame_inner: TestFrame, dispatch_inner: TestFrame.Dispatch) TestFrame.Error!TestFrame.Success {
@@ -242,21 +242,21 @@ test "PUSH handler - inline metadata" {
             return TestFrame.Success.stop;
         }
     }.handler;
-    
+
     var cursor: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
     cursor[0] = .{ .opcode_handler = &mock_handler };
     cursor[1] = .{ .opcode_handler = &mock_handler };
-    
+
     var dispatch = TestFrame.Dispatch{
         .cursor = &cursor,
         .bytecode_length = 0,
     };
-    
+
     // Set inline metadata
     dispatch.cursor[0].metadata = .{ .inline_value = 42 };
-    
+
     _ = try PushHandler(frame, dispatch);
-    
+
     try testing.expectEqual(@as(u256, 42), try frame.stack.pop());
 }
 
@@ -266,9 +266,9 @@ test "PUSH handler - pointer metadata" {
 
     // Test PUSH32 with pointer value
     const PushHandler = TestFrame.StackHandlers.generatePushHandler(32);
-    
+
     const value: u256 = std.math.maxInt(u256);
-    
+
     // Create dispatch with pointer metadata
     const mock_handler = struct {
         fn handler(frame_inner: TestFrame, dispatch_inner: TestFrame.Dispatch) TestFrame.Error!TestFrame.Success {
@@ -277,21 +277,21 @@ test "PUSH handler - pointer metadata" {
             return TestFrame.Success.stop;
         }
     }.handler;
-    
+
     var cursor: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
     cursor[0] = .{ .opcode_handler = &mock_handler };
     cursor[1] = .{ .opcode_handler = &mock_handler };
-    
+
     var dispatch = TestFrame.Dispatch{
         .cursor = &cursor,
         .bytecode_length = 0,
     };
-    
+
     // Set pointer metadata
     dispatch.cursor[0].metadata = .{ .pointer_value = &value };
-    
+
     _ = try PushHandler(frame, dispatch);
-    
+
     try testing.expectEqual(std.math.maxInt(u256), try frame.stack.pop());
 }
 
@@ -305,13 +305,13 @@ test "POP opcode - multiple pops" {
     for (1..11) |i| {
         try frame.stack.push(@as(u256, i));
     }
-    
+
     // Pop 5 times
     for (0..5) |_| {
         const dispatch = createMockDispatch();
         _ = try TestFrame.StackHandlers.pop(frame, dispatch);
     }
-    
+
     try testing.expectEqual(@as(usize, 5), frame.stack.len());
     try testing.expectEqual(@as(u256, 5), try frame.stack.peek());
 }
@@ -325,12 +325,12 @@ test "POP opcode - pop all elements" {
     for (0..count) |i| {
         try frame.stack.push(@as(u256, i));
     }
-    
+
     for (0..count) |_| {
         const dispatch = createMockDispatch();
         _ = try TestFrame.StackHandlers.pop(frame, dispatch);
     }
-    
+
     try testing.expectEqual(@as(usize, 0), frame.stack.len());
 }
 
@@ -343,9 +343,9 @@ test "PUSH0 opcode - multiple push0s" {
         const dispatch = createMockDispatch();
         _ = try TestFrame.StackHandlers.push0(frame, dispatch);
     }
-    
+
     try testing.expectEqual(@as(usize, 10), frame.stack.len());
-    
+
     // Verify all are zeros
     for (0..10) |_| {
         try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
@@ -362,19 +362,19 @@ test "DUP opcodes - all DUP1 to DUP16" {
         while (frame.stack.len() > 0) {
             _ = try frame.stack.pop();
         }
-        
+
         // Push exactly dup_n values
         for (1..dup_n + 1) |i| {
             try frame.stack.push(@as(u256, i * 10));
         }
-        
+
         const DupHandler = TestFrame.StackHandlers.generateDupHandler(dup_n);
         const dispatch = createMockDispatch();
         _ = try DupHandler(frame, dispatch);
-        
+
         // Should have dup_n + 1 items now
         try testing.expectEqual(@as(usize, dup_n + 1), frame.stack.len());
-        
+
         // Top should be the duplicated value
         const expected = @as(u256, 10); // The bottom value that was duplicated
         try testing.expectEqual(expected, try frame.stack.pop());
@@ -391,19 +391,19 @@ test "SWAP opcodes - all SWAP1 to SWAP16" {
         while (frame.stack.len() > 0) {
             _ = try frame.stack.pop();
         }
-        
+
         // Push swap_n + 1 values
         for (0..swap_n + 1) |i| {
             try frame.stack.push(@as(u256, i));
         }
-        
+
         const SwapHandler = TestFrame.StackHandlers.generateSwapHandler(swap_n);
         const dispatch = createMockDispatch();
         _ = try SwapHandler(frame, dispatch);
-        
+
         // Top should now be what was at position swap_n
         try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
-        
+
         // And at position swap_n-1 should be what was on top
         for (0..swap_n - 1) |_| {
             _ = try frame.stack.pop();
@@ -420,34 +420,34 @@ test "Stack operations - complex sequence" {
     try frame.stack.push(10);
     try frame.stack.push(20);
     try frame.stack.push(30);
-    
+
     // DUP2 - duplicate 20
     const Dup2 = TestFrame.StackHandlers.generateDupHandler(2);
     var dispatch = createMockDispatch();
     _ = try Dup2(frame, dispatch);
-    
+
     // Stack: [10, 20, 30, 20]
     try testing.expectEqual(@as(u256, 20), try frame.stack.peek());
-    
+
     // SWAP1 - swap top two
     const Swap1 = TestFrame.StackHandlers.generateSwapHandler(1);
     dispatch = createMockDispatch();
     _ = try Swap1(frame, dispatch);
-    
+
     // Stack: [10, 20, 20, 30]
     try testing.expectEqual(@as(u256, 30), try frame.stack.peek());
-    
+
     // POP
     dispatch = createMockDispatch();
     _ = try TestFrame.StackHandlers.pop(frame, dispatch);
-    
+
     // Stack: [10, 20, 20]
     try testing.expectEqual(@as(usize, 3), frame.stack.len());
-    
+
     // PUSH0
     dispatch = createMockDispatch();
     _ = try TestFrame.StackHandlers.push0(frame, dispatch);
-    
+
     // Stack: [10, 20, 20, 0]
     try testing.expectEqual(@as(u256, 0), try frame.stack.peek());
 }
@@ -459,9 +459,9 @@ test "PUSH handlers - all sizes inline" {
     // Test PUSH1 through PUSH8 (inline values)
     inline for (1..9) |push_n| {
         const PushHandler = TestFrame.StackHandlers.generatePushHandler(push_n);
-        
+
         const value = @as(u256, (1 << (push_n * 8)) - 1); // Max value for n bytes
-        
+
         var cursor: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
         const mock_handler = struct {
             fn handler(f: TestFrame, d: TestFrame.Dispatch) TestFrame.Error!TestFrame.Success {
@@ -470,19 +470,19 @@ test "PUSH handlers - all sizes inline" {
                 return TestFrame.Success.stop;
             }
         }.handler;
-        
+
         cursor[0] = .{ .opcode_handler = &mock_handler };
         cursor[1] = .{ .opcode_handler = &mock_handler };
-        
+
         var dispatch = TestFrame.Dispatch{
             .cursor = &cursor,
             .bytecode_length = 0,
         };
-        
+
         dispatch.cursor[0].metadata = .{ .inline_value = value };
-        
+
         _ = try PushHandler(frame, dispatch);
-        
+
         try testing.expectEqual(value, try frame.stack.pop());
     }
 }
@@ -494,9 +494,9 @@ test "PUSH handlers - all sizes pointer" {
     // Test PUSH9 through PUSH32 (pointer values)
     inline for (9..33) |push_n| {
         const PushHandler = TestFrame.StackHandlers.generatePushHandler(push_n);
-        
+
         const value = @as(u256, push_n * 0x0102030405060708090A0B0C0D0E0F10);
-        
+
         var cursor: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
         const mock_handler = struct {
             fn handler(f: TestFrame, d: TestFrame.Dispatch) TestFrame.Error!TestFrame.Success {
@@ -505,19 +505,19 @@ test "PUSH handlers - all sizes pointer" {
                 return TestFrame.Success.stop;
             }
         }.handler;
-        
+
         cursor[0] = .{ .opcode_handler = &mock_handler };
         cursor[1] = .{ .opcode_handler = &mock_handler };
-        
+
         var dispatch = TestFrame.Dispatch{
             .cursor = &cursor,
             .bytecode_length = 0,
         };
-        
+
         dispatch.cursor[0].metadata = .{ .pointer_value = &value };
-        
+
         _ = try PushHandler(frame, dispatch);
-        
+
         try testing.expectEqual(value, try frame.stack.pop());
     }
 }
@@ -531,14 +531,14 @@ test "Stack operations - maximum depth" {
     for (0..max_stack) |i| {
         try frame.stack.push(@as(u256, i));
     }
-    
+
     // Stack should be full
     try testing.expectEqual(@as(usize, max_stack), frame.stack.len());
-    
+
     // Pop one to make room
     const dispatch = createMockDispatch();
     _ = try TestFrame.StackHandlers.pop(frame, dispatch);
-    
+
     // Now push should succeed
     _ = try TestFrame.StackHandlers.push0(frame, dispatch);
     try testing.expectEqual(@as(usize, max_stack), frame.stack.len());
@@ -552,19 +552,19 @@ test "DUP and SWAP - pattern verification" {
     for (1..9) |i| {
         try frame.stack.push(@as(u256, i * 11)); // 11, 22, 33, 44, 55, 66, 77, 88
     }
-    
+
     // DUP4 - should duplicate 55
     const Dup4 = TestFrame.StackHandlers.generateDupHandler(4);
     var dispatch = createMockDispatch();
     _ = try Dup4(frame, dispatch);
-    
+
     try testing.expectEqual(@as(u256, 55), try frame.stack.peek());
-    
+
     // SWAP3 - swap top (55) with 4th item (66)
     const Swap3 = TestFrame.StackHandlers.generateSwapHandler(3);
     dispatch = createMockDispatch();
     _ = try Swap3(frame, dispatch);
-    
+
     // Now top is 66, and 4th position is 55
     try testing.expectEqual(@as(u256, 66), try frame.stack.pop());
     try testing.expectEqual(@as(u256, 77), try frame.stack.pop());
@@ -577,25 +577,25 @@ test "Stack operations - preservation test" {
     defer frame.deinit(testing.allocator);
 
     // Push unique values
-    const test_values = [_]u256{ 
+    const test_values = [_]u256{
         0xDEADBEEF,
         0xCAFEBABE,
         0x12345678,
         0x9ABCDEF0,
         0xFEEDFACE,
     };
-    
+
     for (test_values) |val| {
         try frame.stack.push(val);
     }
-    
+
     // DUP5 - duplicate bottom value
     const Dup5 = TestFrame.StackHandlers.generateDupHandler(5);
     const dispatch = createMockDispatch();
     _ = try Dup5(frame, dispatch);
-    
+
     try testing.expectEqual(test_values[0], try frame.stack.peek());
-    
+
     // Verify all values are still there in correct order
     try testing.expectEqual(test_values[0], try frame.stack.pop()); // Duplicated
     try testing.expectEqual(test_values[4], try frame.stack.pop());
@@ -614,15 +614,15 @@ test "SWAP operations - circular swaps" {
     try frame.stack.push(200);
     try frame.stack.push(300);
     try frame.stack.push(400);
-    
+
     // SWAP3 twice should restore original order
     const Swap3 = TestFrame.StackHandlers.generateSwapHandler(3);
     var dispatch = createMockDispatch();
     _ = try Swap3(frame, dispatch);
-    
+
     dispatch = createMockDispatch();
     _ = try Swap3(frame, dispatch);
-    
+
     // Should be back to original order
     try testing.expectEqual(@as(u256, 400), try frame.stack.pop());
     try testing.expectEqual(@as(u256, 300), try frame.stack.pop());
@@ -638,11 +638,11 @@ test "PUSH0 opcode - edge case" {
     for (0..1023) |i| {
         try frame.stack.push(@as(u256, i + 1));
     }
-    
+
     // PUSH0 should succeed
     const dispatch = createMockDispatch();
     _ = try TestFrame.StackHandlers.push0(frame, dispatch);
-    
+
     try testing.expectEqual(@as(usize, 1024), frame.stack.len());
     try testing.expectEqual(@as(u256, 0), try frame.stack.peek());
 }
@@ -655,12 +655,12 @@ test "DUP operations - boundary conditions" {
     for (1..17) |i| {
         try frame.stack.push(@as(u256, i * 100));
     }
-    
+
     // DUP16 with exactly 16 elements
     const Dup16 = TestFrame.StackHandlers.generateDupHandler(16);
     const dispatch = createMockDispatch();
     _ = try Dup16(frame, dispatch);
-    
+
     // Should have duplicated the bottom element
     try testing.expectEqual(@as(u256, 100), try frame.stack.peek());
     try testing.expectEqual(@as(usize, 17), frame.stack.len());
@@ -675,13 +675,13 @@ test "SWAP operations - identity swaps" {
     for (values) |val| {
         try frame.stack.push(val);
     }
-    
+
     // SWAP1 twice should restore original
     const Swap1 = TestFrame.StackHandlers.generateSwapHandler(1);
     const dispatch = createMockDispatch();
     _ = try Swap1(frame, dispatch);
     _ = try Swap1(frame, dispatch);
-    
+
     // Verify original order
     var i: usize = values.len;
     while (i > 0) : (i -= 1) {
@@ -703,10 +703,10 @@ test "PUSH handlers - edge values" {
         .{ .push_n = 16, .value = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF },
         .{ .push_n = 32, .value = std.math.maxInt(u256) },
     };
-    
+
     inline for (test_cases) |tc| {
         const PushHandler = TestFrame.StackHandlers.generatePushHandler(tc.push_n);
-        
+
         var cursor: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
         const mock_handler = struct {
             fn handler(f: TestFrame, d: TestFrame.Dispatch) TestFrame.Error!TestFrame.Success {
@@ -715,23 +715,23 @@ test "PUSH handlers - edge values" {
                 return TestFrame.Success.stop;
             }
         }.handler;
-        
+
         cursor[0] = .{ .opcode_handler = &mock_handler };
         cursor[1] = .{ .opcode_handler = &mock_handler };
-        
+
         var dispatch = TestFrame.Dispatch{
             .cursor = &cursor,
             .bytecode_length = 0,
         };
-        
+
         if (tc.push_n <= 8) {
             dispatch.cursor[0].metadata = .{ .inline_value = tc.value };
         } else {
             dispatch.cursor[0].metadata = .{ .pointer_value = &tc.value };
         }
-        
+
         _ = try PushHandler(frame, dispatch);
-        
+
         try testing.expectEqual(tc.value, try frame.stack.pop());
     }
 }
