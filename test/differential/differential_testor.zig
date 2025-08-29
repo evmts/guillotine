@@ -13,20 +13,20 @@ pub const TraceStep = struct {
     memory: []const u8,
     storage_reads: []const StorageRead,
     storage_writes: []const StorageWrite,
-    
+
     pub const StorageRead = struct {
         address: primitives.Address,
         slot: u256,
         value: u256,
     };
-    
+
     pub const StorageWrite = struct {
         address: primitives.Address,
         slot: u256,
         old_value: u256,
         new_value: u256,
     };
-    
+
     pub fn deinit(self: *TraceStep, allocator: std.mem.Allocator) void {
         allocator.free(self.opcode_name);
         allocator.free(self.stack);
@@ -40,21 +40,21 @@ pub const TraceStep = struct {
 pub const ExecutionTrace = struct {
     steps: []TraceStep,
     allocator: std.mem.Allocator,
-    
+
     pub fn init(allocator: std.mem.Allocator) ExecutionTrace {
         return ExecutionTrace{
             .steps = &.{},
             .allocator = allocator,
         };
     }
-    
+
     pub fn deinit(self: *ExecutionTrace) void {
         for (self.steps) |*step| {
             step.deinit(self.allocator);
         }
         self.allocator.free(self.steps);
     }
-    
+
     /// Create empty trace for now (placeholder implementation)
     pub fn empty(allocator: std.mem.Allocator) ExecutionTrace {
         return ExecutionTrace{
@@ -71,7 +71,7 @@ pub const ExecutionResultWithTrace = struct {
     output: []const u8,
     trace: ExecutionTrace,
     allocator: std.mem.Allocator,
-    
+
     pub fn deinit(self: *ExecutionResultWithTrace) void {
         self.allocator.free(self.output);
         self.trace.deinit();
@@ -82,20 +82,20 @@ pub const ExecutionResultWithTrace = struct {
 pub const ExecutionDiff = struct {
     result_match: bool,
     trace_match: bool,
-    
+
     // Result differences
     success_diff: ?struct { revm: bool, guillotine: bool },
     gas_diff: ?struct { revm: u64, guillotine: u64 },
     output_diff: ?struct { revm: []const u8, guillotine: []const u8 },
     error_diff: ?struct { revm: ?[]const u8, guillotine: ?[]const u8 },
-    
+
     // Trace differences
     step_count_diff: ?struct { revm: usize, guillotine: usize },
     first_divergence_step: ?usize,
     trace_diffs: []const TraceDiffStep,
-    
+
     allocator: std.mem.Allocator,
-    
+
     pub const TraceDiffStep = struct {
         step_index: usize,
         pc_diff: ?struct { revm: u32, guillotine: u32 },
@@ -103,7 +103,7 @@ pub const ExecutionDiff = struct {
         gas_diff: ?struct { revm: u64, guillotine: u64 },
         stack_diff: ?struct { revm: []const u256, guillotine: []const u256 },
     };
-    
+
     pub fn deinit(self: *ExecutionDiff) void {
         if (self.output_diff) |diff| {
             self.allocator.free(diff.revm);
@@ -127,42 +127,35 @@ pub const ExecutionDiff = struct {
 pub const DifferentialTestor = struct {
     revm_instance: revm.Revm,
     guillotine_instance: guillotine_evm.Evm(.{}),
-    guillotine_db: *guillotine_evm.Database,
+    guillotine_db: guillotine_evm.Database,
     allocator: std.mem.Allocator,
     caller: primitives.Address,
     contract: primitives.Address,
-    enable_tracing: bool,
-    
+
     /// Simple initialization - creates both EVM instances internally
     pub fn init(allocator: std.mem.Allocator) !DifferentialTestor {
-        return initWithTracing(allocator, false);
-    }
-    
-    /// Initialize with tracing support - creates tracing-enabled EVMs
-    pub fn initWithTracing(allocator: std.mem.Allocator, enable_tracing: bool) !DifferentialTestor {
         // Setup addresses
         const caller = primitives.Address.ZERO_ADDRESS;
         const contract = try primitives.Address.from_hex("0xc0de000000000000000000000000000000000000");
-        
+
         // Setup REVM
         var revm_vm = try revm.Revm.init(allocator, .{
             .gas_limit = 100000,
             .chain_id = 1,
         });
-        
+
         try revm_vm.setBalance(caller, 10000000);
-        
+
         // Setup Guillotine EVM
-        const db = try allocator.create(guillotine_evm.Database);
-        db.* = guillotine_evm.Database.init(allocator);
-        
+        var db = guillotine_evm.Database.init(allocator);
+
         try db.set_account(caller.bytes, .{
             .balance = 10000000,
             .nonce = 0,
             .code_hash = [_]u8{0} ** 32,
             .storage_root = [_]u8{0} ** 32,
         });
-        
+
         const block_info = guillotine_evm.BlockInfo{
             .number = 1,
             .timestamp = 0,
@@ -174,7 +167,7 @@ pub const DifferentialTestor = struct {
             .blob_base_fee = 0,
             .blob_versioned_hashes = &.{},
         };
-        
+
         const tx_context = guillotine_evm.TransactionContext{
             .chain_id = 1,
             .gas_limit = 100000,
@@ -182,17 +175,17 @@ pub const DifferentialTestor = struct {
             .blob_versioned_hashes = &.{},
             .blob_base_fee = 0,
         };
-        
+
         const evm = try guillotine_evm.Evm(.{}).init(
             allocator,
-            db,
+            &db,
             block_info,
             tx_context,
             0, // gas_price
             caller, // origin
             .CANCUN,
         );
-        
+
         return DifferentialTestor{
             .revm_instance = revm_vm,
             .guillotine_instance = evm,
@@ -200,89 +193,13 @@ pub const DifferentialTestor = struct {
             .allocator = allocator,
             .caller = caller,
             .contract = contract,
-            .enable_tracing = enable_tracing,
         };
     }
-    
+
     pub fn deinit(self: *DifferentialTestor) void {
         self.revm_instance.deinit();
         self.guillotine_instance.deinit();
         self.guillotine_db.deinit();
-        self.allocator.destroy(self.guillotine_db);
-    }
-    
-    /// Analyze bytecode and provide debugging information
-    fn analyzeBytecode(self: *DifferentialTestor, bytecode: []const u8) void {
-        _ = self;
-        const log = std.log.scoped(.differential_analysis);
-        
-        log.debug("Analyzing bytecode of {d} bytes", .{bytecode.len});
-        
-        // Decode opcodes for debugging
-        var i: usize = 0;
-        var opcode_count: usize = 0;
-        while (i < bytecode.len) : (opcode_count += 1) {
-            const opcode = bytecode[i];
-            const opcode_name = switch (opcode) {
-                0x00 => "STOP",
-                0x01 => "ADD",
-                0x02 => "MUL",
-                0x03 => "SUB",
-                0x04 => "DIV",
-                0x05 => "SDIV",
-                0x06 => "MOD",
-                0x07 => "SMOD",
-                0x08 => "ADDMOD",
-                0x09 => "MULMOD",
-                0x0a => "EXP",
-                0x0b => "SIGNEXTEND",
-                0x10 => "LT",
-                0x11 => "GT",
-                0x12 => "SLT",
-                0x13 => "SGT",
-                0x14 => "EQ",
-                0x15 => "ISZERO",
-                0x16 => "AND",
-                0x17 => "OR",
-                0x18 => "XOR",
-                0x19 => "NOT",
-                0x1a => "BYTE",
-                0x1b => "SHL",
-                0x1c => "SHR",
-                0x1d => "SAR",
-                0x20 => "SHA3",
-                0x35 => "CALLDATALOAD",
-                0x36 => "CALLDATASIZE",
-                0x37 => "CALLDATACOPY",
-                0x50 => "POP",
-                0x51 => "MLOAD",
-                0x52 => "MSTORE",
-                0x53 => "MSTORE8",
-                0x56 => "JUMP",
-                0x57 => "JUMPI",
-                0x58 => "PC",
-                0x59 => "MSIZE",
-                0x5a => "GAS",
-                0x5b => "JUMPDEST",
-                0x60...0x7f => blk: {
-                    const push_size = opcode - 0x60 + 1;
-                    i += push_size;
-                    break :blk "PUSH";
-                },
-                0x80...0x8f => "DUP",
-                0x90...0x9f => "SWAP",
-                0xa0...0xa4 => "LOG",
-                0xf3 => "RETURN",
-                0xfe => "INVALID",
-                0xff => "SELFDESTRUCT",
-                else => "UNKNOWN",
-            };
-            
-            log.debug("  PC {d}: 0x{x:0>2} ({s})", .{i, opcode, opcode_name});
-            i += 1;
-        }
-        
-        log.debug("Total opcodes decoded: {d}", .{opcode_count});
     }
 
     /// Simple bytecode testing - deploys bytecode and executes it on both EVMs
@@ -291,11 +208,11 @@ pub const DifferentialTestor = struct {
     pub fn test_bytecode(self: *DifferentialTestor, bytecode: []const u8) !void {
         // Deploy bytecode to both EVMs
         try self.revm_instance.setCode(self.contract, bytecode);
-        
+
         const code_hash = try self.guillotine_db.set_code(bytecode);
         const log = std.log.scoped(.differential_testor);
         log.debug("Set code with hash: {x}", .{code_hash});
-        
+
         try self.guillotine_db.set_account(self.contract.bytes, .{
             .balance = 0,
             .nonce = 1,
@@ -303,38 +220,35 @@ pub const DifferentialTestor = struct {
             .storage_root = [_]u8{0} ** 32,
         });
         log.debug("Set account for address: {x}", .{self.contract.bytes});
-        
+
         // Verify deployment
         const deployed_code = try self.guillotine_db.get_code_by_address(self.contract.bytes);
-        log.debug("Deployed bytecode to {any}: len={d} vs deployed_len={d}", .{self.contract, bytecode.len, deployed_code.len});
+        log.debug("Deployed bytecode to {any}: len={} vs deployed_len={}", .{ self.contract, bytecode.len, deployed_code.len });
         if (deployed_code.len == 0) {
             log.err("WARNING: Deployed code has zero length!", .{});
         }
-        
+
         // Also check if account exists
         const account_check = try self.guillotine_db.get_account(self.contract.bytes);
         if (account_check) |acc| {
-            log.debug("Account found: balance={d}, nonce={d}, code_hash={x}", .{acc.balance, acc.nonce, acc.code_hash});
+            log.debug("Account found: balance={}, nonce={}, code_hash={x}", .{ acc.balance, acc.nonce, acc.code_hash });
         } else {
             log.err("WARNING: Account not found after deployment!", .{});
         }
-        
+
         // Execute and diff
         var diff = try self.executeAndDiff(self.caller, self.contract, 0, &.{}, 100000);
         defer diff.deinit();
-        
+
         // Happy path - perfect match
         if (diff.result_match and diff.trace_match) {
             return;
         }
-        
-        // Unhappy path - analyze bytecode for debugging
-        self.analyzeBytecode(bytecode);
-        
+
         // Unhappy path - collect and report errors
         var error_messages: [5][]const u8 = undefined;
         var error_count: usize = 0;
-        
+
         if (diff.success_diff) |success| {
             if (diff.error_diff) |err_info| {
                 if (err_info.guillotine) |g_err| {
@@ -347,34 +261,34 @@ pub const DifferentialTestor = struct {
             }
             error_count += 1;
         }
-        
+
         if (diff.gas_diff) |gas| {
             error_messages[error_count] = try std.fmt.allocPrint(self.allocator, "Gas usage mismatch: REVM={} vs Guillotine={}", .{ gas.revm, gas.guillotine });
             error_count += 1;
         }
-        
+
         if (diff.output_diff) |output| {
             error_messages[error_count] = try std.fmt.allocPrint(self.allocator, "Output mismatch: REVM={x} vs Guillotine={x}", .{ output.revm, output.guillotine });
             error_count += 1;
         }
-        
+
         if (diff.step_count_diff) |steps| {
             error_messages[error_count] = try std.fmt.allocPrint(self.allocator, "Trace step count mismatch: REVM={} vs Guillotine={}", .{ steps.revm, steps.guillotine });
             error_count += 1;
         }
-        
+
         // Print comprehensive human-readable diff
         self.printComprehensiveDiff(diff, bytecode, error_messages[0..error_count]);
-        
+
         // Clean up error messages
         for (error_messages[0..error_count]) |msg| {
             self.allocator.free(msg);
         }
-        
+
         // Throw clear error message
         return error.EVMImplementationMismatch;
     }
-    
+
     /// Execute bytecode on both EVMs and generate comprehensive diff
     pub fn executeAndDiff(
         self: *DifferentialTestor,
@@ -387,15 +301,15 @@ pub const DifferentialTestor = struct {
         // Execute on REVM with trace
         var revm_result = try self.executeRevmWithTrace(caller, to, value, input, gas_limit);
         defer revm_result.deinit();
-        
+
         // Execute on Guillotine with trace
         var guillotine_result = try self.executeGuillotineWithTrace(caller, to, value, input, gas_limit);
         defer guillotine_result.deinit();
-        
+
         // Generate comprehensive diff
         return try self.generateDiff(revm_result, guillotine_result);
     }
-    
+
     /// Execute on REVM and capture trace
     fn executeRevmWithTrace(
         self: *DifferentialTestor,
@@ -409,10 +323,10 @@ pub const DifferentialTestor = struct {
         // TODO: Parse actual REVM trace files
         var result = try self.revm_instance.call(caller, to, value, input, gas_limit);
         defer result.deinit();
-        
+
         const output = try self.allocator.dupe(u8, result.output);
         const trace = ExecutionTrace.empty(self.allocator);
-        
+
         return ExecutionResultWithTrace{
             .success = result.success,
             .gas_used = result.gas_used,
@@ -421,7 +335,7 @@ pub const DifferentialTestor = struct {
             .allocator = self.allocator,
         };
     }
-    
+
     /// Execute on Guillotine and capture trace
     fn executeGuillotineWithTrace(
         self: *DifferentialTestor,
@@ -431,62 +345,6 @@ pub const DifferentialTestor = struct {
         input: []const u8,
         gas_limit: u64,
     ) !ExecutionResultWithTrace {
-        const log = std.log.scoped(.differential_trace);
-        
-        if (self.enable_tracing) {
-            // Create a tracing-enabled EVM instance for this execution
-            const JSONRPCTracer = @import("evm").JSONRPCTracer;
-            
-            // Configure EVM with tracing enabled
-            const TracingEvmConfig = guillotine_evm.EvmConfig{
-                .tracer_type = JSONRPCTracer,
-                .frame_config = .{ .DatabaseType = guillotine_evm.Database },
-            };
-            
-            // Create tracing-enabled EVM instance
-            const TracingEvm = guillotine_evm.Evm(TracingEvmConfig);
-            
-            const block_info = guillotine_evm.BlockInfo{
-                .number = 1,
-                .timestamp = 0,
-                .gas_limit = 100000,
-                .coinbase = primitives.Address.ZERO_ADDRESS,
-                .difficulty = 0,
-                .base_fee = 0,
-                .prev_randao = [_]u8{0} ** 32,
-                .blob_base_fee = 0,
-                .blob_versioned_hashes = &.{},
-            };
-            
-            const tx_context = guillotine_evm.TransactionContext{
-                .chain_id = 1,
-                .gas_limit = 100000,
-                .coinbase = primitives.Address.ZERO_ADDRESS,
-                .blob_versioned_hashes = &.{},
-                .blob_base_fee = 0,
-            };
-            
-            var tracing_evm = try TracingEvm.init(
-                self.allocator,
-                self.guillotine_db,
-                block_info,
-                tx_context,
-                0, // gas_price
-                caller, // origin
-                .CANCUN,
-            );
-            defer tracing_evm.deinit();
-            
-            // Initialize the tracer
-            var tracer = JSONRPCTracer.init(self.allocator);
-            defer tracer.deinit();
-            
-            // TODO: Figure out how to pass the tracer to the EVM's frame
-            // The frame needs to be created with the tracer in its config
-            
-            // For now, fall through to regular execution
-        }
-        
         // Use the actual EVM call method
         const params = guillotine_evm.CallParams{
             .call = .{
@@ -497,83 +355,38 @@ pub const DifferentialTestor = struct {
                 .gas = gas_limit,
             },
         };
-        
-        log.debug("DIFFERENTIAL: About to call Guillotine with gas={d}", .{gas_limit});
-        
-        // First, let's trace the bytecode execution manually
-        // Get the contract code
-        const code = self.guillotine_db.get_code_by_address(to.bytes) catch |err| {
-            log.err("Failed to get code for address {any}: {any}", .{to, err});
-            return ExecutionResultWithTrace{
-                .success = false,
-                .gas_used = 0,
-                .output = &.{},
-                .trace = ExecutionTrace.empty(self.allocator),
-                .allocator = self.allocator,
-            };
-        };
-        
-        log.debug("Contract code at {any}: {d} bytes", .{to, code.len});
-        if (code.len > 0) {
-            log.debug("First 16 bytes: {x}", .{code[0..@min(code.len, 16)]});
-        }
-        
-        // Execute the call
-        log.debug("DIFFERENTIAL: About to call Guillotine.call() with params", .{});
+
+        std.debug.print("DIFFERENTIAL: About to call Guillotine with gas={}\n", .{gas_limit});
         const result = self.guillotine_instance.call(params);
-        log.debug("DIFFERENTIAL: Guillotine call complete, success={any}, gas_left={d}", .{result.success, result.gas_left});
-        if (result.error_info) |err| {
-            log.debug("DIFFERENTIAL: Call error info: {s}", .{err});
-        }
-        
-        // Create a basic trace for now
-        var trace_steps = std.ArrayList(TraceStep){};
-        defer trace_steps.deinit(self.allocator);
-        
-        // If we have bytecode, add some basic trace information
-        if (code.len > 0 and !result.success and result.gas_left == 0) {
-            // This looks like immediate failure - possibly during dispatch init
-            const step = TraceStep{
-                .pc = 0,
-                .opcode = if (code.len > 0) code[0] else 0,
-                .opcode_name = try self.allocator.dupe(u8, "DISPATCH_INIT_FAIL"),
-                .gas = gas_limit,
-                .stack = &.{},
-                .memory = &.{},
-                .storage_reads = &.{},
-                .storage_writes = &.{},
-            };
-            try trace_steps.append(self.allocator, step);
-        }
-        
-        const trace = ExecutionTrace{
-            .steps = try trace_steps.toOwnedSlice(self.allocator),
-            .allocator = self.allocator,
-        };
-        
+        std.debug.print("DIFFERENTIAL: Guillotine call complete, success={}, gas_left={}\n", .{ result.success, result.gas_left });
+
+        // For now, create empty trace - we'll focus on the execution result
+        const trace = ExecutionTrace.empty(self.allocator);
+
         // Calculate gas used
         const gas_used = gas_limit - result.gas_left;
-        
+
         // Store the execution result status for debugging
-        log.debug("Guillotine execution completed: success={any}, gas_left={d}, output_len={d}", .{result.success, result.gas_left, result.output.len});
-        
+        const log = std.log.scoped(.differential_failure);
+        log.debug("Guillotine execution completed: success={}, gas_left={}, output_len={}", .{ result.success, result.gas_left, result.output.len });
+
         if (!result.success) {
             // Log detailed failure information
             log.err("Guillotine execution failed!", .{});
-            log.err("  Gas limit: {d}", .{gas_limit});
-            log.err("  Gas left: {d}", .{result.gas_left});
-            log.err("  Gas used: {d}", .{gas_used});
+            log.err("  Gas limit: {}", .{gas_limit});
+            log.err("  Gas left: {}", .{result.gas_left});
+            log.err("  Gas used: {}", .{gas_used});
             log.err("  Output: {x}", .{result.output});
             if (result.error_info) |error_info| {
                 log.err("  ERROR TYPE: {s}", .{error_info});
             }
-            
+
             // Check if it failed immediately (gas_left == 0 suggests immediate failure)
             if (result.gas_left == 0) {
                 log.err("  NOTE: Gas left is 0, suggesting immediate failure or out of gas", .{});
             }
         }
-        
+
         return ExecutionResultWithTrace{
             .success = result.success,
             .gas_used = gas_used,
@@ -582,34 +395,34 @@ pub const DifferentialTestor = struct {
             .allocator = self.allocator,
         };
     }
-    
+
     /// Print comprehensive, human-readable diff with context
     fn printComprehensiveDiff(self: *DifferentialTestor, diff: ExecutionDiff, bytecode: []const u8, error_messages: []const []const u8) void {
         _ = self; // unused for now
         const log = std.log.scoped(.differential_failure);
-        
+
         log.err("", .{});
         log.err("🔴 DIFFERENTIAL TEST FAILURE DETECTED", .{});
         log.err("=====================================", .{});
         log.err("", .{});
-        
+
         // Show bytecode context
         log.err("📜 BYTECODE UNDER TEST ({} bytes):", .{bytecode.len});
         if (bytecode.len <= 32) {
             log.err("   Full bytecode: {x}", .{bytecode});
         } else {
             log.err("   First 16 bytes: {x}", .{bytecode[0..16]});
-            log.err("   Last 16 bytes:  {x}", .{bytecode[bytecode.len-16..]});
+            log.err("   Last 16 bytes:  {x}", .{bytecode[bytecode.len - 16 ..]});
         }
         log.err("", .{});
-        
+
         // Show all collected errors
         log.err("❌ DETECTED ISSUES ({} total):", .{error_messages.len});
         for (error_messages, 1..) |error_msg, i| {
             log.err("   {}. {s}", .{ i, error_msg });
         }
         log.err("", .{});
-        
+
         // Show detailed comparison
         if (diff.output_diff) |output| {
             log.err("🔍 DETAILED OUTPUT COMPARISON:", .{});
@@ -617,7 +430,7 @@ pub const DifferentialTestor = struct {
             log.err("   Guillotine Output ({} bytes): {x}", .{ output.guillotine.len, output.guillotine });
             log.err("", .{});
         }
-        
+
         // Show trace differences if any
         if (diff.first_divergence_step) |step| {
             log.err("🔍 TRACE DIVERGENCE at step {}:", .{step});
@@ -638,22 +451,19 @@ pub const DifferentialTestor = struct {
             }
             log.err("", .{});
         }
-        
-        // Additional debugging information
+
+        log.err("🛠️  DEBUGGING HINTS:", .{});
+        log.err("   • Check if Guillotine implements all opcodes used", .{});
+        log.err("   • Verify gas calculation matches EVM specification", .{});
+        log.err("   • Ensure memory and stack operations are correct", .{});
+        log.err("   • Compare against EVM specification for edge cases", .{});
         if (diff.trace_diffs.len > 0) {
-            log.err("🔍 EXECUTION TRACE AVAILABLE:", .{});
-            log.err("   First divergence shows different execution paths", .{});
+            log.err("   • Enable detailed tracing to debug execution differences", .{});
         }
-        
-        // Bytecode analysis
-        log.err("💡 DEBUGGING HINTS:", .{});
-        log.err("   1. Check bytecode validity - some opcodes may not be supported", .{});
-        log.err("   2. Verify gas calculations - immediate gas=0 suggests dispatch failure", .{});
-        log.err("   3. Check for dispatch/planner issues in Guillotine", .{});
         log.err("", .{});
         log.err("=====================================", .{});
     }
-    
+
     /// Generate comprehensive diff between two execution results
     fn generateDiff(
         self: *DifferentialTestor,
@@ -672,7 +482,7 @@ pub const DifferentialTestor = struct {
             .trace_diffs = &.{},
             .allocator = self.allocator,
         };
-        
+
         // Compare results
         if (revm_result.success != guillotine_result.success) {
             diff.result_match = false;
@@ -681,13 +491,13 @@ pub const DifferentialTestor = struct {
                 .guillotine = guillotine_result.success,
             };
         }
-        
+
         // Allow some gas variance (within 10%)
         const gas_diff_amount = if (revm_result.gas_used > guillotine_result.gas_used)
             revm_result.gas_used - guillotine_result.gas_used
         else
             guillotine_result.gas_used - revm_result.gas_used;
-        
+
         const max_gas_diff = @max(revm_result.gas_used, guillotine_result.gas_used) / 10;
         if (gas_diff_amount > max_gas_diff) {
             diff.result_match = false;
@@ -696,7 +506,7 @@ pub const DifferentialTestor = struct {
                 .guillotine = guillotine_result.gas_used,
             };
         }
-        
+
         if (!std.mem.eql(u8, revm_result.output, guillotine_result.output)) {
             diff.result_match = false;
             diff.output_diff = .{
@@ -704,7 +514,7 @@ pub const DifferentialTestor = struct {
                 .guillotine = try self.allocator.dupe(u8, guillotine_result.output),
             };
         }
-        
+
         // Compare traces
         if (revm_result.trace.steps.len != guillotine_result.trace.steps.len) {
             diff.trace_match = false;
@@ -713,10 +523,10 @@ pub const DifferentialTestor = struct {
                 .guillotine = guillotine_result.trace.steps.len,
             };
         } else if (guillotine_result.trace.steps.len > 0) {
-            // Compare each step in the traces  
+            // Compare each step in the traces
             var trace_diffs_list = std.ArrayList(ExecutionDiff.TraceDiffStep){};
             defer trace_diffs_list.deinit(self.allocator);
-            
+
             for (revm_result.trace.steps, guillotine_result.trace.steps, 0..) |revm_step, guillotine_step, i| {
                 var step_diff = ExecutionDiff.TraceDiffStep{
                     .step_index = i,
@@ -725,9 +535,9 @@ pub const DifferentialTestor = struct {
                     .gas_diff = null,
                     .stack_diff = null,
                 };
-                
+
                 var has_diff = false;
-                
+
                 // Compare PC
                 if (revm_step.pc != guillotine_step.pc) {
                     step_diff.pc_diff = .{
@@ -736,7 +546,7 @@ pub const DifferentialTestor = struct {
                     };
                     has_diff = true;
                 }
-                
+
                 // Compare opcode
                 if (revm_step.opcode != guillotine_step.opcode) {
                     step_diff.opcode_diff = .{
@@ -745,7 +555,7 @@ pub const DifferentialTestor = struct {
                     };
                     has_diff = true;
                 }
-                
+
                 // Compare gas
                 if (revm_step.gas != guillotine_step.gas) {
                     step_diff.gas_diff = .{
@@ -754,7 +564,7 @@ pub const DifferentialTestor = struct {
                     };
                     has_diff = true;
                 }
-                
+
                 // Compare stack
                 if (!std.mem.eql(u256, revm_step.stack, guillotine_step.stack)) {
                     step_diff.stack_diff = .{
@@ -763,7 +573,7 @@ pub const DifferentialTestor = struct {
                     };
                     has_diff = true;
                 }
-                
+
                 if (has_diff) {
                     try trace_diffs_list.append(self.allocator, step_diff);
                     if (diff.first_divergence_step == null) {
@@ -772,37 +582,37 @@ pub const DifferentialTestor = struct {
                     diff.trace_match = false;
                 }
             }
-            
+
             if (trace_diffs_list.items.len > 0) {
                 diff.trace_diffs = try trace_diffs_list.toOwnedSlice(self.allocator);
             }
         }
-        
+
         return diff;
     }
-    
+
     /// Print detailed diff visualization
     pub fn printDiff(_: *DifferentialTestor, diff: ExecutionDiff, test_name: []const u8) void {
         const log = std.log.scoped(.differential_diff);
-        
+
         log.info("=== DIFFERENTIAL TEST RESULTS: {s} ===", .{test_name});
-        
+
         if (diff.result_match and diff.trace_match) {
             log.info("✅ PERFECT MATCH - All results and traces identical", .{});
             return;
         }
-        
+
         if (!diff.result_match) {
             log.err("❌ RESULT MISMATCH", .{});
-            
+
             if (diff.success_diff) |success| {
                 log.err("  Success: REVM={} vs Guillotine={}", .{ success.revm, success.guillotine });
             }
-            
+
             if (diff.gas_diff) |gas| {
                 log.err("  Gas Usage: REVM={} vs Guillotine={}", .{ gas.revm, gas.guillotine });
             }
-            
+
             if (diff.output_diff) |output| {
                 log.err("  Output Length: REVM={} vs Guillotine={}", .{ output.revm.len, output.guillotine.len });
                 if (output.revm.len > 0) {
@@ -815,28 +625,21 @@ pub const DifferentialTestor = struct {
         } else {
             log.info("✅ RESULTS MATCH", .{});
         }
-        
+
         if (!diff.trace_match) {
             log.err("❌ TRACE MISMATCH", .{});
-            
+
             if (diff.step_count_diff) |steps| {
                 log.err("  Step Count: REVM={} vs Guillotine={}", .{ steps.revm, steps.guillotine });
             }
-            
+
             if (diff.first_divergence_step) |step| {
                 log.err("  First Divergence at Step: {}", .{step});
             }
         } else {
             log.info("✅ TRACES MATCH", .{});
         }
-        
+
         log.info("=== END DIFFERENTIAL TEST ===", .{});
-    }
-    
-    /// Create a DifferentialTestor with tracing enabled for debugging
-    pub fn initForDebugging(allocator: std.mem.Allocator) !DifferentialTestor {
-        const log = std.log.scoped(.differential);
-        log.info("Initializing differential tester with tracing enabled", .{});
-        return initWithTracing(allocator, true);
     }
 };
