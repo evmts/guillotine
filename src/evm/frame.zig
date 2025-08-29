@@ -243,7 +243,7 @@ pub fn Frame(comptime config: FrameConfig) type {
                 }
             }
 
-            const result = if (TracerType) |T| blk: {
+            if (TracerType) |T| {
                 const traced_schedule = Dispatch.initWithTracing(self.allocator, &bytecode, handlers, T, tracer_instance) catch return Error.AllocationError;
                 defer Dispatch.deinitSchedule(self.allocator, traced_schedule);
 
@@ -262,7 +262,7 @@ pub fn Frame(comptime config: FrameConfig) type {
                 const cursor = Self.Dispatch{ .cursor = traced_schedule.ptr + start_index, .jump_table = &traced_jump_table };
                 cursor.cursor[0].opcode_handler(self, cursor) catch |err| return err;
                 unreachable; // Handlers never return normally
-            } else blk: {
+            } else {
                 log.debug("DISPATCH INIT: bytecode len={d}", .{bytecode.runtime_code.len});
                 const schedule = Dispatch.init(self.allocator, &bytecode, handlers) catch |e| {
                     log.err("Failed to create dispatch schedule: {any}", .{e});
@@ -298,7 +298,7 @@ pub fn Frame(comptime config: FrameConfig) type {
                 log.debug("Starting execution at schedule index {}, first handler: {*}", .{ start_index, cursor.cursor[0].opcode_handler });
                 cursor.cursor[0].opcode_handler(self, cursor) catch |err| return err;
                 unreachable; // Handlers never return normally
-            };
+            }
 
             if (TracerType) |T| if (@hasDecl(T, "afterExecute")) tracer_instance.afterExecute(Self, self);
         }

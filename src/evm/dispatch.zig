@@ -17,7 +17,7 @@ pub fn Dispatch(comptime FrameType: type) type {
     return struct {
         const Self = @This();
         // We define opcodehandler locally rather than using Frame.OpcodeHandler to avoid circular dependency
-        const OpcodeHandler = *const fn (frame: *FrameType, dispatch: Self) FrameType.Error!FrameType.Success;
+        const OpcodeHandler = *const fn (frame: *FrameType, dispatch: Self) FrameType.Error!noreturn;
         /// The optimized instruction stream containing opcode handlers and their metadata.
         /// Each item is exactly 64 bits for optimal cache line usage.
         ///
@@ -222,57 +222,51 @@ pub fn Dispatch(comptime FrameType: type) type {
         /// Returns the total gas cost from the start until the first JUMPDEST, terminator opcode, or end of bytecode.
         pub fn calculateFirstBlockGas(bytecode: anytype) u64 {
             var gas: u64 = 0;
-            var iter = bytecode.createIterator();
             const opcode_info = @import("opcode_data.zig").OPCODE_INFO;
+            
+            // Direct bytecode traversal without iterator
+            var pc: usize = 0;
+            while (pc < bytecode.len()) {
+                const opcode_byte = bytecode.getOpcodeUnsafe(@intCast(pc));
+                const opcode = std.meta.intToEnum(Opcode, opcode_byte) catch {
+                    // Invalid opcode
+                    const gas_to_add = @as(u64, opcode_info[0xFE].gas_cost); // INVALID gas cost
+                    gas = std.math.add(u64, gas, gas_to_add) catch return std.math.maxInt(u64);
+                    return gas;
+                };
 
-            while (true) {
-                const maybe = iter.next();
-                if (maybe == null) break;
-                const op_data = maybe.?;
-
-                switch (op_data) {
-                    .regular => |data| {
-                        const gas_to_add = @as(u64, opcode_info[data.opcode].gas_cost);
-                        const new_gas = std.math.add(u64, gas, gas_to_add) catch std.math.maxInt(u64);
-                        if (new_gas == std.math.maxInt(u64)) {
-                            return new_gas;
-                        }
-                        gas = new_gas;
-                        // Stop at JUMP/JUMPI/STOP/RETURN/REVERT/INVALID/SELFDESTRUCT
-                        switch (data.opcode) {
-                            0x56, 0x57, 0x00, 0xf3, 0xfd, 0xfe, 0xff => {
-                                return gas;
-                            },
-                            else => {},
-                        }
-                    },
-                    .push => |data| {
-                        const push_opcode = 0x60 + data.size - 1;
-                        const gas_to_add = @as(u64, opcode_info[push_opcode].gas_cost);
-                        const new_gas = std.math.add(u64, gas, gas_to_add) catch std.math.maxInt(u64);
-                        if (new_gas == std.math.maxInt(u64)) {
-                            return new_gas;
-                        }
-                        gas = new_gas;
-                    },
-                    .jumpdest => {
+                
+                switch (opcode) {
+                    .JUMPDEST => {
                         // JUMPDEST terminates the block but its gas is not included
                         return gas;
                     },
-                    .stop, .invalid => {
-                        const gas_to_add = @as(u64, opcode_info[0x00].gas_cost); // STOP gas cost
-                        gas = std.math.add(u64, gas, gas_to_add) catch std.math.maxInt(u64);
+                    .STOP, .RETURN, .REVERT, .INVALID, .SELFDESTRUCT => {
+                        const gas_to_add = @as(u64, opcode_info[opcode_byte].gas_cost);
+                        gas = std.math.add(u64, gas, gas_to_add) catch return std.math.maxInt(u64);
                         return gas;
                     },
+                    .JUMP, .JUMPI => {
+                        const gas_to_add = @as(u64, opcode_info[opcode_byte].gas_cost);
+                        gas = std.math.add(u64, gas, gas_to_add) catch return std.math.maxInt(u64);
+                        return gas;
+                    },
+                    .PUSH1, .PUSH2, .PUSH3, .PUSH4, .PUSH5, .PUSH6, .PUSH7, .PUSH8, 
+                    .PUSH9, .PUSH10, .PUSH11, .PUSH12, .PUSH13, .PUSH14, .PUSH15, .PUSH16,
+                    .PUSH17, .PUSH18, .PUSH19, .PUSH20, .PUSH21, .PUSH22, .PUSH23, .PUSH24,
+                    .PUSH25, .PUSH26, .PUSH27, .PUSH28, .PUSH29, .PUSH30, .PUSH31, .PUSH32 => {
+                        const push_size = @intFromEnum(opcode) - @intFromEnum(Opcode.PUSH1) + 1;
+                        const gas_to_add = @as(u64, opcode_info[opcode_byte].gas_cost);
+                        gas = std.math.add(u64, gas, gas_to_add) catch return std.math.maxInt(u64);
+                        pc += push_size; // Skip push data
+                    },
                     else => {
-                        // For fusion operations, approximate gas cost
-                        const new_gas = std.math.add(u64, gas, 6) catch std.math.maxInt(u64);
-                        if (new_gas == std.math.maxInt(u64)) {
-                            return new_gas;
-                        }
-                        gas = new_gas;
+                        const gas_to_add = @as(u64, opcode_info[opcode_byte].gas_cost);
+                        gas = std.math.add(u64, gas, gas_to_add) catch return std.math.maxInt(u64);
                     },
                 }
+                
+                pc += 1;
             }
 
             return gas;
@@ -302,9 +296,6 @@ pub fn Dispatch(comptime FrameType: type) type {
             var schedule_items = ArrayList(Self.Item, null){};
             errdefer schedule_items.deinit(allocator);
 
-            // Create iterator to traverse bytecode
-            var iter = bytecode.createIterator();
-
             // Calculate gas cost for first basic block
             const first_block_gas = calculateFirstBlockGas(bytecode);
 
@@ -318,15 +309,17 @@ pub fn Dispatch(comptime FrameType: type) type {
                 }
             }
 
-            var opcode_count: usize = 0;
-            while (true) {
-                const instr_pc = iter.pc;
-                const maybe = iter.next();
-                if (maybe == null) {
-                    break;
+            // Direct bytecode traversal without iterator
+            var pc: usize = 0;
+            while (pc < bytecode.len()) {
+                // Skip if not an opcode start (push data)
+                if (pc < bytecode.packed_bitmap.len and !bytecode.packed_bitmap[pc].is_op_start) {
+                    pc += 1;
+                    continue;
                 }
-                const op_data = maybe.?;
-                opcode_count += 1;
+                
+                const instr_pc = pc;
+                const opcode_byte = bytecode.getOpcodeUnsafe(@intCast(pc));
                 switch (op_data) {
                     .regular => |data| {
                         // Regular opcode - add handler first, then metadata for PC, CODESIZE, CODECOPY
@@ -705,7 +698,7 @@ pub fn Dispatch(comptime FrameType: type) type {
             const S = struct {
                 var tracer: *TracerType = undefined;
 
-                fn handle(frame: *FrameType, dispatch: Self) FrameType.Error!FrameType.Success {
+                fn handle(frame: *FrameType, dispatch: Self) FrameType.Error!noreturn {
                     if (is_before) {
                         const metadata = dispatch.cursor[0].trace_before;
                         if (@hasDecl(TracerType, "beforeOp")) {
@@ -1127,12 +1120,13 @@ const TestFrame = struct {
 
     pub const Error = error{
         TestError,
-    };
-
-    pub const Success = enum {
         Stop,
         Return,
+        SelfDestruct,
     };
+
+    // Success cases are now part of Error enum
+    // Stop, Return, SelfDestruct are error values
 
     // Add OpcodeHandler type for testing
     pub const OpcodeHandler = *const fn (frame: *TestFrame, dispatch: TestDispatch) Error!noreturn;
@@ -1141,37 +1135,37 @@ const TestFrame = struct {
 const TestDispatch = Dispatch(TestFrame);
 
 // Mock opcode handlers for testing
-fn mockStop(frame: *TestFrame, dispatch: TestDispatch) TestFrame.Error!TestFrame.Success {
+fn mockStop(frame: *TestFrame, dispatch: TestDispatch) TestFrame.Error!noreturn {
     _ = frame;
     _ = dispatch;
-    return TestFrame.Success.Stop;
+    return TestFrame.Error.Stop;
 }
 
-fn mockAdd(frame: *TestFrame, dispatch: TestDispatch) TestFrame.Error!TestFrame.Success {
+fn mockAdd(frame: *TestFrame, dispatch: TestDispatch) TestFrame.Error!noreturn {
     _ = frame;
     _ = dispatch;
-    return TestFrame.Success.Stop;
+    return TestFrame.Error.Stop;
 }
 
-fn mockPush1(frame: *TestFrame, dispatch: TestDispatch) TestFrame.Error!TestFrame.Success {
+fn mockPush1(frame: *TestFrame, dispatch: TestDispatch) TestFrame.Error!noreturn {
     _ = frame;
     _ = dispatch;
-    return TestFrame.Success.Stop;
+    return TestFrame.Error.Stop;
 }
 
-fn mockJumpdest(frame: *TestFrame, dispatch: TestDispatch) TestFrame.Error!TestFrame.Success {
+fn mockJumpdest(frame: *TestFrame, dispatch: TestDispatch) TestFrame.Error!noreturn {
     _ = frame;
     _ = dispatch;
-    return TestFrame.Success.Stop;
+    return TestFrame.Error.Stop;
 }
 
-fn mockPc(frame: *TestFrame, dispatch: TestDispatch) TestFrame.Error!TestFrame.Success {
+fn mockPc(frame: *TestFrame, dispatch: TestDispatch) TestFrame.Error!noreturn {
     _ = frame;
     _ = dispatch;
-    return TestFrame.Success.Stop;
+    return TestFrame.Error.Stop;
 }
 
-fn mockInvalid(frame: *TestFrame, dispatch: TestDispatch) TestFrame.Error!TestFrame.Success {
+fn mockInvalid(frame: *TestFrame, dispatch: TestDispatch) TestFrame.Error!noreturn {
     _ = frame;
     _ = dispatch;
     return TestFrame.Error.TestError;
@@ -1745,16 +1739,16 @@ test "JumpTable - large jump table performance" {
 }
 
 // Mock fusion handlers for testing
-fn mockPushAddFusion(frame: TestFrame, dispatch: *const anyopaque) TestFrame.Error!TestFrame.Success {
+fn mockPushAddFusion(frame: TestFrame, dispatch: *const anyopaque) TestFrame.Error!noreturn {
     _ = frame;
     _ = dispatch;
-    return TestFrame.Success.Stop;
+    return TestFrame.Error.Stop;
 }
 
-fn mockPushMulFusion(frame: TestFrame, dispatch: *const anyopaque) TestFrame.Error!TestFrame.Success {
+fn mockPushMulFusion(frame: TestFrame, dispatch: *const anyopaque) TestFrame.Error!noreturn {
     _ = frame;
     _ = dispatch;
-    return TestFrame.Success.Stop;
+    return TestFrame.Error.Stop;
 }
 
 // Create test opcode handler array with synthetic opcodes
