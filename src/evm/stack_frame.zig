@@ -112,9 +112,9 @@ pub fn StackFrame(comptime config: FrameConfig) type {
 
         const Self = @This();
 
-        //           StackFrame Structure Layout Analysis - PRECISE
+        //           StackFrame Structure Layout Analysis - OPTIMIZED
         //
-        //   Total Size: ~600 bytes (with default BlockInfo config)
+        //   Total Size: ~420 bytes (with default BlockInfo config)
         //   Alignment: 8 bytes (natural alignment for pointers)
         //   
         //   SIZE OPTIMIZATIONS:
@@ -271,10 +271,8 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         gas_remaining: GasType,             // 8B - Gas tracking (i64)
         memory: Memory,                     // 16B - Memory operations  
         database: config.DatabaseType,      // 8B - Storage access
-        log_items: [*:null]?Log,            // 8B - Null-terminated log array
+        log_items: ?[*]Log,                 // 8B - Log array pointer (null = 0 logs)
         evm_ptr: *anyopaque,                // 8B - EVM instance pointer
-        // Total cache line 1: 64B exactly!
-        
         caller: Address,                    // 20B - Calling address
         value: WordType,                    // 32B - Call value (inline)
         contract_address: Address = Address.ZERO_ADDRESS, // 20B - Current contract
@@ -303,17 +301,15 @@ pub fn StackFrame(comptime config: FrameConfig) type {
                 @branchHint(.cold);
                 return Error.AllocationError;
             };
-            errdefer memory.deinit();
+            errdefer memory.deinit(allocator);
             
-            // Static empty log list (just a null terminator)
-            const empty_log_sentinel = [_]?Log{null};
             
             return Self{
                 .stack = stack,
                 .gas_remaining = @as(GasType, @intCast(@max(gas_remaining, 0))),
                 .memory = memory,
                 .database = database,
-                .log_items = @as([*:null]?Log, @ptrCast(&empty_log_sentinel)),  // Empty sentinel-terminated list
+                .log_items = null,  // No logs initially
                 .evm_ptr = evm_ptr,
                 .caller = caller,
                 .value = value,
@@ -328,7 +324,7 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         /// Clean up all frame resources.
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
             self.stack.deinit(allocator);
-            self.memory.deinit();
+            self.memory.deinit(allocator);
             self.deinitLogs(allocator);
             if (self.output.len > 0) {
                 allocator.free(self.output);
@@ -339,7 +335,6 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         /// Simply delegates to interpret_with_tracer with no tracer.
         /// @param bytecode_raw: Raw bytecode to execute
         pub fn interpret(self: *Self, bytecode_raw: []const u8) Error!Success {
-            log.debug("StackFrame.interpret called, bytecode len: {}", .{bytecode_raw.len});
             return self.interpret_with_tracer(bytecode_raw, null, {});
         }
         
@@ -350,13 +345,11 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         /// @param TracerType: Optional comptime tracer type for zero-cost tracing abstraction
         /// @param tracer_instance: Instance of the tracer (ignored if TracerType is null)
         pub fn interpret_with_tracer(self: *Self, bytecode_raw: []const u8, comptime TracerType: ?type, tracer_instance: if (TracerType) |T| *T else void) Error!Success {
-            // Validate bytecode size
             if (bytecode_raw.len > config.max_bytecode_size) {
                 @branchHint(.unlikely);
                 return Error.BytecodeTooLarge;
             }
 
-            log.debug("Initializing bytecode with len: {}", .{bytecode_raw.len});
             var bytecode = Bytecode.init(self.allocator, bytecode_raw) catch |e| {
                 @branchHint(.unlikely);
                 log.err("Bytecode init failed: {}", .{e});
@@ -370,26 +363,20 @@ pub fn StackFrame(comptime config: FrameConfig) type {
             defer bytecode.deinit();
             
             const handlers = &Self.opcode_handlers;
-            log.debug("interpret_with_tracer called, bytecode len: {}, gas: {}", .{bytecode.runtime_code.len, self.gas_remaining});
 
-            // Call beforeExecute hook if tracer is configured
             if (TracerType) |T| {
                 if (@hasDecl(T, "beforeExecute")) {
                     tracer_instance.beforeExecute(Self, self);
                 }
             }
 
-            // Execute the bytecode
             const result = if (TracerType) |T| blk: {
-                // When tracing is enabled, use the traced dispatch schedule
                 const traced_schedule = Dispatch.initWithTracing(self.allocator, &bytecode, handlers, T, tracer_instance) catch return Error.AllocationError;
                 defer Dispatch.deinitSchedule(self.allocator, traced_schedule);
                 
-                // Create jump table for traced schedule
                 var traced_jump_table = Dispatch.createJumpTable(self.allocator, traced_schedule, &bytecode) catch return Error.AllocationError;
                 defer self.allocator.free(traced_jump_table.entries);
                 
-                // Process first block gas if needed
                 var start_index: usize = 0;
                 switch (traced_schedule[0]) {
                     .first_block_gas => |meta| {
@@ -402,14 +389,11 @@ pub fn StackFrame(comptime config: FrameConfig) type {
                 const cursor = Self.Dispatch{ .cursor = traced_schedule.ptr + start_index, .jump_table = &traced_jump_table };
                 break :blk cursor.cursor[0].opcode_handler(self, cursor);
             } else blk: {
-                // Normal execution without tracing
-                log.debug("Creating dispatch schedule...", .{});
                 const schedule = Dispatch.init(self.allocator, &bytecode, handlers) catch |e| {
                     log.err("Failed to create dispatch schedule: {}", .{e});
                     return Error.AllocationError;
                 };
                 defer Dispatch.deinitSchedule(self.allocator, schedule);
-                log.debug("Dispatch schedule created, len: {}", .{schedule.len});
                 if (schedule.len < 3) {
                     log.err("Dispatch schedule is too short! len={}", .{schedule.len});
                     log.err("  Bytecode len: {}", .{bytecode.runtime_code.len});
@@ -422,11 +406,9 @@ pub fn StackFrame(comptime config: FrameConfig) type {
                 var jump_table = Dispatch.createJumpTable(self.allocator, schedule, &bytecode) catch return Error.AllocationError;
                 defer self.allocator.free(jump_table.entries);
 
-                // Process first block gas
                 var start_index: usize = 0;
                 switch (schedule[0]) {
                     .first_block_gas => |meta| {
-                        log.debug("First block gas: {}", .{meta.gas});
                         if (meta.gas > 0) try self.consumeGasChecked(meta.gas);
                         start_index = 1;
                     },
@@ -434,18 +416,10 @@ pub fn StackFrame(comptime config: FrameConfig) type {
                 }
                 
                 const cursor = Self.Dispatch{ .cursor = schedule.ptr + start_index, .jump_table = &jump_table };
-                log.debug("Executing first opcode handler...", .{});
                 break :blk cursor.cursor[0].opcode_handler(self, cursor);
             };
             
-            log.debug("Execution result: {any}, output size: {}", .{result, self.output_len});
-            
-            // Call afterExecute hook if tracer is configured
-            if (TracerType) |T| {
-                if (@hasDecl(T, "afterExecute")) {
-                    tracer_instance.afterExecute(Self, self);
-                }
-            }
+            if (TracerType) |T| if (@hasDecl(T, "afterExecute")) tracer_instance.afterExecute(Self, self);
             
             return result;
         }
@@ -453,14 +427,10 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         /// Create a deep copy of the frame.
         /// This is used by DebugPlan to create a sidecar frame for validation.
         pub fn copy(self: *const Self, allocator: std.mem.Allocator) Error!Self {
-            // Copy stack using public API
-            var new_stack = Stack.init(allocator) catch {
-                return Error.AllocationError;
-            };
+            var new_stack = Stack.init(allocator) catch return Error.AllocationError;
             errdefer new_stack.deinit(allocator);
             const src_stack_slice = self.stack.get_slice();
             if (src_stack_slice.len > 0) {
-                // Reconstruct by pushing from bottom to top so top matches exactly
                 var i: usize = src_stack_slice.len;
                 while (i > 0) {
                     i -= 1;
@@ -468,68 +438,68 @@ pub fn StackFrame(comptime config: FrameConfig) type {
                 }
             }
 
-            // Copy memory using current API
-            var new_memory = Memory.init(allocator) catch {
-                return Error.AllocationError;
-            };
-            errdefer new_memory.deinit();
+            var new_memory = Memory.init(allocator) catch return Error.AllocationError;
+            errdefer new_memory.deinit(allocator);
             const mem_size = self.memory.size();
             if (mem_size > 0) {
                 const bytes = self.memory.get_slice(0, mem_size) catch unreachable;
                 try new_memory.set_data(0, bytes);
             }
 
-            // Copy logs
-            const new_log_items: [*]Log = if (self.log_len > 0) blk: {
-                // Compute capacity for allocation
-                const capacity = blk2: {
-                    var cap: usize = 8;
-                    while (cap < self.log_len) cap *= 2;
-                    break :blk2 @min(cap, MAX_LOGS);
-                };
-                const items = allocator.alloc(Log, capacity) catch return Error.AllocationError;
-                for (self.log_items[0..self.log_len], 0..) |log_entry, i| {
+            const new_log_items: ?[*]Log = if (self.log_items) |items| blk: {
+                const header = @as(*const LogHeader, @ptrFromInt(@intFromPtr(items) - @sizeOf(LogHeader)));
+                if (header.count == 0) break :blk null;
+                
+                const full_size = @sizeOf(LogHeader) + header.capacity * @sizeOf(Log);
+                const new_log_memory = allocator.alloc(u8, full_size) catch return Error.AllocationError;
+                
+                const new_header = @as(*LogHeader, @ptrCast(@alignCast(new_log_memory.ptr)));
+                new_header.* = header.*;
+                
+                const new_items = @as([*]Log, @ptrCast(@alignCast(new_log_memory.ptr + @sizeOf(LogHeader))));
+                
+                for (items[0..header.count], 0..) |log_entry, i| {
                     const topics_copy = allocator.alloc(u256, log_entry.topics.len) catch return Error.AllocationError;
                     @memcpy(topics_copy, log_entry.topics);
+                    
                     const data_copy = allocator.alloc(u8, log_entry.data.len) catch {
                         allocator.free(topics_copy);
                         return Error.AllocationError;
                     };
                     @memcpy(data_copy, log_entry.data);
-                    items[i] = Log{
+                    
+                    new_items[i] = Log{
                         .address = log_entry.address,
                         .topics = topics_copy,
                         .data = data_copy,
                     };
                 }
-                break :blk items.ptr;
-            } else blk: {
-                const empty_logs = [_]Log{};
-                break :blk @as([*]Log, @ptrFromInt(@intFromPtr(&empty_logs)));
-            };
+                
+                break :blk new_items;
+            } else null;
+            
+            const new_output = if (self.output.len > 0) blk: {
+                const output_copy = allocator.alloc(u8, self.output.len) catch return Error.AllocationError;
+                @memcpy(output_copy, self.output);
+                break :blk output_copy;
+            } else &[_]u8{};
 
-            var new_frame = Self{
+            return Self{
                 .stack = new_stack,
                 .gas_remaining = self.gas_remaining,
                 .memory = new_memory,
                 .database = self.database,
                 .log_items = new_log_items,
-                .log_len = self.log_len,
                 .evm_ptr = self.evm_ptr,
                 .caller = self.caller,
                 .value = self.value,
                 .contract_address = self.contract_address,
+                .output = new_output,
                 .calldata = self.calldata,
                 .allocator = allocator,
                 .block_info = self.block_info,
                 .self_destruct = self.self_destruct,
-                .output_len = self.output_len,
             };
-            
-            // Copy output buffer
-            @memcpy(new_frame.output_buffer[0..self.output_len], self.output_buffer[0..self.output_len]);
-            
-            return new_frame;
         }
 
         /// Consume gas without checking (for use after static analysis)
@@ -551,17 +521,13 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         
         /// Set output data (allocates on heap)
         pub fn setOutput(self: *Self, data: []const u8) Error!void {
-            // Free existing output if any
             if (self.output.len > 0) {
                 self.allocator.free(self.output);
             }
-            
             if (data.len == 0) {
                 self.output = &[_]u8{};
                 return;
             }
-            
-            // Allocate and copy new output
             const new_output = self.allocator.alloc(u8, data.len) catch {
                 return Error.AllocationError;
             };
@@ -574,65 +540,68 @@ pub fn StackFrame(comptime config: FrameConfig) type {
             return self.output;
         }
 
-        // === Inlined LogList Methods ===
+        /// Log array header stored before the actual logs
+        const LogHeader = struct {
+            capacity: u16,
+            count: u16,
+        };
 
         /// Maximum number of logs that can be stored (u16 limit)
         pub const MAX_LOGS: u16 = std.math.maxInt(u16);
 
         /// Clean up log memory
         pub fn deinitLogs(self: *Self, allocator: std.mem.Allocator) void {
-            const items = self.log_items orelse return;  // No logs to free
+            const items = self.log_items orelse return;
             
-            // Free individual log data by traversing until null
-            var i: usize = 0;
-            while (items[i]) |log_entry| : (i += 1) {
+            const header = @as(*LogHeader, @ptrFromInt(@intFromPtr(items) - @sizeOf(LogHeader)));
+            
+            for (items[0..header.count]) |log_entry| {
                 allocator.free(log_entry.topics);
                 allocator.free(log_entry.data);
             }
             
-            // Free the array itself - we need to know capacity
-            // Since we grow by powers of 2, find the next power of 2 >= count
-            var capacity: usize = 4;  // Minimum allocation
-            while (capacity <= i) capacity *= 2;
-            allocator.free(items[0..capacity]);
+            const full_alloc = @as([*]u8, @ptrFromInt(@intFromPtr(header)))[0..@sizeOf(LogHeader) + header.capacity * @sizeOf(Log)];
+            allocator.free(full_alloc);
         }
 
         /// Add a log entry to the list
         pub fn appendLog(self: *Self, allocator: std.mem.Allocator, log_entry: Log) error{OutOfMemory}!void {
             if (self.log_items == null) {
-                // First log - allocate initial array
-                const initial_capacity = 4;  // Start small for common case
-                const items = try allocator.alloc(?Log, initial_capacity);
+                const initial_capacity: u16 = 4;
+                const full_size = @sizeOf(LogHeader) + initial_capacity * @sizeOf(Log);
+                const memory = try allocator.alloc(u8, full_size);
+                
+                const header = @as(*LogHeader, @ptrCast(@alignCast(memory.ptr)));
+                header.* = .{ .capacity = initial_capacity, .count = 1 };
+                
+                const items = @as([*]Log, @ptrCast(@alignCast(memory.ptr + @sizeOf(LogHeader))));
                 items[0] = log_entry;
-                items[1] = null;  // Null terminator
-                self.log_items = items.ptr;
+                
+                self.log_items = items;
             } else {
-                // Find end of list
-                var count: usize = 0;
-                while (self.log_items.?[count]) |_| : (count += 1) {}
+                const items = self.log_items.?;
+                const header = @as(*LogHeader, @ptrFromInt(@intFromPtr(items) - @sizeOf(LogHeader)));
                 
-                // Check if we need to grow
-                var capacity: usize = 4;
-                while (capacity <= count + 1) capacity *= 2;  // +1 for new item, +1 for null
-                
-                if (capacity > 4 and count + 2 > capacity / 2) {
-                    // Need to grow
-                    const new_items = try allocator.alloc(?Log, capacity);
-                    // Copy existing items
-                    var i: usize = 0;
-                    while (self.log_items.?[i]) |item| : (i += 1) {
-                        new_items[i] = item;
-                    }
-                    new_items[count] = log_entry;
-                    new_items[count + 1] = null;
-                    // Free old array
-                    const old_capacity = capacity / 2;
-                    allocator.free(self.log_items.?[0..old_capacity]);
-                    self.log_items = new_items.ptr;
+                if (header.count >= header.capacity) {
+                    const new_capacity = header.capacity * 2;
+                    const new_size = @sizeOf(LogHeader) + new_capacity * @sizeOf(Log);
+                    const new_memory = try allocator.alloc(u8, new_size);
+                    
+                    const new_header = @as(*LogHeader, @ptrCast(@alignCast(new_memory.ptr)));
+                    new_header.* = .{ .capacity = new_capacity, .count = header.count + 1 };
+                    
+                    const new_items = @as([*]Log, @ptrCast(@alignCast(new_memory.ptr + @sizeOf(LogHeader))));
+                    @memcpy(new_items[0..header.count], items[0..header.count]);
+                    new_items[header.count] = log_entry;
+                    
+                    const old_size = @sizeOf(LogHeader) + header.capacity * @sizeOf(Log);
+                    const old_memory = @as([*]u8, @ptrFromInt(@intFromPtr(header)))[0..old_size];
+                    allocator.free(old_memory);
+                    
+                    self.log_items = new_items;
                 } else {
-                    // Just append
-                    self.log_items.?[count] = log_entry;
-                    self.log_items.?[count + 1] = null;
+                    items[header.count] = log_entry;
+                    header.count += 1;
                 }
             }
         }
@@ -640,56 +609,16 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         /// Get slice of current log entries
         pub fn getLogSlice(self: *const Self) []const Log {
             const items = self.log_items orelse return &[_]Log{};
-            
-            // Count logs
-            var count: usize = 0;
-            while (items[count]) |_| : (count += 1) {}
-            
-            return items[0..count];
+            const header = @as(*const LogHeader, @ptrFromInt(@intFromPtr(items) - @sizeOf(LogHeader)));
+            return items[0..header.count];
         }
 
         /// Get number of logs
         pub fn getLogCount(self: *const Self) u16 {
             const items = self.log_items orelse return 0;
-            
-            var count: u16 = 0;
-            while (items[count]) |_| : (count += 1) {}
-            
-            return count;
+            const header = @as(*const LogHeader, @ptrFromInt(@intFromPtr(items) - @sizeOf(LogHeader)));
+            return header.count;
         }
 
-        /// Grow the capacity of the log list
-        fn growLogs(self: *Self, allocator: std.mem.Allocator) error{OutOfMemory}!void {
-            const current_capacity = if (self.log_len == 0) @as(usize, 0) else blk: {
-                var cap: usize = 8;
-                while (cap < self.log_len) cap *= 2;
-                break :blk @min(cap, MAX_LOGS);
-            };
-            
-            const new_capacity: u16 = if (current_capacity == 0) 
-                8 // Start with 8 logs
-            else 
-                @min(@as(u16, @intCast(current_capacity)) * 2, MAX_LOGS); // Double capacity up to max
-
-            if (new_capacity <= current_capacity) {
-                @branchHint(.cold);
-                return error.OutOfMemory; // Can't grow anymore
-            }
-
-            const new_items = allocator.alloc(Log, new_capacity) catch {
-                @branchHint(.cold);
-                return error.OutOfMemory;
-            };
-
-            // Copy existing items
-            if (self.log_len > 0) {
-                @memcpy(new_items[0..self.log_len], self.log_items[0..self.log_len]);
-                // Free old items
-                const old_slice = self.log_items[0..current_capacity];
-                allocator.free(old_slice);
-            }
-
-            self.log_items = new_items.ptr;
-        }
     };
 }
