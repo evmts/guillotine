@@ -34,6 +34,7 @@ pub fn Handlers(comptime FrameType: type) type {
             return &struct {
                 pub fn pushHandler(self: *FrameType, dispatch: Dispatch) Error!Success {
                     log.debug("PUSH{} handler called, stack size: {}", .{push_n, self.stack.size()});
+                    
                     if (push_n <= 8) {
                         const meta = dispatch.getInlineMetadata();
                         log.debug("PUSH{}: pushing value {} (inline)", .{push_n, meta.value});

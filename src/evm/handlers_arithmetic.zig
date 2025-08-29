@@ -54,8 +54,10 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// SDIV opcode (0x05) - Signed integer division.
         pub fn sdiv(self: *FrameType, dispatch: Dispatch) Error!Success {
+            log.debug("SDIV handler called, stack size: {}", .{self.stack.size()});
             const denominator = try self.stack.pop();
             const numerator = try self.stack.peek();
+            log.debug("SDIV: numerator={x}, denominator={x}", .{numerator, denominator});
             var result: WordType = undefined;
             if (denominator == 0) {
                 result = 0;
