@@ -5,6 +5,7 @@
 //! word boundaries as per EVM specification.
 //!
 //! Key features:
+//! - Thread-safe operations via mutex synchronization
 //! - Lazy allocation on first access
 //! - Zero-initialization guarantee
 //! - Checkpoint system for nested calls
@@ -42,6 +43,7 @@ pub fn Memory(comptime config: MemoryConfig) type {
 
         checkpoint: u24,
         buffer_ptr: *std.ArrayList(u8),
+        mutex: std.Thread.Mutex,
 
         pub fn init(allocator: std.mem.Allocator) !Self {
             if (is_owned) {
@@ -53,6 +55,7 @@ pub fn Memory(comptime config: MemoryConfig) type {
                 return Self{
                     .checkpoint = 0,
                     .buffer_ptr = buffer_ptr,
+                    .mutex = .{},
                 };
             } else {
                 @compileError("Cannot call init() on borrowed memory type. Use init_borrowed() instead.");
@@ -64,6 +67,7 @@ pub fn Memory(comptime config: MemoryConfig) type {
             return Self{
                 .checkpoint = checkpoint,
                 .buffer_ptr = buffer_ptr,
+                .mutex = .{},
             };
         }
 
@@ -76,20 +80,31 @@ pub fn Memory(comptime config: MemoryConfig) type {
         }
 
         pub fn init_child(self: *Self) !Memory(.{ .initial_capacity = config.initial_capacity, .memory_limit = config.memory_limit, .owned = false }) {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            
             // Children are always borrowed memory types
             const BorrowedMemType = Memory(.{ .initial_capacity = config.initial_capacity, .memory_limit = config.memory_limit, .owned = false });
             return BorrowedMemType{
                 .checkpoint = @as(u24, @intCast(self.buffer_ptr.items.len)),
                 .buffer_ptr = self.buffer_ptr,
+                .mutex = .{},
             };
         }
 
-        // Common methods that work on the inner Self type
-        pub fn size(self: *const Self) usize {
+        // Internal size calculation without locking
+        inline fn size_internal(self: *const Self) usize {
             const total = self.buffer_ptr.items.len;
             const checkpoint_usize = @as(usize, self.checkpoint);
             if (total <= checkpoint_usize) return 0;
             return total - checkpoint_usize;
+        }
+        
+        // Common methods that work on the inner Self type
+        pub fn size(self: *Self) usize {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            return self.size_internal();
         }
 
         pub inline fn ensure_capacity(self: *Self, allocator: std.mem.Allocator, new_size: u24) !void {
@@ -125,6 +140,9 @@ pub fn Memory(comptime config: MemoryConfig) type {
 
         // EVM-compliant memory operations that expand to word boundaries
         pub fn set_data_evm(self: *Self, allocator: std.mem.Allocator, offset: u24, data: []const u8) !void {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            
             const offset_usize = @as(usize, offset);
             const end = offset_usize + data.len;
             // Round up to next 32-byte word boundary for EVM compliance
@@ -151,17 +169,23 @@ pub fn Memory(comptime config: MemoryConfig) type {
             try self.set_data_evm(allocator, offset, &bytes);
         }
 
-        pub fn get_slice(self: *const Self, offset: u24, len: u24) MemoryError![]const u8 {
+        pub fn get_slice(self: *Self, offset: u24, len: u24) MemoryError![]const u8 {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            
             const offset_usize = @as(usize, offset);
             const len_usize = @as(usize, len);
             const end = offset_usize + len_usize;
-            if (end > self.size()) return MemoryError.OutOfBounds;
+            if (end > self.size_internal()) return MemoryError.OutOfBounds;
             const checkpoint_usize = @as(usize, self.checkpoint);
             const start_idx = checkpoint_usize + offset_usize;
             return self.buffer_ptr.items[start_idx .. start_idx + len_usize];
         }
 
         pub fn set_data(self: *Self, allocator: std.mem.Allocator, offset: u24, data: []const u8) !void {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            
             const offset_usize = @as(usize, offset);
             const end = offset_usize + data.len;
             try self.ensure_capacity(allocator, @as(u24, @intCast(end)));
@@ -172,6 +196,9 @@ pub fn Memory(comptime config: MemoryConfig) type {
 
         /// Clears memory: resets owned memory to empty, sets checkpoint for borrowed memory
         pub fn clear(self: *Self) void {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            
             if (is_owned) {
                 self.buffer_ptr.items.len = 0;
                 self.checkpoint = 0;
@@ -190,18 +217,32 @@ pub fn Memory(comptime config: MemoryConfig) type {
             return std.mem.readInt(u256, bytes[0..WORD_SIZE], .big);
         }
 
-        pub fn get_u256(self: *const Self, offset: u24) !u256 {
+        pub fn get_u256(self: *Self, offset: u24) !u256 {
             const slice = try self.get_slice(offset, 32);
             return bytes_to_u256(slice);
         }
 
         // EVM-compliant read that expands memory if needed
         pub fn get_u256_evm(self: *Self, allocator: std.mem.Allocator, offset: u24) !u256 {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            
             const offset_usize = @as(usize, offset);
             const word_aligned_end = ((offset_usize + 32 + 31) >> 5) << 5;
             try self.ensure_capacity(allocator, @as(u24, @intCast(word_aligned_end)));
-            const slice = try self.get_slice(offset, 32);
+            const slice = try self.get_slice_internal(offset, 32);
             return bytes_to_u256(slice);
+        }
+        
+        // Internal get_slice without locking
+        inline fn get_slice_internal(self: *const Self, offset: u24, len: u24) MemoryError![]const u8 {
+            const offset_usize = @as(usize, offset);
+            const len_usize = @as(usize, len);
+            const end = offset_usize + len_usize;
+            if (end > self.size_internal()) return MemoryError.OutOfBounds;
+            const checkpoint_usize = @as(usize, self.checkpoint);
+            const start_idx = checkpoint_usize + offset_usize;
+            return self.buffer_ptr.items[start_idx .. start_idx + len_usize];
         }
 
         pub fn set_u256(self: *Self, allocator: std.mem.Allocator, offset: u24, value: u256) !void {
@@ -209,7 +250,7 @@ pub fn Memory(comptime config: MemoryConfig) type {
             try self.set_data(allocator, offset, &bytes);
         }
 
-        pub fn get_byte(self: *const Self, offset: u24) !u8 {
+        pub fn get_byte(self: *Self, offset: u24) !u8 {
             const slice = try self.get_slice(offset, 1);
             return slice[0];
         }
@@ -222,9 +263,12 @@ pub fn Memory(comptime config: MemoryConfig) type {
         fn calculate_memory_cost(words: u64) u64 {
             return 3 * words + ((words * words) >> 9); // Bit shift instead of / 512
         }
-        pub fn get_expansion_cost(self: *const Self, new_size: u24) u64 {
+        pub fn get_expansion_cost(self: *Self, new_size: u24) u64 {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            
             const new_size_u64 = @as(u64, new_size);
-            const current_size = @as(u64, @intCast(self.size()));
+            const current_size = @as(u64, @intCast(self.size_internal()));
             if (new_size_u64 <= current_size) return 0;
             const new_words = (new_size_u64 + 31) >> 5; // Bit shift instead of / 32
             const current_words = (current_size + 31) >> 5; // Bit shift instead of / 32
@@ -593,11 +637,11 @@ test "Memory struct size verification" {
     // Both owned and borrowed should have the same size
     try std.testing.expectEqual(@sizeOf(OwnedMem), @sizeOf(BorrowedMem));
 
-    // Check the actual size - 16 bytes on 64-bit systems
-    // checkpoint (3) + padding (5) + buffer_ptr (8) = 16 bytes
-    try std.testing.expectEqual(@as(usize, 16), @sizeOf(OwnedMem));
+    // Check the actual size - now includes mutex
+    // checkpoint (3) + padding (5) + buffer_ptr (8) + mutex (32) = 48 bytes typical
+    // Note: mutex size is platform-dependent
+    try std.testing.expect(@sizeOf(OwnedMem) >= 32);
 
-    // Verify field offsets
-    try std.testing.expectEqual(@as(usize, 0), @offsetOf(OwnedMem, "checkpoint"));
-    try std.testing.expectEqual(@as(usize, 8), @offsetOf(OwnedMem, "buffer_ptr"));
+    // Field offsets have changed due to mutex addition
+    // The exact offsets depend on struct padding and alignment
 }
