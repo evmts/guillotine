@@ -137,10 +137,15 @@ pub fn Handlers(comptime FrameType: type) type {
             }
 
             // Store return data for future RETURNDATASIZE/RETURNDATACOPY
-            self.output_data.clearRetainingCapacity();
-            self.output_data.appendSlice(self.allocator, result.output) catch {
+            // Free previous output if any
+            if (self.output.len > 0) {
+                self.allocator.free(self.output);
+            }
+            // Allocate new output
+            self.output = self.allocator.alloc(u8, result.output.len) catch {
                 return Error.AllocationError;
             };
+            @memcpy(self.output, result.output);
 
             // Update gas remaining
             self.gas_remaining = @intCast(result.gas_left);
@@ -248,10 +253,15 @@ pub fn Handlers(comptime FrameType: type) type {
             }
 
             // Store return data for future RETURNDATASIZE/RETURNDATACOPY
-            self.output_data.clearRetainingCapacity();
-            self.output_data.appendSlice(self.allocator, result.output) catch {
+            // Free previous output if any
+            if (self.output.len > 0) {
+                self.allocator.free(self.output);
+            }
+            // Allocate new output
+            self.output = self.allocator.alloc(u8, result.output.len) catch {
                 return Error.AllocationError;
             };
+            @memcpy(self.output, result.output);
 
             // Update gas remaining
             self.gas_remaining = @intCast(result.gas_left);
@@ -358,10 +368,15 @@ pub fn Handlers(comptime FrameType: type) type {
             }
 
             // Store return data for future RETURNDATASIZE/RETURNDATACOPY
-            self.output_data.clearRetainingCapacity();
-            self.output_data.appendSlice(self.allocator, result.output) catch {
+            // Free previous output if any
+            if (self.output.len > 0) {
+                self.allocator.free(self.output);
+            }
+            // Allocate new output
+            self.output = self.allocator.alloc(u8, result.output.len) catch {
                 return Error.AllocationError;
             };
+            @memcpy(self.output, result.output);
 
             // Update gas remaining
             self.gas_remaining = @intCast(result.gas_left);
@@ -551,16 +566,22 @@ pub fn Handlers(comptime FrameType: type) type {
                     log.err("RETURN: Failed to get memory slice at offset {} size {}", .{offset_usize, size_usize});
                     return Error.OutOfBounds;
                 };
-                // Clear any existing output data
-                self.output_data.clearRetainingCapacity();
+                // Free previous output if any
+                if (self.output.len > 0) {
+                    self.allocator.free(self.output);
+                }
                 // Store the return data
-                self.output_data.appendSlice(self.allocator, return_data) catch {
+                self.output = self.allocator.alloc(u8, return_data.len) catch {
                     return Error.AllocationError;
                 };
-                log.debug("RETURN: Stored {} bytes to output_data", .{return_data.len});
+                @memcpy(self.output, return_data);
+                log.debug("RETURN: Stored {} bytes to output", .{return_data.len});
             } else {
                 // Empty return data
-                self.output_data.clearRetainingCapacity();
+                if (self.output.len > 0) {
+                    self.allocator.free(self.output);
+                }
+                self.output = &[_]u8{};
                 log.debug("RETURN: Empty return data", .{});
             }
 
@@ -592,15 +613,21 @@ pub fn Handlers(comptime FrameType: type) type {
                 const revert_data = self.memory.get_slice(@as(u24, @intCast(offset_usize)), @as(u24, @intCast(size_usize))) catch {
                     return Error.OutOfBounds;
                 };
-                // Clear any existing output data
-                self.output_data.clearRetainingCapacity();
+                // Free previous output if any
+                if (self.output.len > 0) {
+                    self.allocator.free(self.output);
+                }
                 // Store the revert data
-                self.output_data.appendSlice(self.allocator, revert_data) catch {
+                self.output = self.allocator.alloc(u8, revert_data.len) catch {
                     return Error.AllocationError;
                 };
+                @memcpy(self.output, revert_data);
             } else {
                 // Empty revert data
-                self.output_data.clearRetainingCapacity();
+                if (self.output.len > 0) {
+                    self.allocator.free(self.output);
+                }
+                self.output = &[_]u8{};
             }
 
             // Always return the Revert success type for proper handling
@@ -688,7 +715,7 @@ const MockEvm = struct {
             .call_result = .{
                 .success = true,
                 .gas_remaining = 100_000,
-                .output_data = &.{},
+                .output = &.{},
             },
             .create_result = .{
                 .success = true,
@@ -775,7 +802,7 @@ test "RETURN opcode - empty return" {
     const result = try TestFrame.SystemHandlers.@"return"(frame, dispatch);
     
     try testing.expectEqual(TestFrame.Success.Return, result);
-    try testing.expectEqual(@as(usize, 0), frame.output_data.items.len);
+    try testing.expectEqual(@as(usize, 0), frame.output.len);
 }
 
 test "RETURN opcode - with data" {
@@ -794,7 +821,7 @@ test "RETURN opcode - with data" {
     const result = try TestFrame.SystemHandlers.@"return"(frame, dispatch);
     
     try testing.expectEqual(TestFrame.Success.Return, result);
-    try testing.expectEqualSlices(u8, &test_data, frame.output_data.items);
+    try testing.expectEqualSlices(u8, &test_data, frame.output);
 }
 
 test "REVERT opcode - empty revert" {
@@ -809,7 +836,7 @@ test "REVERT opcode - empty revert" {
     const result = try TestFrame.SystemHandlers.revert(frame, dispatch);
     
     try testing.expectEqual(TestFrame.Success.Revert, result);
-    try testing.expectEqual(@as(usize, 0), frame.output_data.items.len);
+    try testing.expectEqual(@as(usize, 0), frame.output.len);
 }
 
 test "REVERT opcode - with error data" {
@@ -828,7 +855,7 @@ test "REVERT opcode - with error data" {
     const result = try TestFrame.SystemHandlers.revert(frame, dispatch);
     
     try testing.expectEqual(TestFrame.Success.Revert, result);
-    try testing.expectEqualSlices(u8, error_msg, frame.output_data.items);
+    try testing.expectEqualSlices(u8, error_msg, frame.output);
 }
 
 test "SELFDESTRUCT opcode - normal execution" {
@@ -927,7 +954,7 @@ test "RETURN opcode - large data" {
     const result = try TestFrame.SystemHandlers.@"return"(frame, dispatch);
     
     try testing.expectEqual(TestFrame.Success.Return, result);
-    try testing.expectEqualSlices(u8, test_data, frame.output_data.items);
+    try testing.expectEqualSlices(u8, test_data, frame.output);
 }
 
 test "RETURN opcode - offset at memory boundary" {
@@ -946,7 +973,7 @@ test "RETURN opcode - offset at memory boundary" {
     const result = try TestFrame.SystemHandlers.@"return"(frame, dispatch);
     
     try testing.expectEqual(TestFrame.Success.Return, result);
-    try testing.expectEqualSlices(u8, &test_data, frame.output_data.items);
+    try testing.expectEqualSlices(u8, &test_data, frame.output);
 }
 
 test "RETURN opcode - out of bounds offset" {
@@ -991,9 +1018,9 @@ test "RETURN opcode - memory expansion" {
     const result = try TestFrame.SystemHandlers.@"return"(frame, dispatch);
     
     try testing.expectEqual(TestFrame.Success.Return, result);
-    try testing.expectEqual(@as(usize, size), frame.output_data.items.len);
+    try testing.expectEqual(@as(usize, size), frame.output.len);
     // Should be all zeros
-    for (frame.output_data.items) |byte| {
+    for (frame.output) |byte| {
         try testing.expectEqual(@as(u8, 0), byte);
     }
 }
@@ -1012,7 +1039,10 @@ test "REVERT opcode - patterns" {
     };
 
     for (patterns) |pattern| {
-        frame.output_data.clearRetainingCapacity();
+        if (frame.output.len > 0) {
+            frame.allocator.free(frame.output);
+        }
+        frame.output = &[_]u8{};
         try frame.memory.set_data(0, pattern);
 
         try frame.stack.push(0); // offset
@@ -1022,7 +1052,7 @@ test "REVERT opcode - patterns" {
         const result = try TestFrame.SystemHandlers.revert(frame, dispatch);
         
         try testing.expectEqual(TestFrame.Success.Revert, result);
-        try testing.expectEqualSlices(u8, pattern, frame.output_data.items);
+        try testing.expectEqualSlices(u8, pattern, frame.output);
     }
 }
 
@@ -1045,7 +1075,7 @@ test "REVERT opcode - max size revert data" {
     const result = try TestFrame.SystemHandlers.revert(frame, dispatch);
     
     try testing.expectEqual(TestFrame.Success.Revert, result);
-    try testing.expectEqualSlices(u8, revert_data, frame.output_data.items);
+    try testing.expectEqualSlices(u8, revert_data, frame.output);
 }
 
 // SELFDESTRUCT opcode tests
