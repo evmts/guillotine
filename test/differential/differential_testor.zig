@@ -186,7 +186,7 @@ pub const DifferentialTestor = struct {
             caller, // origin
             .CANCUN,
         );
-        
+
         const testor = DifferentialTestor{
             .revm_instance = revm_vm,
             .guillotine_instance = evm,
@@ -240,7 +240,7 @@ pub const DifferentialTestor = struct {
         } else {
             log.err("WARNING: Account not found after deployment!", .{});
         }
-        
+
         // Double check the database pointer is the same
         log.debug("Database pointer in testor: {*}", .{&self.guillotine_db});
         log.debug("Database pointer in EVM: {*}", .{self.guillotine_instance.database});
@@ -462,10 +462,11 @@ pub const DifferentialTestor = struct {
         }
 
         log.err("🛠️  DEBUGGING HINTS:", .{});
-        log.err("   • Check if Guillotine implements all opcodes used", .{});
-        log.err("   • Verify gas calculation matches EVM specification", .{});
-        log.err("   • Ensure memory and stack operations are correct", .{});
-        log.err("   • Compare against EVM specification for edge cases", .{});
+        log.err("   • Create a more minimal reproduction against frame.zig bytecode.zig or dispatch.zig", .{});
+        log.err("   • Compare traces of guillotine and revm", .{});
+        log.err("   • Add debug logging", .{});
+        log.err("   • Create more minimal reproduction", .{});
+        log.err("   • If the bytecode works with revm you know it's a bug in our evm. If it doesn't there is a bug in the bytecode", .{});
         if (diff.trace_diffs.len > 0) {
             log.err("   • Enable detailed tracing to debug execution differences", .{});
         }
