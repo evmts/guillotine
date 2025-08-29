@@ -182,8 +182,8 @@ pub const DifferentialTestor = struct {
             db,
             block_info,
             tx_context,
-            0, // gas_price
-            caller, // origin
+            0,
+            caller,
             .CANCUN,
         );
 
@@ -240,6 +240,10 @@ pub const DifferentialTestor = struct {
         } else {
             log.err("WARNING: Account not found after deployment!", .{});
         }
+
+        // Double check the database pointer is the same
+        log.debug("Database pointer in testor: {*}", .{&self.guillotine_db});
+        log.debug("Database pointer in EVM: {*}", .{self.guillotine_instance.database});
 
         // Double check the database pointer is the same
         log.debug("Database pointer in testor: {*}", .{&self.guillotine_db});
