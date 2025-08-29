@@ -1,4 +1,7 @@
 //! Concrete Database Implementation for EVM State Management
+//!
+//! WARNING: DOES NOT CALCULATE AN ACTUAL STATE ROOT. 
+//! Just an in memory implementation
 //! 
 //! High-performance in-memory database for EVM state storage including:
 //! - Account data (balance, nonce, code hash, storage root)
