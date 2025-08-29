@@ -32,6 +32,7 @@ pub const EvmConfig = @import("evm_config.zig").EvmConfig;
 pub const DefaultEvm = Evm(.{});
 
 // Tracer modules
+pub const tracer = @import("tracer.zig");
 pub const Tracer = @import("tracer.zig").Tracer;
 pub const DetailedStructLog = @import("tracer.zig").DetailedStructLog;
 pub const TracerConfig = @import("tracer.zig").TracerConfig;
@@ -40,7 +41,7 @@ pub const LoggingTracer = @import("tracer.zig").LoggingTracer;
 pub const FileTracer = @import("tracer.zig").FileTracer;
 pub const NoOpTracer = @import("tracer.zig").NoOpTracer;
 pub const DebuggingTracer = @import("tracer.zig").DebuggingTracer;
-pub const tracer_mod = @import("tracer.zig");
+pub const JSONRPCTracer = @import("tracer.zig").JSONRPCTracer;
 
 // Bytecode modules
 pub const BytecodeConfig = @import("bytecode_config.zig").BytecodeConfig;
