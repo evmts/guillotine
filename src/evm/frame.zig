@@ -77,6 +77,15 @@ pub fn Frame(comptime config: FrameConfig) type {
         pub const Dispatch = dispatch_mod.Dispatch(Self);
         /// The config passed into Frame(config)
         pub const frame_config = config;
+
+        /// Returns the appropriate tail call modifier based on the target architecture.
+        /// WebAssembly doesn't support tail calls by default, so we use .auto for wasm targets.
+        pub inline fn getTailCallModifier() std.builtin.CallModifier {
+            return if (builtin.target.cpu.arch == .wasm32 or builtin.target.cpu.arch == .wasm64)
+                .auto
+            else
+                .always_tail;
+        }
         /// The "word" type used by the evm. Defaults to u256. "Word" is the type used by Stack and throughout the Evm
         /// If set to something else the EVM will update to that new word size. e.g. run kekkak128 instead of kekkak256
         /// Lowering the word size can improve perf and bundle size
@@ -322,41 +331,17 @@ pub fn Frame(comptime config: FrameConfig) type {
             errdefer new_logs.deinit(allocator);
             
             for (self.logs.items) |log_entry| {
-                const topics_copy = allocator.alloc(u256, log_entry.topics.len) catch {
-                    // Cleanup any previously allocated logs
-                    for (new_logs.items) |prev_log| {
-                        allocator.free(prev_log.topics);
-                        allocator.free(prev_log.data);
-                    }
-                    return Error.AllocationError;
-                };
-                @memcpy(topics_copy, log_entry.topics);
+                const topics_copy = allocator.dupe(u256, log_entry.topics) catch return Error.AllocationError;
+                errdefer allocator.free(topics_copy);
 
-                const data_copy = allocator.alloc(u8, log_entry.data.len) catch {
-                    allocator.free(topics_copy);
-                    // Cleanup any previously allocated logs
-                    for (new_logs.items) |prev_log| {
-                        allocator.free(prev_log.topics);
-                        allocator.free(prev_log.data);
-                    }
-                    return Error.AllocationError;
-                };
-                @memcpy(data_copy, log_entry.data);
+                const data_copy = allocator.dupe(u8, log_entry.data) catch return Error.AllocationError;
+                errdefer allocator.free(data_copy);
 
-                new_logs.append(allocator, Log{
+                try new_logs.append(allocator, Log{
                     .address = log_entry.address,
                     .topics = topics_copy,
                     .data = data_copy,
-                }) catch {
-                    allocator.free(topics_copy);
-                    allocator.free(data_copy);
-                    // Cleanup any previously allocated logs
-                    for (new_logs.items) |prev_log| {
-                        allocator.free(prev_log.topics);
-                        allocator.free(prev_log.data);
-                    }
-                    return Error.AllocationError;
-                };
+                });
             }
 
             const new_output = if (self.output.len > 0) blk: {
