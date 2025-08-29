@@ -184,7 +184,7 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
         is_push_data: []u8,
         is_op_start: []u8,
         is_jumpdest: []u8,
-        // NEW: SIMD-optimized packed bitmap (4 bits per byte position)
+        // Packed bitmap (4 bits per byte position) for efficient storage
         packed_bitmap: []PackedBits,
 
         pub fn init(allocator: std.mem.Allocator, code: []const u8) ValidationError!Self {
@@ -447,11 +447,8 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
         }
 
         // NOTE: Opcode validation occurs during bitmap construction via safe enum conversion.
-        // A separate SIMD pre-pass was removed to avoid redundant and incomplete checks.
 
-        // (removed unused setBitmapBitsSimd)
-
-        // (removed SIMD fusion detection; scalar detection in getStats)
+        // Fusion detection uses scalar approach in getStats for simplicity and robustness
 
         /// Build bitmaps and validate bytecode in a single pass
         fn buildBitmapsAndValidate(self: *Self) ValidationError!void {
@@ -573,7 +570,7 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
                     i += 1;
                 }
             }
-            // Single pass complete - no need for separate JUMPDEST marking or fusion detection
+            // Single pass complete - bitmaps and validation done in one traversal
         }
 
         /// Validate immediate JUMP/JUMPI targets encoded via preceding PUSH
@@ -1123,54 +1120,6 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
             }
             
             return output.toOwnedSlice();
-        }
-
-        /// Detect fusion candidates (PUSH+ADD, PUSH+MUL patterns) for opcode optimization
-        /// Marks patterns that can be fused into synthetic opcodes for better performance
-        fn markFusionCandidates(self: Self) void {
-            var i: PcType = 0;
-            const code_len = self.len();
-
-            while (i + 1 < code_len) {
-                // Only check actual operation starts, not push data
-                if (!self.packed_bitmap[i].is_op_start or self.packed_bitmap[i].is_push_data) {
-                    i += 1;
-                    continue;
-                }
-
-                const op1 = self.runtime_code[i];
-
-                // Check for PUSH opcode
-                if (op1 >= @intFromEnum(Opcode.PUSH1) and op1 <= @intFromEnum(Opcode.PUSH32)) {
-                    const push_size: PcType = op1 - (@intFromEnum(Opcode.PUSH1) - 1);
-                    const next_op_idx = i + 1 + push_size;
-
-                    // Ensure the next instruction is within bounds and is an operation start
-                    if (next_op_idx < code_len and
-                        self.packed_bitmap[next_op_idx].is_op_start and
-                        !self.packed_bitmap[next_op_idx].is_push_data)
-                    {
-                        const op2 = self.runtime_code[next_op_idx];
-
-                        // Check for fusable patterns:
-                        // PUSH + ADD, PUSH + MUL, PUSH + SUB, PUSH + DIV
-                        // PUSH + AND, PUSH + OR, PUSH + XOR
-                        // PUSH + JUMP, PUSH + JUMPI
-                        const is_fusable = switch (op2) {
-                            @intFromEnum(Opcode.ADD), @intFromEnum(Opcode.MUL), @intFromEnum(Opcode.SUB), @intFromEnum(Opcode.DIV), @intFromEnum(Opcode.AND), @intFromEnum(Opcode.OR), @intFromEnum(Opcode.XOR), @intFromEnum(Opcode.JUMP), @intFromEnum(Opcode.JUMPI) => true,
-                            else => false,
-                        };
-
-                        // Only mark as fusion candidate if fusions are enabled
-                        if (is_fusable and fusions_enabled) {
-                            // Mark the PUSH as a fusion candidate
-                            self.packed_bitmap[i].is_fusion_candidate = true;
-                        }
-                    }
-                }
-
-                i += self.getInstructionSize(i);
-            }
         }
     };
 }
