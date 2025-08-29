@@ -25,7 +25,8 @@ pub fn Handlers(comptime FrameType: type) type {
         /// The actual Keccak variant used depends on WordType:
         /// - For standard EVM (u256), uses Keccak-256
         /// - For smaller word types, may use different variants or truncate
-        pub fn keccak(self: *FrameType, dispatch: Dispatch) Error!noreturn {
+        pub fn keccak(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
             const size = self.stack.pop_unsafe();
             const offset = self.stack.pop_unsafe();
 
@@ -63,7 +64,7 @@ pub fn Handlers(comptime FrameType: type) type {
                 };
                 self.stack.push_unsafe(empty_hash);
                 const next = dispatch.getNext();
-                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
+                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
             }
 
             const offset_usize = @as(usize, @intCast(offset));
@@ -153,7 +154,7 @@ pub fn Handlers(comptime FrameType: type) type {
             self.stack.push_unsafe(result_word);
 
             const next = dispatch.getNext();
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
         }
     };
 }
