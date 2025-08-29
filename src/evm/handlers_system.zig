@@ -427,7 +427,16 @@ pub fn Handlers(comptime FrameType: type) type {
 
             // Push created contract address or 0 on failure
             if (result.success) {
-                try self.stack.push(to_u256(result.created_address.?));
+                const new_address = result.created_address.?;
+                try self.stack.push(to_u256(new_address));
+
+                // Trace account state for successful contract creation
+                if (comptime FrameType.config.TracerType != null) {
+                    if (comptime @hasDecl(@TypeOf(self.tracer), "onAccountCreated")) {
+                        const initial_nonce = 1; // Contract nonce starts at 1
+                        self.tracer.onAccountCreated(new_address, self.host, value, initial_nonce);
+                    }
+                }
             } else {
                 try self.stack.push(0);
             }
@@ -500,7 +509,18 @@ pub fn Handlers(comptime FrameType: type) type {
 
             // Push created contract address or 0 on failure
             if (result.success) {
-                try self.stack.push(to_u256(result.created_address.?));
+                const new_address = result.created_address.?;
+                try self.stack.push(to_u256(new_address));
+
+                // Trace account state for successful contract creation
+                if (comptime FrameType.config.TracerType != null) {
+                    if (comptime @hasDecl(@TypeOf(self.tracer), "onAccountCreated")) {
+                        // Note: We can't easily get the deployed code here since it's handled by host
+                        // The host should ideally notify the tracer, but for now we approximate
+                        const initial_nonce = 1; // Contract nonce starts at 1
+                        self.tracer.onAccountCreated(new_address, self.host, value, initial_nonce);
+                    }
+                }
             } else {
                 try self.stack.push(0);
             }
@@ -600,6 +620,10 @@ pub fn Handlers(comptime FrameType: type) type {
                 return Error.WriteProtection;
             }
 
+            // Get account information for tracer before destruction
+            const _account_balance = if (comptime !FrameType.config.TracerType != null) self.host.get_balance(self.contract_address) else 0;
+            const _account_code = if (comptime !FrameType.config.TracerType != null) self.host.get_code(self.contract_address) else &[_]u8{};
+
             // Mark contract for destruction via host interface
             self.host.mark_for_destruction(self.contract_address, recipient) catch |err| switch (err) {
                 else => {
@@ -607,6 +631,14 @@ pub fn Handlers(comptime FrameType: type) type {
                     return Error.OutOfGas;
                 },
             };
+
+            // Trace account state
+            if (comptime FrameType.config.TracerType != null) {
+                if (comptime @hasDecl(@TypeOf(self.tracer), "onAccountDestroyed")) {
+                    const has_code = _account_code.len > 0;
+                    self.tracer.onAccountDestroyed(self.contract_address, self.host, recipient, _account_balance, has_code, true);
+                }
+            }
 
             // According to EIP-6780 (Cancun hardfork), SELFDESTRUCT only actually destroys
             // the contract if it was created in the same transaction. This is handled by the host.

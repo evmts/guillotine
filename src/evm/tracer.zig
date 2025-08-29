@@ -19,6 +19,7 @@ const block_info_mod = @import("block_info.zig");
 const call_params_mod = @import("call_params.zig");
 const call_result_mod = @import("call_result.zig");
 const hardfork_mod = @import("hardfork.zig");
+const PrestateTracer = @import("prestate_tracer.zig").PrestateTracer;
 
 // ============================================================================
 // NO-OP TRACER
@@ -52,6 +53,77 @@ pub const NoOpTracer = struct {
         _ = frame;
         std.debug.assert(err != error.OutOfMemory); // Suppress error set discard warning
         // FrameType is comptime, no need to discard
+    }
+
+    // Prestate-style hooks for compatibility (no-ops)
+    pub fn onTransactionStart(self: *NoOpTracer) void {
+        _ = self;
+    }
+    pub fn onTransactionEnd(self: *NoOpTracer) void {
+        _ = self;
+    }
+    pub fn onStorageRead(self: *NoOpTracer, address: Address, slot: u256, value: u256, is_warm: bool) void {
+        _ = self;
+        _ = address;
+        _ = slot;
+        _ = value;
+        _ = is_warm;
+    }
+    pub fn onStorageWrite(self: *NoOpTracer, address: Address, slot: u256, old_value: u256, new_value: u256, is_warm: bool) void {
+        _ = self;
+        _ = address;
+        _ = slot;
+        _ = old_value;
+        _ = new_value;
+        _ = is_warm;
+    }
+    pub fn onBalanceRead(self: *NoOpTracer, address: Address, balance: u256) void {
+        _ = self;
+        _ = address;
+        _ = balance;
+    }
+    pub fn onBalanceChange(self: *NoOpTracer, address: Address, old_balance: u256, new_balance: u256) void {
+        _ = self;
+        _ = address;
+        _ = old_balance;
+        _ = new_balance;
+    }
+    pub fn onNonceRead(self: *NoOpTracer, address: Address, nonce: u64) void {
+        _ = self;
+        _ = address;
+        _ = nonce;
+    }
+    pub fn onNonceChange(self: *NoOpTracer, address: Address, old_nonce: u64, new_nonce: u64) void {
+        _ = self;
+        _ = address;
+        _ = old_nonce;
+        _ = new_nonce;
+    }
+    pub fn onCodeRead(self: *NoOpTracer, address: Address, code: []const u8) void {
+        _ = self;
+        _ = address;
+        _ = code;
+    }
+    pub fn onCodeChange(self: *NoOpTracer, address: Address, old_code: []const u8, new_code: []const u8) void {
+        _ = self;
+        _ = address;
+        _ = old_code;
+        _ = new_code;
+    }
+    pub fn onAccountCreated(self: *NoOpTracer, address: Address, initial_balance: u256, initial_nonce: u64, code: []const u8) void {
+        _ = self;
+        _ = address;
+        _ = initial_balance;
+        _ = initial_nonce;
+        _ = code;
+    }
+    pub fn onAccountDestroyed(self: *NoOpTracer, address: Address, beneficiary: Address, balance_transferred: u256, had_code: bool, storage_cleared: bool) void {
+        _ = self;
+        _ = address;
+        _ = beneficiary;
+        _ = balance_transferred;
+        _ = had_code;
+        _ = storage_cleared;
     }
 };
 
@@ -92,6 +164,10 @@ pub const DebuggingTracer = struct {
 
     // Last error tracking
     last_error: ?StepError = null,
+    
+    // Optional composed prestate tracer
+    prestate_tracer: ?*PrestateTracer = null,
+    prestate_enabled: bool = false,
 
     pub const ExecutionResult = enum { Completed, Paused };
     
@@ -99,6 +175,12 @@ pub const DebuggingTracer = struct {
         throw_on_error: bool = true,
         step_mode: bool = false,
         max_history: usize = 10000,
+        // Prestate tracer composition
+        enable_prestate: bool = false,
+        prestate_diff_mode: bool = false,
+        prestate_disable_storage: bool = false,
+        prestate_disable_code: bool = false,
+        prestate_include_empty: bool = false,
     };
 
     pub const ExecutionStep = struct {
@@ -146,6 +228,39 @@ pub const DebuggingTracer = struct {
         };
     }
 
+    /// Configure tracer behavior. Safe to call at any time.
+    pub fn configure(self: *Self, cfg: Config) void {
+        self.throw_on_error = cfg.throw_on_error;
+        self.step_mode = cfg.step_mode;
+        if (cfg.max_history != self.max_history) {
+            self.max_history = cfg.max_history;
+            self.prune_to_max_history();
+        }
+
+        // Manage prestate tracer composition dynamically
+        if (cfg.enable_prestate) {
+            if (self.prestate_tracer == null) {
+                const pt = self.allocator.create(PrestateTracer) catch return;
+                pt.* = PrestateTracer.init(self.allocator);
+                self.prestate_tracer = pt;
+                self.prestate_enabled = true;
+            }
+            if (self.prestate_tracer) |ptc| {
+                ptc.configure(.{
+                    .diff_mode = cfg.prestate_diff_mode,
+                    .disable_storage = cfg.prestate_disable_storage,
+                    .disable_code = cfg.prestate_disable_code,
+                    .include_empty = cfg.prestate_include_empty,
+                });
+            }
+        } else if (self.prestate_tracer) |pt| {
+            pt.deinit();
+            self.allocator.destroy(pt);
+            self.prestate_tracer = null;
+            self.prestate_enabled = false;
+        }
+    }
+
     pub fn deinit(self: *Self) void {
         // Free execution step memory
         for (self.steps.items) |*step| {
@@ -168,6 +283,13 @@ pub const DebuggingTracer = struct {
         }
 
         self.breakpoints.deinit();
+
+        if (self.prestate_tracer) |pt| {
+            pt.deinit();
+            self.allocator.destroy(pt);
+            self.prestate_tracer = null;
+            self.prestate_enabled = false;
+        }
     }
 
     /// Enable or disable step-by-step execution mode
@@ -177,7 +299,7 @@ pub const DebuggingTracer = struct {
 
     /// Check if execution should pause (breakpoint or step mode)
     pub fn shouldPause(self: *Self, pc: u32) bool {
-        return self.step_mode or self.breakpoints.contains(pc);
+        return self.step_mode or self.hasBreakpoint(pc);
     }
 
     /// Pause execution
@@ -202,7 +324,7 @@ pub const DebuggingTracer = struct {
 
     /// Check if there's a breakpoint at the given PC
     pub fn hasBreakpoint(self: *Self, pc: u32) bool {
-        return self.breakpoints.get(pc) != null;
+        return self.breakpoints.contains(pc);
     }
 
     /// Clear all breakpoints
@@ -210,16 +332,6 @@ pub const DebuggingTracer = struct {
         self.breakpoints.clearRetainingCapacity();
     }
 
-    /// Configure tracer behavior. Safe to call at any time.
-    pub fn configure(self: *Self, cfg: Config) void {
-        self.throw_on_error = cfg.throw_on_error;
-        self.step_mode = cfg.step_mode;
-        if (cfg.max_history != self.max_history) {
-            self.max_history = cfg.max_history;
-            self.pruneToMaxHistory();
-        }
-    }
-    
     /// Main execution control - runs interpreter until pause or completion
     pub fn runUntilPauseOrStop(self: *Self, comptime InterpreterType: type, interpreter: *InterpreterType) !ExecutionResult {
         // Clear paused state
@@ -255,6 +367,7 @@ pub const DebuggingTracer = struct {
     
     /// Execute exactly one instruction (step)
     pub fn stepSingle(self: *Self, comptime InterpreterType: type, interpreter: *InterpreterType) !ExecutionResult {
+        // Enable step mode and clear paused flag
         self.step_mode = true;
         defer self.step_mode = false;
         return try self.runUntilPauseOrStop(InterpreterType, interpreter);
@@ -355,6 +468,9 @@ pub const DebuggingTracer = struct {
         self.captureStateForStep(pc, opcode, FrameType, frame, true) catch |err| {
             std.log.warn("Failed to capture before state: {}", .{err});
         };
+        if (self.prestate_tracer) |pt| {
+            pt.beforeOp(pc, opcode, FrameType, frame);
+        }
     }
 
     /// Required tracer interface: called after each operation
@@ -372,6 +488,10 @@ pub const DebuggingTracer = struct {
         self.captureState(pc, FrameType, frame) catch |err| {
             std.log.warn("Failed to capture state snapshot: {}", .{err});
         };
+
+        if (self.prestate_tracer) |pt| {
+            pt.afterOp(pc, opcode, FrameType, frame);
+        }
     }
 
     /// Required tracer interface: called when an error occurs
@@ -508,6 +628,13 @@ pub const DebuggingTracer = struct {
 
         // Keep breakpoints but reset execution state
         self.resumeExecution();
+        self.step_mode = false;
+        self.resume_dispatch = null;
+
+        // Reset composed prestate tracer if present
+        if (self.prestate_tracer) |pt| {
+            pt.reset();
+        }
     }
 
     /// Get debugging statistics
@@ -525,6 +652,48 @@ pub const DebuggingTracer = struct {
             .history_size = self.steps.items.len,
             .snapshot_count = self.state_snapshots.items.len,
         };
+    }
+    
+    pub fn getPrestateTracer(self: *Self) ?*PrestateTracer {
+        return self.prestate_tracer;
+    }
+
+    // Delegate prestate hooks if enabled (safe to call via @hasDecl)
+    pub fn onTransactionStart(self: *Self) void {
+        if (self.prestate_tracer) |pt| pt.onTransactionStart();
+    }
+    pub fn onTransactionEnd(self: *Self) void {
+        if (self.prestate_tracer) |pt| pt.onTransactionEnd();
+    }
+    pub fn onStorageRead(self: *Self, address: Address, slot: u256, value: u256, is_warm: bool) void {
+        if (self.prestate_tracer) |pt| pt.onStorageRead(address, slot, value, is_warm);
+    }
+    pub fn onStorageWrite(self: *Self, address: Address, slot: u256, old_value: u256, new_value: u256, is_warm: bool) void {
+        if (self.prestate_tracer) |pt| pt.onStorageWrite(address, slot, old_value, new_value, is_warm);
+    }
+    pub fn onBalanceRead(self: *Self, address: Address, balance: u256) void {
+        if (self.prestate_tracer) |pt| pt.onBalanceRead(address, balance);
+    }
+    pub fn onBalanceChange(self: *Self, address: Address, old_balance: u256, new_balance: u256) void {
+        if (self.prestate_tracer) |pt| pt.onBalanceChange(address, old_balance, new_balance);
+    }
+    pub fn onNonceRead(self: *Self, address: Address, nonce: u64) void {
+        if (self.prestate_tracer) |pt| pt.onNonceRead(address, nonce);
+    }
+    pub fn onNonceChange(self: *Self, address: Address, old_nonce: u64, new_nonce: u64) void {
+        if (self.prestate_tracer) |pt| pt.onNonceChange(address, old_nonce, new_nonce);
+    }
+    pub fn onCodeRead(self: *Self, address: Address, code: []const u8) void {
+        if (self.prestate_tracer) |pt| pt.onCodeRead(address, code);
+    }
+    pub fn onCodeChange(self: *Self, address: Address, old_code: []const u8, new_code: []const u8) void {
+        if (self.prestate_tracer) |pt| pt.onCodeChange(address, old_code, new_code);
+    }
+    pub fn onAccountCreated(self: *Self, address: Address, initial_balance: u256, initial_nonce: u64, code: []const u8) void {
+        if (self.prestate_tracer) |pt| pt.onAccountCreated(address, initial_balance, initial_nonce, code);
+    }
+    pub fn onAccountDestroyed(self: *Self, address: Address, beneficiary: Address, balance_transferred: u256, had_code: bool, storage_cleared: bool) void {
+        if (self.prestate_tracer) |pt| pt.onAccountDestroyed(address, beneficiary, balance_transferred, had_code, storage_cleared);
     }
 };
 

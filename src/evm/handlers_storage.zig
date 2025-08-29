@@ -33,6 +33,15 @@ pub fn Handlers(comptime FrameType: type) type {
             
             // Load value from storage
             const value = self.host.get_storage(contract_addr, slot);
+
+            // Trace account state
+            if (comptime FrameType.config.TracerType != null) {
+                if (comptime @hasDecl(@TypeOf(self.tracer), "onStorageRead")) {
+                    const is_warm = self.host.is_storage_warm(contract_addr, slot);
+                    self.tracer.onStorageRead(contract_addr, self.host, slot, value, is_warm);
+                }
+            }
+
             try self.stack.push(value);
             
             const next = dispatch.getNext();
@@ -90,7 +99,15 @@ pub fn Handlers(comptime FrameType: type) type {
             self.host.set_storage(contract_addr, slot, value) catch |err| switch (err) {
                 else => return Error.AllocationError,
             };
-            
+
+            // Trace account state
+            if (comptime FrameType.config.TracerType != null) {
+                if (comptime @hasDecl(@TypeOf(self.tracer), "onStorageWrite")) {
+                    const is_warm = self.host.is_storage_warm(contract_addr, slot);
+                    self.tracer.onStorageWrite(contract_addr, self.host, slot, current_value, value, is_warm);
+                }
+            }
+
             const next = dispatch.getNext();
             return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
         }
@@ -111,7 +128,15 @@ pub fn Handlers(comptime FrameType: type) type {
             const value = self.host.get_transient_storage(contract_addr, slot) catch |err| switch (err) {
                 else => return Error.AllocationError,
             };
-            
+
+            // Trace account state
+            if (comptime FrameType.config.TracerType != null) {
+                if (comptime @hasDecl(@TypeOf(self.tracer), "onStorageRead")) {
+                    // Transient storage is always warm
+                    self.tracer.onStorageRead(contract_addr, self.host, slot, value, true);
+                }
+            }
+
             try self.stack.push(value);
             
             const next = dispatch.getNext();
@@ -135,7 +160,16 @@ pub fn Handlers(comptime FrameType: type) type {
             
             // Use the currently executing contract's address
             const contract_addr = self.contract_address;
-            
+
+            // Get old value for tracer
+            const _current_value = if (comptime !FrameType.config.TracerType != null) {
+                self.host.get_transient_storage(contract_addr, slot) catch |err| switch (err) {
+                    else => return Error.AllocationError,
+                };
+            } else {
+                0;
+            };
+
             // Transient storage has fixed gas cost
             const gas_cost = GasConstants.GasWarmStorageRead; // 100 gas
             if (self.gas_remaining < gas_cost) {
@@ -147,7 +181,15 @@ pub fn Handlers(comptime FrameType: type) type {
             self.host.set_transient_storage(contract_addr, slot, value) catch |err| switch (err) {
                 else => return Error.AllocationError,
             };
-            
+
+            // Trace account state
+            if (comptime FrameType.config.TracerType != null) {
+                if (comptime @hasDecl(@TypeOf(self.tracer), "onStorageWrite")) {
+                    // Transient storage is always warm
+                    self.tracer.onStorageWrite(contract_addr, self.host, slot, _current_value, value, true);
+                }
+            }
+
             const next = dispatch.getNext();
             return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
         }

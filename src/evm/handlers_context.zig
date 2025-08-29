@@ -58,6 +58,14 @@ pub fn Handlers(comptime FrameType: type) type {
             };
 
             const bal = self.host.get_balance(addr);
+
+            // Trace account state
+            if (comptime FrameType.config.TracerType != null) {
+                if (comptime @hasDecl(@TypeOf(self.tracer), "onBalanceRead")) {
+                    self.tracer.onBalanceRead(addr, self.host, bal);
+                }
+            }
+
             const balance_word = @as(WordType, @truncate(bal));
             try self.stack.push(balance_word);
             const next = dispatch.getNext();
@@ -249,6 +257,14 @@ pub fn Handlers(comptime FrameType: type) type {
             const address_u256 = try self.stack.pop();
             const addr = from_u256(address_u256);
             const code = self.host.get_code(addr);
+
+            // Trace account state
+            if (comptime FrameType.config.TracerType != null) {
+                if (comptime @hasDecl(@TypeOf(self.tracer), "onCodeRead")) {
+                    self.tracer.onCodeRead(addr, self.host, code);
+                }
+            }
+
             const code_len = @as(WordType, @truncate(@as(u256, @intCast(code.len))));
             try self.stack.push(code_len);
             const next = dispatch.getNext();
@@ -290,6 +306,13 @@ pub fn Handlers(comptime FrameType: type) type {
 
             const code = self.host.get_code(addr);
 
+            // Trace account state
+            if (comptime FrameType.config.TracerType != null) {
+                if (comptime @hasDecl(@TypeOf(self.tracer), "onCodeRead")) {
+                    self.tracer.onCodeRead(addr, self.host, code);
+                }
+            }
+
             // Copy external code to memory with proper zero-padding
             var i: usize = 0;
             while (i < length_usize) : (i += 1) {
@@ -316,6 +339,14 @@ pub fn Handlers(comptime FrameType: type) type {
             }
             
             const code = self.host.get_code(addr);
+
+            // Trace account state
+            if (comptime FrameType.config.TracerType != null) {
+                if (comptime @hasDecl(@TypeOf(self.tracer), "onCodeRead")) {
+                    self.tracer.onCodeRead(addr, self.host, code);
+                }
+            }
+
             if (code.len == 0) {
                 // Existing account with empty code returns keccak256("") constant
                 const empty_hash_u256: u256 = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470;
