@@ -600,8 +600,7 @@ test "Error handling with different configurations" {
     // Check error was recorded
     if (tracer.steps.items.len > 0) {
         const last_step = &tracer.steps.items[tracer.steps.items.len - 1];
-        try testing.expect(last_step.error_occurred);
-        try testing.expect(last_step.error_msg != null);
+        try testing.expect(last_step.@"error" != null);
     }
 }
 
@@ -634,8 +633,7 @@ test "Different error types captured correctly" {
         try testing.expect(tracer.paused);
         if (tracer.steps.items.len > 0) {
             const step = &tracer.steps.items[0];
-            try testing.expect(step.error_occurred);
-            try testing.expect(step.error_msg != null);
+            try testing.expect(step.@"error" != null);
         }
     }
 }
@@ -1660,10 +1658,9 @@ test "onError called and error recorded in current step" {
     
     // Verify error was recorded
     const step = &tracer.steps.items[0];
-    try std.testing.expect(step.error_occurred == true);
-    try std.testing.expect(step.error_msg != null);
-    if (step.error_msg) |msg| {
-        try std.testing.expectEqualStrings("OutOfGas", msg);
+    try std.testing.expect(step.@"error" != null);
+    if (step.@"error") |e| {
+        try std.testing.expectEqualStrings("OutOfGas", e.message);
     }
 }
 
@@ -1711,9 +1708,9 @@ test "Different error types handled" {
     // Verify all errors were recorded
     for (errors, 0..) |err, i| {
         const step = &tracer.steps.items[i];
-        try std.testing.expect(step.error_occurred == true);
-        if (step.error_msg) |msg| {
-            try std.testing.expectEqualStrings(@errorName(err), msg);
+        try std.testing.expect(step.@"error" != null);
+        if (step.@"error") |e| {
+            try std.testing.expectEqualStrings(@errorName(err), e.message);
         }
     }
 }

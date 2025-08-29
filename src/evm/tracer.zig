@@ -90,6 +90,9 @@ pub const DebuggingTracer = struct {
     total_gas_used: u64 = 0,
     step_count: u64 = 0,
 
+    // Last error tracking
+    last_error: ?StepError = null,
+
     pub const ExecutionResult = enum { Completed, Paused };
     
     pub const Config = struct {
@@ -111,8 +114,15 @@ pub const DebuggingTracer = struct {
         memory_size_before: usize,
         memory_size_after: usize,
         depth: u32,
-        error_occurred: bool,
-        error_msg: ?[]const u8,
+        /// Error captured for this step, if any.
+        @"error": ?StepError,
+    };
+
+    pub const ErrorType = enum { ExecutionError, Revert };
+
+    pub const StepError = struct {
+        kind: ErrorType,
+        message: []const u8,
     };
 
     pub const StateSnapshot = struct {
@@ -141,9 +151,7 @@ pub const DebuggingTracer = struct {
         for (self.steps.items) |*step| {
             self.allocator.free(step.stack_before);
             self.allocator.free(step.stack_after);
-            if (step.error_msg) |msg| {
-                self.allocator.free(msg);
-            }
+            if (step.@"error") |e| self.allocator.free(e.message);
         }
         self.steps.deinit(self.allocator);
 
@@ -152,6 +160,12 @@ pub const DebuggingTracer = struct {
             self.allocator.free(snapshot.stack);
         }
         self.state_snapshots.deinit(self.allocator);
+
+        // Free last error if allocated
+        if (self.last_error) |e| {
+            self.allocator.free(e.message);
+            self.last_error = null;
+        }
 
         self.breakpoints.deinit();
     }
@@ -362,23 +376,43 @@ pub const DebuggingTracer = struct {
 
     /// Required tracer interface: called when an error occurs
     pub fn onError(self: *Self, pc: u32, err: anyerror, comptime FrameType: type, frame: *const FrameType) void {
-        _ = frame;
         _ = pc;
-
-        // Record error in current step if we have one
-        if (self.steps.items.len > 0) {
-            const current_step = &self.steps.items[self.steps.items.len - 1];
-            current_step.error_occurred = true;
-
-            // Store error message
-            const error_name = @errorName(err);
-            current_step.error_msg = self.allocator.dupe(u8, error_name) catch null;
+        _ = frame;
+        
+        // Always record the last error at tracer level
+        const error_name = @errorName(err);
+        const kind: ErrorType = if (err == error.REVERT) .Revert else .ExecutionError;
+        
+        // Free previous error if it exists
+        if (self.last_error) |e| {
+            self.allocator.free(e.message);
         }
-
+        
+        // Record new error
+        if (self.allocator.dupe(u8, error_name)) |message| {
+            self.last_error = .{ .kind = kind, .message = message };
+        } else |_| {
+            // Fallback to static message if allocation fails
+            self.last_error = .{ .kind = kind, .message = "Error (allocation failed)" };
+        }
+        
         // Always pause on error for debugging
-        self.pause();
+        self.paused = true;
+        
+        std.log.debug("DebuggingTracer: Error {} recorded at tracer level", .{err});
+    }
 
-        std.log.debug("DebuggingTracer: Error occurred in frame type {s}: {}", .{ @typeName(FrameType), err });
+    /// Get the last error that occurred
+    pub fn getLastError(self: *const Self) ?StepError {
+        return self.last_error;
+    }
+
+    /// Clear the last error (useful for clearing errors after they've been handled)
+    pub fn clearLastError(self: *Self) void {
+        if (self.last_error) |e| {
+            self.allocator.free(e.message);
+            self.last_error = null;
+        }
     }
 
     /// Helper function to capture state for step recording
@@ -401,8 +435,7 @@ pub const DebuggingTracer = struct {
                 .memory_size_before = if (@hasField(FrameType, "memory")) frame.memory.size() else 0,
                 .memory_size_after = 0, // Will be updated in afterOp
                 .depth = if (@hasField(FrameType, "depth")) frame.depth else 0,
-                .error_occurred = false,
-                .error_msg = null,
+                .@"error" = null,
             };
 
             try self.steps.append(self.allocator, step);
@@ -412,9 +445,7 @@ pub const DebuggingTracer = struct {
                 const old = self.steps.orderedRemove(0);
                 self.allocator.free(old.stack_before);
                 self.allocator.free(old.stack_after);
-                if (old.error_msg) |msg| {
-                    self.allocator.free(msg);
-                }
+                if (old.@"error") |e| self.allocator.free(e.message);
             }
         } else {
             // Update the current step with after state
@@ -438,7 +469,7 @@ pub const DebuggingTracer = struct {
             const old = self.steps.orderedRemove(0);
             self.allocator.free(old.stack_before);
             self.allocator.free(old.stack_after);
-            if (old.error_msg) |m| self.allocator.free(m);
+            if (old.@"error") |e| self.allocator.free(e.message);
         }
         // Snapshots
         while (self.state_snapshots.items.len > self.max_history) {
@@ -453,8 +484,8 @@ pub const DebuggingTracer = struct {
         for (self.steps.items) |*step| {
             self.allocator.free(step.stack_before);
             self.allocator.free(step.stack_after);
-            if (step.error_msg) |msg| {
-                self.allocator.free(msg);
+            if (step.@"error") |e| {
+                self.allocator.free(e.message);
             }
         }
         self.steps.clearRetainingCapacity();
@@ -464,6 +495,12 @@ pub const DebuggingTracer = struct {
             self.allocator.free(snapshot.stack);
         }
         self.state_snapshots.clearRetainingCapacity();
+
+        // Clear last error
+        if (self.last_error) |e| {
+            self.allocator.free(e.message);
+            self.last_error = null;
+        }
 
         // Reset statistics
         self.total_instructions = 0;
