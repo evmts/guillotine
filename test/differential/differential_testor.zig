@@ -131,9 +131,15 @@ pub const DifferentialTestor = struct {
     allocator: std.mem.Allocator,
     caller: primitives.Address,
     contract: primitives.Address,
+    enable_tracing: bool,
     
     /// Simple initialization - creates both EVM instances internally
     pub fn init(allocator: std.mem.Allocator) !DifferentialTestor {
+        return initWithTracing(allocator, false);
+    }
+    
+    /// Initialize with tracing support - creates tracing-enabled EVMs
+    pub fn initWithTracing(allocator: std.mem.Allocator, enable_tracing: bool) !DifferentialTestor {
         // Setup addresses
         const caller = primitives.Address.ZERO_ADDRESS;
         const contract = try primitives.Address.from_hex("0xc0de000000000000000000000000000000000000");
@@ -194,6 +200,7 @@ pub const DifferentialTestor = struct {
             .allocator = allocator,
             .caller = caller,
             .contract = contract,
+            .enable_tracing = enable_tracing,
         };
     }
     
@@ -424,23 +431,61 @@ pub const DifferentialTestor = struct {
         input: []const u8,
         gas_limit: u64,
     ) !ExecutionResultWithTrace {
-        // Create a tracing-enabled EVM instance temporarily
-        const JSONRPCTracer = @import("evm").tracer.JSONRPCTracer;
-        var tracer = JSONRPCTracer.init(self.allocator);
-        defer tracer.deinit();
-        
-        // Save current EVM state
-        const original_evm = self.guillotine_instance;
-        defer self.guillotine_instance = original_evm;
-        
-        // Create a new EVM instance with tracing enabled
-        const TracingEvmConfig = guillotine_evm.EvmConfig{
-            .tracer_type = JSONRPCTracer,
-        };
-        
-        // For now, since we can't easily swap out the EVM's tracer at runtime,
-        // we'll create a custom frame execution with tracing
         const log = std.log.scoped(.differential_trace);
+        
+        if (self.enable_tracing) {
+            // Create a tracing-enabled EVM instance for this execution
+            const JSONRPCTracer = @import("evm").JSONRPCTracer;
+            
+            // Configure EVM with tracing enabled
+            const TracingEvmConfig = guillotine_evm.EvmConfig{
+                .tracer_type = JSONRPCTracer,
+                .frame_config = .{ .DatabaseType = guillotine_evm.Database },
+            };
+            
+            // Create tracing-enabled EVM instance
+            const TracingEvm = guillotine_evm.Evm(TracingEvmConfig);
+            
+            const block_info = guillotine_evm.BlockInfo{
+                .number = 1,
+                .timestamp = 0,
+                .gas_limit = 100000,
+                .coinbase = primitives.Address.ZERO_ADDRESS,
+                .difficulty = 0,
+                .base_fee = 0,
+                .prev_randao = [_]u8{0} ** 32,
+                .blob_base_fee = 0,
+                .blob_versioned_hashes = &.{},
+            };
+            
+            const tx_context = guillotine_evm.TransactionContext{
+                .chain_id = 1,
+                .gas_limit = 100000,
+                .coinbase = primitives.Address.ZERO_ADDRESS,
+                .blob_versioned_hashes = &.{},
+                .blob_base_fee = 0,
+            };
+            
+            var tracing_evm = try TracingEvm.init(
+                self.allocator,
+                self.guillotine_db,
+                block_info,
+                tx_context,
+                0, // gas_price
+                caller, // origin
+                .CANCUN,
+            );
+            defer tracing_evm.deinit();
+            
+            // Initialize the tracer
+            var tracer = JSONRPCTracer.init(self.allocator);
+            defer tracer.deinit();
+            
+            // TODO: Figure out how to pass the tracer to the EVM's frame
+            // The frame needs to be created with the tracer in its config
+            
+            // For now, fall through to regular execution
+        }
         
         // Use the actual EVM call method
         const params = guillotine_evm.CallParams{
@@ -782,5 +827,12 @@ pub const DifferentialTestor = struct {
         }
         
         log.info("=== END DIFFERENTIAL TEST ===", .{});
+    }
+    
+    /// Create a DifferentialTestor with tracing enabled for debugging
+    pub fn initForDebugging(allocator: std.mem.Allocator) !DifferentialTestor {
+        const log = std.log.scoped(.differential);
+        log.info("Initializing differential tester with tracing enabled", .{});
+        return initWithTracing(allocator, true);
     }
 };
