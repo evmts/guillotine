@@ -125,6 +125,8 @@ pub const Database = struct {
 
     /// Set account data for the given address
     pub fn set_account(self: *Database, address: [20]u8, account: Account) Error!void {
+        const log = std.log.scoped(.database);
+        log.debug("set_account: Setting account for address {x} with code_hash {x}", .{ address, account.code_hash });
         try self.accounts.put(address, account);
     }
 
@@ -183,9 +185,15 @@ pub const Database = struct {
 
     /// Get contract code by address
     pub fn get_code_by_address(self: *Database, address: [20]u8) Error![]const u8 {
+        const log = std.log.scoped(.database);
+        log.debug("get_code_by_address: Looking for address {x}", .{address});
+        
         if (self.accounts.get(address)) |account| {
+            log.debug("get_code_by_address: Found account with code_hash {x}", .{account.code_hash});
             return self.get_code(account.code_hash);
         }
+        
+        log.debug("get_code_by_address: Account not found for address {x}", .{address});
         return Error.AccountNotFound;
     }
 
