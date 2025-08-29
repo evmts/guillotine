@@ -799,7 +799,7 @@ pub fn Evm(comptime config: EvmConfig) type {
                 // 1. null self_destruct parameter prevents SELFDESTRUCT operations 
                 // 2. Static context tracked in EVM for SSTORE/LOG operations
                 // 3. Frame validates static context for state-modifying operations
-                var frame = try Frame.init(self.allocator, gas_cast, self.database.*, caller, value, input, self.block_info, @as(*anyopaque, @ptrCast(self)), self_destruct_param);
+                var frame = try Frame.init(self.allocator, gas_cast, self.database.*, caller, &value, input, self.block_info, @as(*anyopaque, @ptrCast(self)), self_destruct_param);
                 frame.contract_address = address;
                 defer frame.deinit(self.allocator);
 
@@ -832,7 +832,7 @@ pub fn Evm(comptime config: EvmConfig) type {
                 }
             } else {
                 // Non-static call - pass call context data directly to frame
-                var frame = try Frame.init(self.allocator, gas_cast, self.database.*, caller, value, input, self.block_info, @as(*anyopaque, @ptrCast(self)), self_destruct_param);
+                var frame = try Frame.init(self.allocator, gas_cast, self.database.*, caller, &value, input, self.block_info, @as(*anyopaque, @ptrCast(self)), self_destruct_param);
                 frame.contract_address = address;
                 defer frame.deinit(self.allocator);
 

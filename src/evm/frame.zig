@@ -69,6 +69,7 @@ pub fn Frame(comptime config: FrameConfig) type {
             InvalidAmount,
             WriteProtection,
         };
+        const Self = @This();
         /// The type all opcode handlers return.
         /// Opcode handlers are expected to recursively dispatch the next opcode if they themselves don't error or return
         pub const OpcodeHandler = *const fn (frame: *Self, dispatch: Dispatch) Error!Success;
@@ -101,7 +102,6 @@ pub fn Frame(comptime config: FrameConfig) type {
         pub const Bytecode = bytecode_mod.Bytecode(.{
             .max_bytecode_size = config.max_bytecode_size,
             .max_initcode_size = config.max_initcode_size,
-            .vector_length = config.vector_length,
             .fusions_enabled = false,
         });
         /// The BlockInfo type configured for this frame
@@ -110,42 +110,37 @@ pub fn Frame(comptime config: FrameConfig) type {
         /// A fixed size array of opcode handlers indexed by opcode number
         pub const opcode_handlers: [256]OpcodeHandler = frame_handlers.getOpcodeHandlers(Self);
 
-        const Self = @This();
-
         //           Frame Structure Layout Analysis - OPTIMIZED
         //
-        //   Total Size: ~420 bytes (with default BlockInfo config)
+        //   Total Size: ~396 bytes (with default BlockInfo config)
         //   Alignment: 8 bytes (natural alignment for pointers)
         //
         //   SIZE OPTIMIZATIONS:
         //   - value: 32B → 8B (pointer instead of inline u256)
-        //   - output: ArrayList(24B) → buffer[256] + len(4B) = 260B inline
-        //   Net change: Larger struct but no allocation overhead for typical contracts
-        //   Tradeoff: Wastes some space but eliminates allocator pressure
+        //   - Reordered fields for optimal cache line usage
         //
-        //   CACHE LINE 1 (0-63 bytes) - SUPER HOT PATH
+        //   CACHE LINE 1 (0-63 bytes) - ULTRA HOT PATH
         //   ┌─────────────────────────────────────────────────────────────┐
         //   │ Offset │ Field              │ Size  │ Type                  │
         //   ├────────┼────────────────────┼───────┼───────────────────────┤
         //   │ 0      │ stack              │ 16B   │ Stack (2 pointers)    │
-        //   │ 16     │ gas_remaining      │ 4/8B  │ i32/i64 (config)      │
-        //   │ 20/24  │ memory             │ 8B    │ *Memory struct         │
-        //   │ 36/40  │ database           │ 8B    │ DatabaseType pointer  │
-        //   │ 44/48  │ log_items          │ 8B    │ [*]Log                │
-        //   │ 52/56  │ log_len            │ 2B    │ u16                   │
-        //   │ 54/58  │ evm_ptr            │ 8B    │ *anyopaque            │
-        //   │ 54/58  │ [fits/exceeds]     │       │                       │
+        //   │ 16     │ gas_remaining      │ 8B    │ i64 (typical)         │
+        //   │ 24     │ memory             │ 16B   │ Memory struct         │
+        //   │ 40     │ database           │ 8B    │ DatabaseType pointer  │
+        //   │ 48     │ calldata           │ 16B   │ []const u8 (slice)    │
+        //   │ 64     │ [end of line 1]    │       │ Exactly 64 bytes!     │
         //   └─────────────────────────────────────────────────────────────┘
         //
-        //   CACHE LINE 2 (64-127 bytes) - CALL CONTEXT
+        //   CACHE LINE 2 (64-127 bytes) - WARM PATH
         //   ┌─────────────────────────────────────────────────────────────┐
         //   │ Offset │ Field              │ Size  │ Type                  │
         //   ├────────┼────────────────────┼───────┼───────────────────────┤
-        //   │ 58     │ value              │ 8B    │ *const u256           │
-        //   │ 66     │ caller             │ 20B   │ Address               │
-        //   │ 92     │ contract_address   │ 20B   │ Address               │
-        //   │ 112    │ calldata           │ 16B   │ []const u8 (slice)    │
-        //   │ 128    │ [exceeds line 2]   │       │                       │
+        //   │ 64     │ value              │ 8B    │ *const u256           │
+        //   │ 72     │ contract_address   │ 20B   │ Address               │
+        //   │ 92     │ caller             │ 20B   │ Address               │
+        //   │ 112    │ log_items          │ 8B    │ [*]Log                │
+        //   │ 120    │ evm_ptr            │ 8B    │ *anyopaque            │
+        //   │ 128    │ [end of line 2]    │       │ Exactly 64 bytes!     │
         //   └─────────────────────────────────────────────────────────────┘
         //
         //   CACHE LINE 3 (128-191 bytes) - EXECUTION STATE
@@ -266,24 +261,27 @@ pub fn Frame(comptime config: FrameConfig) type {
         //   - Total: Variable based on types
         //   - Allows fine-tuned memory/precision tradeoffs
 
-        // CACHE LINE 1 (0-63 bytes) - SUPER HOT PATH
-=======
-  
->>>>>>> 2c9f61126cfaba4b16b2fe035739eeb2888dc6b3:src/evm/frame.zig
+        // CACHE LINE 1 (0-63 bytes) - ULTRA HOT PATH
         stack: Stack, // 16B - Stack operations
         gas_remaining: GasType, // 8B - Gas tracking (i64)
         memory: Memory, // 16B - Memory operations
         database: config.DatabaseType, // 8B - Storage access
+        calldata: []const u8, // 16B - Input data slice
+        // = 64B exactly!
+
+        // CACHE LINE 2 (64-127 bytes) - WARM PATH
+        value: *const WordType, // 8B - Call value (pointer)
+        contract_address: Address = Address.ZERO_ADDRESS, // 20B - Current contract
+        caller: Address, // 20B - Calling address
         log_items: [*]Log = &[_]Log{}, // 8B - Log array pointer
         evm_ptr: *anyopaque, // 8B - EVM instance pointer
-        value: WordType, // 32B - Call value (inline)
-        caller: Address, // 20B - Calling address
-        contract_address: Address = Address.ZERO_ADDRESS, // 20B - Current contract
-        calldata: []const u8, // 16B - Input data slice
-        output: []u8, // 16B - Output data slice (heap allocated)
+        // = 64B exactly!
+
+        // CACHE LINE 3+ (128+ bytes) - COLD PATH
+        output: []u8, // 16B - Output data slice (only for RETURN/REVERT)
         allocator: std.mem.Allocator, // 16B - Memory allocator
-        block_info: BlockInfo, // ~188B - Block context
         self_destruct: ?*SelfDestruct = null, // 8B - Self destruct list
+        block_info: BlockInfo, // ~188B - Block context (spans multiple cache lines)
 
         //
         /// Initialize a new execution frame.
@@ -294,7 +292,7 @@ pub fn Frame(comptime config: FrameConfig) type {
         ///
         /// EIP-214: For static calls, self_destruct should be null to prevent
         /// SELFDESTRUCT operations which modify blockchain state.
-        pub fn init(allocator: std.mem.Allocator, gas_remaining: GasType, database: config.DatabaseType, caller: Address, value: WordType, calldata: []const u8, block_info: BlockInfo, evm_ptr: *anyopaque, self_destruct: ?*SelfDestruct) Error!Self {
+        pub fn init(allocator: std.mem.Allocator, gas_remaining: GasType, database: config.DatabaseType, caller: Address, value: *const WordType, calldata: []const u8, block_info: BlockInfo, evm_ptr: *anyopaque, self_destruct: ?*SelfDestruct) Error!Self {
             var stack = Stack.init(allocator) catch {
                 @branchHint(.cold);
                 return Error.AllocationError;
@@ -307,20 +305,23 @@ pub fn Frame(comptime config: FrameConfig) type {
             errdefer memory.deinit(allocator);
 
             return Self{
+                // Cache line 1
                 .stack = stack,
                 .gas_remaining = std.math.cast(GasType, @max(gas_remaining, 0)) orelse return Error.InvalidAmount,
                 .memory = memory,
                 .database = database,
-                .log_items = &[_]Log{},
-                .evm_ptr = evm_ptr,
-                .caller = caller,
+                .calldata = calldata,
+                // Cache line 2
                 .value = value,
                 .contract_address = Address.ZERO_ADDRESS,
+                .caller = caller,
+                .log_items = &[_]Log{},
+                .evm_ptr = evm_ptr,
+                // Cache line 3+
                 .output = &[_]u8{}, // Start with empty output
-                .calldata = calldata,
                 .allocator = allocator,
-                .block_info = block_info,
                 .self_destruct = self_destruct,
+                .block_info = block_info,
             };
         }
         /// Clean up all frame resources.
@@ -471,7 +472,6 @@ pub fn Frame(comptime config: FrameConfig) type {
                 
                 const header = @as(*const LogHeader, @ptrFromInt(@intFromPtr(items) - @sizeOf(LogHeader)));
                 if (header.count == 0) break :blk &[_]Log{};
->>>>>>> 2c9f61126cfaba4b16b2fe035739eeb2888dc6b3:src/evm/frame.zig
 
                 const full_size = @sizeOf(LogHeader) + header.capacity * @sizeOf(Log);
                 const new_log_memory = allocator.alloc(u8, full_size) catch return Error.AllocationError;
@@ -482,11 +482,23 @@ pub fn Frame(comptime config: FrameConfig) type {
                 const new_items = @as([*]Log, @ptrCast(@alignCast(new_log_memory.ptr + @sizeOf(LogHeader))));
 
                 for (items[0..header.count], 0..) |log_entry, i| {
-                    const topics_copy = allocator.alloc(u256, log_entry.topics.len) catch return Error.AllocationError;
+                    const topics_copy = allocator.alloc(u256, log_entry.topics.len) catch {
+                        // Cleanup any previously allocated logs
+                        for (new_items[0..i]) |prev_log| {
+                            allocator.free(prev_log.topics);
+                            allocator.free(prev_log.data);
+                        }
+                        return Error.AllocationError;
+                    };
                     @memcpy(topics_copy, log_entry.topics);
 
                     const data_copy = allocator.alloc(u8, log_entry.data.len) catch {
                         allocator.free(topics_copy);
+                        // Cleanup any previously allocated logs
+                        for (new_items[0..i]) |prev_log| {
+                            allocator.free(prev_log.topics);
+                            allocator.free(prev_log.data);
+                        }
                         return Error.AllocationError;
                     };
                     @memcpy(data_copy, log_entry.data);
