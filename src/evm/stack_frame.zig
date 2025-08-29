@@ -112,37 +112,69 @@ pub fn StackFrame(comptime config: FrameConfig) type {
 
         const Self = @This();
 
-        //           StackFrame Structure Layout Analysis
+        //           StackFrame Structure Layout Analysis - PRECISE
         //
-        //   Total Size: ~104-120 bytes (optimized from ~120-136 bytes, varies by config.has_database)
-        //   Alignment: 8 bytes (pointer alignment)
+        //   Total Size: ~408 bytes (with default BlockInfo config)
+        //   Alignment: 8 bytes (natural alignment for pointers)
         //
-        //   OPTIMIZED: Cache Line 1 (0-63) - Hot Path - Call data prioritized
+        //   CACHE LINE 1 (0-63 bytes) - SUPER HOT PATH
+        //   ┌─────────────────────────────────────────────────────────────┐
+        //   │ Offset │ Field              │ Size  │ Type                  │
+        //   ├────────┼────────────────────┼───────┼───────────────────────┤
+        //   │ 0      │ stack              │ 16B   │ Stack (2 pointers)    │
+        //   │ 16     │ gas_remaining      │ 4/8B  │ i32/i64 (config)      │
+        //   │ 20/24  │ memory             │ 16B   │ Memory struct         │
+        //   │ 36/40  │ database           │ 8B    │ DatabaseType pointer  │
+        //   │ 44/48  │ allocator          │ 16B   │ Allocator (2 ptrs)    │
+        //   │ 60/64  │ [end of line 1]    │       │                       │
+        //   └─────────────────────────────────────────────────────────────┘
         //
-        //   All frequently accessed components during opcode execution:
-        //   ├── stack: Stack                    // 16 bytes (optimized: buf_ptr + stack_ptr)
-        //   ├── gas_remaining: GasType          // 8 bytes (i64 for performance)
-        //   ├── memory: Memory                  // 16 bytes
-        //   ├── database: DatabaseInterface     // 8 bytes (optimized from 16 bytes)
-        //   ├── caller: Address                 // 20 bytes (call context)
-        //   ├── value: WordType                 // 32 bytes (call value)
-        //   ├── calldata: []const u8            // 16 bytes (slice)
-        //   ├── block_info: BlockInfo           // ~variable bytes (cold data)
-        //   Total: Hot path optimized with context prioritized over host access
-        // 
-        //   Cache Line 2+ - Execution State & Memory Management
-        // 
-        //   ├── contract_address: Address       // 20 bytes (complete, atomic access)
-        //   ├── log_items: [*]Log               // 8 bytes (many-item pointer)
-        //   ├── log_len: u16                    // 2 bytes (optimized log count)
-        //   ├── allocator: Allocator            // 16 bytes (memory management)
-        //   ├── output_data: ArrayList(u8)      // 24 bytes
-        // 
-        //   Cold Data - Rarely accessed during normal execution
-        // 
-        //   ├── evm_ptr: *anyopaque             // 8 bytes (only for system calls/destruction)
-        //   ├── self_destruct: ?*SelfDestruct   // 8 bytes (cold data for selfdestruct)
-        //   └── [other cold fields]             // varies
+        //   CACHE LINE 2 (64-127 bytes) - CALL CONTEXT & LOGS
+        //   ┌─────────────────────────────────────────────────────────────┐
+        //   │ Offset │ Field              │ Size  │ Type                  │
+        //   ├────────┼────────────────────┼───────┼───────────────────────┤
+        //   │ 64     │ evm_ptr            │ 8B    │ *anyopaque            │
+        //   │ 72     │ caller             │ 20B   │ Address               │
+        //   │ 92     │ value              │ 32B   │ u256 (WordType)       │
+        //   │ 124    │ log_items          │ 8B    │ [*]Log                │
+        //   │ 132    │ log_len            │ 2B    │ u16                   │
+        //   │ 134    │ [padding]          │ 6B    │ alignment             │
+        //   │ 140    │ [exceeds line 2]   │       │                       │
+        //   └─────────────────────────────────────────────────────────────┘
+        //
+        //   CACHE LINE 3 (128-191 bytes) - EXECUTION STATE  
+        //   ┌─────────────────────────────────────────────────────────────┐
+        //   │ Offset │ Field              │ Size  │ Type                  │
+        //   ├────────┼────────────────────┼───────┼───────────────────────┤
+        //   │ 128    │ contract_address   │ 20B   │ Address               │
+        //   │ 148    │ calldata           │ 16B   │ []const u8 (slice)    │
+        //   │ 164    │ output_data        │ 24B   │ ArrayList(u8)         │
+        //   │ 188    │ [padding]          │ 4B    │ alignment             │
+        //   │ 192    │ [end of line 3]    │       │                       │
+        //   └─────────────────────────────────────────────────────────────┘
+        //
+        //   CACHE LINE 4+ (192+ bytes) - COLD DATA
+        //   ┌─────────────────────────────────────────────────────────────┐
+        //   │ Offset │ Field              │ Size     │ Type                │
+        //   ├────────┼────────────────────┼──────────┼─────────────────────┤
+        //   │ 192    │ block_info         │ Variable │ BlockInfo           │
+        //   │        │                    │          │                     │
+        //   │        │ Default BlockInfo sizes:                             │
+        //   │        │ - number: u64      │ 8B       │                     │
+        //   │        │ - timestamp: u64   │ 8B       │                     │
+        //   │        │ - difficulty: u256 │ 32B      │                     │
+        //   │        │ - gas_limit: u64   │ 8B       │                     │
+        //   │        │ - coinbase: Address│ 20B      │                     │
+        //   │        │ - base_fee: u256   │ 32B      │                     │
+        //   │        │ - prev_randao: [32]│ 32B      │                     │
+        //   │        │ - blob_base_fee:u256│32B      │                     │
+        //   │        │ - blob_versioned_  │ 16B      │ slice ptr           │
+        //   │        │   hashes           │          │                     │
+        //   │        │ Total BlockInfo    │ ~188B    │                     │
+        //   │ ~380   │ self_destruct      │ 8B       │ ?*SelfDestruct      │
+        //   │ ~388   │ [padding to 8B]    │ 4B       │                     │
+        //   │ ~392   │ [total with pad]   │          │                     │
+        //   └─────────────────────────────────────────────────────────────┘
         // 
         //  Component-Level Alignment Details
         //
@@ -181,13 +213,22 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         //  - Implementation: Single pointer or lightweight interface
         //  - Cache-friendly: Fits perfectly in hot path cache line
         //
-        //   OPTIMIZED Memory Layout Visualization
+        //   OPTIMIZED Memory Layout Visualization (64-byte cache lines)
         // 
-        // Cache Line 1 (0-63):   [Stack(16)][Gas(8)][Memory(16)][Database(8)][Allocator(16)] = 64 bytes
-        // Cache Line 2 (64-127): [EVM*(8)][Caller(20)][Value(32)][LogItems(8)][LogLen(2)] = 70 bytes (6B padding)
-        // Cache Line 3 (128-191):[Contract(20)][Calldata(16)][Output(24)] = 60 bytes (4B padding)
-        // Cache Line 4+ (192+):  [BlockInfo(~188)][SelfDest*(8)] = Cold data
-        // Note: Tracer is not stored in the struct - it's a compile-time parameter
+        //   With i64 gas_remaining (common case):
+        //   Cache Line 1 (0-63):    Stack[0-15] Gas[16-23] Memory[24-39] Database[40-47] Allocator[48-63]
+        //   Cache Line 2 (64-127):  EVM*[64-71] Caller[72-91] Value[92-123] LogItems[124-131] LogLen[132-133] PAD[134-127]
+        //   Cache Line 3 (128-191): Contract[128-147] Calldata[148-163] Output[164-187] PAD[188-191]
+        //   Cache Line 4+ (192+):   BlockInfo[192-379] SelfDestruct[380-387] PAD[388-391]
+        //
+        //   With i32 gas_remaining (gas_limit <= 2^31):
+        //   Cache Line 1 (0-63):    Stack[0-15] Gas[16-19] Memory[20-35] Database[36-43] Allocator[44-59] PAD[60-63]
+        //   (Following lines shift by 4 bytes)
+        //
+        //   Note: Exact offsets depend on:
+        //   - GasType size (i32 vs i64)
+        //   - Struct field alignment rules
+        //   - Platform ABI (though we target 8-byte alignment)
         //
         // PERFORMANCE IMPACT: This optimization achieves:
         // - Single cache line access for 99% of opcode execution (hot path)
@@ -199,6 +240,21 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         // - Inlined log storage saves 14 bytes vs LogList struct ([]Log+u16 = 24 -> [*]Log+u16 = 10)
         // - 6 bytes padding available in cache line 2 for future optimizations
         // - 4 bytes padding available in cache line 3 for future optimizations
+        //
+        // BlockInfo Size Variations (based on BlockInfoConfig):
+        // 
+        // Default BlockInfo (use_compact_types = false):
+        //   - Total: ~188 bytes
+        //   - difficulty: u256 (32B), base_fee: u256 (32B), blob_base_fee: u256 (32B)
+        //
+        // Compact BlockInfo (use_compact_types = true):
+        //   - Total: ~116 bytes (saves 72 bytes!)
+        //   - difficulty: u64 (8B), base_fee: u64 (8B), blob_base_fee: u64 (8B)
+        //   - Practical for most use cases as real values fit in u64
+        //
+        // Custom BlockInfo (e.g., DifficultyType = u128, BaseFeeType = u96):
+        //   - Total: Variable based on types
+        //   - Allows fine-tuned memory/precision tradeoffs
         
         // HOT PATH - Cache Line 1 (Most frequently accessed)
         stack: Stack,
