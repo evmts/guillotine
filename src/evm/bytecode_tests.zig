@@ -381,7 +381,7 @@ test "Bytecode.getStats - runtime code detection" {
     try std.testing.expect(!stats.is_create_code);
 }
 
-test "Bytecode SIMD opcode validation" {
+test "Bytecode opcode validation" {
     const allocator = std.testing.allocator;
 
     // Test bytecode with invalid opcode (0x0C is not assigned)
@@ -464,7 +464,7 @@ test "Bytecode calculateInitcodeGas - EIP-3860" {
     try std.testing.expectEqual(@as(u64, 3072), BytecodeDefault.calculateInitcodeGas(default_config.max_initcode_size));
 }
 
-test "Bytecode SIMD fusion pattern detection" {
+test "Bytecode fusion pattern detection" {
     const allocator = std.testing.allocator;
 
     // Test all fusion patterns: PUSH + ADD/SUB/MUL/DIV/JUMP/JUMPI
@@ -710,7 +710,7 @@ test "Bytecode.parseSolidityMetadata" {
     try std.testing.expect(short_metadata == null);
 }
 
-test "Bytecode SIMD edge cases - very short bytecode" {
+test "Bytecode edge cases - very short bytecode" {
     const allocator = std.testing.allocator;
 
     // Test SIMD operations with bytecode shorter than vector length
@@ -720,7 +720,7 @@ test "Bytecode SIMD edge cases - very short bytecode" {
 
     try std.testing.expectEqual(@as(usize, 1), bytecode.len());
 
-    // Test that SIMD validation still works with short code
+    // Test that validation still works with short code
     const stats = try bytecode.getStats();
     defer {
         allocator.free(stats.push_values);
@@ -732,10 +732,10 @@ test "Bytecode SIMD edge cases - very short bytecode" {
     try std.testing.expectEqual(@as(u32, 1), stats.opcode_counts[@intFromEnum(Opcode.STOP)]);
 }
 
-test "Bytecode SIMD edge cases - bytecode at vector boundaries" {
+test "Bytecode edge cases - bytecode at vector boundaries" {
     const allocator = std.testing.allocator;
 
-    // Create bytecode with length exactly at common SIMD vector sizes
+    // Create bytecode with length exactly at common vector sizes
     const vector_sizes = [_]usize{ 8, 16, 32, 64 };
 
     for (vector_sizes) |size| {
@@ -762,7 +762,7 @@ test "Bytecode SIMD edge cases - bytecode at vector boundaries" {
     }
 }
 
-test "Bytecode SIMD fusion detection at boundaries" {
+test "Bytecode fusion detection at boundaries" {
     const allocator = std.testing.allocator;
 
     // Test fusion detection when PUSH+OP spans vector boundaries
@@ -855,7 +855,7 @@ test "Bytecode bitmap operations - empty ranges" {
     try std.testing.expectEqual(@as(usize, 1), BytecodeDefault.countBitsInRange(bitmap, 31, 32));
 }
 
-test "Bytecode SIMD markJumpdest edge cases" {
+test "Bytecode markJumpdest edge cases" {
     const allocator = std.testing.allocator;
 
     // Create bytecode with JUMPDEST at various positions including boundaries
@@ -897,7 +897,7 @@ test "Bytecode SIMD markJumpdest edge cases" {
     }
 }
 
-test "Bytecode complex PUSH patterns with SIMD" {
+test "Bytecode complex PUSH patterns" {
     const allocator = std.testing.allocator;
 
     // Create complex bytecode with all PUSH sizes
@@ -1917,7 +1917,7 @@ test "Bytecode iterator - fusion detection PUSH+ADD" {
             },
             else => {
                 // For now, might not detect fusion until bitmap is properly built
-                // This test will pass once SIMD bitmap building is implemented
+                // This test will pass once bitmap building is fully implemented
             },
         }
     } else {
