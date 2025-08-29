@@ -70,7 +70,8 @@ pub fn Frame(comptime config: FrameConfig) type {
         const Self = @This();
         /// The type all opcode handlers return.
         /// Opcode handlers are expected to recursively dispatch the next opcode if they themselves don't error or return
-        pub const OpcodeHandler = *const fn (frame: *Self, dispatch: Dispatch) Error!noreturn;
+        /// Takes cursor pointer with jump table available through dispatch metadata when needed
+        pub const OpcodeHandler = *const fn (frame: *Self, cursor: [*]const Dispatch.Item) Error!noreturn;
         /// The struct in charge of efficiently dispatching opcode handlers and providing them metadata
         pub const Dispatch = dispatch_mod.Dispatch(Self);
         /// The config passed into Frame(config)
@@ -82,7 +83,7 @@ pub fn Frame(comptime config: FrameConfig) type {
             return if (builtin.target.cpu.arch == .wasm32 or builtin.target.cpu.arch == .wasm64)
                 .auto
             else
-                .always_tail; // Can use always_tail with Error!noreturn handlers
+                .always_tail; // Must use always_tail for performance
         }
         /// The "word" type used by the evm. Defaults to u256. "Word" is the type used by Stack and throughout the Evm
         /// If set to something else the EVM will update to that new word size. e.g. run kekkak128 instead of kekkak256
@@ -116,6 +117,19 @@ pub fn Frame(comptime config: FrameConfig) type {
 
         /// A fixed size array of opcode handlers indexed by opcode number
         pub const opcode_handlers: [256]OpcodeHandler = frame_handlers.getOpcodeHandlers(Self);
+        
+        // Individual handler groups for testing and direct access
+        pub const ArithmeticHandlers = @import("handlers_arithmetic.zig").Handlers(Self);
+        pub const BitwiseHandlers = @import("handlers_bitwise.zig").Handlers(Self);
+        pub const ComparisonHandlers = @import("handlers_comparison.zig").Handlers(Self);
+        pub const ContextHandlers = @import("handlers_context.zig").Handlers(Self);
+        pub const JumpHandlers = @import("handlers_jump.zig").Handlers(Self);
+        pub const KeccakHandlers = @import("handlers_keccak.zig").Handlers(Self);
+        pub const LogHandlers = @import("handlers_log.zig").Handlers(Self);
+        pub const MemoryHandlers = @import("handlers_memory.zig").Handlers(Self);
+        pub const StackHandlers = @import("handlers_stack.zig").Handlers(Self);
+        pub const StorageHandlers = @import("handlers_storage.zig").Handlers(Self);
+        pub const SystemHandlers = @import("handlers_system.zig").Handlers(Self);
 
         // CACHE LINE 1 (0-63 bytes) - ULTRA HOT PATH
         stack: Stack, // 16B - Stack operations
@@ -260,7 +274,7 @@ pub fn Frame(comptime config: FrameConfig) type {
                 }
 
                 const cursor = Self.Dispatch{ .cursor = traced_schedule.ptr + start_index, .jump_table = &traced_jump_table };
-                cursor.cursor[0].opcode_handler(self, cursor) catch |err| return err;
+                cursor.cursor[0].opcode_handler(self, &cursor) catch |err| return err;
                 unreachable; // Handlers never return normally
             } else {
                 log.debug("DISPATCH INIT: bytecode len={d}", .{bytecode.runtime_code.len});
@@ -271,6 +285,17 @@ pub fn Frame(comptime config: FrameConfig) type {
                 };
                 log.debug("DISPATCH INIT COMPLETE: schedule len={d}, opcode_count={d}", .{ schedule.len, bytecode.runtime_code.len });
                 defer Dispatch.deinitSchedule(self.allocator, schedule);
+                
+                // Pretty print the dispatch schedule for debugging
+                if (true) { // Always enabled for debugging the segfault
+                    var temp_schedule = Dispatch.DispatchSchedule{
+                        .items = schedule,
+                        .allocator = self.allocator,
+                    };
+                    const schedule_str = temp_schedule.pretty_print(self.allocator) catch "Failed to pretty print";
+                    defer if (!std.mem.eql(u8, schedule_str, "Failed to pretty print")) self.allocator.free(schedule_str);
+                    log.warn("Dispatch Schedule:\n{s}", .{schedule_str});
+                }
                 if (schedule.len < 3) {
                     log.err("Dispatch schedule is too short! len={d}", .{schedule.len});
                     log.err("  Bytecode len: {d}", .{bytecode.runtime_code.len});
@@ -295,8 +320,22 @@ pub fn Frame(comptime config: FrameConfig) type {
                 }
 
                 const cursor = Self.Dispatch{ .cursor = schedule.ptr + start_index, .jump_table = &jump_table };
-                log.debug("Starting execution at schedule index {}, first handler: {*}", .{ start_index, cursor.cursor[0].opcode_handler });
-                cursor.cursor[0].opcode_handler(self, cursor) catch |err| return err;
+                
+                // Debug: Check what the first item actually is
+                const first_item_tag = @tagName(cursor.cursor[0]);
+                if (!std.mem.eql(u8, first_item_tag, "opcode_handler")) {
+                    log.err("First dispatch item is not opcode_handler! It's {s}", .{first_item_tag});
+                    log.err("  Schedule length: {}", .{schedule.len});
+                    log.err("  Start index: {}", .{start_index});
+                    for (0..@min(10, schedule.len)) |i| {
+                        log.err("  Schedule[{}]: {s}", .{ i, @tagName(schedule[i]) });
+                    }
+                    return Error.InvalidOpcode;
+                }
+                
+                log.debug("Starting execution at schedule index {}, first item: {s}", .{ start_index, first_item_tag });
+                // Pass cursor pointer and jump_table separately - no Dispatch struct needed
+                cursor.cursor[0].opcode_handler(self, cursor.cursor) catch |err| return err;
                 unreachable; // Handlers never return normally
             }
 

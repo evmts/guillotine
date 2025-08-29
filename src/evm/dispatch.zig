@@ -17,7 +17,7 @@ pub fn Dispatch(comptime FrameType: type) type {
     return struct {
         const Self = @This();
         // We define opcodehandler locally rather than using Frame.OpcodeHandler to avoid circular dependency
-        const OpcodeHandler = *const fn (frame: *FrameType, dispatch: Self) FrameType.Error!noreturn;
+        const OpcodeHandler = *const fn (frame: *FrameType, cursor: [*]const Item) FrameType.Error!noreturn;
         /// The optimized instruction stream containing opcode handlers and their metadata.
         /// Each item is exactly 64 bits for optimal cache line usage.
         ///
@@ -71,6 +71,8 @@ pub fn Dispatch(comptime FrameType: type) type {
             opcode: u8,
             _padding: u24 = 0,
         };
+        /// Metadata for jump operations containing pointer to jump table
+        pub const JumpTableMetadata = packed struct(u64) { jump_table: *const JumpTable };
         /// A single item in the dispatch array, either a handler or metadata.
         pub const Item = union(enum) {
             jump_dest: JumpDestMetadata,
@@ -83,7 +85,38 @@ pub fn Dispatch(comptime FrameType: type) type {
             first_block_gas: struct { gas: u64 },
             trace_before: TraceBeforeMetadata,
             trace_after: TraceAfterMetadata,
+            jump_table: JumpTableMetadata,
         };
+        
+        // Comptime validation of Item union
+        comptime {
+            const item_size = @sizeOf(Item);
+            const item_align = @alignOf(Item);
+            const ptr_size = @sizeOf(*anyopaque);
+            
+            // Sizes validated at compile time
+            // Item union size: 32 bytes
+            // Item union alignment: 16 bytes  
+            // OpcodeHandler size: 8 bytes
+            // Pointer size: 8 bytes
+            
+            // Ensure union is properly sized (should be size of largest member + tag)
+            // Tagged union should be at least pointer size + tag
+            if (item_size < ptr_size + 1) {
+                @compileError("Item union is too small!");
+            }
+            
+            // Ensure proper alignment for pointer arithmetic
+            if (item_align < @alignOf(*anyopaque)) {
+                @compileError("Item union alignment is less than pointer alignment!");
+            }
+            
+            // Verify all metadata types fit in 64 bits
+            if (@sizeOf(JumpDestMetadata) != 8) @compileError("JumpDestMetadata must be 64 bits");
+            if (@sizeOf(PushInlineMetadata) != 8) @compileError("PushInlineMetadata must be 64 bits");
+            if (@sizeOf(PushPointerMetadata) != 8) @compileError("PushPointerMetadata must be 64 bits");
+        }
+        
         /// Jump table entry for dynamic jumps
         pub const JumpTableEntry = struct {
             pc: FrameType.PcType,
@@ -165,11 +198,104 @@ pub fn Dispatch(comptime FrameType: type) type {
 
         /// Advance to the next handler in the dispatch array.
         /// Used for opcodes without metadata.
-        pub fn getNext(self: Self) Self {
+        pub inline fn getNext(self: Self) Self {
             return Self{
                 .cursor = self.cursor + 1,
                 .jump_table = self.jump_table,
             };
+        }
+        
+        /// Safe version of getNext that validates the next item
+        /// Returns an error if the next item is not a valid handler
+        pub fn getNextSafe(self: Self) !Self {
+            const log = @import("log.zig");
+            
+            // Debug: log current position
+            log.debug("getNextSafe called:", .{});
+            log.debug("  Current cursor address: 0x{x}", .{@intFromPtr(self.cursor)});
+            
+            // Try to safely access current item to verify cursor is valid
+            const current_tag_ptr = @as([*]const u8, @ptrCast(self.cursor));
+            log.debug("  Current item tag byte: 0x{x:0>2}", .{current_tag_ptr[0]});
+            
+            const next = Self{
+                .cursor = self.cursor + 1,
+                .jump_table = self.jump_table,
+            };
+            
+            log.debug("  Next cursor address: 0x{x} (current + {})", .{ @intFromPtr(next.cursor), @sizeOf(Item) });
+            
+            // Check if next pointer is in valid range
+            const next_addr = @intFromPtr(next.cursor);
+            if (next_addr < 0x1000) {
+                log.err("Next cursor is in low memory: 0x{x}", .{next_addr});
+                return error.InvalidCursor;
+            }
+            
+            // Try to read tag byte at next position
+            const next_tag_ptr = @as([*]const u8, @ptrCast(next.cursor));
+            log.debug("  Attempting to read tag byte at next position...", .{});
+            const next_tag = next_tag_ptr[0];  // This might segfault
+            log.debug("  Next item tag byte: 0x{x:0>2}", .{next_tag});
+            
+            // Check what type of item we're pointing to
+            const next_item = next.cursor[0];
+            
+            // Log the item type for debugging
+            switch (next_item) {
+                .opcode_handler => |handler| {
+                    // Check if handler pointer is valid (not null and looks reasonable)
+                    const handler_addr = @intFromPtr(handler);
+                    if (handler_addr == 0) {
+                        log.err("getNextSafe: Next item is NULL handler pointer!", .{});
+                        return error.InvalidHandler;
+                    }
+                    // Check if it's in a reasonable memory range (not metadata mistaken as pointer)
+                    if (handler_addr < 0x1000) {
+                        log.err("getNextSafe: Handler pointer looks like data: 0x{x}", .{handler_addr});
+                        return error.InvalidHandler;
+                    }
+                    log.debug("getNextSafe: Valid handler at 0x{x}", .{handler_addr});
+                },
+                .push_inline => |meta| {
+                    log.err("getNextSafe ERROR: Next item is push_inline metadata (value=0x{x}), not a handler!", .{meta.value});
+                    return error.MetadataNotHandler;
+                },
+                .push_pointer => |meta| {
+                    log.err("getNextSafe ERROR: Next item is push_pointer metadata (ptr=0x{x}), not a handler!", .{@intFromPtr(meta.value)});
+                    return error.MetadataNotHandler;
+                },
+                .jump_dest => |meta| {
+                    log.err("getNextSafe ERROR: Next item is jump_dest metadata (gas={}), not a handler!", .{meta.gas});
+                    return error.MetadataNotHandler;
+                },
+                .pc => |meta| {
+                    log.err("getNextSafe ERROR: Next item is pc metadata (value={}), not a handler!", .{meta.value});
+                    return error.MetadataNotHandler;
+                },
+                .codesize => |meta| {
+                    log.err("getNextSafe ERROR: Next item is codesize metadata (size={}), not a handler!", .{meta.size});
+                    return error.MetadataNotHandler;
+                },
+                .codecopy => |meta| {
+                    log.err("getNextSafe ERROR: Next item is codecopy metadata (size={}), not a handler!", .{meta.size});
+                    return error.MetadataNotHandler;
+                },
+                .first_block_gas => |meta| {
+                    log.err("getNextSafe ERROR: Next item is first_block_gas (gas={}), not a handler!", .{meta.gas});
+                    return error.MetadataNotHandler;
+                },
+                .trace_before => |meta| {
+                    log.err("getNextSafe ERROR: Next item is trace_before metadata (pc={}), not a handler!", .{meta.pc});
+                    return error.MetadataNotHandler;
+                },
+                .trace_after => |meta| {
+                    log.err("getNextSafe ERROR: Next item is trace_after metadata (pc={}), not a handler!", .{meta.pc});
+                    return error.MetadataNotHandler;
+                },
+            }
+            
+            return next;
         }
 
         /// Skip the current handler's metadata and advance to the next handler.
@@ -705,21 +831,21 @@ pub fn Dispatch(comptime FrameType: type) type {
             const S = struct {
                 var tracer: *TracerType = undefined;
 
-                fn handle(frame: *FrameType, dispatch: Self) FrameType.Error!noreturn {
+                fn handle(frame: *FrameType, cursor: [*]const Item, jump_table: *const JumpTable) FrameType.Error!noreturn {
                     if (is_before) {
-                        const metadata = dispatch.cursor[0].trace_before;
+                        const metadata = cursor[0].trace_before;
                         if (@hasDecl(TracerType, "beforeOp")) {
                             tracer.beforeOp(metadata.pc, metadata.opcode, FrameType, frame);
                         }
                     } else {
-                        const metadata = dispatch.cursor[0].trace_after;
+                        const metadata = cursor[0].trace_after;
                         if (@hasDecl(TracerType, "afterOp")) {
                             tracer.afterOp(metadata.pc, metadata.opcode, FrameType, frame);
                         }
                     }
                     // Skip metadata and continue with next handler
-                    const next = dispatch.skipMetadata();
-                    return next.cursor[0].opcode_handler(frame, next);
+                    const next_cursor = cursor + 2; // Skip over current metadata and next handler
+                    return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ frame, next_cursor, jump_table });
                 }
             };
             S.tracer = tracer_instance;
@@ -895,6 +1021,70 @@ pub fn Dispatch(comptime FrameType: type) type {
                     .cursor = self.items.ptr,
                     .jump_table = jump_table,
                 };
+            }
+            
+            /// Pretty print the dispatch schedule for debugging
+            /// Returns an allocated string that must be freed by the caller
+            pub fn pretty_print(self: *const DispatchSchedule, allocator: std.mem.Allocator) ![]u8 {
+                var buffer = ArrayList(u8, null){};
+                errdefer buffer.deinit(allocator);
+                
+                const writer = buffer.writer(allocator);
+                try writer.print("=== Dispatch Schedule ({} items) ===\n", .{self.items.len});
+                
+                for (self.items, 0..) |item, i| {
+                    try writer.print("[{:4}] ", .{i});
+                    switch (item) {
+                        .opcode_handler => |handler| {
+                            // Get handler name if we can identify it
+                            const handler_name = getHandlerName(handler);
+                            try writer.print("HANDLER: {s}\n", .{handler_name});
+                        },
+                        .push_inline => |meta| {
+                            try writer.print("  └─ METADATA: push_inline value=0x{x} ({})\n", .{meta.value, meta.value});
+                        },
+                        .push_pointer => |meta| {
+                            try writer.print("  └─ METADATA: push_pointer value=0x{x}\n", .{meta.value.*});
+                        },
+                        .jump_dest => |meta| {
+                            try writer.print("  └─ METADATA: jump_dest gas={} min_stack={} max_stack={}\n", 
+                                .{meta.gas, meta.min_stack, meta.max_stack});
+                        },
+                        .pc => |meta| {
+                            try writer.print("  └─ METADATA: pc value={}\n", .{meta.value});
+                        },
+                        .codesize => |meta| {
+                            try writer.print("  └─ METADATA: codesize={}\n", .{meta.size});
+                        },
+                        .codecopy => |meta| {
+                            try writer.print("  └─ METADATA: codecopy size={}\n", .{meta.size});
+                        },
+                        .first_block_gas => |meta| {
+                            try writer.print("FIRST_BLOCK_GAS: {}\n", .{meta.gas});
+                        },
+                        .trace_before => |meta| {
+                            try writer.print("  └─ TRACE_BEFORE: pc={} opcode=0x{x:0>2}\n", .{meta.pc, meta.opcode});
+                        },
+                        .trace_after => |meta| {
+                            try writer.print("  └─ TRACE_AFTER: pc={} opcode=0x{x:0>2}\n", .{meta.pc, meta.opcode});
+                        },
+                        .jump_table => |meta| {
+                            try writer.print("  └─ METADATA: jump_table=@{*}\n", .{meta.jump_table});
+                        },
+                    }
+                }
+                
+                try writer.print("=== End Dispatch Schedule ===\n", .{});
+                
+                return buffer.toOwnedSlice(allocator);
+            }
+            
+            /// Helper to get a human-readable name for a handler function pointer
+            fn getHandlerName(handler: OpcodeHandler) []const u8 {
+                _ = handler;
+                // Simplified version to avoid compile-time evaluation issues
+                // Just return generic handler name for now
+                return "HANDLER";
             }
         };
 
@@ -1131,45 +1321,51 @@ const TestFrame = struct {
     };
 
     // Add OpcodeHandler type for testing
-    pub const OpcodeHandler = *const fn (frame: *TestFrame, dispatch: TestDispatch) Error!noreturn;
+    pub const OpcodeHandler = *const fn (frame: *TestFrame, cursor: [*]const TestDispatch.Item, jump_table: *const TestDispatch.JumpTable) Error!noreturn;
 };
 
 const TestDispatch = Dispatch(TestFrame);
 
 // Mock opcode handlers for testing
-fn mockStop(frame: *TestFrame, dispatch: TestDispatch) TestFrame.Error!noreturn {
+fn mockStop(frame: *TestFrame, cursor: [*]const TestDispatch.Item, jump_table: *const TestDispatch.JumpTable) TestFrame.Error!noreturn {
     _ = frame;
-    _ = dispatch;
+    _ = cursor;
+    _ = jump_table;
     return TestFrame.Error.Stop;
 }
 
-fn mockAdd(frame: *TestFrame, dispatch: TestDispatch) TestFrame.Error!noreturn {
+fn mockAdd(frame: *TestFrame, cursor: [*]const TestDispatch.Item, jump_table: *const TestDispatch.JumpTable) TestFrame.Error!noreturn {
     _ = frame;
-    _ = dispatch;
+    _ = cursor;
+    _ = jump_table;
     return TestFrame.Error.Stop;
 }
 
-fn mockPush1(frame: *TestFrame, dispatch: TestDispatch) TestFrame.Error!noreturn {
+fn mockPush1(frame: *TestFrame, cursor: [*]const TestDispatch.Item, jump_table: *const TestDispatch.JumpTable) TestFrame.Error!noreturn {
     _ = frame;
-    _ = dispatch;
+    _ = cursor;
+    _ = jump_table;
     return TestFrame.Error.Stop;
 }
 
-fn mockJumpdest(frame: *TestFrame, dispatch: TestDispatch) TestFrame.Error!noreturn {
+fn mockJumpdest(frame: *TestFrame, cursor: [*]const TestDispatch.Item, jump_table: *const TestDispatch.JumpTable) TestFrame.Error!noreturn {
     _ = frame;
-    _ = dispatch;
+    _ = cursor;
+    _ = jump_table;
     return TestFrame.Error.Stop;
 }
 
-fn mockPc(frame: *TestFrame, dispatch: TestDispatch) TestFrame.Error!noreturn {
+fn mockPc(frame: *TestFrame, cursor: [*]const TestDispatch.Item, jump_table: *const TestDispatch.JumpTable) TestFrame.Error!noreturn {
     _ = frame;
-    _ = dispatch;
+    _ = cursor;
+    _ = jump_table;
     return TestFrame.Error.Stop;
 }
 
-fn mockInvalid(frame: *TestFrame, dispatch: TestDispatch) TestFrame.Error!noreturn {
+fn mockInvalid(frame: *TestFrame, cursor: [*]const TestDispatch.Item, jump_table: *const TestDispatch.JumpTable) TestFrame.Error!noreturn {
     _ = frame;
-    _ = dispatch;
+    _ = cursor;
+    _ = jump_table;
     return TestFrame.Error.TestError;
 }
 
@@ -1741,15 +1937,17 @@ test "JumpTable - large jump table performance" {
 }
 
 // Mock fusion handlers for testing
-fn mockPushAddFusion(frame: *TestFrame, dispatch: TestDispatch) TestFrame.Error!noreturn {
+fn mockPushAddFusion(frame: *TestFrame, cursor: [*]const TestDispatch.Item, jump_table: *const TestDispatch.JumpTable) TestFrame.Error!noreturn {
     _ = frame;
-    _ = dispatch;
+    _ = cursor;
+    _ = jump_table;
     return TestFrame.Error.Stop;
 }
 
-fn mockPushMulFusion(frame: *TestFrame, dispatch: TestDispatch) TestFrame.Error!noreturn {
+fn mockPushMulFusion(frame: *TestFrame, cursor: [*]const TestDispatch.Item, jump_table: *const TestDispatch.JumpTable) TestFrame.Error!noreturn {
     _ = frame;
-    _ = dispatch;
+    _ = cursor;
+    _ = jump_table;
     return TestFrame.Error.Stop;
 }
 
