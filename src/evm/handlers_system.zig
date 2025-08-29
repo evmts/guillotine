@@ -562,10 +562,13 @@ pub fn Handlers(comptime FrameType: type) type {
 
             // Extract return data from memory and store it
             if (size_usize > 0) {
+                log.debug("RETURN: Getting memory slice at offset {} size {}", .{offset_usize, size_usize});
+                log.debug("RETURN: Memory size before get_slice: {}", .{self.memory.size()});
                 const return_data = self.memory.get_slice(@as(u24, @intCast(offset_usize)), @as(u24, @intCast(size_usize))) catch {
                     log.err("RETURN: Failed to get memory slice at offset {} size {}", .{offset_usize, size_usize});
                     return Error.OutOfBounds;
                 };
+                log.debug("RETURN: Got memory slice, length: {}, data: {x}", .{return_data.len, return_data});
                 // Free previous output if any
                 if (self.output.len > 0) {
                     self.allocator.free(self.output);
@@ -576,6 +579,7 @@ pub fn Handlers(comptime FrameType: type) type {
                 };
                 @memcpy(self.output, return_data);
                 log.debug("RETURN: Stored {} bytes to output", .{return_data.len});
+                log.debug("RETURN: self.output data: {x}", .{self.output});
             } else {
                 // Empty return data
                 if (self.output.len > 0) {
