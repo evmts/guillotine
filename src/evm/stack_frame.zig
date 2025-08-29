@@ -119,14 +119,17 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         //   Total Size: ~104-120 bytes (optimized from ~120-136 bytes, varies by config.has_database)
         //   Alignment: 8 bytes (pointer alignment)
         //
-        //   OPTIMIZED: Cache Line 1 (0-63) - Hot Path - Context prioritized
+        //   OPTIMIZED: Cache Line 1 (0-63) - Hot Path - Call data prioritized
         //
         //   All frequently accessed components during opcode execution:
         //   ├── stack: Stack                    // 16 bytes (optimized: buf_ptr + stack_ptr)
         //   ├── gas_remaining: GasType          // 8 bytes (i64 for performance)
         //   ├── memory: Memory                  // 16 bytes
         //   ├── database: DatabaseInterface     // 8 bytes (optimized from 16 bytes)
-        //   ├── context: Context                // ~80 bytes (execution context data - spans cache lines)
+        //   ├── caller: Address                 // 20 bytes (call context)
+        //   ├── value: WordType                 // 32 bytes (call value)
+        //   ├── calldata: []const u8            // 16 bytes (slice)
+        //   ├── block_info: BlockInfo           // ~variable bytes (cold data)
         //   Total: Hot path optimized with context prioritized over host access
         // 
         //   Cache Line 2+ - Execution State & Memory Management
@@ -182,39 +185,44 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         //
         //   OPTIMIZED Memory Layout Visualization
         // 
-        // Cache Line 1 (0-63):   [Stack(16)][Gas(8)][Memory(16)][Database(8)][evm_ptr(8)][Available(8)] = 64 bytes
-        // Cache Line 2 (64-127): [Address(20)][LogItems(8)][LogLen(2)][Allocator(16)][Available(~18)] = ~64 bytes
-        // Cache Line 3 (128+):   [Output(24)][SelfDest*(8)][Available(~32)]
+        // Cache Line 1 (0-63):   [Stack(16)][Gas(8)][Memory(16)][Database(8)][Allocator(16)] = 64 bytes
+        // Cache Line 2 (64-127): [EVM*(8)][Caller(20)][Value(32)][LogItems(8)][LogLen(2)] = 70 bytes (6B padding)
+        // Cache Line 3 (128-191):[Contract(20)][Calldata(16)][Output(24)] = 60 bytes (4B padding)
+        // Cache Line 4+ (192+):  [BlockInfo(~188)][SelfDest*(8)] = Cold data
         // Note: Tracer is not stored in the struct - it's a compile-time parameter
         //
         // PERFORMANCE IMPACT: This optimization achieves:
         // - Single cache line access for 99% of opcode execution (hot path)
-        // - 16+ bytes total struct size reduction 
+        // - Log operations (LOG0-LOG4) access log_items and log_len atomically in cache line 2
         // - Perfect cache alignment eliminates cache line splits
-        // - Stack/Gas/Memory/Database/EVM operations share optimal locality
-        // - Atomic address access (no cross-cache-line splits)
-        // - Allocator in cache line 2 for efficient memory operations
+        // - Stack/Gas/Memory/Database/Allocator share optimal locality in cache line 1
+        // - Call context (caller/value) and log data co-located for CALL/LOG operations
+        // - BlockInfo moved to cold storage as it's rarely accessed during execution
         // - Inlined log storage saves 14 bytes vs LogList struct ([]Log+u16 = 24 -> [*]Log+u16 = 10)
-        // - [*]Log + u16 enables tight packing with other small fields in cache line 2
-        // - 18 bytes available in cache line 2 for future optimizations
-        // - 8 bytes reserved in cache line 1 for future optimizations
-        // HOT PATH - Cache Line 1+
+        // - 6 bytes padding available in cache line 2 for future optimizations
+        // - 4 bytes padding available in cache line 3 for future optimizations
+        
+        // HOT PATH - Cache Line 1 (Most frequently accessed)
         stack: Stack,
         gas_remaining: GasType, 
         memory: Memory,
         database: config.DatabaseType,
-        context: Context,
+        allocator: std.mem.Allocator,
         
-        // EXECUTION STATE
-        contract_address: Address = Address.ZERO_ADDRESS,
-        // Inlined LogList fields for optimal packing
+        // CALL CONTEXT & LOGS - Cache Line 2 
+        evm_ptr: *anyopaque,
+        caller: Address,
+        value: WordType,
         log_items: [*]Log,
         log_len: u16,
-        allocator: std.mem.Allocator,
+        
+        // EXECUTION STATE - Cache Line 3
+        contract_address: Address = Address.ZERO_ADDRESS,
+        calldata: []const u8,
         output_data: std.ArrayList(u8),
         
-        // COLD DATA - Rarely accessed
-        evm_ptr: *anyopaque,
+        // COLD DATA - Cache Line 4+
+        block_info: BlockInfo,
         self_destruct: ?*SelfDestruct = null,
         /// Initialize a new execution frame.
         ///
@@ -224,7 +232,7 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         /// 
         /// EIP-214: For static calls, self_destruct should be null to prevent 
         /// SELFDESTRUCT operations which modify blockchain state.
-        pub fn init(allocator: std.mem.Allocator, gas_remaining: GasType, database: config.DatabaseType, context: Context, evm_ptr: *anyopaque, self_destruct: ?*SelfDestruct) Error!Self {
+        pub fn init(allocator: std.mem.Allocator, gas_remaining: GasType, database: config.DatabaseType, caller: Address, value: WordType, calldata: []const u8, block_info: BlockInfo, evm_ptr: *anyopaque, self_destruct: ?*SelfDestruct) Error!Self {
 
             var stack = Stack.init(allocator) catch {
                 @branchHint(.cold);
@@ -238,7 +246,7 @@ pub fn StackFrame(comptime config: FrameConfig) type {
             errdefer memory.deinit();
             // Initialize empty log storage
             const empty_logs = [_]Log{};
-            const frame_log_items: [*]Log = empty_logs.ptr;
+            const frame_log_items: [*]Log = @as([*]Log, @ptrFromInt(@intFromPtr(&empty_logs)));
             const frame_log_len: u16 = 0;
             var output_data = std.ArrayList(u8){};
             errdefer output_data.deinit();
@@ -247,12 +255,15 @@ pub fn StackFrame(comptime config: FrameConfig) type {
                 .gas_remaining = @as(GasType, @intCast(@max(gas_remaining, 0))),
                 .memory = memory,
                 .database = database,
-                .context = context,
+                .allocator = allocator,
+                .evm_ptr = evm_ptr,
+                .caller = caller,
+                .value = value,
                 .log_items = frame_log_items,
                 .log_len = frame_log_len,
-                .allocator = allocator,
+                .calldata = calldata,
                 .output_data = output_data,
-                .evm_ptr = evm_ptr,
+                .block_info = block_info,
                 .self_destruct = self_destruct,
             };
         }
@@ -434,7 +445,7 @@ pub fn StackFrame(comptime config: FrameConfig) type {
                 break :blk items.ptr;
             } else blk: {
                 const empty_logs = [_]Log{};
-                break :blk empty_logs.ptr;
+                break :blk @as([*]Log, @ptrFromInt(@intFromPtr(&empty_logs)));
             };
 
             var new_output_data = std.ArrayList(u8){};
@@ -446,13 +457,16 @@ pub fn StackFrame(comptime config: FrameConfig) type {
                 .gas_remaining = self.gas_remaining,
                 .memory = new_memory,
                 .database = self.database,
-                .context = self.context,
-                .contract_address = self.contract_address,
+                .allocator = allocator,
+                .evm_ptr = self.evm_ptr,
+                .caller = self.caller,
+                .value = self.value,
                 .log_items = new_log_items,
                 .log_len = self.log_len,
-                .allocator = allocator,
+                .contract_address = self.contract_address,
+                .calldata = self.calldata,
                 .output_data = new_output_data,
-                .evm_ptr = self.evm_ptr,
+                .block_info = self.block_info,
                 .self_destruct = self.self_destruct,
             };
         }

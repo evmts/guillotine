@@ -36,6 +36,9 @@ pub const FrameConfig = struct {
     /// Common values: 4, 8, 16, 32 depending on CPU (AVX, AVX2, AVX-512 support).
     // @see https://ziglang.org/documentation/master/std/#std.simd.suggestVectorLengthForCpu
     vector_length: comptime_int = std.simd.suggestVectorLengthForCpu(u8, builtin.cpu) orelse 0,
+    
+    /// Block info configuration for the frame
+    block_info_config: @import("block_info_config.zig").BlockInfoConfig = .{},
 
     /// PcType: chosen PC integer type from max_bytecode_size
     pub fn PcType(comptime self: Self) type {

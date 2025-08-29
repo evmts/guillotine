@@ -812,22 +812,8 @@ pub fn Evm(comptime config: EvmConfig) type {
                 _ = static_db_ptr.to_database_interface(); // TODO: Use static database wrapper
                 
                 // Static calls - we'll need to enforce constraints in the EVM methods themselves
-                // Convert TransactionContext to Context for Frame
-                const frame_context = @import("context.zig").Context{
-                    .origin = self.origin,
-                    .gas_price = self.gas_price,
-                    .chain_id = self.block_info.chain_id,
-                    .timestamp = self.block_info.timestamp,
-                    .block_number = self.block_info.number,
-                    .gas_limit = self.block_info.gas_limit,
-                    .base_fee = self.block_info.base_fee,
-                    .coinbase = self.block_info.coinbase,
-                    .difficulty = self.block_info.difficulty,
-                    .prevrandao = self.block_info.prevrandao,
-                    .blob_base_fee = self.block_info.blob_base_fee,
-                    .is_static = is_static,
-                };
-                var frame = try Frame.init(self.allocator, gas_cast, self.database, frame_context, evm_ptr, self_destruct_param);
+                // Pass call context data directly to frame
+                var frame = try Frame.init(self.allocator, gas_cast, self.database, caller, value, input, self.block_info, evm_ptr, self_destruct_param);
                 frame.contract_address = address;
                 defer frame.deinit(self.allocator);
 
@@ -853,23 +839,8 @@ pub fn Evm(comptime config: EvmConfig) type {
                     .SelfDestruct => return CallResult.success_with_output(gas_left, out_buf),
                 }
             } else {
-                // Non-static call - use regular interfaces
-                // Convert TransactionContext to Context for Frame
-                const frame_context = @import("context.zig").Context{
-                    .origin = self.origin,
-                    .gas_price = self.gas_price,
-                    .chain_id = self.block_info.chain_id,
-                    .timestamp = self.block_info.timestamp,
-                    .block_number = self.block_info.number,
-                    .gas_limit = self.block_info.gas_limit,
-                    .base_fee = self.block_info.base_fee,
-                    .coinbase = self.block_info.coinbase,
-                    .difficulty = self.block_info.difficulty,
-                    .prevrandao = self.block_info.prevrandao,
-                    .blob_base_fee = self.block_info.blob_base_fee,
-                    .is_static = false,
-                };
-                var frame = try Frame.init(self.allocator, gas_cast, self.database, frame_context, evm_ptr, self_destruct_param);
+                // Non-static call - pass call context data directly to frame
+                var frame = try Frame.init(self.allocator, gas_cast, self.database, caller, value, input, self.block_info, evm_ptr, self_destruct_param);
                 frame.contract_address = address;
                 defer frame.deinit(self.allocator);
 
