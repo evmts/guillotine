@@ -90,6 +90,8 @@ pub fn Memory(comptime config: MemoryConfig) type {
             const checkpoint_usize = @as(usize, self.checkpoint);
             const new_size_usize = @as(usize, new_size);
             const required_total = checkpoint_usize + new_size_usize;
+            const log = @import("log.zig");
+            log.debug("ensure_capacity: new_size={}, checkpoint={}, required_total={}, current_len={}", .{new_size_usize, checkpoint_usize, required_total, self.buffer_ptr.items.len});
             if (required_total > MEMORY_LIMIT) return MemoryError.MemoryOverflow;
             
             const current_len = self.buffer_ptr.items.len;
@@ -155,7 +157,12 @@ pub fn Memory(comptime config: MemoryConfig) type {
             const offset_usize = @as(usize, offset);
             const len_usize = @as(usize, len);
             const end = offset_usize + len_usize;
-            if (end > self.size()) return MemoryError.OutOfBounds;
+            const mem_size = self.size();
+            if (end > mem_size) {
+                const log = @import("log.zig");
+                log.err("get_slice: OutOfBounds - offset={}, len={}, end={}, size={}", .{offset_usize, len_usize, end, mem_size});
+                return MemoryError.OutOfBounds;
+            }
             const checkpoint_usize = @as(usize, self.checkpoint);
             const start_idx = checkpoint_usize + offset_usize;
             return self.buffer_ptr.items[start_idx..start_idx + len_usize];

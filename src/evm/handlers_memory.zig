@@ -78,6 +78,7 @@ pub fn Handlers(comptime FrameType: type) type {
             };
             
             log.debug("MSTORE: successfully stored value {} at offset {}", .{value_u256, offset_usize});
+            log.debug("MSTORE: Memory size after store: {}", .{self.memory.size()});
             
             const next = dispatch.getNext();
             return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
