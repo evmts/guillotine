@@ -33,15 +33,11 @@ pub fn Handlers(comptime FrameType: type) type {
             if (push_n == 0) @compileError("PUSH0 is handled as its own opcode");
             return &struct {
                 pub fn pushHandler(self: *FrameType, dispatch: Dispatch) Error!Success {
-                    log.debug("PUSH{} handler called, stack size: {}", .{push_n, self.stack.size()});
-                    
                     if (push_n <= 8) {
                         const meta = dispatch.getInlineMetadata();
-                        log.debug("PUSH{}: pushing value {} (inline)", .{push_n, meta.value});
                         self.stack.push_unsafe(meta.value);
                     } else {
                         const meta = dispatch.getPointerMetadata();
-                        log.debug("PUSH{}: pushing value {} (pointer)", .{push_n, meta.value.*});
                         self.stack.push_unsafe(meta.value.*);
                     }
                     const next = dispatch.skipMetadata();
