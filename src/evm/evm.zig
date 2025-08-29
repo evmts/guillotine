@@ -319,11 +319,57 @@ pub fn Evm(comptime config: EvmConfig) type {
                 // Reset refund counter for next transaction
                 self.gas_refund_counter = 0;
             }
-            result.logs = self.takeLogs();
+            result.logs = self.logs.toOwnedSlice(self.allocator) catch &.{};
+            self.logs = std.ArrayList(@import("call_result.zig").Log){};
             result.selfdestructs = self.takeSelfDestructs() catch &.{};
             result.accessed_addresses = self.takeAccessedAddresses() catch &.{};
             result.accessed_storage = self.takeAccessedStorage() catch &.{};
             return result;
+        }
+
+        /// Result of pre-flight checks for call operations
+        const PreflightResult = union(enum) {
+            precompile_result: CallResult,
+            execute_with_code: []const u8,
+            empty_account: u64, // gas remaining
+        };
+
+        /// Perform pre-flight checks common to all call operations
+        fn performCallPreflight(self: *Self, to: primitives.Address, input: []const u8, gas: u64, is_static: bool, snapshot_id: Journal.SnapshotIdType) !PreflightResult {
+            // Handle precompiles
+            if (config.enable_precompiles and precompiles.is_precompile(to)) {
+                const result = self.executePrecompileInline(to, input, gas, is_static, snapshot_id) catch {
+                    self.journal.revert_to_snapshot(snapshot_id);
+                    return PreflightResult{ .precompile_result = CallResult.failure(0) };
+                };
+                return PreflightResult{ .precompile_result = result };
+            }
+
+            // Get contract code
+            const code = self.database.get_code_by_address(to.bytes) catch |err| {
+                log.err("Failed to get code for address {any}: {}", .{ to, err });
+                const error_str = switch (err) {
+                    Database.Error.CodeNotFound => "CodeNotFound",
+                    Database.Error.AccountNotFound => "AccountNotFound",
+                    Database.Error.StorageNotFound => "StorageNotFound",
+                    Database.Error.InvalidAddress => "InvalidAddress",
+                    Database.Error.DatabaseCorrupted => "DatabaseCorrupted",
+                    Database.Error.NetworkError => "NetworkError",
+                    Database.Error.PermissionDenied => "PermissionDenied",
+                    Database.Error.OutOfMemory => "OutOfMemory",
+                    Database.Error.InvalidSnapshot => "InvalidSnapshot",
+                    Database.Error.NoBatchInProgress => "NoBatchInProgress",
+                    Database.Error.SnapshotNotFound => "SnapshotNotFound",
+                    Database.Error.WriteProtection => "WriteProtection",
+                };
+                return PreflightResult{ .precompile_result = CallResult.failure_with_error(0, error_str) };
+            };
+
+            if (code.len == 0) {
+                return PreflightResult{ .empty_account = gas };
+            }
+
+            return PreflightResult{ .execute_with_code = code };
         }
 
         /// Execute CALL operation (inlined from call_handler)
@@ -345,60 +391,40 @@ pub fn Evm(comptime config: EvmConfig) type {
                 };
             }
 
-            // Handle precompiles
-            if (config.enable_precompiles and precompiles.is_precompile(params.to)) {
-                const result = self.executePrecompileInline(params.to, params.input, params.gas, false, snapshot_id) catch {
-                    self.journal.revert_to_snapshot(snapshot_id);
-                    return CallResult.failure(0);
-                };
-                return result;
-            }
-
-            // Get contract code
-            log.debug("EXECUTE_CALL: Getting code for address {any}", .{params.to});
-            const code = self.database.get_code_by_address(params.to.bytes) catch |err| {
-                log.err("EXECUTE_CALL ERROR: Failed to get code: {}", .{err});
-                log.err("EXECUTE_CALL ERROR: Address bytes: {x}", .{params.to.bytes});
-                const error_str = switch (err) {
-                    Database.Error.CodeNotFound => "CodeNotFound",
-                    Database.Error.AccountNotFound => "AccountNotFound",
-                    Database.Error.StorageNotFound => "StorageNotFound",
-                    Database.Error.InvalidAddress => "InvalidAddress",
-                    Database.Error.DatabaseCorrupted => "DatabaseCorrupted",
-                    Database.Error.NetworkError => "NetworkError",
-                    Database.Error.PermissionDenied => "PermissionDenied",
-                    Database.Error.OutOfMemory => "OutOfMemory",
-                    Database.Error.InvalidSnapshot => "InvalidSnapshot",
-                    Database.Error.NoBatchInProgress => "NoBatchInProgress",
-                    Database.Error.SnapshotNotFound => "SnapshotNotFound",
-                    Database.Error.WriteProtection => "WriteProtection",
-                };
-                return CallResult.failure_with_error(0, error_str);
-            };
-            log.debug("EXECUTE_CALL: Got code for address {any}: code_len={d}", .{params.to, code.len});
-            if (code.len == 0) {
-                log.debug("EXECUTE_CALL: Call to empty account: {any}", .{params.to});
-                return CallResult.success_empty(params.gas);
-            }
-            // Execute frame
-            log.debug("About to execute_frame with code_len={}, gas={}", .{code.len, params.gas});
-            const result = self.execute_frame(
-                code,
-                params.input,
-                params.gas,
-                params.to,
-                params.caller,
-                params.value,
-                false, // is_static
-                snapshot_id,
-            ) catch |err| {
-                log.err("execute_frame failed: {}", .{err});
+            // Perform pre-flight checks
+            const preflight = self.performCallPreflight(params.to, params.input, params.gas, false, snapshot_id) catch |err| {
+                log.err("Call preflight failed: {}", .{err});
                 self.journal.revert_to_snapshot(snapshot_id);
                 return CallResult.failure(0);
             };
 
-            if (!result.success) self.journal.revert_to_snapshot(snapshot_id);
-            return result;
+            switch (preflight) {
+                .precompile_result => |result| return result,
+                .empty_account => |gas| {
+                    log.debug("EXECUTE_CALL: Call to empty account: {any}", .{params.to});
+                    return CallResult.success_empty(gas);
+                },
+                .execute_with_code => |code| {
+                    log.debug("About to execute_frame with code_len={}, gas={}", .{code.len, params.gas});
+                    const result = self.execute_frame(
+                        code,
+                        params.input,
+                        params.gas,
+                        params.to,
+                        params.caller,
+                        params.value,
+                        false, // is_static
+                        snapshot_id,
+                    ) catch |err| {
+                        log.err("execute_frame failed: {}", .{err});
+                        self.journal.revert_to_snapshot(snapshot_id);
+                        return CallResult.failure(0);
+                    };
+
+                    if (!result.success) self.journal.revert_to_snapshot(snapshot_id);
+                    return result;
+                },
+            }
         }
 
         /// Execute CALLCODE operation (inlined)
@@ -455,36 +481,37 @@ pub fn Evm(comptime config: EvmConfig) type {
         }) !CallResult {
             const snapshot_id = self.journal.create_snapshot();
 
-            // Handle precompiles
-            if (config.enable_precompiles and precompiles.is_precompile(params.to)) {
-                const result = self.executePrecompileInline(params.to, params.input, params.gas, false, snapshot_id) catch {
-                    self.journal.revert_to_snapshot(snapshot_id);
-                    return CallResult.failure(0);
-                };
-                return result;
-            }
-
-            const code = self.database.get_code_by_address(params.to.bytes) catch &.{};
-            if (code.len == 0) return CallResult.success_empty(params.gas);
-
-            // DELEGATECALL preserves caller and value from parent context
-            const current_value = if (self.depth > 0) self.call_stack[self.depth - 1].value else 0;
-            const result = self.execute_frame(
-                code,
-                params.input,
-                params.gas,
-                params.to,
-                params.caller, // Preserve original caller
-                current_value, // Preserve value from parent context
-                false,
-                snapshot_id,
-            ) catch {
+            // Perform pre-flight checks
+            const preflight = self.performCallPreflight(params.to, params.input, params.gas, false, snapshot_id) catch |err| {
+                log.err("Delegatecall preflight failed: {}", .{err});
                 self.journal.revert_to_snapshot(snapshot_id);
                 return CallResult.failure(0);
             };
 
-            if (!result.success) self.journal.revert_to_snapshot(snapshot_id);
-            return result;
+            switch (preflight) {
+                .precompile_result => |result| return result,
+                .empty_account => |gas| return CallResult.success_empty(gas),
+                .execute_with_code => |code| {
+                    // DELEGATECALL preserves caller and value from parent context
+                    const current_value = if (self.depth > 0) self.call_stack[self.depth - 1].value else 0;
+                    const result = self.execute_frame(
+                        code,
+                        params.input,
+                        params.gas,
+                        params.to,
+                        params.caller, // Preserve original caller
+                        current_value, // Preserve value from parent context
+                        false,
+                        snapshot_id,
+                    ) catch {
+                        self.journal.revert_to_snapshot(snapshot_id);
+                        return CallResult.failure(0);
+                    };
+
+                    if (!result.success) self.journal.revert_to_snapshot(snapshot_id);
+                    return result;
+                },
+            }
         }
 
         /// Execute STATICCALL operation (inlined)
@@ -496,35 +523,36 @@ pub fn Evm(comptime config: EvmConfig) type {
         }) !CallResult {
             const snapshot_id = self.journal.create_snapshot();
 
-            // Handle precompiles
-            if (config.enable_precompiles and precompiles.is_precompile(params.to)) {
-                const result = self.executePrecompileInline(params.to, params.input, params.gas, true, snapshot_id) catch {
-                    self.journal.revert_to_snapshot(snapshot_id);
-                    return CallResult.failure(0);
-                };
-                return result;
-            }
-
-            const code = self.database.get_code_by_address(params.to.bytes) catch &.{};
-            if (code.len == 0) return CallResult.success_empty(params.gas);
-
-            // Execute in static mode
-            const result = self.execute_frame(
-                code,
-                params.input,
-                params.gas,
-                params.to,
-                params.caller,
-                0, // No value in static call
-                true, // is_static = true
-                snapshot_id,
-            ) catch {
+            // Perform pre-flight checks
+            const preflight = self.performCallPreflight(params.to, params.input, params.gas, true, snapshot_id) catch |err| {
+                log.err("Staticcall preflight failed: {}", .{err});
                 self.journal.revert_to_snapshot(snapshot_id);
                 return CallResult.failure(0);
             };
 
-            if (!result.success) self.journal.revert_to_snapshot(snapshot_id);
-            return result;
+            switch (preflight) {
+                .precompile_result => |result| return result,
+                .empty_account => |gas| return CallResult.success_empty(gas),
+                .execute_with_code => |code| {
+                    // Execute in static mode
+                    const result = self.execute_frame(
+                        code,
+                        params.input,
+                        params.gas,
+                        params.to,
+                        params.caller,
+                        0, // No value in static call
+                        true, // is_static = true
+                        snapshot_id,
+                    ) catch {
+                        self.journal.revert_to_snapshot(snapshot_id);
+                        return CallResult.failure(0);
+                    };
+
+                    if (!result.success) self.journal.revert_to_snapshot(snapshot_id);
+                    return result;
+                },
+            }
         }
 
         /// Execute CREATE operation (inlined)
@@ -843,15 +871,8 @@ pub fn Evm(comptime config: EvmConfig) type {
                 };
             };
 
-            // Handle precompile result
-            // Copy output into owned buffer and free original to avoid leaks
-            var out_slice: []const u8 = &.{};
-            if (result.output.len > 0) {
-                const buf = try self.allocator.dupe(u8, result.output);
-                // Original was allocated with self.allocator in precompile
-                self.allocator.free(result.output);
-                out_slice = buf;
-            }
+            // Transfer ownership of precompile output directly (both use same allocator)
+            const out_slice = result.output;
             if (result.success) {
                 return CallResult{ .success = true, .gas_left = gas - result.gas_used, .output = out_slice };
             } else {
@@ -1154,13 +1175,6 @@ pub fn Evm(comptime config: EvmConfig) type {
         }
         
 
-        // TODO: remove useless helper function and just inline this
-        /// Take all logs and clear the log list
-        fn takeLogs(self: *Self) []const @import("call_result.zig").Log {
-            const logs = self.logs.toOwnedSlice(self.allocator) catch &.{};
-            self.logs = std.ArrayList(@import("call_result.zig").Log){};
-            return logs;
-        }
 
         /// Take all selfdestructs and clear the list
         fn takeSelfDestructs(self: *Self) ![]const @import("call_result.zig").SelfDestructRecord {
