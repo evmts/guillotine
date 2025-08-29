@@ -782,7 +782,7 @@ pub fn Evm(comptime config: EvmConfig) type {
             defer self.current_input = prev_input;
 
             self.depth += 1;
-            defer self.depth -= 1;
+            defer if (self.depth > 0) { self.depth -= 1; };
 
             self.call_stack[self.depth - 1] = CallStackEntry{ .caller = caller, .value = value };
 
