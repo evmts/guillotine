@@ -431,7 +431,7 @@ pub const JSONRPCTracer = struct {
         for (self.trace_steps.items) |*step| {
             step.deinit(self.allocator);
         }
-        self.trace_steps.deinit();
+        self.trace_steps.deinit(self.allocator);
     }
     
     /// Called before frame execution begins
