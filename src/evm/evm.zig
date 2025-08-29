@@ -551,7 +551,14 @@ pub fn Evm(comptime config: EvmConfig) type {
             // Calculate contract address from sender and nonce
             const contract_address = primitives.Address.get_contract_address(params.caller, caller_account.nonce);
 
-            // Check if address already has code (collision)
+            // Pre-increment caller nonce (journaled)
+            try self.journal.record_nonce_change(snapshot_id, params.caller, caller_account.nonce);
+            caller_account.nonce += 1;
+            self.database.set_account(params.caller.bytes, caller_account) catch {
+                self.journal.revert_to_snapshot(snapshot_id);
+                return CallResult.failure(0);
+            };
+
             const existed_before = self.database.account_exists(contract_address.bytes);
             if (existed_before) {
                 const existing = self.database.get_account(contract_address.bytes) catch null;
@@ -560,87 +567,23 @@ pub fn Evm(comptime config: EvmConfig) type {
                     return CallResult.failure(0);
                 }
             }
-
-            // Record and increment caller's nonce
-            try self.journal.record_nonce_change(snapshot_id, params.caller, caller_account.nonce);
-            caller_account.nonce += 1;
-            self.database.set_account(params.caller.bytes, caller_account) catch {
-                self.journal.revert_to_snapshot(snapshot_id);
-                return CallResult.failure(0);
-            };
-
-            // Track created contract for EIP-6780
-            try self.created_contracts.mark_created(contract_address);
-
-            // Gas cost for CREATE
+            // Delegate to unified helper
             const GasConstants = primitives.GasConstants;
-            const create_gas = GasConstants.CreateGas; // 32000
-
-            if (params.gas < create_gas) {
+            const create_overhead = GasConstants.CreateGas; // 32000
+            if (params.gas < create_overhead) {
                 self.journal.revert_to_snapshot(snapshot_id);
                 return CallResult.failure(0);
             }
-
-            const remaining_gas = params.gas - create_gas;
-
-            // Transfer value to the new contract before executing init code (per spec)
-            if (params.value > 0) {
-                self.doTransfer(params.caller, contract_address, params.value, snapshot_id) catch {
-                    self.journal.revert_to_snapshot(snapshot_id);
-                    return CallResult.failure(0);
-                };
-            }
-
-            // Execute initialization code via IR interpreter for robustness
-            const result = self.execute_init_code(
-                params.init_code,
-                remaining_gas,
-                contract_address,
-                snapshot_id,
-            ) catch {
-                self.journal.revert_to_snapshot(snapshot_id);
-                return CallResult.failure(0);
-            };
-
-            if (!result.success) {
-                self.journal.revert_to_snapshot(snapshot_id);
-                return result;
-            }
-
-            // Ensure contract account exists and set nonce to 1
-            var contract_account = self.database.get_account(contract_address.bytes) catch {
-                self.journal.revert_to_snapshot(snapshot_id);
-                return CallResult.failure(0);
-            } orelse Account.zero();
-            // For a new account, record creation
-            if (!existed_before) {
-                try self.journal.record_account_created(snapshot_id, contract_address);
-            }
-            // Set nonce to 1 for contract accounts
-            if (contract_account.nonce != 1) {
-                try self.journal.record_nonce_change(snapshot_id, contract_address, contract_account.nonce);
-                contract_account.nonce = 1;
-            }
-            // Store the deployed code (empty code is allowed)
-            if (result.output.len > 0) {
-                const code_hash_bytes = self.database.set_code(result.output) catch {
-                    self.journal.revert_to_snapshot(snapshot_id);
-                    return CallResult.failure(0);
-                };
-                // Journal code change
-                try self.journal.record_code_change(snapshot_id, contract_address, contract_account.code_hash);
-                contract_account.code_hash = code_hash_bytes;
-            }
-            self.database.set_account(contract_address.bytes, contract_account) catch {
-                self.journal.revert_to_snapshot(snapshot_id);
-                return CallResult.failure(0);
-            };
-
-            // Return the contract address as 32 bytes (12 zero padding + 20-byte address)
-            const out32 = self.small_output_buf[0..32];
-            @memset(out32[0..12], 0);
-            @memcpy(out32[12..32], &contract_address.bytes);
-            return CallResult.success_with_output(result.gas_left, out32);
+            const remaining_gas: u64 = params.gas - create_overhead;
+            return self.executeCreateInternal(.{
+                .caller = params.caller,
+                .value = params.value,
+                .init_code = params.init_code,
+                .gas_left = remaining_gas,
+                .contract_address = contract_address,
+                .snapshot_id = snapshot_id,
+                .existed_before = existed_before,
+            });
         }
 
         /// Execute CREATE2 operation (inlined)
@@ -656,10 +599,8 @@ pub fn Evm(comptime config: EvmConfig) type {
                 return CallResult.failure(0);
             }
 
-            // Create snapshot for state reversion
             const snapshot_id = self.journal.create_snapshot();
 
-            // Get caller account
             const caller_account = self.database.get_account(params.caller.bytes) catch {
                 self.journal.revert_to_snapshot(snapshot_id);
                 return CallResult.failure(0);
@@ -678,9 +619,8 @@ pub fn Evm(comptime config: EvmConfig) type {
             const salt_bytes = @as([32]u8, @bitCast(params.salt));
             const contract_address = primitives.Address.get_create2_address(params.caller, salt_bytes, init_code_hash_bytes);
 
-            // Check if address already has code (collision)
-            const existed_before2 = self.database.account_exists(contract_address.bytes);
-            if (existed_before2) {
+            const existed_before = self.database.account_exists(contract_address.bytes);
+            if (existed_before) {
                 const existing = self.database.get_account(contract_address.bytes) catch null;
                 if (existing != null and !std.mem.eql(u8, &existing.?.code_hash, &[_]u8{0} ** 32)) {
                     self.journal.revert_to_snapshot(snapshot_id);
@@ -688,77 +628,92 @@ pub fn Evm(comptime config: EvmConfig) type {
                 }
             }
 
-            // Track created contract for EIP-6780
-            try self.created_contracts.mark_created(contract_address);
-
             // Gas cost for CREATE2
             const GasConstants = primitives.GasConstants;
-            const create_gas = GasConstants.CreateGas; // 32000
+            const create_overhead = GasConstants.CreateGas; // 32000
             const hash_cost = @as(u64, @intCast(params.init_code.len)) * GasConstants.Keccak256WordGas / 32;
-            const total_gas = create_gas + hash_cost;
-
-            if (params.gas < total_gas) {
+            const total_overhead = create_overhead + hash_cost;
+            if (params.gas < total_overhead) {
                 self.journal.revert_to_snapshot(snapshot_id);
                 return CallResult.failure(0);
             }
+            const remaining_gas: u64 = params.gas - total_overhead;
 
-            const remaining_gas = params.gas - total_gas;
+            return self.executeCreateInternal(.{
+                .caller = params.caller,
+                .value = params.value,
+                .init_code = params.init_code,
+                .gas_left = remaining_gas,
+                .contract_address = contract_address,
+                .snapshot_id = snapshot_id,
+                .existed_before = existed_before,
+            });
+        }
 
-            // Transfer value to the new contract before executing init code
-            if (params.value > 0) {
-                self.doTransfer(params.caller, contract_address, params.value, snapshot_id) catch {
-                    self.journal.revert_to_snapshot(snapshot_id);
+        fn executeCreateInternal(self: *Self, args: struct {
+            caller: primitives.Address,
+            value: u256,
+            init_code: []const u8,
+            gas_left: u64,
+            contract_address: primitives.Address,
+            snapshot_id: Journal.SnapshotIdType,
+            existed_before: bool,
+        }) !CallResult {
+            // Track created contract for EIP-6780
+            try self.created_contracts.mark_created(args.contract_address);
+
+            // Transfer value to the new contract before executing init code (per spec)
+            if (args.value > 0) {
+                self.doTransfer(args.caller, args.contract_address, args.value, args.snapshot_id) catch {
+                    self.journal.revert_to_snapshot(args.snapshot_id);
                     return CallResult.failure(0);
                 };
             }
 
-            // Execute initialization code via IR interpreter for robustness
+            // Execute initialization code
             const result = self.execute_init_code(
-                params.init_code,
-                remaining_gas,
-                contract_address,
-                snapshot_id,
+                args.init_code,
+                args.gas_left,
+                args.contract_address,
+                args.snapshot_id,
             ) catch {
-                self.journal.revert_to_snapshot(snapshot_id);
+                self.journal.revert_to_snapshot(args.snapshot_id);
                 return CallResult.failure(0);
             };
-
             if (!result.success) {
-                self.journal.revert_to_snapshot(snapshot_id);
+                self.journal.revert_to_snapshot(args.snapshot_id);
                 return result;
             }
 
             // Ensure contract account exists and set nonce/code
-            var contract_account2 = self.database.get_account(contract_address.bytes) catch {
-                self.journal.revert_to_snapshot(snapshot_id);
+            var contract_account = self.database.get_account(args.contract_address.bytes) catch {
+                self.journal.revert_to_snapshot(args.snapshot_id);
                 return CallResult.failure(0);
             } orelse Account.zero();
-            // Record creation for new accounts
-            if (!existed_before2) {
-                try self.journal.record_account_created(snapshot_id, contract_address);
+            if (!args.existed_before) {
+                try self.journal.record_account_created(args.snapshot_id, args.contract_address);
             }
-            // Set nonce to 1 for contracts
-            if (contract_account2.nonce != 1) {
-                try self.journal.record_nonce_change(snapshot_id, contract_address, contract_account2.nonce);
-                contract_account2.nonce = 1;
+            if (contract_account.nonce != 1) {
+                try self.journal.record_nonce_change(args.snapshot_id, args.contract_address, contract_account.nonce);
+                contract_account.nonce = 1;
             }
             if (result.output.len > 0) {
                 const stored_hash = self.database.set_code(result.output) catch {
-                    self.journal.revert_to_snapshot(snapshot_id);
+                    self.journal.revert_to_snapshot(args.snapshot_id);
                     return CallResult.failure(0);
                 };
-                try self.journal.record_code_change(snapshot_id, contract_address, contract_account2.code_hash);
-                contract_account2.code_hash = stored_hash;
+                try self.journal.record_code_change(args.snapshot_id, args.contract_address, contract_account.code_hash);
+                contract_account.code_hash = stored_hash;
             }
-            self.database.set_account(contract_address.bytes, contract_account2) catch {
-                self.journal.revert_to_snapshot(snapshot_id);
+            self.database.set_account(args.contract_address.bytes, contract_account) catch {
+                self.journal.revert_to_snapshot(args.snapshot_id);
                 return CallResult.failure(0);
             };
 
             // Return the contract address as 32 bytes (12 zero padding + 20-byte address)
             const out32 = self.small_output_buf[0..32];
             @memset(out32[0..12], 0);
-            @memcpy(out32[12..32], &contract_address.bytes);
+            @memcpy(out32[12..32], &args.contract_address.bytes);
             return CallResult.success_with_output(result.gas_left, out32);
         }
 
@@ -789,88 +744,47 @@ pub fn Evm(comptime config: EvmConfig) type {
 
             const gas_cast = @as(Frame.GasType, @intCast(@min(gas, @as(u64, @intCast(std.math.maxInt(Frame.GasType))))));
 
-            // EIP-214: encode static constraints in dependencies
-            // Static calls use null self_destruct to prevent SELFDESTRUCT operations
+            // EIP-214: encode static constraints; null to prevent SELFDESTRUCT in static context
             const self_destruct_param = if (is_static) null else &self.self_destruct;
 
-            // For static calls, use normal database but enforce EIP-214 constraints at opcode level
-            if (is_static) {
-                // Static calls - EIP-214 constraints enforced via:
-                // 1. null self_destruct parameter prevents SELFDESTRUCT operations 
-                // 2. Static context tracked in EVM for SSTORE/LOG operations
-                // 3. Frame validates static context for state-modifying operations
-                var frame = try Frame.init(self.allocator, gas_cast, self.database.*, caller, &value, input, self.block_info, @as(*anyopaque, @ptrCast(self)), self_destruct_param);
-                frame.contract_address = address;
-                defer frame.deinit(self.allocator);
+            var frame = try Frame.init(self.allocator, gas_cast, self.database.*, caller, &value, input, self.block_info, @as(*anyopaque, @ptrCast(self)), self_destruct_param);
+            frame.contract_address = address;
+            defer frame.deinit(self.allocator);
 
-                log.debug("Executing frame: code_len={d}, gas={d}, address={any}, is_static={any}", .{code.len, gas_cast, address, is_static});
-                log.debug("Frame gas_remaining before interpret: {d}", .{frame.gas_remaining});
-                const outcome = frame.interpret(code) catch |err| {
-                    log.debug("Frame.interpret() failed (static): {any}", .{err});
-                    return CallResult.failure(0);
-                };
+            log.debug("Executing frame: code_len={d}, gas={d}, address={any}, is_static={any}", .{code.len, gas_cast, address, is_static});
+            log.debug("Frame gas_remaining before interpret: {d}", .{frame.gas_remaining});
 
-                // Map frame outcome to CallResult
-                const gas_left: u64 = @intCast(@max(frame.gas_remaining, 0));
-                log.debug("Frame execution complete. gas_remaining={d}, gas_left={d}", .{frame.gas_remaining, gas_left});
-                const out_items = frame.output;
-                log.debug("Frame execution complete. Output length: {d}", .{out_items.len});
-                if (out_items.len > 0) {
-                    log.debug("Output data: {x}", .{out_items});
+            const outcome = frame.interpret(code) catch |err| {
+                // Consolidated error logging with context
+                log.err("Frame.interpret() failed (is_static={any}): {any}", .{is_static, err});
+                log.err("  Code length: {d}", .{code.len});
+                log.err("  Gas: {}", .{gas_cast});
+                log.err("  Address: {any}", .{address});
+                if (code.len > 0) {
+                    log.err("  First few bytes of code: {x}", .{code[0..@min(code.len, 16)]});
                 }
-                const out_buf = if (out_items.len > 0) blk: {
-                    const b = try self.allocator.alloc(u8, out_items.len);
-                    @memcpy(b, out_items);
-                    break :blk b;
-                } else &.{};
-                self.return_data = out_buf;
+                return CallResult.failure(0);
+            };
 
-                switch (outcome) {
-                    .Stop => return CallResult.success_with_output(gas_left, out_buf),
-                    .Return => return CallResult.success_with_output(gas_left, out_buf),
-                    .SelfDestruct => return CallResult.success_with_output(gas_left, out_buf),
-                }
-            } else {
-                // Non-static call - pass call context data directly to frame
-                var frame = try Frame.init(self.allocator, gas_cast, self.database.*, caller, &value, input, self.block_info, @as(*anyopaque, @ptrCast(self)), self_destruct_param);
-                frame.contract_address = address;
-                defer frame.deinit(self.allocator);
+            // Map frame outcome to CallResult
+            const gas_left: u64 = @intCast(@max(frame.gas_remaining, 0));
+            log.debug("Frame execution complete. gas_remaining={d}, gas_left={d}", .{frame.gas_remaining, gas_left});
+            const out_items = frame.output;
+            log.debug("Frame execution complete. Output length: {d}", .{out_items.len});
+            if (out_items.len > 0) {
+                log.debug("Output data: {x}", .{out_items});
+            }
+            const out_buf = if (out_items.len > 0) blk: {
+                const b = try self.allocator.alloc(u8, out_items.len);
+                @memcpy(b, out_items);
+                break :blk b;
+            } else &.{};
+            self.return_data = out_buf;
 
-                log.debug("Executing frame (non-static): code_len={d}, gas={d}, address={any}", .{code.len, gas_cast, address});
-                log.debug("Frame gas_remaining before interpret: {d}", .{frame.gas_remaining});
-                
-                // Wrap in a more detailed error handler
-                const outcome = frame.interpret(code) catch |err| {
-                    log.err("Frame.interpret() failed (non-static): {any}", .{err});
-                    log.err("  Code length: {d}", .{code.len});
-                    log.err("  Gas: {}", .{gas_cast});
-                    log.err("  Address: {any}", .{address});
-                    if (code.len > 0) {
-                        log.err("  First few bytes of code: {x}", .{code[0..@min(code.len, 16)]});
-                    }
-                    return CallResult.failure(0);
-                };
-
-                // Map frame outcome to CallResult
-                const gas_left: u64 = @intCast(@max(frame.gas_remaining, 0));
-                log.debug("Frame execution complete. gas_remaining={d}, gas_left={d}", .{frame.gas_remaining, gas_left});
-                const out_items = frame.output;
-                log.debug("Frame execution complete. Output length: {d}", .{out_items.len});
-                if (out_items.len > 0) {
-                    log.debug("Output data: {x}", .{out_items});
-                }
-                const out_buf = if (out_items.len > 0) blk: {
-                    const b = try self.allocator.alloc(u8, out_items.len);
-                    @memcpy(b, out_items);
-                    break :blk b;
-                } else &.{};
-                self.return_data = out_buf;
-
-                switch (outcome) {
-                    .Stop => return CallResult.success_with_output(gas_left, out_buf),
-                    .Return => return CallResult.success_with_output(gas_left, out_buf),
-                    .SelfDestruct => return CallResult.success_with_output(gas_left, out_buf),
-                }
+            switch (outcome) {
+                .Stop => return CallResult.success_with_output(gas_left, out_buf),
+                .Return => return CallResult.success_with_output(gas_left, out_buf),
+                .SelfDestruct => return CallResult.success_with_output(gas_left, out_buf),
             }
         }
 
@@ -1003,35 +917,28 @@ pub fn Evm(comptime config: EvmConfig) type {
         }
 
         /// Revert state changes to a previous snapshot
+        ///
+        /// Optimized to avoid allocations: iterate journal entries in reverse
+        /// before truncating, applying all reverts in-place.
         pub fn revert_to_snapshot(self: *Self, snapshot_id: Journal.SnapshotIdType) void {
-            // Get the journal entries that need to be reverted before removing them
-            var entries_to_revert = std.ArrayList(Journal.EntryType){};
-            defer entries_to_revert.deinit(self.allocator);
+            // Find first index whose snapshot_id >= target
+            var start_index: ?usize = null;
+            for (self.journal.entries.items, 0..) |entry, i| {
+                if (entry.snapshot_id >= snapshot_id) { start_index = i; break; }
+            }
 
-            // Collect entries that belong to snapshots newer than or equal to the target snapshot
-            for (self.journal.entries.items) |entry| {
-                if (entry.snapshot_id >= snapshot_id) {
-                    entries_to_revert.append(self.allocator, entry) catch {
-                        // If we can't allocate memory for reverting, we're in a bad state
-                        // But we should still remove the journal entries to maintain consistency
-                        break;
+            if (start_index) |start| {
+                var i = self.journal.entries.items.len;
+                while (i > start) : (i -= 1) {
+                    const entry = self.journal.entries.items[i - 1];
+                    self.apply_journal_entry_revert(entry) catch |err| {
+                        log.err("Failed to revert journal entry: {any}", .{err});
                     };
                 }
             }
 
-            // Remove the journal entries first
+            // Finally, truncate the journal entries to the snapshot boundary
             self.journal.revert_to_snapshot(snapshot_id);
-
-            // Apply the changes in reverse order to revert the database state
-            var i = entries_to_revert.items.len;
-            while (i > 0) : (i -= 1) {
-                const entry = entries_to_revert.items[i - 1];
-                self.apply_journal_entry_revert(entry) catch |err| {
-                    // Log the error but continue reverting other entries
-                    const logger = @import("log.zig");
-                    logger.err("Failed to revert journal entry: {}", .{err});
-                };
-            }
         }
 
         /// Apply a single journal entry to revert database state
@@ -1123,10 +1030,7 @@ pub fn Evm(comptime config: EvmConfig) type {
 
         /// Check if hardfork is at least the target
         pub fn is_hardfork_at_least(self: *Self, target: Hardfork) bool {
-            _ = target;
-            _ = self;
-            // Use EIPs config instead
-            return true;
+            return @intFromEnum(self.hardfork_config) >= @intFromEnum(target);
         }
 
         /// Get current hardfork (deprecated - use EIPs)
