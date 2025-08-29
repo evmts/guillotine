@@ -78,8 +78,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// CALLER opcode (0x33) - Get caller address.
         /// Stack: [] → [caller]
         pub fn caller(self: *FrameType, dispatch: Dispatch) Error!Success {
-            const caller_addr = self.getEvm().get_caller();
-            const caller_u256 = to_u256(caller_addr);
+            const caller_u256 = to_u256(self.caller);
             try self.stack.push(caller_u256);
             const next = dispatch.getNext();
             return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
@@ -88,7 +87,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// CALLVALUE opcode (0x34) - Get deposited value by the instruction/transaction responsible for this execution.
         /// Stack: [] → [value]
         pub fn callvalue(self: *FrameType, dispatch: Dispatch) Error!Success {
-            const value = self.getEvm().get_call_value();
+            const value = self.value;
             try self.stack.push(value);
             const next = dispatch.getNext();
             return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
@@ -106,7 +105,7 @@ pub fn Handlers(comptime FrameType: type) type {
             }
             const offset_usize = @as(usize, @intCast(offset));
 
-            const calldata = self.getEvm().get_input();
+            const calldata = self.calldata;
             // Load 32 bytes from calldata, zero-padding if needed
             var word: u256 = 0;
             for (0..32) |i| {
@@ -128,7 +127,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// CALLDATASIZE opcode (0x36) - Get size of input data in current environment.
         /// Stack: [] → [size]
         pub fn calldatasize(self: *FrameType, dispatch: Dispatch) Error!Success {
-            const calldata = self.getEvm().get_input();
+            const calldata = self.calldata;
             const calldata_len = @as(WordType, @truncate(@as(u256, @intCast(calldata.len))));
             try self.stack.push(calldata_len);
             const next = dispatch.getNext();
@@ -166,7 +165,7 @@ pub fn Handlers(comptime FrameType: type) type {
                 else => return Error.AllocationError,
             };
 
-            const calldata = self.getEvm().get_input();
+            const calldata = self.calldata;
 
             // Copy calldata to memory with proper zero-padding
             var i: usize = 0;
@@ -430,7 +429,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// COINBASE opcode (0x41) - Get the current block's beneficiary address.
         /// Stack: [] → [coinbase]
         pub fn coinbase(self: *FrameType, dispatch: Dispatch) Error!Success {
-            const block_info = self.getEvm().get_block_info();
+            const block_info = self.block_info;
             const coinbase_u256 = to_u256(block_info.coinbase);
             const coinbase_word = @as(WordType, @truncate(coinbase_u256));
             try self.stack.push(coinbase_word);
@@ -441,7 +440,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// TIMESTAMP opcode (0x42) - Get the current block's timestamp.
         /// Stack: [] → [timestamp]
         pub fn timestamp(self: *FrameType, dispatch: Dispatch) Error!Success {
-            const block_info = self.getEvm().get_block_info();
+            const block_info = self.block_info;
             const timestamp_word = @as(WordType, @truncate(@as(u256, @intCast(block_info.timestamp))));
             try self.stack.push(timestamp_word);
             const next = dispatch.getNext();
@@ -451,7 +450,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// NUMBER opcode (0x43) - Get the current block's number.
         /// Stack: [] → [number]
         pub fn number(self: *FrameType, dispatch: Dispatch) Error!Success {
-            const block_info = self.getEvm().get_block_info();
+            const block_info = self.block_info;
             const block_number_word = @as(WordType, @truncate(@as(u256, @intCast(block_info.number))));
             try self.stack.push(block_number_word);
             const next = dispatch.getNext();
@@ -461,7 +460,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// DIFFICULTY opcode (0x44) - Get the current block's difficulty.
         /// Stack: [] → [difficulty]
         pub fn difficulty(self: *FrameType, dispatch: Dispatch) Error!Success {
-            const block_info = self.getEvm().get_block_info();
+            const block_info = self.block_info;
             const difficulty_word = @as(WordType, @truncate(block_info.difficulty));
             try self.stack.push(difficulty_word);
             const next = dispatch.getNext();
@@ -477,7 +476,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// GASLIMIT opcode (0x45) - Get the current block's gas limit.
         /// Stack: [] → [gas_limit]
         pub fn gaslimit(self: *FrameType, dispatch: Dispatch) Error!Success {
-            const block_info = self.getEvm().get_block_info();
+            const block_info = self.block_info;
             const gas_limit_word = @as(WordType, @truncate(@as(u256, @intCast(block_info.gas_limit))));
             try self.stack.push(gas_limit_word);
             const next = dispatch.getNext();
@@ -507,7 +506,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// BASEFEE opcode (0x48) - Get the current block's base fee.
         /// Stack: [] → [base_fee]
         pub fn basefee(self: *FrameType, dispatch: Dispatch) Error!Success {
-            const block_info = self.getEvm().get_block_info();
+            const block_info = self.block_info;
             const base_fee_word = @as(WordType, @truncate(block_info.base_fee));
             try self.stack.push(base_fee_word);
             const next = dispatch.getNext();
@@ -524,9 +523,10 @@ pub fn Handlers(comptime FrameType: type) type {
                 const next = dispatch.getNext();
                 return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
             }
-            const blob_hash_opt = self.getEvm().get_blob_hash(index);
-            // Push hash or zero if not available
-            if (blob_hash_opt) |hash| {
+            const index_usize = @as(usize, @intCast(index));
+            // Check if index is within bounds of versioned hashes
+            if (index_usize < self.block_info.blob_versioned_hashes.len) {
+                const hash = self.block_info.blob_versioned_hashes[index_usize];
                 // Convert [32]u8 to u256
                 var hash_value: u256 = 0;
                 for (hash) |byte| {
@@ -535,6 +535,7 @@ pub fn Handlers(comptime FrameType: type) type {
                 const hash_word = @as(WordType, @truncate(hash_value));
                 try self.stack.push(hash_word);
             } else {
+                // Index out of bounds - push zero
                 try self.stack.push(0);
             }
             const next = dispatch.getNext();
@@ -544,7 +545,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// BLOBBASEFEE opcode (0x4a) - Get the current block's blob base fee.
         /// Stack: [] → [blob_base_fee]
         pub fn blobbasefee(self: *FrameType, dispatch: Dispatch) Error!Success {
-            const blob_base_fee = self.getEvm().get_blob_base_fee();
+            const blob_base_fee = self.block_info.blob_base_fee;
             const blob_base_fee_word = @as(WordType, @truncate(blob_base_fee));
             try self.stack.push(blob_base_fee_word);
             const next = dispatch.getNext();

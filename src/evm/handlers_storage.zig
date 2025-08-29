@@ -24,7 +24,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const contract_addr = self.contract_address;
             
             // Load value from storage directly from frame's database
-            const value = self.database.getStorage(contract_addr, slot) catch |err| switch (err) {
+            const value = self.database.get_storage(contract_addr.bytes, slot) catch |err| switch (err) {
                 else => return Error.AllocationError,
             };
             try self.stack.push(value);
@@ -48,7 +48,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const contract_addr = self.contract_address;
             
             // Get current value for gas calculation
-            const current_value = self.database.getStorage(contract_addr, slot) catch |err| switch (err) {
+            const current_value = self.database.get_storage(contract_addr.bytes, slot) catch |err| switch (err) {
                 else => return Error.AllocationError,
             };
             
@@ -73,7 +73,7 @@ pub fn Handlers(comptime FrameType: type) type {
             self.gas_remaining -= @intCast(gas_cost);
             
             // Store the value directly in frame's database
-            self.database.setStorage(contract_addr, slot, value) catch |err| switch (err) {
+            self.database.set_storage(contract_addr.bytes, slot, value) catch |err| switch (err) {
                 error.WriteProtection => return Error.WriteProtection,
                 else => return Error.AllocationError,
             };
@@ -92,7 +92,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const contract_addr = self.contract_address;
             
             // Load value from transient storage directly from frame's database
-            const value = self.database.getTransientStorage(contract_addr, slot) catch |err| switch (err) {
+            const value = self.database.get_transient_storage(contract_addr.bytes, slot) catch |err| switch (err) {
                 else => return Error.AllocationError,
             };
             
@@ -122,7 +122,7 @@ pub fn Handlers(comptime FrameType: type) type {
             self.gas_remaining -= @intCast(gas_cost);
             
             // Store the value in transient storage directly in frame's database
-            self.database.setTransientStorage(contract_addr, slot, value) catch |err| switch (err) {
+            self.database.set_transient_storage(contract_addr.bytes, slot, value) catch |err| switch (err) {
                 error.WriteProtection => return Error.WriteProtection,
                 else => return Error.AllocationError,
             };

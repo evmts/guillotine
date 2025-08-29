@@ -64,21 +64,26 @@ pub fn Handlers(comptime FrameType: type) type {
                         &[_]u8{};
                     
                     const topics_array = if (topic_count > 0) blk: {
-                        const arr = allocator.alloc(WordType, topic_count) catch {
+                        const arr = allocator.alloc(u256, topic_count) catch {
                             if (data.len > 0) allocator.free(data_copy);
                             return Error.AllocationError;
                         };
                         for (0..topic_count) |j| {
-                            arr[j] = topics[j];
+                            arr[j] = @as(u256, topics[j]);
                         }
                         break :blk arr;
-                    } else allocator.alloc(WordType, 0) catch {
+                    } else allocator.alloc(u256, 0) catch {
                         if (data.len > 0) allocator.free(data_copy);
                         return Error.AllocationError;
                     };
                     
-                    // Add log to logs list via host  
-                    self.getEvm().emit_log(self.contract_address, topics_array, data_copy);
+                    // Add log to frame's log list
+                    const log_entry = Log{
+                        .address = self.contract_address,
+                        .topics = topics_array,
+                        .data = data_copy,
+                    };
+                    self.appendLog(allocator, log_entry) catch return Error.AllocationError;
                     
                     const next = dispatch.getNext();
                     return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });

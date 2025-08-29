@@ -622,6 +622,7 @@ pub fn Handlers(comptime FrameType: type) type {
             }
 
             // Mark contract for destruction via host interface
+            // TODO: Consider if this should use a different pattern for EVM access
             self.getEvm().mark_for_destruction(self.contract_address, recipient) catch |err| switch (err) {
                 else => {
                     @branchHint(.unlikely);
