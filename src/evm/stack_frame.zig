@@ -397,13 +397,11 @@ pub fn StackFrame(comptime config: FrameConfig) type {
                 const cursor = Self.Dispatch{ .cursor = traced_schedule.ptr + start_index, .jump_table = &traced_jump_table };
                 break :blk cursor.cursor[0].opcode_handler(self, cursor);
             } else blk: {
-                log.debug("DISPATCH INIT: bytecode len={d}", .{bytecode.runtime_code.len});
                 const schedule = Dispatch.init(self.allocator, &bytecode, handlers) catch |e| {
                     log.err("Failed to create dispatch schedule: {any}", .{e});
                     log.err("  Bytecode runtime_code len: {d}", .{bytecode.runtime_code.len});
                     return Error.AllocationError;
                 };
-                log.debug("DISPATCH INIT COMPLETE: schedule len={d}, opcode_count={d}", .{ schedule.len, bytecode.runtime_code.len });
                 defer Dispatch.deinitSchedule(self.allocator, schedule);
                 if (schedule.len < 3) {
                     log.err("Dispatch schedule is too short! len={d}", .{schedule.len});
@@ -420,9 +418,7 @@ pub fn StackFrame(comptime config: FrameConfig) type {
                 var start_index: usize = 0;
                 switch (schedule[0]) {
                     .first_block_gas => |meta| {
-                        log.debug("First block gas charge: {d} (current gas: {d})", .{ meta.gas, self.gas_remaining });
                         if (meta.gas > 0) try self.consumeGasChecked(meta.gas);
-                        log.debug("Gas after first block charge: {d}", .{self.gas_remaining});
                         start_index = 1;
                     },
                     else => {},
