@@ -217,8 +217,20 @@ pub fn Handlers(comptime FrameType: type) type {
                 return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
             }
 
-            // Ensure memory capacity
+            // Calculate gas cost for memory expansion and copy operation
             const new_size = dest_offset_usize + length_usize;
+            const memory_expansion_cost = self.memory.get_expansion_cost(@as(u24, @intCast(new_size)));
+            
+            // Dynamic gas cost: 3 gas per word (32 bytes) copied
+            const copy_cost = (length_usize + 31) / 32 * 3;
+            const total_gas = memory_expansion_cost + copy_cost;
+            
+            if (self.gas_remaining < total_gas) {
+                return Error.OutOfGas;
+            }
+            self.gas_remaining -= @intCast(total_gas);
+
+            // Ensure memory capacity
             self.memory.ensure_capacity(self.allocator, @as(u24, @intCast(new_size))) catch |err| switch (err) {
                 memory_mod.MemoryError.MemoryOverflow => return Error.OutOfBounds,
                 else => return Error.AllocationError,
