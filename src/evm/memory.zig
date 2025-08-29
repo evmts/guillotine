@@ -5,7 +5,6 @@
 //! word boundaries as per EVM specification.
 //!
 //! Key features:
-//! - Thread-safe operations via mutex synchronization
 //! - Lazy allocation on first access
 //! - Zero-initialization guarantee
 //! - Checkpoint system for nested calls
@@ -43,7 +42,6 @@ pub fn Memory(comptime config: MemoryConfig) type {
 
         checkpoint: u24,
         buffer_ptr: *std.ArrayList(u8),
-        mutex: std.Thread.Mutex,
 
         pub fn init(allocator: std.mem.Allocator) !Self {
             if (is_owned) {
@@ -55,7 +53,6 @@ pub fn Memory(comptime config: MemoryConfig) type {
                 return Self{
                     .checkpoint = 0,
                     .buffer_ptr = buffer_ptr,
-                    .mutex = .{},
                 };
             } else {
                 @compileError("Cannot call init() on borrowed memory type. Use init_borrowed() instead.");
@@ -67,7 +64,6 @@ pub fn Memory(comptime config: MemoryConfig) type {
             return Self{
                 .checkpoint = checkpoint,
                 .buffer_ptr = buffer_ptr,
-                .mutex = .{},
             };
         }
 
@@ -80,15 +76,11 @@ pub fn Memory(comptime config: MemoryConfig) type {
         }
 
         pub fn init_child(self: *Self) !Memory(.{ .initial_capacity = config.initial_capacity, .memory_limit = config.memory_limit, .owned = false }) {
-            self.mutex.lock();
-            defer self.mutex.unlock();
-            
             // Children are always borrowed memory types
             const BorrowedMemType = Memory(.{ .initial_capacity = config.initial_capacity, .memory_limit = config.memory_limit, .owned = false });
             return BorrowedMemType{
                 .checkpoint = @as(u24, @intCast(self.buffer_ptr.items.len)),
                 .buffer_ptr = self.buffer_ptr,
-                .mutex = .{},
             };
         }
 
@@ -102,8 +94,6 @@ pub fn Memory(comptime config: MemoryConfig) type {
         
         // Common methods that work on the inner Self type
         pub fn size(self: *Self) usize {
-            self.mutex.lock();
-            defer self.mutex.unlock();
             return self.size_internal();
         }
 
@@ -140,9 +130,6 @@ pub fn Memory(comptime config: MemoryConfig) type {
 
         // EVM-compliant memory operations that expand to word boundaries
         pub fn set_data_evm(self: *Self, allocator: std.mem.Allocator, offset: u24, data: []const u8) !void {
-            self.mutex.lock();
-            defer self.mutex.unlock();
-            
             const offset_usize = @as(usize, offset);
             const end = offset_usize + data.len;
             // Round up to next 32-byte word boundary for EVM compliance
@@ -170,9 +157,6 @@ pub fn Memory(comptime config: MemoryConfig) type {
         }
 
         pub fn get_slice(self: *Self, offset: u24, len: u24) MemoryError![]const u8 {
-            self.mutex.lock();
-            defer self.mutex.unlock();
-            
             const offset_usize = @as(usize, offset);
             const len_usize = @as(usize, len);
             const end = offset_usize + len_usize;
@@ -183,9 +167,6 @@ pub fn Memory(comptime config: MemoryConfig) type {
         }
 
         pub fn set_data(self: *Self, allocator: std.mem.Allocator, offset: u24, data: []const u8) !void {
-            self.mutex.lock();
-            defer self.mutex.unlock();
-            
             const offset_usize = @as(usize, offset);
             const end = offset_usize + data.len;
             try self.ensure_capacity(allocator, @as(u24, @intCast(end)));
@@ -196,9 +177,6 @@ pub fn Memory(comptime config: MemoryConfig) type {
 
         /// Clears memory: resets owned memory to empty, sets checkpoint for borrowed memory
         pub fn clear(self: *Self) void {
-            self.mutex.lock();
-            defer self.mutex.unlock();
-            
             if (is_owned) {
                 self.buffer_ptr.items.len = 0;
                 self.checkpoint = 0;
@@ -224,9 +202,6 @@ pub fn Memory(comptime config: MemoryConfig) type {
 
         // EVM-compliant read that expands memory if needed
         pub fn get_u256_evm(self: *Self, allocator: std.mem.Allocator, offset: u24) !u256 {
-            self.mutex.lock();
-            defer self.mutex.unlock();
-            
             const offset_usize = @as(usize, offset);
             const word_aligned_end = ((offset_usize + 32 + 31) >> 5) << 5;
             try self.ensure_capacity(allocator, @as(u24, @intCast(word_aligned_end)));
@@ -264,9 +239,6 @@ pub fn Memory(comptime config: MemoryConfig) type {
             return 3 * words + ((words * words) >> 9); // Bit shift instead of / 512
         }
         pub fn get_expansion_cost(self: *Self, new_size: u24) u64 {
-            self.mutex.lock();
-            defer self.mutex.unlock();
-            
             const new_size_u64 = @as(u64, new_size);
             const current_size = @as(u64, @intCast(self.size_internal()));
             if (new_size_u64 <= current_size) return 0;
@@ -637,11 +609,9 @@ test "Memory struct size verification" {
     // Both owned and borrowed should have the same size
     try std.testing.expectEqual(@sizeOf(OwnedMem), @sizeOf(BorrowedMem));
 
-    // Check the actual size - now includes mutex
-    // checkpoint (3) + padding (5) + buffer_ptr (8) + mutex (32) = 48 bytes typical
-    // Note: mutex size is platform-dependent
-    try std.testing.expect(@sizeOf(OwnedMem) >= 32);
+    // Check the actual size - without mutex
+    // checkpoint (3) + padding (5) + buffer_ptr (8) = 16 bytes typical
+    try std.testing.expect(@sizeOf(OwnedMem) >= 16);
 
-    // Field offsets have changed due to mutex addition
-    // The exact offsets depend on struct padding and alignment
+    // Field offsets depend on struct padding and alignment
 }
