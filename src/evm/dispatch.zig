@@ -320,21 +320,55 @@ pub fn Dispatch(comptime FrameType: type) type {
                 
                 const instr_pc = pc;
                 const opcode_byte = bytecode.getOpcodeUnsafe(@intCast(pc));
-                switch (op_data) {
-                    .regular => |data| {
-                        // Regular opcode - add handler first, then metadata for PC, CODESIZE, CODECOPY
-                        const handler = opcode_handlers.*[data.opcode];
-                        try schedule_items.append(allocator, .{ .opcode_handler = handler });
-                        if (data.opcode == @intFromEnum(Opcode.PC)) {
-                            try schedule_items.append(allocator, .{ .pc = .{ .value = @intCast(instr_pc) } });
-                        } else if (data.opcode == @intFromEnum(Opcode.CODESIZE)) {
-                            try schedule_items.append(allocator, .{ .codesize = .{ .size = @intCast(bytecode.runtime_code.len) } });
-                        } else if (data.opcode == @intFromEnum(Opcode.CODECOPY)) {
-                            // Store direct pointer to bytecode data for stable reference
-                            const bytecode_data = bytecode.runtime_code;
-                            try schedule_items.append(allocator, .{ .codecopy = .{ .bytecode_ptr = bytecode_data.ptr, .size = @intCast(bytecode_data.len) } });
-                        }
-                    },
+                
+                // Check if this PC is a fusion candidate
+                if (pc < bytecode.packed_bitmap.len and bytecode.packed_bitmap[pc].is_fusion_candidate) {
+                    // Handle fusion operations
+                    const fusion_data = bytecode.getFusionData(@intCast(pc));
+                    switch (fusion_data) {
+                        .push_add_fusion => |data| {
+                            try Self.handleFusionOperation(&schedule_items, allocator, opcode_handlers, data.value, .push_add);
+                        },
+                        .push_mul_fusion => |data| {
+                            try Self.handleFusionOperation(&schedule_items, allocator, opcode_handlers, data.value, .push_mul);
+                        },
+                        .push_sub_fusion => |data| {
+                            try Self.handleFusionOperation(&schedule_items, allocator, opcode_handlers, data.value, .push_sub);
+                        },
+                        .push_div_fusion => |data| {
+                            try Self.handleFusionOperation(&schedule_items, allocator, opcode_handlers, data.value, .push_div);
+                        },
+                        .push_and_fusion => |data| {
+                            try Self.handleFusionOperation(&schedule_items, allocator, opcode_handlers, data.value, .push_and);
+                        },
+                        .push_or_fusion => |data| {
+                            try Self.handleFusionOperation(&schedule_items, allocator, opcode_handlers, data.value, .push_or);
+                        },
+                        .push_xor_fusion => |data| {
+                            try Self.handleFusionOperation(&schedule_items, allocator, opcode_handlers, data.value, .push_xor);
+                        },
+                        .push_jump_fusion => |data| {
+                            try Self.handleFusionOperation(&schedule_items, allocator, opcode_handlers, data.value, .push_jump);
+                        },
+                        .push_jumpi_fusion => |data| {
+                            try Self.handleFusionOperation(&schedule_items, allocator, opcode_handlers, data.value, .push_jumpi);
+                        },
+                        else => {},
+                    }
+                    // Skip to next instruction after fusion
+                    const size = bytecode.getInstructionSize(@intCast(pc));
+                    pc += size;
+                    continue;
+                }
+                
+                const opcode = std.meta.intToEnum(Opcode, opcode_byte) catch {
+                    // Invalid opcode
+                    try schedule_items.append(allocator, .{ .opcode_handler = opcode_handlers.*[@intFromEnum(Opcode.INVALID)] });
+                    pc += 1;
+                    continue;
+                };
+                
+                switch (opcode) {
                     .push => |data| {
                         // PUSH operation - add handler first, then metadata
                         const push_opcode = 0x60 + data.size - 1; // PUSH1 = 0x60, PUSH2 = 0x61, etc.
