@@ -304,9 +304,11 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
                 0x56 => return OpcodeData{ .push_jump_fusion = .{ .value = value } }, // JUMP
                 0x57 => return OpcodeData{ .push_jumpi_fusion = .{ .value = value } }, // JUMPI
                 else => {
-                    // Fallback to regular PUSH if fusion pattern not recognized
+                    // If we hit this branch we failed to implement an opcode or fusion
+                    const log = @import("log.zig");
+                    log.err("getFusionData: Unhandled fusion pattern - PUSH{} (value: {}) followed by opcode 0x{x:0>2}", .{push_size, value, second_op});
                     // TODO: Add more fusion types to OpcodeData union as needed
-                    return OpcodeData{ .push = .{ .value = value, .size = push_size } };
+                    unreachable;
                 },
             }
         }
@@ -984,103 +986,6 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
             return stats;
         }
 
-        /// Linear scan: set jumpdest bit at i when bytecode[i]==0x5b and the push-data bit is not set.
-        fn markJumpdestScalar(self: Self) void {
-            var i: usize = 0;
-            while (i < self.len()) : (i += 1) {
-                // Prefetch for sequential access
-                if (@as(usize, i) + PREFETCH_DISTANCE < self.len()) {
-                    @prefetch(&self.runtime_code[@as(usize, i) + PREFETCH_DISTANCE], .{
-                        .rw = .read,
-                        .locality = 3,
-                        .cache = .data,
-                    });
-                }
-
-                const test_push = (self.is_push_data[i >> BITMAP_SHIFT] & (@as(u8, 1) << @intCast(i & BITMAP_MASK))) != 0;
-                if (self.runtime_code[i] == @intFromEnum(Opcode.JUMPDEST) and !test_push) {
-                    self.is_jumpdest[i >> BITMAP_SHIFT] |= @as(u8, 1) << @intCast(i & BITMAP_MASK);
-                    // NEW: Also set packed bitmap
-                    self.packed_bitmap[i].is_jumpdest = true;
-                }
-            }
-        }
-
-        /// SIMD-accelerated jump destination marking with prefetching optimization
-        ///
-        /// Combines vector processing with cache prefetching for optimal performance on large bytecode.
-        /// Prefetching hides memory latency by loading future data while processing current chunks.
-        fn markJumpdestSimd(self: Self, comptime L: comptime_int) void {
-            // Skip SIMD on WASM targets that don't support it
-            if (comptime (builtin.target.cpu.arch == .wasm32 and !builtin.target.cpu.features.isEnabled(.simd128))) {
-                // Fall back to scalar implementation for WASM without SIMD
-                return self.markJumpdestScalar();
-            }
-            var i: usize = 0;
-            const code_len = self.runtime_code.len;
-
-            // Vector containing L copies of JUMPDEST opcode for parallel comparison
-            const splat_5b: @Vector(L, u8) = @splat(@as(u8, @intFromEnum(Opcode.JUMPDEST)));
-
-            // Process bytecode in L-byte chunks with prefetching
-            while (i + L <= code_len) : (i += L) {
-                // Prefetch future data to hide memory latency
-                if (@as(usize, i + L) + PREFETCH_DISTANCE < code_len) {
-                    // Prefetch next bytecode chunk for future iterations
-                    @prefetch(&self.runtime_code[@as(usize, i + L) + PREFETCH_DISTANCE], .{
-                        .rw = .read,
-                        .locality = 3,
-                        .cache = .data,
-                    });
-
-                    // Prefetch corresponding push_data bitmap entries
-                    @prefetch(&self.is_push_data[(@as(usize, i + L) + PREFETCH_DISTANCE) >> BITMAP_SHIFT], .{
-                        .rw = .read,
-                        .locality = 3,
-                        .cache = .data,
-                    });
-                }
-
-                // Load L consecutive bytes into vector for parallel processing
-                var arr: [L]u8 = undefined;
-                inline for (0..L) |k| arr[k] = self.runtime_code[i + k];
-                const v: @Vector(L, u8) = arr;
-
-                // Compare all L bytes against JUMPDEST simultaneously
-                const eq: @Vector(L, bool) = v == splat_5b;
-                const eq_arr: [L]bool = eq;
-
-                // Process comparison results and update jump destination bitmap
-                inline for (0..L) |j| {
-                    const idx = i + j;
-                    const byte_idx = idx >> BITMAP_SHIFT;
-                    const bit_mask = @as(u8, 1) << @intCast(idx & BITMAP_MASK);
-
-                    // Check if it's a JUMPDEST and not push data
-                    if (eq_arr[j]) {
-                        const test_push = (self.is_push_data[byte_idx] & bit_mask) != 0;
-                        if (!test_push) {
-                            self.is_jumpdest[byte_idx] |= bit_mask;
-                            // NEW: Also set packed bitmap - idx is the actual byte position in bytecode
-                            self.packed_bitmap[idx].is_jumpdest = true;
-                        }
-                    }
-                }
-            }
-
-            // Handle remaining bytes
-            var t: usize = i;
-            while (t < code_len) : (t += 1) {
-                const byte_idx = t >> BITMAP_SHIFT;
-                const bit_mask = @as(u8, 1) << @intCast(t & BITMAP_MASK);
-                const test_push = (self.is_push_data[byte_idx] & bit_mask) != 0;
-                if (self.runtime_code[t] == @intFromEnum(Opcode.JUMPDEST) and !test_push) {
-                    self.is_jumpdest[byte_idx] |= bit_mask;
-                    // NEW: Also set packed bitmap
-                    self.packed_bitmap[t].is_jumpdest = true;
-                }
-            }
-        }
 
         /// Pretty print bytecode with human-readable formatting, colors, and metadata
         pub fn pretty_print(self: Self, allocator: std.mem.Allocator) ![]u8 {
@@ -1238,54 +1143,6 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
             }
             
             return output.toOwnedSlice();
-        }
-
-        /// Detect fusion candidates (PUSH+ADD, PUSH+MUL patterns) for opcode optimization
-        /// Marks patterns that can be fused into synthetic opcodes for better performance
-        fn markFusionCandidates(self: Self) void {
-            var i: PcType = 0;
-            const code_len = self.len();
-
-            while (i + 1 < code_len) {
-                // Only check actual operation starts, not push data
-                if (!self.packed_bitmap[i].is_op_start or self.packed_bitmap[i].is_push_data) {
-                    i += 1;
-                    continue;
-                }
-
-                const op1 = self.runtime_code[i];
-
-                // Check for PUSH opcode
-                if (op1 >= @intFromEnum(Opcode.PUSH1) and op1 <= @intFromEnum(Opcode.PUSH32)) {
-                    const push_size: PcType = op1 - (@intFromEnum(Opcode.PUSH1) - 1);
-                    const next_op_idx = i + 1 + push_size;
-
-                    // Ensure the next instruction is within bounds and is an operation start
-                    if (next_op_idx < code_len and
-                        self.packed_bitmap[next_op_idx].is_op_start and
-                        !self.packed_bitmap[next_op_idx].is_push_data)
-                    {
-                        const op2 = self.runtime_code[next_op_idx];
-
-                        // Check for fusable patterns:
-                        // PUSH + ADD, PUSH + MUL, PUSH + SUB, PUSH + DIV
-                        // PUSH + AND, PUSH + OR, PUSH + XOR
-                        // PUSH + JUMP, PUSH + JUMPI
-                        const is_fusable = switch (op2) {
-                            @intFromEnum(Opcode.ADD), @intFromEnum(Opcode.MUL), @intFromEnum(Opcode.SUB), @intFromEnum(Opcode.DIV), @intFromEnum(Opcode.AND), @intFromEnum(Opcode.OR), @intFromEnum(Opcode.XOR), @intFromEnum(Opcode.JUMP), @intFromEnum(Opcode.JUMPI) => true,
-                            else => false,
-                        };
-
-                        // Only mark as fusion candidate if fusions are enabled
-                        if (is_fusable and fusions_enabled) {
-                            // Mark the PUSH as a fusion candidate
-                            self.packed_bitmap[i].is_fusion_candidate = true;
-                        }
-                    }
-                }
-
-                i += self.getInstructionSize(i);
-            }
         }
     };
 }
