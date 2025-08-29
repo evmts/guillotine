@@ -10,7 +10,7 @@ const HashUtils = crypto.HashUtils;
 const Address = primitives.Address.Address;
 const ZERO_ADDRESS = primitives.ZERO_ADDRESS;
 const TransactionContext = evm_mod.TransactionContext;
-const u256 = primitives.u256;
+// u256 is a primitive type and should not be imported
 
 // ============================================================================
 // Configuration
@@ -351,10 +351,8 @@ fn bench_evm_push_pop(allocator: std.mem.Allocator) void {
     defer allocator.free(bytecode);
     
     // Create memory database
-    var memory_db = evm_mod.MemoryDatabase.init(allocator);
-    defer memory_db.deinit();
-    
-    const db_interface = memory_db.to_database_interface();
+    var db = evm_mod.Database.init(allocator);
+    defer db.deinit();
     
     // Set up block info
     const block_info = evm_mod.BlockInfo{
@@ -375,7 +373,7 @@ fn bench_evm_push_pop(allocator: std.mem.Allocator) void {
     };
     
     // Create EVM instance
-    var vm = evm_mod.Evm(.{}).init(allocator, db_interface, block_info, context, 0, ZERO_ADDRESS, .CANCUN) catch |err| {
+    var vm = evm_mod.Evm(.{}).init(allocator, &db, block_info, context, 0, ZERO_ADDRESS, .CANCUN) catch |err| {
         std.log.err("EVM push/pop benchmark failed to init VM: {}", .{err});
         @panic("EVM push/pop benchmark failed");
     };
@@ -393,12 +391,12 @@ fn bench_evm_push_pop(allocator: std.mem.Allocator) void {
     };
     
     // Deploy contract
-    const code_hash = db_interface.set_code(bytecode) catch |err| {
+    const code_hash = db.set_code(bytecode) catch |err| {
         std.log.err("EVM push/pop benchmark failed to set code: {}", .{err});
         @panic("EVM push/pop benchmark failed");
     };
     
-    var account = db_interface.get_account(CONTRACT_ADDRESS) catch null orelse evm_mod.Account{
+    var account = db.get_account(CONTRACT_ADDRESS) catch null orelse evm_mod.Account{
         .balance = 0,
         .nonce = 0,
         .code_hash = HashUtils.EMPTY_KECCAK256,
@@ -406,7 +404,7 @@ fn bench_evm_push_pop(allocator: std.mem.Allocator) void {
     };
     
     account.code_hash = code_hash;
-    db_interface.set_account(CONTRACT_ADDRESS, account) catch |err| {
+    db.set_account(CONTRACT_ADDRESS, account) catch |err| {
         std.log.err("EVM push/pop benchmark failed to set account: {}", .{err});
         @panic("EVM push/pop benchmark failed");
     };
@@ -428,10 +426,8 @@ fn bench_evm_large_stack(allocator: std.mem.Allocator) void {
     defer allocator.free(bytecode);
     
     // Create memory database
-    var memory_db = evm_mod.MemoryDatabase.init(allocator);
-    defer memory_db.deinit();
-    
-    const db_interface = memory_db.to_database_interface();
+    var db = evm_mod.Database.init(allocator);
+    defer db.deinit();
     
     // Set up block info
     const block_info = evm_mod.BlockInfo{
@@ -452,7 +448,7 @@ fn bench_evm_large_stack(allocator: std.mem.Allocator) void {
     };
     
     // Create EVM instance
-    var vm = evm_mod.Evm(.{}).init(allocator, db_interface, block_info, context, 0, ZERO_ADDRESS, .CANCUN) catch |err| {
+    var vm = evm_mod.Evm(.{}).init(allocator, &db, block_info, context, 0, ZERO_ADDRESS, .CANCUN) catch |err| {
         std.log.err("EVM large stack benchmark failed to init VM: {}", .{err});
         @panic("EVM large stack benchmark failed");
     };
@@ -470,12 +466,12 @@ fn bench_evm_large_stack(allocator: std.mem.Allocator) void {
     };
     
     // Deploy contract
-    const code_hash = db_interface.set_code(bytecode) catch |err| {
+    const code_hash = db.set_code(bytecode) catch |err| {
         std.log.err("EVM large stack benchmark failed to set code: {}", .{err});
         @panic("EVM large stack benchmark failed");
     };
     
-    var account = db_interface.get_account(CONTRACT_ADDRESS) catch null orelse evm_mod.Account{
+    var account = db.get_account(CONTRACT_ADDRESS) catch null orelse evm_mod.Account{
         .balance = 0,
         .nonce = 0,
         .code_hash = HashUtils.EMPTY_KECCAK256,
@@ -483,7 +479,7 @@ fn bench_evm_large_stack(allocator: std.mem.Allocator) void {
     };
     
     account.code_hash = code_hash;
-    db_interface.set_account(CONTRACT_ADDRESS, account) catch |err| {
+    db.set_account(CONTRACT_ADDRESS, account) catch |err| {
         std.log.err("EVM large stack benchmark failed to set account: {}", .{err});
         @panic("EVM large stack benchmark failed");
     };

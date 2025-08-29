@@ -234,9 +234,8 @@ const TEST_ADDRESS_3 = Address{ .bytes = [_]u8{3} ** 20 };
 test "EIP-2929: warm/cold access - BALANCE opcode gas costs" {
     const allocator = testing.allocator;
 
-    var memory_db = @import("memory_database.zig").MemoryDatabase.init(allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db.to_database_interface();
+    var db = @import("database.zig").Database.init(allocator);
+    defer db.deinit();
 
     const block_info = @import("block_info.zig").DefaultBlockInfo{
         .number = 1,
@@ -256,7 +255,7 @@ test "EIP-2929: warm/cold access - BALANCE opcode gas costs" {
         .blob_base_fee = 0,
     };
 
-    var evm = try @import("evm.zig").Evm(.{}).init(allocator, db_interface, block_info, tx_context, 20, TEST_ADDRESS_1, .BERLIN);
+    var evm = try @import("evm.zig").Evm(.{}).init(allocator, &db, block_info, tx_context, 20, TEST_ADDRESS_1, .BERLIN);
     defer evm.deinit();
 
     // Set up test accounts with balances
@@ -266,7 +265,7 @@ test "EIP-2929: warm/cold access - BALANCE opcode gas costs" {
         .code_hash = [_]u8{0} ** 32,
         .storage_root = [_]u8{0} ** 32,
     };
-    try memory_db.set_account(TEST_ADDRESS_2.bytes, account1);
+    try db.set_account(TEST_ADDRESS_2.bytes, account1);
 
     // Test first access (cold) to an address
     const cold_cost = try evm.access_address(TEST_ADDRESS_2);
@@ -280,9 +279,8 @@ test "EIP-2929: warm/cold access - BALANCE opcode gas costs" {
 test "EIP-2929: warm/cold access - SLOAD opcode gas costs" {
     const allocator = testing.allocator;
 
-    var memory_db = @import("memory_database.zig").MemoryDatabase.init(allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db.to_database_interface();
+    var db = @import("database.zig").Database.init(allocator);
+    defer db.deinit();
 
     const block_info = @import("block_info.zig").DefaultBlockInfo{
         .number = 1,
@@ -302,7 +300,7 @@ test "EIP-2929: warm/cold access - SLOAD opcode gas costs" {
         .blob_base_fee = 0,
     };
 
-    var evm = try @import("evm.zig").Evm(.{}).init(allocator, db_interface, block_info, tx_context, 20, TEST_ADDRESS_1, .BERLIN);
+    var evm = try @import("evm.zig").Evm(.{}).init(allocator, &db, block_info, tx_context, 20, TEST_ADDRESS_1, .BERLIN);
     defer evm.deinit();
 
     const slot: u256 = 42;
@@ -319,9 +317,8 @@ test "EIP-2929: warm/cold access - SLOAD opcode gas costs" {
 test "EIP-2929: transaction pre-warming" {
     const allocator = testing.allocator;
 
-    var memory_db = @import("memory_database.zig").MemoryDatabase.init(allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db.to_database_interface();
+    var db = @import("database.zig").Database.init(allocator);
+    defer db.deinit();
 
     const block_info = @import("block_info.zig").DefaultBlockInfo{
         .number = 1,
@@ -341,7 +338,7 @@ test "EIP-2929: transaction pre-warming" {
         .blob_base_fee = 0,
     };
 
-    var evm = try @import("evm.zig").Evm(.{}).init(allocator, db_interface, block_info, tx_context, 20, TEST_ADDRESS_1, .BERLIN);
+    var evm = try @import("evm.zig").Evm(.{}).init(allocator, &db, block_info, tx_context, 20, TEST_ADDRESS_1, .BERLIN);
     defer evm.deinit();
 
     // Pre-warm addresses as per EIP-2929
@@ -365,9 +362,8 @@ test "EIP-2929: transaction pre-warming" {
 test "EIP-2929: SELFBALANCE always warm" {
     const allocator = testing.allocator;
 
-    var memory_db = @import("memory_database.zig").MemoryDatabase.init(allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db.to_database_interface();
+    var db = @import("database.zig").Database.init(allocator);
+    defer db.deinit();
 
     const block_info = @import("block_info.zig").DefaultBlockInfo{
         .number = 1,
@@ -387,13 +383,13 @@ test "EIP-2929: SELFBALANCE always warm" {
         .blob_base_fee = 0,
     };
 
-    var evm = try @import("evm.zig").Evm(.{}).init(allocator, db_interface, block_info, tx_context, 20, TEST_ADDRESS_1, .BERLIN);
+    var evm = try @import("evm.zig").Evm(.{}).init(allocator, &db, block_info, tx_context, 20, TEST_ADDRESS_1, .BERLIN);
     defer evm.deinit();
 
     // Deploy contract
     const contract_address = TEST_ADDRESS_2;
     const bytecode = [_]u8{ 0x47, 0x00 }; // SELFBALANCE, STOP
-    const code_hash = try memory_db.set_code(&bytecode);
+    const code_hash = try db.set_code(&bytecode);
     const Account = @import("database_interface_account.zig").Account;
     const acct = Account{
         .nonce = 0,
@@ -401,7 +397,7 @@ test "EIP-2929: SELFBALANCE always warm" {
         .code_hash = code_hash,
         .storage_root = [_]u8{0} ** 32,
     };
-    try memory_db.set_account(contract_address.bytes, acct);
+    try db.set_account(contract_address.bytes, acct);
 
     // Pre-warm the contract address (as would happen during CALL)
     try evm.access_list.pre_warm_addresses(&[_]Address{contract_address});
@@ -414,9 +410,8 @@ test "EIP-2929: SELFBALANCE always warm" {
 test "EIP-2929: access list cleared between transactions" {
     const allocator = testing.allocator;
 
-    var memory_db = @import("memory_database.zig").MemoryDatabase.init(allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db.to_database_interface();
+    var db = @import("database.zig").Database.init(allocator);
+    defer db.deinit();
 
     const block_info = @import("block_info.zig").DefaultBlockInfo{
         .number = 1,
@@ -436,7 +431,7 @@ test "EIP-2929: access list cleared between transactions" {
         .blob_base_fee = 0,
     };
 
-    var evm = try @import("evm.zig").Evm(.{}).init(allocator, db_interface, block_info, tx_context, 20, TEST_ADDRESS_1, .BERLIN);
+    var evm = try @import("evm.zig").Evm(.{}).init(allocator, &db, block_info, tx_context, 20, TEST_ADDRESS_1, .BERLIN);
     defer evm.deinit();
 
     // Access an address to warm it
@@ -475,9 +470,8 @@ test "EIP-2929 - SLOAD multiple slots warm/cold pattern" {
     //     return error.SkipZigTest; // TODO: Update this test to use the new architecture
     //     const allocator = testing.allocator;
 
-    //     var memory_db = MemoryDatabase.init(allocator);
-    //     defer memory_db.deinit();
-    //     const db_interface = memory_db.to_database_interface();
+    //     var db = Database.init(allocator);
+    //     defer db.deinit();
 
     //     const block_info = BlockInfo.init();
     //     const context = TransactionContext{
@@ -486,7 +480,7 @@ test "EIP-2929 - SLOAD multiple slots warm/cold pattern" {
     //         .chain_id = 1,
     //     };
 
-    //     var evm = try Evm(.{}).init(allocator, db_interface, block_info, context, 0, ZERO_ADDRESS, Hardfork.BERLIN);
+    //     var evm = try Evm(.{}).init(allocator, &db, block_info, context, 0, ZERO_ADDRESS, Hardfork.BERLIN);
     //     defer evm.deinit();
 
     //     const contract_address = Address{ .bytes = [_]u8{0x12} ** 20 };
@@ -519,9 +513,8 @@ test "EIP-2929 - SSTORE warm/cold access patterns" {
 test "EIP-2929 - Cross-opcode warm address sharing" {
     const allocator = testing.allocator;
 
-    var memory_db = MemoryDatabase.init(allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db.to_database_interface();
+    var db = Database.init(allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo.init();
     const context = TransactionContext{
@@ -530,7 +523,7 @@ test "EIP-2929 - Cross-opcode warm address sharing" {
         .chain_id = 1,
     };
 
-    var evm = try Evm(.{}).init(allocator, db_interface, block_info, context, 0, ZERO_ADDRESS, Hardfork.BERLIN);
+    var evm = try Evm(.{}).init(allocator, &db, block_info, context, 0, ZERO_ADDRESS, Hardfork.BERLIN);
     defer evm.deinit();
 
     const test_address = Address{ .bytes = [_]u8{0xAB} ** 20 };
@@ -555,29 +548,27 @@ test "EIP-2929 - Cross-opcode warm address sharing" {
 test "EIP-2929 - CALL warm/cold recipient costs" {
     const allocator = testing.allocator;
 
-    var memory_db = MemoryDatabase.init(allocator);
-    defer memory_db.deinit();
+    var db = Database.init(allocator);
+    defer db.deinit();
 
     // Set up accounts with balance for calls
     const caller_address = Address{ .bytes = [_]u8{0x01} ** 20 };
     const recipient1 = Address{ .bytes = [_]u8{0x02} ** 20 };
     const recipient2 = Address{ .bytes = [_]u8{0x03} ** 20 };
 
-    try memory_db.set_account(caller_address.bytes, .{
+    try db.set_account(caller_address.bytes, .{
         .nonce = 0,
         .balance = 1_000_000_000_000_000_000, // 1 ETH
         .code_hash = [_]u8{0} ** 32,
         .storage_root = [_]u8{0} ** 32,
     });
 
-    try memory_db.set_account(recipient1.bytes, .{
+    try db.set_account(recipient1.bytes, .{
         .nonce = 0,
         .balance = 0,
         .code_hash = [_]u8{0} ** 32,
         .storage_root = [_]u8{0} ** 32,
     });
-
-    const db_interface = memory_db.to_database_interface();
 
     const block_info = BlockInfo.init();
     const context = TransactionContext{
@@ -586,7 +577,7 @@ test "EIP-2929 - CALL warm/cold recipient costs" {
         .chain_id = 1,
     };
 
-    var evm = try Evm(.{}).init(allocator, db_interface, block_info, context, 0, caller_address, Hardfork.BERLIN);
+    var evm = try Evm(.{}).init(allocator, &db, block_info, context, 0, caller_address, Hardfork.BERLIN);
     defer evm.deinit();
 
     // First CALL to recipient1 - should include cold access cost
@@ -605,9 +596,8 @@ test "EIP-2929 - CALL warm/cold recipient costs" {
 test "EIP-2929 - Self-referential operations (BALANCE on self)" {
     const allocator = testing.allocator;
 
-    var memory_db = MemoryDatabase.init(allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db.to_database_interface();
+    var db = Database.init(allocator);
+    defer db.deinit();
 
     const contract_address = Address{ .bytes = [_]u8{0x42} ** 20 };
     const block_info = BlockInfo.init();
@@ -617,7 +607,7 @@ test "EIP-2929 - Self-referential operations (BALANCE on self)" {
         .chain_id = 1,
     };
 
-    var evm = try Evm(.{}).init(allocator, db_interface, block_info, context, 0, contract_address, Hardfork.BERLIN);
+    var evm = try Evm(.{}).init(allocator, &db, block_info, context, 0, contract_address, Hardfork.BERLIN);
     defer evm.deinit();
 
     // Contract accessing its own address - first access should still be cold
@@ -632,9 +622,8 @@ test "EIP-2929 - Self-referential operations (BALANCE on self)" {
 test "EIP-2929 - Precompiled contract access costs" {
     const allocator = testing.allocator;
 
-    var memory_db = MemoryDatabase.init(allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db.to_database_interface();
+    var db = Database.init(allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo.init();
     const context = TransactionContext{
@@ -643,7 +632,7 @@ test "EIP-2929 - Precompiled contract access costs" {
         .chain_id = 1,
     };
 
-    var evm = try Evm(.{}).init(allocator, db_interface, block_info, context, 0, ZERO_ADDRESS, Hardfork.BERLIN);
+    var evm = try Evm(.{}).init(allocator, &db, block_info, context, 0, ZERO_ADDRESS, Hardfork.BERLIN);
     defer evm.deinit();
 
     // Precompiled contracts are at addresses 0x01 through 0x09
@@ -672,9 +661,8 @@ test "EIP-2929 - Precompiled contract access costs" {
 test "EIP-2929 - Storage slots with maximum values" {
     const allocator = testing.allocator;
 
-    var memory_db = MemoryDatabase.init(allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db.to_database_interface();
+    var db = Database.init(allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo.init();
     const context = TransactionContext{
@@ -683,7 +671,7 @@ test "EIP-2929 - Storage slots with maximum values" {
         .chain_id = 1,
     };
 
-    var evm = try Evm(.{}).init(allocator, db_interface, block_info, context, 0, ZERO_ADDRESS, Hardfork.BERLIN);
+    var evm = try Evm(.{}).init(allocator, &db, block_info, context, 0, ZERO_ADDRESS, Hardfork.BERLIN);
     defer evm.deinit();
 
     const contract_address = Address{ .bytes = [_]u8{0xEE} ** 20 };

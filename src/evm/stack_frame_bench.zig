@@ -6,7 +6,9 @@ const FrameConfig = @import("frame_config.zig").FrameConfig;
 const Opcode = @import("opcode.zig").Opcode;
 const primitives = @import("primitives");
 const Address = primitives.Address;
-const MemoryDatabase = @import("memory_database.zig").MemoryDatabase;
+const Database = @import("database.zig").Database;
+const evm_mod = @import("evm");
+const Host = evm_mod.Host;
 const Revm = @import("revm").Revm;
 const RevmSettings = @import("revm").RevmSettings;
 const block_info_mod = @import("block_info.zig");
@@ -285,12 +287,11 @@ fn benchmarkStackFrameERC20(allocator: std.mem.Allocator) void {
     const F = StackFrame(.{ .has_database = true });
 
     const host = createBenchHost();
-    var db = MemoryDatabase.init(allocator);
+    var db = Database.init(allocator);
     defer db.deinit();
-    const db_interface = db.to_database_interface();
 
     // Initialize frame directly from raw bytecode
-    var frame = F.init(allocator, 1000000, db_interface, host, null) catch unreachable;
+    var frame = F.init(allocator, erc20_bytecode, 1000000, &db, host, null) catch unreachable;
     defer frame.deinit(allocator);
 
     // Just initialization for now - actual execution would require planner/interpreter
@@ -300,11 +301,10 @@ fn benchmarkStackFrameSnailtracer(allocator: std.mem.Allocator) void {
     const F = StackFrame(.{ .has_database = true });
 
     const host = createBenchHost();
-    var db = MemoryDatabase.init(allocator);
+    var db = Database.init(allocator);
     defer db.deinit();
-    const db_interface = db.to_database_interface();
 
-    var frame = F.init(allocator, 10000000, db_interface, host, null) catch unreachable;
+    var frame = F.init(allocator, snailtracer_bytecode, 10000000, &db, host, null) catch unreachable;
     defer frame.deinit(allocator);
 }
 

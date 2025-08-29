@@ -7,7 +7,6 @@ const DefaultEvm = @import("evm.zig").DefaultEvm;
 const BlockInfo = @import("block_info.zig").DefaultBlockInfo;
 const Database = @import("database.zig").Database;
 const Account = @import("database_interface_account.zig").Account;
-const MemoryDatabase = @import("memory_database.zig").MemoryDatabase;
 const TransactionContext = @import("transaction_context.zig").TransactionContext;
 const Opcode = @import("opcode.zig").Opcode;
 const EvmConfig = @import("evm_config.zig").EvmConfig;
@@ -55,9 +54,8 @@ test "EVM error type definition" {
     const allocator = std.testing.allocator;
 
     // Create test database
-    var memory_db = MemoryDatabase.init(allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(allocator);
+    defer db.deinit();
 
     // Create EVM instance
     const block_info = BlockInfo{
@@ -76,7 +74,7 @@ test "EVM error type definition" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(allocator, db_interface, block_info, tx_context, 0, primitives.ZERO_ADDRESS, .BERLIN);
+    var evm = try DefaultEvm.init(allocator, &db, block_info, tx_context, 0, primitives.ZERO_ADDRESS, .BERLIN);
     defer evm.deinit();
 
     // Test that call method exists and has correct signature
@@ -107,9 +105,8 @@ test "EVM call() method routes to different handlers" {
     const allocator = std.testing.allocator;
 
     // Create test database
-    var memory_db = MemoryDatabase.init(allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(allocator);
+    defer db.deinit();
 
     // Create EVM instance
     const block_info = BlockInfo{
@@ -128,7 +125,7 @@ test "EVM call() method routes to different handlers" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(allocator, db_interface, block_info, tx_context, 0, primitives.ZERO_ADDRESS, .BERLIN);
+    var evm = try DefaultEvm.init(allocator, &db, block_info, tx_context, 0, primitives.ZERO_ADDRESS, .BERLIN);
     defer evm.deinit();
 
     // Test CALL routing
@@ -193,15 +190,14 @@ test "EVM call_handler basic functionality" {
     const allocator = std.testing.allocator;
 
     // Create test database
-    var memory_db = MemoryDatabase.init(allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(allocator);
+    defer db.deinit();
 
     // Add a simple contract that just STOPs
     const stop_bytecode = [_]u8{0x00}; // STOP opcode
     const contract_address: primitives.Address = [_]u8{0x42} ++ [_]u8{0} ** 19;
-    const code_hash = try memory_db.set_code(&stop_bytecode);
-    try memory_db.set_account(contract_address, Account{
+    const code_hash = try db.set_code(&stop_bytecode);
+    try db.set_account(contract_address, Account{
         .balance = 0,
         .nonce = 0,
         .code_hash = code_hash,
@@ -225,7 +221,7 @@ test "EVM call_handler basic functionality" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(allocator, db_interface, block_info, tx_context, 0, primitives.ZERO_ADDRESS, .BERLIN);
+    var evm = try DefaultEvm.init(allocator, &db, block_info, tx_context, 0, primitives.ZERO_ADDRESS, .BERLIN);
     defer evm.deinit();
 
     // Test call_handler directly (once it's implemented)
@@ -256,9 +252,8 @@ test "EVM staticcall handler prevents state changes" {
     const allocator = std.testing.allocator;
 
     // Create test database with initial state
-    var memory_db = MemoryDatabase.init(allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(allocator);
+    defer db.deinit();
 
     // Add a contract that tries to modify storage (should fail in staticcall)
     const sstore_bytecode = [_]u8{
@@ -268,8 +263,8 @@ test "EVM staticcall handler prevents state changes" {
         0x00, // STOP
     };
     const contract_address: primitives.Address = [_]u8{0x42} ++ [_]u8{0} ** 19;
-    const code_hash = try memory_db.set_code(&sstore_bytecode);
-    try memory_db.set_account(contract_address, Account{
+    const code_hash = try db.set_code(&sstore_bytecode);
+    try db.set_account(contract_address, Account{
         .balance = 0,
         .nonce = 0,
         .code_hash = code_hash,
@@ -293,7 +288,7 @@ test "EVM staticcall handler prevents state changes" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(allocator, db_interface, block_info, tx_context, 0, primitives.ZERO_ADDRESS, .BERLIN);
+    var evm = try DefaultEvm.init(allocator, &db, block_info, tx_context, 0, primitives.ZERO_ADDRESS, .BERLIN);
     defer evm.deinit();
 
     // Test staticcall directly
@@ -320,9 +315,8 @@ test "EVM delegatecall handler preserves caller context" {
     const allocator = std.testing.allocator;
 
     // Create test database
-    var memory_db = MemoryDatabase.init(allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(allocator);
+    defer db.deinit();
 
     // Add a contract that returns the caller address
     // CALLER opcode pushes msg.sender to stack
@@ -335,7 +329,7 @@ test "EVM delegatecall handler preserves caller context" {
         0xF3, // RETURN - return 32 bytes from memory[0]
     };
     const contract_address: primitives.Address = [_]u8{0x42} ++ [_]u8{0} ** 19;
-    try memory_db.set_account(contract_address, Account{
+    try db.set_account(contract_address, Account{
         .balance = 0,
         .nonce = 0,
         .code_hash = [_]u8{0} ** 32,
@@ -360,7 +354,7 @@ test "EVM delegatecall handler preserves caller context" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(allocator, db_interface, block_info, tx_context, 0, primitives.ZERO_ADDRESS, .BERLIN);
+    var evm = try DefaultEvm.init(allocator, &db, block_info, tx_context, 0, primitives.ZERO_ADDRESS, .BERLIN);
     defer evm.deinit();
 
     // Test delegatecall - should preserve original caller
@@ -394,9 +388,8 @@ test "Evm creation with custom config" {
     });
 
     // Create test database
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -414,7 +407,7 @@ test "Evm creation with custom config" {
         .chain_id = 1,
     };
 
-    var evm = try CustomEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try CustomEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     try std.testing.expectEqual(@as(u9, 0), evm.depth);
@@ -422,9 +415,8 @@ test "Evm creation with custom config" {
 
 test "Evm call depth limit" {
     // Create test database
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -442,7 +434,7 @@ test "Evm call depth limit" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     // Set depth to max
@@ -467,9 +459,8 @@ test "Evm call depth limit" {
 // TDD Tests for call method implementation
 test "call method basic functionality - simple STOP" {
     // Create test database
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -487,7 +478,7 @@ test "call method basic functionality - simple STOP" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     _ = [_]u8{0x00};
@@ -511,9 +502,8 @@ test "call method basic functionality - simple STOP" {
 
 test "call method loads contract code from state" {
     // Create test database
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -531,13 +521,13 @@ test "call method loads contract code from state" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     // Set up contract with bytecode [0x00] (STOP)
     const contract_address: primitives.Address = [_]u8{ 0x12, 0x34, 0x56, 0x78, 0x90, 0x12, 0x34, 0x56, 0x78, 0x90, 0x12, 0x34, 0x56, 0x78, 0x90, 0x12, 0x34, 0x56, 0x78, 0x90 };
     const bytecode = [_]u8{0x00};
-    const code_hash = try memory_db.set_code(&bytecode);
+    const code_hash = try db.set_code(&bytecode);
 
     // Create account with the code
     const account = Account{
@@ -546,7 +536,7 @@ test "call method loads contract code from state" {
         .code_hash = code_hash,
         .storage_root = [_]u8{0} ** 32,
     };
-    try memory_db.set_account(contract_address, account);
+    try db.set_account(contract_address, account);
 
     const call_params = DefaultEvm.CallParams{
         .call = .{
@@ -566,9 +556,8 @@ test "call method loads contract code from state" {
 
 test "call method handles CREATE operation" {
     // Create test database
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -586,7 +575,7 @@ test "call method handles CREATE operation" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     // Create contract with simple init code that returns [0x00] (STOP)
@@ -609,9 +598,8 @@ test "call method handles CREATE operation" {
 
 test "call method handles gas limit properly" {
     // Create test database
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -629,7 +617,7 @@ test "call method handles gas limit properly" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     // Call with very low gas (should fail or return with low gas left)
@@ -819,9 +807,8 @@ test "EvmConfig - custom configurations" {
     const CustomEvm = Evm(custom_config);
 
     // Create test database and verify custom EVM compiles
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -839,7 +826,7 @@ test "EvmConfig - custom configurations" {
         .chain_id = 1,
     };
 
-    var evm = try CustomEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try CustomEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     try std.testing.expectEqual(@as(u10, 0), evm.depth); // Should be u10 for 512 max depth
@@ -858,9 +845,8 @@ test "TransactionContext creation and fields" {
 }
 
 test "Evm initialization with all parameters" {
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 12345678,
@@ -881,7 +867,7 @@ test "Evm initialization with all parameters" {
     const gas_price: u256 = 30000000000; // 30 gwei
     const origin = primitives.ZERO_ADDRESS;
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, gas_price, origin, .LONDON);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, gas_price, origin, .LONDON);
     defer evm.deinit();
 
     // Verify all fields were set correctly
@@ -900,9 +886,8 @@ test "Evm initialization with all parameters" {
 // Duplicate test removed - see earlier occurrence
 
 test "Host interface - get_balance functionality" {
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -920,7 +905,7 @@ test "Host interface - get_balance functionality" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     const address = primitives.ZERO_ADDRESS;
@@ -933,7 +918,7 @@ test "Host interface - get_balance functionality" {
         .code_hash = [_]u8{0} ** 32,
         .storage_root = [_]u8{0} ** 32,
     };
-    try memory_db.set_account(address, account);
+    try db.set_account(address, account);
 
     const retrieved_balance = evm.get_balance(address);
     try std.testing.expectEqual(balance, retrieved_balance);
@@ -944,9 +929,8 @@ test "Host interface - get_balance functionality" {
 }
 
 test "Host interface - storage operations" {
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -964,7 +948,7 @@ test "Host interface - storage operations" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     const address = primitives.ZERO_ADDRESS;
@@ -988,9 +972,8 @@ test "Host interface - storage operations" {
 }
 
 test "Host interface - account_exists functionality" {
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -1008,7 +991,7 @@ test "Host interface - account_exists functionality" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     const address = primitives.ZERO_ADDRESS;
@@ -1018,7 +1001,7 @@ test "Host interface - account_exists functionality" {
         .code_hash = [_]u8{0} ** 32,
         .storage_root = [_]u8{0} ** 32,
     };
-    try memory_db.set_account(address, account);
+    try db.set_account(address, account);
 
     const exists = evm.account_exists(address);
     try std.testing.expect(exists);
@@ -1029,9 +1012,8 @@ test "Host interface - account_exists functionality" {
 }
 
 test "Host interface - call type differentiation" {
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -1049,7 +1031,7 @@ test "Host interface - call type differentiation" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     const call_params = DefaultEvm.CallParams{
@@ -1093,9 +1075,8 @@ test "Host interface - call type differentiation" {
 }
 
 test "EVM CREATE operation - basic contract creation" {
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -1113,7 +1094,7 @@ test "EVM CREATE operation - basic contract creation" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     // Set up caller with balance
@@ -1124,7 +1105,7 @@ test "EVM CREATE operation - basic contract creation" {
         .code_hash = [_]u8{0} ** 32,
         .storage_root = [_]u8{0} ** 32,
     };
-    try memory_db.set_account(caller_address, caller_account);
+    try db.set_account(caller_address, caller_account);
 
     // Simple init code that returns a contract with STOP opcode
     // PUSH1 0x01 (size)
@@ -1163,18 +1144,17 @@ test "EVM CREATE operation - basic contract creation" {
     const contract_address: primitives.Address = result.output[12..32].*;
 
     // Verify contract was created
-    const created_account = (try memory_db.get_account(contract_address)).?;
+    const created_account = (try db.get_account(contract_address)).?;
     try std.testing.expectEqual(@as(u64, 1), created_account.nonce);
 
     // Verify caller nonce was incremented
-    const updated_caller = (try memory_db.get_account(caller_address)).?;
+    const updated_caller = (try db.get_account(caller_address)).?;
     try std.testing.expectEqual(@as(u64, 1), updated_caller.nonce);
 }
 
 test "EVM CREATE operation - with value transfer" {
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -1192,7 +1172,7 @@ test "EVM CREATE operation - with value transfer" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     // Set up caller with balance
@@ -1205,7 +1185,7 @@ test "EVM CREATE operation - with value transfer" {
         .code_hash = [_]u8{0} ** 32,
         .storage_root = [_]u8{0} ** 32,
     };
-    try memory_db.set_account(caller_address, caller_account);
+    try db.set_account(caller_address, caller_account);
 
     // Init code that returns empty contract
     const init_code = [_]u8{ 0x00, 0x00, 0xF3 }; // STOP STOP RETURN
@@ -1228,17 +1208,16 @@ test "EVM CREATE operation - with value transfer" {
     const contract_address: primitives.Address = result.output[12..32].*;
 
     // Verify balances
-    const caller_after = (try memory_db.get_account(caller_address)).?;
+    const caller_after = (try db.get_account(caller_address)).?;
     try std.testing.expectEqual(initial_balance - transfer_value, caller_after.balance);
 
-    const contract_account = (try memory_db.get_account(contract_address)).?;
+    const contract_account = (try db.get_account(contract_address)).?;
     try std.testing.expectEqual(transfer_value, contract_account.balance);
 }
 
 test "EVM CREATE operation - insufficient balance fails" {
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -1256,7 +1235,7 @@ test "EVM CREATE operation - insufficient balance fails" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     const caller_address: primitives.Address = [_]u8{0x01} ++ [_]u8{0} ** 19;
@@ -1266,7 +1245,7 @@ test "EVM CREATE operation - insufficient balance fails" {
         .code_hash = [_]u8{0} ** 32,
         .storage_root = [_]u8{0} ** 32,
     };
-    try memory_db.set_account(caller_address, caller_account);
+    try db.set_account(caller_address, caller_account);
 
     const create_params = DefaultEvm.CallParams{
         .create = .{
@@ -1285,9 +1264,8 @@ test "EVM CREATE operation - insufficient balance fails" {
 }
 
 test "EVM CREATE2 operation - deterministic address creation" {
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -1305,7 +1283,7 @@ test "EVM CREATE2 operation - deterministic address creation" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     const caller_address: primitives.Address = [_]u8{0x01} ++ [_]u8{0} ** 19;
@@ -1315,7 +1293,7 @@ test "EVM CREATE2 operation - deterministic address creation" {
         .code_hash = [_]u8{0} ** 32,
         .storage_root = [_]u8{0} ** 32,
     };
-    try memory_db.set_account(caller_address, caller_account);
+    try db.set_account(caller_address, caller_account);
 
     // Simple init code
     const init_code = [_]u8{
@@ -1348,7 +1326,7 @@ test "EVM CREATE2 operation - deterministic address creation" {
     const contract_address: primitives.Address = result.output[12..32].*;
 
     // Verify contract was created
-    const created_account = (try memory_db.get_account(contract_address)).?;
+    const created_account = (try db.get_account(contract_address)).?;
     try std.testing.expectEqual(@as(u64, 1), created_account.nonce);
 
     // Calculate expected address using CREATE2 formula
@@ -1363,9 +1341,8 @@ test "EVM CREATE2 operation - deterministic address creation" {
 }
 
 test "EVM CREATE2 operation - same parameters produce same address" {
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -1383,7 +1360,7 @@ test "EVM CREATE2 operation - same parameters produce same address" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     const caller_address: primitives.Address = [_]u8{0x01} ++ [_]u8{0} ** 19;
@@ -1404,7 +1381,7 @@ test "EVM CREATE2 operation - same parameters produce same address" {
         .code_hash = [_]u8{0} ** 32,
         .storage_root = [_]u8{0} ** 32,
     };
-    try memory_db.set_account(caller_address, caller_account);
+    try db.set_account(caller_address, caller_account);
 
     const create2_params = DefaultEvm.CallParams{
         .create2 = .{
@@ -1426,9 +1403,8 @@ test "EVM CREATE2 operation - same parameters produce same address" {
 }
 
 test "EVM CREATE operation - collision detection" {
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -1446,7 +1422,7 @@ test "EVM CREATE operation - collision detection" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     const caller_address: primitives.Address = [_]u8{0x01} ++ [_]u8{0} ** 19;
@@ -1456,14 +1432,14 @@ test "EVM CREATE operation - collision detection" {
 
     // Pre-create an account at that address with code
     const existing_code = [_]u8{ 0x60, 0x00 }; // PUSH1 0
-    const code_hash = try memory_db.set_code(&existing_code);
+    const code_hash = try db.set_code(&existing_code);
     const existing_account = Account{
         .balance = 0,
         .nonce = 1,
         .code_hash = code_hash,
         .storage_root = [_]u8{0} ** 32,
     };
-    try memory_db.set_account(expected_address, existing_account);
+    try db.set_account(expected_address, existing_account);
 
     // Create caller account
     const caller_account = Account{
@@ -1472,7 +1448,7 @@ test "EVM CREATE operation - collision detection" {
         .code_hash = [_]u8{0} ** 32,
         .storage_root = [_]u8{0} ** 32,
     };
-    try memory_db.set_account(caller_address, caller_account);
+    try db.set_account(caller_address, caller_account);
 
     const create_params = DefaultEvm.CallParams{
         .create = .{
@@ -1491,9 +1467,8 @@ test "EVM CREATE operation - collision detection" {
 }
 
 test "EVM CREATE operation - init code execution and storage" {
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -1511,7 +1486,7 @@ test "EVM CREATE operation - init code execution and storage" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     const caller_address: primitives.Address = [_]u8{0x01} ++ [_]u8{0} ** 19;
@@ -1521,7 +1496,7 @@ test "EVM CREATE operation - init code execution and storage" {
         .code_hash = [_]u8{0} ** 32,
         .storage_root = [_]u8{0} ** 32,
     };
-    try memory_db.set_account(caller_address, caller_account);
+    try db.set_account(caller_address, caller_account);
 
     // Init code that stores a value and returns code with PUSH1 and ADD
     // This tests that init code can access storage and return runtime code
@@ -1559,11 +1534,11 @@ test "EVM CREATE operation - init code execution and storage" {
     const contract_address: primitives.Address = result.output[12..32].*;
 
     // Verify the storage was set during init
-    const stored_value = try memory_db.get_storage(contract_address, 0);
+    const stored_value = try db.get_storage(contract_address, 0);
     try std.testing.expectEqual(@as(u256, 42), stored_value);
 
     // Verify the runtime code was stored
-    const runtime_code = try memory_db.get_code_by_address(contract_address);
+    const runtime_code = try db.get_code_by_address(contract_address);
     try std.testing.expectEqual(@as(usize, 4), runtime_code.len);
     try std.testing.expectEqual(@as(u8, 0x60), runtime_code[0]); // PUSH1
     try std.testing.expectEqual(@as(u8, 0x01), runtime_code[1]); // 1
@@ -1572,9 +1547,8 @@ test "EVM CREATE operation - init code execution and storage" {
 }
 
 test "EVM CREATE/CREATE2 - nested contract creation" {
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -1592,7 +1566,7 @@ test "EVM CREATE/CREATE2 - nested contract creation" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     // Create a factory contract that creates another contract
@@ -1615,8 +1589,8 @@ test "EVM CREATE/CREATE2 - nested contract creation" {
     };
 
     const factory_address: primitives.Address = [_]u8{0x02} ++ [_]u8{0} ** 19;
-    const code_hash = try memory_db.set_code(&factory_bytecode);
-    try memory_db.set_account(factory_address, Account{
+    const code_hash = try db.set_code(&factory_bytecode);
+    try db.set_account(factory_address, Account{
         .balance = 0,
         .nonce = 0,
         .code_hash = code_hash,
@@ -1624,7 +1598,7 @@ test "EVM CREATE/CREATE2 - nested contract creation" {
     });
 
     const caller_address: primitives.Address = [_]u8{0x01} ++ [_]u8{0} ** 19;
-    try memory_db.set_account(caller_address, Account{
+    try db.set_account(caller_address, Account{
         .balance = 1000000,
         .nonce = 0,
         .code_hash = [_]u8{0} ** 32,
@@ -1652,15 +1626,14 @@ test "EVM CREATE/CREATE2 - nested contract creation" {
     const child_address: primitives.Address = result.output[12..32].*;
 
     // Verify child contract exists
-    const child_account = try memory_db.get_account(child_address);
+    const child_account = try db.get_account(child_address);
     try std.testing.expect(child_account != null);
     try std.testing.expectEqual(@as(u64, 1), child_account.?.nonce);
 }
 
 test "EVM logs - emit_log functionality" {
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -1678,7 +1651,7 @@ test "EVM logs - emit_log functionality" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     // Test emit_log functionality
@@ -1706,9 +1679,8 @@ test "EVM logs - emit_log functionality" {
 }
 
 test "EVM logs - included in CallResult" {
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -1726,7 +1698,7 @@ test "EVM logs - included in CallResult" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     // Create bytecode that emits LOG0 (0xA0 opcode)
@@ -1734,7 +1706,7 @@ test "EVM logs - included in CallResult" {
     // PUSH1 0x00 (data offset)
     // LOG0
     const bytecode = [_]u8{ 0x60, 0x05, 0x60, 0x00, 0xA0, 0x00 }; // Last 0x00 is STOP
-    const code_hash = try memory_db.set_code(&bytecode);
+    const code_hash = try db.set_code(&bytecode);
 
     const contract_address: primitives.Address = [_]u8{0x12} ++ [_]u8{0} ** 19;
     const account = Account{
@@ -1743,7 +1715,7 @@ test "EVM logs - included in CallResult" {
         .code_hash = code_hash,
         .storage_root = [_]u8{0} ** 32,
     };
-    try memory_db.set_account(contract_address, account);
+    try db.set_account(contract_address, account);
 
     const call_params = DefaultEvm.CallParams{
         .call = .{
@@ -1772,9 +1744,8 @@ test "EVM logs - included in CallResult" {
 }
 
 test "Host interface - hardfork compatibility checks" {
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -1793,7 +1764,7 @@ test "Host interface - hardfork compatibility checks" {
     };
 
     // Test with different hardfork configurations
-    var london_evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .LONDON);
+    var london_evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .LONDON);
     defer london_evm.deinit();
 
     try std.testing.expectEqual(Hardfork.LONDON, london_evm.get_hardfork());
@@ -1801,7 +1772,7 @@ test "Host interface - hardfork compatibility checks" {
     try std.testing.expect(london_evm.is_hardfork_at_least(.LONDON));
     try std.testing.expect(!london_evm.is_hardfork_at_least(.CANCUN));
 
-    var cancun_evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var cancun_evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer cancun_evm.deinit();
 
     try std.testing.expectEqual(Hardfork.CANCUN, cancun_evm.get_hardfork());
@@ -1810,9 +1781,8 @@ test "Host interface - hardfork compatibility checks" {
 }
 
 test "Host interface - access cost operations" {
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -1830,7 +1800,7 @@ test "Host interface - access cost operations" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .BERLIN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .BERLIN);
     defer evm.deinit();
 
     const address = primitives.ZERO_ADDRESS;
@@ -1846,9 +1816,8 @@ test "Host interface - access cost operations" {
 }
 
 test "Host interface - input size validation" {
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -1866,7 +1835,7 @@ test "Host interface - input size validation" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     // Create input that exceeds max_input_size (131072 bytes)
@@ -1892,9 +1861,8 @@ test "Host interface - input size validation" {
 }
 
 test "Call types - CREATE2 with salt" {
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -1912,7 +1880,7 @@ test "Call types - CREATE2 with salt" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     const init_code = [_]u8{ 0x60, 0x00, 0x60, 0x00, 0xF3 }; // PUSH1 0 PUSH1 0 RETURN (empty contract)
@@ -1937,9 +1905,8 @@ test "Error handling - nested call depth tracking" {
     // Use smaller depth limit for testing
     const TestEvm = Evm(.{ .max_call_depth = 3 });
 
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -1957,7 +1924,7 @@ test "Error handling - nested call depth tracking" {
         .chain_id = 1,
     };
 
-    var evm = try TestEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try TestEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     try std.testing.expectEqual(@as(u2, 0), evm.depth);
@@ -1986,9 +1953,8 @@ test "Error handling - nested call depth tracking" {
 }
 
 test "Error handling - precompile execution" {
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -2006,7 +1972,7 @@ test "Error handling - precompile execution" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     // Test calling ECRECOVER precompile (address 0x01)
@@ -2029,9 +1995,8 @@ test "Error handling - precompile execution" {
 }
 
 test "Precompiles - IDENTITY precompile (0x04)" {
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -2049,7 +2014,7 @@ test "Precompiles - IDENTITY precompile (0x04)" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     // Test IDENTITY precompile - should return input data unchanged
@@ -2079,9 +2044,8 @@ test "Precompiles - IDENTITY precompile (0x04)" {
 }
 
 test "Precompiles - SHA256 precompile (0x02)" {
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -2099,7 +2063,7 @@ test "Precompiles - SHA256 precompile (0x02)" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     // Test SHA256 precompile
@@ -2128,9 +2092,8 @@ test "Precompiles - disabled configuration" {
     // Create EVM with precompiles disabled
     const NoPrecompileEvm = Evm(.{ .enable_precompiles = false });
 
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -2148,7 +2111,7 @@ test "Precompiles - disabled configuration" {
         .chain_id = 1,
     };
 
-    var evm = try NoPrecompileEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try NoPrecompileEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     // Try to call IDENTITY precompile - should be treated as regular call
@@ -2174,9 +2137,8 @@ test "Precompiles - disabled configuration" {
 }
 
 test "Precompiles - invalid precompile addresses" {
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -2194,7 +2156,7 @@ test "Precompiles - invalid precompile addresses" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     // Test invalid precompile address (0x0B - beyond supported range)
@@ -2224,9 +2186,8 @@ test "Precompiles - invalid precompile addresses" {
 test "Debug - Gas limit affects execution" {
     std.testing.log_level = .warn;
 
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -2244,15 +2205,15 @@ test "Debug - Gas limit affects execution" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     // Deploy a simple infinite loop contract
     // JUMPDEST (0x5b) PUSH1 0x00 (0x6000) JUMP (0x56)
     const loop_bytecode = [_]u8{ 0x5b, 0x60, 0x00, 0x56 };
     const deploy_address: primitives.Address = [_]u8{0} ** 19 ++ [_]u8{1};
-    const code_hash = try memory_db.set_code(&loop_bytecode);
-    try memory_db.set_account(deploy_address, Account{
+    const code_hash = try db.set_code(&loop_bytecode);
+    try db.set_account(deploy_address, Account{
         .nonce = 0,
         .balance = 0,
         .code_hash = code_hash,
@@ -2320,9 +2281,8 @@ test "Debug - Gas limit affects execution" {
 test "Debug - Contract deployment and execution" {
     std.testing.log_level = .warn;
 
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -2340,7 +2300,7 @@ test "Debug - Contract deployment and execution" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     // Test 1: Call to non-existent contract
@@ -2367,8 +2327,8 @@ test "Debug - Contract deployment and execution" {
     {
         const stop_bytecode = [_]u8{0x00}; // STOP
         const stop_address: primitives.Address = [_]u8{0} ** 19 ++ [_]u8{2};
-        const code_hash = try memory_db.set_code(&stop_bytecode);
-        try memory_db.set_account(stop_address, Account{
+        const code_hash = try db.set_code(&stop_bytecode);
+        try db.set_account(stop_address, Account{
             .nonce = 0,
             .balance = 0,
             .code_hash = code_hash,
@@ -2400,8 +2360,8 @@ test "Debug - Contract deployment and execution" {
         // Adds 3 + 5 and stores in memory
         const add_bytecode = [_]u8{ 0x60, 0x05, 0x60, 0x03, 0x01, 0x60, 0x00, 0x52, 0x00 };
         const add_address: primitives.Address = [_]u8{0} ** 19 ++ [_]u8{3};
-        const code_hash = try memory_db.set_code(&add_bytecode);
-        try memory_db.set_account(add_address, Account{
+        const code_hash = try db.set_code(&add_bytecode);
+        try db.set_account(add_address, Account{
             .nonce = 0,
             .balance = 0,
             .code_hash = code_hash,
@@ -2431,9 +2391,8 @@ test "Debug - Contract deployment and execution" {
 test "Debug - Bytecode size affects execution time" {
     std.testing.log_level = .warn;
 
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -2451,7 +2410,7 @@ test "Debug - Bytecode size affects execution time" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     // Create a large contract that does simple operations
@@ -2467,8 +2426,8 @@ test "Debug - Bytecode size affects execution time" {
     try large_bytecode.append(std.testing.allocator, 0x00); // STOP
 
     const large_address: primitives.Address = [_]u8{0} ** 19 ++ [_]u8{4};
-    const code_hash = try memory_db.set_code(large_bytecode.items);
-    try memory_db.set_account(large_address, Account{
+    const code_hash = try db.set_code(large_bytecode.items);
+    try db.set_account(large_address, Account{
         .nonce = 0,
         .balance = 0,
         .code_hash = code_hash,
@@ -2507,9 +2466,8 @@ test "Debug - Bytecode size affects execution time" {
 }
 
 test "Security - bounds checking and edge cases" {
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -2527,7 +2485,7 @@ test "Security - bounds checking and edge cases" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     // Test maximum gas limit
@@ -2569,9 +2527,8 @@ test "EVM with minimal planner strategy" {
     const MinimalEvm = Evm(MinimalEvmConfig);
 
     // Create test database
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -2589,7 +2546,7 @@ test "EVM with minimal planner strategy" {
         .chain_id = 1,
     };
 
-    var evm = try MinimalEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try MinimalEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     // Test basic execution with minimal planner
@@ -2622,9 +2579,8 @@ test "EVM with advanced planner strategy" {
     const AdvancedEvm = Evm(AdvancedEvmConfig);
 
     // Create test database
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -2642,7 +2598,7 @@ test "EVM with advanced planner strategy" {
         .chain_id = 1,
     };
 
-    var evm = try AdvancedEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try AdvancedEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     // Test basic execution with advanced planner
@@ -2673,9 +2629,8 @@ test "EVM with advanced planner strategy" {
 
 test "journal state application - storage change rollback" {
     // Create test database
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -2693,7 +2648,7 @@ test "journal state application - storage change rollback" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     const test_address = primitives.Address{ .bytes = [_]u8{0x12} ++ [_]u8{0} ** 19 };
@@ -2732,9 +2687,8 @@ test "journal state application - storage change rollback" {
 
 test "journal state application - balance change rollback" {
     // Create test database
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -2752,7 +2706,7 @@ test "journal state application - balance change rollback" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     const test_address = primitives.Address{ .bytes = [_]u8{0x34} ++ [_]u8{0} ** 19 };
@@ -2793,9 +2747,8 @@ test "journal state application - balance change rollback" {
 
 test "journal state application - nonce change rollback" {
     // Create test database
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -2813,7 +2766,7 @@ test "journal state application - nonce change rollback" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     const test_address = primitives.Address{ .bytes = [_]u8{0x56} ++ [_]u8{0} ** 19 };
@@ -2854,9 +2807,8 @@ test "journal state application - nonce change rollback" {
 
 test "journal state application - code change rollback" {
     // Create test database
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -2874,7 +2826,7 @@ test "journal state application - code change rollback" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     const test_address = primitives.Address{ .bytes = [_]u8{0x78} ++ [_]u8{0} ** 19 };
@@ -2915,9 +2867,8 @@ test "journal state application - code change rollback" {
 
 test "journal state application - multiple changes rollback" {
     // Create test database
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -2935,7 +2886,7 @@ test "journal state application - multiple changes rollback" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     const test_address = [_]u8{0x9A} ++ [_]u8{0} ** 19;
@@ -3025,9 +2976,8 @@ test "journal state application - multiple changes rollback" {
 
 test "journal state application - nested snapshots rollback" {
     // Create test database
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -3045,7 +2995,7 @@ test "journal state application - nested snapshots rollback" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     const test_address = [_]u8{0xBE} ++ [_]u8{0} ** 19;
@@ -3103,9 +3053,8 @@ test "journal state application - nested snapshots rollback" {
 
 test "journal state application - empty journal rollback" {
     // Create test database
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -3123,7 +3072,7 @@ test "journal state application - empty journal rollback" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     // Create snapshot with no changes
@@ -3138,9 +3087,8 @@ test "journal state application - empty journal rollback" {
 
 test "EVM contract execution - minimal benchmark reproduction" {
     // Create test database
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -3158,7 +3106,7 @@ test "EVM contract execution - minimal benchmark reproduction" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     // Simple test contract bytecode: PUSH1 0x42 PUSH1 0x00 MSTORE PUSH1 0x20 PUSH1 0x00 RETURN
@@ -3176,8 +3124,8 @@ test "EVM contract execution - minimal benchmark reproduction" {
     const deploy_address: primitives.Address = [_]u8{0} ** 19 ++ [_]u8{1}; // Address 0x000...001
 
     // Store contract code in database
-    const code_hash = try memory_db.set_code(&test_bytecode);
-    try memory_db.set_account(deploy_address, Account{
+    const code_hash = try db.set_code(&test_bytecode);
+    try db.set_account(deploy_address, Account{
         .nonce = 0,
         .balance = 0,
         .code_hash = code_hash,
@@ -3205,9 +3153,8 @@ test "EVM contract execution - minimal benchmark reproduction" {
 
 test "Precompile - IDENTITY (0x04) basic functionality" {
     // Create test database
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -3225,7 +3172,7 @@ test "Precompile - IDENTITY (0x04) basic functionality" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     // Test calling IDENTITY precompile (0x04) - should return input as-is
@@ -3253,9 +3200,8 @@ test "Precompile - IDENTITY (0x04) basic functionality" {
 
 test "Precompile - SHA256 (0x02) basic functionality" {
     // Create test database
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -3273,7 +3219,7 @@ test "Precompile - SHA256 (0x02) basic functionality" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     // Test calling SHA256 precompile (0x02)
@@ -3307,10 +3253,10 @@ test "Precompile - SHA256 (0x02) basic functionality" {
 }
 
 test "Precompile diagnosis - ECRECOVER (0x01) placeholder implementation" {
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
-    const db_interface = memory_db.to_database_interface();
+    // Database is now used directly
     const block_info = BlockInfo{
         .number = 1,
         .timestamp = 1000,
@@ -3327,7 +3273,7 @@ test "Precompile diagnosis - ECRECOVER (0x01) placeholder implementation" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     // Test ECRECOVER with invalid signature (all zeros)
@@ -3356,10 +3302,10 @@ test "Precompile diagnosis - ECRECOVER (0x01) placeholder implementation" {
 }
 
 test "Precompile diagnosis - RIPEMD160 (0x03) unimplemented" {
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
-    const db_interface = memory_db.to_database_interface();
+    // Database is now used directly
     const block_info = BlockInfo{
         .number = 1,
         .timestamp = 1000,
@@ -3376,7 +3322,7 @@ test "Precompile diagnosis - RIPEMD160 (0x03) unimplemented" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     const precompile_address: primitives.Address = [_]u8{0} ** 19 ++ [_]u8{3};
@@ -3405,10 +3351,10 @@ test "Precompile diagnosis - RIPEMD160 (0x03) unimplemented" {
 }
 
 test "Precompile diagnosis - MODEXP (0x05) basic case works" {
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
-    const db_interface = memory_db.to_database_interface();
+    // Database is now used directly
     const block_info = BlockInfo{
         .number = 1,
         .timestamp = 1000,
@@ -3425,7 +3371,7 @@ test "Precompile diagnosis - MODEXP (0x05) basic case works" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     const precompile_address: primitives.Address = [_]u8{0} ** 19 ++ [_]u8{5};
@@ -3457,10 +3403,10 @@ test "Precompile diagnosis - MODEXP (0x05) basic case works" {
 }
 
 test "Precompile diagnosis - BN254 operations disabled" {
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
-    const db_interface = memory_db.to_database_interface();
+    // Database is now used directly
     const block_info = BlockInfo{
         .number = 1,
         .timestamp = 1000,
@@ -3477,7 +3423,7 @@ test "Precompile diagnosis - BN254 operations disabled" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     // Test ECADD (0x06)
@@ -3512,10 +3458,10 @@ test "Precompile diagnosis - BN254 operations disabled" {
 }
 
 test "Precompile diagnosis - BLAKE2F (0x09) placeholder" {
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
-    const db_interface = memory_db.to_database_interface();
+    // Database is now used directly
     const block_info = BlockInfo{
         .number = 1,
         .timestamp = 1000,
@@ -3532,7 +3478,7 @@ test "Precompile diagnosis - BLAKE2F (0x09) placeholder" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     const precompile_address: primitives.Address = [_]u8{0} ** 19 ++ [_]u8{9};
@@ -3563,15 +3509,14 @@ test "EVM benchmark scenario - reproduces segfault" {
     const allocator = std.testing.allocator;
 
     // Create test database
-    var memory_db = MemoryDatabase.init(allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(allocator);
+    defer db.deinit();
 
     // Deploy contract first (ERC20 approval bytecode snippet)
     const stop_bytecode = [_]u8{0x00}; // Simple STOP for now
     const deploy_address: primitives.Address = [_]u8{0} ** 19 ++ [_]u8{1};
-    const code_hash = try memory_db.set_code(&stop_bytecode);
-    try memory_db.set_account(deploy_address, Account{
+    const code_hash = try db.set_code(&stop_bytecode);
+    try db.set_account(deploy_address, Account{
         .nonce = 0,
         .balance = 0,
         .code_hash = code_hash,
@@ -3595,7 +3540,7 @@ test "EVM benchmark scenario - reproduces segfault" {
         .chain_id = 1,
     };
 
-    var evm_instance = try DefaultEvm.init(allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm_instance = try DefaultEvm.init(allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm_instance.deinit();
 
     // Simple calldata
@@ -3618,7 +3563,7 @@ test "EVM benchmark scenario - reproduces segfault" {
     // The segfault happens in deinit, so let's explicitly test that
     // by creating and destroying multiple times
     for (0..3) |_| {
-        var temp_evm = try DefaultEvm.init(allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+        var temp_evm = try DefaultEvm.init(allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
         const temp_result = try temp_evm.call(call_params);
         try std.testing.expect(temp_result.success);
         temp_evm.deinit(); // This is where the segfault happens
@@ -3632,13 +3577,13 @@ test "EVM benchmark scenario - reproduces segfault" {
 test "CREATE interaction - deployed contract can be called" {
     const allocator = std.testing.allocator;
 
-    var memory_db = MemoryDatabase.init(allocator);
-    defer memory_db.deinit();
+    var db = Database.init(allocator);
+    defer db.deinit();
 
-    const db_interface = memory_db.to_database_interface();
+    // Database is now used directly
     var evm_instance = try DefaultEvm.init(
         allocator,
-        db_interface,
+        &db,
         BlockInfo{
             .number = 1,
             .timestamp = 1000,
@@ -3733,13 +3678,13 @@ test "CREATE interaction - deployed contract can be called" {
 test "CREATE interaction - factory creates and initializes child contracts" {
     const allocator = std.testing.allocator;
 
-    var memory_db = MemoryDatabase.init(allocator);
-    defer memory_db.deinit();
+    var db = Database.init(allocator);
+    defer db.deinit();
 
-    const db_interface = memory_db.to_database_interface();
+    // Database is now used directly
     var evm_instance = try DefaultEvm.init(
         allocator,
-        db_interface,
+        &db,
         BlockInfo{
             .number = 1,
             .timestamp = 1000,
@@ -3889,13 +3834,13 @@ test "CREATE interaction - factory creates and initializes child contracts" {
 test "CREATE interaction - contract creates contract that creates contract" {
     const allocator = std.testing.allocator;
 
-    var memory_db = MemoryDatabase.init(allocator);
-    defer memory_db.deinit();
+    var db = Database.init(allocator);
+    defer db.deinit();
 
-    const db_interface = memory_db.to_database_interface();
+    // Database is now used directly
     var evm_instance = try DefaultEvm.init(
         allocator,
-        db_interface,
+        &db,
         BlockInfo{
             .number = 1,
             .timestamp = 1000,
@@ -4082,13 +4027,13 @@ test "CREATE interaction - contract creates contract that creates contract" {
 test "CREATE interaction - created contract modifies parent storage" {
     const allocator = std.testing.allocator;
 
-    var memory_db = MemoryDatabase.init(allocator);
-    defer memory_db.deinit();
+    var db = Database.init(allocator);
+    defer db.deinit();
 
-    const db_interface = memory_db.to_database_interface();
+    // Database is now used directly
     var evm_instance = try DefaultEvm.init(
         allocator,
-        db_interface,
+        &db,
         BlockInfo{
             .number = 1,
             .timestamp = 1000,
@@ -4239,9 +4184,8 @@ test "CREATE interaction - created contract modifies parent storage" {
 }
 
 test "Arena allocator - resets between calls" {
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -4259,15 +4203,15 @@ test "Arena allocator - resets between calls" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     // Simple contract that emits a log
     // PUSH1 0x20 PUSH1 0x00 LOG0 STOP
     const bytecode = [_]u8{ 0x60, 0x20, 0x60, 0x00, 0xA0, 0x00 };
     const contract_addr = [_]u8{0x01} ** 20;
-    const code_hash = try memory_db.set_code(&bytecode);
-    try db_interface.set_account(contract_addr, .{
+    const code_hash = try db.set_code(&bytecode);
+    try db.set_account(contract_addr, .{
         .balance = 0,
         .nonce = 0,
         .code_hash = code_hash,
@@ -4317,9 +4261,8 @@ test "Arena allocator - resets between calls" {
 }
 
 test "Arena allocator - handles multiple logs efficiently" {
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -4337,7 +4280,7 @@ test "Arena allocator - handles multiple logs efficiently" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     // Contract that emits 100 logs
@@ -4354,8 +4297,8 @@ test "Arena allocator - handles multiple logs efficiently" {
     bytecode[500] = 0x00; // STOP
 
     const contract_addr = [_]u8{0x02} ** 20;
-    const code_hash = try memory_db.set_code(&bytecode);
-    try db_interface.set_account(contract_addr, .{
+    const code_hash = try db.set_code(&bytecode);
+    try db.set_account(contract_addr, .{
         .balance = 0,
         .nonce = 0,
         .code_hash = code_hash,
@@ -4385,9 +4328,8 @@ test "Arena allocator - handles multiple logs efficiently" {
 }
 
 test "Arena allocator - precompile outputs use arena" {
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -4405,7 +4347,7 @@ test "Arena allocator - precompile outputs use arena" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     // Call SHA256 precompile (address 0x02)
@@ -4443,9 +4385,8 @@ test "Arena allocator - precompile outputs use arena" {
 }
 
 test "Arena allocator - memory efficiency with nested calls" {
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -4463,7 +4404,7 @@ test "Arena allocator - memory efficiency with nested calls" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     // Parent contract that calls child and emits log
@@ -4527,8 +4468,8 @@ test "Arena allocator - memory efficiency with nested calls" {
     idx += 1;
 
     const parent_addr = [_]u8{0x04} ** 20;
-    const parent_code_hash = try memory_db.set_code(parent_bytecode[0..idx]);
-    try db_interface.set_account(parent_addr, .{
+    const parent_code_hash = try db.set_code(parent_bytecode[0..idx]);
+    try db.set_account(parent_addr, .{
         .balance = 0,
         .nonce = 0,
         .code_hash = parent_code_hash,
@@ -4537,8 +4478,8 @@ test "Arena allocator - memory efficiency with nested calls" {
 
     // Child contract that also emits log
     const child_bytecode = [_]u8{ 0x60, 0x10, 0x60, 0x00, 0xA0, 0x00 }; // PUSH1 0x10 PUSH1 0x00 LOG0 STOP
-    const child_code_hash = try memory_db.set_code(&child_bytecode);
-    try db_interface.set_account(child_addr, .{
+    const child_code_hash = try db.set_code(&child_bytecode);
+    try db.set_account(child_addr, .{
         .balance = 0,
         .nonce = 0,
         .code_hash = child_code_hash,
@@ -4588,9 +4529,9 @@ test "Arena allocator - memory efficiency with nested calls" {
 }
 
 test "Call context tracking - get_caller and get_call_value" {
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db.to_database_interface();
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
+    // Database is now used directly
 
     const origin_addr = primitives.Address.from_hex("0x1111111111111111111111111111111111111111") catch unreachable;
     const contract_a = primitives.Address.from_hex("0x2222222222222222222222222222222222222222") catch unreachable;
@@ -4603,7 +4544,7 @@ test "Call context tracking - get_caller and get_call_value" {
     };
     var evm = try DefaultEvm.init(
         std.testing.allocator,
-        db_interface,
+        &db,
         block_info,
         tx_context,
         100,
@@ -4641,10 +4582,10 @@ test "Call context tracking - get_caller and get_call_value" {
 test "CREATE stores deployed code bytes" {
     const allocator = std.testing.allocator;
 
-    var memory_db = MemoryDatabase.init(allocator);
-    defer memory_db.deinit();
+    var db = Database.init(allocator);
+    defer db.deinit();
 
-    const db_interface = memory_db.to_database_interface();
+    // Database is now used directly
 
     // Create EVM instance
     const block_info = BlockInfo{
@@ -4663,12 +4604,12 @@ test "CREATE stores deployed code bytes" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(allocator, db_interface, block_info, tx_context, 20_000_000_000, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(allocator, &db, block_info, tx_context, 20_000_000_000, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     // Give creator account some balance
     const creator_address: primitives.Address = [_]u8{0x11} ++ [_]u8{0} ** 19;
-    try memory_db.set_account(creator_address, Account{
+    try db.set_account(creator_address, Account{
         .balance = 1_000_000,
         .nonce = 0,
         .code_hash = [_]u8{0} ** 32,
@@ -4746,8 +4687,8 @@ test "CREATE stores deployed code bytes" {
     try creator_bytecode.append(0xF3); // RETURN
 
     // Deploy creator contract
-    const creator_code_hash = try memory_db.set_code(creator_bytecode.items);
-    try memory_db.set_account(creator_address, Account{
+    const creator_code_hash = try db.set_code(creator_bytecode.items);
+    try db.set_account(creator_address, Account{
         .balance = 1_000_000,
         .nonce = 0,
         .code_hash = creator_code_hash,
@@ -4773,7 +4714,7 @@ test "CREATE stores deployed code bytes" {
     @memcpy(&created_address, result.output[12..32]);
 
     // Verify the deployed contract exists and has the correct code
-    const deployed_code = try memory_db.get_code_by_address(created_address);
+    const deployed_code = try db.get_code_by_address(created_address);
     try std.testing.expectEqualSlices(u8, &deployed_runtime, deployed_code);
 
     // Call the deployed contract to verify it works
@@ -4801,10 +4742,10 @@ test "CREATE stores deployed code bytes" {
 test "CREATE2 stores deployed code bytes" {
     const allocator = std.testing.allocator;
 
-    var memory_db = MemoryDatabase.init(allocator);
-    defer memory_db.deinit();
+    var db = Database.init(allocator);
+    defer db.deinit();
 
-    const db_interface = memory_db.to_database_interface();
+    // Database is now used directly
 
     // Create EVM instance
     const block_info = BlockInfo{
@@ -4823,12 +4764,12 @@ test "CREATE2 stores deployed code bytes" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(allocator, db_interface, block_info, tx_context, 20_000_000_000, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(allocator, &db, block_info, tx_context, 20_000_000_000, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     // Give creator account some balance
     const creator_address: primitives.Address = [_]u8{0x22} ++ [_]u8{0} ** 19;
-    try memory_db.set_account(creator_address, Account{
+    try db.set_account(creator_address, Account{
         .balance = 1_000_000,
         .nonce = 0,
         .code_hash = [_]u8{0} ** 32,
@@ -4909,8 +4850,8 @@ test "CREATE2 stores deployed code bytes" {
     try creator_bytecode.append(0xF3); // RETURN
 
     // Deploy creator contract
-    const creator_code_hash = try memory_db.set_code(creator_bytecode.items);
-    try memory_db.set_account(creator_address, Account{
+    const creator_code_hash = try db.set_code(creator_bytecode.items);
+    try db.set_account(creator_address, Account{
         .balance = 1_000_000,
         .nonce = 0,
         .code_hash = creator_code_hash,
@@ -4936,7 +4877,7 @@ test "CREATE2 stores deployed code bytes" {
     @memcpy(&created_address, result.output[12..32]);
 
     // Verify the deployed contract exists and has the correct code
-    const deployed_code = try memory_db.get_code_by_address(created_address);
+    const deployed_code = try db.get_code_by_address(created_address);
     try std.testing.expectEqualSlices(u8, &deployed_runtime, deployed_code);
 
     // Call the deployed contract to verify it works
@@ -4963,9 +4904,8 @@ test "CREATE2 stores deployed code bytes" {
 
 test "EVM bytecode iterator execution - simple STOP" {
     // Create test database
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -4983,7 +4923,7 @@ test "EVM bytecode iterator execution - simple STOP" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     // Test bytecode iterator execution with simple STOP
@@ -4991,8 +4931,8 @@ test "EVM bytecode iterator execution - simple STOP" {
     
     // Add contract with STOP bytecode
     const contract_address: primitives.Address = [_]u8{0x42} ++ [_]u8{0} ** 19;
-    const code_hash = try memory_db.set_code(&stop_bytecode);
-    try memory_db.set_account(contract_address, Account{
+    const code_hash = try db.set_code(&stop_bytecode);
+    try db.set_account(contract_address, Account{
         .balance = 0,
         .nonce = 0,
         .code_hash = code_hash,
@@ -5017,9 +4957,8 @@ test "EVM bytecode iterator execution - simple STOP" {
 
 test "EVM bytecode iterator execution - PUSH and RETURN" {
     // Create test database
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -5037,7 +4976,7 @@ test "EVM bytecode iterator execution - PUSH and RETURN" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     // Test bytecode that pushes a value and returns it
@@ -5053,8 +4992,8 @@ test "EVM bytecode iterator execution - PUSH and RETURN" {
     
     // Add contract
     const contract_address: primitives.Address = [_]u8{0x43} ++ [_]u8{0} ** 19;
-    const code_hash = try memory_db.set_code(&return_bytecode);
-    try memory_db.set_account(contract_address, Account{
+    const code_hash = try db.set_code(&return_bytecode);
+    try db.set_account(contract_address, Account{
         .balance = 0,
         .nonce = 0,
         .code_hash = code_hash,
@@ -5085,9 +5024,8 @@ test "EVM bytecode iterator execution - PUSH and RETURN" {
 
 test "EVM bytecode iterator execution - handles jumps" {
     // Create test database
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
-    const db_interface = memory_db;
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
 
     const block_info = BlockInfo{
         .number = 1,
@@ -5105,7 +5043,7 @@ test "EVM bytecode iterator execution - handles jumps" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
     // Test bytecode with JUMP
@@ -5120,8 +5058,8 @@ test "EVM bytecode iterator execution - handles jumps" {
     
     // Add contract
     const contract_address: primitives.Address = [_]u8{0x44} ++ [_]u8{0} ** 19;
-    const code_hash = try memory_db.set_code(&jump_bytecode);
-    try memory_db.set_account(contract_address, Account{
+    const code_hash = try db.set_code(&jump_bytecode);
+    try db.set_account(contract_address, Account{
         .balance = 0,
         .nonce = 0,
         .code_hash = code_hash,

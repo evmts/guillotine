@@ -86,7 +86,7 @@ export fn zigEvmCreate() ?*anyopaque {
         .chain_id = 1,
     };
     
-    evm.* = DefaultEvm.init(allocator, database.*, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN) catch {
+    evm.* = DefaultEvm.init(allocator, database, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN) catch {
         database.deinit();
         allocator.destroy(database);
         allocator.destroy(evm);

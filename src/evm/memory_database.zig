@@ -415,7 +415,7 @@ test "MemoryDatabase basic operations" {
     var db = MemoryDatabase.init(allocator);
     defer db.deinit();
     
-    const db_interface = db.to_database_interface();
+    // Database is now used directly
     
     // Test account operations
     const address = [_]u8{1} ** 20;
@@ -426,9 +426,9 @@ test "MemoryDatabase basic operations" {
         .storage_root = [_]u8{0} ** 32,
     };
     
-    try db_interface.set_account(address, account);
+    try db.set_account(address, account);
     
-    const retrieved = try db_interface.get_account(address);
+    const retrieved = try db.get_account(address);
     try std.testing.expect(retrieved != null);
     try std.testing.expectEqual(account.balance, retrieved.?.balance);
     try std.testing.expectEqual(account.nonce, retrieved.?.nonce);
@@ -437,8 +437,8 @@ test "MemoryDatabase basic operations" {
     const key: u256 = 42;
     const value: u256 = 123456;
     
-    try db_interface.set_storage(address, key, value);
-    const stored_value = try db_interface.get_storage(address, key);
+    try db.set_storage(address, key, value);
+    const stored_value = try db.get_storage(address, key);
     try std.testing.expectEqual(value, stored_value);
 }
 
@@ -448,7 +448,7 @@ test "MemoryDatabase snapshot operations" {
     var db = MemoryDatabase.init(allocator);
     defer db.deinit();
     
-    const db_interface = db.to_database_interface();
+    // Database is now used directly
     
     // Set initial state
     const address = [_]u8{1} ** 20;
@@ -459,10 +459,10 @@ test "MemoryDatabase snapshot operations" {
         .storage_root = [_]u8{0} ** 32,
     };
     
-    try db_interface.set_account(address, account1);
+    try db.set_account(address, account1);
     
     // Create snapshot
-    const snapshot_id = try db_interface.create_snapshot();
+    const snapshot_id = try db.create_snapshot();
     
     // Modify state
     const account2 = Account{
@@ -472,17 +472,17 @@ test "MemoryDatabase snapshot operations" {
         .storage_root = [_]u8{0} ** 32,
     };
     
-    try db_interface.set_account(address, account2);
+    try db.set_account(address, account2);
     
     // Verify modified state
-    const modified = try db_interface.get_account(address);
+    const modified = try db.get_account(address);
     try std.testing.expectEqual(@as(u256, 2000), modified.?.balance);
     
     // Revert to snapshot
-    try db_interface.revert_to_snapshot(snapshot_id);
+    try db.revert_to_snapshot(snapshot_id);
     
     // Verify reverted state
-    const reverted = try db_interface.get_account(address);
+    const reverted = try db.get_account(address);
     try std.testing.expectEqual(@as(u256, 1000), reverted.?.balance);
 }
 
@@ -507,10 +507,10 @@ const TestEvm = struct {
 };
 
 fn createTestEvm(allocator: std.mem.Allocator) !TestEvm {
-    var memory_db = try allocator.create(MemoryDatabase);
+    const memory_db = try allocator.create(MemoryDatabase);
     memory_db.* = MemoryDatabase.init(allocator);
     
-    const db_interface = memory_db.to_database_interface();
+    // Using database directly now
     const evm_ptr = try allocator.create(@import("evm.zig").DefaultEvm);
     const block_info = @import("block_info.zig").DefaultBlockInfo.init();
     const tx_context = @import("transaction_context.zig").TransactionContext{
@@ -518,7 +518,7 @@ fn createTestEvm(allocator: std.mem.Allocator) !TestEvm {
         .coinbase = [_]u8{0} ** 20,
         .chain_id = 1,
     };
-    evm_ptr.* = try @import("evm.zig").DefaultEvm.init(allocator, db_interface, block_info, tx_context, 0, [_]u8{0} ** 20, .CANCUN);
+    evm_ptr.* = try @import("evm.zig").DefaultEvm.init(allocator, memory_db, block_info, tx_context, 0, [_]u8{0} ** 20, .CANCUN);
     
     return TestEvm{ .evm = evm_ptr, .memory_db = memory_db };
 }
@@ -578,7 +578,7 @@ test "CREATE stores code and retrieves via get_code_by_address" {
     //     defer {
     //         evm.deinit();
     //         allocator.destroy(evm);
-    //         memory_db.deinit();
+    //         db.deinit();
     //         allocator.destroy(memory_db);
     //     }
     
@@ -663,7 +663,7 @@ test "CREATE2 stores code with deterministic address" {
     //     defer {
     //         evm.deinit();
     //         allocator.destroy(evm);
-    //         memory_db.deinit();
+    //         db.deinit();
     //         allocator.destroy(memory_db);
     //     }
     

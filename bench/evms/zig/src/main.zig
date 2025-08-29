@@ -160,7 +160,7 @@ pub fn main() !void {
         .chain_id = 1,
     };
 
-    var evm_instance = try evm.DefaultEvm.init(allocator, database, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm_instance = try evm.DefaultEvm.init(allocator, &database, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm_instance.deinit();
 
     // We attempt to deploy via CREATE first. If the provided bytecode is actually
@@ -174,7 +174,7 @@ pub fn main() !void {
         var fresh_database = evm.Database.init(allocator);
         defer fresh_database.deinit();
 
-        var fresh_evm = try evm.DefaultEvm.init(allocator, fresh_database, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+        var fresh_evm = try evm.DefaultEvm.init(allocator, &fresh_database, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
         defer fresh_evm.deinit();
 
         // 1) Try CREATE deployment path with provided bytecode as init code

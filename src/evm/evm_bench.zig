@@ -76,7 +76,7 @@ fn benchmark_evm_arithmetic_sequence(allocator: std.mem.Allocator) void {
         result = result *% 3;   // MUL
         result = result -% 20;  // SUB
         result = result / 5;    // DIV
-        _ = result;
+        std.mem.doNotOptimizeAway(result);
     }
 }
 
@@ -94,7 +94,7 @@ fn benchmark_evm_memory_operations(allocator: std.mem.Allocator) void {
     for (memory[0..32]) |byte| {
         sum +%= byte;
     }
-    _ = sum;
+    std.mem.doNotOptimizeAway(sum);
 }
 
 fn benchmark_evm_keccak256(allocator: std.mem.Allocator) void {
@@ -119,9 +119,8 @@ fn benchmark_evm_erc20_transfer(allocator: std.mem.Allocator) void {
     const calldata = hexDecode(allocator, calldata_hex) catch return;
     defer allocator.free(calldata);
 
-    var memory_db = evm_mod.MemoryDatabase.init(allocator);
-    defer memory_db.deinit();
-    const db_interface = evm_mod.DatabaseInterface.init(&memory_db);
+    var db = evm_mod.Database.init(allocator);
+    defer db.deinit();
 
     const block_info = evm_mod.BlockInfo{
         .number = 1,
@@ -139,7 +138,7 @@ fn benchmark_evm_erc20_transfer(allocator: std.mem.Allocator) void {
         .chain_id = 1,
     };
 
-    var vm = evm_mod.Evm(.{}).init(allocator, db_interface, block_info, context, 0, ZERO_ADDRESS, .CANCUN) catch return;
+    var vm = evm_mod.Evm(.{}).init(allocator, &db, block_info, context, 0, ZERO_ADDRESS, .CANCUN) catch return;
     defer vm.deinit();
 
     const caller = Address{ .bytes = [_]u8{0x10} ** 20 };
@@ -177,9 +176,8 @@ fn benchmark_evm_snailtracer(allocator: std.mem.Allocator) void {
     const calldata = hexDecode(allocator, calldata_hex) catch return;
     defer allocator.free(calldata);
 
-    var memory_db = evm_mod.MemoryDatabase.init(allocator);
-    defer memory_db.deinit();
-    const db_interface = evm_mod.DatabaseInterface.init(&memory_db);
+    var db = evm_mod.Database.init(allocator);
+    defer db.deinit();
 
     const block_info = evm_mod.BlockInfo{
         .number = 1,
@@ -197,7 +195,7 @@ fn benchmark_evm_snailtracer(allocator: std.mem.Allocator) void {
         .chain_id = 1,
     };
 
-    var vm = evm_mod.Evm(.{}).init(allocator, db_interface, block_info, context, 0, ZERO_ADDRESS, .CANCUN) catch return;
+    var vm = evm_mod.Evm(.{}).init(allocator, &db, block_info, context, 0, ZERO_ADDRESS, .CANCUN) catch return;
     defer vm.deinit();
 
     const caller = Address{ .bytes = [_]u8{0x10} ** 20 };
@@ -224,9 +222,8 @@ fn benchmark_evm_thousand_hashes(allocator: std.mem.Allocator) void {
     const calldata = hexDecode(allocator, calldata_hex) catch return;
     defer allocator.free(calldata);
 
-    var memory_db = evm_mod.MemoryDatabase.init(allocator);
-    defer memory_db.deinit();
-    const db_interface = evm_mod.DatabaseInterface.init(&memory_db);
+    var db = evm_mod.Database.init(allocator);
+    defer db.deinit();
 
     const block_info = evm_mod.BlockInfo{
         .number = 1,
@@ -244,7 +241,7 @@ fn benchmark_evm_thousand_hashes(allocator: std.mem.Allocator) void {
         .chain_id = 1,
     };
 
-    var vm = evm_mod.Evm(.{}).init(allocator, db_interface, block_info, context, 0, ZERO_ADDRESS, .CANCUN) catch return;
+    var vm = evm_mod.Evm(.{}).init(allocator, &db, block_info, context, 0, ZERO_ADDRESS, .CANCUN) catch return;
     defer vm.deinit();
 
     const caller = Address{ .bytes = [_]u8{0x10} ** 20 };
@@ -398,10 +395,8 @@ const STACK_CONTRACT = [_]u8{
 };
 
 fn benchmark_evm_arithmetic_contract(allocator: std.mem.Allocator) void {
-    var memory_db = evm_mod.MemoryDatabase.init(allocator);
-    defer memory_db.deinit();
-    
-    const db_interface = memory_db.to_database_interface();
+    var db = evm_mod.Database.init(allocator);
+    defer db.deinit();
     
     const block_info = evm_mod.BlockInfo{
         .number = 1,
@@ -419,7 +414,7 @@ fn benchmark_evm_arithmetic_contract(allocator: std.mem.Allocator) void {
         .chain_id = 1,
     };
     
-    var vm = evm_mod.Evm(.{}).init(allocator, db_interface, block_info, context, 0, ZERO_ADDRESS, .CANCUN) catch return;
+    var vm = evm_mod.Evm(.{}).init(allocator, &db, block_info, context, 0, ZERO_ADDRESS, .CANCUN) catch return;
     defer vm.deinit();
     
     const call_params = evm_mod.CallParams{
@@ -433,10 +428,10 @@ fn benchmark_evm_arithmetic_contract(allocator: std.mem.Allocator) void {
     };
     
     // Set contract code and get the hash
-    const code_hash = db_interface.set_code(&ARITHMETIC_CONTRACT) catch return;
+    const code_hash = db.set_code(&ARITHMETIC_CONTRACT) catch return;
     
     // Get existing account or create new one
-    var account = db_interface.get_account(TEST_ADDRESS_2) catch null orelse evm_mod.Account{
+    var account = db.get_account(TEST_ADDRESS_2) catch null orelse evm_mod.Account{
         .balance = 0,
         .nonce = 0,
         .code_hash = HashUtils.EMPTY_KECCAK256,
@@ -445,7 +440,7 @@ fn benchmark_evm_arithmetic_contract(allocator: std.mem.Allocator) void {
     
     // Update account with code hash
     account.code_hash = code_hash;
-    db_interface.set_account(TEST_ADDRESS_2, account) catch return;
+    db.set_account(TEST_ADDRESS_2, account) catch return;
     
     const result = vm.call(call_params) catch return;
     _ = result;
@@ -593,8 +588,7 @@ fn benchmark_storage_access_patterns(allocator: std.mem.Allocator) void {
 // ============================================================================
 
 pub fn main() !void {
-    var stdout_buffer: [4096]u8 = undefined;
-    var stdout_writer = std.fs.File.stdout().writer();
+    const stdout = std.io.getStdOut().writer();
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
@@ -602,65 +596,65 @@ pub fn main() !void {
     var bench = zbench.Benchmark.init(allocator, .{});
     defer bench.deinit();
 
-    try stdout_writer.print("\n⚡ Consolidated EVM Performance Benchmarks\n", .{});
-    try stdout_writer.print("==========================================\n\n", .{});
+    try stdout.print("\n⚡ Consolidated EVM Performance Benchmarks\n", .{});
+    try stdout.print("==========================================\n\n", .{});
 
     // Basic Operations Category
-    try stdout_writer.print("📊 Basic Operations\n", .{});
-    try stdout_writer.print("-------------------\n", .{});
+    try stdout.print("📊 Basic Operations\n", .{});
+    try stdout.print("-------------------\n", .{});
     try bench.add("Stack Push/Pop", benchmark_evm_stack_push_pop, .{});
     try bench.add("Arithmetic Sequence", benchmark_evm_arithmetic_sequence, .{});
     try bench.add("Memory Operations", benchmark_evm_memory_operations, .{});
     try bench.add("KECCAK256 Simple", benchmark_evm_keccak256, .{});
-    try stdout_writer.print("\n", .{});
+    try stdout.print("\n", .{});
 
     // ERC20 Tests Category
-    try stdout_writer.print("📊 ERC20 Tests\n", .{});
-    try stdout_writer.print("--------------\n", .{});
+    try stdout.print("📊 ERC20 Tests\n", .{});
+    try stdout.print("--------------\n", .{});
     try bench.add("EVM: ERC20 Transfer", benchmark_evm_erc20_transfer, .{});
     try bench.add("REVM: ERC20 Transfer", benchmark_revm_erc20_transfer, .{});
-    try stdout_writer.print("\n", .{});
+    try stdout.print("\n", .{});
 
     // Snailtracer Benchmark Category
-    try stdout_writer.print("📊 Snailtracer Benchmark\n", .{});
-    try stdout_writer.print("------------------------\n", .{});
+    try stdout.print("📊 Snailtracer Benchmark\n", .{});
+    try stdout.print("------------------------\n", .{});
     try bench.add("EVM: Snailtracer", benchmark_evm_snailtracer, .{});
     try bench.add("REVM: Snailtracer", benchmark_revm_snailtracer, .{});
-    try stdout_writer.print("\n", .{});
+    try stdout.print("\n", .{});
 
     // Hash-Heavy Operations Category
-    try stdout_writer.print("📊 Hash-Heavy Operations\n", .{});
-    try stdout_writer.print("------------------------\n", .{});
+    try stdout.print("📊 Hash-Heavy Operations\n", .{});
+    try stdout.print("------------------------\n", .{});
     try bench.add("EVM: 10k Hashes", benchmark_evm_thousand_hashes, .{});
     try bench.add("REVM: 10k Hashes", benchmark_revm_thousand_hashes, .{});
-    try stdout_writer.print("\n", .{});
+    try stdout.print("\n", .{});
 
     // Simple Contract Comparisons Category
-    try stdout_writer.print("📊 Simple Contract Comparisons\n", .{});
-    try stdout_writer.print("------------------------------\n", .{});
+    try stdout.print("📊 Simple Contract Comparisons\n", .{});
+    try stdout.print("------------------------------\n", .{});
     try bench.add("EVM: Arithmetic Contract", benchmark_evm_arithmetic_contract, .{});
     try bench.add("REVM: Arithmetic Contract", benchmark_revm_arithmetic_contract, .{});
-    try stdout_writer.print("\n", .{});
+    try stdout.print("\n", .{});
 
     // Advanced Operations Category
-    try stdout_writer.print("📊 Advanced Operations\n", .{});
-    try stdout_writer.print("----------------------\n", .{});
+    try stdout.print("📊 Advanced Operations\n", .{});
+    try stdout.print("----------------------\n", .{});
     try bench.add("Memory Expansion Patterns", benchmark_memory_expansion_patterns, .{});
     try bench.add("KECCAK256 Different Sizes", benchmark_keccak256_different_sizes, .{});
     try bench.add("Address Computation", benchmark_address_computation, .{});
     try bench.add("Deep Stack DUP/SWAP", benchmark_deep_stack_dup_swap, .{});
     try bench.add("Storage Access Patterns", benchmark_storage_access_patterns, .{});
 
-    try stdout_writer.print("\nRunning consolidated EVM benchmarks...\n\n", .{});
-    try bench.run(stdout_writer);
+    try stdout.print("\nRunning consolidated EVM benchmarks...\n\n", .{});
+    try bench.run(stdout);
     
-    try stdout_writer.print("\n✅ Consolidated EVM benchmarks completed!\n", .{});
-    try stdout_writer.print("\nResults Summary:\n", .{});
-    try stdout_writer.print("• Basic Operations: Core EVM operations performance\n", .{});
-    try stdout_writer.print("• Contract Tests: Real-world contract execution comparison\n", .{});
-    try stdout_writer.print("• EVM vs REVM: Direct comparison with Rust reference implementation\n", .{});
-    try stdout_writer.print("• Advanced Operations: Complex patterns and stress tests\n", .{});
-    try stdout_writer.print("\nLower times indicate better performance.\n", .{});
+    try stdout.print("\n✅ Consolidated EVM benchmarks completed!\n", .{});
+    try stdout.print("\nResults Summary:\n", .{});
+    try stdout.print("• Basic Operations: Core EVM operations performance\n", .{});
+    try stdout.print("• Contract Tests: Real-world contract execution comparison\n", .{});
+    try stdout.print("• EVM vs REVM: Direct comparison with Rust reference implementation\n", .{});
+    try stdout.print("• Advanced Operations: Complex patterns and stress tests\n", .{});
+    try stdout.print("\nLower times indicate better performance.\n", .{});
 }
 
 test "consolidated benchmark compilation" {

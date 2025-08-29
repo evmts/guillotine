@@ -1,64 +1,57 @@
 const std = @import("std");
 const zbench = @import("zbench");
-const database_interface_mod = @import("database_interface.zig");
-const memory_database_mod = @import("memory_database.zig");
+const database_mod = @import("database.zig");
 const primitives = @import("primitives");
 
-const DatabaseInterface = database_interface_mod.DatabaseInterface;
-const MemoryDatabase = memory_database_mod.MemoryDatabase;
+const Database = database_mod.Database;
 const Address = primitives.Address.Address;
 
 fn benchDatabaseGetAccount(allocator: std.mem.Allocator) void {
-    var memory_db = MemoryDatabase.init(allocator) catch return;
-    defer memory_db.deinit();
-    
-    const db_interface = memory_db.to_database_interface();
+    var db = Database.init(allocator);
+    defer db.deinit();
     
     // Pre-populate with some accounts
     var i: u8 = 0;
     while (i < 100) : (i += 1) {
         const addr = [_]u8{i} ++ [_]u8{0} ** 19;
-        const account = database_interface_mod.Account{
+        const account = database_mod.Account{
             .balance = @as(u256, i) * 1000000000000000000, // i ETH in wei
             .nonce = i,
             .code_hash = [_]u8{0} ** 32,
             .storage_root = [_]u8{0} ** 32,
         };
-        db_interface.set_account(addr, account) catch break;
+        db.set_account(addr, account) catch break;
     }
     
     // Benchmark account retrieval
     i = 0;
     while (i < 1000) : (i += 1) {
         const addr = [_]u8{i % 100} ++ [_]u8{0} ** 19;
-        _ = db_interface.get_account(addr) catch break;
+        _ = db.get_account(addr) catch break;
     }
 }
 
 fn benchDatabaseSetAccount(allocator: std.mem.Allocator) void {
-    var memory_db = MemoryDatabase.init(allocator) catch return;
-    defer memory_db.deinit();
-    
-    const db_interface = memory_db.to_database_interface();
+    var db = Database.init(allocator);
+    defer db.deinit();
     
     var i: u8 = 0;
     while (i < 200) : (i += 1) {
         const addr = [_]u8{i} ++ [_]u8{0} ** 19;
-        const account = database_interface_mod.Account{
+        const account = database_mod.Account{
             .balance = @as(u256, i) * 1000000000000000000,
             .nonce = i,
             .code_hash = [_]u8{0} ** 32,
             .storage_root = [_]u8{0} ** 32,
         };
-        db_interface.set_account(addr, account) catch break;
+        db.set_account(addr, account) catch break;
     }
 }
 
 fn benchDatabaseStorage(allocator: std.mem.Allocator) void {
-    var memory_db = MemoryDatabase.init(allocator) catch return;
-    defer memory_db.deinit();
+    var db = Database.init(allocator);
+    defer db.deinit();
     
-    const db_interface = memory_db.to_database_interface();
     const addr = [_]u8{0x42} ++ [_]u8{0} ** 19;
     
     // Set storage values
@@ -66,22 +59,21 @@ fn benchDatabaseStorage(allocator: std.mem.Allocator) void {
     while (i < 100) : (i += 1) {
         const key: u256 = i;
         const value: u256 = i * 1000;
-        db_interface.set_storage(addr, key, value) catch break;
+        db.set_storage(addr, key, value) catch break;
     }
     
     // Get storage values
     i = 0;
     while (i < 200) : (i += 1) {
         const key: u256 = i % 100;
-        _ = db_interface.get_storage(addr, key) catch break;
+        _ = db.get_storage(addr, key) catch break;
     }
 }
 
 fn benchDatabaseTransientStorage(allocator: std.mem.Allocator) void {
-    var memory_db = MemoryDatabase.init(allocator) catch return;
-    defer memory_db.deinit();
+    var db = Database.init(allocator);
+    defer db.deinit();
     
-    const db_interface = memory_db.to_database_interface();
     const addr = [_]u8{0x43} ++ [_]u8{0} ** 19;
     
     // Set and get transient storage values
@@ -90,16 +82,15 @@ fn benchDatabaseTransientStorage(allocator: std.mem.Allocator) void {
         const key: u256 = i;
         const value: u256 = i * 2000;
         
-        db_interface.set_transient_storage(addr, key, value) catch break;
-        _ = db_interface.get_transient_storage(addr, key) catch break;
+        db.set_transient_storage(addr, key, value) catch break;
+        _ = db.get_transient_storage(addr, key) catch break;
     }
 }
 
 fn benchDatabaseCodeOperations(allocator: std.mem.Allocator) void {
-    var memory_db = MemoryDatabase.init(allocator) catch return;
-    defer memory_db.deinit();
+    var db = Database.init(allocator);
+    defer db.deinit();
     
-    const db_interface = memory_db.to_database_interface();
     const addr = [_]u8{0x44} ++ [_]u8{0} ** 19;
     
     // Sample contract bytecode
@@ -115,41 +106,39 @@ fn benchDatabaseCodeOperations(allocator: std.mem.Allocator) void {
     while (i < 50) : (i += 1) {
         const test_addr = [_]u8{@as(u8, @intCast(i % 256))} ++ [_]u8{0} ** 19;
         
-        db_interface.set_code(test_addr, &bytecode) catch break;
-        _ = db_interface.get_code(test_addr) catch break;
-        _ = db_interface.get_code_hash(test_addr) catch break;
-        _ = db_interface.get_code_size(test_addr) catch break;
+        _ = db.set_code(&bytecode) catch break;
+        _ = db.get_code(test_addr) catch break;
+        _ = db.get_code_hash(test_addr) catch break;
+        _ = db.get_code_size(test_addr) catch break;
     }
 }
 
 fn benchDatabaseMixedOperations(allocator: std.mem.Allocator) void {
-    var memory_db = MemoryDatabase.init(allocator) catch return;
-    defer memory_db.deinit();
-    
-    const db_interface = memory_db.to_database_interface();
+    var db = Database.init(allocator);
+    defer db.deinit();
     
     var i: u32 = 0;
     while (i < 100) : (i += 1) {
         const addr = [_]u8{@as(u8, @intCast(i % 256))} ++ [_]u8{0} ** 19;
         
         // Mix of operations simulating real EVM usage
-        const account = database_interface_mod.Account{
+        const account = database_mod.Account{
             .balance = @as(u256, i) * 1000000000000000000,
             .nonce = @as(u64, @intCast(i)),
             .code_hash = [_]u8{0} ** 32,
             .storage_root = [_]u8{0} ** 32,
         };
         
-        db_interface.set_account(addr, account) catch break;
-        _ = db_interface.get_account(addr) catch break;
+        db.set_account(addr, account) catch break;
+        _ = db.get_account(addr) catch break;
         
         const storage_key: u256 = i;
         const storage_value: u256 = i * 42;
-        db_interface.set_storage(addr, storage_key, storage_value) catch break;
-        _ = db_interface.get_storage(addr, storage_key) catch break;
+        db.set_storage(addr, storage_key, storage_value) catch break;
+        _ = db.get_storage(addr, storage_key) catch break;
         
-        _ = db_interface.account_exists(addr) catch break;
-        _ = db_interface.is_empty_account(addr) catch break;
+        _ = db.account_exists(addr) catch break;
+        _ = db.is_empty_account(addr) catch break;
     }
 }
 

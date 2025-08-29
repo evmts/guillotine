@@ -367,13 +367,11 @@ pub fn StaticHost(comptime HostType: type) type {
 }
 
 test "StaticDatabase blocks write operations" {
-    const MemoryDatabase = @import("memory_database.zig").MemoryDatabase;
     
-    var memory_db = MemoryDatabase.init(std.testing.allocator);
-    defer memory_db.deinit();
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
     
-    const db_interface = memory_db.to_database_interface();
-    var static_db = StaticDatabase.init(db_interface);
+    var static_db = StaticDatabase.init(db);
     const static_interface = static_db.to_database_interface();
     
     // Read operations should work

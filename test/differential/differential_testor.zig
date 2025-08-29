@@ -127,7 +127,7 @@ pub const ExecutionDiff = struct {
 pub const DifferentialTestor = struct {
     revm_instance: revm.Revm,
     guillotine_instance: guillotine_evm.Evm(.{}),
-    guillotine_db: guillotine_evm.Database,
+    guillotine_db: *guillotine_evm.Database,
     allocator: std.mem.Allocator,
     caller: primitives.Address,
     contract: primitives.Address,
@@ -147,7 +147,8 @@ pub const DifferentialTestor = struct {
         try revm_vm.setBalance(caller, 10000000);
         
         // Setup Guillotine EVM
-        var db = guillotine_evm.Database.init(allocator);
+        const db = try allocator.create(guillotine_evm.Database);
+        db.* = guillotine_evm.Database.init(allocator);
         
         try db.set_account(caller.bytes, .{
             .balance = 10000000,
@@ -200,6 +201,7 @@ pub const DifferentialTestor = struct {
         self.revm_instance.deinit();
         self.guillotine_instance.deinit();
         self.guillotine_db.deinit();
+        self.allocator.destroy(self.guillotine_db);
     }
     
     /// Simple bytecode testing - deploys bytecode and executes it on both EVMs

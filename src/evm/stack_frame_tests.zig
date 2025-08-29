@@ -10,7 +10,7 @@ const call_result_mod = @import("call_result.zig");
 const hardfork_mod = @import("hardfork.zig");
 const frame_config = @import("frame_config.zig");
 const FrameConfig = frame_config.FrameConfig;
-const MemoryDatabase = @import("memory_database.zig").MemoryDatabase;
+const Database = @import("database.zig").Database;
 const GasConstants = primitives.GasConstants;
 const DefaultEvm = @import("evm.zig").Evm(.{});
 const log_mod = @import("logs.zig");
@@ -2129,11 +2129,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             // Create a frame with database support
             const FrameWithDb = StackFrame(.{ .has_database = true });
             // Create a test database
-            var db = @import("memory_database.zig").MemoryDatabase.init(allocator);
+            var db = @import("database.zig").Database.init(allocator);
             defer db.deinit();
-            const db_interface = db.to_database_interface();
             const bytecode = [_]u8{ 0x54, 0x00 }; // SLOAD STOP
-            var frame = try FrameWithDb.init(allocator, &bytecode, 1000000, db_interface, createTestHost());
+            var frame = try FrameWithDb.init(allocator, &bytecode, 1000000, &db, createTestHost());
             defer frame.deinit(allocator);
             // Test SSTORE followed by SLOAD
             const test_key: u256 = 0x42;
@@ -2168,11 +2167,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             // Create a frame with database support
             const FrameWithDb = StackFrame(.{ .has_database = true });
             // Create a test database
-            var db = @import("memory_database.zig").MemoryDatabase.init(allocator);
+            var db = @import("database.zig").Database.init(allocator);
             defer db.deinit();
-            const db_interface = db.to_database_interface();
             const bytecode = [_]u8{ 0x5c, 0x00 }; // TLOAD STOP
-            var frame = try FrameWithDb.init(allocator, &bytecode, 1000000, db_interface, createTestHost());
+            var frame = try FrameWithDb.init(allocator, &bytecode, 1000000, &db, createTestHost());
             defer frame.deinit(allocator);
             // Test TSTORE followed by TLOAD
             const test_key: u256 = 0x123;
@@ -3275,11 +3273,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             defer allocator.free(bytecode);
 
             const host = createTestHost();
-            var db = MemoryDatabase.init(allocator);
+            var db = Database.init(allocator);
             defer db.deinit();
-            const db_interface = db.to_database_interface();
 
-            var frame = try F.init(allocator, bytecode, 1000000, db_interface, host);
+            var frame = try F.init(allocator, bytecode, 1000000, &db, host);
             defer frame.deinit(allocator);
 
             // Verify bytecode was loaded correctly
@@ -3305,11 +3302,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             defer allocator.free(bytecode);
 
             const host = createTestHost();
-            var db = MemoryDatabase.init(allocator);
+            var db = Database.init(allocator);
             defer db.deinit();
-            const db_interface = db.to_database_interface();
 
-            var frame = try F.init(allocator, bytecode, 10000000, db_interface, host);
+            var frame = try F.init(allocator, bytecode, 10000000, &db, host);
             defer frame.deinit(allocator);
 
             // Snailtracer is complex, verify it loaded
