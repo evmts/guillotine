@@ -920,6 +920,49 @@ pub fn Dispatch(comptime FrameType: type) type {
             }
             allocator.free(schedule);
         }
+
+        /// RAII wrapper for dispatch schedule that automatically cleans up push pointers
+        pub const DispatchSchedule = struct {
+            items: []Item,
+            allocator: std.mem.Allocator,
+
+            /// Initialize a dispatch schedule from bytecode with automatic cleanup
+            pub fn init(allocator: std.mem.Allocator, bytecode: anytype, opcode_handlers: *const [256]OpcodeHandler) !DispatchSchedule {
+                const items = try Self.init(allocator, bytecode, opcode_handlers);
+                return DispatchSchedule{
+                    .items = items,
+                    .allocator = allocator,
+                };
+            }
+
+            /// Initialize a dispatch schedule with tracing support
+            pub fn initWithTracing(
+                allocator: std.mem.Allocator,
+                bytecode: anytype,
+                opcode_handlers: *const [256]OpcodeHandler,
+                comptime TracerType: type,
+                tracer_instance: *TracerType,
+            ) !DispatchSchedule {
+                const items = try Self.initWithTracing(allocator, bytecode, opcode_handlers, TracerType, tracer_instance);
+                return DispatchSchedule{
+                    .items = items,
+                    .allocator = allocator,
+                };
+            }
+
+            /// Clean up the schedule including all heap-allocated push pointers
+            pub fn deinit(self: *DispatchSchedule) void {
+                Self.deinitSchedule(self.allocator, self.items);
+            }
+
+            /// Get a Dispatch instance pointing to the start of the schedule
+            pub fn getDispatch(self: *const DispatchSchedule, jump_table: ?*const JumpTable) Self {
+                return Self{
+                    .cursor = self.items.ptr,
+                    .jump_table = jump_table,
+                };
+            }
+        };
     };
 }
 
@@ -1879,6 +1922,93 @@ test "Dispatch - calculateFirstBlockGas helper function" {
         
         const gas = TestDispatch.calculateFirstBlockGas(&bytecode);
         try testing.expect(gas == std.math.maxInt(u64));
+    }
+}
+
+test "Dispatch - RAII DispatchSchedule for automatic cleanup" {
+    const allocator = testing.allocator;
+    const handlers = createTestHandlers();
+    
+    // Test basic RAII with pointer cleanup
+    {
+        // Create bytecode with PUSH that requires pointer allocation
+        var push16_data = [_]u8{@intFromEnum(Opcode.PUSH16)} ++ [_]u8{0xFF} ** 16;
+        const Bytecode = bytecode_mod.Bytecode(TestFrame.BytecodeConfig);
+        const bytecode = try Bytecode.init(allocator, &push16_data);
+        defer bytecode.deinit(allocator);
+        
+        // Create RAII dispatch schedule
+        var schedule = try TestDispatch.DispatchSchedule.init(allocator, &bytecode, &handlers);
+        defer schedule.deinit();
+        
+        // Verify schedule was created
+        try testing.expect(schedule.items.len >= 4); // Handler + metadata + 2 STOP handlers
+        
+        // Verify pointer metadata exists
+        var found_pointer = false;
+        for (schedule.items) |item| {
+            switch (item) {
+                .push_pointer => |ptr_meta| {
+                    found_pointer = true;
+                    // Verify the pointer contains expected value
+                    const expected_value: u256 = (1 << 128) - 1; // 16 bytes of 0xFF
+                    try testing.expect(ptr_meta.value.* == expected_value);
+                },
+                else => {},
+            }
+        }
+        try testing.expect(found_pointer);
+        
+        // deinit will be called automatically, cleaning up pointers
+    }
+    
+    // Test error handling with proper cleanup
+    {
+        var failing_allocator = testing.FailingAllocator.init(allocator, .{ .fail_index = 3 });
+        
+        const Bytecode = bytecode_mod.Bytecode(TestFrame.BytecodeConfig);
+        const bytecode = try Bytecode.init(allocator, &[_]u8{
+            @intFromEnum(Opcode.PUSH32), 0xFF, 0xFF, 0xFF, 0xFF, // Will need pointer
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF,
+        });
+        defer bytecode.deinit(allocator);
+        
+        // Should fail during allocation and clean up properly
+        const result = TestDispatch.DispatchSchedule.init(failing_allocator.allocator(), &bytecode, &handlers);
+        try testing.expectError(error.OutOfMemory, result);
+    }
+    
+    // Test schedule with mixed inline and pointer pushes
+    {
+        const Bytecode = bytecode_mod.Bytecode(TestFrame.BytecodeConfig);
+        const bytecode = try Bytecode.init(allocator, &[_]u8{
+            @intFromEnum(Opcode.PUSH1), 42,      // Inline
+            @intFromEnum(Opcode.PUSH8), 1, 2, 3, 4, 5, 6, 7, 8,  // Inline
+            @intFromEnum(Opcode.PUSH16), 0xFF, 0xFF, 0xFF, 0xFF, // Pointer
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF,
+        });
+        defer bytecode.deinit(allocator);
+        
+        var schedule = try TestDispatch.DispatchSchedule.init(allocator, &bytecode, &handlers);
+        defer schedule.deinit();
+        
+        // Count inline and pointer metadata
+        var inline_count: usize = 0;
+        var pointer_count: usize = 0;
+        for (schedule.items) |item| {
+            switch (item) {
+                .push_inline => inline_count += 1,
+                .push_pointer => pointer_count += 1,
+                else => {},
+            }
+        }
+        
+        try testing.expect(inline_count == 2);
+        try testing.expect(pointer_count == 1);
     }
 }
 
