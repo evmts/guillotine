@@ -201,8 +201,7 @@ pub fn main() !void {
 
             if (maybe_create_result) |create_result| {
                 if (!create_result.success) {
-                    if (verbose) std.debug.print("CREATE failed: success=false, gas_left={}, output_len={}\n", 
-                        .{create_result.gas_left, create_result.output.len});
+                    if (verbose) std.debug.print("CREATE failed: success=false, gas_left={}, output_len={}\n", .{ create_result.gas_left, create_result.output.len });
                     use_direct_install = true;
                 } else if (create_result.output.len == 0) {
                     // CREATE succeeded but returned no address - this is expected for init code
@@ -211,12 +210,10 @@ pub fn main() !void {
                     target_address = try primitives.Address.calculate_create_address(allocator, primitives.ZERO_ADDRESS, nonce);
                     const deployed_code = fresh_evm.get_code(target_address);
                     if (deployed_code.len == 0) {
-                        if (verbose) std.debug.print("CREATE succeeded but no code at computed address {x}\n", 
-                            .{target_address});
+                        if (verbose) std.debug.print("CREATE succeeded but no code at computed address {x}\n", .{target_address});
                         use_direct_install = true;
                     } else {
-                        if (verbose) std.debug.print("CREATE deployed contract at {x} with code_len={}\n",
-                            .{target_address, deployed_code.len});
+                        if (verbose) std.debug.print("CREATE deployed contract at {x} with code_len={}\n", .{ target_address, deployed_code.len });
                     }
                 } else if (create_result.output.len == 20) {
                     // Old-style CREATE that returns address
@@ -247,8 +244,7 @@ pub fn main() !void {
                 .code_hash = fresh_code_hash,
                 .storage_root = [_]u8{0} ** 32,
             });
-            if (verbose) std.debug.print("Direct install at address: {x}, code_len={}, code_hash={x}\n",
-                .{ target_address, init_code.len, fresh_code_hash });
+            if (verbose) std.debug.print("Direct install at address: {x}, code_len={}, code_hash={x}\n", .{ target_address, init_code.len, fresh_code_hash });
         }
 
         // 2) Invoke the contract runtime via CALL
@@ -269,29 +265,27 @@ pub fn main() !void {
             std.process.exit(1);
         }
         const end_time = std.time.nanoTimestamp();
-        
+
         // Calculate gas consumption
         const gas_provided: u64 = 10_000_000;
         const gas_used: u64 = gas_provided - result.gas_left;
-        
+
         // Debug: Print gas usage info
         if (verbose and run_idx == 0) {
-            std.debug.print("success={}, gas_provided={}, gas_left={}, gas_used={}, output_len={}\n", 
-                .{result.success, gas_provided, result.gas_left, gas_used, result.output.len});
+            std.debug.print("success={}, gas_provided={}, gas_left={}, gas_used={}, output_len={}\n", .{ result.success, gas_provided, result.gas_left, gas_used, result.output.len });
             if (result.output.len > 0 and result.output.len <= 64) {
                 std.debug.print("output={x}\n", .{result.output});
             }
             std.debug.print("calldata={x}\n", .{calldata});
-            
+
             // Print logs if any
             if (result.logs.len > 0) {
                 std.debug.print("logs_count={}\n", .{result.logs.len});
                 for (result.logs, 0..) |log, log_idx| {
-                    std.debug.print("log[{}]: address={x}, topics_count={}, data_len={}\n", 
-                        .{log_idx, log.address, log.topics.len, log.data.len});
+                    std.debug.print("log[{}]: address={x}, topics_count={}, data_len={}\n", .{ log_idx, log.address, log.topics.len, log.data.len });
                     if (log.topics.len > 0) {
                         for (log.topics, 0..) |topic, topic_idx| {
-                            std.debug.print("  topic[{}]={x}\n", .{topic_idx, topic});
+                            std.debug.print("  topic[{}]={x}\n", .{ topic_idx, topic });
                         }
                     }
                 }
@@ -306,14 +300,11 @@ pub fn main() !void {
                     std.debug.print("ERROR: Gas consumption mismatch!\n", .{});
                     std.debug.print("  Expected: {} gas\n", .{expected});
                     std.debug.print("  Actual:   {} gas\n", .{gas_used});
-                    std.debug.print("  Diff:     {} gas ({d:.2}%)\n", .{
-                        if (gas_used > expected) gas_used - expected else expected - gas_used,
-                        @as(f64, @floatFromInt(if (gas_used > expected) gas_used - expected else expected - gas_used)) / @as(f64, @floatFromInt(expected)) * 100.0
-                    });
+                    std.debug.print("  Diff:     {} gas ({d:.2}%)\n", .{ if (gas_used > expected) gas_used - expected else expected - gas_used, @as(f64, @floatFromInt(if (gas_used > expected) gas_used - expected else expected - gas_used)) / @as(f64, @floatFromInt(expected)) * 100.0 });
                     std.process.exit(3);
                 }
             }
-            
+
             // Return value validation
             if (expected_output_hex) |expected_hex| {
                 const expected_output = hex_decode(allocator, expected_hex) catch {
@@ -321,27 +312,27 @@ pub fn main() !void {
                     std.process.exit(3);
                 };
                 defer allocator.free(expected_output);
-                
+
                 if (result.output.len != expected_output.len or !std.mem.eql(u8, result.output, expected_output)) {
                     std.debug.print("ERROR: Return value mismatch!\n", .{});
-                    std.debug.print("  Expected: {x} (len={})\n", .{expected_output, expected_output.len});
-                    std.debug.print("  Actual:   {x} (len={})\n", .{result.output, result.output.len});
+                    std.debug.print("  Expected: {x} (len={})\n", .{ expected_output, expected_output.len });
+                    std.debug.print("  Actual:   {x} (len={})\n", .{ result.output, result.output.len });
                     std.process.exit(3);
                 }
             }
-            
+
             // Basic selector-based validation (similar to Geth runner)
             if (calldata.len >= 4) {
-                const selector = (@as(u32, calldata[0]) << 24) | 
-                               (@as(u32, calldata[1]) << 16) | 
-                               (@as(u32, calldata[2]) << 8) | 
-                               @as(u32, calldata[3]);
-                
+                const selector = (@as(u32, calldata[0]) << 24) |
+                    (@as(u32, calldata[1]) << 16) |
+                    (@as(u32, calldata[2]) << 8) |
+                    @as(u32, calldata[3]);
+
                 switch (selector) {
                     0xa9059cbb, 0x095ea7b3, 0x40c10f19 => { // transfer/approve/mint -> 32-byte true
                         if (result.output.len < 32 or result.output[result.output.len - 1] != 1) {
                             std.debug.print("ERROR: Expected 32-byte true for ERC20 operation (selector=0x{x})\n", .{selector});
-                            std.debug.print("  Output: {x} (len={})\n", .{result.output, result.output.len});
+                            std.debug.print("  Output: {x} (len={})\n", .{ result.output, result.output.len });
                             std.process.exit(3);
                         }
                     },
@@ -353,10 +344,10 @@ pub fn main() !void {
                         if (verbose) {
                             std.debug.print("Unknown selector 0x{x}, skipping return value validation\n", .{selector});
                         }
-                    }
+                    },
                 }
             }
-            
+
             std.debug.print("✓ Correctness validation passed\n", .{});
         }
 
@@ -371,17 +362,17 @@ pub fn main() !void {
         // Do not free result.output here. Ownership is managed by the EVM.
         // Freeing it caused an invalid free/double free under the debug allocator
         // and crashes during hyperfine warmup.
-        
+
         if (!result.success) {
             std.debug.print("Contract execution failed\n", .{});
             std.process.exit(1);
         }
-        
+
         const elapsed_ns = @as(u64, @intCast(end_time - start_time));
         const elapsed_ms = @as(f64, @floatFromInt(elapsed_ns)) / 1_000_000.0;
         print("{d:.6}\n", .{elapsed_ms});
     }
-    
+
     // Explicitly exit to avoid any cleanup issues
     std.process.exit(0);
 }

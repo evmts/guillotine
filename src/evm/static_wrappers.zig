@@ -6,7 +6,7 @@
 //!
 //! EIP-214: STATICCALL opcode - read-only execution context that prevents:
 //! - State modifications (SSTORE)
-//! - Log emissions (LOG0-LOG4) 
+//! - Log emissions (LOG0-LOG4)
 //! - Contract creation (CREATE/CREATE2)
 //! - Self-destruction (SELFDESTRUCT)
 //! - Sending value in nested calls
@@ -130,41 +130,41 @@ pub const StaticDatabase = struct {
         _ = value;
         return Database.Error.PermissionDenied;
     }
-    
+
     // Read operations - forward to underlying database
     pub fn get_state_root(self: *StaticDatabase) Database.Error![32]u8 {
         return self.inner.get_state_root();
     }
-    
+
     // Write operations - throw PermissionDenied
     pub fn commit_changes(self: *StaticDatabase) Database.Error![32]u8 {
         _ = self;
         return Database.Error.PermissionDenied;
     }
-    
+
     pub fn create_snapshot(self: *StaticDatabase) Database.Error!u64 {
         return self.inner.create_snapshot();
     }
-    
+
     pub fn revert_to_snapshot(self: *StaticDatabase, snapshot_id: u64) Database.Error!void {
         return self.inner.revert_to_snapshot(snapshot_id);
     }
-    
+
     pub fn commit_snapshot(self: *StaticDatabase, snapshot_id: u64) Database.Error!void {
         _ = self;
         _ = snapshot_id;
         return Database.Error.PermissionDenied;
     }
-    
+
     pub fn begin_batch(self: *StaticDatabase) Database.Error!void {
         return self.inner.begin_batch();
     }
-    
+
     pub fn commit_batch(self: *StaticDatabase) Database.Error!void {
         _ = self;
         return Database.Error.PermissionDenied;
     }
-    
+
     pub fn rollback_batch(self: *StaticDatabase) Database.Error!void {
         return self.inner.rollback_batch();
     }
@@ -193,7 +193,7 @@ pub const StaticDatabase = struct {
 pub fn StaticHost(comptime HostType: type) type {
     return struct {
         const Self = @This();
-        
+
         /// Underlying host for read operations
         inner: HostType,
 
@@ -321,7 +321,7 @@ pub fn StaticHost(comptime HostType: type) type {
         /// EIP-214: STATICCALL cannot emit logs
         pub fn emit_log(self: *Self, contract_address: Address, topics: []const u256, data: []const u8) void {
             _ = self;
-            _ = contract_address; 
+            _ = contract_address;
             _ = topics;
             _ = data;
             // Note: This should ideally return an error, but Host interface defines emit_log as void
@@ -367,21 +367,18 @@ pub fn StaticHost(comptime HostType: type) type {
 }
 
 test "StaticDatabase blocks write operations" {
-    
     var db = Database.init(std.testing.allocator);
     defer db.deinit();
-    
+
     var static_db = StaticDatabase.init(db);
     const static_interface = static_db.to_database_interface();
-    
+
     // Read operations should work
     const balance = try static_interface.get_balance(Address.ZERO_ADDRESS.bytes);
     try std.testing.expectEqual(@as(u256, 0), balance);
-    
+
     // Write operations should throw PermissionDenied error
-    try std.testing.expectError(Database.Error.PermissionDenied, 
-        static_interface.set_balance(Address.ZERO_ADDRESS.bytes, 100));
-    
-    try std.testing.expectError(Database.Error.PermissionDenied, 
-        static_interface.set_storage(Address.ZERO_ADDRESS.bytes, 0, 42));
+    try std.testing.expectError(Database.Error.PermissionDenied, static_interface.set_balance(Address.ZERO_ADDRESS.bytes, 100));
+
+    try std.testing.expectError(Database.Error.PermissionDenied, static_interface.set_storage(Address.ZERO_ADDRESS.bytes, 0, 42));
 }

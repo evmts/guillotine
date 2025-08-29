@@ -94,7 +94,7 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
                 if (iterator.pc >= iterator.bytecode.packed_bitmap.len) {
                     // Log error and return null
                     const log = @import("log.zig");
-                    log.err("Iterator PC {} exceeds packed_bitmap len {}", .{iterator.pc, iterator.bytecode.packed_bitmap.len});
+                    log.err("Iterator PC {} exceeds packed_bitmap len {}", .{ iterator.pc, iterator.bytecode.packed_bitmap.len });
                     return null;
                 }
                 const packed_bits = iterator.bytecode.packed_bitmap[iterator.pc];
@@ -274,7 +274,7 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
             if (pc >= self.len()) return OpcodeData{ .regular = .{ .opcode = 0x00 } }; // STOP fallback
 
             const first_op = self.get_unsafe(pc);
-            
+
             // Read PUSH value first (since all fusions start with PUSH)
             if (first_op < 0x60 or first_op > 0x7F) {
                 // Not a PUSH opcode, shouldn't be marked as fusion candidate
@@ -287,7 +287,7 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
             for (pc + 1..end_pc) |i| {
                 value = (value << 8) | self.get_unsafe(@intCast(i));
             }
-            
+
             // The second opcode comes AFTER the push data
             const second_op_pc = pc + 1 + push_size;
             const second_op = if (second_op_pc < self.len()) self.get_unsafe(second_op_pc) else 0x00;
@@ -306,7 +306,7 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
                 else => {
                     // If we hit this branch we failed to implement an opcode or fusion
                     const log = @import("log.zig");
-                    log.err("getFusionData: Unhandled fusion pattern - PUSH{} (value: {}) followed by opcode 0x{x:0>2}", .{push_size, value, second_op});
+                    log.err("getFusionData: Unhandled fusion pattern - PUSH{} (value: {}) followed by opcode 0x{x:0>2}", .{ push_size, value, second_op });
                     // TODO: Add more fusion types to OpcodeData union as needed
                     unreachable;
                 },
@@ -519,56 +519,48 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
                 // Mark operation start
                 self.is_op_start[i >> BITMAP_SHIFT] |= @as(u8, 1) << @intCast(i & BITMAP_MASK);
                 self.packed_bitmap[i].is_op_start = true;
-                
+
                 const op = self.runtime_code[i];
-                
+
                 // Validate opcode
                 const opcode_enum = std.meta.intToEnum(Opcode, op) catch return error.InvalidOpcode;
-                
+
                 // Check if it's a JUMPDEST (and not push data)
                 if (op == @intFromEnum(Opcode.JUMPDEST)) {
                     self.is_jumpdest[i >> BITMAP_SHIFT] |= @as(u8, 1) << @intCast(i & BITMAP_MASK);
                     self.packed_bitmap[i].is_jumpdest = true;
                 }
-                
+
                 // Check for fusion candidates if enabled
                 if (comptime fusions_enabled) {
                     // Check if this is a PUSH that could be part of a fusion
                     if (op >= @intFromEnum(Opcode.PUSH1) and op <= @intFromEnum(Opcode.PUSH32)) {
                         const push_size: PcType = op - (@intFromEnum(Opcode.PUSH1) - 1);
                         const next_op_idx = i + 1 + push_size;
-                        
+
                         // Ensure we can read the next opcode
                         if (next_op_idx < N) {
                             const next_op = self.runtime_code[next_op_idx];
                             // Check for fusable patterns
                             const is_fusable = switch (next_op) {
-                                @intFromEnum(Opcode.ADD), 
-                                @intFromEnum(Opcode.MUL), 
-                                @intFromEnum(Opcode.SUB), 
-                                @intFromEnum(Opcode.DIV), 
-                                @intFromEnum(Opcode.AND), 
-                                @intFromEnum(Opcode.OR), 
-                                @intFromEnum(Opcode.XOR), 
-                                @intFromEnum(Opcode.JUMP), 
-                                @intFromEnum(Opcode.JUMPI) => true,
+                                @intFromEnum(Opcode.ADD), @intFromEnum(Opcode.MUL), @intFromEnum(Opcode.SUB), @intFromEnum(Opcode.DIV), @intFromEnum(Opcode.AND), @intFromEnum(Opcode.OR), @intFromEnum(Opcode.XOR), @intFromEnum(Opcode.JUMP), @intFromEnum(Opcode.JUMPI) => true,
                                 else => false,
                             };
-                            
+
                             if (is_fusable) {
                                 self.packed_bitmap[i].is_fusion_candidate = true;
                             }
                         }
                     }
                 }
-                
+
                 // Handle PUSH instructions
                 if (@intFromEnum(opcode_enum) >= @intFromEnum(Opcode.PUSH1) and
                     @intFromEnum(opcode_enum) <= @intFromEnum(Opcode.PUSH32))
                 {
                     const n: PcType = op - (@intFromEnum(Opcode.PUSH1) - 1);
                     if (i + n >= N) return error.TruncatedPush;
-                    
+
                     // Mark push data bytes
                     var j: PcType = 0;
                     while (j < n) : (j += 1) {
@@ -986,11 +978,10 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
             return stats;
         }
 
-
         /// Pretty print bytecode with human-readable formatting, colors, and metadata
         pub fn pretty_print(self: Self, allocator: std.mem.Allocator) ![]u8 {
             const opcode_data = @import("opcode_data.zig");
-            
+
             // ANSI color codes
             const Colors = struct {
                 const reset = "\x1b[0m";
@@ -1010,65 +1001,59 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
                 const bright_magenta = "\x1b[95m";
                 const bright_cyan = "\x1b[96m";
             };
-            
+
             var output = std.ArrayList(u8).init(allocator);
             defer output.deinit();
-            
+
             // Header
             try output.writer().print("{s}=== EVM Bytecode Disassembly ==={s}\n", .{ Colors.bold, Colors.reset });
             try output.writer().print("{s}Length: {} bytes{s}\n\n", .{ Colors.dim, self.runtime_code.len, Colors.reset });
-            
+
             var pc: PcType = 0;
             var line_num: u32 = 1;
-            
+
             while (pc < self.runtime_code.len) {
                 const opcode_byte = self.runtime_code[pc];
-                
+
                 // Line number and PC address
-                try output.writer().print("{s}{:3}:{s} {s}0x{:04x}{s} ", .{
-                    Colors.dim, line_num, Colors.reset,
-                    Colors.cyan, pc, Colors.reset
-                });
-                
+                try output.writer().print("{s}{:3}:{s} {s}0x{:04x}{s} ", .{ Colors.dim, line_num, Colors.reset, Colors.cyan, pc, Colors.reset });
+
                 // Check if this is a jump destination
                 if (self.isValidJumpDest(pc)) {
                     try output.writer().print("{s}►{s} ", .{ Colors.bright_yellow, Colors.reset });
                 } else {
                     try output.writer().print("  ");
                 }
-                
+
                 // Raw hex bytes (show opcode + data for PUSH instructions)
                 const instruction_size = self.getInstructionSize(pc);
                 var hex_output = std.ArrayList(u8).init(allocator);
                 defer hex_output.deinit();
-                
+
                 for (0..instruction_size) |i| {
                     if (pc + i < self.runtime_code.len) {
                         try hex_output.writer().print("{:02x}", .{self.runtime_code[pc + i]});
                         if (i + 1 < instruction_size) try hex_output.writer().print(" ");
                     }
                 }
-                
+
                 // Pad hex to fixed width for alignment
                 const hex_str = hex_output.items;
                 try output.writer().print("{s}{s:<24}{s} ", .{ Colors.dim, hex_str, Colors.reset });
-                
+
                 // Parse and format the instruction
                 if (std.meta.intToEnum(Opcode, opcode_byte)) |opcode| {
                     const opcode_info = opcode_data.OPCODE_INFO[opcode_byte];
-                    
+
                     switch (opcode) {
-                        .PUSH1, .PUSH2, .PUSH3, .PUSH4, .PUSH5, .PUSH6, .PUSH7, .PUSH8,
-                        .PUSH9, .PUSH10, .PUSH11, .PUSH12, .PUSH13, .PUSH14, .PUSH15, .PUSH16,
-                        .PUSH17, .PUSH18, .PUSH19, .PUSH20, .PUSH21, .PUSH22, .PUSH23, .PUSH24,
-                        .PUSH25, .PUSH26, .PUSH27, .PUSH28, .PUSH29, .PUSH30, .PUSH31, .PUSH32 => {
+                        .PUSH1, .PUSH2, .PUSH3, .PUSH4, .PUSH5, .PUSH6, .PUSH7, .PUSH8, .PUSH9, .PUSH10, .PUSH11, .PUSH12, .PUSH13, .PUSH14, .PUSH15, .PUSH16, .PUSH17, .PUSH18, .PUSH19, .PUSH20, .PUSH21, .PUSH22, .PUSH23, .PUSH24, .PUSH25, .PUSH26, .PUSH27, .PUSH28, .PUSH29, .PUSH30, .PUSH31, .PUSH32 => {
                             const push_size = @intFromEnum(opcode) - @intFromEnum(Opcode.PUSH1) + 1;
                             try output.writer().print("{s}{s:<12}{s}", .{ Colors.green, @tagName(opcode), Colors.reset });
-                            
+
                             // Extract and format push value
                             if (self.readPushValueN(pc, push_size)) |value| {
                                 try output.writer().print(" {s}0x{x}{s}", .{ Colors.bright_magenta, value, Colors.reset });
-                                
+
                                 // Show decimal if small value
                                 if (value <= 0xFFFF) {
                                     try output.writer().print(" {s}({}){s}", .{ Colors.dim, value, Colors.reset });
@@ -1076,9 +1061,7 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
                             }
                         },
                         .JUMPDEST => {
-                            try output.writer().print("{s}{s}{s:<12}{s}", .{ 
-                                Colors.bright_yellow, Colors.bold, @tagName(opcode), Colors.reset 
-                            });
+                            try output.writer().print("{s}{s}{s:<12}{s}", .{ Colors.bright_yellow, Colors.bold, @tagName(opcode), Colors.reset });
                         },
                         .JUMP, .JUMPI => {
                             try output.writer().print("{s}{s:<12}{s}", .{ Colors.yellow, @tagName(opcode), Colors.reset });
@@ -1097,33 +1080,30 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
                         },
                         else => {
                             try output.writer().print("{s}{s:<12}{s}", .{ Colors.white, @tagName(opcode), Colors.reset });
-                        }
+                        },
                     }
-                    
+
                     // Gas cost
                     try output.writer().print(" {s}[gas: {}]{s}", .{ Colors.dim, opcode_info.gas_cost, Colors.reset });
-                    
+
                     // Stack effects
                     if (opcode_info.stack_inputs > 0 or opcode_info.stack_outputs > 0) {
-                        try output.writer().print(" {s}[stack: -{}, +{}]{s}", .{ 
-                            Colors.dim, opcode_info.stack_inputs, opcode_info.stack_outputs, Colors.reset 
-                        });
+                        try output.writer().print(" {s}[stack: -{}, +{}]{s}", .{ Colors.dim, opcode_info.stack_inputs, opcode_info.stack_outputs, Colors.reset });
                     }
-                    
                 } else |_| {
                     // Invalid opcode
                     try output.writer().print("{s}INVALID(0x{:02x}){s}", .{ Colors.bright_red, opcode_byte, Colors.reset });
                 }
-                
+
                 try output.writer().print("\n");
-                
+
                 pc += instruction_size;
                 line_num += 1;
             }
-            
+
             // Footer with summary
             try output.writer().print("\n{s}=== Summary ==={s}\n", .{ Colors.bold, Colors.reset });
-            
+
             // Count jump destinations
             var jumpdest_count: u32 = 0;
             for (0..self.runtime_code.len) |i| {
@@ -1144,6 +1124,54 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
             
             return output.toOwnedSlice();
         }
+
+        /// Detect fusion candidates (PUSH+ADD, PUSH+MUL patterns) for opcode optimization
+        /// Marks patterns that can be fused into synthetic opcodes for better performance
+        fn markFusionCandidates(self: Self) void {
+            var i: PcType = 0;
+            const code_len = self.len();
+
+            while (i + 1 < code_len) {
+                // Only check actual operation starts, not push data
+                if (!self.packed_bitmap[i].is_op_start or self.packed_bitmap[i].is_push_data) {
+                    i += 1;
+                    continue;
+                }
+
+                const op1 = self.runtime_code[i];
+
+                // Check for PUSH opcode
+                if (op1 >= @intFromEnum(Opcode.PUSH1) and op1 <= @intFromEnum(Opcode.PUSH32)) {
+                    const push_size: PcType = op1 - (@intFromEnum(Opcode.PUSH1) - 1);
+                    const next_op_idx = i + 1 + push_size;
+
+                    // Ensure the next instruction is within bounds and is an operation start
+                    if (next_op_idx < code_len and
+                        self.packed_bitmap[next_op_idx].is_op_start and
+                        !self.packed_bitmap[next_op_idx].is_push_data)
+                    {
+                        const op2 = self.runtime_code[next_op_idx];
+
+                        // Check for fusable patterns:
+                        // PUSH + ADD, PUSH + MUL, PUSH + SUB, PUSH + DIV
+                        // PUSH + AND, PUSH + OR, PUSH + XOR
+                        // PUSH + JUMP, PUSH + JUMPI
+                        const is_fusable = switch (op2) {
+                            @intFromEnum(Opcode.ADD), @intFromEnum(Opcode.MUL), @intFromEnum(Opcode.SUB), @intFromEnum(Opcode.DIV), @intFromEnum(Opcode.AND), @intFromEnum(Opcode.OR), @intFromEnum(Opcode.XOR), @intFromEnum(Opcode.JUMP), @intFromEnum(Opcode.JUMPI) => true,
+                            else => false,
+                        };
+
+                        // Only mark as fusion candidate if fusions are enabled
+                        if (is_fusable and fusions_enabled) {
+                            // Mark the PUSH as a fusion candidate
+                            self.packed_bitmap[i].is_fusion_candidate = true;
+                        }
+                    }
+                }
+
+                i += self.getInstructionSize(i);
+            }
+        }
     };
 }
 
@@ -1156,15 +1184,15 @@ pub const createBytecode = Bytecode;
 
 test "pretty_print: should format bytecode with colors and metadata" {
     const allocator = std.testing.allocator;
-    
+
     // Simple bytecode: PUSH1 0x42, PUSH1 0x24, ADD, JUMPDEST, STOP
     const code = [_]u8{ 0x60, 0x42, 0x60, 0x24, 0x01, 0x5B, 0x00 };
     var bytecode = try BytecodeDefault.init(allocator, &code);
     defer bytecode.deinit();
-    
+
     const formatted = try bytecode.pretty_print(allocator);
     defer allocator.free(formatted);
-    
+
     // Expected output should contain:
     // - PC addresses (0x00, 0x02, etc.)
     // - Opcode names (PUSH1, ADD, JUMPDEST, STOP)
@@ -1172,7 +1200,7 @@ test "pretty_print: should format bytecode with colors and metadata" {
     // - Gas costs
     // - Jump destinations highlighted
     // - ANSI colors
-    
+
     const expected_parts = [_][]const u8{
         "0x00", // PC address
         "PUSH1", // Opcode name
@@ -1185,15 +1213,14 @@ test "pretty_print: should format bytecode with colors and metadata" {
         "gas:", // Gas cost indicator
         "\x1b[", // ANSI escape sequence for colors
     };
-    
+
     for (expected_parts) |part| {
         std.testing.expect(std.mem.indexOf(u8, formatted, part) != null) catch |err| {
             std.debug.print("Expected to find '{s}' in:\n{s}\n", .{ part, formatted });
             return err;
         };
     }
-    
+
     // Verify it's a valid string
     try std.testing.expect(formatted.len > 0);
 }
-

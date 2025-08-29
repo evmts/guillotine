@@ -79,13 +79,13 @@ export fn zigEvmCreate() ?*anyopaque {
         .blob_base_fee = 0,
         .blob_versioned_hashes = &.{},
     };
-    
+
     const context = Evm.TransactionContext{
         .gas_limit = 30_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
     };
-    
+
     evm.* = DefaultEvm.init(allocator, database, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN) catch {
         database.deinit();
         allocator.destroy(database);
