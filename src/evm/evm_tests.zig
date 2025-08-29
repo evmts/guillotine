@@ -2691,6 +2691,126 @@ test "journal state application - storage change rollback" {
     try std.testing.expectEqual(original_value, reverted_value);
 }
 
+test "EVM revert_to_snapshot uses no allocation and fully reverts" {
+    // Build an EVM, introduce several journaled changes, then call
+    // revert_to_snapshot while the EVM's allocator is replaced with a
+    // failing allocator. The revert must not allocate and must fully
+    // restore database state.
+    const allocator = std.testing.allocator;
+
+    // Minimal failing allocator (always fails alloc/resize/remap)
+    const FailingAllocator = struct {
+        fn alloc(self: *anyopaque, len: usize, ptr_align: std.mem.Alignment, ret_addr: usize) ?[*]u8 {
+            _ = self; _ = len; _ = ptr_align; _ = ret_addr; return null;
+        }
+        fn resize(self: *anyopaque, buf: []u8, buf_align: std.mem.Alignment, new_len: usize, ret_addr: usize) bool {
+            _ = self; _ = buf; _ = buf_align; _ = new_len; _ = ret_addr; return false;
+        }
+        fn free(self: *anyopaque, buf: []u8, buf_align: std.mem.Alignment, ret_addr: usize) void {
+            _ = self; _ = buf; _ = buf_align; _ = ret_addr;
+        }
+        fn remap(self: *anyopaque, buf: []u8, buf_align: std.mem.Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
+            _ = self; _ = buf; _ = buf_align; _ = new_len; _ = ret_addr; return null;
+        }
+    };
+    var failing_allocator_state: u8 = 0;
+    const failing_allocator = std.mem.Allocator{
+        .ptr = &failing_allocator_state,
+        .vtable = &.{
+            .alloc = FailingAllocator.alloc,
+            .resize = FailingAllocator.resize,
+            .free = FailingAllocator.free,
+            .remap = FailingAllocator.remap,
+        },
+    };
+
+    // Create database and EVM
+    var db = Database.init(allocator);
+    defer db.deinit();
+
+    const block_info = BlockInfo{
+        .number = 1,
+        .timestamp = 1000,
+        .difficulty = 100,
+        .gas_limit = 30000000,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .base_fee = 1000000000,
+        .prev_randao = [_]u8{0} ** 32,
+    };
+    const context = TransactionContext{
+        .gas_limit = 1000000,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .chain_id = 1,
+    };
+
+    var evm = try DefaultEvm.init(allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    defer evm.deinit();
+
+    // Prepare initial on-chain state
+    const addr = primitives.Address{ .bytes = [_]u8{0xAA} ++ [_]u8{0} ** 19 };
+    const storage_key1: u256 = 0x01;
+    const storage_key2: u256 = 0x02;
+    try db.set_storage(addr, storage_key1, 0x1111);
+    try db.set_storage(addr, storage_key2, 0x2222);
+
+    var acc = Account.zero();
+    acc.balance = 123456;
+    acc.nonce = 7;
+    try db.set_account(addr, acc);
+
+    // Create snapshot and record multiple changes in the journal
+    const snapshot_id = evm.create_snapshot();
+
+    // Change storage values and record journal entries
+    try db.set_storage(addr, storage_key1, 0xAAAA);
+    try evm.journal.entries.append(.{
+        .snapshot_id = snapshot_id,
+        .data = .{ .storage_change = .{ .address = addr, .key = storage_key1, .original_value = 0x1111 } },
+    });
+    try db.set_storage(addr, storage_key2, 0xBBBB);
+    try evm.journal.entries.append(.{
+        .snapshot_id = snapshot_id,
+        .data = .{ .storage_change = .{ .address = addr, .key = storage_key2, .original_value = 0x2222 } },
+    });
+
+    // Change account fields and record journal entries
+    var acc2 = acc;
+    acc2.balance = 999999;
+    acc2.nonce = 9;
+    try db.set_account(addr, acc2);
+    try evm.journal.entries.append(.{
+        .snapshot_id = snapshot_id,
+        .data = .{ .balance_change = .{ .address = addr, .original_balance = acc.balance } },
+    });
+    try evm.journal.entries.append(.{
+        .snapshot_id = snapshot_id,
+        .data = .{ .nonce_change = .{ .address = addr, .original_nonce = acc.nonce } },
+    });
+
+    // Sanity: confirm changes applied
+    try std.testing.expectEqual(@as(u256, 0xAAAA), (try db.get_storage(addr, storage_key1)));
+    try std.testing.expectEqual(@as(u256, 0xBBBB), (try db.get_storage(addr, storage_key2)));
+    const pre_revert_acc = (try db.get_account(addr)).?;
+    try std.testing.expectEqual(@as(u256, 999999), pre_revert_acc.balance);
+    try std.testing.expectEqual(@as(u64, 9), pre_revert_acc.nonce);
+
+    // Swap allocator to the failing one for revert path only
+    const prev_alloc = evm.allocator;
+    evm.allocator = failing_allocator;
+    evm.revert_to_snapshot(snapshot_id);
+    evm.allocator = prev_alloc;
+
+    // Verify state fully reverted (no allocations needed during revert)
+    try std.testing.expectEqual(@as(u256, 0x1111), (try db.get_storage(addr, storage_key1)));
+    try std.testing.expectEqual(@as(u256, 0x2222), (try db.get_storage(addr, storage_key2)));
+    const reverted_acc = (try db.get_account(addr)).?;
+    try std.testing.expectEqual(@as(u256, 123456), reverted_acc.balance);
+    try std.testing.expectEqual(@as(u64, 7), reverted_acc.nonce);
+
+    // Journal should be truncated
+    try std.testing.expectEqual(@as(usize, 0), evm.journal.entry_count());
+}
+
 test "journal state application - balance change rollback" {
     // Create test database
     var db = Database.init(std.testing.allocator);
