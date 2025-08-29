@@ -37,6 +37,10 @@ pub const EvmConfig = struct {
     /// Enable bytecode fusion optimizations (default: true)
     /// When enabled, common opcode patterns like PUSH+ADD are fused into single operations
     enable_fusion: bool = true,
+    
+    /// Tracer type for execution tracing (default: null for no tracing)
+    /// Set to a tracer type (e.g., JSONRPCTracer) to enable execution tracing
+    tracer_type: ?type = null,
 
     /// Gets the appropriate type for depth based on max_call_depth
     pub fn get_depth_type(self: EvmConfig) type {

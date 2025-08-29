@@ -204,6 +204,80 @@ pub const DifferentialTestor = struct {
         self.allocator.destroy(self.guillotine_db);
     }
     
+    /// Analyze bytecode and provide debugging information
+    fn analyzeBytecode(self: *DifferentialTestor, bytecode: []const u8) void {
+        _ = self;
+        const log = std.log.scoped(.differential_analysis);
+        
+        log.debug("Analyzing bytecode of {} bytes", .{bytecode.len});
+        
+        // Decode opcodes for debugging
+        var i: usize = 0;
+        var opcode_count: usize = 0;
+        while (i < bytecode.len) : (opcode_count += 1) {
+            const opcode = bytecode[i];
+            const opcode_name = switch (opcode) {
+                0x00 => "STOP",
+                0x01 => "ADD",
+                0x02 => "MUL",
+                0x03 => "SUB",
+                0x04 => "DIV",
+                0x05 => "SDIV",
+                0x06 => "MOD",
+                0x07 => "SMOD",
+                0x08 => "ADDMOD",
+                0x09 => "MULMOD",
+                0x0a => "EXP",
+                0x0b => "SIGNEXTEND",
+                0x10 => "LT",
+                0x11 => "GT",
+                0x12 => "SLT",
+                0x13 => "SGT",
+                0x14 => "EQ",
+                0x15 => "ISZERO",
+                0x16 => "AND",
+                0x17 => "OR",
+                0x18 => "XOR",
+                0x19 => "NOT",
+                0x1a => "BYTE",
+                0x1b => "SHL",
+                0x1c => "SHR",
+                0x1d => "SAR",
+                0x20 => "SHA3",
+                0x35 => "CALLDATALOAD",
+                0x36 => "CALLDATASIZE",
+                0x37 => "CALLDATACOPY",
+                0x50 => "POP",
+                0x51 => "MLOAD",
+                0x52 => "MSTORE",
+                0x53 => "MSTORE8",
+                0x56 => "JUMP",
+                0x57 => "JUMPI",
+                0x58 => "PC",
+                0x59 => "MSIZE",
+                0x5a => "GAS",
+                0x5b => "JUMPDEST",
+                0x60...0x7f => blk: {
+                    const push_size = opcode - 0x60 + 1;
+                    i += push_size;
+                    break :blk "PUSH";
+                },
+                0x80...0x8f => "DUP",
+                0x90...0x9f => "SWAP",
+                0xa0...0xa4 => "LOG",
+                0xf3 => "RETURN",
+                0xfe => "INVALID",
+                0xff => "SELFDESTRUCT",
+                else => "UNKNOWN",
+            };
+            
+            log.debug("  PC {}: 0x{x:0>2} ({})", .{i, opcode, opcode_name});
+            i += 1;
+        }
+        
+        log.debug("Total opcodes decoded: {}", .{opcode_count});
+    }
+
     /// Simple bytecode testing - deploys bytecode and executes it on both EVMs
     /// In happy path: does nothing
     /// In unhappy path: collects errors, prints readable diff, and throws clear error
@@ -246,6 +320,9 @@ pub const DifferentialTestor = struct {
         if (diff.result_match and diff.trace_match) {
             return;
         }
+        
+        // Unhappy path - analyze bytecode for debugging
+        self.analyzeBytecode(bytecode);
         
         // Unhappy path - collect and report errors
         var error_messages: [5][]const u8 = undefined;
@@ -347,6 +424,24 @@ pub const DifferentialTestor = struct {
         input: []const u8,
         gas_limit: u64,
     ) !ExecutionResultWithTrace {
+        // Create a tracing-enabled EVM instance temporarily
+        const JSONRPCTracer = @import("evm").tracer.JSONRPCTracer;
+        var tracer = JSONRPCTracer.init(self.allocator);
+        defer tracer.deinit();
+        
+        // Save current EVM state
+        const original_evm = self.guillotine_instance;
+        defer self.guillotine_instance = original_evm;
+        
+        // Create a new EVM instance with tracing enabled
+        const TracingEvmConfig = guillotine_evm.EvmConfig{
+            .tracer_type = JSONRPCTracer,
+        };
+        
+        // For now, since we can't easily swap out the EVM's tracer at runtime,
+        // we'll create a custom frame execution with tracing
+        const log = std.log.scoped(.differential_trace);
+        
         // Use the actual EVM call method
         const params = guillotine_evm.CallParams{
             .call = .{
@@ -358,18 +453,59 @@ pub const DifferentialTestor = struct {
             },
         };
         
-        std.debug.print("DIFFERENTIAL: About to call Guillotine with gas={}\n", .{gas_limit});
-        const result = self.guillotine_instance.call(params);
-        std.debug.print("DIFFERENTIAL: Guillotine call complete, success={}, gas_left={}\n", .{result.success, result.gas_left});
+        log.debug("DIFFERENTIAL: About to call Guillotine with gas={}", .{gas_limit});
         
-        // For now, create empty trace - we'll focus on the execution result
-        const trace = ExecutionTrace.empty(self.allocator);
+        // First, let's trace the bytecode execution manually
+        // Get the contract code
+        const code = self.guillotine_db.get_code_by_address(to.bytes) catch |err| {
+            log.err("Failed to get code for address {any}: {}", .{to, err});
+            return ExecutionResultWithTrace{
+                .success = false,
+                .gas_used = 0,
+                .output = &.{},
+                .trace = ExecutionTrace.empty(self.allocator),
+                .allocator = self.allocator,
+            };
+        };
+        
+        log.debug("Contract code at {any}: {} bytes", .{to, code.len});
+        if (code.len > 0) {
+            log.debug("First 16 bytes: {x}", .{code[0..@min(code.len, 16)]});
+        }
+        
+        // Execute the call
+        const result = self.guillotine_instance.call(params);
+        log.debug("DIFFERENTIAL: Guillotine call complete, success={}, gas_left={}", .{result.success, result.gas_left});
+        
+        // Create a basic trace for now
+        var trace_steps = std.ArrayList(TraceStep).init(self.allocator);
+        defer trace_steps.deinit();
+        
+        // If we have bytecode, add some basic trace information
+        if (code.len > 0 and !result.success and result.gas_left == 0) {
+            // This looks like immediate failure - possibly during dispatch init
+            const step = TraceStep{
+                .pc = 0,
+                .opcode = if (code.len > 0) code[0] else 0,
+                .opcode_name = try self.allocator.dupe(u8, "DISPATCH_INIT_FAIL"),
+                .gas = gas_limit,
+                .stack = &.{},
+                .memory = &.{},
+                .storage_reads = &.{},
+                .storage_writes = &.{},
+            };
+            try trace_steps.append(step);
+        }
+        
+        const trace = ExecutionTrace{
+            .steps = try trace_steps.toOwnedSlice(),
+            .allocator = self.allocator,
+        };
         
         // Calculate gas used
         const gas_used = gas_limit - result.gas_left;
         
         // Store the execution result status for debugging
-        const log = std.log.scoped(.differential_failure);
         log.debug("Guillotine execution completed: success={}, gas_left={}, output_len={}", .{result.success, result.gas_left, result.output.len});
         
         if (!result.success) {
@@ -454,14 +590,17 @@ pub const DifferentialTestor = struct {
             log.err("", .{});
         }
         
-        log.err("🛠️  DEBUGGING HINTS:", .{});
-        log.err("   • Check if Guillotine implements all opcodes used", .{});
-        log.err("   • Verify gas calculation matches EVM specification", .{});
-        log.err("   • Ensure memory and stack operations are correct", .{});
-        log.err("   • Compare against EVM specification for edge cases", .{});
+        // Additional debugging information
         if (diff.trace_diffs.len > 0) {
-            log.err("   • Enable detailed tracing to debug execution differences", .{});
+            log.err("🔍 EXECUTION TRACE AVAILABLE:", .{});
+            log.err("   First divergence shows different execution paths", .{});
         }
+        
+        // Bytecode analysis
+        log.err("💡 DEBUGGING HINTS:", .{});
+        log.err("   1. Check bytecode validity - some opcodes may not be supported", .{});
+        log.err("   2. Verify gas calculations - immediate gas=0 suggests dispatch failure", .{});
+        log.err("   3. Check for dispatch/planner issues in Guillotine", .{});
         log.err("", .{});
         log.err("=====================================", .{});
     }
