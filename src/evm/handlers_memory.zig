@@ -44,7 +44,7 @@ pub fn Handlers(comptime FrameType: type) type {
             try self.stack.push(value);
 
             const next = dispatch.getNext();
-            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// MSTORE opcode (0x52) - Store word to memory.
@@ -81,7 +81,7 @@ pub fn Handlers(comptime FrameType: type) type {
             log.debug("MSTORE: Memory size after store: {}", .{self.memory.size()});
 
             const next = dispatch.getNext();
-            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// MSTORE8 opcode (0x53) - Store byte to memory.
@@ -112,7 +112,7 @@ pub fn Handlers(comptime FrameType: type) type {
             };
 
             const next = dispatch.getNext();
-            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// MSIZE opcode (0x59) - Get size of active memory.
@@ -122,7 +122,7 @@ pub fn Handlers(comptime FrameType: type) type {
             try self.stack.push(@as(WordType, @intCast(size)));
 
             const next = dispatch.getNext();
-            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// MCOPY opcode (0x5e) - Memory copy operation (EIP-5656).
@@ -147,7 +147,7 @@ pub fn Handlers(comptime FrameType: type) type {
             if (size_usize == 0) {
                 // No operation for zero size
                 const next = dispatch.getNext();
-                return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
             }
 
             // Calculate gas cost
@@ -179,7 +179,7 @@ pub fn Handlers(comptime FrameType: type) type {
             };
 
             const next = dispatch.getNext();
-            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
         }
     };
 }
