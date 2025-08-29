@@ -55,9 +55,9 @@ pub fn Dispatch(comptime FrameType: type) type {
         pub const CodesizeMetadata = packed struct { size: u32 };
         /// Metadata for CODECOPY opcode containing bytecode pointer and size.
         pub const CodecopyMetadata = packed struct {
-            bytecode_ptr: *const []const u8,
+            bytecode_ptr: [*]const u8,  // Direct pointer to bytecode data, not a slice
             size: u32,
-            _padding: u16 = 0,
+            _padding: u32 = 0,  // Increased padding to maintain 64-bit size
         };
         /// Metadata for trace_before_op containing PC and opcode for tracing
         pub const TraceBeforeMetadata = packed struct(u64) {
@@ -80,7 +80,7 @@ pub fn Dispatch(comptime FrameType: type) type {
             codesize: CodesizeMetadata,
             codecopy: CodecopyMetadata,
             opcode_handler: OpcodeHandler,
-            first_block_gas: struct { gas: u32 },
+            first_block_gas: struct { gas: u64 },
             trace_before: TraceBeforeMetadata,
             trace_after: TraceAfterMetadata,
         };
@@ -243,7 +243,7 @@ pub fn Dispatch(comptime FrameType: type) type {
 
 
             // Calculate gas cost for first basic block
-            var first_block_gas: u32 = 0;
+            var first_block_gas: u64 = 0;
             var temp_iter = bytecode.createIterator();
             const opcode_info = @import("opcode_data.zig").OPCODE_INFO;
 
@@ -256,7 +256,13 @@ pub fn Dispatch(comptime FrameType: type) type {
 
                 switch (op_data) {
                     .regular => |data| {
-                        first_block_gas += opcode_info[data.opcode].gas_cost;
+                        const gas_to_add = @as(u64, opcode_info[data.opcode].gas_cost);
+                        const new_gas = std.math.add(u64, first_block_gas, gas_to_add) catch std.math.maxInt(u64);
+                        if (new_gas == std.math.maxInt(u64)) {
+                            first_block_gas = new_gas;
+                            break;
+                        }
+                        first_block_gas = new_gas;
                         // Stop at JUMP/JUMPI/STOP/RETURN/REVERT/INVALID/SELFDESTRUCT
                         switch (data.opcode) {
                             0x56, 0x57, 0x00, 0xf3, 0xfd, 0xfe, 0xff => {
@@ -268,20 +274,32 @@ pub fn Dispatch(comptime FrameType: type) type {
                     },
                     .push => |data| {
                         const push_opcode = 0x60 + data.size - 1;
-                        first_block_gas += opcode_info[push_opcode].gas_cost;
+                        const gas_to_add = @as(u64, opcode_info[push_opcode].gas_cost);
+                        const new_gas = std.math.add(u64, first_block_gas, gas_to_add) catch std.math.maxInt(u64);
+                        if (new_gas == std.math.maxInt(u64)) {
+                            first_block_gas = new_gas;
+                            break;
+                        }
+                        first_block_gas = new_gas;
                     },
                     .jumpdest => {
                         found_terminator = true;
                         break;
                     },
                     .stop, .invalid => {
-                        first_block_gas += opcode_info[0x00].gas_cost; // STOP gas cost
+                        const gas_to_add = @as(u64, opcode_info[0x00].gas_cost); // STOP gas cost
+                        first_block_gas = std.math.add(u64, first_block_gas, gas_to_add) catch std.math.maxInt(u64);
                         found_terminator = true;
                         break;
                     },
                     else => {
                         // For fusion operations, approximate gas cost
-                        first_block_gas += 6; // PUSH + operation
+                        const new_gas = std.math.add(u64, first_block_gas, 6) catch std.math.maxInt(u64);
+                        if (new_gas == std.math.maxInt(u64)) {
+                            first_block_gas = new_gas;
+                            break;
+                        }
+                        first_block_gas = new_gas; // PUSH + operation
                     },
                 }
                 if (found_terminator) break;
@@ -316,8 +334,9 @@ pub fn Dispatch(comptime FrameType: type) type {
                         } else if (data.opcode == @intFromEnum(Opcode.CODESIZE)) {
                             try schedule_items.append(allocator, .{ .codesize = .{ .size = @intCast(bytecode.runtime_code.len) } });
                         } else if (data.opcode == @intFromEnum(Opcode.CODECOPY)) {
-                            const bytecode_ptr = &bytecode.runtime_code;
-                            try schedule_items.append(allocator, .{ .codecopy = .{ .bytecode_ptr = bytecode_ptr, .size = @intCast(bytecode.runtime_code.len) } });
+                            // Store direct pointer to bytecode data for stable reference
+                            const bytecode_data = bytecode.runtime_code;
+                            try schedule_items.append(allocator, .{ .codecopy = .{ .bytecode_ptr = bytecode_data.ptr, .size = @intCast(bytecode_data.len) } });
                         }
                     },
                     .push => |data| {
@@ -537,7 +556,7 @@ pub fn Dispatch(comptime FrameType: type) type {
             const trace_after_handler = createTraceHandler(TracerType, tracer_instance, false);
 
             // Calculate gas cost for first basic block (same as non-tracing version)
-            var first_block_gas: u32 = 0;
+            var first_block_gas: u64 = 0;
             var temp_iter = bytecode.createIterator();
             const opcode_info = @import("opcode_data.zig").OPCODE_INFO;
 
@@ -550,7 +569,13 @@ pub fn Dispatch(comptime FrameType: type) type {
 
                 switch (op_data) {
                     .regular => |data| {
-                        first_block_gas += opcode_info[data.opcode].gas_cost;
+                        const gas_to_add = @as(u64, opcode_info[data.opcode].gas_cost);
+                        const new_gas = std.math.add(u64, first_block_gas, gas_to_add) catch std.math.maxInt(u64);
+                        if (new_gas == std.math.maxInt(u64)) {
+                            first_block_gas = new_gas;
+                            break;
+                        }
+                        first_block_gas = new_gas;
                         // Stop at JUMP/JUMPI/STOP/RETURN/REVERT/INVALID/SELFDESTRUCT
                         switch (data.opcode) {
                             0x56, 0x57, 0x00, 0xf3, 0xfd, 0xfe, 0xff => {
@@ -562,20 +587,32 @@ pub fn Dispatch(comptime FrameType: type) type {
                     },
                     .push => |data| {
                         const push_opcode = 0x60 + data.size - 1;
-                        first_block_gas += opcode_info[push_opcode].gas_cost;
+                        const gas_to_add = @as(u64, opcode_info[push_opcode].gas_cost);
+                        const new_gas = std.math.add(u64, first_block_gas, gas_to_add) catch std.math.maxInt(u64);
+                        if (new_gas == std.math.maxInt(u64)) {
+                            first_block_gas = new_gas;
+                            break;
+                        }
+                        first_block_gas = new_gas;
                     },
                     .jumpdest => {
                         found_terminator = true;
                         break;
                     },
                     .stop, .invalid => {
-                        first_block_gas += opcode_info[0x00].gas_cost; // STOP gas cost
+                        const gas_to_add = @as(u64, opcode_info[0x00].gas_cost); // STOP gas cost
+                        first_block_gas = std.math.add(u64, first_block_gas, gas_to_add) catch std.math.maxInt(u64);
                         found_terminator = true;
                         break;
                     },
                     else => {
                         // For fusion operations, approximate gas cost
-                        first_block_gas += 6; // PUSH + operation
+                        const new_gas = std.math.add(u64, first_block_gas, 6) catch std.math.maxInt(u64);
+                        if (new_gas == std.math.maxInt(u64)) {
+                            first_block_gas = new_gas;
+                            break;
+                        }
+                        first_block_gas = new_gas; // PUSH + operation
                     },
                 }
                 if (found_terminator) break;
@@ -608,8 +645,9 @@ pub fn Dispatch(comptime FrameType: type) type {
                         } else if (data.opcode == @intFromEnum(Opcode.CODESIZE)) {
                             try schedule_items.append(allocator, .{ .codesize = .{ .size = @intCast(bytecode.runtime_code.len) } });
                         } else if (data.opcode == @intFromEnum(Opcode.CODECOPY)) {
-                            const bytecode_ptr = &bytecode.runtime_code;
-                            try schedule_items.append(allocator, .{ .codecopy = .{ .bytecode_ptr = bytecode_ptr, .size = @intCast(bytecode.runtime_code.len) } });
+                            // Store direct pointer to bytecode data for stable reference
+                            const bytecode_data = bytecode.runtime_code;
+                            try schedule_items.append(allocator, .{ .codecopy = .{ .bytecode_ptr = bytecode_data.ptr, .size = @intCast(bytecode_data.len) } });
                         }
 
                         // Insert trace_after
@@ -955,7 +993,6 @@ const TestFrame = struct {
     pub const BytecodeConfig = bytecode_mod.BytecodeConfig{
         .max_bytecode_size = 1024,
         .max_initcode_size = 49152,
-        .vector_length = 16,
     };
 
     pub const Error = error{
