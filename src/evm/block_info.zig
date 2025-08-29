@@ -41,6 +41,12 @@ pub fn BlockInfo(comptime config: BlockInfoConfig) type {
         base_fee: BaseFeeType,
         /// Block hash of previous block (post-merge: prevrandao value)
         prev_randao: [32]u8,
+        /// Blob base fee for EIP-4844 (cold data)
+        /// Set to 0 for non-Cancun hardforks
+        blob_base_fee: BaseFeeType,
+        /// Blob versioned hashes for EIP-4844 blob transactions (cold data)
+        /// Empty slice for non-blob transactions
+        blob_versioned_hashes: []const [32]u8,
         
         /// Initialize BlockInfo with default values
         pub fn init() Self {
@@ -52,6 +58,8 @@ pub fn BlockInfo(comptime config: BlockInfoConfig) type {
             .coinbase = primitives.ZERO_ADDRESS,
             .base_fee = 0,
             .prev_randao = [_]u8{0} ** 32,
+            .blob_base_fee = 0,
+            .blob_versioned_hashes = &.{},
                 };
         }
         
@@ -59,6 +67,7 @@ pub fn BlockInfo(comptime config: BlockInfoConfig) type {
         pub fn hasBaseFee(self: Self) bool {
             return self.base_fee > 0 or self.number > 0; // Simplified check
         }
+        
         
         /// Validate block info constraints
         pub fn validate(self: Self) bool {
@@ -86,6 +95,8 @@ test "block info initialization" {
     try std.testing.expectEqual(primitives.ZERO_ADDRESS, block.coinbase);
     try std.testing.expectEqual(@as(u256, 0), block.base_fee);
     try std.testing.expectEqual([_]u8{0} ** 32, block.prev_randao);
+    try std.testing.expectEqual(@as(u256, 0), block.blob_base_fee);
+    try std.testing.expectEqual(@as(usize, 0), block.blob_versioned_hashes.len);
 }
 
 test "block info custom values" {
@@ -100,6 +111,8 @@ test "block info custom values" {
         .coinbase = custom_address,
         .base_fee = 20_000_000_000, // 20 gwei
         .prev_randao = custom_randao,
+        .blob_base_fee = 1_000_000_000, // 1 gwei
+        .blob_versioned_hashes = &.{},
     };
     
     try std.testing.expectEqual(@as(u64, 12345), block.number);
@@ -109,6 +122,8 @@ test "block info custom values" {
     try std.testing.expectEqual(custom_address, block.coinbase);
     try std.testing.expectEqual(@as(u256, 20_000_000_000), block.base_fee);
     try std.testing.expectEqual(custom_randao, block.prev_randao);
+    try std.testing.expectEqual(@as(u256, 1_000_000_000), block.blob_base_fee);
+    try std.testing.expectEqual(@as(usize, 0), block.blob_versioned_hashes.len);
 }
 
 test "block info hasBaseFee check" {
@@ -164,6 +179,8 @@ test "block info edge cases" {
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = std.math.maxInt(u256),
         .prev_randao = [_]u8{0xff} ** 32,
+        .blob_base_fee = std.math.maxInt(u256),
+        .blob_versioned_hashes = &.{},
     };
     try std.testing.expect(max_block.validate());
     try std.testing.expect(max_block.hasBaseFee());
@@ -177,6 +194,8 @@ test "block info edge cases" {
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 0,
         .prev_randao = [_]u8{0} ** 32,
+        .blob_base_fee = 0,
+        .blob_versioned_hashes = &.{},
     };
     try std.testing.expect(min_block.validate());
 }
@@ -191,13 +210,41 @@ test "compact block info" {
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 100_000_000_000, // 100 Gwei - fits in u64
         .prev_randao = [_]u8{0xAB} ** 32,
+        .blob_base_fee = 50_000_000_000, // 50 Gwei - fits in u64
+        .blob_versioned_hashes = &.{},
     };
     
     try std.testing.expectEqual(@as(u64, 15000000), block.number);
     try std.testing.expectEqual(@as(u64, 15_000_000_000_000_000), block.difficulty);
     try std.testing.expectEqual(@as(u64, 100_000_000_000), block.base_fee);
+    try std.testing.expectEqual(@as(u64, 50_000_000_000), block.blob_base_fee);
     try std.testing.expect(block.validate());
     try std.testing.expect(block.hasBaseFee());
+}
+
+test "block info with blob data (EIP-4844)" {
+    const blob_hash1 = [_]u8{0x01} ** 32;
+    const blob_hash2 = [_]u8{0x02} ** 32;
+    const blob_hashes = [_][32]u8{ blob_hash1, blob_hash2 };
+    
+    const block = DefaultBlockInfo{
+        .number = 15_000_000,
+        .timestamp = 1640995200,
+        .difficulty = 0, // Post-merge
+        .gas_limit = 30_000_000,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .base_fee = 20_000_000_000, // 20 gwei
+        .prev_randao = [_]u8{0xAB} ** 32,
+        .blob_base_fee = 1_000_000_000, // 1 gwei
+        .blob_versioned_hashes = &blob_hashes,
+    };
+    
+    try std.testing.expectEqual(@as(u64, 15_000_000), block.number);
+    try std.testing.expectEqual(@as(u256, 1_000_000_000), block.blob_base_fee);
+    try std.testing.expectEqual(@as(usize, 2), block.blob_versioned_hashes.len);
+    try std.testing.expectEqual(blob_hash1, block.blob_versioned_hashes[0]);
+    try std.testing.expectEqual(blob_hash2, block.blob_versioned_hashes[1]);
+    try std.testing.expect(block.validate());
 }
 
 test "mixed block info types" {
@@ -217,6 +264,8 @@ test "mixed block info types" {
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1 << 80, // Requires u96
         .prev_randao = [_]u8{0} ** 32,
+        .blob_base_fee = 1 << 70, // Requires u96
+        .blob_versioned_hashes = &.{},
     };
     
     try std.testing.expectEqual(u128, @TypeOf(block.difficulty));
