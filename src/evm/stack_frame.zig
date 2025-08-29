@@ -429,6 +429,7 @@ pub fn StackFrame(comptime config: FrameConfig) type {
                 }
 
                 const cursor = Self.Dispatch{ .cursor = schedule.ptr + start_index, .jump_table = &jump_table };
+                log.debug("Starting execution at schedule index {}, first handler: {*}", .{ start_index, cursor.cursor[0].opcode_handler });
                 break :blk cursor.cursor[0].opcode_handler(self, cursor);
             };
 
