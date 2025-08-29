@@ -110,8 +110,6 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         /// A fixed size array of opcode handlers indexed by opcode number
         pub const opcode_handlers: [256]OpcodeHandler = stack_frame_handlers.getOpcodeHandlers(Self);
 
-        pub const max_bytecode_size = config.max_bytecode_size;
-
         const Self = @This();
 
         //           StackFrame Structure Layout Analysis
@@ -291,7 +289,7 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         /// @param tracer_instance: Instance of the tracer (ignored if TracerType is null)
         pub fn interpret_with_tracer(self: *Self, bytecode_raw: []const u8, comptime TracerType: ?type, tracer_instance: if (TracerType) |T| *T else void) Error!Success {
             // Validate bytecode size
-            if (bytecode_raw.len > max_bytecode_size) {
+            if (bytecode_raw.len > config.max_bytecode_size) {
                 @branchHint(.unlikely);
                 return Error.BytecodeTooLarge;
             }
