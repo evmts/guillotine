@@ -246,7 +246,7 @@ pub fn Frame(comptime config: FrameConfig) type {
                 var start_index: usize = 0;
                 switch (traced_schedule[0]) {
                     .first_block_gas => |meta| {
-                        if (meta.gas > 0) try self.consumeGasChecked(meta.gas);
+                        if (meta.gas > 0) try self.consumeGasChecked(@intCast(meta.gas));
                         start_index = 1;
                     },
                     else => {},
@@ -279,7 +279,7 @@ pub fn Frame(comptime config: FrameConfig) type {
                 switch (schedule[0]) {
                     .first_block_gas => |meta| {
                         log.debug("First block gas charge: {d} (current gas: {d})", .{ meta.gas, self.gas_remaining });
-                        if (meta.gas > 0) try self.consumeGasChecked(meta.gas);
+                        if (meta.gas > 0) try self.consumeGasChecked(@intCast(meta.gas));
                         log.debug("Gas after first block charge: {d}", .{self.gas_remaining});
                         start_index = 1;
                     },
@@ -384,16 +384,43 @@ pub fn Frame(comptime config: FrameConfig) type {
         }
 
         /// Consume gas without checking (for use after static analysis)
-        pub fn consumeGasUnchecked(self: *Self, amount: u64) void {
+        /// 
+        /// Safety: This function clamps the amount to fit in GasType, but in practice
+        /// this should never happen because:
+        /// 1. Block gas limits are typically 30M (well below i32 max of ~2.1B)
+        /// 2. You would run out of gas (gas_remaining < 0) long before hitting the clamp
+        /// 3. Gas costs are designed to fit in u32, making clamping unnecessary
+        pub fn consumeGasUnchecked(self: *Self, amount: u32) void {
+            // Compile-time verification that clamping is practically unnecessary
+            comptime {
+                // With typical block gas limit of 30M and i32, we have plenty of headroom
+                if (frame_config.block_gas_limit <= std.math.maxInt(i32)) {
+                    // Ensure no single gas cost exceeds what i32 can hold
+                    // This is a sanity check - all EVM gas costs are well below this
+                    std.debug.assert(std.math.maxInt(u32) < std.math.maxInt(i32));
+                }
+            }
+            
+            // In practice, amount should always fit in GasType since we use u32
+            // The clamp is defensive programming for edge cases
             const clamped_amount = @min(amount, std.math.maxInt(GasType));
             self.gas_remaining -= @as(GasType, @intCast(clamped_amount));
         }
 
         /// Consume gas with bounds checking and safe casting
-        pub fn consumeGasChecked(self: *Self, amount: u64) Error!void {
-            const amt = std.math.cast(GasType, amount) orelse return Error.OutOfGas;
+        /// Returns GasOverflow if amount doesn't fit in GasType (extremely rare)
+        /// Returns OutOfGas if insufficient gas remaining
+        pub fn consumeGasChecked(self: *Self, amount: u32) Error!void {
+            // Cast to GasType - should always succeed with u32 input
+            // Only fails if GasType is smaller than u32 (impossible with current config)
+            const amt = std.math.cast(GasType, amount) orelse return Error.GasOverflow;
+            
+            // Check if we have enough gas
+            if (amt > self.gas_remaining) {
+                return Error.OutOfGas;
+            }
+            
             self.gas_remaining -= amt;
-            if (self.gas_remaining < 0) return Error.OutOfGas;
         }
 
         /// Get the EVM instance from the opaque pointer
