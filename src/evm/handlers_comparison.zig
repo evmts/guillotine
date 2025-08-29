@@ -18,7 +18,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const result: WordType = if (top < top_minus_1) 1 else 0;
             try self.stack.set_top(result);
             const next = dispatch.getNext();
-            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// GT opcode (0x11) - Greater than comparison.
@@ -28,7 +28,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const result: WordType = if (top > top_minus_1) 1 else 0;
             try self.stack.set_top(result);
             const next = dispatch.getNext();
-            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// SLT opcode (0x12) - Signed less than comparison.
@@ -40,7 +40,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const result: WordType = if (a_signed < b_signed) 1 else 0;
             try self.stack.set_top(result);
             const next = dispatch.getNext();
-            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// SGT opcode (0x13) - Signed greater than comparison.
@@ -52,7 +52,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const result: WordType = if (a_signed > b_signed) 1 else 0;
             try self.stack.set_top(result);
             const next = dispatch.getNext();
-            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// EQ opcode (0x14) - Equality comparison.
@@ -62,7 +62,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const result: WordType = if (top == top_minus_1) 1 else 0;
             try self.stack.set_top(result);
             const next = dispatch.getNext();
-            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// ISZERO opcode (0x15) - Check if value is zero.
@@ -71,7 +71,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const result: WordType = if (value == 0) 1 else 0;
             try self.stack.set_top(result);
             const next = dispatch.getNext();
-            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
         }
     };
 }
@@ -113,10 +113,10 @@ fn createMockDispatch() TestFrame.Dispatch {
             return TestFrame.Success.stop;
         }
     }.handler;
-    
+
     var cursor: [1]dispatch_mod.ScheduleElement(TestFrame) = undefined;
     cursor[0] = .{ .opcode_handler = &mock_handler };
-    
+
     return TestFrame.Dispatch{
         .cursor = &cursor,
         .bytecode_length = 0,
@@ -130,10 +130,10 @@ test "LT opcode - less than comparison" {
     // Test: 5 < 10 = 1 (true)
     try frame.stack.push(5);
     try frame.stack.push(10);
-    
+
     const dispatch = createMockDispatch();
     _ = try TestFrame.ComparisonHandlers.lt(frame, dispatch);
-    
+
     try testing.expectEqual(@as(u256, 1), try frame.stack.pop());
 }
 
@@ -144,10 +144,10 @@ test "LT opcode - not less than" {
     // Test: 10 < 5 = 0 (false)
     try frame.stack.push(10);
     try frame.stack.push(5);
-    
+
     const dispatch = createMockDispatch();
     _ = try TestFrame.ComparisonHandlers.lt(frame, dispatch);
-    
+
     try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
 }
 
@@ -158,10 +158,10 @@ test "LT opcode - equal values" {
     // Test: 5 < 5 = 0 (false)
     try frame.stack.push(5);
     try frame.stack.push(5);
-    
+
     const dispatch = createMockDispatch();
     _ = try TestFrame.ComparisonHandlers.lt(frame, dispatch);
-    
+
     try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
 }
 
@@ -172,10 +172,10 @@ test "GT opcode - greater than comparison" {
     // Test: 10 > 5 = 1 (true)
     try frame.stack.push(10);
     try frame.stack.push(5);
-    
+
     const dispatch = createMockDispatch();
     _ = try TestFrame.ComparisonHandlers.gt(frame, dispatch);
-    
+
     try testing.expectEqual(@as(u256, 1), try frame.stack.pop());
 }
 
@@ -186,10 +186,10 @@ test "GT opcode - not greater than" {
     // Test: 5 > 10 = 0 (false)
     try frame.stack.push(5);
     try frame.stack.push(10);
-    
+
     const dispatch = createMockDispatch();
     _ = try TestFrame.ComparisonHandlers.gt(frame, dispatch);
-    
+
     try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
 }
 
@@ -200,10 +200,10 @@ test "SLT opcode - signed less than positive" {
     // Test: 5 < 10 = 1 (true)
     try frame.stack.push(5);
     try frame.stack.push(10);
-    
+
     const dispatch = createMockDispatch();
     _ = try TestFrame.ComparisonHandlers.slt(frame, dispatch);
-    
+
     try testing.expectEqual(@as(u256, 1), try frame.stack.pop());
 }
 
@@ -216,10 +216,10 @@ test "SLT opcode - signed less than negative" {
     const neg_5 = std.math.maxInt(u256) - 4;
     try frame.stack.push(neg_5);
     try frame.stack.push(5);
-    
+
     const dispatch = createMockDispatch();
     _ = try TestFrame.ComparisonHandlers.slt(frame, dispatch);
-    
+
     try testing.expectEqual(@as(u256, 1), try frame.stack.pop());
 }
 
@@ -232,13 +232,13 @@ test "SLT opcode - signed comparison with max values" {
     // MIN_SIGNED = 0x8000...000
     const max_signed = ((@as(u256, 1) << 255) - 1);
     const min_signed = (@as(u256, 1) << 255);
-    
+
     try frame.stack.push(max_signed);
     try frame.stack.push(min_signed);
-    
+
     const dispatch = createMockDispatch();
     _ = try TestFrame.ComparisonHandlers.slt(frame, dispatch);
-    
+
     try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
 }
 
@@ -249,10 +249,10 @@ test "SGT opcode - signed greater than positive" {
     // Test: 10 > 5 = 1 (true)
     try frame.stack.push(10);
     try frame.stack.push(5);
-    
+
     const dispatch = createMockDispatch();
     _ = try TestFrame.ComparisonHandlers.sgt(frame, dispatch);
-    
+
     try testing.expectEqual(@as(u256, 1), try frame.stack.pop());
 }
 
@@ -264,10 +264,10 @@ test "SGT opcode - signed greater than negative" {
     const neg_5 = std.math.maxInt(u256) - 4;
     try frame.stack.push(5);
     try frame.stack.push(neg_5);
-    
+
     const dispatch = createMockDispatch();
     _ = try TestFrame.ComparisonHandlers.sgt(frame, dispatch);
-    
+
     try testing.expectEqual(@as(u256, 1), try frame.stack.pop());
 }
 
@@ -278,13 +278,13 @@ test "SGT opcode - two negative numbers" {
     // Test: -5 > -10 = 1 (true)
     const neg_5 = std.math.maxInt(u256) - 4;
     const neg_10 = std.math.maxInt(u256) - 9;
-    
+
     try frame.stack.push(neg_5);
     try frame.stack.push(neg_10);
-    
+
     const dispatch = createMockDispatch();
     _ = try TestFrame.ComparisonHandlers.sgt(frame, dispatch);
-    
+
     try testing.expectEqual(@as(u256, 1), try frame.stack.pop());
 }
 
@@ -295,10 +295,10 @@ test "EQ opcode - equal values" {
     // Test: 42 == 42 = 1 (true)
     try frame.stack.push(42);
     try frame.stack.push(42);
-    
+
     const dispatch = createMockDispatch();
     _ = try TestFrame.ComparisonHandlers.eq(frame, dispatch);
-    
+
     try testing.expectEqual(@as(u256, 1), try frame.stack.pop());
 }
 
@@ -309,10 +309,10 @@ test "EQ opcode - not equal values" {
     // Test: 42 == 43 = 0 (false)
     try frame.stack.push(42);
     try frame.stack.push(43);
-    
+
     const dispatch = createMockDispatch();
     _ = try TestFrame.ComparisonHandlers.eq(frame, dispatch);
-    
+
     try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
 }
 
@@ -324,10 +324,10 @@ test "EQ opcode - max value comparison" {
     const max = std.math.maxInt(u256);
     try frame.stack.push(max);
     try frame.stack.push(max);
-    
+
     const dispatch = createMockDispatch();
     _ = try TestFrame.ComparisonHandlers.eq(frame, dispatch);
-    
+
     try testing.expectEqual(@as(u256, 1), try frame.stack.pop());
 }
 
@@ -337,10 +337,10 @@ test "ISZERO opcode - zero value" {
 
     // Test: is 0 zero? = 1 (true)
     try frame.stack.push(0);
-    
+
     const dispatch = createMockDispatch();
     _ = try TestFrame.ComparisonHandlers.iszero(frame, dispatch);
-    
+
     try testing.expectEqual(@as(u256, 1), try frame.stack.pop());
 }
 
@@ -350,10 +350,10 @@ test "ISZERO opcode - non-zero value" {
 
     // Test: is 42 zero? = 0 (false)
     try frame.stack.push(42);
-    
+
     const dispatch = createMockDispatch();
     _ = try TestFrame.ComparisonHandlers.iszero(frame, dispatch);
-    
+
     try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
 }
 
@@ -364,10 +364,10 @@ test "ISZERO opcode - max value" {
     // Test: is MAX_U256 zero? = 0 (false)
     const max = std.math.maxInt(u256);
     try frame.stack.push(max);
-    
+
     const dispatch = createMockDispatch();
     _ = try TestFrame.ComparisonHandlers.iszero(frame, dispatch);
-    
+
     try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
 }
 
@@ -402,10 +402,10 @@ test "LT opcode - max values" {
     const max = std.math.maxInt(u256);
     try frame.stack.push(max - 1);
     try frame.stack.push(max);
-    
+
     const dispatch = createMockDispatch();
     _ = try TestFrame.ComparisonHandlers.lt(frame, dispatch);
-    
+
     try testing.expectEqual(@as(u256, 1), try frame.stack.pop());
 }
 
@@ -416,10 +416,10 @@ test "GT opcode - zero comparison" {
     // Test: 1 > 0 = 1
     try frame.stack.push(1);
     try frame.stack.push(0);
-    
+
     const dispatch = createMockDispatch();
     _ = try TestFrame.ComparisonHandlers.gt(frame, dispatch);
-    
+
     try testing.expectEqual(@as(u256, 1), try frame.stack.pop());
 }
 
@@ -430,10 +430,10 @@ test "GT opcode - equal values" {
     // Test: 42 > 42 = 0
     try frame.stack.push(42);
     try frame.stack.push(42);
-    
+
     const dispatch = createMockDispatch();
     _ = try TestFrame.ComparisonHandlers.gt(frame, dispatch);
-    
+
     try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
 }
 
@@ -445,10 +445,10 @@ test "SLT opcode - mixed signs" {
     const neg_5 = std.math.maxInt(u256) - 4;
     try frame.stack.push(5);
     try frame.stack.push(neg_5);
-    
+
     const dispatch = createMockDispatch();
     _ = try TestFrame.ComparisonHandlers.slt(frame, dispatch);
-    
+
     try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
 }
 
@@ -460,10 +460,10 @@ test "SLT opcode - zero comparisons" {
     const neg_1 = std.math.maxInt(u256);
     try frame.stack.push(0);
     try frame.stack.push(neg_1);
-    
+
     const dispatch = createMockDispatch();
     _ = try TestFrame.ComparisonHandlers.slt(frame, dispatch);
-    
+
     try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
 }
 
@@ -474,13 +474,13 @@ test "SLT opcode - edge case MIN and MAX" {
     // Test: MIN_SIGNED < MAX_SIGNED = 1 (true)
     const min_signed = @as(u256, 1) << 255;
     const max_signed = ((@as(u256, 1) << 255) - 1);
-    
+
     try frame.stack.push(min_signed);
     try frame.stack.push(max_signed);
-    
+
     const dispatch = createMockDispatch();
     _ = try TestFrame.ComparisonHandlers.slt(frame, dispatch);
-    
+
     try testing.expectEqual(@as(u256, 1), try frame.stack.pop());
 }
 
@@ -492,10 +492,10 @@ test "SGT opcode - zero comparison" {
     const neg_1 = std.math.maxInt(u256);
     try frame.stack.push(neg_1);
     try frame.stack.push(0);
-    
+
     const dispatch = createMockDispatch();
     _ = try TestFrame.ComparisonHandlers.sgt(frame, dispatch);
-    
+
     try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
 }
 
@@ -507,10 +507,10 @@ test "SGT opcode - equal negative values" {
     const neg_42 = std.math.maxInt(u256) - 41;
     try frame.stack.push(neg_42);
     try frame.stack.push(neg_42);
-    
+
     const dispatch = createMockDispatch();
     _ = try TestFrame.ComparisonHandlers.sgt(frame, dispatch);
-    
+
     try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
 }
 
@@ -521,10 +521,10 @@ test "EQ opcode - zero comparison" {
     // Test: 0 == 0 = 1
     try frame.stack.push(0);
     try frame.stack.push(0);
-    
+
     const dispatch = createMockDispatch();
     _ = try TestFrame.ComparisonHandlers.eq(frame, dispatch);
-    
+
     try testing.expectEqual(@as(u256, 1), try frame.stack.pop());
 }
 
@@ -535,10 +535,10 @@ test "EQ opcode - one off comparison" {
     // Test: 1000000 == 1000001 = 0
     try frame.stack.push(1000000);
     try frame.stack.push(1000001);
-    
+
     const dispatch = createMockDispatch();
     _ = try TestFrame.ComparisonHandlers.eq(frame, dispatch);
-    
+
     try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
 }
 
@@ -548,10 +548,10 @@ test "ISZERO opcode - one value" {
 
     // Test: is 1 zero? = 0
     try frame.stack.push(1);
-    
+
     const dispatch = createMockDispatch();
     _ = try TestFrame.ComparisonHandlers.iszero(frame, dispatch);
-    
+
     try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
 }
 
@@ -562,10 +562,10 @@ test "ISZERO opcode - large value" {
     // Test: is 2^200 zero? = 0
     const large = @as(u256, 1) << 200;
     try frame.stack.push(large);
-    
+
     const dispatch = createMockDispatch();
     _ = try TestFrame.ComparisonHandlers.iszero(frame, dispatch);
-    
+
     try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
 }
 
@@ -581,14 +581,14 @@ test "comparison consistency - LT and GT" {
     var dispatch = createMockDispatch();
     _ = try TestFrame.ComparisonHandlers.lt(frame, dispatch);
     const lt_result = try frame.stack.pop();
-    
+
     // Test: 10 > 5 = 1
     try frame.stack.push(10);
     try frame.stack.push(5);
     dispatch = createMockDispatch();
     _ = try TestFrame.ComparisonHandlers.gt(frame, dispatch);
     const gt_result = try frame.stack.pop();
-    
+
     try testing.expectEqual(lt_result, gt_result);
 }
 
@@ -599,21 +599,21 @@ test "comparison consistency - signed operations" {
     // Test SLT and SGT consistency
     const neg_10 = std.math.maxInt(u256) - 9;
     const neg_5 = std.math.maxInt(u256) - 4;
-    
+
     // Test: -10 < -5 = 1
     try frame.stack.push(neg_10);
     try frame.stack.push(neg_5);
     var dispatch = createMockDispatch();
     _ = try TestFrame.ComparisonHandlers.slt(frame, dispatch);
     const slt_result = try frame.stack.pop();
-    
+
     // Test: -5 > -10 = 1
     try frame.stack.push(neg_5);
     try frame.stack.push(neg_10);
     dispatch = createMockDispatch();
     _ = try TestFrame.ComparisonHandlers.sgt(frame, dispatch);
     const sgt_result = try frame.stack.pop();
-    
+
     try testing.expectEqual(slt_result, sgt_result);
     try testing.expectEqual(@as(u256, 1), slt_result);
 }
@@ -628,12 +628,12 @@ test "EQ and ISZERO relationship" {
     var dispatch = createMockDispatch();
     _ = try TestFrame.ComparisonHandlers.eq(frame, dispatch);
     const eq_result = try frame.stack.pop();
-    
+
     try frame.stack.push(0);
     dispatch = createMockDispatch();
     _ = try TestFrame.ComparisonHandlers.iszero(frame, dispatch);
     const iszero_result = try frame.stack.pop();
-    
+
     try testing.expectEqual(eq_result, iszero_result);
     try testing.expectEqual(@as(u256, 1), eq_result);
 }
