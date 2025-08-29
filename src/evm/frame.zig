@@ -122,9 +122,8 @@ pub fn Frame(comptime config: FrameConfig) type {
         value: *const WordType, // 8B - Call value (pointer)
         contract_address: Address = Address.ZERO_ADDRESS, // 20B - Current contract
         caller: Address, // 20B - Calling address
-        log_items: [*]Log = &[_]Log{}, // 8B - Log array pointer
+        logs: std.ArrayListUnmanaged(Log), // 16B - Log array list (unmanaged)
         evm_ptr: *anyopaque, // 8B - EVM instance pointer
-        // = 64B exactly!
 
         // CACHE LINE 3+ (128+ bytes) - COLD PATH
         output: []u8, // 16B - Output data slice (only for RETURN/REVERT)
@@ -164,7 +163,7 @@ pub fn Frame(comptime config: FrameConfig) type {
                 .value = value,
                 .contract_address = Address.ZERO_ADDRESS,
                 .caller = caller,
-                .log_items = &[_]Log{},
+                .logs = .{},
                 .evm_ptr = evm_ptr,
                 // Cache line 3+
                 .output = &[_]u8{}, // Start with empty output
@@ -177,7 +176,12 @@ pub fn Frame(comptime config: FrameConfig) type {
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
             self.stack.deinit(allocator);
             self.memory.deinit(allocator);
-            self.deinitLogs(allocator);
+            // Free log data
+            for (self.logs.items) |log_entry| {
+                allocator.free(log_entry.topics);
+                allocator.free(log_entry.data);
+            }
+            self.logs.deinit(allocator);
             if (self.output.len > 0) {
                 allocator.free(self.output);
             }
@@ -314,53 +318,46 @@ pub fn Frame(comptime config: FrameConfig) type {
                 try new_memory.set_data(0, bytes);
             }
 
-            const new_log_items: [*]Log = blk: {
-                const items = self.log_items;
-                // Check if we have the default empty array
-                if (@intFromPtr(items) == @intFromPtr(&[_]Log{})) break :blk &[_]Log{};
-                
-                const header = @as(*const LogHeader, @ptrFromInt(@intFromPtr(items) - @sizeOf(LogHeader)));
-                if (header.count == 0) break :blk &[_]Log{};
+            var new_logs = std.ArrayListUnmanaged(Log){};
+            errdefer new_logs.deinit(allocator);
+            
+            for (self.logs.items) |log_entry| {
+                const topics_copy = allocator.alloc(u256, log_entry.topics.len) catch {
+                    // Cleanup any previously allocated logs
+                    for (new_logs.items) |prev_log| {
+                        allocator.free(prev_log.topics);
+                        allocator.free(prev_log.data);
+                    }
+                    return Error.AllocationError;
+                };
+                @memcpy(topics_copy, log_entry.topics);
 
-                const full_size = @sizeOf(LogHeader) + header.capacity * @sizeOf(Log);
-                const new_log_memory = allocator.alloc(u8, full_size) catch return Error.AllocationError;
+                const data_copy = allocator.alloc(u8, log_entry.data.len) catch {
+                    allocator.free(topics_copy);
+                    // Cleanup any previously allocated logs
+                    for (new_logs.items) |prev_log| {
+                        allocator.free(prev_log.topics);
+                        allocator.free(prev_log.data);
+                    }
+                    return Error.AllocationError;
+                };
+                @memcpy(data_copy, log_entry.data);
 
-                const new_header = @as(*LogHeader, @ptrCast(@alignCast(new_log_memory.ptr)));
-                new_header.* = header.*;
-
-                const new_items = @as([*]Log, @ptrCast(@alignCast(new_log_memory.ptr + @sizeOf(LogHeader))));
-
-                for (items[0..header.count], 0..) |log_entry, i| {
-                    const topics_copy = allocator.alloc(u256, log_entry.topics.len) catch {
-                        // Cleanup any previously allocated logs
-                        for (new_items[0..i]) |prev_log| {
-                            allocator.free(prev_log.topics);
-                            allocator.free(prev_log.data);
-                        }
-                        return Error.AllocationError;
-                    };
-                    @memcpy(topics_copy, log_entry.topics);
-
-                    const data_copy = allocator.alloc(u8, log_entry.data.len) catch {
-                        allocator.free(topics_copy);
-                        // Cleanup any previously allocated logs
-                        for (new_items[0..i]) |prev_log| {
-                            allocator.free(prev_log.topics);
-                            allocator.free(prev_log.data);
-                        }
-                        return Error.AllocationError;
-                    };
-                    @memcpy(data_copy, log_entry.data);
-
-                    new_items[i] = Log{
-                        .address = log_entry.address,
-                        .topics = topics_copy,
-                        .data = data_copy,
-                    };
-                }
-
-                break :blk new_items;
-            };
+                new_logs.append(allocator, Log{
+                    .address = log_entry.address,
+                    .topics = topics_copy,
+                    .data = data_copy,
+                }) catch {
+                    allocator.free(topics_copy);
+                    allocator.free(data_copy);
+                    // Cleanup any previously allocated logs
+                    for (new_logs.items) |prev_log| {
+                        allocator.free(prev_log.topics);
+                        allocator.free(prev_log.data);
+                    }
+                    return Error.AllocationError;
+                };
+            }
 
             const new_output = if (self.output.len > 0) blk: {
                 const output_copy = allocator.alloc(u8, self.output.len) catch return Error.AllocationError;
@@ -373,7 +370,7 @@ pub fn Frame(comptime config: FrameConfig) type {
                 .gas_remaining = self.gas_remaining,
                 .memory = new_memory,
                 .database = self.database,
-                .log_items = new_log_items,
+                .logs = new_logs,
                 .evm_ptr = self.evm_ptr,
                 .caller = self.caller,
                 .value = self.value,
@@ -425,90 +422,19 @@ pub fn Frame(comptime config: FrameConfig) type {
             return self.output;
         }
 
-        /// Log array header stored before the actual logs
-        const LogHeader = struct {
-            capacity: u16,
-            count: u16,
-        };
-
-        /// Maximum number of logs that can be stored (u16 limit)
-        pub const MAX_LOGS: u16 = std.math.maxInt(u16);
-
-        /// Clean up log memory
-        pub fn deinitLogs(self: *Self, allocator: std.mem.Allocator) void {
-            const items = self.log_items;
-            
-            // Check if we have the default empty array
-            if (@intFromPtr(items) == @intFromPtr(&[_]Log{})) return;
-
-            const header = @as(*LogHeader, @ptrFromInt(@intFromPtr(items) - @sizeOf(LogHeader)));
-
-            for (items[0..header.count]) |log_entry| {
-                allocator.free(log_entry.topics);
-                allocator.free(log_entry.data);
-            }
-
-            const full_alloc = @as([*]u8, @ptrFromInt(@intFromPtr(header)))[0 .. @sizeOf(LogHeader) + header.capacity * @sizeOf(Log)];
-            allocator.free(full_alloc);
-        }
-
         /// Add a log entry to the list
-        pub fn appendLog(self: *Self, allocator: std.mem.Allocator, log_entry: Log) error{OutOfMemory}!void {
-            // Check if we're starting with the default empty array
-            if (@intFromPtr(self.log_items) == @intFromPtr(&[_]Log{})) {
-                const initial_capacity: u16 = 4;
-                const full_size = @sizeOf(LogHeader) + initial_capacity * @sizeOf(Log);
-                const memory = try allocator.alloc(u8, full_size);
-
-                const header = @as(*LogHeader, @ptrCast(@alignCast(memory.ptr)));
-                header.* = .{ .capacity = initial_capacity, .count = 1 };
-
-                const items = @as([*]Log, @ptrCast(@alignCast(memory.ptr + @sizeOf(LogHeader))));
-                items[0] = log_entry;
-
-                self.log_items = items;
-            } else {
-                const items = self.log_items;
-                const header = @as(*LogHeader, @ptrFromInt(@intFromPtr(items) - @sizeOf(LogHeader)));
-
-                if (header.count >= header.capacity) {
-                    const new_capacity = header.capacity * 2;
-                    const new_size = @sizeOf(LogHeader) + new_capacity * @sizeOf(Log);
-                    const new_memory = try allocator.alloc(u8, new_size);
-
-                    const new_header = @as(*LogHeader, @ptrCast(@alignCast(new_memory.ptr)));
-                    new_header.* = .{ .capacity = new_capacity, .count = header.count + 1 };
-
-                    const new_items = @as([*]Log, @ptrCast(@alignCast(new_memory.ptr + @sizeOf(LogHeader))));
-                    @memcpy(new_items[0..header.count], items[0..header.count]);
-                    new_items[header.count] = log_entry;
-
-                    const old_size = @sizeOf(LogHeader) + header.capacity * @sizeOf(Log);
-                    const old_memory = @as([*]u8, @ptrFromInt(@intFromPtr(header)))[0..old_size];
-                    allocator.free(old_memory);
-
-                    self.log_items = new_items;
-                } else {
-                    items[header.count] = log_entry;
-                    header.count += 1;
-                }
-            }
+        pub fn appendLog(self: *Self, log_entry: Log) error{OutOfMemory}!void {
+            try self.logs.append(self.allocator, log_entry);
         }
 
         /// Get slice of current log entries
         pub fn getLogSlice(self: *const Self) []const Log {
-            const items = self.log_items;
-            if (@intFromPtr(items) == @intFromPtr(&[_]Log{})) return &[_]Log{};
-            const header = @as(*const LogHeader, @ptrFromInt(@intFromPtr(items) - @sizeOf(LogHeader)));
-            return items[0..header.count];
+            return self.logs.items;
         }
 
         /// Get number of logs
-        pub fn getLogCount(self: *const Self) u16 {
-            const items = self.log_items;
-            if (@intFromPtr(items) == @intFromPtr(&[_]Log{})) return 0;
-            const header = @as(*const LogHeader, @ptrFromInt(@intFromPtr(items) - @sizeOf(LogHeader)));
-            return header.count;
+        pub fn getLogCount(self: *const Self) usize {
+            return self.logs.items.len;
         }
     };
 }
