@@ -22,7 +22,7 @@ pub fn Handlers(comptime FrameType: type) type {
                 return Error.InvalidJump;
             }
             
-            const dest_pc: u16 = @intCast(dest);
+            const dest_pc: FrameType.PcType = @intCast(dest);
             
             // Look up the destination in the jump table
             if (dispatch.findJumpTarget(dest_pc)) |jump_dispatch| {
@@ -47,7 +47,7 @@ pub fn Handlers(comptime FrameType: type) type {
                     return Error.InvalidJump;
                 }
                 
-                const dest_pc: u16 = @intCast(dest);
+                const dest_pc: FrameType.PcType = @intCast(dest);
                 
                 // Look up the destination in the jump table
                 if (dispatch.findJumpTarget(dest_pc)) |jump_dispatch| {
@@ -76,7 +76,7 @@ pub fn Handlers(comptime FrameType: type) type {
             if (self.gas_remaining < gas_cost) {
                 return Error.OutOfGas;
             }
-            self.gas_remaining -= @as(i32, @intCast(gas_cost));
+            self.gas_remaining -= @as(FrameType.GasType, @intCast(gas_cost));
             
             // Continue to next operation
             const next = dispatch.skipMetadata();
@@ -111,8 +111,7 @@ const test_config = FrameConfig{
     .WordType = u256,
     .max_bytecode_size = 1024,
     .block_gas_limit = 30_000_000,
-    .has_database = false,
-    .TracerType = NoOpTracer,
+    .DatabaseType = @TypeOf(null),
     .memory_initial_capacity = 4096,
     .memory_limit = 0xFFFFFF,
 };

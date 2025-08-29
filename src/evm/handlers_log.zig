@@ -83,7 +83,7 @@ pub fn Handlers(comptime FrameType: type) type {
                         .topics = topics_array,
                         .data = data_copy,
                     };
-                    self.appendLog(allocator, log_entry) catch return Error.AllocationError;
+                    self.appendLog(log_entry) catch return Error.AllocationError;
                     
                     const next = dispatch.getNext();
                     return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });

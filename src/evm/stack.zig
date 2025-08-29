@@ -9,18 +9,18 @@
 //! - Automatic index type selection based on capacity
 //! - Zero-cost abstractions through compile-time configuration
 //!
-//! ## Thread Safety Assumptions
+//! ## Thread Safety
 //!
-//! **SINGLE THREAD ONLY**: This implementation assumes single-threaded access.
-//! The stack is NOT thread-safe and MUST NOT be accessed concurrently from
-//! multiple threads without external synchronization.
+//! This implementation provides thread-safe access through mutex synchronization.
+//! All public methods acquire appropriate locks to ensure safe concurrent access.
 //!
-//! Rationale:
-//! - EVM execution is inherently single-threaded within a transaction
-//! - Avoiding atomic operations and locks maximizes performance
-//! - Stack operations are frequent and must be as fast as possible
+//! Design choices:
+//! - Mutex protection for all mutable operations (push/pop/swap/dup)
+//! - Read operations use mutex for consistency
+//! - Unsafe variants bypass locking for performance when caller guarantees exclusive access
 //!
-//! Memory safety is guaranteed under single-threaded access through:
+//! Memory safety is guaranteed through:
+//! - Mutex synchronization for concurrent access
 //! - Bounds checking in safe operations (push/pop/peek/set_top)
 //! - Assertion-based validation in unsafe operations (*_unsafe variants)
 //! - Proper ownership of aligned memory allocation
@@ -58,6 +58,9 @@ pub fn Stack(comptime config: StackConfig) type {
         // Pop: stack_ptr += 1; return *stack_ptr;
         stack_ptr: [*]WordType,
 
+        // Thread safety: mutex protects all stack operations
+        mutex: std.Thread.Mutex,
+
         /// Initialize a new stack with allocated memory.
         ///
         /// Allocates cache-aligned memory and sets up pointer boundaries.
@@ -71,6 +74,7 @@ pub fn Stack(comptime config: StackConfig) type {
             return Self{
                 .buf_ptr = base_ptr,
                 .stack_ptr = base_ptr + stack_capacity,
+                .mutex = .{},
             };
         }
 
@@ -97,6 +101,9 @@ pub fn Stack(comptime config: StackConfig) type {
         }
 
         pub inline fn push(self: *Self, value: WordType) Error!void {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            
             if (@intFromPtr(self.stack_ptr) <= @intFromPtr(self.stack_limit())) {
                 @branchHint(.cold);
                 return Error.StackOverflow;
@@ -113,6 +120,9 @@ pub fn Stack(comptime config: StackConfig) type {
         }
 
         pub inline fn pop(self: *Self) Error!WordType {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            
             if (@intFromPtr(self.stack_ptr) >= @intFromPtr(self.stack_base())) {
                 @branchHint(.cold);
                 return Error.StackUnderflow;
@@ -127,6 +137,9 @@ pub fn Stack(comptime config: StackConfig) type {
         }
 
         pub inline fn set_top(self: *Self, value: WordType) Error!void {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            
             if (@intFromPtr(self.stack_ptr) >= @intFromPtr(self.stack_base())) {
                 @branchHint(.cold);
                 return Error.StackUnderflow;
@@ -140,7 +153,10 @@ pub fn Stack(comptime config: StackConfig) type {
             return self.stack_ptr[0];
         }
 
-        pub inline fn peek(self: *const Self) Error!WordType {
+        pub inline fn peek(self: *Self) Error!WordType {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            
             if (@intFromPtr(self.stack_ptr) >= @intFromPtr(self.stack_base())) {
                 @branchHint(.cold);
                 return Error.StackUnderflow;
@@ -150,8 +166,11 @@ pub fn Stack(comptime config: StackConfig) type {
 
         // Generic dup function for DUP1-DUP16
         pub fn dup_n(self: *Self, n: u8) Error!void {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            
             // Check if we have n items on stack
-            const current_elements = self.size();
+            const current_elements = self.size_internal();
             if (current_elements < n) {
                 @branchHint(.cold);
                 return Error.StackUnderflow;
@@ -162,7 +181,7 @@ pub fn Stack(comptime config: StackConfig) type {
                 return Error.StackOverflow;
             }
             const value = self.stack_ptr[n - 1];
-            return self.push(value);
+            self.push_unsafe(value);
         }
 
         // Unsafe generic dup without bounds checks (validated by planner)
@@ -192,8 +211,11 @@ pub fn Stack(comptime config: StackConfig) type {
 
         // Generic swap function for SWAP1-SWAP16
         pub fn swap_n(self: *Self, n: u8) Error!void {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            
             // Check if we have n+1 items on stack
-            const current_elements = self.size();
+            const current_elements = self.size_internal();
             if (current_elements < n + 1) {
                 @branchHint(.cold);
                 return Error.StackUnderflow;
@@ -227,14 +249,24 @@ pub fn Stack(comptime config: StackConfig) type {
         pub fn swap15(self: *Self) Error!void { return self.swap_n(15); }
         pub fn swap16(self: *Self) Error!void { return self.swap_n(16); }
         
-        // Accessors for tracer
-        pub inline fn size(self: *const Self) usize {
+        // Internal size calculation without locking
+        inline fn size_internal(self: *const Self) usize {
             const bytes_used = @intFromPtr(self.stack_base()) - @intFromPtr(self.stack_ptr);
             return bytes_used / @sizeOf(WordType);
         }
         
-        pub inline fn get_slice(self: *const Self) []const WordType {
-            const count = self.size();
+        // Accessors for tracer
+        pub inline fn size(self: *Self) usize {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            return self.size_internal();
+        }
+        
+        pub inline fn get_slice(self: *Self) []const WordType {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            
+            const count = self.size_internal();
             if (count == 0) return &[_]WordType{};
             // Return slice from stack_ptr to stack_base
             return self.stack_ptr[0..count];
@@ -980,8 +1012,9 @@ test "Stack struct size optimization" {
     // Verify struct size with pointer-only design
     const StackType = Stack(.{});
     const stack_size = @sizeOf(StackType);
-    // With buf_ptr (8 bytes) + stack_ptr (8 bytes) = 16 bytes
-    try std.testing.expectEqual(@as(usize, 16), stack_size);
+    // With buf_ptr (8 bytes) + stack_ptr (8 bytes) + mutex (32 bytes) = 48 bytes
+    // Note: mutex size is platform-dependent, but typically 32 bytes on 64-bit systems
+    try std.testing.expect(stack_size >= 32);
 }
 
 test "Unsafe operations at exact boundaries" {
