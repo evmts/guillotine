@@ -21,7 +21,7 @@ pub fn Handlers(comptime FrameType: type) type {
             try self.stack.push(result);
 
             const next = dispatch.skipMetadata();
-            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// PUSH_AND_POINTER - Fused PUSH+AND with pointer value (>8 bytes).
@@ -34,7 +34,7 @@ pub fn Handlers(comptime FrameType: type) type {
             try self.stack.push(result);
 
             const next = dispatch.skipMetadata();
-            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// PUSH_OR_INLINE - Fused PUSH+OR with inline value (≤8 bytes).
@@ -47,7 +47,7 @@ pub fn Handlers(comptime FrameType: type) type {
             try self.stack.push(result);
 
             const next = dispatch.skipMetadata();
-            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// PUSH_OR_POINTER - Fused PUSH+OR with pointer value (>8 bytes).
@@ -60,7 +60,7 @@ pub fn Handlers(comptime FrameType: type) type {
             try self.stack.push(result);
 
             const next = dispatch.skipMetadata();
-            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// PUSH_XOR_INLINE - Fused PUSH+XOR with inline value (≤8 bytes).
@@ -73,7 +73,7 @@ pub fn Handlers(comptime FrameType: type) type {
             try self.stack.push(result);
 
             const next = dispatch.skipMetadata();
-            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// PUSH_XOR_POINTER - Fused PUSH+XOR with pointer value (>8 bytes).
@@ -86,7 +86,7 @@ pub fn Handlers(comptime FrameType: type) type {
             try self.stack.push(result);
 
             const next = dispatch.skipMetadata();
-            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
         }
     };
 }
@@ -128,13 +128,13 @@ fn createInlineDispatch(value: u256) TestFrame.Dispatch {
             return TestFrame.Success.stop;
         }
     }.handler;
-    
+
     var cursor: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
     cursor[0] = .{ .opcode_handler = &mock_handler };
     cursor[1] = .{ .opcode_handler = &mock_handler };
-    
+
     cursor[0].metadata = .{ .inline_value = value };
-    
+
     return TestFrame.Dispatch{
         .cursor = &cursor,
         .bytecode_length = 0,
@@ -150,13 +150,13 @@ fn createPointerDispatch(value: *const u256) TestFrame.Dispatch {
             return TestFrame.Success.stop;
         }
     }.handler;
-    
+
     var cursor: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
     cursor[0] = .{ .opcode_handler = &mock_handler };
     cursor[1] = .{ .opcode_handler = &mock_handler };
-    
+
     cursor[0].metadata = .{ .pointer_value = value };
-    
+
     return TestFrame.Dispatch{
         .cursor = &cursor,
         .bytecode_length = 0,
@@ -169,10 +169,10 @@ test "PUSH_AND_INLINE - basic AND operation" {
 
     // Stack: [0xFF], then PUSH 0xF0 & AND = 0xF0
     try frame.stack.push(0xFF);
-    
+
     const dispatch = createInlineDispatch(0xF0);
     _ = try TestFrame.BitwiseSyntheticHandlers.push_and_inline(frame, dispatch);
-    
+
     try testing.expectEqual(@as(u256, 0xF0), try frame.stack.pop());
 }
 
@@ -182,10 +182,10 @@ test "PUSH_AND_POINTER - large value AND" {
 
     const mask = @as(u256, 0xFFFFFFFFFFFFFFFF) << 192; // High 64 bits set
     try frame.stack.push(std.math.maxInt(u256));
-    
+
     const dispatch = createPointerDispatch(&mask);
     _ = try TestFrame.BitwiseSyntheticHandlers.push_and_pointer(frame, dispatch);
-    
+
     try testing.expectEqual(mask, try frame.stack.pop());
 }
 
@@ -195,10 +195,10 @@ test "PUSH_OR_INLINE - basic OR operation" {
 
     // Stack: [0xF0], then PUSH 0x0F | OR = 0xFF
     try frame.stack.push(0xF0);
-    
+
     const dispatch = createInlineDispatch(0x0F);
     _ = try TestFrame.BitwiseSyntheticHandlers.push_or_inline(frame, dispatch);
-    
+
     try testing.expectEqual(@as(u256, 0xFF), try frame.stack.pop());
 }
 
@@ -208,10 +208,10 @@ test "PUSH_XOR_INLINE - basic XOR operation" {
 
     // Stack: [0xFF], then PUSH 0xAA ^ XOR = 0x55
     try frame.stack.push(0xFF);
-    
+
     const dispatch = createInlineDispatch(0xAA);
     _ = try TestFrame.BitwiseSyntheticHandlers.push_xor_inline(frame, dispatch);
-    
+
     try testing.expectEqual(@as(u256, 0x55), try frame.stack.pop());
 }
 
@@ -224,13 +224,13 @@ test "synthetic bitwise - all operations" {
     var dispatch = createInlineDispatch(0xFFFF0000);
     _ = try TestFrame.BitwiseSyntheticHandlers.push_and_inline(frame, dispatch);
     try testing.expectEqual(@as(u256, 0xDEAD0000), try frame.stack.pop());
-    
+
     // Test setting bits with OR
     try frame.stack.push(0x1000);
     dispatch = createInlineDispatch(0x0111);
     _ = try TestFrame.BitwiseSyntheticHandlers.push_or_inline(frame, dispatch);
     try testing.expectEqual(@as(u256, 0x1111), try frame.stack.pop());
-    
+
     // Test toggling with XOR
     try frame.stack.push(0b1010);
     dispatch = createInlineDispatch(0b1100);
@@ -248,8 +248,8 @@ test "synthetic bitwise - pointer variants" {
     var dispatch = createPointerDispatch(&or_value);
     _ = try TestFrame.BitwiseSyntheticHandlers.push_or_pointer(frame, dispatch);
     try testing.expectEqual(42 | or_value, try frame.stack.pop());
-    
-    // Test PUSH_XOR_POINTER  
+
+    // Test PUSH_XOR_POINTER
     const xor_value = std.math.maxInt(u256); // All bits set
     try frame.stack.push(0x123456789ABCDEF0);
     dispatch = createPointerDispatch(&xor_value);
