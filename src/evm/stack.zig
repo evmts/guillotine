@@ -186,6 +186,8 @@ pub fn Stack(comptime config: StackConfig) type {
 
         // Unsafe generic dup without bounds checks (validated by planner)
         pub inline fn dup_n_unsafe(self: *Self, n: u8) void {
+            std.debug.assert(self.size_internal() >= n);
+            std.debug.assert(@intFromPtr(self.stack_ptr) > @intFromPtr(self.stack_limit()));
             // In downward stack, nth-from-top is at index n-1
             const value = self.stack_ptr[n - 1];
             self.push_unsafe(value);
@@ -226,6 +228,7 @@ pub fn Stack(comptime config: StackConfig) type {
 
         // Unsafe generic swap without bounds checks (validated by planner)
         pub inline fn swap_n_unsafe(self: *Self, n: u8) void {
+            std.debug.assert(self.size_internal() >= n + 1);
             const tmp = self.stack_ptr[0];
             self.stack_ptr[0] = self.stack_ptr[n];
             self.stack_ptr[n] = tmp;

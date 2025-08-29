@@ -829,66 +829,8 @@ pub fn Dispatch(comptime FrameType: type) type {
 
             try builder.buildFromSchedule(schedule, bytecode);
             
-            var jump_table = try builder.finalize();
-            errdefer allocator.free(jump_table.entries);
-
-            // Update dispatch pointers to point into actual schedule
-            for (jump_table.entries) |*entry| {
-                // Find the corresponding schedule index from the builder
-                // In the new pattern, we stored schedule_index during building
-                // Here we need to reconstruct the pointer
-                var iter = bytecode.createIterator();
-                var schedule_index: usize = 0;
-
-                // Skip first_block_gas if present
-                if (schedule.len > 0) {
-                    switch (schedule[0]) {
-                        .first_block_gas => schedule_index = 1,
-                        else => {},
-                    }
-                }
-
-                // Find the matching PC to get correct schedule index
-                while (true) {
-                    const instr_pc = iter.pc;
-                    const maybe = iter.next();
-                    if (maybe == null) break;
-                    
-                    if (instr_pc == entry.pc) {
-                        entry.dispatch = Self{
-                            .cursor = schedule.ptr + schedule_index,
-                            .jump_table = null,
-                        };
-                        break;
-                    }
-
-                    const op_data = maybe.?;
-                    switch (op_data) {
-                        .jumpdest => {
-                            schedule_index += 2;
-                        },
-                        .regular => |data| {
-                            schedule_index += 1;
-                            if (data.opcode == @intFromEnum(Opcode.PC) or
-                                data.opcode == @intFromEnum(Opcode.CODESIZE) or
-                                data.opcode == @intFromEnum(Opcode.CODECOPY))
-                            {
-                                schedule_index += 1;
-                            }
-                        },
-                        .push => {
-                            schedule_index += 2;
-                        },
-                        .push_add_fusion, .push_mul_fusion, .push_sub_fusion, .push_div_fusion,
-                        .push_and_fusion, .push_or_fusion, .push_xor_fusion, .push_jump_fusion, .push_jumpi_fusion => {
-                            schedule_index += 2;
-                        },
-                        .stop, .invalid => {
-                            schedule_index += 1;
-                        },
-                    }
-                }
-            }
+            // Use finalizeWithSchedule to set dispatch pointers correctly
+            const jump_table = try builder.finalizeWithSchedule(schedule);
 
             // Validate sorting (debug builds only)
             if (std.debug.runtime_safety and jump_table.entries.len > 1) {
@@ -1108,37 +1050,59 @@ pub fn Dispatch(comptime FrameType: type) type {
             }
 
             pub fn finalize(self: *JumpTableBuilder) !JumpTable {
-                const entries = try self.entries.toOwnedSlice(self.allocator);
+                const builder_entries = try self.entries.toOwnedSlice(self.allocator);
+                defer self.allocator.free(builder_entries);
                 
-                // Sort entries by PC
-                std.sort.block(JumpTableEntry, entries, {}, struct {
-                    pub fn lessThan(context: void, a: JumpTableEntry, b: JumpTableEntry) bool {
+                // Sort builder entries by PC
+                std.sort.block(BuilderEntry, builder_entries, {}, struct {
+                    pub fn lessThan(context: void, a: BuilderEntry, b: BuilderEntry) bool {
                         _ = context;
                         return a.pc < b.pc;
                     }
                 }.lessThan);
+
+                // Convert to JumpTableEntry array
+                const entries = try self.allocator.alloc(JumpTableEntry, builder_entries.len);
+                errdefer self.allocator.free(entries);
+                
+                for (builder_entries, entries) |builder_entry, *entry| {
+                    entry.* = .{
+                        .pc = builder_entry.pc,
+                        .dispatch = Self{
+                            .cursor = undefined, // Must be set by caller
+                            .jump_table = null,
+                        },
+                    };
+                }
 
                 return JumpTable{ .entries = entries };
             }
 
             pub fn finalizeWithSchedule(self: *JumpTableBuilder, schedule: []const Item) !JumpTable {
-                const entries = try self.entries.toOwnedSlice(self.allocator);
+                const builder_entries = try self.entries.toOwnedSlice(self.allocator);
+                defer self.allocator.free(builder_entries);
                 
-                // Update dispatch pointers to point into schedule
-                for (entries) |*entry| {
-                    if (entry.dispatch.cursor == undefined) {
-                        // This is simplified - would need actual mapping
-                        entry.dispatch.cursor = schedule.ptr;
-                    }
-                }
-                
-                // Sort entries by PC
-                std.sort.block(JumpTableEntry, entries, {}, struct {
-                    pub fn lessThan(context: void, a: JumpTableEntry, b: JumpTableEntry) bool {
+                // Sort builder entries by PC
+                std.sort.block(BuilderEntry, builder_entries, {}, struct {
+                    pub fn lessThan(context: void, a: BuilderEntry, b: BuilderEntry) bool {
                         _ = context;
                         return a.pc < b.pc;
                     }
                 }.lessThan);
+                
+                // Convert to JumpTableEntry array with proper dispatch pointers
+                const entries = try self.allocator.alloc(JumpTableEntry, builder_entries.len);
+                errdefer self.allocator.free(entries);
+                
+                for (builder_entries, entries) |builder_entry, *entry| {
+                    entry.* = .{
+                        .pc = builder_entry.pc,
+                        .dispatch = Self{
+                            .cursor = schedule.ptr + builder_entry.schedule_index,
+                            .jump_table = null,
+                        },
+                    };
+                }
 
                 return JumpTable{ .entries = entries };
             }
