@@ -146,7 +146,7 @@ pub fn Handlers(comptime FrameType: type) type {
             return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }
 
-        /// Safe modular multiplication that prevents overflow using Russian peasant algorithm.
+        /// Safe modular multiplication using double-width arithmetic to prevent overflow.
         fn mulmod_safe(a: WordType, b: WordType, n: WordType) WordType {
             if (n == 0) return 0;
             if (a == 0 or b == 0) return 0;
@@ -156,19 +156,31 @@ pub fn Handlers(comptime FrameType: type) type {
             const a_mod = a % n;
             const b_mod = b % n;
             
-            // Use binary exponentiation approach for modular multiplication
+            // Use double-width arithmetic to prevent overflow
+            if (WordType == u256) {
+                const wide_a = @as(u512, a_mod);
+                const wide_b = @as(u512, b_mod);
+                const wide_n = @as(u512, n);
+                const wide_product = (wide_a * wide_b) % wide_n;
+                return @intCast(wide_product);
+            } else {
+                // For other word types, fall back to addition-based approach
+                return mulmod_by_addition(a_mod, b_mod, n);
+            }
+        }
+
+        /// Fallback modular multiplication using repeated addition for non-u256 types.
+        fn mulmod_by_addition(a: WordType, b: WordType, n: WordType) WordType {
             var result: WordType = 0;
-            var base = a_mod;
-            var multiplier = b_mod;
+            var base = a % n;
+            var multiplier = b % n;
             
             while (multiplier > 0) {
                 if (multiplier & 1 == 1) {
-                    // result = (result + base) % n, avoiding overflow
                     result = addmod_safe(result, base, n);
                 }
                 multiplier >>= 1;
                 if (multiplier > 0) {
-                    // base = (base * 2) % n, avoiding overflow
                     base = addmod_safe(base, base, n);
                 }
             }
