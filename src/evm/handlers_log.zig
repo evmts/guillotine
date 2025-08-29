@@ -29,40 +29,40 @@ pub fn Handlers(comptime FrameType: type) type {
                     while (i > 0) : (i -= 1) {
                         topics[i - 1] = try self.stack.pop();
                     }
-                    
+
                     const length = try self.stack.pop();
                     const offset = try self.stack.pop();
-                    
+
                     // Check bounds
                     if (offset > std.math.maxInt(usize) or length > std.math.maxInt(usize)) {
                         return Error.OutOfBounds;
                     }
-                    
+
                     const offset_usize = @as(usize, @intCast(offset));
                     const length_usize = @as(usize, @intCast(length));
-                    
+
                     // Note: Gas calculation is handled by the planner/interpreter layer
                     // The handler just performs the operation
-                    
+
                     // Ensure memory capacity
                     if (length_usize > 0) {
                         const memory_end = offset_usize + length_usize;
                         self.memory.ensure_capacity(self.allocator, @as(u24, @intCast(memory_end))) catch return Error.OutOfBounds;
                     }
-                    
+
                     // Get data from memory
-                    const data = if (length_usize > 0) 
+                    const data = if (length_usize > 0)
                         self.memory.get_slice(@as(u24, @intCast(offset_usize)), @as(u24, @intCast(length_usize))) catch return Error.OutOfBounds
-                    else 
+                    else
                         &[_]u8{};
-                    
+
                     // Create log entry
                     const allocator = self.allocator;
                     const data_copy = if (data.len > 0)
                         allocator.dupe(u8, data) catch return Error.AllocationError
                     else
                         &[_]u8{};
-                    
+
                     const topics_array = if (topic_count > 0) blk: {
                         const arr = allocator.alloc(u256, topic_count) catch {
                             if (data.len > 0) allocator.free(data_copy);
@@ -76,7 +76,7 @@ pub fn Handlers(comptime FrameType: type) type {
                         if (data.len > 0) allocator.free(data_copy);
                         return Error.AllocationError;
                     };
-                    
+
                     // Add log to frame's log list
                     const log_entry = Log{
                         .address = self.contract_address,
@@ -84,9 +84,9 @@ pub fn Handlers(comptime FrameType: type) type {
                         .data = data_copy,
                     };
                     self.appendLog(log_entry) catch return Error.AllocationError;
-                    
+
                     const next = dispatch.getNext();
-                    return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+                    return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
                 }
             }.logHandler;
         }
@@ -161,7 +161,6 @@ const MockHost = struct {
     pub fn emit_log(self: *MockHost, log_entry: Log) !void {
         try self.logs.append(log_entry);
     }
-
 };
 
 fn createTestFrame(allocator: std.mem.Allocator, evm: ?*MockHost) !TestFrame {
@@ -179,10 +178,10 @@ fn createMockDispatch() TestFrame.Dispatch {
             return TestFrame.Success.stop;
         }
     }.handler;
-    
+
     var cursor: [1]dispatch_mod.ScheduleElement(TestFrame) = undefined;
     cursor[0] = .{ .opcode_handler = &mock_handler };
-    
+
     return TestFrame.Dispatch{
         .cursor = &cursor,
         .bytecode_length = 0,
@@ -192,7 +191,7 @@ fn createMockDispatch() TestFrame.Dispatch {
 test "LOG0 opcode - empty data" {
     var mock_host = MockHost.init(testing.allocator);
     defer mock_host.deinit();
-    
+
     const host = mock_host.to_host();
     const test_address = Address.fromBytes([_]u8{0x12} ++ [_]u8{0} ** 19) catch unreachable;
     var frame = try createTestFrame(testing.allocator, host);
@@ -205,7 +204,7 @@ test "LOG0 opcode - empty data" {
 
     const dispatch = createMockDispatch();
     _ = try TestFrame.LogHandlers.log0(frame, dispatch);
-    
+
     try testing.expectEqual(@as(usize, 1), mock_host.logs.items.len);
     const log_entry = mock_host.logs.items[0];
     try testing.expect(log_entry.address.eql(test_address));
@@ -216,7 +215,7 @@ test "LOG0 opcode - empty data" {
 test "LOG0 opcode - with data" {
     var mock_host = MockHost.init(testing.allocator);
     defer mock_host.deinit();
-    
+
     const host = mock_host.to_host();
     const test_address = Address.fromBytes([_]u8{0x34} ++ [_]u8{0} ** 19) catch unreachable;
     var frame = try createTestFrame(testing.allocator, host);
@@ -233,7 +232,7 @@ test "LOG0 opcode - with data" {
 
     const dispatch = createMockDispatch();
     _ = try TestFrame.LogHandlers.log0(frame, dispatch);
-    
+
     try testing.expectEqual(@as(usize, 1), mock_host.logs.items.len);
     const log_entry = mock_host.logs.items[0];
     try testing.expect(log_entry.address.eql(test_address));
@@ -244,7 +243,7 @@ test "LOG0 opcode - with data" {
 test "LOG1 opcode - with topic" {
     var mock_host = MockHost.init(testing.allocator);
     defer mock_host.deinit();
-    
+
     const host = mock_host.to_host();
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);
@@ -254,13 +253,13 @@ test "LOG1 opcode - with topic" {
     try frame.memory.set_data(testing.allocator, 0, &test_data);
 
     // LOG1 with one topic
-    try frame.stack.push(0);     // offset
-    try frame.stack.push(2);     // length
+    try frame.stack.push(0); // offset
+    try frame.stack.push(2); // length
     try frame.stack.push(0x1234); // topic1
 
     const dispatch = createMockDispatch();
     _ = try TestFrame.LogHandlers.log1(frame, dispatch);
-    
+
     try testing.expectEqual(@as(usize, 1), mock_host.logs.items.len);
     const log_entry = mock_host.logs.items[0];
     try testing.expectEqual(@as(usize, 1), log_entry.topics.len);
@@ -271,20 +270,20 @@ test "LOG1 opcode - with topic" {
 test "LOG2 opcode - with two topics" {
     var mock_host = MockHost.init(testing.allocator);
     defer mock_host.deinit();
-    
+
     const host = mock_host.to_host();
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);
 
     // LOG2 with two topics
-    try frame.stack.push(0);      // offset
-    try frame.stack.push(0);      // length (empty data)
+    try frame.stack.push(0); // offset
+    try frame.stack.push(0); // length (empty data)
     try frame.stack.push(0xAAAA); // topic1
     try frame.stack.push(0xBBBB); // topic2
 
     const dispatch = createMockDispatch();
     _ = try TestFrame.LogHandlers.log2(frame, dispatch);
-    
+
     try testing.expectEqual(@as(usize, 1), mock_host.logs.items.len);
     const log_entry = mock_host.logs.items[0];
     try testing.expectEqual(@as(usize, 2), log_entry.topics.len);
@@ -295,21 +294,21 @@ test "LOG2 opcode - with two topics" {
 test "LOG3 opcode - with three topics" {
     var mock_host = MockHost.init(testing.allocator);
     defer mock_host.deinit();
-    
+
     const host = mock_host.to_host();
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);
 
     // LOG3 with three topics
-    try frame.stack.push(0);      // offset
-    try frame.stack.push(0);      // length
+    try frame.stack.push(0); // offset
+    try frame.stack.push(0); // length
     try frame.stack.push(0x1111); // topic1
     try frame.stack.push(0x2222); // topic2
     try frame.stack.push(0x3333); // topic3
 
     const dispatch = createMockDispatch();
     _ = try TestFrame.LogHandlers.log3(frame, dispatch);
-    
+
     try testing.expectEqual(@as(usize, 1), mock_host.logs.items.len);
     const log_entry = mock_host.logs.items[0];
     try testing.expectEqual(@as(usize, 3), log_entry.topics.len);
@@ -321,14 +320,14 @@ test "LOG3 opcode - with three topics" {
 test "LOG4 opcode - with four topics" {
     var mock_host = MockHost.init(testing.allocator);
     defer mock_host.deinit();
-    
+
     const host = mock_host.to_host();
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);
 
     // LOG4 with four topics
-    try frame.stack.push(0);      // offset
-    try frame.stack.push(0);      // length
+    try frame.stack.push(0); // offset
+    try frame.stack.push(0); // length
     try frame.stack.push(0xAAAA); // topic1
     try frame.stack.push(0xBBBB); // topic2
     try frame.stack.push(0xCCCC); // topic3
@@ -336,7 +335,7 @@ test "LOG4 opcode - with four topics" {
 
     const dispatch = createMockDispatch();
     _ = try TestFrame.LogHandlers.log4(frame, dispatch);
-    
+
     try testing.expectEqual(@as(usize, 1), mock_host.logs.items.len);
     const log_entry = mock_host.logs.items[0];
     try testing.expectEqual(@as(usize, 4), log_entry.topics.len);
@@ -350,7 +349,7 @@ test "LOG opcodes - static context error" {
     var mock_host = MockHost.init(testing.allocator);
     defer mock_host.deinit();
     mock_host.is_static = true;
-    
+
     const host = mock_host.to_host();
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);
@@ -361,7 +360,7 @@ test "LOG opcodes - static context error" {
 
     const dispatch = createMockDispatch();
     const result = TestFrame.LogHandlers.log0(frame, dispatch);
-    
+
     try testing.expectError(TestFrame.Error.WriteProtection, result);
     try testing.expectEqual(@as(usize, 0), mock_host.logs.items.len);
 }
@@ -369,7 +368,7 @@ test "LOG opcodes - static context error" {
 test "LOG opcodes - out of bounds" {
     var mock_host = MockHost.init(testing.allocator);
     defer mock_host.deinit();
-    
+
     const host = mock_host.to_host();
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);
@@ -377,18 +376,18 @@ test "LOG opcodes - out of bounds" {
     // Try LOG0 with out of bounds offset
     const huge_offset = std.math.maxInt(u256);
     try frame.stack.push(huge_offset); // offset
-    try frame.stack.push(10);          // length
+    try frame.stack.push(10); // length
 
     const dispatch = createMockDispatch();
     const result = TestFrame.LogHandlers.log0(frame, dispatch);
-    
+
     try testing.expectError(TestFrame.Error.OutOfBounds, result);
 }
 
 test "LOG opcodes - large data" {
     var mock_host = MockHost.init(testing.allocator);
     defer mock_host.deinit();
-    
+
     const host = mock_host.to_host();
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);
@@ -401,13 +400,13 @@ test "LOG opcodes - large data" {
     try frame.memory.set_data(testing.allocator, 0, &large_data);
 
     // LOG1 with large data
-    try frame.stack.push(0);           // offset
-    try frame.stack.push(256);         // length
-    try frame.stack.push(0x12345678);  // topic
+    try frame.stack.push(0); // offset
+    try frame.stack.push(256); // length
+    try frame.stack.push(0x12345678); // topic
 
     const dispatch = createMockDispatch();
     _ = try TestFrame.LogHandlers.log1(frame, dispatch);
-    
+
     try testing.expectEqual(@as(usize, 1), mock_host.logs.items.len);
     const log_entry = mock_host.logs.items[0];
     try testing.expectEqualSlices(u8, &large_data, log_entry.data);
@@ -418,7 +417,7 @@ test "LOG opcodes - large data" {
 test "LOG opcodes - boundary value topics" {
     var mock_host = MockHost.init(testing.allocator);
     defer mock_host.deinit();
-    
+
     const host = mock_host.to_host();
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);
@@ -431,7 +430,7 @@ test "LOG opcodes - boundary value topics" {
 
     const dispatch = createMockDispatch();
     _ = try TestFrame.LogHandlers.log2(frame, dispatch);
-    
+
     try testing.expectEqual(@as(usize, 1), mock_host.logs.items.len);
     const log_entry = mock_host.logs.items[0];
     try testing.expectEqual(@as(u256, 0), log_entry.topics[0]);
@@ -441,7 +440,7 @@ test "LOG opcodes - boundary value topics" {
 test "LOG opcodes - all topics patterns" {
     var mock_host = MockHost.init(testing.allocator);
     defer mock_host.deinit();
-    
+
     const host = mock_host.to_host();
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);
@@ -449,14 +448,14 @@ test "LOG opcodes - all topics patterns" {
     // Test LOG4 with various topic patterns
     try frame.stack.push(0); // offset
     try frame.stack.push(0); // length
-    try frame.stack.push(0xFF);                        // topic1 - small value
-    try frame.stack.push(0x8000000000000000);         // topic2 - high bit set
-    try frame.stack.push((1 << 128) - 1);             // topic3 - max 128-bit
-    try frame.stack.push(std.math.maxInt(u256) - 1);  // topic4 - almost max
+    try frame.stack.push(0xFF); // topic1 - small value
+    try frame.stack.push(0x8000000000000000); // topic2 - high bit set
+    try frame.stack.push((1 << 128) - 1); // topic3 - max 128-bit
+    try frame.stack.push(std.math.maxInt(u256) - 1); // topic4 - almost max
 
     const dispatch = createMockDispatch();
     _ = try TestFrame.LogHandlers.log4(frame, dispatch);
-    
+
     const log_entry = mock_host.logs.items[0];
     try testing.expectEqual(@as(u256, 0xFF), log_entry.topics[0]);
     try testing.expectEqual(@as(u256, 0x8000000000000000), log_entry.topics[1]);
@@ -467,51 +466,51 @@ test "LOG opcodes - all topics patterns" {
 test "LOG opcodes - memory boundary access" {
     var mock_host = MockHost.init(testing.allocator);
     defer mock_host.deinit();
-    
+
     const host = mock_host.to_host();
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);
 
     // Write data at various memory locations
-    try frame.memory.set_byte(testing.allocator, 31, 0xAA);  // Last byte of first word
-    try frame.memory.set_byte(testing.allocator, 32, 0xBB);  // First byte of second word
-    try frame.memory.set_byte(testing.allocator, 33, 0xCC);  // Second byte of second word
+    try frame.memory.set_byte(testing.allocator, 31, 0xAA); // Last byte of first word
+    try frame.memory.set_byte(testing.allocator, 32, 0xBB); // First byte of second word
+    try frame.memory.set_byte(testing.allocator, 33, 0xCC); // Second byte of second word
 
     // LOG0 crossing word boundary
     try frame.stack.push(31); // offset
-    try frame.stack.push(3);  // length
+    try frame.stack.push(3); // length
 
     const dispatch = createMockDispatch();
     _ = try TestFrame.LogHandlers.log0(frame, dispatch);
-    
+
     const log_entry = mock_host.logs.items[0];
-    try testing.expectEqualSlices(u8, &[_]u8{0xAA, 0xBB, 0xCC}, log_entry.data);
+    try testing.expectEqualSlices(u8, &[_]u8{ 0xAA, 0xBB, 0xCC }, log_entry.data);
 }
 
 test "LOG opcodes - zero length edge cases" {
     var mock_host = MockHost.init(testing.allocator);
     defer mock_host.deinit();
-    
+
     const host = mock_host.to_host();
-    
+
     // Test with various offset values and zero length
     const test_cases = [_]u256{
-        0,                      // Zero offset
-        100,                    // Normal offset
-        std.math.maxInt(u32),   // Large but valid offset
-        std.math.maxInt(u64),   // Very large offset
+        0, // Zero offset
+        100, // Normal offset
+        std.math.maxInt(u32), // Large but valid offset
+        std.math.maxInt(u64), // Very large offset
     };
-    
+
     for (test_cases) |offset| {
         var frame = try createTestFrame(testing.allocator, host);
         defer frame.deinit(testing.allocator);
-        
+
         try frame.stack.push(offset); // offset
-        try frame.stack.push(0);      // length = 0
-        
+        try frame.stack.push(0); // length = 0
+
         const dispatch = createMockDispatch();
         _ = try TestFrame.LogHandlers.log0(frame, dispatch);
-        
+
         // Should succeed with empty data regardless of offset
         const log_entry = mock_host.logs.items[mock_host.logs.items.len - 1];
         try testing.expectEqual(@as(usize, 0), log_entry.data.len);
@@ -521,38 +520,38 @@ test "LOG opcodes - zero length edge cases" {
 test "LOG opcodes - maximum data sizes" {
     var mock_host = MockHost.init(testing.allocator);
     defer mock_host.deinit();
-    
+
     const host = mock_host.to_host();
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);
 
     // Test various data sizes
     const sizes = [_]usize{
-        1,      // Single byte
-        31,     // Just under word boundary
-        32,     // Exactly one word
-        33,     // Just over word boundary
-        64,     // Two words
-        1024,   // 1KB
-        4096,   // 4KB
+        1, // Single byte
+        31, // Just under word boundary
+        32, // Exactly one word
+        33, // Just over word boundary
+        64, // Two words
+        1024, // 1KB
+        4096, // 4KB
     };
-    
+
     for (sizes) |size| {
         // Ensure memory capacity and fill with test pattern
         try frame.memory.ensure_capacity(testing.allocator, size);
         for (0..size) |i| {
             try frame.memory.set_byte(testing.allocator, i, @intCast((i * 17) & 0xFF)); // Test pattern
         }
-        
-        try frame.stack.push(0);    // offset
+
+        try frame.stack.push(0); // offset
         try frame.stack.push(size); // length
-        
+
         const dispatch = createMockDispatch();
         _ = try TestFrame.LogHandlers.log0(frame, dispatch);
-        
+
         const log_entry = mock_host.logs.items[mock_host.logs.items.len - 1];
         try testing.expectEqual(size, log_entry.data.len);
-        
+
         // Verify data pattern
         for (log_entry.data, 0..) |byte, i| {
             try testing.expectEqual(@as(u8, @intCast((i * 17) & 0xFF)), byte);
@@ -563,26 +562,26 @@ test "LOG opcodes - maximum data sizes" {
 test "LOG opcodes - stack underflow protection" {
     var mock_host = MockHost.init(testing.allocator);
     defer mock_host.deinit();
-    
+
     const host = mock_host.to_host();
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);
 
     const dispatch = createMockDispatch();
-    
+
     // LOG0 needs 2 stack items
     var result = TestFrame.LogHandlers.log0(frame, dispatch);
     try testing.expectError(TestFrame.Error.StackUnderflow, result);
-    
+
     try frame.stack.push(0);
     result = TestFrame.LogHandlers.log0(frame, dispatch);
     try testing.expectError(TestFrame.Error.StackUnderflow, result);
-    
+
     // LOG1 needs 3 stack items
     try frame.stack.push(0);
     result = TestFrame.LogHandlers.log1(frame, dispatch);
     try testing.expectError(TestFrame.Error.StackUnderflow, result);
-    
+
     // LOG4 needs 6 stack items
     try frame.stack.push(0);
     try frame.stack.push(0);
@@ -594,24 +593,24 @@ test "LOG opcodes - stack underflow protection" {
 test "LOG opcodes - memory expansion" {
     var mock_host = MockHost.init(testing.allocator);
     defer mock_host.deinit();
-    
+
     const host = mock_host.to_host();
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);
 
     // Initially memory is empty
     try testing.expectEqual(@as(usize, 0), frame.memory.size());
-    
+
     // LOG0 with data at offset 1000, length 100
     try frame.stack.push(1000); // offset
-    try frame.stack.push(100);  // length
-    
+    try frame.stack.push(100); // length
+
     const dispatch = createMockDispatch();
     _ = try TestFrame.LogHandlers.log0(frame, dispatch);
-    
+
     // Memory should have expanded to at least 1100 bytes
     try testing.expect(frame.memory.size() >= 1100);
-    
+
     // Log should contain zeros (uninitialized memory)
     const log_entry = mock_host.logs.items[0];
     try testing.expectEqual(@as(usize, 100), log_entry.data.len);
@@ -623,81 +622,81 @@ test "LOG opcodes - memory expansion" {
 test "LOG opcodes - multiple logs in sequence" {
     var mock_host = MockHost.init(testing.allocator);
     defer mock_host.deinit();
-    
+
     const host = mock_host.to_host();
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);
 
     // Write different data patterns
-    try frame.memory.set_data(testing.allocator, 0, &[_]u8{0x11, 0x11});
-    try frame.memory.set_data(testing.allocator, 10, &[_]u8{0x22, 0x22});
-    try frame.memory.set_data(testing.allocator, 20, &[_]u8{0x33, 0x33});
-    
+    try frame.memory.set_data(testing.allocator, 0, &[_]u8{ 0x11, 0x11 });
+    try frame.memory.set_data(testing.allocator, 10, &[_]u8{ 0x22, 0x22 });
+    try frame.memory.set_data(testing.allocator, 20, &[_]u8{ 0x33, 0x33 });
+
     const dispatch = createMockDispatch();
-    
+
     // LOG0
     try frame.stack.push(0); // offset
     try frame.stack.push(2); // length
     _ = try TestFrame.LogHandlers.log0(frame, dispatch);
-    
+
     // LOG1
     try frame.stack.push(10); // offset
-    try frame.stack.push(2);  // length
+    try frame.stack.push(2); // length
     try frame.stack.push(0xAA); // topic
     _ = try TestFrame.LogHandlers.log1(frame, dispatch);
-    
+
     // LOG2
     try frame.stack.push(20); // offset
-    try frame.stack.push(2);  // length
+    try frame.stack.push(2); // length
     try frame.stack.push(0xBB); // topic1
     try frame.stack.push(0xCC); // topic2
     _ = try TestFrame.LogHandlers.log2(frame, dispatch);
-    
+
     // Verify all logs
     try testing.expectEqual(@as(usize, 3), mock_host.logs.items.len);
-    
+
     // First log (LOG0)
     try testing.expectEqual(@as(usize, 0), mock_host.logs.items[0].topics.len);
-    try testing.expectEqualSlices(u8, &[_]u8{0x11, 0x11}, mock_host.logs.items[0].data);
-    
+    try testing.expectEqualSlices(u8, &[_]u8{ 0x11, 0x11 }, mock_host.logs.items[0].data);
+
     // Second log (LOG1)
     try testing.expectEqual(@as(usize, 1), mock_host.logs.items[1].topics.len);
     try testing.expectEqual(@as(u256, 0xAA), mock_host.logs.items[1].topics[0]);
-    try testing.expectEqualSlices(u8, &[_]u8{0x22, 0x22}, mock_host.logs.items[1].data);
-    
+    try testing.expectEqualSlices(u8, &[_]u8{ 0x22, 0x22 }, mock_host.logs.items[1].data);
+
     // Third log (LOG2)
     try testing.expectEqual(@as(usize, 2), mock_host.logs.items[2].topics.len);
     try testing.expectEqual(@as(u256, 0xBB), mock_host.logs.items[2].topics[0]);
     try testing.expectEqual(@as(u256, 0xCC), mock_host.logs.items[2].topics[1]);
-    try testing.expectEqualSlices(u8, &[_]u8{0x33, 0x33}, mock_host.logs.items[2].data);
+    try testing.expectEqualSlices(u8, &[_]u8{ 0x33, 0x33 }, mock_host.logs.items[2].data);
 }
 
 test "LOG opcodes - contract address tracking" {
     var mock_host = MockHost.init(testing.allocator);
     defer mock_host.deinit();
-    
+
     const host = mock_host.to_host();
-    
+
     // Test different contract addresses
     const addresses = [_]Address{
         Address.zero(),
         Address.fromBytes([_]u8{0xFF} ** 20) catch unreachable,
-        Address.fromBytes([_]u8{0x12, 0x34, 0x56} ++ [_]u8{0} ** 17) catch unreachable,
+        Address.fromBytes([_]u8{ 0x12, 0x34, 0x56 } ++ [_]u8{0} ** 17) catch unreachable,
     };
-    
+
     for (addresses) |addr| {
         var frame = try createTestFrame(testing.allocator, host);
         defer frame.deinit(testing.allocator);
-        
+
         frame.contract_address = addr;
-        
+
         try frame.stack.push(0); // offset
         try frame.stack.push(0); // length
-        
+
         const dispatch = createMockDispatch();
         _ = try TestFrame.LogHandlers.log0(frame, dispatch);
     }
-    
+
     // Verify each log has correct address
     try testing.expectEqual(@as(usize, addresses.len), mock_host.logs.items.len);
     for (mock_host.logs.items, addresses) |log_entry, expected_addr| {
@@ -708,7 +707,7 @@ test "LOG opcodes - contract address tracking" {
 test "LOG opcodes - topic order preservation" {
     var mock_host = MockHost.init(testing.allocator);
     defer mock_host.deinit();
-    
+
     const host = mock_host.to_host();
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);
@@ -720,10 +719,10 @@ test "LOG opcodes - topic order preservation" {
     try frame.stack.push(0x03); // topic2
     try frame.stack.push(0x02); // topic3
     try frame.stack.push(0x01); // topic4 (pushed first, popped last)
-    
+
     const dispatch = createMockDispatch();
     _ = try TestFrame.LogHandlers.log4(frame, dispatch);
-    
+
     const log_entry = mock_host.logs.items[0];
     // Topics should be in correct order after reversal in handler
     try testing.expectEqual(@as(u256, 0x04), log_entry.topics[0]);
@@ -735,29 +734,29 @@ test "LOG opcodes - topic order preservation" {
 test "LOG opcodes - offset plus length overflow" {
     var mock_host = MockHost.init(testing.allocator);
     defer mock_host.deinit();
-    
+
     const host = mock_host.to_host();
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);
 
     // Test cases where offset + length might overflow
     const test_cases = [_]struct { offset: u256, length: u256 }{
-        .{ .offset = std.math.maxInt(u256) - 10, .length = 20 },  // Would overflow
-        .{ .offset = std.math.maxInt(u64), .length = std.math.maxInt(u64) },  // Both large
+        .{ .offset = std.math.maxInt(u256) - 10, .length = 20 }, // Would overflow
+        .{ .offset = std.math.maxInt(u64), .length = std.math.maxInt(u64) }, // Both large
     };
-    
+
     for (test_cases) |tc| {
         // Clear stack
         while (frame.stack.len() > 0) {
             _ = try frame.stack.pop();
         }
-        
+
         try frame.stack.push(tc.offset);
         try frame.stack.push(tc.length);
-        
+
         const dispatch = createMockDispatch();
         const result = TestFrame.LogHandlers.log0(frame, dispatch);
-        
+
         try testing.expectError(TestFrame.Error.OutOfBounds, result);
     }
 }
@@ -766,9 +765,9 @@ test "LOG opcodes - static context protection for all variants" {
     var mock_host = MockHost.init(testing.allocator);
     defer mock_host.deinit();
     mock_host.is_static = true;
-    
+
     const host = mock_host.to_host();
-    
+
     // Test all LOG variants in static context
     const log_handlers = [_]struct {
         handler: *const TestFrame.OpcodeHandler,
@@ -780,22 +779,22 @@ test "LOG opcodes - static context protection for all variants" {
         .{ .handler = TestFrame.LogHandlers.log3, .stack_items = 5 },
         .{ .handler = TestFrame.LogHandlers.log4, .stack_items = 6 },
     };
-    
+
     for (log_handlers) |lh| {
         var frame = try createTestFrame(testing.allocator, host);
         defer frame.deinit(testing.allocator);
-        
+
         // Push required number of items
         for (0..lh.stack_items) |_| {
             try frame.stack.push(0);
         }
-        
+
         const dispatch = createMockDispatch();
         const result = lh.handler(frame, dispatch);
-        
+
         try testing.expectError(TestFrame.Error.WriteProtection, result);
     }
-    
+
     // Ensure no logs were created
     try testing.expectEqual(@as(usize, 0), mock_host.logs.items.len);
 }
@@ -803,7 +802,7 @@ test "LOG opcodes - static context protection for all variants" {
 test "LOG opcodes - memory limit enforcement" {
     var mock_host = MockHost.init(testing.allocator);
     defer mock_host.deinit();
-    
+
     const host = mock_host.to_host();
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);
@@ -811,11 +810,11 @@ test "LOG opcodes - memory limit enforcement" {
     // Try to log data near memory limit
     const near_limit = test_config.memory_limit - 100;
     try frame.stack.push(near_limit); // offset
-    try frame.stack.push(200);        // length (would exceed limit)
-    
+    try frame.stack.push(200); // length (would exceed limit)
+
     const dispatch = createMockDispatch();
     const result = TestFrame.LogHandlers.log0(frame, dispatch);
-    
+
     try testing.expectError(TestFrame.Error.OutOfBounds, result);
 }
 
@@ -831,13 +830,13 @@ test "LOG opcodes - WordType smaller than u256" {
         .memory_initial_capacity = 4096,
         .memory_limit = 0xFFFFFF,
     };
-    
+
     const SmallFrame = Frame(SmallWordConfig);
     const SmallBytecode = bytecode_mod.Bytecode(.{ .max_bytecode_size = SmallWordConfig.max_bytecode_size });
-    
+
     var mock_host = MockHost.init(testing.allocator);
     defer mock_host.deinit();
-    
+
     const host = mock_host.to_host();
     const bytecode = SmallBytecode.initEmpty();
     var frame = try SmallFrame.init(testing.allocator, bytecode, 1_000_000, null, host);
@@ -847,8 +846,8 @@ test "LOG opcodes - WordType smaller than u256" {
     try frame.stack.push(0); // offset
     try frame.stack.push(0); // length
     try frame.stack.push(std.math.maxInt(u64)); // topic1
-    try frame.stack.push(0x123456789ABCDEF);     // topic2
-    
+    try frame.stack.push(0x123456789ABCDEF); // topic2
+
     // Mock dispatch for SmallFrame
     const mock_handler = struct {
         fn handler(f: SmallFrame, d: SmallFrame.Dispatch) SmallFrame.Error!SmallFrame.Success {
@@ -857,17 +856,17 @@ test "LOG opcodes - WordType smaller than u256" {
             return SmallFrame.Success.stop;
         }
     }.handler;
-    
+
     var cursor: [1]dispatch_mod.ScheduleElement(SmallFrame) = undefined;
     cursor[0] = .{ .opcode_handler = &mock_handler };
-    
+
     const dispatch = SmallFrame.Dispatch{
         .cursor = &cursor,
         .bytecode_length = 0,
     };
-    
+
     _ = try SmallFrame.LogHandlers.log2(frame, dispatch);
-    
+
     const log_entry = mock_host.logs.items[0];
     // Topics are stored as u256 in Log structure
     try testing.expectEqual(@as(usize, 2), log_entry.topics.len);
