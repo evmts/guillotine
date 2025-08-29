@@ -116,7 +116,7 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         gas_remaining: GasType, // 8B - Gas tracking (i64)
         memory: Memory, // 16B - Memory operations
         database: config.DatabaseType, // 8B - Storage access
-        log_items: ?[*]Log, // 8B - Log array pointer (null = 0 logs)
+        log_items: [*]Log = &[_]Log{}, // 8B - Log array pointer 
         evm_ptr: *anyopaque, // 8B - EVM instance pointer
         value: WordType, // 32B - Call value (inline)
         caller: Address, // 20B - Calling address
@@ -153,7 +153,7 @@ pub fn StackFrame(comptime config: FrameConfig) type {
                 .gas_remaining = std.math.cast(GasType, @max(gas_remaining, 0)) orelse return Error.InvalidAmount,
                 .memory = memory,
                 .database = database,
-                .log_items = null, // No logs initially
+                .log_items = &[_]Log{}, 
                 .evm_ptr = evm_ptr,
                 .caller = caller,
                 .value = value,
@@ -306,9 +306,13 @@ pub fn StackFrame(comptime config: FrameConfig) type {
                 try new_memory.set_data(0, bytes);
             }
 
-            const new_log_items: ?[*]Log = if (self.log_items) |items| blk: {
+            const new_log_items: [*]Log = blk: {
+                const items = self.log_items;
+                // Check if we have the default empty array
+                if (@intFromPtr(items) == @intFromPtr(&[_]Log{})) break :blk &[_]Log{};
+                
                 const header = @as(*const LogHeader, @ptrFromInt(@intFromPtr(items) - @sizeOf(LogHeader)));
-                if (header.count == 0) break :blk null;
+                if (header.count == 0) break :blk &[_]Log{};
 
                 const full_size = @sizeOf(LogHeader) + header.capacity * @sizeOf(Log);
                 const new_log_memory = allocator.alloc(u8, full_size) catch return Error.AllocationError;
@@ -336,7 +340,7 @@ pub fn StackFrame(comptime config: FrameConfig) type {
                 }
 
                 break :blk new_items;
-            } else null;
+            } ;
 
             const new_output = if (self.output.len > 0) blk: {
                 const output_copy = allocator.alloc(u8, self.output.len) catch return Error.AllocationError;
@@ -412,7 +416,10 @@ pub fn StackFrame(comptime config: FrameConfig) type {
 
         /// Clean up log memory
         pub fn deinitLogs(self: *Self, allocator: std.mem.Allocator) void {
-            const items = self.log_items orelse return;
+            const items = self.log_items;
+            
+            // Check if we have the default empty array
+            if (@intFromPtr(items) == @intFromPtr(&[_]Log{})) return;
 
             const header = @as(*LogHeader, @ptrFromInt(@intFromPtr(items) - @sizeOf(LogHeader)));
 
@@ -427,7 +434,8 @@ pub fn StackFrame(comptime config: FrameConfig) type {
 
         /// Add a log entry to the list
         pub fn appendLog(self: *Self, allocator: std.mem.Allocator, log_entry: Log) error{OutOfMemory}!void {
-            if (self.log_items == null) {
+            // Check if we're starting with the default empty array
+            if (@intFromPtr(self.log_items) == @intFromPtr(&[_]Log{})) {
                 const initial_capacity: u16 = 4;
                 const full_size = @sizeOf(LogHeader) + initial_capacity * @sizeOf(Log);
                 const memory = try allocator.alloc(u8, full_size);
@@ -440,7 +448,7 @@ pub fn StackFrame(comptime config: FrameConfig) type {
 
                 self.log_items = items;
             } else {
-                const items = self.log_items.?;
+                const items = self.log_items;
                 const header = @as(*LogHeader, @ptrFromInt(@intFromPtr(items) - @sizeOf(LogHeader)));
 
                 if (header.count >= header.capacity) {
@@ -469,14 +477,16 @@ pub fn StackFrame(comptime config: FrameConfig) type {
 
         /// Get slice of current log entries
         pub fn getLogSlice(self: *const Self) []const Log {
-            const items = self.log_items orelse return &[_]Log{};
+            const items = self.log_items;
+            if (@intFromPtr(items) == @intFromPtr(&[_]Log{})) return &[_]Log{};
             const header = @as(*const LogHeader, @ptrFromInt(@intFromPtr(items) - @sizeOf(LogHeader)));
             return items[0..header.count];
         }
 
         /// Get number of logs
         pub fn getLogCount(self: *const Self) u16 {
-            const items = self.log_items orelse return 0;
+            const items = self.log_items;
+            if (@intFromPtr(items) == @intFromPtr(&[_]Log{})) return 0;
             const header = @as(*const LogHeader, @ptrFromInt(@intFromPtr(items) - @sizeOf(LogHeader)));
             return header.count;
         }
