@@ -42,7 +42,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const addr_u256 = to_u256(self.contract_address);
             try self.stack.push(addr_u256);
             const next = dispatch.getNext();
-            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// BALANCE opcode (0x31) - Get balance of the given account.
@@ -62,7 +62,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const balance_word = @as(WordType, @truncate(bal));
             try self.stack.push(balance_word);
             const next = dispatch.getNext();
-            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// ORIGIN opcode (0x32) - Get execution origination address.
@@ -72,7 +72,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const origin_u256 = to_u256(tx_origin);
             try self.stack.push(origin_u256);
             const next = dispatch.getNext();
-            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// CALLER opcode (0x33) - Get caller address.
@@ -81,7 +81,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const caller_u256 = to_u256(self.caller);
             try self.stack.push(caller_u256);
             const next = dispatch.getNext();
-            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// CALLVALUE opcode (0x34) - Get deposited value by the instruction/transaction responsible for this execution.
@@ -90,7 +90,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const value = self.value.*;
             try self.stack.push(value);
             const next = dispatch.getNext();
-            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// CALLDATALOAD opcode (0x35) - Get input data of current environment.
@@ -101,7 +101,7 @@ pub fn Handlers(comptime FrameType: type) type {
             if (offset > std.math.maxInt(usize)) {
                 try self.stack.push(0);
                 const next = dispatch.getNext();
-                return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
             }
             const offset_usize = @as(usize, @intCast(offset));
 
@@ -121,7 +121,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const word_typed = @as(WordType, @truncate(word));
             try self.stack.push(word_typed);
             const next = dispatch.getNext();
-            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// CALLDATASIZE opcode (0x36) - Get size of input data in current environment.
@@ -131,7 +131,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const calldata_len = @as(WordType, @truncate(@as(u256, @intCast(calldata.len))));
             try self.stack.push(calldata_len);
             const next = dispatch.getNext();
-            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// CALLDATACOPY opcode (0x37) - Copy input data in current environment to memory.
@@ -155,7 +155,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
             if (length_usize == 0) {
                 const next = dispatch.getNext();
-                return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
             }
 
             // Ensure memory capacity
@@ -176,7 +176,7 @@ pub fn Handlers(comptime FrameType: type) type {
             }
 
             const next = dispatch.getNext();
-            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// CODESIZE opcode (0x38) - Get size of code running in current environment.
@@ -187,7 +187,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const bytecode_len = @as(WordType, @intCast(metadata.size));
             try self.stack.push(bytecode_len);
             const next = dispatch.skipMetadata();
-            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// CODECOPY opcode (0x39) - Copy code running in current environment to memory.
@@ -214,7 +214,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const next = dispatch.skipMetadata();
 
             if (length_usize == 0) {
-                return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
             }
 
             // Calculate gas cost for memory expansion and copy operation
@@ -247,7 +247,7 @@ pub fn Handlers(comptime FrameType: type) type {
                 self.memory.set_byte(self.allocator, @as(u24, @intCast(dest_offset_usize + i)), byte_val) catch return Error.OutOfBounds;
             }
 
-            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// GASPRICE opcode (0x3A) - Get price of gas in current environment.
@@ -257,7 +257,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const gas_price_truncated = @as(WordType, @truncate(gas_price));
             try self.stack.push(gas_price_truncated);
             const next = dispatch.getNext();
-            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// EXTCODESIZE opcode (0x3B) - Get size of an account's code.
@@ -269,7 +269,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const code_len = @as(WordType, @truncate(@as(u256, @intCast(code.len))));
             try self.stack.push(code_len);
             const next = dispatch.getNext();
-            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// EXTCODECOPY opcode (0x3C) - Copy an account's code to memory.
@@ -295,7 +295,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
             if (length_usize == 0) {
                 const next = dispatch.getNext();
-                return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
             }
 
             // Ensure memory capacity
@@ -316,7 +316,7 @@ pub fn Handlers(comptime FrameType: type) type {
             }
 
             const next = dispatch.getNext();
-            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// EXTCODEHASH opcode (0x3F) - Get hash of account's code.
@@ -329,7 +329,7 @@ pub fn Handlers(comptime FrameType: type) type {
                 // Non-existent account returns 0 per EIP-1052
                 try self.stack.push(0);
                 const next = dispatch.getNext();
-                return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
             }
 
             const code = self.getEvm().get_code(addr);
@@ -339,7 +339,7 @@ pub fn Handlers(comptime FrameType: type) type {
                 const empty_hash_word = @as(WordType, @truncate(empty_hash_u256));
                 try self.stack.push(empty_hash_word);
                 const next = dispatch.getNext();
-                return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
             }
 
             // Compute keccak256 hash of the code
@@ -355,7 +355,7 @@ pub fn Handlers(comptime FrameType: type) type {
             try self.stack.push(hash_word);
 
             const next = dispatch.getNext();
-            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// RETURNDATASIZE opcode (0x3D) - Get size of output data from the previous call.
@@ -365,7 +365,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const return_data_len = @as(WordType, @truncate(@as(u256, @intCast(return_data.len))));
             try self.stack.push(return_data_len);
             const next = dispatch.getNext();
-            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// RETURNDATACOPY opcode (0x3E) - Copy output data from the previous call to memory.
@@ -398,7 +398,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
             if (length_usize == 0) {
                 const next = dispatch.getNext();
-                return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
             }
 
             // Ensure memory capacity
@@ -413,7 +413,7 @@ pub fn Handlers(comptime FrameType: type) type {
             self.memory.set_data(self.allocator, @as(u24, @intCast(dest_offset_usize)), src_slice) catch return Error.OutOfBounds;
 
             const next = dispatch.getNext();
-            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// BLOCKHASH opcode (0x40) - Get the hash of one of the 256 most recent complete blocks.
@@ -438,7 +438,7 @@ pub fn Handlers(comptime FrameType: type) type {
             }
 
             const next = dispatch.getNext();
-            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// COINBASE opcode (0x41) - Get the current block's beneficiary address.
@@ -449,7 +449,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const coinbase_word = @as(WordType, @truncate(coinbase_u256));
             try self.stack.push(coinbase_word);
             const next = dispatch.getNext();
-            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// TIMESTAMP opcode (0x42) - Get the current block's timestamp.
@@ -459,7 +459,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const timestamp_word = @as(WordType, @truncate(@as(u256, @intCast(block_info.timestamp))));
             try self.stack.push(timestamp_word);
             const next = dispatch.getNext();
-            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// NUMBER opcode (0x43) - Get the current block's number.
@@ -469,7 +469,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const block_number_word = @as(WordType, @truncate(@as(u256, @intCast(block_info.number))));
             try self.stack.push(block_number_word);
             const next = dispatch.getNext();
-            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// DIFFICULTY opcode (0x44) - Get the current block's difficulty.
@@ -479,7 +479,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const difficulty_word = @as(WordType, @truncate(block_info.difficulty));
             try self.stack.push(difficulty_word);
             const next = dispatch.getNext();
-            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// PREVRANDAO opcode - Alias for DIFFICULTY post-merge.
@@ -495,7 +495,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const gas_limit_word = @as(WordType, @truncate(@as(u256, @intCast(block_info.gas_limit))));
             try self.stack.push(gas_limit_word);
             const next = dispatch.getNext();
-            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// CHAINID opcode (0x46) - Get the chain ID.
@@ -505,7 +505,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const chain_id_word = @as(WordType, @truncate(@as(u256, chain_id)));
             try self.stack.push(chain_id_word);
             const next = dispatch.getNext();
-            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// SELFBALANCE opcode (0x47) - Get balance of currently executing account.
@@ -515,7 +515,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const balance_word = @as(WordType, @truncate(bal));
             try self.stack.push(balance_word);
             const next = dispatch.getNext();
-            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// BASEFEE opcode (0x48) - Get the current block's base fee.
@@ -525,7 +525,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const base_fee_word = @as(WordType, @truncate(block_info.base_fee));
             try self.stack.push(base_fee_word);
             const next = dispatch.getNext();
-            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// BLOBHASH opcode (0x49) - Get versioned hashes of blob transactions.
@@ -536,7 +536,7 @@ pub fn Handlers(comptime FrameType: type) type {
             if (index > std.math.maxInt(usize)) {
                 try self.stack.push(0);
                 const next = dispatch.getNext();
-                return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
             }
             const index_usize = @as(usize, @intCast(index));
             // Check if index is within bounds of versioned hashes
@@ -554,7 +554,7 @@ pub fn Handlers(comptime FrameType: type) type {
                 try self.stack.push(0);
             }
             const next = dispatch.getNext();
-            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// BLOBBASEFEE opcode (0x4a) - Get the current block's blob base fee.
@@ -564,7 +564,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const blob_base_fee_word = @as(WordType, @truncate(blob_base_fee));
             try self.stack.push(blob_base_fee_word);
             const next = dispatch.getNext();
-            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// GAS opcode (0x5A) - Get the amount of available gas.
@@ -573,7 +573,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const gas_value = @as(WordType, @max(self.gas_remaining, 0));
             try self.stack.push(gas_value);
             const next = dispatch.getNext();
-            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// PC opcode (0x58) - Get the value of the program counter prior to the increment.
@@ -583,7 +583,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const metadata = dispatch.getPcMetadata();
             try self.stack.push(metadata.value);
             const next = dispatch.skipMetadata();
-            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
         }
     };
 }
