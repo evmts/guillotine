@@ -1161,23 +1161,6 @@ pub fn build(b: *std.Build) void {
     const bytecode_bench_simple_step = b.step("bytecode-bench-simple", "Run simple bytecode benchmarks");
     bytecode_bench_simple_step.dependOn(&run_bytecode_bench_simple_cmd.step);
     
-    // SIMD vs scalar comparison benchmark
-    const bytecode_simd_comparison_exe = b.addExecutable(.{
-        .name = "bytecode-simd-comparison",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/evm/bytecode_simd_comparison.zig"),
-            .target = target,
-            .optimize = .ReleaseFast,
-        }),
-    });
-    bytecode_simd_comparison_exe.root_module.addImport("primitives", primitives_mod);
-    bytecode_simd_comparison_exe.root_module.addImport("evm", evm_mod);
-    bytecode_simd_comparison_exe.root_module.addImport("crypto", crypto_mod);
-    bytecode_simd_comparison_exe.root_module.addImport("build_options", build_options_mod);
-    
-    const run_bytecode_simd_comparison_cmd = b.addRunArtifact(bytecode_simd_comparison_exe);
-    const bytecode_simd_comparison_step = b.step("bytecode-simd-comparison", "Compare SIMD vs scalar bytecode analysis");
-    bytecode_simd_comparison_step.dependOn(&run_bytecode_simd_comparison_cmd.step);
 
     // StackFrame benchmark vs REVM
     // TODO: Update stack_frame_bench.zig to work without Host
