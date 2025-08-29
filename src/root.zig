@@ -105,7 +105,7 @@ fn log(comptime level: std.log.Level, comptime scope: @TypeOf(.enum_literal), co
     _ = args;
     // Logging disabled for WASM to avoid Thread dependencies
 }
-const MemoryDatabase = evm_root.MemoryDatabase;
+const Database = evm_root.Database;
 const BlockInfo = evm_root.BlockInfo;
 const Address = primitives.Address;
 const ZERO_ADDRESS = primitives.Address.ZERO_ADDRESS;
@@ -116,9 +116,9 @@ const allocator = if (builtin.target.cpu.arch == .wasm32 and builtin.target.os.t
 else
     std.heap.c_allocator;
 
-// Global VM instance and associated memory database
+// Global VM instance and associated database
 var vm_instance: ?*evm_root.DefaultEvm = null;
-var memory_db_instance: ?*MemoryDatabase = null;
+var database_instance: ?*Database = null;
 
 // C-compatible error codes
 const GuillotineError = enum(c_int) {
@@ -150,15 +150,13 @@ export fn guillotine_init() c_int {
         return @intFromEnum(GuillotineError.GUILLOTINE_OK);
     }
 
-    // Create and store memory database instance
-    const memory_db = allocator.create(MemoryDatabase) catch {
-        log(.err, .guillotine_c, "Failed to allocate memory for MemoryDatabase", .{});
+    // Create and store database instance
+    const database = allocator.create(Database) catch {
+        log(.err, .guillotine_c, "Failed to allocate memory for Database", .{});
         return @intFromEnum(GuillotineError.GUILLOTINE_ERROR_MEMORY);
     };
-    memory_db.* = MemoryDatabase.init(allocator);
-    memory_db_instance = memory_db;
-
-    const db_interface = memory_db.to_database_interface();
+    database.* = Database.init(allocator);
+    database_instance = database;
 
     const vm = allocator.create(evm_root.DefaultEvm) catch {
         log(.err, .guillotine_c, "Failed to allocate memory for VM", .{});
@@ -184,16 +182,15 @@ export fn guillotine_init() c_int {
         .chain_id = 1,
     };
 
-    const db_as_database = @as(evm_root.Database, db_interface.*);
-    vm.* = evm_root.DefaultEvm.init(allocator, db_as_database, block_info, tx_context, 0, // gas_price
+    vm.* = evm_root.DefaultEvm.init(allocator, database.*, block_info, tx_context, 0, // gas_price
         ZERO_ADDRESS, // origin
         .CANCUN // hardfork
     ) catch |err| {
         log(.err, .guillotine_c, "Failed to initialize VM: {}", .{err});
-        // Cleanup memory database on VM init failure
-        memory_db.deinit();
-        allocator.destroy(memory_db);
-        memory_db_instance = null;
+        // Cleanup database on VM init failure
+        database.deinit();
+        allocator.destroy(database);
+        database_instance = null;
         allocator.destroy(vm);
         return @intFromEnum(GuillotineError.GUILLOTINE_ERROR_MEMORY);
     };
@@ -209,7 +206,7 @@ export fn guillotine_deinit() void {
 
     // Minimal cleanup - just clear references to avoid memory corruption
     vm_instance = null;
-    memory_db_instance = null;
+    database_instance = null;
 
     log(.info, .guillotine_c, "Guillotine EVM cleanup completed (minimal)", .{});
 }
@@ -315,7 +312,7 @@ pub const GuillotineExecutionResult = extern struct {
 // Internal VM structure
 const VmState = struct {
     vm: *evm_root.DefaultEvm,
-    memory_db: *MemoryDatabase,
+    database: *Database,
     allocator: std.mem.Allocator,
 };
 
@@ -326,16 +323,15 @@ export fn guillotine_vm_create() ?*GuillotineVm {
     const state = alloc.create(VmState) catch return null;
 
     state.allocator = alloc;
-    state.memory_db = alloc.create(MemoryDatabase) catch {
+    state.database = alloc.create(Database) catch {
         alloc.destroy(state);
         return null;
     };
-    state.memory_db.* = MemoryDatabase.init(alloc);
+    state.database.* = Database.init(alloc);
 
-    const db_interface = state.memory_db.to_database_interface();
     state.vm = alloc.create(evm_root.DefaultEvm) catch {
-        state.memory_db.deinit();
-        alloc.destroy(state.memory_db);
+        state.database.deinit();
+        alloc.destroy(state.database);
         alloc.destroy(state);
         return null;
     };
@@ -359,13 +355,12 @@ export fn guillotine_vm_create() ?*GuillotineVm {
         .chain_id = 1,
     };
 
-    const db_as_database = @as(evm_root.Database, db_interface.*);
-    state.vm.* = evm_root.DefaultEvm.init(alloc, db_as_database, block_info, tx_context, 0, // gas_price
+    state.vm.* = evm_root.DefaultEvm.init(alloc, state.database.*, block_info, tx_context, 0, // gas_price
         primitives.ZERO_ADDRESS, // origin
         .CANCUN // hardfork
     ) catch {
-        state.memory_db.deinit();
-        alloc.destroy(state.memory_db);
+        state.database.deinit();
+        alloc.destroy(state.database);
         alloc.destroy(state.vm);
         alloc.destroy(state);
         return null;
@@ -379,8 +374,8 @@ export fn guillotine_vm_destroy(vm: ?*GuillotineVm) void {
         const state: *VmState = @ptrCast(@alignCast(v));
         state.vm.deinit();
         state.allocator.destroy(state.vm);
-        state.memory_db.deinit();
-        state.allocator.destroy(state.memory_db);
+        state.database.deinit();
+        state.allocator.destroy(state.database);
         state.allocator.destroy(state);
     }
 }

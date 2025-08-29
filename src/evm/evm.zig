@@ -375,6 +375,7 @@ pub fn Evm(comptime config: EvmConfig) type {
                     Database.Error.InvalidSnapshot => "InvalidSnapshot",
                     Database.Error.NoBatchInProgress => "NoBatchInProgress",
                     Database.Error.SnapshotNotFound => "SnapshotNotFound",
+                    Database.Error.WriteProtection => "WriteProtection",
                 };
                 return CallResult.failure_with_error(0, error_str);
             };

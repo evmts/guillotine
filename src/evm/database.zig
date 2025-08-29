@@ -46,6 +46,8 @@ pub const Database = struct {
         NoBatchInProgress,
         /// Snapshot not found
         SnapshotNotFound,
+        /// Write protection for static calls
+        WriteProtection,
     };
 
     const StorageKey = struct {
@@ -91,7 +93,7 @@ pub const Database = struct {
             .storage = std.HashMap(StorageKey, u256, StorageKeyContext, std.hash_map.default_max_load_percentage).init(allocator),
             .transient_storage = std.HashMap(StorageKey, u256, StorageKeyContext, std.hash_map.default_max_load_percentage).init(allocator),
             .code_storage = std.HashMap([32]u8, []const u8, ArrayHashContext, std.hash_map.default_max_load_percentage).init(allocator),
-            .snapshots = std.ArrayList(Snapshot).init(allocator),
+            .snapshots = .{ .items = &[_]Snapshot{}, .capacity = 0 },
             .next_snapshot_id = 1,
             .allocator = allocator,
         };
@@ -224,7 +226,7 @@ pub const Database = struct {
             try snapshot_storage.put(entry.key_ptr.*, entry.value_ptr.*);
         }
         
-        try self.snapshots.append(Snapshot{
+        try self.snapshots.append(self.allocator, Snapshot{
             .id = snapshot_id,
             .accounts = snapshot_accounts,
             .storage = snapshot_storage,
