@@ -17,7 +17,7 @@ const TestMemory = Memory(test_config);
 
 fn benchMemorySet(allocator: std.mem.Allocator) void {
     var memory = TestMemory.init(allocator) catch return;
-    defer memory.deinit();
+    defer memory.deinit(allocator);
     
     // Write data at various offsets
     var i: u32 = 0;
@@ -29,7 +29,7 @@ fn benchMemorySet(allocator: std.mem.Allocator) void {
 
 fn benchMemoryGet(allocator: std.mem.Allocator) void {
     var memory = TestMemory.init(allocator) catch return;
-    defer memory.deinit();
+    defer memory.deinit(allocator);
     
     // Pre-fill memory
     var i: u32 = 0;
@@ -47,7 +47,7 @@ fn benchMemoryGet(allocator: std.mem.Allocator) void {
 
 fn benchMemoryU256Operations(allocator: std.mem.Allocator) void {
     var memory = TestMemory.init(allocator) catch return;
-    defer memory.deinit();
+    defer memory.deinit(allocator);
     
     // Write u256 values
     var i: u32 = 0;
@@ -65,7 +65,7 @@ fn benchMemoryU256Operations(allocator: std.mem.Allocator) void {
 
 fn benchMemoryExpansion(allocator: std.mem.Allocator) void {
     var memory = TestMemory.init(allocator) catch return;
-    defer memory.deinit();
+    defer memory.deinit(allocator);
     
     // Trigger memory expansions
     const offsets = [_]u32{ 1024, 2048, 4096, 8192, 16384, 32768, 65536 };
@@ -78,7 +78,7 @@ fn benchMemoryExpansion(allocator: std.mem.Allocator) void {
 
 fn benchMemoryCopy(allocator: std.mem.Allocator) void {
     var memory = TestMemory.init(allocator) catch return;
-    defer memory.deinit();
+    defer memory.deinit(allocator);
     
     // Pre-fill with source data
     const source_data = [_]u8{0xAB} ** 1024;
@@ -95,16 +95,15 @@ fn benchMemoryCopy(allocator: std.mem.Allocator) void {
 
 fn benchMemoryChildOperations(allocator: std.mem.Allocator) void {
     var parent_memory = TestMemory.init(allocator) catch return;
-    defer parent_memory.deinit();
+    defer parent_memory.deinit(allocator);
     
     // Fill parent with some data
     const data = [_]u8{0xDE, 0xAD, 0xBE, 0xEF} ++ [_]u8{0x00} ** 28;
     parent_memory.set_data_evm(0, &data) catch return;
     
     // Create child memory and perform operations
-    const checkpoint = parent_memory.get_checkpoint();
-    var child_memory = parent_memory.init_child_memory(checkpoint) catch return;
-    defer child_memory.deinit();
+    var child_memory = parent_memory.init_child() catch return;
+    defer child_memory.deinit(allocator);
     
     // Perform operations on child
     var i: u32 = 0;

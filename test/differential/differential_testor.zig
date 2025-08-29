@@ -216,7 +216,7 @@ pub const DifferentialTestor = struct {
         _ = self;
         const log = std.log.scoped(.differential_analysis);
         
-        log.debug("Analyzing bytecode of {} bytes", .{bytecode.len});
+        log.debug("Analyzing bytecode of {d} bytes", .{bytecode.len});
         
         // Decode opcodes for debugging
         var i: usize = 0;
@@ -278,11 +278,11 @@ pub const DifferentialTestor = struct {
                 else => "UNKNOWN",
             };
             
-            log.debug("  PC {}: 0x{x:0>2} ({})", .{i, opcode, opcode_name});
+            log.debug("  PC {d}: 0x{x:0>2} ({s})", .{i, opcode, opcode_name});
             i += 1;
         }
         
-        log.debug("Total opcodes decoded: {}", .{opcode_count});
+        log.debug("Total opcodes decoded: {d}", .{opcode_count});
     }
 
     /// Simple bytecode testing - deploys bytecode and executes it on both EVMs
@@ -306,7 +306,7 @@ pub const DifferentialTestor = struct {
         
         // Verify deployment
         const deployed_code = try self.guillotine_db.get_code_by_address(self.contract.bytes);
-        log.debug("Deployed bytecode to {any}: len={} vs deployed_len={}", .{self.contract, bytecode.len, deployed_code.len});
+        log.debug("Deployed bytecode to {any}: len={d} vs deployed_len={d}", .{self.contract, bytecode.len, deployed_code.len});
         if (deployed_code.len == 0) {
             log.err("WARNING: Deployed code has zero length!", .{});
         }
@@ -314,7 +314,7 @@ pub const DifferentialTestor = struct {
         // Also check if account exists
         const account_check = try self.guillotine_db.get_account(self.contract.bytes);
         if (account_check) |acc| {
-            log.debug("Account found: balance={}, nonce={}, code_hash={x}", .{acc.balance, acc.nonce, acc.code_hash});
+            log.debug("Account found: balance={d}, nonce={d}, code_hash={x}", .{acc.balance, acc.nonce, acc.code_hash});
         } else {
             log.err("WARNING: Account not found after deployment!", .{});
         }
@@ -498,12 +498,12 @@ pub const DifferentialTestor = struct {
             },
         };
         
-        log.debug("DIFFERENTIAL: About to call Guillotine with gas={}", .{gas_limit});
+        log.debug("DIFFERENTIAL: About to call Guillotine with gas={d}", .{gas_limit});
         
         // First, let's trace the bytecode execution manually
         // Get the contract code
         const code = self.guillotine_db.get_code_by_address(to.bytes) catch |err| {
-            log.err("Failed to get code for address {any}: {}", .{to, err});
+            log.err("Failed to get code for address {any}: {any}", .{to, err});
             return ExecutionResultWithTrace{
                 .success = false,
                 .gas_used = 0,
@@ -513,18 +513,22 @@ pub const DifferentialTestor = struct {
             };
         };
         
-        log.debug("Contract code at {any}: {} bytes", .{to, code.len});
+        log.debug("Contract code at {any}: {d} bytes", .{to, code.len});
         if (code.len > 0) {
             log.debug("First 16 bytes: {x}", .{code[0..@min(code.len, 16)]});
         }
         
         // Execute the call
+        log.debug("DIFFERENTIAL: About to call Guillotine.call() with params", .{});
         const result = self.guillotine_instance.call(params);
-        log.debug("DIFFERENTIAL: Guillotine call complete, success={}, gas_left={}", .{result.success, result.gas_left});
+        log.debug("DIFFERENTIAL: Guillotine call complete, success={any}, gas_left={d}", .{result.success, result.gas_left});
+        if (result.error_info) |err| {
+            log.debug("DIFFERENTIAL: Call error info: {s}", .{err});
+        }
         
         // Create a basic trace for now
-        var trace_steps = std.ArrayList(TraceStep).init(self.allocator);
-        defer trace_steps.deinit();
+        var trace_steps = std.ArrayList(TraceStep){};
+        defer trace_steps.deinit(self.allocator);
         
         // If we have bytecode, add some basic trace information
         if (code.len > 0 and !result.success and result.gas_left == 0) {
@@ -539,11 +543,11 @@ pub const DifferentialTestor = struct {
                 .storage_reads = &.{},
                 .storage_writes = &.{},
             };
-            try trace_steps.append(step);
+            try trace_steps.append(self.allocator, step);
         }
         
         const trace = ExecutionTrace{
-            .steps = try trace_steps.toOwnedSlice(),
+            .steps = try trace_steps.toOwnedSlice(self.allocator),
             .allocator = self.allocator,
         };
         
@@ -551,14 +555,14 @@ pub const DifferentialTestor = struct {
         const gas_used = gas_limit - result.gas_left;
         
         // Store the execution result status for debugging
-        log.debug("Guillotine execution completed: success={}, gas_left={}, output_len={}", .{result.success, result.gas_left, result.output.len});
+        log.debug("Guillotine execution completed: success={any}, gas_left={d}, output_len={d}", .{result.success, result.gas_left, result.output.len});
         
         if (!result.success) {
             // Log detailed failure information
             log.err("Guillotine execution failed!", .{});
-            log.err("  Gas limit: {}", .{gas_limit});
-            log.err("  Gas left: {}", .{result.gas_left});
-            log.err("  Gas used: {}", .{gas_used});
+            log.err("  Gas limit: {d}", .{gas_limit});
+            log.err("  Gas left: {d}", .{result.gas_left});
+            log.err("  Gas used: {d}", .{gas_used});
             log.err("  Output: {x}", .{result.output});
             if (result.error_info) |error_info| {
                 log.err("  ERROR TYPE: {s}", .{error_info});

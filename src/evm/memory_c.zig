@@ -57,8 +57,8 @@ pub export fn evm_memory_create(initial_size: usize) ?*MemoryHandle {
     
     // Expand to initial size if requested
     if (initial_size > 0) {
-        handle.memory.ensure_capacity(initial_size) catch {
-            handle.memory.deinit();
+        handle.memory.ensure_capacity(allocator, initial_size) catch {
+            handle.memory.deinit(allocator);
             allocator.destroy(handle);
             return null;
         };
@@ -71,7 +71,7 @@ pub export fn evm_memory_create(initial_size: usize) ?*MemoryHandle {
 /// @param handle Memory handle
 pub export fn evm_memory_destroy(handle: ?*MemoryHandle) void {
     const h = handle orelse return;
-    h.memory.deinit();
+    h.memory.deinit(allocator);
     allocator.destroy(h);
 }
 

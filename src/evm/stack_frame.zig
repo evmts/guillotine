@@ -306,7 +306,7 @@ pub fn StackFrame(comptime config: FrameConfig) type {
             
             return Self{
                 .stack = stack,
-                .gas_remaining = @as(GasType, @intCast(@max(gas_remaining, 0))),
+                .gas_remaining = std.math.cast(GasType, @max(gas_remaining, 0)) orelse return Error.InvalidAmount,
                 .memory = memory,
                 .database = database,
                 .log_items = null,  // No logs initially
@@ -326,9 +326,7 @@ pub fn StackFrame(comptime config: FrameConfig) type {
             self.stack.deinit(allocator);
             self.memory.deinit(allocator);
             self.deinitLogs(allocator);
-            if (self.output.len > 0) {
-                allocator.free(self.output);
-            }
+            // Output is allocated from arena and cleaned up automatically
         }
 
         /// Execute this frame without tracing (backward compatibility method).
@@ -352,9 +350,9 @@ pub fn StackFrame(comptime config: FrameConfig) type {
 
             var bytecode = Bytecode.init(self.allocator, bytecode_raw) catch |e| {
                 @branchHint(.unlikely);
-                log.err("Bytecode init failed: {}", .{e});
+                log.err("Bytecode init failed: {any}", .{e});
                 if (bytecode_raw.len > 0) {
-                    log.err("  Bytecode length: {}", .{bytecode_raw.len});
+                    log.err("  Bytecode length: {d}", .{bytecode_raw.len});
                     log.err("  First 16 bytes: {x}", .{bytecode_raw[0..@min(bytecode_raw.len, 16)]});
                     // Check for specific test bytecode
                     if (bytecode_raw.len >= 10 and bytecode_raw[0] == 0x60 and bytecode_raw[1] == 0x42) {
@@ -399,17 +397,17 @@ pub fn StackFrame(comptime config: FrameConfig) type {
                 const cursor = Self.Dispatch{ .cursor = traced_schedule.ptr + start_index, .jump_table = &traced_jump_table };
                 break :blk cursor.cursor[0].opcode_handler(self, cursor);
             } else blk: {
-                log.debug("DISPATCH INIT: bytecode len={}", .{bytecode.runtime_code.len});
+                log.debug("DISPATCH INIT: bytecode len={d}", .{bytecode.runtime_code.len});
                 const schedule = Dispatch.init(self.allocator, &bytecode, handlers) catch |e| {
-                    log.err("Failed to create dispatch schedule: {}", .{e});
-                    log.err("  Bytecode runtime_code len: {}", .{bytecode.runtime_code.len});
+                    log.err("Failed to create dispatch schedule: {any}", .{e});
+                    log.err("  Bytecode runtime_code len: {d}", .{bytecode.runtime_code.len});
                     return Error.AllocationError;
                 };
-                log.debug("DISPATCH INIT COMPLETE: schedule len={}, opcode_count={}", .{schedule.len, bytecode.runtime_code.len});
+                log.debug("DISPATCH INIT COMPLETE: schedule len={d}, opcode_count={d}", .{schedule.len, bytecode.runtime_code.len});
                 defer Dispatch.deinitSchedule(self.allocator, schedule);
                 if (schedule.len < 3) {
-                    log.err("Dispatch schedule is too short! len={}", .{schedule.len});
-                    log.err("  Bytecode len: {}", .{bytecode.runtime_code.len});
+                    log.err("Dispatch schedule is too short! len={d}", .{schedule.len});
+                    log.err("  Bytecode len: {d}", .{bytecode.runtime_code.len});
                     if (bytecode.runtime_code.len > 0) {
                         log.err("  First few bytes: {x}", .{bytecode.runtime_code[0..@min(bytecode.runtime_code.len, 16)]});
                     }
@@ -422,7 +420,9 @@ pub fn StackFrame(comptime config: FrameConfig) type {
                 var start_index: usize = 0;
                 switch (schedule[0]) {
                     .first_block_gas => |meta| {
+                        log.debug("First block gas charge: {d} (current gas: {d})", .{meta.gas, self.gas_remaining});
                         if (meta.gas > 0) try self.consumeGasChecked(meta.gas);
+                        log.debug("Gas after first block charge: {d}", .{self.gas_remaining});
                         start_index = 1;
                     },
                     else => {},
@@ -517,7 +517,8 @@ pub fn StackFrame(comptime config: FrameConfig) type {
 
         /// Consume gas without checking (for use after static analysis)
         pub fn consumeGasUnchecked(self: *Self, amount: u64) void {
-            self.gas_remaining -= @as(GasType, @intCast(amount));
+            const clamped_amount = @min(amount, std.math.maxInt(GasType));
+            self.gas_remaining -= @as(GasType, @intCast(clamped_amount));
         }
 
         /// Consume gas with bounds checking and safe casting
@@ -532,16 +533,15 @@ pub fn StackFrame(comptime config: FrameConfig) type {
             return @as(*DefaultEvm, @ptrCast(@alignCast(self.evm_ptr)));
         }
         
-        /// Set output data (allocates on heap)
+        /// Set output data (allocates using arena allocator for automatic cleanup)
         pub fn setOutput(self: *Self, data: []const u8) Error!void {
-            if (self.output.len > 0) {
-                self.allocator.free(self.output);
-            }
             if (data.len == 0) {
                 self.output = &[_]u8{};
                 return;
             }
-            const new_output = self.allocator.alloc(u8, data.len) catch {
+            // Use arena allocator from EVM for automatic cleanup
+            const arena_allocator = self.getEvm().getCallArenaAllocator();
+            const new_output = arena_allocator.alloc(u8, data.len) catch {
                 return Error.AllocationError;
             };
             @memcpy(new_output, data);

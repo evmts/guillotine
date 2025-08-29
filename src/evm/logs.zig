@@ -9,6 +9,13 @@ pub const Log = struct {
     data: []const u8,
 };
 
+/// Sentinel value used for null-terminated log arrays in StackFrame
+pub const SENTINEL: Log = .{
+    .address = Address.ZERO_ADDRESS,
+    .topics = &[_]u256{},
+    .data = &[_]u8{},
+};
+
 test "Log creation and field access" {
     const allocator = std.testing.allocator;
     

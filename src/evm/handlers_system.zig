@@ -543,10 +543,10 @@ pub fn Handlers(comptime FrameType: type) type {
         /// Stack: [offset, size] → []
         pub fn @"return"(self: *FrameType, dispatch: Dispatch) Error!Success {
             _ = dispatch;
-            log.debug("RETURN handler called, stack size: {}", .{self.stack.size()});
+            log.debug("RETURN handler called, stack size: {d}", .{self.stack.size()});
             const size = try self.stack.pop();
             const offset = try self.stack.pop();
-            log.debug("RETURN: offset={}, size={}", .{offset, size});
+            log.debug("RETURN: offset={d}, size={d}", .{offset, size});
 
             // Bounds checking for memory offset and size
             if (offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
@@ -556,36 +556,41 @@ pub fn Handlers(comptime FrameType: type) type {
             const offset_usize = @as(usize, @intCast(offset));
             const size_usize = @as(usize, @intCast(size));
 
-            // Ensure memory capacity
+            // Calculate gas cost for memory expansion
             const memory_end = offset_usize + size_usize;
+            const memory_expansion_cost = self.memory.get_expansion_cost(@as(u24, @intCast(memory_end)));
+            if (self.gas_remaining < memory_expansion_cost) {
+                log.debug("RETURN: Out of gas for memory expansion. Required: {d}, Available: {d}", .{memory_expansion_cost, self.gas_remaining});
+                return Error.OutOfGas;
+            }
+            self.gas_remaining -= @intCast(memory_expansion_cost);
+            log.debug("RETURN: Charged {d} gas for memory expansion", .{memory_expansion_cost});
+
+            // Ensure memory capacity
             self.memory.ensure_capacity(self.allocator, @as(u24, @intCast(memory_end))) catch return Error.OutOfBounds;
 
             // Extract return data from memory and store it
             if (size_usize > 0) {
-                log.debug("RETURN: Getting memory slice at offset {} size {}", .{offset_usize, size_usize});
-                log.debug("RETURN: Memory size before get_slice: {}", .{self.memory.size()});
+                log.debug("RETURN: Getting memory slice at offset {d} size {d}", .{offset_usize, size_usize});
+                log.debug("RETURN: Memory size before get_slice: {d}", .{self.memory.size()});
                 const return_data = self.memory.get_slice(@as(u24, @intCast(offset_usize)), @as(u24, @intCast(size_usize))) catch {
-                    log.err("RETURN: Failed to get memory slice at offset {} size {}", .{offset_usize, size_usize});
+                    log.err("RETURN: Failed to get memory slice at offset {d} size {d}", .{offset_usize, size_usize});
                     return Error.OutOfBounds;
                 };
-                log.debug("RETURN: Got memory slice, length: {}, data: {x}", .{return_data.len, return_data});
-                // Free previous output if any
-                if (self.output.len > 0) {
-                    self.allocator.free(self.output);
-                }
-                // Store the return data
-                self.output = self.allocator.alloc(u8, return_data.len) catch {
+                log.debug("RETURN: Got memory slice, length: {d}, data: {x}", .{return_data.len, return_data});
+                // Use the setOutput method to properly allocate output
+                self.setOutput(return_data) catch {
+                    log.err("RETURN: Failed to set output data", .{});
                     return Error.AllocationError;
                 };
-                @memcpy(self.output, return_data);
-                log.debug("RETURN: Stored {} bytes to output", .{return_data.len});
+                log.debug("RETURN: Stored {d} bytes to output", .{return_data.len});
                 log.debug("RETURN: self.output data: {x}", .{self.output});
             } else {
                 // Empty return data
-                if (self.output.len > 0) {
-                    self.allocator.free(self.output);
-                }
-                self.output = &[_]u8{};
+                self.setOutput(&[_]u8{}) catch {
+                    log.err("RETURN: Failed to set empty output data", .{});
+                    return Error.AllocationError;
+                };
                 log.debug("RETURN: Empty return data", .{});
             }
 
@@ -608,8 +613,15 @@ pub fn Handlers(comptime FrameType: type) type {
             const offset_usize = @as(usize, @intCast(offset));
             const size_usize = @as(usize, @intCast(size));
 
-            // Ensure memory capacity
+            // Calculate gas cost for memory expansion
             const memory_end = offset_usize + size_usize;
+            const memory_expansion_cost = self.memory.get_expansion_cost(@as(u24, @intCast(memory_end)));
+            if (self.gas_remaining < memory_expansion_cost) {
+                return Error.OutOfGas;
+            }
+            self.gas_remaining -= @intCast(memory_expansion_cost);
+
+            // Ensure memory capacity
             self.memory.ensure_capacity(self.allocator, @as(u24, @intCast(memory_end))) catch return Error.OutOfBounds;
 
             // Extract revert data from memory and store it
