@@ -286,16 +286,6 @@ pub fn Frame(comptime config: FrameConfig) type {
                 log.debug("DISPATCH INIT COMPLETE: schedule len={d}, opcode_count={d}", .{ schedule.len, bytecode.runtime_code.len });
                 defer Dispatch.deinitSchedule(self.allocator, schedule);
                 
-                // Pretty print the dispatch schedule for debugging
-                if (true) { // Always enabled for debugging the segfault
-                    var temp_schedule = Dispatch.DispatchSchedule{
-                        .items = schedule,
-                        .allocator = self.allocator,
-                    };
-                    const schedule_str = temp_schedule.pretty_print(self.allocator) catch "Failed to pretty print";
-                    defer if (!std.mem.eql(u8, schedule_str, "Failed to pretty print")) self.allocator.free(schedule_str);
-                    log.warn("Dispatch Schedule:\n{s}", .{schedule_str});
-                }
                 if (schedule.len < 3) {
                     log.err("Dispatch schedule is too short! len={d}", .{schedule.len});
                     log.err("  Bytecode len: {d}", .{bytecode.runtime_code.len});

@@ -1023,69 +1023,6 @@ pub fn Dispatch(comptime FrameType: type) type {
                 };
             }
             
-            /// Pretty print the dispatch schedule for debugging
-            /// Returns an allocated string that must be freed by the caller
-            pub fn pretty_print(self: *const DispatchSchedule, allocator: std.mem.Allocator) ![]u8 {
-                var buffer = ArrayList(u8, null){};
-                errdefer buffer.deinit(allocator);
-                
-                const writer = buffer.writer(allocator);
-                try writer.print("=== Dispatch Schedule ({} items) ===\n", .{self.items.len});
-                
-                for (self.items, 0..) |item, i| {
-                    try writer.print("[{:4}] ", .{i});
-                    switch (item) {
-                        .opcode_handler => |handler| {
-                            // Get handler name if we can identify it
-                            const handler_name = getHandlerName(handler);
-                            try writer.print("HANDLER: {s}\n", .{handler_name});
-                        },
-                        .push_inline => |meta| {
-                            try writer.print("  └─ METADATA: push_inline value=0x{x} ({})\n", .{meta.value, meta.value});
-                        },
-                        .push_pointer => |meta| {
-                            try writer.print("  └─ METADATA: push_pointer value=0x{x}\n", .{meta.value.*});
-                        },
-                        .jump_dest => |meta| {
-                            try writer.print("  └─ METADATA: jump_dest gas={} min_stack={} max_stack={}\n", 
-                                .{meta.gas, meta.min_stack, meta.max_stack});
-                        },
-                        .pc => |meta| {
-                            try writer.print("  └─ METADATA: pc value={}\n", .{meta.value});
-                        },
-                        .codesize => |meta| {
-                            try writer.print("  └─ METADATA: codesize={}\n", .{meta.size});
-                        },
-                        .codecopy => |meta| {
-                            try writer.print("  └─ METADATA: codecopy size={}\n", .{meta.size});
-                        },
-                        .first_block_gas => |meta| {
-                            try writer.print("FIRST_BLOCK_GAS: {}\n", .{meta.gas});
-                        },
-                        .trace_before => |meta| {
-                            try writer.print("  └─ TRACE_BEFORE: pc={} opcode=0x{x:0>2}\n", .{meta.pc, meta.opcode});
-                        },
-                        .trace_after => |meta| {
-                            try writer.print("  └─ TRACE_AFTER: pc={} opcode=0x{x:0>2}\n", .{meta.pc, meta.opcode});
-                        },
-                        .jump_table => |meta| {
-                            try writer.print("  └─ METADATA: jump_table=@{*}\n", .{meta.jump_table});
-                        },
-                    }
-                }
-                
-                try writer.print("=== End Dispatch Schedule ===\n", .{});
-                
-                return buffer.toOwnedSlice(allocator);
-            }
-            
-            /// Helper to get a human-readable name for a handler function pointer
-            fn getHandlerName(handler: OpcodeHandler) []const u8 {
-                _ = handler;
-                // Simplified version to avoid compile-time evaluation issues
-                // Just return generic handler name for now
-                return "HANDLER";
-            }
         };
 
         /// Iterator for traversing schedule alongside bytecode
