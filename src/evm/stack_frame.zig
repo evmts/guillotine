@@ -98,7 +98,7 @@ pub fn StackFrame(comptime config: FrameConfig) type {
             GasOverflow,
             InvalidAmount,
             WriteProtection,
-        };
+        } || (if (config.TracerType != null) error{ExecutionPaused} else error{});
 
         pub const opcode_handlers = blk: {
             @setEvalBranchQuota(10000);
@@ -259,6 +259,7 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         stack: Stack,
         bytecode: Bytecode, // Use Bytecode type for optimized access
         gas_remaining: GasType, // Direct gas tracking
+        current_pc: if (config.TracerType != null) u32 else void = if (config.TracerType != null) 0 else {}, // Track PC when tracing
         /// Initial gas at frame start for refund cap calculation
         initial_gas: GasType = 0,
         tracer: if (config.TracerType) |T| T else void,
@@ -593,6 +594,15 @@ pub fn StackFrame(comptime config: FrameConfig) type {
 
         // Bitwise operation synthetic handlers
 
+        /// Trace handler called before each opcode execution
+        pub fn trace_before_handler(self: *Self, dispatch: Dispatch) Error!Success {
+            return @import("tracer_hooks.zig").trace_before_handler(Self, self, dispatch);
+        }
+
+        /// Trace handler called after each opcode execution  
+        pub fn trace_after_handler(self: *Self, dispatch: Dispatch) Error!Success {
+            return @import("tracer_hooks.zig").trace_after_handler(Self, self, dispatch);
+        }
     };
 }
 

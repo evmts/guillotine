@@ -210,6 +210,14 @@ pub fn Dispatch(comptime FrameType: type) type {
                 const maybe = iter.next();
                 if (maybe == null) break;
                 const op_data = maybe.?;
+                
+                // INJECT TRACE_BEFORE when tracing is enabled - once per bytecode instruction
+                if (comptime FrameType.config.TracerType != null) {
+                    // Store PC metadata for trace handler to read
+                    try schedule_items.append(.{ .pc = .{ .value = @intCast(instr_pc) } });
+                    try schedule_items.append(.{ .opcode_handler = @ptrCast(&FrameType.trace_before_handler) });
+                }
+                
                 switch (op_data) {
                     .regular => |data| {
                         // Regular opcode - add handler first, then metadata for PC
@@ -272,6 +280,11 @@ pub fn Dispatch(comptime FrameType: type) type {
                     .invalid => {
                         try schedule_items.append(.{ .opcode_handler = opcode_handlers.*[@intFromEnum(Opcode.INVALID)] });
                     },
+                }
+                
+                // INJECT TRACE_AFTER when tracing is enabled - once per bytecode instruction
+                if (comptime FrameType.config.TracerType != null) {
+                    try schedule_items.append(.{ .opcode_handler = @ptrCast(&FrameType.trace_after_handler) });
                 }
             }
 
