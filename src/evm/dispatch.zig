@@ -235,6 +235,10 @@ pub fn Dispatch(comptime FrameType: type) type {
             const log = @import("log.zig");
             log.debug("Dispatch.init starting...", .{});
 
+            // TEMPORARY: Force output to see if this code is reached
+            if (bytecode.runtime_code.len > 0) {
+                std.debug.print("DISPATCH INIT: bytecode len={d}\n", .{bytecode.runtime_code.len});
+            }
 
             var schedule_items = ArrayList(Self.Item, null){};
             errdefer schedule_items.deinit(allocator);
@@ -308,6 +312,7 @@ pub fn Dispatch(comptime FrameType: type) type {
                 }
                 const op_data = maybe.?;
                 opcode_count += 1;
+                // log.debug("Processing opcode at PC {}: {any}", .{instr_pc, op_data});
                 switch (op_data) {
                     .regular => |data| {
                         // Regular opcode - add handler first, then metadata for PC, CODESIZE, CODECOPY
@@ -403,7 +408,7 @@ pub fn Dispatch(comptime FrameType: type) type {
                         .opcode_handler => |h| std.debug.print("  [{}] handler: {*}\n", .{ idx, h }),
                         .push_pointer => |_| std.debug.print("  [{}] push_pointer\n", .{idx}),
                         .push_inline => |i| std.debug.print("  [{}] push_inline: {}\n", .{ idx, i.value }),
-                        else => std.debug.print("  [{}] {}\n", .{ idx, @tagName(item) }),
+                        else => std.debug.print("  [{}] {s}\n", .{ idx, @tagName(item) }),
                     }
                 }
             }
