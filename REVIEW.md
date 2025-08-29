@@ -70,7 +70,7 @@
 
 **src/evm/bytecode.zig (+ bytecode_config/stats)**
 - **Correctness:** Strong validation model (two-phase; safe in validation then unsafe in exec). Validates truncated PUSH and JUMPDEST mapping. Ensure `parseSolidityMetadataFromBytes` is present and thoroughly tested (referenced in `init`).
-- **Performance:** SIMD validation and bitmap ops with popcount/ctz; good. Prefetch constants defined; ensure actually used or remove.
+- **Performance:** Bitmap ops with popcount/ctz; good. Prefetch constants defined; ensure actually used or remove.
 - **Branch prediction:** Several `@branchHint(.unlikely)` guard error paths; keep that consistent.
 - **Docs:** Very comprehensive security notes.
 - **Tests:** Recommend adding tests for EOF-not-supported paths (explicitly returning errors) and metadata parsing edge cases.
@@ -203,7 +203,7 @@ Note: Full `zig build` and tests could not run here due to network restrictions 
   - Consider reserving `entries.ensureTotalCapacity` based on heuristic per tx (e.g., from instrumentation or previous block stats) to cut reallocs.
 
 - Bytecode Analyzer:
-  - You already use SIMD for opcode validation and fusion detection — great. The constants `CACHE_LINE_SIZE` and `PREFETCH_DISTANCE` are defined; add `@prefetch(&self.runtime_code[i + PREFETCH_DISTANCE], .{ .read = true, .temporal = true })` in the main analysis loop when bounds allow.
+  - The constants `CACHE_LINE_SIZE` and `PREFETCH_DISTANCE` are defined; add `@prefetch(&self.runtime_code[i + PREFETCH_DISTANCE], .{ .read = true, .temporal = true })` in the main analysis loop when bounds allow.
   - Persist the “is_op_start”/“is_jumpdest” bitmaps in a compact aligned buffer (already alignedAlloc) and consider compressing flags into a single bitmap with bit roles if memory pressure becomes a concern.
 
 - Interpreter Branch Prediction:
