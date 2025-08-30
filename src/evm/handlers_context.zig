@@ -1706,6 +1706,103 @@ test "RETURNDATACOPY opcode - strict bounds checking" {
     }
 }
 
+test "RETURNDATASIZE - comprehensive tests" {
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
+
+    // Test with empty return data
+    {
+        evm.return_data = &.{};
+        var frame = try createTestFrame(testing.allocator, &evm);
+        defer frame.deinit(testing.allocator);
+        
+        const dispatch = createMockDispatch();
+        _ = try TestFrame.ContextHandlers.returndatasize(frame, dispatch);
+        
+        const result = try frame.stack.pop();
+        try testing.expectEqual(@as(u256, 0), result);
+    }
+
+    // Test with various sizes
+    const test_sizes = [_]usize{ 1, 32, 64, 128, 256, 1024, 4096 };
+    for (test_sizes) |size| {
+        const data = try testing.allocator.alloc(u8, size);
+        defer testing.allocator.free(data);
+        @memset(data, 0xAB);
+        
+        evm.return_data = data;
+        var frame = try createTestFrame(testing.allocator, &evm);
+        defer frame.deinit(testing.allocator);
+        
+        const dispatch = createMockDispatch();
+        _ = try TestFrame.ContextHandlers.returndatasize(frame, dispatch);
+        
+        const result = try frame.stack.pop();
+        try testing.expectEqual(@as(u256, size), result);
+    }
+}
+
+test "RETURNDATACOPY - comprehensive tests" {
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
+
+    // Test copying entire return data
+    {
+        const return_data = [_]u8{ 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88 };
+        evm.return_data = &return_data;
+        
+        var frame = try createTestFrame(testing.allocator, &evm);
+        defer frame.deinit(testing.allocator);
+        
+        try frame.stack.push(0); // destOffset
+        try frame.stack.push(0); // offset
+        try frame.stack.push(8); // length
+        
+        const dispatch = createMockDispatch();
+        _ = try TestFrame.ContextHandlers.returndatacopy(frame, dispatch);
+        
+        const mem_slice = try frame.memory.get_slice(0, 8);
+        try testing.expectEqualSlices(u8, &return_data, mem_slice);
+    }
+    
+    // Test partial copy with offset
+    {
+        const return_data = [_]u8{ 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF };
+        evm.return_data = &return_data;
+        
+        var frame = try createTestFrame(testing.allocator, &evm);
+        defer frame.deinit(testing.allocator);
+        
+        try frame.stack.push(10); // destOffset  
+        try frame.stack.push(2); // offset (skip first 2 bytes)
+        try frame.stack.push(3); // length
+        
+        const dispatch = createMockDispatch();
+        _ = try TestFrame.ContextHandlers.returndatacopy(frame, dispatch);
+        
+        const mem_slice = try frame.memory.get_slice(10, 3);
+        try testing.expectEqualSlices(u8, &[_]u8{ 0xCC, 0xDD, 0xEE }, mem_slice);
+    }
+    
+    // Test zero-length copy (should succeed)
+    {
+        const return_data = [_]u8{ 0x42 };
+        evm.return_data = &return_data;
+        
+        var frame = try createTestFrame(testing.allocator, &evm);
+        defer frame.deinit(testing.allocator);
+        
+        try frame.stack.push(0); // destOffset
+        try frame.stack.push(0); // offset
+        try frame.stack.push(0); // length = 0
+        
+        const dispatch = createMockDispatch();
+        _ = try TestFrame.ContextHandlers.returndatacopy(frame, dispatch);
+        
+        // Should not error
+    }
+}
+
 test "BLOCKHASH opcode - edge cases" {
     var evm = MockEvm.init(testing.allocator);
     defer evm.deinit();

@@ -1625,6 +1625,136 @@ test "CREATE2 opcode - static context" {
     try testing.expectError(TestFrame.Error.WriteProtection, result);
 }
 
+test "DELEGATECALL - comprehensive tests" {
+    var evm = MockEvm.init(testing.allocator);
+    var frame = try createTestFrame(testing.allocator, &evm);
+    defer frame.deinit(testing.allocator);
+
+    // Test successful delegatecall
+    {
+        evm.call_result.success = true;
+        evm.call_result.gas_left = 50000;
+        evm.call_result.output = "delegated result";
+        
+        const input_data = "test input";
+        try frame.memory.set_data(frame.allocator, 0, input_data);
+        
+        try frame.stack.push(75000);  // gas
+        try frame.stack.push(0x5678); // address  
+        try frame.stack.push(0);      // input_offset
+        try frame.stack.push(input_data.len); // input_size
+        try frame.stack.push(100);    // output_offset
+        try frame.stack.push(32);     // output_size
+        
+        const dispatch = createMockDispatch();
+        const result = try TestFrame.SystemHandlers.delegatecall(frame, dispatch);
+        
+        try testing.expect(result == TestFrame.Success.stop);
+        try testing.expectEqual(@as(u256, 1), try frame.stack.pop());
+        
+        // Check return data was stored
+        try testing.expectEqualSlices(u8, "delegated result", frame.output);
+        
+        // Check gas was updated
+        try testing.expectEqual(@as(i64, 50000), frame.gas_remaining);
+    }
+    
+    // Test failed delegatecall
+    {
+        evm.call_result.success = false;
+        evm.call_result.gas_left = 0;
+        evm.call_result.output = "failure reason";
+        
+        // Reset stack
+        while (frame.stack.len() > 0) {
+            _ = try frame.stack.pop();
+        }
+        
+        try frame.stack.push(50000);  // gas
+        try frame.stack.push(0xDEAD); // address
+        try frame.stack.push(0);      // input_offset
+        try frame.stack.push(0);      // input_size
+        try frame.stack.push(0);      // output_offset
+        try frame.stack.push(0);      // output_size
+        
+        const dispatch = createMockDispatch();
+        const result = try TestFrame.SystemHandlers.delegatecall(frame, dispatch);
+        
+        try testing.expect(result == TestFrame.Success.stop);
+        try testing.expectEqual(@as(u256, 0), try frame.stack.pop()); // failure
+        
+        // Return data should still be stored even on failure
+        try testing.expectEqualSlices(u8, "failure reason", frame.output);
+    }
+}
+
+test "STATICCALL - comprehensive tests" {
+    var evm = MockEvm.init(testing.allocator);
+    var frame = try createTestFrame(testing.allocator, &evm);
+    defer frame.deinit(testing.allocator);
+
+    // Test successful staticcall
+    {
+        evm.call_result.success = true;
+        evm.call_result.gas_left = 40000;
+        evm.call_result.output = "static result";
+        
+        const input_data = "query data";
+        try frame.memory.set_data(frame.allocator, 0, input_data);
+        
+        try frame.stack.push(60000);  // gas
+        try frame.stack.push(0xABCD); // address
+        try frame.stack.push(0);      // input_offset
+        try frame.stack.push(input_data.len); // input_size
+        try frame.stack.push(50);     // output_offset
+        try frame.stack.push(20);     // output_size
+        
+        const dispatch = createMockDispatch();
+        const result = try TestFrame.SystemHandlers.staticcall(frame, dispatch);
+        
+        try testing.expect(result == TestFrame.Success.stop);
+        try testing.expectEqual(@as(u256, 1), try frame.stack.pop());
+        
+        // Check return data was stored
+        try testing.expectEqualSlices(u8, "static result", frame.output);
+        
+        // Check gas was updated
+        try testing.expectEqual(@as(i64, 40000), frame.gas_remaining);
+        
+        // Check output was written to memory (limited to output_size)
+        const mem_result = try frame.memory.get_slice(50, "static result".len);
+        try testing.expectEqualSlices(u8, "static result", mem_result);
+    }
+    
+    // Test staticcall with no input/output
+    {
+        evm.call_result.success = true;
+        evm.call_result.gas_left = 30000;
+        evm.call_result.output = &.{};
+        
+        // Reset stack
+        while (frame.stack.len() > 0) {
+            _ = try frame.stack.pop();
+        }
+        
+        try frame.stack.push(50000);  // gas
+        try frame.stack.push(0x1234); // address
+        try frame.stack.push(0);      // input_offset
+        try frame.stack.push(0);      // input_size (no input)
+        try frame.stack.push(0);      // output_offset
+        try frame.stack.push(0);      // output_size (no output)
+        
+        const dispatch = createMockDispatch();
+        const result = try TestFrame.SystemHandlers.staticcall(frame, dispatch);
+        
+        try testing.expect(result == TestFrame.Success.stop);
+        try testing.expectEqual(@as(u256, 1), try frame.stack.pop());
+        
+        // Check empty return data
+        try testing.expectEqual(@as(usize, 0), frame.output.len);
+    }
+}
+
 // Edge case tests
 test "System opcodes - stack underflow" {
     var evm = MockEvm.init(testing.allocator);
