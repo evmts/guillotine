@@ -2471,3 +2471,478 @@ pub fn ScheduleElement(comptime FrameType: type) type {
     const DispatchType = Dispatch(FrameType);
     return DispatchType.Item;
 }
+
+// ========================
+// Additional Comprehensive Tests
+// ========================
+
+test "Dispatch - getNextSafe error handling" {
+    const dispatch = TestDispatch{ 
+        .cursor = @ptrFromInt(0x100), // Low address that should trigger error
+        .jump_table = null,
+    };
+    
+    // Should return InvalidCursor for low address
+    const result = dispatch.getNextSafe();
+    try testing.expectError(error.InvalidCursor, result);
+}
+
+test "Dispatch - getNextSafe with valid handler" {
+    const handlers = createTestHandlers();
+    var dispatch_items = [_]TestDispatch.Item{
+        .{ .opcode_handler = &handlers[0] }, // Valid handler
+        .{ .opcode_handler = &handlers[0] }, // Next valid handler
+    };
+    
+    const dispatch = TestDispatch{
+        .cursor = &dispatch_items[0],
+        .jump_table = null,
+    };
+    
+    const next = try dispatch.getNextSafe();
+    try testing.expect(@intFromPtr(next.cursor) == @intFromPtr(&dispatch_items[1]));
+}
+
+test "Dispatch - getNextSafe with metadata should fail" {
+    var dispatch_items = [_]TestDispatch.Item{
+        .{ .push_inline = .{ .value = 123 } }, // Metadata, not handler
+        .{ .opcode_handler = &mockAdd },
+    };
+    
+    const dispatch = TestDispatch{
+        .cursor = &dispatch_items[0],
+        .jump_table = null,
+    };
+    
+    const result = dispatch.getNextSafe();
+    try testing.expectError(error.MetadataNotHandler, result);
+}
+
+test "Dispatch - metadata boundary values" {
+    // Test maximum values for packed metadata structures
+    const max_gas: u32 = std.math.maxInt(u32);
+    const max_stack: i16 = std.math.maxInt(i16);
+    const min_stack: i16 = std.math.minInt(i16);
+    
+    const jump_metadata = TestDispatch.JumpDestMetadata{
+        .gas = max_gas,
+        .min_stack = min_stack,
+        .max_stack = max_stack,
+    };
+    
+    // Verify packed structure maintains values
+    try testing.expect(jump_metadata.gas == max_gas);
+    try testing.expect(jump_metadata.min_stack == min_stack);
+    try testing.expect(jump_metadata.max_stack == max_stack);
+    
+    // Test PC metadata with maximum PC type value
+    const max_pc = std.math.maxInt(TestDispatch.PcMetadata.value);
+    const pc_metadata = TestDispatch.PcMetadata{ .value = max_pc };
+    try testing.expect(pc_metadata.value == max_pc);
+}
+
+test "Dispatch - comprehensive fusion operation testing" {
+    const allocator = testing.allocator;
+    const handlers = createTestHandlersWithSynthetic();
+    const Bytecode = bytecode_mod.Bytecode(TestFrame.BytecodeConfig);
+    
+    // Test all fusion types with both inline and pointer values
+    const test_cases = [_]struct {
+        bytecode: []const u8,
+        expected_fusion: u8,
+        expected_inline: bool,
+    }{
+        // Small values that fit inline
+        .{ .bytecode = &[_]u8{ 0x60, 0x01, 0x01 }, .expected_fusion = @intFromEnum(OpcodeSynthetic.PUSH_ADD_INLINE), .expected_inline = true }, // PUSH1 1, ADD
+        .{ .bytecode = &[_]u8{ 0x60, 0xFF, 0x02 }, .expected_fusion = @intFromEnum(OpcodeSynthetic.PUSH_MUL_INLINE), .expected_inline = true }, // PUSH1 255, MUL
+        .{ .bytecode = &[_]u8{ 0x60, 0x10, 0x03 }, .expected_fusion = @intFromEnum(OpcodeSynthetic.PUSH_SUB_INLINE), .expected_inline = true }, // PUSH1 16, SUB
+        .{ .bytecode = &[_]u8{ 0x60, 0x08, 0x04 }, .expected_fusion = @intFromEnum(OpcodeSynthetic.PUSH_DIV_INLINE), .expected_inline = true }, // PUSH1 8, DIV
+        .{ .bytecode = &[_]u8{ 0x60, 0x0F, 0x16 }, .expected_fusion = @intFromEnum(OpcodeSynthetic.PUSH_AND_INLINE), .expected_inline = true }, // PUSH1 15, AND
+        .{ .bytecode = &[_]u8{ 0x60, 0xF0, 0x17 }, .expected_fusion = @intFromEnum(OpcodeSynthetic.PUSH_OR_INLINE), .expected_inline = true }, // PUSH1 240, OR
+        .{ .bytecode = &[_]u8{ 0x60, 0xA5, 0x18 }, .expected_fusion = @intFromEnum(OpcodeSynthetic.PUSH_XOR_INLINE), .expected_inline = true }, // PUSH1 165, XOR
+    };
+    
+    for (test_cases) |test_case| {
+        var bytecode = try Bytecode.init(allocator, test_case.bytecode);
+        defer bytecode.deinit();
+        
+        const dispatch_items = try TestDispatch.init(allocator, &bytecode, &handlers);
+        defer TestDispatch.deinitSchedule(allocator, dispatch_items);
+        
+        // Should have handler + metadata + 2 STOP terminators
+        try testing.expect(dispatch_items.len >= 4);
+        
+        // First item should be the synthetic handler
+        switch (dispatch_items[0]) {
+            .opcode_handler => |handler| {
+                // Verify it's pointing to correct synthetic handler
+                try testing.expect(@intFromPtr(handler) == @intFromPtr(&handlers[test_case.expected_fusion]));
+            },
+            else => try testing.expect(false),
+        }
+        
+        // Second item should be appropriate metadata
+        if (test_case.expected_inline) {
+            switch (dispatch_items[1]) {
+                .push_inline => |metadata| {
+                    try testing.expect(metadata.value > 0);
+                },
+                else => try testing.expect(false),
+            }
+        }
+    }
+}
+
+test "Dispatch - large value fusion operations use pointers" {
+    const allocator = testing.allocator;
+    const handlers = createTestHandlersWithSynthetic();
+    const Bytecode = bytecode_mod.Bytecode(TestFrame.BytecodeConfig);
+    
+    // Create PUSH9 with large value that requires pointer storage
+    var large_value_bytecode = std.ArrayList(u8).init(allocator);
+    defer large_value_bytecode.deinit();
+    
+    try large_value_bytecode.append(0x68); // PUSH9
+    // Add 9 bytes of large value (> u64 max)
+    try large_value_bytecode.appendSlice(&[_]u8{ 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01 });
+    try large_value_bytecode.append(0x01); // ADD
+    
+    var bytecode = try Bytecode.init(allocator, large_value_bytecode.items);
+    defer bytecode.deinit();
+    
+    const dispatch_items = try TestDispatch.init(allocator, &bytecode, &handlers);
+    defer {
+        // Clean up allocated pointers
+        for (dispatch_items) |item| {
+            switch (item) {
+                .push_pointer => |ptr_meta| allocator.destroy(ptr_meta.value),
+                else => {},
+            }
+        }
+        TestDispatch.deinitSchedule(allocator, dispatch_items);
+    }
+    
+    // Should use pointer-based synthetic opcode
+    try testing.expect(dispatch_items.len >= 4);
+    
+    // Verify synthetic handler is for pointer variant
+    switch (dispatch_items[0]) {
+        .opcode_handler => |handler| {
+            const expected_opcode = @intFromEnum(OpcodeSynthetic.PUSH_ADD_POINTER);
+            try testing.expect(@intFromPtr(handler) == @intFromPtr(&handlers[expected_opcode]));
+        },
+        else => try testing.expect(false),
+    }
+    
+    // Verify pointer metadata
+    switch (dispatch_items[1]) {
+        .push_pointer => |ptr_meta| {
+            try testing.expect(ptr_meta.value.* > std.math.maxInt(u64));
+        },
+        else => try testing.expect(false),
+    }
+}
+
+test "Dispatch - initWithTracing comprehensive coverage" {
+    const allocator = testing.allocator;
+    const handlers = createTestHandlers();
+    const Bytecode = bytecode_mod.Bytecode(TestFrame.BytecodeConfig);
+    
+    // Mock tracer for testing
+    const MockTracer = struct {
+        call_count: usize = 0,
+        
+        pub fn beforeOp(self: *@This(), comptime _: type, _: *const anyopaque) void {
+            self.call_count += 1;
+        }
+        
+        pub fn afterOp(self: *@This(), comptime _: type, _: *const anyopaque) void {
+            self.call_count += 1;
+        }
+    };
+    
+    var tracer = MockTracer{};
+    
+    // Create bytecode with various opcodes that should be traced
+    const test_bytecode = [_]u8{
+        0x60, 0x42, // PUSH1 66
+        0x01,       // ADD  
+        0x5B,       // JUMPDEST
+        0x00,       // STOP
+    };
+    
+    var bytecode = try Bytecode.init(allocator, &test_bytecode);
+    defer bytecode.deinit();
+    
+    const traced_schedule = try TestDispatch.initWithTracing(allocator, &bytecode, &handlers, MockTracer, &tracer);
+    defer TestDispatch.deinitSchedule(allocator, traced_schedule);
+    
+    // Verify traced schedule has trace handlers inserted
+    // Should have: first_block_gas + [trace_before, opcode, trace_after] for each opcode + terminators
+    try testing.expect(traced_schedule.len > 10);
+    
+    // Check for trace handler entries
+    var trace_handler_count: usize = 0;
+    for (traced_schedule) |item| {
+        switch (item) {
+            .trace_before, .trace_after => trace_handler_count += 1,
+            else => {},
+        }
+    }
+    try testing.expect(trace_handler_count > 0);
+}
+
+test "Dispatch - calculateFirstBlockGas edge cases" {
+    const allocator = testing.allocator;
+    const Bytecode = bytecode_mod.Bytecode(TestFrame.BytecodeConfig);
+    
+    // Test empty bytecode
+    {
+        var bytecode = try Bytecode.init(allocator, &[_]u8{});
+        defer bytecode.deinit();
+        
+        const gas = TestDispatch.calculateFirstBlockGas(&bytecode);
+        try testing.expect(gas == 0);
+    }
+    
+    // Test bytecode that terminates immediately
+    {
+        var bytecode = try Bytecode.init(allocator, &[_]u8{0x00}); // STOP
+        defer bytecode.deinit();
+        
+        const gas = TestDispatch.calculateFirstBlockGas(&bytecode);
+        try testing.expect(gas == 0); // STOP has 0 gas cost
+    }
+    
+    // Test bytecode with overflow scenario
+    {
+        // Create very long bytecode that would overflow gas calculation
+        var long_bytecode = std.ArrayList(u8).init(allocator);
+        defer long_bytecode.deinit();
+        
+        // Fill with expensive operations
+        const operations_count = 100000;
+        for (0..operations_count) |_| {
+            try long_bytecode.append(0x20); // KECCAK256 (expensive operation)
+        }
+        
+        var bytecode = try Bytecode.init(allocator, long_bytecode.items);
+        defer bytecode.deinit();
+        
+        const gas = TestDispatch.calculateFirstBlockGas(&bytecode);
+        try testing.expect(gas == std.math.maxInt(u64)); // Should overflow to max
+    }
+    
+    // Test termination at JUMPDEST
+    {
+        const test_bytecode = [_]u8{
+            0x01, // ADD (3 gas)
+            0x02, // MUL (5 gas) 
+            0x5B, // JUMPDEST (terminates block)
+            0x01, // ADD (should not be counted)
+        };
+        
+        var bytecode = try Bytecode.init(allocator, &test_bytecode);
+        defer bytecode.deinit();
+        
+        const gas = TestDispatch.calculateFirstBlockGas(&bytecode);
+        try testing.expect(gas == 8); // 3 + 5, JUMPDEST terminates but doesn't count
+    }
+}
+
+test "Dispatch - buildPCMapping comprehensive coverage" {
+    const allocator = testing.allocator;
+    const handlers = createTestHandlersWithSynthetic();
+    const Bytecode = bytecode_mod.Bytecode(TestFrame.BytecodeConfig);
+    
+    // Complex bytecode with various opcode types
+    const test_bytecode = [_]u8{
+        0x60, 0x42, // PUSH1 66  (PC 0)
+        0x01,       // ADD       (PC 2) - will be fused with PUSH
+        0x61, 0x01, 0x23, // PUSH2 0x0123 (PC 3)
+        0x5B,       // JUMPDEST  (PC 6) 
+        0x58,       // PC        (PC 7)
+        0x00,       // STOP      (PC 8)
+    };
+    
+    var bytecode = try Bytecode.init(allocator, &test_bytecode);
+    defer bytecode.deinit();
+    
+    const schedule = try TestDispatch.init(allocator, &bytecode, &handlers);
+    defer {
+        // Clean up pointer metadata
+        for (schedule) |item| {
+            switch (item) {
+                .push_pointer => |ptr_meta| allocator.destroy(ptr_meta.value),
+                else => {},
+            }
+        }
+        TestDispatch.deinitSchedule(allocator, schedule);
+    }
+    
+    const pc_mapping = try TestDispatch.buildPCMapping(allocator, schedule, &bytecode);
+    defer allocator.free(pc_mapping);
+    
+    // Verify mapping contains expected entries
+    try testing.expect(pc_mapping.len > 0);
+    
+    // Check for various opcode types in mapping
+    var has_synthetic = false;
+    var has_regular = false;
+    var has_push = false;
+    var has_jumpdest = false;
+    
+    for (pc_mapping) |entry| {
+        if (entry.is_synthetic) has_synthetic = true;
+        
+        switch (entry.opcode) {
+            0x60...0x7F => has_push = true, // PUSH opcodes
+            @intFromEnum(Opcode.JUMPDEST) => has_jumpdest = true,
+            @intFromEnum(Opcode.PC), @intFromEnum(Opcode.STOP) => has_regular = true,
+            else => {},
+        }
+    }
+    
+    try testing.expect(has_synthetic); // Should have fusion operations
+    try testing.expect(has_regular);   // Should have regular opcodes
+    try testing.expect(has_push);      // Should have push opcodes
+    try testing.expect(has_jumpdest);  // Should have JUMPDEST
+}
+
+test "Dispatch - error resilience and allocation failures" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    _ = arena.allocator(); // Used for arena setup
+    const Bytecode = bytecode_mod.Bytecode(TestFrame.BytecodeConfig);
+    
+    // Test allocation failure during schedule creation
+    var failing_allocator = testing.FailingAllocator.init(testing.allocator, .{ .fail_index = 5 });
+    
+    const handlers = createTestHandlers();
+    const test_bytecode = [_]u8{
+        0x60, 0x01, // PUSH1 1
+        0x60, 0x02, // PUSH1 2  
+        0x01,       // ADD
+        0x00,       // STOP
+    };
+    
+    var bytecode = try Bytecode.init(testing.allocator, &test_bytecode);
+    defer bytecode.deinit();
+    
+    const result = TestDispatch.init(failing_allocator.allocator(), &bytecode, &handlers);
+    try testing.expectError(error.OutOfMemory, result);
+}
+
+test "Dispatch - Item union size and alignment verification" {
+    // Verify compile-time constraints are met
+    const item_size = @sizeOf(TestDispatch.Item);
+    const item_align = @alignOf(TestDispatch.Item);
+    const ptr_size = @sizeOf(*anyopaque);
+    
+    // Item should be large enough for all variants
+    try testing.expect(item_size >= ptr_size + 1); // At least pointer + tag
+    try testing.expect(item_align >= @alignOf(*anyopaque));
+    
+    // All metadata types should be exactly 64 bits
+    try testing.expect(@sizeOf(TestDispatch.JumpDestMetadata) == 8);
+    try testing.expect(@sizeOf(TestDispatch.PushInlineMetadata) == 8);
+    try testing.expect(@sizeOf(TestDispatch.PushPointerMetadata) == 8);
+    try testing.expect(@sizeOf(TestDispatch.TraceBeforeMetadata) == 8);
+    try testing.expect(@sizeOf(TestDispatch.TraceAfterMetadata) == 8);
+    try testing.expect(@sizeOf(TestDispatch.JumpTableMetadata) == 8);
+}
+
+test "Dispatch - complex bytecode patterns with all opcode types" {
+    const allocator = testing.allocator;
+    const handlers = createTestHandlersWithSynthetic();
+    const Bytecode = bytecode_mod.Bytecode(TestFrame.BytecodeConfig);
+    
+    // Comprehensive bytecode with all supported patterns
+    var complex_bytecode = std.ArrayList(u8).init(allocator);
+    defer complex_bytecode.deinit();
+    
+    // Add various opcodes that trigger different dispatch behaviors
+    try complex_bytecode.appendSlice(&[_]u8{ 0x58 }); // PC
+    try complex_bytecode.appendSlice(&[_]u8{ 0x38 }); // CODESIZE  
+    try complex_bytecode.appendSlice(&[_]u8{ 0x60, 0x20, 0x60, 0x00, 0x39 }); // PUSH1 32, PUSH1 0, CODECOPY
+    try complex_bytecode.appendSlice(&[_]u8{ 0x5B }); // JUMPDEST
+    try complex_bytecode.appendSlice(&[_]u8{ 0x60, 0x42, 0x01 }); // PUSH1 66, ADD (fusion)
+    try complex_bytecode.appendSlice(&[_]u8{ 0x69 }); // PUSH10 (will need 10 data bytes)
+    for (0..10) |i| {
+        try complex_bytecode.append(@intCast(i + 1));
+    }
+    try complex_bytecode.append(0x02); // MUL (should fuse with PUSH10)
+    try complex_bytecode.appendSlice(&[_]u8{ 0x56 }); // JUMP
+    try complex_bytecode.appendSlice(&[_]u8{ 0x60, 0x01, 0x57 }); // PUSH1 1, JUMPI
+    try complex_bytecode.appendSlice(&[_]u8{ 0xFE }); // INVALID
+    try complex_bytecode.appendSlice(&[_]u8{ 0x00 }); // STOP
+    
+    var bytecode = try Bytecode.init(allocator, complex_bytecode.items);
+    defer bytecode.deinit();
+    
+    const schedule = try TestDispatch.init(allocator, &bytecode, &handlers);
+    defer {
+        // Clean up pointer metadata
+        for (schedule) |item| {
+            switch (item) {
+                .push_pointer => |ptr_meta| allocator.destroy(ptr_meta.value),
+                else => {},
+            }
+        }
+        TestDispatch.deinitSchedule(allocator, schedule);
+    }
+    
+    // Verify comprehensive schedule was created
+    try testing.expect(schedule.len > 20); // Should have many items
+    
+    // Count different types of items
+    var handler_count: usize = 0;
+    var metadata_count: usize = 0;
+    var has_first_block_gas = false;
+    
+    for (schedule) |item| {
+        switch (item) {
+            .opcode_handler => handler_count += 1,
+            .first_block_gas => has_first_block_gas = true,
+            .pc, .codesize, .codecopy, .push_inline, .push_pointer, .jump_dest, .jump_table => metadata_count += 1,
+            .trace_before, .trace_after => {}, // Not present in non-tracing mode
+        }
+    }
+    
+    try testing.expect(has_first_block_gas);
+    try testing.expect(handler_count > 5); // Multiple handlers
+    try testing.expect(metadata_count > 5); // Multiple metadata entries
+}
+
+test "Dispatch - deinitSchedule memory management" {
+    const allocator = testing.allocator;
+    const handlers = createTestHandlers();
+    const Bytecode = bytecode_mod.Bytecode(TestFrame.BytecodeConfig);
+    
+    // Create bytecode that will allocate pointer metadata
+    const test_bytecode = [_]u8{
+        0x69, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01, // PUSH10 with large value
+        0x01, // ADD
+    };
+    
+    var bytecode = try Bytecode.init(allocator, &test_bytecode);
+    defer bytecode.deinit();
+    
+    const schedule = try TestDispatch.init(allocator, &bytecode, &handlers);
+    
+    // Verify pointer was allocated
+    var found_pointer = false;
+    for (schedule) |item| {
+        switch (item) {
+            .push_pointer => |ptr_meta| {
+                try testing.expect(ptr_meta.value.* != 0);
+                found_pointer = true;
+            },
+            else => {},
+        }
+    }
+    try testing.expect(found_pointer);
+    
+    // Clean up - this should not leak memory
+    TestDispatch.deinitSchedule(allocator, schedule);
+}
