@@ -177,6 +177,7 @@ test "Include fusion tests" {
 test "Include dedicated test modules" {
     _ = @import("evm_tests.zig");
     _ = @import("bytecode_tests.zig");
+    _ = @import("bytecode_jump_validation_tests.zig");
     // TODO: Update frame_tests.zig to work without Host
     // _ = @import("frame_tests.zig");
 }
