@@ -577,11 +577,13 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
                     const n: PcType = op - (@intFromEnum(Opcode.PUSH1) - 1);
                     if (i + n >= N) return error.TruncatedPush;
                     
-                    // Extract push value for immediate jump validation
+                    // Extract push value for immediate jump validation (only if fusions enabled)
                     var push_value: u256 = 0;
-                    var byte_idx: PcType = 0;
-                    while (byte_idx < n) : (byte_idx += 1) {
-                        push_value = (push_value << 8) | self.runtime_code[i + 1 + byte_idx];
+                    if (comptime fusions_enabled) {
+                        var byte_idx: PcType = 0;
+                        while (byte_idx < n) : (byte_idx += 1) {
+                            push_value = (push_value << 8) | self.runtime_code[i + 1 + byte_idx];
+                        }
                     }
                     
                     // Mark push data bytes
@@ -594,37 +596,36 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
                     
                     const push_end = i + 1 + n;
                     
-                    // Check for immediate jump patterns
-                    if (push_end < N) {
-                        const next_op = self.runtime_code[push_end];
-                        
-                        // Case 1: PUSH + JUMP
-                        if (next_op == @intFromEnum(Opcode.JUMP)) {
-                            const log = @import("log.zig");
-                            log.debug("Detected PUSH + JUMP at pc={}, push_value={}, next_op={x}", .{ i, push_value, next_op });
-                            // Validate jump target bounds
-                            if (push_value >= N) return error.InvalidJumpDestination;
-                            // Collect for JUMPDEST validation after first pass
-                            try immediate_jumps.append(self.allocator, @intCast(push_value));
+                    // ONLY check for immediate jump patterns if fusions are enabled
+                    // This is for optimization purposes, not correctness validation
+                    if (comptime fusions_enabled) {
+                        if (push_end < N) {
+                            const next_op = self.runtime_code[push_end];
+                            
+                            // Case 1: PUSH + JUMP (for fusion optimization)
+                            if (next_op == @intFromEnum(Opcode.JUMP)) {
+                                const log = @import("log.zig");
+                                log.debug("Detected PUSH + JUMP fusion opportunity at pc={}, push_value={}, next_op={x}", .{ i, push_value, next_op });
+                                // Note: We do NOT validate jump targets here - that happens at runtime
+                                // This is only for marking fusion opportunities
+                            }
+                            
+                            // Case 2: PUSH + JUMPI (check if previous was also a PUSH)
+                            else if (next_op == @intFromEnum(Opcode.JUMPI) and 
+                                     last_push_value != null and 
+                                     last_push_end == i) {
+                                // We have PUSH(dest) + PUSH(cond) + JUMPI pattern
+                                const jump_dest = last_push_value.?;
+                                const log = @import("log.zig");
+                                log.debug("Detected PUSH + PUSH + JUMPI fusion opportunity at pc={}, jump_dest={}, next_op={x}", .{ i, jump_dest, next_op });
+                                // Note: We do NOT validate jump targets here - that happens at runtime
+                            }
                         }
                         
-                        // Case 2: PUSH + JUMPI (check if previous was also a PUSH)
-                        else if (next_op == @intFromEnum(Opcode.JUMPI) and 
-                                 last_push_value != null and 
-                                 last_push_end == i) {
-                            // We have PUSH(dest) + PUSH(cond) + JUMPI pattern
-                            const jump_dest = last_push_value.?;
-                            const log = @import("log.zig");
-                            log.debug("Detected PUSH + PUSH + JUMPI at pc={}, jump_dest={}, next_op={x}", .{ i, jump_dest, next_op });
-                            if (jump_dest >= N) return error.InvalidJumpDestination;
-                            // Collect for JUMPDEST validation after first pass
-                            try immediate_jumps.append(self.allocator, @intCast(jump_dest));
-                        }
+                        // Update state for next iteration
+                        last_push_value = push_value;
+                        last_push_end = push_end;
                     }
-                    
-                    // Update state for next iteration
-                    last_push_value = push_value;
-                    last_push_end = push_end;
                     
                     i = push_end;
                 } else {
@@ -636,17 +637,11 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
                     i += 1;
                 }
             }
-            // Single pass complete - now validate collected immediate jumps
-            for (immediate_jumps.items) |jump_target| {
-                if ((self.is_jumpdest[jump_target >> BITMAP_SHIFT] & (@as(u8, 1) << @intCast(jump_target & BITMAP_MASK))) == 0) {
-                    // Debug: Print more details about the invalid jump
-                    const log = @import("log.zig");
-                    log.err("Invalid jump destination: target={}, bytecode_len={}, immediate_jumps_count={}", .{ 
-                        jump_target, N, immediate_jumps.items.len 
-                    });
-                    return error.InvalidJumpDestination;
-                }
-            }
+            // Note: We do NOT validate immediate jumps during bytecode initialization because:
+            // 1. Not all PUSH+JUMP patterns in bytecode are actually executed (dead code, data sections)
+            // 2. The EVM spec requires jump validation at execution time, not initialization time
+            // 3. Validating jumps here would reject valid contracts that contain unreachable PUSH+JUMP patterns
+            // The immediate jump detection above is ONLY for fusion optimization, not correctness validation.
         }
 
         /// Validate immediate JUMP/JUMPI targets encoded via preceding PUSH
