@@ -14,16 +14,10 @@ pub fn Handlers(comptime FrameType: type) type {
         /// Pops destination from stack and transfers control to that location.
         /// The destination must be a valid JUMPDEST.
         pub fn jump(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            // Check if the next item contains jump_table metadata
-            var jump_table: ?*const Dispatch.JumpTable = null;
-            switch (cursor[1]) {
-                .jump_table => |meta| {
-                    jump_table = meta.jump_table;
-                },
-                else => {},
-            }
-            
-            const dispatch = Dispatch{ .cursor = cursor, .jump_table = jump_table };
+            // The jump_table should be passed through the frame's dispatch system
+            // For now, create a dispatch without jump_table - this will need to be fixed
+            // when the proper dispatch mechanism is implemented
+            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
             const dest = try self.stack.pop();
 
             // Validate jump destination range
@@ -47,18 +41,12 @@ pub fn Handlers(comptime FrameType: type) type {
         /// Pops destination and condition from stack.
         /// Jumps to destination if condition is non-zero, otherwise continues to next instruction.
         pub fn jumpi(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            // Check if the next item contains jump_table metadata
-            var jump_table: ?*const Dispatch.JumpTable = null;
-            var next_offset: usize = 1;
-            switch (cursor[1]) {
-                .jump_table => |meta| {
-                    jump_table = meta.jump_table;
-                    next_offset = 2; // Skip both handler and metadata
-                },
-                else => {},
-            }
+            // The jump_table should be passed through the frame's dispatch system
+            // For now, create a dispatch without jump_table - this will need to be fixed
+            // when the proper dispatch mechanism is implemented
+            const next_offset: usize = 1; // Just skip the handler
             
-            const dispatch = Dispatch{ .cursor = cursor, .jump_table = jump_table };
+            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
             const dest = try self.stack.pop();
             const condition = try self.stack.pop();
 
@@ -80,7 +68,7 @@ pub fn Handlers(comptime FrameType: type) type {
                 }
             } else {
                 // Continue to next instruction, skipping metadata if present
-                const next = Dispatch{ .cursor = cursor + next_offset, .jump_table = jump_table };
+                const next = Dispatch{ .cursor = cursor + next_offset, .jump_table = null };
                 return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
             }
         }

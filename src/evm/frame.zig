@@ -258,12 +258,13 @@ pub fn Frame(comptime config: FrameConfig) type {
                 Dispatch.updateJumpTableMetadata(traced_schedule, &traced_jump_table);
 
                 var start_index: usize = 0;
-                switch (traced_schedule[0]) {
-                    .first_block_gas => |meta| {
-                        if (meta.gas > 0) try self.consumeGasChecked(@intCast(meta.gas));
-                        start_index = 1;
-                    },
-                    else => {},
+                // Check if first item is first_block_gas and consume gas if so
+                const first_block_gas = Self.Dispatch.calculateFirstBlockGas(bytecode);
+                if (first_block_gas > 0 and traced_schedule.len > 0) {
+                    const temp_dispatch = Self.Dispatch{ .cursor = traced_schedule.ptr, .jump_table = null };
+                    const meta = temp_dispatch.getFirstBlockGas();
+                    if (meta.gas > 0) try self.consumeGasChecked(@intCast(meta.gas));
+                    start_index = 1;
                 }
 
                 const cursor = Self.Dispatch{ .cursor = traced_schedule.ptr + start_index, .jump_table = &traced_jump_table };
@@ -294,31 +295,24 @@ pub fn Frame(comptime config: FrameConfig) type {
                 Dispatch.updateJumpTableMetadata(schedule, &jump_table);
 
                 var start_index: usize = 0;
-                switch (schedule[0]) {
-                    .first_block_gas => |meta| {
-                        log.debug("First block gas charge: {d} (current gas: {d})", .{ meta.gas, self.gas_remaining });
-                        if (meta.gas > 0) try self.consumeGasChecked(@intCast(meta.gas));
-                        log.debug("Gas after first block charge: {d}", .{self.gas_remaining});
-                        start_index = 1;
-                    },
-                    else => {},
+                // Check if first item is first_block_gas and consume gas if so
+                const first_block_gas = Self.Dispatch.calculateFirstBlockGas(bytecode);
+                if (first_block_gas > 0 and schedule.len > 0) {
+                    const temp_dispatch = Self.Dispatch{ .cursor = schedule.ptr, .jump_table = null };
+                    const meta = temp_dispatch.getFirstBlockGas();
+                    log.debug("First block gas charge: {d} (current gas: {d})", .{ meta.gas, self.gas_remaining });
+                    if (meta.gas > 0) try self.consumeGasChecked(@intCast(meta.gas));
+                    log.debug("Gas after first block charge: {d}", .{self.gas_remaining});
+                    start_index = 1;
                 }
 
                 const cursor = Self.Dispatch{ .cursor = schedule.ptr + start_index, .jump_table = &jump_table };
                 
-                // Debug: Check what the first item actually is
-                const first_item_tag = @tagName(cursor.cursor[0]);
-                if (!std.mem.eql(u8, first_item_tag, "opcode_handler")) {
-                    log.err("First dispatch item is not opcode_handler! It's {s}", .{first_item_tag});
-                    log.err("  Schedule length: {}", .{schedule.len});
-                    log.err("  Start index: {}", .{start_index});
-                    for (0..@min(10, schedule.len)) |i| {
-                        log.err("  Schedule[{}]: {s}", .{ i, @tagName(schedule[i]) });
-                    }
-                    return Error.InvalidOpcode;
-                }
+                // Debug: First item should be an opcode_handler after skipping first_block_gas
+                // Since the union is untagged, we can't verify this at runtime
+                log.debug("Starting execution at dispatch index {} (schedule length: {})", .{ start_index, schedule.len });
                 
-                log.debug("Starting execution at schedule index {}, first item: {s}", .{ start_index, first_item_tag });
+                log.debug("Starting execution at schedule index {}", .{start_index});
                 // Pass cursor pointer and jump_table separately - no Dispatch struct needed
                 cursor.cursor[0].opcode_handler(self, cursor.cursor) catch |err| return err;
                 unreachable; // Handlers never return normally
