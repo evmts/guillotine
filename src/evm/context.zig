@@ -62,13 +62,68 @@ pub const Context = struct {
             .is_static = false,
         };
     }
+    
+    /// Create context with custom parameters
+    pub fn with_params(
+        origin: Address,
+        gas_price: u256,
+        chain_id: u64,
+        timestamp: u64,
+        block_number: u64,
+        gas_limit: u64,
+        base_fee: u256,
+        coinbase: Address,
+        difficulty: u256,
+        prevrandao: [32]u8,
+        blob_base_fee: u128,
+        is_static: bool,
+    ) Context {
+        return .{
+            .origin = origin,
+            .gas_price = gas_price,
+            .chain_id = chain_id,
+            .timestamp = timestamp,
+            .block_number = block_number,
+            .gas_limit = gas_limit,
+            .base_fee = base_fee,
+            .coinbase = coinbase,
+            .difficulty = difficulty,
+            .prevrandao = prevrandao,
+            .blob_base_fee = blob_base_fee,
+            .is_static = is_static,
+        };
+    }
+    
+    /// Create context with static flag enabled
+    pub fn with_static() Context {
+        var context = init();
+        context.is_static = true;
+        return context;
+    }
+    
+    /// Create context with mainnet configuration
+    pub fn mainnet() Context {
+        return .{
+            .origin = Address.ZERO_ADDRESS,
+            .gas_price = 20_000_000_000, // 20 gwei
+            .chain_id = 1, // Mainnet
+            .timestamp = 1640995200, // Jan 1, 2022
+            .block_number = 13916166,
+            .gas_limit = 30_000_000,
+            .base_fee = 15_000_000_000, // 15 gwei
+            .coinbase = Address.ZERO_ADDRESS,
+            .difficulty = 0,
+            .prevrandao = [_]u8{0} ** 32,
+            .blob_base_fee = 1,
+            .is_static = false,
+        };
+    }
 };
 
 // =============================================================================
 // Tests
 // =============================================================================
 
-const std = @import("std");
 const testing = std.testing;
 
 test "Context - default initialization" {
@@ -305,4 +360,67 @@ test "Context - pre-merge vs post-merge" {
     try testing.expect(pre_merge.difficulty > 0);
     try testing.expectEqual(@as(u256, 0), post_merge.difficulty);
     try testing.expect(pre_merge.block_number < post_merge.block_number);
-};
+}
+
+// ========== HELPER FUNCTION TESTS ==========
+
+test "Context: custom parameters initialization" {
+    const custom_origin = Address.fromHex("0x742d35cc6634c0532925a3b8ad6a3e5c2c4d9f8b") catch unreachable;
+    const custom_coinbase = Address.fromHex("0x1234567890123456789012345678901234567890") catch unreachable;
+    const custom_prevrandao = [_]u8{0xFF} ** 32;
+    
+    const context = Context.with_params(
+        custom_origin,
+        50_000_000_000, // 50 gwei
+        42, // Custom chain
+        1640995200, // Timestamp
+        1000000, // Block number
+        15_000_000, // Gas limit
+        25_000_000_000, // Base fee
+        custom_coinbase,
+        12345678901234567890, // Difficulty
+        custom_prevrandao,
+        10, // Blob base fee
+        true, // Static
+    );
+    
+    try std.testing.expectEqual(custom_origin, context.origin);
+    try std.testing.expectEqual(@as(u256, 50_000_000_000), context.gas_price);
+    try std.testing.expectEqual(@as(u64, 42), context.chain_id);
+    try std.testing.expectEqual(@as(u64, 1640995200), context.timestamp);
+    try std.testing.expectEqual(@as(u64, 1000000), context.block_number);
+    try std.testing.expectEqual(@as(u64, 15_000_000), context.gas_limit);
+    try std.testing.expectEqual(@as(u256, 25_000_000_000), context.base_fee);
+    try std.testing.expectEqual(custom_coinbase, context.coinbase);
+    try std.testing.expectEqual(@as(u256, 12345678901234567890), context.difficulty);
+    try std.testing.expectEqual(custom_prevrandao, context.prevrandao);
+    try std.testing.expectEqual(@as(u128, 10), context.blob_base_fee);
+    try std.testing.expectEqual(true, context.is_static);
+}
+
+test "Context: static context creation" {
+    const context = Context.with_static();
+    
+    // Should be default init but with is_static = true
+    try std.testing.expectEqual(Address.ZERO_ADDRESS, context.origin);
+    try std.testing.expectEqual(@as(u256, 0), context.gas_price);
+    try std.testing.expectEqual(@as(u64, 1), context.chain_id);
+    try std.testing.expectEqual(true, context.is_static);
+}
+
+test "Context: mainnet configuration" {
+    const context = Context.mainnet();
+    
+    try std.testing.expectEqual(Address.ZERO_ADDRESS, context.origin);
+    try std.testing.expectEqual(@as(u256, 20_000_000_000), context.gas_price);
+    try std.testing.expectEqual(@as(u64, 1), context.chain_id); // Mainnet
+    try std.testing.expectEqual(@as(u64, 1640995200), context.timestamp);
+    try std.testing.expectEqual(@as(u64, 13916166), context.block_number);
+    try std.testing.expectEqual(@as(u64, 30_000_000), context.gas_limit);
+    try std.testing.expectEqual(@as(u256, 15_000_000_000), context.base_fee);
+    try std.testing.expectEqual(Address.ZERO_ADDRESS, context.coinbase);
+    try std.testing.expectEqual(@as(u256, 0), context.difficulty);
+    try std.testing.expectEqual([_]u8{0} ** 32, context.prevrandao);
+    try std.testing.expectEqual(@as(u128, 1), context.blob_base_fee);
+    try std.testing.expectEqual(false, context.is_static);
+}

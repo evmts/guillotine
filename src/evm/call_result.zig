@@ -424,3 +424,297 @@ test "CallResult deinitLogsSlice - memory management for takeLogs result" {
     // This should properly clean up all memory including individual log data
     CallResult.deinitLogsSlice(logs, allocator);
 }
+
+test "call result failure with error info" {
+    const error_message = "Contract execution reverted";
+    const result = CallResult.failure_with_error(1500, error_message);
+
+    try std.testing.expect(!result.success);
+    try std.testing.expectEqual(@as(u64, 1500), result.gas_left);
+    try std.testing.expect(result.isFailure());
+    try std.testing.expect(!result.isSuccess());
+    try std.testing.expect(!result.hasOutput());
+    try std.testing.expectEqualSlices(u8, error_message, result.error_info.?);
+}
+
+test "call result success with logs" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    const topics = try allocator.dupe(u256, &[_]u256{ 0x1234567890ABCDEF, 0xFEDCBA0987654321 });
+    defer allocator.free(topics);
+    const data = try allocator.dupe(u8, "test event data");
+    defer allocator.free(data);
+
+    const logs = try allocator.alloc(Log, 1);
+    defer allocator.free(logs);
+    logs[0] = Log{
+        .address = [_]u8{0x42} ++ [_]u8{0} ** 19,
+        .topics = topics,
+        .data = data,
+    };
+
+    const output_data = &[_]u8{ 0xAA, 0xBB, 0xCC };
+    const result = CallResult.success_with_logs(12000, output_data, logs);
+
+    try std.testing.expect(result.success);
+    try std.testing.expectEqual(@as(u64, 12000), result.gas_left);
+    try std.testing.expectEqualSlices(u8, output_data, result.output);
+    try std.testing.expectEqual(@as(usize, 1), result.logs.len);
+    try std.testing.expectEqual([_]u8{0x42} ++ [_]u8{0} ** 19, result.logs[0].address);
+    try std.testing.expectEqual(@as(usize, 2), result.logs[0].topics.len);
+    try std.testing.expectEqual(@as(u256, 0x1234567890ABCDEF), result.logs[0].topics[0]);
+    try std.testing.expectEqual(@as(u256, 0xFEDCBA0987654321), result.logs[0].topics[1]);
+    try std.testing.expectEqualSlices(u8, "test event data", result.logs[0].data);
+}
+
+test "call result struct field defaults" {
+    // Test that default fields are correctly initialized
+    const result = CallResult.success_empty(5000);
+
+    try std.testing.expectEqual(@as(usize, 0), result.logs.len);
+    try std.testing.expectEqual(@as(usize, 0), result.selfdestructs.len);
+    try std.testing.expectEqual(@as(usize, 0), result.accessed_addresses.len);
+    try std.testing.expectEqual(@as(usize, 0), result.accessed_storage.len);
+    try std.testing.expectEqual(@as(?ExecutionTrace, null), result.trace);
+    try std.testing.expectEqual(@as(?[]const u8, null), result.error_info);
+}
+
+test "call result with self destructs" {
+    var selfdestructs = [_]SelfDestructRecord{
+        SelfDestructRecord{
+            .contract = [_]u8{0x11} ++ [_]u8{0} ** 19,
+            .beneficiary = [_]u8{0x22} ++ [_]u8{0} ** 19,
+        },
+        SelfDestructRecord{
+            .contract = [_]u8{0x33} ++ [_]u8{0} ** 19,
+            .beneficiary = [_]u8{0x44} ++ [_]u8{0} ** 19,
+        },
+    };
+
+    var result = CallResult.success_empty(8000);
+    result.selfdestructs = &selfdestructs;
+
+    try std.testing.expectEqual(@as(usize, 2), result.selfdestructs.len);
+    try std.testing.expectEqual([_]u8{0x11} ++ [_]u8{0} ** 19, result.selfdestructs[0].contract);
+    try std.testing.expectEqual([_]u8{0x22} ++ [_]u8{0} ** 19, result.selfdestructs[0].beneficiary);
+    try std.testing.expectEqual([_]u8{0x33} ++ [_]u8{0} ** 19, result.selfdestructs[1].contract);
+    try std.testing.expectEqual([_]u8{0x44} ++ [_]u8{0} ** 19, result.selfdestructs[1].beneficiary);
+}
+
+test "call result with accessed addresses" {
+    var accessed_addresses = [_]Address{
+        [_]u8{0xAA} ++ [_]u8{0} ** 19,
+        [_]u8{0xBB} ++ [_]u8{0} ** 19,
+        [_]u8{0xCC} ++ [_]u8{0} ** 19,
+    };
+
+    var result = CallResult.failure(200);
+    result.accessed_addresses = &accessed_addresses;
+
+    try std.testing.expectEqual(@as(usize, 3), result.accessed_addresses.len);
+    try std.testing.expectEqual([_]u8{0xAA} ++ [_]u8{0} ** 19, result.accessed_addresses[0]);
+    try std.testing.expectEqual([_]u8{0xBB} ++ [_]u8{0} ** 19, result.accessed_addresses[1]);
+    try std.testing.expectEqual([_]u8{0xCC} ++ [_]u8{0} ** 19, result.accessed_addresses[2]);
+}
+
+test "call result with accessed storage" {
+    var accessed_storage = [_]StorageAccess{
+        StorageAccess{
+            .address = [_]u8{0x11} ++ [_]u8{0} ** 19,
+            .slot = 0x1234,
+        },
+        StorageAccess{
+            .address = [_]u8{0x22} ++ [_]u8{0} ** 19,
+            .slot = 0xABCDEF,
+        },
+    };
+
+    var result = CallResult.success_empty(9500);
+    result.accessed_storage = &accessed_storage;
+
+    try std.testing.expectEqual(@as(usize, 2), result.accessed_storage.len);
+    try std.testing.expectEqual([_]u8{0x11} ++ [_]u8{0} ** 19, result.accessed_storage[0].address);
+    try std.testing.expectEqual(@as(u256, 0x1234), result.accessed_storage[0].slot);
+    try std.testing.expectEqual([_]u8{0x22} ++ [_]u8{0} ** 19, result.accessed_storage[1].address);
+    try std.testing.expectEqual(@as(u256, 0xABCDEF), result.accessed_storage[1].slot);
+}
+
+test "execution trace basic functionality" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var trace = ExecutionTrace.init(allocator);
+    defer trace.deinit();
+
+    try std.testing.expectEqual(@as(usize, 0), trace.steps.len);
+
+    // Test empty trace
+    var empty_trace = ExecutionTrace.empty(allocator);
+    defer empty_trace.deinit();
+    try std.testing.expectEqual(@as(usize, 0), empty_trace.steps.len);
+}
+
+test "trace step memory management" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var step = TraceStep{
+        .pc = 42,
+        .opcode = 0x60,
+        .opcode_name = try allocator.dupe(u8, "PUSH1"),
+        .gas = 21000,
+        .stack = try allocator.dupe(u256, &[_]u256{ 0x123, 0x456 }),
+        .memory = try allocator.dupe(u8, &[_]u8{ 0xAA, 0xBB, 0xCC }),
+        .storage_reads = try allocator.alloc(TraceStep.StorageRead, 1),
+        .storage_writes = try allocator.alloc(TraceStep.StorageWrite, 1),
+    };
+
+    step.storage_reads[0] = TraceStep.StorageRead{
+        .address = ZERO_ADDRESS,
+        .slot = 0x100,
+        .value = 0x200,
+    };
+
+    step.storage_writes[0] = TraceStep.StorageWrite{
+        .address = [_]u8{0x11} ++ [_]u8{0} ** 19,
+        .slot = 0x300,
+        .old_value = 0x400,
+        .new_value = 0x500,
+    };
+
+    // Verify step contents
+    try std.testing.expectEqual(@as(u32, 42), step.pc);
+    try std.testing.expectEqual(@as(u8, 0x60), step.opcode);
+    try std.testing.expectEqualSlices(u8, "PUSH1", step.opcode_name);
+    try std.testing.expectEqual(@as(u64, 21000), step.gas);
+    try std.testing.expectEqual(@as(usize, 2), step.stack.len);
+    try std.testing.expectEqual(@as(u256, 0x123), step.stack[0]);
+    try std.testing.expectEqual(@as(u256, 0x456), step.stack[1]);
+    try std.testing.expectEqual(@as(usize, 3), step.memory.len);
+    try std.testing.expectEqual(@as(u8, 0xAA), step.memory[0]);
+
+    // Test storage operations
+    try std.testing.expectEqual(@as(usize, 1), step.storage_reads.len);
+    try std.testing.expectEqual(ZERO_ADDRESS, step.storage_reads[0].address);
+    try std.testing.expectEqual(@as(u256, 0x100), step.storage_reads[0].slot);
+    try std.testing.expectEqual(@as(u256, 0x200), step.storage_reads[0].value);
+
+    try std.testing.expectEqual(@as(usize, 1), step.storage_writes.len);
+    try std.testing.expectEqual([_]u8{0x11} ++ [_]u8{0} ** 19, step.storage_writes[0].address);
+    try std.testing.expectEqual(@as(u256, 0x300), step.storage_writes[0].slot);
+    try std.testing.expectEqual(@as(u256, 0x400), step.storage_writes[0].old_value);
+    try std.testing.expectEqual(@as(u256, 0x500), step.storage_writes[0].new_value);
+
+    // This should properly clean up all memory
+    step.deinit(allocator);
+}
+
+test "call result gas consumption edge cases" {
+    // Test integer overflow protection
+    const result1 = CallResult.success_empty(std.math.maxInt(u64));
+    try std.testing.expectEqual(@as(u64, 0), result1.gasConsumed(1000));
+
+    // Test maximum possible consumption
+    const result2 = CallResult.success_empty(0);
+    try std.testing.expectEqual(std.math.maxInt(u64), result2.gasConsumed(std.math.maxInt(u64)));
+
+    // Test exact consumption
+    const result3 = CallResult.failure(12345);
+    try std.testing.expectEqual(@as(u64, 8655), result3.gasConsumed(21000));
+}
+
+test "call result comprehensive constructor coverage" {
+    // Test all constructor methods
+    const constructors = [_]CallResult{
+        CallResult.success_with_output(1000, &[_]u8{0x01}),
+        CallResult.success_empty(2000),
+        CallResult.failure(3000),
+        CallResult.failure_with_error(4000, "test error"),
+        CallResult.revert_with_data(5000, "revert reason"),
+        CallResult.success_with_logs(6000, &[_]u8{0x02}, &[_]Log{}),
+    };
+
+    // Verify all constructors work properly
+    for (constructors) |result| {
+        _ = result.isSuccess();
+        _ = result.isFailure();
+        _ = result.hasOutput();
+        _ = result.gasConsumed(10000);
+    }
+}
+
+test "call result empty logs slice cleanup" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    // Test cleanup of empty logs slice
+    const empty_logs = try allocator.alloc(Log, 0);
+    CallResult.deinitLogsSlice(empty_logs, allocator);
+
+    // Should not crash or leak
+}
+
+test "log struct comprehensive" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    // Test log with maximum topics (typically 4 in EVM)
+    const topics = try allocator.dupe(u256, &[_]u256{ 
+        0x1111111111111111,
+        0x2222222222222222, 
+        0x3333333333333333,
+        0x4444444444444444
+    });
+    defer allocator.free(topics);
+
+    const data = try allocator.dupe(u8, "This is a comprehensive test of log data with various characters: !@#$%^&*()");
+    defer allocator.free(data);
+
+    const log = Log{
+        .address = [_]u8{0xDE, 0xAD, 0xBE, 0xEF} ++ [_]u8{0xCA, 0xFE, 0xBA, 0xBE} ++ [_]u8{0x12, 0x34, 0x56, 0x78} ++ [_]u8{0x9A, 0xBC, 0xDE, 0xF0} ++ [_]u8{0x11, 0x22, 0x33, 0x44},
+        .topics = topics,
+        .data = data,
+    };
+
+    try std.testing.expectEqual(@as(usize, 4), log.topics.len);
+    try std.testing.expectEqual(@as(u256, 0x1111111111111111), log.topics[0]);
+    try std.testing.expect(std.mem.startsWith(u8, log.data, "This is a comprehensive test"));
+}
+
+test "storage access and self destruct comprehensive" {
+    // Test boundary values for StorageAccess
+    const storage1 = StorageAccess{
+        .address = ZERO_ADDRESS,
+        .slot = 0,
+    };
+    const storage2 = StorageAccess{
+        .address = [_]u8{0xFF} ** 20,
+        .slot = std.math.maxInt(u256),
+    };
+
+    try std.testing.expectEqual(ZERO_ADDRESS, storage1.address);
+    try std.testing.expectEqual(@as(u256, 0), storage1.slot);
+    try std.testing.expectEqual([_]u8{0xFF} ** 20, storage2.address);
+    try std.testing.expectEqual(std.math.maxInt(u256), storage2.slot);
+
+    // Test boundary values for SelfDestructRecord
+    const selfdestruct1 = SelfDestructRecord{
+        .contract = ZERO_ADDRESS,
+        .beneficiary = ZERO_ADDRESS,
+    };
+    const selfdestruct2 = SelfDestructRecord{
+        .contract = [_]u8{0xFF} ** 20,
+        .beneficiary = [_]u8{0xAA} ** 20,
+    };
+
+    try std.testing.expectEqual(ZERO_ADDRESS, selfdestruct1.contract);
+    try std.testing.expectEqual(ZERO_ADDRESS, selfdestruct1.beneficiary);
+    try std.testing.expectEqual([_]u8{0xFF} ** 20, selfdestruct2.contract);
+    try std.testing.expectEqual([_]u8{0xAA} ** 20, selfdestruct2.beneficiary);
+}

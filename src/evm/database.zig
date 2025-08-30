@@ -453,6 +453,36 @@ test "Database code operations" {
     try testing.expectEqualSlices(u8, test_bytes, code_by_addr);
 }
 
+test "Database code storage operations" {
+    const allocator = testing.allocator;
+    var db = Database.init(allocator);
+    defer db.deinit();
+
+    const test_address = [_]u8{0x78} ++ [_]u8{0} ** 19;
+    const test_code = [_]u8{ 0x60, 0x80, 0x60, 0x40, 0x52 }; // Simple bytecode
+
+    // Test code storage
+    const code_hash = try db.set_code(&test_code);
+    const retrieved_code = try db.get_code(code_hash);
+    try testing.expectEqualSlices(u8, &test_code, retrieved_code);
+
+    // Test code by address - should fail for non-existent account
+    try testing.expectError(Database.Error.AccountNotFound, db.get_code_by_address(test_address));
+
+    // Create account with code hash
+    const test_account = Account{
+        .balance = 0,
+        .nonce = 0,
+        .code_hash = code_hash,
+        .storage_root = [_]u8{0} ** 32,
+    };
+    try db.set_account(test_address, test_account);
+
+    // Now code by address should work
+    const code_by_address = try db.get_code_by_address(test_address);
+    try testing.expectEqualSlices(u8, &test_code, code_by_address);
+}
+
 test "Database code operations - missing code" {
     const allocator = testing.allocator;
     var db = Database.init(allocator);
@@ -463,6 +493,30 @@ test "Database code operations - missing code" {
 
     const test_address = [_]u8{0x99} ++ [_]u8{0} ** 19;
     try testing.expectError(Database.Error.AccountNotFound, db.get_code_by_address(test_address));
+}
+
+test "Database delete account operations" {
+    const allocator = testing.allocator;
+    var db = Database.init(allocator);
+    defer db.deinit();
+
+    const test_address = [_]u8{0x99} ++ [_]u8{0} ** 19;
+    const test_account = Account{
+        .balance = 500,
+        .nonce = 3,
+        .code_hash = [_]u8{0x11} ** 32,
+        .storage_root = [_]u8{0x22} ** 32,
+    };
+
+    // Create account
+    try db.set_account(test_address, test_account);
+    try testing.expect(db.account_exists(test_address));
+
+    // Delete account
+    try db.delete_account(test_address);
+    try testing.expect(!db.account_exists(test_address));
+    try testing.expectEqual(@as(?Account, null), try db.get_account(test_address));
+    try testing.expectEqual(@as(u256, 0), try db.get_balance(test_address));
 }
 
 test "Database account operations" {
@@ -620,6 +674,131 @@ test "Database state root operations" {
     try testing.expectEqualSlices(u8, &([_]u8{0xAB} ** 32), &root2);
 }
 
+test "Database state root operations - detailed" {
+    const allocator = testing.allocator;
+    var db = Database.init(allocator);
+    defer db.deinit();
+
+    // Test mock state root
+    const state_root = try db.get_state_root();
+    try testing.expectEqual([_]u8{0xAB} ** 32, state_root);
+
+    // Test commit changes (returns same mock state root)
+    const committed_root = try db.commit_changes();
+    try testing.expectEqual(state_root, committed_root);
+}
+
+test "Database snapshot operations - detailed" {
+    const allocator = testing.allocator;
+    var db = Database.init(allocator);
+    defer db.deinit();
+
+    const addr1 = [_]u8{0xA1} ++ [_]u8{0} ** 19;
+    const addr2 = [_]u8{0xA2} ++ [_]u8{0} ** 19;
+    
+    const account1 = Account{
+        .balance = 100,
+        .nonce = 1,
+        .code_hash = [_]u8{0x11} ** 32,
+        .storage_root = [_]u8{0x22} ** 32,
+    };
+
+    // Set initial state
+    try db.set_account(addr1, account1);
+    try db.set_storage(addr1, 0x123, 0xABC);
+
+    // Create snapshot
+    const snapshot_id = try db.create_snapshot();
+    try testing.expectEqual(@as(u64, 1), snapshot_id);
+
+    // Modify state after snapshot
+    const account2 = Account{
+        .balance = 200,
+        .nonce = 2,
+        .code_hash = [_]u8{0x33} ** 32,
+        .storage_root = [_]u8{0x44} ** 32,
+    };
+    try db.set_account(addr2, account2);
+    try db.set_storage(addr1, 0x123, 0xDEF);
+
+    // Verify modified state
+    try testing.expect(db.account_exists(addr2));
+    try testing.expectEqual(@as(u256, 0xDEF), try db.get_storage(addr1, 0x123));
+
+    // Revert to snapshot
+    try db.revert_to_snapshot(snapshot_id);
+
+    // Verify original state restored
+    try testing.expect(!db.account_exists(addr2));
+    try testing.expectEqual(@as(u256, 0xABC), try db.get_storage(addr1, 0x123));
+    const restored_account = (try db.get_account(addr1)).?;
+    try testing.expectEqual(account1.balance, restored_account.balance);
+}
+
+test "Database commit snapshot operations - detailed" {
+    const allocator = testing.allocator;
+    var db = Database.init(allocator);
+    defer db.deinit();
+
+    const addr1 = [_]u8{0xB1} ++ [_]u8{0} ** 19;
+    const account1 = Account{
+        .balance = 300,
+        .nonce = 5,
+        .code_hash = [_]u8{0x55} ** 32,
+        .storage_root = [_]u8{0x66} ** 32,
+    };
+
+    try db.set_account(addr1, account1);
+    
+    // Create snapshot
+    const snapshot_id = try db.create_snapshot();
+
+    // Modify state
+    try db.set_storage(addr1, 0x456, 0x789);
+
+    // Commit snapshot (discard without reverting)
+    try db.commit_snapshot(snapshot_id);
+
+    // State should remain modified
+    try testing.expectEqual(@as(u256, 0x789), try db.get_storage(addr1, 0x456));
+
+    // Cannot revert to committed snapshot
+    try testing.expectError(Database.Error.SnapshotNotFound, db.revert_to_snapshot(snapshot_id));
+}
+
+test "Database multiple snapshots - detailed" {
+    const allocator = testing.allocator;
+    var db = Database.init(allocator);
+    defer db.deinit();
+
+    const addr1 = [_]u8{0xC1} ++ [_]u8{0} ** 19;
+
+    // Initial state
+    try db.set_storage(addr1, 0x100, 0x200);
+
+    // Snapshot 1
+    const snap1 = try db.create_snapshot();
+    try db.set_storage(addr1, 0x100, 0x300);
+
+    // Snapshot 2
+    const snap2 = try db.create_snapshot();
+    try db.set_storage(addr1, 0x100, 0x400);
+
+    // Verify final state
+    try testing.expectEqual(@as(u256, 0x400), try db.get_storage(addr1, 0x100));
+
+    // Revert to snapshot 2
+    try db.revert_to_snapshot(snap2);
+    try testing.expectEqual(@as(u256, 0x300), try db.get_storage(addr1, 0x100));
+
+    // Revert to snapshot 1
+    try db.revert_to_snapshot(snap1);
+    try testing.expectEqual(@as(u256, 0x200), try db.get_storage(addr1, 0x100));
+
+    // Cannot revert to non-existent snapshot
+    try testing.expectError(Database.Error.SnapshotNotFound, db.revert_to_snapshot(snap2));
+}
+
 test "Database batch operations" {
     const allocator = testing.allocator;
     var db = Database.init(allocator);
@@ -656,6 +835,48 @@ test "Database storage key collision handling" {
     try testing.expectEqual(@as(u256, 400), try db.get_transient_storage(addr2, key));
 }
 
+test "Database error cases" {
+    const allocator = testing.allocator;
+    var db = Database.init(allocator);
+    defer db.deinit();
+
+    const non_existent_hash = [_]u8{0xFF} ** 32;
+
+    // Code not found error
+    try testing.expectError(Database.Error.CodeNotFound, db.get_code(non_existent_hash));
+
+    // Account not found for code by address
+    const non_existent_addr = [_]u8{0xEE} ++ [_]u8{0} ** 19;
+    try testing.expectError(Database.Error.AccountNotFound, db.get_code_by_address(non_existent_addr));
+
+    // Snapshot not found
+    try testing.expectError(Database.Error.SnapshotNotFound, db.revert_to_snapshot(999));
+    try testing.expectError(Database.Error.SnapshotNotFound, db.commit_snapshot(999));
+}
+
+test "Database zero address handling" {
+    const allocator = testing.allocator;
+    var db = Database.init(allocator);
+    defer db.deinit();
+
+    const zero_address = [_]u8{0} ** 20;
+    const account = Account{
+        .balance = 1000,
+        .nonce = 0,
+        .code_hash = [_]u8{0} ** 32,
+        .storage_root = [_]u8{0} ** 32,
+    };
+
+    // Should handle zero address like any other address
+    try db.set_account(zero_address, account);
+    try testing.expect(db.account_exists(zero_address));
+    try testing.expectEqual(@as(u256, 1000), try db.get_balance(zero_address));
+
+    // Storage operations with zero address
+    try db.set_storage(zero_address, 0, 42);
+    try testing.expectEqual(@as(u256, 42), try db.get_storage(zero_address, 0));
+}
+
 test "Database large values" {
     const allocator = testing.allocator;
     var db = Database.init(allocator);
@@ -685,6 +906,195 @@ test "Database large values" {
     try testing.expectEqual(large_value, try db.get_transient_storage(addr, large_key));
 }
 
+test "Database max values" {
+    const allocator = testing.allocator;
+    var db = Database.init(allocator);
+    defer db.deinit();
+
+    const max_address = [_]u8{0xFF} ** 20;
+    const max_u256 = std.math.maxInt(u256);
+    const max_nonce = std.math.maxInt(u64);
+    
+    const max_account = Account{
+        .balance = max_u256,
+        .nonce = max_nonce,
+        .code_hash = [_]u8{0xFF} ** 32,
+        .storage_root = [_]u8{0xFF} ** 32,
+    };
+
+    // Test maximum values
+    try db.set_account(max_address, max_account);
+    try testing.expectEqual(max_u256, try db.get_balance(max_address));
+
+    // Storage with max values
+    try db.set_storage(max_address, max_u256, max_u256);
+    try testing.expectEqual(max_u256, try db.get_storage(max_address, max_u256));
+
+    // Transient storage with max values
+    try db.set_transient_storage(max_address, max_u256, max_u256);
+    try testing.expectEqual(max_u256, try db.get_transient_storage(max_address, max_u256));
+}
+
+test "Database hash map stress test" {
+    const allocator = testing.allocator;
+    var db = Database.init(allocator);
+    defer db.deinit();
+
+    // Test many accounts
+    const num_accounts = 1000;
+    for (0..num_accounts) |i| {
+        var addr: [20]u8 = [_]u8{0} ** 20;
+        addr[16] = @intCast((i >> 24) & 0xFF);
+        addr[17] = @intCast((i >> 16) & 0xFF);
+        addr[18] = @intCast((i >> 8) & 0xFF);
+        addr[19] = @intCast(i & 0xFF);
+
+        const account = Account{
+            .balance = @intCast(i),
+            .nonce = @intCast(i % 1000),
+            .code_hash = [_]u8{@intCast(i & 0xFF)} ** 32,
+            .storage_root = [_]u8{@intCast((i + 1) & 0xFF)} ** 32,
+        };
+
+        try db.set_account(addr, account);
+    }
+
+    // Verify all accounts
+    for (0..num_accounts) |i| {
+        var addr: [20]u8 = [_]u8{0} ** 20;
+        addr[16] = @intCast((i >> 24) & 0xFF);
+        addr[17] = @intCast((i >> 16) & 0xFF);
+        addr[18] = @intCast((i >> 8) & 0xFF);
+        addr[19] = @intCast(i & 0xFF);
+
+        try testing.expect(db.account_exists(addr));
+        try testing.expectEqual(@as(u256, @intCast(i)), try db.get_balance(addr));
+    }
+}
+
+test "Database storage isolation between addresses" {
+    const allocator = testing.allocator;
+    var db = Database.init(allocator);
+    defer db.deinit();
+
+    const addr1 = [_]u8{0x11} ++ [_]u8{0} ** 19;
+    const addr2 = [_]u8{0x22} ++ [_]u8{0} ** 19;
+    const storage_key: u256 = 42;
+
+    // Set same storage key for different addresses
+    try db.set_storage(addr1, storage_key, 100);
+    try db.set_storage(addr2, storage_key, 200);
+
+    // Verify isolation
+    try testing.expectEqual(@as(u256, 100), try db.get_storage(addr1, storage_key));
+    try testing.expectEqual(@as(u256, 200), try db.get_storage(addr2, storage_key));
+
+    // Test transient storage isolation
+    try db.set_transient_storage(addr1, storage_key, 300);
+    try db.set_transient_storage(addr2, storage_key, 400);
+
+    try testing.expectEqual(@as(u256, 300), try db.get_transient_storage(addr1, storage_key));
+    try testing.expectEqual(@as(u256, 400), try db.get_transient_storage(addr2, storage_key));
+}
+
+test "Database storage key collision resistance" {
+    const allocator = testing.allocator;
+    var db = Database.init(allocator);
+    defer db.deinit();
+
+    // Test keys that might cause hash collisions
+    const addr = [_]u8{0x33} ++ [_]u8{0} ** 19;
+    const keys = [_]u256{ 0, 1, 0x100, 0x10000, 0x100000000, std.math.maxInt(u256) };
+    
+    // Set different values for each key
+    for (keys, 0..) |key, i| {
+        try db.set_storage(addr, key, @intCast(i + 1000));
+    }
+
+    // Verify each key has correct value
+    for (keys, 0..) |key, i| {
+        try testing.expectEqual(@as(u256, @intCast(i + 1000)), try db.get_storage(addr, key));
+    }
+}
+
+test "Database overwrite operations" {
+    const allocator = testing.allocator;
+    var db = Database.init(allocator);
+    defer db.deinit();
+
+    const addr = [_]u8{0x44} ++ [_]u8{0} ** 19;
+    const storage_key: u256 = 777;
+
+    const account1 = Account{
+        .balance = 100,
+        .nonce = 1,
+        .code_hash = [_]u8{0x11} ** 32,
+        .storage_root = [_]u8{0x22} ** 32,
+    };
+
+    const account2 = Account{
+        .balance = 200,
+        .nonce = 2,
+        .code_hash = [_]u8{0x33} ** 32,
+        .storage_root = [_]u8{0x44} ** 32,
+    };
+
+    // Set initial account and storage
+    try db.set_account(addr, account1);
+    try db.set_storage(addr, storage_key, 111);
+    try db.set_transient_storage(addr, storage_key, 222);
+
+    // Verify initial values
+    try testing.expectEqual(@as(u256, 100), try db.get_balance(addr));
+    try testing.expectEqual(@as(u256, 111), try db.get_storage(addr, storage_key));
+    try testing.expectEqual(@as(u256, 222), try db.get_transient_storage(addr, storage_key));
+
+    // Overwrite values
+    try db.set_account(addr, account2);
+    try db.set_storage(addr, storage_key, 333);
+    try db.set_transient_storage(addr, storage_key, 444);
+
+    // Verify overwritten values
+    try testing.expectEqual(@as(u256, 200), try db.get_balance(addr));
+    try testing.expectEqual(@as(u256, 333), try db.get_storage(addr, storage_key));
+    try testing.expectEqual(@as(u256, 444), try db.get_transient_storage(addr, storage_key));
+}
+
+test "Database empty code hash handling" {
+    const allocator = testing.allocator;
+    var db = Database.init(allocator);
+    defer db.deinit();
+
+    const empty_code = [_]u8{};
+    const code_hash = try db.set_code(&empty_code);
+    
+    // Empty code should still have a hash
+    try testing.expect(code_hash.len == 32);
+    
+    const retrieved_code = try db.get_code(code_hash);
+    try testing.expectEqualSlices(u8, &empty_code, retrieved_code);
+}
+
+test "Database large code storage" {
+    const allocator = testing.allocator;
+    var db = Database.init(allocator);
+    defer db.deinit();
+
+    // Create large bytecode (24KB - EIP-170 limit)
+    const large_code_size = 24576;
+    const large_code = try allocator.alloc(u8, large_code_size);
+    defer allocator.free(large_code);
+    
+    // Fill with pattern
+    for (large_code, 0..) |*byte, i| {
+        byte.* = @intCast(i % 256);
+    }
+
+    const code_hash = try db.set_code(large_code);
+    const retrieved_code = try db.get_code(code_hash);
+    try testing.expectEqualSlices(u8, large_code, retrieved_code);
+}
+
 test "Database empty code handling" {
     const allocator = testing.allocator;
     var db = Database.init(allocator);
@@ -699,7 +1109,53 @@ test "Database empty code handling" {
     try testing.expectEqual(@as(usize, 0), retrieved.len);
 }
 
+test "Database validation function" {
+    // Test compile-time validation
+    validate_database_implementation(Database);
+    
+    // This would fail to compile if Database was missing required methods
+    // validate_database_implementation(struct {}); // Uncomment to test failure
+}
+
 test "Database validation test" {
     // Compile-time validation should pass for Database type
     validate_database_implementation(Database);
+}
+
+test "Database state persistence across operations" {
+    const allocator = testing.allocator;
+    var db = Database.init(allocator);
+    defer db.deinit();
+
+    const addr1 = [_]u8{0x55} ++ [_]u8{0} ** 19;
+    const addr2 = [_]u8{0x66} ++ [_]u8{0} ** 19;
+
+    // Complex sequence of operations
+    try db.set_storage(addr1, 1, 100);
+    try db.set_transient_storage(addr1, 1, 200);
+    
+    _ = try db.create_snapshot(); // snapshot1 - used for state setup
+    
+    try db.set_storage(addr2, 1, 300);
+    try db.set_transient_storage(addr2, 1, 400);
+    
+    const snapshot2 = try db.create_snapshot();
+    
+    try db.set_storage(addr1, 2, 500);
+    
+    // Verify intermediate state
+    try testing.expectEqual(@as(u256, 100), try db.get_storage(addr1, 1));
+    try testing.expectEqual(@as(u256, 200), try db.get_transient_storage(addr1, 1));
+    try testing.expectEqual(@as(u256, 300), try db.get_storage(addr2, 1));
+    try testing.expectEqual(@as(u256, 400), try db.get_transient_storage(addr2, 1));
+    try testing.expectEqual(@as(u256, 500), try db.get_storage(addr1, 2));
+    
+    // Revert to snapshot2
+    try db.revert_to_snapshot(snapshot2);
+    try testing.expectEqual(@as(u256, 100), try db.get_storage(addr1, 1));
+    try testing.expectEqual(@as(u256, 300), try db.get_storage(addr2, 1));
+    try testing.expectEqual(@as(u256, 0), try db.get_storage(addr1, 2)); // Should be zero after revert
+    
+    // Note: transient storage behavior during snapshots might need clarification
+    // as EIP-1153 specifies transient storage is cleared between transactions
 }

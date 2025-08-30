@@ -461,3 +461,356 @@ test "BytecodeStats formatStats invalid opcode handling" {
     try std.testing.expect(std.mem.indexOf(u8, output, "Total opcodes: 3") != null);
 }
 
+test "BytecodeStats analyze - basic functionality" {
+    const allocator = std.testing.allocator;
+    const bytecode = [_]u8{
+        @intFromEnum(Opcode.PUSH1), 0x10, // pc=0, value=0x10
+        @intFromEnum(Opcode.ADD),         // pc=2
+        @intFromEnum(Opcode.PUSH2), 0x12, 0x34, // pc=3, value=0x1234  
+        @intFromEnum(Opcode.MUL),         // pc=6
+        @intFromEnum(Opcode.JUMPDEST),    // pc=7
+        @intFromEnum(Opcode.STOP),        // pc=8
+    };
+    
+    var stats = try BytecodeStats.analyze(allocator, &bytecode);
+    defer stats.deinit(allocator);
+    
+    // Test opcode counts
+    try std.testing.expectEqual(@as(u32, 2), stats.opcode_counts[@intFromEnum(Opcode.PUSH1)]);
+    try std.testing.expectEqual(@as(u32, 1), stats.opcode_counts[@intFromEnum(Opcode.ADD)]);
+    try std.testing.expectEqual(@as(u32, 1), stats.opcode_counts[@intFromEnum(Opcode.PUSH2)]);
+    try std.testing.expectEqual(@as(u32, 1), stats.opcode_counts[@intFromEnum(Opcode.MUL)]);
+    try std.testing.expectEqual(@as(u32, 1), stats.opcode_counts[@intFromEnum(Opcode.JUMPDEST)]);
+    try std.testing.expectEqual(@as(u32, 1), stats.opcode_counts[@intFromEnum(Opcode.STOP)]);
+    
+    // Test push values
+    try std.testing.expectEqual(@as(usize, 2), stats.push_values.len);
+    try std.testing.expectEqual(@as(usize, 0), stats.push_values[0].pc);
+    try std.testing.expectEqual(@as(u256, 0x10), stats.push_values[0].value);
+    try std.testing.expectEqual(@as(usize, 3), stats.push_values[1].pc);
+    try std.testing.expectEqual(@as(u256, 0x1234), stats.push_values[1].value);
+    
+    // Test potential fusions
+    try std.testing.expectEqual(@as(usize, 2), stats.potential_fusions.len);
+    try std.testing.expectEqual(@as(usize, 0), stats.potential_fusions[0].pc);
+    try std.testing.expectEqual(Opcode.ADD, stats.potential_fusions[0].second_opcode);
+    try std.testing.expectEqual(@as(usize, 3), stats.potential_fusions[1].pc);
+    try std.testing.expectEqual(Opcode.MUL, stats.potential_fusions[1].second_opcode);
+    
+    // Test JUMPDEST detection
+    try std.testing.expectEqual(@as(usize, 1), stats.jumpdests.len);
+    try std.testing.expectEqual(@as(usize, 7), stats.jumpdests[0]);
+}
+
+test "BytecodeStats analyze - empty bytecode" {
+    const allocator = std.testing.allocator;
+    const bytecode: []const u8 = &.{};
+    
+    var stats = try BytecodeStats.analyze(allocator, bytecode);
+    defer stats.deinit(allocator);
+    
+    // All arrays should be empty
+    try std.testing.expectEqual(@as(usize, 0), stats.push_values.len);
+    try std.testing.expectEqual(@as(usize, 0), stats.potential_fusions.len);
+    try std.testing.expectEqual(@as(usize, 0), stats.jumpdests.len);
+    try std.testing.expectEqual(@as(usize, 0), stats.jumps.len);
+    try std.testing.expectEqual(@as(usize, 0), stats.backwards_jumps);
+    
+    // All opcode counts should be zero
+    for (stats.opcode_counts) |count| {
+        try std.testing.expectEqual(@as(u32, 0), count);
+    }
+}
+
+test "BytecodeStats analyze - push value extraction" {
+    const allocator = std.testing.allocator;
+    const bytecode = [_]u8{
+        @intFromEnum(Opcode.PUSH1), 0xFF,         // 1-byte push
+        @intFromEnum(Opcode.PUSH2), 0x12, 0x34,   // 2-byte push
+        @intFromEnum(Opcode.PUSH4), 0xDE, 0xAD, 0xBE, 0xEF, // 4-byte push
+        @intFromEnum(Opcode.PUSH8), 0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF, // 8-byte push
+    };
+    
+    var stats = try BytecodeStats.analyze(allocator, &bytecode);
+    defer stats.deinit(allocator);
+    
+    try std.testing.expectEqual(@as(usize, 4), stats.push_values.len);
+    
+    // Test PUSH1
+    try std.testing.expectEqual(@as(usize, 0), stats.push_values[0].pc);
+    try std.testing.expectEqual(@as(u256, 0xFF), stats.push_values[0].value);
+    
+    // Test PUSH2 
+    try std.testing.expectEqual(@as(usize, 2), stats.push_values[1].pc);
+    try std.testing.expectEqual(@as(u256, 0x1234), stats.push_values[1].value);
+    
+    // Test PUSH4
+    try std.testing.expectEqual(@as(usize, 5), stats.push_values[2].pc);
+    try std.testing.expectEqual(@as(u256, 0xDEADBEEF), stats.push_values[2].value);
+    
+    // Test PUSH8
+    try std.testing.expectEqual(@as(usize, 10), stats.push_values[3].pc);
+    try std.testing.expectEqual(@as(u256, 0x0123456789ABCDEF), stats.push_values[3].value);
+}
+
+test "BytecodeStats analyze - jump detection and backwards jumps" {
+    const allocator = std.testing.allocator;
+    const bytecode = [_]u8{
+        @intFromEnum(Opcode.JUMPDEST),    // pc=0
+        @intFromEnum(Opcode.PUSH1), 0x08, // pc=1, target=8
+        @intFromEnum(Opcode.JUMP),        // pc=3, forward jump
+        @intFromEnum(Opcode.PUSH1), 0x00, // pc=4, target=0  
+        @intFromEnum(Opcode.JUMP),        // pc=6, backward jump
+        @intFromEnum(Opcode.JUMPDEST),    // pc=7
+        @intFromEnum(Opcode.JUMPDEST),    // pc=8
+        @intFromEnum(Opcode.STOP),        // pc=9
+    };
+    
+    var stats = try BytecodeStats.analyze(allocator, &bytecode);
+    defer stats.deinit(allocator);
+    
+    // Test JUMPDEST detection
+    try std.testing.expectEqual(@as(usize, 3), stats.jumpdests.len);
+    try std.testing.expectEqual(@as(usize, 0), stats.jumpdests[0]);
+    try std.testing.expectEqual(@as(usize, 7), stats.jumpdests[1]);
+    try std.testing.expectEqual(@as(usize, 8), stats.jumpdests[2]);
+    
+    // Test jump detection
+    try std.testing.expectEqual(@as(usize, 2), stats.jumps.len);
+    
+    // First jump: forward (pc=3, target=8)
+    try std.testing.expectEqual(@as(usize, 3), stats.jumps[0].pc);
+    try std.testing.expectEqual(@as(u256, 8), stats.jumps[0].target);
+    
+    // Second jump: backward (pc=6, target=0)
+    try std.testing.expectEqual(@as(usize, 6), stats.jumps[1].pc);
+    try std.testing.expectEqual(@as(u256, 0), stats.jumps[1].target);
+    
+    // Test backwards jump counting
+    try std.testing.expectEqual(@as(usize, 1), stats.backwards_jumps);
+}
+
+test "BytecodeStats analyze - jumpi detection" {
+    const allocator = std.testing.allocator;
+    const bytecode = [_]u8{
+        @intFromEnum(Opcode.PUSH1), 0x05, // pc=0, target=5
+        @intFromEnum(Opcode.JUMPI),       // pc=2
+        @intFromEnum(Opcode.STOP),        // pc=3
+        @intFromEnum(Opcode.JUMPDEST),    // pc=4
+        @intFromEnum(Opcode.JUMPDEST),    // pc=5
+    };
+    
+    var stats = try BytecodeStats.analyze(allocator, &bytecode);
+    defer stats.deinit(allocator);
+    
+    // Test JUMPI detection
+    try std.testing.expectEqual(@as(usize, 1), stats.jumps.len);
+    try std.testing.expectEqual(@as(usize, 2), stats.jumps[0].pc);
+    try std.testing.expectEqual(@as(u256, 5), stats.jumps[0].target);
+}
+
+test "BytecodeStats analyze - fusion pattern detection" {
+    const allocator = std.testing.allocator;
+    const bytecode = [_]u8{
+        // Test all fusion patterns
+        @intFromEnum(Opcode.PUSH1), 0x10, @intFromEnum(Opcode.ADD),  // ADD fusion
+        @intFromEnum(Opcode.PUSH1), 0x20, @intFromEnum(Opcode.MUL),  // MUL fusion
+        @intFromEnum(Opcode.PUSH1), 0x30, @intFromEnum(Opcode.SUB),  // SUB fusion
+        @intFromEnum(Opcode.PUSH1), 0x40, @intFromEnum(Opcode.DIV),  // DIV fusion
+        @intFromEnum(Opcode.PUSH1), 0x50, @intFromEnum(Opcode.JUMP), // JUMP fusion
+        @intFromEnum(Opcode.PUSH1), 0x60, @intFromEnum(Opcode.JUMPI), // JUMPI fusion
+        @intFromEnum(Opcode.PUSH1), 0x70, @intFromEnum(Opcode.GT),   // GT fusion
+        @intFromEnum(Opcode.PUSH1), 0x80, @intFromEnum(Opcode.LT),   // LT fusion
+        @intFromEnum(Opcode.PUSH1), 0x90, @intFromEnum(Opcode.EQ),   // EQ fusion
+        // Non-fusion pattern
+        @intFromEnum(Opcode.PUSH1), 0xA0, @intFromEnum(Opcode.POP),  // Should not fuse
+    };
+    
+    var stats = try BytecodeStats.analyze(allocator, &bytecode);
+    defer stats.deinit(allocator);
+    
+    // Should detect 9 fusion patterns (all except the last POP)
+    try std.testing.expectEqual(@as(usize, 9), stats.potential_fusions.len);
+    
+    const expected_opcodes = [_]Opcode{
+        Opcode.ADD, Opcode.MUL, Opcode.SUB, Opcode.DIV, Opcode.JUMP,
+        Opcode.JUMPI, Opcode.GT, Opcode.LT, Opcode.EQ
+    };
+    
+    for (stats.potential_fusions, expected_opcodes, 0..) |fusion, expected_opcode, i| {
+        try std.testing.expectEqual(@as(usize, i * 3), fusion.pc); // Each pattern is 3 bytes
+        try std.testing.expectEqual(expected_opcode, fusion.second_opcode);
+    }
+}
+
+test "BytecodeStats analyze - invalid opcodes handling" {
+    const allocator = std.testing.allocator;
+    const bytecode = [_]u8{
+        @intFromEnum(Opcode.PUSH1), 0x42,
+        0xFE, // Invalid opcode
+        0xFF, // Invalid opcode  
+        @intFromEnum(Opcode.STOP),
+    };
+    
+    var stats = try BytecodeStats.analyze(allocator, &bytecode);
+    defer stats.deinit(allocator);
+    
+    // Valid opcodes should be counted
+    try std.testing.expectEqual(@as(u32, 1), stats.opcode_counts[@intFromEnum(Opcode.PUSH1)]);
+    try std.testing.expectEqual(@as(u32, 1), stats.opcode_counts[@intFromEnum(Opcode.STOP)]);
+    
+    // Invalid opcodes should also be counted
+    try std.testing.expectEqual(@as(u32, 1), stats.opcode_counts[0xFE]);
+    try std.testing.expectEqual(@as(u32, 1), stats.opcode_counts[0xFF]);
+    
+    // Push value should still be detected
+    try std.testing.expectEqual(@as(usize, 1), stats.push_values.len);
+    try std.testing.expectEqual(@as(u256, 0x42), stats.push_values[0].value);
+}
+
+test "BytecodeStats analyze - truncated push instructions" {
+    const allocator = std.testing.allocator;
+    const bytecode = [_]u8{
+        @intFromEnum(Opcode.PUSH2), 0x12, // Missing second byte
+        @intFromEnum(Opcode.PUSH4), 0x01, 0x02, // Missing two bytes
+    };
+    
+    var stats = try BytecodeStats.analyze(allocator, &bytecode);
+    defer stats.deinit(allocator);
+    
+    // Should still count the PUSH opcodes
+    try std.testing.expectEqual(@as(u32, 1), stats.opcode_counts[@intFromEnum(Opcode.PUSH2)]);
+    try std.testing.expectEqual(@as(u32, 1), stats.opcode_counts[@intFromEnum(Opcode.PUSH4)]);
+    
+    // Should extract partial values
+    try std.testing.expectEqual(@as(usize, 2), stats.push_values.len);
+    try std.testing.expectEqual(@as(u256, 0x12), stats.push_values[0].value); // Only got one byte
+    try std.testing.expectEqual(@as(u256, 0x0102), stats.push_values[1].value); // Only got two bytes
+}
+
+test "BytecodeStats analyze - push32 maximum value" {
+    const allocator = std.testing.allocator;
+    var bytecode: [33]u8 = undefined;
+    bytecode[0] = @intFromEnum(Opcode.PUSH32);
+    for (1..33) |i| {
+        bytecode[i] = 0xFF; // Maximum value
+    }
+    
+    var stats = try BytecodeStats.analyze(allocator, &bytecode);
+    defer stats.deinit(allocator);
+    
+    try std.testing.expectEqual(@as(usize, 1), stats.push_values.len);
+    try std.testing.expectEqual(@as(u256, std.math.maxInt(u256)), stats.push_values[0].value);
+}
+
+test "BytecodeStats analyze - complex jump pattern" {
+    const allocator = std.testing.allocator;
+    const bytecode = [_]u8{
+        @intFromEnum(Opcode.PUSH2), 0x00, 0x10, // Target 0x0010 = 16
+        @intFromEnum(Opcode.JUMP),              // pc=3
+        @intFromEnum(Opcode.PUSH1), 0x00,       // Target 0x00 = 0
+        @intFromEnum(Opcode.PUSH1), 0x20,       // Target 0x20 = 32  
+        @intFromEnum(Opcode.JUMPI),             // pc=7
+        @intFromEnum(Opcode.JUMPDEST),          // pc=8 (not targeted)
+        @intFromEnum(Opcode.PUSH1), 0x08,       // Target 0x08 = 8
+        @intFromEnum(Opcode.JUMP),              // pc=11 (backwards to 8)
+        @intFromEnum(Opcode.JUMPDEST),          // pc=12
+        @intFromEnum(Opcode.JUMPDEST),          // pc=13
+        @intFromEnum(Opcode.JUMPDEST),          // pc=14
+        @intFromEnum(Opcode.JUMPDEST),          // pc=15
+        @intFromEnum(Opcode.JUMPDEST),          // pc=16
+    };
+    
+    var stats = try BytecodeStats.analyze(allocator, &bytecode);
+    defer stats.deinit(allocator);
+    
+    // Should detect 3 jumps
+    try std.testing.expectEqual(@as(usize, 3), stats.jumps.len);
+    
+    // First jump: forward to 16
+    try std.testing.expectEqual(@as(usize, 3), stats.jumps[0].pc);
+    try std.testing.expectEqual(@as(u256, 16), stats.jumps[0].target);
+    
+    // Second jump: forward to 32 (JUMPI)
+    try std.testing.expectEqual(@as(usize, 7), stats.jumps[1].pc);
+    try std.testing.expectEqual(@as(u256, 32), stats.jumps[1].target);
+    
+    // Third jump: backward to 8
+    try std.testing.expectEqual(@as(usize, 11), stats.jumps[2].pc);
+    try std.testing.expectEqual(@as(u256, 8), stats.jumps[2].target);
+    
+    // One backwards jump
+    try std.testing.expectEqual(@as(usize, 1), stats.backwards_jumps);
+}
+
+test "BytecodeStats analyze - no jump target found" {
+    const allocator = std.testing.allocator;
+    const bytecode = [_]u8{
+        @intFromEnum(Opcode.ADD),  // No PUSH before
+        @intFromEnum(Opcode.JUMP), // Should not be detected
+        @intFromEnum(Opcode.MUL),
+        @intFromEnum(Opcode.JUMPI), // Should not be detected
+    };
+    
+    var stats = try BytecodeStats.analyze(allocator, &bytecode);
+    defer stats.deinit(allocator);
+    
+    // No jumps should be detected
+    try std.testing.expectEqual(@as(usize, 0), stats.jumps.len);
+    try std.testing.expectEqual(@as(usize, 0), stats.backwards_jumps);
+}
+
+test "BytecodeStats analyze - distant push target" {
+    const allocator = std.testing.allocator;
+    var bytecode: [50]u8 = undefined;
+    
+    // Fill with NOPs to create distance
+    for (0..40) |i| {
+        bytecode[i] = @intFromEnum(Opcode.STOP); // Use STOP as filler
+    }
+    
+    // Add a distant PUSH followed by JUMP  
+    bytecode[40] = @intFromEnum(Opcode.PUSH1);
+    bytecode[41] = 0x30; // Target 48
+    bytecode[42] = @intFromEnum(Opcode.JUMP);
+    
+    // Add more filler
+    bytecode[43] = @intFromEnum(Opcode.STOP);
+    bytecode[44] = @intFromEnum(Opcode.STOP);
+    bytecode[45] = @intFromEnum(Opcode.STOP);
+    bytecode[46] = @intFromEnum(Opcode.STOP);
+    bytecode[47] = @intFromEnum(Opcode.STOP);
+    bytecode[48] = @intFromEnum(Opcode.JUMPDEST);
+    bytecode[49] = @intFromEnum(Opcode.STOP);
+    
+    var stats = try BytecodeStats.analyze(allocator, &bytecode);
+    defer stats.deinit(allocator);
+    
+    // Should detect the jump
+    try std.testing.expectEqual(@as(usize, 1), stats.jumps.len);
+    try std.testing.expectEqual(@as(usize, 42), stats.jumps[0].pc);
+    try std.testing.expectEqual(@as(u256, 48), stats.jumps[0].target);
+}
+
+test "BytecodeStats deinit memory management" {
+    const allocator = std.testing.allocator;
+    const bytecode = [_]u8{
+        @intFromEnum(Opcode.PUSH1), 0x42,
+        @intFromEnum(Opcode.ADD),
+        @intFromEnum(Opcode.JUMPDEST),
+        @intFromEnum(Opcode.PUSH1), 0x03,
+        @intFromEnum(Opcode.JUMP),
+    };
+    
+    var stats = try BytecodeStats.analyze(allocator, &bytecode);
+    
+    // Verify we have some data to cleanup
+    try std.testing.expect(stats.push_values.len > 0);
+    try std.testing.expect(stats.potential_fusions.len > 0);
+    try std.testing.expect(stats.jumpdests.len > 0);
+    try std.testing.expect(stats.jumps.len > 0);
+    
+    // This should not leak memory
+    stats.deinit(allocator);
+}
+
