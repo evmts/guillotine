@@ -795,7 +795,17 @@ pub fn Evm(comptime config: EvmConfig) type {
 
             self.call_stack[self.depth - 1] = CallStackEntry{ .caller = caller, .value = value, .is_static = is_static };
 
-            const gas_cast = @as(Frame.GasType, @intCast(@min(gas, @as(u64, @intCast(std.math.maxInt(Frame.GasType))))));
+            // Base transaction gas cost (21,000 gas) - only charge for top-level transactions
+            const BASE_TX_GAS = 21000;
+            log.err("[EVM] execute_frame called: depth={d}, gas={d}", .{ self.depth, gas });
+            
+            const gas_after_base = if (self.depth <= 1 and gas >= BASE_TX_GAS) gas_after_base: {
+                const remaining = gas - BASE_TX_GAS;
+                log.err("[EVM] Charged {d} base gas, remaining: {d}", .{ BASE_TX_GAS, remaining });
+                break :gas_after_base remaining;
+            } else gas;
+            
+            const gas_cast = @as(Frame.GasType, @intCast(@min(gas_after_base, @as(u64, @intCast(std.math.maxInt(Frame.GasType))))));
 
             // EIP-214: encode static constraints; null to prevent SELFDESTRUCT in static context
             const self_destruct_param = if (is_static) null else &self.self_destruct;
