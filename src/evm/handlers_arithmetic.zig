@@ -15,6 +15,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const top_minus_1 = try self.stack.pop();
             const top = try self.stack.peek();
             const result = top +% top_minus_1;
+            // Debug logging removed
             try self.stack.set_top(result);
             const next_cursor = cursor + 1;
             return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
@@ -25,6 +26,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const top_minus_1 = try self.stack.pop();
             const top = try self.stack.peek();
             const result = top *% top_minus_1;
+            // Debug logging removed
             try self.stack.set_top(result);
             const next_cursor = cursor + 1;
             return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
@@ -32,9 +34,10 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// SUB opcode (0x03) - Subtraction with underflow wrapping.
         pub fn sub(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const top_minus_1 = try self.stack.pop();
-            const top = try self.stack.peek();
-            const result = top -% top_minus_1;
+            const top = try self.stack.pop();     // μ_s[0] (first operand) 
+            const second = try self.stack.peek(); // μ_s[1] (second operand)
+            const result = top -% second;         // μ_s[0] - μ_s[1] per EVM spec
+            // Debug logging removed
             try self.stack.set_top(result);
             const next_cursor = cursor + 1;
             return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor});
@@ -137,6 +140,7 @@ pub fn Handlers(comptime FrameType: type) type {
             } else {
                 result = mulmod_safe(factor1, factor2, modulus);
             }
+            // Debug logging removed
             try self.stack.set_top(result);
             const next_cursor = cursor + 1;
             return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor});
@@ -201,17 +205,18 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// EXP opcode (0x0a) - Exponential operation.
         pub fn exp(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const exponent = try self.stack.pop();
-            const base = try self.stack.peek();
+            const top = try self.stack.pop();     // μ_s[0] 
+            const second = try self.stack.peek(); // μ_s[1] 
             var result: WordType = 1;
-            var base_working = base;
-            var exponent_working = exponent;
+            var base_working = top;        // Try reversing: top as base
+            var exponent_working = second; // second as exponent
             while (exponent_working > 0) : (exponent_working >>= 1) {
                 if (exponent_working & 1 == 1) {
                     result *%= base_working;
                 }
                 base_working *%= base_working;
             }
+            // Debug logging removed
             try self.stack.set_top(result);
             const next_cursor = cursor + 1;
             return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
