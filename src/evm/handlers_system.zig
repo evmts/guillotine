@@ -685,6 +685,7 @@ pub fn Handlers(comptime FrameType: type) type {
         pub fn stop(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             _ = self;
             _ = cursor;
+            
 
             // EIP-3529 gas refund is applied at the transaction level in evm.zig,
             // not within individual frames. The frame just stops execution.
