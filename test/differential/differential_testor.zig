@@ -3,9 +3,8 @@ const primitives = @import("primitives");
 const guillotine_evm = @import("evm");
 const revm = @import("revm");
 
-// Use the same trace types as the EVM
-pub const TraceStep = guillotine_evm.CallResult.TraceStep;
-pub const ExecutionTrace = guillotine_evm.CallResult.ExecutionTrace;
+// Use the same trace types as the EVM - access from call_result via guillotine_evm
+// For now, I'll create a type reference that works with the module system
 
 
 /// Result of execution with trace
@@ -13,12 +12,15 @@ pub const ExecutionResultWithTrace = struct {
     success: bool,
     gas_used: u64,
     output: []const u8,
-    trace: ExecutionTrace,
+    // Just use the same optional trace type as CallResult
+    trace: @TypeOf(@as(guillotine_evm.CallResult, undefined).trace),
     allocator: std.mem.Allocator,
 
     pub fn deinit(self: *ExecutionResultWithTrace) void {
         self.allocator.free(self.output);
-        self.trace.deinit();
+        if (self.trace) |*t| {
+            t.deinit();
+        }
     }
 };
 
@@ -289,7 +291,7 @@ pub const DifferentialTestor = struct {
         defer result.deinit();
 
         const output = try self.allocator.dupe(u8, result.output);
-        const trace = ExecutionTrace.empty(self.allocator);
+        const trace = null; // TODO: Implement REVM trace collection
 
         return ExecutionResultWithTrace{
             .success = result.success,
@@ -327,14 +329,15 @@ pub const DifferentialTestor = struct {
         std.debug.print("DIFFERENTIAL: Guillotine call complete, success={}, gas_left={}\n", .{ result.success, result.gas_left });
 
         // Use trace from CallResult if available, otherwise create empty trace
-        const trace = if (result.trace) |t| t else ExecutionTrace.empty(self.allocator);
+        const trace = result.trace;
 
         // Calculate gas used
         const gas_used = gas_limit - result.gas_left;
 
         // Store the execution result status for debugging
         const log = std.log.scoped(.differential_failure);
-        log.debug("Guillotine execution completed with tracing enabled: success={}, gas_left={}, output_len={}, trace_steps={}", .{ result.success, result.gas_left, result.output.len, trace.steps.len });
+        const trace_steps_len = if (trace) |t| t.steps.len else 0;
+        log.debug("Guillotine execution completed with tracing enabled: success={}, gas_left={}, output_len={}, trace_steps={}", .{ result.success, result.gas_left, result.output.len, trace_steps_len });
 
         if (!result.success) {
             // Log detailed failure information
@@ -501,19 +504,22 @@ pub const DifferentialTestor = struct {
             };
         }
 
-        // Compare traces
-        if (revm_result.trace.steps.len != guillotine_result.trace.steps.len) {
+        // Compare traces (handle optional traces)
+        const revm_steps_len: usize = if (revm_result.trace) |t| t.steps.len else 0;
+        const guillotine_steps_len: usize = if (guillotine_result.trace) |t| t.steps.len else 0;
+        
+        if (revm_steps_len != guillotine_steps_len) {
             diff.trace_match = false;
             diff.step_count_diff = .{
-                .revm = revm_result.trace.steps.len,
-                .guillotine = guillotine_result.trace.steps.len,
+                .revm = revm_steps_len,
+                .guillotine = guillotine_steps_len,
             };
-        } else if (guillotine_result.trace.steps.len > 0) {
+        } else if (guillotine_steps_len > 0 and guillotine_result.trace != null and revm_result.trace != null) {
             // Compare each step in the traces
             var trace_diffs_list = std.ArrayList(ExecutionDiff.TraceDiffStep){};
             defer trace_diffs_list.deinit(self.allocator);
 
-            for (revm_result.trace.steps, guillotine_result.trace.steps, 0..) |revm_step, guillotine_step, i| {
+            for (revm_result.trace.?.steps, guillotine_result.trace.?.steps, 0..) |revm_step, guillotine_step, i| {
                 var step_diff = ExecutionDiff.TraceDiffStep{
                     .step_index = i,
                     .pc_diff = null,
