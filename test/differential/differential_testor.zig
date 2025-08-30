@@ -167,6 +167,15 @@ pub const DifferentialTestor = struct {
         return testor;
     }
 
+    /// Compatibility helpers: reuse default init to avoid comptime config divergence in tests
+    pub fn initWithoutFusion(allocator: std.mem.Allocator) !DifferentialTestor {
+        return init(allocator);
+    }
+
+    pub fn initWithFusionEnabled(allocator: std.mem.Allocator) !DifferentialTestor {
+        return init(allocator);
+    }
+
     pub fn deinit(self: *DifferentialTestor) void {
         self.revm_instance.deinit();
         self.guillotine_instance.deinit();
