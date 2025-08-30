@@ -111,9 +111,9 @@ pub fn Handlers(comptime FrameType: type) type {
             if (modulus == 0) {
                 result = 0;
             } else {
-                const a = addend1 % modulus;
-                const b = addend2 % modulus;
-                const sum = @addWithOverflow(a, b);
+                const addend1_reduced = addend1 % modulus;
+                const addend2_reduced = addend2 % modulus;
+                const sum = @addWithOverflow(addend1_reduced, addend2_reduced);
                 var r = sum[0];
                 // If overflow occurred or r >= modulus, subtract once
                 if (sum[1] == 1 or r >= modulus) {
@@ -204,13 +204,13 @@ pub fn Handlers(comptime FrameType: type) type {
             const exponent = try self.stack.pop();
             const base = try self.stack.peek();
             var result: WordType = 1;
-            var b = base;
-            var e = exponent;
-            while (e > 0) : (e >>= 1) {
-                if (e & 1 == 1) {
-                    result *%= b;
+            var base_working = base;
+            var exponent_working = exponent;
+            while (exponent_working > 0) : (exponent_working >>= 1) {
+                if (exponent_working & 1 == 1) {
+                    result *%= base_working;
                 }
-                b *%= b;
+                base_working *%= base_working;
             }
             try self.stack.set_top(result);
             const next_cursor = cursor + 1;
