@@ -250,6 +250,10 @@ pub fn Evm(comptime config: EvmConfig) type {
 
         /// Clean up all resources.
         pub fn deinit(self: *Self) void {
+            // Free return_data if it was allocated
+            if (self.return_data.len > 0) {
+                self.allocator.free(self.return_data);
+            }
             self.journal.deinit();
             self.created_contracts.deinit();
             self.self_destruct.deinit();
@@ -879,6 +883,11 @@ pub fn Evm(comptime config: EvmConfig) type {
                 @memcpy(b, out_items);
                 break :blk b;
             } else &.{};
+            
+            // Free old return_data before setting new one
+            if (self.return_data.len > 0) {
+                self.allocator.free(self.return_data);
+            }
             self.return_data = out_buf;
 
             // All success termination cases return the same result with trace data
