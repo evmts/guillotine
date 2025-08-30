@@ -34,10 +34,10 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// SUB opcode (0x03) - Subtraction with underflow wrapping.
         pub fn sub(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const top = try self.stack.pop();     // μ_s[0] (first operand) 
-            const second = try self.stack.peek(); // μ_s[1] (second operand)
-            const result = top -% second;         // μ_s[0] - μ_s[1] per EVM spec
-            // Debug logging removed
+            const subtrahend = try self.stack.pop();     // μ_s[0]
+            const minuend = try self.stack.peek();       // μ_s[1]
+            const result = minuend -% subtrahend;        // μ_s[1] - μ_s[0] per EVM spec
+            log.debug("SUB: minuend=0x{x} - subtrahend=0x{x} = 0x{x}", .{ minuend, subtrahend, result });
             try self.stack.set_top(result);
             const next_cursor = cursor + 1;
             return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor});
@@ -45,8 +45,8 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// DIV opcode (0x04) - Integer division. Division by zero returns 0.
         pub fn div(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const denominator = try self.stack.pop();
-            const numerator = try self.stack.peek();
+            const numerator = try self.stack.pop();      // First pop is numerator
+            const denominator = try self.stack.peek();    // Second (remaining) is denominator
             const result = if (denominator == 0) 0 else numerator / denominator;
             try self.stack.set_top(result);
             const next_cursor = cursor + 1;
@@ -55,21 +55,27 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// SDIV opcode (0x05) - Signed integer division.
         pub fn sdiv(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const denominator = try self.stack.pop();
-            const numerator = try self.stack.peek();
+            const numerator = try self.stack.pop();      // First pop is numerator
+            const denominator = try self.stack.peek();    // Second (remaining) is denominator
+            
+            log.debug("SDIV: numerator=0x{x}, denominator=0x{x}", .{ numerator, denominator });
             var result: WordType = undefined;
             if (denominator == 0) {
                 result = 0;
+                log.debug("SDIV: division by zero, result=0", .{});
             } else {
                 const numerator_signed = @as(std.meta.Int(.signed, @bitSizeOf(WordType)), @bitCast(numerator));
                 const denominator_signed = @as(std.meta.Int(.signed, @bitSizeOf(WordType)), @bitCast(denominator));
+                log.debug("SDIV: numerator_signed={}, denominator_signed={}", .{ numerator_signed, denominator_signed });
                 const min_signed = std.math.minInt(std.meta.Int(.signed, @bitSizeOf(WordType)));
                 if (numerator_signed == min_signed and denominator_signed == -1) {
                     // MIN / -1 overflow case
                     result = numerator;
+                    log.debug("SDIV: overflow case, result=0x{x}", .{result});
                 } else {
                     const result_signed = @divTrunc(numerator_signed, denominator_signed);
                     result = @as(WordType, @bitCast(result_signed));
+                    log.debug("SDIV: result_signed={}, result=0x{x}", .{ result_signed, result });
                 }
             }
             try self.stack.set_top(result);
@@ -79,8 +85,8 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// MOD opcode (0x06) - Modulo operation. Modulo by zero returns 0.
         pub fn mod(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const denominator = try self.stack.pop();
-            const numerator = try self.stack.peek();
+            const numerator = try self.stack.pop();      // First pop is numerator
+            const denominator = try self.stack.peek();    // Second (remaining) is denominator
             const result = if (denominator == 0) 0 else numerator % denominator;
             try self.stack.set_top(result);
             const next_cursor = cursor + 1;
@@ -89,8 +95,8 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// SMOD opcode (0x07) - Signed modulo operation.
         pub fn smod(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const denominator = try self.stack.pop();
-            const numerator = try self.stack.peek();
+            const numerator = try self.stack.pop();      // First pop is numerator
+            const denominator = try self.stack.peek();    // Second (remaining) is denominator
             var result: WordType = undefined;
             if (denominator == 0) {
                 result = 0;
