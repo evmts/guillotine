@@ -14,7 +14,16 @@ pub fn Handlers(comptime FrameType: type) type {
         /// Pops destination from stack and transfers control to that location.
         /// The destination must be a valid JUMPDEST.
         pub fn jump(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            // Check if the next item contains jump_table metadata
+            var jump_table: ?*const Dispatch.JumpTable = null;
+            switch (cursor[1]) {
+                .jump_table => |meta| {
+                    jump_table = meta.jump_table;
+                },
+                else => {},
+            }
+            
+            const dispatch = Dispatch{ .cursor = cursor, .jump_table = jump_table };
             const dest = try self.stack.pop();
 
             // Validate jump destination range
@@ -38,7 +47,18 @@ pub fn Handlers(comptime FrameType: type) type {
         /// Pops destination and condition from stack.
         /// Jumps to destination if condition is non-zero, otherwise continues to next instruction.
         pub fn jumpi(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            // Check if the next item contains jump_table metadata
+            var jump_table: ?*const Dispatch.JumpTable = null;
+            var next_offset: usize = 1;
+            switch (cursor[1]) {
+                .jump_table => |meta| {
+                    jump_table = meta.jump_table;
+                    next_offset = 2; // Skip both handler and metadata
+                },
+                else => {},
+            }
+            
+            const dispatch = Dispatch{ .cursor = cursor, .jump_table = jump_table };
             const dest = try self.stack.pop();
             const condition = try self.stack.pop();
 
@@ -59,8 +79,8 @@ pub fn Handlers(comptime FrameType: type) type {
                     return Error.InvalidJump;
                 }
             } else {
-                // Continue to next instruction
-                const next = dispatch.getNext();
+                // Continue to next instruction, skipping metadata if present
+                const next = Dispatch{ .cursor = cursor + next_offset, .jump_table = jump_table };
                 return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
             }
         }
@@ -69,6 +89,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// This opcode marks a valid destination for JUMP and JUMPI operations.
         /// It also serves as a gas consumption point for the entire basic block.
         pub fn jumpdest(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            // Jump table not needed for JUMPDEST itself
             const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
             // JUMPDEST consumes gas for the entire basic block (static + dynamic)
             const metadata = dispatch.getJumpDestMetadata();
@@ -89,6 +110,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// Pushes the current program counter onto the stack.
         /// The actual PC value is provided by the planner through metadata.
         pub fn pc(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            // Jump table not needed for PC
             const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
             // Get PC value from metadata
             const metadata = dispatch.getPcMetadata();
@@ -503,6 +525,107 @@ test "JUMPI opcode - no validation when not taken" {
 
     // Should succeed - no validation when jump not taken
     try testing.expectEqual(@as(usize, 0), frame.stack.len());
+}
+
+test "JUMP opcode - invalid destination should revert" {
+    var frame = try createTestFrame(testing.allocator);
+    defer frame.deinit(testing.allocator);
+
+    // Create bytecode with JUMPDEST at position 5
+    const bytecode_data = [_]u8{
+        0x60, 0x03, // PUSH1 3 (invalid destination - not a JUMPDEST)
+        0x56,       // JUMP
+        0x00,       // STOP (should not reach here)
+        0x5b,       // JUMPDEST at position 5
+        0x00,       // STOP
+    };
+    var bytecode = try TestBytecode.init(testing.allocator, &bytecode_data);
+    defer bytecode.deinit();
+
+    // Create dispatch with jump table
+    const schedule = try TestFrame.Dispatch.init(testing.allocator, &bytecode, &TestFrame.opcode_handlers);
+    defer testing.allocator.free(schedule);
+    
+    var jump_table = try TestFrame.Dispatch.createJumpTable(testing.allocator, schedule, &bytecode);
+    defer testing.allocator.free(jump_table.entries);
+    
+    // Update jump table metadata in the schedule
+    TestFrame.Dispatch.updateJumpTableMetadata(schedule, &jump_table);
+
+    // Find the JUMP handler in the schedule
+    var jump_handler_index: ?usize = null;
+    for (schedule, 0..) |item, i| {
+        if (item == .opcode_handler) {
+            // This is a simplification - in real code we'd check if it's the JUMP handler
+            // For this test, we know the third handler is JUMP (after two PUSH1s)
+            if (i == 2) {
+                jump_handler_index = i;
+                break;
+            }
+        }
+    }
+
+    try testing.expect(jump_handler_index != null);
+
+    // Push invalid destination (3)
+    try frame.stack.push(3);
+
+    // Call the JUMP handler
+    const result = TestFrame.JumpHandlers.jump(&frame, schedule.ptr + jump_handler_index.?);
+    
+    // Should return InvalidJump error
+    try testing.expectError(TestFrame.Error.InvalidJump, result);
+}
+
+test "JUMPI opcode - invalid destination should revert when taken" {
+    var frame = try createTestFrame(testing.allocator);
+    defer frame.deinit(testing.allocator);
+
+    // Create bytecode with JUMPDEST at position 6
+    const bytecode_data = [_]u8{
+        0x60, 0x01, // PUSH1 1 (condition - true)
+        0x60, 0x04, // PUSH1 4 (invalid destination - not a JUMPDEST)
+        0x57,       // JUMPI
+        0x5b,       // JUMPDEST at position 6
+        0x00,       // STOP
+    };
+    var bytecode = try TestBytecode.init(testing.allocator, &bytecode_data);
+    defer bytecode.deinit();
+
+    // Create dispatch with jump table
+    const schedule = try TestFrame.Dispatch.init(testing.allocator, &bytecode, &TestFrame.opcode_handlers);
+    defer testing.allocator.free(schedule);
+    
+    var jump_table = try TestFrame.Dispatch.createJumpTable(testing.allocator, schedule, &bytecode);
+    defer testing.allocator.free(jump_table.entries);
+    
+    // Update jump table metadata in the schedule
+    TestFrame.Dispatch.updateJumpTableMetadata(schedule, &jump_table);
+
+    // Find the JUMPI handler in the schedule
+    var jumpi_handler_index: ?usize = null;
+    for (schedule, 0..) |item, i| {
+        if (item == .opcode_handler) {
+            // This is a simplification - in real code we'd check if it's the JUMPI handler
+            // For this test, we know the fifth handler is JUMPI (after four PUSH1s)
+            if (i == 4) {
+                jumpi_handler_index = i;
+                break;
+            }
+        }
+    }
+
+    try testing.expect(jumpi_handler_index != null);
+
+    // Push destination and condition
+    try frame.stack.push(4); // Invalid destination
+    try frame.stack.push(1); // Condition (true)
+
+    // Call the JUMPI handler
+    const result = TestFrame.JumpHandlers.jumpi(&frame, schedule.ptr + jumpi_handler_index.?);
+    
+    // Should return InvalidJump error
+    try testing.expectError(TestFrame.Error.InvalidJump, result);
 }
 
 test "Jump operations - integration test" {

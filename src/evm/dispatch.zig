@@ -475,7 +475,7 @@ pub fn Dispatch(comptime FrameType: type) type {
                 
                 switch (op_data) {
                     .regular => |data| {
-                        // Regular opcode - add handler first, then metadata for PC, CODESIZE, CODECOPY
+                        // Regular opcode - add handler first, then metadata for PC, CODESIZE, CODECOPY, JUMP, JUMPI
                         const handler = opcode_handlers.*[data.opcode];
                         
                         // DEBUG: Log specific opcodes we're interested in
@@ -499,6 +499,15 @@ pub fn Dispatch(comptime FrameType: type) type {
                             // Store direct pointer to bytecode data for stable reference
                             const bytecode_data = bytecode.runtime_code;
                             try schedule_items.append(allocator, .{ .codecopy = .{ .bytecode_ptr = bytecode_data.ptr, .size = @intCast(bytecode_data.len) } });
+                        } else if (data.opcode == @intFromEnum(Opcode.JUMP) or data.opcode == @intFromEnum(Opcode.JUMPI)) {
+                            // JUMP and JUMPI need a placeholder for jump_table metadata
+                            // This will be filled in later after the jump table is created
+                            try schedule_items.append(allocator, .{ .jump_table = .{ .jump_table = undefined } });
+                        } else if (data.opcode == @intFromEnum(Opcode.JUMP) or data.opcode == @intFromEnum(Opcode.JUMPI)) {
+                            // JUMP and JUMPI need a placeholder for jump_table metadata
+                            // This will be filled in later after the jump table is created
+                            // For now, add a null pointer placeholder
+                            try schedule_items.append(allocator, .{ .jump_table = .{ .jump_table = undefined } });
                         }
                     },
                     .push => |data| {
@@ -750,6 +759,10 @@ pub fn Dispatch(comptime FrameType: type) type {
                             // Store direct pointer to bytecode data for stable reference
                             const bytecode_data = bytecode.runtime_code;
                             try schedule_items.append(allocator, .{ .codecopy = .{ .bytecode_ptr = bytecode_data.ptr, .size = @intCast(bytecode_data.len) } });
+                        } else if (data.opcode == @intFromEnum(Opcode.JUMP) or data.opcode == @intFromEnum(Opcode.JUMPI)) {
+                            // JUMP and JUMPI need a placeholder for jump_table metadata
+                            // This will be filled in later after the jump table is created
+                            try schedule_items.append(allocator, .{ .jump_table = .{ .jump_table = undefined } });
                         }
 
                         // Insert trace_after
@@ -975,6 +988,25 @@ pub fn Dispatch(comptime FrameType: type) type {
         /// @param schedule - The dispatch array created by init()
         /// @param bytecode - The bytecode to analyze for jump destinations
         /// @return Owned jump table with sorted entries
+        /// Update jump_table metadata in the schedule after jump table creation.
+        /// This fills in the jump_table pointers for JUMP and JUMPI handlers.
+        pub fn updateJumpTableMetadata(
+            schedule: []Item,
+            jump_table: *const JumpTable,
+        ) void {
+            // Iterate through schedule and update jump_table metadata
+            for (schedule, 0..) |*item, i| {
+                // Check if this is a jump_table metadata item that needs updating
+                if (item.* == .jump_table) {
+                    // Check if the previous item is a JUMP or JUMPI handler
+                    if (i > 0 and schedule[i - 1] == .opcode_handler) {
+                        // Update the jump_table pointer
+                        item.jump_table.jump_table = jump_table;
+                    }
+                }
+            }
+        }
+
         pub fn createJumpTable(
             allocator: std.mem.Allocator,
             schedule: []const Item,

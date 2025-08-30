@@ -121,7 +121,6 @@ pub fn Handlers(comptime FrameType: type) type {
                 }
                 result = r;
             }
-            log.err("ADDMOD: Result = {d}", .{result});
             try self.stack.set_top(result);
             const next_cursor = cursor + 1;
             return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor});
@@ -129,18 +128,15 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// MULMOD opcode (0x09) - (a * b) % N. All intermediate calculations are performed with arbitrary precision.
         pub fn mulmod(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            log.err("MULMOD HANDLER CALLED! Stack size: {d}", .{self.stack.size()});
             const modulus = try self.stack.pop();
             const factor2 = try self.stack.pop();
             const factor1 = try self.stack.peek();
-            log.err("MULMOD: Computing ({d} * {d}) % {d}", .{factor1, factor2, modulus});
             var result: WordType = undefined;
             if (modulus == 0) {
                 result = 0;
             } else {
                 result = mulmod_safe(factor1, factor2, modulus);
             }
-            log.err("MULMOD: Result = {d}", .{result});
             try self.stack.set_top(result);
             const next_cursor = cursor + 1;
             return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor});
@@ -205,10 +201,8 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// EXP opcode (0x0a) - Exponential operation.
         pub fn exp(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            log.err("EXP HANDLER CALLED! Stack size: {d}", .{self.stack.size()});
             const exponent = try self.stack.pop();
             const base = try self.stack.peek();
-            log.err("EXP: Computing {d} ^ {d}", .{base, exponent});
             var result: WordType = 1;
             var b = base;
             var e = exponent;
@@ -218,7 +212,6 @@ pub fn Handlers(comptime FrameType: type) type {
                 }
                 b *%= b;
             }
-            log.err("EXP: Result = {d}", .{result});
             try self.stack.set_top(result);
             const next_cursor = cursor + 1;
             return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
