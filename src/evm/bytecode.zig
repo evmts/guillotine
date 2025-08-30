@@ -600,6 +600,8 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
                         
                         // Case 1: PUSH + JUMP
                         if (next_op == @intFromEnum(Opcode.JUMP)) {
+                            const log = @import("log.zig");
+                            log.debug("Detected PUSH + JUMP at pc={}, push_value={}, next_op={x}", .{ i, push_value, next_op });
                             // Validate jump target bounds
                             if (push_value >= N) return error.InvalidJumpDestination;
                             // Collect for JUMPDEST validation after first pass
@@ -612,6 +614,8 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
                                  last_push_end == i) {
                             // We have PUSH(dest) + PUSH(cond) + JUMPI pattern
                             const jump_dest = last_push_value.?;
+                            const log = @import("log.zig");
+                            log.debug("Detected PUSH + PUSH + JUMPI at pc={}, jump_dest={}, next_op={x}", .{ i, jump_dest, next_op });
                             if (jump_dest >= N) return error.InvalidJumpDestination;
                             // Collect for JUMPDEST validation after first pass
                             try immediate_jumps.append(self.allocator, @intCast(jump_dest));
@@ -635,6 +639,11 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
             // Single pass complete - now validate collected immediate jumps
             for (immediate_jumps.items) |jump_target| {
                 if ((self.is_jumpdest[jump_target >> BITMAP_SHIFT] & (@as(u8, 1) << @intCast(jump_target & BITMAP_MASK))) == 0) {
+                    // Debug: Print more details about the invalid jump
+                    const log = @import("log.zig");
+                    log.err("Invalid jump destination: target={}, bytecode_len={}, immediate_jumps_count={}", .{ 
+                        jump_target, N, immediate_jumps.items.len 
+                    });
                     return error.InvalidJumpDestination;
                 }
             }
