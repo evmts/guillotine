@@ -135,13 +135,13 @@ pub const DebuggingTracer = struct {
                 self.allocator.free(msg);
             }
         }
-        self.steps.deinit();
+        self.steps.deinit(self.allocator);
 
         // Free state snapshots
         for (self.state_snapshots.items) |*snapshot| {
             self.allocator.free(snapshot.stack);
         }
-        self.state_snapshots.deinit();
+        self.state_snapshots.deinit(self.allocator);
 
         self.breakpoints.deinit();
     }
@@ -206,17 +206,15 @@ pub const DebuggingTracer = struct {
     /// Create a snapshot of the current state
     pub fn captureState(self: *Self, pc: u32, comptime FrameType: type, frame: *const FrameType) !void {
         // Get current stack contents
-        const stack_copy = try self.allocator.alloc(u256, frame.next_stack_index);
-        for (0..frame.next_stack_index) |i| {
-            // Access stack items from bottom to top for consistent ordering
-            stack_copy[i] = frame.stack[i];
-        }
+        const stack_slice = @constCast(&frame.stack).get_slice();
+        const stack_copy = try self.allocator.alloc(u256, stack_slice.len);
+        @memcpy(stack_copy, stack_slice);
 
         const snapshot = StateSnapshot{
             .pc = pc,
             .gas_remaining = @max(frame.gas_remaining, 0),
             .stack = stack_copy,
-            .memory_size = if (@hasField(FrameType, "memory")) frame.memory.size() else 0,
+            .memory_size = if (@hasField(FrameType, "memory")) @constCast(&frame.memory).size() else 0,
             .depth = if (@hasField(FrameType, "depth")) frame.depth else 0,
             .timestamp = std.time.milliTimestamp(),
         };
@@ -232,6 +230,9 @@ pub const DebuggingTracer = struct {
 
     /// Required tracer interface: called before each operation
     pub fn beforeOp(self: *Self, pc: u32, opcode: u8, comptime FrameType: type, frame: *const FrameType) void {
+        // Update instruction counter to verify tracer is working
+        self.total_instructions += 1;
+        
         // Check if we should pause execution
         if (self.shouldPause(pc)) {
             self.paused = true;
@@ -253,7 +254,7 @@ pub const DebuggingTracer = struct {
         self.total_instructions += 1;
 
         // Capture state after operation to complete the step record
-        self.captureStateForStep(pc, opcode, FrameType, frame) catch |err| {
+        self.captureStateForStep(pc, opcode, FrameType, frame, false) catch |err| {
             std.log.warn("Failed to capture after state: {}", .{err});
         };
 
@@ -289,10 +290,9 @@ pub const DebuggingTracer = struct {
         const gas = @max(frame.gas_remaining, 0);
 
         // Create stack copy
-        const stack_copy = try self.allocator.alloc(u256, frame.next_stack_index);
-        for (0..frame.next_stack_index) |i| {
-            stack_copy[i] = frame.stack[i];
-        }
+        const stack_slice = @constCast(&frame.stack).get_slice();
+        const stack_copy = try self.allocator.alloc(u256, stack_slice.len);
+        @memcpy(stack_copy, stack_slice);
 
         if (is_before) {
             // Start a new execution step
@@ -306,7 +306,7 @@ pub const DebuggingTracer = struct {
                 .gas_cost = 0, // Will be calculated in afterOp
                 .stack_before = stack_copy,
                 .stack_after = &[_]u256{}, // Will be updated in afterOp
-                .memory_size_before = if (@hasField(FrameType, "memory")) frame.memory.size() else 0,
+                .memory_size_before = if (@hasField(FrameType, "memory")) @constCast(&frame.memory).size() else 0,
                 .memory_size_after = 0, // Will be updated in afterOp
                 .depth = if (@hasField(FrameType, "depth")) frame.depth else 0,
                 .error_occurred = false,
@@ -331,7 +331,7 @@ pub const DebuggingTracer = struct {
                 current_step.gas_after = @as(i32, @intCast(@min(gas, std.math.maxInt(i32))));
                 current_step.gas_cost = @intCast(@max(0, current_step.gas_before - @as(i32, @intCast(@min(gas, std.math.maxInt(i32))))));
                 current_step.stack_after = stack_copy;
-                current_step.memory_size_after = if (@hasField(FrameType, "memory")) frame.memory.size() else 0;
+                current_step.memory_size_after = if (@hasField(FrameType, "memory")) @constCast(&frame.memory).size() else 0;
             } else {
                 // No current step, free the stack copy
                 self.allocator.free(stack_copy);
@@ -454,9 +454,9 @@ pub const JSONRPCTracer = struct {
         const gas_before: u64 = @max(frame.gas_remaining, 0);
         
         // Create stack copy
-        const stack_size = frame.stack.size();
+        const stack_size = @constCast(&frame.stack).size();
         const stack_copy = self.allocator.alloc(u256, stack_size) catch return; // Return on allocation failure
-        const stack_slice = frame.stack.get_slice();
+        const stack_slice = @constCast(&frame.stack).get_slice();
         @memcpy(stack_copy, stack_slice);
         
         const op_name = getOpcodeName(opcode);
@@ -476,7 +476,7 @@ pub const JSONRPCTracer = struct {
             .gasCost = 0, // Will be updated in afterOp
             .depth = depth_val,
             .stack = stack_copy,
-            .memSize = if (comptime @hasField(FrameType, "memory")) @intCast(frame.memory.size()) else 0,
+            .memSize = if (comptime @hasField(FrameType, "memory")) @intCast(@constCast(&frame.memory).size()) else 0,
         };
         
         self.trace_steps.append(step) catch return; // Return on allocation failure
@@ -501,7 +501,7 @@ pub const JSONRPCTracer = struct {
             
         // Update memory size if available
         if (comptime @hasField(FrameType, "memory")) {
-            current_step.memSize = @intCast(frame.memory.size());
+            current_step.memSize = @intCast(@constCast(&frame.memory).size());
         }
     }
     
