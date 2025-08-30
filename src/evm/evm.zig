@@ -369,6 +369,7 @@ pub fn Evm(comptime config: EvmConfig) type {
                 return PreflightResult{ .precompile_result = CallResult.failure_with_error(0, error_str) };
             };
 
+
             if (code.len == 0) {
                 return PreflightResult{ .empty_account = gas };
             }

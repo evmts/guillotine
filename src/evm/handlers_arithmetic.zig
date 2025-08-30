@@ -15,7 +15,6 @@ pub fn Handlers(comptime FrameType: type) type {
             const top_minus_1 = try self.stack.pop();
             const top = try self.stack.peek();
             const result = top +% top_minus_1;
-            log.debug("ADD: {} + {} = {}", .{ top, top_minus_1, result });
             try self.stack.set_top(result);
             const next_cursor = cursor + 1;
             return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
@@ -138,7 +137,6 @@ pub fn Handlers(comptime FrameType: type) type {
             } else {
                 result = mulmod_safe(factor1, factor2, modulus);
             }
-            log.debug("MULMOD: {} * {} % {} = {}", .{ factor1, factor2, modulus, result });
             try self.stack.set_top(result);
             const next_cursor = cursor + 1;
             return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor});
@@ -214,7 +212,6 @@ pub fn Handlers(comptime FrameType: type) type {
                 }
                 base_working *%= base_working;
             }
-            log.debug("EXP: {} ^ {} = {}", .{ base, exponent, result });
             try self.stack.set_top(result);
             const next_cursor = cursor + 1;
             return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
