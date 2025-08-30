@@ -16,8 +16,8 @@ pub fn Handlers(comptime FrameType: type) type {
             const metadata = dispatch.getInlineMetadata();
             const push_value = metadata.value;
 
-            const a = try self.stack.pop();
-            const result = a & push_value;
+            const top = try self.stack.pop();
+            const result = top & push_value;
             try self.stack.push(result);
 
             const next = dispatch.skipMetadata();
@@ -30,8 +30,8 @@ pub fn Handlers(comptime FrameType: type) type {
             const metadata = dispatch.getPointerMetadata();
             const push_value = metadata.value.*;
 
-            const a = try self.stack.pop();
-            const result = a & push_value;
+            const top = try self.stack.pop();
+            const result = top & push_value;
             try self.stack.push(result);
 
             const next = dispatch.skipMetadata();
@@ -44,8 +44,8 @@ pub fn Handlers(comptime FrameType: type) type {
             const metadata = dispatch.getInlineMetadata();
             const push_value = metadata.value;
 
-            const a = try self.stack.pop();
-            const result = a | push_value;
+            const top = try self.stack.pop();
+            const result = top | push_value;
             try self.stack.push(result);
 
             const next = dispatch.skipMetadata();
@@ -58,8 +58,8 @@ pub fn Handlers(comptime FrameType: type) type {
             const metadata = dispatch.getPointerMetadata();
             const push_value = metadata.value.*;
 
-            const a = try self.stack.pop();
-            const result = a | push_value;
+            const top = try self.stack.pop();
+            const result = top | push_value;
             try self.stack.push(result);
 
             const next = dispatch.skipMetadata();
@@ -72,8 +72,8 @@ pub fn Handlers(comptime FrameType: type) type {
             const metadata = dispatch.getInlineMetadata();
             const push_value = metadata.value;
 
-            const a = try self.stack.pop();
-            const result = a ^ push_value;
+            const top = try self.stack.pop();
+            const result = top ^ push_value;
             try self.stack.push(result);
 
             const next = dispatch.skipMetadata();
@@ -86,8 +86,8 @@ pub fn Handlers(comptime FrameType: type) type {
             const metadata = dispatch.getPointerMetadata();
             const push_value = metadata.value.*;
 
-            const a = try self.stack.pop();
-            const result = a ^ push_value;
+            const top = try self.stack.pop();
+            const result = top ^ push_value;
             try self.stack.push(result);
 
             const next = dispatch.skipMetadata();
