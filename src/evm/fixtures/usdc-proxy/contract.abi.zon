@@ -1,0 +1,578 @@
+// USDC (USD Coin) Proxy Contract ABI 
+// Contract: 0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48 (Proxy)
+// Implementation: 0x43506849d7c04f9138d1a2050bbf3a0c054402dd (FiatTokenV2_2)
+// Note: This is a proxy, ABI reflects the full implementation contract
+.{
+    .name = "USDC",
+    .functions = .{
+        .transfer = .{
+            .name = "transfer",
+            .type = "function",
+            .stateMutability = "nonpayable",
+            .inputs = .{
+                .{
+                    .name = "to",
+                    .type = "address",
+                    .internalType = "address",
+                },
+                .{
+                    .name = "value",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+            },
+            .outputs = .{
+                .{
+                    .name = "",
+                    .type = "bool",
+                    .internalType = "bool",
+                },
+            },
+        },
+        .transferFrom = .{
+            .name = "transferFrom",
+            .type = "function",
+            .stateMutability = "nonpayable",
+            .inputs = .{
+                .{
+                    .name = "from", 
+                    .type = "address",
+                    .internalType = "address",
+                },
+                .{
+                    .name = "to",
+                    .type = "address",
+                    .internalType = "address",
+                },
+                .{
+                    .name = "value",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+            },
+            .outputs = .{
+                .{
+                    .name = "",
+                    .type = "bool",
+                    .internalType = "bool",
+                },
+            },
+        },
+        .balanceOf = .{
+            .name = "balanceOf",
+            .type = "function",
+            .stateMutability = "view",
+            .inputs = .{
+                .{
+                    .name = "account",
+                    .type = "address", 
+                    .internalType = "address",
+                },
+            },
+            .outputs = .{
+                .{
+                    .name = "",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+            },
+        },
+        .approve = .{
+            .name = "approve",
+            .type = "function",
+            .stateMutability = "nonpayable",
+            .inputs = .{
+                .{
+                    .name = "spender",
+                    .type = "address",
+                    .internalType = "address",
+                },
+                .{
+                    .name = "amount",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+            },
+            .outputs = .{
+                .{
+                    .name = "",
+                    .type = "bool",
+                    .internalType = "bool",
+                },
+            },
+        },
+        .allowance = .{
+            .name = "allowance",
+            .type = "function",
+            .stateMutability = "view",
+            .inputs = .{
+                .{
+                    .name = "owner",
+                    .type = "address",
+                    .internalType = "address",
+                },
+                .{
+                    .name = "spender",
+                    .type = "address",
+                    .internalType = "address",
+                },
+            },
+            .outputs = .{
+                .{
+                    .name = "",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+            },
+        },
+        .totalSupply = .{
+            .name = "totalSupply",
+            .type = "function",
+            .stateMutability = "view",
+            .inputs = .{},
+            .outputs = .{
+                .{
+                    .name = "",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+            },
+        },
+        .decimals = .{
+            .name = "decimals",
+            .type = "function",
+            .stateMutability = "view",
+            .inputs = .{},
+            .outputs = .{
+                .{
+                    .name = "",
+                    .type = "uint8",
+                    .internalType = "uint8",
+                },
+            },
+        },
+        // Minting functions
+        .mint = .{
+            .name = "mint",
+            .type = "function",
+            .stateMutability = "nonpayable",
+            .inputs = .{
+                .{
+                    .name = "to",
+                    .type = "address",
+                    .internalType = "address",
+                },
+                .{
+                    .name = "amount",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+            },
+            .outputs = .{
+                .{
+                    .name = "",
+                    .type = "bool",
+                    .internalType = "bool",
+                },
+            },
+        },
+        .configureMinter = .{
+            .name = "configureMinter",
+            .type = "function",
+            .stateMutability = "nonpayable",
+            .inputs = .{
+                .{
+                    .name = "minter",
+                    .type = "address",
+                    .internalType = "address",
+                },
+                .{
+                    .name = "minterAllowedAmount",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+            },
+            .outputs = .{
+                .{
+                    .name = "",
+                    .type = "bool",
+                    .internalType = "bool",
+                },
+            },
+        },
+        .removeMinter = .{
+            .name = "removeMinter",
+            .type = "function",
+            .stateMutability = "nonpayable",
+            .inputs = .{
+                .{
+                    .name = "minter",
+                    .type = "address",
+                    .internalType = "address",
+                },
+            },
+            .outputs = .{
+                .{
+                    .name = "",
+                    .type = "bool",
+                    .internalType = "bool",
+                },
+            },
+        },
+        .minterAllowance = .{
+            .name = "minterAllowance",
+            .type = "function",
+            .stateMutability = "view",
+            .inputs = .{
+                .{
+                    .name = "minter",
+                    .type = "address",
+                    .internalType = "address",
+                },
+            },
+            .outputs = .{
+                .{
+                    .name = "",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+            },
+        },
+        .isMinter = .{
+            .name = "isMinter",
+            .type = "function",
+            .stateMutability = "view",
+            .inputs = .{
+                .{
+                    .name = "account",
+                    .type = "address",
+                    .internalType = "address",
+                },
+            },
+            .outputs = .{
+                .{
+                    .name = "",
+                    .type = "bool",
+                    .internalType = "bool",
+                },
+            },
+        },
+        // Burning functions
+        .burn = .{
+            .name = "burn",
+            .type = "function",
+            .stateMutability = "nonpayable",
+            .inputs = .{
+                .{
+                    .name = "amount",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+            },
+            .outputs = .{},
+        },
+        // Pause/Unpause functions
+        .pause = .{
+            .name = "pause",
+            .type = "function",
+            .stateMutability = "nonpayable",
+            .inputs = .{},
+            .outputs = .{},
+        },
+        .unpause = .{
+            .name = "unpause",
+            .type = "function",
+            .stateMutability = "nonpayable",
+            .inputs = .{},
+            .outputs = .{},
+        },
+        .paused = .{
+            .name = "paused",
+            .type = "function",
+            .stateMutability = "view",
+            .inputs = .{},
+            .outputs = .{
+                .{
+                    .name = "",
+                    .type = "bool",
+                    .internalType = "bool",
+                },
+            },
+        },
+        // Blacklist functions
+        .blacklist = .{
+            .name = "blacklist",
+            .type = "function",
+            .stateMutability = "nonpayable",
+            .inputs = .{
+                .{
+                    .name = "account",
+                    .type = "address",
+                    .internalType = "address",
+                },
+            },
+            .outputs = .{},
+        },
+        .unBlacklist = .{
+            .name = "unBlacklist",
+            .type = "function",
+            .stateMutability = "nonpayable",
+            .inputs = .{
+                .{
+                    .name = "account",
+                    .type = "address",
+                    .internalType = "address",
+                },
+            },
+            .outputs = .{},
+        },
+        .isBlacklisted = .{
+            .name = "isBlacklisted",
+            .type = "function",
+            .stateMutability = "view",
+            .inputs = .{
+                .{
+                    .name = "account",
+                    .type = "address",
+                    .internalType = "address",
+                },
+            },
+            .outputs = .{
+                .{
+                    .name = "",
+                    .type = "bool",
+                    .internalType = "bool",
+                },
+            },
+        },
+    },
+    .events = .{
+        .Transfer = .{
+            .name = "Transfer",
+            .type = "event",
+            .anonymous = false,
+            .inputs = .{
+                .{
+                    .name = "from",
+                    .type = "address",
+                    .indexed = true,
+                    .internalType = "address",
+                },
+                .{
+                    .name = "to",
+                    .type = "address",
+                    .indexed = true,
+                    .internalType = "address",
+                },
+                .{
+                    .name = "value",
+                    .type = "uint256",
+                    .indexed = false,
+                    .internalType = "uint256",
+                },
+            },
+        },
+        .Approval = .{
+            .name = "Approval",
+            .type = "event",
+            .anonymous = false,
+            .inputs = .{
+                .{
+                    .name = "owner",
+                    .type = "address", 
+                    .indexed = true,
+                    .internalType = "address",
+                },
+                .{
+                    .name = "spender",
+                    .type = "address",
+                    .indexed = true,
+                    .internalType = "address",
+                },
+                .{
+                    .name = "value",
+                    .type = "uint256",
+                    .indexed = false,
+                    .internalType = "uint256",
+                },
+            },
+        },
+        // Minting/Burning events
+        .Mint = .{
+            .name = "Mint",
+            .type = "event",
+            .anonymous = false,
+            .inputs = .{
+                .{
+                    .name = "minter",
+                    .type = "address",
+                    .indexed = true,
+                    .internalType = "address",
+                },
+                .{
+                    .name = "to",
+                    .type = "address",
+                    .indexed = true,
+                    .internalType = "address",
+                },
+                .{
+                    .name = "amount",
+                    .type = "uint256",
+                    .indexed = false,
+                    .internalType = "uint256",
+                },
+            },
+        },
+        .Burn = .{
+            .name = "Burn",
+            .type = "event",
+            .anonymous = false,
+            .inputs = .{
+                .{
+                    .name = "burner",
+                    .type = "address",
+                    .indexed = true,
+                    .internalType = "address",
+                },
+                .{
+                    .name = "amount",
+                    .type = "uint256",
+                    .indexed = false,
+                    .internalType = "uint256",
+                },
+            },
+        },
+        // Minter management events
+        .MinterConfigured = .{
+            .name = "MinterConfigured",
+            .type = "event",
+            .anonymous = false,
+            .inputs = .{
+                .{
+                    .name = "minter",
+                    .type = "address",
+                    .indexed = true,
+                    .internalType = "address",
+                },
+                .{
+                    .name = "minterAllowedAmount",
+                    .type = "uint256",
+                    .indexed = false,
+                    .internalType = "uint256",
+                },
+            },
+        },
+        .MinterRemoved = .{
+            .name = "MinterRemoved",
+            .type = "event",
+            .anonymous = false,
+            .inputs = .{
+                .{
+                    .name = "oldMinter",
+                    .type = "address",
+                    .indexed = true,
+                    .internalType = "address",
+                },
+            },
+        },
+        // Pause events
+        .Pause = .{
+            .name = "Pause",
+            .type = "event",
+            .anonymous = false,
+            .inputs = .{},
+        },
+        .Unpause = .{
+            .name = "Unpause",
+            .type = "event",
+            .anonymous = false,
+            .inputs = .{},
+        },
+        // Blacklist events
+        .Blacklisted = .{
+            .name = "Blacklisted",
+            .type = "event",
+            .anonymous = false,
+            .inputs = .{
+                .{
+                    .name = "account",
+                    .type = "address",
+                    .indexed = true,
+                    .internalType = "address",
+                },
+            },
+        },
+        .UnBlacklisted = .{
+            .name = "UnBlacklisted",
+            .type = "event",
+            .anonymous = false,
+            .inputs = .{
+                .{
+                    .name = "account",
+                    .type = "address",
+                    .indexed = true,
+                    .internalType = "address",
+                },
+            },
+        },
+        // Administrative role events
+        .BlacklisterChanged = .{
+            .name = "BlacklisterChanged",
+            .type = "event",
+            .anonymous = false,
+            .inputs = .{
+                .{
+                    .name = "newBlacklister",
+                    .type = "address",
+                    .indexed = true,
+                    .internalType = "address",
+                },
+            },
+        },
+        .MasterMinterChanged = .{
+            .name = "MasterMinterChanged",
+            .type = "event",
+            .anonymous = false,
+            .inputs = .{
+                .{
+                    .name = "newMasterMinter",
+                    .type = "address",
+                    .indexed = true,
+                    .internalType = "address",
+                },
+            },
+        },
+        .PauserChanged = .{
+            .name = "PauserChanged",
+            .type = "event",
+            .anonymous = false,
+            .inputs = .{
+                .{
+                    .name = "newPauser",
+                    .type = "address",
+                    .indexed = true,
+                    .internalType = "address",
+                },
+            },
+        },
+        .OwnershipTransferred = .{
+            .name = "OwnershipTransferred",
+            .type = "event",
+            .anonymous = false,
+            .inputs = .{
+                .{
+                    .name = "previousOwner",
+                    .type = "address",
+                    .indexed = true,
+                    .internalType = "address",
+                },
+                .{
+                    .name = "newOwner",
+                    .type = "address",
+                    .indexed = true,
+                    .internalType = "address",
+                },
+            },
+        },
+    },
+}

@@ -1,0 +1,368 @@
+// Uniswap V3 Pool (ETH/USDC) Contract ABI
+// Contract: 0x8ad599c3A0ff1De082011EFDDc58f1908eb6e6D8
+.{
+    .name = "UniswapV3Pool",
+    .functions = .{
+        .swap = .{
+            .name = "swap",
+            .type = "function",
+            .stateMutability = "nonpayable",
+            .inputs = .{
+                .{
+                    .name = "recipient",
+                    .type = "address",
+                    .internalType = "address",
+                },
+                .{
+                    .name = "zeroForOne",
+                    .type = "bool",
+                    .internalType = "bool",
+                },
+                .{
+                    .name = "amountSpecified",
+                    .type = "int256",
+                    .internalType = "int256",
+                },
+                .{
+                    .name = "sqrtPriceLimitX96",
+                    .type = "uint160",
+                    .internalType = "uint160",
+                },
+                .{
+                    .name = "data",
+                    .type = "bytes",
+                    .internalType = "bytes",
+                },
+            },
+            .outputs = .{
+                .{
+                    .name = "amount0",
+                    .type = "int256",
+                    .internalType = "int256",
+                },
+                .{
+                    .name = "amount1", 
+                    .type = "int256",
+                    .internalType = "int256",
+                },
+            },
+        },
+        .mint = .{
+            .name = "mint",
+            .type = "function",
+            .stateMutability = "nonpayable",
+            .inputs = .{
+                .{
+                    .name = "recipient",
+                    .type = "address",
+                    .internalType = "address",
+                },
+                .{
+                    .name = "tickLower",
+                    .type = "int24",
+                    .internalType = "int24",
+                },
+                .{
+                    .name = "tickUpper",
+                    .type = "int24",
+                    .internalType = "int24",
+                },
+                .{
+                    .name = "amount",
+                    .type = "uint128",
+                    .internalType = "uint128",
+                },
+                .{
+                    .name = "data",
+                    .type = "bytes",
+                    .internalType = "bytes",
+                },
+            },
+            .outputs = .{
+                .{
+                    .name = "amount0",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+                .{
+                    .name = "amount1",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+            },
+        },
+        .burn = .{
+            .name = "burn",
+            .type = "function",
+            .stateMutability = "nonpayable",
+            .inputs = .{
+                .{
+                    .name = "tickLower",
+                    .type = "int24",
+                    .internalType = "int24",
+                },
+                .{
+                    .name = "tickUpper",
+                    .type = "int24",
+                    .internalType = "int24",
+                },
+                .{
+                    .name = "amount",
+                    .type = "uint128",
+                    .internalType = "uint128",
+                },
+            },
+            .outputs = .{
+                .{
+                    .name = "amount0",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+                .{
+                    .name = "amount1",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+            },
+        },
+        .collect = .{
+            .name = "collect",
+            .type = "function",
+            .stateMutability = "nonpayable",
+            .inputs = .{
+                .{
+                    .name = "recipient",
+                    .type = "address",
+                    .internalType = "address",
+                },
+                .{
+                    .name = "tickLower",
+                    .type = "int24",
+                    .internalType = "int24",
+                },
+                .{
+                    .name = "tickUpper",
+                    .type = "int24",
+                    .internalType = "int24",
+                },
+                .{
+                    .name = "amount0Requested",
+                    .type = "uint128",
+                    .internalType = "uint128",
+                },
+                .{
+                    .name = "amount1Requested",
+                    .type = "uint128",
+                    .internalType = "uint128",
+                },
+            },
+            .outputs = .{
+                .{
+                    .name = "amount0",
+                    .type = "uint128",
+                    .internalType = "uint128",
+                },
+                .{
+                    .name = "amount1",
+                    .type = "uint128",
+                    .internalType = "uint128",
+                },
+            },
+        },
+        .slot0 = .{
+            .name = "slot0",
+            .type = "function",
+            .stateMutability = "view",
+            .inputs = .{},
+            .outputs = .{
+                .{
+                    .name = "sqrtPriceX96",
+                    .type = "uint160",
+                    .internalType = "uint160",
+                },
+                .{
+                    .name = "tick",
+                    .type = "int24",
+                    .internalType = "int24",
+                },
+                .{
+                    .name = "observationIndex",
+                    .type = "uint16",
+                    .internalType = "uint16",
+                },
+                .{
+                    .name = "observationCardinality",
+                    .type = "uint16",
+                    .internalType = "uint16",
+                },
+                .{
+                    .name = "observationCardinalityNext",
+                    .type = "uint16",
+                    .internalType = "uint16",
+                },
+                .{
+                    .name = "feeProtocol",
+                    .type = "uint8",
+                    .internalType = "uint8",
+                },
+                .{
+                    .name = "unlocked",
+                    .type = "bool",
+                    .internalType = "bool",
+                },
+            },
+        },
+        .liquidity = .{
+            .name = "liquidity",
+            .type = "function",
+            .stateMutability = "view",
+            .inputs = .{},
+            .outputs = .{
+                .{
+                    .name = "",
+                    .type = "uint128",
+                    .internalType = "uint128",
+                },
+            },
+        },
+        .token0 = .{
+            .name = "token0",
+            .type = "function",
+            .stateMutability = "view",
+            .inputs = .{},
+            .outputs = .{
+                .{
+                    .name = "",
+                    .type = "address",
+                    .internalType = "address",
+                },
+            },
+        },
+        .token1 = .{
+            .name = "token1",
+            .type = "function",
+            .stateMutability = "view",
+            .inputs = .{},
+            .outputs = .{
+                .{
+                    .name = "",
+                    .type = "address",
+                    .internalType = "address",
+                },
+            },
+        },
+        .fee = .{
+            .name = "fee",
+            .type = "function",
+            .stateMutability = "view",
+            .inputs = .{},
+            .outputs = .{
+                .{
+                    .name = "",
+                    .type = "uint24",
+                    .internalType = "uint24",
+                },
+            },
+        },
+    },
+    .events = .{
+        .Swap = .{
+            .name = "Swap",
+            .type = "event",
+            .anonymous = false,
+            .inputs = .{
+                .{
+                    .name = "sender",
+                    .type = "address",
+                    .indexed = true,
+                    .internalType = "address",
+                },
+                .{
+                    .name = "recipient",
+                    .type = "address",
+                    .indexed = true,
+                    .internalType = "address",
+                },
+                .{
+                    .name = "amount0",
+                    .type = "int256",
+                    .indexed = false,
+                    .internalType = "int256",
+                },
+                .{
+                    .name = "amount1",
+                    .type = "int256",
+                    .indexed = false,
+                    .internalType = "int256",
+                },
+                .{
+                    .name = "sqrtPriceX96",
+                    .type = "uint160",
+                    .indexed = false,
+                    .internalType = "uint160",
+                },
+                .{
+                    .name = "liquidity",
+                    .type = "uint128",
+                    .indexed = false,
+                    .internalType = "uint128",
+                },
+                .{
+                    .name = "tick",
+                    .type = "int24",
+                    .indexed = false,
+                    .internalType = "int24",
+                },
+            },
+        },
+        .Mint = .{
+            .name = "Mint",
+            .type = "event",
+            .anonymous = false,
+            .inputs = .{
+                .{
+                    .name = "sender",
+                    .type = "address",
+                    .indexed = false,
+                    .internalType = "address",
+                },
+                .{
+                    .name = "owner",
+                    .type = "address",
+                    .indexed = true,
+                    .internalType = "address",
+                },
+                .{
+                    .name = "tickLower",
+                    .type = "int24",
+                    .indexed = true,
+                    .internalType = "int24",
+                },
+                .{
+                    .name = "tickUpper",
+                    .type = "int24",
+                    .indexed = true,
+                    .internalType = "int24",
+                },
+                .{
+                    .name = "amount",
+                    .type = "uint128",
+                    .indexed = false,
+                    .internalType = "uint128",
+                },
+                .{
+                    .name = "amount0",
+                    .type = "uint256",
+                    .indexed = false,
+                    .internalType = "uint256",
+                },
+                .{
+                    .name = "amount1",
+                    .type = "uint256",
+                    .indexed = false,
+                    .internalType = "uint256",
+                },
+            },
+        },
+    },
+}

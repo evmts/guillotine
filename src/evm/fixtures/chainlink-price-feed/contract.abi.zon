@@ -1,0 +1,196 @@
+// Chainlink Price Feed (ETH/USD) ABI
+// Contract: 0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419  
+.{
+    .name = "ChainlinkAggregatorV3",
+    .functions = .{
+        .latestRoundData = .{
+            .name = "latestRoundData",
+            .type = "function",
+            .stateMutability = "view",
+            .inputs = .{},
+            .outputs = .{
+                .{
+                    .name = "roundId",
+                    .type = "uint80",
+                    .internalType = "uint80",
+                },
+                .{
+                    .name = "answer",
+                    .type = "int256",
+                    .internalType = "int256",
+                },
+                .{
+                    .name = "startedAt",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+                .{
+                    .name = "updatedAt",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+                .{
+                    .name = "answeredInRound",
+                    .type = "uint80",
+                    .internalType = "uint80",
+                },
+            },
+        },
+        .getRoundData = .{
+            .name = "getRoundData", 
+            .type = "function",
+            .stateMutability = "view",
+            .inputs = .{
+                .{
+                    .name = "_roundId",
+                    .type = "uint80",
+                    .internalType = "uint80",
+                },
+            },
+            .outputs = .{
+                .{
+                    .name = "roundId",
+                    .type = "uint80",
+                    .internalType = "uint80",
+                },
+                .{
+                    .name = "answer",
+                    .type = "int256", 
+                    .internalType = "int256",
+                },
+                .{
+                    .name = "startedAt",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+                .{
+                    .name = "updatedAt",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+                .{
+                    .name = "answeredInRound",
+                    .type = "uint80",
+                    .internalType = "uint80",
+                },
+            },
+        },
+        .decimals = .{
+            .name = "decimals",
+            .type = "function",
+            .stateMutability = "view",
+            .inputs = .{},
+            .outputs = .{
+                .{
+                    .name = "",
+                    .type = "uint8",
+                    .internalType = "uint8",
+                },
+            },
+        },
+        .description = .{
+            .name = "description",
+            .type = "function",
+            .stateMutability = "view",
+            .inputs = .{},
+            .outputs = .{
+                .{
+                    .name = "",
+                    .type = "string",
+                    .internalType = "string",
+                },
+            },
+        },
+        .version = .{
+            .name = "version",
+            .type = "function", 
+            .stateMutability = "view",
+            .inputs = .{},
+            .outputs = .{
+                .{
+                    .name = "",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+            },
+        },
+        .latestAnswer = .{
+            .name = "latestAnswer",
+            .type = "function",
+            .stateMutability = "view",
+            .inputs = .{},
+            .outputs = .{
+                .{
+                    .name = "",
+                    .type = "int256",
+                    .internalType = "int256",
+                },
+            },
+        },
+        .latestTimestamp = .{
+            .name = "latestTimestamp",
+            .type = "function",
+            .stateMutability = "view",
+            .inputs = .{},
+            .outputs = .{
+                .{
+                    .name = "",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+            },
+        },
+    },
+    .events = .{
+        .AnswerUpdated = .{
+            .name = "AnswerUpdated",
+            .type = "event",
+            .anonymous = false,
+            .inputs = .{
+                .{
+                    .name = "current",
+                    .type = "int256",
+                    .indexed = true,
+                    .internalType = "int256", 
+                },
+                .{
+                    .name = "roundId",
+                    .type = "uint256",
+                    .indexed = true,
+                    .internalType = "uint256",
+                },
+                .{
+                    .name = "updatedAt",
+                    .type = "uint256",
+                    .indexed = false,
+                    .internalType = "uint256",
+                },
+            },
+        },
+        .NewRound = .{
+            .name = "NewRound",
+            .type = "event",
+            .anonymous = false,
+            .inputs = .{
+                .{
+                    .name = "roundId",
+                    .type = "uint256",
+                    .indexed = true,
+                    .internalType = "uint256",
+                },
+                .{
+                    .name = "startedBy",
+                    .type = "address",
+                    .indexed = true,
+                    .internalType = "address",
+                },
+                .{
+                    .name = "startedAt",
+                    .type = "uint256",
+                    .indexed = false,
+                    .internalType = "uint256",
+                },
+            },
+        },
+    },
+}

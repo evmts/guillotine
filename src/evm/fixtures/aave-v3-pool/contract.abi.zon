@@ -1,0 +1,556 @@
+// AAVE V3 Pool Contract ABI
+// Contract: 0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2  
+// Note: This is a proxy contract, ABI reflects the Pool implementation
+.{
+    .name = "Pool",
+    .functions = .{
+        .supply = .{
+            .name = "supply",
+            .type = "function",
+            .stateMutability = "nonpayable",
+            .inputs = .{
+                .{
+                    .name = "asset",
+                    .type = "address",
+                    .internalType = "address",
+                },
+                .{
+                    .name = "amount",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+                .{
+                    .name = "onBehalfOf",
+                    .type = "address",
+                    .internalType = "address",
+                },
+                .{
+                    .name = "referralCode",
+                    .type = "uint16",
+                    .internalType = "uint16",
+                },
+            },
+            .outputs = .{},
+        },
+        .withdraw = .{
+            .name = "withdraw",
+            .type = "function",
+            .stateMutability = "nonpayable",
+            .inputs = .{
+                .{
+                    .name = "asset",
+                    .type = "address",
+                    .internalType = "address",
+                },
+                .{
+                    .name = "amount",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+                .{
+                    .name = "to",
+                    .type = "address",
+                    .internalType = "address",
+                },
+            },
+            .outputs = .{
+                .{
+                    .name = "",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+            },
+        },
+        .borrow = .{
+            .name = "borrow",
+            .type = "function",
+            .stateMutability = "nonpayable",
+            .inputs = .{
+                .{
+                    .name = "asset",
+                    .type = "address",
+                    .internalType = "address",
+                },
+                .{
+                    .name = "amount",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+                .{
+                    .name = "interestRateMode",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+                .{
+                    .name = "referralCode",
+                    .type = "uint16",
+                    .internalType = "uint16",
+                },
+                .{
+                    .name = "onBehalfOf",
+                    .type = "address",
+                    .internalType = "address",
+                },
+            },
+            .outputs = .{},
+        },
+        .repay = .{
+            .name = "repay",
+            .type = "function",
+            .stateMutability = "nonpayable",
+            .inputs = .{
+                .{
+                    .name = "asset",
+                    .type = "address",
+                    .internalType = "address",
+                },
+                .{
+                    .name = "amount",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+                .{
+                    .name = "interestRateMode",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+                .{
+                    .name = "onBehalfOf",
+                    .type = "address",
+                    .internalType = "address",
+                },
+            },
+            .outputs = .{
+                .{
+                    .name = "",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+            },
+        },
+        .setUserUseReserveAsCollateral = .{
+            .name = "setUserUseReserveAsCollateral",
+            .type = "function",
+            .stateMutability = "nonpayable",
+            .inputs = .{
+                .{
+                    .name = "asset",
+                    .type = "address",
+                    .internalType = "address",
+                },
+                .{
+                    .name = "useAsCollateral",
+                    .type = "bool",
+                    .internalType = "bool",
+                },
+            },
+            .outputs = .{},
+        },
+        .swapBorrowRateMode = .{
+            .name = "swapBorrowRateMode",
+            .type = "function",
+            .stateMutability = "nonpayable",
+            .inputs = .{
+                .{
+                    .name = "asset",
+                    .type = "address",
+                    .internalType = "address",
+                },
+                .{
+                    .name = "interestRateMode",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+            },
+            .outputs = .{},
+        },
+        .flashLoan = .{
+            .name = "flashLoan",
+            .type = "function",
+            .stateMutability = "nonpayable",
+            .inputs = .{
+                .{
+                    .name = "receiverAddress",
+                    .type = "address",
+                    .internalType = "address",
+                },
+                .{
+                    .name = "assets",
+                    .type = "address[]",
+                    .internalType = "address[]",
+                },
+                .{
+                    .name = "amounts",
+                    .type = "uint256[]",
+                    .internalType = "uint256[]",
+                },
+                .{
+                    .name = "interestRateModes",
+                    .type = "uint256[]",
+                    .internalType = "uint256[]",
+                },
+                .{
+                    .name = "onBehalfOf",
+                    .type = "address",
+                    .internalType = "address",
+                },
+                .{
+                    .name = "params",
+                    .type = "bytes",
+                    .internalType = "bytes",
+                },
+                .{
+                    .name = "referralCode",
+                    .type = "uint16",
+                    .internalType = "uint16",
+                },
+            },
+            .outputs = .{},
+        },
+        .getUserAccountData = .{
+            .name = "getUserAccountData",
+            .type = "function",
+            .stateMutability = "view",
+            .inputs = .{
+                .{
+                    .name = "user",
+                    .type = "address",
+                    .internalType = "address",
+                },
+            },
+            .outputs = .{
+                .{
+                    .name = "totalCollateralBase",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+                .{
+                    .name = "totalDebtBase",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+                .{
+                    .name = "availableBorrowsBase",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+                .{
+                    .name = "currentLiquidationThreshold",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+                .{
+                    .name = "ltv",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+                .{
+                    .name = "healthFactor",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+            },
+        },
+        .getReserveData = .{
+            .name = "getReserveData",
+            .type = "function",
+            .stateMutability = "view",
+            .inputs = .{
+                .{
+                    .name = "asset",
+                    .type = "address",
+                    .internalType = "address",
+                },
+            },
+            .outputs = .{
+                .{
+                    .name = "",
+                    .type = "tuple",
+                    .internalType = "struct DataTypes.ReserveData",
+                    .components = .{
+                        .{
+                            .name = "configuration",
+                            .type = "tuple",
+                            .internalType = "struct DataTypes.ReserveConfigurationMap",
+                        },
+                        .{
+                            .name = "liquidityIndex",
+                            .type = "uint128",
+                            .internalType = "uint128",
+                        },
+                        .{
+                            .name = "currentLiquidityRate",
+                            .type = "uint128",
+                            .internalType = "uint128",
+                        },
+                        .{
+                            .name = "variableBorrowIndex",
+                            .type = "uint128",
+                            .internalType = "uint128",
+                        },
+                        .{
+                            .name = "currentVariableBorrowRate",
+                            .type = "uint128",
+                            .internalType = "uint128",
+                        },
+                        .{
+                            .name = "currentStableBorrowRate",
+                            .type = "uint128",
+                            .internalType = "uint128",
+                        },
+                        .{
+                            .name = "lastUpdateTimestamp",
+                            .type = "uint40",
+                            .internalType = "uint40",
+                        },
+                        .{
+                            .name = "id",
+                            .type = "uint16",
+                            .internalType = "uint16",
+                        },
+                        .{
+                            .name = "aTokenAddress",
+                            .type = "address",
+                            .internalType = "address",
+                        },
+                        .{
+                            .name = "stableDebtTokenAddress",
+                            .type = "address",
+                            .internalType = "address",
+                        },
+                        .{
+                            .name = "variableDebtTokenAddress",
+                            .type = "address",
+                            .internalType = "address",
+                        },
+                        .{
+                            .name = "interestRateStrategyAddress",
+                            .type = "address",
+                            .internalType = "address",
+                        },
+                        .{
+                            .name = "accruedToTreasury",
+                            .type = "uint128",
+                            .internalType = "uint128",
+                        },
+                        .{
+                            .name = "unbacked",
+                            .type = "uint128",
+                            .internalType = "uint128",
+                        },
+                        .{
+                            .name = "isolationModeTotalDebt",
+                            .type = "uint128",
+                            .internalType = "uint128",
+                        },
+                    },
+                },
+            },
+        },
+    },
+    .events = .{
+        .Supply = .{
+            .name = "Supply",
+            .type = "event",
+            .anonymous = false,
+            .inputs = .{
+                .{
+                    .name = "reserve",
+                    .type = "address",
+                    .indexed = true,
+                    .internalType = "address",
+                },
+                .{
+                    .name = "user",
+                    .type = "address",
+                    .indexed = false,
+                    .internalType = "address",
+                },
+                .{
+                    .name = "onBehalfOf",
+                    .type = "address",
+                    .indexed = true,
+                    .internalType = "address",
+                },
+                .{
+                    .name = "amount",
+                    .type = "uint256",
+                    .indexed = false,
+                    .internalType = "uint256",
+                },
+                .{
+                    .name = "referralCode",
+                    .type = "uint16",
+                    .indexed = true,
+                    .internalType = "uint16",
+                },
+            },
+        },
+        .Withdraw = .{
+            .name = "Withdraw",
+            .type = "event",
+            .anonymous = false,
+            .inputs = .{
+                .{
+                    .name = "reserve",
+                    .type = "address",
+                    .indexed = true,
+                    .internalType = "address",
+                },
+                .{
+                    .name = "user",
+                    .type = "address",
+                    .indexed = true,
+                    .internalType = "address",
+                },
+                .{
+                    .name = "to",
+                    .type = "address",
+                    .indexed = true,
+                    .internalType = "address",
+                },
+                .{
+                    .name = "amount",
+                    .type = "uint256",
+                    .indexed = false,
+                    .internalType = "uint256",
+                },
+            },
+        },
+        .Borrow = .{
+            .name = "Borrow",
+            .type = "event",
+            .anonymous = false,
+            .inputs = .{
+                .{
+                    .name = "reserve",
+                    .type = "address",
+                    .indexed = true,
+                    .internalType = "address",
+                },
+                .{
+                    .name = "user",
+                    .type = "address",
+                    .indexed = false,
+                    .internalType = "address",
+                },
+                .{
+                    .name = "onBehalfOf",
+                    .type = "address",
+                    .indexed = true,
+                    .internalType = "address",
+                },
+                .{
+                    .name = "amount",
+                    .type = "uint256",
+                    .indexed = false,
+                    .internalType = "uint256",
+                },
+                .{
+                    .name = "interestRateMode",
+                    .type = "uint256",
+                    .indexed = false,
+                    .internalType = "uint256",
+                },
+                .{
+                    .name = "borrowRate",
+                    .type = "uint256",
+                    .indexed = false,
+                    .internalType = "uint256",
+                },
+                .{
+                    .name = "referralCode",
+                    .type = "uint16",
+                    .indexed = true,
+                    .internalType = "uint16",
+                },
+            },
+        },
+        .Repay = .{
+            .name = "Repay",
+            .type = "event",
+            .anonymous = false,
+            .inputs = .{
+                .{
+                    .name = "reserve",
+                    .type = "address",
+                    .indexed = true,
+                    .internalType = "address",
+                },
+                .{
+                    .name = "user",
+                    .type = "address",
+                    .indexed = true,
+                    .internalType = "address",
+                },
+                .{
+                    .name = "repayer",
+                    .type = "address",
+                    .indexed = true,
+                    .internalType = "address",
+                },
+                .{
+                    .name = "amount",
+                    .type = "uint256",
+                    .indexed = false,
+                    .internalType = "uint256",
+                },
+                .{
+                    .name = "useATokens",
+                    .type = "bool",
+                    .indexed = false,
+                    .internalType = "bool",
+                },
+            },
+        },
+        .FlashLoan = .{
+            .name = "FlashLoan",
+            .type = "event",
+            .anonymous = false,
+            .inputs = .{
+                .{
+                    .name = "target",
+                    .type = "address",
+                    .indexed = true,
+                    .internalType = "address",
+                },
+                .{
+                    .name = "initiator",
+                    .type = "address",
+                    .indexed = true,
+                    .internalType = "address",
+                },
+                .{
+                    .name = "asset",
+                    .type = "address",
+                    .indexed = true,
+                    .internalType = "address",
+                },
+                .{
+                    .name = "amount",
+                    .type = "uint256",
+                    .indexed = false,
+                    .internalType = "uint256",
+                },
+                .{
+                    .name = "interestRateMode",
+                    .type = "uint256",
+                    .indexed = false,
+                    .internalType = "uint256",
+                },
+                .{
+                    .name = "premium",
+                    .type = "uint256",
+                    .indexed = false,
+                    .internalType = "uint256",
+                },
+                .{
+                    .name = "referralCode",
+                    .type = "uint16",
+                    .indexed = false,
+                    .internalType = "uint16",
+                },
+            },
+        },
+    },
+}

@@ -1,0 +1,134 @@
+// WETH (Wrapped Ether) Contract ABI
+// Contract: 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2
+.{
+    .name = "WETH",
+    .functions = .{
+        .deposit = .{
+            .name = "deposit",
+            .type = "function",
+            .stateMutability = "payable",
+            .inputs = .{},
+            .outputs = .{},
+        },
+        .withdraw = .{
+            .name = "withdraw", 
+            .type = "function",
+            .stateMutability = "nonpayable",
+            .inputs = .{
+                .{
+                    .name = "wad",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+            },
+            .outputs = .{},
+        },
+        .transfer = .{
+            .name = "transfer",
+            .type = "function", 
+            .stateMutability = "nonpayable",
+            .inputs = .{
+                .{
+                    .name = "to",
+                    .type = "address",
+                    .internalType = "address",
+                },
+                .{
+                    .name = "value",
+                    .type = "uint256", 
+                    .internalType = "uint256",
+                },
+            },
+            .outputs = .{
+                .{
+                    .name = "",
+                    .type = "bool",
+                    .internalType = "bool",
+                },
+            },
+        },
+        .balanceOf = .{
+            .name = "balanceOf",
+            .type = "function",
+            .stateMutability = "view", 
+            .inputs = .{
+                .{
+                    .name = "account",
+                    .type = "address",
+                    .internalType = "address",
+                },
+            },
+            .outputs = .{
+                .{
+                    .name = "",
+                    .type = "uint256",
+                    .internalType = "uint256", 
+                },
+            },
+        },
+        .approve = .{
+            .name = "approve",
+            .type = "function",
+            .stateMutability = "nonpayable",
+            .inputs = .{
+                .{
+                    .name = "spender",
+                    .type = "address",
+                    .internalType = "address",
+                },
+                .{
+                    .name = "amount",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+            },
+            .outputs = .{
+                .{
+                    .name = "",
+                    .type = "bool", 
+                    .internalType = "bool",
+                },
+            },
+        },
+    },
+    .events = .{
+        .Deposit = .{
+            .name = "Deposit",
+            .type = "event",
+            .anonymous = false,
+            .inputs = .{
+                .{
+                    .name = "dst",
+                    .type = "address",
+                    .indexed = true,
+                    .internalType = "address",
+                },
+                .{
+                    .name = "wad",
+                    .type = "uint256", 
+                    .indexed = false,
+                    .internalType = "uint256",
+                },
+            },
+        },
+        .Withdrawal = .{
+            .name = "Withdrawal",
+            .type = "event", 
+            .anonymous = false,
+            .inputs = .{
+                .{
+                    .name = "src",
+                    .type = "address",
+                    .indexed = true,
+                    .internalType = "address",
+                },
+                .{
+                    .name = "wad", 
+                    .type = "uint256",
+                    .indexed = false,
+                    .internalType = "uint256",
+                },
+            },
+        },
+    },
+}
