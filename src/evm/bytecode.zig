@@ -1223,3 +1223,389 @@ test "pretty_print: should format bytecode with colors and metadata" {
     // Verify it's a valid string
     try std.testing.expect(formatted.len > 0);
 }
+
+// Additional comprehensive test coverage for bytecode.zig
+
+const testing = std.testing;
+
+test "Bytecode init - valid simple bytecode" {
+    const allocator = testing.allocator;
+
+    // Simple valid bytecode: PUSH1 0x01, PUSH1 0x02, ADD, STOP
+    const code = [_]u8{ 0x60, 0x01, 0x60, 0x02, 0x01, 0x00 };
+    var bytecode = try BytecodeDefault.init(allocator, &code);
+    defer bytecode.deinit();
+
+    try testing.expectEqual(@as(usize, 6), bytecode.len());
+    try testing.expect(bytecode.isValidJumpDest(4) == false); // ADD is not a JUMPDEST
+}
+
+test "Bytecode init - empty bytecode" {
+    const allocator = testing.allocator;
+
+    const code = [_]u8{};
+    var bytecode = try BytecodeDefault.init(allocator, &code);
+    defer bytecode.deinit();
+
+    try testing.expectEqual(@as(usize, 0), bytecode.len());
+}
+
+test "Bytecode validation - invalid opcode" {
+    const allocator = testing.allocator;
+
+    // Invalid opcode 0x0c (gap in opcode range - not defined)
+    const code = [_]u8{0x0c};
+    try testing.expectError(BytecodeDefault.ValidationError.InvalidOpcode, BytecodeDefault.init(allocator, &code));
+}
+
+test "Bytecode validation - truncated PUSH instruction" {
+    const allocator = testing.allocator;
+
+    // PUSH1 without data byte
+    const code = [_]u8{0x60};
+    try testing.expectError(BytecodeDefault.ValidationError.TruncatedPush, BytecodeDefault.init(allocator, &code));
+}
+
+test "Bytecode validation - truncated PUSH32" {
+    const allocator = testing.allocator;
+
+    // PUSH32 with only 31 bytes of data (should have 32)
+    var code = [_]u8{0x7F} ++ [_]u8{0xFF} ** 31;
+    try testing.expectError(BytecodeDefault.ValidationError.TruncatedPush, BytecodeDefault.init(allocator, &code));
+}
+
+test "Jump destination validation - valid JUMPDEST" {
+    const allocator = testing.allocator;
+
+    // PUSH1 3, JUMP, JUMPDEST, STOP
+    const code = [_]u8{ 0x60, 0x03, 0x56, 0x5B, 0x00 };
+    var bytecode = try BytecodeDefault.init(allocator, &code);
+    defer bytecode.deinit();
+
+    try testing.expect(bytecode.isValidJumpDest(3) == true); // JUMPDEST at PC 3
+    try testing.expect(bytecode.isValidJumpDest(0) == false); // PUSH1 is not a JUMPDEST
+    try testing.expect(bytecode.isValidJumpDest(2) == false); // JUMP is not a JUMPDEST
+}
+
+test "Jump destination validation - invalid jump target" {
+    const allocator = testing.allocator;
+
+    // PUSH1 3, JUMP, STOP (no JUMPDEST at PC 3)
+    const code = [_]u8{ 0x60, 0x03, 0x56, 0x00 };
+    try testing.expectError(BytecodeDefault.ValidationError.InvalidJumpDestination, BytecodeDefault.init(allocator, &code));
+}
+
+test "Jump destination validation - jump to push data" {
+    const allocator = testing.allocator;
+
+    // PUSH1 1, JUMP, 0x5B (this 0x5B is push data, not a real JUMPDEST)
+    const code = [_]u8{ 0x60, 0x01, 0x56, 0x60, 0x5B };
+    try testing.expectError(BytecodeDefault.ValidationError.InvalidJumpDestination, BytecodeDefault.init(allocator, &code));
+}
+
+test "Jump destination validation - JUMPI pattern" {
+    const allocator = testing.allocator;
+
+    // PUSH1 6, PUSH1 1, JUMPI, STOP, JUMPDEST, STOP  
+    const code = [_]u8{ 0x60, 0x06, 0x60, 0x01, 0x57, 0x00, 0x5B, 0x00 };
+    var bytecode = try BytecodeDefault.init(allocator, &code);
+    defer bytecode.deinit();
+
+    try testing.expect(bytecode.isValidJumpDest(6) == true);
+}
+
+test "PUSH instruction handling - all PUSH sizes" {
+    const allocator = testing.allocator;
+
+    // Test PUSH1 through PUSH4
+    const push1_code = [_]u8{ 0x60, 0x42, 0x00 }; // PUSH1 0x42, STOP
+    var bytecode1 = try BytecodeDefault.init(allocator, &push1_code);
+    defer bytecode1.deinit();
+
+    const push2_code = [_]u8{ 0x61, 0x12, 0x34, 0x00 }; // PUSH2 0x1234, STOP  
+    var bytecode2 = try BytecodeDefault.init(allocator, &push2_code);
+    defer bytecode2.deinit();
+
+    const push4_code = [_]u8{ 0x63, 0x12, 0x34, 0x56, 0x78, 0x00 }; // PUSH4 0x12345678, STOP
+    var bytecode4 = try BytecodeDefault.init(allocator, &push4_code);
+    defer bytecode4.deinit();
+
+    try testing.expectEqual(@as(usize, 3), bytecode1.len());
+    try testing.expectEqual(@as(usize, 4), bytecode2.len());
+    try testing.expectEqual(@as(usize, 6), bytecode4.len());
+}
+
+test "PUSH value reading - readPushValue" {
+    const allocator = testing.allocator;
+
+    // PUSH4 0x12345678, STOP
+    const code = [_]u8{ 0x63, 0x12, 0x34, 0x56, 0x78, 0x00 };
+    var bytecode = try BytecodeDefault.init(allocator, &code);
+    defer bytecode.deinit();
+
+    const value = bytecode.readPushValue(0, 4);
+    try testing.expect(value != null);
+    try testing.expectEqual(@as(u32, 0x12345678), value.?);
+}
+
+test "PUSH value reading - readPushValueN" {
+    const allocator = testing.allocator;
+
+    // PUSH8 with max value that fits in u64
+    const code = [_]u8{ 0x67, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00 };
+    var bytecode = try BytecodeDefault.init(allocator, &code);
+    defer bytecode.deinit();
+
+    const value = bytecode.readPushValueN(0, 8);
+    try testing.expect(value != null);
+    try testing.expectEqual(@as(u256, 0xFFFFFFFFFFFFFFFF), value.?);
+}
+
+test "Iterator functionality - basic iteration" {
+    const allocator = testing.allocator;
+
+    // PUSH1 0x42, ADD, JUMPDEST, STOP
+    const code = [_]u8{ 0x60, 0x42, 0x01, 0x5B, 0x00 };
+    var bytecode = try BytecodeDefault.init(allocator, &code);
+    defer bytecode.deinit();
+
+    var iter = bytecode.createIterator();
+    
+    // First instruction: PUSH1
+    var opcode_data = iter.next();
+    try testing.expect(opcode_data != null);
+    try testing.expectEqual(@as(u8, 0x60), @intFromEnum(opcode_data.?.opcode));
+
+    // Second instruction: ADD (should skip push data)
+    opcode_data = iter.next();
+    try testing.expect(opcode_data != null);
+    try testing.expectEqual(@as(u8, 0x01), @intFromEnum(opcode_data.?.opcode));
+
+    // Third instruction: JUMPDEST
+    opcode_data = iter.next();
+    try testing.expect(opcode_data != null);
+    try testing.expectEqual(@as(u8, 0x5B), @intFromEnum(opcode_data.?.opcode));
+
+    // Fourth instruction: STOP
+    opcode_data = iter.next();
+    try testing.expect(opcode_data != null);
+    try testing.expectEqual(@as(u8, 0x00), @intFromEnum(opcode_data.?.opcode));
+
+    // Should be at end
+    opcode_data = iter.next();
+    try testing.expect(opcode_data == null);
+}
+
+test "Bitmap operations - push data detection" {
+    const allocator = testing.allocator;
+
+    // PUSH2 0x1234, STOP
+    const code = [_]u8{ 0x61, 0x12, 0x34, 0x00 };
+    var bytecode = try BytecodeDefault.init(allocator, &code);
+    defer bytecode.deinit();
+
+    // PC 0: PUSH2 instruction (not push data)
+    try testing.expect(!bytecode.packed_bitmap[0].is_push_data);
+    try testing.expect(bytecode.packed_bitmap[0].is_op_start);
+
+    // PC 1, 2: Push data bytes
+    try testing.expect(bytecode.packed_bitmap[1].is_push_data);
+    try testing.expect(!bytecode.packed_bitmap[1].is_op_start);
+    try testing.expect(bytecode.packed_bitmap[2].is_push_data);
+    try testing.expect(!bytecode.packed_bitmap[2].is_op_start);
+
+    // PC 3: STOP instruction
+    try testing.expect(!bytecode.packed_bitmap[3].is_push_data);
+    try testing.expect(bytecode.packed_bitmap[3].is_op_start);
+}
+
+test "Instruction size calculation - getInstructionSize" {
+    const allocator = testing.allocator;
+
+    // PUSH1 0x42, PUSH4 0x12345678, ADD, STOP
+    const code = [_]u8{ 0x60, 0x42, 0x63, 0x12, 0x34, 0x56, 0x78, 0x01, 0x00 };
+    var bytecode = try BytecodeDefault.init(allocator, &code);
+    defer bytecode.deinit();
+
+    try testing.expectEqual(@as(BytecodeDefault.PcType, 2), bytecode.getInstructionSize(0)); // PUSH1
+    try testing.expectEqual(@as(BytecodeDefault.PcType, 5), bytecode.getInstructionSize(2)); // PUSH4
+    try testing.expectEqual(@as(BytecodeDefault.PcType, 1), bytecode.getInstructionSize(7)); // ADD
+    try testing.expectEqual(@as(BytecodeDefault.PcType, 1), bytecode.getInstructionSize(8)); // STOP
+}
+
+test "PC navigation - getNextPc" {
+    const allocator = testing.allocator;
+
+    // PUSH2 0x1234, ADD, STOP
+    const code = [_]u8{ 0x61, 0x12, 0x34, 0x01, 0x00 };
+    var bytecode = try BytecodeDefault.init(allocator, &code);
+    defer bytecode.deinit();
+
+    try testing.expectEqual(@as(?BytecodeDefault.PcType, 3), bytecode.getNextPc(0)); // PUSH2 -> ADD
+    try testing.expectEqual(@as(?BytecodeDefault.PcType, 4), bytecode.getNextPc(3)); // ADD -> STOP
+    try testing.expectEqual(@as(?BytecodeDefault.PcType, null), bytecode.getNextPc(4)); // STOP -> end
+}
+
+test "Fusion candidate detection" {
+    const allocator = testing.allocator;
+
+    // PUSH1 0x42, ADD, PUSH1 0x24, MUL, STOP
+    const code = [_]u8{ 0x60, 0x42, 0x01, 0x60, 0x24, 0x02, 0x00 };
+    const config = BytecodeConfig{
+        .max_bytecode_size = 1024,
+        .fusions_enabled = true,
+    };
+    const TestBytecode = Bytecode(config);
+    var bytecode = try TestBytecode.init(allocator, &code);
+    defer bytecode.deinit();
+
+    // PUSH1 at PC 0 followed by ADD should be fusion candidate
+    try testing.expect(bytecode.packed_bitmap[0].is_fusion_candidate);
+
+    // PUSH1 at PC 3 followed by MUL should be fusion candidate
+    try testing.expect(bytecode.packed_bitmap[3].is_fusion_candidate);
+}
+
+test "Large bytecode handling - EIP-170 limit" {
+    const allocator = testing.allocator;
+
+    // Test bytecode exactly at EIP-170 limit (24576 bytes)
+    const max_size = 24576;
+    const large_code = try allocator.alloc(u8, max_size);
+    defer allocator.free(large_code);
+    
+    // Fill with STOP opcodes (valid)
+    @memset(large_code, 0x00);
+    
+    var bytecode = try BytecodeDefault.init(allocator, large_code);
+    defer bytecode.deinit();
+    
+    try testing.expectEqual(@as(usize, max_size), bytecode.len());
+}
+
+test "Complex jump patterns - multiple JUMPDESTs" {
+    const allocator = testing.allocator;
+
+    // PUSH1 5, JUMP, PUSH1 9, JUMP, JUMPDEST (PC 5), PUSH1 7, JUMP, STOP, JUMPDEST (PC 9), STOP
+    const code = [_]u8{ 0x60, 0x05, 0x56, 0x60, 0x09, 0x56, 0x5B, 0x60, 0x07, 0x56, 0x00, 0x5B, 0x00 };
+    var bytecode = try BytecodeDefault.init(allocator, &code);
+    defer bytecode.deinit();
+
+    try testing.expect(bytecode.isValidJumpDest(6) == true);  // JUMPDEST at PC 6
+    try testing.expect(bytecode.isValidJumpDest(11) == true); // JUMPDEST at PC 11
+    try testing.expect(bytecode.isValidJumpDest(0) == false); // PUSH1 is not a JUMPDEST
+}
+
+test "Error resilience - out of bounds jump" {
+    const allocator = testing.allocator;
+
+    // PUSH1 100, JUMP (target 100 is beyond bytecode end)
+    const code = [_]u8{ 0x60, 100, 0x56 };
+    try testing.expectError(BytecodeDefault.ValidationError.InvalidJumpDestination, BytecodeDefault.init(allocator, &code));
+}
+
+test "Bitmap utility functions - countBitsInRange" {
+    // Test the bitmap counting utility
+    const bitmap = [_]u8{ 0b10101010, 0b11110000, 0b00001111 };
+    
+    const count1 = BytecodeDefault.countBitsInRange(&bitmap, 0, 8);
+    try testing.expectEqual(@as(usize, 4), count1); // First byte has 4 bits set
+
+    const count2 = BytecodeDefault.countBitsInRange(&bitmap, 8, 16);
+    try testing.expectEqual(@as(usize, 4), count2); // Second byte has 4 bits set
+
+    const count3 = BytecodeDefault.countBitsInRange(&bitmap, 0, 24);
+    try testing.expectEqual(@as(usize, 12), count3); // All three bytes have 12 bits total
+}
+
+test "Bitmap utility functions - findNextSetBit" {
+    // Test finding next set bit in bitmap
+    const bitmap = [_]u8{ 0b00000000, 0b00010000, 0b10000000 };
+    
+    const next_bit1 = BytecodeDefault.findNextSetBit(&bitmap, 0);
+    try testing.expectEqual(@as(?usize, 12), next_bit1); // Bit 12 (4th bit of second byte)
+
+    const next_bit2 = BytecodeDefault.findNextSetBit(&bitmap, 13);
+    try testing.expectEqual(@as(?usize, 16), next_bit2); // Bit 16 (0th bit of third byte)
+
+    const next_bit3 = BytecodeDefault.findNextSetBit(&bitmap, 17);
+    try testing.expectEqual(@as(?usize, null), next_bit3); // No more set bits
+}
+
+test "Initcode gas calculation - EIP-3860" {
+    // Test initcode gas calculation per EIP-3860
+    const gas1 = BytecodeDefault.calculateInitcodeGas(32);
+    try testing.expectEqual(@as(u64, 2), gas1); // 32 bytes = 1 word = 2 gas
+
+    const gas2 = BytecodeDefault.calculateInitcodeGas(64);
+    try testing.expectEqual(@as(u64, 4), gas2); // 64 bytes = 2 words = 4 gas
+
+    const gas3 = BytecodeDefault.calculateInitcodeGas(33);
+    try testing.expectEqual(@as(u64, 4), gas3); // 33 bytes = 2 words (rounded up) = 4 gas
+
+    const gas4 = BytecodeDefault.calculateInitcodeGas(0);
+    try testing.expectEqual(@as(u64, 0), gas4); // 0 bytes = 0 gas
+}
+
+test "Memory management - proper cleanup" {
+    const allocator = testing.allocator;
+
+    // Test that multiple init/deinit cycles work properly
+    for (0..10) |_| {
+        const code = [_]u8{ 0x60, 0x42, 0x01, 0x5B, 0x00 };
+        var bytecode = try BytecodeDefault.init(allocator, &code);
+        defer bytecode.deinit();
+
+        try testing.expectEqual(@as(usize, 5), bytecode.len());
+    }
+}
+
+test "Edge cases - single byte bytecode" {
+    const allocator = testing.allocator;
+
+    // Single STOP instruction
+    const code = [_]u8{0x00};
+    var bytecode = try BytecodeDefault.init(allocator, &code);
+    defer bytecode.deinit();
+
+    try testing.expectEqual(@as(usize, 1), bytecode.len());
+    try testing.expect(bytecode.packed_bitmap[0].is_op_start);
+    try testing.expect(!bytecode.packed_bitmap[0].is_push_data);
+    try testing.expect(!bytecode.packed_bitmap[0].is_jumpdest);
+}
+
+test "Edge cases - maximum PUSH32 instruction" {
+    const allocator = testing.allocator;
+
+    // PUSH32 with 32 bytes of data
+    var code = [_]u8{0x7F} ++ [_]u8{0xFF} ** 32 ++ [_]u8{0x00}; // PUSH32 + 32 bytes + STOP
+    var bytecode = try BytecodeDefault.init(allocator, &code);
+    defer bytecode.deinit();
+
+    try testing.expectEqual(@as(usize, 34), bytecode.len()); // PUSH32 + 32 data bytes + STOP
+
+    // Verify push data is marked correctly
+    for (1..33) |i| {
+        try testing.expect(bytecode.packed_bitmap[i].is_push_data);
+        try testing.expect(!bytecode.packed_bitmap[i].is_op_start);
+    }
+}
+
+test "Boundary conditions - jump to last instruction" {
+    const allocator = testing.allocator;
+
+    // PUSH1 3, JUMP, JUMPDEST
+    const code = [_]u8{ 0x60, 0x03, 0x56, 0x5B };
+    var bytecode = try BytecodeDefault.init(allocator, &code);
+    defer bytecode.deinit();
+
+    try testing.expect(bytecode.isValidJumpDest(3) == true);
+}
+
+test "Security - malformed jump patterns" {
+    const allocator = testing.allocator;
+
+    // PUSH1 2, JUMP, JUMPDEST (but jump target is push data, not the JUMPDEST)
+    const code = [_]u8{ 0x60, 0x02, 0x56, 0x5B };
+    try testing.expectError(BytecodeDefault.ValidationError.InvalidJumpDestination, BytecodeDefault.init(allocator, &code));
+}
