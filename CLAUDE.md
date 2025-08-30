@@ -39,7 +39,8 @@ If sensitive data detected (API keys/passwords/tokens): 1) Abort immediately 2) 
 - Direct imports (`address.Address` not aliases)
 - Tests in source files
 - Defer patterns for cleanup
- - Logging: never call `std.debug.print`; import `log.zig` and use `log.debug`, `log.warn`, etc.
+- Descriptive variable names (NOT `a`, `b` - use `top`, `value1`, `operand`, etc.)
+- Logging: never call `std.debug.print`; import `log.zig` and use `log.debug`, `log.warn`, etc.
 
 ### Memory Management
 ```zig
