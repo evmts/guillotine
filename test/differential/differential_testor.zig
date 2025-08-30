@@ -363,11 +363,12 @@ pub const DifferentialTestor = struct {
         };
 
         std.debug.print("DIFFERENTIAL: About to call Guillotine with gas={}, to={x}\n", .{ gas_limit, to.bytes });
-        const result = self.guillotine_instance.call(params);
+        var result = self.guillotine_instance.call(params);
         std.debug.print("DIFFERENTIAL: Guillotine call complete, success={}, gas_left={}\n", .{ result.success, result.gas_left });
 
-        // Use trace from CallResult if available, otherwise create empty trace
+        // Transfer ownership of trace from CallResult
         const trace = result.trace;
+        result.trace = null; // Clear from result so it won't be double-freed
 
         // Calculate gas used
         const gas_used = gas_limit - result.gas_left;
@@ -394,10 +395,40 @@ pub const DifferentialTestor = struct {
             }
         }
 
+        // Copy output before freeing result
+        const output_copy = try self.allocator.dupe(u8, result.output);
+        
+        // Clean up CallResult allocated memory (except trace which we took ownership of)
+        // Note: logs, selfdestructs, accessed_addresses, accessed_storage are all slices
+        // that were allocated by the EVM and need to be freed
+        if (result.logs.len > 0) {
+            // Free log data
+            for (result.logs) |log_entry| {
+                self.allocator.free(log_entry.topics);
+                self.allocator.free(log_entry.data);
+            }
+            self.allocator.free(result.logs);
+        }
+        if (result.selfdestructs.len > 0) {
+            self.allocator.free(result.selfdestructs);
+        }
+        if (result.accessed_addresses.len > 0) {
+            self.allocator.free(result.accessed_addresses);
+        }
+        if (result.accessed_storage.len > 0) {
+            self.allocator.free(result.accessed_storage);
+        }
+        if (result.output.len > 0) {
+            self.allocator.free(result.output);
+        }
+        if (result.error_info) |error_info| {
+            self.allocator.free(error_info);
+        }
+
         return ExecutionResultWithTrace{
             .success = result.success,
             .gas_used = gas_used,
-            .output = try self.allocator.dupe(u8, result.output),
+            .output = output_copy,
             .trace = trace,
             .allocator = self.allocator,
         };
