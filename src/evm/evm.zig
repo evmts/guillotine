@@ -751,6 +751,11 @@ pub fn Evm(comptime config: EvmConfig) type {
                 contract_account.nonce = 1;
             }
             if (result.output.len > 0) {
+                // EIP-3541: Reject new contract code starting with the 0xEF byte
+                if (self.eips.eip_3541 and result.output[0] == 0xEF) {
+                    self.journal.revert_to_snapshot(args.snapshot_id);
+                    return CallResult.failure(0);
+                }
                 const stored_hash = self.database.set_code(result.output) catch {
                     self.journal.revert_to_snapshot(args.snapshot_id);
                     return CallResult.failure(0);
@@ -1132,7 +1137,42 @@ pub fn Evm(comptime config: EvmConfig) type {
             if (self.is_static_context()) {
                 return error.StaticCallViolation;
             }
-            try self.self_destruct.mark_for_destruction(contract_address, recipient);
+            
+            // EIP-6780: SELFDESTRUCT only actually destroys the contract if it was created in the same transaction
+            // Otherwise, it only transfers the balance but keeps the code and storage
+            if (self.eips.eip_6780) {
+                // Check if contract was created in the current transaction
+                const created_in_tx = self.created_contracts.was_created_in_tx(contract_address);
+                
+                if (created_in_tx) {
+                    // Full destruction: transfer balance and mark for deletion
+                    try self.self_destruct.mark_for_destruction(contract_address, recipient);
+                } else {
+                    // Only transfer balance, don't destroy the contract
+                    // Get the contract's balance
+                    const contract_account = try self.database.get_account(contract_address.bytes);
+                    if (contract_account) |account| {
+                        if (account.balance > 0) {
+                            // Transfer balance to recipient
+                            try self.journal.record_balance_change(self.current_snapshot_id, contract_address, account.balance);
+                            try self.journal.record_balance_change(self.current_snapshot_id, recipient, 0);
+                            
+                            // Update balances
+                            var sender_account = account;
+                            sender_account.balance = 0;
+                            try self.database.set_account(contract_address.bytes, sender_account);
+                            
+                            var recipient_account = (try self.database.get_account(recipient.bytes)) orelse Account.zero();
+                            recipient_account.balance +%= account.balance;
+                            try self.database.set_account(recipient.bytes, recipient_account);
+                        }
+                    }
+                    // Don't mark for destruction - contract persists
+                }
+            } else {
+                // Pre-Cancun: always mark for full destruction
+                try self.self_destruct.mark_for_destruction(contract_address, recipient);
+            }
         }
 
         /// Get current call input/calldata
