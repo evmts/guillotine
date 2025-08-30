@@ -332,7 +332,8 @@ pub const DifferentialTestor = struct {
             break :blk null;
         };
 
-        // Temporarily skip cleanup so we can examine the trace file
+        // Keep trace file for debugging - don't delete it
+        std.debug.print("DEBUG: REVM trace file saved at: {s}\n", .{temp_file});
         // std.fs.deleteFileAbsolute(temp_file) catch {};
 
         return ExecutionResultWithTrace{
@@ -659,11 +660,69 @@ pub const DifferentialTestor = struct {
         defer self.allocator.free(trace_content);
 
         const log = std.log.scoped(.revm_trace);
-        log.debug("REVM trace file content ({} bytes): {s}", .{ trace_content.len, trace_content[0..@min(500, trace_content.len)] });
+        log.debug("REVM trace file content ({} bytes)", .{trace_content.len});
 
-        // For now, just verify the file exists and return null
-        // TODO: Implement proper EIP-3155 JSON parsing to create actual trace
-        log.warn("REVM trace parsing not yet implemented - file exists but content not parsed", .{});
+        // Simple trace parsing for debugging - just count steps and log key operations
+        var step_count: u32 = 0;
+        var lines = std.mem.splitSequence(u8, trace_content, "\n");
+        
+        log.info("=== REVM EXECUTION TRACE ===", .{});
+        
+        while (lines.next()) |line| {
+            if (line.len == 0) continue;
+            
+            // Parse each JSON line for basic info
+            var parsed = std.json.parseFromSlice(std.json.Value, self.allocator, line) catch |err| {
+                log.warn("Failed to parse JSON line: {}, error: {}", .{ line.len, err });
+                continue;
+            };
+            defer parsed.deinit();
+            
+            const obj = parsed.value.object;
+            
+            // Skip the final summary line (has "output" field) 
+            if (obj.get("output")) |output| {
+                log.info("REVM FINAL OUTPUT: {s}", .{output.string});
+                continue;
+            }
+            
+            // Extract basic step information
+            const pc = @as(u32, @intCast(obj.get("pc").?.integer));
+            _ = @as(u8, @intCast(obj.get("op").?.integer)); // opcode - unused for now
+            const opcode_name = obj.get("opName").?.string;
+            
+            // Parse gas as hex string
+            const gas_hex = obj.get("gas").?.string;
+            const gas = std.fmt.parseInt(u64, gas_hex[2..], 16) catch 0;
+            
+            step_count += 1;
+            
+            // Log key arithmetic operations
+            if (std.mem.eql(u8, opcode_name, "SUB") or 
+                std.mem.eql(u8, opcode_name, "MUL") or 
+                std.mem.eql(u8, opcode_name, "DIV") or
+                std.mem.eql(u8, opcode_name, "MOD") or
+                std.mem.eql(u8, opcode_name, "ADDMOD") or
+                std.mem.eql(u8, opcode_name, "MULMOD") or
+                std.mem.eql(u8, opcode_name, "EXP") or
+                std.mem.eql(u8, opcode_name, "ADD") or
+                std.mem.eql(u8, opcode_name, "RETURN")) {
+                
+                // Also log the stack state for key operations
+                if (obj.get("stack")) |stack_array| {
+                    log.info("REVM Step {}: {} (PC={}, Gas={})", .{ step_count, opcode_name, pc, gas });
+                    log.info("  Stack: {s}", .{stack_array.string});
+                } else {
+                    log.info("REVM Step {}: {} (PC={}, Gas={})", .{ step_count, opcode_name, pc, gas });
+                }
+            }
+        }
+
+        log.info("REVM TOTAL STEPS: {}", .{step_count});
+        log.info("=== END REVM TRACE ===", .{});
+
+        // Return null for now since we're just doing debug logging
+        log.warn("REVM trace parsing: debug mode - returning null trace", .{});
         return null;
     }
 };
