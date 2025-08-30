@@ -11,4 +11,5 @@ test {
     _ = @import("keccak_logs_test.zig");
     _ = @import("fixtures_test.zig");
     _ = @import("synthetic_toggle_test.zig");
+    _ = @import("popular_contracts_test.zig");
 }
