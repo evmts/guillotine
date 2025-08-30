@@ -291,6 +291,17 @@ pub fn Evm(comptime config: EvmConfig) type {
             defer self.depth = 0;
             defer _ = self.call_arena.reset(.retain_capacity);
             defer self.logs.clearRetainingCapacity();
+            defer {
+                // Reset all per-transaction state
+                self.gas_refund_counter = 0;
+                self.current_input = &.{};
+                // Note: return_data is not freed here because it's returned as part of CallResult
+                // and the caller is responsible for the memory
+                self.return_data = &.{};
+                // Clear journal and access list
+                self.journal.clear();
+                self.access_list.clear();
+            }
 
             // Check gas unless disabled
             const gas = switch (params) {
@@ -350,8 +361,9 @@ pub fn Evm(comptime config: EvmConfig) type {
             }
 
             // Get contract code
+            log.err("PREFLIGHT: Attempting to get code for address: {x}", .{to.bytes});
             const code = self.database.get_code_by_address(to.bytes) catch |err| {
-                log.err("Failed to get code for address {any}: {}", .{ to, err });
+                log.err("Failed to get code for address {x}: {}", .{ to.bytes, err });
                 const error_str = switch (err) {
                     Database.Error.CodeNotFound => "CodeNotFound",
                     Database.Error.AccountNotFound => "AccountNotFound",
@@ -370,10 +382,14 @@ pub fn Evm(comptime config: EvmConfig) type {
             };
 
 
+            log.err("PREFLIGHT: Got code for address, length: {}", .{code.len});
+            
             if (code.len == 0) {
+                log.err("PREFLIGHT: Code is empty, returning empty account result", .{});
                 return PreflightResult{ .empty_account = gas };
             }
 
+            log.err("PREFLIGHT: Returning code for execution, code_len={}", .{code.len});
             return PreflightResult{ .execute_with_code = code };
         }
 
@@ -410,7 +426,7 @@ pub fn Evm(comptime config: EvmConfig) type {
                     return CallResult.success_empty(gas);
                 },
                 .execute_with_code => |code| {
-                    log.debug("About to execute_frame with code_len={}, gas={}", .{code.len, params.gas});
+                    log.err("EXECUTE_CALL: About to execute_frame with code_len={}, gas={}", .{code.len, params.gas});
                     const result = self.execute_frame(
                         code,
                         params.input,
@@ -804,6 +820,7 @@ pub fn Evm(comptime config: EvmConfig) type {
             const BASE_TX_GAS = 21000;
             const gas_after_base = if (self.depth <= 1 and gas >= BASE_TX_GAS) gas_after_base: {
                 const remaining = gas - BASE_TX_GAS;
+                log.err("EXECUTE_FRAME: Subtracting base gas: {} - {} = {}", .{gas, BASE_TX_GAS, remaining});
                 break :gas_after_base remaining;
             } else gas;
             
@@ -816,8 +833,8 @@ pub fn Evm(comptime config: EvmConfig) type {
             frame.contract_address = address;
             defer frame.deinit(self.allocator);
 
-            log.debug("Executing frame: code_len={d}, gas={d}, address={any}, is_static={any}", .{code.len, gas_cast, address, is_static});
-            log.debug("Frame gas_remaining before interpret: {d}", .{frame.gas_remaining});
+            log.err("EXECUTE_FRAME: Executing frame: code_len={d}, gas={d}, gas_cast={d}, address={x}, is_static={any}", .{code.len, gas, gas_cast, address.bytes, is_static});
+            log.err("EXECUTE_FRAME: Frame gas_remaining before interpret: {d}", .{frame.gas_remaining});
 
             // Execute with tracing if tracer type is configured
             var execution_trace: ?@import("call_result.zig").ExecutionTrace = null;
@@ -835,6 +852,7 @@ pub fn Evm(comptime config: EvmConfig) type {
                 },
                 else => {
                     // Actual errors
+                    log.err("EXECUTE_FRAME: Frame execution failed with error: {}", .{err});
                     return CallResult.failure(0);
                 },
             };
