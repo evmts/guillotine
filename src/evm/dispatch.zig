@@ -377,7 +377,7 @@ pub fn Dispatch(comptime FrameType: type) type {
             opcode_handlers: *const [256]OpcodeHandler,
         ) ![]Self.Item {
             const log = @import("log.zig");
-            log.err("DISPATCH INIT: Starting to parse bytecode with {} bytes", .{bytecode.runtime_code.len});
+            log.debug("Starting to parse bytecode with {} bytes", .{bytecode.runtime_code.len});
 
             const ScheduleList = ArrayList(Self.Item, null);
             var schedule_items = ScheduleList{};
@@ -840,8 +840,6 @@ pub fn Dispatch(comptime FrameType: type) type {
                 fn handle(frame: *FrameType, cursor: [*]const Item) FrameType.Error!noreturn {
                     if (is_before) {
                         const metadata = cursor[1].trace_before;
-                        const log = @import("log.zig");
-                        log.err("TRACE_BEFORE: pc={}, opcode=0x{x:0>2}", .{metadata.pc, metadata.opcode});
                         if (@hasDecl(TracerType, "beforeOp")) {
                             tracer.beforeOp(metadata.pc, metadata.opcode, FrameType, frame);
                         }

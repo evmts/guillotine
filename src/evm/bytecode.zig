@@ -90,23 +90,10 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
                 if (iterator.pc >= iterator.bytecode.len()) return null;
 
                 const opcode = iterator.bytecode.get_unsafe(iterator.pc);
-                const log = @import("log.zig");
-                if (iterator.bytecode.len() == 46) {
-                    // Debug the signed arithmetic test specifically
-                    if (iterator.pc == 33) {
-                        log.err("BYTECODE DEBUG AT PC 33:", .{});
-                        for (30..37) |i| {
-                            const byte = iterator.bytecode.runtime_code[i];
-                            log.err("  byte[{}] = 0x{x:0>2}", .{i, byte});
-                        }
-                    }
-                    log.err("BYTECODE ITERATOR: pc={}, opcode=0x{x:0>2}, bytecode_len={}", .{iterator.pc, opcode, iterator.bytecode.len()});
-                } else {
-                    log.err("BYTECODE ITERATOR: pc={}, opcode=0x{x:0>2}, bytecode_len={}", .{iterator.pc, opcode, iterator.bytecode.len()});
-                }
                 // Check if packed_bitmap has enough elements
                 if (iterator.pc >= iterator.bytecode.packed_bitmap.len) {
                     // Log error and return null
+                    const log = @import("log.zig");
                     log.err("Iterator PC {} exceeds packed_bitmap len {}", .{ iterator.pc, iterator.bytecode.packed_bitmap.len });
                     return null;
                 }
@@ -457,16 +444,36 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
         /// Build bitmaps and validate bytecode in a single pass
         fn buildBitmapsAndValidate(self: *Self) ValidationError!void {
             const N = self.runtime_code.len;
+            
+            // Set up cleanup in case of errors
+            var cleanup_state: struct {
+                is_push_data_allocated: bool = false,
+                is_op_start_allocated: bool = false,
+                is_jumpdest_allocated: bool = false,
+                packed_bitmap_allocated: bool = false,
+            } = .{};
+            
+            errdefer {
+                if (cleanup_state.is_push_data_allocated) self.allocator.free(self.is_push_data);
+                if (cleanup_state.is_op_start_allocated) self.allocator.free(self.is_op_start);
+                if (cleanup_state.is_jumpdest_allocated) self.allocator.free(self.is_jumpdest);
+                if (cleanup_state.packed_bitmap_allocated) self.allocator.free(self.packed_bitmap);
+            }
+            
             // Empty bytecode is valid, allocate minimal bitmaps
             if (N == 0) {
                 self.is_push_data = try self.allocator.alloc(u8, 1);
+                cleanup_state.is_push_data_allocated = true;
                 self.is_op_start = try self.allocator.alloc(u8, 1);
+                cleanup_state.is_op_start_allocated = true;
                 self.is_jumpdest = try self.allocator.alloc(u8, 1);
+                cleanup_state.is_jumpdest_allocated = true;
                 self.is_push_data[0] = 0;
                 self.is_op_start[0] = 0;
                 self.is_jumpdest[0] = 0;
                 // NEW: Also allocate packed bitmap for empty bytecode
                 self.packed_bitmap = try self.allocator.alloc(PackedBits, 1);
+                cleanup_state.packed_bitmap_allocated = true;
                 self.packed_bitmap[0] = PackedBits{ .is_push_data = false, .is_op_start = false, .is_jumpdest = false, .is_fusion_candidate = false };
                 return;
             }
@@ -478,18 +485,18 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
             if (use_aligned) {
                 const aligned_bitmap_bytes = (bitmap_bytes + CACHE_LINE_SIZE - 1) & ~@as(usize, CACHE_LINE_SIZE - 1);
                 self.is_push_data = self.allocator.alignedAlloc(u8, @as(std.mem.Alignment, @enumFromInt(std.math.log2_int(usize, CACHE_LINE_SIZE))), aligned_bitmap_bytes) catch return error.OutOfMemory;
-                errdefer self.allocator.free(self.is_push_data);
+                cleanup_state.is_push_data_allocated = true;
                 self.is_op_start = self.allocator.alignedAlloc(u8, @as(std.mem.Alignment, @enumFromInt(std.math.log2_int(usize, CACHE_LINE_SIZE))), aligned_bitmap_bytes) catch return error.OutOfMemory;
-                errdefer self.allocator.free(self.is_op_start);
+                cleanup_state.is_op_start_allocated = true;
                 self.is_jumpdest = self.allocator.alignedAlloc(u8, @as(std.mem.Alignment, @enumFromInt(std.math.log2_int(usize, CACHE_LINE_SIZE))), aligned_bitmap_bytes) catch return error.OutOfMemory;
-                errdefer self.allocator.free(self.is_jumpdest);
+                cleanup_state.is_jumpdest_allocated = true;
             } else {
                 self.is_push_data = self.allocator.alloc(u8, bitmap_bytes) catch return error.OutOfMemory;
-                errdefer self.allocator.free(self.is_push_data);
+                cleanup_state.is_push_data_allocated = true;
                 self.is_op_start = self.allocator.alloc(u8, bitmap_bytes) catch return error.OutOfMemory;
-                errdefer self.allocator.free(self.is_op_start);
+                cleanup_state.is_op_start_allocated = true;
                 self.is_jumpdest = self.allocator.alloc(u8, bitmap_bytes) catch return error.OutOfMemory;
-                errdefer self.allocator.free(self.is_jumpdest);
+                cleanup_state.is_jumpdest_allocated = true;
             }
             @memset(self.is_push_data, 0);
             @memset(self.is_op_start, 0);
@@ -497,7 +504,7 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
 
             // NEW: Allocate packed bitmap (4 bits per byte, so N packed bits)
             self.packed_bitmap = self.allocator.alloc(PackedBits, N) catch return error.OutOfMemory;
-            errdefer self.allocator.free(self.packed_bitmap);
+            cleanup_state.packed_bitmap_allocated = true;
             // Initialize all packed bits to false
             for (self.packed_bitmap) |*packed_bits| {
                 packed_bits.* = PackedBits{ .is_push_data = false, .is_op_start = false, .is_jumpdest = false, .is_fusion_candidate = false };
@@ -509,7 +516,7 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
             var last_push_end: PcType = 0;
             
             // Collect immediate jumps to validate after first pass
-            var immediate_jumps = std.ArrayList(PcType){};
+            var immediate_jumps = std.ArrayList(PcType){};  
             defer immediate_jumps.deinit(self.allocator);
             
             var i: PcType = 0;

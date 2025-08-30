@@ -251,12 +251,12 @@ pub fn Frame(comptime config: FrameConfig) type {
             }
 
             if (TracerType) |T| {
-                log.err("FRAME: Creating traced schedule with bytecode len={}", .{bytecode.runtime_code.len});
+                log.debug("Creating traced schedule with bytecode len={}", .{bytecode.runtime_code.len});
                 const traced_schedule = Dispatch.initWithTracing(self.allocator, &bytecode, handlers, T, tracer_instance) catch |e| {
-                    log.err("FRAME: Failed to create traced schedule: {}", .{e});
+                    log.err("Failed to create traced schedule: {}", .{e});
                     return Error.AllocationError;
                 };
-                log.err("FRAME: Traced schedule created, len={}", .{traced_schedule.len});
+                log.debug("Traced schedule created, len={}", .{traced_schedule.len});
                 defer Dispatch.deinitSchedule(self.allocator, traced_schedule);
 
                 const traced_jump_table = Dispatch.createJumpTable(self.allocator, traced_schedule, &bytecode) catch return Error.AllocationError;
@@ -276,14 +276,14 @@ pub fn Frame(comptime config: FrameConfig) type {
                 }
 
                 const cursor = Self.Dispatch{ .cursor = traced_schedule.ptr + start_index };
-                log.err("FRAME: Starting execution at cursor index {}, gas={}", .{start_index, self.gas_remaining});
+                log.debug("Starting execution at cursor index {}, gas={}", .{start_index, self.gas_remaining});
                 cursor.cursor[0].opcode_handler(self, cursor.cursor) catch |err| {
-                    log.err("FRAME: Handler failed with error: {}", .{err});
+                    log.debug("Handler failed with error: {}", .{err});
                     return err;
                 };
                 unreachable; // Handlers never return normally
             } else {
-                log.err("FRAME DISPATCH INIT: bytecode len={d}", .{bytecode.runtime_code.len});
+                log.debug("Dispatch init: bytecode len={d}", .{bytecode.runtime_code.len});
                 const schedule = Dispatch.init(self.allocator, &bytecode, handlers) catch |e| {
                     log.err("Failed to create dispatch schedule: {any}", .{e});
                     log.err("  Bytecode runtime_code len: {d}", .{bytecode.runtime_code.len});

@@ -361,9 +361,9 @@ pub fn Evm(comptime config: EvmConfig) type {
             }
 
             // Get contract code
-            log.err("PREFLIGHT: Attempting to get code for address: {x}", .{to.bytes});
+            log.debug("Attempting to get code for address: {x}", .{to.bytes});
             const code = self.database.get_code_by_address(to.bytes) catch |err| {
-                log.err("Failed to get code for address {x}: {}", .{ to.bytes, err });
+                log.debug("Failed to get code for address {x}: {}", .{ to.bytes, err });
                 const error_str = switch (err) {
                     Database.Error.CodeNotFound => "CodeNotFound",
                     Database.Error.AccountNotFound => "AccountNotFound",
@@ -382,14 +382,14 @@ pub fn Evm(comptime config: EvmConfig) type {
             };
 
 
-            log.err("PREFLIGHT: Got code for address, length: {}", .{code.len});
+            log.debug("Got code for address, length: {}", .{code.len});
             
             if (code.len == 0) {
-                log.err("PREFLIGHT: Code is empty, returning empty account result", .{});
+                log.debug("Code is empty, returning empty account result", .{});
                 return PreflightResult{ .empty_account = gas };
             }
 
-            log.err("PREFLIGHT: Returning code for execution, code_len={}", .{code.len});
+            log.debug("Returning code for execution, code_len={}", .{code.len});
             return PreflightResult{ .execute_with_code = code };
         }
 
@@ -426,7 +426,7 @@ pub fn Evm(comptime config: EvmConfig) type {
                     return CallResult.success_empty(gas);
                 },
                 .execute_with_code => |code| {
-                    log.err("EXECUTE_CALL: About to execute_frame with code_len={}, gas={}", .{code.len, params.gas});
+                    log.debug("About to execute_frame with code_len={}, gas={}", .{code.len, params.gas});
                     const result = self.execute_frame(
                         code,
                         params.input,
@@ -820,7 +820,7 @@ pub fn Evm(comptime config: EvmConfig) type {
             const BASE_TX_GAS = 21000;
             const gas_after_base = if (self.depth <= 1 and gas >= BASE_TX_GAS) gas_after_base: {
                 const remaining = gas - BASE_TX_GAS;
-                log.err("EXECUTE_FRAME: Subtracting base gas: {} - {} = {}", .{gas, BASE_TX_GAS, remaining});
+                log.debug("Subtracting base gas: {} - {} = {}", .{gas, BASE_TX_GAS, remaining});
                 break :gas_after_base remaining;
             } else gas;
             
@@ -833,8 +833,13 @@ pub fn Evm(comptime config: EvmConfig) type {
             frame.contract_address = address;
             defer frame.deinit(self.allocator);
 
-            log.err("EXECUTE_FRAME: Executing frame: code_len={d}, gas={d}, gas_cast={d}, address={x}, is_static={any}", .{code.len, gas, gas_cast, address.bytes, is_static});
-            log.err("EXECUTE_FRAME: Frame gas_remaining before interpret: {d}", .{frame.gas_remaining});
+            log.debug("Executing frame: code_len={d}, gas={d}, gas_cast={d}, address={x}, is_static={any}", .{code.len, gas, gas_cast, address.bytes, is_static});
+            log.debug("Frame gas_remaining before interpret: {d}", .{frame.gas_remaining});
+            
+            // DEBUG: Log first few bytes of bytecode for JUMPI test
+            if (code.len == 22) {
+                log.err("DEBUG: This looks like JUMPI test bytecode, first 8 bytes: {x}", .{code[0..8]});
+            }
 
             // Execute with tracing if tracer type is configured
             var execution_trace: ?@import("call_result.zig").ExecutionTrace = null;
@@ -852,7 +857,7 @@ pub fn Evm(comptime config: EvmConfig) type {
                 },
                 else => {
                     // Actual errors
-                    log.err("EXECUTE_FRAME: Frame execution failed with error: {}", .{err});
+                    log.debug("Frame execution failed with error: {}", .{err});
                     return CallResult.failure(0);
                 },
             };
