@@ -97,8 +97,14 @@ pub fn Handlers(comptime FrameType: type) type {
             } else {
                 const numerator_signed = @as(std.meta.Int(.signed, @bitSizeOf(WordType)), @bitCast(numerator));
                 const denominator_signed = @as(std.meta.Int(.signed, @bitSizeOf(WordType)), @bitCast(denominator));
-                const result_signed = @rem(numerator_signed, denominator_signed);
-                result = @as(WordType, @bitCast(result_signed));
+                const min_signed = std.math.minInt(std.meta.Int(.signed, @bitSizeOf(WordType)));
+                // Special case: MIN_INT % -1 = 0 (to avoid overflow)
+                if (numerator_signed == min_signed and denominator_signed == -1) {
+                    result = 0;
+                } else {
+                    const result_signed = @rem(numerator_signed, denominator_signed);
+                    result = @as(WordType, @bitCast(result_signed));
+                }
             }
             try self.stack.set_top(result);
             const next_cursor = cursor + 1;
