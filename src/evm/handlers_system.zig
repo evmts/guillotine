@@ -1,4 +1,5 @@
 const std = @import("std");
+const log = @import("log.zig");
 const FrameConfig = @import("frame_config.zig").FrameConfig;
 const primitives = @import("primitives");
 const Address = primitives.Address;
