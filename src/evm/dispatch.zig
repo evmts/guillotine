@@ -208,89 +208,60 @@ pub fn Dispatch(comptime FrameType: type) type {
         /// Safe version of getNext that validates the next item
         /// Returns an error if the next item is not a valid handler
         pub fn getNextSafe(self: Self) !Self {
-            const log = @import("log.zig");
-            
-            // Debug: log current position
-            log.debug("getNextSafe called:", .{});
-            log.debug("  Current cursor address: 0x{x}", .{@intFromPtr(self.cursor)});
-            
-            // Try to safely access current item to verify cursor is valid
-            const current_tag_ptr = @as([*]const u8, @ptrCast(self.cursor));
-            log.debug("  Current item tag byte: 0x{x:0>2}", .{current_tag_ptr[0]});
-            
             const next = Self{
                 .cursor = self.cursor + 1,
                 .jump_table = self.jump_table,
             };
             
-            log.debug("  Next cursor address: 0x{x} (current + {})", .{ @intFromPtr(next.cursor), @sizeOf(Item) });
-            
             // Check if next pointer is in valid range
             const next_addr = @intFromPtr(next.cursor);
             if (next_addr < 0x1000) {
-                log.err("Next cursor is in low memory: 0x{x}", .{next_addr});
                 return error.InvalidCursor;
             }
-            
-            // Try to read tag byte at next position
-            const next_tag_ptr = @as([*]const u8, @ptrCast(next.cursor));
-            log.debug("  Attempting to read tag byte at next position...", .{});
-            const next_tag = next_tag_ptr[0];  // This might segfault
-            log.debug("  Next item tag byte: 0x{x:0>2}", .{next_tag});
             
             // Check what type of item we're pointing to
             const next_item = next.cursor[0];
             
-            // Log the item type for debugging
             switch (next_item) {
                 .opcode_handler => |handler| {
                     // Check if handler pointer is valid (not null and looks reasonable)
                     const handler_addr = @intFromPtr(handler);
                     if (handler_addr == 0) {
-                        log.err("getNextSafe: Next item is NULL handler pointer!", .{});
                         return error.InvalidHandler;
                     }
                     // Check if it's in a reasonable memory range (not metadata mistaken as pointer)
                     if (handler_addr < 0x1000) {
-                        log.err("getNextSafe: Handler pointer looks like data: 0x{x}", .{handler_addr});
                         return error.InvalidHandler;
                     }
-                    log.debug("getNextSafe: Valid handler at 0x{x}", .{handler_addr});
                 },
-                .push_inline => |meta| {
-                    log.err("getNextSafe ERROR: Next item is push_inline metadata (value=0x{x}), not a handler!", .{meta.value});
+                .push_inline => {
                     return error.MetadataNotHandler;
                 },
-                .push_pointer => |meta| {
-                    log.err("getNextSafe ERROR: Next item is push_pointer metadata (ptr=0x{x}), not a handler!", .{@intFromPtr(meta.value)});
+                .push_pointer => {
                     return error.MetadataNotHandler;
                 },
-                .jump_dest => |meta| {
-                    log.err("getNextSafe ERROR: Next item is jump_dest metadata (gas={}), not a handler!", .{meta.gas});
+                .jump_dest => {
                     return error.MetadataNotHandler;
                 },
-                .pc => |meta| {
-                    log.err("getNextSafe ERROR: Next item is pc metadata (value={}), not a handler!", .{meta.value});
+                .pc => {
                     return error.MetadataNotHandler;
                 },
-                .codesize => |meta| {
-                    log.err("getNextSafe ERROR: Next item is codesize metadata (size={}), not a handler!", .{meta.size});
+                .codesize => {
                     return error.MetadataNotHandler;
                 },
-                .codecopy => |meta| {
-                    log.err("getNextSafe ERROR: Next item is codecopy metadata (size={}), not a handler!", .{meta.size});
+                .codecopy => {
                     return error.MetadataNotHandler;
                 },
-                .first_block_gas => |meta| {
-                    log.err("getNextSafe ERROR: Next item is first_block_gas (gas={}), not a handler!", .{meta.gas});
+                .first_block_gas => {
                     return error.MetadataNotHandler;
                 },
-                .trace_before => |meta| {
-                    log.err("getNextSafe ERROR: Next item is trace_before metadata (pc={}), not a handler!", .{meta.pc});
+                .trace_before => {
                     return error.MetadataNotHandler;
                 },
-                .trace_after => |meta| {
-                    log.err("getNextSafe ERROR: Next item is trace_after metadata (pc={}), not a handler!", .{meta.pc});
+                .trace_after => {
+                    return error.MetadataNotHandler;
+                },
+                .jump_table => {
                     return error.MetadataNotHandler;
                 },
             }
@@ -422,8 +393,6 @@ pub fn Dispatch(comptime FrameType: type) type {
             bytecode: anytype,
             opcode_handlers: *const [256]OpcodeHandler,
         ) ![]Self.Item {
-            const log = @import("log.zig");
-            log.err("DISPATCH INIT: Starting to parse bytecode with {} bytes", .{bytecode.runtime_code.len});
 
             var schedule_items = ArrayList(Self.Item, null){};
             errdefer schedule_items.deinit(allocator);
@@ -437,14 +406,8 @@ pub fn Dispatch(comptime FrameType: type) type {
             // Add first_block_gas entry if there's any gas to charge
             if (first_block_gas > 0) {
                 try schedule_items.append(allocator, .{ .first_block_gas = .{ .gas = first_block_gas } });
-                log.debug("Added first_block_gas: {d}", .{first_block_gas});
-                // TEMPORARY DEBUG: Log expected gas for our test bytecode
-                if (bytecode.runtime_code.len == 38) { // Our specific test case
-                    log.warn("DEBUG: This looks like PUSH32+PUSH1+SDIV bytecode, first_block_gas={}", .{first_block_gas});
-                }
             }
 
-            var opcode_count: usize = 0;
             while (true) {
                 const instr_pc = iter.pc;
                 const maybe = iter.next();
@@ -452,43 +415,11 @@ pub fn Dispatch(comptime FrameType: type) type {
                     break;
                 }
                 const op_data = maybe.?;
-                opcode_count += 1;
-                
-                // DEBUG: Log all opcodes being parsed
-                switch (op_data) {
-                    .regular => |data| {
-                        if (opcode_count <= 20) { // Limit spam to first 20 opcodes
-                            log.warn("DISPATCH: Parsing opcode 0x{x:0>2} at PC {d}", .{ data.opcode, instr_pc });
-                        }
-                    },
-                    .push => |data| {
-                        if (opcode_count <= 20) {
-                            log.warn("DISPATCH: Parsing PUSH{d} at PC {d}", .{ data.size, instr_pc });
-                        }
-                    },
-                    else => {
-                        if (opcode_count <= 20) {
-                            log.warn("DISPATCH: Parsing other operation at PC {d}", .{instr_pc});
-                        }
-                    }
-                }
                 
                 switch (op_data) {
                     .regular => |data| {
                         // Regular opcode - add handler first, then metadata for PC, CODESIZE, CODECOPY, JUMP, JUMPI
                         const handler = opcode_handlers.*[data.opcode];
-                        
-                        // DEBUG: Log specific opcodes we're interested in
-                        if (data.opcode == 0x08) {
-                            log.err("DISPATCH DEBUG: Found ADDMOD (0x08) at PC {d}, adding handler", .{instr_pc});
-                        } else if (data.opcode == 0x09) {
-                            log.err("DISPATCH DEBUG: Found MULMOD (0x09) at PC {d}, adding handler", .{instr_pc});
-                        } else if (data.opcode == 0x0a) {
-                            log.err("DISPATCH DEBUG: Found EXP (0x0a) at PC {d}, adding handler", .{instr_pc});
-                        }
-                        
-                        // Also log ALL opcodes to see what we're parsing
-                        log.err("DISPATCH DEBUG: Parsing opcode 0x{x:0>2} at PC {d}", .{data.opcode, instr_pc});
                         
                         try schedule_items.append(allocator, .{ .opcode_handler = handler });
                         if (data.opcode == @intFromEnum(Opcode.PC)) {
@@ -513,18 +444,15 @@ pub fn Dispatch(comptime FrameType: type) type {
                     .push => |data| {
                         // PUSH operation - add handler first, then metadata
                         const push_opcode = 0x60 + data.size - 1; // PUSH1 = 0x60, PUSH2 = 0x61, etc.
-                        log.debug("Dispatch: Adding PUSH{} handler, value={x}, schedule_items.len={}", .{ data.size, data.value, schedule_items.items.len });
                         try schedule_items.append(allocator, .{ .opcode_handler = opcode_handlers.*[push_opcode] });
                         if (data.size <= 8 and data.value <= std.math.maxInt(u64)) {
                             // Inline value for small pushes that fit in u64
                             const inline_value: u64 = @intCast(data.value);
-                            log.debug("Dispatch: Adding inline metadata for PUSH{}, value={}", .{ data.size, inline_value });
                             try schedule_items.append(allocator, .{ .push_inline = .{ .value = inline_value } });
                         } else {
                             // Pointer to value for large pushes
                             const value_ptr = try allocator.create(FrameType.WordType);
                             value_ptr.* = data.value;
-                            log.debug("Dispatch: Adding pointer metadata for PUSH{}, value={x}", .{ data.size, data.value });
                             try schedule_items.append(allocator, .{ .push_pointer = .{ .value = value_ptr } });
                         }
                     },
@@ -576,7 +504,6 @@ pub fn Dispatch(comptime FrameType: type) type {
             try schedule_items.append(allocator, .{ .opcode_handler = opcode_handlers.*[@intFromEnum(Opcode.STOP)] });
 
             const final_schedule = try schedule_items.toOwnedSlice(allocator);
-            log.debug("Dispatch.init complete, schedule length: {}", .{final_schedule.len});
             return final_schedule;
         }
 
@@ -1012,9 +939,6 @@ pub fn Dispatch(comptime FrameType: type) type {
             schedule: []const Item,
             bytecode: anytype,
         ) !JumpTable {
-            const log = @import("log.zig");
-            log.debug("createJumpTable starting, schedule len: {}", .{schedule.len});
-
             var builder = JumpTableBuilder.init(allocator);
             defer builder.deinit();
 

@@ -1,6 +1,5 @@
 const std = @import("std");
 const FrameConfig = @import("frame_config.zig").FrameConfig;
-const log = @import("log.zig");
 const primitives = @import("primitives");
 const Address = primitives.Address;
 const CallParams = @import("call_params.zig").CallParams;
@@ -552,8 +551,9 @@ pub fn Handlers(comptime FrameType: type) type {
         pub fn @"return"(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
             _ = dispatch;
-            const offset = try self.stack.pop();
+            if (self.stack.size() < 2) return Error.StackUnderflow;
             const size = try self.stack.pop();
+            const offset = try self.stack.pop();
 
             // Bounds checking for memory offset and size
             if (offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
@@ -567,11 +567,9 @@ pub fn Handlers(comptime FrameType: type) type {
             const memory_end = offset_usize + size_usize;
             const memory_expansion_cost = self.memory.get_expansion_cost(@as(u24, @intCast(memory_end)));
             if (self.gas_remaining < memory_expansion_cost) {
-                log.debug("RETURN: Out of gas for memory expansion. Required: {d}, Available: {d}", .{ memory_expansion_cost, self.gas_remaining });
                 return Error.OutOfGas;
             }
             self.gas_remaining -= @intCast(memory_expansion_cost);
-            log.debug("RETURN: Charged {d} gas for memory expansion", .{memory_expansion_cost});
 
             // Ensure memory capacity
             self.memory.ensure_capacity(self.allocator, @as(u24, @intCast(memory_end))) catch return Error.OutOfBounds;
@@ -583,18 +581,13 @@ pub fn Handlers(comptime FrameType: type) type {
                 };
                 // Use the setOutput method to properly allocate output
                 self.setOutput(return_data) catch {
-                    log.err("RETURN: Failed to set output data", .{});
                     return Error.AllocationError;
                 };
-                log.debug("RETURN: Stored {d} bytes to output", .{return_data.len});
-                log.debug("RETURN: self.output data: {x}", .{self.output});
             } else {
                 // Empty return data
                 self.setOutput(&[_]u8{}) catch {
-                    log.err("RETURN: Failed to set empty output data", .{});
                     return Error.AllocationError;
                 };
-                log.debug("RETURN: Empty return data", .{});
             }
 
             // Return indicates successful execution
@@ -857,43 +850,27 @@ test "RETURN opcode - with data" {
     try testing.expectEqualSlices(u8, &test_data, frame.output);
 }
 
-test "DEBUG: RETURN opcode - 32 bytes with 0x42" {
-    log.warn("=== DEBUG TEST START ===", .{});
+test "RETURN opcode - 32 bytes with 0x42" {
     var frame = try createTestFrame(testing.allocator, null);
     defer frame.deinit(testing.allocator);
-
-    log.warn("Initial memory size: {d}", .{frame.memory.size()});
 
     // Store 0x42 at offset 0 (as a u256)
     const value: u256 = 0x42;
     frame.memory.set_u256_evm(frame.allocator, 0, value) catch |err| {
-        log.err("Failed to set u256: {}", .{err});
         return err;
     };
-
-    log.warn("Memory size after MSTORE: {d}", .{frame.memory.size()});
 
     // Read back the value to verify it was stored
-    const stored = frame.memory.get_u256_evm(frame.allocator, 0) catch |err| {
-        log.err("Failed to get u256: {}", .{err});
+    _ = frame.memory.get_u256_evm(frame.allocator, 0) catch |err| {
         return err;
     };
-    log.warn("Stored value: 0x{x}", .{stored});
 
     // Test: return 32 bytes from offset 0
     try frame.stack.push(0); // offset
     try frame.stack.push(32); // size
 
-    log.warn("Stack prepared: offset=0, size=32", .{});
-
     const dispatch = createMockDispatch();
     const result = try TestFrame.SystemHandlers.@"return"(&frame, dispatch);
-
-    log.warn("RETURN result: {}", .{result});
-    log.warn("Output length: {d}", .{frame.output.len});
-    if (frame.output.len > 0) {
-        log.warn("Output data: {x}", .{frame.output});
-    }
 
     try testing.expectEqual(TestFrame.Success.Return, result);
     try testing.expectEqual(@as(usize, 32), frame.output.len);
@@ -902,8 +879,6 @@ test "DEBUG: RETURN opcode - 32 bytes with 0x42" {
     var expected = [_]u8{0} ** 32;
     expected[31] = 0x42;
     try testing.expectEqualSlices(u8, &expected, frame.output);
-
-    log.warn("=== DEBUG TEST END ===", .{});
 }
 
 test "REVERT opcode - empty revert" {

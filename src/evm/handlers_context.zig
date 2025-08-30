@@ -375,9 +375,9 @@ pub fn Handlers(comptime FrameType: type) type {
         /// Stack: [] → [size]
         pub fn returndatasize(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
-            const return_data = self.getEvm().get_return_data();
-            const return_data_len = @as(WordType, @truncate(@as(u256, @intCast(return_data.len))));
-            log.err("[EVM2] RETURNDATASIZE: return_data.len={}, pushing {}", .{ return_data.len, return_data_len });
+            // Return data is stored in the frame's output field after a call
+            const return_data_len = @as(WordType, @truncate(@as(u256, @intCast(self.output.len))));
+            log.err("[EVM2] RETURNDATASIZE: return_data.len={}, pushing {}", .{ self.output.len, return_data_len });
             try self.stack.push(return_data_len);
             const next = dispatch.getNext();
             return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
@@ -389,9 +389,9 @@ pub fn Handlers(comptime FrameType: type) type {
             log.err("[EVM2] RETURNDATACOPY handler called! Stack size: {}", .{self.stack.size()});
             
             const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
-            const dest_offset = try self.stack.pop();
-            const offset = try self.stack.pop();
             const length = try self.stack.pop();
+            const offset = try self.stack.pop();
+            const dest_offset = try self.stack.pop();
 
             // Check for overflow
             if (dest_offset > std.math.maxInt(usize) or
@@ -405,7 +405,8 @@ pub fn Handlers(comptime FrameType: type) type {
             const offset_usize = @as(usize, @intCast(offset));
             const length_usize = @as(usize, @intCast(length));
 
-            const return_data = self.getEvm().get_return_data();
+            // Return data is stored in the frame's output field after a call
+            const return_data = self.output;
 
             // Check if we're trying to read past the end of return data
             if (offset_usize > return_data.len or
@@ -419,8 +420,20 @@ pub fn Handlers(comptime FrameType: type) type {
                 return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
             }
 
-            // Ensure memory capacity
+            // Calculate gas cost for memory expansion and copy operation
             const new_size = dest_offset_usize + length_usize;
+            const memory_expansion_cost = self.memory.get_expansion_cost(@as(u24, @intCast(new_size)));
+
+            // Dynamic gas cost: 3 gas per word (32 bytes) copied
+            const copy_cost = (length_usize + 31) / 32 * 3;
+            const total_gas = memory_expansion_cost + copy_cost;
+
+            if (self.gas_remaining < total_gas) {
+                return Error.OutOfGas;
+            }
+            self.gas_remaining -= @intCast(total_gas);
+
+            // Ensure memory capacity
             self.memory.ensure_capacity(self.allocator, @as(u24, @intCast(new_size))) catch |err| switch (err) {
                 memory_mod.MemoryError.MemoryOverflow => return Error.OutOfBounds,
                 else => return Error.AllocationError,
@@ -2169,4 +2182,63 @@ test "WordType truncation behavior" {
     const base_fee = try frame.stack.pop();
     // Should be truncated to u64 max
     try testing.expectEqual(@as(u64, std.math.maxInt(u64)), base_fee);
+}
+
+test "RETURNDATASIZE and RETURNDATACOPY basic functionality" {
+    const allocator = testing.allocator;
+    
+    // Create frame with test config
+    var frame = try createTestFrame(allocator, null);
+    defer frame.deinit(allocator);
+    
+    // Initially, return data should be empty
+    try testing.expectEqual(@as(usize, 0), frame.output.len);
+    
+    // Test RETURNDATASIZE with empty data
+    const dispatch = createMockDispatch();
+    _ = try TestFrame.ContextHandlers.returndatasize(&frame, dispatch);
+    const empty_size = try frame.stack.pop();
+    try testing.expectEqual(@as(u256, 0), empty_size);
+    
+    // Set some return data
+    const test_data = [_]u8{ 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0 };
+    try frame.setOutput(&test_data);
+    
+    // Test RETURNDATASIZE with data
+    _ = try TestFrame.ContextHandlers.returndatasize(&frame, dispatch);
+    const data_size = try frame.stack.pop();
+    try testing.expectEqual(@as(u256, 8), data_size);
+    
+    // Test RETURNDATACOPY
+    try frame.stack.push(0); // destOffset
+    try frame.stack.push(0); // offset
+    try frame.stack.push(8); // length
+    
+    _ = try TestFrame.ContextHandlers.returndatacopy(&frame, dispatch);
+    
+    // Verify data was copied to memory
+    const memory_data = frame.memory.get_slice(0, 8) catch unreachable;
+    try testing.expectEqualSlices(u8, &test_data, memory_data);
+}
+
+test "RETURNDATACOPY out of bounds" {
+    const allocator = testing.allocator;
+    
+    var frame = try createTestFrame(allocator, null);
+    defer frame.deinit(allocator);
+    
+    // Set small return data
+    const test_data = [_]u8{ 0xAA, 0xBB };
+    try frame.setOutput(&test_data);
+    
+    // Try to copy more data than available
+    try frame.stack.push(0); // destOffset
+    try frame.stack.push(0); // offset
+    try frame.stack.push(4); // length (more than available)
+    
+    const dispatch = createMockDispatch();
+    const result = TestFrame.ContextHandlers.returndatacopy(&frame, dispatch);
+    
+    // Should return OutOfBounds error
+    try testing.expectError(TestFrame.Error.OutOfBounds, result);
 }
