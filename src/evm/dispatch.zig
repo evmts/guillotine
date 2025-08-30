@@ -450,9 +450,6 @@ pub fn Dispatch(comptime FrameType: type) type {
                             // Store direct pointer to bytecode data for stable reference
                             const bytecode_data = bytecode.runtime_code;
                             try schedule_items.append(allocator, .{ .codecopy = .{ .bytecode_ptr = bytecode_data.ptr, .size = @intCast(bytecode_data.len) } });
-                        } else if (data.opcode == @intFromEnum(Opcode.JUMP) or data.opcode == @intFromEnum(Opcode.JUMPI)) {
-                            // JUMP/JUMPI need access to jump table - store placeholder that will be filled later
-                            try schedule_items.append(allocator, .{ .jump_table = .{ .jump_table = undefined } });
                         }
                     },
                     .push => |data| {
@@ -665,6 +662,10 @@ pub fn Dispatch(comptime FrameType: type) type {
         ) ![]Self.Item {
             var schedule_items = ArrayList(Self.Item, null){};
             errdefer schedule_items.deinit(allocator);
+            
+            // Track allocated push pointers for cleanup
+            var allocated_pointers = std.ArrayList(*FrameType.WordType).init(allocator);
+            defer allocated_pointers.deinit();
 
             // Create tracing handlers that will be used throughout
             const trace_before_handler = createTraceHandler(TracerType, tracer_instance, true);
@@ -703,9 +704,6 @@ pub fn Dispatch(comptime FrameType: type) type {
                             // Store direct pointer to bytecode data for stable reference
                             const bytecode_data = bytecode.runtime_code;
                             try schedule_items.append(allocator, .{ .codecopy = .{ .bytecode_ptr = bytecode_data.ptr, .size = @intCast(bytecode_data.len) } });
-                        } else if (data.opcode == @intFromEnum(Opcode.JUMP) or data.opcode == @intFromEnum(Opcode.JUMPI)) {
-                            // JUMP/JUMPI need access to jump table - store placeholder that will be filled later
-                            try schedule_items.append(allocator, .{ .jump_table = .{ .jump_table = undefined } });
                         }
 
                         // Insert trace_after
