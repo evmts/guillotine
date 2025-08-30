@@ -271,3 +271,285 @@ test "mixed block info types" {
     try std.testing.expectEqual(u128, @TypeOf(block.difficulty));
     try std.testing.expectEqual(u96, @TypeOf(block.base_fee));
 }
+
+test "block info gas limit boundary values" {
+    var block = DefaultBlockInfo.init();
+    
+    // Test boundary values for gas limit validation
+    block.gas_limit = 1; // Minimum valid
+    try std.testing.expect(block.validate());
+    
+    block.gas_limit = 100_000_000; // Maximum valid
+    try std.testing.expect(block.validate());
+    
+    block.gas_limit = 100_000_001; // Just over maximum
+    try std.testing.expect(!block.validate());
+}
+
+test "block info timestamp edge cases" {
+    var block = DefaultBlockInfo.init();
+    
+    // Zero timestamp should be valid (genesis special case)
+    block.timestamp = 0;
+    try std.testing.expect(block.validate());
+    
+    // Just before Ethereum genesis (invalid)
+    block.timestamp = 1438269972;
+    try std.testing.expect(!block.validate());
+    
+    // Ethereum genesis timestamp (valid)
+    block.timestamp = 1438269973;
+    try std.testing.expect(block.validate());
+    
+    // Far future timestamp (should still be valid)
+    block.timestamp = std.math.maxInt(u64);
+    try std.testing.expect(block.validate());
+}
+
+test "block info hasBaseFee edge cases" {
+    var block = DefaultBlockInfo.init();
+    
+    // Test edge case: exactly zero base fee and block number
+    block.base_fee = 0;
+    block.number = 0;
+    try std.testing.expect(!block.hasBaseFee());
+    
+    // Test minimum non-zero base fee
+    block.base_fee = 1;
+    block.number = 0;
+    try std.testing.expect(block.hasBaseFee());
+    
+    // Test minimum non-zero block number
+    block.base_fee = 0;
+    block.number = 1;
+    try std.testing.expect(block.hasBaseFee());
+    
+    // Test London fork block number
+    block.base_fee = 0;
+    block.number = 12965000;
+    try std.testing.expect(block.hasBaseFee());
+}
+
+test "block info address variations" {
+    // Test with different coinbase addresses
+    const addresses = [_]Address{
+        primitives.ZERO_ADDRESS,
+        Address{ .bytes = [_]u8{0xFF} ** 20 }, // All ones
+        Address{ .bytes = [_]u8{0x12, 0x34, 0x56} ++ [_]u8{0} ** 17 }, // Mixed pattern
+        Address{ .bytes = [_]u8{1} ++ [_]u8{0} ** 19 }, // Single bit set
+    };
+    
+    for (addresses) |addr| {
+        const block = DefaultBlockInfo{
+            .number = 1,
+            .timestamp = 1640995200,
+            .difficulty = 0,
+            .gas_limit = 30_000_000,
+            .coinbase = addr,
+            .base_fee = 0,
+            .prev_randao = [_]u8{0} ** 32,
+            .blob_base_fee = 0,
+            .blob_versioned_hashes = &.{},
+        };
+        
+        try std.testing.expectEqual(addr, block.coinbase);
+        try std.testing.expect(block.validate());
+    }
+}
+
+test "block info prev_randao variations" {
+    const randao_values = [_][32]u8{
+        [_]u8{0} ** 32,
+        [_]u8{0xFF} ** 32,
+        [_]u8{0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF} ** 4,
+    };
+    
+    for (randao_values) |randao| {
+        const block = DefaultBlockInfo{
+            .number = 1,
+            .timestamp = 1640995200,
+            .difficulty = 0,
+            .gas_limit = 30_000_000,
+            .coinbase = primitives.ZERO_ADDRESS,
+            .base_fee = 0,
+            .prev_randao = randao,
+            .blob_base_fee = 0,
+            .blob_versioned_hashes = &.{},
+        };
+        
+        try std.testing.expectEqual(randao, block.prev_randao);
+        try std.testing.expect(block.validate());
+    }
+}
+
+test "block info maximum blob hashes" {
+    const testing = std.testing;
+    
+    // Test with maximum practical number of blob hashes
+    var blob_hashes: [16][32]u8 = undefined;
+    for (0..16) |i| {
+        blob_hashes[i] = [_]u8{@intCast(i)} ++ [_]u8{0xFF} ** 31;
+    }
+    
+    const block = DefaultBlockInfo{
+        .number = 18_000_000,
+        .timestamp = 1640995200,
+        .difficulty = 0,
+        .gas_limit = 30_000_000,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .base_fee = 20_000_000_000,
+        .prev_randao = [_]u8{0xAB} ** 32,
+        .blob_base_fee = 1_000_000_000,
+        .blob_versioned_hashes = &blob_hashes,
+    };
+    
+    try testing.expectEqual(@as(usize, 16), block.blob_versioned_hashes.len);
+    for (0..16) |i| {
+        try testing.expectEqual([_]u8{@intCast(i)} ++ [_]u8{0xFF} ** 31, block.blob_versioned_hashes[i]);
+    }
+    try testing.expect(block.validate());
+}
+
+test "block info zero blob base fee pre-cancun" {
+    // Before Cancun fork, blob_base_fee should be 0
+    const pre_cancun_block = DefaultBlockInfo{
+        .number = 15_000_000, // Before Cancun
+        .timestamp = 1640995200,
+        .difficulty = 1000,
+        .gas_limit = 30_000_000,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .base_fee = 20_000_000_000,
+        .prev_randao = [_]u8{0} ** 32,
+        .blob_base_fee = 0, // Should be 0 pre-Cancun
+        .blob_versioned_hashes = &.{}, // Empty pre-Cancun
+    };
+    
+    try std.testing.expectEqual(@as(u256, 0), pre_cancun_block.blob_base_fee);
+    try std.testing.expectEqual(@as(usize, 0), pre_cancun_block.blob_versioned_hashes.len);
+    try std.testing.expect(pre_cancun_block.validate());
+}
+
+test "block info difficulty boundary values" {
+    // Test with various difficulty values
+    const difficulty_values = [_]u256{
+        0, // Post-merge (proof of stake)
+        1, // Minimum proof of work
+        0x1000000, // Typical early mainnet
+        0x100000000000000, // High mainnet difficulty
+        std.math.maxInt(u256), // Theoretical maximum
+    };
+    
+    for (difficulty_values) |diff| {
+        const block = DefaultBlockInfo{
+            .number = 1,
+            .timestamp = 1640995200,
+            .difficulty = diff,
+            .gas_limit = 30_000_000,
+            .coinbase = primitives.ZERO_ADDRESS,
+            .base_fee = 0,
+            .prev_randao = [_]u8{0} ** 32,
+            .blob_base_fee = 0,
+            .blob_versioned_hashes = &.{},
+        };
+        
+        try std.testing.expectEqual(diff, block.difficulty);
+        try std.testing.expect(block.validate());
+    }
+}
+
+test "block info compact vs default type sizes" {
+    // Verify type sizes are as expected
+    const default_block = DefaultBlockInfo.init();
+    const compact_block = CompactBlockInfo.init();
+    
+    // Default should use u256 for difficulty and base fees
+    try std.testing.expectEqual(u256, @TypeOf(default_block.difficulty));
+    try std.testing.expectEqual(u256, @TypeOf(default_block.base_fee));
+    try std.testing.expectEqual(u256, @TypeOf(default_block.blob_base_fee));
+    
+    // Compact should use u64 for difficulty and base fees
+    try std.testing.expectEqual(u64, @TypeOf(compact_block.difficulty));
+    try std.testing.expectEqual(u64, @TypeOf(compact_block.base_fee));
+    try std.testing.expectEqual(u64, @TypeOf(compact_block.blob_base_fee));
+    
+    // Both should use u64 for other fields
+    try std.testing.expectEqual(u64, @TypeOf(default_block.number));
+    try std.testing.expectEqual(u64, @TypeOf(compact_block.number));
+    try std.testing.expectEqual(u64, @TypeOf(default_block.timestamp));
+    try std.testing.expectEqual(u64, @TypeOf(compact_block.timestamp));
+}
+
+test "block info large base fee values" {
+    // Test with very large base fee values that require u256
+    const large_base_fees = [_]u256{
+        1_000_000_000_000_000_000, // 1 ETH in wei
+        std.math.maxInt(u64) + 1, // Just over u64 max
+        std.math.maxInt(u128), // u128 max
+        std.math.maxInt(u256), // u256 max
+    };
+    
+    for (large_base_fees) |base_fee| {
+        const block = DefaultBlockInfo{
+            .number = 20_000_000,
+            .timestamp = 1640995200,
+            .difficulty = 0,
+            .gas_limit = 30_000_000,
+            .coinbase = primitives.ZERO_ADDRESS,
+            .base_fee = base_fee,
+            .prev_randao = [_]u8{0} ** 32,
+            .blob_base_fee = base_fee / 10, // Related blob fee
+            .blob_versioned_hashes = &.{},
+        };
+        
+        try std.testing.expectEqual(base_fee, block.base_fee);
+        try std.testing.expect(block.validate());
+        try std.testing.expect(block.hasBaseFee());
+    }
+}
+
+test "block info validation comprehensive" {
+    var block = DefaultBlockInfo.init();
+    
+    // Start with valid block
+    block.timestamp = 1640995200;
+    block.gas_limit = 15_000_000;
+    try std.testing.expect(block.validate());
+    
+    // Test all invalid gas limit cases
+    const invalid_gas_limits = [_]u64{ 0, 100_000_001, std.math.maxInt(u64) };
+    for (invalid_gas_limits) |gas_limit| {
+        block.gas_limit = gas_limit;
+        try std.testing.expect(!block.validate());
+    }
+    block.gas_limit = 15_000_000; // Reset to valid
+    
+    // Test invalid timestamp cases
+    const invalid_timestamps = [_]u64{ 1, 1000000, 1438269972 };
+    for (invalid_timestamps) |timestamp| {
+        block.timestamp = timestamp;
+        try std.testing.expect(!block.validate());
+    }
+    block.timestamp = 1640995200; // Reset to valid
+    
+    // Final validation should pass
+    try std.testing.expect(block.validate());
+}
+
+test "block info struct field ordering" {
+    // Test that all required fields are accessible and have correct types
+    const block = DefaultBlockInfo.init();
+    
+    // Verify field types match expected signature
+    _ = @as(u64, block.number);
+    _ = @as(u64, block.timestamp);
+    _ = @as(u256, block.difficulty);
+    _ = @as(u64, block.gas_limit);
+    _ = @as(Address, block.coinbase);
+    _ = @as(u256, block.base_fee);
+    _ = @as([32]u8, block.prev_randao);
+    _ = @as(u256, block.blob_base_fee);
+    _ = @as([]const [32]u8, block.blob_versioned_hashes);
+    
+    // This test ensures struct layout is as expected
+    try std.testing.expect(true);
+}

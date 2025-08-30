@@ -455,6 +455,235 @@ test "EIP-2929: correct gas costs" {
     try testing.expectEqual(@as(u64, 100), GasConstants.WarmStorageReadCost);
 }
 
+test "AccessList - memory stress test with many addresses" {
+    var access_list = AccessList.init(testing.allocator);
+    defer access_list.deinit();
+
+    // Test with many unique addresses to stress hash map
+    var addresses: [1000]Address = undefined;
+    for (0..1000) |i| {
+        addresses[i] = Address{ .bytes = std.mem.toBytes(@as(u160, @intCast(i + 1))) ++ [_]u8{0} ** 12 };
+        const cost = try access_list.access_address(addresses[i]);
+        try testing.expectEqual(AccessList.COLD_ACCOUNT_ACCESS_COST, cost);
+    }
+
+    // Verify all are warm
+    for (addresses) |addr| {
+        try testing.expect(access_list.is_address_warm(addr));
+        const cost = try access_list.access_address(addr);
+        try testing.expectEqual(AccessList.WARM_ACCOUNT_ACCESS_COST, cost);
+    }
+}
+
+test "AccessList - memory stress test with many storage slots" {
+    var access_list = AccessList.init(testing.allocator);
+    defer access_list.deinit();
+
+    const test_address = Address{ .bytes = [_]u8{1} ** 20 };
+
+    // Test with many unique storage slots
+    for (0..1000) |i| {
+        const slot: u256 = @intCast(i);
+        const cost = try access_list.access_storage_slot(test_address, slot);
+        try testing.expectEqual(AccessList.COLD_SLOAD_COST, cost);
+    }
+
+    // Verify all slots are warm
+    for (0..1000) |i| {
+        const slot: u256 = @intCast(i);
+        try testing.expect(access_list.is_storage_slot_warm(test_address, slot));
+        const cost = try access_list.access_storage_slot(test_address, slot);
+        try testing.expectEqual(AccessList.WARM_SLOAD_COST, cost);
+    }
+}
+
+test "AccessList - boundary values for storage slots" {
+    var access_list = AccessList.init(testing.allocator);
+    defer access_list.deinit();
+
+    const test_address = Address{ .bytes = [_]u8{1} ** 20 };
+
+    // Test boundary values
+    const boundary_slots = [_]u256{ 
+        0, 
+        1, 
+        std.math.maxInt(u8),
+        std.math.maxInt(u16), 
+        std.math.maxInt(u32),
+        std.math.maxInt(u64),
+        std.math.maxInt(u128),
+        std.math.maxInt(u256) 
+    };
+
+    for (boundary_slots) |slot| {
+        // First access should be cold
+        const cold_cost = try access_list.access_storage_slot(test_address, slot);
+        try testing.expectEqual(AccessList.COLD_SLOAD_COST, cold_cost);
+
+        // Second access should be warm
+        const warm_cost = try access_list.access_storage_slot(test_address, slot);
+        try testing.expectEqual(AccessList.WARM_SLOAD_COST, warm_cost);
+
+        try testing.expect(access_list.is_storage_slot_warm(test_address, slot));
+    }
+}
+
+test "AccessList - duplicate pre-warming should not affect behavior" {
+    var access_list = AccessList.init(testing.allocator);
+    defer access_list.deinit();
+
+    const addresses = [_]Address{
+        Address{ .bytes = [_]u8{1} ** 20 },
+        Address{ .bytes = [_]u8{2} ** 20 },
+    };
+
+    // Pre-warm once
+    try access_list.pre_warm_addresses(&addresses);
+
+    // All should be warm
+    for (addresses) |address| {
+        try testing.expect(access_list.is_address_warm(address));
+    }
+
+    // Pre-warm again with overlapping addresses
+    const overlapping_addresses = [_]Address{
+        Address{ .bytes = [_]u8{2} ** 20 },
+        Address{ .bytes = [_]u8{3} ** 20 },
+    };
+
+    try access_list.pre_warm_addresses(&overlapping_addresses);
+
+    // Verify behavior is still correct
+    try testing.expect(access_list.is_address_warm(Address{ .bytes = [_]u8{1} ** 20 }));
+    try testing.expect(access_list.is_address_warm(Address{ .bytes = [_]u8{2} ** 20 }));
+    try testing.expect(access_list.is_address_warm(Address{ .bytes = [_]u8{3} ** 20 }));
+
+    // All should return warm access cost
+    for ([_]Address{
+        Address{ .bytes = [_]u8{1} ** 20 },
+        Address{ .bytes = [_]u8{2} ** 20 },
+        Address{ .bytes = [_]u8{3} ** 20 },
+    }) |address| {
+        const cost = try access_list.access_address(address);
+        try testing.expectEqual(AccessList.WARM_ACCOUNT_ACCESS_COST, cost);
+    }
+}
+
+test "AccessList - storage slot collision resistance" {
+    var access_list = AccessList.init(testing.allocator);
+    defer access_list.deinit();
+
+    const address1 = Address{ .bytes = [_]u8{1} ** 20 };
+    const address2 = Address{ .bytes = [_]u8{2} ** 20 };
+    const slot: u256 = 42;
+
+    // Access same slot on different addresses
+    const cost1 = try access_list.access_storage_slot(address1, slot);
+    try testing.expectEqual(AccessList.COLD_SLOAD_COST, cost1);
+
+    const cost2 = try access_list.access_storage_slot(address2, slot);
+    try testing.expectEqual(AccessList.COLD_SLOAD_COST, cost2);
+
+    // Both should be warm for their respective addresses
+    try testing.expect(access_list.is_storage_slot_warm(address1, slot));
+    try testing.expect(access_list.is_storage_slot_warm(address2, slot));
+
+    // But not warm for different combinations
+    try testing.expect(!access_list.is_storage_slot_warm(address1, slot + 1));
+    try testing.expect(!access_list.is_storage_slot_warm(address2, slot + 1));
+}
+
+test "AccessList - clear preserves capacity" {
+    var access_list = AccessList.init(testing.allocator);
+    defer access_list.deinit();
+
+    // Fill with many entries to grow internal capacity
+    for (0..100) |i| {
+        const address = Address{ .bytes = std.mem.toBytes(@as(u160, @intCast(i + 1))) ++ [_]u8{0} ** 12 };
+        _ = try access_list.access_address(address);
+        _ = try access_list.access_storage_slot(address, @intCast(i));
+    }
+
+    // Check that many entries are warm
+    try testing.expect(access_list.is_address_warm(Address{ .bytes = std.mem.toBytes(@as(u160, 50)) ++ [_]u8{0} ** 12 }));
+
+    // Clear should preserve capacity but remove entries
+    access_list.clear();
+
+    // All entries should be cold again
+    try testing.expect(!access_list.is_address_warm(Address{ .bytes = std.mem.toBytes(@as(u160, 50)) ++ [_]u8{0} ** 12 }));
+
+    // But accessing new entries should still work efficiently
+    const new_address = Address{ .bytes = [_]u8{0xFF} ** 20 };
+    const cost = try access_list.access_address(new_address);
+    try testing.expectEqual(AccessList.COLD_ACCOUNT_ACCESS_COST, cost);
+}
+
+test "AccessList - zero address handling" {
+    var access_list = AccessList.init(testing.allocator);
+    defer access_list.deinit();
+
+    const zero_address = Address{ .bytes = [_]u8{0} ** 20 };
+
+    // Zero address should behave like any other address
+    const cost1 = try access_list.access_address(zero_address);
+    try testing.expectEqual(AccessList.COLD_ACCOUNT_ACCESS_COST, cost1);
+
+    const cost2 = try access_list.access_address(zero_address);
+    try testing.expectEqual(AccessList.WARM_ACCOUNT_ACCESS_COST, cost2);
+
+    try testing.expect(access_list.is_address_warm(zero_address));
+
+    // Storage slots on zero address should also work
+    const slot_cost1 = try access_list.access_storage_slot(zero_address, 0);
+    try testing.expectEqual(AccessList.COLD_SLOAD_COST, slot_cost1);
+
+    const slot_cost2 = try access_list.access_storage_slot(zero_address, 0);
+    try testing.expectEqual(AccessList.WARM_SLOAD_COST, slot_cost2);
+}
+
+test "AccessList - custom config validation" {
+    // Test configuration with different slot type
+    const Config64 = AccessListConfig{
+        .cold_account_access_cost = 1000,
+        .warm_account_access_cost = 50,
+        .cold_sload_cost = 800,
+        .warm_sload_cost = 25,
+        .SlotType = u64,
+    };
+
+    const AccessList64 = createAccessList(Config64);
+    var access_list = AccessList64.init(testing.allocator);
+    defer access_list.deinit();
+
+    const test_address = Address{ .bytes = [_]u8{1} ** 20 };
+    const slot: u64 = std.math.maxInt(u64);
+
+    // Test with u64 slot type
+    try testing.expectEqual(@as(u64, 1000), try access_list.access_address(test_address));
+    try testing.expectEqual(@as(u64, 50), try access_list.access_address(test_address));
+
+    try testing.expectEqual(@as(u64, 800), try access_list.access_storage_slot(test_address, slot));
+    try testing.expectEqual(@as(u64, 25), try access_list.access_storage_slot(test_address, slot));
+}
+
+test "AccessList - empty pre-warm list" {
+    var access_list = AccessList.init(testing.allocator);
+    defer access_list.deinit();
+
+    const empty_addresses: []const Address = &.{};
+    
+    // Should not crash with empty slice
+    try access_list.pre_warm_addresses(empty_addresses);
+
+    // State should remain unchanged
+    const test_address = Address{ .bytes = [_]u8{1} ** 20 };
+    try testing.expect(!access_list.is_address_warm(test_address));
+    
+    const cost = try access_list.access_address(test_address);
+    try testing.expectEqual(AccessList.COLD_ACCOUNT_ACCESS_COST, cost);
+}
+
 // Tests from eip_2929_test.zig
 const Evm = @import("evm.zig").Evm;
 const Database = @import("database.zig").Database;

@@ -329,3 +329,504 @@ test "bytecode analyze - single-pass analyzer" {
     try testing.expectEqual(@as(BytecodeType.PcType, 2), analysis.push_pcs[1]);
 }
 
+test "bytecode analyze - empty bytecode" {
+    const allocator = testing.allocator;
+    const code: []const u8 = &.{};
+
+    const BytecodeType = @import("bytecode.zig").Bytecode(@import("bytecode_config.zig").BytecodeConfig{});
+    const analysis = try bytecodeAnalyze(BytecodeType.PcType, BytecodeType.BasicBlock, BytecodeType.FusionInfo, allocator, code);
+    defer {
+        allocator.free(analysis.push_pcs);
+        allocator.free(analysis.jumpdests);
+        allocator.free(analysis.basic_blocks);
+        analysis.jump_fusions.deinit();
+        analysis.advanced_fusions.deinit();
+    }
+
+    try testing.expectEqual(@as(usize, 0), analysis.push_pcs.len);
+    try testing.expectEqual(@as(usize, 0), analysis.jumpdests.len);
+    try testing.expectEqual(@as(usize, 0), analysis.basic_blocks.len);
+    try testing.expectEqual(@as(usize, 0), analysis.jump_fusions.count());
+    try testing.expectEqual(@as(usize, 0), analysis.advanced_fusions.count());
+}
+
+test "bytecode analyze - jumpdest detection" {
+    const allocator = testing.allocator;
+    const code = [_]u8{
+        @intFromEnum(Opcode.PUSH1), 0x05,
+        @intFromEnum(Opcode.JUMP),
+        @intFromEnum(Opcode.JUMPDEST), // pc = 4
+        @intFromEnum(Opcode.PUSH1), 0x08,
+        @intFromEnum(Opcode.JUMPDEST), // pc = 7
+        @intFromEnum(Opcode.STOP),
+    };
+
+    const BytecodeType = @import("bytecode.zig").Bytecode(@import("bytecode_config.zig").BytecodeConfig{});
+    const analysis = try bytecodeAnalyze(BytecodeType.PcType, BytecodeType.BasicBlock, BytecodeType.FusionInfo, allocator, &code);
+    defer {
+        allocator.free(analysis.push_pcs);
+        allocator.free(analysis.jumpdests);
+        allocator.free(analysis.basic_blocks);
+        analysis.jump_fusions.deinit();
+        analysis.advanced_fusions.deinit();
+    }
+
+    try testing.expectEqual(@as(usize, 2), analysis.jumpdests.len);
+    try testing.expectEqual(@as(BytecodeType.PcType, 3), analysis.jumpdests[0]);
+    try testing.expectEqual(@as(BytecodeType.PcType, 6), analysis.jumpdests[1]);
+}
+
+test "bytecode analyze - constant folding fusion ADD" {
+    const allocator = testing.allocator;
+    const code = [_]u8{
+        @intFromEnum(Opcode.PUSH1), 0x05,  // Push 5
+        @intFromEnum(Opcode.PUSH1), 0x03,  // Push 3
+        @intFromEnum(Opcode.ADD),          // Should fold to 8
+    };
+
+    const BytecodeType = @import("bytecode.zig").Bytecode(@import("bytecode_config.zig").BytecodeConfig{});
+    const analysis = try bytecodeAnalyze(BytecodeType.PcType, BytecodeType.BasicBlock, BytecodeType.FusionInfo, allocator, &code);
+    defer {
+        allocator.free(analysis.push_pcs);
+        allocator.free(analysis.jumpdests);
+        allocator.free(analysis.basic_blocks);
+        analysis.jump_fusions.deinit();
+        analysis.advanced_fusions.deinit();
+    }
+
+    try testing.expectEqual(@as(usize, 1), analysis.advanced_fusions.count());
+    const fusion = analysis.advanced_fusions.get(0).?;
+    try testing.expectEqual(BytecodeType.FusionInfo.FusionType.constant_fold, fusion.fusion_type);
+    try testing.expectEqual(@as(u256, 8), fusion.folded_value);
+    try testing.expectEqual(@as(BytecodeType.PcType, 5), fusion.original_length);
+}
+
+test "bytecode analyze - constant folding fusion SUB" {
+    const allocator = testing.allocator;
+    const code = [_]u8{
+        @intFromEnum(Opcode.PUSH1), 0x0A,  // Push 10
+        @intFromEnum(Opcode.PUSH1), 0x03,  // Push 3
+        @intFromEnum(Opcode.SUB),          // Should fold to 7
+    };
+
+    const BytecodeType = @import("bytecode.zig").Bytecode(@import("bytecode_config.zig").BytecodeConfig{});
+    const analysis = try bytecodeAnalyze(BytecodeType.PcType, BytecodeType.BasicBlock, BytecodeType.FusionInfo, allocator, &code);
+    defer {
+        allocator.free(analysis.push_pcs);
+        allocator.free(analysis.jumpdests);
+        allocator.free(analysis.basic_blocks);
+        analysis.jump_fusions.deinit();
+        analysis.advanced_fusions.deinit();
+    }
+
+    try testing.expectEqual(@as(usize, 1), analysis.advanced_fusions.count());
+    const fusion = analysis.advanced_fusions.get(0).?;
+    try testing.expectEqual(BytecodeType.FusionInfo.FusionType.constant_fold, fusion.fusion_type);
+    try testing.expectEqual(@as(u256, 7), fusion.folded_value);
+}
+
+test "bytecode analyze - constant folding fusion MUL" {
+    const allocator = testing.allocator;
+    const code = [_]u8{
+        @intFromEnum(Opcode.PUSH1), 0x04,  // Push 4
+        @intFromEnum(Opcode.PUSH1), 0x06,  // Push 6
+        @intFromEnum(Opcode.MUL),          // Should fold to 24
+    };
+
+    const BytecodeType = @import("bytecode.zig").Bytecode(@import("bytecode_config.zig").BytecodeConfig{});
+    const analysis = try bytecodeAnalyze(BytecodeType.PcType, BytecodeType.BasicBlock, BytecodeType.FusionInfo, allocator, &code);
+    defer {
+        allocator.free(analysis.push_pcs);
+        allocator.free(analysis.jumpdests);
+        allocator.free(analysis.basic_blocks);
+        analysis.jump_fusions.deinit();
+        analysis.advanced_fusions.deinit();
+    }
+
+    try testing.expectEqual(@as(usize, 1), analysis.advanced_fusions.count());
+    const fusion = analysis.advanced_fusions.get(0).?;
+    try testing.expectEqual(BytecodeType.FusionInfo.FusionType.constant_fold, fusion.fusion_type);
+    try testing.expectEqual(@as(u256, 24), fusion.folded_value);
+}
+
+test "bytecode analyze - multi push fusion (3 pushes)" {
+    const allocator = testing.allocator;
+    const code = [_]u8{
+        @intFromEnum(Opcode.PUSH1), 0x01,
+        @intFromEnum(Opcode.PUSH1), 0x02,
+        @intFromEnum(Opcode.PUSH1), 0x03,
+    };
+
+    const BytecodeType = @import("bytecode.zig").Bytecode(@import("bytecode_config.zig").BytecodeConfig{});
+    const analysis = try bytecodeAnalyze(BytecodeType.PcType, BytecodeType.BasicBlock, BytecodeType.FusionInfo, allocator, &code);
+    defer {
+        allocator.free(analysis.push_pcs);
+        allocator.free(analysis.jumpdests);
+        allocator.free(analysis.basic_blocks);
+        analysis.jump_fusions.deinit();
+        analysis.advanced_fusions.deinit();
+    }
+
+    try testing.expectEqual(@as(usize, 1), analysis.advanced_fusions.count());
+    const fusion = analysis.advanced_fusions.get(0).?;
+    try testing.expectEqual(BytecodeType.FusionInfo.FusionType.multi_push, fusion.fusion_type);
+    try testing.expectEqual(@as(u8, 3), fusion.count);
+    try testing.expectEqual(@as(BytecodeType.PcType, 6), fusion.original_length);
+}
+
+test "bytecode analyze - multi push fusion (2 pushes)" {
+    const allocator = testing.allocator;
+    const code = [_]u8{
+        @intFromEnum(Opcode.PUSH2), 0x01, 0x23,  // 3 bytes
+        @intFromEnum(Opcode.PUSH1), 0x04,        // 2 bytes
+        @intFromEnum(Opcode.ADD), // This prevents 3-push fusion, so should get 2-push fusion
+    };
+
+    const BytecodeType = @import("bytecode.zig").Bytecode(@import("bytecode_config.zig").BytecodeConfig{});
+    const analysis = try bytecodeAnalyze(BytecodeType.PcType, BytecodeType.BasicBlock, BytecodeType.FusionInfo, allocator, &code);
+    defer {
+        allocator.free(analysis.push_pcs);
+        allocator.free(analysis.jumpdests);
+        allocator.free(analysis.basic_blocks);
+        analysis.jump_fusions.deinit();
+        analysis.advanced_fusions.deinit();
+    }
+
+    try testing.expectEqual(@as(usize, 1), analysis.advanced_fusions.count());
+    const fusion = analysis.advanced_fusions.get(0).?;
+    try testing.expectEqual(BytecodeType.FusionInfo.FusionType.multi_push, fusion.fusion_type);
+    try testing.expectEqual(@as(u8, 2), fusion.count);
+    try testing.expectEqual(@as(BytecodeType.PcType, 5), fusion.original_length);
+}
+
+test "bytecode analyze - multi pop fusion (3 pops)" {
+    const allocator = testing.allocator;
+    const code = [_]u8{
+        @intFromEnum(Opcode.POP),
+        @intFromEnum(Opcode.POP),
+        @intFromEnum(Opcode.POP),
+    };
+
+    const BytecodeType = @import("bytecode.zig").Bytecode(@import("bytecode_config.zig").BytecodeConfig{});
+    const analysis = try bytecodeAnalyze(BytecodeType.PcType, BytecodeType.BasicBlock, BytecodeType.FusionInfo, allocator, &code);
+    defer {
+        allocator.free(analysis.push_pcs);
+        allocator.free(analysis.jumpdests);
+        allocator.free(analysis.basic_blocks);
+        analysis.jump_fusions.deinit();
+        analysis.advanced_fusions.deinit();
+    }
+
+    try testing.expectEqual(@as(usize, 1), analysis.advanced_fusions.count());
+    const fusion = analysis.advanced_fusions.get(0).?;
+    try testing.expectEqual(BytecodeType.FusionInfo.FusionType.multi_pop, fusion.fusion_type);
+    try testing.expectEqual(@as(u8, 3), fusion.count);
+    try testing.expectEqual(@as(BytecodeType.PcType, 3), fusion.original_length);
+}
+
+test "bytecode analyze - multi pop fusion (2 pops)" {
+    const allocator = testing.allocator;
+    const code = [_]u8{
+        @intFromEnum(Opcode.POP),
+        @intFromEnum(Opcode.POP),
+        @intFromEnum(Opcode.ADD), // This prevents 3-pop fusion
+    };
+
+    const BytecodeType = @import("bytecode.zig").Bytecode(@import("bytecode_config.zig").BytecodeConfig{});
+    const analysis = try bytecodeAnalyze(BytecodeType.PcType, BytecodeType.BasicBlock, BytecodeType.FusionInfo, allocator, &code);
+    defer {
+        allocator.free(analysis.push_pcs);
+        allocator.free(analysis.jumpdests);
+        allocator.free(analysis.basic_blocks);
+        analysis.jump_fusions.deinit();
+        analysis.advanced_fusions.deinit();
+    }
+
+    try testing.expectEqual(@as(usize, 1), analysis.advanced_fusions.count());
+    const fusion = analysis.advanced_fusions.get(0).?;
+    try testing.expectEqual(BytecodeType.FusionInfo.FusionType.multi_pop, fusion.fusion_type);
+    try testing.expectEqual(@as(u8, 2), fusion.count);
+    try testing.expectEqual(@as(BytecodeType.PcType, 2), fusion.original_length);
+}
+
+test "bytecode analyze - iszero jumpi fusion" {
+    const allocator = testing.allocator;
+    const code = [_]u8{
+        @intFromEnum(Opcode.ISZERO),
+        @intFromEnum(Opcode.PUSH1), 0x06,
+        @intFromEnum(Opcode.JUMPI),
+        @intFromEnum(Opcode.JUMPDEST),
+    };
+
+    const BytecodeType = @import("bytecode.zig").Bytecode(@import("bytecode_config.zig").BytecodeConfig{});
+    const analysis = try bytecodeAnalyze(BytecodeType.PcType, BytecodeType.BasicBlock, BytecodeType.FusionInfo, allocator, &code);
+    defer {
+        allocator.free(analysis.push_pcs);
+        allocator.free(analysis.jumpdests);
+        allocator.free(analysis.basic_blocks);
+        analysis.jump_fusions.deinit();
+        analysis.advanced_fusions.deinit();
+    }
+
+    try testing.expectEqual(@as(usize, 1), analysis.advanced_fusions.count());
+    const fusion = analysis.advanced_fusions.get(0).?;
+    try testing.expectEqual(BytecodeType.FusionInfo.FusionType.iszero_jumpi, fusion.fusion_type);
+    try testing.expectEqual(@as(BytecodeType.PcType, 4), fusion.original_length);
+}
+
+test "bytecode analyze - dup2 mstore push fusion" {
+    const allocator = testing.allocator;
+    const code = [_]u8{
+        @intFromEnum(Opcode.DUP2),
+        @intFromEnum(Opcode.MSTORE),
+        @intFromEnum(Opcode.PUSH2), 0x12, 0x34,
+    };
+
+    const BytecodeType = @import("bytecode.zig").Bytecode(@import("bytecode_config.zig").BytecodeConfig{});
+    const analysis = try bytecodeAnalyze(BytecodeType.PcType, BytecodeType.BasicBlock, BytecodeType.FusionInfo, allocator, &code);
+    defer {
+        allocator.free(analysis.push_pcs);
+        allocator.free(analysis.jumpdests);
+        allocator.free(analysis.basic_blocks);
+        analysis.jump_fusions.deinit();
+        analysis.advanced_fusions.deinit();
+    }
+
+    try testing.expectEqual(@as(usize, 1), analysis.advanced_fusions.count());
+    const fusion = analysis.advanced_fusions.get(0).?;
+    try testing.expectEqual(BytecodeType.FusionInfo.FusionType.dup2_mstore_push, fusion.fusion_type);
+    try testing.expectEqual(@as(BytecodeType.PcType, 5), fusion.original_length);
+}
+
+test "bytecode analyze - jump fusion detection" {
+    const allocator = testing.allocator;
+    const code = [_]u8{
+        @intFromEnum(Opcode.JUMPDEST), // pc = 0
+        @intFromEnum(Opcode.PUSH1), 0x06,
+        @intFromEnum(Opcode.JUMP),
+        @intFromEnum(Opcode.JUMPDEST), // pc = 4
+        @intFromEnum(Opcode.STOP),
+    };
+
+    const BytecodeType = @import("bytecode.zig").Bytecode(@import("bytecode_config.zig").BytecodeConfig{});
+    const analysis = try bytecodeAnalyze(BytecodeType.PcType, BytecodeType.BasicBlock, BytecodeType.FusionInfo, allocator, &code);
+    defer {
+        allocator.free(analysis.push_pcs);
+        allocator.free(analysis.jumpdests);
+        allocator.free(analysis.basic_blocks);
+        analysis.jump_fusions.deinit();
+        analysis.advanced_fusions.deinit();
+    }
+
+    try testing.expectEqual(@as(usize, 1), analysis.jump_fusions.count());
+    const target = analysis.jump_fusions.get(0).?;
+    try testing.expectEqual(@as(BytecodeType.PcType, 4), target);
+}
+
+test "bytecode analyze - invalid jump fusion (target not jumpdest)" {
+    const allocator = testing.allocator;
+    const code = [_]u8{
+        @intFromEnum(Opcode.JUMPDEST), // pc = 0
+        @intFromEnum(Opcode.PUSH1), 0x04, // Target is 4, but pc=4 is STOP, not JUMPDEST
+        @intFromEnum(Opcode.JUMP),
+        @intFromEnum(Opcode.STOP), // pc = 4
+    };
+
+    const BytecodeType = @import("bytecode.zig").Bytecode(@import("bytecode_config.zig").BytecodeConfig{});
+    const analysis = try bytecodeAnalyze(BytecodeType.PcType, BytecodeType.BasicBlock, BytecodeType.FusionInfo, allocator, &code);
+    defer {
+        allocator.free(analysis.push_pcs);
+        allocator.free(analysis.jumpdests);
+        allocator.free(analysis.basic_blocks);
+        analysis.jump_fusions.deinit();
+        analysis.advanced_fusions.deinit();
+    }
+
+    // Invalid jump should be removed
+    try testing.expectEqual(@as(usize, 0), analysis.jump_fusions.count());
+}
+
+test "bytecode analyze - basic blocks creation" {
+    const allocator = testing.allocator;
+    const code = [_]u8{
+        @intFromEnum(Opcode.PUSH1), 0x05, // Block 1: 0-3
+        @intFromEnum(Opcode.JUMP),
+        @intFromEnum(Opcode.JUMPDEST), // Block 2: 3-6 
+        @intFromEnum(Opcode.PUSH1), 0x08,
+        @intFromEnum(Opcode.JUMPDEST), // Block 3: 6-8
+        @intFromEnum(Opcode.STOP),
+    };
+
+    const BytecodeType = @import("bytecode.zig").Bytecode(@import("bytecode_config.zig").BytecodeConfig{});
+    const analysis = try bytecodeAnalyze(BytecodeType.PcType, BytecodeType.BasicBlock, BytecodeType.FusionInfo, allocator, &code);
+    defer {
+        allocator.free(analysis.push_pcs);
+        allocator.free(analysis.jumpdests);
+        allocator.free(analysis.basic_blocks);
+        analysis.jump_fusions.deinit();
+        analysis.advanced_fusions.deinit();
+    }
+
+    try testing.expectEqual(@as(usize, 3), analysis.basic_blocks.len);
+    try testing.expectEqual(@as(BytecodeType.PcType, 0), analysis.basic_blocks[0].start);
+    try testing.expectEqual(@as(BytecodeType.PcType, 3), analysis.basic_blocks[0].end);
+    try testing.expectEqual(@as(BytecodeType.PcType, 3), analysis.basic_blocks[1].start);
+    try testing.expectEqual(@as(BytecodeType.PcType, 6), analysis.basic_blocks[1].end);
+    try testing.expectEqual(@as(BytecodeType.PcType, 6), analysis.basic_blocks[2].start);
+    try testing.expectEqual(@as(BytecodeType.PcType, 8), analysis.basic_blocks[2].end);
+}
+
+test "bytecode analyze - push sizes edge cases" {
+    const allocator = testing.allocator;
+    const code = [_]u8{
+        @intFromEnum(Opcode.PUSH1), 0xFF,  // PUSH1 - smallest
+        @intFromEnum(Opcode.PUSH4), 0x12, 0x34, 0x56, 0x78,  // PUSH4 - medium
+        @intFromEnum(Opcode.PUSH32), // PUSH32 - largest, followed by 32 bytes
+        0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+        0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
+        0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
+        0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20,
+    };
+
+    const BytecodeType = @import("bytecode.zig").Bytecode(@import("bytecode_config.zig").BytecodeConfig{});
+    const analysis = try bytecodeAnalyze(BytecodeType.PcType, BytecodeType.BasicBlock, BytecodeType.FusionInfo, allocator, &code);
+    defer {
+        allocator.free(analysis.push_pcs);
+        allocator.free(analysis.jumpdests);
+        allocator.free(analysis.basic_blocks);
+        analysis.jump_fusions.deinit();
+        analysis.advanced_fusions.deinit();
+    }
+
+    try testing.expectEqual(@as(usize, 3), analysis.push_pcs.len);
+    try testing.expectEqual(@as(BytecodeType.PcType, 0), analysis.push_pcs[0]); // PUSH1
+    try testing.expectEqual(@as(BytecodeType.PcType, 2), analysis.push_pcs[1]); // PUSH4
+    try testing.expectEqual(@as(BytecodeType.PcType, 7), analysis.push_pcs[2]); // PUSH32
+}
+
+test "bytecode analyze - complex fusion patterns mixed" {
+    const allocator = testing.allocator;
+    const code = [_]u8{
+        // Constant folding ADD
+        @intFromEnum(Opcode.PUSH1), 0x05,
+        @intFromEnum(Opcode.PUSH1), 0x03,
+        @intFromEnum(Opcode.ADD), // Fusion 1: pc=0, length=5
+        
+        // Multi-pop
+        @intFromEnum(Opcode.POP),  // pc=5
+        @intFromEnum(Opcode.POP),
+        @intFromEnum(Opcode.POP), // Fusion 2: pc=5, length=3
+        
+        // Regular instruction
+        @intFromEnum(Opcode.STOP), // pc=8
+    };
+
+    const BytecodeType = @import("bytecode.zig").Bytecode(@import("bytecode_config.zig").BytecodeConfig{});
+    const analysis = try bytecodeAnalyze(BytecodeType.PcType, BytecodeType.BasicBlock, BytecodeType.FusionInfo, allocator, &code);
+    defer {
+        allocator.free(analysis.push_pcs);
+        allocator.free(analysis.jumpdests);
+        allocator.free(analysis.basic_blocks);
+        analysis.jump_fusions.deinit();
+        analysis.advanced_fusions.deinit();
+    }
+
+    try testing.expectEqual(@as(usize, 2), analysis.advanced_fusions.count());
+    
+    // Check constant folding fusion
+    const fusion1 = analysis.advanced_fusions.get(0).?;
+    try testing.expectEqual(BytecodeType.FusionInfo.FusionType.constant_fold, fusion1.fusion_type);
+    
+    // Check multi-pop fusion
+    const fusion2 = analysis.advanced_fusions.get(5).?;
+    try testing.expectEqual(BytecodeType.FusionInfo.FusionType.multi_pop, fusion2.fusion_type);
+}
+
+test "bytecode analyze - boundary conditions insufficient bytes" {
+    const allocator = testing.allocator;
+    
+    // Test truncated PUSH1 (missing data byte)
+    const code1 = [_]u8{@intFromEnum(Opcode.PUSH1)};
+    const BytecodeType = @import("bytecode.zig").Bytecode(@import("bytecode_config.zig").BytecodeConfig{});
+    const analysis1 = try bytecodeAnalyze(BytecodeType.PcType, BytecodeType.BasicBlock, BytecodeType.FusionInfo, allocator, &code1);
+    defer {
+        allocator.free(analysis1.push_pcs);
+        allocator.free(analysis1.jumpdests);
+        allocator.free(analysis1.basic_blocks);
+        analysis1.jump_fusions.deinit();
+        analysis1.advanced_fusions.deinit();
+    }
+    
+    // Should still detect the PUSH1 at pc=0, even though it's incomplete
+    try testing.expectEqual(@as(usize, 1), analysis1.push_pcs.len);
+    try testing.expectEqual(@as(BytecodeType.PcType, 0), analysis1.push_pcs[0]);
+    
+    // Test truncated constant folding pattern
+    const code2 = [_]u8{
+        @intFromEnum(Opcode.PUSH1), 0x05,
+        @intFromEnum(Opcode.PUSH1), // Missing data byte and arithmetic op
+    };
+    const analysis2 = try bytecodeAnalyze(BytecodeType.PcType, BytecodeType.BasicBlock, BytecodeType.FusionInfo, allocator, &code2);
+    defer {
+        allocator.free(analysis2.push_pcs);
+        allocator.free(analysis2.jumpdests);
+        allocator.free(analysis2.basic_blocks);
+        analysis2.jump_fusions.deinit();
+        analysis2.advanced_fusions.deinit();
+    }
+    
+    // Should not detect any constant folding fusion
+    try testing.expectEqual(@as(usize, 0), analysis2.advanced_fusions.count());
+}
+
+test "bytecode analyze - wrapping arithmetic in constant folding" {
+    const allocator = testing.allocator;
+    const code = [_]u8{
+        @intFromEnum(Opcode.PUSH1), 0xFF,  // 255
+        @intFromEnum(Opcode.PUSH1), 0x02,  // 2
+        @intFromEnum(Opcode.ADD),          // Should wrap to 1
+    };
+
+    const BytecodeType = @import("bytecode.zig").Bytecode(@import("bytecode_config.zig").BytecodeConfig{});
+    const analysis = try bytecodeAnalyze(BytecodeType.PcType, BytecodeType.BasicBlock, BytecodeType.FusionInfo, allocator, &code);
+    defer {
+        allocator.free(analysis.push_pcs);
+        allocator.free(analysis.jumpdests);
+        allocator.free(analysis.basic_blocks);
+        analysis.jump_fusions.deinit();
+        analysis.advanced_fusions.deinit();
+    }
+
+    try testing.expectEqual(@as(usize, 1), analysis.advanced_fusions.count());
+    const fusion = analysis.advanced_fusions.get(0).?;
+    try testing.expectEqual(BytecodeType.FusionInfo.FusionType.constant_fold, fusion.fusion_type);
+    try testing.expectEqual(@as(u256, 1), fusion.folded_value); // 255 + 2 = 1 (wrapping)
+}
+
+test "bytecode analyze - no fusion patterns present" {
+    const allocator = testing.allocator;
+    const code = [_]u8{
+        @intFromEnum(Opcode.ADD),
+        @intFromEnum(Opcode.MUL),
+        @intFromEnum(Opcode.DUP1),
+        @intFromEnum(Opcode.SWAP1),
+        @intFromEnum(Opcode.STOP),
+    };
+
+    const BytecodeType = @import("bytecode.zig").Bytecode(@import("bytecode_config.zig").BytecodeConfig{});
+    const analysis = try bytecodeAnalyze(BytecodeType.PcType, BytecodeType.BasicBlock, BytecodeType.FusionInfo, allocator, &code);
+    defer {
+        allocator.free(analysis.push_pcs);
+        allocator.free(analysis.jumpdests);
+        allocator.free(analysis.basic_blocks);
+        analysis.jump_fusions.deinit();
+        analysis.advanced_fusions.deinit();
+    }
+
+    try testing.expectEqual(@as(usize, 0), analysis.push_pcs.len);
+    try testing.expectEqual(@as(usize, 0), analysis.jumpdests.len);
+    try testing.expectEqual(@as(usize, 1), analysis.basic_blocks.len); // One block covering entire bytecode
+    try testing.expectEqual(@as(usize, 0), analysis.jump_fusions.count());
+    try testing.expectEqual(@as(usize, 0), analysis.advanced_fusions.count());
+}
+

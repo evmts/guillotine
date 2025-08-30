@@ -355,3 +355,422 @@ test "call params edge cases" {
     };
     try std.testing.expectEqual(@as(usize, 0), call_empty_input.getInput().len);
 }
+
+test "call params validation - zero gas error" {
+    const caller = primitives.ZERO_ADDRESS;
+    const to: Address = [_]u8{1} ++ [_]u8{0} ** 19;
+
+    // CALL with zero gas should fail validation
+    const call_zero_gas = CallParams{ .call = .{
+        .caller = caller,
+        .to = to,
+        .value = 100,
+        .input = &[_]u8{},
+        .gas = 0,
+    } };
+    try std.testing.expectError(CallParams.ValidationError.GasZeroError, call_zero_gas.validate());
+
+    // DELEGATECALL with zero gas should fail validation
+    const delegatecall_zero_gas = CallParams{ .delegatecall = .{
+        .caller = caller,
+        .to = to,
+        .input = &[_]u8{},
+        .gas = 0,
+    } };
+    try std.testing.expectError(CallParams.ValidationError.GasZeroError, delegatecall_zero_gas.validate());
+
+    // CREATE with zero gas should fail validation
+    const create_zero_gas = CallParams{ .create = .{
+        .caller = caller,
+        .value = 0,
+        .init_code = &[_]u8{0x00},
+        .gas = 0,
+    } };
+    try std.testing.expectError(CallParams.ValidationError.GasZeroError, create_zero_gas.validate());
+
+    // CREATE2 with zero gas should fail validation
+    const create2_zero_gas = CallParams{ .create2 = .{
+        .caller = caller,
+        .value = 0,
+        .init_code = &[_]u8{0x00},
+        .salt = 0x123,
+        .gas = 0,
+    } };
+    try std.testing.expectError(CallParams.ValidationError.GasZeroError, create2_zero_gas.validate());
+}
+
+test "call params validation - non-zero gas success" {
+    const caller = primitives.ZERO_ADDRESS;
+    const to: Address = [_]u8{1} ++ [_]u8{0} ** 19;
+
+    // All operations with non-zero gas should pass validation
+    const operations = [_]CallParams{
+        CallParams{ .call = .{
+            .caller = caller,
+            .to = to,
+            .value = 100,
+            .input = &[_]u8{},
+            .gas = 1,
+        } },
+        CallParams{ .callcode = .{
+            .caller = caller,
+            .to = to,
+            .value = 100,
+            .input = &[_]u8{},
+            .gas = 1,
+        } },
+        CallParams{ .delegatecall = .{
+            .caller = caller,
+            .to = to,
+            .input = &[_]u8{},
+            .gas = 1,
+        } },
+        CallParams{ .staticcall = .{
+            .caller = caller,
+            .to = to,
+            .input = &[_]u8{},
+            .gas = 1,
+        } },
+        CallParams{ .create = .{
+            .caller = caller,
+            .value = 0,
+            .init_code = &[_]u8{0x00},
+            .gas = 1,
+        } },
+        CallParams{ .create2 = .{
+            .caller = caller,
+            .value = 0,
+            .init_code = &[_]u8{0x00},
+            .salt = 0x123,
+            .gas = 1,
+        } },
+    };
+
+    for (operations) |op| {
+        try op.validate();
+    }
+}
+
+test "call params callcode operation" {
+    const caller: Address = [_]u8{0xaa} ++ [_]u8{0} ** 19;
+    const to: Address = [_]u8{0xbb} ++ [_]u8{0} ** 19;
+    const input_data = &[_]u8{ 0x12, 0x34, 0x56, 0x78 };
+
+    const callcode_op = CallParams{ .callcode = .{
+        .caller = caller,
+        .to = to,
+        .value = 1000,
+        .input = input_data,
+        .gas = 25000,
+    } };
+
+    try std.testing.expectEqual(@as(u64, 25000), callcode_op.getGas());
+    try std.testing.expectEqual(caller, callcode_op.getCaller());
+    try std.testing.expectEqualSlices(u8, input_data, callcode_op.getInput());
+    try std.testing.expect(callcode_op.hasValue());
+    try std.testing.expect(!callcode_op.isReadOnly());
+    try std.testing.expect(!callcode_op.isCreate());
+}
+
+test "call params create2 salt handling" {
+    const caller = primitives.ZERO_ADDRESS;
+    const init_code = &[_]u8{ 0x60, 0x80, 0x60, 0x40, 0x52, 0x60, 0x04, 0x36, 0x10 };
+
+    // Test various salt values
+    const salt_values = [_]u256{
+        0,
+        1,
+        0x123456789abcdef0,
+        0xdeadbeefcafebabe,
+        std.math.maxInt(u64),
+        std.math.maxInt(u128),
+        std.math.maxInt(u256),
+    };
+
+    for (salt_values) |salt| {
+        const create2_op = CallParams{ .create2 = .{
+            .caller = caller,
+            .value = 0,
+            .init_code = init_code,
+            .salt = salt,
+            .gas = 32000,
+        } };
+
+        try std.testing.expectEqual(@as(u64, 32000), create2_op.getGas());
+        try std.testing.expectEqual(caller, create2_op.getCaller());
+        try std.testing.expectEqualSlices(u8, init_code, create2_op.getInput());
+        try std.testing.expect(!create2_op.hasValue());
+        try std.testing.expect(!create2_op.isReadOnly());
+        try std.testing.expect(create2_op.isCreate());
+    }
+}
+
+test "call params large input data" {
+    const caller = primitives.ZERO_ADDRESS;
+    const to: Address = [_]u8{1} ++ [_]u8{0} ** 19;
+
+    // Test with large input data
+    var large_input: [1024]u8 = undefined;
+    for (0..1024) |i| {
+        large_input[i] = @intCast(i % 256);
+    }
+
+    const call_large_input = CallParams{ .call = .{
+        .caller = caller,
+        .to = to,
+        .value = 0,
+        .input = &large_input,
+        .gas = 100000,
+    } };
+
+    try std.testing.expectEqualSlices(u8, &large_input, call_large_input.getInput());
+    try std.testing.expectEqual(@as(usize, 1024), call_large_input.getInput().len);
+}
+
+test "call params address boundary values" {
+    const zero_address = primitives.ZERO_ADDRESS;
+    const max_address: Address = [_]u8{0xFF} ** 20;
+
+    // Test with zero address as caller and target
+    const zero_call = CallParams{ .call = .{
+        .caller = zero_address,
+        .to = zero_address,
+        .value = 0,
+        .input = &[_]u8{},
+        .gas = 21000,
+    } };
+    try std.testing.expectEqual(zero_address, zero_call.getCaller());
+
+    // Test with max address as caller and target
+    const max_call = CallParams{ .call = .{
+        .caller = max_address,
+        .to = max_address,
+        .value = 0,
+        .input = &[_]u8{},
+        .gas = 21000,
+    } };
+    try std.testing.expectEqual(max_address, max_call.getCaller());
+}
+
+test "call params value edge cases" {
+    const caller = primitives.ZERO_ADDRESS;
+    const to: Address = [_]u8{1} ++ [_]u8{0} ** 19;
+    const init_code = &[_]u8{0x00};
+
+    // Test minimum positive value
+    const call_min_value = CallParams{ .call = .{
+        .caller = caller,
+        .to = to,
+        .value = 1,
+        .input = &[_]u8{},
+        .gas = 21000,
+    } };
+    try std.testing.expect(call_min_value.hasValue());
+
+    // Test maximum value
+    const call_max_value = CallParams{ .call = .{
+        .caller = caller,
+        .to = to,
+        .value = std.math.maxInt(u256),
+        .input = &[_]u8{},
+        .gas = 21000,
+    } };
+    try std.testing.expect(call_max_value.hasValue());
+
+    // Test CREATE with max value
+    const create_max_value = CallParams{ .create = .{
+        .caller = caller,
+        .value = std.math.maxInt(u256),
+        .init_code = init_code,
+        .gas = 53000,
+    } };
+    try std.testing.expect(create_max_value.hasValue());
+    try std.testing.expect(create_max_value.isCreate());
+
+    // Test CREATE2 with max value
+    const create2_max_value = CallParams{ .create2 = .{
+        .caller = caller,
+        .value = std.math.maxInt(u256),
+        .init_code = init_code,
+        .salt = 0x123,
+        .gas = 53000,
+    } };
+    try std.testing.expect(create2_max_value.hasValue());
+    try std.testing.expect(create2_max_value.isCreate());
+}
+
+test "call params gas limit edge cases" {
+    const caller = primitives.ZERO_ADDRESS;
+    const to: Address = [_]u8{1} ++ [_]u8{0} ** 19;
+    const init_code = &[_]u8{0x00};
+
+    // Test minimum gas (1)
+    const call_min_gas = CallParams{ .call = .{
+        .caller = caller,
+        .to = to,
+        .value = 0,
+        .input = &[_]u8{},
+        .gas = 1,
+    } };
+    try std.testing.expectEqual(@as(u64, 1), call_min_gas.getGas());
+
+    // Test typical gas values
+    const typical_gas_values = [_]u64{ 21000, 100000, 1000000, 10000000 };
+
+    for (typical_gas_values) |gas_val| {
+        const ops = [_]CallParams{
+            CallParams{ .call = .{
+                .caller = caller,
+                .to = to,
+                .value = 0,
+                .input = &[_]u8{},
+                .gas = gas_val,
+            } },
+            CallParams{ .delegatecall = .{
+                .caller = caller,
+                .to = to,
+                .input = &[_]u8{},
+                .gas = gas_val,
+            } },
+            CallParams{ .staticcall = .{
+                .caller = caller,
+                .to = to,
+                .input = &[_]u8{},
+                .gas = gas_val,
+            } },
+            CallParams{ .create = .{
+                .caller = caller,
+                .value = 0,
+                .init_code = init_code,
+                .gas = gas_val,
+            } },
+        };
+
+        for (ops) |op| {
+            try std.testing.expectEqual(gas_val, op.getGas());
+        }
+    }
+}
+
+test "call params all operation types coverage" {
+    const caller: Address = [_]u8{0xaa} ++ [_]u8{0} ** 19;
+    const to: Address = [_]u8{0xbb} ++ [_]u8{0} ** 19;
+    const input_data = &[_]u8{ 0x42, 0x24 };
+    const init_code = &[_]u8{ 0x60, 0x00, 0xf3 };
+
+    // Test all operation types exist and work
+    const operations = [_]CallParams{
+        // CALL
+        CallParams{ .call = .{
+            .caller = caller,
+            .to = to,
+            .value = 100,
+            .input = input_data,
+            .gas = 25000,
+        } },
+        // CALLCODE
+        CallParams{ .callcode = .{
+            .caller = caller,
+            .to = to,
+            .value = 200,
+            .input = input_data,
+            .gas = 30000,
+        } },
+        // DELEGATECALL
+        CallParams{ .delegatecall = .{
+            .caller = caller,
+            .to = to,
+            .input = input_data,
+            .gas = 35000,
+        } },
+        // STATICCALL
+        CallParams{ .staticcall = .{
+            .caller = caller,
+            .to = to,
+            .input = input_data,
+            .gas = 40000,
+        } },
+        // CREATE
+        CallParams{ .create = .{
+            .caller = caller,
+            .value = 500,
+            .init_code = init_code,
+            .gas = 53000,
+        } },
+        // CREATE2
+        CallParams{ .create2 = .{
+            .caller = caller,
+            .value = 600,
+            .init_code = init_code,
+            .salt = 0xdeadbeef,
+            .gas = 55000,
+        } },
+    };
+
+    // Verify all operations can be validated and accessed
+    for (operations) |op| {
+        try op.validate();
+        _ = op.getGas();
+        _ = op.getCaller();
+        _ = op.getInput();
+        _ = op.hasValue();
+        _ = op.isReadOnly();
+        _ = op.isCreate();
+    }
+}
+
+test "call params method consistency" {
+    const caller: Address = [_]u8{0xaa} ++ [_]u8{0} ** 19;
+    const to: Address = [_]u8{0xbb} ++ [_]u8{0} ** 19;
+    const input_data = &[_]u8{0x12};
+
+    // Test that delegatecall correctly reports no value transfer
+    const delegatecall_op = CallParams{ .delegatecall = .{
+        .caller = caller,
+        .to = to,
+        .input = input_data,
+        .gas = 25000,
+    } };
+
+    try std.testing.expect(!delegatecall_op.hasValue());
+    try std.testing.expect(!delegatecall_op.isReadOnly());
+    try std.testing.expect(!delegatecall_op.isCreate());
+
+    // Test that staticcall correctly reports read-only
+    const staticcall_op = CallParams{ .staticcall = .{
+        .caller = caller,
+        .to = to,
+        .input = input_data,
+        .gas = 25000,
+    } };
+
+    try std.testing.expect(!staticcall_op.hasValue());
+    try std.testing.expect(staticcall_op.isReadOnly());
+    try std.testing.expect(!staticcall_op.isCreate());
+}
+
+test "call params input vs init code consistency" {
+    const caller = primitives.ZERO_ADDRESS;
+    const to: Address = [_]u8{1} ++ [_]u8{0} ** 19;
+    const call_input = &[_]u8{ 0xa9, 0x05, 0x9c, 0xbb };
+    const init_code = &[_]u8{ 0x60, 0x80, 0x60, 0x40, 0x52 };
+
+    // Regular calls use input field
+    const call_op = CallParams{ .call = .{
+        .caller = caller,
+        .to = to,
+        .value = 0,
+        .input = call_input,
+        .gas = 21000,
+    } };
+    try std.testing.expectEqualSlices(u8, call_input, call_op.getInput());
+
+    // Create operations use init_code field but return it via getInput()
+    const create_op = CallParams{ .create = .{
+        .caller = caller,
+        .value = 0,
+        .init_code = init_code,
+        .gas = 53000,
+    } };
+    try std.testing.expectEqualSlices(u8, init_code, create_op.getInput());
+}
