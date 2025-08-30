@@ -3,66 +3,10 @@ const primitives = @import("primitives");
 const guillotine_evm = @import("evm");
 const revm = @import("revm");
 
-/// Represents a single execution step in the trace
-pub const TraceStep = struct {
-    pc: u32,
-    opcode: u8,
-    opcode_name: []const u8,
-    gas: u64,
-    stack: []const u256,
-    memory: []const u8,
-    storage_reads: []const StorageRead,
-    storage_writes: []const StorageWrite,
+// Use the same trace types as the EVM
+pub const TraceStep = guillotine_evm.CallResult.TraceStep;
+pub const ExecutionTrace = guillotine_evm.CallResult.ExecutionTrace;
 
-    pub const StorageRead = struct {
-        address: primitives.Address,
-        slot: u256,
-        value: u256,
-    };
-
-    pub const StorageWrite = struct {
-        address: primitives.Address,
-        slot: u256,
-        old_value: u256,
-        new_value: u256,
-    };
-
-    pub fn deinit(self: *TraceStep, allocator: std.mem.Allocator) void {
-        allocator.free(self.opcode_name);
-        allocator.free(self.stack);
-        allocator.free(self.memory);
-        allocator.free(self.storage_reads);
-        allocator.free(self.storage_writes);
-    }
-};
-
-/// Complete execution trace
-pub const ExecutionTrace = struct {
-    steps: []TraceStep,
-    allocator: std.mem.Allocator,
-
-    pub fn init(allocator: std.mem.Allocator) ExecutionTrace {
-        return ExecutionTrace{
-            .steps = &.{},
-            .allocator = allocator,
-        };
-    }
-
-    pub fn deinit(self: *ExecutionTrace) void {
-        for (self.steps) |*step| {
-            step.deinit(self.allocator);
-        }
-        self.allocator.free(self.steps);
-    }
-
-    /// Create empty trace for now (placeholder implementation)
-    pub fn empty(allocator: std.mem.Allocator) ExecutionTrace {
-        return ExecutionTrace{
-            .steps = &.{},
-            .allocator = allocator,
-        };
-    }
-};
 
 /// Result of execution with trace
 pub const ExecutionResultWithTrace = struct {
@@ -126,7 +70,12 @@ pub const ExecutionDiff = struct {
 /// Main differential testing coordinator
 pub const DifferentialTestor = struct {
     revm_instance: revm.Revm,
-    guillotine_instance: guillotine_evm.Evm(.{}),
+    guillotine_instance: guillotine_evm.Evm(.{
+        .tracer_type = guillotine_evm.tracer.DebuggingTracer,
+        .frame_config = .{
+            .DatabaseType = guillotine_evm.Database,
+        },
+    }),
     guillotine_db: *guillotine_evm.Database,
     allocator: std.mem.Allocator,
     caller: primitives.Address,
@@ -157,6 +106,8 @@ pub const DifferentialTestor = struct {
             .storage_root = [_]u8{0} ** 32,
         });
 
+        // Tracer is now created internally by the EVM when needed
+
         const block_info = guillotine_evm.BlockInfo{
             .number = 1,
             .timestamp = 0,
@@ -177,7 +128,12 @@ pub const DifferentialTestor = struct {
             .blob_base_fee = 0,
         };
 
-        const evm = try guillotine_evm.Evm(.{}).init(
+        const evm = try guillotine_evm.Evm(.{
+            .tracer_type = guillotine_evm.tracer.DebuggingTracer,
+            .frame_config = .{
+                .DatabaseType = guillotine_evm.Database,
+            },
+        }).init(
             allocator,
             db,
             block_info,
@@ -353,6 +309,8 @@ pub const DifferentialTestor = struct {
         input: []const u8,
         gas_limit: u64,
     ) !ExecutionResultWithTrace {
+        // Tracer is now managed internally by the EVM
+
         // Use the actual EVM call method
         const params = guillotine_evm.CallParams{
             .call = .{
@@ -368,15 +326,15 @@ pub const DifferentialTestor = struct {
         const result = self.guillotine_instance.call(params);
         std.debug.print("DIFFERENTIAL: Guillotine call complete, success={}, gas_left={}\n", .{ result.success, result.gas_left });
 
-        // For now, create empty trace - we'll focus on the execution result
-        const trace = ExecutionTrace.empty(self.allocator);
+        // Use trace from CallResult if available, otherwise create empty trace
+        const trace = if (result.trace) |t| t else ExecutionTrace.empty(self.allocator);
 
         // Calculate gas used
         const gas_used = gas_limit - result.gas_left;
 
         // Store the execution result status for debugging
         const log = std.log.scoped(.differential_failure);
-        log.debug("Guillotine execution completed: success={}, gas_left={}, output_len={}", .{ result.success, result.gas_left, result.output.len });
+        log.debug("Guillotine execution completed with tracing enabled: success={}, gas_left={}, output_len={}, trace_steps={}", .{ result.success, result.gas_left, result.output.len, trace.steps.len });
 
         if (!result.success) {
             // Log detailed failure information
@@ -439,6 +397,14 @@ pub const DifferentialTestor = struct {
             log.err("", .{});
         }
 
+        // Show trace information
+        if (diff.step_count_diff) |steps| {
+            log.err("🔍 TRACE STEP COUNTS:", .{});
+            log.err("   REVM steps: {}", .{steps.revm});
+            log.err("   Guillotine steps: {}", .{steps.guillotine});
+            log.err("", .{});
+        }
+
         // Show trace differences if any
         if (diff.first_divergence_step) |step| {
             log.err("🔍 TRACE DIVERGENCE at step {}:", .{step});
@@ -458,6 +424,17 @@ pub const DifferentialTestor = struct {
                 }
             }
             log.err("", .{});
+        }
+
+        // Show Guillotine trace details for debugging (first few steps)
+        if (diff.step_count_diff) |steps| {
+            if (steps.guillotine > 0) {
+                log.err("🔍 GUILLOTINE TRACE PREVIEW (first {} steps):", .{@min(steps.guillotine, 5)});
+                // This would require access to guillotine_result which we don't have here
+                // We'll need to pass the actual traces to this function
+                log.err("   [Trace details would be shown here with enhanced debugging]", .{});
+                log.err("", .{});
+            }
         }
 
         log.err("🛠️  DEBUGGING HINTS:", .{});
@@ -599,6 +576,7 @@ pub const DifferentialTestor = struct {
 
         return diff;
     }
+
 
     /// Print detailed diff visualization
     pub fn printDiff(_: *DifferentialTestor, diff: ExecutionDiff, test_name: []const u8) void {
