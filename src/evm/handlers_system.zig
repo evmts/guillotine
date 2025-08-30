@@ -578,6 +578,15 @@ pub fn Handlers(comptime FrameType: type) type {
             if (size_usize > 0) {
                 log.debug("RETURN: Getting memory slice at offset {d} size {d}", .{ offset_usize, size_usize });
                 log.debug("RETURN: Memory size before get_slice: {d}", .{self.memory.size()});
+                
+                // Debug: Check what's at memory position 0 before getting slice
+                if (self.memory.size() >= 32) {
+                    const debug_word = self.memory.get_u256_evm(self.allocator, @as(u24, @intCast(offset_usize))) catch 0;
+                    log.debug("RETURN: DEBUG - u256 value at offset {d}: {d} (0x{x})", .{ offset_usize, debug_word, debug_word });
+                } else {
+                    log.debug("RETURN: DEBUG - Memory size {d} is smaller than 32 bytes", .{self.memory.size()});
+                }
+                
                 const return_data = self.memory.get_slice(@as(u24, @intCast(offset_usize)), @as(u24, @intCast(size_usize))) catch {
                     log.err("RETURN: Failed to get memory slice at offset {d} size {d}", .{ offset_usize, size_usize });
                     return Error.OutOfBounds;

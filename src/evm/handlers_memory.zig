@@ -72,6 +72,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
             // Convert to u256 if necessary and store
             const value_u256 = @as(u256, value);
+            log.debug("MSTORE: Converting value {} (type: {s}) to u256: {}", .{ value, @typeName(@TypeOf(value)), value_u256 });
             self.memory.set_u256_evm(self.allocator, @as(u24, @intCast(offset_usize)), value_u256) catch |err| switch (err) {
                 memory_mod.MemoryError.OutOfBounds => return Error.OutOfBounds,
                 memory_mod.MemoryError.MemoryOverflow => return Error.OutOfBounds,
