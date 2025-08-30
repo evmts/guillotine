@@ -2268,3 +2268,89 @@ test "Bytecode bitmap generation - empty and single byte" {
     try std.testing.expect(single_bytecode.packed_bitmap[0].is_op_start == true);
     try std.testing.expect(single_bytecode.packed_bitmap[0].is_push_data == false);
 }
+
+test "PUSH+JUMP: PUSH32 containing JUMP byte should not cause validation error" {
+    const allocator = std.testing.allocator;
+    
+    // PUSH32 with data that contains 0x56 (JUMP opcode value) followed by actual code
+    const bytecode = [_]u8{
+        0x7f, // PUSH32
+        // 32 bytes of data, including 0x56 at various positions
+        0x11, 0x22, 0x33, 0x44, 0x56, 0x66, 0x77, 0x88,  // 0x56 at position 5
+        0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x00,
+        0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88,
+        0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x56,  // 0x56 at position 32
+        0x00, // STOP (at position 33)
+    };
+    
+    // This should succeed - the 0x56 bytes inside PUSH32 data should NOT be treated as JUMP opcodes
+    var bc = BytecodeDefault.init(allocator, &bytecode) catch |err| {
+        std.debug.print("PUSH+JUMP test failed: PUSH32 containing 0x56 incorrectly rejected: {}\n", .{err});
+        return err;
+    };
+    defer bc.deinit();
+    
+    try std.testing.expect(bc.runtime_code.len == bytecode.len);
+    
+    // Verify that position 5 is marked as push data, not an opcode
+    try std.testing.expect(bc.packed_bitmap[5].is_push_data);
+    
+    // Verify that position 33 (STOP) is an opcode start
+    try std.testing.expect(bc.packed_bitmap[33].is_op_start);
+}
+
+test "PUSH+JUMP: complex bytecode with mixed PUSH and JUMP patterns" {
+    const allocator = std.testing.allocator;
+    
+    // Complex pattern:
+    // PUSH1 0x08, JUMP, PUSH2 with 0x56 in data, JUMPDEST, STOP
+    const bytecode = [_]u8{
+        0x60, 0x08,        // PUSH1 8 (valid jump to JUMPDEST)
+        0x56,              // JUMP (actual JUMP opcode at position 2)
+        0x61, 0x56, 0x78,  // PUSH2 0x5678 (contains 0x56 as data at position 4)
+        0x00,              // STOP at position 6
+        0x00,              // STOP at position 7
+        0x5b,              // JUMPDEST at position 8
+        0x00,              // STOP at position 9
+    };
+    
+    var bc = BytecodeDefault.init(allocator, &bytecode) catch |err| {
+        std.debug.print("PUSH+JUMP test failed: Complex pattern incorrectly rejected: {}\n", .{err});
+        return err;
+    };
+    defer bc.deinit();
+    
+    try std.testing.expect(bc.runtime_code.len == bytecode.len);
+    
+    // Position 2 should be a real JUMP opcode
+    try std.testing.expect(bc.packed_bitmap[2].is_op_start);
+    
+    // Position 4 should be push data (even though it's 0x56) 
+    try std.testing.expect(bc.packed_bitmap[4].is_push_data);
+    
+    // Position 8 should be JUMPDEST
+    try std.testing.expect(bc.packed_bitmap[8].is_jumpdest);
+}
+
+test "PUSH+JUMP: unreachable PUSH+JUMP pattern should be valid" {
+    const allocator = std.testing.allocator;
+    
+    // Bytecode with unreachable code that contains PUSH+JUMP
+    const bytecode = [_]u8{
+        0x00,        // STOP - execution ends here
+        // Unreachable code below:
+        0x60, 0x10,  // PUSH1 16 (target doesn't exist)
+        0x56,        // JUMP
+        0x00,        // STOP
+    };
+    
+    // This should succeed even though the jump target (16) doesn't exist,
+    // because the PUSH+JUMP is unreachable
+    var bc = BytecodeDefault.init(allocator, &bytecode) catch |err| {
+        std.debug.print("PUSH+JUMP test failed: Unreachable code incorrectly rejected: {}\n", .{err});
+        return err;
+    };
+    defer bc.deinit();
+    
+    try std.testing.expect(bc.runtime_code.len == bytecode.len);
+}
