@@ -28,6 +28,10 @@ pub const MemoryError = @import("memory.zig").MemoryError;
 pub const Evm = @import("evm.zig").Evm;
 pub const EvmConfig = @import("evm_config.zig").EvmConfig;
 
+// Fixtures for testing
+pub const FixtureContract = @import("fixtures/popular_contracts.zig").FixtureContract;
+pub const ContractName = @import("fixtures/popular_contracts.zig").ContractName;
+
 // Default EVM types for backward compatibility
 pub const DefaultEvm = Evm(.{});
 
