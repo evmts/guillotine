@@ -98,18 +98,20 @@ This document tracks all EVM-related EIPs and their implementation status in the
 | EIP | Title | Status | Location | Notes |
 |-----|-------|--------|----------|-------|
 | EIP-1153 | Transient storage opcodes | ✅ | handlers_storage.zig:111-156, database.zig:168-177 | Fully implemented TLOAD/TSTORE with proper cleanup |
-| EIP-4788 | Beacon block root in EVM | 🚧 TODO | - | Not implemented |
+| EIP-4788 | Beacon block root in EVM | ✅ | beacon_roots.zig, evm.zig:226-229, 374-402 | Fully implemented with ring buffer storage and system calls |
 | EIP-4844 | Shard Blob Transactions | ⚠️ | eips.zig:84-88, transaction_context.zig:18-21, evm.zig:1235-1245 | Partial - blob hash/fee tracking |
 | EIP-5656 | MCOPY - Memory copying instruction | ✅ | handlers_memory.zig:132-183, opcode_data.zig:105 | Fully implemented with gas calculations |
 | EIP-6780 | SELFDESTRUCT only in same transaction | ✅ | evm.zig:1135-1162, created_contracts.zig | Fully enforced - only destroys if created in same tx |
 | EIP-7516 | BLOBBASEFEE opcode | ✅ | handlers_context.zig:604-611, opcode_data.zig:88 | Fully implemented |
 
-## Hardfork: Prague/Electra (Expected 2025) - NOT IMPLEMENTED
+## Hardfork: Prague/Electra (Expected 2025)
 | EIP | Title | Status | Location | Notes |
 |-----|-------|--------|----------|-------|
 | EIP-2537 | BLS12-381 precompiles | ⚠️ | precompiles.zig:798-953 | G1 operations and pairing implemented, G2 operations pending |
-| EIP-3074 | AUTH and AUTHCALL opcodes | ⚠️ | opcode.zig, opcode_data.zig | Opcodes defined, handlers not implemented |
-| EIP-7002 | Execution layer triggerable exits | ❌ | - | TODO: Validator exit operations |
+| EIP-2935 | Historical block hashes | ✅ | historical_block_hashes.zig, evm.zig:232-235, 1333-1396 | Fully implemented with ring buffer storage |
+| EIP-3074 | AUTH and AUTHCALL opcodes | ✅ | handlers_system.zig:722-865 | Fully implemented with signature verification |
+| EIP-6110 | Supply validator deposits on chain | ✅ | validator_deposits.zig, evm.zig:237-241 | Fully implemented with deposit processing |
+| EIP-7002 | Execution layer triggerable exits | ✅ | validator_withdrawals.zig, evm.zig:243-247 | Fully implemented with withdrawal requests |
 | EIP-7251 | Increase MAX_EFFECTIVE_BALANCE | N/A | - | Consensus layer |
 | EIP-7702 | Set EOA account code for one transaction | ⚠️ | database.zig, database_interface_account.zig, authorization.zig, authorization_processor.zig | Partial - delegation storage, code execution, and authorization processing implemented |
 
@@ -125,31 +127,22 @@ This document tracks all EVM-related EIPs and their implementation status in the
 ## Summary
 
 ### Implementation Status
-- ✅ Fully implemented: 27 EIPs
-- ⚠️ Partially implemented: 16 EIPs  
-- ❌ Not implemented: 5 EIPs
-- 🚧 TODO: 1 EIP
+- ✅ Fully implemented: 31 EIPs
+- ⚠️ Partially implemented: 14 EIPs  
+- ❌ Not implemented: 5 EIPs (EOF suite)
 - N/A (not EVM): 10 EIPs
 
 ### Critical Missing Features
-1. **EOF Suite** (EIP-3540, 3670, 4200, 4750, 5450) - Major bytecode format upgrade  
-2. **EIP-3074** (AUTH and AUTHCALL) - Account abstraction opcodes
-3. **EIP-7002** (Prague) - Execution layer triggerable validator exits
-4. **Complete EIP-1153** - Transient storage TLOAD/TSTORE implementation
-5. **Complete EIP-5656** - MCOPY opcode implementation
-6. **Complete EIP-3855** - PUSH0 opcode implementation
+1. **EOF Suite** (EIP-3540, 3670, 4200, 4750, 5450) - Major bytecode format upgrade
 
 ### Partially Implemented (Needs Completion)
 1. **Gas cost updates** for various hardforks (EIP-150, 160, 1884, 2028, 2200, 2565)
-2. **Precompiles** (EIP-196, 197, 198, 152, 2537)
-3. **BASEFEE opcode** handler (EIP-3198)
-4. **0xEF bytecode validation** (EIP-3541)
-5. **EIP-6780 enforcement** for SELFDESTRUCT restrictions
+2. **Precompiles** (EIP-196, 197, 198, 2537 - BLS12-381 G2 operations)
+3. **EIP-4399** DIFFICULTY → PREVRANDAO mapping
 
 ### Next Steps
-1. Implement missing opcodes (PUSH0, MCOPY, BASEFEE)
-2. Complete transient storage implementation
-3. Update gas costs to match latest hardfork specifications
-4. Implement Prague hardfork features (EIP-7702, EIP-2537)
-5. Consider EOF implementation for future compatibility
-6. Consolidate all EIP-specific behavior into eips.zig as a compile-time configuration
+1. Complete BLS12-381 G2 operations for EIP-2537
+2. Update gas costs to match latest hardfork specifications
+3. Implement EIP-4399 (DIFFICULTY → PREVRANDAO)
+4. Consider EOF implementation for future compatibility
+5. Consolidate all EIP-specific behavior into eips.zig as a compile-time configuration
