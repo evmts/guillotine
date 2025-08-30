@@ -983,3 +983,104 @@ test "MCOPY opcode - gas calculation" {
         try testing.expect(gas_used >= expected_min_gas);
     }
 }
+
+test "MLOAD opcode - memory expansion at exact boundaries" {
+    var frame = try createTestFrame(testing.allocator);
+    defer frame.deinit(testing.allocator);
+
+    // Test loading at exact 32-byte boundaries
+    const boundaries = [_]usize{ 0, 32, 64, 96, 128, 4064, 4096 };
+
+    for (boundaries) |boundary| {
+        frame.memory.set_u256_evm(boundary, 0x123456789ABCDEF0) catch unreachable;
+        
+        try frame.stack.push(boundary);
+        
+        const dispatch = createMockDispatch();
+        _ = try TestFrame.MemoryHandlers.mload(frame, dispatch);
+        
+        const loaded = try frame.stack.pop();
+        try testing.expectEqual(@as(u256, 0x123456789ABCDEF0), loaded);
+        
+        // Verify memory size is properly aligned
+        const expected_min_size = ((boundary + 32 + 31) / 32) * 32;
+        try testing.expect(frame.memory.len() >= expected_min_size);
+    }
+}
+
+test "MSTORE opcode - partial word overwrites" {
+    var frame = try createTestFrame(testing.allocator);
+    defer frame.deinit(testing.allocator);
+
+    // Store overlapping values to test partial overwrite behavior
+    
+    // First, store a full pattern
+    frame.memory.set_u256_evm(0, std.math.maxInt(u256)) catch unreachable;
+    
+    // Then store at overlapping offset 16
+    try frame.stack.push(16); // offset
+    try frame.stack.push(0); // value (all zeros)
+    
+    const dispatch = createMockDispatch();
+    _ = try TestFrame.MemoryHandlers.mstore(frame, dispatch);
+    
+    // Verify first 16 bytes remain unchanged
+    const first_half = frame.memory.get_slice(0, 16) catch unreachable;
+    for (first_half) |byte| {
+        try testing.expectEqual(@as(u8, 0xFF), byte);
+    }
+    
+    // Verify next 32 bytes are zeros  
+    const zero_part = frame.memory.get_slice(16, 32) catch unreachable;
+    for (zero_part) |byte| {
+        try testing.expectEqual(@as(u8, 0x00), byte);
+    }
+}
+
+test "memory operations - extreme gas scenarios" {
+    var frame = try createTestFrame(testing.allocator);
+    defer frame.deinit(testing.allocator);
+
+    // Test operations with exactly enough gas
+    const base_gas = GasConstants.GasFastestStep;
+    
+    // MSTORE8 with minimal gas
+    frame.gas_remaining = @intCast(base_gas + 1);
+    try frame.stack.push(0); // offset
+    try frame.stack.push(0xFF); // value
+    
+    const dispatch = createMockDispatch();
+    _ = try TestFrame.MemoryHandlers.mstore8(frame, dispatch);
+    
+    // Should succeed with gas remaining
+    try testing.expect(frame.gas_remaining >= 0);
+    
+    // Verify byte was stored
+    const stored = frame.memory.get_byte(0) catch unreachable;
+    try testing.expectEqual(@as(u8, 0xFF), stored);
+}
+
+test "MCOPY opcode - single byte copies" {
+    var frame = try createTestFrame(testing.allocator);
+    defer frame.deinit(testing.allocator);
+
+    // Test copying individual bytes
+    const test_bytes = [_]u8{ 0x00, 0xFF, 0xAA, 0x55, 0x0F, 0xF0 };
+    
+    for (test_bytes, 0..) |test_byte, i| {
+        // Store test byte
+        frame.memory.set_byte_evm(testing.allocator, @as(u24, @intCast(i)), test_byte) catch unreachable;
+        
+        // Copy single byte to destination
+        try frame.stack.push(100 + i); // dest
+        try frame.stack.push(i); // src
+        try frame.stack.push(1); // size (1 byte)
+        
+        const dispatch = createMockDispatch();
+        _ = try TestFrame.MemoryHandlers.mcopy(frame, dispatch);
+        
+        // Verify copy
+        const copied = frame.memory.get_byte(@as(u24, @intCast(100 + i))) catch unreachable;
+        try testing.expectEqual(test_byte, copied);
+    }
+}

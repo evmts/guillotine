@@ -317,3 +317,124 @@ test "synthetic arithmetic - all pointer variants" {
     _ = try TestFrame.ArithmeticSyntheticHandlers.push_sub_pointer(frame, dispatch);
     try testing.expectEqual(@as(u256, 50), try frame.stack.pop());
 }
+
+test "PUSH_ADD_INLINE - overflow wrapping" {
+    var frame = try createTestFrame(testing.allocator);
+    defer frame.deinit(testing.allocator);
+
+    // Test: MAX + 1 = 0 (wraps around)
+    const max = std.math.maxInt(u256);
+    try frame.stack.push(max);
+
+    const dispatch = createInlineDispatch(1);
+    _ = try TestFrame.ArithmeticSyntheticHandlers.push_add_inline(frame, dispatch);
+
+    try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
+}
+
+test "PUSH_MUL_INLINE - overflow wrapping" {
+    var frame = try createTestFrame(testing.allocator);
+    defer frame.deinit(testing.allocator);
+
+    // Test: MAX * 2 = MAX - 1 (overflow wraps)
+    const max = std.math.maxInt(u256);
+    try frame.stack.push(max);
+
+    const dispatch = createInlineDispatch(2);
+    _ = try TestFrame.ArithmeticSyntheticHandlers.push_mul_inline(frame, dispatch);
+
+    try testing.expectEqual(max - 1, try frame.stack.pop());
+}
+
+test "PUSH_SUB_POINTER - underflow wrapping" {
+    var frame = try createTestFrame(testing.allocator);
+    defer frame.deinit(testing.allocator);
+
+    // Test: 5 - 10 = MAX - 4 (underflow wraps)
+    const sub_value: u256 = 10;
+    try frame.stack.push(5);
+
+    const dispatch = createPointerDispatch(&sub_value);
+    _ = try TestFrame.ArithmeticSyntheticHandlers.push_sub_pointer(frame, dispatch);
+
+    try testing.expectEqual(std.math.maxInt(u256) - 4, try frame.stack.pop());
+}
+
+test "PUSH_DIV_POINTER - division by zero" {
+    var frame = try createTestFrame(testing.allocator);
+    defer frame.deinit(testing.allocator);
+
+    // Test: 42 / 0 = 0 (EVM specification)
+    const zero_value: u256 = 0;
+    try frame.stack.push(42);
+
+    const dispatch = createPointerDispatch(&zero_value);
+    _ = try TestFrame.ArithmeticSyntheticHandlers.push_div_pointer(frame, dispatch);
+
+    try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
+}
+
+test "PUSH_MUL_POINTER - large value multiplication" {
+    var frame = try createTestFrame(testing.allocator);
+    defer frame.deinit(testing.allocator);
+
+    // Test: (2^128) * (2^128) = 0 (overflow wraps)
+    const large: u256 = @as(u256, 1) << 128;
+    try frame.stack.push(large);
+
+    const dispatch = createPointerDispatch(&large);
+    _ = try TestFrame.ArithmeticSyntheticHandlers.push_mul_pointer(frame, dispatch);
+
+    try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
+}
+
+test "synthetic arithmetic - maximum value operations" {
+    var frame = try createTestFrame(testing.allocator);
+    defer frame.deinit(testing.allocator);
+
+    const max = std.math.maxInt(u256);
+
+    // Test PUSH_ADD with maximum values
+    try frame.stack.push(max);
+    var dispatch = createInlineDispatch(max);
+    _ = try TestFrame.ArithmeticSyntheticHandlers.push_add_inline(frame, dispatch);
+    try testing.expectEqual(max - 1, try frame.stack.pop());
+
+    // Test PUSH_SUB with maximum values  
+    try frame.stack.push(max);
+    dispatch = createInlineDispatch(max);
+    _ = try TestFrame.ArithmeticSyntheticHandlers.push_sub_inline(frame, dispatch);
+    try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
+
+    // Test PUSH_DIV with maximum values
+    try frame.stack.push(max);
+    dispatch = createInlineDispatch(max);
+    _ = try TestFrame.ArithmeticSyntheticHandlers.push_div_inline(frame, dispatch);
+    try testing.expectEqual(@as(u256, 1), try frame.stack.pop());
+}
+
+test "synthetic arithmetic - zero operations" {
+    var frame = try createTestFrame(testing.allocator);
+    defer frame.deinit(testing.allocator);
+
+    // Test all operations with zero
+    try frame.stack.push(0);
+    var dispatch = createInlineDispatch(42);
+    _ = try TestFrame.ArithmeticSyntheticHandlers.push_add_inline(frame, dispatch);
+    try testing.expectEqual(@as(u256, 42), try frame.stack.pop());
+
+    try frame.stack.push(0);
+    dispatch = createInlineDispatch(42);
+    _ = try TestFrame.ArithmeticSyntheticHandlers.push_mul_inline(frame, dispatch);
+    try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
+
+    try frame.stack.push(0);
+    dispatch = createInlineDispatch(42);
+    _ = try TestFrame.ArithmeticSyntheticHandlers.push_sub_inline(frame, dispatch);
+    try testing.expectEqual(std.math.maxInt(u256) - 41, try frame.stack.pop());
+
+    try frame.stack.push(0);
+    dispatch = createInlineDispatch(42);
+    _ = try TestFrame.ArithmeticSyntheticHandlers.push_div_inline(frame, dispatch);
+    try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
+}

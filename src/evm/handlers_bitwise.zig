@@ -784,3 +784,115 @@ test "BYTE opcode - all bytes of a pattern" {
         try testing.expectEqual(@as(u256, i), try frame.stack.pop());
     }
 }
+
+test "SHL opcode - edge cases with maximum value" {
+    var frame = try createTestFrame(testing.allocator);
+    defer frame.deinit(testing.allocator);
+
+    // Test: MAX_U256 << 1 = MAX_U256 - 1
+    const max = std.math.maxInt(u256);
+    try frame.stack.push(max);
+    try frame.stack.push(1);
+
+    const dispatch = createMockDispatch();
+    _ = try TestFrame.BitwiseHandlers.shl(&frame, dispatch.cursor);
+
+    try testing.expectEqual(max - 1, try frame.stack.pop());
+}
+
+test "SHR opcode - single bit patterns" {
+    var frame = try createTestFrame(testing.allocator);
+    defer frame.deinit(testing.allocator);
+
+    // Test: 0x8000...000 >> 1 = 0x4000...000
+    const high_bit = @as(u256, 1) << 255;
+    try frame.stack.push(high_bit);
+    try frame.stack.push(1);
+
+    const dispatch = createMockDispatch();
+    _ = try TestFrame.BitwiseHandlers.shr(&frame, dispatch.cursor);
+
+    try testing.expectEqual(@as(u256, 1) << 254, try frame.stack.pop());
+}
+
+test "SAR opcode - boundary value (-1)" {
+    var frame = try createTestFrame(testing.allocator);
+    defer frame.deinit(testing.allocator);
+
+    // Test: -1 >> any_amount = -1 (all bits set)
+    const neg_1 = std.math.maxInt(u256);
+    try frame.stack.push(neg_1);
+    try frame.stack.push(128);
+
+    const dispatch = createMockDispatch();
+    _ = try TestFrame.BitwiseHandlers.sar(&frame, dispatch.cursor);
+
+    try testing.expectEqual(neg_1, try frame.stack.pop());
+}
+
+test "bitwise operations - pattern testing" {
+    var frame = try createTestFrame(testing.allocator);
+    defer frame.deinit(testing.allocator);
+
+    // Test: Alternating bit patterns
+    const pattern1 = @as(u256, 0xAAAAAAAAAAAAAAAA) << 192 | @as(u256, 0xAAAAAAAAAAAAAAAA) << 128 | 
+                     @as(u256, 0xAAAAAAAAAAAAAAAA) << 64 | @as(u256, 0xAAAAAAAAAAAAAAAA);
+    const pattern2 = @as(u256, 0x5555555555555555) << 192 | @as(u256, 0x5555555555555555) << 128 | 
+                     @as(u256, 0x5555555555555555) << 64 | @as(u256, 0x5555555555555555);
+
+    // Test: pattern1 XOR pattern2 = MAX
+    try frame.stack.push(pattern1);
+    try frame.stack.push(pattern2);
+    var dispatch = createMockDispatch();
+    _ = try TestFrame.BitwiseHandlers.xor(&frame, dispatch.cursor);
+    try testing.expectEqual(std.math.maxInt(u256), try frame.stack.pop());
+
+    // Test: pattern1 AND pattern2 = 0
+    try frame.stack.push(pattern1);
+    try frame.stack.push(pattern2);
+    dispatch = createMockDispatch();
+    _ = try TestFrame.BitwiseHandlers.@"and"(&frame, dispatch.cursor);
+    try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
+}
+
+test "shift operations - extreme shifts" {
+    var frame = try createTestFrame(testing.allocator);
+    defer frame.deinit(testing.allocator);
+
+    const max = std.math.maxInt(u256);
+
+    // Test: MAX << 257 = 0 (way past bit size)
+    try frame.stack.push(max);
+    try frame.stack.push(257);
+    var dispatch = createMockDispatch();
+    _ = try TestFrame.BitwiseHandlers.shl(&frame, dispatch.cursor);
+    try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
+
+    // Test: MAX >> 257 = 0 (way past bit size)
+    try frame.stack.push(max);
+    try frame.stack.push(257);
+    dispatch = createMockDispatch();
+    _ = try TestFrame.BitwiseHandlers.shr(&frame, dispatch.cursor);
+    try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
+
+    // Test: -1 >> 300 = -1 (SAR with extreme shift)
+    try frame.stack.push(max);
+    try frame.stack.push(300);
+    dispatch = createMockDispatch();
+    _ = try TestFrame.BitwiseHandlers.sar(&frame, dispatch.cursor);
+    try testing.expectEqual(max, try frame.stack.pop());
+}
+
+test "BYTE opcode - maximum index values" {
+    var frame = try createTestFrame(testing.allocator);
+    defer frame.deinit(testing.allocator);
+
+    // Test with maximum u256 as index
+    try frame.stack.push(0x123456789ABCDEF0);
+    try frame.stack.push(std.math.maxInt(u256));
+
+    const dispatch = createMockDispatch();
+    _ = try TestFrame.BitwiseHandlers.byte(&frame, dispatch.cursor);
+
+    try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
+}

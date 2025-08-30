@@ -1023,6 +1023,75 @@ test "ADDMOD/MULMOD consistency" {
     try testing.expectEqual(expected, result1);
 }
 
+test "ADDMOD opcode - modulus equals 1" {
+    var frame = try createTestFrame(testing.allocator);
+    defer frame.deinit(testing.allocator);
+
+    // Test: (100 + 200) % 1 = 0
+    try frame.stack.push(100);
+    try frame.stack.push(200);
+    try frame.stack.push(1);
+
+    const dispatch = createMockDispatch();
+    _ = try TestFrame.ArithmeticHandlers.addmod(&frame, dispatch.cursor);
+
+    try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
+}
+
+test "MULMOD helper functions - mulmod_safe edge cases" {
+    // Test modulus = 0
+    try testing.expectEqual(@as(u256, 0), TestFrame.ArithmeticHandlers.mulmod_safe(100, 200, 0));
+    
+    // Test factor1 = 0
+    try testing.expectEqual(@as(u256, 0), TestFrame.ArithmeticHandlers.mulmod_safe(0, 200, 13));
+    
+    // Test factor2 = 0
+    try testing.expectEqual(@as(u256, 0), TestFrame.ArithmeticHandlers.mulmod_safe(100, 0, 13));
+    
+    // Test modulus = 1
+    try testing.expectEqual(@as(u256, 0), TestFrame.ArithmeticHandlers.mulmod_safe(100, 200, 1));
+    
+    // Test normal case
+    try testing.expectEqual(@as(u256, 4), TestFrame.ArithmeticHandlers.mulmod_safe(10, 20, 7));
+}
+
+test "MULMOD helper functions - addmod_safe overflow protection" {
+    const max_half = std.math.maxInt(u256) / 2;
+    
+    // Test overflow case where addend1 > modulus - addend2
+    const result = TestFrame.ArithmeticHandlers.addmod_safe(max_half, max_half + 1, 100);
+    try testing.expect(result < 100);
+    
+    // Test non-overflow case
+    const result2 = TestFrame.ArithmeticHandlers.addmod_safe(10, 20, 100);
+    try testing.expectEqual(@as(u256, 30), result2);
+}
+
+test "SIGNEXTEND opcode - boundary byte indices" {
+    var frame = try createTestFrame(testing.allocator);
+    defer frame.deinit(testing.allocator);
+
+    // Test: sign extend with byte index 30 (edge case)
+    try frame.stack.push(30);
+    try frame.stack.push(0x80);
+    
+    const dispatch = createMockDispatch();
+    _ = try TestFrame.ArithmeticHandlers.signextend(&frame, dispatch.cursor);
+    
+    // With index 30, should extend from bit 247
+    const result = try frame.stack.pop();
+    try testing.expect(result != 0x80); // Should have been sign extended
+    
+    // Test: sign extend with byte index exactly 31 (no extension)
+    try frame.stack.push(31);
+    try frame.stack.push(0x80);
+    
+    const dispatch2 = createMockDispatch();
+    _ = try TestFrame.ArithmeticHandlers.signextend(&frame, dispatch2.cursor);
+    
+    try testing.expectEqual(@as(u256, 0x80), try frame.stack.pop());
+}
+
 test "MUL opcode - maximum value overflow" {
     var frame = try createTestFrame(testing.allocator);
     defer frame.deinit(testing.allocator);
