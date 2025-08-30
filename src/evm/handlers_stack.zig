@@ -741,3 +741,134 @@ test "PUSH handlers - edge values" {
         try testing.expectEqual(tc.value, try frame.stack.pop());
     }
 }
+
+test "Stack operations - stress test with alternating operations" {
+    var frame = try createTestFrame(testing.allocator);
+    defer frame.deinit(testing.allocator);
+
+    // Stress test: alternating PUSH0, DUP1, SWAP1, POP operations
+    const operations = 100;
+    
+    for (0..operations) |i| {
+        const dispatch = createMockDispatch();
+        switch (i % 4) {
+            0 => {
+                // PUSH0
+                _ = try TestFrame.StackHandlers.push0(frame, dispatch);
+            },
+            1 => {
+                // DUP1 (if stack has items)
+                if (frame.stack.len() > 0) {
+                    const Dup1 = TestFrame.StackHandlers.generateDupHandler(1);
+                    _ = try Dup1(frame, dispatch);
+                }
+            },
+            2 => {
+                // SWAP1 (if stack has at least 2 items)
+                if (frame.stack.len() >= 2) {
+                    const Swap1 = TestFrame.StackHandlers.generateSwapHandler(1);
+                    _ = try Swap1(frame, dispatch);
+                }
+            },
+            3 => {
+                // POP (if stack has items)
+                if (frame.stack.len() > 0) {
+                    _ = try TestFrame.StackHandlers.pop(frame, dispatch);
+                }
+            },
+            else => unreachable,
+        }
+    }
+    
+    // Stack should have some items (not empty, not overflow)
+    try testing.expect(frame.stack.len() > 0);
+    try testing.expect(frame.stack.len() <= 1024);
+}
+
+test "DUP operations - maximum stack utilization" {
+    var frame = try createTestFrame(testing.allocator);
+    defer frame.deinit(testing.allocator);
+
+    // Fill stack to 1023 (leave room for 1 more)
+    for (0..1023) |i| {
+        try frame.stack.push(@as(u256, i));
+    }
+
+    // DUP1 should succeed (bringing stack to maximum of 1024)
+    const Dup1 = TestFrame.StackHandlers.generateDupHandler(1);
+    const dispatch = createMockDispatch();
+    _ = try Dup1(frame, dispatch);
+
+    try testing.expectEqual(@as(usize, 1024), frame.stack.len());
+    try testing.expectEqual(@as(u256, 1022), try frame.stack.peek()); // Duplicated top value
+}
+
+test "SWAP operations - adjacent element preservation" {
+    var frame = try createTestFrame(testing.allocator);
+    defer frame.deinit(testing.allocator);
+
+    // Create a distinctive pattern to verify adjacent elements aren't corrupted
+    const pattern = [_]u256{ 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0x6666, 0x7777, 0x8888 };
+    
+    for (pattern) |val| {
+        try frame.stack.push(val);
+    }
+
+    // SWAP4 - swap positions 0 and 4
+    const Swap4 = TestFrame.StackHandlers.generateSwapHandler(4);
+    const dispatch = createMockDispatch();
+    _ = try Swap4(frame, dispatch);
+
+    // Verify the swap happened correctly and adjacent elements preserved
+    try testing.expectEqual(@as(u256, 0x4444), try frame.stack.pop()); // Was at position 4
+    try testing.expectEqual(@as(u256, 0x7777), try frame.stack.pop()); // Position 1 unchanged  
+    try testing.expectEqual(@as(u256, 0x6666), try frame.stack.pop()); // Position 2 unchanged
+    try testing.expectEqual(@as(u256, 0x5555), try frame.stack.pop()); // Position 3 unchanged
+    try testing.expectEqual(@as(u256, 0x8888), try frame.stack.pop()); // Was at position 0
+    try testing.expectEqual(@as(u256, 0x3333), try frame.stack.pop()); // Position 5 unchanged
+    try testing.expectEqual(@as(u256, 0x2222), try frame.stack.pop()); // Position 6 unchanged
+    try testing.expectEqual(@as(u256, 0x1111), try frame.stack.pop()); // Position 7 unchanged
+}
+
+test "PUSH handlers - inline vs pointer threshold" {
+    var frame = try createTestFrame(testing.allocator);
+    defer frame.deinit(testing.allocator);
+
+    // Test the exact threshold where inline becomes pointer (PUSH8 vs PUSH9)
+    
+    // PUSH8 should use inline
+    const Push8 = TestFrame.StackHandlers.generatePushHandler(8);
+    const value8: u256 = 0xFFFFFFFFFFFFFFFF;
+    
+    var cursor8: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
+    const mock_handler8 = struct {
+        fn handler(f: TestFrame, d: TestFrame.Dispatch) TestFrame.Error!TestFrame.Success {
+            _ = f; _ = d; return TestFrame.Success.stop;
+        }
+    }.handler;
+    cursor8[0] = .{ .opcode_handler = &mock_handler8 };
+    cursor8[1] = .{ .opcode_handler = &mock_handler8 };
+    
+    const dispatch8 = TestFrame.Dispatch{ .cursor = &cursor8, .bytecode_length = 0 };
+    dispatch8.*.cursor[0].metadata = .{ .inline_value = value8 };
+    _ = try Push8(frame, dispatch8);
+    try testing.expectEqual(value8, try frame.stack.pop());
+
+    // PUSH9 should use pointer
+    const Push9 = TestFrame.StackHandlers.generatePushHandler(9);
+    const value9: u256 = 0xFFFFFFFFFFFFFFFFFF;
+    
+    var cursor9: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
+    const mock_handler9 = struct {
+        fn handler(f: TestFrame, d: TestFrame.Dispatch) TestFrame.Error!TestFrame.Success {
+            _ = f; _ = d; return TestFrame.Success.stop;
+        }
+    }.handler;
+    cursor9[0] = .{ .opcode_handler = &mock_handler9 };
+    cursor9[1] = .{ .opcode_handler = &mock_handler9 };
+    
+    const dispatch9 = TestFrame.Dispatch{ .cursor = &cursor9, .bytecode_length = 0 };
+    dispatch9.*.cursor[0].metadata = .{ .pointer_value = &value9 };
+    _ = try Push9(frame, dispatch9);
+    try testing.expectEqual(value9, try frame.stack.pop());
+}

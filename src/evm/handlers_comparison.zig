@@ -636,3 +636,68 @@ test "EQ and ISZERO relationship" {
     try testing.expectEqual(eq_result, iszero_result);
     try testing.expectEqual(@as(u256, 1), eq_result);
 }
+
+test "LT and GT with extreme values" {
+    var frame = try createTestFrame(testing.allocator);
+    defer frame.deinit(testing.allocator);
+
+    const max = std.math.maxInt(u256);
+
+    // Test: 0 < MAX = 1
+    try frame.stack.push(0);
+    try frame.stack.push(max);
+    var dispatch = createMockDispatch();
+    _ = try TestFrame.ComparisonHandlers.lt(frame, dispatch);
+    try testing.expectEqual(@as(u256, 1), try frame.stack.pop());
+
+    // Test: MAX > 0 = 1
+    try frame.stack.push(max);
+    try frame.stack.push(0);
+    dispatch = createMockDispatch();
+    _ = try TestFrame.ComparisonHandlers.gt(frame, dispatch);
+    try testing.expectEqual(@as(u256, 1), try frame.stack.pop());
+}
+
+test "signed comparisons - boundary edge cases" {
+    var frame = try createTestFrame(testing.allocator);
+    defer frame.deinit(testing.allocator);
+
+    const min_signed = @as(u256, 1) << 255;
+    const max_signed = ((@as(u256, 1) << 255) - 1);
+
+    // Test: MIN_SIGNED < 0 = 1 (most negative is less than 0)
+    try frame.stack.push(min_signed);
+    try frame.stack.push(0);
+    var dispatch = createMockDispatch();
+    _ = try TestFrame.ComparisonHandlers.slt(frame, dispatch);
+    try testing.expectEqual(@as(u256, 1), try frame.stack.pop());
+
+    // Test: 0 > MIN_SIGNED = 1
+    try frame.stack.push(0);
+    try frame.stack.push(min_signed);
+    dispatch = createMockDispatch();
+    _ = try TestFrame.ComparisonHandlers.sgt(frame, dispatch);
+    try testing.expectEqual(@as(u256, 1), try frame.stack.pop());
+
+    // Test: MAX_SIGNED > 0 = 1
+    try frame.stack.push(max_signed);
+    try frame.stack.push(0);
+    dispatch = createMockDispatch();
+    _ = try TestFrame.ComparisonHandlers.sgt(frame, dispatch);
+    try testing.expectEqual(@as(u256, 1), try frame.stack.pop());
+}
+
+test "EQ opcode - negative values" {
+    var frame = try createTestFrame(testing.allocator);
+    defer frame.deinit(testing.allocator);
+
+    // Test: -1 == -1 = 1
+    const neg_1 = std.math.maxInt(u256);
+    try frame.stack.push(neg_1);
+    try frame.stack.push(neg_1);
+
+    const dispatch = createMockDispatch();
+    _ = try TestFrame.ComparisonHandlers.eq(frame, dispatch);
+
+    try testing.expectEqual(@as(u256, 1), try frame.stack.pop());
+}

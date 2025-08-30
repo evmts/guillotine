@@ -450,6 +450,9 @@ pub fn Dispatch(comptime FrameType: type) type {
                             // Store direct pointer to bytecode data for stable reference
                             const bytecode_data = bytecode.runtime_code;
                             try schedule_items.append(allocator, .{ .codecopy = .{ .bytecode_ptr = bytecode_data.ptr, .size = @intCast(bytecode_data.len) } });
+                        } else if (data.opcode == @intFromEnum(Opcode.JUMP) or data.opcode == @intFromEnum(Opcode.JUMPI)) {
+                            // JUMP/JUMPI need access to jump table - store placeholder that will be filled later
+                            try schedule_items.append(allocator, .{ .jump_table = .{ .jump_table = undefined } });
                         }
                     },
                     .push => |data| {
@@ -700,6 +703,9 @@ pub fn Dispatch(comptime FrameType: type) type {
                             // Store direct pointer to bytecode data for stable reference
                             const bytecode_data = bytecode.runtime_code;
                             try schedule_items.append(allocator, .{ .codecopy = .{ .bytecode_ptr = bytecode_data.ptr, .size = @intCast(bytecode_data.len) } });
+                        } else if (data.opcode == @intFromEnum(Opcode.JUMP) or data.opcode == @intFromEnum(Opcode.JUMPI)) {
+                            // JUMP/JUMPI need access to jump table - store placeholder that will be filled later
+                            try schedule_items.append(allocator, .{ .jump_table = .{ .jump_table = undefined } });
                         }
 
                         // Insert trace_after
