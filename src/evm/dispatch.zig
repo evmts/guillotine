@@ -304,11 +304,14 @@ pub fn Dispatch(comptime FrameType: type) type {
             var gas: u64 = 0;
             var iter = bytecode.createIterator();
             const opcode_info = @import("opcode_data.zig").OPCODE_INFO;
+            const log = @import("log.zig");
 
+            var op_count: u32 = 0;
             while (true) {
                 const maybe = iter.next();
                 if (maybe == null) break;
                 const op_data = maybe.?;
+                op_count += 1;
 
                 switch (op_data) {
                     .regular => |data| {
@@ -355,6 +358,9 @@ pub fn Dispatch(comptime FrameType: type) type {
                 }
             }
 
+            if (gas > 10000) {
+                log.warn("calculateFirstBlockGas: Excessive first block gas! gas={}, op_count={}", .{ gas, op_count });
+            }
             return gas;
         }
 
