@@ -53,7 +53,7 @@ pub const CallResult = struct {
             .accessed_storage = &.{},
         };
     }
-    
+
     /// Create a failed call result with error info
     pub fn failure_with_error(gas_left: u64, error_info: []const u8) CallResult {
         return CallResult{
@@ -175,20 +175,20 @@ pub const TraceStep = struct {
     memory: []const u8,
     storage_reads: []const StorageRead,
     storage_writes: []const StorageWrite,
-    
+
     pub const StorageRead = struct {
         address: Address,
         slot: u256,
         value: u256,
     };
-    
+
     pub const StorageWrite = struct {
         address: Address,
         slot: u256,
         old_value: u256,
         new_value: u256,
     };
-    
+
     pub fn deinit(self: *TraceStep, allocator: std.mem.Allocator) void {
         allocator.free(self.opcode_name);
         allocator.free(self.stack);
@@ -202,21 +202,21 @@ pub const TraceStep = struct {
 pub const ExecutionTrace = struct {
     steps: []TraceStep,
     allocator: std.mem.Allocator,
-    
+
     pub fn init(allocator: std.mem.Allocator) ExecutionTrace {
         return ExecutionTrace{
             .steps = &.{},
             .allocator = allocator,
         };
     }
-    
+
     pub fn deinit(self: *ExecutionTrace) void {
         for (self.steps) |*step| {
             step.deinit(self.allocator);
         }
         self.allocator.free(self.steps);
     }
-    
+
     /// Create empty trace for now (placeholder implementation)
     pub fn empty(allocator: std.mem.Allocator) ExecutionTrace {
         return ExecutionTrace{
