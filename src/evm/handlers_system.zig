@@ -548,10 +548,14 @@ pub fn Handlers(comptime FrameType: type) type {
         pub fn @"return"(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
             _ = dispatch;
-            log.debug("RETURN handler called, stack size: {d}", .{self.stack.size()});
-            const size = try self.stack.pop();
+            log.warn("[RETURN] Stack size before: {d}", .{self.stack.size()});
+            if (self.stack.size() < 2) {
+                log.err("[RETURN] Stack underflow - need 2 elements, have {d}", .{self.stack.size()});
+                return Error.StackUnderflow;
+            }
             const offset = try self.stack.pop();
-            log.debug("RETURN: offset={d}, size={d}", .{ offset, size });
+            const size = try self.stack.pop();
+            log.warn("[RETURN] offset={d}, size={d}, stack size after: {d}", .{ offset, size, self.stack.size() });
 
             // Bounds checking for memory offset and size
             if (offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
@@ -576,22 +580,22 @@ pub fn Handlers(comptime FrameType: type) type {
 
             // Extract return data from memory and store it
             if (size_usize > 0) {
-                log.debug("RETURN: Getting memory slice at offset {d} size {d}", .{ offset_usize, size_usize });
-                log.debug("RETURN: Memory size before get_slice: {d}", .{self.memory.size()});
+                log.warn("[RETURN] Getting memory slice at offset {d} size {d}", .{ offset_usize, size_usize });
+                log.warn("[RETURN] Memory size before get_slice: {d}", .{self.memory.size()});
                 
                 // Debug: Check what's at memory position 0 before getting slice
                 if (self.memory.size() >= 32) {
                     const debug_word = self.memory.get_u256_evm(self.allocator, @as(u24, @intCast(offset_usize))) catch 0;
-                    log.debug("RETURN: DEBUG - u256 value at offset {d}: {d} (0x{x})", .{ offset_usize, debug_word, debug_word });
+                    log.warn("[RETURN] Value at offset {d}: 0x{x}", .{ offset_usize, debug_word });
                 } else {
-                    log.debug("RETURN: DEBUG - Memory size {d} is smaller than 32 bytes", .{self.memory.size()});
+                    log.warn("[RETURN] Memory size {d} is smaller than 32 bytes", .{self.memory.size()});
                 }
                 
                 const return_data = self.memory.get_slice(@as(u24, @intCast(offset_usize)), @as(u24, @intCast(size_usize))) catch {
-                    log.err("RETURN: Failed to get memory slice at offset {d} size {d}", .{ offset_usize, size_usize });
+                    log.err("[RETURN] Failed to get memory slice at offset {d} size {d}", .{ offset_usize, size_usize });
                     return Error.OutOfBounds;
                 };
-                log.debug("RETURN: Got memory slice, length: {d}, data: {x}", .{ return_data.len, return_data });
+                log.warn("[RETURN] Got memory slice, length: {d}, data: {x}", .{ return_data.len, return_data });
                 // Use the setOutput method to properly allocate output
                 self.setOutput(return_data) catch {
                     log.err("RETURN: Failed to set output data", .{});
