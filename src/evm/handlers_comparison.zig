@@ -10,11 +10,11 @@ pub fn Handlers(comptime FrameType: type) type {
         pub const Dispatch = FrameType.Dispatch;
         pub const WordType = FrameType.WordType;
 
-        /// LT opcode (0x10) - Less than comparison.
+        /// LT opcode (0x10) - Less than comparison.  
         pub fn lt(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const top_minus_1 = try self.stack.pop();
-            const top = try self.stack.peek();
-            const result: WordType = if (top < top_minus_1) 1 else 0;
+            const b = try self.stack.pop();     // Top element 
+            const a = try self.stack.peek();    // Second element (now top after pop)
+            const result: WordType = if (b < a) 1 else 0; // Swapped: b < a
             try self.stack.set_top(result);
             const next_cursor = cursor + 1;
             return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor});
@@ -22,9 +22,9 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// GT opcode (0x11) - Greater than comparison.
         pub fn gt(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const top_minus_1 = try self.stack.pop();
-            const top = try self.stack.peek();
-            const result: WordType = if (top > top_minus_1) 1 else 0;
+            const b = try self.stack.pop();     // Top element 
+            const a = try self.stack.peek();    // Second element (now top after pop)
+            const result: WordType = if (b > a) 1 else 0; // Swapped: b > a
             try self.stack.set_top(result);
             const next_cursor = cursor + 1;
             return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor});
