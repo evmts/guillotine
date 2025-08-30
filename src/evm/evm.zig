@@ -150,7 +150,7 @@ pub fn Evm(comptime config: EvmConfig) type {
                         .eip_5656 = false,
                         .eip_6780 = false,
                     },
-                    .CANCUN => .{
+                    .CANCUN, .PRAGUE => .{
                         .eip_2929 = true,
                         .eip_3541 = true,
                         .eip_3855 = true,
@@ -158,6 +158,7 @@ pub fn Evm(comptime config: EvmConfig) type {
                         .eip_4844 = true, // Blob transactions
                         .eip_5656 = true, // MCOPY
                         .eip_6780 = true, // SELFDESTRUCT changes
+                        // Prague adds EIP-7702 and others but they need separate implementation
                     },
                 };
             }

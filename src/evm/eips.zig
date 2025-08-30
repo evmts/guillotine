@@ -3,10 +3,41 @@ const AccessList = @import("access_list.zig").AccessList;
 const Hardfork = @import("hardfork.zig").Hardfork;
 
 // EIPs is a comptime known configuration of Eip and hardfork specific behavior
+// This struct consolidates all EIP-specific logic for the EVM
 pub const Eips = struct {
     const Self = @This();
 
     hardfork: Hardfork,
+    
+    /// EIP-7702: Set EOA account code (Prague)
+    /// Allows EOAs to temporarily execute smart contract code for one transaction
+    pub fn eip_7702_eoa_code_enabled(self: Self) bool {
+        return self.hardfork.isAtLeast(.PRAGUE);
+    }
+    
+    /// EIP-2537: BLS12-381 precompile operations (Prague)
+    /// Adds precompiled contracts for BLS12-381 curve operations
+    pub fn eip_2537_bls_precompiles_enabled(self: Self) bool {
+        return self.hardfork.isAtLeast(.PRAGUE);
+    }
+    
+    /// EIP-2935: Serve historical block hashes from state (Prague)
+    /// Stores historical block hashes in the state for easier access
+    pub fn eip_2935_historical_block_hashes_enabled(self: Self) bool {
+        return self.hardfork.isAtLeast(.PRAGUE);
+    }
+    
+    /// EIP-6110: Supply validator deposits on chain (Prague)
+    /// Validator deposits handled directly on execution layer
+    pub fn eip_6110_validator_deposits_enabled(self: Self) bool {
+        return self.hardfork.isAtLeast(.PRAGUE);
+    }
+    
+    /// EIP-7002: Execution layer triggerable exits (Prague)
+    /// Allows triggering validator exits from execution layer
+    pub fn eip_7002_validator_exits_enabled(self: Self) bool {
+        return self.hardfork.isAtLeast(.PRAGUE);
+    }
 
     /// EIP-3651: Warm COINBASE address at the start of transaction
     /// Shanghai hardfork introduced this optimization
@@ -121,6 +152,7 @@ pub const Eips = struct {
         return switch (self.hardfork) {
             .FRONTIER => &[_]u16{},
             .HOMESTEAD => &[_]u16{2,7,8},
+            .DAO => &[_]u16{2,7,8}, // DAO fork had no EVM changes
             .TANGERINE_WHISTLE => &[_]u16{2,7,8,150},
             .SPURIOUS_DRAGON => &[_]u16{2,7,8,150,155,160,161},
             .BYZANTIUM => &[_]u16{2,7,8,150,155,160,161,100,140,196,197,198,211,214,649,658},
@@ -133,8 +165,9 @@ pub const Eips = struct {
             .ARROW_GLACIER => &[_]u16{2,7,8,150,155,160,161,100,140,196,197,198,211,214,649,658,145,1014,1052,1283,152,1108,1344,1884,2028,2200,2565,2718,2929,2930,1559,3198,3529,3541,4345},
             .GRAY_GLACIER => &[_]u16{2,7,8,150,155,160,161,100,140,196,197,198,211,214,649,658,145,1014,1052,1283,152,1108,1344,1884,2028,2200,2565,2718,2929,2930,1559,3198,3529,3541,4345,5133},
             .MERGE => &[_]u16{2,7,8,150,155,160,161,100,140,196,197,198,211,214,649,658,145,1014,1052,1283,152,1108,1344,1884,2028,2200,2565,2718,2929,2930,1559,3198,3529,3541,4345,5133,3675,4399},
-            .SHANGHAI => &[_]u16{2,7,8,150,155,160,161,100,140,196,197,198,211,214,649,658,145,1014,1052,1283,152,1108,1344,1884,2028,2200,2565,2718,2929,2930,1559,3198,3529,3541,4345,5133,3675,4399,3651,3855,3860},
-            .CANCUN => &[_]u16{2,7,8,150,155,160,161,100,140,196,197,198,211,214,649,658,145,1014,1052,1283,152,1108,1344,1884,2028,2200,2565,2718,2929,2930,1559,3198,3529,3541,4345,5133,3675,4399,3651,3855,3860,1153,4788,4844,5656,6780},
+            .SHANGHAI => &[_]u16{2,7,8,150,155,160,161,100,140,196,197,198,211,214,649,658,145,1014,1052,1283,152,1108,1344,1884,2028,2200,2565,2718,2929,2930,1559,3198,3529,3541,4345,5133,3675,4399,3651,3855,3860,4895},
+            .CANCUN => &[_]u16{2,7,8,150,155,160,161,100,140,196,197,198,211,214,649,658,145,1014,1052,1283,152,1108,1344,1884,2028,2200,2565,2718,2929,2930,1559,3198,3529,3541,4345,5133,3675,4399,3651,3855,3860,4895,1153,4788,4844,5656,6780,7516},
+            .PRAGUE => &[_]u16{2,7,8,150,155,160,161,100,140,196,197,198,211,214,649,658,145,1014,1052,1283,152,1108,1344,1884,2028,2200,2565,2718,2929,2930,1559,3198,3529,3541,4345,5133,3675,4399,3651,3855,3860,4895,1153,4788,4844,5656,6780,7516,2537,2935,6110,7002,7702},
         };
     }
 
@@ -146,6 +179,132 @@ pub const Eips = struct {
         }
         return false;
     }
+    
+    /// Get configuration for EVM features based on hardfork
+    pub fn get_evm_config(self: Self) EvmConfig {
+        return EvmConfig{
+            .eip_2929_enabled = self.hardfork.isAtLeast(.BERLIN),
+            .eip_3541_enabled = self.hardfork.isAtLeast(.LONDON),
+            .eip_3855_enabled = self.hardfork.isAtLeast(.SHANGHAI),
+            .eip_3860_enabled = self.hardfork.isAtLeast(.SHANGHAI),
+            .eip_4844_enabled = self.hardfork.isAtLeast(.CANCUN),
+            .eip_5656_enabled = self.hardfork.isAtLeast(.CANCUN),
+            .eip_6780_enabled = self.hardfork.isAtLeast(.CANCUN),
+            .eip_7702_enabled = self.hardfork.isAtLeast(.PRAGUE),
+        };
+    }
+    
+    /// Configuration struct for EVM features
+    pub const EvmConfig = struct {
+        eip_2929_enabled: bool, // Access list
+        eip_3541_enabled: bool, // 0xEF prefix rejection
+        eip_3855_enabled: bool, // PUSH0 opcode
+        eip_3860_enabled: bool, // Initcode size limit
+        eip_4844_enabled: bool, // Blob transactions
+        eip_5656_enabled: bool, // MCOPY opcode
+        eip_6780_enabled: bool, // SELFDESTRUCT restrictions
+        eip_7702_enabled: bool, // EOA code execution
+    };
+    
+    /// Get maximum contract code size based on hardfork
+    pub fn max_code_size(self: Self) u32 {
+        // EIP-170: Contract code size limit (Spurious Dragon)
+        if (!self.hardfork.isAtLeast(.SPURIOUS_DRAGON)) {
+            return 0xFFFFFF; // No limit before Spurious Dragon
+        }
+        return 0x6000; // 24KB limit
+    }
+    
+    /// Check if bytecode starting with 0xEF should be rejected
+    pub fn should_reject_ef_bytecode(self: Self) bool {
+        return self.hardfork.isAtLeast(.LONDON); // EIP-3541
+    }
+    
+    /// Get gas cost for EXP opcode exponent byte
+    pub fn exp_byte_gas_cost(self: Self) u64 {
+        if (!self.hardfork.isAtLeast(.SPURIOUS_DRAGON)) {
+            return 10; // Pre-EIP-160
+        }
+        return 50; // Post-EIP-160
+    }
+    
+    /// Get CREATE opcode gas cost  
+    pub fn create_gas_cost(_: Self) u64 {
+        return 32000;
+    }
+    
+    /// Check if PREVRANDAO should be used instead of DIFFICULTY
+    pub fn use_prevrandao(self: Self) bool {
+        return self.hardfork.isAtLeast(.MERGE); // EIP-4399
+    }
+    
+    /// Get calldata gas costs
+    pub fn calldata_gas_cost(self: Self, is_zero: bool) u64 {
+        if (is_zero) return 4;
+        
+        // EIP-2028: Reduced non-zero byte cost
+        if (!self.hardfork.isAtLeast(.ISTANBUL)) {
+            return 68; // Pre-Istanbul
+        }
+        return 16; // Post-Istanbul
+    }
+    
+    /// Check if transient storage is available
+    pub fn has_transient_storage(self: Self) bool {
+        return self.hardfork.isAtLeast(.CANCUN); // EIP-1153
+    }
+    
+    /// Check if PUSH0 opcode is available
+    pub fn has_push0(self: Self) bool {
+        return self.hardfork.isAtLeast(.SHANGHAI); // EIP-3855
+    }
+    
+    /// Check if BASEFEE opcode is available
+    pub fn has_basefee(self: Self) bool {
+        return self.hardfork.isAtLeast(.LONDON); // EIP-3198
+    }
+    
+    /// Check if MCOPY opcode is available
+    pub fn has_mcopy(self: Self) bool {
+        return self.hardfork.isAtLeast(.CANCUN); // EIP-5656
+    }
+    
+    /// Check if blob transactions are supported
+    pub fn has_blob_transactions(self: Self) bool {
+        return self.hardfork.isAtLeast(.CANCUN); // EIP-4844
+    }
+    
+    /// Get SSTORE gas costs based on hardfork and state
+    pub fn sstore_gas_cost(self: Self, current: primitives.U256, new: primitives.U256, original: primitives.U256) SstoreGasCost {
+        _ = original; // Will be used for EIP-2200
+        
+        // Pre-Constantinople: Simple model
+        if (self.hardfork.isBefore(.CONSTANTINOPLE)) {
+            if (current == 0 and new != 0) {
+                return .{ .gas = 20000, .refund = 0 };
+            }
+            if (current != 0 and new == 0) {
+                return .{ .gas = 5000, .refund = 15000 };
+            }
+            return .{ .gas = 5000, .refund = 0 };
+        }
+        
+        // TODO: Implement EIP-1283, EIP-2200, EIP-2929, EIP-3529 logic
+        // For now, use simplified model
+        if (current == 0 and new != 0) {
+            return .{ .gas = 20000, .refund = 0 };
+        }
+        if (current != 0 and new == 0) {
+            const refund = if (self.hardfork.isAtLeast(.LONDON)) 4800 else 15000; // EIP-3529
+            return .{ .gas = 5000, .refund = refund };
+        }
+        return .{ .gas = 5000, .refund = 0 };
+    }
+    
+    pub const SstoreGasCost = struct {
+        gas: u64,
+        refund: u64,
+    };
 };
 
 const std = @import("std");
@@ -342,6 +501,7 @@ test "get_active_eips cancun" {
     try std.testing.expect(eips.is_eip_active(1153));
     try std.testing.expect(eips.is_eip_active(4844));
     try std.testing.expect(eips.is_eip_active(6780));
+    try std.testing.expect(eips.is_eip_active(7516)); // BLOBBASEFEE
     
     // Should also include all previous EIPs
     try std.testing.expect(eips.is_eip_active(2)); // From Homestead
@@ -349,13 +509,44 @@ test "get_active_eips cancun" {
     try std.testing.expect(eips.is_eip_active(3855)); // From Shanghai
 }
 
+test "get_active_eips prague" {
+    const eips = Eips{ .hardfork = Hardfork.PRAGUE };
+    
+    // Prague should include new EIPs
+    try std.testing.expect(eips.is_eip_active(2537)); // BLS precompiles
+    try std.testing.expect(eips.is_eip_active(7702)); // EOA code execution
+    try std.testing.expect(eips.is_eip_active(7002)); // Validator exits
+    
+    // Should also include all Cancun EIPs
+    try std.testing.expect(eips.is_eip_active(1153));
+    try std.testing.expect(eips.is_eip_active(4844));
+    try std.testing.expect(eips.is_eip_active(6780));
+}
+
 test "is_eip_active non-existent EIP" {
     const eips = Eips{ .hardfork = Hardfork.CANCUN };
+    const prague = Eips{ .hardfork = Hardfork.PRAGUE };
     
     // Test non-existent EIP numbers
     try std.testing.expect(!eips.is_eip_active(9999));
     try std.testing.expect(!eips.is_eip_active(0));
     try std.testing.expect(!eips.is_eip_active(1));
+    try std.testing.expect(!prague.is_eip_active(9999));
+}
+
+test "prague eip features" {
+    const pre_prague = Eips{ .hardfork = Hardfork.CANCUN };
+    const prague = Eips{ .hardfork = Hardfork.PRAGUE };
+    
+    // Test Prague-specific EIP features
+    try std.testing.expect(!pre_prague.eip_7702_eoa_code_enabled());
+    try std.testing.expect(prague.eip_7702_eoa_code_enabled());
+    
+    try std.testing.expect(!pre_prague.eip_2537_bls_precompiles_enabled());
+    try std.testing.expect(prague.eip_2537_bls_precompiles_enabled());
+    
+    try std.testing.expect(!pre_prague.eip_7002_validator_exits_enabled());
+    try std.testing.expect(prague.eip_7002_validator_exits_enabled());
 }
 
 test "hardfork progression" {
@@ -365,6 +556,7 @@ test "hardfork progression" {
     const london = Eips{ .hardfork = Hardfork.LONDON };
     const shanghai = Eips{ .hardfork = Hardfork.SHANGHAI };
     const cancun = Eips{ .hardfork = Hardfork.CANCUN };
+    const prague = Eips{ .hardfork = Hardfork.PRAGUE };
     
     // EIP-2929 should be active from Berlin onwards
     try std.testing.expect(!istanbul.is_eip_active(2929));
@@ -372,12 +564,18 @@ test "hardfork progression" {
     try std.testing.expect(london.is_eip_active(2929));
     try std.testing.expect(shanghai.is_eip_active(2929));
     try std.testing.expect(cancun.is_eip_active(2929));
+    try std.testing.expect(prague.is_eip_active(2929));
     
     // EIP-1559 should be active from London onwards
     try std.testing.expect(!berlin.is_eip_active(1559));
     try std.testing.expect(london.is_eip_active(1559));
     try std.testing.expect(shanghai.is_eip_active(1559));
     try std.testing.expect(cancun.is_eip_active(1559));
+    try std.testing.expect(prague.is_eip_active(1559));
+    
+    // EIP-7702 should only be active from Prague onwards
+    try std.testing.expect(!cancun.is_eip_active(7702));
+    try std.testing.expect(prague.is_eip_active(7702));
 }
 
 test "gas_cost_consistency" {
@@ -424,9 +622,10 @@ test "edge_case_hardforks" {
 
 test "comprehensive_eip_coverage" {
     const cancun = Eips{ .hardfork = Hardfork.CANCUN };
+    const prague = Eips{ .hardfork = Hardfork.PRAGUE };
     
     // Test a comprehensive set of important EIPs are active in Cancun
-    const important_eips = [_]u16{
+    const cancun_eips = [_]u16{
         2,    // Homestead
         150,  // Tangerine Whistle 
         155,  // Spurious Dragon
@@ -440,9 +639,15 @@ test "comprehensive_eip_coverage" {
         6780, // Cancun
     };
     
-    for (important_eips) |eip| {
+    for (cancun_eips) |eip| {
         try std.testing.expect(cancun.is_eip_active(eip));
     }
+    
+    // Test Prague includes Cancun EIPs plus new ones
+    for (cancun_eips) |eip| {
+        try std.testing.expect(prague.is_eip_active(eip));
+    }
+    try std.testing.expect(prague.is_eip_active(7702)); // Prague-specific
 }
 
 test "initcode_size_boundaries" {
@@ -458,4 +663,126 @@ test "initcode_size_boundaries" {
         pre_shanghai.eip_3860_initcode_size_limit() * 2,
         post_shanghai.eip_3860_initcode_size_limit()
     );
+}
+
+test "evm config generation" {
+    const frontier = Eips{ .hardfork = Hardfork.FRONTIER };
+    const berlin = Eips{ .hardfork = Hardfork.BERLIN };
+    const london = Eips{ .hardfork = Hardfork.LONDON };
+    const shanghai = Eips{ .hardfork = Hardfork.SHANGHAI };
+    const cancun = Eips{ .hardfork = Hardfork.CANCUN };
+    const prague = Eips{ .hardfork = Hardfork.PRAGUE };
+    
+    // Test Frontier has no EIPs enabled
+    const frontier_config = frontier.get_evm_config();
+    try std.testing.expect(!frontier_config.eip_2929_enabled);
+    try std.testing.expect(!frontier_config.eip_3541_enabled);
+    try std.testing.expect(!frontier_config.eip_3855_enabled);
+    
+    // Test Berlin enables EIP-2929
+    const berlin_config = berlin.get_evm_config();
+    try std.testing.expect(berlin_config.eip_2929_enabled);
+    try std.testing.expect(!berlin_config.eip_3541_enabled);
+    
+    // Test London adds EIP-3541
+    const london_config = london.get_evm_config();
+    try std.testing.expect(london_config.eip_2929_enabled);
+    try std.testing.expect(london_config.eip_3541_enabled);
+    try std.testing.expect(!london_config.eip_3855_enabled);
+    
+    // Test Shanghai adds PUSH0
+    const shanghai_config = shanghai.get_evm_config();
+    try std.testing.expect(shanghai_config.eip_3855_enabled);
+    try std.testing.expect(shanghai_config.eip_3860_enabled);
+    
+    // Test Cancun adds multiple features
+    const cancun_config = cancun.get_evm_config();
+    try std.testing.expect(cancun_config.eip_4844_enabled);
+    try std.testing.expect(cancun_config.eip_5656_enabled);
+    try std.testing.expect(cancun_config.eip_6780_enabled);
+    try std.testing.expect(!cancun_config.eip_7702_enabled);
+    
+    // Test Prague adds EIP-7702
+    const prague_config = prague.get_evm_config();
+    try std.testing.expect(prague_config.eip_7702_enabled);
+    try std.testing.expect(prague_config.eip_4844_enabled); // Includes all Cancun features
+}
+
+test "specific eip helper functions" {
+    const frontier = Eips{ .hardfork = Hardfork.FRONTIER };
+    const spurious = Eips{ .hardfork = Hardfork.SPURIOUS_DRAGON };
+    const london = Eips{ .hardfork = Hardfork.LONDON };
+    const shanghai = Eips{ .hardfork = Hardfork.SHANGHAI };
+    const cancun = Eips{ .hardfork = Hardfork.CANCUN };
+    const merge = Eips{ .hardfork = Hardfork.MERGE };
+    
+    // Test max code size
+    try std.testing.expectEqual(@as(u32, 0xFFFFFF), frontier.max_code_size());
+    try std.testing.expectEqual(@as(u32, 0x6000), spurious.max_code_size());
+    
+    // Test 0xEF bytecode rejection
+    try std.testing.expect(!frontier.should_reject_ef_bytecode());
+    try std.testing.expect(london.should_reject_ef_bytecode());
+    
+    // Test EXP gas cost
+    try std.testing.expectEqual(@as(u64, 10), frontier.exp_byte_gas_cost());
+    try std.testing.expectEqual(@as(u64, 50), spurious.exp_byte_gas_cost());
+    
+    // Test PREVRANDAO vs DIFFICULTY
+    try std.testing.expect(!london.use_prevrandao());
+    try std.testing.expect(merge.use_prevrandao());
+    
+    // Test opcode availability
+    try std.testing.expect(!london.has_push0());
+    try std.testing.expect(shanghai.has_push0());
+    
+    try std.testing.expect(!shanghai.has_mcopy());
+    try std.testing.expect(cancun.has_mcopy());
+    
+    try std.testing.expect(!frontier.has_basefee());
+    try std.testing.expect(london.has_basefee());
+    
+    try std.testing.expect(!shanghai.has_transient_storage());
+    try std.testing.expect(cancun.has_transient_storage());
+    
+    try std.testing.expect(!shanghai.has_blob_transactions());
+    try std.testing.expect(cancun.has_blob_transactions());
+}
+
+test "calldata gas costs" {
+    const homestead = Eips{ .hardfork = Hardfork.HOMESTEAD };
+    const istanbul = Eips{ .hardfork = Hardfork.ISTANBUL };
+    
+    // Zero bytes always cost 4 gas
+    try std.testing.expectEqual(@as(u64, 4), homestead.calldata_gas_cost(true));
+    try std.testing.expectEqual(@as(u64, 4), istanbul.calldata_gas_cost(true));
+    
+    // Non-zero bytes: 68 pre-Istanbul, 16 post-Istanbul
+    try std.testing.expectEqual(@as(u64, 68), homestead.calldata_gas_cost(false));
+    try std.testing.expectEqual(@as(u64, 16), istanbul.calldata_gas_cost(false));
+}
+
+test "sstore gas costs" {
+    const frontier = Eips{ .hardfork = Hardfork.FRONTIER };
+    const london = Eips{ .hardfork = Hardfork.LONDON };
+    
+    // Set from zero to non-zero
+    var cost = frontier.sstore_gas_cost(0, 1, 0);
+    try std.testing.expectEqual(@as(u64, 20000), cost.gas);
+    try std.testing.expectEqual(@as(u64, 0), cost.refund);
+    
+    // Clear from non-zero to zero (refund differs by hardfork)
+    cost = frontier.sstore_gas_cost(1, 0, 1);
+    try std.testing.expectEqual(@as(u64, 5000), cost.gas);
+    try std.testing.expectEqual(@as(u64, 15000), cost.refund);
+    
+    // London reduces refund (EIP-3529)
+    cost = london.sstore_gas_cost(1, 0, 1);
+    try std.testing.expectEqual(@as(u64, 5000), cost.gas);
+    try std.testing.expectEqual(@as(u64, 4800), cost.refund);
+    
+    // No-op (same value)
+    cost = frontier.sstore_gas_cost(1, 1, 1);
+    try std.testing.expectEqual(@as(u64, 5000), cost.gas);
+    try std.testing.expectEqual(@as(u64, 0), cost.refund);
 }

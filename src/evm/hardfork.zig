@@ -81,6 +81,13 @@ pub const Hardfork = enum {
     /// EIP-1153: Transient storage (TLOAD/TSTORE).
     /// EIP-5656: MCOPY opcode.
     CANCUN,
+    /// Prague/Electra fork (Expected 2025).
+    /// EIP-2537: BLS12-381 precompiles.
+    /// EIP-7702: Set EOA account code for one transaction.
+    /// EIP-2935: Serve historical block hashes from state.
+    /// EIP-6110: Supply validator deposits on chain.
+    /// EIP-7002: Execution layer triggerable exits.
+    PRAGUE,
     /// Default hardfork for new chains.
     /// Set to latest stable fork (currently CANCUN).
     pub const DEFAULT = Hardfork.CANCUN;
@@ -107,6 +114,7 @@ test "hardfork enum ordering" {
     try std.testing.expect(@intFromEnum(Hardfork.FRONTIER) < @intFromEnum(Hardfork.HOMESTEAD));
     try std.testing.expect(@intFromEnum(Hardfork.HOMESTEAD) < @intFromEnum(Hardfork.BYZANTIUM));
     try std.testing.expect(@intFromEnum(Hardfork.BYZANTIUM) < @intFromEnum(Hardfork.CANCUN));
+    try std.testing.expect(@intFromEnum(Hardfork.CANCUN) < @intFromEnum(Hardfork.PRAGUE));
 }
 
 test "hardfork default is cancun" {
@@ -117,6 +125,7 @@ test "hardfork toInt conversion" {
     try std.testing.expect(Hardfork.FRONTIER.toInt() == 0);
     try std.testing.expect(Hardfork.HOMESTEAD.toInt() == 1);
     try std.testing.expect(Hardfork.CANCUN.toInt() > Hardfork.FRONTIER.toInt());
+    try std.testing.expect(Hardfork.PRAGUE.toInt() > Hardfork.CANCUN.toInt());
 }
 
 test "hardfork isAtLeast comparison" {
@@ -164,6 +173,9 @@ test "hardfork major milestone checks" {
 
     // Cancun introduces transient storage
     try std.testing.expect(Hardfork.CANCUN.isAtLeast(Hardfork.CANCUN));
+    
+    // Prague introduces account abstraction features
+    try std.testing.expect(Hardfork.PRAGUE.isAtLeast(Hardfork.PRAGUE));
 }
 
 test "hardfork complete sequence ordering" {
@@ -185,6 +197,7 @@ test "hardfork complete sequence ordering" {
         .MERGE,
         .SHANGHAI,
         .CANCUN,
+        .PRAGUE,
     };
 
     // Verify each fork is properly ordered
@@ -214,6 +227,7 @@ test "hardfork toInt values are consecutive" {
     try std.testing.expectEqual(@as(u32, 14), Hardfork.MERGE.toInt());
     try std.testing.expectEqual(@as(u32, 15), Hardfork.SHANGHAI.toInt());
     try std.testing.expectEqual(@as(u32, 16), Hardfork.CANCUN.toInt());
+    try std.testing.expectEqual(@as(u32, 17), Hardfork.PRAGUE.toInt());
 }
 
 test "hardfork DAO special case" {
@@ -260,11 +274,13 @@ test "hardfork recent forks" {
     // Test the most recent forks have proper ordering
     try std.testing.expect(Hardfork.MERGE.isBefore(Hardfork.SHANGHAI));
     try std.testing.expect(Hardfork.SHANGHAI.isBefore(Hardfork.CANCUN));
+    try std.testing.expect(Hardfork.CANCUN.isBefore(Hardfork.PRAGUE));
     
     // All recent forks should be at least Berlin (for access lists)
     try std.testing.expect(Hardfork.MERGE.isAtLeast(Hardfork.BERLIN));
     try std.testing.expect(Hardfork.SHANGHAI.isAtLeast(Hardfork.BERLIN));
     try std.testing.expect(Hardfork.CANCUN.isAtLeast(Hardfork.BERLIN));
+    try std.testing.expect(Hardfork.PRAGUE.isAtLeast(Hardfork.BERLIN));
 }
 
 test "hardfork gas repricing forks" {
@@ -308,6 +324,10 @@ test "hardfork feature introduction points" {
     // TLOAD/TSTORE introduced in Cancun
     try std.testing.expect(Hardfork.CANCUN.isAtLeast(Hardfork.CANCUN));
     try std.testing.expect(Hardfork.SHANGHAI.isBefore(Hardfork.CANCUN));
+    
+    // Account abstraction features in Prague
+    try std.testing.expect(Hardfork.PRAGUE.isAtLeast(Hardfork.PRAGUE));
+    try std.testing.expect(Hardfork.CANCUN.isBefore(Hardfork.PRAGUE));
 }
 
 test "hardfork transitivity of comparisons" {
@@ -337,7 +357,7 @@ test "hardfork comparison consistency" {
     const all_forks = [_]Hardfork{
         .FRONTIER, .HOMESTEAD, .DAO, .TANGERINE_WHISTLE, .SPURIOUS_DRAGON,
         .BYZANTIUM, .CONSTANTINOPLE, .PETERSBURG, .ISTANBUL, .MUIR_GLACIER,
-        .BERLIN, .LONDON, .ARROW_GLACIER, .GRAY_GLACIER, .MERGE, .SHANGHAI, .CANCUN
+        .BERLIN, .LONDON, .ARROW_GLACIER, .GRAY_GLACIER, .MERGE, .SHANGHAI, .CANCUN, .PRAGUE
     };
     
     // Test all pairs for consistency
@@ -385,15 +405,15 @@ test "hardfork default is latest" {
 test "hardfork enum completeness" {
     // Verify we have all expected hardforks based on the highest toInt() value
     // This helps catch if we add new forks but forget to update tests
-    const max_int = Hardfork.CANCUN.toInt();
-    try std.testing.expectEqual(@as(u32, 16), max_int); // 17 total forks (0-16)
+    const max_int = Hardfork.PRAGUE.toInt();
+    try std.testing.expectEqual(@as(u32, 17), max_int); // 18 total forks (0-17)
     
     // Verify there are no gaps in the sequence
     var expected_int: u32 = 0;
     const all_forks = [_]Hardfork{
         .FRONTIER, .HOMESTEAD, .DAO, .TANGERINE_WHISTLE, .SPURIOUS_DRAGON,
         .BYZANTIUM, .CONSTANTINOPLE, .PETERSBURG, .ISTANBUL, .MUIR_GLACIER,
-        .BERLIN, .LONDON, .ARROW_GLACIER, .GRAY_GLACIER, .MERGE, .SHANGHAI, .CANCUN
+        .BERLIN, .LONDON, .ARROW_GLACIER, .GRAY_GLACIER, .MERGE, .SHANGHAI, .CANCUN, .PRAGUE
     };
     
     for (all_forks) |fork| {
@@ -429,4 +449,5 @@ test "hardfork historical context validation" {
     // Recent forks should be in the upper range
     try std.testing.expect(Hardfork.SHANGHAI.toInt() >= 15);
     try std.testing.expect(Hardfork.CANCUN.toInt() >= 16);
+    try std.testing.expect(Hardfork.PRAGUE.toInt() >= 17);
 }
