@@ -90,10 +90,23 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
                 if (iterator.pc >= iterator.bytecode.len()) return null;
 
                 const opcode = iterator.bytecode.get_unsafe(iterator.pc);
+                const log = @import("log.zig");
+                if (iterator.bytecode.len() == 46) {
+                    // Debug the signed arithmetic test specifically
+                    if (iterator.pc == 33) {
+                        log.err("BYTECODE DEBUG AT PC 33:", .{});
+                        for (30..37) |i| {
+                            const byte = iterator.bytecode.runtime_code[i];
+                            log.err("  byte[{}] = 0x{x:0>2}", .{i, byte});
+                        }
+                    }
+                    log.err("BYTECODE ITERATOR: pc={}, opcode=0x{x:0>2}, bytecode_len={}", .{iterator.pc, opcode, iterator.bytecode.len()});
+                } else {
+                    log.err("BYTECODE ITERATOR: pc={}, opcode=0x{x:0>2}, bytecode_len={}", .{iterator.pc, opcode, iterator.bytecode.len()});
+                }
                 // Check if packed_bitmap has enough elements
                 if (iterator.pc >= iterator.bytecode.packed_bitmap.len) {
                     // Log error and return null
-                    const log = @import("log.zig");
                     log.err("Iterator PC {} exceeds packed_bitmap len {}", .{ iterator.pc, iterator.bytecode.packed_bitmap.len });
                     return null;
                 }
