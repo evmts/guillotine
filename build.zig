@@ -1457,6 +1457,40 @@ pub fn build(b: *std.Build) void {
         
         const differential_test_step = b.step("test-differential", "Run differential tests comparing Guillotine and REVM");
         differential_test_step.dependOn(&run_differential_test.step);
+
+        // Debug target for math operations only
+        const debug_math_test = b.addTest(.{
+            .name = "debug-math-test",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("test/differential/debug_math_only.zig"),
+                .target = target,
+                .optimize = optimize,
+            }),
+        });
+        debug_math_test.root_module.addImport("evm", evm_mod);
+        debug_math_test.root_module.addImport("primitives", primitives_mod);
+        debug_math_test.root_module.addImport("revm", revm_mod);
+        
+        debug_math_test.linkLibrary(revm_lib.?);
+        debug_math_test.addIncludePath(b.path("src/revm_wrapper"));
+        debug_math_test.linkLibC();
+        debug_math_test.addObjectFile(b.path(revm_dylib_path));
+        
+        if (target.result.os.tag == .linux) {
+            debug_math_test.linkSystemLibrary("m");
+            debug_math_test.linkSystemLibrary("pthread");
+            debug_math_test.linkSystemLibrary("dl");
+        } else if (target.result.os.tag == .macos) {
+            debug_math_test.linkSystemLibrary("c++");
+            debug_math_test.linkFramework("Security");
+            debug_math_test.linkFramework("SystemConfiguration");
+            debug_math_test.linkFramework("CoreFoundation");
+        }
+        
+        const run_debug_math_test = b.addRunArtifact(debug_math_test);
+        
+        const debug_step = b.step("debug", "Run only arithmetic operation tests for debugging");
+        debug_step.dependOn(&run_debug_math_test.step);
     }
 
     const comprehensive_compare = b.addExecutable(.{
