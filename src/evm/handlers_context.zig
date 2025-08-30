@@ -377,6 +377,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
             const return_data = self.getEvm().get_return_data();
             const return_data_len = @as(WordType, @truncate(@as(u256, @intCast(return_data.len))));
+            log.err("[EVM2] RETURNDATASIZE: return_data.len={}, pushing {}", .{ return_data.len, return_data_len });
             try self.stack.push(return_data_len);
             const next = dispatch.getNext();
             return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
@@ -385,6 +386,8 @@ pub fn Handlers(comptime FrameType: type) type {
         /// RETURNDATACOPY opcode (0x3E) - Copy output data from the previous call to memory.
         /// Stack: [destOffset, offset, length] → []
         pub fn returndatacopy(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            log.err("[EVM2] RETURNDATACOPY handler called! Stack size: {}", .{self.stack.size()});
+            
             const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
             const dest_offset = try self.stack.pop();
             const offset = try self.stack.pop();

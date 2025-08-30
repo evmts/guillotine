@@ -160,6 +160,8 @@ pub fn Handlers(comptime FrameType: type) type {
         /// DELEGATECALL opcode (0xf4) - Message-call with alternative account's code but current values.
         /// Stack: [gas, address, input_offset, input_size, output_offset, output_size] → [success]
         pub fn delegatecall(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            log.err("[EVM2] DELEGATECALL handler called! Stack size: {}", .{self.stack.size()});
+            
             const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
             const output_size = try self.stack.pop();
             const output_offset = try self.stack.pop();
@@ -229,7 +231,7 @@ pub fn Handlers(comptime FrameType: type) type {
             // DELEGATECALL preserves caller and value from current context
             const params = CallParams{
                 .delegatecall = .{
-                    .caller = self.contract_address,
+                    .caller = self.caller,  // Preserve original caller, not contract address!
                     .to = addr,
                     .input = input_data,
                     .gas = gas_u64,
@@ -277,6 +279,8 @@ pub fn Handlers(comptime FrameType: type) type {
         /// STATICCALL opcode (0xfa) - Static message-call (no state changes allowed).
         /// Stack: [gas, address, input_offset, input_size, output_offset, output_size] → [success]
         pub fn staticcall(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            log.err("[EVM2] STATICCALL handler called! Stack size: {}", .{self.stack.size()});
+            
             const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
             const output_size = try self.stack.pop();
             const output_offset = try self.stack.pop();
