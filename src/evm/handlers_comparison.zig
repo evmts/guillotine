@@ -34,9 +34,9 @@ pub fn Handlers(comptime FrameType: type) type {
         pub fn slt(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const top_minus_1 = try self.stack.pop();
             const top = try self.stack.peek();
-            const a_signed = @as(std.meta.Int(.signed, @bitSizeOf(WordType)), @bitCast(top));
-            const b_signed = @as(std.meta.Int(.signed, @bitSizeOf(WordType)), @bitCast(top_minus_1));
-            const result: WordType = if (a_signed < b_signed) 1 else 0;
+            const top_signed = @as(std.meta.Int(.signed, @bitSizeOf(WordType)), @bitCast(top));
+            const top_minus_1_signed = @as(std.meta.Int(.signed, @bitSizeOf(WordType)), @bitCast(top_minus_1));
+            const result: WordType = if (top_signed < top_minus_1_signed) 1 else 0;
             try self.stack.set_top(result);
             const next_cursor = cursor + 1;
             return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor});
@@ -46,9 +46,9 @@ pub fn Handlers(comptime FrameType: type) type {
         pub fn sgt(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const top_minus_1 = try self.stack.pop();
             const top = try self.stack.peek();
-            const a_signed = @as(std.meta.Int(.signed, @bitSizeOf(WordType)), @bitCast(top));
-            const b_signed = @as(std.meta.Int(.signed, @bitSizeOf(WordType)), @bitCast(top_minus_1));
-            const result: WordType = if (a_signed > b_signed) 1 else 0;
+            const top_signed = @as(std.meta.Int(.signed, @bitSizeOf(WordType)), @bitCast(top));
+            const top_minus_1_signed = @as(std.meta.Int(.signed, @bitSizeOf(WordType)), @bitCast(top_minus_1));
+            const result: WordType = if (top_signed > top_minus_1_signed) 1 else 0;
             try self.stack.set_top(result);
             const next_cursor = cursor + 1;
             return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor});

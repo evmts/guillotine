@@ -665,9 +665,9 @@ test "Jump operations - integration test" {
     // Stack: [50, 50, 100]
 
     // Simulate EQ comparison (would normally be done by comparison handler)
-    const b = try frame.stack.pop();
-    const a = try frame.stack.pop();
-    try frame.stack.push(if (a == b) @as(u256, 1) else 0);
+    const top_minus_1 = try frame.stack.pop();
+    const top = try frame.stack.pop();
+    try frame.stack.push(if (top == top_minus_1) @as(u256, 1) else 0);
 
     // Stack: [50, 1]
 

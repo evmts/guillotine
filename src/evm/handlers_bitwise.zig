@@ -704,13 +704,13 @@ test "bitwise operations - De Morgan's laws" {
     var frame = try createTestFrame(testing.allocator);
     defer frame.deinit(testing.allocator);
 
-    // Test: ~(A & B) = (~A | ~B)
-    const a = 0x123456789ABCDEF0;
-    const b = 0xFEDCBA9876543210;
+    // Test: ~(value1 & value2) = (~value1 | ~value2)
+    const value1 = 0x123456789ABCDEF0;
+    const value2 = 0xFEDCBA9876543210;
 
-    // Calculate ~(A & B)
-    try frame.stack.push(a);
-    try frame.stack.push(b);
+    // Calculate ~(value1 & value2)
+    try frame.stack.push(value1);
+    try frame.stack.push(value2);
     var dispatch = createMockDispatch();
     _ = try TestFrame.BitwiseHandlers.@"and"(&frame, dispatch.cursor);
 
@@ -718,19 +718,19 @@ test "bitwise operations - De Morgan's laws" {
     _ = try TestFrame.BitwiseHandlers.not(&frame, dispatch.cursor);
     const left_side = try frame.stack.pop();
 
-    // Calculate (~A | ~B)
-    try frame.stack.push(a);
+    // Calculate (~value1 | ~value2)
+    try frame.stack.push(value1);
     dispatch = createMockDispatch();
     _ = try TestFrame.BitwiseHandlers.not(&frame, dispatch.cursor);
-    const not_a = try frame.stack.pop();
+    const not_value1 = try frame.stack.pop();
 
-    try frame.stack.push(b);
+    try frame.stack.push(value2);
     dispatch = createMockDispatch();
     _ = try TestFrame.BitwiseHandlers.not(&frame, dispatch.cursor);
-    const not_b = try frame.stack.pop();
+    const not_value2 = try frame.stack.pop();
 
-    try frame.stack.push(not_a);
-    try frame.stack.push(not_b);
+    try frame.stack.push(not_value1);
+    try frame.stack.push(not_value2);
     dispatch = createMockDispatch();
     _ = try TestFrame.BitwiseHandlers.@"or"(&frame, dispatch.cursor);
     const right_side = try frame.stack.pop();
