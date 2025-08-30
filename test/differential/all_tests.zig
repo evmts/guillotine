@@ -14,4 +14,5 @@ test {
     _ = @import("popular_contracts_test.zig");
     _ = @import("fixtures_contract_test.zig");
     _ = @import("usdc_proxy_test.zig");
+    _ = @import("comprehensive_contract_tests.zig");
 }

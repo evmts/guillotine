@@ -60,31 +60,26 @@ pub const PopularContractsTest = struct {
         const bytecode = try loadBytecode(self.allocator, "src/evm/fixtures/weth-mainnet/bytecode.txt");
         defer self.allocator.free(bytecode);
 
-        // Test contract deployment by testing the bytecode
-        self.testor.test_bytecode(bytecode) catch |err| {
-            std.log.warn("WETH deployment test failed: {} - this is expected during development", .{err});
-            return; // Exit early if deployment fails
-        };
+        // Test contract deployment by testing the bytecode - let it fail if there are bugs
+        try self.testor.test_bytecode(bytecode);
 
         // Test deposit function (payable fallback) using executeAndDiff
         const deposit_calldata = &[_]u8{}; // Empty calldata for fallback
         const deposit_value = 1000000000000000000; // 1 ETH in wei
 
-        var deposit_result = self.testor.executeAndDiff(
+        var deposit_result = try self.testor.executeAndDiff(
             self.testor.caller,
             self.testor.contract,
             deposit_value,
             deposit_calldata,
             1_000_000,
-        ) catch |err| {
-            std.log.warn("WETH deposit test failed: {} - this is expected during development", .{err});
-            return;
-        };
+        );
         defer deposit_result.deinit();
 
         if (!deposit_result.result_match) {
-            std.log.warn("WETH deposit test failed - this is expected during development", .{});
+            std.log.err("WETH deposit differential test failed", .{});
             self.testor.printDiff(deposit_result, "WETH deposit");
+            return error.DifferentialTestFailed;
         }
 
         // Test balanceOf function (0x70a08231)
@@ -101,21 +96,19 @@ pub const PopularContractsTest = struct {
         };
         defer self.allocator.free(balance_calldata);
 
-        var balance_result = self.testor.executeAndDiff(
+        var balance_result = try self.testor.executeAndDiff(
             self.testor.caller,
             self.testor.contract,
             0,
             balance_calldata,
             1_000_000,
-        ) catch |err| {
-            std.log.warn("WETH balanceOf test failed: {} - this is expected during development", .{err});
-            return;
-        };
+        );
         defer balance_result.deinit();
 
         if (!balance_result.result_match) {
-            std.log.warn("WETH balanceOf test failed - this is expected during development", .{});
+            std.log.err("WETH balanceOf differential test failed", .{});
             self.testor.printDiff(balance_result, "WETH balanceOf");
+            return error.DifferentialTestFailed;
         }
     }
 
@@ -125,29 +118,24 @@ pub const PopularContractsTest = struct {
         defer self.allocator.free(bytecode);
 
         // Test proxy deployment
-        self.testor.test_bytecode(bytecode) catch |err| {
-            std.log.warn("USDC deployment test failed: {} - this is expected during development", .{err});
-            return;
-        };
+        try self.testor.test_bytecode(bytecode);
 
         // Test implementation() function (0x5c60da1b)
         const impl_calldata = &[_]u8{ 0x5c, 0x60, 0xda, 0x1b };
 
-        var impl_result = self.testor.executeAndDiff(
+        var impl_result = try self.testor.executeAndDiff(
             self.testor.caller,
             self.testor.contract,
             0,
             impl_calldata,
             1_000_000,
-        ) catch |err| {
-            std.log.warn("USDC implementation test failed: {} - this is expected during development", .{err});
-            return;
-        };
+        );
         defer impl_result.deinit();
 
         if (!impl_result.result_match) {
-            std.log.warn("USDC implementation test failed - this is expected during development", .{});
+            std.log.err("USDC implementation differential test failed", .{});
             self.testor.printDiff(impl_result, "USDC implementation");
+            return error.DifferentialTestFailed;
         }
     }
 
@@ -157,29 +145,24 @@ pub const PopularContractsTest = struct {
         defer self.allocator.free(bytecode);
 
         // Test router deployment (this is a large contract)
-        self.testor.test_bytecode(bytecode) catch |err| {
-            std.log.warn("Uniswap V2 Router deployment test failed: {} - this is expected during development", .{err});
-            return;
-        };
+        try self.testor.test_bytecode(bytecode);
 
         // Test factory() function (0xc45a0155)
         const factory_calldata = &[_]u8{ 0xc4, 0x5a, 0x01, 0x55 };
 
-        var factory_result = self.testor.executeAndDiff(
+        var factory_result = try self.testor.executeAndDiff(
             self.testor.caller,
             self.testor.contract,
             0,
             factory_calldata,
             1_000_000,
-        ) catch |err| {
-            std.log.warn("Uniswap V2 Router factory test failed: {} - this is expected during development", .{err});
-            return;
-        };
+        );
         defer factory_result.deinit();
 
         if (!factory_result.result_match) {
-            std.log.warn("Uniswap V2 Router factory test failed - this is expected during development", .{});
+            std.log.err("Uniswap V2 Router factory differential test failed", .{});
             self.testor.printDiff(factory_result, "Uniswap V2 Router factory");
+            return error.DifferentialTestFailed;
         }
     }
 
@@ -189,29 +172,24 @@ pub const PopularContractsTest = struct {
         defer self.allocator.free(bytecode);
 
         // Test pool deployment
-        self.testor.test_bytecode(bytecode) catch |err| {
-            std.log.warn("Uniswap V3 Pool deployment test failed: {} - this is expected during development", .{err});
-            return;
-        };
+        try self.testor.test_bytecode(bytecode);
 
         // Test token0() function (0x0dfe1681)
         const token0_calldata = &[_]u8{ 0x0d, 0xfe, 0x16, 0x81 };
 
-        var token0_result = self.testor.executeAndDiff(
+        var token0_result = try self.testor.executeAndDiff(
             self.testor.caller,
             self.testor.contract,
             0,
             token0_calldata,
             1_000_000,
-        ) catch |err| {
-            std.log.warn("Uniswap V3 Pool token0 test failed: {} - this is expected during development", .{err});
-            return;
-        };
+        );
         defer token0_result.deinit();
 
         if (!token0_result.result_match) {
-            std.log.warn("Uniswap V3 Pool token0 test failed - this is expected during development", .{});
+            std.log.err("Uniswap V3 Pool token0 differential test failed", .{});
             self.testor.printDiff(token0_result, "Uniswap V3 Pool token0");
+            return error.DifferentialTestFailed;
         }
     }
 
@@ -221,29 +199,24 @@ pub const PopularContractsTest = struct {
         defer self.allocator.free(bytecode);
 
         // Test cUSDC deployment
-        self.testor.test_bytecode(bytecode) catch |err| {
-            std.log.warn("Compound cUSDC deployment test failed: {} - this is expected during development", .{err});
-            return;
-        };
+        try self.testor.test_bytecode(bytecode);
 
         // Test totalSupply() function (0x18160ddd)
         const total_supply_calldata = &[_]u8{ 0x18, 0x16, 0x0d, 0xdd };
 
-        var supply_result = self.testor.executeAndDiff(
+        var supply_result = try self.testor.executeAndDiff(
             self.testor.caller,
             self.testor.contract,
             0,
             total_supply_calldata,
             1_000_000,
-        ) catch |err| {
-            std.log.warn("Compound cUSDC totalSupply test failed: {} - this is expected during development", .{err});
-            return;
-        };
+        );
         defer supply_result.deinit();
 
         if (!supply_result.result_match) {
-            std.log.warn("Compound cUSDC totalSupply test failed - this is expected during development", .{});
+            std.log.err("Compound cUSDC totalSupply differential test failed", .{});
             self.testor.printDiff(supply_result, "Compound cUSDC totalSupply");
+            return error.DifferentialTestFailed;
         }
     }
 
