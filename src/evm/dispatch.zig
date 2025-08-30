@@ -27,10 +27,6 @@ pub fn Dispatch(comptime FrameType: type) type {
         /// or cursor[n+2] is safe without bounds checking.
         cursor: [*]const Item,
 
-        /// Jump table for efficient JUMP/JUMPI lookups
-        /// Contains sorted JUMPDEST locations for binary search
-        jump_table: ?*const JumpTable,
-
         // ========================
         // Metadata Types
         // ========================
@@ -72,7 +68,6 @@ pub fn Dispatch(comptime FrameType: type) type {
             _padding: u24 = 0,
         };
         /// Metadata for jump operations containing pointer to jump table
-        pub const JumpTableMetadata = packed struct(u64) { jump_table: *const JumpTable };
         /// A single item in the dispatch array, either a handler or metadata.
         /// Untagged union for optimal 64-bit cache line usage.
         pub const Item = union {
@@ -86,7 +81,6 @@ pub fn Dispatch(comptime FrameType: type) type {
             first_block_gas: struct { gas: u64 },
             trace_before: TraceBeforeMetadata,
             trace_after: TraceAfterMetadata,
-            jump_table: JumpTableMetadata,
         };
 
         // Comptime validation of Item union
@@ -202,7 +196,6 @@ pub fn Dispatch(comptime FrameType: type) type {
         pub inline fn getNext(self: Self) Self {
             return Self{
                 .cursor = self.cursor + 1,
-                .jump_table = self.jump_table,
             };
         }
 
@@ -221,7 +214,6 @@ pub fn Dispatch(comptime FrameType: type) type {
 
             const next = Self{
                 .cursor = self.cursor + 1,
-                .jump_table = self.jump_table,
             };
 
             log.debug("  Next cursor address: 0x{x} (current + {})", .{ @intFromPtr(next.cursor), @sizeOf(Item) });
@@ -261,18 +253,9 @@ pub fn Dispatch(comptime FrameType: type) type {
         pub fn skipMetadata(self: Self) Self {
             return Self{
                 .cursor = self.cursor + 2,
-                .jump_table = self.jump_table,
             };
         }
 
-        /// Find a jump target dispatch for the given PC
-        /// Returns null if the PC is not a valid JUMPDEST
-        pub fn findJumpTarget(self: Self, target_pc: FrameType.PcType) ?Self {
-            if (self.jump_table) |table| {
-                return table.findJumpTarget(target_pc);
-            }
-            return null;
-        }
 
         /// Get inline push metadata from the next position.
         /// Assumes the caller verified this is a push with inline metadata.
@@ -298,11 +281,6 @@ pub fn Dispatch(comptime FrameType: type) type {
             return self.cursor[1].jump_dest;
         }
 
-        /// Get jump table metadata from the next position.
-        /// Assumes the caller verified this is a jump table metadata.
-        pub fn getJumpTableMetadata(self: Self) JumpTableMetadata {
-            return self.cursor[1].jump_table;
-        }
 
         /// Get first block gas metadata from the current position.
         /// Assumes the caller verified this is a first_block_gas item.
@@ -312,64 +290,6 @@ pub fn Dispatch(comptime FrameType: type) type {
             return ptr.*;
         }
 
-        /// Update the schedule to include jump table metadata after JUMP/JUMPI handlers.
-        /// This is needed so jump handlers can access the jump table through cursor[1].
-        pub fn updateJumpTableMetadata(schedule: []Self.Item, jump_table: *const JumpTable, bytecode: anytype, opcode_handlers: *const [256]OpcodeHandler) void {
-            // Find JUMP/JUMPI handlers in the schedule and update their metadata
-            var iter = bytecode.createIterator();
-            var schedule_index: usize = 0;
-            
-            // Skip first_block_gas if present
-            const first_block_gas = calculateFirstBlockGas(bytecode);
-            if (first_block_gas > 0 and schedule.len > 0) {
-                schedule_index = 1;
-            }
-            
-            while (true) {
-                const maybe = iter.next();
-                if (maybe == null) break;
-                const op_data = maybe.?;
-                
-                switch (op_data) {
-                    .regular => |data| {
-                        if (schedule_index < schedule.len) {
-                            // Check if this is JUMP or JUMPI
-                            if (data.opcode == @intFromEnum(Opcode.JUMP) or data.opcode == @intFromEnum(Opcode.JUMPI)) {
-                                // Update the metadata slot with the jump table pointer
-                                if (schedule_index + 1 < schedule.len) {
-                                    schedule[schedule_index + 1] = .{ .jump_table = .{ .jump_table = jump_table } };
-                                }
-                                schedule_index += 2; // Handler + metadata
-                            } else {
-                                schedule_index += 1;
-                                // Account for metadata of other opcodes
-                                if (data.opcode == @intFromEnum(Opcode.PC) or
-                                    data.opcode == @intFromEnum(Opcode.CODESIZE) or
-                                    data.opcode == @intFromEnum(Opcode.CODECOPY))
-                                {
-                                    schedule_index += 1;
-                                }
-                            }
-                        }
-                    },
-                    .push => {
-                        schedule_index += 2; // Handler + metadata
-                    },
-                    .jumpdest => {
-                        schedule_index += 2; // Handler + metadata  
-                    },
-                    .push_add_fusion, .push_mul_fusion, .push_sub_fusion, .push_div_fusion, 
-                    .push_and_fusion, .push_or_fusion, .push_xor_fusion, .push_jump_fusion, .push_jumpi_fusion => {
-                        schedule_index += 2; // Handler + metadata
-                    },
-                    .stop, .invalid => {
-                        schedule_index += 1;
-                    },
-                }
-            }
-            
-            _ = opcode_handlers; // Not needed for this implementation
-        }
 
         // ========================
         // Helper Functions
@@ -530,9 +450,6 @@ pub fn Dispatch(comptime FrameType: type) type {
                             // Store direct pointer to bytecode data for stable reference
                             const bytecode_data = bytecode.runtime_code;
                             try schedule_items.append(allocator, .{ .codecopy = .{ .bytecode_ptr = bytecode_data.ptr, .size = @intCast(bytecode_data.len) } });
-                        } else if (data.opcode == @intFromEnum(Opcode.JUMP) or data.opcode == @intFromEnum(Opcode.JUMPI)) {
-                            // JUMP/JUMPI need access to jump table - store placeholder that will be filled later
-                            try schedule_items.append(allocator, .{ .jump_table = .{ .jump_table = undefined } });
                         }
                     },
                     .push => |data| {
@@ -783,9 +700,6 @@ pub fn Dispatch(comptime FrameType: type) type {
                             // Store direct pointer to bytecode data for stable reference
                             const bytecode_data = bytecode.runtime_code;
                             try schedule_items.append(allocator, .{ .codecopy = .{ .bytecode_ptr = bytecode_data.ptr, .size = @intCast(bytecode_data.len) } });
-                        } else if (data.opcode == @intFromEnum(Opcode.JUMP) or data.opcode == @intFromEnum(Opcode.JUMPI)) {
-                            // JUMP/JUMPI need access to jump table - store placeholder that will be filled later
-                            try schedule_items.append(allocator, .{ .jump_table = .{ .jump_table = undefined } });
                         }
 
                         // Insert trace_after
@@ -1089,10 +1003,9 @@ pub fn Dispatch(comptime FrameType: type) type {
             }
 
             /// Get a Dispatch instance pointing to the start of the schedule
-            pub fn getDispatch(self: *const DispatchSchedule, jump_table: ?*const JumpTable) Self {
+            pub fn getDispatch(self: *const DispatchSchedule) Self {
                 return Self{
                     .cursor = self.items.ptr,
-                    .jump_table = jump_table,
                 };
             }
         };
@@ -1295,7 +1208,6 @@ pub fn Dispatch(comptime FrameType: type) type {
                         .pc = builder_entry.pc,
                         .dispatch = Self{
                             .cursor = schedule.ptr + builder_entry.schedule_index,
-                            .jump_table = null,
                         },
                     };
                 }
@@ -1476,7 +1388,7 @@ test "Dispatch - getNext advances by 1" {
         .{ .opcode_handler = mockStop },
         .{ .opcode_handler = mockStop },
     };
-    const dispatch = TestDispatch{ .cursor = &dummy_items, .jump_table = null };
+    const dispatch = TestDispatch{ .cursor = &dummy_items };
     const next = dispatch.getNext();
 
     // Verify pointer arithmetic
@@ -1490,7 +1402,7 @@ test "Dispatch - skipMetadata advances by 2" {
         .{ .opcode_handler = mockStop },
         .{ .opcode_handler = mockStop },
     };
-    const dispatch = TestDispatch{ .cursor = &dummy_items, .jump_table = null };
+    const dispatch = TestDispatch{ .cursor = &dummy_items };
     const next = dispatch.skipMetadata();
 
     // Verify pointer arithmetic
@@ -1560,7 +1472,7 @@ test "Dispatch - getOpData for PC returns correct metadata and next" {
         .{ .opcode_handler = mockStop },
     };
 
-    const dispatch = TestDispatch{ .cursor = @ptrCast(&items[0]), .jump_table = null };
+    const dispatch = TestDispatch{ .cursor = @ptrCast(&items[0]) };
     const op_data = dispatch.getOpData(.PC);
 
     try testing.expect(op_data.metadata.value == 42);
@@ -1573,7 +1485,7 @@ test "Dispatch - getOpData for regular opcode returns only next" {
         .{ .opcode_handler = mockStop },
     };
 
-    const dispatch = TestDispatch{ .cursor = @ptrCast(&items[0]), .jump_table = null };
+    const dispatch = TestDispatch{ .cursor = @ptrCast(&items[0]) };
     const op_data = dispatch.getOpData(.ADD);
 
     try testing.expect(op_data.next.cursor == dispatch.cursor + 1);

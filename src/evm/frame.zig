@@ -148,6 +148,7 @@ pub fn Frame(comptime config: FrameConfig) type {
 
         // CACHE LINE 3+ (128+ bytes) - COLD PATH
         output: []u8, // 16B - Output data slice (only for RETURN/REVERT)
+        jump_table: Dispatch.JumpTable, // 24B - Jump table for JUMP/JUMPI validation (entries slice)
         allocator: std.mem.Allocator, // 16B - Memory allocator
         self_destruct: ?*SelfDestruct = null, // 8B - Self destruct list
         block_info: BlockInfo, // ~188B - Block context (spans multiple cache lines)
@@ -188,6 +189,7 @@ pub fn Frame(comptime config: FrameConfig) type {
                 .evm_ptr = evm_ptr,
                 // Cache line 3+
                 .output = &[_]u8{}, // Start with empty output
+                .jump_table = .{ .entries = &[_]Dispatch.JumpTableEntry{} }, // Empty jump table
                 .allocator = allocator,
                 .self_destruct = self_destruct,
                 .block_info = block_info,
@@ -252,22 +254,23 @@ pub fn Frame(comptime config: FrameConfig) type {
                 const traced_schedule = Dispatch.initWithTracing(self.allocator, &bytecode, handlers, T, tracer_instance) catch return Error.AllocationError;
                 defer Dispatch.deinitSchedule(self.allocator, traced_schedule);
 
-                var traced_jump_table = Dispatch.createJumpTable(self.allocator, traced_schedule, &bytecode) catch return Error.AllocationError;
+                const traced_jump_table = Dispatch.createJumpTable(self.allocator, traced_schedule, &bytecode) catch return Error.AllocationError;
                 defer self.allocator.free(traced_jump_table.entries);
-                // Update jump_table metadata in the schedule
-                Dispatch.updateJumpTableMetadata(traced_schedule, &traced_jump_table, &bytecode, handlers);
+                
+                // Store jump table in frame for JUMP/JUMPI handlers
+                self.jump_table = traced_jump_table;
 
                 var start_index: usize = 0;
                 // Check if first item is first_block_gas and consume gas if so
                 const first_block_gas = Self.Dispatch.calculateFirstBlockGas(bytecode);
                 if (first_block_gas > 0 and traced_schedule.len > 0) {
-                    const temp_dispatch = Self.Dispatch{ .cursor = traced_schedule.ptr, .jump_table = null };
+                    const temp_dispatch = Self.Dispatch{ .cursor = traced_schedule.ptr };
                     const meta = temp_dispatch.getFirstBlockGas();
                     if (meta.gas > 0) try self.consumeGasChecked(@intCast(meta.gas));
                     start_index = 1;
                 }
 
-                const cursor = Self.Dispatch{ .cursor = traced_schedule.ptr + start_index, .jump_table = &traced_jump_table };
+                const cursor = Self.Dispatch{ .cursor = traced_schedule.ptr + start_index };
                 cursor.cursor[0].opcode_handler(self, cursor.cursor) catch |err| return err;
                 unreachable; // Handlers never return normally
             } else {
@@ -289,16 +292,17 @@ pub fn Frame(comptime config: FrameConfig) type {
                     return Error.InvalidOpcode;
                 }
 
-                var jump_table = Dispatch.createJumpTable(self.allocator, schedule, &bytecode) catch return Error.AllocationError;
+                const jump_table = Dispatch.createJumpTable(self.allocator, schedule, &bytecode) catch return Error.AllocationError;
                 defer self.allocator.free(jump_table.entries);
-                // Update jump_table metadata in the schedule
-                Dispatch.updateJumpTableMetadata(schedule, &jump_table, &bytecode, handlers);
+                
+                // Store jump table in frame for JUMP/JUMPI handlers
+                self.jump_table = jump_table;
 
                 var start_index: usize = 0;
                 // Check if first item is first_block_gas and consume gas if so
                 const first_block_gas = Self.Dispatch.calculateFirstBlockGas(bytecode);
                 if (first_block_gas > 0 and schedule.len > 0) {
-                    const temp_dispatch = Self.Dispatch{ .cursor = schedule.ptr, .jump_table = null };
+                    const temp_dispatch = Self.Dispatch{ .cursor = schedule.ptr };
                     const meta = temp_dispatch.getFirstBlockGas();
                     log.debug("First block gas charge: {d} (current gas: {d})", .{ meta.gas, self.gas_remaining });
                     if (meta.gas > 0) try self.consumeGasChecked(@intCast(meta.gas));
@@ -306,7 +310,7 @@ pub fn Frame(comptime config: FrameConfig) type {
                     start_index = 1;
                 }
 
-                const cursor = Self.Dispatch{ .cursor = schedule.ptr + start_index, .jump_table = &jump_table };
+                const cursor = Self.Dispatch{ .cursor = schedule.ptr + start_index };
                 
                 // Debug: First item should be an opcode_handler after skipping first_block_gas
                 // Since the union is untagged, we can't verify this at runtime

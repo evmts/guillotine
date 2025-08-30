@@ -13,7 +13,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// PUSH_JUMP_INLINE - Fused PUSH+JUMP with inline destination (≤8 bytes).
         /// Pushes a destination and immediately jumps to it.
         pub fn push_jump_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            const dispatch = Dispatch{ .cursor = cursor };
             const metadata = dispatch.getInlineMetadata();
             const dest = metadata.value;
 
@@ -25,7 +25,8 @@ pub fn Handlers(comptime FrameType: type) type {
             const dest_pc: u16 = @intCast(dest);
 
             // Look up the destination in the jump table
-            if (dispatch.findJumpTarget(dest_pc)) |jump_dispatch| {
+            const jump_table = self.jump_table;
+            if (jump_table.findJumpTarget(dest_pc)) |jump_dispatch| {
                 // Found valid JUMPDEST - tail call to the jump destination
                 return @call(FrameType.getTailCallModifier(), jump_dispatch.cursor[0].opcode_handler, .{ self, jump_dispatch.cursor });
             } else {
@@ -36,7 +37,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// PUSH_JUMP_POINTER - Fused PUSH+JUMP with pointer destination (>8 bytes).
         pub fn push_jump_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            const dispatch = Dispatch{ .cursor = cursor };
             const metadata = dispatch.getPointerMetadata();
             const dest = metadata.value.*;
 
@@ -48,7 +49,8 @@ pub fn Handlers(comptime FrameType: type) type {
             const dest_pc: u16 = @intCast(dest);
 
             // Look up the destination in the jump table
-            if (dispatch.findJumpTarget(dest_pc)) |jump_dispatch| {
+            const jump_table = self.jump_table;
+            if (jump_table.findJumpTarget(dest_pc)) |jump_dispatch| {
                 // Found valid JUMPDEST - tail call to the jump destination
                 return @call(FrameType.getTailCallModifier(), jump_dispatch.cursor[0].opcode_handler, .{ self, jump_dispatch.cursor });
             } else {
@@ -60,7 +62,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// PUSH_JUMPI_INLINE - Fused PUSH+JUMPI with inline destination (≤8 bytes).
         /// Pushes a destination, pops condition, and conditionally jumps.
         pub fn push_jumpi_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            const dispatch = Dispatch{ .cursor = cursor };
             const metadata = dispatch.getInlineMetadata();
             const dest = metadata.value;
 
@@ -76,7 +78,8 @@ pub fn Handlers(comptime FrameType: type) type {
                 const dest_pc: u16 = @intCast(dest);
 
                 // Look up the destination in the jump table
-                if (dispatch.findJumpTarget(dest_pc)) |jump_dispatch| {
+                const jump_table = self.jump_table;
+                if (jump_table.findJumpTarget(dest_pc)) |jump_dispatch| {
                     // Found valid JUMPDEST - tail call to the jump destination
                     return @call(FrameType.getTailCallModifier(), jump_dispatch.cursor[0].opcode_handler, .{ self, jump_dispatch.cursor });
                 } else {
@@ -92,7 +95,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// PUSH_JUMPI_POINTER - Fused PUSH+JUMPI with pointer destination (>8 bytes).
         pub fn push_jumpi_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            const dispatch = Dispatch{ .cursor = cursor };
             const metadata = dispatch.getPointerMetadata();
             const dest = metadata.value.*;
 
@@ -108,7 +111,8 @@ pub fn Handlers(comptime FrameType: type) type {
                 const dest_pc: u16 = @intCast(dest);
 
                 // Look up the destination in the jump table
-                if (dispatch.findJumpTarget(dest_pc)) |jump_dispatch| {
+                const jump_table = self.jump_table;
+                if (jump_table.findJumpTarget(dest_pc)) |jump_dispatch| {
                     // Found valid JUMPDEST - tail call to the jump destination
                     return @call(FrameType.getTailCallModifier(), jump_dispatch.cursor[0].opcode_handler, .{ self, jump_dispatch.cursor });
                 } else {

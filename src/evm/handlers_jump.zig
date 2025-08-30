@@ -13,10 +13,9 @@ pub fn Handlers(comptime FrameType: type) type {
         /// JUMP opcode (0x56) - Unconditional jump.
         /// Pops destination from stack and transfers control to that location.
         /// The destination must be a valid JUMPDEST.
-        pub fn jump(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            // Get jump table from metadata at cursor[1]
-            const jump_table_metadata = cursor[1].jump_table;
-            const jump_table = jump_table_metadata.jump_table;
+        pub fn jump(self: *FrameType, _: [*]const Dispatch.Item) Error!noreturn {
+            // Get jump table from frame
+            const jump_table = self.jump_table;
             
             const dest = try self.stack.pop();
 
@@ -41,9 +40,8 @@ pub fn Handlers(comptime FrameType: type) type {
         /// Pops destination and condition from stack.
         /// Jumps to destination if condition is non-zero, otherwise continues to next instruction.
         pub fn jumpi(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            // Get jump table from metadata at cursor[1]
-            const jump_table_metadata = cursor[1].jump_table;
-            const jump_table = jump_table_metadata.jump_table;
+            // Get jump table from frame
+            const jump_table = self.jump_table;
             
             const dest = try self.stack.pop();
             const condition = try self.stack.pop();
@@ -77,7 +75,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// It also serves as a gas consumption point for the entire basic block.
         pub fn jumpdest(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             // Jump table not needed for JUMPDEST itself
-            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            const dispatch = Dispatch{ .cursor = cursor };
             // JUMPDEST consumes gas for the entire basic block (static + dynamic)
             const metadata = dispatch.getJumpDestMetadata();
             const gas_cost = metadata.gas;
@@ -98,7 +96,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// The actual PC value is provided by the planner through metadata.
         pub fn pc(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             // Jump table not needed for PC
-            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            const dispatch = Dispatch{ .cursor = cursor };
             // Get PC value from metadata
             const metadata = dispatch.getPcMetadata();
             try self.stack.push(metadata.value);
@@ -533,11 +531,8 @@ test "JUMP opcode - invalid destination should revert" {
     const schedule = try TestFrame.Dispatch.init(testing.allocator, &bytecode, &TestFrame.opcode_handlers);
     defer testing.allocator.free(schedule);
     
-    var jump_table = try TestFrame.Dispatch.createJumpTable(testing.allocator, schedule, &bytecode);
+    const jump_table = try TestFrame.Dispatch.createJumpTable(testing.allocator, schedule, &bytecode);
     defer testing.allocator.free(jump_table.entries);
-    
-    // Update jump table metadata in the schedule
-    TestFrame.Dispatch.updateJumpTableMetadata(schedule, &jump_table, &bytecode, &TestFrame.opcode_handlers);
 
     // Find the JUMP handler in the schedule
     var jump_handler_index: ?usize = null;
@@ -583,11 +578,8 @@ test "JUMPI opcode - invalid destination should revert when taken" {
     const schedule = try TestFrame.Dispatch.init(testing.allocator, &bytecode, &TestFrame.opcode_handlers);
     defer testing.allocator.free(schedule);
     
-    var jump_table = try TestFrame.Dispatch.createJumpTable(testing.allocator, schedule, &bytecode);
+    const jump_table = try TestFrame.Dispatch.createJumpTable(testing.allocator, schedule, &bytecode);
     defer testing.allocator.free(jump_table.entries);
-    
-    // Update jump table metadata in the schedule
-    TestFrame.Dispatch.updateJumpTableMetadata(schedule, &jump_table, &bytecode, &TestFrame.opcode_handlers);
 
     // Find the JUMPI handler in the schedule
     var jumpi_handler_index: ?usize = null;
