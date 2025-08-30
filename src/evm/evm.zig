@@ -745,6 +745,31 @@ pub fn Evm(comptime config: EvmConfig) type {
             return CallResult.success_with_output(result.gas_left, out32);
         }
 
+        /// Convert tracer data to ExecutionTrace format
+        fn convertTracerToExecutionTrace(allocator: std.mem.Allocator, tracer: anytype) !@import("call_result.zig").ExecutionTrace {
+            const call_result = @import("call_result.zig");
+            const tracer_steps = tracer.steps.items;
+            var trace_steps = try allocator.alloc(call_result.TraceStep, tracer_steps.len);
+            
+            for (tracer_steps, 0..) |tracer_step, i| {
+                trace_steps[i] = call_result.TraceStep{
+                    .pc = tracer_step.pc,
+                    .opcode = tracer_step.opcode,
+                    .opcode_name = try allocator.dupe(u8, tracer_step.opcode_name),
+                    .gas = @intCast(@max(tracer_step.gas_after, 0)),
+                    .stack = try allocator.dupe(u256, tracer_step.stack_after),
+                    .memory = &.{}, // Empty for now
+                    .storage_reads = &.{}, // Empty for now  
+                    .storage_writes = &.{}, // Empty for now
+                };
+            }
+            
+            return call_result.ExecutionTrace{
+                .steps = trace_steps,
+                .allocator = allocator,
+            };
+        }
+
         /// Execute a frame by delegating to Frame.interpret (dispatch-based execution)
         fn execute_frame(
             self: *Self,
@@ -782,8 +807,17 @@ pub fn Evm(comptime config: EvmConfig) type {
             log.debug("Executing frame: code_len={d}, gas={d}, address={any}, is_static={any}", .{code.len, gas_cast, address, is_static});
             log.debug("Frame gas_remaining before interpret: {d}", .{frame.gas_remaining});
 
-            // Frame.interpret now returns Error!void and uses errors for success termination
-            frame.interpret(code) catch |err| switch (err) {
+            // Execute with tracing if tracer type is configured
+            var execution_trace: ?@import("call_result.zig").ExecutionTrace = null;
+            if (config.tracer_type) |TracerType| {
+                // Create tracer instance for this execution
+                var tracer = TracerType.init();
+                defer tracer.deinit();
+                
+                log.debug("Executing frame with tracer: {s}", .{@typeName(TracerType)});
+                
+                // Frame.interpret_with_tracer returns Error!void and uses errors for success termination
+                frame.interpret_with_tracer(code, TracerType, &tracer) catch |err| switch (err) {
                 error.Stop, error.Return, error.SelfDestruct => {
                     // These are success termination cases
                 },
@@ -799,6 +833,28 @@ pub fn Evm(comptime config: EvmConfig) type {
                     return CallResult.failure(0);
                 },
             };
+            
+            // Extract trace data before tracer is destroyed
+            execution_trace = try convertTracerToExecutionTrace(self.allocator, &tracer);
+            } else {
+                // Execute without tracing (original path)
+                frame.interpret(code) catch |err| switch (err) {
+                error.Stop, error.Return, error.SelfDestruct => {
+                    // These are success termination cases
+                },
+                else => {
+                    // Actual errors
+                    log.err("Frame.interpret() failed (is_static={any}): {any}", .{ is_static, err });
+                    log.err("  Code length: {d}", .{code.len});
+                    log.err("  Gas: {}", .{gas_cast});
+                    log.err("  Address: {any}", .{address});
+                    if (code.len > 0) {
+                        log.err("  First few bytes of code: {x}", .{code[0..@min(code.len, 16)]});
+                    }
+                    return CallResult.failure(0);
+                },
+            };
+            }
 
             // Map frame outcome to CallResult
             const gas_left: u64 = @intCast(@max(frame.gas_remaining, 0));
@@ -815,8 +871,10 @@ pub fn Evm(comptime config: EvmConfig) type {
             } else &.{};
             self.return_data = out_buf;
 
-            // All success termination cases return the same result
-            return CallResult.success_with_output(gas_left, out_buf);
+            // All success termination cases return the same result with trace data
+            var result = CallResult.success_with_output(gas_left, out_buf);
+            result.trace = execution_trace;
+            return result;
         }
 
         fn execute_init_code(
