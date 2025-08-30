@@ -163,17 +163,27 @@ pub fn Frame(comptime config: FrameConfig) type {
         /// EIP-214: For static calls, self_destruct should be null to prevent
         /// SELFDESTRUCT operations which modify blockchain state.
         pub fn init(allocator: std.mem.Allocator, gas_remaining: GasType, database: config.DatabaseType, caller: Address, value: *const WordType, calldata: []const u8, block_info: BlockInfo, evm_ptr: *anyopaque, self_destruct: ?*SelfDestruct) Error!Self {
+            log.debug("Frame.init: gas={}, caller={any}, value={}, calldata_len={}, self_destruct={}", .{ 
+                gas_remaining, 
+                caller, 
+                value.*, 
+                calldata.len, 
+                self_destruct != null 
+            });
             var stack = Stack.init(allocator) catch {
                 @branchHint(.cold);
+                log.err("Frame.init: Failed to initialize stack", .{});
                 return Error.AllocationError;
             };
             errdefer stack.deinit(allocator);
             var memory = Memory.init(allocator) catch {
                 @branchHint(.cold);
+                log.err("Frame.init: Failed to initialize memory", .{});
                 return Error.AllocationError;
             };
             errdefer memory.deinit(allocator);
 
+            log.debug("Frame.init: Successfully initialized frame components", .{});
             return Self{
                 // Cache line 1
                 .stack = stack,
@@ -197,6 +207,10 @@ pub fn Frame(comptime config: FrameConfig) type {
         }
         /// Clean up all frame resources.
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+            log.debug("Frame.deinit: Starting cleanup, logs_count={}, output_len={}", .{ 
+                self.logs.items.len, 
+                self.output.len 
+            });
             self.stack.deinit(allocator);
             self.memory.deinit(allocator);
             // Free log data
@@ -208,6 +222,7 @@ pub fn Frame(comptime config: FrameConfig) type {
             if (self.output.len > 0) {
                 allocator.free(self.output);
             }
+            log.debug("Frame.deinit: Cleanup complete", .{});
         }
 
         /// Execute this frame without tracing (backward compatibility method).
@@ -224,13 +239,23 @@ pub fn Frame(comptime config: FrameConfig) type {
         /// @param TracerType: Optional comptime tracer type for zero-cost tracing abstraction
         /// @param tracer_instance: Instance of the tracer (ignored if TracerType is null)
         pub fn interpret_with_tracer(self: *Self, bytecode_raw: []const u8, comptime TracerType: ?type, tracer_instance: if (TracerType) |T| *T else void) Error!void {
+            log.debug("Frame.interpret_with_tracer: Starting execution, bytecode_len={}, gas={}", .{ 
+                bytecode_raw.len, 
+                self.gas_remaining 
+            });
+            
             if (bytecode_raw.len > config.max_bytecode_size) {
                 @branchHint(.unlikely);
+                log.err("Frame.interpret_with_tracer: Bytecode too large: {} > max {}", .{ 
+                    bytecode_raw.len, 
+                    config.max_bytecode_size 
+                });
                 return Error.BytecodeTooLarge;
             }
 
             var bytecode = Bytecode.init(self.allocator, bytecode_raw) catch |e| {
                 @branchHint(.unlikely);
+                log.err("Frame.interpret_with_tracer: Bytecode init failed: {}", .{e});
                 return switch (e) {
                     error.BytecodeTooLarge => Error.BytecodeTooLarge,
                     error.InvalidOpcode => Error.InvalidOpcode,
@@ -251,12 +276,12 @@ pub fn Frame(comptime config: FrameConfig) type {
             }
 
             if (TracerType) |T| {
-                log.debug("Creating traced schedule with bytecode len={}", .{bytecode.runtime_code.len});
+                log.debug("Frame.interpret_with_tracer: Creating traced schedule with bytecode len={}", .{bytecode.runtime_code.len});
                 const traced_schedule = Dispatch.initWithTracing(self.allocator, &bytecode, handlers, T, tracer_instance) catch |e| {
-                    log.err("Failed to create traced schedule: {}", .{e});
+                    log.err("Frame.interpret_with_tracer: Failed to create traced schedule: {}", .{e});
                     return Error.AllocationError;
                 };
-                log.debug("Traced schedule created, len={}", .{traced_schedule.len});
+                log.debug("Frame.interpret_with_tracer: Traced schedule created, len={}", .{traced_schedule.len});
                 defer Dispatch.deinitSchedule(self.allocator, traced_schedule);
 
                 const traced_jump_table = Dispatch.createJumpTable(self.allocator, traced_schedule, &bytecode) catch return Error.AllocationError;
@@ -276,27 +301,27 @@ pub fn Frame(comptime config: FrameConfig) type {
                 }
 
                 const cursor = Self.Dispatch{ .cursor = traced_schedule.ptr + start_index };
-                log.debug("Starting execution at cursor index {}, gas={}", .{start_index, self.gas_remaining});
+                log.debug("Frame.interpret_with_tracer: Starting traced execution at cursor index {}, gas={}", .{start_index, self.gas_remaining});
                 cursor.cursor[0].opcode_handler(self, cursor.cursor) catch |err| {
-                    log.debug("Handler failed with error: {}", .{err});
+                    log.debug("Frame.interpret_with_tracer: Handler failed with error: {}", .{err});
                     return err;
                 };
                 unreachable; // Handlers never return normally
             } else {
-                log.debug("Dispatch init: bytecode len={d}", .{bytecode.runtime_code.len});
+                log.debug("Frame.interpret_with_tracer: Dispatch init: bytecode len={d}", .{bytecode.runtime_code.len});
                 const schedule = Dispatch.init(self.allocator, &bytecode, handlers) catch |e| {
-                    log.err("Failed to create dispatch schedule: {any}", .{e});
-                    log.err("  Bytecode runtime_code len: {d}", .{bytecode.runtime_code.len});
+                    log.err("Frame.interpret_with_tracer: Failed to create dispatch schedule: {any}", .{e});
+                    log.err("Frame.interpret_with_tracer:   Bytecode runtime_code len: {d}", .{bytecode.runtime_code.len});
                     return Error.AllocationError;
                 };
-                log.debug("DISPATCH INIT COMPLETE: schedule len={d}, opcode_count={d}", .{ schedule.len, bytecode.runtime_code.len });
+                log.debug("Frame.interpret_with_tracer: DISPATCH INIT COMPLETE: schedule len={d}, opcode_count={d}", .{ schedule.len, bytecode.runtime_code.len });
                 defer Dispatch.deinitSchedule(self.allocator, schedule);
                 
                 if (schedule.len < 3) {
-                    log.err("Dispatch schedule is too short! len={d}", .{schedule.len});
-                    log.err("  Bytecode len: {d}", .{bytecode.runtime_code.len});
+                    log.err("Frame.interpret_with_tracer: Dispatch schedule is too short! len={d}", .{schedule.len});
+                    log.err("Frame.interpret_with_tracer:   Bytecode len: {d}", .{bytecode.runtime_code.len});
                     if (bytecode.runtime_code.len > 0) {
-                        log.err("  First few bytes: {x}", .{bytecode.runtime_code[0..@min(bytecode.runtime_code.len, 16)]});
+                        log.err("Frame.interpret_with_tracer:   First few bytes: {x}", .{bytecode.runtime_code[0..@min(bytecode.runtime_code.len, 16)]});
                     }
                     return Error.InvalidOpcode;
                 }
@@ -313,9 +338,9 @@ pub fn Frame(comptime config: FrameConfig) type {
                 if (first_block_gas > 0 and schedule.len > 0) {
                     const temp_dispatch = Self.Dispatch{ .cursor = schedule.ptr };
                     const meta = temp_dispatch.getFirstBlockGas();
-                    log.debug("First block gas charge: {d} (current gas: {d})", .{ meta.gas, self.gas_remaining });
+                    log.debug("Frame.interpret_with_tracer: First block gas charge: {d} (current gas: {d})", .{ meta.gas, self.gas_remaining });
                     if (meta.gas > 0) try self.consumeGasChecked(@intCast(meta.gas));
-                    log.debug("Gas after first block charge: {d}", .{self.gas_remaining});
+                    log.debug("Frame.interpret_with_tracer: Gas after first block charge: {d}", .{self.gas_remaining});
                     start_index = 1;
                 }
 
@@ -323,9 +348,7 @@ pub fn Frame(comptime config: FrameConfig) type {
                 
                 // Debug: First item should be an opcode_handler after skipping first_block_gas
                 // Since the union is untagged, we can't verify this at runtime
-                log.debug("Starting execution at dispatch index {} (schedule length: {})", .{ start_index, schedule.len });
-                
-                log.debug("Starting execution at schedule index {}", .{start_index});
+                log.debug("Frame.interpret_with_tracer: Starting execution at dispatch index {} (schedule length: {})", .{ start_index, schedule.len });
                 // Pass cursor pointer and jump_table separately - no Dispatch struct needed
                 cursor.cursor[0].opcode_handler(self, cursor.cursor) catch |err| return err;
                 unreachable; // Handlers never return normally
@@ -337,6 +360,11 @@ pub fn Frame(comptime config: FrameConfig) type {
         /// Create a deep copy of the frame.
         /// This is used by DebugPlan to create a sidecar frame for validation.
         pub fn copy(self: *const Self, allocator: std.mem.Allocator) Error!Self {
+            log.debug("Frame.copy: Creating deep copy, stack_size={}, memory_size={}, logs_count={}", .{ 
+                self.stack.get_slice().len, 
+                self.memory.size(), 
+                self.logs.items.len 
+            });
             var new_stack = Stack.init(allocator) catch return Error.AllocationError;
             errdefer new_stack.deinit(allocator);
             const src_stack_slice = self.stack.get_slice();
@@ -379,6 +407,7 @@ pub fn Frame(comptime config: FrameConfig) type {
                 break :blk output_copy;
             } else &[_]u8{};
 
+            log.debug("Frame.copy: Deep copy complete", .{});
             return Self{
                 .stack = new_stack,
                 .gas_remaining = self.gas_remaining,
@@ -427,10 +456,14 @@ pub fn Frame(comptime config: FrameConfig) type {
         pub fn consumeGasChecked(self: *Self, amount: u32) Error!void {
             // Cast to GasType - should always succeed with u32 input
             // Only fails if GasType is smaller than u32 (impossible with current config)
-            const amt = std.math.cast(GasType, amount) orelse return Error.GasOverflow;
+            const amt = std.math.cast(GasType, amount) orelse {
+                log.err("Frame.consumeGasChecked: Gas overflow, amount={} doesn't fit in GasType", .{amount});
+                return Error.GasOverflow;
+            };
             
             // Check if we have enough gas
             if (amt > self.gas_remaining) {
+                log.debug("Frame.consumeGasChecked: Out of gas, required={}, remaining={}", .{ amt, self.gas_remaining });
                 return Error.OutOfGas;
             }
             
@@ -444,6 +477,10 @@ pub fn Frame(comptime config: FrameConfig) type {
 
         /// Set output data (allocates on heap)
         pub fn setOutput(self: *Self, data: []const u8) Error!void {
+            log.debug("Frame.setOutput: Setting output data, new_size={}, old_size={}", .{ 
+                data.len, 
+                self.output.len 
+            });
             if (self.output.len > 0) {
                 self.allocator.free(self.output);
             }
@@ -452,6 +489,7 @@ pub fn Frame(comptime config: FrameConfig) type {
                 return;
             }
             const new_output = self.allocator.alloc(u8, data.len) catch {
+                log.err("Frame.setOutput: Failed to allocate {} bytes for output", .{data.len});
                 return Error.AllocationError;
             };
             @memcpy(new_output, data);
@@ -465,6 +503,11 @@ pub fn Frame(comptime config: FrameConfig) type {
 
         /// Add a log entry to the list
         pub fn appendLog(self: *Self, log_entry: Log) error{OutOfMemory}!void {
+            log.debug("Frame.appendLog: Adding log entry from address={any}, topics_count={}, data_len={}", .{ 
+                log_entry.address, 
+                log_entry.topics.len, 
+                log_entry.data.len 
+            });
             try self.logs.append(self.allocator, log_entry);
         }
 
