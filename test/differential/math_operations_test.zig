@@ -317,6 +317,8 @@ test "differential: signed arithmetic edge cases" {
     var testor = try DifferentialTestor.init(allocator);
     defer testor.deinit();
     
+    // std.debug.print("\n[DEBUG] Starting signed arithmetic edge cases test\n", .{});
+    
     // Test SDIV/SMOD with MIN_INT and -1
     const bytecode = [_]u8{
         // SDIV: MIN_INT / -1 = MIN_INT (overflow)
