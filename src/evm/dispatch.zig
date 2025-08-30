@@ -18,6 +18,9 @@ pub fn Dispatch(comptime FrameType: type) type {
         const Self = @This();
         // We define opcodehandler locally rather than using Frame.OpcodeHandler to avoid circular dependency
         const OpcodeHandler = *const fn (frame: *FrameType, cursor: [*]const Item) FrameType.Error!noreturn;
+        
+        // Thread-local storage for traced allocated pointers (used for cleanup)
+        threadlocal var traced_allocated_pointers: ?[]*FrameType.WordType = null;
         /// The optimized instruction stream containing opcode handlers and their metadata.
         /// Each item is exactly 64 bits for optimal cache line usage.
         ///
@@ -376,7 +379,8 @@ pub fn Dispatch(comptime FrameType: type) type {
             const log = @import("log.zig");
             log.err("DISPATCH INIT: Starting to parse bytecode with {} bytes", .{bytecode.runtime_code.len});
 
-            var schedule_items = ArrayList(Self.Item, null){};
+            const ScheduleList = ArrayList(Self.Item, null);
+            var schedule_items = ScheduleList{};
             errdefer schedule_items.deinit(allocator);
 
             // Create iterator to traverse bytecode
@@ -536,7 +540,8 @@ pub fn Dispatch(comptime FrameType: type) type {
             schedule: []const Self.Item,
             bytecode: anytype,
         ) ![]PCMapEntry {
-            var pc_map = ArrayList(PCMapEntry, null){};
+            const PCMapList = ArrayList(PCMapEntry, null);
+            var pc_map = PCMapList{};
             errdefer pc_map.deinit(allocator);
 
             // Create iterator to traverse bytecode
@@ -660,12 +665,19 @@ pub fn Dispatch(comptime FrameType: type) type {
             comptime TracerType: type,
             tracer_instance: *TracerType,
         ) ![]Self.Item {
-            var schedule_items = ArrayList(Self.Item, null){};
+            const ScheduleList = ArrayList(Self.Item, null);
+            var schedule_items = ScheduleList{};
             errdefer schedule_items.deinit(allocator);
             
             // Track allocated push pointers for cleanup
-            var allocated_pointers = std.ArrayList(*FrameType.WordType).init(allocator);
-            defer allocated_pointers.deinit();
+            const PointerList = ArrayList(*FrameType.WordType, null);
+            var allocated_pointers = PointerList{};
+            errdefer {
+                for (allocated_pointers.items) |ptr| {
+                    allocator.destroy(ptr);
+                }
+                allocated_pointers.deinit(allocator);
+            }
 
             // Create tracing handlers that will be used throughout
             const trace_before_handler = createTraceHandler(TracerType, tracer_instance, true);
@@ -724,7 +736,9 @@ pub fn Dispatch(comptime FrameType: type) type {
                             try schedule_items.append(allocator, .{ .push_inline = .{ .value = inline_value } });
                         } else {
                             const value_ptr = try allocator.create(FrameType.WordType);
+                            errdefer allocator.destroy(value_ptr);
                             value_ptr.* = data.value;
+                            try allocated_pointers.append(allocator, value_ptr);
                             try schedule_items.append(allocator, .{ .push_pointer = .{ .value = value_ptr } });
                         }
 
@@ -810,6 +824,11 @@ pub fn Dispatch(comptime FrameType: type) type {
             try schedule_items.append(allocator, .{ .opcode_handler = opcode_handlers.*[@intFromEnum(Opcode.STOP)] });
             try schedule_items.append(allocator, .{ .opcode_handler = opcode_handlers.*[@intFromEnum(Opcode.STOP)] });
 
+            // Store the allocated pointers list for cleanup
+            // We need to attach this to the schedule somehow for later cleanup
+            // Store it in thread local storage for now
+            traced_allocated_pointers = try allocated_pointers.toOwnedSlice(allocator);
+            
             return schedule_items.toOwnedSlice(allocator);
         }
 
@@ -821,6 +840,8 @@ pub fn Dispatch(comptime FrameType: type) type {
                 fn handle(frame: *FrameType, cursor: [*]const Item) FrameType.Error!noreturn {
                     if (is_before) {
                         const metadata = cursor[1].trace_before;
+                        const log = @import("log.zig");
+                        log.err("TRACE_BEFORE: pc={}, opcode=0x{x:0>2}", .{metadata.pc, metadata.opcode});
                         if (@hasDecl(TracerType, "beforeOp")) {
                             tracer.beforeOp(metadata.pc, metadata.opcode, FrameType, frame);
                         }
@@ -841,7 +862,7 @@ pub fn Dispatch(comptime FrameType: type) type {
 
         /// Helper function to handle fusion operations with tracing support
         fn handleFusionOperationWithTracing(
-            schedule_items: *ArrayList(Self.Item, null),
+            schedule_items: anytype,
             allocator: std.mem.Allocator,
             opcode_handlers: *const [256]OpcodeHandler,
             trace_before_handler: OpcodeHandler,
@@ -873,7 +894,7 @@ pub fn Dispatch(comptime FrameType: type) type {
         /// Helper function to handle fusion operations consistently.
         /// This reduces code duplication and centralizes fusion logic.
         fn handleFusionOperation(
-            schedule_items: *ArrayList(Self.Item, null),
+            schedule_items: anytype,
             allocator: std.mem.Allocator,
             opcode_handlers: *const [256]OpcodeHandler,
             value: FrameType.WordType,
@@ -961,14 +982,16 @@ pub fn Dispatch(comptime FrameType: type) type {
         /// Since Item is now untagged, we identify push_pointer items by checking
         /// if the value looks like a valid heap pointer (heuristic approach)
         pub fn deinitSchedule(allocator: std.mem.Allocator, schedule: []const Item) void {
-            // TODO: With untagged unions, we can't reliably determine which items are push_pointer
-            // that need cleanup. This causes memory leaks for large PUSH values, but prevents crashes.
-            // We need a different approach - either:
-            // 1. Keep a separate list of allocated pointers to clean up
-            // 2. Use a tagged union with a different approach
-            // 3. Use a different memory management strategy
+            // If we have traced allocated pointers, free them
+            if (traced_allocated_pointers) |pointers| {
+                for (pointers) |ptr| {
+                    allocator.destroy(ptr);
+                }
+                allocator.free(pointers);
+                traced_allocated_pointers = null;
+            }
             
-            // For now, just free the schedule itself
+            // Free the schedule itself
             allocator.free(schedule);
         }
 
