@@ -38,7 +38,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// CALL opcode (0xf1) - Message-call into an account.
         /// Stack: [gas, address, value, input_offset, input_size, output_offset, output_size] → [success]
         pub fn call(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            const dispatch = Dispatch{ .cursor = cursor };
             // Check static context - CALL with non-zero value is not allowed in static context
             const output_size = try self.stack.pop();
             const output_offset = try self.stack.pop();
@@ -162,7 +162,7 @@ pub fn Handlers(comptime FrameType: type) type {
         pub fn delegatecall(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             log.err("[EVM2] DELEGATECALL handler called! Stack size: {}", .{self.stack.size()});
             
-            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            const dispatch = Dispatch{ .cursor = cursor };
             const output_size = try self.stack.pop();
             const output_offset = try self.stack.pop();
             const input_size = try self.stack.pop();
@@ -281,7 +281,7 @@ pub fn Handlers(comptime FrameType: type) type {
         pub fn staticcall(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             log.err("[EVM2] STATICCALL handler called! Stack size: {}", .{self.stack.size()});
             
-            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            const dispatch = Dispatch{ .cursor = cursor };
             const output_size = try self.stack.pop();
             const output_offset = try self.stack.pop();
             const input_size = try self.stack.pop();
@@ -398,7 +398,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// Stack: [value, offset, size] → [address]
         /// EIP-214: CREATE not allowed in static context - handled by host implementation
         pub fn create(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            const dispatch = Dispatch{ .cursor = cursor };
             // EIP-214: Static constraint encoded in host - will throw WriteProtection
 
             const value = try self.stack.pop();
@@ -472,7 +472,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// Stack: [value, offset, size, salt] → [address]
         /// EIP-214: CREATE2 not allowed in static context - handled by host implementation
         pub fn create2(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            const dispatch = Dispatch{ .cursor = cursor };
             // EIP-214: Static constraint encoded in host - will throw WriteProtection
 
             const salt = try self.stack.pop();
@@ -550,7 +550,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// RETURN opcode (0xf3) - Halt execution returning output data.
         /// Stack: [offset, size] → []
         pub fn @"return"(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            const dispatch = Dispatch{ .cursor = cursor };
             _ = dispatch;
             if (self.stack.size() < 2) {
                 return Error.StackUnderflow;
@@ -600,7 +600,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// REVERT opcode (0xfd) - Halt execution reverting state changes.
         /// Stack: [offset, size] → []
         pub fn revert(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            const dispatch = Dispatch{ .cursor = cursor };
             _ = dispatch;
             const offset = try self.stack.pop();
             const size = try self.stack.pop();
@@ -654,7 +654,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// Stack: [recipient] → []
         /// EIP-214: STATICCALL prevents SELFDESTRUCT via null self_destruct and static host
         pub fn selfdestruct(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            const dispatch = Dispatch{ .cursor = cursor };
             _ = dispatch;
             const recipient_u256 = try self.stack.pop();
             const recipient = from_u256(recipient_u256);

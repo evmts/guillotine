@@ -15,7 +15,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// MLOAD opcode (0x51) - Load word from memory.
         /// Pops memory offset from stack and pushes the 32-byte word at that offset.
         pub fn mload(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            const dispatch = Dispatch{ .cursor = cursor };
             // MLOAD loads a 32-byte word from memory
             const offset = try self.stack.pop();
 
@@ -50,7 +50,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// MSTORE opcode (0x52) - Store word to memory.
         /// Pops memory offset and value from stack, stores 32 bytes at that offset.
         pub fn mstore(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            const dispatch = Dispatch{ .cursor = cursor };
             // MSTORE stores a 32-byte word to memory
             const offset = try self.stack.pop();
             const value = try self.stack.pop();
@@ -87,7 +87,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// MSTORE8 opcode (0x53) - Store byte to memory.
         /// Pops memory offset and value from stack, stores the least significant byte at that offset.
         pub fn mstore8(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            const dispatch = Dispatch{ .cursor = cursor };
             const offset = try self.stack.pop();
             const value = try self.stack.pop();
 
@@ -119,7 +119,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// MSIZE opcode (0x59) - Get size of active memory.
         /// Pushes the size of active memory in bytes onto the stack.
         pub fn msize(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            const dispatch = Dispatch{ .cursor = cursor };
             const size = self.memory.size();
             try self.stack.push(@as(WordType, @intCast(size)));
 
@@ -130,7 +130,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// MCOPY opcode (0x5e) - Memory copy operation (EIP-5656).
         /// Copies memory from one location to another.
         pub fn mcopy(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            const dispatch = Dispatch{ .cursor = cursor };
             const dest_offset = try self.stack.pop();
             const src_offset = try self.stack.pop();
             const size = try self.stack.pop();

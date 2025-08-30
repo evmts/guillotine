@@ -26,7 +26,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// - For standard EVM (u256), uses Keccak-256
         /// - For smaller word types, may use different variants or truncate
         pub fn keccak(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            const dispatch = Dispatch{ .cursor = cursor };
             const size = self.stack.pop_unsafe();
             const offset = self.stack.pop_unsafe();
 

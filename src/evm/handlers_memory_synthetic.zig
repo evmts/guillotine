@@ -15,7 +15,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// PUSH_MLOAD_INLINE - Fused PUSH+MLOAD with inline offset (≤8 bytes).
         /// Pushes an offset and immediately loads from that memory location.
         pub fn push_mload_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            const dispatch = Dispatch{ .cursor = cursor };
             const metadata = dispatch.getInlineMetadata();
             const offset = metadata.value;
 
@@ -48,7 +48,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// PUSH_MLOAD_POINTER - Fused PUSH+MLOAD with pointer offset (>8 bytes).
         pub fn push_mload_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            const dispatch = Dispatch{ .cursor = cursor };
             const metadata = dispatch.getPointerMetadata();
             const offset = metadata.value.*;
 
@@ -82,7 +82,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// PUSH_MSTORE_INLINE - Fused PUSH+MSTORE with inline offset (≤8 bytes).
         /// Pushes an offset, then pops a value and stores it at that offset.
         pub fn push_mstore_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            const dispatch = Dispatch{ .cursor = cursor };
             const metadata = dispatch.getInlineMetadata();
             const offset = metadata.value;
 
@@ -116,7 +116,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// PUSH_MSTORE_POINTER - Fused PUSH+MSTORE with pointer offset (>8 bytes).
         pub fn push_mstore_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            const dispatch = Dispatch{ .cursor = cursor };
             const metadata = dispatch.getPointerMetadata();
             const offset = metadata.value.*;
 
@@ -151,7 +151,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// PUSH_MSTORE8_INLINE - Fused PUSH+MSTORE8 with inline offset (≤8 bytes).
         /// Pushes an offset, then pops a value and stores the least significant byte.
         pub fn push_mstore8_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            const dispatch = Dispatch{ .cursor = cursor };
             const metadata = dispatch.getInlineMetadata();
             const offset = metadata.value;
 
@@ -185,7 +185,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// PUSH_MSTORE8_POINTER - Fused PUSH+MSTORE8 with pointer offset (>8 bytes).
         pub fn push_mstore8_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            const dispatch = Dispatch{ .cursor = cursor };
             const metadata = dispatch.getPointerMetadata();
             const offset = metadata.value.*;
 

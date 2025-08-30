@@ -20,7 +20,7 @@ pub fn Handlers(comptime FrameType: type) type {
             if (topic_count > 4) @compileError("Only LOG0 to LOG4 is supported");
             return &struct {
                 pub fn logHandler(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            const dispatch = Dispatch{ .cursor = cursor };
                     // EIP-214: WriteProtection is handled by host interface for static calls
 
                     // Pop topics in reverse order
