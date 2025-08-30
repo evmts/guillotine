@@ -170,6 +170,7 @@ pub const Revm = struct {
     pub fn setCode(self: *Revm, address: Address, code: []const u8) !void {
         const code_hex = try std.fmt.allocPrint(self.allocator, "0x{x}\x00", .{code});
         defer self.allocator.free(code_hex);
+        
 
         var error_ptr: ?*c.RevmError = null;
         const addr_bytes = address.bytes;
@@ -403,6 +404,7 @@ pub const Revm = struct {
 
         defer c.revm_free_result(result_ptr);
         const result = result_ptr.?.*;
+        
 
         // Copy output data
         const output = if (result.outputData != null and result.outputLen > 0) blk: {
