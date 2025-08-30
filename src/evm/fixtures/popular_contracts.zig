@@ -1,6 +1,9 @@
 const std = @import("std");
-const abi = @import("primitives").abi;
+const Abi = @import("primitives").Abi;
 const Address = @import("primitives").Address.Address;
+const FunctionDefinition = Abi.FunctionDefinition;
+const StateMutability = Abi.StateMutability;
+const AbiType = Abi.AbiType;
 
 pub const ContractName = enum {
     aave_v3_pool,
@@ -13,10 +16,17 @@ pub const ContractName = enum {
     weth_mainnet,
 };
 
+// Contract ABI structure that holds functions and events
+pub const ContractAbi = struct {
+    name: []const u8,
+    functions: []const FunctionDefinition,
+    // events: []const EventDefinition, // TODO: Add when EventDefinition is available
+};
+
 pub const FixtureContract = struct {
     bytecode: []const u8,
     address: Address,
-    abi: []const u8, // JSON string for now, can be parsed later
+    abi: ContractAbi,
 
     pub fn get(contract: ContractName) FixtureContract {
         return switch (contract) {
@@ -48,192 +58,149 @@ pub const FixtureContract = struct {
 
 const valid_contract_names = "aave_v3_pool, chainlink_price_feed, compound_cusdc, opensea_seaport, uniswap_v2_router, uniswap_v3_pool_eth_usdc, usdc_proxy, weth_mainnet";
 
+// Helper functions to convert .zon data to ABI format
+fn stringToAbiType(comptime type_str: []const u8) AbiType {
+    if (comptime std.mem.eql(u8, type_str, "uint8")) return .uint8;
+    if (comptime std.mem.eql(u8, type_str, "uint16")) return .uint16;
+    if (comptime std.mem.eql(u8, type_str, "uint32")) return .uint32;
+    if (comptime std.mem.eql(u8, type_str, "uint64")) return .uint64;
+    if (comptime std.mem.eql(u8, type_str, "uint128")) return .uint128;
+    if (comptime std.mem.eql(u8, type_str, "uint256")) return .uint256;
+    if (comptime std.mem.eql(u8, type_str, "int8")) return .int8;
+    if (comptime std.mem.eql(u8, type_str, "int16")) return .int16;
+    if (comptime std.mem.eql(u8, type_str, "int32")) return .int32;
+    if (comptime std.mem.eql(u8, type_str, "int64")) return .int64;
+    if (comptime std.mem.eql(u8, type_str, "int128")) return .int128;
+    if (comptime std.mem.eql(u8, type_str, "int256")) return .int256;
+    if (comptime std.mem.eql(u8, type_str, "address")) return .address;
+    if (comptime std.mem.eql(u8, type_str, "bool")) return .bool;
+    if (comptime std.mem.eql(u8, type_str, "bytes32")) return .bytes32;
+    if (comptime std.mem.eql(u8, type_str, "bytes")) return .bytes;
+    if (comptime std.mem.eql(u8, type_str, "string")) return .string;
+    if (comptime std.mem.eql(u8, type_str, "uint256[]")) return .uint256_array;
+    if (comptime std.mem.eql(u8, type_str, "address[]")) return .address_array;
+    // Handle specific sized types
+    if (comptime std.mem.eql(u8, type_str, "bytes1")) return .bytes1;
+    if (comptime std.mem.eql(u8, type_str, "bytes2")) return .bytes2;
+    if (comptime std.mem.eql(u8, type_str, "bytes3")) return .bytes3;
+    if (comptime std.mem.eql(u8, type_str, "bytes4")) return .bytes4;
+    if (comptime std.mem.eql(u8, type_str, "bytes8")) return .bytes8;
+    if (comptime std.mem.eql(u8, type_str, "bytes16")) return .bytes16;
+    // Handle non-standard sized uints by mapping to larger types
+    if (comptime std.mem.eql(u8, type_str, "uint40")) return .uint64; // Map to larger type
+    if (comptime std.mem.eql(u8, type_str, "uint80")) return .uint128; // Map to larger type
+    // Handle complex types by mapping to simpler types for now
+    if (comptime std.mem.eql(u8, type_str, "tuple")) return .bytes32; // Temporary mapping
+    if (comptime std.mem.eql(u8, type_str, "tuple[]")) return .bytes32_array; // Temporary mapping
+    if (comptime std.mem.eql(u8, type_str, "tuple[][]")) return .bytes32_array; // Temporary mapping for nested arrays
+    // Fallback: for any other complex type, map to bytes32
+    return .bytes32;
+}
+
+fn stringToStateMutability(comptime mutability_str: []const u8) StateMutability {
+    if (comptime std.mem.eql(u8, mutability_str, "pure")) return .pure;
+    if (comptime std.mem.eql(u8, mutability_str, "view")) return .view;
+    if (comptime std.mem.eql(u8, mutability_str, "nonpayable")) return .nonpayable;
+    if (comptime std.mem.eql(u8, mutability_str, "payable")) return .payable;
+    @compileError("Unsupported state mutability: " ++ mutability_str);
+}
+
+// Function to convert input/output parameters from .zon to AbiType array
+fn convertZonParameters(comptime zon_params: anytype) []const AbiType {
+    const fields = std.meta.fields(@TypeOf(zon_params));
+    var types: [fields.len]AbiType = undefined;
+    inline for (fields, 0..) |field, i| {
+        const param = @field(zon_params, field.name);
+        types[i] = stringToAbiType(param.type);
+    }
+    const result = types;
+    return &result;
+}
+
+// Function to convert a .zon function definition to FunctionDefinition
+fn convertZonFunction(comptime zon_func: anytype) FunctionDefinition {
+    const inputs = convertZonParameters(zon_func.inputs);
+    const outputs = convertZonParameters(zon_func.outputs);
+    return FunctionDefinition{
+        .name = zon_func.name,
+        .inputs = inputs,
+        .outputs = outputs,
+        .state_mutability = stringToStateMutability(zon_func.stateMutability),
+    };
+}
+
+// Function to convert full .zon ABI to ContractAbi
+fn convertZonAbi(comptime zon_abi: anytype) ContractAbi {
+    const functions_struct = zon_abi.functions;
+    const function_fields = std.meta.fields(@TypeOf(functions_struct));
+    
+    var functions: [function_fields.len]FunctionDefinition = undefined;
+    inline for (function_fields, 0..) |field, i| {
+        const zon_func = @field(functions_struct, field.name);
+        functions[i] = convertZonFunction(zon_func);
+    }
+    
+    const result_functions = functions;
+    return ContractAbi{
+        .name = zon_abi.name,
+        .functions = &result_functions,
+    };
+}
+
 // AAVE V3 Pool
 const aave_v3_pool_fixture = FixtureContract{
     .address = Address.from_hex("0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2") catch unreachable,
     .bytecode = @embedFile("aave-v3-pool/bytecode.txt"),
-    .abi = 
-    \\[{
-    \\  "inputs": [{"internalType": "address", "name": "asset", "type": "address"},
-    \\             {"internalType": "uint256", "name": "amount", "type": "uint256"},
-    \\             {"internalType": "address", "name": "onBehalfOf", "type": "address"},
-    \\             {"internalType": "uint16", "name": "referralCode", "type": "uint16"}],
-    \\  "name": "supply",
-    \\  "outputs": [],
-    \\  "stateMutability": "nonpayable",
-    \\  "type": "function"
-    \\},
-    \\{
-    \\  "inputs": [{"internalType": "address", "name": "asset", "type": "address"},
-    \\             {"internalType": "uint256", "name": "amount", "type": "uint256"},
-    \\             {"internalType": "address", "name": "to", "type": "address"}],
-    \\  "name": "withdraw",
-    \\  "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
-    \\  "stateMutability": "nonpayable",
-    \\  "type": "function"
-    \\}]
-    ,
+    .abi = convertZonAbi(@import("aave-v3-pool/contract.abi.zon")),
 };
 
 // Chainlink Price Feed
 const chainlink_price_feed_fixture = FixtureContract{
     .address = Address.from_hex("0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419") catch unreachable,
     .bytecode = @embedFile("chainlink-price-feed/bytecode.txt"),
-    .abi = 
-    \\[{
-    \\  "inputs": [],
-    \\  "name": "latestRoundData",
-    \\  "outputs": [
-    \\    {"internalType": "uint80", "name": "roundId", "type": "uint80"},
-    \\    {"internalType": "int256", "name": "answer", "type": "int256"},
-    \\    {"internalType": "uint256", "name": "startedAt", "type": "uint256"},
-    \\    {"internalType": "uint256", "name": "updatedAt", "type": "uint256"},
-    \\    {"internalType": "uint80", "name": "answeredInRound", "type": "uint80"}
-    \\  ],
-    \\  "stateMutability": "view",
-    \\  "type": "function"
-    \\},
-    \\{
-    \\  "inputs": [],
-    \\  "name": "decimals",
-    \\  "outputs": [{"internalType": "uint8", "name": "", "type": "uint8"}],
-    \\  "stateMutability": "view",
-    \\  "type": "function"
-    \\}]
-    ,
+    .abi = convertZonAbi(@import("chainlink-price-feed/contract.abi.zon")),
 };
 
 // Compound cUSDC
 const compound_cusdc_fixture = FixtureContract{
     .address = Address.from_hex("0x39AA39c021dfbaE8faC545936693aC917d5E7563") catch unreachable,
     .bytecode = @embedFile("compound-cusdc/bytecode.txt"),
-    .abi = 
-    \\[{
-    \\  "inputs": [{"internalType": "uint256", "name": "mintAmount", "type": "uint256"}],
-    \\  "name": "mint",
-    \\  "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
-    \\  "stateMutability": "nonpayable",
-    \\  "type": "function"
-    \\},
-    \\{
-    \\  "inputs": [{"internalType": "uint256", "name": "redeemTokens", "type": "uint256"}],
-    \\  "name": "redeem",
-    \\  "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
-    \\  "stateMutability": "nonpayable",
-    \\  "type": "function"
-    \\}]
-    ,
+    .abi = convertZonAbi(@import("compound-cusdc/contract.abi.zon")),
 };
 
 // OpenSea Seaport
 const opensea_seaport_fixture = FixtureContract{
     .address = Address.from_hex("0x00000000000000ADc04C56Bf30aC9d3c0aAF14dC") catch unreachable,
     .bytecode = @embedFile("opensea-seaport/bytecode.txt"),
-    .abi = 
-    \\[{
-    \\  "inputs": [
-    \\    {"components": [
-    \\      {"internalType": "address", "name": "offerer", "type": "address"},
-    \\      {"internalType": "address", "name": "zone", "type": "address"}
-    \\    ], "internalType": "struct Order[]", "name": "orders", "type": "tuple[]"}
-    \\  ],
-    \\  "name": "fulfillOrder",
-    \\  "outputs": [{"internalType": "bool", "name": "fulfilled", "type": "bool"}],
-    \\  "stateMutability": "payable",
-    \\  "type": "function"
-    \\}]
-    ,
+    .abi = convertZonAbi(@import("opensea-seaport/contract.abi.zon")),
 };
 
 // Uniswap V2 Router
 const uniswap_v2_router_fixture = FixtureContract{
     .address = Address.from_hex("0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D") catch unreachable,
     .bytecode = @embedFile("uniswap-v2-router/bytecode.txt"),
-    .abi = 
-    \\[{
-    \\  "inputs": [
-    \\    {"internalType": "uint256", "name": "amountOutMin", "type": "uint256"},
-    \\    {"internalType": "address[]", "name": "path", "type": "address[]"},
-    \\    {"internalType": "address", "name": "to", "type": "address"},
-    \\    {"internalType": "uint256", "name": "deadline", "type": "uint256"}
-    \\  ],
-    \\  "name": "swapExactETHForTokens",
-    \\  "outputs": [{"internalType": "uint256[]", "name": "amounts", "type": "uint256[]"}],
-    \\  "stateMutability": "payable",
-    \\  "type": "function"
-    \\}]
-    ,
+    .abi = convertZonAbi(@import("uniswap-v2-router/contract.abi.zon")),
 };
 
 // Uniswap V3 Pool ETH/USDC
 const uniswap_v3_pool_eth_usdc_fixture = FixtureContract{
     .address = Address.from_hex("0x8ad599c3A0ff1De082011EFDDc58f1908eb6e6D8") catch unreachable,
     .bytecode = @embedFile("uniswap-v3-pool-eth-usdc/bytecode.txt"),
-    .abi = 
-    \\[{
-    \\  "inputs": [
-    \\    {"internalType": "address", "name": "recipient", "type": "address"},
-    \\    {"internalType": "bool", "name": "zeroForOne", "type": "bool"},
-    \\    {"internalType": "int256", "name": "amountSpecified", "type": "int256"},
-    \\    {"internalType": "uint160", "name": "sqrtPriceLimitX96", "type": "uint160"},
-    \\    {"internalType": "bytes", "name": "data", "type": "bytes"}
-    \\  ],
-    \\  "name": "swap",
-    \\  "outputs": [
-    \\    {"internalType": "int256", "name": "amount0", "type": "int256"},
-    \\    {"internalType": "int256", "name": "amount1", "type": "int256"}
-    \\  ],
-    \\  "stateMutability": "nonpayable",
-    \\  "type": "function"
-    \\}]
-    ,
+    .abi = convertZonAbi(@import("uniswap-v3-pool-eth-usdc/contract.abi.zon")),
 };
 
 // USDC Proxy (uses USDC implementation ABI)
 const usdc_proxy_fixture = FixtureContract{
     .address = Address.from_hex("0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48") catch unreachable,
     .bytecode = @embedFile("usdc-proxy/bytecode.txt"),
-    .abi = 
-    \\[{
-    \\  "inputs": [
-    \\    {"internalType": "address", "name": "to", "type": "address"},
-    \\    {"internalType": "uint256", "name": "value", "type": "uint256"}
-    \\  ],
-    \\  "name": "transfer",
-    \\  "outputs": [{"internalType": "bool", "name": "", "type": "bool"}],
-    \\  "stateMutability": "nonpayable",
-    \\  "type": "function"
-    \\},
-    \\{
-    \\  "inputs": [{"internalType": "address", "name": "account", "type": "address"}],
-    \\  "name": "balanceOf",
-    \\  "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
-    \\  "stateMutability": "view",
-    \\  "type": "function"
-    \\}]
-    ,
+    .abi = convertZonAbi(@import("usdc-proxy/contract.abi.zon")),
 };
 
 // WETH Mainnet
 const weth_mainnet_fixture = FixtureContract{
     .address = Address.from_hex("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2") catch unreachable,
     .bytecode = @embedFile("weth-mainnet/bytecode.txt"),
-    .abi = 
-    \\[{
-    \\  "inputs": [],
-    \\  "name": "deposit",
-    \\  "outputs": [],
-    \\  "stateMutability": "payable",
-    \\  "type": "function"
-    \\},
-    \\{
-    \\  "inputs": [{"internalType": "uint256", "name": "wad", "type": "uint256"}],
-    \\  "name": "withdraw",
-    \\  "outputs": [],
-    \\  "stateMutability": "nonpayable",
-    \\  "type": "function"
-    \\}]
-    ,
+    .abi = convertZonAbi(@import("weth-mainnet/contract.abi.zon")),
 };
 
 // Test to verify compile-time checking works

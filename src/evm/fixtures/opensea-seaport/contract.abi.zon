@@ -1,0 +1,355 @@
+// OpenSea Seaport Contract ABI
+// Contract: 0x00000000000000ADc04C56Bf30aC9d3c0aAF14dC
+.{
+    .name = "Seaport",
+    .functions = .{
+        .fulfillOrder = .{
+            .name = "fulfillOrder",
+            .type = "function",
+            .stateMutability = "payable",
+            .inputs = .{
+                .{
+                    .name = "order",
+                    .type = "tuple",
+                    .internalType = "struct OrderComponents",
+                    .components = .{
+                        .{
+                            .name = "offerer",
+                            .type = "address",
+                            .internalType = "address",
+                        },
+                        .{
+                            .name = "zone",
+                            .type = "address",
+                            .internalType = "address",
+                        },
+                        .{
+                            .name = "offer",
+                            .type = "tuple[]",
+                            .internalType = "struct OfferItem[]",
+                        },
+                        .{
+                            .name = "consideration",
+                            .type = "tuple[]",
+                            .internalType = "struct ConsiderationItem[]",
+                        },
+                        .{
+                            .name = "orderType",
+                            .type = "uint8",
+                            .internalType = "enum OrderType",
+                        },
+                        .{
+                            .name = "startTime",
+                            .type = "uint256",
+                            .internalType = "uint256",
+                        },
+                        .{
+                            .name = "endTime",
+                            .type = "uint256",
+                            .internalType = "uint256",
+                        },
+                        .{
+                            .name = "zoneHash",
+                            .type = "bytes32",
+                            .internalType = "bytes32",
+                        },
+                        .{
+                            .name = "salt",
+                            .type = "uint256",
+                            .internalType = "uint256",
+                        },
+                        .{
+                            .name = "conduitKey",
+                            .type = "bytes32",
+                            .internalType = "bytes32",
+                        },
+                        .{
+                            .name = "counter",
+                            .type = "uint256",
+                            .internalType = "uint256",
+                        },
+                    },
+                },
+                .{
+                    .name = "fulfillerConduitKey",
+                    .type = "bytes32",
+                    .internalType = "bytes32",
+                },
+            },
+            .outputs = .{
+                .{
+                    .name = "fulfilled",
+                    .type = "bool",
+                    .internalType = "bool",
+                },
+            },
+        },
+        .fulfillAvailableOrders = .{
+            .name = "fulfillAvailableOrders",
+            .type = "function",
+            .stateMutability = "payable",
+            .inputs = .{
+                .{
+                    .name = "orders",
+                    .type = "tuple[]",
+                    .internalType = "struct Order[]",
+                },
+                .{
+                    .name = "offerFulfillments",
+                    .type = "tuple[][]",
+                    .internalType = "struct FulfillmentComponent[][]",
+                },
+                .{
+                    .name = "considerationFulfillments",
+                    .type = "tuple[][]",
+                    .internalType = "struct FulfillmentComponent[][]",
+                },
+                .{
+                    .name = "fulfillerConduitKey",
+                    .type = "bytes32",
+                    .internalType = "bytes32",
+                },
+                .{
+                    .name = "maximumFulfilled",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+            },
+            .outputs = .{
+                .{
+                    .name = "availableOrders",
+                    .type = "bool[]",
+                    .internalType = "bool[]",
+                },
+                .{
+                    .name = "executions",
+                    .type = "tuple[]",
+                    .internalType = "struct Execution[]",
+                },
+            },
+        },
+        .matchOrders = .{
+            .name = "matchOrders",
+            .type = "function",
+            .stateMutability = "payable",
+            .inputs = .{
+                .{
+                    .name = "orders",
+                    .type = "tuple[]",
+                    .internalType = "struct Order[]",
+                },
+                .{
+                    .name = "fulfillments",
+                    .type = "tuple[]",
+                    .internalType = "struct Fulfillment[]",
+                },
+            },
+            .outputs = .{
+                .{
+                    .name = "executions",
+                    .type = "tuple[]",
+                    .internalType = "struct Execution[]",
+                },
+            },
+        },
+        .cancel = .{
+            .name = "cancel",
+            .type = "function",
+            .stateMutability = "nonpayable",
+            .inputs = .{
+                .{
+                    .name = "orders",
+                    .type = "tuple[]",
+                    .internalType = "struct OrderComponents[]",
+                },
+            },
+            .outputs = .{
+                .{
+                    .name = "cancelled",
+                    .type = "bool",
+                    .internalType = "bool",
+                },
+            },
+        },
+        .validate = .{
+            .name = "validate",
+            .type = "function",
+            .stateMutability = "nonpayable",
+            .inputs = .{
+                .{
+                    .name = "orders",
+                    .type = "tuple[]",
+                    .internalType = "struct Order[]",
+                },
+            },
+            .outputs = .{
+                .{
+                    .name = "validated",
+                    .type = "bool",
+                    .internalType = "bool",
+                },
+            },
+        },
+        .getOrderHash = .{
+            .name = "getOrderHash",
+            .type = "function",
+            .stateMutability = "view",
+            .inputs = .{
+                .{
+                    .name = "order",
+                    .type = "tuple",
+                    .internalType = "struct OrderComponents",
+                },
+            },
+            .outputs = .{
+                .{
+                    .name = "orderHash",
+                    .type = "bytes32",
+                    .internalType = "bytes32",
+                },
+            },
+        },
+        .getOrderStatus = .{
+            .name = "getOrderStatus",
+            .type = "function",
+            .stateMutability = "view",
+            .inputs = .{
+                .{
+                    .name = "orderHash",
+                    .type = "bytes32",
+                    .internalType = "bytes32",
+                },
+            },
+            .outputs = .{
+                .{
+                    .name = "isValidated",
+                    .type = "bool",
+                    .internalType = "bool",
+                },
+                .{
+                    .name = "isCancelled",
+                    .type = "bool",
+                    .internalType = "bool",
+                },
+                .{
+                    .name = "totalFilled",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+                .{
+                    .name = "totalSize",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+            },
+        },
+        .name = .{
+            .name = "name",
+            .type = "function",
+            .stateMutability = "pure",
+            .inputs = .{},
+            .outputs = .{
+                .{
+                    .name = "",
+                    .type = "string",
+                    .internalType = "string",
+                },
+            },
+        },
+    },
+    .events = .{
+        .OrderFulfilled = .{
+            .name = "OrderFulfilled",
+            .type = "event",
+            .anonymous = false,
+            .inputs = .{
+                .{
+                    .name = "orderHash",
+                    .type = "bytes32",
+                    .indexed = false,
+                    .internalType = "bytes32",
+                },
+                .{
+                    .name = "offerer",
+                    .type = "address",
+                    .indexed = true,
+                    .internalType = "address",
+                },
+                .{
+                    .name = "zone",
+                    .type = "address",
+                    .indexed = true,
+                    .internalType = "address",
+                },
+                .{
+                    .name = "recipient",
+                    .type = "address",
+                    .indexed = false,
+                    .internalType = "address",
+                },
+                .{
+                    .name = "offer",
+                    .type = "tuple[]",
+                    .indexed = false,
+                    .internalType = "struct SpentItem[]",
+                },
+                .{
+                    .name = "consideration",
+                    .type = "tuple[]",
+                    .indexed = false,
+                    .internalType = "struct ReceivedItem[]",
+                },
+            },
+        },
+        .OrderCancelled = .{
+            .name = "OrderCancelled",
+            .type = "event",
+            .anonymous = false,
+            .inputs = .{
+                .{
+                    .name = "orderHash",
+                    .type = "bytes32",
+                    .indexed = false,
+                    .internalType = "bytes32",
+                },
+                .{
+                    .name = "offerer",
+                    .type = "address",
+                    .indexed = true,
+                    .internalType = "address",
+                },
+                .{
+                    .name = "zone",
+                    .type = "address",
+                    .indexed = true,
+                    .internalType = "address",
+                },
+            },
+        },
+        .OrderValidated = .{
+            .name = "OrderValidated",
+            .type = "event",
+            .anonymous = false,
+            .inputs = .{
+                .{
+                    .name = "orderHash",
+                    .type = "bytes32",
+                    .indexed = false,
+                    .internalType = "bytes32",
+                },
+                .{
+                    .name = "offerer",
+                    .type = "address",
+                    .indexed = true,
+                    .internalType = "address",
+                },
+                .{
+                    .name = "zone",
+                    .type = "address",
+                    .indexed = true,
+                    .internalType = "address",
+                },
+            },
+        },
+    },
+}

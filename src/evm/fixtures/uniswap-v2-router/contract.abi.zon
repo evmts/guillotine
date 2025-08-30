@@ -1,0 +1,288 @@
+// Uniswap V2 Router Contract ABI
+// Contract: 0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D
+.{
+    .name = "UniswapV2Router02",
+    .functions = .{
+        .swapExactETHForTokens = .{
+            .name = "swapExactETHForTokens",
+            .type = "function",
+            .stateMutability = "payable",
+            .inputs = .{
+                .{
+                    .name = "amountOutMin",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+                .{
+                    .name = "path",
+                    .type = "address[]",
+                    .internalType = "address[]",
+                },
+                .{
+                    .name = "to",
+                    .type = "address",
+                    .internalType = "address",
+                },
+                .{
+                    .name = "deadline",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+            },
+            .outputs = .{
+                .{
+                    .name = "amounts",
+                    .type = "uint256[]",
+                    .internalType = "uint256[]",
+                },
+            },
+        },
+        .swapExactTokensForETH = .{
+            .name = "swapExactTokensForETH",
+            .type = "function",
+            .stateMutability = "nonpayable",
+            .inputs = .{
+                .{
+                    .name = "amountIn",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+                .{
+                    .name = "amountOutMin",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+                .{
+                    .name = "path",
+                    .type = "address[]",
+                    .internalType = "address[]",
+                },
+                .{
+                    .name = "to",
+                    .type = "address",
+                    .internalType = "address",
+                },
+                .{
+                    .name = "deadline",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+            },
+            .outputs = .{
+                .{
+                    .name = "amounts",
+                    .type = "uint256[]",
+                    .internalType = "uint256[]",
+                },
+            },
+        },
+        .swapExactTokensForTokens = .{
+            .name = "swapExactTokensForTokens",
+            .type = "function",
+            .stateMutability = "nonpayable",
+            .inputs = .{
+                .{
+                    .name = "amountIn",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+                .{
+                    .name = "amountOutMin",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+                .{
+                    .name = "path",
+                    .type = "address[]",
+                    .internalType = "address[]",
+                },
+                .{
+                    .name = "to",
+                    .type = "address",
+                    .internalType = "address",
+                },
+                .{
+                    .name = "deadline",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+            },
+            .outputs = .{
+                .{
+                    .name = "amounts",
+                    .type = "uint256[]",
+                    .internalType = "uint256[]",
+                },
+            },
+        },
+        .addLiquidity = .{
+            .name = "addLiquidity",
+            .type = "function",
+            .stateMutability = "nonpayable",
+            .inputs = .{
+                .{
+                    .name = "tokenA",
+                    .type = "address",
+                    .internalType = "address",
+                },
+                .{
+                    .name = "tokenB",
+                    .type = "address",
+                    .internalType = "address",
+                },
+                .{
+                    .name = "amountADesired",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+                .{
+                    .name = "amountBDesired",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+                .{
+                    .name = "amountAMin",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+                .{
+                    .name = "amountBMin",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+                .{
+                    .name = "to",
+                    .type = "address",
+                    .internalType = "address",
+                },
+                .{
+                    .name = "deadline",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+            },
+            .outputs = .{
+                .{
+                    .name = "amountA",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+                .{
+                    .name = "amountB",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+                .{
+                    .name = "liquidity",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+            },
+        },
+        .removeLiquidity = .{
+            .name = "removeLiquidity",
+            .type = "function",
+            .stateMutability = "nonpayable",
+            .inputs = .{
+                .{
+                    .name = "tokenA",
+                    .type = "address",
+                    .internalType = "address",
+                },
+                .{
+                    .name = "tokenB",
+                    .type = "address",
+                    .internalType = "address",
+                },
+                .{
+                    .name = "liquidity",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+                .{
+                    .name = "amountAMin",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+                .{
+                    .name = "amountBMin",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+                .{
+                    .name = "to",
+                    .type = "address",
+                    .internalType = "address",
+                },
+                .{
+                    .name = "deadline",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+            },
+            .outputs = .{
+                .{
+                    .name = "amountA",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+                .{
+                    .name = "amountB",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+            },
+        },
+        .getAmountsOut = .{
+            .name = "getAmountsOut",
+            .type = "function",
+            .stateMutability = "view",
+            .inputs = .{
+                .{
+                    .name = "amountIn",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+                .{
+                    .name = "path",
+                    .type = "address[]",
+                    .internalType = "address[]",
+                },
+            },
+            .outputs = .{
+                .{
+                    .name = "amounts",
+                    .type = "uint256[]",
+                    .internalType = "uint256[]",
+                },
+            },
+        },
+        .factory = .{
+            .name = "factory",
+            .type = "function",
+            .stateMutability = "view",
+            .inputs = .{},
+            .outputs = .{
+                .{
+                    .name = "",
+                    .type = "address",
+                    .internalType = "address",
+                },
+            },
+        },
+        .WETH = .{
+            .name = "WETH",
+            .type = "function",
+            .stateMutability = "view",
+            .inputs = .{},
+            .outputs = .{
+                .{
+                    .name = "",
+                    .type = "address",
+                    .internalType = "address",
+                },
+            },
+        },
+    },
+    .events = .{},
+}

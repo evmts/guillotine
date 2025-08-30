@@ -1,0 +1,320 @@
+// Compound cUSDC Contract ABI
+// Contract: 0x39AA39c021dfbaE8faC545936693aC917d5E7563
+.{
+    .name = "cUSDC",
+    .functions = .{
+        .mint = .{
+            .name = "mint",
+            .type = "function",
+            .stateMutability = "nonpayable",
+            .inputs = .{
+                .{
+                    .name = "mintAmount",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+            },
+            .outputs = .{
+                .{
+                    .name = "",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+            },
+        },
+        .redeem = .{
+            .name = "redeem",
+            .type = "function",
+            .stateMutability = "nonpayable",
+            .inputs = .{
+                .{
+                    .name = "redeemTokens",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+            },
+            .outputs = .{
+                .{
+                    .name = "",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+            },
+        },
+        .redeemUnderlying = .{
+            .name = "redeemUnderlying",
+            .type = "function",
+            .stateMutability = "nonpayable",
+            .inputs = .{
+                .{
+                    .name = "redeemAmount",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+            },
+            .outputs = .{
+                .{
+                    .name = "",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+            },
+        },
+        .borrow = .{
+            .name = "borrow",
+            .type = "function",
+            .stateMutability = "nonpayable",
+            .inputs = .{
+                .{
+                    .name = "borrowAmount",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+            },
+            .outputs = .{
+                .{
+                    .name = "",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+            },
+        },
+        .repayBorrow = .{
+            .name = "repayBorrow",
+            .type = "function",
+            .stateMutability = "nonpayable",
+            .inputs = .{
+                .{
+                    .name = "repayAmount",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+            },
+            .outputs = .{
+                .{
+                    .name = "",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+            },
+        },
+        .balanceOf = .{
+            .name = "balanceOf",
+            .type = "function",
+            .stateMutability = "view",
+            .inputs = .{
+                .{
+                    .name = "owner",
+                    .type = "address",
+                    .internalType = "address",
+                },
+            },
+            .outputs = .{
+                .{
+                    .name = "",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+            },
+        },
+        .balanceOfUnderlying = .{
+            .name = "balanceOfUnderlying",
+            .type = "function",
+            .stateMutability = "nonpayable",
+            .inputs = .{
+                .{
+                    .name = "owner",
+                    .type = "address",
+                    .internalType = "address",
+                },
+            },
+            .outputs = .{
+                .{
+                    .name = "",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+            },
+        },
+        .borrowBalanceCurrent = .{
+            .name = "borrowBalanceCurrent",
+            .type = "function",
+            .stateMutability = "nonpayable",
+            .inputs = .{
+                .{
+                    .name = "account",
+                    .type = "address",
+                    .internalType = "address",
+                },
+            },
+            .outputs = .{
+                .{
+                    .name = "",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+            },
+        },
+        .exchangeRateCurrent = .{
+            .name = "exchangeRateCurrent",
+            .type = "function",
+            .stateMutability = "nonpayable",
+            .inputs = .{},
+            .outputs = .{
+                .{
+                    .name = "",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+            },
+        },
+        .exchangeRateStored = .{
+            .name = "exchangeRateStored",
+            .type = "function",
+            .stateMutability = "view",
+            .inputs = .{},
+            .outputs = .{
+                .{
+                    .name = "",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+            },
+        },
+        .totalSupply = .{
+            .name = "totalSupply",
+            .type = "function",
+            .stateMutability = "view",
+            .inputs = .{},
+            .outputs = .{
+                .{
+                    .name = "",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+            },
+        },
+        .underlying = .{
+            .name = "underlying",
+            .type = "function",
+            .stateMutability = "view",
+            .inputs = .{},
+            .outputs = .{
+                .{
+                    .name = "",
+                    .type = "address",
+                    .internalType = "address",
+                },
+            },
+        },
+        .supplyRatePerBlock = .{
+            .name = "supplyRatePerBlock",
+            .type = "function",
+            .stateMutability = "view",
+            .inputs = .{},
+            .outputs = .{
+                .{
+                    .name = "",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+            },
+        },
+        .borrowRatePerBlock = .{
+            .name = "borrowRatePerBlock",
+            .type = "function",
+            .stateMutability = "view",
+            .inputs = .{},
+            .outputs = .{
+                .{
+                    .name = "",
+                    .type = "uint256",
+                    .internalType = "uint256",
+                },
+            },
+        },
+    },
+    .events = .{
+        .Mint = .{
+            .name = "Mint",
+            .type = "event",
+            .anonymous = false,
+            .inputs = .{
+                .{
+                    .name = "minter",
+                    .type = "address",
+                    .indexed = false,
+                    .internalType = "address",
+                },
+                .{
+                    .name = "mintAmount",
+                    .type = "uint256",
+                    .indexed = false,
+                    .internalType = "uint256",
+                },
+                .{
+                    .name = "mintTokens",
+                    .type = "uint256",
+                    .indexed = false,
+                    .internalType = "uint256",
+                },
+            },
+        },
+        .Redeem = .{
+            .name = "Redeem",
+            .type = "event",
+            .anonymous = false,
+            .inputs = .{
+                .{
+                    .name = "redeemer",
+                    .type = "address",
+                    .indexed = false,
+                    .internalType = "address",
+                },
+                .{
+                    .name = "redeemAmount",
+                    .type = "uint256",
+                    .indexed = false,
+                    .internalType = "uint256",
+                },
+                .{
+                    .name = "redeemTokens",
+                    .type = "uint256",
+                    .indexed = false,
+                    .internalType = "uint256",
+                },
+            },
+        },
+        .Borrow = .{
+            .name = "Borrow",
+            .type = "event",
+            .anonymous = false,
+            .inputs = .{
+                .{
+                    .name = "borrower",
+                    .type = "address",
+                    .indexed = false,
+                    .internalType = "address",
+                },
+                .{
+                    .name = "borrowAmount",
+                    .type = "uint256",
+                    .indexed = false,
+                    .internalType = "uint256",
+                },
+                .{
+                    .name = "accountBorrows",
+                    .type = "uint256",
+                    .indexed = false,
+                    .internalType = "uint256",
+                },
+                .{
+                    .name = "totalBorrows",
+                    .type = "uint256",
+                    .indexed = false,
+                    .internalType = "uint256",
+                },
+            },
+        },
+    },
+}

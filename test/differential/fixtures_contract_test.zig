@@ -18,7 +18,8 @@ test "FixtureContract enum-based get method" {
     const contracts = [_]FixtureContract{ weth, chainlink, compound, opensea, uniswap_v2, uniswap_v3, usdc, aave };
     for (contracts) |contract| {
         try std.testing.expect(contract.bytecode.len > 0);
-        try std.testing.expect(contract.abi.len > 0);
+        try std.testing.expect(contract.abi.name.len > 0); // ABI has a name
+        try std.testing.expect(contract.abi.functions.len > 0); // ABI has functions
         try std.testing.expect(!contract.address.is_zero());
     }
 }
@@ -51,12 +52,19 @@ test "FixtureContract bytecode content validation" {
 test "FixtureContract ABI format validation" {
     const weth = FixtureContract.get(.weth_mainnet);
     
-    // ABI should be JSON format
-    try std.testing.expect(std.mem.startsWith(u8, weth.abi, "["));
-    try std.testing.expect(std.mem.endsWith(u8, weth.abi, "]"));
+    // ABI should have proper structure
+    try std.testing.expect(std.mem.eql(u8, weth.abi.name, "WETH"));
+    try std.testing.expect(weth.abi.functions.len > 0);
     
-    // Should contain function definitions
-    try std.testing.expect(std.mem.indexOf(u8, weth.abi, "function") != null);
+    // Should have at least basic ERC-20 functions
+    var found_transfer = false;
+    for (weth.abi.functions) |func| {
+        if (std.mem.eql(u8, func.name, "transfer")) {
+            found_transfer = true;
+            break;
+        }
+    }
+    try std.testing.expect(found_transfer);
 }
 
 test "FixtureContract string-based lookup" {
@@ -67,7 +75,7 @@ test "FixtureContract string-based lookup" {
     // Both methods should return the same contract
     try std.testing.expect(weth.address.equals(enum_weth.address));
     try std.testing.expect(std.mem.eql(u8, weth.bytecode, enum_weth.bytecode));
-    try std.testing.expect(std.mem.eql(u8, weth.abi, enum_weth.abi));
+    try std.testing.expect(std.mem.eql(u8, weth.abi.name, enum_weth.abi.name)); // Compare ABI names
 }
 
 test "ContractName enum completeness" {
@@ -79,7 +87,7 @@ test "ContractName enum completeness" {
     inline for (all_contracts) |contract_name| {
         const contract = FixtureContract.get(contract_name);
         try std.testing.expect(contract.bytecode.len > 0);
-        try std.testing.expect(contract.abi.len > 0);
+        try std.testing.expect(contract.abi.functions.len > 0);
         try std.testing.expect(!contract.address.is_zero());
     }
 }
