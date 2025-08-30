@@ -143,41 +143,41 @@ pub fn Handlers(comptime FrameType: type) type {
         }
 
         /// Safe modular multiplication using double-width arithmetic to prevent overflow.
-        fn mulmod_safe(a: WordType, b: WordType, n: WordType) WordType {
-            if (n == 0) return 0;
-            if (a == 0 or b == 0) return 0;
-            if (n == 1) return 0;
+        fn mulmod_safe(factor1: WordType, factor2: WordType, modulus: WordType) WordType {
+            if (modulus == 0) return 0;
+            if (factor1 == 0 or factor2 == 0) return 0;
+            if (modulus == 1) return 0;
 
             // Reduce operands first
-            const a_mod = a % n;
-            const b_mod = b % n;
+            const factor1_mod = factor1 % modulus;
+            const factor2_mod = factor2 % modulus;
 
             // Use double-width arithmetic to prevent overflow
             if (WordType == u256) {
-                const wide_a = @as(u512, a_mod);
-                const wide_b = @as(u512, b_mod);
-                const wide_n = @as(u512, n);
-                const wide_product = (wide_a * wide_b) % wide_n;
+                const wide_factor1 = @as(u512, factor1_mod);
+                const wide_factor2 = @as(u512, factor2_mod);
+                const wide_modulus = @as(u512, modulus);
+                const wide_product = (wide_factor1 * wide_factor2) % wide_modulus;
                 return @intCast(wide_product);
             } else {
                 // For other word types, fall back to addition-based approach
-                return mulmod_by_addition(a_mod, b_mod, n);
+                return mulmod_by_addition(factor1_mod, factor2_mod, modulus);
             }
         }
 
         /// Fallback modular multiplication using repeated addition for non-u256 types.
-        fn mulmod_by_addition(a: WordType, b: WordType, n: WordType) WordType {
+        fn mulmod_by_addition(factor1: WordType, factor2: WordType, modulus: WordType) WordType {
             var result: WordType = 0;
-            var base = a % n;
-            var multiplier = b % n;
+            var base = factor1 % modulus;
+            var multiplier = factor2 % modulus;
 
             while (multiplier > 0) {
                 if (multiplier & 1 == 1) {
-                    result = addmod_safe(result, base, n);
+                    result = addmod_safe(result, base, modulus);
                 }
                 multiplier >>= 1;
                 if (multiplier > 0) {
-                    base = addmod_safe(base, base, n);
+                    base = addmod_safe(base, base, modulus);
                 }
             }
 
@@ -185,17 +185,17 @@ pub fn Handlers(comptime FrameType: type) type {
         }
 
         /// Safe modular addition that prevents overflow.
-        fn addmod_safe(a: WordType, b: WordType, n: WordType) WordType {
-            const a_mod = a % n;
-            const b_mod = b % n;
+        fn addmod_safe(addend1: WordType, addend2: WordType, modulus: WordType) WordType {
+            const addend1_mod = addend1 % modulus;
+            const addend2_mod = addend2 % modulus;
 
             // Check if addition would overflow
-            if (a_mod > n - b_mod) {
-                // Overflow case: (a + b) = n + (a + b - n)
-                return (a_mod - (n - b_mod));
+            if (addend1_mod > modulus - addend2_mod) {
+                // Overflow case: (addend1 + addend2) = modulus + (addend1 + addend2 - modulus)
+                return (addend1_mod - (modulus - addend2_mod));
             } else {
                 // No overflow case
-                return (a_mod + b_mod) % n;
+                return (addend1_mod + addend2_mod) % modulus;
             }
         }
 
@@ -999,22 +999,22 @@ test "ADDMOD/MULMOD consistency" {
     var frame = try createTestFrame(testing.allocator);
     defer frame.deinit(testing.allocator);
 
-    // Test that (a + b) % n == ((a % n) + (b % n)) % n
-    const a = 12345;
-    const b = 67890;
-    const n = 997; // prime
+    // Test that (addend1 + addend2) % modulus == ((addend1 % modulus) + (addend2 % modulus)) % modulus
+    const addend1 = 12345;
+    const addend2 = 67890;
+    const modulus = 997; // prime
 
     // Direct calculation
-    try frame.stack.push(a);
-    try frame.stack.push(b);
-    try frame.stack.push(n);
+    try frame.stack.push(addend1);
+    try frame.stack.push(addend2);
+    try frame.stack.push(modulus);
 
     const dispatch = createMockDispatch();
     _ = try TestFrame.ArithmeticHandlers.addmod(&frame, dispatch.cursor);
     const result1 = try frame.stack.pop();
 
     // Manual calculation for verification
-    const expected = (a + b) % n;
+    const expected = (addend1 + addend2) % modulus;
     try testing.expectEqual(expected, result1);
 }
 
@@ -1089,14 +1089,14 @@ test "MULMOD opcode - overflow bug reproduction" {
     defer frame.deinit(testing.allocator);
 
     // Test case that reproduces the overflow bug
-    // Use values where (a%n) * (b%n) overflows but a*b%n doesn't
-    const a = (@as(u256, 1) << 200) + 1; // Large number
-    const b = (@as(u256, 1) << 200) + 1; // Large number
-    const n = (@as(u256, 1) << 100) + 3; // Modulus
+    // Use values where (factor1%modulus) * (factor2%modulus) overflows but factor1*factor2%modulus doesn't
+    const factor1 = (@as(u256, 1) << 200) + 1; // Large number
+    const factor2 = (@as(u256, 1) << 200) + 1; // Large number
+    const modulus = (@as(u256, 1) << 100) + 3; // Modulus
 
-    try frame.stack.push(a);
-    try frame.stack.push(b);
-    try frame.stack.push(n);
+    try frame.stack.push(factor1);
+    try frame.stack.push(factor2);
+    try frame.stack.push(modulus);
 
     const dispatch = createMockDispatch();
     _ = try TestFrame.ArithmeticHandlers.mulmod(&frame, dispatch.cursor);
@@ -1105,10 +1105,10 @@ test "MULMOD opcode - overflow bug reproduction" {
     // Calculate correct result using proper modular arithmetic
     // For proper MULMOD: we need arbitrary precision
     // Since Zig u256 overflows, we'd expect different results
-    const a_mod = a % n;
-    const b_mod = b % n;
-    const incorrect_product = a_mod *% b_mod; // This overflows
-    const incorrect_result = incorrect_product % n;
+    const factor1_mod = factor1 % modulus;
+    const factor2_mod = factor2 % modulus;
+    const incorrect_product = factor1_mod *% factor2_mod; // This overflows
+    const incorrect_result = incorrect_product % modulus;
 
     // The current implementation returns the incorrect result due to overflow
     try testing.expectEqual(incorrect_result, buggy_result);
