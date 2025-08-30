@@ -32,11 +32,11 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// SLT opcode (0x12) - Signed less than comparison.
         pub fn slt(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const top_minus_1 = try self.stack.pop();
-            const top = try self.stack.peek();
-            const top_signed = @as(std.meta.Int(.signed, @bitSizeOf(WordType)), @bitCast(top));
-            const top_minus_1_signed = @as(std.meta.Int(.signed, @bitSizeOf(WordType)), @bitCast(top_minus_1));
-            const result: WordType = if (top_signed < top_minus_1_signed) 1 else 0;
+            const b = try self.stack.pop();     // Top element
+            const a = try self.stack.peek();    // Second element (now top after pop)
+            const a_signed = @as(std.meta.Int(.signed, @bitSizeOf(WordType)), @bitCast(a));
+            const b_signed = @as(std.meta.Int(.signed, @bitSizeOf(WordType)), @bitCast(b));
+            const result: WordType = if (b_signed < a_signed) 1 else 0; // Swapped: b < a
             try self.stack.set_top(result);
             const next_cursor = cursor + 1;
             return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor});
@@ -44,11 +44,11 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// SGT opcode (0x13) - Signed greater than comparison.
         pub fn sgt(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const top_minus_1 = try self.stack.pop();
-            const top = try self.stack.peek();
-            const top_signed = @as(std.meta.Int(.signed, @bitSizeOf(WordType)), @bitCast(top));
-            const top_minus_1_signed = @as(std.meta.Int(.signed, @bitSizeOf(WordType)), @bitCast(top_minus_1));
-            const result: WordType = if (top_signed > top_minus_1_signed) 1 else 0;
+            const b = try self.stack.pop();     // Top element
+            const a = try self.stack.peek();    // Second element (now top after pop)
+            const a_signed = @as(std.meta.Int(.signed, @bitSizeOf(WordType)), @bitCast(a));
+            const b_signed = @as(std.meta.Int(.signed, @bitSizeOf(WordType)), @bitCast(b));
+            const result: WordType = if (b_signed > a_signed) 1 else 0; // Swapped: b > a
             try self.stack.set_top(result);
             const next_cursor = cursor + 1;
             return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor});
