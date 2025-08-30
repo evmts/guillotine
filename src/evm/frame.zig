@@ -274,7 +274,7 @@ pub fn Frame(comptime config: FrameConfig) type {
                 }
 
                 const cursor = Self.Dispatch{ .cursor = traced_schedule.ptr + start_index, .jump_table = &traced_jump_table };
-                cursor.cursor[0].opcode_handler(self, &cursor) catch |err| return err;
+                cursor.cursor[0].opcode_handler(self, cursor.cursor) catch |err| return err;
                 unreachable; // Handlers never return normally
             } else {
                 log.debug("DISPATCH INIT: bytecode len={d}", .{bytecode.runtime_code.len});

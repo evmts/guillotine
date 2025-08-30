@@ -831,21 +831,21 @@ pub fn Dispatch(comptime FrameType: type) type {
             const S = struct {
                 var tracer: *TracerType = undefined;
 
-                fn handle(frame: *FrameType, cursor: [*]const Item, jump_table: *const JumpTable) FrameType.Error!noreturn {
+                fn handle(frame: *FrameType, cursor: [*]const Item) FrameType.Error!noreturn {
                     if (is_before) {
-                        const metadata = cursor[0].trace_before;
+                        const metadata = cursor[1].trace_before;
                         if (@hasDecl(TracerType, "beforeOp")) {
                             tracer.beforeOp(metadata.pc, metadata.opcode, FrameType, frame);
                         }
                     } else {
-                        const metadata = cursor[0].trace_after;
+                        const metadata = cursor[1].trace_after;
                         if (@hasDecl(TracerType, "afterOp")) {
                             tracer.afterOp(metadata.pc, metadata.opcode, FrameType, frame);
                         }
                     }
                     // Skip metadata and continue with next handler
                     const next_cursor = cursor + 2; // Skip over current metadata and next handler
-                    return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ frame, next_cursor, jump_table });
+                    return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ frame, next_cursor });
                 }
             };
             S.tracer = tracer_instance;
