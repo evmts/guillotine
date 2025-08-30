@@ -423,7 +423,7 @@ pub fn Dispatch(comptime FrameType: type) type {
             opcode_handlers: *const [256]OpcodeHandler,
         ) ![]Self.Item {
             const log = @import("log.zig");
-            log.debug("Dispatch.init starting...", .{});
+            log.err("DISPATCH INIT: Starting to parse bytecode with {} bytes", .{bytecode.runtime_code.len});
 
             var schedule_items = ArrayList(Self.Item, null){};
             errdefer schedule_items.deinit(allocator);
@@ -453,10 +453,43 @@ pub fn Dispatch(comptime FrameType: type) type {
                 }
                 const op_data = maybe.?;
                 opcode_count += 1;
+                
+                // DEBUG: Log all opcodes being parsed
+                switch (op_data) {
+                    .regular => |data| {
+                        if (opcode_count <= 20) { // Limit spam to first 20 opcodes
+                            log.warn("DISPATCH: Parsing opcode 0x{x:0>2} at PC {d}", .{ data.opcode, instr_pc });
+                        }
+                    },
+                    .push => |data| {
+                        if (opcode_count <= 20) {
+                            log.warn("DISPATCH: Parsing PUSH{d} at PC {d}", .{ data.size, instr_pc });
+                        }
+                    },
+                    else => {
+                        if (opcode_count <= 20) {
+                            log.warn("DISPATCH: Parsing other operation at PC {d}", .{instr_pc});
+                        }
+                    }
+                }
+                
                 switch (op_data) {
                     .regular => |data| {
                         // Regular opcode - add handler first, then metadata for PC, CODESIZE, CODECOPY
                         const handler = opcode_handlers.*[data.opcode];
+                        
+                        // DEBUG: Log specific opcodes we're interested in
+                        if (data.opcode == 0x08) {
+                            log.err("DISPATCH DEBUG: Found ADDMOD (0x08) at PC {d}, adding handler", .{instr_pc});
+                        } else if (data.opcode == 0x09) {
+                            log.err("DISPATCH DEBUG: Found MULMOD (0x09) at PC {d}, adding handler", .{instr_pc});
+                        } else if (data.opcode == 0x0a) {
+                            log.err("DISPATCH DEBUG: Found EXP (0x0a) at PC {d}, adding handler", .{instr_pc});
+                        }
+                        
+                        // Also log ALL opcodes to see what we're parsing
+                        log.err("DISPATCH DEBUG: Parsing opcode 0x{x:0>2} at PC {d}", .{data.opcode, instr_pc});
+                        
                         try schedule_items.append(allocator, .{ .opcode_handler = handler });
                         if (data.opcode == @intFromEnum(Opcode.PC)) {
                             try schedule_items.append(allocator, .{ .pc = .{ .value = @intCast(instr_pc) } });

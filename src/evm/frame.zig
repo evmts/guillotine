@@ -277,7 +277,7 @@ pub fn Frame(comptime config: FrameConfig) type {
                 cursor.cursor[0].opcode_handler(self, cursor.cursor) catch |err| return err;
                 unreachable; // Handlers never return normally
             } else {
-                log.debug("DISPATCH INIT: bytecode len={d}", .{bytecode.runtime_code.len});
+                log.err("FRAME DISPATCH INIT: bytecode len={d}", .{bytecode.runtime_code.len});
                 const schedule = Dispatch.init(self.allocator, &bytecode, handlers) catch |e| {
                     log.err("Failed to create dispatch schedule: {any}", .{e});
                     log.err("  Bytecode runtime_code len: {d}", .{bytecode.runtime_code.len});
