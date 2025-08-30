@@ -229,15 +229,6 @@ pub fn Frame(comptime config: FrameConfig) type {
 
             var bytecode = Bytecode.init(self.allocator, bytecode_raw) catch |e| {
                 @branchHint(.unlikely);
-                log.err("Bytecode init failed: {any}", .{e});
-                if (bytecode_raw.len > 0) {
-                    log.err("  Bytecode length: {d}", .{bytecode_raw.len});
-                    log.err("  First 16 bytes: {x}", .{bytecode_raw[0..@min(bytecode_raw.len, 16)]});
-                    // Check for specific test bytecode
-                    if (bytecode_raw.len >= 10 and bytecode_raw[0] == 0x60 and bytecode_raw[1] == 0x42) {
-                        log.warn("  This appears to be the MSTORE/RETURN test bytecode!", .{});
-                    }
-                }
                 return switch (e) {
                     error.BytecodeTooLarge => Error.BytecodeTooLarge,
                     error.InvalidOpcode => Error.InvalidOpcode,

@@ -12,15 +12,9 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// ADD opcode (0x01) - Addition with overflow wrapping.
         pub fn add(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            log.warn("[ADD] Stack size before: {d}", .{self.stack.size()});
-            if (self.stack.size() < 2) {
-                log.err("[ADD] Stack underflow - need 2 elements, have {d}", .{self.stack.size()});
-                return Error.StackUnderflow;
-            }
             const top_minus_1 = try self.stack.pop();
             const top = try self.stack.peek();
             const result = top +% top_minus_1;
-            log.warn("[ADD] {d} + {d} = {d}, stack size after: {d}", .{ top, top_minus_1, result, self.stack.size() });
             try self.stack.set_top(result);
             const next_cursor = cursor + 1;
             return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
@@ -28,69 +22,38 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// MUL opcode (0x02) - Multiplication with overflow wrapping.
         pub fn mul(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            log.warn("[MUL] Stack size before: {d}", .{self.stack.size()});
-            if (self.stack.size() < 2) {
-                log.err("[MUL] Stack underflow - need 2 elements, have {d}", .{self.stack.size()});
-                return Error.StackUnderflow;
-            }
             const top_minus_1 = try self.stack.pop();
             const top = try self.stack.peek();
             const result = top *% top_minus_1;
-            log.warn("[MUL] {d} * {d} = {d}, stack size after: {d}", .{ top, top_minus_1, result, self.stack.size() });
             try self.stack.set_top(result);
             const next_cursor = cursor + 1;
-            log.warn("[MUL] About to call next opcode handler at cursor+1", .{});
             return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
         }
 
         /// SUB opcode (0x03) - Subtraction with underflow wrapping.
         pub fn sub(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            log.warn("[SUB] Stack size before: {d}", .{self.stack.size()});
-            if (self.stack.size() < 2) {
-                log.err("[SUB] Stack underflow - need 2 elements, have {d}", .{self.stack.size()});
-                return Error.StackUnderflow;
-            }
             const top_minus_1 = try self.stack.pop();
-            log.warn("[SUB] Popped value: 0x{x}, stack size now: {d}", .{ top_minus_1, self.stack.size() });
             const top = try self.stack.peek();
-            log.warn("[SUB] Top value: 0x{x}", .{top});
             const result = top -% top_minus_1;
-            log.warn("[SUB] Result: 0x{x}", .{result});
             try self.stack.set_top(result);
-            log.warn("[SUB] Stack size after: {d}", .{self.stack.size()});
             const next_cursor = cursor + 1;
-            log.warn("[SUB] About to call next opcode handler at cursor+1", .{});
             return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor});
         }
 
         /// DIV opcode (0x04) - Integer division. Division by zero returns 0.
         pub fn div(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            log.warn("[DIV] Stack size before: {d}", .{self.stack.size()});
-            if (self.stack.size() < 2) {
-                log.err("[DIV] Stack underflow - need 2 elements, have {d}", .{self.stack.size()});
-                return Error.StackUnderflow;
-            }
             const denominator = try self.stack.pop();
             const numerator = try self.stack.peek();
             const result = if (denominator == 0) 0 else numerator / denominator;
-            log.warn("[DIV] {d} / {d} = {d}, stack size after: {d}", .{ numerator, denominator, result, self.stack.size() });
             try self.stack.set_top(result);
             const next_cursor = cursor + 1;
-            log.warn("[DIV] About to call next opcode handler at cursor+1", .{});
             return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor});
         }
 
         /// SDIV opcode (0x05) - Signed integer division.
         pub fn sdiv(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            log.warn("[SDIV] Stack size before: {d}", .{self.stack.size()});
-            if (self.stack.size() < 2) {
-                log.err("[SDIV] Stack underflow - need 2 elements, have {d}", .{self.stack.size()});
-                return Error.StackUnderflow;
-            }
             const denominator = try self.stack.pop();
-            log.warn("[SDIV] Popped denominator: 0x{x}, stack size now: {d}", .{ denominator, self.stack.size() });
             const numerator = try self.stack.peek();
-            log.warn("[SDIV] Numerator: 0x{x}", .{numerator});
             var result: WordType = undefined;
             if (denominator == 0) {
                 result = 0;
@@ -113,18 +76,11 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// MOD opcode (0x06) - Modulo operation. Modulo by zero returns 0.
         pub fn mod(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            log.warn("[MOD] Stack size before: {d}", .{self.stack.size()});
-            if (self.stack.size() < 2) {
-                log.err("[MOD] Stack underflow - need 2 elements, have {d}", .{self.stack.size()});
-                return Error.StackUnderflow;
-            }
             const denominator = try self.stack.pop();
             const numerator = try self.stack.peek();
             const result = if (denominator == 0) 0 else numerator % denominator;
-            log.warn("[MOD] {d} % {d} = {d}, stack size after: {d}", .{ numerator, denominator, result, self.stack.size() });
             try self.stack.set_top(result);
             const next_cursor = cursor + 1;
-            log.warn("[MOD] About to call next opcode handler at cursor+1", .{});
             return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor});
         }
 
@@ -148,11 +104,9 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// ADDMOD opcode (0x08) - (a + b) % N. All intermediate calculations are performed with arbitrary precision.
         pub fn addmod(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            log.err("ADDMOD HANDLER CALLED! Stack size: {d}", .{self.stack.size()});
             const modulus = try self.stack.pop();
             const addend2 = try self.stack.pop();
             const addend1 = try self.stack.peek();
-            log.err("ADDMOD: Computing ({d} + {d}) % {d}", .{addend1, addend2, modulus});
             var result: WordType = 0;
             if (modulus == 0) {
                 result = 0;

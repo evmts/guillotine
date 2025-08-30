@@ -23,6 +23,18 @@ pub fn Handlers(comptime FrameType: type) type {
             // Use the currently executing contract's address
             const contract_addr = self.contract_address;
 
+            // Access storage slot and get gas cost (cold vs warm)
+            const evm = self.getEvm();
+            const access_cost = evm.access_storage_slot(contract_addr, slot) catch |err| switch (err) {
+                else => return Error.AllocationError,
+            };
+            
+            // Charge gas for storage access
+            if (self.gas_remaining < access_cost) {
+                return Error.OutOfGas;
+            }
+            self.gas_remaining -= @intCast(access_cost);
+
             // Load value from storage directly from frame's database
             const value = self.database.get_storage(contract_addr.bytes, slot) catch |err| switch (err) {
                 else => return Error.AllocationError,
@@ -53,19 +65,30 @@ pub fn Handlers(comptime FrameType: type) type {
                 else => return Error.AllocationError,
             };
 
-            // Calculate gas cost based on EIP-2200
-            // This is simplified - actual implementation would need to consider:
-            // - Original value (for refunds)
-            // - Cold vs warm access
-            // - Net gas metering
-            var gas_cost: u64 = GasConstants.SstoreSetGas;
-            if (current_value != 0 and value == 0) {
-                // Clearing storage - eligible for refund
-                gas_cost = GasConstants.SstoreClearGas;
-                // Note: Actual refund would be added to gas_refund field
-            } else if (current_value == value) {
-                // No-op
-                gas_cost = GasConstants.SstoreSetGas / 5; // Warm storage cost
+            // Access storage slot and get gas cost (cold vs warm)
+            const evm = self.getEvm();
+            const access_cost = evm.access_storage_slot(contract_addr, slot) catch |err| switch (err) {
+                else => return Error.AllocationError,
+            };
+            
+            // Calculate gas cost based on EIP-2200 and EIP-2929
+            var gas_cost: u64 = undefined;
+            const is_warm = access_cost == GasConstants.WarmStorageReadCost;
+            
+            if (current_value == value) {
+                // No-op: value doesn't change
+                gas_cost = if (is_warm) GasConstants.WarmStorageReadCost else access_cost;
+            } else if (current_value == 0 and value != 0) {
+                // Zero to non-zero (most expensive)
+                gas_cost = if (is_warm) GasConstants.SstoreSetGas else access_cost + GasConstants.SstoreSetGas - GasConstants.WarmStorageReadCost;
+            } else if (current_value != 0 and value == 0) {
+                // Non-zero to zero (eligible for refund)
+                gas_cost = if (is_warm) GasConstants.SstoreClearGas else access_cost + GasConstants.SstoreClearGas - GasConstants.WarmStorageReadCost;
+                // Add gas refund for clearing storage
+                evm.add_gas_refund(GasConstants.SstoreRefundGas);
+            } else {
+                // Non-zero to non-zero (different value)
+                gas_cost = if (is_warm) GasConstants.SstoreClearGas else access_cost + GasConstants.SstoreClearGas - GasConstants.WarmStorageReadCost;
             }
 
             if (self.gas_remaining < gas_cost) {
@@ -117,7 +140,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const contract_addr = self.contract_address;
 
             // Transient storage has fixed gas cost
-            const gas_cost = GasConstants.GasWarmStorageRead; // 100 gas
+            const gas_cost = GasConstants.WarmStorageReadCost; // 100 gas
             if (self.gas_remaining < gas_cost) {
                 return Error.OutOfGas;
             }

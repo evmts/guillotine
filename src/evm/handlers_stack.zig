@@ -35,27 +35,16 @@ pub fn Handlers(comptime FrameType: type) type {
             return &struct {
                 pub fn pushHandler(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
-                    log.warn("[PUSH{d}] Stack size before: {d}", .{ push_n, self.stack.size() });
-                    
-                    // Check for potential stack overflow before pushing
-                    if (self.stack.size() >= 1024) {
-                        log.err("[PUSH{d}] Stack overflow - size already at: {d}", .{ push_n, self.stack.size() });
-                        return Error.StackOverflow;
-                    }
                     
                     if (push_n <= 8) {
                         const meta = dispatch.getInlineMetadata();
-                        log.warn("[PUSH{d}] Pushing inline value: 0x{x}", .{ push_n, meta.value });
                         try self.stack.push(meta.value);
                     } else {
                         const meta = dispatch.getPointerMetadata();
-                        log.warn("[PUSH{d}] Pushing pointer value: 0x{x}", .{ push_n, meta.value.* });
                         try self.stack.push(meta.value.*);
                     }
                     
-                    log.warn("[PUSH{d}] Stack size after: {d}", .{ push_n, self.stack.size() });
                     const next = dispatch.skipMetadata();
-                    log.warn("[PUSH{d}] About to call next opcode handler at cursor+2", .{push_n});
                     return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
                 }
             }.pushHandler;

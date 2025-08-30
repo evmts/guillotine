@@ -119,8 +119,8 @@ pub fn getOpcodeHandlers(comptime FrameType: type) [256]FrameType.OpcodeHandler 
     h[@intFromEnum(Opcode.GAS)] = &ContextHandlers.gas;
     h[@intFromEnum(Opcode.JUMPDEST)] = &JumpHandlers.jumpdest;
     // TODO: Enable when EVM implementation has transient storage support
-    // h[@intFromEnum(Opcode.TLOAD)] = &StorageHandlers.tload;
-    // h[@intFromEnum(Opcode.TSTORE)] = &StorageHandlers.tstore;
+    h[@intFromEnum(Opcode.TLOAD)] = &StorageHandlers.tload;
+    h[@intFromEnum(Opcode.TSTORE)] = &StorageHandlers.tstore;
     h[@intFromEnum(Opcode.MCOPY)] = &MemoryHandlers.mcopy;
     // PUSH
     h[@intFromEnum(Opcode.PUSH0)] = &StackHandlers.push0;

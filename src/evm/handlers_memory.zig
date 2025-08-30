@@ -52,14 +52,8 @@ pub fn Handlers(comptime FrameType: type) type {
         pub fn mstore(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
             // MSTORE stores a 32-byte word to memory
-            log.warn("[MSTORE] Stack size before: {d}", .{self.stack.size()});
-            if (self.stack.size() < 2) {
-                log.err("[MSTORE] Stack underflow - need 2 elements, have {d}", .{self.stack.size()});
-                return Error.StackUnderflow;
-            }
             const offset = try self.stack.pop();
             const value = try self.stack.pop();
-            log.warn("[MSTORE] offset=0x{x}, value=0x{x}, stack size after: {d}", .{ offset, value, self.stack.size() });
 
             // Check if offset fits in usize
             if (offset > std.math.maxInt(usize)) {

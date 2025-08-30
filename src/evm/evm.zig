@@ -801,11 +801,8 @@ pub fn Evm(comptime config: EvmConfig) type {
 
             // Base transaction gas cost (21,000 gas) - only charge for top-level transactions
             const BASE_TX_GAS = 21000;
-            log.err("[EVM] execute_frame called: depth={d}, gas={d}", .{ self.depth, gas });
-            
             const gas_after_base = if (self.depth <= 1 and gas >= BASE_TX_GAS) gas_after_base: {
                 const remaining = gas - BASE_TX_GAS;
-                log.err("[EVM] Charged {d} base gas, remaining: {d}", .{ BASE_TX_GAS, remaining });
                 break :gas_after_base remaining;
             } else gas;
             
@@ -837,13 +834,6 @@ pub fn Evm(comptime config: EvmConfig) type {
                 },
                 else => {
                     // Actual errors
-                    log.err("Frame.interpret() failed (is_static={any}): {any}", .{ is_static, err });
-                    log.err("  Code length: {d}", .{code.len});
-                    log.err("  Gas: {}", .{gas_cast});
-                    log.err("  Address: {any}", .{address});
-                    if (code.len > 0) {
-                        log.err("  First few bytes of code: {x}", .{code[0..@min(code.len, 16)]});
-                    }
                     return CallResult.failure(0);
                 },
             };
@@ -858,13 +848,6 @@ pub fn Evm(comptime config: EvmConfig) type {
                 },
                 else => {
                     // Actual errors
-                    log.err("Frame.interpret() failed (is_static={any}): {any}", .{ is_static, err });
-                    log.err("  Code length: {d}", .{code.len});
-                    log.err("  Gas: {}", .{gas_cast});
-                    log.err("  Address: {any}", .{address});
-                    if (code.len > 0) {
-                        log.err("  First few bytes of code: {x}", .{code[0..@min(code.len, 16)]});
-                    }
                     return CallResult.failure(0);
                 },
             };
