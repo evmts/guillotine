@@ -268,6 +268,31 @@ test "differential: modexp edge cases" {
     try testor.test_bytecode(&bytecode);
 }
 
+test "differential: simple PUSH32" {
+    const allocator = testing.allocator;
+    
+    var testor = try DifferentialTestor.init(allocator);
+    defer testor.deinit();
+    
+    // Single PUSH32 and STOP
+    const bytecode = [_]u8{
+        0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, // PUSH32 MAX_U256
+        0x60, 0x00, // PUSH1 0
+        0x52,       // MSTORE
+        0x60, 0x20, // PUSH1 32
+        0x60, 0x00, // PUSH1 0
+        0xf3,       // RETURN
+    };
+    
+    std.debug.print("\n=== Testing simple PUSH32 ===\n", .{});
+    std.debug.print("Bytecode length: {}\n", .{bytecode.len});
+    
+    try testor.test_bytecode(&bytecode);
+}
+
 test "differential: exp edge cases" {
     const allocator = testing.allocator;
     
