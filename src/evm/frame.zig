@@ -255,7 +255,7 @@ pub fn Frame(comptime config: FrameConfig) type {
                 var traced_jump_table = Dispatch.createJumpTable(self.allocator, traced_schedule, &bytecode) catch return Error.AllocationError;
                 defer self.allocator.free(traced_jump_table.entries);
                 // Update jump_table metadata in the schedule
-                Dispatch.updateJumpTableMetadata(traced_schedule, &traced_jump_table);
+                Dispatch.updateJumpTableMetadata(traced_schedule, &traced_jump_table, &bytecode, handlers);
 
                 var start_index: usize = 0;
                 // Check if first item is first_block_gas and consume gas if so
@@ -292,7 +292,7 @@ pub fn Frame(comptime config: FrameConfig) type {
                 var jump_table = Dispatch.createJumpTable(self.allocator, schedule, &bytecode) catch return Error.AllocationError;
                 defer self.allocator.free(jump_table.entries);
                 // Update jump_table metadata in the schedule
-                Dispatch.updateJumpTableMetadata(schedule, &jump_table);
+                Dispatch.updateJumpTableMetadata(schedule, &jump_table, &bytecode, handlers);
 
                 var start_index: usize = 0;
                 // Check if first item is first_block_gas and consume gas if so

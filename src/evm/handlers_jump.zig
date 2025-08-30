@@ -14,10 +14,10 @@ pub fn Handlers(comptime FrameType: type) type {
         /// Pops destination from stack and transfers control to that location.
         /// The destination must be a valid JUMPDEST.
         pub fn jump(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            // The jump_table should be passed through the frame's dispatch system
-            // For now, create a dispatch without jump_table - this will need to be fixed
-            // when the proper dispatch mechanism is implemented
-            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            // Get jump table from metadata at cursor[1]
+            const jump_table_metadata = cursor[1].jump_table;
+            const jump_table = jump_table_metadata.jump_table;
+            
             const dest = try self.stack.pop();
 
             // Validate jump destination range
@@ -27,8 +27,8 @@ pub fn Handlers(comptime FrameType: type) type {
 
             const dest_pc: FrameType.PcType = @intCast(dest);
 
-            // Look up the destination in the jump table
-            if (dispatch.findJumpTarget(dest_pc)) |jump_dispatch| {
+            // Use binary search to find valid jump destination
+            if (jump_table.findJumpTarget(dest_pc)) |jump_dispatch| {
                 // Found valid JUMPDEST - tail call to the jump destination
                 return @call(FrameType.getTailCallModifier(), jump_dispatch.cursor[0].opcode_handler, .{ self, jump_dispatch.cursor });
             } else {
@@ -41,12 +41,10 @@ pub fn Handlers(comptime FrameType: type) type {
         /// Pops destination and condition from stack.
         /// Jumps to destination if condition is non-zero, otherwise continues to next instruction.
         pub fn jumpi(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            // The jump_table should be passed through the frame's dispatch system
-            // For now, create a dispatch without jump_table - this will need to be fixed
-            // when the proper dispatch mechanism is implemented
-            const next_offset: usize = 1; // Just skip the handler
+            // Get jump table from metadata at cursor[1]
+            const jump_table_metadata = cursor[1].jump_table;
+            const jump_table = jump_table_metadata.jump_table;
             
-            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
             const dest = try self.stack.pop();
             const condition = try self.stack.pop();
 
@@ -58,8 +56,8 @@ pub fn Handlers(comptime FrameType: type) type {
 
                 const dest_pc: FrameType.PcType = @intCast(dest);
 
-                // Look up the destination in the jump table
-                if (dispatch.findJumpTarget(dest_pc)) |jump_dispatch| {
+                // Use binary search to find valid jump destination
+                if (jump_table.findJumpTarget(dest_pc)) |jump_dispatch| {
                     // Found valid JUMPDEST - tail call to the jump destination
                     return @call(FrameType.getTailCallModifier(), jump_dispatch.cursor[0].opcode_handler, .{ self, jump_dispatch.cursor });
                 } else {
@@ -67,9 +65,10 @@ pub fn Handlers(comptime FrameType: type) type {
                     return Error.InvalidJump;
                 }
             } else {
-                // Continue to next instruction, skipping metadata if present
-                const next = Dispatch{ .cursor = cursor + next_offset, .jump_table = null };
-                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                // Condition is false, continue to next instruction
+                // Skip the jump table metadata (cursor + 2)
+                const next_cursor = cursor + 2;
+                return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
             }
         }
 
@@ -538,7 +537,7 @@ test "JUMP opcode - invalid destination should revert" {
     defer testing.allocator.free(jump_table.entries);
     
     // Update jump table metadata in the schedule
-    TestFrame.Dispatch.updateJumpTableMetadata(schedule, &jump_table);
+    TestFrame.Dispatch.updateJumpTableMetadata(schedule, &jump_table, &bytecode, &TestFrame.opcode_handlers);
 
     // Find the JUMP handler in the schedule
     var jump_handler_index: ?usize = null;
@@ -588,7 +587,7 @@ test "JUMPI opcode - invalid destination should revert when taken" {
     defer testing.allocator.free(jump_table.entries);
     
     // Update jump table metadata in the schedule
-    TestFrame.Dispatch.updateJumpTableMetadata(schedule, &jump_table);
+    TestFrame.Dispatch.updateJumpTableMetadata(schedule, &jump_table, &bytecode, &TestFrame.opcode_handlers);
 
     // Find the JUMPI handler in the schedule
     var jumpi_handler_index: ?usize = null;

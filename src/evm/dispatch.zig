@@ -314,12 +314,61 @@ pub fn Dispatch(comptime FrameType: type) type {
 
         /// Update the schedule to include jump table metadata after JUMP/JUMPI handlers.
         /// This is needed so jump handlers can access the jump table through cursor[1].
-        pub fn updateJumpTableMetadata(schedule: []Self.Item, jump_table: *const JumpTable) void {
-            // For now, this is a placeholder implementation
-            // The jump handlers will need to be updated to not rely on cursor[1] for jump_table
-            // Instead, they should get the jump_table through the dispatch parameter
-            _ = schedule;
-            _ = jump_table;
+        pub fn updateJumpTableMetadata(schedule: []Self.Item, jump_table: *const JumpTable, bytecode: anytype, opcode_handlers: *const [256]OpcodeHandler) void {
+            // Find JUMP/JUMPI handlers in the schedule and update their metadata
+            var iter = bytecode.createIterator();
+            var schedule_index: usize = 0;
+            
+            // Skip first_block_gas if present
+            const first_block_gas = calculateFirstBlockGas(bytecode);
+            if (first_block_gas > 0 and schedule.len > 0) {
+                schedule_index = 1;
+            }
+            
+            while (true) {
+                const maybe = iter.next();
+                if (maybe == null) break;
+                const op_data = maybe.?;
+                
+                switch (op_data) {
+                    .regular => |data| {
+                        if (schedule_index < schedule.len) {
+                            // Check if this is JUMP or JUMPI
+                            if (data.opcode == @intFromEnum(Opcode.JUMP) or data.opcode == @intFromEnum(Opcode.JUMPI)) {
+                                // Update the metadata slot with the jump table pointer
+                                if (schedule_index + 1 < schedule.len) {
+                                    schedule[schedule_index + 1] = .{ .jump_table = .{ .jump_table = jump_table } };
+                                }
+                                schedule_index += 2; // Handler + metadata
+                            } else {
+                                schedule_index += 1;
+                                // Account for metadata of other opcodes
+                                if (data.opcode == @intFromEnum(Opcode.PC) or
+                                    data.opcode == @intFromEnum(Opcode.CODESIZE) or
+                                    data.opcode == @intFromEnum(Opcode.CODECOPY))
+                                {
+                                    schedule_index += 1;
+                                }
+                            }
+                        }
+                    },
+                    .push => {
+                        schedule_index += 2; // Handler + metadata
+                    },
+                    .jumpdest => {
+                        schedule_index += 2; // Handler + metadata  
+                    },
+                    .push_add_fusion, .push_mul_fusion, .push_sub_fusion, .push_div_fusion, 
+                    .push_and_fusion, .push_or_fusion, .push_xor_fusion, .push_jump_fusion, .push_jumpi_fusion => {
+                        schedule_index += 2; // Handler + metadata
+                    },
+                    .stop, .invalid => {
+                        schedule_index += 1;
+                    },
+                }
+            }
+            
+            _ = opcode_handlers; // Not needed for this implementation
         }
 
         // ========================
@@ -481,6 +530,9 @@ pub fn Dispatch(comptime FrameType: type) type {
                             // Store direct pointer to bytecode data for stable reference
                             const bytecode_data = bytecode.runtime_code;
                             try schedule_items.append(allocator, .{ .codecopy = .{ .bytecode_ptr = bytecode_data.ptr, .size = @intCast(bytecode_data.len) } });
+                        } else if (data.opcode == @intFromEnum(Opcode.JUMP) or data.opcode == @intFromEnum(Opcode.JUMPI)) {
+                            // JUMP/JUMPI need access to jump table - store placeholder that will be filled later
+                            try schedule_items.append(allocator, .{ .jump_table = .{ .jump_table = undefined } });
                         }
                     },
                     .push => |data| {
@@ -731,6 +783,9 @@ pub fn Dispatch(comptime FrameType: type) type {
                             // Store direct pointer to bytecode data for stable reference
                             const bytecode_data = bytecode.runtime_code;
                             try schedule_items.append(allocator, .{ .codecopy = .{ .bytecode_ptr = bytecode_data.ptr, .size = @intCast(bytecode_data.len) } });
+                        } else if (data.opcode == @intFromEnum(Opcode.JUMP) or data.opcode == @intFromEnum(Opcode.JUMPI)) {
+                            // JUMP/JUMPI need access to jump table - store placeholder that will be filled later
+                            try schedule_items.append(allocator, .{ .jump_table = .{ .jump_table = undefined } });
                         }
 
                         // Insert trace_after
