@@ -190,10 +190,11 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
         pub fn init(allocator: std.mem.Allocator, code: []const u8) ValidationError!Self {
             // First, try to parse metadata to separate runtime code
             const metadata = parseSolidityMetadataFromBytes(code);
-            const runtime_code = if (metadata) |m|
-                code[0 .. code.len - m.metadata_length]
-            else
-                code;
+            const runtime_code = if (metadata) |m| blk: {
+                break :blk code[0 .. code.len - m.metadata_length];
+            } else blk: {
+                break :blk code;
+            };
 
             // Enforce EIP-170: maximum runtime bytecode size
             if (runtime_code.len > cfg.max_bytecode_size) {
@@ -538,8 +539,12 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
 
                 const op = self.runtime_code[i];
 
-                // Validate opcode
-                const opcode_enum = std.meta.intToEnum(Opcode, op) catch return error.InvalidOpcode;
+                // Validate opcode - undefined opcodes are valid but treated as INVALID
+                const opcode_enum = std.meta.intToEnum(Opcode, op) catch blk: {
+                    // Undefined opcodes are valid in EVM - they execute as INVALID operation
+                    // which consumes all gas and reverts. We'll treat them as INVALID (0xFE)
+                    break :blk Opcode.INVALID;
+                };
 
                 // Check if it's a JUMPDEST (and not push data)
                 if (op == @intFromEnum(Opcode.JUMPDEST)) {
@@ -799,15 +804,17 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
 
         /// Parse Solidity metadata from raw bytecode bytes (static function)
         fn parseSolidityMetadataFromBytes(code: []const u8) ?SolidityMetadata {
-            // Minimum metadata size: 2 (length) + 4 (ipfs) + 32 (hash) + 4 (solc) + 3 (version) = 45 bytes
-            if (code.len < 45) return null;
+            // Minimum metadata size: reduced for Swarm format
+            if (code.len < 35) return null;
 
             // Get the last 2 bytes which encode the metadata length
             const len_offset = code.len - 2;
             const metadata_len = (@as(u16, code[len_offset]) << 8) | code[len_offset + 1];
 
-            // Verify metadata length is reasonable
-            if (metadata_len < 43 or metadata_len > code.len) return null;
+            // Verify metadata length is reasonable (reduced minimum for Swarm)
+            if (metadata_len < 35 or metadata_len > code.len) {
+                return null;
+            }
 
             // Calculate where metadata starts
             const metadata_start = code.len - 2 - metadata_len;
@@ -816,45 +823,79 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
             // Parse CBOR-encoded metadata
             var pos: usize = 0;
 
-            // Check CBOR map header (0xa2 = map with 2 items)
-            if (pos >= metadata.len or metadata[pos] != 0xa2) return null;
+            // Check CBOR map header (0xa1 = map with 1 item, 0xa2 = map with 2 items)
+            if (pos >= metadata.len) {
+                return null;
+            }
+            if (metadata[pos] != 0xa1 and metadata[pos] != 0xa2) {
+                return null;
+            }
+            const map_items = if (metadata[pos] == 0xa1) @as(u8, 1) else @as(u8, 2);
             pos += 1;
 
-            // First entry should be "ipfs"
-            if (pos + 5 >= metadata.len) return null;
-            if (metadata[pos] != 0x64) return null; // 4-byte string
-            pos += 1;
+            // First entry should be "ipfs" or "bzzr0"/"bzzr1" 
+            if (pos + 6 >= metadata.len) return null;
+            
+            const is_ipfs = metadata[pos] == 0x64 and pos + 4 < metadata.len and 
+                           std.mem.eql(u8, metadata[pos + 1 .. pos + 5], "ipfs");
+            const is_swarm = metadata[pos] == 0x65 and pos + 5 < metadata.len and
+                            (std.mem.eql(u8, metadata[pos + 1 .. pos + 6], "bzzr0") or
+                             std.mem.eql(u8, metadata[pos + 1 .. pos + 6], "bzzr1"));
+            
+            if (!is_ipfs and !is_swarm) return null;
+            
+            if (is_ipfs) {
+                pos += 5; // Skip length byte + "ipfs"
+            } else {
+                pos += 6; // Skip length byte + "bzzr0" or "bzzr1"
+            }
 
-            if (!std.mem.eql(u8, metadata[pos .. pos + 4], "ipfs")) return null;
-            pos += 4;
-
-            // IPFS hash (0x58 = byte string, 0x22 = 34 bytes following)
-            if (pos + 2 >= metadata.len) return null;
-            if (metadata[pos] != 0x58 or metadata[pos + 1] != 0x22) return null;
-            pos += 2;
-
-            if (pos + 34 > metadata.len) return null;
+            // Hash format depends on whether it's IPFS or Swarm
+            if (is_ipfs) {
+                // IPFS hash (0x58 = byte string, 0x22 = 34 bytes following)
+                if (pos + 2 >= metadata.len) return null;
+                if (metadata[pos] != 0x58 or metadata[pos + 1] != 0x22) return null;
+                pos += 2;
+                if (pos + 34 > metadata.len) return null;
+                pos += 34; // Skip 34-byte IPFS hash
+            } else {
+                // Swarm hash (0x58 = byte string, 0x20 = 32 bytes following)
+                if (pos + 2 >= metadata.len) return null;
+                if (metadata[pos] != 0x58 or metadata[pos + 1] != 0x20) return null;
+                pos += 2;
+                if (pos + 32 > metadata.len) return null;
+                pos += 32; // Skip 32-byte Swarm hash
+            }
+            
+            // Create a dummy 34-byte hash for compatibility (we don't actually need the hash content)
             var ipfs_hash: [34]u8 = undefined;
-            @memcpy(&ipfs_hash, metadata[pos .. pos + 34]);
-            pos += 34;
+            @memset(&ipfs_hash, 0);
 
-            // Second entry should be "solc"
-            if (pos + 5 >= metadata.len) return null;
-            if (metadata[pos] != 0x64) return null; // 4-byte string
-            pos += 1;
+            // For 2-item maps, second entry should be "solc" (but 1-item maps only have the hash)
+            if (map_items == 2) {
+                if (pos + 5 >= metadata.len) return null;
+                if (metadata[pos] != 0x64) return null; // 4-byte string
+                pos += 1;
+                
+                if (!std.mem.eql(u8, metadata[pos .. pos + 4], "solc")) return null;
+                pos += 4;
+                
+                // Solc version (3 bytes: major, minor, patch)
+                if (pos + 3 > metadata.len) return null;
+            }
 
-            if (!std.mem.eql(u8, metadata[pos .. pos + 4], "solc")) return null;
-            pos += 4;
-
-            // Solc version (3 bytes: major, minor, patch)
-            if (pos + 3 > metadata.len) return null;
-            const major = metadata[pos];
-            const minor = metadata[pos + 1];
-            const patch = metadata[pos + 2];
+            // For 1-item maps, we're done parsing; for 2-item maps, parse version
+            var solc_version: [3]u8 = .{ 0, 0, 0 }; // Default for Swarm metadata without version
+            if (map_items == 2) {
+                if (pos + 3 > metadata.len) return null;
+                solc_version[0] = metadata[pos];
+                solc_version[1] = metadata[pos + 1];
+                solc_version[2] = metadata[pos + 2];
+            }
 
             return SolidityMetadata{
                 .ipfs_hash = ipfs_hash,
-                .solc_version = .{ major, minor, patch },
+                .solc_version = solc_version,
                 .metadata_length = metadata_len + 2, // Include the length bytes
             };
         }
@@ -1274,12 +1315,15 @@ test "Bytecode init - empty bytecode" {
     try testing.expectEqual(@as(usize, 0), bytecode.len());
 }
 
-test "Bytecode validation - invalid opcode" {
+test "Bytecode validation - undefined opcode treated as INVALID" {
     const allocator = testing.allocator;
 
-    // Invalid opcode 0x0c (gap in opcode range - not defined)
+    // Undefined opcode 0x0c (gap in opcode range) should be accepted as INVALID
     const code = [_]u8{0x0c};
-    try testing.expectError(BytecodeDefault.ValidationError.InvalidOpcode, BytecodeDefault.init(allocator, &code));
+    var bytecode = try BytecodeDefault.init(allocator, &code);
+    defer bytecode.deinit();
+    
+    try testing.expectEqual(@as(usize, 1), bytecode.len());
 }
 
 test "Bytecode validation - truncated PUSH instruction" {

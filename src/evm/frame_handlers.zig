@@ -42,9 +42,10 @@ pub fn getOpcodeHandlers(comptime FrameType: type) [256]FrameType.OpcodeHandler 
     // The default opcode handler used for any opcode that is not supported by the EVM
     const invalid = struct {
         fn handler(frame: *FrameType, cursor: [*]const FrameType.Dispatch.Item) FrameType.Error!noreturn {
-            _ = frame;
             _ = cursor;
-            return FrameType.Error.InvalidOpcode;
+            // Invalid opcodes consume all remaining gas and revert
+            frame.gas_remaining = 0;
+            return FrameType.Error.OutOfGas;
         }
     }.handler;
 
