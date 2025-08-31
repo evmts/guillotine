@@ -16,8 +16,8 @@ const DEFAULT_RUNS = 100;
 // Test data constants
 const ERC20_TRANSFER_SELECTOR: u32 = 0xa9059cbb; // transfer(address,uint256)
 const ERC20_MINT_SELECTOR: u32 = 0x40c10f19; // mint(address,uint256)
-const TEST_ADDRESS_1: Address = [_]u8{0x11} ** 20;
-const TEST_ADDRESS_2: Address = [_]u8{0x22} ** 20;
+const TEST_ADDRESS_1: Address = Address{ .bytes = [_]u8{0x11} ** 20 };
+const TEST_ADDRESS_2: Address = Address{ .bytes = [_]u8{0x22} ** 20 };
 
 /// Load test case files from src/evm/fixtures/
 fn readFixtureFile(allocator: std.mem.Allocator, fixture_name: []const u8, file_name: []const u8) ![]u8 {
@@ -131,6 +131,8 @@ fn benchmark_evm_erc20_transfer(allocator: std.mem.Allocator) void {
         .coinbase = ZERO_ADDRESS,
         .base_fee = 1000000000,
         .prev_randao = [_]u8{0} ** 32,
+        .blob_base_fee = 0,
+        .blob_versioned_hashes = &.{},
     };
 
     const context = TransactionContext{
@@ -150,7 +152,7 @@ fn benchmark_evm_erc20_transfer(allocator: std.mem.Allocator) void {
             .init_code = bytecode,
             .gas = BENCHMARK_GAS_LIMIT,
         },
-    }) catch return;
+    });
 
     if (!deploy_result.success) return;
 
@@ -163,7 +165,7 @@ fn benchmark_evm_erc20_transfer(allocator: std.mem.Allocator) void {
             .gas = BENCHMARK_GAS_LIMIT,
         },
     };
-    _ = vm.call(call_params) catch return;
+    _ = vm.call(call_params);
 }
 
 fn benchmark_evm_snailtracer(allocator: std.mem.Allocator) void {
@@ -188,6 +190,8 @@ fn benchmark_evm_snailtracer(allocator: std.mem.Allocator) void {
         .coinbase = ZERO_ADDRESS,
         .base_fee = 1000000000,
         .prev_randao = [_]u8{0} ** 32,
+        .blob_base_fee = 0,
+        .blob_versioned_hashes = &.{},
     };
 
     const context = TransactionContext{
@@ -219,7 +223,7 @@ fn benchmark_evm_snailtracer(allocator: std.mem.Allocator) void {
             .gas = BENCHMARK_GAS_LIMIT,
         },
     };
-    _ = vm.call(call_params) catch return;
+    _ = vm.call(call_params);
 }
 
 fn benchmark_evm_thousand_hashes(allocator: std.mem.Allocator) void {
@@ -244,6 +248,8 @@ fn benchmark_evm_thousand_hashes(allocator: std.mem.Allocator) void {
         .coinbase = ZERO_ADDRESS,
         .base_fee = 1000000000,
         .prev_randao = [_]u8{0} ** 32,
+        .blob_base_fee = 0,
+        .blob_versioned_hashes = &.{},
     };
 
     const context = TransactionContext{
@@ -275,7 +281,7 @@ fn benchmark_evm_thousand_hashes(allocator: std.mem.Allocator) void {
             .gas = BENCHMARK_GAS_LIMIT,
         },
     };
-    _ = vm.call(call_params) catch return;
+    _ = vm.call(call_params);
 }
 
 // ============================================================================
@@ -425,6 +431,8 @@ fn benchmark_evm_arithmetic_contract(allocator: std.mem.Allocator) void {
         .coinbase = ZERO_ADDRESS,
         .base_fee = 0,
         .prev_randao = [_]u8{0} ** 32,
+        .blob_base_fee = 0,
+        .blob_versioned_hashes = &.{},
     };
     
     const context = TransactionContext{
@@ -450,7 +458,7 @@ fn benchmark_evm_arithmetic_contract(allocator: std.mem.Allocator) void {
     const code_hash = db.set_code(&ARITHMETIC_CONTRACT) catch return;
     
     // Get existing account or create new one
-    var account = db.get_account(TEST_ADDRESS_2) catch null orelse evm_mod.Account{
+    var account = db.get_account(TEST_ADDRESS_2.bytes) catch null orelse evm_mod.Account{
         .balance = 0,
         .nonce = 0,
         .code_hash = HashUtils.EMPTY_KECCAK256,
@@ -459,9 +467,9 @@ fn benchmark_evm_arithmetic_contract(allocator: std.mem.Allocator) void {
     
     // Update account with code hash
     account.code_hash = code_hash;
-    db.set_account(TEST_ADDRESS_2, account) catch return;
+    db.set_account(TEST_ADDRESS_2.bytes, account) catch return;
     
-    const result = vm.call(call_params) catch return;
+    const result = vm.call(call_params);
     _ = result;
 }
 
@@ -490,16 +498,14 @@ fn benchmark_revm_arithmetic_contract(allocator: std.mem.Allocator) void {
 
 /// Memory expansion patterns - tests memory growth under different scenarios
 fn benchmark_memory_expansion_patterns(allocator: std.mem.Allocator) void {
-    var memory = std.ArrayList(u8).init(allocator);
-    defer memory.deinit();
-    
     // Simulate EVM memory expansion in 32-byte chunks
     const expansion_sizes = [_]usize{ 32, 64, 128, 256, 512, 1024, 2048, 4096 };
     for (expansion_sizes) |size| {
-        memory.resize(size) catch continue;
+        const memory = allocator.alloc(u8, size) catch continue;
+        defer allocator.free(memory);
         // Touch memory to ensure allocation
-        if (memory.items.len > 0) {
-            memory.items[size - 1] = 0xAA;
+        if (memory.len > 0) {
+            memory[size - 1] = 0xAA;
         }
     }
 }
@@ -607,7 +613,6 @@ fn benchmark_storage_access_patterns(allocator: std.mem.Allocator) void {
 // ============================================================================
 
 pub fn main() !void {
-    const stdout = std.io.getStdOut().writer();
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
@@ -615,65 +620,68 @@ pub fn main() !void {
     var bench = zbench.Benchmark.init(allocator, .{});
     defer bench.deinit();
 
-    try stdout.print("\n⚡ Consolidated EVM Performance Benchmarks\n", .{});
-    try stdout.print("==========================================\n\n", .{});
+    std.debug.print("\n⚡ Consolidated EVM Performance Benchmarks\n", .{});
+    std.debug.print("==========================================\n\n", .{});
 
     // Basic Operations Category
-    try stdout.print("📊 Basic Operations\n", .{});
-    try stdout.print("-------------------\n", .{});
+    std.debug.print("📊 Basic Operations\n", .{});
+    std.debug.print("-------------------\n", .{});
     try bench.add("Stack Push/Pop", benchmark_evm_stack_push_pop, .{});
     try bench.add("Arithmetic Sequence", benchmark_evm_arithmetic_sequence, .{});
     try bench.add("Memory Operations", benchmark_evm_memory_operations, .{});
     try bench.add("KECCAK256 Simple", benchmark_evm_keccak256, .{});
-    try stdout.print("\n", .{});
+    std.debug.print("\n", .{});
 
     // ERC20 Tests Category
-    try stdout.print("📊 ERC20 Tests\n", .{});
-    try stdout.print("--------------\n", .{});
+    std.debug.print("📊 ERC20 Tests\n", .{});
+    std.debug.print("--------------\n", .{});
     try bench.add("EVM: ERC20 Transfer", benchmark_evm_erc20_transfer, .{});
     try bench.add("REVM: ERC20 Transfer", benchmark_revm_erc20_transfer, .{});
-    try stdout.print("\n", .{});
+    std.debug.print("\n", .{});
 
     // Snailtracer Benchmark Category
-    try stdout.print("📊 Snailtracer Benchmark\n", .{});
-    try stdout.print("------------------------\n", .{});
+    std.debug.print("📊 Snailtracer Benchmark\n", .{});
+    std.debug.print("------------------------\n", .{});
     try bench.add("EVM: Snailtracer", benchmark_evm_snailtracer, .{});
     try bench.add("REVM: Snailtracer", benchmark_revm_snailtracer, .{});
-    try stdout.print("\n", .{});
+    std.debug.print("\n", .{});
 
     // Hash-Heavy Operations Category
-    try stdout.print("📊 Hash-Heavy Operations\n", .{});
-    try stdout.print("------------------------\n", .{});
+    std.debug.print("📊 Hash-Heavy Operations\n", .{});
+    std.debug.print("------------------------\n", .{});
     try bench.add("EVM: 10k Hashes", benchmark_evm_thousand_hashes, .{});
     try bench.add("REVM: 10k Hashes", benchmark_revm_thousand_hashes, .{});
-    try stdout.print("\n", .{});
+    std.debug.print("\n", .{});
 
     // Simple Contract Comparisons Category
-    try stdout.print("📊 Simple Contract Comparisons\n", .{});
-    try stdout.print("------------------------------\n", .{});
+    std.debug.print("📊 Simple Contract Comparisons\n", .{});
+    std.debug.print("------------------------------\n", .{});
     try bench.add("EVM: Arithmetic Contract", benchmark_evm_arithmetic_contract, .{});
     try bench.add("REVM: Arithmetic Contract", benchmark_revm_arithmetic_contract, .{});
-    try stdout.print("\n", .{});
+    std.debug.print("\n", .{});
 
     // Advanced Operations Category
-    try stdout.print("📊 Advanced Operations\n", .{});
-    try stdout.print("----------------------\n", .{});
+    std.debug.print("📊 Advanced Operations\n", .{});
+    std.debug.print("----------------------\n", .{});
     try bench.add("Memory Expansion Patterns", benchmark_memory_expansion_patterns, .{});
     try bench.add("KECCAK256 Different Sizes", benchmark_keccak256_different_sizes, .{});
     try bench.add("Address Computation", benchmark_address_computation, .{});
     try bench.add("Deep Stack DUP/SWAP", benchmark_deep_stack_dup_swap, .{});
     try bench.add("Storage Access Patterns", benchmark_storage_access_patterns, .{});
 
-    try stdout.print("\nRunning consolidated EVM benchmarks...\n\n", .{});
-    try bench.run(stdout);
+    std.debug.print("\nRunning consolidated EVM benchmarks...\n\n", .{});
     
-    try stdout.print("\n✅ Consolidated EVM benchmarks completed!\n", .{});
-    try stdout.print("\nResults Summary:\n", .{});
-    try stdout.print("• Basic Operations: Core EVM operations performance\n", .{});
-    try stdout.print("• Contract Tests: Real-world contract execution comparison\n", .{});
-    try stdout.print("• EVM vs REVM: Direct comparison with Rust reference implementation\n", .{});
-    try stdout.print("• Advanced Operations: Complex patterns and stress tests\n", .{});
-    try stdout.print("\nLower times indicate better performance.\n", .{});
+    // Run benchmarks
+    const stdout_file = std.fs.File.stdout();
+    try bench.run(stdout_file.writer());
+    
+    std.debug.print("\n✅ Consolidated EVM benchmarks completed!\n", .{});
+    std.debug.print("\nResults Summary:\n", .{});
+    std.debug.print("• Basic Operations: Core EVM operations performance\n", .{});
+    std.debug.print("• Contract Tests: Real-world contract execution comparison\n", .{});
+    std.debug.print("• EVM vs REVM: Direct comparison with Rust reference implementation\n", .{});
+    std.debug.print("• Advanced Operations: Complex patterns and stress tests\n", .{});
+    std.debug.print("\nLower times indicate better performance.\n", .{});
 }
 
 test "consolidated benchmark compilation" {
