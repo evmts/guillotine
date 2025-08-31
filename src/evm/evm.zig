@@ -392,7 +392,7 @@ pub fn Evm(comptime config: EvmConfig) type {
             const beacon_roots = @import("beacon_roots.zig");
             const historical_block_hashes = @import("historical_block_hashes.zig");
             if (std.mem.eql(u8, &to.bytes, &beacon_roots.BEACON_ROOTS_ADDRESS.bytes)) {
-                var contract = beacon_roots.BeaconRootsContract{ .database = self.database };
+                var contract = beacon_roots.BeaconRootsContract{ .database = self.database, .allocator = self.allocator };
                 const caller = if (self.depth > 0) self.call_stack[self.depth - 1].caller else primitives.ZERO_ADDRESS;
                 
                 const result = contract.execute(caller, input, gas) catch |err| {
