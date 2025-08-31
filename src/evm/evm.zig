@@ -288,10 +288,13 @@ pub fn Evm(comptime config: EvmConfig) type {
         /// state including logs and ensures proper cleanup.
         pub fn call(self: *Self, params: CallParams) CallResult {
             params.validate() catch return CallResult.failure(0);
-            defer self.depth = 0;
-            defer _ = self.call_arena.reset(.retain_capacity);
-            defer self.logs.clearRetainingCapacity();
-            defer {
+            
+            // Only reset state for top-level calls (depth == 0)
+            const is_top_level = self.depth == 0;
+            defer if (is_top_level) {
+                self.depth = 0;
+                _ = self.call_arena.reset(.retain_capacity);
+                self.logs.clearRetainingCapacity();
                 // Reset all per-transaction state
                 self.gas_refund_counter = 0;
                 self.current_input = &.{};
@@ -301,7 +304,7 @@ pub fn Evm(comptime config: EvmConfig) type {
                 // Clear journal and access list
                 self.journal.clear();
                 self.access_list.clear();
-            }
+            };
 
             // Check gas unless disabled
             const gas = switch (params) {
