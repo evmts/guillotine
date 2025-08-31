@@ -1,7 +1,7 @@
 /**
- * BN254 Wrapper Library - C Header
+ * BN254 and BLS12-381 Wrapper Library - C Header
  * 
- * C-compatible API for BN254 elliptic curve operations
+ * C-compatible API for BN254 and BLS12-381 elliptic curve operations
  * Designed for integration with Zig code for Ethereum precompiles
  */
 
@@ -113,6 +113,130 @@ int bn254_ecpairing_validate_input(
     const unsigned char* input,
     unsigned int input_len
 );
+
+/**
+ * Result codes for BLS12-381 operations
+ */
+typedef enum {
+    BLS12_381_SUCCESS = 0,
+    BLS12_381_INVALID_INPUT = 1,
+    BLS12_381_INVALID_POINT = 2,
+    BLS12_381_INVALID_SCALAR = 3,
+    BLS12_381_COMPUTATION_FAILED = 4,
+} Bls12381Result;
+
+/**
+ * Perform BLS12-381 G1 addition
+ * 
+ * Input format (256 bytes):
+ * - Bytes 0-47: first point x coordinate (big-endian)
+ * - Bytes 48-95: first point y coordinate (big-endian)
+ * - Bytes 128-175: second point x coordinate (big-endian)
+ * - Bytes 176-223: second point y coordinate (big-endian)
+ *
+ * Output format (128 bytes):
+ * - Bytes 0-47: result x coordinate (big-endian)
+ * - Bytes 48-95: result y coordinate (big-endian)
+ *
+ * @param input Input data pointer
+ * @param input_len Length of input data (must be >= 256)
+ * @param output Output buffer pointer
+ * @param output_len Length of output buffer (must be >= 128)
+ * @return BLS12_381_SUCCESS on success, error code otherwise
+ */
+int bls12_381_g1_add(
+    const unsigned char* input,
+    unsigned int input_len,
+    unsigned char* output,
+    unsigned int output_len
+);
+
+/**
+ * Perform BLS12-381 G1 scalar multiplication
+ * 
+ * Input format (160 bytes):
+ * - Bytes 0-47: x coordinate (big-endian)
+ * - Bytes 48-95: y coordinate (big-endian)
+ * - Bytes 128-159: scalar (big-endian)
+ *
+ * Output format (128 bytes):
+ * - Bytes 0-47: result x coordinate (big-endian)
+ * - Bytes 48-95: result y coordinate (big-endian)
+ *
+ * @param input Input data pointer
+ * @param input_len Length of input data (must be >= 160)
+ * @param output Output buffer pointer
+ * @param output_len Length of output buffer (must be >= 128)
+ * @return BLS12_381_SUCCESS on success, error code otherwise
+ */
+int bls12_381_g1_mul(
+    const unsigned char* input,
+    unsigned int input_len,
+    unsigned char* output,
+    unsigned int output_len
+);
+
+/**
+ * Perform BLS12-381 G1 multi-scalar multiplication
+ * 
+ * Input format (variable, 160 * k bytes for k points):
+ * Each 160-byte group contains:
+ * - Bytes 0-47: x coordinate (big-endian)
+ * - Bytes 48-95: y coordinate (big-endian)
+ * - Bytes 128-159: scalar (big-endian)
+ *
+ * Output format (128 bytes):
+ * - Bytes 0-47: result x coordinate (big-endian)
+ * - Bytes 48-95: result y coordinate (big-endian)
+ *
+ * @param input Input data pointer
+ * @param input_len Length of input data (must be multiple of 160)
+ * @param output Output buffer pointer
+ * @param output_len Length of output buffer (must be >= 128)
+ * @return BLS12_381_SUCCESS on success, error code otherwise
+ */
+int bls12_381_g1_multiexp(
+    const unsigned char* input,
+    unsigned int input_len,
+    unsigned char* output,
+    unsigned int output_len
+);
+
+/**
+ * Perform BLS12-381 pairing check
+ * 
+ * Input format (variable, 384 * k bytes for k pairs):
+ * Each 384-byte group contains:
+ * - Bytes 0-127: G1 point (x, y coordinates, 48 bytes each + padding)
+ * - Bytes 128-383: G2 point (x and y in Fp2, 96 bytes each + padding)
+ *
+ * Output format (32 bytes):
+ * - 32-byte boolean result (0x00...00 for false, 0x00...01 for true)
+ *
+ * @param input Input data pointer
+ * @param input_len Length of input data (must be multiple of 384)
+ * @param output Output buffer pointer  
+ * @param output_len Length of output buffer (must be >= 32)
+ * @return BLS12_381_SUCCESS on success, error code otherwise
+ */
+int bls12_381_pairing(
+    const unsigned char* input,
+    unsigned int input_len,
+    unsigned char* output,
+    unsigned int output_len
+);
+
+/**
+ * Get the expected output size for BLS12-381 G1 operations
+ * @return 128 bytes
+ */
+unsigned int bls12_381_g1_output_size(void);
+
+/**
+ * Get the expected output size for BLS12-381 pairing
+ * @return 32 bytes
+ */
+unsigned int bls12_381_pairing_output_size(void);
 
 #ifdef __cplusplus
 }

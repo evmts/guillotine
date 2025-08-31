@@ -50,3 +50,6 @@ pub const c_kzg = @import("c_kzg");
 
 // BN254 for precompiles
 pub const bn254 = @import("bn254.zig");
+
+// Export BLS12-381 from crypto.zig
+pub const bls12_381 = Crypto.bls12_381;
