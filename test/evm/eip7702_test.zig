@@ -201,7 +201,11 @@ test "EIP-7702: Process authorizations before transaction execution" {
     // Create contract to delegate to
     const contract_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
     const contract_code = [_]u8{0x60, 0x42, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3}; // PUSH1 0x42, PUSH1 0x00, MSTORE, PUSH1 0x20, PUSH1 0x00, RETURN
-    try db.set_code(contract_address.bytes, &contract_code);
+    // Set the contract code - get code hash and set up account
+    const code_hash = try db.set_code(&contract_code);
+    var contract_account = evm.Account.zero();
+    contract_account.code_hash = code_hash;
+    try db.set_account(contract_address.bytes, contract_account);
     
     // Create authorization
     const auth = Authorization{
@@ -247,7 +251,8 @@ test "EIP-7702: Authorization with wrong nonce is rejected" {
     };
     
     const processor = AuthorizationProcessor.init(allocator, &db);
-    try testing.expectError(EIP7702Error.NonceMismatch, processor.processAuthorization(auth, eoa_address));
+    var mutable_processor = processor.*;
+    try testing.expectError(EIP7702Error.NonceMismatch, mutable_processor.processAuthorization(auth, eoa_address));
 }
 
 test "EIP-7702: Authorization with wrong chain_id is rejected" {
@@ -284,7 +289,8 @@ test "EIP-7702: EOA with delegation executes delegated contract code" {
     const eoa_address = try Address.from_hex("0x1111111111111111111111111111111111111111");
     var eoa_account = evm.Account.zero();
     eoa_account.balance = 1_000_000_000_000_000_000;
-    eoa_account.delegated_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
+    const delegated_addr = try Address.from_hex("0x2222222222222222222222222222222222222222");
+    eoa_account.delegated_address = .{ .bytes = delegated_addr.bytes };
     try db.set_account(eoa_address.bytes, eoa_account);
     
     // Setup contract code
@@ -297,7 +303,11 @@ test "EIP-7702: EOA with delegation executes delegated contract code" {
         0x60, 0x00, // PUSH1 0x00
         0xf3,       // RETURN
     };
-    try db.set_code(contract_address.bytes, &contract_code);
+    // Set the contract code - get code hash and set up account
+    const code_hash = try db.set_code(&contract_code);
+    var contract_account = evm.Account.zero();
+    contract_account.code_hash = code_hash;
+    try db.set_account(contract_address.bytes, contract_account);
     
     // Call EOA (should execute contract code)
     const call_params = evm.CallParams{
@@ -328,7 +338,8 @@ test "EIP-7702: ADDRESS opcode returns EOA address, not delegated address" {
     const eoa_address = try Address.from_hex("0x1111111111111111111111111111111111111111");
     var eoa_account = evm.Account.zero();
     eoa_account.balance = 1_000_000_000_000_000_000;
-    eoa_account.delegated_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
+    const delegated_addr = try Address.from_hex("0x2222222222222222222222222222222222222222");
+    eoa_account.delegated_address = .{ .bytes = delegated_addr.bytes };
     try db.set_account(eoa_address.bytes, eoa_account);
     
     // Contract code that returns ADDRESS
@@ -451,10 +462,12 @@ test "EIP-7702: Cannot delegate from contract account" {
     
     // Create contract account (has code)
     const contract_address = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    // Set some dummy code for the contract
+    const dummy_code = [_]u8{0x00};
+    const code_hash = try db.set_code(&dummy_code);
     var contract_account = evm.Account.zero();
-    contract_account.code_hash = [_]u8{0x42} ** 32; // Non-empty code hash
+    contract_account.code_hash = code_hash;
     try db.set_account(contract_address.bytes, contract_account);
-    try db.set_code(contract_address.bytes, &[_]u8{0x00}); // Some code
     
     const auth = Authorization{
         .chain_id = 1,
@@ -476,7 +489,8 @@ test "EIP-7702: Signature recovery validates authority" {
     // Create a real authorization with valid signature
     const private_key: crypto.PrivateKey = [_]u8{0x42} ** 32;
     
-    const signer_address = try crypto.getAddress(allocator, private_key);
+    const public_key = try crypto.unaudited_getPublicKey(private_key);
+    const signer_address = public_key.to_address();
     const target_address = try Address.from_hex("0x1111111111111111111111111111111111111111");
     
     const auth = try primitives.Authorization.create_authorization(
@@ -505,7 +519,8 @@ test "EIP-7702: Authorization revocation (nonce = 2^64 - 1)" {
     const eoa_address = try Address.from_hex("0x1111111111111111111111111111111111111111");
     var eoa_account = evm.Account.zero();
     eoa_account.nonce = 5;
-    eoa_account.delegated_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
+    const delegated_addr = try Address.from_hex("0x2222222222222222222222222222222222222222");
+    eoa_account.delegated_address = .{ .bytes = delegated_addr.bytes };
     try db.set_account(eoa_address.bytes, eoa_account);
     
     // Create revocation authorization (nonce = max u64)
@@ -561,7 +576,11 @@ test "EIP-7702: Full transaction execution with authorization list" {
         0x60, 0x00, // PUSH1 0x00
         0xf3,       // RETURN
     };
-    try db.set_code(contract_address.bytes, &contract_code);
+    // Set the contract code - get code hash and set up account
+    const code_hash = try db.set_code(&contract_code);
+    var contract_account = evm.Account.zero();
+    contract_account.code_hash = code_hash;
+    try db.set_account(contract_address.bytes, contract_account);
     
     // Create authorization
     const auth = Authorization{
