@@ -31,6 +31,7 @@ test "EIP-3651 - COINBASE opcode uses warm gas cost post-Shanghai" {
     
     const coinbase_address = [_]u8{0xC0, 0x1B, 0xA5, 0xE} ++ [_]u8{0} ** 16;
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 17_000_000, // Post-Shanghai block
         .timestamp = 1681338455,
         .difficulty = 0,

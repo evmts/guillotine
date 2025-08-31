@@ -356,6 +356,7 @@ fn bench_evm_push_pop(allocator: std.mem.Allocator) void {
     
     // Set up block info
     const block_info = evm_mod.BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1640995200,
         .gas_limit = BENCHMARK_GAS_LIMIT,
@@ -431,6 +432,7 @@ fn bench_evm_large_stack(allocator: std.mem.Allocator) void {
     
     // Set up block info
     const block_info = evm_mod.BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1640995200,
         .gas_limit = BENCHMARK_GAS_LIMIT,

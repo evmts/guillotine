@@ -228,6 +228,24 @@ pub fn Evm(comptime config: EvmConfig) type {
                 log.warn("Failed to process beacon root update: {}", .{err});
             };
             
+            // Process historical block hash update for EIP-2935 if applicable
+            const historical_block_hashes = @import("historical_block_hashes.zig");
+            historical_block_hashes.HistoricalBlockHashesContract.processBlockHashUpdate(database, &block_info) catch |err| {
+                log.warn("Failed to process historical block hash update: {}", .{err});
+            };
+            
+            // Process validator deposits for EIP-6110 if applicable
+            const validator_deposits = @import("validator_deposits.zig");
+            validator_deposits.ValidatorDepositsContract.processBlockDeposits(database, &block_info) catch |err| {
+                log.warn("Failed to process validator deposits: {}", .{err});
+            };
+            
+            // Process validator withdrawals for EIP-7002 if applicable
+            const validator_withdrawals = @import("validator_withdrawals.zig");
+            validator_withdrawals.ValidatorWithdrawalsContract.processBlockWithdrawals(database, &block_info) catch |err| {
+                log.warn("Failed to process validator withdrawals: {}", .{err});
+            };
+            
             var access_list = AccessList.init(allocator);
             errdefer access_list.deinit();
             return Self{
@@ -372,12 +390,43 @@ pub fn Evm(comptime config: EvmConfig) type {
 
             // Handle EIP-4788 beacon roots contract
             const beacon_roots = @import("beacon_roots.zig");
+            const historical_block_hashes = @import("historical_block_hashes.zig");
             if (std.mem.eql(u8, &to.bytes, &beacon_roots.BEACON_ROOTS_ADDRESS.bytes)) {
                 var contract = beacon_roots.BeaconRootsContract{ .database = self.database };
                 const caller = if (self.depth > 0) self.call_stack[self.depth - 1].caller else primitives.ZERO_ADDRESS;
                 
                 const result = contract.execute(caller, input, gas) catch |err| {
                     log.debug("Beacon roots contract failed: {}", .{err});
+                    self.journal.revert_to_snapshot(snapshot_id);
+                    return PreflightResult{ .precompile_result = CallResult.failure(0) };
+                };
+                
+                // Allocate output that persists beyond this function
+                const output = if (result.output.len > 0) output: {
+                    const out = self.allocator.alloc(u8, result.output.len) catch {
+                        self.journal.revert_to_snapshot(snapshot_id);
+                        return PreflightResult{ .precompile_result = CallResult.failure(0) };
+                    };
+                    @memcpy(out, result.output);
+                    break :output out;
+                } else &[_]u8{};
+                
+                return PreflightResult{ 
+                    .precompile_result = CallResult{
+                        .success = true,
+                        .gas_left = gas - result.gas_used,
+                        .output = output,
+                    }
+                };
+            }
+            
+            // Handle EIP-2935 historical block hashes contract
+            if (std.mem.eql(u8, &to.bytes, &historical_block_hashes.HISTORY_CONTRACT_ADDRESS.bytes)) {
+                var contract = historical_block_hashes.HistoricalBlockHashesContract{ .database = self.database };
+                const caller = if (self.depth > 0) self.call_stack[self.depth - 1].caller else primitives.ZERO_ADDRESS;
+                
+                const result = contract.execute(caller, input, gas) catch |err| {
+                    log.debug("Historical block hashes contract failed: {}", .{err});
                     self.journal.revert_to_snapshot(snapshot_id);
                     return PreflightResult{ .precompile_result = CallResult.failure(0) };
                 };
@@ -1291,10 +1340,50 @@ pub fn Evm(comptime config: EvmConfig) type {
         pub fn get_block_hash(self: *Self, block_number: u64) ?[32]u8 {
             const current_block = self.block_info.number;
 
-            // EVM BLOCKHASH rules:
-            // - Return 0 for current block and future blocks
-            // - Return 0 for blocks older than 256 blocks
-            // - Return 0 for block 0 (genesis)
+            // Use EIP-2935 historical block hashes if available
+            // This provides access to older block hashes via system contract
+            const historical_block_hashes = @import("historical_block_hashes.zig");
+            const hash_opt = historical_block_hashes.HistoricalBlockHashesContract.getBlockHash(
+                self.database,
+                block_number,
+                current_block,
+            ) catch |err| {
+                log.debug("Failed to get block hash from history contract: {}", .{err});
+                // Fall back to standard behavior on error
+                
+                // EVM BLOCKHASH rules:
+                // - Return null for current block and future blocks
+                // - Return null for blocks older than 256 blocks
+                // - Return null for block 0 (genesis)
+                if (block_number >= current_block or
+                    current_block > block_number + 256 or
+                    block_number == 0)
+                {
+                    return null;
+                }
+                
+                // For testing/simulation purposes, generate a deterministic hash
+                var hash: [32]u8 = undefined;
+                hash[0..8].* = std.mem.toBytes(block_number);
+                hash[8..16].* = std.mem.toBytes(current_block);
+                
+                // Fill rest with deterministic pattern based on block number
+                var i: usize = 16;
+                while (i < 32) : (i += 1) {
+                    hash[i] = @as(u8, @truncate(block_number +% i));
+                }
+                
+                return hash;
+            };
+            
+            if (hash_opt) |hash| {
+                return hash;
+            }
+            
+            // If no hash found in storage, fall back to standard behavior
+            // - Return null for current block and future blocks
+            // - Return null for blocks older than 256 blocks
+            // - Return null for block 0 (genesis)
             if (block_number >= current_block or
                 current_block > block_number + 256 or
                 block_number == 0)

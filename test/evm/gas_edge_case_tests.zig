@@ -42,6 +42,7 @@ const NoOpHost = struct {
     pub fn get_block_info(self: *Self) BlockInfo {
         _ = self;
         return BlockInfo{
+            .chain_id = 1,
             .number = 0,
             .timestamp = 0,
             .gas_limit = 30_000_000,
@@ -410,6 +411,7 @@ const MockHost = struct {
     pub fn get_block_info(self: *Self) BlockInfo {
         _ = self;
         return BlockInfo{
+            .chain_id = 1,
             .number = 0,
             .timestamp = 0,
             .gas_limit = 30_000_000,

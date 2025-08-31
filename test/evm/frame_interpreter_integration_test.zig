@@ -238,6 +238,7 @@ test "Frame interpreter CREATE integration - deploy simple contract" {
         allocator,
         db_interface,
         block_info.DefaultBlockInfo{
+            .chain_id = 1,
             .number = 1,
             .timestamp = 1000,
             .difficulty = 100,
@@ -337,6 +338,7 @@ test "Frame interpreter CREATE integration - with value transfer" {
         allocator,
         db_interface,
         block_info.DefaultBlockInfo{
+            .chain_id = 1,
             .number = 1,
             .timestamp = 1000,
             .difficulty = 100,

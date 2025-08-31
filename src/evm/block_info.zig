@@ -28,6 +28,8 @@ pub fn BlockInfo(comptime config: BlockInfoConfig) type {
         chain_id: u64,
         /// Block number
         number: u64,
+        /// Parent block hash (for EIP-2935 historical block hashes)
+        parent_hash: [32]u8 = [_]u8{0} ** 32,
         /// Block timestamp
         timestamp: u64,
         /// Block difficulty (pre-merge) or prevrandao (post-merge)
@@ -58,6 +60,7 @@ pub fn BlockInfo(comptime config: BlockInfoConfig) type {
             return Self{
             .chain_id = 1, // Default to mainnet
             .number = 0,
+            .parent_hash = [_]u8{0} ** 32,
             .timestamp = 0,
             .difficulty = 0,
             .gas_limit = 30_000_000,

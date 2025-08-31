@@ -25,6 +25,7 @@ test "warm/cold access - multiple addresses in single transaction" {
     const db_interface = DatabaseInterface.init(&memory_db);
     
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -104,6 +105,7 @@ test "warm/cold access - storage slots across different addresses" {
     const db_interface = DatabaseInterface.init(&memory_db);
     
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -154,6 +156,7 @@ test "warm/cold access - EXTCODESIZE and EXTCODEHASH" {
     const db_interface = DatabaseInterface.init(&memory_db);
     
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -193,6 +196,7 @@ test "warm/cold access - nested calls preserve access list" {
     const db_interface = DatabaseInterface.init(&memory_db);
     
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -247,6 +251,7 @@ test "warm/cold access - SSTORE gas calculation" {
     const db_interface = DatabaseInterface.init(&memory_db);
     
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -287,6 +292,7 @@ test "warm/cold access - pre-warming validation" {
     const db_interface = DatabaseInterface.init(&memory_db);
     
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -336,6 +342,7 @@ test "warm/cold access - large number of unique accesses" {
     const db_interface = DatabaseInterface.init(&memory_db);
     
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -388,6 +395,7 @@ test "warm/cold access - CALL opcode target pre-warming" {
     const db_interface = DatabaseInterface.init(&memory_db);
     
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,

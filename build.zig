@@ -1462,12 +1462,12 @@ pub fn build(b: *std.Build) void {
         revm_test.addIncludePath(b.path("src/revm_wrapper"));
         revm_test.linkLibC();
 
-        const revm_rust_target_dir = if (optimize == .Debug) "debug" else "release";
-        const revm_dylib_path = if (rust_target) |target_triple|
-            b.fmt("target/{s}/{s}/librevm_wrapper.dylib", .{ target_triple, revm_rust_target_dir })
+        const revm_rust_target_dir_test = if (optimize == .Debug) "debug" else "release";
+        const revm_dylib_path_test = if (rust_target) |target_triple|
+            b.fmt("target/{s}/{s}/librevm_wrapper.dylib", .{ target_triple, revm_rust_target_dir_test })
         else
-            b.fmt("target/{s}/librevm_wrapper.dylib", .{revm_rust_target_dir});
-        revm_test.addObjectFile(b.path(revm_dylib_path));
+            b.fmt("target/{s}/librevm_wrapper.dylib", .{revm_rust_target_dir_test});
+        revm_test.addObjectFile(b.path(revm_dylib_path_test));
 
         if (target.result.os.tag == .linux) {
             revm_test.linkSystemLibrary("m");
@@ -1529,12 +1529,12 @@ pub fn build(b: *std.Build) void {
         differential_test.addIncludePath(b.path("src/revm_wrapper"));
         differential_test.linkLibC();
         
-        const revm_rust_target_dir = if (optimize == .Debug) "debug" else "release";
-        const revm_dylib_path = if (rust_target) |target_triple|
-            b.fmt("target/{s}/{s}/librevm_wrapper.dylib", .{ target_triple, revm_rust_target_dir })
+        const revm_rust_target_dir_diff = if (optimize == .Debug) "debug" else "release";
+        const revm_dylib_path_diff = if (rust_target) |target_triple|
+            b.fmt("target/{s}/{s}/librevm_wrapper.dylib", .{ target_triple, revm_rust_target_dir_diff })
         else
-            b.fmt("target/{s}/librevm_wrapper.dylib", .{revm_rust_target_dir});
-        differential_test.addObjectFile(b.path(revm_dylib_path));
+            b.fmt("target/{s}/librevm_wrapper.dylib", .{revm_rust_target_dir_diff});
+        differential_test.addObjectFile(b.path(revm_dylib_path_diff));
         
         if (target.result.os.tag == .linux) {
             differential_test.linkSystemLibrary("m");
@@ -1640,12 +1640,12 @@ pub fn build(b: *std.Build) void {
         comprehensive_compare.addIncludePath(b.path("src/revm_wrapper"));
         comprehensive_compare.linkLibC();
 
-        const revm_rust_target_dir = if (optimize == .Debug) "debug" else "release";
-        const revm_dylib_path = if (rust_target) |target_triple|
-            b.fmt("target/{s}/{s}/librevm_wrapper.dylib", .{ target_triple, revm_rust_target_dir })
+        const revm_rust_target_dir_comp = if (optimize == .Debug) "debug" else "release";
+        const revm_dylib_path_comp = if (rust_target) |target_triple|
+            b.fmt("target/{s}/{s}/librevm_wrapper.dylib", .{ target_triple, revm_rust_target_dir_comp })
         else
-            b.fmt("target/{s}/librevm_wrapper.dylib", .{revm_rust_target_dir});
-        comprehensive_compare.addObjectFile(b.path(revm_dylib_path));
+            b.fmt("target/{s}/librevm_wrapper.dylib", .{revm_rust_target_dir_comp});
+        comprehensive_compare.addObjectFile(b.path(revm_dylib_path_comp));
 
         if (target.result.os.tag == .linux) {
             comprehensive_compare.linkSystemLibrary("m");

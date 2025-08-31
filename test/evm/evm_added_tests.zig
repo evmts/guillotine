@@ -21,6 +21,7 @@ fn setup_evm(allocator: std.mem.Allocator) !struct {
     const db_interface = DatabaseInterface.init(&memory_db);
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 0,

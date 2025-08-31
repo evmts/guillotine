@@ -121,6 +121,7 @@ pub const DifferentialTestor = struct {
         // Tracer is now created internally by the EVM when needed
 
         const block_info = guillotine_evm.BlockInfo{
+            .chain_id = 1,
             .number = 1,
             .timestamp = 0,
             .gas_limit = 100000,

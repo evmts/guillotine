@@ -124,6 +124,7 @@ fn benchmark_evm_erc20_transfer(allocator: std.mem.Allocator) void {
     defer db.deinit();
 
     const block_info = evm_mod.BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -181,6 +182,7 @@ fn benchmark_evm_snailtracer(allocator: std.mem.Allocator) void {
     defer db.deinit();
 
     const block_info = evm_mod.BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -237,6 +239,7 @@ fn benchmark_evm_thousand_hashes(allocator: std.mem.Allocator) void {
     defer db.deinit();
 
     const block_info = evm_mod.BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -418,6 +421,7 @@ fn benchmark_evm_arithmetic_contract(allocator: std.mem.Allocator) void {
     defer db.deinit();
     
     const block_info = evm_mod.BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1640995200,
         .gas_limit = BENCHMARK_GAS_LIMIT,

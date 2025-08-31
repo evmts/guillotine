@@ -44,6 +44,7 @@ test "EVM msg.sender propagation in CALL" {
     try memory_db.set_account(contract_address, account);
     
     const block_info = DefaultBlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .gas_limit = 30_000_000,
@@ -116,6 +117,7 @@ test "EVM msg.sender preservation in DELEGATECALL" {
     try memory_db.set_account(contract_address, account);
     
     const block_info = DefaultBlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .gas_limit = 30_000_000,
@@ -197,6 +199,7 @@ test "EVM msg.value propagation" {
     try memory_db.set_account(caller_address, caller_account);
     
     const block_info = DefaultBlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .gas_limit = 30_000_000,

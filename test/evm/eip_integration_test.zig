@@ -64,6 +64,7 @@ test "Integration - DeFi contract with blob data and coinbase interaction" {
     }
     
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 18_000_000,
         .timestamp = 1700000000,
         .difficulty = 0,
