@@ -303,7 +303,7 @@ pub const DifferentialTestor = struct {
     }
 
     /// Execute on REVM and capture trace
-    fn executeRevmWithTrace(
+    pub fn executeRevmWithTrace(
         self: *DifferentialTestor,
         caller: primitives.Address,
         to: primitives.Address,
@@ -341,7 +341,7 @@ pub const DifferentialTestor = struct {
     }
 
     /// Execute on Guillotine and capture trace
-    fn executeGuillotineWithTrace(
+    pub fn executeGuillotineWithTrace(
         self: *DifferentialTestor,
         caller: primitives.Address,
         to: primitives.Address,
@@ -543,7 +543,7 @@ pub const DifferentialTestor = struct {
     }
 
     /// Generate comprehensive diff between two execution results
-    fn generateDiff(
+    pub fn generateDiff(
         self: *DifferentialTestor,
         revm_result: ExecutionResultWithTrace,
         guillotine_result: ExecutionResultWithTrace,
