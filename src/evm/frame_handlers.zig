@@ -157,6 +157,8 @@ pub fn getOpcodeHandlers(comptime FrameType: type) [256]FrameType.OpcodeHandler 
     h[@intFromEnum(Opcode.REVERT)] = &SystemHandlers.revert;
     h[@intFromEnum(Opcode.INVALID)] = &invalid;
     h[@intFromEnum(Opcode.SELFDESTRUCT)] = &SystemHandlers.selfdestruct;
+    h[@intFromEnum(Opcode.AUTH)] = &SystemHandlers.auth;
+    h[@intFromEnum(Opcode.AUTHCALL)] = &SystemHandlers.authcall;
     h[@intFromEnum(OpcodeSynthetic.PUSH_ADD_INLINE)] = &ArithmeticSyntheticHandlers.push_add_inline;
     h[@intFromEnum(OpcodeSynthetic.PUSH_ADD_POINTER)] = &ArithmeticSyntheticHandlers.push_add_pointer;
     h[@intFromEnum(OpcodeSynthetic.PUSH_MUL_INLINE)] = &ArithmeticSyntheticHandlers.push_mul_inline;

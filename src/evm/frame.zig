@@ -152,6 +152,7 @@ pub fn Frame(comptime config: FrameConfig) type {
         allocator: std.mem.Allocator, // 16B - Memory allocator
         self_destruct: ?*SelfDestruct = null, // 8B - Self destruct list
         block_info: BlockInfo, // ~188B - Block context (spans multiple cache lines)
+        authorized_address: ?Address = null, // 20B - EIP-3074 authorized address
 
         //
         /// Initialize a new execution frame.
@@ -203,6 +204,7 @@ pub fn Frame(comptime config: FrameConfig) type {
                 .allocator = allocator,
                 .self_destruct = self_destruct,
                 .block_info = block_info,
+                .authorized_address = null,
             };
         }
         /// Clean up all frame resources.

@@ -692,6 +692,221 @@ pub fn Handlers(comptime FrameType: type) type {
 
             return Error.Stop;
         }
+
+        /// AUTH opcode (0xf6) - EIP-3074: Authorize a trusted invoker
+        /// Stack: [authority, commitment, sig_v, sig_r, sig_s] → [success]
+        pub fn auth(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            const dispatch = Dispatch{ .cursor = cursor };
+            
+            // Pop authorization parameters from stack
+            const sig_s = try self.stack.pop();
+            const sig_r = try self.stack.pop();
+            const sig_v = try self.stack.pop();
+            const commitment = try self.stack.pop();
+            const authority_u256 = try self.stack.pop();
+            
+            // Convert authority to address
+            const authority = from_u256(authority_u256);
+            
+            // Validate signature components
+            if (sig_v > 28 or sig_r == 0 or sig_s == 0) {
+                // Invalid signature, push failure
+                try self.stack.push(0);
+                const next = dispatch.getNext();
+                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            }
+            
+            // Create authorization message
+            // Format: keccak256(0x04 || chainId || nonce || invokerAddress || commitment)
+            var message: [1 + 32 + 32 + 20 + 32]u8 = undefined;
+            message[0] = 0x04; // AUTH magic byte
+            
+            // Get chain ID and nonce from context
+            const chain_id = self.block_info.chain_id;
+            const nonce = self.database.get_account(authority.bytes) catch {
+                try self.stack.push(0);
+                const next = dispatch.getNext();
+                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            } orelse {
+                try self.stack.push(0);
+                const next = dispatch.getNext();
+                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            };
+            
+            // Encode chain ID (32 bytes, big-endian)
+            std.mem.writeInt(u256, message[1..33], chain_id, .big);
+            // Encode nonce (32 bytes, big-endian)
+            std.mem.writeInt(u256, message[33..65], nonce.nonce, .big);
+            // Encode invoker address (20 bytes)
+            @memcpy(message[65..85], &self.contract_address.bytes);
+            // Encode commitment (32 bytes)
+            if (@bitSizeOf(WordType) < 256) {
+                std.mem.writeInt(u256, message[85..117], @as(u256, commitment), .big);
+            } else {
+                std.mem.writeInt(u256, message[85..117], commitment, .big);
+            }
+            
+            // Compute message hash
+            const crypto = @import("crypto");
+            const message_hash = crypto.Hash.keccak256(&message);
+            
+            // Verify signature  
+            const recovery_id = @as(u8, @intCast(sig_v - 27));
+            
+            const recovered = crypto.secp256k1.unaudited_recover_address(
+                &message_hash,
+                recovery_id,
+                sig_r,
+                sig_s
+            ) catch {
+                try self.stack.push(0);
+                const next = dispatch.getNext();
+                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            };
+            
+            // Check if recovered address matches authority
+            if (!std.mem.eql(u8, &recovered.bytes, &authority.bytes)) {
+                try self.stack.push(0);
+                const next = dispatch.getNext();
+                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            }
+            
+            // Store authorized context in frame
+            self.authorized_address = authority;
+            
+            // Push success
+            try self.stack.push(1);
+            const next = dispatch.getNext();
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+        }
+
+        /// AUTHCALL opcode (0xf7) - EIP-3074: Make a call as an authorized address
+        /// Stack: [gas, to, value, input_offset, input_size, output_offset, output_size, auth] → [success]
+        pub fn authcall(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            const dispatch = Dispatch{ .cursor = cursor };
+            
+            // Pop call parameters from stack
+            const auth_flag = try self.stack.pop();
+            const output_size = try self.stack.pop();
+            const output_offset = try self.stack.pop();
+            const input_size = try self.stack.pop();
+            const input_offset = try self.stack.pop();
+            const value = try self.stack.pop();
+            const to_address = try self.stack.pop();
+            const gas_param = try self.stack.pop();
+            
+            // Check if we have an authorized context (auth_flag must be 1)
+            if (auth_flag != 1 or self.authorized_address == null) {
+                // No authorization, push failure
+                try self.stack.push(0);
+                const next = dispatch.getNext();
+                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            }
+            
+            // Convert to address
+            const to_addr = from_u256(to_address);
+            
+            // Bounds checking for gas parameter
+            if (gas_param > std.math.maxInt(u64)) {
+                try self.stack.push(0);
+                const next = dispatch.getNext();
+                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            }
+            const gas_u64 = @as(u64, @intCast(gas_param));
+            
+            // Bounds checking for memory offsets and sizes
+            if (input_offset > std.math.maxInt(usize) or
+                input_size > std.math.maxInt(usize) or
+                output_offset > std.math.maxInt(usize) or
+                output_size > std.math.maxInt(usize))
+            {
+                try self.stack.push(0);
+                const next = dispatch.getNext();
+                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            }
+            
+            const input_offset_usize = @as(usize, @intCast(input_offset));
+            const input_size_usize = @as(usize, @intCast(input_size));
+            const output_offset_usize = @as(usize, @intCast(output_offset));
+            const output_size_usize = @as(usize, @intCast(output_size));
+            
+            // Ensure memory capacity for input
+            if (input_size_usize > 0) {
+                const input_end = input_offset_usize + input_size_usize;
+                self.memory.ensure_capacity(self.allocator, @as(u24, @intCast(input_end))) catch {
+                    try self.stack.push(0);
+                    const next = dispatch.getNext();
+                    return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                };
+            }
+            
+            // Ensure memory capacity for output
+            if (output_size_usize > 0) {
+                const output_end = output_offset_usize + output_size_usize;
+                self.memory.ensure_capacity(self.allocator, @as(u24, @intCast(output_end))) catch {
+                    try self.stack.push(0);
+                    const next = dispatch.getNext();
+                    return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                };
+            }
+            
+            // Extract input data
+            var input_data: []const u8 = &.{};
+            if (input_size_usize > 0) {
+                input_data = self.memory.get_slice(@as(u24, @intCast(input_offset_usize)), @as(u24, @intCast(input_size_usize))) catch {
+                    try self.stack.push(0);
+                    const next = dispatch.getNext();
+                    return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                };
+            }
+            
+            // Perform the authorized call through the host interface
+            // The call is made with the authorized address as the caller
+            const params = CallParams{
+                .call = .{
+                    .caller = self.authorized_address.?,
+                    .to = to_addr,
+                    .value = value,
+                    .input = input_data,
+                    .gas = gas_u64,
+                },
+            };
+            
+            const result = self.getEvm().inner_call(params) catch |err| switch (err) {
+                else => {
+                    try self.stack.push(0);
+                    const next = dispatch.getNext();
+                    return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                },
+            };
+            
+            // Write return data to memory if successful and output size > 0
+            if (result.success and output_size_usize > 0 and result.output.len > 0) {
+                const copy_size = @min(output_size_usize, result.output.len);
+                self.memory.set_data(self.allocator, @as(u24, @intCast(output_offset_usize)), result.output[0..copy_size]) catch {
+                    try self.stack.push(0);
+                    const next = dispatch.getNext();
+                    return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                };
+            }
+            
+            // Store return data for future RETURNDATASIZE/RETURNDATACOPY
+            if (self.output.len > 0) {
+                self.allocator.free(self.output);
+            }
+            self.output = self.allocator.alloc(u8, result.output.len) catch {
+                return Error.AllocationError;
+            };
+            @memcpy(self.output, result.output);
+            
+            // Update gas remaining
+            self.gas_remaining = @as(@TypeOf(self.gas_remaining), @intCast(result.gas_left));
+            
+            // Push success status
+            try self.stack.push(if (result.success) 1 else 0);
+            const next = dispatch.getNext();
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+        }
     };
 }
 
