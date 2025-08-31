@@ -110,6 +110,7 @@ pub fn build(b: *std.Build) void {
     });
     crypto_mod.addImport("primitives", primitives_mod);
     crypto_mod.addImport("c_kzg", c_kzg_mod);
+    primitives_mod.addImport("crypto", crypto_mod);
 
     const utils_mod = b.createModule(.{
         .root_source_file = b.path("src/utils.zig"),
@@ -860,6 +861,22 @@ pub fn build(b: *std.Build) void {
     const precompiles_regression_test_step = b.step("test-precompiles-regression", "Run precompiles regression tests");
     precompiles_regression_test_step.dependOn(&run_precompiles_regression_test.step);
 
+    const eip7702_test = b.addTest(.{
+        .name = "eip7702-test",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("test/evm/eip7702_test.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        }),
+    });
+    eip7702_test.root_module.addImport("evm", evm_mod);
+    eip7702_test.root_module.addImport("primitives", primitives_mod);
+    eip7702_test.root_module.addImport("crypto", crypto_mod);
+    const run_eip7702_test = b.addRunArtifact(eip7702_test);
+    const eip7702_test_step = b.step("test-eip7702", "Run EIP-7702 tests");
+    eip7702_test_step.dependOn(&run_eip7702_test.step);
+
     const compiler_test = b.addTest(.{
         .name = "compiler-test",
         .root_module = b.createModule(.{
@@ -1430,6 +1447,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_exe_unit_tests.step);
     test_step.dependOn(&run_precompiles_test.step);
     test_step.dependOn(&run_precompiles_regression_test.step);
+    test_step.dependOn(&run_eip7702_test.step);
     if (revm_lib != null) {
         const revm_test = b.addTest(.{
             .name = "revm-test",

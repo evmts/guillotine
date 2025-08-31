@@ -210,7 +210,9 @@ test "All precompiles are recognized correctly" {
     
     // Test non-precompile addresses
     try testing.expect(!precompiles.is_precompile(primitives.ZERO_ADDRESS));
-    try testing.expect(!precompiles.is_precompile(primitives.Address.from_u256(11)));
+    try testing.expect(precompiles.is_precompile(primitives.Address.from_u256(11))); // 0x0B is now BLS12-381 G1_ADD
+    try testing.expect(precompiles.is_precompile(primitives.Address.from_u256(0x12))); // 0x12 is BLS12-381 MAP_FP_TO_G1
+    try testing.expect(!precompiles.is_precompile(primitives.Address.from_u256(0x13))); // 0x13 is beyond precompiles
 }
 
 test "Gas costs are reasonable for all precompiles" {

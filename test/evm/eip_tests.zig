@@ -1,8 +1,8 @@
 const std = @import("std");
 const testing = std.testing;
-const evm_mod = @import("evm");
+const evm_mod = @import("evm.zig");
 const primitives = @import("primitives");
-const Hardfork = evm_mod.Hardfork;
+const Hardfork = @import("hardfork.zig").Hardfork;
 
 // Test EIP-3541: Reject new contract code starting with the 0xEF byte
 test "EIP-3541: reject contracts starting with 0xEF after London" {
@@ -126,7 +126,7 @@ test "EIP-6780: SELFDESTRUCT restrictions after Cancun" {
         try evm.database.set_account(contract_addr.bytes, account);
         
         // Execute SELFDESTRUCT
-        const result = try evm.call(.{
+        _ = try evm.call(.{
             .to = contract_addr,
             .gas_limit = 50000,
         });
@@ -172,7 +172,7 @@ test "EIP-6780: SELFDESTRUCT restrictions after Cancun" {
         try evm.database.set_account(contract_addr.bytes, account);
         
         // Execute SELFDESTRUCT (not created in same tx)
-        const result = try evm.call(.{
+        _ = try evm.call(.{
             .to = contract_addr,
             .gas_limit = 50000,
         });
@@ -238,7 +238,7 @@ test "New opcodes are available in correct hardforks" {
         defer evm_berlin.deinit();
         
         const push0_code = [_]u8{ 0x5F, 0x00 }; // PUSH0, STOP
-        const result_berlin = try evm.call(.{
+        const result_berlin = try evm_berlin.call(.{
             .input = &push0_code,
             .gas_limit = 10000,
         });
@@ -250,7 +250,7 @@ test "New opcodes are available in correct hardforks" {
         });
         defer evm_shanghai.deinit();
         
-        const result_shanghai = try evm.call(.{
+        const result_shanghai = try evm_shanghai.call(.{
             .input = &push0_code,
             .gas_limit = 10000,
         });
@@ -273,7 +273,7 @@ test "New opcodes are available in correct hardforks" {
             0x00,       // STOP
         };
         
-        const result_shanghai = try evm.call(.{
+        const result_shanghai = try evm_shanghai.call(.{
             .input = &mcopy_code,
             .gas_limit = 10000,
         });
@@ -285,7 +285,7 @@ test "New opcodes are available in correct hardforks" {
         });
         defer evm_cancun.deinit();
         
-        const result_cancun = try evm.call(.{
+        const result_cancun = try evm_cancun.call(.{
             .input = &mcopy_code,
             .gas_limit = 10000,
         });

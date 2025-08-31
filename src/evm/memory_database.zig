@@ -108,7 +108,7 @@ pub const MemoryDatabase = struct {
             snapshot.accounts.deinit();
             snapshot.storage.deinit();
         }
-        self.snapshots.deinit();
+        self.snapshots.deinit(self.allocator);
         
         // Free batch changes if any
         if (self.batch_changes) |*batch| {
