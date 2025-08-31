@@ -950,6 +950,16 @@ fn formatTimeWithUnit(time_ms: f64) FormattedTime {
     return selectOptimalUnit(time_ms);
 }
 
+fn formatTimeString(allocator: std.mem.Allocator, time_ms: f64) ![]const u8 {
+    const formatted = formatTimeWithUnit(time_ms);
+    const unit_str = switch (formatted.unit) {
+        .microseconds => "μs",
+        .milliseconds => "ms",
+        .seconds => "s",
+    };
+    return std.fmt.allocPrint(allocator, "{d:.2} {s}", .{ formatted.value, unit_str });
+}
+
 const HyperfineSummary = struct {
     mean: f64,
     min: f64,
@@ -1067,10 +1077,13 @@ fn parseHyperfineJson(self: *Orchestrator, test_name: []const u8, json_data: []c
 
     try self.results.append(self.allocator, result);
 
-    const mean_formatted = formatTimeWithUnit(result.mean_ms);
-    const min_formatted = formatTimeWithUnit(result.min_ms);
-    const max_formatted = formatTimeWithUnit(result.max_ms);
-    print("  Mean: {any}, Min: {any}, Max: {any} (per run, {} internal runs)\n", .{ mean_formatted, min_formatted, max_formatted, result.internal_runs });
+    const mean_str = try formatTimeString(self.allocator, result.mean_ms);
+    defer self.allocator.free(mean_str);
+    const min_str = try formatTimeString(self.allocator, result.min_ms);
+    defer self.allocator.free(min_str);
+    const max_str = try formatTimeString(self.allocator, result.max_ms);
+    defer self.allocator.free(max_str);
+    print("  Mean: {s}, Min: {s}, Max: {s} (per run, {} internal runs)\n", .{ mean_str, min_str, max_str, result.internal_runs });
 }
 
 pub fn printSummary(self: *Orchestrator) void {
@@ -1083,10 +1096,13 @@ pub fn printSummary(self: *Orchestrator) void {
     print("{s:-<80}\n", .{""});
 
     for (self.results.items) |result| {
-        const mean_formatted = formatTimeWithUnit(result.mean_ms);
-        const min_formatted = formatTimeWithUnit(result.min_ms);
-        const max_formatted = formatTimeWithUnit(result.max_ms);
-        print("{s:<30} {any:>15} {any:>15} {any:>15}\n", .{ result.test_case, mean_formatted, min_formatted, max_formatted });
+        const mean_str = formatTimeString(self.allocator, result.mean_ms) catch "N/A";
+        defer if (!std.mem.eql(u8, mean_str, "N/A")) self.allocator.free(mean_str);
+        const min_str = formatTimeString(self.allocator, result.min_ms) catch "N/A";
+        defer if (!std.mem.eql(u8, min_str, "N/A")) self.allocator.free(min_str);
+        const max_str = formatTimeString(self.allocator, result.max_ms) catch "N/A";
+        defer if (!std.mem.eql(u8, max_str, "N/A")) self.allocator.free(max_str);
+        print("{s:<30} {s:>15} {s:>15} {s:>15}\n", .{ result.test_case, mean_str, min_str, max_str });
     }
 }
 
@@ -1393,10 +1409,37 @@ fn exportDetailed(self: *Orchestrator) !void {
 }
 
 fn exportJSON(self: *Orchestrator) !void {
-    // TODO: Fix JSON export for Zig 0.15.1 API changes
-    _ = self;
-    std.debug.print("JSON export temporarily disabled\n", .{});
-    return;
+    const file = try std.fs.cwd().createFile("results.json", .{});
+    defer file.close();
+    
+    var buffer: [4096]u8 = undefined;
+    var writer = file.writer(&buffer);
+    
+    try writer.interface.writeAll("{\n");
+    try writer.interface.print("  \"evm\": \"{s}\",\n", .{self.evm_name});
+    try writer.interface.print("  \"runs\": {},\n", .{self.num_runs});
+    try writer.interface.print("  \"timestamp\": {},\n", .{std.time.timestamp()});
+    try writer.interface.writeAll("  \"benchmarks\": [\n");
+    
+    for (self.results.items, 0..) |result, i| {
+        try writer.interface.print("    {{\n", .{});
+        try writer.interface.print("      \"name\": \"{s}\",\n", .{result.test_case});
+        try writer.interface.print("      \"mean_ms\": {d:.6},\n", .{result.mean_ms});
+        try writer.interface.print("      \"median_ms\": {d:.6},\n", .{result.median_ms});
+        try writer.interface.print("      \"min_ms\": {d:.6},\n", .{result.min_ms});
+        try writer.interface.print("      \"max_ms\": {d:.6},\n", .{result.max_ms});
+        try writer.interface.print("      \"std_dev_ms\": {d:.6},\n", .{result.std_dev_ms});
+        try writer.interface.print("      \"internal_runs\": {}\n", .{result.internal_runs});
+        try writer.interface.print("    }}{s}\n", .{if (i < self.results.items.len - 1) "," else ""});
+    }
+    
+    try writer.interface.writeAll("  ]\n");
+    try writer.interface.writeAll("}\n");
+    
+    // Flush the buffer before closing
+    try writer.interface.flush();
+    
+    print("Results exported to results.json\n", .{});
 }
 
 // fn exportJSON_disabled_DO_NOT_COMPILE(self: *Orchestrator) !void {
@@ -1428,10 +1471,92 @@ fn exportJSON(self: *Orchestrator) !void {
 // }
 
 fn exportMarkdown(self: *Orchestrator) !void {
-    // TODO: Fix markdown export for Zig 0.15.1 API changes
-    _ = self;
-    std.debug.print("Markdown export temporarily disabled\n", .{});
-    return;
+    // Create the file in bench/results.md
+    const project_root = try getProjectRoot(self.allocator);
+    defer self.allocator.free(project_root);
+    
+    const results_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "bench", "official", "results.md" });
+    defer self.allocator.free(results_path);
+    
+    const file = try std.fs.createFileAbsolute(results_path, .{});
+    defer file.close();
+    
+    var buffer: [4096]u8 = undefined;
+    var writer = file.writer(&buffer);
+    
+    // Get current timestamp
+    const timestamp = std.time.timestamp();
+    const seconds = @as(u64, @intCast(timestamp));
+    
+    // Write header
+    try writer.interface.print("# Guillotine EVM Benchmark Results\n\n", .{});
+    try writer.interface.print("## Summary\n\n", .{});
+    try writer.interface.print("**EVM Implementation**: {s}\n", .{self.evm_name});
+    try writer.interface.print("**Test Runs per Case**: {}\n", .{self.num_runs});
+    try writer.interface.print("**Total Test Cases**: {}\n", .{self.results.items.len});
+    try writer.interface.print("**Timestamp**: {} (Unix epoch)\n\n", .{seconds});
+    
+    // Write performance table
+    try writer.interface.print("## Performance Results (Per Run)\n\n", .{});
+    try writer.interface.writeAll("| Test Case | Mean | Median | Min | Max | Std Dev | Internal Runs |\n");
+    try writer.interface.writeAll("|-----------|------|--------|-----|-----|---------|---------------|\n");
+    
+    for (self.results.items) |result| {
+        const mean_str = try formatTimeString(self.allocator, result.mean_ms);
+        defer self.allocator.free(mean_str);
+        const median_str = try formatTimeString(self.allocator, result.median_ms);
+        defer self.allocator.free(median_str);
+        const min_str = try formatTimeString(self.allocator, result.min_ms);
+        defer self.allocator.free(min_str);
+        const max_str = try formatTimeString(self.allocator, result.max_ms);
+        defer self.allocator.free(max_str);
+        const stddev_str = try formatTimeString(self.allocator, result.std_dev_ms);
+        defer self.allocator.free(stddev_str);
+        
+        try writer.interface.print("| {s:<25} | {s:>10} | {s:>10} | {s:>9} | {s:>9} | {s:>11} | {d:>13} |\n", .{
+            result.test_case,
+            mean_str,
+            median_str,
+            min_str,
+            max_str,
+            stddev_str,
+            result.internal_runs,
+        });
+    }
+    
+    // Add test case descriptions
+    try writer.interface.print("\n## Test Case Descriptions\n\n", .{});
+    try writer.interface.writeAll("### ERC20 Operations\n\n");
+    try writer.interface.writeAll("- **erc20-transfer**: Standard ERC20 token transfer operation\n");
+    try writer.interface.writeAll("- **erc20-mint**: ERC20 token minting operation\n");
+    try writer.interface.writeAll("- **erc20-approval-transfer**: ERC20 approval followed by transferFrom\n\n");
+    
+    try writer.interface.writeAll("### Computational Benchmarks\n\n");
+    try writer.interface.writeAll("- **ten-thousand-hashes**: Performs 10,000 keccak256 hash operations\n");
+    try writer.interface.writeAll("- **snailtracer**: Complex computational benchmark with intensive operations\n\n");
+    
+    // Add environment information
+    try writer.interface.print("## Environment\n\n", .{});
+    try writer.interface.print("- **Benchmark Tool**: hyperfine\n", .{});
+    try writer.interface.print("- **Warmup Runs**: 3\n", .{});
+    try writer.interface.print("- **Statistical Confidence**: Based on {} runs per test case\n\n", .{self.num_runs});
+    
+    // Add notes
+    try writer.interface.writeAll("## Notes\n\n");
+    try writer.interface.writeAll("- **All times are normalized per individual execution run**\n");
+    try writer.interface.writeAll("- Times are displayed in the most appropriate unit (μs, ms, or s)\n");
+    try writer.interface.writeAll("- Lower values indicate better performance\n");
+    try writer.interface.writeAll("- Standard deviation indicates consistency (lower is more consistent)\n");
+    try writer.interface.writeAll("- Each hyperfine run executes the contract multiple times internally (see Internal Runs column)\n");
+    try writer.interface.writeAll("- These benchmarks measure the full execution time including contract deployment\n\n");
+    
+    try writer.interface.writeAll("---\n\n");
+    try writer.interface.writeAll("*Generated by Guillotine Benchmark Orchestrator*\n");
+    
+    // Flush the buffer before closing
+    try writer.interface.flush();
+    
+    print("Results exported to bench/official/results.md\n", .{});
 }
 
 // fn exportMarkdown_disabled_DO_NOT_COMPILE(self: *Orchestrator) !void {
