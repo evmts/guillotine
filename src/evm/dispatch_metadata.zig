@@ -1,3 +1,5 @@
+const std = @import("std");
+
 /// Metadata types for dispatch instruction stream
 /// These structs contain pre-computed data that helps opcodes execute more efficiently
 
@@ -44,22 +46,24 @@ pub fn DispatchMetadata(comptime FrameType: type) type {
 
         /// Metadata for CODECOPY opcode containing bytecode pointer and size.
         /// Only one opcode needs this data so it's better to store it as metadata for that opcode than store on frame
-        pub const CodecopyMetadata = packed struct {
-            /// Direct pointer to bytecode data
-            bytecode_ptr: [*]const u8,
+        pub const CodecopyMetadata = packed struct(u64) {
+            /// Direct pointer to bytecode data (null-terminated)
+            bytecode_ptr: [*:0]const u8,
         };
 
         /// Metadata for trace_before_op containing PC and opcode for tracing
         /// When tracing is turned on we insert extra instructions before and after every opcode
-        pub const TraceBeforeMetadata = struct {
+        pub const TraceBeforeMetadata = packed struct(u64) {
             pc: FrameType.PcType,
             opcode: u8,
+            _padding: std.meta.Int(.unsigned, 64 - @bitSizeOf(FrameType.PcType) - 8) = 0,
         };
 
         /// Metadata for trace_after_op containing PC and opcode for tracing
-        pub const TraceAfterMetadata = struct {
+        pub const TraceAfterMetadata = packed struct(u64) {
             pc: FrameType.PcType,
             opcode: u8,
+            _padding: std.meta.Int(.unsigned, 64 - @bitSizeOf(FrameType.PcType) - 8) = 0,
         };
     };
 }
