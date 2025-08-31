@@ -29,7 +29,7 @@ This document tracks all EVM-related EIPs and their implementation status in the
 | EIP | Title | Status | Location | Notes |
 |-----|-------|--------|----------|-------|
 | EIP-155 | Simple replay attack protection | N/A | - | Transaction signing, not EVM |
-| EIP-160 | EXP cost increase | 🚧 TODO | opcode_data.zig:37 | Needs dynamic gas calculation |
+| EIP-160 | EXP cost increase | ✅ | handlers_arithmetic.zig:217-234 | Dynamic gas calculation implemented |
 | EIP-161 | State trie clearing | ⚠️ | eips.zig:125 | Listed but not fully implemented |
 | EIP-170 | Contract code size limit | ✅ | bytecode.zig, evm.zig:908-909 | 24KB limit enforced |
 
@@ -57,17 +57,17 @@ This document tracks all EVM-related EIPs and their implementation status in the
 ## Hardfork: Istanbul (December 2019)
 | EIP | Title | Status | Location | Notes |
 |-----|-------|--------|----------|-------|
-| EIP-152 | Blake2 precompile | 🚧 TODO | precompiles.zig | Not implemented |
+| EIP-152 | Blake2 precompile | ✅ | precompiles.zig:425 | Blake2F compression function |
 | EIP-1108 | Reduce alt_bn128 gas costs | ⚠️ | eips.zig:129 | Listed but needs implementation |
 | EIP-1344 | CHAINID opcode | ✅ | frame.zig | Opcode 0x46 |
-| EIP-1884 | Repricing for trie-size-dependent opcodes | ⚠️ | opcode_data.zig | SELFBALANCE added, gas costs need update |
-| EIP-2028 | Transaction data gas cost reduction | 🚧 TODO | - | Needs implementation |
-| EIP-2200 | Structured Definitions for Net Gas Metering | 🚧 TODO | - | SSTORE gas calculation |
+| EIP-1884 | Repricing for trie-size-dependent opcodes | ✅ | opcode_data.zig | SELFBALANCE added, superseded by EIP-2929 |
+| EIP-2028 | Transaction data gas cost reduction | ✅ | eips.zig:242-250 | Calldata gas cost function |
+| EIP-2200 | Structured Definitions for Net Gas Metering | ⚠️ | handlers_storage.zig:74-92 | Basic gas metering implemented |
 
 ## Hardfork: Berlin (April 2021)
 | EIP | Title | Status | Location | Notes |
 |-----|-------|--------|----------|-------|
-| EIP-2565 | ModExp Gas Cost | 🚧 TODO | precompiles.zig | Needs implementation |
+| EIP-2565 | ModExp Gas Cost | ⚠️ | precompiles.zig:302 | Simplified gas calculation |
 | EIP-2718 | Typed Transaction Envelope | N/A | - | Transaction format |
 | EIP-2929 | Gas cost increases for state access opcodes | ✅ | eips.zig:35-64, access_list.zig, evm.zig:1110-1115 | Cold/warm access implemented |
 | EIP-2930 | Optional access lists | ✅ | access_list.zig, eips.zig:13-16 | Pre-warming implemented |
@@ -76,9 +76,9 @@ This document tracks all EVM-related EIPs and their implementation status in the
 | EIP | Title | Status | Location | Notes |
 |-----|-------|--------|----------|-------|
 | EIP-1559 | Fee market change | ⚠️ | eips.zig:66-70, context.zig:30 | Base fee tracked but not fully integrated |
-| EIP-3198 | BASEFEE opcode | ⚠️ | eips.zig:72-76, opcode_data.zig:86 | Opcode 0x48 listed but needs handler |
+| EIP-3198 | BASEFEE opcode | ✅ | handlers_context.zig:563-570, opcode_data.zig:86 | Fully implemented |
 | EIP-3529 | Reduction in refunds | ✅ | eips.zig:23-31, evm.zig:325-329 | Gas refund cap implemented |
-| EIP-3541 | Reject new contracts with 0xEF byte | ⚠️ | evm.zig:108,119,128,137,146,155 | Flag exists but validation needed |
+| EIP-3541 | Reject new contracts with 0xEF byte | ✅ | evm.zig:752-754 | Validation implemented for CREATE/CREATE2 |
 
 ## Hardfork: Merge/Paris (September 2022)
 | EIP | Title | Status | Location | Notes |
@@ -90,28 +90,28 @@ This document tracks all EVM-related EIPs and their implementation status in the
 | EIP | Title | Status | Location | Notes |
 |-----|-------|--------|----------|-------|
 | EIP-3651 | Warm COINBASE | ✅ | eips.zig:13-16, access_list.zig | Pre-warming coinbase address |
-| EIP-3855 | PUSH0 instruction | ⚠️ | eips.zig:96-100, evm.zig:109,120,129,138,147,156 | Flag exists, opcode needs implementation |
+| EIP-3855 | PUSH0 instruction | ✅ | handlers_stack.zig:24, bytecode.zig:917-925 | Fully implemented with handler and bytecode support |
 | EIP-3860 | Limit and meter initcode | ⚠️ | eips.zig:102-117, evm.zig:908-909 | Size limit enforced, gas metering partial |
 | EIP-4895 | Beacon chain push withdrawals | N/A | - | Consensus layer |
 
 ## Hardfork: Cancun/Deneb (March 2024)
 | EIP | Title | Status | Location | Notes |
 |-----|-------|--------|----------|-------|
-| EIP-1153 | Transient storage opcodes | ⚠️ | eips.zig:78-82, database.zig:167-173 | Interface exists, needs implementation |
+| EIP-1153 | Transient storage opcodes | ✅ | handlers_storage.zig:111-156, database.zig:168-177 | Fully implemented TLOAD/TSTORE with proper cleanup |
 | EIP-4788 | Beacon block root in EVM | 🚧 TODO | - | Not implemented |
 | EIP-4844 | Shard Blob Transactions | ⚠️ | eips.zig:84-88, transaction_context.zig:18-21, evm.zig:1235-1245 | Partial - blob hash/fee tracking |
-| EIP-5656 | MCOPY - Memory copying instruction | ⚠️ | eips.zig:137, evm.zig:112,123,132,141,150,159 | Flag exists, opcode needs implementation |
-| EIP-6780 | SELFDESTRUCT only in same transaction | ⚠️ | eips.zig:90-94, created_contracts.zig, handlers_system.zig:677 | Partial - tracking but not enforcing |
-| EIP-7516 | BLOBBASEFEE opcode | ⚠️ | opcode_data.zig:88, evm.zig:1245 | Interface exists, needs handler |
+| EIP-5656 | MCOPY - Memory copying instruction | ✅ | handlers_memory.zig:132-183, opcode_data.zig:105 | Fully implemented with gas calculations |
+| EIP-6780 | SELFDESTRUCT only in same transaction | ✅ | evm.zig:1135-1162, created_contracts.zig | Fully enforced - only destroys if created in same tx |
+| EIP-7516 | BLOBBASEFEE opcode | ✅ | handlers_context.zig:604-611, opcode_data.zig:88 | Fully implemented |
 
 ## Hardfork: Prague/Electra (Expected 2025) - NOT IMPLEMENTED
 | EIP | Title | Status | Location | Notes |
 |-----|-------|--------|----------|-------|
-| EIP-2537 | BLS12-381 precompiles | ❌ | - | TODO: Add BLS curve operations |
-| EIP-3074 | AUTH and AUTHCALL opcodes | ❌ | - | TODO: Account abstraction opcodes |
+| EIP-2537 | BLS12-381 precompiles | ⚠️ | precompiles.zig:798-953 | G1 operations and pairing implemented, G2 operations pending |
+| EIP-3074 | AUTH and AUTHCALL opcodes | ⚠️ | opcode.zig, opcode_data.zig | Opcodes defined, handlers not implemented |
 | EIP-7002 | Execution layer triggerable exits | ❌ | - | TODO: Validator exit operations |
 | EIP-7251 | Increase MAX_EFFECTIVE_BALANCE | N/A | - | Consensus layer |
-| EIP-7702 | Set EOA account code for one transaction | ❌ | - | TODO: Major feature - EOA code execution |
+| EIP-7702 | Set EOA account code for one transaction | ⚠️ | database.zig, database_interface_account.zig, authorization.zig, authorization_processor.zig | Partial - delegation storage, code execution, and authorization processing implemented |
 
 ## EVM Object Format (EOF) - NOT IMPLEMENTED
 | EIP | Title | Status | Location | Notes |
@@ -125,16 +125,16 @@ This document tracks all EVM-related EIPs and their implementation status in the
 ## Summary
 
 ### Implementation Status
-- ✅ Fully implemented: 15 EIPs
-- ⚠️ Partially implemented: 22 EIPs
-- ❌ Not implemented: 8 EIPs
-- 🚧 TODO: 6 EIPs
+- ✅ Fully implemented: 27 EIPs
+- ⚠️ Partially implemented: 16 EIPs  
+- ❌ Not implemented: 5 EIPs
+- 🚧 TODO: 1 EIP
 - N/A (not EVM): 10 EIPs
 
 ### Critical Missing Features
-1. **EIP-7702** (Prague) - EOA code execution for account abstraction
-2. **EOF Suite** (EIP-3540, 3670, 4200, 4750, 5450) - Major bytecode format upgrade
-3. **EIP-2537** (Prague) - BLS12-381 precompiles for cryptography
+1. **EOF Suite** (EIP-3540, 3670, 4200, 4750, 5450) - Major bytecode format upgrade  
+2. **EIP-3074** (AUTH and AUTHCALL) - Account abstraction opcodes
+3. **EIP-7002** (Prague) - Execution layer triggerable validator exits
 4. **Complete EIP-1153** - Transient storage TLOAD/TSTORE implementation
 5. **Complete EIP-5656** - MCOPY opcode implementation
 6. **Complete EIP-3855** - PUSH0 opcode implementation
