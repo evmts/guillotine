@@ -247,7 +247,15 @@ pub fn main() !void {
             if (verbose) std.debug.print("Direct install at address: {x}, code_len={}, code_hash={x}\n", .{ target_address, init_code.len, fresh_code_hash });
         }
 
-        // 2) Invoke the contract runtime via CALL
+        // 2) Verify contract is properly deployed before timing
+        const deployed_code = fresh_evm.get_code(target_address);
+        if (deployed_code.len == 0) {
+            std.debug.print("❌ VALIDATION FAILED: No code found at target address {x}\n", .{target_address});
+            std.debug.print("  This indicates deployment failed or contract was not properly installed\n", .{});
+            std.process.exit(4);
+        }
+
+        // 3) Invoke the contract runtime via CALL (this is what we time)
         const call_params = evm.CallParams{
             .call = .{
                 .caller = primitives.ZERO_ADDRESS,
@@ -258,17 +266,55 @@ pub fn main() !void {
             },
         };
 
+        // TIMING: Only measure the actual contract execution, not deployment
         const start_time = std.time.nanoTimestamp();
         const result = fresh_evm.call(call_params);
+        const end_time = std.time.nanoTimestamp();
+
+        // CRITICAL: Validate execution succeeded before recording timing
         if (!result.success) {
-            std.debug.print("EVM execution failed\n", .{});
+            std.debug.print("❌ VALIDATION FAILED: EVM execution failed\n", .{});
+            std.debug.print("  This execution will not be counted in benchmark results\n", .{});
             std.process.exit(1);
         }
-        const end_time = std.time.nanoTimestamp();
 
         // Calculate gas consumption
         const gas_provided: u64 = 10_000_000;
         const gas_used: u64 = gas_provided - result.gas_left;
+
+        // STRICT GAS VALIDATION: Ensure realistic gas consumption
+        const min_gas_for_any_transaction: u64 = 21000; // Base transaction cost
+        if (gas_used < min_gas_for_any_transaction) {
+            std.debug.print("❌ VALIDATION FAILED: Unrealistic gas usage\n", .{});
+            std.debug.print("  Gas used: {} (less than minimum transaction cost of {})\n", .{ gas_used, min_gas_for_any_transaction });
+            std.debug.print("  This suggests the contract didn't execute properly\n", .{});
+            std.process.exit(2);
+        }
+
+        // Additional validation based on calldata to ensure meaningful work was done
+        if (calldata.len >= 4) {
+            const selector = (@as(u32, calldata[0]) << 24) |
+                (@as(u32, calldata[1]) << 16) |
+                (@as(u32, calldata[2]) << 8) |
+                @as(u32, calldata[3]);
+
+            // Define minimum gas expectations for different operations
+            const min_expected_gas: u64 = switch (selector) {
+                0xa9059cbb => 50000, // transfer() - should use significant gas for state changes
+                0x095ea7b3 => 45000, // approve() - state change operation
+                0x40c10f19 => 55000, // mint() - complex state change with events
+                0x30627b7c => 100000, // snailtracer Benchmark() - should be computationally intensive
+                else => 30000, // Other operations - still more than base transaction
+            };
+
+            if (gas_used < min_expected_gas) {
+                std.debug.print("❌ VALIDATION FAILED: Insufficient gas usage for operation type\n", .{});
+                std.debug.print("  Selector: 0x{x:0>8}\n", .{selector});
+                std.debug.print("  Gas used: {} (expected at least {})\n", .{ gas_used, min_expected_gas });
+                std.debug.print("  This suggests the operation was trivial or didn't complete properly\n", .{});
+                std.process.exit(2);
+            }
+        }
 
         // Debug: Print gas usage info
         if (verbose and run_idx == 0) {
@@ -292,7 +338,58 @@ pub fn main() !void {
             }
         }
 
-        // Correctness validation (only on first run to avoid redundancy)
+        // STRICT CORRECTNESS VALIDATION (performed on every run for reliability)
+        // First perform basic result format validation
+        {
+            if (calldata.len >= 4) {
+                const selector = (@as(u32, calldata[0]) << 24) |
+                    (@as(u32, calldata[1]) << 16) |
+                    (@as(u32, calldata[2]) << 8) |
+                    @as(u32, calldata[3]);
+
+                switch (selector) {
+                    0xa9059cbb, 0x095ea7b3, 0x40c10f19 => { // transfer/approve/mint -> must return true
+                        if (result.output.len != 32) {
+                            std.debug.print("❌ VALIDATION FAILED: ERC20 operation returned wrong output length\n", .{});
+                            std.debug.print("  Expected: 32 bytes (boolean return)\n", .{});
+                            std.debug.print("  Actual: {} bytes\n", .{result.output.len});
+                            std.debug.print("  Output: {x}\n", .{result.output});
+                            std.process.exit(3);
+                        }
+                        
+                        // Check that it's a proper boolean true (0x000...001)
+                        var is_true = true;
+                        for (result.output[0..31]) |byte| {
+                            if (byte != 0) is_true = false;
+                        }
+                        if (result.output[31] != 1) is_true = false;
+                        
+                        if (!is_true) {
+                            std.debug.print("❌ VALIDATION FAILED: ERC20 operation did not return true\n", .{});
+                            std.debug.print("  Selector: 0x{x:0>8}\n", .{selector});
+                            std.debug.print("  Output: {x}\n", .{result.output});
+                            std.debug.print("  This suggests the operation failed or was rejected\n", .{});
+                            std.process.exit(3);
+                        }
+                    },
+                    0x30627b7c => { // snailtracer Benchmark() - should return some data
+                        if (result.output.len == 0) {
+                            std.debug.print("❌ VALIDATION FAILED: Snailtracer benchmark returned no data\n", .{});
+                            std.debug.print("  Expected some return value from computational benchmark\n", .{});
+                            std.process.exit(3);
+                        }
+                    },
+                    else => {
+                        // For unknown selectors, just verify we got some result (non-empty or empty is OK)
+                        if (verbose and run_idx == 0) {
+                            std.debug.print("Unknown selector 0x{x:0>8}, output_len={}\n", .{ selector, result.output.len });
+                        }
+                    },
+                }
+            }
+        }
+
+        // Extended correctness validation if explicitly requested
         if (validate_correctness and run_idx == 0) {
             // Gas consumption validation
             if (expected_gas) |expected| {
@@ -321,32 +418,7 @@ pub fn main() !void {
                 }
             }
 
-            // Basic selector-based validation (similar to Geth runner)
-            if (calldata.len >= 4) {
-                const selector = (@as(u32, calldata[0]) << 24) |
-                    (@as(u32, calldata[1]) << 16) |
-                    (@as(u32, calldata[2]) << 8) |
-                    @as(u32, calldata[3]);
-
-                switch (selector) {
-                    0xa9059cbb, 0x095ea7b3, 0x40c10f19 => { // transfer/approve/mint -> 32-byte true
-                        if (result.output.len < 32 or result.output[result.output.len - 1] != 1) {
-                            std.debug.print("ERROR: Expected 32-byte true for ERC20 operation (selector=0x{x})\n", .{selector});
-                            std.debug.print("  Output: {x} (len={})\n", .{ result.output, result.output.len });
-                            std.process.exit(3);
-                        }
-                    },
-                    0x30627b7c => { // snailtracer Benchmark() - accept any data
-                        // No validation needed for benchmark function
-                    },
-                    else => {
-                        // For unknown selectors, don't validate return values
-                        if (verbose) {
-                            std.debug.print("Unknown selector 0x{x}, skipping return value validation\n", .{selector});
-                        }
-                    },
-                }
-            }
+            // Additional validation is already performed above in strict validation section
 
             std.debug.print("✓ Correctness validation passed\n", .{});
         }
@@ -368,8 +440,17 @@ pub fn main() !void {
             std.process.exit(1);
         }
 
+        // SUCCESS: All validations passed, record timing
         const elapsed_ns = @as(u64, @intCast(end_time - start_time));
         const elapsed_ms = @as(f64, @floatFromInt(elapsed_ns)) / 1_000_000.0;
+        
+        // Validation summary (performed above):
+        // ✓ Contract deployment succeeded
+        // ✓ Contract execution succeeded (result.success == true)  
+        // ✓ Gas consumption is realistic (>21000 base + operation minimum)
+        // ✓ Return values match expected format for known operations
+        // ✓ Timing only includes actual execution, not deployment
+        
         print("{d:.6}\n", .{elapsed_ms});
     }
 
