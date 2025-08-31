@@ -208,6 +208,86 @@ pub const SECP256K1_B: u256 = secp256k1.SECP256K1_B;
 pub const SECP256K1_GX: u256 = secp256k1.SECP256K1_GX;
 pub const SECP256K1_GY: u256 = secp256k1.SECP256K1_GY;
 
+// BLS12-381 FFI bindings
+pub const bls12_381 = struct {
+    // FFI function declarations
+    extern fn bls12_381_g1_add(input: [*]const u8, input_len: u32, output: [*]u8, output_len: u32) c_int;
+    extern fn bls12_381_g1_mul(input: [*]const u8, input_len: u32, output: [*]u8, output_len: u32) c_int;
+    extern fn bls12_381_g1_multiexp(input: [*]const u8, input_len: u32, output: [*]u8, output_len: u32) c_int;
+    extern fn bls12_381_pairing(input: [*]const u8, input_len: u32, output: [*]u8, output_len: u32) c_int;
+    extern fn bls12_381_g1_output_size() u32;
+    extern fn bls12_381_pairing_output_size() u32;
+
+    pub const Error = error{
+        InvalidInput,
+        InvalidPoint,
+        InvalidScalar,
+        ComputationFailed,
+    };
+
+    /// Perform BLS12-381 G1 addition
+    pub fn g1_add(input: []const u8, output: []u8) Error!void {
+        const result = bls12_381_g1_add(input.ptr, @intCast(input.len), output.ptr, @intCast(output.len));
+        switch (result) {
+            0 => return,
+            1 => return Error.InvalidInput,
+            2 => return Error.InvalidPoint,
+            3 => return Error.InvalidScalar,
+            4 => return Error.ComputationFailed,
+            else => return Error.ComputationFailed,
+        }
+    }
+
+    /// Perform BLS12-381 G1 scalar multiplication
+    pub fn g1_mul(input: []const u8, output: []u8) Error!void {
+        const result = bls12_381_g1_mul(input.ptr, @intCast(input.len), output.ptr, @intCast(output.len));
+        switch (result) {
+            0 => return,
+            1 => return Error.InvalidInput,
+            2 => return Error.InvalidPoint,
+            3 => return Error.InvalidScalar,
+            4 => return Error.ComputationFailed,
+            else => return Error.ComputationFailed,
+        }
+    }
+
+    /// Perform BLS12-381 G1 multi-scalar multiplication
+    pub fn g1_multiexp(input: []const u8, output: []u8) Error!void {
+        const result = bls12_381_g1_multiexp(input.ptr, @intCast(input.len), output.ptr, @intCast(output.len));
+        switch (result) {
+            0 => return,
+            1 => return Error.InvalidInput,
+            2 => return Error.InvalidPoint,
+            3 => return Error.InvalidScalar,
+            4 => return Error.ComputationFailed,
+            else => return Error.ComputationFailed,
+        }
+    }
+
+    /// Perform BLS12-381 pairing check
+    pub fn pairing(input: []const u8, output: []u8) Error!void {
+        const result = bls12_381_pairing(input.ptr, @intCast(input.len), output.ptr, @intCast(output.len));
+        switch (result) {
+            0 => return,
+            1 => return Error.InvalidInput,
+            2 => return Error.InvalidPoint,
+            3 => return Error.InvalidScalar,
+            4 => return Error.ComputationFailed,
+            else => return Error.ComputationFailed,
+        }
+    }
+
+    /// Get the output size for G1 operations
+    pub fn g1_output_size() u32 {
+        return bls12_381_g1_output_size();
+    }
+
+    /// Get the output size for pairing operations
+    pub fn pairing_output_size() u32 {
+        return bls12_381_pairing_output_size();
+    }
+};
+
 /// Generate a random private key
 /// WARNING: UNAUDITED - Custom cryptographic implementation that has NOT been audited!
 /// This function implements private key generation without security review.
@@ -258,7 +338,7 @@ pub fn hash_message(message: []const u8) Hash.Hash {
 
 /// Validate signature parameters (basic validation)
 pub fn is_valid_signature(signature: Signature) bool {
-    return secp256k1.validateSignature(signature.r, signature.s);
+    return secp256k1.unaudited_validate_signature(signature.r, signature.s);
 }
 
 /// Derive public key from private key
