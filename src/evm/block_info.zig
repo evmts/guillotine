@@ -24,6 +24,8 @@ pub fn BlockInfo(comptime config: BlockInfoConfig) type {
     return struct {
         const Self = @This();
         
+        /// Chain ID for EIP-155 replay protection
+        chain_id: u64,
         /// Block number
         number: u64,
         /// Block timestamp
@@ -51,6 +53,7 @@ pub fn BlockInfo(comptime config: BlockInfoConfig) type {
         /// Initialize BlockInfo with default values
         pub fn init() Self {
             return Self{
+            .chain_id = 1, // Default to mainnet
             .number = 0,
             .timestamp = 0,
             .difficulty = 0,

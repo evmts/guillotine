@@ -69,6 +69,7 @@ export fn zigEvmCreate() ?*anyopaque {
     };
 
     const block_info = Evm.BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1640995200,
         .gas_limit = 30_000_000,

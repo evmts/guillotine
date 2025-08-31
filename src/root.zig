@@ -165,6 +165,7 @@ export fn guillotine_init() c_int {
 
     // Create default block info and transaction context
     const block_info = evm_root.BlockInfo{
+        .chain_id = 1,
         .number = 0,
         .timestamp = 0,
         .difficulty = 0,
@@ -338,6 +339,7 @@ export fn guillotine_vm_create() ?*GuillotineVm {
 
     // Create default block info and transaction context
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 0,
         .timestamp = 0,
         .difficulty = 0,

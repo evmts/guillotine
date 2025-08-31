@@ -143,6 +143,7 @@ pub fn main() !void {
     defer database.deinit();
 
     const block_info = evm.BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
