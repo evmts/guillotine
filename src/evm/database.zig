@@ -183,12 +183,19 @@ pub const Database = struct {
         return self.code_storage.get(code_hash) orelse return Error.CodeNotFound;
     }
 
-    /// Get contract code by address
+    /// Get contract code by address (supports EIP-7702 delegation)
     pub fn get_code_by_address(self: *Database, address: [20]u8) Error![]const u8 {
         const log = std.log.scoped(.database);
         log.debug("get_code_by_address: Looking for address {x}", .{address});
         
         if (self.accounts.get(address)) |account| {
+            // EIP-7702: Check if this EOA has delegated code
+            if (account.get_effective_code_address()) |delegated_addr| {
+                log.debug("get_code_by_address: EOA has delegation to {x}", .{delegated_addr.bytes});
+                // Recursively get code from delegated address
+                return self.get_code_by_address(delegated_addr.bytes);
+            }
+            
             log.debug("get_code_by_address: Found account with code_hash {x}", .{account.code_hash});
             return self.get_code(account.code_hash);
         }
@@ -301,6 +308,50 @@ pub const Database = struct {
             snapshot.storage.deinit();
         }
         self.snapshots.shrinkRetainingCapacity(index);
+    }
+
+    // EIP-7702 Delegation operations
+
+    /// Set delegation for an EOA to execute another address's code
+    pub fn set_delegation(self: *Database, eoa_address: [20]u8, delegated_address: [20]u8) Error!void {
+        const log = std.log.scoped(.database);
+        
+        // Get or create the EOA account
+        var account = (try self.get_account(eoa_address)) orelse Account.zero();
+        
+        // Only EOAs can have delegations (no existing code)
+        if (!std.mem.eql(u8, &account.code_hash, &[_]u8{0} ** 32)) {
+            log.debug("set_delegation: Address {x} is a contract, cannot set delegation", .{eoa_address});
+            return Error.InvalidAddress;
+        }
+        
+        // Convert to Address type for the delegation
+        const primitives = @import("primitives");
+        const delegate_addr = primitives.Address.Address{ .bytes = delegated_address };
+        
+        account.set_delegation(delegate_addr);
+        try self.set_account(eoa_address, account);
+        
+        log.debug("set_delegation: Set delegation for EOA {x} to {x}", .{ eoa_address, delegated_address });
+    }
+
+    /// Clear delegation for an EOA
+    pub fn clear_delegation(self: *Database, eoa_address: [20]u8) Error!void {
+        const log = std.log.scoped(.database);
+        
+        if (try self.get_account(eoa_address)) |*account| {
+            account.clear_delegation();
+            try self.set_account(eoa_address, account.*);
+            log.debug("clear_delegation: Cleared delegation for EOA {x}", .{eoa_address});
+        }
+    }
+
+    /// Check if an address has a delegation
+    pub fn has_delegation(self: *Database, address: [20]u8) Error!bool {
+        if (try self.get_account(address)) |account| {
+            return account.has_delegation();
+        }
+        return false;
     }
 
     // Batch operations (simple implementation)
@@ -1115,6 +1166,99 @@ test "Database validation function" {
     
     // This would fail to compile if Database was missing required methods
     // validate_database_implementation(struct {}); // Uncomment to test failure
+}
+
+test "EIP-7702: Database delegation operations" {
+    const allocator = testing.allocator;
+    var db = Database.init(allocator);
+    defer db.deinit();
+
+    const eoa_address = [_]u8{0x01} ++ [_]u8{0} ** 19;
+    const contract_address = [_]u8{0x02} ++ [_]u8{0} ** 19;
+    const contract_code = [_]u8{ 0x60, 0x80, 0x60, 0x40, 0x52 }; // Simple bytecode
+
+    // Store contract code
+    const code_hash = try db.set_code(&contract_code);
+    const contract_account = Account{
+        .balance = 0,
+        .nonce = 0,
+        .code_hash = code_hash,
+        .storage_root = [_]u8{0} ** 32,
+        .delegated_address = null,
+    };
+    try db.set_account(contract_address, contract_account);
+
+    // Set delegation from EOA to contract
+    try db.set_delegation(eoa_address, contract_address);
+
+    // Check delegation was set
+    try testing.expect(try db.has_delegation(eoa_address));
+
+    // Get code for EOA should return contract's code via delegation
+    const eoa_code = try db.get_code_by_address(eoa_address);
+    try testing.expectEqualSlices(u8, &contract_code, eoa_code);
+
+    // Clear delegation
+    try db.clear_delegation(eoa_address);
+    try testing.expect(!(try db.has_delegation(eoa_address)));
+
+    // Now get_code_by_address should fail for EOA
+    try testing.expectError(Database.Error.AccountNotFound, db.get_code_by_address(eoa_address));
+}
+
+test "EIP-7702: Cannot set delegation on contract" {
+    const allocator = testing.allocator;
+    var db = Database.init(allocator);
+    defer db.deinit();
+
+    const contract_address = [_]u8{0x03} ++ [_]u8{0} ** 19;
+    const delegate_address = [_]u8{0x04} ++ [_]u8{0} ** 19;
+    
+    // Create a contract account (has code)
+    const code_hash = try db.set_code(&[_]u8{0x60});
+    const contract_account = Account{
+        .balance = 0,
+        .nonce = 0,
+        .code_hash = code_hash,
+        .storage_root = [_]u8{0} ** 32,
+        .delegated_address = null,
+    };
+    try db.set_account(contract_address, contract_account);
+
+    // Try to set delegation on contract - should fail
+    try testing.expectError(Database.Error.InvalidAddress, db.set_delegation(contract_address, delegate_address));
+}
+
+test "EIP-7702: Delegation chain resolution" {
+    const allocator = testing.allocator;
+    var db = Database.init(allocator);
+    defer db.deinit();
+
+    const eoa1_address = [_]u8{0x05} ++ [_]u8{0} ** 19;
+    const eoa2_address = [_]u8{0x06} ++ [_]u8{0} ** 19;
+    const contract_address = [_]u8{0x07} ++ [_]u8{0} ** 19;
+    const contract_code = [_]u8{ 0x60, 0xFF }; // PUSH1 0xFF
+
+    // Store contract code
+    const code_hash = try db.set_code(&contract_code);
+    const contract_account = Account{
+        .balance = 0,
+        .nonce = 0,
+        .code_hash = code_hash,
+        .storage_root = [_]u8{0} ** 32,
+        .delegated_address = null,
+    };
+    try db.set_account(contract_address, contract_account);
+
+    // EOA1 delegates to EOA2
+    try db.set_delegation(eoa1_address, eoa2_address);
+    
+    // EOA2 delegates to contract
+    try db.set_delegation(eoa2_address, contract_address);
+
+    // Getting code for EOA1 should resolve through the delegation chain
+    const eoa1_code = try db.get_code_by_address(eoa1_address);
+    try testing.expectEqualSlices(u8, &contract_code, eoa1_code);
 }
 
 test "Database validation test" {
