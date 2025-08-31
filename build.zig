@@ -1178,17 +1178,19 @@ pub fn build(b: *std.Build) void {
     evm_main_bench_exe.root_module.addImport("crypto", crypto_mod);
     evm_main_bench_exe.root_module.addImport("build_options", build_options_mod);
     
-    // Link REVM libraries
-    evm_main_bench_exe.linkLibrary(revm_lib.?);
-    evm_main_bench_exe.addIncludePath(b.path("src/revm_wrapper"));
-    evm_main_bench_exe.linkLibC();
-    
-    const revm_rust_target_dir = if (optimize == .Debug) "debug" else "release";
-    const revm_dylib_path = if (rust_target) |target_triple|
-        b.fmt("target/{s}/{s}/librevm_wrapper.dylib", .{ target_triple, revm_rust_target_dir })
-    else
-        b.fmt("target/{s}/librevm_wrapper.dylib", .{revm_rust_target_dir});
-    evm_main_bench_exe.addObjectFile(b.path(revm_dylib_path));
+    // Link REVM libraries (reusing existing variables from differential test setup)
+    if (revm_lib != null) {
+        evm_main_bench_exe.linkLibrary(revm_lib.?);
+        evm_main_bench_exe.addIncludePath(b.path("src/revm_wrapper"));
+        evm_main_bench_exe.linkLibC();
+        
+        const evm_bench_revm_rust_target_dir = if (optimize == .Debug) "debug" else "release";
+        const evm_bench_revm_dylib_path = if (rust_target) |target_triple|
+            b.fmt("target/{s}/{s}/librevm_wrapper.dylib", .{ target_triple, evm_bench_revm_rust_target_dir })
+        else
+            b.fmt("target/{s}/librevm_wrapper.dylib", .{evm_bench_revm_rust_target_dir});
+        evm_main_bench_exe.addObjectFile(b.path(evm_bench_revm_dylib_path));
+    }
     
     if (target.result.os.tag == .linux) {
         evm_main_bench_exe.linkSystemLibrary("m");
