@@ -78,6 +78,7 @@ pub const MemoryDatabase = @import("memory_database.zig").MemoryDatabase;
 pub const SelfDestruct = @import("self_destruct.zig").SelfDestruct;
 pub const Log = @import("logs.zig").Log;
 pub const TransactionContext = @import("transaction_context.zig").TransactionContext;
+pub const AuthorizationProcessor = @import("authorization_processor.zig").AuthorizationProcessor;
 pub const kzg_setup = @import("kzg_setup.zig");
 
 // Run all tests
