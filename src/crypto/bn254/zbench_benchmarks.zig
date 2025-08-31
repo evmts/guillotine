@@ -217,6 +217,10 @@ fn nextInputIndex() usize {
 // =============================================================================
 
 test "field benchmarks" {
+    var stderr_buffer: [4096]u8 = undefined;
+    var stderr_writer = std.fs.File.stderr().writer(&stderr_buffer);
+    const stderr = &stderr_writer.interface;
+    
     const allocator = std.testing.allocator;
     // 500ms time budget for field benchmarks
     var bench = zbench.Benchmark.init(allocator, .{ .time_budget_ns = 5e8 });
@@ -255,12 +259,15 @@ test "field benchmarks" {
     try bench.add("Fr Multiplication (1000)", benchmarkFrMul, .{});
     try bench.add("Fr Inversion (1000)", benchmarkFrInv, .{});
 
-    const stderr = std.io.getStdErr().writer();
     try stderr.writeAll("\n");
     try bench.run(stderr);
 }
 
 test "curve benchmarks" {
+    var stderr_buffer: [4096]u8 = undefined;
+    var stderr_writer = std.fs.File.stderr().writer(&stderr_buffer);
+    const stderr = &stderr_writer.interface;
+    
     const allocator = std.testing.allocator;
     // 1 second time budget for curve benchmarks
     var bench = zbench.Benchmark.init(allocator, .{ .time_budget_ns = 1e9 });
@@ -280,12 +287,15 @@ test "curve benchmarks" {
     try bench.add("G2 Affine Conversion", benchmarkG2ToAffine, .{});
     try bench.add("G2 Curve Validation", benchmarkG2IsOnCurve, .{});
 
-    const stderr = std.io.getStdErr().writer();
     try stderr.writeAll("\n");
     try bench.run(stderr);
 }
 
 test "pairing benchmarks" {
+    var stderr_buffer: [4096]u8 = undefined;
+    var stderr_writer = std.fs.File.stderr().writer(&stderr_buffer);
+    const stderr = &stderr_writer.interface;
+    
     const allocator = std.testing.allocator;
     // 2 seconds time budget for pairing benchmarks
     var bench = zbench.Benchmark.init(allocator, .{ .time_budget_ns = 2e9 });
@@ -297,7 +307,6 @@ test "pairing benchmarks" {
     try bench.add("Final Exponentiation (Easy)", benchmarkFinalExponentiationEasy, .{});
     try bench.add("Final Exponentiation (Hard)", benchmarkFinalExponentiationHard, .{});
 
-    const stderr = std.io.getStdErr().writer();
     try stderr.writeAll("\n");
     try bench.run(stderr);
 }

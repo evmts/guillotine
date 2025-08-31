@@ -570,6 +570,27 @@ pub fn build(b: *std.Build) void {
     const build_debug_runner_step = b.step("build-debug-runner", "Build the debug EVM runner");
     build_debug_runner_step.dependOn(&b.addInstallArtifact(debug_runner_exe, .{}).step);
 
+    // Add zbench benchmark for BN254
+    const zbench_module = b.dependency("zbench", .{
+        .target = target,
+        .optimize = optimize,
+    }).module("zbench");
+
+    const zbench_bn254 = b.addTest(.{
+        .name = "zbench-bn254",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/crypto/bn254/zbench_benchmarks.zig"),
+            .target = target,
+            .optimize = .ReleaseFast,
+        }),
+    });
+    zbench_bn254.root_module.addImport("zbench", zbench_module);
+
+    const run_zbench_bn254 = b.addRunArtifact(zbench_bn254);
+
+    const zbench_bn254_step = b.step("bench-bn254", "Run zbench BN254 benchmarks");
+    zbench_bn254_step.dependOn(&run_zbench_bn254.step);
+
     const poop_runner_exe = b.addExecutable(.{
         .name = "poop-runner",
         .root_module = b.createModule(.{
