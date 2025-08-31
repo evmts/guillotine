@@ -93,12 +93,14 @@ const std = @import("std");
 const testing = std.testing;
 const rlp = @import("rlp.zig");
 const address = @import("address.zig");
+const authorization = @import("authorization.zig");
 const crypto_pkg = @import("crypto");
 const hash = crypto_pkg.Hash;
 const hex = @import("hex.zig");
 const crypto = crypto_pkg.Crypto;
 const Address = address.Address;
 const Hash = hash.Hash;
+const Authorization = authorization.Authorization;
 const Allocator = std.mem.Allocator;
 
 // Transaction error types
@@ -141,6 +143,23 @@ pub const Eip1559Transaction = struct {
     value: u256,
     data: []const u8,
     access_list: []const AccessListItem,
+    v: u64,
+    r: [32]u8,
+    s: [32]u8,
+};
+
+// EIP-7702 transaction structure
+pub const Eip7702Transaction = struct {
+    chain_id: u64,
+    nonce: u64,
+    max_priority_fee_per_gas: u256,
+    max_fee_per_gas: u256,
+    gas_limit: u64,
+    to: ?Address,
+    value: u256,
+    data: []const u8,
+    access_list: []const AccessListItem,
+    authorization_list: []const Authorization,
     v: u64,
     r: [32]u8,
     s: [32]u8,
