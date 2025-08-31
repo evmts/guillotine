@@ -200,7 +200,7 @@ pub fn Frame(comptime config: FrameConfig) type {
                 .evm_ptr = evm_ptr,
                 // Cache line 3+
                 .output = &[_]u8{}, // Start with empty output
-                .jump_table = .{ .entries = &[_]Dispatch.JumpTableEntry{} }, // Empty jump table
+                .jump_table = .{ .entries = &[_]Dispatch.JumpTable.JumpTableEntry{} }, // Empty jump table
                 .allocator = allocator,
                 .self_destruct = self_destruct,
                 .block_info = block_info,
@@ -303,6 +303,25 @@ pub fn Frame(comptime config: FrameConfig) type {
                 }
 
                 const cursor = Self.Dispatch{ .cursor = traced_schedule.ptr + start_index };
+                
+                // Debug check: verify bytecode stream ends with 2 stop handlers
+                if (builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
+                    if (traced_schedule.len >= 2) {
+                        const last_item = traced_schedule[traced_schedule.len - 1];
+                        const second_last_item = traced_schedule[traced_schedule.len - 2];
+                        
+                        // Check if both are stop handlers by comparing function pointers
+                        const stop_handler = Self.opcode_handlers[@intFromEnum(Opcode.STOP)];
+                        if (last_item.opcode_handler != stop_handler or second_last_item.opcode_handler != stop_handler) {
+                            log.err("Frame.interpret_with_tracer: Bytecode stream does not end with 2 stop handlers (traced)", .{});
+                            return Error.InvalidOpcode;
+                        }
+                    } else {
+                        log.err("Frame.interpret_with_tracer: Bytecode stream too short to have 2 stop handlers (traced)", .{});
+                        return Error.InvalidOpcode;
+                    }
+                }
+                
                 log.debug("Frame.interpret_with_tracer: Starting traced execution at cursor index {}, gas={}", .{start_index, self.gas_remaining});
                 cursor.cursor[0].opcode_handler(self, cursor.cursor) catch |err| {
                     log.debug("Frame.interpret_with_tracer: Handler failed with error: {}", .{err});
@@ -347,6 +366,24 @@ pub fn Frame(comptime config: FrameConfig) type {
                 }
 
                 const cursor = Self.Dispatch{ .cursor = schedule.ptr + start_index };
+                
+                // Debug check: verify bytecode stream ends with 2 stop handlers
+                if (builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
+                    if (schedule.len >= 2) {
+                        const last_item = schedule[schedule.len - 1];
+                        const second_last_item = schedule[schedule.len - 2];
+                        
+                        // Check if both are stop handlers by comparing function pointers
+                        const stop_handler = Self.opcode_handlers[@intFromEnum(Opcode.STOP)];
+                        if (last_item.opcode_handler != stop_handler or second_last_item.opcode_handler != stop_handler) {
+                            log.err("Frame.interpret_with_tracer: Bytecode stream does not end with 2 stop handlers (normal)", .{});
+                            return Error.InvalidOpcode;
+                        }
+                    } else {
+                        log.err("Frame.interpret_with_tracer: Bytecode stream too short to have 2 stop handlers (normal)", .{});
+                        return Error.InvalidOpcode;
+                    }
+                }
                 
                 // Debug: First item should be an opcode_handler after skipping first_block_gas
                 // Since the union is untagged, we can't verify this at runtime

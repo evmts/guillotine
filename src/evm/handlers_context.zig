@@ -245,8 +245,8 @@ pub fn Handlers(comptime FrameType: type) type {
                 else => return Error.AllocationError,
             };
 
-            // Create a slice from the bytecode pointer and size
-            const code_data = metadata.bytecode_ptr[0..metadata.size];
+            // Create a slice from the null-terminated bytecode pointer
+            const code_data = std.mem.span(metadata.bytecode_ptr);
 
             // Copy code to memory with proper zero-padding
             var i: usize = 0;
