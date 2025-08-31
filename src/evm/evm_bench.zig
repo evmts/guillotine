@@ -19,11 +19,12 @@ const ERC20_MINT_SELECTOR: u32 = 0x40c10f19; // mint(address,uint256)
 const TEST_ADDRESS_1: Address = [_]u8{0x11} ** 20;
 const TEST_ADDRESS_2: Address = [_]u8{0x22} ** 20;
 
-/// Load test case files from bench/cases/
-fn readCaseFile(allocator: std.mem.Allocator, case_name: []const u8, file_name: []const u8) ![]u8 {
-    const path = try std.fmt.allocPrint(allocator, "/Users/williamcory/guillotine/bench/cases/{s}/{s}", .{ case_name, file_name });
+/// Load test case files from src/evm/fixtures/
+fn readFixtureFile(allocator: std.mem.Allocator, fixture_name: []const u8, file_name: []const u8) ![]u8 {
+    const path = try std.fmt.allocPrint(allocator, "src/evm/fixtures/{s}/{s}", .{ fixture_name, file_name });
     defer allocator.free(path);
-    const file = try std.fs.openFileAbsolute(path, .{});
+    const cwd = std.fs.cwd();
+    const file = try cwd.openFile(path, .{});
     defer file.close();
     const content = try file.readToEndAlloc(allocator, 16 * 1024 * 1024);
     const trimmed = std.mem.trim(u8, content, " \t\n\r");
@@ -109,9 +110,9 @@ fn benchmark_evm_keccak256(allocator: std.mem.Allocator) void {
 // ============================================================================
 
 fn benchmark_evm_erc20_transfer(allocator: std.mem.Allocator) void {
-    const bytecode_hex = readCaseFile(allocator, "erc20-transfer", "bytecode.txt") catch return;
+    const bytecode_hex = readFixtureFile(allocator, "erc20-transfer", "bytecode.txt") catch return;
     defer allocator.free(bytecode_hex);
-    const calldata_hex = readCaseFile(allocator, "erc20-transfer", "calldata.txt") catch return;
+    const calldata_hex = readFixtureFile(allocator, "erc20-transfer", "calldata.txt") catch return;
     defer allocator.free(calldata_hex);
 
     const bytecode = hexDecode(allocator, bytecode_hex) catch return;
@@ -166,9 +167,9 @@ fn benchmark_evm_erc20_transfer(allocator: std.mem.Allocator) void {
 }
 
 fn benchmark_evm_snailtracer(allocator: std.mem.Allocator) void {
-    const bytecode_hex = readCaseFile(allocator, "snailtracer", "bytecode.txt") catch return;
+    const bytecode_hex = readFixtureFile(allocator, "snailtracer", "bytecode.txt") catch return;
     defer allocator.free(bytecode_hex);
-    const calldata_hex = readCaseFile(allocator, "snailtracer", "calldata.txt") catch return;
+    const calldata_hex = readFixtureFile(allocator, "snailtracer", "calldata.txt") catch return;
     defer allocator.free(calldata_hex);
 
     const bytecode = hexDecode(allocator, bytecode_hex) catch return;
@@ -198,11 +199,21 @@ fn benchmark_evm_snailtracer(allocator: std.mem.Allocator) void {
     var vm = evm_mod.Evm(.{}).init(allocator, &db, block_info, context, 0, ZERO_ADDRESS, .CANCUN) catch return;
     defer vm.deinit();
 
+    // Deploy the bytecode first
+    const contract_address = Address{ .bytes = [_]u8{0x12} ** 20 };
+    const code_hash = db.set_code(bytecode) catch return;
+    db.set_account(contract_address.bytes, .{
+        .balance = 0,
+        .nonce = 1,
+        .code_hash = code_hash,
+        .storage_root = [_]u8{0} ** 32,
+    }) catch return;
+    
     const caller = Address{ .bytes = [_]u8{0x10} ** 20 };
     const call_params = evm_mod.CallParams{
         .call = .{
             .caller = caller,
-            .to = Address{ .bytes = [_]u8{0x12} ** 20 },
+            .to = contract_address,
             .value = 0,
             .input = calldata,
             .gas = BENCHMARK_GAS_LIMIT,
@@ -212,9 +223,9 @@ fn benchmark_evm_snailtracer(allocator: std.mem.Allocator) void {
 }
 
 fn benchmark_evm_thousand_hashes(allocator: std.mem.Allocator) void {
-    const bytecode_hex = readCaseFile(allocator, "ten-thousand-hashes", "bytecode.txt") catch return;
+    const bytecode_hex = readFixtureFile(allocator, "ten-thousand-hashes", "bytecode.txt") catch return;
     defer allocator.free(bytecode_hex);
-    const calldata_hex = readCaseFile(allocator, "ten-thousand-hashes", "calldata.txt") catch return;
+    const calldata_hex = readFixtureFile(allocator, "ten-thousand-hashes", "calldata.txt") catch return;
     defer allocator.free(calldata_hex);
 
     const bytecode = hexDecode(allocator, bytecode_hex) catch return;
@@ -244,11 +255,21 @@ fn benchmark_evm_thousand_hashes(allocator: std.mem.Allocator) void {
     var vm = evm_mod.Evm(.{}).init(allocator, &db, block_info, context, 0, ZERO_ADDRESS, .CANCUN) catch return;
     defer vm.deinit();
 
+    // Deploy the bytecode first
+    const contract_address = Address{ .bytes = [_]u8{0x12} ** 20 };
+    const code_hash = db.set_code(bytecode) catch return;
+    db.set_account(contract_address.bytes, .{
+        .balance = 0,
+        .nonce = 1,
+        .code_hash = code_hash,
+        .storage_root = [_]u8{0} ** 32,
+    }) catch return;
+    
     const caller = Address{ .bytes = [_]u8{0x10} ** 20 };
     const call_params = evm_mod.CallParams{
         .call = .{
             .caller = caller,
-            .to = Address{ .bytes = [_]u8{0x12} ** 20 },
+            .to = contract_address,
             .value = 0,
             .input = calldata,
             .gas = BENCHMARK_GAS_LIMIT,
@@ -262,9 +283,9 @@ fn benchmark_evm_thousand_hashes(allocator: std.mem.Allocator) void {
 // ============================================================================
 
 fn benchmark_revm_erc20_transfer(allocator: std.mem.Allocator) void {
-    const bytecode_hex = readCaseFile(allocator, "erc20-transfer", "bytecode.txt") catch return;
+    const bytecode_hex = readFixtureFile(allocator, "erc20-transfer", "bytecode.txt") catch return;
     defer allocator.free(bytecode_hex);
-    const calldata_hex = readCaseFile(allocator, "erc20-transfer", "calldata.txt") catch return;
+    const calldata_hex = readFixtureFile(allocator, "erc20-transfer", "calldata.txt") catch return;
     defer allocator.free(calldata_hex);
 
     const bytecode = hexDecode(allocator, bytecode_hex) catch return;
@@ -291,9 +312,9 @@ fn benchmark_revm_erc20_transfer(allocator: std.mem.Allocator) void {
 }
 
 fn benchmark_revm_snailtracer(allocator: std.mem.Allocator) void {
-    const bytecode_hex = readCaseFile(allocator, "snailtracer", "bytecode.txt") catch return;
+    const bytecode_hex = readFixtureFile(allocator, "snailtracer", "bytecode.txt") catch return;
     defer allocator.free(bytecode_hex);
-    const calldata_hex = readCaseFile(allocator, "snailtracer", "calldata.txt") catch return;
+    const calldata_hex = readFixtureFile(allocator, "snailtracer", "calldata.txt") catch return;
     defer allocator.free(calldata_hex);
 
     const bytecode = hexDecode(allocator, bytecode_hex) catch return;
@@ -306,23 +327,22 @@ fn benchmark_revm_snailtracer(allocator: std.mem.Allocator) void {
     defer vm.deinit();
 
     const caller = Address{ .bytes = [_]u8{0x10} ** 20 };
-    vm.setBalance(caller, std.math.maxInt(u256)) catch return;
-
-    var create_result = vm.create(caller, 0, bytecode, BENCHMARK_GAS_LIMIT) catch return;
-    defer create_result.deinit();
-    if (!create_result.success) return;
-
     const contract_address = Address{ .bytes = [_]u8{0x12} ** 20 };
-    vm.setCode(contract_address, create_result.output) catch return;
+    
+    // Set balance for caller
+    vm.setBalance(caller, std.math.maxInt(u256)) catch return;
+    
+    // Deploy bytecode directly to contract address
+    vm.setCode(contract_address, bytecode) catch return;
 
     var call_result = vm.call(caller, contract_address, 0, calldata, BENCHMARK_GAS_LIMIT) catch return;
     defer call_result.deinit();
 }
 
 fn benchmark_revm_thousand_hashes(allocator: std.mem.Allocator) void {
-    const bytecode_hex = readCaseFile(allocator, "ten-thousand-hashes", "bytecode.txt") catch return;
+    const bytecode_hex = readFixtureFile(allocator, "ten-thousand-hashes", "bytecode.txt") catch return;
     defer allocator.free(bytecode_hex);
-    const calldata_hex = readCaseFile(allocator, "ten-thousand-hashes", "calldata.txt") catch return;
+    const calldata_hex = readFixtureFile(allocator, "ten-thousand-hashes", "calldata.txt") catch return;
     defer allocator.free(calldata_hex);
 
     const bytecode = hexDecode(allocator, bytecode_hex) catch return;
@@ -335,14 +355,13 @@ fn benchmark_revm_thousand_hashes(allocator: std.mem.Allocator) void {
     defer vm.deinit();
 
     const caller = Address{ .bytes = [_]u8{0x10} ** 20 };
-    vm.setBalance(caller, std.math.maxInt(u256)) catch return;
-
-    var create_result = vm.create(caller, 0, bytecode, BENCHMARK_GAS_LIMIT) catch return;
-    defer create_result.deinit();
-    if (!create_result.success) return;
-
     const contract_address = Address{ .bytes = [_]u8{0x12} ** 20 };
-    vm.setCode(contract_address, create_result.output) catch return;
+    
+    // Set balance for caller
+    vm.setBalance(caller, std.math.maxInt(u256)) catch return;
+    
+    // Deploy bytecode directly to contract address
+    vm.setCode(contract_address, bytecode) catch return;
 
     var call_result = vm.call(caller, contract_address, 0, calldata, BENCHMARK_GAS_LIMIT) catch return;
     defer call_result.deinit();
