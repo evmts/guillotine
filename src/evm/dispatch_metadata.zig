@@ -67,3 +67,125 @@ pub fn DispatchMetadata(comptime FrameType: type) type {
         };
     };
 }
+
+// ============================
+// Tests
+// ============================
+
+const testing = std.testing;
+
+// Mock frame type for testing
+const TestFrame = struct {
+    pub const WordType = u256;
+    pub const PcType = u32;
+};
+
+test "JumpDestMetadata packs correctly into 64 bits" {
+    const Metadata = DispatchMetadata(TestFrame);
+    
+    try testing.expectEqual(@as(usize, 8), @sizeOf(Metadata.JumpDestMetadata));
+    
+    const metadata = Metadata.JumpDestMetadata{
+        .gas = 1000,
+        .min_stack = -10,
+        .max_stack = 100,
+    };
+    
+    try testing.expectEqual(@as(u32, 1000), metadata.gas);
+    try testing.expectEqual(@as(i16, -10), metadata.min_stack);
+    try testing.expectEqual(@as(i16, 100), metadata.max_stack);
+}
+
+test "PushInlineMetadata stores u64 values" {
+    const Metadata = DispatchMetadata(TestFrame);
+    
+    try testing.expectEqual(@as(usize, 8), @sizeOf(Metadata.PushInlineMetadata));
+    
+    const metadata = Metadata.PushInlineMetadata{
+        .value = 0xDEADBEEFCAFEBABE,
+    };
+    
+    try testing.expectEqual(@as(u64, 0xDEADBEEFCAFEBABE), metadata.value);
+}
+
+test "PushPointerMetadata stores pointer to u256" {
+    const Metadata = DispatchMetadata(TestFrame);
+    
+    try testing.expectEqual(@as(usize, 8), @sizeOf(Metadata.PushPointerMetadata));
+    
+    var value: u256 = 0x123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0;
+    const metadata = Metadata.PushPointerMetadata{
+        .value = &value,
+    };
+    
+    try testing.expectEqual(@as(u256, 0x123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0), metadata.value.*);
+}
+
+test "PcMetadata stores program counter value" {
+    const Metadata = DispatchMetadata(TestFrame);
+    
+    const metadata = Metadata.PcMetadata{
+        .value = 12345,
+    };
+    
+    try testing.expectEqual(@as(u32, 12345), metadata.value);
+}
+
+test "CodesizeMetadata stores bytecode size" {
+    const Metadata = DispatchMetadata(TestFrame);
+    
+    const metadata = Metadata.CodesizeMetadata{
+        .size = 65536,
+    };
+    
+    try testing.expectEqual(@as(u32, 65536), metadata.size);
+}
+
+test "CodecopyMetadata stores null-terminated bytecode pointer" {
+    const Metadata = DispatchMetadata(TestFrame);
+    
+    try testing.expectEqual(@as(usize, 8), @sizeOf(Metadata.CodecopyMetadata));
+    
+    const bytecode = "test_bytecode";
+    const metadata = Metadata.CodecopyMetadata{
+        .bytecode_ptr = bytecode,
+    };
+    
+    try testing.expectEqual(@as([*:0]const u8, bytecode), metadata.bytecode_ptr);
+}
+
+test "TraceBeforeMetadata packs with proper padding" {
+    const Metadata = DispatchMetadata(TestFrame);
+    
+    try testing.expectEqual(@as(usize, 8), @sizeOf(Metadata.TraceBeforeMetadata));
+    
+    const metadata = Metadata.TraceBeforeMetadata{
+        .pc = 100,
+        .opcode = 0x60, // PUSH1
+        ._padding = 0,
+    };
+    
+    try testing.expectEqual(@as(u32, 100), metadata.pc);
+    try testing.expectEqual(@as(u8, 0x60), metadata.opcode);
+}
+
+test "TraceAfterMetadata packs with proper padding" {
+    const Metadata = DispatchMetadata(TestFrame);
+    
+    try testing.expectEqual(@as(usize, 8), @sizeOf(Metadata.TraceAfterMetadata));
+    
+    const metadata = Metadata.TraceAfterMetadata{
+        .pc = 200,
+        .opcode = 0x01, // ADD
+        ._padding = 0,
+    };
+    
+    try testing.expectEqual(@as(u32, 200), metadata.pc);
+    try testing.expectEqual(@as(u8, 0x01), metadata.opcode);
+}
+
+test "FirstBlockMetadata is same as JumpDestMetadata" {
+    const Metadata = DispatchMetadata(TestFrame);
+    
+    try testing.expectEqual(@TypeOf(Metadata.JumpDestMetadata{}), @TypeOf(Metadata.FirstBlockMetadata{}));
+}

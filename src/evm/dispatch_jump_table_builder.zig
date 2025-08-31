@@ -135,3 +135,173 @@ pub fn JumpTableBuilder(comptime FrameType: type, comptime DispatchType: type) t
         }
     };
 }
+
+// ============================
+// Tests
+// ============================
+
+const testing = std.testing;
+
+// Mock types for testing
+const TestFrame = struct {
+    pub const PcType = u32;
+};
+
+const TestItem = struct {
+    value: u64,
+};
+
+const TestDispatch = struct {
+    cursor: [*]const TestItem,
+    
+    pub const Item = TestItem;
+    
+    pub const JumpTable = struct {
+        pub const JumpTableEntry = struct {
+            pc: TestFrame.PcType,
+            dispatch: TestDispatch,
+        };
+        
+        entries: []const JumpTableEntry,
+    };
+    
+    pub fn calculateFirstBlockGas(bytecode: anytype) u64 {
+        _ = bytecode;
+        return 0; // No first block gas for testing
+    }
+};
+
+// Mock bytecode for testing
+const MockBytecode = struct {
+    data: []const u8,
+    
+    pub const Iterator = struct {
+        pc: u32,
+        index: usize,
+        data: []const u8,
+        
+        pub const OpData = union(enum) {
+            regular: struct { opcode: u8 },
+            push: struct { size: u8, value: u256 },
+            jumpdest: struct { gas_cost: u32 },
+            stop,
+            invalid,
+            push_add_fusion: struct { value: u64 },
+            push_mul_fusion: struct { value: u64 },
+            push_sub_fusion: struct { value: u64 },
+            push_div_fusion: struct { value: u64 },
+            push_and_fusion: struct { value: u64 },
+            push_or_fusion: struct { value: u64 },
+            push_xor_fusion: struct { value: u64 },
+            push_jump_fusion: struct { value: u64 },
+            push_jumpi_fusion: struct { value: u64 },
+        };
+        
+        pub fn next(self: *@This()) ?OpData {
+            if (self.index >= self.data.len) return null;
+            
+            const opcode = self.data[self.index];
+            self.index += 1;
+            
+            // Simple mock: 0x5b = JUMPDEST, others are regular
+            if (opcode == 0x5b) {
+                const result = OpData{ .jumpdest = .{ .gas_cost = 1 } };
+                self.pc += 1;
+                return result;
+            } else {
+                const result = OpData{ .regular = .{ .opcode = opcode } };
+                self.pc += 1;
+                return result;
+            }
+        }
+    };
+    
+    pub fn createIterator(self: @This()) Iterator {
+        return .{ .pc = 0, .index = 0, .data = self.data };
+    }
+};
+
+test "JumpTableBuilder adds and sorts entries correctly" {
+    const Builder = JumpTableBuilder(TestFrame, TestDispatch);
+    
+    var builder = Builder.init(testing.allocator);
+    defer builder.deinit();
+    
+    // Add entries out of order
+    try builder.addEntry(30, 3);
+    try builder.addEntry(10, 1);
+    try builder.addEntry(20, 2);
+    
+    // Test that entries are stored
+    try testing.expectEqual(@as(usize, 3), builder.entries.items.len);
+}
+
+test "JumpTableBuilder builds from bytecode with JUMPDESTs" {
+    const Builder = JumpTableBuilder(TestFrame, TestDispatch);
+    
+    var builder = Builder.init(testing.allocator);
+    defer builder.deinit();
+    
+    // Create mock bytecode with JUMPDESTs at positions 1 and 3
+    const bytecode_data = [_]u8{ 0x60, 0x5b, 0x60, 0x5b, 0x00 }; // PUSH1, JUMPDEST, PUSH1, JUMPDEST, STOP
+    const bytecode = MockBytecode{ .data = &bytecode_data };
+    
+    const schedule = [_]TestItem{
+        .{ .value = 0 }, // PUSH1
+        .{ .value = 1 }, // JUMPDEST
+        .{ .value = 2 }, // Metadata
+        .{ .value = 3 }, // PUSH1
+        .{ .value = 4 }, // JUMPDEST
+        .{ .value = 5 }, // Metadata
+        .{ .value = 6 }, // STOP
+    };
+    
+    try builder.buildFromSchedule(&schedule, bytecode);
+    
+    // Should have found 2 JUMPDESTs
+    try testing.expectEqual(@as(usize, 2), builder.entries.items.len);
+}
+
+test "JumpTableBuilder finalize creates proper JumpTable" {
+    const Builder = JumpTableBuilder(TestFrame, TestDispatch);
+    
+    var builder = Builder.init(testing.allocator);
+    defer builder.deinit();
+    
+    // Add test entries
+    try builder.addEntry(20, 2);
+    try builder.addEntry(10, 1);
+    
+    const jump_table = try builder.finalize();
+    defer testing.allocator.free(jump_table.entries);
+    
+    // Verify entries are sorted
+    try testing.expectEqual(@as(u32, 10), jump_table.entries[0].pc);
+    try testing.expectEqual(@as(u32, 20), jump_table.entries[1].pc);
+}
+
+test "JumpTableBuilder finalizeWithSchedule sets dispatch pointers" {
+    const Builder = JumpTableBuilder(TestFrame, TestDispatch);
+    
+    var builder = Builder.init(testing.allocator);
+    defer builder.deinit();
+    
+    const schedule = [_]TestItem{
+        .{ .value = 100 },
+        .{ .value = 200 },
+        .{ .value = 300 },
+    };
+    
+    try builder.addEntry(10, 1);
+    try builder.addEntry(20, 2);
+    
+    const jump_table = try builder.finalizeWithSchedule(&schedule);
+    defer testing.allocator.free(jump_table.entries);
+    
+    // Verify dispatch pointers are set correctly
+    try testing.expectEqual(@as(u32, 10), jump_table.entries[0].pc);
+    try testing.expectEqual(@as([*]const TestItem, schedule.ptr + 1), jump_table.entries[0].dispatch.cursor);
+    
+    try testing.expectEqual(@as(u32, 20), jump_table.entries[1].pc);
+    try testing.expectEqual(@as([*]const TestItem, schedule.ptr + 2), jump_table.entries[1].dispatch.cursor);
+}
