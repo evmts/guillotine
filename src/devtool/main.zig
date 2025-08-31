@@ -3,10 +3,10 @@ const App = @import("app.zig");
 
 extern fn createApplicationMenu() void;
 extern fn setMainWindow(window: usize) void;
-extern fn setWebuiRunFunction(func: *const fn (usize, [*:0]const u8) callconv(.C) void) void;
+extern fn setWebuiRunFunction(func: *const fn (usize, [*:0]const u8) callconv(.c) void) void;
 
 // Import webui_run function
-pub extern fn webui_run(window: usize, script: [*:0]const u8) callconv(.C) void;
+pub extern fn webui_run(window: usize, script: [*:0]const u8) callconv(.c) void;
 
 pub fn main() !void {
     if (@import("builtin").target.os.tag == .macos) {

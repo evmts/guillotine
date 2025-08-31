@@ -6,15 +6,15 @@ const WebUIErrorInfo = types.WebUIErrorInfo;
 const flags = @import("flags");
 
 // C function declarations for utilities
-pub extern fn webui_get_last_error_number() callconv(.C) c_int;
-pub extern fn webui_get_last_error_message() callconv(.C) [*:0]const u8;
-pub extern fn webui_encode(str: [*:0]const u8) callconv(.C) ?[*:0]u8;
-pub extern fn webui_decode(str: [*:0]const u8) callconv(.C) ?[*:0]u8;
-pub extern fn webui_free(ptr: *anyopaque) callconv(.C) void;
-pub extern fn webui_malloc(size: usize) callconv(.C) ?*anyopaque;
-pub extern fn webui_memcpy(dest: *anyopaque, src: *anyopaque, count: usize) callconv(.C) void;
-pub extern fn webui_get_mime_type(file: [*:0]const u8) callconv(.C) [*:0]const u8;
-pub extern fn webui_set_tls_certificate(certificate_pem: [*:0]const u8, private_key_pem: [*:0]const u8) callconv(.C) bool;
+pub extern fn webui_get_last_error_number() callconv(.c) c_int;
+pub extern fn webui_get_last_error_message() callconv(.c) [*:0]const u8;
+pub extern fn webui_encode(str: [*:0]const u8) callconv(.c) ?[*:0]u8;
+pub extern fn webui_decode(str: [*:0]const u8) callconv(.c) ?[*:0]u8;
+pub extern fn webui_free(ptr: *anyopaque) callconv(.c) void;
+pub extern fn webui_malloc(size: usize) callconv(.c) ?*anyopaque;
+pub extern fn webui_memcpy(dest: *anyopaque, src: *anyopaque, count: usize) callconv(.c) void;
+pub extern fn webui_get_mime_type(file: [*:0]const u8) callconv(.c) [*:0]const u8;
+pub extern fn webui_set_tls_certificate(certificate_pem: [*:0]const u8, private_key_pem: [*:0]const u8) callconv(.c) bool;
 
 /// through this func, we can get webui's lastest error number and error message
 pub fn get_last_error() WebUIErrorInfo {

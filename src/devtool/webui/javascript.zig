@@ -8,47 +8,47 @@ const Runtime = types.Runtime;
 const Webui = @import("webui.zig");
 
 // C function declarations for JavaScript operations
-pub extern fn webui_run(window: usize, script: [*:0]const u8) callconv(.C) void;
+pub extern fn webui_run(window: usize, script: [*:0]const u8) callconv(.c) void;
 pub extern fn webui_script(
     window: usize,
     script: [*:0]const u8,
     timeout: usize,
     buffer: [*]u8,
     buffer_length: usize,
-) callconv(.C) bool;
-pub extern fn webui_set_runtime(window: usize, runtime: Runtime) callconv(.C) void;
-pub extern fn webui_send_raw(window: usize, function: [*:0]const u8, raw: [*]const anyopaque, size: usize) callconv(.C) void;
+) callconv(.c) bool;
+pub extern fn webui_set_runtime(window: usize, runtime: Runtime) callconv(.c) void;
+pub extern fn webui_send_raw(window: usize, function: [*:0]const u8, raw: [*]const anyopaque, size: usize) callconv(.c) void;
 
 // Interface functions for JavaScript operations
 pub extern fn webui_interface_get_string_at(
     window: usize,
     event_number: usize,
     index: usize,
-) callconv(.C) [*:0]const u8;
+) callconv(.c) [*:0]const u8;
 
 pub extern fn webui_interface_get_int_at(
     window: usize,
     event_number: usize,
     index: usize,
-) callconv(.C) i64;
+) callconv(.c) i64;
 
 pub extern fn webui_interface_get_float_at(
     window: usize,
     event_number: usize,
     index: usize,
-) callconv(.C) f64;
+) callconv(.c) f64;
 
 pub extern fn webui_interface_get_bool_at(
     window: usize,
     event_number: usize,
     index: usize,
-) callconv(.C) bool;
+) callconv(.c) bool;
 
 pub extern fn webui_interface_get_size_at(
     window: usize,
     event_number: usize,
     index: usize,
-) callconv(.C) usize;
+) callconv(.c) usize;
 
 pub extern fn webui_interface_send_raw_client(
     window: usize,
@@ -56,19 +56,19 @@ pub extern fn webui_interface_send_raw_client(
     function: [*:0]const u8,
     raw: [*c]const u8,
     size: usize,
-) callconv(.C) void;
+) callconv(.c) void;
 
 pub extern fn webui_interface_navigate_client(
     window: usize,
     event_number: usize,
     url: [*:0]const u8,
-) callconv(.C) void;
+) callconv(.c) void;
 
 pub extern fn webui_interface_run_client(
     window: usize,
     event_number: usize,
     script: [*:0]const u8,
-) callconv(.C) void;
+) callconv(.c) void;
 
 pub extern fn webui_interface_script_client(
     window: usize,
@@ -77,18 +77,18 @@ pub extern fn webui_interface_script_client(
     timeout: usize,
     buffer: [*c]u8,
     buffer_length: usize,
-) callconv(.C) bool;
+) callconv(.c) bool;
 
 pub extern fn webui_interface_show_client(
     window: usize,
     event_number: usize,
     content: [*:0]const u8,
-) callconv(.C) bool;
+) callconv(.c) bool;
 
 pub extern fn webui_interface_close_client(
     window: usize,
     event_number: usize,
-) callconv(.C) void;
+) callconv(.c) void;
 
 // Instance methods
 

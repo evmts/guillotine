@@ -36,10 +36,10 @@
     // Once all dependencies are fetched, `zig build` no longer requires
     // internet connectivity.
     .dependencies = .{
-        // .webui = .{
-        //     .url = "https://github.com/webui-dev/webui/archive/699119f42fc64ae42c9121bc4749b740f71949af.tar.gz",
-        //     .hash = "webui-2.5.0-beta.4-pxqD5esSNwCHzwq6ndnW-ShzC_nPNAzGu13l4Unk0rFl",
-        // },
+        .webui = .{
+            .url = "https://github.com/webui-dev/webui/archive/dcc776a0f6bdf244d0024042253ebd194271ac9b.tar.gz",
+            .hash = "122004fef9d2d7bd284e11d9ddb94f70743ce54b765c77fae5fd6e0a4eeac25407ee",
+        },
         .zbench = .{
             .url = "https://github.com/hendriknielaender/zBench/archive/refs/heads/main.tar.gz",
             .hash = "zbench-0.11.1-YTdc7zgmAQDtDcHPFwsLeawui27WjMLWmUwrfz7pIlB2",

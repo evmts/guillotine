@@ -13,14 +13,14 @@ const Webui = @import("webui.zig");
 pub extern fn webui_bind(
     window: usize,
     element: [*:0]const u8,
-    func: *const fn (e: *Event) callconv(.C) void,
-) callconv(.C) usize;
+    func: *const fn (e: *Event) callconv(.c) void,
+) callconv(.c) usize;
 
 pub extern fn webui_set_context(
     window: usize,
     element: [*:0]const u8,
     context: *anyopaque,
-) callconv(.C) void;
+) callconv(.c) void;
 
 pub extern fn webui_interface_bind(
     window: usize,
@@ -32,13 +32,13 @@ pub extern fn webui_interface_bind(
         event_number: usize,
         bind_id: usize,
     ) void,
-) callconv(.C) usize;
+) callconv(.c) usize;
 
 pub extern fn webui_interface_set_response(
     window: usize,
     event_number: usize,
     response: [*:0]const u8,
-) callconv(.C) void;
+) callconv(.c) void;
 
 /// Bind an HTML element and a JavaScript object with a backend function.
 /// Empty element name means all events.
@@ -48,7 +48,7 @@ pub fn bind(
     comptime func: fn (e: *Event) void,
 ) !usize {
     const tmp_struct = struct {
-        fn handle(tmp_e: *Event) callconv(.C) void {
+        fn handle(tmp_e: *Event) callconv(.c) void {
             func(tmp_e);
         }
     };
@@ -84,7 +84,7 @@ pub fn interface_bind(
             tmp_element: [*:0]u8,
             tmp_event_number: usize,
             tmp_bind_id: usize,
-        ) callconv(.C) void {
+        ) callconv(.c) void {
             const len = std.mem.len(tmp_element);
             callback(tmp_window, tmp_event_type, tmp_element[0..len], tmp_event_number, tmp_bind_id);
         }

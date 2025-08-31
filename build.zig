@@ -389,6 +389,16 @@ pub fn build(b: *std.Build) void {
         .name = "guillotine-devtool",
         .root_module = devtool_mod,
     });
+    
+    // Build WebUI library from source
+    const webui_dep = b.dependency("webui", .{
+        .target = target,
+        .optimize = optimize,
+        .dynamic = false, // Use static linking
+        .@"enable-tls" = false, // Disable TLS for now
+    });
+    devtool_exe.linkLibrary(webui_dep.artifact("webui"));
+    
     if (target.result.os.tag == .macos) {
         const swift_compile = b.addSystemCommand(&[_][]const u8{
             "swiftc",
