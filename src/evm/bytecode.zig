@@ -966,6 +966,16 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
                         });
                         pc += 1;
                     },
+                    .PUSH0 => {
+                        // EIP-3855: PUSH0 pushes zero onto the stack
+                        try analysis.push_data.append(.{
+                            .pc = pc,
+                            .size = 0,
+                            .value = 0,
+                            .is_inline = true,
+                        });
+                        pc += 1;
+                    },
                     .PUSH1, .PUSH2, .PUSH3, .PUSH4, .PUSH5, .PUSH6, .PUSH7, .PUSH8, .PUSH9, .PUSH10, .PUSH11, .PUSH12, .PUSH13, .PUSH14, .PUSH15, .PUSH16, .PUSH17, .PUSH18, .PUSH19, .PUSH20, .PUSH21, .PUSH22, .PUSH23, .PUSH24, .PUSH25, .PUSH26, .PUSH27, .PUSH28, .PUSH29, .PUSH30, .PUSH31, .PUSH32 => {
                         const push_size = @intFromEnum(opcode) - @intFromEnum(Opcode.PUSH1) + 1;
 
@@ -1158,6 +1168,11 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
                     const opcode_info = opcode_data.OPCODE_INFO[opcode_byte];
 
                     switch (opcode) {
+                        .PUSH0 => {
+                            // EIP-3855: PUSH0 pushes zero
+                            try output.writer().print("{s}{s:<12}{s}", .{ Colors.green, @tagName(opcode), Colors.reset });
+                            try output.writer().print(" {s}0x0{s} {s}(0){s}", .{ Colors.bright_magenta, Colors.reset, Colors.dim, Colors.reset });
+                        },
                         .PUSH1, .PUSH2, .PUSH3, .PUSH4, .PUSH5, .PUSH6, .PUSH7, .PUSH8, .PUSH9, .PUSH10, .PUSH11, .PUSH12, .PUSH13, .PUSH14, .PUSH15, .PUSH16, .PUSH17, .PUSH18, .PUSH19, .PUSH20, .PUSH21, .PUSH22, .PUSH23, .PUSH24, .PUSH25, .PUSH26, .PUSH27, .PUSH28, .PUSH29, .PUSH30, .PUSH31, .PUSH32 => {
                             const push_size = @intFromEnum(opcode) - @intFromEnum(Opcode.PUSH1) + 1;
                             try output.writer().print("{s}{s:<12}{s}", .{ Colors.green, @tagName(opcode), Colors.reset });
