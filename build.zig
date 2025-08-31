@@ -1203,7 +1203,8 @@ pub fn build(b: *std.Build) void {
         evm_main_bench_exe.linkFramework("CoreFoundation");
     }
     
-    b.installArtifact(evm_main_bench_exe);
+    // TODO: Fix duplicate symbol issue between bn254_wrapper and revm_wrapper
+    // b.installArtifact(evm_main_bench_exe);
     
     const run_evm_main_bench_cmd = b.addRunArtifact(evm_main_bench_exe);
     const evm_main_bench_step = b.step("bench-evm", "Run main EVM benchmarks (snailtracer, 10k hashes, etc.)");
@@ -1571,7 +1572,13 @@ pub fn build(b: *std.Build) void {
         specific_fixtures_test.linkLibrary(revm_lib.?);
         specific_fixtures_test.addIncludePath(b.path("src/revm_wrapper"));
         specific_fixtures_test.linkLibC();
-        specific_fixtures_test.addObjectFile(b.path(revm_dylib_path));
+
+        const revm_rust_target_dir_specific = if (optimize == .Debug) "debug" else "release";
+        const revm_dylib_path_specific = if (rust_target) |target_triple|
+            b.fmt("target/{s}/{s}/librevm_wrapper.dylib", .{ target_triple, revm_rust_target_dir_specific })
+        else
+            b.fmt("target/{s}/librevm_wrapper.dylib", .{revm_rust_target_dir_specific});
+        specific_fixtures_test.addObjectFile(b.path(revm_dylib_path_specific));
         
         if (target.result.os.tag == .linux) {
             specific_fixtures_test.linkSystemLibrary("m");
@@ -1605,7 +1612,13 @@ pub fn build(b: *std.Build) void {
         debug_math_test.linkLibrary(revm_lib.?);
         debug_math_test.addIncludePath(b.path("src/revm_wrapper"));
         debug_math_test.linkLibC();
-        debug_math_test.addObjectFile(b.path(revm_dylib_path));
+
+        const revm_rust_target_dir_debug = if (optimize == .Debug) "debug" else "release";
+        const revm_dylib_path_debug = if (rust_target) |target_triple|
+            b.fmt("target/{s}/{s}/librevm_wrapper.dylib", .{ target_triple, revm_rust_target_dir_debug })
+        else
+            b.fmt("target/{s}/librevm_wrapper.dylib", .{revm_rust_target_dir_debug});
+        debug_math_test.addObjectFile(b.path(revm_dylib_path_debug));
         
         if (target.result.os.tag == .linux) {
             debug_math_test.linkSystemLibrary("m");
