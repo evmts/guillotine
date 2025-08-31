@@ -147,6 +147,20 @@ pub const Eips = struct {
         return 2; // Post-Shanghai: 2 gas per word
     }
 
+    /// EIP-7702: Base gas cost per authorization
+    /// Prague hardfork introduced authorization lists
+    pub fn eip_7702_per_auth_base_cost(self: Self) i64 {
+        _ = self; // EIP-7702 gas costs are constant regardless of hardfork
+        return 12500;
+    }
+
+    /// EIP-7702: Additional gas cost for empty account
+    /// Prague hardfork introduced authorization lists
+    pub fn eip_7702_per_empty_account_cost(self: Self) i64 {
+        _ = self; // EIP-7702 gas costs are constant regardless of hardfork
+        return 25000;
+    }
+
     /// Get all active EIPs for the current hardfork
     pub fn get_active_eips(self: Self) []const u16 {
         return switch (self.hardfork) {

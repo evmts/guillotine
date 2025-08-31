@@ -8,9 +8,11 @@ const std = @import("std");
 const primitives = @import("primitives");
 const Address = primitives.Address.Address;
 const Authorization = primitives.Authorization.Authorization;
+const EMPTY_CODE_HASH = primitives.EMPTY_CODE_HASH;
 const Database = @import("database.zig").Database;
 const Account = @import("database_interface_account.zig").Account;
 const log = @import("log.zig");
+const Eips = @import("eips.zig").Eips;
 
 pub const AuthorizationError = error{
     InvalidChainId,
@@ -22,14 +24,40 @@ pub const AuthorizationError = error{
     OutOfGas,
 };
 
+/// Result of processing a single authorization
+pub const AuthorizationResult = struct {
+    success: bool,
+    error_type: ?AuthorizationError = null,
+    gas_used: i64 = 0,
+};
+
+/// Results of processing an authorization list
+pub const AuthorizationListResult = struct {
+    results: []AuthorizationResult,
+    total_gas_used: i64,
+    successful_count: u32,
+    failed_count: u32,
+    
+    pub fn deinit(self: *AuthorizationListResult, allocator: std.mem.Allocator) void {
+        allocator.free(self.results);
+    }
+};
+
 /// Authorization processor for EIP-7702
+///
+/// Thread Safety: This processor is designed for single-threaded use.
+/// The `gas_remaining` pointer must not be accessed concurrently from
+/// multiple threads. Callers must ensure exclusive access during the
+/// lifetime of any authorization processing operations.
 pub const AuthorizationProcessor = struct {
     /// Database for state access
     db: *Database,
     /// Current chain ID
     chain_id: u64,
-    /// Gas tracking
+    /// Gas tracking (single-threaded access only)
     gas_remaining: *i64,
+    /// EIP configuration for hardfork-specific behavior
+    eips: Eips,
     
     /// Process a single authorization
     pub fn processAuthorization(
@@ -55,7 +83,7 @@ pub const AuthorizationProcessor = struct {
         };
         
         // Check if it's an EOA (no code)
-        if (!std.mem.eql(u8, &account.code_hash, &[_]u8{0} ** 32)) {
+        if (!std.mem.eql(u8, &account.code_hash, &EMPTY_CODE_HASH)) {
             log.debug("Authority is not an EOA (has code)", .{});
             return AuthorizationError.NotEOA;
         }
@@ -92,14 +120,104 @@ pub const AuthorizationProcessor = struct {
         log.debug("Set delegation for EOA {x} to {x}", .{ authority.bytes, auth.address.bytes });
     }
     
-    /// Process an authorization list
+    /// Process an authorization list with detailed results
+    pub fn processAuthorizationListWithResults(
+        self: *AuthorizationProcessor,
+        allocator: std.mem.Allocator,
+        auth_list: []const Authorization,
+    ) AuthorizationError!AuthorizationListResult {
+        var results = try allocator.alloc(AuthorizationResult, auth_list.len);
+        var total_gas_used: i64 = 0;
+        var successful_count: u32 = 0;
+        var failed_count: u32 = 0;
+        
+        for (auth_list, 0..) |auth, i| {
+            const gas_cost = self.calculateAuthorizationGasCost(auth) catch |err| {
+                results[i] = AuthorizationResult{
+                    .success = false,
+                    .error_type = err,
+                    .gas_used = 0,
+                };
+                failed_count += 1;
+                continue;
+            };
+            
+            // Check gas before processing
+            if (self.gas_remaining.* < gas_cost) {
+                results[i] = AuthorizationResult{
+                    .success = false,
+                    .error_type = AuthorizationError.OutOfGas,
+                    .gas_used = 0,
+                };
+                failed_count += 1;
+                return AuthorizationError.OutOfGas;
+            }
+            
+            // Validate authorization
+            auth.validate() catch |err| {
+                log.debug("Authorization validation failed: {}", .{err});
+                results[i] = AuthorizationResult{
+                    .success = false,
+                    .error_type = AuthorizationError.InvalidSignature,
+                    .gas_used = 0,
+                };
+                failed_count += 1;
+                continue;
+            };
+            
+            // Recover authority (signer)
+            const authority = auth.authority() catch |err| {
+                log.debug("Failed to recover authority: {}", .{err});
+                results[i] = AuthorizationResult{
+                    .success = false,
+                    .error_type = AuthorizationError.InvalidSignature,
+                    .gas_used = 0,
+                };
+                failed_count += 1;
+                continue;
+            };
+            
+            // Consume gas
+            self.gas_remaining.* -= gas_cost;
+            total_gas_used += gas_cost;
+            
+            // Process the authorization
+            self.processAuthorization(auth, authority) catch |err| {
+                log.debug("Failed to process authorization: {}", .{err});
+                results[i] = AuthorizationResult{
+                    .success = false,
+                    .error_type = err,
+                    .gas_used = gas_cost,
+                };
+                failed_count += 1;
+                continue;
+            };
+            
+            results[i] = AuthorizationResult{
+                .success = true,
+                .error_type = null,
+                .gas_used = gas_cost,
+            };
+            successful_count += 1;
+        }
+        
+        return AuthorizationListResult{
+            .results = results,
+            .total_gas_used = total_gas_used,
+            .successful_count = successful_count,
+            .failed_count = failed_count,
+        };
+    }
+    
+    /// Process an authorization list (simplified interface, maintains backward compatibility)
     pub fn processAuthorizationList(
         self: *AuthorizationProcessor,
         auth_list: []const Authorization,
     ) AuthorizationError!void {
-        // Gas costs per EIP-7702
-        const PER_AUTH_BASE_COST = 12500;
-        const PER_EMPTY_ACCOUNT_COST = 25000;
+        // Gas costs per EIP-7702 (configurable via hardfork)
+        // TODO: Implement gas cost calculation once gas metering is integrated
+        _ = self.eips.eip_7702_per_auth_base_cost();
+        _ = self.eips.eip_7702_per_empty_account_cost();
         
         for (auth_list) |auth| {
             // Validate authorization
@@ -114,16 +232,10 @@ pub const AuthorizationProcessor = struct {
                 continue;
             };
             
-            // Check if account is empty (for gas calculation)
-            const account_opt = self.db.get_account(authority.bytes) catch {
+            // Calculate gas cost
+            const gas_cost = self.calculateAuthorizationGasCost(auth) catch {
                 continue;
             };
-            
-            // Calculate gas cost
-            var gas_cost: i64 = PER_AUTH_BASE_COST;
-            if (account_opt == null or account_opt.?.is_empty()) {
-                gas_cost += PER_EMPTY_ACCOUNT_COST;
-            }
             
             // Check gas
             if (self.gas_remaining.* < gas_cost) {
@@ -137,6 +249,26 @@ pub const AuthorizationProcessor = struct {
                 // Continue processing other authorizations
             };
         }
+    }
+    
+    /// Calculate gas cost for a single authorization
+    fn calculateAuthorizationGasCost(self: *AuthorizationProcessor, auth: Authorization) !i64 {
+        // Recover authority to check account state
+        const authority = try auth.authority();
+        
+        // Check if account is empty (for gas calculation)
+        const account_opt = try self.db.get_account(authority.bytes);
+        
+        // Gas costs per EIP-7702 (configurable via hardfork)
+        const PER_AUTH_BASE_COST = self.eips.eip_7702_per_auth_base_cost();
+        const PER_EMPTY_ACCOUNT_COST = self.eips.eip_7702_per_empty_account_cost();
+        
+        var gas_cost: i64 = PER_AUTH_BASE_COST;
+        if (account_opt == null or account_opt.?.is_empty()) {
+            gas_cost += PER_EMPTY_ACCOUNT_COST;
+        }
+        
+        return gas_cost;
     }
     
     /// Create delegation designator (0xef0100 || address)
@@ -190,10 +322,12 @@ test "Authorization processor - basic delegation" {
     
     // Process authorization
     var gas_remaining: i64 = 100_000;
+    const eips = Eips{ .hardfork = @import("hardfork.zig").Hardfork.PRAGUE };
     var processor = AuthorizationProcessor{
         .db = &db,
         .chain_id = 1,
         .gas_remaining = &gas_remaining,
+        .eips = eips,
     };
     
     // Mock authority for testing (normally recovered from signature)
@@ -229,10 +363,12 @@ test "Authorization processor - wrong nonce rejected" {
     };
     
     var gas_remaining: i64 = 100_000;
+    const eips = Eips{ .hardfork = @import("hardfork.zig").Hardfork.PRAGUE };
     var processor = AuthorizationProcessor{
         .db = &db,
         .chain_id = 1,
         .gas_remaining = &gas_remaining,
+        .eips = eips,
     };
     
     try testing.expectError(AuthorizationError.NonceMismatch, processor.processAuthorization(auth, eoa_address));
