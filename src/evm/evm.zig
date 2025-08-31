@@ -222,6 +222,12 @@ pub fn Evm(comptime config: EvmConfig) type {
         /// and transaction parameters. The planner cache is initialized with
         /// a default size for bytecode optimization.
         pub fn init(allocator: std.mem.Allocator, database: *Database, block_info: BlockInfo, context: TransactionContext, gas_price: u256, origin: primitives.Address, hardfork_config: Hardfork) !Self {
+            // Process beacon root update for EIP-4788 if applicable
+            const beacon_roots = @import("beacon_roots.zig");
+            beacon_roots.BeaconRootsContract.processBeaconRootUpdate(database, &block_info) catch |err| {
+                log.warn("Failed to process beacon root update: {}", .{err});
+            };
+            
             var access_list = AccessList.init(allocator);
             errdefer access_list.deinit();
             return Self{
@@ -362,6 +368,37 @@ pub fn Evm(comptime config: EvmConfig) type {
                     return PreflightResult{ .precompile_result = CallResult.failure(0) };
                 };
                 return PreflightResult{ .precompile_result = result };
+            }
+
+            // Handle EIP-4788 beacon roots contract
+            const beacon_roots = @import("beacon_roots.zig");
+            if (std.mem.eql(u8, &to.bytes, &beacon_roots.BEACON_ROOTS_ADDRESS.bytes)) {
+                var contract = beacon_roots.BeaconRootsContract{ .database = self.database };
+                const caller = if (self.depth > 0) self.call_stack[self.depth - 1].caller else primitives.ZERO_ADDRESS;
+                
+                const result = contract.execute(caller, input, gas) catch |err| {
+                    log.debug("Beacon roots contract failed: {}", .{err});
+                    self.journal.revert_to_snapshot(snapshot_id);
+                    return PreflightResult{ .precompile_result = CallResult.failure(0) };
+                };
+                
+                // Allocate output that persists beyond this function
+                const output = if (result.output.len > 0) output: {
+                    const out = self.allocator.alloc(u8, result.output.len) catch {
+                        self.journal.revert_to_snapshot(snapshot_id);
+                        return PreflightResult{ .precompile_result = CallResult.failure(0) };
+                    };
+                    @memcpy(out, result.output);
+                    break :output out;
+                } else &[_]u8{};
+                
+                return PreflightResult{ 
+                    .precompile_result = CallResult{
+                        .success = true,
+                        .gas_left = gas - result.gas_used,
+                        .output = output,
+                    }
+                };
             }
 
             // Get contract code

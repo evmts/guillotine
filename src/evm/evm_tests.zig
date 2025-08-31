@@ -62,6 +62,7 @@ test "EVM call() entry point method" {
 
     // Create EVM instance
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -114,6 +115,7 @@ test "EVM call() method routes to different handlers" {
 
     // Create EVM instance
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -211,6 +213,7 @@ test "EVM call_handler basic functionality" {
 
     // Create EVM instance
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -278,6 +281,7 @@ test "EVM staticcall handler prevents state changes" {
 
     // Create EVM instance
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -344,6 +348,7 @@ test "EVM delegatecall handler preserves caller context" {
 
     // Create EVM instance
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -398,6 +403,7 @@ test "Evm creation with custom config" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -425,6 +431,7 @@ test "Evm call depth limit" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -469,6 +476,7 @@ test "call method basic functionality - simple STOP" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -512,6 +520,7 @@ test "call method loads contract code from state" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -566,6 +575,7 @@ test "call method handles CREATE operation" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -608,6 +618,7 @@ test "call method handles gas limit properly" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -817,6 +828,7 @@ test "EvmConfig - custom configurations" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -896,6 +908,7 @@ test "Host interface - get_balance functionality" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -939,6 +952,7 @@ test "Host interface - storage operations" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -982,6 +996,7 @@ test "Host interface - account_exists functionality" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -1022,6 +1037,7 @@ test "Host interface - call type differentiation" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -1085,6 +1101,7 @@ test "EVM CREATE operation - basic contract creation" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -1163,6 +1180,7 @@ test "EVM CREATE operation - with value transfer" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -1226,6 +1244,7 @@ test "EVM CREATE operation - insufficient balance fails" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -1274,6 +1293,7 @@ test "EVM CREATE2 operation - deterministic address creation" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -1351,6 +1371,7 @@ test "EVM CREATE2 operation - same parameters produce same address" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -1413,6 +1434,7 @@ test "EVM CREATE operation - collision detection" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -1477,6 +1499,7 @@ test "EVM CREATE operation - init code execution and storage" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -1557,6 +1580,7 @@ test "EVM CREATE/CREATE2 - nested contract creation" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -1642,6 +1666,7 @@ test "EVM logs - emit_log functionality" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -1689,6 +1714,7 @@ test "EVM logs - included in CallResult" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -1754,6 +1780,7 @@ test "Host interface - hardfork compatibility checks" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -1791,6 +1818,7 @@ test "Host interface - access cost operations" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -1826,6 +1854,7 @@ test "Host interface - input size validation" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -1871,6 +1900,7 @@ test "Call types - CREATE2 with salt" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -1915,6 +1945,7 @@ test "Error handling - nested call depth tracking" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -1963,6 +1994,7 @@ test "Error handling - precompile execution" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -2005,6 +2037,7 @@ test "Precompiles - IDENTITY precompile (0x04)" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -2054,6 +2087,7 @@ test "Precompiles - SHA256 precompile (0x02)" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -2102,6 +2136,7 @@ test "Precompiles - disabled configuration" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -2147,6 +2182,7 @@ test "Precompiles - invalid precompile addresses" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -2196,6 +2232,7 @@ test "Debug - Gas limit affects execution" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -2291,6 +2328,7 @@ test "Debug - Contract deployment and execution" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -2401,6 +2439,7 @@ test "Debug - Bytecode size affects execution time" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -2476,6 +2515,7 @@ test "Security - bounds checking and edge cases" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -2537,6 +2577,7 @@ test "EVM with minimal planner strategy" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -2589,6 +2630,7 @@ test "EVM with advanced planner strategy" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -2639,6 +2681,7 @@ test "journal state application - storage change rollback" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -2729,6 +2772,7 @@ test "EVM revert_to_snapshot uses no allocation and fully reverts" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -2817,6 +2861,7 @@ test "journal state application - balance change rollback" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -2877,6 +2922,7 @@ test "journal state application - nonce change rollback" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -2937,6 +2983,7 @@ test "journal state application - code change rollback" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -2997,6 +3044,7 @@ test "journal state application - multiple changes rollback" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -3106,6 +3154,7 @@ test "journal state application - nested snapshots rollback" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -3183,6 +3232,7 @@ test "journal state application - empty journal rollback" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -3217,6 +3267,7 @@ test "EVM contract execution - minimal benchmark reproduction" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -3283,6 +3334,7 @@ test "Precompile - IDENTITY (0x04) basic functionality" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -3330,6 +3382,7 @@ test "Precompile - SHA256 (0x02) basic functionality" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -3384,6 +3437,7 @@ test "Precompile diagnosis - ECRECOVER (0x01) placeholder implementation" {
 
     // Database is now used directly
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -3433,6 +3487,7 @@ test "Precompile diagnosis - RIPEMD160 (0x03) unimplemented" {
 
     // Database is now used directly
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -3482,6 +3537,7 @@ test "Precompile diagnosis - MODEXP (0x05) basic case works" {
 
     // Database is now used directly
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -3534,6 +3590,7 @@ test "Precompile diagnosis - BN254 operations disabled" {
 
     // Database is now used directly
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -3589,6 +3646,7 @@ test "Precompile diagnosis - BLAKE2F (0x09) placeholder" {
 
     // Database is now used directly
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -3652,6 +3710,7 @@ test "EVM benchmark scenario - reproduces segfault" {
 
     // Create EVM instance
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -3712,6 +3771,7 @@ test "CREATE interaction - deployed contract can be called" {
         allocator,
         &db,
         BlockInfo{
+            .chain_id = 1,
             .number = 1,
             .timestamp = 1000,
             .difficulty = 100,
@@ -3813,6 +3873,7 @@ test "CREATE interaction - factory creates and initializes child contracts" {
         allocator,
         &db,
         BlockInfo{
+            .chain_id = 1,
             .number = 1,
             .timestamp = 1000,
             .difficulty = 100,
@@ -3969,6 +4030,7 @@ test "CREATE interaction - contract creates contract that creates contract" {
         allocator,
         &db,
         BlockInfo{
+            .chain_id = 1,
             .number = 1,
             .timestamp = 1000,
             .difficulty = 100,
@@ -4162,6 +4224,7 @@ test "CREATE interaction - created contract modifies parent storage" {
         allocator,
         &db,
         BlockInfo{
+            .chain_id = 1,
             .number = 1,
             .timestamp = 1000,
             .difficulty = 100,
@@ -4315,6 +4378,7 @@ test "Arena allocator - resets between calls" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -4392,6 +4456,7 @@ test "Arena allocator - handles multiple logs efficiently" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -4459,6 +4524,7 @@ test "Arena allocator - precompile outputs use arena" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -4516,6 +4582,7 @@ test "Arena allocator - memory efficiency with nested calls" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -4716,6 +4783,7 @@ test "CREATE stores deployed code bytes" {
 
     // Create EVM instance
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -4876,6 +4944,7 @@ test "CREATE2 stores deployed code bytes" {
 
     // Create EVM instance
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -5035,6 +5104,7 @@ test "EVM bytecode iterator execution - simple STOP" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -5088,6 +5158,7 @@ test "EVM bytecode iterator execution - PUSH and RETURN" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -5155,6 +5226,7 @@ test "EVM bytecode iterator execution - handles jumps" {
     defer db.deinit();
 
     const block_info = BlockInfo{
+        .chain_id = 1,
         .number = 1,
         .timestamp = 1000,
         .difficulty = 100,
@@ -5207,4 +5279,63 @@ test "EVM bytecode iterator execution - handles jumps" {
     // Jump bytecode should execute successfully
     try std.testing.expect(result.success);
     try std.testing.expectEqual(@as(usize, 0), result.output.len);
+}
+
+test "EIP-4788: beacon block root storage and retrieval" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    // Setup database and EVM
+    var database = try Database.init(allocator);
+    defer database.deinit();
+
+    // EIP-4788 beacon roots contract address
+    const beacon_roots_address = primitives.Address{ .bytes = [_]u8{0} ** 19 ++ [_]u8{0x0B} };
+    const HISTORY_BUFFER_LENGTH: u64 = 8191;
+
+    // Create block info with beacon root
+    const expected_beacon_root = [32]u8{
+        0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0,
+        0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0,
+        0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0,
+        0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0,
+    };
+
+    const block_info = BlockInfo{
+        .chain_id = 1,
+        .number = 19426587, // Dencun activation
+        .timestamp = 1710338135,
+        .difficulty = 0,
+        .gas_limit = 30_000_000,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .base_fee = 1_000_000_000,
+        .prev_randao = [_]u8{0} ** 32,
+        .blob_base_fee = 1,
+        .blob_versioned_hashes = &.{},
+        .beacon_root = expected_beacon_root,
+    };
+
+    // Store beacon root using EIP-4788 storage pattern
+    // Storage slot = timestamp % HISTORY_BUFFER_LENGTH
+    const timestamp_slot = block_info.timestamp % HISTORY_BUFFER_LENGTH;
+    
+    // Store timestamp -> beacon_root mapping
+    const timestamp_key: u256 = timestamp_slot;
+    try database.set_storage(beacon_roots_address.bytes, timestamp_key, @bitCast(expected_beacon_root));
+    
+    // Store beacon_root -> timestamp mapping (at slot + HISTORY_BUFFER_LENGTH)
+    const root_slot = timestamp_slot + HISTORY_BUFFER_LENGTH;
+    const root_key: u256 = root_slot;
+    const timestamp_value: u256 = block_info.timestamp;
+    try database.set_storage(beacon_roots_address.bytes, root_key, timestamp_value);
+
+    // Verify retrieval
+    const stored_root = try database.get_storage(beacon_roots_address.bytes, timestamp_key);
+    const stored_root_bytes: [32]u8 = @bitCast(stored_root);
+    try std.testing.expectEqualSlices(u8, &expected_beacon_root, &stored_root_bytes);
+
+    // Verify reverse mapping
+    const stored_timestamp = try database.get_storage(beacon_roots_address.bytes, root_key);
+    try std.testing.expectEqual(timestamp_value, stored_timestamp);
 }

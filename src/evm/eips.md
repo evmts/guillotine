@@ -98,7 +98,7 @@ This document tracks all EVM-related EIPs and their implementation status in the
 | EIP | Title | Status | Location | Notes |
 |-----|-------|--------|----------|-------|
 | EIP-1153 | Transient storage opcodes | ✅ | handlers_storage.zig:111-156, database.zig:168-177 | Fully implemented TLOAD/TSTORE with proper cleanup |
-| EIP-4788 | Beacon block root in EVM | ✅ | beacon_roots.zig, evm.zig:226-229, 374-402 | Fully implemented with ring buffer storage and system calls |
+| EIP-4788 | Beacon block root in EVM | ✅ | beacon_roots.zig, evm.zig:226-229, 368-396 | Fully implemented with ring buffer storage and system calls |
 | EIP-4844 | Shard Blob Transactions | ⚠️ | eips.zig:84-88, transaction_context.zig:18-21, evm.zig:1235-1245 | Partial - blob hash/fee tracking |
 | EIP-5656 | MCOPY - Memory copying instruction | ✅ | handlers_memory.zig:132-183, opcode_data.zig:105 | Fully implemented with gas calculations |
 | EIP-6780 | SELFDESTRUCT only in same transaction | ✅ | evm.zig:1135-1162, created_contracts.zig | Fully enforced - only destroys if created in same tx |

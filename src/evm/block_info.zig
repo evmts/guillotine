@@ -49,6 +49,9 @@ pub fn BlockInfo(comptime config: BlockInfoConfig) type {
         /// Blob versioned hashes for EIP-4844 blob transactions (cold data)
         /// Empty slice for non-blob transactions
         blob_versioned_hashes: []const [32]u8,
+        /// Beacon block root for EIP-4788 (Dencun)
+        /// Contains the parent beacon block root for trust-minimized access to consensus layer
+        beacon_root: ?[32]u8 = null,
         
         /// Initialize BlockInfo with default values
         pub fn init() Self {
