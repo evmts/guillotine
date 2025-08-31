@@ -242,6 +242,85 @@ pub fn Dispatch(comptime FrameType: type) type {
                     .invalid => {
                         try schedule_items.append(allocator, .{ .opcode_handler = opcode_handlers.*[@intFromEnum(Opcode.INVALID)] });
                     },
+                    // Advanced fusion patterns - use optimized handlers
+                    .constant_fold => |cf| {
+                        // Use the optimized constant fold handler
+                        const frame_handlers = @import("../frame/frame_handlers.zig");
+                        const handler = frame_handlers.getSyntheticHandler(FrameType, @intFromEnum(OpcodeSynthetic.CONSTANT_FOLD));
+                        try schedule_items.append(allocator, .{ .opcode_handler = handler });
+                        
+                        // Add the folded value as metadata
+                        if (cf.value <= std.math.maxInt(u64)) {
+                            try schedule_items.append(allocator, .{ .push_inline = .{ .value = @intCast(cf.value) } });
+                        } else {
+                            const value_ptr = try allocator.create(FrameType.WordType);
+                            value_ptr.* = cf.value;
+                            try schedule_items.append(allocator, .{ .push_pointer = .{ .value = value_ptr } });
+                        }
+                    },
+                    .multi_push => |mp| {
+                        // Use optimized multi-push handler
+                        const frame_handlers = @import("../frame/frame_handlers.zig");
+                        const handler = if (mp.count == 2)
+                            frame_handlers.getSyntheticHandler(FrameType, @intFromEnum(OpcodeSynthetic.MULTI_PUSH_2))
+                        else
+                            frame_handlers.getSyntheticHandler(FrameType, @intFromEnum(OpcodeSynthetic.MULTI_PUSH_3));
+                        
+                        try schedule_items.append(allocator, .{ .opcode_handler = handler });
+                        
+                        // Add all values as metadata
+                        var i: u8 = 0;
+                        while (i < mp.count) : (i += 1) {
+                            const value = mp.values[i];
+                            if (value <= std.math.maxInt(u64)) {
+                                try schedule_items.append(allocator, .{ .push_inline = .{ .value = @intCast(value) } });
+                            } else {
+                                const value_ptr = try allocator.create(FrameType.WordType);
+                                value_ptr.* = value;
+                                try schedule_items.append(allocator, .{ .push_pointer = .{ .value = value_ptr } });
+                            }
+                        }
+                    },
+                    .multi_pop => |mp| {
+                        // Use optimized multi-pop handler
+                        const frame_handlers = @import("../frame/frame_handlers.zig");
+                        const handler = if (mp.count == 2)
+                            frame_handlers.getSyntheticHandler(FrameType, @intFromEnum(OpcodeSynthetic.MULTI_POP_2))
+                        else
+                            frame_handlers.getSyntheticHandler(FrameType, @intFromEnum(OpcodeSynthetic.MULTI_POP_3));
+                        
+                        try schedule_items.append(allocator, .{ .opcode_handler = handler });
+                    },
+                    .iszero_jumpi => |ij| {
+                        // Use optimized iszero-jumpi handler
+                        const frame_handlers = @import("../frame/frame_handlers.zig");
+                        const handler = frame_handlers.getSyntheticHandler(FrameType, @intFromEnum(OpcodeSynthetic.ISZERO_JUMPI));
+                        try schedule_items.append(allocator, .{ .opcode_handler = handler });
+                        
+                        // Add target as metadata
+                        if (ij.target <= std.math.maxInt(u64)) {
+                            try schedule_items.append(allocator, .{ .push_inline = .{ .value = @intCast(ij.target) } });
+                        } else {
+                            const value_ptr = try allocator.create(FrameType.WordType);
+                            value_ptr.* = ij.target;
+                            try schedule_items.append(allocator, .{ .push_pointer = .{ .value = value_ptr } });
+                        }
+                    },
+                    .dup2_mstore_push => |dmp| {
+                        // Use optimized dup2-mstore-push handler
+                        const frame_handlers = @import("../frame/frame_handlers.zig");
+                        const handler = frame_handlers.getSyntheticHandler(FrameType, @intFromEnum(OpcodeSynthetic.DUP2_MSTORE_PUSH));
+                        try schedule_items.append(allocator, .{ .opcode_handler = handler });
+                        
+                        // Add push value as metadata
+                        if (dmp.push_value <= std.math.maxInt(u64)) {
+                            try schedule_items.append(allocator, .{ .push_inline = .{ .value = @intCast(dmp.push_value) } });
+                        } else {
+                            const value_ptr = try allocator.create(FrameType.WordType);
+                            value_ptr.* = dmp.push_value;
+                            try schedule_items.append(allocator, .{ .push_pointer = .{ .value = value_ptr } });
+                        }
+                    },
                 }
             }
 
@@ -484,6 +563,22 @@ pub fn Dispatch(comptime FrameType: type) type {
                     },
                     .stop, .invalid => {
                         schedule_index += 1; // Handler
+                    },
+                    // Advanced fusion patterns
+                    .constant_fold => {
+                        schedule_index += 2; // Handler + folded value
+                    },
+                    .multi_push => |mp| {
+                        schedule_index += @as(usize, mp.count) * 2; // Each push: handler + value
+                    },
+                    .multi_pop => |mp| {
+                        schedule_index += mp.count; // Each pop: handler only
+                    },
+                    .iszero_jumpi => {
+                        schedule_index += 5; // ISZERO handler + PUSH handler + value + JUMPI handler + metadata
+                    },
+                    .dup2_mstore_push => {
+                        schedule_index += 4; // DUP2 handler + MSTORE handler + PUSH handler + value
                     },
                 }
             }

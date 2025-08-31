@@ -126,14 +126,31 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
                 // Handle fusion opcodes first (only if fusions are enabled)
                 if (fusions_enabled and packed_bits.is_fusion_candidate) {
                     const fusion_data = iterator.bytecode.getFusionData(iterator.pc);
-                    // Advance PC properly for fusion opcodes (PUSH + data + op)
+                    // Advance PC properly for fusion opcodes
                     switch (fusion_data) {
+                        // 2-opcode fusions: PUSH + op
                         .push_add_fusion, .push_mul_fusion, .push_sub_fusion, .push_div_fusion, 
                         .push_and_fusion, .push_or_fusion, .push_xor_fusion, 
                         .push_jump_fusion, .push_jumpi_fusion,
                         .push_mload_fusion, .push_mstore_fusion, .push_mstore8_fusion => {
                             const push_size = opcode - 0x5F;
                             iterator.pc += 1 + push_size + 1;
+                        },
+                        // Advanced fusion patterns
+                        .constant_fold => |cf| {
+                            iterator.pc += cf.original_length;
+                        },
+                        .multi_push => |mp| {
+                            iterator.pc += mp.original_length;
+                        },
+                        .multi_pop => |mp| {
+                            iterator.pc += mp.original_length;
+                        },
+                        .iszero_jumpi => |ij| {
+                            iterator.pc += ij.original_length;
+                        },
+                        .dup2_mstore_push => |dmp| {
+                            iterator.pc += dmp.original_length;
                         },
                         .push => |push_data| {
                             iterator.pc += 1 + push_data.size;
@@ -199,6 +216,12 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
             push_mload_fusion: struct { value: u256 },
             push_mstore_fusion: struct { value: u256 },
             push_mstore8_fusion: struct { value: u256 },
+            // Advanced fusion patterns
+            constant_fold: struct { value: u256, original_length: u8 },
+            multi_push: struct { count: u8, original_length: u8, values: [3]u256 },
+            multi_pop: struct { count: u8, original_length: u8 },
+            iszero_jumpi: struct { target: u256, original_length: u8 },
+            dup2_mstore_push: struct { push_value: u256, original_length: u8 },
             stop: void,
             invalid: void,
         };
@@ -284,51 +307,256 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
             };
         }
 
+        // Advanced pattern detection functions
+        fn checkConstantFoldingPattern(self: *const Self, pc: PcType) ?OpcodeData {
+            // Pattern A: PUSH1 a, PUSH1 b, <arith-op> (5 bytes)
+            // Pattern B: PUSH1 a, PUSH1 b, PUSH1 shift, SHL, SUB (8 bytes)
+            if (pc + 4 >= self.len()) return null;
+            
+            // First PUSH1
+            if (self.get_unsafe(pc) != 0x60) return null;
+            const value1 = self.get_unsafe(pc + 1);
+            
+            // Second PUSH1
+            if (self.get_unsafe(pc + 2) != 0x60) return null;
+            const value2 = self.get_unsafe(pc + 3);
+            
+            // Next byte decides between pattern A and B
+            const next = self.get_unsafe(pc + 4);
+            
+            // Pattern A: arithmetic op directly after two PUSH1
+            if (next == 0x01 or next == 0x03 or next == 0x02) { // ADD, SUB, MUL
+                const folded_value: u256 = switch (next) {
+                    0x01 => @as(u256, value1) +% @as(u256, value2), // ADD
+                    0x03 => @as(u256, value1) -% @as(u256, value2), // SUB
+                    0x02 => @as(u256, value1) *% @as(u256, value2), // MUL
+                    else => unreachable,
+                };
+                return OpcodeData{ .constant_fold = .{ 
+                    .value = folded_value, 
+                    .original_length = 5 
+                }};
+            }
+            
+            // Pattern B: PUSH1 shift, SHL, SUB
+            if (pc + 7 < self.len() and
+                next == 0x60 and // PUSH1
+                self.get_unsafe(pc + 6) == 0x1B and // SHL
+                self.get_unsafe(pc + 7) == 0x03) // SUB
+            {
+                const shift_amount = self.get_unsafe(pc + 5);
+                const shifted: u256 = if (shift_amount < 256)
+                    (@as(u256, value2) << @as(u8, @intCast(shift_amount)))
+                else
+                    0;
+                const folded_value: u256 = @as(u256, value1) -% shifted;
+                return OpcodeData{ .constant_fold = .{ 
+                    .value = folded_value, 
+                    .original_length = 8 
+                }};
+            }
+            
+            return null;
+        }
+        
+        fn checkMultiPushPattern(self: *const Self, pc: PcType, n: u8) ?OpcodeData {
+            if (pc + n > self.len()) return null;
+            
+            var current_pc = pc;
+            var total_length: PcType = 0;
+            var values: [3]u256 = .{0, 0, 0};
+            
+            // Check for n consecutive PUSH instructions
+            var i: u8 = 0;
+            while (i < n) : (i += 1) {
+                if (current_pc >= self.len()) return null;
+                const op = self.get_unsafe(current_pc);
+                if (op < 0x60 or op > 0x7F) { // Not a PUSH opcode
+                    return null;
+                }
+                const push_size = op - 0x5F;
+                
+                // Extract value
+                var value: u256 = 0;
+                const end = @min(current_pc + 1 + push_size, self.len());
+                for (current_pc + 1..end) |j| {
+                    value = std.math.shl(u256, value, 8) | self.get_unsafe(@intCast(j));
+                }
+                if (i < 3) values[i] = value;
+                
+                current_pc += 1 + push_size;
+                total_length += 1 + push_size;
+            }
+            
+            return OpcodeData{ .multi_push = .{ 
+                .count = n, 
+                .original_length = @intCast(total_length),
+                .values = values
+            }};
+        }
+        
+        fn checkMultiPopPattern(self: *const Self, pc: PcType, n: u8) ?OpcodeData {
+            if (pc + n > self.len()) return null;
+            
+            // Check if we have n consecutive POP instructions
+            var i: u8 = 0;
+            while (i < n) : (i += 1) {
+                if (self.get_unsafe(pc + i) != 0x50) { // POP opcode
+                    return null;
+                }
+            }
+            
+            return OpcodeData{ .multi_pop = .{ 
+                .count = n, 
+                .original_length = n 
+            }};
+        }
+        
+        fn checkIszeroJumpiPattern(self: *const Self, pc: PcType) ?OpcodeData {
+            if (pc + 2 >= self.len()) return null;
+            
+            // Check for ISZERO
+            if (self.get_unsafe(pc) != 0x15) return null;
+            
+            // Check for PUSH after ISZERO
+            const push_pc = pc + 1;
+            const push_op = self.get_unsafe(push_pc);
+            if (push_op < 0x60 or push_op > 0x7F) {
+                return null;
+            }
+            
+            const push_size = push_op - 0x5F;
+            const jumpi_pc = push_pc + 1 + push_size;
+            
+            // Check for JUMPI
+            if (jumpi_pc >= self.len() or self.get_unsafe(jumpi_pc) != 0x57) {
+                return null;
+            }
+            
+            // Extract target
+            var target: u256 = 0;
+            const end = @min(push_pc + 1 + push_size, self.len());
+            for (push_pc + 1..end) |i| {
+                target = std.math.shl(u256, target, 8) | self.get_unsafe(@intCast(i));
+            }
+            
+            return OpcodeData{ .iszero_jumpi = .{ 
+                .target = target, 
+                .original_length = @intCast(jumpi_pc + 1 - pc)
+            }};
+        }
+        
+        fn checkDup2MstorePushPattern(self: *const Self, pc: PcType) ?OpcodeData {
+            if (pc + 3 >= self.len()) return null;
+            
+            // Check for DUP2
+            if (self.get_unsafe(pc) != 0x81) return null;
+            
+            // Check for MSTORE
+            if (self.get_unsafe(pc + 1) != 0x52) return null;
+            
+            // Check for PUSH after MSTORE
+            const push_pc = pc + 2;
+            const push_op = self.get_unsafe(push_pc);
+            if (push_op < 0x60 or push_op > 0x7F) {
+                return null;
+            }
+            
+            const push_size = push_op - 0x5F;
+            
+            // Extract push value
+            var value: u256 = 0;
+            const end = @min(push_pc + 1 + push_size, self.len());
+            for (push_pc + 1..end) |i| {
+                value = std.math.shl(u256, value, 8) | self.get_unsafe(@intCast(i));
+            }
+            
+            return OpcodeData{ .dup2_mstore_push = .{ 
+                .push_value = value, 
+                .original_length = @intCast(3 + push_size)
+            }};
+        }
+        
         /// Get fusion data for a bytecode position marked as fusion candidate
-        /// This method uses the pre-computed packed bitmap instead of re-analyzing
+        /// This method checks for advanced patterns first (in priority order)
         pub fn getFusionData(self: *const Self, pc: PcType) OpcodeData {
             if (pc >= self.len()) return OpcodeData{ .regular = .{ .opcode = 0x00 } }; // STOP fallback
 
+            // Check advanced fusion patterns in priority order (longest first)
+            
+            // 1. Check for constant folding pattern (highest priority, up to 8 bytes)
+            if (self.checkConstantFoldingPattern(pc)) |fusion| {
+                return fusion;
+            }
+            
+            // 2. Check for ISZERO-JUMPI pattern (variable length)
+            if (self.checkIszeroJumpiPattern(pc)) |fusion| {
+                return fusion;
+            }
+            
+            // 3. Check for DUP2-MSTORE-PUSH pattern (variable length)
+            if (self.checkDup2MstorePushPattern(pc)) |fusion| {
+                return fusion;
+            }
+            
+            // 4. Check for 3-PUSH fusion
+            if (self.checkMultiPushPattern(pc, 3)) |fusion| {
+                return fusion;
+            }
+            
+            // 5. Check for 3-POP fusion
+            if (self.checkMultiPopPattern(pc, 3)) |fusion| {
+                return fusion;
+            }
+            
+            // 6. Check for 2-PUSH fusion
+            if (self.checkMultiPushPattern(pc, 2)) |fusion| {
+                return fusion;
+            }
+            
+            // 7. Check for 2-POP fusion
+            if (self.checkMultiPopPattern(pc, 2)) |fusion| {
+                return fusion;
+            }
+
             const first_op = self.get_unsafe(pc);
 
-            // Read PUSH value first (since all fusions start with PUSH)
-            if (first_op < 0x60 or first_op > 0x7F) {
-                // Not a PUSH opcode, shouldn't be marked as fusion candidate
-                return OpcodeData{ .regular = .{ .opcode = first_op } };
-            }
+            // Check for existing 2-opcode fusions (PUSH + op)
+            if (first_op >= 0x60 and first_op <= 0x7F) { // PUSH opcode
+                const push_size = first_op - 0x5F;
+                var value: u256 = 0;
+                const end_pc = @min(pc + 1 + push_size, self.len());
+                for (pc + 1..end_pc) |i| {
+                    value = std.math.shl(u256, value, 8) | self.get_unsafe(@intCast(i));
+                }
 
-            const push_size = first_op - 0x5F;
-            var value: u256 = 0;
-            const end_pc = @min(pc + 1 + push_size, self.len());
-            for (pc + 1..end_pc) |i| {
-                value = std.math.shl(u256, value, 8) | self.get_unsafe(@intCast(i));
-            }
+                // The second opcode comes AFTER the push data
+                const second_op_pc = pc + 1 + push_size;
+                const second_op = if (second_op_pc < self.len()) self.get_unsafe(second_op_pc) else 0x00;
 
-            // The second opcode comes AFTER the push data
-            const second_op_pc = pc + 1 + push_size;
-            const second_op = if (second_op_pc < self.len()) self.get_unsafe(second_op_pc) else 0x00;
-
-            // Return appropriate fusion type based on second opcode
-            switch (second_op) {
-                0x01 => return OpcodeData{ .push_add_fusion = .{ .value = value } }, // ADD
-                0x02 => return OpcodeData{ .push_mul_fusion = .{ .value = value } }, // MUL
-                0x03 => return OpcodeData{ .push_sub_fusion = .{ .value = value } }, // SUB
-                0x04 => return OpcodeData{ .push_div_fusion = .{ .value = value } }, // DIV
-                0x16 => return OpcodeData{ .push_and_fusion = .{ .value = value } }, // AND
-                0x17 => return OpcodeData{ .push_or_fusion = .{ .value = value } }, // OR
-                0x18 => return OpcodeData{ .push_xor_fusion = .{ .value = value } }, // XOR
-                0x51 => return OpcodeData{ .push_mload_fusion = .{ .value = value } }, // MLOAD
-                0x52 => return OpcodeData{ .push_mstore_fusion = .{ .value = value } }, // MSTORE
-                0x53 => return OpcodeData{ .push_mstore8_fusion = .{ .value = value } }, // MSTORE8
-                0x56 => return OpcodeData{ .push_jump_fusion = .{ .value = value } }, // JUMP
-                0x57 => return OpcodeData{ .push_jumpi_fusion = .{ .value = value } }, // JUMPI
-                else => {
-                    // If we hit this branch we failed to implement an opcode or fusion
-                    log.err("getFusionData: Unhandled fusion pattern - PUSH{} (value: {}) followed by opcode 0x{x:0>2}", .{ push_size, value, second_op });
-                    // TODO: Add more fusion types to OpcodeData union as needed
-                    unreachable;
-                },
+                // Return appropriate fusion type based on second opcode
+                switch (second_op) {
+                    0x01 => return OpcodeData{ .push_add_fusion = .{ .value = value } }, // ADD
+                    0x02 => return OpcodeData{ .push_mul_fusion = .{ .value = value } }, // MUL
+                    0x03 => return OpcodeData{ .push_sub_fusion = .{ .value = value } }, // SUB
+                    0x04 => return OpcodeData{ .push_div_fusion = .{ .value = value } }, // DIV
+                    0x16 => return OpcodeData{ .push_and_fusion = .{ .value = value } }, // AND
+                    0x17 => return OpcodeData{ .push_or_fusion = .{ .value = value } }, // OR
+                    0x18 => return OpcodeData{ .push_xor_fusion = .{ .value = value } }, // XOR
+                    0x51 => return OpcodeData{ .push_mload_fusion = .{ .value = value } }, // MLOAD
+                    0x52 => return OpcodeData{ .push_mstore_fusion = .{ .value = value } }, // MSTORE
+                    0x53 => return OpcodeData{ .push_mstore8_fusion = .{ .value = value } }, // MSTORE8
+                    0x56 => return OpcodeData{ .push_jump_fusion = .{ .value = value } }, // JUMP
+                    0x57 => return OpcodeData{ .push_jumpi_fusion = .{ .value = value } }, // JUMPI
+                    else => {
+                        // No fusion detected, return regular PUSH
+                        return OpcodeData{ .push = .{ .value = value, .size = push_size } };
+                    },
+                }
             }
+            
+            // No fusion pattern detected, return regular opcode
+            return OpcodeData{ .regular = .{ .opcode = first_op } };
         }
 
         /// Get the length of the bytecode

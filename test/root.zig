@@ -96,5 +96,9 @@ test {
     
     // Opcode differential tests
     _ = @import("evm/opcodes/all_opcodes.zig");
+    
+    // Advanced fusion tests
+    _ = @import("fusion/advanced_fusion_test.zig");
+    _ = @import("fusion/advanced_fusion_integration_test.zig");
 
 }

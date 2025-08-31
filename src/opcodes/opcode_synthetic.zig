@@ -42,6 +42,14 @@ pub const OpcodeSynthetic = enum(u8) {
     PUSH_XOR_POINTER = 0xBA,
     PUSH_MSTORE8_INLINE = 0xBB,
     PUSH_MSTORE8_POINTER = 0xBC,
+    // Advanced fusion patterns (3+ opcodes)
+    CONSTANT_FOLD = 0xBD,        // Pre-computed arithmetic results
+    MULTI_PUSH_2 = 0xBE,          // Two consecutive PUSH operations
+    MULTI_PUSH_3 = 0xBF,          // Three consecutive PUSH operations
+    MULTI_POP_2 = 0xC0,           // Two consecutive POP operations
+    MULTI_POP_3 = 0xC1,           // Three consecutive POP operations
+    ISZERO_JUMPI = 0xC2,          // ISZERO + PUSH + JUMPI pattern
+    DUP2_MSTORE_PUSH = 0xC3,      // DUP2 + MSTORE + PUSH pattern
 };
 
 // Compile-time check to ensure synthetic opcodes don't overlap with normal opcodes

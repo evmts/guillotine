@@ -18,6 +18,7 @@ const stack_frame_arithmetic_synthetic = @import("../instructions/handlers_arith
 const stack_frame_bitwise_synthetic = @import("../instructions/handlers_bitwise_synthetic.zig");
 const stack_frame_memory_synthetic = @import("../instructions/handlers_memory_synthetic.zig");
 const stack_frame_jump_synthetic = @import("../instructions/handlers_jump_synthetic.zig");
+const stack_frame_advanced_synthetic = @import("../instructions/handlers_advanced_synthetic.zig");
 
 /// Thread-local storage for the tracer instance and its type info
 threadlocal var tracer_instance: ?*anyopaque = null;
@@ -190,6 +191,7 @@ pub fn getSyntheticHandler(comptime FrameType: type, synthetic_opcode: u8) Frame
     const BitwiseSyntheticHandlers = stack_frame_bitwise_synthetic.Handlers(FrameType);
     const MemorySyntheticHandlers = stack_frame_memory_synthetic.Handlers(FrameType);
     const JumpSyntheticHandlers = stack_frame_jump_synthetic.Handlers(FrameType);
+    const AdvancedSyntheticHandlers = stack_frame_advanced_synthetic.Handlers(FrameType);
 
     return switch (synthetic_opcode) {
         @intFromEnum(OpcodeSynthetic.PUSH_ADD_INLINE) => &ArithmeticSyntheticHandlers.push_add_inline,
@@ -216,6 +218,14 @@ pub fn getSyntheticHandler(comptime FrameType: type, synthetic_opcode: u8) Frame
         @intFromEnum(OpcodeSynthetic.PUSH_XOR_POINTER) => &BitwiseSyntheticHandlers.push_xor_pointer,
         @intFromEnum(OpcodeSynthetic.PUSH_MSTORE8_INLINE) => &MemorySyntheticHandlers.push_mstore8_inline,
         @intFromEnum(OpcodeSynthetic.PUSH_MSTORE8_POINTER) => &MemorySyntheticHandlers.push_mstore8_pointer,
+        // Advanced fusion patterns
+        @intFromEnum(OpcodeSynthetic.CONSTANT_FOLD) => &AdvancedSyntheticHandlers.constant_fold,
+        @intFromEnum(OpcodeSynthetic.MULTI_PUSH_2) => &AdvancedSyntheticHandlers.multi_push_2,
+        @intFromEnum(OpcodeSynthetic.MULTI_PUSH_3) => &AdvancedSyntheticHandlers.multi_push_3,
+        @intFromEnum(OpcodeSynthetic.MULTI_POP_2) => &AdvancedSyntheticHandlers.multi_pop_2,
+        @intFromEnum(OpcodeSynthetic.MULTI_POP_3) => &AdvancedSyntheticHandlers.multi_pop_3,
+        @intFromEnum(OpcodeSynthetic.ISZERO_JUMPI) => &AdvancedSyntheticHandlers.iszero_jumpi,
+        @intFromEnum(OpcodeSynthetic.DUP2_MSTORE_PUSH) => &AdvancedSyntheticHandlers.dup2_mstore_push,
         else => @panic("Invalid synthetic opcode"),
     };
 }
