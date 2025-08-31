@@ -215,6 +215,16 @@ fn formatTimeWithUnit(time_ms: f64) FormattedTime {
     return selectOptimalUnit(time_ms);
 }
 
+fn formatTimeString(allocator: std.mem.Allocator, time_ms: f64) ![]const u8 {
+    const formatted = formatTimeWithUnit(time_ms);
+    const unit_str = switch (formatted.unit) {
+        .microseconds => "μs",
+        .milliseconds => "ms",
+        .seconds => "s",
+    };
+    return std.fmt.allocPrint(allocator, "{d:.2} {s}", .{ formatted.value, unit_str });
+}
+
 fn exportComparisonMarkdown(allocator: std.mem.Allocator, results: []const Orchestrator.BenchmarkResult, num_runs: u32, js_runs: u32, include_all_cases: bool) !void {
     // Create the file in bench/results.md
     var exe_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
@@ -318,19 +328,24 @@ fn exportComparisonMarkdown(allocator: std.mem.Allocator, results: []const Orche
             }
         }
 
-        const zig_call2_formatted = formatTimeWithUnit(zig_call2_mean);
-        const revm_formatted = formatTimeWithUnit(revm_mean);
-        const ethereumjs_formatted = formatTimeWithUnit(ethereumjs_mean);
-        const geth_formatted = formatTimeWithUnit(geth_mean);
-        const evmone_formatted = formatTimeWithUnit(evmone_mean);
+        const zig_call2_str = try formatTimeString(allocator, zig_call2_mean);
+        defer allocator.free(zig_call2_str);
+        const revm_str = try formatTimeString(allocator, revm_mean);
+        defer allocator.free(revm_str);
+        const ethereumjs_str = try formatTimeString(allocator, ethereumjs_mean);
+        defer allocator.free(ethereumjs_str);
+        const geth_str = try formatTimeString(allocator, geth_mean);
+        defer allocator.free(geth_str);
+        const evmone_str = try formatTimeString(allocator, evmone_mean);
+        defer allocator.free(evmone_str);
 
-        try writer.interface.print("| {s:<25} | {any:>9} | {any:>4} | {any:>10} | {any:>4} | {any:>6} |\n", .{
+        try writer.interface.print("| {s:<25} | {s:>9} | {s:>9} | {s:>10} | {s:>9} | {s:>9} |\n", .{
             test_case,
-            zig_call2_formatted,
-            revm_formatted,
-            ethereumjs_formatted,
-            geth_formatted,
-            evmone_formatted,
+            zig_call2_str,
+            revm_str,
+            ethereumjs_str,
+            geth_str,
+            evmone_str,
         });
     }
 
@@ -362,19 +377,24 @@ fn exportComparisonMarkdown(allocator: std.mem.Allocator, results: []const Orche
                 else
                     "evmone";
 
-                const mean_formatted = formatTimeWithUnit(result.mean_ms);
-                const median_formatted = formatTimeWithUnit(result.median_ms);
-                const min_formatted = formatTimeWithUnit(result.min_ms);
-                const max_formatted = formatTimeWithUnit(result.max_ms);
-                const stddev_formatted = formatTimeWithUnit(result.std_dev_ms);
+                const mean_str = try formatTimeString(allocator, result.mean_ms);
+                defer allocator.free(mean_str);
+                const median_str = try formatTimeString(allocator, result.median_ms);
+                defer allocator.free(median_str);
+                const min_str = try formatTimeString(allocator, result.min_ms);
+                defer allocator.free(min_str);
+                const max_str = try formatTimeString(allocator, result.max_ms);
+                defer allocator.free(max_str);
+                const stddev_str = try formatTimeString(allocator, result.std_dev_ms);
+                defer allocator.free(stddev_str);
 
-                try writer.interface.print("| {s:<11} | {any:>14} | {any:>16} | {any:>13} | {any:>13} | {any:>17} | {d:>13} |\n", .{
+                try writer.interface.print("| {s:<11} | {s:>14} | {s:>16} | {s:>13} | {s:>13} | {s:>17} | {d:>13} |\n", .{
                     evm_name,
-                    mean_formatted,
-                    median_formatted,
-                    min_formatted,
-                    max_formatted,
-                    stddev_formatted,
+                    mean_str,
+                    median_str,
+                    min_str,
+                    max_str,
+                    stddev_str,
                     result.internal_runs,
                 });
             }
