@@ -136,6 +136,8 @@ pub const OPCODE_INFO = blk: {
     info[0xf3] = .{ .gas_cost = 0, .stack_inputs = 2, .stack_outputs = 0 }; // RETURN (dynamic)
     info[0xf4] = .{ .gas_cost = 100, .stack_inputs = 6, .stack_outputs = 1 }; // DELEGATECALL (warm access, dynamic)
     info[0xf5] = .{ .gas_cost = 32000, .stack_inputs = 4, .stack_outputs = 1 }; // CREATE2
+    info[0xf6] = .{ .gas_cost = 3100, .stack_inputs = 3, .stack_outputs = 1 }; // AUTH (EIP-3074)
+    info[0xf7] = .{ .gas_cost = 100, .stack_inputs = 8, .stack_outputs = 1 }; // AUTHCALL (EIP-3074)
     info[0xfa] = .{ .gas_cost = 100, .stack_inputs = 6, .stack_outputs = 1 }; // STATICCALL (warm access, dynamic)
     info[0xfd] = .{ .gas_cost = 0, .stack_inputs = 2, .stack_outputs = 0 }; // REVERT (dynamic)
     info[0xfe] = .{ .gas_cost = 0, .stack_inputs = 0, .stack_outputs = 0 }; // INVALID

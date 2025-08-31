@@ -158,6 +158,8 @@ pub const Opcode = enum(u8) {
     RETURN = 0xf3,
     DELEGATECALL = 0xf4,
     CREATE2 = 0xf5,
+    AUTH = 0xf6, // EIP-3074
+    AUTHCALL = 0xf7, // EIP-3074
     STATICCALL = 0xfa,
     REVERT = 0xfd,
     INVALID = 0xfe,
@@ -230,7 +232,7 @@ pub const Opcode = enum(u8) {
         return switch (self) {
             .SSTORE, .TSTORE, .LOG0, .LOG1, .LOG2, .LOG3, .LOG4,
             .CREATE, .CREATE2, .CALL, .CALLCODE, .DELEGATECALL,
-            .SELFDESTRUCT => true,
+            .AUTHCALL, .SELFDESTRUCT => true,
             else => false,
         };
     }
@@ -408,6 +410,8 @@ pub const Opcode = enum(u8) {
             .RETURN => "RETURN",
             .DELEGATECALL => "DELEGATECALL",
             .CREATE2 => "CREATE2",
+            .AUTH => "AUTH",
+            .AUTHCALL => "AUTHCALL",
             .STATICCALL => "STATICCALL",
             .REVERT => "REVERT",
             .INVALID => "INVALID",
