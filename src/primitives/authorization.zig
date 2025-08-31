@@ -31,10 +31,12 @@ pub const Authorization = struct {
     pub fn authority(self: *const Authorization) !Address {
         // Recover the authority (signer) from the authorization
         const h = try self.signing_hash();
+        const r_value = std.mem.readInt(u256, &self.r, .big);
+        const s_value = std.mem.readInt(u256, &self.s, .big);
         const signature = crypto.Signature{
-            .v = self.v,
-            .r = self.r,
-            .s = self.s,
+            .v = @intCast(self.v),
+            .r = r_value,
+            .s = s_value,
         };
 
         const allocator = std.heap.page_allocator;
@@ -91,7 +93,9 @@ pub const Authorization = struct {
         }
 
         // Signature must be valid
-        if (!crypto.is_valid_signature(.{ .v = self.v, .r = self.r, .s = self.s })) {
+        const r_value = std.mem.readInt(u256, &self.r, .big);
+        const s_value = std.mem.readInt(u256, &self.s, .big);
+        if (!crypto.is_valid_signature(.{ .v = @intCast(self.v), .r = r_value, .s = s_value })) {
             return AuthorizationError.InvalidSignature;
         }
     }
@@ -118,8 +122,8 @@ pub fn create_authorization(
     const signature = try crypto.sign(allocator, private_key, h);
 
     auth.v = signature.v;
-    auth.r = signature.r;
-    auth.s = signature.s;
+    std.mem.writeInt(u256, &auth.r, signature.r, .big);
+    std.mem.writeInt(u256, &auth.s, signature.s, .big);
 
     return auth;
 }
@@ -224,12 +228,10 @@ pub fn calculate_authorization_gas_cost(auth_list: AuthorizationList, empty_acco
 test "authorization creation and recovery" {
     const allocator = testing.allocator;
 
-    const private_key = crypto.PrivateKey{
-        .bytes = [_]u8{0x42} ** 32,
-    };
+    const private_key: crypto.PrivateKey = [_]u8{0x42} ** 32;
 
     const signer_address = try crypto.getAddress(allocator, private_key);
-    const target_address = try Address.fromHex("0x1111111111111111111111111111111111111111");
+    const target_address = try Address.from_hex("0x1111111111111111111111111111111111111111");
 
     const auth = try create_authorization(
         allocator,
@@ -250,7 +252,7 @@ test "authorization creation and recovery" {
 test "authorization validation" {
     var auth = Authorization{
         .chain_id = 1,
-        .address = try Address.fromHex("0x1111111111111111111111111111111111111111"),
+        .address = try Address.from_hex("0x1111111111111111111111111111111111111111"),
         .nonce = 0,
         .v = 27,
         .r = [_]u8{0x12} ** 32,
@@ -273,14 +275,12 @@ test "authorization validation" {
 test "authorization list encoding" {
     const allocator = testing.allocator;
 
-    const private_key = crypto.PrivateKey{
-        .bytes = [_]u8{0x42} ** 32,
-    };
+    const private_key: crypto.PrivateKey = [_]u8{0x42} ** 32;
 
     const auth1 = try create_authorization(
         allocator,
         1,
-        try Address.fromHex("0x1111111111111111111111111111111111111111"),
+        try Address.from_hex("0x1111111111111111111111111111111111111111"),
         0,
         private_key,
     );
@@ -288,7 +288,7 @@ test "authorization list encoding" {
     const auth2 = try create_authorization(
         allocator,
         1,
-        try Address.fromHex("0x2222222222222222222222222222222222222222"),
+        try Address.from_hex("0x2222222222222222222222222222222222222222"),
         1,
         private_key,
     );
@@ -305,8 +305,8 @@ test "authorization list encoding" {
 
 test "delegation designation" {
     var delegation = DelegationDesignation{
-        .authority = try Address.fromHex("0x1111111111111111111111111111111111111111"),
-        .delegated_address = try Address.fromHex("0x2222222222222222222222222222222222222222"),
+        .authority = try Address.from_hex("0x1111111111111111111111111111111111111111"),
+        .delegated_address = try Address.from_hex("0x2222222222222222222222222222222222222222"),
     };
 
     // Should be active
@@ -321,17 +321,13 @@ test "delegation designation" {
 test "batch authorization processing" {
     const allocator = testing.allocator;
 
-    const private_key1 = crypto.PrivateKey{
-        .bytes = [_]u8{0x01} ** 32,
-    };
-    const private_key2 = crypto.PrivateKey{
-        .bytes = [_]u8{0x02} ** 32,
-    };
+    const private_key1: crypto.PrivateKey = [_]u8{0x01} ** 32;
+    const private_key2: crypto.PrivateKey = [_]u8{0x02} ** 32;
 
     const auth1 = try create_authorization(
         allocator,
         1,
-        try Address.fromHex("0x1111111111111111111111111111111111111111"),
+        try Address.from_hex("0x1111111111111111111111111111111111111111"),
         0,
         private_key1,
     );
@@ -339,7 +335,7 @@ test "batch authorization processing" {
     const auth2 = try create_authorization(
         allocator,
         1,
-        try Address.fromHex("0x2222222222222222222222222222222222222222"),
+        try Address.from_hex("0x2222222222222222222222222222222222222222"),
         0,
         private_key2,
     );
@@ -358,7 +354,7 @@ test "authorization gas cost calculation" {
     const auth_list = [_]Authorization{
         .{
             .chain_id = 1,
-            .address = try Address.fromHex("0x1111111111111111111111111111111111111111"),
+            .address = try Address.from_hex("0x1111111111111111111111111111111111111111"),
             .nonce = 0,
             .v = 27,
             .r = [_]u8{0x12} ** 32,
@@ -366,7 +362,7 @@ test "authorization gas cost calculation" {
         },
         .{
             .chain_id = 1,
-            .address = try Address.fromHex("0x2222222222222222222222222222222222222222"),
+            .address = try Address.from_hex("0x2222222222222222222222222222222222222222"),
             .nonce = 0,
             .v = 27,
             .r = [_]u8{0x56} ** 32,
