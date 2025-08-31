@@ -4,17 +4,17 @@
 
 **Test Runs per Case**: 1
 **EVMs Compared**: Guillotine Call2 (Zig with tailcall dispatch), REVM (Rust), EthereumJS (JavaScript), Geth (Go), evmone (C++)
-**Timestamp**: 1756122914 (Unix epoch)
+**Timestamp**: 1756603585 (Unix epoch)
 
 ## Overall Performance Summary (Per Run)
 
 | Test Case | Zig-Call2 | REVM | EthereumJS | Geth | evmone |
 |-----------|-----------|------|------------|------|--------|
-| erc20-approval-transfer   | 0.00 μs | 6.76 ms | 405.76 ms | 91.92 ms | 9.99 ms |
-| erc20-mint                | 0.00 μs | 5.85 ms | 403.92 ms | 73.48 ms | 31.67 ms |
-| erc20-transfer            | 0.00 μs | 8.45 ms | 3.68 s | 115.25 ms | 36.33 ms |
-| ten-thousand-hashes       | 0.00 μs | 3.30 ms | 365.01 ms | 49.16 ms | 27.36 ms |
-| snailtracer               | 0.00 μs | 40.06 ms | 8.15 s | 628.76 ms | 181.44 ms |
+| erc20-approval-transfer   | .{ .value =         0, .unit = .microseconds } | .{ .value = 6.395890700000001, .unit = .milliseconds } | .{ .value =          0, .unit = .microseconds } | .{ .value = 12.518542179999999, .unit = .milliseconds } | .{ .value = 4.6294716000000005, .unit = .milliseconds } |
+| erc20-mint                | .{ .value =         0, .unit = .microseconds } | .{ .value = 5.031915400000001, .unit = .milliseconds } | .{ .value =          0, .unit = .microseconds } | .{ .value = 10.74502494, .unit = .milliseconds } | .{ .value = 3.8889704400000005, .unit = .milliseconds } |
+| erc20-transfer            | .{ .value =         0, .unit = .microseconds } | .{ .value = 7.265388820000001, .unit = .milliseconds } | .{ .value =          0, .unit = .microseconds } | .{ .value = 15.382508399999999, .unit = .milliseconds } | .{ .value = 5.65009504, .unit = .milliseconds } |
+| ten-thousand-hashes       | .{ .value =         0, .unit = .microseconds } | .{ .value = 2.4982341399999997, .unit = .milliseconds } | .{ .value =          0, .unit = .microseconds } | .{ .value = 7.78607346, .unit = .milliseconds } | .{ .value = 1.9732741999999996, .unit = .milliseconds } |
+| snailtracer               | .{ .value =         0, .unit = .microseconds } | .{ .value = 32.3546341, .unit = .milliseconds } | .{ .value =          0, .unit = .microseconds } | .{ .value = 73.15247031999999, .unit = .milliseconds } | .{ .value = 22.65945622, .unit = .milliseconds } |
 
 ## Detailed Performance Comparison
 
@@ -22,46 +22,41 @@
 
 | EVM | Mean (per run) | Median (per run) | Min (per run) | Max (per run) | Std Dev (per run) | Internal Runs |
 |-----|----------------|------------------|---------------|---------------|-------------------|---------------|
-| REVM        | 6.76 ms | 6.76 ms | 6.76 ms | 6.76 ms | 0.00 μs |             1 |
-| EthereumJS  | 405.76 ms | 405.76 ms | 405.76 ms | 405.76 ms | 0.00 μs |             1 |
-| Geth        | 91.92 ms | 91.92 ms | 91.92 ms | 91.92 ms | 0.00 μs |             1 |
-| evmone      | 9.99 ms | 9.99 ms | 9.99 ms | 9.99 ms | 0.00 μs |             1 |
+| REVM        | .{ .value = 6.395890700000001, .unit = .milliseconds } | .{ .value = 6.395890700000001, .unit = .milliseconds } | .{ .value = 6.395890700000001, .unit = .milliseconds } | .{ .value = 6.395890700000001, .unit = .milliseconds } | .{ .value =                 0, .unit = .microseconds } |             1 |
+| Geth        | .{ .value = 12.518542179999999, .unit = .milliseconds } | .{ .value = 12.518542179999999, .unit = .milliseconds } | .{ .value = 12.518542179999999, .unit = .milliseconds } | .{ .value = 12.518542179999999, .unit = .milliseconds } | .{ .value =                 0, .unit = .microseconds } |             1 |
+| evmone      | .{ .value = 4.6294716000000005, .unit = .milliseconds } | .{ .value = 4.6294716000000005, .unit = .milliseconds } | .{ .value = 4.6294716000000005, .unit = .milliseconds } | .{ .value = 4.6294716000000005, .unit = .milliseconds } | .{ .value =                 0, .unit = .microseconds } |             1 |
 
 ### erc20-mint
 
 | EVM | Mean (per run) | Median (per run) | Min (per run) | Max (per run) | Std Dev (per run) | Internal Runs |
 |-----|----------------|------------------|---------------|---------------|-------------------|---------------|
-| REVM        | 5.85 ms | 5.85 ms | 5.85 ms | 5.85 ms | 0.00 μs |             1 |
-| EthereumJS  | 403.92 ms | 403.92 ms | 403.92 ms | 403.92 ms | 0.00 μs |             1 |
-| Geth        | 73.48 ms | 73.48 ms | 73.48 ms | 73.48 ms | 0.00 μs |             1 |
-| evmone      | 31.67 ms | 31.67 ms | 31.67 ms | 31.67 ms | 0.00 μs |             1 |
+| REVM        | .{ .value = 5.031915400000001, .unit = .milliseconds } | .{ .value = 5.031915400000001, .unit = .milliseconds } | .{ .value = 5.031915400000001, .unit = .milliseconds } | .{ .value = 5.031915400000001, .unit = .milliseconds } | .{ .value =                 0, .unit = .microseconds } |             1 |
+| Geth        | .{ .value =    10.74502494, .unit = .milliseconds } | .{ .value =      10.74502494, .unit = .milliseconds } | .{ .value =   10.74502494, .unit = .milliseconds } | .{ .value =   10.74502494, .unit = .milliseconds } | .{ .value =                 0, .unit = .microseconds } |             1 |
+| evmone      | .{ .value = 3.8889704400000005, .unit = .milliseconds } | .{ .value = 3.8889704400000005, .unit = .milliseconds } | .{ .value = 3.8889704400000005, .unit = .milliseconds } | .{ .value = 3.8889704400000005, .unit = .milliseconds } | .{ .value =                 0, .unit = .microseconds } |             1 |
 
 ### erc20-transfer
 
 | EVM | Mean (per run) | Median (per run) | Min (per run) | Max (per run) | Std Dev (per run) | Internal Runs |
 |-----|----------------|------------------|---------------|---------------|-------------------|---------------|
-| REVM        | 8.45 ms | 8.45 ms | 8.45 ms | 8.45 ms | 0.00 μs |             1 |
-| EthereumJS  | 3.68 s | 3.68 s | 3.68 s | 3.68 s | 0.00 μs |             1 |
-| Geth        | 115.25 ms | 115.25 ms | 115.25 ms | 115.25 ms | 0.00 μs |             1 |
-| evmone      | 36.33 ms | 36.33 ms | 36.33 ms | 36.33 ms | 0.00 μs |             1 |
+| REVM        | .{ .value = 7.265388820000001, .unit = .milliseconds } | .{ .value = 7.265388820000001, .unit = .milliseconds } | .{ .value = 7.265388820000001, .unit = .milliseconds } | .{ .value = 7.265388820000001, .unit = .milliseconds } | .{ .value =                 0, .unit = .microseconds } |             1 |
+| Geth        | .{ .value = 15.382508399999999, .unit = .milliseconds } | .{ .value = 15.382508399999999, .unit = .milliseconds } | .{ .value = 15.382508399999999, .unit = .milliseconds } | .{ .value = 15.382508399999999, .unit = .milliseconds } | .{ .value =                 0, .unit = .microseconds } |             1 |
+| evmone      | .{ .value =     5.65009504, .unit = .milliseconds } | .{ .value =       5.65009504, .unit = .milliseconds } | .{ .value =    5.65009504, .unit = .milliseconds } | .{ .value =    5.65009504, .unit = .milliseconds } | .{ .value =                 0, .unit = .microseconds } |             1 |
 
 ### ten-thousand-hashes
 
 | EVM | Mean (per run) | Median (per run) | Min (per run) | Max (per run) | Std Dev (per run) | Internal Runs |
 |-----|----------------|------------------|---------------|---------------|-------------------|---------------|
-| REVM        | 3.30 ms | 3.30 ms | 3.30 ms | 3.30 ms | 0.00 μs |             1 |
-| EthereumJS  | 365.01 ms | 365.01 ms | 365.01 ms | 365.01 ms | 0.00 μs |             1 |
-| Geth        | 49.16 ms | 49.16 ms | 49.16 ms | 49.16 ms | 0.00 μs |             1 |
-| evmone      | 27.36 ms | 27.36 ms | 27.36 ms | 27.36 ms | 0.00 μs |             1 |
+| REVM        | .{ .value = 2.4982341399999997, .unit = .milliseconds } | .{ .value = 2.4982341399999997, .unit = .milliseconds } | .{ .value = 2.4982341399999997, .unit = .milliseconds } | .{ .value = 2.4982341399999997, .unit = .milliseconds } | .{ .value =                 0, .unit = .microseconds } |             1 |
+| Geth        | .{ .value =     7.78607346, .unit = .milliseconds } | .{ .value =       7.78607346, .unit = .milliseconds } | .{ .value =    7.78607346, .unit = .milliseconds } | .{ .value =    7.78607346, .unit = .milliseconds } | .{ .value =                 0, .unit = .microseconds } |             1 |
+| evmone      | .{ .value = 1.9732741999999996, .unit = .milliseconds } | .{ .value = 1.9732741999999996, .unit = .milliseconds } | .{ .value = 1.9732741999999996, .unit = .milliseconds } | .{ .value = 1.9732741999999996, .unit = .milliseconds } | .{ .value =                 0, .unit = .microseconds } |             1 |
 
 ### snailtracer
 
 | EVM | Mean (per run) | Median (per run) | Min (per run) | Max (per run) | Std Dev (per run) | Internal Runs |
 |-----|----------------|------------------|---------------|---------------|-------------------|---------------|
-| REVM        | 40.06 ms | 40.06 ms | 40.06 ms | 40.06 ms | 0.00 μs |             1 |
-| EthereumJS  | 8.15 s | 8.15 s | 8.15 s | 8.15 s | 0.00 μs |             1 |
-| Geth        | 628.76 ms | 628.76 ms | 628.76 ms | 628.76 ms | 0.00 μs |             1 |
-| evmone      | 181.44 ms | 181.44 ms | 181.44 ms | 181.44 ms | 0.00 μs |             1 |
+| REVM        | .{ .value =     32.3546341, .unit = .milliseconds } | .{ .value =       32.3546341, .unit = .milliseconds } | .{ .value =    32.3546341, .unit = .milliseconds } | .{ .value =    32.3546341, .unit = .milliseconds } | .{ .value =                 0, .unit = .microseconds } |             1 |
+| Geth        | .{ .value = 73.15247031999999, .unit = .milliseconds } | .{ .value = 73.15247031999999, .unit = .milliseconds } | .{ .value = 73.15247031999999, .unit = .milliseconds } | .{ .value = 73.15247031999999, .unit = .milliseconds } | .{ .value =                 0, .unit = .microseconds } |             1 |
+| evmone      | .{ .value =    22.65945622, .unit = .milliseconds } | .{ .value =      22.65945622, .unit = .milliseconds } | .{ .value =   22.65945622, .unit = .milliseconds } | .{ .value =   22.65945622, .unit = .milliseconds } | .{ .value =                 0, .unit = .microseconds } |             1 |
 
 
 ## Notes
