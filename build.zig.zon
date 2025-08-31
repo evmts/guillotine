@@ -44,10 +44,10 @@
             .url = "https://github.com/hendriknielaender/zBench/archive/refs/heads/main.tar.gz",
             .hash = "zbench-0.11.1-YTdc7zgmAQDtDcHPFwsLeawui27WjMLWmUwrfz7pIlB2",
         },
-        // .clap = .{
-        //     .url = "https://github.com/Hejsil/zig-clap/archive/refs/tags/0.10.0.tar.gz",
-        //     .hash = "clap-0.10.0-oBajB434AQBDh-Ei3YtoKIRxZacVPF1iSwp3IX_ZB8f0",
-        // },
+        .clap = .{
+            .url = "https://github.com/Hejsil/zig-clap/archive/refs/heads/master.tar.gz",
+            .hash = "clap-0.11.0-oBajB-HnAQDPCKYzwF7rO3qDFwRcD39Q0DALlTSz5H7e",
+        },
     },
 
     // Specifies the set of files and directories that are included in this package.

@@ -589,15 +589,21 @@ pub fn build(b: *std.Build) void {
     const poop_step = b.step("poop", "Run poop benchmark on snailtracer (Linux only)");
     poop_step.dependOn(&run_poop_cmd.step);
 
-    // Build simple orchestrator stub
+    // Build real orchestrator
+    const clap_dep = b.dependency("clap", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    
     const orchestrator_exe = b.addExecutable(.{
         .name = "orchestrator",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("bench/simple_orchestrator.zig"),
+            .root_source_file = b.path("bench/src/main.zig"),
             .target = target,
             .optimize = .ReleaseFast,
         }),
     });
+    orchestrator_exe.root_module.addImport("clap", clap_dep.module("clap"));
 
     b.installArtifact(orchestrator_exe);
 
@@ -1139,6 +1145,54 @@ pub fn build(b: *std.Build) void {
         build_comprehensive_bench_step.dependOn(&b.addInstallArtifact(comprehensive_bench_exe, .{}).step);
     }
 
+    // EVM Bench - main benchmark file
+    const evm_main_bench_exe = b.addExecutable(.{
+        .name = "evm-main-bench",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/evm/evm_bench.zig"),
+            .target = target,
+            .optimize = .ReleaseFast,
+        }),
+    });
+    evm_main_bench_exe.root_module.addImport("zbench", zbench_dep.module("zbench"));
+    evm_main_bench_exe.root_module.addImport("primitives", primitives_mod);
+    evm_main_bench_exe.root_module.addImport("evm", evm_mod);
+    evm_main_bench_exe.root_module.addImport("revm", revm_mod);
+    evm_main_bench_exe.root_module.addImport("crypto", crypto_mod);
+    evm_main_bench_exe.root_module.addImport("build_options", build_options_mod);
+    
+    // Link REVM libraries
+    evm_main_bench_exe.linkLibrary(revm_lib.?);
+    evm_main_bench_exe.addIncludePath(b.path("src/revm_wrapper"));
+    evm_main_bench_exe.linkLibC();
+    
+    const revm_rust_target_dir = if (optimize == .Debug) "debug" else "release";
+    const revm_dylib_path = if (rust_target) |target_triple|
+        b.fmt("target/{s}/{s}/librevm_wrapper.dylib", .{ target_triple, revm_rust_target_dir })
+    else
+        b.fmt("target/{s}/librevm_wrapper.dylib", .{revm_rust_target_dir});
+    evm_main_bench_exe.addObjectFile(b.path(revm_dylib_path));
+    
+    if (target.result.os.tag == .linux) {
+        evm_main_bench_exe.linkSystemLibrary("m");
+        evm_main_bench_exe.linkSystemLibrary("pthread");
+        evm_main_bench_exe.linkSystemLibrary("dl");
+    } else if (target.result.os.tag == .macos) {
+        evm_main_bench_exe.linkSystemLibrary("c++");
+        evm_main_bench_exe.linkFramework("Security");
+        evm_main_bench_exe.linkFramework("SystemConfiguration");
+        evm_main_bench_exe.linkFramework("CoreFoundation");
+    }
+    
+    b.installArtifact(evm_main_bench_exe);
+    
+    const run_evm_main_bench_cmd = b.addRunArtifact(evm_main_bench_exe);
+    const evm_main_bench_step = b.step("bench-evm", "Run main EVM benchmarks (snailtracer, 10k hashes, etc.)");
+    evm_main_bench_step.dependOn(&run_evm_main_bench_cmd.step);
+    
+    const build_evm_main_bench_step = b.step("build-bench-evm", "Build main EVM benchmarks");
+    build_evm_main_bench_step.dependOn(&b.addInstallArtifact(evm_main_bench_exe, .{}).step);
+
     // Bytecode benchmarks
     const bytecode_bench_exe = b.addExecutable(.{
         .name = "bytecode-bench",
@@ -1480,6 +1534,40 @@ pub fn build(b: *std.Build) void {
         
         const differential_test_step = b.step("test-differential", "Run differential tests comparing Guillotine and REVM");
         differential_test_step.dependOn(&run_differential_test.step);
+
+        // Specific fixtures test for ten-thousand-hashes and snailtracer
+        const specific_fixtures_test = b.addTest(.{
+            .name = "specific-fixtures-test",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("test/differential/specific_fixtures_test.zig"),
+                .target = target,
+                .optimize = optimize,
+            }),
+        });
+        specific_fixtures_test.root_module.addImport("evm", evm_mod);
+        specific_fixtures_test.root_module.addImport("primitives", primitives_mod);
+        specific_fixtures_test.root_module.addImport("revm", revm_mod);
+        
+        specific_fixtures_test.linkLibrary(revm_lib.?);
+        specific_fixtures_test.addIncludePath(b.path("src/revm_wrapper"));
+        specific_fixtures_test.linkLibC();
+        specific_fixtures_test.addObjectFile(b.path(revm_dylib_path));
+        
+        if (target.result.os.tag == .linux) {
+            specific_fixtures_test.linkSystemLibrary("m");
+            specific_fixtures_test.linkSystemLibrary("pthread");
+            specific_fixtures_test.linkSystemLibrary("dl");
+        } else if (target.result.os.tag == .macos) {
+            specific_fixtures_test.linkSystemLibrary("c++");
+            specific_fixtures_test.linkFramework("Security");
+            specific_fixtures_test.linkFramework("SystemConfiguration");
+            specific_fixtures_test.linkFramework("CoreFoundation");
+        }
+        
+        const run_specific_fixtures_test = b.addRunArtifact(specific_fixtures_test);
+        
+        const specific_fixtures_step = b.step("test-fixtures", "Run differential tests for ten-thousand-hashes and snailtracer only");
+        specific_fixtures_step.dependOn(&run_specific_fixtures_test.step);
 
         // Debug target for math operations only
         const debug_math_test = b.addTest(.{

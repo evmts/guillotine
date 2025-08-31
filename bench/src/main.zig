@@ -45,7 +45,8 @@ pub fn main() !void {
         .diagnostic = &diag,
         .allocator = allocator,
     }) catch |err| {
-        diag.report(std.io.getStdErr().writer(), err) catch {};
+        const stderr = std.fs.File{ .handle = 2 };
+        diag.reportToFile(stderr, err) catch {};
         return err;
     };
     defer res.deinit();
@@ -55,8 +56,11 @@ pub fn main() !void {
         return;
     }
     if (res.args.version != 0) {
-        const stdout = std.io.getStdOut().writer();
-        try stdout.print("Guillotine Orchestrator {s}\n", .{version()});
+        const stdout_file = std.fs.File{ .handle = 1 };
+        var stdout_buffer: [1024]u8 = undefined;
+        var stdout = stdout_file.writer(&stdout_buffer);
+        try stdout.interface.print("Guillotine Orchestrator {s}\n", .{version()});
+        try stdout.interface.flush();
         return;
     }
 
@@ -109,8 +113,8 @@ pub fn main() !void {
         // Compare mode: run benchmarks for all available EVMs
         const evms = [_][]const u8{ "zig-call2", "revm", "ethereumjs", "geth", "evmone" };
 
-        var all_results = std.ArrayList(Orchestrator.BenchmarkResult).init(allocator);
-        defer all_results.deinit();
+        var all_results = std.ArrayList(Orchestrator.BenchmarkResult).empty;
+        defer all_results.deinit(allocator);
 
         for (evms) |evm| {
             std.debug.print("\n=== Running benchmarks for {s} ===\n", .{evm});
@@ -123,7 +127,7 @@ pub fn main() !void {
 
             // Collect results
             for (orchestrator.results.items) |result| {
-                try all_results.append(.{
+                try all_results.append(allocator, .{
                     .test_case = try std.fmt.allocPrint(allocator, "{s} ({s})", .{ result.test_case, evm }),
                     .mean_ms = result.mean_ms,
                     .min_ms = result.min_ms,
@@ -230,15 +234,17 @@ fn exportComparisonMarkdown(allocator: std.mem.Allocator, results: []const Orche
     const seconds = @as(u64, @intCast(timestamp));
 
     // Write header
-    try file.writer().print("# EVM Benchmark Comparison Results\n\n", .{});
-    try file.writer().print("## Summary\n\n", .{});
+    var writer_buffer: [1024]u8 = undefined;
+    var writer = file.writer(&writer_buffer);
+    try writer.interface.print("# EVM Benchmark Comparison Results\n\n", .{});
+    try writer.interface.print("## Summary\n\n", .{});
     if (js_runs != num_runs) {
-        try file.writer().print("**Test Runs per Case**: {} (EthereumJS: {})\n", .{ num_runs, js_runs });
+        try writer.interface.print("**Test Runs per Case**: {} (EthereumJS: {})\n", .{ num_runs, js_runs });
     } else {
-        try file.writer().print("**Test Runs per Case**: {}\n", .{num_runs});
+        try writer.interface.print("**Test Runs per Case**: {}\n", .{num_runs});
     }
-    try file.writer().print("**EVMs Compared**: Guillotine Call2 (Zig with tailcall dispatch), REVM (Rust), EthereumJS (JavaScript), Geth (Go), evmone (C++)\n", .{});
-    try file.writer().print("**Timestamp**: {} (Unix epoch)\n\n", .{seconds});
+    try writer.interface.print("**EVMs Compared**: Guillotine Call2 (Zig with tailcall dispatch), REVM (Rust), EthereumJS (JavaScript), Geth (Go), evmone (C++)\n", .{});
+    try writer.interface.print("**Timestamp**: {} (Unix epoch)\n\n", .{seconds});
 
     // Determine which test cases to include
     const working_test_cases = [_][]const u8{ "erc20-approval-transfer", "erc20-mint", "erc20-transfer", "ten-thousand-hashes", "snailtracer" };
@@ -281,9 +287,9 @@ fn exportComparisonMarkdown(allocator: std.mem.Allocator, results: []const Orche
     const test_cases = if (include_all_cases) all_test_cases[0..] else working_test_cases[0..];
 
     // Add summary statistics first
-    try file.writer().print("## Overall Performance Summary (Per Run)\n\n", .{});
-    try file.writeAll("| Test Case | Zig-Call2 | REVM | EthereumJS | Geth | evmone |\n");
-    try file.writeAll("|-----------|-----------|------|------------|------|--------|\n");
+    try writer.interface.print("## Overall Performance Summary (Per Run)\n\n", .{});
+    try writer.interface.writeAll("| Test Case | Zig-Call2 | REVM | EthereumJS | Geth | evmone |\n");
+    try writer.interface.writeAll("|-----------|-----------|------|------------|------|--------|\n");
 
     for (test_cases) |test_case| {
         var zig_call2_mean: f64 = 0;
@@ -318,7 +324,7 @@ fn exportComparisonMarkdown(allocator: std.mem.Allocator, results: []const Orche
         const geth_formatted = formatTimeWithUnit(geth_mean);
         const evmone_formatted = formatTimeWithUnit(evmone_mean);
 
-        try file.writer().print("| {s:<25} | {s:>9} | {s:>4} | {s:>10} | {s:>4} | {s:>6} |\n", .{
+        try writer.interface.print("| {s:<25} | {any:>9} | {any:>4} | {any:>10} | {any:>4} | {any:>6} |\n", .{
             test_case,
             zig_call2_formatted,
             revm_formatted,
@@ -329,14 +335,14 @@ fn exportComparisonMarkdown(allocator: std.mem.Allocator, results: []const Orche
     }
 
     // Group results by test case
-    try file.writer().print("\n## Detailed Performance Comparison\n\n", .{});
+    try writer.interface.print("\n## Detailed Performance Comparison\n\n", .{});
 
     // Write comparison tables for each test case
 
     for (test_cases) |test_case| {
-        try file.writer().print("### {s}\n\n", .{test_case});
-        try file.writeAll("| EVM | Mean (per run) | Median (per run) | Min (per run) | Max (per run) | Std Dev (per run) | Internal Runs |\n");
-        try file.writeAll("|-----|----------------|------------------|---------------|---------------|-------------------|---------------|\n");
+        try writer.interface.print("### {s}\n\n", .{test_case});
+        try writer.interface.writeAll("| EVM | Mean (per run) | Median (per run) | Min (per run) | Max (per run) | Std Dev (per run) | Internal Runs |\n");
+        try writer.interface.writeAll("|-----|----------------|------------------|---------------|---------------|-------------------|---------------|\n");
 
         // Find results for this test case (exact match to avoid duplicates)
         for (results) |result| {
@@ -362,7 +368,7 @@ fn exportComparisonMarkdown(allocator: std.mem.Allocator, results: []const Orche
                 const max_formatted = formatTimeWithUnit(result.max_ms);
                 const stddev_formatted = formatTimeWithUnit(result.std_dev_ms);
 
-                try file.writer().print("| {s:<11} | {s:>14} | {s:>16} | {s:>13} | {s:>13} | {s:>17} | {d:>13} |\n", .{
+                try writer.interface.print("| {s:<11} | {any:>14} | {any:>16} | {any:>13} | {any:>13} | {any:>17} | {d:>13} |\n", .{
                     evm_name,
                     mean_formatted,
                     median_formatted,
@@ -374,32 +380,35 @@ fn exportComparisonMarkdown(allocator: std.mem.Allocator, results: []const Orche
             }
         }
 
-        try file.writer().print("\n", .{});
+        try writer.interface.print("\n", .{});
     }
 
     // Add notes
-    try file.writeAll("\n## Notes\n\n");
-    try file.writeAll("- **All times are normalized per individual execution run**\n");
-    try file.writeAll("- Times are displayed in the most appropriate unit (μs, ms, or s)\n");
-    try file.writeAll("- All implementations use optimized builds:\n");
-    try file.writeAll("  - Zig (Call2): ReleaseFast with tailcall-based interpreter\n");
-    try file.writeAll("  - Rust (REVM): --release\n");
-    try file.writeAll("  - JavaScript (EthereumJS): JS runtime (bun or node)\n");
-    try file.writeAll("  - Go (geth): -O3 optimizations\n");
-    try file.writeAll("  - C++ (evmone): -O3 -march=native\n");
-    try file.writeAll("- Lower values indicate better performance\n");
-    try file.writeAll("- Each hyperfine run executes the contract multiple times internally (see Internal Runs column)\n");
-    try file.writeAll("- These benchmarks measure the full execution time including contract deployment\n\n");
+    try writer.interface.writeAll("\n## Notes\n\n");
+    try writer.interface.writeAll("- **All times are normalized per individual execution run**\n");
+    try writer.interface.writeAll("- Times are displayed in the most appropriate unit (μs, ms, or s)\n");
+    try writer.interface.writeAll("- All implementations use optimized builds:\n");
+    try writer.interface.writeAll("  - Zig (Call2): ReleaseFast with tailcall-based interpreter\n");
+    try writer.interface.writeAll("  - Rust (REVM): --release\n");
+    try writer.interface.writeAll("  - JavaScript (EthereumJS): JS runtime (bun or node)\n");
+    try writer.interface.writeAll("  - Go (geth): -O3 optimizations\n");
+    try writer.interface.writeAll("  - C++ (evmone): -O3 -march=native\n");
+    try writer.interface.writeAll("- Lower values indicate better performance\n");
+    try writer.interface.writeAll("- Each hyperfine run executes the contract multiple times internally (see Internal Runs column)\n");
+    try writer.interface.writeAll("- These benchmarks measure the full execution time including contract deployment\n\n");
 
-    try file.writeAll("---\n\n");
-    try file.writeAll("*Generated by Guillotine Benchmark Orchestrator*\n");
+    try writer.interface.writeAll("---\n\n");
+    try writer.interface.writeAll("*Generated by Guillotine Benchmark Orchestrator*\n");
+    try writer.interface.flush();
 
     std.debug.print("Comparison results exported to bench/results.md\n", .{});
 }
 
 fn printHelp() !void {
-    const stdout = std.io.getStdOut().writer();
-    try stdout.print(
+    const stdout_file = std.fs.File{ .handle = 1 };
+    var stdout_buffer: [1024]u8 = undefined;
+    var stdout = stdout_file.writer(&stdout_buffer);
+    try stdout.interface.print(
         \\EVM Benchmark Orchestrator
         \\
         \\This tool orchestrates benchmarks across various EVM implementations using hyperfine.
@@ -434,6 +443,7 @@ fn printHelp() !void {
         \\  orchestrator --detailed --perf-output results  Custom output directory for perf reports
         \\
     , .{});
+    try stdout.interface.flush();
 }
 
 test "formatTimeWithUnit selects appropriate unit" {
@@ -473,23 +483,23 @@ test "FormattedTime.format outputs correct string" {
 
     // Test microseconds formatting
     const micro_time = FormattedTime{ .value = 123.45, .unit = .microseconds };
-    var micro_buf = std.ArrayList(u8).init(allocator);
-    defer micro_buf.deinit();
-    try micro_time.format("", .{}, micro_buf.writer());
+    var micro_buf = std.ArrayList(u8).empty;
+    defer micro_buf.deinit(allocator);
+    try micro_time.format("", .{}, micro_buf.writer(allocator));
     try std.testing.expectEqualStrings("123.45 μs", micro_buf.items);
 
     // Test milliseconds formatting
     const milli_time = FormattedTime{ .value = 87.50, .unit = .milliseconds };
-    var milli_buf = std.ArrayList(u8).init(allocator);
-    defer milli_buf.deinit();
-    try milli_time.format("", .{}, milli_buf.writer());
+    var milli_buf = std.ArrayList(u8).empty;
+    defer milli_buf.deinit(allocator);
+    try milli_time.format("", .{}, milli_buf.writer(allocator));
     try std.testing.expectEqualStrings("87.50 ms", milli_buf.items);
 
     // Test seconds formatting
     const seconds_time = FormattedTime{ .value = 3.14, .unit = .seconds };
-    var seconds_buf = std.ArrayList(u8).init(allocator);
-    defer seconds_buf.deinit();
-    try seconds_time.format("", .{}, seconds_buf.writer());
+    var seconds_buf = std.ArrayList(u8).empty;
+    defer seconds_buf.deinit(allocator);
+    try seconds_time.format("", .{}, seconds_buf.writer(allocator));
     try std.testing.expectEqualStrings("3.14 s", seconds_buf.items);
 }
 
