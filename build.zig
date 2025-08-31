@@ -589,6 +589,29 @@ pub fn build(b: *std.Build) void {
     const poop_step = b.step("poop", "Run poop benchmark on snailtracer (Linux only)");
     poop_step.dependOn(&run_poop_cmd.step);
 
+    // Build simple orchestrator stub
+    const orchestrator_exe = b.addExecutable(.{
+        .name = "orchestrator",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("bench/simple_orchestrator.zig"),
+            .target = target,
+            .optimize = .ReleaseFast,
+        }),
+    });
+
+    b.installArtifact(orchestrator_exe);
+
+    const run_orchestrator_cmd = b.addRunArtifact(orchestrator_exe);
+    if (b.args) |args| {
+        run_orchestrator_cmd.addArgs(args);
+    }
+
+    const orchestrator_step = b.step("orchestrator", "Run the benchmark orchestrator");
+    orchestrator_step.dependOn(&run_orchestrator_cmd.step);
+
+    const build_orchestrator_step = b.step("build-orchestrator", "Build the benchmark orchestrator (ReleaseFast)");
+    build_orchestrator_step.dependOn(&b.addInstallArtifact(orchestrator_exe, .{}).step);
+
     const release_step = b.step("release", "Build release artifacts (evm-runner, evm-runner-small)");
     release_step.dependOn(build_evm_runner_step);
     release_step.dependOn(build_evm_runner_small_step);
