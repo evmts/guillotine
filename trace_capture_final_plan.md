@@ -2,7 +2,7 @@
 
 ## TL;DR - What We're Capturing
 
-Transform JSONRPCTracer from basic counting to comprehensive execution tracking. Instead of "3 storage changes occurred", we'll know exactly what changed, from what value to what value.
+Transform JSONRPCTracer to track execution comprehensively.
 
 ### Before Execution (beforeExecute)
 ```zig
