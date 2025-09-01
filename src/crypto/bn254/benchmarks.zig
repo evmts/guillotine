@@ -290,13 +290,13 @@ fn calculateStats(allocator: std.mem.Allocator, name: []const u8, measurements: 
     const outlier_threshold = q3 + 1.5 * iqr; // Standard 1.5*IQR
 
     // Filter outliers for statistics calculation
-    var filtered_measurements = std.ArrayList(u64).init(allocator);
-    defer filtered_measurements.deinit();
+    var filtered_measurements: std.ArrayList(u64) = .empty;
+    defer filtered_measurements.deinit(allocator);
 
     for (measurements) |measurement| {
         const val = @as(f64, @floatFromInt(measurement));
         if (val <= outlier_threshold) {
-            try filtered_measurements.append(measurement);
+            try filtered_measurements.append(allocator, measurement);
         }
     }
 
@@ -433,8 +433,8 @@ fn nextInputIndex() usize {
 }
 
 pub fn benchmark(allocator: std.mem.Allocator, name: []const u8, benchmark_fn: BenchmarkFunction, time_budget_ns: u64) !BenchmarkStats {
-    var measurements = std.ArrayList(u64).init(allocator);
-    defer measurements.deinit();
+    var measurements: std.ArrayList(u64) = .empty;
+    defer measurements.deinit(allocator);
 
     // Extended warmup phase to stabilize caches and CPU frequency
     for (0..BenchmarkConfig.warmup_iterations * 10) |_| {
@@ -484,7 +484,7 @@ pub fn benchmark(allocator: std.mem.Allocator, name: []const u8, benchmark_fn: B
 
         // Only record reasonable measurements (filter obvious outliers)
         if (per_op_time > 0 and per_op_time < estimated_ns_per_op * 100) {
-            try measurements.append(per_op_time);
+            try measurements.append(allocator, per_op_time);
         }
 
         iteration += batch_size;
@@ -499,373 +499,6 @@ pub fn benchmark(allocator: std.mem.Allocator, name: []const u8, benchmark_fn: B
         if (iteration >= 10000000) break;
     }
 
-    const start = std.time.nanoTimestamp();
-    for (0..n) |i| {
-        const result = inputs_a[i].add(&inputs_b[i]);
-        std.mem.doNotOptimizeAway(result);
-    }
-    const end = std.time.nanoTimestamp();
-
-    const duration_ns = @as(u64, @intCast(end - start));
-    const avg_ns = duration_ns / n;
-
-    const time = formatTime(avg_ns);
-    std.debug.print("FpMont.add n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
-}
-
-test "benchmark FpMont.sub" {
-    const n = 500000;
-
-    var inputs_a = try std.testing.allocator.alloc(FpMont, n);
-    defer std.testing.allocator.free(inputs_a);
-    var inputs_b = try std.testing.allocator.alloc(FpMont, n);
-    defer std.testing.allocator.free(inputs_b);
-
-    for (0..n) |i| {
-        inputs_a[i] = randomFpMont();
-        inputs_b[i] = randomFpMont();
-    }
-
-    // dry run
-    const dry = if (n < 10000) n else 10000;
-    for (0..dry) |i| {
-        const result = inputs_a[i].sub(&inputs_b[i]);
-        std.mem.doNotOptimizeAway(result);
-    }
-
-    const start = std.time.nanoTimestamp();
-    for (0..n) |i| {
-        const result = inputs_a[i].sub(&inputs_b[i]);
-        std.mem.doNotOptimizeAway(result);
-    }
-    const end = std.time.nanoTimestamp();
-
-    const duration_ns = @as(u64, @intCast(end - start));
-    const avg_ns = duration_ns / n;
-
-    const time = formatTime(avg_ns);
-    std.debug.print("FpMont.sub n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
-}
-
-test "benchmark FpMont.mul" {
-    const n = 500000;
-
-    var inputs_a = try std.testing.allocator.alloc(FpMont, n);
-    defer std.testing.allocator.free(inputs_a);
-    var inputs_b = try std.testing.allocator.alloc(FpMont, n);
-    defer std.testing.allocator.free(inputs_b);
-
-    for (0..n) |i| {
-        inputs_a[i] = randomFpMont();
-        inputs_b[i] = randomFpMont();
-    }
-
-    // dry run
-    const dry = if (n < 10000) n else 10000;
-    for (0..dry) |i| {
-        const result = inputs_a[i].mul(&inputs_b[i]);
-        std.mem.doNotOptimizeAway(result);
-    }
-
-    const start = std.time.nanoTimestamp();
-    for (0..n) |i| {
-        const result = inputs_a[i].mul(&inputs_b[i]);
-        std.mem.doNotOptimizeAway(result);
-    }
-    const end = std.time.nanoTimestamp();
-
-    const duration_ns = @as(u64, @intCast(end - start));
-    const avg_ns = duration_ns / n;
-
-    const time = formatTime(avg_ns);
-    std.debug.print("FpMont.mul n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
-}
-
-test "benchmark FpMont.square" {
-    const n = 500000;
-
-    var inputs = try std.testing.allocator.alloc(FpMont, n);
-    defer std.testing.allocator.free(inputs);
-
-    for (0..n) |i| {
-        inputs[i] = randomFpMont();
-    }
-
-    // dry run
-    const dry = if (n < 10000) n else 10000;
-    for (0..dry) |i| {
-        const result = inputs[i].square();
-        std.mem.doNotOptimizeAway(result);
-    }
-
-    const start = std.time.nanoTimestamp();
-    for (0..n) |i| {
-        const result = inputs[i].square();
-        std.mem.doNotOptimizeAway(result);
-    }
-    const end = std.time.nanoTimestamp();
-
-    const duration_ns = @as(u64, @intCast(end - start));
-    const avg_ns = duration_ns / n;
-
-    const time = formatTime(avg_ns);
-    std.debug.print("FpMont.square n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
-}
-
-test "benchmark FpMont.pow" {
-    const n = 5000;
-
-    var inputs = try std.testing.allocator.alloc(FpMont, n);
-    defer std.testing.allocator.free(inputs);
-    var exponents = try std.testing.allocator.alloc(u256, n);
-    defer std.testing.allocator.free(exponents);
-
-    for (0..n) |i| {
-        inputs[i] = randomFpMont();
-        exponents[i] = nextRandom();
-    }
-
-    // dry run
-    const dry = if (n < 10000) n else 10000;
-    for (0..dry) |i| {
-        const result = inputs[i].pow(exponents[i]);
-        std.mem.doNotOptimizeAway(result);
-    }
-
-    const start = std.time.nanoTimestamp();
-    for (0..n) |i| {
-        const result = inputs[i].pow(exponents[i]);
-        std.mem.doNotOptimizeAway(result);
-    }
-    const end = std.time.nanoTimestamp();
-
-    const duration_ns = @as(u64, @intCast(end - start));
-    const avg_ns = duration_ns / n;
-
-    const time = formatTime(avg_ns);
-    std.debug.print("FpMont.pow n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
-}
-
-test "benchmark FpMont.inv" {
-    const n = 5000;
-
-    var inputs = try std.testing.allocator.alloc(FpMont, n);
-    defer std.testing.allocator.free(inputs);
-
-    for (0..n) |i| {
-        inputs[i] = randomFpMont();
-        if (inputs[i].value == 0) inputs[i] = FpMont.ONE;
-    }
-
-    // dry run
-    const dry = if (n < 10000) n else 10000;
-    for (0..dry) |i| {
-        const result = inputs[i].inv();
-        std.mem.doNotOptimizeAway(result);
-    }
-
-    const start = std.time.nanoTimestamp();
-    for (0..n) |i| {
-        const result = inputs[i].inv();
-        std.mem.doNotOptimizeAway(result);
-    }
-    const end = std.time.nanoTimestamp();
-
-    const duration_ns = @as(u64, @intCast(end - start));
-    const avg_ns = duration_ns / n;
-
-    const time = formatTime(avg_ns);
-    std.debug.print("FpMont.inv n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
-}
-
-// =============================================================================
-// QUADRATIC EXTENSION FIELD OPERATIONS (Fp2Mont)
-// =============================================================================
-
-test "benchmark Fp2Mont.add" {
-    const n = 100000;
-
-    var inputs_a = try std.testing.allocator.alloc(Fp2Mont, n);
-    defer std.testing.allocator.free(inputs_a);
-    var inputs_b = try std.testing.allocator.alloc(Fp2Mont, n);
-    defer std.testing.allocator.free(inputs_b);
-
-    for (0..n) |i| {
-        inputs_a[i] = randomFp2Mont();
-        inputs_b[i] = randomFp2Mont();
-    }
-
-    // dry run
-    const dry = if (n < 10000) n else 10000;
-    for (0..dry) |i| {
-        const result = inputs_a[i].add(&inputs_b[i]);
-        std.mem.doNotOptimizeAway(result);
-    }
-
-    const start = std.time.nanoTimestamp();
-    for (0..n) |i| {
-        const result = inputs_a[i].add(&inputs_b[i]);
-        std.mem.doNotOptimizeAway(result);
-    }
-    const end = std.time.nanoTimestamp();
-
-    const duration_ns = @as(u64, @intCast(end - start));
-    const avg_ns = duration_ns / n;
-
-    const time = formatTime(avg_ns);
-    std.debug.print("Fp2Mont.add n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
-}
-
-test "benchmark Fp2Mont.sub" {
-    const n = 100000;
-    // Random number generation
-    // Using deterministic PRNG
-
-    var inputs_a = try std.testing.allocator.alloc(Fp2Mont, n);
-    defer std.testing.allocator.free(inputs_a);
-    var inputs_b = try std.testing.allocator.alloc(Fp2Mont, n);
-    defer std.testing.allocator.free(inputs_b);
-
-    for (0..n) |i| {
-        inputs_a[i] = randomFp2Mont();
-        inputs_b[i] = randomFp2Mont();
-    }
-
-    // dry run
-    const dry = if (n < 10000) n else 10000;
-    for (0..dry) |i| {
-        const result = inputs_a[i].sub(&inputs_b[i]);
-        std.mem.doNotOptimizeAway(result);
-    }
-
-    const start = std.time.nanoTimestamp();
-    for (0..n) |i| {
-        const result = inputs_a[i].sub(&inputs_b[i]);
-        std.mem.doNotOptimizeAway(result);
-    }
-    const end = std.time.nanoTimestamp();
-
-    const duration_ns = @as(u64, @intCast(end - start));
-    const avg_ns = duration_ns / n;
-    // ops_per_sec calculation removed
-
-    const time = formatTime(avg_ns);
-    std.debug.print("Fp2Mont.sub n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
-}
-
-test "benchmark Fp2Mont.mul" {
-    const n = 100000;
-
-    var inputs_a = try std.testing.allocator.alloc(Fp2Mont, n);
-    defer std.testing.allocator.free(inputs_a);
-    var inputs_b = try std.testing.allocator.alloc(Fp2Mont, n);
-    defer std.testing.allocator.free(inputs_b);
-
-    for (0..n) |i| {
-        inputs_a[i] = randomFp2Mont();
-        inputs_b[i] = randomFp2Mont();
-    }
-
-    // dry run
-    const dry = if (n < 10000) n else 10000;
-    for (0..dry) |i| {
-        const result = inputs_a[i].mul(&inputs_b[i]);
-        std.mem.doNotOptimizeAway(result);
-    }
-
-    const start = std.time.nanoTimestamp();
-    for (0..n) |i| {
-        const result = inputs_a[i].mul(&inputs_b[i]);
-        std.mem.doNotOptimizeAway(result);
-    }
-    const end = std.time.nanoTimestamp();
-
-    const duration_ns = @as(u64, @intCast(end - start));
-    const avg_ns = duration_ns / n;
-
-    const time = formatTime(avg_ns);
-    std.debug.print("Fp2Mont.mul n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
-}
-
-test "benchmark Fp2Mont.square" {
-    const n = 100000;
-
-    var inputs = try std.testing.allocator.alloc(Fp2Mont, n);
-    defer std.testing.allocator.free(inputs);
-
-    for (0..n) |i| {
-        inputs[i] = randomFp2Mont();
-    }
-
-    // dry run
-    const dry = if (n < 10000) n else 10000;
-    for (0..dry) |i| {
-        const result = inputs[i].square();
-        std.mem.doNotOptimizeAway(result);
-    }
-
-    const start = std.time.nanoTimestamp();
-    for (0..n) |i| {
-        const result = inputs[i].square();
-        std.mem.doNotOptimizeAway(result);
-    }
-    const end = std.time.nanoTimestamp();
-
-    const duration_ns = @as(u64, @intCast(end - start));
-    const avg_ns = duration_ns / n;
-
-    const time = formatTime(avg_ns);
-    std.debug.print("Fp2Mont.square n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
-}
-
-test "benchmark Fp2Mont.pow" {
-    const n = 10000;
-
-    // Random number generation
-    // Using deterministic PRNG
-
-    var inputs = try std.testing.allocator.alloc(Fp2Mont, n);
-    defer std.testing.allocator.free(inputs);
-    var exponents = try std.testing.allocator.alloc(u256, n);
-    defer std.testing.allocator.free(exponents);
-
-    for (0..n) |i| {
-        inputs[i] = randomFp2Mont();
-        exponents[i] = nextRandom();
-    }
-
-    // dry run
-    const dry = if (n < 10000) n else 10000;
-    for (0..dry) |i| {
-        const result = inputs[i].pow(exponents[i]);
-        std.mem.doNotOptimizeAway(result);
-    }
-
-    const start = std.time.nanoTimestamp();
-    for (0..n) |i| {
-        const result = inputs[i].pow(exponents[i]);
-        std.mem.doNotOptimizeAway(result);
-    }
-    const end = std.time.nanoTimestamp();
-
-    const duration_ns = @as(u64, @intCast(end - start));
-    const avg_ns = duration_ns / n;
-    // ops_per_sec calculation removed
-
-    const time = formatTime(avg_ns);
-    std.debug.print("Fp2Mont.pow n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
-}
-
-test "benchmark Fp2Mont.inv" {
-    const n = 100000;
-
-    var inputs = try std.testing.allocator.alloc(Fp2Mont, n);
-    defer std.testing.allocator.free(inputs);
-
-    for (0..n) |i| {
-        inputs[i] = randomFp2Mont();
-        if (inputs[i].u0.value == 0 and inputs[i].u1.value == 0) {
-            inputs[i] = Fp2Mont.ONE;
     // Ensure we have enough measurements
     if (measurements.items.len < 10) {
         // Fallback: run more iterations with smaller batches
@@ -878,7 +511,7 @@ test "benchmark Fp2Mont.inv" {
             const iter_end = std.time.nanoTimestamp();
             const measurement = @as(u64, @intCast(iter_end - iter_start));
             if (measurement > 0 and measurement < 1_000_000_000) { // Filter absurd values > 1s
-                try measurements.append(measurement);
+                try measurements.append(allocator, measurement);
             }
         }
     }
@@ -887,8 +520,8 @@ test "benchmark Fp2Mont.inv" {
 }
 
 pub fn benchmarkWithSamples(allocator: std.mem.Allocator, name: []const u8, benchmark_fn: BenchmarkFunctionWithSamples, sample_size: usize, time_budget_ns: u64) !BenchmarkStats {
-    var measurements = std.ArrayList(u64).init(allocator);
-    defer measurements.deinit();
+    var measurements: std.ArrayList(u64) = .empty;
+    defer measurements.deinit(allocator);
 
     // Extended warmup phase to stabilize caches and CPU frequency
     for (0..BenchmarkConfig.warmup_iterations * 10) |_| {
@@ -912,7 +545,7 @@ pub fn benchmarkWithSamples(allocator: std.mem.Allocator, name: []const u8, benc
 
         // Only record reasonable measurements
         if (per_op_time > 0 and total_time < 10_000_000_000) { // Filter absurd values > 10s
-            try measurements.append(per_op_time);
+            try measurements.append(allocator, per_op_time);
         }
 
         iteration += 1;
@@ -939,7 +572,7 @@ pub fn benchmarkWithSamples(allocator: std.mem.Allocator, name: []const u8, benc
             const total_time = @as(u64, @intCast(iter_end - iter_start));
             const per_op_time = total_time / sample_size;
             if (per_op_time > 0 and total_time < 10_000_000_000) {
-                try measurements.append(per_op_time);
+                try measurements.append(allocator, per_op_time);
             }
         }
     }
@@ -1278,13 +911,13 @@ pub fn runComprehensiveBenchmarks(allocator: std.mem.Allocator) !void {
     std.debug.print("\x1b[90m│\x1b[0m \x1b[1;17mOperation\x1b[0m                              \x1b[90m│\x1b[0m   \x1b[1;33mMean\x1b[0m   \x1b[90m│\x1b[0m  \x1b[1;33mStdDev\x1b[0m  \x1b[90m│\x1b[0m    \x1b[1;33mP99\x1b[0m   \x1b[90m│\x1b[0m    \x1b[1;33mMax\x1b[0m   \x1b[90m│\x1b[0m   \x1b[1;33mOps/s\x1b[0m   \x1b[90m│\x1b[0m \x1b[1;33mSamples\x1b[0m\x1b[90m│\x1b[0m\n", .{});
     std.debug.print("\x1b[90m├────────────────────────────────────────┼──────────┼──────────┼──────────┼──────────┼───────────┼────────┤\x1b[0m\n", .{});
 
-    var all_stats = std.ArrayList(BenchmarkStats).init(allocator);
-    defer all_stats.deinit();
+    var all_stats: std.ArrayList(BenchmarkStats) = .empty;
+    defer all_stats.deinit(allocator);
 
     for (benchmarks) |bench_spec| {
         const time_budget = if (bench_spec.is_slow) BenchmarkConfig.slow_time_budget_ns else BenchmarkConfig.fast_time_budget_ns;
         const stats = try benchmarkWithSamples(allocator, bench_spec.name, bench_spec.func, bench_spec.sample_size, time_budget);
-        try all_stats.append(stats);
+        try all_stats.append(allocator, stats);
         stats.format();
     }
 

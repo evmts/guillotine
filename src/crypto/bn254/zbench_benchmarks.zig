@@ -190,7 +190,6 @@ const PreGeneratedInputs = struct {
             self.g1_points[i] = rng.randomG1();
             self.g2_points[i] = rng.randomG2();
         }
-
         return self;
     }
 };
@@ -217,10 +216,10 @@ fn nextInputIndex() usize {
 // =============================================================================
 
 test "field benchmarks" {
-    var stderr_buffer: [4096]u8 = undefined;
-    var stderr_writer = std.fs.File.stderr().writer(&stderr_buffer);
-    const stderr = &stderr_writer.interface;
-    
+    var stdout_buffer: [4096]u8 = undefined;
+    var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
+    const stdout = &stdout_writer.interface;
+
     const allocator = std.testing.allocator;
     // 500ms time budget for field benchmarks
     var bench = zbench.Benchmark.init(allocator, .{ .time_budget_ns = 5e8 });
@@ -259,15 +258,16 @@ test "field benchmarks" {
     try bench.add("Fr Multiplication (1000)", benchmarkFrMul, .{});
     try bench.add("Fr Inversion (1000)", benchmarkFrInv, .{});
 
-    try stderr.writeAll("\n");
-    try bench.run(stderr);
+    try stdout.writeAll("\n");
+    try bench.run(stdout);
+    try stdout.flush();
 }
 
 test "curve benchmarks" {
-    var stderr_buffer: [4096]u8 = undefined;
-    var stderr_writer = std.fs.File.stderr().writer(&stderr_buffer);
-    const stderr = &stderr_writer.interface;
-    
+    var stdout_buffer: [4096]u8 = undefined;
+    var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
+    const stdout = &stdout_writer.interface;
+
     const allocator = std.testing.allocator;
     // 1 second time budget for curve benchmarks
     var bench = zbench.Benchmark.init(allocator, .{ .time_budget_ns = 1e9 });
@@ -287,15 +287,16 @@ test "curve benchmarks" {
     try bench.add("G2 Affine Conversion", benchmarkG2ToAffine, .{});
     try bench.add("G2 Curve Validation", benchmarkG2IsOnCurve, .{});
 
-    try stderr.writeAll("\n");
-    try bench.run(stderr);
+    try stdout.writeAll("\n");
+    try bench.run(stdout);
+    try stdout.flush();
 }
 
 test "pairing benchmarks" {
-    var stderr_buffer: [4096]u8 = undefined;
-    var stderr_writer = std.fs.File.stderr().writer(&stderr_buffer);
-    const stderr = &stderr_writer.interface;
-    
+    var stdout_buffer: [4096]u8 = undefined;
+    var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
+    const stdout = &stdout_writer.interface;
+
     const allocator = std.testing.allocator;
     // 2 seconds time budget for pairing benchmarks
     var bench = zbench.Benchmark.init(allocator, .{ .time_budget_ns = 2e9 });
@@ -307,8 +308,84 @@ test "pairing benchmarks" {
     try bench.add("Final Exponentiation (Easy)", benchmarkFinalExponentiationEasy, .{});
     try bench.add("Final Exponentiation (Hard)", benchmarkFinalExponentiationHard, .{});
 
-    try stderr.writeAll("\n");
-    try bench.run(stderr);
+    try stdout.writeAll("\n");
+    try bench.run(stdout);
+    try stdout.flush();
+}
+
+pub fn main() !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var buf: [4096]u8 = undefined;
+    var bw = std.fs.File.stdout().writer(&buf);
+    const out = &bw.interface;
+
+    {
+        var bench = zbench.Benchmark.init(allocator, .{ .time_budget_ns = 5e8 });
+        defer bench.deinit();
+        try bench.add("Fp Addition (1000)", benchmarkFpMontAdd, .{});
+        try bench.add("Fp Subtraction (1000)", benchmarkFpMontSub, .{});
+        try bench.add("Fp Multiplication (1000)", benchmarkFpMontMul, .{});
+        try bench.add("Fp Squaring (1000)", benchmarkFpMontSquare, .{});
+        try bench.add("Fp Inversion (1000)", benchmarkFpMontInv, .{});
+        try bench.add("Fp2 Addition (1000)", benchmarkFp2MontAdd, .{});
+        try bench.add("Fp2 Subtraction (1000)", benchmarkFp2MontSub, .{});
+        try bench.add("Fp2 Multiplication (1000)", benchmarkFp2MontMul, .{});
+        try bench.add("Fp2 Squaring (1000)", benchmarkFp2MontSquare, .{});
+        try bench.add("Fp2 Inversion (1000)", benchmarkFp2MontInv, .{});
+        try bench.add("Fp6 Addition (1000)", benchmarkFp6MontAdd, .{});
+        try bench.add("Fp6 Subtraction (1000)", benchmarkFp6MontSub, .{});
+        try bench.add("Fp6 Multiplication (1000)", benchmarkFp6MontMul, .{});
+        try bench.add("Fp6 Squaring (1000)", benchmarkFp6MontSquare, .{});
+        try bench.add("Fp6 Inversion (1000)", benchmarkFp6MontInv, .{});
+        try bench.add("Fp12 Addition (1000)", benchmarkFp12MontAdd, .{});
+        try bench.add("Fp12 Subtraction (1000)", benchmarkFp12MontSub, .{});
+        try bench.add("Fp12 Multiplication (1000)", benchmarkFp12MontMul, .{});
+        try bench.add("Fp12 Squaring (1000)", benchmarkFp12MontSquare, .{});
+        try bench.add("Fp12 Inversion (1000)", benchmarkFp12MontInv, .{});
+        try bench.add("Fr Addition (1000)", benchmarkFrAdd, .{});
+        try bench.add("Fr Subtraction (1000)", benchmarkFrSub, .{});
+        try bench.add("Fr Multiplication (1000)", benchmarkFrMul, .{});
+        try bench.add("Fr Inversion (1000)", benchmarkFrInv, .{});
+        try out.writeAll("\n");
+        try bench.run(out);
+        try out.flush();
+    }
+
+    {
+        var bench = zbench.Benchmark.init(allocator, .{ .time_budget_ns = 1e9 });
+        defer bench.deinit();
+        try bench.add("G1 Addition", benchmarkG1Add, .{});
+        try bench.add("G1 Doubling", benchmarkG1Double, .{});
+        try bench.add("G1 Scalar Multiplication", benchmarkG1ScalarMul, .{});
+        try bench.add("G1 Negation", benchmarkG1Neg, .{});
+        try bench.add("G1 Affine Conversion", benchmarkG1ToAffine, .{});
+        try bench.add("G1 Curve Validation", benchmarkG1IsOnCurve, .{});
+        try bench.add("G2 Addition", benchmarkG2Add, .{});
+        try bench.add("G2 Doubling", benchmarkG2Double, .{});
+        try bench.add("G2 Scalar Multiplication", benchmarkG2ScalarMul, .{});
+        try bench.add("G2 Negation", benchmarkG2Neg, .{});
+        try bench.add("G2 Affine Conversion", benchmarkG2ToAffine, .{});
+        try bench.add("G2 Curve Validation", benchmarkG2IsOnCurve, .{});
+        try out.writeAll("\n");
+        try bench.run(out);
+        try out.flush();
+    }
+
+    {
+        var bench = zbench.Benchmark.init(allocator, .{ .time_budget_ns = 2e9 });
+        defer bench.deinit();
+        try bench.add("Full Pairing", benchmarkPairing, .{});
+        try bench.add("Miller Loop", benchmarkMillerLoop, .{});
+        try bench.add("Final Exponentiation (Full)", benchmarkFinalExponentiation, .{});
+        try bench.add("Final Exponentiation (Easy)", benchmarkFinalExponentiationEasy, .{});
+        try bench.add("Final Exponentiation (Hard)", benchmarkFinalExponentiationHard, .{});
+        try out.writeAll("\n");
+        try bench.run(out);
+        try out.flush();
+    }
 }
 
 // pub fn runAllBenchmarks(allocator: std.mem.Allocator) !void {
