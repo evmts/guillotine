@@ -145,6 +145,50 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run all tests");
     test_step.dependOn(&run_lib_unit_tests.step);
     test_step.dependOn(&run_integration_tests.step);
+
+    // BN254 benchmarks
+    const zbench_module = zbench_dep.module("zbench");
+    const zbench_bn254 = b.addExecutable(.{
+        .name = "zbench-bn254",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/crypto/bn254/zbench_benchmarks.zig"),
+            .target = target,
+            .optimize = .ReleaseFast,
+        }),
+    });
+    zbench_bn254.root_module.addImport("zbench", zbench_module);
+
+    const run_zbench_bn254 = b.addRunArtifact(zbench_bn254);
+    const zbench_bn254_step = b.step("bench-bn254", "Run zbench BN254 benchmarks");
+    zbench_bn254_step.dependOn(&run_zbench_bn254.step);
+
+    // EVM benchmarks
+    const zbench_evm = b.addExecutable(.{
+        .name = "zbench-evm",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/evm/evm_bench.zig"),
+            .target = target,
+            .optimize = .ReleaseFast,
+        }),
+    });
+    zbench_evm.root_module.addImport("zbench", zbench_module);
+    zbench_evm.root_module.addImport("log", b.createModule(.{
+        .root_source_file = b.path("src/log.zig"),
+        .target = target,
+        .optimize = optimize,
+    }));
+    zbench_evm.root_module.addImport("evm", modules.evm_mod);
+    zbench_evm.root_module.addImport("primitives", modules.primitives_mod);
+    zbench_evm.root_module.addImport("crypto", modules.crypto_mod);
+    zbench_evm.root_module.addImport("build_options", config.options_mod);
+    zbench_evm.linkLibrary(c_kzg_lib);
+    zbench_evm.linkLibrary(blst_lib);
+    if (bn254_lib) |bn254| zbench_evm.linkLibrary(bn254);
+    zbench_evm.linkLibC();
+
+    const run_zbench_evm = b.addRunArtifact(zbench_evm);
+    const zbench_evm_step = b.step("bench-evm", "Run zbench EVM benchmarks");
+    zbench_evm_step.dependOn(&run_zbench_evm.step);
     
     // ERC20 deployment gas issue test
     const erc20_gas_test = b.addTest(.{
@@ -188,6 +232,8 @@ pub fn build(b: *std.Build) void {
     jump_table_test.root_module.addImport("build_options", config.options_mod);
     jump_table_test.root_module.addImport("log", b.createModule(.{
         .root_source_file = b.path("src/log.zig"),
+        .target = target,
+        .optimize = .Debug,
     }));
     jump_table_test.linkLibrary(c_kzg_lib);
     jump_table_test.linkLibrary(blst_lib);
@@ -197,8 +243,6 @@ pub fn build(b: *std.Build) void {
     const run_jump_table_test = b.addRunArtifact(jump_table_test);
     const jump_table_test_step = b.step("test-jump-table", "Test jump table JUMPDEST recognition");
     jump_table_test_step.dependOn(&run_jump_table_test.step);
-
-    // Zbench executables removed (moved to separate repo)
 
     // ERC20 deployment issue test
     const erc20_deployment_test = b.addTest(.{
