@@ -38,18 +38,18 @@ func main() {
     }
     defer vm.Close()
 
-    // Execute bytecode
+    // Execute bytecode using CALL
     bytecode := primitives.NewBytes([]byte{0x60, 0x42}) // PUSH1 0x42
-    result, err := vm.Execute(evm.ExecutionParams{
-        Bytecode: bytecode,
-        GasLimit: 1000000,
-    })
+    caller := primitives.ZeroAddress()
+    to := primitives.ZeroAddress()
+    
+    result, err := vm.ExecuteCall(caller, to, primitives.ZeroU256(), bytecode, 1000000)
     if err != nil {
         log.Fatal(err)
     }
 
-    fmt.Printf("Execution successful: %t\n", result.IsSuccess())
-    fmt.Printf("Gas used: %d\n", result.GasUsed())
+    fmt.Printf("Execution successful: %t\n", result.Success)
+    fmt.Printf("Gas left: %d\n", result.GasLeft)
 }
 ```
 
@@ -65,8 +65,9 @@ func main() {
 ### EVM Execution
 
 - **`EVM`**: Main execution engine with goroutine safety
-- **`ExecutionResult`**: Comprehensive execution results with gas usage and return data
-- **`GuillotineError`**: Typed error handling for all EVM operations
+- **`CallParams`**: Parameters for all EVM call types (CALL, DELEGATECALL, CREATE, etc.)
+- **`CallResult`**: Comprehensive execution results with logs, selfdestructs, and gas usage
+- **`CallType`**: Enum for different EVM call operations
 
 ## Examples
 
@@ -137,18 +138,55 @@ if err != nil {
     log.Fatal(err)
 }
 
-// Execute with parameters
-result, err := vm.Execute(evm.ExecutionParams{
-    Bytecode: contractCode,
-    Caller:   primitives.ZeroAddress(),
-    To:       addr,
-    Value:    primitives.NewU256(100),
-    Input:    primitives.NewBytes([]byte{0x01, 0x02, 0x03}),
-    GasLimit: 1000000,
-})
+// Execute a CALL operation
+caller := primitives.ZeroAddress()
+input := primitives.NewBytes([]byte{0x01, 0x02, 0x03})
+value := primitives.NewU256(100)
+
+result, err := vm.ExecuteCall(caller, addr, value, input, 1000000)
 if err != nil {
     log.Fatal(err)
 }
+```
+
+### Different Call Types
+
+```go
+// CALL - Standard call with value transfer
+result, err := vm.ExecuteCall(caller, to, value, input, gasLimit)
+
+// STATICCALL - Read-only call (no state changes)
+result, err := vm.ExecuteStaticCall(caller, to, input, gasLimit)
+
+// DELEGATECALL - Execute in caller's context
+result, err := vm.ExecuteDelegateCall(caller, to, input, gasLimit)
+
+// CREATE - Deploy new contract
+initCode := primitives.NewBytes(contractBytecode)
+result, err := vm.ExecuteCreate(caller, value, initCode, gasLimit)
+
+// CREATE2 - Deploy with deterministic address
+salt, _ := primitives.U256FromHex("0x1234567890abcdef")
+result, err := vm.ExecuteCreate2(caller, value, initCode, salt, gasLimit)
+
+// Advanced: Use CallParams for full control
+params := evm.CallParams{
+    CallType: evm.CallTypeCall,
+    Caller:   caller,
+    To:       to,
+    Value:    value,
+    Input:    input,
+    Gas:      gasLimit,
+    Salt:     primitives.ZeroU256(), // Only for CREATE2
+}
+result, err := vm.ExecuteWithParams(params)
+
+// Access comprehensive results
+fmt.Printf("Success: %v\n", result.Success)
+fmt.Printf("Gas left: %d\n", result.GasLeft)
+fmt.Printf("Output: %x\n", result.Output.Data())
+fmt.Printf("Logs: %d\n", len(result.Logs))
+fmt.Printf("Self-destructs: %d\n", len(result.SelfDestructs))
 ```
 
 ## Architecture
@@ -180,20 +218,16 @@ go test ./...
 The Go bindings use Go's standard error handling patterns:
 
 ```go
-result, err := vm.Execute(params)
+result, err := vm.ExecuteCall(caller, to, value, input, gasLimit)
 if err != nil {
-    var guillotineErr *evm.GuillotineError
-    if errors.As(err, &guillotineErr) {
-        switch guillotineErr.Type {
-        case evm.ErrorExecutionFailed:
-            // Handle execution failure
-        case evm.ErrorInvalidBytecode:
-            // Handle invalid bytecode
-        default:
-            // Handle other guillotine errors
-        }
-    } else {
-        // Handle other errors
+    // Handle error
+    log.Fatal(err)
+}
+
+// Check execution result
+if !result.Success {
+    if result.ErrorInfo != "" {
+        log.Printf("Execution failed: %s", result.ErrorInfo)
     }
 }
 ```

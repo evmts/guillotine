@@ -1,100 +1,43 @@
 package evm
 
 import (
+	"fmt"
+	"runtime"
 	"sync"
-	"unsafe"
 	
+	"github.com/evmts/guillotine/bindings/go"
 	"github.com/evmts/guillotine/bindings/go/primitives"
 )
 
-/*
-#cgo CFLAGS: -I../../../zig-out/include
-#cgo LDFLAGS: -L../../../zig-out/lib -lGuillotine
+// Re-export types from guillotine package for public API
+type CallType = guillotine.CallType
+type CallParams = guillotine.CallParams
+type CallResult = guillotine.CallResult
+type LogEntry = guillotine.LogEntry
+type SelfDestructRecord = guillotine.SelfDestructRecord
+type StorageAccessRecord = guillotine.StorageAccessRecord
 
-#include <stdlib.h>
-#include <stdint.h>
-#include <string.h>
-
-typedef struct {
-    uint8_t bytes[20];
-} GuillotineAddress;
-
-typedef struct {
-    uint8_t bytes[32];
-} GuillotineU256;
-
-typedef struct {
-    uint8_t* data;
-    size_t len;
-    size_t cap;
-} GuillotineBytes;
-
-typedef struct GuillotineVm GuillotineVm;
-
-typedef struct {
-    int success;
-    uint64_t gas_used;
-    GuillotineBytes return_data;
-    GuillotineBytes revert_reason;
-} GuillotineExecutionResult;
-
-int guillotine_init(void);
-GuillotineVm* guillotine_vm_create(void);
-void guillotine_vm_destroy(GuillotineVm* vm);
-
-GuillotineExecutionResult guillotine_vm_execute(
-    GuillotineVm* vm,
-    GuillotineBytes bytecode,
-    GuillotineAddress caller,
-    GuillotineAddress to,
-    GuillotineU256 value,
-    GuillotineBytes input,
-    uint64_t gas_limit
-);
-
-int guillotine_vm_set_balance(GuillotineVm* vm, GuillotineAddress address, GuillotineU256 balance);
-int guillotine_vm_set_code(GuillotineVm* vm, GuillotineAddress address, GuillotineBytes code);
-int guillotine_vm_set_storage(GuillotineVm* vm, GuillotineAddress address, GuillotineU256 key, GuillotineU256 value);
-
-GuillotineU256 guillotine_vm_get_balance(GuillotineVm* vm, GuillotineAddress address);
-GuillotineBytes guillotine_vm_get_code(GuillotineVm* vm, GuillotineAddress address);
-GuillotineU256 guillotine_vm_get_storage(GuillotineVm* vm, GuillotineAddress address, GuillotineU256 key);
-
-void guillotine_bytes_destroy(GuillotineBytes bytes);
-*/
-import "C"
-
-import (
-	"fmt"
-	"runtime"
+// Re-export constants
+const (
+	CallTypeCall         = guillotine.CallTypeCall
+	CallTypeCallcode     = guillotine.CallTypeCallcode
+	CallTypeDelegatecall = guillotine.CallTypeDelegatecall
+	CallTypeStaticcall   = guillotine.CallTypeStaticcall
+	CallTypeCreate       = guillotine.CallTypeCreate
+	CallTypeCreate2      = guillotine.CallTypeCreate2
 )
 
-// EVM represents a Guillotine EVM instance
+// EVM represents an instance of the Ethereum Virtual Machine
 type EVM struct {
-	vm *C.GuillotineVm
+	vm *guillotine.VMHandle
 	mu sync.RWMutex
-}
-
-// ExecutionParams holds parameters for EVM execution
-type ExecutionParams struct {
-	Bytecode primitives.Bytes
-	Caller   primitives.Address
-	To       primitives.Address
-	Value    primitives.U256
-	Input    primitives.Bytes
-	GasLimit uint64
 }
 
 // New creates a new EVM instance
 func New() (*EVM, error) {
-	// Initialize the library if not already done
-	if result := C.guillotine_init(); result != 0 {
-		return nil, fmt.Errorf("failed to initialize Guillotine library")
-	}
-	
-	vm := C.guillotine_vm_create()
-	if vm == nil {
-		return nil, fmt.Errorf("failed to create VM instance")
+	vm, err := guillotine.NewVMHandle()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create EVM instance: %w", err)
 	}
 	
 	evm := &EVM{vm: vm}
@@ -102,27 +45,27 @@ func New() (*EVM, error) {
 	return evm, nil
 }
 
-// Close closes the EVM instance and releases resources
+// finalize is called by the garbage collector
+func (evm *EVM) finalize() {
+	_ = evm.Close()
+}
+
+// Close destroys the EVM instance
 func (evm *EVM) Close() error {
 	evm.mu.Lock()
 	defer evm.mu.Unlock()
 	
 	if evm.vm != nil {
-		C.guillotine_vm_destroy(evm.vm)
+		err := evm.vm.Close()
 		evm.vm = nil
 		runtime.SetFinalizer(evm, nil)
+		return err
 	}
-	
 	return nil
 }
 
-// finalize is called by the garbage collector
-func (evm *EVM) finalize() {
-	evm.Close()
-}
-
-// Execute executes bytecode on the EVM
-func (evm *EVM) Execute(params ExecutionParams) (*ExecutionResult, error) {
+// ExecuteWithParams executes bytecode with complete call parameters
+func (evm *EVM) ExecuteWithParams(params CallParams) (*CallResult, error) {
 	evm.mu.RLock()
 	defer evm.mu.RUnlock()
 	
@@ -130,107 +73,102 @@ func (evm *EVM) Execute(params ExecutionParams) (*ExecutionResult, error) {
 		return nil, fmt.Errorf("EVM instance has been closed")
 	}
 	
-	// Convert Go types to C types
-	cBytecode := bytesToC(params.Bytecode)
-	defer freeCBytes(cBytecode)
+	// Convert primitives to raw bytes for VMHandle
+	callType := uint8(params.CallType)
+	caller := params.Caller.Array()
+	to := params.To.Array()  
+	value := params.Value.Array()
+	input := params.Input.Data()
+	salt := params.Salt.Array()
 	
-	cCaller := addressToC(params.Caller)
-	cTo := addressToC(params.To)
-	cValue := u256ToC(params.Value)
-	
-	cInput := bytesToC(params.Input)
-	defer freeCBytes(cInput)
-	
-	// Call the C function
-	result := C.guillotine_vm_execute(
-		evm.vm,
-		cBytecode,
-		cCaller,
-		cTo,
-		cValue,
-		cInput,
-		C.uint64_t(params.GasLimit),
-	)
-	
-	// Convert result back to Go
-	goResult := &ExecutionResult{
-		success:     result.success != 0,
-		gasUsed:     uint64(result.gas_used),
-		returnData:  bytesFromC(result.return_data),
-		revertReason: bytesFromC(result.revert_reason),
+	// Execute through the guillotine VMHandle - now returns public types directly
+	result, err := evm.vm.ExecuteWithParams(callType, caller, to, value, input, params.Gas, salt)
+	if err != nil {
+		return nil, err
 	}
 	
-	// Clean up C memory
-	C.guillotine_bytes_destroy(result.return_data)
-	C.guillotine_bytes_destroy(result.revert_reason)
-	
-	return goResult, nil
+	return result, nil
 }
 
-// SetBalance sets the balance of an account
-func (evm *EVM) SetBalance(address primitives.Address, balance primitives.U256) error {
-	evm.mu.Lock()
-	defer evm.mu.Unlock()
+// ExecuteCall performs a simple CALL operation
+func (evm *EVM) ExecuteCall(caller, to primitives.Address, value primitives.U256, input primitives.Bytes, gasLimit uint64) (*CallResult, error) {
+	return evm.ExecuteWithParams(CallParams{
+		CallType: CallTypeCall,
+		Caller:   caller,
+		To:       to,
+		Value:    value,
+		Input:    input,
+		Gas:      gasLimit,
+		Salt:     primitives.ZeroU256(),
+	})
+}
+
+// ExecuteStaticCall performs a STATICCALL operation (read-only)
+func (evm *EVM) ExecuteStaticCall(caller, to primitives.Address, input primitives.Bytes, gasLimit uint64) (*CallResult, error) {
+	return evm.ExecuteWithParams(CallParams{
+		CallType: CallTypeStaticcall,
+		Caller:   caller,
+		To:       to,
+		Value:    primitives.ZeroU256(),
+		Input:    input,
+		Gas:      gasLimit,
+		Salt:     primitives.ZeroU256(),
+	})
+}
+
+// ExecuteDelegateCall performs a DELEGATECALL operation
+func (evm *EVM) ExecuteDelegateCall(caller, to primitives.Address, input primitives.Bytes, gasLimit uint64) (*CallResult, error) {
+	return evm.ExecuteWithParams(CallParams{
+		CallType: CallTypeDelegatecall,
+		Caller:   caller,
+		To:       to,
+		Value:    primitives.ZeroU256(),
+		Input:    input,
+		Gas:      gasLimit,
+		Salt:     primitives.ZeroU256(),
+	})
+}
+
+// ExecuteCreate performs a CREATE operation
+func (evm *EVM) ExecuteCreate(caller primitives.Address, value primitives.U256, initCode primitives.Bytes, gasLimit uint64) (*CallResult, error) {
+	return evm.ExecuteWithParams(CallParams{
+		CallType: CallTypeCreate,
+		Caller:   caller,
+		To:       primitives.ZeroAddress(),
+		Value:    value,
+		Input:    initCode,
+		Gas:      gasLimit,
+		Salt:     primitives.ZeroU256(),
+	})
+}
+
+// ExecuteCreate2 performs a CREATE2 operation
+func (evm *EVM) ExecuteCreate2(caller primitives.Address, value primitives.U256, initCode primitives.Bytes, salt primitives.U256, gasLimit uint64) (*CallResult, error) {
+	return evm.ExecuteWithParams(CallParams{
+		CallType: CallTypeCreate2,
+		Caller:   caller,
+		To:       primitives.ZeroAddress(),
+		Value:    value,
+		Input:    initCode,
+		Gas:      gasLimit,
+		Salt:     salt,
+	})
+}
+
+// SetBalance sets the balance of an address
+func (evm *EVM) SetBalance(addr primitives.Address, balance primitives.U256) error {
+	evm.mu.RLock()
+	defer evm.mu.RUnlock()
 	
 	if evm.vm == nil {
 		return fmt.Errorf("EVM instance has been closed")
 	}
 	
-	cAddress := addressToC(address)
-	cBalance := u256ToC(balance)
-	
-	result := C.guillotine_vm_set_balance(evm.vm, cAddress, cBalance)
-	if result != 0 {
-		return fmt.Errorf("failed to set balance")
-	}
-	
-	return nil
+	return evm.vm.SetBalance(addr.Array(), balance.Array())
 }
 
-// SetCode sets the code of an account
-func (evm *EVM) SetCode(address primitives.Address, code primitives.Bytes) error {
-	evm.mu.Lock()
-	defer evm.mu.Unlock()
-	
-	if evm.vm == nil {
-		return fmt.Errorf("EVM instance has been closed")
-	}
-	
-	cAddress := addressToC(address)
-	cCode := bytesToC(code)
-	defer freeCBytes(cCode)
-	
-	result := C.guillotine_vm_set_code(evm.vm, cAddress, cCode)
-	if result != 0 {
-		return fmt.Errorf("failed to set code")
-	}
-	
-	return nil
-}
-
-// SetStorage sets a storage slot for an account
-func (evm *EVM) SetStorage(address primitives.Address, key primitives.U256, value primitives.U256) error {
-	evm.mu.Lock()
-	defer evm.mu.Unlock()
-	
-	if evm.vm == nil {
-		return fmt.Errorf("EVM instance has been closed")
-	}
-	
-	cAddress := addressToC(address)
-	cKey := u256ToC(key)
-	cValue := u256ToC(value)
-	
-	result := C.guillotine_vm_set_storage(evm.vm, cAddress, cKey, cValue)
-	if result != 0 {
-		return fmt.Errorf("failed to set storage")
-	}
-	
-	return nil
-}
-
-// GetBalance gets the balance of an account
-func (evm *EVM) GetBalance(address primitives.Address) (primitives.U256, error) {
+// GetBalance gets the balance of an address
+func (evm *EVM) GetBalance(addr primitives.Address) (primitives.U256, error) {
 	evm.mu.RLock()
 	defer evm.mu.RUnlock()
 	
@@ -238,14 +176,33 @@ func (evm *EVM) GetBalance(address primitives.Address) (primitives.U256, error) 
 		return primitives.ZeroU256(), fmt.Errorf("EVM instance has been closed")
 	}
 	
-	cAddress := addressToC(address)
-	cBalance := C.guillotine_vm_get_balance(evm.vm, cAddress)
+	balanceBytes, err := evm.vm.GetBalance(addr.Array())
+	if err != nil {
+		return primitives.ZeroU256(), err
+	}
 	
-	return u256FromC(cBalance), nil
+	// Zig returns little-endian bytes
+	result, err := primitives.U256FromLittleEndianBytes(balanceBytes[:])
+	if err != nil {
+		return primitives.ZeroU256(), err
+	}
+	return result, nil
 }
 
-// GetCode gets the code of an account
-func (evm *EVM) GetCode(address primitives.Address) (primitives.Bytes, error) {
+// SetCode sets the code at an address
+func (evm *EVM) SetCode(addr primitives.Address, code primitives.Bytes) error {
+	evm.mu.RLock()
+	defer evm.mu.RUnlock()
+	
+	if evm.vm == nil {
+		return fmt.Errorf("EVM instance has been closed")
+	}
+	
+	return evm.vm.SetCode(addr.Array(), code.Data())
+}
+
+// GetCode gets the code at an address
+func (evm *EVM) GetCode(addr primitives.Address) (primitives.Bytes, error) {
 	evm.mu.RLock()
 	defer evm.mu.RUnlock()
 	
@@ -253,15 +210,28 @@ func (evm *EVM) GetCode(address primitives.Address) (primitives.Bytes, error) {
 		return primitives.EmptyBytes(), fmt.Errorf("EVM instance has been closed")
 	}
 	
-	cAddress := addressToC(address)
-	cCode := C.guillotine_vm_get_code(evm.vm, cAddress)
-	defer C.guillotine_bytes_destroy(cCode)
+	codeBytes, err := evm.vm.GetCode(addr.Array())
+	if err != nil {
+		return primitives.EmptyBytes(), err
+	}
 	
-	return bytesFromC(cCode), nil
+	return primitives.NewBytes(codeBytes), nil
 }
 
-// GetStorage gets a storage slot for an account
-func (evm *EVM) GetStorage(address primitives.Address, key primitives.U256) (primitives.U256, error) {
+// SetStorage sets a storage value at an address
+func (evm *EVM) SetStorage(addr primitives.Address, key, value primitives.U256) error {
+	evm.mu.RLock()
+	defer evm.mu.RUnlock()
+	
+	if evm.vm == nil {
+		return fmt.Errorf("EVM instance has been closed")
+	}
+	
+	return evm.vm.SetStorage(addr.Array(), key.Array(), value.Array())
+}
+
+// GetStorage gets a storage value at an address
+func (evm *EVM) GetStorage(addr primitives.Address, key primitives.U256) (primitives.U256, error) {
 	evm.mu.RLock()
 	defer evm.mu.RUnlock()
 	
@@ -269,88 +239,15 @@ func (evm *EVM) GetStorage(address primitives.Address, key primitives.U256) (pri
 		return primitives.ZeroU256(), fmt.Errorf("EVM instance has been closed")
 	}
 	
-	cAddress := addressToC(address)
-	cKey := u256ToC(key)
-	cValue := C.guillotine_vm_get_storage(evm.vm, cAddress, cKey)
-	
-	return u256FromC(cValue), nil
-}
-
-// Helper functions for type conversion
-
-func bytesToC(b primitives.Bytes) C.GuillotineBytes {
-	data := b.Data()
-	if len(data) == 0 {
-		return C.GuillotineBytes{data: nil, len: 0, cap: 0}
+	valueBytes, err := evm.vm.GetStorage(addr.Array(), key.Array())
+	if err != nil {
+		return primitives.ZeroU256(), err
 	}
 	
-	// Allocate C memory and copy data
-	cData := C.malloc(C.size_t(len(data)))
-	C.memcpy(cData, unsafe.Pointer(&data[0]), C.size_t(len(data)))
-	
-	return C.GuillotineBytes{
-		data: (*C.uint8_t)(cData),
-		len:  C.size_t(len(data)),
-		cap:  C.size_t(len(data)),
+	// Zig returns little-endian bytes
+	result, err := primitives.U256FromLittleEndianBytes(valueBytes[:])
+	if err != nil {
+		return primitives.ZeroU256(), err
 	}
-}
-
-func bytesFromC(cBytes C.GuillotineBytes) primitives.Bytes {
-	if cBytes.data == nil || cBytes.len == 0 {
-		return primitives.EmptyBytes()
-	}
-	
-	data := C.GoBytes(unsafe.Pointer(cBytes.data), C.int(cBytes.len))
-	return primitives.NewBytes(data)
-}
-
-func freeCBytes(cBytes C.GuillotineBytes) {
-	if cBytes.data != nil {
-		C.free(unsafe.Pointer(cBytes.data))
-	}
-}
-
-func addressToC(addr primitives.Address) C.GuillotineAddress {
-	var cAddr C.GuillotineAddress
-	bytes := addr.Array()
-	for i, b := range bytes {
-		cAddr.bytes[i] = C.uint8_t(b)
-	}
-	return cAddr
-}
-
-func addressFromC(cAddr C.GuillotineAddress) primitives.Address {
-	var bytes [20]byte
-	for i := 0; i < 20; i++ {
-		bytes[i] = byte(cAddr.bytes[i])
-	}
-	return primitives.NewAddress(bytes)
-}
-
-func u256ToC(u primitives.U256) C.GuillotineU256 {
-	var cU256 C.GuillotineU256
-	bytes := u.Array() // Little-endian internal representation
-	for i, b := range bytes {
-		cU256.bytes[i] = C.uint8_t(b)
-	}
-	return cU256
-}
-
-func u256FromC(cU256 C.GuillotineU256) primitives.U256 {
-	var bytes [32]byte
-	for i := 0; i < 32; i++ {
-		bytes[i] = byte(cU256.bytes[i])
-	}
-	
-	// Create U256 from the byte array (assuming it's in the correct internal format)
-	u256, _ := primitives.U256FromBytes(reverseBytes(bytes[:])) // Convert from little-endian to big-endian for FromBytes
-	return u256
-}
-
-func reverseBytes(b []byte) []byte {
-	result := make([]byte, len(b))
-	for i, j := 0, len(b)-1; i < len(b); i, j = i+1, j-1 {
-		result[i] = b[j]
-	}
-	return result
+	return result, nil
 }

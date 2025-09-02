@@ -96,6 +96,8 @@ pub const std_options = std.Options{
 const evm_root = @import("evm");
 const primitives = @import("primitives");
 const provider = @import("provider");
+const logs = evm_root.logs;
+const Log = evm_root.Log;
 
 // Simple inline logging that compiles out for freestanding WASM
 fn log(comptime level: std.log.Level, comptime scope: @TypeOf(.enum_literal), comptime format: []const u8, args: anytype) void {
@@ -106,6 +108,7 @@ fn log(comptime level: std.log.Level, comptime scope: @TypeOf(.enum_literal), co
     // Logging disabled for WASM to avoid Thread dependencies
 }
 const Database = evm_root.Database;
+const Account = evm_root.Account;
 const BlockInfo = evm_root.BlockInfo;
 const Address = primitives.Address;
 const ZERO_ADDRESS = primitives.Address.ZERO_ADDRESS;
@@ -302,12 +305,66 @@ pub const GuillotineU256 = extern struct {
     bytes: [32]u8, // Little-endian representation
 };
 
-pub const GuillotineExecutionResult = extern struct {
+pub const GuillotineBytes = extern struct {
+    data: ?[*]u8,
+    len: usize,
+};
+
+// CallParams enum tag for differentiating call types
+pub const GuillotineCallType = enum(c_int) {
+    call = 0,
+    callcode = 1,
+    delegatecall = 2,
+    staticcall = 3,
+    create = 4,
+    create2 = 5,
+};
+
+// Complete CallParams with all fields (union-like struct)
+pub const GuillotineCallParams = extern struct {
+    call_type: GuillotineCallType,
+    caller: GuillotineAddress,
+    to: GuillotineAddress, // Zero for CREATE/CREATE2
+    value: GuillotineU256, // Zero for DELEGATECALL/STATICCALL
+    input: GuillotineBytes, // init_code for CREATE/CREATE2
+    gas: u64,
+    salt: GuillotineU256, // Only used for CREATE2
+};
+
+// Log entry for events
+pub const GuillotineLog = extern struct {
+    address: GuillotineAddress,
+    topics: [*]GuillotineU256,
+    topics_len: usize,
+    data: GuillotineBytes,
+};
+
+// Self-destruct record
+pub const GuillotineSelfDestruct = extern struct {
+    contract: GuillotineAddress,
+    beneficiary: GuillotineAddress,
+};
+
+// Storage access record
+pub const GuillotineStorageAccess = extern struct {
+    address: GuillotineAddress,
+    slot: GuillotineU256,
+};
+
+// Complete CallResult with all fields
+pub const GuillotineCallResult = extern struct {
     success: bool,
-    gas_used: u64,
-    output: [*]u8,
-    output_len: usize,
-    error_message: ?[*:0]const u8,
+    gas_left: u64,
+    output: GuillotineBytes,
+    logs: ?[*]GuillotineLog,
+    logs_len: usize,
+    selfdestructs: ?[*]GuillotineSelfDestruct,
+    selfdestructs_len: usize,
+    accessed_addresses: ?[*]GuillotineAddress,
+    accessed_addresses_len: usize,
+    accessed_storage: ?[*]GuillotineStorageAccess,
+    accessed_storage_len: usize,
+    error_info: ?[*:0]const u8, // Null-terminated string or null
 };
 
 // Internal VM structure
@@ -390,11 +447,33 @@ export fn guillotine_set_balance(vm: ?*GuillotineVm, address: ?*const Guillotine
     const addr = Address{ .bytes = address.?.bytes };
     const value = u256_from_bytes(&balance.?.bytes);
 
-    // NOTE: set_balance disabled - requires integration with new database interface
-    _ = state;
-    _ = addr;
-    _ = value;
-    return false;
+    // Set balance using database interface (via account)
+    // First get existing account or create new one
+    const existing_account = state.database.get_account(addr.bytes) catch null;
+    const account = if (existing_account) |acc| 
+        Account{ .balance = value, .nonce = acc.nonce, .code_hash = acc.code_hash, .storage_root = acc.storage_root }
+    else 
+        Account{ .balance = value, .nonce = 0, .code_hash = [_]u8{0} ** 32, .storage_root = [_]u8{0} ** 32 };
+    
+    state.database.set_account(addr.bytes, account) catch {
+        return false;
+    };
+    return true;
+}
+
+export fn guillotine_get_balance(vm: ?*GuillotineVm, address: ?*const GuillotineAddress) GuillotineU256 {
+    const zero_balance = GuillotineU256{ .bytes = [_]u8{0} ** 32 };
+    
+    if (vm == null or address == null) return zero_balance;
+    
+    const state: *VmState = @ptrCast(@alignCast(vm.?));
+    const addr = Address{ .bytes = address.?.bytes };
+    
+    // Get balance using database interface
+    const balance = state.database.get_balance(addr.bytes) catch 0;
+    var bytes: [32]u8 = undefined;
+    u256_to_bytes(balance, &bytes);
+    return GuillotineU256{ .bytes = bytes };
 }
 
 export fn guillotine_set_code(vm: ?*GuillotineVm, address: ?*const GuillotineAddress, code: ?[*]const u8, code_len: usize) bool {
@@ -403,66 +482,241 @@ export fn guillotine_set_code(vm: ?*GuillotineVm, address: ?*const GuillotineAdd
     const state: *VmState = @ptrCast(@alignCast(vm.?));
     const addr = Address{ .bytes = address.?.bytes };
 
-    const code_slice = if (code) |c| c[0..code_len] else &[_]u8{};
-    // NOTE: set_code disabled - requires integration with new database interface
-    _ = state;
-    _ = addr;
-    _ = code_slice;
-    return false;
+    // Copy Go-managed memory to Zig-owned memory to avoid dangling pointers
+    // when Go's garbage collector runs or the memory is reused
+    const code_slice = if (code) |c| blk: {
+        if (code_len == 0) break :blk &[_]u8{};
+        const code_copy = state.allocator.alloc(u8, code_len) catch return false;
+        @memcpy(code_copy, c[0..code_len]);
+        break :blk code_copy;
+    } else &[_]u8{};
+    
+    // Set code using database interface (now with Zig-owned memory)
+    const code_hash = state.database.set_code(code_slice) catch {
+        return false;
+    };
+    
+    // Update account with new code hash
+    const existing_account = state.database.get_account(addr.bytes) catch null;
+    const account = if (existing_account) |acc| 
+        Account{ .balance = acc.balance, .nonce = acc.nonce, .code_hash = code_hash, .storage_root = acc.storage_root }
+    else 
+        Account{ .balance = 0, .nonce = 0, .code_hash = code_hash, .storage_root = [_]u8{0} ** 32 };
+    
+    state.database.set_account(addr.bytes, account) catch {
+        return false;
+    };
+    return true;
 }
 
-// Execution - using the new API that accepts frames directly
+export fn guillotine_get_code(vm: ?*GuillotineVm, address: ?*const GuillotineAddress) GuillotineBytes {
+    const empty_code = GuillotineBytes{ .data = null, .len = 0 };
+    
+    if (vm == null or address == null) return empty_code;
+    
+    const state: *VmState = @ptrCast(@alignCast(vm.?));
+    const addr = Address{ .bytes = address.?.bytes };
+    
+    // Get code using database interface
+    const code = state.database.get_code_by_address(addr.bytes) catch return empty_code;
+    if (code.len == 0) return empty_code;
+    
+    // Allocate fresh memory for code copy to avoid @memcpy alias issues
+    const code_copy = state.allocator.alloc(u8, code.len) catch return empty_code;
+    // Use alternative to @memcpy to avoid alias issues
+    for (code, 0..) |byte, i| {
+        code_copy[i] = byte;
+    }
+    return GuillotineBytes{ .data = code_copy.ptr, .len = code_copy.len };
+}
+
+export fn guillotine_set_storage(vm: ?*GuillotineVm, address: ?*const GuillotineAddress, key: ?*const GuillotineU256, value: ?*const GuillotineU256) c_int {
+    if (vm == null or address == null or key == null or value == null) return 0;
+    
+    const state: *VmState = @ptrCast(@alignCast(vm.?));
+    const addr = Address{ .bytes = address.?.bytes };
+    const k = u256_from_bytes(&key.?.bytes);
+    const v = u256_from_bytes(&value.?.bytes);
+    
+    // Set storage using database interface
+    state.database.set_storage(addr.bytes, k, v) catch {
+        return 0;
+    };
+    return 1; // Return 1 for success
+}
+
+export fn guillotine_get_storage(vm: ?*GuillotineVm, address: ?*const GuillotineAddress, key: ?*const GuillotineU256) GuillotineU256 {
+    const zero_value = GuillotineU256{ .bytes = [_]u8{0} ** 32 };
+    
+    if (vm == null or address == null or key == null) return zero_value;
+    
+    const state: *VmState = @ptrCast(@alignCast(vm.?));
+    const addr = Address{ .bytes = address.?.bytes };
+    const k = u256_from_bytes(&key.?.bytes);
+    
+    // Get storage using database interface
+    const storage_value = state.database.get_storage(addr.bytes, k) catch 0;
+    var bytes: [32]u8 = undefined;
+    u256_to_bytes(storage_value, &bytes);
+    return GuillotineU256{ .bytes = bytes };
+}
+
+// Execution with complete CallParams support
 export fn guillotine_vm_execute(
     vm: ?*GuillotineVm,
-    from: ?*const GuillotineAddress,
-    to: ?*const GuillotineAddress,
-    value: ?*const GuillotineU256,
-    input: ?[*]const u8,
-    input_len: usize,
-    gas_limit: u64,
-) GuillotineExecutionResult {
-    var result = GuillotineExecutionResult{
+    params: ?*const GuillotineCallParams,
+) GuillotineCallResult {
+    var result = GuillotineCallResult{
         .success = false,
-        .gas_used = 0,
-        .output = undefined,
-        .output_len = 0,
-        .error_message = null,
+        .gas_left = 0,
+        .output = .{ .data = null, .len = 0 },
+        .logs = null,
+        .logs_len = 0,
+        .selfdestructs = null,
+        .selfdestructs_len = 0,
+        .accessed_addresses = null,
+        .accessed_addresses_len = 0,
+        .accessed_storage = null,
+        .accessed_storage_len = 0,
+        .error_info = null,
     };
 
-    if (vm == null or from == null) return result;
+    if (vm == null or params == null) return result;
 
     const state: *VmState = @ptrCast(@alignCast(vm.?));
-    const from_addr = Address{ .bytes = from.?.bytes };
-    const to_addr = if (to) |t| Address{ .bytes = t.bytes } else primitives.Address.ZERO_ADDRESS;
-    const value_u256 = if (value) |v| u256_from_bytes(&v.bytes) else 0;
-    const input_slice = if (input) |i| i[0..input_len] else &[_]u8{};
-    _ = from_addr;
-    _ = to_addr;
-    _ = value_u256;
-    _ = input_slice;
-    _ = gas_limit;
+    const p = params.?;
 
-    // NOTE: Contract execution disabled - APIs have changed, requires integration work
-    // Note: using warn level since debug function may not work in all contexts
+    // Convert GuillotineCallParams to CallParams enum
+    const call_params = switch (p.call_type) {
+        .call => evm_root.CallParams{ .call = .{
+            .caller = Address{ .bytes = p.caller.bytes },
+            .to = Address{ .bytes = p.to.bytes },
+            .value = u256_from_bytes(&p.value.bytes),
+            .input = if (p.input.data) |d| d[0..p.input.len] else &[_]u8{},
+            .gas = p.gas,
+        } },
+        .callcode => evm_root.CallParams{ .callcode = .{
+            .caller = Address{ .bytes = p.caller.bytes },
+            .to = Address{ .bytes = p.to.bytes },
+            .value = u256_from_bytes(&p.value.bytes),
+            .input = if (p.input.data) |d| d[0..p.input.len] else &[_]u8{},
+            .gas = p.gas,
+        } },
+        .delegatecall => evm_root.CallParams{ .delegatecall = .{
+            .caller = Address{ .bytes = p.caller.bytes },
+            .to = Address{ .bytes = p.to.bytes },
+            .input = if (p.input.data) |d| d[0..p.input.len] else &[_]u8{},
+            .gas = p.gas,
+        } },
+        .staticcall => evm_root.CallParams{ .staticcall = .{
+            .caller = Address{ .bytes = p.caller.bytes },
+            .to = Address{ .bytes = p.to.bytes },
+            .input = if (p.input.data) |d| d[0..p.input.len] else &[_]u8{},
+            .gas = p.gas,
+        } },
+        .create => evm_root.CallParams{ .create = .{
+            .caller = Address{ .bytes = p.caller.bytes },
+            .value = u256_from_bytes(&p.value.bytes),
+            .init_code = if (p.input.data) |d| d[0..p.input.len] else &[_]u8{},
+            .gas = p.gas,
+        } },
+        .create2 => evm_root.CallParams{ .create2 = .{
+            .caller = Address{ .bytes = p.caller.bytes },
+            .value = u256_from_bytes(&p.value.bytes),
+            .init_code = if (p.input.data) |d| d[0..p.input.len] else &[_]u8{},
+            .salt = u256_from_bytes(&p.salt.bytes),
+            .gas = p.gas,
+        } },
+    };
 
-    // Return placeholder result for now
-    const exec_result = struct {
-        status: enum { Success, Failure } = .Failure,
-        gas_used: u64 = 0,
-        output: ?[]const u8 = null,
-    }{};
+    // Execute using the EVM's call method
+    const exec_result = state.vm.call(call_params);
 
-    result.success = exec_result.status == .Success;
-    result.gas_used = exec_result.gas_used;
+    // Convert CallResult to GuillotineCallResult
+    result.success = exec_result.success;
+    result.gas_left = exec_result.gas_left;
 
-    // Copy output if any
-    if (exec_result.output) |output| {
-        if (output.len > 0) {
-            const output_copy = state.allocator.alloc(u8, output.len) catch return result;
-            @memcpy(output_copy, output);
-            result.output = output_copy.ptr;
-            result.output_len = output_copy.len;
+    // Copy output data
+    if (exec_result.output.len > 0) {
+        const output_copy = state.allocator.alloc(u8, exec_result.output.len) catch return result;
+        @memcpy(output_copy, exec_result.output);
+        result.output = .{ .data = output_copy.ptr, .len = output_copy.len };
+    }
+
+    // Copy logs
+    if (exec_result.logs.len > 0) {
+        const logs_copy = state.allocator.alloc(GuillotineLog, exec_result.logs.len) catch return result;
+        for (exec_result.logs, 0..) |log_entry, i| {
+            // Copy topics
+            const topics_copy = state.allocator.alloc(u256, log_entry.topics.len) catch return result;
+            @memcpy(topics_copy, log_entry.topics);
+
+            // Copy data
+            const data_copy = state.allocator.alloc(u8, log_entry.data.len) catch return result;
+            @memcpy(data_copy, log_entry.data);
+
+            // Convert topics to GuillotineU256
+            const topics_u256 = state.allocator.alloc(GuillotineU256, log_entry.topics.len) catch return result;
+            for (topics_copy, 0..) |topic, j| {
+                var bytes: [32]u8 = undefined;
+                u256_to_bytes(topic, &bytes);
+                topics_u256[j] = GuillotineU256{ .bytes = bytes };
+            }
+
+            logs_copy[i] = GuillotineLog{
+                .address = GuillotineAddress{ .bytes = log_entry.address.bytes },
+                .topics = topics_u256.ptr,
+                .topics_len = topics_u256.len,
+                .data = .{ .data = data_copy.ptr, .len = data_copy.len },
+            };
         }
+        result.logs = logs_copy.ptr;
+        result.logs_len = logs_copy.len;
+    }
+
+    // Copy selfdestructs
+    if (exec_result.selfdestructs.len > 0) {
+        const selfdestructs_copy = state.allocator.alloc(GuillotineSelfDestruct, exec_result.selfdestructs.len) catch return result;
+        for (exec_result.selfdestructs, 0..) |sd, i| {
+            selfdestructs_copy[i] = GuillotineSelfDestruct{
+                .contract = GuillotineAddress{ .bytes = sd.contract.bytes },
+                .beneficiary = GuillotineAddress{ .bytes = sd.beneficiary.bytes },
+            };
+        }
+        result.selfdestructs = selfdestructs_copy.ptr;
+        result.selfdestructs_len = selfdestructs_copy.len;
+    }
+
+    // Copy accessed addresses
+    if (exec_result.accessed_addresses.len > 0) {
+        const addresses_copy = state.allocator.alloc(GuillotineAddress, exec_result.accessed_addresses.len) catch return result;
+        for (exec_result.accessed_addresses, 0..) |addr, i| {
+            addresses_copy[i] = GuillotineAddress{ .bytes = addr.bytes };
+        }
+        result.accessed_addresses = addresses_copy.ptr;
+        result.accessed_addresses_len = addresses_copy.len;
+    }
+
+    // Copy accessed storage
+    if (exec_result.accessed_storage.len > 0) {
+        const storage_copy = state.allocator.alloc(GuillotineStorageAccess, exec_result.accessed_storage.len) catch return result;
+        for (exec_result.accessed_storage, 0..) |sa, i| {
+            var slot_bytes: [32]u8 = undefined;
+            u256_to_bytes(sa.slot, &slot_bytes);
+            storage_copy[i] = GuillotineStorageAccess{
+                .address = GuillotineAddress{ .bytes = sa.address.bytes },
+                .slot = GuillotineU256{ .bytes = slot_bytes },
+            };
+        }
+        result.accessed_storage = storage_copy.ptr;
+        result.accessed_storage_len = storage_copy.len;
+    }
+
+    // Copy error info if present
+    if (exec_result.error_info) |err_info| {
+        const err_copy = state.allocator.allocSentinel(u8, err_info.len, 0) catch return result;
+        @memcpy(err_copy, err_info);
+        result.error_info = err_copy.ptr;
     }
 
     return result;
@@ -470,12 +724,19 @@ export fn guillotine_vm_execute(
 
 // Helper functions
 fn u256_from_bytes(bytes: *const [32]u8) u256 {
-    // Convert from little-endian bytes to u256
+    // Convert from little-endian bytes to u256 (Go primitives use little-endian internally)
     var result: u256 = 0;
     for (bytes, 0..) |byte, i| {
         result |= @as(u256, byte) << @intCast(i * 8);
     }
     return result;
+}
+
+fn u256_to_bytes(value: u256, bytes: *[32]u8) void {
+    // Convert u256 to little-endian bytes (Go primitives expect little-endian internally)
+    for (0..32) |i| {
+        bytes[i] = @intCast((value >> @intCast(i * 8)) & 0xFF);
+    }
 }
 
 // Test to ensure this compiles
