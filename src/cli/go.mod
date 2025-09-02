@@ -5,7 +5,10 @@ go 1.25.0
 require (
 	github.com/charmbracelet/bubbletea v1.3.6
 	github.com/charmbracelet/lipgloss v1.1.0
+	github.com/evmts/guillotine/bindings/go v0.0.0
 )
+
+replace github.com/evmts/guillotine/bindings/go => ../guillotine-go
 
 require (
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
