@@ -939,11 +939,11 @@ pub fn Evm(comptime config: EvmConfig) type {
                 return CallResult.failure(0);
             };
 
-            // Return the contract address as 32 bytes (12 zero padding + 20-byte address)
-            const out32 = self.small_output_buf[0..32];
-            @memset(out32[0..12], 0);
-            @memcpy(out32[12..32], &args.contract_address.bytes);
-            return CallResult.success_with_output(result.gas_left, out32);
+            // Return the contract address as 20 bytes (unpadded)
+            // The handler will convert it to u256 when pushing to stack
+            const out20 = self.small_output_buf[0..20];
+            @memcpy(out20, &args.contract_address.bytes);
+            return CallResult.success_with_output(result.gas_left, out20);
         }
 
         /// Convert tracer data to ExecutionTrace format
@@ -2716,10 +2716,10 @@ test "EVM CREATE operation - basic contract creation" {
     // Verify successful creation
     try std.testing.expect(result.success);
     try std.testing.expect(result.gas_left > 0);
-    try std.testing.expectEqual(@as(usize, 32), result.output.len);
+    try std.testing.expectEqual(@as(usize, 20), result.output.len);
 
-    // Extract contract address from output (last 20 bytes)
-    const contract_address: primitives.Address = result.output[12..32].*;
+    // Extract contract address from output
+    const contract_address: primitives.Address = result.output[0..20].*;
 
     // Verify contract was created
     const created_account = (try db.get_account(contract_address)).?;
@@ -2784,7 +2784,7 @@ test "EVM CREATE operation - with value transfer" {
     try std.testing.expect(result.success);
 
     // Extract contract address
-    const contract_address: primitives.Address = result.output[12..32].*;
+    const contract_address: primitives.Address = result.output[0..20].*;
 
     // Verify balances
     const caller_after = (try db.get_account(caller_address)).?;
@@ -2901,10 +2901,10 @@ test "EVM CREATE2 operation - deterministic address creation" {
     // Verify successful creation
     try std.testing.expect(result.success);
     try std.testing.expect(result.gas_left > 0);
-    try std.testing.expectEqual(@as(usize, 32), result.output.len);
+    try std.testing.expectEqual(@as(usize, 20), result.output.len);
 
     // Extract contract address
-    const contract_address: primitives.Address = result.output[12..32].*;
+    const contract_address: primitives.Address = result.output[0..20].*;
 
     // Verify contract was created
     const created_account = (try db.get_account(contract_address)).?;
@@ -2980,7 +2980,7 @@ test "EVM CREATE2 operation - same parameters produce same address" {
 
     try std.testing.expect(result.success);
 
-    const actual_address: primitives.Address = result.output[12..32].*;
+    const actual_address: primitives.Address = result.output[0..20].*;
     try std.testing.expectEqualSlices(u8, &expected_address, &actual_address);
 }
 
@@ -3115,7 +3115,7 @@ test "EVM CREATE operation - init code execution and storage" {
 
     try std.testing.expect(result.success);
 
-    const contract_address: primitives.Address = result.output[12..32].*;
+    const contract_address: primitives.Address = result.output[0..20].*;
 
     // Verify the storage was set during init
     const stored_value = try db.get_storage(contract_address, 0);
@@ -3205,10 +3205,10 @@ test "EVM CREATE/CREATE2 - nested contract creation" {
     defer if (result.output.len > 0) evm.allocator.free(result.output);
 
     try std.testing.expect(result.success);
-    try std.testing.expectEqual(@as(usize, 32), result.output.len);
+    try std.testing.expectEqual(@as(usize, 20), result.output.len);
 
     // The output should contain the address of the created child contract
-    const child_address: primitives.Address = result.output[12..32].*;
+    const child_address: primitives.Address = result.output[0..20].*;
 
     // Verify child contract exists
     const child_account = try db.get_account(child_address);
@@ -5421,7 +5421,7 @@ test "CREATE interaction - factory creates and initializes child contracts" {
 
     // Extract child contract address from output
     var child_address: primitives.Address = undefined;
-    @memcpy(&child_address, factory_result.output[12..32]); // Address is in bytes 12-31
+    @memcpy(&child_address, factory_result.output[0..20]); // Contract address
 
     // Call child contract to verify initialization
     const verify_result = try evm_instance.call(.{
@@ -5615,7 +5615,7 @@ test "CREATE interaction - contract creates contract that creates contract" {
 
     // Get level 3 address
     var level3_addr: primitives.Address = undefined;
-    @memcpy(&level3_addr, result2.output[12..32]);
+    @memcpy(&level3_addr, result2.output[0..20]);
 
     // Call level 3 to verify it returns 99
     const result3 = try evm_instance.call(.{
@@ -6329,7 +6329,7 @@ test "CREATE stores deployed code bytes" {
 
     // Extract created contract address from output
     var created_address: primitives.Address = undefined;
-    @memcpy(&created_address, result.output[12..32]);
+    @memcpy(&created_address, result.output[0..20]);
 
     // Verify the deployed contract exists and has the correct code
     const deployed_code = try db.get_code_by_address(created_address);
@@ -6492,7 +6492,7 @@ test "CREATE2 stores deployed code bytes" {
 
     // Extract created contract address from output
     var created_address: primitives.Address = undefined;
-    @memcpy(&created_address, result.output[12..32]);
+    @memcpy(&created_address, result.output[0..20]);
 
     // Verify the deployed contract exists and has the correct code
     const deployed_code = try db.get_code_by_address(created_address);
