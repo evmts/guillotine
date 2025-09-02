@@ -207,7 +207,8 @@ func (s *Stack) PopU256() (primitives.U256, error) {
 		bytes[i] = byte(cBytes[i])
 	}
 
-	u256, err := primitives.U256FromBytes(bytes)
+	// Bytes from Zig are little-endian
+	u256, err := primitives.U256FromLittleEndianBytes(bytes)
 	if err != nil {
 		return primitives.ZeroU256(), fmt.Errorf("failed to parse U256: %w", err)
 	}
@@ -254,7 +255,8 @@ func (s *Stack) PeekU256() (primitives.U256, error) {
 		bytes[i] = byte(cBytes[i])
 	}
 
-	u256, err := primitives.U256FromBytes(bytes)
+	// Bytes from Zig are little-endian
+	u256, err := primitives.U256FromLittleEndianBytes(bytes)
 	if err != nil {
 		return primitives.ZeroU256(), fmt.Errorf("failed to parse U256: %w", err)
 	}
@@ -313,7 +315,8 @@ func (s *Stack) PeekAtU256(depth uint32) (primitives.U256, error) {
 		bytes[i] = byte(cBytes[i])
 	}
 
-	u256, err := primitives.U256FromBytes(bytes)
+	// Bytes from Zig are little-endian
+	u256, err := primitives.U256FromLittleEndianBytes(bytes)
 	if err != nil {
 		return primitives.ZeroU256(), fmt.Errorf("failed to parse U256: %w", err)
 	}
@@ -440,7 +443,8 @@ func (s *Stack) GetContents() ([]primitives.U256, error) {
 		end := start + 32
 		itemBytes := buffer[start:end]
 		
-		u256, err := primitives.U256FromBytes(itemBytes)
+		// Bytes from Zig are little-endian
+		u256, err := primitives.U256FromLittleEndianBytes(itemBytes)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse U256 at index %d: %w", i, err)
 		}

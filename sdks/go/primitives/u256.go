@@ -22,17 +22,35 @@ func NewU256(value uint64) U256 {
 	return u
 }
 
-// U256FromBytes creates a U256 from a byte slice (big-endian)
+// U256FromBytes creates a U256 from a big-endian byte slice
+// This is the standard function for external use - input bytes are expected to be
+// in big-endian order (most significant byte first), which is the standard
+// representation in Ethereum and human-readable formats.
 func U256FromBytes(b []byte) (U256, error) {
 	if len(b) > 32 {
 		return U256{}, fmt.Errorf("invalid U256 length: expected at most 32 bytes, got %d", len(b))
 	}
 	
 	var u U256
-	// Convert from big-endian to little-endian
+	// Convert from big-endian to little-endian internal representation
 	for i, j := 0, len(b)-1; j >= 0; i, j = i+1, j-1 {
 		u.bytes[i] = b[j]
 	}
+	return u, nil
+}
+
+// U256FromLittleEndianBytes creates a U256 from a little-endian byte slice
+// This function is for internal use when interfacing with Zig/C code that
+// uses little-endian representation for performance. The bytes are copied
+// directly without conversion.
+func U256FromLittleEndianBytes(b []byte) (U256, error) {
+	if len(b) > 32 {
+		return U256{}, fmt.Errorf("invalid U256 length: expected at most 32 bytes, got %d", len(b))
+	}
+	
+	var u U256
+	// Copy little-endian bytes directly (no conversion needed)
+	copy(u.bytes[:], b)
 	return u, nil
 }
 
