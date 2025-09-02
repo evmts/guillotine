@@ -6,10 +6,17 @@ type KeyBinding struct {
 }
 
 var (
-	KeyQuit   = []string{"ctrl+c", "q"}
-	KeyUp     = []string{"up", "k"}
-	KeyDown   = []string{"down", "j"}
-	KeySelect = []string{"enter", " "}
+	KeyQuit      = []string{"ctrl+c", "q"}
+	KeyUp        = []string{"up", "k"}
+	KeyDown      = []string{"down", "j"}
+	KeySelect    = []string{"enter", " "}
+	KeyBack      = []string{"esc"}
+	KeyExecute   = []string{"x", "ctrl+enter"}
+	KeyEdit      = []string{"enter"}
+	KeySave      = []string{"enter"}
+	KeyCancel    = []string{"esc"}
+	KeyReset     = []string{"r"}
+	KeyResetAll  = []string{"ctrl+r"}
 )
 
 // HelpBindings defines what we show in the help text at the bottom

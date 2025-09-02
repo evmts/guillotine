@@ -10,14 +10,46 @@ const (
 	LoadingMessage = "Loading..."
 	
 	// Menu items
-	MenuRunTest    = "Run test call"
+	MenuMakeCall   = "Make Call"
 	MenuExit       = "Exit"
+	
+	// Call parameter names
+	CallParamCallType    = "Call Type"
+	CallParamCaller      = "Caller Address"
+	CallParamTarget      = "Target Address"
+	CallParamValue       = "Value (Wei)"
+	CallParamInput       = "Input Data"
+	CallParamGasLimit    = "Gas Limit"
+	CallParamSalt        = "Salt (CREATE2 only)"
+	
+	// Call states
+	CallStateTitle       = "Configure Call Parameters"
+	CallEditTitle        = "Edit Parameter"
+	CallExecutingTitle   = "Executing Call"
+	CallResultTitle      = "Call Result"
+	
+	// Call messages
+	CallExecutingMsg     = "Executing EVM call..."
+	CallSuccessMsg       = "Call executed successfully"
+	CallFailureMsg       = "Call execution failed"
+	
+	// Call instructions (now handled by help.go)
+	// CallParamListInstructions = "↑/↓ Navigate  Enter: Edit  x: Execute  r: Reset  Ctrl+r: Reset All  Esc: Back"
+	// CallEditInstructions      = "Enter: Save  r: Reset to Default  Esc: Cancel"
+	// CallResultInstructions    = "Enter: Continue  Esc: Back to menu"
+	
+	// Call type options
+	CallTypeCall         = "CALL"
+	CallTypeStaticCall   = "STATICCALL"
+	CallTypeDelegateCall = "DELEGATECALL"
+	CallTypeCreate       = "CREATE"
+	CallTypeCreate2      = "CREATE2"
 )
 
 // GetMenuItems returns the default menu items
 func GetMenuItems() []string {
 	return []string{
-		MenuRunTest,
+		MenuMakeCall,
 		MenuExit,
 	}
 }
