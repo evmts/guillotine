@@ -61,16 +61,19 @@ pub fn subAssign(self: *Fp2Mont, other: *const Fp2Mont) void {
     self.* = self.sub(other);
 }
 
-/// Schoolbook multiplication: (a0 + a1*u)(b0 + b1*u) = (a0*b0 - a1*b1) + (a0*b1 + a1*b0)*u
+/// Karatsuba multiplication (u^2 = -1):
+/// v0 = a0*b0, v1 = a1*b1, v2 = (a0+a1)*(b0+b1)
+/// (a0 + a1*u)(b0 + b1*u) = (v0 - v1) + (v2 - v0 - v1)*u
 pub fn mul(self: *const Fp2Mont, other: *const Fp2Mont) Fp2Mont {
     // a = a0 + a1*u, b = b0 + b1*u
     const a0_b0 = self.u0.mul(&other.u0);
     const a1_b1 = self.u1.mul(&other.u1);
-    const a0_b1 = self.u0.mul(&other.u1);
-    const a1_b0 = self.u1.mul(&other.u0);
+    const a0_plus_a1 = self.u0.add(&self.u1);
+    const b0_plus_b1 = other.u0.add(&other.u1);
+    const v2 = a0_plus_a1.mul(&b0_plus_b1);
 
-    const c0 = a0_b0.sub(&a1_b1); // Real part: a0*b0 - a1*b1
-    const c1 = a0_b1.add(&a1_b0); // Imag part: a0*b1 + a1*b0
+    const c0 = a0_b0.sub(&a1_b1); // Real part: v0 - v1
+    const c1 = v2.sub(&a0_b0).sub(&a1_b1); // Imag part: v2 - v0 - v1
 
     return Fp2Mont{
         .u0 = c0,
