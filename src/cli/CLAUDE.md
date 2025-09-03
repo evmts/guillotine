@@ -2,7 +2,7 @@
 
 ## Architecture Overview
 
-The Guillotine CLI is a terminal user interface (TUI) application built with Go and the Bubbletea framework. It follows a Model-View-Update (MVU) architecture pattern with strict separation of concerns.
+The Guillotine CLI is a terminal user interface (TUI) application for interacting with the Guillotine EVM implementation. Built with Go and the Bubbletea framework, it provides an interactive interface for executing EVM calls and testing smart contract interactions. It follows a Model-View-Update (MVU) architecture pattern with strict separation of concerns.
 
 ## Directory Structure
 
@@ -11,18 +11,27 @@ src/cli/
 ├── main.go                 # Entry point - initializes and runs the Bubbletea program
 ├── go.mod                  # Go module definition (module: guillotine-cli)
 ├── go.sum                  # Dependency lock file
+├── poc_test.go            # Proof-of-concept tests for EVM call functionality
 └── internal/               # Internal packages (Go convention - not externally importable)
+    ├── types/              # Type definitions and data structures
+    │   └── call_types.go  # EVM call parameters, execution results, app states
     ├── config/            # Configuration, constants, and styling
     │   ├── keys.go       # Key bindings and keyboard shortcuts
     │   ├── messages.go   # All UI text strings (titles, labels, messages)
-    │   └── theme.go      # Colors, styles, and visual theming
+    │   ├── theme.go      # Colors, styles, and visual theming
+    │   ├── call_defaults.go # Default values for EVM call parameters
+    │   └── errors.go     # Error types and validation error handling
     ├── app/              # Application logic and state management
-    │   └── model.go      # Bubbletea Model: state, Init(), Update(), View()
+    │   ├── model.go      # Bubbletea Model: state, Init(), Update(), View()
+    │   ├── call_executor.go # EVM call execution and validation logic
+    │   └── validation_test.go # Unit tests for validation functions
     └── ui/               # Reusable UI components
         ├── header.go     # Title and subtitle rendering
         ├── menu.go       # Menu item rendering with selection state
         ├── help.go       # Help text generation from key bindings
-        └── layout.go     # Layout composition, spacing, and centering
+        ├── layout.go     # Layout composition, spacing, and centering
+        ├── call_input.go # Call parameter input field rendering
+        └── call_list.go  # Call parameter list display
 ```
 
 ## Core Concepts
@@ -38,35 +47,144 @@ The application follows Bubbletea's Model-View-Update pattern:
   - `selected`: Map tracking selected items
   - `quitting`: Exit state flag
   - `width/height`: Terminal dimensions
+  - **Call-related state**:
+    - `state`: Current application state (enum: MainMenu, CallParameterList, etc.)
+    - `callParams`: EVM call parameters (type, addresses, gas, value, data)
+    - `callParamCursor`: Current parameter selection in edit mode
+    - `editingParam`: Name of parameter being edited
+    - `textInput`: Bubbletea text input model for parameter editing
+    - `validationError`: Current validation error message
+    - `callResult`: Execution result from EVM call
+    - `callTypeSelector`: Index for call type selection
 
 - **Update** (`model.Update()`): Handles events and state changes
-  - Processes keyboard input
-  - Updates cursor position
-  - Manages window resizing
+  - Processes keyboard input based on current state
+  - Updates cursor position for menus and parameter lists
+  - Manages state transitions between screens
+  - Validates input parameters
+  - Executes EVM calls asynchronously
+  - Handles window resizing
   - Triggers exit sequences
 
 - **View** (`model.View()`): Renders UI based on current state
-  - Composes UI components
+  - Composes UI components based on `AppState`
   - Applies layout and styling
+  - Shows appropriate screen (menu, parameter list, edit, result)
   - Returns string for terminal display
 
 ### 2. Package Responsibilities
+
+#### `internal/types/`
+Core type definitions and data structures:
+- **call_types.go**: Defines `AppState` enum, `CallParameters`, `CallExecution` result types
+- Centralizes all application-specific types
+- Provides helper methods for type conversions
 
 #### `internal/config/`
 Central configuration hub for all constants and settings:
 - **keys.go**: Keyboard bindings, help text generation
 - **messages.go**: All user-facing text strings
 - **theme.go**: Color palette, text styles, box styles
+- **call_defaults.go**: Default values for EVM call parameters, call type mappings
+- **errors.go**: Custom error types, validation error handling with user-friendly messages
 
 #### `internal/app/`
 Application logic and state management:
 - **model.go**: Core application logic, state transitions, main render function
+- **call_executor.go**: EVM call execution logic, parameter validation, FFI integration
+- **validation_test.go**: Unit tests for input validation functions
 
 #### `internal/ui/`
 Reusable UI components that are pure functions:
 - Each component takes data and returns formatted strings
 - No state management within UI components
 - Composable and testable
+- **New components**:
+  - `call_input.go`: Text input fields for EVM parameters with validation
+  - `call_list.go`: Display list of call parameters with navigation
+
+## Application States
+
+### State Flow
+The application uses a finite state machine with the following states:
+```go
+type AppState int
+
+const (
+    StateMainMenu           // Initial menu screen
+    StateCallParameterList  // List of call parameters to edit
+    StateCallParameterEdit  // Editing a specific parameter
+    StateCallExecuting      // Async EVM call in progress
+    StateCallResult         // Display call execution results
+)
+```
+
+### State Transitions
+```
+MainMenu → (Execute Call) → CallParameterList
+CallParameterList → (Select) → CallParameterEdit
+CallParameterEdit → (Save) → CallParameterList
+CallParameterList → (Execute) → CallExecuting → CallResult
+CallResult → (Back) → MainMenu
+```
+
+## EVM Integration
+
+### Call Execution Flow
+1. **Parameter Collection**: User inputs call parameters through UI
+2. **Validation**: `call_executor.go` validates all parameters
+3. **FFI Bridge**: Parameters converted to Zig types via CGo bindings
+4. **EVM Execution**: Guillotine EVM processes the call
+5. **Result Handling**: Results converted back to Go types for display
+
+### Supported Call Types
+- `CALL`: Standard message call with value transfer
+- `STATICCALL`: Read-only call, no state changes
+- `DELEGATECALL`: Execute in caller's context
+- `CREATE`: Deploy new contract
+- `CREATE2`: Deploy with deterministic address
+
+### Validation Rules
+```go
+// Address validation: 40 hex characters (without 0x prefix)
+// Gas limit: Valid uint64
+// Value: Valid uint64 in Wei
+// Input data: Valid hex string starting with 0x
+// Salt: Required for CREATE2, 64 hex characters
+```
+
+## Error Handling
+
+### Error Types
+1. **Input Validation Errors** (`InputParamError`)
+   - Invalid addresses
+   - Invalid numeric values
+   - Malformed hex data
+   - Missing required fields
+
+2. **EVM Execution Errors**
+   - Out of gas
+   - Revert with reason
+   - Invalid opcode
+   - Stack overflow/underflow
+
+3. **System Errors**
+   - FFI failures
+   - Memory allocation
+   - Panic recovery
+
+### Error Display Pattern
+```go
+// Validation errors show inline
+if err := ValidateCallParameters(params); err != nil {
+    m.validationError = err.UIError() // User-friendly message
+}
+
+// Execution errors show in result screen
+if result.Status != Success {
+    // Display error reason and gas consumed
+}
+```
 
 ## Common Modifications
 
@@ -249,12 +367,82 @@ go build -o guillotine-cli .
 
 ### Dependencies
 - **github.com/charmbracelet/bubbletea**: TUI framework
+- **github.com/charmbracelet/bubbles**: UI components (textinput)
 - **github.com/charmbracelet/lipgloss**: Terminal styling
+- **github.com/evmts/guillotine/bindings/go**: EVM FFI bindings
+  - `/evm`: Main EVM interface
+  - `/primitives`: Ethereum types (Address, U256, Bytes)
+
+### Build Requirements
+- Go 1.25+ (for type parameters and improved CGo)
+- Zig 0.15+ (for building Guillotine library)
+- CGo enabled (for FFI bridge to Zig)
+- Dynamic library: `libguillotine.dylib` (macOS) or `.so` (Linux)
 
 ### Update Dependencies
 ```bash
 go mod tidy  # Clean up unused dependencies
 go get -u    # Update all dependencies
+```
+
+## Asynchronous Operations
+
+### Command Pattern for Long-Running Tasks
+The CLI uses Bubbletea's command pattern for async operations:
+
+```go
+// Define a result message type
+type callResultMsg struct {
+    result *types.CallExecution
+    err    error
+}
+
+// Create an async command
+func executeCallCmd(params types.CallParameters) tea.Cmd {
+    return func() tea.Msg {
+        result, err := ExecuteCall(params)
+        return callResultMsg{result: result, err: err}
+    }
+}
+
+// Handle the result in Update()
+case callResultMsg:
+    m.callResult = msg.result
+    m.state = types.StateCallResult
+```
+
+### Benefits
+- Non-blocking UI during EVM execution
+- Clean separation of I/O from state updates
+- Cancellable operations (future enhancement)
+
+## FFI Integration with Guillotine
+
+### Go Bindings Structure
+```
+github.com/evmts/guillotine/bindings/go/
+├── evm/          # Main EVM interface
+├── primitives/   # Ethereum types (Address, U256, Bytes)
+└── cgo/          # C bindings to Zig library
+```
+
+### Memory Management
+- Go manages high-level objects
+- Zig handles EVM execution memory
+- Proper cleanup via `defer vm.Close()`
+- No manual memory management required
+
+### Type Conversions
+```go
+// Go string → Zig Address
+addr, _ := parseAddress("0x1234...")
+primitives.NewAddress(addr)
+
+// Go uint64 → Zig U256
+value := primitives.NewU256(1000000)
+
+// Hex string → Zig Bytes
+data := primitives.NewBytes(hexToBytes("0x6060..."))
 ```
 
 ## Testing Guidelines
@@ -329,14 +517,26 @@ func TestModelUpdate(t *testing.T) {
 | File | Purpose | Modify When |
 |------|---------|-------------|
 | `main.go` | Entry point | Rarely, only for initialization changes |
+| `poc_test.go` | Integration tests | Testing EVM call functionality |
+| **Types** | | |
+| `types/call_types.go` | Type definitions | Adding new types, states, or structures |
+| **Config** | | |
 | `config/keys.go` | Key bindings | Adding new shortcuts or changing existing |
 | `config/messages.go` | UI text | Changing any displayed text |
 | `config/theme.go` | Visual styling | Adjusting colors, borders, padding |
+| `config/call_defaults.go` | Default values | Changing EVM call defaults |
+| `config/errors.go` | Error handling | Adding new error types |
+| **App Logic** | | |
 | `app/model.go` | Core logic | Adding features, handling events |
+| `app/call_executor.go` | EVM execution | Changing call logic or validation |
+| `app/validation_test.go` | Validation tests | Testing input validation |
+| **UI Components** | | |
 | `ui/layout.go` | Spacing/positioning | Adjusting element placement |
 | `ui/menu.go` | Menu rendering | Changing menu appearance |
 | `ui/header.go` | Title rendering | Modifying header display |
 | `ui/help.go` | Help text | Changing help display format |
+| `ui/call_input.go` | Input fields | Modifying parameter input UI |
+| `ui/call_list.go` | Parameter list | Changing parameter list display |
 
 ### State Flow
 1. User presses key → `Update()` receives `tea.KeyMsg`
@@ -365,18 +565,27 @@ func TestModelUpdate(t *testing.T) {
 2. **Package Organization**: NEVER create redundant structures (no `keys/keys.go`, use `config/keys.go`)
 3. **Separation of Concerns**: Each package has ONE responsibility - NEVER mix concerns
 4. **Pure UI Functions**: UI components NEVER manage state, ONLY render
-5. **Single Source of Truth**: ALL strings in messages.go, ALL colors in theme.go, ALL keys in keys.go
+5. **Single Source of Truth**: ALL strings in messages.go, ALL colors in theme.go, ALL keys in keys.go, ALL types in types/
+6. **FFI Safety**: ALWAYS use defer for cleanup, validate before calling Zig functions
+7. **Error Handling**: User-friendly messages via UIError(), technical details in logs
+8. **Async Pattern**: Use tea.Cmd for long operations, NEVER block Update()
 
 ### File Placement Rules
 ```yaml
 MUST place code in correct location:
+  Type definitions: internal/types/call_types.go ONLY
   User text: internal/config/messages.go ONLY
   Colors/styles: internal/config/theme.go ONLY
   Key bindings: internal/config/keys.go ONLY
+  Error types: internal/config/errors.go ONLY
+  Default values: internal/config/call_defaults.go ONLY
   State/logic: internal/app/model.go ONLY
+  EVM execution: internal/app/call_executor.go ONLY
   UI rendering: internal/ui/*.go (pure functions)
-  NEVER: Create new packages without being able to justify it with strong confidence
+  Tests: Alongside source files (*_test.go)
+  NEVER: Create new packages without strong justification
   NEVER: Mix concerns across packages
+  NEVER: Put business logic in UI components
 ```
 
 ### Code Patterns to Follow
@@ -386,12 +595,28 @@ UI Components:
   - NO side effects, NO state management
   - Use existing styles from theme.go
   - Compose using lipgloss methods
+  - Text inputs via bubbles/textinput
 
 State Management:
   - ALL state changes in Update() method
+  - State transitions via AppState enum
   - Use existing Model fields before adding new
-  - Handle ALL keyboard events explicitly
+  - Handle ALL keyboard events per state
   - Always update dimensions on WindowSizeMsg
+  - Async operations return tea.Cmd
+
+EVM Integration:
+  - Validate parameters before FFI calls
+  - Convert Go types to primitives.* types
+  - Use defer for vm.Close()
+  - Handle all error cases from Zig
+  - Return structured CallExecution results
+
+Validation:
+  - Separate validation from execution
+  - Return InputParamError with field context
+  - Provide user-friendly error messages
+  - Check hex format, address length, numeric ranges
 
 Styling:
   - REUSE existing styles before creating new
@@ -411,6 +636,12 @@ DON'T:
   - Mix Update logic with View rendering
   - Create files outside internal/ structure
   - Ignore existing patterns for "better" ones
+  - Block Update() with synchronous calls
+  - Forget defer vm.Close() after evm.New()
+  - Mix validation with execution logic
+  - Return technical errors to UI
+  - Create new error types without using errors.go
+  - Access FFI directly without validation
 ```
 
 ### Adding Features Checklist
@@ -433,16 +664,28 @@ Implementation order:
 ### Navigation & Discovery
 ```yaml
 Finding code:
-  - Opcodes: Use handler pattern (handlers_*.go)
+  - Types: Check types/call_types.go FIRST
   - UI text: Check messages.go FIRST
   - Styles: Check theme.go FIRST
   - State: Check Model struct in model.go
   - Rendering: Check ui/ components
+  - Validation: Check call_executor.go
+  - Errors: Check errors.go for types
+  - Defaults: Check call_defaults.go
+
+EVM call flow:
+  1. User selects "Execute Call" from menu
+  2. StateCallParameterList shows params
+  3. User edits each parameter
+  4. Validation runs on save
+  5. Execute triggers async call
+  6. Result displayed with gas/status
 
 Before creating:
   - Search for similar existing code
   - Check if pattern already exists
   - Reuse before recreating
+  - Verify type exists in types/
 ```
 
 ### Testing Requirements
@@ -496,6 +739,33 @@ When stuck:
   4. Ask before breaking conventions
 ```
 
+### Key Architectural Decisions
+```yaml
+State Machine:
+  - Single AppState enum controls UI flow
+  - State determines which View() branch renders
+  - Keyboard handling switches per state
+  - No nested state machines
+
+FFI Bridge:
+  - Go → C → Zig via CGo
+  - Primitives package handles type conversion
+  - All EVM ops through single vm instance
+  - Resource cleanup mandatory
+
+Validation Strategy:
+  - Client-side validation before EVM call
+  - Separate validation from execution
+  - User-friendly error messages
+  - Technical details in logs only
+
+Async Execution:
+  - tea.Cmd for non-blocking operations
+  - Message types for result handling
+  - UI remains responsive during calls
+  - Error states handled gracefully
+```
+
 ### Zero Tolerance Violations
 ```yaml
 NEVER:
@@ -508,6 +778,35 @@ NEVER:
   - Import from parent project directories
 ```
 
+## Development Workflow
+
+### Running with EVM
+```bash
+# Build Guillotine library first
+cd ../..
+zig build
+
+# Build and run CLI
+cd src/cli
+go build .
+./guillotine-cli
+```
+
+### Debugging Tips
+1. **EVM Errors**: Check `vm.GetLastError()` for detailed error messages
+2. **UI Issues**: Add debug output to `View()` temporarily (remove before commit)
+3. **State Problems**: Log state transitions in `Update()`
+4. **FFI Crashes**: Verify library path and version compatibility
+5. **Input Validation**: Test edge cases with `validation_test.go`
+
+### Performance Considerations
+- EVM calls can take 10-100ms depending on complexity
+- UI updates at 60 FPS via Bubbletea
+- Keep View() rendering under 16ms for smooth UI
+- Use async commands for any operation >50ms
+
 ---
 
+*This documentation was last updated: January 2025*
+*Version: 2.0.0 - Full EVM Integration*
 *This documentation should be updated whenever significant architectural changes are made to the CLI.*
