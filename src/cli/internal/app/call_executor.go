@@ -2,7 +2,7 @@ package app
 
 import (
 	"encoding/hex"
-	"errors"
+	"fmt"
 	"guillotine-cli/internal/config"
 	"guillotine-cli/internal/types"
 	"strconv"
@@ -14,33 +14,33 @@ import (
 
 func ValidateCallParameters(params types.CallParameters) error {
 	if params.CallType == "" {
-		return errors.New("call type is required")
+		return config.NewInputParamError(config.ErrorCallTypeRequired, "call_type")
 	}
 	
 	if !IsValidAddress(params.Caller) {
-		return errors.New("caller address must be a valid 40-character hex address")
+		return config.NewInputParamError(config.ErrorInvalidCallerAddress, "caller")
 	}
 	
 	if params.CallType != config.CallTypeCreate && params.CallType != config.CallTypeCreate2 {
 		if !IsValidAddress(params.Target) {
-			return errors.New("target address must be a valid 40-character hex address")
+			return config.NewInputParamError(config.ErrorInvalidTargetAddress, "target")
 		}
 	}
 	
 	if _, err := strconv.ParseUint(params.GasLimit, 10, 64); err != nil {
-		return errors.New("gas limit must be a valid number")
+		return config.NewInputParamError(config.ErrorInvalidGasLimit, "gas_limit")
 	}
 	
 	if _, err := strconv.ParseUint(params.Value, 10, 64); err != nil {
-		return errors.New("value must be a valid number in Wei")
+		return config.NewInputParamError(config.ErrorInvalidValue, "value")
 	}
 	
 	if !IsValidHex(params.InputData) {
-		return errors.New("input data must be valid hex (starting with 0x)")
+		return config.NewInputParamError(config.ErrorInvalidInputData, "input_data")
 	}
 	
 	if (params.CallType == config.CallTypeCreate2) && !IsValidHex(params.Salt) {
-		return errors.New("salt must be valid hex for CREATE2 operations")
+		return config.NewInputParamError(config.ErrorInvalidSalt, "salt")
 	}
 	
 	return nil
@@ -53,33 +53,33 @@ func ExecuteCall(params types.CallParameters) (*types.CallExecution, error) {
 	
 	vm, err := evm.New()
 	if err != nil {
-		return nil, errors.New("failed to create EVM: " + err.Error())
+		return nil, fmt.Errorf("failed to create EVM: %w", err)
 	}
 	defer vm.Close()
 	
 	caller, err := parseAddress(params.Caller)
 	if err != nil {
-		return nil, errors.New("invalid caller address: " + err.Error())
+		return nil, fmt.Errorf("invalid caller address: %w", err)
 	}
 	
 	value, err := parseWeiValue(params.Value)
 	if err != nil {
-		return nil, errors.New("invalid value: " + err.Error())
+		return nil, fmt.Errorf("invalid value: %w", err)
 	}
 	
 	gasLimit, err := strconv.ParseUint(params.GasLimit, 10, 64)
 	if err != nil {
-		return nil, errors.New("invalid gas limit: " + err.Error())
+		return nil, fmt.Errorf("invalid gas limit: %w", err)
 	}
 	
 	inputData, err := parseBytes(params.InputData)
 	if err != nil {
-		return nil, errors.New("invalid input data: " + err.Error())
+		return nil, fmt.Errorf("invalid input data: %w", err)
 	}
 	
 	// TODO: when we have state persistance and cheatcodes add a switch to bypass or not caller balance and give the exact amount required for the call
 	if err := vm.SetBalance(caller, primitives.NewU256(1000000)); err != nil {
-		return nil, errors.New("failed to set caller balance: " + err.Error())
+		return nil, fmt.Errorf("failed to set caller balance: %w", err)
 	}
 	
 	callType := config.CallTypeFromString(params.CallType)
@@ -90,21 +90,21 @@ func ExecuteCall(params types.CallParameters) (*types.CallExecution, error) {
 	case evm.CallTypeCall:
 		target, err := parseAddress(params.Target)
 		if err != nil {
-			return nil, errors.New("invalid target address: " + err.Error())
+			return nil, fmt.Errorf("invalid target address: %w", err)
 		}
 		result, err = vm.ExecuteCall(caller, target, value, inputData, gasLimit)
 		
 	case evm.CallTypeStaticcall:
 		target, err := parseAddress(params.Target)
 		if err != nil {
-			return nil, errors.New("invalid target address: " + err.Error())
+			return nil, fmt.Errorf("invalid target address: %w", err)
 		}
 		result, err = vm.ExecuteStaticCall(caller, target, inputData, gasLimit)
 		
 	case evm.CallTypeDelegatecall:
 		target, err := parseAddress(params.Target)
 		if err != nil {
-			return nil, errors.New("invalid target address: " + err.Error())
+			return nil, fmt.Errorf("invalid target address: %w", err)
 		}
 		result, err = vm.ExecuteDelegateCall(caller, target, inputData, gasLimit)
 		
@@ -114,12 +114,12 @@ func ExecuteCall(params types.CallParameters) (*types.CallExecution, error) {
 	case evm.CallTypeCreate2:
 		salt, err := parseU256(params.Salt)
 		if err != nil {
-			return nil, errors.New("invalid salt: " + err.Error())
+			return nil, fmt.Errorf("invalid salt: %w", err)
 		}
 		result, err = vm.ExecuteCreate2(caller, value, inputData, salt, gasLimit)
 		
 	default:
-		return nil, errors.New("unsupported call type")
+		return nil, config.NewInputParamError(config.ErrorUnsupportedCallType, "call_type")
 	}
 	
 	if err != nil {
@@ -174,7 +174,7 @@ func IsValidHex(data string) bool {
 
 func parseAddress(addr string) (primitives.Address, error) {
 	if !IsValidAddress(addr) {
-		return primitives.Address{}, errors.New("invalid address format")
+		return primitives.Address{}, config.NewInputParamError(config.ErrorInvalidCallerAddress, "address")
 	}
 	
 	hexStr := addr[2:]
@@ -190,7 +190,7 @@ func parseAddress(addr string) (primitives.Address, error) {
 
 func parseU256(value string) (primitives.U256, error) {
 	if !IsValidHex(value) {
-		return primitives.U256{}, errors.New("invalid hex format")
+		return primitives.U256{}, config.NewInputParamError(config.ErrorInvalidInputData, "hex_value")
 	}
 	
 	hexStr := value[2:]
@@ -211,7 +211,7 @@ func parseU256(value string) (primitives.U256, error) {
 
 func parseBytes(data string) (primitives.Bytes, error) {
 	if !IsValidHex(data) {
-		return primitives.Bytes{}, errors.New("invalid hex format")
+		return primitives.Bytes{}, config.NewInputParamError(config.ErrorInvalidInputData, "hex_data")
 	}
 	
 	hexStr := data[2:]
@@ -231,7 +231,7 @@ func parseWeiValue(value string) (primitives.U256, error) {
 	// Parse as decimal number
 	val, err := strconv.ParseUint(value, 10, 64)
 	if err != nil {
-		return primitives.U256{}, errors.New("value must be a valid number")
+		return primitives.U256{}, config.NewInputParamError(config.ErrorInvalidValue, "value")
 	}
 	
 	// Convert to U256

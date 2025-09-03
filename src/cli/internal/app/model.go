@@ -1,7 +1,6 @@
 package app
 
 import (
-	"errors"
 	"guillotine-cli/internal/config"
 	"guillotine-cli/internal/types"
 	"guillotine-cli/internal/ui"
@@ -174,27 +173,27 @@ func validateField(fieldName, value string) error {
 	switch fieldName {
 	case config.CallParamCaller:
 		if !IsValidAddress(value) {
-			return errors.New("caller address must be a valid 40-character hex address")
+			return config.NewInputParamError(config.ErrorInvalidCallerAddress, fieldName)
 		}
 	case config.CallParamTarget:
 		if !IsValidAddress(value) {
-			return errors.New("target address must be a valid 40-character hex address")
+			return config.NewInputParamError(config.ErrorInvalidTargetAddress, fieldName)
 		}
 	case config.CallParamValue:
 		if _, err := strconv.ParseUint(value, 10, 64); err != nil {
-			return errors.New("value must be a valid number in Wei (e.g., 0, 1000000)")
+			return config.NewInputParamError(config.ErrorInvalidValue, fieldName)
 		}
 	case config.CallParamGasLimit:
 		if _, err := strconv.ParseUint(value, 10, 64); err != nil {
-			return errors.New("gas limit must be a valid number")
+			return config.NewInputParamError(config.ErrorInvalidGasLimit, fieldName)
 		}
 	case config.CallParamInput:
 		if !IsValidHex(value) {
-			return errors.New("input data must be valid hex (starting with 0x)")
+			return config.NewInputParamError(config.ErrorInvalidInputData, fieldName)
 		}
 	case config.CallParamSalt:
 		if !IsValidHex(value) {
-			return errors.New("salt must be valid hex for CREATE2 operations")
+			return config.NewInputParamError(config.ErrorInvalidSalt, fieldName)
 		}
 	}
 	return nil
@@ -266,7 +265,12 @@ func (m Model) handleCallEditSave() (tea.Model, tea.Cmd) {
 	
 	// Field-specific validation
 	if err := validateField(m.editingParam, value); err != nil {
-		m.validationError = err.Error()
+		// Use UIError for better user experience in UI context
+		if inputErr, ok := err.(config.InputParamError); ok {
+			m.validationError = inputErr.UIError()
+		} else {
+			m.validationError = err.Error()
+		}
 		return m, nil
 	}
 	
