@@ -27,7 +27,7 @@ func CreateTextInput(paramName, currentValue string) textinput.Model {
 	case config.CallParamGasLimit:
 		ti.CharLimit = 10
 		ti.Placeholder = "100000"
-	case config.CallParamInput:
+	case config.CallParamInput, config.CallParamInputDeploy:
 		ti.CharLimit = 1000
 		ti.Placeholder = "0x"
 	case config.CallParamSalt:

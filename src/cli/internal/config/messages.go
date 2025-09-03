@@ -10,23 +10,24 @@ const (
 	LoadingMessage = "Loading..."
 	
 	// Menu items
-	MenuMakeCall   = "Make Call"
+	MenuMakeCall   = "Make call"
 	MenuExit       = "Exit"
 	
 	// Call parameter names
-	CallParamCallType    = "Call Type"
-	CallParamCaller      = "Caller Address"
-	CallParamTarget      = "Target Address"
-	CallParamValue       = "Value (Wei)"
-	CallParamInput       = "Input Data"
-	CallParamGasLimit    = "Gas Limit"
-	CallParamSalt        = "Salt (CREATE2 only)"
+	CallParamCallType    = "Call type"
+	CallParamCaller      = "Caller address"
+	CallParamTarget      = "Target address"
+	CallParamValue       = "Value (wei)"
+	CallParamInput       = "Input data"
+	CallParamInputDeploy = "Input data (deployment bytecode)"
+	CallParamGasLimit    = "Gas limit"
+	CallParamSalt        = "Salt"
 	
 	// Call states
-	CallStateTitle       = "Configure Call Parameters"
-	CallEditTitle        = "Edit Parameter"
-	CallExecutingTitle   = "Executing Call"
-	CallResultTitle      = "Call Result"
+	CallStateTitle       = "Configure call parameters"
+	CallEditTitle        = "Edit parameter"
+	CallExecutingTitle   = "Executing call"
+	CallResultTitle      = "Call result"
 	
 	// Call messages
 	CallExecutingMsg     = "Executing EVM call..."
