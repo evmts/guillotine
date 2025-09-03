@@ -51,3 +51,15 @@ pub const FROBENIUS_G2_Y_COEFF = Fp2Mont{ .u0 = FpMont{ .value = 0x253570bea500f
 
 // Frobenius coefficients for Fp12
 pub const FROBENIUS_COEFF_FP12 = Fp2Mont{ .u0 = FpMont{ .value = 0x2f34d751a1f3a7c11bded5ef08a2087ca6b1d7387afb78aaf9ba69633144907 }, .u1 = FpMont{ .value = 0x10a75716b3899551dc2ff3a253dfc926d00f02a4565de15ba222ae234c492d72 } };
+
+// GLS constants
+pub const cube_root_of_unity = 2203960485148121921418603742825762020974279258880205651966;
+pub const GLS_LAMBDA = 4407920970296243842393367215006156084916469457145843978461;
+
+// this is the lattice basis for the GLS scheme
+// it generates all (x,y) s.t. x + y * lambda = 0 mod r
+
+pub const v1_x = 9931322734385697763;
+pub const v1_y = 147946756881789319000765030803803410728;
+pub const v2_x = 147946756881789319010696353538189108491;
+pub const v2_y = 9931322734385697763;

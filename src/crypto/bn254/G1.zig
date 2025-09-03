@@ -195,24 +195,87 @@ pub fn addAssign(self: *G1, other: *const G1) void {
     self.* = self.add(other);
 }
 
-pub fn mul(self: *const G1, scalar: *const Fr) G1 {
-    return self.mul_by_int(scalar.value);
+// pub fn mul(self: *const G1, scalar: *const Fr) G1 {
+//     return self.mul_by_int(scalar.value);
+// }
+
+// pub fn mul_by_int(self: *const G1, scalar: u256) G1 {
+//     if (self.isInfinity()) {
+//         return INFINITY;
+//     }
+//     var result = INFINITY;
+//     var base = self.*;
+//     var exp = scalar;
+//     while (exp > 0) : (exp >>= 1) {
+//         if (exp & 1 == 1) {
+//             result.addAssign(&base);
+//         }
+//         base.doubleAssign();
+//     }
+//     return result;
+// }
+
+pub fn GLS_endomorphism(self: *const G1) G1 {
+    const cube_root = FpMont.init(curve_parameters.cube_root_of_unity);
+    const point_aff = self.toAffine();
+    return G1{
+        .x = point_aff.x.mul(&cube_root),
+        .y = point_aff.y,
+        .z = FpMont.ONE,
+    };
+}
+
+pub const scalar_decomposition = struct {
+    k1: u128,
+    k2: u128,
+};
+
+pub fn decomposeScalar(scalar: u256) scalar_decomposition {
+    const k: i512 = @intCast(scalar);
+    const r_mod = curve_parameters.FR_MOD;
+    const v1_x = curve_parameters.v1_x;
+    const v1_y = curve_parameters.v1_y;
+    const v2_x = curve_parameters.v2_x;
+    const v2_y = curve_parameters.v2_y;
+
+    const c1 = @divTrunc(v2_y * k, r_mod);
+    const c2 = @divTrunc(v1_y * k, r_mod);
+
+    const k1 = k - c1 * v1_x - c2 * v2_x;
+    const k2 = c1 * (-v1_y) + c2 * v2_y;
+
+    return scalar_decomposition{ .k1 = @intCast(k1), .k2 = @intCast(k2) };
 }
 
 pub fn mul_by_int(self: *const G1, scalar: u256) G1 {
-    if (self.isInfinity()) {
-        return INFINITY;
-    }
+    const decomposition = decomposeScalar(scalar);
+    const k1 = decomposition.k1;
+    const k2 = decomposition.k2;
+
+    const P = self;
+    const Q = self.GLS_endomorphism().neg();
+    const P_plus_Q = P.add(&Q);
+
     var result = INFINITY;
-    var base = self.*;
-    var exp = scalar;
-    while (exp > 0) : (exp >>= 1) {
-        if (exp & 1 == 1) {
-            result.addAssign(&base);
+
+    for (0..128) |i| {
+        const k1_bit = (k1 >> @intCast(127 - i)) & 1;
+        const k2_bit = (k2 >> @intCast(127 - i)) & 1;
+        result.doubleAssign();
+
+        if (k1_bit == 1 and k2_bit == 1) {
+            result.addAssign(&P_plus_Q);
+        } else if (k1_bit == 1) {
+            result.addAssign(P);
+        } else if (k2_bit == 1) {
+            result.addAssign(&Q);
         }
-        base.doubleAssign();
     }
     return result;
+}
+
+pub fn mul(self: *const G1, scalar: *const Fr) G1 {
+    return self.mul_by_int(scalar.value);
 }
 
 pub fn mulAssign(self: *G1, scalar: *const Fr) void {
@@ -406,3 +469,47 @@ test "G1.mulAssign basic assignment" {
     a.mulAssign(&scalar);
     try std.testing.expect(a.equal(&expected));
 }
+
+test "G1.GLS_endomorphism" {
+    const gen = G1.GENERATOR;
+
+    const test_values = [_]Fr{
+        Fr.init(1),
+        Fr.init(2654765),
+        Fr.init(34567898765434567898765434567898765434567898765434567898765434567898765434567),
+        Fr.init(45677654345678987654345678987654345678987654345678987654345678),
+        Fr.init(5678456789876543456789876543456789876543456789876543456789876543456789),
+    };
+
+    for (test_values) |value| {
+        const point = gen.mul(&value);
+        const endo = point.GLS_endomorphism();
+        const point_times_lambda = point.mul(&Fr.init(curve_parameters.GLS_LAMBDA));
+        try std.testing.expect(point_times_lambda.equal(&endo));
+    }
+}
+
+test "G1.decomposeScalar" {
+    const lambda = curve_parameters.GLS_LAMBDA;
+
+    const test_values = [_]Fr{
+        Fr.init(1),
+        Fr.init(2654765),
+        Fr.init(34567898765434567898765434567898765434567898765434567898765434567898765434567),
+        Fr.init(45677654345678987654345678987654345678987654345678987654345678),
+        Fr.init(5678456789876543456789876543456789876543456789876543456789876543456789),
+    };
+
+    for (test_values) |value| {
+        const decomposition = G1.decomposeScalar(value.value);
+        try std.testing.expect(decomposition.k2 >= 0);
+        try std.testing.expect(@mod(decomposition.k1 + lambda * (-@as(i512, decomposition.k2)), curve_parameters.FR_MOD) == value.value);
+    }
+}
+
+// test "G1.GLS_scalar_mul" {
+//     const gen = G1.GENERATOR;
+//     const scalar = Fr.init(3567845675456765456765456765467546754675467545674567);
+//     const result = gen.GLS_scalar_mul(&scalar);
+//     try std.testing.expect(result.equal(&gen.mul(&scalar)));
+// }
