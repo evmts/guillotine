@@ -33,11 +33,6 @@ const (
 	CallSuccessMsg       = "Call executed successfully"
 	CallFailureMsg       = "Call execution failed"
 	
-	// Call instructions (now handled by help.go)
-	// CallParamListInstructions = "↑/↓ Navigate  Enter: Edit  x: Execute  r: Reset  Ctrl+r: Reset All  Esc: Back"
-	// CallEditInstructions      = "Enter: Save  r: Reset to Default  Esc: Cancel"
-	// CallResultInstructions    = "Enter: Continue  Esc: Back to menu"
-	
 	// Call type options
 	CallTypeCall         = "CALL"
 	CallTypeStaticCall   = "STATICCALL"
