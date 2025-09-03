@@ -187,7 +187,7 @@ func validateField(fieldName, value string) error {
 		if _, err := strconv.ParseUint(value, 10, 64); err != nil {
 			return config.NewInputParamError(config.ErrorInvalidGasLimit, fieldName)
 		}
-	case config.CallParamInput:
+	case config.CallParamInput, config.CallParamInputDeploy:
 		if !IsValidHex(value) {
 			return config.NewInputParamError(config.ErrorInvalidInputData, fieldName)
 		}

@@ -34,12 +34,29 @@ func (cp *CallParameters) GetParams() []CallParameter {
 	params := []CallParameter{
 		{Name: config.CallParamCallType, Value: cp.CallType},
 		{Name: config.CallParamCaller, Value: cp.Caller},
-		{Name: config.CallParamTarget, Value: cp.Target},
-		{Name: config.CallParamValue, Value: cp.Value},
-		{Name: config.CallParamGasLimit, Value: cp.GasLimit},
-		{Name: config.CallParamInput, Value: cp.InputData},
 	}
 	
+	// Hide target address for CREATE and CREATE2
+	if cp.CallType != config.CallTypeCreate && cp.CallType != config.CallTypeCreate2 {
+		params = append(params, CallParameter{Name: config.CallParamTarget, Value: cp.Target})
+	}
+	
+	// Hide value for STATICCALL
+	if cp.CallType != config.CallTypeStaticCall {
+		params = append(params, CallParameter{Name: config.CallParamValue, Value: cp.Value})
+	}
+	
+	// Always show gas limit
+	params = append(params, CallParameter{Name: config.CallParamGasLimit, Value: cp.GasLimit})
+	
+	// Show input data with context-aware label
+	inputDataLabel := config.CallParamInput
+	if cp.CallType == config.CallTypeCreate || cp.CallType == config.CallTypeCreate2 {
+		inputDataLabel = config.CallParamInputDeploy
+	}
+	params = append(params, CallParameter{Name: inputDataLabel, Value: cp.InputData})
+	
+	// Show salt only for CREATE2
 	if cp.CallType == config.CallTypeCreate2 {
 		params = append(params, CallParameter{Name: config.CallParamSalt, Value: cp.Salt})
 	}
@@ -59,7 +76,7 @@ func (cp *CallParameters) SetParam(name, value string) {
 		cp.Value = value
 	case config.CallParamGasLimit:
 		cp.GasLimit = value
-	case config.CallParamInput:
+	case config.CallParamInput, config.CallParamInputDeploy:
 		cp.InputData = value
 	case config.CallParamSalt:
 		cp.Salt = value
