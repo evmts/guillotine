@@ -31,7 +31,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const bytes = addr.bytes;
             var value: u256 = 0;
             for (bytes) |byte| {
-                value = (value << 8) | @as(u256, byte);
+                value = std.math.shl(u256, value, 8) | @as(u256, byte);
             }
             return @as(WordType, @truncate(value));
         }
@@ -1611,7 +1611,7 @@ test "Address conversion - from_u256 edge cases" {
     try testing.expectEqual(expected_max, max_addr);
 
     // Test truncation from u256
-    const large_value: u256 = (1 << 200) | 0x1234567890ABCDEF1234567890ABCDEF12345678;
+    const large_value: u256 = std.math.shl(u256, 1, 200) | 0x1234567890ABCDEF1234567890ABCDEF12345678;
     const truncated = TestFrame.SystemHandlers.from_u256(large_value);
     // Should only keep lower 160 bits
     const expected_bytes = [_]u8{ 0x12, 0x34, 0x56, 0x78, 0x90, 0xAB, 0xCD, 0xEF, 0x12, 0x34, 0x56, 0x78, 0x90, 0xAB, 0xCD, 0xEF, 0x12, 0x34, 0x56, 0x78 };

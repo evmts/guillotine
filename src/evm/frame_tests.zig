@@ -515,7 +515,7 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             // Calculate expected value
             var expected: u256 = 0;
             for (1..17) |i| {
-                expected = (expected << 8) | @as(u256, i);
+                expected = std.math.shl(u256, expected, 8) | @as(u256, i);
             }
             // The interpreter would handle PUSH16 using push16_handler
             try frame.stack.push(expected);
@@ -942,7 +942,7 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const result2 = try frame.stack.pop();
             try std.testing.expectEqual(@as(u256, 0xFF), result2);
             // Test extracting byte 0 (leftmost) from a value
-            const value: u256 = @as(u256, 0xAB) << 248; // Put 0xAB in the leftmost byte
+            const value: u256 = std.math.shl(u256, @as(u256, 0xAB), 248); // Put 0xAB in the leftmost byte
             try frame.stack.push(value);
             try frame.stack.push(0);
             _ = try frame.byte(createTestHandlerChain(@TypeOf(frame)));
@@ -1027,13 +1027,13 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const result1 = try frame.stack.pop();
             try std.testing.expectEqual(@as(u256, 1), result1);
             // Test negative number (sign bit = 1)
-            const negative = @as(u256, 1) << 255 | 0xFF00; // Set sign bit and some data
+            const negative = std.math.shl(u256, @as(u256, 1), 255) | 0xFF00; // Set sign bit and some data
             try frame.stack.push(negative);
             try frame.stack.push(8);
             _ = try frame.sar(createTestHandlerChain(@TypeOf(frame)));
             const result2 = try frame.stack.pop();
             // Should fill with 1s from the left
-            const expected2 = (@as(u256, std.math.maxInt(u256)) << 247) | 0xFF;
+            const expected2 = std.math.shl(u256, @as(u256, std.math.maxInt(u256)), 247) | 0xFF;
             try std.testing.expectEqual(expected2, result2);
             // Test shift >= 256 with positive number returns 0
             try frame.stack.push(0x7FFFFFFF); // Positive (sign bit = 0)
@@ -1042,7 +1042,7 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const result3 = try frame.stack.pop();
             try std.testing.expectEqual(@as(u256, 0), result3);
             // Test shift >= 256 with negative number returns max value
-            try frame.stack.push(@as(u256, 1) << 255); // Negative (sign bit = 1)
+            try frame.stack.push(std.math.shl(u256, @as(u256, 1), 255)); // Negative (sign bit = 1)
             try frame.stack.push(256);
             _ = try frame.sar(createTestHandlerChain(@TypeOf(frame)));
             const result4 = try frame.stack.pop();
@@ -1098,7 +1098,7 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const result2 = try frame.stack.pop();
             try std.testing.expectEqual(@as(u256, 0), result2);
             // Test overflow with large numbers
-            const large = @as(u256, 1) << 128;
+            const large = std.math.shl(u256, @as(u256, 1), 128);
             try frame.stack.push(large);
             try frame.stack.push(large);
             _ = try frame.mul(createTestHandlerChain(@TypeOf(frame)));
@@ -1185,7 +1185,7 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const expected2 = @as(u256, @bitCast(@as(i256, -4)));
             try std.testing.expectEqual(expected2, result2);
             // Test MIN_I256 / -1 = MIN_I256 (overflow case)
-            const min_i256 = @as(u256, 1) << 255;
+            const min_i256 = std.math.shl(u256, @as(u256, 1), 255);
             const neg_1 = @as(u256, @bitCast(@as(i256, -1)));
             try frame.stack.push(min_i256);
             try frame.stack.push(neg_1);
@@ -1332,7 +1332,7 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const simple_result = try frame.stack.pop();
             try std.testing.expectEqual(@as(u256, 96), simple_result);
             // Test that large % 100 = 56
-            const large = @as(u256, 1) << 128;
+            const large = std.math.shl(u256, @as(u256, 1), 128);
             try std.testing.expectEqual(@as(u256, 56), large % 100);
             // Test overflow handling: (2^128 * 2^128) % 100
             // This tests the modular multiplication
@@ -1560,8 +1560,8 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const result3 = try frame.stack.pop();
             try std.testing.expectEqual(@as(u256, 0), result3);
             // Test MIN_INT < MAX_INT = 1
-            const min_int = @as(u256, 1) << 255; // Sign bit set
-            const max_int = (@as(u256, 1) << 255) - 1; // All bits except sign bit
+            const min_int = std.math.shl(u256, @as(u256, 1), 255); // Sign bit set
+            const max_int = std.math.shl(u256, @as(u256, 1), 255) - 1; // All bits except sign bit
             try frame.stack.push(min_int);
             try frame.stack.push(max_int);
             _ = try frame.slt(createTestHandlerChain(@TypeOf(frame)));
@@ -1597,8 +1597,8 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const result3 = try frame.stack.pop();
             try std.testing.expectEqual(@as(u256, 0), result3);
             // Test MAX_INT > MIN_INT = 1
-            const min_int = @as(u256, 1) << 255; // Sign bit set
-            const max_int = (@as(u256, 1) << 255) - 1; // All bits except sign bit
+            const min_int = std.math.shl(u256, @as(u256, 1), 255); // Sign bit set
+            const max_int = std.math.shl(u256, @as(u256, 1), 255) - 1; // All bits except sign bit
             try frame.stack.push(max_int);
             try frame.stack.push(min_int);
             _ = try frame.sgt(createTestHandlerChain(@TypeOf(frame)));
@@ -1916,7 +1916,7 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const word = try frame.stack.pop();
             // The byte at offset 5 should be 0xFF
             // In a 32-byte word, byte 5 is at bit position 216-223 (from the right)
-            const byte_5 = @as(u8, @truncate((word >> (26 * 8)) & 0xFF));
+            const byte_5 = @as(u8, @truncate(std.math.shr(u256, word, 26 * 8) & 0xFF));
             try std.testing.expectEqual(@as(u8, 0xFF), byte_5);
             // Store another byte and check
             try frame.stack.push(0x1234ABCD); // value (only 0xCD will be stored)
@@ -1925,7 +1925,7 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             try frame.stack.push(0);
             _ = try frame.mload(createTestHandlerChain(@TypeOf(frame)));
             const word2 = try frame.stack.pop();
-            const byte_10 = @as(u8, @truncate((word2 >> (21 * 8)) & 0xFF));
+            const byte_10 = @as(u8, @truncate(std.math.shr(u256, word2, 21 * 8) & 0xFF));
             try std.testing.expectEqual(@as(u8, 0xCD), byte_10);
         }
         test "trace instructions behavior with different tracer types" {
@@ -2544,7 +2544,7 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const sub_underflow = try frame.stack.pop();
             try std.testing.expectEqual(std.math.maxInt(u256), sub_underflow);
             // Test MUL overflow - large values should wrap
-            const large_val = @as(u256, 1) << 128; // 2^128
+            const large_val = std.math.shl(u256, @as(u256, 1), 128); // 2^128
             try frame.stack.push(large_val);
             try frame.stack.push(large_val);
             _ = try frame.mul(createTestHandlerChain(@TypeOf(frame)));
@@ -2573,7 +2573,7 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const div_zero = try frame.stack.pop();
             try std.testing.expectEqual(@as(u256, 0), div_zero);
             // Test signed division overflow case: -2^255 / -1 = -2^255 (stays same due to overflow)
-            const min_i256 = @as(u256, 1) << 255; // -2^255 in two's complement
+            const min_i256 = std.math.shl(u256, @as(u256, 1), 255); // -2^255 in two's complement
             const neg_one = std.math.maxInt(u256); // -1 in two's complement
             try frame.stack.push(min_i256);
             try frame.stack.push(neg_one);
@@ -2603,7 +2603,7 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const mod_zero = try frame.stack.pop();
             try std.testing.expectEqual(@as(u256, 0), mod_zero);
             // Test signed modulo edge cases
-            const min_i256 = @as(u256, 1) << 255; // -2^255 in two's complement
+            const min_i256 = std.math.shl(u256, @as(u256, 1), 255); // -2^255 in two's complement
             const neg_one = std.math.maxInt(u256); // -1 in two's complement
             // Test -2^255 % -1 = 0 (special case)
             try frame.stack.push(min_i256);
@@ -2891,7 +2891,7 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
             var frame = try F.init(allocator, &bytecode, 1000000, void{}, evm_ptr);
             defer frame.deinit(allocator);
-            const min_i256 = @as(u256, 1) << 255; // Most negative number in two's complement
+            const min_i256 = std.math.shl(u256, @as(u256, 1), 255); // Most negative number in two's complement
             const max_i256 = (@as(u256, 1) << 255) - 1; // Most positive number in two's complement
             // Test SLT: min_i256 < max_i256 should be true
             try frame.stack.push(max_i256);

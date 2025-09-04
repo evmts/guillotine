@@ -111,7 +111,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
                     var hash_u256: u256 = 0;
                     for (hash_bytes) |b| {
-                        hash_u256 = (hash_u256 << 8) | @as(u256, b);
+                        hash_u256 = std.math.shl(u256, hash_u256, 8) | @as(u256, b);
                     }
                     break :blk @as(WordType, hash_u256);
                 },
@@ -127,7 +127,7 @@ pub fn Handlers(comptime FrameType: type) type {
                     // Take first 8 bytes for u64
                     var hash_u64: u64 = 0;
                     for (hash_bytes[0..8]) |b| {
-                        hash_u64 = (hash_u64 << 8) | @as(u64, b);
+                        hash_u64 = std.math.shl(u64, hash_u64, 8) | @as(u64, b);
                     }
                     break :blk @as(WordType, hash_u64);
                 },
@@ -143,7 +143,7 @@ pub fn Handlers(comptime FrameType: type) type {
                     // Take first 4 bytes for u32
                     var hash_u32: u32 = 0;
                     for (hash_bytes[0..4]) |b| {
-                        hash_u32 = (hash_u32 << 8) | @as(u32, b);
+                        hash_u32 = std.math.shl(u32, hash_u32, 8) | @as(u32, b);
                     }
                     break :blk @as(WordType, hash_u32);
                 },
@@ -158,7 +158,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
                     var hash_u256: u256 = 0;
                     for (hash_bytes) |b| {
-                        hash_u256 = (hash_u256 << 8) | @as(u256, b);
+                        hash_u256 = std.math.shl(u256, hash_u256, 8) | @as(u256, b);
                     }
                     break :blk @as(WordType, @truncate(hash_u256));
                 },

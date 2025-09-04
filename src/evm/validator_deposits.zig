@@ -115,7 +115,7 @@ pub const ValidatorDepositsContract = struct {
         
         // Parse amount (8 bytes, big-endian)
         for (input[80..88]) |byte| {
-            deposit.amount = (deposit.amount << 8) | byte;
+            deposit.amount = std.math.shl(u64, deposit.amount, 8) | byte;
         }
         
         // Copy signature
@@ -123,7 +123,7 @@ pub const ValidatorDepositsContract = struct {
         
         // Parse index (8 bytes, big-endian)
         for (input[184..192]) |byte| {
-            deposit.index = (deposit.index << 8) | byte;
+            deposit.index = std.math.shl(u64, deposit.index, 8) | byte;
         }
         
         // Validate deposit amount (minimum 1 ETH = 1e9 Gwei)
@@ -157,7 +157,7 @@ pub const ValidatorDepositsContract = struct {
             deposit_hash ^= byte;
         }
         for (deposit.withdrawal_credentials) |byte| {
-            deposit_hash ^= (@as(u256, byte) << 8);
+            deposit_hash ^= std.math.shl(u256, @as(u256, byte), 8);
         }
         
         try self.database.set_storage(

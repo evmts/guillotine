@@ -191,7 +191,7 @@ pub fn Handlers(comptime FrameType: type) type {
                 if (multiplier & 1 == 1) {
                     result = addmod_safe(result, base, modulus);
                 }
-                multiplier >>= 1;
+                multiplier = std.math.shr(WordType, multiplier, 1);
                 if (multiplier > 0) {
                     base = addmod_safe(base, base, modulus);
                 }
@@ -227,7 +227,7 @@ pub fn Handlers(comptime FrameType: type) type {
             var exp_bytes: u32 = 0;
             if (exponent > 0) {
                 var temp_exp = exponent;
-                while (temp_exp > 0) : (temp_exp >>= 8) {
+                while (temp_exp > 0) : (temp_exp = std.math.shr(WordType, temp_exp, 8)) {
                     exp_bytes += 1;
                 }
             }
@@ -242,7 +242,7 @@ pub fn Handlers(comptime FrameType: type) type {
             var result: WordType = 1;
             var base_working = base;
             var exponent_working = exponent;
-            while (exponent_working > 0) : (exponent_working >>= 1) {
+            while (exponent_working > 0) : (exponent_working = std.math.shr(WordType, exponent_working, 1)) {
                 if (exponent_working & 1 == 1) {
                     result *%= base_working;
                 }
@@ -280,8 +280,8 @@ pub fn Handlers(comptime FrameType: type) type {
                 // Cast bit_index to the appropriate shift type
                 const shift_amount = @as(u8, @intCast(bit_index));
 
-                const mask = (@as(WordType, 1) << shift_amount) - 1;
-                const sign_bit = (value >> shift_amount) & 1;
+                const mask = std.math.shl(WordType, @as(WordType, 1), shift_amount) - 1;
+                const sign_bit = std.math.shr(WordType, value, shift_amount) & 1;
                 if (sign_bit == 1) {
                     result = value | ~mask;
                 } else {
@@ -489,7 +489,7 @@ test "SDIV opcode - MIN/-1 overflow case" {
     defer frame.deinit(testing.allocator);
 
     // Test: MIN_SIGNED / -1 = MIN_SIGNED (special case)
-    const min_signed = @as(u256, 1) << 255; // 0x8000...000
+    const min_signed = std.math.shl(u256, @as(u256, 1), 255); // 0x8000...000
     const neg_1 = std.math.maxInt(u256);
 
     try frame.stack.push(min_signed);
@@ -801,7 +801,7 @@ test "SIGNEXTEND opcode - all edge indices" {
         .{ .index = 1, .value = 0x7FFF, .expected = 0x7FFF },
 
         // Index 30: extend from byte 30
-        .{ .index = 30, .value = 0x80 << (30 * 8), .expected = std.math.maxInt(u256) - ((1 << (31 * 8)) - 1) + (0x80 << (30 * 8)) },
+        .{ .index = 30, .value = std.math.shl(u256, 0x80, 30 * 8), .expected = std.math.maxInt(u256) - (std.math.shl(u256, 1, 31 * 8) - 1) + std.math.shl(u256, 0x80, 30 * 8) },
 
         // Index 31: no extension needed (full 32 bytes)
         .{ .index = 31, .value = std.math.maxInt(u256), .expected = std.math.maxInt(u256) },
@@ -865,7 +865,7 @@ test "MUL opcode - multiplication overflow" {
     defer frame.deinit(testing.allocator);
 
     // Test: (2^128) * (2^128) = 0 (overflow wraps)
-    const large = @as(u256, 1) << 128;
+    const large = std.math.shl(u256, @as(u256, 1), 128);
     try frame.stack.push(large);
     try frame.stack.push(large);
 
@@ -976,7 +976,7 @@ test "ADDMOD opcode - large numbers" {
     defer frame.deinit(testing.allocator);
 
     // Test: ((2^255) + (2^255)) % 7 = expected
-    const large = @as(u256, 1) << 255;
+    const large = std.math.shl(u256, @as(u256, 1), 255);
     try frame.stack.push(large);
     try frame.stack.push(large);
     try frame.stack.push(7);
@@ -993,7 +993,7 @@ test "MULMOD opcode - large multiplication" {
     defer frame.deinit(testing.allocator);
 
     // Test: ((2^200) * (2^200)) % 13
-    const large = @as(u256, 1) << 200;
+    const large = std.math.shl(u256, @as(u256, 1), 200);
     try frame.stack.push(large);
     try frame.stack.push(large);
     try frame.stack.push(13);

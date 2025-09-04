@@ -133,7 +133,7 @@ pub fn Memory(comptime config: MemoryConfig) type {
             const offset_usize = @as(usize, offset);
             const end = offset_usize + data.len;
             // Round up to next 32-byte word boundary for EVM compliance
-            const word_aligned_end = ((end + 31) >> 5) << 5;
+            const word_aligned_end = std.math.shl(usize, std.math.shr(usize, end + 31, 5), 5);
             try self.ensure_capacity(allocator, @as(u24, @intCast(word_aligned_end)));
             const checkpoint_usize = @as(usize, self.checkpoint);
             const start_idx = checkpoint_usize + offset_usize;
@@ -189,7 +189,7 @@ pub fn Memory(comptime config: MemoryConfig) type {
             if (bytes.len != WORD_SIZE) {
                 // Fallback for non-standard sizes
                 var result: u256 = 0;
-                for (bytes) |byte| result = (result << 8) | byte;
+                for (bytes) |byte| result = std.math.shl(u256, result, 8) | byte;
                 return result;
             }
             return std.mem.readInt(u256, bytes[0..WORD_SIZE], .big);
@@ -203,7 +203,7 @@ pub fn Memory(comptime config: MemoryConfig) type {
         // EVM-compliant read that expands memory if needed
         pub fn get_u256_evm(self: *Self, allocator: std.mem.Allocator, offset: u24) !u256 {
             const offset_usize = @as(usize, offset);
-            const word_aligned_end = ((offset_usize + 32 + 31) >> 5) << 5;
+            const word_aligned_end = std.math.shl(usize, std.math.shr(usize, offset_usize + 32 + 31, 5), 5);
             try self.ensure_capacity(allocator, @as(u24, @intCast(word_aligned_end)));
             const slice = try self.get_slice_internal(offset, 32);
             return bytes_to_u256(slice);
@@ -243,14 +243,14 @@ pub fn Memory(comptime config: MemoryConfig) type {
                 // Return max cost for unrealistic memory sizes
                 return std.math.maxInt(u64);
             }
-            return 3 * words + ((words * words) >> 9); // Bit shift instead of / 512
+            return 3 * words + std.math.shr(u64, words * words, 9); // Using std.math.shr instead of / 512
         }
         pub fn get_expansion_cost(self: *Self, new_size: u24) u64 {
             const new_size_u64 = @as(u64, new_size);
             const current_size = @as(u64, @intCast(self.size_internal()));
             if (new_size_u64 <= current_size) return 0;
-            const new_words = (new_size_u64 + 31) >> 5; // Bit shift instead of / 32
-            const current_words = (current_size + 31) >> 5; // Bit shift instead of / 32
+            const new_words = std.math.shr(u64, new_size_u64 + 31, 5); // Using std.math.shr instead of / 32
+            const current_words = std.math.shr(u32, current_size + 31, 5); // Using std.math.shr instead of / 32
             const new_cost = calculate_memory_cost(new_words);
             const current_cost = calculate_memory_cost(current_words);
             return new_cost - current_cost;

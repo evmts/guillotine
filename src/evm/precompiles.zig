@@ -662,9 +662,9 @@ pub fn execute_blake2f(allocator: std.mem.Allocator, input: []const u8, gas_limi
     }
 
     // Parse rounds from first 4 bytes (big-endian)
-    const rounds = (@as(u32, input[0]) << 24) |
-        (@as(u32, input[1]) << 16) |
-        (@as(u32, input[2]) << 8) |
+    const rounds = std.math.shl(u32, @as(u32, input[0]), 24) |
+        std.math.shl(u32, @as(u32, input[1]), 16) |
+        std.math.shl(u32, @as(u32, input[2]), 8) |
         @as(u32, input[3]);
 
     const required_gas = rounds * GasCosts.BLAKE2F_PER_ROUND;
@@ -955,7 +955,7 @@ pub fn execute_bls12_381_map_fp_to_g1(allocator: std.mem.Allocator, input: []con
 fn bytesToU256(bytes: []const u8) u256 {
     var result: u256 = 0;
     for (bytes) |byte| {
-        result = (result << 8) | byte;
+        result = std.math.shl(u256, result, 8) | byte;
     }
     return result;
 }
@@ -965,7 +965,7 @@ fn bytesToU32(bytes: []const u8) u32 {
     // This handles Ethereum’s 32-byte length encoding where only the last byte is often set.
     var result: u32 = 0;
     for (bytes) |byte| {
-        result = (result << 8) | byte;
+        result = std.math.shl(u256, result, 8) | byte;
     }
     return result;
 }
@@ -976,7 +976,7 @@ fn u256ToBytes(value: u256, output: []u8) void {
     while (i > 0) {
         i -= 1;
         output[i] = @intCast(v & 0xFF);
-        v >>= 8;
+        v = std.math.shr(u256, v, 8);
     }
 }
 

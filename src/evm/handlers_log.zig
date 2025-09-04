@@ -479,7 +479,7 @@ test "LOG opcodes - all topics patterns" {
     try frame.stack.push(0); // length
     try frame.stack.push(0xFF); // topic1 - small value
     try frame.stack.push(0x8000000000000000); // topic2 - high bit set
-    try frame.stack.push((1 << 128) - 1); // topic3 - max 128-bit
+    try frame.stack.push(std.math.shl(u256, 1, 128) - 1); // topic3 - max 128-bit
     try frame.stack.push(std.math.maxInt(u256) - 1); // topic4 - almost max
 
     const dispatch = createMockDispatch();
@@ -488,7 +488,7 @@ test "LOG opcodes - all topics patterns" {
     const log_entry = mock_host.logs.items[0];
     try testing.expectEqual(@as(u256, 0xFF), log_entry.topics[0]);
     try testing.expectEqual(@as(u256, 0x8000000000000000), log_entry.topics[1]);
-    try testing.expectEqual(@as(u256, (1 << 128) - 1), log_entry.topics[2]);
+    try testing.expectEqual(std.math.shl(u256, @as(u256, 1), 128) - 1, log_entry.topics[2]);
     try testing.expectEqual(std.math.maxInt(u256) - 1, log_entry.topics[3]);
 }
 

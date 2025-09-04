@@ -421,7 +421,7 @@ test "Dispatch - PUSH32 with pointer metadata" {
     try testing.expect(dispatch_items[0].opcode_handler == &TestTypes.mockPush1); // Using mockPush1 for all PUSH variants
 
     // Verify pointer metadata contains the correct large value
-    const expected_value: u256 = (1 << 256) - 1; // 0xFFFF...FFFF (32 bytes of 0xFF)
+    const expected_value: u256 = std.math.maxInt(u256); // 0xFFFF...FFFF (32 bytes of 0xFF) - using maxInt for clarity
     try testing.expect(dispatch_items[1].push_pointer.value.* == expected_value);
 }
 
@@ -1019,7 +1019,7 @@ test "Dispatch - RAII DispatchSchedule for automatic cleanup" {
                 .push_pointer => |ptr_meta| {
                     found_pointer = true;
                     // Verify the pointer contains expected value
-                    const expected_value: u256 = (1 << 128) - 1; // 16 bytes of 0xFF
+                    const expected_value: u256 = std.math.shl(u256, 1, 128) - 1; // 16 bytes of 0xFF
                     try testing.expect(ptr_meta.value.* == expected_value);
                 },
                 else => {},

@@ -235,8 +235,8 @@ test "SLT opcode - signed comparison with max values" {
     // Test: MAX_SIGNED < MIN_SIGNED = 0 (false)
     // MAX_SIGNED = 0x7FFF...FFF
     // MIN_SIGNED = 0x8000...000
-    const max_signed = ((@as(u256, 1) << 255) - 1);
-    const min_signed = (@as(u256, 1) << 255);
+    const max_signed = std.math.shl(u256, @as(u256, 1), 255) - 1;
+    const min_signed = std.math.shl(u256, @as(u256, 1), 255);
 
     try frame.stack.push(max_signed);
     try frame.stack.push(min_signed);
@@ -477,8 +477,8 @@ test "SLT opcode - edge case MIN and MAX" {
     defer frame.deinit(testing.allocator);
 
     // Test: MIN_SIGNED < MAX_SIGNED = 1 (true)
-    const min_signed = @as(u256, 1) << 255;
-    const max_signed = ((@as(u256, 1) << 255) - 1);
+    const min_signed = std.math.shl(u256, @as(u256, 1), 255);
+    const max_signed = std.math.shl(u256, @as(u256, 1), 255) - 1;
 
     try frame.stack.push(min_signed);
     try frame.stack.push(max_signed);
@@ -565,7 +565,7 @@ test "ISZERO opcode - large value" {
     defer frame.deinit(testing.allocator);
 
     // Test: is 2^200 zero? = 0
-    const large = @as(u256, 1) << 200;
+    const large = std.math.shl(u256, @as(u256, 1), 200);
     try frame.stack.push(large);
 
     const dispatch = createMockDispatch();
@@ -668,8 +668,8 @@ test "signed comparisons - boundary edge cases" {
     var frame = try createTestFrame(testing.allocator);
     defer frame.deinit(testing.allocator);
 
-    const min_signed = @as(u256, 1) << 255;
-    const max_signed = ((@as(u256, 1) << 255) - 1);
+    const min_signed = std.math.shl(u256, @as(u256, 1), 255);
+    const max_signed = std.math.shl(u256, @as(u256, 1), 255) - 1;
 
     // Test: MIN_SIGNED < 0 = 1 (most negative is less than 0)
     try frame.stack.push(min_signed);

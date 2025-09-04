@@ -48,6 +48,8 @@ pub fn Handlers(comptime FrameType: type) type {
         /// BYTE opcode (0x1a) - Extract byte from word.
         /// Takes byte index from stack top, value from second position.
         /// Returns the byte at that index or 0 if index >= 32.
+        /// Uses std.math.shr for consistent cross-platform behavior.
+        /// See: https://ziglang.org/documentation/master/std/#std.math.shr
         pub fn byte(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const byte_index = try self.stack.pop(); // Top of stack - byte index
             const value = try self.stack.peek(); // Second from top - value to extract from
@@ -55,14 +57,15 @@ pub fn Handlers(comptime FrameType: type) type {
                 const index_usize = @as(usize, @intCast(byte_index));
                 const shift_amount = (31 - index_usize) * 8;
                 const ShiftType = std.math.Log2Int(WordType);
-                break :blk (value >> @as(ShiftType, @intCast(shift_amount))) & 0xFF;
+                break :blk std.math.shr(WordType, value, @as(ShiftType, @intCast(shift_amount))) & 0xFF;
             };
             self.stack.set_top_unsafe(result);
             const next_cursor = cursor + 1;
             return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
         }
 
-        /// SHL opcode (0x1b) - Shift left operation.
+        /// SHL opcode (0x1b) - Shift left operation using std.math.shl for consistent behavior.
+        /// See: https://ziglang.org/documentation/master/std/#std.math.shl
         pub fn shl(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const shift = try self.stack.pop(); // Top of stack - shift amount
             const value = try self.stack.peek(); // Second from top - value to shift
@@ -71,14 +74,15 @@ pub fn Handlers(comptime FrameType: type) type {
             } else blk: {
                 const ShiftType = std.math.Log2Int(WordType);
                 // shift is guaranteed to be < 256 here, safe to cast
-                break :blk value << @as(ShiftType, @truncate(shift));
+                break :blk std.math.shl(WordType, value, @as(ShiftType, @truncate(shift)));
             };
             self.stack.set_top_unsafe(result);
             const next_cursor = cursor + 1;
             return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
         }
 
-        /// SHR opcode (0x1c) - Logical shift right operation.
+        /// SHR opcode (0x1c) - Logical shift right operation using std.math.shr.
+        /// See: https://ziglang.org/documentation/master/std/#std.math.shr
         pub fn shr(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const shift = try self.stack.pop(); // Top of stack - shift amount
             const value = try self.stack.peek(); // Second from top - value to shift
@@ -87,27 +91,29 @@ pub fn Handlers(comptime FrameType: type) type {
             } else blk: {
                 const ShiftType = std.math.Log2Int(WordType);
                 // shift is guaranteed to be < 256 here, safe to cast
-                break :blk value >> @as(ShiftType, @truncate(shift));
+                break :blk std.math.shr(WordType, value, @as(ShiftType, @truncate(shift)));
             };
             self.stack.set_top_unsafe(result);
             const next_cursor = cursor + 1;
             return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
         }
 
-        /// SAR opcode (0x1d) - Arithmetic shift right operation.
+        /// SAR opcode (0x1d) - Arithmetic shift right operation using std.math.shr.
         /// Preserves the sign bit during shift.
+        /// See: https://ziglang.org/documentation/master/std/#std.math.shr
         pub fn sar(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const shift = try self.stack.pop(); // Top of stack - shift amount
             const value = try self.stack.peek(); // Second from top - value to shift
             const word_bits = @bitSizeOf(WordType);
             const result = if (shift >= word_bits) blk: {
-                const sign_bit = value >> (word_bits - 1);
+                const sign_bit = std.math.shr(WordType, value, word_bits - 1);
                 break :blk if (sign_bit == 1) @as(WordType, std.math.maxInt(WordType)) else @as(WordType, 0);
             } else blk: {
                 const ShiftType = std.math.Log2Int(WordType);
                 const shift_amount = @as(ShiftType, @truncate(shift));
                 const value_signed = @as(std.meta.Int(.signed, @bitSizeOf(WordType)), @bitCast(value));
-                const result_signed = value_signed >> shift_amount;
+                // For signed types, right shift maintains sign bit semantics
+                const result_signed = std.math.shr(std.meta.Int(.signed, @bitSizeOf(WordType)), value_signed, shift_amount);
                 break :blk @as(WordType, @bitCast(result_signed));
             };
             self.stack.set_top_unsafe(result);
@@ -241,7 +247,7 @@ test "BYTE opcode - extract first byte" {
     defer frame.deinit(testing.allocator);
 
     // Test: byte 0 of 0xFF00000000...0 = 0xFF
-    try frame.stack.push(@as(u256, 0xFF) << 248);
+    try frame.stack.push(std.math.shl(u256, @as(u256, 0xFF), 248));
     try frame.stack.push(0); // byte index
 
     const dispatch = createMockDispatch();
@@ -536,7 +542,7 @@ test "BYTE opcode - extract middle byte" {
 
     // Test: extract byte 15 (middle of 32 bytes)
     // Create value with 0xAB at byte position 15
-    const value = @as(u256, 0xAB) << ((31 - 15) * 8);
+    const value = std.math.shl(u256, @as(u256, 0xAB), (31 - 15) * 8);
     try frame.stack.push(value);
     try frame.stack.push(15);
 
@@ -615,7 +621,7 @@ test "SHL opcode - large shifts" {
     const dispatch = createMockDispatch();
     _ = try TestFrame.BitwiseHandlers.shl(&frame, dispatch.cursor);
 
-    const expected = @as(u256, 1) << 255;
+    const expected = std.math.shl(u256, @as(u256, 1), 255);
     try testing.expectEqual(expected, try frame.stack.pop());
 }
 
@@ -630,7 +636,7 @@ test "SHL opcode - partial overflow" {
     const dispatch = createMockDispatch();
     _ = try TestFrame.BitwiseHandlers.shl(&frame, dispatch.cursor);
 
-    const expected = @as(u256, 0xF) << 252;
+    const expected = std.math.shl(u256, @as(u256, 0xF), 252);
     try testing.expectEqual(expected, try frame.stack.pop());
 }
 
@@ -700,7 +706,7 @@ test "SAR opcode - positive large shift" {
     defer frame.deinit(testing.allocator);
 
     // Test: large positive >> 255 = 0
-    const value = (@as(u256, 1) << 254) - 1; // 0x3FFF...FFF
+    const value = std.math.shl(u256, @as(u256, 1), 254) - 1; // 0x3FFF...FFF
     try frame.stack.push(value);
     try frame.stack.push(255);
 
@@ -768,7 +774,7 @@ test "shift operations - round trip" {
     _ = try TestFrame.BitwiseHandlers.shr(&frame, dispatch.cursor);
 
     // Due to overflow, only lower bits are preserved
-    const mask = (@as(u256, 1) << (256 - shift)) - 1;
+    const mask = std.math.shl(u256, @as(u256, 1), (256 - shift)) - 1;
     try testing.expectEqual(value & mask, try frame.stack.pop());
 }
 
@@ -780,7 +786,7 @@ test "BYTE opcode - all bytes of a pattern" {
     var value: u256 = 0;
     var i: u8 = 0;
     while (i < 32) : (i += 1) {
-        value |= @as(u256, i) << ((31 - i) * 8);
+        value |= std.math.shl(u256, @as(u256, i), (31 - i) * 8);
     }
 
     // Verify each byte
@@ -816,14 +822,14 @@ test "SHR opcode - single bit patterns" {
     defer frame.deinit(testing.allocator);
 
     // Test: 0x8000...000 >> 1 = 0x4000...000
-    const high_bit = @as(u256, 1) << 255;
+    const high_bit = std.math.shl(u256, @as(u256, 1), 255);
     try frame.stack.push(high_bit);
     try frame.stack.push(1);
 
     const dispatch = createMockDispatch();
     _ = try TestFrame.BitwiseHandlers.shr(&frame, dispatch.cursor);
 
-    try testing.expectEqual(@as(u256, 1) << 254, try frame.stack.pop());
+    try testing.expectEqual(std.math.shl(u256, @as(u256, 1), 254), try frame.stack.pop());
 }
 
 test "SAR opcode - boundary value (-1)" {
@@ -846,10 +852,10 @@ test "bitwise operations - pattern testing" {
     defer frame.deinit(testing.allocator);
 
     // Test: Alternating bit patterns
-    const pattern1 = @as(u256, 0xAAAAAAAAAAAAAAAA) << 192 | @as(u256, 0xAAAAAAAAAAAAAAAA) << 128 |
-        @as(u256, 0xAAAAAAAAAAAAAAAA) << 64 | @as(u256, 0xAAAAAAAAAAAAAAAA);
-    const pattern2 = @as(u256, 0x5555555555555555) << 192 | @as(u256, 0x5555555555555555) << 128 |
-        @as(u256, 0x5555555555555555) << 64 | @as(u256, 0x5555555555555555);
+    const pattern1 = std.math.shl(u256, @as(u256, 0xAAAAAAAAAAAAAAAA), 192) | std.math.shl(u256, @as(u256, 0xAAAAAAAAAAAAAAAA), 128) |
+        std.math.shl(u256, @as(u256, 0xAAAAAAAAAAAAAAAA), 64) | @as(u256, 0xAAAAAAAAAAAAAAAA);
+    const pattern2 = std.math.shl(u256, @as(u256, 0x5555555555555555), 192) | std.math.shl(u256, @as(u256, 0x5555555555555555), 128) |
+        std.math.shl(u256, @as(u256, 0x5555555555555555), 64) | @as(u256, 0x5555555555555555);
 
     // Test: pattern1 XOR pattern2 = MAX
     try frame.stack.push(pattern1);

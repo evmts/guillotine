@@ -4101,7 +4101,7 @@ test "CREATE interaction - deployed contract can be called" {
     // Verify returned value is 42
     var returned_value: u256 = 0;
     for (call_result.output) |byte| {
-        returned_value = (returned_value << 8) | byte;
+        returned_value = std.math.shl(u256, returned_value, 8) | byte;
     }
     try std.testing.expectEqual(@as(u256, 42), returned_value);
 }
@@ -4258,7 +4258,7 @@ test "CREATE interaction - factory creates and initializes child contracts" {
     // Verify returned value is 123
     var returned_value: u256 = 0;
     for (verify_result.output) |byte| {
-        returned_value = (returned_value << 8) | byte;
+        returned_value = std.math.shl(u256, returned_value, 8) | byte;
     }
     try std.testing.expectEqual(@as(u256, 123), returned_value);
 }
@@ -4363,7 +4363,7 @@ test "CREATE interaction - contract creates contract that creates contract" {
         try level2_init.append(0x53); // MSTORE8
     }
     try level2_init.append(0x61); // PUSH2
-    try level2_init.append(@as(u8, @truncate(level2_runtime.items.len >> 8)));
+    try level2_init.append(@as(u8, @truncate(std.math.shr(usize, level2_runtime.items.len, 8))));
     try level2_init.append(@as(u8, @truncate(level2_runtime.items.len & 0xFF)));
     try level2_init.append(0x60); // PUSH1
     try level2_init.append(0x00);
@@ -4378,14 +4378,14 @@ test "CREATE interaction - contract creates contract that creates contract" {
         try level1_code.append(0x60); // PUSH1
         try level1_code.append(byte);
         try level1_code.append(0x61); // PUSH2
-        try level1_code.append(@as(u8, @truncate(i >> 8)));
+        try level1_code.append(@as(u8, @truncate(std.math.shr(u32, i, 8))));
         try level1_code.append(@as(u8, @truncate(i & 0xFF)));
         try level1_code.append(0x53); // MSTORE8
     }
 
     // CREATE level 2
     try level1_code.append(0x61); // PUSH2
-    try level1_code.append(@as(u8, @truncate(level2_init.items.len >> 8)));
+    try level1_code.append(@as(u8, @truncate(std.math.shr(usize, level2_init.items.len, 8)));
     try level1_code.append(@as(u8, @truncate(level2_init.items.len & 0xFF)));
     try level1_code.append(0x60); // PUSH1
     try level1_code.append(0x00); // offset
@@ -4452,7 +4452,7 @@ test "CREATE interaction - contract creates contract that creates contract" {
 
     var returned_value: u256 = 0;
     for (result3.output) |byte| {
-        returned_value = (returned_value << 8) | byte;
+        returned_value = std.math.shl(u256, returned_value, 8) | byte;
     }
     try std.testing.expectEqual(@as(u256, 99), returned_value);
 }

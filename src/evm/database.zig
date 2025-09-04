@@ -1014,9 +1014,9 @@ test "Database hash map stress test" {
     const num_accounts = 1000;
     for (0..num_accounts) |i| {
         var addr: [20]u8 = [_]u8{0} ** 20;
-        addr[16] = @intCast((i >> 24) & 0xFF);
-        addr[17] = @intCast((i >> 16) & 0xFF);
-        addr[18] = @intCast((i >> 8) & 0xFF);
+        addr[16] = @intCast(std.math.shr(usize, i, 24) & 0xFF);
+        addr[17] = @intCast(std.math.shr(usize, i, 16) & 0xFF);
+        addr[18] = @intCast(std.math.shr(usize, i, 8) & 0xFF);
         addr[19] = @intCast(i & 0xFF);
 
         const account = Account{
@@ -1032,9 +1032,9 @@ test "Database hash map stress test" {
     // Verify all accounts
     for (0..num_accounts) |i| {
         var addr: [20]u8 = [_]u8{0} ** 20;
-        addr[16] = @intCast((i >> 24) & 0xFF);
-        addr[17] = @intCast((i >> 16) & 0xFF);
-        addr[18] = @intCast((i >> 8) & 0xFF);
+        addr[16] = @intCast(std.math.shr(usize, i, 24) & 0xFF);
+        addr[17] = @intCast(std.math.shr(usize, i, 16) & 0xFF);
+        addr[18] = @intCast(std.math.shr(usize, i, 8) & 0xFF);
         addr[19] = @intCast(i & 0xFF);
 
         try testing.expect(db.account_exists(addr));
