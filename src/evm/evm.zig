@@ -1087,9 +1087,7 @@ pub fn Evm(comptime config: EvmConfig) type {
             is_static: bool,
             snapshot_id: Journal.SnapshotIdType,
         ) !CallResult {
-            // std.debug.print("execute_frame: code_len={}, gas={}, address={any}, depth={}\n", .{ 
-            //     code.len, gas, address, self.depth,
-            // });
+            // TODO: Remove commented debug print per CLAUDE.md zero-tolerance policy (issue #648)
             const prev_snapshot = self.current_snapshot_id;
             self.current_snapshot_id = snapshot_id;
             defer self.current_snapshot_id = prev_snapshot;

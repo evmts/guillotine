@@ -48,6 +48,23 @@ test "immediate jump validation integrated into main validation" {
     }
 }
 
+// Test that deprecated methods no longer exist in bytecode.zig
+test "deprecated methods should be removed from codebase" {
+    // This test ensures deprecated methods are cleaned up per issue #648
+    // Compile-time verification that methods no longer exist
+    const bytecode_mod = @import("bytecode.zig");
+    const BytecodeType = bytecode_mod.Bytecode(default_config);
+    
+    // These should fail to compile if deprecated methods still exist
+    const has_validate_deprecated = @hasDecl(BytecodeType, "validateImmediateJumps_DEPRECATED");
+    const has_read_target_deprecated = @hasDecl(BytecodeType, "readImmediateJumpTarget_DEPRECATED");  
+    const has_read_jumpi_deprecated = @hasDecl(BytecodeType, "readImmediateJumpiTarget_DEPRECATED");
+    
+    try std.testing.expect(!has_validate_deprecated);
+    try std.testing.expect(!has_read_target_deprecated);
+    try std.testing.expect(!has_read_jumpi_deprecated);
+}
+
 // Test that validation correctly identifies fusion opportunities during the main pass
 test "fusion detection during validation pass" {
     const allocator = std.testing.allocator;
