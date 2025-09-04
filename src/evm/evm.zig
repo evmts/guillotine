@@ -42,9 +42,9 @@ pub fn Evm(comptime config: EvmConfig) type {
 
         /// Frame type for the evm
         pub const Frame = @import("frame.zig").Frame(config.frame_config());
-        /// Static wrappers for EIP-214 (STATICCALL) constraint enforcement
-        const static_wrappers = @import("static_wrappers.zig");
-        const StaticDatabase = static_wrappers.StaticDatabase;
+        /// Database proxy for EIP-214 (STATICCALL) constraint enforcement and flexible access patterns
+        const database_proxy = @import("database_proxy.zig");
+        const StaticDatabase = database_proxy.DatabaseProxy(.static, Database);
         /// Bytecode type for bytecode analysis
         pub const BytecodeFactory = @import("bytecode.zig").Bytecode;
         pub const Bytecode = BytecodeFactory(.{
