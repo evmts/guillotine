@@ -5,10 +5,21 @@ const BlockInfoConfig = @import("block_info_config.zig").BlockInfoConfig;
 const Eips = @import("eips.zig").Eips;
 const Hardfork = @import("hardfork.zig").Hardfork;
 
+/// Chain types supported by the EVM
+/// TODO: Add more L2 chains as needed (Optimism, Base, etc.)
+pub const ChainType = enum {
+    ETHEREUM,
+    ARBITRUM,
+};
+
 pub const EvmConfig = struct {
     // TODO update enum to support latest hardfork
     // Comptime known configuration of Eip and hardfork information
     eips: Eips = Eips{ .hardfork = Hardfork.CANCUN },
+
+    /// Chain type for this EVM instance (default: Ethereum)
+    /// TODO: Implement chain-specific gas costs and precompile behavior
+    chain_type: ChainType = .ETHEREUM,
 
     /// Maximum call depth allowed in the EVM (defaults to 1024 levels)
     /// This prevents infinite recursion and stack overflow attacks

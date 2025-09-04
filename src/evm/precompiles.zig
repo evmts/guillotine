@@ -43,6 +43,11 @@ pub const BLS12_381_G2_MULTIEXP_ADDRESS = primitives.Address.from_u256(0x10);
 pub const BLS12_381_PAIRING_ADDRESS = primitives.Address.from_u256(0x11);
 pub const BLS12_381_MAP_FP_TO_G1_ADDRESS = primitives.Address.from_u256(0x12);
 
+/// Arbitrum L2 precompile addresses
+/// TODO: Implement full ArbOS integration for production use
+pub const ARB_SYS_ADDRESS = primitives.Address.from_u256(0x64);
+pub const ARB_INFO_ADDRESS = primitives.Address.from_u256(0x65);
+
 /// Precompile error types
 pub const PrecompileError = error{
     InvalidInput,
@@ -81,6 +86,18 @@ pub fn is_precompile(address: Address) bool {
     }
     // Check if the last byte is between 1 and 18 (0x12)
     return address.bytes[19] >= 1 and address.bytes[19] <= 0x12;
+}
+
+/// Check if an address is an Arbitrum precompile
+/// TODO: Make this configurable based on chain type
+pub fn is_arbitrum_precompile(address: Address) bool {
+    // Check if all bytes except the last one are zero  
+    for (address.bytes[0..19]) |byte| {
+        if (byte != 0) return false;
+    }
+    // Arbitrum precompiles are at 0x64-0x6f
+    const last_byte = address.bytes[19];
+    return last_byte == 0x64 or last_byte == 0x65;
 }
 
 /// Execute a precompile based on its address
@@ -153,6 +170,11 @@ pub const GasCosts = struct {
     pub const BLS12_381_PAIRING_BASE = 65000;
     pub const BLS12_381_PAIRING_PER_PAIR = 43000;
     pub const BLS12_381_MAP_FP_TO_G1 = 5500;
+    
+    // Arbitrum precompile gas costs
+    // TODO: Verify these match actual Arbitrum gas costs
+    pub const ARB_SYS = 50;
+    pub const ARB_INFO = 50;
 };
 
 /// 0x01: ecRecover - ECDSA signature recovery
@@ -952,6 +974,60 @@ pub fn execute_bls12_381_map_fp_to_g1(allocator: std.mem.Allocator, input: []con
     return PrecompileError.NotImplemented;
 }
 
+/// 0x64: ArbSys - Arbitrum system information precompile
+/// TODO: Implement full ArbSys functionality with proper ArbOS integration
+pub fn execute_arb_sys(allocator: std.mem.Allocator, input: []const u8, gas_limit: u64) PrecompileError!PrecompileOutput {
+    const required_gas = GasCosts.ARB_SYS;
+    if (gas_limit < required_gas) {
+        return PrecompileOutput{
+            .output = &.{},
+            .gas_used = gas_limit,
+            .success = false,
+        };
+    }
+
+    // Parse function selector from first 4 bytes
+    if (input.len < 4) {
+        return PrecompileOutput{
+            .output = &.{},
+            .gas_used = required_gas,
+            .success = false,
+        };
+    }
+
+    const selector = std.mem.readInt(u32, input[0..4], .big);
+    
+    return switch (selector) {
+        0x9a8a0592 => execute_arb_sys_chainid(allocator, required_gas), // chainId()
+        // TODO: Add more ArbSys functions:
+        // 0x43ca5161 => execute_arb_sys_block_number(allocator, required_gas), // arbBlockNumber()
+        // 0x23ca5161 => execute_arb_sys_block_hash(allocator, input[4..], required_gas), // arbBlockHash(uint256)
+        else => PrecompileOutput{
+            .output = &.{},
+            .gas_used = required_gas,
+            .success = false,
+        },
+    };
+}
+
+/// ArbSys.chainId() - returns the Arbitrum chain ID
+/// TODO: Make this configurable based on actual chain ID
+fn execute_arb_sys_chainid(allocator: std.mem.Allocator, gas_used: u64) PrecompileError!PrecompileOutput {
+    const output = try allocator.alloc(u8, 32);
+    @memset(output, 0);
+    
+    // Mock: Return Arbitrum One chain ID (42161)
+    // TODO: Get actual chain ID from chain configuration
+    const arbitrum_chain_id: u256 = 42161;
+    u256ToBytes(arbitrum_chain_id, output);
+    
+    return PrecompileOutput{
+        .output = output,
+        .gas_used = gas_used,
+        .success = true,
+    };
+}
+
 fn bytesToU256(bytes: []const u8) u256 {
     var result: u256 = 0;
     for (bytes) |byte| {
@@ -1434,4 +1510,32 @@ test "execute_all_precompiles smoke test" {
         // All should at least not error (may fail due to invalid input)
         try testing.expect(result.gas_used <= 100000);
     }
+}
+
+test "is_arbitrum_precompile detects Arbitrum addresses" {
+    const testing = std.testing;
+    
+    // Test valid Arbitrum precompile addresses
+    try testing.expect(is_arbitrum_precompile(ARB_SYS_ADDRESS));
+    try testing.expect(is_arbitrum_precompile(ARB_INFO_ADDRESS));
+    
+    // Test non-Arbitrum addresses
+    try testing.expect(!is_arbitrum_precompile(ECRECOVER_ADDRESS));
+    try testing.expect(!is_arbitrum_precompile(primitives.Address.from_u256(0x70)));
+}
+
+test "execute_arb_sys_chainid" {
+    const testing = std.testing;
+    
+    // chainId() function selector: 0x9a8a0592
+    const input = [_]u8{ 0x9a, 0x8a, 0x05, 0x92 };
+    const result = try execute_arb_sys(testing.allocator, &input, GasCosts.ARB_SYS + 100);
+    defer testing.allocator.free(result.output);
+    
+    try testing.expect(result.success);
+    try testing.expectEqual(@as(usize, 32), result.output.len);
+    
+    // Should return Arbitrum chain ID (42161)
+    const returned_chain_id = bytesToU256(result.output);
+    try testing.expectEqual(@as(u256, 42161), returned_chain_id);
 }
