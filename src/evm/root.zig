@@ -70,6 +70,11 @@ pub const opcode_data = @import("opcode_data.zig");
 // Precompiles module
 pub const precompiles = @import("precompiles.zig");
 
+// Chain configuration and L2 support
+pub const ChainConfig = @import("chain_config.zig").ChainConfig;
+pub const ChainType = @import("chain_config.zig").ChainType;
+pub const arbitrum_precompiles = @import("arbitrum_precompiles.zig");
+
 // Database and state modules
 const block_info_mod = @import("block_info.zig");
 pub const BlockInfo = block_info_mod.DefaultBlockInfo;
@@ -163,6 +168,10 @@ test {
     _ = MemoryDatabase;
     _ = SelfDestruct;
     _ = AccessList;
+    
+    // Test L2 modules
+    _ = @import("chain_config.zig");
+    _ = @import("arbitrum_precompiles.zig");
 }
 
 // Include C API tests via import to ensure they run under `zig build test`

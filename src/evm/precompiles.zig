@@ -20,6 +20,8 @@ const Address = primitives.Address;
 // Use the real crypto and build_options modules
 const crypto = @import("crypto");
 const build_options = @import("build_options");
+const ChainConfig = @import("chain_config.zig").ChainConfig;
+const arbitrum = @import("arbitrum_precompiles.zig");
 
 /// Precompile addresses (Ethereum mainnet)
 pub const ECRECOVER_ADDRESS = primitives.Address.from_u256(1);
@@ -68,9 +70,9 @@ pub const PrecompileOutput = struct {
     success: bool,
 };
 
-/// Check if an address is a precompile
-pub fn is_precompile(address: Address) bool {
-    // Check if the address is one of the known precompile addresses
+/// Check if an address is a precompile (Ethereum standard precompiles only)
+pub fn is_standard_precompile(address: Address) bool {
+    // Check if the address is one of the known standard precompile addresses
     // Precompiles are at addresses:
     // 0x01-0x0A: Standard precompiles (ECRECOVER through POINT_EVALUATION)
     // 0x0B-0x12: BLS12-381 precompiles (EIP-2537)
@@ -83,21 +85,37 @@ pub fn is_precompile(address: Address) bool {
     return address.bytes[19] >= 1 and address.bytes[19] <= 0x12;
 }
 
-/// Execute a precompile based on its address
-/// Not safe to call without checking is_precompile first
+/// Check if an address is a precompile (supports chain-specific precompiles)
+pub fn is_precompile(address: Address, chain_config: ChainConfig) bool {
+    // Standard Ethereum precompiles (all chains)
+    if (is_standard_precompile(address)) return true;
+    
+    // Chain-specific precompiles
+    return switch (chain_config.chain_type) {
+        .ARBITRUM => arbitrum.is_arbitrum_precompile(address),
+        .OPTIMISM => false, // TODO: Add Optimism precompiles
+        .ETHEREUM => false,
+    };
+}
+
+/// Execute a precompile based on its address (supports chain-specific precompiles)
 pub fn execute_precompile(
     allocator: std.mem.Allocator,
     address: Address,
     input: []const u8,
     gas_limit: u64,
+    chain_config: ChainConfig,
 ) PrecompileError!PrecompileOutput {
-    // TODO this should be removed and this method considered unsafe in ReleaseFast
-    if (!is_precompile(address)) return PrecompileOutput{
-        .output = &.{},
-        .gas_used = 0,
-        .success = false,
-    };
-    std.debug.assert(is_precompile(address));
+    // Check if it's a chain-specific precompile first
+    if (!is_standard_precompile(address)) {
+        return switch (chain_config.chain_type) {
+            .ARBITRUM => arbitrum.execute_arbitrum_precompile(allocator, address, input, gas_limit, chain_config),
+            .OPTIMISM => PrecompileOutput{ .output = &.{}, .gas_used = 0, .success = false }, // TODO: Add Optimism support
+            .ETHEREUM => PrecompileOutput{ .output = &.{}, .gas_used = 0, .success = false },
+        };
+    }
+    
+    // Execute standard Ethereum precompiles
     const precompile_id = address.bytes[19];
     return switch (precompile_id) {
         1 => execute_ecrecover(allocator, input, gas_limit),
@@ -124,6 +142,17 @@ pub fn execute_precompile(
             .success = false,
         },
     };
+}
+
+/// Legacy execute function for backward compatibility (defaults to Ethereum mainnet)
+pub fn execute_precompile_legacy(
+    allocator: std.mem.Allocator,
+    address: Address,
+    input: []const u8,
+    gas_limit: u64,
+) PrecompileError!PrecompileOutput {
+    const ethereum_config = ChainConfig.from_chain_id(1);
+    return execute_precompile(allocator, address, input, gas_limit, ethereum_config);
 }
 
 /// Gas costs for precompiles (in gas units)
@@ -980,35 +1009,52 @@ fn u256ToBytes(value: u256, output: []u8) void {
     }
 }
 
-test "is_precompile detects valid precompile addresses" {
+test "is_standard_precompile detects valid precompile addresses" {
     const testing = std.testing;
 
     // Test valid precompile addresses
-    try testing.expect(is_precompile(ECRECOVER_ADDRESS));
-    try testing.expect(is_precompile(SHA256_ADDRESS));
-    try testing.expect(is_precompile(RIPEMD160_ADDRESS));
-    try testing.expect(is_precompile(IDENTITY_ADDRESS));
-    try testing.expect(is_precompile(MODEXP_ADDRESS));
-    try testing.expect(is_precompile(ECADD_ADDRESS));
-    try testing.expect(is_precompile(ECMUL_ADDRESS));
-    try testing.expect(is_precompile(ECPAIRING_ADDRESS));
-    try testing.expect(is_precompile(BLAKE2F_ADDRESS));
-    try testing.expect(is_precompile(POINT_EVALUATION_ADDRESS));
+    try testing.expect(is_standard_precompile(ECRECOVER_ADDRESS));
+    try testing.expect(is_standard_precompile(SHA256_ADDRESS));
+    try testing.expect(is_standard_precompile(RIPEMD160_ADDRESS));
+    try testing.expect(is_standard_precompile(IDENTITY_ADDRESS));
+    try testing.expect(is_standard_precompile(MODEXP_ADDRESS));
+    try testing.expect(is_standard_precompile(ECADD_ADDRESS));
+    try testing.expect(is_standard_precompile(ECMUL_ADDRESS));
+    try testing.expect(is_standard_precompile(ECPAIRING_ADDRESS));
+    try testing.expect(is_standard_precompile(BLAKE2F_ADDRESS));
+    try testing.expect(is_standard_precompile(POINT_EVALUATION_ADDRESS));
 
     // Test BLS12-381 precompile addresses (EIP-2537)
-    try testing.expect(is_precompile(BLS12_381_G1_ADD_ADDRESS));
-    try testing.expect(is_precompile(BLS12_381_G1_MUL_ADDRESS));
-    try testing.expect(is_precompile(BLS12_381_G1_MULTIEXP_ADDRESS));
-    try testing.expect(is_precompile(BLS12_381_G2_ADD_ADDRESS));
-    try testing.expect(is_precompile(BLS12_381_G2_MUL_ADDRESS));
-    try testing.expect(is_precompile(BLS12_381_G2_MULTIEXP_ADDRESS));
-    try testing.expect(is_precompile(BLS12_381_PAIRING_ADDRESS));
-    try testing.expect(is_precompile(BLS12_381_MAP_FP_TO_G1_ADDRESS));
+    try testing.expect(is_standard_precompile(BLS12_381_G1_ADD_ADDRESS));
+    try testing.expect(is_standard_precompile(BLS12_381_G1_MUL_ADDRESS));
+    try testing.expect(is_standard_precompile(BLS12_381_G1_MULTIEXP_ADDRESS));
+    try testing.expect(is_standard_precompile(BLS12_381_G2_ADD_ADDRESS));
+    try testing.expect(is_standard_precompile(BLS12_381_G2_MUL_ADDRESS));
+    try testing.expect(is_standard_precompile(BLS12_381_G2_MULTIEXP_ADDRESS));
+    try testing.expect(is_standard_precompile(BLS12_381_PAIRING_ADDRESS));
+    try testing.expect(is_standard_precompile(BLS12_381_MAP_FP_TO_G1_ADDRESS));
 
     // Test invalid addresses
-    try testing.expect(!is_precompile(primitives.Address.from_u256(0)));
-    try testing.expect(!is_precompile(primitives.Address.from_u256(0x13))); // Beyond BLS12-381
-    try testing.expect(!is_precompile(primitives.Address.from_u256(100)));
+    try testing.expect(!is_standard_precompile(primitives.Address.from_u256(0)));
+    try testing.expect(!is_standard_precompile(primitives.Address.from_u256(0x13))); // Beyond BLS12-381
+    try testing.expect(!is_standard_precompile(primitives.Address.from_u256(100)));
+}
+
+test "is_precompile with chain config" {
+    const testing = std.testing;
+    
+    // Test Ethereum chain config
+    const eth_config = ChainConfig.from_chain_id(1);
+    try testing.expect(is_precompile(ECRECOVER_ADDRESS, eth_config));
+    try testing.expect(is_precompile(SHA256_ADDRESS, eth_config));
+    try testing.expect(!is_precompile(arbitrum.ARB_SYS_ADDRESS, eth_config));
+    
+    // Test Arbitrum chain config
+    const arb_config = ChainConfig.from_chain_id(42161);
+    try testing.expect(is_precompile(ECRECOVER_ADDRESS, arb_config)); // Standard precompiles work
+    try testing.expect(is_precompile(arbitrum.ARB_SYS_ADDRESS, arb_config)); // Arbitrum precompiles work
+    try testing.expect(is_precompile(arbitrum.ARB_INFO_ADDRESS, arb_config));
+    try testing.expect(is_precompile(arbitrum.ARB_GAS_INFO_ADDRESS, arb_config));
 }
 
 test "execute_identity precompile" {
@@ -1398,16 +1444,17 @@ test "execute_point_evaluation without kzg setup" {
 
 test "precompile address boundary checks" {
     const testing = std.testing;
+    const eth_config = ChainConfig.from_chain_id(1);
     
     // Test addresses at boundaries
-    try testing.expect(is_precompile(ECRECOVER_ADDRESS)); // 0x01
-    try testing.expect(is_precompile(POINT_EVALUATION_ADDRESS)); // 0x0A
+    try testing.expect(is_precompile(ECRECOVER_ADDRESS, eth_config)); // 0x01
+    try testing.expect(is_precompile(POINT_EVALUATION_ADDRESS, eth_config)); // 0x0A
     
     // Test addresses outside range
-    try testing.expect(!is_precompile(primitives.Address.ZERO));
-    try testing.expect(is_precompile([_]u8{0} ** 19 ++ [_]u8{0x0B})); // 0x0B is a valid BLS12-381 precompile
-    try testing.expect(!is_precompile([_]u8{0} ** 19 ++ [_]u8{0x13})); // 0x13 is beyond valid precompiles
-    try testing.expect(!is_precompile([_]u8{0xFF} ** 20)); // Max address
+    try testing.expect(!is_precompile(primitives.Address.ZERO, eth_config));
+    try testing.expect(is_precompile([_]u8{0} ** 19 ++ [_]u8{0x0B}, eth_config)); // 0x0B is a valid BLS12-381 precompile
+    try testing.expect(!is_precompile([_]u8{0} ** 19 ++ [_]u8{0x13}, eth_config)); // 0x13 is beyond valid precompiles
+    try testing.expect(!is_precompile([_]u8{0xFF} ** 20, eth_config)); // Max address
 }
 
 test "execute_all_precompiles smoke test" {
@@ -1428,10 +1475,65 @@ test "execute_all_precompiles smoke test" {
     };
     
     for (addresses) |addr| {
-        const result = try execute_precompile(testing.allocator, addr, &[_]u8{}, 100000);
+        const result = try execute_precompile_legacy(testing.allocator, addr, &[_]u8{}, 100000);
         defer if (result.output.len > 0) testing.allocator.free(result.output);
         
         // All should at least not error (may fail due to invalid input)
         try testing.expect(result.gas_used <= 100000);
     }
+}
+
+test "execute_arbitrum_precompiles_integration" {
+    const testing = std.testing;
+    const arb_config = ChainConfig.from_chain_id(42161);
+    
+    // Test ArbSys chainId() function
+    const chain_id_input = [_]u8{0x9a, 0x8a, 0x05, 0x92};
+    const arb_sys_result = try execute_precompile(
+        testing.allocator,
+        arbitrum.ARB_SYS_ADDRESS,
+        &chain_id_input,
+        1000,
+        arb_config,
+    );
+    defer testing.allocator.free(arb_sys_result.output);
+    
+    try testing.expect(arb_sys_result.success);
+    try testing.expectEqual(@as(usize, 32), arb_sys_result.output.len);
+    
+    // Verify chain ID is correctly encoded
+    try testing.expectEqual(@as(u8, 0xA4), arb_sys_result.output[30]); // 42161 = 0xA4B1
+    try testing.expectEqual(@as(u8, 0xB1), arb_sys_result.output[31]);
+    
+    // Test ArbInfo getBalance() function
+    const get_balance_input = [_]u8{0xf8, 0xb2, 0xcb, 0x4f} ++ [_]u8{0} ** 32;
+    const arb_info_result = try execute_precompile(
+        testing.allocator,
+        arbitrum.ARB_INFO_ADDRESS,
+        &get_balance_input,
+        1000,
+        arb_config,
+    );
+    defer testing.allocator.free(arb_info_result.output);
+    
+    try testing.expect(arb_info_result.success);
+    try testing.expectEqual(@as(usize, 32), arb_info_result.output.len);
+}
+
+test "arbitrum_precompiles_fail_on_ethereum" {
+    const testing = std.testing;
+    const eth_config = ChainConfig.from_chain_id(1);
+    
+    // ArbSys should fail on Ethereum
+    const input = [_]u8{0x9a, 0x8a, 0x05, 0x92};
+    const result = try execute_precompile(
+        testing.allocator,
+        arbitrum.ARB_SYS_ADDRESS,
+        &input,
+        1000,
+        eth_config,
+    );
+    
+    try testing.expect(!result.success);
+    try testing.expectEqual(@as(usize, 0), result.output.len);
 }
