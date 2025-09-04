@@ -3885,3 +3885,104 @@ test "wrapping_mul" {
     const small_result = small_a.wrapping_mul(small_b);
     try testing.expectEqual(small_result_native, small_result.to_u256().?);
 }
+
+// ============================================================================
+// Differential Testing Framework for holiman/uint256 Compatibility
+// ============================================================================
+
+/// Minimal differential testing framework to validate our U256 implementation
+/// against native Zig u256 operations (with future holiman/uint256 support)
+const DifferentialTester = struct {
+    /// Compare our U256 result with native u256 result
+    pub fn compareWithNative(our_result: U256, native_result: u256) !void {
+        const our_u256 = our_result.to_u256() orelse {
+            // Our result overflowed u256 bounds, native should too
+            // TODO: Add proper overflow comparison logic
+            return;
+        };
+        try testing.expectEqual(native_result, our_u256);
+    }
+
+    /// Generate random U256 values for testing
+    /// TODO: Add proper random generation with configurable bit patterns
+    pub fn randomU256(rng: *std.rand.Random) U256 {
+        _ = rng; // TODO: Use actual random generation
+        // For now, return a simple test value
+        return U256.from_limbs(.{ 0x1234567890ABCDEF, 0xFEDCBA9876543210, 0x0, 0x0 });
+    }
+
+    /// Test arithmetic operations against native u256
+    pub fn testArithmetic(a: U256, b: U256) !void {
+        const a_native = a.to_u256() orelse return; // Skip if can't convert
+        const b_native = b.to_u256() orelse return; // Skip if can't convert
+
+        // Test addition
+        const sum_native = a_native +% b_native;
+        const sum_ours = a.wrapping_add(b);
+        try compareWithNative(sum_ours, sum_native);
+
+        // Test subtraction  
+        const diff_native = a_native -% b_native;
+        const diff_ours = a.wrapping_sub(b);
+        try compareWithNative(diff_ours, diff_native);
+
+        // Test multiplication
+        const mul_native = a_native *% b_native;
+        const mul_ours = a.wrapping_mul(b);
+        try compareWithNative(mul_ours, mul_native);
+
+        // TODO: Add division, modulo, bitwise operations
+        // TODO: Add comparison operations
+        // TODO: Add shift operations
+    }
+};
+
+test "differential testing: basic arithmetic" {
+    // Simple test cases to validate differential testing framework
+    const test_cases = [_]struct { a: U256, b: U256 }{
+        .{ .a = U256.from_limbs(.{ 0x123, 0, 0, 0 }), .b = U256.from_limbs(.{ 0x456, 0, 0, 0 }) },
+        .{ .a = U256.from_limbs(.{ 0xFFFFFFFF, 0, 0, 0 }), .b = U256.from_limbs(.{ 0x1, 0, 0, 0 }) },
+        // TODO: Add more comprehensive test cases
+        // TODO: Add edge cases (zero, max, near-overflow)
+        // TODO: Add random test case generation
+    };
+
+    for (test_cases) |case| {
+        try DifferentialTester.testArithmetic(case.a, case.b);
+    }
+}
+
+test "differential testing: property validation" {
+    // Test mathematical properties hold for our implementation
+    const a = U256.from_limbs(.{ 0x123456789, 0, 0, 0 });
+    const b = U256.from_limbs(.{ 0x987654321, 0, 0, 0 });
+
+    // Commutativity: a + b == b + a
+    const sum1 = a.wrapping_add(b);
+    const sum2 = b.wrapping_add(a);
+    try testing.expect(sum1.eq(sum2));
+
+    // Associativity: (a + b) + c == a + (b + c)  
+    const c = U256.from_limbs(.{ 0xABC, 0, 0, 0 });
+    const left = (a.wrapping_add(b)).wrapping_add(c);
+    const right = a.wrapping_add(b.wrapping_add(c));
+    try testing.expect(left.eq(right));
+
+    // Identity: a + 0 == a
+    const zero = U256.ZERO;
+    const identity_result = a.wrapping_add(zero);
+    try testing.expect(a.eq(identity_result));
+
+    // TODO: Add more mathematical properties
+    // TODO: Add multiplicative properties
+    // TODO: Add bitwise operation properties
+    // TODO: Add comprehensive fuzzing framework
+}
+
+// TODO: Future holiman/uint256 integration
+// pub const HolimanTester = struct {
+//     // TODO: Add FFI bindings or subprocess calls to holiman/uint256
+//     // TODO: Add comprehensive cross-validation
+//     // TODO: Port holiman's test cases to Zig
+//     // TODO: Add performance benchmarking
+// };
