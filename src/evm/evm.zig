@@ -337,15 +337,16 @@ pub fn Evm(comptime config: EvmConfig) type {
 
         /// Execute an EVM operation.
         ///
-        /// This is the main entry point that routes to specific handlers based
-        /// on the operation type (CALL, CREATE, etc). Manages transaction-level
-        /// state including logs and ensures proper cleanup.
+        /// Top-level transaction entry point - handles transaction state management
+        /// This method manages transaction-level operations (state clearing, gas refunds, log extraction)
+        /// For nested calls within a transaction, use inner_call() to avoid transaction overhead
         pub fn call(self: *Self, params: CallParams) CallResult {
             params.validate() catch return CallResult.failure(0);
             
             // Only reset state for top-level calls (depth == 0)
             const is_top_level = self.depth == 0;
             
+            // TODO: Phase 1 - Move to separate transaction setup method
             // Reset per-transaction state at the START of each new transaction
             if (is_top_level) {
                 // Clear access list for new transaction (EIP-2929)
@@ -364,6 +365,7 @@ pub fn Evm(comptime config: EvmConfig) type {
                 _ = self.call_arena.reset(.retain_capacity);
             }
             
+            // TODO: Phase 1 - Move to separate transaction cleanup method
             defer if (is_top_level) {
                 // Cleanup after transaction completes
                 self.depth = 0;
@@ -373,6 +375,7 @@ pub fn Evm(comptime config: EvmConfig) type {
                 self.return_data = &.{};
             };
             
+            // TODO: Phase 1 - Move to transaction setup method
             // Pre-warm addresses for top-level calls (EIP-2929)
             if (is_top_level) {
                 // Get the target address from params
@@ -421,6 +424,7 @@ pub fn Evm(comptime config: EvmConfig) type {
             // Store initial gas for EIP-3529 calculations
             const initial_gas = gas;
             
+            // TODO: Phase 1 - Move to transaction setup method  
             // Deduct intrinsic gas for top-level calls (transactions)
             const execution_gas = if (is_top_level) blk: {
                 const GasConstants = primitives.GasConstants;
@@ -451,6 +455,7 @@ pub fn Evm(comptime config: EvmConfig) type {
                 .create2 => |p| self.executeCreate2(.{ .caller = p.caller, .value = p.value, .init_code = p.init_code, .salt = p.salt, .gas = execution_gas }) catch CallResult.failure(0),
             };
             
+            // TODO: Phase 1 - Move to transaction finalization method
             // Apply EIP-3529 gas refund cap if transaction succeeded
             if (result.success and self.depth == 0) {
                 const gas_used = initial_gas - result.gas_left;
@@ -463,6 +468,7 @@ pub fn Evm(comptime config: EvmConfig) type {
                 // Reset refund counter for next transaction
                 self.gas_refund_counter = 0;
             }
+            // TODO: Phase 1 - Move to transaction finalization method
             // Only extract logs for top-level calls
             // For nested calls, leave logs in the EVM's list to accumulate
             if (is_top_level) {
@@ -1305,8 +1311,38 @@ pub fn Evm(comptime config: EvmConfig) type {
         }
 
         /// Execute nested EVM call - used for calls from within the EVM
+        /// This method skips transaction-level setup and focuses on call execution
         pub fn inner_call(self: *Self, params: CallParams) !CallResult {
+            // TODO: Phase 2 - Move core call logic here (without transaction branching)
+            // TODO: Phase 2 - Remove all is_top_level checks from this path
+            // TODO: Phase 2 - Handle depth limit checking
+            // TODO: Phase 2 - Direct execution without transaction overhead
+            
+            // For now, delegate to existing call method (TEMPORARY)
             return self.call(params);
+        }
+
+        // TODO: Phase 1 - Extract helper methods for clean separation
+        
+        /// Setup transaction-level state (called once per transaction)
+        /// TODO: Move transaction setup logic here from call()
+        fn setupTransactionState(self: *Self) void {
+            // TODO: Move access_list.clear(), journal.clear(), etc.
+        }
+        
+        /// Apply intrinsic gas costs for transaction-level calls  
+        /// TODO: Move gas calculation logic here from call()
+        fn calculateTransactionGas(self: *Self, params: CallParams, gas: u64) !u64 {
+            // TODO: Move intrinsic gas deduction logic here
+            _ = self; _ = params; _ = gas;
+            return error.NotImplemented; // TEMPORARY
+        }
+        
+        /// Finalize transaction state (gas refunds, log extraction)
+        /// TODO: Move transaction finalization logic here from call()
+        fn finalizeTransaction(self: *Self, result: *CallResult, initial_gas: u64) void {
+            // TODO: Move EIP-3529 refund cap and log extraction here  
+            _ = self; _ = result; _ = initial_gas;
         }
 
         /// Execute a precompile call (inlined)
