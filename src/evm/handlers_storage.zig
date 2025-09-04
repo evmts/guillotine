@@ -1,9 +1,21 @@
 const std = @import("std");
 const FrameConfig = @import("frame_config.zig").FrameConfig;
 const log = @import("log.zig");
-const GasConstants = @import("primitives").GasConstants;
-const Address = @import("primitives").Address.Address;
+const primitives = @import("primitives");
+const GasConstants = primitives.GasConstants;
+const Address = primitives.Address.Address;
 const Opcode = @import("opcode_data.zig").Opcode;
+const Eips = @import("eips.zig").Eips;
+const Hardfork = @import("hardfork.zig").Hardfork;
+
+/// Temporary helper function to calculate SSTORE costs with proper EIP logic
+/// TODO: This should receive hardfork information from EVM context
+fn calculate_sstore_cost(current: primitives.U256, new: primitives.U256, original: primitives.U256, is_cold: bool) Eips.SstoreGasCost {
+    // For now, assume Berlin hardfork (includes all EIPs we need)
+    // This will need to be updated to receive actual hardfork from EVM context
+    const eips = Eips{ .hardfork = Hardfork.BERLIN };
+    return eips.sstore_gas_cost_with_access(current, new, original, is_cold);
+}
 
 /// Storage operation handlers for the EVM stack frame.
 /// These are generic structs that return static handlers for a given FrameType.
@@ -86,13 +98,14 @@ pub fn Handlers(comptime FrameType: type) type {
             const original_opt = evm.get_original_storage(contract_addr, slot);
             const original_value: WordType = original_opt orelse current_value;
 
-            // Calculate SSTORE operation cost (includes cold access cost if applicable)
-            const total_gas_cost: u64 = GasConstants.sstore_gas_cost(current_value, original_value, value, is_cold);
-
+            // Calculate SSTORE operation cost with proper EIP logic
+            // For now, use a temporary hardfork determination - this should be passed from EVM context
+            const sstore_result = calculate_sstore_cost(current_value, value, original_value, is_cold);
+            const total_gas_cost: u64 = sstore_result.gas;
 
             log.debug(
-                "SSTORE metering: slot={}, original={}, current={}, new={}, is_cold={}, total={}",
-                .{ slot, original_value, current_value, value, is_cold, total_gas_cost },
+                "SSTORE metering: slot={}, original={}, current={}, new={}, is_cold={}, total={}, refund={}",
+                .{ slot, original_value, current_value, value, is_cold, total_gas_cost, sstore_result.refund },
             );
 
             if (self.gas_remaining < total_gas_cost) {
@@ -113,9 +126,9 @@ pub fn Handlers(comptime FrameType: type) type {
                 else => return Error.AllocationError,
             };
 
-            // EIP-3529: Only clearing (non-zero -> zero) is eligible for refund
-            if (current_value != 0 and value == 0) {
-                evm.add_gas_refund(GasConstants.SstoreRefundGas);
+            // Add gas refund if applicable
+            if (sstore_result.refund > 0) {
+                evm.add_gas_refund(sstore_result.refund);
             }
 
             const op_data = dispatch.getOpData(.{ .regular = Opcode.SSTORE });
