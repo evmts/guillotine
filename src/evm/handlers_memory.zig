@@ -52,7 +52,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const value = @as(WordType, @truncate(value_u256));
             try self.stack.push(value);
 
-            const op_data = dispatch.getOpData(.{ .regular = Opcode.MLOAD });
+            const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular(Opcode.MLOAD));
             const next = op_data.next;
             return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
         }
@@ -107,7 +107,7 @@ pub fn Handlers(comptime FrameType: type) type {
                 else => return Error.AllocationError,
             };
 
-            const op_data = dispatch.getOpData(.{ .regular = Opcode.MSTORE });
+            const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular(Opcode.MSTORE));
             const next = op_data.next;
             
             // // Log exit state
@@ -161,7 +161,7 @@ pub fn Handlers(comptime FrameType: type) type {
                 else => return Error.AllocationError,
             };
 
-            const op_data = dispatch.getOpData(.{ .regular = Opcode.MSTORE8 });
+            const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular(Opcode.MSTORE8));
             const next = op_data.next;
             return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
         }
@@ -173,7 +173,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const size = self.memory.size();
             try self.stack.push(@as(WordType, @intCast(size)));
 
-            const op_data = dispatch.getOpData(.{ .regular = Opcode.MSIZE });
+            const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular(Opcode.MSIZE));
             const next = op_data.next;
             return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
         }
@@ -197,7 +197,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
             if (size_u24 == 0) {
                 // No operation for zero size
-                const op_data = dispatch.getOpData(.{ .regular = Opcode.MCOPY });
+                const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular(Opcode.MCOPY));
                 const next = op_data.next;
                 return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
             }
@@ -240,7 +240,7 @@ pub fn Handlers(comptime FrameType: type) type {
             // Free the temporary buffer before tail call
             self.allocator.free(temp_buffer);
 
-            const op_data = dispatch.getOpData(.{ .regular = Opcode.MCOPY });
+            const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular(Opcode.MCOPY));
             const next = op_data.next;
             return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
         }

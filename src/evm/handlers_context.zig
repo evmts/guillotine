@@ -44,9 +44,9 @@ pub fn Handlers(comptime FrameType: type) type {
             const dispatch = Dispatch{ .cursor = cursor };
             const addr_u256 = to_u256(self.contract_address);
             try self.stack.push(addr_u256);
-            const op_data = dispatch.getOpData(.{ .regular = Opcode.ADDRESS });
+            const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular( Opcode.ADDRESS ));
             const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor ));
         }
 
         /// BALANCE opcode (0x31) - Get balance of the given account.
@@ -71,9 +71,9 @@ pub fn Handlers(comptime FrameType: type) type {
             const bal = evm.get_balance(addr);
             const balance_word = @as(WordType, @truncate(bal));
             try self.stack.push(balance_word);
-            const op_data = dispatch.getOpData(.{ .regular = Opcode.BALANCE });
+            const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular( Opcode.BALANCE ));
             const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor ));
         }
 
         /// ORIGIN opcode (0x32) - Get execution origination address.
@@ -83,9 +83,9 @@ pub fn Handlers(comptime FrameType: type) type {
             const tx_origin = self.getEvm().get_tx_origin();
             const origin_u256 = to_u256(tx_origin);
             try self.stack.push(origin_u256);
-            const op_data = dispatch.getOpData(.{ .regular = Opcode.ORIGIN });
+            const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular( Opcode.ORIGIN ));
             const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor ));
         }
 
         /// CALLER opcode (0x33) - Get caller address.
@@ -94,9 +94,9 @@ pub fn Handlers(comptime FrameType: type) type {
             const dispatch = Dispatch{ .cursor = cursor };
             const caller_u256 = to_u256(self.caller);
             try self.stack.push(caller_u256);
-            const op_data = dispatch.getOpData(.{ .regular = Opcode.CALLER });
+            const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular( Opcode.CALLER ));
             const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor ));
         }
 
         /// CALLVALUE opcode (0x34) - Get deposited value by the instruction/transaction responsible for this execution.
@@ -105,8 +105,8 @@ pub fn Handlers(comptime FrameType: type) type {
             const dispatch = Dispatch{ .cursor = cursor };
             const value = self.value.*;
             try self.stack.push(value);
-            const op_data = dispatch.getOpData(.{ .regular = Opcode.CALLVALUE }); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular( Opcode.CALLVALUE )); const next = op_data.next;
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor ));
         }
 
         /// CALLDATALOAD opcode (0x35) - Get input data of current environment.
@@ -117,8 +117,8 @@ pub fn Handlers(comptime FrameType: type) type {
             // Convert u256 to usize, checking for overflow
             if (offset > std.math.maxInt(usize)) {
                 try self.stack.push(0);
-                const op_data = dispatch.getOpData(.{ .regular = Opcode.CALLDATALOAD }); const next = op_data.next;
-                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular( Opcode.CALLDATALOAD )); const next = op_data.next;
+                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor ));
             }
             const offset_usize = @as(usize, @intCast(offset));
 
@@ -137,8 +137,8 @@ pub fn Handlers(comptime FrameType: type) type {
             // Convert to WordType (truncate if necessary for smaller word types)
             const word_typed = @as(WordType, @truncate(word));
             try self.stack.push(word_typed);
-            const op_data = dispatch.getOpData(.{ .regular = Opcode.CALLDATALOAD }); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular( Opcode.CALLDATALOAD )); const next = op_data.next;
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor ));
         }
 
         /// CALLDATASIZE opcode (0x36) - Get size of input data in current environment.
@@ -148,8 +148,8 @@ pub fn Handlers(comptime FrameType: type) type {
             const calldata = self.calldata;
             const calldata_len = @as(WordType, @truncate(@as(u256, @intCast(calldata.len))));
             try self.stack.push(calldata_len);
-            const op_data = dispatch.getOpData(.{ .regular = Opcode.CALLDATASIZE }); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular( Opcode.CALLDATASIZE )); const next = op_data.next;
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor ));
         }
 
         /// CALLDATACOPY opcode (0x37) - Copy input data in current environment to memory.
@@ -173,8 +173,8 @@ pub fn Handlers(comptime FrameType: type) type {
             const length_usize = @as(usize, @intCast(length));
 
             if (length_usize == 0) {
-                const op_data = dispatch.getOpData(.{ .regular = Opcode.CALLDATACOPY }); const next = op_data.next;
-                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular( Opcode.CALLDATACOPY )); const next = op_data.next;
+                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor ));
             }
 
             // Ensure memory capacity
@@ -194,8 +194,8 @@ pub fn Handlers(comptime FrameType: type) type {
                 self.memory.set_byte(self.allocator, @as(u24, @intCast(dest_offset_usize + i)), byte_val) catch return Error.OutOfBounds;
             }
 
-            const op_data = dispatch.getOpData(.{ .regular = Opcode.CALLDATACOPY }); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular( Opcode.CALLDATACOPY )); const next = op_data.next;
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor ));
         }
 
         /// CODESIZE opcode (0x38) - Get size of code running in current environment.
@@ -205,7 +205,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const bytecode_len = if (self.bytecode) |bc| @as(WordType, @intCast(bc.full_code.len)) else 0;
             try self.stack.push(bytecode_len);
             const next = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next[0].opcode_handler, .{ self, next ));
         }
 
         /// CODECOPY opcode (0x39) - Copy code running in current environment to memory.
@@ -230,7 +230,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
             if (length_usize == 0) {
                 const next = cursor + 1;
-                return @call(FrameType.getTailCallModifier(), next[0].opcode_handler, .{ self, next });
+                return @call(FrameType.getTailCallModifier(), next[0].opcode_handler, .{ self, next ));
             }
 
             // Calculate gas cost for memory expansion and copy operation
@@ -264,7 +264,7 @@ pub fn Handlers(comptime FrameType: type) type {
             }
 
             const next = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next[0].opcode_handler, .{ self, next ));
         }
 
         /// GASPRICE opcode (0x3A) - Get price of gas in current environment.
@@ -274,8 +274,8 @@ pub fn Handlers(comptime FrameType: type) type {
             const gas_price = self.getEvm().get_gas_price();
             const gas_price_truncated = @as(WordType, @truncate(gas_price));
             try self.stack.push(gas_price_truncated);
-            const op_data = dispatch.getOpData(.{ .regular = Opcode.GASPRICE }); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular( Opcode.GASPRICE )); const next = op_data.next;
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor ));
         }
 
         /// EXTCODESIZE opcode (0x3B) - Get size of an account's code.
@@ -300,8 +300,8 @@ pub fn Handlers(comptime FrameType: type) type {
             const code = evm.get_code(addr);
             const code_len = @as(WordType, @truncate(@as(u256, @intCast(code.len))));
             try self.stack.push(code_len);
-            const op_data = dispatch.getOpData(.{ .regular = Opcode.EXTCODESIZE }); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular( Opcode.EXTCODESIZE )); const next = op_data.next;
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor ));
         }
 
         /// EXTCODECOPY opcode (0x3C) - Copy an account's code to memory.
@@ -339,8 +339,8 @@ pub fn Handlers(comptime FrameType: type) type {
             const length_usize = @as(usize, @intCast(length));
 
             if (length_usize == 0) {
-                const op_data = dispatch.getOpData(.{ .regular = Opcode.EXTCODECOPY }); const next = op_data.next;
-                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular( Opcode.EXTCODECOPY )); const next = op_data.next;
+                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor ));
             }
 
             // Ensure memory capacity
@@ -360,8 +360,8 @@ pub fn Handlers(comptime FrameType: type) type {
                 self.memory.set_byte(self.allocator, @as(u24, @intCast(dest_offset_usize + i)), byte_val) catch return Error.OutOfBounds;
             }
 
-            const op_data = dispatch.getOpData(.{ .regular = Opcode.EXTCODECOPY }); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular( Opcode.EXTCODECOPY )); const next = op_data.next;
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor ));
         }
 
         /// EXTCODEHASH opcode (0x3F) - Get hash of account's code.
@@ -386,8 +386,8 @@ pub fn Handlers(comptime FrameType: type) type {
             if (!evm.account_exists(addr)) {
                 // Non-existent account returns 0 per EIP-1052
                 try self.stack.push(0);
-                const op_data = dispatch.getOpData(.{ .regular = Opcode.EXTCODEHASH }); const next = op_data.next;
-                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular( Opcode.EXTCODEHASH )); const next = op_data.next;
+                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor ));
             }
 
             const code = self.getEvm().get_code(addr);
@@ -396,8 +396,8 @@ pub fn Handlers(comptime FrameType: type) type {
                 const empty_hash_u256: u256 = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470;
                 const empty_hash_word = @as(WordType, @truncate(empty_hash_u256));
                 try self.stack.push(empty_hash_word);
-                const op_data = dispatch.getOpData(.{ .regular = Opcode.EXTCODEHASH }); const next = op_data.next;
-                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular( Opcode.EXTCODEHASH )); const next = op_data.next;
+                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor ));
             }
 
             // Compute keccak256 hash of the code
@@ -412,8 +412,8 @@ pub fn Handlers(comptime FrameType: type) type {
             const hash_word = @as(WordType, @truncate(hash_u256));
             try self.stack.push(hash_word);
 
-            const op_data = dispatch.getOpData(.{ .regular = Opcode.EXTCODEHASH }); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular( Opcode.EXTCODEHASH )); const next = op_data.next;
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor ));
         }
 
         /// RETURNDATASIZE opcode (0x3D) - Get size of output data from the previous call.
@@ -423,8 +423,8 @@ pub fn Handlers(comptime FrameType: type) type {
             // Return data is stored in the frame's output field after a call
             const return_data_len = @as(WordType, @truncate(@as(u256, @intCast(self.output.len))));
             try self.stack.push(return_data_len);
-            const op_data = dispatch.getOpData(.{ .regular = Opcode.RETURNDATASIZE }); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular( Opcode.RETURNDATASIZE )); const next = op_data.next;
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor ));
         }
 
         /// RETURNDATACOPY opcode (0x3E) - Copy output data from the previous call to memory.
@@ -459,8 +459,8 @@ pub fn Handlers(comptime FrameType: type) type {
             }
 
             if (length_usize == 0) {
-                const op_data = dispatch.getOpData(.{ .regular = Opcode.RETURNDATACOPY }); const next = op_data.next;
-                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular( Opcode.RETURNDATACOPY )); const next = op_data.next;
+                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor ));
             }
 
             // Calculate gas cost for memory expansion and copy operation
@@ -486,8 +486,8 @@ pub fn Handlers(comptime FrameType: type) type {
             const src_slice = return_data[offset_usize..][0..length_usize];
             self.memory.set_data(self.allocator, @as(u24, @intCast(dest_offset_usize)), src_slice) catch return Error.OutOfBounds;
 
-            const op_data = dispatch.getOpData(.{ .regular = Opcode.RETURNDATACOPY }); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular( Opcode.RETURNDATACOPY )); const next = op_data.next;
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor ));
         }
 
         /// BLOCKHASH opcode (0x40) - Get the hash of one of the 256 most recent complete blocks.
@@ -519,8 +519,8 @@ pub fn Handlers(comptime FrameType: type) type {
                 try self.stack.push(0);
             }
 
-            const op_data = dispatch.getOpData(.{ .regular = Opcode.BLOCKHASH }); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular( Opcode.BLOCKHASH )); const next = op_data.next;
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor ));
         }
 
         /// COINBASE opcode (0x41) - Get the current block's beneficiary address.
@@ -538,8 +538,8 @@ pub fn Handlers(comptime FrameType: type) type {
             const coinbase_u256 = to_u256(block_info.coinbase);
             const coinbase_word = @as(WordType, @truncate(coinbase_u256));
             try self.stack.push(coinbase_word);
-            const op_data = dispatch.getOpData(.{ .regular = Opcode.COINBASE }); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular( Opcode.COINBASE )); const next = op_data.next;
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor ));
         }
 
         /// TIMESTAMP opcode (0x42) - Get the current block's timestamp.
@@ -556,8 +556,8 @@ pub fn Handlers(comptime FrameType: type) type {
             const block_info = self.block_info;
             const timestamp_word = @as(WordType, @truncate(@as(u256, @intCast(block_info.timestamp))));
             try self.stack.push(timestamp_word);
-            const op_data = dispatch.getOpData(.{ .regular = Opcode.TIMESTAMP }); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular( Opcode.TIMESTAMP )); const next = op_data.next;
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor ));
         }
 
         /// NUMBER opcode (0x43) - Get the current block's number.
@@ -574,8 +574,8 @@ pub fn Handlers(comptime FrameType: type) type {
             const block_info = self.block_info;
             const block_number_word = @as(WordType, @truncate(@as(u256, @intCast(block_info.number))));
             try self.stack.push(block_number_word);
-            const op_data = dispatch.getOpData(.{ .regular = Opcode.NUMBER }); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular( Opcode.NUMBER )); const next = op_data.next;
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor ));
         }
 
         /// DIFFICULTY opcode (0x44) - Get the current block's difficulty.
@@ -592,8 +592,8 @@ pub fn Handlers(comptime FrameType: type) type {
             const block_info = self.block_info;
             const difficulty_word = @as(WordType, @truncate(block_info.difficulty));
             try self.stack.push(difficulty_word);
-            const op_data = dispatch.getOpData(.{ .regular = Opcode.DIFFICULTY }); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular( Opcode.DIFFICULTY )); const next = op_data.next;
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor ));
         }
 
         /// PREVRANDAO opcode - Alias for DIFFICULTY post-merge.
@@ -610,8 +610,8 @@ pub fn Handlers(comptime FrameType: type) type {
             const block_info = self.block_info;
             const gas_limit_word = @as(WordType, @truncate(@as(u256, @intCast(block_info.gas_limit))));
             try self.stack.push(gas_limit_word);
-            const op_data = dispatch.getOpData(.{ .regular = Opcode.GASLIMIT }); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular( Opcode.GASLIMIT )); const next = op_data.next;
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor ));
         }
 
         /// CHAINID opcode (0x46) - Get the chain ID.
@@ -621,8 +621,8 @@ pub fn Handlers(comptime FrameType: type) type {
             const chain_id = self.getEvm().get_chain_id();
             const chain_id_word = @as(WordType, @truncate(@as(u256, chain_id)));
             try self.stack.push(chain_id_word);
-            const op_data = dispatch.getOpData(.{ .regular = Opcode.CHAINID }); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular( Opcode.CHAINID )); const next = op_data.next;
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor ));
         }
 
         /// SELFBALANCE opcode (0x47) - Get balance of currently executing account.
@@ -632,8 +632,8 @@ pub fn Handlers(comptime FrameType: type) type {
             const bal = self.getEvm().get_balance(self.contract_address);
             const balance_word = @as(WordType, @truncate(bal));
             try self.stack.push(balance_word);
-            const op_data = dispatch.getOpData(.{ .regular = Opcode.SELFBALANCE }); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular( Opcode.SELFBALANCE )); const next = op_data.next;
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor ));
         }
 
         /// BASEFEE opcode (0x48) - Get the current block's base fee.
@@ -643,8 +643,8 @@ pub fn Handlers(comptime FrameType: type) type {
             const block_info = self.block_info;
             const base_fee_word = @as(WordType, @truncate(block_info.base_fee));
             try self.stack.push(base_fee_word);
-            const op_data = dispatch.getOpData(.{ .regular = Opcode.BASEFEE }); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular( Opcode.BASEFEE )); const next = op_data.next;
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor ));
         }
 
         /// BLOBHASH opcode (0x49) - Get versioned hashes of blob transactions.
@@ -655,8 +655,8 @@ pub fn Handlers(comptime FrameType: type) type {
             // Convert u256 to usize for array access
             if (index > std.math.maxInt(usize)) {
                 try self.stack.push(0);
-                const op_data = dispatch.getOpData(.{ .regular = Opcode.BLOBHASH }); const next = op_data.next;
-                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular( Opcode.BLOBHASH )); const next = op_data.next;
+                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor ));
             }
             const index_usize = @as(usize, @intCast(index));
             // Check if index is within bounds of versioned hashes
@@ -673,8 +673,8 @@ pub fn Handlers(comptime FrameType: type) type {
                 // Index out of bounds - push zero
                 try self.stack.push(0);
             }
-            const op_data = dispatch.getOpData(.{ .regular = Opcode.BLOBHASH }); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular( Opcode.BLOBHASH )); const next = op_data.next;
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor ));
         }
 
         /// BLOBBASEFEE opcode (0x4a) - Get the current block's blob base fee.
@@ -684,8 +684,8 @@ pub fn Handlers(comptime FrameType: type) type {
             const blob_base_fee = self.block_info.blob_base_fee;
             const blob_base_fee_word = @as(WordType, @truncate(blob_base_fee));
             try self.stack.push(blob_base_fee_word);
-            const op_data = dispatch.getOpData(.{ .regular = Opcode.BLOBBASEFEE }); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular( Opcode.BLOBBASEFEE )); const next = op_data.next;
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor ));
         }
 
         /// GAS opcode (0x5A) - Get the amount of available gas.
@@ -696,9 +696,9 @@ pub fn Handlers(comptime FrameType: type) type {
             // The dispatch system handles the gas consumption before calling this handler
             const gas_value = @as(WordType, @max(self.gas_remaining, 0));
             try self.stack.push(gas_value);
-            const op_data = dispatch.getOpData(.{ .regular = Opcode.GAS });
+            const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular( Opcode.GAS ));
             const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor ));
         }
 
         /// PC opcode (0x58) - Get the value of the program counter prior to the increment.
@@ -706,9 +706,9 @@ pub fn Handlers(comptime FrameType: type) type {
         pub fn pc(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const dispatch = Dispatch{ .cursor = cursor };
             // Get PC value from metadata
-            const op_data = dispatch.getOpData(.{ .regular = Opcode.PC });
+            const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular( Opcode.PC ));
             try self.stack.push(op_data.metadata.value);
-            return @call(FrameType.getTailCallModifier(), op_data.next.cursor[0].opcode_handler, .{ self, op_data.next.cursor });
+            return @call(FrameType.getTailCallModifier(), op_data.next.cursor[0].opcode_handler, .{ self, op_data.next.cursor ));
         }
     };
 }
@@ -735,7 +735,7 @@ const test_config = FrameConfig{
 };
 
 const TestFrame = Frame(test_config);
-const TestBytecode = bytecode_mod.Bytecode(.{ .max_bytecode_size = test_config.max_bytecode_size });
+const TestBytecode = bytecode_mod.Bytecode(.{ .max_bytecode_size = test_config.max_bytecode_size ));
 
 // Mock host for testing
 const MockEvm = struct {
@@ -1057,7 +1057,7 @@ test "CODESIZE opcode" {
 
     // Create bytecode with some data
     var bytecode = TestBytecode.initEmpty();
-    try bytecode.appendSlice(&[_]u8{ 0x60, 0x00, 0x60, 0x00 });
+    try bytecode.appendSlice(&[_]u8{ 0x60, 0x00, 0x60, 0x00 ));
 
     const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
     var frame = try TestFrame.init(testing.allocator, bytecode, 1_000_000, null, evm_ptr);
@@ -2219,7 +2219,7 @@ test "WordType truncation behavior" {
     };
 
     const SmallFrame = Frame(SmallWordConfig);
-    const SmallBytecode = bytecode_mod.Bytecode(.{ .max_bytecode_size = SmallWordConfig.max_bytecode_size });
+    const SmallBytecode = bytecode_mod.Bytecode(.{ .max_bytecode_size = SmallWordConfig.max_bytecode_size ));
 
     var evm = MockEvm.init(testing.allocator);
     defer evm.deinit();

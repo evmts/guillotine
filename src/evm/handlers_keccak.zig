@@ -68,7 +68,7 @@ pub fn Handlers(comptime FrameType: type) type {
                     },
                 };
                 self.stack.push_unsafe(empty_hash);
-                const op_data = dispatch.getOpData(.{ .regular = Opcode.KECCAK256 });
+                const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular(Opcode.KECCAK256));
                 const next = op_data.next;
                 return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
             }
@@ -166,7 +166,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
             self.stack.push_unsafe(result_word);
 
-            const op_data = dispatch.getOpData(.{ .regular = Opcode.KECCAK256 });
+            const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular(Opcode.KECCAK256));
             const next = op_data.next;
             return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
         }

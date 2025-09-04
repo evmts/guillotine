@@ -90,7 +90,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const dispatch = Dispatch{ .cursor = cursor };
             const Opcode = @import("opcode_data.zig").Opcode;
             // JUMPDEST consumes gas for the entire basic block (static + dynamic)
-            const op_data = dispatch.getOpData(.{ .regular = Opcode.JUMPDEST });
+            const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular(Opcode.JUMPDEST));
             const gas_cost = op_data.metadata.gas;
 
             // Check and consume gas for the entire basic block
@@ -123,7 +123,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const dispatch = Dispatch{ .cursor = cursor };
             const Opcode = @import("opcode_data.zig").Opcode;
             // Get PC value from metadata
-            const op_data = dispatch.getOpData(.{ .regular = Opcode.PC });
+            const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular(Opcode.PC));
 
             try self.stack.push(op_data.metadata.value);
 

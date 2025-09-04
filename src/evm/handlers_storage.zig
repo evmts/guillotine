@@ -42,7 +42,7 @@ pub fn Handlers(comptime FrameType: type) type {
             };
             try self.stack.push(value);
 
-            const op_data = dispatch.getOpData(.{ .regular = Opcode.SLOAD });
+            const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular(Opcode.SLOAD));
             const next = op_data.next;
             return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
         }
@@ -118,7 +118,7 @@ pub fn Handlers(comptime FrameType: type) type {
                 evm.add_gas_refund(GasConstants.SstoreRefundGas);
             }
 
-            const op_data = dispatch.getOpData(.{ .regular = Opcode.SSTORE });
+            const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular(Opcode.SSTORE));
             const next = op_data.next;
             return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
         }
@@ -139,7 +139,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
             try self.stack.push(value);
 
-            const op_data = dispatch.getOpData(.{ .regular = Opcode.TLOAD });
+            const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular(Opcode.TLOAD));
             const next = op_data.next;
             return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
         }
@@ -171,7 +171,7 @@ pub fn Handlers(comptime FrameType: type) type {
                 else => return Error.AllocationError,
             };
 
-            const op_data = dispatch.getOpData(.{ .regular = Opcode.TSTORE });
+            const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular(Opcode.TSTORE));
             const next = op_data.next;
             return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
         }

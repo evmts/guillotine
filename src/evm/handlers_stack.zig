@@ -14,7 +14,7 @@ pub fn Handlers(comptime FrameType: type) type {
         pub fn pop(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const dispatch = Dispatch{ .cursor = cursor };
             _ = try self.stack.pop();
-            const op_data = dispatch.getOpData(.{ .regular = .POP });
+            const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular(.POP));
             return @call(FrameType.getTailCallModifier(), op_data.next.cursor[0].opcode_handler, .{ self, op_data.next.cursor });
         }
 
@@ -22,7 +22,7 @@ pub fn Handlers(comptime FrameType: type) type {
         pub fn push0(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const dispatch = Dispatch{ .cursor = cursor };
             try self.stack.push(0);
-            const op_data = dispatch.getOpData(.{ .regular = .PUSH0 });
+            const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular(.PUSH0));
             return @call(FrameType.getTailCallModifier(), op_data.next.cursor[0].opcode_handler, .{ self, op_data.next.cursor });
         }
 
@@ -83,7 +83,7 @@ pub fn Handlers(comptime FrameType: type) type {
                     
                     // For PUSH1-PUSH8, we get push_inline metadata with u64 value
                     // For PUSH9-PUSH32, we get push_pointer metadata with *u256 value
-                    const op_data = dispatch.getOpData(.{ .regular = push_opcode });
+                    const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular(push_opcode));
                     
                     if (push_n <= 8) {
                         const value = op_data.metadata.value;
@@ -112,7 +112,7 @@ pub fn Handlers(comptime FrameType: type) type {
                     try self.stack.dup_n(dup_n);
                     // DUP operations don't have metadata, just get next
                     const dup_opcode = comptime @field(Opcode, std.fmt.comptimePrint("DUP{}", .{dup_n}));
-                    const op_data = dispatch.getOpData(.{ .regular = dup_opcode });
+                    const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular(dup_opcode));
                     return @call(FrameType.getTailCallModifier(), op_data.next.cursor[0].opcode_handler, .{ self, op_data.next.cursor });
                 }
             }.dupHandler;
@@ -128,7 +128,7 @@ pub fn Handlers(comptime FrameType: type) type {
                     try self.stack.swap_n(swap_n);
                     // SWAP operations don't have metadata, just get next
                     const swap_opcode = comptime @field(Opcode, std.fmt.comptimePrint("SWAP{}", .{swap_n}));
-                    const op_data = dispatch.getOpData(.{ .regular = swap_opcode });
+                    const op_data = dispatch.getOpData(DispatchType.UnifiedOpcode.fromRegular(swap_opcode));
                     return @call(FrameType.getTailCallModifier(), op_data.next.cursor[0].opcode_handler, .{ self, op_data.next.cursor });
                 }
             }.swapHandler;
