@@ -12,23 +12,38 @@ pub fn Handlers(comptime FrameType: type) type {
         pub const WordType = FrameType.WordType;
 
         /// ADD opcode (0x01) - Addition with overflow wrapping.
+        /// PROPOSAL DEMO: Shows getOpData approach vs hardcoded cursor arithmetic
         pub fn add(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const b = try self.stack.pop(); // Second operand (top of stack)
             const a = try self.stack.peek(); // First operand (second element)
             const result = a +% b;
             self.stack.set_top_unsafe(result);
-            const next_cursor = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            
+            // OLD WAY: Hardcoded cursor arithmetic - brittle and error-prone
+            // const next_cursor = cursor + 1;
+            // return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            
+            // NEW WAY: Type-safe getOpData approach
+            const dispatch = Dispatch{ .cursor = cursor };
+            const op_data = dispatch.getOpData(.{ .regular = .ADD });
+            // TODO: Add proper tail call helper to reduce boilerplate
+            // TODO: Verify this approach works for all opcode types
+            return @call(FrameType.getTailCallModifier(), op_data.next.cursor[0].opcode_handler, .{ self, op_data.next.cursor });
         }
 
         /// MUL opcode (0x02) - Multiplication with overflow wrapping.
+        /// PROPOSAL DEMO: Shows getOpData approach for consistency
         pub fn mul(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const b = try self.stack.pop(); // Second operand (top of stack)
             const a = try self.stack.peek(); // First operand (second element)
             const result = a *% b;
             self.stack.set_top_unsafe(result);
-            const next_cursor = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            
+            // NEW WAY: Consistent with ADD pattern above
+            const dispatch = Dispatch{ .cursor = cursor };
+            const op_data = dispatch.getOpData(.{ .regular = .MUL });
+            // TODO: This could be simplified with a helper function
+            return @call(FrameType.getTailCallModifier(), op_data.next.cursor[0].opcode_handler, .{ self, op_data.next.cursor });
         }
 
         /// SUB opcode (0x03) - Subtraction with underflow wrapping.

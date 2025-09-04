@@ -192,6 +192,7 @@ pub fn Dispatch(comptime FrameType: type) type {
 
         /// Get opcode data including metadata and next dispatch position.
         /// This is a comptime-optimized method for specific opcodes.
+        /// PROPOSAL DEMO: This method replaces hardcoded cursor arithmetic throughout handlers
         pub fn getOpData(self: Self, comptime opcode: UnifiedOpcode) GetOpDataReturnType(opcode) {
             return switch (opcode) {
                 .regular => |op| switch (op) {
@@ -212,6 +213,7 @@ pub fn Dispatch(comptime FrameType: type) type {
                         .next = Self{ .cursor = self.cursor + 2 },
                     },
                     else => .{
+                        // PROPOSAL DEMO: Simple opcodes advance cursor by 1 - no metadata needed
                         .next = Self{ .cursor = self.cursor + 1 },
                     },
                 },
@@ -226,6 +228,13 @@ pub fn Dispatch(comptime FrameType: type) type {
                     },
                 },
             };
+        }
+
+        /// PROPOSAL DEMO: Helper function to reduce boilerplate in tail calls
+        /// TODO: This could be further optimized and refined
+        pub inline fn tailCall(self: Self, comptime opcode: UnifiedOpcode, frame: anytype) noreturn {
+            const op_data = self.getOpData(opcode);
+            return @call(.always_tail, op_data.next.cursor[0].opcode_handler, .{ frame, op_data.next.cursor });
         }
 
         /// Get first block gas metadata from the current position.
