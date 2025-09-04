@@ -222,10 +222,10 @@ pub fn Frame(comptime config: FrameConfig) type {
             log.debug("Frame.deinit: Cleanup complete", .{});
         }
 
-        /// Execute this frame without tracing (backward compatibility method).
-        /// Simply delegates to interpret_with_tracer with no tracer.
-        /// @param bytecode_raw: Raw bytecode to execute
+        /// Execute this frame without tracing.
+        /// @param bytecode_raw: Raw bytecode to execute  
         pub fn interpret(self: *Self, bytecode_raw: []const u8) Error!void {
+            // TODO: Change to use begin_dispatch once it's fully implemented
             return self.interpret_with_tracer(bytecode_raw, null, {});
         }
 
@@ -235,6 +235,25 @@ pub fn Frame(comptime config: FrameConfig) type {
         /// @param bytecode_raw: Raw bytecode to execute
         /// @param TracerType: Optional comptime tracer type for zero-cost tracing abstraction
         /// @param tracer_instance: Instance of the tracer (ignored if TracerType is null)
+        /// Execute this frame by building a dispatch schedule and jumping to the first handler.
+        /// Uses tail call syntax for consistency and performance optimization.
+        /// TODO: This is a MINIMAL proof-of-concept showing the tail call approach
+        pub fn begin_dispatch(self: *Self, bytecode_raw: []const u8, comptime TracerType: ?type, tracer_instance: if (TracerType) |T| *T else void) Error!void {
+            // Minimal proof-of-concept that compiles - just demonstrates the method signature
+            // In full implementation, this would:
+            // 1. Initialize bytecode, dispatch schedule, jump table 
+            // 2. Set up tracer if needed
+            // 3. Calculate first block gas
+            // 4. End with: return @call(Self.getTailCallModifier(), cursor.cursor[0].opcode_handler, .{self, cursor.cursor});
+            
+            // For now, return an error to avoid infinite recursion while showing the concept
+            _ = bytecode_raw;
+            _ = TracerType;
+            _ = tracer_instance; 
+            _ = self;
+            return Error.InvalidOpcode; // TODO: Replace with full implementation - using InvalidOpcode as placeholder
+        }
+
         pub fn interpret_with_tracer(self: *Self, bytecode_raw: []const u8, comptime TracerType: ?type, tracer_instance: if (TracerType) |T| *T else void) Error!void {
             // Measure dispatch schedule + jump table creation vs. opcode execution
             var analysis_ns: u64 = 0;
@@ -349,6 +368,8 @@ pub fn Frame(comptime config: FrameConfig) type {
                 log.debug("timing: analysis_ns={} dispatch_ns={} handlers_ns={}", .{ analysis_ns, dispatch_build_ns, exec_ns });
             }
 
+            // TODO FOR begin_dispatch: Replace these 2 lines with tail call approach:
+            // return @call(Self.getTailCallModifier(), cursor.cursor[0].opcode_handler, .{self, cursor.cursor});
             try cursor.cursor[0].opcode_handler(self, cursor.cursor);
             unreachable; // Handlers never return normally
         }
