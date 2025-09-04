@@ -87,15 +87,11 @@ pub fn Handlers(comptime FrameType: type) type {
                     
                     if (push_n <= 8) {
                         const value = op_data.metadata.value;
-                        log.debug("[PUSH{d}] Pushing inline value: {d}", .{ push_n, value });
                         try self.stack.push(value);
                     } else {
                         const value = op_data.metadata.value.*;
-                        log.debug("[PUSH{d}] Pushing pointer value: {d}", .{ push_n, value });
                         try self.stack.push(value);
                     }
-                    
-                    log.debug("[PUSH{d}] Stack after: {any}", .{ push_n, self.stack.get_slice() });
                     
                     return @call(FrameType.getTailCallModifier(), op_data.next.cursor[0].opcode_handler, .{ self, op_data.next.cursor });
                 }
