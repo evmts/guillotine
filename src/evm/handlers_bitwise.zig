@@ -62,7 +62,9 @@ pub fn Handlers(comptime FrameType: type) type {
             return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
         }
 
-        /// SHL opcode (0x1b) - Shift left operation.
+        /// SHL opcode (0x1b) - Shift left operation using std.math.shl
+        /// Uses std library for consistent cross-platform behavior
+        /// See: https://ziglang.org/documentation/master/std/#std.math.shl
         pub fn shl(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const shift = try self.stack.pop(); // Top of stack - shift amount
             const value = try self.stack.peek(); // Second from top - value to shift
@@ -71,14 +73,17 @@ pub fn Handlers(comptime FrameType: type) type {
             } else blk: {
                 const ShiftType = std.math.Log2Int(WordType);
                 // shift is guaranteed to be < 256 here, safe to cast
-                break :blk value << @as(ShiftType, @truncate(shift));
+                // TODO: Replace all 268+ manual bit operations found in audit
+                break :blk std.math.shl(WordType, value, @as(ShiftType, @truncate(shift)));
             };
             self.stack.set_top_unsafe(result);
             const next_cursor = cursor + 1;
             return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
         }
 
-        /// SHR opcode (0x1c) - Logical shift right operation.
+        /// SHR opcode (0x1c) - Logical shift right operation using std.math.shr
+        /// Uses std library for consistent cross-platform behavior
+        /// See: https://ziglang.org/documentation/master/std/#std.math.shr
         pub fn shr(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const shift = try self.stack.pop(); // Top of stack - shift amount
             const value = try self.stack.peek(); // Second from top - value to shift
@@ -87,7 +92,8 @@ pub fn Handlers(comptime FrameType: type) type {
             } else blk: {
                 const ShiftType = std.math.Log2Int(WordType);
                 // shift is guaranteed to be < 256 here, safe to cast
-                break :blk value >> @as(ShiftType, @truncate(shift));
+                // TODO: Replace remaining manual shifts in BYTE handler (line 58)
+                break :blk std.math.shr(WordType, value, @as(ShiftType, @truncate(shift)));
             };
             self.stack.set_top_unsafe(result);
             const next_cursor = cursor + 1;
