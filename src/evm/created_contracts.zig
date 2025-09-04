@@ -8,18 +8,21 @@ pub const CreatedContracts = struct {
     created: std.AutoHashMap(Address, void),
     allocator: std.mem.Allocator,
 
-    pub inline fn init(allocator: std.mem.Allocator) CreatedContracts {
+    // INLINE REMOVED: Simple HashMap wrapper - compiler will inline automatically
+    pub fn init(allocator: std.mem.Allocator) CreatedContracts {
         return CreatedContracts{
             .created = std.AutoHashMap(Address, void).init(allocator),
             .allocator = allocator,
         };
     }
 
-    pub inline fn deinit(self: *CreatedContracts) void {
+    // INLINE REMOVED: Simple deallocation - no performance benefit from manual inline
+    pub fn deinit(self: *CreatedContracts) void {
         self.created.deinit();
     }
 
-    pub inline fn mark_created(self: *CreatedContracts, address: Address) !void {
+    // INLINE REMOVED: HashMap operation - compiler will optimize as needed
+    pub fn mark_created(self: *CreatedContracts, address: Address) !void {
         try self.created.put(address, {});
     }
 

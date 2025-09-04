@@ -355,14 +355,16 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
         }
 
         /// Get the length of the bytecode
-        pub inline fn len(self: Self) PcType {
+        // INLINE REMOVED: Simple getter - compiler will inline automatically
+        pub fn len(self: Self) PcType {
             // Guaranteed by config that runtime_code.len fits in PcType
             std.debug.assert(self.runtime_code.len <= std.math.maxInt(PcType));
             return @intCast(self.runtime_code.len);
         }
 
-        /// Get the raw bytecode slice
-        pub inline fn raw(self: Self) []const u8 {
+        /// Get the raw bytecode slice  
+        // INLINE REMOVED: Simple getter - no performance benefit from manual inline
+        pub fn raw(self: Self) []const u8 {
             return self.runtime_code;
         }
 
