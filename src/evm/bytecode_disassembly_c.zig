@@ -108,11 +108,28 @@ pub const CResult = extern struct {
     };
     defer zig_result.deinit(allocator);
 
+    // Initialize optional pointers for cleanup
+    var c_instructions: ?[]CInstruction = null;
+    var c_jumpdests: ?[]u32 = null;
+    var c_blocks: ?[]CBasicBlock = null;
+    
+    // Consolidated error cleanup
+    errdefer {
+        if (c_instructions) |ptr| {
+            // Clean up allocated opcode names
+            for (ptr) |inst| {
+                allocator.free(std.mem.span(inst.opcode_name));
+            }
+            allocator.free(ptr);
+        }
+        if (c_jumpdests) |ptr| allocator.free(ptr);
+        if (c_blocks) |ptr| allocator.free(ptr);
+    }
+
     // Convert instructions to C format
-    const c_instructions = allocator.alloc(CInstruction, zig_result.bytecode_instructions.len) catch {
+    c_instructions = allocator.alloc(CInstruction, zig_result.bytecode_instructions.len) catch {
         return EVM_DISASM_ERROR_OUT_OF_MEMORY;
     };
-    errdefer allocator.free(c_instructions);
 
     for (zig_result.bytecode_instructions, 0..) |inst, i| {
         var push_low: u64 = 0;
@@ -131,15 +148,10 @@ pub const CResult = extern struct {
 
         // Allocate and copy the opcode name string for C
         const name_z = allocator.dupeZ(u8, inst.opcode_name) catch {
-            // Clean up previously allocated names
-            for (0..i) |j| {
-                allocator.free(std.mem.span(c_instructions[j].opcode_name));
-            }
-            allocator.free(c_instructions);
             return EVM_DISASM_ERROR_OUT_OF_MEMORY;
         };
 
-        c_instructions[i] = .{
+        c_instructions.?[i] = .{
             .pc = inst.pc,
             .opcode_name = name_z.ptr,
             .opcode_hex = inst.opcode_hex,
@@ -155,30 +167,17 @@ pub const CResult = extern struct {
     }
 
     // Copy jumpdests (already u32)
-    const c_jumpdests = allocator.dupe(u32, zig_result.jumpdests) catch {
-        // Clean up allocated names
-        for (0..c_instructions.len) |j| {
-            allocator.free(std.mem.span(c_instructions[j].opcode_name));
-        }
-        allocator.free(c_instructions);
+    c_jumpdests = allocator.dupe(u32, zig_result.jumpdests) catch {
         return EVM_DISASM_ERROR_OUT_OF_MEMORY;
     };
-    errdefer allocator.free(c_jumpdests);
 
     // Convert basic blocks to C format
-    const c_blocks = allocator.alloc(CBasicBlock, zig_result.basic_blocks.len) catch {
-        // Clean up allocated names
-        for (0..c_instructions.len) |j| {
-            allocator.free(std.mem.span(c_instructions[j].opcode_name));
-        }
-        allocator.free(c_instructions);
-        allocator.free(c_jumpdests);
+    c_blocks = allocator.alloc(CBasicBlock, zig_result.basic_blocks.len) catch {
         return EVM_DISASM_ERROR_OUT_OF_MEMORY;
     };
-    errdefer allocator.free(c_blocks);
 
     for (zig_result.basic_blocks, 0..) |block, i| {
-        c_blocks[i] = .{
+        c_blocks.?[i] = .{
             .start = block.start,
             .end = block.end,
         };
@@ -186,12 +185,12 @@ pub const CResult = extern struct {
 
     // Fill result structure
     result_out.* = .{
-        .instructions = c_instructions.ptr,
-        .instruction_count = @intCast(c_instructions.len),
-        .jumpdests = c_jumpdests.ptr,
-        .jumpdest_count = @intCast(c_jumpdests.len),
-        .basic_blocks = c_blocks.ptr,
-        .basic_block_count = @intCast(c_blocks.len),
+        .instructions = c_instructions.?.ptr,
+        .instruction_count = @intCast(c_instructions.?.len),
+        .jumpdests = c_jumpdests.?.ptr,
+        .jumpdest_count = @intCast(c_jumpdests.?.len),
+        .basic_blocks = c_blocks.?.ptr,
+        .basic_block_count = @intCast(c_blocks.?.len),
         .stats = .{
             .original_size = @intCast(zig_result.stats.original_size),
             .dispatch_size = @intCast(zig_result.stats.dispatch_size),

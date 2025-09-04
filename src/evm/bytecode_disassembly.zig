@@ -71,11 +71,11 @@ pub const BytecodeDisassembly = struct {
         // Reuses: bytecode.createIterator() from bytecode.zig:608
         // Reuses: OPCODE_INFO from opcode_data.zig for gas/stack info
 
-        var instructions = std.ArrayList(Instruction){};
-        defer instructions.deinit(allocator);
+        var instructions = std.ArrayList(Instruction).init(allocator);
+        defer instructions.deinit();
         
-        var jumpdests_list = std.ArrayList(u32){};
-        defer jumpdests_list.deinit(allocator);
+        var jumpdests_list = std.ArrayList(u32).init(allocator);
+        defer jumpdests_list.deinit();
 
         // Parse raw bytecode directly without fusion analysis
         const runtime_code = bytecode.runtime_code;
@@ -156,8 +156,8 @@ pub const BytecodeDisassembly = struct {
 
         // PHASE 3: Create basic blocks
         // Basic blocks are segments of code between jumpdests
-        var blocks = std.ArrayList(BasicBlock){};
-        defer blocks.deinit(allocator);
+        var blocks = std.ArrayList(BasicBlock).init(allocator);
+        defer blocks.deinit();
 
         const sorted_jumpdests = try jumpdests_list.toOwnedSlice(allocator);
         // No defer free - ownership transferred to Result
@@ -220,7 +220,7 @@ test "bytecode disassembly - empty bytecode" {
     };
     defer bytecode.deinit();
 
-    var result = try BytecodeDisassembly.disassemble(allocator, bytecode, TestFrame);
+    var result = try BytecodeDisassembly.analyze(allocator, bytecode, TestFrame);
     defer result.deinit(allocator);
 
     try testing.expectEqual(@as(usize, 0), result.bytecode_instructions.len);
@@ -241,7 +241,7 @@ test "bytecode disassembly - single ADD instruction" {
     };
     defer bytecode.deinit();
 
-    var result = try BytecodeDisassembly.disassemble(allocator, bytecode, TestFrame);
+    var result = try BytecodeDisassembly.analyze(allocator, bytecode, TestFrame);
     defer result.deinit(allocator);
 
     try testing.expectEqual(@as(usize, 1), result.bytecode_instructions.len);
@@ -269,7 +269,7 @@ test "bytecode disassembly - PUSH1 with value" {
     };
     defer bytecode.deinit();
 
-    var result = try BytecodeDisassembly.disassemble(allocator, bytecode, TestFrame);
+    var result = try BytecodeDisassembly.analyze(allocator, bytecode, TestFrame);
     defer result.deinit(allocator);
 
     try testing.expectEqual(@as(usize, 1), result.bytecode_instructions.len);
@@ -296,7 +296,7 @@ test "bytecode disassembly - multiple PUSH sizes" {
     };
     defer bytecode.deinit();
 
-    var result = try BytecodeDisassembly.disassemble(allocator, bytecode, TestFrame);
+    var result = try BytecodeDisassembly.analyze(allocator, bytecode, TestFrame);
     defer result.deinit(allocator);
 
     try testing.expectEqual(@as(usize, 3), result.bytecode_instructions.len);
@@ -333,7 +333,7 @@ test "bytecode disassembly - JUMPDEST creates blocks" {
     };
     defer bytecode.deinit();
 
-    var result = try BytecodeDisassembly.disassemble(allocator, bytecode, TestFrame);
+    var result = try BytecodeDisassembly.analyze(allocator, bytecode, TestFrame);
     defer result.deinit(allocator);
 
     // Check jumpdests detected
@@ -368,7 +368,7 @@ test "bytecode disassembly - invalid opcode handling" {
     };
     defer bytecode.deinit();
 
-    var result = try BytecodeDisassembly.disassemble(allocator, bytecode, TestFrame);
+    var result = try BytecodeDisassembly.analyze(allocator, bytecode, TestFrame);
     defer result.deinit(allocator);
 
     try testing.expectEqual(@as(usize, 1), result.bytecode_instructions.len);
@@ -389,7 +389,7 @@ test "bytecode disassembly - truncated PUSH instruction" {
     };
     defer bytecode.deinit();
 
-    var result = try BytecodeDisassembly.disassemble(allocator, bytecode, TestFrame);
+    var result = try BytecodeDisassembly.analyze(allocator, bytecode, TestFrame);
     defer result.deinit(allocator);
 
     try testing.expectEqual(@as(usize, 1), result.bytecode_instructions.len);
@@ -413,7 +413,7 @@ test "bytecode disassembly - first block gas calculation" {
     };
     defer bytecode.deinit();
 
-    var result = try BytecodeDisassembly.disassemble(allocator, bytecode, TestFrame);
+    var result = try BytecodeDisassembly.analyze(allocator, bytecode, TestFrame);
     defer result.deinit(allocator);
 
     // First block should have 9 gas total
@@ -443,7 +443,7 @@ test "bytecode disassembly - complex control flow" {
     };
     defer bytecode.deinit();
 
-    var result = try BytecodeDisassembly.disassemble(allocator, bytecode, TestFrame);
+    var result = try BytecodeDisassembly.analyze(allocator, bytecode, TestFrame);
     defer result.deinit(allocator);
 
     // Should have 2 jumpdests
@@ -467,7 +467,7 @@ test "bytecode disassembly - PUSH32 handling" {
     };
     defer bytecode.deinit();
 
-    var result = try BytecodeDisassembly.disassemble(allocator, bytecode, TestFrame);
+    var result = try BytecodeDisassembly.analyze(allocator, bytecode, TestFrame);
     defer result.deinit(allocator);
 
     try testing.expectEqual(@as(usize, 1), result.bytecode_instructions.len);
@@ -494,7 +494,7 @@ test "bytecode disassembly - dispatch size verification" {
     };
     defer bytecode.deinit();
 
-    var result = try BytecodeDisassembly.disassemble(allocator, bytecode, TestFrame);
+    var result = try BytecodeDisassembly.analyze(allocator, bytecode, TestFrame);
     defer result.deinit(allocator);
 
     // Dispatch should be created and have a size > 0
@@ -518,7 +518,7 @@ test "bytecode disassembly - no jumpdests" {
     };
     defer bytecode.deinit();
 
-    var result = try BytecodeDisassembly.disassemble(allocator, bytecode, TestFrame);
+    var result = try BytecodeDisassembly.analyze(allocator, bytecode, TestFrame);
     defer result.deinit(allocator);
 
     // No jumpdests
