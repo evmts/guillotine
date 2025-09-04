@@ -57,6 +57,7 @@ pub const log = @import("log.zig");
 
 // Bytecode modules
 pub const BytecodeConfig = @import("bytecode_config.zig").BytecodeConfig;
+pub const VerificationMode = @import("bytecode_config.zig").VerificationMode;
 pub const Bytecode = @import("bytecode.zig").Bytecode;
 pub const BytecodeStats = @import("bytecode_stats.zig").BytecodeStats;
 
@@ -107,6 +108,14 @@ test {
     _ = MemoryError;
 
     // Test bytecode
+    _ = BytecodeConfig;
+    _ = VerificationMode;
+    
+    // Test fusion verification modules
+    _ = @import("fusion_verification_test.zig");
+    _ = @import("fusion_verification_e2e_test.zig");
+    _ = @import("fusion_benchmark_test.zig");
+    _ = @import("fusion_verification_edge_cases_test.zig");
 
     // Test EVM
     _ = Evm;

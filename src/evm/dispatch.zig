@@ -602,14 +602,56 @@ pub fn Dispatch(comptime FrameType: type) type {
             items: []Item,
             allocator: std.mem.Allocator,
             push_pointers: []const *FrameType.WordType = &.{},
+            
+            // Shadow schedule for fusion verification (debug builds only)
+            shadow_items: if (std.debug.runtime_safety) ?[]Item else void = 
+                if (std.debug.runtime_safety) null else {},
+            shadow_push_pointers: if (std.debug.runtime_safety) ?[]const *FrameType.WordType else void = 
+                if (std.debug.runtime_safety) null else {},
 
             /// Initialize a dispatch schedule from bytecode with automatic cleanup
             pub fn init(allocator: std.mem.Allocator, bytecode: anytype, opcode_handlers: *const [256]OpcodeHandler) !DispatchSchedule {
                 const owned = try Self.initWithOwnership(allocator, bytecode, opcode_handlers);
+                
+                // Create shadow schedule for verification in debug builds
+                if (std.debug.runtime_safety) {
+                    // Check if bytecode has verification enabled
+                    const verification_enabled = switch (@TypeOf(bytecode)) {
+                        else => blk: {
+                            // Try to access verification_mode field if it exists
+                            if (@hasField(@TypeOf(bytecode), "verification_mode")) {
+                                break :blk bytecode.verification_mode != .none;
+                            } else {
+                                break :blk false; // Default to no verification
+                            }
+                        }
+                    };
+                    
+                    if (verification_enabled) {
+                        // Create shadow bytecode with fusions disabled
+                        var shadow_bytecode = bytecode;
+                        if (@hasField(@TypeOf(shadow_bytecode), "fusions_enabled")) {
+                            shadow_bytecode.fusions_enabled = false;
+                        }
+                        
+                        const shadow_owned = try Self.initWithOwnership(allocator, shadow_bytecode, opcode_handlers);
+                        
+                        return DispatchSchedule{
+                            .items = owned.items,
+                            .allocator = allocator,
+                            .push_pointers = owned.push_pointers,
+                            .shadow_items = shadow_owned.items,
+                            .shadow_push_pointers = shadow_owned.push_pointers,
+                        };
+                    }
+                }
+                
                 return DispatchSchedule{
                     .items = owned.items,
                     .allocator = allocator,
                     .push_pointers = owned.push_pointers,
+                    .shadow_items = if (std.debug.runtime_safety) null else {},
+                    .shadow_push_pointers = if (std.debug.runtime_safety) null else {},
                 };
             }
 
@@ -620,6 +662,19 @@ pub fn Dispatch(comptime FrameType: type) type {
                     self.allocator.destroy(ptr);
                 }
                 if (self.push_pointers.len > 0) self.allocator.free(self.push_pointers);
+
+                // Free shadow schedule if present (debug builds only)
+                if (std.debug.runtime_safety) {
+                    if (self.shadow_items) |shadow_items| {
+                        Self.deinitSchedule(self.allocator, shadow_items);
+                    }
+                    if (self.shadow_push_pointers) |shadow_pointers| {
+                        for (shadow_pointers) |ptr| {
+                            self.allocator.destroy(ptr);
+                        }
+                        if (shadow_pointers.len > 0) self.allocator.free(shadow_pointers);
+                    }
+                }
 
                 // Free schedule itself
                 Self.deinitSchedule(self.allocator, self.items);

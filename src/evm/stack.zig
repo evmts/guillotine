@@ -237,6 +237,21 @@ pub fn Stack(comptime config: StackConfig) type {
             // Return slice from stack_ptr to stack_base
             return self.stack_ptr[0..count];
         }
+        
+        /// Compare two stacks for equality (for fusion verification)
+        pub fn equals(self: *const Self, other: *const Self) bool {
+            const self_size = self.size_internal();
+            const other_size = other.size_internal();
+            
+            if (self_size != other_size) return false;
+            if (self_size == 0) return true;
+            
+            // Compare stack contents
+            const self_slice = self.stack_ptr[0..self_size];
+            const other_slice = other.stack_ptr[0..other_size];
+            
+            return std.mem.eql(WordType, self_slice, other_slice);
+        }
     };
 }
 

@@ -260,6 +260,24 @@ pub fn Memory(comptime config: MemoryConfig) type {
         pub inline fn get_buffer_ref(self: *Self) *std.ArrayList(u8) {
             return self.buffer_ptr;
         }
+        
+        /// Compare two memory instances for equality (for fusion verification)
+        pub fn equals(self: *const Self, other: *const Self) bool {
+            const self_size = self.size_internal();
+            const other_size = other.size_internal();
+            
+            if (self_size != other_size) return false;
+            if (self_size == 0) return true;
+            
+            // Compare memory contents from checkpoint
+            const self_checkpoint = @as(usize, self.checkpoint);
+            const other_checkpoint = @as(usize, other.checkpoint);
+            
+            const self_slice = self.buffer_ptr.*.items[self_checkpoint..self_checkpoint + self_size];
+            const other_slice = other.buffer_ptr.*.items[other_checkpoint..other_checkpoint + other_size];
+            
+            return std.mem.eql(u8, self_slice, other_slice);
+        }
     };
 }
 

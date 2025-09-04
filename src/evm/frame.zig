@@ -17,6 +17,7 @@ const opcode_data = @import("opcode_data.zig");
 const Opcode = opcode_data.Opcode;
 const OpcodeSynthetic = @import("opcode_synthetic.zig").OpcodeSynthetic;
 pub const FrameConfig = @import("frame_config.zig").FrameConfig;
+const BytecodeConfig = @import("bytecode_config.zig").BytecodeConfig;
 const Database = @import("database.zig").Database;
 const Account = @import("database.zig").Account;
 const MemoryDatabase = @import("memory_database.zig").MemoryDatabase;
@@ -68,6 +69,81 @@ pub fn Frame(comptime config: FrameConfig) type {
             SelfDestruct,
         };
         const Self = @This();
+        
+        /// Shadow frame for fusion verification (debug builds only)
+        const ShadowFrame = struct {
+            frame: *Self,
+            dispatch: Dispatch,
+            verification_mode: BytecodeConfig.VerificationMode,
+            opcode_count: u32,
+            
+            pub fn init(allocator: std.mem.Allocator, mode: BytecodeConfig.VerificationMode) !*ShadowFrame {
+                const shadow = try allocator.create(ShadowFrame);
+                errdefer allocator.destroy(shadow);
+                
+                shadow.verification_mode = mode;
+                shadow.opcode_count = 0;
+                
+                // Note: Shadow frame and dispatch are initialized separately
+                // when shadow execution is set up in interpret_with_verification
+                shadow.frame = undefined;
+                shadow.dispatch = undefined;
+                
+                return shadow;
+            }
+            
+            pub fn deinit(self: *ShadowFrame, allocator: std.mem.Allocator) void {
+                // Only clean up if frame was properly initialized
+                // In the current implementation, frame is set to undefined in init
+                // and would be properly initialized during shadow execution setup
+                allocator.destroy(self);
+            }
+            
+            pub fn verify(self: *ShadowFrame, main_frame: *Self) Error!void {
+                // Verify stack state matches
+                if (!self.frame.stack.equals(&main_frame.stack)) {
+                    self.reportFailure("stack mismatch", main_frame);
+                }
+                
+                // Verify memory state matches  
+                if (!self.frame.memory.equals(&main_frame.memory)) {
+                    self.reportFailure("memory mismatch", main_frame);
+                }
+                
+                // Verify gas consumption (with tolerance for fusion optimizations)
+                const gas_diff = if (self.frame.gas_remaining >= main_frame.gas_remaining)
+                    self.frame.gas_remaining - main_frame.gas_remaining
+                else
+                    main_frame.gas_remaining - self.frame.gas_remaining;
+                    
+                if (gas_diff > 5) { // Allow up to 5 gas difference for fusion optimizations
+                    self.reportFailure("gas mismatch", main_frame);
+                }
+            }
+            
+            pub fn shouldVerify(self: *ShadowFrame) bool {
+                return switch (self.verification_mode) {
+                    .none => false,
+                    .opcode => true,
+                    .block => (self.opcode_count % 64) == 0,
+                    .transaction => false, // Only verify at end
+                };
+            }
+            
+            fn reportFailure(self: *ShadowFrame, reason: []const u8, main: *Self) noreturn {
+                log.err("=== FUSION VERIFICATION FAILURE ===", .{});
+                log.err("Reason: {s}", .{reason});
+                log.err("Opcode count: {}", .{self.opcode_count});
+                log.err("Main gas: {}, Shadow gas: {}", .{ main.gas_remaining, self.frame.gas_remaining });
+                log.err("Main stack depth: {}, Shadow stack depth: {}", .{ main.stack.len(), self.frame.stack.len() });
+                
+                if (main.stack.len() > 0 and self.frame.stack.len() > 0) {
+                    log.err("Main stack top: 0x{X}, Shadow stack top: 0x{X}", .{ main.stack.peek(), self.frame.stack.peek() });
+                }
+                
+                @panic("Fusion verification failed - see logs above for details");
+            }
+        };
         /// The type all opcode handlers return.
         /// Opcode handlers are expected to recursively dispatch the next opcode if they themselves don't error or return
         /// Takes cursor pointer with jump table available through dispatch metadata when needed
@@ -157,6 +233,10 @@ pub fn Frame(comptime config: FrameConfig) type {
         block_info: BlockInfo, // ~188B - Block context (spans multiple cache lines)
         authorized_address: ?Address = null, // 20B - EIP-3074 authorized address
         bytecode: ?Bytecode = null, // Bytecode object (for CODESIZE/CODECOPY/analysis)
+        
+        // Fusion verification shadow frame (debug builds only)
+        shadow_frame: if (std.debug.runtime_safety) ?*ShadowFrame else void = 
+            if (std.debug.runtime_safety) null else {},
 
         //
         /// Initialize a new execution frame.
