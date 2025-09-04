@@ -287,11 +287,8 @@ pub fn Evm(comptime config: EvmConfig) type {
             self.call_arena.deinit();
         }
 
-        /// Get the arena allocator for temporary allocations during the current call.
-        /// This allocator is reset after each root call completes.
-        pub fn getCallArenaAllocator(self: *Self) std.mem.Allocator {
-            return self.call_arena.allocator();
-        }
+        // TODO: Removed unused getCallArenaAllocator() wrapper method
+        // Direct access pattern: use evm.call_arena.allocator() instead
 
         /// Transfer value between accounts with proper balance checks and error handling
         fn doTransfer(self: *Self, from: primitives.Address, to: primitives.Address, value: u256, snapshot_id: Journal.SnapshotIdType) !void {
@@ -1342,6 +1339,11 @@ pub fn Evm(comptime config: EvmConfig) type {
         }
 
         // ===== Host Interface Implementation =====
+        // TODO: Remove unnecessary wrapper methods per issue #637
+        // - Simple field accessors: get_block_info() -> evm.block_info 
+        // - Database wrappers: get_balance() -> evm.database.get_balance() with explicit error handling
+        // - Call stack logic: get_caller() -> inline the depth-based logic
+        // - Unused methods: getCallArenaAllocator() -> REMOVED (example above)
 
         /// Get account balance
         pub fn get_balance(self: *Self, address: primitives.Address) u256 {
@@ -1606,6 +1608,7 @@ pub fn Evm(comptime config: EvmConfig) type {
         }
 
         /// Get transaction gas price
+        /// TODO: This wrapper will be removed - see handlers_context.zig:275 for direct access example  
         pub fn get_gas_price(self: *Self) u256 {
             return self.gas_price;
         }

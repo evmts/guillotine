@@ -271,7 +271,8 @@ pub fn Handlers(comptime FrameType: type) type {
         /// Stack: [] → [gas_price]
         pub fn gasprice(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const dispatch = Dispatch{ .cursor = cursor };
-            const gas_price = self.getEvm().get_gas_price();
+            // TODO: Demonstrate direct field access instead of wrapper method
+            const gas_price = self.getEvm().gas_price; // Direct field access
             const gas_price_truncated = @as(WordType, @truncate(gas_price));
             try self.stack.push(gas_price_truncated);
             const op_data = dispatch.getOpData(.{ .regular = Opcode.GASPRICE }); const next = op_data.next;

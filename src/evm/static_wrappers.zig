@@ -233,6 +233,7 @@ pub fn StaticHost(comptime HostType: type) type {
         }
 
         pub fn get_gas_price(self: *Self) u256 {
+            // TODO: This will need to be updated to direct field access: self.inner.gas_price  
             return self.inner.get_gas_price();
         }
 
