@@ -289,10 +289,6 @@ pub fn Evm(comptime config: EvmConfig) type {
 
         /// Get the arena allocator for temporary allocations during the current call.
         /// This allocator is reset after each root call completes.
-        pub fn getCallArenaAllocator(self: *Self) std.mem.Allocator {
-            return self.call_arena.allocator();
-        }
-
         /// Transfer value between accounts with proper balance checks and error handling
         fn doTransfer(self: *Self, from: primitives.Address, to: primitives.Address, value: u256, snapshot_id: Journal.SnapshotIdType) !void {
             var from_account = try self.database.get_account(from.bytes) orelse Account.zero();
@@ -1341,28 +1337,6 @@ pub fn Evm(comptime config: EvmConfig) type {
             }
         }
 
-        // ===== Host Interface Implementation =====
-
-        /// Get account balance
-        pub fn get_balance(self: *Self, address: primitives.Address) u256 {
-            return self.database.get_balance(address.bytes) catch 0;
-        }
-
-        /// Check if account exists
-        pub fn account_exists(self: *Self, address: primitives.Address) bool {
-            return self.database.account_exists(address.bytes);
-        }
-
-        /// Get account code
-        pub fn get_code(self: *Self, address: primitives.Address) []const u8 {
-            return self.database.get_code_by_address(address.bytes) catch &.{};
-        }
-
-        /// Get block information
-        pub fn get_block_info(self: *Self) BlockInfo {
-            return self.block_info;
-        }
-
         /// Emit log event
         pub fn emit_log(self: *Self, contract_address: primitives.Address, topics: []const u256, data: []const u8) void {
             // EIP-214: Prevent log emission in static context
@@ -1545,42 +1519,11 @@ pub fn Evm(comptime config: EvmConfig) type {
             }
         }
 
-        /// Get current call input/calldata
-        pub fn get_input(self: *Self) []const u8 {
-            return self.current_input;
-        }
-
         /// Check if hardfork is at least the target
         pub fn is_hardfork_at_least(self: *Self, target: Hardfork) bool {
             return @intFromEnum(self.hardfork_config) >= @intFromEnum(target);
         }
 
-        /// Get current hardfork (deprecated - use EIPs)
-        pub fn get_hardfork(self: *Self) Hardfork {
-            return self.hardfork_config;
-        }
-
-        /// Get the call depth for the current frame
-        pub fn get_depth(self: *Self) u11 {
-            return @intCast(self.depth);
-        }
-
-        /// Get transaction origin (original sender)
-        pub fn get_tx_origin(self: *Self) primitives.Address {
-            return self.origin;
-        }
-
-        /// Get current caller address
-        pub fn get_caller(self: *Self) primitives.Address {
-            if (self.depth == 0) return self.origin;
-            return self.call_stack[self.depth - 1].caller;
-        }
-
-        /// Get current call value
-        pub fn get_call_value(self: *Self) u256 {
-            if (self.depth == 0) return 0;
-            return self.call_stack[self.depth - 1].value;
-        }
 
         /// Check if current context is static (EIP-214)
         pub fn is_static_context(self: *Self) bool {
@@ -1588,10 +1531,6 @@ pub fn Evm(comptime config: EvmConfig) type {
             return self.call_stack[self.depth - 1].is_static;
         }
 
-        /// Get storage value
-        pub fn get_storage(self: *Self, address: primitives.Address, slot: u256) u256 {
-            return self.database.get_storage(address.bytes, slot) catch 0;
-        }
 
         /// Set storage value
         pub fn set_storage(self: *Self, address: primitives.Address, slot: u256, value: u256) !void {
@@ -1605,20 +1544,6 @@ pub fn Evm(comptime config: EvmConfig) type {
             try self.database.set_storage(address.bytes, slot, value);
         }
 
-        /// Get transaction gas price
-        pub fn get_gas_price(self: *Self) u256 {
-            return self.gas_price;
-        }
-
-        /// Get return data from last call
-        pub fn get_return_data(self: *Self) []const u8 {
-            return self.return_data;
-        }
-
-        /// Get chain ID  
-        pub fn get_chain_id(self: *Self) u64 {
-            return self.block_info.chain_id;
-        }
 
         /// Get block hash by number
         pub fn get_block_hash(self: *Self, block_number: u64) ?[32]u8 {
@@ -1699,11 +1624,6 @@ pub fn Evm(comptime config: EvmConfig) type {
             }
             const idx = @as(usize, @intCast(index));
             return self.context.blob_versioned_hashes[idx];
-        }
-
-        /// Get blob base fee (EIP-4844)
-        pub fn get_blob_base_fee(self: *Self) u256 {
-            return self.context.blob_base_fee;
         }
 
         /// Add gas refund amount for SSTORE operations
@@ -6371,8 +6291,10 @@ test "Call context tracking - get_caller and get_call_value" {
 
     // Test depth 0 - should return origin
     try std.testing.expectEqual(@as(u11, 0), evm.depth);
-    try std.testing.expectEqual(origin_addr, evm.get_caller());
-    try std.testing.expectEqual(@as(u256, 0), evm.get_call_value());
+    const direct_caller_0 = if (evm.depth == 0) evm.origin else evm.call_stack[evm.depth - 1].caller;
+    const direct_value_0 = if (evm.depth == 0) 0 else evm.call_stack[evm.depth - 1].value;
+    try std.testing.expectEqual(origin_addr, direct_caller_0);
+    try std.testing.expectEqual(@as(u256, 0), direct_value_0);
 
     // Simulate depth 1 call from origin to contract_a with value 123
     evm.depth = 1;
@@ -6381,8 +6303,10 @@ test "Call context tracking - get_caller and get_call_value" {
         .value = 123,
     };
 
-    try std.testing.expectEqual(origin_addr, evm.get_caller());
-    try std.testing.expectEqual(@as(u256, 123), evm.get_call_value());
+    const direct_caller_1 = if (evm.depth == 0) evm.origin else evm.call_stack[evm.depth - 1].caller;
+    const direct_value_1 = if (evm.depth == 0) 0 else evm.call_stack[evm.depth - 1].value;
+    try std.testing.expectEqual(origin_addr, direct_caller_1);
+    try std.testing.expectEqual(@as(u256, 123), direct_value_1);
 
     // Simulate depth 2 call from contract_a to contract_b with value 456
     evm.depth = 2;
@@ -6391,8 +6315,10 @@ test "Call context tracking - get_caller and get_call_value" {
         .value = 456,
     };
 
-    try std.testing.expectEqual(contract_a, evm.get_caller());
-    try std.testing.expectEqual(@as(u256, 456), evm.get_call_value());
+    const direct_caller_2 = if (evm.depth == 0) evm.origin else evm.call_stack[evm.depth - 1].caller;
+    const direct_value_2 = if (evm.depth == 0) 0 else evm.call_stack[evm.depth - 1].value;
+    try std.testing.expectEqual(contract_a, direct_caller_2);
+    try std.testing.expectEqual(@as(u256, 456), direct_value_2);
 }
 
 test "CREATE stores deployed code bytes" {
@@ -6994,4 +6920,258 @@ test "Minimal ERC20 deployment reproduction - benchmark runner issue" {
     // For now, we expect this to fail (reproducing the issue)
     // Once fixed, change this to: try std.testing.expect(result.success);
     try std.testing.expect(!result.success);
+}
+
+// ===== Direct Access Tests for Wrapper Method Removal =====
+// TDD Phase 1: Red - These tests will FAIL until we implement direct access
+
+test "Direct access - field accessors equivalence" {
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
+
+    const block_info = BlockInfo{
+        .number = 42,
+        .timestamp = 1234567890,
+        .difficulty = 100,
+        .gas_limit = 30000000,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .base_fee = 1000000000,
+        .chain_id = 31337, // Custom chain ID for testing
+        .prev_randao = [_]u8{0} ** 32,
+    };
+
+    const context = TransactionContext{
+        .gas_limit = 1000000,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .chain_id = 31337,
+    };
+
+    const origin_address = [_]u8{0x12} ++ [_]u8{0} ** 19;
+    const test_gas_price: u256 = 20000000000; // 20 gwei
+
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, test_gas_price, origin_address, .CANCUN);
+    defer evm.deinit();
+
+    // Set some return data for testing
+    const test_return_data = "hello world";
+    evm.return_data = test_return_data;
+    
+    // Set some current input for testing
+    const test_input = "test input data";
+    evm.current_input = test_input;
+
+    // Test field accessor equivalences - these should pass when we implement direct access
+    
+    // get_block_info() vs evm.block_info
+    const wrapper_block_info = evm.get_block_info();
+    const direct_block_info = evm.block_info;
+    try std.testing.expectEqual(wrapper_block_info.number, direct_block_info.number);
+    try std.testing.expectEqual(wrapper_block_info.chain_id, direct_block_info.chain_id);
+    
+    // get_depth() vs @intCast(evm.depth)
+    const wrapper_depth = evm.get_depth();
+    const direct_depth = @as(u11, @intCast(evm.depth));
+    try std.testing.expectEqual(wrapper_depth, direct_depth);
+    
+    // get_gas_price() vs evm.gas_price
+    const wrapper_gas_price = evm.get_gas_price();
+    const direct_gas_price = evm.gas_price;
+    try std.testing.expectEqual(wrapper_gas_price, direct_gas_price);
+    
+    // get_return_data() vs evm.return_data
+    const wrapper_return_data = evm.get_return_data();
+    const direct_return_data = evm.return_data;
+    try std.testing.expectEqualSlices(u8, wrapper_return_data, direct_return_data);
+    
+    // get_chain_id() vs evm.block_info.chain_id
+    const wrapper_chain_id = evm.get_chain_id();
+    const direct_chain_id = evm.block_info.chain_id;
+    try std.testing.expectEqual(wrapper_chain_id, direct_chain_id);
+    
+    // get_tx_origin() vs evm.origin
+    const wrapper_origin = evm.get_tx_origin();
+    const direct_origin = evm.origin;
+    try std.testing.expectEqual(wrapper_origin.bytes, direct_origin.bytes);
+    
+    // get_input() vs evm.current_input
+    const wrapper_input = evm.get_input();
+    const direct_input = evm.current_input;
+    try std.testing.expectEqualSlices(u8, wrapper_input, direct_input);
+    
+    // get_hardfork() vs evm.hardfork_config
+    const wrapper_hardfork = evm.get_hardfork();
+    const direct_hardfork = evm.hardfork_config;
+    try std.testing.expectEqual(wrapper_hardfork, direct_hardfork);
+}
+
+test "Direct access - call stack logic equivalence" {
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
+
+    const block_info = BlockInfo{
+        .number = 1,
+        .timestamp = 1000,
+        .difficulty = 100,
+        .gas_limit = 30000000,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .base_fee = 1000000000,
+        .prev_randao = [_]u8{0} ** 32,
+    };
+
+    const context = TransactionContext{
+        .gas_limit = 1000000,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .chain_id = 1,
+    };
+
+    const origin_address = [_]u8{0x42} ++ [_]u8{0} ** 19;
+
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, origin_address, .CANCUN);
+    defer evm.deinit();
+
+    // Test depth 0 (should use origin)
+    const wrapper_caller_depth0 = evm.get_caller();
+    const direct_caller_depth0 = if (evm.depth == 0) evm.origin else evm.call_stack[evm.depth - 1].caller;
+    try std.testing.expectEqual(wrapper_caller_depth0.bytes, direct_caller_depth0.bytes);
+    
+    const wrapper_value_depth0 = evm.get_call_value();
+    const direct_value_depth0 = if (evm.depth == 0) 0 else evm.call_stack[evm.depth - 1].value;
+    try std.testing.expectEqual(wrapper_value_depth0, direct_value_depth0);
+
+    // Simulate a call to increase depth
+    evm.depth = 1;
+    const test_caller = [_]u8{0x11} ++ [_]u8{0} ** 19;
+    const test_value: u256 = 1000000000000000000; // 1 ETH
+    evm.call_stack[0] = CallStackEntry{
+        .caller = primitives.Address{ .bytes = test_caller },
+        .code_address = primitives.ZERO_ADDRESS,
+        .value = test_value,
+        .is_static = false,
+    };
+
+    // Test depth > 0 (should use call stack)
+    const wrapper_caller_depth1 = evm.get_caller();
+    const direct_caller_depth1 = if (evm.depth == 0) evm.origin else evm.call_stack[evm.depth - 1].caller;
+    try std.testing.expectEqual(wrapper_caller_depth1.bytes, direct_caller_depth1.bytes);
+    
+    const wrapper_value_depth1 = evm.get_call_value();
+    const direct_value_depth1 = if (evm.depth == 0) 0 else evm.call_stack[evm.depth - 1].value;
+    try std.testing.expectEqual(wrapper_value_depth1, direct_value_depth1);
+}
+
+test "Direct access - database operations equivalence" {
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
+
+    const block_info = BlockInfo{
+        .number = 1,
+        .timestamp = 1000,
+        .difficulty = 100,
+        .gas_limit = 30000000,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .base_fee = 1000000000,
+        .prev_randao = [_]u8{0} ** 32,
+    };
+
+    const context = TransactionContext{
+        .gas_limit = 1000000,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .chain_id = 1,
+    };
+
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    defer evm.deinit();
+
+    const test_address = [_]u8{0x42} ++ [_]u8{0} ** 19;
+    const test_balance: u256 = 1000000000000000000; // 1 ETH
+    const test_slot: u256 = 42;
+    const test_storage_value: u256 = 0xDEADBEEF;
+    const test_code = [_]u8{ 0x60, 0x00, 0x60, 0x00, 0xF3 }; // Simple contract code
+
+    // Set up test data in database
+    const account = @import("database_interface_account.zig").Account{
+        .balance = test_balance,
+        .nonce = 0,
+        .code_hash = [_]u8{1} ** 32, // Non-zero code hash
+        .storage_root = [_]u8{0} ** 32,
+    };
+    try db.set_account(test_address, account);
+    try db.set_code(test_address, &test_code);
+    try db.set_storage(test_address, test_slot, test_storage_value);
+
+    // Test database wrapper equivalences
+    
+    // get_balance() vs database.get_balance() - Success case
+    const wrapper_balance = evm.get_balance(primitives.Address{ .bytes = test_address });
+    const direct_balance = evm.database.get_balance(test_address) catch 0;
+    try std.testing.expectEqual(wrapper_balance, direct_balance);
+    
+    // get_balance() - Error case (non-existent address should return 0)
+    const nonexistent_address = [_]u8{0xFF} ++ [_]u8{0} ** 19;
+    const wrapper_balance_err = evm.get_balance(primitives.Address{ .bytes = nonexistent_address });
+    const direct_balance_err = evm.database.get_balance(nonexistent_address) catch 0;
+    try std.testing.expectEqual(wrapper_balance_err, direct_balance_err);
+    
+    // account_exists() vs database.account_exists()
+    const wrapper_exists = evm.account_exists(primitives.Address{ .bytes = test_address });
+    const direct_exists = evm.database.account_exists(test_address);
+    try std.testing.expectEqual(wrapper_exists, direct_exists);
+    
+    // get_code() vs database.get_code_by_address() - Success case
+    const wrapper_code = evm.get_code(primitives.Address{ .bytes = test_address });
+    const direct_code = evm.database.get_code_by_address(test_address) catch &.{};
+    try std.testing.expectEqualSlices(u8, wrapper_code, direct_code);
+    
+    // get_code() - Error case (non-existent address should return empty slice)
+    const wrapper_code_err = evm.get_code(primitives.Address{ .bytes = nonexistent_address });
+    const direct_code_err = evm.database.get_code_by_address(nonexistent_address) catch &.{};
+    try std.testing.expectEqualSlices(u8, wrapper_code_err, direct_code_err);
+    
+    // get_storage() vs database.get_storage() - Success case
+    const wrapper_storage = evm.get_storage(primitives.Address{ .bytes = test_address }, test_slot);
+    const direct_storage = evm.database.get_storage(test_address, test_slot) catch 0;
+    try std.testing.expectEqual(wrapper_storage, direct_storage);
+    
+    // get_storage() - Error case (non-existent slot should return 0)
+    const nonexistent_slot: u256 = 999;
+    const wrapper_storage_err = evm.get_storage(primitives.Address{ .bytes = test_address }, nonexistent_slot);
+    const direct_storage_err = evm.database.get_storage(test_address, nonexistent_slot) catch 0;
+    try std.testing.expectEqual(wrapper_storage_err, direct_storage_err);
+}
+
+test "Direct access - call arena allocator direct access" {
+    // This test verifies that direct call arena access works
+    // (getCallArenaAllocator method has been removed)
+    
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
+
+    const block_info = BlockInfo{
+        .number = 1,
+        .timestamp = 1000,
+        .difficulty = 100,
+        .gas_limit = 30000000,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .base_fee = 1000000000,
+        .prev_randao = [_]u8{0} ** 32,
+    };
+
+    const context = TransactionContext{
+        .gas_limit = 1000000,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .chain_id = 1,
+    };
+
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    defer evm.deinit();
+
+    // Verify that direct call arena allocator access works
+    const direct_allocator = evm.call_arena.allocator();
+    
+    // Test that direct allocator works
+    const test_bytes = direct_allocator.alloc(u8, 10) catch unreachable; 
+    defer direct_allocator.free(test_bytes);
+    
+    // Should work (implicit success test)
+    try std.testing.expect(test_bytes.len == 10);
 }

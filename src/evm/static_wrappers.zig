@@ -204,23 +204,23 @@ pub fn StaticHost(comptime HostType: type) type {
 
         // Read operations - forwarded to underlying host
         pub fn get_balance(self: *Self, address: Address) u256 {
-            return self.inner.get_balance(address);
+            return self.inner.database.get_balance(address.bytes) catch 0;
         }
 
         pub fn account_exists(self: *Self, address: Address) bool {
-            return self.inner.account_exists(address);
+            return self.inner.database.account_exists(address.bytes);
         }
 
         pub fn get_code(self: *Self, address: Address) []const u8 {
-            return self.inner.get_code(address);
+            return self.inner.database.get_code_by_address(address.bytes) catch &.{};
         }
 
-        pub fn get_block_info(self: *Self) @TypeOf(self.inner.get_block_info()) {
-            return self.inner.get_block_info();
+        pub fn get_block_info(self: *Self) @TypeOf(self.inner.block_info) {
+            return self.inner.block_info;
         }
 
         pub fn get_storage(self: *Self, address: Address, slot: u256) u256 {
-            return self.inner.get_storage(address, slot);
+            return self.inner.database.get_storage(address.bytes, slot) catch 0;
         }
 
         pub fn get_is_static(self: *Self) bool {
@@ -229,19 +229,19 @@ pub fn StaticHost(comptime HostType: type) type {
         }
 
         pub fn get_depth(self: *Self) u11 {
-            return self.inner.get_depth();
+            return @as(u11, @intCast(self.inner.depth));
         }
 
         pub fn get_gas_price(self: *Self) u256 {
-            return self.inner.get_gas_price();
+            return self.inner.gas_price;
         }
 
         pub fn get_return_data(self: *Self) []const u8 {
-            return self.inner.get_return_data();
+            return self.inner.return_data;
         }
 
         pub fn get_chain_id(self: *Self) u64 {
-            return self.inner.get_chain_id();
+            return self.inner.block_info.chain_id;
         }
 
         pub fn get_block_hash(self: *Self, block_number: u64) ?[32]u8 {
@@ -253,23 +253,23 @@ pub fn StaticHost(comptime HostType: type) type {
         }
 
         pub fn get_blob_base_fee(self: *Self) u256 {
-            return self.inner.get_blob_base_fee();
+            return self.inner.context.blob_base_fee;
         }
 
         pub fn get_tx_origin(self: *Self) Address {
-            return self.inner.get_tx_origin();
+            return self.inner.origin;
         }
 
         pub fn get_caller(self: *Self) Address {
-            return self.inner.get_caller();
+            return if (self.inner.depth == 0) self.inner.origin else self.inner.call_stack[self.inner.depth - 1].caller;
         }
 
         pub fn get_call_value(self: *Self) u256 {
-            return self.inner.get_call_value();
+            return if (self.inner.depth == 0) 0 else self.inner.call_stack[self.inner.depth - 1].value;
         }
 
         pub fn get_input(self: *Self) []const u8 {
-            return self.inner.get_input();
+            return self.inner.current_input;
         }
 
         pub fn is_hardfork_at_least(self: *Self, target: Hardfork) bool {
@@ -277,7 +277,7 @@ pub fn StaticHost(comptime HostType: type) type {
         }
 
         pub fn get_hardfork(self: *Self) Hardfork {
-            return self.inner.get_hardfork();
+            return self.inner.hardfork_config;
         }
 
         pub fn create_snapshot(self: *Self) u32 {

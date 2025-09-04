@@ -4993,8 +4993,10 @@ test "Call context tracking - get_caller and get_call_value" {
 
     // Test depth 0 - should return origin
     try std.testing.expectEqual(@as(u11, 0), evm.depth);
-    try std.testing.expectEqual(origin_addr, evm.get_caller());
-    try std.testing.expectEqual(@as(u256, 0), evm.get_call_value());
+    const direct_caller_0 = if (evm.depth == 0) evm.origin else evm.call_stack[evm.depth - 1].caller;
+    const direct_value_0 = if (evm.depth == 0) 0 else evm.call_stack[evm.depth - 1].value;
+    try std.testing.expectEqual(origin_addr, direct_caller_0);
+    try std.testing.expectEqual(@as(u256, 0), direct_value_0);
 
     // Simulate depth 1 call from origin to contract_a with value 123
     evm.depth = 1;
@@ -5003,8 +5005,10 @@ test "Call context tracking - get_caller and get_call_value" {
         .value = 123,
     };
 
-    try std.testing.expectEqual(origin_addr, evm.get_caller());
-    try std.testing.expectEqual(@as(u256, 123), evm.get_call_value());
+    const direct_caller_1 = if (evm.depth == 0) evm.origin else evm.call_stack[evm.depth - 1].caller;
+    const direct_value_1 = if (evm.depth == 0) 0 else evm.call_stack[evm.depth - 1].value;
+    try std.testing.expectEqual(origin_addr, direct_caller_1);
+    try std.testing.expectEqual(@as(u256, 123), direct_value_1);
 
     // Simulate depth 2 call from contract_a to contract_b with value 456
     evm.depth = 2;
@@ -5013,8 +5017,10 @@ test "Call context tracking - get_caller and get_call_value" {
         .value = 456,
     };
 
-    try std.testing.expectEqual(contract_a, evm.get_caller());
-    try std.testing.expectEqual(@as(u256, 456), evm.get_call_value());
+    const direct_caller_2 = if (evm.depth == 0) evm.origin else evm.call_stack[evm.depth - 1].caller;
+    const direct_value_2 = if (evm.depth == 0) 0 else evm.call_stack[evm.depth - 1].value;
+    try std.testing.expectEqual(contract_a, direct_caller_2);
+    try std.testing.expectEqual(@as(u256, 456), direct_value_2);
 }
 
 test "CREATE stores deployed code bytes" {

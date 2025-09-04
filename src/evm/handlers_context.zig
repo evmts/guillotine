@@ -68,7 +68,7 @@ pub fn Handlers(comptime FrameType: type) type {
             }
             self.gas_remaining -= @intCast(access_cost);
 
-            const bal = evm.get_balance(addr);
+            const bal = evm.database.get_balance(addr.bytes) catch 0;
             const balance_word = @as(WordType, @truncate(bal));
             try self.stack.push(balance_word);
             const op_data = dispatch.getOpData(.{ .regular = Opcode.BALANCE });
@@ -80,7 +80,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// Stack: [] → [origin]
         pub fn origin(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const dispatch = Dispatch{ .cursor = cursor };
-            const tx_origin = self.getEvm().get_tx_origin();
+            const tx_origin = self.getEvm().origin;
             const origin_u256 = to_u256(tx_origin);
             try self.stack.push(origin_u256);
             const op_data = dispatch.getOpData(.{ .regular = Opcode.ORIGIN });
@@ -271,7 +271,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// Stack: [] → [gas_price]
         pub fn gasprice(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const dispatch = Dispatch{ .cursor = cursor };
-            const gas_price = self.getEvm().get_gas_price();
+            const gas_price = self.getEvm().gas_price;
             const gas_price_truncated = @as(WordType, @truncate(gas_price));
             try self.stack.push(gas_price_truncated);
             const op_data = dispatch.getOpData(.{ .regular = Opcode.GASPRICE }); const next = op_data.next;
@@ -618,7 +618,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// Stack: [] → [chain_id]
         pub fn chainid(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const dispatch = Dispatch{ .cursor = cursor };
-            const chain_id = self.getEvm().get_chain_id();
+            const chain_id = self.getEvm().block_info.chain_id;
             const chain_id_word = @as(WordType, @truncate(@as(u256, chain_id)));
             try self.stack.push(chain_id_word);
             const op_data = dispatch.getOpData(.{ .regular = Opcode.CHAINID }); const next = op_data.next;
@@ -629,7 +629,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// Stack: [] → [balance]
         pub fn selfbalance(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const dispatch = Dispatch{ .cursor = cursor };
-            const bal = self.getEvm().get_balance(self.contract_address);
+            const bal = self.getEvm().database.get_balance(self.contract_address.bytes) catch 0;
             const balance_word = @as(WordType, @truncate(bal));
             try self.stack.push(balance_word);
             const op_data = dispatch.getOpData(.{ .regular = Opcode.SELFBALANCE }); const next = op_data.next;
