@@ -2,196 +2,306 @@ const primitives = @import("primitives");
 const Address = primitives.Address;
 
 // TODO: Currently used in host which is unused
-/// Call operation parameters for different call types
-pub const CallParams = union(enum) {
-    /// Regular CALL operation
-    call: struct {
-        caller: Address,
-        to: Address,
-        value: u256,
-        input: []const u8,
-        gas: u64,
-    },
-    /// CALLCODE operation: execute external code with current storage/context
-    /// Executes code at `to`, but uses caller's storage and address context
-    callcode: struct {
-        caller: Address,
-        to: Address,
-        value: u256,
-        input: []const u8,
-        gas: u64,
-    },
-    /// DELEGATECALL operation (preserves caller context)
-    delegatecall: struct {
-        caller: Address, // Original caller, not current contract
-        to: Address,
-        input: []const u8,
-        gas: u64,
-    },
-    /// STATICCALL operation (read-only)
-    staticcall: struct {
-        caller: Address,
-        to: Address,
-        input: []const u8,
-        gas: u64,
-    },
-    /// CREATE operation
-    create: struct {
-        caller: Address,
-        value: u256,
-        init_code: []const u8,
-        gas: u64,
-    },
-    /// CREATE2 operation
-    create2: struct {
-        caller: Address,
-        value: u256,
-        init_code: []const u8,
-        salt: u256,
-        gas: u64,
-    },
+/// Call operation parameters for different call types - generic version
+pub fn CallParams(comptime config: anytype) type {
+    const WordType = config.WordType;
+    const AddressType = config.AddressType;
+    const GasType = config.frame_config().GasType();
+    
+    return union(enum) {
+        /// Regular CALL operation
+        call: struct {
+            caller: AddressType,
+            to: AddressType,
+            value: WordType,
+            input: []const u8,
+            gas: GasType,
+        },
+        /// CALLCODE operation: execute external code with current storage/context
+        /// Executes code at `to`, but uses caller's storage and address context
+        callcode: struct {
+            caller: AddressType,
+            to: AddressType,
+            value: WordType,
+            input: []const u8,
+            gas: GasType,
+        },
+        /// DELEGATECALL operation (preserves caller context)
+        delegatecall: struct {
+            caller: AddressType, // Original caller, not current contract
+            to: AddressType,
+            input: []const u8,
+            gas: GasType,
+        },
+        /// STATICCALL operation (read-only)
+        staticcall: struct {
+            caller: AddressType,
+            to: AddressType,
+            input: []const u8,
+            gas: GasType,
+        },
+        /// CREATE operation
+        create: struct {
+            caller: AddressType,
+            value: WordType,
+            init_code: []const u8,
+            gas: GasType,
+        },
+        /// CREATE2 operation
+        create2: struct {
+            caller: AddressType,
+            value: WordType,
+            init_code: []const u8,
+            salt: WordType,
+            gas: GasType,
+        },
 
-    const ValidationError = error{
-        GasZeroError,
+        const Self = @This();
+
+        pub const ValidationError = error{
+            GasZeroError,
+        };
+
+        /// TODO we need to validate input!
+        pub fn validate(self: Self) ValidationError!void {
+            if (self.getGas() == 0) return ValidationError.GasZeroError;
+        }
+
+        /// Get the gas limit for this call operation
+        pub fn getGas(self: Self) GasType {
+            return switch (self) {
+                .call => |params| params.gas,
+                .callcode => |params| params.gas,
+                .delegatecall => |params| params.gas,
+                .staticcall => |params| params.gas,
+                .create => |params| params.gas,
+                .create2 => |params| params.gas,
+            };
+        }
+
+        /// Get the caller address for this call operation
+        pub fn getCaller(self: Self) AddressType {
+            return switch (self) {
+                .call => |params| params.caller,
+                .callcode => |params| params.caller,
+                .delegatecall => |params| params.caller,
+                .staticcall => |params| params.caller,
+                .create => |params| params.caller,
+                .create2 => |params| params.caller,
+            };
+        }
+
+        /// Get the input data for this call operation (empty for CREATE operations)
+        pub fn getInput(self: Self) []const u8 {
+            return switch (self) {
+                .call => |params| params.input,
+                .callcode => |params| params.input,
+                .delegatecall => |params| params.input,
+                .staticcall => |params| params.input,
+                .create => |params| params.init_code,
+                .create2 => |params| params.init_code,
+            };
+        }
+
+        /// Check if this call operation transfers value
+        pub fn hasValue(self: Self) bool {
+            return switch (self) {
+                .call => |params| params.value > 0,
+                .callcode => |params| params.value > 0,
+                .delegatecall => false, // DELEGATECALL preserves value from parent context
+                .staticcall => false, // STATICCALL cannot transfer value
+                .create => |params| params.value > 0,
+                .create2 => |params| params.value > 0,
+            };
+        }
+
+        /// Check if this is a read-only operation
+        pub fn isReadOnly(self: Self) bool {
+            return switch (self) {
+                .staticcall => true,
+                else => false,
+            };
+        }
+
+        /// Check if this is a contract creation operation
+        pub fn isCreate(self: Self) bool {
+            return switch (self) {
+                .create, .create2 => true,
+                else => false,
+            };
+        }
     };
-
-    /// TODO we need to validate input!
-    pub fn validate(self: CallParams) ValidationError!void {
-        if (self.getGas() == 0) return ValidationError.GasZeroError;
-    }
-
-    /// Get the gas limit for this call operation
-    pub fn getGas(self: CallParams) u64 {
-        return switch (self) {
-            .call => |params| params.gas,
-            .callcode => |params| params.gas,
-            .delegatecall => |params| params.gas,
-            .staticcall => |params| params.gas,
-            .create => |params| params.gas,
-            .create2 => |params| params.gas,
-        };
-    }
-
-    /// Get the caller address for this call operation
-    pub fn getCaller(self: CallParams) Address {
-        return switch (self) {
-            .call => |params| params.caller,
-            .callcode => |params| params.caller,
-            .delegatecall => |params| params.caller,
-            .staticcall => |params| params.caller,
-            .create => |params| params.caller,
-            .create2 => |params| params.caller,
-        };
-    }
-
-    /// Get the input data for this call operation (empty for CREATE operations)
-    pub fn getInput(self: CallParams) []const u8 {
-        return switch (self) {
-            .call => |params| params.input,
-            .callcode => |params| params.input,
-            .delegatecall => |params| params.input,
-            .staticcall => |params| params.input,
-            .create => |params| params.init_code,
-            .create2 => |params| params.init_code,
-        };
-    }
-
-    /// Check if this call operation transfers value
-    pub fn hasValue(self: CallParams) bool {
-        return switch (self) {
-            .call => |params| params.value > 0,
-            .callcode => |params| params.value > 0,
-            .delegatecall => false, // DELEGATECALL preserves value from parent context
-            .staticcall => false, // STATICCALL cannot transfer value
-            .create => |params| params.value > 0,
-            .create2 => |params| params.value > 0,
-        };
-    }
-
-    /// Check if this is a read-only operation
-    pub fn isReadOnly(self: CallParams) bool {
-        return switch (self) {
-            .staticcall => true,
-            else => false,
-        };
-    }
-
-    /// Check if this is a contract creation operation
-    pub fn isCreate(self: CallParams) bool {
-        return switch (self) {
-            .create, .create2 => true,
-            else => false,
-        };
-    }
-};
+}
 
 const std = @import("std");
 
-test "call params gas access" {
+test "CallParams - generic function with default config" {
+    const EvmConfig = @import("evm_config.zig").EvmConfig;
+    const default_config = EvmConfig{};
+    const CallParamsType = CallParams(default_config);
+    const GasType = default_config.frame_config().GasType();
+    
     const caller = primitives.ZERO_ADDRESS;
-    const to: Address = [_]u8{1} ++ [_]u8{0} ** 19;
+    const to: [20]u8 = [_]u8{1} ++ [_]u8{0} ** 19;
+    
+    const call_op = CallParamsType{ .call = .{
+        .caller = caller,
+        .to = to,
+        .value = 100, // Should use WordType (u256)
+        .input = &[_]u8{0x42},
+        .gas = @as(GasType, 21000),
+    } };
+    
+    try std.testing.expectEqual(@as(u256, 100), call_op.call.value);
+    try std.testing.expectEqual(@as(GasType, 21000), call_op.getGas());
+}
+
+test "CallParams - all operation types with custom config" {
+    const EvmConfig = @import("evm_config.zig").EvmConfig;
+    const custom_config = EvmConfig{
+        .WordType = u128,
+        .AddressType = [16]u8,
+        .block_gas_limit = 1000000, // Forces i32 gas type
+    };
+    comptime custom_config.validate();
+    const CallParamsType = CallParams(custom_config);
+    const GasType = custom_config.frame_config().GasType(); // i32
+    
+    const caller: [16]u8 = [_]u8{0xAA} ++ [_]u8{0} ** 15;
+    const to: [16]u8 = [_]u8{0xBB} ++ [_]u8{0} ** 15;
+    
+    // Test CALL with u128 value and i32 gas
+    const call_op = CallParamsType{ .call = .{
+        .caller = caller,
+        .to = to,
+        .value = @as(u128, 1000),
+        .input = &[_]u8{0x42},
+        .gas = @as(i32, 21000),
+    } };
+    
+    // Test CREATE2 with u128 value and u128 salt
+    const create2_op = CallParamsType{ .create2 = .{
+        .caller = caller,
+        .value = @as(u128, 500),
+        .init_code = &[_]u8{0x60, 0x80},
+        .salt = @as(u128, 0x123456),
+        .gas = @as(i32, 53000),
+    } };
+    
+    try std.testing.expectEqual(@as(u128, 1000), call_op.call.value);
+    try std.testing.expectEqual(@as(i32, 21000), call_op.call.gas);
+    try std.testing.expectEqual(@as(u128, 0x123456), create2_op.create2.salt);
+}
+
+test "CallParams - validation with generic gas types" {
+    const EvmConfig = @import("evm_config.zig").EvmConfig;
+    const i32_config = EvmConfig{ .block_gas_limit = 1000000 };
+    const i64_config = EvmConfig{ .block_gas_limit = 3000000000 };
+    
+    const CallParamsI32 = CallParams(i32_config);
+    const CallParamsI64 = CallParams(i64_config);
+    
+    // Test zero gas validation with i32
+    const zero_gas_i32 = CallParamsI32{ .call = .{
+        .caller = primitives.ZERO_ADDRESS,
+        .to = [_]u8{1} ++ [_]u8{0} ** 19,
+        .value = 0,
+        .input = &[_]u8{},
+        .gas = 0,
+    } };
+    try std.testing.expectError(CallParamsI32.ValidationError.GasZeroError, zero_gas_i32.validate());
+    
+    // Test zero gas validation with i64
+    const zero_gas_i64 = CallParamsI64{ .call = .{
+        .caller = primitives.ZERO_ADDRESS,
+        .to = [_]u8{1} ++ [_]u8{0} ** 19,
+        .value = 0,
+        .input = &[_]u8{},
+        .gas = 0,
+    } };
+    try std.testing.expectError(CallParamsI64.ValidationError.GasZeroError, zero_gas_i64.validate());
+}
+
+test "call params gas access" {
+    const EvmConfig = @import("evm_config.zig").EvmConfig;
+    const default_config = EvmConfig{};
+    const CallParamsType = CallParams(default_config);
+    const GasType = default_config.frame_config().GasType();
+    
+    const caller = primitives.ZERO_ADDRESS;
+    const to: [20]u8 = [_]u8{1} ++ [_]u8{0} ** 19;
     const input = &[_]u8{0x42};
 
-    const call_op = CallParams{ .call = .{
+    const call_op = CallParamsType{ .call = .{
         .caller = caller,
         .to = to,
         .value = 100,
         .input = input,
-        .gas = 21000,
+        .gas = @as(GasType, 21000),
     } };
-    try std.testing.expectEqual(@as(u64, 21000), call_op.getGas());
+    try std.testing.expectEqual(@as(GasType, 21000), call_op.getGas());
 
-    const delegatecall_op = CallParams{ .delegatecall = .{
+    const delegatecall_op = CallParamsType{ .delegatecall = .{
         .caller = caller,
         .to = to,
         .input = input,
-        .gas = 15000,
+        .gas = @as(GasType, 15000),
     } };
-    try std.testing.expectEqual(@as(u64, 15000), delegatecall_op.getGas());
+    try std.testing.expectEqual(@as(GasType, 15000), delegatecall_op.getGas());
 }
 
 test "call params caller access" {
-    const caller: Address = [_]u8{0xaa} ++ [_]u8{0} ** 19;
-    const to: Address = [_]u8{1} ++ [_]u8{0} ** 19;
+    const EvmConfig = @import("evm_config.zig").EvmConfig;
+    const default_config = EvmConfig{};
+    const CallParamsType = CallParams(default_config);
+    const GasType = default_config.frame_config().GasType();
+    
+    const caller: [20]u8 = [_]u8{0xaa} ++ [_]u8{0} ** 19;
+    const to: [20]u8 = [_]u8{1} ++ [_]u8{0} ** 19;
 
-    const call_op = CallParams{ .call = .{
+    const call_op = CallParamsType{ .call = .{
         .caller = caller,
         .to = to,
         .value = 0,
         .input = &.{},
-        .gas = 21000,
+        .gas = @as(GasType, 21000),
     } };
     try std.testing.expectEqual(caller, call_op.getCaller());
 
-    const create_op = CallParams{ .create = .{
+    const create_op = CallParamsType{ .create = .{
         .caller = caller,
         .value = 50,
         .init_code = &[_]u8{ 0x60, 0x00, 0x60, 0x00, 0xf3 },
-        .gas = 53000,
+        .gas = @as(GasType, 53000),
     } };
     try std.testing.expectEqual(caller, create_op.getCaller());
 }
 
 test "call params input access" {
+    const EvmConfig = @import("evm_config.zig").EvmConfig;
+    const default_config = EvmConfig{};
+    const CallParamsType = CallParams(default_config);
+    const GasType = default_config.frame_config().GasType();
+    
     const caller = primitives.ZERO_ADDRESS;
-    const to: Address = [_]u8{1} ++ [_]u8{0} ** 19;
+    const to: [20]u8 = [_]u8{1} ++ [_]u8{0} ** 19;
     const input_data = &[_]u8{ 0xa9, 0x05, 0x9c, 0xbb }; // transfer(address,uint256) selector
 
-    const call_op = CallParams{ .call = .{
+    const call_op = CallParamsType{ .call = .{
         .caller = caller,
         .to = to,
         .value = 0,
         .input = input_data,
-        .gas = 21000,
+        .gas = @as(GasType, 21000),
     } };
     try std.testing.expectEqualSlices(u8, input_data, call_op.getInput());
 
     const init_code = &[_]u8{ 0x60, 0x80, 0x60, 0x40, 0x52 };
-    const create_op = CallParams{ .create = .{
+    const create_op = CallParamsType{ .create = .{
         .caller = caller,
         .value = 0,
         .init_code = init_code,
-        .gas = 53000,
+        .gas = @as(GasType, 53000),
     } };
     try std.testing.expectEqualSlices(u8, init_code, create_op.getInput());
 }

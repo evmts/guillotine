@@ -28,8 +28,8 @@ const precompiles = @import("precompiles.zig");
 const EvmConfig = @import("evm_config.zig").EvmConfig;
 const TransactionContext = @import("transaction_context.zig").TransactionContext;
 const Opcode = @import("opcode.zig").Opcode;
-pub const CallResult: type = @import("call_result.zig").CallResult;
-pub const CallParams: type = @import("call_params.zig").CallParams;
+pub const CallResultFn = @import("call_result.zig").CallResult;
+pub const CallParamsFn = @import("call_params.zig").CallParams;
 
 /// Creates a configured EVM instance type.
 ///
@@ -59,9 +59,14 @@ pub fn Evm(comptime config: EvmConfig) type {
             .initial_capacity = 128,
         });
 
+        /// Call operation parameters for this EVM configuration
+        pub const CallParams = CallParamsFn(config);
+        /// Call result type for this EVM configuration
+        pub const CallResult = CallResultFn(config);
+
         /// Call stack entry to track caller and value for DELEGATECALL
         const CallStackEntry = struct {
-            caller: primitives.Address,
+            caller: config.AddressType,
             value: config.WordType,
             is_static: bool, // EIP-214: Track static context per call level
         };

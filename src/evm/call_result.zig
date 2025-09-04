@@ -1,7 +1,10 @@
-/// Call result structure for EVM calls
-pub const CallResult = struct {
-    success: bool,
-    gas_left: u64,
+/// Call result structure for EVM calls - generic version
+pub fn CallResult(comptime config: anytype) type {
+    const GasType = config.frame_config().GasType();
+    
+    return struct {
+        success: bool,
+        gas_left: GasType,
     output: []const u8,
     logs: []const Log = &.{},
     /// Accounts that self-destructed during execution (address -> beneficiary)
@@ -17,188 +20,240 @@ pub const CallResult = struct {
     /// Address of created contract (for CREATE/CREATE2 operations)
     created_address: ?Address = null,
 
-    /// Create a successful call result
-    pub fn success_with_output(gas_left: u64, output: []const u8) CallResult {
-        return CallResult{
-            .success = true,
-            .gas_left = gas_left,
-            .output = output,
-            .logs = &.{},
-            .selfdestructs = &.{},
-            .accessed_addresses = &.{},
-            .accessed_storage = &.{},
-        };
-    }
+        const Self = @This();
 
-    /// Create a successful call result with empty output
-    pub fn success_empty(gas_left: u64) CallResult {
-        return CallResult{
-            .success = true,
-            .gas_left = gas_left,
-            .output = &[_]u8{},
-            .logs = &.{},
-            .selfdestructs = &.{},
-            .accessed_addresses = &.{},
-            .accessed_storage = &.{},
-        };
-    }
-
-    /// Create a failed call result
-    pub fn failure(gas_left: u64) CallResult {
-        return CallResult{
-            .success = false,
-            .gas_left = gas_left,
-            .output = &[_]u8{},
-            .logs = &.{},
-            .selfdestructs = &.{},
-            .accessed_addresses = &.{},
-            .accessed_storage = &.{},
-        };
-    }
-
-    /// Create a failed call result with error info
-    pub fn failure_with_error(gas_left: u64, error_info: []const u8) CallResult {
-        return CallResult{
-            .success = false,
-            .gas_left = gas_left,
-            .output = &[_]u8{},
-            .logs = &.{},
-            .selfdestructs = &.{},
-            .accessed_addresses = &.{},
-            .accessed_storage = &.{},
-            .error_info = error_info,
-        };
-    }
-
-    /// Create a reverted call result with revert data
-    pub fn revert_with_data(gas_left: u64, revert_data: []const u8) CallResult {
-        return CallResult{
-            .success = false,
-            .gas_left = gas_left,
-            .output = revert_data,
-            .logs = &.{},
-            .selfdestructs = &.{},
-            .accessed_addresses = &.{},
-            .accessed_storage = &.{},
-        };
-    }
-
-    /// Create a successful call result with output and logs
-    pub fn success_with_logs(gas_left: u64, output: []const u8, logs: []const Log) CallResult {
-        return CallResult{
-            .success = true,
-            .gas_left = gas_left,
-            .output = output,
-            .logs = logs,
-            .selfdestructs = &.{},
-            .accessed_addresses = &.{},
-            .accessed_storage = &.{},
-        };
-    }
-
-    /// Check if the call succeeded
-    pub fn isSuccess(self: CallResult) bool {
-        return self.success;
-    }
-
-    /// Check if the call failed
-    pub fn isFailure(self: CallResult) bool {
-        return !self.success;
-    }
-
-    /// Check if the call has output data
-    pub fn hasOutput(self: CallResult) bool {
-        return self.output.len > 0;
-    }
-
-    /// Get the amount of gas consumed (assuming original_gas was provided)
-    pub fn gasConsumed(self: CallResult, original_gas: u64) u64 {
-        if (self.gas_left > original_gas) return 0; // Sanity check
-        return original_gas - self.gas_left;
-    }
-
-    /// Clean up all memory associated with logs
-    /// Must be called when CallResult contains owned log data
-    pub fn deinitLogs(self: *CallResult, allocator: std.mem.Allocator) void {
-        for (self.logs) |log| {
-            allocator.free(log.topics);
-            allocator.free(log.data);
+        /// Create a successful call result
+        pub fn success_with_output(gas_left: GasType, output: []const u8) Self {
+            return Self{
+                .success = true,
+                .gas_left = gas_left,
+                .output = output,
+                .logs = &.{},
+                .selfdestructs = &.{},
+                .accessed_addresses = &.{},
+                .accessed_storage = &.{},
+            };
         }
-        allocator.free(self.logs);
-        self.logs = &.{};
-    }
 
-    /// Clean up memory for a logs slice returned by takeLogs()
-    /// Use this when you have logs from takeLogs() instead of a full CallResult
-    pub fn deinitLogsSlice(logs: []const Log, allocator: std.mem.Allocator) void {
-        for (logs) |log| {
-            allocator.free(log.topics);
-            allocator.free(log.data);
+        /// Create a successful call result with empty output
+        pub fn success_empty(gas_left: GasType) Self {
+            return Self{
+                .success = true,
+                .gas_left = gas_left,
+                .output = &[_]u8{},
+                .logs = &.{},
+                .selfdestructs = &.{},
+                .accessed_addresses = &.{},
+                .accessed_storage = &.{},
+            };
         }
-        allocator.free(logs);
-    }
 
-    /// Clean up all allocated memory in the CallResult
-    /// Call this when the CallResult contains owned data that needs to be freed
-    pub fn deinit(self: *CallResult, allocator: std.mem.Allocator) void {
-        // Free output buffer if it's allocated
-        if (self.output.len > 0) {
-            allocator.free(self.output);
+        /// Create a failed call result
+        pub fn failure(gas_left: GasType) Self {
+            return Self{
+                .success = false,
+                .gas_left = gas_left,
+                .output = &[_]u8{},
+                .logs = &.{},
+                .selfdestructs = &.{},
+                .accessed_addresses = &.{},
+                .accessed_storage = &.{},
+            };
         }
-        
-        // Free logs - always free if we have logs since they're allocated
-        if (self.logs.len > 0) {
+
+        /// Create a failed call result with error info
+        pub fn failure_with_error(gas_left: GasType, error_info: []const u8) Self {
+            return Self{
+                .success = false,
+                .gas_left = gas_left,
+                .output = &[_]u8{},
+                .logs = &.{},
+                .selfdestructs = &.{},
+                .accessed_addresses = &.{},
+                .accessed_storage = &.{},
+                .error_info = error_info,
+            };
+        }
+
+        /// Create a reverted call result with revert data
+        pub fn revert_with_data(gas_left: GasType, revert_data: []const u8) Self {
+            return Self{
+                .success = false,
+                .gas_left = gas_left,
+                .output = revert_data,
+                .logs = &.{},
+                .selfdestructs = &.{},
+                .accessed_addresses = &.{},
+                .accessed_storage = &.{},
+            };
+        }
+
+        /// Create a successful call result with output and logs
+        pub fn success_with_logs(gas_left: GasType, output: []const u8, logs: []const Log) Self {
+            return Self{
+                .success = true,
+                .gas_left = gas_left,
+                .output = output,
+                .logs = logs,
+                .selfdestructs = &.{},
+                .accessed_addresses = &.{},
+                .accessed_storage = &.{},
+            };
+        }
+
+        /// Check if the call succeeded
+        pub fn isSuccess(self: Self) bool {
+            return self.success;
+        }
+
+        /// Check if the call failed
+        pub fn isFailure(self: Self) bool {
+            return !self.success;
+        }
+
+        /// Check if the call has output data
+        pub fn hasOutput(self: Self) bool {
+            return self.output.len > 0;
+        }
+
+        /// Get the amount of gas consumed (assuming original_gas was provided)
+        pub fn gasConsumed(self: Self, original_gas: GasType) GasType {
+            if (self.gas_left > original_gas) return 0; // Sanity check
+            return original_gas - self.gas_left;
+        }
+
+        /// Clean up all memory associated with logs
+        /// Must be called when CallResult contains owned log data
+        pub fn deinitLogs(self: *Self, allocator: std.mem.Allocator) void {
             for (self.logs) |log| {
-                if (log.topics.len > 0) {
-                    allocator.free(log.topics);
-                }
-                if (log.data.len > 0) {
-                    allocator.free(log.data);
-                }
+                allocator.free(log.topics);
+                allocator.free(log.data);
             }
             allocator.free(self.logs);
+            self.logs = &.{};
         }
-        
-        // Free selfdestructs if allocated
-        if (self.selfdestructs.len > 0) {
-            allocator.free(self.selfdestructs);
+
+        /// Clean up memory for a logs slice returned by takeLogs()
+        /// Use this when you have logs from takeLogs() instead of a full CallResult
+        pub fn deinitLogsSlice(logs: []const Log, allocator: std.mem.Allocator) void {
+            for (logs) |log| {
+                allocator.free(log.topics);
+                allocator.free(log.data);
+            }
+            allocator.free(logs);
         }
-        
-        // Free accessed_addresses if allocated
-        if (self.accessed_addresses.len > 0) {
-            allocator.free(self.accessed_addresses);
+
+        /// Clean up all allocated memory in the CallResult
+        /// Call this when the CallResult contains owned data that needs to be freed
+        pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+            // Free output buffer if it's allocated
+            if (self.output.len > 0) {
+                allocator.free(self.output);
+            }
+            
+            // Free logs - always free if we have logs since they're allocated
+            if (self.logs.len > 0) {
+                for (self.logs) |log| {
+                    if (log.topics.len > 0) {
+                        allocator.free(log.topics);
+                    }
+                    if (log.data.len > 0) {
+                        allocator.free(log.data);
+                    }
+                }
+                allocator.free(self.logs);
+            }
+            
+            // Free selfdestructs if allocated
+            if (self.selfdestructs.len > 0) {
+                allocator.free(self.selfdestructs);
+            }
+            
+            // Free accessed_addresses if allocated
+            if (self.accessed_addresses.len > 0) {
+                allocator.free(self.accessed_addresses);
+            }
+            
+            // Free accessed_storage if allocated
+            if (self.accessed_storage.len > 0) {
+                allocator.free(self.accessed_storage);
+            }
+            
+            // Free trace if present
+            if (self.trace) |*trace| {
+                trace.deinit();
+            }
+            
+            // Free error_info if present
+            if (self.error_info) |info| {
+                allocator.free(info);
+            }
+            
+            // Reset all fields to empty slices
+            self.output = &.{};
+            self.logs = &.{};
+            self.selfdestructs = &.{};
+            self.accessed_addresses = &.{};
+            self.accessed_storage = &.{};
+            self.trace = null;
+            self.error_info = null;
         }
-        
-        // Free accessed_storage if allocated
-        if (self.accessed_storage.len > 0) {
-            allocator.free(self.accessed_storage);
-        }
-        
-        // Free trace if present
-        if (self.trace) |*trace| {
-            trace.deinit();
-        }
-        
-        // Free error_info if present
-        if (self.error_info) |info| {
-            allocator.free(info);
-        }
-        
-        // Reset all fields to empty slices
-        self.output = &.{};
-        self.logs = &.{};
-        self.selfdestructs = &.{};
-        self.accessed_addresses = &.{};
-        self.accessed_storage = &.{};
-        self.trace = null;
-        self.error_info = null;
-    }
-};
+    };
+}
 
 const std = @import("std");
 const primitives = @import("primitives");
 const Address = primitives.Address.Address;
 const ZERO_ADDRESS = primitives.ZERO_ADDRESS;
+
+test "CallResult - generic function with custom gas types" {
+    const EvmConfig = @import("evm_config.zig").EvmConfig;
+    const i32_config = EvmConfig{ .block_gas_limit = 1000000 };
+    const i64_config = EvmConfig{ .block_gas_limit = 3000000000 };
+    
+    const CallResultI32 = CallResult(i32_config);
+    const CallResultI64 = CallResult(i64_config);
+    
+    const result_i32 = CallResultI32.success_empty(@as(i32, 15000));
+    const result_i64 = CallResultI64.success_empty(@as(i64, 25000000000));
+    
+    try std.testing.expect(result_i32.success);
+    try std.testing.expectEqual(@as(i32, 15000), result_i32.gas_left);
+    try std.testing.expect(result_i64.success);
+    try std.testing.expectEqual(@as(i64, 25000000000), result_i64.gas_left);
+}
+
+test "CallResult - all factory methods with generic gas types" {
+    const EvmConfig = @import("evm_config.zig").EvmConfig;
+    const config = EvmConfig{ .block_gas_limit = 1000000 }; // i32 gas
+    const CallResultType = CallResult(config);
+    const GasType = config.frame_config().GasType(); // i32
+    
+    const methods_test = [_]CallResultType{
+        CallResultType.success_with_output(@as(i32, 1000), &[_]u8{0x01}),
+        CallResultType.success_empty(@as(i32, 2000)),
+        CallResultType.failure(@as(i32, 3000)),
+        CallResultType.failure_with_error(@as(i32, 4000), "test error"),
+        CallResultType.revert_with_data(@as(i32, 5000), "revert reason"),
+        CallResultType.success_with_logs(@as(i32, 6000), &[_]u8{0x02}, &[_]Log{}),
+    };
+    
+    for (methods_test) |result| {
+        _ = result.isSuccess();
+        _ = result.gasConsumed(@as(i32, 10000));
+    }
+}
+
+test "CallResult - backward compatibility with defaults" {
+    const EvmConfig = @import("evm_config.zig").EvmConfig;
+    const default_config = EvmConfig{};
+    const CallResultType = CallResult(default_config);
+    const GasType = default_config.frame_config().GasType();
+    
+    // This should be identical to original CallResult behavior
+    const call_result = CallResultType.success_empty(@as(GasType, 18500));
+    try std.testing.expectEqual(@as(GasType, 2500), call_result.gasConsumed(@as(GasType, 21000)));
+}
 
 /// Log entry structure for EVM events
 pub const Log = struct {
@@ -285,11 +340,16 @@ pub const ExecutionTrace = struct {
 };
 
 test "call result success creation" {
+    const EvmConfig = @import("evm_config.zig").EvmConfig;
+    const default_config = EvmConfig{};
+    const CallResultType = CallResult(default_config);
+    const GasType = default_config.frame_config().GasType();
+    
     const output_data = &[_]u8{ 0x01, 0x02, 0x03, 0x04 };
-    const result = CallResult.success_with_output(15000, output_data);
+    const result = CallResultType.success_with_output(@as(GasType, 15000), output_data);
 
     try std.testing.expect(result.success);
-    try std.testing.expectEqual(@as(u64, 15000), result.gas_left);
+    try std.testing.expectEqual(@as(GasType, 15000), result.gas_left);
     try std.testing.expectEqualSlices(u8, output_data, result.output);
     try std.testing.expect(result.isSuccess());
     try std.testing.expect(!result.isFailure());

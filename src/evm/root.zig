@@ -77,6 +77,10 @@ pub const CompactBlockInfo = block_info_mod.CompactBlockInfo;
 pub const BlockInfoConfig = @import("block_info_config.zig").BlockInfoConfig;
 pub const CallParams = @import("call_params.zig").CallParams;
 pub const CallResult = @import("call_result.zig").CallResult;
+
+// Default non-generic types for backward compatibility
+pub const DefaultCallParams = CallParams(EvmConfig{});
+pub const DefaultCallResult = CallResult(EvmConfig{});
 pub const CreatedContracts = @import("created_contracts.zig").CreatedContracts;
 pub const Database = @import("database.zig").Database;
 pub const Account = @import("database_interface_account.zig").Account;
@@ -156,6 +160,8 @@ test {
     _ = BlockInfo;
     _ = CallParams;
     _ = CallResult;
+    _ = DefaultCallParams;
+    _ = DefaultCallResult;
     _ = CreatedContracts;
     _ = Database;
     _ = Account;

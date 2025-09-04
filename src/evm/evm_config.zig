@@ -31,6 +31,8 @@ pub const EvmConfig = struct {
     stack_size: u12 = 1024,
     /// The size of a single word in the EVM - Defaults to u256
     WordType: type = u256,
+    /// Address type for EVM addresses - Defaults to [20]u8
+    AddressType: type = [20]u8,
     /// The maximum amount of bytes allowed in contract code
     max_bytecode_size: u32 = 24576,
     /// The maximum amount of bytes allowed in contract deployment
@@ -64,6 +66,16 @@ pub const EvmConfig = struct {
             .TracerType = self.TracerType,
             .block_info_config = self.block_info_config,
         };
+    }
+
+    /// Validates the configuration at compile time
+    pub fn validate(comptime self: EvmConfig) void {
+        if (@sizeOf(self.AddressType) > @sizeOf(self.WordType)) {
+            @compileError("AddressType size cannot exceed WordType size");
+        }
+        if (self.block_gas_limit > @as(u64, @intCast(std.math.maxInt(self.frame_config().GasType())))) {
+            @compileError("block_gas_limit exceeds GasType capacity");
+        }
     }
 
     /// Gets the appropriate type for depth based on max_call_depth
@@ -271,4 +283,98 @@ test "EvmConfig - complete custom configuration" {
     try testing.expectEqual(false, config.enable_fusion);
     try testing.expectEqual(DummyTracer, config.TracerType.?);
     try testing.expectEqual(u11, config.get_depth_type());
+}
+
+test "EvmConfig - AddressType configuration and validation" {
+    // Test default AddressType
+    const default_config = EvmConfig{};
+    comptime default_config.validate();
+    try testing.expectEqual([20]u8, default_config.AddressType);
+    
+    // Test custom AddressType (smaller than WordType)
+    const custom_config = EvmConfig{
+        .AddressType = [16]u8,
+        .WordType = u256,
+    };
+    comptime custom_config.validate();
+    try testing.expectEqual([16]u8, custom_config.AddressType);
+    
+    // Test valid case where AddressType equals WordType size
+    const equal_config = EvmConfig{
+        .AddressType = [32]u8,
+        .WordType = u256, // 32 bytes
+    };
+    comptime equal_config.validate();
+    try testing.expectEqual([32]u8, equal_config.AddressType);
+}
+
+test "EvmConfig - gas type selection and validation" {
+    const small_gas_config = EvmConfig{ .block_gas_limit = 1000000 }; // Fits in i32
+    comptime small_gas_config.validate();
+    try testing.expectEqual(i32, small_gas_config.frame_config().GasType());
+    
+    const large_gas_config = EvmConfig{ .block_gas_limit = 3000000000 }; // Requires i64
+    comptime large_gas_config.validate();
+    try testing.expectEqual(i64, large_gas_config.frame_config().GasType());
+}
+
+test "EvmConfig - cross-configuration compatibility" {
+    const configs = [_]EvmConfig{
+        EvmConfig{}, // Default: u256, [20]u8
+        EvmConfig{ .WordType = u128, .AddressType = [16]u8, .block_gas_limit = 1000000 }, // i32 gas
+        EvmConfig{ .WordType = u256, .AddressType = [32]u8, .block_gas_limit = 50000000000 }, // i64 gas
+    };
+    
+    // Test that each configuration works independently
+    inline for (configs) |config| {
+        comptime config.validate();
+        const GasType = config.frame_config().GasType();
+        const WordType = config.WordType;
+        const AddressType = config.AddressType;
+        
+        // All configurations should be valid
+        try testing.expect(@sizeOf(AddressType) <= @sizeOf(WordType));
+        try testing.expect(GasType == i32 or GasType == i64);
+    }
+}
+
+test "EvmConfig - EVM integration with generic types" {
+    const Evm = @import("evm.zig").Evm;
+    const CallParams = @import("call_params.zig").CallParams;
+    const CallResult = @import("call_result.zig").CallResult;
+    
+    const config = EvmConfig{
+        .WordType = u128,
+        .AddressType = [16]u8,
+        .block_gas_limit = 5000000,
+    };
+    comptime config.validate();
+    
+    const EvmType = Evm(config);
+    const CallParamsType = CallParams(config);
+    const CallResultType = CallResult(config);
+    const GasType = config.frame_config().GasType();
+    
+    // Test that EVM has the right generic types
+    try testing.expectEqual(CallParamsType, EvmType.CallParams);
+    try testing.expectEqual(CallResultType, EvmType.CallResult);
+    
+    // Test that we can create instances with the right types
+    const caller: [16]u8 = [_]u8{0xAA} ++ [_]u8{0} ** 15;
+    const to: [16]u8 = [_]u8{0xBB} ++ [_]u8{0} ** 15;
+    
+    const params = EvmType.CallParams{ .call = .{
+        .caller = caller,
+        .to = to,
+        .value = @as(u128, 1000),
+        .input = &[_]u8{},
+        .gas = @as(GasType, 21000),
+    } };
+    
+    const result = EvmType.CallResult.success_empty(@as(GasType, 18500));
+    
+    try testing.expectEqual(@as(u128, 1000), params.call.value);
+    try testing.expectEqual(@as(GasType, 21000), params.call.gas);
+    try testing.expectEqual(@as(GasType, 18500), result.gas_left);
+    try testing.expectEqual(@as(GasType, 2500), result.gasConsumed(@as(GasType, 21000)));
 }
