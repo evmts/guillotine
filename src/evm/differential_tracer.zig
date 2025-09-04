@@ -295,7 +295,7 @@ pub fn DifferentialTracer(comptime revm_module: type) type {
                 ));
             }
 
-            // TODO: Re-enable gas comparison once gas pricing is fixed
+            // See issue #649 for gas comparison re-enablement
             // Currently disabled to focus on functional correctness
             // The issue is that MSTORE gas calculation differs - REVM charges 12 gas
             // (3 base + 9 memory expansion) while Guillotine charges only 9 gas

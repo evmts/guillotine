@@ -8,7 +8,7 @@ const dispatch_item = @import("dispatch_item.zig");
 const dispatch_jump_table = @import("dispatch_jump_table.zig");
 const dispatch_jump_table_builder = @import("dispatch_jump_table_builder.zig");
 
-// TODO: Low priority TODO
+// See issue #650 for dispatch optimization opportunities
 // Currently our architecture assumes 64 byte cpu. It will still be functional for 32 byte cpu or 128 byte cpu but potentially not optimal
 // In future we should consider benchmarking other cpu architectures. It's possible we want our metadata to be dynamic based on usize
 // For example, we might want to only store 32 byte inline values on a 32 byte machines rather than 64
@@ -265,7 +265,7 @@ pub fn Dispatch(comptime FrameType: type) type {
                             0x56, 0x57, 0x00, 0xf3, 0xfd, 0xfe, 0xff => {
                                 // Debug: log when we encounter a terminator
                                 if (data.opcode == 0x57) {
-                                    // log.debug("calculateFirstBlockGas: Found JUMPI at op_count={}, gas={}", .{op_count, gas});
+                                    log.debug("calculateFirstBlockGas: Found JUMPI at op_count={}, gas={}", .{op_count, gas});
                                 }
                                 return gas;
                             },

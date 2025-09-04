@@ -5,6 +5,22 @@ const BytecodeConfig = @import("bytecode_config.zig").BytecodeConfig;
 const default_config = BytecodeConfig{};
 const BytecodeDefault = Bytecode(default_config);
 
+// TDD Red Phase: Test for deprecated methods removal  
+test "deprecated methods should not exist" {
+    const bytecode_src = @import("bytecode.zig");
+    
+    // This test will FAIL if deprecated methods still exist
+    // Compile-time verification that methods are removed
+    const has_deprecated_validate = @hasDecl(bytecode_src.Bytecode(default_config), "validateImmediateJumps_DEPRECATED");
+    try std.testing.expect(!has_deprecated_validate);
+    
+    const has_deprecated_read1 = @hasDecl(bytecode_src.Bytecode(default_config), "readImmediateJumpTarget_DEPRECATED");
+    try std.testing.expect(!has_deprecated_read1);
+    
+    const has_deprecated_read2 = @hasDecl(bytecode_src.Bytecode(default_config), "readImmediateJumpiTarget_DEPRECATED");
+    try std.testing.expect(!has_deprecated_read2);
+}
+
 // Test that immediate jump validation happens during buildBitmapsAndValidate
 // not as a separate pass
 test "immediate jump validation integrated into main validation" {
