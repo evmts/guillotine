@@ -270,9 +270,7 @@ pub fn Evm(comptime config: EvmConfig) type {
                 self.journal.revert_to_snapshot(snapshot_id);
             }
             
-            // Execute using inner_call to avoid top-level state clearing
             return self.inner_call(params) catch |err| {
-                // Convert error to failure result
                 return CallResult.failure(0);
             };
         }
