@@ -41,7 +41,7 @@ pub fn Evm(comptime config: EvmConfig) type {
         const Self = @This();
 
         /// Frame type for the evm
-        pub const Frame = @import("frame.zig").Frame(config.frame_config());
+        pub const Frame = @import("frame.zig").Frame(config);
         /// Static wrappers for EIP-214 (STATICCALL) constraint enforcement
         const static_wrappers = @import("static_wrappers.zig");
         const StaticDatabase = static_wrappers.StaticDatabase;
@@ -53,10 +53,11 @@ pub fn Evm(comptime config: EvmConfig) type {
         });
         /// Journal handles reverting state when state needs to be reverted
         pub const Journal: type = @import("journal.zig").Journal(.{
-            .SnapshotIdType = if (config.max_call_depth <= 255) u8 else u16,
+            .SnapshotIdType = config.SnapshotIdType(),
             .WordType = config.WordType,
-            .NonceType = u64,
-            .initial_capacity = 128,
+            .NonceType = config.NonceType,
+            .initial_capacity = config.journal_initial_capacity,
+            .use_soa = config.journal_use_soa,
         });
 
         /// Call stack entry to track caller and value for DELEGATECALL

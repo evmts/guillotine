@@ -44,8 +44,9 @@ const dispatch_mod = @import("dispatch.zig");
 ///
 /// The Frame is parameterized by compile-time configuration to enable
 /// optimal code generation and platform-specific optimizations.
-pub fn Frame(comptime config: FrameConfig) type {
-    comptime config.validate();
+pub fn Frame(comptime evm_config: anytype) type {
+    // Now accepts EvmConfig directly - configuration consolidation complete
+    comptime evm_config.validate();
 
     return struct {
         /// Error code type returned by Frame.interpret - includes both error and success termination cases
@@ -74,8 +75,8 @@ pub fn Frame(comptime config: FrameConfig) type {
         pub const OpcodeHandler = *const fn (frame: *Self, cursor: [*]const Dispatch.Item) Error!noreturn;
         /// The struct in charge of efficiently dispatching opcode handlers and providing them metadata
         pub const Dispatch = dispatch_mod.Dispatch(Self);
-        /// The config passed into Frame(config)
-        pub const frame_config = config;
+        /// The config passed into Frame(config) - now unified as EvmConfig
+        pub const config = evm_config;
 
         /// Returns the appropriate tail call modifier based on the target architecture.
         /// WebAssembly doesn't support tail calls by default, so we use .auto for wasm targets.
@@ -429,7 +430,7 @@ pub fn Frame(comptime config: FrameConfig) type {
             // Compile-time verification that clamping is practically unnecessary
             comptime {
                 // With typical block gas limit of 30M and i32, we have plenty of headroom
-                if (frame_config.block_gas_limit <= std.math.maxInt(i32)) {
+                if (config.block_gas_limit <= std.math.maxInt(i32)) {
                     // Ensure no single gas cost exceeds what i32 can hold
                     // This is a sanity check - all EVM gas costs are well below this
                     std.debug.assert(std.math.maxInt(u32) < std.math.maxInt(i32));
