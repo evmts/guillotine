@@ -602,6 +602,13 @@ pub fn Dispatch(comptime FrameType: type) type {
             items: []Item,
             allocator: std.mem.Allocator,
             push_pointers: []const *FrameType.WordType = &.{},
+            
+            /// Debug-only shadow schedule for fusion verification (comptime conditional)
+            /// TODO: Populate these fields in init() when verification is enabled
+            shadow_items: if (std.debug.runtime_safety) ?[]Item else void = 
+                if (std.debug.runtime_safety) null else {},
+            shadow_push_pointers: if (std.debug.runtime_safety) ?[]const *FrameType.WordType else void = 
+                if (std.debug.runtime_safety) null else {},
 
             /// Initialize a dispatch schedule from bytecode with automatic cleanup
             pub fn init(allocator: std.mem.Allocator, bytecode: anytype, opcode_handlers: *const [256]OpcodeHandler) !DispatchSchedule {
@@ -620,6 +627,19 @@ pub fn Dispatch(comptime FrameType: type) type {
                     self.allocator.destroy(ptr);
                 }
                 if (self.push_pointers.len > 0) self.allocator.free(self.push_pointers);
+
+                // TODO: Clean up shadow schedule in debug builds
+                if (std.debug.runtime_safety) {
+                    if (self.shadow_items) |shadow_items| {
+                        Self.deinitSchedule(self.allocator, shadow_items);
+                    }
+                    if (self.shadow_push_pointers) |shadow_ptrs| {
+                        for (shadow_ptrs) |ptr| {
+                            self.allocator.destroy(ptr);
+                        }
+                        if (shadow_ptrs.len > 0) self.allocator.free(shadow_ptrs);
+                    }
+                }
 
                 // Free schedule itself
                 Self.deinitSchedule(self.allocator, self.items);

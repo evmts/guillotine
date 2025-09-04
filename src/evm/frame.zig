@@ -157,6 +157,27 @@ pub fn Frame(comptime config: FrameConfig) type {
         block_info: BlockInfo, // ~188B - Block context (spans multiple cache lines)
         authorized_address: ?Address = null, // 20B - EIP-3074 authorized address
         bytecode: ?Bytecode = null, // Bytecode object (for CODESIZE/CODECOPY/analysis)
+        
+        /// Debug-only shadow frame for fusion verification (comptime conditional)
+        /// TODO: Initialize this when verification is enabled, implement verification logic
+        shadow_frame: if (std.debug.runtime_safety) ?*ShadowFrame else void = 
+            if (std.debug.runtime_safety) null else {},
+
+        /// Shadow frame structure for parallel fusion verification (debug builds only)
+        const ShadowFrame = struct {
+            frame: *Self,
+            dispatch: Dispatch,
+            
+            /// Verify that shadow frame state matches main frame state
+            /// TODO: Implement comprehensive state comparison (stack, memory, gas)
+            pub fn verify(self: *ShadowFrame, main_frame: *Self) Error!void {
+                _ = self; _ = main_frame; // Suppress unused warnings
+                // TODO: Compare stack contents
+                // TODO: Compare memory contents  
+                // TODO: Compare gas remaining (with tolerance)
+                // TODO: Generate detailed diagnostic output on mismatch
+            }
+        };
 
         //
         /// Initialize a new execution frame.

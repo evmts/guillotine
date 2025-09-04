@@ -1,6 +1,14 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+/// Fusion verification modes for debug builds
+pub const VerificationMode = enum {
+    none,        /// No verification (production default)
+    opcode,      /// Verify after every opcode (slowest, most thorough)
+    block,       /// Verify at basic block boundaries (balanced)
+    transaction, /// Verify only at transaction end (fastest debug)
+};
+
 /// Configure Bytecode validation
 pub const BytecodeConfig = struct {
     // https://ziglang.org/documentation/master/#toc-This
@@ -8,6 +16,11 @@ pub const BytecodeConfig = struct {
     // whether to fuze multiple opcodes into a single instruction for performance
     // defaults to true
     fusions_enabled: bool = true,
+    
+    /// Debug-only fusion verification mode (comptime conditional)
+    /// TODO: Wire this through to dispatch schedule creation
+    verification_mode: if (std.debug.runtime_safety) VerificationMode else void = 
+        if (std.debug.runtime_safety) .block else {},
     /// The maximum amount of bytes allowed in contract code
     max_bytecode_size: u32 = 24576,
     /// The maximum amount of bytes allowed in initcode (EIP-3860)
