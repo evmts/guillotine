@@ -205,6 +205,8 @@ pub fn Evm(comptime config: EvmConfig) type {
         eips: EipsConfig,
         /// Disable gas checking (for testing/debugging)
         disable_gas_checking: bool,
+        /// Flag to indicate simulation mode (prevents journal clearing)
+        is_simulating: bool,
 
         // CACHE LINE 4+ - COLD PATH (less frequently accessed)
         /// Logs emitted during the current call
@@ -267,6 +269,7 @@ pub fn Evm(comptime config: EvmConfig) type {
                 .hardfork_config = hardfork_config,
                 .eips = EipsConfig.fromHardfork(hardfork_config),
                 .disable_gas_checking = false,
+                .is_simulating = false,
                 .current_snapshot_id = 0,
                 .logs = std.ArrayList(@import("call_result.zig").Log){},
                 .call_arena = std.heap.ArenaAllocator.init(allocator),
@@ -312,6 +315,11 @@ pub fn Evm(comptime config: EvmConfig) type {
         /// returning the result as if the call had been executed. Useful for
         /// gas estimation, testing outcomes, or previewing transaction effects.
         pub fn simulate(self: *Self, params: CallParams) CallResult {
+            // Set simulation flag to prevent journal clearing in call()
+            const prev_simulating = self.is_simulating;
+            self.is_simulating = true;
+            defer self.is_simulating = prev_simulating;
+            
             // Create a snapshot before execution
             const snapshot_id = self.journal.create_snapshot();
             
@@ -331,7 +339,7 @@ pub fn Evm(comptime config: EvmConfig) type {
             }
             
             // Execute the call normally and return its result
-            // Note: call() will also try to clear for top-level, but that's OK - clearing twice is safe
+            // BUG FIX: Now call() won't clear journal because is_simulating=true
             return self.call(params);
         }
 
@@ -347,7 +355,8 @@ pub fn Evm(comptime config: EvmConfig) type {
             const is_top_level = self.depth == 0;
             
             // Reset per-transaction state at the START of each new transaction
-            if (is_top_level) {
+            // BUG FIX: Don't clear journal during simulation to preserve snapshots
+            if (is_top_level and !self.is_simulating) {
                 // Clear access list for new transaction (EIP-2929)
                 self.access_list.clear();
                 // Clear journal for new transaction
@@ -363,6 +372,10 @@ pub fn Evm(comptime config: EvmConfig) type {
                 // Reset arena allocator
                 _ = self.call_arena.reset(.retain_capacity);
             }
+            
+            // TODO: Review if other state clearing above also needs simulation protection
+            // Currently simulate() handles access_list separately, but gas_refund_counter,
+            // logs, created_contracts, self_destruct, and arena may also need protection
             
             defer if (is_top_level) {
                 // Cleanup after transaction completes
