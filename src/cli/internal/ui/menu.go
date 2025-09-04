@@ -11,31 +11,24 @@ type MenuItem struct {
 	Selected bool
 }
 
-func RenderMenuItem(item MenuItem, isCurrent bool, isChecked bool) string {
+func RenderMenuItem(item MenuItem, isCurrent bool) string {
 	cursor := "  "
-	checked := " "
-	
-	if isChecked {
-		checked = config.CheckedStyle.Render("✓")
-	}
 	
 	if isCurrent {
 		cursor = config.CursorStyle.Render("▸ ")
 		choiceText := config.SelectedItemStyle.Render(" " + item.Label + " ")
-		return fmt.Sprintf("%s[%s] %s", cursor, checked, choiceText)
+		return fmt.Sprintf("%s%s", cursor, choiceText)
 	}
 	
-	return config.NormalItemStyle.Render(fmt.Sprintf("  [%s] %s", checked, item.Label))
+	return config.NormalItemStyle.Render(fmt.Sprintf("   %s", item.Label))
 }
 
-func RenderMenu(items []string, currentIndex int, selected map[int]struct{}) string {
+func RenderMenu(items []string, currentIndex int) string {
 	menuItems := ""
 	for i, choice := range items {
-		_, isSelected := selected[i]
 		line := RenderMenuItem(
 			MenuItem{Label: choice},
 			i == currentIndex,
-			isSelected,
 		)
 		menuItems += line + "\n"
 	}

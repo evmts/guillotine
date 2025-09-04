@@ -4,6 +4,7 @@ import (
 	"testing"
 	"guillotine-cli/internal/config"
 	"guillotine-cli/internal/types"
+	"guillotine-cli/internal/utils"
 )
 
 func TestValidateCallParameters(t *testing.T) {
@@ -86,7 +87,7 @@ func TestValidateCallParameters(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateCallParameters(tt.params)
+			err := utils.ValidateCallParameters(tt.params)
 			
 			if tt.expectError {
 				if err == nil {
@@ -134,7 +135,7 @@ func TestValidateField(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.field+"_"+tt.value, func(t *testing.T) {
-			err := validateField(tt.field, tt.value)
+			err := utils.ValidateField(tt.field, tt.value)
 			
 			if tt.expectError {
 				if err == nil {

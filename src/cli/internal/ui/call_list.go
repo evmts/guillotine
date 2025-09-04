@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"guillotine-cli/internal/config"
 	"guillotine-cli/internal/types"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/evmts/guillotine/bindings/go/evm"
 )
 
 func RenderCallParameterList(params []types.CallParameter, cursor int, validationError string) string {
@@ -67,7 +69,7 @@ func RenderCallParameterEdit(paramName, currentValue string) string {
 	return boxStyle.Render(content)
 }
 
-func RenderCallResult(result *types.CallExecution) string {
+func RenderCallResult(result *evm.CallResult, params types.CallParameters) string {
 	var content strings.Builder
 	
 	successStyle := lipgloss.NewStyle().Bold(true).Foreground(config.ChartGreen)
@@ -84,7 +86,12 @@ func RenderCallResult(result *types.CallExecution) string {
 	
 	// Always show gas used
 	content.WriteString(labelStyle.Render("Gas Used: "))
-	content.WriteString(lipgloss.NewStyle().Render(formatNumber(result.GasUsed)))
+	if gasLimit, err := strconv.ParseUint(params.GasLimit, 10, 64); err == nil {
+		gasUsed := gasLimit - result.GasLeft
+		content.WriteString(lipgloss.NewStyle().Render(formatNumber(gasUsed)))
+	} else {
+		content.WriteString(lipgloss.NewStyle().Render("0"))
+	}
 	content.WriteString("\n")
 	
 	// Show error first if failed
@@ -96,10 +103,11 @@ func RenderCallResult(result *types.CallExecution) string {
 	}
 	
 	// Show output if available (even for failed calls)
-	if len(result.Output) > 0 {
+	outputData := result.Output.Data()
+	if len(outputData) > 0 {
 		content.WriteString("\n")
 		content.WriteString(labelStyle.Render("Output: "))
-		content.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render(formatHex(result.Output)))
+		content.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render(formatHex(outputData)))
 		content.WriteString("\n")
 	}
 	

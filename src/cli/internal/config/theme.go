@@ -20,6 +20,7 @@ var (
 	ChartPurple = lipgloss.Color("#9333EA")
 	ChartOrange = lipgloss.Color("#F97316")
 	
+	Success     = lipgloss.Color("#10B981")
 	Destructive = lipgloss.Color("#DC2626")
 )
 
@@ -67,6 +68,41 @@ var (
 	
 	IconStyle = lipgloss.NewStyle().
 		Foreground(AmberLight)
+	
+	DimmedStyle = lipgloss.NewStyle().
+		Foreground(Muted)
+		
+	LabelStyle = lipgloss.NewStyle().
+		Foreground(Amber).
+		Bold(true)
+		
+	SelectedStyle = lipgloss.NewStyle().
+		Foreground(Background).
+		Background(Amber).
+		Bold(true)
+		
+	NormalStyle = lipgloss.NewStyle().
+		Foreground(Foreground)
+		
+	AccentStyle = lipgloss.NewStyle().
+		Foreground(Amber)
+		
+	SuccessStyle = lipgloss.NewStyle().
+		Foreground(ChartGreen)
+		
+	ErrorStyle = lipgloss.NewStyle().
+		Foreground(Destructive)
+		
+	Primary = Amber
+	Secondary = ChartBlue
+	Error = Destructive
+	
+	CodeStyle = lipgloss.NewStyle().
+		Foreground(ChartBlue)
+		
+	InputStyle = lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("237"))
 )
 
 func GetBoxStyle(width, height int) lipgloss.Style {

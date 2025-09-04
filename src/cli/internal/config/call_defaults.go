@@ -4,6 +4,11 @@ import (
 	"github.com/evmts/guillotine/bindings/go/evm"
 )
 
+const (
+	DefaultGasLimit = "100000"
+	DefaultTableHeight = 10
+)
+
 type CallDefaults struct {
 	CallType    evm.CallType
 	GasLimit    uint64
