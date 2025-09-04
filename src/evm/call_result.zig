@@ -1,4 +1,6 @@
 /// Call result structure for EVM calls
+/// TODO: This will be converted to a generic function CallResult(comptime config: EvmConfig)
+/// For now, keeping backwards compatibility with hardcoded types
 pub const CallResult = struct {
     success: bool,
     gas_left: u64,
@@ -195,10 +197,62 @@ pub const CallResult = struct {
     }
 };
 
+/// Generic version of CallResult that takes EvmConfig
+/// This is the future API - currently a proof-of-concept
+pub fn CallResultGeneric(comptime config: anytype) type {
+    const GasType = config.frame_config().GasType();
+    
+    return struct {
+        success: bool,
+        gas_left: GasType,       // TODO: Was u64, now i32 or i64 based on block_gas_limit
+        output: []const u8,      // TODO: Stays the same
+        
+        // TODO: Add all the other fields (logs, selfdestructs, etc.)
+        // TODO: Add all factory methods (success_with_output, failure, etc.)
+        // TODO: Add all helper methods (isSuccess, gasConsumed, etc.)
+        
+        /// Basic success factory - TODO: Implement all factory methods
+        pub fn success_empty(gas_left: GasType) @This() {
+            return @This(){
+                .success = true,
+                .gas_left = gas_left,
+                .output = &[_]u8{},
+            };
+        }
+        
+        /// Basic gas consumption calculation - TODO: Add overflow protection 
+        pub fn gasConsumed(self: @This(), original_gas: GasType) GasType {
+            if (self.gas_left > original_gas) return 0; // TODO: Better error handling
+            return original_gas - self.gas_left;
+        }
+    };
+}
+
 const std = @import("std");
 const primitives = @import("primitives");
 const Address = primitives.Address.Address;
 const ZERO_ADDRESS = primitives.ZERO_ADDRESS;
+
+test "CallResultGeneric - proof of concept with custom gas types" {
+    // TODO: Import EvmConfig once circular dependency is resolved
+    const EvmConfig = @import("evm_config.zig").EvmConfig;
+    
+    // Small gas limit config -> i32 gas type
+    const small_gas_config = EvmConfig{ .block_gas_limit = 1000000 };
+    const CallResultI32 = CallResultGeneric(small_gas_config);
+    
+    const result_i32 = CallResultI32.success_empty(@as(i32, 15000));
+    try std.testing.expectEqual(@as(i32, 15000), result_i32.gas_left);
+    try std.testing.expectEqual(@as(i32, 6000), result_i32.gasConsumed(@as(i32, 21000)));
+    
+    // Large gas limit config -> i64 gas type  
+    const large_gas_config = EvmConfig{ .block_gas_limit = 50_000_000_000 };
+    const CallResultI64 = CallResultGeneric(large_gas_config);
+    
+    const result_i64 = CallResultI64.success_empty(@as(i64, 25_000_000_000));
+    try std.testing.expectEqual(@as(i64, 25_000_000_000), result_i64.gas_left);
+    try std.testing.expectEqual(@as(i64, 5_000_000_000), result_i64.gasConsumed(@as(i64, 30_000_000_000)));
+}
 
 /// Log entry structure for EVM events
 pub const Log = struct {

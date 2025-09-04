@@ -3,6 +3,9 @@ const Address = primitives.Address;
 
 // TODO: Currently used in host which is unused
 /// Call operation parameters for different call types
+/// 
+/// TODO: This will be converted to a generic function CallParams(comptime config: EvmConfig)
+/// For now, keeping backwards compatibility with hardcoded types
 pub const CallParams = union(enum) {
     /// Regular CALL operation
     call: struct {
@@ -125,7 +128,61 @@ pub const CallParams = union(enum) {
     }
 };
 
+/// Generic version of CallParams that takes EvmConfig
+/// This is the future API - currently a proof-of-concept
+pub fn CallParamsGeneric(comptime config: anytype) type {
+    // TODO: Get types from EvmConfig once AddressType is supported in FrameConfig  
+    const AddressType = config.AddressType;
+    const WordType = config.WordType;
+    const GasType = config.frame_config().GasType();
+    
+    return union(enum) {
+        /// Regular CALL operation - now using generic types
+        call: struct {
+            caller: AddressType,     // TODO: Was Address ([20]u8)
+            to: AddressType,         // TODO: Was Address ([20]u8) 
+            value: WordType,         // TODO: Was u256
+            input: []const u8,       // TODO: Stays the same
+            gas: GasType,           // TODO: Was u64, now i32 or i64 based on block_gas_limit
+        },
+        
+        // TODO: Add other operation types (callcode, delegatecall, etc.)
+        // TODO: Add all the same helper methods (getGas, getCaller, etc.)
+        // TODO: Add validation logic
+        // TODO: Add comprehensive tests
+        
+        /// Placeholder - Get the gas limit for this call operation  
+        /// TODO: Implement full switch statement like original
+        pub fn getGas(self: @This()) GasType {
+            return switch (self) {
+                .call => |params| params.gas,
+                // TODO: Add other cases
+            };
+        }
+    };
+}
+
 const std = @import("std");
+
+test "CallParamsGeneric - proof of concept with default config" {
+    // TODO: Import EvmConfig once circular dependency is resolved
+    const EvmConfig = @import("evm_config.zig").EvmConfig;
+    const default_config = EvmConfig{};
+    
+    const CallParamsType = CallParamsGeneric(default_config);
+    
+    // TODO: This shows the generic approach working with default types
+    const call_op = CallParamsType{ .call = .{
+        .caller = [_]u8{0xAA} ++ [_]u8{0} ** 19,    // AddressType ([20]u8)
+        .to = [_]u8{0xBB} ++ [_]u8{0} ** 19,       // AddressType ([20]u8)
+        .value = 1000,                              // WordType (u256) 
+        .input = &[_]u8{0x42},                      // []const u8
+        .gas = 21000,                               // GasType (i32 for default config)
+    } };
+    
+    // TODO: Test that helper methods work with generic types
+    try std.testing.expectEqual(@as(i32, 21000), call_op.getGas());
+}
 
 test "call params gas access" {
     const caller = primitives.ZERO_ADDRESS;

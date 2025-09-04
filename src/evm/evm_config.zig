@@ -31,6 +31,9 @@ pub const EvmConfig = struct {
     stack_size: u12 = 1024,
     /// The size of a single word in the EVM - Defaults to u256
     WordType: type = u256,
+    /// The address type for the EVM - Defaults to [20]u8 (Ethereum standard)
+    /// TODO: Add validation that AddressType fits within WordType
+    AddressType: type = [20]u8,
     /// The maximum amount of bytes allowed in contract code
     max_bytecode_size: u32 = 24576,
     /// The maximum amount of bytes allowed in contract deployment
@@ -63,6 +66,7 @@ pub const EvmConfig = struct {
             .DatabaseType = self.DatabaseType,
             .TracerType = self.TracerType,
             .block_info_config = self.block_info_config,
+            // TODO: Pass AddressType through to FrameConfig once it supports it
         };
     }
 
