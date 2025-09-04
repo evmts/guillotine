@@ -1222,7 +1222,7 @@ pub fn Evm(comptime config: EvmConfig) type {
             self.return_data = out_buf;
 
             // Transfer logs from frame to EVM's log list
-            const frame_logs = frame.getLogSlice();
+            const frame_logs = frame.logs.items;
             for (frame_logs) |log_entry| {
                 // Create copies of the log data with the EVM's allocator
                 const topics_copy = self.allocator.dupe(u256, log_entry.topics) catch return CallResult.failure(0);

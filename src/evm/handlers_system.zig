@@ -770,15 +770,24 @@ pub fn Handlers(comptime FrameType: type) type {
                 const return_data = self.memory.get_slice(@as(u24, @intCast(offset_usize)), @as(u24, @intCast(size_usize))) catch {
                     return Error.OutOfBounds;
                 };
-                // Use the setOutput method to properly allocate output
-                self.setOutput(return_data) catch {
-                    return Error.AllocationError;
-                };
+                // Inline setOutput logic: free old output and allocate new
+                if (self.output.len > 0) {
+                    self.allocator.free(self.output);
+                }
+                if (return_data.len == 0) {
+                    self.output = &[_]u8{};
+                } else {
+                    self.output = self.allocator.alloc(u8, return_data.len) catch {
+                        return Error.AllocationError;
+                    };
+                    @memcpy(self.output, return_data);
+                }
             } else {
-                // Empty return data
-                self.setOutput(&[_]u8{}) catch {
-                    return Error.AllocationError;
-                };
+                // Empty return data - inline setOutput logic
+                if (self.output.len > 0) {
+                    self.allocator.free(self.output);
+                }
+                self.output = &[_]u8{};
             }
 
             // Return indicates successful execution

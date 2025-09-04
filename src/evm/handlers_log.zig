@@ -103,7 +103,7 @@ pub fn Handlers(comptime FrameType: type) type {
                         .topics = topics_array,
                         .data = data_copy,
                     };
-                    self.appendLog(log_entry) catch return Error.AllocationError;
+                    self.logs.append(self.allocator, log_entry) catch return Error.AllocationError;
 
                     // Map topic_count to the appropriate LOG opcode
                     const log_opcode = switch (topic_count) {

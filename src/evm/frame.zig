@@ -467,44 +467,10 @@ pub fn Frame(comptime config: FrameConfig) type {
             return @as(*DefaultEvm, @ptrCast(@alignCast(self.evm_ptr)));
         }
 
-        /// Set output data (allocates on heap)
-        pub fn setOutput(self: *Self, data: []const u8) Error!void {
-            log.debug("Frame.setOutput: Setting output data, new_size={}, old_size={}", .{ data.len, self.output.len });
-            if (self.output.len > 0) {
-                self.allocator.free(self.output);
-            }
-            if (data.len == 0) {
-                self.output = &[_]u8{};
-                return;
-            }
-            const new_output = self.allocator.alloc(u8, data.len) catch {
-                log.err("Frame.setOutput: Failed to allocate {} bytes for output", .{data.len});
-                return Error.AllocationError;
-            };
-            @memcpy(new_output, data);
-            self.output = new_output;
-        }
 
-        /// Get current output data as slice
-        pub fn getOutput(self: *const Self) []const u8 {
-            return self.output;
-        }
 
-        /// Add a log entry to the list
-        pub fn appendLog(self: *Self, log_entry: Log) error{OutOfMemory}!void {
-            log.debug("Frame.appendLog: Adding log entry from address={any}, topics_count={}, data_len={}", .{ log_entry.address, log_entry.topics.len, log_entry.data.len });
-            try self.logs.append(self.allocator, log_entry);
-        }
 
-        /// Get slice of current log entries
-        pub fn getLogSlice(self: *const Self) []const Log {
-            return self.logs.items;
-        }
 
-        /// Get number of logs
-        pub fn getLogCount(self: *const Self) usize {
-            return self.logs.items.len;
-        }
 
         /// Pretty print the frame state for debugging and visualization.
         /// Shows stack, memory, gas, and other key state information with ANSI colors.

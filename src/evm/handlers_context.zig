@@ -2281,7 +2281,16 @@ test "RETURNDATASIZE and RETURNDATACOPY basic functionality" {
 
     // Set some return data
     const test_data = [_]u8{ 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0 };
-    try frame.setOutput(&test_data);
+    // Inline setOutput logic: free old output and allocate new
+    if (frame.output.len > 0) {
+        frame.allocator.free(frame.output);
+    }
+    if (test_data.len == 0) {
+        frame.output = &[_]u8{};
+    } else {
+        frame.output = try frame.allocator.alloc(u8, test_data.len);
+        @memcpy(frame.output, &test_data);
+    }
 
     // Test RETURNDATASIZE with data
     _ = try TestFrame.ContextHandlers.returndatasize(&frame, dispatch);
@@ -2308,7 +2317,16 @@ test "RETURNDATACOPY out of bounds" {
 
     // Set small return data
     const test_data = [_]u8{ 0xAA, 0xBB };
-    try frame.setOutput(&test_data);
+    // Inline setOutput logic: free old output and allocate new
+    if (frame.output.len > 0) {
+        frame.allocator.free(frame.output);
+    }
+    if (test_data.len == 0) {
+        frame.output = &[_]u8{};
+    } else {
+        frame.output = try frame.allocator.alloc(u8, test_data.len);
+        @memcpy(frame.output, &test_data);
+    }
 
     // Try to copy more data than available
     try frame.stack.push(0); // destOffset
