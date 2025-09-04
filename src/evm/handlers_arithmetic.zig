@@ -13,22 +13,26 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// ADD opcode (0x01) - Addition with overflow wrapping.
         pub fn add(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            
             const b = try self.stack.pop(); // Second operand (top of stack)
             const a = try self.stack.peek(); // First operand (second element)
             const result = a +% b;
             self.stack.set_top_unsafe(result);
-            const next_cursor = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            
+            return dispatch.tailCall(.{ .regular = .ADD }, self);
         }
 
         /// MUL opcode (0x02) - Multiplication with overflow wrapping.
         pub fn mul(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            
             const b = try self.stack.pop(); // Second operand (top of stack)
             const a = try self.stack.peek(); // First operand (second element)
             const result = a *% b;
             self.stack.set_top_unsafe(result);
-            const next_cursor = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            
+            return dispatch.tailCall(.{ .regular = .MUL }, self);
         }
 
         /// SUB opcode (0x03) - Subtraction with underflow wrapping.
@@ -38,8 +42,9 @@ pub fn Handlers(comptime FrameType: type) type {
             // EVM semantics: top - second = a - b
             const result = a -% b;
             self.stack.set_top_unsafe(result);
-            const next_cursor = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            
+            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            return dispatch.tailCall(.{ .regular = .SUB }, self);
         }
 
         /// DIV opcode (0x04) - Integer division. Division by zero returns 0.
@@ -49,8 +54,9 @@ pub fn Handlers(comptime FrameType: type) type {
             // EVM semantics: top / second = a / b
             const result = if (b == 0) 0 else a / b;
             self.stack.set_top_unsafe(result);
-            const next_cursor = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            
+            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            return dispatch.tailCall(.{ .regular = .DIV }, self);
         }
 
         /// SDIV opcode (0x05) - Signed integer division.
@@ -79,8 +85,9 @@ pub fn Handlers(comptime FrameType: type) type {
                 }
             }
             self.stack.set_top_unsafe(result);
-            const next_cursor = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            
+            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            return dispatch.tailCall(.{ .regular = .SDIV }, self);
         }
 
         /// MOD opcode (0x06) - Modulo operation. Modulo by zero returns 0.
@@ -90,8 +97,9 @@ pub fn Handlers(comptime FrameType: type) type {
             // EVM semantics: top % second = a % b
             const result = if (b == 0) 0 else a % b;
             self.stack.set_top_unsafe(result);
-            const next_cursor = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            
+            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            return dispatch.tailCall(.{ .regular = .MOD }, self);
         }
 
         /// SMOD opcode (0x07) - Signed modulo operation.
@@ -114,8 +122,9 @@ pub fn Handlers(comptime FrameType: type) type {
                 }
             }
             self.stack.set_top_unsafe(result);
-            const next_cursor = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            
+            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            return dispatch.tailCall(.{ .regular = .SMOD }, self);
         }
 
         /// ADDMOD opcode (0x08) - (a + b) % N. All intermediate calculations are performed with arbitrary precision.
@@ -138,8 +147,9 @@ pub fn Handlers(comptime FrameType: type) type {
                 result = r;
             }
             try self.stack.push(result);
-            const next_cursor = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            
+            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            return dispatch.tailCall(.{ .regular = .ADDMOD }, self);
         }
 
         /// MULMOD opcode (0x09) - (a * b) % N. All intermediate calculations are performed with arbitrary precision.
@@ -154,8 +164,9 @@ pub fn Handlers(comptime FrameType: type) type {
                 result = mulmod_safe(factor1, factor2, modulus);
             }
             try self.stack.push(result);
-            const next_cursor = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            
+            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            return dispatch.tailCall(.{ .regular = .MULMOD }, self);
         }
 
         /// Safe modular multiplication using double-width arithmetic to prevent overflow.
@@ -249,8 +260,9 @@ pub fn Handlers(comptime FrameType: type) type {
                 base_working *%= base_working;
             }
             self.stack.set_top_unsafe(result);
-            const next_cursor = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            
+            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            return dispatch.tailCall(.{ .regular = .EXP }, self);
         }
 
         /// SIGNEXTEND opcode (0x0b) - Sign extend operation.
@@ -293,9 +305,8 @@ pub fn Handlers(comptime FrameType: type) type {
 
             self.stack.set_top_unsafe(result);
 
-
-            const next_cursor = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            return dispatch.tailCall(.{ .regular = .SIGNEXTEND }, self);
         }
     };
 }

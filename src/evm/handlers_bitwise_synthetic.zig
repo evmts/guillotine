@@ -13,74 +13,74 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// PUSH_AND_INLINE - Fused PUSH+AND with inline value (≤8 bytes).
         pub fn push_and_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            // For synthetic opcodes, cursor[1] contains the metadata directly
-            const push_value = cursor[1].push_inline.value;
-
+            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            const op_data = dispatch.getOpData(.{ .synthetic = .PUSH_AND_INLINE });
+            
             const top = try self.stack.pop();
-            const result = top & push_value;
+            const result = top & op_data.metadata.value;
             try self.stack.push(result);
 
-            return @call(FrameType.getTailCallModifier(), cursor[2].opcode_handler, .{ self, cursor + 2 });
+            return dispatch.tailCall(.{ .synthetic = .PUSH_AND_INLINE }, self);
         }
 
         /// PUSH_AND_POINTER - Fused PUSH+AND with pointer value (>8 bytes).
         pub fn push_and_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            // For synthetic opcodes, cursor[1] contains the metadata directly
-            const push_value = cursor[1].push_pointer.value.*;
-
+            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            const op_data = dispatch.getOpData(.{ .synthetic = .PUSH_AND_POINTER });
+            
             const top = try self.stack.pop();
-            const result = top & push_value;
+            const result = top & op_data.metadata.value.*;
             try self.stack.push(result);
 
-            return @call(FrameType.getTailCallModifier(), cursor[2].opcode_handler, .{ self, cursor + 2 });
+            return dispatch.tailCall(.{ .synthetic = .PUSH_AND_POINTER }, self);
         }
 
         /// PUSH_OR_INLINE - Fused PUSH+OR with inline value (≤8 bytes).
         pub fn push_or_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            // For synthetic opcodes, cursor[1] contains the metadata directly
-            const push_value = cursor[1].push_inline.value;
-
+            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            const op_data = dispatch.getOpData(.{ .synthetic = .PUSH_OR_INLINE });
+            
             const top = try self.stack.pop();
-            const result = top | push_value;
+            const result = top | op_data.metadata.value;
             try self.stack.push(result);
 
-            return @call(FrameType.getTailCallModifier(), cursor[2].opcode_handler, .{ self, cursor + 2 });
+            return dispatch.tailCall(.{ .synthetic = .PUSH_OR_INLINE }, self);
         }
 
         /// PUSH_OR_POINTER - Fused PUSH+OR with pointer value (>8 bytes).
         pub fn push_or_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            // For synthetic opcodes, cursor[1] contains the metadata directly
-            const push_value = cursor[1].push_pointer.value.*;
-
+            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            const op_data = dispatch.getOpData(.{ .synthetic = .PUSH_OR_POINTER });
+            
             const top = try self.stack.pop();
-            const result = top | push_value;
+            const result = top | op_data.metadata.value.*;
             try self.stack.push(result);
 
-            return @call(FrameType.getTailCallModifier(), cursor[2].opcode_handler, .{ self, cursor + 2 });
+            return dispatch.tailCall(.{ .synthetic = .PUSH_OR_POINTER }, self);
         }
 
         /// PUSH_XOR_INLINE - Fused PUSH+XOR with inline value (≤8 bytes).
         pub fn push_xor_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            // For synthetic opcodes, cursor[1] contains the metadata directly
-            const push_value = cursor[1].push_inline.value;
-
+            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            const op_data = dispatch.getOpData(.{ .synthetic = .PUSH_XOR_INLINE });
+            
             const top = try self.stack.pop();
-            const result = top ^ push_value;
+            const result = top ^ op_data.metadata.value;
             try self.stack.push(result);
 
-            return @call(FrameType.getTailCallModifier(), cursor[2].opcode_handler, .{ self, cursor + 2 });
+            return dispatch.tailCall(.{ .synthetic = .PUSH_XOR_INLINE }, self);
         }
 
         /// PUSH_XOR_POINTER - Fused PUSH+XOR with pointer value (>8 bytes).
         pub fn push_xor_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            // For synthetic opcodes, cursor[1] contains the metadata directly
-            const push_value = cursor[1].push_pointer.value.*;
-
+            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            const op_data = dispatch.getOpData(.{ .synthetic = .PUSH_XOR_POINTER });
+            
             const top = try self.stack.pop();
-            const result = top ^ push_value;
+            const result = top ^ op_data.metadata.value.*;
             try self.stack.push(result);
 
-            return @call(FrameType.getTailCallModifier(), cursor[2].opcode_handler, .{ self, cursor + 2 });
+            return dispatch.tailCall(.{ .synthetic = .PUSH_XOR_POINTER }, self);
         }
     };
 }

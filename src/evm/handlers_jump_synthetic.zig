@@ -61,8 +61,9 @@ pub fn Handlers(comptime FrameType: type) type {
         /// PUSH_JUMPI_INLINE - Fused PUSH+JUMPI with inline destination (≤8 bytes).
         /// Pushes a destination, pops condition, and conditionally jumps.
         pub fn push_jumpi_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            // For synthetic opcodes, cursor[1] contains the metadata directly
-            const dest = cursor[1].push_inline.value;
+            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            const op_data = dispatch.getOpData(.{ .synthetic = .PUSH_JUMPI_INLINE });
+            const dest = op_data.metadata.value;
 
             // Pop the condition
             const condition = try self.stack.pop();
@@ -85,15 +86,16 @@ pub fn Handlers(comptime FrameType: type) type {
                     return Error.InvalidJump;
                 }
             } else {
-                // Continue to next instruction (cursor[2] since cursor[0]=handler, cursor[1]=metadata, cursor[2]=next)
-                return @call(FrameType.getTailCallModifier(), cursor[2].opcode_handler, .{ self, cursor + 2 });
+                // Continue to next instruction - getOpData handles cursor advancement
+                return dispatch.tailCall(.{ .synthetic = .PUSH_JUMPI_INLINE }, self);
             }
         }
 
         /// PUSH_JUMPI_POINTER - Fused PUSH+JUMPI with pointer destination (>8 bytes).
         pub fn push_jumpi_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            // For synthetic opcodes, cursor[1] contains the metadata directly
-            const dest = cursor[1].push_pointer.value.*;
+            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            const op_data = dispatch.getOpData(.{ .synthetic = .PUSH_JUMPI_POINTER });
+            const dest = op_data.metadata.value.*;
 
             // Pop the condition
             const condition = try self.stack.pop();
@@ -116,8 +118,8 @@ pub fn Handlers(comptime FrameType: type) type {
                     return Error.InvalidJump;
                 }
             } else {
-                // Continue to next instruction (cursor[2] since cursor[0]=handler, cursor[1]=metadata, cursor[2]=next)
-                return @call(FrameType.getTailCallModifier(), cursor[2].opcode_handler, .{ self, cursor + 2 });
+                // Continue to next instruction - getOpData handles cursor advancement
+                return dispatch.tailCall(.{ .synthetic = .PUSH_JUMPI_POINTER }, self);
             }
         }
     };

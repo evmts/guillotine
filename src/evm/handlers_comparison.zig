@@ -17,8 +17,9 @@ pub fn Handlers(comptime FrameType: type) type {
             // EVM: pops a (top), then b; pushes (a < b)
             const result: WordType = if (a < b) 1 else 0;
             self.stack.set_top_unsafe(result);
-            const next_cursor = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            
+            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            return dispatch.tailCall(.{ .regular = .LT }, self);
         }
 
         /// GT opcode (0x11) - Greater than comparison.
@@ -28,8 +29,9 @@ pub fn Handlers(comptime FrameType: type) type {
             // EVM: pops a (top), then b; pushes (a > b)
             const result: WordType = if (a > b) 1 else 0;
             self.stack.set_top_unsafe(result);
-            const next_cursor = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            
+            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            return dispatch.tailCall(.{ .regular = .GT }, self);
         }
 
         /// SLT opcode (0x12) - Signed less than comparison.
@@ -41,8 +43,9 @@ pub fn Handlers(comptime FrameType: type) type {
             // EVM: pops a (top), then b; pushes (a < b) with signed comparison
             const result: WordType = if (a_signed < b_signed) 1 else 0;
             self.stack.set_top_unsafe(result);
-            const next_cursor = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            
+            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            return dispatch.tailCall(.{ .regular = .SLT }, self);
         }
 
         /// SGT opcode (0x13) - Signed greater than comparison.
@@ -54,8 +57,9 @@ pub fn Handlers(comptime FrameType: type) type {
             // EVM: pops a (top), then b; pushes (a > b) with signed comparison
             const result: WordType = if (a_signed > b_signed) 1 else 0;
             self.stack.set_top_unsafe(result);
-            const next_cursor = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            
+            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            return dispatch.tailCall(.{ .regular = .SGT }, self);
         }
 
         /// EQ opcode (0x14) - Equality comparison.
@@ -65,8 +69,9 @@ pub fn Handlers(comptime FrameType: type) type {
             // EVM: pops b, then a, and pushes (a == b)
             const result: WordType = if (a == b) 1 else 0;
             self.stack.set_top_unsafe(result);
-            const next_cursor = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            
+            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            return dispatch.tailCall(.{ .regular = .EQ }, self);
         }
 
         /// ISZERO opcode (0x15) - Check if value is zero.
@@ -74,8 +79,9 @@ pub fn Handlers(comptime FrameType: type) type {
             const value = try self.stack.peek();
             const result: WordType = if (value == 0) 1 else 0;
             self.stack.set_top_unsafe(result);
-            const next_cursor = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            
+            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            return dispatch.tailCall(.{ .regular = .ISZERO }, self);
         }
     };
 }

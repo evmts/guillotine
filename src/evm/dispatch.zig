@@ -236,7 +236,35 @@ pub fn Dispatch(comptime FrameType: type) type {
         }
 
         // ========================
-        // Helper Functions
+        // getOpData Helper Functions  
+        // ========================
+
+        /// Helper function to perform tail call with getOpData pattern.
+        /// Reduces boilerplate in handler functions.
+        pub inline fn tailCall(self: Self, comptime opcode: UnifiedOpcode, frame: anytype) noreturn {
+            const op_data = self.getOpData(opcode);
+            return @call(.always_tail, op_data.next.cursor[0].opcode_handler, .{ frame, op_data.next.cursor });
+        }
+
+        /// Helper function for opcodes that need metadata access.
+        /// Returns both metadata and a function to perform the tail call.
+        pub inline fn getOpDataWithTailCall(self: Self, comptime opcode: UnifiedOpcode, frame: anytype) struct {
+            metadata: auto,
+            tailCall: fn () noreturn,
+        } {
+            const op_data = self.getOpData(opcode);
+            return .{
+                .metadata = op_data.metadata,
+                .tailCall = struct {
+                    fn call() noreturn {
+                        return @call(.always_tail, op_data.next.cursor[0].opcode_handler, .{ frame, op_data.next.cursor });
+                    }
+                }.call,
+            };
+        }
+
+        // ========================
+        // Other Helper Functions
         // ========================
 
         /// Calculate gas cost for the first basic block of bytecode.

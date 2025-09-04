@@ -15,8 +15,9 @@ pub fn Handlers(comptime FrameType: type) type {
             const b = try self.stack.pop(); // Top of stack - second operand
             const a = try self.stack.peek(); // Second from top - first operand
             self.stack.set_top_unsafe(a & b);
-            const next_cursor = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            
+            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            return dispatch.tailCall(.{ .regular = .AND }, self);
         }
 
         /// OR opcode (0x17) - Bitwise OR operation.
@@ -24,8 +25,9 @@ pub fn Handlers(comptime FrameType: type) type {
             const b = try self.stack.pop(); // Top of stack - second operand
             const a = try self.stack.peek(); // Second from top - first operand
             self.stack.set_top_unsafe(a | b);
-            const next_cursor = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            
+            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            return dispatch.tailCall(.{ .regular = .OR }, self);
         }
 
         /// XOR opcode (0x18) - Bitwise XOR operation.
@@ -33,16 +35,18 @@ pub fn Handlers(comptime FrameType: type) type {
             const b = try self.stack.pop(); // Top of stack - second operand
             const a = try self.stack.peek(); // Second from top - first operand
             self.stack.set_top_unsafe(a ^ b);
-            const next_cursor = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            
+            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            return dispatch.tailCall(.{ .regular = .XOR }, self);
         }
 
         /// NOT opcode (0x19) - Bitwise NOT operation.
         pub fn not(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const value = try self.stack.peek();
             self.stack.set_top_unsafe(~value);
-            const next_cursor = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            
+            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            return dispatch.tailCall(.{ .regular = .NOT }, self);
         }
 
         /// BYTE opcode (0x1a) - Extract byte from word.
@@ -58,8 +62,9 @@ pub fn Handlers(comptime FrameType: type) type {
                 break :blk (value >> @as(ShiftType, @intCast(shift_amount))) & 0xFF;
             };
             self.stack.set_top_unsafe(result);
-            const next_cursor = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            
+            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            return dispatch.tailCall(.{ .regular = .BYTE }, self);
         }
 
         /// SHL opcode (0x1b) - Shift left operation.
@@ -74,8 +79,9 @@ pub fn Handlers(comptime FrameType: type) type {
                 break :blk value << @as(ShiftType, @truncate(shift));
             };
             self.stack.set_top_unsafe(result);
-            const next_cursor = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            
+            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            return dispatch.tailCall(.{ .regular = .SHL }, self);
         }
 
         /// SHR opcode (0x1c) - Logical shift right operation.
@@ -90,8 +96,9 @@ pub fn Handlers(comptime FrameType: type) type {
                 break :blk value >> @as(ShiftType, @truncate(shift));
             };
             self.stack.set_top_unsafe(result);
-            const next_cursor = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            
+            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            return dispatch.tailCall(.{ .regular = .SHR }, self);
         }
 
         /// SAR opcode (0x1d) - Arithmetic shift right operation.
@@ -111,8 +118,9 @@ pub fn Handlers(comptime FrameType: type) type {
                 break :blk @as(WordType, @bitCast(result_signed));
             };
             self.stack.set_top_unsafe(result);
-            const next_cursor = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            
+            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+            return dispatch.tailCall(.{ .regular = .SAR }, self);
         }
     };
 }

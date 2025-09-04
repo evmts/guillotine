@@ -76,9 +76,9 @@ pub fn Handlers(comptime FrameType: type) type {
                 }
             } else {
                 // Condition is false, continue to next instruction
-                // JUMPI has jump_dest metadata at cursor[1], so next instruction is at cursor + 2
-                const next_cursor = cursor + 2;
-                return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+                // JUMPI has jump_dest metadata, getOpData handles cursor advancement
+                const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
+                return dispatch.tailCall(.{ .regular = .JUMPI }, self);
             }
         }
 
