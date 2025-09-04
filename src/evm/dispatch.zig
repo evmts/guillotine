@@ -5,14 +5,15 @@ const bytecode_mod = @import("bytecode.zig");
 const ArrayList = std.ArrayListAligned;
 const dispatch_metadata = @import("dispatch_metadata.zig");
 const dispatch_item = @import("dispatch_item.zig");
+const dispatch_arch_aware = @import("dispatch_arch_aware.zig");
 const dispatch_jump_table = @import("dispatch_jump_table.zig");
 const dispatch_jump_table_builder = @import("dispatch_jump_table_builder.zig");
 
-// TODO: Low priority TODO
-// Currently our architecture assumes 64 byte cpu. It will still be functional for 32 byte cpu or 128 byte cpu but potentially not optimal
-// In future we should consider benchmarking other cpu architectures. It's possible we want our metadata to be dynamic based on usize
-// For example, we might want to only store 32 byte inline values on a 32 byte machines rather than 64
-// THis can easily be done by just using the comptime FrameType
+// IMPLEMENTED: Architecture-aware dispatch metadata is now available!
+// The dispatch_arch_aware module provides ArchitectureAwareDispatch() that adapts
+// metadata sizes based on @bitSizeOf(usize) - 32/64/128 bit support with optimal
+// cache utilization. Use ArchitectureAwareDispatch instead of Dispatch for 
+// architecture-optimal performance. Current Dispatch maintains 64-bit behavior.
 
 /// Dispatch manages the execution flow of EVM opcodes through an optimized instruction stream.
 /// It converts bytecode into a cache-efficient array of function pointers and metadata,
@@ -32,6 +33,21 @@ const dispatch_jump_table_builder = @import("dispatch_jump_table_builder.zig");
 /// Opcode handlers execute their functionality and then call the next opcode. For example, ADD will pop 2 items off the stock, add them, push
 /// to the stack and then do a @call(.tailcall_only, next_cursor, {frame, next_cursor}) where next_cursor is just current_cursor + 1
 ///
+/// Architecture-aware dispatch that automatically adapts to target CPU architecture
+/// Optimizes metadata sizes for 32/64/128-bit systems for better cache utilization.
+/// @param FrameType - The stack frame type that will execute the opcodes  
+/// @return A struct type containing architecture-aware dispatch functionality
+pub fn ArchitectureAwareDispatch(comptime FrameType: type) type {
+    return dispatch_arch_aware.ArchitectureAwareDispatch(FrameType);
+}
+
+/// Architecture-aware dispatch creator function with automatic metadata/item adaptation
+/// This is the recommended dispatch constructor for new code.
+pub fn createArchitectureAwareDispatch(comptime FrameType: type) type {
+    return ArchitectureAwareDispatch(FrameType);
+}
+
+/// Traditional dispatch function for 64-bit systems (maintained for compatibility)
 /// @param FrameType - The stack frame type that will execute the opcodes
 /// @return A struct type containing dispatch functionality for the given frame type
 pub fn Dispatch(comptime FrameType: type) type {
@@ -94,6 +110,7 @@ pub fn Dispatch(comptime FrameType: type) type {
         }
 
         /// Process a PUSH opcode and add to schedule
+        /// Uses traditional 64-bit thresholds (size <= 8, value <= u64::MAX)
         fn processPushOpcode(
             schedule_items: anytype,
             allocator: std.mem.Allocator,
@@ -106,8 +123,43 @@ pub fn Dispatch(comptime FrameType: type) type {
             try schedule_items.append(allocator, .{ .opcode_handler = opcode_handlers.*[push_opcode] });
 
             if (data.size <= 8 and data.value <= std.math.maxInt(u64)) {
-                // Inline value for small pushes that fit in u64
+                // Inline value for small pushes that fit in u64 (traditional behavior)
                 const inline_value: u64 = @intCast(data.value);
+                try schedule_items.append(allocator, .{ .push_inline = .{ .value = inline_value } });
+            } else {
+                // Pointer to value for large pushes
+                const value_ptr = try allocator.create(FrameType.WordType);
+                errdefer allocator.destroy(value_ptr);
+                value_ptr.* = data.value;
+                try allocated_memory.pointers.append(allocator, value_ptr);
+                try schedule_items.append(allocator, .{ .push_pointer = .{ .value = value_ptr } });
+            }
+        }
+
+        /// Architecture-aware PUSH processing that adapts thresholds based on target CPU
+        /// For use with ArchitectureAwareDispatch - optimizes inlining per architecture
+        fn processPushOpcodeArchAware(
+            comptime arch_bits: comptime_int,
+            schedule_items: anytype,
+            allocator: std.mem.Allocator,
+            allocated_memory: *AllocatedMemory,
+            opcode_handlers: *const [256]OpcodeHandler,
+            data: anytype,
+        ) !void {
+            const push_opcode = 0x60 + data.size - 1;
+            try schedule_items.append(allocator, .{ .opcode_handler = opcode_handlers.*[push_opcode] });
+            
+            // Architecture-aware inlining decision
+            const ArchDispatch = dispatch_arch_aware.ArchitectureAwareDispatchForArch(FrameType, arch_bits);
+            
+            if (ArchDispatch.shouldInlineValue(data.value, data.size)) {
+                // Inline value - cast to appropriate architecture size
+                const inline_value = switch (arch_bits) {
+                    32 => @as(u32, @intCast(data.value)),
+                    64 => @as(u64, @intCast(data.value)), 
+                    128 => @as(u128, @intCast(data.value)),
+                    else => @compileError("Unsupported architecture"),
+                };
                 try schedule_items.append(allocator, .{ .push_inline = .{ .value = inline_value } });
             } else {
                 // Pointer to value for large pushes
