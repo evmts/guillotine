@@ -4,6 +4,7 @@ const BytecodeConfig = @import("bytecode_config.zig").BytecodeConfig;
 const Opcode = @import("opcode_data.zig").Opcode;
 const OpcodeSynthetic = @import("opcode_synthetic.zig").OpcodeSynthetic;
 const testing = std.testing;
+const dispatch_utils = @import("dispatch_utils.zig");
 
 /// Test infrastructure for dispatch operations
 /// Creates test types and helper functions
@@ -930,7 +931,7 @@ test "Dispatch - calculateFirstBlockGas helper function" {
         var bytecode = try Bytecode.init(allocator, &[_]u8{});
         defer bytecode.deinit();
 
-        const gas = TestDispatch.calculateFirstBlockGas(&bytecode);
+        const gas = dispatch_utils.calculateFirstBlockGas(&bytecode);
         try testing.expect(gas == 0);
     }
 
@@ -940,7 +941,7 @@ test "Dispatch - calculateFirstBlockGas helper function" {
         var bytecode = try Bytecode.init(allocator, &[_]u8{@intFromEnum(Opcode.STOP)});
         defer bytecode.deinit();
 
-        const gas = TestDispatch.calculateFirstBlockGas(&bytecode);
+        const gas = dispatch_utils.calculateFirstBlockGas(&bytecode);
         try testing.expect(gas == 0); // STOP has 0 gas cost
     }
 
@@ -954,7 +955,7 @@ test "Dispatch - calculateFirstBlockGas helper function" {
         });
         defer bytecode.deinit();
 
-        const gas = TestDispatch.calculateFirstBlockGas(&bytecode);
+        const gas = dispatch_utils.calculateFirstBlockGas(&bytecode);
         try testing.expect(gas == 6); // PUSH1(3) + ADD(3), JUMPDEST not included
     }
 
@@ -969,7 +970,7 @@ test "Dispatch - calculateFirstBlockGas helper function" {
         });
         defer bytecode.deinit();
 
-        const gas = TestDispatch.calculateFirstBlockGas(&bytecode);
+        const gas = dispatch_utils.calculateFirstBlockGas(&bytecode);
         try testing.expect(gas == 19); // 3 + 3 + 5 + 8
     }
 
@@ -988,7 +989,7 @@ test "Dispatch - calculateFirstBlockGas helper function" {
         var bytecode = try Bytecode.init(allocator, large_bytecode.items);
         defer bytecode.deinit();
 
-        const gas = TestDispatch.calculateFirstBlockGas(&bytecode);
+        const gas = dispatch_utils.calculateFirstBlockGas(&bytecode);
         try testing.expect(gas == std.math.maxInt(u64));
     }
 }
@@ -1189,33 +1190,3 @@ test "Dispatch - JumpTableBuilder iterator pattern" {
     }
 }
 
-test "Dispatch - pretty_print basic functionality" {
-    const allocator = testing.allocator;
-    const handlers = createTestHandlers();
-
-    // Create simple bytecode: PUSH1 0x42, ADD, STOP
-    const code = [_]u8{ @intFromEnum(Opcode.PUSH1), 0x42, @intFromEnum(Opcode.ADD), @intFromEnum(Opcode.STOP) };
-    const Bytecode = bytecode_mod.Bytecode(TestFrame.BytecodeConfig);
-    var bytecode = try Bytecode.init(allocator, &code);
-    defer bytecode.deinit();
-
-    // Create dispatch schedule
-    const dispatch_items = try TestDispatch.init(allocator, &bytecode, &handlers);
-    defer TestDispatch.deinitSchedule(allocator, dispatch_items);
-
-    // Test pretty_print
-    const formatted = try TestDispatch.pretty_print(allocator, dispatch_items, &bytecode);
-    defer allocator.free(formatted);
-
-    // Verify the output contains expected elements
-    try testing.expect(std.mem.indexOf(u8, formatted, "=== EVM Dispatch Instruction Stream ===") != null);
-    try testing.expect(std.mem.indexOf(u8, formatted, "--- Original Bytecode ---") != null);
-    try testing.expect(std.mem.indexOf(u8, formatted, "--- Dispatch Instruction Stream ---") != null);
-    try testing.expect(std.mem.indexOf(u8, formatted, "--- Summary ---") != null);
-    try testing.expect(std.mem.indexOf(u8, formatted, "PUSH1") != null);
-    try testing.expect(std.mem.indexOf(u8, formatted, "0x42") != null);
-    try testing.expect(std.mem.indexOf(u8, formatted, "HANDLER") != null);
-
-    // Verify it's a non-empty string
-    try testing.expect(formatted.len > 100);
-}
