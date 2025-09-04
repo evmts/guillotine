@@ -337,92 +337,48 @@ pub fn Evm(comptime config: EvmConfig) type {
 
         /// Execute an EVM operation.
         ///
-        /// This is the main entry point that routes to specific handlers based
-        /// on the operation type (CALL, CREATE, etc). Manages transaction-level
-        /// state including logs and ensures proper cleanup.
+        /// Transaction entry point - handles transaction-level state management
+        /// and delegates execution to inner_call(). Only used for top-level calls (depth == 0).
         pub fn call(self: *Self, params: CallParams) CallResult {
             params.validate() catch return CallResult.failure(0);
             
-            // Only reset state for top-level calls (depth == 0)
-            const is_top_level = self.depth == 0;
-            
-            // Reset per-transaction state at the START of each new transaction
-            if (is_top_level) {
-                // Clear access list for new transaction (EIP-2929)
-                self.access_list.clear();
-                // Clear journal for new transaction
-                self.journal.clear();
-                // Reset gas refund counter
-                self.gas_refund_counter = 0;
-                // Clear logs from previous transaction
-                self.logs.clearRetainingCapacity();
-                // Clear created contracts tracking (EIP-6780)
-                self.created_contracts.clear();
-                // Clear self destruct list
-                self.self_destruct.clear();
-                // Reset arena allocator
-                _ = self.call_arena.reset(.retain_capacity);
+            // Assert we're at transaction level (depth should be 0)
+            if (self.depth != 0) {
+                // This should not happen - call() is for transactions only
+                // For nested calls, use inner_call() directly
+                std.debug.panic("call() method used for nested call at depth {}, use inner_call() instead", .{self.depth});
             }
             
-            defer if (is_top_level) {
-                // Cleanup after transaction completes
+            // Clear transaction-level state for new transaction
+            self.access_list.clear();
+            self.journal.clear();
+            self.gas_refund_counter = 0;
+            self.logs.clearRetainingCapacity();
+            self.created_contracts.clear();
+            self.self_destruct.clear();
+            _ = self.call_arena.reset(.retain_capacity);
+            
+            // Cleanup after transaction completes
+            defer {
                 self.depth = 0;
                 self.current_input = &.{};
-                // Note: return_data is not freed here because it's returned as part of CallResult
-                // and the caller is responsible for the memory
                 self.return_data = &.{};
             };
             
-            // Pre-warm addresses for top-level calls (EIP-2929)
-            if (is_top_level) {
-                // Get the target address from params
-                const target_address = switch (params) {
-                    .call => |p| p.to,
-                    .callcode => |p| p.to,
-                    .delegatecall => |p| p.to,
-                    .staticcall => |p| p.to,
-                    .create, .create2 => primitives.Address.ZERO_ADDRESS, // Creates don't have a target
-                };
-                
-                // Pre-warm: tx.origin, target, and coinbase (EIP-3651 for Shanghai+)
-                // Build a small array of addresses to warm (max 3: origin, target, coinbase)
-                var warm_addresses: [3]primitives.Address = undefined;
-                var warm_count: usize = 0;
-                
-                // Always warm origin
-                warm_addresses[warm_count] = self.origin;
-                warm_count += 1;
-                
-                // Warm target if it's not a create operation  
-                if (!std.mem.eql(u8, &target_address.bytes, &primitives.Address.ZERO_ADDRESS.bytes)) {
-                    warm_addresses[warm_count] = target_address;
-                    warm_count += 1;
-                }
-                
-                // EIP-3651: Warm coinbase for Shanghai+
-                if (self.hardfork_config.isAtLeast(.SHANGHAI)) {
-                    warm_addresses[warm_count] = self.block_info.coinbase;
-                    warm_count += 1;
-                }
-                
-                // Pre-warm all addresses
-                if (warm_count > 0) {
-                    self.access_list.pre_warm_addresses(warm_addresses[0..warm_count]) catch {};
-                }
-            }
-
-            // Check gas unless disabled
+            // Pre-warm addresses for transaction (EIP-2929)
+            self.performTransactionPrewarm(params) catch {};
+            
+            // Get gas and validate
             const gas = switch (params) {
                 inline else => |p| p.gas,
             };
             if (!self.disable_gas_checking and gas == 0) return CallResult.failure(0);
-            if (self.depth >= config.max_call_depth) return CallResult.failure(0);
             
-            // Store initial gas for EIP-3529 calculations
+            // Store initial gas for refund calculations
             const initial_gas = gas;
             
-            // Deduct intrinsic gas for top-level calls (transactions)
-            const execution_gas = if (is_top_level) blk: {
+            // Deduct intrinsic gas for transaction
+            const execution_gas = blk: {
                 const GasConstants = primitives.GasConstants;
                 const intrinsic_gas = switch (params) {
                     .create, .create2 => GasConstants.TxGasContractCreation, // 53000 for contract creation
@@ -433,55 +389,81 @@ pub fn Evm(comptime config: EvmConfig) type {
                 if (gas < intrinsic_gas) return CallResult.failure(0);
                 
                 break :blk gas - intrinsic_gas;
-            } else gas;
-            
-            // Route to appropriate handler
-            var result = switch (params) {
-                .call => |p| blk: {
-                    // log.debug("DEBUG: EVM.call starting, to={x}, gas={}, input_len={}\n", .{ p.to.bytes, execution_gas, p.input.len });
-                    break :blk self.executeCall(.{ .caller = p.caller, .to = p.to, .value = p.value, .input = p.input, .gas = execution_gas }) catch {
-                        // log.debug("DEBUG: EVM.call failed with error: {}\n", .{err});
-                        return CallResult.failure(0);
-                    };
-                },
-                .callcode => |p| self.executeCallcode(.{ .caller = p.caller, .to = p.to, .value = p.value, .input = p.input, .gas = execution_gas }) catch CallResult.failure(0),
-                .delegatecall => |p| self.executeDelegatecall(.{ .caller = p.caller, .to = p.to, .input = p.input, .gas = execution_gas }) catch CallResult.failure(0),
-                .staticcall => |p| self.executeStaticcall(.{ .caller = p.caller, .to = p.to, .input = p.input, .gas = execution_gas }) catch CallResult.failure(0),
-                .create => |p| self.executeCreate(.{ .caller = p.caller, .value = p.value, .init_code = p.init_code, .gas = execution_gas }) catch CallResult.failure(0),
-                .create2 => |p| self.executeCreate2(.{ .caller = p.caller, .value = p.value, .init_code = p.init_code, .salt = p.salt, .gas = execution_gas }) catch CallResult.failure(0),
             };
             
-            // Apply EIP-3529 gas refund cap if transaction succeeded
-            if (result.success and self.depth == 0) {
+            // Create new params with adjusted gas for inner_call
+            const inner_params = switch (params) {
+                .call => |p| CallParams{ .call = .{ .caller = p.caller, .to = p.to, .value = p.value, .input = p.input, .gas = execution_gas } },
+                .callcode => |p| CallParams{ .callcode = .{ .caller = p.caller, .to = p.to, .value = p.value, .input = p.input, .gas = execution_gas } },
+                .delegatecall => |p| CallParams{ .delegatecall = .{ .caller = p.caller, .to = p.to, .input = p.input, .gas = execution_gas } },
+                .staticcall => |p| CallParams{ .staticcall = .{ .caller = p.caller, .to = p.to, .input = p.input, .gas = execution_gas } },
+                .create => |p| CallParams{ .create = .{ .caller = p.caller, .value = p.value, .init_code = p.init_code, .gas = execution_gas } },
+                .create2 => |p| CallParams{ .create2 = .{ .caller = p.caller, .value = p.value, .init_code = p.init_code, .salt = p.salt, .gas = execution_gas } },
+            };
+            
+            // Execute via inner_call (no transaction-level branching)
+            var result = self.inner_call(inner_params) catch CallResult.failure(0);
+            
+            // Apply transaction-level post-processing
+            if (result.success) {
+                // Apply EIP-3529 gas refund cap
                 const gas_used = initial_gas - result.gas_left;
                 const eips_instance = @import("eips.zig").Eips{ .hardfork = self.hardfork_config };
                 const capped_refund = eips_instance.eip_3529_gas_refund_cap(gas_used, self.gas_refund_counter);
                 
                 // Apply the refund, ensuring we don't exceed the gas used
                 result.gas_left = @min(initial_gas, result.gas_left + capped_refund);
-                
-                // Reset refund counter for next transaction
-                self.gas_refund_counter = 0;
             }
-            // Only extract logs for top-level calls
-            // For nested calls, leave logs in the EVM's list to accumulate
-            if (is_top_level) {
-                // Transfer logs to result - the CallResult now owns them and will free on deinit
-                result.logs = self.logs.toOwnedSlice(self.allocator) catch &.{};
-                result.selfdestructs = &.{};
-                result.accessed_addresses = &.{};
-                result.accessed_storage = &.{};
-                // Reset internal accumulators (logs already transferred)
-                self.self_destruct.clear();
-                self.access_list.clear();
-            } else {
-                // For nested calls, return empty slices - logs accumulate in EVM
-                result.logs = &.{};
-                result.selfdestructs = &.{};
-                result.accessed_addresses = &.{};
-                result.accessed_storage = &.{};
-            }
+            
+            // Extract logs for transaction result - transfer ownership to CallResult
+            result.logs = self.logs.toOwnedSlice(self.allocator) catch &.{};
+            result.selfdestructs = &.{};
+            result.accessed_addresses = &.{};
+            result.accessed_storage = &.{};
+            
+            // Clear internal accumulators (logs already transferred)
+            self.self_destruct.clear();
+            self.access_list.clear();
+            
             return result;
+        }
+
+        /// Pre-warm addresses for transaction-level calls (EIP-2929, EIP-3651)
+        fn performTransactionPrewarm(self: *Self, params: CallParams) !void {
+            // Get the target address from params
+            const target_address = switch (params) {
+                .call => |p| p.to,
+                .callcode => |p| p.to,
+                .delegatecall => |p| p.to,
+                .staticcall => |p| p.to,
+                .create, .create2 => primitives.Address.ZERO_ADDRESS, // Creates don't have a target
+            };
+            
+            // Pre-warm: tx.origin, target, and coinbase (EIP-3651 for Shanghai+)
+            // Build a small array of addresses to warm (max 3: origin, target, coinbase)
+            var warm_addresses: [3]primitives.Address = undefined;
+            var warm_count: usize = 0;
+            
+            // Always warm origin
+            warm_addresses[warm_count] = self.origin;
+            warm_count += 1;
+            
+            // Warm target if it's not a create operation  
+            if (!std.mem.eql(u8, &target_address.bytes, &primitives.Address.ZERO_ADDRESS.bytes)) {
+                warm_addresses[warm_count] = target_address;
+                warm_count += 1;
+            }
+            
+            // EIP-3651: Warm coinbase for Shanghai+
+            if (self.hardfork_config.isAtLeast(.SHANGHAI)) {
+                warm_addresses[warm_count] = self.block_info.coinbase;
+                warm_count += 1;
+            }
+            
+            // Pre-warm all addresses
+            if (warm_count > 0) {
+                try self.access_list.pre_warm_addresses(warm_addresses[0..warm_count]);
+            }
         }
 
         /// Result of pre-flight checks for call operations
@@ -1305,8 +1287,44 @@ pub fn Evm(comptime config: EvmConfig) type {
         }
 
         /// Execute nested EVM call - used for calls from within the EVM
+        /// This method handles only the core execution logic without transaction-level operations
         pub fn inner_call(self: *Self, params: CallParams) !CallResult {
-            return self.call(params);
+            params.validate() catch return CallResult.failure(0);
+            
+            // Check depth limit (nested calls only)
+            if (self.depth >= config.max_call_depth) return CallResult.failure(0);
+            
+            // Get gas parameter
+            const gas = switch (params) {
+                inline else => |p| p.gas,
+            };
+            if (!self.disable_gas_checking and gas == 0) return CallResult.failure(0);
+            
+            // No intrinsic gas deduction for nested calls - use full gas amount
+            const execution_gas = gas;
+            
+            // Route to appropriate handler - core execution logic
+            var result = switch (params) {
+                .call => |p| blk: {
+                    break :blk self.executeCall(.{ .caller = p.caller, .to = p.to, .value = p.value, .input = p.input, .gas = execution_gas }) catch {
+                        return CallResult.failure(0);
+                    };
+                },
+                .callcode => |p| self.executeCallcode(.{ .caller = p.caller, .to = p.to, .value = p.value, .input = p.input, .gas = execution_gas }) catch CallResult.failure(0),
+                .delegatecall => |p| self.executeDelegatecall(.{ .caller = p.caller, .to = p.to, .input = p.input, .gas = execution_gas }) catch CallResult.failure(0),
+                .staticcall => |p| self.executeStaticcall(.{ .caller = p.caller, .to = p.to, .input = p.input, .gas = execution_gas }) catch CallResult.failure(0),
+                .create => |p| self.executeCreate(.{ .caller = p.caller, .value = p.value, .init_code = p.init_code, .gas = execution_gas }) catch CallResult.failure(0),
+                .create2 => |p| self.executeCreate2(.{ .caller = p.caller, .value = p.value, .init_code = p.init_code, .salt = p.salt, .gas = execution_gas }) catch CallResult.failure(0),
+            };
+            
+            // No gas refund capping for nested calls - that's transaction-level
+            // No log extraction for nested calls - logs accumulate in EVM
+            result.logs = &.{};
+            result.selfdestructs = &.{};
+            result.accessed_addresses = &.{};
+            result.accessed_storage = &.{};
+            
+            return result;
         }
 
         /// Execute a precompile call (inlined)

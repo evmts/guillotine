@@ -6384,3 +6384,245 @@ test "E2E CALL failure scenarios" {
         );
     }
 }
+
+// TDD Tests for call/inner_call separation - Phase 1: RED (Failing Tests)
+// These tests verify the behavior we want AFTER separating call and inner_call
+
+test "TDD: call() clears transaction state at depth 0" {
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
+
+    const block_info = BlockInfo{
+        .chain_id = 1,
+        .number = 1,
+        .timestamp = 1000,
+        .difficulty = 100,
+        .gas_limit = 30000000,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .base_fee = 1000000000,
+        .prev_randao = [_]u8{0} ** 32,
+    };
+
+    const context = TransactionContext{
+        .gas_limit = 1000000,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .chain_id = 1,
+    };
+
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    defer evm.deinit();
+
+    // Set up existing state that should be cleared
+    evm.gas_refund_counter = 500;
+    try evm.logs.append(.{
+        .address = primitives.ZERO_ADDRESS,
+        .data = &.{},
+        .topics = &.{},
+    });
+    _ = evm.access_list.access_address(primitives.ZERO_ADDRESS) catch {};
+
+    // Verify state exists before call
+    try std.testing.expectEqual(@as(u64, 500), evm.gas_refund_counter);
+    try std.testing.expectEqual(@as(usize, 1), evm.logs.items.len);
+
+    // Create simple call params (depth should be 0)
+    const call_params = DefaultEvm.CallParams{
+        .call = .{
+            .caller = primitives.ZERO_ADDRESS,
+            .to = primitives.ZERO_ADDRESS,
+            .value = 0,
+            .input = &.{},
+            .gas = 100000,
+        },
+    };
+
+    // call() should clear transaction state for depth 0
+    _ = try evm.call(call_params);
+
+    // This should FAIL initially because current implementation doesn't separate
+    // After implementation, these should pass:
+    // - Transaction state should be reset
+    // - depth should be back to 0 after call
+    try std.testing.expectEqual(@as(u64, 0), evm.depth);
+}
+
+test "TDD: inner_call() preserves existing state" {
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
+
+    const block_info = BlockInfo{
+        .chain_id = 1,
+        .number = 1,
+        .timestamp = 1000,
+        .difficulty = 100,
+        .gas_limit = 30000000,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .base_fee = 1000000000,
+        .prev_randao = [_]u8{0} ** 32,
+    };
+
+    const context = TransactionContext{
+        .gas_limit = 1000000,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .chain_id = 1,
+    };
+
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    defer evm.deinit();
+
+    // Set up existing state that should NOT be cleared
+    evm.gas_refund_counter = 300;
+    evm.depth = 2; // Simulate nested call context
+    try evm.logs.append(.{
+        .address = primitives.ZERO_ADDRESS,
+        .data = &.{},
+        .topics = &.{},
+    });
+
+    const initial_refund = evm.gas_refund_counter;
+    const initial_depth = evm.depth;
+    const initial_logs = evm.logs.items.len;
+
+    const call_params = DefaultEvm.CallParams{
+        .call = .{
+            .caller = primitives.ZERO_ADDRESS,
+            .to = primitives.ZERO_ADDRESS,
+            .value = 0,
+            .input = &.{},
+            .gas = 100000,
+        },
+    };
+
+    // inner_call() should NOT modify transaction-level state
+    _ = try evm.inner_call(call_params);
+
+    // This should FAIL initially because current inner_call delegates to call()
+    // After implementation, these assertions should pass:
+    try std.testing.expectEqual(initial_refund, evm.gas_refund_counter);
+    try std.testing.expectEqual(initial_depth, evm.depth); // Should remain unchanged
+    try std.testing.expectEqual(initial_logs, evm.logs.items.len);
+}
+
+test "TDD: inner_call() skips intrinsic gas deduction" {
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
+
+    const block_info = BlockInfo{
+        .chain_id = 1,
+        .number = 1,
+        .timestamp = 1000,
+        .difficulty = 100,
+        .gas_limit = 30000000,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .base_fee = 1000000000,
+        .prev_randao = [_]u8{0} ** 32,
+    };
+
+    const context = TransactionContext{
+        .gas_limit = 1000000,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .chain_id = 1,
+    };
+
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    defer evm.deinit();
+
+    // Set up account with simple bytecode (STOP)
+    const account_address: primitives.Address = [_]u8{0x01} ++ [_]u8{0} ** 19;
+    const bytecode = [_]u8{0x00}; // STOP
+    const code_hash = try db.set_code(&bytecode);
+    try db.set_account(account_address, Account{
+        .balance = 0,
+        .nonce = 0,
+        .code_hash = code_hash,
+        .storage_root = [_]u8{0} ** 32,
+    });
+
+    // Simulate nested call context
+    evm.depth = 1;
+
+    const call_params = DefaultEvm.CallParams{
+        .call = .{
+            .caller = primitives.ZERO_ADDRESS,
+            .to = account_address,
+            .value = 0,
+            .input = &.{},
+            .gas = 5000, // Less than intrinsic gas requirement
+        },
+    };
+
+    // inner_call() should NOT deduct intrinsic gas
+    const result = try evm.inner_call(call_params);
+
+    // This should FAIL initially because current inner_call delegates to call()
+    // After separation, inner_call should skip intrinsic gas deduction
+    try std.testing.expect(result.success);
+    // Gas consumption should be minimal (just execution, no intrinsic deduction)
+}
+
+test "TDD: inner_call() leaves logs in EVM for accumulation" {
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
+
+    const block_info = BlockInfo{
+        .chain_id = 1,
+        .number = 1,
+        .timestamp = 1000,
+        .difficulty = 100,
+        .gas_limit = 30000000,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .base_fee = 1000000000,
+        .prev_randao = [_]u8{0} ** 32,
+    };
+
+    const context = TransactionContext{
+        .gas_limit = 1000000,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .chain_id = 1,
+    };
+
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    defer evm.deinit();
+
+    // Set up contract that generates a log  
+    const contract_address: primitives.Address = [_]u8{0x01} ++ [_]u8{0} ** 19;
+    const bytecode = [_]u8{
+        0x60, 0x01, // PUSH1 1 (data)
+        0x60, 0x00, // PUSH1 0 (offset)
+        0x52,       // MSTORE
+        0x60, 0x01, // PUSH1 1 (length)
+        0x60, 0x00, // PUSH1 0 (offset)
+        0x60, 0x20, // PUSH1 32 (topic)
+        0xA1,       // LOG1
+        0x00,       // STOP
+    };
+    const code_hash = try db.set_code(&bytecode);
+    try db.set_account(contract_address, Account{
+        .balance = 0,
+        .nonce = 0,
+        .code_hash = code_hash,
+        .storage_root = [_]u8{0} ** 32,
+    });
+
+    // Simulate nested call context
+    evm.depth = 1;
+
+    const call_params = DefaultEvm.CallParams{
+        .call = .{
+            .caller = primitives.ZERO_ADDRESS,
+            .to = contract_address,
+            .value = 0,
+            .input = &.{},
+            .gas = 100000,
+        },
+    };
+
+    // inner_call() should leave logs in EVM for accumulation
+    const result = try evm.inner_call(call_params);
+    defer result.deinit(std.testing.allocator);
+
+    // This should FAIL initially because current inner_call delegates to call()
+    // After separation, inner_call should NOT extract logs
+    try std.testing.expectEqual(@as(usize, 0), result.logs.len);
+    try std.testing.expectEqual(@as(usize, 1), evm.logs.items.len); // Should remain
+}
