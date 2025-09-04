@@ -345,6 +345,166 @@ pub fn is_valid_signature(signature: Signature) bool {
     return secp256k1.unaudited_validate_signature(signature.r, signature.s);
 }
 
+// ============================================================================
+// RFC 6979 Deterministic Signature Implementation
+// ============================================================================
+
+/// HMAC-SHA256 implementation for RFC 6979
+fn hmac_sha256(key: []const u8, data: []const u8) [32]u8 {
+    var result: [32]u8 = undefined;
+    crypto.auth.hmac.sha2.HmacSha256.create(&result, data, key);
+    return result;
+}
+
+/// Convert bit string to integer as per RFC 6979
+fn bits2int(bits: []const u8) u256 {
+    var result: u256 = 0;
+    const max_bytes = @min(bits.len, 32);
+    
+    for (0..max_bytes) |i| {
+        result = (result << 8) | @as(u256, bits[i]);
+    }
+    
+    // If we have more than 256 bits, shift right
+    if (bits.len > 32) {
+        const excess_bits = (bits.len - 32) * 8;
+        result >>= @intCast(excess_bits);
+    }
+    
+    return result;
+}
+
+/// Convert integer to octets and reduce modulo n
+fn int2octets(x: u256, n: u256) [32]u8 {
+    const reduced = x % n;
+    var result: [32]u8 = undefined;
+    std.mem.writeInt(u256, &result, reduced, .big);
+    return result;
+}
+
+/// Generate deterministic k value using RFC 6979
+fn generateDeterministicK(private_key: [32]u8, message_hash: [32]u8) u256 {
+    // Step a: process message hash
+    const h1 = bits2int(&message_hash);
+    const h = int2octets(h1, SECP256K1_N);
+    
+    // Step b: convert private key
+    const x = int2octets(std.mem.readInt(u256, &private_key, .big), SECP256K1_N);
+    
+    // Step c: initialize V and K
+    var V = [_]u8{0x01} ** 32;
+    var K = [_]u8{0x00} ** 32;
+    
+    // Step d: K = HMAC_K(V || 0x00 || x || h)
+    var data_d: [32 + 1 + 32 + 32]u8 = undefined;
+    @memcpy(data_d[0..32], &V);
+    data_d[32] = 0x00;
+    @memcpy(data_d[33..65], &x);
+    @memcpy(data_d[65..97], &h);
+    K = hmac_sha256(&K, &data_d);
+    
+    // Step e: V = HMAC_K(V)  
+    V = hmac_sha256(&K, &V);
+    
+    // Step f: K = HMAC_K(V || 0x01 || x || h)
+    var data_f: [32 + 1 + 32 + 32]u8 = undefined;
+    @memcpy(data_f[0..32], &V);
+    data_f[32] = 0x01;
+    @memcpy(data_f[33..65], &x);
+    @memcpy(data_f[65..97], &h);
+    K = hmac_sha256(&K, &data_f);
+    
+    // Step g: V = HMAC_K(V)
+    V = hmac_sha256(&K, &V);
+    
+    // Step h: generate k
+    while (true) {
+        // h.1: V = HMAC_K(V)
+        V = hmac_sha256(&K, &V);
+        
+        // h.2: convert V to integer
+        const k = bits2int(&V);
+        
+        // h.3: check if k is in valid range
+        if (k >= 1 and k < SECP256K1_N) {
+            return k;
+        }
+        
+        // h.4: K = HMAC_K(V || 0x00)
+        var data_h4: [32 + 1]u8 = undefined;
+        @memcpy(data_h4[0..32], &V);
+        data_h4[32] = 0x00;
+        K = hmac_sha256(&K, &data_h4);
+        
+        // h.5: V = HMAC_K(V)
+        V = hmac_sha256(&K, &V);
+    }
+}
+
+/// Sign hash using deterministic k generation (RFC 6979)
+/// WARNING: UNAUDITED - Custom cryptographic implementation that has NOT been audited!
+/// This function implements RFC 6979 deterministic ECDSA signing without security review.
+/// Use at your own risk in production systems.
+pub fn unaudited_signHashDeterministic(hash: Hash.Hash, private_key: PrivateKey) !Signature {
+    const private_key_u256 = std.mem.readInt(u256, &private_key, .big);
+    
+    // Validate private key
+    if (private_key_u256 == 0 or private_key_u256 >= SECP256K1_N) {
+        return CryptoError.InvalidPrivateKey;
+    }
+    
+    const message_u256 = std.mem.readInt(u256, &hash, .big);
+    
+    // Generate deterministic k using RFC 6979
+    const k = generateDeterministicK(private_key, hash);
+    
+    // Calculate r = (k * G).x mod n
+    const generator = secp256k1.AffinePoint.generator();
+    const point_r = generator.scalar_mul(k);
+    if (point_r.infinity) {
+        return CryptoError.SigningFailed;
+    }
+    
+    const r = point_r.x % SECP256K1_N;
+    if (r == 0) {
+        return CryptoError.SigningFailed;
+    }
+    
+    // Calculate s = k^-1 * (hash + r * private_key) mod n
+    const k_inv = secp256k1.unaudited_invmod(k, SECP256K1_N) orelse return CryptoError.SigningFailed;
+    const r_d = secp256k1.unaudited_mulmod(r, private_key_u256, SECP256K1_N);
+    const hash_plus_rd = secp256k1.unaudited_addmod(message_u256, r_d, SECP256K1_N);
+    var s = secp256k1.unaudited_mulmod(k_inv, hash_plus_rd, SECP256K1_N);
+    
+    if (s == 0) {
+        return CryptoError.SigningFailed;
+    }
+    
+    // Ensure s is in lower half to prevent malleability
+    const half_n = SECP256K1_N >> 1;
+    if (s > half_n) {
+        s = SECP256K1_N - s;
+    }
+    
+    // Calculate recovery ID
+    const recovery_id: u8 = if ((point_r.y & 1) == 1) 1 else 0;
+    
+    return Signature{
+        .r = r,
+        .s = s,
+        .v = recovery_id + 27,
+    };
+}
+
+/// Sign a message using deterministic k generation (RFC 6979)
+/// WARNING: UNAUDITED - Custom cryptographic implementation that has NOT been audited!
+/// This function implements RFC 6979 deterministic message signing without security review.
+/// Use at your own risk in production systems.
+pub fn unaudited_signMessageDeterministic(message: []const u8, private_key: PrivateKey) !Signature {
+    const message_hash = hash_message(message);
+    return unaudited_signHashDeterministic(message_hash, private_key);
+}
+
 /// Derive public key from private key
 /// WARNING: UNAUDITED - Custom cryptographic implementation that has NOT been audited!
 /// This function implements public key derivation using unaudited ECC operations.
@@ -371,84 +531,12 @@ pub fn unaudited_getPublicKey(private_key: PrivateKey) !PublicKey {
     };
 }
 
-/// Sign a hash with a private key using ECDSA
+/// Sign a hash with a private key using ECDSA (now with RFC 6979 deterministic k)
 /// WARNING: UNAUDITED - Custom cryptographic implementation that has NOT been audited!
 /// This function implements ECDSA signing without security review.
 /// Use at your own risk in production systems.
 pub fn unaudited_signHash(hash: Hash.Hash, private_key: PrivateKey) !Signature {
-    const private_key_u256 = std.mem.readInt(u256, &private_key, .big);
-
-    // Validate private key
-    if (private_key_u256 == 0 or private_key_u256 >= SECP256K1_N) {
-        return CryptoError.InvalidPrivateKey;
-    }
-
-    // Get message hash as u256
-    const message_u256 = std.mem.readInt(u256, &hash, .big);
-
-    // Generate deterministic k using RFC 6979 (simplified)
-    // For now, we'll use a simpler approach with random k
-    // TODO: Implement proper RFC 6979 for deterministic signatures
-    var k: u256 = 0;
-    var r: u256 = 0;
-    var s: u256 = 0;
-    var recovery_id: u8 = 0;
-
-    // Try random k values until we get a valid signature
-    var attempts: u32 = 0;
-    while (attempts < 1000) : (attempts += 1) {
-        // Generate random k
-        var k_bytes: [32]u8 = undefined;
-        crypto.random.bytes(&k_bytes);
-        k = std.mem.readInt(u256, &k_bytes, .big);
-
-        // Ensure k is valid
-        if (k == 0 or k >= SECP256K1_N) continue;
-
-        // Calculate r = (k * G).x mod n
-        const generator = secp256k1.AffinePoint.generator();
-        const point_r = generator.scalar_mul(k);
-        if (point_r.infinity) continue;
-
-        r = point_r.x % SECP256K1_N;
-        if (r == 0) continue;
-
-        // Calculate s = k^-1 * (hash + r * private_key) mod n
-        const k_inv = secp256k1.unaudited_invmod(k, SECP256K1_N) orelse continue;
-        const r_d = secp256k1.unaudited_mulmod(r, private_key_u256, SECP256K1_N);
-        const hash_plus_rd = secp256k1.unaudited_addmod(message_u256, r_d, SECP256K1_N);
-        s = secp256k1.unaudited_mulmod(k_inv, hash_plus_rd, SECP256K1_N);
-
-        if (s == 0) continue;
-
-        // Ensure s is in lower half to prevent malleability
-        const half_n = SECP256K1_N >> 1;
-        if (s > half_n) {
-            s = SECP256K1_N - s;
-        }
-
-        // Calculate recovery ID
-        recovery_id = if ((point_r.y & 1) == 1) @as(u8, 1) else @as(u8, 0);
-
-        // Verify signature by recovering public key
-        const recovered_address = unaudited_recoverAddress(hash, .{ .v = recovery_id, .r = r, .s = s }) catch continue;
-        const expected_public_key = unaudited_getPublicKey(private_key) catch continue;
-        const expected_address = expected_public_key.to_address();
-
-        if (std.mem.eql(u8, &recovered_address.bytes, &expected_address.bytes)) {
-            break;
-        }
-    }
-
-    if (attempts >= 1000) {
-        return CryptoError.SigningFailed;
-    }
-
-    return Signature{
-        .r = r,
-        .s = s,
-        .v = recovery_id + 27,
-    };
+    return unaudited_signHashDeterministic(hash, private_key);
 }
 
 /// Sign a message with EIP-191 prefix
@@ -456,8 +544,7 @@ pub fn unaudited_signHash(hash: Hash.Hash, private_key: PrivateKey) !Signature {
 /// This function implements message signing without security review.
 /// Use at your own risk in production systems.
 pub fn unaudited_signMessage(message: []const u8, private_key: PrivateKey) !Signature {
-    const message_hash = hash_message(message);
-    return unaudited_signHash(message_hash, private_key);
+    return unaudited_signMessageDeterministic(message, private_key);
 }
 
 /// Recover address from signature and hash
@@ -750,7 +837,7 @@ test "derive public key from private key" {
     const public_key = try unaudited_getPublicKey(private_key);
 
     // Public key should be valid
-    try testing.expect(public_key.isValid());
+    try testing.expect(public_key.is_valid());
 
     // Public key should be deterministic
     const public_key2 = try unaudited_getPublicKey(private_key);
@@ -836,4 +923,229 @@ test "validate signature components" {
         .v = 27,
     };
     try testing.expect(!is_valid_signature(zero_s));
+}
+
+// ============================================================================
+// RFC 6979 Deterministic Signature Tests
+// ============================================================================
+
+test "rfc6979 deterministic k generation" {
+    // This test will fail until we implement generateDeterministicK
+    const private_key = PrivateKey{
+        0xC9, 0xAF, 0xA9, 0xD8, 0x45, 0xBA, 0x75, 0x16,
+        0x6B, 0x5C, 0x21, 0x57, 0x67, 0xB1, 0xD6, 0x93,
+        0x4E, 0x50, 0xC3, 0xDB, 0x36, 0xE8, 0x9B, 0x12,
+        0x7B, 0x8A, 0x62, 0x2B, 0x12, 0x0F, 0x67, 0x21,
+    };
+    const message_hash = Hash.keccak256("sample");
+    
+    // This should generate the same k value every time
+    const k1 = generateDeterministicK(private_key, message_hash);
+    const k2 = generateDeterministicK(private_key, message_hash);
+    
+    try testing.expectEqual(k1, k2);
+    
+    // k should be in valid range [1, n-1]
+    try testing.expect(k1 > 0);
+    try testing.expect(k1 < SECP256K1_N);
+}
+
+test "rfc6979 different inputs produce different k values" {
+    const private_key = PrivateKey{
+        0xC9, 0xAF, 0xA9, 0xD8, 0x45, 0xBA, 0x75, 0x16,
+        0x6B, 0x5C, 0x21, 0x57, 0x67, 0xB1, 0xD6, 0x93,
+        0x4E, 0x50, 0xC3, 0xDB, 0x36, 0xE8, 0x9B, 0x12,
+        0x7B, 0x8A, 0x62, 0x2B, 0x12, 0x0F, 0x67, 0x21,
+    };
+    
+    const message_hash_1 = Hash.keccak256("sample");
+    const message_hash_2 = Hash.keccak256("test");
+    
+    const k1 = generateDeterministicK(private_key, message_hash_1);
+    const k2 = generateDeterministicK(private_key, message_hash_2);
+    
+    // Different messages should produce different k values
+    try testing.expect(k1 != k2);
+}
+
+test "rfc6979 deterministic signatures are reproducible" {
+    const private_key = PrivateKey{
+        0xC9, 0xAF, 0xA9, 0xD8, 0x45, 0xBA, 0x75, 0x16,
+        0x6B, 0x5C, 0x21, 0x57, 0x67, 0xB1, 0xD6, 0x93,
+        0x4E, 0x50, 0xC3, 0xDB, 0x36, 0xE8, 0x9B, 0x12,
+        0x7B, 0x8A, 0x62, 0x2B, 0x12, 0x0F, 0x67, 0x21,
+    };
+    const message = "sample";
+    
+    // Multiple signatures should be identical
+    const sig1 = try unaudited_signMessageDeterministic(message, private_key);
+    const sig2 = try unaudited_signMessageDeterministic(message, private_key);
+    const sig3 = try unaudited_signMessageDeterministic(message, private_key);
+    
+    try testing.expectEqual(sig1.r, sig2.r);
+    try testing.expectEqual(sig1.s, sig2.s);
+    try testing.expectEqual(sig1.v, sig2.v);
+    
+    try testing.expectEqual(sig2.r, sig3.r);
+    try testing.expectEqual(sig2.s, sig3.s);
+    try testing.expectEqual(sig2.v, sig3.v);
+}
+
+test "rfc6979 test vector from specification" {
+    // RFC 6979 Appendix A.2.5 test vector (SHA-256, secp256k1)
+    const private_key = PrivateKey{
+        0xC9, 0xAF, 0xA9, 0xD8, 0x45, 0xBA, 0x75, 0x16,
+        0x6B, 0x5C, 0x21, 0x57, 0x67, 0xB1, 0xD6, 0x93,
+        0x4E, 0x50, 0xC3, 0xDB, 0x36, 0xE8, 0x9B, 0x12,
+        0x7B, 0x8A, 0x62, 0x2B, 0x12, 0x0F, 0x67, 0x21,
+    };
+    
+    // "sample" message hashed with SHA-256
+    const message_hash = Hash.sha256("sample");
+    
+    // Expected k from RFC 6979
+    const expected_k: u256 = 0xA6E3C57DD01ABE90086538398355DD4C3B17AA873382B0F24D6129493D8AAD60;
+    
+    const k = generateDeterministicK(private_key, message_hash);
+    try testing.expectEqual(expected_k, k);
+}
+
+test "rfc6979 complete signature validation" {
+    // RFC 6979 test vector with complete signature
+    const private_key = PrivateKey{
+        0xC9, 0xAF, 0xA9, 0xD8, 0x45, 0xBA, 0x75, 0x16,
+        0x6B, 0x5C, 0x21, 0x57, 0x67, 0xB1, 0xD6, 0x93,
+        0x4E, 0x50, 0xC3, 0xDB, 0x36, 0xE8, 0x9B, 0x12,
+        0x7B, 0x8A, 0x62, 0x2B, 0x12, 0x0F, 0x67, 0x21,
+    };
+    
+    const message_hash = Hash.sha256("sample");
+    const signature = try unaudited_signHashDeterministic(message_hash, private_key);
+    
+    // Signature should be valid
+    try testing.expect(signature.is_valid());
+    
+    // Should be able to recover the correct address
+    const recovered_address = try unaudited_recoverAddress(message_hash, signature);
+    const expected_public_key = try unaudited_getPublicKey(private_key);
+    const expected_address = expected_public_key.to_address();
+    
+    try testing.expect(std.mem.eql(u8, &recovered_address.bytes, &expected_address.bytes));
+}
+
+test "rfc6979 multiple test vectors" {
+    const TestVector = struct {
+        private_key: PrivateKey,
+        message: []const u8,
+        description: []const u8,
+    };
+    
+    const test_vectors = [_]TestVector{
+        .{
+            .private_key = PrivateKey{
+                0xC9, 0xAF, 0xA9, 0xD8, 0x45, 0xBA, 0x75, 0x16,
+                0x6B, 0x5C, 0x21, 0x57, 0x67, 0xB1, 0xD6, 0x93,
+                0x4E, 0x50, 0xC3, 0xDB, 0x36, 0xE8, 0x9B, 0x12,
+                0x7B, 0x8A, 0x62, 0x2B, 0x12, 0x0F, 0x67, 0x21,
+            },
+            .message = "sample",
+            .description = "RFC 6979 sample vector",
+        },
+        .{
+            .private_key = PrivateKey{
+                0xC9, 0xAF, 0xA9, 0xD8, 0x45, 0xBA, 0x75, 0x16,
+                0x6B, 0x5C, 0x21, 0x57, 0x67, 0xB1, 0xD6, 0x93,
+                0x4E, 0x50, 0xC3, 0xDB, 0x36, 0xE8, 0x9B, 0x12,
+                0x7B, 0x8A, 0x62, 0x2B, 0x12, 0x0F, 0x67, 0x21,
+            },
+            .message = "test",
+            .description = "RFC 6979 test vector",
+        },
+    };
+    
+    for (test_vectors) |vector| {
+        const message_hash = Hash.sha256(vector.message);
+        
+        // Generate signature deterministically
+        const sig1 = try unaudited_signHashDeterministic(message_hash, vector.private_key);
+        const sig2 = try unaudited_signHashDeterministic(message_hash, vector.private_key);
+        
+        // Should be identical
+        try testing.expectEqual(sig1.r, sig2.r);
+        try testing.expectEqual(sig1.s, sig2.s);
+        try testing.expectEqual(sig1.v, sig2.v);
+        
+        // Should be valid
+        try testing.expect(sig1.is_valid());
+        
+        // Should recover to correct address
+        const recovered = try unaudited_recoverAddress(message_hash, sig1);
+        const expected = (try unaudited_getPublicKey(vector.private_key)).to_address();
+        try testing.expect(std.mem.eql(u8, &recovered.bytes, &expected.bytes));
+    }
+}
+
+test "rfc6979 performance compared to random" {
+    const private_key = try unaudited_randomPrivateKey();
+    const message = "Performance test message";
+    const message_hash = hash_message(message);
+    
+    // Deterministic signing should be fast and consistent
+    const start = std.time.nanoTimestamp();
+    const sig1 = try unaudited_signHashDeterministic(message_hash, private_key);
+    const end = std.time.nanoTimestamp();
+    
+    // Should complete quickly (no retry loops)
+    const duration_ns = end - start;
+    try testing.expect(duration_ns < 50_000_000); // 50ms limit
+    
+    // Second signature should be identical
+    const sig2 = try unaudited_signHashDeterministic(message_hash, private_key);
+    try testing.expectEqual(sig1.r, sig2.r);
+    try testing.expectEqual(sig1.s, sig2.s);
+    try testing.expectEqual(sig1.v, sig2.v);
+    
+    // Should be valid
+    try testing.expect(sig1.is_valid());
+}
+
+test "rfc6979 edge cases" {
+    // Test with minimum valid private key
+    const min_key = [_]u8{0x00} ** 31 ++ [_]u8{0x01};
+    const message_hash = Hash.keccak256("test");
+    
+    const k1 = generateDeterministicK(min_key, message_hash);
+    try testing.expect(k1 > 0 and k1 < SECP256K1_N);
+    
+    // Test with maximum valid private key  
+    var max_key: [32]u8 = undefined;
+    std.mem.writeInt(u256, &max_key, SECP256K1_N - 1, .big);
+    
+    const k2 = generateDeterministicK(max_key, message_hash);
+    try testing.expect(k2 > 0 and k2 < SECP256K1_N);
+    
+    // Should be different
+    try testing.expect(k1 != k2);
+}
+
+test "rfc6979 zero and max hash handling" {
+    const private_key = PrivateKey{
+        0xC9, 0xAF, 0xA9, 0xD8, 0x45, 0xBA, 0x75, 0x16,
+        0x6B, 0x5C, 0x21, 0x57, 0x67, 0xB1, 0xD6, 0x93,
+        0x4E, 0x50, 0xC3, 0xDB, 0x36, 0xE8, 0x9B, 0x12,
+        0x7B, 0x8A, 0x62, 0x2B, 0x12, 0x0F, 0x67, 0x21,
+    };
+    
+    // Zero hash
+    const zero_hash = [_]u8{0x00} ** 32;
+    const k1 = generateDeterministicK(private_key, zero_hash);
+    try testing.expect(k1 > 0 and k1 < SECP256K1_N);
+    
+    // All-ones hash
+    const ones_hash = [_]u8{0xFF} ** 32;
+    const k2 = generateDeterministicK(private_key, ones_hash);
+    try testing.expect(k2 > 0 and k2 < SECP256K1_N);
+    
+    // Should be different
+    try testing.expect(k1 != k2);
 }

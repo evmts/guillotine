@@ -11,8 +11,9 @@ pub const StorageKey = Hash;
 pub const StorageValue = Hash;
 pub const Selector = [4]u8;
 
-// Keccak256 implementation
+// Hash implementations
 const Keccak256 = crypto.hash.sha3.Keccak256;
+const Sha256 = crypto.hash.sha2.Sha256;
 
 // Constants
 pub const ZERO_HASH: Hash = [_]u8{0} ** 32;
@@ -97,6 +98,13 @@ pub fn keccak256(data: []const u8) Hash {
 
 pub fn keccak256_empty() Hash {
     return EMPTY_KECCAK256;
+}
+
+// SHA256 hashing function
+pub fn sha256(data: []const u8) Hash {
+    var hash: Hash = undefined;
+    Sha256.hash(data, &hash, .{});
+    return hash;
 }
 
 // EIP-191 message hashing

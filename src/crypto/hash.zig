@@ -28,6 +28,7 @@ pub const is_zero = hash.isZero;
 pub const equal = hash.equal;
 pub const keccak256 = hash.keccak256;
 pub const keccak256_empty = hash.keccak256Empty;
+pub const sha256 = hash.sha256;
 pub const eip191_hash_message = hash.eip191HashMessage;
 pub const selector_from_signature = hash.selectorFromSignature;
 pub const compare = hash.compare;
