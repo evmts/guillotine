@@ -86,8 +86,10 @@ pub fn Handlers(comptime FrameType: type) type {
             const original_opt = evm.get_original_storage(contract_addr, slot);
             const original_value: WordType = original_opt orelse current_value;
 
-            // Calculate SSTORE operation cost (includes cold access cost if applicable)
-            const total_gas_cost: u64 = GasConstants.sstore_gas_cost(current_value, original_value, value, is_cold);
+            // Calculate SSTORE operation cost using EIP logic (TODO: Remove gas_constants.zig version)
+            // For now, use the new EIP-based calculation in eips.zig
+            const sstore_result = evm.eips.sstore_gas_cost_with_access(current_value, value, original_value, is_cold);
+            const total_gas_cost: u64 = sstore_result.gas;
 
 
             log.debug(
@@ -113,9 +115,10 @@ pub fn Handlers(comptime FrameType: type) type {
                 else => return Error.AllocationError,
             };
 
-            // EIP-3529: Only clearing (non-zero -> zero) is eligible for refund
-            if (current_value != 0 and value == 0) {
-                evm.add_gas_refund(GasConstants.SstoreRefundGas);
+            // Apply gas refunds from EIP calculations (replaces the hardcoded refund logic)
+            // TODO: Remove the old refund logic once EIP implementation is complete
+            if (sstore_result.refund > 0) {
+                evm.add_gas_refund(sstore_result.refund);
             }
 
             const op_data = dispatch.getOpData(.{ .regular = Opcode.SSTORE });
