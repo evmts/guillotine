@@ -3,6 +3,8 @@ const primitives = @import("primitives");
 const guillotine_evm = @import("evm");
 const revm = @import("revm");
 
+const u256 = primitives.u256;
+
 // Extract ExecutionTrace type from CallResult 
 const ExecutionTrace = @typeInfo(@TypeOf(@as(guillotine_evm.CallResult, undefined).trace)).optional.child;
 
@@ -79,6 +81,12 @@ pub const DifferentialTestConfig = struct {
     enable_tracing: bool = true,
 };
 
+/// Blob context configuration for EIP-4844 testing
+pub const BlobContext = struct {
+    blob_base_fee: u256 = 0,
+    blob_versioned_hashes: []const [32]u8 = &.{},
+};
+
 const TracedEVMType = guillotine_evm.Evm(.{
     .TracerType = guillotine_evm.tracer.DebuggingTracer,
     .DatabaseType = guillotine_evm.Database,
@@ -111,13 +119,24 @@ pub const DifferentialTestor = struct {
         return initWithConfig(allocator, .{ .enable_tracing = true });
     }
 
+    /// Initialize with custom blob context for EIP-4844 testing
+    pub fn initWithBlobContext(allocator: std.mem.Allocator, blob_context: BlobContext) !DifferentialTestor {
+        return initWithBlobContextAndConfig(allocator, blob_context, .{ .enable_tracing = true });
+    }
+
     /// Initialize with custom configuration
     pub fn initWithConfig(allocator: std.mem.Allocator, config: DifferentialTestConfig) !DifferentialTestor {
+        return initWithBlobContextAndConfig(allocator, .{}, config);
+    }
+
+    /// Initialize with both blob context and custom configuration
+    pub fn initWithBlobContextAndConfig(allocator: std.mem.Allocator, blob_context: BlobContext, config: DifferentialTestConfig) !DifferentialTestor {
         // Setup addresses
         const caller = primitives.Address.ZERO_ADDRESS;
         const contract = try primitives.Address.from_hex("0xc0de000000000000000000000000000000000000");
 
-        // Setup REVM
+        // Setup REVM - blob context needs to be passed through settings or other mechanism
+        // For now, REVM wrapper doesn't expose blob context configuration
         var revm_vm = try revm.Revm.init(allocator, .{
             .gas_limit = 100000,
             .chain_id = 1,
@@ -125,6 +144,10 @@ pub const DifferentialTestor = struct {
         });
 
         try revm_vm.setBalance(caller, 10_000_000);
+        
+        // TODO: REVM wrapper needs blob context support
+        // The blob context will currently default to empty in REVM
+        // This is a known limitation until the wrapper is enhanced
 
         // Setup Guillotine EVMs - allocate databases on heap
         const db = try allocator.create(guillotine_evm.Database);
@@ -156,16 +179,16 @@ pub const DifferentialTestor = struct {
             .difficulty = 0,
             .base_fee = 0,
             .prev_randao = [_]u8{0} ** 32,
-            .blob_base_fee = 0,
-            .blob_versioned_hashes = &.{},
+            .blob_base_fee = blob_context.blob_base_fee,
+            .blob_versioned_hashes = blob_context.blob_versioned_hashes,
         };
 
         const tx_context = guillotine_evm.TransactionContext{
             .chain_id = 1,
             .gas_limit = 100000,
             .coinbase = primitives.Address.ZERO_ADDRESS,
-            .blob_versioned_hashes = &.{},
-            .blob_base_fee = 0,
+            .blob_versioned_hashes = blob_context.blob_versioned_hashes,
+            .blob_base_fee = blob_context.blob_base_fee,
         };
 
         // Create both traced and non-traced EVMs based on config

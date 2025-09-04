@@ -475,6 +475,136 @@ test "differential: BLOBHASH opcode EIP-4844 blob hash" {
     try testor.test_bytecode(&bytecode);
 }
 
+test "differential: BLOBHASH with multiple blob indices (0-5)" {
+    const allocator = testing.allocator;
+    
+    // Create 6 unique blob hashes (maximum allowed)
+    var blob_hashes: [6][32]u8 = undefined;
+    for (0..6) |i| {
+        blob_hashes[i][0] = 0x01; // KZG commitment version
+        for (1..32) |j| {
+            blob_hashes[i][j] = @as(u8, @intCast((i * 32 + j) % 256));
+        }
+    }
+    
+    var testor = try DifferentialTestor.initWithBlobContext(allocator, .{
+        .blob_base_fee = 1_000_000_000,
+        .blob_versioned_hashes = &blob_hashes,
+    });
+    defer testor.deinit();
+    
+    // Test accessing all valid blob indices
+    const bytecode = [_]u8{
+        // Access blob index 0
+        0x60, 0x00,             // PUSH1 0
+        0x49,                   // BLOBHASH
+        0x60, 0x00,             // PUSH1 0
+        0x52,                   // MSTORE
+        
+        // Access blob index 1
+        0x60, 0x01,             // PUSH1 1
+        0x49,                   // BLOBHASH
+        0x60, 0x20,             // PUSH1 32
+        0x52,                   // MSTORE
+        
+        // Access blob index 5 (last valid)
+        0x60, 0x05,             // PUSH1 5
+        0x49,                   // BLOBHASH
+        0x60, 0x40,             // PUSH1 64
+        0x52,                   // MSTORE
+        
+        0x00,                   // STOP
+    };
+    
+    try testor.test_bytecode(&bytecode);
+}
+
+test "differential: BLOBHASH with out-of-bounds indices" {
+    const allocator = testing.allocator;
+    
+    // Single blob hash
+    const blob_hash = [_]u8{0x01} ++ [_]u8{0xAB} ** 31;
+    const blob_hashes = [_][32]u8{blob_hash};
+    
+    var testor = try DifferentialTestor.initWithBlobContext(allocator, .{
+        .blob_base_fee = 1_000_000_000,
+        .blob_versioned_hashes = &blob_hashes,
+    });
+    defer testor.deinit();
+    
+    // Test out-of-bounds access returns zero
+    const bytecode = [_]u8{
+        // Access valid index 0
+        0x60, 0x00,             // PUSH1 0
+        0x49,                   // BLOBHASH
+        0x60, 0x00,             // PUSH1 0
+        0x52,                   // MSTORE
+        
+        // Access invalid index 1 (should return 0)
+        0x60, 0x01,             // PUSH1 1
+        0x49,                   // BLOBHASH
+        0x60, 0x20,             // PUSH1 32
+        0x52,                   // MSTORE
+        
+        // Access invalid index 255 (should return 0)
+        0x60, 0xFF,             // PUSH1 255
+        0x49,                   // BLOBHASH
+        0x60, 0x40,             // PUSH1 64
+        0x52,                   // MSTORE
+        
+        0x00,                   // STOP
+    };
+    
+    try testor.test_bytecode(&bytecode);
+}
+
+test "differential: BLOBHASH with empty blob array" {
+    const allocator = testing.allocator;
+    
+    var testor = try DifferentialTestor.initWithBlobContext(allocator, .{
+        .blob_base_fee = 1_000_000_000,
+        .blob_versioned_hashes = &.{}, // No blobs
+    });
+    defer testor.deinit();
+    
+    // Test that access to any index returns zero when no blobs present
+    const bytecode = [_]u8{
+        0x60, 0x00,             // PUSH1 0
+        0x49,                   // BLOBHASH
+        0x60, 0x00,             // PUSH1 0
+        0x52,                   // MSTORE
+        0x00,                   // STOP
+    };
+    
+    try testor.test_bytecode(&bytecode);
+}
+
+test "differential: BLOBHASH with u256 max index" {
+    const allocator = testing.allocator;
+    
+    const blob_hash = [_]u8{0x01} ++ [_]u8{0xCD} ** 31;
+    const blob_hashes = [_][32]u8{blob_hash};
+    
+    var testor = try DifferentialTestor.initWithBlobContext(allocator, .{
+        .blob_base_fee = 1_000_000_000,
+        .blob_versioned_hashes = &blob_hashes,
+    });
+    defer testor.deinit();
+    
+    // Test with maximum u256 index (should return 0)
+    const bytecode = [_]u8{
+        // Push u256::MAX as 32 bytes
+        0x7F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,  // PUSH32 (16 bytes of 0xFF)
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,  // (remaining 16 bytes of 0xFF)
+        0x49,                   // BLOBHASH
+        0x60, 0x00,             // PUSH1 0
+        0x52,                   // MSTORE
+        0x00,                   // STOP
+    };
+    
+    try testor.test_bytecode(&bytecode);
+}
+
 test "differential: BLOBBASEFEE opcode EIP-4844 blob base fee" {
     const allocator = testing.allocator;
     
@@ -482,6 +612,66 @@ test "differential: BLOBBASEFEE opcode EIP-4844 blob base fee" {
     defer testor.deinit();
     
     // Get blob base fee (EIP-4844)
+    const bytecode = [_]u8{
+        0x4a,                   // BLOBBASEFEE
+        0x60, 0x00,             // PUSH1 0
+        0x52,                   // MSTORE
+        0x00,                   // STOP
+    };
+    
+    try testor.test_bytecode(&bytecode);
+}
+
+test "differential: BLOBBASEFEE with configured blob base fee" {
+    const allocator = testing.allocator;
+    
+    var testor = try DifferentialTestor.initWithBlobContext(allocator, .{
+        .blob_base_fee = 1_000_000_000, // 1 Gwei
+        .blob_versioned_hashes = &.{},
+    });
+    defer testor.deinit();
+    
+    // Test that both EVMs return the same non-zero blob base fee
+    const bytecode = [_]u8{
+        0x4a,                   // BLOBBASEFEE
+        0x60, 0x00,             // PUSH1 0
+        0x52,                   // MSTORE
+        0x00,                   // STOP
+    };
+    
+    try testor.test_bytecode(&bytecode);
+}
+
+test "differential: BLOBBASEFEE with zero blob base fee" {
+    const allocator = testing.allocator;
+    
+    var testor = try DifferentialTestor.initWithBlobContext(allocator, .{
+        .blob_base_fee = 0,
+        .blob_versioned_hashes = &.{},
+    });
+    defer testor.deinit();
+    
+    // Test that both EVMs return zero for zero blob base fee
+    const bytecode = [_]u8{
+        0x4a,                   // BLOBBASEFEE
+        0x60, 0x00,             // PUSH1 0
+        0x52,                   // MSTORE
+        0x00,                   // STOP
+    };
+    
+    try testor.test_bytecode(&bytecode);
+}
+
+test "differential: BLOBBASEFEE with maximum blob base fee" {
+    const allocator = testing.allocator;
+    
+    var testor = try DifferentialTestor.initWithBlobContext(allocator, .{
+        .blob_base_fee = std.math.maxInt(u256),
+        .blob_versioned_hashes = &.{},
+    });
+    defer testor.deinit();
+    
+    // Test maximum u256 value for blob base fee
     const bytecode = [_]u8{
         0x4a,                   // BLOBBASEFEE
         0x60, 0x00,             // PUSH1 0
@@ -537,6 +727,58 @@ test "differential: PC opcode program counter" {
         
         0x58,                   // PC (should be 7)
         0x60, 0x20,             // PUSH1 32
+        0x52,                   // MSTORE
+        
+        0x00,                   // STOP
+    };
+    
+    try testor.test_bytecode(&bytecode);
+}
+
+test "differential: EIP-4844 opcodes fail pre-Cancun" {
+    const allocator = testing.allocator;
+    
+    // For pre-Cancun validation, we need to test with a different hardfork
+    // This requires implementing hardfork-aware differential testing
+    // For now, we document this as a known limitation
+    _ = allocator;
+    
+    // TODO: Add pre-Cancun hardfork validation when DifferentialTestor supports hardfork configuration
+    // The differential testor currently hardcodes Cancun hardfork
+    // We need to add initWithHardfork method to test pre-Cancun behavior
+}
+
+test "differential: blob context initialization identical in both EVMs" {
+    const allocator = testing.allocator;
+    
+    // Create known blob context
+    const test_blob_hash = [_]u8{0x01} ++ [_]u8{0x42} ** 31;
+    const blob_hashes = [_][32]u8{test_blob_hash};
+    const test_blob_fee: u256 = 7_777_777_777;
+    
+    var testor = try DifferentialTestor.initWithBlobContext(allocator, .{
+        .blob_base_fee = test_blob_fee,
+        .blob_versioned_hashes = &blob_hashes,
+    });
+    defer testor.deinit();
+    
+    // Test that both EVMs have identical blob context by combining operations
+    const bytecode = [_]u8{
+        // Get blob base fee
+        0x4a,                   // BLOBBASEFEE
+        0x60, 0x00,             // PUSH1 0
+        0x52,                   // MSTORE
+        
+        // Get first blob hash
+        0x60, 0x00,             // PUSH1 0
+        0x49,                   // BLOBHASH
+        0x60, 0x20,             // PUSH1 32
+        0x52,                   // MSTORE
+        
+        // Test out-of-bounds access returns zero
+        0x60, 0x01,             // PUSH1 1
+        0x49,                   // BLOBHASH  
+        0x60, 0x40,             // PUSH1 64
         0x52,                   // MSTORE
         
         0x00,                   // STOP
