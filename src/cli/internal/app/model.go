@@ -16,6 +16,13 @@ type Model struct {
 	quitting bool
 	width    int
 	height   int
+	
+	// Call Input state - minimal devtool demo
+	showCallInput bool
+	callFrom      string  // TODO: Validate as hex address
+	callTo        string  // TODO: Validate as hex address  
+	callValue     string  // TODO: Parse as u256
+	callData      string  // TODO: Validate as hex bytes
 }
 
 func InitialModel() Model {
@@ -64,18 +71,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if config.IsKey(msgStr, config.KeySelect) {
-			if m.choices[m.cursor] == config.MenuExit {
+			switch m.choices[m.cursor] {
+			case config.MenuExit:
 				m.quitting = true
 				return m, tea.Batch(
 					tea.ExitAltScreen,
 					tea.Quit,
 				)
-			}
-			_, ok := m.selected[m.cursor]
-			if ok {
-				delete(m.selected, m.cursor)
-			} else {
-				m.selected[m.cursor] = struct{}{}
+			case config.MenuMakeCall:
+				// TODO: Implement full call input form with navigation
+				// TODO: Add input validation and error handling
+				// TODO: Bridge to Zig EVM CallParams system
+				m.showCallInput = !m.showCallInput  // Simple toggle for demo
+			default:
+				// Original selection behavior for other menu items
+				_, ok := m.selected[m.cursor]
+				if ok {
+					delete(m.selected, m.cursor)
+				} else {
+					m.selected[m.cursor] = struct{}{}
+				}
 			}
 		}
 	}
@@ -99,10 +114,27 @@ func (m Model) View() string {
 	layout := ui.Layout{Width: m.width, Height: m.height}
 	
 	header := ui.RenderHeader(m.greeting, config.AppSubtitle, config.TitleStyle, config.SubtitleStyle)
-	menu := ui.RenderMenu(m.choices, m.cursor, m.selected)
-	help := ui.RenderHelpText()
 	
-	content := layout.ComposeVertical(header, menu, help)
+	var content string
+	if m.showCallInput {
+		// Show call input form - minimal demo implementation
+		// TODO: Add proper form state management
+		// TODO: Handle keyboard input for form fields  
+		// TODO: Add field validation and error display
+		callData := ui.CallInputData{
+			From:  m.callFrom,   // TODO: Default to user's address
+			To:    m.callTo,     // TODO: Support ENS resolution  
+			Value: m.callValue,  // TODO: Support unit conversion
+			Data:  m.callData,   // TODO: Support function selector encoding
+		}
+		callForm := ui.RenderCallInputForm(callData)
+		content = layout.ComposeVertical(header, callForm)
+	} else {
+		// Show regular menu
+		menu := ui.RenderMenu(m.choices, m.cursor, m.selected)
+		help := ui.RenderHelpText()
+		content = layout.ComposeVertical(header, menu, help)
+	}
 	
 	return layout.RenderWithBox(content)
 }

@@ -11,6 +11,7 @@ const (
 	
 	// Menu items
 	MenuRunTest    = "Run test call"
+	MenuMakeCall   = "Make Call"  // New devtool feature
 	MenuExit       = "Exit"
 )
 
@@ -18,6 +19,7 @@ const (
 func GetMenuItems() []string {
 	return []string{
 		MenuRunTest,
+		MenuMakeCall,  // Add the new menu item
 		MenuExit,
 	}
 }
