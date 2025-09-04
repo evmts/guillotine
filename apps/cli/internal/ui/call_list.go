@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"guillotine-cli/internal/config"
 	"guillotine-cli/internal/types"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -68,7 +69,7 @@ func RenderCallParameterEdit(paramName, currentValue string) string {
 	return boxStyle.Render(content)
 }
 
-func RenderCallResult(result *guillotine.CallResult) string {
+func RenderCallResult(result *guillotine.CallResult, params types.CallParametersStrings) string {
 	var content strings.Builder
 	
 	successStyle := lipgloss.NewStyle().Bold(true).Foreground(config.ChartGreen)
@@ -83,9 +84,14 @@ func RenderCallResult(result *guillotine.CallResult) string {
 	
 	content.WriteString("\n\n")
 	
-	// Show gas left instead of gas used (we'll need to calculate gas used from original limit)
-	content.WriteString(labelStyle.Render("Gas Left: "))
-	content.WriteString(lipgloss.NewStyle().Render(formatNumber(result.GasLeft)))
+	// Always show gas used
+	content.WriteString(labelStyle.Render("Gas Used: "))
+	if gasLimit, err := strconv.ParseUint(params.GasLimit, 10, 64); err == nil {
+		gasUsed := gasLimit - result.GasLeft
+		content.WriteString(lipgloss.NewStyle().Render(formatNumber(gasUsed)))
+	} else {
+		content.WriteString(lipgloss.NewStyle().Render("0"))
+	}
 	content.WriteString("\n")
 	
 	// Show error first if failed
@@ -97,10 +103,11 @@ func RenderCallResult(result *guillotine.CallResult) string {
 	}
 	
 	// Show output if available (even for failed calls)
-	if len(result.Output) > 0 {
+	outputData := result.Output.Data()
+	if len(outputData) > 0 {
 		content.WriteString("\n")
 		content.WriteString(labelStyle.Render("Output: "))
-		content.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render(formatHex(result.Output)))
+		content.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render(formatHex(outputData)))
 		content.WriteString("\n")
 	}
 	

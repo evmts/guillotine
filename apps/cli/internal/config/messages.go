@@ -10,8 +10,11 @@ const (
 	LoadingMessage = "Loading..."
 	
 	// Menu items
-	MenuMakeCall   = "Make call"
-	MenuExit       = "Exit"
+	MenuMakeCall    = "Make call"
+	MenuCallHistory = "Call History"
+	MenuContracts   = "Contracts"
+	MenuResetState  = "Reset State"
+	MenuExit        = "Exit"
 	
 	// Call parameter names
 	CallParamCallType    = "Call type"
@@ -24,10 +27,28 @@ const (
 	CallParamSalt        = "Salt"
 	
 	// Call states
-	CallStateTitle       = "Configure call parameters"
-	CallEditTitle        = "Edit parameter"
-	CallExecutingTitle   = "Executing call"
-	CallResultTitle      = "Call result"
+	CallStateTitle         = "Make call"
+	CallStateSubtitle      = "Configure call parameters"
+	CallEditTitle          = "Edit parameter"
+	CallEditSubtitle       = ""
+	CallExecutingTitle     = "Executing call"
+	CallExecutingSubtitle  = ""
+	CallResultTitle        = "Call result"
+	CallResultSubtitle     = ""
+	
+	// History states
+	CallHistoryTitle       = "Call History"
+	CallHistorySubtitle    = "Browse previous EVM calls"
+	CallHistoryDetailTitle = "Call Details"
+	CallHistoryDetailSubtitle = ""
+	
+	// Contract states
+	ContractsTitle         = "Deployed Contracts"
+	ContractsSubtitle      = "Browse deployed contracts"
+	ContractDetailTitle    = "Contract Details"
+	ContractDetailSubtitle = ""
+	ContractBytecodeTitle  = "Contract Bytecode"
+	ContractBytecodeSubtitle = ""
 	
 	// Call messages
 	CallExecutingMsg     = "Executing EVM call..."
@@ -47,6 +68,9 @@ const (
 func GetMenuItems() []string {
 	return []string{
 		MenuMakeCall,
+		MenuCallHistory,
+		MenuContracts,
+		MenuResetState,
 		MenuExit,
 	}
 }

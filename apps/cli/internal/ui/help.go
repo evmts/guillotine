@@ -2,47 +2,53 @@ package ui
 
 import (
 	"guillotine-cli/internal/config"
+	"guillotine-cli/internal/types"
 	"github.com/charmbracelet/lipgloss"
 )
 
-func RenderHelpText() string {
-	displayKeys, actions := config.GetHelpText()
-	return renderHelpTextFromKeysAndActions(displayKeys, actions)
+// Map AppState to string keys for help lookup
+var stateToHelpKey = map[types.AppState]string{
+	types.StateMainMenu:           "main_menu",
+	types.StateCallParameterList:  "call_parameter_list",
+	types.StateCallParameterEdit:  "call_parameter_edit",
+	types.StateCallTypeEdit:       "call_type_selection",
+	types.StateCallResult:         "call_result",
+	types.StateCallHistory:        "call_history",
+	types.StateCallHistoryDetail:  "call_history_detail",
+	types.StateContracts:          "contracts",
+	types.StateContractDetail:     "contract_detail",
+	types.StateConfirmReset:       "confirm_reset",
 }
 
-func renderHelpTextFromKeysAndActions(keys, actions []string) string {
+// RenderHelp renders help text for the given state
+func RenderHelp(state types.AppState) string {
+	stateKey, exists := stateToHelpKey[state]
+	if !exists {
+		return ""
+	}
+	return renderHelpForKey(stateKey)
+}
+
+// renderHelpForKey renders help for a given state key
+func renderHelpForKey(stateKey string) string {
+	entries := config.GetHelpForState(stateKey)
+	keys, actions := config.GetHelpText(entries)
+	return renderHelpText(keys, actions)
+}
+
+// renderHelpText renders the actual help text from keys and actions
+func renderHelpText(keys, actions []string) string {
 	helpText := ""
+	keyStyle := lipgloss.NewStyle().Foreground(config.Amber)
+	actionStyle := lipgloss.NewStyle().Foreground(config.Muted)
+	
 	for i, key := range keys {
 		if i > 0 {
 			helpText += " • "
 		}
-		keyStyle := lipgloss.NewStyle().Foreground(config.Amber)
-		actionStyle := lipgloss.NewStyle().Foreground(config.Muted)
 		helpText += keyStyle.Render(key) + " " + actionStyle.Render(actions[i])
 	}
-	return helpText
-}
-
-func RenderCallParameterListHelp() string {
-	keys := []string{"↑/↓", "enter", "x", "r", "ctrl+r", "esc"}
-	actions := []string{"navigate", "edit", "execute", "reset", "reset all", "back"}
-	return renderHelpTextFromKeysAndActions(keys, actions)
-}
-
-func RenderCallEditHelp() string {
-	keys := []string{"enter", "r", "esc"}
-	actions := []string{"save", "reset default", "cancel"}
-	return renderHelpTextFromKeysAndActions(keys, actions)
-}
-
-func RenderCallEditTypeHelp() string {
-	keys := []string{"↑/↓", "enter", "r", "esc"}
-	actions := []string{"select", "save", "reset default", "cancel"}
-	return renderHelpTextFromKeysAndActions(keys, actions)
-}
-
-func RenderCallResultHelp() string {
-	keys := []string{"enter", "esc"}
-	actions := []string{"continue", "back to menu"}
-	return renderHelpTextFromKeysAndActions(keys, actions)
+	
+	// Apply the HelpStyle which should handle positioning
+	return config.HelpStyle.Render(helpText)
 }

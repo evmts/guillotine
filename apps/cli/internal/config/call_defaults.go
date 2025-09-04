@@ -4,6 +4,11 @@ import (
 	guillotine "github.com/evmts/guillotine/sdks/go"
 )
 
+const (
+	DefaultGasLimit = "100000"
+	DefaultTableHeight = 10
+)
+
 type CallDefaults struct {
 	CallType    guillotine.CallType
 	GasLimit    uint64

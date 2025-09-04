@@ -2,10 +2,25 @@ package types
 
 import (
 	"time"
-
+	
 	"guillotine-cli/internal/config"
+	"github.com/evmts/guillotine/bindings/go/evm"
+)
 
-	guillotine "github.com/evmts/guillotine/sdks/go"
+type AppState int
+
+const (
+	StateMainMenu AppState = iota
+	StateCallParameterList
+	StateCallParameterEdit
+	StateCallTypeEdit
+	StateCallExecuting
+	StateCallResult
+	StateCallHistory
+	StateCallHistoryDetail
+	StateContracts
+	StateContractDetail
+	StateConfirmReset
 )
 
 type CallParameter struct {
@@ -13,8 +28,7 @@ type CallParameter struct {
 	Value string
 }
 
-// CallParametersStrings holds string representations of call parameters for UI
-type CallParametersStrings struct {
+type CallParameters struct {
 	CallType   string
 	Caller     string
 	Target     string
@@ -24,8 +38,7 @@ type CallParametersStrings struct {
 	Salt       string
 }
 
-// GetParams returns parameter list for UI display based on call type
-func (cp *CallParametersStrings) GetParams() []CallParameter {
+func (cp *CallParameters) GetParams() []CallParameter {
 	// Define parameter visibility rules based on call type
 	paramConfig := []struct {
 		name      string
@@ -90,8 +103,7 @@ func (cp *CallParametersStrings) GetParams() []CallParameter {
 	return params
 }
 
-// SetParam updates a parameter value by name
-func (cp *CallParametersStrings) SetParam(name, value string) {
+func (cp *CallParameters) SetParam(name, value string) {
 	switch name {
 	case config.CallParamCallType:
 		cp.CallType = value
@@ -110,11 +122,10 @@ func (cp *CallParametersStrings) SetParam(name, value string) {
 	}
 }
 
-// NewCallParametersStrings creates new parameters with defaults
-func NewCallParametersStrings() CallParametersStrings {
+func NewCallParameters() CallParameters {
 	defaults := config.GetCallDefaults()
-	return CallParametersStrings{
-		CallType:   CallTypeToString(defaults.CallType),
+	return CallParameters{
+		CallType:   config.CallTypeToString(defaults.CallType),
 		Caller:     defaults.CallerAddr,
 		Target:     defaults.TargetAddr,
 		Value:      defaults.Value,
@@ -124,63 +135,11 @@ func NewCallParametersStrings() CallParametersStrings {
 	}
 }
 
-// GetCallTypeOptions returns all available call type options
-func GetCallTypeOptions() []string {
-	return []string{
-		config.CallTypeCall,
-		config.CallTypeCallcode,
-		config.CallTypeStaticCall,
-		config.CallTypeDelegateCall,
-		config.CallTypeCreate,
-		config.CallTypeCreate2,
-	}
-}
-
-// CallTypeFromString converts a string to SDK CallType
-func CallTypeFromString(s string) guillotine.CallType {
-	switch s {
-	case config.CallTypeCall:
-		return guillotine.CallTypeCall
-	case config.CallTypeCallcode:
-		return guillotine.CallTypeCallcode
-	case config.CallTypeStaticCall:
-		return guillotine.CallTypeStaticcall
-	case config.CallTypeDelegateCall:
-		return guillotine.CallTypeDelegatecall
-	case config.CallTypeCreate:
-		return guillotine.CallTypeCreate
-	case config.CallTypeCreate2:
-		return guillotine.CallTypeCreate2
-	default:
-		return guillotine.CallTypeCall
-	}
-}
-
-// CallTypeToString converts SDK CallType to string
-func CallTypeToString(ct guillotine.CallType) string {
-	switch ct {
-	case guillotine.CallTypeCall:
-		return config.CallTypeCall
-	case guillotine.CallTypeCallcode:
-		return config.CallTypeCallcode
-	case guillotine.CallTypeStaticcall:
-		return config.CallTypeStaticCall
-	case guillotine.CallTypeDelegatecall:
-		return config.CallTypeDelegateCall
-	case guillotine.CallTypeCreate:
-		return config.CallTypeCreate
-	case guillotine.CallTypeCreate2:
-		return config.CallTypeCreate2
-	default:
-		return config.CallTypeCall
-	}
-}
-
 type CallHistoryEntry struct {
 	ID         string
 	Timestamp  time.Time
-	Parameters CallParametersStrings
-	Result     *guillotine.CallResult
+	Parameters CallParameters
+	Result     *evm.CallResult
 }
 
 type DeployedContract struct {
@@ -188,3 +147,12 @@ type DeployedContract struct {
 	Bytecode  []byte
 	Timestamp time.Time
 }
+
+type TabType int
+
+const (
+	TabMakeCall TabType = iota
+	TabCallHistory
+	TabContracts
+	TabSettings
+)

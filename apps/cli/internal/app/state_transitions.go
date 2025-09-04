@@ -1,0 +1,234 @@
+package app
+
+import (
+	"guillotine-cli/internal/config"
+	"guillotine-cli/internal/types"
+	"guillotine-cli/internal/ui"
+
+	tea "github.com/charmbracelet/bubbletea"
+)
+
+// handleStateNavigation handles state-based navigation for keyboard input
+func (m *Model) handleStateNavigation(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	msgStr := msg.String()
+	
+	// Handle quit
+	if config.IsKey(msgStr, config.KeyQuit) {
+		m.quitting = true
+		return m, tea.Batch(tea.ExitAltScreen, tea.Quit)
+	}
+	
+	// Handle clipboard shortcuts
+	if config.IsKey(msgStr, config.KeyCopy) {
+		return m.handleCopy()
+	}
+	
+	// Handle navigation keys based on current state
+	switch m.state {
+	case types.StateMainMenu:
+		return m.handleMainMenuNavigation(msgStr)
+		
+	case types.StateCallParameterList:
+		return m.handleCallParamListNavigation(msgStr)
+		
+	case types.StateCallParameterEdit:
+		return m.handleCallParamEditNavigation(msgStr, msg)
+		
+	case types.StateCallTypeEdit:
+		return m.handleCallTypeEditNavigation(msgStr)
+		
+	case types.StateCallResult:
+		return m.handleCallResultNavigation(msgStr)
+		
+	case types.StateCallHistory:
+		return m.handleCallHistoryNavigation(msgStr, msg)
+		
+	case types.StateCallHistoryDetail:
+		return m.handleHistoryDetailNavigation(msgStr)
+		
+	case types.StateContracts:
+		return m.handleContractsNavigation(msgStr, msg)
+		
+	case types.StateContractDetail:
+		return m.handleContractDetailNavigation(msgStr)
+		
+	case types.StateConfirmReset:
+		return m.handleConfirmResetNavigation(msgStr)
+	}
+	
+	return m, nil
+}
+
+// handleMainMenuNavigation handles navigation in main menu state
+func (m *Model) handleMainMenuNavigation(msgStr string) (tea.Model, tea.Cmd) {
+	if config.IsKey(msgStr, config.KeyUp) {
+		if m.cursor > 0 {
+			m.cursor--
+		}
+	} else if config.IsKey(msgStr, config.KeyDown) {
+		if m.cursor < len(m.choices)-1 {
+			m.cursor++
+		}
+	} else if config.IsKey(msgStr, config.KeySelect) {
+		return m.handleMainMenuSelect()
+	}
+	return m, nil
+}
+
+// handleCallParamListNavigation handles navigation in call parameter list state
+func (m *Model) handleCallParamListNavigation(msgStr string) (tea.Model, tea.Cmd) {
+	if config.IsKey(msgStr, config.KeyUp) {
+		if m.callParamCursor > 0 {
+			m.callParamCursor--
+		}
+	} else if config.IsKey(msgStr, config.KeyDown) {
+		params := m.callParams.GetParams()
+		if m.callParamCursor < len(params)-1 {
+			m.callParamCursor++
+		}
+	} else if config.IsKey(msgStr, config.KeySelect) {
+		m.validationError = "" // Clear validation errors when navigating to edit
+		return m.handleCallParamSelect()
+	} else if config.IsKey(msgStr, config.KeyBack) {
+		m.state = types.StateMainMenu
+		return m, nil
+	} else if config.IsKey(msgStr, config.KeyExecute) {
+		return m.handleCallExecute()
+	} else if config.IsKey(msgStr, config.KeyReset) {
+		return m.handleResetParameter()
+	} else if config.IsKey(msgStr, config.KeyResetAll) {
+		return m.handleResetAllParameters()
+	}
+	return m, nil
+}
+
+// handleCallParamEditNavigation handles navigation in call parameter edit state
+func (m *Model) handleCallParamEditNavigation(msgStr string, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if config.IsKey(msgStr, config.KeySelect) {
+		return m.handleCallEditSave()
+	} else if config.IsKey(msgStr, config.KeyBack) {
+		m.state = types.StateCallParameterList
+		return m, nil
+	} else if config.IsKey(msgStr, config.KeyReset) {
+		return m.handleResetCurrentParameter()
+	} else if config.IsKey(msgStr, config.KeyPaste) {
+		if m.editingParam != config.CallParamCallType {
+			if content, err := ui.GetClipboard(); err == nil {
+				m.textInput.SetValue(content)
+			}
+		}
+		return m, nil
+	} else {
+		// Pass all other keys to text input
+		var cmd tea.Cmd
+		m.textInput, cmd = m.textInput.Update(msg)
+		return m, cmd
+	}
+}
+
+// handleCallTypeEditNavigation handles navigation in call type edit state
+func (m *Model) handleCallTypeEditNavigation(msgStr string) (tea.Model, tea.Cmd) {
+	if config.IsKey(msgStr, config.KeyUp) {
+		if m.callTypeSelector > 0 {
+			m.callTypeSelector--
+		}
+	} else if config.IsKey(msgStr, config.KeyDown) {
+		options := config.GetCallTypeOptions()
+		if m.callTypeSelector < len(options)-1 {
+			m.callTypeSelector++
+		}
+	} else if config.IsKey(msgStr, config.KeySelect) {
+		return m.handleCallEditSave()
+	} else if config.IsKey(msgStr, config.KeyBack) {
+		m.state = types.StateCallParameterList
+		return m, nil
+	} else if config.IsKey(msgStr, config.KeyReset) {
+		return m.handleResetCurrentParameter()
+	}
+	return m, nil
+}
+
+// handleCallResultNavigation handles navigation in call result state
+func (m *Model) handleCallResultNavigation(msgStr string) (tea.Model, tea.Cmd) {
+	if config.IsKey(msgStr, config.KeySelect) {
+		m.state = types.StateMainMenu
+		return m, nil
+	} else if config.IsKey(msgStr, config.KeyBack) {
+		m.state = types.StateCallParameterList
+		return m, nil
+	}
+	return m, nil
+}
+
+// handleCallHistoryNavigation handles navigation in call history state
+func (m *Model) handleCallHistoryNavigation(msgStr string, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if config.IsKey(msgStr, config.KeySelect) {
+		history := m.historyManager.GetAllCalls()
+		selectedRow := m.historyTable.SelectedRow()
+		if len(selectedRow) > 0 && m.historyTable.Cursor() < len(history) {
+			m.selectedHistoryID = history[m.historyTable.Cursor()].ID
+			m.state = types.StateCallHistoryDetail
+		}
+		return m, nil
+	} else if config.IsKey(msgStr, config.KeyBack) {
+		m.state = types.StateMainMenu
+		return m, nil
+	} else {
+		// Let table handle navigation
+		var cmd tea.Cmd
+		m.historyTable, cmd = m.historyTable.Update(msg)
+		return m, cmd
+	}
+}
+
+// handleHistoryDetailNavigation handles navigation in history detail state
+func (m *Model) handleHistoryDetailNavigation(msgStr string) (tea.Model, tea.Cmd) {
+	if config.IsKey(msgStr, config.KeyBack) {
+		m.state = types.StateCallHistory
+		m.updateHistoryTable()
+		return m, nil
+	}
+	return m, nil
+}
+
+// handleContractsNavigation handles navigation in contracts state
+func (m *Model) handleContractsNavigation(msgStr string, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if config.IsKey(msgStr, config.KeySelect) {
+		contracts := m.historyManager.GetContracts()
+		selectedRow := m.contractsTable.SelectedRow()
+		if len(selectedRow) > 0 && m.contractsTable.Cursor() < len(contracts) {
+			m.selectedContract = contracts[m.contractsTable.Cursor()].Address
+			m.state = types.StateContractDetail
+		}
+		return m, nil
+	} else if config.IsKey(msgStr, config.KeyBack) {
+		m.state = types.StateMainMenu
+		return m, nil
+	} else {
+		// Let table handle navigation
+		var cmd tea.Cmd
+		m.contractsTable, cmd = m.contractsTable.Update(msg)
+		return m, cmd
+	}
+}
+
+// handleContractDetailNavigation handles navigation in contract detail state
+func (m *Model) handleContractDetailNavigation(msgStr string) (tea.Model, tea.Cmd) {
+	if config.IsKey(msgStr, config.KeyBack) {
+		m.state = types.StateContracts
+		m.updateContractsTable()
+		return m, nil
+	}
+	return m, nil
+}
+
+// handleConfirmResetNavigation handles navigation in confirm reset state
+func (m *Model) handleConfirmResetNavigation(msgStr string) (tea.Model, tea.Cmd) {
+	if config.IsKey(msgStr, config.KeySelect) {
+		return m, m.executeReset()
+	} else if config.IsKey(msgStr, config.KeyBack) {
+		m.state = types.StateMainMenu
+		return m, nil
+	}
+	return m, nil
+}
