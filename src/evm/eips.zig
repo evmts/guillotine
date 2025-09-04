@@ -1,6 +1,7 @@
 const primitives = @import("primitives");
 const AccessList = @import("access_list.zig").AccessList;
 const Hardfork = @import("hardfork.zig").Hardfork;
+const ChainType = @import("chain_type.zig").ChainType;
 
 // EIPs is a comptime known configuration of Eip and hardfork specific behavior
 // This struct consolidates all EIP-specific logic for the EVM
@@ -8,6 +9,7 @@ pub const Eips = struct {
     const Self = @This();
 
     hardfork: Hardfork,
+    chain_type: ChainType = .ethereum,
     
     /// EIP-7702: Set EOA account code (Prague)
     /// Allows EOAs to temporarily execute smart contract code for one transaction
@@ -319,6 +321,24 @@ pub const Eips = struct {
         gas: u64,
         refund: u64,
     };
+
+    /// Optimism: Check if L1 cost calculation is enabled
+    /// Available on all Optimism networks (Bedrock and later)
+    pub fn optimism_l1_cost_enabled(self: Self) bool {
+        return self.chain_type.is_optimism();
+    }
+
+    /// Optimism: Check if deposit transactions are enabled
+    /// Available on all Optimism networks
+    pub fn optimism_deposit_tx_enabled(self: Self) bool {
+        return self.chain_type.is_optimism();
+    }
+
+    /// Optimism: Check if L1Block precompile is enabled
+    /// Available on all Optimism networks
+    pub fn optimism_l1_block_precompile_enabled(self: Self) bool {
+        return self.chain_type.is_optimism();
+    }
 };
 
 const std = @import("std");
@@ -799,4 +819,19 @@ test "sstore gas costs" {
     cost = frontier.sstore_gas_cost(1, 1, 1);
     try std.testing.expectEqual(@as(u64, 5000), cost.gas);
     try std.testing.expectEqual(@as(u64, 0), cost.refund);
+}
+
+test "optimism eip integration" {
+    const optimism_eips = Eips{ .hardfork = .CANCUN, .chain_type = .optimism };
+    const ethereum_eips = Eips{ .hardfork = .CANCUN, .chain_type = .ethereum };
+    
+    // Optimism should have L2-specific features enabled
+    try std.testing.expect(optimism_eips.optimism_l1_cost_enabled());
+    try std.testing.expect(optimism_eips.optimism_deposit_tx_enabled());
+    try std.testing.expect(optimism_eips.optimism_l1_block_precompile_enabled());
+    
+    // Ethereum should not have L2 features
+    try std.testing.expect(!ethereum_eips.optimism_l1_cost_enabled());
+    try std.testing.expect(!ethereum_eips.optimism_deposit_tx_enabled());
+    try std.testing.expect(!ethereum_eips.optimism_l1_block_precompile_enabled());
 }

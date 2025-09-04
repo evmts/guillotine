@@ -20,6 +20,7 @@ const Address = primitives.Address;
 // Use the real crypto and build_options modules
 const crypto = @import("crypto");
 const build_options = @import("build_options");
+const l1_block_precompile = @import("l1_block_precompile.zig");
 
 /// Precompile addresses (Ethereum mainnet)
 pub const ECRECOVER_ADDRESS = primitives.Address.from_u256(1);
@@ -42,6 +43,9 @@ pub const BLS12_381_G2_MUL_ADDRESS = primitives.Address.from_u256(0x0F);
 pub const BLS12_381_G2_MULTIEXP_ADDRESS = primitives.Address.from_u256(0x10);
 pub const BLS12_381_PAIRING_ADDRESS = primitives.Address.from_u256(0x11);
 pub const BLS12_381_MAP_FP_TO_G1_ADDRESS = primitives.Address.from_u256(0x12);
+
+/// Optimism L2 precompile addresses
+pub const OPTIMISM_L1_BLOCK_ADDRESS = l1_block_precompile.L1_BLOCK_ADDRESS;
 
 /// Precompile error types
 pub const PrecompileError = error{
@@ -70,6 +74,11 @@ pub const PrecompileOutput = struct {
 
 /// Check if an address is a precompile
 pub fn is_precompile(address: Address) bool {
+    return is_ethereum_precompile(address) or is_optimism_precompile(address);
+}
+
+/// Check if an address corresponds to an Ethereum precompile
+pub fn is_ethereum_precompile(address: Address) bool {
     // Check if the address is one of the known precompile addresses
     // Precompiles are at addresses:
     // 0x01-0x0A: Standard precompiles (ECRECOVER through POINT_EVALUATION)
@@ -83,13 +92,30 @@ pub fn is_precompile(address: Address) bool {
     return address.bytes[19] >= 1 and address.bytes[19] <= 0x12;
 }
 
+/// Check if an address corresponds to an Optimism precompile
+pub fn is_optimism_precompile(address: Address) bool {
+    return l1_block_precompile.is_optimism_precompile(address);
+}
+
 /// Execute a precompile based on its address
-/// Not safe to call without checking is_precompile first
+/// Not safe to call without checking is_precompile first  
+/// For Optimism L1Block precompile, l1_info parameter is required
 pub fn execute_precompile(
     allocator: std.mem.Allocator,
     address: Address,
     input: []const u8,
     gas_limit: u64,
+) PrecompileError!PrecompileOutput {
+    return execute_precompile_with_l1_info(allocator, address, input, gas_limit, null);
+}
+
+/// Execute a precompile with optional L1 block information for Optimism
+pub fn execute_precompile_with_l1_info(
+    allocator: std.mem.Allocator,
+    address: Address,
+    input: []const u8,
+    gas_limit: u64,
+    l1_info: ?l1_block_precompile.L1BlockInfo,
 ) PrecompileError!PrecompileOutput {
     // TODO this should be removed and this method considered unsafe in ReleaseFast
     if (!is_precompile(address)) return PrecompileOutput{
@@ -98,6 +124,31 @@ pub fn execute_precompile(
         .success = false,
     };
     std.debug.assert(is_precompile(address));
+    
+    // Handle Optimism precompiles first
+    if (is_optimism_precompile(address)) {
+        if (l1_block_precompile.is_l1_block_precompile(address)) {
+            const info = l1_info orelse return PrecompileOutput{
+                .output = &.{},
+                .gas_used = gas_limit,
+                .success = false,
+            };
+            const result = l1_block_precompile.execute_l1_block_precompile(allocator, input, gas_limit, info) catch |err| switch (err) {
+                error.OutOfGas => return PrecompileOutput{ .output = &.{}, .gas_used = gas_limit, .success = false },
+                error.OutOfMemory => return PrecompileError.OutOfMemory,
+                error.InvalidInput => return PrecompileError.InvalidInput,
+            };
+            return PrecompileOutput{
+                .output = result.output,
+                .gas_used = result.gas_used,
+                .success = result.success,
+            };
+        }
+        // Future Optimism precompiles would go here
+        return PrecompileOutput{ .output = &.{}, .gas_used = 0, .success = false };
+    }
+    
+    // Handle Ethereum precompiles
     const precompile_id = address.bytes[19];
     return switch (precompile_id) {
         1 => execute_ecrecover(allocator, input, gas_limit),
@@ -1434,4 +1485,54 @@ test "execute_all_precompiles smoke test" {
         // All should at least not error (may fail due to invalid input)
         try testing.expect(result.gas_used <= 100000);
     }
+}
+
+test "optimism precompile integration" {
+    const testing = std.testing;
+    
+    // Test L1Block precompile detection
+    try testing.expect(is_precompile(OPTIMISM_L1_BLOCK_ADDRESS));
+    try testing.expect(is_optimism_precompile(OPTIMISM_L1_BLOCK_ADDRESS));
+    try testing.expect(!is_ethereum_precompile(OPTIMISM_L1_BLOCK_ADDRESS));
+    
+    // Test L1Block precompile execution
+    const l1_info = l1_block_precompile.L1BlockInfo{
+        .number = 12345,
+        .timestamp = 1625097600,
+        .base_fee = 1000000000,
+        .hash = [_]u8{0xab} ** 32,
+        .sequence_number = 1,
+        .batcher_hash = [_]u8{0xcd} ** 32,
+        .l1_fee_overhead = 188,
+        .l1_fee_scalar = 684000,
+    };
+    
+    const result = try execute_precompile_with_l1_info(
+        testing.allocator, 
+        OPTIMISM_L1_BLOCK_ADDRESS, 
+        &[_]u8{}, 
+        100000,
+        l1_info
+    );
+    defer testing.allocator.free(result.output);
+    
+    try testing.expect(result.success);
+    try testing.expectEqual(@as(usize, 256), result.output.len);
+    try testing.expectEqual(@as(u64, l1_block_precompile.L1_BLOCK_GAS_COST), result.gas_used);
+    
+    // Verify first field (L1 block number) in output
+    const decoded_number = @as(u64, @truncate(std.mem.readInt(u256, result.output[0..32], .big)));
+    try testing.expectEqual(@as(u64, 12345), decoded_number);
+}
+
+test "optimism precompile without l1 info fails" {
+    const testing = std.testing;
+    
+    // Calling L1Block precompile without L1 info should fail
+    const result = try execute_precompile(testing.allocator, OPTIMISM_L1_BLOCK_ADDRESS, &[_]u8{}, 100000);
+    defer if (result.output.len > 0) testing.allocator.free(result.output);
+    
+    try testing.expect(!result.success);
+    try testing.expectEqual(@as(usize, 0), result.output.len);
+    try testing.expectEqual(@as(u64, 100000), result.gas_used); // Should consume all gas
 }

@@ -91,6 +91,12 @@ pub const AuthorizationProcessor = @import("authorization_processor.zig").Author
 pub const AuthorizationError = @import("authorization_processor.zig").AuthorizationError;
 pub const kzg_setup = @import("kzg_setup.zig");
 
+// Optimism L2 support
+pub const ChainType = @import("chain_type.zig").ChainType;
+pub const L1Cost = @import("l1_cost.zig");
+pub const L1BlockPrecompile = @import("l1_block_precompile.zig");
+pub const DepositTransaction = @import("deposit_transaction.zig").DepositTransaction;
+
 // Run all tests
 test {
     // Test core modules
@@ -187,6 +193,13 @@ test "Include C API tests" {
 test "Include fusion tests" {
     // TODO: These fusion test files are currently missing
     // _ = @import("test_fusion_e2e.zig");
+    
+    // Test Optimism L2 modules
+    _ = ChainType;
+    _ = L1Cost;
+    _ = L1BlockPrecompile;
+    _ = DepositTransaction;
+    _ = @import("optimism_integration_test.zig");
 }
 
 test "Include dedicated test modules" {

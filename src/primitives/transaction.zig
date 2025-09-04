@@ -103,6 +103,9 @@ const Hash = hash.Hash;
 const Authorization = authorization.Authorization;
 const Allocator = std.mem.Allocator;
 
+// Re-export deposit transaction from EVM module for L2 support
+pub const DepositTransaction = @import("../evm/deposit_transaction.zig").DepositTransaction;
+
 // Transaction error types
 pub const TransactionError = error{
     InvalidTransactionType,
@@ -117,6 +120,8 @@ pub const TransactionType = enum(u8) {
     eip1559 = 0x02,
     eip4844 = 0x03,
     eip7702 = 0x04,
+    // L2 specific transaction types
+    optimism_deposit = 0x7E, // Optimism deposit transaction
 };
 
 // Legacy transaction structure
@@ -578,4 +583,22 @@ test "decode mainnet transaction" {
 
     // For now, just verify we can handle the concept
     try testing.expect(true);
+}
+
+test "optimism deposit transaction type" {
+    // Test that deposit transaction type is correctly defined
+    try testing.expectEqual(@as(u8, 0x7E), @intFromEnum(TransactionType.optimism_deposit));
+    
+    // Test that all transaction types are distinct
+    const types = [_]TransactionType{ 
+        .legacy, .eip2930, .eip1559, .eip4844, .eip7702, .optimism_deposit 
+    };
+    
+    for (types, 0..) |tx_type_1, i| {
+        for (types, 0..) |tx_type_2, j| {
+            if (i != j) {
+                try testing.expect(@intFromEnum(tx_type_1) != @intFromEnum(tx_type_2));
+            }
+        }
+    }
 }
