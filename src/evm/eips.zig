@@ -288,6 +288,31 @@ pub const Eips = struct {
         return self.hardfork.isAtLeast(.CANCUN); // EIP-4844
     }
     
+    /// Check if SELFDESTRUCT opcode is available (always true but behavior varies)
+    pub fn has_selfdestruct(self: Self) bool {
+        return true; // Always available but behavior changes with EIP-6780
+    }
+    
+    /// Check if access lists are supported
+    pub fn has_access_list(self: Self) bool {
+        return self.hardfork.isAtLeast(.BERLIN); // EIP-2929
+    }
+    
+    /// Check if logs are supported (always available since Frontier)
+    pub fn has_logs(self: Self) bool {
+        return true; // Always available
+    }
+    
+    /// Check if CREATE2 opcode is available
+    pub fn has_create2(self: Self) bool {
+        return self.hardfork.isAtLeast(.CONSTANTINOPLE); // EIP-1014
+    }
+    
+    /// Check if BLOBHASH and BLOBBASEFEE opcodes are available
+    pub fn has_blobhash(self: Self) bool {
+        return self.hardfork.isAtLeast(.CANCUN); // EIP-4844
+    }
+    
     /// Get SSTORE gas costs based on hardfork and state
     pub fn sstore_gas_cost(self: Self, current: primitives.U256, new: primitives.U256, original: primitives.U256) SstoreGasCost {
         _ = original; // Will be used for EIP-2200
@@ -799,4 +824,140 @@ test "sstore gas costs" {
     cost = frontier.sstore_gas_cost(1, 1, 1);
     try std.testing.expectEqual(@as(u64, 5000), cost.gas);
     try std.testing.expectEqual(@as(u64, 0), cost.refund);
+}
+
+test "conditional feature detection - has_selfdestruct" {
+    // SELFDESTRUCT is always available but behavior changes
+    const frontier = Eips{ .hardfork = Hardfork.FRONTIER };
+    const cancun = Eips{ .hardfork = Hardfork.CANCUN };
+    const prague = Eips{ .hardfork = Hardfork.PRAGUE };
+    
+    try std.testing.expect(frontier.has_selfdestruct());
+    try std.testing.expect(cancun.has_selfdestruct());
+    try std.testing.expect(prague.has_selfdestruct());
+}
+
+test "conditional feature detection - has_access_list" {
+    const istanbul = Eips{ .hardfork = Hardfork.ISTANBUL };
+    const berlin = Eips{ .hardfork = Hardfork.BERLIN };
+    const london = Eips{ .hardfork = Hardfork.LONDON };
+    const cancun = Eips{ .hardfork = Hardfork.CANCUN };
+    
+    // Access lists only available from Berlin onwards (EIP-2929)
+    try std.testing.expect(!istanbul.has_access_list());
+    try std.testing.expect(berlin.has_access_list());
+    try std.testing.expect(london.has_access_list());
+    try std.testing.expect(cancun.has_access_list());
+}
+
+test "conditional feature detection - has_logs" {
+    // Logs are always available since Frontier
+    const frontier = Eips{ .hardfork = Hardfork.FRONTIER };
+    const homestead = Eips{ .hardfork = Hardfork.HOMESTEAD };
+    const berlin = Eips{ .hardfork = Hardfork.BERLIN };
+    const cancun = Eips{ .hardfork = Hardfork.CANCUN };
+    const prague = Eips{ .hardfork = Hardfork.PRAGUE };
+    
+    try std.testing.expect(frontier.has_logs());
+    try std.testing.expect(homestead.has_logs());
+    try std.testing.expect(berlin.has_logs());
+    try std.testing.expect(cancun.has_logs());
+    try std.testing.expect(prague.has_logs());
+}
+
+test "conditional feature detection - has_create2" {
+    const byzantium = Eips{ .hardfork = Hardfork.BYZANTIUM };
+    const constantinople = Eips{ .hardfork = Hardfork.CONSTANTINOPLE };
+    const petersburg = Eips{ .hardfork = Hardfork.PETERSBURG };
+    const berlin = Eips{ .hardfork = Hardfork.BERLIN };
+    const cancun = Eips{ .hardfork = Hardfork.CANCUN };
+    
+    // CREATE2 available from Constantinople onwards (EIP-1014)
+    try std.testing.expect(!byzantium.has_create2());
+    try std.testing.expect(constantinople.has_create2());
+    try std.testing.expect(petersburg.has_create2());
+    try std.testing.expect(berlin.has_create2());
+    try std.testing.expect(cancun.has_create2());
+}
+
+test "conditional feature detection - has_blobhash" {
+    const shanghai = Eips{ .hardfork = Hardfork.SHANGHAI };
+    const cancun = Eips{ .hardfork = Hardfork.CANCUN };
+    const prague = Eips{ .hardfork = Hardfork.PRAGUE };
+    
+    // BLOBHASH and BLOBBASEFEE available from Cancun onwards (EIP-4844)
+    try std.testing.expect(!shanghai.has_blobhash());
+    try std.testing.expect(cancun.has_blobhash());
+    try std.testing.expect(prague.has_blobhash());
+}
+
+test "conditional feature matrix across hardforks" {
+    const hardforks = [_]struct { hardfork: Hardfork, name: []const u8 }{
+        .{ .hardfork = Hardfork.FRONTIER, .name = "FRONTIER" },
+        .{ .hardfork = Hardfork.HOMESTEAD, .name = "HOMESTEAD" },
+        .{ .hardfork = Hardfork.BYZANTIUM, .name = "BYZANTIUM" },
+        .{ .hardfork = Hardfork.CONSTANTINOPLE, .name = "CONSTANTINOPLE" },
+        .{ .hardfork = Hardfork.PETERSBURG, .name = "PETERSBURG" },
+        .{ .hardfork = Hardfork.ISTANBUL, .name = "ISTANBUL" },
+        .{ .hardfork = Hardfork.BERLIN, .name = "BERLIN" },
+        .{ .hardfork = Hardfork.LONDON, .name = "LONDON" },
+        .{ .hardfork = Hardfork.SHANGHAI, .name = "SHANGHAI" },
+        .{ .hardfork = Hardfork.CANCUN, .name = "CANCUN" },
+        .{ .hardfork = Hardfork.PRAGUE, .name = "PRAGUE" },
+    };
+    
+    for (hardforks) |hf| {
+        const eips = Eips{ .hardfork = hf.hardfork };
+        
+        // Verify feature availability is consistent with hardfork progression
+        const has_access = eips.has_access_list();
+        const has_create2 = eips.has_create2();
+        const has_push0 = eips.has_push0();
+        const has_basefee = eips.has_basefee();
+        const has_transient = eips.has_transient_storage();
+        const has_mcopy = eips.has_mcopy();
+        const has_blob = eips.has_blob_transactions();
+        const has_blobhash = eips.has_blobhash();
+        
+        // Always available features
+        try std.testing.expect(eips.has_selfdestruct());
+        try std.testing.expect(eips.has_logs());
+        
+        // Feature progression validation
+        if (hf.hardfork.isAtLeast(.BERLIN)) {
+            try std.testing.expect(has_access);
+        } else {
+            try std.testing.expect(!has_access);
+        }
+        
+        if (hf.hardfork.isAtLeast(.CONSTANTINOPLE)) {
+            try std.testing.expect(has_create2);
+        } else {
+            try std.testing.expect(!has_create2);
+        }
+        
+        if (hf.hardfork.isAtLeast(.SHANGHAI)) {
+            try std.testing.expect(has_push0);
+        } else {
+            try std.testing.expect(!has_push0);
+        }
+        
+        if (hf.hardfork.isAtLeast(.LONDON)) {
+            try std.testing.expect(has_basefee);
+        } else {
+            try std.testing.expect(!has_basefee);
+        }
+        
+        if (hf.hardfork.isAtLeast(.CANCUN)) {
+            try std.testing.expect(has_transient);
+            try std.testing.expect(has_mcopy);
+            try std.testing.expect(has_blob);
+            try std.testing.expect(has_blobhash);
+        } else {
+            try std.testing.expect(!has_transient);
+            try std.testing.expect(!has_mcopy);
+            try std.testing.expect(!has_blob);
+            try std.testing.expect(!has_blobhash);
+        }
+    }
 }
