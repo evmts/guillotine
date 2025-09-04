@@ -60,6 +60,7 @@ pub const BytecodeConfig = @import("bytecode_config.zig").BytecodeConfig;
 pub const Bytecode = @import("bytecode.zig").Bytecode;
 pub const BytecodeStats = @import("bytecode_stats.zig").BytecodeStats;
 pub const bytecode = @import("bytecode.zig");
+pub const BytecodeDisassemblyC = @import("bytecode_disassembly_c.zig").BytecodeDisassemblyC;
 
 // Dispatch module
 pub const dispatch = @import("dispatch.zig");

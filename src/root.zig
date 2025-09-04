@@ -821,6 +821,33 @@ pub const DefaultEvm = evm_root.DefaultEvm;
 pub const Primitives = primitives;
 pub const Provider = provider;
 
+// Bytecode disassembly C API exports
+const BytecodeDisassemblyC = evm_root.BytecodeDisassemblyC;
+
+// Export the C types for external usage
+pub const CDisasmInstruction = BytecodeDisassemblyC.CInstruction;
+pub const CDisasmBasicBlock = BytecodeDisassemblyC.CBasicBlock;
+pub const CDisasmStats = BytecodeDisassemblyC.CStats;
+pub const CDisasmResult = BytecodeDisassemblyC.CResult;
+
+// Export bytecode disassembly functions for C FFI
+export fn evm_disasm_analyze(
+    data: [*]const u8,
+    data_len: usize,
+    result_out: *CDisasmResult
+) c_int {
+    return BytecodeDisassemblyC.analyze(data, data_len, result_out);
+}
+
+export fn evm_disasm_free_result(result: *CDisasmResult) void {
+    BytecodeDisassemblyC.free_result(result);
+}
+
+export fn evm_disasm_error_string(error_code: c_int) [*:0]const u8 {
+    return BytecodeDisassemblyC.error_string(error_code);
+}
+
+
 test "Evm module" {
     std.testing.refAllDecls(DefaultEvm);
 }

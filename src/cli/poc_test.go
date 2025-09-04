@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/hex"
 	"testing"
+	"unsafe"
 	
 	"github.com/evmts/guillotine/bindings/go/evm"
 	"github.com/evmts/guillotine/bindings/go/primitives"
@@ -573,5 +574,302 @@ func TestEVMLogsAndEvents(t *testing.T) {
 	} else {
 		t.Error("No logs captured")
 	}
+	})
+}
+
+// ============================================================================
+// BYTECODE DISASSEMBLY POC - Direct C API Integration
+// ============================================================================
+
+/*
+#cgo CFLAGS: -I../../
+#cgo LDFLAGS: -L../../zig-out/lib -lguillotine
+
+#include <stdint.h>
+#include <stdlib.h>
+
+// C-compatible instruction representation (matches CInstruction in bytecode_disassembly_c.zig)
+typedef struct {
+    uint32_t pc;
+    const char* opcode_name;
+    uint8_t opcode_hex;
+    uint16_t gas_cost;
+    uint8_t stack_inputs;
+    uint8_t stack_outputs;
+    uint64_t push_value_low;
+    uint64_t push_value_high;
+    uint64_t push_value_extra_high;
+    uint64_t push_value_top;
+    uint8_t has_push_value;
+} CInstruction;
+
+// C-compatible basic block representation
+typedef struct {
+    uint32_t start;
+    uint32_t end;
+} CBasicBlock;
+
+// C-compatible statistics structure
+typedef struct {
+    uint32_t original_size;
+    uint32_t dispatch_size;
+    uint32_t gas_first_block;
+    uint32_t jumpdest_count;
+    uint32_t basic_block_count;
+} CStats;
+
+// C-compatible complete result structure
+typedef struct {
+    CInstruction* instructions;
+    uint32_t instruction_count;
+    uint32_t* jumpdests;
+    uint32_t jumpdest_count;
+    CBasicBlock* basic_blocks;
+    uint32_t basic_block_count;
+    CStats stats;
+} CResult;
+
+// Error codes (matches BytecodeDisassemblyC constants)
+#define EVM_DISASM_SUCCESS 0
+#define EVM_DISASM_ERROR_NULL_POINTER -1
+#define EVM_DISASM_ERROR_INVALID_BYTECODE -2
+#define EVM_DISASM_ERROR_OUT_OF_MEMORY -3
+
+// Function prototypes for the C exports from root.zig
+extern int evm_disasm_analyze(const uint8_t* data, size_t data_len, CResult* result_out);
+extern void evm_disasm_free_result(CResult* result);
+extern const char* evm_disasm_error_string(int error_code);
+*/
+import "C"
+
+func TestBytecodeDisassemblyDirectAPI(t *testing.T) {
+	t.Run("Simple PUSH and arithmetic operations", func(t *testing.T) {
+		// Test bytecode: PUSH1 0x42, PUSH1 0x03, ADD, PUSH1 0x00, MSTORE, PUSH1 0x20, PUSH1 0x00, RETURN
+		// Same pattern as used in EVM tests above
+		bytecode := []byte{
+			0x60, 0x42, // PUSH1 0x42
+			0x60, 0x03, // PUSH1 0x03  
+			0x01,       // ADD
+			0x60, 0x00, // PUSH1 0x00
+			0x52,       // MSTORE
+			0x60, 0x20, // PUSH1 0x20
+			0x60, 0x00, // PUSH1 0x00
+			0xf3,       // RETURN
+		}
+
+		var result C.CResult
+		
+		// Call the C API directly
+		rc := C.evm_disasm_analyze(
+			(*C.uint8_t)(unsafe.Pointer(&bytecode[0])),
+			C.size_t(len(bytecode)),
+			&result,
+		)
+		defer C.evm_disasm_free_result(&result)
+
+		// Verify success
+		if rc != C.EVM_DISASM_SUCCESS {
+			errorStr := C.GoString(C.evm_disasm_error_string(rc))
+			t.Fatalf("Disassembly failed with error %d: %s", rc, errorStr)
+		}
+
+		// Verify we got the expected number of instructions
+		expectedInstructions := uint32(8) // 8 instructions in the bytecode
+		if result.instruction_count != expectedInstructions {
+			t.Errorf("Expected %d instructions, got %d", expectedInstructions, result.instruction_count)
+		}
+
+		// Verify statistics
+		if result.stats.original_size != uint32(len(bytecode)) {
+			t.Errorf("Expected original_size %d, got %d", len(bytecode), result.stats.original_size)
+		}
+
+		// Convert C array to Go slice for easier access
+		instructions := (*[256]C.CInstruction)(unsafe.Pointer(result.instructions))[:result.instruction_count:result.instruction_count]
+
+		// Verify first instruction (PUSH1 0x42)
+		if instructions[0].opcode_hex != 0x60 {
+			t.Errorf("Expected first opcode 0x60 (PUSH1), got 0x%02x", instructions[0].opcode_hex)
+		}
+		if instructions[0].has_push_value != 1 {
+			t.Errorf("Expected first instruction to have push value")
+		}
+		if instructions[0].push_value_low != 0x42 {
+			t.Errorf("Expected first instruction push value 0x42, got 0x%x", instructions[0].push_value_low)
+		}
+
+		// Verify instruction names
+		firstName := C.GoString(instructions[0].opcode_name)
+		if firstName != "PUSH1" {
+			t.Errorf("Expected first instruction name 'PUSH1', got '%s'", firstName)
+		}
+
+		// Verify ADD instruction (index 2)
+		if instructions[2].opcode_hex != 0x01 {
+			t.Errorf("Expected ADD opcode 0x01, got 0x%02x", instructions[2].opcode_hex)
+		}
+		addName := C.GoString(instructions[2].opcode_name)
+		if addName != "ADD" {
+			t.Errorf("Expected ADD instruction name 'ADD', got '%s'", addName)
+		}
+
+		// Verify RETURN instruction (last)
+		lastIdx := result.instruction_count - 1
+		if instructions[lastIdx].opcode_hex != 0xf3 {
+			t.Errorf("Expected RETURN opcode 0xf3, got 0x%02x", instructions[lastIdx].opcode_hex)
+		}
+
+		t.Logf("Successfully disassembled %d instructions", result.instruction_count)
+		t.Logf("Original size: %d bytes, dispatch size: %d", result.stats.original_size, result.stats.dispatch_size)
+		t.Logf("Basic blocks: %d, jumpdests: %d", result.stats.basic_block_count, result.stats.jumpdest_count)
+	})
+
+	t.Run("Bytecode with JUMPDEST instructions", func(t *testing.T) {
+		// Test bytecode with jump destinations: JUMPDEST, PUSH1 0x01, JUMPDEST, STOP
+		bytecode := []byte{
+			0x5b,       // JUMPDEST (pc=0)
+			0x60, 0x01, // PUSH1 0x01
+			0x5b,       // JUMPDEST (pc=3)
+			0x00,       // STOP
+		}
+
+		var result C.CResult
+		
+		rc := C.evm_disasm_analyze(
+			(*C.uint8_t)(unsafe.Pointer(&bytecode[0])),
+			C.size_t(len(bytecode)),
+			&result,
+		)
+		defer C.evm_disasm_free_result(&result)
+
+		if rc != C.EVM_DISASM_SUCCESS {
+			errorStr := C.GoString(C.evm_disasm_error_string(rc))
+			t.Fatalf("Disassembly failed with error %d: %s", rc, errorStr)
+		}
+
+		// Should have 2 jumpdests
+		expectedJumpdests := uint32(2)
+		if result.jumpdest_count != expectedJumpdests {
+			t.Errorf("Expected %d jumpdests, got %d", expectedJumpdests, result.jumpdest_count)
+		}
+
+		// Convert C array to Go slice for jumpdests
+		if result.jumpdest_count > 0 {
+			jumpdests := (*[256]C.uint32_t)(unsafe.Pointer(result.jumpdests))[:result.jumpdest_count:result.jumpdest_count]
+			
+			// Verify jumpdest positions
+			if jumpdests[0] != 0 {
+				t.Errorf("Expected first jumpdest at pc=0, got pc=%d", jumpdests[0])
+			}
+			if jumpdests[1] != 3 {
+				t.Errorf("Expected second jumpdest at pc=3, got pc=%d", jumpdests[1])
+			}
+			
+			t.Logf("Found jumpdests at PC positions: %v", []uint32{uint32(jumpdests[0]), uint32(jumpdests[1])})
+		}
+
+		// Verify basic block information
+		if result.basic_block_count == 0 {
+			t.Error("Expected at least one basic block")
+		} else {
+			basicBlocks := (*[256]C.CBasicBlock)(unsafe.Pointer(result.basic_blocks))[:result.basic_block_count:result.basic_block_count]
+			t.Logf("Found %d basic blocks", result.basic_block_count)
+			for i, block := range basicBlocks {
+				t.Logf("  Block %d: start=%d, end=%d", i, block.start, block.end)
+			}
+		}
+	})
+
+	t.Run("Complex contract bytecode", func(t *testing.T) {
+		// Test more complex bytecode similar to what's used in contract deployment
+		// Contract that stores a value and returns it: PUSH1 0x42, PUSH1 0x00, SSTORE, PUSH1 0x00, SLOAD, PUSH1 0x00, MSTORE, PUSH1 0x20, PUSH1 0x00, RETURN
+		bytecode := []byte{
+			0x60, 0x42, // PUSH1 0x42
+			0x60, 0x00, // PUSH1 0x00  
+			0x55,       // SSTORE (store 0x42 at slot 0)
+			0x60, 0x00, // PUSH1 0x00
+			0x54,       // SLOAD (load from slot 0)
+			0x60, 0x00, // PUSH1 0x00
+			0x52,       // MSTORE (store in memory)
+			0x60, 0x20, // PUSH1 0x20
+			0x60, 0x00, // PUSH1 0x00
+			0xf3,       // RETURN
+		}
+
+		var result C.CResult
+		
+		rc := C.evm_disasm_analyze(
+			(*C.uint8_t)(unsafe.Pointer(&bytecode[0])),
+			C.size_t(len(bytecode)),
+			&result,
+		)
+		defer C.evm_disasm_free_result(&result)
+
+		if rc != C.EVM_DISASM_SUCCESS {
+			errorStr := C.GoString(C.evm_disasm_error_string(rc))
+			t.Fatalf("Disassembly failed with error %d: %s", rc, errorStr)
+		}
+
+		// Verify we get the right number of instructions
+		expectedInstructions := uint32(10)
+		if result.instruction_count != expectedInstructions {
+			t.Errorf("Expected %d instructions, got %d", expectedInstructions, result.instruction_count)
+		}
+
+		// Convert instructions for detailed verification
+		instructions := (*[256]C.CInstruction)(unsafe.Pointer(result.instructions))[:result.instruction_count:result.instruction_count]
+
+		// Verify storage operations
+		sstoreFound := false
+		sloadFound := false
+		
+		for i := uint32(0); i < result.instruction_count; i++ {
+			opcodeName := C.GoString(instructions[i].opcode_name)
+			switch instructions[i].opcode_hex {
+			case 0x55: // SSTORE
+				if opcodeName != "SSTORE" {
+					t.Errorf("Expected SSTORE name, got '%s'", opcodeName)
+				}
+				sstoreFound = true
+				t.Logf("Found SSTORE at PC %d", instructions[i].pc)
+			case 0x54: // SLOAD
+				if opcodeName != "SLOAD" {
+					t.Errorf("Expected SLOAD name, got '%s'", opcodeName)  
+				}
+				sloadFound = true
+				t.Logf("Found SLOAD at PC %d", instructions[i].pc)
+			}
+		}
+
+		if !sstoreFound {
+			t.Error("Expected to find SSTORE instruction")
+		}
+		if !sloadFound {
+			t.Error("Expected to find SLOAD instruction")
+		}
+
+		// Log comprehensive results
+		t.Logf("Complex bytecode analysis:")
+		t.Logf("  Instructions: %d", result.instruction_count)
+		t.Logf("  Basic blocks: %d", result.basic_block_count)  
+		t.Logf("  Jumpdests: %d", result.jumpdest_count)
+		t.Logf("  Original size: %d bytes", result.stats.original_size)
+		t.Logf("  Gas for first block: %d", result.stats.gas_first_block)
+	})
+
+	t.Run("Error handling - invalid bytecode", func(t *testing.T) {
+		// Test error handling with empty bytecode
+		var result C.CResult
+		
+		rc := C.evm_disasm_analyze(nil, 0, &result)
+		// Don't defer cleanup since this should fail
+		
+		if rc == C.EVM_DISASM_SUCCESS {
+			C.evm_disasm_free_result(&result) // Clean up if it unexpectedly succeeded
+			t.Error("Expected failure with empty bytecode, but got success")
+		} else {
+			errorStr := C.GoString(C.evm_disasm_error_string(rc))
+			t.Logf("Properly handled error case: code=%d, message='%s'", rc, errorStr)
+		}
 	})
 }
