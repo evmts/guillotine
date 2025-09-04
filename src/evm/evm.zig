@@ -40,6 +40,26 @@ pub fn Evm(comptime config: EvmConfig) type {
     return struct {
         const Self = @This();
 
+        // Module extractions for better code organization
+        const evm_context = @import("evm_context.zig");
+        const Context = evm_context.Context(Self);
+        
+        // TODO: Additional planned module extractions:
+        // const evm_transaction = @import("evm_transaction.zig");
+        // const Transaction = evm_transaction.Transaction(Self);
+        // 
+        // const evm_execution = @import("evm_execution.zig"); 
+        // const Execution = evm_execution.Execution(Self);
+        //
+        // const evm_state = @import("evm_state.zig");
+        // const State = evm_state.State(Self);
+        //
+        // const evm_preflight = @import("evm_preflight.zig");
+        // const Preflight = evm_preflight.Preflight(Self);
+        //
+        // const evm_host = @import("evm_host.zig");
+        // const Host = evm_host.Host(Self);
+
         /// Frame type for the evm
         pub const Frame = @import("frame.zig").Frame(config.frame_config());
         /// Static wrappers for EIP-214 (STATICCALL) constraint enforcement
@@ -311,6 +331,8 @@ pub fn Evm(comptime config: EvmConfig) type {
         /// Executes exactly like `call()` but reverts all state changes at the end,
         /// returning the result as if the call had been executed. Useful for
         /// gas estimation, testing outcomes, or previewing transaction effects.
+        ///
+        /// TODO: Move to evm_transaction.zig - Transaction.simulate()
         pub fn simulate(self: *Self, params: CallParams) CallResult {
             // Create a snapshot before execution
             const snapshot_id = self.journal.create_snapshot();
@@ -340,6 +362,8 @@ pub fn Evm(comptime config: EvmConfig) type {
         /// This is the main entry point that routes to specific handlers based
         /// on the operation type (CALL, CREATE, etc). Manages transaction-level
         /// state including logs and ensures proper cleanup.
+        ///
+        /// TODO: Move to evm_transaction.zig - Transaction.call()
         pub fn call(self: *Self, params: CallParams) CallResult {
             params.validate() catch return CallResult.failure(0);
             
@@ -1305,6 +1329,7 @@ pub fn Evm(comptime config: EvmConfig) type {
         }
 
         /// Execute nested EVM call - used for calls from within the EVM
+        /// TODO: Move to evm_execution.zig - Execution.inner_call()
         pub fn inner_call(self: *Self, params: CallParams) !CallResult {
             return self.call(params);
         }
@@ -1360,7 +1385,7 @@ pub fn Evm(comptime config: EvmConfig) type {
 
         /// Get block information
         pub fn get_block_info(self: *Self) BlockInfo {
-            return self.block_info;
+            return Context.get_block_info(self);
         }
 
         /// Emit log event
@@ -1552,12 +1577,12 @@ pub fn Evm(comptime config: EvmConfig) type {
 
         /// Check if hardfork is at least the target
         pub fn is_hardfork_at_least(self: *Self, target: Hardfork) bool {
-            return @intFromEnum(self.hardfork_config) >= @intFromEnum(target);
+            return Context.is_hardfork_at_least(self, target);
         }
 
         /// Get current hardfork (deprecated - use EIPs)
         pub fn get_hardfork(self: *Self) Hardfork {
-            return self.hardfork_config;
+            return Context.get_hardfork(self);
         }
 
         /// Get the call depth for the current frame
