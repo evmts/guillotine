@@ -1,10 +1,9 @@
-package app
+package evm
 
 import (
 	"testing"
 	"guillotine-cli/internal/config"
 	"guillotine-cli/internal/types"
-	"guillotine-cli/internal/utils"
 )
 
 func TestValidateCallParameters(t *testing.T) {
@@ -12,7 +11,7 @@ func TestValidateCallParameters(t *testing.T) {
 		name        string
 		params      types.CallParametersStrings
 		expectError bool
-		errorType   config.InputParamErrorType
+		errorType   types.InputParamErrorType
 	}{
 		{
 			name: "Valid parameters",
@@ -39,7 +38,7 @@ func TestValidateCallParameters(t *testing.T) {
 				Salt:      "0x0000000000000000000000000000000000000000000000000000000000000000",
 			},
 			expectError: true,
-			errorType:   config.ErrorCallTypeRequired,
+			errorType:   types.ErrorCallTypeRequired,
 		},
 		{
 			name: "Invalid caller address",
@@ -53,7 +52,7 @@ func TestValidateCallParameters(t *testing.T) {
 				Salt:      "0x0000000000000000000000000000000000000000000000000000000000000000",
 			},
 			expectError: true,
-			errorType:   config.ErrorInvalidCallerAddress,
+			errorType:   types.ErrorInvalidCallerAddress,
 		},
 		{
 			name: "Invalid gas limit",
@@ -67,7 +66,7 @@ func TestValidateCallParameters(t *testing.T) {
 				Salt:      "0x0000000000000000000000000000000000000000000000000000000000000000",
 			},
 			expectError: true,
-			errorType:   config.ErrorInvalidGasLimit,
+			errorType:   types.ErrorInvalidGasLimit,
 		},
 		{
 			name: "Invalid input data",
@@ -81,13 +80,14 @@ func TestValidateCallParameters(t *testing.T) {
 				Salt:      "0x0000000000000000000000000000000000000000000000000000000000000000",
 			},
 			expectError: true,
-			errorType:   config.ErrorInvalidInputData,
+			errorType:   types.ErrorInvalidInputData,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := utils.ValidateCallParameters(tt.params)
+			validator := NewCallValidator()
+			err := validator.ValidateCallParameters(tt.params)
 			
 			if tt.expectError {
 				if err == nil {
@@ -96,7 +96,7 @@ func TestValidateCallParameters(t *testing.T) {
 				}
 				
 				// Check if it's the right type of error
-				if inputErr, ok := err.(config.InputParamError); ok {
+				if inputErr, ok := err.(types.InputParamError); ok {
 					if inputErr.Type != tt.errorType {
 						t.Errorf("Expected error type %d, got %d", tt.errorType, inputErr.Type)
 					}
@@ -117,25 +117,26 @@ func TestValidateField(t *testing.T) {
 		field       string
 		value       string
 		expectError bool
-		errorType   config.InputParamErrorType
+		errorType   types.InputParamErrorType
 	}{
 		{config.CallParamCaller, "0x0102030405060708090a0b0c0d0e0f1011121314", false, 0},
-		{config.CallParamCaller, "invalid", true, config.ErrorInvalidCallerAddress},
+		{config.CallParamCaller, "invalid", true, types.ErrorInvalidCallerAddress},
 		{config.CallParamTarget, "0x0102030405060708090a0b0c0d0e0f1011121314", false, 0},
-		{config.CallParamTarget, "invalid", true, config.ErrorInvalidTargetAddress},
+		{config.CallParamTarget, "invalid", true, types.ErrorInvalidTargetAddress},
 		{config.CallParamValue, "123", false, 0},
-		{config.CallParamValue, "invalid", true, config.ErrorInvalidValue},
+		{config.CallParamValue, "invalid", true, types.ErrorInvalidValue},
 		{config.CallParamGasLimit, "100000", false, 0},
-		{config.CallParamGasLimit, "invalid", true, config.ErrorInvalidGasLimit},
+		{config.CallParamGasLimit, "invalid", true, types.ErrorInvalidGasLimit},
 		{config.CallParamInput, "0x", false, 0},
-		{config.CallParamInput, "invalid", true, config.ErrorInvalidInputData},
+		{config.CallParamInput, "invalid", true, types.ErrorInvalidInputData},
 		{config.CallParamSalt, "0x0000000000000000000000000000000000000000000000000000000000000000", false, 0},
-		{config.CallParamSalt, "invalid", true, config.ErrorInvalidSalt},
+		{config.CallParamSalt, "invalid", true, types.ErrorInvalidSalt},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.field+"_"+tt.value, func(t *testing.T) {
-			err := utils.ValidateField(tt.field, tt.value)
+			validator := NewCallValidator()
+			err := validator.ValidateField(tt.field, tt.value)
 			
 			if tt.expectError {
 				if err == nil {
@@ -143,7 +144,7 @@ func TestValidateField(t *testing.T) {
 					return
 				}
 				
-				if inputErr, ok := err.(config.InputParamError); ok {
+				if inputErr, ok := err.(types.InputParamError); ok {
 					if inputErr.Type != tt.errorType {
 						t.Errorf("Expected error type %d, got %d", tt.errorType, inputErr.Type)
 					}

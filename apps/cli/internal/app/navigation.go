@@ -82,7 +82,7 @@ func (m *Model) handleCallParamListNavigation(msgStr string) (tea.Model, tea.Cmd
 			m.callParamCursor--
 		}
 	} else if config.IsKey(msgStr, config.KeyDown) {
-		params := m.callParams.GetParams()
+		params := GetCallParams(m.callParams)
 		if m.callParamCursor < len(params)-1 {
 			m.callParamCursor++
 		}

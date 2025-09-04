@@ -1,8 +1,7 @@
-package app
+package evm
 
 import (
 	"fmt"
-	"guillotine-cli/internal/utils"
 	"sync"
 
 	"github.com/evmts/guillotine/bindings/go/evm"
@@ -77,7 +76,7 @@ func (vm *VMManager) GetCode(address string) ([]byte, error) {
 	}
 
 	// Parse address string to primitives.Address
-	addr, err := utils.ParseEthereumAddress(address)
+	addr, err := ParseEthereumAddress(address)
 	if err != nil {
 		return nil, fmt.Errorf("invalid address format: %w", err)
 	}

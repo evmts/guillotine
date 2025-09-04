@@ -2,7 +2,7 @@ package ui
 
 import (
 	"fmt"
-	"guillotine-cli/internal/utils"
+	"guillotine-cli/internal/core/evm"
 	"regexp"
 	"strconv"
 	"strings"
@@ -36,7 +36,7 @@ func PasteToField(fieldType string) (string, error) {
 
 	switch fieldType {
 	case "address":
-		if utils.IsValidAddress(cleaned) {
+		if evm.IsValidAddress(cleaned) {
 			clipboardMgr.lastPasted = cleaned
 			return cleaned, nil
 		}
@@ -47,10 +47,10 @@ func PasteToField(fieldType string) (string, error) {
 		return "", fmt.Errorf("invalid address format in clipboard")
 
 	case "hex":
-		if utils.IsValidHex(cleaned) {
+		if evm.IsValidHex(cleaned) {
 			return cleaned, nil
 		}
-		if utils.IsValidHex("0x" + cleaned) {
+		if evm.IsValidHex("0x" + cleaned) {
 			return "0x" + cleaned, nil
 		}
 		return "", fmt.Errorf("invalid hex format in clipboard")

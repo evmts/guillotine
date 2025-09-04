@@ -1,44 +1,12 @@
-package types
+package app
 
 import (
-	"time"
-	
 	"guillotine-cli/internal/config"
-	"github.com/evmts/guillotine/bindings/go/evm"
+	"guillotine-cli/internal/types"
 )
 
-type AppState int
-
-const (
-	StateMainMenu AppState = iota
-	StateCallParameterList
-	StateCallParameterEdit
-	StateCallTypeEdit
-	StateCallExecuting
-	StateCallResult
-	StateCallHistory
-	StateCallHistoryDetail
-	StateContracts
-	StateContractDetail
-	StateConfirmReset
-)
-
-type CallParameter struct {
-	Name  string
-	Value string
-}
-
-type CallParameters struct {
-	CallType   string
-	Caller     string
-	Target     string
-	Value      string
-	InputData  string
-	GasLimit   string
-	Salt       string
-}
-
-func (cp *CallParameters) GetParams() []CallParameter {
+// GetCallParams returns the list of parameters based on call type
+func GetCallParams(cp types.CallParameters) []types.CallParameter {
 	// Define parameter visibility rules based on call type
 	paramConfig := []struct {
 		name      string
@@ -89,21 +57,22 @@ func (cp *CallParameters) GetParams() []CallParameter {
 		},
 	}
 	
-	params := []CallParameter{}
+	params := []types.CallParameter{}
 	for _, cfg := range paramConfig {
 		if cfg.showWhen(cp.CallType) {
 			paramName := cfg.name
 			if cfg.nameFunc != nil {
 				paramName = cfg.nameFunc(cp.CallType)
 			}
-			params = append(params, CallParameter{Name: paramName, Value: cfg.value})
+			params = append(params, types.CallParameter{Name: paramName, Value: cfg.value})
 		}
 	}
 	
 	return params
 }
 
-func (cp *CallParameters) SetParam(name, value string) {
+// SetCallParam updates a specific parameter value
+func SetCallParam(cp *types.CallParameters, name, value string) {
 	switch name {
 	case config.CallParamCallType:
 		cp.CallType = value
@@ -122,9 +91,10 @@ func (cp *CallParameters) SetParam(name, value string) {
 	}
 }
 
-func NewCallParameters() CallParameters {
+// NewCallParameters creates a new CallParameters with default values
+func NewCallParameters() types.CallParameters {
 	defaults := config.GetCallDefaults()
-	return CallParameters{
+	return types.CallParameters{
 		CallType:   config.CallTypeToString(defaults.CallType),
 		Caller:     defaults.CallerAddr,
 		Target:     defaults.TargetAddr,
@@ -134,25 +104,3 @@ func NewCallParameters() CallParameters {
 		Salt:       defaults.Salt,
 	}
 }
-
-type CallHistoryEntry struct {
-	ID         string
-	Timestamp  time.Time
-	Parameters CallParameters
-	Result     *evm.CallResult
-}
-
-type DeployedContract struct {
-	Address   string
-	Bytecode  []byte
-	Timestamp time.Time
-}
-
-type TabType int
-
-const (
-	TabMakeCall TabType = iota
-	TabCallHistory
-	TabContracts
-	TabSettings
-)

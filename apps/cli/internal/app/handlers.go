@@ -1,20 +1,22 @@
 package app
 
 import (
+	"fmt"
 	"guillotine-cli/internal/config"
-	"guillotine-cli/internal/persistence"
+	"guillotine-cli/internal/core/evm"
+	"guillotine-cli/internal/core/state"
 	"guillotine-cli/internal/types"
 	"guillotine-cli/internal/ui"
 	"time"
 
-	"github.com/evmts/guillotine/bindings/go/evm"
+	gevmTypes "github.com/evmts/guillotine/bindings/go/evm"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
 // Message types for tea commands
 type resetCompleteMsg struct{}
 type callResultMsg struct {
-	result *evm.CallResult
+	result *gevmTypes.CallResult
 	params types.CallParameters
 }
 type copyFeedbackMsg struct {
@@ -48,7 +50,7 @@ func (m Model) handleMainMenuSelect() (tea.Model, tea.Cmd) {
 
 // handleCallParamSelect handles selecting a call parameter for editing
 func (m Model) handleCallParamSelect() (tea.Model, tea.Cmd) {
-	params := m.callParams.GetParams()
+	params := GetCallParams(m.callParams)
 	if m.callParamCursor >= len(params) {
 		return m, nil
 	}
@@ -84,7 +86,7 @@ func (m Model) handleCallEditSave() (tea.Model, tea.Cmd) {
 		options := config.GetCallTypeOptions()
 		if m.callTypeSelector >= 0 && m.callTypeSelector < len(options) {
 			selectedType := options[m.callTypeSelector]
-			m.callParams.SetParam(m.editingParam, selectedType)
+			SetCallParam(&m.callParams, m.editingParam, selectedType)
 		}
 		m.state = types.StateCallParameterList
 		return m, nil
@@ -94,10 +96,10 @@ func (m Model) handleCallEditSave() (tea.Model, tea.Cmd) {
 	value := m.textInput.Value()
 	
 	// Field-specific validation
-	validator := NewCallValidator()
+	validator := evm.NewCallValidator()
 	if err := validator.ValidateField(m.editingParam, value); err != nil {
 		// Use UIError for better user experience in UI context
-		if inputErr, ok := err.(config.InputParamError); ok {
+		if inputErr, ok := err.(types.InputParamError); ok {
 			m.validationError = inputErr.UIError()
 		} else {
 			m.validationError = err.Error()
@@ -105,14 +107,14 @@ func (m Model) handleCallEditSave() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	
-	m.callParams.SetParam(m.editingParam, value)
+	SetCallParam(&m.callParams, m.editingParam, value)
 	m.state = types.StateCallParameterList
 	return m, nil
 }
 
 // handleCallExecute handles executing the EVM call
 func (m Model) handleCallExecute() (tea.Model, tea.Cmd) {
-	validator := NewCallValidator()
+	validator := evm.NewCallValidator()
 	if err := validator.ValidateCallParameters(m.callParams); err != nil {
 		m.validationError = err.Error()
 		return m, nil
@@ -125,14 +127,22 @@ func (m Model) handleCallExecute() (tea.Model, tea.Cmd) {
 // executeCallCmd creates a command to execute an EVM call asynchronously
 func (m *Model) executeCallCmd(params types.CallParameters) tea.Cmd {
 	return func() tea.Msg {
-		result, err := ExecuteCall(m.vmManager, params)
+		result, err := evm.ExecuteCall(m.vmManager, params)
 		if err != nil {
-			result = &evm.CallResult{
+			result = &gevmTypes.CallResult{
 				Success:   false,
 				ErrorInfo: err.Error(),
 				GasLeft:   0,
 			}
 		}
+		
+		// Persist call parameters after execution (non-blocking)
+		persistedCall := state.ConvertFromCallParameters(params)
+		go func() {
+			if err := state.AppendCall(state.GetStateFilePath(), persistedCall); err != nil {
+				fmt.Printf("Warning: Failed to persist call: %v\n", err)
+			}
+		}()
 		
 		entry := types.CallHistoryEntry{
 			Parameters: params,
@@ -168,7 +178,7 @@ func (m *Model) resetParameter(paramName string, updateInput bool) {
 	}
 	
 	// Update the parameter value
-	m.callParams.SetParam(paramName, defaultValue)
+	SetCallParam(&m.callParams, paramName, defaultValue)
 	
 	// Update UI inputs if requested
 	if updateInput {
@@ -190,7 +200,7 @@ func (m *Model) resetParameter(paramName string, updateInput bool) {
 
 // handleResetParameter handles resetting the current parameter to default
 func (m Model) handleResetParameter() (tea.Model, tea.Cmd) {
-	params := m.callParams.GetParams()
+	params := GetCallParams(m.callParams)
 	if m.callParamCursor >= len(params) {
 		return m, nil
 	}
@@ -208,7 +218,7 @@ func (m Model) handleResetCurrentParameter() (tea.Model, tea.Cmd) {
 
 // handleResetAllParameters handles resetting all parameters to defaults
 func (m Model) handleResetAllParameters() (tea.Model, tea.Cmd) {
-	m.callParams = types.NewCallParameters()
+	m.callParams = NewCallParameters()
 	return m, nil
 }
 
@@ -222,14 +232,14 @@ func (m Model) handleResetState() (tea.Model, tea.Cmd) {
 func (m Model) executeReset() tea.Cmd {
 	return func() tea.Msg {
 		// Clear state file
-		persistence.ClearStateFile(persistence.GetStateFilePath())
+		state.ClearStateFile(state.GetStateFilePath())
 		
 		// Create fresh VM manager
-		newVmManager, err := GetVMManager()
+		newVmManager, err := evm.GetVMManager()
 		if err == nil {
 			// Clean up old VM
-			if m.vmManager != nil && m.vmManager.vm != nil {
-				m.vmManager.vm.Close()
+			if m.vmManager != nil {
+				m.vmManager.Close()
 			}
 			m.vmManager = newVmManager
 		}
@@ -238,7 +248,7 @@ func (m Model) executeReset() tea.Cmd {
 		m.historyManager.Clear()
 		
 		// Reset call parameters
-		m.callParams = types.NewCallParameters()
+		m.callParams = NewCallParameters()
 		
 		return resetCompleteMsg{}
 	}
@@ -253,7 +263,7 @@ func (m *Model) getCopyContent() string {
 		}
 		
 	case types.StateCallParameterList:
-		params := m.callParams.GetParams()
+		params := GetCallParams(m.callParams)
 		if m.callParamCursor < len(params) {
 			return params[m.callParamCursor].Value
 		}

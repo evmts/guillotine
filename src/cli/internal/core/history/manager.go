@@ -1,4 +1,4 @@
-package app
+package history
 
 import (
 	"fmt"
@@ -8,15 +8,6 @@ import (
 	"guillotine-cli/internal/config"
 	"guillotine-cli/internal/types"
 	"github.com/google/uuid"
-)
-
-type RotationPolicy int
-
-const (
-	KeepAll RotationPolicy = iota
-	KeepLast100
-	KeepLastHour
-	KeepLastSession
 )
 
 type HistoryManager struct {
