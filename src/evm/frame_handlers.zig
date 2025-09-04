@@ -22,6 +22,11 @@ const stack_frame_jump_synthetic = @import("handlers_jump_synthetic.zig");
 /// Thread-local storage for the tracer instance and its type info
 threadlocal var tracer_instance: ?*anyopaque = null;
 
+// TODO: Implement tracer stack for nested calls
+// This will fix the bug where nested CREATE/CREATE2 calls overwrite the parent tracer
+threadlocal var tracer_stack: std.ArrayList(*anyopaque) = undefined;
+threadlocal var tracer_stack_initialized: bool = false;
+
 /// Thread-local storage for current execution context
 threadlocal var current_opcode: u8 = 0;
 threadlocal var current_pc: u32 = 0;
@@ -254,14 +259,47 @@ pub fn getTracedOpcodeHandlers(
     return traced;
 }
 
-/// Set the tracer instance for traced execution
-pub fn setTracerInstance(tracer: anytype) void {
-    tracer_instance = @ptrCast(@alignCast(tracer));
+// TODO: Initialize tracer stack - needed for proper cleanup
+fn initTracerStack(allocator: std.mem.Allocator) void {
+    if (!tracer_stack_initialized) {
+        tracer_stack = std.ArrayList(*anyopaque).init(allocator);
+        tracer_stack_initialized = true;
+    }
 }
 
-/// Clear the tracer instance
-pub fn clearTracerInstance() void {
+// TODO: Push tracer onto stack instead of replacing current instance
+pub fn pushTracerInstance(tracer: anytype) void {
+    // TODO: Need allocator parameter to initialize stack
+    // For now, keep existing behavior to avoid breaking build
+    tracer_instance = @ptrCast(@alignCast(tracer));
+    
+    // TODO: Implement actual stack push:
+    // initTracerStack(allocator);  
+    // tracer_stack.append(@ptrCast(@alignCast(tracer))) catch return;
+    // tracer_instance = @ptrCast(@alignCast(tracer));
+}
+
+// TODO: Pop tracer from stack and restore previous tracer  
+pub fn popTracerInstance() void {
+    // TODO: Implement actual stack pop:
+    // _ = tracer_stack.popOrNull();
+    // tracer_instance = if (tracer_stack.items.len > 0) 
+    //     tracer_stack.items[tracer_stack.items.len - 1] else null;
+    
+    // For now, keep existing behavior
     tracer_instance = null;
+}
+
+/// Set the tracer instance for traced execution
+pub fn setTracerInstance(tracer: anytype) void {
+    // TODO: Replace this with pushTracerInstance call
+    pushTracerInstance(tracer);
+}
+
+/// Clear the tracer instance  
+pub fn clearTracerInstance() void {
+    // TODO: Replace this with popTracerInstance call
+    popTracerInstance();
 }
 
 /// Set the current PC for tracing

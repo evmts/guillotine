@@ -273,15 +273,16 @@ pub fn Frame(comptime config: FrameConfig) type {
             // Debug: Check if we're using traced handlers
             if (TracerType) |_| {
                 // log.debug("Using TRACED handlers for type: {s}", .{@typeName(T)});
-                frame_handlers.setTracerInstance(tracer_instance);
+                // TODO: Use pushTracerInstance to support nested calls
+                frame_handlers.pushTracerInstance(tracer_instance);
             } else {
                 // log.debug("Using NON-TRACED handlers", .{});
             }
             
-            // Clear tracer at end of function, not at end of if block
+            // TODO: Use popTracerInstance to restore parent tracer for nested calls
             defer {
                 if (TracerType != null) {
-                    frame_handlers.clearTracerInstance();
+                    frame_handlers.popTracerInstance();
                 }
             }
 
