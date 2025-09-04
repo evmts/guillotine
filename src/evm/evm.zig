@@ -211,7 +211,7 @@ pub fn Evm(comptime config: EvmConfig) type {
                 },
                 .disable_gas_checking = false,
                 .current_snapshot_id = 0,
-                .logs = std.ArrayList(@import("call_result.zig").Log).init(allocator),
+                .logs = std.ArrayList(@import("call_result.zig").Log){},
                 .call_arena = std.heap.ArenaAllocator.init(allocator),
             };
         }
