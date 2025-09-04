@@ -50,6 +50,20 @@ pub const EvmConfig = struct {
     /// Controls the types used for difficulty and base_fee fields
     block_info_config: BlockInfoConfig = .{},
 
+    /// Custom opcode handlers (sparse array - null means use default handler)
+    /// Each entry corresponds to an opcode value (0-255)
+    /// Example: custom_opcode_handlers[0xfe] = &myDebugHandler
+    /// TODO: Define proper function signature - currently uses anytype for minimal implementation
+    custom_opcode_handlers: ?[256]?*const anyopaque = null,
+
+    // TODO: Add custom call type support in future iteration
+    // /// Custom call types to extend CallParams beyond standard EVM calls
+    // /// Example use cases: meta-transactions, account abstraction, custom precompiles
+    // CustomCallTypes: ?type = null,
+    // 
+    // /// Handlers for custom call types (must implement executeCustomCall interface)
+    // custom_call_handlers: ?type = null,
+
     /// Computed frame configuration from the fields above
     pub fn frame_config(self: EvmConfig) FrameConfig {
         return .{
@@ -271,4 +285,32 @@ test "EvmConfig - complete custom configuration" {
     try testing.expectEqual(false, config.enable_fusion);
     try testing.expectEqual(DummyTracer, config.TracerType.?);
     try testing.expectEqual(u11, config.get_depth_type());
+}
+
+test "EvmConfig - custom opcode handlers basic structure" {
+    // Test basic structure for custom opcode handlers
+    // This is a minimal proof of concept showing the API design
+    
+    const config = EvmConfig{
+        .custom_opcode_handlers = null, // Default - no custom handlers
+    };
+    
+    try testing.expectEqual(@as(?[256]?*const anyopaque, null), config.custom_opcode_handlers);
+    
+    // TODO: Test with actual custom handlers once implementation is complete
+    // Example of what the future API would look like:
+    //
+    // const myCustomHandler = struct {
+    //     fn debugOpcode(frame: *Frame, cursor: [*]const Dispatch.Item) Frame.Error!noreturn {
+    //         // Custom debug opcode at 0xfe
+    //         return frame.next(cursor);
+    //     }
+    // }.debugOpcode;
+    //
+    // var custom_handlers = [_]?*const anyopaque{null} ** 256;
+    // custom_handlers[0xfe] = &myCustomHandler;
+    //
+    // const config_with_custom = EvmConfig{
+    //     .custom_opcode_handlers = custom_handlers,
+    // };
 }

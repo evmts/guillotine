@@ -3,6 +3,20 @@ const Address = primitives.Address;
 
 // TODO: Currently used in host which is unused
 /// Call operation parameters for different call types
+/// 
+/// TODO: Make this parameterized by EvmConfig to support custom call types
+/// Future API design:
+/// pub fn CallParams(comptime config: EvmConfig) type {
+///     return union(enum) {
+///         // Standard call types
+///         call: CallData,
+///         delegatecall: DelegateCallData,
+///         // ... other standard types
+///         
+///         // Custom call types (if configured)
+///         custom: if (config.CustomCallTypes) |CT| CT else void,
+///     };
+/// }
 pub const CallParams = union(enum) {
     /// Regular CALL operation
     call: struct {

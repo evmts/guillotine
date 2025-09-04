@@ -28,7 +28,9 @@ threadlocal var current_pc: u32 = 0;
 threadlocal var tracer_vtable: ?*const anyopaque = null;
 
 /// Returns the normal (non-traced) opcode handlers array for a given Frame type
+/// Supports custom opcode handlers via EvmConfig.custom_opcode_handlers
 pub fn getOpcodeHandlers(comptime FrameType: type) [256]FrameType.OpcodeHandler {
+    // TODO: Accept EvmConfig parameter to enable custom handler overrides
     // Import handler modules with FrameType
     const ArithmeticHandlers = stack_frame_arithmetic.Handlers(FrameType);
     const ComparisonHandlers = stack_frame_comparison.Handlers(FrameType);
@@ -165,6 +167,16 @@ pub fn getOpcodeHandlers(comptime FrameType: type) [256]FrameType.OpcodeHandler 
     // Note: Synthetic opcodes (0xa5-0xbc) are NOT mapped here because they should only be used
     // internally by the dispatch system during optimization. Raw bytecode containing these values
     // should be treated as invalid opcodes and use the default invalid handler.
+    
+    // TODO: Apply custom opcode handler overrides here
+    // if (config.custom_opcode_handlers) |custom_handlers| {
+    //     inline for (custom_handlers, 0..) |maybe_handler, opcode| {
+    //         if (maybe_handler) |handler| {
+    //             h[opcode] = @ptrCast(handler);
+    //         }
+    //     }
+    // }
+    
     return h;
 }
 
