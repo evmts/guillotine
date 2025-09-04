@@ -128,19 +128,19 @@ pub fn getOpcodeHandlers(comptime FrameType: type) [256]FrameType.OpcodeHandler 
     h[@intFromEnum(Opcode.TSTORE)] = &StorageHandlers.tstore;
     // PUSH
     h[@intFromEnum(Opcode.PUSH0)] = &StackHandlers.push0;
-    for (1..33) |i| {
+    inline for (1..33) |i| {
         const push_n = @as(u8, @intCast(i));
         const opcode = @as(Opcode, @enumFromInt(@intFromEnum(Opcode.PUSH0) + push_n));
         h[@intFromEnum(opcode)] = StackHandlers.generatePushHandler(push_n);
     }
     // DUP
-    for (1..17) |i| {
+    inline for (1..17) |i| {
         const dup_n = @as(u8, @intCast(i));
         const opcode = @as(Opcode, @enumFromInt(@intFromEnum(Opcode.DUP1) + dup_n - 1));
         h[@intFromEnum(opcode)] = StackHandlers.generateDupHandler(dup_n);
     }
     // SWAP
-    for (1..17) |i| {
+    inline for (1..17) |i| {
         const swap_n = @as(u8, @intCast(i));
         const opcode = @as(Opcode, @enumFromInt(@intFromEnum(Opcode.SWAP1) + swap_n - 1));
         h[@intFromEnum(opcode)] = StackHandlers.generateSwapHandler(swap_n);
