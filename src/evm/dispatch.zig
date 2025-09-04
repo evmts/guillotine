@@ -4,15 +4,22 @@ const OpcodeSynthetic = @import("opcode_synthetic.zig").OpcodeSynthetic;
 const bytecode_mod = @import("bytecode.zig");
 const ArrayList = std.ArrayListAligned;
 const dispatch_metadata = @import("dispatch_metadata.zig");
+const dispatch_metadata_arch = @import("dispatch_metadata_arch.zig"); // TODO: Architecture-aware replacement (Issue #641)
 const dispatch_item = @import("dispatch_item.zig");
 const dispatch_jump_table = @import("dispatch_jump_table.zig");
 const dispatch_jump_table_builder = @import("dispatch_jump_table_builder.zig");
 
-// TODO: Low priority TODO
-// Currently our architecture assumes 64 byte cpu. It will still be functional for 32 byte cpu or 128 byte cpu but potentially not optimal
-// In future we should consider benchmarking other cpu architectures. It's possible we want our metadata to be dynamic based on usize
-// For example, we might want to only store 32 byte inline values on a 32 byte machines rather than 64
-// THis can easily be done by just using the comptime FrameType
+// TODO: ARCHITECTURE-AWARE METADATA (Issue #641) - IN PROGRESS
+// Current implementation assumes 64-bit CPU architecture for all metadata types.
+// This works but is suboptimal for other architectures:
+//   - 32-bit systems: waste 50% of metadata space (could use u32 instead of u64)
+//   - 128-bit systems: miss opportunities for larger inline values (could use u128)
+//
+// PROOF OF CONCEPT: See dispatch_metadata_arch.zig for architecture-aware approach
+// TODO: Replace dispatch_metadata.zig with architecture-aware version
+// TODO: Update processPushOpcode to use dynamic inlining thresholds  
+// TODO: Make Item union size architecture-specific
+// TODO: Benchmark across different architectures to validate improvements
 
 /// Dispatch manages the execution flow of EVM opcodes through an optimized instruction stream.
 /// It converts bytecode into a cache-efficient array of function pointers and metadata,
@@ -105,6 +112,14 @@ pub fn Dispatch(comptime FrameType: type) type {
 
             try schedule_items.append(allocator, .{ .opcode_handler = opcode_handlers.*[push_opcode] });
 
+            // TODO: ARCHITECTURE-AWARE INLINING (Issue #641)
+            // Current: hardcoded 8-byte threshold for 64-bit systems
+            // Future: use architecture-specific thresholds:
+            //   - 32-bit systems: PUSH1-PUSH4 inline (4 bytes max)
+            //   - 64-bit systems: PUSH1-PUSH8 inline (8 bytes max) <- current behavior
+            //   - 128-bit systems: PUSH1-PUSH16 inline (16 bytes max)
+            // Implementation would use: ArchAwareDispatchMetadata(FrameType).shouldInline(data.value)
+            
             if (data.size <= 8 and data.value <= std.math.maxInt(u64)) {
                 // Inline value for small pushes that fit in u64
                 const inline_value: u64 = @intCast(data.value);
@@ -121,6 +136,11 @@ pub fn Dispatch(comptime FrameType: type) type {
 
         /// The optimized instruction stream containing opcode handlers and their metadata.
         /// Each item is exactly 64 bits for optimal cache line usage.
+        /// 
+        /// TODO (Issue #641): Make item size architecture-aware
+        /// - 32-bit systems: 32-bit items for better cache utilization
+        /// - 64-bit systems: 64-bit items (current behavior)
+        /// - 128-bit systems: 128-bit items for larger inline values
         ///
         /// Layout example: [push_ptr, push_value_as_metadata, push_ptr, push_value_as_metadata, add_ptr, return_ptr]
         ///
