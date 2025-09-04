@@ -49,6 +49,10 @@ pub const EvmConfig = struct {
     /// Block information configuration
     /// Controls the types used for difficulty and base_fee fields
     block_info_config: BlockInfoConfig = .{},
+    
+    /// Journal configuration (preparation for Journal consolidation)
+    /// TODO: Enable Journal to use EvmConfig directly instead of separate JournalConfig
+    journal_initial_capacity: usize = 128,
 
     /// Computed frame configuration from the fields above
     pub fn frame_config(self: EvmConfig) FrameConfig {
@@ -74,6 +78,52 @@ pub const EvmConfig = struct {
             u11
         else
             @compileError("max_call_depth too large");
+    }
+
+    // TODO: Consolidate computed type methods from FrameConfig
+    // These methods enable direct EvmConfig usage, eliminating FrameConfig dependency
+    
+    /// PcType: optimal integer type for program counter based on max_bytecode_size
+    pub fn PcType(comptime self: EvmConfig) type {
+        return if (self.max_bytecode_size <= std.math.maxInt(u8))
+            u8
+        else if (self.max_bytecode_size <= std.math.maxInt(u12))
+            u12
+        else if (self.max_bytecode_size <= std.math.maxInt(u16))
+            u16
+        else if (self.max_bytecode_size <= std.math.maxInt(u32))
+            u32
+        else
+            @compileError("Bytecode size too large! Must fit in u32");
+    }
+    
+    /// StackIndexType: minimal integer type to index the configured stack
+    pub fn StackIndexType(comptime self: EvmConfig) type {
+        return if (self.stack_size <= std.math.maxInt(u4))
+            u4
+        else if (self.stack_size <= std.math.maxInt(u8))
+            u8
+        else if (self.stack_size <= std.math.maxInt(u12))
+            u12
+        else
+            @compileError("FrameConfig stack_size too large! Must fit in u12");
+    }
+    
+    /// GasType: minimal signed integer type to track gas remaining
+    pub fn GasType(comptime self: EvmConfig) type {
+        return if (self.block_gas_limit <= std.math.maxInt(i32))
+            i32
+        else
+            i64;
+    }
+    
+    /// SnapshotIdType: optimal type for journal snapshots based on call depth
+    /// TODO: This enables Journal to use EvmConfig directly instead of separate JournalConfig
+    pub fn SnapshotIdType(comptime self: EvmConfig) type {
+        return if (self.max_call_depth <= std.math.maxInt(u8))
+            u8
+        else
+            u16;
     }
 
     /// Predefined configuration optimized for performance

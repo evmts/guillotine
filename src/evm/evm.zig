@@ -41,7 +41,8 @@ pub fn Evm(comptime config: EvmConfig) type {
         const Self = @This();
 
         /// Frame type for the evm
-        pub const Frame = @import("frame.zig").Frame(config.frame_config());
+        /// TODO: Direct EvmConfig usage eliminates intermediate frame_config() call
+        pub const Frame = @import("frame.zig").Frame(config);
         /// Static wrappers for EIP-214 (STATICCALL) constraint enforcement
         const static_wrappers = @import("static_wrappers.zig");
         const StaticDatabase = static_wrappers.StaticDatabase;
