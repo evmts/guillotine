@@ -43,6 +43,10 @@ pub const BLS12_381_G2_MULTIEXP_ADDRESS = primitives.Address.from_u256(0x10);
 pub const BLS12_381_PAIRING_ADDRESS = primitives.Address.from_u256(0x11);
 pub const BLS12_381_MAP_FP_TO_G1_ADDRESS = primitives.Address.from_u256(0x12);
 
+/// Optimism precompile addresses (L2-specific)
+/// L1Block precompile provides access to L1 block information for L1 cost calculation
+pub const OPTIMISM_L1_BLOCK_ADDRESS = primitives.Address.from_hex("0x4200000000000000000000000000000000000015");
+
 /// Precompile error types
 pub const PrecompileError = error{
     InvalidInput,
@@ -70,6 +74,17 @@ pub const PrecompileOutput = struct {
 
 /// Check if an address is a precompile
 pub fn is_precompile(address: Address) bool {
+    // Check standard precompiles first (0x01-0x12)
+    if (is_standard_precompile(address)) return true;
+    
+    // Check L2-specific precompiles
+    if (is_optimism_precompile(address)) return true;
+    
+    return false;
+}
+
+/// Check if address is a standard Ethereum precompile
+fn is_standard_precompile(address: Address) bool {
     // Check if the address is one of the known precompile addresses
     // Precompiles are at addresses:
     // 0x01-0x0A: Standard precompiles (ECRECOVER through POINT_EVALUATION)
@@ -81,6 +96,13 @@ pub fn is_precompile(address: Address) bool {
     }
     // Check if the last byte is between 1 and 18 (0x12)
     return address.bytes[19] >= 1 and address.bytes[19] <= 0x12;
+}
+
+/// Check if address is an Optimism L2 precompile
+pub fn is_optimism_precompile(address: Address) bool {
+    // TODO: This should be gated by chain type in production
+    // For now, we always recognize Optimism precompiles for simplicity
+    return std.mem.eql(u8, &address.bytes, &OPTIMISM_L1_BLOCK_ADDRESS.bytes);
 }
 
 /// Execute a precompile based on its address
@@ -98,6 +120,13 @@ pub fn execute_precompile(
         .success = false,
     };
     std.debug.assert(is_precompile(address));
+    
+    // Check if this is an Optimism L2 precompile
+    if (is_optimism_precompile(address)) {
+        return execute_optimism_l1_block(allocator, input, gas_limit);
+    }
+    
+    // Handle standard precompiles
     const precompile_id = address.bytes[19];
     return switch (precompile_id) {
         1 => execute_ecrecover(allocator, input, gas_limit),
@@ -153,6 +182,9 @@ pub const GasCosts = struct {
     pub const BLS12_381_PAIRING_BASE = 65000;
     pub const BLS12_381_PAIRING_PER_PAIR = 43000;
     pub const BLS12_381_MAP_FP_TO_G1 = 5500;
+    
+    // Optimism L2 precompile costs
+    pub const OPTIMISM_L1_BLOCK = 1000;  // L1Block precompile gas cost
 };
 
 /// 0x01: ecRecover - ECDSA signature recovery
@@ -952,6 +984,52 @@ pub fn execute_bls12_381_map_fp_to_g1(allocator: std.mem.Allocator, input: []con
     return PrecompileError.NotImplemented;
 }
 
+/// Optimism L1Block precompile (0x4200000000000000000000000000000000000015)
+/// Provides access to L1 block information for L1 cost calculation
+/// Input: none (reads from L1 block info storage)
+/// Output: 256 bytes (8 x 32-byte values: number, timestamp, basefee, hash, seq_number, batcher_hash, l1_fee_overhead, l1_fee_scalar)
+pub fn execute_optimism_l1_block(allocator: std.mem.Allocator, input: []const u8, gas_limit: u64) PrecompileError!PrecompileOutput {
+    _ = input; // L1Block precompile takes no input
+    
+    const required_gas = GasCosts.OPTIMISM_L1_BLOCK;
+    if (gas_limit < required_gas) {
+        return PrecompileOutput{
+            .output = &.{},
+            .gas_used = gas_limit,
+            .success = false,
+        };
+    }
+    
+    // TODO: In production, this would read from L1 block info storage
+    // For now, return mock data to demonstrate the interface
+    const output = try allocator.alloc(u8, 256); // 8 * 32 bytes
+    @memset(output, 0);
+    
+    // Mock L1 block information (would be read from storage in production)
+    const mock_l1_number: u64 = 18500000;
+    const mock_l1_timestamp: u64 = 1692000000;
+    const mock_l1_basefee: u64 = 1000000000; // 1 gwei
+    const mock_sequence_number: u64 = 12345;
+    const mock_l1_fee_overhead: u64 = 188;
+    const mock_l1_fee_scalar: u64 = 684000;
+    
+    // Pack values into output (big-endian)
+    u64ToBytes(mock_l1_number, output[24..32]);     // L1 block number
+    u64ToBytes(mock_l1_timestamp, output[56..64]);   // L1 block timestamp  
+    u64ToBytes(mock_l1_basefee, output[88..96]);     // L1 base fee
+    // Hash would go in output[96..128] - leaving as zeros for mock
+    u64ToBytes(mock_sequence_number, output[152..160]); // Sequence number
+    // Batcher hash would go in output[160..192] - leaving as zeros for mock
+    u64ToBytes(mock_l1_fee_overhead, output[216..224]); // L1 fee overhead
+    u64ToBytes(mock_l1_fee_scalar, output[248..256]);   // L1 fee scalar
+    
+    return PrecompileOutput{
+        .output = output,
+        .gas_used = required_gas,
+        .success = true,
+    };
+}
+
 fn bytesToU256(bytes: []const u8) u256 {
     var result: u256 = 0;
     for (bytes) |byte| {
@@ -971,6 +1049,16 @@ fn bytesToU32(bytes: []const u8) u32 {
 }
 
 fn u256ToBytes(value: u256, output: []u8) void {
+    var v = value;
+    var i = output.len;
+    while (i > 0) {
+        i -= 1;
+        output[i] = @intCast(v & 0xFF);
+        v >>= 8;
+    }
+}
+
+fn u64ToBytes(value: u64, output: []u8) void {
     var v = value;
     var i = output.len;
     while (i > 0) {
@@ -1408,6 +1496,10 @@ test "precompile address boundary checks" {
     try testing.expect(is_precompile([_]u8{0} ** 19 ++ [_]u8{0x0B})); // 0x0B is a valid BLS12-381 precompile
     try testing.expect(!is_precompile([_]u8{0} ** 19 ++ [_]u8{0x13})); // 0x13 is beyond valid precompiles
     try testing.expect(!is_precompile([_]u8{0xFF} ** 20)); // Max address
+    
+    // Test Optimism L2 precompiles
+    try testing.expect(is_precompile(OPTIMISM_L1_BLOCK_ADDRESS));
+    try testing.expect(is_optimism_precompile(OPTIMISM_L1_BLOCK_ADDRESS));
 }
 
 test "execute_all_precompiles smoke test" {
@@ -1434,4 +1526,24 @@ test "execute_all_precompiles smoke test" {
         // All should at least not error (may fail due to invalid input)
         try testing.expect(result.gas_used <= 100000);
     }
+}
+
+test "execute_optimism_l1_block precompile" {
+    const testing = std.testing;
+    
+    // Test L1Block precompile execution
+    const input = &[_]u8{}; // L1Block takes no input
+    const result = try execute_optimism_l1_block(testing.allocator, input, GasCosts.OPTIMISM_L1_BLOCK + 100);
+    defer testing.allocator.free(result.output);
+    
+    try testing.expect(result.success);
+    try testing.expectEqual(@as(usize, 256), result.output.len); // Should return 256 bytes (8 * 32)
+    try testing.expectEqual(GasCosts.OPTIMISM_L1_BLOCK, result.gas_used);
+    
+    // Verify we can execute it through the main precompile dispatcher
+    const dispatch_result = try execute_precompile(testing.allocator, OPTIMISM_L1_BLOCK_ADDRESS, input, GasCosts.OPTIMISM_L1_BLOCK + 100);
+    defer testing.allocator.free(dispatch_result.output);
+    
+    try testing.expect(dispatch_result.success);
+    try testing.expectEqual(@as(usize, 256), dispatch_result.output.len);
 }
