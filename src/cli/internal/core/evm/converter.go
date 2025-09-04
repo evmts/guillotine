@@ -1,14 +1,10 @@
-package app
+package evm
 
 import (
 	"encoding/hex"
 	"fmt"
 	"guillotine-cli/internal/config"
-	"guillotine-cli/internal/persistence"
-	"guillotine-cli/internal/types"
-	"guillotine-cli/internal/utils"
 	"strconv"
-	"time"
 
 	"github.com/evmts/guillotine/bindings/go/evm"
 	"github.com/evmts/guillotine/bindings/go/primitives"
@@ -24,17 +20,17 @@ func NewTypeConverter() *TypeConverter {
 
 // ConvertToEVMAddress converts a string address to primitives.Address
 func (tc *TypeConverter) ConvertToEVMAddress(addr string) (primitives.Address, error) {
-	return utils.ParseEthereumAddress(addr)
+	return ParseEthereumAddress(addr)
 }
 
 // ConvertToU256 converts a string value to primitives.U256
 func (tc *TypeConverter) ConvertToU256(value string) (primitives.U256, error) {
-	return utils.ParseWeiValue(value)
+	return ParseWeiValue(value)
 }
 
 // ConvertToBytes converts hex string to primitives.Bytes
 func (tc *TypeConverter) ConvertToBytes(data string) (primitives.Bytes, error) {
-	bytes, err := utils.ParseHexData(data)
+	bytes, err := ParseHexData(data)
 	if err != nil {
 		return primitives.Bytes{}, err
 	}
@@ -52,7 +48,7 @@ func (tc *TypeConverter) ConvertToGasLimit(gasLimit string) (uint64, error) {
 
 // ConvertSaltToU256 converts hex salt string to primitives.U256
 func (tc *TypeConverter) ConvertSaltToU256(salt string) (primitives.U256, error) {
-	saltBytes, err := utils.ParseHexData(salt)
+	saltBytes, err := ParseHexData(salt)
 	if err != nil {
 		return primitives.U256{}, fmt.Errorf("invalid salt: %w", err)
 	}
@@ -71,33 +67,6 @@ func (tc *TypeConverter) ConvertSaltToU256(salt string) (primitives.U256, error)
 // ConvertCallType converts string to evm.CallType
 func (tc *TypeConverter) ConvertCallType(callType string) evm.CallType {
 	return config.CallTypeFromString(callType)
-}
-
-// ConvertFromCallParameters converts types.CallParameters to persistence.PersistedCall
-func (tc *TypeConverter) ConvertFromCallParameters(params types.CallParameters) persistence.PersistedCall {
-	return persistence.PersistedCall{
-		CallType:  params.CallType,
-		Caller:    params.Caller,
-		Target:    params.Target,
-		Value:     params.Value,
-		GasLimit:  params.GasLimit,
-		InputData: params.InputData,
-		Salt:      params.Salt,
-		Timestamp: time.Now().Unix(),
-	}
-}
-
-// ConvertToCallParameters converts persistence.PersistedCall to types.CallParameters
-func (tc *TypeConverter) ConvertToCallParameters(call persistence.PersistedCall) types.CallParameters {
-	return types.CallParameters{
-		CallType:  call.CallType,
-		Caller:    call.Caller,
-		Target:    call.Target,
-		Value:     call.Value,
-		GasLimit:  call.GasLimit,
-		InputData: call.InputData,
-		Salt:      call.Salt,
-	}
 }
 
 // ConvertAddressFromOutput extracts address from CREATE/CREATE2 output

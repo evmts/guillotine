@@ -1,10 +1,9 @@
-package app
+package evm
 
 import (
 	"fmt"
 	"guillotine-cli/internal/config"
 	"guillotine-cli/internal/types"
-	"guillotine-cli/internal/utils"
 	"strconv"
 )
 
@@ -20,40 +19,40 @@ func NewCallValidator() *CallValidator {
 func (v *CallValidator) ValidateCallParameters(params types.CallParameters) error {
 	// Validate call type
 	if params.CallType == "" {
-		return config.NewInputParamError(config.ErrorCallTypeRequired, "call_type")
+		return types.NewInputParamError(types.ErrorCallTypeRequired, "call_type")
 	}
 	
 	// Validate caller address
-	if !utils.IsValidAddress(params.Caller) {
-		return config.NewInputParamError(config.ErrorInvalidCallerAddress, "caller")
+	if !IsValidAddress(params.Caller) {
+		return types.NewInputParamError(types.ErrorInvalidCallerAddress, "caller")
 	}
 	
 	// Validate target address (not required for CREATE/CREATE2)
 	if params.CallType != config.CallTypeCreate && params.CallType != config.CallTypeCreate2 {
-		if !utils.IsValidAddress(params.Target) {
-			return config.NewInputParamError(config.ErrorInvalidTargetAddress, "target")
+		if !IsValidAddress(params.Target) {
+			return types.NewInputParamError(types.ErrorInvalidTargetAddress, "target")
 		}
 	}
 	
 	// Validate gas limit
 	if _, err := strconv.ParseUint(params.GasLimit, 10, 64); err != nil {
-		return config.NewInputParamError(config.ErrorInvalidGasLimit, "gas_limit")
+		return types.NewInputParamError(types.ErrorInvalidGasLimit, "gas_limit")
 	}
 	
 	// Validate value
 	if _, err := strconv.ParseUint(params.Value, 10, 64); err != nil {
-		return config.NewInputParamError(config.ErrorInvalidValue, "value")
+		return types.NewInputParamError(types.ErrorInvalidValue, "value")
 	}
 	
 	// Validate input data
-	if !utils.IsValidHex(params.InputData) {
-		return config.NewInputParamError(config.ErrorInvalidInputData, "input_data")
+	if !IsValidHex(params.InputData) {
+		return types.NewInputParamError(types.ErrorInvalidInputData, "input_data")
 	}
 	
 	// Validate salt for CREATE2
 	if params.CallType == config.CallTypeCreate2 {
-		if !utils.IsValidHex(params.Salt) {
-			return config.NewInputParamError(config.ErrorInvalidSalt, "salt")
+		if !IsValidHex(params.Salt) {
+			return types.NewInputParamError(types.ErrorInvalidSalt, "salt")
 		}
 	}
 	
@@ -64,33 +63,33 @@ func (v *CallValidator) ValidateCallParameters(params types.CallParameters) erro
 func (v *CallValidator) ValidateField(fieldName, value string) error {
 	switch fieldName {
 	case config.CallParamCaller:
-		if !utils.IsValidAddress(value) {
-			return config.NewInputParamError(config.ErrorInvalidCallerAddress, fieldName)
+		if !IsValidAddress(value) {
+			return types.NewInputParamError(types.ErrorInvalidCallerAddress, fieldName)
 		}
 		
 	case config.CallParamTarget:
-		if !utils.IsValidAddress(value) {
-			return config.NewInputParamError(config.ErrorInvalidTargetAddress, fieldName)
+		if !IsValidAddress(value) {
+			return types.NewInputParamError(types.ErrorInvalidTargetAddress, fieldName)
 		}
 		
 	case config.CallParamValue:
 		if _, err := strconv.ParseUint(value, 10, 64); err != nil {
-			return config.NewInputParamError(config.ErrorInvalidValue, fieldName)
+			return types.NewInputParamError(types.ErrorInvalidValue, fieldName)
 		}
 		
 	case config.CallParamGasLimit:
 		if _, err := strconv.ParseUint(value, 10, 64); err != nil {
-			return config.NewInputParamError(config.ErrorInvalidGasLimit, fieldName)
+			return types.NewInputParamError(types.ErrorInvalidGasLimit, fieldName)
 		}
 		
 	case config.CallParamInput, config.CallParamInputDeploy:
-		if !utils.IsValidHex(value) {
-			return config.NewInputParamError(config.ErrorInvalidInputData, fieldName)
+		if !IsValidHex(value) {
+			return types.NewInputParamError(types.ErrorInvalidInputData, fieldName)
 		}
 		
 	case config.CallParamSalt:
-		if !utils.IsValidHex(value) {
-			return config.NewInputParamError(config.ErrorInvalidSalt, fieldName)
+		if !IsValidHex(value) {
+			return types.NewInputParamError(types.ErrorInvalidSalt, fieldName)
 		}
 	}
 	

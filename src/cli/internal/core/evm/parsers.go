@@ -1,8 +1,8 @@
-package utils
+package evm
 
 import (
 	"encoding/hex"
-	"guillotine-cli/internal/config"
+	"guillotine-cli/internal/types"
 	"strconv"
 	"strings"
 
@@ -12,7 +12,7 @@ import (
 // ParseEthereumAddress parses a hex string address into primitives.Address
 func ParseEthereumAddress(addr string) (primitives.Address, error) {
 	if !IsValidAddress(addr) {
-		return primitives.Address{}, config.NewInputParamError(config.ErrorInvalidCallerAddress, "address")
+		return primitives.Address{}, types.NewInputParamError(types.ErrorInvalidCallerAddress, "address")
 	}
 	
 	hexStr := addr[2:] // Remove 0x prefix
@@ -30,7 +30,7 @@ func ParseEthereumAddress(addr string) (primitives.Address, error) {
 func ParseWeiValue(value string) (primitives.U256, error) {
 	val, err := strconv.ParseUint(value, 10, 64)
 	if err != nil {
-		return primitives.U256{}, config.NewInputParamError(config.ErrorInvalidValue, "value")
+		return primitives.U256{}, types.NewInputParamError(types.ErrorInvalidValue, "value")
 	}
 	
 	return primitives.NewU256(val), nil
@@ -39,7 +39,7 @@ func ParseWeiValue(value string) (primitives.U256, error) {
 // ParseHexData parses a hex string into bytes
 func ParseHexData(data string) ([]byte, error) {
 	if !IsValidHex(data) {
-		return nil, config.NewInputParamError(config.ErrorInvalidInputData, "hex_data")
+		return nil, types.NewInputParamError(types.ErrorInvalidInputData, "hex_data")
 	}
 	
 	hexStr := data[2:] // Remove 0x prefix

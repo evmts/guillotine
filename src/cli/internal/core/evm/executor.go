@@ -1,11 +1,9 @@
-package app
+package evm
 
 import (
 	"fmt"
 	"guillotine-cli/internal/config"
-	"guillotine-cli/internal/persistence"
 	"guillotine-cli/internal/types"
-	"guillotine-cli/internal/utils"
 	"strconv"
 
 	"github.com/evmts/guillotine/bindings/go/evm"
@@ -23,12 +21,12 @@ func ExecuteCall(vmMgr *VMManager, params types.CallParameters) (*evm.CallResult
 		return nil, fmt.Errorf("failed to get VM: %w", err)
 	}
 	
-	caller, err := utils.ParseEthereumAddress(params.Caller)
+	caller, err := ParseEthereumAddress(params.Caller)
 	if err != nil {
 		return nil, fmt.Errorf("invalid caller address: %w", err)
 	}
 	
-	value, err := utils.ParseWeiValue(params.Value)
+	value, err := ParseWeiValue(params.Value)
 	if err != nil {
 		return nil, fmt.Errorf("invalid value: %w", err)
 	}
@@ -38,7 +36,7 @@ func ExecuteCall(vmMgr *VMManager, params types.CallParameters) (*evm.CallResult
 		return nil, fmt.Errorf("invalid gas limit: %w", err)
 	}
 	
-	inputBytes, err := utils.ParseHexData(params.InputData)
+	inputBytes, err := ParseHexData(params.InputData)
 	if err != nil {
 		return nil, fmt.Errorf("invalid input data: %w", err)
 	}
@@ -55,21 +53,21 @@ func ExecuteCall(vmMgr *VMManager, params types.CallParameters) (*evm.CallResult
 	
 	switch callType {
 	case evm.CallTypeCall:
-		target, err := utils.ParseEthereumAddress(params.Target)
+		target, err := ParseEthereumAddress(params.Target)
 		if err != nil {
 			return nil, fmt.Errorf("invalid target address: %w", err)
 		}
 		result, err = vm.ExecuteCall(caller, target, value, inputData, gasLimit)
 		
 	case evm.CallTypeStaticcall:
-		target, err := utils.ParseEthereumAddress(params.Target)
+		target, err := ParseEthereumAddress(params.Target)
 		if err != nil {
 			return nil, fmt.Errorf("invalid target address: %w", err)
 		}
 		result, err = vm.ExecuteStaticCall(caller, target, inputData, gasLimit)
 		
 	case evm.CallTypeDelegatecall:
-		target, err := utils.ParseEthereumAddress(params.Target)
+		target, err := ParseEthereumAddress(params.Target)
 		if err != nil {
 			return nil, fmt.Errorf("invalid target address: %w", err)
 		}
@@ -79,7 +77,7 @@ func ExecuteCall(vmMgr *VMManager, params types.CallParameters) (*evm.CallResult
 		result, err = vm.ExecuteCreate(caller, value, inputData, gasLimit)
 		
 	case evm.CallTypeCreate2:
-		saltBytes, err := utils.ParseHexData(params.Salt)
+		saltBytes, err := ParseHexData(params.Salt)
 		if err != nil {
 			return nil, fmt.Errorf("invalid salt: %w", err)
 		}
@@ -93,7 +91,7 @@ func ExecuteCall(vmMgr *VMManager, params types.CallParameters) (*evm.CallResult
 		result, err = vm.ExecuteCreate2(caller, value, inputData, salt, gasLimit)
 		
 	default:
-		return nil, config.NewInputParamError(config.ErrorUnsupportedCallType, "call_type")
+		return nil, types.NewInputParamError(types.ErrorUnsupportedCallType, "call_type")
 	}
 	
 	if err != nil {
@@ -103,14 +101,6 @@ func ExecuteCall(vmMgr *VMManager, params types.CallParameters) (*evm.CallResult
 			GasLeft:   0,
 		}
 	}
-	
-	// Persist call parameters after execution (non-blocking)
-	persistedCall := persistence.ConvertFromCallParameters(params)
-	go func() {
-		if err := persistence.AppendCall(persistence.GetStateFilePath(), persistedCall); err != nil {
-			fmt.Printf("Warning: Failed to persist call: %v\n", err)
-		}
-	}()
 	
 	return result, nil
 }
