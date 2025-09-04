@@ -781,7 +781,7 @@ test "derive public key from private key" {
     const public_key = try unaudited_getPublicKey(private_key);
 
     // Public key should be valid
-    try testing.expect(public_key.isValid());
+    try testing.expect(public_key.is_valid());
 
     // Public key should be deterministic
     const public_key2 = try unaudited_getPublicKey(private_key);
