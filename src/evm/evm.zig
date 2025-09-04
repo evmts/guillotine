@@ -45,6 +45,21 @@ pub fn Evm(comptime config: EvmConfig) type {
         /// Static wrappers for EIP-214 (STATICCALL) constraint enforcement
         const static_wrappers = @import("static_wrappers.zig");
         const StaticDatabase = static_wrappers.StaticDatabase;
+        /// Context methods module
+        const evm_context = @import("evm_context.zig");
+        const Context = evm_context.Context(Self);
+        /// Preflight methods module
+        const evm_preflight = @import("evm_preflight.zig");
+        const Preflight = evm_preflight.Preflight(Self, config);
+        /// State management methods module
+        const evm_state = @import("evm_state.zig");
+        const State = evm_state.State(Self);
+        /// Host interface methods module
+        const evm_host = @import("evm_host.zig");
+        const Host = evm_host.Host(Self);
+        /// Transaction methods module
+        const evm_transaction = @import("evm_transaction.zig");
+        const Transaction = evm_transaction.Transaction(Self);
         /// Bytecode type for bytecode analysis
         pub const BytecodeFactory = @import("bytecode.zig").Bytecode;
         pub const Bytecode = BytecodeFactory(.{
@@ -295,15 +310,7 @@ pub fn Evm(comptime config: EvmConfig) type {
 
         /// Transfer value between accounts with proper balance checks and error handling
         fn doTransfer(self: *Self, from: primitives.Address, to: primitives.Address, value: u256, snapshot_id: Journal.SnapshotIdType) !void {
-            var from_account = try self.database.get_account(from.bytes) orelse Account.zero();
-            if (from_account.balance < value) return error.InsufficientBalance;
-            var to_account = try self.database.get_account(to.bytes) orelse Account.zero();
-            try self.journal.record_balance_change(snapshot_id, from, from_account.balance);
-            try self.journal.record_balance_change(snapshot_id, to, to_account.balance);
-            from_account.balance -= value;
-            to_account.balance += value;
-            try self.database.set_account(from.bytes, from_account);
-            try self.database.set_account(to.bytes, to_account);
+            return State.do_transfer(self, from, to, value, snapshot_id);
         }
 
         /// Simulate an EVM operation without committing state changes.
@@ -312,27 +319,7 @@ pub fn Evm(comptime config: EvmConfig) type {
         /// returning the result as if the call had been executed. Useful for
         /// gas estimation, testing outcomes, or previewing transaction effects.
         pub fn simulate(self: *Self, params: CallParams) CallResult {
-            // Create a snapshot before execution
-            const snapshot_id = self.journal.create_snapshot();
-            
-            // For top-level simulations, we need to clear the access list
-            // to ensure consistent gas costs across multiple simulations
-            const is_top_level = self.depth == 0;
-            if (is_top_level) {
-                self.access_list.clear();
-            }
-            
-            // Always revert database state changes
-            defer {
-                // For simulate, we don't need to apply individual reverts since
-                // we're discarding all state anyway. Just truncate the journal.
-                // This avoids potential stack overflow with large numbers of entries.
-                self.journal.revert_to_snapshot(snapshot_id);
-            }
-            
-            // Execute the call normally and return its result
-            // Note: call() will also try to clear for top-level, but that's OK - clearing twice is safe
-            return self.call(params);
+            return Transaction.simulate(self, params);
         }
 
         /// Execute an EVM operation.
@@ -485,131 +472,11 @@ pub fn Evm(comptime config: EvmConfig) type {
         }
 
         /// Result of pre-flight checks for call operations
-        const PreflightResult = union(enum) {
-            precompile_result: CallResult,
-            execute_with_code: []const u8,
-            empty_account: u64, // gas remaining
-        };
+        const PreflightResult = Preflight.PreflightResult;
 
         /// Perform pre-flight checks common to all call operations
         fn performCallPreflight(self: *Self, to: primitives.Address, input: []const u8, gas: u64, is_static: bool, snapshot_id: Journal.SnapshotIdType) !PreflightResult {
-            // Handle precompiles
-            if (config.enable_precompiles and precompiles.is_precompile(to)) {
-                const result = self.executePrecompileInline(to, input, gas, is_static, snapshot_id) catch {
-                    self.journal.revert_to_snapshot(snapshot_id);
-                    return PreflightResult{ .precompile_result = CallResult.failure(0) };
-                };
-                return PreflightResult{ .precompile_result = result };
-            }
-
-            // Handle EIP-4788 beacon roots contract
-            const beacon_roots = @import("beacon_roots.zig");
-            const historical_block_hashes = @import("historical_block_hashes.zig");
-            if (std.mem.eql(u8, &to.bytes, &beacon_roots.BEACON_ROOTS_ADDRESS.bytes)) {
-                var contract = beacon_roots.BeaconRootsContract{ .database = self.database, .allocator = self.allocator };
-                const caller = if (self.depth > 0) self.call_stack[self.depth - 1].caller else primitives.ZERO_ADDRESS;
-                
-                const result = contract.execute(caller, input, gas) catch |err| {
-                    log.debug("Beacon roots contract failed: {}", .{err});
-                    self.journal.revert_to_snapshot(snapshot_id);
-                    return PreflightResult{ .precompile_result = CallResult.failure(0) };
-                };
-                
-                // Allocate output that persists beyond this function
-                const output = if (result.output.len > 0) output: {
-                    const out = self.allocator.alloc(u8, result.output.len) catch {
-                        self.journal.revert_to_snapshot(snapshot_id);
-                        return PreflightResult{ .precompile_result = CallResult.failure(0) };
-                    };
-                    @memcpy(out, result.output);
-                    break :output out;
-                } else &[_]u8{};
-                
-                return PreflightResult{ 
-                    .precompile_result = CallResult{
-                        .success = true,
-                        .gas_left = gas - result.gas_used,
-                        .output = output,
-                    }
-                };
-            }
-            
-            // Handle EIP-2935 historical block hashes contract
-            if (std.mem.eql(u8, &to.bytes, &historical_block_hashes.HISTORY_CONTRACT_ADDRESS.bytes)) {
-                var contract = historical_block_hashes.HistoricalBlockHashesContract{ .database = self.database };
-                const caller = if (self.depth > 0) self.call_stack[self.depth - 1].caller else primitives.ZERO_ADDRESS;
-                
-                const result = contract.execute(caller, input, gas) catch |err| {
-                    log.debug("Historical block hashes contract failed: {}", .{err});
-                    self.journal.revert_to_snapshot(snapshot_id);
-                    return PreflightResult{ .precompile_result = CallResult.failure(0) };
-                };
-                
-                // Allocate output that persists beyond this function
-                const output = if (result.output.len > 0) output: {
-                    const out = self.allocator.alloc(u8, result.output.len) catch {
-                        self.journal.revert_to_snapshot(snapshot_id);
-                        return PreflightResult{ .precompile_result = CallResult.failure(0) };
-                    };
-                    @memcpy(out, result.output);
-                    break :output out;
-                } else &[_]u8{};
-                
-                return PreflightResult{ 
-                    .precompile_result = CallResult{
-                        .success = true,
-                        .gas_left = gas - result.gas_used,
-                        .output = output,
-                    }
-                };
-            }
-
-            // Check for EIP-7702 delegation first
-            const account = self.database.get_account(to.bytes) catch |err| {
-                log.debug("Failed to get account for address {x}: {}", .{ to.bytes, err });
-                return PreflightResult{ .precompile_result = CallResult.failure(0) };
-            };
-            
-            // Get the effective code address (handles delegation)
-            const code_address = if (account) |acc| blk: {
-                if (acc.get_effective_code_address()) |delegated| {
-                    log.debug("Account {x} has delegation to {x}", .{ to.bytes, delegated.bytes });
-                    break :blk delegated;
-                }
-                break :blk to;
-            } else to;
-            
-            // Get contract code (from delegated address if applicable)
-            // log.debug("Attempting to get code for address: {x}", .{code_address.bytes});
-            const code = self.database.get_code_by_address(code_address.bytes) catch |err| {
-                // log.debug("Failed to get code for address {x}: {}", .{ code_address.bytes, err });
-                const error_str = switch (err) {
-                    Database.Error.CodeNotFound => "CodeNotFound",
-                    Database.Error.AccountNotFound => "AccountNotFound",
-                    Database.Error.StorageNotFound => "StorageNotFound",
-                    Database.Error.InvalidAddress => "InvalidAddress",
-                    Database.Error.DatabaseCorrupted => "DatabaseCorrupted",
-                    Database.Error.NetworkError => "NetworkError",
-                    Database.Error.PermissionDenied => "PermissionDenied",
-                    Database.Error.OutOfMemory => "OutOfMemory",
-                    Database.Error.InvalidSnapshot => "InvalidSnapshot",
-                    Database.Error.NoBatchInProgress => "NoBatchInProgress",
-                    Database.Error.SnapshotNotFound => "SnapshotNotFound",
-                    Database.Error.WriteProtection => "WriteProtection",
-                };
-                return PreflightResult{ .precompile_result = CallResult.failure_with_error(0, error_str) };
-            };
-
-
-            // log.debug("Got code for address, length: {}", .{code.len});
-            
-            if (code.len == 0) {
-                log.debug("Code is empty, returning empty account result", .{});
-                return PreflightResult{ .empty_account = gas };
-            }
-
-            // log.debug("Returning code for execution, code_len={}", .{code.len});
-            return PreflightResult{ .execute_with_code = code };
+            return Preflight.perform_call_preflight(self, to, input, gas, is_static, snapshot_id);
         }
 
         /// Execute CALL operation (inlined from call_handler)
@@ -1345,60 +1212,47 @@ pub fn Evm(comptime config: EvmConfig) type {
 
         /// Get account balance
         pub fn get_balance(self: *Self, address: primitives.Address) u256 {
-            return self.database.get_balance(address.bytes) catch 0;
+            return Host.get_balance(self, address);
         }
 
         /// Check if account exists
         pub fn account_exists(self: *Self, address: primitives.Address) bool {
-            return self.database.account_exists(address.bytes);
+            return Host.account_exists(self, address);
         }
 
         /// Get account code
         pub fn get_code(self: *Self, address: primitives.Address) []const u8 {
-            return self.database.get_code_by_address(address.bytes) catch &.{};
+            return Host.get_code(self, address);
         }
 
         /// Get block information
         pub fn get_block_info(self: *Self) BlockInfo {
-            return self.block_info;
+            return Context.get_block_info(self);
         }
 
         /// Emit log event
         pub fn emit_log(self: *Self, contract_address: primitives.Address, topics: []const u256, data: []const u8) void {
-            // EIP-214: Prevent log emission in static context
-            if (self.is_static_context()) {
-                return; // Silently fail in static context
-            }
-            
-            // Allocate copies with the main allocator so tests can free via evm.allocator
-            const topics_copy = self.allocator.dupe(u256, topics) catch return;
-            const data_copy = self.allocator.dupe(u8, data) catch return;
-
-            self.logs.append(self.allocator, @import("call_result.zig").Log{
-                .address = contract_address,
-                .topics = topics_copy,
-                .data = data_copy,
-            }) catch return;
+            Host.emit_log(self, contract_address, topics, data);
         }
 
         /// Execute nested EVM call - for Host interface
         pub fn host_inner_call(self: *Self, params: CallParams) !CallResult {
-            return self.inner_call(params);
+            return Host.host_inner_call(self, params);
         }
 
         /// Register a contract as created in the current transaction
         pub fn register_created_contract(self: *Self, address: primitives.Address) !void {
-            try self.created_contracts.mark_created(address);
+            return State.register_created_contract(self, address);
         }
 
         /// Check if a contract was created in the current transaction
         pub fn was_created_in_tx(self: *Self, address: primitives.Address) bool {
-            return self.created_contracts.was_created_in_tx(address);
+            return State.was_created_in_tx(self, address);
         }
 
         /// Create a new journal snapshot
         pub fn create_snapshot(self: *Self) Journal.SnapshotIdType {
-            return self.journal.create_snapshot();
+            return State.create_snapshot(self);
         }
 
         /// Revert state changes to a previous snapshot
@@ -1406,304 +1260,113 @@ pub fn Evm(comptime config: EvmConfig) type {
         /// Optimized to avoid allocations: iterate journal entries in reverse
         /// before truncating, applying all reverts in-place.
         pub fn revert_to_snapshot(self: *Self, snapshot_id: Journal.SnapshotIdType) void {
-            // Find first index whose snapshot_id >= target
-            var start_index: ?usize = null;
-            for (self.journal.entries.items, 0..) |entry, i| {
-                if (entry.snapshot_id >= snapshot_id) { start_index = i; break; }
-            }
-
-            if (start_index) |start| {
-                var i = self.journal.entries.items.len;
-                while (i > start) : (i -= 1) {
-                    const entry = self.journal.entries.items[i - 1];
-                    self.apply_journal_entry_revert(entry) catch |err| {
-                        log.err("Failed to revert journal entry: {any}", .{err});
-                    };
-                }
-            }
-
-            // Finally, truncate the journal entries to the snapshot boundary
-            self.journal.revert_to_snapshot(snapshot_id);
+            State.revert_to_snapshot(self, snapshot_id);
         }
 
-        /// Apply a single journal entry to revert database state
-        fn apply_journal_entry_revert(self: *Self, entry: Journal.EntryType) !void {
-            switch (entry.data) {
-                .storage_change => |sc| {
-                    // Revert storage to original value
-                    try self.database.set_storage(sc.address.bytes, sc.key, sc.original_value);
-                },
-                .balance_change => |bc| {
-                    // Revert balance to original value
-                    var account = (try self.database.get_account(bc.address.bytes)) orelse {
-                        // If account doesn't exist, create it with the original balance
-                        const reverted_account = Account{
-                            .balance = bc.original_balance,
-                            .nonce = 0,
-                            .code_hash = [_]u8{0} ** 32,
-                            .storage_root = [_]u8{0} ** 32,
-                        };
-                        return self.database.set_account(bc.address.bytes, reverted_account);
-                    };
-                    account.balance = bc.original_balance;
-                    try self.database.set_account(bc.address.bytes, account);
-                },
-                .nonce_change => |nc| {
-                    // Revert nonce to original value
-                    var account = (try self.database.get_account(nc.address.bytes)) orelse return;
-                    account.nonce = nc.original_nonce;
-                    try self.database.set_account(nc.address.bytes, account);
-                },
-                .code_change => |cc| {
-                    // Revert code to original value
-                    var account = (try self.database.get_account(cc.address.bytes)) orelse return;
-                    account.code_hash = cc.original_code_hash;
-                    try self.database.set_account(cc.address.bytes, account);
-                },
-                .account_created => |ac| {
-                    // Remove created account
-                    try self.database.delete_account(ac.address.bytes);
-                },
-                .account_destroyed => |ad| {
-                    // Restore destroyed account
-                    // Note: This is a simplified restoration - in practice we'd need full account state
-                    const restored_account = Account{
-                        .balance = ad.balance,
-                        .nonce = 0,
-                        .code_hash = [_]u8{0} ** 32,
-                        .storage_root = [_]u8{0} ** 32,
-                    };
-                    try self.database.set_account(ad.address.bytes, restored_account);
-                },
-            }
-        }
 
         /// Record a storage change in the journal
         pub fn record_storage_change(self: *Self, address: primitives.Address, slot: u256, original_value: u256) !void {
-            try self.journal.record_storage_change(self.current_snapshot_id, address, slot, original_value);
+            return State.record_storage_change(self, address, slot, original_value);
         }
 
         /// Get the original storage value from the journal
         pub fn get_original_storage(self: *Self, address: primitives.Address, slot: u256) ?u256 {
-            // Use journal's built-in method to get original storage
-            return self.journal.get_original_storage(address, slot);
+            return State.get_original_storage(self, address, slot);
         }
 
         /// Access an address and return the gas cost (EIP-2929)
         pub fn access_address(self: *Self, address: primitives.Address) !u64 {
-            const cost = try self.access_list.access_address(address);
-            return cost;
+            return State.access_address(self, address);
         }
 
         /// Access a storage slot and return the gas cost (EIP-2929)
         pub fn access_storage_slot(self: *Self, contract_address: primitives.Address, slot: u256) !u64 {
-            const cost = try self.access_list.access_storage_slot(contract_address, slot);
-            return cost;
+            return State.access_storage_slot(self, contract_address, slot);
         }
 
         /// Mark a contract for destruction
         pub fn mark_for_destruction(self: *Self, contract_address: primitives.Address, recipient: primitives.Address) !void {
-            // EIP-214: Prevent self-destruction in static context
-            if (self.is_static_context()) {
-                return error.StaticCallViolation;
-            }
-            
-            // EIP-6780: SELFDESTRUCT only actually destroys the contract if it was created in the same transaction
-            // Otherwise, it only transfers the balance but keeps the code and storage
-            if (self.eips.eip_6780) {
-                // Check if contract was created in the current transaction
-                const created_in_tx = self.created_contracts.was_created_in_tx(contract_address);
-                
-                if (created_in_tx) {
-                    // Full destruction: transfer balance and mark for deletion
-                    try self.self_destruct.mark_for_destruction(contract_address, recipient);
-                } else {
-                    // Only transfer balance, don't destroy the contract
-                    // Get the contract's balance
-                    const contract_account = try self.database.get_account(contract_address.bytes);
-                    if (contract_account) |account| {
-                        if (account.balance > 0) {
-                            // Transfer balance to recipient
-                            try self.journal.record_balance_change(self.current_snapshot_id, contract_address, account.balance);
-                            try self.journal.record_balance_change(self.current_snapshot_id, recipient, 0);
-                            
-                            // Update balances
-                            var sender_account = account;
-                            sender_account.balance = 0;
-                            try self.database.set_account(contract_address.bytes, sender_account);
-                            
-                            var recipient_account = (try self.database.get_account(recipient.bytes)) orelse Account.zero();
-                            recipient_account.balance +%= account.balance;
-                            try self.database.set_account(recipient.bytes, recipient_account);
-                        }
-                    }
-                    // Don't mark for destruction - contract persists
-                }
-            } else {
-                // Pre-Cancun: always mark for full destruction
-                try self.self_destruct.mark_for_destruction(contract_address, recipient);
-            }
+            return State.mark_for_destruction(self, contract_address, recipient);
         }
 
         /// Get current call input/calldata
         pub fn get_input(self: *Self) []const u8 {
-            return self.current_input;
+            return Context.get_input(self);
         }
 
         /// Check if hardfork is at least the target
         pub fn is_hardfork_at_least(self: *Self, target: Hardfork) bool {
-            return @intFromEnum(self.hardfork_config) >= @intFromEnum(target);
+            return Context.is_hardfork_at_least(self, target);
         }
 
         /// Get current hardfork (deprecated - use EIPs)
         pub fn get_hardfork(self: *Self) Hardfork {
-            return self.hardfork_config;
+            return Context.get_hardfork(self);
         }
 
         /// Get the call depth for the current frame
         pub fn get_depth(self: *Self) u11 {
-            return @intCast(self.depth);
+            return Context.get_depth(self);
         }
 
         /// Get transaction origin (original sender)
         pub fn get_tx_origin(self: *Self) primitives.Address {
-            return self.origin;
+            return Context.get_tx_origin(self);
         }
 
         /// Get current caller address
         pub fn get_caller(self: *Self) primitives.Address {
-            if (self.depth == 0) return self.origin;
-            return self.call_stack[self.depth - 1].caller;
+            return Context.get_caller(self);
         }
 
         /// Get current call value
         pub fn get_call_value(self: *Self) u256 {
-            if (self.depth == 0) return 0;
-            return self.call_stack[self.depth - 1].value;
+            return Context.get_call_value(self);
         }
 
         /// Check if current context is static (EIP-214)
         pub fn is_static_context(self: *Self) bool {
-            if (self.depth == 0) return false;
-            return self.call_stack[self.depth - 1].is_static;
+            return Context.is_static_context(self);
         }
 
         /// Get storage value
         pub fn get_storage(self: *Self, address: primitives.Address, slot: u256) u256 {
-            return self.database.get_storage(address.bytes, slot) catch 0;
+            return Host.get_storage(self, address, slot);
         }
 
         /// Set storage value
         pub fn set_storage(self: *Self, address: primitives.Address, slot: u256, value: u256) !void {
-            // EIP-214: Prevent storage writes in static context
-            if (self.is_static_context()) {
-                return error.StaticCallViolation;
-            }
-            // Record original value for journal
-            const original_value = self.get_storage(address, slot);
-            try self.record_storage_change(address, slot, original_value);
-            try self.database.set_storage(address.bytes, slot, value);
+            return Host.set_storage(self, address, slot, value);
         }
 
         /// Get transaction gas price
         pub fn get_gas_price(self: *Self) u256 {
-            return self.gas_price;
+            return Context.get_gas_price(self);
         }
 
         /// Get return data from last call
         pub fn get_return_data(self: *Self) []const u8 {
-            return self.return_data;
+            return Context.get_return_data(self);
         }
 
         /// Get chain ID  
         pub fn get_chain_id(self: *Self) u64 {
-            return self.block_info.chain_id;
+            return Context.get_chain_id(self);
         }
 
         /// Get block hash by number
         pub fn get_block_hash(self: *Self, block_number: u64) ?[32]u8 {
-            const current_block = self.block_info.number;
-
-            // Use EIP-2935 historical block hashes if available
-            // This provides access to older block hashes via system contract
-            const historical_block_hashes = @import("historical_block_hashes.zig");
-            const hash_opt = historical_block_hashes.HistoricalBlockHashesContract.getBlockHash(
-                self.database,
-                block_number,
-                current_block,
-            ) catch |err| {
-                log.debug("Failed to get block hash from history contract: {}", .{err});
-                // Fall back to standard behavior on error
-                
-                // EVM BLOCKHASH rules:
-                // - Return null for current block and future blocks
-                // - Return null for blocks older than 256 blocks
-                // - Return null for block 0 (genesis)
-                if (block_number >= current_block or
-                    current_block > block_number + 256 or
-                    block_number == 0)
-                {
-                    return null;
-                }
-                
-                // For testing/simulation purposes, generate a deterministic hash
-                var hash: [32]u8 = undefined;
-                hash[0..8].* = std.mem.toBytes(block_number);
-                hash[8..16].* = std.mem.toBytes(current_block);
-                
-                // Fill rest with deterministic pattern based on block number
-                var i: usize = 16;
-                while (i < 32) : (i += 1) {
-                    hash[i] = @as(u8, @truncate(block_number +% i));
-                }
-                
-                return hash;
-            };
-            
-            if (hash_opt) |hash| {
-                return hash;
-            }
-            
-            // If no hash found in storage, fall back to standard behavior
-            // - Return null for current block and future blocks
-            // - Return null for blocks older than 256 blocks
-            // - Return null for block 0 (genesis)
-            if (block_number >= current_block or
-                current_block > block_number + 256 or
-                block_number == 0)
-            {
-                return null;
-            }
-
-            // For testing/simulation purposes, generate a deterministic hash
-            // In a real implementation, this would look up the actual block hash
-            // from the blockchain state or a block hash ring buffer
-            var hash: [32]u8 = undefined;
-            hash[0..8].* = std.mem.toBytes(block_number);
-            hash[8..16].* = std.mem.toBytes(current_block);
-
-            // Fill rest with deterministic pattern based on block number
-            var i: usize = 16;
-            while (i < 32) : (i += 1) {
-                hash[i] = @as(u8, @truncate(block_number +% i));
-            }
-
-            return hash;
+            return Context.get_block_hash(self, block_number);
         }
 
         /// Get blob hash for the given index (EIP-4844)
         pub fn get_blob_hash(self: *Self, index: u256) ?[32]u8 {
-            // Convert index to usize, return null if out of bounds
-            if (index >= self.context.blob_versioned_hashes.len) {
-                return null;
-            }
-            const idx = @as(usize, @intCast(index));
-            return self.context.blob_versioned_hashes[idx];
+            return Context.get_blob_hash(self, index);
         }
 
         /// Get blob base fee (EIP-4844)
         pub fn get_blob_base_fee(self: *Self) u256 {
-            return self.context.blob_base_fee;
+            return Context.get_blob_base_fee(self);
         }
 
         /// Add gas refund amount for SSTORE operations
