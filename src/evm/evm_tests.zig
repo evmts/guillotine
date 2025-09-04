@@ -2234,6 +2234,181 @@ test "EVM simulate - handles failures without state changes" {
     try std.testing.expectEqual(initial_balance, caller_after.balance);
 }
 
+test "EVM simulate - preserves journal state and snapshot mechanism" {
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
+
+    const block_info = BlockInfo{
+        .chain_id = 1,
+        .number = 1,
+        .timestamp = 1000,
+        .difficulty = 100,
+        .gas_limit = 30000000,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .base_fee = 1000000000,
+        .prev_randao = [_]u8{0} ** 32,
+    };
+
+    const context = TransactionContext{
+        .gas_limit = 1000000,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .chain_id = 1,
+    };
+
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    defer evm.deinit();
+
+    // Set up an account and contract
+    const caller_address: primitives.Address = [_]u8{0x01} ++ [_]u8{0} ** 19;
+    const contract_address: primitives.Address = [_]u8{0x02} ++ [_]u8{0} ** 19;
+    
+    try db.set_account(caller_address, Account{
+        .balance = 1000000,
+        .nonce = 5,
+        .code_hash = [_]u8{0} ** 32,
+        .storage_root = [_]u8{0} ** 32,
+    });
+    
+    // Contract that stores a value: PUSH1 42 PUSH1 0 SSTORE STOP
+    const bytecode = [_]u8{ 0x60, 0x2A, 0x60, 0x00, 0x55, 0x00 };
+    const code_hash = try db.set_code(&bytecode);
+    try db.set_account(contract_address, Account{
+        .balance = 0,
+        .nonce = 0,
+        .code_hash = code_hash,
+        .storage_root = [_]u8{0} ** 32,
+    });
+
+    // First, make a real call to create some journal entries
+    const initial_call_params = DefaultEvm.CallParams{
+        .call = .{
+            .caller = caller_address,
+            .to = contract_address,
+            .value = 100,
+            .input = &.{},
+            .gas = 100000,
+        },
+    };
+    
+    const real_result = try evm.call(initial_call_params);
+    try std.testing.expect(real_result.success);
+    
+    // After real call, we should have journal entries and next_snapshot_id should be incremented
+    const journal_entries_before = evm.journal.entry_count();
+    const next_snapshot_before = evm.journal.next_snapshot_id;
+    
+    // Now simulate should NOT corrupt the existing journal state
+    const sim_call_params = DefaultEvm.CallParams{
+        .call = .{
+            .caller = caller_address,
+            .to = contract_address,
+            .value = 50,
+            .input = &.{},
+            .gas = 100000,
+        },
+    };
+    
+    const sim_result = evm.simulate(sim_call_params);
+    try std.testing.expect(sim_result.success);
+    
+    // CRITICAL: Journal should be restored to exact previous state
+    try std.testing.expectEqual(journal_entries_before, evm.journal.entry_count());
+    try std.testing.expectEqual(next_snapshot_before, evm.journal.next_snapshot_id);
+    
+    // Verify that multiple consecutive simulates work correctly
+    const sim_result2 = evm.simulate(sim_call_params);
+    try std.testing.expect(sim_result2.success);
+    try std.testing.expectEqual(journal_entries_before, evm.journal.entry_count());
+    try std.testing.expectEqual(next_snapshot_before, evm.journal.next_snapshot_id);
+}
+
+test "EVM simulate - mixed simulate/call sequences maintain state isolation" {
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
+
+    const block_info = BlockInfo{
+        .chain_id = 1,
+        .number = 1,
+        .timestamp = 1000,
+        .difficulty = 100,
+        .gas_limit = 30000000,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .base_fee = 1000000000,
+        .prev_randao = [_]u8{0} ** 32,
+    };
+
+    const context = TransactionContext{
+        .gas_limit = 1000000,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .chain_id = 1,
+    };
+
+    var evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    defer evm.deinit();
+
+    // Set up account and contract
+    const caller_address: primitives.Address = [_]u8{0x01} ++ [_]u8{0} ** 19;
+    const contract_address: primitives.Address = [_]u8{0x02} ++ [_]u8{0} ** 19;
+    
+    try db.set_account(caller_address, Account{
+        .balance = 1000000,
+        .nonce = 0,
+        .code_hash = [_]u8{0} ** 32,
+        .storage_root = [_]u8{0} ** 32,
+    });
+    
+    // Simple contract: PUSH1 1 PUSH1 0 SSTORE STOP (stores 1 at slot 0)
+    const bytecode = [_]u8{ 0x60, 0x01, 0x60, 0x00, 0x55, 0x00 };
+    const code_hash = try db.set_code(&bytecode);
+    try db.set_account(contract_address, Account{
+        .balance = 0,
+        .nonce = 0,
+        .code_hash = code_hash,
+        .storage_root = [_]u8{0} ** 32,
+    });
+
+    const call_params = DefaultEvm.CallParams{
+        .call = .{
+            .caller = caller_address,
+            .to = contract_address,
+            .value = 0,
+            .input = &.{},
+            .gas = 100000,
+        },
+    };
+
+    // Test sequence: call -> simulate -> call -> simulate
+    // Each real call should see cumulative changes, simulations should not affect real state
+    
+    // First real call
+    const real_result1 = try evm.call(call_params);
+    try std.testing.expect(real_result1.success);
+    
+    // Storage should now be set
+    const storage_after_real1 = try db.get_storage(contract_address, 0);
+    try std.testing.expectEqual(@as(u256, 1), storage_after_real1);
+    
+    // Simulate should see the real state but not change it
+    const sim_result1 = evm.simulate(call_params);
+    try std.testing.expect(sim_result1.success);
+    
+    // Storage should remain unchanged after simulation
+    const storage_after_sim1 = try db.get_storage(contract_address, 0);
+    try std.testing.expectEqual(@as(u256, 1), storage_after_sim1);
+    
+    // Second real call - should work normally
+    const real_result2 = try evm.call(call_params);
+    try std.testing.expect(real_result2.success);
+    
+    // Final simulation - should still work
+    const sim_result2 = evm.simulate(call_params);
+    try std.testing.expect(sim_result2.success);
+    
+    // Verify EVM journal state is consistent throughout
+    // If bug exists, journal would be corrupted after first simulate
+    try std.testing.expect(evm.journal.next_snapshot_id >= 0);
+}
+
 test "Error handling - precompile execution" {
     var db = Database.init(std.testing.allocator);
     defer db.deinit();

@@ -270,9 +270,11 @@ pub fn Evm(comptime config: EvmConfig) type {
                 self.journal.revert_to_snapshot(snapshot_id);
             }
             
-            // Execute the call normally and return its result
-            // Note: call() will also try to clear for top-level, but that's OK - clearing twice is safe
-            return self.call(params);
+            // Execute using inner_call to avoid top-level state clearing
+            return self.inner_call(params) catch |err| {
+                // Convert error to failure result
+                return CallResult.failure(0);
+            };
         }
 
         /// Execute an EVM operation.
@@ -375,20 +377,14 @@ pub fn Evm(comptime config: EvmConfig) type {
                 break :blk gas - intrinsic_gas;
             } else gas;
             
-            // Route to appropriate handler
-            var result = switch (params) {
-                .call => |p| blk: {
-                    // log.debug("DEBUG: EVM.call starting, to={x}, gas={}, input_len={}\n", .{ p.to.bytes, execution_gas, p.input.len });
-                    break :blk self.executeCall(.{ .caller = p.caller, .to = p.to, .value = p.value, .input = p.input, .gas = execution_gas }) catch {
-                        // log.debug("DEBUG: EVM.call failed with error: {}\n", .{err});
-                        return CallResult.failure(0);
-                    };
-                },
-                .callcode => |p| self.executeCallcode(.{ .caller = p.caller, .to = p.to, .value = p.value, .input = p.input, .gas = execution_gas }) catch CallResult.failure(0),
-                .delegatecall => |p| self.executeDelegatecall(.{ .caller = p.caller, .to = p.to, .input = p.input, .gas = execution_gas }) catch CallResult.failure(0),
-                .staticcall => |p| self.executeStaticcall(.{ .caller = p.caller, .to = p.to, .input = p.input, .gas = execution_gas }) catch CallResult.failure(0),
-                .create => |p| self.executeCreate(.{ .caller = p.caller, .value = p.value, .init_code = p.init_code, .gas = execution_gas }) catch CallResult.failure(0),
-                .create2 => |p| self.executeCreate2(.{ .caller = p.caller, .value = p.value, .init_code = p.init_code, .salt = p.salt, .gas = execution_gas }) catch CallResult.failure(0),
+            // Create params with execution gas and execute using inner_call
+            var execution_params = params;
+            switch (execution_params) {
+                inline else => |*p| p.gas = execution_gas,
+            }
+            
+            var result = self.inner_call(execution_params) catch {
+                return CallResult.failure(0);
             };
             
             // Apply EIP-3529 gas refund cap if transaction succeeded
@@ -1245,8 +1241,41 @@ pub fn Evm(comptime config: EvmConfig) type {
         }
 
         /// Execute nested EVM call - used for calls from within the EVM
+        /// This is the core execution logic without transaction-level state management
         pub fn inner_call(self: *Self, params: CallParams) !CallResult {
-            return self.call(params);
+            params.validate() catch return CallResult.failure(0);
+            
+            // Check basic constraints
+            const gas = switch (params) {
+                inline else => |p| p.gas,
+            };
+            if (!self.disable_gas_checking and gas == 0) return CallResult.failure(0);
+            if (self.depth >= config.max_call_depth) return CallResult.failure(0);
+            
+            // No intrinsic gas deduction for inner calls - that's handled by the calling opcode
+            const execution_gas = gas;
+            
+            // Route to appropriate handler
+            const result = switch (params) {
+                .call => |p| blk: {
+                    break :blk self.executeCall(.{ .caller = p.caller, .to = p.to, .value = p.value, .input = p.input, .gas = execution_gas }) catch {
+                        return CallResult.failure(0);
+                    };
+                },
+                .callcode => |p| self.executeCallcode(.{ .caller = p.caller, .to = p.to, .value = p.value, .input = p.input, .gas = execution_gas }) catch CallResult.failure(0),
+                .delegatecall => |p| self.executeDelegatecall(.{ .caller = p.caller, .to = p.to, .input = p.input, .gas = execution_gas }) catch CallResult.failure(0),
+                .staticcall => |p| self.executeStaticcall(.{ .caller = p.caller, .to = p.to, .input = p.input, .gas = execution_gas }) catch CallResult.failure(0),
+                .create => |p| self.executeCreate(.{ .caller = p.caller, .value = p.value, .init_code = p.init_code, .gas = execution_gas }) catch CallResult.failure(0),
+                .create2 => |p| self.executeCreate2(.{ .caller = p.caller, .value = p.value, .init_code = p.init_code, .salt = p.salt, .gas = execution_gas }) catch CallResult.failure(0),
+            };
+            
+            // For nested calls, return empty slices - logs accumulate in EVM
+            var result_copy = result;
+            result_copy.logs = &.{};
+            result_copy.selfdestructs = &.{};
+            result_copy.accessed_addresses = &.{};
+            result_copy.accessed_storage = &.{};
+            return result_copy;
         }
 
         /// Execute a precompile call (inlined)
