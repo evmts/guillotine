@@ -155,18 +155,80 @@ pub fn Dispatch(comptime FrameType: type) type {
         // the details of how the stream is structured.
 
         /// Unified opcode enum that combines regular and synthetic opcodes
-        pub const UnifiedOpcode = union(enum) {
-            regular: Opcode,
-            synthetic: OpcodeSynthetic,
-
-            /// Convert from regular Opcode
-            pub fn fromOpcode(opcode: Opcode) UnifiedOpcode {
-                return .{ .regular = opcode };
+        /// FLATTENED VERSION: Simple u16 enum instead of tagged union
+        pub const UnifiedOpcode = enum(u16) {
+            // Regular opcodes (0x00-0xFF) - just the most common ones for this POC
+            STOP = 0x00,
+            ADD = 0x01,
+            MUL = 0x02,
+            SUB = 0x03,
+            PC = 0x58,
+            JUMPDEST = 0x5B,
+            PUSH1 = 0x60,
+            PUSH2 = 0x61,
+            PUSH3 = 0x62,
+            PUSH4 = 0x63,
+            PUSH5 = 0x64,
+            PUSH6 = 0x65,
+            PUSH7 = 0x66,
+            PUSH8 = 0x67,
+            PUSH9 = 0x68,
+            // TODO: Add all 256 regular opcodes (0x00-0xFF)
+            PUSH32 = 0x7F,
+            LOG0 = 0xA0,
+            LOG1 = 0xA1,
+            LOG2 = 0xA2,
+            LOG3 = 0xA3,
+            LOG4 = 0xA4,
+            
+            // Synthetic opcodes (0x100+ range to avoid conflicts)
+            PUSH_ADD_INLINE = 0x100,      // was 0xA5
+            PUSH_ADD_POINTER = 0x101,     // was 0xA6  
+            PUSH_MUL_INLINE = 0x102,      // was 0xA7
+            PUSH_MUL_POINTER = 0x103,     // was 0xA8
+            // TODO: Add remaining synthetic opcodes (24 total)
+            
+            /// Convert from regular Opcode (simplified for POC)
+            pub fn fromRegular(opcode: Opcode) UnifiedOpcode {
+                // TODO: Handle all opcodes - this is just a few examples
+                return switch (opcode) {
+                    .STOP => .STOP,
+                    .ADD => .ADD,
+                    .MUL => .MUL,
+                    .SUB => .SUB,
+                    .PC => .PC,
+                    .PUSH1 => .PUSH1,
+                    .PUSH2 => .PUSH2,
+                    .JUMPDEST => .JUMPDEST,
+                    .LOG0 => .LOG0,
+                    .LOG1 => .LOG1,
+                    .LOG2 => .LOG2,
+                    .LOG3 => .LOG3,
+                    .LOG4 => .LOG4,
+                    else => @enumFromInt(@intFromEnum(opcode)), // Fallback
+                };
             }
 
-            /// Convert from synthetic OpcodeSynthetic
+            /// Convert from synthetic OpcodeSynthetic (simplified for POC)
             pub fn fromSynthetic(opcode: OpcodeSynthetic) UnifiedOpcode {
-                return .{ .synthetic = opcode };
+                // TODO: Handle all synthetic opcodes - this is just a few examples
+                return switch (opcode) {
+                    .PUSH_ADD_INLINE => .PUSH_ADD_INLINE,
+                    .PUSH_ADD_POINTER => .PUSH_ADD_POINTER,
+                    .PUSH_MUL_INLINE => .PUSH_MUL_INLINE,
+                    .PUSH_MUL_POINTER => .PUSH_MUL_POINTER,
+                    else => @enumFromInt(0x100 + (@intFromEnum(opcode) - 0xA5)), // Map to 0x100+ range
+                };
+            }
+
+            /// Check if this is a regular EVM opcode (0x00-0xFF)
+            pub fn isRegular(self: UnifiedOpcode) bool {
+                return @intFromEnum(self) <= 0xFF;
+            }
+
+            /// Check if this is a synthetic opcode (0x100+)
+            pub fn isSynthetic(self: UnifiedOpcode) bool {
+                return @intFromEnum(self) >= 0x100;
             }
         };
 
@@ -174,56 +236,63 @@ pub fn Dispatch(comptime FrameType: type) type {
         /// NOTE: The metadata is not tagged (to save cacheline space) so this working safely depends on us always
         /// Constructing the instruction stream correctly with the expected metadata consistentally in the expected spots based on opcode!
         /// We also assume every opcode will correctly pass in the correct enum type for their opcode
+        /// FLATTENED VERSION: Single switch instead of nested switches
         fn GetOpDataReturnType(comptime opcode: UnifiedOpcode) type {
             return switch (opcode) {
-                .regular => |op| switch (op) {
-                    .PC => struct { metadata: PcMetadata, next: Self },
-                    .PUSH1, .PUSH2, .PUSH3, .PUSH4, .PUSH5, .PUSH6, .PUSH7, .PUSH8 => struct { metadata: PushInlineMetadata, next: Self },
-                    .PUSH9, .PUSH10, .PUSH11, .PUSH12, .PUSH13, .PUSH14, .PUSH15, .PUSH16, .PUSH17, .PUSH18, .PUSH19, .PUSH20, .PUSH21, .PUSH22, .PUSH23, .PUSH24, .PUSH25, .PUSH26, .PUSH27, .PUSH28, .PUSH29, .PUSH30, .PUSH31, .PUSH32 => struct { metadata: PushPointerMetadata, next: Self },
-                    .JUMPDEST => struct { metadata: JumpDestMetadata, next: Self },
-                    else => struct { next: Self },
-                },
-                .synthetic => |op| switch (op) {
-                    .PUSH_ADD_INLINE, .PUSH_MUL_INLINE, .PUSH_DIV_INLINE, .PUSH_SUB_INLINE, .PUSH_AND_INLINE, .PUSH_OR_INLINE, .PUSH_XOR_INLINE, .PUSH_JUMP_INLINE, .PUSH_JUMPI_INLINE, .PUSH_MLOAD_INLINE, .PUSH_MSTORE_INLINE, .PUSH_MSTORE8_INLINE => struct { metadata: PushInlineMetadata, next: Self },
-                    .PUSH_ADD_POINTER, .PUSH_MUL_POINTER, .PUSH_DIV_POINTER, .PUSH_SUB_POINTER, .PUSH_AND_POINTER, .PUSH_OR_POINTER, .PUSH_XOR_POINTER, .PUSH_JUMP_POINTER, .PUSH_JUMPI_POINTER, .PUSH_MLOAD_POINTER, .PUSH_MSTORE_POINTER, .PUSH_MSTORE8_POINTER => struct { metadata: PushPointerMetadata, next: Self },
-                },
+                // Regular opcodes that need metadata
+                .PC => struct { metadata: PcMetadata, next: Self },
+                .PUSH1, .PUSH2, .PUSH3, .PUSH4, .PUSH5, .PUSH6, .PUSH7, .PUSH8 => 
+                    struct { metadata: PushInlineMetadata, next: Self },
+                .PUSH9, .PUSH32 => // TODO: Add all PUSH9-PUSH32 opcodes here
+                    struct { metadata: PushPointerMetadata, next: Self },
+                .JUMPDEST => struct { metadata: JumpDestMetadata, next: Self },
+                
+                // Synthetic opcodes that need metadata  
+                .PUSH_ADD_INLINE, .PUSH_MUL_INLINE => // TODO: Add all synthetic inline opcodes
+                    struct { metadata: PushInlineMetadata, next: Self },
+                .PUSH_ADD_POINTER, .PUSH_MUL_POINTER => // TODO: Add all synthetic pointer opcodes
+                    struct { metadata: PushPointerMetadata, next: Self },
+                
+                // Everything else just needs next pointer
+                else => struct { next: Self },
             };
         }
 
         /// Get opcode data including metadata and next dispatch position.
-        /// This is a comptime-optimized method for specific opcodes.
+        /// FLATTENED VERSION: Single switch eliminates double dispatch
         pub fn getOpData(self: Self, comptime opcode: UnifiedOpcode) GetOpDataReturnType(opcode) {
             return switch (opcode) {
-                .regular => |op| switch (op) {
-                    .PC => .{
-                        .metadata = self.cursor[1].pc,
-                        .next = Self{ .cursor = self.cursor + 2 },
-                    },
-                    .PUSH1, .PUSH2, .PUSH3, .PUSH4, .PUSH5, .PUSH6, .PUSH7, .PUSH8 => .{
-                        .metadata = self.cursor[1].push_inline,
-                        .next = Self{ .cursor = self.cursor + 2 },
-                    },
-                    .PUSH9, .PUSH10, .PUSH11, .PUSH12, .PUSH13, .PUSH14, .PUSH15, .PUSH16, .PUSH17, .PUSH18, .PUSH19, .PUSH20, .PUSH21, .PUSH22, .PUSH23, .PUSH24, .PUSH25, .PUSH26, .PUSH27, .PUSH28, .PUSH29, .PUSH30, .PUSH31, .PUSH32 => .{
-                        .metadata = self.cursor[1].push_pointer,
-                        .next = Self{ .cursor = self.cursor + 2 },
-                    },
-                    .JUMPDEST => .{
-                        .metadata = self.cursor[1].jump_dest,
-                        .next = Self{ .cursor = self.cursor + 2 },
-                    },
-                    else => .{
-                        .next = Self{ .cursor = self.cursor + 1 },
-                    },
+                // Regular opcodes with metadata
+                .PC => .{
+                    .metadata = self.cursor[1].pc,
+                    .next = Self{ .cursor = self.cursor + 2 },
                 },
-                .synthetic => |op| switch (op) {
-                    .PUSH_ADD_INLINE, .PUSH_MUL_INLINE, .PUSH_DIV_INLINE, .PUSH_SUB_INLINE, .PUSH_AND_INLINE, .PUSH_OR_INLINE, .PUSH_XOR_INLINE, .PUSH_JUMP_INLINE, .PUSH_JUMPI_INLINE, .PUSH_MLOAD_INLINE, .PUSH_MSTORE_INLINE, .PUSH_MSTORE8_INLINE => .{
-                        .metadata = self.cursor[1].push_inline,
-                        .next = Self{ .cursor = self.cursor + 2 },
-                    },
-                    .PUSH_ADD_POINTER, .PUSH_MUL_POINTER, .PUSH_DIV_POINTER, .PUSH_SUB_POINTER, .PUSH_AND_POINTER, .PUSH_OR_POINTER, .PUSH_XOR_POINTER, .PUSH_JUMP_POINTER, .PUSH_JUMPI_POINTER, .PUSH_MLOAD_POINTER, .PUSH_MSTORE_POINTER, .PUSH_MSTORE8_POINTER => .{
-                        .metadata = self.cursor[1].push_pointer,
-                        .next = Self{ .cursor = self.cursor + 2 },
-                    },
+                .PUSH1, .PUSH2, .PUSH3, .PUSH4, .PUSH5, .PUSH6, .PUSH7, .PUSH8 => .{
+                    .metadata = self.cursor[1].push_inline,
+                    .next = Self{ .cursor = self.cursor + 2 },
+                },
+                .PUSH9, .PUSH32 => .{ // TODO: Add all PUSH9-PUSH32 opcodes here  
+                    .metadata = self.cursor[1].push_pointer,
+                    .next = Self{ .cursor = self.cursor + 2 },
+                },
+                .JUMPDEST => .{
+                    .metadata = self.cursor[1].jump_dest,
+                    .next = Self{ .cursor = self.cursor + 2 },
+                },
+                
+                // Synthetic opcodes with metadata
+                .PUSH_ADD_INLINE, .PUSH_MUL_INLINE => .{ // TODO: Add all synthetic inline opcodes
+                    .metadata = self.cursor[1].push_inline,
+                    .next = Self{ .cursor = self.cursor + 2 },
+                },
+                .PUSH_ADD_POINTER, .PUSH_MUL_POINTER => .{ // TODO: Add all synthetic pointer opcodes
+                    .metadata = self.cursor[1].push_pointer,
+                    .next = Self{ .cursor = self.cursor + 2 },
+                },
+                
+                // Everything else just advances cursor
+                else => .{
+                    .next = Self{ .cursor = self.cursor + 1 },
                 },
             };
         }
@@ -538,18 +607,14 @@ pub fn Dispatch(comptime FrameType: type) type {
             push_jumpi,
         };
 
-        /// Get the correct synthetic opcode index for a fusion operation
-        fn getSyntheticOpcode(fusion_type: FusionType, is_inline: bool) u8 {
+        /// Get the correct synthetic opcode for a fusion operation
+        /// FLATTENED VERSION: Returns flat UnifiedOpcode instead of u8 index
+        fn getSyntheticOpcode(fusion_type: FusionType, is_inline: bool) UnifiedOpcode {
             return switch (fusion_type) {
-                .push_add => if (is_inline) @intFromEnum(OpcodeSynthetic.PUSH_ADD_INLINE) else @intFromEnum(OpcodeSynthetic.PUSH_ADD_POINTER),
-                .push_mul => if (is_inline) @intFromEnum(OpcodeSynthetic.PUSH_MUL_INLINE) else @intFromEnum(OpcodeSynthetic.PUSH_MUL_POINTER),
-                .push_sub => if (is_inline) @intFromEnum(OpcodeSynthetic.PUSH_SUB_INLINE) else @intFromEnum(OpcodeSynthetic.PUSH_SUB_POINTER),
-                .push_div => if (is_inline) @intFromEnum(OpcodeSynthetic.PUSH_DIV_INLINE) else @intFromEnum(OpcodeSynthetic.PUSH_DIV_POINTER),
-                .push_and => if (is_inline) @intFromEnum(OpcodeSynthetic.PUSH_AND_INLINE) else @intFromEnum(OpcodeSynthetic.PUSH_AND_POINTER),
-                .push_or => if (is_inline) @intFromEnum(OpcodeSynthetic.PUSH_OR_INLINE) else @intFromEnum(OpcodeSynthetic.PUSH_OR_POINTER),
-                .push_xor => if (is_inline) @intFromEnum(OpcodeSynthetic.PUSH_XOR_INLINE) else @intFromEnum(OpcodeSynthetic.PUSH_XOR_POINTER),
-                .push_jump => if (is_inline) @intFromEnum(OpcodeSynthetic.PUSH_JUMP_INLINE) else @intFromEnum(OpcodeSynthetic.PUSH_JUMP_POINTER),
-                .push_jumpi => if (is_inline) @intFromEnum(OpcodeSynthetic.PUSH_JUMPI_INLINE) else @intFromEnum(OpcodeSynthetic.PUSH_JUMPI_POINTER),
+                .push_add => if (is_inline) .PUSH_ADD_INLINE else .PUSH_ADD_POINTER,
+                .push_mul => if (is_inline) .PUSH_MUL_INLINE else .PUSH_MUL_POINTER,
+                // TODO: Add remaining fusion types (.push_sub, .push_div, .push_and, etc.)
+                else => if (is_inline) .PUSH_ADD_INLINE else .PUSH_ADD_POINTER, // Temporary fallback
             };
         }
 

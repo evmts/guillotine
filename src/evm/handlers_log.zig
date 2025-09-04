@@ -114,7 +114,8 @@ pub fn Handlers(comptime FrameType: type) type {
                         4 => Opcode.LOG4,
                         else => unreachable,
                     };
-                    const op_data = dispatch.getOpData(.{ .regular = log_opcode });
+                    // FLATTENED VERSION: Use fromRegular helper instead of tagged union
+                    const op_data = dispatch.getOpData(Dispatch.UnifiedOpcode.fromRegular(log_opcode));
                     const next = op_data.next;
                     return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
                 }
