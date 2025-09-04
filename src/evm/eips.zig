@@ -288,6 +288,28 @@ pub const Eips = struct {
         return self.hardfork.isAtLeast(.CANCUN); // EIP-4844
     }
     
+    // ==== NEW: Additional feature detection methods for conditional compilation ====
+    
+    /// Check if SELFDESTRUCT is available (always true but behavior varies)
+    pub fn has_selfdestruct(self: Self) bool {
+        return true; // Available from beginning but behavior changed in EIP-6780
+    }
+    
+    /// Check if access lists are supported
+    pub fn has_access_list(self: Self) bool {
+        return self.hardfork.isAtLeast(.BERLIN); // EIP-2929
+    }
+    
+    /// Check if logs are supported (always available)
+    pub fn has_logs(self: Self) bool {
+        return true; // LOG0-LOG4 available since Frontier
+    }
+    
+    /// Check if CREATE2 opcode is available
+    pub fn has_create2(self: Self) bool {
+        return self.hardfork.isAtLeast(.CONSTANTINOPLE); // EIP-1014
+    }
+    
     /// Get SSTORE gas costs based on hardfork and state
     pub fn sstore_gas_cost(self: Self, current: primitives.U256, new: primitives.U256, original: primitives.U256) SstoreGasCost {
         _ = original; // Will be used for EIP-2200
