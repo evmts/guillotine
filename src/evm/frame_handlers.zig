@@ -2,6 +2,7 @@ const std = @import("std");
 const opcode_data = @import("opcode_data.zig");
 const Opcode = opcode_data.Opcode;
 const OpcodeSynthetic = @import("opcode_synthetic.zig").OpcodeSynthetic;
+const dispatch_module = @import("dispatch.zig");
 const stack_frame_arithmetic = @import("handlers_arithmetic.zig");
 const stack_frame_comparison = @import("handlers_comparison.zig");
 const stack_frame_bitwise = @import("handlers_bitwise.zig");
@@ -170,7 +171,7 @@ pub fn getOpcodeHandlers(comptime FrameType: type) [256]FrameType.OpcodeHandler 
 
 /// Get a synthetic opcode handler by its opcode value.
 /// This is separate from the main handlers array to ensure synthetic opcodes are only used internally.
-pub fn getSyntheticHandler(comptime FrameType: type, synthetic_opcode: u8) FrameType.OpcodeHandler {
+pub fn getSyntheticHandler(comptime FrameType: type, synthetic_opcode: FrameType.Dispatch.UnifiedOpcode) FrameType.OpcodeHandler {
     // Import synthetic handler modules
     const ArithmeticSyntheticHandlers = stack_frame_arithmetic_synthetic.Handlers(FrameType);
     const BitwiseSyntheticHandlers = stack_frame_bitwise_synthetic.Handlers(FrameType);
@@ -178,30 +179,30 @@ pub fn getSyntheticHandler(comptime FrameType: type, synthetic_opcode: u8) Frame
     const JumpSyntheticHandlers = stack_frame_jump_synthetic.Handlers(FrameType);
 
     return switch (synthetic_opcode) {
-        @intFromEnum(OpcodeSynthetic.PUSH_ADD_INLINE) => &ArithmeticSyntheticHandlers.push_add_inline,
-        @intFromEnum(OpcodeSynthetic.PUSH_ADD_POINTER) => &ArithmeticSyntheticHandlers.push_add_pointer,
-        @intFromEnum(OpcodeSynthetic.PUSH_MUL_INLINE) => &ArithmeticSyntheticHandlers.push_mul_inline,
-        @intFromEnum(OpcodeSynthetic.PUSH_MUL_POINTER) => &ArithmeticSyntheticHandlers.push_mul_pointer,
-        @intFromEnum(OpcodeSynthetic.PUSH_DIV_INLINE) => &ArithmeticSyntheticHandlers.push_div_inline,
-        @intFromEnum(OpcodeSynthetic.PUSH_DIV_POINTER) => &ArithmeticSyntheticHandlers.push_div_pointer,
-        @intFromEnum(OpcodeSynthetic.PUSH_SUB_INLINE) => &ArithmeticSyntheticHandlers.push_sub_inline,
-        @intFromEnum(OpcodeSynthetic.PUSH_SUB_POINTER) => &ArithmeticSyntheticHandlers.push_sub_pointer,
-        @intFromEnum(OpcodeSynthetic.PUSH_JUMP_INLINE) => &JumpSyntheticHandlers.push_jump_inline,
-        @intFromEnum(OpcodeSynthetic.PUSH_JUMP_POINTER) => &JumpSyntheticHandlers.push_jump_pointer,
-        @intFromEnum(OpcodeSynthetic.PUSH_JUMPI_INLINE) => &JumpSyntheticHandlers.push_jumpi_inline,
-        @intFromEnum(OpcodeSynthetic.PUSH_JUMPI_POINTER) => &JumpSyntheticHandlers.push_jumpi_pointer,
-        @intFromEnum(OpcodeSynthetic.PUSH_MLOAD_INLINE) => &MemorySyntheticHandlers.push_mload_inline,
-        @intFromEnum(OpcodeSynthetic.PUSH_MLOAD_POINTER) => &MemorySyntheticHandlers.push_mload_pointer,
-        @intFromEnum(OpcodeSynthetic.PUSH_MSTORE_INLINE) => &MemorySyntheticHandlers.push_mstore_inline,
-        @intFromEnum(OpcodeSynthetic.PUSH_MSTORE_POINTER) => &MemorySyntheticHandlers.push_mstore_pointer,
-        @intFromEnum(OpcodeSynthetic.PUSH_AND_INLINE) => &BitwiseSyntheticHandlers.push_and_inline,
-        @intFromEnum(OpcodeSynthetic.PUSH_AND_POINTER) => &BitwiseSyntheticHandlers.push_and_pointer,
-        @intFromEnum(OpcodeSynthetic.PUSH_OR_INLINE) => &BitwiseSyntheticHandlers.push_or_inline,
-        @intFromEnum(OpcodeSynthetic.PUSH_OR_POINTER) => &BitwiseSyntheticHandlers.push_or_pointer,
-        @intFromEnum(OpcodeSynthetic.PUSH_XOR_INLINE) => &BitwiseSyntheticHandlers.push_xor_inline,
-        @intFromEnum(OpcodeSynthetic.PUSH_XOR_POINTER) => &BitwiseSyntheticHandlers.push_xor_pointer,
-        @intFromEnum(OpcodeSynthetic.PUSH_MSTORE8_INLINE) => &MemorySyntheticHandlers.push_mstore8_inline,
-        @intFromEnum(OpcodeSynthetic.PUSH_MSTORE8_POINTER) => &MemorySyntheticHandlers.push_mstore8_pointer,
+        .PUSH_ADD_INLINE => &ArithmeticSyntheticHandlers.push_add_inline,
+        .PUSH_ADD_POINTER => &ArithmeticSyntheticHandlers.push_add_pointer,
+        .PUSH_MUL_INLINE => &ArithmeticSyntheticHandlers.push_mul_inline,
+        .PUSH_MUL_POINTER => &ArithmeticSyntheticHandlers.push_mul_pointer,
+        .PUSH_DIV_INLINE => &ArithmeticSyntheticHandlers.push_div_inline,
+        .PUSH_DIV_POINTER => &ArithmeticSyntheticHandlers.push_div_pointer,
+        .PUSH_SUB_INLINE => &ArithmeticSyntheticHandlers.push_sub_inline,
+        .PUSH_SUB_POINTER => &ArithmeticSyntheticHandlers.push_sub_pointer,
+        .PUSH_JUMP_INLINE => &JumpSyntheticHandlers.push_jump_inline,
+        .PUSH_JUMP_POINTER => &JumpSyntheticHandlers.push_jump_pointer,
+        .PUSH_JUMPI_INLINE => &JumpSyntheticHandlers.push_jumpi_inline,
+        .PUSH_JUMPI_POINTER => &JumpSyntheticHandlers.push_jumpi_pointer,
+        .PUSH_MLOAD_INLINE => &MemorySyntheticHandlers.push_mload_inline,
+        .PUSH_MLOAD_POINTER => &MemorySyntheticHandlers.push_mload_pointer,
+        .PUSH_MSTORE_INLINE => &MemorySyntheticHandlers.push_mstore_inline,
+        .PUSH_MSTORE_POINTER => &MemorySyntheticHandlers.push_mstore_pointer,
+        .PUSH_AND_INLINE => &BitwiseSyntheticHandlers.push_and_inline,
+        .PUSH_AND_POINTER => &BitwiseSyntheticHandlers.push_and_pointer,
+        .PUSH_OR_INLINE => &BitwiseSyntheticHandlers.push_or_inline,
+        .PUSH_OR_POINTER => &BitwiseSyntheticHandlers.push_or_pointer,
+        .PUSH_XOR_INLINE => &BitwiseSyntheticHandlers.push_xor_inline,
+        .PUSH_XOR_POINTER => &BitwiseSyntheticHandlers.push_xor_pointer,
+        .PUSH_MSTORE8_INLINE => &MemorySyntheticHandlers.push_mstore8_inline,
+        .PUSH_MSTORE8_POINTER => &MemorySyntheticHandlers.push_mstore8_pointer,
         else => @panic("Invalid synthetic opcode"),
     };
 }

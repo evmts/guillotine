@@ -142,7 +142,7 @@ pub fn Evm(comptime config: EvmConfig) type {
         /// Hardfork configuration
         hardfork_config: Hardfork,
         /// Active EIPs configuration
-        eips: eips.EvmConfig,
+        eips: eips.Eips.EvmConfig,
         /// Disable gas checking (for testing/debugging)
         disable_gas_checking: bool,
 
@@ -6944,7 +6944,7 @@ test "EipsConfig compatibility with eips.EvmConfig" {
     
     for (hardforks) |fork| {
         // Current duplicate implementation
-        const old_config = eips.EipsConfig.fromHardfork(fork);
+        const old_config = eips.eips.EvmConfig.fromHardfork(fork);
         
         // Canonical implementation
         const canonical = eips.Eips{ .hardfork = fork };
