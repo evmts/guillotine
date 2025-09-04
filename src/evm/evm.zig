@@ -1139,9 +1139,9 @@ pub fn Evm(comptime config: EvmConfig) type {
                 
                 // log.debug("Executing frame with tracer: {s}", .{@typeName(TracerType)});
                 
-                // Frame.interpret_with_tracer returns Error!void and uses errors for success termination
+                // Frame.begin_dispatch returns Error!void and uses errors for success termination
                 // reduce tracer call logging noise
-                frame.interpret_with_tracer(code, TracerType, &tracer) catch |err| switch (err) {
+                frame.begin_dispatch(code, TracerType, &tracer) catch |err| switch (err) {
                 error.Stop => {
                     termination_reason = error.Stop;
                 },

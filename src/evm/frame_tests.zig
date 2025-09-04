@@ -3683,3 +3683,50 @@ test "Frame gasprice and pc opcodes" {
     v = try frame.stack.pop();
     try std.testing.expectEqual(@as(u256, 0), v);
 }
+
+// RED PHASE: Tests for begin_dispatch method (should fail initially)
+test "begin_dispatch method exists and basic execution" {
+    const allocator = std.testing.allocator;
+    const F = Frame(.{});
+    const bytecode = [_]u8{ 0x60, 0x42, 0x00 }; // PUSH1 0x42, STOP
+    var frame = try F.init(allocator, &bytecode, 1000000, void{}, createTestHost());
+    defer frame.deinit(allocator);
+    
+    // This should fail initially as begin_dispatch doesn't exist yet
+    try frame.begin_dispatch(bytecode[0..], null, {});
+    try std.testing.expectEqual(@as(u256, 0x42), frame.stack.peek_unsafe());
+}
+
+test "begin_dispatch with mock tracer" {
+    const allocator = std.testing.allocator;
+    const F = Frame(.{});
+    const MockTracer = struct { 
+        call_count: u32 = 0,
+        pub fn trace_opcode(self: *@This(), opcode: u8) void {
+            _ = opcode;
+            self.call_count += 1;
+        }
+    };
+    
+    var tracer = MockTracer{};
+    const bytecode = [_]u8{ 0x60, 0x42, 0x00 }; // PUSH1 0x42, STOP
+    var frame = try F.init(allocator, &bytecode, 1000000, void{}, createTestHost());
+    defer frame.deinit(allocator);
+    
+    // This should fail initially as begin_dispatch doesn't exist yet
+    try frame.begin_dispatch(bytecode[0..], MockTracer, &tracer);
+    try std.testing.expectEqual(@as(u256, 0x42), frame.stack.peek_unsafe());
+}
+
+test "begin_dispatch returns via tail call not unreachable" {
+    const allocator = std.testing.allocator;
+    const F = Frame(.{});
+    const simple_return_bytecode = [_]u8{ 0xF3 }; // RETURN with empty stack should error
+    var frame = try F.init(allocator, &simple_return_bytecode, 1000000, void{}, createTestHost());
+    defer frame.deinit(allocator);
+    
+    // RETURN with empty stack should error with StackUnderflow
+    // This demonstrates proper tail call error propagation vs unreachable panic
+    const result = frame.begin_dispatch(simple_return_bytecode[0..], null, {});
+    try std.testing.expectError(error.StackUnderflow, result);
+}

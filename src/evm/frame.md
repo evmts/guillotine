@@ -170,15 +170,15 @@ defer frame.deinit(allocator);
 
 ```zig
 // Execute bytecode without tracing
-pub fn interpret(self: *Self, bytecode_raw: []const u8) Error!noreturn
+pub fn interpret(self: *Self, bytecode_raw: []const u8) Error!void
 
 // Execute with custom tracer
-pub fn interpret_with_tracer(
+pub fn begin_dispatch(
     self: *Self, 
     bytecode_raw: []const u8, 
     comptime TracerType: ?type, 
     tracer_instance: if (TracerType) |T| *T else void
-) Error!noreturn
+) Error!void
 
 // Basic execution example
 const contract_code = [_]u8{ 0x60, 0x42, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3 };

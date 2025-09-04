@@ -223,27 +223,28 @@ pub fn Frame(comptime config: FrameConfig) type {
         }
 
         /// Execute this frame without tracing (backward compatibility method).
-        /// Simply delegates to interpret_with_tracer with no tracer.
+        /// Simply delegates to begin_dispatch with no tracer.
         /// @param bytecode_raw: Raw bytecode to execute
         pub fn interpret(self: *Self, bytecode_raw: []const u8) Error!void {
-            return self.interpret_with_tracer(bytecode_raw, null, {});
+            return self.begin_dispatch(bytecode_raw, null, {});
         }
 
-        /// Execute this frame by building a dispatch schedule and jumping to the first handler.
+        /// Begin execution by building a dispatch schedule and jumping to the first handler with tail call.
+        /// This method replaces interpret_with_tracer with proper tail call semantics instead of unreachable.
         /// Performs a one-time static gas charge for the first basic block before execution.
         ///
         /// @param bytecode_raw: Raw bytecode to execute
         /// @param TracerType: Optional comptime tracer type for zero-cost tracing abstraction
         /// @param tracer_instance: Instance of the tracer (ignored if TracerType is null)
-        pub fn interpret_with_tracer(self: *Self, bytecode_raw: []const u8, comptime TracerType: ?type, tracer_instance: if (TracerType) |T| *T else void) Error!void {
+        pub fn begin_dispatch(self: *Self, bytecode_raw: []const u8, comptime TracerType: ?type, tracer_instance: if (TracerType) |T| *T else void) Error!void {
             // Measure dispatch schedule + jump table creation vs. opcode execution
             var analysis_ns: u64 = 0;
             var dispatch_build_ns: u64 = 0;
-            // log.debug("Frame.interpret_with_tracer: Starting execution, bytecode_len={}, gas={}", .{ bytecode_raw.len, self.gas_remaining });
+            // log.debug("Frame.begin_dispatch: Starting execution, bytecode_len={}, gas={}", .{ bytecode_raw.len, self.gas_remaining });
 
             if (bytecode_raw.len > config.max_bytecode_size) {
                 @branchHint(.unlikely);
-                log.err("Frame.interpret_with_tracer: Bytecode too large: {} > max {}", .{ bytecode_raw.len, config.max_bytecode_size });
+                log.err("Frame.begin_dispatch: Bytecode too large: {} > max {}", .{ bytecode_raw.len, config.max_bytecode_size });
                 return Error.BytecodeTooLarge;
             }
 
@@ -252,105 +253,66 @@ pub fn Frame(comptime config: FrameConfig) type {
             self.bytecode = Bytecode.init(self.allocator, bytecode_raw) catch |e| {
                 @branchHint(.unlikely);
                 // log.debug("DEBUG: Bytecode init FAILED with error: {}\n", .{e});
-                log.err("Frame.interpret_with_tracer: Bytecode init failed: {}", .{e});
+                log.err("Frame.begin_dispatch: Bytecode init failed: {}", .{e});
                 return switch (e) {
                     error.BytecodeTooLarge => Error.BytecodeTooLarge,
                     error.InvalidOpcode => Error.InvalidOpcode,
                     error.InvalidJumpDestination => Error.InvalidJump,
-                    error.TruncatedPush => Error.InvalidOpcode,
-                    error.OutOfMemory => Error.AllocationError,
                     else => Error.AllocationError,
                 };
             };
-            const t_analysis_end = std.time.Instant.now() catch unreachable;
-            analysis_ns = t_analysis_end.since(t_analysis_start);
-            defer if (self.bytecode) |*bc| bc.deinit();
-            // log.debug("DEBUG: Bytecode init SUCCESS, runtime_code_len={}\n", .{self.bytecode.?.runtime_code.len});
+            defer self.bytecode.deinit();
 
-            // Use the handlers (traced or non-traced based on TracerType)
-            const handlers = &Self.opcode_handlers;
+            analysis_ns = std.time.Instant.since(std.time.Instant.now() catch unreachable, t_analysis_start) catch 0;
 
-            // Debug: Check if we're using traced handlers
-            if (TracerType) |_| {
-                // log.debug("Using TRACED handlers for type: {s}", .{@typeName(T)});
-                frame_handlers.setTracerInstance(tracer_instance);
-            } else {
-                // log.debug("Using NON-TRACED handlers", .{});
-            }
-            
-            // Clear tracer at end of function, not at end of if block
-            defer {
-                if (TracerType != null) {
-                    frame_handlers.clearTracerInstance();
-                }
+            if (self.code_len == 0) {
+                log.debug("Frame.begin_dispatch: Empty bytecode, returning success");
+                return Error.Stop;
             }
 
-            // Create dispatch schedule with ownership to ensure all allocations are freed
             const t_dispatch_start = std.time.Instant.now() catch unreachable;
-            var schedule_raii = Dispatch.DispatchSchedule.init(self.allocator, &self.bytecode.?, handlers) catch |e| {
-                log.err("Frame.interpret_with_tracer: Failed to create dispatch schedule: {}", .{e});
-                return Error.AllocationError;
-            };
-            defer schedule_raii.deinit();
-            const schedule = schedule_raii.items;
 
-            // Create jump table
-            const jump_table = Dispatch.createJumpTable(self.allocator, schedule, &self.bytecode.?) catch return Error.AllocationError;
-            defer self.allocator.free(jump_table.entries);
-            const t_dispatch_end = std.time.Instant.now() catch unreachable;
-            dispatch_build_ns = t_dispatch_end.since(t_dispatch_start);
-
-            // Store jump table in frame for JUMP/JUMPI handlers
-            self.jump_table = jump_table;
-
-            // Handle first_block_gas
-            var start_index: usize = 0;
-            const first_block_gas = Dispatch.calculateFirstBlockGas(self.bytecode.?);
-            if (first_block_gas > 0 and schedule.len > 0) {
-                const temp_dispatch = Dispatch{ .cursor = schedule.ptr };
-                const meta = temp_dispatch.getFirstBlockGas();
-                if (meta.gas > 0) {
-                    // log.debug("Frame.interpret_with_tracer: Consuming first_block_gas={}", .{meta.gas});
-                    try self.consumeGasChecked(@intCast(meta.gas));
-                }
-                start_index = 1;
-            }
-
-            const cursor = Dispatch{ .cursor = schedule.ptr + start_index };
-
-            // Verify bytecode stream ends with 2 stop handlers (debug builds only)
-            if (builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
-                if (schedule.len >= 2) {
-                    const last_item = schedule[schedule.len - 1];
-                    const second_last_item = schedule[schedule.len - 2];
-
-                    // With traced handlers we can't directly compare, so skip this check when tracing
-                    if (TracerType == null) {
-                        const stop_handler = Self.opcode_handlers[@intFromEnum(Opcode.STOP)];
-                        if (last_item.opcode_handler != stop_handler or second_last_item.opcode_handler != stop_handler) {
-                            log.err("Frame.interpret_with_tracer: Bytecode stream does not end with 2 stop handlers", .{});
-                            return Error.InvalidOpcode;
-                        }
-                    }
-                } else {
-                    log.err("Frame.interpret_with_tracer: Bytecode stream too short", .{});
+            var cursor = dispatch.createSchedule(
+                DispatchType,
+                self.allocator,
+                &self.bytecode,
+                TracerType,
+                tracer_instance,
+                self.gas_remaining,
+                self.config,
+            ) catch |e| switch (e) {
+                error.OutOfMemory => {
+                    log.err("Frame.begin_dispatch: Dispatch creation failed - out of memory");
+                    return Error.AllocationError;
+                },
+                error.OutOfGas => {
+                    log.warn("Frame.begin_dispatch: Dispatch creation failed - out of gas");
+                    return Error.OutOfGas;
+                },
+                error.InvalidOpcode => {
+                    log.err("Frame.begin_dispatch: Dispatch creation failed - invalid opcode");
                     return Error.InvalidOpcode;
-                }
+                },
+                error.InvalidJump => {
+                    log.err("Frame.begin_dispatch: Dispatch creation failed - invalid jump");
+                    return Error.InvalidJump;
+                },
+                else => |unknown| {
+                    log.err("Frame.begin_dispatch: Dispatch creation failed with unknown error: {}", .{unknown});
+                    return Error.AllocationError;
+                },
+            };
+            defer cursor.deinit(self.allocator);
+
+            dispatch_build_ns = std.time.Instant.since(std.time.Instant.now() catch unreachable, t_dispatch_start) catch 0;
+            const static_gas = cursor.cursor[0].static_gas;
+            try self.charge_gas(static_gas);
+            if (comptime config.enable_tracing) {
+                log.debug("Frame.begin_dispatch: Built dispatch schedule ({}ns) and jump table ({}ns), static_gas={}, remaining_gas={}", .{ analysis_ns, dispatch_build_ns, static_gas, self.gas_remaining });
             }
 
-            // log.debug("Frame.interpret_with_tracer: Starting execution, gas={}", .{self.gas_remaining});
-
-            // Measure opcode handler execution time; errdefer ensures it logs when unwinding with Stop/Return/etc.
-            const t_exec_start = std.time.Instant.now() catch unreachable;
-            errdefer {
-                const t_exec_end = std.time.Instant.now() catch unreachable;
-                const exec_ns = t_exec_end.since(t_exec_start);
-                // Debug-level timing to avoid failing tests that treat errors as failures
-                log.debug("timing: analysis_ns={} dispatch_ns={} handlers_ns={}", .{ analysis_ns, dispatch_build_ns, exec_ns });
-            }
-
-            try cursor.cursor[0].opcode_handler(self, cursor.cursor);
-            unreachable; // Handlers never return normally
+            // Use proper tail call instead of unreachable - this is the key change
+            return @call(Self.getTailCallModifier(), cursor.cursor[0].opcode_handler, .{ self, cursor.cursor });
         }
 
         /// Create a deep copy of the frame.
