@@ -8,34 +8,34 @@ pub const CreatedContracts = struct {
     created: std.AutoHashMap(Address, void),
     allocator: std.mem.Allocator,
 
-    pub inline fn init(allocator: std.mem.Allocator) CreatedContracts {
+    pub fn init(allocator: std.mem.Allocator) CreatedContracts {
         return CreatedContracts{
             .created = std.AutoHashMap(Address, void).init(allocator),
             .allocator = allocator,
         };
     }
 
-    pub inline fn deinit(self: *CreatedContracts) void {
+    pub fn deinit(self: *CreatedContracts) void {
         self.created.deinit();
     }
 
-    pub inline fn mark_created(self: *CreatedContracts, address: Address) !void {
+    pub fn mark_created(self: *CreatedContracts, address: Address) !void {
         try self.created.put(address, {});
     }
 
-    pub inline fn was_created_in_tx(self: *const CreatedContracts, address: Address) bool {
+    pub fn was_created_in_tx(self: *const CreatedContracts, address: Address) bool {
         return self.created.contains(address);
     }
     
-    pub inline fn count(self: *const CreatedContracts) u32 {
+    pub fn count(self: *const CreatedContracts) u32 {
         return @intCast(self.created.count());
     }
     
-    pub inline fn clear(self: *CreatedContracts) void {
+    pub fn clear(self: *CreatedContracts) void {
         self.created.clearAndFree();
     }
     
-    pub inline fn remove(self: *CreatedContracts, address: Address) bool {
+    pub fn remove(self: *CreatedContracts, address: Address) bool {
         return self.created.remove(address);
     }
 };

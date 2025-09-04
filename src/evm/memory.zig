@@ -97,7 +97,7 @@ pub fn Memory(comptime config: MemoryConfig) type {
             return self.size_internal();
         }
 
-        pub inline fn ensure_capacity(self: *Self, allocator: std.mem.Allocator, new_size: u24) !void {
+        pub fn ensure_capacity(self: *Self, allocator: std.mem.Allocator, new_size: u24) !void {
             const checkpoint_usize = @as(usize, self.checkpoint);
             const new_size_usize = @as(usize, new_size);
             const required_total = checkpoint_usize + new_size_usize;

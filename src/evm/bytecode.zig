@@ -355,14 +355,14 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
         }
 
         /// Get the length of the bytecode
-        pub inline fn len(self: Self) PcType {
+        pub fn len(self: Self) PcType {
             // Guaranteed by config that runtime_code.len fits in PcType
             std.debug.assert(self.runtime_code.len <= std.math.maxInt(PcType));
             return @intCast(self.runtime_code.len);
         }
 
         /// Get the raw bytecode slice
-        pub inline fn raw(self: Self) []const u8 {
+        pub fn raw(self: Self) []const u8 {
             return self.runtime_code;
         }
 
@@ -374,21 +374,21 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
         }
 
         /// Get byte at index
-        pub inline fn get(self: Self, index: PcType) ?u8 {
+        pub fn get(self: Self, index: PcType) ?u8 {
             if (index >= self.runtime_code.len) return null;
             return self.runtime_code[index];
         }
         /// Get byte at index
-        pub inline fn get_unsafe(self: Self, index: PcType) u8 {
+        pub fn get_unsafe(self: Self, index: PcType) u8 {
             return self.runtime_code[index];
         }
 
         /// Get opcode at position (doesn't check if it's actually an opcode start)
-        pub inline fn getOpcode(self: Self, pc: PcType) ?u8 {
+        pub fn getOpcode(self: Self, pc: PcType) ?u8 {
             return self.get(pc);
         }
         /// Get opcode at position (doesn't check if it's actually an opcode start)
-        pub inline fn getOpcodeUnsafe(self: Self, pc: PcType) u8 {
+        pub fn getOpcodeUnsafe(self: Self, pc: PcType) u8 {
             return self.get_unsafe(pc);
         }
 
