@@ -485,10 +485,19 @@ pub fn Frame(comptime config: FrameConfig) type {
             self.output = new_output;
         }
 
-        /// Get current output data as slice
-        pub fn getOutput(self: *const Self) []const u8 {
-            return self.output;
-        }
+        // TODO: Removed getOutput() - use direct field access: frame.output
+        
+        // TODO: Next steps for complete implementation:
+        // 1. Remove appendLog() method and replace with direct frame.logs.append() calls
+        //    - Usage: handlers_log.zig:106
+        // 2. Inline setOutput() method at its 4 call sites:
+        //    - handlers_system.zig:774, 779
+        //    - handlers_context.zig:2284, 2311  
+        //    - Replace with memory management logic:
+        //      if (frame.output.len > 0) frame.allocator.free(frame.output);
+        //      frame.output = try frame.allocator.alloc(u8, data.len);
+        //      @memcpy(frame.output, data);
+        // 3. KEEP getEvm() - provides essential type safety for 18+ call sites
 
         /// Add a log entry to the list
         pub fn appendLog(self: *Self, log_entry: Log) error{OutOfMemory}!void {
@@ -496,15 +505,9 @@ pub fn Frame(comptime config: FrameConfig) type {
             try self.logs.append(self.allocator, log_entry);
         }
 
-        /// Get slice of current log entries
-        pub fn getLogSlice(self: *const Self) []const Log {
-            return self.logs.items;
-        }
+        // TODO: Removed getLogSlice() - use direct field access: frame.logs.items
 
-        /// Get number of logs
-        pub fn getLogCount(self: *const Self) usize {
-            return self.logs.items.len;
-        }
+        // TODO: Removed getLogCount() - use direct field access: frame.logs.items.len
 
         /// Pretty print the frame state for debugging and visualization.
         /// Shows stack, memory, gas, and other key state information with ANSI colors.
