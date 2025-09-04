@@ -17,6 +17,7 @@
 const std = @import("std");
 const log = @import("log.zig");
 const primitives = @import("primitives");
+const eips = @import("eips.zig");
 const BlockInfo = @import("block_info.zig").DefaultBlockInfo; // Default for backward compatibility
 const Database = @import("database.zig").Database;
 const Account = @import("database_interface_account.zig").Account;
@@ -102,67 +103,6 @@ pub fn Evm(comptime config: EvmConfig) type {
             BytecodeTooLarge,
         };
 
-        /// EIPs configuration based on hardfork
-        const EipsConfig = struct {
-            eip_2929: bool, // Access list
-            eip_3541: bool, // 0xEF prefix
-            eip_3855: bool, // PUSH0
-            eip_3860: bool, // Initcode size limit
-            eip_4844: bool, // Blob transactions
-            eip_5656: bool, // MCOPY
-            eip_6780: bool, // SELFDESTRUCT changes
-
-            pub fn fromHardfork(fork: Hardfork) EipsConfig {
-                return switch (fork) {
-                    .FRONTIER, .HOMESTEAD, .DAO, .TANGERINE_WHISTLE, .SPURIOUS_DRAGON, .BYZANTIUM, .CONSTANTINOPLE, .PETERSBURG, .ISTANBUL, .MUIR_GLACIER => .{
-                        .eip_2929 = false,
-                        .eip_3541 = false,
-                        .eip_3855 = false,
-                        .eip_3860 = false,
-                        .eip_4844 = false,
-                        .eip_5656 = false,
-                        .eip_6780 = false,
-                    },
-                    .BERLIN => .{
-                        .eip_2929 = true, // Access list
-                        .eip_3541 = false,
-                        .eip_3855 = false,
-                        .eip_3860 = false,
-                        .eip_4844 = false,
-                        .eip_5656 = false,
-                        .eip_6780 = false,
-                    },
-                    .LONDON, .ARROW_GLACIER, .GRAY_GLACIER, .MERGE => .{
-                        .eip_2929 = true,
-                        .eip_3541 = true, // 0xEF prefix
-                        .eip_3855 = false,
-                        .eip_3860 = false,
-                        .eip_4844 = false,
-                        .eip_5656 = false,
-                        .eip_6780 = false,
-                    },
-                    .SHANGHAI => .{
-                        .eip_2929 = true,
-                        .eip_3541 = true,
-                        .eip_3855 = true, // PUSH0
-                        .eip_3860 = true, // Initcode size limit
-                        .eip_4844 = false,
-                        .eip_5656 = false,
-                        .eip_6780 = false,
-                    },
-                    .CANCUN, .PRAGUE => .{
-                        .eip_2929 = true,
-                        .eip_3541 = true,
-                        .eip_3855 = true,
-                        .eip_3860 = true,
-                        .eip_4844 = true, // Blob transactions
-                        .eip_5656 = true, // MCOPY
-                        .eip_6780 = true, // SELFDESTRUCT changes
-                        // Prague adds EIP-7702 and others but they need separate implementation
-                    },
-                };
-            }
-        };
 
         // CACHE LINE 1 - HOT PATH (frequently accessed during execution)
         /// Current call depth (0 = root call)
@@ -202,7 +142,7 @@ pub fn Evm(comptime config: EvmConfig) type {
         /// Hardfork configuration
         hardfork_config: Hardfork,
         /// Active EIPs configuration
-        eips: EipsConfig,
+        eips: eips.EvmConfig,
         /// Disable gas checking (for testing/debugging)
         disable_gas_checking: bool,
 
@@ -265,7 +205,7 @@ pub fn Evm(comptime config: EvmConfig) type {
                 .gas_price = gas_price,
                 .origin = origin,
                 .hardfork_config = hardfork_config,
-                .eips = EipsConfig.fromHardfork(hardfork_config),
+                .eips = eips.Eips{ .hardfork = hardfork_config }.get_evm_config(),
                 .disable_gas_checking = false,
                 .current_snapshot_id = 0,
                 .logs = std.ArrayList(@import("call_result.zig").Log){},
@@ -993,7 +933,7 @@ pub fn Evm(comptime config: EvmConfig) type {
             }
             if (result.output.len > 0) {
                 // EIP-3541: Reject new contract code starting with the 0xEF byte
-                if (self.eips.eip_3541 and result.output[0] == 0xEF) {
+                if (self.eips.eip_3541_enabled and result.output[0] == 0xEF) {
                     // Free the allocated output memory before returning
                     self.allocator.free(result.output);
                     self.journal.revert_to_snapshot(args.snapshot_id);
@@ -1279,7 +1219,7 @@ pub fn Evm(comptime config: EvmConfig) type {
         ) !CallResult {
             // Reduce log noise for init code execution
             // Check initcode size limit (EIP-3860)
-            if (self.eips.eip_3860 and code.len > 49152) {
+            if (self.eips.eip_3860_enabled and code.len > 49152) {
                 log.debug("Init code too large: {} > 49152", .{code.len});
                 return CallResult.failure(0);
             }
@@ -1510,7 +1450,7 @@ pub fn Evm(comptime config: EvmConfig) type {
             
             // EIP-6780: SELFDESTRUCT only actually destroys the contract if it was created in the same transaction
             // Otherwise, it only transfers the balance but keeps the code and storage
-            if (self.eips.eip_6780) {
+            if (self.eips.eip_6780_enabled) {
                 // Check if contract was created in the current transaction
                 const created_in_tx = self.created_contracts.was_created_in_tx(contract_address);
                 
@@ -6994,4 +6934,73 @@ test "Minimal ERC20 deployment reproduction - benchmark runner issue" {
     // For now, we expect this to fail (reproducing the issue)
     // Once fixed, change this to: try std.testing.expect(result.success);
     try std.testing.expect(!result.success);
+}
+
+test "EipsConfig compatibility with eips.EvmConfig" {
+    const eips = @import("eips.zig");
+    const hardforks = [_]Hardfork{.FRONTIER, .BERLIN, .LONDON, .SHANGHAI, .CANCUN, .PRAGUE};
+    
+    for (hardforks) |fork| {
+        // Current duplicate implementation
+        const old_config = EipsConfig.fromHardfork(fork);
+        
+        // Canonical implementation
+        const canonical = eips.Eips{ .hardfork = fork };
+        const new_config = canonical.get_evm_config();
+        
+        // Verify identical behavior
+        try std.testing.expectEqual(old_config.eip_2929, new_config.eip_2929_enabled);
+        try std.testing.expectEqual(old_config.eip_3541, new_config.eip_3541_enabled);
+        try std.testing.expectEqual(old_config.eip_3855, new_config.eip_3855_enabled);
+        try std.testing.expectEqual(old_config.eip_3860, new_config.eip_3860_enabled);
+        try std.testing.expectEqual(old_config.eip_4844, new_config.eip_4844_enabled);
+        try std.testing.expectEqual(old_config.eip_5656, new_config.eip_5656_enabled);
+        try std.testing.expectEqual(old_config.eip_6780, new_config.eip_6780_enabled);
+    }
+}
+
+test "EVM EIP checks maintain behavior after consolidation" {
+    const allocator = std.testing.allocator;
+    
+    const test_cases = [_]struct {
+        hardfork: Hardfork,
+        expected_eip_3541: bool,
+        expected_eip_3860: bool, 
+        expected_eip_6780: bool,
+    }{
+        .{ .hardfork = .LONDON, .expected_eip_3541 = true, .expected_eip_3860 = false, .expected_eip_6780 = false },
+        .{ .hardfork = .SHANGHAI, .expected_eip_3541 = true, .expected_eip_3860 = true, .expected_eip_6780 = false },
+        .{ .hardfork = .CANCUN, .expected_eip_3541 = true, .expected_eip_3860 = true, .expected_eip_6780 = true },
+    };
+    
+    for (test_cases) |case| {
+        // Create test database
+        var db = Database.init(allocator);
+        defer db.deinit();
+
+        // Create block info and transaction context
+        const block_info = BlockInfo{
+            .number = 1,
+            .timestamp = 1000,
+            .difficulty = 100,
+            .gas_limit = 30000000,
+            .coinbase = primitives.ZERO_ADDRESS,
+            .base_fee = 0,
+            .prev_randao = [_]u8{0} ** 32,
+        };
+
+        const tx_context = TransactionContext{
+            .gas_limit = 1000000,
+            .coinbase = primitives.ZERO_ADDRESS,
+            .chain_id = 1,
+        };
+
+        var evm = try DefaultEvm.init(allocator, &db, block_info, tx_context, 0, primitives.ZERO_ADDRESS, case.hardfork);
+        defer evm.deinit();
+        
+        // Test the 3 runtime checks that currently use self.eips.eip_xxxx_enabled
+        try std.testing.expectEqual(case.expected_eip_3541, evm.eips.eip_3541_enabled);
+        try std.testing.expectEqual(case.expected_eip_3860, evm.eips.eip_3860_enabled);
+        try std.testing.expectEqual(case.expected_eip_6780, evm.eips.eip_6780_enabled);
+    }
 }
