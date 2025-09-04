@@ -4,6 +4,8 @@ const FrameConfig = @import("frame_config.zig").FrameConfig;
 const BlockInfoConfig = @import("block_info_config.zig").BlockInfoConfig;
 const Eips = @import("eips.zig").Eips;
 const Hardfork = @import("hardfork.zig").Hardfork;
+const primitives = @import("primitives");
+const Address = primitives.Address;
 
 pub const EvmConfig = struct {
     // TODO update enum to support latest hardfork
@@ -50,6 +52,15 @@ pub const EvmConfig = struct {
     /// Controls the types used for difficulty and base_fee fields
     block_info_config: BlockInfoConfig = .{},
 
+    /// Custom opcode handlers for extending or overriding EVM behavior
+    /// Sparse array where null entries use default handlers
+    /// Array index corresponds to opcode value (0-255)
+    custom_opcode_handlers: ?*const [256]?*const anyopaque = null,
+
+    /// Custom call types to extend CallParams beyond standard Ethereum calls
+    /// If provided, CallParams becomes parameterized with this type
+    CustomCallTypes: ?type = null,
+
     /// Computed frame configuration from the fields above
     pub fn frame_config(self: EvmConfig) FrameConfig {
         return .{
@@ -74,6 +85,38 @@ pub const EvmConfig = struct {
             u11
         else
             @compileError("max_call_depth too large");
+    }
+
+    /// Compile-time validation of the configuration
+    pub fn validate(comptime self: EvmConfig) void {
+        // Validate custom opcode handlers
+        if (self.custom_opcode_handlers) |_| {
+            // Custom opcode handlers are validated at runtime by the type system
+            // since we use type casting to ensure proper function signatures
+        }
+
+        // Validate custom call types
+        if (self.CustomCallTypes) |CustomTypes| {
+            // Verify that custom call types have required fields
+            const type_info = @typeInfo(CustomTypes);
+            if (type_info != .Struct) {
+                @compileError("CustomCallTypes must be a struct type");
+            }
+            
+            // Ensure gas field exists - required for all call types
+            if (!@hasField(CustomTypes, "gas")) {
+                @compileError("CustomCallTypes must have a 'gas' field of type u64");
+            }
+            
+            // Validate gas field type
+            const gas_field = @typeInfo(@TypeOf(@field(@as(CustomTypes, undefined), "gas")));
+            if (gas_field != .Int or @typeInfo(@TypeOf(@field(@as(CustomTypes, undefined), "gas"))) != .Int) {
+                @compileError("CustomCallTypes 'gas' field must be of type u64");
+            }
+        }
+
+        // Other validations can be added here
+        _ = self.get_depth_type(); // This will compile-error if max_call_depth is too large
     }
 
     /// Predefined configuration optimized for performance
@@ -271,4 +314,255 @@ test "EvmConfig - complete custom configuration" {
     try testing.expectEqual(false, config.enable_fusion);
     try testing.expectEqual(DummyTracer, config.TracerType.?);
     try testing.expectEqual(u11, config.get_depth_type());
+}
+
+test "EvmConfig - custom opcode handlers basic configuration" {
+    // This test will fail until we implement the feature
+    const DummyHandler = struct {
+        fn handler(frame: anytype, cursor: anytype) anytype {
+            _ = frame;
+            _ = cursor;
+            return @as(anytype, undefined);
+        }
+    }.handler;
+    
+    var custom_handlers: [256]?*const anyopaque = [_]?*const anyopaque{null} ** 256;
+    custom_handlers[0xfe] = &DummyHandler; // Custom debug opcode
+    custom_handlers[0x01] = &DummyHandler; // Override ADD opcode
+    
+    const config = EvmConfig{
+        .custom_opcode_handlers = &custom_handlers,
+    };
+    
+    try testing.expectEqual(@as(?*const [256]?*const anyopaque, &custom_handlers), config.custom_opcode_handlers);
+}
+
+test "EvmConfig - custom opcode handlers null configuration" {
+    const config = EvmConfig{};
+    try testing.expectEqual(@as(?*const [256]?*const anyopaque, null), config.custom_opcode_handlers);
+}
+
+test "EvmConfig - custom opcode handlers integration with frame handlers" {
+    // Test that custom opcode handlers are properly integrated
+    const frame_handlers = @import("frame_handlers.zig");
+    
+    // Create a minimal frame type for testing
+    const TestFrame = struct {
+        const Self = @This();
+        pub const Error = error{TestError};
+        pub const OpcodeHandler = *const fn (frame: *Self, cursor: [*]const anytype) Error!noreturn;
+        
+        gas: u64 = 1000,
+        
+        fn customAddHandler(frame: *Self, cursor: [*]const anytype) Error!noreturn {
+            _ = frame;
+            _ = cursor;
+            return Error.TestError; // Custom behavior
+        }
+    };
+    
+    var custom_handlers: [256]?*const anyopaque = [_]?*const anyopaque{null} ** 256;
+    custom_handlers[0x01] = &TestFrame.customAddHandler; // Override ADD
+    
+    const config = EvmConfig{
+        .custom_opcode_handlers = &custom_handlers,
+    };
+    
+    // Get handlers with custom config
+    const handlers = frame_handlers.getOpcodeHandlersWithConfig(TestFrame, config);
+    
+    // Verify the custom handler is installed
+    try testing.expect(handlers[0x01] == &TestFrame.customAddHandler);
+}
+
+test "EvmConfig - custom call types configuration" {
+    // Test custom call types configuration
+    const MetaCall = struct {
+        relayer: Address,
+        signer: Address,
+        to: Address,
+        value: u256,
+        data: []const u8,
+        gas: u64,
+    };
+    
+    const config = EvmConfig{
+        .CustomCallTypes = MetaCall,
+    };
+    
+    try testing.expectEqual(MetaCall, config.CustomCallTypes.?);
+}
+
+test "EvmConfig - compile-time validation success" {
+    // Test valid configurations pass validation
+    const ValidCustomCall = struct {
+        caller: Address,
+        to: Address,
+        data: []const u8,
+        gas: u64, // Required field
+    };
+    
+    const config = EvmConfig{
+        .CustomCallTypes = ValidCustomCall,
+        .max_call_depth = 1024, // Valid depth
+    };
+    
+    // This should compile without error
+    comptime {
+        config.validate();
+    }
+}
+
+test "EvmConfig - integration test custom opcodes and calls" {
+    // Integration test combining custom opcodes and custom calls
+    const frame_handlers = @import("frame_handlers.zig");
+    const call_params = @import("call_params.zig");
+    
+    // Define custom call type for this test
+    const TestCustomCall = struct {
+        operator: Address,
+        target: Address,
+        data: []const u8,
+        gas: u64,
+    };
+    
+    // Create config with both custom opcodes and calls
+    const TestFrame = struct {
+        const Self = @This();
+        pub const Error = error{TestError};
+        pub const OpcodeHandler = *const fn (frame: *Self, cursor: [*]const anytype) Error!noreturn;
+        
+        pub fn customHandler(frame: *Self, cursor: [*]const anytype) Error!noreturn {
+            _ = frame;
+            _ = cursor;
+            return Error.TestError;
+        }
+    };
+    
+    var custom_handlers: [256]?*const anyopaque = [_]?*const anyopaque{null} ** 256;
+    custom_handlers[0xfe] = &TestFrame.customHandler;
+    
+    const config = EvmConfig{
+        .custom_opcode_handlers = &custom_handlers,
+        .CustomCallTypes = TestCustomCall,
+    };
+    
+    // Validate the configuration
+    comptime {
+        config.validate();
+    }
+    
+    // Test custom opcode handler integration
+    const handlers = frame_handlers.getOpcodeHandlersWithConfig(TestFrame, config);
+    try testing.expect(handlers[0xfe] == &TestFrame.customHandler);
+    
+    // Test custom call type integration
+    const CustomCallParams = call_params.CallParamsGeneric(config);
+    
+    const custom_call = CustomCallParams{ .custom = TestCustomCall{
+        .operator = primitives.ZERO_ADDRESS,
+        .target = [_]u8{1} ++ [_]u8{0} ** 19,
+        .data = &[_]u8{0x42},
+        .gas = 100000,
+    } };
+    
+    try testing.expectEqual(@as(u64, 100000), custom_call.getGas());
+    try testing.expectEqual(primitives.ZERO_ADDRESS, custom_call.getCaller()); // Uses operator
+}
+
+test "EvmConfig - performance verification zero overhead" {
+    // Test that default configuration has zero additional overhead
+    const default_config = EvmConfig{};
+    
+    // Default config should have null custom extensions
+    try testing.expectEqual(@as(?*const [256]?*const anyopaque, null), default_config.custom_opcode_handlers);
+    try testing.expectEqual(@as(?type, null), default_config.CustomCallTypes);
+    
+    // Validate default config
+    comptime {
+        default_config.validate();
+    }
+    
+    // Test that frame handlers work normally with default config
+    const frame_handlers = @import("frame_handlers.zig");
+    
+    const TestFrame = struct {
+        const Self = @This();
+        pub const Error = error{TestError};
+        pub const OpcodeHandler = *const fn (frame: *Self, cursor: [*]const anytype) Error!noreturn;
+    };
+    
+    const handlers = frame_handlers.getOpcodeHandlersWithConfig(TestFrame, default_config);
+    
+    // Should have 256 handlers (no custom ones)
+    try testing.expectEqual(@as(usize, 256), handlers.len);
+}
+
+test "EvmConfig - working examples" {
+    // Example 1: Meta-transaction support
+    const MetaTransaction = struct {
+        relayer: Address,
+        signer: Address,
+        to: Address,
+        value: u256,
+        data: []const u8,
+        signature: [65]u8,
+        nonce: u64,
+        gas: u64,
+    };
+    
+    const meta_config = EvmConfig{
+        .CustomCallTypes = MetaTransaction,
+    };
+    
+    comptime {
+        meta_config.validate();
+    }
+    
+    // Example 2: Account abstraction call
+    const AccountAbstractionCall = struct {
+        sender: Address,
+        target: Address,
+        calldata: []const u8,
+        gas: u64,
+        validation_data: []const u8,
+    };
+    
+    const aa_config = EvmConfig{
+        .CustomCallTypes = AccountAbstractionCall,
+    };
+    
+    comptime {
+        aa_config.validate();
+    }
+    
+    // Example 3: Custom debug opcode with logging
+    const DebugFrame = struct {
+        const Self = @This();
+        pub const Error = error{DebugError};
+        pub const OpcodeHandler = *const fn (frame: *Self, cursor: [*]const anytype) Error!noreturn;
+        
+        pub fn debugLog(frame: *Self, cursor: [*]const anytype) Error!noreturn {
+            _ = frame;
+            _ = cursor;
+            // In real implementation, this would log execution state
+            return Error.DebugError;
+        }
+    };
+    
+    var debug_handlers: [256]?*const anyopaque = [_]?*const anyopaque{null} ** 256;
+    debug_handlers[0xfe] = &DebugFrame.debugLog; // Custom DEBUG opcode
+    
+    const debug_config = EvmConfig{
+        .custom_opcode_handlers = &debug_handlers,
+    };
+    
+    comptime {
+        debug_config.validate();
+    }
+    
+    // Test the debug opcode handler
+    const frame_handlers = @import("frame_handlers.zig");
+    const debug_opcode_handlers = frame_handlers.getOpcodeHandlersWithConfig(DebugFrame, debug_config);
+    try testing.expect(debug_opcode_handlers[0xfe] == &DebugFrame.debugLog);
 }

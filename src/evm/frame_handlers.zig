@@ -29,6 +29,11 @@ threadlocal var tracer_vtable: ?*const anyopaque = null;
 
 /// Returns the normal (non-traced) opcode handlers array for a given Frame type
 pub fn getOpcodeHandlers(comptime FrameType: type) [256]FrameType.OpcodeHandler {
+    return getOpcodeHandlersWithConfig(FrameType, @import("evm_config.zig").EvmConfig{});
+}
+
+/// Returns the normal (non-traced) opcode handlers array for a given Frame type with custom config
+pub fn getOpcodeHandlersWithConfig(comptime FrameType: type, comptime config: @import("evm_config.zig").EvmConfig) [256]FrameType.OpcodeHandler {
     // Import handler modules with FrameType
     const ArithmeticHandlers = stack_frame_arithmetic.Handlers(FrameType);
     const ComparisonHandlers = stack_frame_comparison.Handlers(FrameType);
@@ -165,6 +170,18 @@ pub fn getOpcodeHandlers(comptime FrameType: type) [256]FrameType.OpcodeHandler 
     // Note: Synthetic opcodes (0xa5-0xbc) are NOT mapped here because they should only be used
     // internally by the dispatch system during optimization. Raw bytecode containing these values
     // should be treated as invalid opcodes and use the default invalid handler.
+    
+    // Apply custom opcode handlers if provided
+    if (config.custom_opcode_handlers) |custom_handlers| {
+        for (custom_handlers, 0..) |maybe_handler, opcode| {
+            if (maybe_handler) |custom_handler| {
+                // Cast the anyopaque pointer to the correct handler type
+                const typed_handler = @as(FrameType.OpcodeHandler, @ptrCast(custom_handler));
+                h[opcode] = typed_handler;
+            }
+        }
+    }
+    
     return h;
 }
 
@@ -211,8 +228,17 @@ pub fn getTracedOpcodeHandlers(
     comptime FrameType: type,
     comptime TracerType: type,
 ) [256]FrameType.OpcodeHandler {
-    // Get the base handlers at compile time
-    const base_handlers = getOpcodeHandlers(FrameType);
+    return getTracedOpcodeHandlersWithConfig(FrameType, TracerType, @import("evm_config.zig").EvmConfig{});
+}
+
+/// Returns traced opcode handlers that wrap the base handlers with tracer calls with custom config
+pub fn getTracedOpcodeHandlersWithConfig(
+    comptime FrameType: type,
+    comptime TracerType: type,
+    comptime config: @import("evm_config.zig").EvmConfig,
+) [256]FrameType.OpcodeHandler {
+    // Get the base handlers at compile time with custom config
+    const base_handlers = getOpcodeHandlersWithConfig(FrameType, config);
 
     // Create a wrapper function generator
     const createWrapper = struct {

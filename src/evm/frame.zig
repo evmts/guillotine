@@ -117,9 +117,9 @@ pub fn Frame(comptime config: FrameConfig) type {
 
         /// A fixed size array of opcode handlers indexed by opcode number
         pub const opcode_handlers: [256]OpcodeHandler = if (config.TracerType) |TracerType|
-            frame_handlers.getTracedOpcodeHandlers(Self, TracerType)
+            frame_handlers.getTracedOpcodeHandlersWithConfig(Self, TracerType, config)
         else
-            frame_handlers.getOpcodeHandlers(Self);
+            frame_handlers.getOpcodeHandlersWithConfig(Self, config);
 
         // Individual handler groups for testing and direct access
         pub const ArithmeticHandlers = @import("handlers_arithmetic.zig").Handlers(Self);

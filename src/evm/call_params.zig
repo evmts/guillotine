@@ -3,6 +3,7 @@ const Address = primitives.Address;
 
 // TODO: Currently used in host which is unused
 /// Call operation parameters for different call types
+/// This will be converted to a generic function to support custom call types
 pub const CallParams = union(enum) {
     /// Regular CALL operation
     call: struct {
@@ -773,4 +774,402 @@ test "call params input vs init code consistency" {
         .gas = 53000,
     } };
     try std.testing.expectEqualSlices(u8, init_code, create_op.getInput());
+}
+
+test "extensible CallParams - custom call types configuration" {
+    // Define a custom call type for meta transactions
+    const MetaCall = struct {
+        relayer: Address,
+        signer: Address,
+        to: Address,
+        value: u256,
+        data: []const u8,
+        signature: [65]u8,
+        nonce: u64,
+        gas: u64,
+    };
+    
+    const EvmConfig = @import("evm_config.zig").EvmConfig;
+    
+    const config = EvmConfig{
+        .CustomCallTypes = MetaCall,
+    };
+    
+    // Test that we can create the parameterized CallParams type
+    const ExtendedCallParams = CallParamsGeneric(config);
+    
+    // Create a meta call instance
+    const meta_call = ExtendedCallParams{ .custom = MetaCall{
+        .relayer = primitives.ZERO_ADDRESS,
+        .signer = [_]u8{0xaa} ++ [_]u8{0} ** 19,
+        .to = [_]u8{0xbb} ++ [_]u8{0} ** 19,
+        .value = 1000,
+        .data = &[_]u8{0x12, 0x34},
+        .signature = [_]u8{0} ** 65,
+        .nonce = 42,
+        .gas = 50000,
+    } };
+    
+    // Should be able to access gas from custom call
+    try std.testing.expectEqual(@as(u64, 50000), meta_call.getGas());
+    try std.testing.expectEqual(primitives.ZERO_ADDRESS, meta_call.getCaller()); // Should use relayer
+    try std.testing.expectEqualSlices(u8, &[_]u8{0x12, 0x34}, meta_call.getInput()); // Should use data field
+    try std.testing.expect(meta_call.hasValue()); // Has value > 0
+    try std.testing.expect(!meta_call.isReadOnly()); // Not read-only
+    try std.testing.expect(!meta_call.isCreate()); // Not a create operation
+}
+
+test "extensible CallParams - backward compatibility" {
+    // Test that standard configuration still works
+    const EvmConfig = @import("evm_config.zig").EvmConfig;
+    const config = EvmConfig{};
+    
+    const StandardCallParams = CallParamsGeneric(config);
+    
+    // Should still support all standard call types
+    const caller = primitives.ZERO_ADDRESS;
+    const to: Address = [_]u8{1} ++ [_]u8{0} ** 19;
+    
+    const call_op = StandardCallParams{ .call = .{
+        .caller = caller,
+        .to = to,
+        .value = 100,
+        .input = &[_]u8{0x42},
+        .gas = 21000,
+    } };
+    
+    try std.testing.expectEqual(@as(u64, 21000), call_op.getGas());
+    try std.testing.expectEqual(caller, call_op.getCaller());
+    try std.testing.expect(call_op.hasValue());
+}
+
+test "extensible CallParams - custom call type field detection" {
+    // Test various custom call type field combinations
+    const EvmConfig = @import("evm_config.zig").EvmConfig;
+    
+    // Custom call with signer instead of relayer
+    const SignerCall = struct {
+        signer: Address,
+        to: Address,
+        data: []const u8,
+        gas: u64,
+    };
+    
+    const config1 = EvmConfig{
+        .CustomCallTypes = SignerCall,
+    };
+    
+    const CallParams1 = CallParamsGeneric(config1);
+    
+    const signer_call = CallParams1{ .custom = SignerCall{
+        .signer = [_]u8{0xcc} ++ [_]u8{0} ** 19,
+        .to = [_]u8{0xdd} ++ [_]u8{0} ** 19,
+        .data = &[_]u8{0x12},
+        .gas = 30000,
+    } };
+    
+    // Should use signer as caller when no relayer present
+    try std.testing.expectEqual([_]u8{0xcc} ++ [_]u8{0} ** 19, signer_call.getCaller());
+    try std.testing.expectEqual(@as(u64, 30000), signer_call.getGas());
+    try std.testing.expectEqualSlices(u8, &[_]u8{0x12}, signer_call.getInput());
+    try std.testing.expect(!signer_call.hasValue()); // No value field
+}
+
+test "extensible CallParams - read only custom calls" {
+    // Test custom call type with read-only behavior
+    const ReadOnlyCall = struct {
+        caller: Address,
+        to: Address,
+        input: []const u8,
+        gas: u64,
+        read_only: bool = true,
+    };
+    
+    const EvmConfig = @import("evm_config.zig").EvmConfig;
+    const config = EvmConfig{
+        .CustomCallTypes = ReadOnlyCall,
+    };
+    
+    const CallParams = CallParamsGeneric(config);
+    
+    const readonly_call = CallParams{ .custom = ReadOnlyCall{
+        .caller = primitives.ZERO_ADDRESS,
+        .to = [_]u8{1} ++ [_]u8{0} ** 19,
+        .input = &[_]u8{0x42},
+        .gas = 25000,
+        .read_only = true,
+    } };
+    
+    try std.testing.expect(readonly_call.isReadOnly());
+    try std.testing.expect(!readonly_call.hasValue());
+    try std.testing.expect(!readonly_call.isCreate());
+}
+
+// Generic CallParams that supports custom call types via EvmConfig
+pub fn CallParamsGeneric(comptime config: anytype) type {
+    const BaseCallParams = union(enum) {
+        /// Regular CALL operation
+        call: struct {
+            caller: Address,
+            to: Address,
+            value: u256,
+            input: []const u8,
+            gas: u64,
+        },
+        /// CALLCODE operation: execute external code with current storage/context
+        callcode: struct {
+            caller: Address,
+            to: Address,
+            value: u256,
+            input: []const u8,
+            gas: u64,
+        },
+        /// DELEGATECALL operation (preserves caller context)
+        delegatecall: struct {
+            caller: Address, // Original caller, not current contract
+            to: Address,
+            input: []const u8,
+            gas: u64,
+        },
+        /// STATICCALL operation (read-only)
+        staticcall: struct {
+            caller: Address,
+            to: Address,
+            input: []const u8,
+            gas: u64,
+        },
+        /// CREATE operation
+        create: struct {
+            caller: Address,
+            value: u256,
+            init_code: []const u8,
+            gas: u64,
+        },
+        /// CREATE2 operation
+        create2: struct {
+            caller: Address,
+            value: u256,
+            init_code: []const u8,
+            salt: u256,
+            gas: u64,
+        },
+
+        // Methods for the base types
+        pub fn getGas(self: @This()) u64 {
+            return switch (self) {
+                .call => |params| params.gas,
+                .callcode => |params| params.gas,
+                .delegatecall => |params| params.gas,
+                .staticcall => |params| params.gas,
+                .create => |params| params.gas,
+                .create2 => |params| params.gas,
+            };
+        }
+
+        pub fn getCaller(self: @This()) Address {
+            return switch (self) {
+                .call => |params| params.caller,
+                .callcode => |params| params.caller,
+                .delegatecall => |params| params.caller,
+                .staticcall => |params| params.caller,
+                .create => |params| params.caller,
+                .create2 => |params| params.caller,
+            };
+        }
+
+        pub fn getInput(self: @This()) []const u8 {
+            return switch (self) {
+                .call => |params| params.input,
+                .callcode => |params| params.input,
+                .delegatecall => |params| params.input,
+                .staticcall => |params| params.input,
+                .create => |params| params.init_code,
+                .create2 => |params| params.init_code,
+            };
+        }
+
+        pub fn hasValue(self: @This()) bool {
+            return switch (self) {
+                .call => |params| params.value > 0,
+                .callcode => |params| params.value > 0,
+                .delegatecall => false,
+                .staticcall => false,
+                .create => |params| params.value > 0,
+                .create2 => |params| params.value > 0,
+            };
+        }
+
+        pub fn isReadOnly(self: @This()) bool {
+            return switch (self) {
+                .staticcall => true,
+                else => false,
+            };
+        }
+
+        pub fn isCreate(self: @This()) bool {
+            return switch (self) {
+                .create, .create2 => true,
+                else => false,
+            };
+        }
+    };
+
+    // If custom call types are provided, extend the union
+    if (@hasField(@TypeOf(config), "CustomCallTypes")) {
+        if (@field(config, "CustomCallTypes")) |CustomTypes| {
+            return union(enum) {
+                /// Regular CALL operation
+                call: struct {
+                    caller: Address,
+                    to: Address,
+                    value: u256,
+                    input: []const u8,
+                    gas: u64,
+                },
+                /// CALLCODE operation
+                callcode: struct {
+                    caller: Address,
+                    to: Address,
+                    value: u256,
+                    input: []const u8,
+                    gas: u64,
+                },
+                /// DELEGATECALL operation
+                delegatecall: struct {
+                    caller: Address,
+                    to: Address,
+                    input: []const u8,
+                    gas: u64,
+                },
+                /// STATICCALL operation
+                staticcall: struct {
+                    caller: Address,
+                    to: Address,
+                    input: []const u8,
+                    gas: u64,
+                },
+                /// CREATE operation
+                create: struct {
+                    caller: Address,
+                    value: u256,
+                    init_code: []const u8,
+                    gas: u64,
+                },
+                /// CREATE2 operation
+                create2: struct {
+                    caller: Address,
+                    value: u256,
+                    init_code: []const u8,
+                    salt: u256,
+                    gas: u64,
+                },
+                /// Custom call types wrapper
+                custom: CustomTypes,
+
+                // Extended methods that handle both base and custom types
+                pub fn getGas(self: @This()) u64 {
+                    return switch (self) {
+                        .call => |params| params.gas,
+                        .callcode => |params| params.gas,
+                        .delegatecall => |params| params.gas,
+                        .staticcall => |params| params.gas,
+                        .create => |params| params.gas,
+                        .create2 => |params| params.gas,
+                        .custom => |custom_params| {
+                            // Custom types must have a gas field
+                            return @field(custom_params, "gas");
+                        },
+                    };
+                }
+
+                pub fn getCaller(self: @This()) Address {
+                    return switch (self) {
+                        .call => |params| params.caller,
+                        .callcode => |params| params.caller,
+                        .delegatecall => |params| params.caller,
+                        .staticcall => |params| params.caller,
+                        .create => |params| params.caller,
+                        .create2 => |params| params.caller,
+                        .custom => |custom_params| {
+                            // Check for relayer (meta-transaction) or fall back to signer/caller
+                            if (@hasField(@TypeOf(custom_params), "relayer")) {
+                                return @field(custom_params, "relayer");
+                            } else if (@hasField(@TypeOf(custom_params), "signer")) {
+                                return @field(custom_params, "signer");
+                            } else {
+                                return @field(custom_params, "caller");
+                            }
+                        },
+                    };
+                }
+
+                pub fn getInput(self: @This()) []const u8 {
+                    return switch (self) {
+                        .call => |params| params.input,
+                        .callcode => |params| params.input,
+                        .delegatecall => |params| params.input,
+                        .staticcall => |params| params.input,
+                        .create => |params| params.init_code,
+                        .create2 => |params| params.init_code,
+                        .custom => |custom_params| {
+                            // Custom types should have input or data field
+                            if (@hasField(@TypeOf(custom_params), "data")) {
+                                return @field(custom_params, "data");
+                            } else {
+                                return @field(custom_params, "input");
+                            }
+                        },
+                    };
+                }
+
+                pub fn hasValue(self: @This()) bool {
+                    return switch (self) {
+                        .call => |params| params.value > 0,
+                        .callcode => |params| params.value > 0,
+                        .delegatecall => false,
+                        .staticcall => false,
+                        .create => |params| params.value > 0,
+                        .create2 => |params| params.value > 0,
+                        .custom => |custom_params| {
+                            // Custom types should have value field if they transfer value
+                            if (@hasField(@TypeOf(custom_params), "value")) {
+                                return @field(custom_params, "value") > 0;
+                            }
+                            return false;
+                        },
+                    };
+                }
+
+                pub fn isReadOnly(self: @This()) bool {
+                    return switch (self) {
+                        .staticcall => true,
+                        .custom => |custom_params| {
+                            // Custom types can opt-in to read-only behavior
+                            if (@hasField(@TypeOf(custom_params), "read_only")) {
+                                return @field(custom_params, "read_only");
+                            }
+                            return false;
+                        },
+                        else => false,
+                    };
+                }
+
+                pub fn isCreate(self: @This()) bool {
+                    return switch (self) {
+                        .create, .create2 => true,
+                        .custom => |custom_params| {
+                            // Custom types can opt-in to creation behavior
+                            if (@hasField(@TypeOf(custom_params), "is_create")) {
+                                return @field(custom_params, "is_create");
+                            }
+                            return false;
+                        },
+                        else => false,
+                    };
+                }
+            };
+        }
+    }
+    
+    return BaseCallParams;
 }
