@@ -167,20 +167,29 @@ pub fn Frame(comptime config: FrameConfig) type {
         ///
         /// EIP-214: For static calls, self_destruct should be null to prevent
         /// SELFDESTRUCT operations which modify blockchain state.
-        pub fn init(allocator: std.mem.Allocator, gas_remaining: GasType, database: config.DatabaseType, caller: Address, value: *const WordType, calldata: []const u8, block_info: BlockInfo, evm_ptr: *anyopaque, self_destruct: ?*SelfDestruct) Error!Self {
+        ///
+        /// ARENA ALLOCATION PROOF-OF-CONCEPT:
+        /// This version accepts an arena allocator for automatic cleanup.
+        /// Stack and Memory will be allocated from arena - no manual cleanup needed.
+        pub fn init(arena: std.mem.Allocator, gas_remaining: GasType, database: config.DatabaseType, caller: Address, value: *const WordType, calldata: []const u8, block_info: BlockInfo, evm_ptr: *anyopaque, self_destruct: ?*SelfDestruct) Error!Self {
             // log.debug("Frame.init: gas={}, caller={any}, value={}, calldata_len={}, self_destruct={}", .{ gas_remaining, caller, value.*, calldata.len, self_destruct != null });
-            var stack = Stack.init(allocator) catch {
+            
+            // ARENA ALLOCATION: Use arena for Stack and Memory - no errdefer needed!
+            var stack = Stack.init(arena) catch {
                 @branchHint(.cold);
                 log.err("Frame.init: Failed to initialize stack", .{});
                 return Error.AllocationError;
             };
-            errdefer stack.deinit(allocator);
-            var memory = Memory.init(allocator) catch {
+            // TODO: Remove errdefer - arena handles cleanup automatically
+            // errdefer stack.deinit(arena);
+            
+            var memory = Memory.init(arena) catch {
                 @branchHint(.cold);
                 log.err("Frame.init: Failed to initialize memory", .{});
                 return Error.AllocationError;
             };
-            errdefer memory.deinit(allocator);
+            // TODO: Remove errdefer - arena handles cleanup automatically  
+            // errdefer memory.deinit(arena);
 
             // log.debug("Frame.init: Successfully initialized frame components", .{});
             return Self{
@@ -199,13 +208,23 @@ pub fn Frame(comptime config: FrameConfig) type {
                 // Cache line 3+
                 .output = &[_]u8{}, // Start with empty output
                 .jump_table = .{ .entries = &[_]Dispatch.JumpTable.JumpTableEntry{} }, // Empty jump table
-                .allocator = allocator,
+                .allocator = arena, // TODO: Store arena allocator for consistency
                 .self_destruct = self_destruct,
                 .block_info = block_info,
                 .authorized_address = null,
             };
         }
         /// Clean up all frame resources.
+        /// 
+        /// TODO: ARENA ALLOCATION - This entire method can be removed!
+        /// When using arena allocation, all Frame resources are cleaned up
+        /// automatically when the arena is reset. This includes:
+        /// - Stack memory
+        /// - Memory data
+        /// - Log topics and data
+        /// - Output buffers
+        /// 
+        /// For now, keeping this method for compatibility during transition.
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
             log.debug("Frame.deinit: Starting cleanup, logs_count={}, output_len={}", .{ self.logs.items.len, self.output.len });
             self.stack.deinit(allocator);
