@@ -343,11 +343,7 @@ pub fn Evm(comptime config: EvmConfig) type {
             params.validate() catch return CallResult.failure(0);
             
             // Assert we're at transaction level (depth should be 0)
-            if (self.depth != 0) {
-                // This should not happen - call() is for transactions only
-                // For nested calls, use inner_call() directly
-                std.debug.panic("call() method used for nested call at depth {}, use inner_call() instead", .{self.depth});
-            }
+            std.debug.assert(self.depth == 0);
             
             // Clear transaction-level state for new transaction
             self.access_list.clear();
