@@ -205,10 +205,13 @@ pub fn Evm(comptime config: EvmConfig) type {
                 .gas_price = gas_price,
                 .origin = origin,
                 .hardfork_config = hardfork_config,
-                .eips = eips.Eips{ .hardfork = hardfork_config }.get_evm_config(),
+                .eips = blk: {
+                    const eips_instance = eips.Eips{ .hardfork = hardfork_config };
+                    break :blk eips_instance.get_evm_config();
+                },
                 .disable_gas_checking = false,
                 .current_snapshot_id = 0,
-                .logs = std.ArrayList(@import("call_result.zig").Log){},
+                .logs = std.ArrayList(@import("call_result.zig").Log).init(allocator),
                 .call_arena = std.heap.ArenaAllocator.init(allocator),
             };
         }
@@ -6937,12 +6940,11 @@ test "Minimal ERC20 deployment reproduction - benchmark runner issue" {
 }
 
 test "EipsConfig compatibility with eips.EvmConfig" {
-    const eips = @import("eips.zig");
     const hardforks = [_]Hardfork{.FRONTIER, .BERLIN, .LONDON, .SHANGHAI, .CANCUN, .PRAGUE};
     
     for (hardforks) |fork| {
         // Current duplicate implementation
-        const old_config = EipsConfig.fromHardfork(fork);
+        const old_config = eips.EipsConfig.fromHardfork(fork);
         
         // Canonical implementation
         const canonical = eips.Eips{ .hardfork = fork };
