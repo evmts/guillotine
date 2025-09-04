@@ -76,26 +76,21 @@ pub fn Handlers(comptime FrameType: type) type {
                     else
                         &[_]u8{};
 
-                    // Create log entry
-                    const allocator = self.allocator;
+                    // Create log entry using arena allocation
+                    const arena = self.allocator; // Frame now uses arena allocator
                     const data_copy = if (data.len > 0)
-                        allocator.dupe(u8, data) catch return Error.AllocationError
+                        arena.dupe(u8, data) catch return Error.AllocationError
                     else
                         &[_]u8{};
 
+                    // Arena allocation - no complex error cleanup needed
                     const topics_array = if (topic_count > 0) blk: {
-                        const arr = allocator.alloc(u256, topic_count) catch {
-                            if (data.len > 0) allocator.free(data_copy);
-                            return Error.AllocationError;
-                        };
+                        const arr = arena.alloc(u256, topic_count) catch return Error.AllocationError;
                         for (0..topic_count) |j| {
                             arr[j] = @as(u256, topics[j]);
                         }
                         break :blk arr;
-                    } else allocator.alloc(u256, 0) catch {
-                        if (data.len > 0) allocator.free(data_copy);
-                        return Error.AllocationError;
-                    };
+                    } else arena.alloc(u256, 0) catch return Error.AllocationError;
 
                     // Add log to frame's log list
                     const log_entry = Log{

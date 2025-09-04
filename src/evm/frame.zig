@@ -167,22 +167,22 @@ pub fn Frame(comptime config: FrameConfig) type {
         ///
         /// EIP-214: For static calls, self_destruct should be null to prevent
         /// SELFDESTRUCT operations which modify blockchain state.
-        pub fn init(allocator: std.mem.Allocator, gas_remaining: GasType, database: config.DatabaseType, caller: Address, value: *const WordType, calldata: []const u8, block_info: BlockInfo, evm_ptr: *anyopaque, self_destruct: ?*SelfDestruct) Error!Self {
+        pub fn init(arena: std.mem.Allocator, gas_remaining: GasType, database: config.DatabaseType, caller: Address, value: *const WordType, calldata: []const u8, block_info: BlockInfo, evm_ptr: *anyopaque, self_destruct: ?*SelfDestruct) Error!Self {
             // log.debug("Frame.init: gas={}, caller={any}, value={}, calldata_len={}, self_destruct={}", .{ gas_remaining, caller, value.*, calldata.len, self_destruct != null });
-            var stack = Stack.init(allocator) catch {
+            
+            // Arena allocation - no errdefer chains needed
+            var stack = Stack.init(arena) catch {
                 @branchHint(.cold);
                 log.err("Frame.init: Failed to initialize stack", .{});
                 return Error.AllocationError;
             };
-            errdefer stack.deinit(allocator);
-            var memory = Memory.init(allocator) catch {
+            var memory = Memory.init(arena) catch {
                 @branchHint(.cold);
                 log.err("Frame.init: Failed to initialize memory", .{});
                 return Error.AllocationError;
             };
-            errdefer memory.deinit(allocator);
 
-            // log.debug("Frame.init: Successfully initialized frame components", .{});
+            // log.debug("Frame.init: Successfully initialized frame components with arena", .{});
             return Self{
                 // Cache line 1
                 .stack = stack,
@@ -199,14 +199,23 @@ pub fn Frame(comptime config: FrameConfig) type {
                 // Cache line 3+
                 .output = &[_]u8{}, // Start with empty output
                 .jump_table = .{ .entries = &[_]Dispatch.JumpTable.JumpTableEntry{} }, // Empty jump table
-                .allocator = allocator,
+                .allocator = arena,
                 .self_destruct = self_destruct,
                 .block_info = block_info,
                 .authorized_address = null,
             };
         }
         /// Clean up all frame resources.
+        /// NOTE: This method is deprecated when using arena allocation.
+        /// Arena automatically handles cleanup when reset. This method is kept
+        /// temporarily for backward compatibility during transition.
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+            // When using arena allocation, this method should not be called
+            // as the arena handles all cleanup automatically
+            log.warn("Frame.deinit: Called on arena-allocated Frame - cleanup is automatic", .{});
+            
+            // For backward compatibility during transition, still perform cleanup
+            // but log that this is unnecessary with arena allocation
             log.debug("Frame.deinit: Starting cleanup, logs_count={}, output_len={}", .{ self.logs.items.len, self.output.len });
             self.stack.deinit(allocator);
             self.memory.deinit(allocator);
@@ -355,10 +364,12 @@ pub fn Frame(comptime config: FrameConfig) type {
 
         /// Create a deep copy of the frame.
         /// This is used by DebugPlan to create a sidecar frame for validation.
-        pub fn copy(self: *const Self, allocator: std.mem.Allocator) Error!Self {
-            log.debug("Frame.copy: Creating deep copy, stack_size={}, memory_size={}, logs_count={}", .{ self.stack.get_slice().len, self.memory.size(), self.logs.items.len });
-            var new_stack = Stack.init(allocator) catch return Error.AllocationError;
-            errdefer new_stack.deinit(allocator);
+        /// Uses arena allocator for simplified memory management.
+        pub fn copy(self: *const Self, arena: std.mem.Allocator) Error!Self {
+            log.debug("Frame.copy: Creating deep copy with arena, stack_size={}, memory_size={}, logs_count={}", .{ self.stack.get_slice().len, self.memory.size(), self.logs.items.len });
+            
+            // Arena allocation - no errdefer chains needed
+            var new_stack = Stack.init(arena) catch return Error.AllocationError;
             const src_stack_slice = self.stack.get_slice();
             if (src_stack_slice.len > 0) {
                 var i: usize = src_stack_slice.len;
@@ -368,8 +379,7 @@ pub fn Frame(comptime config: FrameConfig) type {
                 }
             }
 
-            var new_memory = Memory.init(allocator) catch return Error.AllocationError;
-            errdefer new_memory.deinit(allocator);
+            var new_memory = Memory.init(arena) catch return Error.AllocationError;
             const mem_size = self.memory.size();
             if (mem_size > 0) {
                 const bytes = self.memory.get_slice(0, mem_size) catch unreachable;
@@ -377,16 +387,12 @@ pub fn Frame(comptime config: FrameConfig) type {
             }
 
             var new_logs = std.ArrayListUnmanaged(Log){};
-            errdefer new_logs.deinit(allocator);
 
             for (self.logs.items) |log_entry| {
-                const topics_copy = allocator.dupe(u256, log_entry.topics) catch return Error.AllocationError;
-                errdefer allocator.free(topics_copy);
+                const topics_copy = arena.dupe(u256, log_entry.topics) catch return Error.AllocationError;
+                const data_copy = arena.dupe(u8, log_entry.data) catch return Error.AllocationError;
 
-                const data_copy = allocator.dupe(u8, log_entry.data) catch return Error.AllocationError;
-                errdefer allocator.free(data_copy);
-
-                try new_logs.append(allocator, Log{
+                try new_logs.append(arena, Log{
                     .address = log_entry.address,
                     .topics = topics_copy,
                     .data = data_copy,
@@ -394,12 +400,12 @@ pub fn Frame(comptime config: FrameConfig) type {
             }
 
             const new_output = if (self.output.len > 0) blk: {
-                const output_copy = allocator.alloc(u8, self.output.len) catch return Error.AllocationError;
+                const output_copy = arena.alloc(u8, self.output.len) catch return Error.AllocationError;
                 @memcpy(output_copy, self.output);
                 break :blk output_copy;
             } else &[_]u8{};
 
-            log.debug("Frame.copy: Deep copy complete", .{});
+            log.debug("Frame.copy: Deep copy complete with arena", .{});
             return Self{
                 .stack = new_stack,
                 .gas_remaining = self.gas_remaining,
@@ -412,7 +418,7 @@ pub fn Frame(comptime config: FrameConfig) type {
                 .contract_address = self.contract_address,
                 .output = new_output,
                 .calldata = self.calldata,
-                .allocator = allocator,
+                .allocator = arena,
                 .block_info = self.block_info,
                 .self_destruct = self.self_destruct,
             };
@@ -467,12 +473,12 @@ pub fn Frame(comptime config: FrameConfig) type {
             return @as(*DefaultEvm, @ptrCast(@alignCast(self.evm_ptr)));
         }
 
-        /// Set output data (allocates on heap)
+        /// Set output data (allocates from arena)
         pub fn setOutput(self: *Self, data: []const u8) Error!void {
-            log.debug("Frame.setOutput: Setting output data, new_size={}, old_size={}", .{ data.len, self.output.len });
-            if (self.output.len > 0) {
-                self.allocator.free(self.output);
-            }
+            log.debug("Frame.setOutput: Setting output data with arena, new_size={}, old_size={}", .{ data.len, self.output.len });
+            
+            // With arena allocation, no need to free previous output
+            // Arena will clean up everything automatically
             if (data.len == 0) {
                 self.output = &[_]u8{};
                 return;

@@ -1113,10 +1113,13 @@ pub fn Evm(comptime config: EvmConfig) type {
             // EIP-214: encode static constraints; null to prevent SELFDESTRUCT in static context
             const self_destruct_param = if (is_static) null else &self.self_destruct;
 
-            // log.debug("DEBUG: About to call Frame.init\n", .{});
-            var frame = try Frame.init(self.allocator, gas_cast, self.database.*, caller, &value, input, self.block_info, @as(*anyopaque, @ptrCast(self)), self_destruct_param);
+            // Use arena allocator for Frame and all its components
+            const arena = self.getCallArenaAllocator();
+            
+            // log.debug("DEBUG: About to call Frame.init with arena\n", .{});
+            var frame = try Frame.init(arena, gas_cast, self.database.*, caller, &value, input, self.block_info, @as(*anyopaque, @ptrCast(self)), self_destruct_param);
             frame.contract_address = address;
-            defer frame.deinit(self.allocator);
+            // No defer frame.deinit() - arena handles cleanup automatically
             
             // EIP-2929: Warm the contract address being executed
             _ = self.access_list.access_address(address) catch {};
