@@ -270,18 +270,16 @@ pub fn Frame(comptime config: FrameConfig) type {
             // Use the handlers (traced or non-traced based on TracerType)
             const handlers = &Self.opcode_handlers;
 
-            // Debug: Check if we're using traced handlers
+            // Push tracer onto stack for nested execution support
             if (TracerType) |_| {
                 // log.debug("Using TRACED handlers for type: {s}", .{@typeName(T)});
-                frame_handlers.setTracerInstance(tracer_instance);
-            } else {
-                // log.debug("Using NON-TRACED handlers", .{});
+                frame_handlers.pushTracerInstance(tracer_instance);
             }
             
-            // Clear tracer at end of function, not at end of if block
+            // Pop tracer when frame execution completes
             defer {
                 if (TracerType != null) {
-                    frame_handlers.clearTracerInstance();
+                    frame_handlers.popTracerInstance();
                 }
             }
 

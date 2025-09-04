@@ -19,7 +19,9 @@ const stack_frame_bitwise_synthetic = @import("handlers_bitwise_synthetic.zig");
 const stack_frame_memory_synthetic = @import("handlers_memory_synthetic.zig");
 const stack_frame_jump_synthetic = @import("handlers_jump_synthetic.zig");
 
-/// Thread-local storage for the tracer instance and its type info
+/// Thread-local storage for tracer stack to handle nested calls
+threadlocal var tracer_stack: [8]*anyopaque = undefined;
+threadlocal var tracer_stack_depth: u8 = 0;
 threadlocal var tracer_instance: ?*anyopaque = null;
 
 /// Thread-local storage for current execution context
@@ -254,14 +256,37 @@ pub fn getTracedOpcodeHandlers(
     return traced;
 }
 
-/// Set the tracer instance for traced execution
-pub fn setTracerInstance(tracer: anytype) void {
-    tracer_instance = @ptrCast(@alignCast(tracer));
+/// Push tracer instance onto stack for nested execution
+pub fn pushTracerInstance(tracer: anytype) void {
+    if (tracer_stack_depth < tracer_stack.len) {
+        tracer_stack[tracer_stack_depth] = @ptrCast(@alignCast(tracer));
+        tracer_stack_depth += 1;
+        tracer_instance = @ptrCast(@alignCast(tracer));
+    }
 }
 
-/// Clear the tracer instance
+/// Pop tracer instance from stack when nested execution completes
+pub fn popTracerInstance() void {
+    if (tracer_stack_depth > 0) {
+        tracer_stack_depth -= 1;
+        tracer_instance = if (tracer_stack_depth > 0) 
+            tracer_stack[tracer_stack_depth - 1] else null;
+    }
+}
+
+/// Set the tracer instance for traced execution (backward compatibility)
+pub fn setTracerInstance(tracer: anytype) void {
+    pushTracerInstance(tracer);
+}
+
+/// Clear the tracer instance (backward compatibility)
 pub fn clearTracerInstance() void {
-    tracer_instance = null;
+    popTracerInstance();
+}
+
+/// Check if there is an active tracer in the stack
+pub fn hasActiveTracer() bool {
+    return tracer_instance != null;
 }
 
 /// Set the current PC for tracing
