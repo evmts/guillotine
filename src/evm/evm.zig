@@ -18,6 +18,7 @@ const std = @import("std");
 const log = @import("log.zig");
 const primitives = @import("primitives");
 const BlockInfo = @import("block_info.zig").DefaultBlockInfo; // Default for backward compatibility
+const eips = @import("eips.zig"); // Import canonical EIPs implementation
 const Database = @import("database.zig").Database;
 const Account = @import("database_interface_account.zig").Account;
 const SelfDestruct = @import("self_destruct.zig").SelfDestruct;
@@ -102,7 +103,20 @@ pub fn Evm(comptime config: EvmConfig) type {
             BytecodeTooLarge,
         };
 
-        /// EIPs configuration based on hardfork
+        // TODO: REMOVE - Duplicate EipsConfig implementation
+        // This struct duplicates functionality in eips.zig and should be removed
+        // Keeping temporarily for compilation during refactoring
+        //
+        // The canonical implementation in eips.zig provides:
+        // - eips.Eips.get_evm_config() returns eips.EvmConfig 
+        // - Same fields with *_enabled suffix (eip_2929_enabled vs eip_2929)
+        // - Comprehensive hardfork logic and additional EIP methods
+        //
+        // Migration path:
+        // 1. Change field type from EipsConfig to eips.EvmConfig
+        // 2. Use eips.Eips{.hardfork = hardfork}.get_evm_config() for initialization
+        // 3. Update field access: .eip_2929 -> .eip_2929_enabled
+        // 4. Remove this duplicate struct entirely
         const EipsConfig = struct {
             eip_2929: bool, // Access list
             eip_3541: bool, // 0xEF prefix
@@ -202,6 +216,9 @@ pub fn Evm(comptime config: EvmConfig) type {
         /// Hardfork configuration
         hardfork_config: Hardfork,
         /// Active EIPs configuration
+        // TODO: Update to use canonical eips.EvmConfig from eips.zig
+        // Change this to: eips: eips.EvmConfig,
+        // And update initialization to use: eips.Eips{.hardfork = hardfork}.get_evm_config()
         eips: EipsConfig,
         /// Disable gas checking (for testing/debugging)
         disable_gas_checking: bool,
@@ -993,6 +1010,7 @@ pub fn Evm(comptime config: EvmConfig) type {
             }
             if (result.output.len > 0) {
                 // EIP-3541: Reject new contract code starting with the 0xEF byte
+                // TODO: Change to self.eips.eip_3541_enabled after switching to canonical eips.EvmConfig
                 if (self.eips.eip_3541 and result.output[0] == 0xEF) {
                     // Free the allocated output memory before returning
                     self.allocator.free(result.output);
@@ -1279,6 +1297,7 @@ pub fn Evm(comptime config: EvmConfig) type {
         ) !CallResult {
             // Reduce log noise for init code execution
             // Check initcode size limit (EIP-3860)
+            // TODO: Change to self.eips.eip_3860_enabled after switching to canonical eips.EvmConfig
             if (self.eips.eip_3860 and code.len > 49152) {
                 log.debug("Init code too large: {} > 49152", .{code.len});
                 return CallResult.failure(0);
@@ -1510,6 +1529,7 @@ pub fn Evm(comptime config: EvmConfig) type {
             
             // EIP-6780: SELFDESTRUCT only actually destroys the contract if it was created in the same transaction
             // Otherwise, it only transfers the balance but keeps the code and storage
+            // TODO: Change to self.eips.eip_6780_enabled after switching to canonical eips.EvmConfig
             if (self.eips.eip_6780) {
                 // Check if contract was created in the current transaction
                 const created_in_tx = self.created_contracts.was_created_in_tx(contract_address);
