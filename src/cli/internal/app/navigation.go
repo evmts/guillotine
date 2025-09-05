@@ -2,6 +2,7 @@ package app
 
 import (
 	"guillotine-cli/internal/config"
+	"guillotine-cli/internal/core/utils"
 	"guillotine-cli/internal/types"
 	"guillotine-cli/internal/ui"
 
@@ -38,13 +39,16 @@ func (m *Model) handleStateNavigation(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleCallTypeEditNavigation(msgStr)
 		
 	case types.StateCallResult:
-		return m.handleCallResultNavigation(msgStr)
+		return m.handleCallResultNavigation(msgStr, msg)
 		
 	case types.StateCallHistory:
 		return m.handleCallHistoryNavigation(msgStr, msg)
 		
 	case types.StateCallHistoryDetail:
-		return m.handleHistoryDetailNavigation(msgStr)
+		return m.handleHistoryDetailNavigation(msgStr, msg)
+		
+	case types.StateLogDetail:
+		return m.handleLogDetailNavigation(msgStr)
 		
 	case types.StateContracts:
 		return m.handleContractsNavigation(msgStr, msg)
@@ -104,6 +108,20 @@ func (m *Model) handleCallParamListNavigation(msgStr string) (tea.Model, tea.Cmd
 
 // handleCallParamEditNavigation handles navigation in call parameter edit state
 func (m *Model) handleCallParamEditNavigation(msgStr string, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Handle paste specially to get clipboard content
+	if config.IsKey(msgStr, config.KeyPaste) {
+		if m.editingParam != config.CallParamCallType {
+			if content, err := ui.GetClipboard(); err == nil {
+				// Clean multi-line content for single-line input
+				cleanedContent := utils.CleanMultilineForInput(content)
+				m.textInput.SetValue(cleanedContent)
+				// IMPORTANT: Also update the cursor position to the end
+				m.textInput.CursorEnd()
+			}
+		}
+		return m, nil
+	}
+	
 	if config.IsKey(msgStr, config.KeySelect) {
 		return m.handleCallEditSave()
 	} else if config.IsKey(msgStr, config.KeyBack) {
@@ -111,13 +129,6 @@ func (m *Model) handleCallParamEditNavigation(msgStr string, msg tea.KeyMsg) (te
 		return m, nil
 	} else if config.IsKey(msgStr, config.KeyReset) {
 		return m.handleResetCurrentParameter()
-	} else if config.IsKey(msgStr, config.KeyPaste) {
-		if m.editingParam != config.CallParamCallType {
-			if content, err := ui.GetClipboard(); err == nil {
-				m.textInput.SetValue(content)
-			}
-		}
-		return m, nil
 	} else {
 		// Pass all other keys to text input
 		var cmd tea.Cmd
@@ -149,14 +160,33 @@ func (m *Model) handleCallTypeEditNavigation(msgStr string) (tea.Model, tea.Cmd)
 }
 
 // handleCallResultNavigation handles navigation in call result state
-func (m *Model) handleCallResultNavigation(msgStr string) (tea.Model, tea.Cmd) {
-	if config.IsKey(msgStr, config.KeySelect) {
-		m.state = types.StateMainMenu
-		return m, nil
-	} else if config.IsKey(msgStr, config.KeyBack) {
+func (m *Model) handleCallResultNavigation(msgStr string, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	hasLogs := m.callResult != nil && len(m.callResult.Logs) > 0
+	
+	if hasLogs {
+		// Direct log navigation - no activation needed
+		if config.IsKey(msgStr, config.KeySelect) {
+			if m.logsTable.Cursor() < len(m.callResult.Logs) {
+				m.selectedLogIndex = m.logsTable.Cursor()
+				m.state = types.StateLogDetail
+				return m, nil
+			}
+		}
+		
+		// Let table handle navigation
+		if config.IsKey(msgStr, config.KeyUp) || config.IsKey(msgStr, config.KeyDown) {
+			var cmd tea.Cmd
+			m.logsTable, cmd = m.logsTable.Update(msg)
+			return m, cmd
+		}
+	}
+	
+	// Non-log navigation (only back is allowed)
+	if config.IsKey(msgStr, config.KeyBack) {
 		m.state = types.StateCallParameterList
 		return m, nil
 	}
+	
 	return m, nil
 }
 
@@ -168,6 +198,13 @@ func (m *Model) handleCallHistoryNavigation(msgStr string, msg tea.KeyMsg) (tea.
 		if len(selectedRow) > 0 && m.historyTable.Cursor() < len(history) {
 			m.selectedHistoryID = history[m.historyTable.Cursor()].ID
 			m.state = types.StateCallHistoryDetail
+			
+			// Populate logs table for the history entry
+			entry := &history[m.historyTable.Cursor()]
+			if entry.Result != nil && len(entry.Result.Logs) > 0 {
+				rows := ui.ConvertLogsToRows(entry.Result.Logs)
+				m.logsTable.SetRows(rows)
+			}
 		}
 		return m, nil
 	} else if config.IsKey(msgStr, config.KeyBack) {
@@ -182,12 +219,35 @@ func (m *Model) handleCallHistoryNavigation(msgStr string, msg tea.KeyMsg) (tea.
 }
 
 // handleHistoryDetailNavigation handles navigation in history detail state
-func (m *Model) handleHistoryDetailNavigation(msgStr string) (tea.Model, tea.Cmd) {
+func (m *Model) handleHistoryDetailNavigation(msgStr string, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Get the selected history entry to check for logs
+	entry := m.historyManager.GetCall(m.selectedHistoryID)
+	hasLogs := entry != nil && entry.Result != nil && len(entry.Result.Logs) > 0
+	
+	if hasLogs {
+		// Direct log navigation - no activation needed
+		if config.IsKey(msgStr, config.KeySelect) {
+			if m.logsTable.Cursor() < len(entry.Result.Logs) {
+				m.selectedLogIndex = m.logsTable.Cursor()
+				m.state = types.StateLogDetail
+				return m, nil
+			}
+		}
+		
+		// Let table handle navigation
+		if config.IsKey(msgStr, config.KeyUp) || config.IsKey(msgStr, config.KeyDown) {
+			var cmd tea.Cmd
+			m.logsTable, cmd = m.logsTable.Update(msg)
+			return m, cmd
+		}
+	}
+	
 	if config.IsKey(msgStr, config.KeyBack) {
 		m.state = types.StateCallHistory
 		m.updateHistoryTable()
 		return m, nil
 	}
+	
 	return m, nil
 }
 
@@ -228,6 +288,23 @@ func (m *Model) handleConfirmResetNavigation(msgStr string) (tea.Model, tea.Cmd)
 		return m, m.executeReset()
 	} else if config.IsKey(msgStr, config.KeyBack) {
 		m.state = types.StateMainMenu
+		return m, nil
+	}
+	return m, nil
+}
+
+// handleLogDetailNavigation handles navigation in log detail state
+func (m *Model) handleLogDetailNavigation(msgStr string) (tea.Model, tea.Cmd) {
+	if config.IsKey(msgStr, config.KeyBack) {
+		// Return to previous state
+		if m.state == types.StateLogDetail {
+			// Determine which state to return to based on context
+			if m.selectedHistoryID != "" {
+				m.state = types.StateCallHistoryDetail
+			} else {
+				m.state = types.StateCallResult
+			}
+		}
 		return m, nil
 	}
 	return m, nil

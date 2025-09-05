@@ -31,6 +31,18 @@ func CreateContractsTable() table.Model {
 	return createStyledTable(columns, config.DefaultTableHeight)
 }
 
+// CreateLogsTable creates a new styled table for logs display
+func CreateLogsTable(height int) table.Model {
+	columns := []table.Column{
+		{Title: "#", Width: 4},
+		{Title: "Address", Width: 18},
+		{Title: "Topics", Width: 8},
+		{Title: "Data", Width: 50},
+	}
+
+	return createStyledTable(columns, height)
+}
+
 // createStyledTable creates a table with common styling
 func createStyledTable(columns []table.Column, height int) table.Model {
 	t := table.New(

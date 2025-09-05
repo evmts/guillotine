@@ -104,7 +104,7 @@ func formatGas(gas uint64) string {
 	return fmt.Sprintf("%.2fM", float64(gas)/1000000)
 }
 
-func RenderHistoryDetail(entry *types.CallHistoryEntry, width, height int) string {
+func RenderHistoryDetail(entry *types.CallHistoryEntry, logDisplayData LogDisplayData, width int) string {
 	if entry == nil {
 		return config.DimmedStyle.Render("No entry selected")
 	}
@@ -175,17 +175,11 @@ func RenderHistoryDetail(entry *types.CallHistoryEntry, width, height int) strin
 			b.WriteString(config.DimmedStyle.Render(outputHex))
 			b.WriteString("\n")
 		}
-
-		if len(entry.Result.Logs) > 0 {
-			b.WriteString("\n")
-			b.WriteString(config.LabelStyle.Render(fmt.Sprintf("Logs (%d):", len(entry.Result.Logs))))
-			b.WriteString("\n")
-			for i, log := range entry.Result.Logs {
-				b.WriteString(config.DimmedStyle.Render(fmt.Sprintf("  [%d] Topics: %d, Data: %d bytes", 
-					i, len(log.Topics), len(log.Data.Data()))))
-				b.WriteString("\n")
-			}
-		}
+		
+		// Render logs if available
+		baseContent := b.String()
+		logsContent := RenderLogsDisplay(logDisplayData, width)
+		return baseContent + logsContent
 	}
 
 	return b.String()
