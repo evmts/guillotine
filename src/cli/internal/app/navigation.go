@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"guillotine-cli/internal/config"
 	"guillotine-cli/internal/core/utils"
 	"guillotine-cli/internal/types"
@@ -54,7 +55,7 @@ func (m *Model) handleStateNavigation(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleContractsNavigation(msgStr, msg)
 		
 	case types.StateContractDetail:
-		return m.handleContractDetailNavigation(msgStr)
+		return m.handleContractDetailNavigation(msgStr, msg)
 		
 	case types.StateConfirmReset:
 		return m.handleConfirmResetNavigation(msgStr)
@@ -259,6 +260,11 @@ func (m *Model) handleContractsNavigation(msgStr string, msg tea.KeyMsg) (tea.Mo
 		if len(selectedRow) > 0 && m.contractsTable.Cursor() < len(contracts) {
 			m.selectedContract = contracts[m.contractsTable.Cursor()].Address
 			m.state = types.StateContractDetail
+			// Load disassembly for the selected contract
+			contract := m.historyManager.GetContract(m.selectedContract)
+			if contract != nil && len(contract.Bytecode) > 0 {
+				return m, m.loadDisassemblyCmd(contract.Bytecode)
+			}
 		}
 		return m, nil
 	} else if config.IsKey(msgStr, config.KeyBack) {
@@ -273,13 +279,85 @@ func (m *Model) handleContractsNavigation(msgStr string, msg tea.KeyMsg) (tea.Mo
 }
 
 // handleContractDetailNavigation handles navigation in contract detail state
-func (m *Model) handleContractDetailNavigation(msgStr string) (tea.Model, tea.Cmd) {
+func (m *Model) handleContractDetailNavigation(msgStr string, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Handle disassembly navigation if available
+	if m.disassemblyResult != nil {
+		// Left/Right to navigate between blocks
+		if config.IsKey(msgStr, config.KeyLeft) {
+			if m.currentBlockIndex > 0 {
+				m.currentBlockIndex--
+				// Update table with new block's instructions
+				m.updateInstructionsTable()
+			}
+		} else if config.IsKey(msgStr, config.KeyRight) {
+			if m.currentBlockIndex < len(m.disassemblyResult.BasicBlocks)-1 {
+				m.currentBlockIndex++
+				// Update table with new block's instructions
+				m.updateInstructionsTable()
+			}
+		}
+		
+		// Up/Down handled by the table component
+		if config.IsKey(msgStr, config.KeyUp) || config.IsKey(msgStr, config.KeyDown) {
+			var cmd tea.Cmd
+			m.instructionsTable, cmd = m.instructionsTable.Update(msg)
+			return m, cmd
+		}
+	}
+	
 	if config.IsKey(msgStr, config.KeyBack) {
 		m.state = types.StateContracts
+		m.disassemblyResult = nil  // Clear disassembly when going back
+		m.currentBlockIndex = 0     // Reset block index
 		m.updateContractsTable()
 		return m, nil
 	}
 	return m, nil
+}
+
+// updateInstructionsTable updates the instructions table with current block data
+func (m *Model) updateInstructionsTable() {
+	if m.disassemblyResult == nil {
+		return
+	}
+	
+	instructions, _ := m.getInstructionsForCurrentBlock()
+	if len(instructions) > 0 {
+		rows := ui.ConvertInstructionsToRows(instructions, m.disassemblyResult.Jumpdests)
+		m.instructionsTable.SetRows(rows)
+		// Reset cursor to top when changing blocks
+		m.instructionsTable.SetCursor(0)
+	}
+}
+
+// getInstructionsForCurrentBlock helper to get instructions for current block
+func (m *Model) getInstructionsForCurrentBlock() ([]types.DisassemblyInstruction, string) {
+	if m.disassemblyResult == nil || len(m.disassemblyResult.Instructions) == 0 {
+		return nil, ""
+	}
+	
+	// If no blocks defined, return all instructions
+	if len(m.disassemblyResult.BasicBlocks) == 0 {
+		return m.disassemblyResult.Instructions, fmt.Sprintf("PC 0-%d", len(m.disassemblyResult.Instructions)-1)
+	}
+	
+	// Validate block index
+	if m.currentBlockIndex < 0 || m.currentBlockIndex >= len(m.disassemblyResult.BasicBlocks) {
+		m.currentBlockIndex = 0
+	}
+	
+	block := m.disassemblyResult.BasicBlocks[m.currentBlockIndex]
+	
+	// Find instructions in this block's PC range
+	var blockInstructions []types.DisassemblyInstruction
+	for _, inst := range m.disassemblyResult.Instructions {
+		if inst.PC >= block.Start && inst.PC <= block.End {
+			blockInstructions = append(blockInstructions, inst)
+		}
+	}
+	
+	blockInfo := fmt.Sprintf("PC %d-%d", block.Start, block.End)
+	return blockInstructions, blockInfo
 }
 
 // handleConfirmResetNavigation handles navigation in confirm reset state

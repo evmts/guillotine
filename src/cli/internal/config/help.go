@@ -28,6 +28,10 @@ var HelpCatalog = map[string]HelpEntry{
 	"paste":        {Key: "ctrl+v", Action: "paste"},
 	"copy":         {Key: "c", Action: "copy address"},
 	
+	// Disassembly navigation
+	"navigate_blocks": {Key: "←/h →/l", Action: "navigate blocks"},
+	"scroll_instructions": {Key: "↑/k ↓/j", Action: "scroll instructions"},
+	
 	// Reset
 	"reset":        {Key: "r", Action: "reset"},
 	"reset_all":    {Key: "ctrl+r", Action: "reset all"},
@@ -139,6 +143,24 @@ func GetHelpForStateWithLogs(stateKey string, hasLogs bool) []HelpEntry {
 	if hasLogs && (stateKey == "call_result" || stateKey == "call_history_detail") {
 		// Insert log navigation entries at the beginning
 		keys = append([]string{"navigate_logs", "view_log_detail"}, keys...)
+	}
+	
+	entries := make([]HelpEntry, 0, len(keys))
+	for _, key := range keys {
+		if entry, ok := HelpCatalog[key]; ok {
+			entries = append(entries, entry)
+		}
+	}
+	return entries
+}
+
+// GetHelpForContractDetail returns help entries for contract detail state
+func GetHelpForContractDetail(hasDisassembly bool) []HelpEntry {
+	keys := []string{"copy", "back"}
+	
+	// If there's disassembly, add navigation help at the beginning
+	if hasDisassembly {
+		keys = append([]string{"navigate_blocks", "scroll_instructions"}, keys...)
 	}
 	
 	entries := make([]HelpEntry, 0, len(keys))
