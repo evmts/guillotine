@@ -115,32 +115,8 @@ GuillotineCallResult guillotine_vm_execute(
     const GuillotineCallParams* params
 );
 
-// Helper to free result memory
-static void guillotine_free_call_result(GuillotineCallResult* result) {
-    if (result->output.data != NULL) {
-        free(result->output.data);
-    }
-    if (result->logs != NULL) {
-        for (size_t i = 0; i < result->logs_len; i++) {
-            if (result->logs[i].topics != NULL) {
-                free(result->logs[i].topics);
-            }
-            if (result->logs[i].data.data != NULL) {
-                free(result->logs[i].data.data);
-            }
-        }
-        free(result->logs);
-    }
-    if (result->selfdestructs != NULL) {
-        free(result->selfdestructs);
-    }
-    if (result->accessed_addresses != NULL) {
-        free(result->accessed_addresses);
-    }
-    if (result->accessed_storage != NULL) {
-        free(result->accessed_storage);
-    }
-}
+// Free result memory - exported from Zig
+void guillotine_free_call_result(GuillotineCallResult* result);
 
 // ========================
 // State Management

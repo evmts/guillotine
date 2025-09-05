@@ -722,6 +722,63 @@ export fn guillotine_vm_execute(
     return result;
 }
 
+// Free a call result - must be called from FFI consumer to properly deallocate memory
+export fn guillotine_free_call_result(result: ?*GuillotineCallResult) void {
+    if (result == null) return;
+    const r = result.?;
+    
+    // Free output data
+    if (r.output.len > 0 and r.output.data != null) {
+        const output_slice = @as([*]u8, @ptrCast(r.output.data))[0..r.output.len];
+        allocator.free(output_slice);
+    }
+    
+    // Free logs
+    if (r.logs_len > 0 and r.logs != null) {
+        const log_array = @as([*]GuillotineLog, @ptrCast(r.logs))[0..r.logs_len];
+        for (log_array) |log_entry| {
+            // Free topics array and individual topic data
+            if (log_entry.topics_len > 0) {
+                const topics_slice = log_entry.topics[0..log_entry.topics_len];
+                allocator.free(topics_slice);
+            }
+            // Free log data
+            if (log_entry.data.len > 0 and log_entry.data.data != null) {
+                const data_slice = @as([*]u8, @ptrCast(log_entry.data.data))[0..log_entry.data.len];
+                allocator.free(data_slice);
+            }
+        }
+        allocator.free(log_array);
+    }
+    
+    // Free selfdestructs
+    if (r.selfdestructs_len > 0 and r.selfdestructs != null) {
+        const sd_slice = @as([*]GuillotineSelfDestruct, @ptrCast(r.selfdestructs))[0..r.selfdestructs_len];
+        allocator.free(sd_slice);
+    }
+    
+    // Free accessed addresses
+    if (r.accessed_addresses_len > 0 and r.accessed_addresses != null) {
+        const addr_slice = @as([*]GuillotineAddress, @ptrCast(r.accessed_addresses))[0..r.accessed_addresses_len];
+        allocator.free(addr_slice);
+    }
+    
+    // Free accessed storage
+    if (r.accessed_storage_len > 0 and r.accessed_storage != null) {
+        const storage_slice = @as([*]GuillotineStorageAccess, @ptrCast(r.accessed_storage))[0..r.accessed_storage_len];
+        allocator.free(storage_slice);
+    }
+    
+    // Free error info
+    if (r.error_info != null) {
+        // The error string was allocated with allocSentinel so we need to span and include sentinel
+        const err_str = std.mem.span(r.error_info).?;
+        // Create a slice that includes the sentinel
+        const err_slice = @as([*]u8, @ptrFromInt(@intFromPtr(r.error_info)))[0..err_str.len + 1];
+        allocator.free(err_slice);
+    }
+}
+
 // Helper functions
 fn u256_from_bytes(bytes: *const [32]u8) u256 {
     // Convert from little-endian bytes to u256 (Go primitives use little-endian internally)
