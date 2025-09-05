@@ -1,6 +1,7 @@
 const FpMont = @import("FpMont.zig");
 const Fr = @import("Fr.zig");
 const curve_parameters = @import("curve_parameters.zig");
+const naf = @import("NAF.zig").naf;
 
 //G1 is the group of points on the elliptic curve y^2 = x^3 + 3
 // We use the Jacobian projective coordinates to represent the points
@@ -98,7 +99,7 @@ pub fn equal(self: *const G1, other: *const G1) bool {
 }
 
 pub fn sub(self: *const G1, other: *const G1) G1 {
-    return self.add(other.neg());
+    return self.add(&other.neg());
 }
 
 pub fn subAssign(self: *G1, other: *const G1) void {
@@ -195,26 +196,7 @@ pub fn addAssign(self: *G1, other: *const G1) void {
     self.* = self.add(other);
 }
 
-// pub fn mul(self: *const G1, scalar: *const Fr) G1 {
-//     return self.mul_by_int(scalar.value);
-// }
-
-// pub fn mul_by_int(self: *const G1, scalar: u256) G1 {
-//     if (self.isInfinity()) {
-//         return INFINITY;
-//     }
-//     var result = INFINITY;
-//     var base = self.*;
-//     var exp = scalar;
-//     while (exp > 0) : (exp >>= 1) {
-//         if (exp & 1 == 1) {
-//             result.addAssign(&base);
-//         }
-//         base.doubleAssign();
-//     }
-//     return result;
-// }
-
+// This is a easy to compute morphism, G -> λG, where λ is a fixed field element, it can be found in curve_parameters.zig
 pub fn GLS_endomorphism(self: *const G1) G1 {
     const cube_root = FpMont.init(curve_parameters.cube_root_of_unity);
     const point_aff = self.toAffine();
@@ -225,6 +207,7 @@ pub fn GLS_endomorphism(self: *const G1) G1 {
     };
 }
 
+// This is a decomposition of a scalar into two 128-bit integers, k1 and k2, such that k = k1 + λ * k2
 pub const scalar_decomposition = struct {
     k1: u128,
     k2: u128,
@@ -247,28 +230,40 @@ pub fn decomposeScalar(scalar: u256) scalar_decomposition {
     return scalar_decomposition{ .k1 = @intCast(k1), .k2 = @intCast(k2) };
 }
 
+// This uses GLS in NAF, we first compute k1 and k2 in NAF, such that k = k1 + λ * k2
+// we then use Shamir's trick to reduce the number of doublings
 pub fn mul_by_int(self: *const G1, scalar: u256) G1 {
     const decomposition = decomposeScalar(scalar);
     const k1 = decomposition.k1;
+    const naf_k1 = naf(k1);
     const k2 = decomposition.k2;
+    const naf_k2 = naf(k2);
 
     const P = self;
     const Q = self.GLS_endomorphism().neg();
     const P_plus_Q = P.add(&Q);
+    const P_minus_Q = P.sub(&Q);
 
     var result = INFINITY;
 
     for (0..128) |i| {
-        const k1_bit = (k1 >> @intCast(127 - i)) & 1;
-        const k2_bit = (k2 >> @intCast(127 - i)) & 1;
         result.doubleAssign();
 
-        if (k1_bit == 1 and k2_bit == 1) {
-            result.addAssign(&P_plus_Q);
-        } else if (k1_bit == 1) {
-            result.addAssign(P);
-        } else if (k2_bit == 1) {
-            result.addAssign(&Q);
+        const k1_bit = naf_k1[127 - i];
+        const k2_bit = naf_k2[127 - i];
+        const switch_case: u4 = (@as(u4, @as(u2, @bitCast(k1_bit))) << 2) | @as(u2, @bitCast(k2_bit)); //combine k1 and k2 bits into a single switch case
+
+        switch (switch_case) { //(k1_bit, k2_bit)
+            0 => {}, // (0, 0)
+            1 => result.addAssign(&Q), // (0, 1)
+            3 => result.addAssign(&Q.neg()), // (0, -1)
+            4 => result.addAssign(P), // (1, 0)
+            5 => result.addAssign(&P_plus_Q), // (1, 1)
+            7 => result.addAssign(&P_minus_Q), // (1, -1)
+            12 => result.addAssign(&P.neg()), // (-1, 0)
+            13 => result.addAssign(&P_minus_Q.neg()), // (-1, 1)
+            15 => result.addAssign(&P_plus_Q.neg()), // (-1, -1)
+            else => unreachable,
         }
     }
     return result;
