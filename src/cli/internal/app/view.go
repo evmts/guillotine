@@ -59,9 +59,9 @@ func (m Model) View() string {
 		// Create pure log display data
 		logDisplayData := ui.LogDisplayData{}
 		if m.callResult != nil && len(m.callResult.Logs) > 0 {
-			currentLines := 8 // Estimate for call result content + header
-			baseOverhead := 9 // borders, help, buffer
-			availableHeight := m.height - currentLines - baseOverhead
+			// Use a reasonable fixed height for logs that won't cause cropping
+			maxLogHeight := (m.height / 2) // Use at most half of screen for logs
+			availableHeight := min(maxLogHeight, 15) // Cap at 15 lines for logs
 			
 			logDisplayData = ui.LogDisplayData{
 				Logs:            m.callResult.Logs,
@@ -90,9 +90,10 @@ func (m Model) View() string {
 		// Create pure log display data
 		logDisplayData := ui.LogDisplayData{}
 		if logs.HasHistoryLogs(entry) {
-			currentLines := 12 // Estimate for history detail content + header
-			baseOverhead := 9  // borders, help, buffer
-			availableHeight := m.height - currentLines - baseOverhead
+			// Use a conservative fixed height for logs in history detail view
+			// This ensures the content is never cropped at the top
+			maxLogHeight := (m.height / 3) // Use at most 1/3 of screen for logs
+			availableHeight := min(maxLogHeight, 10) // Cap at 10 lines for logs
 			
 			logDisplayData = ui.LogDisplayData{
 				Logs:            entry.Result.Logs,
