@@ -136,8 +136,11 @@ func (m *Model) executeCallCmd(params types.CallParameters) tea.Cmd {
 			}
 		}
 		
+		// Create timestamp once for both persistence and history
+		executionTime := time.Now()
+		
 		// Persist call parameters after execution (non-blocking)
-		persistedCall := state.ConvertFromCallParameters(params)
+		persistedCall := state.ConvertFromCallParameters(params, executionTime)
 		go func() {
 			if err := state.AppendCall(state.GetStateFilePath(), persistedCall); err != nil {
 				fmt.Printf("Warning: Failed to persist call: %v\n", err)
@@ -147,7 +150,7 @@ func (m *Model) executeCallCmd(params types.CallParameters) tea.Cmd {
 		entry := types.CallHistoryEntry{
 			Parameters: params,
 			Result:     result,
-			Timestamp:  time.Now(),
+			Timestamp:  executionTime,
 		}
 		m.historyManager.AddCall(entry)
 		

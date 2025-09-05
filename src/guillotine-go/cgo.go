@@ -87,6 +87,7 @@ typedef struct {
     GuillotineStorageAccess* accessed_storage;
     size_t accessed_storage_len;
     const char* error_info;
+    GuillotineAddress* created_address;
 } GuillotineCallResult;
 
 // ========================
@@ -597,6 +598,12 @@ func convertCallResult(result *C.GuillotineCallResult) *CallResult {
 	// Copy error info
 	if result.error_info != nil {
 		goResult.ErrorInfo = C.GoString(result.error_info)
+	}
+	
+	// Copy created address (for CREATE/CREATE2)
+	if result.created_address != nil {
+		createdAddr := primitives.NewAddress(goAddress(*result.created_address))
+		goResult.CreatedAddress = &createdAddr
 	}
 	
 	return goResult

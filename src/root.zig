@@ -365,6 +365,7 @@ pub const GuillotineCallResult = extern struct {
     accessed_storage: ?[*]GuillotineStorageAccess,
     accessed_storage_len: usize,
     error_info: ?[*:0]const u8, // Null-terminated string or null
+    created_address: ?*GuillotineAddress, // Address of created contract (for CREATE/CREATE2)
 };
 
 // Internal VM structure
@@ -579,6 +580,7 @@ export fn guillotine_vm_execute(
         .accessed_storage = null,
         .accessed_storage_len = 0,
         .error_info = null,
+        .created_address = null,
     };
 
     if (vm == null or params == null) return result;
@@ -719,6 +721,13 @@ export fn guillotine_vm_execute(
         result.error_info = err_copy.ptr;
     }
 
+    // Copy created address if present (for CREATE/CREATE2)
+    if (exec_result.created_address) |addr| {
+        const addr_copy = state.allocator.create(GuillotineAddress) catch return result;
+        addr_copy.bytes = addr.bytes;
+        result.created_address = addr_copy;
+    }
+
     return result;
 }
 
@@ -776,6 +785,11 @@ export fn guillotine_free_call_result(result: ?*GuillotineCallResult) void {
         // Create a slice that includes the sentinel
         const err_slice = @as([*]u8, @ptrFromInt(@intFromPtr(r.error_info)))[0..err_str.len + 1];
         allocator.free(err_slice);
+    }
+    
+    // Free created address
+    if (r.created_address != null) {
+        allocator.destroy(r.created_address.?);
     }
 }
 

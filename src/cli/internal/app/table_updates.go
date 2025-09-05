@@ -37,7 +37,7 @@ func (m *Model) updateHistoryTable() {
 		}
 		
 		rows = append(rows, table.Row{
-			entry.Timestamp.Format("15:04:05"),
+			entry.Timestamp.Format("15:04:05 01/02"),
 			entry.Parameters.CallType,
 			caller,
 			target,
