@@ -70,12 +70,11 @@ pub const BytecodeDisassembly = struct {
         // PHASE 1: Bytecode Analysis
         // Reuses: bytecode.createIterator() from bytecode.zig:608
         // Reuses: OPCODE_INFO from opcode_data.zig for gas/stack info
-
-        var instructions = std.ArrayList(Instruction).init(allocator);
-        defer instructions.deinit();
+        var instructions = std.ArrayList(Instruction){};
+        defer instructions.deinit(allocator);
         
-        var jumpdests_list = std.ArrayList(u32).init(allocator);
-        defer jumpdests_list.deinit();
+        var jumpdests_list = std.ArrayList(u32){};
+        defer jumpdests_list.deinit(allocator);
 
         // Parse raw bytecode directly without fusion analysis
         const runtime_code = bytecode.runtime_code;
@@ -156,8 +155,8 @@ pub const BytecodeDisassembly = struct {
 
         // PHASE 3: Create basic blocks
         // Basic blocks are segments of code between jumpdests
-        var blocks = std.ArrayList(BasicBlock).init(allocator);
-        defer blocks.deinit();
+        var blocks = std.ArrayList(BasicBlock){};
+        defer blocks.deinit(allocator);
 
         const sorted_jumpdests = try jumpdests_list.toOwnedSlice(allocator);
         // No defer free - ownership transferred to Result
