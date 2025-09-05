@@ -2,6 +2,7 @@ package app
 
 import (
 	"guillotine-cli/internal/config"
+	logs "guillotine-cli/internal/core"
 	"guillotine-cli/internal/types"
 	"guillotine-cli/internal/ui"
 
@@ -54,8 +55,24 @@ func (m Model) View() string {
 		
 	case types.StateCallResult:
 		header := ui.RenderHeader(config.CallResultTitle, config.CallResultSubtitle, config.TitleStyle, config.SubtitleStyle)
-		result := ui.RenderCallResult(m.callResult, m.callParams)
-		help := ui.RenderHelp(types.StateCallResult)
+		
+		// Create pure log display data
+		logDisplayData := ui.LogDisplayData{}
+		if m.callResult != nil && len(m.callResult.Logs) > 0 {
+			currentLines := 8 // Estimate for call result content + header
+			baseOverhead := 9 // borders, help, buffer
+			availableHeight := m.height - currentLines - baseOverhead
+			
+			logDisplayData = ui.LogDisplayData{
+				Logs:            m.callResult.Logs,
+				SelectedIndex:   m.logsTable.Cursor(), // Get current selection from table
+				AvailableHeight: availableHeight,
+			}
+		}
+		
+		result := ui.RenderCallResult(m.callResult, m.callParams, logDisplayData, m.width-4)
+		hasLogs := logs.HasLogs(m.callResult)
+		help := ui.RenderHelpWithLogs(types.StateCallResult, hasLogs)
 		content := layout.ComposeVertical(header, result, help)
 		return layout.RenderWithBox(content)
 		
@@ -69,8 +86,24 @@ func (m Model) View() string {
 	case types.StateCallHistoryDetail:
 		header := ui.RenderHeader(config.CallHistoryDetailTitle, config.CallHistoryDetailSubtitle, config.TitleStyle, config.SubtitleStyle)
 		entry := m.historyManager.GetCall(m.selectedHistoryID)
-		detail := ui.RenderHistoryDetail(entry, m.width-4, m.height-10)
-		help := ui.RenderHelp(types.StateCallHistoryDetail)
+		
+		// Create pure log display data
+		logDisplayData := ui.LogDisplayData{}
+		if logs.HasHistoryLogs(entry) {
+			currentLines := 12 // Estimate for history detail content + header
+			baseOverhead := 9  // borders, help, buffer
+			availableHeight := m.height - currentLines - baseOverhead
+			
+			logDisplayData = ui.LogDisplayData{
+				Logs:            entry.Result.Logs,
+				SelectedIndex:   m.logsTable.Cursor(),
+				AvailableHeight: availableHeight,
+			}
+		}
+		
+		detail := ui.RenderHistoryDetail(entry, logDisplayData, m.width-4)
+		hasLogs := logs.HasHistoryLogs(entry)
+		help := ui.RenderHelpWithLogs(types.StateCallHistoryDetail, hasLogs)
 		content := layout.ComposeVertical(header, detail, help)
 		return layout.RenderWithBox(content)
 		
@@ -91,13 +124,28 @@ func (m Model) View() string {
 		return layout.RenderWithBox(content)
 		
 	case types.StateConfirmReset:
-		header := ui.RenderHeader("Reset State", "Are you sure? This will clear all call history and contracts.", config.TitleStyle, config.SubtitleStyle)
+		header := ui.RenderHeader(config.ResetStateTitle, config.ResetStateSubtitle, config.TitleStyle, config.SubtitleStyle)
 		confirmText := lipgloss.NewStyle().
 			Bold(true).
 			Foreground(config.Destructive).
-			Render("Press ENTER to confirm reset or ESC to cancel")
+			Render(config.ResetConfirmMessage)
 		help := ui.RenderHelp(types.StateConfirmReset)
 		content := layout.ComposeVertical(header, confirmText, help)
+		return layout.RenderWithBox(content)
+		
+	case types.StateLogDetail:
+		header := ui.RenderHeader(config.LogDetailTitle, config.LogDetailSubtitle, config.TitleStyle, config.SubtitleStyle)
+		
+		// Get log using core domain logic
+		var selectedHistoryEntry *types.CallHistoryEntry
+		if m.selectedHistoryID != "" {
+			selectedHistoryEntry = m.historyManager.GetCall(m.selectedHistoryID)
+		}
+		
+		log := logs.GetSelectedLog(m.callResult, selectedHistoryEntry, m.selectedLogIndex)
+		detail := ui.RenderLogDetail(log, m.selectedLogIndex, m.width-4)
+		help := ui.RenderHelp(types.StateLogDetail)
+		content := layout.ComposeVertical(header, detail, help)
 		return layout.RenderWithBox(content)
 		
 	default:

@@ -10,6 +10,7 @@ type HelpEntry struct {
 var HelpCatalog = map[string]HelpEntry{
 	// Navigation
 	"navigate":     {Key: "↑/k ↓/j", Action: "navigate"},
+	"navigate_logs": {Key: "↑/k ↓/j", Action: "navigate logs"},
 	
 	// Selection and actions
 	"select":       {Key: "enter", Action: "select"},
@@ -17,6 +18,7 @@ var HelpCatalog = map[string]HelpEntry{
 	"edit":         {Key: "enter", Action: "edit"},
 	"save":         {Key: "enter", Action: "save"},
 	"view_details": {Key: "enter", Action: "view details"},
+	"view_log_detail": {Key: "enter", Action: "view log details"},
 	"continue":     {Key: "enter", Action: "continue"},
 	
 	// Execution
@@ -68,7 +70,6 @@ var StateHelpEntries = map[string][]string{
 		"cancel",
 	},
 	"call_result": {
-		"continue",
 		"back_to_menu",
 	},
 	"call_history": {
@@ -91,6 +92,9 @@ var StateHelpEntries = map[string][]string{
 	"confirm_reset": {
 		"enter",
 		"cancel",
+	},
+	"log_detail": {
+		"back",
 	},
 }
 
@@ -121,4 +125,27 @@ func GetHelpText(entries []HelpEntry) ([]string, []string) {
 	}
 	
 	return keys, actions
+}
+
+// GetHelpForStateWithLogs returns help entries for states that may have logs
+func GetHelpForStateWithLogs(stateKey string, hasLogs bool) []HelpEntry {
+	// Get base entries
+	keys, exists := StateHelpEntries[stateKey]
+	if !exists {
+		return nil
+	}
+	
+	// If there are logs, prepend log navigation entries
+	if hasLogs && (stateKey == "call_result" || stateKey == "call_history_detail") {
+		// Insert log navigation entries at the beginning
+		keys = append([]string{"navigate_logs", "view_log_detail"}, keys...)
+	}
+	
+	entries := make([]HelpEntry, 0, len(keys))
+	for _, key := range keys {
+		if entry, ok := HelpCatalog[key]; ok {
+			entries = append(entries, entry)
+		}
+	}
+	return entries
 }

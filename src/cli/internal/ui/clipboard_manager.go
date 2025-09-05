@@ -23,7 +23,8 @@ func GetClipboard() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(content), nil
+	// Preserve content as-is, let the caller decide how to clean it
+	return content, nil
 }
 
 func PasteToField(fieldType string) (string, error) {
@@ -32,7 +33,8 @@ func PasteToField(fieldType string) (string, error) {
 		return "", err
 	}
 
-	cleaned := strings.TrimSpace(content)
+	// Clean multi-line content
+	cleaned := cleanContentForField(content)
 
 	switch fieldType {
 	case "address":
@@ -47,6 +49,8 @@ func PasteToField(fieldType string) (string, error) {
 		return "", fmt.Errorf("invalid address format in clipboard")
 
 	case "hex":
+		// For hex data, remove all whitespace including newlines
+		cleaned = cleanHexContent(content)
 		if evm.IsValidHex(cleaned) {
 			return cleaned, nil
 		}
@@ -67,6 +71,29 @@ func PasteToField(fieldType string) (string, error) {
 	default:
 		return cleaned, nil
 	}
+}
+
+// cleanContentForField cleans content for general fields
+func cleanContentForField(content string) string {
+	// Remove newlines and extra whitespace
+	cleaned := strings.ReplaceAll(content, "\n", "")
+	cleaned = strings.ReplaceAll(cleaned, "\r", "")
+	cleaned = strings.ReplaceAll(cleaned, "\t", " ")
+	// Collapse multiple spaces
+	for strings.Contains(cleaned, "  ") {
+		cleaned = strings.ReplaceAll(cleaned, "  ", " ")
+	}
+	return strings.TrimSpace(cleaned)
+}
+
+// cleanHexContent specifically cleans hex data which might be multi-line
+func cleanHexContent(content string) string {
+	// Remove all whitespace for hex data
+	cleaned := strings.ReplaceAll(content, "\n", "")
+	cleaned = strings.ReplaceAll(cleaned, "\r", "")
+	cleaned = strings.ReplaceAll(cleaned, "\t", "")
+	cleaned = strings.ReplaceAll(cleaned, " ", "")
+	return strings.TrimSpace(cleaned)
 }
 
 func extractAddress(text string) string {

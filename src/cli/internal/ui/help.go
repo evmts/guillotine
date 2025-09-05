@@ -18,6 +18,7 @@ var stateToHelpKey = map[types.AppState]string{
 	types.StateContracts:          "contracts",
 	types.StateContractDetail:     "contract_detail",
 	types.StateConfirmReset:       "confirm_reset",
+	types.StateLogDetail:          "log_detail",
 }
 
 // RenderHelp renders help text for the given state
@@ -27,6 +28,18 @@ func RenderHelp(state types.AppState) string {
 		return ""
 	}
 	return renderHelpForKey(stateKey)
+}
+
+// RenderHelpWithLogs renders help text for states that may have logs
+func RenderHelpWithLogs(state types.AppState, hasLogs bool) string {
+	stateKey, exists := stateToHelpKey[state]
+	if !exists {
+		return ""
+	}
+	
+	entries := config.GetHelpForStateWithLogs(stateKey, hasLogs)
+	keys, actions := config.GetHelpText(entries)
+	return renderHelpText(keys, actions)
 }
 
 // renderHelpForKey renders help for a given state key

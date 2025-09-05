@@ -20,6 +20,7 @@ const (
 	StateContracts
 	StateContractDetail
 	StateConfirmReset
+	StateLogDetail
 )
 
 type CallParameter struct {

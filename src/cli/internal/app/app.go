@@ -37,6 +37,7 @@ func InitialModel() Model {
 		historyManager: historyMgr,
 		historyTable:   ui.CreateHistoryTable(),
 		contractsTable: ui.CreateContractsTable(),
+		logsTable:      ui.CreateLogsTable(10),
 	}
 }
 
