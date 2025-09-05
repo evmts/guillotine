@@ -60,6 +60,62 @@ func AnalyzeBytecode(bytecode []byte) (*types.DisassemblyResult, error) {
 	return result, nil
 }
 
+// GetInstructionsForBlock returns instructions for a specific block or all if no blocks
+func GetInstructionsForBlock(result *types.DisassemblyResult, blockIndex int) ([]types.DisassemblyInstruction, string, error) {
+	if result == nil || len(result.Instructions) == 0 {
+		return nil, "", fmt.Errorf("no disassembly result available")
+	}
+	
+	// If no blocks defined, return all instructions
+	if len(result.BasicBlocks) == 0 {
+		blockInfo := fmt.Sprintf("PC 0-%d", len(result.Instructions)-1)
+		return result.Instructions, blockInfo, nil
+	}
+	
+	// Validate block index
+	if blockIndex < 0 || blockIndex >= len(result.BasicBlocks) {
+		return nil, "", fmt.Errorf("invalid block index: %d", blockIndex)
+	}
+	
+	block := result.BasicBlocks[blockIndex]
+	
+	// Find instructions in this block's PC range
+	var blockInstructions []types.DisassemblyInstruction
+	for _, inst := range result.Instructions {
+		if inst.PC >= block.Start && inst.PC <= block.End {
+			blockInstructions = append(blockInstructions, inst)
+		}
+	}
+	
+	blockInfo := fmt.Sprintf("PC %d-%d", block.Start, block.End)
+	return blockInstructions, blockInfo, nil
+}
+
+// CalculateBlockGas calculates total gas cost for a set of instructions
+func CalculateBlockGas(instructions []types.DisassemblyInstruction) uint32 {
+	var totalGas uint32
+	for _, inst := range instructions {
+		totalGas += uint32(inst.GasCost)
+	}
+	return totalGas
+}
+
+// IsImportantOpcode determines if an opcode should be highlighted
+func IsImportantOpcode(opcode string) bool {
+	important := []string{
+		"CALL", "STATICCALL", "DELEGATECALL", "CREATE", "CREATE2",
+		"SELFDESTRUCT", "REVERT", "INVALID", "STOP", "RETURN",
+		"SSTORE", "SLOAD", "LOG0", "LOG1", "LOG2", "LOG3", "LOG4",
+	}
+	
+	for _, op := range important {
+		if opcode == op {
+			return true
+		}
+	}
+	return false
+}
+
 func convertStats(stats disassembly.Stats) types.BytecodeStats {
 	return types.BytecodeStats{
 		OriginalSize:    stats.OriginalSize,

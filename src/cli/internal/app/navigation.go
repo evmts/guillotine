@@ -1,8 +1,8 @@
 package app
 
 import (
-	"fmt"
 	"guillotine-cli/internal/config"
+	"guillotine-cli/internal/core/disassembly"
 	"guillotine-cli/internal/core/utils"
 	"guillotine-cli/internal/types"
 	"guillotine-cli/internal/ui"
@@ -321,43 +321,18 @@ func (m *Model) updateInstructionsTable() {
 		return
 	}
 	
-	instructions, _ := m.getInstructionsForCurrentBlock()
+	instructions, _, err := disassembly.GetInstructionsForBlock(m.disassemblyResult, m.currentBlockIndex)
+	if err != nil {
+		// Handle error case - could log or show error state
+		return
+	}
+	
 	if len(instructions) > 0 {
 		rows := ui.ConvertInstructionsToRows(instructions, m.disassemblyResult.Jumpdests)
 		m.instructionsTable.SetRows(rows)
 		// Reset cursor to top when changing blocks
 		m.instructionsTable.SetCursor(0)
 	}
-}
-
-// getInstructionsForCurrentBlock helper to get instructions for current block
-func (m *Model) getInstructionsForCurrentBlock() ([]types.DisassemblyInstruction, string) {
-	if m.disassemblyResult == nil || len(m.disassemblyResult.Instructions) == 0 {
-		return nil, ""
-	}
-	
-	// If no blocks defined, return all instructions
-	if len(m.disassemblyResult.BasicBlocks) == 0 {
-		return m.disassemblyResult.Instructions, fmt.Sprintf("PC 0-%d", len(m.disassemblyResult.Instructions)-1)
-	}
-	
-	// Validate block index
-	if m.currentBlockIndex < 0 || m.currentBlockIndex >= len(m.disassemblyResult.BasicBlocks) {
-		m.currentBlockIndex = 0
-	}
-	
-	block := m.disassemblyResult.BasicBlocks[m.currentBlockIndex]
-	
-	// Find instructions in this block's PC range
-	var blockInstructions []types.DisassemblyInstruction
-	for _, inst := range m.disassemblyResult.Instructions {
-		if inst.PC >= block.Start && inst.PC <= block.End {
-			blockInstructions = append(blockInstructions, inst)
-		}
-	}
-	
-	blockInfo := fmt.Sprintf("PC %d-%d", block.Start, block.End)
-	return blockInstructions, blockInfo
 }
 
 // handleConfirmResetNavigation handles navigation in confirm reset state

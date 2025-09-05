@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"guillotine-cli/internal/config"
+	"guillotine-cli/internal/core/disassembly"
 	"guillotine-cli/internal/types"
 
 	"github.com/charmbracelet/bubbles/table"
@@ -33,13 +34,13 @@ func RenderBytecodeDisassembly(result *types.DisassemblyResult, width, height in
 // RenderBytecodeDisassemblyWithNavigation renders disassembly with block navigation
 func RenderBytecodeDisassemblyWithNavigation(data DisassemblyDisplayData) string {
 	if data.Result == nil {
-		return config.DimmedStyle.Render("No disassembly available")
+		return config.DimmedStyle.Render(config.NoDisassemblyAvailable)
 	}
 
 	var b strings.Builder
 
 	// Title
-	b.WriteString(config.SubtitleStyle.Render("Bytecode Disassembly"))
+	b.WriteString(config.SubtitleStyle.Render(config.BytecodeDisassemblyTitle))
 	b.WriteString("\n")
 
 	// Statistics section
@@ -47,7 +48,7 @@ func RenderBytecodeDisassemblyWithNavigation(data DisassemblyDisplayData) string
 	b.WriteString("\n\n")
 
 	// Get instructions for current block
-	instructions, blockInfo := getInstructionsForBlock(data.Result, data.CurrentBlockIndex)
+	instructions, blockInfo, _ := disassembly.GetInstructionsForBlock(data.Result, data.CurrentBlockIndex)
 	
 	// Render instructions as a scrollable table view
 	tableView := renderInstructionsAsTable(instructions, data.Result.Jumpdests, 
@@ -55,7 +56,7 @@ func RenderBytecodeDisassemblyWithNavigation(data DisassemblyDisplayData) string
 	b.WriteString(tableView)
 	
 	// Calculate total gas for the block
-	blockGas := calculateBlockGas(instructions)
+	blockGas := disassembly.CalculateBlockGas(instructions)
 	
 	// Block indicator
 	b.WriteString("\n\n")
@@ -67,13 +68,13 @@ func RenderBytecodeDisassemblyWithNavigation(data DisassemblyDisplayData) string
 // RenderBytecodeDisassemblyWithTable renders disassembly using a table component
 func RenderBytecodeDisassemblyWithTable(data DisassemblyDisplayData, instructionTable table.Model) string {
 	if data.Result == nil {
-		return config.DimmedStyle.Render("No disassembly available")
+		return config.DimmedStyle.Render(config.NoDisassemblyAvailable)
 	}
 
 	var b strings.Builder
 
 	// Title
-	b.WriteString(config.SubtitleStyle.Render("Bytecode Disassembly"))
+	b.WriteString(config.SubtitleStyle.Render(config.BytecodeDisassemblyTitle))
 	b.WriteString("\n")
 
 	// Statistics section
@@ -84,10 +85,10 @@ func RenderBytecodeDisassemblyWithTable(data DisassemblyDisplayData, instruction
 	b.WriteString(instructionTable.View())
 	
 	// Get block info for indicator
-	instructions, blockInfo := getInstructionsForBlock(data.Result, data.CurrentBlockIndex)
+	instructions, blockInfo, _ := disassembly.GetInstructionsForBlock(data.Result, data.CurrentBlockIndex)
 	
 	// Calculate total gas for the block
-	blockGas := calculateBlockGas(instructions)
+	blockGas := disassembly.CalculateBlockGas(instructions)
 	
 	// Block indicator
 	b.WriteString("\n\n")
@@ -122,13 +123,13 @@ func renderStats(stats *types.BytecodeStats) string {
 	
 	statsContent := fmt.Sprintf(
 		"%s %d bytes | %s %d | %s %d | %s %d",
-		config.LabelStyle.Render("Size:"),
+		config.LabelStyle.Render(config.DisassemblySizeLabel),
 		stats.OriginalSize,
-		config.LabelStyle.Render("Instructions:"),
+		config.LabelStyle.Render(config.DisassemblyInstructionsLabel),
 		instrCount,
-		config.LabelStyle.Render("Blocks:"),
+		config.LabelStyle.Render(config.DisassemblyBlocksLabel),
 		blocksCount,
-		config.LabelStyle.Render("Jumpdests:"),
+		config.LabelStyle.Render(config.DisassemblyJumpdestsLabel),
 		stats.JumpdestCount,
 	)
 	
@@ -140,7 +141,7 @@ func renderInstructionsAsTable(instructions []types.DisassemblyInstruction, jump
 	width, availableHeight int) string {
 	
 	if len(instructions) == 0 {
-		return config.DimmedStyle.Render("No instructions in this block")
+		return config.DimmedStyle.Render(config.NoInstructionsInBlock)
 	}
 	
 	// Create jumpdest map for quick lookup
@@ -154,7 +155,8 @@ func renderInstructionsAsTable(instructions []types.DisassemblyInstruction, jump
 	// Table header
 	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(config.Amber)
 	header := fmt.Sprintf("%-8s %-12s %-6s %-25s %-5s %-8s", 
-		"PC", "Opcode", "Hex", "Value/Target", "Gas", "Stack")
+		config.DisassemblyHeaderPC, config.DisassemblyHeaderOpcode, config.DisassemblyHeaderHex, 
+		config.DisassemblyHeaderValue, config.DisassemblyHeaderGas, config.DisassemblyHeaderStack)
 	content.WriteString(headerStyle.Render(header))
 	content.WriteString("\n")
 	
@@ -173,7 +175,7 @@ func renderInstructionsAsTable(instructions []types.DisassemblyInstruction, jump
 		rowStyle := config.NormalStyle
 		if inst.OpcodeName == "JUMPDEST" {
 			rowStyle = config.SuccessStyle
-		} else if isImportantOpcode(inst.OpcodeName) {
+		} else if disassembly.IsImportantOpcode(inst.OpcodeName) {
 			rowStyle = config.AccentStyle
 		} else if strings.HasPrefix(inst.OpcodeName, "JUMP") || inst.OpcodeName == "PC" {
 			rowStyle = config.AccentStyle
@@ -255,12 +257,12 @@ func ConvertInstructionsToRows(instructions []types.DisassemblyInstruction, jump
 // CreateInstructionsTable creates a table component for instructions
 func CreateInstructionsTable(height int) table.Model {
 	columns := []table.Column{
-		{Title: "PC", Width: 8},
-		{Title: "Opcode", Width: 12},
-		{Title: "Hex", Width: 6},
-		{Title: "Value/Target", Width: 25},
-		{Title: "Gas", Width: 5},
-		{Title: "Stack", Width: 8},
+		{Title: config.DisassemblyHeaderPC, Width: 8},
+		{Title: config.DisassemblyHeaderOpcode, Width: 12},
+		{Title: config.DisassemblyHeaderHex, Width: 6},
+		{Title: config.DisassemblyHeaderValue, Width: 25},
+		{Title: config.DisassemblyHeaderGas, Width: 5},
+		{Title: config.DisassemblyHeaderStack, Width: 8},
 	}
 	
 	t := table.New(
@@ -332,45 +334,6 @@ func formatInstructionRow(inst types.DisassemblyInstruction, jumpdestMap map[uin
 	return fmt.Sprintf("%-8s %-12s %-6s %-25s %-5s %-8s", pc, opcode, hex, value, gas, stack)
 }
 
-// getInstructionsForBlock returns instructions for a specific block or all if no blocks
-func getInstructionsForBlock(result *types.DisassemblyResult, blockIndex int) ([]types.DisassemblyInstruction, string) {
-	if result == nil || len(result.Instructions) == 0 {
-		return nil, ""
-	}
-	
-	// If no blocks defined, return all instructions
-	if len(result.BasicBlocks) == 0 {
-		return result.Instructions, fmt.Sprintf("PC 0-%d", len(result.Instructions)-1)
-	}
-	
-	// Validate block index
-	if blockIndex < 0 || blockIndex >= len(result.BasicBlocks) {
-		blockIndex = 0
-	}
-	
-	block := result.BasicBlocks[blockIndex]
-	
-	// Find instructions in this block's PC range
-	var blockInstructions []types.DisassemblyInstruction
-	for _, inst := range result.Instructions {
-		if inst.PC >= block.Start && inst.PC <= block.End {
-			blockInstructions = append(blockInstructions, inst)
-		}
-	}
-	
-	blockInfo := fmt.Sprintf("PC %d-%d", block.Start, block.End)
-	return blockInstructions, blockInfo
-}
-
-// calculateBlockGas calculates total gas cost for a set of instructions
-func calculateBlockGas(instructions []types.DisassemblyInstruction) uint32 {
-	var totalGas uint32
-	for _, inst := range instructions {
-		totalGas += uint32(inst.GasCost)
-	}
-	return totalGas
-}
-
 // renderBlockIndicator shows current block position and gas usage
 func renderBlockIndicator(currentBlock int, totalBlocks int, blockInfo string, blockGas uint32) string {
 	if totalBlocks == 0 {
@@ -378,7 +341,7 @@ func renderBlockIndicator(currentBlock int, totalBlocks int, blockInfo string, b
 		if blockGas > 0 {
 			gasInfo = fmt.Sprintf(" • Gas: %d", blockGas)
 		}
-		return config.DimmedStyle.Render("All instructions " + blockInfo + gasInfo)
+		return config.DimmedStyle.Render(config.AllInstructionsLabel + " " + blockInfo + gasInfo)
 	}
 	
 	indicator := fmt.Sprintf("Block %d/%d • %s", currentBlock+1, totalBlocks, blockInfo)
@@ -388,20 +351,4 @@ func renderBlockIndicator(currentBlock int, totalBlocks int, blockInfo string, b
 	
 	return config.SubtitleStyle.Render(indicator)
 }
-
-func isImportantOpcode(opcode string) bool {
-	important := []string{
-		"CALL", "STATICCALL", "DELEGATECALL", "CREATE", "CREATE2",
-		"SELFDESTRUCT", "REVERT", "INVALID", "STOP", "RETURN",
-		"SSTORE", "SLOAD", "LOG0", "LOG1", "LOG2", "LOG3", "LOG4",
-	}
-	
-	for _, op := range important {
-		if opcode == op {
-			return true
-		}
-	}
-	return false
-}
-
 
