@@ -119,6 +119,16 @@ func (h *HistoryManager) GetContracts() []*types.DeployedContract {
 	for _, contract := range h.contracts {
 		result = append(result, contract)
 	}
+	
+	// Sort by timestamp, most recent first
+	for i := 0; i < len(result)-1; i++ {
+		for j := i + 1; j < len(result); j++ {
+			if result[i].Timestamp.Before(result[j].Timestamp) {
+				result[i], result[j] = result[j], result[i]
+			}
+		}
+	}
+	
 	return result
 }
 
