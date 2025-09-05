@@ -2,6 +2,8 @@ const std = @import("std");
 const Opcode = @import("opcode.zig").Opcode;
 const OpcodeSynthetic = @import("opcode_synthetic.zig").OpcodeSynthetic;
 const OPCODE_INFO = @import("opcode_data.zig").OPCODE_INFO;
+const dispatch_mod = @import("dispatch.zig");
+const frame_handlers_mod = @import("frame_handlers.zig");
 
 /// This module provides structured analysis of both original bytecode and optimized dispatch streams.
 /// Designed for minimal code addition while maximizing reuse of existing infrastructure.
@@ -88,7 +90,7 @@ pub const BytecodeDisassembly = struct {
                 const info = OPCODE_INFO[opcode];
 
                 // Handle PUSH instructions specially to extract value
-                if (opcode >= 0x60 and opcode <= 0x7f) { // PUSH1 to PUSH32
+                if (opcode >= Opcode.PUSH1 and opcode <= Opcode.PUSH32) {
                     const push_size = opcode - 0x60 + 1;
                     var push_value: u256 = 0;
 
@@ -143,10 +145,9 @@ pub const BytecodeDisassembly = struct {
 
         // PHASE 2: Build Dispatch Schedule
         // Build dispatch schedule to get its size
-        const Dispatch = @import("dispatch.zig").Dispatch(FrameType);
+        const Dispatch = dispatch_mod.Dispatch(FrameType);
         // Get opcode handlers for the frame type
-        const frame_handlers = @import("frame_handlers.zig");
-        const opcode_handlers = frame_handlers.getOpcodeHandlers(FrameType);
+        const opcode_handlers = frame_handlers_mod.getOpcodeHandlers(FrameType);
         const schedule = try Dispatch.init(allocator, bytecode, &opcode_handlers);
         defer allocator.free(schedule);
 
