@@ -71,6 +71,24 @@ const (
 	// Log detail messages
 	LogDetailTitle       = "Log Details"
 	LogDetailSubtitle    = "Full log entry information"
+	
+	// Disassembly messages
+	BytecodeDisassemblyTitle     = "Bytecode Disassembly"
+	NoDisassemblyAvailable       = "No disassembly available"
+	NoInstructionsInBlock        = "No instructions in this block"
+	AllInstructionsLabel         = "All instructions"
+	DisassemblySizeLabel         = "Size:"
+	DisassemblyInstructionsLabel = "Instructions:"
+	DisassemblyBlocksLabel       = "Blocks:"
+	DisassemblyJumpdestsLabel    = "Jumpdests:"
+	
+	// Disassembly table headers
+	DisassemblyHeaderPC          = "PC"
+	DisassemblyHeaderOpcode      = "Opcode"  
+	DisassemblyHeaderHex         = "Hex"
+	DisassemblyHeaderValue       = "Value/Target"
+	DisassemblyHeaderGas         = "Gas"
+	DisassemblyHeaderStack       = "Stack"
 )
 
 // GetMenuItems returns the default menu items
