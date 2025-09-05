@@ -144,7 +144,7 @@ func TestConvertFromCallParameters(t *testing.T) {
 		InputData: "0x70a08231",
 	}
 	
-	persisted := ConvertFromCallParameters(params)
+	persisted := ConvertFromCallParameters(params, time.Now())
 	
 	if persisted.CallType != params.CallType {
 		t.Errorf("Expected call type %s, got %s", params.CallType, persisted.CallType)
