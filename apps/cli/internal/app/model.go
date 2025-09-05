@@ -40,6 +40,11 @@ type Model struct {
 	selectedContract   string
 	selectedLogIndex   int
 	
+	// Disassembly state
+	disassemblyResult  *types.DisassemblyResult
+	currentBlockIndex  int
+	instructionsTable  table.Model
+	
 	// UI state
 	showCopyFeedback   bool
 	copyFeedbackMsg    string

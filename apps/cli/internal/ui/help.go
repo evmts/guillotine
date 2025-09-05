@@ -30,6 +30,13 @@ func RenderHelp(state types.AppState) string {
 	return renderHelpForKey(stateKey)
 }
 
+// RenderHelpForContractDetail renders help for contract detail with conditional disassembly navigation
+func RenderHelpForContractDetail(hasDisassembly bool) string {
+	entries := config.GetHelpForContractDetail(hasDisassembly)
+	keys, actions := config.GetHelpText(entries)
+	return renderHelpText(keys, actions)
+}
+
 // RenderHelpWithLogs renders help text for states that may have logs
 func RenderHelpWithLogs(state types.AppState, hasLogs bool) string {
 	stateKey, exists := stateToHelpKey[state]

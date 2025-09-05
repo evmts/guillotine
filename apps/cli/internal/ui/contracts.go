@@ -69,38 +69,54 @@ func RenderContractDetail(contract *types.DeployedContract, width, height int) s
 
 	var b strings.Builder
 
+	// Contract header info
+	b.WriteString(config.SubtitleStyle.Render("Contract Information"))
+	b.WriteString("\n\n")
+	
 	b.WriteString(config.LabelStyle.Render("Address: "))
-	b.WriteString(config.AccentStyle.Render(contract.Address))
 	b.WriteString("\n")
+	b.WriteString(config.AccentStyle.Render(contract.Address))
+	b.WriteString("\n\n")
 
 	b.WriteString(config.LabelStyle.Render("Deployed: "))
-	b.WriteString(contract.Timestamp.Format("2006-01-02 15:04:05"))
 	b.WriteString("\n")
+	b.WriteString(contract.Timestamp.Format("2006-01-02 15:04:05"))
+	b.WriteString("\n\n")
 
-	// Show bytecode if available
+	// Show bytecode info
 	if len(contract.Bytecode) > 0 {
 		b.WriteString(config.LabelStyle.Render("Bytecode Size: "))
+		b.WriteString("\n")
 		b.WriteString(formatBytecodeSize(len(contract.Bytecode)))
-		b.WriteString("\n")
+		b.WriteString("\n\n")
 
-		// Show bytecode
-		b.WriteString("\n")
-		b.WriteString(config.SubtitleStyle.Render("Bytecode"))
+		// Show raw bytecode hex (compact for left panel)
+		b.WriteString(config.SubtitleStyle.Render("Raw Bytecode"))
 		b.WriteString("\n")
 		
 		bytecodeHex := fmt.Sprintf("0x%x", contract.Bytecode)
-		lines := wrapHex(bytecodeHex, width-8)
-		maxLines := 10 // Show first 10 lines
-		if len(lines) < maxLines {
-			maxLines = len(lines)
+		lines := wrapHex(bytecodeHex, width-4)
+		
+		// Calculate how many lines we can show based on available height
+		availableLines := height - 12 // Reserve space for headers
+		if availableLines < 5 {
+			availableLines = 5
+		}
+		
+		maxLines := len(lines)
+		if maxLines > availableLines {
+			maxLines = availableLines
 		}
 		
 		for i := 0; i < maxLines; i++ {
-			b.WriteString(config.CodeStyle.Render(lines[i]))
-			b.WriteString("\n")
+			b.WriteString(config.AccentStyle.Render(lines[i]))  // Use amber/yellow for bytecode
+			if i < maxLines-1 {
+				b.WriteString("\n")
+			}
 		}
 		
 		if len(lines) > maxLines {
+			b.WriteString("\n")
 			b.WriteString(config.DimmedStyle.Render(fmt.Sprintf("... (%d more lines)", len(lines)-maxLines)))
 		}
 	} else {

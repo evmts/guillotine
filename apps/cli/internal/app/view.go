@@ -118,10 +118,32 @@ func (m Model) View() string {
 	case types.StateContractDetail:
 		header := ui.RenderHeader(config.ContractDetailTitle, config.ContractDetailSubtitle, config.TitleStyle, config.SubtitleStyle)
 		contract := m.historyManager.GetContract(m.selectedContract)
+		help := ui.RenderHelpForContractDetail(m.disassemblyResult != nil)
 		
-		detail := ui.RenderContractDetail(contract, m.width-4, m.height-10)
-		help := ui.RenderHelp(types.StateContractDetail)
-		content := layout.ComposeVertical(header, detail, help)
+		// Calculate heights
+		helpHeight := 3
+		fullHeight := m.height - helpHeight - 4  // Full height from top to help
+		
+		// Left content: header + contract details
+		leftContent := header + "\n" + ui.RenderContractDetail(contract, (m.width-4)*40/100, fullHeight-4)
+		
+		// Right content: disassembly if available
+		var rightContent string
+		hasDisassembly := m.disassemblyResult != nil
+		if hasDisassembly {
+			data := ui.DisassemblyDisplayData{
+				Result:            m.disassemblyResult,
+				CurrentBlockIndex: m.currentBlockIndex,
+				Width:             ((m.width - 4) * 60 / 100) - 4,
+				Height:            fullHeight,
+			}
+			rightContent = ui.RenderBytecodeDisassemblyWithTable(data, m.instructionsTable)
+		}
+		
+		// Create split panel
+		detail := ui.RenderContractDetailSplit(leftContent, rightContent, m.width-4, fullHeight, hasDisassembly)
+		
+		content := detail + "\n" + help
 		return layout.RenderWithBox(content)
 		
 	case types.StateConfirmReset:

@@ -5,6 +5,8 @@ var (
 	KeyQuit      = []string{"ctrl+c"}
 	KeyUp        = []string{"up", "k"}
 	KeyDown      = []string{"down", "j"}
+	KeyLeft      = []string{"left", "h"}
+	KeyRight     = []string{"right", "l"}
 	KeySelect    = []string{"enter", " "}
 	KeyBack      = []string{"esc"}
 	KeyExecute   = []string{"x", "ctrl+enter"}
@@ -15,6 +17,7 @@ var (
 	KeyResetAll  = []string{"ctrl+r"}
 	KeyPaste     = []string{"ctrl+v"}
 	KeyCopy      = []string{"c", "ctrl+c"}
+	KeyToggleDisassembly = []string{"d", "ctrl+d"}
 )
 
 // IsKey checks if a message matches any of the given key bindings
