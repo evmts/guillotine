@@ -1,7 +1,6 @@
 package history
 
 import (
-	"fmt"
 	"sync"
 	"time"
 
@@ -33,8 +32,12 @@ func (h *HistoryManager) AddCall(entry types.CallHistoryEntry) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	entry.ID = uuid.New().String()
-	entry.Timestamp = time.Now()
+	if entry.ID == "" {
+		entry.ID = uuid.New().String()
+	}
+	if entry.Timestamp.IsZero() {
+		entry.Timestamp = time.Now()
+	}
 
 	if len(h.calls) >= h.maxEntries && h.rotationPolicy != KeepAll {
 		removed := h.calls[0]
@@ -45,29 +48,25 @@ func (h *HistoryManager) AddCall(entry types.CallHistoryEntry) {
 	h.calls = append(h.calls, entry)
 	h.callIndex[entry.ID] = &h.calls[len(h.calls)-1]
 
+	// Track deployed contracts for successful CREATE/CREATE2 operations
 	if entry.Parameters.CallType == config.CallTypeCreate || entry.Parameters.CallType == config.CallTypeCreate2 {
-		if entry.Result != nil && entry.Result.Success && len(entry.Result.Output.Data()) > 0 {
-			h.trackContractDeployment(entry)
+		if entry.Result != nil && entry.Result.Success && entry.Result.CreatedAddress != nil {
+			// Get the created contract address
+			address := entry.Result.CreatedAddress.Hex()
+			
+			// The output field contains the deployed bytecode for successful CREATE/CREATE2
+			bytecode := entry.Result.Output.Data()
+			
+			// Store the deployed contract with the same timestamp as the CREATE call
+			contract := &types.DeployedContract{
+				Address:   address,
+				Bytecode:  bytecode,
+				Timestamp: entry.Timestamp,
+			}
+			
+			
+			h.contracts[address] = contract
 		}
-	}
-}
-
-func (h *HistoryManager) trackContractDeployment(entry types.CallHistoryEntry) {
-	// For successful CREATE/CREATE2, output should contain the 20-byte contract address
-	outputData := entry.Result.Output.Data()
-	if len(outputData) == 20 {
-		address := fmt.Sprintf("0x%x", outputData)
-		
-		// Note: This method is called from AddCall, but bytecode should be
-		// retrieved separately using GetCode. This is a fallback for cases
-		// where that fails.
-		contract := &types.DeployedContract{
-			Address:   address,
-			Bytecode:  nil, // Will be populated separately if GetCode succeeds
-			Timestamp: entry.Timestamp,
-		}
-
-		h.contracts[address] = contract
 	}
 }
 
@@ -110,28 +109,6 @@ func (h *HistoryManager) GetCall(id string) *types.CallHistoryEntry {
 		return &copy
 	}
 	return nil
-}
-
-func (h *HistoryManager) AddContract(address string, timestamp time.Time) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	h.contracts[address] = &types.DeployedContract{
-		Address:   address,
-		Bytecode:  nil, // No bytecode provided
-		Timestamp: timestamp,
-	}
-}
-
-func (h *HistoryManager) AddContractWithBytecode(address string, bytecode []byte, timestamp time.Time) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	h.contracts[address] = &types.DeployedContract{
-		Address:   address,
-		Bytecode:  bytecode,
-		Timestamp: timestamp,
-	}
 }
 
 func (h *HistoryManager) GetContracts() []*types.DeployedContract {

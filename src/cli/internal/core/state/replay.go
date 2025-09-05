@@ -45,9 +45,12 @@ func (sm *StateReplayer) replayCall(call PersistedCall, index int) error {
 		}
 	}
 	
+	// Use the saved timestamp from the persisted call
+	savedTime := time.Unix(call.Timestamp, 0)
+	
 	entry := types.CallHistoryEntry{
 		ID:         uuid.New().String(),
-		Timestamp:  time.Unix(call.Timestamp, 0),
+		Timestamp:  savedTime,
 		Parameters: params,
 		Result:     result,
 	}

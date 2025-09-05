@@ -655,3 +655,201 @@ func Bytes32ToBigInt(bytes [32]byte) *big.Int {
 	return new(big.Int).SetBytes(bytes[start:])
 }
 
+// TODO: need to handle new design and exports
+// cAddress converts Go address to C
+func cAddress(goAddr [20]byte) C.GuillotineAddress {
+	var cAddr C.GuillotineAddress
+	for i, b := range goAddr {
+		cAddr.bytes[i] = C.uint8_t(b)
+	}
+	return cAddr
+}
+
+// goAddress converts C address to Go
+func goAddress(cAddr C.GuillotineAddress) [20]byte {
+	var goAddr [20]byte
+	for i := 0; i < 20; i++ {
+		goAddr[i] = byte(cAddr.bytes[i])
+	}
+	return goAddr
+}
+
+// cU256 converts Go U256 to C
+func cU256(goU256 [32]byte) C.GuillotineU256 {
+	var cU256 C.GuillotineU256
+	for i, b := range goU256 {
+		cU256.bytes[i] = C.uint8_t(b)
+	}
+	return cU256
+}
+
+// goU256 converts C U256 to Go
+func goU256(cU256 C.GuillotineU256) [32]byte {
+	var goU256 [32]byte
+	for i := 0; i < 32; i++ {
+		goU256[i] = byte(cU256.bytes[i])
+	}
+	return goU256
+}
+
+// cHash converts Go hash to C
+func cHash(goHash [32]byte) C.GuillotineHash {
+	var cHash C.GuillotineHash
+	for i, b := range goHash {
+		cHash.bytes[i] = C.uint8_t(b)
+	}
+	return cHash
+}
+
+// goHash converts C hash to Go
+func goHash(cHash C.GuillotineHash) [32]byte {
+	var goHash [32]byte
+	for i := 0; i < 32; i++ {
+		goHash[i] = byte(cHash.bytes[i])
+	}
+	return goHash
+}
+
+// cBytes converts Go bytes to C
+func cBytes(goBytes []byte) C.GuillotineBytes {
+	if len(goBytes) == 0 {
+		return C.GuillotineBytes{data: nil, len: 0}
+	}
+	return C.GuillotineBytes{
+		data: (*C.uint8_t)(C.CBytes(goBytes)),
+		len:  C.size_t(len(goBytes)),
+	}
+}
+
+// goBytes converts C bytes to Go
+func goBytes(cBytes C.GuillotineBytes) []byte {
+	if cBytes.len == 0 || cBytes.data == nil {
+		return []byte{}
+	}
+	return C.GoBytes(unsafe.Pointer(cBytes.data), C.int(cBytes.len))
+}
+
+// freeBytes frees C bytes
+func freeBytes(cBytes C.GuillotineBytes) {
+	if cBytes.data != nil {
+		C.free(unsafe.Pointer(cBytes.data))
+	}
+}
+
+// convertCallResult converts C call result directly to public CallResult structure
+func convertCallResult(result *C.GuillotineCallResult) *CallResult {
+	goResult := &CallResult{
+		Success: bool(result.success),
+		GasLeft: uint64(result.gas_left),
+	}
+	
+	// Copy output
+	if result.output.len > 0 && result.output.data != nil {
+		goResult.Output = C.GoBytes(unsafe.Pointer(result.output.data), C.int(result.output.len))
+	} else {
+		goResult.Output = []byte{}
+	}
+	
+	// Copy logs
+	if result.logs_len > 0 && result.logs != nil {
+		logs := (*[1 << 30]C.GuillotineLog)(unsafe.Pointer(result.logs))[:result.logs_len:result.logs_len]
+		goResult.Logs = make([]LogEntry, result.logs_len)
+		
+		for i, log := range logs {
+			goResult.Logs[i].Address = primitives.NewAddress(goAddress(log.address))
+			
+			// Copy topics
+			if log.topics_len > 0 && log.topics != nil {
+				topics := (*[1 << 30]C.GuillotineU256)(unsafe.Pointer(log.topics))[:log.topics_len:log.topics_len]
+				goResult.Logs[i].Topics = make([]*big.Int, log.topics_len)
+				for j, topic := range topics {
+					topicBytes := goU256(topic)
+					// Topics from Zig are little-endian
+					goResult.Logs[i].Topics[j] = bytes32ToBigInt(topicBytes)
+				}
+			} else {
+				goResult.Logs[i].Topics = make([]*big.Int, 0)
+			}
+			
+			// Copy data
+			if log.data.len > 0 && log.data.data != nil {
+				goResult.Logs[i].Data = C.GoBytes(unsafe.Pointer(log.data.data), C.int(log.data.len))
+			} else {
+				goResult.Logs[i].Data = []byte{}
+			}
+		}
+	} else {
+		goResult.Logs = make([]LogEntry, 0)
+	}
+	
+	// Copy selfdestructs
+	if result.selfdestructs_len > 0 && result.selfdestructs != nil {
+		sds := (*[1 << 30]C.GuillotineSelfDestruct)(unsafe.Pointer(result.selfdestructs))[:result.selfdestructs_len:result.selfdestructs_len]
+		goResult.SelfDestructs = make([]SelfDestructRecord, result.selfdestructs_len)
+		
+		for i, sd := range sds {
+			goResult.SelfDestructs[i] = SelfDestructRecord{
+				Contract:    primitives.NewAddress(goAddress(sd.contract)),
+				Beneficiary: primitives.NewAddress(goAddress(sd.beneficiary)),
+			}
+		}
+	} else {
+		goResult.SelfDestructs = make([]SelfDestructRecord, 0)
+	}
+	
+	// Copy accessed addresses
+	if result.accessed_addresses_len > 0 && result.accessed_addresses != nil {
+		addrs := (*[1 << 30]C.GuillotineAddress)(unsafe.Pointer(result.accessed_addresses))[:result.accessed_addresses_len:result.accessed_addresses_len]
+		goResult.AccessedAddresses = make([]primitives.Address, result.accessed_addresses_len)
+		
+		for i, addr := range addrs {
+			goResult.AccessedAddresses[i] = primitives.NewAddress(goAddress(addr))
+		}
+	} else {
+		goResult.AccessedAddresses = make([]primitives.Address, 0)
+	}
+	
+	// Copy accessed storage
+	if result.accessed_storage_len > 0 && result.accessed_storage != nil {
+		storages := (*[1 << 30]C.GuillotineStorageAccess)(unsafe.Pointer(result.accessed_storage))[:result.accessed_storage_len:result.accessed_storage_len]
+		goResult.AccessedStorage = make([]StorageAccessRecord, result.accessed_storage_len)
+		
+		for i, storage := range storages {
+			slotBytes := goU256(storage.slot)
+			// Storage slots from Zig are little-endian
+			goResult.AccessedStorage[i] = StorageAccessRecord{
+				Address: primitives.NewAddress(goAddress(storage.address)),
+				Slot:    bytes32ToBigInt(slotBytes),
+			}
+		}
+	} else {
+		goResult.AccessedStorage = make([]StorageAccessRecord, 0)
+	}
+	
+	// Copy error info
+	if result.error_info != nil {
+		goResult.ErrorInfo = C.GoString(result.error_info)
+	}
+	
+	// Copy created address (for CREATE/CREATE2)
+	if result.created_address != nil {
+		createdAddr := primitives.NewAddress(goAddress(*result.created_address))
+		goResult.CreatedAddress = &createdAddr
+	}
+	
+	return goResult
+}
+
+// ========================
+// Utility Functions
+// ========================
+
+// IsInitialized checks if Guillotine is initialized
+func IsInitialized() bool {
+	return C.guillotine_is_initialized() != 0
+}
+
+// Version returns the Guillotine version string
+func Version() string {
+	return C.GoString(C.guillotine_version())
+}
