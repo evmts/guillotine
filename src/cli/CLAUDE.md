@@ -34,6 +34,9 @@ src/cli/
     │   │   ├── vm_manager.go # VM lifecycle management
     │   │   └── parsers.go    # Address and hex data parsing
     │   │
+    │   ├── disassembly/      # Bytecode disassembly domain
+    │   │   └── analyzer.go   # Bytecode analysis and instruction extraction
+    │   │
     │   ├── history/          # History domain
     │   │   ├── manager.go    # Call history management
     │   │   ├── entry.go      # History entry types
@@ -45,6 +48,7 @@ src/cli/
     │
     ├── types/                 # Type definitions and data structures
     │   ├── call.go           # Core types (AppState, CallParameters, etc.)
+    │   ├── disassembly.go    # Disassembly types (DisassemblyResult, Instructions, etc.)
     │   └── errors.go         # Error types and definitions
     │
     ├── config/               # Configuration and constants
@@ -64,6 +68,8 @@ src/cli/
         ├── call_result.go   # Result display formatting
         ├── history_list.go  # History table rendering
         ├── contract_list.go # Contract table rendering
+        ├── bytecode_disassembly.go # Bytecode disassembly rendering
+        ├── split_panel.go   # Split panel layout for contract details
         ├── clipboard_manager.go # Clipboard utilities
         └── table_factory.go # Table creation helpers
 ```
@@ -79,8 +85,9 @@ Pure state container with no methods:
 - Application state (greeting, cursor, choices, quitting)
 - UI state (width, height, selected items)
 - Call state (parameters, validation errors, results)
+- Disassembly state (result, current block index, instructions table)
 - Domain managers (vmManager, historyManager)
-- Table components (historyTable, contractsTable)
+- Table components (historyTable, contractsTable, instructionsTable)
 
 #### Update (`app/update.go`)
 Handles all events and state changes:
@@ -132,6 +139,14 @@ Each domain is self-contained with clear responsibilities:
 - Type conversions for FFI
 - VM lifecycle management
 - Address and data parsing
+- No UI concerns
+
+**Disassembly Domain** (`core/disassembly/`)
+- Bytecode analysis via FFI bindings
+- Instruction extraction and parsing
+- Basic block identification
+- Gas cost calculation
+- Opcode importance classification
 - No UI concerns
 
 **History Domain** (`core/history/`)
@@ -193,6 +208,57 @@ Each domain is self-contained with clear responsibilities:
 - Zig handles EVM execution memory
 - Proper cleanup via `defer vm.Close()`
 - No manual memory management required
+
+## Bytecode Disassembly
+
+### Overview
+
+The CLI provides comprehensive bytecode disassembly capabilities for deployed contracts. When viewing contract details, the interface displays a split-panel view with contract information on the left and interactive bytecode disassembly on the right.
+
+### Disassembly Features
+
+#### Analysis Components
+- **Instructions**: Full EVM instruction listing with program counter, opcodes, gas costs
+- **Basic Blocks**: Control flow blocks for code structure analysis
+- **Jumpdests**: Jump destination identification and highlighting
+- **Statistics**: Bytecode size, instruction count, block count, gas analysis
+
+#### Interactive Navigation
+- **Block Navigation**: Use left/right arrow keys (←/h, →/l) to navigate between basic blocks
+- **Instruction Scrolling**: Use up/down arrow keys (↑/k, ↓/j) to scroll within instruction tables
+- **Opcode Highlighting**: Important opcodes (CALL, SSTORE, etc.) are visually highlighted
+- **Jump Target Analysis**: Push values targeting jumpdests are automatically identified
+
+### Disassembly Flow
+
+1. **Contract Selection**: Select a deployed contract from the contracts list
+2. **Automatic Analysis**: Bytecode is automatically analyzed using Guillotine's disassembly engine
+3. **Block Navigation**: Navigate between basic blocks to understand control flow
+4. **Instruction Details**: View detailed instruction information including:
+   - Program Counter (PC) position
+   - Opcode name and hex value
+   - Push values and jump targets
+   - Gas cost per instruction
+   - Stack input/output effects
+
+### Integration with FFI
+
+The disassembly system uses Go bindings to Guillotine's Zig disassembly engine:
+- **Efficient Analysis**: Native Zig performance for bytecode parsing
+- **Comprehensive Results**: Full instruction metadata and control flow analysis
+- **Memory Safety**: Proper cleanup of FFI resources via `defer analysis.Free()`
+
+### UI Architecture
+
+#### Split Panel Design
+- **Left Panel (40%)**: Contract details (address, deployment time, bytecode size)
+- **Right Panel (60%)**: Interactive disassembly table with block navigation
+- **Responsive Layout**: Adapts to terminal size with minimum viable dimensions
+
+#### Table Component Integration
+- **Scrollable Instructions**: Large bytecode handled via paginated table view
+- **Contextual Highlighting**: Jumpdests, important opcodes, and jump targets emphasized
+- **Real-time Updates**: Smooth navigation between blocks with instant table updates
 
 ## Error Handling
 
@@ -301,16 +367,38 @@ var KeyNewAction = []string{"n", "ctrl+n"}
 var NewStyle = lipgloss.NewStyle().Bold(true)
 ```
 
+#### 5. Working with Disassembly Types
+When working with bytecode disassembly:
+```go
+// types/disassembly.go - Pure data structures
+type DisassemblyResult struct {
+    Instructions []DisassemblyInstruction
+    Jumpdests    []uint32
+    BasicBlocks  []BasicBlock
+    Stats        BytecodeStats
+}
+
+// core/disassembly/analyzer.go - Business logic
+func AnalyzeBytecode(bytecode []byte) (*types.DisassemblyResult, error) {
+    // Call FFI, convert types, no UI concerns
+}
+
+// ui/bytecode_disassembly.go - Pure rendering
+func RenderBytecodeDisassembly(result *types.DisassemblyResult) string {
+    // Pure rendering function, no state
+}
+```
+
 ### File Placement Rules
 
 ```yaml
 MUST place code in correct location:
-  Type definitions: types/*.go
+  Type definitions: types/*.go (call.go, disassembly.go, errors.go)
   Error types: types/errors.go
-  Business logic: core/<domain>/*.go
+  Business logic: core/<domain>/*.go (evm/, disassembly/, history/, state/)
   State management: app/*.go
-  Pure rendering: ui/*.go
-  Configuration: config/*.go
+  Pure rendering: ui/*.go (bytecode_disassembly.go, split_panel.go)
+  Configuration: config/*.go (keys.go with navigation bindings)
   
 NEVER:
   Put methods on type structs
@@ -318,6 +406,8 @@ NEVER:
   Create circular dependencies
   Put logic in config files
   Add state to UI components
+  Put FFI calls in UI components (belongs in core/disassembly/)
+  Mix disassembly analysis with rendering logic
 ```
 
 ### Testing Strategy
@@ -332,6 +422,13 @@ NEVER:
 func TestValidateCallParameters(t *testing.T) {
     // Test validation logic
 }
+
+// core/disassembly/analyzer_test.go
+func TestAnalyzeBytecode(t *testing.T) {
+    bytecode := []byte{0x60, 0x01, 0x60, 0x02, 0x01} // PUSH1 1 PUSH1 2 ADD
+    result, err := AnalyzeBytecode(bytecode)
+    // Test instruction parsing, gas calculation, block identification
+}
 ```
 
 #### Integration Tests
@@ -343,6 +440,11 @@ func TestValidateCallParameters(t *testing.T) {
 // app/update_test.go
 func TestStateTransitions(t *testing.T) {
     // Test Update() behavior
+}
+
+// Test disassembly integration
+func TestDisassemblyStateTransitions(t *testing.T) {
+    // Test navigation between blocks, table updates, async loading
 }
 ```
 
@@ -375,10 +477,13 @@ go get -u
 ## Performance Considerations
 
 - EVM calls: 10-100ms depending on complexity
+- Bytecode disassembly: 5-50ms depending on bytecode size
 - UI updates: 60 FPS via Bubbletea
 - View() rendering: Keep under 16ms
-- Async commands: Any operation >50ms
+- Async commands: Any operation >50ms (includes disassembly loading)
 - State persistence: Non-blocking background saves
+- Table scrolling: Efficient with large instruction sets via virtualized display
+- Block navigation: Instant switching with pre-analyzed data
 
 ## Common Modifications
 
@@ -425,6 +530,44 @@ var KeyNewAction = []string{"n", "ctrl+n"}
 // Update help
 var HelpBindings = []KeyBinding{
     {Key: "n", Description: "new action"},
+}
+```
+
+### Disassembly Navigation Keys
+Standard navigation keys for bytecode disassembly:
+```go
+// Basic navigation
+KeyLeft      = []string{"left", "h"}   // Navigate to previous block
+KeyRight     = []string{"right", "l"}  // Navigate to next block
+KeyUp        = []string{"up", "k"}     // Scroll up in instructions
+KeyDown      = []string{"down", "j"}   // Scroll down in instructions
+
+// Additional disassembly keys
+KeyToggleDisassembly = []string{"d", "ctrl+d"} // Future: toggle disassembly view
+```
+
+### Adding Disassembly Features
+To extend disassembly functionality:
+
+1. **New Analysis Function** (`core/disassembly/analyzer.go`):
+```go
+func AnalyzeJumpPattern(result *types.DisassemblyResult) map[uint32][]uint32 {
+    // Pure business logic for jump analysis
+}
+```
+
+2. **Enhanced Types** (`types/disassembly.go`):
+```go
+type DisassemblyResult struct {
+    // existing fields...
+    JumpAnalysis map[uint32][]uint32 // New field
+}
+```
+
+3. **UI Enhancement** (`ui/bytecode_disassembly.go`):
+```go
+func RenderJumpHighlights(result *types.DisassemblyResult) string {
+    // Pure rendering function using JumpAnalysis data
 }
 ```
 
