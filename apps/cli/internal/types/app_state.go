@@ -14,6 +14,7 @@ const (
 	StateContracts
 	StateContractDetail
 	StateConfirmReset
+	StateLogDetail
 )
 
 type TabType int

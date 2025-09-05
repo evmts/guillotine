@@ -12,7 +12,6 @@ import (
 func CreateTextInput(paramName, currentValue string) textinput.Model {
 	ti := textinput.New()
 	ti.Focus()
-	ti.CharLimit = 256
 	ti.Width = 50
 	ti.SetValue(currentValue)
 	
@@ -29,11 +28,13 @@ func CreateTextInput(paramName, currentValue string) textinput.Model {
 		ti.CharLimit = 10
 		ti.Placeholder = "100000"
 	case config.CallParamInput, config.CallParamInputDeploy:
-		ti.CharLimit = 1000
+		ti.CharLimit = 0 // No limit for input data
 		ti.Placeholder = "0x"
 	case config.CallParamSalt:
 		ti.CharLimit = 66
 		ti.Placeholder = "0x0000..."
+	default:
+		ti.CharLimit = 256 // Default for unknown parameters
 	}
 	
 	return ti

@@ -24,7 +24,14 @@ func RenderCallParameterList(params []types.CallParameter, cursor int, validatio
 		valueStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
 		
 		name := nameStyle.Render(param.Name)
-		value := valueStyle.Render(param.Value)
+		
+		// Truncate very long values for display
+		displayValue := param.Value
+		const maxDisplayLength = 50
+		if len(displayValue) > maxDisplayLength {
+			displayValue = displayValue[:maxDisplayLength] + "..."
+		}
+		value := valueStyle.Render(displayValue)
 		
 		if i == cursor {
 			name = lipgloss.NewStyle().Bold(true).Foreground(config.Background).Background(config.Amber).Render(param.Name)
@@ -69,7 +76,7 @@ func RenderCallParameterEdit(paramName, currentValue string) string {
 	return boxStyle.Render(content)
 }
 
-func RenderCallResult(result *guillotine.CallResult, params types.CallParametersStrings) string {
+func RenderCallResult(result *guillotine.CallResult, params types.CallParametersStrings, logDisplayData LogDisplayData, width int) string {
 	var content strings.Builder
 	
 	successStyle := lipgloss.NewStyle().Bold(true).Foreground(config.ChartGreen)
@@ -109,15 +116,7 @@ func RenderCallResult(result *guillotine.CallResult, params types.CallParameters
 		content.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render(formatHex(result.Output)))
 		content.WriteString("\n")
 	}
-	
-	// Show logs if available
-	if len(result.Logs) > 0 {
-		content.WriteString("\n")
-		content.WriteString(labelStyle.Render("Logs: "))
-		content.WriteString(lipgloss.NewStyle().Render(formatNumber(uint64(len(result.Logs)))))
-		content.WriteString(" entries\n")
-	}
-	
+
 	// Show created address for CREATE/CREATE2
 	if result.CreatedAddress != nil {
 		content.WriteString("\n")
@@ -126,7 +125,11 @@ func RenderCallResult(result *guillotine.CallResult, params types.CallParameters
 		content.WriteString("\n")
 	}
 	
-	return content.String()
+	// Render logs if available
+	baseContent := content.String()
+	logsContent := RenderLogsDisplay(logDisplayData, width)
+	
+	return baseContent + logsContent
 }
 
 func formatNumber(n uint64) string {

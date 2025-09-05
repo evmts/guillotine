@@ -2,6 +2,7 @@ package app
 
 import (
 	"guillotine-cli/internal/types"
+	"guillotine-cli/internal/ui"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -23,6 +24,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case callResultMsg:
 		m.callResult = msg.result
 		m.state = types.StateCallResult
+		
+		// Populate logs table if there are logs
+		if msg.result != nil && len(msg.result.Logs) > 0 {
+			rows := ui.ConvertLogsToRows(msg.result.Logs)
+			m.logsTable.SetRows(rows)
+		}
+		
 		return m, nil
 
 	case resetCompleteMsg:

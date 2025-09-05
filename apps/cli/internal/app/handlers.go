@@ -264,43 +264,10 @@ func (m Model) executeReset() tea.Cmd {
 // getCopyContent returns the content to copy based on current state
 func (m *Model) getCopyContent() string {
 	switch m.state {
-	case types.StateCallResult:
-		if m.callResult != nil {
-			return ui.RenderCallResult(m.callResult, m.callParams)
-		}
-		
-	case types.StateCallParameterList:
-		params := GetCallParams(m.callParams)
-		if m.callParamCursor < len(params) {
-			return params[m.callParamCursor].Value
-		}
-		
-	case types.StateCallParameterEdit:
-		return m.textInput.Value()
-		
-	case types.StateCallHistory:
-		history := m.historyManager.GetAllCalls()
-		if m.historyTable.Cursor() < len(history) {
-			entry := history[m.historyTable.Cursor()]
-			return ui.RenderHistoryDetail(&entry, m.width-4, m.height-10)
-		}
-		
-	case types.StateCallHistoryDetail:
-		entry := m.historyManager.GetCall(m.selectedHistoryID)
-		if entry != nil {
-			return ui.RenderHistoryDetail(entry, m.width-4, m.height-10)
-		}
-		
-	case types.StateContracts:
-		contracts := m.historyManager.GetContracts()
-		if m.contractsTable.Cursor() < len(contracts) {
-			return contracts[m.contractsTable.Cursor()].Address
-		}
-		
 	case types.StateContractDetail:
 		contract := m.historyManager.GetContract(m.selectedContract)
 		if contract != nil {
-			return ui.RenderContractDetail(contract, m.width-4, m.height-10)
+			return contract.Address
 		}
 	}
 	

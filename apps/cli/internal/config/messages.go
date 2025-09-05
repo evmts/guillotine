@@ -62,6 +62,15 @@ const (
 	CallTypeDelegateCall = "DELEGATECALL"
 	CallTypeCreate       = "CREATE"
 	CallTypeCreate2      = "CREATE2"
+	
+	// Reset state messages
+	ResetStateTitle      = "Reset State"
+	ResetStateSubtitle   = "Are you sure? This will clear all call history and contracts."
+	ResetConfirmMessage  = "Press ENTER to confirm reset or ESC to cancel"
+	
+	// Log detail messages
+	LogDetailTitle       = "Log Details"
+	LogDetailSubtitle    = "Full log entry information"
 )
 
 // GetMenuItems returns the default menu items

@@ -35,8 +35,10 @@ type Model struct {
 	// View states
 	historyTable       table.Model
 	contractsTable     table.Model
+	logsTable          table.Model
 	selectedHistoryID  string
 	selectedContract   string
+	selectedLogIndex   int
 	
 	// UI state
 	showCopyFeedback   bool
