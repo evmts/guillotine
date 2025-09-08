@@ -259,6 +259,63 @@ pub const GuillotineExecutionResult = extern struct {
     error_message: ?[*:0]const u8,
 };
 
+// New comprehensive types for the updated API
+pub const GuillotineCallType = enum(c_int) {
+    call = 0,
+    callcode = 1,
+    delegatecall = 2,
+    staticcall = 3,
+    create = 4,
+    create2 = 5,
+};
+
+pub const GuillotineBytes = extern struct {
+    data: ?[*]const u8,
+    len: usize,
+};
+
+pub const GuillotineCallParams = extern struct {
+    call_type: GuillotineCallType,
+    caller: GuillotineAddress,
+    to: GuillotineAddress,
+    value: GuillotineU256,
+    input: GuillotineBytes,
+    gas: u64,
+    salt: GuillotineU256, // Only used for CREATE2
+};
+
+pub const GuillotineLog = extern struct {
+    address: GuillotineAddress,
+    topics: ?[*]GuillotineU256,
+    topics_len: usize,
+    data: GuillotineBytes,
+};
+
+pub const GuillotineSelfDestruct = extern struct {
+    contract: GuillotineAddress,
+    beneficiary: GuillotineAddress,
+};
+
+pub const GuillotineStorageAccess = extern struct {
+    address: GuillotineAddress,
+    slot: GuillotineU256,
+};
+
+pub const GuillotineCallResult = extern struct {
+    success: bool,
+    gas_left: u64,
+    output: GuillotineBytes,
+    logs: ?[*]GuillotineLog,
+    logs_len: usize,
+    selfdestructs: ?[*]GuillotineSelfDestruct,
+    selfdestructs_len: usize,
+    accessed_addresses: ?[*]GuillotineAddress,
+    accessed_addresses_len: usize,
+    accessed_storage: ?[*]GuillotineStorageAccess,
+    accessed_storage_len: usize,
+    error_info: ?[*:0]const u8,
+};
+
 // Internal VM structure
 const VmState = struct {
     vm: *DefaultEvm,
@@ -357,7 +414,100 @@ export fn guillotine_set_code(vm: ?*GuillotineVm, address: ?*const GuillotineAdd
     return true;
 }
 
-// Execution
+// Comprehensive execution function with full CallParams support
+export fn guillotine_vm_execute(
+    vm: ?*GuillotineVm,
+    params: ?*const GuillotineCallParams,
+) GuillotineCallResult {
+    var result = GuillotineCallResult{
+        .success = false,
+        .gas_left = 0,
+        .output = .{ .data = null, .len = 0 },
+        .logs = null,
+        .logs_len = 0,
+        .selfdestructs = null,
+        .selfdestructs_len = 0,
+        .accessed_addresses = null,
+        .accessed_addresses_len = 0,
+        .accessed_storage = null,
+        .accessed_storage_len = 0,
+        .error_info = null,
+    };
+
+    if (vm == null or params == null) return result;
+
+    const state: *VmState = @ptrCast(@alignCast(vm.?));
+    const p = params.?;
+
+    // Convert GuillotineCallParams to CallParams enum
+    const call_params = switch (p.call_type) {
+        .call => CallParams{ .call = .{
+            .caller = Address{ .bytes = p.caller.bytes },
+            .to = Address{ .bytes = p.to.bytes },
+            .value = u256_from_bytes(&p.value.bytes),
+            .input = if (p.input.data) |d| d[0..p.input.len] else &[_]u8{},
+            .gas = p.gas,
+        } },
+        .callcode => CallParams{ .callcode = .{
+            .caller = Address{ .bytes = p.caller.bytes },
+            .to = Address{ .bytes = p.to.bytes },
+            .value = u256_from_bytes(&p.value.bytes),
+            .input = if (p.input.data) |d| d[0..p.input.len] else &[_]u8{},
+            .gas = p.gas,
+        } },
+        .delegatecall => CallParams{ .delegatecall = .{
+            .caller = Address{ .bytes = p.caller.bytes },
+            .to = Address{ .bytes = p.to.bytes },
+            .input = if (p.input.data) |d| d[0..p.input.len] else &[_]u8{},
+            .gas = p.gas,
+        } },
+        .staticcall => CallParams{ .staticcall = .{
+            .caller = Address{ .bytes = p.caller.bytes },
+            .to = Address{ .bytes = p.to.bytes },
+            .input = if (p.input.data) |d| d[0..p.input.len] else &[_]u8{},
+            .gas = p.gas,
+        } },
+        .create => CallParams{ .create = .{
+            .caller = Address{ .bytes = p.caller.bytes },
+            .value = u256_from_bytes(&p.value.bytes),
+            .init_code = if (p.input.data) |d| d[0..p.input.len] else &[_]u8{},
+            .gas = p.gas,
+        } },
+        .create2 => CallParams{ .create2 = .{
+            .caller = Address{ .bytes = p.caller.bytes },
+            .value = u256_from_bytes(&p.value.bytes),
+            .init_code = if (p.input.data) |d| d[0..p.input.len] else &[_]u8{},
+            .salt = u256_from_bytes(&p.salt.bytes),
+            .gas = p.gas,
+        } },
+    };
+
+    // Execute using the EVM's call method
+    const exec_result = state.vm.call(call_params) catch |err| {
+        const err_msg = @errorName(err);
+        const err_c_str = state.allocator.dupeZ(u8, err_msg) catch return result;
+        result.error_info = err_c_str.ptr;
+        return result;
+    };
+
+    // Convert CallResult to GuillotineCallResult
+    result.success = exec_result.success;
+    result.gas_left = exec_result.gas_left;
+
+    // Copy output data
+    if (exec_result.output.len > 0) {
+        const output_copy = state.allocator.alloc(u8, exec_result.output.len) catch return result;
+        @memcpy(output_copy, exec_result.output);
+        result.output = .{ .data = output_copy.ptr, .len = output_copy.len };
+    }
+
+    // TODO: Handle logs, selfdestructs, accessed addresses, and storage
+    // These would need to be extracted from the CallResult if available
+
+    return result;
+}
+
+// Legacy execution function for backward compatibility
 export fn guillotine_execute(
     vm: ?*GuillotineVm,
     from: ?*const GuillotineAddress,
@@ -426,6 +576,84 @@ export fn guillotine_u256_from_u64(value: u64, out_u256: ?*GuillotineU256) void 
     // Set the lower 8 bytes (little-endian)
     const value_bytes = std.mem.asBytes(&value);
     @memcpy(out_u256.?.bytes[0..8], value_bytes);
+}
+
+// Helper function to convert u256 to bytes
+fn u256_to_bytes(value: u256, bytes: *[32]u8) void {
+    // Convert u256 to little-endian bytes
+    for (0..32) |i| {
+        bytes[i] = @intCast((value >> @intCast(i * 8)) & 0xFF);
+    }
+}
+
+// Get code function
+export fn guillotine_get_code(vm: ?*GuillotineVm, address: ?*const GuillotineAddress) GuillotineBytes {
+    const empty_code = GuillotineBytes{ .data = null, .len = 0 };
+    
+    if (vm == null or address == null) return empty_code;
+    
+    const state: *VmState = @ptrCast(@alignCast(vm.?));
+    const addr = Address{ .bytes = address.?.bytes };
+    
+    // Get code using database interface
+    const code = state.vm.database.get_code_by_address(addr.bytes) catch return empty_code;
+    if (code.len == 0) return empty_code;
+    
+    // Allocate and copy code
+    const code_copy = state.allocator.alloc(u8, code.len) catch return empty_code;
+    @memcpy(code_copy, code);
+    return GuillotineBytes{ .data = code_copy.ptr, .len = code_copy.len };
+}
+
+// Set storage function
+export fn guillotine_set_storage(vm: ?*GuillotineVm, address: ?*const GuillotineAddress, key: ?*const GuillotineU256, value: ?*const GuillotineU256) c_int {
+    if (vm == null or address == null or key == null or value == null) return 0;
+    
+    const state: *VmState = @ptrCast(@alignCast(vm.?));
+    const addr = Address{ .bytes = address.?.bytes };
+    const k = u256_from_bytes(&key.?.bytes);
+    const v = u256_from_bytes(&value.?.bytes);
+    
+    // Set storage using database interface
+    state.vm.database.set_storage(addr.bytes, k, v) catch {
+        return 0;
+    };
+    return 1; // Return 1 for success
+}
+
+// Get storage function
+export fn guillotine_get_storage(vm: ?*GuillotineVm, address: ?*const GuillotineAddress, key: ?*const GuillotineU256) GuillotineU256 {
+    const zero_value = GuillotineU256{ .bytes = [_]u8{0} ** 32 };
+    
+    if (vm == null or address == null or key == null) return zero_value;
+    
+    const state: *VmState = @ptrCast(@alignCast(vm.?));
+    const addr = Address{ .bytes = address.?.bytes };
+    const k = u256_from_bytes(&key.?.bytes);
+    
+    // Get storage using database interface
+    const storage_value = state.vm.database.get_storage(addr.bytes, k) catch 0;
+    var bytes: [32]u8 = undefined;
+    u256_to_bytes(storage_value, &bytes);
+    return GuillotineU256{ .bytes = bytes };
+}
+
+// Get balance function
+export fn guillotine_get_balance(vm: ?*GuillotineVm, address: ?*const GuillotineAddress) GuillotineU256 {
+    const zero_value = GuillotineU256{ .bytes = [_]u8{0} ** 32 };
+    
+    if (vm == null or address == null) return zero_value;
+    
+    const state: *VmState = @ptrCast(@alignCast(vm.?));
+    const addr = address.?.bytes;
+    
+    // Get account
+    const account = state.vm.database.get_account(addr) catch return zero_value;
+    if (account == null) return zero_value;
+    
+    var bytes: [32]u8 = undefined;
+    u256_to_bytes(account.?.balance, &bytes);
+    return GuillotineU256{ .bytes = bytes };
 }
 
 // Frame API exports for direct frame manipulation

@@ -6,7 +6,11 @@
 //    - Direct mapping to Zig CallParams enum and CallResult struct
 package guillotine
 
-import "github.com/evmts/guillotine/bindings/go/primitives"
+import (
+	"math/big"
+	
+	"github.com/evmts/guillotine/sdks/go/primitives"
+)
 
 // ========================
 // Call Types and Parameters
@@ -30,10 +34,10 @@ type CallParams struct {
 	CallType CallType
 	Caller   primitives.Address
 	To       primitives.Address // Zero for CREATE/CREATE2
-	Value    primitives.U256    // Zero for DELEGATECALL/STATICCALL
-	Input    primitives.Bytes   // init_code for CREATE/CREATE2
+	Value    *big.Int          // Zero for DELEGATECALL/STATICCALL
+	Input    []byte            // init_code for CREATE/CREATE2
 	Gas      uint64
-	Salt     primitives.U256 // Only used for CREATE2
+	Salt     *big.Int          // Only used for CREATE2
 }
 
 // ========================
@@ -43,8 +47,8 @@ type CallParams struct {
 // LogEntry represents an EVM event log
 type LogEntry struct {
 	Address primitives.Address
-	Topics  []primitives.U256
-	Data    primitives.Bytes
+	Topics  []*big.Int
+	Data    []byte
 }
 
 // SelfDestructRecord represents a self-destruct operation
@@ -56,14 +60,14 @@ type SelfDestructRecord struct {
 // StorageAccessRecord represents a storage slot access
 type StorageAccessRecord struct {
 	Address primitives.Address
-	Slot    primitives.U256
+	Slot    *big.Int
 }
 
 // CallResult contains complete execution results
 type CallResult struct {
 	Success           bool
 	GasLeft           uint64
-	Output            primitives.Bytes
+	Output            []byte
 	Logs              []LogEntry
 	SelfDestructs     []SelfDestructRecord
 	AccessedAddresses []primitives.Address

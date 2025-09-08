@@ -15,7 +15,7 @@ This document outlines the design for a comprehensive Go SDK that wraps the Guil
 ## Package Structure
 
 ```
-github.com/evmts/guillotine/bindings/go/
+github.com/evmts/guillotine/sdks/go/
 ├── primitives/          # Ethereum primitive types (existing)
 ├── evm/                 # Main EVM execution (existing, needs update)
 ├── plan/                # Bytecode analysis and execution plans

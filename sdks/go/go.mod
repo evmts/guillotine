@@ -1,4 +1,4 @@
-module github.com/evmts/guillotine/bindings/go
+module github.com/evmts/guillotine/sdks/go
 
 go 1.21
 

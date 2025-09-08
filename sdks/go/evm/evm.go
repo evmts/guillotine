@@ -2,30 +2,84 @@ package evm
 
 import (
 	"fmt"
+	"math/big"
 	"runtime"
 	"sync"
 	
-	"github.com/evmts/guillotine/bindings/go"
-	"github.com/evmts/guillotine/bindings/go/primitives"
+	guillotine "github.com/evmts/guillotine/sdks/go"
+	"github.com/evmts/guillotine/sdks/go/primitives"
 )
 
-// Re-export types from guillotine package for public API
-type CallType = guillotine.CallType
-type CallParams = guillotine.CallParams
-type CallResult = guillotine.CallResult
-type LogEntry = guillotine.LogEntry
-type SelfDestructRecord = guillotine.SelfDestructRecord
-type StorageAccessRecord = guillotine.StorageAccessRecord
+// ========================
+// Call Parameter Interfaces
+// ========================
 
-// Re-export constants
-const (
-	CallTypeCall         = guillotine.CallTypeCall
-	CallTypeCallcode     = guillotine.CallTypeCallcode
-	CallTypeDelegatecall = guillotine.CallTypeDelegatecall
-	CallTypeStaticcall   = guillotine.CallTypeStaticcall
-	CallTypeCreate       = guillotine.CallTypeCreate
-	CallTypeCreate2      = guillotine.CallTypeCreate2
-)
+// CallParams is the interface for all call types
+type CallParams interface {
+	callType() string
+}
+
+// Call represents a regular CALL operation
+type Call struct {
+	Caller primitives.Address
+	To     primitives.Address
+	Value  *big.Int
+	Input  []byte
+	Gas    uint64
+}
+func (c Call) callType() string { return "call" }
+
+// Callcode represents a CALLCODE operation: execute external code with current storage/context
+// Executes code at `to`, but uses caller's storage and address context
+type Callcode struct {
+	Caller primitives.Address
+	To     primitives.Address
+	Value  *big.Int
+	Input  []byte
+	Gas    uint64
+}
+func (c Callcode) callType() string { return "callcode" }
+
+// Delegatecall represents a DELEGATECALL operation (preserves caller context)
+type Delegatecall struct {
+	Caller primitives.Address // Original caller, not current contract
+	To     primitives.Address
+	Input  []byte
+	Gas    uint64
+}
+func (d Delegatecall) callType() string { return "delegatecall" }
+
+// Staticcall represents a STATICCALL operation (read-only)
+type Staticcall struct {
+	Caller primitives.Address
+	To     primitives.Address
+	Input  []byte
+	Gas    uint64
+}
+func (s Staticcall) callType() string { return "staticcall" }
+
+// Create represents a CREATE operation
+type Create struct {
+	Caller   primitives.Address
+	Value    *big.Int
+	InitCode []byte
+	Gas      uint64
+}
+func (c Create) callType() string { return "create" }
+
+// Create2 represents a CREATE2 operation
+type Create2 struct {
+	Caller   primitives.Address
+	Value    *big.Int
+	InitCode []byte
+	Salt     *big.Int
+	Gas      uint64
+}
+func (c Create2) callType() string { return "create2" }
+
+// ========================
+// EVM Instance
+// ========================
 
 // EVM represents an instance of the Ethereum Virtual Machine
 type EVM struct {
@@ -64,8 +118,8 @@ func (evm *EVM) Close() error {
 	return nil
 }
 
-// ExecuteWithParams executes bytecode with complete call parameters
-func (evm *EVM) ExecuteWithParams(params CallParams) (*CallResult, error) {
+// Call executes any type of EVM call using the interface parameter
+func (evm *EVM) Call(params CallParams) (*guillotine.CallResult, error) {
 	evm.mu.RLock()
 	defer evm.mu.RUnlock()
 	
@@ -73,90 +127,84 @@ func (evm *EVM) ExecuteWithParams(params CallParams) (*CallResult, error) {
 		return nil, fmt.Errorf("EVM instance has been closed")
 	}
 	
-	// Convert primitives to raw bytes for VMHandle
-	callType := uint8(params.CallType)
-	caller := params.Caller.Array()
-	to := params.To.Array()  
-	value := params.Value.Array()
-	input := params.Input.Data()
-	salt := params.Salt.Array()
+	// Convert interface to guillotine.CallParams based on type
+	var callParams *guillotine.CallParams
 	
-	// Execute through the guillotine VMHandle - now returns public types directly
-	result, err := evm.vm.ExecuteWithParams(callType, caller, to, value, input, params.Gas, salt)
-	if err != nil {
-		return nil, err
+	switch p := params.(type) {
+	case Call:
+		callParams = &guillotine.CallParams{
+			CallType: guillotine.CallTypeCall,
+			Caller:   p.Caller,
+			To:       p.To,
+			Value:    p.Value,
+			Input:    p.Input,
+			Gas:      p.Gas,
+			Salt:     big.NewInt(0),
+		}
+	case Callcode:
+		callParams = &guillotine.CallParams{
+			CallType: guillotine.CallTypeCallcode,
+			Caller:   p.Caller,
+			To:       p.To,
+			Value:    p.Value,
+			Input:    p.Input,
+			Gas:      p.Gas,
+			Salt:     big.NewInt(0),
+		}
+	case Delegatecall:
+		callParams = &guillotine.CallParams{
+			CallType: guillotine.CallTypeDelegatecall,
+			Caller:   p.Caller,
+			To:       p.To,
+			Value:    big.NewInt(0),
+			Input:    p.Input,
+			Gas:      p.Gas,
+			Salt:     big.NewInt(0),
+		}
+	case Staticcall:
+		callParams = &guillotine.CallParams{
+			CallType: guillotine.CallTypeStaticcall,
+			Caller:   p.Caller,
+			To:       p.To,
+			Value:    big.NewInt(0),
+			Input:    p.Input,
+			Gas:      p.Gas,
+			Salt:     big.NewInt(0),
+		}
+	case Create:
+		callParams = &guillotine.CallParams{
+			CallType: guillotine.CallTypeCreate,
+			Caller:   p.Caller,
+			To:       primitives.ZeroAddress(),
+			Value:    p.Value,
+			Input:    p.InitCode,
+			Gas:      p.Gas,
+			Salt:     big.NewInt(0),
+		}
+	case Create2:
+		callParams = &guillotine.CallParams{
+			CallType: guillotine.CallTypeCreate2,
+			Caller:   p.Caller,
+			To:       primitives.ZeroAddress(),
+			Value:    p.Value,
+			Input:    p.InitCode,
+			Gas:      p.Gas,
+			Salt:     p.Salt,
+		}
+	default:
+		return nil, fmt.Errorf("unknown call type: %T", params)
 	}
 	
-	return result, nil
+	// Execute through the VMHandle
+	return evm.vm.Execute(callParams)
 }
 
-// ExecuteCall performs a simple CALL operation
-func (evm *EVM) ExecuteCall(caller, to primitives.Address, value primitives.U256, input primitives.Bytes, gasLimit uint64) (*CallResult, error) {
-	return evm.ExecuteWithParams(CallParams{
-		CallType: CallTypeCall,
-		Caller:   caller,
-		To:       to,
-		Value:    value,
-		Input:    input,
-		Gas:      gasLimit,
-		Salt:     primitives.ZeroU256(),
-	})
-}
-
-// ExecuteStaticCall performs a STATICCALL operation (read-only)
-func (evm *EVM) ExecuteStaticCall(caller, to primitives.Address, input primitives.Bytes, gasLimit uint64) (*CallResult, error) {
-	return evm.ExecuteWithParams(CallParams{
-		CallType: CallTypeStaticcall,
-		Caller:   caller,
-		To:       to,
-		Value:    primitives.ZeroU256(),
-		Input:    input,
-		Gas:      gasLimit,
-		Salt:     primitives.ZeroU256(),
-	})
-}
-
-// ExecuteDelegateCall performs a DELEGATECALL operation
-func (evm *EVM) ExecuteDelegateCall(caller, to primitives.Address, input primitives.Bytes, gasLimit uint64) (*CallResult, error) {
-	return evm.ExecuteWithParams(CallParams{
-		CallType: CallTypeDelegatecall,
-		Caller:   caller,
-		To:       to,
-		Value:    primitives.ZeroU256(),
-		Input:    input,
-		Gas:      gasLimit,
-		Salt:     primitives.ZeroU256(),
-	})
-}
-
-// ExecuteCreate performs a CREATE operation
-func (evm *EVM) ExecuteCreate(caller primitives.Address, value primitives.U256, initCode primitives.Bytes, gasLimit uint64) (*CallResult, error) {
-	return evm.ExecuteWithParams(CallParams{
-		CallType: CallTypeCreate,
-		Caller:   caller,
-		To:       primitives.ZeroAddress(),
-		Value:    value,
-		Input:    initCode,
-		Gas:      gasLimit,
-		Salt:     primitives.ZeroU256(),
-	})
-}
-
-// ExecuteCreate2 performs a CREATE2 operation
-func (evm *EVM) ExecuteCreate2(caller primitives.Address, value primitives.U256, initCode primitives.Bytes, salt primitives.U256, gasLimit uint64) (*CallResult, error) {
-	return evm.ExecuteWithParams(CallParams{
-		CallType: CallTypeCreate2,
-		Caller:   caller,
-		To:       primitives.ZeroAddress(),
-		Value:    value,
-		Input:    initCode,
-		Gas:      gasLimit,
-		Salt:     salt,
-	})
-}
+// ========================
+// State Management
+// ========================
 
 // SetBalance sets the balance of an address
-func (evm *EVM) SetBalance(addr primitives.Address, balance primitives.U256) error {
+func (evm *EVM) SetBalance(address primitives.Address, balance *big.Int) error {
 	evm.mu.RLock()
 	defer evm.mu.RUnlock()
 	
@@ -164,33 +212,27 @@ func (evm *EVM) SetBalance(addr primitives.Address, balance primitives.U256) err
 		return fmt.Errorf("EVM instance has been closed")
 	}
 	
-	return evm.vm.SetBalance(addr.Array(), balance.Array())
+	return evm.vm.SetBalance(address.Array(), bigIntToBytes32(balance))
 }
 
 // GetBalance gets the balance of an address
-func (evm *EVM) GetBalance(addr primitives.Address) (primitives.U256, error) {
+func (evm *EVM) GetBalance(address primitives.Address) (*big.Int, error) {
 	evm.mu.RLock()
 	defer evm.mu.RUnlock()
 	
 	if evm.vm == nil {
-		return primitives.ZeroU256(), fmt.Errorf("EVM instance has been closed")
+		return nil, fmt.Errorf("EVM instance has been closed")
 	}
 	
-	balanceBytes, err := evm.vm.GetBalance(addr.Array())
+	bytes, err := evm.vm.GetBalance(address.Array())
 	if err != nil {
-		return primitives.ZeroU256(), err
+		return nil, err
 	}
-	
-	// Zig returns little-endian bytes
-	result, err := primitives.U256FromLittleEndianBytes(balanceBytes[:])
-	if err != nil {
-		return primitives.ZeroU256(), err
-	}
-	return result, nil
+	return bytes32ToBigInt(bytes), nil
 }
 
 // SetCode sets the code at an address
-func (evm *EVM) SetCode(addr primitives.Address, code primitives.Bytes) error {
+func (evm *EVM) SetCode(address primitives.Address, code []byte) error {
 	evm.mu.RLock()
 	defer evm.mu.RUnlock()
 	
@@ -198,28 +240,23 @@ func (evm *EVM) SetCode(addr primitives.Address, code primitives.Bytes) error {
 		return fmt.Errorf("EVM instance has been closed")
 	}
 	
-	return evm.vm.SetCode(addr.Array(), code.Data())
+	return evm.vm.SetCode(address.Array(), code)
 }
 
 // GetCode gets the code at an address
-func (evm *EVM) GetCode(addr primitives.Address) (primitives.Bytes, error) {
+func (evm *EVM) GetCode(address primitives.Address) ([]byte, error) {
 	evm.mu.RLock()
 	defer evm.mu.RUnlock()
 	
 	if evm.vm == nil {
-		return primitives.EmptyBytes(), fmt.Errorf("EVM instance has been closed")
+		return nil, fmt.Errorf("EVM instance has been closed")
 	}
 	
-	codeBytes, err := evm.vm.GetCode(addr.Array())
-	if err != nil {
-		return primitives.EmptyBytes(), err
-	}
-	
-	return primitives.NewBytes(codeBytes), nil
+	return evm.vm.GetCode(address.Array())
 }
 
 // SetStorage sets a storage value at an address
-func (evm *EVM) SetStorage(addr primitives.Address, key, value primitives.U256) error {
+func (evm *EVM) SetStorage(address primitives.Address, key, value *big.Int) error {
 	evm.mu.RLock()
 	defer evm.mu.RUnlock()
 	
@@ -227,27 +264,64 @@ func (evm *EVM) SetStorage(addr primitives.Address, key, value primitives.U256) 
 		return fmt.Errorf("EVM instance has been closed")
 	}
 	
-	return evm.vm.SetStorage(addr.Array(), key.Array(), value.Array())
+	return evm.vm.SetStorage(address.Array(), bigIntToBytes32(key), bigIntToBytes32(value))
 }
 
 // GetStorage gets a storage value at an address
-func (evm *EVM) GetStorage(addr primitives.Address, key primitives.U256) (primitives.U256, error) {
+func (evm *EVM) GetStorage(address primitives.Address, key *big.Int) (*big.Int, error) {
 	evm.mu.RLock()
 	defer evm.mu.RUnlock()
 	
 	if evm.vm == nil {
-		return primitives.ZeroU256(), fmt.Errorf("EVM instance has been closed")
+		return nil, fmt.Errorf("EVM instance has been closed")
 	}
 	
-	valueBytes, err := evm.vm.GetStorage(addr.Array(), key.Array())
+	bytes, err := evm.vm.GetStorage(address.Array(), bigIntToBytes32(key))
 	if err != nil {
-		return primitives.ZeroU256(), err
+		return nil, err
+	}
+	return bytes32ToBigInt(bytes), nil
+}
+
+// ========================
+// Helper Functions
+// ========================
+
+// bigIntToBytes32 converts a big.Int to a 32-byte array (little-endian for Zig)
+func bigIntToBytes32(n *big.Int) [32]byte {
+	var result [32]byte
+	if n == nil {
+		return result
 	}
 	
-	// Zig returns little-endian bytes
-	result, err := primitives.U256FromLittleEndianBytes(valueBytes[:])
-	if err != nil {
-		return primitives.ZeroU256(), err
+	// Get big-endian bytes
+	bigEndian := n.Bytes()
+	
+	// Convert to little-endian (Zig expects little-endian)
+	for i := 0; i < len(bigEndian) && i < 32; i++ {
+		result[i] = bigEndian[len(bigEndian)-1-i]
 	}
-	return result, nil
+	
+	return result
+}
+
+// bytes32ToBigInt converts a 32-byte array (little-endian from Zig) to big.Int
+func bytes32ToBigInt(bytes [32]byte) *big.Int {
+	// Convert from little-endian to big-endian
+	var bigEndian [32]byte
+	for i := 0; i < 32; i++ {
+		bigEndian[31-i] = bytes[i]
+	}
+	
+	// Trim leading zeros
+	start := 0
+	for start < 32 && bigEndian[start] == 0 {
+		start++
+	}
+	
+	if start == 32 {
+		return big.NewInt(0)
+	}
+	
+	return new(big.Int).SetBytes(bigEndian[start:])
 }

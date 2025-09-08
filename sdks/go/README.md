@@ -1,48 +1,32 @@
-# Guillotine Go Bindings (WIP)
+# Guillotine Go Bindings
 
-Go bindings and design notes for integrating the Zig EVM.
+Go bindings for the Guillotine EVM implementation, providing a clean and idiomatic Go interface to the high-performance Zig EVM.
 
 ## Overview
 
-This directory documents the intended Go bindings. The reference implementation lives in a separate repository; examples here illustrate the intended API shape and memory‑safety constraints when calling into the Zig/C layer.
+The Go bindings provide a production-ready interface to Guillotine EVM using native Go types and patterns. The API has been designed to be minimal, clean, and idiomatic to Go conventions.
 
-## Components
+## Key Design Decisions
 
-### Packages (planned)
+### Native Go Types
+- Uses `[]byte` for byte arrays (no custom Bytes wrapper)
+- Uses `*big.Int` for 256-bit integers (standard Go practice)
+- Uses `[20]byte` for addresses via the `primitives.Address` type
+- No unnecessary wrapper types around native Go types
 
-- `primitives` — Address, U256, Hash, Bytes
-- `evm` — EVM execution (C API)
-- `stack` — Stack helpers
-- `errors` — Error types
+### Single Unified Call Interface
+Instead of multiple methods (`ExecuteCall`, `ExecuteStaticCall`, etc.), there is a single `Call` method that accepts different parameter types implementing the `CallParams` interface:
 
-### Support Files
+```go
+// All call types use the same method
+result, err := vm.Call(params)
+```
 
-- `cgo.go` — C API bridge and lifetime management
-- `go.mod` — Module definition and versions
-- `DESIGN.md` — Design rationale and FFI invariants
+## Installation
 
-## Features
-
-### High-Performance EVM Execution
-
-- **Native performance** - Direct C API integration with minimal overhead
-- **Memory safety** - Automatic resource management with finalizers
-- **Concurrency safe** - All operations protected with appropriate locks
-- **Error handling** - Comprehensive Go error types for all failure modes
-
-### Ethereum Primitives
-
-- **Address handling** - 20-byte Ethereum addresses with validation
-- **U256 arithmetic** - 256-bit unsigned integer operations
-- **Hash operations** - 32-byte Keccak-256 hash handling
-- **Dynamic bytes** - Efficient byte array management
-
-### EVM State Management
-
-- **Account balances** - Get/set account ETH balances
-- **Contract code** - Deploy and retrieve contract bytecode
-- **Storage operations** - Read/write contract storage slots
-- **Execution context** - Full control over execution parameters
+```bash
+go get github.com/evmts/guillotine/sdks/go
+```
 
 ## Usage Examples
 
@@ -53,8 +37,10 @@ package main
 
 import (
     "fmt"
-    evm "github.com/evmts/guillotine/bindings/go/evm"
-    primitives "github.com/evmts/guillotine/bindings/go/primitives"
+    "math/big"
+    
+    "github.com/evmts/guillotine/sdks/go/evm"
+    "github.com/evmts/guillotine/sdks/go/primitives"
 )
 
 func main() {
@@ -65,190 +51,301 @@ func main() {
     }
     defer vm.Close()
     
-    // Prepare execution parameters
-    bytecode, _ := primitives.BytesFromHex("0x6001600101")  // PUSH1 1, PUSH1 1, ADD
-    params := evm.ExecutionParams{
-        Bytecode: bytecode,
-        Caller:   primitives.ZeroAddress(),
-        To:       primitives.ZeroAddress(),
-        Value:    primitives.ZeroU256(),
-        Input:    primitives.EmptyBytes(),
-        GasLimit: 100000,
-    }
+    // Execute a simple CALL
+    caller, _ := primitives.AddressFromHex("0x742d35Cc6634C0532925a3b8266C95839487a15")
+    to, _ := primitives.AddressFromHex("0x8e729aeFa69c91B3266C95839d866fc48fB1ea15")
     
-    // Execute bytecode
-    result, err := vm.Execute(params)
+    result, err := vm.Call(evm.Call{
+        Caller: caller,
+        To:     to,
+        Value:  big.NewInt(100),
+        Input:  []byte{0x01, 0x02, 0x03},
+        Gas:    1000000,
+    })
+    
     if err != nil {
         panic(err)
     }
     
-    fmt.Printf("Success: %v\n", result.Success())
-    fmt.Printf("Gas used: %d\n", result.GasUsed())
-    fmt.Printf("Return data: %s\n", result.ReturnData().Hex())
+    fmt.Printf("Success: %v\n", result.Success)
+    fmt.Printf("Gas left: %d\n", result.GasLeft)
+    fmt.Printf("Output: %x\n", result.Output)
 }
 ```
 
-### Account State Management
+### Contract Creation
 
 ```go
-// Set up account state
-address := primitives.MustAddressFromHex("0x742d35Cc6635C0532925a3b8D96fdc0c52b81ea5")
-balance := primitives.MustU256FromDecimal("1000000000000000000") // 1 ETH
-code, _ := primitives.BytesFromHex("0x608060405234801561...")
+// Deploy a new contract using CREATE
+initCode := []byte{0x60, 0x80, 0x60, 0x40, 0x52} // Contract initialization code
+
+result, err := vm.Call(evm.Create{
+    Caller:   caller,
+    Value:    big.NewInt(0),
+    InitCode: initCode,
+    Gas:      2000000,
+})
+
+if err != nil {
+    panic(err)
+}
+
+// Or use CREATE2 for deterministic addresses
+salt := big.NewInt(12345)
+
+result, err = vm.Call(evm.Create2{
+    Caller:   caller,
+    Value:    big.NewInt(0),
+    InitCode: initCode,
+    Salt:     salt,
+    Gas:      2000000,
+})
+```
+
+### Different Call Types
+
+```go
+// STATICCALL - read-only execution
+result, err := vm.Call(evm.Staticcall{
+    Caller: caller,
+    To:     contractAddress,
+    Input:  []byte{0x70, 0xa0, 0x82, 0x31}, // balanceOf selector
+    Gas:    50000,
+})
+
+// DELEGATECALL - execute in caller's context
+result, err = vm.Call(evm.Delegatecall{
+    Caller: caller,
+    To:     implementationAddress,
+    Input:  calldata,
+    Gas:    100000,
+})
+
+// CALLCODE - legacy, similar to delegatecall
+result, err = vm.Call(evm.Callcode{
+    Caller: caller,
+    To:     libraryAddress,
+    Value:  big.NewInt(0),
+    Input:  calldata,
+    Gas:    100000,
+})
+```
+
+### State Management
+
+```go
+// Set account balance
+address, _ := primitives.AddressFromHex("0x742d35Cc6635C0532925a3b8266C95839487a15")
+balance := big.NewInt(1000000000000000000) // 1 ETH in wei
 
 err = vm.SetBalance(address, balance)
 if err != nil {
     panic(err)
 }
 
-err = vm.SetCode(address, code)
-if err != nil {
-    panic(err)
-}
-
-// Read account state
+// Get account balance
 currentBalance, err := vm.GetBalance(address)
 if err != nil {
     panic(err)
 }
+fmt.Printf("Balance: %s wei\n", currentBalance.String())
 
-contractCode, err := vm.GetCode(address)
-if err != nil {
-    panic(err)
-}
+// Set contract code
+bytecode := []byte{0x60, 0x80, 0x60, 0x40, 0x52} // Contract bytecode
+err = vm.SetCode(address, bytecode)
+
+// Get contract code
+code, err := vm.GetCode(address)
+fmt.Printf("Code: %x\n", code)
+
+// Storage operations
+slot := big.NewInt(0)
+value := big.NewInt(42)
+
+err = vm.SetStorage(address, slot, value)
+storedValue, err := vm.GetStorage(address, slot)
+fmt.Printf("Storage[0]: %s\n", storedValue.String())
 ```
 
-### Storage Operations
+### Working with Call Results
 
 ```go
-// Set storage slot
-address := primitives.MustAddressFromHex("0x742d35Cc6635C0532925a3b8D96fdc0c52b81ea5")
-key := primitives.MustU256FromHex("0x0000000000000000000000000000000000000000000000000000000000000001")
-value := primitives.MustU256FromDecimal("42")
-
-err = vm.SetStorage(address, key, value)
+result, err := vm.Call(params)
 if err != nil {
-    panic(err)
+    // Handle execution error
+    log.Printf("Execution failed: %v", err)
+    return
 }
 
-// Read storage slot
-storedValue, err := vm.GetStorage(address, key)
-if err != nil {
-    panic(err)
+// Check execution status
+if !result.Success {
+    log.Printf("Call reverted: %s", result.ErrorInfo)
+    return
 }
 
-fmt.Printf("Stored value: %s\n", storedValue.Decimal())
+// Access execution data
+fmt.Printf("Gas used: %d\n", result.GasLeft)
+fmt.Printf("Output: %x\n", result.Output)
+
+// Process logs
+for _, log := range result.Logs {
+    fmt.Printf("Log from %s\n", log.Address.Hex())
+    for i, topic := range log.Topics {
+        fmt.Printf("  Topic[%d]: %s\n", i, topic.Text(16))
+    }
+    fmt.Printf("  Data: %x\n", log.Data)
+}
+
+// Check for self-destructs
+for _, sd := range result.SelfDestructs {
+    fmt.Printf("Contract %s self-destructed, beneficiary: %s\n", 
+        sd.Contract.Hex(), sd.Beneficiary.Hex())
+}
+
+// Accessed addresses (for access lists)
+for _, addr := range result.AccessedAddresses {
+    fmt.Printf("Accessed: %s\n", addr.Hex())
+}
+
+// Accessed storage slots
+for _, storage := range result.AccessedStorage {
+    fmt.Printf("Storage access: %s[%s]\n", 
+        storage.Address.Hex(), storage.Slot.Text(16))
+}
 ```
 
-### Working with Primitives
+## API Reference
+
+### EVM Instance
 
 ```go
-// Address operations
-addr1 := primitives.ZeroAddress()
-addr2, err := primitives.AddressFromHex("0x742d35Cc6635C0532925a3b8D96fdc0c52b81ea5")
-if err != nil {
-    panic(err)
-}
+// Create a new EVM instance
+func New() (*EVM, error)
 
-// U256 operations
-big1 := primitives.ZeroU256()
-big2, err := primitives.U256FromDecimal("123456789")
-if err != nil {
-    panic(err)
-}
+// Close the EVM instance and free resources
+func (evm *EVM) Close() error
 
-result := big1.Add(big2)
-fmt.Printf("Result: %s\n", result.Hex())
-
-// Bytes operations
-data1 := primitives.EmptyBytes()
-data2, err := primitives.BytesFromHex("0xdeadbeef")
-if err != nil {
-    panic(err)
-}
-
-combined := data1.Append(data2)
+// Execute any type of EVM call
+func (evm *EVM) Call(params CallParams) (*CallResult, error)
 ```
 
-## API Reference (preview)
+### Call Parameter Types
 
-### EVM Operations
+All types implement the `CallParams` interface:
 
-- `New() (*EVM, error)` - Create new EVM instance
-- `Close() error` - Close EVM and release resources
-- `Execute(params ExecutionParams) (*ExecutionResult, error)` - Execute bytecode
+```go
+type Call struct {
+    Caller primitives.Address
+    To     primitives.Address
+    Value  *big.Int
+    Input  []byte
+    Gas    uint64
+}
 
-### Account Management
+type Staticcall struct {
+    Caller primitives.Address
+    To     primitives.Address
+    Input  []byte
+    Gas    uint64
+}
 
-- `SetBalance(address Address, balance U256) error` - Set account balance
-- `GetBalance(address Address) (U256, error)` - Get account balance
-- `SetCode(address Address, code Bytes) error` - Set contract code
-- `GetCode(address Address) (Bytes, error)` - Get contract code
+type Delegatecall struct {
+    Caller primitives.Address
+    To     primitives.Address
+    Input  []byte
+    Gas    uint64
+}
 
-### Storage Operations
+type Create struct {
+    Caller   primitives.Address
+    Value    *big.Int
+    InitCode []byte
+    Gas      uint64
+}
 
-- `SetStorage(address Address, key U256, value U256) error` - Set storage slot
-- `GetStorage(address Address, key U256) (U256, error)` - Get storage slot
+type Create2 struct {
+    Caller   primitives.Address
+    Value    *big.Int
+    InitCode []byte
+    Salt     *big.Int
+    Gas      uint64
+}
+```
 
-### Primitive Types
+### State Management
 
-#### Address
-- `ZeroAddress() Address` - Create zero address
-- `AddressFromHex(hex string) (Address, error)` - Parse from hex string
-- `(a Address) Hex() string` - Convert to hex string
-- `(a Address) Array() [20]byte` - Get raw byte array
+```go
+// Balance operations
+func (evm *EVM) SetBalance(address primitives.Address, balance *big.Int) error
+func (evm *EVM) GetBalance(address primitives.Address) (*big.Int, error)
 
-#### U256
-- `ZeroU256() U256` - Create zero value
-- `U256FromDecimal(dec string) (U256, error)` - Parse from decimal
-- `U256FromHex(hex string) (U256, error)` - Parse from hex
-- `(u U256) Add(other U256) U256` - Addition
-- `(u U256) Hex() string` - Convert to hex string
+// Code operations
+func (evm *EVM) SetCode(address primitives.Address, code []byte) error
+func (evm *EVM) GetCode(address primitives.Address) ([]byte, error)
 
-#### Bytes
-- `EmptyBytes() Bytes` - Create empty bytes
-- `BytesFromHex(hex string) (Bytes, error)` - Parse from hex
-- `(b Bytes) Append(other Bytes) Bytes` - Concatenate bytes
-- `(b Bytes) Data() []byte` - Get raw data
+// Storage operations
+func (evm *EVM) SetStorage(address primitives.Address, key, value *big.Int) error
+func (evm *EVM) GetStorage(address primitives.Address, key *big.Int) (*big.Int, error)
+```
 
-## Important Considerations
+### Result Types
 
-### Memory Management
+```go
+type CallResult struct {
+    Success           bool
+    GasLeft           uint64
+    Output            []byte
+    Logs              []LogEntry
+    SelfDestructs     []SelfDestructRecord
+    AccessedAddresses []primitives.Address
+    AccessedStorage   []StorageAccessRecord
+    ErrorInfo         string
+}
 
-- **Automatic cleanup** - EVM instances use finalizers for safe cleanup
-- **Explicit cleanup** - Always call `Close()` for deterministic resource release
-- **C memory handling** - Internal C memory is automatically managed
-- **Go memory safety** - All operations are memory-safe from Go perspective
+type LogEntry struct {
+    Address primitives.Address
+    Topics  []*big.Int
+    Data    []byte
+}
 
-### Error Handling
+type SelfDestructRecord struct {
+    Contract    primitives.Address
+    Beneficiary primitives.Address
+}
 
-- **Go error conventions** - All operations return proper Go errors
-- **Typed errors** - Specific error types for different failure conditions
-- **Error propagation** - C API errors are properly translated to Go errors
-- **Validation** - Input validation prevents common usage errors
+type StorageAccessRecord struct {
+    Address primitives.Address
+    Slot    *big.Int
+}
+```
 
-### Performance Considerations
+### Address Type
 
-- **Zero-copy operations** - Minimal data copying between Go and C
-- **Concurrent access** - Thread-safe operations with reader-writer locks
-- **Resource pooling** - EVM instances can be reused for multiple executions
-- **Memory efficiency** - Optimized memory usage for large-scale applications
+The `primitives.Address` type provides useful methods while wrapping `[20]byte`:
 
-### Platform Support
+```go
+// Create addresses
+addr := primitives.ZeroAddress()
+addr, err := primitives.AddressFromHex("0x742d35Cc6634C0532925a3b8266C95839487a15")
 
-- **Cross-platform** - Works on Linux, macOS, and Windows
-- **CGO requirements** - Requires CGO and C compiler for building
-- **Static linking** - Can be statically linked with Guillotine library
-- **Dynamic linking** - Supports dynamic linking for smaller binaries
+// Convert formats
+hex := addr.Hex()           // "0x742d..."
+bytes := addr.Bytes()        // []byte (copy)
+array := addr.Array()        // [20]byte
+
+// Check properties
+if addr.IsZero() { ... }
+if addr.Equal(other) { ... }
+```
+
+## Performance Considerations
+
+- **Zero-copy FFI** - Minimal copying between Go and C layers
+- **Native types** - No overhead from unnecessary wrappers
+- **Thread-safe** - All operations properly synchronized
+- **Memory management** - Automatic cleanup with finalizers
 
 ## Testing
-
-The module includes comprehensive tests covering:
-
-- **Unit tests** - Test individual components and functions
-- **Integration tests** - Test complete EVM execution scenarios
-- **Benchmark tests** - Performance benchmarks against reference implementations
-- **Property tests** - Randomized testing for edge cases
 
 ```bash
 # Run all tests
@@ -259,15 +356,25 @@ go test -race ./...
 
 # Run benchmarks
 go test -bench=. ./...
+
+# Verbose output
+go test -v ./...
 ```
 
-## Development Workflow
+## Building
 
-1. **Import** - Add module to your Go project dependencies
-2. **Initialize** - Create EVM instance with proper error handling
-3. **Configure** - Set up accounts, balances, and contract code
-4. **Execute** - Run bytecode with appropriate gas limits
-5. **Inspect** - Examine execution results and state changes
-6. **Cleanup** - Properly close EVM instances to free resources
+The bindings require CGO and link against the Guillotine library:
 
-The Go bindings provide a production-ready interface to Guillotine EVM, suitable for building Ethereum-compatible applications, testing frameworks, and blockchain infrastructure in Go.
+```bash
+# Build the Zig library first
+cd ../..
+zig build
+
+# Then build the Go bindings
+cd sdks/go
+go build ./...
+```
+
+## License
+
+See the LICENSE file in the repository root.

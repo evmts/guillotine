@@ -187,11 +187,12 @@ int guillotine_hash_eq(GuillotineHash a, GuillotineHash b);
 import "C"
 
 import (
+	"math/big"
 	"runtime"
 	"sync"
 	"unsafe"
 
-	"github.com/evmts/guillotine/bindings/go/primitives"
+	"github.com/evmts/guillotine/sdks/go/primitives"
 )
 
 // ========================
@@ -259,8 +260,8 @@ func (vm *VMHandle) Close() error {
 // Execution Methods
 // ========================
 
-// ExecuteWithParams executes bytecode with comprehensive result data
-func (vm *VMHandle) ExecuteWithParams(callType uint8, caller, to [20]byte, value [32]byte, input []byte, gasLimit uint64, salt [32]byte) (*CallResult, error) {
+// Execute executes bytecode with comprehensive result data using a CallParams struct
+func (vm *VMHandle) Execute(params *CallParams) (*CallResult, error) {
 	vm.mu.RLock()
 	defer vm.mu.RUnlock()
 	
@@ -268,15 +269,19 @@ func (vm *VMHandle) ExecuteWithParams(callType uint8, caller, to [20]byte, value
 		return nil, ErrVMClosed
 	}
 	
+	// Convert big.Int to bytes (big-endian for C compatibility)
+	valueBytes := bigIntToBytes32(params.Value)
+	saltBytes := bigIntToBytes32(params.Salt)
+	
 	// Convert Go types to C types
 	cParams := C.GuillotineCallParams{
-		call_type: C.GuillotineCallType(callType),
-		caller:    cAddress(caller),
-		to:        cAddress(to),
-		value:     cU256(value),
-		input:     cBytes(input),
-		gas:       C.uint64_t(gasLimit),
-		salt:      cU256(salt),
+		call_type: C.GuillotineCallType(params.CallType),
+		caller:    cAddress(params.Caller.Array()),
+		to:        cAddress(params.To.Array()),
+		value:     cU256(valueBytes),
+		input:     cBytes(params.Input),
+		gas:       C.uint64_t(params.Gas),
+		salt:      cU256(saltBytes),
 	}
 	defer freeBytes(cParams.input)
 	
@@ -287,49 +292,69 @@ func (vm *VMHandle) ExecuteWithParams(callType uint8, caller, to [20]byte, value
 	return convertCallResult(&result), nil
 }
 
-// ExecuteCall performs a simple CALL operation
-func (vm *VMHandle) ExecuteCall(caller, to [20]byte, value [32]byte, input []byte, gasLimit uint64) (bool, uint64, []byte, error) {
-	result, err := vm.ExecuteWithParams(0, caller, to, value, input, gasLimit, [32]byte{}) // 0 = CALL
-	if err != nil {
-		return false, 0, nil, err
-	}
-	return result.Success, result.GasLeft, result.Output.Data(), nil
+// Call performs a CALL operation
+func (vm *VMHandle) Call(caller, to primitives.Address, value *big.Int, input []byte, gasLimit uint64) (*CallResult, error) {
+	return vm.Execute(&CallParams{
+		CallType: CallTypeCall,
+		Caller:   caller,
+		To:       to,
+		Value:    value,
+		Input:    input,
+		Gas:      gasLimit,
+		Salt:     big.NewInt(0),
+	})
 }
 
-// ExecuteStaticCall performs a STATICCALL operation (read-only)
-func (vm *VMHandle) ExecuteStaticCall(caller, to [20]byte, input []byte, gasLimit uint64) (bool, uint64, []byte, error) {
-	result, err := vm.ExecuteWithParams(3, caller, to, [32]byte{}, input, gasLimit, [32]byte{}) // 3 = STATICCALL
-	if err != nil {
-		return false, 0, nil, err
-	}
-	return result.Success, result.GasLeft, result.Output.Data(), nil
+// StaticCall performs a STATICCALL operation (read-only)
+func (vm *VMHandle) StaticCall(caller, to primitives.Address, input []byte, gasLimit uint64) (*CallResult, error) {
+	return vm.Execute(&CallParams{
+		CallType: CallTypeStaticcall,
+		Caller:   caller,
+		To:       to,
+		Value:    big.NewInt(0),
+		Input:    input,
+		Gas:      gasLimit,
+		Salt:     big.NewInt(0),
+	})
 }
 
-// ExecuteDelegateCall performs a DELEGATECALL operation
-func (vm *VMHandle) ExecuteDelegateCall(caller, to [20]byte, input []byte, gasLimit uint64) (bool, uint64, []byte, error) {
-	result, err := vm.ExecuteWithParams(2, caller, to, [32]byte{}, input, gasLimit, [32]byte{}) // 2 = DELEGATECALL
-	if err != nil {
-		return false, 0, nil, err
-	}
-	return result.Success, result.GasLeft, result.Output.Data(), nil
+// DelegateCall performs a DELEGATECALL operation
+func (vm *VMHandle) DelegateCall(caller, to primitives.Address, input []byte, gasLimit uint64) (*CallResult, error) {
+	return vm.Execute(&CallParams{
+		CallType: CallTypeDelegatecall,
+		Caller:   caller,
+		To:       to,
+		Value:    big.NewInt(0),
+		Input:    input,
+		Gas:      gasLimit,
+		Salt:     big.NewInt(0),
+	})
 }
 
-// ExecuteCreate performs a CREATE operation
-func (vm *VMHandle) ExecuteCreate(caller [20]byte, value [32]byte, initCode []byte, gasLimit uint64) (bool, uint64, []byte, error) {
-	result, err := vm.ExecuteWithParams(4, caller, [20]byte{}, value, initCode, gasLimit, [32]byte{}) // 4 = CREATE
-	if err != nil {
-		return false, 0, nil, err
-	}
-	return result.Success, result.GasLeft, result.Output.Data(), nil
+// Create performs a CREATE operation
+func (vm *VMHandle) Create(caller primitives.Address, value *big.Int, initCode []byte, gasLimit uint64) (*CallResult, error) {
+	return vm.Execute(&CallParams{
+		CallType: CallTypeCreate,
+		Caller:   caller,
+		To:       primitives.ZeroAddress(),
+		Value:    value,
+		Input:    initCode,
+		Gas:      gasLimit,
+		Salt:     big.NewInt(0),
+	})
 }
 
-// ExecuteCreate2 performs a CREATE2 operation
-func (vm *VMHandle) ExecuteCreate2(caller [20]byte, value [32]byte, initCode []byte, salt [32]byte, gasLimit uint64) (bool, uint64, []byte, error) {
-	result, err := vm.ExecuteWithParams(5, caller, [20]byte{}, value, initCode, gasLimit, salt) // 5 = CREATE2
-	if err != nil {
-		return false, 0, nil, err
-	}
-	return result.Success, result.GasLeft, result.Output.Data(), nil
+// Create2 performs a CREATE2 operation
+func (vm *VMHandle) Create2(caller primitives.Address, value *big.Int, initCode []byte, salt *big.Int, gasLimit uint64) (*CallResult, error) {
+	return vm.Execute(&CallParams{
+		CallType: CallTypeCreate2,
+		Caller:   caller,
+		To:       primitives.ZeroAddress(),
+		Value:    value,
+		Input:    initCode,
+		Gas:      gasLimit,
+		Salt:     salt,
+	})
 }
 
 // ========================
@@ -444,6 +469,45 @@ func (vm *VMHandle) GetStorage(address [20]byte, key [32]byte) ([32]byte, error)
 // Helper Functions - Type Conversions
 // ========================
 
+// bigIntToBytes32 converts a big.Int to a 32-byte array (little-endian for Zig)
+func bigIntToBytes32(n *big.Int) [32]byte {
+	var result [32]byte
+	if n == nil {
+		return result
+	}
+	
+	// Get big-endian bytes
+	bigEndian := n.Bytes()
+	
+	// Convert to little-endian (Zig expects little-endian)
+	for i := 0; i < len(bigEndian) && i < 32; i++ {
+		result[i] = bigEndian[len(bigEndian)-1-i]
+	}
+	
+	return result
+}
+
+// bytes32ToBigInt converts a 32-byte array (little-endian from Zig) to big.Int
+func bytes32ToBigInt(bytes [32]byte) *big.Int {
+	// Convert from little-endian to big-endian
+	var bigEndian [32]byte
+	for i := 0; i < 32; i++ {
+		bigEndian[31-i] = bytes[i]
+	}
+	
+	// Trim leading zeros
+	start := 0
+	for start < 32 && bigEndian[start] == 0 {
+		start++
+	}
+	
+	if start == 32 {
+		return big.NewInt(0)
+	}
+	
+	return new(big.Int).SetBytes(bigEndian[start:])
+}
+
 // cAddress converts Go address to C
 func cAddress(goAddr [20]byte) C.GuillotineAddress {
 	var cAddr C.GuillotineAddress
@@ -533,10 +597,9 @@ func convertCallResult(result *C.GuillotineCallResult) *CallResult {
 	
 	// Copy output
 	if result.output.len > 0 && result.output.data != nil {
-		outputBytes := C.GoBytes(unsafe.Pointer(result.output.data), C.int(result.output.len))
-		goResult.Output = primitives.NewBytes(outputBytes)
+		goResult.Output = C.GoBytes(unsafe.Pointer(result.output.data), C.int(result.output.len))
 	} else {
-		goResult.Output = primitives.EmptyBytes()
+		goResult.Output = []byte{}
 	}
 	
 	// Copy logs
@@ -550,23 +613,21 @@ func convertCallResult(result *C.GuillotineCallResult) *CallResult {
 			// Copy topics
 			if log.topics_len > 0 && log.topics != nil {
 				topics := (*[1 << 30]C.GuillotineU256)(unsafe.Pointer(log.topics))[:log.topics_len:log.topics_len]
-				goResult.Logs[i].Topics = make([]primitives.U256, log.topics_len)
+				goResult.Logs[i].Topics = make([]*big.Int, log.topics_len)
 				for j, topic := range topics {
 					topicBytes := goU256(topic)
 					// Topics from Zig are little-endian
-					u256, _ := primitives.U256FromLittleEndianBytes(topicBytes[:])
-					goResult.Logs[i].Topics[j] = u256
+					goResult.Logs[i].Topics[j] = bytes32ToBigInt(topicBytes)
 				}
 			} else {
-				goResult.Logs[i].Topics = make([]primitives.U256, 0)
+				goResult.Logs[i].Topics = make([]*big.Int, 0)
 			}
 			
 			// Copy data
 			if log.data.len > 0 && log.data.data != nil {
-				logData := C.GoBytes(unsafe.Pointer(log.data.data), C.int(log.data.len))
-				goResult.Logs[i].Data = primitives.NewBytes(logData)
+				goResult.Logs[i].Data = C.GoBytes(unsafe.Pointer(log.data.data), C.int(log.data.len))
 			} else {
-				goResult.Logs[i].Data = primitives.EmptyBytes()
+				goResult.Logs[i].Data = []byte{}
 			}
 		}
 	} else {
@@ -608,10 +669,9 @@ func convertCallResult(result *C.GuillotineCallResult) *CallResult {
 		for i, storage := range storages {
 			slotBytes := goU256(storage.slot)
 			// Storage slots from Zig are little-endian
-			slot, _ := primitives.U256FromLittleEndianBytes(slotBytes[:])
 			goResult.AccessedStorage[i] = StorageAccessRecord{
 				Address: primitives.NewAddress(goAddress(storage.address)),
-				Slot:    slot,
+				Slot:    bytes32ToBigInt(slotBytes),
 			}
 		}
 	} else {
