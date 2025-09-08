@@ -49,7 +49,7 @@ func main() {
     if err != nil {
         panic(err)
     }
-    defer vm.Close()
+    defer vm.Destroy()
     
     // Execute a simple CALL
     caller, _ := primitives.AddressFromHex("0x742d35Cc6634C0532925a3b8266C95839487a15")
@@ -223,7 +223,7 @@ for _, storage := range result.AccessedStorage {
 func New() (*EVM, error)
 
 // Close the EVM instance and free resources
-func (evm *EVM) Close() error
+func (evm *EVM) Destroy() error
 
 // Execute any type of EVM call
 func (evm *EVM) Call(params CallParams) (*CallResult, error)

@@ -101,16 +101,16 @@ func New() (*EVM, error) {
 
 // finalize is called by the garbage collector
 func (evm *EVM) finalize() {
-	_ = evm.Close()
+	_ = evm.Destroy()
 }
 
 // Close destroys the EVM instance
-func (evm *EVM) Close() error {
+func (evm *EVM) Destroy() error {
 	evm.mu.Lock()
 	defer evm.mu.Unlock()
 	
 	if evm.vm != nil {
-		err := evm.vm.Close()
+		err := evm.vm.Destroy()
 		evm.vm = nil
 		runtime.SetFinalizer(evm, nil)
 		return err
@@ -196,7 +196,7 @@ func (evm *EVM) Call(params CallParams) (*guillotine.CallResult, error) {
 	}
 	
 	// Execute through the VMHandle
-	return evm.vm.Execute(callParams)
+	return evm.vm.Call(callParams)
 }
 
 // ========================

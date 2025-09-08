@@ -15,13 +15,13 @@ func TestEVM(t *testing.T) {
 		evm, err := New()
 		require.NoError(t, err)
 		require.NotNil(t, evm)
-		defer evm.Close()
+		defer evm.Destroy()
 	})
 	
 	t.Run("ExecuteSimpleBytecode", func(t *testing.T) {
 		evm, err := New()
 		require.NoError(t, err)
-		defer evm.Close()
+		defer evm.Destroy()
 		
 		// Simple bytecode: PUSH1 0x42 (pushes 42 onto stack)
 		bytecode := []byte{0x60, 0x42}
@@ -53,7 +53,7 @@ func TestEVM(t *testing.T) {
 	t.Run("SetGetBalance", func(t *testing.T) {
 		evm, err := New()
 		require.NoError(t, err)
-		defer evm.Close()
+		defer evm.Destroy()
 		
 		addr, _ := primitives.AddressFromHex("0x1234567890123456789012345678901234567890")
 		balance := big.NewInt(1000)
@@ -71,7 +71,7 @@ func TestEVM(t *testing.T) {
 	t.Run("SetGetCode", func(t *testing.T) {
 		evm, err := New()
 		require.NoError(t, err)
-		defer evm.Close()
+		defer evm.Destroy()
 		
 		addr, _ := primitives.AddressFromHex("0x1234567890123456789012345678901234567890")
 		code := []byte{0x60, 0x80, 0x60, 0x40, 0x52}
@@ -89,7 +89,7 @@ func TestEVM(t *testing.T) {
 	t.Run("SetGetStorage", func(t *testing.T) {
 		evm, err := New()
 		require.NoError(t, err)
-		defer evm.Close()
+		defer evm.Destroy()
 		
 		addr, _ := primitives.AddressFromHex("0x1234567890123456789012345678901234567890")
 		key := big.NewInt(1)
@@ -108,7 +108,7 @@ func TestEVM(t *testing.T) {
 	t.Run("CallTypes", func(t *testing.T) {
 		evm, err := New()
 		require.NoError(t, err)
-		defer evm.Close()
+		defer evm.Destroy()
 		
 		caller := primitives.ZeroAddress()
 		to, _ := primitives.AddressFromHex("0x1000000000000000000000000000000000000000")

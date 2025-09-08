@@ -204,8 +204,8 @@ func NewVMHandle(blockInfo ...*BlockInfo) (*VMHandle, error) {
 	return &VMHandle{ptr: ptr}, nil
 }
 
-// Close destroys the EVM instance
-func (vm *VMHandle) Close() error {
+// Destroy destroys the EVM instance (consistent with guillotine_evm_destroy)
+func (vm *VMHandle) Destroy() error {
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
 	
@@ -217,12 +217,13 @@ func (vm *VMHandle) Close() error {
 	return nil
 }
 
+
 // ========================
 // Execution
 // ========================
 
-// Execute runs a call with the given parameters
-func (vm *VMHandle) Execute(params *CallParams) (*CallResult, error) {
+// Call runs a call with the given parameters (consistent with guillotine_call)
+func (vm *VMHandle) Call(params *CallParams) (*CallResult, error) {
 	vm.mu.RLock()
 	defer vm.mu.RUnlock()
 	
@@ -548,87 +549,7 @@ func (vm *VMHandle) GetStorage(address [20]byte, key [32]byte) ([32]byte, error)
 	return value, nil
 }
 
-// ========================
-// Legacy Compatibility Functions
-// ========================
 
-// Call executes a CALL operation
-func (vm *VMHandle) Call(caller, to primitives.Address, value *big.Int, input []byte, gasLimit uint64) (*CallResult, error) {
-	return vm.Execute(&CallParams{
-		CallType: CallTypeCall,
-		Caller:   caller,
-		To:       to,
-		Value:    value,
-		Input:    input,
-		Gas:      gasLimit,
-		Salt:     big.NewInt(0),
-	})
-}
-
-// Callcode executes a CALLCODE operation
-func (vm *VMHandle) Callcode(caller, to primitives.Address, value *big.Int, input []byte, gasLimit uint64) (*CallResult, error) {
-	return vm.Execute(&CallParams{
-		CallType: CallTypeCallcode,
-		Caller:   caller,
-		To:       to,
-		Value:    value,
-		Input:    input,
-		Gas:      gasLimit,
-		Salt:     big.NewInt(0),
-	})
-}
-
-// Delegatecall executes a DELEGATECALL operation
-func (vm *VMHandle) Delegatecall(caller, to primitives.Address, input []byte, gasLimit uint64) (*CallResult, error) {
-	return vm.Execute(&CallParams{
-		CallType: CallTypeDelegatecall,
-		Caller:   caller,
-		To:       to,
-		Value:    big.NewInt(0),
-		Input:    input,
-		Gas:      gasLimit,
-		Salt:     big.NewInt(0),
-	})
-}
-
-// Staticcall executes a STATICCALL operation
-func (vm *VMHandle) Staticcall(caller, to primitives.Address, input []byte, gasLimit uint64) (*CallResult, error) {
-	return vm.Execute(&CallParams{
-		CallType: CallTypeStaticcall,
-		Caller:   caller,
-		To:       to,
-		Value:    big.NewInt(0),
-		Input:    input,
-		Gas:      gasLimit,
-		Salt:     big.NewInt(0),
-	})
-}
-
-// Create executes a CREATE operation
-func (vm *VMHandle) Create(caller primitives.Address, value *big.Int, initCode []byte, gasLimit uint64) (*CallResult, error) {
-	return vm.Execute(&CallParams{
-		CallType: CallTypeCreate,
-		Caller:   caller,
-		To:       primitives.ZeroAddress(),
-		Value:    value,
-		Input:    initCode,
-		Gas:      gasLimit,
-		Salt:     big.NewInt(0),
-	})
-}
-
-// Create2 executes a CREATE2 operation
-func (vm *VMHandle) Create2(caller primitives.Address, value *big.Int, initCode []byte, salt *big.Int, gasLimit uint64) (*CallResult, error) {
-	return vm.Execute(&CallParams{
-		CallType: CallTypeCreate2,
-		Caller:   caller,
-		To:       primitives.ZeroAddress(),
-		Value:    value,
-		Input:    initCode,
-		Gas:      gasLimit,
-		Salt:     salt,
-	})
-}
 
 // ========================
 // Helper Functions
