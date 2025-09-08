@@ -113,6 +113,10 @@ func TestEVM(t *testing.T) {
 		caller := primitives.ZeroAddress()
 		to, _ := primitives.AddressFromHex("0x1000000000000000000000000000000000000000")
 		
+		// Give caller sufficient balance for value transfers
+		err = evm.SetBalance(caller, big.NewInt(1000))
+		require.NoError(t, err)
+		
 		// Test CALL
 		result, err := evm.Call(Call{
 			Caller: caller,

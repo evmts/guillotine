@@ -1,8 +1,10 @@
 package guillotine
 
 /*
-#cgo CFLAGS: -I../../zig-out/include -I../../src
-#cgo LDFLAGS: -L../../zig-out/lib -lguillotine_ffi
+#cgo CFLAGS: -I${SRCDIR}/../../zig-out/include -I${SRCDIR}/../../src
+#cgo LDFLAGS: -L${SRCDIR}/../../zig-out/lib -lguillotine_ffi
+#cgo darwin LDFLAGS: -Wl,-rpath,${SRCDIR}/../../zig-out/lib
+#cgo linux LDFLAGS: -Wl,-rpath,${SRCDIR}/../../zig-out/lib
 
 #include <stdlib.h>
 #include <stdint.h>
@@ -118,6 +120,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"runtime"
 	"sync"
 	"unsafe"
 	
@@ -247,8 +250,13 @@ func (vm *VMHandle) Execute(params *CallParams) (*CallResult, error) {
 		cParams.salt[i] = C.uint8_t(saltBytes[i])
 	}
 	
-	// Handle input bytes
+	// Handle input bytes with runtime.Pinner
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
+	
 	if len(params.Input) > 0 {
+		// Pin the slice data to prevent GC from moving it
+		pinner.Pin(&params.Input[0])
 		cParams.input = (*C.uint8_t)(unsafe.Pointer(&params.Input[0]))
 		cParams.input_len = C.size_t(len(params.Input))
 	} else {
@@ -415,8 +423,14 @@ func (vm *VMHandle) SetCode(address [20]byte, code []byte) error {
 		return ErrVMClosed
 	}
 	
+	// Pin memory for slice data
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
+	
 	var codePtr *C.uint8_t
 	if len(code) > 0 {
+		// Pin the slice data to prevent GC from moving it
+		pinner.Pin(&code[0])
 		codePtr = (*C.uint8_t)(unsafe.Pointer(&code[0]))
 	}
 	

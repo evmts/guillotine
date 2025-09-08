@@ -65,7 +65,7 @@ pub const CallParams = extern struct {
     input: [*]const u8,
     input_len: usize,
     gas: u64,
-    call_type: u8, // 0=CALL, 1=DELEGATECALL, 2=STATICCALL, 3=CREATE, 4=CREATE2
+    call_type: u8, // 0=CALL, 1=CALLCODE, 2=DELEGATECALL, 3=STATICCALL, 4=CREATE, 5=CREATE2
     salt: [32]u8, // For CREATE2
 };
 
@@ -85,6 +85,8 @@ pub const BlockInfoFFI = extern struct {
 threadlocal var ffi_allocator: ?std.mem.Allocator = null;
 threadlocal var last_error: [256]u8 = undefined;
 threadlocal var last_error_z: [257]u8 = undefined;
+const empty_error: [1]u8 = .{0};
+const empty_buffer: [0]u8 = .{};
 
 fn setError(comptime fmt: []const u8, args: anytype) void {
     const slice = std.fmt.bufPrint(&last_error, fmt, args) catch "Unknown error";
@@ -247,7 +249,7 @@ fn convertCallResultToEvmResult(result: anytype, allocator: std.mem.Allocator) ?
     evm_result.error_message = if (result.error_info) |info| blk: {
         _ = std.fmt.bufPrintZ(&last_error_z, "{s}", .{info}) catch "Unknown error";
         break :blk @ptrCast(&last_error_z);
-    } else if (!result.success) @ptrCast(&last_error_z) else undefined;
+    } else if (!result.success) @ptrCast(&last_error_z) else @as([*:0]const u8, @ptrCast(&empty_error));
     
     // Copy output if present
     if (result.output.len > 0) {
@@ -260,7 +262,7 @@ fn convertCallResultToEvmResult(result: anytype, allocator: std.mem.Allocator) ?
         evm_result.output = output_copy.ptr;
         evm_result.output_len = output_copy.len;
     } else {
-        evm_result.output = undefined;
+        evm_result.output = @as([*]const u8, @ptrCast(&empty_error));
         evm_result.output_len = 0;
     }
     
@@ -296,7 +298,7 @@ fn convertCallResultToEvmResult(result: anytype, allocator: std.mem.Allocator) ?
                 logs_copy[i].topics = topics_copy.ptr;
                 logs_copy[i].topics_len = topics_copy.len;
             } else {
-                logs_copy[i].topics = undefined;
+                logs_copy[i].topics = @as([*]const [32]u8, @ptrCast(&empty_buffer));
                 logs_copy[i].topics_len = 0;
             }
             
@@ -319,7 +321,7 @@ fn convertCallResultToEvmResult(result: anytype, allocator: std.mem.Allocator) ?
                 logs_copy[i].data = data_copy.ptr;
                 logs_copy[i].data_len = data_copy.len;
             } else {
-                logs_copy[i].data = undefined;
+                logs_copy[i].data = @as([*]const u8, @ptrCast(&empty_buffer));
                 logs_copy[i].data_len = 0;
             }
         }
@@ -327,7 +329,7 @@ fn convertCallResultToEvmResult(result: anytype, allocator: std.mem.Allocator) ?
         evm_result.logs = logs_copy.ptr;
         evm_result.logs_len = logs_copy.len;
     } else {
-        evm_result.logs = undefined;
+        evm_result.logs = @as([*]const LogEntry, @ptrCast(@alignCast(&empty_buffer)));
         evm_result.logs_len = 0;
     }
     
@@ -356,7 +358,7 @@ fn convertCallResultToEvmResult(result: anytype, allocator: std.mem.Allocator) ?
         evm_result.selfdestructs = selfdestructs_copy.ptr;
         evm_result.selfdestructs_len = selfdestructs_copy.len;
     } else {
-        evm_result.selfdestructs = undefined;
+        evm_result.selfdestructs = @as([*]const SelfDestructRecord, @ptrCast(&empty_buffer));
         evm_result.selfdestructs_len = 0;
     }
     
@@ -385,7 +387,7 @@ fn convertCallResultToEvmResult(result: anytype, allocator: std.mem.Allocator) ?
         evm_result.accessed_addresses = addresses_copy.ptr;
         evm_result.accessed_addresses_len = addresses_copy.len;
     } else {
-        evm_result.accessed_addresses = undefined;
+        evm_result.accessed_addresses = @as([*]const [20]u8, @ptrCast(&empty_buffer));
         evm_result.accessed_addresses_len = 0;
     }
     
@@ -416,7 +418,7 @@ fn convertCallResultToEvmResult(result: anytype, allocator: std.mem.Allocator) ?
         evm_result.accessed_storage = storage_copy.ptr;
         evm_result.accessed_storage_len = storage_copy.len;
     } else {
-        evm_result.accessed_storage = undefined;
+        evm_result.accessed_storage = @as([*]const StorageAccessRecord, @ptrCast(&empty_buffer));
         evm_result.accessed_storage_len = 0;
     }
     
@@ -457,7 +459,16 @@ export fn guillotine_call(handle: *EvmHandle, params: *const CallParams) ?*EvmRe
                 .gas = params.gas,
             },
         },
-        1 => DefaultEvm.CallParams{ // DELEGATECALL
+        1 => DefaultEvm.CallParams{ // CALLCODE
+            .callcode = .{
+                .caller = primitives.Address{ .bytes = params.caller },
+                .to = primitives.Address{ .bytes = params.to },
+                .value = value,
+                .input = input_slice,
+                .gas = params.gas,
+            },
+        },
+        2 => DefaultEvm.CallParams{ // DELEGATECALL
             .delegatecall = .{
                 .caller = primitives.Address{ .bytes = params.caller },
                 .to = primitives.Address{ .bytes = params.to },
@@ -465,7 +476,7 @@ export fn guillotine_call(handle: *EvmHandle, params: *const CallParams) ?*EvmRe
                 .gas = params.gas,
             },
         },
-        2 => DefaultEvm.CallParams{ // STATICCALL
+        3 => DefaultEvm.CallParams{ // STATICCALL
             .staticcall = .{
                 .caller = primitives.Address{ .bytes = params.caller },
                 .to = primitives.Address{ .bytes = params.to },
@@ -473,7 +484,7 @@ export fn guillotine_call(handle: *EvmHandle, params: *const CallParams) ?*EvmRe
                 .gas = params.gas,
             },
         },
-        3 => DefaultEvm.CallParams{ // CREATE
+        4 => DefaultEvm.CallParams{ // CREATE
             .create = .{
                 .caller = primitives.Address{ .bytes = params.caller },
                 .value = value,
@@ -481,7 +492,7 @@ export fn guillotine_call(handle: *EvmHandle, params: *const CallParams) ?*EvmRe
                 .gas = params.gas,
             },
         },
-        4 => DefaultEvm.CallParams{ // CREATE2
+        5 => DefaultEvm.CallParams{ // CREATE2
             .create2 = .{
                 .caller = primitives.Address{ .bytes = params.caller },
                 .value = value,
@@ -527,12 +538,12 @@ export fn guillotine_get_code(handle: *EvmHandle, address: *const [20]u8, code_o
     const code = evm_ptr.database.get_code_by_address(address.*) catch |err| {
         if (err == Database.Error.AccountNotFound) {
             // For non-existent accounts, return empty code (success with len=0)
-            code_out.* = undefined;
+            code_out.* = @as([*]u8, @ptrCast(@constCast(&empty_error)));
             len_out.* = 0;
             return true;
         } else if (err == Database.Error.CodeNotFound) {
             // For accounts with no code, return empty code (success with len=0)
-            code_out.* = undefined;
+            code_out.* = @as([*]u8, @ptrCast(@constCast(&empty_error)));
             len_out.* = 0;
             return true;
         } else {
@@ -551,7 +562,7 @@ export fn guillotine_get_code(handle: *EvmHandle, address: *const [20]u8, code_o
         code_out.* = code_copy.ptr;
         len_out.* = code_copy.len;
     } else {
-        code_out.* = undefined;
+        code_out.* = @as([*]u8, @ptrCast(@constCast(&empty_error)));
         len_out.* = 0;
     }
     
