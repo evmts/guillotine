@@ -54,14 +54,15 @@ Guillotine is not suitable for production use at this time. Any use of Guillotin
 
 ## 🧰 SDKs (Experimental)
 
-All SDKs in this repo are vibecoded proof-of-concepts. APIs are unstable and may change without notice. We’re actively seeking early users to try things out and tell us what APIs you want. Please open an issue or ping us on Telegram with feedback.
+All SDKs in this repo are vibecoded proof-of-concepts. APIs are unstable and may change without notice. We're actively seeking early users to try things out and tell us what APIs you want. Please open an issue or ping us on Telegram with feedback.
 
-- Bun: `sdks/bun` — Native Bun bindings around the Zig EVM
-- C: `sdks/c` — C/C++ FFI surface for embedding
-- Python: `sdks/python` — Python bindings and primitives
-- Rust: `sdks/rust` — Idiomatic Rust wrapper over FFI
-- Swift: `sdks/swift` — Swift bindings for Apple platforms
-- TypeScript: `sdks/ts` — WASM/TS APIs for Node, Bun, Browser
+- Bun: [`sdks/bun`](./sdks/bun) — Native Bun bindings around the Zig EVM
+- C: [`sdks/c`](./sdks/c) — C/C++ FFI surface for embedding
+- Go: [`sdks/go`](./sdks/go) — Go bindings for embedding the EVM
+- Python: [`sdks/python`](./sdks/python) — Python bindings and primitives
+- Rust: [`sdks/rust`](./sdks/rust) — Idiomatic Rust wrapper over FFI
+- Swift: [`sdks/swift`](./sdks/swift) — Swift bindings for Apple platforms
+- TypeScript: [`sdks/ts`](./sdks/ts) — WASM/TS APIs for Node, Bun, Browser
 
 See each SDK’s README for install, quick start, and current API.
 
