@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"guillotine-cli/internal/config"
 	"guillotine-cli/internal/types"
 	"guillotine-cli/internal/ui"
@@ -9,6 +10,8 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/evmts/guillotine/bindings/go/evm"
+	"github.com/evmts/guillotine/bindings/go/primitives"
 )
 
 type Model struct {
@@ -172,11 +175,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func validateField(fieldName, value string) error {
 	switch fieldName {
 	case config.CallParamCaller:
-		if !IsValidAddress(value) {
+		if _, err := primitives.AddressFromHex(value); err != nil {
 			return config.NewInputParamError(config.ErrorInvalidCallerAddress, fieldName)
 		}
 	case config.CallParamTarget:
-		if !IsValidAddress(value) {
+		if _, err := primitives.AddressFromHex(value); err != nil {
 			return config.NewInputParamError(config.ErrorInvalidTargetAddress, fieldName)
 		}
 	case config.CallParamValue:
@@ -188,11 +191,11 @@ func validateField(fieldName, value string) error {
 			return config.NewInputParamError(config.ErrorInvalidGasLimit, fieldName)
 		}
 	case config.CallParamInput, config.CallParamInputDeploy:
-		if !IsValidHex(value) {
+		if _, err := primitives.BytesFromHex(value); err != nil {
 			return config.NewInputParamError(config.ErrorInvalidInputData, fieldName)
 		}
 	case config.CallParamSalt:
-		if !IsValidHex(value) {
+		if _, err := primitives.BytesFromHex(value); err != nil {
 			return config.NewInputParamError(config.ErrorInvalidSalt, fieldName)
 		}
 	}
@@ -280,7 +283,7 @@ func (m Model) handleCallEditSave() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleCallExecute() (tea.Model, tea.Cmd) {
-	if err := ValidateCallParameters(m.callParams); err != nil {
+	if err := validateCallParameters(m.callParams); err != nil {
 		m.validationError = err.Error()
 		return m, nil
 	}
@@ -291,7 +294,7 @@ func (m Model) handleCallExecute() (tea.Model, tea.Cmd) {
 
 func executeCallCmd(params types.CallParameters) tea.Cmd {
 	return func() tea.Msg {
-		result, err := ExecuteCall(params)
+		result, err := executeCall(params)
 		if err != nil {
 			result = &types.CallExecution{
 				Success:   false,
@@ -433,4 +436,143 @@ func (m Model) View() string {
 	default:
 		return "Invalid state"
 	}
+}
+
+// validateCallParameters validates all parameters for an EVM call
+func validateCallParameters(params types.CallParameters) error {
+	if params.CallType == "" {
+		return config.NewInputParamError(config.ErrorCallTypeRequired, "call_type")
+	}
+	
+	if _, err := primitives.AddressFromHex(params.Caller); err != nil {
+		return config.NewInputParamError(config.ErrorInvalidCallerAddress, "caller")
+	}
+	
+	if params.CallType != config.CallTypeCreate && params.CallType != config.CallTypeCreate2 {
+		if _, err := primitives.AddressFromHex(params.Target); err != nil {
+			return config.NewInputParamError(config.ErrorInvalidTargetAddress, "target")
+		}
+	}
+	
+	if _, err := strconv.ParseUint(params.GasLimit, 10, 64); err != nil {
+		return config.NewInputParamError(config.ErrorInvalidGasLimit, "gas_limit")
+	}
+	
+	if _, err := strconv.ParseUint(params.Value, 10, 64); err != nil {
+		return config.NewInputParamError(config.ErrorInvalidValue, "value")
+	}
+	
+	if _, err := primitives.BytesFromHex(params.InputData); err != nil {
+		return config.NewInputParamError(config.ErrorInvalidInputData, "input_data")
+	}
+	
+	if (params.CallType == config.CallTypeCreate2) {
+		if _, err := primitives.BytesFromHex(params.Salt); err != nil {
+			return config.NewInputParamError(config.ErrorInvalidSalt, "salt")
+		}
+	}
+	
+	return nil
+}
+
+// executeCall performs an EVM call using the SDK directly
+func executeCall(params types.CallParameters) (*types.CallExecution, error) {
+	if err := validateCallParameters(params); err != nil {
+		return nil, err
+	}
+	
+	vm, err := evm.New()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create EVM: %w", err)
+	}
+	defer vm.Close()
+	
+	caller, err := primitives.AddressFromHex(params.Caller)
+	if err != nil {
+		return nil, fmt.Errorf("invalid caller address: %w", err)
+	}
+	
+	value := primitives.NewU256(parseUint64(params.Value))
+	gasLimit, err := strconv.ParseUint(params.GasLimit, 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("invalid gas limit: %w", err)
+	}
+	
+	inputData, err := primitives.BytesFromHex(params.InputData)
+	if err != nil {
+		return nil, fmt.Errorf("invalid input data: %w", err)
+	}
+	
+	// Set caller balance
+	if err := vm.SetBalance(caller, primitives.NewU256(1000000)); err != nil {
+		return nil, fmt.Errorf("failed to set caller balance: %w", err)
+	}
+	
+	callType := config.CallTypeFromString(params.CallType)
+	var result *evm.CallResult
+	
+	switch callType {
+	case evm.CallTypeCall:
+		target, err := primitives.AddressFromHex(params.Target)
+		if err != nil {
+			return nil, fmt.Errorf("invalid target address: %w", err)
+		}
+		result, err = vm.ExecuteCall(caller, target, value, inputData, gasLimit)
+		
+	case evm.CallTypeStaticcall:
+		target, err := primitives.AddressFromHex(params.Target)
+		if err != nil {
+			return nil, fmt.Errorf("invalid target address: %w", err)
+		}
+		result, err = vm.ExecuteStaticCall(caller, target, inputData, gasLimit)
+		
+	case evm.CallTypeDelegatecall:
+		target, err := primitives.AddressFromHex(params.Target)
+		if err != nil {
+			return nil, fmt.Errorf("invalid target address: %w", err)
+		}
+		result, err = vm.ExecuteDelegateCall(caller, target, inputData, gasLimit)
+		
+	case evm.CallTypeCreate:
+		result, err = vm.ExecuteCreate(caller, value, inputData, gasLimit)
+		
+	case evm.CallTypeCreate2:
+		salt, err := primitives.U256FromHex(params.Salt)
+		if err != nil {
+			return nil, fmt.Errorf("invalid salt: %w", err)
+		}
+		result, err = vm.ExecuteCreate2(caller, value, inputData, salt, gasLimit)
+		
+	default:
+		return nil, config.NewInputParamError(config.ErrorUnsupportedCallType, "call_type")
+	}
+	
+	if err != nil {
+		return &types.CallExecution{
+			Success:   false,
+			GasUsed:   0,
+			Output:    nil,
+			ErrorInfo: err.Error(),
+			Logs:      nil,
+		}, nil
+	}
+	
+	gasUsed := gasLimit - result.GasLeft
+	
+	return &types.CallExecution{
+		Success:   result.Success,
+		GasUsed:   gasUsed,
+		Output:    result.Output.Data(),
+		ErrorInfo: result.ErrorInfo,
+		Logs:      result.Logs,
+	}, nil
+}
+
+// parseUint64 parses a string as uint64, returning 0 on error
+func parseUint64(s string) uint64 {
+	val, err := strconv.ParseUint(s, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return val
 }

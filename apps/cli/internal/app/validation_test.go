@@ -6,7 +6,7 @@ import (
 	"guillotine-cli/internal/types"
 )
 
-func TestValidateCallParameters(t *testing.T) {
+func TestvalidateCallParameters(t *testing.T) {
 	tests := []struct {
 		name        string
 		params      types.CallParameters
@@ -86,7 +86,7 @@ func TestValidateCallParameters(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateCallParameters(tt.params)
+			err := validateCallParameters(tt.params)
 			
 			if tt.expectError {
 				if err == nil {
