@@ -1,13 +1,14 @@
 package logs
 
 import (
-	gevmTypes "github.com/evmts/guillotine/bindings/go/evm"
 	"guillotine-cli/internal/types"
+
+	guillotine "github.com/evmts/guillotine/sdks/go"
 )
 
 // GetSelectedLog returns the log entry for the given context
-func GetSelectedLog(callResult *gevmTypes.CallResult, selectedHistoryEntry *types.CallHistoryEntry, logIndex int) *gevmTypes.LogEntry {
-	var logs []gevmTypes.LogEntry
+func GetSelectedLog(callResult *guillotine.CallResult, selectedHistoryEntry *types.CallHistoryEntry, logIndex int) *guillotine.LogEntry {
+	var logs []guillotine.LogEntry
 	
 	// Determine source of logs
 	if selectedHistoryEntry != nil && selectedHistoryEntry.Result != nil {
@@ -25,7 +26,7 @@ func GetSelectedLog(callResult *gevmTypes.CallResult, selectedHistoryEntry *type
 }
 
 // HasLogs checks if the given result has any logs
-func HasLogs(result *gevmTypes.CallResult) bool {
+func HasLogs(result *guillotine.CallResult) bool {
 	return result != nil && len(result.Logs) > 0
 }
 

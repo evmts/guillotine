@@ -8,12 +8,12 @@ import (
 
 	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/evmts/guillotine/bindings/go/evm"
+	guillotine "github.com/evmts/guillotine/sdks/go"
 )
 
 // LogDisplayData contains pure data for log display
 type LogDisplayData struct {
-	Logs             []evm.LogEntry
+	Logs             []guillotine.LogEntry
 	SelectedIndex    int
 	AvailableHeight  int
 }
@@ -32,7 +32,7 @@ func RenderLogsDisplay(displayData LogDisplayData, width int) string {
 }
 
 // RenderLogsAsTable renders logs in a pure table format with proper scrolling
-func RenderLogsAsTable(logs []evm.LogEntry, selectedIndex int, width, availableHeight int) string {
+func RenderLogsAsTable(logs []guillotine.LogEntry, selectedIndex int, width, availableHeight int) string {
 	if len(logs) == 0 {
 		emptyStyle := config.DimmedStyle
 		return emptyStyle.Render("No logs emitted")
@@ -103,7 +103,7 @@ func RenderLogsAsTable(logs []evm.LogEntry, selectedIndex int, width, availableH
 		
 		// Format address to exactly 16 chars for alignment
 		addr := formatFixedAddress(log.Address.String(), 16)
-		data := formatLogData(log.Data.Data(), 30)
+		data := formatLogData(log.Data, 30)
 		
 		row := fmt.Sprintf("%-4d %-16s %-7d %s", 
 			i, 
@@ -119,7 +119,7 @@ func RenderLogsAsTable(logs []evm.LogEntry, selectedIndex int, width, availableH
 }
 
 // RenderLogsSection renders a simple logs section without a table (for when table is not available)
-func RenderLogsSection(logs []evm.LogEntry, width int) string {
+func RenderLogsSection(logs []guillotine.LogEntry, width int) string {
 	if len(logs) == 0 {
 		return ""
 	}
@@ -141,7 +141,7 @@ func RenderLogsSection(logs []evm.LogEntry, width int) string {
 }
 
 // ConvertLogsToRows converts log entries to table rows
-func ConvertLogsToRows(logs []evm.LogEntry) []table.Row {
+func ConvertLogsToRows(logs []guillotine.LogEntry) []table.Row {
 	rows := make([]table.Row, 0, len(logs))
 	
 	for i, log := range logs {
@@ -149,7 +149,7 @@ func ConvertLogsToRows(logs []evm.LogEntry) []table.Row {
 			fmt.Sprintf("%d", i),
 			formatFixedAddress(log.Address.String(), 16),
 			fmt.Sprintf("%d", len(log.Topics)),
-			formatLogData(log.Data.Data(), 40),
+			formatLogData(log.Data, 40),
 		}
 		rows = append(rows, row)
 	}
@@ -157,7 +157,7 @@ func ConvertLogsToRows(logs []evm.LogEntry) []table.Row {
 	return rows
 }
 
-func renderLogEntry(index int, log evm.LogEntry, width int) string {
+func renderLogEntry(index int, log guillotine.LogEntry, width int) string {
 	var b strings.Builder
 	
 	indexStyle := lipgloss.NewStyle().Bold(true).Foreground(config.Amber)
@@ -183,7 +183,7 @@ func renderLogEntry(index int, log evm.LogEntry, width int) string {
 	}
 	
 	// Data
-	data := log.Data.Data()
+	data := log.Data
 	if len(data) > 0 {
 		b.WriteString("    ")
 		b.WriteString(config.LabelStyle.Render("Data: "))
@@ -250,7 +250,7 @@ func formatLogData(data []byte, maxChars int) string {
 
 
 // RenderLogDetail renders detailed view of a single log entry
-func RenderLogDetail(log *evm.LogEntry, index int, width int) string {
+func RenderLogDetail(log *guillotine.LogEntry, index int, width int) string {
 	if log == nil {
 		return config.DimmedStyle.Render("No log selected")
 	}
@@ -280,7 +280,7 @@ func RenderLogDetail(log *evm.LogEntry, index int, width int) string {
 	}
 	
 	// Data - intelligently wrap based on terminal width
-	data := log.Data.Data()
+	data := log.Data
 	if len(data) > 0 {
 		b.WriteString(config.LabelStyle.Render("Data:"))
 		b.WriteString("\n")
