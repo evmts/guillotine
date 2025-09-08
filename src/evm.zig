@@ -697,7 +697,7 @@ pub fn Evm(comptime config: EvmConfig) type {
                         code,
                         params.input,
                         params.gas,
-                        params.to,
+                        params.caller,
                         params.caller, // Preserve original caller
                         current_value, // Preserve value from parent context
                         false,
