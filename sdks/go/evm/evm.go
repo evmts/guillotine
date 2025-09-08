@@ -212,7 +212,7 @@ func (evm *EVM) SetBalance(address primitives.Address, balance *big.Int) error {
 		return fmt.Errorf("EVM instance has been closed")
 	}
 	
-	return evm.vm.SetBalance(address.Array(), bigIntToBytes32(balance))
+	return evm.vm.SetBalance(address.Array(), guillotine.BigIntToBytes32(balance))
 }
 
 // GetBalance gets the balance of an address
@@ -228,7 +228,7 @@ func (evm *EVM) GetBalance(address primitives.Address) (*big.Int, error) {
 	if err != nil {
 		return nil, err
 	}
-	return bytes32ToBigInt(bytes), nil
+	return guillotine.Bytes32ToBigInt(bytes), nil
 }
 
 // SetCode sets the code at an address
@@ -264,7 +264,7 @@ func (evm *EVM) SetStorage(address primitives.Address, key, value *big.Int) erro
 		return fmt.Errorf("EVM instance has been closed")
 	}
 	
-	return evm.vm.SetStorage(address.Array(), bigIntToBytes32(key), bigIntToBytes32(value))
+	return evm.vm.SetStorage(address.Array(), guillotine.BigIntToBytes32(key), guillotine.BigIntToBytes32(value))
 }
 
 // GetStorage gets a storage value at an address
@@ -276,52 +276,10 @@ func (evm *EVM) GetStorage(address primitives.Address, key *big.Int) (*big.Int, 
 		return nil, fmt.Errorf("EVM instance has been closed")
 	}
 	
-	bytes, err := evm.vm.GetStorage(address.Array(), bigIntToBytes32(key))
+	bytes, err := evm.vm.GetStorage(address.Array(), guillotine.BigIntToBytes32(key))
 	if err != nil {
 		return nil, err
 	}
-	return bytes32ToBigInt(bytes), nil
+	return guillotine.Bytes32ToBigInt(bytes), nil
 }
 
-// ========================
-// Helper Functions
-// ========================
-
-// bigIntToBytes32 converts a big.Int to a 32-byte array (little-endian for Zig)
-func bigIntToBytes32(n *big.Int) [32]byte {
-	var result [32]byte
-	if n == nil {
-		return result
-	}
-	
-	// Get big-endian bytes
-	bigEndian := n.Bytes()
-	
-	// Convert to little-endian (Zig expects little-endian)
-	for i := 0; i < len(bigEndian) && i < 32; i++ {
-		result[i] = bigEndian[len(bigEndian)-1-i]
-	}
-	
-	return result
-}
-
-// bytes32ToBigInt converts a 32-byte array (little-endian from Zig) to big.Int
-func bytes32ToBigInt(bytes [32]byte) *big.Int {
-	// Convert from little-endian to big-endian
-	var bigEndian [32]byte
-	for i := 0; i < 32; i++ {
-		bigEndian[31-i] = bytes[i]
-	}
-	
-	// Trim leading zeros
-	start := 0
-	for start < 32 && bigEndian[start] == 0 {
-		start++
-	}
-	
-	if start == 32 {
-		return big.NewInt(0)
-	}
-	
-	return new(big.Int).SetBytes(bigEndian[start:])
-}

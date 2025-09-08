@@ -16,6 +16,27 @@ const Account = evm.Account;
 // Opaque handle for EVM instance
 pub const EvmHandle = opaque {};
 
+// Log entry for FFI
+pub const LogEntry = extern struct {
+    address: [20]u8,
+    topics: [*]const [32]u8,  // Array of 32-byte topics
+    topics_len: usize,
+    data: [*]const u8,
+    data_len: usize,
+};
+
+// Self-destruct record for FFI
+pub const SelfDestructRecord = extern struct {
+    contract: [20]u8,
+    beneficiary: [20]u8,
+};
+
+// Storage access record for FFI
+pub const StorageAccessRecord = extern struct {
+    address: [20]u8,
+    slot: [32]u8,  // u256 as bytes
+};
+
 // Result structure for FFI
 pub const EvmResult = extern struct {
     success: bool,
@@ -23,6 +44,17 @@ pub const EvmResult = extern struct {
     output: [*]const u8,
     output_len: usize,
     error_message: [*:0]const u8,
+    // Additional fields from CallResult
+    logs: [*]const LogEntry,
+    logs_len: usize,
+    selfdestructs: [*]const SelfDestructRecord,
+    selfdestructs_len: usize,
+    accessed_addresses: [*]const [20]u8,  // Array of addresses
+    accessed_addresses_len: usize,
+    accessed_storage: [*]const StorageAccessRecord,
+    accessed_storage_len: usize,
+    created_address: [20]u8,  // For CREATE/CREATE2, zero if not applicable
+    has_created_address: bool,
 };
 
 // Call parameters for FFI
@@ -201,6 +233,205 @@ export fn guillotine_set_code(handle: *EvmHandle, address: *const [20]u8, code: 
     return true;
 }
 
+// Helper function to convert CallResult to EvmResult
+fn convertCallResultToEvmResult(result: anytype, allocator: std.mem.Allocator) ?*EvmResult {
+    // Allocate result structure on heap
+    const evm_result = allocator.create(EvmResult) catch {
+        setError("Failed to allocate result", .{});
+        return null;
+    };
+    
+    // Set basic fields
+    evm_result.success = result.success;
+    evm_result.gas_left = result.gas_left;
+    evm_result.error_message = if (result.error_info) |info| blk: {
+        _ = std.fmt.bufPrintZ(&last_error_z, "{s}", .{info}) catch "Unknown error";
+        break :blk @ptrCast(&last_error_z);
+    } else if (!result.success) @ptrCast(&last_error_z) else undefined;
+    
+    // Copy output if present
+    if (result.output.len > 0) {
+        const output_copy = allocator.alloc(u8, result.output.len) catch {
+            setError("Failed to allocate output buffer", .{});
+            allocator.destroy(evm_result);
+            return null;
+        };
+        @memcpy(output_copy, result.output);
+        evm_result.output = output_copy.ptr;
+        evm_result.output_len = output_copy.len;
+    } else {
+        evm_result.output = undefined;
+        evm_result.output_len = 0;
+    }
+    
+    // Copy logs if present
+    if (result.logs.len > 0) {
+        const logs_copy = allocator.alloc(LogEntry, result.logs.len) catch {
+            setError("Failed to allocate logs", .{});
+            if (evm_result.output_len > 0) allocator.free(evm_result.output[0..evm_result.output_len]);
+            allocator.destroy(evm_result);
+            return null;
+        };
+        
+        for (result.logs, 0..) |log, i| {
+            logs_copy[i].address = log.address.bytes;
+            
+            // Copy topics
+            if (log.topics.len > 0) {
+                const topics_copy = allocator.alloc([32]u8, log.topics.len) catch {
+                    setError("Failed to allocate topics", .{});
+                    // Clean up already allocated
+                    for (logs_copy[0..i]) |prev_log| {
+                        if (prev_log.topics_len > 0) allocator.free(prev_log.topics[0..prev_log.topics_len]);
+                        if (prev_log.data_len > 0) allocator.free(prev_log.data[0..prev_log.data_len]);
+                    }
+                    allocator.free(logs_copy);
+                    if (evm_result.output_len > 0) allocator.free(evm_result.output[0..evm_result.output_len]);
+                    allocator.destroy(evm_result);
+                    return null;
+                };
+                for (log.topics, 0..) |topic, j| {
+                    std.mem.writeInt(u256, &topics_copy[j], topic, .big);
+                }
+                logs_copy[i].topics = topics_copy.ptr;
+                logs_copy[i].topics_len = topics_copy.len;
+            } else {
+                logs_copy[i].topics = undefined;
+                logs_copy[i].topics_len = 0;
+            }
+            
+            // Copy data
+            if (log.data.len > 0) {
+                const data_copy = allocator.alloc(u8, log.data.len) catch {
+                    setError("Failed to allocate log data", .{});
+                    // Clean up
+                    if (logs_copy[i].topics_len > 0) allocator.free(logs_copy[i].topics[0..logs_copy[i].topics_len]);
+                    for (logs_copy[0..i]) |prev_log| {
+                        if (prev_log.topics_len > 0) allocator.free(prev_log.topics[0..prev_log.topics_len]);
+                        if (prev_log.data_len > 0) allocator.free(prev_log.data[0..prev_log.data_len]);
+                    }
+                    allocator.free(logs_copy);
+                    if (evm_result.output_len > 0) allocator.free(evm_result.output[0..evm_result.output_len]);
+                    allocator.destroy(evm_result);
+                    return null;
+                };
+                @memcpy(data_copy, log.data);
+                logs_copy[i].data = data_copy.ptr;
+                logs_copy[i].data_len = data_copy.len;
+            } else {
+                logs_copy[i].data = undefined;
+                logs_copy[i].data_len = 0;
+            }
+        }
+        
+        evm_result.logs = logs_copy.ptr;
+        evm_result.logs_len = logs_copy.len;
+    } else {
+        evm_result.logs = undefined;
+        evm_result.logs_len = 0;
+    }
+    
+    // Copy selfdestructs if present
+    if (result.selfdestructs.len > 0) {
+        const selfdestructs_copy = allocator.alloc(SelfDestructRecord, result.selfdestructs.len) catch {
+            setError("Failed to allocate selfdestructs", .{});
+            // Clean up logs
+            if (evm_result.logs_len > 0) {
+                for (evm_result.logs[0..evm_result.logs_len]) |log| {
+                    if (log.topics_len > 0) allocator.free(log.topics[0..log.topics_len]);
+                    if (log.data_len > 0) allocator.free(log.data[0..log.data_len]);
+                }
+                allocator.free(evm_result.logs[0..evm_result.logs_len]);
+            }
+            if (evm_result.output_len > 0) allocator.free(evm_result.output[0..evm_result.output_len]);
+            allocator.destroy(evm_result);
+            return null;
+        };
+        
+        for (result.selfdestructs, 0..) |sd, i| {
+            selfdestructs_copy[i].contract = sd.contract.bytes;
+            selfdestructs_copy[i].beneficiary = sd.beneficiary.bytes;
+        }
+        
+        evm_result.selfdestructs = selfdestructs_copy.ptr;
+        evm_result.selfdestructs_len = selfdestructs_copy.len;
+    } else {
+        evm_result.selfdestructs = undefined;
+        evm_result.selfdestructs_len = 0;
+    }
+    
+    // Copy accessed addresses if present
+    if (result.accessed_addresses.len > 0) {
+        const addresses_copy = allocator.alloc([20]u8, result.accessed_addresses.len) catch {
+            setError("Failed to allocate accessed addresses", .{});
+            // Clean up previous allocations
+            if (evm_result.selfdestructs_len > 0) allocator.free(evm_result.selfdestructs[0..evm_result.selfdestructs_len]);
+            if (evm_result.logs_len > 0) {
+                for (evm_result.logs[0..evm_result.logs_len]) |log| {
+                    if (log.topics_len > 0) allocator.free(log.topics[0..log.topics_len]);
+                    if (log.data_len > 0) allocator.free(log.data[0..log.data_len]);
+                }
+                allocator.free(evm_result.logs[0..evm_result.logs_len]);
+            }
+            if (evm_result.output_len > 0) allocator.free(evm_result.output[0..evm_result.output_len]);
+            allocator.destroy(evm_result);
+            return null;
+        };
+        
+        for (result.accessed_addresses, 0..) |addr, i| {
+            addresses_copy[i] = addr.bytes;
+        }
+        
+        evm_result.accessed_addresses = addresses_copy.ptr;
+        evm_result.accessed_addresses_len = addresses_copy.len;
+    } else {
+        evm_result.accessed_addresses = undefined;
+        evm_result.accessed_addresses_len = 0;
+    }
+    
+    // Copy accessed storage if present
+    if (result.accessed_storage.len > 0) {
+        const storage_copy = allocator.alloc(StorageAccessRecord, result.accessed_storage.len) catch {
+            setError("Failed to allocate accessed storage", .{});
+            // Clean up previous allocations
+            if (evm_result.accessed_addresses_len > 0) allocator.free(evm_result.accessed_addresses[0..evm_result.accessed_addresses_len]);
+            if (evm_result.selfdestructs_len > 0) allocator.free(evm_result.selfdestructs[0..evm_result.selfdestructs_len]);
+            if (evm_result.logs_len > 0) {
+                for (evm_result.logs[0..evm_result.logs_len]) |log| {
+                    if (log.topics_len > 0) allocator.free(log.topics[0..log.topics_len]);
+                    if (log.data_len > 0) allocator.free(log.data[0..log.data_len]);
+                }
+                allocator.free(evm_result.logs[0..evm_result.logs_len]);
+            }
+            if (evm_result.output_len > 0) allocator.free(evm_result.output[0..evm_result.output_len]);
+            allocator.destroy(evm_result);
+            return null;
+        };
+        
+        for (result.accessed_storage, 0..) |access, i| {
+            storage_copy[i].address = access.address.bytes;
+            std.mem.writeInt(u256, &storage_copy[i].slot, access.slot, .big);
+        }
+        
+        evm_result.accessed_storage = storage_copy.ptr;
+        evm_result.accessed_storage_len = storage_copy.len;
+    } else {
+        evm_result.accessed_storage = undefined;
+        evm_result.accessed_storage_len = 0;
+    }
+    
+    // Set created address if present
+    if (result.created_address) |addr| {
+        evm_result.created_address = addr.bytes;
+        evm_result.has_created_address = true;
+    } else {
+        evm_result.created_address = primitives.Address.ZERO_ADDRESS.bytes;
+        evm_result.has_created_address = false;
+    }
+    
+    return evm_result;
+}
+
 // Execute a call
 export fn guillotine_call(handle: *EvmHandle, params: *const CallParams) ?*EvmResult {
     const evm_ptr: *DefaultEvm = @ptrCast(@alignCast(handle));
@@ -268,32 +499,100 @@ export fn guillotine_call(handle: *EvmHandle, params: *const CallParams) ?*EvmRe
     // Execute the call
     const result = evm_ptr.call(call_params);
     
-    // Allocate result structure on heap
-    const evm_result = allocator.create(EvmResult) catch {
-        setError("Failed to allocate result", .{});
-        return null;
+    // Convert result to FFI format
+    return convertCallResultToEvmResult(result, allocator);
+}
+
+// Get account balance
+export fn guillotine_get_balance(handle: *EvmHandle, address: *const [20]u8, balance_out: *[32]u8) bool {
+    const evm_ptr: *DefaultEvm = @ptrCast(@alignCast(handle));
+    
+    const balance = evm_ptr.database.get_balance(address.*) catch {
+        setError("Failed to get balance", .{});
+        return false;
     };
     
-    // Copy output if present (caller must free)
-    if (result.output.len > 0) {
-        const output_copy = allocator.alloc(u8, result.output.len) catch {
-            setError("Failed to allocate output buffer", .{});
-            allocator.destroy(evm_result);
-            return null;
+    std.mem.writeInt(u256, balance_out, balance, .big);
+    return true;
+}
+
+// Get contract code - returns code bytes and length, caller must free with guillotine_free_code
+export fn guillotine_get_code(handle: *EvmHandle, address: *const [20]u8, code_out: *[*]u8, len_out: *usize) bool {
+    const evm_ptr: *DefaultEvm = @ptrCast(@alignCast(handle));
+    const allocator = ffi_allocator orelse {
+        setError("FFI not initialized", .{});
+        return false;
+    };
+    
+    const code = evm_ptr.database.get_code_by_address(address.*) catch |err| {
+        if (err == Database.Error.AccountNotFound) {
+            // For non-existent accounts, return empty code (success with len=0)
+            code_out.* = undefined;
+            len_out.* = 0;
+            return true;
+        } else if (err == Database.Error.CodeNotFound) {
+            // For accounts with no code, return empty code (success with len=0)
+            code_out.* = undefined;
+            len_out.* = 0;
+            return true;
+        } else {
+            setError("Failed to get code", .{});
+            return false;
+        }
+    };
+    
+    // Copy code if present
+    if (code.len > 0) {
+        const code_copy = allocator.alloc(u8, code.len) catch {
+            setError("Failed to allocate code buffer", .{});
+            return false;
         };
-        @memcpy(output_copy, result.output);
-        evm_result.output = output_copy.ptr;
-        evm_result.output_len = output_copy.len;
+        @memcpy(code_copy, code);
+        code_out.* = code_copy.ptr;
+        len_out.* = code_copy.len;
     } else {
-        evm_result.output = undefined;
-        evm_result.output_len = 0;
+        code_out.* = undefined;
+        len_out.* = 0;
     }
     
-    evm_result.success = result.success;
-    evm_result.gas_left = result.gas_left;
-    evm_result.error_message = if (result.success) undefined else @ptrCast(&last_error_z);
+    return true;
+}
+
+// Free contract code buffer
+export fn guillotine_free_code(code: [*]u8, len: usize) void {
+    const allocator = ffi_allocator orelse return;
+    if (len > 0) {
+        allocator.free(code[0..len]);
+    }
+}
+
+// Set storage value
+export fn guillotine_set_storage(handle: *EvmHandle, address: *const [20]u8, key: *const [32]u8, value: *const [32]u8) bool {
+    const evm_ptr: *DefaultEvm = @ptrCast(@alignCast(handle));
     
-    return evm_result;
+    const key_u256 = std.mem.readInt(u256, key, .big);
+    const value_u256 = std.mem.readInt(u256, value, .big);
+    
+    evm_ptr.database.set_storage(address.*, key_u256, value_u256) catch {
+        setError("Failed to set storage", .{});
+        return false;
+    };
+    
+    return true;
+}
+
+// Get storage value
+export fn guillotine_get_storage(handle: *EvmHandle, address: *const [20]u8, key: *const [32]u8, value_out: *[32]u8) bool {
+    const evm_ptr: *DefaultEvm = @ptrCast(@alignCast(handle));
+    
+    const key_u256 = std.mem.readInt(u256, key, .big);
+    const storage_value = evm_ptr.database.get_storage(address.*, key_u256) catch {
+        setError("Failed to get storage", .{});
+        return false;
+    };
+    
+    std.mem.writeInt(u256, value_out, storage_value, .big);
+    return true;
 }
 
 // Free output buffer
@@ -306,9 +605,40 @@ export fn guillotine_free_output(output: [*]u8, len: usize) void {
 export fn guillotine_free_result(result: ?*EvmResult) void {
     const allocator = ffi_allocator orelse return;
     if (result) |r| {
+        // Free output
         if (r.output_len > 0) {
             allocator.free(r.output[0..r.output_len]);
         }
+        
+        // Free logs
+        if (r.logs_len > 0) {
+            for (r.logs[0..r.logs_len]) |log| {
+                if (log.topics_len > 0) {
+                    allocator.free(log.topics[0..log.topics_len]);
+                }
+                if (log.data_len > 0) {
+                    allocator.free(log.data[0..log.data_len]);
+                }
+            }
+            allocator.free(r.logs[0..r.logs_len]);
+        }
+        
+        // Free selfdestructs
+        if (r.selfdestructs_len > 0) {
+            allocator.free(r.selfdestructs[0..r.selfdestructs_len]);
+        }
+        
+        // Free accessed addresses
+        if (r.accessed_addresses_len > 0) {
+            allocator.free(r.accessed_addresses[0..r.accessed_addresses_len]);
+        }
+        
+        // Free accessed storage
+        if (r.accessed_storage_len > 0) {
+            allocator.free(r.accessed_storage[0..r.accessed_storage_len]);
+        }
+        
+        // Finally free the result structure itself
         allocator.destroy(r);
     }
 }
@@ -352,30 +682,6 @@ export fn guillotine_simulate(handle: *EvmHandle, params: *const CallParams) ?*E
     // Simulate the call
     const result = evm_ptr.simulate(call_params);
     
-    // Allocate result structure on heap
-    const evm_result = allocator.create(EvmResult) catch {
-        setError("Failed to allocate result", .{});
-        return null;
-    };
-    
-    // Copy output if present
-    if (result.output.len > 0) {
-        const output_copy = allocator.alloc(u8, result.output.len) catch {
-            setError("Failed to allocate output buffer", .{});
-            allocator.destroy(evm_result);
-            return null;
-        };
-        @memcpy(output_copy, result.output);
-        evm_result.output = output_copy.ptr;
-        evm_result.output_len = output_copy.len;
-    } else {
-        evm_result.output = undefined;
-        evm_result.output_len = 0;
-    }
-    
-    evm_result.success = result.success;
-    evm_result.gas_left = result.gas_left;
-    evm_result.error_message = if (result.success) undefined else @ptrCast(&last_error_z);
-    
-    return evm_result;
+    // Convert result to FFI format
+    return convertCallResultToEvmResult(result, allocator);
 }
