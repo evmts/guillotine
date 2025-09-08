@@ -1054,6 +1054,12 @@ pub fn Evm(comptime config: EvmConfig) type {
                 self.depth -= 1;
             };
 
+            // Defensive check: ensure we don't access call_stack beyond bounds
+            // This should never happen if depth checks are working correctly,
+            // but prevents segfaults if something goes wrong
+            std.debug.assert(self.depth > 0 and self.depth <= config.max_call_depth);
+            std.debug.assert(self.depth - 1 < self.call_stack.len);
+
             self.call_stack[self.depth - 1] = CallStackEntry{ .caller = caller, .value = value, .is_static = is_static };
 
             // Base transaction gas cost (21,000 gas) - only charge for real transactions, not test calls
