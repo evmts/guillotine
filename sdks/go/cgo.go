@@ -123,7 +123,7 @@ import (
 	"runtime"
 	"sync"
 	"unsafe"
-	
+
 	"github.com/evmts/guillotine/sdks/go/primitives"
 )
 
@@ -226,6 +226,7 @@ func (vm *VMHandle) Destroy() error {
 func (vm *VMHandle) Call(params *CallParams) (*CallResult, error) {
 	vm.mu.RLock()
 	defer vm.mu.RUnlock()
+	C.guillotine_init()
 	
 	if vm.ptr == nil {
 		return nil, ErrVMClosed
@@ -366,6 +367,7 @@ func (vm *VMHandle) Call(params *CallParams) (*CallResult, error) {
 func (vm *VMHandle) SetBalance(address [20]byte, balance [32]byte) error {
 	vm.mu.RLock()
 	defer vm.mu.RUnlock()
+	C.guillotine_init()
 	
 	if vm.ptr == nil {
 		return ErrVMClosed
@@ -392,7 +394,8 @@ func (vm *VMHandle) SetBalance(address [20]byte, balance [32]byte) error {
 func (vm *VMHandle) GetBalance(address [20]byte) ([32]byte, error) {
 	vm.mu.RLock()
 	defer vm.mu.RUnlock()
-	
+	C.guillotine_init()
+
 	if vm.ptr == nil {
 		return [32]byte{}, ErrVMClosed
 	}
@@ -419,6 +422,7 @@ func (vm *VMHandle) GetBalance(address [20]byte) ([32]byte, error) {
 func (vm *VMHandle) SetCode(address [20]byte, code []byte) error {
 	vm.mu.RLock()
 	defer vm.mu.RUnlock()
+	C.guillotine_init()
 	
 	if vm.ptr == nil {
 		return ErrVMClosed
@@ -457,7 +461,8 @@ func (vm *VMHandle) SetCode(address [20]byte, code []byte) error {
 func (vm *VMHandle) GetCode(address [20]byte) ([]byte, error) {
 	vm.mu.RLock()
 	defer vm.mu.RUnlock()
-	
+	C.guillotine_init()
+
 	if vm.ptr == nil {
 		return nil, ErrVMClosed
 	}
@@ -498,7 +503,8 @@ func (vm *VMHandle) GetCode(address [20]byte) ([]byte, error) {
 func (vm *VMHandle) SetStorage(address [20]byte, key, value [32]byte) error {
 	vm.mu.RLock()
 	defer vm.mu.RUnlock()
-	
+	C.guillotine_init()
+
 	if vm.ptr == nil {
 		return ErrVMClosed
 	}
@@ -525,7 +531,8 @@ func (vm *VMHandle) SetStorage(address [20]byte, key, value [32]byte) error {
 func (vm *VMHandle) GetStorage(address [20]byte, key [32]byte) ([32]byte, error) {
 	vm.mu.RLock()
 	defer vm.mu.RUnlock()
-	
+	C.guillotine_init()
+
 	if vm.ptr == nil {
 		return [32]byte{}, ErrVMClosed
 	}
