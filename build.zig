@@ -660,6 +660,22 @@ pub fn build(b: *std.Build) void {
         synthetic_step.dependOn(&run_synthetic_test.step);
     }
 
+    // CLI App
+    const cli_exe = b.addExecutable(.{
+        .name = "guillotine-cli",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/cli/main.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    cli_exe.linkLibC();
+    b.installArtifact(cli_exe);
+    
+    const run_cli = b.addRunArtifact(cli_exe);
+    const run_cli_step = b.step("run-cli", "Run the Guillotine CLI");
+    run_cli_step.dependOn(&run_cli.step);
+
     // Language bindings
     build_pkg.WasmBindings.createWasmSteps(b, optimize, config.options_mod);
     build_pkg.PythonBindings.createPythonSteps(b);
