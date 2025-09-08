@@ -9,6 +9,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// Test constants
+const (
+	StandardGas = 100000
+	HighGas = 200000
+	VeryHighGas = 1000000
+	LargeBalance = 10000000
+	CallValue = 1000
+)
+
 func TestCallTypes(t *testing.T) {
 	t.Run("CALL with value transfer", func(t *testing.T) {
 		evm, err := New()
@@ -18,7 +27,7 @@ func TestCallTypes(t *testing.T) {
 		callerAddr := primitives.NewAddress([20]byte{0x01})
 		calleeAddr := primitives.NewAddress([20]byte{0x02})
 		
-		balance := big.NewInt(10000000)
+		balance := big.NewInt(LargeBalance)
 		err = evm.SetBalance(callerAddr, balance)
 		require.NoError(t, err)
 		
@@ -29,16 +38,16 @@ func TestCallTypes(t *testing.T) {
 		result, err := evm.Call(Call{
 			Caller: callerAddr,
 			To:     calleeAddr,
-			Value:  big.NewInt(1000),
+			Value:  big.NewInt(CallValue),
 			Input:  []byte{},
-			Gas:    100000,
+			Gas:    StandardGas,
 		})
 		require.NoError(t, err)
 		assert.NotNil(t, result, "CALL with value should complete")
 		
 		calleeBalance, err := evm.GetBalance(calleeAddr)
 		require.NoError(t, err)
-		assert.Equal(t, big.NewInt(1000), calleeBalance, "Callee should have received value")
+		assert.Equal(t, big.NewInt(CallValue), calleeBalance, "Callee should have received value")
 	})
 
 	t.Run("CALL without value transfer", func(t *testing.T) {
@@ -49,7 +58,7 @@ func TestCallTypes(t *testing.T) {
 		callerAddr := primitives.NewAddress([20]byte{0x03})
 		calleeAddr := primitives.NewAddress([20]byte{0x04})
 		
-		balance := big.NewInt(10000000)
+		balance := big.NewInt(LargeBalance)
 		err = evm.SetBalance(callerAddr, balance)
 		require.NoError(t, err)
 		
@@ -62,7 +71,7 @@ func TestCallTypes(t *testing.T) {
 			To:     calleeAddr,
 			Value:  big.NewInt(0),
 			Input:  []byte{},
-			Gas:    100000,
+			Gas:    StandardGas,
 		})
 		require.NoError(t, err)
 		assert.NotNil(t, result, "CALL without value should complete")
@@ -76,7 +85,7 @@ func TestCallTypes(t *testing.T) {
 		callerAddr := primitives.NewAddress([20]byte{0x05})
 		delegateAddr := primitives.NewAddress([20]byte{0x06})
 		
-		balance := big.NewInt(10000000)
+		balance := big.NewInt(LargeBalance)
 		err = evm.SetBalance(callerAddr, balance)
 		require.NoError(t, err)
 		
@@ -94,7 +103,7 @@ func TestCallTypes(t *testing.T) {
 			Caller: callerAddr,
 			To:     delegateAddr,
 			Input:  []byte{},
-			Gas:    100000,
+			Gas:    StandardGas,
 		})
 		require.NoError(t, err)
 		assert.NotNil(t, result, "DELEGATECALL should complete")
@@ -116,7 +125,7 @@ func TestCallTypes(t *testing.T) {
 		callerAddr := primitives.NewAddress([20]byte{0x07})
 		staticAddr := primitives.NewAddress([20]byte{0x08})
 		
-		balance := big.NewInt(10000000)
+		balance := big.NewInt(LargeBalance)
 		err = evm.SetBalance(callerAddr, balance)
 		require.NoError(t, err)
 		
@@ -128,7 +137,7 @@ func TestCallTypes(t *testing.T) {
 			Caller: callerAddr,
 			To:     staticAddr,
 			Input:  []byte{},
-			Gas:    100000,
+			Gas:    StandardGas,
 		})
 		require.NoError(t, err)
 		assert.False(t, result.Success, "STATICCALL with state modification should fail")
@@ -143,7 +152,7 @@ func TestCallTypes(t *testing.T) {
 		intermediateAddr := primitives.NewAddress([20]byte{0x0c})
 		finalAddr := primitives.NewAddress([20]byte{0x0d})
 		
-		balance := big.NewInt(10000000)
+		balance := big.NewInt(LargeBalance)
 		err = evm.SetBalance(callerAddr, balance)
 		require.NoError(t, err)
 		
@@ -162,7 +171,7 @@ func TestCallTypes(t *testing.T) {
 			To:     intermediateAddr,
 			Value:  big.NewInt(0),
 			Input:  []byte{},
-			Gas:    200000,
+			Gas:    HighGas,
 		})
 		require.NoError(t, err)
 		assert.NotNil(t, result, "Nested CALL operations should complete")
@@ -176,7 +185,7 @@ func TestCallTypes(t *testing.T) {
 		callerAddr := primitives.NewAddress([20]byte{0x10})
 		calleeAddr := primitives.NewAddress([20]byte{0x11})
 		
-		balance := big.NewInt(10000000)
+		balance := big.NewInt(LargeBalance)
 		err = evm.SetBalance(callerAddr, balance)
 		require.NoError(t, err)
 		
@@ -190,7 +199,7 @@ func TestCallTypes(t *testing.T) {
 			To:     calleeAddr,
 			Value:  big.NewInt(0),
 			Input:  []byte{},
-			Gas:    100000,
+			Gas:    StandardGas,
 		})
 		require.NoError(t, err)
 		assert.NotNil(t, result, "CALL with return data capture should complete")
@@ -203,7 +212,7 @@ func TestCallTypes(t *testing.T) {
 		defer evm.Destroy()
 
 		recursiveAddr := primitives.NewAddress([20]byte{0x14})
-		balance := big.NewInt(10000000)
+		balance := big.NewInt(LargeBalance)
 		err = evm.SetBalance(recursiveAddr, balance)
 		require.NoError(t, err)
 		
@@ -217,7 +226,7 @@ func TestCallTypes(t *testing.T) {
 			To:     recursiveAddr,
 			Value:  big.NewInt(0),
 			Input:  []byte{},
-			Gas:    1000000,
+			Gas:    VeryHighGas,
 		})
 		require.NoError(t, err)
 		assert.NotNil(t, result, "Deep recursion should be handled")
@@ -231,7 +240,7 @@ func TestCallTypes(t *testing.T) {
 		callerAddr := primitives.NewAddress([20]byte{0x15})
 		nonExistentAddr := primitives.NewAddress([20]byte{0x99})
 		
-		balance := big.NewInt(10000000)
+		balance := big.NewInt(LargeBalance)
 		err = evm.SetBalance(callerAddr, balance)
 		require.NoError(t, err)
 
@@ -240,7 +249,7 @@ func TestCallTypes(t *testing.T) {
 			To:     nonExistentAddr,
 			Value:  big.NewInt(0),
 			Input:  []byte{},
-			Gas:    100000,
+			Gas:    StandardGas,
 		})
 		require.NoError(t, err)
 		assert.NotNil(t, result, "CALL to non-existent account should complete")
@@ -254,7 +263,7 @@ func TestCallTypes(t *testing.T) {
 		callerAddr := primitives.NewAddress([20]byte{0x16})
 		calleeAddr := primitives.NewAddress([20]byte{0x17})
 		
-		balance := big.NewInt(10000000)
+		balance := big.NewInt(LargeBalance)
 		err = evm.SetBalance(callerAddr, balance)
 		require.NoError(t, err)
 		

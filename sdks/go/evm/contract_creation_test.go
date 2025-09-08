@@ -9,6 +9,14 @@ import (
 	"github.com/evmts/guillotine/sdks/go/primitives"
 )
 
+// Test constants
+const (
+	StandardGas = 100000
+	HighGas = 200000
+	VeryHighGas = 1000000
+	LargeBalance = 10000000
+)
+
 func TestContractCreation(t *testing.T) {
 	t.Run("CREATE opcode basic deployment", func(t *testing.T) {
 		evm, err := New()
@@ -16,7 +24,7 @@ func TestContractCreation(t *testing.T) {
 		defer evm.Destroy()
 
 		deployerAddr := primitives.NewAddress([20]byte{0x01})
-		balance := big.NewInt(10000000)
+		balance := big.NewInt(LargeBalance)
 		err = evm.SetBalance(deployerAddr, balance)
 		require.NoError(t, err)
 
@@ -27,7 +35,7 @@ func TestContractCreation(t *testing.T) {
 			Caller:   deployerAddr,
 			Value:    big.NewInt(0),
 			InitCode: initCode,
-			Gas:      200000,
+			Gas:      HighGas,
 		})
 		require.NoError(t, err)
 		assert.True(t, result.Success, "Contract deployment should succeed")
@@ -39,7 +47,7 @@ func TestContractCreation(t *testing.T) {
 		defer evm.Destroy()
 
 		deployerAddr := primitives.NewAddress([20]byte{0x02})
-		balance := big.NewInt(10000000)
+		balance := big.NewInt(LargeBalance)
 		err = evm.SetBalance(deployerAddr, balance)
 		require.NoError(t, err)
 
@@ -52,7 +60,7 @@ func TestContractCreation(t *testing.T) {
 			Value:    big.NewInt(0),
 			InitCode: initCode,
 			Salt:     salt,
-			Gas:      200000,
+			Gas:      HighGas,
 		})
 		require.NoError(t, err)
 		assert.True(t, result.Success, "CREATE2 deployment should succeed")
@@ -64,7 +72,7 @@ func TestContractCreation(t *testing.T) {
 		defer evm.Destroy()
 
 		deployerAddr := primitives.NewAddress([20]byte{0x03})
-		balance := big.NewInt(10000000)
+		balance := big.NewInt(LargeBalance)
 		err = evm.SetBalance(deployerAddr, balance)
 		require.NoError(t, err)
 
@@ -82,7 +90,7 @@ func TestContractCreation(t *testing.T) {
 			Caller:   deployerAddr,
 			Value:    big.NewInt(0),
 			InitCode: initCode,
-			Gas:      200000,
+			Gas:      HighGas,
 		})
 		require.NoError(t, err)
 		assert.NotNil(t, result, "Constructor deployment should return result")
@@ -94,7 +102,7 @@ func TestContractCreation(t *testing.T) {
 		defer evm.Destroy()
 
 		deployerAddr := primitives.NewAddress([20]byte{0x04})
-		balance := big.NewInt(10000000)
+		balance := big.NewInt(LargeBalance)
 		err = evm.SetBalance(deployerAddr, balance)
 		require.NoError(t, err)
 
@@ -106,7 +114,7 @@ func TestContractCreation(t *testing.T) {
 			Caller:   deployerAddr,
 			Value:    deployValue,
 			InitCode: initCode,
-			Gas:      200000,
+			Gas:      HighGas,
 		})
 		require.NoError(t, err)
 		assert.NotNil(t, result, "Deployment with value should return result")
@@ -125,7 +133,7 @@ func TestContractCreation(t *testing.T) {
 		defer evm.Destroy()
 
 		deployerAddr := primitives.NewAddress([20]byte{0x05})
-		balance := big.NewInt(10000000)
+		balance := big.NewInt(LargeBalance)
 		err = evm.SetBalance(deployerAddr, balance)
 		require.NoError(t, err)
 
@@ -152,7 +160,7 @@ func TestContractCreation(t *testing.T) {
 		defer evm.Destroy()
 
 		deployerAddr := primitives.NewAddress([20]byte{0x06})
-		balance := big.NewInt(10000000)
+		balance := big.NewInt(LargeBalance)
 		err = evm.SetBalance(deployerAddr, balance)
 		require.NoError(t, err)
 
@@ -175,7 +183,7 @@ func TestContractCreation(t *testing.T) {
 		defer evm.Destroy()
 
 		deployerAddr := primitives.NewAddress([20]byte{0x07})
-		balance := big.NewInt(10000000)
+		balance := big.NewInt(LargeBalance)
 		err = evm.SetBalance(deployerAddr, balance)
 		require.NoError(t, err)
 
@@ -186,7 +194,7 @@ func TestContractCreation(t *testing.T) {
 			Caller:   deployerAddr,
 			Value:    big.NewInt(0),
 			InitCode: initCode,
-			Gas:      200000,
+			Gas:      HighGas,
 		})
 		require.NoError(t, err)
 		assert.NotNil(t, result, "Address calculation should complete")
@@ -199,7 +207,7 @@ func TestContractCreation(t *testing.T) {
 		defer evm.Destroy()
 
 		deployerAddr := primitives.NewAddress([20]byte{0x08})
-		balance := big.NewInt(10000000)
+		balance := big.NewInt(LargeBalance)
 		err = evm.SetBalance(deployerAddr, balance)
 		require.NoError(t, err)
 
@@ -210,7 +218,7 @@ func TestContractCreation(t *testing.T) {
 			Caller:   deployerAddr,
 			Value:    big.NewInt(0),
 			InitCode: initCode1,
-			Gas:      200000,
+			Gas:      HighGas,
 		})
 		require.NoError(t, err)
 		assert.NotNil(t, result1, "First deployment should complete")
@@ -219,7 +227,7 @@ func TestContractCreation(t *testing.T) {
 			Caller:   deployerAddr,
 			Value:    big.NewInt(0),
 			InitCode: initCode2,
-			Gas:      200000,
+			Gas:      HighGas,
 		})
 		require.NoError(t, err)
 		assert.NotNil(t, result2, "Second deployment should complete")
@@ -236,7 +244,7 @@ func TestContractCreation(t *testing.T) {
 		defer evm.Destroy()
 
 		deployerAddr := primitives.NewAddress([20]byte{0x09})
-		balance := big.NewInt(10000000)
+		balance := big.NewInt(LargeBalance)
 		err = evm.SetBalance(deployerAddr, balance)
 		require.NoError(t, err)
 
@@ -260,7 +268,7 @@ func TestContractCreation(t *testing.T) {
 			Caller:   deployerAddr,
 			Value:    big.NewInt(0),
 			InitCode: initCode,
-			Gas:      200000,
+			Gas:      HighGas,
 		})
 		require.NoError(t, err)
 		assert.NotNil(t, result, "Init code execution should complete")
@@ -272,7 +280,7 @@ func TestContractCreation(t *testing.T) {
 		defer evm.Destroy()
 
 		factoryAddr := primitives.NewAddress([20]byte{0x0a})
-		balance := big.NewInt(10000000)
+		balance := big.NewInt(LargeBalance)
 		err = evm.SetBalance(factoryAddr, balance)
 		require.NoError(t, err)
 
@@ -325,7 +333,7 @@ func TestContractCreation(t *testing.T) {
 		defer evm.Destroy()
 
 		deployerAddr := primitives.NewAddress([20]byte{0x0b})
-		balance := big.NewInt(10000000)
+		balance := big.NewInt(LargeBalance)
 		err = evm.SetBalance(deployerAddr, balance)
 		require.NoError(t, err)
 
@@ -337,7 +345,7 @@ func TestContractCreation(t *testing.T) {
 			Value:    big.NewInt(0),
 			InitCode: initCode,
 			Salt:     salt,
-			Gas:      200000,
+			Gas:      HighGas,
 		})
 		require.NoError(t, err)
 		assert.NotNil(t, result, "CREATE2 with computed address should complete")
@@ -351,7 +359,7 @@ func TestContractCreation(t *testing.T) {
 
 		deployerAddr := primitives.NewAddress([20]byte{0x0c})
 		beneficiary := primitives.NewAddress([20]byte{0x0d})
-		balance := big.NewInt(10000000)
+		balance := big.NewInt(LargeBalance)
 		err = evm.SetBalance(deployerAddr, balance)
 		require.NoError(t, err)
 
@@ -366,7 +374,7 @@ func TestContractCreation(t *testing.T) {
 			Caller:   deployerAddr,
 			Value:    big.NewInt(1000),
 			InitCode: initCode,
-			Gas:      200000,
+			Gas:      HighGas,
 		})
 		require.NoError(t, err)
 		assert.NotNil(t, result, "Deployment with SELFDESTRUCT should complete")
@@ -378,7 +386,7 @@ func TestContractCreation(t *testing.T) {
 		defer evm.Destroy()
 
 		deployerAddr := primitives.NewAddress([20]byte{0x0e})
-		balance := big.NewInt(10000000)
+		balance := big.NewInt(LargeBalance)
 		err = evm.SetBalance(deployerAddr, balance)
 		require.NoError(t, err)
 
@@ -424,7 +432,7 @@ func TestContractCreation(t *testing.T) {
 		defer evm.Destroy()
 
 		deployerAddr := primitives.NewAddress([20]byte{0x0f})
-		balance := big.NewInt(10000000)
+		balance := big.NewInt(LargeBalance)
 		err = evm.SetBalance(deployerAddr, balance)
 		require.NoError(t, err)
 
@@ -456,7 +464,7 @@ func TestContractCreation(t *testing.T) {
 		defer evm.Destroy()
 
 		deployerAddr := primitives.NewAddress([20]byte{0x10})
-		balance := big.NewInt(10000000)
+		balance := big.NewInt(LargeBalance)
 		err = evm.SetBalance(deployerAddr, balance)
 		require.NoError(t, err)
 
@@ -496,7 +504,7 @@ func TestContractCreation(t *testing.T) {
 		defer evm.Destroy()
 
 		deployerAddr := primitives.NewAddress([20]byte{0x17})
-		balance := big.NewInt(10000000)
+		balance := big.NewInt(LargeBalance)
 		err = evm.SetBalance(deployerAddr, balance)
 		require.NoError(t, err)
 
@@ -507,7 +515,7 @@ func TestContractCreation(t *testing.T) {
 			Caller:   deployerAddr,
 			Value:    big.NewInt(0),
 			InitCode: initCode,
-			Gas:      200000,
+			Gas:      HighGas,
 		})
 		require.NoError(t, err)
 		assert.NotNil(t, result, "Zero-length runtime code should be handled")
@@ -521,7 +529,7 @@ func TestContractInteraction(t *testing.T) {
 		defer evm.Destroy()
 
 		deployerAddr := primitives.NewAddress([20]byte{0x11})
-		balance := big.NewInt(10000000)
+		balance := big.NewInt(LargeBalance)
 		err = evm.SetBalance(deployerAddr, balance)
 		require.NoError(t, err)
 
@@ -597,7 +605,7 @@ func TestContractInteraction(t *testing.T) {
 		defer evm.Destroy()
 
 		factoryAddr := primitives.NewAddress([20]byte{0x12})
-		balance := big.NewInt(10000000)
+		balance := big.NewInt(LargeBalance)
 		err = evm.SetBalance(factoryAddr, balance)
 		require.NoError(t, err)
 
@@ -657,7 +665,7 @@ func TestContractUpgradePatterns(t *testing.T) {
 		defer evm.Destroy()
 
 		deployerAddr := primitives.NewAddress([20]byte{0x13})
-		balance := big.NewInt(10000000)
+		balance := big.NewInt(LargeBalance)
 		err = evm.SetBalance(deployerAddr, balance)
 		require.NoError(t, err)
 
@@ -708,7 +716,7 @@ func TestContractUpgradePatterns(t *testing.T) {
 		defer evm.Destroy()
 
 		deployerAddr := primitives.NewAddress([20]byte{0x14})
-		balance := big.NewInt(10000000)
+		balance := big.NewInt(LargeBalance)
 		err = evm.SetBalance(deployerAddr, balance)
 		require.NoError(t, err)
 
@@ -767,7 +775,7 @@ func TestContractSecurityPatterns(t *testing.T) {
 		defer evm.Destroy()
 
 		deployerAddr := primitives.NewAddress([20]byte{0x15})
-		balance := big.NewInt(10000000)
+		balance := big.NewInt(LargeBalance)
 		err = evm.SetBalance(deployerAddr, balance)
 		require.NoError(t, err)
 
@@ -785,7 +793,7 @@ func TestContractSecurityPatterns(t *testing.T) {
 			Caller:   deployerAddr,
 			Value:    big.NewInt(0),
 			InitCode: initCode,
-			Gas:      200000,
+			Gas:      HighGas,
 		})
 		require.NoError(t, err)
 		assert.NotNil(t, result, "Reentrancy guard initialization should complete")
@@ -797,7 +805,7 @@ func TestContractSecurityPatterns(t *testing.T) {
 		defer evm.Destroy()
 
 		deployerAddr := primitives.NewAddress([20]byte{0x16})
-		balance := big.NewInt(10000000)
+		balance := big.NewInt(LargeBalance)
 		err = evm.SetBalance(deployerAddr, balance)
 		require.NoError(t, err)
 
@@ -815,7 +823,7 @@ func TestContractSecurityPatterns(t *testing.T) {
 			Caller:   deployerAddr,
 			Value:    big.NewInt(0),
 			InitCode: initCode,
-			Gas:      200000,
+			Gas:      HighGas,
 		})
 		require.NoError(t, err)
 		assert.NotNil(t, result, "Access control setup should complete")
@@ -829,7 +837,7 @@ func TestContractDeploymentEdgeCases(t *testing.T) {
 		defer evm.Destroy()
 
 		deployerAddr := primitives.NewAddress([20]byte{0x18})
-		balance := big.NewInt(10000000)
+		balance := big.NewInt(LargeBalance)
 		err = evm.SetBalance(deployerAddr, balance)
 		require.NoError(t, err)
 
@@ -867,7 +875,7 @@ func TestContractDeploymentEdgeCases(t *testing.T) {
 		deployerAddr := primitives.NewAddress([20]byte{0x19})
 		existingAddr := primitives.NewAddress([20]byte{0x20})
 		
-		balance := big.NewInt(10000000)
+		balance := big.NewInt(LargeBalance)
 		err = evm.SetBalance(deployerAddr, balance)
 		require.NoError(t, err)
 		
@@ -890,7 +898,7 @@ func TestContractDeploymentEdgeCases(t *testing.T) {
 			Caller:   deployerAddr,
 			Value:    big.NewInt(0),
 			InitCode: initCode,
-			Gas:      200000,
+			Gas:      HighGas,
 		})
 		require.NoError(t, err)
 		assert.NotNil(t, result, "Deployment collision should be handled")

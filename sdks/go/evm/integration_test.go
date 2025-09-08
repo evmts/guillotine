@@ -10,6 +10,15 @@ import (
 	"github.com/evmts/guillotine/sdks/go/primitives"
 )
 
+// Test constants
+const (
+	DefaultBalance = 1000000
+	StandardGas = 100000
+	HighGas = 200000
+	VeryHighGas = 1000000
+	LargeBalance = 10000000
+)
+
 func TestIntegrationScenarios(t *testing.T) {
 	t.Run("ERC20 token transfer simulation", func(t *testing.T) {
 		evm, err := New()
@@ -20,7 +29,7 @@ func TestIntegrationScenarios(t *testing.T) {
 		senderAddr := primitives.NewAddress([20]byte{0x02})
 		
 		// Set up sender with balance
-		err = evm.SetBalance(senderAddr, big.NewInt(1000000))
+		err = evm.SetBalance(senderAddr, big.NewInt(DefaultBalance))
 		require.NoError(t, err)
 
 		senderBalanceSlot := big.NewInt(0)
@@ -70,7 +79,7 @@ func TestIntegrationScenarios(t *testing.T) {
 		caller := primitives.ZeroAddress()
 		
 		// Set up caller with balance
-		err = evm.SetBalance(caller, big.NewInt(1000000))
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 		require.NoError(t, err)
 
 		reserve0Slot := big.NewInt(0)
@@ -113,7 +122,7 @@ func TestIntegrationScenarios(t *testing.T) {
 		caller := primitives.ZeroAddress()
 		
 		// Set up caller with balance
-		err = evm.SetBalance(caller, big.NewInt(1000000))
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 		require.NoError(t, err)
 
 		ownerCountSlot := big.NewInt(0)
@@ -156,7 +165,7 @@ func TestIntegrationScenarios(t *testing.T) {
 		caller := primitives.ZeroAddress()
 		
 		// Set up caller with balance
-		err = evm.SetBalance(caller, big.NewInt(1000000))
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 		require.NoError(t, err)
 
 		totalSupplySlot := big.NewInt(0)
@@ -198,13 +207,13 @@ func TestIntegrationScenarios(t *testing.T) {
 		caller := primitives.ZeroAddress()
 		
 		// Set up caller with balance
-		err = evm.SetBalance(caller, big.NewInt(1000000))
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 		require.NoError(t, err)
 
 		totalStakedSlot := big.NewInt(0)
 		rewardRateSlot := big.NewInt(1)
 		
-		totalStaked := big.NewInt(1000000)
+		totalStaked := big.NewInt(DefaultBalance)
 		rewardRate := big.NewInt(5)
 		
 		err = evm.SetStorage(stakingAddr, totalStakedSlot, totalStaked)
@@ -241,7 +250,7 @@ func TestIntegrationScenarios(t *testing.T) {
 		caller := primitives.ZeroAddress()
 		
 		// Set up caller with balance
-		err = evm.SetBalance(caller, big.NewInt(1000000))
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 		require.NoError(t, err)
 
 		proposalSlot := big.NewInt(0)
@@ -289,9 +298,9 @@ func TestIntegrationScenarios(t *testing.T) {
 		caller := primitives.ZeroAddress()
 		
 		// Set up caller and contract A with balance
-		err = evm.SetBalance(caller, big.NewInt(10000000))
+		err = evm.SetBalance(caller, big.NewInt(LargeBalance))
 		require.NoError(t, err)
-		err = evm.SetBalance(contractA, big.NewInt(10000000))
+		err = evm.SetBalance(contractA, big.NewInt(LargeBalance))
 		require.NoError(t, err)
 		
 		contractBCode := []byte{0x60, 0xaa, 0x5f, 0x55, 0x60, 0x01, 0x5f, 0x52, 0x60, 0x20, 0x5f, 0xf3}
@@ -329,9 +338,9 @@ func TestIntegrationScenarios(t *testing.T) {
 		caller := primitives.ZeroAddress()
 		
 		// Set up caller and lender with balance
-		err = evm.SetBalance(caller, big.NewInt(10000000))
+		err = evm.SetBalance(caller, big.NewInt(LargeBalance))
 		require.NoError(t, err)
-		err = evm.SetBalance(lenderAddr, big.NewInt(10000000))
+		err = evm.SetBalance(lenderAddr, big.NewInt(LargeBalance))
 		require.NoError(t, err)
 		
 		borrowerCode := []byte{0x34, 0x61, 0x03, 0xe8, 0x01, 0x5f, 0x52, 0x60, 0x20, 0x5f, 0xf3}
@@ -368,7 +377,7 @@ func TestIntegrationScenarios(t *testing.T) {
 		caller := primitives.ZeroAddress()
 		
 		// Set up caller with balance
-		err = evm.SetBalance(caller, big.NewInt(1000000))
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 		require.NoError(t, err)
 
 		implSlot := big.NewInt(0)
@@ -410,7 +419,7 @@ func TestIntegrationScenarios(t *testing.T) {
 		caller := primitives.ZeroAddress()
 		
 		// Set up caller with balance
-		err = evm.SetBalance(caller, big.NewInt(1000000))
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 		require.NoError(t, err)
 
 		unlockTimeSlot := big.NewInt(0)
@@ -449,7 +458,7 @@ func TestIntegrationScenarios(t *testing.T) {
 		caller := primitives.ZeroAddress()
 		
 		// Set up caller with balance
-		err = evm.SetBalance(caller, big.NewInt(1000000))
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 		require.NoError(t, err)
 		
 		for i := uint64(0); i < 5; i++ {
@@ -488,7 +497,7 @@ func TestIntegrationScenarios(t *testing.T) {
 		caller := primitives.ZeroAddress()
 		
 		// Set up caller with balance
-		err = evm.SetBalance(caller, big.NewInt(1000000))
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 		require.NoError(t, err)
 
 		priceSlot := big.NewInt(0)
@@ -532,7 +541,7 @@ func TestIntegrationScenarios(t *testing.T) {
 		caller := primitives.ZeroAddress()
 		
 		// Set up caller with balance
-		err = evm.SetBalance(caller, big.NewInt(1000000))
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 		require.NoError(t, err)
 
 		rootSlot := big.NewInt(0)
@@ -573,7 +582,7 @@ func TestIntegrationScenarios(t *testing.T) {
 		caller := primitives.ZeroAddress()
 		
 		// Set up caller with balance
-		err = evm.SetBalance(caller, big.NewInt(1000000))
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 		require.NoError(t, err)
 
 		pausedSlot := big.NewInt(0)
@@ -627,7 +636,7 @@ func TestRealWorldContracts(t *testing.T) {
 		caller := primitives.ZeroAddress()
 		
 		// Set up caller with balance
-		err = evm.SetBalance(caller, big.NewInt(1000000))
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 		require.NoError(t, err)
 
 		storageContract := "608060405234801561001057600080fd5b50610150806100206000396000f3fe608060405234801561001057600080fd5b50600436106100365760003560e01c80632e64cec11461003b5780636057361d14610059575b600080fd5b610043610075565b60405161005091906100a1565b60405180910390f35b610073600480360381019061006e91906100ed565b61007e565b005b60008054905090565b8060008190555050565b6000819050919050565b61009b81610088565b82525050565b60006020820190506100b66000830184610092565b92915050565b600080fd5b6100ca81610088565b81146100d557600080fd5b50565b6000813590506100e7816100c1565b92915050565b600060208284031215610103576101026100bc565b5b6000610111848285016100d8565b9150509291505056fea2646970667358221220"
@@ -655,7 +664,7 @@ func TestRealWorldContracts(t *testing.T) {
 		caller := primitives.ZeroAddress()
 		
 		// Set up caller with balance
-		err = evm.SetBalance(caller, big.NewInt(1000000))
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 		require.NoError(t, err)
 
 		counterSlot := big.NewInt(0)

@@ -10,6 +10,15 @@ import (
 	"github.com/evmts/guillotine/sdks/go/primitives"
 )
 
+// Test constants
+const (
+	DefaultBalance = 1000000
+	StandardGas = 100000
+	HighGas = 200000
+	VeryHighGas = 1000000
+	LargeBalance = 10000000
+)
+
 func TestGasMetering(t *testing.T) {
 	t.Run("Basic gas consumption", func(t *testing.T) {
 		evm, err := New()
@@ -20,7 +29,7 @@ func TestGasMetering(t *testing.T) {
 		contractAddr := primitives.NewAddress([20]byte{0x01})
 		
 		// Set up caller with balance
-		err = evm.SetBalance(caller, big.NewInt(1000000))
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 		require.NoError(t, err)
 
 		tests := []struct {
@@ -71,7 +80,7 @@ func TestGasMetering(t *testing.T) {
 		contractAddr := primitives.NewAddress([20]byte{0x01})
 		
 		// Set up caller with balance
-		err = evm.SetBalance(caller, big.NewInt(1000000))
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 		require.NoError(t, err)
 
 		expensiveBytecode := "600160005560016001556001600255"
@@ -102,7 +111,7 @@ func TestGasMetering(t *testing.T) {
 		contractAddr := primitives.NewAddress([20]byte{0x01})
 		
 		// Set up caller with balance
-		err = evm.SetBalance(caller, big.NewInt(1000000))
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 		require.NoError(t, err)
 
 		// Pre-set some storage to clear later
@@ -137,7 +146,7 @@ func TestGasMetering(t *testing.T) {
 		contractAddr := primitives.NewAddress([20]byte{0x01})
 		
 		// Set up caller with balance
-		err = evm.SetBalance(caller, big.NewInt(1000000))
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 		require.NoError(t, err)
 
 		tests := []struct {
@@ -182,7 +191,7 @@ func TestGasMetering(t *testing.T) {
 		contractAddr := primitives.NewAddress([20]byte{0x03})
 		
 		// Set up caller with balance
-		err = evm.SetBalance(callerAddr, big.NewInt(10000000))
+		err = evm.SetBalance(callerAddr, big.NewInt(LargeBalance))
 		require.NoError(t, err)
 
 		callWithValue := "5f5f5f5f600173" + hex.EncodeToString(calleeAddr.Bytes()) + "5af1"
@@ -213,7 +222,7 @@ func TestGasMetering(t *testing.T) {
 		contractAddr := primitives.NewAddress([20]byte{0x01})
 		
 		// Set up caller with balance
-		err = evm.SetBalance(caller, big.NewInt(1000000))
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 		require.NoError(t, err)
 
 		tests := []struct {
@@ -258,7 +267,7 @@ func TestGasMetering(t *testing.T) {
 		contractAddr := primitives.NewAddress([20]byte{0x01})
 		
 		// Set up caller with balance
-		err = evm.SetBalance(caller, big.NewInt(1000000))
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 		require.NoError(t, err)
 
 		tests := []struct {
@@ -302,7 +311,7 @@ func TestGasMetering(t *testing.T) {
 		contractAddr := primitives.NewAddress([20]byte{0x01})
 		
 		// Set up caller with balance
-		err = evm.SetBalance(caller, big.NewInt(1000000))
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 		require.NoError(t, err)
 
 		tests := []struct {
@@ -347,7 +356,7 @@ func TestGasMetering(t *testing.T) {
 		contractAddr := primitives.NewAddress([20]byte{0x01})
 		
 		// Set up caller with balance
-		err = evm.SetBalance(caller, big.NewInt(1000000))
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 		require.NoError(t, err)
 
 		tests := []struct {
@@ -392,7 +401,7 @@ func TestGasOptimizations(t *testing.T) {
 		contractAddr := primitives.NewAddress([20]byte{0x01})
 		
 		// Set up caller with balance
-		err = evm.SetBalance(caller, big.NewInt(1000000))
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 		require.NoError(t, err)
 
 		efficientSwap := "600160028190"
@@ -423,7 +432,7 @@ func TestGasOptimizations(t *testing.T) {
 		contractAddr := primitives.NewAddress([20]byte{0x01})
 		
 		// Set up caller with balance
-		err = evm.SetBalance(caller, big.NewInt(1000000))
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 		require.NoError(t, err)
 
 		expensiveLoop := "6064805b8060010360008112610014576100085661001a565b50"
@@ -456,7 +465,7 @@ func TestIntrinsicGas(t *testing.T) {
 		contractAddr := primitives.NewAddress([20]byte{0x01})
 		
 		// Set up caller with balance
-		err = evm.SetBalance(caller, big.NewInt(1000000))
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 		require.NoError(t, err)
 
 		tests := []struct {
@@ -516,7 +525,7 @@ func TestAccessListGas(t *testing.T) {
 		contractAddr := primitives.NewAddress([20]byte{0x01})
 		
 		// Set up caller with balance
-		err = evm.SetBalance(caller, big.NewInt(1000000))
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 		require.NoError(t, err)
 
 		accessListBytecode := "5f545f54"
@@ -549,7 +558,7 @@ func TestGasEstimation(t *testing.T) {
 		contractAddr := primitives.NewAddress([20]byte{0x01})
 		
 		// Set up caller with balance
-		err = evm.SetBalance(caller, big.NewInt(1000000))
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 		require.NoError(t, err)
 
 		tests := []struct {

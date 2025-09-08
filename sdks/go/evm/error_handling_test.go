@@ -10,6 +10,14 @@ import (
 	"github.com/evmts/guillotine/sdks/go/primitives"
 )
 
+// Test constants
+const (
+	DefaultBalance = 1000000
+	StandardGas = 100000
+	HighGas = 200000
+	VeryHighGas = 1000000
+)
+
 func TestErrorHandling(t *testing.T) {
 	t.Run("Stack underflow", func(t *testing.T) {
 		tests := []struct {
@@ -32,7 +40,7 @@ func TestErrorHandling(t *testing.T) {
 				contractAddr := primitives.NewAddress([20]byte{0x01})
 				
 				// Set up caller with balance
-				err = evm.SetBalance(caller, big.NewInt(1000000))
+				err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 				require.NoError(t, err)
 				
 				// Deploy the problematic bytecode
@@ -44,7 +52,7 @@ func TestErrorHandling(t *testing.T) {
 					To:     contractAddr,
 					Value:  big.NewInt(0),
 					Input:  []byte{},
-					Gas:    100000,
+					Gas:    StandardGas,
 				})
 				require.NoError(t, err)
 				assert.False(t, result.Success, "Should fail due to stack underflow")
@@ -61,7 +69,7 @@ func TestErrorHandling(t *testing.T) {
 		contractAddr := primitives.NewAddress([20]byte{0x01})
 		
 		// Set up caller with balance
-		err = evm.SetBalance(caller, big.NewInt(1000000))
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 		require.NoError(t, err)
 
 		// Create bytecode that pushes many values to cause overflow
@@ -93,7 +101,7 @@ func TestErrorHandling(t *testing.T) {
 		contractAddr := primitives.NewAddress([20]byte{0x01})
 		
 		// Set up caller with balance
-		err = evm.SetBalance(caller, big.NewInt(1000000))
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 		require.NoError(t, err)
 
 		// Create expensive bytecode (many operations)
@@ -125,7 +133,7 @@ func TestErrorHandling(t *testing.T) {
 		contractAddr := primitives.NewAddress([20]byte{0x01})
 		
 		// Set up caller with balance
-		err = evm.SetBalance(caller, big.NewInt(1000000))
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 		require.NoError(t, err)
 
 		// Use invalid opcode 0xfe (which should cause revert)
@@ -139,7 +147,7 @@ func TestErrorHandling(t *testing.T) {
 			To:     contractAddr,
 			Value:  big.NewInt(0),
 			Input:  []byte{},
-			Gas:    100000,
+			Gas:    StandardGas,
 		})
 		require.NoError(t, err)
 		assert.False(t, result.Success, "Should fail due to invalid opcode")
@@ -154,7 +162,7 @@ func TestErrorHandling(t *testing.T) {
 		contractAddr := primitives.NewAddress([20]byte{0x01})
 		
 		// Set up caller with balance
-		err = evm.SetBalance(caller, big.NewInt(1000000))
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 		require.NoError(t, err)
 
 		// Try to load from a very high memory address
@@ -174,7 +182,7 @@ func TestErrorHandling(t *testing.T) {
 			To:     contractAddr,
 			Value:  big.NewInt(0),
 			Input:  []byte{},
-			Gas:    100000,
+			Gas:    StandardGas,
 		})
 		require.NoError(t, err)
 		// Memory expansion should work in modern EVM, but might run out of gas
@@ -191,7 +199,7 @@ func TestErrorHandling(t *testing.T) {
 		contractAddr := primitives.NewAddress([20]byte{0x01})
 		
 		// Set up caller with balance
-		err = evm.SetBalance(caller, big.NewInt(1000000))
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 		require.NoError(t, err)
 
 		// Division by zero: PUSH1 1, PUSH1 0, DIV
@@ -205,7 +213,7 @@ func TestErrorHandling(t *testing.T) {
 			To:     contractAddr,
 			Value:  big.NewInt(0),
 			Input:  []byte{},
-			Gas:    100000,
+			Gas:    StandardGas,
 		})
 		require.NoError(t, err)
 		// Division by zero should return 0 in EVM, not fail
@@ -221,7 +229,7 @@ func TestErrorHandling(t *testing.T) {
 		contractAddr := primitives.NewAddress([20]byte{0x01})
 		
 		// Set up caller with balance
-		err = evm.SetBalance(caller, big.NewInt(1000000))
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 		require.NoError(t, err)
 
 		// Modulo by zero: PUSH1 1, PUSH1 0, MOD
@@ -235,7 +243,7 @@ func TestErrorHandling(t *testing.T) {
 			To:     contractAddr,
 			Value:  big.NewInt(0),
 			Input:  []byte{},
-			Gas:    100000,
+			Gas:    StandardGas,
 		})
 		require.NoError(t, err)
 		// Modulo by zero should return 0 in EVM, not fail
@@ -251,7 +259,7 @@ func TestErrorHandling(t *testing.T) {
 		contractAddr := primitives.NewAddress([20]byte{0x01})
 		
 		// Set up caller with balance
-		err = evm.SetBalance(caller, big.NewInt(1000000))
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 		require.NoError(t, err)
 
 		// ADDMOD by zero: PUSH1 1, PUSH1 1, PUSH1 0, ADDMOD
@@ -265,7 +273,7 @@ func TestErrorHandling(t *testing.T) {
 			To:     contractAddr,
 			Value:  big.NewInt(0),
 			Input:  []byte{},
-			Gas:    100000,
+			Gas:    StandardGas,
 		})
 		require.NoError(t, err)
 		// ADDMOD by zero should return 0 in EVM, not fail
@@ -281,7 +289,7 @@ func TestErrorHandling(t *testing.T) {
 		contractAddr := primitives.NewAddress([20]byte{0x01})
 		
 		// Set up caller with balance
-		err = evm.SetBalance(caller, big.NewInt(1000000))
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 		require.NoError(t, err)
 
 		// MULMOD by zero: PUSH1 1, PUSH1 1, PUSH1 0, MULMOD
@@ -295,7 +303,7 @@ func TestErrorHandling(t *testing.T) {
 			To:     contractAddr,
 			Value:  big.NewInt(0),
 			Input:  []byte{},
-			Gas:    100000,
+			Gas:    StandardGas,
 		})
 		require.NoError(t, err)
 		// MULMOD by zero should return 0 in EVM, not fail
@@ -311,7 +319,7 @@ func TestErrorHandling(t *testing.T) {
 		contractAddr := primitives.NewAddress([20]byte{0x01})
 		
 		// Set up caller with balance
-		err = evm.SetBalance(caller, big.NewInt(1000000))
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 		require.NoError(t, err)
 
 		// REVERT with specific data: PUSH32 0x0123456789abcdef..., PUSH1 0, MSTORE, PUSH1 8, PUSH1 0, REVERT
@@ -328,7 +336,7 @@ func TestErrorHandling(t *testing.T) {
 			To:     contractAddr,
 			Value:  big.NewInt(0),
 			Input:  []byte{},
-			Gas:    100000,
+			Gas:    StandardGas,
 		})
 		require.NoError(t, err)
 		assert.False(t, result.Success, "REVERT should fail")
@@ -347,7 +355,7 @@ func TestErrorHandling(t *testing.T) {
 		contractAddr := primitives.NewAddress([20]byte{0x01})
 		
 		// Set up caller with balance
-		err = evm.SetBalance(caller, big.NewInt(1000000))
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 		require.NoError(t, err)
 
 		// Recursive call: ADDRESS, PUSH1 0, PUSH1 0, PUSH1 0, PUSH1 0, DUP5, PUSH2 0xffff, CALL
@@ -400,7 +408,7 @@ func TestErrorHandling(t *testing.T) {
 			To:     contractAddr,
 			Value:  big.NewInt(1000), // More than caller's balance
 			Input:  []byte{},
-			Gas:    100000,
+			Gas:    StandardGas,
 		})
 		require.NoError(t, err)
 		assert.False(t, result.Success, "Should fail due to insufficient balance")
@@ -417,7 +425,7 @@ func TestMemoryErrors(t *testing.T) {
 		contractAddr := primitives.NewAddress([20]byte{0x01})
 		
 		// Set up caller with balance
-		err = evm.SetBalance(caller, big.NewInt(1000000))
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 		require.NoError(t, err)
 
 		// Try to expand memory to a large size
@@ -435,7 +443,7 @@ func TestMemoryErrors(t *testing.T) {
 			To:     contractAddr,
 			Value:  big.NewInt(0),
 			Input:  []byte{},
-			Gas:    100000,
+			Gas:    StandardGas,
 		})
 		require.NoError(t, err)
 		assert.True(t, result.Success, "Memory expansion should succeed with sufficient gas")
@@ -451,7 +459,7 @@ func TestMemoryErrors(t *testing.T) {
 		contractAddr := primitives.NewAddress([20]byte{0x01})
 		
 		// Set up caller with balance
-		err = evm.SetBalance(caller, big.NewInt(1000000))
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 		require.NoError(t, err)
 
 		// Try to expand memory to a very large size
@@ -486,7 +494,7 @@ func TestJumpErrors(t *testing.T) {
 		contractAddr := primitives.NewAddress([20]byte{0x01})
 		
 		// Set up caller with balance
-		err = evm.SetBalance(caller, big.NewInt(1000000))
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 		require.NoError(t, err)
 
 		// Jump to invalid destination: PUSH1 0x10, JUMP
@@ -500,7 +508,7 @@ func TestJumpErrors(t *testing.T) {
 			To:     contractAddr,
 			Value:  big.NewInt(0),
 			Input:  []byte{},
-			Gas:    100000,
+			Gas:    StandardGas,
 		})
 		require.NoError(t, err)
 		assert.False(t, result.Success, "Should fail due to invalid jump destination")
@@ -515,7 +523,7 @@ func TestJumpErrors(t *testing.T) {
 		contractAddr := primitives.NewAddress([20]byte{0x01})
 		
 		// Set up caller with balance
-		err = evm.SetBalance(caller, big.NewInt(1000000))
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 		require.NoError(t, err)
 
 		// Valid jump: PUSH1 0x06, JUMP, INVALID, INVALID, JUMPDEST, STOP
@@ -529,7 +537,7 @@ func TestJumpErrors(t *testing.T) {
 			To:     contractAddr,
 			Value:  big.NewInt(0),
 			Input:  []byte{},
-			Gas:    100000,
+			Gas:    StandardGas,
 		})
 		require.NoError(t, err)
 		assert.True(t, result.Success, "Should succeed with valid jump destination")

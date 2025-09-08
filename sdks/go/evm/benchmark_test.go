@@ -10,6 +10,17 @@ import (
 	"github.com/evmts/guillotine/sdks/go/primitives"
 )
 
+// Test constants
+const (
+	DefaultBalance = 1000000
+	StandardGas = 100000
+	HighGas = 200000
+	VeryHighGas = 1000000
+	ExtremeGas = 30000000
+	CallValue = 1000
+	LargeBalance = 10000000
+)
+
 func BenchmarkArithmeticOperations(b *testing.B) {
 	benchmarks := []struct {
 		name     string
@@ -27,25 +38,37 @@ func BenchmarkArithmeticOperations(b *testing.B) {
 
 	for _, bm := range benchmarks {
 		b.Run(bm.name, func(b *testing.B) {
-			evm, _ := New()
+			evm, err := New()
+			if err != nil {
+				panic(err)
+			}
 			defer evm.Destroy()
 			
-			bytecode, _ := hex.DecodeString(bm.bytecode)
+			bytecode, err := hex.DecodeString(bm.bytecode)
+			if err != nil {
+				panic(err)
+			}
 			caller := primitives.ZeroAddress()
 			contractAddr := primitives.NewAddress([20]byte{0x01})
 			
-			_ = evm.SetBalance(caller, big.NewInt(1000000))
-			_ = evm.SetCode(contractAddr, bytecode)
+			if err := evm.SetBalance(caller, big.NewInt(DefaultBalance)); err != nil {
+				panic(err)
+			}
+			if err := evm.SetCode(contractAddr, bytecode); err != nil {
+				panic(err)
+			}
 			
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				_, _ = evm.Call(Call{
+				if _, err := evm.Call(Call{
 					Caller: caller,
 					To:     contractAddr,
 					Value:  big.NewInt(0),
 					Input:  []byte{},
-					Gas:    100000,
-				})
+					Gas:    StandardGas,
+				}); err != nil {
+					panic(err)
+				}
 			}
 		})
 	}
@@ -67,25 +90,37 @@ func BenchmarkBitwiseOperations(b *testing.B) {
 
 	for _, bm := range benchmarks {
 		b.Run(bm.name, func(b *testing.B) {
-			evm, _ := New()
+			evm, err := New()
+			if err != nil {
+				panic(err)
+			}
 			defer evm.Destroy()
 			
-			bytecode, _ := hex.DecodeString(bm.bytecode)
+			bytecode, err := hex.DecodeString(bm.bytecode)
+			if err != nil {
+				panic(err)
+			}
 			caller := primitives.ZeroAddress()
 			contractAddr := primitives.NewAddress([20]byte{0x01})
 			
-			_ = evm.SetBalance(caller, big.NewInt(1000000))
-			_ = evm.SetCode(contractAddr, bytecode)
+			if err := evm.SetBalance(caller, big.NewInt(DefaultBalance)); err != nil {
+				panic(err)
+			}
+			if err := evm.SetCode(contractAddr, bytecode); err != nil {
+				panic(err)
+			}
 			
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				_, _ = evm.Call(Call{
+				if _, err := evm.Call(Call{
 					Caller: caller,
 					To:     contractAddr,
 					Value:  big.NewInt(0),
 					Input:  []byte{},
-					Gas:    100000,
-				})
+					Gas:    StandardGas,
+				}); err != nil {
+					panic(err)
+				}
 			}
 		})
 	}
@@ -105,25 +140,37 @@ func BenchmarkMemoryOperations(b *testing.B) {
 
 	for _, bm := range benchmarks {
 		b.Run(bm.name, func(b *testing.B) {
-			evm, _ := New()
+			evm, err := New()
+			if err != nil {
+				panic(err)
+			}
 			defer evm.Destroy()
 			
-			bytecode, _ := hex.DecodeString(bm.bytecode)
+			bytecode, err := hex.DecodeString(bm.bytecode)
+			if err != nil {
+				panic(err)
+			}
 			caller := primitives.ZeroAddress()
 			contractAddr := primitives.NewAddress([20]byte{0x01})
 			
-			_ = evm.SetBalance(caller, big.NewInt(1000000))
-			_ = evm.SetCode(contractAddr, bytecode)
+			if err := evm.SetBalance(caller, big.NewInt(DefaultBalance)); err != nil {
+				panic(err)
+			}
+			if err := evm.SetCode(contractAddr, bytecode); err != nil {
+				panic(err)
+			}
 			
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				_, _ = evm.Call(Call{
+				if _, err := evm.Call(Call{
 					Caller: caller,
 					To:     contractAddr,
 					Value:  big.NewInt(0),
 					Input:  []byte{},
-					Gas:    100000,
-				})
+					Gas:    StandardGas,
+				}); err != nil {
+					panic(err)
+				}
 			}
 		})
 	}
@@ -146,7 +193,9 @@ func BenchmarkStorageOperations(b *testing.B) {
 			setup: func(evm *EVM, addr primitives.Address) {
 				key := big.NewInt(0)
 				value := big.NewInt(0xaa)
-				_ = evm.SetStorage(addr, key, value)
+				if err := evm.SetStorage(addr, key, value); err != nil {
+					panic(err)
+				}
 			},
 		},
 		{
@@ -160,14 +209,19 @@ func BenchmarkStorageOperations(b *testing.B) {
 			setup: func(evm *EVM, addr primitives.Address) {
 				key := big.NewInt(0)
 				value := big.NewInt(0xaa)
-				_ = evm.SetStorage(addr, key, value)
+				if err := evm.SetStorage(addr, key, value); err != nil {
+					panic(err)
+				}
 			},
 		},
 	}
 
 	for _, bm := range benchmarks {
 		b.Run(bm.name, func(b *testing.B) {
-			bytecode, _ := hex.DecodeString(bm.bytecode)
+			bytecode, err := hex.DecodeString(bm.bytecode)
+			if err != nil {
+				panic(err)
+			}
 			
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
@@ -175,20 +229,26 @@ func BenchmarkStorageOperations(b *testing.B) {
 				caller := primitives.ZeroAddress()
 				contractAddr := primitives.NewAddress([20]byte{0x01})
 				
-				_ = evm.SetBalance(caller, big.NewInt(1000000))
-				_ = evm.SetCode(contractAddr, bytecode)
+				if err := evm.SetBalance(caller, big.NewInt(DefaultBalance)); err != nil {
+				panic(err)
+			}
+				if err := evm.SetCode(contractAddr, bytecode); err != nil {
+					panic(err)
+				}
 				
 				if bm.setup != nil {
 					bm.setup(evm, contractAddr)
 				}
 				
-				_, _ = evm.Call(Call{
+				if _, err := evm.Call(Call{
 					Caller: caller,
 					To:     contractAddr,
 					Value:  big.NewInt(0),
 					Input:  []byte{},
-					Gas:    100000,
-				})
+					Gas:    StandardGas,
+				}); err != nil {
+					panic(err)
+				}
 				evm.Destroy()
 			}
 		})
@@ -211,25 +271,37 @@ func BenchmarkStackOperations(b *testing.B) {
 
 	for _, bm := range benchmarks {
 		b.Run(bm.name, func(b *testing.B) {
-			evm, _ := New()
+			evm, err := New()
+			if err != nil {
+				panic(err)
+			}
 			defer evm.Destroy()
 			
-			bytecode, _ := hex.DecodeString(bm.bytecode)
+			bytecode, err := hex.DecodeString(bm.bytecode)
+			if err != nil {
+				panic(err)
+			}
 			caller := primitives.ZeroAddress()
 			contractAddr := primitives.NewAddress([20]byte{0x01})
 			
-			_ = evm.SetBalance(caller, big.NewInt(1000000))
-			_ = evm.SetCode(contractAddr, bytecode)
+			if err := evm.SetBalance(caller, big.NewInt(DefaultBalance)); err != nil {
+				panic(err)
+			}
+			if err := evm.SetCode(contractAddr, bytecode); err != nil {
+				panic(err)
+			}
 			
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				_, _ = evm.Call(Call{
+				if _, err := evm.Call(Call{
 					Caller: caller,
 					To:     contractAddr,
 					Value:  big.NewInt(0),
 					Input:  []byte{},
-					Gas:    100000,
-				})
+					Gas:    StandardGas,
+				}); err != nil {
+					panic(err)
+				}
 			}
 		})
 	}
@@ -249,25 +321,37 @@ func BenchmarkControlFlow(b *testing.B) {
 
 	for _, bm := range benchmarks {
 		b.Run(bm.name, func(b *testing.B) {
-			evm, _ := New()
+			evm, err := New()
+			if err != nil {
+				panic(err)
+			}
 			defer evm.Destroy()
 			
-			bytecode, _ := hex.DecodeString(bm.bytecode)
+			bytecode, err := hex.DecodeString(bm.bytecode)
+			if err != nil {
+				panic(err)
+			}
 			caller := primitives.ZeroAddress()
 			contractAddr := primitives.NewAddress([20]byte{0x01})
 			
-			_ = evm.SetBalance(caller, big.NewInt(1000000))
-			_ = evm.SetCode(contractAddr, bytecode)
+			if err := evm.SetBalance(caller, big.NewInt(DefaultBalance)); err != nil {
+				panic(err)
+			}
+			if err := evm.SetCode(contractAddr, bytecode); err != nil {
+				panic(err)
+			}
 			
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				_, _ = evm.Call(Call{
+				if _, err := evm.Call(Call{
 					Caller: caller,
 					To:     contractAddr,
 					Value:  big.NewInt(0),
 					Input:  []byte{},
-					Gas:    100000,
-				})
+					Gas:    StandardGas,
+				}); err != nil {
+					panic(err)
+				}
 			}
 		})
 	}
@@ -287,25 +371,37 @@ func BenchmarkKeccak256(b *testing.B) {
 
 	for _, bm := range benchmarks {
 		b.Run(bm.name, func(b *testing.B) {
-			evm, _ := New()
+			evm, err := New()
+			if err != nil {
+				panic(err)
+			}
 			defer evm.Destroy()
 			
-			bytecode, _ := hex.DecodeString(bm.bytecode)
+			bytecode, err := hex.DecodeString(bm.bytecode)
+			if err != nil {
+				panic(err)
+			}
 			caller := primitives.ZeroAddress()
 			contractAddr := primitives.NewAddress([20]byte{0x01})
 			
-			_ = evm.SetBalance(caller, big.NewInt(1000000))
-			_ = evm.SetCode(contractAddr, bytecode)
+			if err := evm.SetBalance(caller, big.NewInt(DefaultBalance)); err != nil {
+				panic(err)
+			}
+			if err := evm.SetCode(contractAddr, bytecode); err != nil {
+				panic(err)
+			}
 			
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				_, _ = evm.Call(Call{
+				if _, err := evm.Call(Call{
 					Caller: caller,
 					To:     contractAddr,
 					Value:  big.NewInt(0),
 					Input:  []byte{},
-					Gas:    100000,
-				})
+					Gas:    StandardGas,
+				}); err != nil {
+					panic(err)
+				}
 			}
 		})
 	}
@@ -322,10 +418,14 @@ func BenchmarkCallOperations(b *testing.B) {
 				evm, _ := New()
 				callerAddr := primitives.NewAddress([20]byte{0x01})
 				calleeAddr := primitives.NewAddress([20]byte{0x02})
-				balance := big.NewInt(10000000)
-				_ = evm.SetBalance(callerAddr, balance)
+				balance := big.NewInt(LargeBalance)
+				if err := evm.SetBalance(callerAddr, balance); err != nil {
+					panic(err)
+				}
 				calleeCode := []byte{0x60, 0xaa, 0x5f, 0x52, 0x60, 0x20, 0x5f, 0xf3}
-				_ = evm.SetCode(calleeAddr, calleeCode)
+				if err := evm.SetCode(calleeAddr, calleeCode); err != nil {
+					panic(err)
+				}
 				return evm, callerAddr, calleeAddr
 			},
 		},
@@ -335,10 +435,14 @@ func BenchmarkCallOperations(b *testing.B) {
 				evm, _ := New()
 				callerAddr := primitives.NewAddress([20]byte{0x03})
 				delegateAddr := primitives.NewAddress([20]byte{0x04})
-				balance := big.NewInt(10000000)
-				_ = evm.SetBalance(callerAddr, balance)
+				balance := big.NewInt(LargeBalance)
+				if err := evm.SetBalance(callerAddr, balance); err != nil {
+					panic(err)
+				}
 				delegateCode := []byte{0x60, 0xbb, 0x5f, 0x52, 0x60, 0x20, 0x5f, 0xf3}
-				_ = evm.SetCode(delegateAddr, delegateCode)
+				if err := evm.SetCode(delegateAddr, delegateCode); err != nil {
+					panic(err)
+				}
 				return evm, callerAddr, delegateAddr
 			},
 		},
@@ -348,10 +452,14 @@ func BenchmarkCallOperations(b *testing.B) {
 				evm, _ := New()
 				callerAddr := primitives.NewAddress([20]byte{0x05})
 				staticAddr := primitives.NewAddress([20]byte{0x06})
-				balance := big.NewInt(10000000)
-				_ = evm.SetBalance(callerAddr, balance)
+				balance := big.NewInt(LargeBalance)
+				if err := evm.SetBalance(callerAddr, balance); err != nil {
+					panic(err)
+				}
 				staticCode := []byte{0x60, 0xcc, 0x5f, 0x52, 0x60, 0x20, 0x5f, 0xf3}
-				_ = evm.SetCode(staticAddr, staticCode)
+				if err := evm.SetCode(staticAddr, staticCode); err != nil {
+					panic(err)
+				}
 				return evm, callerAddr, staticAddr
 			},
 		},
@@ -364,27 +472,33 @@ func BenchmarkCallOperations(b *testing.B) {
 				evm, caller, target := bm.setup()
 				switch bm.name {
 				case "CALL_simple":
-					_, _ = evm.Call(Call{
+					if _, err := evm.Call(Call{
 						Caller: caller,
 						To:     target,
 						Value:  big.NewInt(0),
 						Input:  []byte{},
-						Gas:    100000,
-					})
+						Gas:    StandardGas,
+					}); err != nil {
+						panic(err)
+					}
 				case "DELEGATECALL":
-					_, _ = evm.Call(Delegatecall{
+					if _, err := evm.Call(Delegatecall{
 						Caller: caller,
 						To:     target,
 						Input:  []byte{},
-						Gas:    100000,
-					})
+						Gas:    StandardGas,
+					}); err != nil {
+						panic(err)
+					}
 				case "STATICCALL":
-					_, _ = evm.Call(Staticcall{
+					if _, err := evm.Call(Staticcall{
 						Caller: caller,
 						To:     target,
 						Input:  []byte{},
-						Gas:    100000,
-					})
+						Gas:    StandardGas,
+					}); err != nil {
+						panic(err)
+					}
 				}
 				evm.Destroy()
 			}
@@ -411,24 +525,30 @@ func BenchmarkContractCreation(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				evm, _ := New()
 				addr := primitives.NewAddress([20]byte{byte(i)})
-				balance := big.NewInt(10000000)
-				_ = evm.SetBalance(addr, balance)
+				balance := big.NewInt(LargeBalance)
+				if err := evm.SetBalance(addr, balance); err != nil {
+					panic(err)
+				}
 				
 				if bm.isCreate2 {
-					_, _ = evm.Call(Create2{
+					if _, err := evm.Call(Create2{
 						Caller:   addr,
 						Value:    big.NewInt(0),
 						InitCode: bm.initCode,
 						Salt:     bm.salt,
-						Gas:      200000,
-					})
+						Gas:      HighGas,
+					}); err != nil {
+						panic(err)
+					}
 				} else {
-					_, _ = evm.Call(Create{
+					if _, err := evm.Call(Create{
 						Caller:   addr,
 						Value:    big.NewInt(0),
 						InitCode: bm.initCode,
-						Gas:      200000,
-					})
+						Gas:      HighGas,
+					}); err != nil {
+						panic(err)
+					}
 				}
 				evm.Destroy()
 			}
@@ -465,25 +585,37 @@ func BenchmarkComplexScenarios(b *testing.B) {
 
 	for _, bm := range benchmarks {
 		b.Run(bm.name, func(b *testing.B) {
-			evm, _ := New()
+			evm, err := New()
+			if err != nil {
+				panic(err)
+			}
 			defer evm.Destroy()
 			
-			bytecode, _ := hex.DecodeString(bm.bytecode)
+			bytecode, err := hex.DecodeString(bm.bytecode)
+			if err != nil {
+				panic(err)
+			}
 			caller := primitives.ZeroAddress()
 			contractAddr := primitives.NewAddress([20]byte{0x01})
 			
-			_ = evm.SetBalance(caller, big.NewInt(1000000))
-			_ = evm.SetCode(contractAddr, bytecode)
+			if err := evm.SetBalance(caller, big.NewInt(DefaultBalance)); err != nil {
+				panic(err)
+			}
+			if err := evm.SetCode(contractAddr, bytecode); err != nil {
+				panic(err)
+			}
 			
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				_, _ = evm.Call(Call{
+				if _, err := evm.Call(Call{
 					Caller: caller,
 					To:     contractAddr,
 					Value:  big.NewInt(0),
 					Input:  []byte{},
-					Gas:    1000000,
-				})
+					Gas:    VeryHighGas,
+				}); err != nil {
+					panic(err)
+				}
 			}
 		})
 	}
@@ -526,16 +658,22 @@ func BenchmarkGasIntensive(b *testing.B) {
 				caller := primitives.ZeroAddress()
 				contractAddr := primitives.NewAddress([20]byte{0x01})
 				
-				_ = evm.SetBalance(caller, big.NewInt(1000000))
-				_ = evm.SetCode(contractAddr, bm.bytecode)
+				if err := evm.SetBalance(caller, big.NewInt(DefaultBalance)); err != nil {
+				panic(err)
+			}
+				if err := evm.SetCode(contractAddr, bm.bytecode); err != nil {
+					panic(err)
+				}
 				
-				_, _ = evm.Call(Call{
+				if _, err := evm.Call(Call{
 					Caller: caller,
 					To:     contractAddr,
 					Value:  big.NewInt(0),
 					Input:  []byte{},
-					Gas:    30000000,
-				})
+					Gas:    ExtremeGas,
+				}); err != nil {
+					panic(err)
+				}
 				evm.Destroy()
 			}
 		})
@@ -553,12 +691,19 @@ func BenchmarkRealWorldContracts(b *testing.B) {
 				evm, _ := New()
 				reserve0Slot := big.NewInt(0)
 				reserve1Slot := big.NewInt(1)
-				reserve0 := big.NewInt(1000000)
+				reserve0 := big.NewInt(DefaultBalance)
 				reserve1 := big.NewInt(2000000)
 				addr := primitives.NewAddress([20]byte{})
-				_ = evm.SetStorage(addr, reserve0Slot, reserve0)
-				_ = evm.SetStorage(addr, reserve1Slot, reserve1)
-				bytecode, _ := hex.DecodeString("5f5460015402619c40116100165761001c5661001c5b60016001555b")
+				if err := evm.SetStorage(addr, reserve0Slot, reserve0); err != nil {
+					panic(err)
+				}
+				if err := evm.SetStorage(addr, reserve1Slot, reserve1); err != nil {
+					panic(err)
+				}
+				bytecode, err := hex.DecodeString("5f5460015402619c40116100165761001c5661001c5b60016001555b")
+				if err != nil {
+					panic(err)
+				}
 				return bytecode, evm, addr
 			},
 		},
@@ -569,8 +714,13 @@ func BenchmarkRealWorldContracts(b *testing.B) {
 				totalSupplySlot := big.NewInt(0)
 				currentSupply := big.NewInt(100)
 				addr := primitives.NewAddress([20]byte{})
-				_ = evm.SetStorage(addr, totalSupplySlot, currentSupply)
-				bytecode, _ := hex.DecodeString("5f5460010160648111610019576001810190555f52602001f35bfd")
+				if err := evm.SetStorage(addr, totalSupplySlot, currentSupply); err != nil {
+					panic(err)
+				}
+				bytecode, err := hex.DecodeString("5f5460010160648111610019576001810190555f52602001f35bfd")
+				if err != nil {
+					panic(err)
+				}
 				return bytecode, evm, addr
 			},
 		},
@@ -582,15 +732,19 @@ func BenchmarkRealWorldContracts(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				bytecode, evm, addr := bm.setup()
 				caller := primitives.ZeroAddress()
-				_ = evm.SetBalance(caller, big.NewInt(1000000))
-				_ = evm.SetCode(addr, bytecode)
+				if err := evm.SetBalance(caller, big.NewInt(DefaultBalance)); err != nil {
+				panic(err)
+			}
+				if err := evm.SetCode(addr, bytecode); err != nil {
+					panic(err)
+				}
 				
 				_, _ = evm.Call(Call{
 					Caller: caller,
 					To:     addr,
 					Value:  big.NewInt(0),
 					Input:  []byte{},
-					Gas:    200000,
+					Gas:    HighGas,
 				})
 				evm.Destroy()
 			}
@@ -599,7 +753,10 @@ func BenchmarkRealWorldContracts(b *testing.B) {
 }
 
 func BenchmarkParallelExecution(b *testing.B) {
-	bytecode, _ := hex.DecodeString("600a6014015f5260205ff3")
+	bytecode, err := hex.DecodeString("600a6014015f5260205ff3")
+	if err != nil {
+		panic(err)
+	}
 	
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
@@ -607,16 +764,22 @@ func BenchmarkParallelExecution(b *testing.B) {
 			caller := primitives.ZeroAddress()
 			contractAddr := primitives.NewAddress([20]byte{0x01})
 			
-			_ = evm.SetBalance(caller, big.NewInt(1000000))
-			_ = evm.SetCode(contractAddr, bytecode)
+			if err := evm.SetBalance(caller, big.NewInt(DefaultBalance)); err != nil {
+				panic(err)
+			}
+			if err := evm.SetCode(contractAddr, bytecode); err != nil {
+				panic(err)
+			}
 			
-			_, _ = evm.Call(Call{
+			if _, err := evm.Call(Call{
 				Caller: caller,
 				To:     contractAddr,
 				Value:  big.NewInt(0),
 				Input:  []byte{},
-				Gas:    100000,
-			})
+				Gas:    StandardGas,
+			}); err != nil {
+				panic(err)
+			}
 			evm.Destroy()
 		}
 	})
@@ -636,16 +799,22 @@ func BenchmarkMemoryAllocation(b *testing.B) {
 				caller := primitives.ZeroAddress()
 				contractAddr := primitives.NewAddress([20]byte{0x01})
 				
-				_ = evm.SetBalance(caller, big.NewInt(1000000))
-				_ = evm.SetCode(contractAddr, bc)
+				if err := evm.SetBalance(caller, big.NewInt(DefaultBalance)); err != nil {
+				panic(err)
+			}
+				if err := evm.SetCode(contractAddr, bc); err != nil {
+					panic(err)
+				}
 				
-				_, _ = evm.Call(Call{
+				if _, err := evm.Call(Call{
 					Caller: caller,
 					To:     contractAddr,
 					Value:  big.NewInt(0),
 					Input:  []byte{},
-					Gas:    100000,
-				})
+					Gas:    StandardGas,
+				}); err != nil {
+					panic(err)
+				}
 				evm.Destroy()
 			}
 		})
@@ -683,26 +852,37 @@ func BenchmarkCachePerformance(b *testing.B) {
 			caller := primitives.ZeroAddress()
 			contractAddr := primitives.NewAddress([20]byte{0x01})
 			
-			_ = evm.SetBalance(caller, big.NewInt(1000000))
+			if err := evm.SetBalance(caller, big.NewInt(DefaultBalance)); err != nil {
+				panic(err)
+			}
 			
 			for i := uint64(0); i < 10; i++ {
 				slot := big.NewInt(int64(i))
 				value := big.NewInt(int64(i * 10))
-				_ = evm.SetStorage(contractAddr, slot, value)
+				if err := evm.SetStorage(contractAddr, slot, value); err != nil {
+					panic(err)
+				}
 			}
 			
-			bytecode, _ := hex.DecodeString(bm.bytecode)
-			_ = evm.SetCode(contractAddr, bytecode)
+			bytecode, err := hex.DecodeString(bm.bytecode)
+			if err != nil {
+				panic(err)
+			}
+			if err := evm.SetCode(contractAddr, bytecode); err != nil {
+				panic(err)
+			}
 			
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				_, _ = evm.Call(Call{
+				if _, err := evm.Call(Call{
 					Caller: caller,
 					To:     contractAddr,
 					Value:  big.NewInt(0),
 					Input:  []byte{},
-					Gas:    1000000,
-				})
+					Gas:    VeryHighGas,
+				}); err != nil {
+					panic(err)
+				}
 			}
 		})
 	}

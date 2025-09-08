@@ -11,6 +11,14 @@ import (
 	"github.com/evmts/guillotine/sdks/go/primitives"
 )
 
+// Test constants
+const (
+	DefaultBalance = 1000000
+	StandardGas = 100000
+	HighGas = 200000
+	VeryHighGas = 1000000
+)
+
 func TestComprehensiveArithmeticOperations(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -93,7 +101,7 @@ func TestComprehensiveArithmeticOperations(t *testing.T) {
 			caller := primitives.ZeroAddress()
 			contractAddr := primitives.NewAddress([20]byte{0x01})
 			
-			err = evm.SetBalance(caller, big.NewInt(1000000))
+			err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 			require.NoError(t, err)
 			
 			err = evm.SetCode(contractAddr, bytecode)
@@ -104,7 +112,7 @@ func TestComprehensiveArithmeticOperations(t *testing.T) {
 				To:     contractAddr,
 				Value:  big.NewInt(0),
 				Input:  []byte{},
-				Gas:    100000,
+				Gas:    StandardGas,
 			})
 			require.NoError(t, err)
 
@@ -180,7 +188,7 @@ func TestComprehensiveBitwiseOperations(t *testing.T) {
 			caller := primitives.ZeroAddress()
 			contractAddr := primitives.NewAddress([20]byte{0x01})
 			
-			err = evm.SetBalance(caller, big.NewInt(1000000))
+			err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 			require.NoError(t, err)
 			
 			err = evm.SetCode(contractAddr, bytecode)
@@ -191,7 +199,7 @@ func TestComprehensiveBitwiseOperations(t *testing.T) {
 				To:     contractAddr,
 				Value:  big.NewInt(0),
 				Input:  []byte{},
-				Gas:    100000,
+				Gas:    StandardGas,
 			})
 			require.NoError(t, err)
 
@@ -259,7 +267,7 @@ func TestComprehensiveComparisonOperations(t *testing.T) {
 			caller := primitives.ZeroAddress()
 			contractAddr := primitives.NewAddress([20]byte{0x01})
 			
-			err = evm.SetBalance(caller, big.NewInt(1000000))
+			err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 			require.NoError(t, err)
 			
 			err = evm.SetCode(contractAddr, bytecode)
@@ -270,7 +278,7 @@ func TestComprehensiveComparisonOperations(t *testing.T) {
 				To:     contractAddr,
 				Value:  big.NewInt(0),
 				Input:  []byte{},
-				Gas:    100000,
+				Gas:    StandardGas,
 			})
 			require.NoError(t, err)
 
@@ -328,7 +336,7 @@ func TestComprehensiveMemoryOperations(t *testing.T) {
 			caller := primitives.ZeroAddress()
 			contractAddr := primitives.NewAddress([20]byte{0x01})
 			
-			err = evm.SetBalance(caller, big.NewInt(1000000))
+			err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 			require.NoError(t, err)
 			
 			err = evm.SetCode(contractAddr, bytecode)
@@ -339,7 +347,7 @@ func TestComprehensiveMemoryOperations(t *testing.T) {
 				To:     contractAddr,
 				Value:  big.NewInt(0),
 				Input:  []byte{},
-				Gas:    100000,
+				Gas:    StandardGas,
 			})
 			require.NoError(t, err)
 
@@ -375,7 +383,9 @@ func TestComprehensiveStorageOperations(t *testing.T) {
 			setup: func(evm *EVM, addr primitives.Address) {
 				key := big.NewInt(0)
 				value := big.NewInt(0xaa)
-				_ = evm.SetStorage(addr, key, value)
+				if err := evm.SetStorage(addr, key, value); err != nil {
+				panic(err)
+			}
 			},
 			bytecode: "5f545f5260205ff3",
 			expectedVal: big.NewInt(0xaa),
@@ -385,13 +395,19 @@ func TestComprehensiveStorageOperations(t *testing.T) {
 			setup: func(evm *EVM, addr primitives.Address) {
 				key0 := big.NewInt(0)
 				value0 := big.NewInt(0xaa)
-				_ = evm.SetStorage(addr, key0, value0)
+				if err := evm.SetStorage(addr, key0, value0); err != nil {
+				panic(err)
+			}
 				key1 := big.NewInt(1)
 				value1 := big.NewInt(0xbb)
-				_ = evm.SetStorage(addr, key1, value1)
+				if err := evm.SetStorage(addr, key1, value1); err != nil {
+				panic(err)
+			}
 				key2 := big.NewInt(2)
 				value2 := big.NewInt(0xcc)
-				_ = evm.SetStorage(addr, key2, value2)
+				if err := evm.SetStorage(addr, key2, value2); err != nil {
+				panic(err)
+			}
 			},
 			bytecode: "600254600154015f54015f5260205ff3",
 			expectedVal: big.NewInt(0xaa + 0xbb + 0xcc),
@@ -401,7 +417,9 @@ func TestComprehensiveStorageOperations(t *testing.T) {
 			setup: func(evm *EVM, addr primitives.Address) {
 				key := big.NewInt(0)
 				value := big.NewInt(0xaa)
-				_ = evm.SetStorage(addr, key, value)
+				if err := evm.SetStorage(addr, key, value); err != nil {
+				panic(err)
+			}
 			},
 			bytecode: "60bb5f555f545f5260205ff3",
 			expectedVal: big.NewInt(0xbb),
@@ -417,7 +435,7 @@ func TestComprehensiveStorageOperations(t *testing.T) {
 			caller := primitives.ZeroAddress()
 			contractAddr := primitives.NewAddress([20]byte{0x01})
 			
-			err = evm.SetBalance(caller, big.NewInt(1000000))
+			err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 			require.NoError(t, err)
 
 			if tt.setup != nil {
@@ -435,7 +453,7 @@ func TestComprehensiveStorageOperations(t *testing.T) {
 				To:     contractAddr,
 				Value:  big.NewInt(0),
 				Input:  []byte{},
-				Gas:    100000,
+				Gas:    StandardGas,
 			})
 			require.NoError(t, err)
 
@@ -498,7 +516,7 @@ func TestComprehensiveStackOperations(t *testing.T) {
 			caller := primitives.ZeroAddress()
 			contractAddr := primitives.NewAddress([20]byte{0x01})
 			
-			err = evm.SetBalance(caller, big.NewInt(1000000))
+			err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 			require.NoError(t, err)
 			
 			err = evm.SetCode(contractAddr, bytecode)
@@ -509,7 +527,7 @@ func TestComprehensiveStackOperations(t *testing.T) {
 				To:     contractAddr,
 				Value:  big.NewInt(0),
 				Input:  []byte{},
-				Gas:    100000,
+				Gas:    StandardGas,
 			})
 			require.NoError(t, err)
 
@@ -572,7 +590,7 @@ func TestComprehensiveControlFlowOperations(t *testing.T) {
 			caller := primitives.ZeroAddress()
 			contractAddr := primitives.NewAddress([20]byte{0x01})
 			
-			err = evm.SetBalance(caller, big.NewInt(1000000))
+			err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 			require.NoError(t, err)
 			
 			err = evm.SetCode(contractAddr, bytecode)
@@ -583,7 +601,7 @@ func TestComprehensiveControlFlowOperations(t *testing.T) {
 				To:     contractAddr,
 				Value:  big.NewInt(0),
 				Input:  []byte{},
-				Gas:    100000,
+				Gas:    StandardGas,
 			})
 			require.NoError(t, err)
 
@@ -652,7 +670,7 @@ func TestComprehensiveContextOperations(t *testing.T) {
 			contractAddr := primitives.NewAddress([20]byte{0x01})
 			callValue := big.NewInt(1000)
 			
-			err = evm.SetBalance(caller, big.NewInt(1000000))
+			err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 			require.NoError(t, err)
 			
 			err = evm.SetCode(contractAddr, bytecode)
@@ -663,7 +681,7 @@ func TestComprehensiveContextOperations(t *testing.T) {
 				To:     contractAddr,
 				Value:  callValue,
 				Input:  []byte{},
-				Gas:    100000,
+				Gas:    StandardGas,
 			})
 			require.NoError(t, err)
 
@@ -735,7 +753,7 @@ func TestComprehensiveBlockOperations(t *testing.T) {
 			caller := primitives.ZeroAddress()
 			contractAddr := primitives.NewAddress([20]byte{0x01})
 			
-			err = evm.SetBalance(caller, big.NewInt(1000000))
+			err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 			require.NoError(t, err)
 			
 			err = evm.SetCode(contractAddr, bytecode)
@@ -746,7 +764,7 @@ func TestComprehensiveBlockOperations(t *testing.T) {
 				To:     contractAddr,
 				Value:  big.NewInt(0),
 				Input:  []byte{},
-				Gas:    100000,
+				Gas:    StandardGas,
 			})
 			require.NoError(t, err)
 
@@ -797,7 +815,7 @@ func TestComprehensiveHashingOperations(t *testing.T) {
 			caller := primitives.ZeroAddress()
 			contractAddr := primitives.NewAddress([20]byte{0x01})
 			
-			err = evm.SetBalance(caller, big.NewInt(1000000))
+			err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 			require.NoError(t, err)
 			
 			err = evm.SetCode(contractAddr, bytecode)
@@ -808,7 +826,7 @@ func TestComprehensiveHashingOperations(t *testing.T) {
 				To:     contractAddr,
 				Value:  big.NewInt(0),
 				Input:  []byte{},
-				Gas:    100000,
+				Gas:    StandardGas,
 			})
 			require.NoError(t, err)
 
@@ -863,7 +881,7 @@ func TestComprehensiveLoggingOperations(t *testing.T) {
 			caller := primitives.ZeroAddress()
 			contractAddr := primitives.NewAddress([20]byte{0x01})
 			
-			err = evm.SetBalance(caller, big.NewInt(1000000))
+			err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 			require.NoError(t, err)
 			
 			err = evm.SetCode(contractAddr, bytecode)
@@ -874,7 +892,7 @@ func TestComprehensiveLoggingOperations(t *testing.T) {
 				To:     contractAddr,
 				Value:  big.NewInt(0),
 				Input:  []byte{},
-				Gas:    100000,
+				Gas:    StandardGas,
 			})
 			require.NoError(t, err)
 
@@ -929,7 +947,7 @@ func TestComprehensivePushOperations(t *testing.T) {
 			caller := primitives.ZeroAddress()
 			contractAddr := primitives.NewAddress([20]byte{0x01})
 			
-			err = evm.SetBalance(caller, big.NewInt(1000000))
+			err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 			require.NoError(t, err)
 			
 			err = evm.SetCode(contractAddr, bytecode)
@@ -940,7 +958,7 @@ func TestComprehensivePushOperations(t *testing.T) {
 				To:     contractAddr,
 				Value:  big.NewInt(0),
 				Input:  []byte{},
-				Gas:    100000,
+				Gas:    StandardGas,
 			})
 			require.NoError(t, err)
 
@@ -1003,7 +1021,7 @@ func TestComprehensiveReturnOperations(t *testing.T) {
 			caller := primitives.ZeroAddress()
 			contractAddr := primitives.NewAddress([20]byte{0x01})
 			
-			err = evm.SetBalance(caller, big.NewInt(1000000))
+			err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 			require.NoError(t, err)
 			
 			err = evm.SetCode(contractAddr, bytecode)
@@ -1014,7 +1032,7 @@ func TestComprehensiveReturnOperations(t *testing.T) {
 				To:     contractAddr,
 				Value:  big.NewInt(0),
 				Input:  []byte{},
-				Gas:    100000,
+				Gas:    StandardGas,
 			})
 			require.NoError(t, err)
 
@@ -1071,7 +1089,7 @@ func TestComplexScenarios(t *testing.T) {
 			caller := primitives.ZeroAddress()
 			contractAddr := primitives.NewAddress([20]byte{0x01})
 			
-			err = evm.SetBalance(caller, big.NewInt(1000000))
+			err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 			require.NoError(t, err)
 			
 			err = evm.SetCode(contractAddr, bytecode)
@@ -1082,7 +1100,7 @@ func TestComplexScenarios(t *testing.T) {
 				To:     contractAddr,
 				Value:  big.NewInt(0),
 				Input:  []byte{},
-				Gas:    1000000, // More gas for complex scenarios
+				Gas:    VeryHighGas, // More gas for complex scenarios
 			})
 			require.NoError(t, err)
 
@@ -1144,7 +1162,7 @@ func TestEdgeCasesAndBoundaries(t *testing.T) {
 			caller := primitives.ZeroAddress()
 			contractAddr := primitives.NewAddress([20]byte{0x01})
 			
-			err = evm.SetBalance(caller, big.NewInt(1000000))
+			err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 			require.NoError(t, err)
 			
 			err = evm.SetCode(contractAddr, bytecode)
@@ -1155,7 +1173,7 @@ func TestEdgeCasesAndBoundaries(t *testing.T) {
 				To:     contractAddr,
 				Value:  big.NewInt(0),
 				Input:  []byte{},
-				Gas:    100000,
+				Gas:    StandardGas,
 			})
 			require.NoError(t, err)
 
@@ -1208,7 +1226,7 @@ func TestPerformanceConsiderations(t *testing.T) {
 			caller := primitives.ZeroAddress()
 			contractAddr := primitives.NewAddress([20]byte{0x01})
 			
-			err = evm.SetBalance(caller, big.NewInt(1000000))
+			err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 			require.NoError(t, err)
 			
 			err = evm.SetCode(contractAddr, bytecode)
@@ -1244,7 +1262,9 @@ func TestRealWorldPatterns(t *testing.T) {
 				// Set balance of slot 0 to 1000
 				key := big.NewInt(0)
 				balance := big.NewInt(1000)
-				_ = evm.SetStorage(addr, key, balance)
+				if err := evm.SetStorage(addr, key, balance); err != nil {
+				panic(err)
+			}
 			},
 			bytecode:    "5f545f5260205ff3", // SLOAD slot 0, return
 			description: "Should return stored balance",
@@ -1255,7 +1275,9 @@ func TestRealWorldPatterns(t *testing.T) {
 				// Set owner at slot 0
 				key := big.NewInt(0)
 				owner := new(big.Int).SetBytes(primitives.ZeroAddress().Bytes())
-				_ = evm.SetStorage(addr, key, owner)
+				if err := evm.SetStorage(addr, key, owner); err != nil {
+				panic(err)
+			}
 			},
 			bytecode:    "335f54141560115760aa600e565b60bb5b5f5260205ff3", // Check if caller == owner
 			description: "Should handle access control",
@@ -1276,7 +1298,7 @@ func TestRealWorldPatterns(t *testing.T) {
 			caller := primitives.ZeroAddress()
 			contractAddr := primitives.NewAddress([20]byte{0x01})
 			
-			err = evm.SetBalance(caller, big.NewInt(1000000))
+			err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
 			require.NoError(t, err)
 
 			if tt.setup != nil {
@@ -1294,7 +1316,7 @@ func TestRealWorldPatterns(t *testing.T) {
 				To:     contractAddr,
 				Value:  big.NewInt(0),
 				Input:  []byte{},
-				Gas:    100000,
+				Gas:    StandardGas,
 			})
 			require.NoError(t, err)
 
