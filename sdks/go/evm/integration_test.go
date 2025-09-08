@@ -33,7 +33,7 @@ func TestIntegrationScenarios(t *testing.T) {
 		require.NoError(t, err)
 		err = evm.SetStorage(tokenAddr, receiverBalanceSlot, initialReceiverBalance)
 		require.NoError(t, err)
-		transferSimulation := "6064805f5461096403805460015461096401556064600155"
+		transferSimulation := "60645f54606490035f55606460015401600155"
 		
 		bytecode, err := hex.DecodeString(transferSimulation)
 		require.NoError(t, err)
@@ -84,7 +84,7 @@ func TestIntegrationScenarios(t *testing.T) {
 		err = evm.SetStorage(dexAddr, reserve1Slot, reserve1)
 		require.NoError(t, err)
 
-		swapSimulation := "5f5460015402619c40116100165761001c5661001c5b60016001555b"
+		swapSimulation := "5f5460015402619c40116100165761001b5661001b5b60016001555b"
 		
 		bytecode, err := hex.DecodeString(swapSimulation)
 		require.NoError(t, err)
@@ -127,7 +127,7 @@ func TestIntegrationScenarios(t *testing.T) {
 		err = evm.SetStorage(walletAddr, thresholdSlot, threshold)
 		require.NoError(t, err)
 
-		multiSigExecution := "5f546001541161001e5760aa60025560015460025410610029576001610029565b5f5b5f5260205ff3"
+		multiSigExecution := "5f546001541161001e5760aa60025560015460025410610020576001610022565b5f5b5f5260205ff3"
 		
 		bytecode, err := hex.DecodeString(multiSigExecution)
 		require.NoError(t, err)
@@ -165,7 +165,7 @@ func TestIntegrationScenarios(t *testing.T) {
 		err = evm.SetStorage(nftAddr, totalSupplySlot, currentSupply)
 		require.NoError(t, err)
 
-		mintNFT := "5f5460010160648111610019576001810190555f52602001f35bfd"
+		mintNFT := "5f5460010180606411610019575f5560015f5260205ff35bfd"
 		
 		bytecode, err := hex.DecodeString(mintNFT)
 		require.NoError(t, err)
@@ -259,7 +259,7 @@ func TestIntegrationScenarios(t *testing.T) {
 		err = evm.SetStorage(govAddr, noVotesSlot, noVotes)
 		require.NoError(t, err)
 
-		checkVoteOutcome := "600154600254116100155760016100195660006100195b5f5260205ff3"
+		checkVoteOutcome := "600154600254116100155760016100165660006100165b5f5260205ff3"
 		
 		bytecode, err := hex.DecodeString(checkVoteOutcome)
 		require.NoError(t, err)
@@ -419,7 +419,7 @@ func TestIntegrationScenarios(t *testing.T) {
 		err = evm.SetStorage(timelockAddr, unlockTimeSlot, unlockTime)
 		require.NoError(t, err)
 
-		checkTimelock := "5f5442116100145760aa5f5560016100185660006100185b5f5260205ff3"
+		checkTimelock := "5f5442116100145760aa5f5560016100175660006100175b5f5260205ff3"
 		
 		bytecode, err := hex.DecodeString(checkTimelock)
 		require.NoError(t, err)
@@ -459,7 +459,7 @@ func TestIntegrationScenarios(t *testing.T) {
 			require.NoError(t, err)
 		}
 
-		batchProcess := "5f5b8060051161003b57805460018201915081602002815560010180915061000b565b"
+		batchProcess := "5f5b80600511610022578054600182019150816020028155600101809150610001565b"
 		
 		bytecode, err := hex.DecodeString(batchProcess)
 		require.NoError(t, err)
