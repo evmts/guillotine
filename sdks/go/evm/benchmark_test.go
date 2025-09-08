@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"fmt"
+	"math/big"
 	"testing"
 
 	"github.com/evmts/guillotine/sdks/go/primitives"
@@ -30,10 +31,21 @@ func BenchmarkArithmeticOperations(b *testing.B) {
 			defer evm.Destroy()
 			
 			bytecode, _ := hex.DecodeString(bm.bytecode)
+			caller := primitives.ZeroAddress()
+			contractAddr := primitives.NewAddress([20]byte{0x01})
+			
+			_ = evm.SetBalance(caller, big.NewInt(1000000))
+			_ = evm.SetCode(contractAddr, bytecode)
 			
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				_ = evm.Execute(bytecode)
+				_, _ = evm.Call(Call{
+					Caller: caller,
+					To:     contractAddr,
+					Value:  big.NewInt(0),
+					Input:  []byte{},
+					Gas:    100000,
+				})
 			}
 		})
 	}
@@ -59,10 +71,21 @@ func BenchmarkBitwiseOperations(b *testing.B) {
 			defer evm.Destroy()
 			
 			bytecode, _ := hex.DecodeString(bm.bytecode)
+			caller := primitives.ZeroAddress()
+			contractAddr := primitives.NewAddress([20]byte{0x01})
+			
+			_ = evm.SetBalance(caller, big.NewInt(1000000))
+			_ = evm.SetCode(contractAddr, bytecode)
 			
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				_ = evm.Execute(bytecode)
+				_, _ = evm.Call(Call{
+					Caller: caller,
+					To:     contractAddr,
+					Value:  big.NewInt(0),
+					Input:  []byte{},
+					Gas:    100000,
+				})
 			}
 		})
 	}
@@ -86,10 +109,21 @@ func BenchmarkMemoryOperations(b *testing.B) {
 			defer evm.Destroy()
 			
 			bytecode, _ := hex.DecodeString(bm.bytecode)
+			caller := primitives.ZeroAddress()
+			contractAddr := primitives.NewAddress([20]byte{0x01})
+			
+			_ = evm.SetBalance(caller, big.NewInt(1000000))
+			_ = evm.SetCode(contractAddr, bytecode)
 			
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				_ = evm.Execute(bytecode)
+				_, _ = evm.Call(Call{
+					Caller: caller,
+					To:     contractAddr,
+					Value:  big.NewInt(0),
+					Input:  []byte{},
+					Gas:    100000,
+				})
 			}
 		})
 	}
@@ -99,7 +133,7 @@ func BenchmarkStorageOperations(b *testing.B) {
 	benchmarks := []struct {
 		name     string
 		bytecode string
-		setup    func(*EVM)
+		setup    func(*EVM, primitives.Address)
 	}{
 		{
 			name:     "SSTORE_cold",
@@ -109,11 +143,10 @@ func BenchmarkStorageOperations(b *testing.B) {
 		{
 			name:     "SSTORE_warm",
 			bytecode: "60bb5f55",
-			setup: func(evm *EVM) {
-				addr := NewAddress([20]byte{})
-				key := NewU256FromUint64(0)
-				value := NewU256FromUint64(0xaa)
-				evm.SetStorage(&addr, &key, &value)
+			setup: func(evm *EVM, addr primitives.Address) {
+				key := big.NewInt(0)
+				value := big.NewInt(0xaa)
+				_ = evm.SetStorage(addr, key, value)
 			},
 		},
 		{
@@ -124,11 +157,10 @@ func BenchmarkStorageOperations(b *testing.B) {
 		{
 			name:     "SLOAD_warm",
 			bytecode: "5f545f54",
-			setup: func(evm *EVM) {
-				addr := NewAddress([20]byte{})
-				key := NewU256FromUint64(0)
-				value := NewU256FromUint64(0xaa)
-				evm.SetStorage(&addr, &key, &value)
+			setup: func(evm *EVM, addr primitives.Address) {
+				key := big.NewInt(0)
+				value := big.NewInt(0xaa)
+				_ = evm.SetStorage(addr, key, value)
 			},
 		},
 	}
@@ -140,10 +172,23 @@ func BenchmarkStorageOperations(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				evm, _ := New()
+				caller := primitives.ZeroAddress()
+				contractAddr := primitives.NewAddress([20]byte{0x01})
+				
+				_ = evm.SetBalance(caller, big.NewInt(1000000))
+				_ = evm.SetCode(contractAddr, bytecode)
+				
 				if bm.setup != nil {
-					bm.setup(evm)
+					bm.setup(evm, contractAddr)
 				}
-				_ = evm.Execute(bytecode)
+				
+				_, _ = evm.Call(Call{
+					Caller: caller,
+					To:     contractAddr,
+					Value:  big.NewInt(0),
+					Input:  []byte{},
+					Gas:    100000,
+				})
 				evm.Destroy()
 			}
 		})
@@ -170,10 +215,21 @@ func BenchmarkStackOperations(b *testing.B) {
 			defer evm.Destroy()
 			
 			bytecode, _ := hex.DecodeString(bm.bytecode)
+			caller := primitives.ZeroAddress()
+			contractAddr := primitives.NewAddress([20]byte{0x01})
+			
+			_ = evm.SetBalance(caller, big.NewInt(1000000))
+			_ = evm.SetCode(contractAddr, bytecode)
 			
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				_ = evm.Execute(bytecode)
+				_, _ = evm.Call(Call{
+					Caller: caller,
+					To:     contractAddr,
+					Value:  big.NewInt(0),
+					Input:  []byte{},
+					Gas:    100000,
+				})
 			}
 		})
 	}
@@ -197,10 +253,21 @@ func BenchmarkControlFlow(b *testing.B) {
 			defer evm.Destroy()
 			
 			bytecode, _ := hex.DecodeString(bm.bytecode)
+			caller := primitives.ZeroAddress()
+			contractAddr := primitives.NewAddress([20]byte{0x01})
+			
+			_ = evm.SetBalance(caller, big.NewInt(1000000))
+			_ = evm.SetCode(contractAddr, bytecode)
 			
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				_ = evm.Execute(bytecode)
+				_, _ = evm.Call(Call{
+					Caller: caller,
+					To:     contractAddr,
+					Value:  big.NewInt(0),
+					Input:  []byte{},
+					Gas:    100000,
+				})
 			}
 		})
 	}
@@ -224,10 +291,21 @@ func BenchmarkKeccak256(b *testing.B) {
 			defer evm.Destroy()
 			
 			bytecode, _ := hex.DecodeString(bm.bytecode)
+			caller := primitives.ZeroAddress()
+			contractAddr := primitives.NewAddress([20]byte{0x01})
+			
+			_ = evm.SetBalance(caller, big.NewInt(1000000))
+			_ = evm.SetCode(contractAddr, bytecode)
 			
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				_ = evm.Execute(bytecode)
+				_, _ = evm.Call(Call{
+					Caller: caller,
+					To:     contractAddr,
+					Value:  big.NewInt(0),
+					Input:  []byte{},
+					Gas:    100000,
+				})
 			}
 		})
 	}
@@ -236,48 +314,45 @@ func BenchmarkKeccak256(b *testing.B) {
 func BenchmarkCallOperations(b *testing.B) {
 	benchmarks := []struct {
 		name     string
-		setup    func() ([]byte, *EVM)
+		setup    func() (*EVM, primitives.Address, primitives.Address)
 	}{
 		{
 			name: "CALL_simple",
-			setup: func() ([]byte, *EVM) {
+			setup: func() (*EVM, primitives.Address, primitives.Address) {
 				evm, _ := New()
-				callerAddr := NewAddress([20]byte{0x01})
-				calleeAddr := NewAddress([20]byte{0x02})
-				balance := NewU256FromUint64(10000000)
-				evm.SetBalance(&callerAddr, &balance)
+				callerAddr := primitives.NewAddress([20]byte{0x01})
+				calleeAddr := primitives.NewAddress([20]byte{0x02})
+				balance := big.NewInt(10000000)
+				_ = evm.SetBalance(callerAddr, balance)
 				calleeCode := []byte{0x60, 0xaa, 0x5f, 0x52, 0x60, 0x20, 0x5f, 0xf3}
-				evm.SetCode(&calleeAddr, calleeCode)
-				bytecode, _ := hex.DecodeString("5f5f5f5f5f73" + hex.EncodeToString(calleeAddr.Bytes()) + "61fffff1")
-				return bytecode, evm
+				_ = evm.SetCode(calleeAddr, calleeCode)
+				return evm, callerAddr, calleeAddr
 			},
 		},
 		{
 			name: "DELEGATECALL",
-			setup: func() ([]byte, *EVM) {
+			setup: func() (*EVM, primitives.Address, primitives.Address) {
 				evm, _ := New()
-				callerAddr := NewAddress([20]byte{0x03})
-				delegateAddr := NewAddress([20]byte{0x04})
-				balance := NewU256FromUint64(10000000)
-				evm.SetBalance(&callerAddr, &balance)
+				callerAddr := primitives.NewAddress([20]byte{0x03})
+				delegateAddr := primitives.NewAddress([20]byte{0x04})
+				balance := big.NewInt(10000000)
+				_ = evm.SetBalance(callerAddr, balance)
 				delegateCode := []byte{0x60, 0xbb, 0x5f, 0x52, 0x60, 0x20, 0x5f, 0xf3}
-				evm.SetCode(&delegateAddr, delegateCode)
-				bytecode, _ := hex.DecodeString("5f5f5f5f73" + hex.EncodeToString(delegateAddr.Bytes()) + "61fffff4")
-				return bytecode, evm
+				_ = evm.SetCode(delegateAddr, delegateCode)
+				return evm, callerAddr, delegateAddr
 			},
 		},
 		{
 			name: "STATICCALL",
-			setup: func() ([]byte, *EVM) {
+			setup: func() (*EVM, primitives.Address, primitives.Address) {
 				evm, _ := New()
-				callerAddr := NewAddress([20]byte{0x05})
-				staticAddr := NewAddress([20]byte{0x06})
-				balance := NewU256FromUint64(10000000)
-				evm.SetBalance(&callerAddr, &balance)
+				callerAddr := primitives.NewAddress([20]byte{0x05})
+				staticAddr := primitives.NewAddress([20]byte{0x06})
+				balance := big.NewInt(10000000)
+				_ = evm.SetBalance(callerAddr, balance)
 				staticCode := []byte{0x60, 0xcc, 0x5f, 0x52, 0x60, 0x20, 0x5f, 0xf3}
-				evm.SetCode(&staticAddr, staticCode)
-				bytecode, _ := hex.DecodeString("5f5f5f5f73" + hex.EncodeToString(staticAddr.Bytes()) + "61fffffa")
-				return bytecode, evm
+				_ = evm.SetCode(staticAddr, staticCode)
+				return evm, callerAddr, staticAddr
 			},
 		},
 	}
@@ -286,8 +361,31 @@ func BenchmarkCallOperations(b *testing.B) {
 		b.Run(bm.name, func(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				bytecode, evm := bm.setup()
-				_ = evm.Execute(bytecode)
+				evm, caller, target := bm.setup()
+				switch bm.name {
+				case "CALL_simple":
+					_, _ = evm.Call(Call{
+						Caller: caller,
+						To:     target,
+						Value:  big.NewInt(0),
+						Input:  []byte{},
+						Gas:    100000,
+					})
+				case "DELEGATECALL":
+					_, _ = evm.Call(Delegatecall{
+						Caller: caller,
+						To:     target,
+						Input:  []byte{},
+						Gas:    100000,
+					})
+				case "STATICCALL":
+					_, _ = evm.Call(Staticcall{
+						Caller: caller,
+						To:     target,
+						Input:  []byte{},
+						Gas:    100000,
+					})
+				}
 				evm.Destroy()
 			}
 		})
@@ -297,25 +395,41 @@ func BenchmarkCallOperations(b *testing.B) {
 func BenchmarkContractCreation(b *testing.B) {
 	benchmarks := []struct {
 		name     string
-		bytecode string
+		initCode []byte
+		salt     *big.Int
+		isCreate2 bool
 	}{
-		{"CREATE_empty", "5f5f5ff0"},
-		{"CREATE_simple", "60806040525f5260205ff35f5f5ff0"},
-		{"CREATE2_empty", "5f5f5f5ff5"},
-		{"CREATE2_simple", "60806040525f5260205ff35f5f5f7f00000000000000000000000000000000000000000000000000000000000000015ff5"},
+		{"CREATE_empty", []byte{}, nil, false},
+		{"CREATE_simple", []byte{0x60, 0x80, 0x60, 0x40, 0x52, 0x5f, 0x52, 0x60, 0x20, 0x5f, 0xf3}, nil, false},
+		{"CREATE2_empty", []byte{}, big.NewInt(0), true},
+		{"CREATE2_simple", []byte{0x60, 0x80, 0x60, 0x40, 0x52, 0x5f, 0x52, 0x60, 0x20, 0x5f, 0xf3}, big.NewInt(1), true},
 	}
 
 	for _, bm := range benchmarks {
 		b.Run(bm.name, func(b *testing.B) {
-			bytecode, _ := hex.DecodeString(bm.bytecode)
-			
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				evm, _ := New()
-				addr := NewAddress([20]byte{byte(i)})
-				balance := NewU256FromUint64(10000000)
-				evm.SetBalance(&addr, &balance)
-				_ = evm.ExecuteWithAddress(bytecode, &addr)
+				addr := primitives.NewAddress([20]byte{byte(i)})
+				balance := big.NewInt(10000000)
+				_ = evm.SetBalance(addr, balance)
+				
+				if bm.isCreate2 {
+					_, _ = evm.Call(Create2{
+						Caller:   addr,
+						Value:    big.NewInt(0),
+						InitCode: bm.initCode,
+						Salt:     bm.salt,
+						Gas:      200000,
+					})
+				} else {
+					_, _ = evm.Call(Create{
+						Caller:   addr,
+						Value:    big.NewInt(0),
+						InitCode: bm.initCode,
+						Gas:      200000,
+					})
+				}
 				evm.Destroy()
 			}
 		})
@@ -355,10 +469,21 @@ func BenchmarkComplexScenarios(b *testing.B) {
 			defer evm.Destroy()
 			
 			bytecode, _ := hex.DecodeString(bm.bytecode)
+			caller := primitives.ZeroAddress()
+			contractAddr := primitives.NewAddress([20]byte{0x01})
+			
+			_ = evm.SetBalance(caller, big.NewInt(1000000))
+			_ = evm.SetCode(contractAddr, bytecode)
 			
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				_ = evm.Execute(bytecode)
+				_, _ = evm.Call(Call{
+					Caller: caller,
+					To:     contractAddr,
+					Value:  big.NewInt(0),
+					Input:  []byte{},
+					Gas:    1000000,
+				})
 			}
 		})
 	}
@@ -367,38 +492,50 @@ func BenchmarkComplexScenarios(b *testing.B) {
 func BenchmarkGasIntensive(b *testing.B) {
 	benchmarks := []struct {
 		name     string
-		bytecode string
+		bytecode []byte
 	}{
 		{
 			name:     "SSTORE_cold_10",
-			bytecode: "60015f5560026001556003600255600460035560056004556006600555600760065560086007556009600855600a600955",
+			bytecode: func() []byte {
+				bc, _ := hex.DecodeString("60015f5560026001556003600255600460035560056004556006600555600760065560086007556009600855600a600955")
+				return bc
+			}(),
 		},
 		{
-			name:     "KECCAK_large",
-			bytecode: bytes.Repeat([]byte{0x60, 0xaa}, 512) + []byte{0x61, 0x10, 0x00, 0x5f, 0x20},
+			name: "KECCAK_large",
+			bytecode: func() []byte {
+				bytecode := bytes.Repeat([]byte{0x60, 0xaa}, 512)
+				bytecode = append(bytecode, []byte{0x61, 0x10, 0x00, 0x5f, 0x20}...)
+				return bytecode
+			}(),
 		},
 		{
-			name:     "Memory_10MB",
-			bytecode: "7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff6298968052",
+			name: "Memory_10MB",
+			bytecode: func() []byte {
+				bc, _ := hex.DecodeString("7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff6298968052")
+				return bc
+			}(),
 		},
 	}
 
 	for _, bm := range benchmarks {
 		b.Run(bm.name, func(b *testing.B) {
-			var bytecode []byte
-			if bm.name == "KECCAK_large" {
-				bytecode = bytes.Repeat([]byte{0x60, 0xaa}, 512)
-				bytecode = append(bytecode, []byte{0x61, 0x10, 0x00, 0x5f, 0x20}...)
-			} else {
-				bytecode, _ = hex.DecodeString(bm.bytecode)
-			}
-			
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				evm, _ := New()
-				gasLimit := NewU256FromUint64(30000000)
-				evm.SetGasLimit(&gasLimit)
-				_ = evm.Execute(bytecode)
+				caller := primitives.ZeroAddress()
+				contractAddr := primitives.NewAddress([20]byte{0x01})
+				
+				_ = evm.SetBalance(caller, big.NewInt(1000000))
+				_ = evm.SetCode(contractAddr, bm.bytecode)
+				
+				_, _ = evm.Call(Call{
+					Caller: caller,
+					To:     contractAddr,
+					Value:  big.NewInt(0),
+					Input:  []byte{},
+					Gas:    30000000,
+				})
 				evm.Destroy()
 			}
 		})
@@ -408,33 +545,33 @@ func BenchmarkGasIntensive(b *testing.B) {
 func BenchmarkRealWorldContracts(b *testing.B) {
 	benchmarks := []struct {
 		name  string
-		setup func() ([]byte, *EVM)
+		setup func() ([]byte, *EVM, primitives.Address)
 	}{
 		{
 			name: "UniswapV2_swap",
-			setup: func() ([]byte, *EVM) {
+			setup: func() ([]byte, *EVM, primitives.Address) {
 				evm, _ := New()
-				reserve0Slot := NewU256FromUint64(0)
-				reserve1Slot := NewU256FromUint64(1)
-				reserve0 := NewU256FromUint64(1000000)
-				reserve1 := NewU256FromUint64(2000000)
-				addr := NewAddress([20]byte{})
-				evm.SetStorage(&addr, &reserve0Slot, &reserve0)
-				evm.SetStorage(&addr, &reserve1Slot, &reserve1)
+				reserve0Slot := big.NewInt(0)
+				reserve1Slot := big.NewInt(1)
+				reserve0 := big.NewInt(1000000)
+				reserve1 := big.NewInt(2000000)
+				addr := primitives.NewAddress([20]byte{})
+				_ = evm.SetStorage(addr, reserve0Slot, reserve0)
+				_ = evm.SetStorage(addr, reserve1Slot, reserve1)
 				bytecode, _ := hex.DecodeString("5f5460015402619c40116100165761001c5661001c5b60016001555b")
-				return bytecode, evm
+				return bytecode, evm, addr
 			},
 		},
 		{
 			name: "ERC721_mint",
-			setup: func() ([]byte, *EVM) {
+			setup: func() ([]byte, *EVM, primitives.Address) {
 				evm, _ := New()
-				totalSupplySlot := NewU256FromUint64(0)
-				currentSupply := NewU256FromUint64(100)
-				addr := NewAddress([20]byte{})
-				evm.SetStorage(&addr, &totalSupplySlot, &currentSupply)
+				totalSupplySlot := big.NewInt(0)
+				currentSupply := big.NewInt(100)
+				addr := primitives.NewAddress([20]byte{})
+				_ = evm.SetStorage(addr, totalSupplySlot, currentSupply)
 				bytecode, _ := hex.DecodeString("5f5460010160648111610019576001810190555f52602001f35bfd")
-				return bytecode, evm
+				return bytecode, evm, addr
 			},
 		},
 	}
@@ -443,8 +580,18 @@ func BenchmarkRealWorldContracts(b *testing.B) {
 		b.Run(bm.name, func(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				bytecode, evm := bm.setup()
-				_ = evm.Execute(bytecode)
+				bytecode, evm, addr := bm.setup()
+				caller := primitives.ZeroAddress()
+				_ = evm.SetBalance(caller, big.NewInt(1000000))
+				_ = evm.SetCode(addr, bytecode)
+				
+				_, _ = evm.Call(Call{
+					Caller: caller,
+					To:     addr,
+					Value:  big.NewInt(0),
+					Input:  []byte{},
+					Gas:    200000,
+				})
 				evm.Destroy()
 			}
 		})
@@ -457,7 +604,19 @@ func BenchmarkParallelExecution(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			evm, _ := New()
-			_ = evm.Execute(bytecode)
+			caller := primitives.ZeroAddress()
+			contractAddr := primitives.NewAddress([20]byte{0x01})
+			
+			_ = evm.SetBalance(caller, big.NewInt(1000000))
+			_ = evm.SetCode(contractAddr, bytecode)
+			
+			_, _ = evm.Call(Call{
+				Caller: caller,
+				To:     contractAddr,
+				Value:  big.NewInt(0),
+				Input:  []byte{},
+				Gas:    100000,
+			})
 			evm.Destroy()
 		}
 	})
@@ -474,7 +633,19 @@ func BenchmarkMemoryAllocation(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				evm, _ := New()
-				_ = evm.Execute(bc)
+				caller := primitives.ZeroAddress()
+				contractAddr := primitives.NewAddress([20]byte{0x01})
+				
+				_ = evm.SetBalance(caller, big.NewInt(1000000))
+				_ = evm.SetCode(contractAddr, bc)
+				
+				_, _ = evm.Call(Call{
+					Caller: caller,
+					To:     contractAddr,
+					Value:  big.NewInt(0),
+					Input:  []byte{},
+					Gas:    100000,
+				})
 				evm.Destroy()
 			}
 		})
@@ -509,18 +680,29 @@ func BenchmarkCachePerformance(b *testing.B) {
 			evm, _ := New()
 			defer evm.Destroy()
 			
+			caller := primitives.ZeroAddress()
+			contractAddr := primitives.NewAddress([20]byte{0x01})
+			
+			_ = evm.SetBalance(caller, big.NewInt(1000000))
+			
 			for i := uint64(0); i < 10; i++ {
-				slot := NewU256FromUint64(i)
-				value := NewU256FromUint64(i * 10)
-				addr := NewAddress([20]byte{})
-				evm.SetStorage(&addr, &slot, &value)
+				slot := big.NewInt(int64(i))
+				value := big.NewInt(int64(i * 10))
+				_ = evm.SetStorage(contractAddr, slot, value)
 			}
 			
 			bytecode, _ := hex.DecodeString(bm.bytecode)
+			_ = evm.SetCode(contractAddr, bytecode)
 			
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				_ = evm.Execute(bytecode)
+				_, _ = evm.Call(Call{
+					Caller: caller,
+					To:     contractAddr,
+					Value:  big.NewInt(0),
+					Input:  []byte{},
+					Gas:    1000000,
+				})
 			}
 		})
 	}
