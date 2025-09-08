@@ -58,7 +58,7 @@ The app package provides services that:
 
 ## Usage Patterns
 
-The demo wires a simple Bubble Tea program in `src/cli/main.go`; `internal/app` owns the tea.Model.
+The demo wires a simple Bubble Tea program in `apps/cli/main.go`; `internal/app` owns the tea.Model.
 
 ## Integration Points
 

@@ -7,7 +7,7 @@ The Guillotine CLI is a terminal user interface (TUI) application built with Go 
 ## Directory Structure
 
 ```
-src/cli/
+apps/cli/
 ├── main.go                 # Entry point - initializes and runs the Bubbletea program
 ├── go.mod                  # Go module definition (module: guillotine-cli)
 ├── go.sum                  # Dependency lock file
@@ -238,7 +238,7 @@ The CLI uses Bubbletea's alternate screen mode:
 
 ### Build
 ```bash
-cd src/cli
+cd apps/cli
 go build -o guillotine-cli .
 ```
 

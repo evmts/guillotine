@@ -16,7 +16,7 @@ This directory is a standalone Go module that uses Bubble Tea to prototype inter
 ## Build
 
 ```bash
-cd src/cli
+cd apps/cli
 go build -o guillotine-cli
 ./guillotine-cli
 ```

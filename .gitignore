@@ -177,7 +177,7 @@ advanced_cpu_profiles/*.trace/
 advanced_cpu_profiles/*_summary.txt
 
 # Go binaries
-src/cli/evm-debugger
+apps/cli/guillotine-cli
 # Performance and comparison reports (generated files)
 EVM2_Performance_Report.md
 *-comparison.md
