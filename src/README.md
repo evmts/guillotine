@@ -35,7 +35,6 @@ Core implementation of the Guillotine EVM (Ethereum Virtual Machine) in Zig.
 - **cli/** - Command-line interface for interacting with Guillotine
 - **devtool/** - Development and debugging tools
 - **solidity/** - Solidity compilation and deployment utilities
-- **guillotine-go/** - Go bindings for Guillotine
 
 ### Testing
 - **_test_utils/** - Testing utilities and fixtures

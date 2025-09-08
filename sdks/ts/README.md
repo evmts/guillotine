@@ -286,6 +286,6 @@ MIT License - see [LICENSE](../../LICENSE) for details.
 ## Related Projects
 
 - [Guillotine](https://github.com/evmts/guillotine) - The main Zig implementation
-- [Guillotine Go](../guillotine-go) - Go bindings
-- [Guillotine Python](../guillotine-py) - Python bindings
-- [Guillotine Rust](../guillotine-rs) - Rust bindings
+- [Guillotine Go](../go) - Go bindings
+- [Guillotine Python](../python) - Python bindings
+- [Guillotine Rust](../rust) - Rust bindings
