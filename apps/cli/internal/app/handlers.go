@@ -42,6 +42,10 @@ func (m Model) handleMainMenuSelect() (tea.Model, tea.Cmd) {
 		return m.handleResetState()
 	case config.MenuExit:
 		m.quitting = true
+		// Perform cleanup before exiting
+		if m.vmManager != nil {
+			m.vmManager.Close()
+		}
 		return m, tea.Batch(tea.ExitAltScreen, tea.Quit)
 	default:
 		return m, nil
