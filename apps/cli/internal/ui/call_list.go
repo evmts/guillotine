@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	guillotine "github.com/evmts/guillotine/sdks/go"
 )
 
 func RenderCallParameterList(params []types.CallParameter, cursor int, validationError string) string {
@@ -67,7 +68,7 @@ func RenderCallParameterEdit(paramName, currentValue string) string {
 	return boxStyle.Render(content)
 }
 
-func RenderCallResult(result *types.CallExecution) string {
+func RenderCallResult(result *guillotine.CallResult) string {
 	var content strings.Builder
 	
 	successStyle := lipgloss.NewStyle().Bold(true).Foreground(config.ChartGreen)
@@ -82,9 +83,9 @@ func RenderCallResult(result *types.CallExecution) string {
 	
 	content.WriteString("\n\n")
 	
-	// Always show gas used
-	content.WriteString(labelStyle.Render("Gas Used: "))
-	content.WriteString(lipgloss.NewStyle().Render(formatNumber(result.GasUsed)))
+	// Show gas left instead of gas used (we'll need to calculate gas used from original limit)
+	content.WriteString(labelStyle.Render("Gas Left: "))
+	content.WriteString(lipgloss.NewStyle().Render(formatNumber(result.GasLeft)))
 	content.WriteString("\n")
 	
 	// Show error first if failed
@@ -109,6 +110,14 @@ func RenderCallResult(result *types.CallExecution) string {
 		content.WriteString(labelStyle.Render("Logs: "))
 		content.WriteString(lipgloss.NewStyle().Render(formatNumber(uint64(len(result.Logs)))))
 		content.WriteString(" entries\n")
+	}
+	
+	// Show created address for CREATE/CREATE2
+	if result.CreatedAddress != nil {
+		content.WriteString("\n")
+		content.WriteString(labelStyle.Render("Created Address: "))
+		content.WriteString(lipgloss.NewStyle().Foreground(config.ChartGreen).Render(result.CreatedAddress.String()))
+		content.WriteString("\n")
 	}
 	
 	return content.String()

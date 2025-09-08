@@ -369,7 +369,7 @@ go build -o guillotine-cli .
 - **github.com/charmbracelet/bubbletea**: TUI framework
 - **github.com/charmbracelet/bubbles**: UI components (textinput)
 - **github.com/charmbracelet/lipgloss**: Terminal styling
-- **github.com/evmts/guillotine/bindings/go**: EVM FFI bindings
+- **github.com/evmts/guillotine/sdks/go**: EVM FFI bindings
   - `/evm`: Main EVM interface
   - `/primitives`: Ethereum types (Address, U256, Bytes)
 
@@ -420,7 +420,7 @@ case callResultMsg:
 
 ### Go Bindings Structure
 ```
-github.com/evmts/guillotine/bindings/go/
+github.com/evmts/guillotine/sdks/go/
 ├── evm/          # Main EVM interface
 ├── primitives/   # Ethereum types (Address, U256, Bytes)
 └── cgo/          # C bindings to Zig library

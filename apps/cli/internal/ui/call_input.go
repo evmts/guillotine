@@ -2,6 +2,7 @@ package ui
 
 import (
 	"guillotine-cli/internal/config"
+	"guillotine-cli/internal/types"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -65,7 +66,7 @@ func RenderCallEdit(paramName string, input textinput.Model, validationError str
 }
 
 func renderCallTypeSelector(selectedIndex int) string {
-	options := config.GetCallTypeOptions()
+	options := types.GetCallTypeOptions()
 	var items []string
 	
 	for i, option := range options {

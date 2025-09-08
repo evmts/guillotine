@@ -36,6 +36,7 @@ const (
 	
 	// Call type options
 	CallTypeCall         = "CALL"
+	CallTypeCallcode     = "CALLCODE"
 	CallTypeStaticCall   = "STATICCALL"
 	CallTypeDelegateCall = "DELEGATECALL"
 	CallTypeCreate       = "CREATE"

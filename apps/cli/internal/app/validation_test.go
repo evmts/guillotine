@@ -6,16 +6,16 @@ import (
 	"guillotine-cli/internal/types"
 )
 
-func TestvalidateCallParameters(t *testing.T) {
+func TestValidateCallParameters(t *testing.T) {
 	tests := []struct {
 		name        string
-		params      types.CallParameters
+		params      types.CallParametersStrings
 		expectError bool
 		errorType   config.InputParamErrorType
 	}{
 		{
 			name: "Valid parameters",
-			params: types.CallParameters{
+			params: types.CallParametersStrings{
 				CallType:  config.CallTypeCall,
 				Caller:    "0x0102030405060708090a0b0c0d0e0f1011121314",
 				Target:    "0x15161718191a1b1c1d1e1f20212223242526272e",
@@ -28,7 +28,7 @@ func TestvalidateCallParameters(t *testing.T) {
 		},
 		{
 			name: "Missing call type",
-			params: types.CallParameters{
+			params: types.CallParametersStrings{
 				CallType:  "",
 				Caller:    "0x0102030405060708090a0b0c0d0e0f1011121314",
 				Target:    "0x15161718191a1b1c1d1e1f20212223242526272e",
@@ -42,7 +42,7 @@ func TestvalidateCallParameters(t *testing.T) {
 		},
 		{
 			name: "Invalid caller address",
-			params: types.CallParameters{
+			params: types.CallParametersStrings{
 				CallType:  config.CallTypeCall,
 				Caller:    "invalid",
 				Target:    "0x15161718191a1b1c1d1e1f20212223242526272e",
@@ -56,7 +56,7 @@ func TestvalidateCallParameters(t *testing.T) {
 		},
 		{
 			name: "Invalid gas limit",
-			params: types.CallParameters{
+			params: types.CallParametersStrings{
 				CallType:  config.CallTypeCall,
 				Caller:    "0x0102030405060708090a0b0c0d0e0f1011121314",
 				Target:    "0x15161718191a1b1c1d1e1f20212223242526272e",
@@ -70,7 +70,7 @@ func TestvalidateCallParameters(t *testing.T) {
 		},
 		{
 			name: "Invalid input data",
-			params: types.CallParameters{
+			params: types.CallParametersStrings{
 				CallType:  config.CallTypeCall,
 				Caller:    "0x0102030405060708090a0b0c0d0e0f1011121314",
 				Target:    "0x15161718191a1b1c1d1e1f20212223242526272e",
