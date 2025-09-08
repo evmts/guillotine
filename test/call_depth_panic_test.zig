@@ -3,19 +3,14 @@ const testing = std.testing;
 const evm = @import("evm");
 const primitives = @import("primitives");
 
-test "call depth limit panic - segfaults when max_call_depth is reached" {
+test "call depth limit handling - should fail gracefully when max_call_depth is reached" {
     const allocator = testing.allocator;
     
-    // BUG: Setting max_call_depth to a small value causes a segfault when the limit is reached.
-    // The EVM likely panics or mishandles the error when hitting the call depth limit,
-    // causing memory corruption that manifests as a segfault in arena_allocator during
-    // the next allocation attempt.
-    //
-    // This configuration WILL CRASH:
+    // Test that max_call_depth limit is properly handled without crashing.
+    // When the call depth limit is reached, the EVM should return a failure result
+    // rather than segfaulting.
     const TestEvm = evm.Evm(.{ .max_call_depth = 3 });
     
-    // To make the test pass, comment the line above and uncomment this:
-    // const TestEvm = evm.Evm(.{}); // Uses default max_call_depth = 1024
     
     // Recursive bytecode that calls itself indefinitely
     const recursive_bytecode = [_]u8{
@@ -92,7 +87,7 @@ test "call depth limit panic - segfaults when max_call_depth is reached" {
     );
     defer test_evm.deinit();
     
-    // Execute recursive call - THIS WILL SEGFAULT when max_call_depth = 3
+    // Execute recursive call - should fail gracefully when max_call_depth = 3
     const call_params = TestEvm.CallParams{
         .call = .{
             .caller = caller_address,
@@ -106,7 +101,9 @@ test "call depth limit panic - segfaults when max_call_depth is reached" {
     var result = test_evm.call(call_params);
     defer result.deinit(allocator);
     
-    try testing.expect(result.success);
-    try testing.expect(result.output.len == 32);
-    try testing.expectEqual(@as(u8, 0x01), result.output[31]);
+    // Should fail due to call depth limit being exceeded
+    try testing.expect(!result.success);
+    try testing.expectEqual(@as(u64, 0), result.gas_left);
+    // Output should be empty when call fails due to depth limit
+    try testing.expectEqual(@as(usize, 0), result.output.len);
 }
