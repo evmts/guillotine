@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/evmts/guillotine/bindings/go/evm"
+	"github.com/evmts/guillotine/sdks/go/evm"
 )
 
 type VMManager struct {
@@ -54,7 +54,7 @@ func (vm *VMManager) Reset() error {
 	defer vm.mu.Unlock()
 
 	if vm.vm != nil {
-		vm.vm.Close()
+		vm.vm.Destroy()
 	}
 
 	newVM, err := evm.New()
@@ -86,7 +86,7 @@ func (vm *VMManager) GetCode(address string) ([]byte, error) {
 		return nil, fmt.Errorf("failed to get code: %w", err)
 	}
 
-	return code.Data(), nil
+	return code, nil
 }
 
 
@@ -96,7 +96,7 @@ func (vm *VMManager) Close() {
 	defer vm.mu.Unlock()
 
 	if vm.vm != nil {
-		vm.vm.Close()
+		vm.vm.Destroy()
 		vm.vm = nil
 	}
 }

@@ -3,10 +3,11 @@ package evm
 import (
 	"encoding/hex"
 	"guillotine-cli/internal/types"
+	"math/big"
 	"strconv"
 	"strings"
 
-	"github.com/evmts/guillotine/bindings/go/primitives"
+	"github.com/evmts/guillotine/sdks/go/primitives"
 )
 
 // ParseEthereumAddress parses a hex string address into primitives.Address
@@ -15,25 +16,18 @@ func ParseEthereumAddress(addr string) (primitives.Address, error) {
 		return primitives.Address{}, types.NewInputParamError(types.ErrorInvalidCallerAddress, "address")
 	}
 	
-	hexStr := addr[2:] // Remove 0x prefix
-	bytes, err := hex.DecodeString(hexStr)
-	if err != nil {
-		return primitives.Address{}, err
-	}
-	
-	var addrBytes [20]byte
-	copy(addrBytes[:], bytes)
-	return primitives.NewAddress(addrBytes), nil
+	// Use the SDK's built-in parser
+	return primitives.AddressFromHex(addr)
 }
 
-// ParseWeiValue parses a decimal string to U256
-func ParseWeiValue(value string) (primitives.U256, error) {
+// ParseWeiValue parses a decimal string to *big.Int
+func ParseWeiValue(value string) (*big.Int, error) {
 	val, err := strconv.ParseUint(value, 10, 64)
 	if err != nil {
-		return primitives.U256{}, types.NewInputParamError(types.ErrorInvalidValue, "value")
+		return nil, types.NewInputParamError(types.ErrorInvalidValue, "value")
 	}
 	
-	return primitives.NewU256(val), nil
+	return big.NewInt(int64(val)), nil
 }
 
 // ParseHexData parses a hex string into bytes
@@ -42,7 +36,7 @@ func ParseHexData(data string) ([]byte, error) {
 		return nil, types.NewInputParamError(types.ErrorInvalidInputData, "hex_data")
 	}
 	
-	hexStr := data[2:] // Remove 0x prefix
+	hexStr := strings.TrimPrefix(data, "0x")
 	if len(hexStr)%2 != 0 {
 		hexStr = "0" + hexStr
 	}
@@ -60,11 +54,11 @@ func IsValidAddress(addr string) bool {
 	if !strings.HasPrefix(addr, "0x") {
 		return false
 	}
-	hex := addr[2:]
-	if len(hex) != 40 {
+	hexStr := addr[2:]
+	if len(hexStr) != 40 {
 		return false
 	}
-	for _, c := range hex {
+	for _, c := range hexStr {
 		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
 			return false
 		}
@@ -77,8 +71,8 @@ func IsValidHex(data string) bool {
 	if !strings.HasPrefix(data, "0x") {
 		return false
 	}
-	hex := data[2:]
-	for _, c := range hex {
+	hexStr := data[2:]
+	for _, c := range hexStr {
 		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
 			return false
 		}

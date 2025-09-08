@@ -133,7 +133,7 @@ func (m *Model) handleCallTypeEditNavigation(msgStr string) (tea.Model, tea.Cmd)
 			m.callTypeSelector--
 		}
 	} else if config.IsKey(msgStr, config.KeyDown) {
-		options := config.GetCallTypeOptions()
+		options := types.GetCallTypeOptions()
 		if m.callTypeSelector < len(options)-1 {
 			m.callTypeSelector++
 		}

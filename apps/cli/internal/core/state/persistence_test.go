@@ -135,7 +135,7 @@ func TestAppendCall(t *testing.T) {
 }
 
 func TestConvertFromCallParameters(t *testing.T) {
-	params := types.CallParameters{
+	params := types.CallParametersStrings{
 		CallType:  "STATICCALL",
 		Caller:    "0x1111111111111111111111111111111111111111",
 		Target:    "0x2222222222222222222222222222222222222222",

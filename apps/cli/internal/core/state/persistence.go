@@ -131,7 +131,7 @@ func AppendCall(path string, call PersistedCall) error {
 	return SaveStateFile(path, state)
 }
 
-func ConvertFromCallParameters(params types.CallParameters, timestamp time.Time) PersistedCall {
+func ConvertFromCallParameters(params types.CallParametersStrings, timestamp time.Time) PersistedCall {
 	return PersistedCall{
 		CallType:  params.CallType,
 		Caller:    params.Caller,
@@ -144,8 +144,8 @@ func ConvertFromCallParameters(params types.CallParameters, timestamp time.Time)
 	}
 }
 
-func ConvertToCallParameters(call PersistedCall) types.CallParameters {
-	return types.CallParameters{
+func ConvertToCallParameters(call PersistedCall) types.CallParametersStrings {
+	return types.CallParametersStrings{
 		CallType:  call.CallType,
 		Caller:    call.Caller,
 		Target:    call.Target,

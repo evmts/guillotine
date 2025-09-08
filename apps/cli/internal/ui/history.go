@@ -166,7 +166,7 @@ func RenderHistoryDetail(entry *types.CallHistoryEntry, width, height int) strin
 			b.WriteString("\n")
 		}
 
-		outputData := entry.Result.Output.Data()
+		outputData := entry.Result.Output
 		if len(outputData) > 0 {
 			b.WriteString("\n")
 			b.WriteString(config.LabelStyle.Render("Output:"))
@@ -182,7 +182,7 @@ func RenderHistoryDetail(entry *types.CallHistoryEntry, width, height int) strin
 			b.WriteString("\n")
 			for i, log := range entry.Result.Logs {
 				b.WriteString(config.DimmedStyle.Render(fmt.Sprintf("  [%d] Topics: %d, Data: %d bytes", 
-					i, len(log.Topics), len(log.Data.Data()))))
+					i, len(log.Topics), len(log.Data))))
 				b.WriteString("\n")
 			}
 		}

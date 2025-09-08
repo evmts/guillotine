@@ -6,6 +6,7 @@ import (
 
 	"guillotine-cli/internal/config"
 	"guillotine-cli/internal/types"
+
 	"github.com/google/uuid"
 )
 
@@ -55,7 +56,7 @@ func (h *HistoryManager) AddCall(entry types.CallHistoryEntry) {
 			address := entry.Result.CreatedAddress.Hex()
 			
 			// The output field contains the deployed bytecode for successful CREATE/CREATE2
-			bytecode := entry.Result.Output.Data()
+			bytecode := entry.Result.Output
 			
 			// Store the deployed contract with the same timestamp as the CREATE call
 			contract := &types.DeployedContract{

@@ -13,12 +13,12 @@ func TestExecuteCall_ValidateParameters(t *testing.T) {
 
 	tests := []struct {
 		name      string
-		params    types.CallParameters
+		params    types.CallParametersStrings
 		wantError bool
 	}{
 		{
 			name: "Valid CALL parameters",
-			params: types.CallParameters{
+			params: types.CallParametersStrings{
 				CallType:  "CALL",
 				Caller:    "0x0102030405060708090a0b0c0d0e0f1011121314",
 				Target:    "0x15161718191a1b1c1d1e1f20212223242526272e",
@@ -30,7 +30,7 @@ func TestExecuteCall_ValidateParameters(t *testing.T) {
 		},
 		{
 			name: "Invalid caller address",
-			params: types.CallParameters{
+			params: types.CallParametersStrings{
 				CallType:  "CALL",
 				Caller:    "invalid",
 				Target:    "0x15161718191a1b1c1d1e1f20212223242526272e",
@@ -42,7 +42,7 @@ func TestExecuteCall_ValidateParameters(t *testing.T) {
 		},
 		{
 			name: "Invalid gas limit",
-			params: types.CallParameters{
+			params: types.CallParametersStrings{
 				CallType:  "CALL",
 				Caller:    "0x0102030405060708090a0b0c0d0e0f1011121314",
 				Target:    "0x15161718191a1b1c1d1e1f20212223242526272e",
@@ -71,7 +71,7 @@ func TestExecuteCall_CallTypes(t *testing.T) {
 	}
 
 	// Test CREATE call type
-	params := types.CallParameters{
+	params := types.CallParametersStrings{
 		CallType:  "CREATE",
 		Caller:    "0x0102030405060708090a0b0c0d0e0f1011121314",
 		Value:     "0",

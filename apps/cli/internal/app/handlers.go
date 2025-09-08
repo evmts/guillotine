@@ -9,15 +9,15 @@ import (
 	"guillotine-cli/internal/ui"
 	"time"
 
-	gevmTypes "github.com/evmts/guillotine/bindings/go/evm"
 	tea "github.com/charmbracelet/bubbletea"
+	guillotine "github.com/evmts/guillotine/sdks/go"
 )
 
 // Message types for tea commands
 type resetCompleteMsg struct{}
 type callResultMsg struct {
-	result *gevmTypes.CallResult
-	params types.CallParameters
+	result *guillotine.CallResult
+	params types.CallParametersStrings
 }
 type copyFeedbackMsg struct {
 	message string
@@ -60,7 +60,7 @@ func (m Model) handleCallParamSelect() (tea.Model, tea.Cmd) {
 	
 	if param.Name == config.CallParamCallType {
 		// Initialize call type selector with current value
-		options := config.GetCallTypeOptions()
+		options := types.GetCallTypeOptions()
 		m.callTypeSelector = 0
 		for i, opt := range options {
 			if opt == param.Value {
@@ -83,7 +83,7 @@ func (m Model) handleCallParamSelect() (tea.Model, tea.Cmd) {
 func (m Model) handleCallEditSave() (tea.Model, tea.Cmd) {
 	if m.editingParam == config.CallParamCallType {
 		// Handle call type selection
-		options := config.GetCallTypeOptions()
+		options := types.GetCallTypeOptions()
 		if m.callTypeSelector >= 0 && m.callTypeSelector < len(options) {
 			selectedType := options[m.callTypeSelector]
 			SetCallParam(&m.callParams, m.editingParam, selectedType)
@@ -125,11 +125,11 @@ func (m Model) handleCallExecute() (tea.Model, tea.Cmd) {
 }
 
 // executeCallCmd creates a command to execute an EVM call asynchronously
-func (m *Model) executeCallCmd(params types.CallParameters) tea.Cmd {
+func (m *Model) executeCallCmd(params types.CallParametersStrings) tea.Cmd {
 	return func() tea.Msg {
 		result, err := evm.ExecuteCall(m.vmManager, params)
 		if err != nil {
-			result = &gevmTypes.CallResult{
+			result = &guillotine.CallResult{
 				Success:   false,
 				ErrorInfo: err.Error(),
 				GasLeft:   0,
@@ -165,7 +165,7 @@ func (m *Model) resetParameter(paramName string, updateInput bool) {
 	defaultValue := ""
 	switch paramName {
 	case config.CallParamCallType:
-		defaultValue = config.CallTypeToString(defaults.CallType)
+		defaultValue = types.CallTypeToString(defaults.CallType)
 	case config.CallParamCaller:
 		defaultValue = defaults.CallerAddr
 	case config.CallParamTarget:
@@ -186,7 +186,7 @@ func (m *Model) resetParameter(paramName string, updateInput bool) {
 	// Update UI inputs if requested
 	if updateInput {
 		if paramName == config.CallParamCallType {
-			options := config.GetCallTypeOptions()
+			options := types.GetCallTypeOptions()
 			for i, opt := range options {
 				if opt == defaultValue {
 					m.callTypeSelector = i

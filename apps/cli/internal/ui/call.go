@@ -103,11 +103,10 @@ func RenderCallResult(result *guillotine.CallResult, params types.CallParameters
 	}
 	
 	// Show output if available (even for failed calls)
-	outputData := result.Output.Data()
-	if len(outputData) > 0 {
+	if len(result.Output) > 0 {
 		content.WriteString("\n")
 		content.WriteString(labelStyle.Render("Output: "))
-		content.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render(formatHex(outputData)))
+		content.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render(formatHex(result.Output)))
 		content.WriteString("\n")
 	}
 	

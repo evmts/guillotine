@@ -16,7 +16,7 @@ func NewCallValidator() *CallValidator {
 }
 
 // ValidateCallParameters validates all call parameters before execution
-func (v *CallValidator) ValidateCallParameters(params types.CallParameters) error {
+func (v *CallValidator) ValidateCallParameters(params types.CallParametersStrings) error {
 	// Validate call type
 	if params.CallType == "" {
 		return types.NewInputParamError(types.ErrorCallTypeRequired, "call_type")

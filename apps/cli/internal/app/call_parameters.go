@@ -6,7 +6,7 @@ import (
 )
 
 // GetCallParams returns the list of parameters based on call type
-func GetCallParams(cp types.CallParameters) []types.CallParameter {
+func GetCallParams(cp types.CallParametersStrings) []types.CallParameter {
 	// Define parameter visibility rules based on call type
 	paramConfig := []struct {
 		name      string
@@ -72,7 +72,7 @@ func GetCallParams(cp types.CallParameters) []types.CallParameter {
 }
 
 // SetCallParam updates a specific parameter value
-func SetCallParam(cp *types.CallParameters, name, value string) {
+func SetCallParam(cp *types.CallParametersStrings, name, value string) {
 	switch name {
 	case config.CallParamCallType:
 		cp.CallType = value
@@ -92,10 +92,10 @@ func SetCallParam(cp *types.CallParameters, name, value string) {
 }
 
 // NewCallParameters creates a new CallParameters with default values
-func NewCallParameters() types.CallParameters {
+func NewCallParameters() types.CallParametersStrings {
 	defaults := config.GetCallDefaults()
-	return types.CallParameters{
-		CallType:   config.CallTypeToString(defaults.CallType),
+	return types.CallParametersStrings{
+		CallType:   types.CallTypeToString(defaults.CallType),
 		Caller:     defaults.CallerAddr,
 		Target:     defaults.TargetAddr,
 		Value:      defaults.Value,

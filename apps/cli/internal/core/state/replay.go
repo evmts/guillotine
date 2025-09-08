@@ -7,7 +7,8 @@ import (
 	"guillotine-cli/internal/core/evm"
 	"guillotine-cli/internal/core/history"
 	"guillotine-cli/internal/types"
-	gevmTypes "github.com/evmts/guillotine/bindings/go/evm"
+
+	guillotine "github.com/evmts/guillotine/sdks/go"
 	"github.com/google/uuid"
 )
 
@@ -38,7 +39,7 @@ func (sm *StateReplayer) replayCall(call PersistedCall, index int) error {
 	
 	result, err := evm.ExecuteCall(sm.vmManager, params)
 	if err != nil {
-		result = &gevmTypes.CallResult{
+		result = &guillotine.CallResult{
 			Success:   false,
 			ErrorInfo: err.Error(),
 			GasLeft:   0,
