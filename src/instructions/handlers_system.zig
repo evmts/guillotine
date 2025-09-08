@@ -136,7 +136,16 @@ pub fn Handlers(comptime FrameType: type) type {
                 },
             };
 
-            var result = self.getEvm().inner_call(params) catch |err| switch (err) {
+            // Check call depth limit before making the recursive call
+            const evm_instance = self.getEvm();
+            if (evm_instance.depth >= @TypeOf(evm_instance.*).config.max_call_depth) {
+                self.stack.push_unsafe(0); // Call failed
+                const op_data = dispatch.getOpData(.CALL);
+                const next = op_data.next;
+                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            }
+
+            var result = evm_instance.inner_call(params) catch |err| switch (err) {
                 else => {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.CALL);
@@ -275,7 +284,16 @@ pub fn Handlers(comptime FrameType: type) type {
                 },
             };
 
-            var result = self.getEvm().inner_call(call_params) catch |err| switch (err) {
+            // Check call depth limit before making the recursive call
+            const evm_instance = self.getEvm();
+            if (evm_instance.depth >= @TypeOf(evm_instance.*).config.max_call_depth) {
+                self.stack.push_unsafe(0); // Call failed
+                const op_data = dispatch.getOpData(.CALLCODE);
+                const next = op_data.next;
+                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            }
+
+            var result = evm_instance.inner_call(call_params) catch |err| switch (err) {
                 else => {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.CALLCODE);
@@ -396,7 +414,17 @@ pub fn Handlers(comptime FrameType: type) type {
                     .gas = gas_u64,
                 },
             };
-            var result = self.getEvm().inner_call(params) catch |err| switch (err) {
+            
+            // Check call depth limit before making the recursive call
+            const evm_instance = self.getEvm();
+            if (evm_instance.depth >= @TypeOf(evm_instance.*).config.max_call_depth) {
+                self.stack.push_unsafe(0); // Call failed
+                const op_data = dispatch.getOpData(.DELEGATECALL);
+                const next = op_data.next;
+                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            }
+
+            var result = evm_instance.inner_call(params) catch |err| switch (err) {
                 else => {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.DELEGATECALL);
@@ -530,7 +558,17 @@ pub fn Handlers(comptime FrameType: type) type {
                     .gas = gas_u64,
                 },
             };
-            var result = self.getEvm().inner_call(params) catch |err| switch (err) {
+            
+            // Check call depth limit before making the recursive call
+            const evm_instance = self.getEvm();
+            if (evm_instance.depth >= @TypeOf(evm_instance.*).config.max_call_depth) {
+                self.stack.push_unsafe(0); // Call failed
+                const op_data = dispatch.getOpData(.STATICCALL);
+                const next = op_data.next;
+                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            }
+
+            var result = evm_instance.inner_call(params) catch |err| switch (err) {
                 else => {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.STATICCALL);
@@ -628,7 +666,17 @@ pub fn Handlers(comptime FrameType: type) type {
                     .gas = @as(u64, @intCast(self.gas_remaining)),
                 },
             };
-            var result = self.getEvm().inner_call(params) catch |err| switch (err) {
+            
+            // Check call depth limit before making the recursive call
+            const evm_instance = self.getEvm();
+            if (evm_instance.depth >= @TypeOf(evm_instance.*).config.max_call_depth) {
+                self.stack.push_unsafe(0); // Call failed
+                const op_data = dispatch.getOpData(.CREATE);
+                const next = op_data.next;
+                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            }
+
+            var result = evm_instance.inner_call(params) catch |err| switch (err) {
                 else => {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.CREATE);
@@ -713,7 +761,17 @@ pub fn Handlers(comptime FrameType: type) type {
                     .gas = @as(u64, @intCast(self.gas_remaining)),
                 },
             };
-            var result = self.getEvm().inner_call(params) catch |err| switch (err) {
+            
+            // Check call depth limit before making the recursive call
+            const evm_instance = self.getEvm();
+            if (evm_instance.depth >= @TypeOf(evm_instance.*).config.max_call_depth) {
+                self.stack.push_unsafe(0); // Call failed
+                const op_data = dispatch.getOpData(.CREATE2);
+                const next = op_data.next;
+                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            }
+
+            var result = evm_instance.inner_call(params) catch |err| switch (err) {
                 else => {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.CREATE2);
@@ -1072,7 +1130,16 @@ pub fn Handlers(comptime FrameType: type) type {
                 },
             };
 
-            var result = self.getEvm().inner_call(params) catch |err| switch (err) {
+            // Check call depth limit before making the recursive call
+            const evm_instance = self.getEvm();
+            if (evm_instance.depth >= @TypeOf(evm_instance.*).config.max_call_depth) {
+                self.stack.push_unsafe(0); // Call failed
+                const op_data = dispatch.getOpData(.AUTHCALL);
+                const next = op_data.next;
+                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            }
+
+            var result = evm_instance.inner_call(params) catch |err| switch (err) {
                 else => {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.AUTHCALL);
