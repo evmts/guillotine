@@ -102,18 +102,8 @@ int evm_bytecode_is_jump_dest(const BytecodeHandle* handle, size_t position);
 size_t evm_bytecode_get_full_length(const BytecodeHandle* handle);
 size_t evm_bytecode_get_runtime_data(const BytecodeHandle* handle, uint8_t* buffer, size_t buffer_len);
 
-// Metadata accessors
-int evm_bytecode_has_metadata(const BytecodeHandle* handle);
-size_t evm_bytecode_get_metadata_length(const BytecodeHandle* handle);
-size_t evm_bytecode_get_metadata_ipfs(const BytecodeHandle* handle, uint8_t* out, size_t max_len);
-int evm_bytecode_get_metadata_solc_version(const BytecodeHandle* handle, uint8_t* out_major, uint8_t* out_minor, uint8_t* out_patch);
-
 // Bytecode validation
-uint32_t evm_bytecode_count_invalid_opcodes(const BytecodeHandle* handle);
 int evm_bytecode_find_jump_dests(const BytecodeHandle* handle, uint32_t* jump_dests, uint32_t max_dests, uint32_t* count_out);
-
-// Bytecode statistics
-int evm_bytecode_get_stats(const BytecodeHandle* handle, CBytecodeStats* stats_out);
 
 // Bytecode analysis
 int evm_bytecode_analyze(const BytecodeHandle* handle, CBytecodeAnalysis* analysis_out);
@@ -121,6 +111,14 @@ void evm_bytecode_free_analysis(CBytecodeAnalysis* analysis);
 
 // Utilities
 const char* evm_bytecode_opcode_name(uint8_t opcode_value);
+
+typedef struct {
+    uint16_t gas_cost;
+    uint8_t stack_inputs;
+    uint8_t stack_outputs;
+} COpcodeInfo;
+
+COpcodeInfo evm_bytecode_opcode_info(uint8_t opcode_value);
 
 // FFI initialization and cleanup (from parent package)
 void guillotine_init(void);

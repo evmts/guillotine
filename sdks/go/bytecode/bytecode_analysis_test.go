@@ -101,15 +101,6 @@ func TestAnalysisBasicPatterns(t *testing.T) {
 			if len(analysis.BasicBlocks) < tt.expectedBlocksMin {
 				t.Errorf("Expected at least %d basic blocks, got %d", tt.expectedBlocksMin, len(analysis.BasicBlocks))
 			}
-
-			// Get stats to verify instruction count
-			stats, err := bc.GetStats()
-			if err != nil {
-				t.Fatalf("Failed to get stats: %v", err)
-			}
-			if stats.InstructionCount != tt.expectedInstrCount {
-				t.Errorf("Expected %d instructions, got %d", tt.expectedInstrCount, stats.InstructionCount)
-			}
 		})
 	}
 }
@@ -300,26 +291,11 @@ func TestAnalysisComplexContracts(t *testing.T) {
 			}
 			defer bc.Destroy()
 
-			// Get statistics
-			stats, err := bc.GetStats()
-			if err != nil {
-				t.Fatalf("Failed to get stats: %v", err)
-			}
-
 			// Analyze bytecode
 			analysis, err := bc.Analyze()
 			if err != nil {
 				t.Fatalf("Failed to analyze bytecode: %v", err)
 			}
-
-			t.Logf("%s: %s", tt.name, tt.description)
-			t.Logf("  Total bytes: %d", stats.TotalBytes)
-			t.Logf("  Instructions: %d (min expected: %d)", stats.InstructionCount, tt.minStats.instructions)
-			t.Logf("  Push instructions: %d (min expected: %d)", stats.PushInstructionCount, tt.minStats.pushes)
-			t.Logf("  Jump instructions: %d (min expected: %d)", stats.JumpInstructionCount, tt.minStats.jumps)
-			t.Logf("  Call instructions: %d (min expected: %d)", stats.CallInstructionCount, tt.minStats.calls)
-			t.Logf("  Jump destinations: %d", stats.JumpDestCount)
-			t.Logf("  Complexity score: %d", stats.ComplexityScore)
 
 			t.Logf("  Analysis results:")
 			t.Logf("    Push PCs: %d", len(analysis.PushPCs))
@@ -327,20 +303,6 @@ func TestAnalysisComplexContracts(t *testing.T) {
 			t.Logf("    Basic blocks: %d", len(analysis.BasicBlocks))
 			t.Logf("    Jump fusions: %d", len(analysis.JumpFusions))
 			t.Logf("    Advanced fusions: %d", len(analysis.AdvancedFusions))
-
-			// Verify minimum expectations
-			if stats.InstructionCount < tt.minStats.instructions {
-				t.Errorf("Expected at least %d instructions, got %d", tt.minStats.instructions, stats.InstructionCount)
-			}
-			if stats.PushInstructionCount < tt.minStats.pushes {
-				t.Errorf("Expected at least %d push instructions, got %d", tt.minStats.pushes, stats.PushInstructionCount)
-			}
-			if stats.JumpInstructionCount < tt.minStats.jumps {
-				t.Errorf("Expected at least %d jump instructions, got %d", tt.minStats.jumps, stats.JumpInstructionCount)
-			}
-			if stats.CallInstructionCount < tt.minStats.calls {
-				t.Errorf("Expected at least %d call instructions, got %d", tt.minStats.calls, stats.CallInstructionCount)
-			}
 
 			// Basic blocks should be non-empty for complex contracts
 			if len(analysis.BasicBlocks) == 0 {
@@ -420,118 +382,14 @@ func TestAnalysisEdgeCases(t *testing.T) {
 			}
 			defer bc.Destroy()
 
-			// Both stats and analysis should work without panicking
-			stats, err := bc.GetStats()
-			if err != nil {
-				t.Fatalf("Failed to get stats: %v", err)
-			}
-
 			analysis, err := bc.Analyze()
 			if err != nil {
 				t.Fatalf("Failed to analyze bytecode: %v", err)
 			}
 
 			t.Logf("%s: %s", tt.name, tt.description)
-			t.Logf("  Total bytes: %d", stats.TotalBytes)
-			t.Logf("  Instructions: %d", stats.InstructionCount)
-			t.Logf("  Invalid opcodes: %d", stats.InvalidOpcodeCount)
 			t.Logf("  Basic blocks: %d", len(analysis.BasicBlocks))
-
-			// Special checks for specific edge cases
-			if tt.name == "empty_bytecode" {
-				if stats.TotalBytes != 0 {
-					t.Error("Empty bytecode should have 0 bytes")
-				}
-				if stats.InstructionCount != 0 {
-					t.Error("Empty bytecode should have 0 instructions")
-				}
-			}
-
-			if tt.name == "only_invalid" {
-				if stats.InvalidOpcodeCount != 3 {
-					t.Errorf("Expected 3 invalid opcodes, got %d", stats.InvalidOpcodeCount)
-				}
-			}
 		})
-	}
-}
-
-// TestStatsAccuracy tests accuracy of bytecode statistics
-func TestStatsAccuracy(t *testing.T) {
-	// Create bytecode with known opcode counts
-	code := []byte{
-		// Push instructions (5)
-		0x60, 0x01, // PUSH1
-		0x61, 0x02, 0x03, // PUSH2
-		0x5F, // PUSH0
-		0x60, 0x04, // PUSH1
-		0x60, 0x05, // PUSH1
-
-		// Jump instructions (2)
-		0x56, // JUMP
-		0x57, // JUMPI
-
-		// Jump destinations (2)
-		0x5B, // JUMPDEST
-		0x5B, // JUMPDEST
-
-		// Call instructions (4)
-		0xF1, // CALL
-		0xF2, // CALLCODE
-		0xF4, // DELEGATECALL
-		0xFA, // STATICCALL
-
-		// Create instructions (2)
-		0xF0, // CREATE
-		0xF5, // CREATE2
-
-		// Other instructions
-		0x01, // ADD
-		0x02, // MUL
-		0x50, // POP
-		0x00, // STOP
-	}
-
-	bc, err := bytecode.New(code)
-	if err != nil {
-		t.Fatalf("Failed to create bytecode: %v", err)
-	}
-	defer bc.Destroy()
-
-	stats, err := bc.GetStats()
-	if err != nil {
-		t.Fatalf("Failed to get stats: %v", err)
-	}
-
-	// Verify exact counts
-	tests := []struct {
-		name     string
-		got      uint32
-		expected uint32
-	}{
-		{"total_bytes", uint32(stats.TotalBytes), uint32(len(code))},
-		{"push_instructions", stats.PushInstructionCount, 5},
-		{"jump_instructions", stats.JumpInstructionCount, 2},
-		{"jump_destinations", stats.JumpDestCount, 2},
-		{"call_instructions", stats.CallInstructionCount, 4},
-		{"create_instructions", stats.CreateInstructionCount, 2},
-	}
-
-	for _, tt := range tests {
-		if tt.got != tt.expected {
-			t.Errorf("%s: expected %d, got %d", tt.name, tt.expected, tt.got)
-		}
-	}
-
-	// Verify complexity score calculation
-	// Formula: instructions + (jumps * 2) + (calls * 3) + (creates * 5)
-	expectedComplexity := uint64(stats.InstructionCount) +
-		uint64(stats.JumpInstructionCount)*2 +
-		uint64(stats.CallInstructionCount)*3 +
-		uint64(stats.CreateInstructionCount)*5
-
-	if stats.ComplexityScore != expectedComplexity {
-		t.Errorf("Complexity score: expected %d, got %d", expectedComplexity, stats.ComplexityScore)
 	}
 }
 

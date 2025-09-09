@@ -8,6 +8,7 @@ const Opcode = evm.Opcode;
 const BytecodeConfig = evm.BytecodeConfig;
 const BytecodeType = evm.Bytecode(BytecodeConfig{});
 const bytecodeAnalyze = @import("bytecode_analyze.zig").bytecodeAnalyze;
+const opcode_data = evm.OpcodeData;
 
 const allocator = std.heap.c_allocator;
 
@@ -571,6 +572,25 @@ pub fn evm_bytecode_opcode_name(opcode_value: u8) callconv(.c) [*:0]const u8 {
 pub fn evm_bytecode_is_valid_opcode(opcode_value: u8) callconv(.c) c_int {
     _ = std.meta.intToEnum(Opcode, opcode_value) catch return 0;
     return 1;
+}
+
+/// C structure for opcode information
+pub const COpcodeInfo = extern struct {
+    gas_cost: u16,
+    stack_inputs: u8,
+    stack_outputs: u8,
+};
+
+/// Get opcode information for a given opcode value
+/// @param opcode_value Opcode value (0-255)
+/// @return Opcode information structure
+pub fn evm_bytecode_opcode_info(opcode_value: u8) callconv(.c) COpcodeInfo {
+    const info = opcode_data.OPCODE_INFO[opcode_value];
+    return COpcodeInfo{
+        .gas_cost = info.gas_cost,
+        .stack_inputs = info.stack_inputs,
+        .stack_outputs = info.stack_outputs,
+    };
 }
 
 // ============================================================================

@@ -1,48 +1,15 @@
 // Package bytecode provides bytecode analysis and statistics functionality.
 //
 // This file contains the single source of truth for all bytecode-related types:
-//    - Bytecode statistics and metadata structures
-//    - Control flow analysis (basic blocks, jump patterns)
-//    - Fusion optimization detection types
-//    - Comprehensive bytecode analysis results
+//   - Bytecode statistics and metadata structures
+//   - Control flow analysis (basic blocks, jump patterns)
+//   - Fusion optimization detection types
+//   - Comprehensive bytecode analysis results
 package bytecode
 
 import (
 	"math/big"
 )
-
-// ========================
-// Statistics Types
-// ========================
-
-// Stats contains comprehensive bytecode statistics
-type Stats struct {
-	TotalBytes             uint64
-	InstructionCount       uint32
-	JumpDestCount          uint32
-	InvalidOpcodeCount     uint32
-	PushInstructionCount   uint32
-	JumpInstructionCount   uint32
-	CallInstructionCount   uint32
-	CreateInstructionCount uint32
-	ComplexityScore        uint64
-}
-
-// ========================
-// Metadata Types
-// ========================
-
-// Metadata contains Solidity metadata information
-type Metadata struct {
-	HasMetadata    bool
-	MetadataLength uint64
-	IPFSHash       []byte // 34 bytes: 0x12 0x20 + 32-byte hash
-	SolcVersion    struct {
-		Major uint8
-		Minor uint8
-		Patch uint8
-	}
-}
 
 // ========================
 // Control Flow Analysis Types

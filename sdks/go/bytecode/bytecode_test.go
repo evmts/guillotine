@@ -149,14 +149,4 @@ func TestBytecodeWithMetadata(t *testing.T) {
 		t.Fatalf("Failed to create bytecode: %v", err)
 	}
 	defer bc.Destroy()
-	
-	metadata, err := bc.GetMetadata()
-	if err != nil {
-		t.Fatalf("Failed to get metadata: %v", err)
-	}
-	
-	// This simple bytecode shouldn't have metadata
-	if metadata.HasMetadata {
-		t.Error("Simple bytecode should not have metadata")
-	}
 }

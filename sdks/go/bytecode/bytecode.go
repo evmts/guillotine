@@ -267,94 +267,6 @@ func (b *Bytecode) FindJumpDests() ([]uint32, error) {
 	return jumpDests, nil
 }
 
-// CountInvalidOpcodes returns the number of invalid opcodes
-func (b *Bytecode) CountInvalidOpcodes() (uint32, error) {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-	
-	if b.ptr == nil {
-		return 0, ErrBytecodeDestroyed
-	}
-	
-	return uint32(C.evm_bytecode_count_invalid_opcodes(b.ptr)), nil
-}
-
-// ========================
-// Metadata
-// ========================
-
-// GetMetadata returns the Solidity metadata information
-func (b *Bytecode) GetMetadata() (*Metadata, error) {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-	
-	if b.ptr == nil {
-		return nil, ErrBytecodeDestroyed
-	}
-	
-	metadata := &Metadata{}
-	
-	// Check if metadata exists
-	hasMetadata := C.evm_bytecode_has_metadata(b.ptr)
-	metadata.HasMetadata = hasMetadata != 0
-	
-	if !metadata.HasMetadata {
-		return metadata, nil
-	}
-	
-	// Get metadata length
-	metadata.MetadataLength = uint64(C.evm_bytecode_get_metadata_length(b.ptr))
-	
-	// Get IPFS hash (34 bytes)
-	ipfsHash := make([]byte, 34)
-	copied := C.evm_bytecode_get_metadata_ipfs(b.ptr, (*C.uint8_t)(unsafe.Pointer(&ipfsHash[0])), 34)
-	if copied == 34 {
-		metadata.IPFSHash = ipfsHash
-	}
-	
-	// Get Solc version
-	var major, minor, patch C.uint8_t
-	if C.evm_bytecode_get_metadata_solc_version(b.ptr, &major, &minor, &patch) != 0 {
-		metadata.SolcVersion.Major = uint8(major)
-		metadata.SolcVersion.Minor = uint8(minor)
-		metadata.SolcVersion.Patch = uint8(patch)
-	}
-	
-	return metadata, nil
-}
-
-// ========================
-// Statistics
-// ========================
-
-// GetStats returns comprehensive bytecode statistics
-func (b *Bytecode) GetStats() (*Stats, error) {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-	
-	if b.ptr == nil {
-		return nil, ErrBytecodeDestroyed
-	}
-	
-	var cStats C.CBytecodeStats
-	result := C.evm_bytecode_get_stats(b.ptr, &cStats)
-	if result != 0 {
-		return nil, fmt.Errorf("failed to get stats: error code %d", result)
-	}
-	
-	return &Stats{
-		TotalBytes:             uint64(cStats.total_bytes),
-		InstructionCount:       uint32(cStats.instruction_count),
-		JumpDestCount:          uint32(cStats.jump_dest_count),
-		InvalidOpcodeCount:     uint32(cStats.invalid_opcode_count),
-		PushInstructionCount:   uint32(cStats.push_instruction_count),
-		JumpInstructionCount:   uint32(cStats.jump_instruction_count),
-		CallInstructionCount:   uint32(cStats.call_instruction_count),
-		CreateInstructionCount: uint32(cStats.create_instruction_count),
-		ComplexityScore:        uint64(cStats.complexity_score),
-	}, nil
-}
-
 // ========================
 // Advanced Analysis
 // ========================
@@ -457,4 +369,21 @@ func (b *Bytecode) Analyze() (*Analysis, error) {
 func OpcodeName(opcodeValue uint8) string {
 	name := C.evm_bytecode_opcode_name(C.uint8_t(opcodeValue))
 	return C.GoString(name)
+}
+
+// OpcodeInfo represents opcode metadata
+type OpcodeInfoType struct {
+	GasCost      uint16 `json:"gas_cost"`
+	StackInputs  uint8  `json:"stack_inputs"`
+	StackOutputs uint8  `json:"stack_outputs"`
+}
+
+// OpcodeInfo returns opcode information for a given opcode value
+func OpcodeInfo(opcodeValue uint8) OpcodeInfoType {
+	cInfo := C.evm_bytecode_opcode_info(C.uint8_t(opcodeValue))
+	return OpcodeInfoType{
+		GasCost:      uint16(cInfo.gas_cost),
+		StackInputs:  uint8(cInfo.stack_inputs),
+		StackOutputs: uint8(cInfo.stack_outputs),
+	}
 }

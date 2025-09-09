@@ -1043,20 +1043,13 @@ comptime {
     @export(&bytecode_c.evm_bytecode_is_jump_dest, .{ .name = "evm_bytecode_is_jump_dest" });
     @export(&bytecode_c.evm_bytecode_get_full_length, .{ .name = "evm_bytecode_get_full_length" });
     @export(&bytecode_c.evm_bytecode_get_runtime_data, .{ .name = "evm_bytecode_get_runtime_data" });
-    @export(&bytecode_c.evm_bytecode_has_metadata, .{ .name = "evm_bytecode_has_metadata" });
-    @export(&bytecode_c.evm_bytecode_get_metadata_length, .{ .name = "evm_bytecode_get_metadata_length" });
-    @export(&bytecode_c.evm_bytecode_get_metadata_ipfs, .{ .name = "evm_bytecode_get_metadata_ipfs" });
-    @export(&bytecode_c.evm_bytecode_get_metadata_solc_version, .{ .name = "evm_bytecode_get_metadata_solc_version" });
-    @export(&bytecode_c.evm_bytecode_count_invalid_opcodes, .{ .name = "evm_bytecode_count_invalid_opcodes" });
     @export(&bytecode_c.evm_bytecode_find_jump_dests, .{ .name = "evm_bytecode_find_jump_dests" });
-    @export(&bytecode_c.evm_bytecode_get_stats, .{ .name = "evm_bytecode_get_stats" });
     @export(&bytecode_c.evm_bytecode_analyze, .{ .name = "evm_bytecode_analyze" });
     @export(&bytecode_c.evm_bytecode_free_analysis, .{ .name = "evm_bytecode_free_analysis" });
     @export(&bytecode_c.evm_bytecode_opcode_name, .{ .name = "evm_bytecode_opcode_name" });
+    @export(&bytecode_c.evm_bytecode_opcode_info, .{ .name = "evm_bytecode_opcode_info" });
     @export(&bytecode_c.evm_bytecode_is_valid_opcode, .{ .name = "evm_bytecode_is_valid_opcode" });
     @export(&bytecode_c.evm_bytecode_error_string, .{ .name = "evm_bytecode_error_string" });
-    @export(&bytecode_c.evm_bytecode_test_basic, .{ .name = "evm_bytecode_test_basic" });
-    @export(&bytecode_c.evm_bytecode_test_opcodes, .{ .name = "evm_bytecode_test_opcodes" });
 }
 
 // ============================================================================
