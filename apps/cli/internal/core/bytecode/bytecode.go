@@ -12,6 +12,7 @@ type Instruction struct {
 	PC              uint64   `json:"pc"`
 	IsJumpDest      bool     `json:"is_jump_dest"`
 	HexBytes        []string `json:"hex_bytes"`
+	OpcodeHex       uint8    `json:"opcode_hex"`
 	OpcodeName      string   `json:"opcode_name"`
 	PushValue       *string  `json:"push_value,omitempty"`
 	PushValueDecimal *uint64 `json:"push_value_decimal,omitempty"`
@@ -94,6 +95,7 @@ func AnalyzeBytecode(bc *bytecode.Bytecode) (*DisassemblyResult, error) {
 			PC:         pc,
 			IsJumpDest: isJumpDest,
 			HexBytes:   hexBytes,
+			OpcodeHex:  opcodeValue,
 			OpcodeName: opcodeName,
 		}
 
@@ -142,6 +144,69 @@ func AnalyzeBytecode(bc *bytecode.Bytecode) (*DisassemblyResult, error) {
 	result.TotalInstructions = uint32(lineNum - 1)
 
 	return result, nil
+}
+
+func AnalyzeBytecodeFromBytes(bc []byte) (*DisassemblyResult, error) {
+	bytecode, err := bytecode.New(bc)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create bytecode: %w", err)
+	}
+	return AnalyzeBytecode(bytecode)
+}
+
+// Return instructions that belong in a specific block
+func GetInstructionsForBlock(dr *DisassemblyResult, blockIndex int) ([]Instruction, string, error) {
+	if dr.Analysis == nil {
+		return nil, "", fmt.Errorf("analysis is nil")
+	}
+	
+	// Check bounds
+	if blockIndex < 0 || blockIndex >= len(dr.Analysis.BasicBlocks) {
+		return nil, "", fmt.Errorf("block index %d out of range [0, %d)", blockIndex, len(dr.Analysis.BasicBlocks))
+	}
+	
+	// Get the boundaries of the block
+	block := dr.Analysis.BasicBlocks[blockIndex]
+	startPC := block.Start
+	endPC := block.End
+
+	blockInfo := fmt.Sprintf("PC %d-%d", startPC, endPC)
+	
+	// Convert PC range to instruction indices
+	startIdx := -1
+	endIdx := len(dr.Instructions)
+	
+	for i, instruction := range dr.Instructions {
+		if instruction.PC == uint64(startPC) && startIdx == -1 {
+			startIdx = i
+		}
+		if instruction.PC >= uint64(endPC) && endIdx == len(dr.Instructions) {
+			endIdx = i
+			break
+		}
+	}
+	
+	// Handle edge cases
+	if startIdx == -1 {
+		return nil, blockInfo, fmt.Errorf("start PC %d not found in instructions", startPC)
+	}
+	
+	// Get the instructions that belong in the block
+	return dr.Instructions[startIdx:endIdx], blockInfo, nil
+}
+
+func CalculateBlockGas(instructions []Instruction) uint64 {
+	gas := uint64(0)
+	for _, instruction := range instructions {
+		if instruction.GasCost != nil {
+			gas += *instruction.GasCost
+		}
+	}
+	return gas
+}
+
+func ShouldHighlightOpcode(opcode string) bool {
+	return opcode == "CALL" || opcode == "STATICCALL" || opcode == "DELEGATECALL" || opcode == "CREATE" || opcode == "CREATE2" || opcode == "SELFDESTRUCT" || opcode == "REVERT" || opcode == "INVALID" || opcode == "STOP" || opcode == "RETURN" || opcode == "SSTORE" || opcode == "SLOAD"
 }
 
 // Helper functions

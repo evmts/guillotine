@@ -2,7 +2,7 @@ package app
 
 import (
 	"guillotine-cli/internal/config"
-	"guillotine-cli/internal/core/disassembly"
+	"guillotine-cli/internal/core/bytecode"
 	"guillotine-cli/internal/core/utils"
 	"guillotine-cli/internal/types"
 	"guillotine-cli/internal/ui"
@@ -290,7 +290,7 @@ func (m *Model) handleContractDetailNavigation(msgStr string, msg tea.KeyMsg) (t
 				m.updateInstructionsTable()
 			}
 		} else if config.IsKey(msgStr, config.KeyRight) {
-			if m.currentBlockIndex < len(m.disassemblyResult.BasicBlocks)-1 {
+			if m.currentBlockIndex < len(m.disassemblyResult.Analysis.BasicBlocks)-1 {
 				m.currentBlockIndex++
 				// Update table with new block's instructions
 				m.updateInstructionsTable()
@@ -321,14 +321,14 @@ func (m *Model) updateInstructionsTable() {
 		return
 	}
 	
-	instructions, _, err := disassembly.GetInstructionsForBlock(m.disassemblyResult, m.currentBlockIndex)
+	instructions, _, err := bytecode.GetInstructionsForBlock(m.disassemblyResult, m.currentBlockIndex)
 	if err != nil {
 		// Handle error case - could log or show error state
 		return
 	}
 	
 	if len(instructions) > 0 {
-		rows := ui.ConvertInstructionsToRows(instructions, m.disassemblyResult.Jumpdests)
+		rows := ui.ConvertInstructionsToRows(instructions, m.disassemblyResult.Analysis.JumpDests)
 		m.instructionsTable.SetRows(rows)
 		// Reset cursor to top when changing blocks
 		m.instructionsTable.SetCursor(0)

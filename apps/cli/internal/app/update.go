@@ -1,7 +1,7 @@
 package app
 
 import (
-	"guillotine-cli/internal/core/disassembly"
+	"guillotine-cli/internal/core/bytecode"
 	"guillotine-cli/internal/types"
 	"guillotine-cli/internal/ui"
 
@@ -60,9 +60,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.instructionsTable = ui.CreateInstructionsTable(tableHeight)
 				
 				// Load instructions for the first block
-				instructions, _, err := disassembly.GetInstructionsForBlock(m.disassemblyResult, m.currentBlockIndex)
+				instructions, _, err := bytecode.GetInstructionsForBlock(m.disassemblyResult, m.currentBlockIndex)
 				if err == nil && len(instructions) > 0 {
-					rows := ui.ConvertInstructionsToRows(instructions, m.disassemblyResult.Jumpdests)
+					rows := ui.ConvertInstructionsToRows(instructions, m.disassemblyResult.Analysis.JumpDests)
 					m.instructionsTable.SetRows(rows)
 				}
 			}

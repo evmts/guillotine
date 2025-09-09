@@ -392,3 +392,88 @@ func TestAnalyzeBytecode_PUSHVariations(t *testing.T) {
 		}
 	}
 }
+
+func TestAnalyzeBytecode_BasicBlocks(t *testing.T) {
+	// Test specific BasicBlocks functionality with a more complex control flow
+	// Code with multiple jumps to create distinct basic blocks
+	code := []byte{
+		0x60, 0x0a, // PUSH1 0x0a (jump to PC 10)
+		0x57,       // JUMPI (conditional jump)
+		0x60, 0x01, // PUSH1 0x01
+		0x00,       // STOP
+		0x5b,       // JUMPDEST (PC 7) 
+		0x60, 0x02, // PUSH1 0x02
+		0x00,       // STOP
+		0x5b,       // JUMPDEST (PC 10)
+		0x60, 0x03, // PUSH1 0x03
+		0x00,       // STOP
+	}
+
+	bc, err := bytecode.New(code)
+	if err != nil {
+		t.Fatalf("Failed to create bytecode: %v", err)
+	}
+	defer bc.Destroy()
+
+	result, err := AnalyzeBytecode(bc)
+	if err != nil {
+		t.Fatalf("Failed to analyze bytecode: %v", err)
+	}
+
+	// Should have multiple basic blocks due to jumps
+	if len(result.BasicBlocks) == 0 {
+		t.Fatal("No basic blocks found")
+	}
+
+	t.Logf("Found %d basic blocks for control flow test:", len(result.BasicBlocks))
+	for i, block := range result.BasicBlocks {
+		t.Logf("  Block %d: Start=%d, End=%d", i, block.Start, block.End)
+	}
+
+	// Validate structural integrity
+	for i, block := range result.BasicBlocks {
+		if block.Start > block.End {
+			t.Errorf("BasicBlock %d: invalid range, start %d > end %d", i, block.Start, block.End)
+		}
+
+		// Check blocks don't overlap
+		if i < len(result.BasicBlocks)-1 {
+			nextBlock := result.BasicBlocks[i+1]
+			if block.End > nextBlock.Start {
+				t.Errorf("BasicBlocks %d and %d overlap: block %d ends at %d, block %d starts at %d", 
+					i, i+1, i, block.End, i+1, nextBlock.Start)
+			}
+		}
+
+		// Check bounds
+		if block.End > uint32(len(code)) {
+			t.Errorf("BasicBlock %d: end %d exceeds bytecode length %d", i, block.End, len(code))
+		}
+	}
+
+	// First block should start at 0
+	if result.BasicBlocks[0].Start != 0 {
+		t.Errorf("First basic block should start at 0, got %d", result.BasicBlocks[0].Start)
+	}
+
+	// Should have at least 2 blocks due to control flow
+	if len(result.BasicBlocks) < 2 {
+		t.Errorf("Expected at least 2 basic blocks for this control flow, got %d", len(result.BasicBlocks))
+	}
+
+	// Test JSON serialization includes BasicBlocks
+	jsonData, err := json.Marshal(result)
+	if err != nil {
+		t.Errorf("Failed to marshal to JSON: %v", err)
+	}
+
+	var unmarshaled DisassemblyResult
+	if err := json.Unmarshal(jsonData, &unmarshaled); err != nil {
+		t.Errorf("Failed to unmarshal JSON: %v", err)
+	}
+
+	if len(unmarshaled.BasicBlocks) != len(result.BasicBlocks) {
+		t.Errorf("JSON roundtrip failed: expected %d basic blocks, got %d", 
+			len(result.BasicBlocks), len(unmarshaled.BasicBlocks))
+	}
+}

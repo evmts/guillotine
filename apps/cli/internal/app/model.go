@@ -1,6 +1,7 @@
 package app
 
 import (
+	"guillotine-cli/internal/core/bytecode"
 	"guillotine-cli/internal/core/evm"
 	"guillotine-cli/internal/core/history"
 	"guillotine-cli/internal/types"
@@ -41,7 +42,7 @@ type Model struct {
 	selectedLogIndex   int
 	
 	// Disassembly state
-	disassemblyResult  *types.DisassemblyResult
+	disassemblyResult  *bytecode.DisassemblyResult
 	currentBlockIndex  int
 	instructionsTable  table.Model
 	

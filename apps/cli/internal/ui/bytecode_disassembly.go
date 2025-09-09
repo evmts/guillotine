@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"guillotine-cli/internal/config"
-	"guillotine-cli/internal/core/disassembly"
+	"guillotine-cli/internal/core/bytecode"
 	"guillotine-cli/internal/types"
 
 	"github.com/charmbracelet/bubbles/table"
@@ -14,14 +14,14 @@ import (
 
 // DisassemblyDisplayData contains data for rendering bytecode disassembly
 type DisassemblyDisplayData struct {
-	Result            *types.DisassemblyResult
+	Result            *bytecode.DisassemblyResult
 	CurrentBlockIndex int
 	Width             int
 	Height            int
 }
 
 // RenderBytecodeDisassembly renders the bytecode disassembly result
-func RenderBytecodeDisassembly(result *types.DisassemblyResult, width, height int) string {
+func RenderBytecodeDisassembly(result *bytecode.DisassemblyResult, width, height int) string {
 	data := DisassemblyDisplayData{
 		Result:            result,
 		CurrentBlockIndex: 0,
@@ -43,24 +43,20 @@ func RenderBytecodeDisassemblyWithNavigation(data DisassemblyDisplayData) string
 	b.WriteString(config.SubtitleStyle.Render(config.BytecodeDisassemblyTitle))
 	b.WriteString("\n")
 
-	// Statistics section
-	b.WriteString(renderStats(&data.Result.Stats))
-	b.WriteString("\n\n")
-
 	// Get instructions for current block
-	instructions, blockInfo, _ := disassembly.GetInstructionsForBlock(data.Result, data.CurrentBlockIndex)
+	instructions, blockInfo, _ := bytecode.GetInstructionsForBlock(data.Result, data.CurrentBlockIndex)
 	
 	// Render instructions as a scrollable table view
-	tableView := renderInstructionsAsTable(instructions, data.Result.Jumpdests, 
+	tableView := renderInstructionsAsTable(instructions, data.Result.Analysis.JumpDests, 
 		data.Width, data.Height-12)  // Reserve space for header, stats and indicator
 	b.WriteString(tableView)
 	
 	// Calculate total gas for the block
-	blockGas := disassembly.CalculateBlockGas(instructions)
+	blockGas := bytecode.CalculateBlockGas(instructions)
 	
 	// Block indicator
 	b.WriteString("\n\n")
-	b.WriteString(renderBlockIndicator(data.CurrentBlockIndex, len(data.Result.BasicBlocks), blockInfo, blockGas))
+	b.WriteString(renderBlockIndicator(data.CurrentBlockIndex, len(data.Result.Analysis.BasicBlocks), blockInfo, blockGas))
 
 	return b.String()
 }
@@ -77,22 +73,18 @@ func RenderBytecodeDisassemblyWithTable(data DisassemblyDisplayData, instruction
 	b.WriteString(config.SubtitleStyle.Render(config.BytecodeDisassemblyTitle))
 	b.WriteString("\n")
 
-	// Statistics section
-	b.WriteString(renderStats(&data.Result.Stats))
-	b.WriteString("\n\n")
-
 	// Render the table view
 	b.WriteString(instructionTable.View())
 	
 	// Get block info for indicator
-	instructions, blockInfo, _ := disassembly.GetInstructionsForBlock(data.Result, data.CurrentBlockIndex)
+	instructions, blockInfo, _ := bytecode.GetInstructionsForBlock(data.Result, data.CurrentBlockIndex)
 	
 	// Calculate total gas for the block
-	blockGas := disassembly.CalculateBlockGas(instructions)
+	blockGas := bytecode.CalculateBlockGas(instructions)
 	
 	// Block indicator
 	b.WriteString("\n\n")
-	b.WriteString(renderBlockIndicator(data.CurrentBlockIndex, len(data.Result.BasicBlocks), blockInfo, blockGas))
+	b.WriteString(renderBlockIndicator(data.CurrentBlockIndex, len(data.Result.Analysis.BasicBlocks), blockInfo, blockGas))
 
 	// Wrap everything in a box without forcing height
 	content := b.String()
@@ -137,7 +129,7 @@ func renderStats(stats *types.BytecodeStats) string {
 }
 
 // renderInstructionsAsTable renders instructions in a scrollable table format
-func renderInstructionsAsTable(instructions []types.DisassemblyInstruction, jumpdests []uint32, 
+func renderInstructionsAsTable(instructions []bytecode.Instruction, jumpdests []uint32, 
 	width, availableHeight int) string {
 	
 	if len(instructions) == 0 {
@@ -154,7 +146,7 @@ func renderInstructionsAsTable(instructions []types.DisassemblyInstruction, jump
 	
 	// Table header
 	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(config.Amber)
-	header := fmt.Sprintf("%-8s %-12s %-6s %-25s %-5s %-8s", 
+	header := fmt.Sprintf("%-8s %-12s %-6s %-20s %-8s %-10s", 
 		config.DisassemblyHeaderPC, config.DisassemblyHeaderOpcode, config.DisassemblyHeaderHex, 
 		config.DisassemblyHeaderValue, config.DisassemblyHeaderGas, config.DisassemblyHeaderStack)
 	content.WriteString(headerStyle.Render(header))
@@ -175,7 +167,7 @@ func renderInstructionsAsTable(instructions []types.DisassemblyInstruction, jump
 		rowStyle := config.NormalStyle
 		if inst.OpcodeName == "JUMPDEST" {
 			rowStyle = config.SuccessStyle
-		} else if disassembly.IsImportantOpcode(inst.OpcodeName) {
+		} else if bytecode.ShouldHighlightOpcode(inst.OpcodeName) {
 			rowStyle = config.AccentStyle
 		} else if strings.HasPrefix(inst.OpcodeName, "JUMP") || inst.OpcodeName == "PC" {
 			rowStyle = config.AccentStyle
@@ -198,7 +190,7 @@ func renderInstructionsAsTable(instructions []types.DisassemblyInstruction, jump
 }
 
 // ConvertInstructionsToRows converts instructions to table rows for table component
-func ConvertInstructionsToRows(instructions []types.DisassemblyInstruction, jumpdests []uint32) []table.Row {
+func ConvertInstructionsToRows(instructions []bytecode.Instruction, jumpdests []uint32) []table.Row {
 	// Create jumpdest map for quick lookup
 	jumpdestMap := make(map[uint32]bool)
 	for _, j := range jumpdests {
@@ -210,28 +202,34 @@ func ConvertInstructionsToRows(instructions []types.DisassemblyInstruction, jump
 	for _, inst := range instructions {
 		// Format gas
 		gas := "-"
-		if inst.GasCost > 0 {
-			gas = fmt.Sprintf("%d", inst.GasCost)
+		if inst.GasCost != nil && *inst.GasCost > 0 {
+			gas = fmt.Sprintf("%d", *inst.GasCost)
 		}
 		
 		// Format stack I/O
 		stack := "-"
-		if inst.StackInputs > 0 || inst.StackOutputs > 0 {
-			stack = fmt.Sprintf("-%d +%d", inst.StackInputs, inst.StackOutputs)
+		if inst.StackInputs != nil || inst.StackOutputs != nil {
+			inputs := uint8(0)
+			outputs := uint8(0)
+			if inst.StackInputs != nil {
+				inputs = *inst.StackInputs
+			}
+			if inst.StackOutputs != nil {
+				outputs = *inst.StackOutputs
+			}
+			if inputs > 0 || outputs > 0 {
+				stack = fmt.Sprintf("-%d +%d", inputs, outputs)
+			}
 		}
 		
 		// Format value/target
 		value := ""
 		if inst.PushValue != nil {
-			if inst.PushValue.High == 0 {
-				value = fmt.Sprintf("0x%x", inst.PushValue.Low)
-			} else {
-				value = fmt.Sprintf("0x%x%016x", inst.PushValue.High, inst.PushValue.Low)
-			}
+			value = *inst.PushValue
 			
 			// Check if this push value is a jumpdest target
 			if strings.HasPrefix(inst.OpcodeName, "PUSH") {
-				targetPC := uint32(inst.PushValue.Low)
+				targetPC := uint32(*inst.PushValueDecimal)
 				if jumpdestMap[targetPC] {
 					value += fmt.Sprintf(" → [JD@%d]", targetPC)
 				}
@@ -260,9 +258,9 @@ func CreateInstructionsTable(height int) table.Model {
 		{Title: config.DisassemblyHeaderPC, Width: 8},
 		{Title: config.DisassemblyHeaderOpcode, Width: 12},
 		{Title: config.DisassemblyHeaderHex, Width: 6},
-		{Title: config.DisassemblyHeaderValue, Width: 25},
-		{Title: config.DisassemblyHeaderGas, Width: 5},
-		{Title: config.DisassemblyHeaderStack, Width: 8},
+		{Title: config.DisassemblyHeaderValue, Width: 20},
+		{Title: config.DisassemblyHeaderGas, Width: 8},
+		{Title: config.DisassemblyHeaderStack, Width: 10},
 	}
 	
 	t := table.New(
@@ -291,7 +289,7 @@ func CreateInstructionsTable(height int) table.Model {
 }
 
 
-func formatInstructionRow(inst types.DisassemblyInstruction, jumpdestMap map[uint32]bool) string {
+func formatInstructionRow(inst bytecode.Instruction, jumpdestMap map[uint32]bool) string {
 	pc := fmt.Sprintf("%-8d", inst.PC)
 	hex := fmt.Sprintf("0x%02x", inst.OpcodeHex)
 	hex = padRight(hex, 6)
@@ -299,30 +297,36 @@ func formatInstructionRow(inst types.DisassemblyInstruction, jumpdestMap map[uin
 	
 	// Format gas cost
 	gas := "-"
-	if inst.GasCost > 0 {
-		gas = fmt.Sprintf("%d", inst.GasCost)
+	if inst.GasCost != nil && *inst.GasCost > 0 {
+		gas = fmt.Sprintf("%d", *inst.GasCost)
 	}
-	gas = padRight(gas, 5)
+	gas = padRight(gas, 8)
 	
 	// Format stack I/O
 	stack := "-"
-	if inst.StackInputs > 0 || inst.StackOutputs > 0 {
-		stack = fmt.Sprintf("-%d +%d", inst.StackInputs, inst.StackOutputs)
+	if inst.StackInputs != nil || inst.StackOutputs != nil {
+		inputs := uint8(0)
+		outputs := uint8(0)
+		if inst.StackInputs != nil {
+			inputs = *inst.StackInputs
+		}
+		if inst.StackOutputs != nil {
+			outputs = *inst.StackOutputs
+		}
+		if inputs > 0 || outputs > 0 {
+			stack = fmt.Sprintf("-%d +%d", inputs, outputs)
+		}
 	}
-	stack = padRight(stack, 8)
+	stack = padRight(stack, 10)
 	
 	// Format value/target
 	value := ""
 	if inst.PushValue != nil {
-		if inst.PushValue.High == 0 {
-			value = fmt.Sprintf("0x%x", inst.PushValue.Low)
-		} else {
-			value = fmt.Sprintf("0x%x%016x", inst.PushValue.High, inst.PushValue.Low)
-		}
+		value = *inst.PushValue
 		
 		// Check if this push value is a jumpdest target
 		if strings.HasPrefix(inst.OpcodeName, "PUSH") {
-			targetPC := uint32(inst.PushValue.Low)
+			targetPC := uint32(*inst.PushValueDecimal)
 			if jumpdestMap[targetPC] {
 				value += fmt.Sprintf(" → [JD@%d]", targetPC)
 			}
@@ -331,11 +335,11 @@ func formatInstructionRow(inst types.DisassemblyInstruction, jumpdestMap map[uin
 		value = "[Jump Target]"
 	}
 	
-	return fmt.Sprintf("%-8s %-12s %-6s %-25s %-5s %-8s", pc, opcode, hex, value, gas, stack)
+	return fmt.Sprintf("%-8s %-12s %-6s %-20s %-8s %-10s", pc, opcode, hex, value, gas, stack)
 }
 
 // renderBlockIndicator shows current block position and gas usage
-func renderBlockIndicator(currentBlock int, totalBlocks int, blockInfo string, blockGas uint32) string {
+func renderBlockIndicator(currentBlock int, totalBlocks int, blockInfo string, blockGas uint64) string {
 	if totalBlocks == 0 {
 		gasInfo := ""
 		if blockGas > 0 {
