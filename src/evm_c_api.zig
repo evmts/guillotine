@@ -4,6 +4,7 @@
 const std = @import("std");
 const evm = @import("evm");
 const primitives = @import("primitives");
+const bytecode_c = @import("bytecode/bytecode_c.zig");
 const log = std.log.scoped(.c_api);
 
 // Import types from evm module
@@ -15,6 +16,10 @@ const BlockInfo = evm.BlockInfo;
 const TransactionContext = evm.TransactionContext;
 const Hardfork = evm.Hardfork;
 const Account = evm.Account;
+
+// ============================================================================
+// EVM C API
+// ============================================================================
 
 // Opaque handle for EVM instance
 pub const EvmHandle = opaque {};
@@ -1005,6 +1010,56 @@ export fn guillotine_free_result(result: ?*EvmResult) void {
 export fn guillotine_get_last_error() [*:0]const u8 {
     return @ptrCast(&last_error_z);
 }
+
+// ============================================================================
+// BYTECODE C API EXPORTS
+// ============================================================================
+
+// Re-export bytecode error codes
+pub const EVM_BYTECODE_SUCCESS = bytecode_c.EVM_BYTECODE_SUCCESS;
+pub const EVM_BYTECODE_ERROR_NULL_POINTER = bytecode_c.EVM_BYTECODE_ERROR_NULL_POINTER;
+pub const EVM_BYTECODE_ERROR_INVALID_BYTECODE = bytecode_c.EVM_BYTECODE_ERROR_INVALID_BYTECODE;
+pub const EVM_BYTECODE_ERROR_OUT_OF_MEMORY = bytecode_c.EVM_BYTECODE_ERROR_OUT_OF_MEMORY;
+pub const EVM_BYTECODE_ERROR_BYTECODE_TOO_LARGE = bytecode_c.EVM_BYTECODE_ERROR_BYTECODE_TOO_LARGE;
+pub const EVM_BYTECODE_ERROR_INVALID_OPCODE = bytecode_c.EVM_BYTECODE_ERROR_INVALID_OPCODE;
+pub const EVM_BYTECODE_ERROR_OUT_OF_BOUNDS = bytecode_c.EVM_BYTECODE_ERROR_OUT_OF_BOUNDS;
+
+// Re-export bytecode types
+pub const CBytecodeStats = bytecode_c.CBytecodeStats;
+pub const CBasicBlock = bytecode_c.CBasicBlock;
+pub const CFusionInfo = bytecode_c.CFusionInfo;
+pub const CFusionType = bytecode_c.CFusionType;
+pub const CJumpFusion = bytecode_c.CJumpFusion;
+pub const CAdvancedFusion = bytecode_c.CAdvancedFusion;
+pub const CBytecodeAnalysis = bytecode_c.CBytecodeAnalysis;
+
+// Re-export bytecode functions
+pub const evm_bytecode_create = bytecode_c.evm_bytecode_create;
+pub const evm_bytecode_destroy = bytecode_c.evm_bytecode_destroy;
+pub const evm_bytecode_get_length = bytecode_c.evm_bytecode_get_length;
+pub const evm_bytecode_get_data = bytecode_c.evm_bytecode_get_data;
+pub const evm_bytecode_get_opcode_at = bytecode_c.evm_bytecode_get_opcode_at;
+pub const evm_bytecode_is_jump_dest = bytecode_c.evm_bytecode_is_jump_dest;
+pub const evm_bytecode_get_full_length = bytecode_c.evm_bytecode_get_full_length;
+pub const evm_bytecode_get_runtime_data = bytecode_c.evm_bytecode_get_runtime_data;
+pub const evm_bytecode_has_metadata = bytecode_c.evm_bytecode_has_metadata;
+pub const evm_bytecode_get_metadata_length = bytecode_c.evm_bytecode_get_metadata_length;
+pub const evm_bytecode_get_metadata_ipfs = bytecode_c.evm_bytecode_get_metadata_ipfs;
+pub const evm_bytecode_get_metadata_solc_version = bytecode_c.evm_bytecode_get_metadata_solc_version;
+pub const evm_bytecode_count_invalid_opcodes = bytecode_c.evm_bytecode_count_invalid_opcodes;
+pub const evm_bytecode_find_jump_dests = bytecode_c.evm_bytecode_find_jump_dests;
+pub const evm_bytecode_get_stats = bytecode_c.evm_bytecode_get_stats;
+pub const evm_bytecode_analyze = bytecode_c.evm_bytecode_analyze;
+pub const evm_bytecode_free_analysis = bytecode_c.evm_bytecode_free_analysis;
+pub const evm_bytecode_opcode_name = bytecode_c.evm_bytecode_opcode_name;
+pub const evm_bytecode_is_valid_opcode = bytecode_c.evm_bytecode_is_valid_opcode;
+pub const evm_bytecode_error_string = bytecode_c.evm_bytecode_error_string;
+pub const evm_bytecode_test_basic = bytecode_c.evm_bytecode_test_basic;
+pub const evm_bytecode_test_opcodes = bytecode_c.evm_bytecode_test_opcodes;
+
+// ============================================================================
+// TESTS
+// ============================================================================
 
 // Simulate a call (doesn't commit state)
 export fn guillotine_simulate(handle: *EvmHandle, params: *const CallParams) ?*EvmResult {

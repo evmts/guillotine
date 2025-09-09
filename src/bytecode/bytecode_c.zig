@@ -3,10 +3,11 @@
 // ============================================================================
 
 const std = @import("std");
-const Opcode = @import("../opcodes/opcode.zig").Opcode;
-const BytecodeConfig = @import("bytecode_config.zig").BytecodeConfig;
-const BytecodeType = @import("bytecode.zig").Bytecode(BytecodeConfig{});
-const bytecodeAnalyze = @import("bytecode_analyze.zig").bytecodeAnalyze;
+const evm = @import("evm");
+const Opcode = evm.Opcode;
+const BytecodeConfig = evm.BytecodeConfig;
+const BytecodeType = evm.Bytecode(BytecodeConfig{});
+const bytecodeAnalyze = evm.bytecodeAnalyze;
 
 const allocator = std.heap.c_allocator;
 
