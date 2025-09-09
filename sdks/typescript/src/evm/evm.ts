@@ -1,27 +1,54 @@
 import { Address } from '../primitives/address.js';
 import { U256 } from '../primitives/u256.js';
 import { Bytes } from '../primitives/bytes.js';
-import { Hash } from '../primitives/hash.js';
-import { ExecutionResult } from './execution-result.js';
+import { ExecutionResult, type LogEntry, type SelfDestructRecord, type StorageAccessRecord } from './execution-result.js';
 import { GuillotineError } from '../errors.js';
-import { getWasmLoader, WasmMemory, GuillotineWasm } from '../wasm/loader.js';
+import { getWasmLoader, type WasmMemory, type GuillotineWasm } from '../wasm/loader.js';
+
+/**
+ * Block information for EVM execution
+ */
+export interface BlockInfo {
+  number?: bigint;
+  timestamp?: bigint;
+  gasLimit?: bigint;
+  coinbase?: Address;
+  baseFee?: bigint;
+  chainId?: bigint;
+  difficulty?: bigint;
+  prevRandao?: Bytes;
+}
+
+/**
+ * Call types for EVM execution
+ */
+export enum CallType {
+  CALL = 0,
+  CALLCODE = 1,
+  DELEGATECALL = 2,
+  STATICCALL = 3,
+  CREATE = 4,
+  CREATE2 = 5,
+}
 
 /**
  * Parameters for EVM execution
  */
 export interface ExecutionParams {
-  /** The bytecode to execute */
-  bytecode: Bytes;
-  /** The caller address (defaults to zero address) */
-  caller?: Address;
-  /** The target address (defaults to zero address) */
-  to?: Address;
-  /** The value to transfer (defaults to zero) */
-  value?: U256;
-  /** The input data (defaults to empty) */
-  input?: Bytes;
-  /** The gas limit (defaults to 1,000,000) */
-  gasLimit?: bigint;
+  /** The caller address */
+  caller: Address;
+  /** The target address */
+  to: Address;
+  /** The value to transfer */
+  value: U256;
+  /** The input data */
+  input: Bytes;
+  /** The gas limit */
+  gas: bigint;
+  /** The call type (defaults to CALL) */
+  callType?: CallType;
+  /** Salt for CREATE2 */
+  salt?: U256;
 }
 
 /**
@@ -30,20 +57,22 @@ export interface ExecutionParams {
 export class GuillotineEVM {
   private wasm: GuillotineWasm;
   private memory: WasmMemory;
-  private vmPtr: number;
+  private evmHandle: number;
   private isInitialized: boolean = false;
+  private useTracing: boolean = false;
 
-  private constructor(wasm: GuillotineWasm, memory: WasmMemory, vmPtr: number) {
+  private constructor(wasm: GuillotineWasm, memory: WasmMemory, evmHandle: number, useTracing: boolean = false) {
     this.wasm = wasm;
     this.memory = memory;
-    this.vmPtr = vmPtr;
+    this.evmHandle = evmHandle;
+    this.useTracing = useTracing;
     this.isInitialized = true;
   }
 
   /**
    * Create a new EVM instance
    */
-  static async create(wasmPath?: string): Promise<GuillotineEVM> {
+  static async create(blockInfo?: BlockInfo, useTracing: boolean = false, wasmPath?: string): Promise<GuillotineEVM> {
     try {
       const loader = getWasmLoader();
       
@@ -51,17 +80,55 @@ export class GuillotineEVM {
       if (!loader.isLoaded()) {
         await loader.load(wasmPath);
       }
-
+      
       const wasm = loader.getWasm();
       const memory = loader.getMemory();
-
-      // Create VM instance
-      const vmPtr = wasm.guillotine_vm_create();
-      if (vmPtr === 0) {
-        throw GuillotineError.vmCreationFailed('Failed to create VM instance');
+      
+      // Initialize FFI
+      wasm.guillotine_init();
+      
+      // Create block info structure
+      const blockInfoPtr = memory.malloc(100); // Size of BlockInfoFFI struct
+      const buffer = memory.getBuffer();
+      const view = new DataView(buffer.buffer, blockInfoPtr);
+      
+      // Set block info fields with defaults
+      view.setBigUint64(0, blockInfo?.number || 0n, true); // number
+      view.setBigUint64(8, blockInfo?.timestamp || BigInt(Date.now() / 1000), true); // timestamp
+      view.setBigUint64(16, blockInfo?.gasLimit || 30000000n, true); // gas_limit
+      
+      // coinbase address (20 bytes)
+      const coinbase = blockInfo?.coinbase || Address.zero();
+      const coinbaseBytes = coinbase.toBytes();
+      for (let i = 0; i < 20; i++) {
+        view.setUint8(24 + i, coinbaseBytes[i] || 0);
       }
-
-      return new GuillotineEVM(wasm, memory, vmPtr);
+      
+      view.setBigUint64(44, blockInfo?.baseFee || 0n, true); // base_fee
+      view.setBigUint64(52, blockInfo?.chainId || 1n, true); // chain_id
+      view.setBigUint64(60, blockInfo?.difficulty || 0n, true); // difficulty
+      
+      // prev_randao (32 bytes)
+      const prevRandao = blockInfo?.prevRandao || Bytes.fromBytes(new Uint8Array(32));
+      const prevRandaoBytes = prevRandao.toBytes();
+      for (let i = 0; i < 32; i++) {
+        view.setUint8(68 + i, prevRandaoBytes[i] || 0);
+      }
+      
+      // Create EVM instance
+      const evmHandle = useTracing
+        ? wasm.guillotine_evm_create_tracing(blockInfoPtr)
+        : wasm.guillotine_evm_create(blockInfoPtr);
+        
+      memory.free(blockInfoPtr, 100);
+      
+      if (evmHandle === 0) {
+        const errorPtr = wasm.guillotine_get_last_error();
+        const errorMessage = memory.readString(errorPtr);
+        throw GuillotineError.vmNotInitialized(`Failed to create EVM instance: ${errorMessage}`);
+      }
+      
+      return new GuillotineEVM(wasm, memory, evmHandle, useTracing);
     } catch (error) {
       if (error instanceof GuillotineError) {
         throw error;
@@ -74,61 +141,85 @@ export class GuillotineEVM {
   }
 
   /**
-   * Execute bytecode on the EVM
+   * Execute a call on the EVM
    */
-  async execute(params: ExecutionParams): Promise<ExecutionResult> {
+  async call(params: ExecutionParams): Promise<ExecutionResult> {
     this.ensureInitialized();
 
     try {
-      // Set default parameters
-      const caller = params.caller || Address.zero();
-      const to = params.to || Address.zero();
-      const value = params.value || U256.zero();
-      const input = params.input || Bytes.empty();
-      const gasLimit = params.gasLimit || 1000000n;
+      // Create CallParams structure
+      const paramsPtr = this.memory.malloc(124); // Size of CallParams struct
+      const buffer = this.memory.getBuffer();
+      const view = new DataView(buffer.buffer, paramsPtr);
+      let offset = 0;
 
-      // Validate inputs
-      if (params.bytecode.isEmpty()) {
-        throw GuillotineError.invalidBytecode('Bytecode cannot be empty');
+      // caller (20 bytes)
+      const callerBytes = params.caller.toBytes();
+      for (let i = 0; i < 20; i++) {
+        view.setUint8(offset + i, callerBytes[i] || 0);
+      }
+      offset += 20;
+
+      // to (20 bytes)
+      const toBytes = params.to.toBytes();
+      for (let i = 0; i < 20; i++) {
+        view.setUint8(offset + i, toBytes[i] || 0);
+      }
+      offset += 20;
+
+      // value (32 bytes)
+      const valueBytes = params.value.toBytes();
+      for (let i = 0; i < 32; i++) {
+        view.setUint8(offset + i, valueBytes[i] || 0);
+      }
+      offset += 32;
+
+      // input pointer and length
+      const inputPtr = params.input.isEmpty() ? 0 : this.memory.writeBytes(params.input.toBytes());
+      view.setUint32(offset, inputPtr, true);
+      offset += 4;
+      view.setUint32(offset, params.input.length(), true);
+      offset += 4;
+
+      // gas
+      view.setBigUint64(offset, params.gas, true);
+      offset += 8;
+
+      // call_type
+      view.setUint8(offset, params.callType || CallType.CALL);
+      offset += 1;
+
+      // salt (32 bytes) - for CREATE2
+      const salt = params.salt || U256.zero();
+      const saltBytes = salt.toBytes();
+      for (let i = 0; i < 32; i++) {
+        view.setUint8(offset + i, saltBytes[i] || 0);
       }
 
-      // Write data to WASM memory
-      const bytecodePtr = this.memory.writeBytes(params.bytecode.toBytes());
-      const callerPtr = this.memory.writeAddress(caller.toBytes());
-      const toPtr = this.memory.writeAddress(to.toBytes());
-      const valuePtr = this.memory.writeU256(value.toBytes());
-      const inputPtr = input.isEmpty() ? 0 : this.memory.writeBytes(input.toBytes());
-
       try {
-        // Execute on the EVM
-        const resultPtr = this.wasm.guillotine_vm_execute(
-          this.vmPtr,
-          bytecodePtr,
-          params.bytecode.length(),
-          callerPtr,
-          toPtr,
-          valuePtr,
-          inputPtr,
-          input.length(),
-          gasLimit
-        );
+        // Execute the call
+        const resultPtr = this.useTracing
+          ? this.wasm.guillotine_call_tracing(this.evmHandle, paramsPtr)
+          : this.wasm.guillotine_call(this.evmHandle, paramsPtr);
 
         if (resultPtr === 0) {
-          throw GuillotineError.executionFailed('VM execution returned null result');
+          const errorPtr = this.wasm.guillotine_get_last_error();
+          const errorMessage = this.memory.readString(errorPtr);
+          throw GuillotineError.executionFailed(`VM execution failed: ${errorMessage}`);
         }
 
-        // Read the result from WASM memory
+        // Parse the result
         const result = this.parseExecutionResult(resultPtr);
+        
+        // Free the result
+        this.wasm.guillotine_free_result(resultPtr);
         
         return result;
       } finally {
         // Clean up allocated memory
-        this.memory.free(bytecodePtr, params.bytecode.length());
-        this.memory.free(callerPtr, 20);
-        this.memory.free(toPtr, 20);
-        this.memory.free(valuePtr, 32);
+        this.memory.free(paramsPtr, 124);
         if (inputPtr !== 0) {
-          this.memory.free(inputPtr, input.length());
+          this.memory.free(inputPtr, params.input.length());
         }
       }
     } catch (error) {
@@ -153,9 +244,14 @@ export class GuillotineEVM {
       const balancePtr = this.memory.writeU256(balance.toBytes());
 
       try {
-        const result = this.wasm.guillotine_set_balance(this.vmPtr, addressPtr, balancePtr);
-        if (result !== 0) {
-          throw GuillotineError.fromErrorCode(result, 'Failed to set balance');
+        const result = this.useTracing
+          ? this.wasm.guillotine_set_balance_tracing(this.evmHandle, addressPtr, balancePtr)
+          : this.wasm.guillotine_set_balance(this.evmHandle, addressPtr, balancePtr);
+          
+        if (!result) {
+          const errorPtr = this.wasm.guillotine_get_last_error();
+          const errorMessage = this.memory.readString(errorPtr);
+          throw GuillotineError.stateError(`Failed to set balance: ${errorMessage}`);
         }
       } finally {
         this.memory.free(addressPtr, 20);
@@ -180,14 +276,14 @@ export class GuillotineEVM {
       const codePtr = code.isEmpty() ? 0 : this.memory.writeBytes(code.toBytes());
 
       try {
-        const result = this.wasm.guillotine_set_code(
-          this.vmPtr,
-          addressPtr,
-          codePtr,
-          code.length()
-        );
-        if (result !== 0) {
-          throw GuillotineError.fromErrorCode(result, 'Failed to set code');
+        const result = this.useTracing
+          ? this.wasm.guillotine_set_code_tracing(this.evmHandle, addressPtr, codePtr, code.length())
+          : this.wasm.guillotine_set_code(this.evmHandle, addressPtr, codePtr, code.length());
+          
+        if (!result) {
+          const errorPtr = this.wasm.guillotine_get_last_error();
+          const errorMessage = this.memory.readString(errorPtr);
+          throw GuillotineError.stateError(`Failed to set code: ${errorMessage}`);
         }
       } finally {
         this.memory.free(addressPtr, 20);
@@ -216,13 +312,15 @@ export class GuillotineEVM {
 
       try {
         const result = this.wasm.guillotine_set_storage(
-          this.vmPtr,
+          this.evmHandle,
           addressPtr,
           keyPtr,
           valuePtr
         );
-        if (result !== 0) {
-          throw GuillotineError.fromErrorCode(result, 'Failed to set storage');
+        if (!result) {
+          const errorPtr = this.wasm.guillotine_get_last_error();
+          const errorMessage = this.memory.readString(errorPtr);
+          throw GuillotineError.stateError(`Failed to set storage: ${errorMessage}`);
         }
       } finally {
         this.memory.free(addressPtr, 20);
@@ -245,17 +343,19 @@ export class GuillotineEVM {
 
     try {
       const addressPtr = this.memory.writeAddress(address.toBytes());
+      const balanceOutPtr = this.memory.malloc(32);
 
       try {
-        const balancePtr = this.wasm.guillotine_get_balance(this.vmPtr, addressPtr);
-        if (balancePtr === 0) {
+        const result = this.wasm.guillotine_get_balance(this.evmHandle, addressPtr, balanceOutPtr);
+        if (!result) {
           return U256.zero();
         }
 
-        const balanceBytes = this.memory.readU256(balancePtr);
+        const balanceBytes = this.memory.readU256(balanceOutPtr);
         return U256.fromBytes(balanceBytes);
       } finally {
         this.memory.free(addressPtr, 20);
+        this.memory.free(balanceOutPtr, 32);
       }
     } catch (error) {
       if (error instanceof GuillotineError) {
@@ -273,19 +373,35 @@ export class GuillotineEVM {
 
     try {
       const addressPtr = this.memory.writeAddress(address.toBytes());
+      const codeOutPtr = this.memory.malloc(4);
+      const lenOutPtr = this.memory.malloc(4);
 
       try {
-        const codePtr = this.wasm.guillotine_get_code(this.vmPtr, addressPtr);
-        if (codePtr === 0) {
+        const success = this.wasm.guillotine_get_code(this.evmHandle, addressPtr, codeOutPtr, lenOutPtr);
+        if (!success) {
           return Bytes.empty();
         }
 
-        // Note: In a real implementation, we'd need to know the length
-        // For now, we'll assume the WASM function returns a structured result
-        // This is a simplified version
-        return Bytes.empty();
+        const buffer = this.memory.getBuffer();
+        const view = new DataView(buffer.buffer);
+        const codePtr = view.getUint32(codeOutPtr, true);
+        const codeLen = view.getUint32(lenOutPtr, true);
+
+        if (codeLen === 0) {
+          return Bytes.empty();
+        }
+
+        const codeBytes = new Uint8Array(buffer.buffer, codePtr, codeLen);
+        const codeResult = Bytes.fromBytes(codeBytes);
+
+        // Free the code allocated by WASM
+        this.wasm.guillotine_free_code(codePtr, codeLen);
+
+        return codeResult;
       } finally {
         this.memory.free(addressPtr, 20);
+        this.memory.free(codeOutPtr, 4);
+        this.memory.free(lenOutPtr, 4);
       }
     } catch (error) {
       if (error instanceof GuillotineError) {
@@ -304,18 +420,20 @@ export class GuillotineEVM {
     try {
       const addressPtr = this.memory.writeAddress(address.toBytes());
       const keyPtr = this.memory.writeU256(key.toBytes());
+      const valueOutPtr = this.memory.malloc(32);
 
       try {
-        const valuePtr = this.wasm.guillotine_get_storage(this.vmPtr, addressPtr, keyPtr);
-        if (valuePtr === 0) {
+        const result = this.wasm.guillotine_get_storage(this.evmHandle, addressPtr, keyPtr, valueOutPtr);
+        if (!result) {
           return U256.zero();
         }
 
-        const valueBytes = this.memory.readU256(valuePtr);
+        const valueBytes = this.memory.readU256(valueOutPtr);
         return U256.fromBytes(valueBytes);
       } finally {
         this.memory.free(addressPtr, 20);
         this.memory.free(keyPtr, 32);
+        this.memory.free(valueOutPtr, 32);
       }
     } catch (error) {
       if (error instanceof GuillotineError) {
@@ -326,26 +444,29 @@ export class GuillotineEVM {
   }
 
   /**
-   * Get the EVM version
+   * Simulate a call (doesn't modify state)
    */
-  getVersion(): string {
+  async simulate(params: ExecutionParams): Promise<ExecutionResult> {
     this.ensureInitialized();
 
-    try {
-      const versionPtr = this.wasm.guillotine_version();
-      return this.memory.readString(versionPtr);
-    } catch (error) {
-      throw GuillotineError.unknown('Failed to get version', error as Error);
-    }
+    // Create CallParams and call guillotine_simulate
+    // Implementation similar to call() but uses guillotine_simulate
+    // This is a placeholder - implement similarly to call()
+    return this.call(params);
   }
 
   /**
    * Close the EVM instance and clean up resources
    */
   close(): void {
-    if (this.isInitialized && this.vmPtr !== 0) {
-      this.wasm.guillotine_vm_destroy(this.vmPtr);
-      this.vmPtr = 0;
+    if (this.isInitialized && this.evmHandle !== 0) {
+      if (this.useTracing) {
+        this.wasm.guillotine_evm_destroy_tracing(this.evmHandle);
+      } else {
+        this.wasm.guillotine_evm_destroy(this.evmHandle);
+      }
+      this.wasm.guillotine_cleanup();
+      this.evmHandle = 0;
       this.isInitialized = false;
     }
   }
@@ -354,7 +475,7 @@ export class GuillotineEVM {
    * Ensure the EVM is initialized
    */
   private ensureInitialized(): void {
-    if (!this.isInitialized || this.vmPtr === 0) {
+    if (!this.isInitialized || this.evmHandle === 0) {
       throw GuillotineError.vmNotInitialized('EVM instance is not initialized');
     }
   }
@@ -363,35 +484,195 @@ export class GuillotineEVM {
    * Parse execution result from WASM memory
    */
   private parseExecutionResult(resultPtr: number): ExecutionResult {
-    // This is a simplified parser - in a real implementation,
-    // we'd need to match the exact structure returned by the Zig code
     const buffer = this.memory.getBuffer();
-    
-    // Assuming a simple structure for now:
-    // - 4 bytes: success flag
-    // - 8 bytes: gas used
-    // - 4 bytes: return data length
-    // - N bytes: return data
-    // - 4 bytes: revert reason length
-    // - N bytes: revert reason
-    
     const view = new DataView(buffer.buffer, resultPtr);
-    
-    const success = view.getUint32(0, true) !== 0;
-    const gasUsed = view.getBigUint64(4, true);
-    const returnDataLen = view.getUint32(12, true);
-    
-    let offset = 16;
-    const returnDataBytes = new Uint8Array(buffer.buffer, resultPtr + offset, returnDataLen);
-    const returnData = Bytes.fromBytes(returnDataBytes);
-    
-    offset += returnDataLen;
-    const revertReasonLen = view.getUint32(offset, true);
-    offset += 4;
-    
-    const revertReasonBytes = new Uint8Array(buffer.buffer, resultPtr + offset, revertReasonLen);
-    const revertReason = Bytes.fromBytes(revertReasonBytes);
+    let offset = 0;
 
-    return new ExecutionResult(success, gasUsed, returnData, revertReason);
+    // Parse EvmResult struct
+    // success: bool (1 byte, padded to 4 for alignment)
+    const success = view.getUint8(offset) !== 0;
+    offset = 4; // Aligned to 4 bytes
+
+    // gas_left: u64
+    const gasLeft = view.getBigUint64(offset, true);
+    offset += 8;
+
+    // output: pointer
+    const outputPtr = view.getUint32(offset, true);
+    offset += 4;
+
+    // output_len: usize
+    const outputLen = view.getUint32(offset, true);
+    offset += 4;
+
+    // error_message: pointer
+    const errorMessagePtr = view.getUint32(offset, true);
+    offset += 4;
+
+    // logs: pointer
+    const logsPtr = view.getUint32(offset, true);
+    offset += 4;
+
+    // logs_len: usize
+    const logsLen = view.getUint32(offset, true);
+    offset += 4;
+
+    // selfdestructs: pointer
+    const selfdestructsPtr = view.getUint32(offset, true);
+    offset += 4;
+
+    // selfdestructs_len: usize
+    const selfdestructsLen = view.getUint32(offset, true);
+    offset += 4;
+
+    // accessed_addresses: pointer
+    const accessedAddressesPtr = view.getUint32(offset, true);
+    offset += 4;
+
+    // accessed_addresses_len: usize
+    const accessedAddressesLen = view.getUint32(offset, true);
+    offset += 4;
+
+    // accessed_storage: pointer
+    const accessedStoragePtr = view.getUint32(offset, true);
+    offset += 4;
+
+    // accessed_storage_len: usize
+    const accessedStorageLen = view.getUint32(offset, true);
+    offset += 4;
+
+    // created_address: [20]u8
+    const createdAddressBytes = new Uint8Array(20);
+    for (let i = 0; i < 20; i++) {
+      createdAddressBytes[i] = view.getUint8(offset + i);
+    }
+    offset += 20;
+
+    // has_created_address: bool
+    const hasCreatedAddress = view.getUint8(offset) !== 0;
+    offset += 1;
+
+    // Align to 4 bytes
+    offset = Math.ceil(offset / 4) * 4;
+
+    // trace_json: pointer
+    const traceJsonPtr = view.getUint32(offset, true);
+    offset += 4;
+
+    // trace_json_len: usize
+    const traceJsonLen = view.getUint32(offset, true);
+
+    // Parse output
+    const output = outputLen > 0
+      ? Bytes.fromBytes(new Uint8Array(buffer.buffer, outputPtr, outputLen))
+      : Bytes.empty();
+
+    // Parse error message
+    const errorMessage = errorMessagePtr !== 0
+      ? this.memory.readString(errorMessagePtr)
+      : null;
+
+    // Parse logs
+    const logs: LogEntry[] = [];
+    if (logsLen > 0) {
+      for (let i = 0; i < logsLen; i++) {
+        const logPtr = logsPtr + i * 40; // Size of LogEntry struct
+        const logView = new DataView(buffer.buffer, logPtr);
+        
+        // address: [20]u8
+        const addressBytes = new Uint8Array(20);
+        for (let j = 0; j < 20; j++) {
+          addressBytes[j] = logView.getUint8(j);
+        }
+        
+        // topics: pointer
+        const topicsPtr = logView.getUint32(20, true);
+        // topics_len: usize
+        const topicsLen = logView.getUint32(24, true);
+        // data: pointer
+        const dataPtr = logView.getUint32(28, true);
+        // data_len: usize
+        const dataLen = logView.getUint32(32, true);
+
+        const topics: U256[] = [];
+        for (let j = 0; j < topicsLen; j++) {
+          const topicBytes = new Uint8Array(buffer.buffer, topicsPtr + j * 32, 32);
+          topics.push(U256.fromBytes(topicBytes));
+        }
+
+        const data = dataLen > 0
+          ? Bytes.fromBytes(new Uint8Array(buffer.buffer, dataPtr, dataLen))
+          : Bytes.empty();
+
+        logs.push({
+          address: Address.fromBytes(addressBytes),
+          topics,
+          data,
+        });
+      }
+    }
+
+    // Parse selfdestructs
+    const selfdestructs: SelfDestructRecord[] = [];
+    if (selfdestructsLen > 0) {
+      for (let i = 0; i < selfdestructsLen; i++) {
+        const sdPtr = selfdestructsPtr + i * 40; // Size of SelfDestructRecord
+        const contractBytes = new Uint8Array(buffer.buffer, sdPtr, 20);
+        const beneficiaryBytes = new Uint8Array(buffer.buffer, sdPtr + 20, 20);
+        
+        selfdestructs.push({
+          contract: Address.fromBytes(contractBytes),
+          beneficiary: Address.fromBytes(beneficiaryBytes),
+        });
+      }
+    }
+
+    // Parse accessed addresses
+    const accessedAddresses: Address[] = [];
+    if (accessedAddressesLen > 0) {
+      for (let i = 0; i < accessedAddressesLen; i++) {
+        const addrPtr = accessedAddressesPtr + i * 20;
+        const addrBytes = new Uint8Array(buffer.buffer, addrPtr, 20);
+        accessedAddresses.push(Address.fromBytes(addrBytes));
+      }
+    }
+
+    // Parse accessed storage
+    const accessedStorage: StorageAccessRecord[] = [];
+    if (accessedStorageLen > 0) {
+      for (let i = 0; i < accessedStorageLen; i++) {
+        const storagePtr = accessedStoragePtr + i * 52; // 20 + 32
+        const addressBytes = new Uint8Array(buffer.buffer, storagePtr, 20);
+        const slotBytes = new Uint8Array(buffer.buffer, storagePtr + 20, 32);
+        
+        accessedStorage.push({
+          address: Address.fromBytes(addressBytes),
+          slot: U256.fromBytes(slotBytes),
+        });
+      }
+    }
+
+    // Parse created address
+    const createdAddress = hasCreatedAddress
+      ? Address.fromBytes(createdAddressBytes)
+      : null;
+
+    // Parse trace JSON
+    const traceJson = traceJsonLen > 0
+      ? new TextDecoder().decode(new Uint8Array(buffer.buffer, traceJsonPtr, traceJsonLen))
+      : null;
+
+    return new ExecutionResult(
+      success,
+      gasLeft,
+      output,
+      errorMessage,
+      logs,
+      selfdestructs,
+      accessedAddresses,
+      accessedStorage,
+      createdAddress,
+      traceJson
+    );
   }
 }

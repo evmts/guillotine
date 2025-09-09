@@ -3,40 +3,49 @@
 /**
  * C-compatible types used by the WASM interface
  * 
- * CExecutionResult struct (for evm_execute result_ptr):
- * - success: c_int (4 bytes)
- * - gas_used: c_ulonglong (8 bytes) 
- * - return_data_ptr: pointer (4 bytes in wasm32)
- * - return_data_len: usize (4 bytes in wasm32)
- * - error_code: c_int (4 bytes)
- * 
- * GuillotineExecutionResult struct (returned by guillotine_execute):
- * - success: bool (1 byte)
- * - gas_used: u64 (8 bytes)
+ * EvmResult struct (returned by guillotine_call):
+ * - success: bool (1 byte, padded to 4 bytes for alignment)
+ * - gas_left: u64 (8 bytes)
  * - output: pointer (4 bytes in wasm32)
  * - output_len: usize (4 bytes in wasm32)
- * - error_message: pointer or null (4 bytes in wasm32)
+ * - error_message: pointer to null-terminated string (4 bytes in wasm32)
+ * - logs: pointer to LogEntry array (4 bytes in wasm32)
+ * - logs_len: usize (4 bytes in wasm32)
+ * - selfdestructs: pointer to SelfDestructRecord array (4 bytes in wasm32)
+ * - selfdestructs_len: usize (4 bytes in wasm32)
+ * - accessed_addresses: pointer to address array (4 bytes in wasm32)
+ * - accessed_addresses_len: usize (4 bytes in wasm32)
+ * - accessed_storage: pointer to StorageAccessRecord array (4 bytes in wasm32)
+ * - accessed_storage_len: usize (4 bytes in wasm32)
+ * - created_address: [20]u8 (20 bytes)
+ * - has_created_address: bool (1 byte)
+ * - trace_json: pointer to JSON string (4 bytes in wasm32)
+ * - trace_json_len: usize (4 bytes in wasm32)
  * 
- * GuillotineAddress: 20 bytes
- * GuillotineU256: 32 bytes (little-endian)
+ * LogEntry struct:
+ * - address: [20]u8
+ * - topics: pointer to [32]u8 array
+ * - topics_len: usize
+ * - data: pointer to u8 array
+ * - data_len: usize
  * 
- * Error codes (EvmError enum):
- * - EVM_OK = 0
- * - EVM_ERROR_MEMORY = 1
- * - EVM_ERROR_INVALID_PARAM = 2
- * - EVM_ERROR_VM_NOT_INITIALIZED = 3
- * - EVM_ERROR_EXECUTION_FAILED = 4
- * - EVM_ERROR_INVALID_ADDRESS = 5
- * - EVM_ERROR_INVALID_BYTECODE = 6
+ * SelfDestructRecord struct:
+ * - contract: [20]u8
+ * - beneficiary: [20]u8
  * 
- * Frame error codes (FrameError enum):
- * - FRAME_OK = 0
- * - FRAME_ERROR_MEMORY = 1
- * - FRAME_ERROR_INVALID_PARAM = 2
- * - FRAME_ERROR_EXECUTION_FAILED = 3
- * - FRAME_ERROR_STACK_OVERFLOW = 4
- * - FRAME_ERROR_STACK_UNDERFLOW = 5
- * - FRAME_ERROR_OUT_OF_GAS = 6
+ * StorageAccessRecord struct:
+ * - address: [20]u8
+ * - slot: [32]u8
+ * 
+ * CallParams struct:
+ * - caller: [20]u8
+ * - to: [20]u8
+ * - value: [32]u8 (u256 as bytes)
+ * - input: pointer to u8 array
+ * - input_len: usize
+ * - gas: u64
+ * - call_type: u8 (0=CALL, 1=CALLCODE, 2=DELEGATECALL, 3=STATICCALL, 4=CREATE, 5=CREATE2)
+ * - salt: [32]u8 (for CREATE2)
  */
 
 /**
@@ -46,87 +55,38 @@ export interface GuillotineWasm {
   // Memory management
   memory: WebAssembly.Memory;
   
-  // Core functions
-  evm_init(): number; // Returns c_int (0 = success)
-  evm_deinit(): void;
-  evm_is_initialized(): number; // Returns c_int (1 if initialized, 0 otherwise)
-  evm_version(): number; // Returns pointer to null-terminated string
+  // Initialization
+  guillotine_init(): void;
+  guillotine_cleanup(): void;
   
-  // Legacy EVM execution
-  evm_execute(
-    bytecode_ptr: number,
-    bytecode_len: number,
-    caller_ptr: number,
-    value: bigint, // c_ulonglong
-    gas_limit: bigint, // c_ulonglong
-    result_ptr: number // Pointer to CExecutionResult struct
-  ): number; // Returns c_int error code
-  
-  // VM management
-  guillotine_vm_create(): number; // Returns pointer to GuillotineVm or null
-  guillotine_vm_destroy(vm: number): void;
+  // EVM instance management
+  guillotine_evm_create(block_info_ptr: number): number; // Returns EvmHandle pointer or null
+  guillotine_evm_create_tracing(block_info_ptr: number): number; // Returns EvmHandle pointer or null
+  guillotine_evm_destroy(handle: number): void;
+  guillotine_evm_destroy_tracing(handle: number): void;
   
   // State management
-  guillotine_set_balance(vm: number, address_ptr: number, balance_ptr: number): boolean;
-  guillotine_set_code(vm: number, address_ptr: number, code_ptr: number, code_len: number): boolean;
-  guillotine_set_storage(vm: number, address_ptr: number, key_ptr: number, value_ptr: number): number;
-  guillotine_get_balance(vm: number, address_ptr: number): number; // Returns pointer to U256
-  guillotine_get_code(vm: number, address_ptr: number): number; // Returns pointer to bytes
-  guillotine_get_storage(vm: number, address_ptr: number, key_ptr: number): number; // Returns pointer to U256
+  guillotine_set_balance(handle: number, address_ptr: number, balance_ptr: number): boolean;
+  guillotine_set_balance_tracing(handle: number, address_ptr: number, balance_ptr: number): boolean;
+  guillotine_set_code(handle: number, address_ptr: number, code_ptr: number, code_len: number): boolean;
+  guillotine_set_code_tracing(handle: number, address_ptr: number, code_ptr: number, code_len: number): boolean;
+  guillotine_set_storage(handle: number, address_ptr: number, key_ptr: number, value_ptr: number): boolean;
+  guillotine_get_balance(handle: number, address_ptr: number, balance_out: number): boolean;
+  guillotine_get_code(handle: number, address_ptr: number, code_out_ptr: number, len_out_ptr: number): boolean;
+  guillotine_get_storage(handle: number, address_ptr: number, key_ptr: number, value_out: number): boolean;
   
-  // VM execution
-  guillotine_vm_execute(
-    vm: number,
-    bytecode_ptr: number,
-    bytecode_len: number,
-    caller_ptr: number,
-    to_ptr: number,
-    value_ptr: number,
-    input_ptr: number,
-    input_len: number,
-    gas_limit: bigint
-  ): number; // Returns pointer to result
-  guillotine_execute(
-    vm: number,
-    from_ptr: number, // Pointer to GuillotineAddress
-    to_ptr: number, // Pointer to GuillotineAddress (nullable)
-    value_ptr: number, // Pointer to GuillotineU256 (nullable)
-    input_ptr: number, // Pointer to input bytes (nullable)
-    input_len: number,
-    gas_limit: bigint // u64
-  ): number; // Returns GuillotineExecutionResult struct (by value)
+  // Execution
+  guillotine_call(handle: number, params_ptr: number): number; // Returns EvmResult pointer or null
+  guillotine_call_tracing(handle: number, params_ptr: number): number; // Returns EvmResult pointer or null
+  guillotine_simulate(handle: number, params_ptr: number): number; // Returns EvmResult pointer or null
   
-  // Utility functions
-  guillotine_u256_from_u64(value: bigint, out_u256_ptr: number): void;
-  guillotine_version(): number; // Returns pointer to version string
+  // Memory cleanup
+  guillotine_free_output(output: number, len: number): void;
+  guillotine_free_code(code: number, len: number): void;
+  guillotine_free_result(result: number): void;
   
-  // Frame API
-  evm_frame_create(bytecode_ptr: number, bytecode_len: number, initial_gas: bigint): number; // Returns pointer or null
-  evm_frame_destroy(frame_ptr: number): void;
-  evm_frame_reset(frame_ptr: number, new_gas: bigint): number; // Returns c_int error code
-  evm_frame_execute(frame_ptr: number): number; // Returns c_int error code
-  
-  // Frame gas operations
-  evm_frame_get_gas_remaining(frame_ptr: number): bigint; // Returns u64
-  evm_frame_get_gas_used(frame_ptr: number): bigint; // Returns u64
-  
-  // Frame state inspection
-  evm_frame_get_pc(frame_ptr: number): number; // Returns u32
-  evm_frame_stack_size(frame_ptr: number): number; // Returns u32
-  evm_frame_is_stopped(frame_ptr: number): number; // Returns c_int (1 if stopped, 0 if running)
-  evm_frame_get_memory_size(frame_ptr: number): number; // Returns usize
-  evm_frame_get_bytecode_len(frame_ptr: number): number; // Returns u32
-  evm_frame_get_current_opcode(frame_ptr: number): number; // Returns u8
-  
-  // Frame stack operations
-  evm_frame_push_u64(frame_ptr: number, value: bigint): number; // Returns c_int error code
-  evm_frame_pop_u64(frame_ptr: number, value_out_ptr: number): number; // Returns c_int error code
-  
-  // Frame memory operations
-  evm_frame_get_memory(frame_ptr: number, offset: number, length: number, data_out_ptr: number): number; // Returns c_int error code
-  
-  // Debug frame API
-  evm_debug_frame_create(bytecode_ptr: number, bytecode_len: number, initial_gas: bigint): number; // Returns pointer or null
+  // Error handling
+  guillotine_get_last_error(): number; // Returns pointer to null-terminated error string
 }
 
 /**
