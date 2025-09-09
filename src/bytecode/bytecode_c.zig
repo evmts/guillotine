@@ -6,6 +6,7 @@ const std = @import("std");
 const Opcode = @import("../opcodes/opcode.zig").Opcode;
 const BytecodeConfig = @import("bytecode_config.zig").BytecodeConfig;
 const BytecodeType = @import("bytecode.zig").Bytecode(BytecodeConfig{});
+const bytecodeAnalyze = @import("bytecode_analyze.zig").bytecodeAnalyze;
 
 const allocator = std.heap.c_allocator;
 
@@ -145,60 +146,8 @@ pub export fn evm_bytecode_get_runtime_data(handle: ?*const BytecodeHandle, buff
 }
 
 // ============================================================================
-// METADATA ACCESSORS
-// ============================================================================
-
-/// Return 1 if Solidity metadata is present, 0 otherwise
-pub export fn evm_bytecode_has_metadata(handle: ?*const BytecodeHandle) c_int {
-    const h = handle orelse return 0;
-    return if (h.bytecode.metadata != null) 1 else 0;
-}
-
-/// Get metadata length in bytes (including trailing 2-byte length field). 0 if none.
-pub export fn evm_bytecode_get_metadata_length(handle: ?*const BytecodeHandle) usize {
-    const h = handle orelse return 0;
-    if (h.bytecode.metadata) |m| return m.metadata_length;
-    return 0;
-}
-
-/// Copy 34-byte IPFS multihash (0x12 0x20 prefix + 32-byte digest). Returns bytes copied (34 or 0).
-pub export fn evm_bytecode_get_metadata_ipfs(handle: ?*const BytecodeHandle, out: [*]u8, max_len: usize) usize {
-    const h = handle orelse return 0;
-    if (h.bytecode.metadata) |m| {
-        const need: usize = 34;
-        if (max_len < need) return 0;
-        @memcpy(out[0..need], m.ipfs_hash[0..]);
-        return need;
-    }
-    return 0;
-}
-
-/// Get solc version components; returns 1 if present, 0 otherwise
-pub export fn evm_bytecode_get_metadata_solc_version(handle: ?*const BytecodeHandle, out_major: *u8, out_minor: *u8, out_patch: *u8) c_int {
-    const h = handle orelse return 0;
-    if (h.bytecode.metadata) |m| {
-        out_major.* = m.solc_version[0];
-        out_minor.* = m.solc_version[1];
-        out_patch.* = m.solc_version[2];
-        return 1;
-    }
-    return 0;
-}
-
-// ============================================================================
 // BYTECODE VALIDATION
 // ============================================================================
-
-/// Get the number of invalid opcodes in bytecode
-/// @param handle Bytecode handle
-/// @return Count of invalid opcodes, or 0 on error
-pub export fn evm_bytecode_count_invalid_opcodes(handle: ?*const BytecodeHandle) u32 {
-    const h = handle orelse return 0;
-    // Runtime code validated => invalid count should be zero; compute via stats for completeness
-    var stats = h.bytecode.getStats() catch return 0;
-    defer stats.deinit(allocator);
-    return stats.opcode_counts[@intFromEnum(Opcode.INVALID)];
-}
 
 /// Find all jump destinations in bytecode
 /// @param handle Bytecode handle
@@ -227,70 +176,227 @@ pub export fn evm_bytecode_find_jump_dests(
 }
 
 // ============================================================================
-// BYTECODE STATISTICS
+// BYTECODE ANALYSIS - Advanced fusion and control flow analysis
 // ============================================================================
 
-/// C structure for bytecode statistics
-pub const CBytecodeStats = extern struct {
-    total_bytes: usize,
-    instruction_count: u32,
-    jump_dest_count: u32,
-    invalid_opcode_count: u32,
-    push_instruction_count: u32,
-    jump_instruction_count: u32,
-    call_instruction_count: u32,
-    create_instruction_count: u32,
-    complexity_score: u64,
+/// C structure for basic block information
+pub const CBasicBlock = extern struct {
+    start: u32,
+    end: u32,
 };
 
-/// Get comprehensive bytecode statistics
+/// C structure for fusion information
+pub const CFusionInfo = extern struct {
+    fusion_type: CFusionType,
+    original_length: u32,
+    folded_value_low: u64,
+    folded_value_high: u64,
+    folded_value_extra_high: u64,
+    folded_value_top: u64,
+    count: u8,
+};
+
+/// Fusion type enum for C
+pub const CFusionType = enum(u8) {
+    constant_fold = 0,
+    multi_push = 1,
+    multi_pop = 2,
+    iszero_jumpi = 3,
+    dup2_mstore_push = 4,
+};
+
+/// C structure for jump fusion entry
+pub const CJumpFusion = extern struct {
+    source_pc: u32,
+    target_pc: u32,
+};
+
+/// C structure for advanced fusion entry
+pub const CAdvancedFusion = extern struct {
+    pc: u32,
+    info: CFusionInfo,
+};
+
+/// C structure for bytecode analysis result
+pub const CBytecodeAnalysis = extern struct {
+    // Arrays of program counters
+    push_pcs: [*]u32,
+    push_pcs_count: u32,
+    
+    jumpdests: [*]u32,
+    jumpdests_count: u32,
+    
+    // Basic blocks
+    basic_blocks: [*]CBasicBlock,
+    basic_blocks_count: u32,
+    
+    // Jump fusions
+    jump_fusions: [*]CJumpFusion,
+    jump_fusions_count: u32,
+    
+    // Advanced fusions
+    advanced_fusions: [*]CAdvancedFusion,
+    advanced_fusions_count: u32,
+};
+
+/// Analyze bytecode for advanced patterns and control flow
 /// @param handle Bytecode handle
-/// @param stats_out Output statistics structure
+/// @param analysis_out Output analysis structure
 /// @return Error code
-pub export fn evm_bytecode_get_stats(handle: ?*const BytecodeHandle, stats_out: *CBytecodeStats) c_int {
+pub fn evm_bytecode_analyze(handle: ?*const BytecodeHandle, analysis_out: *CBytecodeAnalysis) callconv(.c) c_int {
     const h = handle orelse return EVM_BYTECODE_ERROR_NULL_POINTER;
-    // Initialize
-    stats_out.total_bytes = @intCast(h.bytecode.len());
-    stats_out.instruction_count = 0;
-    stats_out.jump_dest_count = 0;
-    stats_out.invalid_opcode_count = 0;
-    stats_out.push_instruction_count = 0;
-    stats_out.jump_instruction_count = 0;
-    stats_out.call_instruction_count = 0;
-    stats_out.create_instruction_count = 0;
-    stats_out.complexity_score = 0;
-
-    var zstats = h.bytecode.getStats() catch return EVM_BYTECODE_ERROR_INVALID_BYTECODE;
-    defer zstats.deinit(allocator);
-
-    var total_instr: u32 = 0;
-    for (zstats.opcode_counts, 0..) |count, op| {
-        total_instr +%= count;
-        const maybe = std.meta.intToEnum(Opcode, @as(u8, @intCast(op))) catch continue;
-        const opcode = maybe;
-        switch (opcode) {
-            .JUMPDEST => stats_out.jump_dest_count +%= count,
-            .JUMP, .JUMPI => stats_out.jump_instruction_count +%= count,
-            .CALL, .CALLCODE, .DELEGATECALL, .STATICCALL => stats_out.call_instruction_count +%= count,
-            .CREATE, .CREATE2 => stats_out.create_instruction_count +%= count,
-            .PUSH0, .PUSH1, .PUSH2, .PUSH3, .PUSH4, .PUSH5, .PUSH6, .PUSH7,
-            .PUSH8, .PUSH9, .PUSH10, .PUSH11, .PUSH12, .PUSH13, .PUSH14, .PUSH15,
-            .PUSH16, .PUSH17, .PUSH18, .PUSH19, .PUSH20, .PUSH21, .PUSH22, .PUSH23,
-            .PUSH24, .PUSH25, .PUSH26, .PUSH27, .PUSH28, .PUSH29, .PUSH30, .PUSH31, .PUSH32 =>
-                stats_out.push_instruction_count +%= count,
-            else => {},
+    
+    // Call the Zig analyzer with correct types
+    const BasicBlock = struct {
+        start: BytecodeType.PcType,
+        end: BytecodeType.PcType,
+    };
+    const FusionInfo = struct {
+        fusion_type: enum { constant_fold, multi_push, multi_pop, iszero_jumpi, dup2_mstore_push },
+        original_length: BytecodeType.PcType,
+        folded_value: u256 = 0,
+        count: u8 = 0,
+    };
+    
+    const analysis = bytecodeAnalyze(
+        BytecodeType.PcType,
+        BasicBlock,
+        FusionInfo,
+        allocator,
+        h.bytecode.raw(),
+    ) catch return EVM_BYTECODE_ERROR_INVALID_BYTECODE;
+    
+    defer {
+        allocator.free(analysis.push_pcs);
+        allocator.free(analysis.jumpdests);
+        allocator.free(analysis.basic_blocks);
+        var mut_jump_fusions = analysis.jump_fusions;
+        mut_jump_fusions.deinit();
+        var mut_advanced_fusions = analysis.advanced_fusions;
+        mut_advanced_fusions.deinit();
+    }
+    
+    // Convert push_pcs
+    const c_push_pcs = allocator.alloc(u32, analysis.push_pcs.len) catch 
+        return EVM_BYTECODE_ERROR_OUT_OF_MEMORY;
+    for (analysis.push_pcs, 0..) |pc, i| {
+        c_push_pcs[i] = @intCast(pc);
+    }
+    
+    // Convert jumpdests
+    const c_jumpdests = allocator.alloc(u32, analysis.jumpdests.len) catch {
+        allocator.free(c_push_pcs);
+        return EVM_BYTECODE_ERROR_OUT_OF_MEMORY;
+    };
+    for (analysis.jumpdests, 0..) |pc, i| {
+        c_jumpdests[i] = @intCast(pc);
+    }
+    
+    // Convert basic blocks
+    const c_blocks = allocator.alloc(CBasicBlock, analysis.basic_blocks.len) catch {
+        allocator.free(c_push_pcs);
+        allocator.free(c_jumpdests);
+        return EVM_BYTECODE_ERROR_OUT_OF_MEMORY;
+    };
+    for (analysis.basic_blocks, 0..) |block, i| {
+        c_blocks[i] = .{
+            .start = @intCast(block.start),
+            .end = @intCast(block.end),
+        };
+    }
+    
+    // Convert jump fusions
+    const c_jump_fusions = allocator.alloc(CJumpFusion, analysis.jump_fusions.count()) catch {
+        allocator.free(c_push_pcs);
+        allocator.free(c_jumpdests);
+        allocator.free(c_blocks);
+        return EVM_BYTECODE_ERROR_OUT_OF_MEMORY;
+    };
+    {
+        var iter = analysis.jump_fusions.iterator();
+        var i: usize = 0;
+        while (iter.next()) |entry| : (i += 1) {
+            c_jump_fusions[i] = .{
+                .source_pc = @intCast(entry.key_ptr.*),
+                .target_pc = @intCast(entry.value_ptr.*),
+            };
         }
     }
-    stats_out.instruction_count = total_instr;
-    stats_out.invalid_opcode_count = zstats.opcode_counts[@intFromEnum(Opcode.INVALID)];
-
-    // Simple heuristic complexity score retained
-    stats_out.complexity_score = @as(u64, stats_out.instruction_count)
-        + (@as(u64, stats_out.jump_instruction_count) * 2)
-        + (@as(u64, stats_out.call_instruction_count) * 3)
-        + (@as(u64, stats_out.create_instruction_count) * 5);
-
+    
+    // Convert advanced fusions
+    const c_advanced = allocator.alloc(CAdvancedFusion, analysis.advanced_fusions.count()) catch {
+        allocator.free(c_push_pcs);
+        allocator.free(c_jumpdests);
+        allocator.free(c_blocks);
+        allocator.free(c_jump_fusions);
+        return EVM_BYTECODE_ERROR_OUT_OF_MEMORY;
+    };
+    {
+        var iter = analysis.advanced_fusions.iterator();
+        var i: usize = 0;
+        while (iter.next()) |entry| : (i += 1) {
+            const fusion = entry.value_ptr.*;
+            c_advanced[i] = .{
+                .pc = @intCast(entry.key_ptr.*),
+                .info = .{
+                    .fusion_type = switch (fusion.fusion_type) {
+                        .constant_fold => CFusionType.constant_fold,
+                        .multi_push => CFusionType.multi_push,
+                        .multi_pop => CFusionType.multi_pop,
+                        .iszero_jumpi => CFusionType.iszero_jumpi,
+                        .dup2_mstore_push => CFusionType.dup2_mstore_push,
+                    },
+                    .original_length = @intCast(fusion.original_length),
+                    .folded_value_low = @truncate(fusion.folded_value),
+                    .folded_value_high = @truncate(fusion.folded_value >> 64),
+                    .folded_value_extra_high = @truncate(fusion.folded_value >> 128),
+                    .folded_value_top = @truncate(fusion.folded_value >> 192),
+                    .count = fusion.count,
+                },
+            };
+        }
+    }
+    
+    // Fill output structure
+    analysis_out.* = .{
+        .push_pcs = c_push_pcs.ptr,
+        .push_pcs_count = @intCast(c_push_pcs.len),
+        
+        .jumpdests = c_jumpdests.ptr,
+        .jumpdests_count = @intCast(c_jumpdests.len),
+        
+        .basic_blocks = c_blocks.ptr,
+        .basic_blocks_count = @intCast(c_blocks.len),
+        
+        .jump_fusions = c_jump_fusions.ptr,
+        .jump_fusions_count = @intCast(c_jump_fusions.len),
+        
+        .advanced_fusions = c_advanced.ptr,
+        .advanced_fusions_count = @intCast(c_advanced.len),
+    };
+    
     return EVM_BYTECODE_SUCCESS;
+}
+
+/// Free memory allocated by bytecode analysis
+/// @param analysis Analysis structure to free
+pub fn evm_bytecode_free_analysis(analysis: *CBytecodeAnalysis) callconv(.c) void {
+    if (analysis.push_pcs_count > 0) {
+        allocator.free(analysis.push_pcs[0..analysis.push_pcs_count]);
+    }
+    if (analysis.jumpdests_count > 0) {
+        allocator.free(analysis.jumpdests[0..analysis.jumpdests_count]);
+    }
+    if (analysis.basic_blocks_count > 0) {
+        allocator.free(analysis.basic_blocks[0..analysis.basic_blocks_count]);
+    }
+    if (analysis.jump_fusions_count > 0) {
+        allocator.free(analysis.jump_fusions[0..analysis.jump_fusions_count]);
+    }
+    if (analysis.advanced_fusions_count > 0) {
+        allocator.free(analysis.advanced_fusions[0..analysis.advanced_fusions_count]);
+    }
+    analysis.* = std.mem.zeroes(CBytecodeAnalysis);
 }
 
 // ============================================================================
@@ -488,25 +594,6 @@ pub export fn evm_bytecode_error_string(error_code: c_int) [*:0]const u8 {
 // TESTING
 // ============================================================================
 
-/// Test bytecode creation and basic analysis
-pub export fn evm_bytecode_test_basic() c_int {
-    // Simple bytecode: PUSH1 42 PUSH1 10 ADD STOP
-    const test_bytecode = [_]u8{ 0x60, 0x2A, 0x60, 0x0A, 0x01, 0x00 };
-    
-    const handle = evm_bytecode_create(&test_bytecode, test_bytecode.len) orelse return -1;
-    defer evm_bytecode_destroy(handle);
-    
-    if (evm_bytecode_get_length(handle) != test_bytecode.len) return -2;
-    
-    var stats: CBytecodeStats = undefined;
-    if (evm_bytecode_get_stats(handle, &stats) != EVM_BYTECODE_SUCCESS) return -4;
-    
-    if (stats.total_bytes != test_bytecode.len) return -5;
-    if (stats.push_instruction_count != 2) return -6; // Two PUSH1 instructions
-    
-    return 0;
-}
-
 /// Test opcode utilities
 pub export fn evm_bytecode_test_opcodes() c_int {
     // Test valid opcodes
@@ -555,14 +642,6 @@ test "Bytecode C API basic getters and data copy" {
     const copied_runtime = evm_bytecode_get_runtime_data(h, &buf_runtime, buf_runtime.len);
     try std.testing.expectEqual(code.len, copied_runtime);
     try std.testing.expect(std.mem.eql(u8, buf_runtime[0..copied_runtime], code[0..]));
-
-    // Metadata absent
-    try std.testing.expectEqual(@as(c_int, 0), evm_bytecode_has_metadata(h));
-    try std.testing.expectEqual(@as(usize, 0), evm_bytecode_get_metadata_length(h));
-    var ipfs: [34]u8 = undefined;
-    try std.testing.expectEqual(@as(usize, 0), evm_bytecode_get_metadata_ipfs(h, &ipfs, ipfs.len));
-    var maj: u8 = 0; var min: u8 = 0; var pat: u8 = 0;
-    try std.testing.expectEqual(@as(c_int, 0), evm_bytecode_get_metadata_solc_version(h, &maj, &min, &pat));
 }
 
 test "Bytecode C API opcode/jumpdest/bounds and stats" {
@@ -593,10 +672,4 @@ test "Bytecode C API opcode/jumpdest/bounds and stats" {
     try std.testing.expectEqual(@as(u32, 2), found);
     try std.testing.expectEqual(@as(u32, 0), out[0]);
     try std.testing.expectEqual(@as(u32, 2), out[1]);
-
-    // Stats basics
-    var stats: CBytecodeStats = undefined;
-    try std.testing.expectEqual(@as(c_int, EVM_BYTECODE_SUCCESS), evm_bytecode_get_stats(h, &stats));
-    try std.testing.expectEqual(@as(usize, code.len), stats.total_bytes);
-    try std.testing.expect(stats.jump_dest_count >= 2);
 }
