@@ -65,7 +65,7 @@ export class U256 {
     
     let value = 0n;
     for (let i = 0; i < byteArray.length; i++) {
-      value = (value << 8n) + BigInt(byteArray[i]);
+      value = (value << 8n) + BigInt(byteArray[i] ?? 0);
     }
     
     return new U256(value);

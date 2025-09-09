@@ -1,0 +1,15 @@
+{
+	"name": "@guillotine/typescript",
+	"version": "0.0.1",
+	"type": "module",
+	"scripts": {
+		"test": "bun test",
+		"build": "bun build ./src/index.ts --outdir ./dist --target node",
+		"lint": "biome check --write ."
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.2.3",
+		"@types/bun": "latest",
+		"typescript": "^5.9.2"
+	}
+}

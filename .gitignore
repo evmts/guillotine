@@ -158,9 +158,8 @@ diff_output/
 test_traces/
 
 # Test trace files
-*.json
-trace_test.json
-test_trace*.json
+trace_*.json
+*_trace*.json
 
 # Log files
 *.log
