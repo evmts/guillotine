@@ -228,7 +228,7 @@ func ConvertInstructionsToRows(instructions []bytecode.Instruction, jumpdests []
 			value = *inst.PushValue
 			
 			// Check if this push value is a jumpdest target
-			if strings.HasPrefix(inst.OpcodeName, "PUSH") {
+			if strings.HasPrefix(inst.OpcodeName, "PUSH") && inst.PushValueDecimal != nil {
 				targetPC := uint32(*inst.PushValueDecimal)
 				if jumpdestMap[targetPC] {
 					value += fmt.Sprintf(" → [JD@%d]", targetPC)
