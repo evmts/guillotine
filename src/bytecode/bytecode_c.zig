@@ -7,7 +7,7 @@ const evm = @import("evm");
 const Opcode = evm.Opcode;
 const BytecodeConfig = evm.BytecodeConfig;
 const BytecodeType = evm.Bytecode(BytecodeConfig{});
-const bytecodeAnalyze = evm.bytecodeAnalyze;
+const bytecodeAnalyze = @import("bytecode_analyze.zig").bytecodeAnalyze;
 
 const allocator = std.heap.c_allocator;
 
@@ -41,7 +41,7 @@ const BytecodeHandle = struct {
 /// @param data Pointer to bytecode data
 /// @param data_len Length of bytecode data
 /// @return Opaque bytecode handle, or NULL on failure
-pub export fn evm_bytecode_create(data: [*]const u8, data_len: usize) ?*BytecodeHandle {
+pub fn evm_bytecode_create(data: [*]const u8, data_len: usize) callconv(.c) ?*BytecodeHandle {
     const handle = allocator.create(BytecodeHandle) catch return null;
     errdefer allocator.destroy(handle);
 
@@ -68,7 +68,7 @@ pub export fn evm_bytecode_create(data: [*]const u8, data_len: usize) ?*Bytecode
 
 /// Destroy bytecode and free memory
 /// @param handle Bytecode handle
-pub export fn evm_bytecode_destroy(handle: ?*BytecodeHandle) void {
+pub fn evm_bytecode_destroy(handle: ?*BytecodeHandle) callconv(.c) void {
     if (handle) |h| {
         h.bytecode.deinit();
         h.allocator.free(h.raw_data);
@@ -83,7 +83,7 @@ pub export fn evm_bytecode_destroy(handle: ?*BytecodeHandle) void {
 /// Get the length of the bytecode
 /// @param handle Bytecode handle
 /// @return Bytecode length in bytes, or 0 on error
-pub export fn evm_bytecode_get_length(handle: ?*const BytecodeHandle) usize {
+pub fn evm_bytecode_get_length(handle: ?*const BytecodeHandle) callconv(.c) usize {
     const h = handle orelse return 0;
     // Runtime length (excludes metadata)
     return @intCast(h.bytecode.len());
@@ -94,7 +94,7 @@ pub export fn evm_bytecode_get_length(handle: ?*const BytecodeHandle) usize {
 /// @param buffer Output buffer
 /// @param buffer_len Buffer length
 /// @return Number of bytes copied, or 0 on error
-pub export fn evm_bytecode_get_data(handle: ?*const BytecodeHandle, buffer: [*]u8, buffer_len: usize) usize {
+pub fn evm_bytecode_get_data(handle: ?*const BytecodeHandle, buffer: [*]u8, buffer_len: usize) callconv(.c) usize {
     const h = handle orelse return 0;
     
     const copy_len = @min(h.raw_data.len, buffer_len);
@@ -106,7 +106,7 @@ pub export fn evm_bytecode_get_data(handle: ?*const BytecodeHandle, buffer: [*]u
 /// @param handle Bytecode handle
 /// @param position Position in bytecode
 /// @return Opcode value (0-255), or 0xFF if out of bounds
-pub export fn evm_bytecode_get_opcode_at(handle: ?*const BytecodeHandle, position: usize) u8 {
+pub fn evm_bytecode_get_opcode_at(handle: ?*const BytecodeHandle, position: usize) callconv(.c) u8 {
     const h = handle orelse return 0xFF;
     const len: usize = @intCast(h.bytecode.len());
     if (position >= len) return 0xFF;
@@ -118,7 +118,7 @@ pub export fn evm_bytecode_get_opcode_at(handle: ?*const BytecodeHandle, positio
 /// @param handle Bytecode handle
 /// @param position Position to check
 /// @return 1 if valid jump destination, 0 otherwise
-pub export fn evm_bytecode_is_jump_dest(handle: ?*const BytecodeHandle, position: usize) c_int {
+pub fn evm_bytecode_is_jump_dest(handle: ?*const BytecodeHandle, position: usize) callconv(.c) c_int {
     const h = handle orelse return 0;
     const len: usize = @intCast(h.bytecode.len());
     if (position >= len) return 0;
@@ -131,14 +131,14 @@ pub export fn evm_bytecode_is_jump_dest(handle: ?*const BytecodeHandle, position
 // ============================================================================
 
 /// Get the full input length (may include Solidity metadata)
-pub export fn evm_bytecode_get_full_length(handle: ?*const BytecodeHandle) usize {
+pub fn evm_bytecode_get_full_length(handle: ?*const BytecodeHandle) callconv(.c) usize {
     const h = handle orelse return 0;
     return h.raw_data.len;
 }
 
 /// Copy validated runtime code (excludes metadata) to buffer
 /// Returns number of bytes copied
-pub export fn evm_bytecode_get_runtime_data(handle: ?*const BytecodeHandle, buffer: [*]u8, buffer_len: usize) usize {
+pub fn evm_bytecode_get_runtime_data(handle: ?*const BytecodeHandle, buffer: [*]u8, buffer_len: usize) callconv(.c) usize {
     const h = handle orelse return 0;
     const runtime = h.bytecode.raw();
     const copy_len = @min(runtime.len, buffer_len);
@@ -156,12 +156,12 @@ pub export fn evm_bytecode_get_runtime_data(handle: ?*const BytecodeHandle, buff
 /// @param max_dests Maximum number of destinations to find
 /// @param count_out Actual number of destinations found
 /// @return Error code
-pub export fn evm_bytecode_find_jump_dests(
+pub fn evm_bytecode_find_jump_dests(
     handle: ?*const BytecodeHandle,
     jump_dests: [*]u32,
     max_dests: u32,
     count_out: *u32
-) c_int {
+) callconv(.c) c_int {
     const h = handle orelse return EVM_BYTECODE_ERROR_NULL_POINTER;
     var count: u32 = 0;
     var pos: usize = 0;
@@ -407,7 +407,7 @@ pub fn evm_bytecode_free_analysis(analysis: *CBytecodeAnalysis) callconv(.c) voi
 /// Get opcode name for a given opcode value
 /// @param opcode_value Opcode value (0-255)
 /// @return Opcode name, or "INVALID" if not recognized
-pub export fn evm_bytecode_opcode_name(opcode_value: u8) [*:0]const u8 {
+pub fn evm_bytecode_opcode_name(opcode_value: u8) callconv(.c) [*:0]const u8 {
     const opcode = std.meta.intToEnum(Opcode, opcode_value) catch return "INVALID";
     
     return switch (opcode) {
@@ -568,7 +568,7 @@ pub export fn evm_bytecode_opcode_name(opcode_value: u8) [*:0]const u8 {
 /// Check if an opcode value is valid
 /// @param opcode_value Opcode value (0-255)
 /// @return 1 if valid opcode, 0 otherwise
-pub export fn evm_bytecode_is_valid_opcode(opcode_value: u8) c_int {
+pub fn evm_bytecode_is_valid_opcode(opcode_value: u8) callconv(.c) c_int {
     _ = std.meta.intToEnum(Opcode, opcode_value) catch return 0;
     return 1;
 }
@@ -578,7 +578,7 @@ pub export fn evm_bytecode_is_valid_opcode(opcode_value: u8) c_int {
 // ============================================================================
 
 /// Convert error code to human-readable string
-pub export fn evm_bytecode_error_string(error_code: c_int) [*:0]const u8 {
+pub fn evm_bytecode_error_string(error_code: c_int) callconv(.c) [*:0]const u8 {
     return switch (error_code) {
         EVM_BYTECODE_SUCCESS => "Success",
         EVM_BYTECODE_ERROR_NULL_POINTER => "Null pointer",
@@ -620,7 +620,7 @@ pub export fn evm_bytecode_pretty_print(handle: ?*const BytecodeHandle, buffer: 
 // ============================================================================
 
 /// Test opcode utilities
-pub export fn evm_bytecode_test_opcodes() c_int {
+pub fn evm_bytecode_test_opcodes() callconv(.c) c_int {
     // Test valid opcodes
     if (evm_bytecode_is_valid_opcode(0x00) != 1) return -1; // STOP
     if (evm_bytecode_is_valid_opcode(0x01) != 1) return -2; // ADD

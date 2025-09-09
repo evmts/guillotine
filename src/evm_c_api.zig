@@ -1033,29 +1033,31 @@ pub const CJumpFusion = bytecode_c.CJumpFusion;
 pub const CAdvancedFusion = bytecode_c.CAdvancedFusion;
 pub const CBytecodeAnalysis = bytecode_c.CBytecodeAnalysis;
 
-// Re-export bytecode functions
-pub const evm_bytecode_create = bytecode_c.evm_bytecode_create;
-pub const evm_bytecode_destroy = bytecode_c.evm_bytecode_destroy;
-pub const evm_bytecode_get_length = bytecode_c.evm_bytecode_get_length;
-pub const evm_bytecode_get_data = bytecode_c.evm_bytecode_get_data;
-pub const evm_bytecode_get_opcode_at = bytecode_c.evm_bytecode_get_opcode_at;
-pub const evm_bytecode_is_jump_dest = bytecode_c.evm_bytecode_is_jump_dest;
-pub const evm_bytecode_get_full_length = bytecode_c.evm_bytecode_get_full_length;
-pub const evm_bytecode_get_runtime_data = bytecode_c.evm_bytecode_get_runtime_data;
-pub const evm_bytecode_has_metadata = bytecode_c.evm_bytecode_has_metadata;
-pub const evm_bytecode_get_metadata_length = bytecode_c.evm_bytecode_get_metadata_length;
-pub const evm_bytecode_get_metadata_ipfs = bytecode_c.evm_bytecode_get_metadata_ipfs;
-pub const evm_bytecode_get_metadata_solc_version = bytecode_c.evm_bytecode_get_metadata_solc_version;
-pub const evm_bytecode_count_invalid_opcodes = bytecode_c.evm_bytecode_count_invalid_opcodes;
-pub const evm_bytecode_find_jump_dests = bytecode_c.evm_bytecode_find_jump_dests;
-pub const evm_bytecode_get_stats = bytecode_c.evm_bytecode_get_stats;
-pub const evm_bytecode_analyze = bytecode_c.evm_bytecode_analyze;
-pub const evm_bytecode_free_analysis = bytecode_c.evm_bytecode_free_analysis;
-pub const evm_bytecode_opcode_name = bytecode_c.evm_bytecode_opcode_name;
-pub const evm_bytecode_is_valid_opcode = bytecode_c.evm_bytecode_is_valid_opcode;
-pub const evm_bytecode_error_string = bytecode_c.evm_bytecode_error_string;
-pub const evm_bytecode_test_basic = bytecode_c.evm_bytecode_test_basic;
-pub const evm_bytecode_test_opcodes = bytecode_c.evm_bytecode_test_opcodes;
+// Re-export bytecode functions using comptime @export pattern
+comptime {
+    @export(&bytecode_c.evm_bytecode_create, .{ .name = "evm_bytecode_create" });
+    @export(&bytecode_c.evm_bytecode_destroy, .{ .name = "evm_bytecode_destroy" });
+    @export(&bytecode_c.evm_bytecode_get_length, .{ .name = "evm_bytecode_get_length" });
+    @export(&bytecode_c.evm_bytecode_get_data, .{ .name = "evm_bytecode_get_data" });
+    @export(&bytecode_c.evm_bytecode_get_opcode_at, .{ .name = "evm_bytecode_get_opcode_at" });
+    @export(&bytecode_c.evm_bytecode_is_jump_dest, .{ .name = "evm_bytecode_is_jump_dest" });
+    @export(&bytecode_c.evm_bytecode_get_full_length, .{ .name = "evm_bytecode_get_full_length" });
+    @export(&bytecode_c.evm_bytecode_get_runtime_data, .{ .name = "evm_bytecode_get_runtime_data" });
+    @export(&bytecode_c.evm_bytecode_has_metadata, .{ .name = "evm_bytecode_has_metadata" });
+    @export(&bytecode_c.evm_bytecode_get_metadata_length, .{ .name = "evm_bytecode_get_metadata_length" });
+    @export(&bytecode_c.evm_bytecode_get_metadata_ipfs, .{ .name = "evm_bytecode_get_metadata_ipfs" });
+    @export(&bytecode_c.evm_bytecode_get_metadata_solc_version, .{ .name = "evm_bytecode_get_metadata_solc_version" });
+    @export(&bytecode_c.evm_bytecode_count_invalid_opcodes, .{ .name = "evm_bytecode_count_invalid_opcodes" });
+    @export(&bytecode_c.evm_bytecode_find_jump_dests, .{ .name = "evm_bytecode_find_jump_dests" });
+    @export(&bytecode_c.evm_bytecode_get_stats, .{ .name = "evm_bytecode_get_stats" });
+    @export(&bytecode_c.evm_bytecode_analyze, .{ .name = "evm_bytecode_analyze" });
+    @export(&bytecode_c.evm_bytecode_free_analysis, .{ .name = "evm_bytecode_free_analysis" });
+    @export(&bytecode_c.evm_bytecode_opcode_name, .{ .name = "evm_bytecode_opcode_name" });
+    @export(&bytecode_c.evm_bytecode_is_valid_opcode, .{ .name = "evm_bytecode_is_valid_opcode" });
+    @export(&bytecode_c.evm_bytecode_error_string, .{ .name = "evm_bytecode_error_string" });
+    @export(&bytecode_c.evm_bytecode_test_basic, .{ .name = "evm_bytecode_test_basic" });
+    @export(&bytecode_c.evm_bytecode_test_opcodes, .{ .name = "evm_bytecode_test_opcodes" });
+}
 
 // ============================================================================
 // TESTS

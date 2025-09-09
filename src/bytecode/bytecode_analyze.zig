@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const Opcode = @import("../opcodes/opcode.zig").Opcode;
+const evm = @import("evm");
+const Opcode = evm.Opcode;
 
 /// Single-pass bytecode analyzer extracted from bytecode.zig
 /// Renamed to bytecodeAnalyze but otherwise identical behavior/signature.
@@ -314,7 +315,7 @@ test "bytecode analyze - single-pass analyzer" {
         @intFromEnum(Opcode.ADD),
     };
 
-    const BytecodeType = @import("bytecode.zig").Bytecode(@import("bytecode_config.zig").BytecodeConfig{});
+    const BytecodeType = evm.Bytecode(evm.BytecodeConfig{});
     const analysis = try bytecodeAnalyze(BytecodeType.PcType, BytecodeType.BasicBlock, BytecodeType.FusionInfo, allocator, &code);
     defer {
         allocator.free(analysis.push_pcs);
@@ -333,7 +334,7 @@ test "bytecode analyze - empty bytecode" {
     const allocator = testing.allocator;
     const code: []const u8 = &.{};
 
-    const BytecodeType = @import("bytecode.zig").Bytecode(@import("bytecode_config.zig").BytecodeConfig{});
+    const BytecodeType = evm.Bytecode(evm.BytecodeConfig{});
     const analysis = try bytecodeAnalyze(BytecodeType.PcType, BytecodeType.BasicBlock, BytecodeType.FusionInfo, allocator, code);
     defer {
         allocator.free(analysis.push_pcs);
@@ -361,7 +362,7 @@ test "bytecode analyze - jumpdest detection" {
         @intFromEnum(Opcode.STOP),
     };
 
-    const BytecodeType = @import("bytecode.zig").Bytecode(@import("bytecode_config.zig").BytecodeConfig{});
+    const BytecodeType = evm.Bytecode(evm.BytecodeConfig{});
     const analysis = try bytecodeAnalyze(BytecodeType.PcType, BytecodeType.BasicBlock, BytecodeType.FusionInfo, allocator, &code);
     defer {
         allocator.free(analysis.push_pcs);
@@ -384,7 +385,7 @@ test "bytecode analyze - constant folding fusion ADD" {
         @intFromEnum(Opcode.ADD),          // Should fold to 8
     };
 
-    const BytecodeType = @import("bytecode.zig").Bytecode(@import("bytecode_config.zig").BytecodeConfig{});
+    const BytecodeType = evm.Bytecode(evm.BytecodeConfig{});
     const analysis = try bytecodeAnalyze(BytecodeType.PcType, BytecodeType.BasicBlock, BytecodeType.FusionInfo, allocator, &code);
     defer {
         allocator.free(analysis.push_pcs);
@@ -409,7 +410,7 @@ test "bytecode analyze - constant folding fusion SUB" {
         @intFromEnum(Opcode.SUB),          // Should fold to 7
     };
 
-    const BytecodeType = @import("bytecode.zig").Bytecode(@import("bytecode_config.zig").BytecodeConfig{});
+    const BytecodeType = evm.Bytecode(evm.BytecodeConfig{});
     const analysis = try bytecodeAnalyze(BytecodeType.PcType, BytecodeType.BasicBlock, BytecodeType.FusionInfo, allocator, &code);
     defer {
         allocator.free(analysis.push_pcs);
@@ -433,7 +434,7 @@ test "bytecode analyze - constant folding fusion MUL" {
         @intFromEnum(Opcode.MUL),          // Should fold to 24
     };
 
-    const BytecodeType = @import("bytecode.zig").Bytecode(@import("bytecode_config.zig").BytecodeConfig{});
+    const BytecodeType = evm.Bytecode(evm.BytecodeConfig{});
     const analysis = try bytecodeAnalyze(BytecodeType.PcType, BytecodeType.BasicBlock, BytecodeType.FusionInfo, allocator, &code);
     defer {
         allocator.free(analysis.push_pcs);
@@ -457,7 +458,7 @@ test "bytecode analyze - multi push fusion (3 pushes)" {
         @intFromEnum(Opcode.PUSH1), 0x03,
     };
 
-    const BytecodeType = @import("bytecode.zig").Bytecode(@import("bytecode_config.zig").BytecodeConfig{});
+    const BytecodeType = evm.Bytecode(evm.BytecodeConfig{});
     const analysis = try bytecodeAnalyze(BytecodeType.PcType, BytecodeType.BasicBlock, BytecodeType.FusionInfo, allocator, &code);
     defer {
         allocator.free(analysis.push_pcs);
@@ -482,7 +483,7 @@ test "bytecode analyze - multi push fusion (2 pushes)" {
         @intFromEnum(Opcode.ADD), // This prevents 3-push fusion, so should get 2-push fusion
     };
 
-    const BytecodeType = @import("bytecode.zig").Bytecode(@import("bytecode_config.zig").BytecodeConfig{});
+    const BytecodeType = evm.Bytecode(evm.BytecodeConfig{});
     const analysis = try bytecodeAnalyze(BytecodeType.PcType, BytecodeType.BasicBlock, BytecodeType.FusionInfo, allocator, &code);
     defer {
         allocator.free(analysis.push_pcs);
@@ -507,7 +508,7 @@ test "bytecode analyze - multi pop fusion (3 pops)" {
         @intFromEnum(Opcode.POP),
     };
 
-    const BytecodeType = @import("bytecode.zig").Bytecode(@import("bytecode_config.zig").BytecodeConfig{});
+    const BytecodeType = evm.Bytecode(evm.BytecodeConfig{});
     const analysis = try bytecodeAnalyze(BytecodeType.PcType, BytecodeType.BasicBlock, BytecodeType.FusionInfo, allocator, &code);
     defer {
         allocator.free(analysis.push_pcs);
@@ -532,7 +533,7 @@ test "bytecode analyze - multi pop fusion (2 pops)" {
         @intFromEnum(Opcode.ADD), // This prevents 3-pop fusion
     };
 
-    const BytecodeType = @import("bytecode.zig").Bytecode(@import("bytecode_config.zig").BytecodeConfig{});
+    const BytecodeType = evm.Bytecode(evm.BytecodeConfig{});
     const analysis = try bytecodeAnalyze(BytecodeType.PcType, BytecodeType.BasicBlock, BytecodeType.FusionInfo, allocator, &code);
     defer {
         allocator.free(analysis.push_pcs);
@@ -558,7 +559,7 @@ test "bytecode analyze - iszero jumpi fusion" {
         @intFromEnum(Opcode.JUMPDEST),
     };
 
-    const BytecodeType = @import("bytecode.zig").Bytecode(@import("bytecode_config.zig").BytecodeConfig{});
+    const BytecodeType = evm.Bytecode(evm.BytecodeConfig{});
     const analysis = try bytecodeAnalyze(BytecodeType.PcType, BytecodeType.BasicBlock, BytecodeType.FusionInfo, allocator, &code);
     defer {
         allocator.free(analysis.push_pcs);
@@ -582,7 +583,7 @@ test "bytecode analyze - dup2 mstore push fusion" {
         @intFromEnum(Opcode.PUSH2), 0x12, 0x34,
     };
 
-    const BytecodeType = @import("bytecode.zig").Bytecode(@import("bytecode_config.zig").BytecodeConfig{});
+    const BytecodeType = evm.Bytecode(evm.BytecodeConfig{});
     const analysis = try bytecodeAnalyze(BytecodeType.PcType, BytecodeType.BasicBlock, BytecodeType.FusionInfo, allocator, &code);
     defer {
         allocator.free(analysis.push_pcs);
@@ -608,7 +609,7 @@ test "bytecode analyze - jump fusion detection" {
         @intFromEnum(Opcode.STOP),
     };
 
-    const BytecodeType = @import("bytecode.zig").Bytecode(@import("bytecode_config.zig").BytecodeConfig{});
+    const BytecodeType = evm.Bytecode(evm.BytecodeConfig{});
     const analysis = try bytecodeAnalyze(BytecodeType.PcType, BytecodeType.BasicBlock, BytecodeType.FusionInfo, allocator, &code);
     defer {
         allocator.free(analysis.push_pcs);
@@ -632,7 +633,7 @@ test "bytecode analyze - invalid jump fusion (target not jumpdest)" {
         @intFromEnum(Opcode.STOP), // pc = 4
     };
 
-    const BytecodeType = @import("bytecode.zig").Bytecode(@import("bytecode_config.zig").BytecodeConfig{});
+    const BytecodeType = evm.Bytecode(evm.BytecodeConfig{});
     const analysis = try bytecodeAnalyze(BytecodeType.PcType, BytecodeType.BasicBlock, BytecodeType.FusionInfo, allocator, &code);
     defer {
         allocator.free(analysis.push_pcs);
@@ -657,7 +658,7 @@ test "bytecode analyze - basic blocks creation" {
         @intFromEnum(Opcode.STOP),
     };
 
-    const BytecodeType = @import("bytecode.zig").Bytecode(@import("bytecode_config.zig").BytecodeConfig{});
+    const BytecodeType = evm.Bytecode(evm.BytecodeConfig{});
     const analysis = try bytecodeAnalyze(BytecodeType.PcType, BytecodeType.BasicBlock, BytecodeType.FusionInfo, allocator, &code);
     defer {
         allocator.free(analysis.push_pcs);
@@ -688,7 +689,7 @@ test "bytecode analyze - push sizes edge cases" {
         0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20,
     };
 
-    const BytecodeType = @import("bytecode.zig").Bytecode(@import("bytecode_config.zig").BytecodeConfig{});
+    const BytecodeType = evm.Bytecode(evm.BytecodeConfig{});
     const analysis = try bytecodeAnalyze(BytecodeType.PcType, BytecodeType.BasicBlock, BytecodeType.FusionInfo, allocator, &code);
     defer {
         allocator.free(analysis.push_pcs);
@@ -721,7 +722,7 @@ test "bytecode analyze - complex fusion patterns mixed" {
         @intFromEnum(Opcode.STOP), // pc=8
     };
 
-    const BytecodeType = @import("bytecode.zig").Bytecode(@import("bytecode_config.zig").BytecodeConfig{});
+    const BytecodeType = evm.Bytecode(evm.BytecodeConfig{});
     const analysis = try bytecodeAnalyze(BytecodeType.PcType, BytecodeType.BasicBlock, BytecodeType.FusionInfo, allocator, &code);
     defer {
         allocator.free(analysis.push_pcs);
@@ -747,7 +748,7 @@ test "bytecode analyze - boundary conditions insufficient bytes" {
     
     // Test truncated PUSH1 (missing data byte)
     const code1 = [_]u8{@intFromEnum(Opcode.PUSH1)};
-    const BytecodeType = @import("bytecode.zig").Bytecode(@import("bytecode_config.zig").BytecodeConfig{});
+    const BytecodeType = evm.Bytecode(evm.BytecodeConfig{});
     const analysis1 = try bytecodeAnalyze(BytecodeType.PcType, BytecodeType.BasicBlock, BytecodeType.FusionInfo, allocator, &code1);
     defer {
         allocator.free(analysis1.push_pcs);
@@ -787,7 +788,7 @@ test "bytecode analyze - wrapping arithmetic in constant folding" {
         @intFromEnum(Opcode.ADD),          // Should wrap to 1
     };
 
-    const BytecodeType = @import("bytecode.zig").Bytecode(@import("bytecode_config.zig").BytecodeConfig{});
+    const BytecodeType = evm.Bytecode(evm.BytecodeConfig{});
     const analysis = try bytecodeAnalyze(BytecodeType.PcType, BytecodeType.BasicBlock, BytecodeType.FusionInfo, allocator, &code);
     defer {
         allocator.free(analysis.push_pcs);
@@ -813,7 +814,7 @@ test "bytecode analyze - no fusion patterns present" {
         @intFromEnum(Opcode.STOP),
     };
 
-    const BytecodeType = @import("bytecode.zig").Bytecode(@import("bytecode_config.zig").BytecodeConfig{});
+    const BytecodeType = evm.Bytecode(evm.BytecodeConfig{});
     const analysis = try bytecodeAnalyze(BytecodeType.PcType, BytecodeType.BasicBlock, BytecodeType.FusionInfo, allocator, &code);
     defer {
         allocator.free(analysis.push_pcs);
