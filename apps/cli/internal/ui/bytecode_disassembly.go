@@ -165,7 +165,7 @@ func ConvertInstructionsToRows(instructions []bytecode.Instruction, jumpdests []
 	
 	rows := make([]table.Row, 0, len(instructions))
 	
-	for _, inst := range instructions {
+	for i, inst := range instructions {
 		// Format gas
 		gas := "-"
 		if inst.GasCost != nil && *inst.GasCost > 0 {
@@ -202,6 +202,13 @@ func ConvertInstructionsToRows(instructions []bytecode.Instruction, jumpdests []
 			}
 		} else if inst.OpcodeName == "JUMPDEST" {
 			value = "[Jump Target]"
+		} else if bytecode.IsJumpInstruction(inst.OpcodeName) {
+			// Show if jump destination can be determined (for display purposes)
+			if dest := bytecode.GetJumpDestination(instructions, i); dest != nil {
+				value = fmt.Sprintf("→ PC %d", *dest)
+			} else {
+				value = "[dynamic]"
+			}
 		}
 		
 		row := table.Row{

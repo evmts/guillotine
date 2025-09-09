@@ -282,6 +282,12 @@ func (m *Model) handleContractsNavigation(msgStr string, msg tea.KeyMsg) (tea.Mo
 func (m *Model) handleContractDetailNavigation(msgStr string, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Handle disassembly navigation if available
 	if m.disassemblyResult != nil {
+		// Jump to destination when 'g' is pressed on a jump instruction
+		if config.IsKey(msgStr, config.KeyJumpToDestination) {
+			m.handleJumpToDestination()
+			return m, nil
+		}
+		
 		// Left/Right to navigate between blocks
 		if config.IsKey(msgStr, config.KeyLeft) {
 			if m.currentBlockIndex > 0 {
@@ -362,4 +368,48 @@ func (m *Model) handleLogDetailNavigation(msgStr string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	return m, nil
+}
+
+// handleJumpToDestination navigates to the jump destination of the currently selected instruction
+func (m *Model) handleJumpToDestination() {
+	if m.disassemblyResult == nil {
+		return
+	}
+	
+	// Get current block's instructions
+	instructions, _, err := bytecode.GetInstructionsForBlock(m.disassemblyResult, m.currentBlockIndex)
+	if err != nil {
+		return
+	}
+	
+	// Get the cursor position in the table
+	cursorPos := m.instructionsTable.Cursor()
+	if cursorPos < 0 || cursorPos >= len(instructions) {
+		return
+	}
+	
+	// Check if current instruction is a jump and get its destination
+	jumpDest := bytecode.GetJumpDestination(instructions, cursorPos)
+	if jumpDest == nil {
+		return
+	}
+	
+	// Find which block contains the jump destination
+	targetBlockIndex := bytecode.FindBlockContainingPC(m.disassemblyResult.Analysis, *jumpDest)
+	if targetBlockIndex == -1 {
+		return
+	}
+	
+	// Navigate to the target block
+	m.currentBlockIndex = targetBlockIndex
+	m.updateInstructionsTable()
+	
+	// Try to position the cursor at the jump destination instruction
+	targetInstructions, _, _ := bytecode.GetInstructionsForBlock(m.disassemblyResult, targetBlockIndex)
+	if targetInstructions != nil {
+		targetInstIndex := bytecode.FindInstructionIndexByPC(targetInstructions, *jumpDest)
+		if targetInstIndex >= 0 {
+			m.instructionsTable.SetCursor(targetInstIndex)
+		}
+	}
 }

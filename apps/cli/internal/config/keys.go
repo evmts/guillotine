@@ -17,7 +17,7 @@ var (
 	KeyResetAll  = []string{"ctrl+r"}
 	KeyPaste     = []string{"ctrl+v"}
 	KeyCopy      = []string{"c", "ctrl+c"}
-	KeyToggleDisassembly = []string{"d", "ctrl+d"}
+	KeyJumpToDestination = []string{"g"}
 )
 
 // IsKey checks if a message matches any of the given key bindings

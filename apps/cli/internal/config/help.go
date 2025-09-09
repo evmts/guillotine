@@ -31,6 +31,7 @@ var HelpCatalog = map[string]HelpEntry{
 	// Disassembly navigation
 	"navigate_blocks": {Key: "←/h →/l", Action: "navigate blocks"},
 	"scroll_instructions": {Key: "↑/k ↓/j", Action: "scroll instructions"},
+	"jump_to_destination": {Key: "g", Action: "jump to destination"},
 	
 	// Reset
 	"reset":        {Key: "r", Action: "reset"},
@@ -160,7 +161,7 @@ func GetHelpForContractDetail(hasDisassembly bool) []HelpEntry {
 	
 	// If there's disassembly, add navigation help at the beginning
 	if hasDisassembly {
-		keys = append([]string{"navigate_blocks", "scroll_instructions"}, keys...)
+		keys = append([]string{"navigate_blocks", "scroll_instructions", "jump_to_destination"}, keys...)
 	}
 	
 	entries := make([]HelpEntry, 0, len(keys))

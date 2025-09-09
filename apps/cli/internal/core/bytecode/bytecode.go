@@ -2,6 +2,7 @@ package bytecode
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/evmts/guillotine/sdks/go/bytecode"
 )
@@ -207,6 +208,94 @@ func CalculateBlockGas(instructions []Instruction) uint64 {
 
 func ShouldHighlightOpcode(opcode string) bool {
 	return opcode == "CALL" || opcode == "STATICCALL" || opcode == "DELEGATECALL" || opcode == "CREATE" || opcode == "CREATE2" || opcode == "SELFDESTRUCT" || opcode == "REVERT" || opcode == "INVALID" || opcode == "STOP" || opcode == "RETURN" || opcode == "SSTORE" || opcode == "SLOAD"
+}
+
+// IsJumpInstruction checks if an opcode is a JUMP or JUMPI instruction
+func IsJumpInstruction(opcodeName string) bool {
+	return opcodeName == "JUMP" || opcodeName == "JUMPI"
+}
+
+// GetJumpDestination extracts the jump destination from a sequence of instructions
+// This only works for the common pattern where a PUSH immediately precedes the JUMP/JUMPI
+// Returns nil if the destination cannot be reliably determined
+func GetJumpDestination(instructions []Instruction, instructionIndex int) *uint64 {
+	if instructionIndex < 0 || instructionIndex >= len(instructions) {
+		return nil
+	}
+	
+	// Check if current instruction is a jump
+	if !IsJumpInstruction(instructions[instructionIndex].OpcodeName) {
+		return nil
+	}
+	
+	// For JUMPI, we need the second-to-last value on the stack (condition is on top)
+	// For JUMP, we need the top value on the stack
+	// Only handle the simple case: PUSH followed immediately by JUMP/JUMPI
+	
+	if instructions[instructionIndex].OpcodeName == "JUMP" {
+		// For JUMP, check if the previous instruction is a PUSH with a value
+		if instructionIndex > 0 {
+			prev := &instructions[instructionIndex-1]
+			if strings.HasPrefix(prev.OpcodeName, "PUSH") && prev.PushValueDecimal != nil {
+				return prev.PushValueDecimal
+			}
+		}
+	} else if instructions[instructionIndex].OpcodeName == "JUMPI" {
+		// For JUMPI, we need to find the destination (not the condition)
+		// Common patterns:
+		// 1. PUSH dest, PUSH condition, JUMPI
+		// 2. PUSH dest, <compute condition>, JUMPI
+		
+		// Check if previous instruction is a PUSH (likely the condition)
+		if instructionIndex > 0 {
+			prev := &instructions[instructionIndex-1]
+			if strings.HasPrefix(prev.OpcodeName, "PUSH") {
+				// Previous is a PUSH, check the one before that for destination
+				if instructionIndex > 1 {
+					prevPrev := &instructions[instructionIndex-2]
+					if strings.HasPrefix(prevPrev.OpcodeName, "PUSH") && prevPrev.PushValueDecimal != nil {
+						return prevPrev.PushValueDecimal
+					}
+				}
+			} else {
+				// Previous is not a PUSH, might be a computed condition
+				// Look for the most recent PUSH before the condition computation
+				for i := instructionIndex - 1; i >= 0 && i >= instructionIndex-3; i-- {
+					inst := &instructions[i]
+					if strings.HasPrefix(inst.OpcodeName, "PUSH") && inst.PushValueDecimal != nil {
+						return inst.PushValueDecimal
+					}
+				}
+			}
+		}
+	}
+	
+	return nil
+}
+
+// FindBlockContainingPC finds which block index contains the given PC
+func FindBlockContainingPC(analysis *bytecode.Analysis, targetPC uint64) int {
+	if analysis == nil || len(analysis.BasicBlocks) == 0 {
+		return -1
+	}
+	
+	for i, block := range analysis.BasicBlocks {
+		if targetPC >= uint64(block.Start) && targetPC < uint64(block.End) {
+			return i
+		}
+	}
+	
+	return -1
+}
+
+// FindInstructionIndexByPC finds the index of instruction with given PC within a block
+func FindInstructionIndexByPC(instructions []Instruction, targetPC uint64) int {
+	for i, inst := range instructions {
+		if inst.PC == targetPC {
+			return i
+		}
+	}
+	return -1
 }
 
 // Helper functions

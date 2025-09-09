@@ -572,9 +572,6 @@ KeyLeft      = []string{"left", "h"}   // Navigate to previous block
 KeyRight     = []string{"right", "l"}  // Navigate to next block
 KeyUp        = []string{"up", "k"}     // Scroll up in instructions
 KeyDown      = []string{"down", "j"}   // Scroll down in instructions
-
-// Additional disassembly keys
-KeyToggleDisassembly = []string{"d", "ctrl+d"} // Future: toggle disassembly view
 ```
 
 ### Adding Disassembly Features
