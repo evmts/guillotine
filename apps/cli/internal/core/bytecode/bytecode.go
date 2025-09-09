@@ -26,6 +26,7 @@ type DisassemblyResult struct {
 	Instructions     []Instruction `json:"instructions"`
 	JumpDestCount    uint32        `json:"jump_dest_count"`
 	TotalInstructions uint32       `json:"total_instructions"`
+	BasicBlocks      []bytecode.BasicBlock `json:"basic_blocks"`
 }
 
 // AnalyzeBytecode returns structured bytecode disassembly
@@ -44,25 +45,26 @@ func AnalyzeBytecode(bc *bytecode.Bytecode) (*DisassemblyResult, error) {
 		return nil, fmt.Errorf("failed to get runtime data: %w", err)
 	}
 
+	analysis, err := bc.Analyze()
+	if err != nil {
+		return nil, fmt.Errorf("failed to analyze bytecode: %w", err)
+	}
+
 	result := &DisassemblyResult{
 		Length:       length,
 		Instructions: make([]Instruction, 0),
+		BasicBlocks: analysis.BasicBlocks,
 	}
 
 	var pc uint64 = 0
 	var lineNum int = 1
-	// Get all jump destinations at once using SDK method
-	jumpDests, err := bc.FindJumpDests()
-	if err != nil {
-		return nil, fmt.Errorf("failed to find jump destinations: %w", err)
-	}
 	
 	// Create a map for fast jump destination lookup
 	jumpDestMap := make(map[uint64]bool)
-	for _, dest := range jumpDests {
+	for _, dest := range analysis.JumpDests {
 		jumpDestMap[uint64(dest)] = true
 	}
-	jumpDestCount := uint32(len(jumpDests))
+	jumpDestCount := uint32(len(analysis.JumpDests))
 
 	for pc < length {
 		opcodeValue, err := bc.OpcodeAt(pc)
