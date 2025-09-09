@@ -96,7 +96,7 @@ __pycache__/
 *$py.class
 *.so
 .Python
-build/
+sdks/*/build/
 develop-eggs/
 dist/
 downloads/

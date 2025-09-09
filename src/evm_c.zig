@@ -32,19 +32,26 @@ fn log(comptime level: std.log.Level, comptime scope: @TypeOf(.enum_literal), co
 }
 
 const DefaultEvm = evm_root.DefaultEvm;
+const Database = evm_root.Database;
 const MemoryDatabase = evm_root.MemoryDatabase;
 const CallParams = evm_root.CallParams;
 const CallResult = evm_root.CallResult;
-const Address = primitives.Address.Address;
+const Address = primitives.Address;
 const Frame = evm_root.Frame;
 const FrameConfig = evm_root.FrameConfig;
 const NoOpTracer = evm_root.NoOpTracer;
+const BlockInfo = evm_root.BlockInfo;
+const TransactionContext = evm_root.TransactionContext;
+const Hardfork = evm_root.Hardfork;
+const Account = evm_root.Account;
 
 // Define a specific Frame type for C API use
+// Using a void type for DatabaseType since Frame won't have database access
+const VoidDatabase = struct {};
 const DefaultFrameConfig = FrameConfig{
     .stack_size = 1024,
-    .has_database = false,
-    .TracerType = NoOpTracer,
+    .DatabaseType = VoidDatabase,
+    .TracerType = null,
 };
 const DefaultFrame = Frame(DefaultFrameConfig);
 
@@ -87,8 +94,12 @@ export fn evm_init() c_int {
         return @intFromEnum(EvmError.EVM_OK);
     }
 
-    var memory_db = MemoryDatabase.init(allocator);
-    const db_interface = memory_db.to_database_interface();
+    const memory_db = allocator.create(MemoryDatabase) catch {
+        log(.err, .evm_c, "Failed to allocate memory for database", .{});
+        return @intFromEnum(EvmError.EVM_ERROR_MEMORY);
+    };
+    memory_db.* = MemoryDatabase.init(allocator);
+    const db_ptr = @as(*Database, @ptrCast(memory_db));
 
     const vm = allocator.create(DefaultEvm) catch {
         log(.err, .evm_c, "Failed to allocate memory for VM", .{});
@@ -96,17 +107,17 @@ export fn evm_init() c_int {
     };
 
     // Initialize with default configuration
-    const block_info = evm_root.BlockInfo.init();
-    const tx_context = evm_root.TransactionContext{
+    const block_info = BlockInfo.init();
+    const tx_context = TransactionContext{
         .gas_limit = 30_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
     };
-    const gas_price = 0;
+    const gas_price: u256 = 0;
     const origin = primitives.ZERO_ADDRESS;
-    const hardfork = evm_root.Hardfork.CANCUN;
+    const hardfork = Hardfork.CANCUN;
     
-    vm.* = DefaultEvm.init(allocator, db_interface, block_info, tx_context, gas_price, origin, hardfork) catch |err| {
+    vm.* = DefaultEvm.init(allocator, db_ptr, block_info, tx_context, gas_price, origin, hardfork) catch |err| {
         log(.err, .evm_c, "Failed to initialize VM: {}", .{err});
         allocator.destroy(vm);
         return @intFromEnum(EvmError.EVM_ERROR_MEMORY);
@@ -160,7 +171,7 @@ export fn evm_execute(
     // Convert inputs
     const bytecode = bytecode_ptr[0..bytecode_len];
     const caller_bytes = caller_ptr[0..20];
-    const caller_address = caller_bytes.*;
+    const caller_address = Address{ .bytes = caller_bytes.* };
 
     // Create a temporary address for the code execution
     const target_address = primitives.ZERO_ADDRESS; // Use zero address for contract execution
@@ -174,9 +185,9 @@ export fn evm_execute(
     };
     
     // Create account with the code
-    var account = evm_root.Account.zero();
+    var account = Account.zero();
     account.code_hash = code_hash;
-    vm.database.set_account(target_address, account) catch |err| {
+    vm.database.set_account(target_address.bytes, account) catch |err| {
         log(.err, .evm_c, "Failed to set account: {}", .{err});
         result_ptr.success = 0;
         result_ptr.error_code = @intFromEnum(EvmError.EVM_ERROR_EXECUTION_FAILED);
@@ -194,13 +205,8 @@ export fn evm_execute(
         },
     };
 
-    // Execute call
-    const run_result = vm.call(call_params) catch |err| {
-        log(.err, .evm_c, "Execution failed: {}", .{err});
-        result_ptr.success = 0;
-        result_ptr.error_code = @intFromEnum(EvmError.EVM_ERROR_EXECUTION_FAILED);
-        return @intFromEnum(EvmError.EVM_ERROR_EXECUTION_FAILED);
-    };
+    // Execute call - vm.call returns CallResult directly, not an error union
+    const run_result = vm.call(call_params);
 
     // Fill result structure
     result_ptr.success = if (run_result.success) 1 else 0;
@@ -263,6 +269,7 @@ pub const GuillotineExecutionResult = extern struct {
 const VmState = struct {
     vm: *DefaultEvm,
     memory_db: *MemoryDatabase,
+    database: *Database,
     allocator: std.mem.Allocator,
 };
 
@@ -278,7 +285,7 @@ export fn guillotine_vm_create() ?*GuillotineVm {
     };
     state.memory_db.* = MemoryDatabase.init(allocator);
     
-    const db_interface = state.memory_db.to_database_interface();
+    state.database = @as(*Database, @ptrCast(state.memory_db));
     state.vm = allocator.create(DefaultEvm) catch {
         state.memory_db.deinit();
         allocator.destroy(state.memory_db);
@@ -287,17 +294,17 @@ export fn guillotine_vm_create() ?*GuillotineVm {
     };
     
     // Initialize with default configuration
-    const block_info = evm_root.BlockInfo.init();
-    const tx_context = evm_root.TransactionContext{
+    const block_info = BlockInfo.init();
+    const tx_context = TransactionContext{
         .gas_limit = 30_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
     };
-    const gas_price = 0;
+    const gas_price: u256 = 0;
     const origin = primitives.ZERO_ADDRESS;
-    const hardfork = evm_root.Hardfork.CANCUN;
+    const hardfork = Hardfork.CANCUN;
     
-    state.vm.* = DefaultEvm.init(allocator, db_interface, block_info, tx_context, gas_price, origin, hardfork) catch {
+    state.vm.* = DefaultEvm.init(allocator, state.database, block_info, tx_context, gas_price, origin, hardfork) catch {
         state.memory_db.deinit();
         allocator.destroy(state.memory_db);
         allocator.destroy(state.vm);
@@ -328,12 +335,12 @@ export fn guillotine_set_balance(vm: ?*GuillotineVm, address: ?*const Guillotine
     const value = u256_from_bytes(&balance.?.bytes);
     
     // Get current account or create new one
-    var account = state.vm.database.get_account(addr) catch return false;
+    var account = state.database.get_account(addr) catch return false;
     if (account == null) {
-        account = evm_root.Account.zero();
+        account = Account.zero();
     }
     account.?.balance = value;
-    state.vm.database.set_account(addr, account.?) catch return false;
+    state.database.set_account(addr, account.?) catch return false;
     return true;
 }
 
@@ -345,15 +352,15 @@ export fn guillotine_set_code(vm: ?*GuillotineVm, address: ?*const GuillotineAdd
     
     const code_slice = if (code) |c| c[0..code_len] else &[_]u8{};
     // Set code and update account
-    const code_hash = state.vm.database.set_code(code_slice) catch return false;
+    const code_hash = state.database.set_code(code_slice) catch return false;
     
     // Get current account or create new one
-    var account = state.vm.database.get_account(addr) catch return false;
+    var account = state.database.get_account(addr) catch return false;
     if (account == null) {
-        account = evm_root.Account.zero();
+        account = Account.zero();
     }
     account.?.code_hash = code_hash;
-    state.vm.database.set_account(addr, account.?) catch return false;
+    state.database.set_account(addr, account.?) catch return false;
     return true;
 }
 
@@ -378,12 +385,12 @@ export fn guillotine_execute(
     if (vm == null or from == null) return result;
     
     const state: *VmState = @ptrCast(@alignCast(vm.?));
-    const from_addr = from.?.bytes;
+    const from_addr = Address{ .bytes = from.?.bytes };
     const value_u256 = if (value) |v| u256_from_bytes(&v.bytes) else 0;
     const input_slice = if (input) |i| i[0..input_len] else &[_]u8{};
     
     // Create call parameters
-    const to_addr = if (to) |t| t.bytes else primitives.ZERO_ADDRESS;
+    const to_addr = if (to) |t| Address{ .bytes = t.bytes } else primitives.ZERO_ADDRESS;
     const call_params = CallParams{
         .call = .{
             .caller = from_addr,
@@ -394,13 +401,8 @@ export fn guillotine_execute(
         },
     };
     
-    // Execute
-    const exec_result = state.vm.call(call_params) catch |err| {
-        const err_msg = @errorName(err);
-        const err_c_str = state.allocator.dupeZ(u8, err_msg) catch return result;
-        result.error_message = err_c_str.ptr;
-        return result;
-    };
+    // Execute - vm.call returns CallResult directly
+    const exec_result = state.vm.call(call_params);
     
     result.success = exec_result.success;
     result.gas_used = gas_limit - exec_result.gas_left;
@@ -479,13 +481,24 @@ export fn evm_frame_create(bytecode_ptr: [*]const u8, bytecode_len: usize, initi
         return null;
     };
     
-    // Initialize frame (Frame doesn't have database when has_database = false)
+    // Initialize frame 
+    // Need to provide all required parameters for Frame.init
+    const default_value: u256 = 0;
+    const default_caller = primitives.ZERO_ADDRESS;
+    const empty_calldata: []const u8 = &[_]u8{};
+    const void_database = VoidDatabase{};
+    // Use a dummy struct as placeholder for evm_ptr
+    var dummy_evm: u8 = 0;
+    const null_evm_ptr: *anyopaque = @ptrCast(&dummy_evm);
+    
     handle.frame.* = DefaultFrame.init(
         allocator,
-        handle.bytecode,
         @intCast(initial_gas),
-        {}, // void when has_database = false
-        null // No host  
+        void_database,
+        default_caller,
+        &default_value,
+        empty_calldata,
+        null_evm_ptr
     ) catch {
         allocator.destroy(handle.frame);
         allocator.free(handle.bytecode);
@@ -626,8 +639,8 @@ export fn evm_frame_reset(frame_ptr: ?*anyopaque, new_gas: u64) c_int {
     const frame = handle.frame;
     
     // Reset frame state
-    // Reset stack by resetting the pointer to the base
-    frame.stack.stack_ptr = frame.stack.stack_base;
+    // Reset stack by resetting the pointer to the end of the buffer (stack grows downward)
+    frame.stack.stack_ptr = frame.stack.buf_ptr + @TypeOf(frame.stack).stack_capacity;
     frame.memory.clear();
     frame.gas_remaining = @as(DefaultFrame.GasType, @intCast(new_gas));
     

@@ -47,7 +47,51 @@ pub const Keccak256_Accel = @import("keccak256_accel.zig");
 pub const keccak_asm = @import("keccak_asm.zig");
 
 // KZG commitments for EIP-4844
-pub const c_kzg = @import("c_kzg");
+const builtin = @import("builtin");
+pub const c_kzg = if (builtin.target.cpu.arch != .wasm32) 
+    @import("c_kzg") 
+else struct {
+    // Stub for WASM builds - KZG operations not supported
+    pub const KZGCommitment = [48]u8;
+    pub const KZGProof = [48]u8;
+    pub const Bytes32 = [32]u8;
+    pub const Blob = [131072]u8;
+    
+    pub fn verifyKZGProof(commitment: *const KZGCommitment, z: *const Bytes32, y: *const Bytes32, proof: *const KZGProof) !bool {
+        _ = commitment;
+        _ = z;
+        _ = y;
+        _ = proof;
+        return error.NotSupported;
+    }
+    
+    pub fn blobToKZGCommitment(blob: *const Blob) !KZGCommitment {
+        _ = blob;
+        return error.NotSupported;
+    }
+    
+    pub fn computeKZGProof(blob: *const Blob, z: *const Bytes32) !struct { proof: KZGProof, y: Bytes32 } {
+        _ = blob;
+        _ = z;
+        return error.NotSupported;
+    }
+    
+    pub fn loadTrustedSetupFile(path: []const u8, precompute: usize) !void {
+        _ = path;
+        _ = precompute;
+        return error.NotSupported;
+    }
+    
+    pub fn loadTrustedSetupFromText(data: []const u8, precompute: usize) !void {
+        _ = data;
+        _ = precompute;
+        return error.NotSupported;
+    }
+    
+    pub fn freeTrustedSetup() !void {
+        return error.NotSupported;
+    }
+};
 
 // BN254 for precompiles
 pub const bn254 = @import("bn254.zig");
