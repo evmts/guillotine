@@ -24,6 +24,7 @@ pub fn createModules(
     blst_lib: *std.Build.Step.Compile,
     bn254_lib: ?*std.Build.Step.Compile,
     revm_lib: ?*std.Build.Step.Compile,
+    foundry_lib: ?*std.Build.Step.Compile,
 ) ModuleSet {
     // C-KZG module
     const c_kzg_mod = b.createModule(.{
@@ -119,6 +120,12 @@ pub fn createModules(
     });
     compilers_mod.addImport("primitives", primitives_mod);
     compilers_mod.addImport("evm", evm_mod);
+    
+    // Link with foundry library if available
+    if (foundry_lib) |lib| {
+        compilers_mod.linkLibrary(lib);
+        compilers_mod.addIncludePath(b.path("lib/foundry-compilers"));
+    }
 
     // Main library module
     const lib_mod = b.createModule(.{

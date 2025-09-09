@@ -71,9 +71,10 @@ pub fn build(b: *std.Build) void {
     const rust_build_step = build_pkg.RevmLib.createRustBuildStep(b, optimize, rust_target);
     const bn254_lib = build_pkg.Bn254Lib.createBn254Library(b, target, optimize, config.options, rust_build_step, rust_target);
     const revm_lib = build_pkg.RevmLib.createRevmLibrary(b, target, optimize, rust_build_step, rust_target);
+    const foundry_lib = build_pkg.FoundryLib.createFoundryLibrary(b, target, optimize, rust_build_step, rust_target);
 
     // Modules
-    const modules = build_pkg.Modules.createModules(b, target, optimize, config.options_mod, zbench_dep, c_kzg_lib, blst_lib, bn254_lib, revm_lib);
+    const modules = build_pkg.Modules.createModules(b, target, optimize, config.options_mod, zbench_dep, c_kzg_lib, blst_lib, bn254_lib, revm_lib, foundry_lib);
 
     // Executables
     const guillotine_exe = build_pkg.GuillotineExe.createExecutable(b, modules.exe_mod);
@@ -170,10 +171,37 @@ pub fn build(b: *std.Build) void {
     root_tests.linkLibC();
     const run_root_tests = b.addRunArtifact(root_tests);
 
+    // Compiler tests
+    const compiler_tests = b.addTest(.{
+        .name = "compiler-tests",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("test/compiler_test.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    compiler_tests.root_module.addImport("compilers", modules.compilers_mod);
+    compiler_tests.root_module.addImport("primitives", modules.primitives_mod);
+    if (foundry_lib) |foundry| {
+        compiler_tests.linkLibrary(foundry);
+        compiler_tests.addIncludePath(b.path("lib/foundry-compilers"));
+        compiler_tests.linkLibC();
+    }
+    const run_compiler_tests = b.addRunArtifact(compiler_tests);
+    
+    // Add a dedicated compiler test step
+    const compiler_test_step = b.step("test-compiler", "Run compiler tests");
+    if (foundry_lib != null) {
+        compiler_test_step.dependOn(&run_compiler_tests.step);
+    }
+
     const test_step = b.step("test", "Run all tests");
     test_step.dependOn(&run_lib_unit_tests.step);
     test_step.dependOn(&run_integration_tests.step);
     test_step.dependOn(&run_root_tests.step);
+    if (foundry_lib != null) {
+        test_step.dependOn(&run_compiler_tests.step);
+    }
 
     // BN254 benchmarks
     const zbench_module = zbench_dep.module("zbench");
