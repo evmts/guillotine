@@ -234,9 +234,9 @@ pub fn getTracedOpcodeHandlers(
                         }
                     }
 
-                    // Call the base handler with tail call optimization
+                    // Call the base handler with tail call optimization where supported
                     // Note: Since handlers are noreturn, we don't need afterOp
-                    return @call(.always_tail, base_handler, .{ frame, cursor });
+                    return @call(FrameType.getTailCallModifier(), base_handler, .{ frame, cursor });
                 }
             }.handler;
             return &wrapper;
