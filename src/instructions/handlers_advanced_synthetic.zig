@@ -24,23 +24,7 @@ pub fn Handlers(comptime FrameType: type) type {
             return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
         }
 
-        /// CONSTANT_FOLD - Push pre-computed value from constant folding
-        /// This replaces sequences like PUSH1 5, PUSH1 3, ADD with a single push of 8
-        pub fn constant_fold(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            // The folded value is stored in the next dispatch item
-            const value_item = cursor[1];
-            
-            // Push the pre-computed value onto the stack
-            if (value_item == .push_inline) {
-                self.stack.push_unsafe(value_item.push_inline.value);
-            } else if (value_item == .push_pointer) {
-                self.stack.push_unsafe(value_item.push_pointer.value.*);
-            } else {
-                unreachable; // Should never happen with proper dispatch
-            }
-            
-            return next_instruction(self, cursor);
-        }
+        // Note: constant_fold handler removed - compiler handles constant folding
 
         /// MULTI_PUSH_2 - Push two values in a single operation
         pub fn multi_push_2(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {

@@ -15,89 +15,7 @@ const BytecodeWithFusion = evm_mod.Bytecode(.{
     .fusions_enabled = true,
 });
 
-// Test constant folding patterns
-test "constant folding: PUSH1 5, PUSH1 3, ADD should fold to PUSH 8" {
-    const allocator = testing.allocator;
-    
-    // Bytecode: PUSH1 5, PUSH1 3, ADD
-    const bytecode = [_]u8{
-        0x60, 0x05, // PUSH1 5
-        0x60, 0x03, // PUSH1 3
-        0x01,       // ADD
-    };
-    
-    // Create bytecode analyzer with fusion enabled
-    var bc = try BytecodeWithFusion.init(allocator, &bytecode);
-    defer bc.deinit();
-    
-    // Check that the pattern is detected as a fusion candidate
-    const fusion_data = bc.getFusionData(0);
-    try testing.expect(fusion_data == .constant_fold);
-    try testing.expectEqual(@as(u256, 8), fusion_data.constant_fold.value);
-    try testing.expectEqual(@as(u8, 5), fusion_data.constant_fold.original_length);
-}
-
-test "constant folding: PUSH1 10, PUSH1 2, SUB should fold to PUSH 8" {
-    const allocator = testing.allocator;
-    
-    // Bytecode: PUSH1 10, PUSH1 2, SUB
-    const bytecode = [_]u8{
-        0x60, 0x0A, // PUSH1 10
-        0x60, 0x02, // PUSH1 2
-        0x03,       // SUB
-    };
-    
-    var bc = try BytecodeWithFusion.init(allocator, &bytecode);
-    defer bc.deinit();
-    
-    const fusion_data = bc.getFusionData(0);
-    try testing.expect(fusion_data == .constant_fold);
-    try testing.expectEqual(@as(u256, 8), fusion_data.constant_fold.value);
-    try testing.expectEqual(@as(u8, 5), fusion_data.constant_fold.original_length);
-}
-
-test "constant folding: PUSH1 4, PUSH1 2, MUL should fold to PUSH 8" {
-    const allocator = testing.allocator;
-    
-    // Bytecode: PUSH1 4, PUSH1 2, MUL
-    const bytecode = [_]u8{
-        0x60, 0x04, // PUSH1 4
-        0x60, 0x02, // PUSH1 2
-        0x02,       // MUL
-    };
-    
-    var bc = try BytecodeWithFusion.init(allocator, &bytecode);
-    defer bc.deinit();
-    
-    const fusion_data = bc.getFusionData(0);
-    try testing.expect(fusion_data == .constant_fold);
-    try testing.expectEqual(@as(u256, 8), fusion_data.constant_fold.value);
-    try testing.expectEqual(@as(u8, 5), fusion_data.constant_fold.original_length);
-}
-
-test "constant folding: complex pattern PUSH1 4, PUSH1 2, PUSH1 3, SHL, SUB" {
-    const allocator = testing.allocator;
-    
-    // Bytecode: PUSH1 4, PUSH1 2, PUSH1 3, SHL, SUB
-    // This computes: 4 - (2 << 3) = 4 - 16 = -12 (wrapping to large positive)
-    const bytecode = [_]u8{
-        0x60, 0x04, // PUSH1 4
-        0x60, 0x02, // PUSH1 2
-        0x60, 0x03, // PUSH1 3
-        0x1B,       // SHL (correct opcode)
-        0x03,       // SUB
-    };
-    
-    var bc = try BytecodeWithFusion.init(allocator, &bytecode);
-    defer bc.deinit();
-    
-    const fusion_data = bc.getFusionData(0);
-    try testing.expect(fusion_data == .constant_fold);
-    // 4 - 16 with wrapping arithmetic
-    const expected: u256 = @as(u256, 4) -% @as(u256, 16);
-    try testing.expectEqual(expected, fusion_data.constant_fold.value);
-    try testing.expectEqual(@as(u8, 8), fusion_data.constant_fold.original_length);
-}
+// Note: Constant folding tests removed - compiler handles constant folding
 
 // Test multi-PUSH patterns
 test "multi-PUSH: two consecutive PUSH1 operations should fuse" {
@@ -218,25 +136,22 @@ test "DUP2-MSTORE-PUSH: pattern should be detected and fused" {
 // Handler execution test will be added after implementing handlers
 
 // Test priority ordering - longer patterns should be detected first
-test "pattern priority: longer patterns detected before shorter ones" {
+test "pattern priority: ISZERO-JUMPI detected before other patterns" {
     const allocator = testing.allocator;
     
-    // This bytecode could match either:
-    // 1. 3-PUSH fusion (PUSH1, PUSH1, PUSH1)
-    // 2. Constant folding (PUSH1 5, PUSH1 3, ADD)
-    // Constant folding should win because it's checked first
+    // This bytecode contains ISZERO-JUMPI pattern
     const bytecode = [_]u8{
-        0x60, 0x05, // PUSH1 5
-        0x60, 0x03, // PUSH1 3
-        0x01,       // ADD
-        0x60, 0x02, // PUSH1 2
+        0x15,       // ISZERO
+        0x60, 0x08, // PUSH1 8 (jump target)
+        0x57,       // JUMPI
+        0x00,       // STOP
     };
     
     var bc = try BytecodeWithFusion.init(allocator, &bytecode);
     defer bc.deinit();
     
-    // Should detect constant folding, not multi-push
+    // Should detect ISZERO-JUMPI fusion
     const fusion_data = bc.getFusionData(0);
-    try testing.expect(fusion_data == .constant_fold);
-    try testing.expectEqual(@as(u256, 8), fusion_data.constant_fold.value);
+    try testing.expect(fusion_data == .iszero_jumpi);
+    try testing.expectEqual(@as(u256, 8), fusion_data.iszero_jumpi.target);
 }

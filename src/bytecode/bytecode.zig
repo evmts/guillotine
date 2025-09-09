@@ -137,9 +137,6 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
                             iterator.pc += 1 + push_size + 1;
                         },
                         // Advanced fusion patterns
-                        .constant_fold => |cf| {
-                            iterator.pc += cf.original_length;
-                        },
                         .multi_push => |mp| {
                             iterator.pc += mp.original_length;
                         },
@@ -217,7 +214,6 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
             push_mstore_fusion: struct { value: u256 },
             push_mstore8_fusion: struct { value: u256 },
             // Advanced fusion patterns
-            constant_fold: struct { value: u256, original_length: u8 },
             multi_push: struct { count: u8, original_length: u8, values: [3]u256 },
             multi_pop: struct { count: u8, original_length: u8 },
             iszero_jumpi: struct { target: u256, original_length: u8 },
@@ -308,56 +304,6 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
         }
 
         // Advanced pattern detection functions
-        fn checkConstantFoldingPattern(self: *const Self, pc: PcType) ?OpcodeData {
-            // Pattern A: PUSH1 a, PUSH1 b, <arith-op> (5 bytes)
-            // Pattern B: PUSH1 a, PUSH1 b, PUSH1 shift, SHL, SUB (8 bytes)
-            if (pc + 4 >= self.len()) return null;
-            
-            // First PUSH1
-            if (self.get_unsafe(pc) != 0x60) return null;
-            const value1 = self.get_unsafe(pc + 1);
-            
-            // Second PUSH1
-            if (self.get_unsafe(pc + 2) != 0x60) return null;
-            const value2 = self.get_unsafe(pc + 3);
-            
-            // Next byte decides between pattern A and B
-            const next = self.get_unsafe(pc + 4);
-            
-            // Pattern A: arithmetic op directly after two PUSH1
-            if (next == 0x01 or next == 0x03 or next == 0x02) { // ADD, SUB, MUL
-                const folded_value: u256 = switch (next) {
-                    0x01 => @as(u256, value1) +% @as(u256, value2), // ADD
-                    0x03 => @as(u256, value1) -% @as(u256, value2), // SUB
-                    0x02 => @as(u256, value1) *% @as(u256, value2), // MUL
-                    else => unreachable,
-                };
-                return OpcodeData{ .constant_fold = .{ 
-                    .value = folded_value, 
-                    .original_length = 5 
-                }};
-            }
-            
-            // Pattern B: PUSH1 shift, SHL, SUB
-            if (pc + 7 < self.len() and
-                next == 0x60 and // PUSH1
-                self.get_unsafe(pc + 6) == 0x1B and // SHL
-                self.get_unsafe(pc + 7) == 0x03) // SUB
-            {
-                const shift_amount = self.get_unsafe(pc + 5);
-                const shifted: u256 = if (shift_amount < 256)
-                    (@as(u256, value2) << @as(u8, @intCast(shift_amount)))
-                else
-                    0;
-                const folded_value: u256 = @as(u256, value1) -% shifted;
-                return OpcodeData{ .constant_fold = .{ 
-                    .value = folded_value, 
-                    .original_length = 8 
-                }};
-            }
-            
-            return null;
-        }
         
         fn checkMultiPushPattern(self: *const Self, pc: PcType, n: u8) ?OpcodeData {
             if (pc + n > self.len()) return null;
@@ -484,12 +430,7 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
 
             // Check advanced fusion patterns in priority order (longest first)
             
-            // 1. Check for constant folding pattern (highest priority, up to 8 bytes)
-            if (self.checkConstantFoldingPattern(pc)) |fusion| {
-                return fusion;
-            }
-            
-            // 2. Check for ISZERO-JUMPI pattern (variable length)
+            // 1. Check for ISZERO-JUMPI pattern (highest priority) (variable length)
             if (self.checkIszeroJumpiPattern(pc)) |fusion| {
                 return fusion;
             }

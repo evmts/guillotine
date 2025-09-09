@@ -243,21 +243,6 @@ pub fn Dispatch(comptime FrameType: type) type {
                         try schedule_items.append(allocator, .{ .opcode_handler = opcode_handlers.*[@intFromEnum(Opcode.INVALID)] });
                     },
                     // Advanced fusion patterns - use optimized handlers
-                    .constant_fold => |cf| {
-                        // Use the optimized constant fold handler
-                        const frame_handlers = @import("../frame/frame_handlers.zig");
-                        const handler = frame_handlers.getSyntheticHandler(FrameType, @intFromEnum(OpcodeSynthetic.CONSTANT_FOLD));
-                        try schedule_items.append(allocator, .{ .opcode_handler = handler });
-                        
-                        // Add the folded value as metadata
-                        if (cf.value <= std.math.maxInt(u64)) {
-                            try schedule_items.append(allocator, .{ .push_inline = .{ .value = @intCast(cf.value) } });
-                        } else {
-                            const value_ptr = try allocator.create(FrameType.WordType);
-                            value_ptr.* = cf.value;
-                            try schedule_items.append(allocator, .{ .push_pointer = .{ .value = value_ptr } });
-                        }
-                    },
                     .multi_push => |mp| {
                         // Use optimized multi-push handler
                         const frame_handlers = @import("../frame/frame_handlers.zig");
@@ -565,9 +550,6 @@ pub fn Dispatch(comptime FrameType: type) type {
                         schedule_index += 1; // Handler
                     },
                     // Advanced fusion patterns
-                    .constant_fold => {
-                        schedule_index += 2; // Handler + folded value
-                    },
                     .multi_push => |mp| {
                         schedule_index += @as(usize, mp.count) * 2; // Each push: handler + value
                     },

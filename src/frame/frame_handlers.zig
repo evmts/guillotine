@@ -219,7 +219,7 @@ pub fn getSyntheticHandler(comptime FrameType: type, synthetic_opcode: u8) Frame
         @intFromEnum(OpcodeSynthetic.PUSH_MSTORE8_INLINE) => &MemorySyntheticHandlers.push_mstore8_inline,
         @intFromEnum(OpcodeSynthetic.PUSH_MSTORE8_POINTER) => &MemorySyntheticHandlers.push_mstore8_pointer,
         // Advanced fusion patterns
-        @intFromEnum(OpcodeSynthetic.CONSTANT_FOLD) => &AdvancedSyntheticHandlers.constant_fold,
+        // Note: CONSTANT_FOLD (0xBD) removed - compiler handles constant folding
         @intFromEnum(OpcodeSynthetic.MULTI_PUSH_2) => &AdvancedSyntheticHandlers.multi_push_2,
         @intFromEnum(OpcodeSynthetic.MULTI_PUSH_3) => &AdvancedSyntheticHandlers.multi_push_3,
         @intFromEnum(OpcodeSynthetic.MULTI_POP_2) => &AdvancedSyntheticHandlers.multi_pop_2,
