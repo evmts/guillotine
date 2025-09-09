@@ -6,7 +6,6 @@ import (
 
 	"guillotine-cli/internal/config"
 	"guillotine-cli/internal/core/bytecode"
-	"guillotine-cli/internal/types"
 
 	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/lipgloss"
@@ -93,39 +92,6 @@ func RenderBytecodeDisassemblyWithTable(data DisassemblyDisplayData, instruction
 		BorderForeground(config.Amber)
 	
 	return boxStyle.Render(content)
-}
-
-func renderStats(stats *types.BytecodeStats) string {
-	statsBox := config.BoxStyle.Copy().
-		Padding(0, 1).
-		BorderForeground(config.Amber)
-	
-	// Show actual instruction count, not dispatch size which might be 0
-	instrCount := stats.DispatchSize
-	if instrCount == 0 && stats.OriginalSize > 0 {
-		// Estimate instruction count from bytecode size if dispatch size not set
-		instrCount = stats.OriginalSize // This is an approximation
-	}
-	
-	// Fix blocks count - if it's 0 but we have instructions, show 1
-	blocksCount := stats.BasicBlockCount
-	if blocksCount == 0 && stats.OriginalSize > 0 {
-		blocksCount = 1  // At least one block if we have bytecode
-	}
-	
-	statsContent := fmt.Sprintf(
-		"%s %d bytes | %s %d | %s %d | %s %d",
-		config.LabelStyle.Render(config.DisassemblySizeLabel),
-		stats.OriginalSize,
-		config.LabelStyle.Render(config.DisassemblyInstructionsLabel),
-		instrCount,
-		config.LabelStyle.Render(config.DisassemblyBlocksLabel),
-		blocksCount,
-		config.LabelStyle.Render(config.DisassemblyJumpdestsLabel),
-		stats.JumpdestCount,
-	)
-	
-	return statsBox.Render(statsContent)
 }
 
 // renderInstructionsAsTable renders instructions in a scrollable table format
