@@ -43,6 +43,7 @@ type Model struct {
 	
 	// Disassembly state
 	disassemblyResult  *bytecode.DisassemblyResult
+	disassemblyError   error
 	currentBlockIndex  int
 	instructionsTable  table.Model
 	

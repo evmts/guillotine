@@ -356,3 +356,35 @@ func renderBlockIndicator(currentBlock int, totalBlocks int, blockInfo string, b
 	return config.SubtitleStyle.Render(indicator)
 }
 
+// RenderBytecodeDisassemblyError renders an error message when bytecode analysis fails
+func RenderBytecodeDisassemblyError(err error) string {
+	var b strings.Builder
+	
+	// Title
+	b.WriteString(config.SubtitleStyle.Render(config.BytecodeDisassemblyTitle))
+	b.WriteString("\n\n")
+	
+	// Error message
+	b.WriteString(config.ErrorStyle.Render("Bytecode Analysis Failed"))
+	b.WriteString("\n\n")
+	b.WriteString(config.NormalStyle.Render(fmt.Sprintf("Error: %v", err)))
+	
+	// Helpful message
+	b.WriteString("\n\n")
+	b.WriteString(config.DimmedStyle.Render("This could be due to:"))
+	b.WriteString("\n")
+	b.WriteString(config.DimmedStyle.Render("• Empty or invalid bytecode"))
+	b.WriteString("\n")
+	b.WriteString(config.DimmedStyle.Render("• Unsupported bytecode format"))
+	b.WriteString("\n")
+	b.WriteString(config.DimmedStyle.Render("• Contract with only metadata (no runtime code)"))
+	
+	// Wrap in box
+	content := b.String()
+	boxStyle := config.BoxStyle.Copy().
+		Padding(0, 1).
+		BorderForeground(config.Amber)
+	
+	return boxStyle.Render(content)
+}
+

@@ -129,8 +129,11 @@ func (m Model) View() string {
 		
 		// Right content: disassembly if available
 		var rightContent string
-		hasDisassembly := m.disassemblyResult != nil
-		if hasDisassembly {
+		hasDisassembly := m.disassemblyResult != nil || m.disassemblyError != nil
+		if m.disassemblyError != nil {
+			// Show error message
+			rightContent = ui.RenderBytecodeDisassemblyError(m.disassemblyError)
+		} else if m.disassemblyResult != nil {
 			data := ui.DisassemblyDisplayData{
 				Result:            m.disassemblyResult,
 				CurrentBlockIndex: m.currentBlockIndex,

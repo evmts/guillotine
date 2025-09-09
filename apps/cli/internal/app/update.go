@@ -42,7 +42,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.error != nil {
 			// Store error message for display
 			m.disassemblyResult = nil
+			m.disassemblyError = msg.error
 		} else {
+			m.disassemblyError = nil
 			m.disassemblyResult = msg.result
 			m.currentBlockIndex = 0
 			

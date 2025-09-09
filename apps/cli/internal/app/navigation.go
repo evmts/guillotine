@@ -308,6 +308,7 @@ func (m *Model) handleContractDetailNavigation(msgStr string, msg tea.KeyMsg) (t
 	if config.IsKey(msgStr, config.KeyBack) {
 		m.state = types.StateContracts
 		m.disassemblyResult = nil  // Clear disassembly when going back
+		m.disassemblyError = nil   // Clear error state
 		m.currentBlockIndex = 0     // Reset block index
 		m.updateContractsTable()
 		return m, nil
