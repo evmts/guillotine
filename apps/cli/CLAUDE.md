@@ -34,8 +34,9 @@ apps/cli/
     │   │   ├── vm_manager.go # VM lifecycle management
     │   │   └── parsers.go    # Address and hex data parsing
     │   │
-    │   ├── disassembly/      # Bytecode disassembly domain
-    │   │   └── analyzer.go   # Bytecode analysis and instruction extraction
+    │   ├── bytecode/         # Bytecode analysis domain
+    │   │   ├── bytecode.go   # Bytecode analysis using Go SDK bindings
+    │   │   └── bytecode_test.go # Bytecode analysis tests
     │   │
     │   ├── history/          # History domain
     │   │   ├── manager.go    # Call history management
@@ -141,12 +142,12 @@ Each domain is self-contained with clear responsibilities:
 - Address and data parsing
 - No UI concerns
 
-**Disassembly Domain** (`core/disassembly/`)
-- Bytecode analysis via FFI bindings
-- Instruction extraction and parsing
-- Basic block identification
-- Gas cost calculation
-- Opcode importance classification
+**Bytecode Domain** (`core/bytecode/`)
+- Bytecode analysis via Go SDK bindings (`github.com/evmts/guillotine/sdks/go/bytecode`)
+- Instruction extraction with metadata (PC, gas, stack I/O)
+- Basic block identification via SDK Analysis
+- Jump destination tracking and validation
+- Push value extraction and decimal conversion
 - No UI concerns
 
 **History Domain** (`core/history/`)
@@ -232,21 +233,23 @@ The CLI provides comprehensive bytecode disassembly capabilities for deployed co
 ### Disassembly Flow
 
 1. **Contract Selection**: Select a deployed contract from the contracts list
-2. **Automatic Analysis**: Bytecode is automatically analyzed using Guillotine's disassembly engine
+2. **Automatic Analysis**: Bytecode is analyzed using Go SDK bindings
 3. **Block Navigation**: Navigate between basic blocks to understand control flow
 4. **Instruction Details**: View detailed instruction information including:
    - Program Counter (PC) position
-   - Opcode name and hex value
-   - Push values and jump targets
-   - Gas cost per instruction
+   - Opcode name and hex value (from `bytecode.OpcodeName()`)
+   - Push values with decimal conversion for small values
+   - Gas cost per instruction (from `bytecode.OpcodeInfo()`)
    - Stack input/output effects
+   - Jump destination identification
 
-### Integration with FFI
+### Integration with Go SDK
 
-The disassembly system uses Go bindings to Guillotine's Zig disassembly engine:
-- **Efficient Analysis**: Native Zig performance for bytecode parsing
-- **Comprehensive Results**: Full instruction metadata and control flow analysis
-- **Memory Safety**: Proper cleanup of FFI resources via `defer analysis.Free()`
+The disassembly system uses the Guillotine Go SDK bytecode package:
+- **Efficient Analysis**: Native bytecode analysis via `bytecode.Analyze()`
+- **Comprehensive Results**: Full instruction metadata, basic blocks, and jump destinations
+- **Type Safety**: Strongly typed results with `bytecode.DisassemblyResult` and `bytecode.Analysis`
+- **Memory Management**: Automatic cleanup via Go garbage collection
 
 ### UI Architecture
 
@@ -259,6 +262,24 @@ The disassembly system uses Go bindings to Guillotine's Zig disassembly engine:
 - **Scrollable Instructions**: Large bytecode handled via paginated table view
 - **Contextual Highlighting**: Jumpdests, important opcodes, and jump targets emphasized
 - **Real-time Updates**: Smooth navigation between blocks with instant table updates
+
+## Bytecode Analysis Navigation
+
+Bytecode analysis components are organized as follows:
+
+```bash
+# Core bytecode analysis implementation
+cat apps/cli/internal/core/bytecode/bytecode.go
+
+# UI rendering for disassembly
+cat apps/cli/internal/ui/bytecode_disassembly.go
+
+# Integration in app handlers
+grep -n "bytecode\|disassembly" apps/cli/internal/app/*.go
+
+# SDK bytecode package usage
+grep -n "github.com/evmts/guillotine/sdks/go/bytecode" apps/cli/internal/core/bytecode/*.go
+```
 
 ## Error Handling
 
@@ -370,21 +391,31 @@ var NewStyle = lipgloss.NewStyle().Bold(true)
 #### 5. Working with Disassembly Types
 When working with bytecode disassembly:
 ```go
-// types/disassembly.go - Pure data structures
-type DisassemblyResult struct {
-    Instructions []DisassemblyInstruction
-    Jumpdests    []uint32
-    BasicBlocks  []BasicBlock
-    Stats        BytecodeStats
+// core/bytecode/bytecode.go - Types and business logic
+type Instruction struct {
+    PC              uint64
+    OpcodeHex       uint8
+    OpcodeName      string
+    PushValue       *string
+    PushValueDecimal *uint64
+    GasCost         *uint64
+    StackInputs     *uint8
+    StackOutputs    *uint8
+    // ... other fields
 }
 
-// core/disassembly/analyzer.go - Business logic
-func AnalyzeBytecode(bytecode []byte) (*types.DisassemblyResult, error) {
-    // Call FFI, convert types, no UI concerns
+type DisassemblyResult struct {
+    Instructions []Instruction
+    Analysis     *bytecode.Analysis  // From SDK
+    // ... other fields
+}
+
+func AnalyzeBytecode(bc *bytecode.Bytecode) (*DisassemblyResult, error) {
+    // Uses SDK bindings, no UI concerns
 }
 
 // ui/bytecode_disassembly.go - Pure rendering
-func RenderBytecodeDisassembly(result *types.DisassemblyResult) string {
+func RenderBytecodeDisassembly(result *bytecode.DisassemblyResult) string {
     // Pure rendering function, no state
 }
 ```
@@ -395,7 +426,7 @@ func RenderBytecodeDisassembly(result *types.DisassemblyResult) string {
 MUST place code in correct location:
   Type definitions: types/*.go (call.go, disassembly.go, errors.go)
   Error types: types/errors.go
-  Business logic: core/<domain>/*.go (evm/, disassembly/, history/, state/)
+  Business logic: core/<domain>/*.go (evm/, bytecode/, history/, state/)
   State management: app/*.go
   Pure rendering: ui/*.go (bytecode_disassembly.go, split_panel.go)
   Configuration: config/*.go (keys.go with navigation bindings)
@@ -406,8 +437,8 @@ NEVER:
   Create circular dependencies
   Put logic in config files
   Add state to UI components
-  Put FFI calls in UI components (belongs in core/disassembly/)
-  Mix disassembly analysis with rendering logic
+  Put SDK calls in UI components (belongs in core/bytecode/)
+  Mix bytecode analysis with rendering logic
 ```
 
 ### Testing Strategy
@@ -423,10 +454,10 @@ func TestValidateCallParameters(t *testing.T) {
     // Test validation logic
 }
 
-// core/disassembly/analyzer_test.go
+// core/bytecode/bytecode_test.go
 func TestAnalyzeBytecode(t *testing.T) {
-    bytecode := []byte{0x60, 0x01, 0x60, 0x02, 0x01} // PUSH1 1 PUSH1 2 ADD
-    result, err := AnalyzeBytecode(bytecode)
+    bc := []byte{0x60, 0x01, 0x60, 0x02, 0x01} // PUSH1 1 PUSH1 2 ADD
+    result, err := AnalyzeBytecodeFromBytes(bc)
     // Test instruction parsing, gas calculation, block identification
 }
 ```
@@ -477,13 +508,13 @@ go get -u
 ## Performance Considerations
 
 - EVM calls: 10-100ms depending on complexity
-- Bytecode disassembly: 5-50ms depending on bytecode size
+- Bytecode analysis: 5-50ms via SDK bindings
 - UI updates: 60 FPS via Bubbletea
 - View() rendering: Keep under 16ms
 - Async commands: Any operation >50ms (includes disassembly loading)
 - State persistence: Non-blocking background saves
 - Table scrolling: Efficient with large instruction sets via virtualized display
-- Block navigation: Instant switching with pre-analyzed data
+- Block navigation: Instant switching with SDK's pre-analyzed BasicBlocks
 
 ## Common Modifications
 
@@ -549,25 +580,35 @@ KeyToggleDisassembly = []string{"d", "ctrl+d"} // Future: toggle disassembly vie
 ### Adding Disassembly Features
 To extend disassembly functionality:
 
-1. **New Analysis Function** (`core/disassembly/analyzer.go`):
+1. **New Analysis Function** (`core/bytecode/bytecode.go`):
 ```go
-func AnalyzeJumpPattern(result *types.DisassemblyResult) map[uint32][]uint32 {
-    // Pure business logic for jump analysis
+func AnalyzeJumpPattern(result *DisassemblyResult) map[uint64][]uint64 {
+    // Pure business logic for jump pattern analysis
+}
+
+func GetInstructionsForBlock(dr *DisassemblyResult, blockIndex int) ([]Instruction, string, error) {
+    // Extract instructions for a specific basic block
 }
 ```
 
-2. **Enhanced Types** (`types/disassembly.go`):
+2. **Enhanced SDK Integration** (`core/bytecode/bytecode.go`):
 ```go
+// Leverage SDK's Analysis type
 type DisassemblyResult struct {
-    // existing fields...
-    JumpAnalysis map[uint32][]uint32 // New field
+    Instructions []Instruction
+    Analysis     *bytecode.Analysis  // SDK provides BasicBlocks, JumpDests
+    // ... custom fields
 }
 ```
 
 3. **UI Enhancement** (`ui/bytecode_disassembly.go`):
 ```go
-func RenderJumpHighlights(result *types.DisassemblyResult) string {
-    // Pure rendering function using JumpAnalysis data
+func RenderBytecodeDisassemblyWithNavigation(data DisassemblyDisplayData) string {
+    // Pure rendering with block navigation support
+}
+
+func ConvertInstructionsToRows(instructions []bytecode.Instruction, jumpdests []uint32) []table.Row {
+    // Convert instructions to table rows for display
 }
 ```
 

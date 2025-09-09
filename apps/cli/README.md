@@ -8,10 +8,16 @@ This directory is a standalone Go module that uses Bubble Tea to prototype inter
 
 ## Layout
 
-- `main.go` — tiny program that boots the internal TUI model
-- `internal/app` — application model/state used by the TUI
-- `internal/ui` — presentation and layout components
-- `internal/config` — theming and config strings/keys
+- `main.go` — entry point that initializes the Bubble Tea program
+- `internal/app/` — MVU pattern implementation (model, update, view, handlers)
+- `internal/core/` — business logic domains:
+  - `evm/` — EVM call execution and validation
+  - `bytecode/` — bytecode analysis using Go SDK bindings
+  - `history/` — call history and contract tracking
+  - `state/` — persistence and state management
+- `internal/ui/` — pure rendering components (no state)
+- `internal/types/` — shared type definitions
+- `internal/config/` — theming, keys, and UI strings
 
 ## Build
 
