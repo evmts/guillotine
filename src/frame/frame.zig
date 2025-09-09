@@ -421,7 +421,7 @@ pub fn Frame(comptime config: FrameConfig) type {
             } else null;
             errdefer if (length_prefixed) |ptr| {
                 const len = std.mem.readInt(u64, ptr[0..8], .little);
-                allocator.free(ptr[0 .. 8 + len]);
+                allocator.free(ptr[0 .. 8 + @as(usize, @intCast(len))]);
             };
 
             // log.debug("Frame.init: Successfully initialized frame components", .{});
@@ -716,7 +716,7 @@ pub fn Frame(comptime config: FrameConfig) type {
             // Read length from first 8 bytes
             const len = std.mem.readInt(u64, ptr[0..8], .little);
             // Return slice starting after length prefix
-            return ptr[8 .. 8 + len];
+            return ptr[8 .. 8 + @as(usize, @intCast(len))];
         }
 
         /// Get the EVM instance from the opaque pointer
