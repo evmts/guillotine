@@ -26,7 +26,7 @@ type DisassemblyResult struct {
 	Instructions     []Instruction `json:"instructions"`
 	JumpDestCount    uint32        `json:"jump_dest_count"`
 	TotalInstructions uint32       `json:"total_instructions"`
-	BasicBlocks      []bytecode.BasicBlock `json:"basic_blocks"`
+	Analysis      *bytecode.Analysis `json:"analysis"`
 }
 
 // AnalyzeBytecode returns structured bytecode disassembly
@@ -53,7 +53,7 @@ func AnalyzeBytecode(bc *bytecode.Bytecode) (*DisassemblyResult, error) {
 	result := &DisassemblyResult{
 		Length:       length,
 		Instructions: make([]Instruction, 0),
-		BasicBlocks: analysis.BasicBlocks,
+		Analysis: analysis,
 	}
 
 	var pc uint64 = 0
