@@ -25,7 +25,7 @@ func TestAnalysisBasicPatterns(t *testing.T) {
 				0x01,       // ADD
 				0x00,       // STOP
 			},
-			expectedPushCount:  2,
+			expectedPushCount:  0, // Fused as multi_push pattern
 			expectedJumpDests:  []uint32{},
 			expectedBlocksMin:  1,
 			expectedInstrCount: 4,
@@ -42,7 +42,7 @@ func TestAnalysisBasicPatterns(t *testing.T) {
 				0x60, 0x03, // PUSH1 0x03
 				0x00,       // STOP
 			},
-			expectedPushCount:  4,
+			expectedPushCount:  2, // First two fused with JUMPI, last two individual
 			expectedJumpDests:  []uint32{8},
 			expectedBlocksMin:  2,
 			expectedInstrCount: 8,
@@ -64,7 +64,7 @@ func TestAnalysisBasicPatterns(t *testing.T) {
 			expectedPushCount:  3,
 			expectedJumpDests:  []uint32{2},
 			expectedBlocksMin:  2,
-			expectedInstrCount: 11,
+			expectedInstrCount: 10,
 		},
 	}
 
@@ -236,7 +236,7 @@ func TestAnalysisComplexContracts(t *testing.T) {
 			codeHex: "6080604052348015600f57600080fd5b506004361060285760003560e01c8063" +
 				"70a0823114602d575b600080fd5b60336047565b604051603e9190605d565b60405180910390f3" +
 				"5b60005481565b6000819050919050565b6057816047565b82525050565b6000602082019050" +
-				"607060008301846050565b92915050565b7f4e487b71000000000000000000000000000000",
+				"607060008301846050565b92915050565b7f4e487b710000000000000000000000000000000000000000000000000000000000",
 			description: "ERC20 balance query fragment",
 			minStats: struct {
 				instructions uint32
