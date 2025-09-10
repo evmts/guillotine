@@ -98,5 +98,8 @@ test {
     _ = @import("evm/opcodes/all_opcodes.zig");
 
     // Benchmarks
-    _ = @import("benchmark/baseline_benchmark.zig");
+    // _ = @import("benchmark/baseline_benchmark.zig"); // Missing file
+    
+    // DELEGATECALL storage context bug test
+    _ = @import("delegatecall_storage_context_bug_test.zig");
 }
