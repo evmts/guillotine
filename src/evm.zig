@@ -1216,6 +1216,15 @@ pub fn Evm(comptime config: EvmConfig) type {
                 }) catch return CallResult.failure(0);
             }
 
+            // Transfer storage changes from frame to EVM's database
+            var storage_iter = frame.database.storage.iterator();
+            while (storage_iter.next()) |entry| {
+                // Copy each storage entry from frame database to main database
+                self.database.set_storage(entry.key_ptr.address, entry.key_ptr.key, entry.value_ptr.*) catch {
+                    return CallResult.failure(0);
+                };
+            }
+
             // Handle different termination reasons appropriately
             var result: CallResult = undefined;
             if (termination_reason) |reason| {
