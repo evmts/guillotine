@@ -497,78 +497,76 @@ export class GuillotineEVM {
     const view = new DataView(buffer.buffer, resultPtr);
     let offset = 0;
 
-    // Parse EvmResult struct
-    // success: bool (1 byte, padded to 4 for alignment)
+    // Parse EvmResult struct with correct WASM32 offsets
+    // IMPORTANT: These offsets match the actual WASM32 struct layout
+    // success: bool at offset 0 (padded to 4 bytes)
     const success = view.getUint8(offset) !== 0;
-    offset = 4; // Aligned to 4 bytes
+    offset = 8; // Skip to offset 8 (gas_left requires 8-byte alignment)
 
-    // gas_left: u64
+    // gas_left: u64 at offset 8
     const gasLeft = view.getBigUint64(offset, true);
-    offset += 8;
+    offset = 16; // Now at offset 16
 
-    // output: pointer
+    // output: pointer at offset 16
     const outputPtr = view.getUint32(offset, true);
-    offset += 4;
+    offset = 20; // Now at offset 20
 
-    // output_len: usize
+    // output_len: usize at offset 20
     const outputLen = view.getUint32(offset, true);
-    offset += 4;
+    offset = 24; // Now at offset 24
 
-    // error_message: pointer
+    // error_message: pointer at offset 24
     const errorMessagePtr = view.getUint32(offset, true);
-    offset += 4;
+    offset = 28; // Now at offset 28
 
-    // logs: pointer
+    // logs: pointer at offset 28
     const logsPtr = view.getUint32(offset, true);
-    offset += 4;
+    offset = 32; // Now at offset 32
 
-    // logs_len: usize
+    // logs_len: usize at offset 32
     const logsLen = view.getUint32(offset, true);
-    offset += 4;
+    offset = 36; // Now at offset 36
 
-    // selfdestructs: pointer
+    // selfdestructs: pointer at offset 36
     const selfdestructsPtr = view.getUint32(offset, true);
-    offset += 4;
+    offset = 40; // Now at offset 40
 
-    // selfdestructs_len: usize
+    // selfdestructs_len: usize at offset 40
     const selfdestructsLen = view.getUint32(offset, true);
-    offset += 4;
+    offset = 44; // Now at offset 44
 
-    // accessed_addresses: pointer
+    // accessed_addresses: pointer at offset 44
     const accessedAddressesPtr = view.getUint32(offset, true);
-    offset += 4;
+    offset = 48; // Now at offset 48
 
-    // accessed_addresses_len: usize
+    // accessed_addresses_len: usize at offset 48
     const accessedAddressesLen = view.getUint32(offset, true);
-    offset += 4;
+    offset = 52; // Now at offset 52
 
-    // accessed_storage: pointer
+    // accessed_storage: pointer at offset 52
     const accessedStoragePtr = view.getUint32(offset, true);
-    offset += 4;
+    offset = 56; // Now at offset 56
 
-    // accessed_storage_len: usize
+    // accessed_storage_len: usize at offset 56
     const accessedStorageLen = view.getUint32(offset, true);
-    offset += 4;
+    offset = 60; // Now at offset 60
 
-    // created_address: [20]u8
+    // created_address: [20]u8 at offset 60
     const createdAddressBytes = new Uint8Array(20);
     for (let i = 0; i < 20; i++) {
       createdAddressBytes[i] = view.getUint8(offset + i);
     }
-    offset += 20;
+    offset = 80; // Now at offset 80 (60 + 20)
 
-    // has_created_address: bool
+    // has_created_address: bool at offset 80
     const hasCreatedAddress = view.getUint8(offset) !== 0;
-    offset += 1;
+    offset = 84; // Now at offset 84 (aligned to 4 bytes)
 
-    // Align to 4 bytes
-    offset = Math.ceil(offset / 4) * 4;
-
-    // trace_json: pointer
+    // trace_json: pointer at offset 84
     const traceJsonPtr = view.getUint32(offset, true);
-    offset += 4;
+    offset = 88; // Now at offset 88
 
-    // trace_json_len: usize
+    // trace_json_len: usize at offset 88
     const traceJsonLen = view.getUint32(offset, true);
 
     // Parse output
