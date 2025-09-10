@@ -248,6 +248,9 @@ pub fn Evm(comptime config: EvmConfig) type {
 
         /// Transfer value between accounts with proper balance checks and error handling
         fn doTransfer(self: *Self, from: primitives.Address, to: primitives.Address, value: u256, snapshot_id: Journal.SnapshotIdType) !void {
+            // Self-transfer is a no-op
+            if (std.mem.eql(u8, &from.bytes, &to.bytes)) return;
+            
             var from_account = try self.database.get_account(from.bytes) orelse Account.zero();
             // Skip balance check if disabled in config
             if (comptime !config.disable_balance_checks) {
@@ -6694,4 +6697,60 @@ test "Minimal ERC20 deployment reproduction - benchmark runner issue" {
     // For now, we expect this to fail (reproducing the issue)
     // Once fixed, change this to: try std.testing.expect(result.success);
     try std.testing.expect(!result.success);
+}
+
+test "doTransfer - self-transfer should not change balance" {
+    // Create test database
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
+
+    // Create EVM instance following existing test patterns
+    const block_info = BlockInfo{
+        .chain_id = 1,
+        .number = 1,
+        .timestamp = 1000,
+        .difficulty = 100,
+        .gas_limit = 30000000,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .base_fee = 0,
+        .prev_randao = [_]u8{0} ** 32,
+    };
+
+    const tx_context = TransactionContext{
+        .gas_limit = 1000000,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .chain_id = 1,
+    };
+
+    var test_evm = try DefaultEvm.init(std.testing.allocator, &db, block_info, tx_context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    defer test_evm.deinit();
+
+    // Set up test account with initial balance
+    const test_address = primitives.Address{ .bytes = [_]u8{0xAB} ** 20 };
+    const initial_balance: u256 = 1000;
+    const transfer_value: u256 = 100;
+
+    const account = Account{
+        .nonce = 0,
+        .balance = initial_balance,
+        .code_hash = primitives.EMPTY_HASH,
+        .storage_root = primitives.EMPTY_HASH,
+    };
+
+    try db.set_account(test_address.bytes, account);
+
+    // Create snapshot before transfer
+    const snapshot_id = test_evm.journal.create_snapshot();
+
+    // Perform self-transfer (this calls the private doTransfer function)
+    try test_evm.doTransfer(test_address, test_address, transfer_value, snapshot_id);
+
+    // Check that balance remains unchanged
+    const final_account = (try db.get_account(test_address.bytes)).?;
+
+    // This should pass but currently fails due to the bug
+    try std.testing.expectEqual(initial_balance, final_account.balance);
+
+    // Current buggy behavior produces: initial_balance + transfer_value = 1100
+    // Expected correct behavior: initial_balance = 1000 (unchanged)
 }
