@@ -1,6 +1,7 @@
 import { Bytes } from '../primitives/bytes.js';
 import { Address } from '../primitives/address.js';
 import { U256 } from '../primitives/u256.js';
+import type { Jsonified } from '../utils/json-types.js';
 
 /**
  * Log entry from EVM execution
@@ -161,7 +162,7 @@ export class ExecutionResult {
   /**
    * JSON serialization
    */
-  toJSON(): Record<string, unknown> {
+  toJSON() {
     return {
       success: this.success,
       gasLeft: this.gasLeft.toString(),
@@ -189,36 +190,36 @@ export class ExecutionResult {
   /**
    * Create from JSON
    */
-  static fromJSON(json: Record<string, unknown>): ExecutionResult {
-    const logs = (json.logs as any[] ?? []).map(log => ({
+  static fromJSON(json: Jsonified<ExecutionResult>): ExecutionResult {
+    const logs = (json.logs ?? []).map(log => ({
       address: Address.fromHex(log.address),
-      topics: (log.topics ?? []).map((t: string) => U256.fromHex(t)),
+      topics: (log.topics ?? []).map(t => U256.fromHex(t)),
       data: Bytes.fromHex(log.data),
     }));
 
-    const selfdestructs = (json.selfdestructs as any[] ?? []).map(sd => ({
+    const selfdestructs = (json.selfdestructs ?? []).map(sd => ({
       contract: Address.fromHex(sd.contract),
       beneficiary: Address.fromHex(sd.beneficiary),
     }));
 
-    const accessedAddresses = (json.accessedAddresses as string[] ?? []).map(a => Address.fromHex(a));
+    const accessedAddresses = (json.accessedAddresses ?? []).map(a => Address.fromHex(a));
 
-    const accessedStorage = (json.accessedStorage as any[] ?? []).map(s => ({
+    const accessedStorage = (json.accessedStorage ?? []).map(s => ({
       address: Address.fromHex(s.address),
       slot: U256.fromHex(s.slot),
     }));
 
     return new ExecutionResult(
-      json.success as boolean,
-      BigInt(json.gasLeft as string),
-      Bytes.fromHex(json.output as string),
-      json.errorMessage as string | null,
+      json.success,
+      BigInt(json.gasLeft),
+      Bytes.fromHex(json.output),
+      json.errorMessage,
       logs,
       selfdestructs,
       accessedAddresses,
       accessedStorage,
-      json.createdAddress ? Address.fromHex(json.createdAddress as string) : null,
-      json.traceJson as string | null
+      json.createdAddress ? Address.fromHex(json.createdAddress) : null,
+      json.traceJson
     );
   }
 }

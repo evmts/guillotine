@@ -97,6 +97,37 @@ export class Bytes {
   }
 
   /**
+   * Concatenates multiple Bytes or byte arrays into a single Bytes
+   */
+  static concat(items: (Bytes | Uint8Array | ArrayLike<number>)[]): Bytes {
+    // Calculate total length
+    let totalLength = 0;
+    for (const item of items) {
+      if (item instanceof Bytes) {
+        totalLength += item.length();
+      } else {
+        totalLength += item.length;
+      }
+    }
+    
+    // Create combined array
+    const combined = new Uint8Array(totalLength);
+    let offset = 0;
+    
+    for (const item of items) {
+      if (item instanceof Bytes) {
+        combined.set(item.toBytes(), offset);
+        offset += item.length();
+      } else {
+        combined.set(new Uint8Array(item), offset);
+        offset += item.length;
+      }
+    }
+    
+    return new Bytes(combined);
+  }
+
+  /**
    * Returns a copy of the underlying byte data
    */
   toBytes(): Uint8Array {
