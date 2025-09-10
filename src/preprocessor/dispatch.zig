@@ -164,17 +164,11 @@ pub fn Dispatch(comptime FrameType: type) type {
             // Use optimized single-pass analysis if available
             const raw_bytecode = bytecode.raw();
             
+            const single_log = @import("../log.zig");
+            single_log.debug("Dispatch.init: Using single-pass analysis for bytecode of length {}", .{raw_bytecode.len});
+            
             // Perform single-pass analysis
             const result = try bytecode_single_pass.analyzeAndPreprocess(FrameType, allocator, raw_bytecode, opcode_handlers);
-            
-            // Store the jump table for later retrieval
-            // We need to store it directly as JumpTable, not a pointer to it
-            // The jump table entries are already allocated and owned by the caller
-            if (@hasField(@TypeOf(bytecode.*), "single_pass_jump_table")) {
-                const jump_table_ptr = try allocator.create(JumpTable);
-                jump_table_ptr.* = result.jump_table;
-                bytecode.single_pass_jump_table = @ptrCast(jump_table_ptr);
-            }
             
             // Store packed bitmap back to bytecode for compatibility
             if (@hasField(@TypeOf(bytecode.*), "packed_bitmap")) {
@@ -548,16 +542,7 @@ pub fn Dispatch(comptime FrameType: type) type {
             schedule: []const Item,
             bytecode: anytype,
         ) !JumpTable {
-            // Check if we already have a jump table from single-pass analysis
-            if (@hasField(@TypeOf(bytecode.*), "single_pass_jump_table")) {
-                if (bytecode.single_pass_jump_table) |jt_ptr| {
-                    // Cast back from anyopaque to the correct jump table type
-                    const jump_table_ptr: *JumpTable = @ptrCast(@alignCast(jt_ptr));
-                    return jump_table_ptr.*;
-                }
-            }
-            
-            // Fall back to building jump table the old way
+            // Build jump table from schedule by scanning bytecode
             var jumpdest_map = std.AutoHashMap(FrameType.PcType, usize).init(allocator);
             defer jumpdest_map.deinit();
             

@@ -6,6 +6,7 @@ const Address = primitives.Address;
 // Access to call params through the call params module
 const call_params_mod = @import("../frame/call_params.zig");
 const Opcode = @import("../opcodes/opcode_data.zig").Opcode;
+const Hardfork = @import("../eips_and_hardforks/hardfork.zig").Hardfork;
 // u256 is now a built-in type in Zig 0.14+
 
 /// System opcode handlers for the EVM stack frame.
@@ -136,14 +137,7 @@ pub fn Handlers(comptime FrameType: type) type {
                 },
             };
 
-            var result = self.getEvm().inner_call(params) catch |err| switch (err) {
-                else => {
-                    self.stack.push_unsafe(0);
-                    const op_data = dispatch.getOpData(.CALL);
-                    const next = op_data.next;
-                    return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
-                },
-            };
+            var result = self.getEvm().inner_call(params);
             defer result.deinit(self.getAllocator());
 
             // Write return data to memory if successful and output size > 0
@@ -275,14 +269,7 @@ pub fn Handlers(comptime FrameType: type) type {
                 },
             };
 
-            var result = self.getEvm().inner_call(call_params) catch |err| switch (err) {
-                else => {
-                    self.stack.push_unsafe(0);
-                    const op_data = dispatch.getOpData(.CALLCODE);
-                    const next = op_data.next;
-                    return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
-                },
-            };
+            var result = self.getEvm().inner_call(call_params);
             defer result.deinit(self.getAllocator());
 
             // Write return data to memory if successful and output size > 0
@@ -396,14 +383,7 @@ pub fn Handlers(comptime FrameType: type) type {
                     .gas = gas_u64,
                 },
             };
-            var result = self.getEvm().inner_call(params) catch |err| switch (err) {
-                else => {
-                    self.stack.push_unsafe(0);
-                    const op_data = dispatch.getOpData(.DELEGATECALL);
-                    const next = op_data.next;
-                    return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
-                },
-            };
+            var result = self.getEvm().inner_call(params);
             defer result.deinit(self.getAllocator());
 
             // Write return data to memory if successful and output size > 0
@@ -530,14 +510,7 @@ pub fn Handlers(comptime FrameType: type) type {
                     .gas = gas_u64,
                 },
             };
-            var result = self.getEvm().inner_call(params) catch |err| switch (err) {
-                else => {
-                    self.stack.push_unsafe(0);
-                    const op_data = dispatch.getOpData(.STATICCALL);
-                    const next = op_data.next;
-                    return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
-                },
-            };
+            var result = self.getEvm().inner_call(params);
             defer result.deinit(self.getAllocator());
 
             // Write return data to memory if successful and output size > 0
@@ -628,14 +601,7 @@ pub fn Handlers(comptime FrameType: type) type {
                     .gas = @as(u64, @intCast(self.gas_remaining)),
                 },
             };
-            var result = self.getEvm().inner_call(params) catch |err| switch (err) {
-                else => {
-                    self.stack.push_unsafe(0);
-                    const op_data = dispatch.getOpData(.CREATE);
-                    const next = op_data.next;
-                    return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
-                },
-            };
+            var result = self.getEvm().inner_call(params);
             defer result.deinit(self.getAllocator());
 
             // Update gas remaining
@@ -713,14 +679,7 @@ pub fn Handlers(comptime FrameType: type) type {
                     .gas = @as(u64, @intCast(self.gas_remaining)),
                 },
             };
-            var result = self.getEvm().inner_call(params) catch |err| switch (err) {
-                else => {
-                    self.stack.push_unsafe(0);
-                    const op_data = dispatch.getOpData(.CREATE2);
-                    const next = op_data.next;
-                    return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
-                },
-            };
+            var result = self.getEvm().inner_call(params);
             defer result.deinit(self.getAllocator());
 
             // Update gas remaining
@@ -888,6 +847,14 @@ pub fn Handlers(comptime FrameType: type) type {
         pub fn auth(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const dispatch = Dispatch{ .cursor = cursor };
 
+            // AUTH is only available from PRAGUE hardfork onwards
+            const hardfork = self.getEvm().get_hardfork();
+            if (!hardfork.isAtLeast(.PRAGUE)) {
+                // Invalid opcode for pre-PRAGUE hardforks
+                self.gas_remaining = 0;
+                return Error.InvalidOpcode;
+            }
+
             // Pop authorization parameters from stack
             std.debug.assert(self.stack.size() >= 5); // AUTH requires 5 stack items
             const sig_s = self.stack.pop_unsafe();
@@ -977,6 +944,14 @@ pub fn Handlers(comptime FrameType: type) type {
         /// Stack: [gas, to, value, input_offset, input_size, output_offset, output_size, auth] → [success]
         pub fn authcall(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const dispatch = Dispatch{ .cursor = cursor };
+
+            // AUTHCALL is only available from PRAGUE hardfork onwards
+            const hardfork = self.getEvm().get_hardfork();
+            if (!hardfork.isAtLeast(.PRAGUE)) {
+                // Invalid opcode for pre-PRAGUE hardforks
+                self.gas_remaining = 0;
+                return Error.InvalidOpcode;
+            }
 
             // Pop call parameters from stack
             std.debug.assert(self.stack.size() >= 8); // AUTHCALL requires 8 stack items
@@ -1072,14 +1047,7 @@ pub fn Handlers(comptime FrameType: type) type {
                 },
             };
 
-            var result = self.getEvm().inner_call(params) catch |err| switch (err) {
-                else => {
-                    self.stack.push_unsafe(0);
-                    const op_data = dispatch.getOpData(.AUTHCALL);
-                    const next = op_data.next;
-                    return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
-                },
-            };
+            var result = self.getEvm().inner_call(params);
             defer result.deinit(self.getAllocator());
 
             // Write return data to memory if successful and output size > 0
@@ -1162,7 +1130,7 @@ const MockEvm = struct {
         return self.is_static;
     }
 
-    pub fn inner_call(self: *MockEvm, params: call_params_mod.CallParams) !call_params_mod.CallResult {
+    pub fn inner_call(self: *MockEvm, params: call_params_mod.CallParams) call_params_mod.CallResult {
         _ = params;
         return self.call_result;
     }

@@ -30,6 +30,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const dest_pc: FrameType.PcType = @intCast(dest);
 
             // Use binary search to find valid jump destination
+            log.warn("JUMP: looking for PC=0x{x} in table with {} entries", .{ dest_pc, jump_table.entries.len });
             if (jump_table.findJumpTarget(dest_pc)) |jump_dispatch| {
                 // Found valid JUMPDEST - update thread-local PC for tracing
                 const frame_handlers = @import("../frame/frame_handlers.zig");
@@ -38,6 +39,10 @@ pub fn Handlers(comptime FrameType: type) type {
                 return @call(FrameType.getTailCallModifier(), jump_dispatch.cursor[0].opcode_handler, .{ self, jump_dispatch.cursor });
             } else {
                 // Not a valid JUMPDEST
+                // Print jump table contents for debugging
+                for (jump_table.entries, 0..) |entry, i| {
+                    log.warn("  entry[{}] pc=0x{x}", .{ i, entry.pc });
+                }
                 log.warn("JUMP: Invalid jump destination PC=0x{x} - not a JUMPDEST", .{dest_pc});
                 return Error.InvalidJump;
             }

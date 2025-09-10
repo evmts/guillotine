@@ -26,8 +26,14 @@ pub fn JumpTable(comptime FrameType: type, comptime DispatchType: type) type {
             var left: usize = 0;
             var right: usize = self.entries.len;
             
-            // Log for specific problematic addresses
-            // Debug logging removed for performance
+            // Debug logging for problematic jump targets
+            const log = @import("../log.zig");
+            if (target_pc == 0x7 or target_pc == 0x8) {
+                log.debug("Looking for jump target PC=0x{x} in jump table with {} entries", .{ target_pc, self.entries.len });
+                for (self.entries, 0..) |entry, i| {
+                    log.debug("  Jump table[{}]: PC=0x{x}", .{ i, entry.pc });
+                }
+            }
 
             while (left < right) {
                 const mid = left + (right - left) / 2;

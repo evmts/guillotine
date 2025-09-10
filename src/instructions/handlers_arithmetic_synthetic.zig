@@ -106,21 +106,22 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// PUSH_SUB_INLINE - Fused PUSH+SUB with inline value (≤8 bytes).
         pub fn push_sub_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const push_value = cursor[1].push_inline.value;
-            std.debug.assert(self.stack.size() >= 1); // PUSH_SUB_INLINE requires 1 stack item
-            const top = self.stack.pop_unsafe();
-            const result = push_value -% top;
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
-            self.stack.push_unsafe(result);
+            // Semantics: original sequence was PUSH b; SUB which computes (second - top) => a - b
+            // Before fusion, top of stack is 'a'; metadata contains 'b'. We compute a - b.
+            const b = cursor[1].push_inline.value;
+            std.debug.assert(self.stack.size() >= 1);
+            const a = self.stack.pop_unsafe();
+            self.stack.push_unsafe(a -% b);
             return @call(FrameType.getTailCallModifier(), cursor[2].opcode_handler, .{ self, cursor + 2 });
         }
 
         /// PUSH_SUB_POINTER - Fused PUSH+SUB with pointer value (>8 bytes).
         pub fn push_sub_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            std.debug.assert(self.stack.size() >= 1); 
-            const result = cursor[1].push_pointer.value.* -% self.stack.pop_unsafe();
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); 
-            self.stack.push_unsafe(result);
+            // Compute a - b with b coming from pointer metadata
+            std.debug.assert(self.stack.size() >= 1);
+            const a = self.stack.pop_unsafe();
+            const b = cursor[1].push_pointer.value.*;
+            self.stack.push_unsafe(a -% b);
             return @call(FrameType.getTailCallModifier(), cursor[2].opcode_handler, .{ self, cursor + 2 });
         }
     };

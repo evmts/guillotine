@@ -37,9 +37,12 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// SUB opcode (0x03) - Subtraction with underflow wrapping.
         pub fn sub(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            std.debug.assert(self.stack.size() >= 2); 
+            std.debug.assert(self.stack.size() >= 2);
 
-            self.stack.set_top_unsafe(self.stack.pop_unsafe() -% self.stack.peek_unsafe());
+            // EVM semantics (as validated by REVM): result = second - top
+            const top = self.stack.pop_unsafe();
+            const second = self.stack.peek_unsafe();
+            self.stack.set_top_unsafe(second -% top);
 
             return next_instruction(self, cursor);
         }
