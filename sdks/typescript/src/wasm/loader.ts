@@ -1,4 +1,5 @@
 // File system imports are loaded dynamically in Node.js environment
+import { precompiles } from './precompiles';
 
 /**
  * C-compatible types used by the WASM interface
@@ -285,53 +286,8 @@ export class WasmLoader {
         console_log: this.consoleLog.bind(this),
         console_warn: this.consoleWarn.bind(this),
         console_error: this.consoleError.bind(this),
-        // TODO: make it cleaner maybe it should just be a stub like kzg?
-        // BN254 precompile functions
-        bn254_ecpairing: (inputPtr: number, inputLen: number, outputPtr: number, outputLenPtr: number) => {
-          // Stub implementation - the actual EVM precompile would handle this
-          // For now, just return false to indicate the precompile is not available
-          return 0;
-        },
-        bn254_ecadd: (inputPtr: number, inputLen: number, outputPtr: number, outputLenPtr: number) => {
-          return 0;
-        },
-        bn254_ecmul: (inputPtr: number, inputLen: number, outputPtr: number, outputLenPtr: number) => {
-          return 0;
-        },
-        // BLS12-381 precompile functions
-        bls12_381_g1_add: (inputPtr: number, inputLen: number, outputPtr: number, outputLenPtr: number) => {
-          return 0;
-        },
-        bls12_381_g1_mul: (inputPtr: number, inputLen: number, outputPtr: number, outputLenPtr: number) => {
-          return 0;
-        },
-        bls12_381_g1_msm: (inputPtr: number, inputLen: number, outputPtr: number, outputLenPtr: number) => {
-          return 0;
-        },
-        bls12_381_g1_multiexp: (inputPtr: number, inputLen: number, outputPtr: number, outputLenPtr: number) => {
-          return 0;
-        },
-        bls12_381_g2_add: (inputPtr: number, inputLen: number, outputPtr: number, outputLenPtr: number) => {
-          return 0;
-        },
-        bls12_381_g2_mul: (inputPtr: number, inputLen: number, outputPtr: number, outputLenPtr: number) => {
-          return 0;
-        },
-        bls12_381_g2_msm: (inputPtr: number, inputLen: number, outputPtr: number, outputLenPtr: number) => {
-          return 0;
-        },
-        bls12_381_g2_multiexp: (inputPtr: number, inputLen: number, outputPtr: number, outputLenPtr: number) => {
-          return 0;
-        },
-        bls12_381_pairing: (inputPtr: number, inputLen: number, outputPtr: number, outputLenPtr: number) => {
-          return 0;
-        },
-        bls12_381_map_fp_to_g1: (inputPtr: number, inputLen: number, outputPtr: number, outputLenPtr: number) => {
-          return 0;
-        },
-        bls12_381_map_fp2_to_g2: (inputPtr: number, inputLen: number, outputPtr: number, outputLenPtr: number) => {
-          return 0;
-        },
+        // EVM precompile functions (organized in separate modules)
+        ...precompiles,
       },
       wasi_snapshot_preview1: {
         // Provide minimal WASI imports if needed
