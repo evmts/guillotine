@@ -25,7 +25,7 @@ pub fn Handlers(comptime FrameType: type) type {
                     // EIP-214: WriteProtection is handled by host interface for static calls
 
                     // LOG0 requires 2 items, LOG1 requires 3, LOG2 requires 4, LOG3 requires 5, LOG4 requires 6
-                    std.debug.assert(self.stack.size() >= 2 + topic_count);
+                    if (self.stack.size() < 2 + topic_count) return Error.StackUnderflow;
 
                     // Pop offset and length first (they're on top of stack)
                     const offset = self.stack.pop_unsafe();

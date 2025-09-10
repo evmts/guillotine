@@ -19,7 +19,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const dispatch = Dispatch{ .cursor = cursor };
             // SLOAD loads a value from storage
 
-            std.debug.assert(self.stack.size() >= 1); // SLOAD requires 1 stack item
+            if (self.stack.size() < 1) return Error.StackUnderflow; // SLOAD requires 1 stack item
             const slot = self.stack.pop_unsafe();
 
             // Use the currently executing contract's address
@@ -42,7 +42,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const value = self.database.get_storage(contract_addr.bytes, slot) catch |err| switch (err) {
                 else => return Error.AllocationError,
             };
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
+            if (self.stack.size() >= @TypeOf(self.stack).stack_capacity) return Error.StackOverflow; // Ensure space for push
             self.stack.push_unsafe(value);
 
             const op_data = dispatch.getOpData(.SLOAD);
@@ -64,7 +64,7 @@ pub fn Handlers(comptime FrameType: type) type {
             // - First push 0x42 (goes to stack position 0)
             // - Then push 0x00 (goes to stack position 1, becoming the top)
             // - SSTORE pops key first (0x00), then value (0x42)
-            std.debug.assert(self.stack.size() >= 2); // SSTORE requires 2 stack items
+            if (self.stack.size() < 2) return Error.StackUnderflow; // SSTORE requires 2 stack items
             const slot = self.stack.pop_unsafe(); // Pop key/slot first (top of stack)
             const value = self.stack.pop_unsafe(); // Pop value second
 
@@ -129,7 +129,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// Loads value from transient storage slot and pushes it onto the stack.
         pub fn tload(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const dispatch = Dispatch{ .cursor = cursor };
-            std.debug.assert(self.stack.size() >= 1); // TLOAD requires 1 stack item
+            if (self.stack.size() < 1) return Error.StackUnderflow; // TLOAD requires 1 stack item
             const slot = self.stack.pop_unsafe();
 
             // Use the currently executing contract's address
@@ -140,7 +140,7 @@ pub fn Handlers(comptime FrameType: type) type {
                 else => return Error.AllocationError,
             };
 
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
+            if (self.stack.size() >= @TypeOf(self.stack).stack_capacity) return Error.StackOverflow; // Ensure space for push
             self.stack.push_unsafe(value);
 
             const op_data = dispatch.getOpData(.TLOAD);
@@ -156,7 +156,7 @@ pub fn Handlers(comptime FrameType: type) type {
             // EIP-214: WriteProtection is handled by host interface for static calls
 
             // TSTORE expects stack: [..., key, value] where key is at top
-            std.debug.assert(self.stack.size() >= 2); // TSTORE requires 2 stack items
+            if (self.stack.size() < 2) return Error.StackUnderflow; // TSTORE requires 2 stack items
             const slot = self.stack.pop_unsafe(); // Pop key/slot first (top of stack)
             const value = self.stack.pop_unsafe(); // Pop value second
 

@@ -186,6 +186,28 @@ pub fn build(b: *std.Build) void {
     root_tests.linkLibC();
     const run_root_tests = b.addRunArtifact(root_tests);
 
+    // Debug assertion issue test
+    const debug_assertion_tests = b.addTest(.{
+        .name = "debug-assertion-tests",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("test/debug_assertion_issue_test.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    debug_assertion_tests.root_module.addImport("evm", modules.evm_mod);
+    debug_assertion_tests.root_module.addImport("primitives", modules.primitives_mod);
+    debug_assertion_tests.root_module.addImport("root", modules.lib_mod);
+    debug_assertion_tests.linkLibrary(c_kzg_lib);
+    debug_assertion_tests.linkLibrary(blst_lib);
+    if (bn254_lib) |bn254| debug_assertion_tests.linkLibrary(bn254);
+    if (revm_lib) |revm| {
+        debug_assertion_tests.linkLibrary(revm);
+        debug_assertion_tests.addIncludePath(b.path("lib/revm"));
+    }
+    debug_assertion_tests.linkLibC();
+    const run_debug_assertion_tests = b.addRunArtifact(debug_assertion_tests);
+
     // Compiler tests
     const compiler_tests = b.addTest(.{
         .name = "compiler-tests",
@@ -210,10 +232,15 @@ pub fn build(b: *std.Build) void {
         compiler_test_step.dependOn(&run_compiler_tests.step);
     }
 
+    // Add a dedicated debug assertion test step
+    const debug_assertion_test_step = b.step("test-debug-assertions", "Run debug assertion issue tests");
+    debug_assertion_test_step.dependOn(&run_debug_assertion_tests.step);
+
     const test_step = b.step("test", "Run all tests");
     test_step.dependOn(&run_lib_unit_tests.step);
     test_step.dependOn(&run_integration_tests.step);
     test_step.dependOn(&run_root_tests.step);
+    test_step.dependOn(&run_debug_assertion_tests.step);
     if (foundry_lib != null) {
         test_step.dependOn(&run_compiler_tests.step);
     }

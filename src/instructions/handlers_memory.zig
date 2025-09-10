@@ -32,7 +32,7 @@ pub fn Handlers(comptime FrameType: type) type {
         pub fn mload(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const dispatch = Dispatch{ .cursor = cursor };
             // MLOAD loads a 32-byte word from memory
-            std.debug.assert(self.stack.size() >= 1); // MLOAD requires 1 stack item
+            if (self.stack.size() < 1) return Error.StackUnderflow; // MLOAD requires 1 stack item
             const offset = self.stack.pop_unsafe();
 
             // Check if offset fits in usize
@@ -65,7 +65,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
             // Convert to WordType (truncate if necessary for smaller word types)
             const value = @as(WordType, @truncate(value_u256));
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
+            if (self.stack.size() >= @TypeOf(self.stack).stack_capacity) return Error.StackOverflow; // Ensure space for push
             self.stack.push_unsafe(value);
 
             const op_data = dispatch.getOpData(.MLOAD);
@@ -91,7 +91,7 @@ pub fn Handlers(comptime FrameType: type) type {
             //     log.err("  [{}] = {x}", .{i, val});
             // }
 
-            std.debug.assert(self.stack.size() >= 2); // MSTORE requires 2 stack items
+            if (self.stack.size() < 2) return Error.StackUnderflow; // MSTORE requires 2 stack items
             const offset = self.stack.pop_unsafe();
             const value = self.stack.pop_unsafe();
             log.debug("MSTORE: offset={x}, value={x}", .{ offset, value });
@@ -147,7 +147,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// Pops memory offset and value from stack, stores the least significant byte at that offset.
         pub fn mstore8(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const dispatch = Dispatch{ .cursor = cursor };
-            std.debug.assert(self.stack.size() >= 2); // MSTORE8 requires 2 stack items
+            if (self.stack.size() < 2) return Error.StackUnderflow; // MSTORE8 requires 2 stack items
             const offset = self.stack.pop_unsafe();
             const value = self.stack.pop_unsafe();
 
@@ -190,7 +190,7 @@ pub fn Handlers(comptime FrameType: type) type {
         pub fn msize(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const dispatch = Dispatch{ .cursor = cursor };
             const size = self.memory.size();
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
+            if (self.stack.size() >= @TypeOf(self.stack).stack_capacity) return Error.StackOverflow; // Ensure space for push
             self.stack.push_unsafe(@as(WordType, @intCast(size)));
 
             const op_data = dispatch.getOpData(.MSIZE);
@@ -202,7 +202,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// Copies memory from one location to another.
         pub fn mcopy(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const dispatch = Dispatch{ .cursor = cursor };
-            std.debug.assert(self.stack.size() >= 3); // MCOPY requires 3 stack items
+            if (self.stack.size() < 3) return Error.StackUnderflow; // MCOPY requires 3 stack items
             const size = self.stack.pop_unsafe(); // Top of stack
             const src_offset = self.stack.pop_unsafe(); // Second from top
             const dest_offset = self.stack.pop_unsafe(); // Third from top

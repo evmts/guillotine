@@ -13,7 +13,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// POP opcode (0x50) - Remove item from stack.
         pub fn pop(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const dispatch = Dispatch{ .cursor = cursor };
-            std.debug.assert(self.stack.size() >= 1); // POP requires 1 stack item
+            if (self.stack.size() < 1) return Error.StackUnderflow; // POP requires 1 stack item
             _ = self.stack.pop_unsafe();
             const op_data = dispatch.getOpData(.POP);
             return @call(FrameType.getTailCallModifier(), op_data.next.cursor[0].opcode_handler, .{ self, op_data.next.cursor });
@@ -22,7 +22,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// PUSH0 opcode (0x5f) - Push 0 onto stack.
         pub fn push0(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const dispatch = Dispatch{ .cursor = cursor };
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
+            if (self.stack.size() >= @TypeOf(self.stack).stack_capacity) return Error.StackOverflow; // Ensure space for push
             self.stack.push_unsafe(0);
             const op_data = dispatch.getOpData(.PUSH0);
             return @call(FrameType.getTailCallModifier(), op_data.next.cursor[0].opcode_handler, .{ self, op_data.next.cursor });
@@ -86,12 +86,12 @@ pub fn Handlers(comptime FrameType: type) type {
                         @branchHint(.likely);
                         const value = op_data.metadata.value;
                         // log.debug("[PUSH{d}] Pushing inline value: {d}", .{ push_n, value });
-                        std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
+                        if (self.stack.size() >= @TypeOf(self.stack).stack_capacity) return Error.StackOverflow; // Ensure space for push
                         self.stack.push_unsafe(value);
                     } else {
                         const value = op_data.metadata.value.*;
                         // log.debug("[PUSH{d}] Pushing pointer value: {d}", .{ push_n, value });
-                        std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
+                        if (self.stack.size() >= @TypeOf(self.stack).stack_capacity) return Error.StackOverflow; // Ensure space for push
                         self.stack.push_unsafe(value);
                     }
                     
@@ -108,8 +108,8 @@ pub fn Handlers(comptime FrameType: type) type {
             return &struct {
                 pub fn dupHandler(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
                     const dispatch = Dispatch{ .cursor = cursor };
-                    std.debug.assert(self.stack.size() >= dup_n); // DUP{d} requires {d} stack items
-                    std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
+                    if (self.stack.size() < dup_n) return Error.StackUnderflow; // DUP{d} requires {d} stack items
+                    if (self.stack.size() >= @TypeOf(self.stack).stack_capacity) return Error.StackOverflow; // Ensure space for push
                     self.stack.dup_n_unsafe(dup_n);
                     // DUP operations don't have metadata, just get next
                     const op_data = switch (dup_n) {
@@ -142,7 +142,7 @@ pub fn Handlers(comptime FrameType: type) type {
             return &struct {
                 pub fn swapHandler(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
                     const dispatch = Dispatch{ .cursor = cursor };
-                    std.debug.assert(self.stack.size() >= swap_n + 1); // SWAP{d} requires {d}+1 stack items
+                    if (self.stack.size() < swap_n + 1) return Error.StackUnderflow; // SWAP{d} requires {d}+1 stack items
                     self.stack.swap_n_unsafe(swap_n);
                     // SWAP operations don't have metadata, just get next
                     const op_data = switch (swap_n) {

@@ -15,7 +15,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// Pops destination from stack and transfers control to that location.
         /// The destination must be a valid JUMPDEST.
         pub fn jump(self: *FrameType, _: [*]const Dispatch.Item) Error!noreturn {
-            std.debug.assert(self.stack.size() >= 1); // JUMP requires 1 stack item
+            if (self.stack.size() < 1) return Error.StackUnderflow; // JUMP requires 1 stack item
             // Get jump table from frame
             const jump_table = self.jump_table;
 
@@ -50,7 +50,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// Pops destination and condition from stack.
         /// Jumps to destination if condition is non-zero, otherwise continues to next instruction.
         pub fn jumpi(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            std.debug.assert(self.stack.size() >= 2); // JUMPI requires 2 stack items
+            if (self.stack.size() < 2) return Error.StackUnderflow; // JUMPI requires 2 stack items
             // Get jump table from frame
             const jump_table = self.jump_table;
 
@@ -113,7 +113,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// Pushes the current program counter onto the stack.
         /// The actual PC value is provided by the planner through metadata.
         pub fn pc(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
+            if (self.stack.size() >= @TypeOf(self.stack).stack_capacity) return Error.StackOverflow; // Ensure space for push
             // Jump table not needed for PC
             const dispatch = Dispatch{ .cursor = cursor };
             // Get PC value from metadata

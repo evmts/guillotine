@@ -1178,7 +1178,8 @@ pub fn Evm(comptime config: EvmConfig) type {
                     else => {
                         // Actual errors
                         log.debug("Frame execution failed with error: {}", .{err});
-                        return CallResult.failure(0);
+                        const error_name = @errorName(err);
+                        return CallResult.failure_with_error(0, error_name);
                     },
                 };
             }
