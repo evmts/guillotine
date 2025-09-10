@@ -349,45 +349,20 @@ pub fn Dispatch(comptime FrameType: type) type {
             value: FrameType.WordType,
             fusion_type: FusionType,
         ) !void {
-            // Import gas constants for static calculation
-            const GasConstants = @import("primitives").GasConstants;
-            
-            // Calculate static gas cost since we know the offset at compile time
-            var static_gas_cost: u64 = GasConstants.GasFastestStep;
-            
-            // For memory operations with known offsets, we can calculate expansion cost statically
-            if (value <= std.math.maxInt(usize)) {
-                const offset_usize = @as(usize, @intCast(value));
-                const size_needed = switch (fusion_type) {
-                    .push_mload, .push_mstore => offset_usize + 32,
-                    .push_mstore8 => offset_usize + 1,
-                    else => unreachable,
-                };
-                
-                // Calculate memory expansion cost statically
-                // Memory cost = 3 * words + words^2 / 512
-                const new_words = (size_needed + 31) / 32;
-                const memory_cost = 3 * new_words + (new_words * new_words) / 512;
-                static_gas_cost += memory_cost;
-            }
-            
-            // Get synthetic handler with pre-calculated gas
+            // Get synthetic handler for memory operation
+            // Memory expansion gas cost is calculated dynamically at runtime
+            // because it depends on the current memory size
             const synthetic_opcode = getSyntheticOpcode(fusion_type, value <= std.math.maxInt(u64));
             const frame_handlers = @import("../frame/frame_handlers.zig");
             const synthetic_handler = frame_handlers.getSyntheticHandler(FrameType, synthetic_opcode);
             
-            // Add handler with metadata that includes static gas cost
+            // Add handler
             try schedule_items.append(allocator, .{ .opcode_handler = synthetic_handler });
             
             // Add the value metadata (inline or pointer)
             if (value <= std.math.maxInt(u64)) {
                 const inline_val: u64 = @intCast(value);
-                // Include gas cost in metadata
-                try schedule_items.append(allocator, .{ .push_inline = .{ 
-                    .value = inline_val,
-                    // Store gas cost for use in jumpdest validation
-                    // This will be added to jumpdest gas during preprocessing
-                } });
+                try schedule_items.append(allocator, .{ .push_inline = .{ .value = inline_val } });
             } else {
                 const value_ptr = try allocator.create(FrameType.WordType);
                 value_ptr.* = value;
