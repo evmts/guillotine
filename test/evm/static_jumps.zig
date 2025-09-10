@@ -38,11 +38,11 @@ test "static jump resolution works with forward jumps" {
     const handlers = frame_handlers.getOpcodeHandlers(TestFrame);
     
     // Initialize dispatch - this should detect the PUSH+JUMP fusion and resolve the forward jump
-    const dispatch_items = try TestDispatch.init(allocator, bytecode, &handlers);
+    const dispatch_items = try TestDispatch.init(allocator, &bytecode, &handlers);
     defer allocator.free(dispatch_items);
     
     // Create jump table
-    const jump_table = try TestDispatch.createJumpTable(allocator, dispatch_items, bytecode);
+    const jump_table = try TestDispatch.createJumpTable(allocator, dispatch_items, &bytecode);
     defer allocator.free(jump_table.entries);
     
     // Verify that the jump table has the JUMPDEST at PC 5
@@ -105,10 +105,10 @@ test "static jumpi resolution for conditional forward jumps" {
     defer bytecode.deinit();
     
     const handlers = frame_handlers.getOpcodeHandlers(TestFrame);
-    const dispatch_items = try TestDispatch.init(allocator, bytecode, &handlers);
+    const dispatch_items = try TestDispatch.init(allocator, &bytecode, &handlers);
     defer allocator.free(dispatch_items);
     
-    const jump_table = try TestDispatch.createJumpTable(allocator, dispatch_items, bytecode);
+    const jump_table = try TestDispatch.createJumpTable(allocator, dispatch_items, &bytecode);
     defer allocator.free(jump_table.entries);
     
     // Verify JUMPDEST exists at PC 5
@@ -172,10 +172,10 @@ test "multiple forward jumps are all resolved" {
     defer bytecode.deinit();
     
     const handlers = frame_handlers.getOpcodeHandlers(TestFrame);
-    const dispatch_items = try TestDispatch.init(allocator, bytecode, &handlers);
+    const dispatch_items = try TestDispatch.init(allocator, &bytecode, &handlers);
     defer allocator.free(dispatch_items);
     
-    const jump_table = try TestDispatch.createJumpTable(allocator, dispatch_items, bytecode);
+    const jump_table = try TestDispatch.createJumpTable(allocator, dispatch_items, &bytecode);
     defer allocator.free(jump_table.entries);
     
     // Both jump destinations should exist

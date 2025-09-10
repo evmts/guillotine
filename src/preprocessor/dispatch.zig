@@ -3,6 +3,7 @@ const opcode_mod = @import("../opcodes/opcode.zig");
 const Opcode = @import("../opcodes/opcode_data.zig").Opcode;
 const OpcodeSynthetic = @import("../opcodes/opcode_synthetic.zig").OpcodeSynthetic;
 const bytecode_mod = @import("../bytecode/bytecode.zig");
+const bytecode_single_pass = @import("../bytecode/bytecode_single_pass.zig");
 const ArrayList = std.ArrayListAligned;
 const dispatch_metadata = @import("dispatch_metadata.zig");
 const dispatch_item = @import("dispatch_item.zig");
@@ -156,6 +157,36 @@ pub fn Dispatch(comptime FrameType: type) type {
         };
 
         pub fn init(
+            allocator: std.mem.Allocator,
+            bytecode: anytype,
+            opcode_handlers: *const [256]OpcodeHandler,
+        ) ![]Self.Item {
+            // Use optimized single-pass analysis if available
+            const raw_bytecode = bytecode.raw();
+            
+            // Perform single-pass analysis
+            const result = try bytecode_single_pass.analyzeAndPreprocess(FrameType, allocator, raw_bytecode, opcode_handlers);
+            
+            // Store the jump table for later retrieval
+            // We need to store it directly as JumpTable, not a pointer to it
+            // The jump table entries are already allocated and owned by the caller
+            if (@hasField(@TypeOf(bytecode.*), "single_pass_jump_table")) {
+                const jump_table_ptr = try allocator.create(JumpTable);
+                jump_table_ptr.* = result.jump_table;
+                bytecode.single_pass_jump_table = @ptrCast(jump_table_ptr);
+            }
+            
+            // Store packed bitmap back to bytecode for compatibility
+            if (@hasField(@TypeOf(bytecode.*), "packed_bitmap")) {
+                bytecode.packed_bitmap = result.packed_bitmap;
+            }
+            
+            // Return the dispatch schedule
+            return result.dispatch_schedule;
+        }
+        
+        // Legacy init function (kept for compatibility but not used)
+        pub fn init_legacy(
             allocator: std.mem.Allocator,
             bytecode: anytype,
             opcode_handlers: *const [256]OpcodeHandler,
@@ -517,8 +548,16 @@ pub fn Dispatch(comptime FrameType: type) type {
             schedule: []const Item,
             bytecode: anytype,
         ) !JumpTable {
-            // First, we need to build the jumpdest map by iterating bytecode
-            // This is still needed for the public API, but init() now does this in one pass
+            // Check if we already have a jump table from single-pass analysis
+            if (@hasField(@TypeOf(bytecode.*), "single_pass_jump_table")) {
+                if (bytecode.single_pass_jump_table) |jt_ptr| {
+                    // Cast back from anyopaque to the correct jump table type
+                    const jump_table_ptr: *JumpTable = @ptrCast(@alignCast(jt_ptr));
+                    return jump_table_ptr.*;
+                }
+            }
+            
+            // Fall back to building jump table the old way
             var jumpdest_map = std.AutoHashMap(FrameType.PcType, usize).init(allocator);
             defer jumpdest_map.deinit();
             

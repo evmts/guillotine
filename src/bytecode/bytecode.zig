@@ -75,7 +75,7 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
         const Self = @This();
 
         // Packed 4-bit data per bytecode byte
-        const PackedBits = packed struct(u4) {
+        pub const PackedBits = packed struct(u4) {
             is_push_data: bool, // This byte is PUSH operand data
             is_op_start: bool, // This byte starts an instruction
             is_jumpdest: bool, // This byte is a valid JUMPDEST
@@ -233,6 +233,8 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
         allocator: std.mem.Allocator,
         // Packed bitmap (4 bits per byte position) for efficient storage
         packed_bitmap: []PackedBits,
+        // Jump table from single-pass analysis (optional, for optimization)  
+        single_pass_jump_table: ?*anyopaque = null,
 
         pub fn init(allocator: std.mem.Allocator, code: []const u8) ValidationError!Self {
             // Enforce EIP-170: maximum runtime bytecode size
@@ -280,6 +282,7 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
                 .runtime_code = runtime_code,
                 .allocator = allocator,
                 .packed_bitmap = &.{},
+                .single_pass_jump_table = null,
             };
             // Build bitmaps and validate only the runtime code
             try self.buildBitmapsAndValidateWithLength(runtime_code.len);
@@ -296,6 +299,25 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
 
         pub fn deinit(self: *Self) void {
             self.allocator.free(self.packed_bitmap);
+            
+            // Clean up single-pass jump table if it exists
+            if (self.single_pass_jump_table) |jt_ptr| {
+                const JumpTableType = @import("../preprocessor/dispatch.zig").Dispatch(struct {
+                    pub const PcType = Self.PcType;
+                    pub const WordType = Self.WordType;
+                    pub const Error = error{OutOfGas};
+                }).JumpTable;
+                const jump_table: *JumpTableType = @ptrCast(@alignCast(jt_ptr));
+                
+                // Free the entries array if it's not empty
+                if (jump_table.entries.len > 0) {
+                    self.allocator.free(jump_table.entries);
+                }
+                
+                // Free the jump table struct itself
+                self.allocator.destroy(jump_table);
+            }
+            
             self.* = undefined;
         }
 
@@ -673,10 +695,6 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
             // Track state for immediate jump validation
             var last_push_value: ?u256 = null;
             var last_push_end: PcType = 0;
-
-            // Collect immediate jumps to validate after first pass
-            var immediate_jumps = std.ArrayList(PcType){};
-            defer immediate_jumps.deinit(self.allocator);
 
             var i: PcType = 0;
             while (i < validate_up_to) {
