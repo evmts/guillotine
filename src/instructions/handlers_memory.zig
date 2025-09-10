@@ -12,6 +12,20 @@ pub fn Handlers(comptime FrameType: type) type {
         pub const Error = FrameType.Error;
         pub const Dispatch = FrameType.Dispatch;
         pub const WordType = FrameType.WordType;
+        
+        /// Maximum memory size (24-bit limit)
+        const MEMORY_LIMIT: usize = 0xFFFFFF;
+        
+        /// Check if an offset plus size would exceed memory limit
+        inline fn checkMemoryBounds(offset: usize, size: usize) bool {
+            const end = offset + size;
+            return end <= MEMORY_LIMIT;
+        }
+        
+        /// Check if a value fits within memory limit
+        inline fn checkMemoryLimit(value: anytype) bool {
+            return value <= MEMORY_LIMIT;
+        }
 
         /// MLOAD opcode (0x51) - Load word from memory.
         /// Pops memory offset from stack and pushes the 32-byte word at that offset.
@@ -29,10 +43,10 @@ pub fn Handlers(comptime FrameType: type) type {
 
             // Calculate gas cost for memory expansion
             // Check if offset + 32 would overflow u24
-            const end_offset = offset_usize + 32;
-            if (end_offset > 0xFFFFFF) {
+            if (!checkMemoryBounds(offset_usize, 32)) {
                 return Error.OutOfBounds;
             }
+            const end_offset = offset_usize + 32;
             const memory_expansion_cost = self.memory.get_expansion_cost(@as(u24, @intCast(end_offset)));
             // Only check and consume dynamic gas (memory expansion), static gas is handled by JUMPDEST
             // Use negative gas pattern for single-branch out-of-gas detection
@@ -90,10 +104,10 @@ pub fn Handlers(comptime FrameType: type) type {
 
             // Calculate gas cost for memory expansion
             // Check if offset + 32 would overflow u24
-            const end_offset = offset_usize + 32;
-            if (end_offset > 0xFFFFFF) {
+            if (!checkMemoryBounds(offset_usize, 32)) {
                 return Error.OutOfBounds;
             }
+            const end_offset = offset_usize + 32;
             const memory_expansion_cost = self.memory.get_expansion_cost(@as(u24, @intCast(end_offset)));
             // Only check and consume dynamic gas (memory expansion), static gas is handled by JUMPDEST
             // Use negative gas pattern for single-branch out-of-gas detection
@@ -145,10 +159,10 @@ pub fn Handlers(comptime FrameType: type) type {
 
             // Calculate gas cost for memory expansion
             // Check if offset + 1 would overflow u24
-            const end_offset = offset_usize + 1;
-            if (end_offset > 0xFFFFFF) {
+            if (!checkMemoryBounds(offset_usize, 1)) {
                 return Error.OutOfBounds;
             }
+            const end_offset = offset_usize + 1;
             const memory_expansion_cost = self.memory.get_expansion_cost(@as(u24, @intCast(end_offset)));
             // Only check and consume dynamic gas (memory expansion), static gas is handled by JUMPDEST
             // Use negative gas pattern for single-branch out-of-gas detection
@@ -194,7 +208,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const dest_offset = self.stack.pop_unsafe(); // Third from top
 
             // Check if offsets and size fit in u24 (memory limit)
-            if (dest_offset > 0xFFFFFF or src_offset > 0xFFFFFF or size > 0xFFFFFF) {
+            if (!checkMemoryLimit(dest_offset) or !checkMemoryLimit(src_offset) or !checkMemoryLimit(size)) {
                 return Error.OutOfBounds;
             }
 
@@ -210,13 +224,13 @@ pub fn Handlers(comptime FrameType: type) type {
             }
 
             // Calculate dynamic gas cost (static gas handled by JUMPDEST)
-            const words = (size_u24 + 31) / 32;
+            const words = (size_u24 + 31) >> 5;
             const copy_gas_cost = words * GasConstants.CopyGas; // Only dynamic copy cost
 
             // Calculate memory expansion cost for both source and destination
             const src_end = src_u24 + size_u24;
             const dest_end = dest_u24 + size_u24;
-            if (src_end > 0xFFFFFF or dest_end > 0xFFFFFF) {
+            if (!checkMemoryLimit(src_end) or !checkMemoryLimit(dest_end)) {
                 return Error.OutOfBounds;
             }
             const src_expansion_cost = self.memory.get_expansion_cost(src_end);

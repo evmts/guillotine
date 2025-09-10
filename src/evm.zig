@@ -148,16 +148,16 @@ pub fn Evm(comptime config: EvmConfig) type {
         eips: eips.Eips.EvmConfig,
         /// Disable gas checking (for testing/debugging)
         disable_gas_checking: bool,
-
-        // CACHE LINE 4+ - COLD PATH (less frequently accessed)
-        /// Logs emitted during the current call
-        logs: std.ArrayList(@import("frame/call_result.zig").Log),
-        /// Call stack - tracks caller and value for each call depth
-        call_stack: [config.max_call_depth]CallStackEntry,
-        /// Growing arena allocator for per-call temporary allocations with 50% growth strategy
-        call_arena: GrowingArenaAllocator,
         /// Small reusable buffer for fixed-size outputs (e.g., 32-byte address)
         small_output_buf: [64]u8 = undefined,
+
+        // CACHE LINE 4+ - COLD PATH (less frequently accessed)
+        /// Growing arena allocator for per-call temporary allocations with 50% growth strategy
+        call_arena: GrowingArenaAllocator,
+        /// Logs emitted during the current call (only accessed for LOG opcodes)
+        logs: std.ArrayList(@import("frame/call_result.zig").Log),
+        /// Call stack - tracks caller and value for each call depth (accessed on depth changes)
+        call_stack: [config.max_call_depth]CallStackEntry,
 
         /// Initialize a new EVM instance.
         ///
@@ -344,10 +344,10 @@ pub fn Evm(comptime config: EvmConfig) type {
                 // Get the target address from params
                 const target_address = switch (params) {
                     .call => |p| p.to,
-                    .callcode => |p| p.to,
+                    .create, .create2 => primitives.Address.ZERO_ADDRESS, // Creates don't have a target
                     .delegatecall => |p| p.to,
                     .staticcall => |p| p.to,
-                    .create, .create2 => primitives.Address.ZERO_ADDRESS, // Creates don't have a target
+                    .callcode => |p| p.to,
                 };
 
                 // Pre-warm: tx.origin, target, and coinbase (EIP-3651 for Shanghai+)
@@ -410,11 +410,11 @@ pub fn Evm(comptime config: EvmConfig) type {
                         return CallResult.failure(0);
                     };
                 },
-                .callcode => |p| self.executeCallcode(.{ .caller = p.caller, .to = p.to, .value = p.value, .input = p.input, .gas = execution_gas }) catch CallResult.failure(0),
+                .create => |p| self.executeCreate(.{ .caller = p.caller, .value = p.value, .init_code = p.init_code, .gas = execution_gas }) catch CallResult.failure(0),
                 .delegatecall => |p| self.executeDelegatecall(.{ .caller = p.caller, .to = p.to, .input = p.input, .gas = execution_gas }) catch CallResult.failure(0),
                 .staticcall => |p| self.executeStaticcall(.{ .caller = p.caller, .to = p.to, .input = p.input, .gas = execution_gas }) catch CallResult.failure(0),
-                .create => |p| self.executeCreate(.{ .caller = p.caller, .value = p.value, .init_code = p.init_code, .gas = execution_gas }) catch CallResult.failure(0),
                 .create2 => |p| self.executeCreate2(.{ .caller = p.caller, .value = p.value, .init_code = p.init_code, .salt = p.salt, .gas = execution_gas }) catch CallResult.failure(0),
+                .callcode => |p| self.executeCallcode(.{ .caller = p.caller, .to = p.to, .value = p.value, .input = p.input, .gas = execution_gas }) catch CallResult.failure(0),
             };
 
             // Apply EIP-3529 gas refund cap if transaction succeeded

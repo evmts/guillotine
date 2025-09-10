@@ -76,15 +76,12 @@ pub fn Handlers(comptime FrameType: type) type {
                 else => return Error.AllocationError,
             };
 
-            // Check if storage slot is cold before accessing it
+            // Access storage slot once to both warm it and get cost
             const evm = self.getEvm();
-            const is_cold = !evm.access_list.is_storage_slot_warm(contract_addr, slot);
-
-            // Access storage slot to mark it as warm for future accesses
-            // Note: We ignore the returned gas cost since it's already included in sstore_gas_cost
-            _ = evm.access_storage_slot(contract_addr, slot) catch |err| switch (err) {
+            const access_cost = evm.access_storage_slot(contract_addr, slot) catch |err| switch (err) {
                 else => return Error.AllocationError,
             };
+            const is_cold = access_cost == GasConstants.ColdSloadCost;
 
             // Determine original value at start of transaction (for EIP-2200 logic)
             const original_opt = evm.get_original_storage(contract_addr, slot);
