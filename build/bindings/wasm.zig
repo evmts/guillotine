@@ -14,6 +14,7 @@ pub fn createWasmSteps(
     const wasm_crypto_mod = wasm.createWasmModule(b, "src/crypto/root.zig", wasm_target, wasm_optimize);
     // crypto - primitives dependency is circular as in main build
     wasm_crypto_mod.addImport("primitives", wasm_primitives_mod);
+    wasm_crypto_mod.addImport("build_options", build_options_mod);
     wasm_primitives_mod.addImport("crypto", wasm_crypto_mod);
 
     // Build the EVM library module (needed by C API)
