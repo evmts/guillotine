@@ -3,6 +3,7 @@
  */
 export type GuillotineErrorType =
   | 'InitializationFailed'
+  | 'CleanupFailed'
   | 'WasmLoadFailed'
   | 'WasmNotLoaded'
   | 'VMCreationFailed'
@@ -42,6 +43,13 @@ export class GuillotineError extends Error {
    */
   static initializationFailed(message: string, cause?: Error): GuillotineError {
     return new GuillotineError('InitializationFailed', message, cause);
+  }
+
+  /**
+   * Create a cleanup error
+   */
+  static cleanupFailed(message: string, cause?: Error): GuillotineError {
+    return new GuillotineError('CleanupFailed', message, cause);
   }
 
   /**

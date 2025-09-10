@@ -71,6 +71,13 @@ export class GuillotineEVM {
 
   /**
    * Create a new EVM instance
+   * 
+   * INSTANCE CREATION PATTERN:
+   * - Creates independent EVM instance with its own state via handle
+   * - Multiple instances can coexist on same thread (share WASM module)
+   * - Each instance has separate storage/balance/code state
+   * - Calls guillotine_evm_create() which allocates instance-specific memory
+   * - We only init the WASM module and allocate memory once
    */
   static async create(blockInfo?: BlockInfo, useTracing: boolean = false, wasmPath?: string): Promise<GuillotineEVM> {
     try {
@@ -84,31 +91,28 @@ export class GuillotineEVM {
       const wasm = loader.getWasm();
       const memory = loader.getMemory();
       
-      // Initialize FFI
-      wasm.guillotine_init();
-      
-      // Create block info structure
+      // Create block info structure  
+      // BlockInfoFFI struct: 6 u64s (48 bytes) + coinbase (20 bytes) + prev_randao (32 bytes) = 100 bytes
       const blockInfoPtr = memory.malloc(100); // Size of BlockInfoFFI struct
       const buffer = memory.getBuffer();
       const view = new DataView(buffer.buffer, blockInfoPtr);
       
-      // Set block info fields with defaults
+      // Write all u64 fields first (for proper alignment without padding)
       view.setBigUint64(0, blockInfo?.number || 0n, true); // number
       view.setBigUint64(8, blockInfo?.timestamp || BigInt(Math.floor(Date.now() / 1000)), true); // timestamp
       view.setBigUint64(16, blockInfo?.gasLimit || 30000000n, true); // gas_limit
+      view.setBigUint64(24, blockInfo?.baseFee || 0n, true); // base_fee
+      view.setBigUint64(32, blockInfo?.chainId || 1n, true); // chain_id
+      view.setBigUint64(40, blockInfo?.difficulty || 0n, true); // difficulty
       
-      // coinbase address (20 bytes)
+      // coinbase address (20 bytes) at offset 48
       const coinbase = blockInfo?.coinbase || Address.zero();
       const coinbaseBytes = coinbase.toBytes();
       for (let i = 0; i < 20; i++) {
-        view.setUint8(24 + i, coinbaseBytes[i] || 0);
+        view.setUint8(48 + i, coinbaseBytes[i] || 0);
       }
       
-      view.setBigUint64(44, blockInfo?.baseFee || 0n, true); // base_fee
-      view.setBigUint64(52, blockInfo?.chainId || 1n, true); // chain_id
-      view.setBigUint64(60, blockInfo?.difficulty || 0n, true); // difficulty
-      
-      // prev_randao (32 bytes)
+      // prev_randao (32 bytes) at offset 68
       const prevRandao = blockInfo?.prevRandao || Bytes.fromBytes(new Uint8Array(32));
       const prevRandaoBytes = prevRandao.toBytes();
       for (let i = 0; i < 32; i++) {
@@ -457,6 +461,12 @@ export class GuillotineEVM {
 
   /**
    * Close the EVM instance and clean up resources
+   * 
+   * INSTANCE CLEANUP PATTERN:
+   * - Frees THIS instance's resources via guillotine_evm_destroy()
+   * - Does NOT affect other EVM instances or global WASM module
+   * - Does NOT call guillotine_cleanup() (would break all instances)
+   * - Safe to create new instances after closing
    */
   close(): void {
     if (this.isInitialized && this.evmHandle !== 0) {
@@ -465,7 +475,6 @@ export class GuillotineEVM {
       } else {
         this.wasm.guillotine_evm_destroy(this.evmHandle);
       }
-      this.wasm.guillotine_cleanup();
       this.evmHandle = 0;
       this.isInitialized = false;
     }
@@ -563,8 +572,8 @@ export class GuillotineEVM {
     const traceJsonLen = view.getUint32(offset, true);
 
     // Parse output
-    const output = outputLen > 0
-      ? Bytes.fromBytes(new Uint8Array(buffer.buffer, outputPtr, outputLen))
+    const output = outputLen > 0 && outputPtr !== 0
+      ? Bytes.fromBytes(this.memory.readBytes(outputPtr, outputLen))
       : Bytes.empty();
 
     // Parse error message
@@ -577,7 +586,8 @@ export class GuillotineEVM {
     if (logsLen > 0 && logsPtr !== 0) {
       for (let i = 0; i < logsLen; i++) {
         const logPtr = logsPtr + i * 36; // Size of LogEntry struct (20 + 4 + 4 + 4 + 4)
-        const logView = new DataView(buffer.buffer, logPtr);
+        const logBuffer = this.memory.readBytes(logPtr, 36);
+        const logView = new DataView(logBuffer.buffer);
         
         // address: [20]u8
         const addressBytes = new Uint8Array(20);
@@ -597,13 +607,13 @@ export class GuillotineEVM {
         const topics: U256[] = [];
         if (topicsLen > 0 && topicsPtr !== 0) {
           for (let j = 0; j < topicsLen; j++) {
-            const topicBytes = new Uint8Array(buffer.buffer, topicsPtr + j * 32, 32);
+            const topicBytes = this.memory.readBytes(topicsPtr + j * 32, 32);
             topics.push(U256.fromBytes(topicBytes));
           }
         }
 
         const data = dataLen > 0 && dataPtr !== 0
-          ? Bytes.fromBytes(new Uint8Array(buffer.buffer, dataPtr, dataLen))
+          ? Bytes.fromBytes(this.memory.readBytes(dataPtr, dataLen))
           : Bytes.empty();
 
         logs.push({
@@ -619,8 +629,9 @@ export class GuillotineEVM {
     if (selfdestructsLen > 0 && selfdestructsPtr !== 0) {
       for (let i = 0; i < selfdestructsLen; i++) {
         const sdPtr = selfdestructsPtr + i * 40; // Size of SelfDestructRecord
-        const contractBytes = new Uint8Array(buffer.buffer, sdPtr, 20);
-        const beneficiaryBytes = new Uint8Array(buffer.buffer, sdPtr + 20, 20);
+        const sdBuffer = this.memory.readBytes(sdPtr, 40);
+        const contractBytes = new Uint8Array(sdBuffer.buffer, 0, 20);
+        const beneficiaryBytes = new Uint8Array(sdBuffer.buffer, 20, 20);
         
         selfdestructs.push({
           contract: Address.fromBytes(contractBytes),
@@ -634,7 +645,7 @@ export class GuillotineEVM {
     if (accessedAddressesLen > 0 && accessedAddressesPtr !== 0) {
       for (let i = 0; i < accessedAddressesLen; i++) {
         const addrPtr = accessedAddressesPtr + i * 20;
-        const addrBytes = new Uint8Array(buffer.buffer, addrPtr, 20);
+        const addrBytes = this.memory.readBytes(addrPtr, 20);
         accessedAddresses.push(Address.fromBytes(addrBytes));
       }
     }
@@ -644,8 +655,9 @@ export class GuillotineEVM {
     if (accessedStorageLen > 0 && accessedStoragePtr !== 0) {
       for (let i = 0; i < accessedStorageLen; i++) {
         const storagePtr = accessedStoragePtr + i * 52; // 20 + 32
-        const addressBytes = new Uint8Array(buffer.buffer, storagePtr, 20);
-        const slotBytes = new Uint8Array(buffer.buffer, storagePtr + 20, 32);
+        const storageBuffer = this.memory.readBytes(storagePtr, 52);
+        const addressBytes = new Uint8Array(storageBuffer.buffer, 0, 20);
+        const slotBytes = new Uint8Array(storageBuffer.buffer, 20, 32);
         
         accessedStorage.push({
           address: Address.fromBytes(addressBytes),
@@ -661,7 +673,7 @@ export class GuillotineEVM {
 
     // Parse trace JSON
     const traceJson = traceJsonLen > 0 && traceJsonPtr !== 0
-      ? new TextDecoder().decode(new Uint8Array(buffer.buffer, traceJsonPtr, traceJsonLen))
+      ? new TextDecoder().decode(this.memory.readBytes(traceJsonPtr, traceJsonLen))
       : null;
 
     return new ExecutionResult(

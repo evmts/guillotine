@@ -1,4 +1,5 @@
 // File system imports are loaded dynamically in Node.js environment
+import { GuillotineError } from '../errors';
 import { precompiles } from './precompiles';
 
 /**
@@ -243,6 +244,12 @@ export class WasmLoader {
 
   /**
    * Load the WASM module
+   * 
+   * INITIALIZATION PATTERN:
+   * - Called ONCE per application lifetime (singleton pattern)
+   * - Initializes global FFI allocator via guillotine_init()
+   * - Shared by ALL EVM instances on the same thread
+   * - Do NOT call per EVM instance - use GuillotineEVM.create() instead
    */
   async load(wasmPath?: string): Promise<void> {
     let wasmBinary: Uint8Array;
@@ -266,14 +273,15 @@ export class WasmLoader {
       
       let finalPath: string | undefined;
       for (const p of possiblePaths) {
-        if (fs.existsSync(p!)) {
+        if (!p) continue;
+        if (fs.existsSync(p)) {
           finalPath = p;
           break;
         }
       }
       
       if (!finalPath) {
-        throw new Error('Could not find guillotine.wasm file');
+        throw GuillotineError.wasmLoadFailed('Could not find guillotine.wasm file');
       }
       
       wasmBinary = new Uint8Array(fs.readFileSync(finalPath));
@@ -298,39 +306,46 @@ export class WasmLoader {
       },
     });
 
-    const exports = wasmModule.instance.exports as any;
+    const exports = wasmModule.instance.exports as unknown as GuillotineWasm;
     this.wasmModule = exports;
     this.exports = exports;
     
     // Debug: Log available exports
-    console.log('WASM exports:', Object.keys(exports));
-    console.log('WASM export types:', Object.entries(exports).map(([k, v]) => [k, typeof v]));
+    // console.log('WASM exports:', Object.keys(exports));
+    // console.log('WASM export types:', Object.entries(exports).map(([k, v]) => [k, typeof v]));
     
     this.memory = new WasmMemory(exports.memory || new WebAssembly.Memory({ initial: 256 }), exports);
     
     // Update memory views
     this.memoryViews = {
-      getUint8: () => new Uint8Array(this.wasmModule!.memory.buffer),
-      getUint32: () => new Uint32Array(this.wasmModule!.memory.buffer),
+      getUint8: () => {
+        if (!this.wasmModule) {
+          throw GuillotineError.wasmNotLoaded('WASM module not loaded. Call load() first.');
+        }
+        return new Uint8Array(this.wasmModule.memory.buffer);
+      },
+      getUint32: () => {
+        if (!this.wasmModule) {
+          throw GuillotineError.wasmNotLoaded('WASM module not loaded. Call load() first.');
+        }
+        return new Uint32Array(this.wasmModule.memory.buffer);
+      },
     };
 
     // Initialize the EVM
-    if (this.wasmModule && this.wasmModule.evm_init) {
-      const result = this.wasmModule.evm_init();
-      if (result !== 0) {
-        throw new Error('Failed to initialize Guillotine EVM');
-      }
+    if (this.wasmModule?.guillotine_init) {
+      this.wasmModule.guillotine_init();
     } else if (this.wasmModule) {
-      console.warn('evm_init function not found in WASM exports');
+      throw GuillotineError.initializationFailed('guillotine_init function not found in WASM exports');
     }
   }
 
   /**
    * Get the WASM module
    */
-  getWasm(): any {
+  getWasm(): GuillotineWasm {
     if (!this.wasmModule) {
-      throw new Error('WASM module not loaded. Call load() first.');
+      throw GuillotineError.wasmNotLoaded('WASM module not loaded. Call load() first.');
     }
     return this.wasmModule;
   }
@@ -340,7 +355,7 @@ export class WasmLoader {
    */
   getMemory(): WasmMemory {
     if (!this.memory) {
-      throw new Error('WASM module not loaded. Call load() first.');
+      throw GuillotineError.wasmNotLoaded('WASM module not loaded. Call load() first.');
     }
     return this.memory;
   }
@@ -357,7 +372,7 @@ export class WasmLoader {
    */
   allocateBytes(bytes: Uint8Array): number {
     if (!this.memory) {
-      throw new Error('WASM module not loaded');
+      throw GuillotineError.wasmNotLoaded('WASM module not loaded');
     }
     return this.memory.writeBytes(bytes);
   }
@@ -367,7 +382,7 @@ export class WasmLoader {
    */
   freeBytes(_ptr: number): void {
     if (!this.memory) {
-      throw new Error('WASM module not loaded');
+      throw GuillotineError.wasmNotLoaded('WASM module not loaded');
     }
     // In our case, we don't track size, so we'll just no-op for now
     // Real implementation would track allocations
@@ -378,7 +393,7 @@ export class WasmLoader {
    */
   readBytes(ptr: number, length: number): Uint8Array {
     if (!this.memory) {
-      throw new Error('WASM module not loaded');
+      throw GuillotineError.wasmNotLoaded('WASM module not loaded');
     }
     return this.memory.readBytes(ptr, length);
   }
@@ -388,7 +403,7 @@ export class WasmLoader {
    */
   writeBytes(ptr: number, bytes: Uint8Array): void {
     if (!this.memory) {
-      throw new Error('WASM module not loaded');
+      throw GuillotineError.wasmNotLoaded('WASM module not loaded');
     }
     const buffer = this.memory.getBuffer();
     buffer.set(bytes, ptr);
@@ -399,17 +414,26 @@ export class WasmLoader {
    */
   readString(ptr: number): string {
     if (!this.memory) {
-      throw new Error('WASM module not loaded');
+      throw GuillotineError.wasmNotLoaded('WASM module not loaded');
     }
     return this.memory.readString(ptr);
   }
 
   /**
    * Cleanup the WASM module
+   * 
+   * CLEANUP PATTERN:
+   * - Called ONCE when unloading entire WASM module (application shutdown)
+   * - Destroys global FFI allocator via guillotine_cleanup()
+   * - Will break ALL existing EVM instances
+   * - Do NOT call when closing individual EVMs - use evm.close() instead
+   * - Only call if you need to fully unload and reload the WASM module
    */
   cleanup(): void {
-    if (this.wasmModule && this.wasmModule.evm_deinit) {
-      this.wasmModule.evm_deinit();
+    if (this.wasmModule?.guillotine_cleanup) {
+      this.wasmModule.guillotine_cleanup();
+    } else {
+      throw GuillotineError.cleanupFailed('guillotine_cleanup function not found in WASM exports');
     }
     this.wasmModule = null;
     this.memory = null;
@@ -455,7 +479,7 @@ export function getWasmLoader(): WasmLoader {
 /**
  * Set the global WASM loader instance (for testing)
  */
-export function setWasmLoader(loader: WasmLoader | any): void {
+export function setWasmLoader(loader: WasmLoader): void {
   globalLoader = loader;
 }
 
