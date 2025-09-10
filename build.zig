@@ -714,6 +714,27 @@ pub fn build(b: *std.Build) void {
         codecopy_step.dependOn(&run_codecopy_test.step);
     }
 
+    // Log revert test
+    {
+        const log_revert_test = b.addTest(.{
+            .name = "log_revert_test",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("test/evm/log_revert_test.zig"),
+                .target = target,
+                .optimize = optimize,
+            }),
+        });
+        
+        log_revert_test.root_module.addImport("evm", modules.evm_mod);
+        log_revert_test.root_module.addImport("primitives", modules.primitives_mod);
+        log_revert_test.root_module.addImport("crypto", modules.crypto_mod);
+        log_revert_test.root_module.addImport("build_options", config.options_mod);
+        
+        const run_log_revert_test = b.addRunArtifact(log_revert_test);
+        const log_revert_step = b.step("test-log-revert", "Test log reversion on REVERT opcode");
+        log_revert_step.dependOn(&run_log_revert_test.step);
+    }
+
     // Official execution-spec state fixture smoke test
     {
         const official_state_test = b.addTest(.{

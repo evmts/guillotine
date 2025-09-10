@@ -69,6 +69,7 @@ pub fn Evm(comptime config: EvmConfig) type {
             caller: primitives.Address,
             value: config.WordType,
             is_static: bool, // EIP-214: Track static context per call level
+            log_count_at_snapshot: usize, // Track log count at snapshot creation for reverting
         };
 
         pub const Success = enum {
@@ -203,7 +204,7 @@ pub fn Evm(comptime config: EvmConfig) type {
 
             return Self{
                 .depth = 0,
-                .call_stack = [_]CallStackEntry{CallStackEntry{ .caller = primitives.Address.ZERO_ADDRESS, .value = 0, .is_static = false }} ** config.max_call_depth,
+                .call_stack = [_]CallStackEntry{CallStackEntry{ .caller = primitives.Address.ZERO_ADDRESS, .value = 0, .is_static = false, .log_count_at_snapshot = 0 }} ** config.max_call_depth,
                 .allocator = allocator,
                 .database = database,
                 .journal = Journal.init(allocator),
@@ -327,7 +328,7 @@ pub fn Evm(comptime config: EvmConfig) type {
 
                 // Reset call stack to initial state
                 // This is critical when reusing EVM instances across multiple transactions
-                self.call_stack = [_]CallStackEntry{CallStackEntry{ .caller = primitives.Address.ZERO_ADDRESS, .value = 0, .is_static = false }} ** config.max_call_depth;
+                self.call_stack = [_]CallStackEntry{CallStackEntry{ .caller = primitives.Address.ZERO_ADDRESS, .value = 0, .is_static = false, .log_count_at_snapshot = 0 }} ** config.max_call_depth;
 
                 // Reset snapshot ID
                 self.current_snapshot_id = 0;
@@ -1084,7 +1085,7 @@ pub fn Evm(comptime config: EvmConfig) type {
                 self.depth -= 1;
             };
 
-            self.call_stack[self.depth - 1] = CallStackEntry{ .caller = caller, .value = value, .is_static = is_static };
+            self.call_stack[self.depth - 1] = CallStackEntry{ .caller = caller, .value = value, .is_static = is_static, .log_count_at_snapshot = self.logs.items.len };
 
             // Base transaction gas cost (21,000 gas) - only charge for real transactions, not test calls
             // Test calls start at depth 0, real transactions have depth >= 1 with is_transaction flag
@@ -1413,6 +1414,13 @@ pub fn Evm(comptime config: EvmConfig) type {
                         log.err("Failed to revert journal entry: {any}", .{err});
                     };
                 }
+            }
+
+            // Revert logs to the count stored at snapshot creation
+            // For the current call depth, revert to the log count stored when the call started
+            if (self.depth > 0) {
+                const log_count_at_snapshot = self.call_stack[self.depth - 1].log_count_at_snapshot;
+                self.logs.shrinkRetainingCapacity(log_count_at_snapshot);
             }
 
             // Finally, truncate the journal entries to the snapshot boundary
@@ -6078,6 +6086,7 @@ test "Call context tracking - get_caller and get_call_value" {
         .caller = origin_addr,
         .value = 123,
         .is_static = false,
+        .log_count_at_snapshot = 0,
     };
 
     try std.testing.expectEqual(origin_addr, evm.get_caller());
@@ -6089,6 +6098,7 @@ test "Call context tracking - get_caller and get_call_value" {
         .caller = contract_a,
         .value = 456,
         .is_static = false,
+        .log_count_at_snapshot = 0,
     };
 
     try std.testing.expectEqual(contract_a, evm.get_caller());
