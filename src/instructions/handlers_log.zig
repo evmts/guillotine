@@ -31,10 +31,12 @@ pub fn Handlers(comptime FrameType: type) type {
                     const offset = self.stack.pop_unsafe();
                     const length = self.stack.pop_unsafe();
                     
-                    // Pop topics in order (topic1 is deepest, topicN is shallowest)
+                    // Pop topics in reverse order to account for LIFO stack
                     var topics: [4]WordType = [_]WordType{0} ** 4;
-                    for (0..topic_count) |j| {
-                        topics[j] = self.stack.pop_unsafe();
+                    var i = topic_count;
+                    while (i > 0) {
+                        i -= 1;
+                        topics[i] = self.stack.pop_unsafe();
                     }
 
                     // Check bounds
@@ -870,6 +872,40 @@ test "LOG opcodes - memory limit enforcement" {
     const result = TestFrame.LogHandlers.log0(frame, dispatch);
 
     try testing.expectError(TestFrame.Error.OutOfBounds, result);
+}
+
+test "LOG2 topic order issue - demonstrates reverse order bug" {
+    var mock_host = MockHost.init(testing.allocator);
+    defer mock_host.deinit();
+
+    const host = mock_host.to_host();
+    var frame = try createTestFrame(testing.allocator, host);
+    defer frame.deinit(testing.allocator);
+
+    // Per Ethereum spec, when we emit LOG2(data, topic0, topic1):
+    // - topic0 should be at index 0 in the resulting log
+    // - topic1 should be at index 1 in the resulting log
+    //
+    // Stack setup for LOG2: [offset, length, topic0, topic1] (top to bottom)
+    // So we push in this order to create that stack layout:
+    
+    try frame.stack.push(0);     // offset (bottom of stack)
+    try frame.stack.push(0);     // length
+    try frame.stack.push(0x10);  // topic0 (should end up as topics[0])
+    try frame.stack.push(0x11);  // topic1 (should end up as topics[1]) (top of stack)
+
+    const dispatch = createMockDispatch();
+    _ = try TestFrame.LogHandlers.log2(frame, dispatch);
+
+    try testing.expectEqual(@as(usize, 1), mock_host.logs.items.len);
+    const log_entry = mock_host.logs.items[0];
+    try testing.expectEqual(@as(usize, 2), log_entry.topics.len);
+    
+    // These assertions should now PASS with the fix for topic reversal:
+    // Fixed behavior: topics[0] gets 0x10 (correct), topics[1] gets 0x11 (correct)
+    // Expected behavior: topics[0] should get 0x10, topics[1] should get 0x11
+    try testing.expectEqual(@as(u256, 0x10), log_entry.topics[0]); // Should be topic0
+    try testing.expectEqual(@as(u256, 0x11), log_entry.topics[1]); // Should be topic1
 }
 
 test "LOG opcodes - WordType smaller than u256" {
