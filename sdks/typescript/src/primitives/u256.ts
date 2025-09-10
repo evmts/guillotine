@@ -143,14 +143,14 @@ export class U256 {
     if (this._value === 0n) {
       return '0x0';
     }
-    return '0x' + this._value.toString(16);
+    return `0x${this._value.toString(16)}`;
   }
 
   /**
    * Returns the value as a hex string with 0x prefix, padded to 64 characters
    */
   toHexPadded(): string {
-    return '0x' + this._value.toString(16).padStart(64, '0');
+    return `0x${this._value.toString(16).padStart(64, '0')}`;
   }
 
   /**

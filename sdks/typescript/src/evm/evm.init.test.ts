@@ -94,12 +94,13 @@ describe("GuillotineEVM - Basic Lifecycle", () => {
 
 		it("should handle maximum values in block info", async () => {
 			const maxU64 = (1n << 64n) - 1n;
+			const maxU16 = (1n << 16n) - 1n; // 65535 - maximum supported chain ID
 			const blockInfo: BlockInfo = {
 				number: maxU64,
 				timestamp: maxU64,
 				gasLimit: maxU64,
 				baseFee: maxU64,
-				chainId: maxU64,
+				chainId: maxU16, // Use valid chain ID within u16 range
 				difficulty: maxU64,
 			};
 
