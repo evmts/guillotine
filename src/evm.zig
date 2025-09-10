@@ -437,7 +437,8 @@ pub fn Evm(comptime config: EvmConfig) type {
                 // IMPORTANT: Reinitialize logs after toOwnedSlice() to maintain allocator reference
                 // toOwnedSlice() takes ownership and leaves the ArrayList in an undefined state
                 self.logs = .empty;
-                result.selfdestructs = &.{};
+                // Extract self-destruct records to result - similar to logs extraction
+                result.selfdestructs = self.extractSelfDestructRecords() catch &.{};
                 result.accessed_addresses = &.{};
                 result.accessed_storage = &.{};
                 // Reset internal accumulators (logs already transferred)
@@ -1369,6 +1370,26 @@ pub fn Evm(comptime config: EvmConfig) type {
         /// Take ownership of the accumulated logs and clear internal storage
         pub fn takeLogs(self: *Self) []@import("frame/call_result.zig").Log {
             return self.logs.toOwnedSlice(self.allocator) catch &.{};
+        }
+
+        /// Extract self-destruct records from internal tracker to owned slice
+        pub fn extractSelfDestructRecords(self: *Self) ![]const @import("frame/call_result.zig").SelfDestructRecord {
+            const count = self.self_destruct.count();
+            if (count == 0) {
+                return &.{};
+            }
+
+            const records = try self.allocator.alloc(@import("frame/call_result.zig").SelfDestructRecord, count);
+            var iter = self.self_destruct.iterator();
+            var i: usize = 0;
+            while (iter.next()) |entry| {
+                records[i] = @import("frame/call_result.zig").SelfDestructRecord{
+                    .contract = entry.key_ptr.*,
+                    .beneficiary = entry.value_ptr.*,
+                };
+                i += 1;
+            }
+            return records;
         }
 
         /// Execute nested EVM call - for Host interface
