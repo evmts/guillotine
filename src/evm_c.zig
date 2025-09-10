@@ -91,15 +91,15 @@ pub const CallParams = extern struct {
     salt: [32]u8, // For CREATE2
 };
 
-// Block info for FFI
+// Block info for FFI - all u64 fields first to avoid padding
 pub const BlockInfoFFI = extern struct {
     number: u64,
     timestamp: u64,
     gas_limit: u64,
-    coinbase: [20]u8,
     base_fee: u64,
     chain_id: u64,
     difficulty: u64,
+    coinbase: [20]u8,
     prev_randao: [32]u8,
 };
 
