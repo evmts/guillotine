@@ -92,8 +92,8 @@ export class GuillotineEVM {
       const memory = loader.getMemory();
       
       // Create block info structure  
-      // BlockInfoFFI struct: 6 u64s (48 bytes) + coinbase (20 bytes) + prev_randao (32 bytes) = 100 bytes
-      const blockInfoPtr = memory.malloc(100); // Size of BlockInfoFFI struct
+      // BlockInfoFFI struct: 6 u64s (48 bytes) + coinbase (20 bytes) + padding (4 bytes) + prev_randao (32 bytes) = 104 bytes
+      const blockInfoPtr = memory.malloc(104); // Size of BlockInfoFFI struct
       const buffer = memory.getBuffer();
       const view = new DataView(buffer.buffer, blockInfoPtr);
       
@@ -112,11 +112,12 @@ export class GuillotineEVM {
         view.setUint8(48 + i, coinbaseBytes[i] || 0);
       }
       
-      // prev_randao (32 bytes) at offset 68
+      // padding (4 bytes) at offset 68-71
+      // prev_randao (32 bytes) at offset 72
       const prevRandao = blockInfo?.prevRandao || Bytes.fromBytes(new Uint8Array(32));
       const prevRandaoBytes = prevRandao.toBytes();
       for (let i = 0; i < 32; i++) {
-        view.setUint8(68 + i, prevRandaoBytes[i] || 0);
+        view.setUint8(72 + i, prevRandaoBytes[i] || 0);
       }
       
       // Create EVM instance
@@ -124,7 +125,7 @@ export class GuillotineEVM {
         ? wasm.guillotine_evm_create_tracing(blockInfoPtr)
         : wasm.guillotine_evm_create(blockInfoPtr);
         
-      memory.free(blockInfoPtr, 100);
+      memory.free(blockInfoPtr, 104);
       
       if (evmHandle === 0) {
         const errorPtr = wasm.guillotine_get_last_error();
@@ -192,6 +193,9 @@ export class GuillotineEVM {
       // call_type
       view.setUint8(offset, params.callType || CallType.CALL);
       offset += 1;
+
+      // padding (3 bytes) for alignment
+      offset += 3;
 
       // salt (32 bytes) - for CREATE2
       const salt = params.salt || U256.zero();
@@ -518,55 +522,58 @@ export class GuillotineEVM {
     // error_message: pointer at offset 24
     const errorMessagePtr = view.getUint32(offset, true);
     offset = 28; // Now at offset 28
+    
+    // Skip padding (_pad2: 4 bytes)
+    offset = 32; // Skip to offset 32 after padding
 
-    // logs: pointer at offset 28
+    // logs: pointer at offset 32
     const logsPtr = view.getUint32(offset, true);
-    offset = 32; // Now at offset 32
-
-    // logs_len: usize at offset 32
-    const logsLen = view.getUint32(offset, true);
     offset = 36; // Now at offset 36
 
-    // selfdestructs: pointer at offset 36
-    const selfdestructsPtr = view.getUint32(offset, true);
+    // logs_len: u32 at offset 36
+    const logsLen = view.getUint32(offset, true);
     offset = 40; // Now at offset 40
 
-    // selfdestructs_len: usize at offset 40
-    const selfdestructsLen = view.getUint32(offset, true);
+    // selfdestructs: pointer at offset 40
+    const selfdestructsPtr = view.getUint32(offset, true);
     offset = 44; // Now at offset 44
 
-    // accessed_addresses: pointer at offset 44
-    const accessedAddressesPtr = view.getUint32(offset, true);
+    // selfdestructs_len: u32 at offset 44
+    const selfdestructsLen = view.getUint32(offset, true);
     offset = 48; // Now at offset 48
 
-    // accessed_addresses_len: usize at offset 48
-    const accessedAddressesLen = view.getUint32(offset, true);
+    // accessed_addresses: pointer at offset 48
+    const accessedAddressesPtr = view.getUint32(offset, true);
     offset = 52; // Now at offset 52
 
-    // accessed_storage: pointer at offset 52
-    const accessedStoragePtr = view.getUint32(offset, true);
+    // accessed_addresses_len: u32 at offset 52
+    const accessedAddressesLen = view.getUint32(offset, true);
     offset = 56; // Now at offset 56
 
-    // accessed_storage_len: usize at offset 56
-    const accessedStorageLen = view.getUint32(offset, true);
+    // accessed_storage: pointer at offset 56
+    const accessedStoragePtr = view.getUint32(offset, true);
     offset = 60; // Now at offset 60
 
-    // created_address: [20]u8 at offset 60
+    // accessed_storage_len: u32 at offset 60
+    const accessedStorageLen = view.getUint32(offset, true);
+    offset = 64; // Now at offset 64
+
+    // created_address: [20]u8 at offset 64
     const createdAddressBytes = new Uint8Array(20);
     for (let i = 0; i < 20; i++) {
       createdAddressBytes[i] = view.getUint8(offset + i);
     }
-    offset = 80; // Now at offset 80 (60 + 20)
+    offset = 84; // Now at offset 84 (64 + 20)
 
-    // has_created_address: bool at offset 80
+    // has_created_address: bool at offset 84
     const hasCreatedAddress = view.getUint8(offset) !== 0;
-    offset = 84; // Now at offset 84 (aligned to 4 bytes)
+    offset = 88; // Now at offset 88 (aligned to 4 bytes with padding)
 
-    // trace_json: pointer at offset 84
+    // trace_json: pointer at offset 88
     const traceJsonPtr = view.getUint32(offset, true);
-    offset = 88; // Now at offset 88
+    offset = 92; // Now at offset 92
 
-    // trace_json_len: usize at offset 88
+    // trace_json_len: u32 at offset 92
     const traceJsonLen = view.getUint32(offset, true);
 
     // Parse output
@@ -583,8 +590,8 @@ export class GuillotineEVM {
     const logs: LogEntry[] = [];
     if (logsLen > 0 && logsPtr !== 0) {
       for (let i = 0; i < logsLen; i++) {
-        const logPtr = logsPtr + i * 36; // Size of LogEntry struct (20 + 4 + 4 + 4 + 4)
-        const logBuffer = this.memory.readBytes(logPtr, 36);
+        const logPtr = logsPtr + i * 40; // Size of LogEntry struct (20 + 4 padding + 4 + 4 + 4 + 4)
+        const logBuffer = this.memory.readBytes(logPtr, 40);
         const logView = new DataView(logBuffer.buffer);
         
         // address: [20]u8
@@ -593,14 +600,15 @@ export class GuillotineEVM {
           addressBytes[j] = logView.getUint8(j);
         }
         
-        // topics: pointer
-        const topicsPtr = logView.getUint32(20, true);
-        // topics_len: usize
-        const topicsLen = logView.getUint32(24, true);
-        // data: pointer
-        const dataPtr = logView.getUint32(28, true);
-        // data_len: usize
-        const dataLen = logView.getUint32(32, true);
+        // Skip padding (4 bytes) at offset 20-23
+        // topics: pointer at offset 24
+        const topicsPtr = logView.getUint32(24, true);
+        // topics_len: u32 at offset 28
+        const topicsLen = logView.getUint32(28, true);
+        // data: pointer at offset 32
+        const dataPtr = logView.getUint32(32, true);
+        // data_len: u32 at offset 36
+        const dataLen = logView.getUint32(36, true);
 
         const topics: U256[] = [];
         if (topicsLen > 0 && topicsPtr !== 0) {
@@ -670,9 +678,40 @@ export class GuillotineEVM {
       : null;
 
     // Parse trace JSON
-    const traceJson = traceJsonLen > 0 && traceJsonPtr !== 0
-      ? new TextDecoder().decode(this.memory.readBytes(traceJsonPtr, traceJsonLen))
-      : null;
+    let traceJson: string | null = null;
+    if (traceJsonLen > 0 && traceJsonPtr !== 0) {
+      const traceBytes = this.memory.readBytes(traceJsonPtr, traceJsonLen);
+      // The trace JSON from Zig might include garbage at the end, trim it
+      // Look for the last valid JSON character (should end with ]})
+      let actualLength = traceJsonLen;
+      for (let i = 0; i < traceJsonLen; i++) {
+        // Check for null terminator or invalid UTF-8 byte
+        if (traceBytes[i] === 0 || (traceBytes[i] ?? 0) > 127) {
+          actualLength = i;
+          break;
+        }
+      }
+      const rawJson = new TextDecoder().decode(traceBytes.slice(0, actualLength));
+      // Ensure the JSON is complete
+      if (rawJson.includes('"structLogs":[') && !rawJson.endsWith(']}')) {
+        // Try to fix incomplete JSON by adding missing closing brackets
+        const openBrackets = (rawJson.match(/\[/g) || []).length;
+        const closeBrackets = (rawJson.match(/\]/g) || []).length;
+        const openBraces = (rawJson.match(/\{/g) || []).length;
+        const closeBraces = (rawJson.match(/\}/g) || []).length;
+        
+        let fixedJson = rawJson;
+        for (let i = 0; i < openBrackets - closeBrackets; i++) {
+          fixedJson += ']';
+        }
+        for (let i = 0; i < openBraces - closeBraces; i++) {
+          fixedJson += '}';
+        }
+        traceJson = fixedJson;
+      } else {
+        traceJson = rawJson;
+      }
+    }
 
     return new ExecutionResult(
       success,

@@ -557,8 +557,7 @@ describe("GuillotineEVM - Logs and Events", () => {
 	});
 
 	describe("Tracing", () => {
-		// TODO: Fix tracing returning null in Zig implementation
-		it.todo("should include trace JSON when tracing enabled", async () => {
+		it("should include trace JSON when tracing enabled", async () => {
 			const evmWithTrace = await GuillotineEVM.create(undefined, true);
 
 			const contractAddr = testAddress(600);
