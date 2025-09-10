@@ -379,23 +379,45 @@ pub fn Evm(comptime config: EvmConfig) type {
                 self.gas_refund_counter = 0;
             }
 
-            result.logs = self.logs.toOwnedSlice(self.allocator) catch |err| {
-                log.err("Failed to extract logs: {}", .{err});
-                // Return failure result if we can't allocate logs
-                return CallResult.failure(result.gas_left);
-            };
-
+            // Extract logs for top-level calls
+            // Transfer logs to result - the CallResult now owns them and will free on deinit
+            result.logs = self.logs.toOwnedSlice(self.allocator) catch &.{};
+            // IMPORTANT: Reinitialize logs after toOwnedSlice() to maintain allocator reference
+            // toOwnedSlice() takes ownership and leaves the ArrayList in an undefined state
             self.logs = .empty;
+            
             // Extract self-destruct records if self-destruct is enabled
             // EIP-6780 restricts SELFDESTRUCT behavior in Cancun+
             if (comptime config.eips.eip_6780_selfdestruct_same_transaction_only()) {
-                result.selfdestructs = self.self_destruct.toOwnedSlice(self.allocator) catch |err| {
-                    log.err("Failed to extract self-destruct records: {}", .{err});
-                    return CallResult.failure(result.gas_left);
-                };
+                result.selfdestructs = self.self_destruct.toOwnedSlice(self.allocator) catch &.{};
+            } else {
+                result.selfdestructs = &.{};
             }
-            result.accessed_addresses = &.{};
-            result.accessed_storage = &.{};
+            
+            // Extract access list data before clearing
+            // Get addresses from access list and create owned copy
+            const address_keys = self.access_list.addresses.keys();
+            result.accessed_addresses = self.allocator.dupe(primitives.Address, address_keys) catch &.{};
+            
+            // Get storage keys from access list and convert to StorageAccess
+            const storage_keys = self.access_list.storage_slots.keys();
+            if (storage_keys.len > 0) {
+                const storage_access = self.allocator.alloc(call_result_module.StorageAccess, storage_keys.len) catch {
+                    result.accessed_storage = &.{};
+                    return result;
+                };
+                for (storage_keys, 0..) |key, i| {
+                    storage_access[i] = call_result_module.StorageAccess{
+                        .address = key.address,
+                        .slot = key.slot,
+                    };
+                }
+                result.accessed_storage = storage_access;
+            } else {
+                result.accessed_storage = &.{};
+            }
+            
+            // Reset internal accumulators (logs and access data already transferred)
             self.self_destruct.clear();
             self.access_list.clear();
 
