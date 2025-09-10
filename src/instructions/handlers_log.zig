@@ -22,7 +22,12 @@ pub fn Handlers(comptime FrameType: type) type {
             return &struct {
                 pub fn logHandler(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
                     const dispatch = Dispatch{ .cursor = cursor };
-                    // EIP-214: WriteProtection is handled by host interface for static calls
+                    
+                    // EIP-214: Prevent log emission in static context (STATICCALL)
+                    const evm = self.getEvm();
+                    if (evm.get_is_static()) {
+                        return Error.WriteProtection;
+                    }
 
                     // LOG0 requires 2 items, LOG1 requires 3, LOG2 requires 4, LOG3 requires 5, LOG4 requires 6
                     std.debug.assert(self.stack.size() >= 2 + topic_count);

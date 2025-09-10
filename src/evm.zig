@@ -1376,6 +1376,12 @@ pub fn Evm(comptime config: EvmConfig) type {
             return self.inner_call(params);
         }
 
+        /// Host interface method to get static context (EIP-214)
+        /// Used by Frame handlers to check if state modifications are allowed
+        pub fn get_is_static(self: *Self) bool {
+            return self.is_static_context();
+        }
+
         /// Register a contract as created in the current transaction
         pub fn register_created_contract(self: *Self, address: primitives.Address) !void {
             try self.created_contracts.mark_created(address);

@@ -78,6 +78,12 @@ pub fn Handlers(comptime FrameType: type) type {
 
             // Access storage slot once to both warm it and get cost
             const evm = self.getEvm();
+            
+            // EIP-214: Prevent storage writes in static context (STATICCALL)
+            if (evm.get_is_static()) {
+                return Error.WriteProtection;
+            }
+            
             const access_cost = evm.access_storage_slot(contract_addr, slot) catch |err| switch (err) {
                 else => return Error.AllocationError,
             };
