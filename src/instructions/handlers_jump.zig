@@ -31,9 +31,12 @@ pub fn Handlers(comptime FrameType: type) type {
 
             // Use binary search to find valid jump destination
             if (jump_table.findJumpTarget(dest_pc)) |jump_dispatch| {
-                // Found valid JUMPDEST - update thread-local PC for tracing
-                const frame_handlers = @import("../frame/frame_handlers.zig");
-                frame_handlers.setCurrentPc(dest_pc);
+                // Found valid JUMPDEST - update thread-local PC for tracing (only when tracing is enabled)
+                const build_options = @import("build_options");
+                if (comptime build_options.enable_tracing) {
+                    const frame_handlers = @import("../frame/frame_handlers.zig");
+                    frame_handlers.setCurrentPc(dest_pc);
+                }
 
                 return @call(FrameType.getTailCallModifier(), jump_dispatch.cursor[0].opcode_handler, .{ self, jump_dispatch.cursor });
             } else {
@@ -64,9 +67,12 @@ pub fn Handlers(comptime FrameType: type) type {
 
                 // Use binary search to find valid jump destination
                 if (jump_table.findJumpTarget(dest_pc)) |jump_dispatch| {
-                    // Found valid JUMPDEST - update thread-local PC for tracing
-                    const frame_handlers = @import("../frame/frame_handlers.zig");
-                    frame_handlers.setCurrentPc(dest_pc);
+                    // Found valid JUMPDEST - update thread-local PC for tracing (only when tracing is enabled)
+                    const build_options = @import("build_options");
+                    if (comptime build_options.enable_tracing) {
+                        const frame_handlers = @import("../frame/frame_handlers.zig");
+                        frame_handlers.setCurrentPc(dest_pc);
+                    }
 
                     return @call(FrameType.getTailCallModifier(), jump_dispatch.cursor[0].opcode_handler, .{ self, jump_dispatch.cursor });
                 } else {
