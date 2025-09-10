@@ -37,13 +37,15 @@ const Account = evm.Account;
 // Opaque handle for EVM instance
 pub const EvmHandle = opaque {};
 
-// Log entry for FFI
+// Log entry for FFI - WASM32 optimized
 pub const LogEntry = extern struct {
     address: [20]u8,
-    topics: [*]const [32]u8,
-    topics_len: usize,
-    data: [*]const u8,
-    data_len: usize,
+    _pad1: [4]u8 = .{0,0,0,0}, // Padding to align pointer
+    topics: [*]const [32]u8,  // 4 bytes (32-bit pointer)
+    topics_len: u32,          // 4 bytes (not usize!)
+    data: [*]const u8,        // 4 bytes
+    data_len: u32,            // 4 bytes
+    // Total: 40 bytes
 };
 
 // Self-destruct record for FFI
@@ -58,49 +60,58 @@ pub const StorageAccessRecord = extern struct {
     slot: [32]u8,
 };
 
-// Result structure for FFI - matches evm_c_api.zig
+// Result structure for FFI - WASM32 optimized with explicit alignment
 pub const EvmResult = extern struct {
-    success: bool align(4), // Align to 4 bytes for C compatibility
-    gas_left: u64,
-    output: [*]const u8,
-    output_len: usize,
-    error_message: [*:0]const u8,
-    logs: [*]const LogEntry,
-    logs_len: usize,
-    selfdestructs: [*]const SelfDestructRecord,
-    selfdestructs_len: usize,
-    accessed_addresses: [*]const [20]u8,
-    accessed_addresses_len: usize,
-    accessed_storage: [*]const StorageAccessRecord,
-    accessed_storage_len: usize,
-    created_address: [20]u8,
-    has_created_address: bool,
-    trace_json: [*]const u8,
-    trace_json_len: usize,
+    success: bool,                       // 1 byte + 3 padding for alignment
+    _pad1: [3]u8 = .{0,0,0},            // Explicit padding
+    gas_left: u64,                       // 8 bytes, must be 8-byte aligned
+    output: [*]const u8,                 // 4 bytes (32-bit pointer)
+    output_len: u32,                     // 4 bytes (use u32 not usize for FFI)
+    error_message: [*:0]const u8,        // 4 bytes
+    _pad2: [4]u8 = .{0,0,0,0},          // Pad to 8-byte boundary
+    logs: [*]const LogEntry,             // 4 bytes
+    logs_len: u32,                       // 4 bytes
+    selfdestructs: [*]const SelfDestructRecord, // 4 bytes
+    selfdestructs_len: u32,              // 4 bytes
+    accessed_addresses: [*]const [20]u8, // 4 bytes
+    accessed_addresses_len: u32,         // 4 bytes
+    accessed_storage: [*]const StorageAccessRecord, // 4 bytes
+    accessed_storage_len: u32,           // 4 bytes
+    created_address: [20]u8,             // 20 bytes
+    has_created_address: bool,           // 1 byte
+    _pad3: [3]u8 = .{0,0,0},            // Padding
+    trace_json: [*]const u8,             // 4 bytes
+    trace_json_len: u32,                 // 4 bytes
 };
 
-// Call parameters for FFI
+// Call parameters for FFI - WASM32 optimized
 pub const CallParams = extern struct {
-    caller: [20]u8,
-    to: [20]u8,
-    value: [32]u8, // u256 as bytes
-    input: [*]const u8,
-    input_len: usize,
-    gas: u64,
-    call_type: u8, // 0=CALL, 1=CALLCODE, 2=DELEGATECALL, 3=STATICCALL, 4=CREATE, 5=CREATE2
-    salt: [32]u8, // For CREATE2
+    caller: [20]u8,         // 20 bytes
+    to: [20]u8,            // 20 bytes  
+    value: [32]u8,         // 32 bytes (u256 as big-endian bytes)
+    input: [*]const u8,    // 4 bytes (32-bit pointer)
+    input_len: u32,        // 4 bytes (not usize!)
+    gas: u64,              // 8 bytes
+    call_type: u8,         // 1 byte
+    _pad: [3]u8 = .{0,0,0}, // Padding for alignment
+    salt: [32]u8,          // 32 bytes (for CREATE2)
+    // Total: Check alignment with offsetof
 };
 
-// Block info for FFI - all u64 fields first to avoid padding
+// Block info for FFI - WASM32 optimized struct layout
 pub const BlockInfoFFI = extern struct {
-    number: u64,
-    timestamp: u64,
-    gas_limit: u64,
-    base_fee: u64,
-    chain_id: u64,
-    difficulty: u64,
-    coinbase: [20]u8,
-    prev_randao: [32]u8,
+    // Group u64 fields first to avoid padding
+    number: u64,         // 8 bytes, offset 0
+    timestamp: u64,      // 8 bytes, offset 8
+    gas_limit: u64,      // 8 bytes, offset 16
+    base_fee: u64,       // 8 bytes, offset 24
+    chain_id: u64,       // 8 bytes, offset 32
+    difficulty: u64,     // 8 bytes, offset 40
+    // Then smaller fields
+    coinbase: [20]u8,    // 20 bytes, offset 48
+    _pad1: [4]u8 = .{0,0,0,0}, // Padding to align next field
+    prev_randao: [32]u8, // 32 bytes, offset 72
+    // Total: 104 bytes
 };
 
 // Use page allocator for WASM (no libc dependency)
@@ -109,12 +120,37 @@ const allocator = if (builtin.target.cpu.arch == .wasm32 and builtin.target.os.t
 else
     std.heap.c_allocator;
 
-// Thread-local allocator for FFI (in WASM this is just global)
+// Global allocator for FFI (WASM is single-threaded)
 var ffi_allocator: ?std.mem.Allocator = null;
 var last_error: [256]u8 = undefined;
 var last_error_z: [257]u8 = undefined;
 const empty_error: [1]u8 = .{0};
 const empty_buffer: [0]u8 = .{};
+
+// Instance pooling for performance (WASM-optimized, no threading)
+const EvmInstance = struct {
+    evm: *DefaultEvm,
+    database: *Database,
+    block_info: BlockInfoFFI,
+    in_use: bool,
+    needs_reset: bool,
+};
+
+const TracingEvmInstance = struct {
+    evm: *TracerEvm,
+    database: *Database,
+    block_info: BlockInfoFFI,
+    in_use: bool,
+    needs_reset: bool,
+};
+
+// Instance pools - maintain reusable EVM instances (no mutex needed in WASM)
+var instance_pool: ?std.ArrayList(*EvmInstance) = null;
+var tracing_instance_pool: ?std.ArrayList(*TracingEvmInstance) = null;
+
+// Map handles to instances
+var handle_map: ?std.AutoHashMap(*EvmHandle, *EvmInstance) = null;
+var tracing_handle_map: ?std.AutoHashMap(*EvmHandle, *TracingEvmInstance) = null;
 
 fn setError(comptime fmt: []const u8, args: anytype) void {
     const slice = std.fmt.bufPrint(&last_error, fmt, args) catch "Unknown error";
@@ -122,31 +158,126 @@ fn setError(comptime fmt: []const u8, args: anytype) void {
     last_error_z[slice.len] = 0;
 }
 
-// Initialize FFI
+// Initialize FFI and instance pools
 export fn guillotine_init() void {
     if (ffi_allocator == null) {
         ffi_allocator = allocator;
     }
+    
+    const alloc = ffi_allocator.?;
+    
+    if (instance_pool == null) {
+        instance_pool = std.ArrayList(*EvmInstance).initCapacity(alloc, 4) catch return;
+        tracing_instance_pool = std.ArrayList(*TracingEvmInstance).initCapacity(alloc, 4) catch return;
+        handle_map = std.AutoHashMap(*EvmHandle, *EvmInstance).init(alloc);
+        tracing_handle_map = std.AutoHashMap(*EvmHandle, *TracingEvmInstance).init(alloc);
+    }
 }
 
-// Cleanup FFI
+// Cleanup FFI and instance pools
 export fn guillotine_cleanup() void {
+    if (ffi_allocator) |alloc| {
+        // Clean up instance pools
+        if (instance_pool) |*pool| {
+            for (pool.items) |instance| {
+                instance.evm.deinit();
+                instance.database.deinit();
+                alloc.destroy(instance.database);
+                alloc.destroy(instance.evm);
+                alloc.destroy(instance);
+            }
+            pool.deinit(alloc);
+            instance_pool = null;
+        }
+        
+        if (tracing_instance_pool) |*pool| {
+            for (pool.items) |instance| {
+                instance.evm.deinit();
+                instance.database.deinit();
+                alloc.destroy(instance.database);
+                alloc.destroy(instance.evm);
+                alloc.destroy(instance);
+            }
+            pool.deinit(alloc);
+            tracing_instance_pool = null;
+        }
+        
+        if (handle_map) |*map| {
+            map.deinit();
+            handle_map = null;
+        }
+        
+        if (tracing_handle_map) |*map| {
+            map.deinit();
+            tracing_handle_map = null;
+        }
+    }
+    
     ffi_allocator = null;
 }
 
-// Create EVM instance
+// Create EVM instance (or reuse from pool)
 export fn guillotine_evm_create(block_info_ptr: *const BlockInfoFFI) ?*EvmHandle {
     const alloc = ffi_allocator orelse {
         setError("FFI not initialized. Call guillotine_init() first", .{});
         return null;
     };
-
-    // Create database
-    const db = alloc.create(evm.Database) catch {
-        setError("Failed to allocate database", .{});
+    
+    // Try to find a free instance in the pool
+    if (instance_pool) |*pool| {
+        for (pool.items) |instance| {
+            if (!instance.in_use) {
+                // Found a free instance - reset and reuse it
+                if (instance.needs_reset) {
+                    // Reset the database by reinitializing it
+                    instance.database.deinit();
+                    instance.database.* = Database.init(alloc);
+                    instance.needs_reset = false;
+                }
+                
+                // Update block info
+                instance.block_info = block_info_ptr.*;
+                const block_info = BlockInfo{
+                    .number = block_info_ptr.number,
+                    .timestamp = block_info_ptr.timestamp,
+                    .gas_limit = block_info_ptr.gas_limit,
+                    .coinbase = primitives.Address{ .bytes = block_info_ptr.coinbase },
+                    .base_fee = block_info_ptr.base_fee,
+                    .chain_id = block_info_ptr.chain_id,
+                    .difficulty = block_info_ptr.difficulty,
+                    .prev_randao = block_info_ptr.prev_randao,
+                    .blob_base_fee = 0,
+                    .blob_versioned_hashes = &.{},
+                };
+                instance.evm.block_info = block_info;
+                instance.in_use = true;
+                
+                // Create handle and register it
+                const handle = @as(*EvmHandle, @ptrCast(instance.evm));
+                handle_map.?.put(handle, instance) catch {
+                    instance.in_use = false;
+                    setError("Failed to register handle", .{});
+                    return null;
+                };
+                
+                return handle;
+            }
+        }
+    }
+    
+    // No free instance found, create a new one
+    const instance = alloc.create(EvmInstance) catch {
+        setError("Failed to allocate instance", .{});
         return null;
     };
-    db.* = evm.Database.init(alloc);
+    
+    // Create database
+    const db = alloc.create(Database) catch {
+        setError("Failed to allocate database", .{});
+        alloc.destroy(instance);
+        return null;
+    };
+    db.* = Database.init(alloc);
 
     // Set up block info
     const block_info = BlockInfo{
@@ -158,6 +289,8 @@ export fn guillotine_evm_create(block_info_ptr: *const BlockInfoFFI) ?*EvmHandle
         .chain_id = block_info_ptr.chain_id,
         .difficulty = block_info_ptr.difficulty,
         .prev_randao = block_info_ptr.prev_randao,
+        .blob_base_fee = 0,
+        .blob_versioned_hashes = &.{},
     };
 
     // Create transaction context
@@ -166,11 +299,14 @@ export fn guillotine_evm_create(block_info_ptr: *const BlockInfoFFI) ?*EvmHandle
         .coinbase = block_info.coinbase,
         .chain_id = @intCast(block_info.chain_id),
         .blob_versioned_hashes = &.{},
+        .blob_base_fee = 0,
     };
 
     // Create EVM instance
     const evm_ptr = alloc.create(DefaultEvm) catch {
+        db.deinit();
         alloc.destroy(db);
+        alloc.destroy(instance);
         setError("Failed to allocate EVM instance", .{});
         return null;
     };
@@ -181,31 +317,108 @@ export fn guillotine_evm_create(block_info_ptr: *const BlockInfoFFI) ?*EvmHandle
         block_info,
         tx_context,
         0, // gas_price
-        primitives.Address.zero(), // origin
-        Hardfork.DEFAULT,
+        primitives.Address.ZERO_ADDRESS, // origin
+        .CANCUN, // Latest hardfork
     ) catch {
+        db.deinit();
         alloc.destroy(db);
         alloc.destroy(evm_ptr);
+        alloc.destroy(instance);
         setError("Failed to initialize EVM", .{});
         return null;
     };
+    
+    // Initialize instance struct
+    instance.* = .{
+        .evm = evm_ptr,
+        .database = db,
+        .block_info = block_info_ptr.*,
+        .in_use = true,
+        .needs_reset = false,
+    };
+    
+    // Add to pool
+    instance_pool.?.append(alloc, instance) catch {
+        setError("Failed to add to pool", .{});
+        evm_ptr.deinit();
+        db.deinit();
+        alloc.destroy(db);
+        alloc.destroy(evm_ptr);
+        alloc.destroy(instance);
+        return null;
+    };
+    
+    // Create handle and register it
+    const handle = @as(*EvmHandle, @ptrCast(evm_ptr));
+    handle_map.?.put(handle, instance) catch {
+        setError("Failed to register handle", .{});
+        return null;
+    };
 
-    return @ptrCast(evm_ptr);
+    return handle;
 }
 
-// Create tracing EVM instance
+// Create tracing EVM instance (with pooling support)
 export fn guillotine_evm_create_tracing(block_info_ptr: *const BlockInfoFFI) ?*EvmHandle {
     const alloc = ffi_allocator orelse {
         setError("FFI not initialized. Call guillotine_init() first", .{});
         return null;
     };
-
-    // Create database
-    const db = alloc.create(evm.Database) catch {
-        setError("Failed to allocate database", .{});
+    
+    // Try to find a free tracing instance in the pool
+    if (tracing_instance_pool) |*pool| {
+        for (pool.items) |instance| {
+            if (!instance.in_use) {
+                // Found a free instance - reset and reuse it
+                if (instance.needs_reset) {
+                    instance.database.deinit();
+                    instance.database.* = Database.init(alloc);
+                    instance.needs_reset = false;
+                }
+                
+                // Update block info
+                instance.block_info = block_info_ptr.*;
+                const block_info = BlockInfo{
+                    .number = block_info_ptr.number,
+                    .timestamp = block_info_ptr.timestamp,
+                    .gas_limit = block_info_ptr.gas_limit,
+                    .coinbase = primitives.Address{ .bytes = block_info_ptr.coinbase },
+                    .base_fee = block_info_ptr.base_fee,
+                    .chain_id = block_info_ptr.chain_id,
+                    .difficulty = block_info_ptr.difficulty,
+                    .prev_randao = block_info_ptr.prev_randao,
+                    .blob_base_fee = 0,
+                    .blob_versioned_hashes = &.{},
+                };
+                instance.evm.block_info = block_info;
+                instance.in_use = true;
+                
+                // Create handle and register it
+                const handle = @as(*EvmHandle, @ptrCast(instance.evm));
+                tracing_handle_map.?.put(handle, instance) catch {
+                    instance.in_use = false;
+                    setError("Failed to register handle", .{});
+                    return null;
+                };
+                
+                return handle;
+            }
+        }
+    }
+    
+    // No free instance found, create a new one
+    const instance = alloc.create(TracingEvmInstance) catch {
+        setError("Failed to allocate tracing instance", .{});
         return null;
     };
-    db.* = evm.Database.init(alloc);
+
+    // Create database
+    const db = alloc.create(Database) catch {
+        setError("Failed to allocate database", .{});
+        alloc.destroy(instance);
+        return null;
+    };
+    db.* = Database.init(alloc);
 
     // Set up block info
     const block_info = BlockInfo{
@@ -217,6 +430,8 @@ export fn guillotine_evm_create_tracing(block_info_ptr: *const BlockInfoFFI) ?*E
         .chain_id = block_info_ptr.chain_id,
         .difficulty = block_info_ptr.difficulty,
         .prev_randao = block_info_ptr.prev_randao,
+        .blob_base_fee = 0,
+        .blob_versioned_hashes = &.{},
     };
 
     // Create transaction context
@@ -225,6 +440,7 @@ export fn guillotine_evm_create_tracing(block_info_ptr: *const BlockInfoFFI) ?*E
         .coinbase = block_info.coinbase,
         .chain_id = @intCast(block_info.chain_id),
         .blob_versioned_hashes = &.{},
+        .blob_base_fee = 0,
     };
 
     // Create tracing EVM instance
@@ -240,46 +456,73 @@ export fn guillotine_evm_create_tracing(block_info_ptr: *const BlockInfoFFI) ?*E
         block_info,
         tx_context,
         0, // gas_price
-        primitives.Address.zero(), // origin
-        Hardfork.DEFAULT,
+        primitives.Address.ZERO_ADDRESS, // origin
+        .CANCUN, // Latest hardfork
     ) catch {
+        db.deinit();
         alloc.destroy(db);
         alloc.destroy(evm_ptr);
+        alloc.destroy(instance);
         setError("Failed to initialize tracing EVM", .{});
         return null;
     };
+    
+    // Initialize instance struct
+    instance.* = .{
+        .evm = evm_ptr,
+        .database = db,
+        .block_info = block_info_ptr.*,
+        .in_use = true,
+        .needs_reset = false,
+    };
+    
+    // Add to pool
+    tracing_instance_pool.?.append(alloc, instance) catch {
+        setError("Failed to add to pool", .{});
+        evm_ptr.deinit();
+        db.deinit();
+        alloc.destroy(db);
+        alloc.destroy(evm_ptr);
+        alloc.destroy(instance);
+        return null;
+    };
+    
+    // Create handle and register it
+    const handle = @as(*EvmHandle, @ptrCast(evm_ptr));
+    tracing_handle_map.?.put(handle, instance) catch {
+        setError("Failed to register handle", .{});
+        return null;
+    };
 
-    return @ptrCast(evm_ptr);
+    return handle;
 }
 
-// Destroy EVM instance
+// Destroy EVM instance (actually returns it to the pool)
 export fn guillotine_evm_destroy(handle: *EvmHandle) void {
-    const alloc = ffi_allocator orelse return;
-    const evm_ptr: *DefaultEvm = @ptrCast(@alignCast(handle));
-    
-    // Deinit database
-    const db_ptr: *evm.Database = @ptrCast(@alignCast(evm_ptr.database));
-    db_ptr.deinit();
-    alloc.destroy(db_ptr);
-    
-    // Destroy EVM
-    evm_ptr.deinit();
-    alloc.destroy(evm_ptr);
+    // Find the instance in the handle map
+    if (handle_map) |*map| {
+        if (map.fetchRemove(handle)) |entry| {
+            const instance = entry.value;
+            // Mark as not in use and needs reset
+            instance.in_use = false;
+            instance.needs_reset = true;
+            // Instance stays in the pool for reuse
+        }
+    }
 }
 
-// Destroy tracing EVM instance
+// Destroy tracing EVM instance (actually returns it to the pool)
 export fn guillotine_evm_destroy_tracing(handle: *EvmHandle) void {
-    const alloc = ffi_allocator orelse return;
-    const evm_ptr: *TracerEvm = @ptrCast(@alignCast(handle));
-
-    // Deinit database
-    const db_ptr: *evm.Database = @ptrCast(@alignCast(evm_ptr.database));
-    db_ptr.deinit();
-    alloc.destroy(db_ptr);
-
-    // Destroy EVM
-    evm_ptr.deinit();
-    alloc.destroy(evm_ptr);
+    // Find the instance in the tracing handle map
+    if (tracing_handle_map) |*map| {
+        if (map.fetchRemove(handle)) |entry| {
+            const instance = entry.value;
+            // Mark as not in use and needs reset
+            instance.in_use = false;
+            instance.needs_reset = true;
+            // Instance stays in the pool for reuse
+        }
+    }
 }
 
 // Set balance
@@ -386,7 +629,7 @@ fn convertCallResultToEvmResult(result: anytype, alloc: std.mem.Allocator) ?*Evm
         };
         @memcpy(output_copy, result.output);
         evm_result.output = output_copy.ptr;
-        evm_result.output_len = output_copy.len;
+        evm_result.output_len = @intCast(output_copy.len);
     } else {
         evm_result.output = @as([*]const u8, @ptrCast(&empty_error));
         evm_result.output_len = 0;
@@ -422,7 +665,7 @@ fn convertCallResultToEvmResult(result: anytype, alloc: std.mem.Allocator) ?*Evm
                     std.mem.writeInt(u256, &topics_copy[j], topic, .big);
                 }
                 logs_copy[i].topics = topics_copy.ptr;
-                logs_copy[i].topics_len = topics_copy.len;
+                logs_copy[i].topics_len = @intCast(topics_copy.len);
             } else {
                 logs_copy[i].topics = @as([*]const [32]u8, @ptrCast(&empty_buffer));
                 logs_copy[i].topics_len = 0;
@@ -445,7 +688,7 @@ fn convertCallResultToEvmResult(result: anytype, alloc: std.mem.Allocator) ?*Evm
                 };
                 @memcpy(data_copy, log.data);
                 logs_copy[i].data = data_copy.ptr;
-                logs_copy[i].data_len = data_copy.len;
+                logs_copy[i].data_len = @intCast(data_copy.len);
             } else {
                 logs_copy[i].data = @as([*]const u8, @ptrCast(&empty_buffer));
                 logs_copy[i].data_len = 0;
@@ -453,7 +696,7 @@ fn convertCallResultToEvmResult(result: anytype, alloc: std.mem.Allocator) ?*Evm
         }
         
         evm_result.logs = logs_copy.ptr;
-        evm_result.logs_len = logs_copy.len;
+        evm_result.logs_len = @intCast(logs_copy.len);
     } else {
         evm_result.logs = @as([*]const LogEntry, @ptrCast(@alignCast(&empty_buffer)));
         evm_result.logs_len = 0;
@@ -482,7 +725,7 @@ fn convertCallResultToEvmResult(result: anytype, alloc: std.mem.Allocator) ?*Evm
         }
         
         evm_result.selfdestructs = selfdestructs_copy.ptr;
-        evm_result.selfdestructs_len = selfdestructs_copy.len;
+        evm_result.selfdestructs_len = @intCast(selfdestructs_copy.len);
     } else {
         evm_result.selfdestructs = @as([*]const SelfDestructRecord, @ptrCast(&empty_buffer));
         evm_result.selfdestructs_len = 0;
@@ -511,7 +754,7 @@ fn convertCallResultToEvmResult(result: anytype, alloc: std.mem.Allocator) ?*Evm
         }
         
         evm_result.accessed_addresses = addresses_copy.ptr;
-        evm_result.accessed_addresses_len = addresses_copy.len;
+        evm_result.accessed_addresses_len = @intCast(addresses_copy.len);
     } else {
         evm_result.accessed_addresses = @as([*]const [20]u8, @ptrCast(&empty_buffer));
         evm_result.accessed_addresses_len = 0;
@@ -542,7 +785,7 @@ fn convertCallResultToEvmResult(result: anytype, alloc: std.mem.Allocator) ?*Evm
         }
         
         evm_result.accessed_storage = storage_copy.ptr;
-        evm_result.accessed_storage_len = storage_copy.len;
+        evm_result.accessed_storage_len = @intCast(storage_copy.len);
     } else {
         evm_result.accessed_storage = @as([*]const StorageAccessRecord, @ptrCast(&empty_buffer));
         evm_result.accessed_storage_len = 0;
@@ -553,13 +796,53 @@ fn convertCallResultToEvmResult(result: anytype, alloc: std.mem.Allocator) ?*Evm
         evm_result.created_address = addr.bytes;
         evm_result.has_created_address = true;
     } else {
-        evm_result.created_address = [_]u8{0} ** 20;
+        evm_result.created_address = primitives.Address.ZERO_ADDRESS.bytes;
         evm_result.has_created_address = false;
     }
     
-    // TODO: Add trace JSON support if available
+    // If we have an execution trace, serialize to JSON-RPC format
     evm_result.trace_json = @as([*]const u8, @ptrCast(&empty_buffer));
     evm_result.trace_json_len = 0;
+    if (result.trace) |*trace| {
+        // WASM32: Use heap allocation to avoid stack overflow
+        var buf = std.array_list.AlignedManaged(u8, null).init(alloc);
+        defer buf.deinit();
+        
+        // Build JSON with proper escaping
+        buf.appendSlice("{\"structLogs\":[") catch {
+            setError("Failed to start trace JSON", .{});
+            alloc.destroy(evm_result);
+            return null;
+        };
+        
+        for (trace.steps, 0..) |step, i| {
+            if (i > 0) buf.append(',') catch {};
+            // WASM32: Be careful with stack values (u256 = 32 bytes each)
+            buf.writer().print(
+                "{{\"pc\":{d},\"op\":\"{s}\",\"gas\":{d},\"gasCost\":{d},\"depth\":{d},\"stack\":[",
+                .{step.pc, step.opcode_name, step.gas, step.gas_cost, step.depth}
+            ) catch {};
+            
+            for (step.stack, 0..) |val, j| {
+                if (j > 0) buf.append(',') catch {};
+                // WASM32: u256 values must be formatted as hex strings
+                buf.writer().print("\"0x{x}\"", .{val}) catch {};
+            }
+            
+            buf.writer().print("],\"memSize\":{d}}}", .{step.mem_size}) catch {};
+        }
+        
+        buf.appendSlice("]}") catch {};
+        
+        // WASM32: Allocate final buffer with page_allocator
+        const bytes = alloc.dupe(u8, buf.items) catch {
+            setError("Failed to allocate trace JSON", .{});
+            alloc.destroy(evm_result);
+            return null;
+        };
+        evm_result.trace_json = bytes.ptr;
+        evm_result.trace_json_len = @intCast(bytes.len);
+    }
     
     return evm_result;
 }
@@ -690,10 +973,10 @@ export fn guillotine_call_tracing(handle: *EvmHandle, params: *const CallParams)
         },
     };
     
-    // Execute the call
+    // Execute the call with tracing
     const result = evm_ptr.call(call_params);
     
-    // TODO: Include trace JSON in result
+    // The trace is already included in result and will be serialized by convertCallResultToEvmResult
     return convertCallResultToEvmResult(result, alloc);
 }
 
@@ -710,44 +993,45 @@ export fn guillotine_get_balance(handle: *EvmHandle, address: *const [20]u8, bal
     return true;
 }
 
-// Get code
-export fn guillotine_get_code(handle: *EvmHandle, address: *const [20]u8, code_out: *[*]u8, len_out: *usize) bool {
+// Get code - returns code bytes and length, caller must free with guillotine_free_code
+export fn guillotine_get_code(handle: *EvmHandle, address: *const [20]u8, code_out: *[*]u8, len_out: *u32) bool {
     const evm_ptr: *DefaultEvm = @ptrCast(@alignCast(handle));
     const alloc = ffi_allocator orelse {
         setError("FFI not initialized", .{});
         return false;
     };
     
-    const account = evm_ptr.database.get_account(address.*) catch {
-        setError("Failed to get account", .{});
-        return false;
-    } orelse Account{ .balance = 0, .code_hash = primitives.EMPTY_CODE_HASH, .storage_root = [_]u8{0} ** 32, .nonce = 0, .delegated_address = null };
-    
-    if (std.mem.eql(u8, &account.code_hash, &primitives.EMPTY_CODE_HASH)) {
-        code_out.* = @constCast(@ptrCast(@alignCast(&empty_buffer)));
-        len_out.* = 0;
-        return true;
-    }
-    
-    const code = evm_ptr.database.get_code(account.code_hash) catch {
-        setError("Failed to get code", .{});
-        return false;
+    const code = evm_ptr.database.get_code_by_address(address.*) catch |err| {
+        if (err == Database.Error.AccountNotFound) {
+            // For non-existent accounts, return empty code (success with len=0)
+            code_out.* = @as([*]u8, @ptrCast(@constCast(&empty_buffer)));
+            len_out.* = 0;
+            return true;
+        } else if (err == Database.Error.CodeNotFound) {
+            // For accounts with no code, return empty code (success with len=0)
+            code_out.* = @as([*]u8, @ptrCast(@constCast(&empty_buffer)));
+            len_out.* = 0;
+            return true;
+        } else {
+            setError("Failed to get code: {}", .{err});
+            return false;
+        }
     };
     
-    if (code.len == 0) {
-        code_out.* = @constCast(@ptrCast(@alignCast(&empty_buffer)));
+    // Copy code if present
+    if (code.len > 0) {
+        const code_copy = alloc.alloc(u8, code.len) catch {
+            setError("Failed to allocate code buffer", .{});
+            return false;
+        };
+        @memcpy(code_copy, code);
+        code_out.* = code_copy.ptr;
+        len_out.* = @intCast(code_copy.len);
+    } else {
+        code_out.* = @as([*]u8, @ptrCast(@constCast(&empty_buffer)));
         len_out.* = 0;
-        return true;
     }
     
-    const code_copy = alloc.alloc(u8, code.len) catch {
-        setError("Failed to allocate code buffer", .{});
-        return false;
-    };
-    @memcpy(code_copy, code);
-    
-    code_out.* = code_copy.ptr;
-    len_out.* = code_copy.len;
     return true;
 }
 
@@ -846,9 +1130,69 @@ export fn guillotine_get_last_error() [*:0]const u8 {
     return @ptrCast(&last_error_z);
 }
 
-// Simulate a call (same as call but doesn't modify state)
+// Simulate a call (doesn't commit state)
 export fn guillotine_simulate(handle: *EvmHandle, params: *const CallParams) ?*EvmResult {
-    // For now, just call the regular call function
-    // TODO: Implement proper simulation that doesn't modify state
-    return guillotine_call(handle, params);
+    const evm_ptr: *DefaultEvm = @ptrCast(@alignCast(handle));
+    const alloc = ffi_allocator orelse {
+        setError("FFI not initialized", .{});
+        return null;
+    };
+    
+    // Convert parameters
+    const value = std.mem.readInt(u256, &params.value, .big);
+    const salt = std.mem.readInt(u256, &params.salt, .big);
+    const input = if (params.input_len > 0) params.input[0..params.input_len] else &[_]u8{};
+    
+    // Create appropriate call params based on type
+    const call_params = switch (params.call_type) {
+        0 => evm.CallParams{ .call = .{
+            .caller = primitives.Address{ .bytes = params.caller },
+            .to = primitives.Address{ .bytes = params.to },
+            .value = value,
+            .input = input,
+            .gas = params.gas,
+        }},
+        1 => evm.CallParams{ .callcode = .{
+            .caller = primitives.Address{ .bytes = params.caller },
+            .to = primitives.Address{ .bytes = params.to },
+            .value = value,
+            .input = input,
+            .gas = params.gas,
+        }},
+        2 => evm.CallParams{ .delegatecall = .{
+            .caller = primitives.Address{ .bytes = params.caller },
+            .to = primitives.Address{ .bytes = params.to },
+            .input = input,
+            .gas = params.gas,
+        }},
+        3 => evm.CallParams{ .staticcall = .{
+            .caller = primitives.Address{ .bytes = params.caller },
+            .to = primitives.Address{ .bytes = params.to },
+            .input = input,
+            .gas = params.gas,
+        }},
+        4 => evm.CallParams{ .create = .{
+            .caller = primitives.Address{ .bytes = params.caller },
+            .value = value,
+            .init_code = input,
+            .gas = params.gas,
+        }},
+        5 => evm.CallParams{ .create2 = .{
+            .caller = primitives.Address{ .bytes = params.caller },
+            .value = value,
+            .init_code = input,
+            .salt = salt,
+            .gas = params.gas,
+        }},
+        else => {
+            setError("Invalid call type: {}", .{params.call_type});
+            return null;
+        },
+    };
+    
+    // Simulate the call (doesn't modify state)
+    const result = evm_ptr.simulate(call_params);
+    
+    // Convert result to FFI format
+    return convertCallResultToEvmResult(result, alloc);
 }
