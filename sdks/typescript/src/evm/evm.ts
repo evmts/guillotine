@@ -94,7 +94,7 @@ export class GuillotineEVM {
       
       // Set block info fields with defaults
       view.setBigUint64(0, blockInfo?.number || 0n, true); // number
-      view.setBigUint64(8, blockInfo?.timestamp || BigInt(Date.now() / 1000), true); // timestamp
+      view.setBigUint64(8, blockInfo?.timestamp || BigInt(Math.floor(Date.now() / 1000)), true); // timestamp
       view.setBigUint64(16, blockInfo?.gasLimit || 30000000n, true); // gas_limit
       
       // coinbase address (20 bytes)
@@ -574,9 +574,9 @@ export class GuillotineEVM {
 
     // Parse logs
     const logs: LogEntry[] = [];
-    if (logsLen > 0) {
+    if (logsLen > 0 && logsPtr !== 0) {
       for (let i = 0; i < logsLen; i++) {
-        const logPtr = logsPtr + i * 40; // Size of LogEntry struct
+        const logPtr = logsPtr + i * 36; // Size of LogEntry struct (20 + 4 + 4 + 4 + 4)
         const logView = new DataView(buffer.buffer, logPtr);
         
         // address: [20]u8
@@ -595,12 +595,14 @@ export class GuillotineEVM {
         const dataLen = logView.getUint32(32, true);
 
         const topics: U256[] = [];
-        for (let j = 0; j < topicsLen; j++) {
-          const topicBytes = new Uint8Array(buffer.buffer, topicsPtr + j * 32, 32);
-          topics.push(U256.fromBytes(topicBytes));
+        if (topicsLen > 0 && topicsPtr !== 0) {
+          for (let j = 0; j < topicsLen; j++) {
+            const topicBytes = new Uint8Array(buffer.buffer, topicsPtr + j * 32, 32);
+            topics.push(U256.fromBytes(topicBytes));
+          }
         }
 
-        const data = dataLen > 0
+        const data = dataLen > 0 && dataPtr !== 0
           ? Bytes.fromBytes(new Uint8Array(buffer.buffer, dataPtr, dataLen))
           : Bytes.empty();
 
@@ -614,7 +616,7 @@ export class GuillotineEVM {
 
     // Parse selfdestructs
     const selfdestructs: SelfDestructRecord[] = [];
-    if (selfdestructsLen > 0) {
+    if (selfdestructsLen > 0 && selfdestructsPtr !== 0) {
       for (let i = 0; i < selfdestructsLen; i++) {
         const sdPtr = selfdestructsPtr + i * 40; // Size of SelfDestructRecord
         const contractBytes = new Uint8Array(buffer.buffer, sdPtr, 20);
@@ -629,7 +631,7 @@ export class GuillotineEVM {
 
     // Parse accessed addresses
     const accessedAddresses: Address[] = [];
-    if (accessedAddressesLen > 0) {
+    if (accessedAddressesLen > 0 && accessedAddressesPtr !== 0) {
       for (let i = 0; i < accessedAddressesLen; i++) {
         const addrPtr = accessedAddressesPtr + i * 20;
         const addrBytes = new Uint8Array(buffer.buffer, addrPtr, 20);
@@ -639,7 +641,7 @@ export class GuillotineEVM {
 
     // Parse accessed storage
     const accessedStorage: StorageAccessRecord[] = [];
-    if (accessedStorageLen > 0) {
+    if (accessedStorageLen > 0 && accessedStoragePtr !== 0) {
       for (let i = 0; i < accessedStorageLen; i++) {
         const storagePtr = accessedStoragePtr + i * 52; // 20 + 32
         const addressBytes = new Uint8Array(buffer.buffer, storagePtr, 20);
@@ -658,7 +660,7 @@ export class GuillotineEVM {
       : null;
 
     // Parse trace JSON
-    const traceJson = traceJsonLen > 0
+    const traceJson = traceJsonLen > 0 && traceJsonPtr !== 0
       ? new TextDecoder().decode(new Uint8Array(buffer.buffer, traceJsonPtr, traceJsonLen))
       : null;
 
