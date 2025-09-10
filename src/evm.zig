@@ -1175,6 +1175,16 @@ pub fn Evm(comptime config: EvmConfig) type {
                         log.debug("execute_frame: termination SelfDestruct", .{});
                         termination_reason = error.SelfDestruct;
                     },
+                    error.REVERT => {
+                        // REVERT is a special case - copy revert data and return revert result
+                        const gas_left: u64 = @intCast(@max(frame.gas_remaining, 0));
+                        const out_copy = if (frame.output.len > 0) blk: {
+                            const buf = try self.allocator.alloc(u8, frame.output.len);
+                            @memcpy(buf, frame.output);
+                            break :blk buf;
+                        } else &[_]u8{};
+                        return CallResult.revert_with_data(gas_left, out_copy);
+                    },
                     else => {
                         // Actual errors
                         log.debug("Frame execution failed with error: {}", .{err});
