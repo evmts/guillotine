@@ -44,10 +44,6 @@ pub fn DispatchMetadata(comptime FrameType: type) type {
         /// Thus we must provide as metadata to avoid the expensive process of mapping back our instruction index to what pc it came from
         pub const PcMetadata = packed struct { value: FrameType.PcType };
 
-        /// Metadata for CODESIZE opcode containing the bytecode size.
-        /// Only one opcode needs this data so it's better to store it as metadata for that opcode than store on frame
-        pub const CodesizeMetadata = packed struct { size: u32 };
-
     };
 }
 
@@ -113,17 +109,6 @@ test "PcMetadata stores program counter value" {
     
     try testing.expectEqual(@as(u32, 12345), metadata.value);
 }
-
-test "CodesizeMetadata stores bytecode size" {
-    const Metadata = DispatchMetadata(TestFrame);
-    
-    const metadata = Metadata.CodesizeMetadata{
-        .size = 65536,
-    };
-    
-    try testing.expectEqual(@as(u32, 65536), metadata.size);
-}
-
 
 test "FirstBlockMetadata is same as JumpDestMetadata" {
     const Metadata = DispatchMetadata(TestFrame);

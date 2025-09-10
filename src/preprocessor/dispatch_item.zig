@@ -13,7 +13,6 @@ pub fn DispatchItem(comptime FrameType: type, comptime HandlerType: type) type {
         push_inline: Metadata.PushInlineMetadata,
         push_pointer: Metadata.PushPointerMetadata,
         pc: Metadata.PcMetadata,
-        codesize: Metadata.CodesizeMetadata,
         first_block_gas: Metadata.FirstBlockMetadata,
     };
 
@@ -60,8 +59,4 @@ test "DispatchItem can store different metadata types" {
     // Test PC metadata
     const item3: Item = .{ .pc = .{ .value = 42 } };
     try testing.expectEqual(@as(u32, 42), item3.pc.value);
-
-    // Test codesize metadata
-    const item4: Item = .{ .codesize = .{ .size = 1024 } };
-    try testing.expectEqual(@as(u32, 1024), item4.codesize.size);
 }
