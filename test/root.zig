@@ -74,7 +74,7 @@ test {
     // _ = @import("evm/evm_test_msg_propagation.zig");
     // _ = @import("evm/frame_integration_test.zig");
     _ = @import("evm/transfer_test.zig");
-    _ = @import("access_list_test.zig");
+    _ = @import("evm/access_list_test.zig");
     
     // ERC20 deployment differential test
     _ = @import("evm/erc20_deployment_issue.zig");
