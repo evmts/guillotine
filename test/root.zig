@@ -99,8 +99,8 @@ test {
 
     // Static call tests
     _ = @import("differential/staticcall_state_modification_test.zig");
-    _ = @import("staticcall_eip214_test.zig");
-    _ = @import("staticcall_write_protection_test.zig");
+    _ = @import("evm/staticcall_eip214_test.zig");
+    _ = @import("evm/staticcall_write_protection_test.zig");
 
     // Benchmarks
     // _ = @import("benchmark/baseline_benchmark.zig");
