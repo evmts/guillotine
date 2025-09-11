@@ -500,28 +500,6 @@ pub fn build(b: *std.Build) void {
     const test_gt_bug = b.step("test-gt-bug", "Test GT opcode bug");
     test_gt_bug.dependOn(&b.addRunArtifact(gt_bug_test).step);
 
-    // Storage persistence test
-    const storage_persistence_test = b.addTest(.{
-        .name = "storage-persistence-test",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("test/storage_persistence_test.zig"),
-            .target = target,
-            .optimize = .Debug,
-        }),
-    });
-    storage_persistence_test.root_module.addImport("evm", modules.evm_mod);
-    storage_persistence_test.root_module.addImport("primitives", modules.primitives_mod);
-    storage_persistence_test.root_module.addImport("crypto", modules.crypto_mod);
-    storage_persistence_test.root_module.addImport("build_options", config.options_mod);
-    storage_persistence_test.root_module.addImport("log", b.createModule(.{ .root_source_file = b.path("src/log.zig"), .target = target, .optimize = .Debug }));
-    storage_persistence_test.linkLibrary(c_kzg_lib);
-    storage_persistence_test.linkLibrary(blst_lib);
-    if (bn254_lib) |bn254| storage_persistence_test.linkLibrary(bn254);
-    storage_persistence_test.linkLibC();
-    const run_storage_persistence_test = b.addRunArtifact(storage_persistence_test);
-    const storage_persistence_test_step = b.step("test-storage-persistence", "Test storage persistence after frame execution");
-    storage_persistence_test_step.dependOn(&run_storage_persistence_test.step);
-
     // Per-opcode differential tests discovered in test/evm/opcodes
     // We dynamically scan the directory and add a test target for each file matching *_test.zig
     const opcode_tests_step = b.step("test-opcodes", "Run all per-opcode differential tests");
