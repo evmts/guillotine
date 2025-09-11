@@ -2,66 +2,69 @@
 //! are tracked during execution but never returned in CallResult.
 
 const std = @import("std");
-const Evm = @import("evm").DefaultEvm;
-const MemoryDatabase = @import("evm").MemoryDatabase;
-const Address = @import("primitives").Address.Address;
+const testing = std.testing;
+const evm = @import("evm");
 const primitives = @import("primitives");
-const CallParams = @import("evm").CallParams;
-const BlockInfo = @import("evm").DefaultBlockInfo;
-const TransactionContext = @import("evm").TransactionContext;
-const Hardfork = @import("evm").Hardfork;
-const Account = @import("evm").Account;
 
-/// Helper to create a configured EVM instance for testing
-fn createTestEvm(allocator: std.mem.Allocator) !struct { evm: *Evm, memory_db: *MemoryDatabase } {
-    const memory_db = try allocator.create(MemoryDatabase);
-    memory_db.* = MemoryDatabase.init(allocator);
-    const db_interface = memory_db.to_database_interface();
+const Evm = evm.Evm;
+const Database = evm.Database;
+const CallParams = evm.CallParams;
+const Address = primitives.Address.Address;
+const BlockInfo = evm.BlockInfo;
+const TransactionContext = evm.TransactionContext;
+
+test "Access lists should be populated in CallResult" {
+    const allocator = testing.allocator;
     
+    // Create database
+    var database = Database.init(allocator);
+    defer database.deinit();
+    
+    // Create block info and transaction context
     const block_info = BlockInfo{
         .number = 1,
         .timestamp = 1000,
-        .gas_limit = 1_000_000,
+        .difficulty = 100,
+        .gas_limit = 30_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
-        .base_fee = 0,
-        .chain_id = 1,
-        .difficulty = 0,
+        .base_fee = 1_000_000_000,
         .prev_randao = [_]u8{0} ** 32,
-    };
-    
-    const tx_context = TransactionContext{
-        .gas_limit = 1_000_000,
-        .coinbase = primitives.ZERO_ADDRESS,
         .chain_id = 1,
+        .blob_base_fee = 0,
         .blob_versioned_hashes = &.{},
     };
+    const tx_context = TransactionContext{
+        .gas_limit = 100_000_000,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .chain_id = 1,
+    };
     
-    const gas_price = 0;
-    const origin = primitives.ZERO_ADDRESS;
-    const hardfork = Hardfork.CANCUN;
-    
-    const evm = try allocator.create(Evm);
-    evm.* = try Evm.init(allocator, db_interface, block_info, tx_context, gas_price, origin, hardfork);
-    return .{ .evm = evm, .memory_db = memory_db };
-}
-
-test "Access lists should be populated in CallResult" {
-    const testing = std.testing;
-    const allocator = testing.allocator;
+    // Create caller account with balance
+    const caller_address = Address.from_hex("0x1234567890123456789012345678901234567890") catch unreachable;
+    const caller_account = evm.Account{
+        .balance = 1_000_000_000,
+        .nonce = 0,
+        .code_hash = [_]u8{0} ** 32,
+        .storage_root = [_]u8{0} ** 32,
+        .delegated_address = null,
+    };
+    try database.set_account(caller_address.bytes, caller_account);
     
     // Create EVM instance
-    const ctx = try createTestEvm(allocator);
-    var evm = ctx.evm;
-    defer {
-        evm.deinit();
-        allocator.destroy(evm);
-        ctx.memory_db.deinit();
-        allocator.destroy(ctx.memory_db);
-    }
+    var evm_instance = try Evm(.{}).init(
+        allocator,
+        &database,
+        block_info,
+        tx_context,
+        0,
+        caller_address,
+        .CANCUN
+    );
+    defer evm_instance.deinit();
     
     // Deploy contracts
-    const contract_a = Address.fromHex("1111111111111111111111111111111111111111") catch unreachable;
-    const contract_b = Address.fromHex("2222222222222222222222222222222222222222") catch unreachable;
+    const contract_a = Address.from_hex("0x1111111111111111111111111111111111111111") catch unreachable;
+    const contract_b = Address.from_hex("0x2222222222222222222222222222222222222222") catch unreachable;
     
     // Bytecode for contract A:
     // PUSH20 contract_b, BALANCE (accesses address)
@@ -79,53 +82,59 @@ test "Access lists should be populated in CallResult" {
         0x00,              // STOP
     };
     
-    const code_hash_a = try ctx.memory_db.set_code(&bytecode_a);
-    const account_a = Account{
+    const code_hash_a = try database.set_code(&bytecode_a);
+    const account_a = evm.Account{
         .balance = 0,
         .code_hash = code_hash_a,
         .storage_root = [_]u8{0} ** 32,
         .nonce = 0,
         .delegated_address = null,
     };
-    try ctx.memory_db.set_account(contract_a.bytes, account_a);
+    try database.set_account(contract_a.bytes, account_a);
     
     // Set up contract B (empty code)
-    const account_b = Account{
+    const account_b = evm.Account{
         .balance = 1000,
         .code_hash = primitives.EMPTY_CODE_HASH,
         .storage_root = [_]u8{0} ** 32,
         .nonce = 0,
         .delegated_address = null,
     };
-    try ctx.memory_db.set_account(contract_b.bytes, account_b);
+    try database.set_account(contract_b.bytes, account_b);
     
     // Execute call to contract A
     const params = CallParams{ .call = .{
-        .caller = primitives.ZERO_ADDRESS,
+        .caller = caller_address,
         .to = contract_a,
         .value = 0,
         .input = &.{},
         .gas = 100_000,
     }};
     
-    const result = try evm.call(params);
+    var result = evm_instance.call(params);
+    defer result.deinit(allocator);
     
     // Verify access lists were populated
     try testing.expect(result.success);
     
     // Should have accessed at least contract_a and contract_b
-    std.debug.print("Accessed addresses count: {}\n", .{result.accessed_addresses.len});
-    for (result.accessed_addresses, 0..) |addr, i| {
-        std.debug.print("  Address[{}]: {any}\n", .{i, addr});
-    }
-    
     try testing.expect(result.accessed_addresses.len >= 2);
     
-    // Should have accessed storage slots 0, 5, and 10
-    std.debug.print("Accessed storage count: {}\n", .{result.accessed_storage.len});
-    for (result.accessed_storage, 0..) |access, i| {
-        std.debug.print("  Storage[{}]: {any} slot {}\n", .{i, access.address, access.slot});
+    // Check that contract_a and contract_b are in the accessed addresses (order doesn't matter)
+    var found_contract_a = false;
+    var found_contract_b = false;
+    for (result.accessed_addresses) |addr| {
+        if (std.mem.eql(u8, &addr.bytes, &contract_a.bytes)) {
+            found_contract_a = true;
+        }
+        if (std.mem.eql(u8, &addr.bytes, &contract_b.bytes)) {
+            found_contract_b = true;
+        }
     }
+    try testing.expect(found_contract_a);
+    try testing.expect(found_contract_b);
+    
+    // Should have accessed storage slots 0, 5, and 10
     
     try testing.expect(result.accessed_storage.len == 3);
     
