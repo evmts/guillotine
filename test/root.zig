@@ -93,6 +93,7 @@ test {
     // _ = @import("evm/snapshot_propagation_tests.zig");
     // C API tests removed - these APIs are not exported from evm module
     // _ = @import("evm/warm_cold_access_tests.zig");
+    _ = @import("selfdestruct_records_test.zig");
     
     // Opcode differential tests
     _ = @import("evm/opcodes/all_opcodes.zig");

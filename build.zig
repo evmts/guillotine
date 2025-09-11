@@ -426,28 +426,6 @@ pub fn build(b: *std.Build) void {
     const fixtures_differential_test_step = b.step("test-fixtures-differential", "Run differential tests for benchmark fixtures (ERC20, snailtracer, etc.)");
     fixtures_differential_test_step.dependOn(&run_fixtures_differential_test.step);
 
-    // SELFDESTRUCT records test
-    const selfdestruct_records_test = b.addTest(.{
-        .name = "test-selfdestruct-records",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("test/selfdestruct_records_test.zig"),
-            .target = target,
-            .optimize = .Debug,
-        }),
-    });
-    selfdestruct_records_test.root_module.addImport("evm", modules.evm_mod);
-    selfdestruct_records_test.root_module.addImport("primitives", modules.primitives_mod);
-    selfdestruct_records_test.root_module.addImport("crypto", modules.crypto_mod);
-    selfdestruct_records_test.root_module.addImport("build_options", config.options_mod);
-    selfdestruct_records_test.linkLibrary(c_kzg_lib);
-    selfdestruct_records_test.linkLibrary(blst_lib);
-    if (bn254_lib) |bn254| selfdestruct_records_test.linkLibrary(bn254);
-    selfdestruct_records_test.linkLibC();
-    
-    const run_selfdestruct_records_test = b.addRunArtifact(selfdestruct_records_test);
-    const selfdestruct_records_test_step = b.step("test-selfdestruct-records", "Test SELFDESTRUCT records in CallResult");
-    selfdestruct_records_test_step.dependOn(&run_selfdestruct_records_test.step);
-
     // Snailtracer differential test
     const snailtracer_test = b.addTest(.{
         .name = "snailtracer-test",
