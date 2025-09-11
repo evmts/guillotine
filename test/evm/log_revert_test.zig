@@ -60,15 +60,15 @@ test "logs should be reverted on REVERT opcode" {
     
     // Bytecode: Emit LOG1 then REVERT
     // PUSH1 0x42, PUSH1 0x00, MSTORE (store data)
-    // PUSH1 0x20, PUSH1 0x00, PUSH1 0x99, LOG1 (emit log)
+    // PUSH1 0x00, PUSH1 0x20, PUSH1 0x99, LOG1 (emit log with correct stack order)
     // PUSH1 0x00, PUSH1 0x00, REVERT
     const bytecode = [_]u8{
         0x60, 0x42,  // PUSH1 0x42
         0x60, 0x00,  // PUSH1 0x00  
         0x52,        // MSTORE
-        0x60, 0x20,  // PUSH1 0x20 (size)
-        0x60, 0x00,  // PUSH1 0x00 (offset) 
-        0x60, 0x99,  // PUSH1 0x99 (topic)
+        0x60, 0x00,  // PUSH1 0x00 (offset - bottom of stack)
+        0x60, 0x20,  // PUSH1 0x20 (size - middle of stack)
+        0x60, 0x99,  // PUSH1 0x99 (topic - top of stack)
         0xA1,        // LOG1
         0x60, 0x00,  // PUSH1 0x00 (offset)
         0x60, 0x00,  // PUSH1 0x00 (size)
@@ -92,7 +92,8 @@ test "logs should be reverted on REVERT opcode" {
         .gas = 100000,
     } };
     
-    const result = evm.call(params);
+    var result = evm.call(params);
+    defer result.deinit(allocator);
     
     // Should fail due to REVERT
     try std.testing.expect(!result.success);
@@ -120,15 +121,15 @@ test "logs should be preserved on successful execution" {
     
     // Bytecode: Emit LOG1 then RETURN (success)
     // PUSH1 0x42, PUSH1 0x00, MSTORE (store data)
-    // PUSH1 0x20, PUSH1 0x00, PUSH1 0x99, LOG1 (emit log)
+    // PUSH1 0x00, PUSH1 0x20, PUSH1 0x99, LOG1 (emit log with correct stack order)
     // PUSH1 0x00, PUSH1 0x00, RETURN
     const bytecode = [_]u8{
         0x60, 0x42,  // PUSH1 0x42
         0x60, 0x00,  // PUSH1 0x00  
         0x52,        // MSTORE
-        0x60, 0x20,  // PUSH1 0x20 (size)
-        0x60, 0x00,  // PUSH1 0x00 (offset) 
-        0x60, 0x99,  // PUSH1 0x99 (topic)
+        0x60, 0x00,  // PUSH1 0x00 (offset - bottom of stack)
+        0x60, 0x20,  // PUSH1 0x20 (size - middle of stack)
+        0x60, 0x99,  // PUSH1 0x99 (topic - top of stack)
         0xA1,        // LOG1
         0x60, 0x00,  // PUSH1 0x00 (offset)
         0x60, 0x00,  // PUSH1 0x00 (size)
@@ -152,7 +153,8 @@ test "logs should be preserved on successful execution" {
         .gas = 100000,
     } };
     
-    const result = evm.call(params);
+    var result = evm.call(params);
+    defer result.deinit(allocator);
     
     // Should succeed
     try std.testing.expect(result.success);
