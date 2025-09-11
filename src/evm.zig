@@ -1096,6 +1096,9 @@ pub fn Evm(comptime config: EvmConfig) type {
             // log.debug("DEBUG: About to call Frame.init\n", .{});
             // Use arena allocator for all frame allocations
             const arena_allocator = self.getCallArenaAllocator();
+            
+            // TODO: Use StaticDatabase wrapper when in static context (EIP-214)
+            // Currently handlers check static context manually due to type system constraints
             var frame = try Frame.init(arena_allocator, gas_cast, self.database.*, caller, &value, input, @as(*anyopaque, @ptrCast(self)));
             frame.contract_address = address;
             defer frame.deinit(arena_allocator);
@@ -1352,7 +1355,7 @@ pub fn Evm(comptime config: EvmConfig) type {
         pub fn emit_log(self: *Self, contract_address: primitives.Address, topics: []const u256, data: []const u8) void {
             // EIP-214: Prevent log emission in static context
             if (self.is_static_context()) {
-                return; // Silently fail in static context
+                return error.WriteProtection;
             }
 
             // Allocate copies with the main allocator so tests can free via evm.allocator
@@ -1374,12 +1377,6 @@ pub fn Evm(comptime config: EvmConfig) type {
         /// Execute nested EVM call - for Host interface
         pub fn host_inner_call(self: *Self, params: CallParams) !CallResult {
             return self.inner_call(params);
-        }
-
-        /// Host interface method to get static context (EIP-214)
-        /// Used by Frame handlers to check if state modifications are allowed
-        pub fn get_is_static(self: *Self) bool {
-            return self.is_static_context();
         }
 
         /// Register a contract as created in the current transaction

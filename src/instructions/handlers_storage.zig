@@ -78,12 +78,6 @@ pub fn Handlers(comptime FrameType: type) type {
 
             // Access storage slot once to both warm it and get cost
             const evm = self.getEvm();
-            
-            // EIP-214: Prevent storage writes in static context (STATICCALL)
-            if (evm.get_is_static()) {
-                return Error.WriteProtection;
-            }
-            
             const access_cost = evm.access_storage_slot(contract_addr, slot) catch |err| switch (err) {
                 else => return Error.AllocationError,
             };
@@ -115,6 +109,11 @@ pub fn Handlers(comptime FrameType: type) type {
                 };
             }
 
+            // EIP-214: Check static context - no storage writes in static calls
+            if (evm.is_static_context()) {
+                return Error.WriteProtection;
+            }
+            
             // Store the value directly in frame's database
             self.database.set_storage(contract_addr.bytes, slot, value) catch |err| switch (err) {
                 error.WriteProtection => return Error.WriteProtection,
@@ -167,14 +166,6 @@ pub fn Handlers(comptime FrameType: type) type {
             // Use the currently executing contract's address
             const contract_addr = self.contract_address;
 
-            // Get EVM instance for static context check
-            const evm = self.getEvm();
-            
-            // EIP-214: Prevent transient storage writes in static context (STATICCALL)
-            if (evm.get_is_static()) {
-                return Error.WriteProtection;
-            }
-
             // Transient storage has fixed gas cost
             const gas_cost = GasConstants.WarmStorageReadCost; // 100 gas
             // Use negative gas pattern for single-branch out-of-gas detection
@@ -183,6 +174,12 @@ pub fn Handlers(comptime FrameType: type) type {
                 return Error.OutOfGas;
             }
 
+            // EIP-214: Check static context - no transient storage writes in static calls
+            const evm = self.getEvm();
+            if (evm.is_static_context()) {
+                return Error.WriteProtection;
+            }
+            
             // Store the value in transient storage directly in frame's database
             self.database.set_transient_storage(contract_addr.bytes, slot, value) catch |err| switch (err) {
                 error.WriteProtection => return Error.WriteProtection,

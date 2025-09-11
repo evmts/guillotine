@@ -94,11 +94,6 @@ test "STATICCALL should fail when attempting state modifications" {
     // Verify that storage was NOT modified
     const storage_value = try db.get_storage(target_addr.bytes, 0);
     try testing.expectEqual(@as(u256, 0), storage_value);
-    
-    // This test currently FAILS because the STATICCALL succeeds when it should fail.
-    // The issue appears to be that the write protection check in the SSTORE handler
-    // is not properly detecting that we're in a static context, or the error is not
-    // being properly propagated to cause the STATICCALL to fail.
 }
 
 // Additional test: STATICCALL should succeed for read-only operations

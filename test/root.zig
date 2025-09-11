@@ -97,6 +97,11 @@ test {
     // Opcode differential tests
     _ = @import("evm/opcodes/all_opcodes.zig");
 
+    // Static call tests
+    _ = @import("differential/staticcall_state_modification_test.zig");
+    _ = @import("staticcall_eip214_test.zig");
+    _ = @import("staticcall_write_protection_test.zig");
+
     // Benchmarks
     // _ = @import("benchmark/baseline_benchmark.zig");
 }

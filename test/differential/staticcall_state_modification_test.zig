@@ -2,9 +2,8 @@ const std = @import("std");
 const DifferentialTestor = @import("differential_testor.zig").DifferentialTestor;
 const testing = std.testing;
 
-/// Test that STATICCALL properly prevents state modifications (EIP-214)
-/// This test creates a contract and makes a STATICCALL to it that attempts SSTORE
-/// It should demonstrate the bug where guillotine incorrectly allows state modifications in static context
+// Test that STATICCALL properly prevents state modifications (EIP-214)
+// This test creates a contract and makes a STATICCALL to it that attempts SSTORE
 test "differential: STATICCALL should prevent state modifications" {
     const allocator = testing.allocator;
     
@@ -53,7 +52,7 @@ test "differential: STATICCALL should prevent state modifications" {
     }
     
     // Main contract that deploys target and makes STATICCALL to it
-    var main_contract: [256]u8 = undefined;
+    var main_contract: [512]u8 = undefined;
     var pos: usize = 0;
     
     // Store deployment bytecode in memory
