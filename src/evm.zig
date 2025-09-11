@@ -1098,7 +1098,16 @@ pub fn Evm(comptime config: EvmConfig) type {
             const arena_allocator = self.getCallArenaAllocator();
             var frame = try Frame.init(arena_allocator, gas_cast, self.database.*, caller, &value, input, @as(*anyopaque, @ptrCast(self)));
             frame.contract_address = address;
-            defer frame.deinit(arena_allocator);
+            defer {
+                // Synchronize storage changes back from frame
+                // This is necessary because Frame gets a copy of the Database struct
+                // When HashMap grows during SSTORE, Frame allocates new metadata
+                // Without this sync, the original Database has stale pointers = SEGFAULT or lost storage
+                self.database.storage = frame.database.storage;
+                self.database.accounts = frame.database.accounts;
+                self.database.transient_storage = frame.database.transient_storage;
+                frame.deinit(arena_allocator);
+            }
 
             // EIP-2929: Warm the contract address being executed
             _ = self.access_list.access_address(address) catch {};
@@ -1214,15 +1223,6 @@ pub fn Evm(comptime config: EvmConfig) type {
                     .topics = topics_copy,
                     .data = data_copy,
                 }) catch return CallResult.failure(0);
-            }
-
-            // Transfer storage changes from frame to EVM's database
-            var storage_iter = frame.database.storage.iterator();
-            while (storage_iter.next()) |entry| {
-                // Copy each storage entry from frame database to main database
-                self.database.set_storage(entry.key_ptr.address, entry.key_ptr.key, entry.value_ptr.*) catch {
-                    return CallResult.failure(0);
-                };
             }
 
             // Handle different termination reasons appropriately
