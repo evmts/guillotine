@@ -159,8 +159,6 @@ pub fn Handlers(comptime FrameType: type) type {
         pub fn tstore(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const dispatch = Dispatch{ .cursor = cursor };
 
-            // EIP-214: WriteProtection is handled by host interface for static calls
-
             // TSTORE expects stack: [..., key, value] where key is at top
             std.debug.assert(self.stack.size() >= 2); // TSTORE requires 2 stack items
             const slot = self.stack.pop_unsafe(); // Pop key/slot first (top of stack)
@@ -168,6 +166,14 @@ pub fn Handlers(comptime FrameType: type) type {
 
             // Use the currently executing contract's address
             const contract_addr = self.contract_address;
+
+            // Get EVM instance for static context check
+            const evm = self.getEvm();
+            
+            // EIP-214: Prevent transient storage writes in static context (STATICCALL)
+            if (evm.get_is_static()) {
+                return Error.WriteProtection;
+            }
 
             // Transient storage has fixed gas cost
             const gas_cost = GasConstants.WarmStorageReadCost; // 100 gas
