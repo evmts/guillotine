@@ -2,7 +2,7 @@ use revm::{
     Database,
     db::{CacheDB, EmptyDB},
     primitives::{
-        Address, Bytecode, Bytes, ExecutionResult as RevmExecutionResult, U256, SpecId,
+        Address, Bytecode, Bytes, ExecutionResult as RevmExecutionResult, U256, SpecId, Log,
     },
     Evm,
 };
@@ -71,6 +71,16 @@ impl Default for RevmSettings {
     }
 }
 
+/// Log entry for FFI
+#[repr(C)]
+pub struct FfiLog {
+    pub address: [u8; 20],
+    pub topics: *mut [u8; 32],
+    pub topics_count: usize,
+    pub data: *mut u8,
+    pub data_len: usize,
+}
+
 /// Execution result from REVM
 #[repr(C)]
 pub struct ExecutionResult {
@@ -79,6 +89,7 @@ pub struct ExecutionResult {
     pub gas_refunded: u64,
     pub output_data: *mut u8,
     pub output_len: usize,
+    pub logs: *mut FfiLog,
     pub logs_count: usize,
     pub revert_reason: *mut c_char,
 }
@@ -462,6 +473,10 @@ pub unsafe extern "C" fn revm_execute(
         }
     };
     
+    // TODO: Extract actual logs from REVM 
+    // For now, use empty logs to verify the pipeline works
+    let logs: Vec<Log> = Vec::new();
+    
     // eprintln!("REVM FFI: Transaction succeeded");
     // eprintln!("REVM FFI: Result type: {:?}", result);
 
@@ -497,6 +512,50 @@ pub unsafe extern "C" fn revm_execute(
         }
     };
 
+    // Convert logs to FFI format
+    let (logs_ptr, logs_count) = if !logs.is_empty() {
+        let mut ffi_logs = Vec::with_capacity(logs.len());
+        for log in logs.iter() {
+            // Allocate and convert topics
+            let topics_ptr = if !log.topics().is_empty() {
+                let mut topics = Vec::with_capacity(log.topics().len());
+                for topic in log.topics() {
+                    topics.push(topic.0);
+                }
+                let ptr = topics.as_mut_ptr();
+                std::mem::forget(topics);
+                ptr
+            } else {
+                ptr::null_mut()
+            };
+            
+            // Allocate and convert data
+            let data_vec = log.data.data.to_vec();
+            let data_ptr = if !data_vec.is_empty() {
+                let mut data = data_vec;
+                let ptr = data.as_mut_ptr();
+                std::mem::forget(data);
+                ptr
+            } else {
+                ptr::null_mut()
+            };
+            
+            ffi_logs.push(FfiLog {
+                address: log.address.0.into(),
+                topics: topics_ptr,
+                topics_count: log.topics().len(),
+                data: data_ptr,
+                data_len: log.data.data.len(),
+            });
+        }
+        let ptr = ffi_logs.as_mut_ptr();
+        let len = ffi_logs.len();
+        std::mem::forget(ffi_logs);
+        (ptr, len)
+    } else {
+        (ptr::null_mut(), 0)
+    };
+
     // Create result
     // eprintln!("REVM FFI: Creating result with output length: {}", output.len());
     let mut output_vec = output.to_vec();
@@ -519,7 +578,8 @@ pub unsafe extern "C" fn revm_execute(
         gas_refunded,
         output_data: output_ptr,
         output_len: output.len(),
-        logs_count: 0, // TODO: Implement logs
+        logs: logs_ptr,
+        logs_count,
         revert_reason: revert_ptr,
     });
 
@@ -683,6 +743,10 @@ pub unsafe extern "C" fn revm_execute_with_trace(
             return 0;
         }
     };
+    
+    // TODO: Extract actual logs from REVM
+    // For now, use empty logs to verify the pipeline works  
+    let logs: Vec<Log> = Vec::new();
 
     // Ensure trace is flushed
     let _ = trace_file.flush();
@@ -715,6 +779,50 @@ pub unsafe extern "C" fn revm_execute_with_trace(
         }
     };
 
+    // Convert logs to FFI format
+    let (logs_ptr, logs_count) = if !logs.is_empty() {
+        let mut ffi_logs = Vec::with_capacity(logs.len());
+        for log in logs.iter() {
+            // Allocate and convert topics
+            let topics_ptr = if !log.topics().is_empty() {
+                let mut topics = Vec::with_capacity(log.topics().len());
+                for topic in log.topics() {
+                    topics.push(topic.0);
+                }
+                let ptr = topics.as_mut_ptr();
+                std::mem::forget(topics);
+                ptr
+            } else {
+                ptr::null_mut()
+            };
+            
+            // Allocate and convert data
+            let data_vec = log.data.data.to_vec();
+            let data_ptr = if !data_vec.is_empty() {
+                let mut data = data_vec;
+                let ptr = data.as_mut_ptr();
+                std::mem::forget(data);
+                ptr
+            } else {
+                ptr::null_mut()
+            };
+            
+            ffi_logs.push(FfiLog {
+                address: log.address.0.into(),
+                topics: topics_ptr,
+                topics_count: log.topics().len(),
+                data: data_ptr,
+                data_len: log.data.data.len(),
+            });
+        }
+        let ptr = ffi_logs.as_mut_ptr();
+        let len = ffi_logs.len();
+        std::mem::forget(ffi_logs);
+        (ptr, len)
+    } else {
+        (ptr::null_mut(), 0)
+    };
+
     // Create result
     let mut output_vec = output.to_vec();
     let output_ptr = if output_vec.is_empty() {
@@ -736,7 +844,8 @@ pub unsafe extern "C" fn revm_execute_with_trace(
         gas_refunded,
         output_data: output_ptr,
         output_len: output.len(),
-        logs_count: 0,
+        logs: logs_ptr,
+        logs_count,
         revert_reason: revert_ptr,
     });
 
@@ -1219,6 +1328,25 @@ pub unsafe extern "C" fn keccak256_hex(
     std::ptr::copy_nonoverlapping(bytes.as_ptr() as *const c_char, out_hex_hash, bytes.len());
 
     1
+}
+
+/// Free logs from execution result
+#[no_mangle]
+pub unsafe extern "C" fn revm_free_logs(logs: *mut FfiLog, count: usize) {
+    if logs.is_null() || count == 0 {
+        return;
+    }
+    
+    for i in 0..count {
+        let log = &*logs.add(i);
+        if !log.topics.is_null() && log.topics_count > 0 {
+            Vec::from_raw_parts(log.topics, log.topics_count, log.topics_count);
+        }
+        if !log.data.is_null() && log.data_len > 0 {
+            Vec::from_raw_parts(log.data, log.data_len, log.data_len);
+        }
+    }
+    Vec::from_raw_parts(logs, count, count);
 }
 
 #[cfg(test)]
