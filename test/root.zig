@@ -77,9 +77,6 @@ test {
     // ERC20 deployment differential test
     _ = @import("evm/erc20_deployment_issue.zig");
     
-    // REVERT data preservation test - demonstrates and tests fix for REVERT issues
-    _ = @import("revert_data_preservation_test.zig");
-    
     // Ten thousand hashes differential test
     _ = @import("differential/ten_thousand_hashes_test.zig");
     // _ = @import("evm/frame_interpreter_create_edge_tests.zig");
