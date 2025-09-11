@@ -3593,7 +3593,7 @@ test "Error handling - REVERT should preserve data and error message in both tra
         try db.set_account(contract_addr.bytes, account);
         
         // Execute call that should revert (non-tracing mode)
-        const params = CallParams{ .call = .{
+        const params = DefaultEvm.CallParams{ .call = .{
             .caller = primitives.Address.ZERO_ADDRESS,
             .to = contract_addr,
             .value = 0,
@@ -3634,6 +3634,7 @@ test "Error handling - REVERT should preserve data and error message in both tra
     
     // Test tracing mode (this should work better but still has error_info issue)
     {
+        const TracingEvm = Evm(.{ .TracerType = @import("tracer/tracer.zig").JSONRPCTracer });
         var vm = try TracingEvm.init(allocator, &db, block_info, tx_context, 0, primitives.Address.ZERO_ADDRESS, .BERLIN);
         defer vm.deinit();
         
@@ -3660,7 +3661,7 @@ test "Error handling - REVERT should preserve data and error message in both tra
         try db.set_account(contract_addr.bytes, account);
         
         // Execute call that should revert (tracing mode)
-        const params = CallParams{ .call = .{
+        const params = TracingEvm.CallParams{ .call = .{
             .caller = primitives.Address.ZERO_ADDRESS,
             .to = contract_addr,
             .value = 0,
@@ -3752,7 +3753,7 @@ test "Error handling - REVERT with empty data should still have error message" {
     try db.set_account(contract_addr.bytes, account);
     
     // Execute call that should revert
-    const params = CallParams{ .call = .{
+    const params = DefaultEvm.CallParams{ .call = .{
         .caller = primitives.Address.ZERO_ADDRESS,
         .to = contract_addr,
         .value = 0,
