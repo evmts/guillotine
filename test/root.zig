@@ -97,6 +97,6 @@ test {
     // Opcode differential tests
     _ = @import("evm/opcodes/all_opcodes.zig");
 
-    // Benchmarks - temporarily commented out due to missing file
+    // Benchmarks
     // _ = @import("benchmark/baseline_benchmark.zig");
 }
