@@ -27,7 +27,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// The actual Keccak variant used depends on WordType:
         /// - For standard EVM (u256), uses Keccak-256
         /// - For smaller word types, may use different variants or truncate
-        pub fn keccak(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn keccak(self: *FrameType, cursor: [*]const Dispatch.Item) callconv(FrameType.getInterpreterCallConv()) Error!noreturn {
             const dispatch = Dispatch{ .cursor = cursor };
             std.debug.assert(self.stack.size() >= 2); // KECCAK256 requires 2 stack items
             const offset = self.stack.pop_unsafe();  // Top of stack is offset

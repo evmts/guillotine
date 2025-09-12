@@ -16,7 +16,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// PUSH_MLOAD_INLINE - Fused PUSH+MLOAD with inline offset (≤8 bytes).
         /// Pushes an offset and immediately loads from that memory location.
         /// Gas costs are pre-calculated statically in dispatch.
-        pub fn push_mload_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn push_mload_inline(self: *FrameType, cursor: [*]const Dispatch.Item) callconv(FrameType.getInterpreterCallConv()) Error!noreturn {
             const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
             const op_data = dispatch_opcode_data.getOpData(.PUSH_MLOAD_INLINE, Dispatch, Dispatch.Item, cursor);
             
@@ -48,7 +48,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// PUSH_MLOAD_POINTER - Fused PUSH+MLOAD with pointer offset (>8 bytes).
         /// Gas costs are pre-calculated statically in dispatch.
-        pub fn push_mload_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn push_mload_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) callconv(FrameType.getInterpreterCallConv()) Error!noreturn {
             const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
             const op_data = dispatch_opcode_data.getOpData(.PUSH_MLOAD_POINTER, Dispatch, Dispatch.Item, cursor);
             
@@ -81,7 +81,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// PUSH_MSTORE_INLINE - Fused PUSH+MSTORE with inline offset (≤8 bytes).
         /// Pushes an offset, then pops a value and stores it at that offset.
         /// Gas costs are pre-calculated statically in dispatch.
-        pub fn push_mstore_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn push_mstore_inline(self: *FrameType, cursor: [*]const Dispatch.Item) callconv(FrameType.getInterpreterCallConv()) Error!noreturn {
             const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
             const op_data = dispatch_opcode_data.getOpData(.PUSH_MSTORE_INLINE, Dispatch, Dispatch.Item, cursor);
             
@@ -114,7 +114,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// PUSH_MSTORE_POINTER - Fused PUSH+MSTORE with pointer offset (>8 bytes).
         /// Gas costs are pre-calculated statically in dispatch.
-        pub fn push_mstore_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn push_mstore_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) callconv(FrameType.getInterpreterCallConv()) Error!noreturn {
             const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
             const op_data = dispatch_opcode_data.getOpData(.PUSH_MSTORE_POINTER, Dispatch, Dispatch.Item, cursor);
             
@@ -144,7 +144,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// PUSH_MSTORE8_INLINE - Fused PUSH+MSTORE8 with inline offset (≤8 bytes).
         /// Pushes an offset, then pops a value and stores the least significant byte.
         /// Gas costs are pre-calculated statically in dispatch.
-        pub fn push_mstore8_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn push_mstore8_inline(self: *FrameType, cursor: [*]const Dispatch.Item) callconv(FrameType.getInterpreterCallConv()) Error!noreturn {
             const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
             const op_data = dispatch_opcode_data.getOpData(.PUSH_MSTORE8_INLINE, Dispatch, Dispatch.Item, cursor);
             
@@ -177,7 +177,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// PUSH_MSTORE8_POINTER - Fused PUSH+MSTORE8 with pointer offset (>8 bytes).
         /// Gas costs are pre-calculated statically in dispatch.
-        pub fn push_mstore8_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn push_mstore8_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) callconv(FrameType.getInterpreterCallConv()) Error!noreturn {
             const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
             const op_data = dispatch_opcode_data.getOpData(.PUSH_MSTORE8_POINTER, Dispatch, Dispatch.Item, cursor);
             

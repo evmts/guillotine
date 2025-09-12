@@ -11,7 +11,7 @@ pub fn Handlers(comptime FrameType: type) type {
         pub const WordType = FrameType.WordType;
 
         /// POP opcode (0x50) - Remove item from stack.
-        pub fn pop(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn pop(self: *FrameType, cursor: [*]const Dispatch.Item) callconv(FrameType.getInterpreterCallConv()) Error!noreturn {
             const dispatch = Dispatch{ .cursor = cursor };
             std.debug.assert(self.stack.size() >= 1); // POP requires 1 stack item
             _ = self.stack.pop_unsafe();
@@ -20,7 +20,7 @@ pub fn Handlers(comptime FrameType: type) type {
         }
 
         /// PUSH0 opcode (0x5f) - Push 0 onto stack.
-        pub fn push0(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn push0(self: *FrameType, cursor: [*]const Dispatch.Item) callconv(FrameType.getInterpreterCallConv()) Error!noreturn {
             const dispatch = Dispatch{ .cursor = cursor };
             std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
             self.stack.push_unsafe(0);
@@ -33,7 +33,7 @@ pub fn Handlers(comptime FrameType: type) type {
             if (push_n > 32) @compileError("Only PUSH1 to PUSH32 is supported");
             if (push_n == 0) @compileError("PUSH0 is handled as its own opcode");
             return &struct {
-                pub fn pushHandler(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+                pub fn pushHandler(self: *FrameType, cursor: [*]const Dispatch.Item) callconv(FrameType.getInterpreterCallConv()) Error!noreturn {
                     const dispatch = Dispatch{ .cursor = cursor };
                     
                     // For PUSH1-PUSH8, we get push_inline metadata with u64 value
@@ -93,7 +93,7 @@ pub fn Handlers(comptime FrameType: type) type {
         pub fn generateDupHandler(comptime dup_n: u8) FrameType.OpcodeHandler {
             if (dup_n == 0 or dup_n > 16) @compileError("Only DUP1 to DUP16 is supported");
             return &struct {
-                pub fn dupHandler(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+                pub fn dupHandler(self: *FrameType, cursor: [*]const Dispatch.Item) callconv(FrameType.getInterpreterCallConv()) Error!noreturn {
                     const dispatch = Dispatch{ .cursor = cursor };
                     std.debug.assert(self.stack.size() >= dup_n); // DUP{d} requires {d} stack items
                     std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
@@ -127,7 +127,7 @@ pub fn Handlers(comptime FrameType: type) type {
         pub fn generateSwapHandler(comptime swap_n: u8) FrameType.OpcodeHandler {
             if (swap_n == 0 or swap_n > 16) @compileError("Only SWAP1 to SWAP16 is supported");
             return &struct {
-                pub fn swapHandler(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+                pub fn swapHandler(self: *FrameType, cursor: [*]const Dispatch.Item) callconv(FrameType.getInterpreterCallConv()) Error!noreturn {
                     const dispatch = Dispatch{ .cursor = cursor };
                     std.debug.assert(self.stack.size() >= swap_n + 1); // SWAP{d} requires {d}+1 stack items
                     self.stack.swap_n_unsafe(swap_n);

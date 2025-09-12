@@ -19,7 +19,7 @@ pub fn Handlers(comptime FrameType: type) type {
         pub fn generateLogHandler(comptime topic_count: u8) FrameType.OpcodeHandler {
             if (topic_count > 4) @compileError("Only LOG0 to LOG4 is supported");
             return &struct {
-                pub fn logHandler(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+                pub fn logHandler(self: *FrameType, cursor: [*]const Dispatch.Item) callconv(FrameType.getInterpreterCallConv()) Error!noreturn {
                     const dispatch = Dispatch{ .cursor = cursor };
                     // EIP-214: WriteProtection is handled by host interface for static calls
 

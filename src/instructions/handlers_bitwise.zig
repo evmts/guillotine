@@ -28,7 +28,7 @@ pub fn Handlers(comptime FrameType: type) type {
         }
 
         /// XOR opcode (0x18) - Bitwise XOR operation.
-        pub fn xor(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn xor(self: *FrameType, cursor: [*]const Dispatch.Item) callconv(FrameType.getInterpreterCallConv()) Error!noreturn {
             std.debug.assert(self.stack.size() >= 2); // XOR requires 2 stack items
             self.stack.binary_op_unsafe(struct { fn op(top: WordType, second: WordType) WordType { return top ^ second; } }.op);
             const op_data = dispatch.getOpData(.XOR, Dispatch, Dispatch.Item, cursor);
@@ -36,7 +36,7 @@ pub fn Handlers(comptime FrameType: type) type {
         }
 
         /// NOT opcode (0x19) - Bitwise NOT operation.
-        pub fn not(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn not(self: *FrameType, cursor: [*]const Dispatch.Item) callconv(FrameType.getInterpreterCallConv()) Error!noreturn {
             std.debug.assert(self.stack.size() >= 1); // NOT requires 1 stack item
             const value = self.stack.peek_unsafe();
             self.stack.set_top_unsafe(~value);
@@ -49,7 +49,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// Returns the byte at that index or 0 if index >= 32.
         /// Uses std.math.shr for consistent cross-platform behavior.
         /// See: https://ziglang.org/documentation/master/std/#std.math.shr
-        pub fn byte(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn byte(self: *FrameType, cursor: [*]const Dispatch.Item) callconv(FrameType.getInterpreterCallConv()) Error!noreturn {
             std.debug.assert(self.stack.size() >= 2); // BYTE requires 2 stack items
             const byte_index = self.stack.pop_unsafe(); // Top of stack - byte index
             const value = self.stack.peek_unsafe(); // Second from top - value to extract from
@@ -66,7 +66,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// SHL opcode (0x1b) - Shift left operation using std.math.shl for consistent behavior.
         /// See: https://ziglang.org/documentation/master/std/#std.math.shl
-        pub fn shl(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn shl(self: *FrameType, cursor: [*]const Dispatch.Item) callconv(FrameType.getInterpreterCallConv()) Error!noreturn {
             std.debug.assert(self.stack.size() >= 2); // SHL requires 2 stack items
             const shift = self.stack.pop_unsafe(); // Top of stack - shift amount
             const value = self.stack.peek_unsafe(); // Second from top - value to shift
@@ -84,7 +84,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// SHR opcode (0x1c) - Logical shift right operation using std.math.shr.
         /// See: https://ziglang.org/documentation/master/std/#std.math.shr
-        pub fn shr(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn shr(self: *FrameType, cursor: [*]const Dispatch.Item) callconv(FrameType.getInterpreterCallConv()) Error!noreturn {
             std.debug.assert(self.stack.size() >= 2); // SHR requires 2 stack items
             const shift = self.stack.pop_unsafe(); // Top of stack - shift amount
             const value = self.stack.peek_unsafe(); // Second from top - value to shift
@@ -103,7 +103,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// SAR opcode (0x1d) - Arithmetic shift right operation using std.math.shr.
         /// Preserves the sign bit during shift.
         /// See: https://ziglang.org/documentation/master/std/#std.math.shr
-        pub fn sar(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn sar(self: *FrameType, cursor: [*]const Dispatch.Item) callconv(FrameType.getInterpreterCallConv()) Error!noreturn {
             std.debug.assert(self.stack.size() >= 2); // SAR requires 2 stack items
             const shift = self.stack.pop_unsafe(); // Top of stack - shift amount
             const value = self.stack.peek_unsafe(); // Second from top - value to shift

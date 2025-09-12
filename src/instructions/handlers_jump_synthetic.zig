@@ -13,7 +13,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// Jump directly to a statically known location without binary search.
         /// The cursor now points to metadata containing the jump destination dispatch.
-        pub fn jump_to_static_location(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn jump_to_static_location(self: *FrameType, cursor: [*]const Dispatch.Item) callconv(FrameType.getInterpreterCallConv()) Error!noreturn {
             @branchHint(.likely);
             const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
             const op_data = dispatch_opcode_data.getOpData(.JUMP_TO_STATIC_LOCATION, Dispatch, Dispatch.Item, cursor);
@@ -26,7 +26,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// Conditionally jump to a statically known location without binary search.
         /// The cursor now points to metadata containing the jump destination dispatch.
-        pub fn jumpi_to_static_location(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn jumpi_to_static_location(self: *FrameType, cursor: [*]const Dispatch.Item) callconv(FrameType.getInterpreterCallConv()) Error!noreturn {
             @branchHint(.likely);
             const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
             const op_data = dispatch_opcode_data.getOpData(.JUMPI_TO_STATIC_LOCATION, Dispatch, Dispatch.Item, cursor);

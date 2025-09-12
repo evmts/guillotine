@@ -49,7 +49,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// JUMPI opcode (0x57) - Conditional jump.
         /// Pops destination and condition from stack.
         /// Jumps to destination if condition is non-zero, otherwise continues to next instruction.
-        pub fn jumpi(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn jumpi(self: *FrameType, cursor: [*]const Dispatch.Item) callconv(FrameType.getInterpreterCallConv()) Error!noreturn {
             std.debug.assert(self.stack.size() >= 2); 
             const jump_table = self.jump_table;
 
@@ -88,7 +88,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// JUMPDEST opcode (0x5b) - Mark valid jump destination.
         /// This opcode marks a valid destination for JUMP and JUMPI operations.
         /// It also serves as a gas consumption point and stack validation point for the entire basic block.
-        pub fn jumpdest(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn jumpdest(self: *FrameType, cursor: [*]const Dispatch.Item) callconv(FrameType.getInterpreterCallConv()) Error!noreturn {
             // Jump table not needed for JUMPDEST itself
             const dispatch = Dispatch{ .cursor = cursor };
             // JUMPDEST consumes gas for the entire basic block (static + dynamic)
@@ -132,7 +132,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// PC opcode (0x58) - Get program counter.
         /// Pushes the current program counter onto the stack.
         /// The actual PC value is provided by the planner through metadata.
-        pub fn pc(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn pc(self: *FrameType, cursor: [*]const Dispatch.Item) callconv(FrameType.getInterpreterCallConv()) Error!noreturn {
             std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
             // Jump table not needed for PC
             const dispatch = Dispatch{ .cursor = cursor };

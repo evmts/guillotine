@@ -309,6 +309,22 @@ pub fn Frame(comptime config: FrameConfig) type {
             else
                 .always_tail; // Must use always_tail for performance
         }
+        
+        /// Returns the appropriate calling convention for interpreter handlers.
+        /// Once we build with the modified Zig compiler, this will use ghccc for maximum performance.
+        /// For now, we use the default calling convention to maintain compatibility.
+        pub inline fn getInterpreterCallConv() std.builtin.CallingConvention {
+            // TODO: Once we're using the custom Zig build with ghccc support, uncomment this:
+            // return switch (builtin.target.cpu.arch) {
+            //     .x86_64 => .{ .x86_64_ghccc = .{} },
+            //     .aarch64, .aarch64_be => .{ .aarch64_ghccc = .{} },
+            //     .wasm32, .wasm64 => .c,
+            //     else => .auto,
+            // };
+            
+            // For now, use standard calling conventions
+            return .auto;
+        }
         /// The "word" type used by the evm. Defaults to u256. "Word" is the type used by Stack and throughout the Evm
         /// If set to something else the EVM will update to that new word size. e.g. run kekkak128 instead of kekkak256
         /// Lowering the word size can improve perf and bundle size

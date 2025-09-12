@@ -20,7 +20,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// PUSH_ADD_INLINE - Fused PUSH+ADD with inline value (≤8 bytes).
         /// Pushes a value and immediately adds it to the top of stack.
-        pub fn push_add_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn push_add_inline(self: *FrameType, cursor: [*]const Dispatch.Item) callconv(FrameType.getInterpreterCallConv()) Error!noreturn {
             @branchHint(.likely);
             validate_stack(self);
             
@@ -32,7 +32,7 @@ pub fn Handlers(comptime FrameType: type) type {
         }
 
         /// PUSH_ADD_POINTER - Fused PUSH+ADD with pointer value (>8 bytes).
-        pub fn push_add_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn push_add_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) callconv(FrameType.getInterpreterCallConv()) Error!noreturn {
             validate_stack(self);
 
             const op_data = dispatch.getOpData(.PUSH_ADD_POINTER, Dispatch, Dispatch.Item, cursor);
@@ -43,7 +43,7 @@ pub fn Handlers(comptime FrameType: type) type {
         }
 
         /// PUSH_MUL_INLINE - Fused PUSH+MUL with inline value (≤8 bytes).
-        pub fn push_mul_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn push_mul_inline(self: *FrameType, cursor: [*]const Dispatch.Item) callconv(FrameType.getInterpreterCallConv()) Error!noreturn {
             validate_stack(self);
             
             const op_data = dispatch.getOpData(.PUSH_MUL_INLINE, Dispatch, Dispatch.Item, cursor);
@@ -54,7 +54,7 @@ pub fn Handlers(comptime FrameType: type) type {
         }
 
         /// PUSH_MUL_POINTER - Fused PUSH+MUL with pointer value (>8 bytes).
-        pub fn push_mul_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn push_mul_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) callconv(FrameType.getInterpreterCallConv()) Error!noreturn {
             validate_stack(self);
 
             const op_data = dispatch.getOpData(.PUSH_MUL_POINTER, Dispatch, Dispatch.Item, cursor);
@@ -65,7 +65,7 @@ pub fn Handlers(comptime FrameType: type) type {
         }
 
         /// PUSH_DIV_INLINE - Fused PUSH+DIV with inline value (≤8 bytes).
-        pub fn push_div_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn push_div_inline(self: *FrameType, cursor: [*]const Dispatch.Item) callconv(FrameType.getInterpreterCallConv()) Error!noreturn {
             const op_data = dispatch.getOpData(.PUSH_DIV_INLINE, Dispatch, Dispatch.Item, cursor);
             const dividend = op_data.metadata.value;
 
@@ -85,7 +85,7 @@ pub fn Handlers(comptime FrameType: type) type {
         }
 
         /// PUSH_DIV_POINTER - Fused PUSH+DIV with pointer value (>8 bytes).
-        pub fn push_div_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn push_div_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) callconv(FrameType.getInterpreterCallConv()) Error!noreturn {
             const op_data = dispatch.getOpData(.PUSH_DIV_POINTER, Dispatch, Dispatch.Item, cursor);
             const dividend = self.u256_constants[op_data.metadata.index];
 
@@ -107,7 +107,7 @@ pub fn Handlers(comptime FrameType: type) type {
         }
 
         /// PUSH_SUB_INLINE - Fused PUSH+SUB with inline value (≤8 bytes).
-        pub fn push_sub_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn push_sub_inline(self: *FrameType, cursor: [*]const Dispatch.Item) callconv(FrameType.getInterpreterCallConv()) Error!noreturn {
             const op_data = dispatch.getOpData(.PUSH_SUB_INLINE, Dispatch, Dispatch.Item, cursor);
             const push_value = op_data.metadata.value;
             std.debug.assert(self.stack.size() >= 1); // PUSH_SUB_INLINE requires 1 stack item
@@ -118,7 +118,7 @@ pub fn Handlers(comptime FrameType: type) type {
         }
 
         /// PUSH_SUB_POINTER - Fused PUSH+SUB with pointer value (>8 bytes).
-        pub fn push_sub_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn push_sub_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) callconv(FrameType.getInterpreterCallConv()) Error!noreturn {
             const op_data = dispatch.getOpData(.PUSH_SUB_POINTER, Dispatch, Dispatch.Item, cursor);
             std.debug.assert(self.stack.size() >= 1); 
             const top = self.stack.peek_unsafe();

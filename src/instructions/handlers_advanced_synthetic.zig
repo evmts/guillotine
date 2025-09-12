@@ -20,7 +20,7 @@ pub fn Handlers(comptime FrameType: type) type {
         // Note: constant_fold handler removed - compiler handles constant folding
 
         /// MULTI_PUSH_2 - Push two values in a single operation
-        pub fn multi_push_2(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn multi_push_2(self: *FrameType, cursor: [*]const Dispatch.Item) callconv(FrameType.getInterpreterCallConv()) Error!noreturn {
             const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
             const op_data = dispatch_opcode_data.getOpData(.MULTI_PUSH_2, Dispatch, Dispatch.Item, cursor);
             
@@ -47,7 +47,7 @@ pub fn Handlers(comptime FrameType: type) type {
         }
 
         /// MULTI_PUSH_3 - Push three values in a single operation
-        pub fn multi_push_3(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn multi_push_3(self: *FrameType, cursor: [*]const Dispatch.Item) callconv(FrameType.getInterpreterCallConv()) Error!noreturn {
             const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
             const op_data = dispatch_opcode_data.getOpData(.MULTI_PUSH_3, Dispatch, Dispatch.Item, cursor);
             
@@ -80,7 +80,7 @@ pub fn Handlers(comptime FrameType: type) type {
         }
 
         /// MULTI_POP_2 - Pop two values in a single operation
-        pub fn multi_pop_2(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn multi_pop_2(self: *FrameType, cursor: [*]const Dispatch.Item) callconv(FrameType.getInterpreterCallConv()) Error!noreturn {
             const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
             const op_data = dispatch_opcode_data.getOpData(.MULTI_POP_2, Dispatch, Dispatch.Item, cursor);
             
@@ -93,7 +93,7 @@ pub fn Handlers(comptime FrameType: type) type {
         }
 
         /// MULTI_POP_3 - Pop three values in a single operation
-        pub fn multi_pop_3(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn multi_pop_3(self: *FrameType, cursor: [*]const Dispatch.Item) callconv(FrameType.getInterpreterCallConv()) Error!noreturn {
             const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
             const op_data = dispatch_opcode_data.getOpData(.MULTI_POP_3, Dispatch, Dispatch.Item, cursor);
             
@@ -108,7 +108,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// ISZERO_JUMPI - Combined zero check and conditional jump
         /// Replaces ISZERO, PUSH target, JUMPI with a single operation
-        pub fn iszero_jumpi(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn iszero_jumpi(self: *FrameType, cursor: [*]const Dispatch.Item) callconv(FrameType.getInterpreterCallConv()) Error!noreturn {
             const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
             const op_data = dispatch_opcode_data.getOpData(.ISZERO_JUMPI, Dispatch, Dispatch.Item, cursor);
             
@@ -134,7 +134,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// DUP2_MSTORE_PUSH - Optimized memory store pattern
         /// Replaces DUP2, MSTORE, PUSH value with a single operation
-        pub fn dup2_mstore_push(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn dup2_mstore_push(self: *FrameType, cursor: [*]const Dispatch.Item) callconv(FrameType.getInterpreterCallConv()) Error!noreturn {
             const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
             const op_data = dispatch_opcode_data.getOpData(.DUP2_MSTORE_PUSH, Dispatch, Dispatch.Item, cursor);
             
@@ -175,7 +175,7 @@ pub fn Handlers(comptime FrameType: type) type {
         // New high-impact fusion handlers
         
         /// DUP3_ADD_MSTORE - Optimized DUP3 + ADD + MSTORE pattern (60 occurrences)
-        pub fn dup3_add_mstore(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn dup3_add_mstore(self: *FrameType, cursor: [*]const Dispatch.Item) callconv(FrameType.getInterpreterCallConv()) Error!noreturn {
             const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
             const op_data = dispatch_opcode_data.getOpData(.DUP3_ADD_MSTORE, Dispatch, Dispatch.Item, cursor);
             
@@ -197,7 +197,7 @@ pub fn Handlers(comptime FrameType: type) type {
         }
         
         /// SWAP1_DUP2_ADD - Optimized SWAP1 + DUP2 + ADD pattern (134+ occurrences)
-        pub fn swap1_dup2_add(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn swap1_dup2_add(self: *FrameType, cursor: [*]const Dispatch.Item) callconv(FrameType.getInterpreterCallConv()) Error!noreturn {
             const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
             const op_data = dispatch_opcode_data.getOpData(.SWAP1_DUP2_ADD, Dispatch, Dispatch.Item, cursor);
             
@@ -219,7 +219,7 @@ pub fn Handlers(comptime FrameType: type) type {
         }
         
         /// PUSH_DUP3_ADD - Optimized PUSH + DUP3 + ADD pattern (58 occurrences)
-        pub fn push_dup3_add(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn push_dup3_add(self: *FrameType, cursor: [*]const Dispatch.Item) callconv(FrameType.getInterpreterCallConv()) Error!noreturn {
             const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
             const op_data = dispatch_opcode_data.getOpData(.PUSH_DUP3_ADD, Dispatch, Dispatch.Item, cursor);
             
@@ -243,7 +243,7 @@ pub fn Handlers(comptime FrameType: type) type {
         }
         
         /// FUNCTION_DISPATCH - Optimized PUSH4 + EQ + PUSH + JUMPI for function selectors
-        pub fn function_dispatch(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn function_dispatch(self: *FrameType, cursor: [*]const Dispatch.Item) callconv(FrameType.getInterpreterCallConv()) Error!noreturn {
             const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
             const op_data = dispatch_opcode_data.getOpData(.FUNCTION_DISPATCH, Dispatch, Dispatch.Item, cursor);
             
@@ -284,7 +284,7 @@ pub fn Handlers(comptime FrameType: type) type {
         }
         
         /// CALLVALUE_CHECK - Optimized CALLVALUE + DUP1 + ISZERO for payable checks
-        pub fn callvalue_check(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn callvalue_check(self: *FrameType, cursor: [*]const Dispatch.Item) callconv(FrameType.getInterpreterCallConv()) Error!noreturn {
             const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
             const op_data = dispatch_opcode_data.getOpData(.CALLVALUE_CHECK, Dispatch, Dispatch.Item, cursor);
             
@@ -303,7 +303,7 @@ pub fn Handlers(comptime FrameType: type) type {
         }
         
         /// PUSH0_REVERT - Optimized PUSH0 + PUSH0 + REVERT for error handling
-        pub fn push0_revert(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn push0_revert(self: *FrameType, cursor: [*]const Dispatch.Item) callconv(FrameType.getInterpreterCallConv()) Error!noreturn {
             _ = cursor;
             
             // PUSH0 PUSH0: Push two zeros for offset and size
@@ -321,7 +321,7 @@ pub fn Handlers(comptime FrameType: type) type {
         }
         
         /// PUSH_ADD_DUP1 - Optimized PUSH + ADD + DUP1 pattern (common in loops)
-        pub fn push_add_dup1(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn push_add_dup1(self: *FrameType, cursor: [*]const Dispatch.Item) callconv(FrameType.getInterpreterCallConv()) Error!noreturn {
             const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
             const op_data = dispatch_opcode_data.getOpData(.PUSH_ADD_DUP1, Dispatch, Dispatch.Item, cursor);
             
@@ -346,7 +346,7 @@ pub fn Handlers(comptime FrameType: type) type {
         }
         
         /// MLOAD_SWAP1_DUP2 - Optimized MLOAD + SWAP1 + DUP2 memory pattern
-        pub fn mload_swap1_dup2(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn mload_swap1_dup2(self: *FrameType, cursor: [*]const Dispatch.Item) callconv(FrameType.getInterpreterCallConv()) Error!noreturn {
             const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
             const op_data = dispatch_opcode_data.getOpData(.MLOAD_SWAP1_DUP2, Dispatch, Dispatch.Item, cursor);
             
