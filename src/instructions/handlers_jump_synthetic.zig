@@ -12,25 +12,36 @@ pub fn Handlers(comptime FrameType: type) type {
         pub const WordType = FrameType.WordType;
 
         /// Jump directly to a statically known location without binary search.
-        /// The cursor[1] should contain a direct pointer to the jump destination dispatch.
+        /// The cursor now points to metadata containing the jump destination dispatch.
         pub fn jump_to_static_location(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             @branchHint(.likely);
-            const jump_dispatch_ptr = @as([*]const Dispatch.Item, @ptrCast(@alignCast(cursor[1].jump_static.dispatch)));
+            const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
+            const op_data = dispatch_opcode_data.getOpData(.JUMP_TO_STATIC_LOCATION, Dispatch, Dispatch.Item, cursor);
+            
+            // The dispatch pointer already points to the JUMPDEST handler location
+            const jump_dispatch_ptr = @as([*]const Dispatch.Item, @ptrCast(@alignCast(op_data.metadata.dispatch)));
+            // Call the handler at that location, passing cursor pointing to the next slot (where metadata would be)
             return @call(FrameType.getTailCallModifier(), jump_dispatch_ptr[0].opcode_handler, .{ self, jump_dispatch_ptr });
         }
 
         /// Conditionally jump to a statically known location without binary search.
-        /// The cursor[1] should contain a direct pointer to the jump destination dispatch.
+        /// The cursor now points to metadata containing the jump destination dispatch.
         pub fn jumpi_to_static_location(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             @branchHint(.likely);
-            const jump_dispatch_ptr = @as([*]const Dispatch.Item, @ptrCast(@alignCast(cursor[1].jump_static.dispatch)));
+            const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
+            const op_data = dispatch_opcode_data.getOpData(.JUMPI_TO_STATIC_LOCATION, Dispatch, Dispatch.Item, cursor);
+            
+            // The dispatch pointer already points to the JUMPDEST handler location
+            const jump_dispatch_ptr = @as([*]const Dispatch.Item, @ptrCast(@alignCast(op_data.metadata.dispatch)));
             std.debug.assert(self.stack.size() >= 1);
             const condition = self.stack.pop_unsafe();
             if (condition != 0) {
                 @branchHint(.unlikely);
+                // Call the handler at that location, passing cursor pointing to that slot
                 return @call(FrameType.getTailCallModifier(), jump_dispatch_ptr[0].opcode_handler, .{ self, jump_dispatch_ptr });
             }
-            return @call(FrameType.getTailCallModifier(), cursor[2].opcode_handler, .{ self, cursor + 2 });
+            // Continue to next instruction
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// PUSH_JUMP_INLINE - Fused PUSH+JUMP with inline destination (≤8 bytes).
@@ -38,8 +49,11 @@ pub fn Handlers(comptime FrameType: type) type {
         /// @deprecated Use jump_to_static_location for better performance
         pub fn push_jump_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             @branchHint(.likely);
-            // For synthetic opcodes, cursor[1] contains the metadata directly
-            const dest = cursor[1].push_inline.value;
+            const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
+            const op_data = dispatch_opcode_data.getOpData(.PUSH_JUMP_INLINE, Dispatch, Dispatch.Item, cursor);
+            
+            // Cursor now points to metadata
+            const dest = op_data.metadata.value;
 
             // Validate jump destination range
             if (dest > std.math.maxInt(FrameType.PcType)) {
@@ -64,8 +78,11 @@ pub fn Handlers(comptime FrameType: type) type {
         /// @deprecated Use jump_to_static_location for better performance
         pub fn push_jump_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             @branchHint(.likely);
-            // For synthetic opcodes, cursor[1] contains the metadata directly
-            const dest = cursor[1].push_pointer.value.*;
+            const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
+            const op_data = dispatch_opcode_data.getOpData(.PUSH_JUMP_POINTER, Dispatch, Dispatch.Item, cursor);
+            
+            // Cursor now points to metadata
+            const dest = op_data.metadata.value.*;
 
             // Validate jump destination range
             if (dest > std.math.maxInt(FrameType.PcType)) {
@@ -92,7 +109,10 @@ pub fn Handlers(comptime FrameType: type) type {
         /// @deprecated Use jumpi_to_static_location for better performance
         pub fn push_jumpi_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             @branchHint(.likely);
-            const dest = cursor[1].push_inline.value;
+            const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
+            const op_data = dispatch_opcode_data.getOpData(.PUSH_JUMPI_INLINE, Dispatch, Dispatch.Item, cursor);
+            
+            const dest = op_data.metadata.value;
 
             std.debug.assert(self.stack.size() >= 1);
             const condition = self.stack.pop_unsafe();
@@ -118,8 +138,8 @@ pub fn Handlers(comptime FrameType: type) type {
                     return Error.InvalidJump;
                 }
             } else {
-                // Continue to next instruction (cursor[2] since cursor[0]=handler, cursor[1]=metadata, cursor[2]=next)
-                return @call(FrameType.getTailCallModifier(), cursor[2].opcode_handler, .{ self, cursor + 2 });
+                // Continue to next instruction
+                return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             }
         }
 
@@ -127,8 +147,11 @@ pub fn Handlers(comptime FrameType: type) type {
         /// @deprecated Use jumpi_to_static_location for better performance
         pub fn push_jumpi_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             @branchHint(.likely);
-            // For synthetic opcodes, cursor[1] contains the metadata directly
-            const dest = cursor[1].push_pointer.value.*;
+            const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
+            const op_data = dispatch_opcode_data.getOpData(.PUSH_JUMPI_POINTER, Dispatch, Dispatch.Item, cursor);
+            
+            // Cursor now points to metadata
+            const dest = op_data.metadata.value.*;
 
             // Pop the condition
             std.debug.assert(self.stack.size() >= 1); // PUSH_JUMPI requires 1 stack item
@@ -155,8 +178,8 @@ pub fn Handlers(comptime FrameType: type) type {
                     return Error.InvalidJump;
                 }
             } else {
-                // Continue to next instruction (cursor[2] since cursor[0]=handler, cursor[1]=metadata, cursor[2]=next)
-                return @call(FrameType.getTailCallModifier(), cursor[2].opcode_handler, .{ self, cursor + 2 });
+                // Continue to next instruction
+                return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             }
         }
     };

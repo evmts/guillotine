@@ -83,11 +83,14 @@ pub fn Dispatch(comptime FrameType: type) type {
         fn GetOpDataReturnType(comptime opcode: UnifiedOpcode) type {
             return dispatch_opcode_data.GetOpDataReturnType(
                 opcode,
+                @TypeOf(@as(Item, undefined).opcode_handler),
                 Self,
+                Item,
                 PcMetadata,
                 PushInlineMetadata,
                 PushPointerMetadata,
                 JumpDestMetadata,
+                JumpStaticMetadata,
             );
         }
 

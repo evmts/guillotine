@@ -11,10 +11,12 @@ pub fn Handlers(comptime FrameType: type) type {
         pub const Dispatch = FrameType.Dispatch;
         pub const WordType = FrameType.WordType;
 
+        const dispatch = @import("../preprocessor/dispatch_opcode_data.zig");
+
         /// Advance to the next opcode instruction
         pub inline fn next_instruction(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const next_cursor = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            const op_data = dispatch.getOpData(.STOP, Dispatch, Dispatch.Item, cursor);
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// ADD opcode (0x01) - Addition with overflow wrapping.
@@ -133,13 +135,11 @@ pub fn Handlers(comptime FrameType: type) type {
             
             if (second == 0) {
                 self.stack.set_top_unsafe(0);
-                const next_cursor = cursor + 1;
-                return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+                return next_instruction(self, cursor);
             }
             if (top == MIN_SIGNED and second == std.math.maxInt(u256)) { // -1 in two's complement
                 self.stack.set_top_unsafe(0);
-                const next_cursor = cursor + 1;
-                return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+                return next_instruction(self, cursor);
             }
             
             // This section implements branchless two's complement arithmetic.

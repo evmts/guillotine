@@ -2,6 +2,35 @@
 
 ## Core Protocols
 
+## Temporary warning
+
+The build is currently set up in a way that causes zig build test to often hang forever. To workaround this for now apply following diff
+
+```
+diff --git a/lib/revm/Cargo.toml b/lib/revm/Cargo.toml
+index a3661c9b..484ba27a 100644
+--- a/lib/revm/Cargo.toml
++++ b/lib/revm/Cargo.toml
+@@ -23,13 +23,13 @@ cbindgen = "0.24"
+
+ [profile.release]
+ panic = "abort"
+-lto = true
+-codegen-units = 1
++lto = false
++codegen-units = 16
+
+ [profile.bench]
+ panic = "abort"
+-lto = true
+-codegen-units = 1
++lto = false
++codegen-units = 16
+
+ # [[bin]]
+ # name = "verify_lt_order"
+```
+
 ### Security
 
 - If sensitive data detected (API keys/passwords/tokens): 1) Abort immediately 2) Explain concern 3) Request sanitized prompt

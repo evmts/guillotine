@@ -603,6 +603,16 @@ pub const UnifiedOpcode = enum(u16) {
     PUSH_XOR_POINTER = 0x100 + 0xBA,
     PUSH_MSTORE8_INLINE = 0x100 + 0xBB,
     PUSH_MSTORE8_POINTER = 0x100 + 0xBC,
+    // Static jump optimizations
+    JUMP_TO_STATIC_LOCATION = 0x100 + 0xBD,
+    JUMPI_TO_STATIC_LOCATION = 0x100 + 0xBE,
+    // Advanced synthetic opcodes
+    MULTI_PUSH_2 = 0x100 + 0xBF,
+    MULTI_PUSH_3 = 0x100 + 0xC0,
+    MULTI_POP_2 = 0x100 + 0xC1,
+    MULTI_POP_3 = 0x100 + 0xC2,
+    ISZERO_JUMPI = 0x100 + 0xC3,
+    DUP2_MSTORE_PUSH = 0x100 + 0xC4,
 
     /// Convert from regular Opcode
     pub fn fromOpcode(opcode: Opcode) UnifiedOpcode {

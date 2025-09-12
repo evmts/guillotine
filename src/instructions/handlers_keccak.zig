@@ -71,8 +71,8 @@ pub fn Handlers(comptime FrameType: type) type {
                 std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
                 self.stack.push_unsafe(empty_hash);
                 const op_data = dispatch.getOpData(.KECCAK256);
-                const next = op_data.next;
-                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                // Use op_data.next_handler and op_data.next_cursor directly
+                return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             }
 
             const offset_usize = @as(usize, @intCast(offset));
@@ -158,8 +158,8 @@ pub fn Handlers(comptime FrameType: type) type {
             self.stack.push_unsafe(result_word);
 
             const op_data = dispatch.getOpData(.KECCAK256);
-            const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
     };
 }

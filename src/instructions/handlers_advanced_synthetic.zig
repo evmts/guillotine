@@ -17,20 +17,16 @@ pub fn Handlers(comptime FrameType: type) type {
         pub const Dispatch = FrameType.Dispatch;
         pub const WordType = FrameType.WordType;
 
-        /// Advance to the next opcode instruction
-        pub inline fn next_instruction(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            // Advance past the metadata
-            const next_cursor = cursor + 2;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
-        }
-
         // Note: constant_fold handler removed - compiler handles constant folding
 
         /// MULTI_PUSH_2 - Push two values in a single operation
         pub fn multi_push_2(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            // Extract both values from dispatch items
-            const value1_item = cursor[1];
-            const value2_item = cursor[2];
+            const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
+            const op_data = dispatch_opcode_data.getOpData(.MULTI_PUSH_2, Dispatch, Dispatch.Item, cursor);
+            
+            // Extract both values from items
+            const value1_item = op_data.items[0];
+            const value2_item = op_data.items[1];
             
             // Push first value
             if (value1_item == .push_inline) {
@@ -46,17 +42,19 @@ pub fn Handlers(comptime FrameType: type) type {
                 self.stack.push_unsafe(value2_item.push_pointer.value.*);
             }
             
-            // Advance past handler + 2 values
-            const next_cursor = cursor + 3;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            // Use getOpData for next instruction
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// MULTI_PUSH_3 - Push three values in a single operation
         pub fn multi_push_3(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            // Extract all three values from dispatch items
-            const value1_item = cursor[1];
-            const value2_item = cursor[2];
-            const value3_item = cursor[3];
+            const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
+            const op_data = dispatch_opcode_data.getOpData(.MULTI_PUSH_3, Dispatch, Dispatch.Item, cursor);
+            
+            // Extract all three values from items
+            const value1_item = op_data.items[0];
+            const value2_item = op_data.items[1];
+            const value3_item = op_data.items[2];
             
             // Push all three values
             if (value1_item == .push_inline) {
@@ -77,39 +75,45 @@ pub fn Handlers(comptime FrameType: type) type {
                 self.stack.push_unsafe(value3_item.push_pointer.value.*);
             }
             
-            // Advance past handler + 3 values
-            const next_cursor = cursor + 4;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            // Use getOpData for next instruction
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// MULTI_POP_2 - Pop two values in a single operation
         pub fn multi_pop_2(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
+            const op_data = dispatch_opcode_data.getOpData(.MULTI_POP_2, Dispatch, Dispatch.Item, cursor);
+            
             // Pop two values at once
             _ = self.stack.pop_unsafe();
             _ = self.stack.pop_unsafe();
             
-            // Advance to next instruction
-            const next_cursor = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            // Use getOpData for next instruction
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// MULTI_POP_3 - Pop three values in a single operation
         pub fn multi_pop_3(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
+            const op_data = dispatch_opcode_data.getOpData(.MULTI_POP_3, Dispatch, Dispatch.Item, cursor);
+            
             // Pop three values at once
             _ = self.stack.pop_unsafe();
             _ = self.stack.pop_unsafe();
             _ = self.stack.pop_unsafe();
             
-            // Advance to next instruction
-            const next_cursor = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            // Use getOpData for next instruction
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// ISZERO_JUMPI - Combined zero check and conditional jump
         /// Replaces ISZERO, PUSH target, JUMPI with a single operation
         pub fn iszero_jumpi(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            // Get the jump target from dispatch
-            const target_item = cursor[1];
+            const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
+            const op_data = dispatch_opcode_data.getOpData(.ISZERO_JUMPI, Dispatch, Dispatch.Item, cursor);
+            
+            // Get the jump target from items
+            const target_item = op_data.items[0];
             _ = target_item; // Target would be used for actual jumping
             
             // Pop value and check if zero
@@ -124,15 +128,18 @@ pub fn Handlers(comptime FrameType: type) type {
                 // TODO: Implement proper jump handling with jump table
             }
             
-            // Continue to next instruction if not jumping
-            return next_instruction(self, cursor);
+            // Continue to next instruction using getOpData
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// DUP2_MSTORE_PUSH - Optimized memory store pattern
         /// Replaces DUP2, MSTORE, PUSH value with a single operation
         pub fn dup2_mstore_push(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            // Get the push value from dispatch
-            const push_item = cursor[1];
+            const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
+            const op_data = dispatch_opcode_data.getOpData(.DUP2_MSTORE_PUSH, Dispatch, Dispatch.Item, cursor);
+            
+            // Get the push value from items
+            const push_item = op_data.items[0];
             const push_value = if (push_item == .push_inline)
                 push_item.push_inline.value
             else if (push_item == .push_pointer)
@@ -166,8 +173,8 @@ pub fn Handlers(comptime FrameType: type) type {
             // PUSH: Push the new value
             self.stack.push_unsafe(push_value);
             
-            // Continue to next instruction
-            return next_instruction(self, cursor);
+            // Use getOpData for next instruction
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
     };
 }

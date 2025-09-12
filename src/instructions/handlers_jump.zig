@@ -82,9 +82,9 @@ pub fn Handlers(comptime FrameType: type) type {
                 }
             } else {
                 // Condition is false, continue to next instruction
-                // JUMPI has jump_dest metadata at cursor[1], so next instruction is at cursor + 2
-                const next_cursor = cursor + 2;
-                return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+                const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
+                const op_data = dispatch_opcode_data.getOpData(.JUMPI, Dispatch, Dispatch.Item, cursor);
+                return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             }
         }
 
@@ -106,7 +106,7 @@ pub fn Handlers(comptime FrameType: type) type {
                 return Error.OutOfGas;
             }
 
-            return @call(FrameType.getTailCallModifier(), op_data.next.cursor[0].opcode_handler, .{ self, op_data.next.cursor });
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// PC opcode (0x58) - Get program counter.
@@ -121,7 +121,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
             self.stack.push_unsafe(op_data.metadata.value);
 
-            return @call(FrameType.getTailCallModifier(), op_data.next.cursor[0].opcode_handler, .{ self, op_data.next.cursor });
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
     };
 }

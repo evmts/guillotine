@@ -4,6 +4,35 @@ Thank you so much for you interest in contributing to Guillotine!
 
 We welcome contributions to Guillotine! This document provides guidelines and instructions for contributing to the project.
 
+## Temporary warning
+
+The build is currently set up in a way that causes zig build test to often hang forever. To workaround this for now apply following diff
+
+```
+diff --git a/lib/revm/Cargo.toml b/lib/revm/Cargo.toml
+index a3661c9b..484ba27a 100644
+--- a/lib/revm/Cargo.toml
++++ b/lib/revm/Cargo.toml
+@@ -23,13 +23,13 @@ cbindgen = "0.24"
+
+ [profile.release]
+ panic = "abort"
+-lto = true
+-codegen-units = 1
++lto = false
++codegen-units = 16
+
+ [profile.bench]
+ panic = "abort"
+-lto = true
+-codegen-units = 1
++lto = false
++codegen-units = 16
+
+ # [[bin]]
+ # name = "verify_lt_order"
+```
+
 ## AI-Assisted Contributions
 
 **AI-assisted contributions are welcome with proper disclosure.** If you use AI tools (like GitHub Copilot, Claude, ChatGPT, etc.) to generate code:
@@ -18,6 +47,7 @@ We welcome contributions to Guillotine! This document provides guidelines and in
 5. **Take responsibility** for the correctness and quality of the code
 
 Example PR description:
+
 ```
 ## AI Disclosure
 This PR contains AI-generated code using Claude.

@@ -111,28 +111,28 @@ pub fn Handlers(comptime FrameType: type) type {
                     switch (topic_count) {
                         0 => {
                             const op_data = dispatch.getOpData(.LOG0);
-                            const next = op_data.next;
-                            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                            // Use op_data.next_handler and op_data.next_cursor directly
+                            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
                         },
                         1 => {
                             const op_data = dispatch.getOpData(.LOG1);
-                            const next = op_data.next;
-                            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                            // Use op_data.next_handler and op_data.next_cursor directly
+                            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
                         },
                         2 => {
                             const op_data = dispatch.getOpData(.LOG2);
-                            const next = op_data.next;
-                            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                            // Use op_data.next_handler and op_data.next_cursor directly
+                            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
                         },
                         3 => {
                             const op_data = dispatch.getOpData(.LOG3);
-                            const next = op_data.next;
-                            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                            // Use op_data.next_handler and op_data.next_cursor directly
+                            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
                         },
                         4 => {
                             const op_data = dispatch.getOpData(.LOG4);
-                            const next = op_data.next;
-                            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                            // Use op_data.next_handler and op_data.next_cursor directly
+                            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
                         },
                         else => unreachable,
                     }

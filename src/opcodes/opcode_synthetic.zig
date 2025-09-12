@@ -42,14 +42,16 @@ pub const OpcodeSynthetic = enum(u8) {
     PUSH_XOR_POINTER = 0xBA,
     PUSH_MSTORE8_INLINE = 0xBB,
     PUSH_MSTORE8_POINTER = 0xBC,
+    // Static jump optimizations - jump directly to known dispatch locations
+    JUMP_TO_STATIC_LOCATION = 0xBD,   // Direct jump without binary search
+    JUMPI_TO_STATIC_LOCATION = 0xBE,  // Conditional jump without binary search
     // Advanced fusion patterns (3+ opcodes)
-    // Note: 0xBD reserved but not used (constant folding handled by compiler)
-    MULTI_PUSH_2 = 0xBE,          // Two consecutive PUSH operations
-    MULTI_PUSH_3 = 0xBF,          // Three consecutive PUSH operations
-    MULTI_POP_2 = 0xC0,           // Two consecutive POP operations
-    MULTI_POP_3 = 0xC1,           // Three consecutive POP operations
-    ISZERO_JUMPI = 0xC2,          // ISZERO + PUSH + JUMPI pattern
-    DUP2_MSTORE_PUSH = 0xC3,      // DUP2 + MSTORE + PUSH pattern
+    MULTI_PUSH_2 = 0xBF,          // Two consecutive PUSH operations
+    MULTI_PUSH_3 = 0xC0,          // Three consecutive PUSH operations
+    MULTI_POP_2 = 0xC1,           // Two consecutive POP operations
+    MULTI_POP_3 = 0xC2,           // Three consecutive POP operations
+    ISZERO_JUMPI = 0xC3,          // ISZERO + PUSH + JUMPI pattern
+    DUP2_MSTORE_PUSH = 0xC4,      // DUP2 + MSTORE + PUSH pattern
 };
 
 // Compile-time check to ensure synthetic opcodes don't overlap with normal opcodes

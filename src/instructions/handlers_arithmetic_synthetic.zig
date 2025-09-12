@@ -10,12 +10,7 @@ pub fn Handlers(comptime FrameType: type) type {
         pub const Dispatch = FrameType.Dispatch;
         pub const WordType = FrameType.WordType;
 
-        /// Advance to the next opcode instruction
-        pub inline fn next_instruction(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            // advance past the metadata
-            const next_cursor = cursor + 2;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
-        }
+        const dispatch = @import("../preprocessor/dispatch_opcode_data.zig");
 
         /// Validate stack constraints
         pub inline fn validate_stack(self: *FrameType) void {
@@ -28,42 +23,47 @@ pub fn Handlers(comptime FrameType: type) type {
         pub fn push_add_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             @branchHint(.likely);
             validate_stack(self);
+            
+            const op_data = dispatch.getOpData(.PUSH_ADD_INLINE, Dispatch, Dispatch.Item, cursor);
+            self.stack.push_unsafe(op_data.metadata.value +% self.stack.pop_unsafe());
 
-            self.stack.push_unsafe(cursor[1].push_inline.value +% self.stack.pop_unsafe());
-
-            return next_instruction(self, cursor);
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// PUSH_ADD_POINTER - Fused PUSH+ADD with pointer value (>8 bytes).
         pub fn push_add_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             validate_stack(self);
 
-            self.stack.push_unsafe(cursor[1].push_pointer.value.* +% self.stack.pop_unsafe());
+            const op_data = dispatch.getOpData(.PUSH_ADD_POINTER, Dispatch, Dispatch.Item, cursor);
+            self.stack.push_unsafe(op_data.metadata.value.* +% self.stack.pop_unsafe());
             
-            return next_instruction(self, cursor);
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// PUSH_MUL_INLINE - Fused PUSH+MUL with inline value (≤8 bytes).
         pub fn push_mul_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             validate_stack(self);
             
-            self.stack.push_unsafe(cursor[1].push_inline.value *% self.stack.pop_unsafe());
+            const op_data = dispatch.getOpData(.PUSH_MUL_INLINE, Dispatch, Dispatch.Item, cursor);
+            self.stack.push_unsafe(op_data.metadata.value *% self.stack.pop_unsafe());
 
-            return next_instruction(self, cursor);
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// PUSH_MUL_POINTER - Fused PUSH+MUL with pointer value (>8 bytes).
         pub fn push_mul_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             validate_stack(self);
 
-            self.stack.push_unsafe(cursor[1].push_pointer.value.* *% self.stack.pop_unsafe());
+            const op_data = dispatch.getOpData(.PUSH_MUL_POINTER, Dispatch, Dispatch.Item, cursor);
+            self.stack.push_unsafe(op_data.metadata.value.* *% self.stack.pop_unsafe());
 
-            return next_instruction(self, cursor);
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// PUSH_DIV_INLINE - Fused PUSH+DIV with inline value (≤8 bytes).
         pub fn push_div_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const dividend = cursor[1].push_inline.value;
+            const op_data = dispatch.getOpData(.PUSH_DIV_INLINE, Dispatch, Dispatch.Item, cursor);
+            const dividend = op_data.metadata.value;
 
             const divisor = self.stack.pop_unsafe();
             
@@ -78,13 +78,13 @@ pub fn Handlers(comptime FrameType: type) type {
             std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
             self.stack.push_unsafe(result);
 
-            return @call(FrameType.getTailCallModifier(), cursor[2].opcode_handler, .{ self, cursor + 2 });
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// PUSH_DIV_POINTER - Fused PUSH+DIV with pointer value (>8 bytes).
         pub fn push_div_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            // For synthetic opcodes, cursor[1] contains the metadata directly
-            const dividend = cursor[1].push_pointer.value.*;
+            const op_data = dispatch.getOpData(.PUSH_DIV_POINTER, Dispatch, Dispatch.Item, cursor);
+            const dividend = op_data.metadata.value.*;
 
             std.debug.assert(self.stack.size() >= 1); // PUSH_DIV_POINTER requires 1 stack item
             const divisor = self.stack.pop_unsafe();
@@ -101,27 +101,29 @@ pub fn Handlers(comptime FrameType: type) type {
             std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
             self.stack.push_unsafe(result);
 
-            return @call(FrameType.getTailCallModifier(), cursor[2].opcode_handler, .{ self, cursor + 2 });
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// PUSH_SUB_INLINE - Fused PUSH+SUB with inline value (≤8 bytes).
         pub fn push_sub_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const push_value = cursor[1].push_inline.value;
+            const op_data = dispatch.getOpData(.PUSH_SUB_INLINE, Dispatch, Dispatch.Item, cursor);
+            const push_value = op_data.metadata.value;
             std.debug.assert(self.stack.size() >= 1); // PUSH_SUB_INLINE requires 1 stack item
             const top = self.stack.pop_unsafe();
             const result = push_value -% top;
             std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
             self.stack.push_unsafe(result);
-            return @call(FrameType.getTailCallModifier(), cursor[2].opcode_handler, .{ self, cursor + 2 });
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// PUSH_SUB_POINTER - Fused PUSH+SUB with pointer value (>8 bytes).
         pub fn push_sub_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            const op_data = dispatch.getOpData(.PUSH_SUB_POINTER, Dispatch, Dispatch.Item, cursor);
             std.debug.assert(self.stack.size() >= 1); 
-            const result = cursor[1].push_pointer.value.* -% self.stack.pop_unsafe();
+            const result = op_data.metadata.value.* -% self.stack.pop_unsafe();
             std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); 
             self.stack.push_unsafe(result);
-            return @call(FrameType.getTailCallModifier(), cursor[2].opcode_handler, .{ self, cursor + 2 });
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
     };
 }

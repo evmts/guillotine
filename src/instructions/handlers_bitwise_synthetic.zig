@@ -13,8 +13,11 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// PUSH_AND_INLINE - Fused PUSH+AND with inline value (≤8 bytes).
         pub fn push_and_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            // For synthetic opcodes, cursor[1] contains the metadata directly
-            const push_value = cursor[1].push_inline.value;
+            const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
+            const op_data = dispatch_opcode_data.getOpData(.PUSH_AND_INLINE, Dispatch, Dispatch.Item, cursor);
+            
+            // For synthetic opcodes, cursor now points to metadata
+            const push_value = op_data.metadata.value;
 
             std.debug.assert(self.stack.size() >= 1); // PUSH_AND_INLINE requires 1 stack item
             const top = self.stack.pop_unsafe();
@@ -22,13 +25,16 @@ pub fn Handlers(comptime FrameType: type) type {
             std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
             self.stack.push_unsafe(result);
 
-            return @call(FrameType.getTailCallModifier(), cursor[2].opcode_handler, .{ self, cursor + 2 });
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// PUSH_AND_POINTER - Fused PUSH+AND with pointer value (>8 bytes).
         pub fn push_and_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            // For synthetic opcodes, cursor[1] contains the metadata directly
-            const push_value = cursor[1].push_pointer.value.*;
+            const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
+            const op_data = dispatch_opcode_data.getOpData(.PUSH_AND_POINTER, Dispatch, Dispatch.Item, cursor);
+            
+            // For synthetic opcodes, cursor now points to metadata
+            const push_value = op_data.metadata.value.*;
 
             std.debug.assert(self.stack.size() >= 1); // PUSH_AND_POINTER requires 1 stack item
             const top = self.stack.pop_unsafe();
@@ -36,13 +42,16 @@ pub fn Handlers(comptime FrameType: type) type {
             std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
             self.stack.push_unsafe(result);
 
-            return @call(FrameType.getTailCallModifier(), cursor[2].opcode_handler, .{ self, cursor + 2 });
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// PUSH_OR_INLINE - Fused PUSH+OR with inline value (≤8 bytes).
         pub fn push_or_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            // For synthetic opcodes, cursor[1] contains the metadata directly
-            const push_value = cursor[1].push_inline.value;
+            const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
+            const op_data = dispatch_opcode_data.getOpData(.PUSH_OR_INLINE, Dispatch, Dispatch.Item, cursor);
+            
+            // For synthetic opcodes, cursor now points to metadata
+            const push_value = op_data.metadata.value;
 
             std.debug.assert(self.stack.size() >= 1); // PUSH_OR_INLINE requires 1 stack item
             const top = self.stack.pop_unsafe();
@@ -50,13 +59,16 @@ pub fn Handlers(comptime FrameType: type) type {
             std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
             self.stack.push_unsafe(result);
 
-            return @call(FrameType.getTailCallModifier(), cursor[2].opcode_handler, .{ self, cursor + 2 });
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// PUSH_OR_POINTER - Fused PUSH+OR with pointer value (>8 bytes).
         pub fn push_or_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            // For synthetic opcodes, cursor[1] contains the metadata directly
-            const push_value = cursor[1].push_pointer.value.*;
+            const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
+            const op_data = dispatch_opcode_data.getOpData(.PUSH_OR_POINTER, Dispatch, Dispatch.Item, cursor);
+            
+            // For synthetic opcodes, cursor now points to metadata
+            const push_value = op_data.metadata.value.*;
 
             std.debug.assert(self.stack.size() >= 1); // PUSH_OR_POINTER requires 1 stack item
             const top = self.stack.pop_unsafe();
@@ -64,13 +76,16 @@ pub fn Handlers(comptime FrameType: type) type {
             std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
             self.stack.push_unsafe(result);
 
-            return @call(FrameType.getTailCallModifier(), cursor[2].opcode_handler, .{ self, cursor + 2 });
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// PUSH_XOR_INLINE - Fused PUSH+XOR with inline value (≤8 bytes).
         pub fn push_xor_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            // For synthetic opcodes, cursor[1] contains the metadata directly
-            const push_value = cursor[1].push_inline.value;
+            const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
+            const op_data = dispatch_opcode_data.getOpData(.PUSH_XOR_INLINE, Dispatch, Dispatch.Item, cursor);
+            
+            // For synthetic opcodes, cursor now points to metadata
+            const push_value = op_data.metadata.value;
 
             std.debug.assert(self.stack.size() >= 1); // PUSH_XOR_INLINE requires 1 stack item
             const top = self.stack.pop_unsafe();
@@ -78,13 +93,16 @@ pub fn Handlers(comptime FrameType: type) type {
             std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
             self.stack.push_unsafe(result);
 
-            return @call(FrameType.getTailCallModifier(), cursor[2].opcode_handler, .{ self, cursor + 2 });
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// PUSH_XOR_POINTER - Fused PUSH+XOR with pointer value (>8 bytes).
         pub fn push_xor_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            // For synthetic opcodes, cursor[1] contains the metadata directly
-            const push_value = cursor[1].push_pointer.value.*;
+            const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
+            const op_data = dispatch_opcode_data.getOpData(.PUSH_XOR_POINTER, Dispatch, Dispatch.Item, cursor);
+            
+            // For synthetic opcodes, cursor now points to metadata
+            const push_value = op_data.metadata.value.*;
 
             std.debug.assert(self.stack.size() >= 1); // PUSH_XOR_POINTER requires 1 stack item
             const top = self.stack.pop_unsafe();
@@ -92,7 +110,7 @@ pub fn Handlers(comptime FrameType: type) type {
             std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
             self.stack.push_unsafe(result);
 
-            return @call(FrameType.getTailCallModifier(), cursor[2].opcode_handler, .{ self, cursor + 2 });
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
     };
 }
