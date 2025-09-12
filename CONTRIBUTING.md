@@ -4,35 +4,6 @@ Thank you so much for you interest in contributing to Guillotine!
 
 We welcome contributions to Guillotine! This document provides guidelines and instructions for contributing to the project.
 
-## Temporary warning
-
-The build is currently set up in a way that causes zig build test to often hang forever. To workaround this for now apply following diff
-
-```
-diff --git a/lib/revm/Cargo.toml b/lib/revm/Cargo.toml
-index a3661c9b..484ba27a 100644
---- a/lib/revm/Cargo.toml
-+++ b/lib/revm/Cargo.toml
-@@ -23,13 +23,13 @@ cbindgen = "0.24"
-
- [profile.release]
- panic = "abort"
--lto = true
--codegen-units = 1
-+lto = false
-+codegen-units = 16
-
- [profile.bench]
- panic = "abort"
--lto = true
--codegen-units = 1
-+lto = false
-+codegen-units = 16
-
- # [[bin]]
- # name = "verify_lt_order"
-```
-
 ## AI-Assisted Contributions
 
 **AI-assisted contributions are welcome with proper disclosure.** If you use AI tools (like GitHub Copilot, Claude, ChatGPT, etc.) to generate code:
@@ -161,8 +132,8 @@ git submodule update --init --recursive
 # Build the project (Zig automatically runs cargo build for Rust dependencies)
 zig build
 
-# Run tests
-zig build test
+# Run tests (use test-opcodes to avoid hanging issues)
+zig build test-opcodes
 ```
 
 **Note**: The Zig build system automatically runs `cargo build` as a dependency step when building Rust libraries. On the first build, this may take longer as Cargo downloads and compiles dependencies.
@@ -174,14 +145,14 @@ zig build test
 zig build
 
 # Run tests
-zig build test
+zig build test-opcodes
 ```
 
 ### Development Workflow
 
 1. **Always verify builds**: After any code change, run:
    ```bash
-   zig build && zig build test
+   zig build && zig build test-opcodes
    ```
 2. **Enable debug logging** in tests when needed:
    ```zig

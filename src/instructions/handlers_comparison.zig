@@ -14,11 +14,8 @@ pub fn Handlers(comptime FrameType: type) type {
         /// LT opcode (0x10) - Less than comparison.
         pub fn lt(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             std.debug.assert(self.stack.size() >= 2); // LT requires 2 stack items
-            const a = self.stack.pop_unsafe(); // Top of stack (second pushed value)
-            const b = self.stack.peek_unsafe(); // Second from top (first pushed value)
-            // EVM: pops a (top), then b; pushes (a < b)
-            const result: WordType = @intFromBool(a < b);
-            self.stack.set_top_unsafe(result);
+            // EVM: pops top, then second; pushes (top < second)
+            self.stack.binary_op_unsafe(struct { fn op(top: WordType, second: WordType) WordType { return @intFromBool(top < second); } }.op);
             const op_data = dispatch.getOpData(.LT, Dispatch, Dispatch.Item, cursor);
             return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
@@ -26,11 +23,8 @@ pub fn Handlers(comptime FrameType: type) type {
         /// GT opcode (0x11) - Greater than comparison.
         pub fn gt(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             std.debug.assert(self.stack.size() >= 2); // GT requires 2 stack items
-            const a = self.stack.pop_unsafe(); // Top of stack (second pushed value)
-            const b = self.stack.peek_unsafe(); // Second from top (first pushed value)
-            // EVM: pops a (top), then b; pushes (a > b)
-            const result: WordType = @intFromBool(a > b);
-            self.stack.set_top_unsafe(result);
+            // EVM: pops top, then second; pushes (top > second)
+            self.stack.binary_op_unsafe(struct { fn op(top: WordType, second: WordType) WordType { return @intFromBool(top > second); } }.op);
             const op_data = dispatch.getOpData(.GT, Dispatch, Dispatch.Item, cursor);
             return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
@@ -66,11 +60,8 @@ pub fn Handlers(comptime FrameType: type) type {
         /// EQ opcode (0x14) - Equality comparison.
         pub fn eq(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             std.debug.assert(self.stack.size() >= 2); // EQ requires 2 stack items
-            const b = self.stack.pop_unsafe(); // Top of stack - second operand
-            const a = self.stack.peek_unsafe(); // Second from top - first operand
-            // EVM: pops b, then a, and pushes (a == b)
-            const result: WordType = @intFromBool(a == b);
-            self.stack.set_top_unsafe(result);
+            // EVM: pops top, then second, and pushes (top == second)
+            self.stack.binary_op_unsafe(struct { fn op(top: WordType, second: WordType) WordType { return @intFromBool(top == second); } }.op);
             const op_data = dispatch.getOpData(.EQ, Dispatch, Dispatch.Item, cursor);
             return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }

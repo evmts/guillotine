@@ -25,7 +25,8 @@ pub fn Handlers(comptime FrameType: type) type {
             validate_stack(self);
             
             const op_data = dispatch.getOpData(.PUSH_ADD_INLINE, Dispatch, Dispatch.Item, cursor);
-            self.stack.push_unsafe(op_data.metadata.value +% self.stack.pop_unsafe());
+            const top = self.stack.peek_unsafe();
+            self.stack.set_top_unsafe(op_data.metadata.value +% top);
 
             return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
@@ -35,7 +36,8 @@ pub fn Handlers(comptime FrameType: type) type {
             validate_stack(self);
 
             const op_data = dispatch.getOpData(.PUSH_ADD_POINTER, Dispatch, Dispatch.Item, cursor);
-            self.stack.push_unsafe(op_data.metadata.value.* +% self.stack.pop_unsafe());
+            const top = self.stack.peek_unsafe();
+            self.stack.set_top_unsafe(op_data.metadata.value.* +% top);
             
             return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
@@ -45,7 +47,8 @@ pub fn Handlers(comptime FrameType: type) type {
             validate_stack(self);
             
             const op_data = dispatch.getOpData(.PUSH_MUL_INLINE, Dispatch, Dispatch.Item, cursor);
-            self.stack.push_unsafe(op_data.metadata.value *% self.stack.pop_unsafe());
+            const top = self.stack.peek_unsafe();
+            self.stack.set_top_unsafe(op_data.metadata.value *% top);
 
             return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
@@ -55,7 +58,8 @@ pub fn Handlers(comptime FrameType: type) type {
             validate_stack(self);
 
             const op_data = dispatch.getOpData(.PUSH_MUL_POINTER, Dispatch, Dispatch.Item, cursor);
-            self.stack.push_unsafe(op_data.metadata.value.* *% self.stack.pop_unsafe());
+            const top = self.stack.peek_unsafe();
+            self.stack.set_top_unsafe(op_data.metadata.value.* *% top);
 
             return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
@@ -65,7 +69,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const op_data = dispatch.getOpData(.PUSH_DIV_INLINE, Dispatch, Dispatch.Item, cursor);
             const dividend = op_data.metadata.value;
 
-            const divisor = self.stack.pop_unsafe();
+            const divisor = self.stack.peek_unsafe();
             
             const Uint = @import("primitives").Uint;
             const U256 = Uint(256, 4);
@@ -75,8 +79,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const result_u256 = dividend_u256.wrapping_div(divisor_u256);
             const result = result_u256.to_native();
             
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
-            self.stack.push_unsafe(result);
+            self.stack.set_top_unsafe(result);
 
             return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
@@ -87,7 +90,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const dividend = op_data.metadata.value.*;
 
             std.debug.assert(self.stack.size() >= 1); // PUSH_DIV_POINTER requires 1 stack item
-            const divisor = self.stack.pop_unsafe();
+            const divisor = self.stack.peek_unsafe();
             
             // Convert to U256 for optimized division
             const Uint = @import("primitives").Uint;
@@ -98,8 +101,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const result_u256 = dividend_u256.wrapping_div(divisor_u256);
             const result = result_u256.to_native();
             
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
-            self.stack.push_unsafe(result);
+            self.stack.set_top_unsafe(result);
 
             return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
@@ -109,10 +111,9 @@ pub fn Handlers(comptime FrameType: type) type {
             const op_data = dispatch.getOpData(.PUSH_SUB_INLINE, Dispatch, Dispatch.Item, cursor);
             const push_value = op_data.metadata.value;
             std.debug.assert(self.stack.size() >= 1); // PUSH_SUB_INLINE requires 1 stack item
-            const top = self.stack.pop_unsafe();
+            const top = self.stack.peek_unsafe();
             const result = push_value -% top;
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
-            self.stack.push_unsafe(result);
+            self.stack.set_top_unsafe(result);
             return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
@@ -120,9 +121,9 @@ pub fn Handlers(comptime FrameType: type) type {
         pub fn push_sub_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const op_data = dispatch.getOpData(.PUSH_SUB_POINTER, Dispatch, Dispatch.Item, cursor);
             std.debug.assert(self.stack.size() >= 1); 
-            const result = op_data.metadata.value.* -% self.stack.pop_unsafe();
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); 
-            self.stack.push_unsafe(result);
+            const top = self.stack.peek_unsafe();
+            const result = op_data.metadata.value.* -% top;
+            self.stack.set_top_unsafe(result);
             return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
     };

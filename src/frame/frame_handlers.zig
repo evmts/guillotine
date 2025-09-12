@@ -203,10 +203,9 @@ pub fn getSyntheticHandler(comptime FrameType: type, synthetic_opcode: u8) Frame
         @intFromEnum(OpcodeSynthetic.PUSH_DIV_POINTER) => &ArithmeticSyntheticHandlers.push_div_pointer,
         @intFromEnum(OpcodeSynthetic.PUSH_SUB_INLINE) => &ArithmeticSyntheticHandlers.push_sub_inline,
         @intFromEnum(OpcodeSynthetic.PUSH_SUB_POINTER) => &ArithmeticSyntheticHandlers.push_sub_pointer,
-        @intFromEnum(OpcodeSynthetic.PUSH_JUMP_INLINE) => &JumpSyntheticHandlers.push_jump_inline,
-        @intFromEnum(OpcodeSynthetic.PUSH_JUMP_POINTER) => &JumpSyntheticHandlers.push_jump_pointer,
-        @intFromEnum(OpcodeSynthetic.PUSH_JUMPI_INLINE) => &JumpSyntheticHandlers.push_jumpi_inline,
-        @intFromEnum(OpcodeSynthetic.PUSH_JUMPI_POINTER) => &JumpSyntheticHandlers.push_jumpi_pointer,
+        // Static jump optimizations
+        @intFromEnum(OpcodeSynthetic.JUMP_TO_STATIC_LOCATION) => &JumpSyntheticHandlers.jump_to_static_location,
+        @intFromEnum(OpcodeSynthetic.JUMPI_TO_STATIC_LOCATION) => &JumpSyntheticHandlers.jumpi_to_static_location,
         @intFromEnum(OpcodeSynthetic.PUSH_MLOAD_INLINE) => &MemorySyntheticHandlers.push_mload_inline,
         @intFromEnum(OpcodeSynthetic.PUSH_MLOAD_POINTER) => &MemorySyntheticHandlers.push_mload_pointer,
         @intFromEnum(OpcodeSynthetic.PUSH_MSTORE_INLINE) => &MemorySyntheticHandlers.push_mstore_inline,

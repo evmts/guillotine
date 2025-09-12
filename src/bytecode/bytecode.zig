@@ -180,6 +180,19 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
                         iterator.pc += 1;
                         return OpcodeData{ .jumpdest = .{ .gas_cost = 1 } };
                     },
+                    0x56 => { // JUMP - Dynamic jump (not fused)
+                        iterator.pc += 1;
+                        return OpcodeData{ .jump = {} };
+                    },
+                    0x57 => { // JUMPI - Dynamic jump (not fused)
+                        iterator.pc += 1;
+                        return OpcodeData{ .jumpi = {} };
+                    },
+                    0x58 => { // PC
+                        const current_pc = iterator.pc;
+                        iterator.pc += 1;
+                        return OpcodeData{ .pc = .{ .value = current_pc } };
+                    },
                     0x00 => { // STOP
                         iterator.pc += 1;
                         return OpcodeData{ .stop = {} };
@@ -201,6 +214,9 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
             regular: struct { opcode: u8 },
             push: struct { value: u256, size: u8 },
             jumpdest: struct { gas_cost: u16 },
+            jump: void,  // Dynamic JUMP (not fused)
+            jumpi: void,  // Dynamic JUMPI (not fused)
+            pc: struct { value: PcType },  // PC opcode with current PC value
             push_add_fusion: struct { value: u256 },
             push_mul_fusion: struct { value: u256 },
             push_sub_fusion: struct { value: u256 },

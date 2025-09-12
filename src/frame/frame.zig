@@ -39,10 +39,8 @@ const dispatch_mod = @import("../preprocessor/dispatch.zig");
 
 /// LRU cache for dispatch schedules to avoid recompiling bytecode
 const DispatchCacheEntry = struct {
-    /// First 64 bytes of bytecode used as key for fast lookup
-    bytecode_key: [64]u8,
-    /// Full bytecode slice for verification on key match
-    bytecode: []const u8,
+    /// Full bytecode used as key (padded with zeros if shorter than max)
+    bytecode_key: []const u8, // Points to bytecode directly when it fits, or to a copy
     /// Cached dispatch schedule (owned by cache)
     schedule: []const u8, // Store as raw bytes
     /// Cached jump table (owned by cache)
@@ -82,16 +80,9 @@ const DispatchCache = struct {
         }
     }
 
-    fn getBytecodeKey(bytecode: []const u8) [64]u8 {
-        var key: [64]u8 = [_]u8{0} ** 64;
-        const copy_len = @min(bytecode.len, 64);
-        @memcpy(key[0..copy_len], bytecode[0..copy_len]);
-        return key;
-    }
+    // No longer needed - we use bytecode directly as key
 
     fn lookup(self: *DispatchCache, bytecode: []const u8) ?struct { schedule: []const u8, jump_table: []const u8 } {
-        const key = getBytecodeKey(bytecode);
-
         self.mutex.lock();
         defer self.mutex.unlock();
 
@@ -100,19 +91,16 @@ const DispatchCache = struct {
         // Search for matching entry
         for (&self.entries) |*entry_opt| {
             if (entry_opt.*) |*entry| {
-                // First check the 64-byte key for fast rejection
-                if (std.mem.eql(u8, &entry.bytecode_key, &key)) {
-                    // Key matches, now verify full bytecode
-                    if (std.mem.eql(u8, entry.bytecode, bytecode)) {
-                        // Found a hit
-                        self.hits += 1;
-                        entry.last_access = self.access_counter;
-                        entry.ref_count += 1;
-                        return .{
-                            .schedule = entry.schedule,
-                            .jump_table = entry.jump_table_entries,
-                        };
-                    }
+                // Direct bytecode comparison - entire bytecode is the key
+                if (std.mem.eql(u8, entry.bytecode_key, bytecode)) {
+                    // Found a hit
+                    self.hits += 1;
+                    entry.last_access = self.access_counter;
+                    entry.ref_count += 1;
+                    return .{
+                        .schedule = entry.schedule,
+                        .jump_table = entry.jump_table_entries,
+                    };
                 }
             }
         }
@@ -122,7 +110,6 @@ const DispatchCache = struct {
     }
 
     fn insert(self: *DispatchCache, bytecode: []const u8, schedule: []const u8, jump_table: []const u8) !void {
-        const key = getBytecodeKey(bytecode);
 
         self.mutex.lock();
         defer self.mutex.unlock();
@@ -162,8 +149,7 @@ const DispatchCache = struct {
 
         // Insert new entry
         self.entries[target_idx] = DispatchCacheEntry{
-            .bytecode_key = key,
-            .bytecode = bytecode, // Store reference to original bytecode
+            .bytecode_key = bytecode, // Use bytecode directly as key
             .schedule = schedule_copy,
             .jump_table_entries = jump_table_copy,
             .last_access = self.access_counter,
@@ -172,22 +158,17 @@ const DispatchCache = struct {
     }
 
     fn release(self: *DispatchCache, bytecode: []const u8) void {
-        const key = getBytecodeKey(bytecode);
-
         self.mutex.lock();
         defer self.mutex.unlock();
 
         for (&self.entries) |*entry_opt| {
             if (entry_opt.*) |*entry| {
-                // Quick key check first
-                if (std.mem.eql(u8, &entry.bytecode_key, &key)) {
-                    // Verify full bytecode
-                    if (std.mem.eql(u8, entry.bytecode, bytecode)) {
-                        if (entry.ref_count > 0) {
-                            entry.ref_count -= 1;
-                        }
-                        return;
+                // Direct bytecode comparison
+                if (std.mem.eql(u8, entry.bytecode_key, bytecode)) {
+                    if (entry.ref_count > 0) {
+                        entry.ref_count -= 1;
                     }
+                    return;
                 }
             }
         }
@@ -334,6 +315,14 @@ pub fn Frame(comptime config: FrameConfig) type {
         pub const GasType = config.GasType();
         /// The type used to index into bytecode or instructions. Determined by config.max_bytecode_size
         pub const PcType = config.PcType();
+        
+        // Compile-time check: PcType must be at least u8 for dispatch cache optimization
+        comptime {
+            if (@bitSizeOf(PcType) < 8) {
+                @compileError("PcType must be at least u8 (8 bits). Current max_bytecode_size is too small.");
+            }
+        }
+        
         /// The struct in charge of managing Evm memory
         pub const Memory = memory_mod.Memory(.{
             .initial_capacity = config.memory_initial_capacity,
@@ -540,8 +529,7 @@ pub fn Frame(comptime config: FrameConfig) type {
                     const handlers = &Self.opcode_handlers;
 
                     // Create dispatch schedule
-                    owned_schedule = Dispatch.DispatchSchedule.init(allocator, &bytecode, handlers) catch |e| {
-                        log.err("Frame.interpret_with_tracer: Failed to create dispatch schedule: {}", .{e});
+                    owned_schedule = Dispatch.DispatchSchedule.init(allocator, &bytecode, handlers) catch {
                         return Error.AllocationError;
                     };
                     schedule = owned_schedule.?.items;
@@ -581,8 +569,7 @@ pub fn Frame(comptime config: FrameConfig) type {
                 const handlers = &Self.opcode_handlers;
 
                 // Create dispatch schedule
-                owned_schedule = Dispatch.DispatchSchedule.init(allocator, &bytecode, handlers) catch |e| {
-                    log.err("Frame.interpret_with_tracer: Failed to create dispatch schedule: {}", .{e});
+                owned_schedule = Dispatch.DispatchSchedule.init(allocator, &bytecode, handlers) catch {
                     return Error.AllocationError;
                 };
                 schedule = owned_schedule.?.items;

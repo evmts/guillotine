@@ -36,14 +36,6 @@ pub fn Handlers(comptime FrameType: type) type {
                 pub fn pushHandler(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
                     const dispatch = Dispatch{ .cursor = cursor };
                     
-                    // // Log entry state at error level to be visible
-                    // log.err("PUSH{} ENTRY: stack_size={}, stack_ptr={*}", .{
-                    //     push_n,
-                    //     self.stack.size(),
-                    //     self.stack.stack_ptr
-                    // });
-                    
-                    
                     // For PUSH1-PUSH8, we get push_inline metadata with u64 value
                     // For PUSH9-PUSH32, we get push_pointer metadata with *u256 value
                     const op_data = switch (push_n) {

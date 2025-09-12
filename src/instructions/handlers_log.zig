@@ -31,12 +31,10 @@ pub fn Handlers(comptime FrameType: type) type {
                     const offset = self.stack.pop_unsafe();
                     const length = self.stack.pop_unsafe();
                     
-                    // Pop topics in reverse order to account for LIFO stack
+                    // Pop topics in order (topic1 is deepest, topicN is shallowest)
                     var topics: [4]WordType = [_]WordType{0} ** 4;
-                    var i = topic_count;
-                    while (i > 0) {
-                        i -= 1;
-                        topics[i] = self.stack.pop_unsafe();
+                    for (0..topic_count) |j| {
+                        topics[j] = self.stack.pop_unsafe();
                     }
 
                     // Check bounds

@@ -78,18 +78,6 @@ pub fn Handlers(comptime FrameType: type) type {
         pub fn mstore(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const dispatch = Dispatch{ .cursor = cursor };
             // MSTORE stores a 32-byte word to memory
-            // log.err("MSTORE ENTRY: stack_size={}, stack_ptr={*}", .{
-            //     self.stack.size(),
-            //     self.stack.stack_ptr
-            // });
-            //
-            // // Log stack contents
-            // const stack_slice = self.stack.get_slice();
-            // log.err("MSTORE: Stack contents (top first):", .{});
-            // for (stack_slice, 0..) |val, i| {
-            //     if (i >= 3) break;
-            //     log.err("  [{}] = {x}", .{i, val});
-            // }
 
             std.debug.assert(self.stack.size() >= 2); // MSTORE requires 2 stack items
             const offset = self.stack.pop_unsafe();

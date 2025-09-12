@@ -23,13 +23,13 @@ cbindgen = "0.24"
 
 [profile.release]
 panic = "abort"
-lto = false
-codegen-units = 16
+lto = true
+codegen-units = 1
 
 [profile.bench]
 panic = "abort"
-lto = false
-codegen-units = 16
+lto = true
+codegen-units = 1
 
 # [[bin]]
 # name = "verify_lt_order"

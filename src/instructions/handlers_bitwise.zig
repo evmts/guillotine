@@ -14,9 +14,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// AND opcode (0x16) - Bitwise AND operation.
         pub fn @"and"(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             std.debug.assert(self.stack.size() >= 2); // AND requires 2 stack items
-            const b = self.stack.pop_unsafe(); // Top of stack - second operand
-            const a = self.stack.peek_unsafe(); // Second from top - first operand
-            self.stack.set_top_unsafe(a & b);
+            self.stack.binary_op_unsafe(struct { fn op(top: WordType, second: WordType) WordType { return top & second; } }.op);
             const op_data = dispatch.getOpData(.AND, Dispatch, Dispatch.Item, cursor);
             return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
@@ -24,9 +22,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// OR opcode (0x17) - Bitwise OR operation.
         pub fn @"or"(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             std.debug.assert(self.stack.size() >= 2); // OR requires 2 stack items
-            const b = self.stack.pop_unsafe(); // Top of stack - second operand
-            const a = self.stack.peek_unsafe(); // Second from top - first operand
-            self.stack.set_top_unsafe(a | b);
+            self.stack.binary_op_unsafe(struct { fn op(top: WordType, second: WordType) WordType { return top | second; } }.op);
             const op_data = dispatch.getOpData(.OR, Dispatch, Dispatch.Item, cursor);
             return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
@@ -34,9 +30,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// XOR opcode (0x18) - Bitwise XOR operation.
         pub fn xor(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             std.debug.assert(self.stack.size() >= 2); // XOR requires 2 stack items
-            const b = self.stack.pop_unsafe(); // Top of stack - second operand
-            const a = self.stack.peek_unsafe(); // Second from top - first operand
-            self.stack.set_top_unsafe(a ^ b);
+            self.stack.binary_op_unsafe(struct { fn op(top: WordType, second: WordType) WordType { return top ^ second; } }.op);
             const op_data = dispatch.getOpData(.XOR, Dispatch, Dispatch.Item, cursor);
             return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }

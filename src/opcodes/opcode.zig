@@ -585,10 +585,7 @@ pub const UnifiedOpcode = enum(u16) {
     PUSH_MUL_POINTER = 0x100 + 0xA8,
     PUSH_DIV_INLINE = 0x100 + 0xA9,
     PUSH_DIV_POINTER = 0x100 + 0xAA,
-    PUSH_JUMP_INLINE = 0x100 + 0xAB,
-    PUSH_JUMP_POINTER = 0x100 + 0xAC,
-    PUSH_JUMPI_INLINE = 0x100 + 0xAD,
-    PUSH_JUMPI_POINTER = 0x100 + 0xAE,
+    // 0x100 + 0xAB-0xAE removed - deprecated jump handlers (use static jumps instead)
     PUSH_SUB_INLINE = 0x100 + 0xAF,
     PUSH_SUB_POINTER = 0x100 + 0xB0,
     PUSH_MLOAD_INLINE = 0x100 + 0xB1,

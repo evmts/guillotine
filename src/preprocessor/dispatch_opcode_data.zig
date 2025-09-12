@@ -25,9 +25,9 @@ pub fn GetOpDataReturnType(
         .PUSH1, .PUSH2, .PUSH3, .PUSH4, .PUSH5, .PUSH6, .PUSH7, .PUSH8 => struct { metadata: PushInlineMetadata, next_handler: OpcodeHandler, next_cursor: Self },
         .PUSH9, .PUSH10, .PUSH11, .PUSH12, .PUSH13, .PUSH14, .PUSH15, .PUSH16, .PUSH17, .PUSH18, .PUSH19, .PUSH20, .PUSH21, .PUSH22, .PUSH23, .PUSH24, .PUSH25, .PUSH26, .PUSH27, .PUSH28, .PUSH29, .PUSH30, .PUSH31, .PUSH32 => struct { metadata: PushPointerMetadata, next_handler: OpcodeHandler, next_cursor: Self },
         .JUMPDEST => struct { metadata: JumpDestMetadata, next_handler: OpcodeHandler, next_cursor: Self },
-        .PUSH_ADD_INLINE, .PUSH_MUL_INLINE, .PUSH_DIV_INLINE, .PUSH_SUB_INLINE, .PUSH_AND_INLINE, .PUSH_OR_INLINE, .PUSH_XOR_INLINE, .PUSH_JUMP_INLINE, .PUSH_JUMPI_INLINE, .PUSH_MLOAD_INLINE, .PUSH_MSTORE_INLINE, .PUSH_MSTORE8_INLINE => struct { metadata: PushInlineMetadata, next_handler: OpcodeHandler, next_cursor: Self },
+        .PUSH_ADD_INLINE, .PUSH_MUL_INLINE, .PUSH_DIV_INLINE, .PUSH_SUB_INLINE, .PUSH_AND_INLINE, .PUSH_OR_INLINE, .PUSH_XOR_INLINE, .PUSH_MLOAD_INLINE, .PUSH_MSTORE_INLINE, .PUSH_MSTORE8_INLINE => struct { metadata: PushInlineMetadata, next_handler: OpcodeHandler, next_cursor: Self },
         .JUMP_TO_STATIC_LOCATION, .JUMPI_TO_STATIC_LOCATION => struct { metadata: JumpStaticMetadata, next_handler: OpcodeHandler, next_cursor: Self },
-        .PUSH_ADD_POINTER, .PUSH_MUL_POINTER, .PUSH_DIV_POINTER, .PUSH_SUB_POINTER, .PUSH_AND_POINTER, .PUSH_OR_POINTER, .PUSH_XOR_POINTER, .PUSH_JUMP_POINTER, .PUSH_JUMPI_POINTER, .PUSH_MLOAD_POINTER, .PUSH_MSTORE_POINTER, .PUSH_MSTORE8_POINTER => struct { metadata: PushPointerMetadata, next_handler: OpcodeHandler, next_cursor: Self },
+        .PUSH_ADD_POINTER, .PUSH_MUL_POINTER, .PUSH_DIV_POINTER, .PUSH_SUB_POINTER, .PUSH_AND_POINTER, .PUSH_OR_POINTER, .PUSH_XOR_POINTER, .PUSH_MLOAD_POINTER, .PUSH_MSTORE_POINTER, .PUSH_MSTORE8_POINTER => struct { metadata: PushPointerMetadata, next_handler: OpcodeHandler, next_cursor: Self },
         // Advanced synthetic opcodes with special metadata requirements
         .MULTI_PUSH_2 => struct { items: [*]const Item, next_handler: OpcodeHandler, next_cursor: Self }, // Points to 2 push items
         .MULTI_PUSH_3 => struct { items: [*]const Item, next_handler: OpcodeHandler, next_cursor: Self }, // Points to 3 push items
@@ -82,7 +82,7 @@ pub inline fn getOpData(
             .next_handler = cursor[2].opcode_handler,
             .next_cursor = Self{ .cursor = cursor + 2 },
         },
-        .PUSH_ADD_INLINE, .PUSH_MUL_INLINE, .PUSH_DIV_INLINE, .PUSH_SUB_INLINE, .PUSH_AND_INLINE, .PUSH_OR_INLINE, .PUSH_XOR_INLINE, .PUSH_JUMP_INLINE, .PUSH_JUMPI_INLINE, .PUSH_MLOAD_INLINE, .PUSH_MSTORE_INLINE, .PUSH_MSTORE8_INLINE => .{
+        .PUSH_ADD_INLINE, .PUSH_MUL_INLINE, .PUSH_DIV_INLINE, .PUSH_SUB_INLINE, .PUSH_AND_INLINE, .PUSH_OR_INLINE, .PUSH_XOR_INLINE, .PUSH_MLOAD_INLINE, .PUSH_MSTORE_INLINE, .PUSH_MSTORE8_INLINE => .{
             .metadata = cursor[1].push_inline,
             .next_handler = cursor[2].opcode_handler,
             .next_cursor = Self{ .cursor = cursor + 2 },
@@ -92,7 +92,7 @@ pub inline fn getOpData(
             .next_handler = cursor[2].opcode_handler,
             .next_cursor = Self{ .cursor = cursor + 2 },
         },
-        .PUSH_ADD_POINTER, .PUSH_MUL_POINTER, .PUSH_DIV_POINTER, .PUSH_SUB_POINTER, .PUSH_AND_POINTER, .PUSH_OR_POINTER, .PUSH_XOR_POINTER, .PUSH_JUMP_POINTER, .PUSH_JUMPI_POINTER, .PUSH_MLOAD_POINTER, .PUSH_MSTORE_POINTER, .PUSH_MSTORE8_POINTER => .{
+        .PUSH_ADD_POINTER, .PUSH_MUL_POINTER, .PUSH_DIV_POINTER, .PUSH_SUB_POINTER, .PUSH_AND_POINTER, .PUSH_OR_POINTER, .PUSH_XOR_POINTER, .PUSH_MLOAD_POINTER, .PUSH_MSTORE_POINTER, .PUSH_MSTORE8_POINTER => .{
             .metadata = cursor[1].push_pointer,
             .next_handler = cursor[2].opcode_handler,
             .next_cursor = Self{ .cursor = cursor + 2 },

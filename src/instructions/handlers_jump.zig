@@ -50,12 +50,11 @@ pub fn Handlers(comptime FrameType: type) type {
         /// Pops destination and condition from stack.
         /// Jumps to destination if condition is non-zero, otherwise continues to next instruction.
         pub fn jumpi(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            std.debug.assert(self.stack.size() >= 2); // JUMPI requires 2 stack items
-            // Get jump table from frame
+            std.debug.assert(self.stack.size() >= 2); 
             const jump_table = self.jump_table;
 
-            const dest = self.stack.pop_unsafe(); // Top of stack (destination)
-            const condition = self.stack.pop_unsafe(); // Second from top (condition)
+            const dest = self.stack.pop_unsafe(); 
+            const condition = self.stack.pop_unsafe(); 
 
             if (condition != 0) {
                 if (dest > std.math.maxInt(u32)) {
@@ -65,9 +64,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
                 const dest_pc: FrameType.PcType = @intCast(dest);
 
-                // Use binary search to find valid jump destination
                 if (jump_table.findJumpTarget(dest_pc)) |jump_dispatch| {
-                    // Found valid JUMPDEST - update thread-local PC for tracing (only when tracing is enabled)
                     const build_options = @import("build_options");
                     if (comptime build_options.enable_tracing) {
                         const frame_handlers = @import("../frame/frame_handlers.zig");
@@ -81,7 +78,7 @@ pub fn Handlers(comptime FrameType: type) type {
                     return Error.InvalidJump;
                 }
             } else {
-                // Condition is false, continue to next instruction
+                @branchHint(.likely);
                 const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
                 const op_data = dispatch_opcode_data.getOpData(.JUMPI, Dispatch, Dispatch.Item, cursor);
                 return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });

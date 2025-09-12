@@ -20,10 +20,9 @@ pub fn Handlers(comptime FrameType: type) type {
             const push_value = op_data.metadata.value;
 
             std.debug.assert(self.stack.size() >= 1); // PUSH_AND_INLINE requires 1 stack item
-            const top = self.stack.pop_unsafe();
+            const top = self.stack.peek_unsafe();
             const result = top & push_value;
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
-            self.stack.push_unsafe(result);
+            self.stack.set_top_unsafe(result);
 
             return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
@@ -37,10 +36,9 @@ pub fn Handlers(comptime FrameType: type) type {
             const push_value = op_data.metadata.value.*;
 
             std.debug.assert(self.stack.size() >= 1); // PUSH_AND_POINTER requires 1 stack item
-            const top = self.stack.pop_unsafe();
+            const top = self.stack.peek_unsafe();
             const result = top & push_value;
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
-            self.stack.push_unsafe(result);
+            self.stack.set_top_unsafe(result);
 
             return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
@@ -54,10 +52,9 @@ pub fn Handlers(comptime FrameType: type) type {
             const push_value = op_data.metadata.value;
 
             std.debug.assert(self.stack.size() >= 1); // PUSH_OR_INLINE requires 1 stack item
-            const top = self.stack.pop_unsafe();
+            const top = self.stack.peek_unsafe();
             const result = top | push_value;
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
-            self.stack.push_unsafe(result);
+            self.stack.set_top_unsafe(result);
 
             return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
@@ -71,10 +68,9 @@ pub fn Handlers(comptime FrameType: type) type {
             const push_value = op_data.metadata.value.*;
 
             std.debug.assert(self.stack.size() >= 1); // PUSH_OR_POINTER requires 1 stack item
-            const top = self.stack.pop_unsafe();
+            const top = self.stack.peek_unsafe();
             const result = top | push_value;
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
-            self.stack.push_unsafe(result);
+            self.stack.set_top_unsafe(result);
 
             return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
@@ -88,10 +84,9 @@ pub fn Handlers(comptime FrameType: type) type {
             const push_value = op_data.metadata.value;
 
             std.debug.assert(self.stack.size() >= 1); // PUSH_XOR_INLINE requires 1 stack item
-            const top = self.stack.pop_unsafe();
+            const top = self.stack.peek_unsafe();
             const result = top ^ push_value;
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
-            self.stack.push_unsafe(result);
+            self.stack.set_top_unsafe(result);
 
             return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
@@ -105,10 +100,9 @@ pub fn Handlers(comptime FrameType: type) type {
             const push_value = op_data.metadata.value.*;
 
             std.debug.assert(self.stack.size() >= 1); // PUSH_XOR_POINTER requires 1 stack item
-            const top = self.stack.pop_unsafe();
+            const top = self.stack.peek_unsafe();
             const result = top ^ push_value;
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
-            self.stack.push_unsafe(result);
+            self.stack.set_top_unsafe(result);
 
             return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
