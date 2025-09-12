@@ -57,11 +57,11 @@ test "LOG2 topic order correctness" {
     const contract_address = Address.from_hex("0xc0ffeebabedeadbeefcafebabe0123456789abcd") catch unreachable;
     
     // Create bytecode that emits LOG2 with two topics
-    // Stack setup: PUSH1 0xAA, PUSH1 0xBB, PUSH1 0, PUSH1 0, LOG2
-    // Expected log topics: [0xAA, 0xBB] (same order as pushed)
+    // Stack setup: PUSH1 0xBB, PUSH1 0xAA, PUSH1 0, PUSH1 0, LOG2
+    // Expected log topics: [0xAA, 0xBB] (0xAA as topic0, 0xBB as topic1)
     const bytecode = [_]u8{
-        0x60, 0xAA,  // PUSH1 0xAA (topic0 - first topic)
-        0x60, 0xBB,  // PUSH1 0xBB (topic1 - second topic)
+        0x60, 0xBB,  // PUSH1 0xBB (will become topic1 after LIFO pop)
+        0x60, 0xAA,  // PUSH1 0xAA (will become topic0 after LIFO pop)
         0x60, 0x00,  // PUSH1 0 (data length)
         0x60, 0x00,  // PUSH1 0 (data offset)
         0xa2,        // LOG2
@@ -115,9 +115,9 @@ test "LOG2 topic order correctness" {
     try testing.expectEqual(contract_address, log.address);
     try testing.expectEqual(@as(usize, 2), log.topics.len);
     
-    // Verify correct topic order (this will fail until the bug is fixed)
-    try testing.expectEqual(@as(u256, 0xAA), log.topics[0]); // First topic pushed
-    try testing.expectEqual(@as(u256, 0xBB), log.topics[1]); // Second topic pushed
+    // Verify correct topic order
+    try testing.expectEqual(@as(u256, 0xAA), log.topics[0]); // topic0
+    try testing.expectEqual(@as(u256, 0xBB), log.topics[1]); // topic1
 }
 
 test "LOG3 topic order correctness" {
@@ -161,12 +161,12 @@ test "LOG3 topic order correctness" {
     const contract_address = Address.from_hex("0xc0ffeebabedeadbeefcafebabe0123456789abcd") catch unreachable;
     
     // Create bytecode that emits LOG3 with three topics
-    // Stack setup: PUSH1 0x11, PUSH1 0x22, PUSH1 0x33, PUSH1 0, PUSH1 0, LOG3
-    // Expected log topics: [0x11, 0x22, 0x33] (same order as pushed)
+    // Stack setup: PUSH1 0x33, PUSH1 0x22, PUSH1 0x11, PUSH1 0, PUSH1 0, LOG3
+    // Expected log topics: [0x11, 0x22, 0x33]
     const bytecode = [_]u8{
-        0x60, 0x11,  // PUSH1 0x11 (topic0)
-        0x60, 0x22,  // PUSH1 0x22 (topic1)
-        0x60, 0x33,  // PUSH1 0x33 (topic2)
+        0x60, 0x33,  // PUSH1 0x33 (will become topic2 after LIFO pop)
+        0x60, 0x22,  // PUSH1 0x22 (will become topic1 after LIFO pop)
+        0x60, 0x11,  // PUSH1 0x11 (will become topic0 after LIFO pop)
         0x60, 0x00,  // PUSH1 0 (data length)
         0x60, 0x00,  // PUSH1 0 (data offset)
         0xa3,        // LOG3
@@ -220,10 +220,10 @@ test "LOG3 topic order correctness" {
     try testing.expectEqual(contract_address, log.address);
     try testing.expectEqual(@as(usize, 3), log.topics.len);
     
-    // Verify correct topic order (this will fail until the bug is fixed)
-    try testing.expectEqual(@as(u256, 0x11), log.topics[0]); // First topic pushed
-    try testing.expectEqual(@as(u256, 0x22), log.topics[1]); // Second topic pushed  
-    try testing.expectEqual(@as(u256, 0x33), log.topics[2]); // Third topic pushed
+    // Verify correct topic order
+    try testing.expectEqual(@as(u256, 0x11), log.topics[0]); // topic0
+    try testing.expectEqual(@as(u256, 0x22), log.topics[1]); // topic1
+    try testing.expectEqual(@as(u256, 0x33), log.topics[2]); // topic2
 }
 
 test "LOG4 topic order with Transfer event" {
@@ -281,15 +281,15 @@ test "LOG4 topic order with Transfer event" {
         0x60, 0x00,  // PUSH1 0 (memory position)
         0x52,        // MSTORE
         
-        // Push topics (in order they should appear)
-        0x7f, 0xdd, 0xf2, 0x52, 0xad, 0x1b, 0xe2, 0xc8, 0x9b, // PUSH32 Transfer signature
+        // Push topics in reverse order (due to LIFO stack)
+        0x60, 0xCC,  // PUSH1 0xCC (will become topic3 after LIFO pop)
+        0x60, 0xBB,  // PUSH1 0xBB (will become topic2 after LIFO pop)
+        0x60, 0xAA,  // PUSH1 0xAA (will become topic1 after LIFO pop)
+        
+        0x7f, 0xdd, 0xf2, 0x52, 0xad, 0x1b, 0xe2, 0xc8, 0x9b, // PUSH32 Transfer signature (topic0)
         0x69, 0xc2, 0xb0, 0x68, 0xfc, 0x37, 0x8d, 0xaa,
         0x95, 0x2b, 0xa7, 0xf1, 0x63, 0xc4, 0xa1, 0x16,
         0x28, 0xf5, 0x5a, 0x4d, 0xf5, 0x23, 0xb3, 0xef,
-        
-        0x60, 0xAA,  // PUSH1 0xAA (from address placeholder)
-        0x60, 0xBB,  // PUSH1 0xBB (to address placeholder)
-        0x60, 0xCC,  // PUSH1 0xCC (extra topic)
         
         0x60, 0x20,  // PUSH1 32 (data length - the value)
         0x60, 0x00,  // PUSH1 0 (data offset)
@@ -344,10 +344,10 @@ test "LOG4 topic order with Transfer event" {
     try testing.expectEqual(contract_address, log.address);
     try testing.expectEqual(@as(usize, 4), log.topics.len);
     
-    // Verify correct topic order (this will fail until the bug is fixed)
+    // Verify correct topic order
     const expected_sig: u256 = 0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef;
-    try testing.expectEqual(expected_sig, log.topics[0]); // Transfer event signature (first pushed)
-    try testing.expectEqual(@as(u256, 0xAA), log.topics[1]); // From address (second pushed)
-    try testing.expectEqual(@as(u256, 0xBB), log.topics[2]); // To address (third pushed)
-    try testing.expectEqual(@as(u256, 0xCC), log.topics[3]); // Extra topic (fourth pushed)
+    try testing.expectEqual(expected_sig, log.topics[0]); // Transfer event signature (topic0)
+    try testing.expectEqual(@as(u256, 0xAA), log.topics[1]); // From address (topic1)
+    try testing.expectEqual(@as(u256, 0xBB), log.topics[2]); // To address (topic2)
+    try testing.expectEqual(@as(u256, 0xCC), log.topics[3]); // Extra topic (topic3)
 }
