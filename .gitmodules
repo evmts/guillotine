@@ -13,3 +13,4 @@
 [submodule "lib/zig"]
 	path = lib/zig
 	url = git@github.com:evmts/zig.git
+	branch = ghccc-llvm20
