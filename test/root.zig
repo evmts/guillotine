@@ -27,7 +27,7 @@ test {
     // Testing which test causes hanging - adding one by one
     _ = @import("differential/keccak_logs_test.zig");
     _ = @import("differential/log_operations_test.zig");
-    // _ = @import("differential/log_topic_order_test.zig"); // uncomment when differential testor supports logs
+    _ = @import("differential/log_topic_order_test.zig");
     _ = @import("differential/push_comprehensive_test.zig");
     _ = @import("differential/stack_edge_cases_test.zig");
     _ = @import("differential/memory_edge_cases_test.zig");
