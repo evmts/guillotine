@@ -2,6 +2,8 @@ const std = @import("std");
 const primitives = @import("primitives");
 const guillotine_evm = @import("evm");
 const revm = @import("revm");
+const CallResultType = guillotine_evm.CallResult;
+const GuillotineLog = CallResultType.Log;
 
 // Extract ExecutionTrace type from CallResult 
 const ExecutionTrace = @typeInfo(@TypeOf(@as(guillotine_evm.CallResult, undefined).trace)).optional.child;
@@ -17,12 +19,21 @@ pub const ExecutionResultWithTrace = struct {
     success: bool,
     gas_used: u64,
     output: []const u8,
+    logs: []const revm.Log,
     // Just use the same optional trace type as CallResult
     trace: ?ExecutionTrace,
     allocator: std.mem.Allocator,
 
     pub fn deinit(self: *ExecutionResultWithTrace) void {
         self.allocator.free(self.output);
+        // Free logs
+        for (self.logs) |log| {
+            self.allocator.free(log.topics);
+            self.allocator.free(log.data);
+        }
+        if (self.logs.len > 0) {
+            self.allocator.free(self.logs);
+        }
         if (self.trace) |*t| {
             t.deinit();
         }
@@ -33,12 +44,14 @@ pub const ExecutionResultWithTrace = struct {
 pub const ExecutionDiff = struct {
     result_match: bool,
     trace_match: bool,
+    logs_match: bool,
 
     // Result differences
     success_diff: ?struct { revm: bool, guillotine: bool },
     gas_diff: ?struct { revm: u64, guillotine: u64 },
     output_diff: ?struct { revm: []const u8, guillotine: []const u8 },
     error_diff: ?struct { revm: ?[]const u8, guillotine: ?[]const u8 },
+    logs_diff: ?struct { revm: []const revm.Log, guillotine: []const revm.Log },
 
     // Trace differences
     step_count_diff: ?struct { revm: usize, guillotine: usize },
@@ -63,6 +76,24 @@ pub const ExecutionDiff = struct {
         if (self.error_diff) |diff| {
             if (diff.revm) |r| self.allocator.free(r);
             if (diff.guillotine) |g| self.allocator.free(g);
+        }
+        if (self.logs_diff) |diff| {
+            // Free log topics and data for revm logs
+            for (diff.revm) |log| {
+                self.allocator.free(log.topics);
+                self.allocator.free(log.data);
+            }
+            if (diff.revm.len > 0) {
+                self.allocator.free(diff.revm);
+            }
+            // Free log topics and data for guillotine logs
+            for (diff.guillotine) |log| {
+                self.allocator.free(log.topics);
+                self.allocator.free(log.data);
+            }
+            if (diff.guillotine.len > 0) {
+                self.allocator.free(diff.guillotine);
+            }
         }
         for (self.trace_diffs) |*step_diff| {
             if (step_diff.stack_diff) |stack| {
@@ -397,7 +428,7 @@ pub const DifferentialTestor = struct {
         defer diff.deinit();
 
         // Happy path - perfect match
-        if (diff.result_match and diff.trace_match) {
+        if (diff.result_match and diff.trace_match and diff.logs_match) {
             return;
         }
         
@@ -405,7 +436,7 @@ pub const DifferentialTestor = struct {
         log.err("DIFFERENTIAL TEST FAILURE with {s}", .{trace_mode});
 
         // Unhappy path - collect and report errors
-        var error_messages: [5][]const u8 = undefined;
+        var error_messages: [6][]const u8 = undefined;
         var error_count: usize = 0;
 
         if (diff.success_diff) |success| {
@@ -428,6 +459,11 @@ pub const DifferentialTestor = struct {
 
         if (diff.output_diff) |output| {
             error_messages[error_count] = try std.fmt.allocPrint(self.allocator, "Output mismatch: REVM={x} vs Guillotine={x}", .{ output.revm, output.guillotine });
+            error_count += 1;
+        }
+
+        if (diff.logs_diff) |logs| {
+            error_messages[error_count] = try std.fmt.allocPrint(self.allocator, "Log count mismatch: REVM={} vs Guillotine={}", .{ logs.revm.len, logs.guillotine.len });
             error_count += 1;
         }
 
@@ -502,6 +538,9 @@ pub const DifferentialTestor = struct {
         else 
             0;
         
+        // Duplicate logs for result
+        const logs = try self.duplicateLogs(result.logs);
+        
         // If tracing is enabled, we might have trace files generated
         // For now, just log that tracing occurred
         if (self.revm_instance.enable_tracing) {
@@ -516,6 +555,7 @@ pub const DifferentialTestor = struct {
             .success = result.success,
             .gas_used = gas_used,
             .output = output,
+            .logs = logs,
             .trace = trace,
             .allocator = self.allocator,
         };
@@ -592,6 +632,9 @@ pub const DifferentialTestor = struct {
         // Copy output before freeing result
         const output_copy = try self.allocator.dupe(u8, result.output);
         
+        // Convert Guillotine logs to REVM log format
+        const logs = try self.convertGuillotineLogsToRevmLogs(result.logs);
+        
         // Clean up CallResult allocated memory using the comprehensive deinit method
         result.deinit(self.allocator);
 
@@ -599,6 +642,7 @@ pub const DifferentialTestor = struct {
             .success = result.success,
             .gas_used = gas_used,
             .output = output_copy,
+            .logs = logs,
             .trace = trace,
             .allocator = self.allocator,
         };
@@ -733,10 +777,12 @@ pub const DifferentialTestor = struct {
         var diff = ExecutionDiff{
             .result_match = true,
             .trace_match = true,
+            .logs_match = true,
             .success_diff = null,
             .gas_diff = null,
             .output_diff = null,
             .error_diff = null,
+            .logs_diff = null,
             .step_count_diff = null,
             .first_divergence_step = null,
             .trace_diffs = &.{},
@@ -775,6 +821,16 @@ pub const DifferentialTestor = struct {
             };
         }
 
+        // Compare logs
+        if (!self.logsEqual(revm_result.logs, guillotine_result.logs)) {
+            diff.result_match = false;
+            diff.logs_match = false;
+            diff.logs_diff = .{
+                .revm = try self.duplicateLogs(revm_result.logs),
+                .guillotine = try self.duplicateLogs(guillotine_result.logs),
+            };
+        }
+
         // Compare traces (handle optional traces)
         const revm_steps_len: usize = if (revm_result.trace) |t| t.steps.len else 0;
         const guillotine_steps_len: usize = if (guillotine_result.trace) |t| t.steps.len else 0;
@@ -801,6 +857,82 @@ pub const DifferentialTestor = struct {
         return diff;
     }
 
+    /// Compare two log arrays for equality
+    fn logsEqual(self: *DifferentialTestor, logs1: []const revm.Log, logs2: []const revm.Log) bool {
+        _ = self; // unused
+        
+        if (logs1.len != logs2.len) {
+            return false;
+        }
+        
+        for (logs1, logs2) |log1, log2| {
+            // Compare addresses
+            if (!std.mem.eql(u8, &log1.address.bytes, &log2.address.bytes)) {
+                return false;
+            }
+            
+            // Compare topic count
+            if (log1.topics.len != log2.topics.len) {
+                return false;
+            }
+            
+            // Compare topics
+            for (log1.topics, log2.topics) |topic1, topic2| {
+                if (topic1 != topic2) {
+                    return false;
+                }
+            }
+            
+            // Compare data
+            if (!std.mem.eql(u8, log1.data, log2.data)) {
+                return false;
+            }
+        }
+        
+        return true;
+    }
+
+    /// Create a deep copy of logs for diff storage
+    fn duplicateLogs(self: *DifferentialTestor, logs: []const revm.Log) ![]const revm.Log {
+        if (logs.len == 0) {
+            return &.{};
+        }
+        
+        var result = try self.allocator.alloc(revm.Log, logs.len);
+        
+        for (logs, result) |src_log, *dest_log| {
+            dest_log.address = src_log.address;
+            
+            // Duplicate topics
+            dest_log.topics = try self.allocator.dupe(u256, src_log.topics);
+            
+            // Duplicate data
+            dest_log.data = try self.allocator.dupe(u8, src_log.data);
+        }
+        
+        return result;
+    }
+
+    /// Convert Guillotine logs to REVM log format
+    fn convertGuillotineLogsToRevmLogs(self: *DifferentialTestor, guillotine_logs: []const GuillotineLog) ![]const revm.Log {
+        if (guillotine_logs.len == 0) {
+            return &.{};
+        }
+        
+        var result = try self.allocator.alloc(revm.Log, guillotine_logs.len);
+        
+        for (guillotine_logs, result) |src_log, *dest_log| {
+            dest_log.address = src_log.address;
+            
+            // Duplicate topics
+            dest_log.topics = try self.allocator.dupe(u256, src_log.topics);
+            
+            // Duplicate data
+            dest_log.data = try self.allocator.dupe(u8, src_log.data);
+        }
+        
+        return result;
+    }
 
     /// Print detailed diff visualization
     pub fn printDiff(_: *DifferentialTestor, diff: ExecutionDiff, test_name: []const u8) void {

@@ -332,6 +332,52 @@ pub unsafe extern "C" fn revm_set_storage(
     1
 }
 
+/// Helper function to extract logs from REVM execution result
+fn extract_logs_from_result(result: &RevmExecutionResult) -> Vec<Log> {
+    match result {
+        RevmExecutionResult::Success { logs, .. } => logs.clone(),
+        _ => Vec::new(), // No logs for reverted/halted transactions
+    }
+}
+
+/// Helper function to convert logs to FFI format
+/// Returns (logs_ptr, logs_count) tuple
+unsafe fn convert_logs_to_ffi(logs: &[Log]) -> (*mut FfiLog, usize) {
+    if logs.is_empty() {
+        return (ptr::null_mut(), 0);
+    }
+
+    let mut ffi_logs = Vec::with_capacity(logs.len());
+    for log in logs.iter() {
+        // Convert topics to FFI format
+        let topics_ptr = if !log.topics().is_empty() {
+            let topics_vec: Vec<[u8; 32]> = log.topics().iter().map(|t| t.0).collect();
+            Box::into_raw(topics_vec.into_boxed_slice()) as *mut [u8; 32]
+        } else {
+            ptr::null_mut()
+        };
+        
+        // Convert data to FFI format
+        let data_vec = log.data.data.to_vec();
+        let data_ptr = if !data_vec.is_empty() {
+            Box::into_raw(data_vec.into_boxed_slice()) as *mut u8
+        } else {
+            ptr::null_mut()
+        };
+        
+        ffi_logs.push(FfiLog {
+            address: log.address.0.into(),
+            topics: topics_ptr,
+            topics_count: log.topics().len(),
+            data: data_ptr,
+            data_len: log.data.data.len(),
+        });
+    }
+    
+    let logs_ptr = Box::into_raw(ffi_logs.into_boxed_slice()) as *mut FfiLog;
+    (logs_ptr, logs.len())
+}
+
 /// Execute a transaction
 #[no_mangle]
 pub unsafe extern "C" fn revm_execute(
@@ -473,9 +519,8 @@ pub unsafe extern "C" fn revm_execute(
         }
     };
     
-    // TODO: Extract actual logs from REVM 
-    // For now, use empty logs to verify the pipeline works
-    let logs: Vec<Log> = Vec::new();
+    // Extract actual logs from REVM execution result
+    let logs = extract_logs_from_result(&result);
     
     // eprintln!("REVM FFI: Transaction succeeded");
     // eprintln!("REVM FFI: Result type: {:?}", result);
@@ -513,58 +558,15 @@ pub unsafe extern "C" fn revm_execute(
     };
 
     // Convert logs to FFI format
-    let (logs_ptr, logs_count) = if !logs.is_empty() {
-        let mut ffi_logs = Vec::with_capacity(logs.len());
-        for log in logs.iter() {
-            // Allocate and convert topics
-            let topics_ptr = if !log.topics().is_empty() {
-                let mut topics = Vec::with_capacity(log.topics().len());
-                for topic in log.topics() {
-                    topics.push(topic.0);
-                }
-                let ptr = topics.as_mut_ptr();
-                std::mem::forget(topics);
-                ptr
-            } else {
-                ptr::null_mut()
-            };
-            
-            // Allocate and convert data
-            let data_vec = log.data.data.to_vec();
-            let data_ptr = if !data_vec.is_empty() {
-                let mut data = data_vec;
-                let ptr = data.as_mut_ptr();
-                std::mem::forget(data);
-                ptr
-            } else {
-                ptr::null_mut()
-            };
-            
-            ffi_logs.push(FfiLog {
-                address: log.address.0.into(),
-                topics: topics_ptr,
-                topics_count: log.topics().len(),
-                data: data_ptr,
-                data_len: log.data.data.len(),
-            });
-        }
-        let ptr = ffi_logs.as_mut_ptr();
-        let len = ffi_logs.len();
-        std::mem::forget(ffi_logs);
-        (ptr, len)
-    } else {
-        (ptr::null_mut(), 0)
-    };
+    let (logs_ptr, logs_count) = convert_logs_to_ffi(&logs);
 
     // Create result
     // eprintln!("REVM FFI: Creating result with output length: {}", output.len());
-    let mut output_vec = output.to_vec();
+    let output_vec = output.to_vec();
     let output_ptr = if output_vec.is_empty() {
         ptr::null_mut()
     } else {
-        let ptr = output_vec.as_mut_ptr();
-        std::mem::forget(output_vec);
-        ptr
+        Box::into_raw(output_vec.into_boxed_slice()) as *mut u8
     };
 
     let revert_ptr = revert_reason
@@ -744,9 +746,8 @@ pub unsafe extern "C" fn revm_execute_with_trace(
         }
     };
     
-    // TODO: Extract actual logs from REVM
-    // For now, use empty logs to verify the pipeline works  
-    let logs: Vec<Log> = Vec::new();
+    // Extract actual logs from REVM execution result
+    let logs = extract_logs_from_result(&result);
 
     // Ensure trace is flushed
     let _ = trace_file.flush();
@@ -780,57 +781,14 @@ pub unsafe extern "C" fn revm_execute_with_trace(
     };
 
     // Convert logs to FFI format
-    let (logs_ptr, logs_count) = if !logs.is_empty() {
-        let mut ffi_logs = Vec::with_capacity(logs.len());
-        for log in logs.iter() {
-            // Allocate and convert topics
-            let topics_ptr = if !log.topics().is_empty() {
-                let mut topics = Vec::with_capacity(log.topics().len());
-                for topic in log.topics() {
-                    topics.push(topic.0);
-                }
-                let ptr = topics.as_mut_ptr();
-                std::mem::forget(topics);
-                ptr
-            } else {
-                ptr::null_mut()
-            };
-            
-            // Allocate and convert data
-            let data_vec = log.data.data.to_vec();
-            let data_ptr = if !data_vec.is_empty() {
-                let mut data = data_vec;
-                let ptr = data.as_mut_ptr();
-                std::mem::forget(data);
-                ptr
-            } else {
-                ptr::null_mut()
-            };
-            
-            ffi_logs.push(FfiLog {
-                address: log.address.0.into(),
-                topics: topics_ptr,
-                topics_count: log.topics().len(),
-                data: data_ptr,
-                data_len: log.data.data.len(),
-            });
-        }
-        let ptr = ffi_logs.as_mut_ptr();
-        let len = ffi_logs.len();
-        std::mem::forget(ffi_logs);
-        (ptr, len)
-    } else {
-        (ptr::null_mut(), 0)
-    };
+    let (logs_ptr, logs_count) = convert_logs_to_ffi(&logs);
 
     // Create result
-    let mut output_vec = output.to_vec();
+    let output_vec = output.to_vec();
     let output_ptr = if output_vec.is_empty() {
         ptr::null_mut()
     } else {
-        let ptr = output_vec.as_mut_ptr();
-        std::mem::forget(output_vec);
-        ptr
+        Box::into_raw(output_vec.into_boxed_slice()) as *mut u8
     };
 
     let revert_ptr = revert_reason
@@ -878,11 +836,15 @@ pub unsafe extern "C" fn revm_free_error(error: *mut RevmError) {
 pub unsafe extern "C" fn revm_free_result(result: *mut ExecutionResult) {
     if !result.is_null() {
         let result = Box::from_raw(result);
-        if !result.output_data.is_null() {
-            let _ = Vec::from_raw_parts(result.output_data, result.output_len, result.output_len);
+        if !result.output_data.is_null() && result.output_len > 0 {
+            let _ = Box::from_raw(std::slice::from_raw_parts_mut(result.output_data, result.output_len));
         }
         if !result.revert_reason.is_null() {
             let _ = CString::from_raw(result.revert_reason);
+        }
+        // Free logs if present
+        if !result.logs.is_null() && result.logs_count > 0 {
+            revm_free_logs(result.logs, result.logs_count);
         }
     }
 }
@@ -1337,16 +1299,17 @@ pub unsafe extern "C" fn revm_free_logs(logs: *mut FfiLog, count: usize) {
         return;
     }
     
-    for i in 0..count {
-        let log = &*logs.add(i);
+    // Convert back to boxed slice and free each log's data
+    let logs_slice = Box::from_raw(std::slice::from_raw_parts_mut(logs, count));
+    for log in logs_slice.iter() {
         if !log.topics.is_null() && log.topics_count > 0 {
-            Vec::from_raw_parts(log.topics, log.topics_count, log.topics_count);
+            let _topics = Box::from_raw(std::slice::from_raw_parts_mut(log.topics, log.topics_count));
         }
         if !log.data.is_null() && log.data_len > 0 {
-            Vec::from_raw_parts(log.data, log.data_len, log.data_len);
+            let _data = Box::from_raw(std::slice::from_raw_parts_mut(log.data, log.data_len));
         }
     }
-    Vec::from_raw_parts(logs, count, count);
+    // logs_slice is automatically freed when it goes out of scope
 }
 
 #[cfg(test)]
