@@ -211,6 +211,15 @@ pub const Database = struct {
                 return self.get_code_by_address(delegated_addr.bytes);
             }
             
+            // Check if this is an EOA (all-zero code_hash or EMPTY_CODE_HASH)
+            // EOAs don't have code stored, return empty code
+            const primitives = @import("primitives");
+            if (std.mem.eql(u8, &account.code_hash, &[_]u8{0} ** 32) or
+                std.mem.eql(u8, &account.code_hash, &primitives.EMPTY_CODE_HASH)) {
+                // log.debug("get_code_by_address: EOA detected, returning empty code", .{});
+                return &.{};
+            }
+            
             // log.debug("get_code_by_address: Found account with code_hash {x}", .{account.code_hash});
             return self.get_code(account.code_hash);
         }
