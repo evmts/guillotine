@@ -2,11 +2,11 @@ const std = @import("std");
 const primitives = @import("primitives");
 const guillotine_evm = @import("evm");
 const revm = @import("revm");
-const CallResultType = guillotine_evm.CallResult;
-const GuillotineLog = CallResultType.Log;
 
 // Extract ExecutionTrace type from CallResult 
 const ExecutionTrace = @typeInfo(@TypeOf(@as(guillotine_evm.CallResult, undefined).trace)).optional.child;
+// Same for Log
+const GuillotineLog = @typeInfo(@TypeOf(@as(guillotine_evm.CallResult, undefined).logs)).pointer.child;
 
 // The trace type will be extracted from the actual CallResult structure when needed
 
@@ -463,7 +463,36 @@ pub const DifferentialTestor = struct {
         }
 
         if (diff.logs_diff) |logs| {
-            error_messages[error_count] = try std.fmt.allocPrint(self.allocator, "Log count mismatch: REVM={} vs Guillotine={}", .{ logs.revm.len, logs.guillotine.len });
+            // Check if it's actually a count mismatch or content mismatch
+            if (logs.revm.len != logs.guillotine.len) {
+                error_messages[error_count] = try std.fmt.allocPrint(self.allocator, "Log count mismatch: REVM={} vs Guillotine={}", .{ logs.revm.len, logs.guillotine.len });
+            } else {
+                // Same count but different content - find the specific difference
+                var mismatch_detail: []const u8 = "unknown difference";
+                
+                for (logs.revm, logs.guillotine, 0..) |revm_log, guillo_log, i| {
+                    if (!std.mem.eql(u8, &revm_log.address.bytes, &guillo_log.address.bytes)) {
+                        mismatch_detail = try std.fmt.allocPrint(self.allocator, "address differs at log[{}]", .{i});
+                        break;
+                    }
+                    if (revm_log.topics.len != guillo_log.topics.len) {
+                        mismatch_detail = try std.fmt.allocPrint(self.allocator, "topic count differs at log[{}]: REVM={} vs Guillotine={}", .{i, revm_log.topics.len, guillo_log.topics.len});
+                        break;
+                    }
+                    for (revm_log.topics, guillo_log.topics, 0..) |revm_topic, guillo_topic, j| {
+                        if (revm_topic != guillo_topic) {
+                            mismatch_detail = try std.fmt.allocPrint(self.allocator, "topic[{}] differs at log[{}]: REVM=0x{x:0>64} vs Guillotine=0x{x:0>64}", .{j, i, revm_topic, guillo_topic});
+                            break;
+                        }
+                    }
+                    if (!std.mem.eql(u8, revm_log.data, guillo_log.data)) {
+                        mismatch_detail = try std.fmt.allocPrint(self.allocator, "data differs at log[{}]", .{i});
+                        break;
+                    }
+                }
+                
+                error_messages[error_count] = try std.fmt.allocPrint(self.allocator, "Log content mismatch ({} logs): {s}", .{logs.revm.len, mismatch_detail});
+            }
             error_count += 1;
         }
 
@@ -895,11 +924,12 @@ pub const DifferentialTestor = struct {
     /// Create a deep copy of logs for diff storage
     fn duplicateLogs(self: *DifferentialTestor, logs: []const revm.Log) ![]const revm.Log {
         if (logs.len == 0) {
-            return &.{};
+            // Return allocated empty slice instead of static literal
+            return try self.allocator.alloc(revm.Log, 0);
         }
         
         const result = try self.allocator.alloc(revm.Log, logs.len);
-        defer self.allocator.free(result);
+        // NOTE: Do NOT free result here - it's being returned and will be freed by the caller
         
         for (logs, result) |src_log, *dest_log| {
             dest_log.address = src_log.address;
@@ -917,11 +947,12 @@ pub const DifferentialTestor = struct {
     /// Convert Guillotine logs to REVM log format
     fn convertGuillotineLogsToRevmLogs(self: *DifferentialTestor, guillotine_logs: []const GuillotineLog) ![]const revm.Log {
         if (guillotine_logs.len == 0) {
-            return &.{};
+            // Return allocated empty slice instead of static literal
+            return try self.allocator.alloc(revm.Log, 0);
         }
         
         const result = try self.allocator.alloc(revm.Log, guillotine_logs.len);
-        defer self.allocator.free(result);
+        // NOTE: Do NOT free result here - it's being returned and will be freed by the caller
         
         for (guillotine_logs, result) |src_log, *dest_log| {
             dest_log.address = src_log.address;

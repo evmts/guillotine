@@ -471,14 +471,20 @@ pub const Revm = struct {
                 const ffi_log = result.logs[i];
                 
                 // Convert topics
-                const topics = try self.allocator.alloc(u256, ffi_log.topicsCount);
-                for (0..ffi_log.topicsCount) |j| {
-                    const topic_bytes = ffi_log.topics[j];
-                    topics[j] = std.mem.readInt(u256, &topic_bytes, .big);
-                }
+                const topics = if (ffi_log.topics != null and ffi_log.topicsCount > 0) topics_blk: {
+                    const topic_list = try self.allocator.alloc(u256, ffi_log.topicsCount);
+                    for (0..ffi_log.topicsCount) |j| {
+                        const topic_bytes = ffi_log.topics[j];
+                        topic_list[j] = std.mem.readInt(u256, &topic_bytes, .big);
+                    }
+                    break :topics_blk topic_list;
+                } else try self.allocator.alloc(u256, 0);
                 
                 // Convert data
-                const data = try self.allocator.dupe(u8, ffi_log.data[0..ffi_log.dataLen]);
+                const data = if (ffi_log.data != null and ffi_log.dataLen > 0) 
+                    try self.allocator.dupe(u8, ffi_log.data[0..ffi_log.dataLen])
+                else
+                    try self.allocator.alloc(u8, 0);
                 
                 log_list[i] = Log{
                     .address = Address{ .bytes = ffi_log.address },
@@ -490,9 +496,10 @@ pub const Revm = struct {
         } else &[_]Log{};
         
         // Free FFI logs
-        if (result.logsCount > 0) {
-            c.revm_free_logs(result.logs, result.logsCount);
-        }
+        // TODO: freeing the logs causes a crash: "the following command terminated with signal 6"
+        // if (result.logsCount > 0) {
+        //     c.revm_free_logs(result.logs, result.logsCount);
+        // }
 
         // Align with Guillotine's post-refund accounting (EIP-3529 cap applies):
         const capped_refund: u64 = @min(result.gasRefunded, result.gasUsed / 5);
@@ -594,6 +601,23 @@ pub const Revm = struct {
             break :blk info;
         } else null;
         
+        // Copy logs - need to deep copy since exec_result will be freed
+        const logs = if (exec_result.logs.len > 0) blk: {
+            const log_list = try self.allocator.alloc(Log, exec_result.logs.len);
+            for (exec_result.logs, 0..) |log, i| {
+                // Duplicate topics
+                const topics = try self.allocator.dupe(u256, log.topics);
+                // Duplicate data
+                const data = try self.allocator.dupe(u8, log.data);
+                log_list[i] = Log{
+                    .address = log.address,
+                    .topics = topics,
+                    .data = data,
+                };
+            }
+            break :blk log_list;
+        } else &[_]Log{};
+        
         // Calculate gas_left from gas_used
         const gas_left = if (original_gas > exec_result.gas_used) 
             original_gas - exec_result.gas_used 
@@ -604,7 +628,7 @@ pub const Revm = struct {
             .success = exec_result.success,
             .gas_left = gas_left,
             .output = output,
-            .logs = exec_result.logs,
+            .logs = logs,
             .error_info = error_info,
             .allocator = self.allocator,
         };
@@ -695,14 +719,20 @@ pub const Revm = struct {
                 const ffi_log = result.logs[i];
                 
                 // Convert topics
-                const topics = try self.allocator.alloc(u256, ffi_log.topicsCount);
-                for (0..ffi_log.topicsCount) |j| {
-                    const topic_bytes = ffi_log.topics[j];
-                    topics[j] = std.mem.readInt(u256, &topic_bytes, .big);
-                }
+                const topics = if (ffi_log.topics != null and ffi_log.topicsCount > 0) topics_blk: {
+                    const topic_list = try self.allocator.alloc(u256, ffi_log.topicsCount);
+                    for (0..ffi_log.topicsCount) |j| {
+                        const topic_bytes = ffi_log.topics[j];
+                        topic_list[j] = std.mem.readInt(u256, &topic_bytes, .big);
+                    }
+                    break :topics_blk topic_list;
+                } else try self.allocator.alloc(u256, 0);
                 
                 // Convert data
-                const data = try self.allocator.dupe(u8, ffi_log.data[0..ffi_log.dataLen]);
+                const data = if (ffi_log.data != null and ffi_log.dataLen > 0) 
+                    try self.allocator.dupe(u8, ffi_log.data[0..ffi_log.dataLen])
+                else
+                    try self.allocator.alloc(u8, 0);
                 
                 log_list[i] = Log{
                     .address = Address{ .bytes = ffi_log.address },
@@ -714,9 +744,10 @@ pub const Revm = struct {
         } else &[_]Log{};
         
         // Free FFI logs
-        if (result.logsCount > 0) {
-            c.revm_free_logs(result.logs, result.logsCount);
-        }
+        // TODO: freeing the logs causes a crash: "the following command terminated with signal 6"
+        // if (result.logsCount > 0) {
+        //     c.revm_free_logs(result.logs, result.logsCount);
+        // }
 
         const capped_refund: u64 = @min(result.gasRefunded, result.gasUsed / 5);
         const effective_gas_used: u64 = result.gasUsed - capped_refund;
