@@ -17,8 +17,11 @@ pub fn Handlers(comptime FrameType: type) type {
         /// Pushes an offset and immediately loads from that memory location.
         /// Gas costs are pre-calculated statically in dispatch.
         pub fn push_mload_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            // For synthetic opcodes, cursor[1] contains the metadata directly
-            const offset = cursor[1].push_inline.value;
+            const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
+            const op_data = dispatch_opcode_data.getOpData(.PUSH_MLOAD_INLINE, Dispatch, Dispatch.Item, cursor);
+            
+            // Cursor now points to metadata
+            const offset = op_data.metadata.value;
 
             // Check if offset fits in usize
             if (offset > std.math.maxInt(usize)) {
@@ -40,14 +43,17 @@ pub fn Handlers(comptime FrameType: type) type {
             std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
             self.stack.push_unsafe(value);
 
-            return @call(FrameType.getTailCallModifier(), cursor[2].opcode_handler, .{ self, cursor + 2 });
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// PUSH_MLOAD_POINTER - Fused PUSH+MLOAD with pointer offset (>8 bytes).
         /// Gas costs are pre-calculated statically in dispatch.
         pub fn push_mload_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            // For synthetic opcodes, cursor[1] contains the metadata directly
-            const offset = cursor[1].push_pointer.value.*;
+            const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
+            const op_data = dispatch_opcode_data.getOpData(.PUSH_MLOAD_POINTER, Dispatch, Dispatch.Item, cursor);
+            
+            // Cursor now points to metadata
+            const offset = op_data.metadata.value.*;
 
             // Check if offset fits in usize
             if (offset > std.math.maxInt(usize)) {
@@ -69,17 +75,18 @@ pub fn Handlers(comptime FrameType: type) type {
             std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
             self.stack.push_unsafe(value);
 
-            // Advance cursor past the synthetic instruction and its metadata (skip 2 items)
-            const next_cursor = cursor + 2;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// PUSH_MSTORE_INLINE - Fused PUSH+MSTORE with inline offset (≤8 bytes).
         /// Pushes an offset, then pops a value and stores it at that offset.
         /// Gas costs are pre-calculated statically in dispatch.
         pub fn push_mstore_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            // For synthetic opcodes, cursor[1] contains the metadata directly
-            const offset = cursor[1].push_inline.value;
+            const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
+            const op_data = dispatch_opcode_data.getOpData(.PUSH_MSTORE_INLINE, Dispatch, Dispatch.Item, cursor);
+            
+            // Cursor now points to metadata
+            const offset = op_data.metadata.value;
 
             // Pop the value to store
             std.debug.assert(self.stack.size() >= 1); // PUSH_MSTORE requires 1 stack item
@@ -102,16 +109,17 @@ pub fn Handlers(comptime FrameType: type) type {
                 else => return Error.AllocationError,
             };
 
-            // Advance cursor past the synthetic instruction and its metadata (skip 2 items)
-            const next_cursor = cursor + 2;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// PUSH_MSTORE_POINTER - Fused PUSH+MSTORE with pointer offset (>8 bytes).
         /// Gas costs are pre-calculated statically in dispatch.
         pub fn push_mstore_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            // For synthetic opcodes, cursor[1] contains the metadata directly
-            const offset = cursor[1].push_pointer.value.*;
+            const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
+            const op_data = dispatch_opcode_data.getOpData(.PUSH_MSTORE_POINTER, Dispatch, Dispatch.Item, cursor);
+            
+            // Cursor now points to metadata
+            const offset = op_data.metadata.value.*;
 
             // Pop the value to store
             std.debug.assert(self.stack.size() >= 1); // PUSH_MSTORE requires 1 stack item
@@ -130,17 +138,18 @@ pub fn Handlers(comptime FrameType: type) type {
                 else => return Error.AllocationError,
             };
 
-            // Advance cursor past the synthetic instruction and its metadata (skip 2 items)
-            const next_cursor = cursor + 2;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// PUSH_MSTORE8_INLINE - Fused PUSH+MSTORE8 with inline offset (≤8 bytes).
         /// Pushes an offset, then pops a value and stores the least significant byte.
         /// Gas costs are pre-calculated statically in dispatch.
         pub fn push_mstore8_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            // For synthetic opcodes, cursor[1] contains the metadata directly
-            const offset = cursor[1].push_inline.value;
+            const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
+            const op_data = dispatch_opcode_data.getOpData(.PUSH_MSTORE8_INLINE, Dispatch, Dispatch.Item, cursor);
+            
+            // Cursor now points to metadata
+            const offset = op_data.metadata.value;
 
             // Pop the value to store
             std.debug.assert(self.stack.size() >= 1); // PUSH_MSTORE8 requires 1 stack item
@@ -163,16 +172,17 @@ pub fn Handlers(comptime FrameType: type) type {
                 else => return Error.AllocationError,
             };
 
-            // Advance cursor past the synthetic instruction and its metadata (skip 2 items)
-            const next_cursor = cursor + 2;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// PUSH_MSTORE8_POINTER - Fused PUSH+MSTORE8 with pointer offset (>8 bytes).
         /// Gas costs are pre-calculated statically in dispatch.
         pub fn push_mstore8_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            // For synthetic opcodes, cursor[1] contains the metadata directly
-            const offset = cursor[1].push_pointer.value.*;
+            const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
+            const op_data = dispatch_opcode_data.getOpData(.PUSH_MSTORE8_POINTER, Dispatch, Dispatch.Item, cursor);
+            
+            // Cursor now points to metadata
+            const offset = op_data.metadata.value.*;
 
             // Pop the value to store
             std.debug.assert(self.stack.size() >= 1); // PUSH_MSTORE8 requires 1 stack item
@@ -195,9 +205,7 @@ pub fn Handlers(comptime FrameType: type) type {
                 else => return Error.AllocationError,
             };
 
-            // Advance cursor past the synthetic instruction and its metadata (skip 2 items)
-            const next_cursor = cursor + 2;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
     };
 }

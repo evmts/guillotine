@@ -9,7 +9,7 @@
 
 ### Mandatory Build Verification
 
-**EVERY code change**: `zig build && zig build test` - NO EXCEPTIONS
+**EVERY code change**: `zig build && zig build test-opcodes` - NO EXCEPTIONS
 **Exception**: Changes to .md (markdown) files do not require running build or test commands
 
 Follow TDD to add any features or fix any bugs
@@ -101,7 +101,8 @@ const Contract = @import("../frame/contract.zig");
 ## Commands
 
 ```bash
-zig build test              # ALWAYS use this, never 'zig test'
+zig build test-opcodes      # Test opcode implementations
+zig build test              # Run all tests (may hang - use test-opcodes instead)
 zig build                   # Build project
 zig build build-evm-runner  # Build benchmarks
 ```

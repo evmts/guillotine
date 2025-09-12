@@ -46,8 +46,8 @@ pub fn Handlers(comptime FrameType: type) type {
             std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // ADDRESS requires stack space
             self.stack.push_unsafe(addr_u256);
             const op_data = dispatch.getOpData(.ADDRESS);
-            const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// BALANCE opcode (0x31) - Get balance of the given account.
@@ -76,8 +76,8 @@ pub fn Handlers(comptime FrameType: type) type {
             std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // BALANCE push requires stack space
             self.stack.push_unsafe(balance_word);
             const op_data = dispatch.getOpData(.BALANCE);
-            const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// ORIGIN opcode (0x32) - Get execution origination address.
@@ -89,8 +89,8 @@ pub fn Handlers(comptime FrameType: type) type {
             std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // ORIGIN requires stack space
             self.stack.push_unsafe(origin_u256);
             const op_data = dispatch.getOpData(.ORIGIN);
-            const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// CALLER opcode (0x33) - Get caller address.
@@ -101,8 +101,8 @@ pub fn Handlers(comptime FrameType: type) type {
             std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // CALLER requires stack space
             self.stack.push_unsafe(caller_u256);
             const op_data = dispatch.getOpData(.CALLER);
-            const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// CALLVALUE opcode (0x34) - Get deposited value by the instruction/transaction responsible for this execution.
@@ -112,8 +112,8 @@ pub fn Handlers(comptime FrameType: type) type {
             const value = self.value.*;
             std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // CALLVALUE requires stack space
             self.stack.push_unsafe(value);
-            const op_data = dispatch.getOpData(.CALLVALUE); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(.CALLVALUE); // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// CALLDATALOAD opcode (0x35) - Get input data of current environment.
@@ -126,8 +126,8 @@ pub fn Handlers(comptime FrameType: type) type {
             if (offset > std.math.maxInt(usize)) {
                 std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // CALLDATALOAD push requires stack space
                 self.stack.push_unsafe(0);
-                const op_data = dispatch.getOpData(.CALLDATALOAD); const next = op_data.next;
-                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                const op_data = dispatch.getOpData(.CALLDATALOAD); // Use op_data.next_handler and op_data.next_cursor directly
+                return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             }
             const offset_usize = @as(usize, @intCast(offset));
 
@@ -147,8 +147,8 @@ pub fn Handlers(comptime FrameType: type) type {
             const word_typed = @as(WordType, @truncate(word));
             std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // CALLDATALOAD push requires stack space
             self.stack.push_unsafe(word_typed);
-            const op_data = dispatch.getOpData(.CALLDATALOAD); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(.CALLDATALOAD); // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// CALLDATASIZE opcode (0x36) - Get size of input data in current environment.
@@ -159,8 +159,8 @@ pub fn Handlers(comptime FrameType: type) type {
             const calldata_len = @as(WordType, @truncate(@as(u256, @intCast(calldata.len))));
             std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // CALLDATASIZE requires stack space
             self.stack.push_unsafe(calldata_len);
-            const op_data = dispatch.getOpData(.CALLDATASIZE); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(.CALLDATASIZE); // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// CALLDATACOPY opcode (0x37) - Copy input data in current environment to memory.
@@ -185,8 +185,8 @@ pub fn Handlers(comptime FrameType: type) type {
             const length_usize = @as(usize, @intCast(length));
 
             if (length_usize == 0) {
-                const op_data = dispatch.getOpData(.CALLDATACOPY); const next = op_data.next;
-                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                const op_data = dispatch.getOpData(.CALLDATACOPY); // Use op_data.next_handler and op_data.next_cursor directly
+                return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             }
 
             // Ensure memory capacity
@@ -206,8 +206,8 @@ pub fn Handlers(comptime FrameType: type) type {
                 self.memory.set_byte(self.getAllocator(), @as(u24, @intCast(dest_offset_usize + i)), byte_val) catch return Error.OutOfBounds;
             }
 
-            const op_data = dispatch.getOpData(.CALLDATACOPY); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(.CALLDATACOPY); // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// CODESIZE opcode (0x38) - Get size of code running in current environment.
@@ -290,8 +290,8 @@ pub fn Handlers(comptime FrameType: type) type {
             const gas_price_truncated = @as(WordType, @truncate(gas_price));
             std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // GASPRICE requires stack space
             self.stack.push_unsafe(gas_price_truncated);
-            const op_data = dispatch.getOpData(.GASPRICE); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(.GASPRICE); // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// EXTCODESIZE opcode (0x3B) - Get size of an account's code.
@@ -319,8 +319,8 @@ pub fn Handlers(comptime FrameType: type) type {
             const code_len = @as(WordType, @truncate(@as(u256, @intCast(code.len))));
             std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // EXTCODESIZE push requires stack space
             self.stack.push_unsafe(code_len);
-            const op_data = dispatch.getOpData(.EXTCODESIZE); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(.EXTCODESIZE); // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// EXTCODECOPY opcode (0x3C) - Copy an account's code to memory.
@@ -360,8 +360,8 @@ pub fn Handlers(comptime FrameType: type) type {
             const length_usize = @as(usize, @intCast(length));
 
             if (length_usize == 0) {
-                const op_data = dispatch.getOpData(.EXTCODECOPY); const next = op_data.next;
-                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                const op_data = dispatch.getOpData(.EXTCODECOPY); // Use op_data.next_handler and op_data.next_cursor directly
+                return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             }
 
             // Ensure memory capacity
@@ -381,8 +381,8 @@ pub fn Handlers(comptime FrameType: type) type {
                 self.memory.set_byte(self.getAllocator(), @as(u24, @intCast(dest_offset_usize + i)), byte_val) catch return Error.OutOfBounds;
             }
 
-            const op_data = dispatch.getOpData(.EXTCODECOPY); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(.EXTCODECOPY); // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// EXTCODEHASH opcode (0x3F) - Get hash of account's code.
@@ -410,8 +410,8 @@ pub fn Handlers(comptime FrameType: type) type {
                 // Non-existent account returns 0 per EIP-1052
                 std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // EXTCODEHASH push requires stack space
                 self.stack.push_unsafe(0);
-                const op_data = dispatch.getOpData(.EXTCODEHASH); const next = op_data.next;
-                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                const op_data = dispatch.getOpData(.EXTCODEHASH); // Use op_data.next_handler and op_data.next_cursor directly
+                return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             }
 
             const code = self.getEvm().get_code(addr);
@@ -421,8 +421,8 @@ pub fn Handlers(comptime FrameType: type) type {
                 const empty_hash_word = @as(WordType, @truncate(empty_hash_u256));
                 std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // EXTCODEHASH push requires stack space
                 self.stack.push_unsafe(empty_hash_word);
-                const op_data = dispatch.getOpData(.EXTCODEHASH); const next = op_data.next;
-                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                const op_data = dispatch.getOpData(.EXTCODEHASH); // Use op_data.next_handler and op_data.next_cursor directly
+                return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             }
 
             // Compute keccak256 hash of the code
@@ -438,8 +438,8 @@ pub fn Handlers(comptime FrameType: type) type {
             std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // EXTCODEHASH push requires stack space
             self.stack.push_unsafe(hash_word);
 
-            const op_data = dispatch.getOpData(.EXTCODEHASH); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(.EXTCODEHASH); // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// RETURNDATASIZE opcode (0x3D) - Get size of output data from the previous call.
@@ -450,8 +450,8 @@ pub fn Handlers(comptime FrameType: type) type {
             const return_data_len = @as(WordType, @truncate(@as(u256, @intCast(self.output.len))));
             std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // RETURNDATASIZE requires stack space
             self.stack.push_unsafe(return_data_len);
-            const op_data = dispatch.getOpData(.RETURNDATASIZE); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(.RETURNDATASIZE); // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// RETURNDATACOPY opcode (0x3E) - Copy output data from the previous call to memory.
@@ -487,8 +487,8 @@ pub fn Handlers(comptime FrameType: type) type {
             }
 
             if (length_usize == 0) {
-                const op_data = dispatch.getOpData(.RETURNDATACOPY); const next = op_data.next;
-                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                const op_data = dispatch.getOpData(.RETURNDATACOPY); // Use op_data.next_handler and op_data.next_cursor directly
+                return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             }
 
             // Calculate gas cost for memory expansion and copy operation
@@ -515,8 +515,8 @@ pub fn Handlers(comptime FrameType: type) type {
             const src_slice = return_data[offset_usize..][0..length_usize];
             self.memory.set_data(self.getAllocator(), @as(u24, @intCast(dest_offset_usize)), src_slice) catch return Error.OutOfBounds;
 
-            const op_data = dispatch.getOpData(.RETURNDATACOPY); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(.RETURNDATACOPY); // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// BLOCKHASH opcode (0x40) - Get the hash of one of the 256 most recent complete blocks.
@@ -552,8 +552,8 @@ pub fn Handlers(comptime FrameType: type) type {
                 self.stack.push_unsafe(0);
             }
 
-            const op_data = dispatch.getOpData(.BLOCKHASH); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(.BLOCKHASH); // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// COINBASE opcode (0x41) - Get the current block's beneficiary address.
@@ -573,8 +573,8 @@ pub fn Handlers(comptime FrameType: type) type {
             const coinbase_word = @as(WordType, @truncate(coinbase_u256));
             std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // COINBASE requires stack space
             self.stack.push_unsafe(coinbase_word);
-            const op_data = dispatch.getOpData(.COINBASE); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(.COINBASE); // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// TIMESTAMP opcode (0x42) - Get the current block's timestamp.
@@ -593,8 +593,8 @@ pub fn Handlers(comptime FrameType: type) type {
             const timestamp_word = @as(WordType, @truncate(@as(u256, @intCast(block_info.timestamp))));
             std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // TIMESTAMP requires stack space
             self.stack.push_unsafe(timestamp_word);
-            const op_data = dispatch.getOpData(.TIMESTAMP); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(.TIMESTAMP); // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// NUMBER opcode (0x43) - Get the current block's number.
@@ -613,8 +613,8 @@ pub fn Handlers(comptime FrameType: type) type {
             const block_number_word = @as(WordType, @truncate(@as(u256, @intCast(block_info.number))));
             std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // NUMBER requires stack space
             self.stack.push_unsafe(block_number_word);
-            const op_data = dispatch.getOpData(.NUMBER); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(.NUMBER); // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// DIFFICULTY opcode (0x44) - Get the current block's difficulty.
@@ -633,8 +633,8 @@ pub fn Handlers(comptime FrameType: type) type {
             const difficulty_word = @as(WordType, @truncate(block_info.difficulty));
             std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // DIFFICULTY requires stack space
             self.stack.push_unsafe(difficulty_word);
-            const op_data = dispatch.getOpData(.PREVRANDAO); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(.PREVRANDAO); // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// PREVRANDAO opcode - Alias for DIFFICULTY post-merge.
@@ -652,8 +652,8 @@ pub fn Handlers(comptime FrameType: type) type {
             const gas_limit_word = @as(WordType, @truncate(@as(u256, @intCast(block_info.gas_limit))));
             std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // GASLIMIT requires stack space
             self.stack.push_unsafe(gas_limit_word);
-            const op_data = dispatch.getOpData(.GASLIMIT); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(.GASLIMIT); // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// CHAINID opcode (0x46) - Get the chain ID.
@@ -664,8 +664,8 @@ pub fn Handlers(comptime FrameType: type) type {
             const chain_id_word = @as(WordType, @truncate(@as(u256, chain_id)));
             std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // CHAINID requires stack space
             self.stack.push_unsafe(chain_id_word);
-            const op_data = dispatch.getOpData(.CHAINID); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(.CHAINID); // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// SELFBALANCE opcode (0x47) - Get balance of currently executing account.
@@ -676,8 +676,8 @@ pub fn Handlers(comptime FrameType: type) type {
             const balance_word = @as(WordType, @truncate(bal));
             std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // SELFBALANCE requires stack space
             self.stack.push_unsafe(balance_word);
-            const op_data = dispatch.getOpData(.SELFBALANCE); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(.SELFBALANCE); // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// BASEFEE opcode (0x48) - Get the current block's base fee.
@@ -688,8 +688,8 @@ pub fn Handlers(comptime FrameType: type) type {
             const base_fee_word = @as(WordType, @truncate(block_info.base_fee));
             std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // BASEFEE requires stack space
             self.stack.push_unsafe(base_fee_word);
-            const op_data = dispatch.getOpData(.BASEFEE); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(.BASEFEE); // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// BLOBHASH opcode (0x49) - Get versioned hashes of blob transactions.
@@ -702,8 +702,8 @@ pub fn Handlers(comptime FrameType: type) type {
             if (index > std.math.maxInt(usize)) {
                 std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // BLOBHASH push requires stack space
                 self.stack.push_unsafe(0);
-                const op_data = dispatch.getOpData(.BLOBHASH); const next = op_data.next;
-                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                const op_data = dispatch.getOpData(.BLOBHASH); // Use op_data.next_handler and op_data.next_cursor directly
+                return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             }
             const index_usize = @as(usize, @intCast(index));
             // Check if index is within bounds of versioned hashes
@@ -723,8 +723,8 @@ pub fn Handlers(comptime FrameType: type) type {
                 std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // BLOBHASH push requires stack space
                 self.stack.push_unsafe(0);
             }
-            const op_data = dispatch.getOpData(.BLOBHASH); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(.BLOBHASH); // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// BLOBBASEFEE opcode (0x4a) - Get the current block's blob base fee.
@@ -736,8 +736,8 @@ pub fn Handlers(comptime FrameType: type) type {
             const blob_base_fee_word = @as(WordType, @truncate(blob_base_fee));
             std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // BLOBBASEFEE requires stack space
             self.stack.push_unsafe(blob_base_fee_word);
-            const op_data = dispatch.getOpData(.BLOBBASEFEE); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(.BLOBBASEFEE); // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// GAS opcode (0x5A) - Get the amount of available gas.
@@ -750,8 +750,8 @@ pub fn Handlers(comptime FrameType: type) type {
             std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // GAS requires stack space
             self.stack.push_unsafe(gas_value);
             const op_data = dispatch.getOpData(.GAS);
-            const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// PC opcode (0x58) - Get the value of the program counter prior to the increment.
@@ -762,7 +762,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const op_data = dispatch.getOpData(.PC);
             std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // PC requires stack space
             self.stack.push_unsafe(op_data.metadata.value);
-            return @call(FrameType.getTailCallModifier(), op_data.next.cursor[0].opcode_handler, .{ self, op_data.next.cursor });
+            return @call(FrameType.getTailCallModifier(), op_data.op_data.next_handler, .{ self, op_data.op_data.next_cursor.cursor });
         }
     };
 }

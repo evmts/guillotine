@@ -46,8 +46,8 @@ pub fn Handlers(comptime FrameType: type) type {
             self.stack.push_unsafe(value);
 
             const op_data = dispatch.getOpData(.SLOAD);
-            const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// SSTORE opcode (0x55) - Store to storage.
@@ -121,8 +121,8 @@ pub fn Handlers(comptime FrameType: type) type {
             }
 
             const op_data = dispatch.getOpData(.SSTORE);
-            const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// TLOAD opcode (0x5c) - Load from transient storage (EIP-1153).
@@ -144,8 +144,8 @@ pub fn Handlers(comptime FrameType: type) type {
             self.stack.push_unsafe(value);
 
             const op_data = dispatch.getOpData(.TLOAD);
-            const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// TSTORE opcode (0x5d) - Store to transient storage (EIP-1153).
@@ -178,8 +178,8 @@ pub fn Handlers(comptime FrameType: type) type {
             };
 
             const op_data = dispatch.getOpData(.TSTORE);
-            const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
     };
 }
