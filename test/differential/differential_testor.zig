@@ -898,7 +898,8 @@ pub const DifferentialTestor = struct {
             return &.{};
         }
         
-        var result = try self.allocator.alloc(revm.Log, logs.len);
+        const result = try self.allocator.alloc(revm.Log, logs.len);
+        defer self.allocator.free(result);
         
         for (logs, result) |src_log, *dest_log| {
             dest_log.address = src_log.address;
@@ -919,7 +920,8 @@ pub const DifferentialTestor = struct {
             return &.{};
         }
         
-        var result = try self.allocator.alloc(revm.Log, guillotine_logs.len);
+        const result = try self.allocator.alloc(revm.Log, guillotine_logs.len);
+        defer self.allocator.free(result);
         
         for (guillotine_logs, result) |src_log, *dest_log| {
             dest_log.address = src_log.address;
