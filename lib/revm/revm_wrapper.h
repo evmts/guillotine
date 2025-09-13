@@ -37,6 +37,17 @@ typedef struct RevmError {
 } RevmError;
 
 /**
+ * Log entry for FFI
+ */
+typedef struct FfiLog {
+  uint8_t address[20];
+  uint8_t (*topics)[32];
+  uintptr_t topicsCount;
+  uint8_t *data;
+  uintptr_t dataLen;
+} FfiLog;
+
+/**
  * Execution result from REVM
  */
 typedef struct ExecutionResult {
@@ -45,6 +56,7 @@ typedef struct ExecutionResult {
   uint64_t gasRefunded;
   uint8_t *outputData;
   uintptr_t outputLen;
+  struct FfiLog *logs;
   uintptr_t logsCount;
   char *revertReason;
 } ExecutionResult;
@@ -177,5 +189,10 @@ int32_t keccak256_hex(const char *hexInput,
                       char *outHexHash,
                       uintptr_t outHexLen,
                       struct RevmError **outError);
+
+/**
+ * Free logs from execution result
+ */
+void revm_free_logs(struct FfiLog *logs, uintptr_t count);
 
 #endif /* REVM_WRAPPER_H */

@@ -162,12 +162,21 @@ pub const ExecutionResult = struct {
     gas_refunded: u64,
     output: []const u8,
     revert_reason: ?[]const u8,
+    logs: []const Log,
     allocator: std.mem.Allocator,
 
     pub fn deinit(self: *ExecutionResult) void {
         self.allocator.free(self.output);
         if (self.revert_reason) |reason| {
             self.allocator.free(reason);
+        }
+        // Free logs
+        for (self.logs) |log| {
+            self.allocator.free(log.topics);
+            self.allocator.free(log.data);
+        }
+        if (self.logs.len > 0) {
+            self.allocator.free(self.logs);
         }
     }
 };
@@ -455,6 +464,42 @@ pub const Revm = struct {
             break :blk try self.allocator.dupe(u8, reason);
         } else null;
 
+        // Extract logs from FFI result
+        const logs = if (result.logsCount > 0) blk: {
+            var log_list = try self.allocator.alloc(Log, result.logsCount);
+            for (0..result.logsCount) |i| {
+                const ffi_log = result.logs[i];
+                
+                // Convert topics
+                const topics = if (ffi_log.topics != null and ffi_log.topicsCount > 0) topics_blk: {
+                    const topic_list = try self.allocator.alloc(u256, ffi_log.topicsCount);
+                    for (0..ffi_log.topicsCount) |j| {
+                        const topic_bytes = ffi_log.topics[j];
+                        topic_list[j] = std.mem.readInt(u256, &topic_bytes, .big);
+                    }
+                    break :topics_blk topic_list;
+                } else try self.allocator.alloc(u256, 0);
+                
+                // Convert data
+                const data = if (ffi_log.data != null and ffi_log.dataLen > 0) 
+                    try self.allocator.dupe(u8, ffi_log.data[0..ffi_log.dataLen])
+                else
+                    try self.allocator.alloc(u8, 0);
+                
+                log_list[i] = Log{
+                    .address = Address{ .bytes = ffi_log.address },
+                    .topics = topics,
+                    .data = data,
+                };
+            }
+            break :blk log_list;
+        } else &[_]Log{};
+        
+        // Memory ownership: The FFI logs are owned by the ExecutionResult and will be freed
+        // by revm_free_result (called via defer at line 440). We've already copied the log data
+        // into Zig-managed memory above, so we must NOT call revm_free_logs here as that would
+        // cause a double-free when revm_free_result executes.
+
         // Align with Guillotine's post-refund accounting (EIP-3529 cap applies):
         const capped_refund: u64 = @min(result.gasRefunded, result.gasUsed / 5);
         const effective_gas_used: u64 = result.gasUsed - capped_refund;
@@ -464,6 +509,7 @@ pub const Revm = struct {
             .gas_refunded = result.gasRefunded,
             .output = output,
             .revert_reason = revert_reason,
+            .logs = logs,
             .allocator = self.allocator,
         };
     }
@@ -554,6 +600,23 @@ pub const Revm = struct {
             break :blk info;
         } else null;
         
+        // Copy logs - need to deep copy since exec_result will be freed
+        const logs = if (exec_result.logs.len > 0) blk: {
+            const log_list = try self.allocator.alloc(Log, exec_result.logs.len);
+            for (exec_result.logs, 0..) |log, i| {
+                // Duplicate topics
+                const topics = try self.allocator.dupe(u256, log.topics);
+                // Duplicate data
+                const data = try self.allocator.dupe(u8, log.data);
+                log_list[i] = Log{
+                    .address = log.address,
+                    .topics = topics,
+                    .data = data,
+                };
+            }
+            break :blk log_list;
+        } else &[_]Log{};
+        
         // Calculate gas_left from gas_used
         const gas_left = if (original_gas > exec_result.gas_used) 
             original_gas - exec_result.gas_used 
@@ -564,7 +627,7 @@ pub const Revm = struct {
             .success = exec_result.success,
             .gas_left = gas_left,
             .output = output,
-            .logs = &.{}, // TODO: Extract logs from REVM if available
+            .logs = logs,
             .error_info = error_info,
             .allocator = self.allocator,
         };
@@ -648,6 +711,42 @@ pub const Revm = struct {
             break :blk try self.allocator.dupe(u8, reason);
         } else null;
 
+        // Extract logs from FFI result
+        const logs = if (result.logsCount > 0) blk: {
+            var log_list = try self.allocator.alloc(Log, result.logsCount);
+            for (0..result.logsCount) |i| {
+                const ffi_log = result.logs[i];
+                
+                // Convert topics
+                const topics = if (ffi_log.topics != null and ffi_log.topicsCount > 0) topics_blk: {
+                    const topic_list = try self.allocator.alloc(u256, ffi_log.topicsCount);
+                    for (0..ffi_log.topicsCount) |j| {
+                        const topic_bytes = ffi_log.topics[j];
+                        topic_list[j] = std.mem.readInt(u256, &topic_bytes, .big);
+                    }
+                    break :topics_blk topic_list;
+                } else try self.allocator.alloc(u256, 0);
+                
+                // Convert data
+                const data = if (ffi_log.data != null and ffi_log.dataLen > 0) 
+                    try self.allocator.dupe(u8, ffi_log.data[0..ffi_log.dataLen])
+                else
+                    try self.allocator.alloc(u8, 0);
+                
+                log_list[i] = Log{
+                    .address = Address{ .bytes = ffi_log.address },
+                    .topics = topics,
+                    .data = data,
+                };
+            }
+            break :blk log_list;
+        } else &[_]Log{};
+        
+        // Memory ownership: The FFI logs are owned by the ExecutionResult and will be freed
+        // by revm_free_result (called via defer at line 698). We've already copied the log data
+        // into Zig-managed memory above, so we must NOT call revm_free_logs here as that would
+        // cause a double-free when revm_free_result executes.
+
         const capped_refund: u64 = @min(result.gasRefunded, result.gasUsed / 5);
         const effective_gas_used: u64 = result.gasUsed - capped_refund;
         return ExecutionResult{
@@ -656,6 +755,7 @@ pub const Revm = struct {
             .gas_refunded = result.gasRefunded,
             .output = output,
             .revert_reason = revert_reason,
+            .logs = logs,
             .allocator = self.allocator,
         };
     }
