@@ -342,6 +342,10 @@ fn extract_logs_from_result(result: &RevmExecutionResult) -> Vec<Log> {
 
 /// Helper function to convert logs to FFI format
 /// Returns (logs_ptr, logs_count) tuple
+/// 
+/// Memory ownership: The returned pointer and all nested allocations (topics, data) are 
+/// transferred to the caller. The ExecutionResult takes ownership and must free them via
+/// revm_free_result -> revm_free_logs when done.
 unsafe fn convert_logs_to_ffi(logs: &[Log]) -> (*mut FfiLog, usize) {
     if logs.is_empty() {
         return (ptr::null_mut(), 0);
@@ -1293,6 +1297,10 @@ pub unsafe extern "C" fn keccak256_hex(
 }
 
 /// Free logs from execution result
+/// 
+/// This function is called internally by revm_free_result to clean up logs.
+/// It should NOT be called directly from Zig code after copying log data,
+/// as that would cause a double-free when revm_free_result is called.
 #[no_mangle]
 pub unsafe extern "C" fn revm_free_logs(logs: *mut FfiLog, count: usize) {
     if logs.is_null() || count == 0 {

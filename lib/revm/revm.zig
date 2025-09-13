@@ -495,11 +495,10 @@ pub const Revm = struct {
             break :blk log_list;
         } else &[_]Log{};
         
-        // Free FFI logs
-        // TODO: freeing the logs causes a crash: "the following command terminated with signal 6"
-        // if (result.logsCount > 0) {
-        //     c.revm_free_logs(result.logs, result.logsCount);
-        // }
+        // Memory ownership: The FFI logs are owned by the ExecutionResult and will be freed
+        // by revm_free_result (called via defer at line 440). We've already copied the log data
+        // into Zig-managed memory above, so we must NOT call revm_free_logs here as that would
+        // cause a double-free when revm_free_result executes.
 
         // Align with Guillotine's post-refund accounting (EIP-3529 cap applies):
         const capped_refund: u64 = @min(result.gasRefunded, result.gasUsed / 5);
@@ -743,11 +742,10 @@ pub const Revm = struct {
             break :blk log_list;
         } else &[_]Log{};
         
-        // Free FFI logs
-        // TODO: freeing the logs causes a crash: "the following command terminated with signal 6"
-        // if (result.logsCount > 0) {
-        //     c.revm_free_logs(result.logs, result.logsCount);
-        // }
+        // Memory ownership: The FFI logs are owned by the ExecutionResult and will be freed
+        // by revm_free_result (called via defer at line 698). We've already copied the log data
+        // into Zig-managed memory above, so we must NOT call revm_free_logs here as that would
+        // cause a double-free when revm_free_result executes.
 
         const capped_refund: u64 = @min(result.gasRefunded, result.gasUsed / 5);
         const effective_gas_used: u64 = result.gasUsed - capped_refund;
