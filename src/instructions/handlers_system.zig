@@ -66,8 +66,8 @@ pub fn Handlers(comptime FrameType: type) type {
                 std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
                 self.stack.push_unsafe(0);
                 const op_data = dispatch.getOpData(.CALL);
-                const next = op_data.next;
-                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                // Use op_data.next_handler and op_data.next_cursor directly
+                return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             }
             const gas_u64_raw = @as(u64, @intCast(gas_param));
             const caller_gas_available: u64 = @as(u64, @intCast(@max(self.gas_remaining, 0)));
@@ -83,8 +83,8 @@ pub fn Handlers(comptime FrameType: type) type {
                 std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
                 self.stack.push_unsafe(0);
                 const op_data = dispatch.getOpData(.CALL);
-                const next = op_data.next;
-                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                // Use op_data.next_handler and op_data.next_cursor directly
+                return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             }
 
             const input_offset_usize = @as(usize, @intCast(input_offset));
@@ -98,8 +98,8 @@ pub fn Handlers(comptime FrameType: type) type {
                 self.memory.ensure_capacity(self.getAllocator(), @as(u24, @intCast(input_end))) catch {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.CALL);
-                    const next = op_data.next;
-                    return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                    // Use op_data.next_handler and op_data.next_cursor directly
+                    return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
                 };
             }
 
@@ -109,8 +109,8 @@ pub fn Handlers(comptime FrameType: type) type {
                 self.memory.ensure_capacity(self.getAllocator(), @as(u24, @intCast(output_end))) catch {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.CALL);
-                    const next = op_data.next;
-                    return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                    // Use op_data.next_handler and op_data.next_cursor directly
+                    return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
                 };
             }
 
@@ -120,8 +120,8 @@ pub fn Handlers(comptime FrameType: type) type {
                 input_data = self.memory.get_slice(@as(u24, @intCast(input_offset_usize)), @as(u24, @intCast(input_size_usize))) catch {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.CALL);
-                    const next = op_data.next;
-                    return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                    // Use op_data.next_handler and op_data.next_cursor directly
+                    return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
                 };
             }
 
@@ -136,14 +136,7 @@ pub fn Handlers(comptime FrameType: type) type {
                 },
             };
 
-            var result = self.getEvm().inner_call(params) catch |err| switch (err) {
-                else => {
-                    self.stack.push_unsafe(0);
-                    const op_data = dispatch.getOpData(.CALL);
-                    const next = op_data.next;
-                    return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
-                },
-            };
+            var result = self.getEvm().inner_call(params);
             defer result.deinit(self.getAllocator());
 
             // Write return data to memory if successful and output size > 0
@@ -152,8 +145,8 @@ pub fn Handlers(comptime FrameType: type) type {
                 self.memory.set_data(self.getAllocator(), @as(u24, @intCast(output_offset_usize)), result.output[0..copy_size]) catch {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.CALL);
-                    const next = op_data.next;
-                    return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                    // Use op_data.next_handler and op_data.next_cursor directly
+                    return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
                 };
             }
 
@@ -179,8 +172,8 @@ pub fn Handlers(comptime FrameType: type) type {
             self.stack.push_unsafe(if (result.success) 1 else 0);
 
             const op_data = dispatch.getOpData(.CALL);
-            const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// CALLCODE opcode (0xf2) - Message-call with alternative account's code but current context.
@@ -205,8 +198,8 @@ pub fn Handlers(comptime FrameType: type) type {
                 std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
                 self.stack.push_unsafe(0);
                 const op_data = dispatch.getOpData(.CALLCODE);
-                const next = op_data.next;
-                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                // Use op_data.next_handler and op_data.next_cursor directly
+                return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             }
             const gas_u64_raw = @as(u64, @intCast(gas_param));
             const caller_gas_available_cc: u64 = @as(u64, @intCast(@max(self.gas_remaining, 0)));
@@ -221,8 +214,8 @@ pub fn Handlers(comptime FrameType: type) type {
             {
                 self.stack.push_unsafe(0);
                 const op_data = dispatch.getOpData(.CALLCODE);
-                const next = op_data.next;
-                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                // Use op_data.next_handler and op_data.next_cursor directly
+                return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             }
 
             const input_offset_usize = @as(usize, @intCast(input_offset));
@@ -236,8 +229,8 @@ pub fn Handlers(comptime FrameType: type) type {
                 self.memory.ensure_capacity(self.getAllocator(), @as(u24, @intCast(input_end))) catch {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.CALLCODE);
-                    const next = op_data.next;
-                    return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                    // Use op_data.next_handler and op_data.next_cursor directly
+                    return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
                 };
             }
 
@@ -247,8 +240,8 @@ pub fn Handlers(comptime FrameType: type) type {
                 self.memory.ensure_capacity(self.getAllocator(), @as(u24, @intCast(output_end))) catch {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.CALLCODE);
-                    const next = op_data.next;
-                    return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                    // Use op_data.next_handler and op_data.next_cursor directly
+                    return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
                 };
             }
 
@@ -258,8 +251,8 @@ pub fn Handlers(comptime FrameType: type) type {
                 input_data = self.memory.get_slice(@as(u24, @intCast(input_offset_usize)), @as(u24, @intCast(input_size_usize))) catch {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.CALLCODE);
-                    const next = op_data.next;
-                    return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                    // Use op_data.next_handler and op_data.next_cursor directly
+                    return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
                 };
             }
 
@@ -275,14 +268,7 @@ pub fn Handlers(comptime FrameType: type) type {
                 },
             };
 
-            var result = self.getEvm().inner_call(call_params) catch |err| switch (err) {
-                else => {
-                    self.stack.push_unsafe(0);
-                    const op_data = dispatch.getOpData(.CALLCODE);
-                    const next = op_data.next;
-                    return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
-                },
-            };
+            var result = self.getEvm().inner_call(call_params);
             defer result.deinit(self.getAllocator());
 
             // Write return data to memory if successful and output size > 0
@@ -304,8 +290,8 @@ pub fn Handlers(comptime FrameType: type) type {
             self.stack.push_unsafe(if (result.success) 1 else 0);
 
             const op_data = dispatch.getOpData(.CALLCODE);
-            const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// DELEGATECALL opcode (0xf4) - Message-call with alternative account's code but current values.
@@ -328,8 +314,8 @@ pub fn Handlers(comptime FrameType: type) type {
             if (gas_param > std.math.maxInt(u64)) {
                 self.stack.push_unsafe(0);
                 const op_data = dispatch.getOpData(.DELEGATECALL);
-                const next = op_data.next;
-                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                // Use op_data.next_handler and op_data.next_cursor directly
+                return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             }
             const gas_u64_raw = @as(u64, @intCast(gas_param));
             const caller_gas_available_dc: u64 = @as(u64, @intCast(@max(self.gas_remaining, 0)));
@@ -344,8 +330,8 @@ pub fn Handlers(comptime FrameType: type) type {
             {
                 self.stack.push_unsafe(0);
                 const op_data = dispatch.getOpData(.DELEGATECALL);
-                const next = op_data.next;
-                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                // Use op_data.next_handler and op_data.next_cursor directly
+                return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             }
 
             const input_offset_usize = @as(usize, @intCast(input_offset));
@@ -359,8 +345,8 @@ pub fn Handlers(comptime FrameType: type) type {
                 self.memory.ensure_capacity(self.getAllocator(), @as(u24, @intCast(input_end))) catch {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.DELEGATECALL);
-                    const next = op_data.next;
-                    return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                    // Use op_data.next_handler and op_data.next_cursor directly
+                    return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
                 };
             }
 
@@ -370,8 +356,8 @@ pub fn Handlers(comptime FrameType: type) type {
                 self.memory.ensure_capacity(self.getAllocator(), @as(u24, @intCast(output_end))) catch {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.DELEGATECALL);
-                    const next = op_data.next;
-                    return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                    // Use op_data.next_handler and op_data.next_cursor directly
+                    return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
                 };
             }
 
@@ -381,8 +367,8 @@ pub fn Handlers(comptime FrameType: type) type {
                 input_data = self.memory.get_slice(@as(u24, @intCast(input_offset_usize)), @as(u24, @intCast(input_size_usize))) catch {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.DELEGATECALL);
-                    const next = op_data.next;
-                    return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                    // Use op_data.next_handler and op_data.next_cursor directly
+                    return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
                 };
             }
 
@@ -396,14 +382,7 @@ pub fn Handlers(comptime FrameType: type) type {
                     .gas = gas_u64,
                 },
             };
-            var result = self.getEvm().inner_call(params) catch |err| switch (err) {
-                else => {
-                    self.stack.push_unsafe(0);
-                    const op_data = dispatch.getOpData(.DELEGATECALL);
-                    const next = op_data.next;
-                    return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
-                },
-            };
+            var result = self.getEvm().inner_call(params);
             defer result.deinit(self.getAllocator());
 
             // Write return data to memory if successful and output size > 0
@@ -412,8 +391,8 @@ pub fn Handlers(comptime FrameType: type) type {
                 self.memory.set_data(self.getAllocator(), @as(u24, @intCast(output_offset_usize)), result.output[0..copy_size]) catch {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.DELEGATECALL);
-                    const next = op_data.next;
-                    return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                    // Use op_data.next_handler and op_data.next_cursor directly
+                    return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
                 };
             }
 
@@ -439,8 +418,8 @@ pub fn Handlers(comptime FrameType: type) type {
             self.stack.push_unsafe(if (result.success) 1 else 0);
 
             const op_data = dispatch.getOpData(.DELEGATECALL);
-            const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// STATICCALL opcode (0xfa) - Static message-call (no state changes allowed).
@@ -463,8 +442,8 @@ pub fn Handlers(comptime FrameType: type) type {
             if (gas_param > std.math.maxInt(u64)) {
                 self.stack.push_unsafe(0);
                 const op_data = dispatch.getOpData(.STATICCALL);
-                const next = op_data.next;
-                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                // Use op_data.next_handler and op_data.next_cursor directly
+                return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             }
             const gas_u64_raw = @as(u64, @intCast(gas_param));
             const caller_gas_available_sc: u64 = @as(u64, @intCast(@max(self.gas_remaining, 0)));
@@ -479,8 +458,8 @@ pub fn Handlers(comptime FrameType: type) type {
             {
                 self.stack.push_unsafe(0);
                 const op_data = dispatch.getOpData(.STATICCALL);
-                const next = op_data.next;
-                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                // Use op_data.next_handler and op_data.next_cursor directly
+                return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             }
 
             const input_offset_usize = @as(usize, @intCast(input_offset));
@@ -494,8 +473,8 @@ pub fn Handlers(comptime FrameType: type) type {
                 self.memory.ensure_capacity(self.getAllocator(), @as(u24, @intCast(input_end))) catch {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.STATICCALL);
-                    const next = op_data.next;
-                    return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                    // Use op_data.next_handler and op_data.next_cursor directly
+                    return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
                 };
             }
 
@@ -505,8 +484,8 @@ pub fn Handlers(comptime FrameType: type) type {
                 self.memory.ensure_capacity(self.getAllocator(), @as(u24, @intCast(output_end))) catch {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.STATICCALL);
-                    const next = op_data.next;
-                    return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                    // Use op_data.next_handler and op_data.next_cursor directly
+                    return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
                 };
             }
 
@@ -516,8 +495,8 @@ pub fn Handlers(comptime FrameType: type) type {
                 input_data = self.memory.get_slice(@as(u24, @intCast(input_offset_usize)), @as(u24, @intCast(input_size_usize))) catch {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.STATICCALL);
-                    const next = op_data.next;
-                    return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                    // Use op_data.next_handler and op_data.next_cursor directly
+                    return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
                 };
             }
 
@@ -530,14 +509,7 @@ pub fn Handlers(comptime FrameType: type) type {
                     .gas = gas_u64,
                 },
             };
-            var result = self.getEvm().inner_call(params) catch |err| switch (err) {
-                else => {
-                    self.stack.push_unsafe(0);
-                    const op_data = dispatch.getOpData(.STATICCALL);
-                    const next = op_data.next;
-                    return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
-                },
-            };
+            var result = self.getEvm().inner_call(params);
             defer result.deinit(self.getAllocator());
 
             // Write return data to memory if successful and output size > 0
@@ -546,8 +518,8 @@ pub fn Handlers(comptime FrameType: type) type {
                 self.memory.set_data(self.getAllocator(), @as(u24, @intCast(output_offset_usize)), result.output[0..copy_size]) catch {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.STATICCALL);
-                    const next = op_data.next;
-                    return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                    // Use op_data.next_handler and op_data.next_cursor directly
+                    return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
                 };
             }
 
@@ -572,8 +544,8 @@ pub fn Handlers(comptime FrameType: type) type {
             self.stack.push_unsafe(if (result.success) 1 else 0);
 
             const op_data = dispatch.getOpData(.STATICCALL);
-            const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// CREATE opcode (0xf0) - Create a new account with associated code.
@@ -592,8 +564,8 @@ pub fn Handlers(comptime FrameType: type) type {
             if (offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
                 self.stack.push_unsafe(0);
                 const op_data = dispatch.getOpData(.CREATE);
-                const next = op_data.next;
-                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                // Use op_data.next_handler and op_data.next_cursor directly
+                return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             }
 
             const offset_usize = @as(usize, @intCast(offset));
@@ -604,8 +576,8 @@ pub fn Handlers(comptime FrameType: type) type {
             self.memory.ensure_capacity(self.getAllocator(), @as(u24, @intCast(memory_end))) catch {
                 self.stack.push_unsafe(0);
                 const op_data = dispatch.getOpData(.CREATE);
-                const next = op_data.next;
-                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                // Use op_data.next_handler and op_data.next_cursor directly
+                return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             };
 
             // Extract initialization code
@@ -614,8 +586,8 @@ pub fn Handlers(comptime FrameType: type) type {
                 init_code = self.memory.get_slice(@as(u24, @intCast(offset_usize)), @as(u24, @intCast(size_usize))) catch {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.CREATE);
-                    const next = op_data.next;
-                    return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                    // Use op_data.next_handler and op_data.next_cursor directly
+                    return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
                 };
             }
 
@@ -628,14 +600,7 @@ pub fn Handlers(comptime FrameType: type) type {
                     .gas = @as(u64, @intCast(self.gas_remaining)),
                 },
             };
-            var result = self.getEvm().inner_call(params) catch |err| switch (err) {
-                else => {
-                    self.stack.push_unsafe(0);
-                    const op_data = dispatch.getOpData(.CREATE);
-                    const next = op_data.next;
-                    return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
-                },
-            };
+            var result = self.getEvm().inner_call(params);
             defer result.deinit(self.getAllocator());
 
             // Update gas remaining
@@ -651,8 +616,8 @@ pub fn Handlers(comptime FrameType: type) type {
             }
 
             const op_data = dispatch.getOpData(.CREATE);
-            const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// CREATE2 opcode (0xf5) - Create a new account with deterministic address.
@@ -673,8 +638,8 @@ pub fn Handlers(comptime FrameType: type) type {
             if (offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
                 self.stack.push_unsafe(0);
                 const op_data = dispatch.getOpData(.CREATE2);
-                const next = op_data.next;
-                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                // Use op_data.next_handler and op_data.next_cursor directly
+                return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             }
 
             const offset_usize = @as(usize, @intCast(offset));
@@ -685,8 +650,8 @@ pub fn Handlers(comptime FrameType: type) type {
             self.memory.ensure_capacity(self.getAllocator(), @as(u24, @intCast(memory_end))) catch {
                 self.stack.push_unsafe(0);
                 const op_data = dispatch.getOpData(.CREATE2);
-                const next = op_data.next;
-                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                // Use op_data.next_handler and op_data.next_cursor directly
+                return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             };
 
             // Extract initialization code
@@ -695,8 +660,8 @@ pub fn Handlers(comptime FrameType: type) type {
                 init_code = self.memory.get_slice(@as(u24, @intCast(offset_usize)), @as(u24, @intCast(size_usize))) catch {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.CREATE2);
-                    const next = op_data.next;
-                    return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                    // Use op_data.next_handler and op_data.next_cursor directly
+                    return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
                 };
             }
 
@@ -713,14 +678,7 @@ pub fn Handlers(comptime FrameType: type) type {
                     .gas = @as(u64, @intCast(self.gas_remaining)),
                 },
             };
-            var result = self.getEvm().inner_call(params) catch |err| switch (err) {
-                else => {
-                    self.stack.push_unsafe(0);
-                    const op_data = dispatch.getOpData(.CREATE2);
-                    const next = op_data.next;
-                    return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
-                },
-            };
+            var result = self.getEvm().inner_call(params);
             defer result.deinit(self.getAllocator());
 
             // Update gas remaining
@@ -736,8 +694,8 @@ pub fn Handlers(comptime FrameType: type) type {
             }
 
             const op_data = dispatch.getOpData(.CREATE2);
-            const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// RETURN opcode (0xf3) - Halt execution returning output data.
@@ -904,8 +862,8 @@ pub fn Handlers(comptime FrameType: type) type {
                 // Invalid signature, push failure
                 self.stack.push_unsafe(0);
                 const op_data = dispatch.getOpData(.AUTH);
-                const next = op_data.next;
-                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                // Use op_data.next_handler and op_data.next_cursor directly
+                return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             }
 
             // Create authorization message
@@ -914,17 +872,18 @@ pub fn Handlers(comptime FrameType: type) type {
             message[0] = 0x04; // AUTH magic byte
 
             // Get chain ID and nonce from context
-            const chain_id = self.getEvm().get_chain_id();
-            const nonce = self.database.get_account(authority.bytes) catch {
+            const evm = self.getEvm();
+            const chain_id = evm.get_chain_id();
+            const nonce = evm.database.get_account(authority.bytes) catch {
                 self.stack.push_unsafe(0);
                 const op_data = dispatch.getOpData(.AUTH);
-                const next = op_data.next;
-                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                // Use op_data.next_handler and op_data.next_cursor directly
+                return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             } orelse {
                 self.stack.push_unsafe(0);
                 const op_data = dispatch.getOpData(.AUTH);
-                const next = op_data.next;
-                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                // Use op_data.next_handler and op_data.next_cursor directly
+                return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             };
 
             // Encode chain ID (32 bytes, big-endian)
@@ -950,16 +909,16 @@ pub fn Handlers(comptime FrameType: type) type {
             const recovered = crypto.secp256k1.unaudited_recover_address(&message_hash, recovery_id, sig_r, sig_s) catch {
                 self.stack.push_unsafe(0);
                 const op_data = dispatch.getOpData(.AUTHCALL);
-                const next = op_data.next;
-                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                // Use op_data.next_handler and op_data.next_cursor directly
+                return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             };
 
             // Check if recovered address matches authority
             if (!std.mem.eql(u8, &recovered.bytes, &authority.bytes)) {
                 self.stack.push_unsafe(0);
                 const op_data = dispatch.getOpData(.AUTHCALL);
-                const next = op_data.next;
-                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                // Use op_data.next_handler and op_data.next_cursor directly
+                return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             }
 
             // Store authorized context in frame
@@ -969,8 +928,8 @@ pub fn Handlers(comptime FrameType: type) type {
             std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
             self.stack.push_unsafe(1);
             const op_data = dispatch.getOpData(.AUTHCALL);
-            const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// AUTHCALL opcode (0xf7) - EIP-3074: Make a call as an authorized address
@@ -994,8 +953,8 @@ pub fn Handlers(comptime FrameType: type) type {
                 // No authorization, push failure
                 self.stack.push_unsafe(0);
                 const op_data = dispatch.getOpData(.AUTHCALL);
-                const next = op_data.next;
-                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                // Use op_data.next_handler and op_data.next_cursor directly
+                return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             }
 
             // Convert to address
@@ -1005,8 +964,8 @@ pub fn Handlers(comptime FrameType: type) type {
             if (gas_param > std.math.maxInt(u64)) {
                 self.stack.push_unsafe(0);
                 const op_data = dispatch.getOpData(.AUTHCALL);
-                const next = op_data.next;
-                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                // Use op_data.next_handler and op_data.next_cursor directly
+                return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             }
             const gas_u64 = @as(u64, @intCast(gas_param));
 
@@ -1018,8 +977,8 @@ pub fn Handlers(comptime FrameType: type) type {
             {
                 self.stack.push_unsafe(0);
                 const op_data = dispatch.getOpData(.AUTHCALL);
-                const next = op_data.next;
-                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                // Use op_data.next_handler and op_data.next_cursor directly
+                return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             }
 
             const input_offset_usize = @as(usize, @intCast(input_offset));
@@ -1033,8 +992,8 @@ pub fn Handlers(comptime FrameType: type) type {
                 self.memory.ensure_capacity(self.getAllocator(), @as(u24, @intCast(input_end))) catch {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.AUTHCALL);
-                    const next = op_data.next;
-                    return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                    // Use op_data.next_handler and op_data.next_cursor directly
+                    return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
                 };
             }
 
@@ -1044,8 +1003,8 @@ pub fn Handlers(comptime FrameType: type) type {
                 self.memory.ensure_capacity(self.getAllocator(), @as(u24, @intCast(output_end))) catch {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.AUTHCALL);
-                    const next = op_data.next;
-                    return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                    // Use op_data.next_handler and op_data.next_cursor directly
+                    return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
                 };
             }
 
@@ -1055,8 +1014,8 @@ pub fn Handlers(comptime FrameType: type) type {
                 input_data = self.memory.get_slice(@as(u24, @intCast(input_offset_usize)), @as(u24, @intCast(input_size_usize))) catch {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.AUTHCALL);
-                    const next = op_data.next;
-                    return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                    // Use op_data.next_handler and op_data.next_cursor directly
+                    return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
                 };
             }
 
@@ -1072,14 +1031,7 @@ pub fn Handlers(comptime FrameType: type) type {
                 },
             };
 
-            var result = self.getEvm().inner_call(params) catch |err| switch (err) {
-                else => {
-                    self.stack.push_unsafe(0);
-                    const op_data = dispatch.getOpData(.AUTHCALL);
-                    const next = op_data.next;
-                    return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
-                },
-            };
+            var result = self.getEvm().inner_call(params);
             defer result.deinit(self.getAllocator());
 
             // Write return data to memory if successful and output size > 0
@@ -1088,8 +1040,8 @@ pub fn Handlers(comptime FrameType: type) type {
                 self.memory.set_data(self.getAllocator(), @as(u24, @intCast(output_offset_usize)), result.output[0..copy_size]) catch {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.AUTHCALL);
-                    const next = op_data.next;
-                    return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                    // Use op_data.next_handler and op_data.next_cursor directly
+                    return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
                 };
             }
 
@@ -1107,8 +1059,8 @@ pub fn Handlers(comptime FrameType: type) type {
             std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
             self.stack.push_unsafe(if (result.success) 1 else 0);
             const op_data = dispatch.getOpData(.AUTHCALL);
-            const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
     };
 }

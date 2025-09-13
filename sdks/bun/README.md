@@ -20,18 +20,29 @@ bun add @guillotine/bun
 
 ## Building from Source
 
-First, build the shared library:
+### Prerequisites
 
-```bash
-cd ../..
-zig build shared -Doptimize=ReleaseFast
-```
+- [Zig](https://ziglang.org/) compiler (version 0.14.1 or later)
+- [Bun](https://bun.sh/) runtime
 
-Then build the TypeScript bindings:
+### Build Steps
 
-```bash
-bun build src/index.ts --outdir dist --target bun
-```
+1. Build the Guillotine shared library from the project root:
+   ```bash
+   cd ../..  # Navigate to guillotine project root
+   zig build shared -Doptimize=ReleaseFast
+   ```
+
+2. Build the TypeScript bindings:
+   ```bash
+   cd sdks/bun
+   bun build src/index.ts --outdir dist --target bun
+   ```
+
+3. Or use the provided build script:
+   ```bash
+   ./build.sh
+   ```
 
 ## Usage
 
@@ -83,13 +94,33 @@ Creates a new EVM instance with the specified block configuration.
 
 ### `GuillotineEVM`
 
+The main EVM instance class that provides methods for interacting with the EVM state and executing transactions.
+
 #### Methods
 
-- `setBalance(address: string, balance: bigint): void` - Set account balance
-- `setCode(address: string, code: Uint8Array): void` - Set contract code
-- `call(params: CallParams): EvmResult` - Execute an EVM call
-- `simulate(params: CallParams): EvmResult` - Simulate a call without committing state
-- `destroy(): void` - Clean up the EVM instance
+- `setBalance(address: string, balance: bigint): void`
+  - Sets the balance of an account
+  - `address`: Ethereum address (with or without '0x' prefix)
+  - `balance`: Balance in wei as a bigint
+
+- `setCode(address: string, code: Uint8Array): void`
+  - Sets the bytecode for a contract account
+  - `address`: Contract address
+  - `code`: Contract bytecode as Uint8Array
+
+- `call(params: CallParams): EvmResult`
+  - Executes an EVM call/transaction and commits state changes
+  - `params`: Call parameters (see CallParams interface)
+  - Returns: Execution result with gas usage and output
+
+- `simulate(params: CallParams): EvmResult`
+  - Simulates an EVM call without committing state changes
+  - Same parameters and return as `call()` but state remains unchanged
+  - Useful for gas estimation and testing
+
+- `destroy(): void`
+  - Cleans up the EVM instance and releases native resources
+  - **Important**: Always call this when done to prevent memory leaks
 
 ### Types
 
@@ -110,36 +141,47 @@ interface BlockInfo {
 #### `CallParams`
 ```typescript
 interface CallParams {
-  caller: string;
-  to: string;
-  value: bigint;
-  input: Uint8Array;
-  gas: bigint;
-  callType: CallType;
-  salt?: bigint; // For CREATE2
+  caller: string;      // Address of the account making the call
+  to: string;          // Target address (use zero address for CREATE)
+  value: bigint;       // Wei value to transfer
+  input: Uint8Array;   // Call data (constructor args for CREATE/CREATE2)
+  gas: bigint;         // Gas limit for the call
+  callType: CallType;  // Type of call (CALL, DELEGATECALL, etc.)
+  salt?: bigint;       // Salt for CREATE2 (required for CREATE2 calls)
 }
 ```
 
 #### `CallType`
 ```typescript
 enum CallType {
-  CALL = 0,
-  DELEGATECALL = 1,
-  STATICCALL = 2,
-  CREATE = 3,
-  CREATE2 = 4,
+  CALL = 0,         // Standard call - can modify state, transfer value
+  DELEGATECALL = 1, // Delegate call - executes in caller's context
+  STATICCALL = 2,   // Static call - cannot modify state, no value transfer
+  CREATE = 3,       // Deploy new contract
+  CREATE2 = 4,      // Deploy with deterministic address
 }
 ```
 
 #### `EvmResult`
 ```typescript
 interface EvmResult {
-  success: boolean;
-  gasLeft: bigint;
-  output: Uint8Array;
-  error?: string;
+  success: boolean;     // Whether the execution succeeded
+  gasLeft: bigint;      // Remaining gas after execution
+  output: Uint8Array;   // Return data (empty if reverted without data)
+  error?: string;       // Error message if execution failed
 }
 ```
+
+### Utility Functions
+
+- `hexToBytes(hex: string): Uint8Array`
+  - Converts hex string to Uint8Array
+  - Handles both "0x" prefixed and plain hex strings
+  - Example: `hexToBytes("0x1234")` → `Uint8Array([0x12, 0x34])`
+
+- `bytesToHex(bytes: Uint8Array): string`
+  - Converts Uint8Array to hex string with "0x" prefix
+  - Example: `bytesToHex(Uint8Array([0x12, 0x34]))` → `"0x1234"`
 
 ## Testing
 
@@ -180,57 +222,128 @@ Notes:
 
 Reproduce locally:
 
-1) Build the shared library
+### Run Benchmarks
 
-```bash
-zig build shared -Doptimize=ReleaseFast
-```
+1) First ensure the shared library is built:
+   ```bash
+   # From the Guillotine project root
+   zig build shared -Doptimize=ReleaseFast
+   ```
 
-2) Save this as `sdks/bun/bench.ts` (adjust repo path if needed), then run it:
+2) Save this benchmark script as `bench.ts` in the `sdks/bun` directory:
 
-```ts
-import { createEVM, CallType, hexToBytes } from "./src/index";
-import { readFileSync } from "fs";
-import { join } from "path";
+   ```typescript
+   import { createEVM, CallType, hexToBytes } from "./src/index";
+   import { readFileSync } from "fs";
+   import { join } from "path";
 
-function loadHexFile(p: string) {
-  return hexToBytes(readFileSync(p, "utf8").trim().replace(/^0x/, ""));
+   function loadHexFile(filepath: string): Uint8Array {
+     const content = readFileSync(filepath, "utf8").trim();
+     return hexToBytes(content.replace(/^0x/, ""));
+   }
+
+   function benchmark(name: string, bytecodePath: string, calldataPath: string, gasLimit: bigint) {
+     const evm = createEVM({
+       number: 1n,
+       timestamp: BigInt(Math.floor(Date.now() / 1000)),
+       gasLimit: 30_000_000n,
+       coinbase: "0x0000000000000000000000000000000000000000",
+       baseFee: 1_000_000_000n,
+       chainId: 1n,
+       difficulty: 0n,
+     });
+
+     try {
+       const caller = "0x1234567890123456789012345678901234567890";
+       const contractAddress = "0x2222222222222222222222222222222222222222";
+       
+       // Set up accounts and contract
+       evm.setBalance(caller, 10n ** 18n);
+       evm.setCode(contractAddress, loadHexFile(bytecodePath));
+       const calldata = loadHexFile(calldataPath);
+       
+       // Execute and time
+       const startTime = performance.now();
+       const result = evm.call({
+         caller,
+         to: contractAddress,
+         value: 0n,
+         input: calldata,
+         gas: gasLimit,
+         callType: CallType.CALL,
+       });
+       const endTime = performance.now();
+       
+       const executionTime = (endTime - startTime).toFixed(2);
+       const gasUsed = Number(gasLimit - result.gasLeft);
+       
+       console.log(`[${name}] ${executionTime} ms, success=${result.success}, gasUsed=${gasUsed}, outputLen=${result.output.length}`);
+     } finally {
+       evm.destroy();
+     }
+   }
+
+   // Run benchmarks (adjust paths as needed for your setup)
+   const fixturesPath = "../../src/_test_utils/fixtures";
+   benchmark("erc20-mint", join(fixturesPath, "erc20-mint/bytecode.txt"), join(fixturesPath, "erc20-mint/calldata.txt"), 5_000_000n);
+   benchmark("ten-thousand-hashes", join(fixturesPath, "ten-thousand-hashes/bytecode.txt"), join(fixturesPath, "ten-thousand-hashes/calldata.txt"), 10_000_000n);
+   benchmark("snailtracer", join(fixturesPath, "snailtracer/bytecode.txt"), join(fixturesPath, "snailtracer/calldata.txt"), 10_000_000n);
+   ```
+
+3) Run the benchmark:
+   ```bash
+   bun run bench.ts
+   ```
+
+## Error Handling
+
+The SDK provides detailed error information when operations fail:
+
+```typescript
+const result = evm.call(params);
+
+if (!result.success) {
+  console.log("Call failed:", result.error);
+  console.log("Gas used:", params.gas - result.gasLeft);
+  console.log("Revert data:", bytesToHex(result.output));
 }
-
-function bench(name: string, bc: string, cd: string, gas: bigint) {
-  const evm = createEVM({
-    number: 1n,
-    timestamp: BigInt(Math.floor(Date.now() / 1000)),
-    gasLimit: 30_000_000n,
-    coinbase: "0x0000000000000000000000000000000000000000",
-    baseFee: 1_000_000_000n,
-    chainId: 1n,
-    difficulty: 0n,
-  });
-  try {
-    const caller = "0x1234567890123456789012345678901234567890";
-    const to = "0x2222222222222222222222222222222222222222";
-    evm.setBalance(caller, 10n ** 18n);
-    evm.setCode(to, loadHexFile(bc));
-    const calldata = loadHexFile(cd);
-    const t0 = performance.now();
-    const r = evm.call({ caller, to, value: 0n, input: calldata, gas, callType: CallType.CALL });
-    const t1 = performance.now();
-    console.log(`[${name}]`, `${(t1 - t0).toFixed(2)} ms`, `success=${r.success}`, `gasUsed=${Number(gas - r.gasLeft)}`);
-  } finally { evm.destroy(); }
-}
-
-const root = process.cwd();
-bench("erc20-mint", join(root, "src/_test_utils/fixtures/erc20-mint/bytecode.txt"), join(root, "src/_test_utils/fixtures/erc20-mint/calldata.txt"), 5_000_000n);
-bench("ten-thousand-hashes", join(root, "src/_test_utils/fixtures/ten-thousand-hashes/bytecode.txt"), join(root, "src/_test_utils/fixtures/ten-thousand-hashes/calldata.txt"), 10_000_000n);
-bench("snailtracer", join(root, "src/_test_utils/fixtures/snailtracer/bytecode.txt"), join(root, "src/_test_utils/fixtures/snailtracer/calldata.txt"), 10_000_000n);
 ```
 
-Then run:
+### Common Error Scenarios
 
-```bash
-bun run sdks/bun/bench.ts
-```
+- **Out of Gas**: `result.success = false`, `result.gasLeft = 0n`
+- **Revert**: `result.success = false`, `result.output` contains revert data
+- **Invalid Jump**: `result.success = false`, execution stops at invalid jump destination
+- **Stack Underflow/Overflow**: `result.success = false`, stack operation failed
+- **Invalid Opcode**: `result.success = false`, encountered undefined opcode
+
+### Best Practices
+
+1. **Always destroy EVM instances**:
+   ```typescript
+   const evm = createEVM(blockInfo);
+   try {
+     // Use EVM
+   } finally {
+     evm.destroy(); // Prevent memory leaks
+   }
+   ```
+
+2. **Handle errors gracefully**:
+   ```typescript
+   try {
+     evm.setBalance(address, balance);
+   } catch (error) {
+     console.error("Failed to set balance:", error.message);
+   }
+   ```
+
+3. **Use appropriate gas limits**:
+   ```typescript
+   // Too low: execution will fail
+   // Too high: wastes gas but doesn't affect correctness
+   const result = evm.call({ ...params, gas: 1_000_000n });
+   ```
 
 ## License
 

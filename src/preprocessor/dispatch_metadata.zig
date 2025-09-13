@@ -32,8 +32,8 @@ pub fn DispatchMetadata(comptime FrameType: type) type {
         pub const PushInlineMetadata = packed struct(u64) { value: u64 };
 
         /// Metadata for PUSH operations with values larger than 64 bits.
-        /// Contains a pointer to the heap-allocated u256 value.
-        pub const PushPointerMetadata = packed struct(usize) { value: *u256 };
+        /// Contains an index into the u256 values array stored in the dispatch schedule.
+        pub const PushPointerMetadata = packed struct(u32) { index: u32 };
 
         /// Metadata for PC opcode containing the program counter value.
         /// Metadata for static jump locations - contains a direct pointer to the jump destination dispatch
@@ -91,17 +91,16 @@ test "PushInlineMetadata stores u64 values" {
     try testing.expectEqual(@as(u64, 0xDEADBEEFCAFEBABE), metadata.value);
 }
 
-test "PushPointerMetadata stores pointer to u256" {
+test "PushPointerMetadata stores index to u256 array" {
     const Metadata = DispatchMetadata(TestFrame);
     
-    try testing.expectEqual(@as(usize, 8), @sizeOf(Metadata.PushPointerMetadata));
+    try testing.expectEqual(@as(usize, 4), @sizeOf(Metadata.PushPointerMetadata));
     
-    var value: u256 = 0x123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0;
     const metadata = Metadata.PushPointerMetadata{
-        .value = &value,
+        .index = 42,
     };
     
-    try testing.expectEqual(@as(u256, 0x123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0), metadata.value.*);
+    try testing.expectEqual(@as(u32, 42), metadata.index);
 }
 
 test "PcMetadata stores program counter value" {

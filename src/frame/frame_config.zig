@@ -11,6 +11,7 @@
 /// and catch invalid parameter combinations early.
 const std = @import("std");
 const builtin = @import("builtin");
+const NoOpTracer = @import("../tracer/tracer.zig").NoOpTracer;
 
 // TODO add the Eip type from evm
 pub const FrameConfig = struct {
@@ -31,8 +32,8 @@ pub const FrameConfig = struct {
     /// Database implementation type for storage operations (always required).
     DatabaseType: type,
 
-    /// Optional tracer type for execution tracing (null for no tracing)
-    TracerType: ?type = null,
+    /// Tracer type for execution tracing (default: NoOpTracer for zero overhead)
+    TracerType: type = NoOpTracer,
 
     /// Block info configuration for the frame
     block_info_config: @import("block_info_config.zig").BlockInfoConfig = .{},

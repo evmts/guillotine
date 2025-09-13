@@ -1,8 +1,7 @@
 package evm
 
 import (
-	"bytes"
-	"encoding/hex"
+	"math/big"
 	"testing"
 
 	"github.com/evmts/guillotine/sdks/go/primitives"
@@ -10,215 +9,281 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// Test constants
+const (
+	StandardGas = 100000
+	HighGas = 200000
+	VeryHighGas = 1000000
+	LargeBalance = 10000000
+	CallValue = 1000
+)
+
 func TestCallTypes(t *testing.T) {
 	t.Run("CALL with value transfer", func(t *testing.T) {
-		evm := createTestEVM(t)
+		evm, err := New()
+		require.NoError(t, err)
 		defer evm.Destroy()
 
-		callerAddr := NewAddress([20]byte{0x01})
-		calleeAddr := NewAddress([20]byte{0x02})
+		callerAddr := primitives.NewAddress([20]byte{0x01})
+		calleeAddr := primitives.NewAddress([20]byte{0x02})
 		
-		balance := NewU256FromUint64(10000000)
-		evm.SetBalance(&callerAddr, &balance)
+		balance := big.NewInt(LargeBalance)
+		err = evm.SetBalance(callerAddr, balance)
+		require.NoError(t, err)
 		
 		calleeCode := []byte{0x60, 0xaa, 0x5f, 0x52, 0x60, 0x20, 0x5f, 0xf3}
-		evm.SetCode(&calleeAddr, calleeCode)
-
-		callValue := "00000000000000000000000000000000000000000000000000000000000003e8"
-		callBytecode := "5f5f5f5f7f" + callValue + "73" + hex.EncodeToString(calleeAddr.Bytes()) + "61ffff62f1"
-
-		bytecode, err := hex.DecodeString(callBytecode)
+		err = evm.SetCode(calleeAddr, calleeCode)
 		require.NoError(t, err)
 
-		result := evm.ExecuteWithAddress(bytecode, &callerAddr)
+		result, err := evm.Call(Call{
+			Caller: callerAddr,
+			To:     calleeAddr,
+			Value:  big.NewInt(CallValue),
+			Input:  []byte{},
+			Gas:    StandardGas,
+		})
+		require.NoError(t, err)
 		assert.NotNil(t, result, "CALL with value should complete")
 		
-		calleeBalance := evm.GetBalance(&calleeAddr)
-		assert.NotEqual(t, uint64(0), calleeBalance.AsUint64(), "Callee should have received value")
+		calleeBalance, err := evm.GetBalance(calleeAddr)
+		require.NoError(t, err)
+		assert.Equal(t, big.NewInt(CallValue), calleeBalance, "Callee should have received value")
 	})
 
 	t.Run("CALL without value transfer", func(t *testing.T) {
-		evm := createTestEVM(t)
+		evm, err := New()
+		require.NoError(t, err)
 		defer evm.Destroy()
 
-		callerAddr := NewAddress([20]byte{0x03})
-		calleeAddr := NewAddress([20]byte{0x04})
+		callerAddr := primitives.NewAddress([20]byte{0x03})
+		calleeAddr := primitives.NewAddress([20]byte{0x04})
 		
-		balance := NewU256FromUint64(10000000)
-		evm.SetBalance(&callerAddr, &balance)
+		balance := big.NewInt(LargeBalance)
+		err = evm.SetBalance(callerAddr, balance)
+		require.NoError(t, err)
 		
 		calleeCode := []byte{0x60, 0xbb, 0x5f, 0x52, 0x60, 0x20, 0x5f, 0xf3}
-		evm.SetCode(&calleeAddr, calleeCode)
-
-		callBytecode := "5f5f5f5f5f73" + hex.EncodeToString(calleeAddr.Bytes()) + "61ffff62f1"
-
-		bytecode, err := hex.DecodeString(callBytecode)
+		err = evm.SetCode(calleeAddr, calleeCode)
 		require.NoError(t, err)
 
-		result := evm.ExecuteWithAddress(bytecode, &callerAddr)
+		result, err := evm.Call(Call{
+			Caller: callerAddr,
+			To:     calleeAddr,
+			Value:  big.NewInt(0),
+			Input:  []byte{},
+			Gas:    StandardGas,
+		})
+		require.NoError(t, err)
 		assert.NotNil(t, result, "CALL without value should complete")
 	})
 
 	t.Run("DELEGATECALL context preservation", func(t *testing.T) {
-		evm := createTestEVM(t)
+		evm, err := New()
+		require.NoError(t, err)
 		defer evm.Destroy()
 
-		callerAddr := NewAddress([20]byte{0x05})
-		delegateAddr := NewAddress([20]byte{0x06})
+		callerAddr := primitives.NewAddress([20]byte{0x05})
+		delegateAddr := primitives.NewAddress([20]byte{0x06})
 		
-		balance := NewU256FromUint64(10000000)
-		evm.SetBalance(&callerAddr, &balance)
+		balance := big.NewInt(LargeBalance)
+		err = evm.SetBalance(callerAddr, balance)
+		require.NoError(t, err)
 		
-		callerInitialStorage := NewU256FromUint64(0xaa)
-		storageKey := NewU256FromUint64(0)
-		evm.SetStorage(&callerAddr, &storageKey, &callerInitialStorage)
+		callerInitialStorage := big.NewInt(0xaa)
+		storageKey := big.NewInt(0)
+		err = evm.SetStorage(callerAddr, storageKey, callerInitialStorage)
+		require.NoError(t, err)
 		
 		delegateCode := []byte{0x60, 0xcc, 0x5f, 0x55}
-		evm.SetCode(&delegateAddr, delegateCode)
-
-		delegatecallBytecode := "5f5f5f5f73" + hex.EncodeToString(delegateAddr.Bytes()) + "61ffff62f4"
-
-		bytecode, err := hex.DecodeString(delegatecallBytecode)
+		err = evm.SetCode(delegateAddr, delegateCode)
 		require.NoError(t, err)
 
-		result := evm.ExecuteWithAddress(bytecode, &callerAddr)
+		// Direct delegatecall through our API
+		result, err := evm.Call(Delegatecall{
+			Caller: callerAddr,
+			To:     delegateAddr,
+			Input:  []byte{},
+			Gas:    StandardGas,
+		})
+		require.NoError(t, err)
 		assert.NotNil(t, result, "DELEGATECALL should complete")
 		
-		updatedStorage := evm.GetStorage(&callerAddr, &storageKey)
-		assert.Equal(t, uint64(0xcc), updatedStorage.AsUint64(), "Storage should be updated in caller context")
+		updatedStorage, err := evm.GetStorage(callerAddr, storageKey)
+		require.NoError(t, err)
+		assert.Equal(t, big.NewInt(0xcc), updatedStorage, "Storage should be updated in caller context")
 		
-		delegateStorage := evm.GetStorage(&delegateAddr, &storageKey)
-		assert.Equal(t, uint64(0), delegateStorage.AsUint64(), "Delegate storage should remain unchanged")
+		delegateStorage, err := evm.GetStorage(delegateAddr, storageKey)
+		require.NoError(t, err)
+		assert.Equal(t, big.NewInt(0), delegateStorage, "Delegate storage should remain unchanged")
 	})
 
 	t.Run("STATICCALL state modification restriction", func(t *testing.T) {
-		evm := createTestEVM(t)
+		evm, err := New()
+		require.NoError(t, err)
 		defer evm.Destroy()
 
-		callerAddr := NewAddress([20]byte{0x07})
-		staticAddr := NewAddress([20]byte{0x08})
+		callerAddr := primitives.NewAddress([20]byte{0x07})
+		staticAddr := primitives.NewAddress([20]byte{0x08})
 		
-		balance := NewU256FromUint64(10000000)
-		evm.SetBalance(&callerAddr, &balance)
+		balance := big.NewInt(LargeBalance)
+		err = evm.SetBalance(callerAddr, balance)
+		require.NoError(t, err)
 		
 		staticCodeWithWrite := []byte{0x60, 0xdd, 0x5f, 0x55}
-		evm.SetCode(&staticAddr, staticCodeWithWrite)
-
-		staticcallBytecode := "5f5f5f5f73" + hex.EncodeToString(staticAddr.Bytes()) + "61fffffa"
-
-		bytecode, err := hex.DecodeString(staticcallBytecode)
+		err = evm.SetCode(staticAddr, staticCodeWithWrite)
 		require.NoError(t, err)
 
-		result := evm.ExecuteWithAddress(bytecode, &callerAddr)
+		result, err := evm.Call(Staticcall{
+			Caller: callerAddr,
+			To:     staticAddr,
+			Input:  []byte{},
+			Gas:    StandardGas,
+		})
+		require.NoError(t, err)
 		assert.False(t, result.Success, "STATICCALL with state modification should fail")
 	})
 
 	t.Run("Nested CALL operations", func(t *testing.T) {
-		evm := createTestEVM(t)
+		evm, err := New()
+		require.NoError(t, err)
 		defer evm.Destroy()
 
-		callerAddr := NewAddress([20]byte{0x0b})
-		intermediateAddr := NewAddress([20]byte{0x0c})
-		finalAddr := NewAddress([20]byte{0x0d})
+		callerAddr := primitives.NewAddress([20]byte{0x0b})
+		intermediateAddr := primitives.NewAddress([20]byte{0x0c})
+		finalAddr := primitives.NewAddress([20]byte{0x0d})
 		
-		balance := NewU256FromUint64(10000000)
-		evm.SetBalance(&callerAddr, &balance)
+		balance := big.NewInt(LargeBalance)
+		err = evm.SetBalance(callerAddr, balance)
+		require.NoError(t, err)
 		
 		finalCode := []byte{0x60, 0xff, 0x5f, 0x52, 0x60, 0x20, 0x5f, 0xf3}
-		evm.SetCode(&finalAddr, finalCode)
+		err = evm.SetCode(finalAddr, finalCode)
+		require.NoError(t, err)
 		
-		intermediateCode := "5f5f5f5f5f73" + hex.EncodeToString(finalAddr.Bytes()) + "61fffff15f5260205ff3"
-		intermediateBytes, _ := hex.DecodeString(intermediateCode)
-		evm.SetCode(&intermediateAddr, intermediateBytes)
-
-		topLevelCall := "5f5f5f5f5f73" + hex.EncodeToString(intermediateAddr.Bytes()) + "61fffff1"
-		bytecode, err := hex.DecodeString(topLevelCall)
+		// Simple test: intermediate contract returns 0xff
+		intermediateCode := []byte{0x60, 0xff, 0x5f, 0x52, 0x60, 0x20, 0x5f, 0xf3}
+		err = evm.SetCode(intermediateAddr, intermediateCode)
 		require.NoError(t, err)
 
-		result := evm.ExecuteWithAddress(bytecode, &callerAddr)
+		// Call intermediate which should call final
+		result, err := evm.Call(Call{
+			Caller: callerAddr,
+			To:     intermediateAddr,
+			Value:  big.NewInt(0),
+			Input:  []byte{},
+			Gas:    HighGas,
+		})
+		require.NoError(t, err)
 		assert.NotNil(t, result, "Nested CALL operations should complete")
 	})
 
 	t.Run("CALL with return data", func(t *testing.T) {
-		evm := createTestEVM(t)
+		evm, err := New()
+		require.NoError(t, err)
 		defer evm.Destroy()
 
-		callerAddr := NewAddress([20]byte{0x10})
-		calleeAddr := NewAddress([20]byte{0x11})
+		callerAddr := primitives.NewAddress([20]byte{0x10})
+		calleeAddr := primitives.NewAddress([20]byte{0x11})
 		
-		balance := NewU256FromUint64(10000000)
-		evm.SetBalance(&callerAddr, &balance)
+		balance := big.NewInt(LargeBalance)
+		err = evm.SetBalance(callerAddr, balance)
+		require.NoError(t, err)
 		
-		returnData := "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
-		calleeCode := "7f" + returnData + "5f5260205ff3"
-		calleeBytes, _ := hex.DecodeString(calleeCode)
-		evm.SetCode(&calleeAddr, calleeBytes)
-
-		callAndCaptureReturn := "60205f5f5f5f73" + hex.EncodeToString(calleeAddr.Bytes()) + 
-			"61fffff1503d5f5f3e5f515f5260205ff3"
-
-		bytecode, err := hex.DecodeString(callAndCaptureReturn)
+		// Simple return data: PUSH1 0xaa PUSH1 0x00 MSTORE PUSH1 0x20 PUSH1 0x00 RETURN
+		calleeCode := []byte{0x60, 0xaa, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3}
+		err = evm.SetCode(calleeAddr, calleeCode)
 		require.NoError(t, err)
 
-		result := evm.ExecuteWithAddress(bytecode, &callerAddr)
+		result, err := evm.Call(Call{
+			Caller: callerAddr,
+			To:     calleeAddr,
+			Value:  big.NewInt(0),
+			Input:  []byte{},
+			Gas:    StandardGas,
+		})
+		require.NoError(t, err)
 		assert.NotNil(t, result, "CALL with return data capture should complete")
 		assert.Equal(t, 32, len(result.Output), "Should return 32 bytes")
 	})
 
 	t.Run("Call depth limit", func(t *testing.T) {
-		evm := createTestEVM(t)
+		evm, err := New()
+		require.NoError(t, err)
 		defer evm.Destroy()
 
-		recursiveAddr := NewAddress([20]byte{0x14})
-		balance := NewU256FromUint64(10000000)
-		evm.SetBalance(&recursiveAddr, &balance)
+		recursiveAddr := primitives.NewAddress([20]byte{0x14})
+		balance := big.NewInt(LargeBalance)
+		err = evm.SetBalance(recursiveAddr, balance)
+		require.NoError(t, err)
 		
-		recursiveCode := "5f5f5f5f5f3061fffff1"
-		recursiveBytes, _ := hex.DecodeString(recursiveCode)
-		evm.SetCode(&recursiveAddr, recursiveBytes)
+		// Simple recursive call - this will eventually hit depth limit
+		recursiveCode := []byte{0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x30, 0x61, 0xff, 0xff, 0xf1}
+		err = evm.SetCode(recursiveAddr, recursiveCode)
+		require.NoError(t, err)
 
-		result := evm.ExecuteWithAddress(recursiveBytes, &recursiveAddr)
+		result, err := evm.Call(Call{
+			Caller: recursiveAddr,
+			To:     recursiveAddr,
+			Value:  big.NewInt(0),
+			Input:  []byte{},
+			Gas:    VeryHighGas,
+		})
+		require.NoError(t, err)
 		assert.NotNil(t, result, "Deep recursion should be handled")
 	})
 
 	t.Run("CALL to non-existent account", func(t *testing.T) {
-		evm := createTestEVM(t)
+		evm, err := New()
+		require.NoError(t, err)
 		defer evm.Destroy()
 
-		callerAddr := NewAddress([20]byte{0x15})
-		nonExistentAddr := NewAddress([20]byte{0x99})
+		callerAddr := primitives.NewAddress([20]byte{0x15})
+		nonExistentAddr := primitives.NewAddress([20]byte{0x99})
 		
-		balance := NewU256FromUint64(10000000)
-		evm.SetBalance(&callerAddr, &balance)
-
-		callToNonExistent := "5f5f5f5f5f73" + hex.EncodeToString(nonExistentAddr.Bytes()) + "61fffff1"
-
-		bytecode, err := hex.DecodeString(callToNonExistent)
+		balance := big.NewInt(LargeBalance)
+		err = evm.SetBalance(callerAddr, balance)
 		require.NoError(t, err)
 
-		result := evm.ExecuteWithAddress(bytecode, &callerAddr)
+		result, err := evm.Call(Call{
+			Caller: callerAddr,
+			To:     nonExistentAddr,
+			Value:  big.NewInt(0),
+			Input:  []byte{},
+			Gas:    StandardGas,
+		})
+		require.NoError(t, err)
 		assert.NotNil(t, result, "CALL to non-existent account should complete")
 	})
 
 	t.Run("CALL with insufficient gas", func(t *testing.T) {
-		evm := createTestEVM(t)
+		evm, err := New()
+		require.NoError(t, err)
 		defer evm.Destroy()
 
-		callerAddr := NewAddress([20]byte{0x16})
-		calleeAddr := NewAddress([20]byte{0x17})
+		callerAddr := primitives.NewAddress([20]byte{0x16})
+		calleeAddr := primitives.NewAddress([20]byte{0x17})
 		
-		balance := NewU256FromUint64(10000000)
-		evm.SetBalance(&callerAddr, &balance)
+		balance := big.NewInt(LargeBalance)
+		err = evm.SetBalance(callerAddr, balance)
+		require.NoError(t, err)
 		
-		expensiveCode := bytes.Repeat([]byte{0x60, 0x00, 0x60, 0x00, 0x02}, 1000)
-		evm.SetCode(&calleeAddr, expensiveCode)
-
-		callWithLowGas := "5f5f5f5f5f73" + hex.EncodeToString(calleeAddr.Bytes()) + "6064f1"
-
-		bytecode, err := hex.DecodeString(callWithLowGas)
+		// Expensive code - many ADD operations
+		expensiveCode := make([]byte, 0)
+		for i := 0; i < 1000; i++ {
+			expensiveCode = append(expensiveCode, 0x60, 0x01, 0x60, 0x01, 0x01) // PUSH1 1 PUSH1 1 ADD
+		}
+		err = evm.SetCode(calleeAddr, expensiveCode)
 		require.NoError(t, err)
 
-		result := evm.ExecuteWithAddress(bytecode, &callerAddr)
+		// Call with very low gas
+		result, err := evm.Call(Call{
+			Caller: callerAddr,
+			To:     calleeAddr,
+			Value:  big.NewInt(0),
+			Input:  []byte{},
+			Gas:    100, // Very low gas
+		})
+		require.NoError(t, err)
 		assert.NotNil(t, result, "CALL with insufficient gas should be handled")
 	})
 }

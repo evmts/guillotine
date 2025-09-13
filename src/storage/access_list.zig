@@ -9,7 +9,6 @@ pub fn createAccessList(comptime config: AccessListConfig) type {
 
     return struct {
         const Self = @This();
-        allocator: std.mem.Allocator,
         /// Warm addresses - addresses that have been accessed
         /// Using ArrayHashMap for better cache locality
         addresses: std.array_hash_map.ArrayHashMap(Address, void, std.array_hash_map.AutoContext(Address), false),
@@ -46,7 +45,6 @@ pub fn createAccessList(comptime config: AccessListConfig) type {
 
         pub fn init(allocator: std.mem.Allocator) Self {
             return Self{
-                .allocator = allocator,
                 .addresses = std.array_hash_map.ArrayHashMap(Address, void, std.array_hash_map.AutoContext(Address), false).init(allocator),
                 .storage_slots = std.array_hash_map.ArrayHashMap(StorageKey, void, StorageKeyContext, false).init(allocator),
             };

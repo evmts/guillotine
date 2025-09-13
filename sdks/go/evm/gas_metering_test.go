@@ -2,6 +2,7 @@ package evm
 
 import (
 	"encoding/hex"
+	"math/big"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -9,10 +10,27 @@ import (
 	"github.com/evmts/guillotine/sdks/go/primitives"
 )
 
+// Test constants
+const (
+	DefaultBalance = 1000000
+	StandardGas = 100000
+	HighGas = 200000
+	VeryHighGas = 1000000
+	LargeBalance = 10000000
+)
+
 func TestGasMetering(t *testing.T) {
 	t.Run("Basic gas consumption", func(t *testing.T) {
-		evm := createTestEVM(t)
+		evm, err := New()
+		require.NoError(t, err)
 		defer evm.Destroy()
+
+		caller := primitives.ZeroAddress()
+		contractAddr := primitives.NewAddress([20]byte{0x01})
+		
+		// Set up caller with balance
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
+		require.NoError(t, err)
 
 		tests := []struct {
 			name     string
@@ -34,49 +52,102 @@ func TestGasMetering(t *testing.T) {
 				bytecode, err := hex.DecodeString(tt.bytecode)
 				require.NoError(t, err)
 
-				result := evm.Execute(bytecode)
+				// Deploy the bytecode
+				err = evm.SetCode(contractAddr, bytecode)
+				require.NoError(t, err)
+
+				result, err := evm.Call(Call{
+					Caller: caller,
+					To:     contractAddr,
+					Value:  big.NewInt(0),
+					Input:  []byte{},
+					Gas:    1000000,
+				})
+				require.NoError(t, err)
 				assert.True(t, result.Success)
-				assert.GreaterOrEqual(t, result.GasUsed, tt.minGas)
-				assert.LessOrEqual(t, result.GasUsed, tt.maxGas)
+				assert.GreaterOrEqual(t, uint64(1000000-int(result.GasLeft)), tt.minGas)
+				assert.LessOrEqual(t, uint64(1000000-int(result.GasLeft)), tt.maxGas)
 			})
 		}
 	})
 
 	t.Run("Out of gas scenarios", func(t *testing.T) {
-		evm := createTestEVM(t)
+		evm, err := New()
+		require.NoError(t, err)
 		defer evm.Destroy()
 
-		gasLimit := NewU256FromUint64(100)
-		evm.SetGasLimit(&gasLimit)
+		caller := primitives.ZeroAddress()
+		contractAddr := primitives.NewAddress([20]byte{0x01})
+		
+		// Set up caller with balance
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
+		require.NoError(t, err)
 
 		expensiveBytecode := "600160005560016001556001600255"
 		bytecode, err := hex.DecodeString(expensiveBytecode)
 		require.NoError(t, err)
 
-		result := evm.Execute(bytecode)
+		// Deploy the expensive bytecode
+		err = evm.SetCode(contractAddr, bytecode)
+		require.NoError(t, err)
+
+		result, err := evm.Call(Call{
+			Caller: caller,
+			To:     contractAddr,
+			Value:  big.NewInt(0),
+			Input:  []byte{},
+			Gas:    100, // Very low gas
+		})
+		require.NoError(t, err)
 		assert.False(t, result.Success, "Should fail with out of gas")
 	})
 
 	t.Run("Gas refunds", func(t *testing.T) {
-		evm := createTestEVM(t)
+		evm, err := New()
+		require.NoError(t, err)
 		defer evm.Destroy()
 
-		addr := NewAddress([20]byte{})
-		key := NewU256FromUint64(0)
-		value := NewU256FromUint64(0xaa)
-		evm.SetStorage(&addr, &key, &value)
+		caller := primitives.ZeroAddress()
+		contractAddr := primitives.NewAddress([20]byte{0x01})
+		
+		// Set up caller with balance
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
+		require.NoError(t, err)
+
+		// Pre-set some storage to clear later
+		err = evm.SetStorage(contractAddr, big.NewInt(0), big.NewInt(0xaa))
+		require.NoError(t, err)
 
 		clearStorageBytecode := "5f5f55"
 		bytecode, err := hex.DecodeString(clearStorageBytecode)
 		require.NoError(t, err)
 
-		result := evm.Execute(bytecode)
+		// Deploy the bytecode
+		err = evm.SetCode(contractAddr, bytecode)
+		require.NoError(t, err)
+
+		result, err := evm.Call(Call{
+			Caller: caller,
+			To:     contractAddr,
+			Value:  big.NewInt(0),
+			Input:  []byte{},
+			Gas:    100000,
+		})
+		require.NoError(t, err)
 		assert.True(t, result.Success)
 	})
 
 	t.Run("Memory expansion gas", func(t *testing.T) {
-		evm := createTestEVM(t)
+		evm, err := New()
+		require.NoError(t, err)
 		defer evm.Destroy()
+
+		caller := primitives.ZeroAddress()
+		contractAddr := primitives.NewAddress([20]byte{0x01})
+		
+		// Set up caller with balance
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
+		require.NoError(t, err)
 
 		tests := []struct {
 			name     string
@@ -93,33 +164,66 @@ func TestGasMetering(t *testing.T) {
 				bytecode, err := hex.DecodeString(tt.bytecode)
 				require.NoError(t, err)
 
-				result := evm.Execute(bytecode)
+				// Deploy the bytecode
+				err = evm.SetCode(contractAddr, bytecode)
+				require.NoError(t, err)
+
+				result, err := evm.Call(Call{
+					Caller: caller,
+					To:     contractAddr,
+					Value:  big.NewInt(0),
+					Input:  []byte{},
+					Gas:    1000000,
+				})
+				require.NoError(t, err)
 				assert.True(t, result.Success, tt.desc)
 			})
 		}
 	})
 
 	t.Run("Call gas stipend", func(t *testing.T) {
-		evm := createTestEVM(t)
+		evm, err := New()
+		require.NoError(t, err)
 		defer evm.Destroy()
 
-		callerAddr := NewAddress([20]byte{0x01})
-		calleeAddr := NewAddress([20]byte{0x02})
+		callerAddr := primitives.NewAddress([20]byte{0x01})
+		calleeAddr := primitives.NewAddress([20]byte{0x02})
+		contractAddr := primitives.NewAddress([20]byte{0x03})
 		
-		balance := NewU256FromUint64(10000000)
-		evm.SetBalance(&callerAddr, &balance)
+		// Set up caller with balance
+		err = evm.SetBalance(callerAddr, big.NewInt(LargeBalance))
+		require.NoError(t, err)
 
 		callWithValue := "5f5f5f5f600173" + hex.EncodeToString(calleeAddr.Bytes()) + "5af1"
 		bytecode, err := hex.DecodeString(callWithValue)
 		require.NoError(t, err)
 
-		result := evm.ExecuteWithAddress(bytecode, &callerAddr)
+		// Deploy the bytecode
+		err = evm.SetCode(contractAddr, bytecode)
+		require.NoError(t, err)
+
+		result, err := evm.Call(Call{
+			Caller: callerAddr,
+			To:     contractAddr,
+			Value:  big.NewInt(0),
+			Input:  []byte{},
+			Gas:    1000000,
+		})
+		require.NoError(t, err)
 		assert.NotNil(t, result)
 	})
 
 	t.Run("EIP-2200 SSTORE gas", func(t *testing.T) {
-		evm := createTestEVM(t)
+		evm, err := New()
+		require.NoError(t, err)
 		defer evm.Destroy()
+
+		caller := primitives.ZeroAddress()
+		contractAddr := primitives.NewAddress([20]byte{0x01})
+		
+		// Set up caller with balance
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
+		require.NoError(t, err)
 
 		tests := []struct {
 			name        string
@@ -137,15 +241,34 @@ func TestGasMetering(t *testing.T) {
 				bytecode, err := hex.DecodeString(tt.bytecode)
 				require.NoError(t, err)
 
-				result := evm.Execute(bytecode)
+				// Deploy the bytecode
+				err = evm.SetCode(contractAddr, bytecode)
+				require.NoError(t, err)
+
+				result, err := evm.Call(Call{
+					Caller: caller,
+					To:     contractAddr,
+					Value:  big.NewInt(0),
+					Input:  []byte{},
+					Gas:    1000000,
+				})
+				require.NoError(t, err)
 				assert.True(t, result.Success, tt.description)
 			})
 		}
 	})
 
 	t.Run("EIP-1884 gas repricing", func(t *testing.T) {
-		evm := createTestEVM(t)
+		evm, err := New()
+		require.NoError(t, err)
 		defer evm.Destroy()
+
+		caller := primitives.ZeroAddress()
+		contractAddr := primitives.NewAddress([20]byte{0x01})
+		
+		// Set up caller with balance
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
+		require.NoError(t, err)
 
 		tests := []struct {
 			opcode   string
@@ -162,15 +285,34 @@ func TestGasMetering(t *testing.T) {
 				bytecode, err := hex.DecodeString(tt.bytecode)
 				require.NoError(t, err)
 
-				result := evm.Execute(bytecode)
+				// Deploy the bytecode
+				err = evm.SetCode(contractAddr, bytecode)
+				require.NoError(t, err)
+
+				result, err := evm.Call(Call{
+					Caller: caller,
+					To:     contractAddr,
+					Value:  big.NewInt(0),
+					Input:  []byte{},
+					Gas:    1000000,
+				})
+				require.NoError(t, err)
 				assert.True(t, result.Success)
 			})
 		}
 	})
 
 	t.Run("Dynamic gas calculation", func(t *testing.T) {
-		evm := createTestEVM(t)
+		evm, err := New()
+		require.NoError(t, err)
 		defer evm.Destroy()
+
+		caller := primitives.ZeroAddress()
+		contractAddr := primitives.NewAddress([20]byte{0x01})
+		
+		// Set up caller with balance
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
+		require.NoError(t, err)
 
 		tests := []struct {
 			name     string
@@ -188,15 +330,34 @@ func TestGasMetering(t *testing.T) {
 				bytecode, err := hex.DecodeString(tt.bytecode)
 				require.NoError(t, err)
 
-				result := evm.Execute(bytecode)
+				// Deploy the bytecode
+				err = evm.SetCode(contractAddr, bytecode)
+				require.NoError(t, err)
+
+				result, err := evm.Call(Call{
+					Caller: caller,
+					To:     contractAddr,
+					Value:  big.NewInt(0),
+					Input:  []byte{},
+					Gas:    1000000,
+				})
+				require.NoError(t, err)
 				assert.True(t, result.Success, tt.desc)
 			})
 		}
 	})
 
 	t.Run("Gas limit enforcement", func(t *testing.T) {
-		evm := createTestEVM(t)
+		evm, err := New()
+		require.NoError(t, err)
 		defer evm.Destroy()
+
+		caller := primitives.ZeroAddress()
+		contractAddr := primitives.NewAddress([20]byte{0x01})
+		
+		// Set up caller with balance
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
+		require.NoError(t, err)
 
 		tests := []struct {
 			gasLimit uint64
@@ -210,13 +371,21 @@ func TestGasMetering(t *testing.T) {
 		}
 
 		for _, tt := range tests {
-			gasLimit := NewU256FromUint64(tt.gasLimit)
-			evm.SetGasLimit(&gasLimit)
-
 			bytecode, err := hex.DecodeString(tt.bytecode)
 			require.NoError(t, err)
 
-			result := evm.Execute(bytecode)
+			// Deploy the bytecode
+			err = evm.SetCode(contractAddr, bytecode)
+			require.NoError(t, err)
+
+			result, err := evm.Call(Call{
+				Caller: caller,
+				To:     contractAddr,
+				Value:  big.NewInt(0),
+				Input:  []byte{},
+				Gas:    tt.gasLimit,
+			})
+			require.NoError(t, err)
 			assert.Equal(t, tt.shouldSucceed, result.Success)
 		}
 	})
@@ -224,34 +393,80 @@ func TestGasMetering(t *testing.T) {
 
 func TestGasOptimizations(t *testing.T) {
 	t.Run("Gas efficient patterns", func(t *testing.T) {
-		evm := createTestEVM(t)
+		evm, err := New()
+		require.NoError(t, err)
 		defer evm.Destroy()
+
+		caller := primitives.ZeroAddress()
+		contractAddr := primitives.NewAddress([20]byte{0x01})
+		
+		// Set up caller with balance
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
+		require.NoError(t, err)
 
 		efficientSwap := "600160028190"
 		bytecode, err := hex.DecodeString(efficientSwap)
 		require.NoError(t, err)
 
-		result := evm.Execute(bytecode)
+		// Deploy the bytecode
+		err = evm.SetCode(contractAddr, bytecode)
+		require.NoError(t, err)
+
+		result, err := evm.Call(Call{
+			Caller: caller,
+			To:     contractAddr,
+			Value:  big.NewInt(0),
+			Input:  []byte{},
+			Gas:    1000000,
+		})
+		require.NoError(t, err)
 		assert.True(t, result.Success)
 	})
 
 	t.Run("Gas expensive patterns", func(t *testing.T) {
-		evm := createTestEVM(t)
+		evm, err := New()
+		require.NoError(t, err)
 		defer evm.Destroy()
+
+		caller := primitives.ZeroAddress()
+		contractAddr := primitives.NewAddress([20]byte{0x01})
+		
+		// Set up caller with balance
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
+		require.NoError(t, err)
 
 		expensiveLoop := "6064805b8060010360008112610014576100085661001a565b50"
 		bytecode, err := hex.DecodeString(expensiveLoop)
 		require.NoError(t, err)
 
-		result := evm.Execute(bytecode)
+		// Deploy the bytecode
+		err = evm.SetCode(contractAddr, bytecode)
+		require.NoError(t, err)
+
+		result, err := evm.Call(Call{
+			Caller: caller,
+			To:     contractAddr,
+			Value:  big.NewInt(0),
+			Input:  []byte{},
+			Gas:    1000000,
+		})
+		require.NoError(t, err)
 		assert.True(t, result.Success)
 	})
 }
 
 func TestIntrinsicGas(t *testing.T) {
 	t.Run("Transaction intrinsic gas", func(t *testing.T) {
-		evm := createTestEVM(t)
+		evm, err := New()
+		require.NoError(t, err)
 		defer evm.Destroy()
+
+		caller := primitives.ZeroAddress()
+		contractAddr := primitives.NewAddress([20]byte{0x01})
+		
+		// Set up caller with balance
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
+		require.NoError(t, err)
 
 		tests := []struct {
 			name     string
@@ -266,11 +481,35 @@ func TestIntrinsicGas(t *testing.T) {
 
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				bytecode, err := hex.DecodeString(tt.bytecode)
-				require.NoError(t, err)
+				if tt.bytecode == "" {
+					// For empty bytecode, just make a simple call
+					result, err := evm.Call(Call{
+						Caller: caller,
+						To:     contractAddr,
+						Value:  big.NewInt(0),
+						Input:  []byte{},
+						Gas:    1000000,
+					})
+					require.NoError(t, err)
+					assert.NotNil(t, result)
+				} else {
+					bytecode, err := hex.DecodeString(tt.bytecode)
+					require.NoError(t, err)
 
-				result := evm.Execute(bytecode)
-				assert.NotNil(t, result)
+					// Deploy the bytecode
+					err = evm.SetCode(contractAddr, bytecode)
+					require.NoError(t, err)
+
+					result, err := evm.Call(Call{
+						Caller: caller,
+						To:     contractAddr,
+						Value:  big.NewInt(0),
+						Input:  []byte{},
+						Gas:    1000000,
+					})
+					require.NoError(t, err)
+					assert.NotNil(t, result)
+				}
 			})
 		}
 	})
@@ -278,22 +517,49 @@ func TestIntrinsicGas(t *testing.T) {
 
 func TestAccessListGas(t *testing.T) {
 	t.Run("EIP-2930 access list", func(t *testing.T) {
-		evm := createTestEVM(t)
+		evm, err := New()
+		require.NoError(t, err)
 		defer evm.Destroy()
+
+		caller := primitives.ZeroAddress()
+		contractAddr := primitives.NewAddress([20]byte{0x01})
+		
+		// Set up caller with balance
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
+		require.NoError(t, err)
 
 		accessListBytecode := "5f545f54"
 		bytecode, err := hex.DecodeString(accessListBytecode)
 		require.NoError(t, err)
 
-		result := evm.Execute(bytecode)
+		// Deploy the bytecode
+		err = evm.SetCode(contractAddr, bytecode)
+		require.NoError(t, err)
+
+		result, err := evm.Call(Call{
+			Caller: caller,
+			To:     contractAddr,
+			Value:  big.NewInt(0),
+			Input:  []byte{},
+			Gas:    1000000,
+		})
+		require.NoError(t, err)
 		assert.True(t, result.Success)
 	})
 }
 
 func TestGasEstimation(t *testing.T) {
 	t.Run("Accurate gas estimation", func(t *testing.T) {
-		evm := createTestEVM(t)
+		evm, err := New()
+		require.NoError(t, err)
 		defer evm.Destroy()
+
+		caller := primitives.ZeroAddress()
+		contractAddr := primitives.NewAddress([20]byte{0x01})
+		
+		// Set up caller with balance
+		err = evm.SetBalance(caller, big.NewInt(DefaultBalance))
+		require.NoError(t, err)
 
 		tests := []struct {
 			name     string
@@ -308,12 +574,32 @@ func TestGasEstimation(t *testing.T) {
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
 				if tt.bytecode == "" {
-					result := evm.Execute([]byte{})
+					// For empty bytecode, just make a simple call
+					result, err := evm.Call(Call{
+						Caller: caller,
+						To:     contractAddr,
+						Value:  big.NewInt(0),
+						Input:  []byte{},
+						Gas:    1000000,
+					})
+					require.NoError(t, err)
 					assert.NotNil(t, result)
 				} else {
 					bytecode, err := hex.DecodeString(tt.bytecode)
 					require.NoError(t, err)
-					result := evm.Execute(bytecode)
+
+					// Deploy the bytecode
+					err = evm.SetCode(contractAddr, bytecode)
+					require.NoError(t, err)
+
+					result, err := evm.Call(Call{
+						Caller: caller,
+						To:     contractAddr,
+						Value:  big.NewInt(0),
+						Input:  []byte{},
+						Gas:    1000000,
+					})
+					require.NoError(t, err)
 					assert.NotNil(t, result)
 				}
 			})

@@ -9,29 +9,24 @@ pub fn Handlers(comptime FrameType: type) type {
         pub const Error = FrameType.Error;
         pub const Dispatch = FrameType.Dispatch;
         pub const WordType = FrameType.WordType;
+        const dispatch = @import("../preprocessor/dispatch_opcode_data.zig");
 
         /// LT opcode (0x10) - Less than comparison.
         pub fn lt(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             std.debug.assert(self.stack.size() >= 2); // LT requires 2 stack items
-            const a = self.stack.pop_unsafe(); // Top of stack (second pushed value)
-            const b = self.stack.peek_unsafe(); // Second from top (first pushed value)
-            // EVM: pops a (top), then b; pushes (a < b)
-            const result: WordType = @intFromBool(a < b);
-            self.stack.set_top_unsafe(result);
-            const next_cursor = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            // EVM: pops top, then second; pushes (top < second)
+            self.stack.binary_op_unsafe(struct { fn op(top: WordType, second: WordType) WordType { return @intFromBool(top < second); } }.op);
+            const op_data = dispatch.getOpData(.LT, Dispatch, Dispatch.Item, cursor);
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// GT opcode (0x11) - Greater than comparison.
         pub fn gt(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             std.debug.assert(self.stack.size() >= 2); // GT requires 2 stack items
-            const a = self.stack.pop_unsafe(); // Top of stack (second pushed value)
-            const b = self.stack.peek_unsafe(); // Second from top (first pushed value)
-            // EVM: pops a (top), then b; pushes (a > b)
-            const result: WordType = @intFromBool(a > b);
-            self.stack.set_top_unsafe(result);
-            const next_cursor = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            // EVM: pops top, then second; pushes (top > second)
+            self.stack.binary_op_unsafe(struct { fn op(top: WordType, second: WordType) WordType { return @intFromBool(top > second); } }.op);
+            const op_data = dispatch.getOpData(.GT, Dispatch, Dispatch.Item, cursor);
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// SLT opcode (0x12) - Signed less than comparison.
@@ -44,8 +39,8 @@ pub fn Handlers(comptime FrameType: type) type {
             // EVM: pops a (top), then b; pushes (a < b) with signed comparison
             const result: WordType = @intFromBool(a_signed < b_signed);
             self.stack.set_top_unsafe(result);
-            const next_cursor = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            const op_data = dispatch.getOpData(.SLT, Dispatch, Dispatch.Item, cursor);
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// SGT opcode (0x13) - Signed greater than comparison.
@@ -58,20 +53,17 @@ pub fn Handlers(comptime FrameType: type) type {
             // EVM: pops a (top), then b; pushes (a > b) with signed comparison
             const result: WordType = @intFromBool(a_signed > b_signed);
             self.stack.set_top_unsafe(result);
-            const next_cursor = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            const op_data = dispatch.getOpData(.SGT, Dispatch, Dispatch.Item, cursor);
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// EQ opcode (0x14) - Equality comparison.
         pub fn eq(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             std.debug.assert(self.stack.size() >= 2); // EQ requires 2 stack items
-            const b = self.stack.pop_unsafe(); // Top of stack - second operand
-            const a = self.stack.peek_unsafe(); // Second from top - first operand
-            // EVM: pops b, then a, and pushes (a == b)
-            const result: WordType = @intFromBool(a == b);
-            self.stack.set_top_unsafe(result);
-            const next_cursor = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            // EVM: pops top, then second, and pushes (top == second)
+            self.stack.binary_op_unsafe(struct { fn op(top: WordType, second: WordType) WordType { return @intFromBool(top == second); } }.op);
+            const op_data = dispatch.getOpData(.EQ, Dispatch, Dispatch.Item, cursor);
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// ISZERO opcode (0x15) - Check if value is zero.
@@ -80,8 +72,8 @@ pub fn Handlers(comptime FrameType: type) type {
             const value = self.stack.peek_unsafe();
             const result: WordType = @intFromBool(value == 0);
             self.stack.set_top_unsafe(result);
-            const next_cursor = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            const op_data = dispatch.getOpData(.ISZERO, Dispatch, Dispatch.Item, cursor);
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
     };
 }

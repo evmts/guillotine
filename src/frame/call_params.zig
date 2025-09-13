@@ -77,6 +77,18 @@ pub fn CallParams(comptime config: anytype) type {
         };
     }
 
+    /// Set the gas limit for this call operation
+    pub fn setGas(self: *@This(), gas: u64) void {
+        switch (self.*) {
+            .call => |*params| params.gas = gas,
+            .callcode => |*params| params.gas = gas,
+            .delegatecall => |*params| params.gas = gas,
+            .staticcall => |*params| params.gas = gas,
+            .create => |*params| params.gas = gas,
+            .create2 => |*params| params.gas = gas,
+        }
+    }
+
     /// Get the caller address for this call operation
     pub fn getCaller(self: @This()) Address {
         return switch (self) {
@@ -127,6 +139,83 @@ pub fn CallParams(comptime config: anytype) type {
             .create, .create2 => true,
             else => false,
         };
+    }
+
+    /// Creates a deep copy of the CallParams
+    /// Allocates new memory for all dynamic data (input/init_code)
+    pub fn clone(self: @This(), allocator: std.mem.Allocator) !@This() {
+        return switch (self) {
+            .call => |params| blk: {
+                const cloned_input = try allocator.dupe(u8, params.input);
+                break :blk @This(){ .call = .{
+                    .caller = params.caller,
+                    .to = params.to,
+                    .value = params.value,
+                    .input = cloned_input,
+                    .gas = params.gas,
+                } };
+            },
+            .callcode => |params| blk: {
+                const cloned_input = try allocator.dupe(u8, params.input);
+                break :blk @This(){ .callcode = .{
+                    .caller = params.caller,
+                    .to = params.to,
+                    .value = params.value,
+                    .input = cloned_input,
+                    .gas = params.gas,
+                } };
+            },
+            .delegatecall => |params| blk: {
+                const cloned_input = try allocator.dupe(u8, params.input);
+                break :blk @This(){ .delegatecall = .{
+                    .caller = params.caller,
+                    .to = params.to,
+                    .input = cloned_input,
+                    .gas = params.gas,
+                } };
+            },
+            .staticcall => |params| blk: {
+                const cloned_input = try allocator.dupe(u8, params.input);
+                break :blk @This(){ .staticcall = .{
+                    .caller = params.caller,
+                    .to = params.to,
+                    .input = cloned_input,
+                    .gas = params.gas,
+                } };
+            },
+            .create => |params| blk: {
+                const cloned_init_code = try allocator.dupe(u8, params.init_code);
+                break :blk @This(){ .create = .{
+                    .caller = params.caller,
+                    .value = params.value,
+                    .init_code = cloned_init_code,
+                    .gas = params.gas,
+                } };
+            },
+            .create2 => |params| blk: {
+                const cloned_init_code = try allocator.dupe(u8, params.init_code);
+                break :blk @This(){ .create2 = .{
+                    .caller = params.caller,
+                    .value = params.value,
+                    .init_code = cloned_init_code,
+                    .salt = params.salt,
+                    .gas = params.gas,
+                } };
+            },
+        };
+    }
+
+    /// Frees memory allocated by clone()
+    /// Must be called when the cloned CallParams is no longer needed
+    pub fn deinit(self: @This(), allocator: std.mem.Allocator) void {
+        switch (self) {
+            .call => |params| allocator.free(params.input),
+            .callcode => |params| allocator.free(params.input),
+            .delegatecall => |params| allocator.free(params.input),
+            .staticcall => |params| allocator.free(params.input),
+            .create => |params| allocator.free(params.init_code),
+            .create2 => |params| allocator.free(params.init_code),
+        }
     }
     };
 }
@@ -783,4 +872,323 @@ test "call params input vs init code consistency" {
         .gas = 53000,
     } };
     try std.testing.expectEqualSlices(u8, init_code, create_op.getInput());
+}
+
+test "call params clone and deinit" {
+    const testing_allocator = std.testing.allocator;
+    const caller: Address = .{ .bytes = [_]u8{0xaa} ++ [_]u8{0} ** 19 };
+    const to: Address = .{ .bytes = [_]u8{0xbb} ++ [_]u8{0} ** 19 };
+    const input_data = &[_]u8{ 0x12, 0x34, 0x56, 0x78 };
+    const init_code = &[_]u8{ 0x60, 0x00, 0x60, 0x00, 0xf3 };
+
+    // Test CALL clone
+    {
+        const original = DefaultCallParams{ .call = .{
+            .caller = caller,
+            .to = to,
+            .value = 100,
+            .input = input_data,
+            .gas = 25000,
+        } };
+
+        const cloned = try original.clone(testing_allocator);
+        defer cloned.deinit(testing_allocator);
+
+        try std.testing.expectEqual(original.getGas(), cloned.getGas());
+        try std.testing.expectEqual(original.getCaller(), cloned.getCaller());
+        try std.testing.expectEqualSlices(u8, original.getInput(), cloned.getInput());
+
+        // Verify it's a deep copy (different memory addresses)
+        try std.testing.expect(original.call.input.ptr != cloned.call.input.ptr);
+    }
+
+    // Test DELEGATECALL clone
+    {
+        const original = DefaultCallParams{ .delegatecall = .{
+            .caller = caller,
+            .to = to,
+            .input = input_data,
+            .gas = 30000,
+        } };
+
+        const cloned = try original.clone(testing_allocator);
+        defer cloned.deinit(testing_allocator);
+
+        try std.testing.expectEqual(original.getGas(), cloned.getGas());
+        try std.testing.expectEqual(original.getCaller(), cloned.getCaller());
+        try std.testing.expectEqualSlices(u8, original.getInput(), cloned.getInput());
+        try std.testing.expect(original.delegatecall.input.ptr != cloned.delegatecall.input.ptr);
+    }
+
+    // Test STATICCALL clone
+    {
+        const original = DefaultCallParams{ .staticcall = .{
+            .caller = caller,
+            .to = to,
+            .input = input_data,
+            .gas = 35000,
+        } };
+
+        const cloned = try original.clone(testing_allocator);
+        defer cloned.deinit(testing_allocator);
+
+        try std.testing.expectEqual(original.getGas(), cloned.getGas());
+        try std.testing.expectEqual(original.getCaller(), cloned.getCaller());
+        try std.testing.expectEqualSlices(u8, original.getInput(), cloned.getInput());
+        try std.testing.expect(original.staticcall.input.ptr != cloned.staticcall.input.ptr);
+    }
+
+    // Test CREATE clone
+    {
+        const original = DefaultCallParams{ .create = .{
+            .caller = caller,
+            .value = 500,
+            .init_code = init_code,
+            .gas = 53000,
+        } };
+
+        const cloned = try original.clone(testing_allocator);
+        defer cloned.deinit(testing_allocator);
+
+        try std.testing.expectEqual(original.getGas(), cloned.getGas());
+        try std.testing.expectEqual(original.getCaller(), cloned.getCaller());
+        try std.testing.expectEqualSlices(u8, original.getInput(), cloned.getInput());
+        try std.testing.expect(original.create.init_code.ptr != cloned.create.init_code.ptr);
+    }
+
+    // Test CREATE2 clone
+    {
+        const original = DefaultCallParams{ .create2 = .{
+            .caller = caller,
+            .value = 600,
+            .init_code = init_code,
+            .salt = 0xdeadbeef,
+            .gas = 55000,
+        } };
+
+        const cloned = try original.clone(testing_allocator);
+        defer cloned.deinit(testing_allocator);
+
+        try std.testing.expectEqual(original.getGas(), cloned.getGas());
+        try std.testing.expectEqual(original.getCaller(), cloned.getCaller());
+        try std.testing.expectEqualSlices(u8, original.getInput(), cloned.getInput());
+        try std.testing.expectEqual(original.create2.salt, cloned.create2.salt);
+        try std.testing.expect(original.create2.init_code.ptr != cloned.create2.init_code.ptr);
+    }
+
+    // Test CALLCODE clone
+    {
+        const original = DefaultCallParams{ .callcode = .{
+            .caller = caller,
+            .to = to,
+            .value = 200,
+            .input = input_data,
+            .gas = 40000,
+        } };
+
+        const cloned = try original.clone(testing_allocator);
+        defer cloned.deinit(testing_allocator);
+
+        try std.testing.expectEqual(original.getGas(), cloned.getGas());
+        try std.testing.expectEqual(original.getCaller(), cloned.getCaller());
+        try std.testing.expectEqualSlices(u8, original.getInput(), cloned.getInput());
+        try std.testing.expect(original.callcode.input.ptr != cloned.callcode.input.ptr);
+    }
+}
+
+test "call params clone empty input" {
+    const testing_allocator = std.testing.allocator;
+    const caller = primitives.ZERO_ADDRESS;
+    const to: Address = .{ .bytes = [_]u8{1} ++ [_]u8{0} ** 19 };
+
+    // Test with empty input slice
+    const original = DefaultCallParams{ .call = .{
+        .caller = caller,
+        .to = to,
+        .value = 0,
+        .input = &[_]u8{},
+        .gas = 21000,
+    } };
+
+    const cloned = try original.clone(testing_allocator);
+    defer cloned.deinit(testing_allocator);
+
+    try std.testing.expectEqual(@as(usize, 0), cloned.getInput().len);
+    try std.testing.expectEqual(original.getGas(), cloned.getGas());
+    try std.testing.expectEqual(original.getCaller(), cloned.getCaller());
+}
+
+test "call params clone large input" {
+    const testing_allocator = std.testing.allocator;
+    const caller = primitives.ZERO_ADDRESS;
+    const to: Address = .{ .bytes = [_]u8{1} ++ [_]u8{0} ** 19 };
+
+    // Create large input data
+    var large_input: [1024]u8 = undefined;
+    for (0..1024) |i| {
+        large_input[i] = @intCast(i % 256);
+    }
+
+    const original = DefaultCallParams{ .call = .{
+        .caller = caller,
+        .to = to,
+        .value = 0,
+        .input = &large_input,
+        .gas = 100000,
+    } };
+
+    const cloned = try original.clone(testing_allocator);
+    defer cloned.deinit(testing_allocator);
+
+    try std.testing.expectEqualSlices(u8, &large_input, cloned.getInput());
+    try std.testing.expect(original.call.input.ptr != cloned.call.input.ptr);
+}
+
+test "call params setGas" {
+    const caller = primitives.ZERO_ADDRESS;
+    const to: Address = .{ .bytes = [_]u8{1} ++ [_]u8{0} ** 19 };
+    const input = &[_]u8{0x42};
+    const init_code = &[_]u8{0x60, 0x00, 0xf3};
+
+    // Test CALL setGas
+    {
+        var call_op = DefaultCallParams{ .call = .{
+            .caller = caller,
+            .to = to,
+            .value = 100,
+            .input = input,
+            .gas = 21000,
+        } };
+        
+        try std.testing.expectEqual(@as(u64, 21000), call_op.getGas());
+        call_op.setGas(50000);
+        try std.testing.expectEqual(@as(u64, 50000), call_op.getGas());
+    }
+
+    // Test DELEGATECALL setGas
+    {
+        var delegatecall_op = DefaultCallParams{ .delegatecall = .{
+            .caller = caller,
+            .to = to,
+            .input = input,
+            .gas = 15000,
+        } };
+        
+        try std.testing.expectEqual(@as(u64, 15000), delegatecall_op.getGas());
+        delegatecall_op.setGas(30000);
+        try std.testing.expectEqual(@as(u64, 30000), delegatecall_op.getGas());
+    }
+
+    // Test STATICCALL setGas
+    {
+        var staticcall_op = DefaultCallParams{ .staticcall = .{
+            .caller = caller,
+            .to = to,
+            .input = input,
+            .gas = 20000,
+        } };
+        
+        try std.testing.expectEqual(@as(u64, 20000), staticcall_op.getGas());
+        staticcall_op.setGas(40000);
+        try std.testing.expectEqual(@as(u64, 40000), staticcall_op.getGas());
+    }
+
+    // Test CALLCODE setGas
+    {
+        var callcode_op = DefaultCallParams{ .callcode = .{
+            .caller = caller,
+            .to = to,
+            .value = 200,
+            .input = input,
+            .gas = 25000,
+        } };
+        
+        try std.testing.expectEqual(@as(u64, 25000), callcode_op.getGas());
+        callcode_op.setGas(60000);
+        try std.testing.expectEqual(@as(u64, 60000), callcode_op.getGas());
+    }
+
+    // Test CREATE setGas
+    {
+        var create_op = DefaultCallParams{ .create = .{
+            .caller = caller,
+            .value = 500,
+            .init_code = init_code,
+            .gas = 53000,
+        } };
+        
+        try std.testing.expectEqual(@as(u64, 53000), create_op.getGas());
+        create_op.setGas(70000);
+        try std.testing.expectEqual(@as(u64, 70000), create_op.getGas());
+    }
+
+    // Test CREATE2 setGas
+    {
+        var create2_op = DefaultCallParams{ .create2 = .{
+            .caller = caller,
+            .value = 600,
+            .init_code = init_code,
+            .salt = 0xdeadbeef,
+            .gas = 55000,
+        } };
+        
+        try std.testing.expectEqual(@as(u64, 55000), create2_op.getGas());
+        create2_op.setGas(80000);
+        try std.testing.expectEqual(@as(u64, 80000), create2_op.getGas());
+    }
+}
+
+test "call params setGas edge cases" {
+    const caller = primitives.ZERO_ADDRESS;
+    const to: Address = .{ .bytes = [_]u8{1} ++ [_]u8{0} ** 19 };
+
+    // Test setting gas to 0 (should fail validation after)
+    {
+        var call_op = DefaultCallParams{ .call = .{
+            .caller = caller,
+            .to = to,
+            .value = 0,
+            .input = &[_]u8{},
+            .gas = 1000,
+        } };
+        
+        call_op.setGas(0);
+        try std.testing.expectEqual(@as(u64, 0), call_op.getGas());
+        try std.testing.expectError(DefaultCallParams.ValidationError.GasZeroError, call_op.validate());
+    }
+
+    // Test setting gas to max value
+    {
+        var call_op = DefaultCallParams{ .call = .{
+            .caller = caller,
+            .to = to,
+            .value = 0,
+            .input = &[_]u8{},
+            .gas = 1000,
+        } };
+        
+        const max_gas = std.math.maxInt(u64);
+        call_op.setGas(max_gas);
+        try std.testing.expectEqual(max_gas, call_op.getGas());
+    }
+
+    // Test multiple gas updates
+    {
+        var call_op = DefaultCallParams{ .call = .{
+            .caller = caller,
+            .to = to,
+            .value = 0,
+            .input = &[_]u8{},
+            .gas = 1000,
+        } };
+        
+        call_op.setGas(2000);
+        try std.testing.expectEqual(@as(u64, 2000), call_op.getGas());
+        
+        call_op.setGas(3000);
+        try std.testing.expectEqual(@as(u64, 3000), call_op.getGas());
+        
+        call_op.setGas(1500);
+        try std.testing.expectEqual(@as(u64, 1500), call_op.getGas());
+    }
 }

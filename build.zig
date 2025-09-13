@@ -110,6 +110,40 @@ pub fn build(b: *std.Build) void {
     _ = build_pkg.Utils.createOpcodeTestLib(b, target, optimize, modules.evm_mod, modules.primitives_mod, modules.crypto_mod, config.options_mod, bn254_lib);
     build_pkg.Utils.createExternalBuildSteps(b);
     
+    // Pattern analyzer tool (JSON fixtures)
+    const pattern_analyzer = b.addExecutable(.{
+        .name = "pattern-analyzer",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("scripts/analyze_patterns.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    pattern_analyzer.root_module.addImport("evm", modules.evm_mod);
+    pattern_analyzer.root_module.addImport("primitives", modules.primitives_mod);
+    pattern_analyzer.root_module.addImport("crypto", modules.crypto_mod);
+    b.installArtifact(pattern_analyzer);
+    
+    const pattern_analyzer_step = b.step("build-pattern-analyzer", "Build JSON fixture pattern analyzer");
+    pattern_analyzer_step.dependOn(&b.addInstallArtifact(pattern_analyzer, .{}).step);
+    
+    // Bytecode pattern analyzer (text files)
+    const bytecode_patterns = b.addExecutable(.{
+        .name = "bytecode-patterns",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("scripts/bytecode_patterns.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    bytecode_patterns.root_module.addImport("evm", modules.evm_mod);
+    bytecode_patterns.root_module.addImport("primitives", modules.primitives_mod);
+    bytecode_patterns.root_module.addImport("crypto", modules.crypto_mod);
+    b.installArtifact(bytecode_patterns);
+    
+    const bytecode_patterns_step = b.step("build-bytecode-patterns", "Build bytecode pattern analyzer");
+    bytecode_patterns_step.dependOn(&b.addInstallArtifact(bytecode_patterns, .{}).step);
+    
     // Shared library for FFI bindings
     const shared_lib_mod = b.createModule(.{
         .root_source_file = b.path("src/evm_c_api.zig"),

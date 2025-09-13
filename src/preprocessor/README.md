@@ -1,56 +1,60 @@
 # Bytecode Preprocessor
 
-Advanced bytecode preprocessing and optimization system for maximizing EVM execution performance through dispatch optimization, instruction fusion, and jump table generation.
+Advanced bytecode preprocessing and optimization system for maximizing EVM execution performance through dispatch optimization, instruction fusion patterns, and jump table generation with static resolution.
 
 ## Overview
 
-The preprocessor module transforms raw EVM bytecode into highly optimized dispatch schedules, enabling Guillotine to achieve superior performance through compile-time analysis and runtime optimization. It implements sophisticated bytecode analysis, instruction fusion, and jump table generation.
+The preprocessor module transforms raw EVM bytecode into highly optimized dispatch schedules, enabling Guillotine to achieve superior performance through compile-time analysis and runtime optimization. It implements sophisticated bytecode analysis, instruction fusion with 15+ synthetic opcodes, static jump resolution, and efficient dispatch table generation.
 
 ## Components
 
 ### Core Processing
 
-- **`dispatch.zig`** - Main dispatch schedule generation and optimization
-- **`dispatch_item.zig`** - Individual dispatch item definitions and utilities
-- **`dispatch_metadata.zig`** - Metadata structures for dispatch optimization
+- **`dispatch.zig`** - Main dispatch schedule generation with 15+ fusion patterns and static jump resolution
+- **`dispatch_metadata.zig`** - Packed metadata structures for dispatch optimization (64-bit aligned)
+- **`dispatch_opcode_data.zig`** - Comptime opcode-specific data extraction with type safety
 - **`dispatch_test.zig`** - Comprehensive testing suite for dispatch functionality
 
 ### Specialized Modules
 
-- **`dispatch_jump_table.zig`** - Jump table generation and management
+- **`dispatch_jump_table.zig`** - Binary search jump table with interpolated starting points
 - **`dispatch_jump_table_builder.zig`** - Builder pattern for jump table construction
-- **`dispatch_opcode_data.zig`** - Opcode-specific data extraction and handling
-- **`dispatch_pretty_print.zig`** - Human-readable dispatch schedule visualization
+- **`dispatch_pretty_print.zig`** - Human-readable dispatch schedule visualization with ANSI colors
 - **`dispatch_allocated_memory.zig`** - Memory allocation tracking for dispatch items
+- **`dispatch_item.zig`** - 64-bit dispatch item union definitions
 
 ## Features
 
 ### Bytecode Analysis
 
-- **Complete parsing** - Full bytecode analysis with opcode recognition
-- **Jump destination mapping** - Comprehensive JUMPDEST location tracking
-- **Control flow analysis** - Static analysis of execution paths
-- **Gas cost calculation** - Precise gas cost computation for optimization
+- **Single-pass parsing** - Complete bytecode analysis with opcode recognition and validation
+- **Jump destination mapping** - Binary-searchable JUMPDEST location tracking with PC indexing
+- **Basic block analysis** - First block gas calculation for immediate execution optimization
+- **Pattern recognition** - Identifies 8+ high-impact fusion patterns automatically
 
-### Instruction Fusion
+### Instruction Fusion (15+ Synthetic Opcodes)
 
-- **Push-operation fusion** - Combine PUSH instructions with following operations
-- **Static jump optimization** - Convert dynamic jumps to static when possible
-- **Arithmetic optimization** - Fuse common arithmetic patterns
-- **Memory access optimization** - Optimize memory operation sequences
+- **Arithmetic fusion** - PUSH+ADD/MUL/SUB/DIV with inline/pointer value storage
+- **Bitwise fusion** - PUSH+AND/OR/XOR optimizations for common patterns
+- **Memory fusion** - PUSH+MLOAD/MSTORE/MSTORE8 with static offset optimization
+- **Static jump resolution** - Direct dispatch pointer jumps bypassing binary search
+- **Multi-operation fusion** - Advanced patterns: MULTI_PUSH, DUP3_ADD_MSTORE, FUNCTION_DISPATCH
+- **Control flow optimization** - ISZERO_JUMPI, CALLVALUE_CHECK, PUSH0_REVERT patterns
 
 ### Dispatch Optimization
 
-- O(1) dispatch via prebuilt schedule
-- Inline constants for small immediates
-- Pointer metadata for large immediates
-- Cache‑friendly layout and prefetching
+- **O(1) dispatch** - Prebuilt schedule eliminates bytecode parsing during execution
+- **Cache-friendly layout** - 64-bit aligned dispatch items for optimal memory access
+- **Value deduplication** - Hash-based u256 storage with pointer metadata for large values
+- **Inline optimization** - Small values (≤64-bit) stored directly in dispatch stream
+- **Forward reference resolution** - Single-pass static jump resolution without backpatching
 
 ### Jump Table Generation
 
-- Static resolution when possible
-- Validation against bytecode bitmaps
-- Compact entries with fast lookup used by handlers
+- **Binary search optimization** - Interpolated starting points reduce average search iterations
+- **Static validation** - All jump destinations validated during preprocessing
+- **Compact entries** - Direct dispatch pointers eliminate binary search for static jumps
+- **Cache-optimized layout** - Sequential memory access patterns for dispatch items
 
 ## Usage Examples
 
@@ -61,31 +65,31 @@ const std = @import("std");
 const Dispatch = @import("dispatch.zig").Dispatch;
 const Frame = @import("../frame/frame.zig").Frame;
 
-pub fn createDispatch(allocator: std.mem.Allocator, bytecode: []const u8) ![]Dispatch(Frame).Item {
+pub fn createDispatch(allocator: std.mem.Allocator, bytecode: anytype) !Dispatch(Frame).DispatchSchedule {
     const opcode_handlers = &frame_handlers.OPCODE_HANDLERS;
     
-    // Generate optimized dispatch schedule
+    // Generate optimized dispatch schedule with fusion patterns
     const schedule = try Dispatch(Frame).init(
         allocator,
         bytecode,
         opcode_handlers,
     );
     
-    return schedule;
+    return schedule; // Returns DispatchSchedule with items and u256_values
 }
 ```
 
 ### Jump Table Creation
 
 ```zig
-const JumpTable = Dispatch(Frame).JumpTable;
+const DispatchType = Dispatch(Frame);
 
 pub fn createJumpTable(
     allocator: std.mem.Allocator,
-    schedule: []const Dispatch(Frame).Item,
-    bytecode: []const u8,
-) !JumpTable {
-    return try Dispatch(Frame).createJumpTable(
+    schedule: []const DispatchType.Item,
+    bytecode: anytype,
+) !DispatchType.JumpTable {
+    return try DispatchType.createJumpTable(
         allocator,
         schedule,
         bytecode,
@@ -98,11 +102,13 @@ pub fn createJumpTable(
 ```zig
 pub fn executeWithDispatch(
     frame: *Frame,
-    schedule: []const Dispatch(Frame).Item,
+    dispatch_schedule: *const Dispatch(Frame).DispatchSchedule,
 ) !void {
-    var dispatch = Dispatch(Frame){
-        .cursor = schedule.ptr,
-    };
+    var dispatch = dispatch_schedule.getDispatch();
+    
+    // Execute first block gas optimization
+    const first_block_gas = dispatch.getFirstBlockGas();
+    try frame.gas.consume(first_block_gas.gas);
     
     while (true) {
         const item = dispatch.cursor[0];
@@ -111,19 +117,25 @@ pub fn executeWithDispatch(
         switch (item) {
             .opcode_handler => |handler| {
                 try handler(frame, dispatch.cursor);
-                // Handler is responsible for advancing cursor
+                // Handler is responsible for advancing cursor and termination
             },
             .jump_dest => |metadata| {
-                // Handle jump destination metadata
-                frame.gas.consume(metadata.gas) catch return error.OutOfGas;
+                // Apply basic block gas and stack validation
+                try frame.gas.consume(metadata.gas);
+                // Handlers can use unsafe operations after validation
             },
             .push_inline => |metadata| {
-                try frame.stack.append(@intCast(metadata.value));
+                try frame.stack.push_unsafe(@intCast(metadata.value));
                 dispatch.cursor += 1;
             },
             .push_pointer => |metadata| {
-                try frame.stack.append(metadata.value.*);
+                const value = dispatch_schedule.getU256Value(metadata.index);
+                try frame.stack.push_unsafe(value);
                 dispatch.cursor += 1;
+            },
+            .jump_static => |metadata| {
+                // Direct jump to resolved dispatch location
+                dispatch.cursor = @ptrCast(metadata.dispatch);
             },
         }
     }
@@ -133,29 +145,45 @@ pub fn executeWithDispatch(
 ### Instruction Fusion
 
 ```zig
-// Example of PUSH1 + ADD fusion
-const FusionType = enum { push_add, push_mul, push_sub };
+// Example of PUSH + ADD fusion with value deduplication using U256Storage
+const OpcodeSynthetic = @import("../opcodes/opcode_synthetic.zig").OpcodeSynthetic;
 
 fn handleFusionOperation(
-    schedule_items: *ArrayList(Item),
+    self: *Self,
     allocator: std.mem.Allocator,
     value: u256,
-    fusion_type: FusionType,
+    next_opcode: u8,
 ) !void {
-    // Generate fused instruction
-    const synthetic_handler = getSyntheticHandler(fusion_type);
-    try schedule_items.append(.{ .opcode_handler = synthetic_handler });
+    // Determine synthetic opcode based on next instruction
+    const synthetic_opcode: OpcodeSynthetic = switch (next_opcode) {
+        0x01 => OpcodeSynthetic.PUSH_ADD_INLINE, // or PUSH_ADD_POINTER
+        0x02 => OpcodeSynthetic.PUSH_MUL_INLINE, // or PUSH_MUL_POINTER
+        0x03 => OpcodeSynthetic.PUSH_SUB_INLINE, // or PUSH_SUB_POINTER
+        0x04 => OpcodeSynthetic.PUSH_DIV_INLINE, // or PUSH_DIV_POINTER
+        0x16 => OpcodeSynthetic.PUSH_AND_INLINE, // or PUSH_AND_POINTER
+        0x17 => OpcodeSynthetic.PUSH_OR_INLINE,  // or PUSH_OR_POINTER
+        0x18 => OpcodeSynthetic.PUSH_XOR_INLINE, // or PUSH_XOR_POINTER
+        else => return, // No fusion available
+    };
     
-    // Add value metadata
+    // Use U256Storage for value deduplication
     if (value <= std.math.maxInt(u64)) {
-        try schedule_items.append(.{ 
+        // Small values: use inline variant
+        const handler = self.getSyntheticHandler(@intFromEnum(synthetic_opcode));
+        try self.schedule_items.append(.{ .opcode_handler = handler });
+        try self.schedule_items.append(.{ 
             .push_inline = .{ .value = @intCast(value) }
         });
     } else {
-        const value_ptr = try allocator.create(u256);
-        value_ptr.* = value;
-        try schedule_items.append(.{ 
-            .push_pointer = .{ .value = value_ptr }
+        // Large values: use pointer variant with deduplication
+        const pointer_opcode = @intFromEnum(synthetic_opcode) + 1; // _POINTER variant
+        const handler = self.getSyntheticHandler(pointer_opcode);
+        try self.schedule_items.append(.{ .opcode_handler = handler });
+        
+        // Deduplicate via U256Storage hash map
+        const value_index = try self.u256_storage.getOrPut(allocator, value);
+        try self.schedule_items.append(.{ 
+            .push_pointer = .{ .index = value_index }
         });
     }
 }
