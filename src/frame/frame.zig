@@ -33,6 +33,7 @@ const DefaultEvm = @import("../evm.zig").DefaultEvm;
 const call_params_mod = @import("call_params.zig");
 const call_result_mod = @import("call_result.zig");
 const dispatch_mod = @import("../preprocessor/dispatch.zig");
+const NoOpTracer = @import("../tracer/tracer.zig").NoOpTracer;
 
 /// LRU cache for dispatch schedules to avoid recompiling bytecode
 const DispatchCacheEntry = struct {
@@ -356,10 +357,10 @@ pub fn Frame(comptime config: FrameConfig) type {
         });
 
         /// A fixed size array of opcode handlers indexed by opcode number
-        pub const opcode_handlers: [256]OpcodeHandler = if (config.TracerType) |TracerType|
-            frame_handlers.getTracedOpcodeHandlers(Self, TracerType)
+        pub const opcode_handlers: [256]OpcodeHandler = if (config.TracerType == NoOpTracer)
+            frame_handlers.getOpcodeHandlers(Self)
         else
-            frame_handlers.getOpcodeHandlers(Self);
+            frame_handlers.getTracedOpcodeHandlers(Self, config.TracerType);
 
         // Individual handler groups for testing and direct access
         pub const ArithmeticHandlers = @import("../instructions/handlers_arithmetic.zig").Handlers(Self);
@@ -593,15 +594,9 @@ pub fn Frame(comptime config: FrameConfig) type {
                 }
             }
 
-            // Setup tracer if needed
-            if (TracerType) |_| {
-                frame_handlers.setTracerInstance(tracer_instance);
-            }
-            defer {
-                if (TracerType != null) {
-                    frame_handlers.clearTracerInstance();
-                }
-            }
+            // Setup tracer
+            frame_handlers.setTracerInstance(tracer_instance);
+            defer frame_handlers.clearTracerInstance();
 
             // Store pointer to jump table in frame for JUMP/JUMPI handlers
             self.jump_table = jump_table_ptr;
@@ -634,11 +629,11 @@ pub fn Frame(comptime config: FrameConfig) type {
                     const last_item = schedule[schedule.len - 1];
                     const second_last_item = schedule[schedule.len - 2];
 
-                    // With traced handlers we can't directly compare, so skip this check when tracing
-                    if (TracerType == null) {
+                    // With traced handlers we can't directly compare, so check if it's NoOpTracer
+                    if (TracerType == NoOpTracer) {
                         const stop_handler = Self.opcode_handlers[@intFromEnum(Opcode.STOP)];
                         if (last_item.opcode_handler != stop_handler or second_last_item.opcode_handler != stop_handler) {
-                            log.err("Frame.interpret_with_tracer: Bytecode stream does not end with 2 stop handlers", .{});
+                            log.err("Frame.interpret: Bytecode stream does not end with 2 stop handlers", .{});
                             return Error.InvalidOpcode;
                         }
                     }

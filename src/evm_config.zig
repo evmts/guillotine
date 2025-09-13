@@ -6,6 +6,7 @@ const Eips = @import("eips_and_hardforks/eips.zig").Eips;
 const Hardfork = @import("eips_and_hardforks/hardfork.zig").Hardfork;
 const primitives = @import("primitives");
 const Address = primitives.Address;
+const NoOpTracer = @import("tracer/tracer.zig").NoOpTracer;
 
 /// Custom opcode handler override
 pub const OpcodeOverride = struct {
@@ -90,9 +91,9 @@ pub const EvmConfig = struct {
     arena_growth_factor: u32 = 150,
     /// Database implementation type for storage operations (always required)
     DatabaseType: type = @import("storage/database.zig").Database,
-    /// Tracer type for execution tracing (default: null for no tracing)
+    /// Tracer type for execution tracing (default: NoOpTracer for zero overhead)
     /// Set to a tracer type (e.g., JSONRPCTracer) to enable execution tracing
-    TracerType: ?type = null,
+    TracerType: type = NoOpTracer,
 
     /// Block information configuration
     /// Controls the types used for difficulty and base_fee fields
@@ -235,7 +236,7 @@ test "EvmConfig - default initialization" {
     try testing.expectEqual(true, config.enable_fusion);
     try testing.expectEqual(false, config.disable_gas_checks);
     try testing.expectEqual(false, config.disable_balance_checks);
-    try testing.expectEqual(@as(?type, null), config.TracerType);
+    try testing.expectEqual(NoOpTracer, config.TracerType);
 }
 
 test "EvmConfig - custom configuration" {
@@ -363,7 +364,7 @@ test "EvmConfig - precompiles and fusion combinations" {
 
 test "EvmConfig - tracer type handling" {
     const no_tracer_config = EvmConfig{};
-    try testing.expectEqual(@as(?type, null), no_tracer_config.TracerType);
+    try testing.expectEqual(NoOpTracer, no_tracer_config.TracerType);
 
     // Test with a dummy tracer type
     const DummyTracer = struct {
@@ -371,7 +372,7 @@ test "EvmConfig - tracer type handling" {
     };
 
     const with_tracer_config = EvmConfig{ .TracerType = DummyTracer };
-    try testing.expectEqual(DummyTracer, with_tracer_config.TracerType.?);
+    try testing.expectEqual(DummyTracer, with_tracer_config.TracerType);
 }
 
 test "EvmConfig - block info config integration" {
@@ -398,7 +399,7 @@ test "EvmConfig - complete custom configuration" {
     try testing.expectEqual(@as(u18, 200000), config.max_input_size);
     try testing.expectEqual(false, config.enable_precompiles);
     try testing.expectEqual(false, config.enable_fusion);
-    try testing.expectEqual(DummyTracer, config.TracerType.?);
+    try testing.expectEqual(DummyTracer, config.TracerType);
     try testing.expectEqual(u11, config.get_depth_type());
 }
 

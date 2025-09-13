@@ -178,6 +178,7 @@ advanced_cpu_profiles/*_summary.txt
 
 # Go binaries
 apps/cli/guillotine-cli
+apps/cli/guillotine-bench
 # Performance and comparison reports (generated files)
 EVM2_Performance_Report.md
 *-comparison.md

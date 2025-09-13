@@ -1727,6 +1727,86 @@ test "Security - malformed jump patterns" {
     try testing.expectError(BytecodeDefault.ValidationError.InvalidJumpDestination, BytecodeDefault.init(allocator, &code));
 }
 
+test "Invalid jump - jumping to non-JUMPDEST opcode" {
+    const allocator = testing.allocator;
+
+    // This test reproduces the bug from 15_test.zig where we jump to position 37
+    // instead of position 36 where the JUMPDEST is located
+    // PUSH32 value (33 bytes total), PUSH1 37, JUMP, JUMPDEST (at 36), ISZERO (at 37)
+    var code = std.ArrayList(u8){};
+    defer code.deinit(allocator);
+
+    // PUSH32 with value 0
+    try code.append(allocator, 0x7F); // PUSH32 opcode
+    try code.appendNTimes(allocator, 0x00, 32); // 32 zero bytes
+
+    // PUSH1 37 - incorrect jump destination (should be 36)
+    try code.append(allocator, 0x60); // PUSH1
+    try code.append(allocator, 37);   // Jump to position 37 (ISZERO) instead of 36 (JUMPDEST)
+
+    // JUMP
+    try code.append(allocator, 0x56);
+
+    // JUMPDEST at position 36
+    try code.append(allocator, 0x5B);
+
+    // ISZERO at position 37
+    try code.append(allocator, 0x15);
+
+    // STOP
+    try code.append(allocator, 0x00);
+
+    // This bytecode is valid from a structural perspective (no truncated pushes)
+    // but contains an invalid jump that should be caught at runtime
+    var bytecode = try BytecodeDefault.init(allocator, code.items);
+    defer bytecode.deinit();
+
+    // Verify that position 36 is a valid JUMPDEST
+    try testing.expect(bytecode.isValidJumpDest(36) == true);
+
+    // Verify that position 37 is NOT a valid JUMPDEST (it's an ISZERO opcode)
+    try testing.expect(bytecode.isValidJumpDest(37) == false);
+
+    // The bytecode itself is valid - the invalid jump will be caught at runtime
+    // This test documents that bytecode validation does NOT catch runtime jump errors
+}
+
+test "Valid jump - jumping to correct JUMPDEST" {
+    const allocator = testing.allocator;
+
+    // Same as above but with correct jump destination
+    var code = std.ArrayList(u8){};
+    defer code.deinit(allocator);
+
+    // PUSH32 with value 0
+    try code.append(allocator, 0x7F); // PUSH32 opcode
+    try code.appendNTimes(allocator, 0x00, 32); // 32 zero bytes
+
+    // PUSH1 36 - correct jump destination
+    try code.append(allocator, 0x60); // PUSH1
+    try code.append(allocator, 36);   // Jump to position 36 (JUMPDEST)
+
+    // JUMP
+    try code.append(allocator, 0x56);
+
+    // JUMPDEST at position 36
+    try code.append(allocator, 0x5B);
+
+    // ISZERO at position 37
+    try code.append(allocator, 0x15);
+
+    // STOP
+    try code.append(allocator, 0x00);
+
+    var bytecode = try BytecodeDefault.init(allocator, code.items);
+    defer bytecode.deinit();
+
+    // Verify that position 36 is a valid JUMPDEST
+    try testing.expect(bytecode.isValidJumpDest(36) == true);
+
+    // This is valid bytecode with a valid jump
+}
+
 test "Minimal repro - deployment bytecode with apparent truncated PUSH" {
     const allocator = testing.allocator;
 

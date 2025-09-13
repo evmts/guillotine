@@ -124,9 +124,9 @@ fn run_iszero_test_with_jump(allocator: std.mem.Allocator, value: u256, expected
     std.mem.writeInt(u256, &value_bytes, value, .big);
     try bytecode.appendSlice(allocator, &value_bytes);
     
-    // PUSH destination (position after JUMP: 32 + 1 + 1 + 1 + 1 + 1 = 37)
+    // PUSH destination (JUMPDEST is at position 36: PUSH32_op(1) + data(32) + PUSH1_op(1) + data(1) + JUMP_op(1) = 36)
     try bytecode.append(allocator, 0x60); // PUSH1
-    try bytecode.append(allocator, 37);
+    try bytecode.append(allocator, 36);
     
     // JUMP
     try bytecode.append(allocator, 0x56);

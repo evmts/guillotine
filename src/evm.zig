@@ -1152,16 +1152,17 @@ pub fn Evm(comptime config: EvmConfig) type {
             var execution_trace: ?@import("frame/call_result.zig").ExecutionTrace = null;
             const Termination = error{ Stop, Return, SelfDestruct };
             var termination_reason: ?Termination = null;
-            if (config.TracerType) |TracerType| {
-                // Create tracer instance for this execution
-                var tracer = TracerType.init(self.allocator);
-                defer tracer.deinit();
 
-                // log.debug("Executing frame with tracer: {s}", .{@typeName(TracerType)});
+            // Create tracer instance for this execution
+            const TracerType = config.TracerType;
+            var tracer = TracerType.init(self.allocator);
+            defer tracer.deinit();
 
-                // Frame.interpret_with_tracer returns Error!void and uses errors for success termination
-                // reduce tracer call logging noise
-                frame.interpret_with_tracer(code, TracerType, &tracer) catch |err| switch (err) {
+            // log.debug("Executing frame with tracer: {s}", .{@typeName(TracerType)});
+
+            // Frame.interpret returns Error!void and uses errors for success termination
+            // reduce tracer call logging noise
+            frame.interpret_with_tracer(code, TracerType, &tracer) catch |err| switch (err) {
                     error.Stop => {
                         termination_reason = error.Stop;
                     },
@@ -1196,40 +1197,10 @@ pub fn Evm(comptime config: EvmConfig) type {
                         failure.trace = execution_trace;
                         return failure;
                     },
-                };
+            };
 
-                // Extract trace data before tracer is destroyed (for success cases)
-                execution_trace = try convertTracerToExecutionTrace(self.allocator, &tracer);
-            } else {
-                // Execute without tracing (original path)
-                frame.interpret(code) catch |err| switch (err) {
-                    error.Stop => {
-                        termination_reason = error.Stop;
-                    },
-                    error.Return => {
-                        termination_reason = error.Return;
-                    },
-                    error.SelfDestruct => {
-                        log.debug("execute_frame: termination SelfDestruct", .{});
-                        termination_reason = error.SelfDestruct;
-                    },
-                    error.REVERT => {
-                        // REVERT is a special case - copy revert data and return revert result
-                        const gas_left: u64 = @intCast(@max(frame.gas_remaining, 0));
-                        const out_copy = if (frame.output.len > 0) blk: {
-                            const buf = try self.allocator.alloc(u8, frame.output.len);
-                            @memcpy(buf, frame.output);
-                            break :blk buf;
-                        } else &[_]u8{};
-                        return CallResult.revert_with_data(gas_left, out_copy);
-                    },
-                    else => {
-                        // Actual errors
-                        log.debug("Frame execution failed with error: {}", .{err});
-                        return CallResult.failure(0);
-                    },
-                };
-            }
+            // Extract trace data before tracer is destroyed (for success cases)
+            execution_trace = try convertTracerToExecutionTrace(self.allocator, &tracer);
 
             // Map frame outcome to CallResult
             const gas_left: u64 = @intCast(@max(frame.gas_remaining, 0));

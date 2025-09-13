@@ -227,8 +227,9 @@ pub fn Handlers(comptime FrameType: type) type {
             const bytecode_len = @as(WordType, @intCast(self.code.len));
             std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // CODESIZE requires stack space
             self.stack.push_unsafe(bytecode_len);
-            const next = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next[0].opcode_handler, .{ self, next });
+            const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
+            const op_data = dispatch_opcode_data.getOpData(.CODESIZE, Dispatch, Dispatch.Item, cursor);
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// CODECOPY opcode (0x39) - Copy code running in current environment to memory.
@@ -253,8 +254,9 @@ pub fn Handlers(comptime FrameType: type) type {
             const length_usize = @as(usize, @intCast(length));
 
             if (length_usize == 0) {
-                const next = cursor + 1;
-                return @call(FrameType.getTailCallModifier(), next[0].opcode_handler, .{ self, next });
+                const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
+                const op_data = dispatch_opcode_data.getOpData(.CODECOPY, Dispatch, Dispatch.Item, cursor);
+                return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             }
 
             // Calculate gas cost for memory expansion and copy operation
@@ -288,8 +290,9 @@ pub fn Handlers(comptime FrameType: type) type {
                 self.memory.set_byte(self.getAllocator(), @as(u24, @intCast(dest_offset_usize + i)), byte_val) catch return Error.OutOfBounds;
             }
 
-            const next = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next[0].opcode_handler, .{ self, next });
+            const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
+            const op_data = dispatch_opcode_data.getOpData(.CODECOPY, Dispatch, Dispatch.Item, cursor);
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// GASPRICE opcode (0x3A) - Get price of gas in current environment.
