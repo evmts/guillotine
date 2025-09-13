@@ -248,6 +248,9 @@ pub fn Evm(comptime config: EvmConfig) type {
 
         /// Transfer value between accounts with proper balance checks and error handling
         fn doTransfer(self: *Self, from: primitives.Address, to: primitives.Address, value: u256, snapshot_id: Journal.SnapshotIdType) !void {
+            // Self-transfer is a no-op
+            if (from.equals(to)) return;
+            
             var from_account = try self.database.get_account(from.bytes) orelse Account.zero();
             // Skip balance check if disabled in config
             if (comptime !config.disable_balance_checks) {
@@ -256,9 +259,6 @@ pub fn Evm(comptime config: EvmConfig) type {
             var to_account = try self.database.get_account(to.bytes) orelse Account.zero();
             try self.journal.record_balance_change(snapshot_id, from, from_account.balance);
             try self.journal.record_balance_change(snapshot_id, to, to_account.balance);
-            
-            // Self-transfer is a no-op for balance updates
-            if (std.mem.eql(u8, &from.bytes, &to.bytes)) return;
             
             from_account.balance -= value;
             to_account.balance += value;
