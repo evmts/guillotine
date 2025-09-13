@@ -18,6 +18,7 @@ We welcome contributions to Guillotine! This document provides guidelines and in
 5. **Take responsibility** for the correctness and quality of the code
 
 Example PR description:
+
 ```
 ## AI Disclosure
 This PR contains AI-generated code using Claude.
@@ -131,8 +132,8 @@ git submodule update --init --recursive
 # Build the project (Zig automatically runs cargo build for Rust dependencies)
 zig build
 
-# Run tests
-zig build test
+# Run tests (use test-opcodes to avoid hanging issues)
+zig build test-opcodes
 ```
 
 **Note**: The Zig build system automatically runs `cargo build` as a dependency step when building Rust libraries. On the first build, this may take longer as Cargo downloads and compiles dependencies.
@@ -144,14 +145,14 @@ zig build test
 zig build
 
 # Run tests
-zig build test
+zig build test-opcodes
 ```
 
 ### Development Workflow
 
 1. **Always verify builds**: After any code change, run:
    ```bash
-   zig build && zig build test
+   zig build && zig build test-opcodes
    ```
 2. **Enable debug logging** in tests when needed:
    ```zig

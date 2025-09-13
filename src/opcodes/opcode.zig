@@ -585,10 +585,7 @@ pub const UnifiedOpcode = enum(u16) {
     PUSH_MUL_POINTER = 0x100 + 0xA8,
     PUSH_DIV_INLINE = 0x100 + 0xA9,
     PUSH_DIV_POINTER = 0x100 + 0xAA,
-    PUSH_JUMP_INLINE = 0x100 + 0xAB,
-    PUSH_JUMP_POINTER = 0x100 + 0xAC,
-    PUSH_JUMPI_INLINE = 0x100 + 0xAD,
-    PUSH_JUMPI_POINTER = 0x100 + 0xAE,
+    // 0x100 + 0xAB-0xAE removed - deprecated jump handlers (use static jumps instead)
     PUSH_SUB_INLINE = 0x100 + 0xAF,
     PUSH_SUB_POINTER = 0x100 + 0xB0,
     PUSH_MLOAD_INLINE = 0x100 + 0xB1,
@@ -603,6 +600,25 @@ pub const UnifiedOpcode = enum(u16) {
     PUSH_XOR_POINTER = 0x100 + 0xBA,
     PUSH_MSTORE8_INLINE = 0x100 + 0xBB,
     PUSH_MSTORE8_POINTER = 0x100 + 0xBC,
+    // Static jump optimizations
+    JUMP_TO_STATIC_LOCATION = 0x100 + 0xBD,
+    JUMPI_TO_STATIC_LOCATION = 0x100 + 0xBE,
+    // Advanced synthetic opcodes
+    MULTI_PUSH_2 = 0x100 + 0xBF,
+    MULTI_PUSH_3 = 0x100 + 0xC0,
+    MULTI_POP_2 = 0x100 + 0xC1,
+    MULTI_POP_3 = 0x100 + 0xC2,
+    ISZERO_JUMPI = 0x100 + 0xC3,
+    DUP2_MSTORE_PUSH = 0x100 + 0xC4,
+    // New high-impact fusions
+    DUP3_ADD_MSTORE = 0x100 + 0xC5,
+    SWAP1_DUP2_ADD = 0x100 + 0xC6,
+    PUSH_DUP3_ADD = 0x100 + 0xC7,
+    FUNCTION_DISPATCH = 0x100 + 0xC8,
+    CALLVALUE_CHECK = 0x100 + 0xC9,
+    PUSH0_REVERT = 0x100 + 0xCA,
+    PUSH_ADD_DUP1 = 0x100 + 0xCB,
+    MLOAD_SWAP1_DUP2 = 0x100 + 0xCC,
 
     /// Convert from regular Opcode
     pub fn fromOpcode(opcode: Opcode) UnifiedOpcode {

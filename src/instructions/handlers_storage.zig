@@ -20,7 +20,7 @@ pub fn Handlers(comptime FrameType: type) type {
             // SLOAD loads a value from storage
 
             std.debug.assert(self.stack.size() >= 1); // SLOAD requires 1 stack item
-            const slot = self.stack.pop_unsafe();
+            const slot = self.stack.peek_unsafe();
 
             // Use the currently executing contract's address
             const contract_addr = self.contract_address;
@@ -38,16 +38,15 @@ pub fn Handlers(comptime FrameType: type) type {
                 return Error.OutOfGas;
             }
 
-            // Load value from storage directly from frame's database
-            const value = self.database.get_storage(contract_addr.bytes, slot) catch |err| switch (err) {
+            // Load value from storage through EVM's database for better cache locality
+            const value = evm.database.get_storage(contract_addr.bytes, slot) catch |err| switch (err) {
                 else => return Error.AllocationError,
             };
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
-            self.stack.push_unsafe(value);
+            self.stack.set_top_unsafe(value);
 
             const op_data = dispatch.getOpData(.SLOAD);
-            const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// SSTORE opcode (0x55) - Store to storage.
@@ -71,13 +70,15 @@ pub fn Handlers(comptime FrameType: type) type {
             // Use the currently executing contract's address
             const contract_addr = self.contract_address;
 
-            // Get current value for gas calculation
-            const current_value = self.database.get_storage(contract_addr.bytes, slot) catch |err| switch (err) {
+            // Get EVM instance once for all storage operations (better cache locality)
+            const evm = self.getEvm();
+            
+            // Get current value for gas calculation (through EVM's database)
+            const current_value = evm.database.get_storage(contract_addr.bytes, slot) catch |err| switch (err) {
                 else => return Error.AllocationError,
             };
 
             // Access storage slot once to both warm it and get cost
-            const evm = self.getEvm();
             const access_cost = evm.access_storage_slot(contract_addr, slot) catch |err| switch (err) {
                 else => return Error.AllocationError,
             };
@@ -109,8 +110,8 @@ pub fn Handlers(comptime FrameType: type) type {
                 };
             }
 
-            // Store the value directly in frame's database
-            self.database.set_storage(contract_addr.bytes, slot, value) catch |err| switch (err) {
+            // Store the value through EVM's database (better cache locality)
+            evm.database.set_storage(contract_addr.bytes, slot, value) catch |err| switch (err) {
                 error.WriteProtection => return Error.WriteProtection,
                 else => return Error.AllocationError,
             };
@@ -121,8 +122,8 @@ pub fn Handlers(comptime FrameType: type) type {
             }
 
             const op_data = dispatch.getOpData(.SSTORE);
-            const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// TLOAD opcode (0x5c) - Load from transient storage (EIP-1153).
@@ -130,22 +131,22 @@ pub fn Handlers(comptime FrameType: type) type {
         pub fn tload(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             const dispatch = Dispatch{ .cursor = cursor };
             std.debug.assert(self.stack.size() >= 1); // TLOAD requires 1 stack item
-            const slot = self.stack.pop_unsafe();
+            const slot = self.stack.peek_unsafe();
 
             // Use the currently executing contract's address
             const contract_addr = self.contract_address;
 
-            // Load value from transient storage directly from frame's database
-            const value = self.database.get_transient_storage(contract_addr.bytes, slot) catch |err| switch (err) {
+            // Load value from transient storage through EVM's database
+            const evm = self.getEvm();
+            const value = evm.database.get_transient_storage(contract_addr.bytes, slot) catch |err| switch (err) {
                 else => return Error.AllocationError,
             };
 
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
-            self.stack.push_unsafe(value);
+            self.stack.set_top_unsafe(value);
 
             const op_data = dispatch.getOpData(.TLOAD);
-            const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// TSTORE opcode (0x5d) - Store to transient storage (EIP-1153).
@@ -171,15 +172,16 @@ pub fn Handlers(comptime FrameType: type) type {
                 return Error.OutOfGas;
             }
 
-            // Store the value in transient storage directly in frame's database
-            self.database.set_transient_storage(contract_addr.bytes, slot, value) catch |err| switch (err) {
+            // Store the value in transient storage through EVM's database
+            const evm = self.getEvm();
+            evm.database.set_transient_storage(contract_addr.bytes, slot, value) catch |err| switch (err) {
                 error.WriteProtection => return Error.WriteProtection,
                 else => return Error.AllocationError,
             };
 
             const op_data = dispatch.getOpData(.TSTORE);
-            const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
     };
 }

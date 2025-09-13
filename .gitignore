@@ -205,3 +205,6 @@ test_hyperfine
 data/kzg/trusted_setup.txt
 trace*.json
 src/kzg/trusted_setup.txt
+
+# Benchmarks directory (cloned on demand)
+benchmarks/

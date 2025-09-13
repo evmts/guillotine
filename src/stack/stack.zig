@@ -138,6 +138,19 @@ pub fn Stack(comptime config: StackConfig) type {
             return self.peek_unsafe();
         }
 
+        /// Performs a binary operation on the top two stack items.
+        /// Pops the top item, applies the operation with the second item, 
+        /// and replaces the second item with the result.
+        /// This is optimized for arithmetic operations like ADD, MUL, SUB, DIV.
+        pub inline fn binary_op_unsafe(self: *Self, comptime op: fn(a: WordType, b: WordType) WordType) void {
+            @branchHint(.likely);
+            std.debug.assert(@intFromPtr(self.stack_ptr) + @sizeOf(WordType) < @intFromPtr(self.stack_base()));
+            const top = self.stack_ptr[0];
+            const second = self.stack_ptr[1];
+            self.stack_ptr[1] = op(top, second);
+            self.stack_ptr += 1;
+        }
+
         // Generic dup function for DUP1-DUP16
         pub fn dup_n(self: *Self, n: u8) Error!void {
             // Check if we have n items on stack

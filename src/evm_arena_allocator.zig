@@ -22,24 +22,31 @@ pub const GrowingArenaAllocator = struct {
     /// @param base_allocator: The underlying allocator to use
     /// @param initial_capacity: Initial capacity to preallocate (also used as max retained capacity)
     /// @param growth_factor: Growth percentage (e.g., 150 = 50% growth)
-    pub fn init(base_allocator: std.mem.Allocator, initial_capacity: usize, growth_factor: u32) Self {
+    pub fn init(base_allocator: std.mem.Allocator, initial_capacity: usize, growth_factor: u32) !Self {
         return initWithMaxCapacity(base_allocator, initial_capacity, initial_capacity, growth_factor);
     }
 
     /// Initialize with separate initial and max capacities
-    pub fn initWithMaxCapacity(base_allocator: std.mem.Allocator, initial_capacity: usize, max_capacity: usize, growth_factor: u32) Self {
+    pub fn initWithMaxCapacity(base_allocator: std.mem.Allocator, initial_capacity: usize, max_capacity: usize, growth_factor: u32) !Self {
         var arena = std.heap.ArenaAllocator.init(base_allocator);
+        errdefer arena.deinit();
         
         // Preallocate the initial capacity
+        var actual_capacity = initial_capacity;
         if (initial_capacity > 0) {
-            _ = arena.allocator().alloc(u8, initial_capacity) catch {};
+            const initial_alloc = arena.allocator().alloc(u8, initial_capacity) catch |err| {
+                // If we can't preallocate the requested capacity, start with 0
+                actual_capacity = 0;
+                return err;
+            };
+            _ = initial_alloc;
             _ = arena.reset(.retain_capacity);
         }
 
         return Self{
             .arena = arena,
             .base_allocator = base_allocator,
-            .current_capacity = initial_capacity,
+            .current_capacity = actual_capacity,
             .initial_capacity = initial_capacity,
             .max_capacity = max_capacity,
             .growth_factor = growth_factor,
@@ -71,13 +78,14 @@ pub const GrowingArenaAllocator = struct {
 
     /// Reset the arena to initial capacity
     /// This frees all memory and then pre-allocates the initial capacity again
-    pub fn resetToInitialCapacity(self: *Self) void {
+    pub fn resetToInitialCapacity(self: *Self) !void {
         // Free all memory
         _ = self.arena.reset(.free_all);
         
         // Pre-allocate initial capacity again
         if (self.initial_capacity > 0) {
-            _ = self.arena.allocator().alloc(u8, self.initial_capacity) catch {};
+            const initial_alloc = try self.arena.allocator().alloc(u8, self.initial_capacity);
+            _ = initial_alloc;
             _ = self.arena.reset(.retain_capacity);
         }
         
@@ -87,7 +95,7 @@ pub const GrowingArenaAllocator = struct {
 
     /// Reset the arena while retaining capacity up to max_capacity limit
     /// This prevents unbounded memory growth while still being efficient
-    pub fn resetRetainCapacity(self: *Self) void {
+    pub fn resetRetainCapacity(self: *Self) !void {
         const current_actual_capacity = self.arena.queryCapacity();
         
         // If we've grown beyond our max limit, reset to max capacity
@@ -97,7 +105,8 @@ pub const GrowingArenaAllocator = struct {
             
             // Pre-allocate to max capacity
             if (self.max_capacity > 0) {
-                _ = self.arena.allocator().alloc(u8, self.max_capacity) catch {};
+                const max_alloc = try self.arena.allocator().alloc(u8, self.max_capacity);
+                _ = max_alloc;
                 _ = self.arena.reset(.retain_capacity);
             }
             
@@ -120,6 +129,7 @@ pub const GrowingArenaAllocator = struct {
         
         // First, try to allocate with the current arena
         if (self.arena.allocator().rawAlloc(len, ptr_align, ret_addr)) |ptr| {
+            @branchHint(.likely);
             return ptr;
         }
         
@@ -142,8 +152,13 @@ pub const GrowingArenaAllocator = struct {
             const additional_capacity = new_capacity - self.current_capacity;
             if (additional_capacity > 0) {
                 // Allocate a dummy block to force the arena to grow
-                _ = self.arena.allocator().alloc(u8, additional_capacity) catch {};
-                self.current_capacity = new_capacity;
+                if (self.arena.allocator().alloc(u8, additional_capacity)) |dummy_alloc| {
+                    _ = dummy_alloc;
+                    self.current_capacity = new_capacity;
+                } else |_| {
+                    // If we can't grow, continue with current capacity
+                    // The actual allocation attempt below may still succeed
+                }
             }
         }
         
@@ -174,7 +189,7 @@ pub const GrowingArenaAllocator = struct {
 };
 
 test "GrowingArenaAllocator basic functionality" {
-    var gaa = GrowingArenaAllocator.init(std.testing.allocator, 1024, 150);
+    var gaa = try GrowingArenaAllocator.init(std.testing.allocator, 1024, 150);
     defer gaa.deinit();
 
     const alloc = gaa.allocator();
@@ -193,7 +208,7 @@ test "GrowingArenaAllocator basic functionality" {
 }
 
 test "GrowingArenaAllocator growth strategy" {
-    var gaa = GrowingArenaAllocator.init(std.testing.allocator, 1000, 150);
+    var gaa = try GrowingArenaAllocator.init(std.testing.allocator, 1000, 150);
     defer gaa.deinit();
 
     const alloc = gaa.allocator();
@@ -212,7 +227,7 @@ test "GrowingArenaAllocator growth strategy" {
 
 test "GrowingArenaAllocator max capacity limit" {
     // Create allocator with 1KB initial and 4KB max
-    var gaa = GrowingArenaAllocator.initWithMaxCapacity(std.testing.allocator, 1024, 4096, 150);
+    var gaa = try GrowingArenaAllocator.initWithMaxCapacity(std.testing.allocator, 1024, 4096, 150);
     defer gaa.deinit();
 
     const alloc = gaa.allocator();
@@ -230,7 +245,7 @@ test "GrowingArenaAllocator max capacity limit" {
     const before_reset = grown_cap;
     
     // Reset with capacity retention
-    gaa.resetRetainCapacity();
+    try gaa.resetRetainCapacity();
     
     // After reset, if we were over max_capacity, we should have reset
     const reset_cap = gaa.queryCapacity();

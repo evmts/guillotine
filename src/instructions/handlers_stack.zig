@@ -16,7 +16,7 @@ pub fn Handlers(comptime FrameType: type) type {
             std.debug.assert(self.stack.size() >= 1); // POP requires 1 stack item
             _ = self.stack.pop_unsafe();
             const op_data = dispatch.getOpData(.POP);
-            return @call(FrameType.getTailCallModifier(), op_data.next.cursor[0].opcode_handler, .{ self, op_data.next.cursor });
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// PUSH0 opcode (0x5f) - Push 0 onto stack.
@@ -25,7 +25,7 @@ pub fn Handlers(comptime FrameType: type) type {
             std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
             self.stack.push_unsafe(0);
             const op_data = dispatch.getOpData(.PUSH0);
-            return @call(FrameType.getTailCallModifier(), op_data.next.cursor[0].opcode_handler, .{ self, op_data.next.cursor });
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// Generate a push handler for PUSH1-PUSH32
@@ -35,14 +35,6 @@ pub fn Handlers(comptime FrameType: type) type {
             return &struct {
                 pub fn pushHandler(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
                     const dispatch = Dispatch{ .cursor = cursor };
-                    
-                    // // Log entry state at error level to be visible
-                    // log.err("PUSH{} ENTRY: stack_size={}, stack_ptr={*}", .{
-                    //     push_n,
-                    //     self.stack.size(),
-                    //     self.stack.stack_ptr
-                    // });
-                    
                     
                     // For PUSH1-PUSH8, we get push_inline metadata with u64 value
                     // For PUSH9-PUSH32, we get push_pointer metadata with *u256 value
@@ -82,22 +74,17 @@ pub fn Handlers(comptime FrameType: type) type {
                         else => unreachable,
                     };
                     
-                    if (push_n <= 8) {
-                        @branchHint(.likely);
+                    if (comptime push_n <= 8) {
                         const value = op_data.metadata.value;
-                        // log.debug("[PUSH{d}] Pushing inline value: {d}", .{ push_n, value });
                         std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
                         self.stack.push_unsafe(value);
                     } else {
-                        const value = op_data.metadata.value.*;
+                        const value = self.u256_constants[op_data.metadata.index];
                         // log.debug("[PUSH{d}] Pushing pointer value: {d}", .{ push_n, value });
                         std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
                         self.stack.push_unsafe(value);
                     }
-                    
-                    // log.debug("[PUSH{d}] Stack after: {any}", .{ push_n, self.stack.get_slice() });
-                    
-                    return @call(FrameType.getTailCallModifier(), op_data.next.cursor[0].opcode_handler, .{ self, op_data.next.cursor });
+                    return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
                 }
             }.pushHandler;
         }
@@ -131,7 +118,7 @@ pub fn Handlers(comptime FrameType: type) type {
                         16 => dispatch.getOpData(.DUP16),
                         else => unreachable,
                     };
-                    return @call(FrameType.getTailCallModifier(), op_data.next.cursor[0].opcode_handler, .{ self, op_data.next.cursor });
+                    return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
                 }
             }.dupHandler;
         }
@@ -164,7 +151,7 @@ pub fn Handlers(comptime FrameType: type) type {
                         16 => dispatch.getOpData(.SWAP16),
                         else => unreachable,
                     };
-                    return @call(FrameType.getTailCallModifier(), op_data.next.cursor[0].opcode_handler, .{ self, op_data.next.cursor });
+                    return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
                 }
             }.swapHandler;
         }

@@ -6,6 +6,16 @@ Go bindings for the Guillotine EVM implementation, providing a clean and idiomat
 
 The Go bindings provide a production-ready interface to Guillotine EVM using native Go types and patterns. The API has been designed to be minimal, clean, and idiomatic to Go conventions.
 
+### Features
+
+- **High Performance**: Zero-copy FFI with minimal overhead between Go and Zig
+- **Type Safety**: Strong typing with native Go types (`*big.Int`, `[]byte`, etc.)
+- **Thread Safety**: Concurrent access protection with proper synchronization
+- **Memory Management**: Automatic resource cleanup with finalizers
+- **Comprehensive API**: Support for all EVM operations (CALL, CREATE, storage, etc.)
+- **Tracing Support**: Optional JSON-RPC compatible execution tracing
+- **Block Context**: Configurable block environment for EVM execution
+
 ## Key Design Decisions
 
 ### Native Go Types
@@ -50,12 +60,26 @@ This will:
 
 ### Using as a dependency
 
-If you're using this as a dependency in your project, you'll need to ensure the Guillotine library is built first:
+Add to your `go.mod`:
 
 ```bash
 go get github.com/evmts/guillotine/sdks/go
-cd $GOPATH/pkg/mod/github.com/evmts/guillotine/sdks/go@<version>
+```
+
+**Important**: You need to build the Guillotine library first:
+
+```bash
+# Navigate to your module cache or clone the repo
+git clone https://github.com/evmts/guillotine.git
+cd guillotine/sdks/go
 make install
+```
+
+Or use the library from a local clone:
+
+```go
+// In your go.mod
+replace github.com/evmts/guillotine/sdks/go => /path/to/local/guillotine/sdks/go
 ```
 
 ### Available make targets
@@ -112,6 +136,93 @@ func main() {
 }
 ```
 
+### EVM with Custom Block Context
+
+```go
+package main
+
+import (
+    "math/big"
+    
+    "github.com/evmts/guillotine/sdks/go/evm"
+    "github.com/evmts/guillotine/sdks/go/primitives"
+    guillotine "github.com/evmts/guillotine/sdks/go"
+)
+
+func main() {
+    // Configure custom block context
+    blockInfo := &guillotine.BlockInfo{
+        Number:     12345678,
+        Timestamp:  1640995200, // Jan 1, 2022
+        GasLimit:   30000000,
+        Coinbase:   primitives.ZeroAddress(),
+        BaseFee:    20000000000, // 20 gwei
+        ChainID:    1,           // Ethereum mainnet
+        Difficulty: 0,
+        PrevRandao: [32]byte{},
+    }
+    
+    // Create EVM with custom block context
+    vmHandle, err := guillotine.NewVMHandle(blockInfo)
+    if err != nil {
+        panic(err)
+    }
+    defer vmHandle.Destroy()
+    
+    // Use the VMHandle directly or wrap in evm.EVM...
+}
+```
+
+### EVM with Tracing
+
+```go
+package main
+
+import (
+    "fmt"
+    "math/big"
+    
+    "github.com/evmts/guillotine/sdks/go/evm"
+    "github.com/evmts/guillotine/sdks/go/primitives"
+)
+
+func main() {
+    // Create EVM instance with tracing enabled
+    vm, err := evm.NewTracing()
+    if err != nil {
+        panic(err)
+    }
+    defer vm.Destroy()
+    
+    // Set up a simple contract
+    contractAddr, _ := primitives.AddressFromHex("0x1000000000000000000000000000000000000000")
+    bytecode := []byte{0x60, 0x42, 0x60, 0x00, 0x52} // PUSH1 0x42, PUSH1 0x00, MSTORE
+    
+    err = vm.SetCode(contractAddr, bytecode)
+    if err != nil {
+        panic(err)
+    }
+    
+    // Execute with tracing
+    result, err := vm.Call(evm.Call{
+        Caller: primitives.ZeroAddress(),
+        To:     contractAddr,
+        Value:  big.NewInt(0),
+        Input:  []byte{},
+        Gas:    1000000,
+    })
+    
+    if err != nil {
+        panic(err)
+    }
+    
+    // Access trace data
+    if len(result.TraceJSON) > 0 {
+        fmt.Printf("Trace JSON: %s\n", string(result.TraceJSON))
+    }
+}
+```
+
 ### Contract Creation
 
 ```go
@@ -129,6 +240,11 @@ if err != nil {
     panic(err)
 }
 
+// Access the created contract address
+if result.CreatedAddress != nil {
+    fmt.Printf("Created contract at: %s\n", result.CreatedAddress.Hex())
+}
+
 // Or use CREATE2 for deterministic addresses
 salt := big.NewInt(12345)
 
@@ -139,6 +255,10 @@ result, err = vm.Call(evm.Create2{
     Salt:     salt,
     Gas:      2000000,
 })
+
+if result.CreatedAddress != nil {
+    fmt.Printf("CREATE2 contract at: %s\n", result.CreatedAddress.Hex())
+}
 ```
 
 ### Different Call Types
@@ -258,14 +378,56 @@ for _, storage := range result.AccessedStorage {
 ### EVM Instance
 
 ```go
-// Create a new EVM instance
+// Create a new EVM instance with default block context
 func New() (*EVM, error)
+
+// Create a new EVM instance with JSON-RPC tracing enabled
+func NewTracing() (*EVM, error)
 
 // Close the EVM instance and free resources
 func (evm *EVM) Destroy() error
 
 // Execute any type of EVM call
 func (evm *EVM) Call(params CallParams) (*CallResult, error)
+```
+
+### Low-level VM Handle
+
+```go
+// Create a VM handle with optional custom block context
+func NewVMHandle(blockInfo ...*BlockInfo) (*VMHandle, error)
+
+// Create a VM handle with tracing and optional custom block context
+func NewTracingVMHandle(blockInfo ...*BlockInfo) (*VMHandle, error)
+
+// Execute call with low-level parameters
+func (vm *VMHandle) Call(params *CallParams) (*CallResult, error)
+
+// State management methods
+func (vm *VMHandle) SetBalance(address [20]byte, balance [32]byte) error
+func (vm *VMHandle) GetBalance(address [20]byte) ([32]byte, error)
+func (vm *VMHandle) SetCode(address [20]byte, code []byte) error
+func (vm *VMHandle) GetCode(address [20]byte) ([]byte, error)
+func (vm *VMHandle) SetStorage(address [20]byte, key, value [32]byte) error
+func (vm *VMHandle) GetStorage(address [20]byte, key [32]byte) ([32]byte, error)
+
+// Close the VM handle
+func (vm *VMHandle) Destroy() error
+```
+
+### Block Context Configuration
+
+```go
+type BlockInfo struct {
+    Number     uint64
+    Timestamp  uint64
+    GasLimit   uint64
+    Coinbase   primitives.Address
+    BaseFee    uint64
+    ChainID    uint64
+    Difficulty uint64
+    PrevRandao [32]byte
+}
 ```
 
 ### Call Parameter Types
@@ -339,6 +501,8 @@ type CallResult struct {
     AccessedAddresses []primitives.Address
     AccessedStorage   []StorageAccessRecord
     ErrorInfo         string
+    CreatedAddress    *primitives.Address // Address of created contract (CREATE/CREATE2 only)
+    TraceJSON         []byte              // JSON-RPC trace data (tracing mode only)
 }
 
 type LogEntry struct {
@@ -358,7 +522,9 @@ type StorageAccessRecord struct {
 }
 ```
 
-### Address Type
+### Primitive Types
+
+#### Address Type
 
 The `primitives.Address` type provides useful methods while wrapping `[20]byte`:
 
@@ -366,15 +532,40 @@ The `primitives.Address` type provides useful methods while wrapping `[20]byte`:
 // Create addresses
 addr := primitives.ZeroAddress()
 addr, err := primitives.AddressFromHex("0x742d35Cc6634C0532925a3b8266C95839487a15")
+addr, err := primitives.AddressFromBytes([]byte{0x01, 0x02, ...}) // 20 bytes required
 
 // Convert formats
 hex := addr.Hex()           // "0x742d..."
-bytes := addr.Bytes()        // []byte (copy)
-array := addr.Array()        // [20]byte
+bytes := addr.Bytes()       // []byte (copy)
+array := addr.Array()       // [20]byte
 
 // Check properties
 if addr.IsZero() { ... }
 if addr.Equal(other) { ... }
+
+// Text marshaling (JSON compatible)
+text, _ := addr.MarshalText()
+addr.UnmarshalText(text)
+```
+
+#### Hash Type
+
+The `primitives.Hash` type wraps `[32]byte` for 32-byte hash values:
+
+```go
+// Create hashes
+hash := primitives.ZeroHash()
+hash, err := primitives.HashFromHex("0x1234...")
+hash, err := primitives.HashFromBytes([]byte{0x01, 0x02, ...}) // 32 bytes required
+
+// Convert formats
+hex := hash.Hex()          // "0x1234..."
+bytes := hash.Bytes()      // []byte (copy)
+array := hash.Array()      // [32]byte
+
+// Properties
+if hash.IsZero() { ... }
+if hash.Equal(other) { ... }
 ```
 
 ## Performance Considerations
@@ -386,8 +577,13 @@ if addr.Equal(other) { ... }
 
 ## Testing
 
+The Go bindings include comprehensive tests covering all functionality:
+
 ```bash
-# Run all tests
+# Build the Zig library and run all tests
+make test
+
+# Or run tests manually (requires built library)
 go test ./...
 
 # Run with race detection
@@ -398,7 +594,21 @@ go test -bench=. ./...
 
 # Verbose output
 go test -v ./...
+
+# Run specific test packages
+go test ./evm              # EVM functionality tests
+go test ./primitives       # Primitive types tests
 ```
+
+### Test Coverage
+
+- **EVM Operations**: All call types (CALL, CREATE, DELEGATECALL, etc.)
+- **State Management**: Balance, code, and storage operations
+- **Error Handling**: Invalid inputs and execution failures
+- **Memory Safety**: Resource cleanup and garbage collection
+- **Concurrency**: Thread-safe operations
+- **Integration Tests**: Complex multi-step scenarios
+- **Benchmarks**: Performance comparison tests
 
 ## Building
 
@@ -407,12 +617,90 @@ The bindings require CGO and link against the Guillotine library:
 ```bash
 # Build the Zig library first
 cd ../..
-zig build
+zig build -Doptimize=ReleaseFast
 
 # Then build the Go bindings
 cd sdks/go
 go build ./...
 ```
+
+### Build Requirements
+
+- **Go 1.21+**: Modern Go version with generics support
+- **Zig compiler**: For building the underlying Guillotine library  
+- **CGO enabled**: Required for FFI bindings to Zig library
+- **C compiler**: GCC, Clang, or MSVC for linking
+
+### Cross-compilation
+
+The bindings support cross-compilation to any platform supported by both Go and Zig:
+
+```bash
+# Build for specific platform
+GOOS=linux GOARCH=amd64 go build ./...
+
+# Note: You'll need to cross-compile the Zig library for the target platform first
+cd ../..
+zig build -Doptimize=ReleaseFast -Dtarget=x86_64-linux-gnu
+```
+
+## Error Handling
+
+The Go bindings provide structured error handling with specific error types:
+
+### Common Error Types
+
+```go
+var (
+    ErrInitializationFailed = errors.New("failed to initialize Guillotine")
+    ErrVMCreationFailed     = errors.New("failed to create VM instance")
+    ErrVMClosed             = errors.New("VM instance has been closed")
+    ErrExecutionFailed      = errors.New("EVM execution failed")
+    ErrInvalidInput         = errors.New("invalid input")
+)
+```
+
+### Error Handling Patterns
+
+```go
+// Check for execution errors
+result, err := vm.Call(params)
+if err != nil {
+    switch {
+    case errors.Is(err, guillotine.ErrVMClosed):
+        log.Fatal("VM was closed unexpectedly")
+    case errors.Is(err, guillotine.ErrExecutionFailed):
+        log.Printf("Execution failed: %v", err)
+        // Handle execution failure...
+    default:
+        log.Printf("Unexpected error: %v", err)
+    }
+    return
+}
+
+// Check execution success
+if !result.Success {
+    log.Printf("EVM execution reverted: %s", result.ErrorInfo)
+    // Handle revert...
+}
+```
+
+### Troubleshooting
+
+**Build Issues:**
+- Ensure Zig library is built first with `make build`
+- Check that CGO is enabled: `go env CGO_ENABLED` should return `1`
+- Verify C compiler is available in PATH
+
+**Runtime Issues:**
+- Always call `Destroy()` to prevent memory leaks
+- Use `defer vm.Destroy()` immediately after creation
+- Check that gas limits are sufficient for contract execution
+
+**Performance Issues:**
+- Use `NewTracing()` only when debugging; tracing adds overhead
+- Consider reusing EVM instances instead of creating new ones frequently
+- Profile with `go test -bench=.` to identify bottlenecks
 
 ## License
 

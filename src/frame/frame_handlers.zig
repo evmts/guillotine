@@ -203,10 +203,9 @@ pub fn getSyntheticHandler(comptime FrameType: type, synthetic_opcode: u8) Frame
         @intFromEnum(OpcodeSynthetic.PUSH_DIV_POINTER) => &ArithmeticSyntheticHandlers.push_div_pointer,
         @intFromEnum(OpcodeSynthetic.PUSH_SUB_INLINE) => &ArithmeticSyntheticHandlers.push_sub_inline,
         @intFromEnum(OpcodeSynthetic.PUSH_SUB_POINTER) => &ArithmeticSyntheticHandlers.push_sub_pointer,
-        @intFromEnum(OpcodeSynthetic.PUSH_JUMP_INLINE) => &JumpSyntheticHandlers.push_jump_inline,
-        @intFromEnum(OpcodeSynthetic.PUSH_JUMP_POINTER) => &JumpSyntheticHandlers.push_jump_pointer,
-        @intFromEnum(OpcodeSynthetic.PUSH_JUMPI_INLINE) => &JumpSyntheticHandlers.push_jumpi_inline,
-        @intFromEnum(OpcodeSynthetic.PUSH_JUMPI_POINTER) => &JumpSyntheticHandlers.push_jumpi_pointer,
+        // Static jump optimizations
+        @intFromEnum(OpcodeSynthetic.JUMP_TO_STATIC_LOCATION) => &JumpSyntheticHandlers.jump_to_static_location,
+        @intFromEnum(OpcodeSynthetic.JUMPI_TO_STATIC_LOCATION) => &JumpSyntheticHandlers.jumpi_to_static_location,
         @intFromEnum(OpcodeSynthetic.PUSH_MLOAD_INLINE) => &MemorySyntheticHandlers.push_mload_inline,
         @intFromEnum(OpcodeSynthetic.PUSH_MLOAD_POINTER) => &MemorySyntheticHandlers.push_mload_pointer,
         @intFromEnum(OpcodeSynthetic.PUSH_MSTORE_INLINE) => &MemorySyntheticHandlers.push_mstore_inline,
@@ -227,6 +226,15 @@ pub fn getSyntheticHandler(comptime FrameType: type, synthetic_opcode: u8) Frame
         @intFromEnum(OpcodeSynthetic.MULTI_POP_3) => &AdvancedSyntheticHandlers.multi_pop_3,
         @intFromEnum(OpcodeSynthetic.ISZERO_JUMPI) => &AdvancedSyntheticHandlers.iszero_jumpi,
         @intFromEnum(OpcodeSynthetic.DUP2_MSTORE_PUSH) => &AdvancedSyntheticHandlers.dup2_mstore_push,
+        // New high-impact fusions
+        @intFromEnum(OpcodeSynthetic.DUP3_ADD_MSTORE) => &AdvancedSyntheticHandlers.dup3_add_mstore,
+        @intFromEnum(OpcodeSynthetic.SWAP1_DUP2_ADD) => &AdvancedSyntheticHandlers.swap1_dup2_add,
+        @intFromEnum(OpcodeSynthetic.PUSH_DUP3_ADD) => &AdvancedSyntheticHandlers.push_dup3_add,
+        @intFromEnum(OpcodeSynthetic.FUNCTION_DISPATCH) => &AdvancedSyntheticHandlers.function_dispatch,
+        @intFromEnum(OpcodeSynthetic.CALLVALUE_CHECK) => &AdvancedSyntheticHandlers.callvalue_check,
+        @intFromEnum(OpcodeSynthetic.PUSH0_REVERT) => &AdvancedSyntheticHandlers.push0_revert,
+        @intFromEnum(OpcodeSynthetic.PUSH_ADD_DUP1) => &AdvancedSyntheticHandlers.push_add_dup1,
+        @intFromEnum(OpcodeSynthetic.MLOAD_SWAP1_DUP2) => &AdvancedSyntheticHandlers.mload_swap1_dup2,
         else => @panic("Invalid synthetic opcode"),
     };
 }

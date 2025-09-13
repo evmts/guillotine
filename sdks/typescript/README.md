@@ -32,13 +32,24 @@ yarn add @evmts/guillotine
 bun add @evmts/guillotine
 ```
 
+### WASM Module Setup
+
+The SDK requires a WebAssembly module compiled from the Zig implementation. The loader will automatically search for the WASM file in these locations:
+
+1. Custom path if provided to `GuillotineEVM.create(wasmPath)`
+2. `../wasm/guillotine-evm.wasm` (relative to package)
+3. `../../../../zig-out/bin/guillotine-evm.wasm` (development)
+4. `zig-out/bin/guillotine-evm.wasm` (project root)
+
+For browser usage, ensure the WASM file is served at `/wasm/guillotine-evm.wasm`.
+
 ## Quick Start
 
 ```typescript
-import { EVM, Address, U256, Bytes } from '@evmts/guillotine';
+import { GuillotineEVM, Address, U256, Bytes } from '@evmts/guillotine';
 
 // Create an EVM instance
-const evm = await EVM.create();
+const evm = await GuillotineEVM.create();
 
 // Execute bytecode
 const result = await evm.execute({
@@ -50,13 +61,13 @@ const result = await evm.execute({
 
 if (result.success) {
   console.log('Gas used:', result.gasUsed);
-  console.log('Return data:', result.output.toHex());
+  console.log('Return data:', result.returnData.toHex());
 } else {
-  console.log('Execution failed:', result.error);
+  console.log('Execution failed:', result.revertReason?.toString());
 }
 
 // Clean up
-evm.destroy();
+evm.close();
 ```
 
 ## Core Concepts
@@ -66,147 +77,258 @@ evm.destroy();
 The main entry point for executing EVM bytecode:
 
 ```typescript
-const evm = await EVM.create({
-  hardfork: 'shanghai', // Optional: specify hardfork rules
-  enableTracing: false  // Optional: enable execution tracing
-});
+// Create EVM instance (no options currently supported)
+const evm = await GuillotineEVM.create();
+
+// Optionally specify custom WASM path
+const evm = await GuillotineEVM.create('/path/to/guillotine-evm.wasm');
 ```
 
 ### State Management
 
-Manage blockchain state with the built-in state database:
+Manage blockchain state with the built-in methods:
 
 ```typescript
 // Set account balance
-await evm.stateDB.setBalance(
+await evm.setBalance(
   Address.from('0x742d35Cc6634C0532925a3b844Bc9e7595f7BBDc'),
   U256.from('1000000000000000000') // 1 ETH
 );
 
-// Deploy contract code
-await evm.stateDB.setCode(contractAddress, contractBytecode);
+// Get account balance
+const balance = await evm.getBalance(address);
 
-// Set storage values
-await evm.stateDB.setStorage(contractAddress, slot, value);
+// Set contract code
+await evm.setCode(contractAddress, contractBytecode);
+
+// Get contract code
+const code = await evm.getCode(contractAddress);
+
+// Set storage slot
+await evm.setStorage(contractAddress, key, value);
+
+// Get storage slot
+const value = await evm.getStorage(contractAddress, key);
 ```
 
 ### Transaction Execution
 
-Execute transactions with full context:
+Execute bytecode with execution parameters:
 
 ```typescript
 const result = await evm.execute({
-  // Transaction parameters
-  caller: Address.from('0x...'),
-  to: Address.from('0x...'),
+  bytecode: Bytes.from('0x6001600101'), // PUSH1 1, PUSH1 1, ADD
+  caller: Address.from('0x742d35Cc6634C0532925a3b844Bc9e7595f7BBDc'),
+  to: Address.from('0x1234567890123456789012345678901234567890'),
   value: U256.from('1000000000000000000'),
-  input: Bytes.from('0x...'),
-  gasLimit: 100000n,
-  gasPrice: U256.from('20000000000'),
-  
-  // Block context
-  blockNumber: 1000000n,
-  timestamp: Date.now() / 1000,
-  coinbase: Address.from('0x...'),
-  difficulty: U256.zero(),
-  gasLimit: 30000000n,
-  baseFee: U256.from('10000000000')
-});
-```
-
-### Low-Level Frame API
-
-For direct bytecode execution and debugging:
-
-```typescript
-const frame = await Frame.create({
-  bytecode: Bytes.from('0x...'),
+  input: Bytes.from('0x'),
   gasLimit: 100000n
 });
 
-// Enable step-by-step execution
-frame.enableStepping();
-
-while (!frame.isStopped()) {
-  const step = await frame.step();
-  console.log(`PC: ${step.pc}, Opcode: ${step.opcode}, Gas: ${step.gasRemaining}`);
+// Check execution result
+if (result.isSuccess()) {
+  console.log('Success! Gas used:', result.gasUsed);
+  console.log('Return data:', result.returnData.toHex());
+} else {
+  console.log('Failed! Gas used:', result.gasUsed);
+  if (result.hasRevertReason()) {
+    console.log('Revert reason:', result.getRevertReasonString());
+  }
 }
-
-frame.destroy();
 ```
 
 ## API Documentation
 
-See [API_DESIGN.md](./API_DESIGN.md) for comprehensive API documentation.
+### Main Classes
 
-### Main Modules
-
-- **EVM**: Main execution engine
-- **Frame**: Low-level execution context
-- **Stack**: EVM stack operations
-- **Memory**: EVM memory management
-- **StateDB**: Blockchain state management
-- **Bytecode**: Bytecode analysis and optimization
+- **GuillotineEVM**: Main execution engine with state management
+- **ExecutionResult**: Result of EVM execution with gas usage and output data
+- **ExecutionParams**: Parameters for EVM execution (bytecode, caller, etc.)
 
 ### Primitive Types
 
-- **Address**: 20-byte Ethereum address
-- **U256**: 256-bit unsigned integer
-- **Bytes**: Variable-length byte array
-- **Hash**: 32-byte hash value
+- **Address**: 20-byte Ethereum address with hex string and byte array conversion
+- **U256**: 256-bit unsigned integer with arithmetic and bitwise operations  
+- **Bytes**: Variable-length byte array with hex string conversion
+- **Hash**: 32-byte hash value with hex string conversion
+
+### Core API
+
+#### GuillotineEVM
+
+```typescript
+class GuillotineEVM {
+  // Create new EVM instance
+  static async create(wasmPath?: string): Promise<GuillotineEVM>
+  
+  // Execute bytecode
+  async execute(params: ExecutionParams): Promise<ExecutionResult>
+  
+  // State management
+  async setBalance(address: Address, balance: U256): Promise<void>
+  async getBalance(address: Address): Promise<U256>
+  async setCode(address: Address, code: Bytes): Promise<void>  
+  async getCode(address: Address): Promise<Bytes>
+  async setStorage(address: Address, key: U256, value: U256): Promise<void>
+  async getStorage(address: Address, key: U256): Promise<U256>
+  
+  // Utilities
+  getVersion(): string
+  close(): void
+}
+```
+
+#### ExecutionParams
+
+```typescript
+interface ExecutionParams {
+  bytecode: Bytes        // The bytecode to execute
+  caller?: Address       // Caller address (defaults to zero address)
+  to?: Address          // Target address (defaults to zero address) 
+  value?: U256          // Value to transfer (defaults to zero)
+  input?: Bytes         // Input data (defaults to empty)
+  gasLimit?: bigint     // Gas limit (defaults to 1,000,000)
+}
+```
+
+#### ExecutionResult
+
+```typescript
+class ExecutionResult {
+  readonly success: boolean
+  readonly gasUsed: bigint
+  readonly returnData: Bytes
+  readonly revertReason: Bytes
+  
+  // Helper methods
+  isSuccess(): boolean
+  isFailure(): boolean
+  hasReturnData(): boolean
+  hasRevertReason(): boolean
+  getRevertReasonString(): string | null
+  getReturnDataString(): string | null
+}
+```
+
+#### Error Handling
+
+```typescript
+// Error types
+type GuillotineErrorType = 
+  | 'InitializationFailed'
+  | 'WasmLoadFailed' 
+  | 'WasmNotLoaded'
+  | 'VMCreationFailed'
+  | 'VMNotInitialized'
+  | 'ExecutionFailed'
+  | 'InvalidBytecode'
+  | 'InvalidAddress'
+  | 'InvalidValue'
+  | 'OutOfGas'
+  | 'StackOverflow'
+  | 'StackUnderflow' 
+  | 'InvalidJump'
+  | 'InvalidOpcode'
+  | 'MemoryError'
+  | 'StateError'
+  | 'UnknownError';
+
+class GuillotineError extends Error {
+  readonly type: GuillotineErrorType;
+  readonly cause?: Error;
+  
+  // Static factory methods
+  static initializationFailed(message: string, cause?: Error): GuillotineError
+  static executionFailed(message: string, cause?: Error): GuillotineError
+  static invalidBytecode(message: string): GuillotineError
+  // ... other static methods
+}
+```
 
 ## Examples
 
-### Deploy and Call a Contract
+### Simple Bytecode Execution
 
 ```typescript
-// Deploy a simple storage contract
-const deployCode = Bytes.from('0x608060405234801561001057600080fd5b50610150806100206000396000f3fe608060405234801561001057600080fd5b50600436106100365760003560e01c80632e64cec11461003b5780636057361d14610059575b600080fd5b610043610075565b60405161005091906100e2565b60405180910390f35b610073600480360381019061006e91906100ae565b61007e565b005b60008054905090565b8060008190555050565b60008135905061009881610103565b92915050565b6000602082840312156100b057600080fd5b60006100be84828501610089565b91505092915050565b60006100d2826100d8565b82525050565b6000819050919050565b60006020820190506100f760008301846100c7565b92915050565b50919050565b61010c816100d8565b811461011757600080fd5b5056fea264697066735822122064e2a6a82e23e69b1e28e2e8d573fa513043efbf84e32331f184990797c5b52a64736f6c63430008040033');
+import { GuillotineEVM, Address, U256, Bytes } from '@evmts/guillotine';
 
-const deployResult = await evm.execute({
-  caller: Address.from('0x1234567890123456789012345678901234567890'),
-  input: deployCode,
-  gasLimit: 1000000n
-});
+const evm = await GuillotineEVM.create();
 
-const contractAddress = deployResult.createdAddress;
-
-// Call the deployed contract
-const calldata = Bytes.from('0x6057361d0000000000000000000000000000000000000000000000000000000000000042'); // store(66)
-
-const callResult = await evm.execute({
-  caller: Address.from('0x1234567890123456789012345678901234567890'),
-  to: contractAddress,
-  input: calldata,
+// Execute simple arithmetic: PUSH1 5, PUSH1 3, ADD
+const result = await evm.execute({
+  bytecode: Bytes.from('0x6005600301'),
   gasLimit: 100000n
 });
+
+console.log('Success:', result.isSuccess());
+console.log('Gas used:', result.gasUsed);
+console.log('Return data:', result.returnData.toHex());
+
+evm.close();
 ```
 
-### Custom Tracer
+### Working with Account State
 
 ```typescript
-class GasTracer {
-  private gasPerOpcode = new Map<string, bigint>();
+const evm = await GuillotineEVM.create();
+
+const address = Address.from('0x742d35Cc6634C0532925a3b844Bc9e7595f7BBDc');
+
+// Set initial balance
+await evm.setBalance(address, U256.from('1000000000000000000')); // 1 ETH
+
+// Check balance
+const balance = await evm.getBalance(address);
+console.log('Balance:', balance.toString(), 'wei');
+
+// Set contract code
+const code = Bytes.from('0x6001600101'); // PUSH1 1, PUSH1 1, ADD
+await evm.setCode(address, code);
+
+// Get code back
+const retrievedCode = await evm.getCode(address);
+console.log('Code:', retrievedCode.toHex());
+
+// Set storage
+const key = U256.from(0);
+const value = U256.from(42);
+await evm.setStorage(address, key, value);
+
+// Get storage
+const retrievedValue = await evm.getStorage(address, key);
+console.log('Storage[0]:', retrievedValue.toString());
+
+evm.close();
+```
+
+### Error Handling
+
+```typescript
+import { GuillotineError } from '@evmts/guillotine';
+
+try {
+  const evm = await GuillotineEVM.create();
   
-  async onStep(step: TraceStep): Promise<void> {
-    const current = this.gasPerOpcode.get(step.opcode) || 0n;
-    this.gasPerOpcode.set(step.opcode, current + step.gasCost);
-  }
+  const result = await evm.execute({
+    bytecode: Bytes.from('0xfd'), // REVERT opcode
+    gasLimit: 100000n
+  });
   
-  report() {
-    console.log('Gas usage by opcode:');
-    for (const [opcode, gas] of this.gasPerOpcode) {
-      console.log(`  ${opcode}: ${gas}`);
+  if (result.isFailure()) {
+    console.log('Execution reverted');
+    if (result.hasRevertReason()) {
+      console.log('Revert reason:', result.getRevertReasonString());
     }
   }
+  
+  evm.close();
+} catch (error) {
+  if (error instanceof GuillotineError) {
+    console.log('Guillotine error:', error.type, error.message);
+  } else {
+    console.log('Unknown error:', error);
+  }
 }
-
-const tracer = new GasTracer();
-const evm = await EVM.create({ tracer });
-
-// Execute transaction...
-
-tracer.report();
 ```
 
 ## Performance
@@ -246,12 +368,11 @@ bun run format
 
 ```
 src/
-├── core/          # Core EVM functionality
-├── primitives/    # Ethereum primitive types
-├── bytecode/      # Bytecode analysis
-├── state/         # State management
-├── wasm/          # WASM bindings
-└── test/          # Test utilities
+├── evm/           # EVM execution engine
+├── primitives/    # Ethereum primitive types (Address, U256, Bytes, Hash)
+├── wasm/          # WebAssembly loading and bindings
+├── errors.ts      # Error types and handling
+└── index.ts       # Main exports
 ```
 
 ## Testing
@@ -260,12 +381,12 @@ All code is developed using Test-Driven Development (TDD) with Bun test:
 
 ```typescript
 import { describe, it, expect } from 'bun:test';
-import { Address } from '../address';
+import { Address } from './address';
 
 describe('Address', () => {
   it('should create address from hex string', () => {
-    const addr = Address.from('0x742d35Cc6634C0532925a3b844Bc9e7595f7BBDc');
-    expect(addr.toString()).toBe('0x742d35cc6634c0532925a3b844bc9e7595f7bbdc');
+    const addr = Address.fromHex('0x742d35Cc6634C0532925a3b844Bc9e7595f7BBDc');
+    expect(addr.toHex()).toBe('0x742d35cc6634c0532925a3b844bc9e7595f7bbdc');
   });
   
   it('should detect zero address', () => {
@@ -273,6 +394,19 @@ describe('Address', () => {
     expect(zero.isZero()).toBe(true);
   });
 });
+```
+
+Run tests with:
+
+```bash
+# Run all tests
+bun test
+
+# Run specific test file
+bun test src/primitives/address.test.ts
+
+# Run tests with coverage
+bun test --coverage
 ```
 
 ## Contributing

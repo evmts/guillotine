@@ -101,7 +101,10 @@ pub fn Memory(comptime config: MemoryConfig) type {
             const checkpoint_usize = @as(usize, self.checkpoint);
             const new_size_usize = @as(usize, new_size);
             const required_total = checkpoint_usize + new_size_usize;
-            if (required_total > MEMORY_LIMIT) return MemoryError.MemoryOverflow;
+            if (required_total > MEMORY_LIMIT) {
+                @branchHint(.unlikely);
+                return MemoryError.MemoryOverflow;
+            }
 
             const current_len = self.buffer_ptr.*.items.len;
             if (required_total <= current_len) return;
@@ -109,8 +112,10 @@ pub fn Memory(comptime config: MemoryConfig) type {
             // Fast path for small growth (common for single word operations)
             const growth = required_total - current_len;
             if (growth <= FAST_PATH_THRESHOLD) {
+                @branchHint(.likely);
                 // For small growth, try to use existing capacity first
                 if (required_total <= self.buffer_ptr.*.capacity) {
+                    @branchHint(.likely);
                     // We have capacity, just extend length and zero
                     const old_len = current_len;
                     self.buffer_ptr.*.items.len = required_total;
@@ -232,7 +237,10 @@ pub fn Memory(comptime config: MemoryConfig) type {
             const offset_usize = @as(usize, offset);
             const len_usize = @as(usize, len);
             const end = offset_usize + len_usize;
-            if (end > self.size_internal()) return MemoryError.OutOfBounds;
+            if (end > self.size_internal()) {
+                @branchHint(.unlikely);
+                return MemoryError.OutOfBounds;
+            }
             const checkpoint_usize = @as(usize, self.checkpoint);
             const start_idx = checkpoint_usize + offset_usize;
             return self.buffer_ptr.*.items[start_idx .. start_idx + len_usize];
@@ -286,7 +294,10 @@ pub fn Memory(comptime config: MemoryConfig) type {
             const offset_usize = @as(usize, offset);
             const len_usize = @as(usize, len);
             const end = offset_usize + len_usize;
-            if (end > self.size_internal()) return MemoryError.OutOfBounds;
+            if (end > self.size_internal()) {
+                @branchHint(.unlikely);
+                return MemoryError.OutOfBounds;
+            }
             const checkpoint_usize = @as(usize, self.checkpoint);
             const start_idx = checkpoint_usize + offset_usize;
             return self.buffer_ptr.*.items[start_idx .. start_idx + len_usize];
@@ -312,6 +323,7 @@ pub fn Memory(comptime config: MemoryConfig) type {
             // EVM memory is limited to 16MB (0xFFFFFF bytes = 524287 words)
             // So words should never exceed 524287 in practice
             if (words > 524287) {
+                @branchHint(.unlikely);
                 // Return max cost for unrealistic memory sizes
                 return std.math.maxInt(u64);
             }
@@ -320,7 +332,10 @@ pub fn Memory(comptime config: MemoryConfig) type {
         pub fn get_expansion_cost(self: *Self, new_size: u24) u64 {
             const new_size_u64 = @as(u64, new_size);
             const current_size = @as(u64, @intCast(self.size_internal()));
-            if (new_size_u64 <= current_size) return 0;
+            if (new_size_u64 <= current_size) {
+                @branchHint(.likely);
+                return 0;
+            }
             const new_words = std.math.shr(u64, new_size_u64 + 31, 5); // Using std.math.shr instead of / 32
             const current_words = std.math.shr(u64, current_size + 31, 5); // Using std.math.shr instead of / 32
             const new_cost = calculate_memory_cost(new_words);
