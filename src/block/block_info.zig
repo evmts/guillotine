@@ -24,7 +24,7 @@ pub fn BlockInfo(comptime config: BlockInfoConfig) type {
         const Self = @This();
 
         /// Chain ID for EIP-155 replay protection
-        chain_id: u64 = 1,
+        chain_id: u16 = 1,
         /// Block number
         number: u64,
         /// Parent block hash (for EIP-2935 historical block hashes)

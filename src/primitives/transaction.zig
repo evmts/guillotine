@@ -134,7 +134,7 @@ pub const LegacyTransaction = struct {
 
 // EIP-1559 transaction structure
 pub const Eip1559Transaction = struct {
-    chain_id: u64,
+    chain_id: u16,
     nonce: u64,
     max_priority_fee_per_gas: u256,
     max_fee_per_gas: u256,
@@ -150,7 +150,7 @@ pub const Eip1559Transaction = struct {
 
 // EIP-7702 transaction structure
 pub const Eip7702Transaction = struct {
-    chain_id: u64,
+    chain_id: u16,
     nonce: u64,
     max_priority_fee_per_gas: u256,
     max_fee_per_gas: u256,
@@ -171,7 +171,7 @@ pub const AccessListItem = struct {
 };
 
 // Encode legacy transaction for signing
-pub fn encode_legacy_for_signing(allocator: Allocator, tx: LegacyTransaction, chain_id: u64) ![]u8 {
+pub fn encode_legacy_for_signing(allocator: Allocator, tx: LegacyTransaction, chain_id: u16) ![]u8 {
     var list = std.array_list.AlignedManaged(u8, null).init(allocator);
     defer list.deinit();
 
@@ -334,7 +334,7 @@ fn encode_access_list_internal(allocator: Allocator, access_list: []const Access
 }
 
 // Sign legacy transaction
-pub fn sign_legacy_transaction(allocator: Allocator, tx: LegacyTransaction, private_key: crypto.PrivateKey, chain_id: u64) !LegacyTransaction {
+pub fn sign_legacy_transaction(allocator: Allocator, tx: LegacyTransaction, private_key: crypto.PrivateKey, chain_id: u16) !LegacyTransaction {
     // Encode transaction for signing
     const encoded = try encode_legacy_for_signing(allocator, tx, chain_id);
     defer allocator.free(encoded);

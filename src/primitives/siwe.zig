@@ -29,7 +29,7 @@ pub const SiweMessage = struct {
     statement: ?[]const u8,
     uri: []const u8,
     version: []const u8,
-    chain_id: u64,
+    chain_id: u16,
     nonce: []const u8,
     issued_at: []const u8,
     expiration_time: ?[]const u8,

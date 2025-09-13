@@ -53,7 +53,7 @@ pub const AuthorizationProcessor = struct {
     /// Database for state access
     db: *Database,
     /// Current chain ID
-    chain_id: u64,
+    chain_id: u16,
     /// Gas tracking (single-threaded access only)
     gas_remaining: *i64,
     /// EIP configuration for hardfork-specific behavior

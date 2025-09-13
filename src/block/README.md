@@ -21,7 +21,7 @@ This module does not implement blockchain consensus or block validation. It prov
 ### Key Fields
 
 All BlockInfo instances contain these fields:
-- `chain_id: u64` — Chain ID for EIP-155 replay protection (default: 1 for mainnet)
+- `chain_id: u16` — Chain ID for EIP-155 replay protection (default: 1 for mainnet)
 - `number: u64` — Block number
 - `parent_hash: [32]u8` — Parent block hash (for EIP-2935 historical block hashes)
 - `timestamp: u64` — Block timestamp

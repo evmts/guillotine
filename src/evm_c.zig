@@ -105,11 +105,12 @@ pub const BlockInfoFFI = extern struct {
     timestamp: u64,      // 8 bytes, offset 8
     gas_limit: u64,      // 8 bytes, offset 16
     base_fee: u64,       // 8 bytes, offset 24
-    chain_id: u64,       // 8 bytes, offset 32
+    chain_id: u16,       // 2 bytes, offset 32
+    _pad1: [6]u8 = .{0,0,0,0,0,0}, // Padding to align next field (6 bytes)
     difficulty: u64,     // 8 bytes, offset 40
     // Then smaller fields
     coinbase: [20]u8,    // 20 bytes, offset 48
-    _pad1: [4]u8 = .{0,0,0,0}, // Padding to align next field
+    _pad2: [4]u8 = .{0,0,0,0}, // Padding to align next field
     prev_randao: [32]u8, // 32 bytes, offset 72
     // Total: 104 bytes
 };

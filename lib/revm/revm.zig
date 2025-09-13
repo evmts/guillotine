@@ -28,7 +28,7 @@ pub const RevmError = struct {
 /// Settings for REVM execution
 pub const RevmSettings = struct {
     gas_limit: u64 = 30_000_000,
-    chain_id: u64 = 1,
+    chain_id: u16 = 1,
     block_number: u64 = 0,
     block_timestamp: u64 = 0,
     block_gas_limit: u64 = 30_000_000,

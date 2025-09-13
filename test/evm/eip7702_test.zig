@@ -804,7 +804,7 @@ fn parseDelegationDesignator(designator: []const u8) !Address {
 
 // Transaction type for EIP-7702
 const Eip7702Transaction = struct {
-    chain_id: u64,
+    chain_id: u16,
     nonce: u64,
     max_priority_fee_per_gas: u256,
     max_fee_per_gas: u256,

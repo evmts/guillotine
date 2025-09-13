@@ -812,7 +812,7 @@ const MockEvm = struct {
     origin_address: Address,
     call_value: u256,
     gas_price: u256,
-    chain_id: u64,
+    chain_id: u16,
     input_data: []const u8,
     return_data: []const u8,
     block_info: block_info_mod.BlockInfo,

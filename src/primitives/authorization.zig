@@ -21,7 +21,7 @@ pub const AuthorizationError = error{
 
 // Authorization structure
 pub const Authorization = struct {
-    chain_id: u64,
+    chain_id: u16,
     address: Address,
     nonce: u64,
     v: u64,
@@ -110,7 +110,7 @@ pub const Authorization = struct {
 // Create a signed authorization
 pub fn create_authorization(
     allocator: Allocator,
-    chain_id: u64,
+    chain_id: u16,
     addr: Address,
     nonce: u64,
     private_key: crypto.PrivateKey,

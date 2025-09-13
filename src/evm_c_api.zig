@@ -80,7 +80,7 @@ pub const BlockInfoFFI = extern struct {
     gas_limit: u64,
     coinbase: [20]u8,
     base_fee: u64,
-    chain_id: u64,
+    chain_id: u16,
     difficulty: u64,
     prev_randao: [32]u8,
 };
