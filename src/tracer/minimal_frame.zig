@@ -511,7 +511,7 @@ pub const MinimalFrame = struct {
                     const end_addr = @as(u64, offset_u32) + @as(u64, size_u32);
                     const mem_cost = self.memoryExpansionCost(end_addr);
                     try self.consumeGas(mem_cost);
-                    if (end_addr > self.memory_size) self.memory_size = end_addr;
+                    if (end_addr > self.memory_size) self.memory_size = @intCast(end_addr);
 
                     // Read data from memory
                     var data = try self.allocator.alloc(u8, size_u32);
