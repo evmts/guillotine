@@ -263,6 +263,7 @@ pub const MinimalEvm = struct {
     ) MinimalEvmError!CallResult {
         const intrinsic_gas: i64 = @intCast(GasConstants.TxGas);
         if (gas < intrinsic_gas) {
+          @branchHint(.cold);
             return CallResult{
                 .success = false,
                 .gas_left = 0,
