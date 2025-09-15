@@ -4,6 +4,7 @@ const std = @import("std");
 const primitives = @import("primitives");
 const Address = primitives.Address;
 const CreatedContracts = @import("created_contracts.zig").CreatedContracts;
+const SelfDestructRecord = @import("../frame/call_result.zig").SelfDestructRecord;
 
 /// Error type for SelfDestruct operations
 pub const StateError = error{OutOfMemory};
@@ -48,17 +49,17 @@ pub const SelfDestruct = struct {
 
     /// Convert the internal HashMap to an owned slice of SelfDestructRecord for CallResult
     /// Returns an allocated slice that the caller must eventually free
-    pub fn toOwned(self: *SelfDestruct, allocator: std.mem.Allocator) ![]const @import("../frame/call_result.zig").SelfDestructRecord {
-        const count = self.count();
-        if (count == 0) {
+    pub fn toOwned(self: *SelfDestruct, allocator: std.mem.Allocator) ![]const SelfDestructRecord {
+        const self_destruct_count = self.count();
+        if (self_destruct_count == 0) {
             return &.{};
         }
 
-        const records = try allocator.alloc(@import("../frame/call_result.zig").SelfDestructRecord, count);
+        const records = try allocator.alloc(SelfDestructRecord, self_destruct_count);
         var iter = self.iterator();
         var i: usize = 0;
         while (iter.next()) |entry| {
-            records[i] = @import("../frame/call_result.zig").SelfDestructRecord{
+            records[i] = SelfDestructRecord{
                 .contract = entry.key_ptr.*,
                 .beneficiary = entry.value_ptr.*,
             };
