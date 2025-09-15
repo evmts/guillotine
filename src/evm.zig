@@ -380,8 +380,6 @@ pub fn Evm(comptime config: EvmConfig) type {
                     log.err("Failed to extract self-destruct records: {}", .{err});
                     return CallResult.failure(result.gas_left);
                 };
-            } else {
-                result.selfdestructs = &.{};
             }
             result.accessed_addresses = &.{};
             result.accessed_storage = &.{};
