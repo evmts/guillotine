@@ -335,7 +335,7 @@ pub const MinimalEvm = struct {
         // and include precompiles as warm from the start.
         // TODO: pre-warm EIP-2930 tx access list entries when wiring tx params into the tracer.
         try self.pre_warm_addresses(&[_]Address{ self.origin, address, self.block_coinbase });
-        // Currently we only use this function for regular calls
+
         const intrinsic_gas: i64 = @intCast(GasConstants.TxGas);
         if (gas < intrinsic_gas) {
             @branchHint(.cold);
