@@ -245,8 +245,6 @@ pub fn Evm(comptime config: EvmConfig) type {
             try self.journal.record_balance_change(snapshot_id, from, from_account.balance);
             try self.journal.record_balance_change(snapshot_id, to, to_account.balance);
 
-            if (std.mem.eql(u8, &from.bytes, &to.bytes)) return;
-
             from_account.balance -= value;
             to_account.balance += value;
             try self.database.set_account(from.bytes, from_account);
