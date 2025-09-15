@@ -50,6 +50,21 @@ const StorageSlotKeyContext = struct {
     }
 };
 
+/// Error set for MinimalEvm operations
+pub const MinimalEvmError = error{
+    OutOfMemory,
+    StackOverflow,
+    StackUnderflow,
+    OutOfGas,
+    InvalidOpcode,
+    InvalidJump,
+    InvalidPush,
+    // Memory
+    OutOfBounds,
+    // Access list
+    AddressPreWarmError,
+};
+
 /// Minimal EVM - Orchestrates execution like evm.zig
 pub const MinimalEvm = struct {
     /// Error set for MinimalEvm operations
