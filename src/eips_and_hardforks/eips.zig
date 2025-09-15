@@ -39,6 +39,41 @@ pub const Eips = struct {
         return self.hardfork.isAtLeast(.PRAGUE);
     }
 
+    /// EIP-2929 & EIP-3651: Pre-warm addresses for top-level calls
+    /// Warms tx.origin, target address, and coinbase (EIP-3651 for Shanghai+)
+    pub fn pre_warm_transaction_addresses(
+        self: Self,
+        access_list: *AccessList,
+        origin: primitives.Address,
+        target: ?primitives.Address,
+        coinbase: primitives.Address,
+    ) !void {
+        // Build array of addresses to warm
+        var warm_addresses: [3]primitives.Address = undefined;
+        var warm_count: usize = 0;
+        
+        // Always warm origin
+        warm_addresses[warm_count] = origin;
+        warm_count += 1;
+        
+        // Warm target if provided (not a create operation)
+        if (target) |t| {
+            warm_addresses[warm_count] = t;
+            warm_count += 1;
+        }
+        
+        // EIP-3651: Warm coinbase for Shanghai+
+        if (self.hardfork.isAtLeast(.SHANGHAI)) {
+            warm_addresses[warm_count] = coinbase;
+            warm_count += 1;
+        }
+        
+        // Pre-warm all addresses
+        if (warm_count > 0) {
+            try access_list.pre_warm_addresses(warm_addresses[0..warm_count]);
+        }
+    }
+
     /// EIP-3651: Warm COINBASE address at the start of transaction
     /// Shanghai hardfork introduced this optimization
     pub fn eip_3651_warm_coinbase_address(self: Self, access_list: *AccessList, coinbase: primitives.Address.Address) !void {
@@ -197,10 +232,13 @@ pub const Eips = struct {
     /// Get configuration for EVM features based on hardfork
     pub fn get_evm_config(self: Self) EvmConfig {
         return EvmConfig{
+            .eip_214_enabled = self.hardfork.isAtLeast(.BYZANTIUM),
             .eip_2929_enabled = self.hardfork.isAtLeast(.BERLIN),
             .eip_3541_enabled = self.hardfork.isAtLeast(.LONDON),
             .eip_3855_enabled = self.hardfork.isAtLeast(.SHANGHAI),
             .eip_3860_enabled = self.hardfork.isAtLeast(.SHANGHAI),
+            .eip_4788_enabled = self.hardfork.isAtLeast(.CANCUN),
+            .eip_2935_enabled = self.hardfork.isAtLeast(.PRAGUE),
             .eip_4844_enabled = self.hardfork.isAtLeast(.CANCUN),
             .eip_5656_enabled = self.hardfork.isAtLeast(.CANCUN),
             .eip_6780_enabled = self.hardfork.isAtLeast(.CANCUN),
@@ -210,10 +248,13 @@ pub const Eips = struct {
     
     /// Configuration struct for EVM features
     pub const EvmConfig = struct {
+        eip_214_enabled: bool,  // Static call restrictions
         eip_2929_enabled: bool, // Access list
         eip_3541_enabled: bool, // 0xEF prefix rejection
         eip_3855_enabled: bool, // PUSH0 opcode
         eip_3860_enabled: bool, // Initcode size limit
+        eip_4788_enabled: bool, // Beacon roots contract
+        eip_2935_enabled: bool, // Historical block hashes
         eip_4844_enabled: bool, // Blob transactions
         eip_5656_enabled: bool, // MCOPY opcode
         eip_6780_enabled: bool, // SELFDESTRUCT restrictions
@@ -319,6 +360,101 @@ pub const Eips = struct {
         gas: u64,
         refund: u64,
     };
+    
+    /// EIP-4788: Check if address is the beacon roots contract
+    pub fn is_beacon_roots_address(self: Self, address: primitives.Address) bool {
+        _ = self;
+        const beacon_roots = @import("beacon_roots.zig");
+        return std.mem.eql(u8, &address.bytes, &beacon_roots.BEACON_ROOTS_ADDRESS.bytes);
+    }
+    
+    /// EIP-2935: Check if address is the historical block hashes contract
+    pub fn is_historical_block_hashes_address(self: Self, address: primitives.Address) bool {
+        _ = self;
+        const historical_block_hashes = @import("historical_block_hashes.zig");
+        return std.mem.eql(u8, &address.bytes, &historical_block_hashes.HISTORY_CONTRACT_ADDRESS.bytes);
+    }
+    
+    /// EIP-7702: Get effective code address handling delegation
+    pub fn get_effective_code_address(self: Self, account: ?@import("../storage/database_interface_account.zig").Account, address: primitives.Address) primitives.Address {
+        _ = self;
+        if (account) |acc| {
+            if (acc.get_effective_code_address()) |delegated| {
+                return delegated;
+            }
+        }
+        return address;
+    }
+    
+    /// EIP-3541: Should reject bytecode starting with 0xEF
+    pub fn should_reject_create_with_ef_bytecode(self: Self, bytecode: []const u8) bool {
+        if (!self.hardfork.isAtLeast(.LONDON)) return false;
+        return bytecode.len > 0 and bytecode[0] == 0xEF;
+    }
+    
+    /// EIP-2929: Warm contract address for execution
+    pub fn warm_contract_for_execution(self: Self, access_list: anytype, address: primitives.Address) !void {
+        if (!self.hardfork.isAtLeast(.BERLIN)) return;
+        _ = try access_list.access_address(address);
+    }
+    
+    /// EIP-214: Check if log emission is allowed (not in static context)
+    pub fn is_log_emission_allowed(is_static: bool) bool {
+        return !is_static;
+    }
+    
+    /// EIP-6780: Handle SELFDESTRUCT based on creation in same transaction
+    pub fn handle_selfdestruct(
+        self: Self,
+        created_in_tx: bool,
+        contract_address: primitives.Address,
+        recipient: primitives.Address,
+        self_destruct: anytype,
+        database: anytype,
+        journal: anytype,
+        snapshot_id: anytype,
+    ) !void {
+        if (!self.hardfork.isAtLeast(.CANCUN)) {
+            // Pre-Cancun: always mark for full destruction
+            try self_destruct.mark_for_destruction(contract_address, recipient);
+            return;
+        }
+        
+        // EIP-6780: Only destroy if created in same transaction
+        if (created_in_tx) {
+            // Full destruction: transfer balance and mark for deletion
+            try self_destruct.mark_for_destruction(contract_address, recipient);
+        } else {
+            // Only transfer balance, don't destroy the contract
+            const contract_account = try database.get_account(contract_address.bytes);
+            if (contract_account) |account| {
+                if (account.balance > 0) {
+                    // Transfer balance to recipient
+                    try journal.record_balance_change(snapshot_id, contract_address, account.balance);
+                    try journal.record_balance_change(snapshot_id, recipient, 0);
+                    
+                    // Update balances
+                    var sender_account = account;
+                    sender_account.balance = 0;
+                    try database.set_account(contract_address.bytes, sender_account);
+                    
+                    const Account = @import("../storage/database_interface_account.zig").Account;
+                    var recipient_account = (try database.get_account(recipient.bytes)) orelse Account.zero();
+                    recipient_account.balance +%= account.balance;
+                    try database.set_account(recipient.bytes, recipient_account);
+                }
+            }
+        }
+    }
+    
+    /// Apply EIP-3529 gas refund after transaction
+    pub fn apply_gas_refund(self: Self, initial_gas: u64, gas_left: u64, gas_refund_counter: u64) u64 {
+        const gas_used = initial_gas - gas_left;
+        const capped_refund = self.eip_3529_gas_refund_cap(gas_used, gas_refund_counter);
+        
+        // Apply the refund, ensuring we don't exceed the gas used
+        return @min(initial_gas, gas_left + capped_refund);
+    }
 };
 
 const std = @import("std");

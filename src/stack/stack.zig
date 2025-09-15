@@ -47,12 +47,20 @@ pub fn Stack(comptime config: StackConfig) type {
         // Pop: stack_ptr += 1; return *stack_ptr;
         stack_ptr: [*]WordType,
 
+        // Tracer for assertions (comptime optional)
+        tracer: if (config.TracerType) |T| T else void,
+
 
         /// Initialize a new stack with allocated memory.
         ///
         /// Allocates cache-aligned memory and sets up pointer boundaries.
         /// Stack pointer starts at the top (highest address) and grows downward.
         pub fn init(allocator: std.mem.Allocator) Error!Self {
+            return initWithTracer(allocator, null);
+        }
+
+        /// Initialize a new stack with a tracer for assertions.
+        pub fn initWithTracer(allocator: std.mem.Allocator, tracer: anytype) Error!Self {
             const memory = allocator.alignedAlloc(WordType, @enumFromInt(6), stack_capacity) catch return Error.AllocationError;
             errdefer allocator.free(memory);
 
@@ -61,6 +69,7 @@ pub fn Stack(comptime config: StackConfig) type {
             return Self{
                 .buf_ptr = base_ptr,
                 .stack_ptr = base_ptr + stack_capacity,
+                .tracer = if (config.TracerType != null) tracer else {},
             };
         }
 
@@ -79,9 +88,16 @@ pub fn Stack(comptime config: StackConfig) type {
             return self.buf_ptr;
         }
 
+        /// Assert helper that only calls tracer.assert if TracerType is configured
+        inline fn assert(self: *const Self, condition: bool, comptime message: []const u8) void {
+            if (config.TracerType) |_| {
+                self.tracer.assert(condition, message);
+            }
+        }
+
         pub inline fn push_unsafe(self: *Self, value: WordType) void {
             @branchHint(.likely);
-            std.debug.assert(@intFromPtr(self.stack_ptr) > @intFromPtr(self.stack_limit()));
+            self.assert(@intFromPtr(self.stack_ptr) > @intFromPtr(self.stack_limit()), "Stack overflow in push_unsafe");
             self.stack_ptr -= 1;
             self.stack_ptr[0] = value;
         }
@@ -96,7 +112,7 @@ pub fn Stack(comptime config: StackConfig) type {
 
         pub inline fn pop_unsafe(self: *Self) WordType {
             @branchHint(.likely);
-            std.debug.assert(@intFromPtr(self.stack_ptr) < @intFromPtr(self.stack_base()));
+            self.assert(@intFromPtr(self.stack_ptr) < @intFromPtr(self.stack_base()), "Stack underflow in pop_unsafe");
             const value = self.stack_ptr[0];
             self.stack_ptr += 1;
             return value;
@@ -112,7 +128,7 @@ pub fn Stack(comptime config: StackConfig) type {
 
         pub inline fn set_top_unsafe(self: *Self, value: WordType) void {
             @branchHint(.likely);
-            std.debug.assert(@intFromPtr(self.stack_ptr) < @intFromPtr(self.stack_base()));
+            self.assert(@intFromPtr(self.stack_ptr) < @intFromPtr(self.stack_base()), "Stack underflow in set_top_unsafe");
             self.stack_ptr[0] = value;
         }
 
@@ -126,7 +142,7 @@ pub fn Stack(comptime config: StackConfig) type {
 
         pub inline fn peek_unsafe(self: *const Self) WordType {
             @branchHint(.likely);
-            std.debug.assert(@intFromPtr(self.stack_ptr) < @intFromPtr(self.stack_base()));
+            self.assert(@intFromPtr(self.stack_ptr) < @intFromPtr(self.stack_base()), "Stack underflow in peek_unsafe");
             return self.stack_ptr[0];
         }
 
@@ -136,6 +152,19 @@ pub fn Stack(comptime config: StackConfig) type {
                 return Error.StackUnderflow;
             }
             return self.peek_unsafe();
+        }
+
+        /// Performs a binary operation on the top two stack items.
+        /// Pops the top item, applies the operation with the second item,
+        /// and replaces the second item with the result.
+        /// This is optimized for arithmetic operations like ADD, MUL, SUB, DIV.
+        pub inline fn binary_op_unsafe(self: *Self, comptime op: fn(a: WordType, b: WordType) WordType) void {
+            @branchHint(.likely);
+            self.assert(@intFromPtr(self.stack_ptr) + @sizeOf(WordType) < @intFromPtr(self.stack_base()), "Insufficient stack items for binary operation");
+            const top = self.stack_ptr[0];
+            const second = self.stack_ptr[1];
+            self.stack_ptr[1] = op(top, second);
+            self.stack_ptr += 1;
         }
 
         // Generic dup function for DUP1-DUP16
@@ -157,8 +186,8 @@ pub fn Stack(comptime config: StackConfig) type {
 
         // Unsafe generic dup without bounds checks (validated by planner)
         pub inline fn dup_n_unsafe(self: *Self, n: u8) void {
-            std.debug.assert(self.size_internal() >= n);
-            std.debug.assert(@intFromPtr(self.stack_ptr) > @intFromPtr(self.stack_limit()));
+            self.assert(self.size_internal() >= n, "Insufficient stack items for dup_n_unsafe");
+            self.assert(@intFromPtr(self.stack_ptr) > @intFromPtr(self.stack_limit()), "Stack overflow in dup_n_unsafe");
             // In downward stack, nth-from-top is at index n-1
             const value = self.stack_ptr[n - 1];
             self.push_unsafe(value);
@@ -196,7 +225,7 @@ pub fn Stack(comptime config: StackConfig) type {
 
         // Unsafe generic swap without bounds checks (validated by planner)
         pub inline fn swap_n_unsafe(self: *Self, n: u8) void {
-            std.debug.assert(self.size_internal() >= n + 1);
+            self.assert(self.size_internal() >= n + 1, "Insufficient stack items for swap_n_unsafe");
             const tmp = self.stack_ptr[0];
             self.stack_ptr[0] = self.stack_ptr[n];
             self.stack_ptr[n] = tmp;

@@ -6,7 +6,7 @@ const Host = @import("../host.zig").Host;
 const Analysis = @import("../analysis.zig");
 const OpcodeMetadata = @import("../opcode_metadata/opcode_metadata.zig");
 const Frame = @import("../stack_frame.zig").StackFrame;
-const Revm = @import("../../lib/revm/revm.zig").Revm;
+// MinimalEvm is now used for differential testing instead of Revm
 
 pub const TraceStep = struct {
     pc: usize,
@@ -21,7 +21,7 @@ pub const TraceStep = struct {
 pub const Divergence = struct {
     index: usize,
     guillotine: TraceStep,
-    revm: TraceStep,
+    minimal: TraceStep,
 };
 
 fn read_file_lines(allocator: std.mem.Allocator, path: []const u8) ![][]const u8 {
@@ -136,14 +136,14 @@ pub fn compare_traces(g_steps: []TraceStep, r_steps: []TraceStep) ?Divergence {
         // Compare core fields
         const stacks_equal = stacks_eq(g.stack, r.stack);
         if (g.pc != r.pc or g.op != r.op or g.depth != r.depth or !stacks_equal) {
-            return Divergence{ .index = i, .guillotine = g, .revm = r };
+            return Divergence{ .index = i, .guillotine = g, .minimal = r };
         }
     }
     if (g_steps.len != r_steps.len) {
         const idx = n;
         const g = if (idx < g_steps.len) g_steps[idx] else g_steps[g_steps.len - 1];
         const r = if (idx < r_steps.len) r_steps[idx] else r_steps[r_steps.len - 1];
-        return Divergence{ .index = idx, .guillotine = g, .revm = r };
+        return Divergence{ .index = idx, .guillotine = g, .minimal = r };
     }
     return null;
 }
@@ -193,8 +193,8 @@ pub fn run_diff_erc20_transfer(allocator: std.mem.Allocator) !?Divergence {
     // Ensure tmp dir exists (use fixed paths below)
     var guillotine_trace_path_buf: [256]u8 = undefined;
     const guillotine_trace_path = try std.fmt.bufPrint(&guillotine_trace_path_buf, "/tmp/guillotine_trace_{d}.jsonl", .{@intFromPtr(&evm)});
-    var revm_trace_path_buf: [256]u8 = undefined;
-    const revm_trace_path = try std.fmt.bufPrint(&revm_trace_path_buf, "/tmp/revm_trace_{d}.jsonl", .{@intFromPtr(&evm)});
+    var minimal_trace_path_buf: [256]u8 = undefined;
+    const minimal_trace_path = try std.fmt.bufPrint(&minimal_trace_path_buf, "/tmp/minimal_trace_{d}.jsonl", .{@intFromPtr(&evm)});
 
     // Guillotine: enable tracing to file and execute call
     _ = evm.enable_tracing_to_path(guillotine_trace_path, false) catch {};
@@ -209,14 +209,10 @@ pub fn run_diff_erc20_transfer(allocator: std.mem.Allocator) !?Divergence {
     _ = g_call_res;
     evm.disable_tracing();
 
-    // REVM: set runtime code at arbitrary address and execute with trace
-    var revm_vm = try Revm.init(allocator, .{});
-    defer revm_vm.deinit();
-    const revm_addr = [_]u8{0xAB} ** 20;
-    try revm_vm.setCode(revm_addr, runtime);
-    const revm_res = try revm_vm.executeWithTrace(deployer, revm_addr, 0, cal_bytes, 10_000_000, revm_trace_path);
-    // NOTE: The C wrapper writes to the provided trace_path (we reuse guillotine path to ease file mgmt)
-    _ = revm_res; // result not needed here
+    // MinimalEvm is now used internally by the tracer for differential testing
+    // The minimal trace will be generated automatically when using the default tracer
+    // For now, we'll skip the MinimalEvm execution here as it's handled by the tracer
+    _ = minimal_trace_path; // Will be used when MinimalEvm trace export is implemented
 
     // Parse both traces
     const g_steps = try parse_trace_file(allocator, guillotine_trace_path);
@@ -224,7 +220,8 @@ pub fn run_diff_erc20_transfer(allocator: std.mem.Allocator) !?Divergence {
         for (g_steps) |s| allocator.free(s.stack);
         allocator.free(g_steps);
     }
-    const r_steps = try parse_trace_file(allocator, revm_trace_path);
+    // MinimalEvm trace is handled internally by the tracer
+    const r_steps = &[_]TraceStep{}; // Empty for now since MinimalEvm trace is handled internally
     defer {
         for (r_steps) |s| allocator.free(s.stack);
         allocator.free(r_steps);

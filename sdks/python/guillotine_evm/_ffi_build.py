@@ -12,121 +12,99 @@ ffibuilder = FFI()
 
 # Define the C interface based on the existing headers
 ffibuilder.cdef("""
-    // Error codes
-    typedef enum {
-        GUILLOTINE_OK = 0,
-        GUILLOTINE_ERROR_MEMORY = 1,
-        GUILLOTINE_ERROR_INVALID_PARAM = 2,
-        GUILLOTINE_ERROR_VM_NOT_INITIALIZED = 3,
-        GUILLOTINE_ERROR_EXECUTION_FAILED = 4,
-        GUILLOTINE_ERROR_INVALID_ADDRESS = 5,
-        GUILLOTINE_ERROR_INVALID_BYTECODE = 6,
-    } GuillotineErrorCode;
+    // Opaque handle to EVM instance
+    typedef void* EvmHandle;
 
-    // Opaque pointer types
-    typedef struct GuillotineVm GuillotineVm;
-    typedef struct GuillotineDatabase GuillotineDatabase;
-
-    // Address type (20 bytes)
+    // Block information structure
     typedef struct {
-        uint8_t bytes[20];
-    } GuillotineAddress;
+        uint64_t number;
+        uint64_t timestamp;
+        uint64_t gas_limit;
+        uint8_t coinbase[20];
+        uint64_t base_fee;
+        uint64_t chain_id;
+        uint64_t difficulty;
+        uint8_t prev_randao[32];
+    } BlockInfoFFI;
 
-    // U256 type (32 bytes, little-endian)
+    // Call parameters structure
     typedef struct {
-        uint8_t bytes[32];
-    } GuillotineU256;
+        uint8_t caller[20];
+        uint8_t to[20];
+        uint8_t value[32];
+        const uint8_t* input;
+        size_t input_len;
+        uint64_t gas;
+        uint8_t call_type; // 0=CALL, 1=DELEGATECALL, 2=STATICCALL, 3=CREATE, 4=CREATE2
+        uint8_t salt[32];   // For CREATE2
+    } CallParams;
 
-    // Execution result
+    // Result structure
     typedef struct {
         bool success;
-        uint64_t gas_used;
-        uint8_t* output;
+        uint64_t gas_left;
+        const uint8_t* output;
         size_t output_len;
-        char* error_message; // NULL if no error
-    } GuillotineExecutionResult;
+        const char* error_message;
+    } EvmResult;
 
-    // VM creation and destruction
-    GuillotineVm* guillotine_vm_create(void);
-    void guillotine_vm_destroy(GuillotineVm* vm);
+    // Initialize the FFI library
+    void guillotine_init(void);
 
-    // State management
-    bool guillotine_set_balance(GuillotineVm* vm, const GuillotineAddress* address, const GuillotineU256* balance);
-    bool guillotine_get_balance(GuillotineVm* vm, const GuillotineAddress* address, GuillotineU256* balance);
-    bool guillotine_set_code(GuillotineVm* vm, const GuillotineAddress* address, const uint8_t* code, size_t code_len);
-    bool guillotine_set_storage(GuillotineVm* vm, const GuillotineAddress* address, const GuillotineU256* key, const GuillotineU256* value);
-    bool guillotine_get_storage(GuillotineVm* vm, const GuillotineAddress* address, const GuillotineU256* key, GuillotineU256* value);
+    // Clean up the FFI library
+    void guillotine_cleanup(void);
 
-    // Execution
-    GuillotineExecutionResult guillotine_execute(
-        GuillotineVm* vm,
-        const GuillotineAddress* from,
-        const GuillotineAddress* to,
-        const GuillotineU256* value,
-        const uint8_t* input,
-        size_t input_len,
-        uint64_t gas_limit
-    );
+    // Create a new EVM instance
+    EvmHandle guillotine_evm_create(const BlockInfoFFI* block_info);
 
-    // Result cleanup
-    void guillotine_free_result(GuillotineExecutionResult* result);
+    // Destroy an EVM instance
+    void guillotine_evm_destroy(EvmHandle handle);
 
-    // Utility functions
-    void guillotine_address_from_bytes(const uint8_t* bytes, GuillotineAddress* address);
-    void guillotine_u256_from_u64(uint64_t value, GuillotineU256* u256);
-    void guillotine_u256_from_bytes(const uint8_t* bytes, GuillotineU256* u256);
+    // Set account balance
+    bool guillotine_set_balance(EvmHandle handle, const uint8_t address[20], const uint8_t balance[32]);
 
-    // Primitives API
-    int primitives_init(void);
-    void primitives_deinit(void);
-    int primitives_address_from_bytes(const uint8_t* bytes_ptr, GuillotineAddress* out_ptr);
-    int primitives_address_is_zero(const GuillotineAddress* addr_ptr);
-    int primitives_u256_from_bytes_le(const uint8_t* bytes_ptr, GuillotineU256* out_ptr);
-    int primitives_u256_to_bytes_le(const GuillotineU256* value_ptr, uint8_t* out_ptr);
-    const char* primitives_version(void);
+    // Set contract code
+    bool guillotine_set_code(EvmHandle handle, const uint8_t address[20], const uint8_t* code, size_t code_len);
 
-    // EVM API
-    int evm_init(void);
-    void evm_deinit(void);
-    int evm_execute(
-        const uint8_t* bytecode_ptr,
-        size_t bytecode_len,
-        const uint8_t* caller_ptr,
-        uint64_t value,
-        uint64_t gas_limit,
-        GuillotineExecutionResult* result_ptr
-    );
-    int evm_is_initialized(void);
-    const char* evm_version(void);
+    // Execute a call
+    EvmResult* guillotine_call(EvmHandle handle, const CallParams* params);
+
+    // Simulate a call (doesn't commit state)
+    EvmResult* guillotine_simulate(EvmHandle handle, const CallParams* params);
+
+    // Free result structure
+    void guillotine_free_result(EvmResult* result);
+
+    // Free output buffer
+    void guillotine_free_output(uint8_t* output, size_t len);
+
+    // Get last error message
+    const char* guillotine_get_last_error(void);
 """)
 
 # Determine the library path based on the build
 def get_library_path():
     """Find the compiled Guillotine library."""
     # Look for the library in common build locations
-    project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-    
-    # Common library names and locations
+    # From sdks/python/guillotine_evm/_ffi_build.py, we need to go up 4 levels to reach project root
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+
+    # We specifically want the static library to avoid dynamic linking issues
     library_names = [
-        "libGuillotine.a",
-        "libGuillotine.so", 
-        "libGuillotine.dylib",
-        "Guillotine.dll"
+        "libguillotine_ffi_static.a",
     ]
-    
+
     search_paths = [
         os.path.join(project_root, "zig-out", "lib"),
-        os.path.join(project_root, "zig-out", "bin"),
-        os.path.join(project_root, "target", "release"),
-        os.path.join(project_root, "target", "debug"),
     ]
-    
+
     for path in search_paths:
         for lib_name in library_names:
             lib_path = os.path.join(path, lib_name)
             if os.path.exists(lib_path):
+                print(f"Successfully found Guillotine library at {lib_path}")
                 return lib_path
-    
+
     # If not found, try to build it
     print("Library not found. Please build the main project first with 'zig build'")
     return None
@@ -141,13 +119,11 @@ if library_path:
         #include <string.h>
         #include <stdbool.h>
         #include <stdint.h>
-        
-        // Function declarations will be linked from the static library
+        #include "guillotine_ffi.h"
         """,
-        libraries=["Guillotine"],
-        library_dirs=[os.path.dirname(library_path)] if library_path else [],
+        extra_objects=[library_path] if library_path else [],
         include_dirs=[
-            os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "src"),
+            os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "sdks", "swift", "Sources", "GuillotineFFI", "include"),
         ]
     )
 else:

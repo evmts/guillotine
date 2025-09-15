@@ -22,7 +22,26 @@
 
 **Current Status**: DO NOT USE IN PRODUCTION
 
-Guillotine is not suitable for production use at this time. Any use of Guillotine should be considered purely experimental. There are known bugs and TODOs. Follow the [issue tracker](https://github.com/evmts/Guillotine/issues) for features planned for Beta.
+Guillotine is not suitable for production use at this time. Any use of Guillotine should be considered purely experimental.
+
+### 📊 Ethereum Specification Test Results
+
+**Latest Test Run**: 159 tests executed
+- ✅ **35 passing** (22.0% pass rate)
+- ❌ **124 failing** (78.0% fail rate)
+
+**Failure Categories**:
+- `AccountNotFound` errors: ~30% of failures (account state management issues in Zig EVM)
+- `EVM execution failed`: ~25% of failures (gas/execution issues in Zig EVM)
+- Assembly syntax tests: ~20% of failures (Python test infrastructure limitation - not yet implemented)
+- Invalid hex data: ~15% of failures (Python SDK spec compatibility issue)
+- File parsing errors: ~10% of failures (Python test infrastructure - YAML format not yet supported)
+
+Note: Some failures are due to the Python SDK and test infrastructure not being fully spec-compliant yet, rather than issues in the core Zig EVM implementation.
+
+**Current Development Focus**: Our primary goal is achieving 100% Ethereum specification compliance while ensuring complete safety, debuggability, and observability through our tracer system ([`src/tracer/tracer.zig`](src/tracer/tracer.zig)). The tracer provides comprehensive execution monitoring, differential testing against a reference implementation, and detailed error reporting for every opcode.
+
+See [test report](specs/test_report.md) for detailed results. For an in-depth understanding of Guillotine's design and implementation, see our comprehensive [Architecture Documentation](docs/pages/architecture.mdx). Follow the [issue tracker](https://github.com/evmts/Guillotine/issues) for features planned for Beta.
 
 **Network Support**: Currently only **Ethereum Mainnet** is supported. Planned for Beta:
 
@@ -52,7 +71,7 @@ Guillotine is not suitable for production use at this time. Any use of Guillotin
 - 📚 **Well documented**
 - 🎨 **Fun** - Guillotine is a fun way to dive into Zig and fun/easy to [contribute](./CONTRIBUTING.md) to
 - 🤖 **LLM-friendly**
-- 🧪 **Robust** - Guillotine takes testing and architecture very seriously with [full unit tests](./src) for all files, a robust [E2E test suite](./test/e2e), [fuzz testing](./test/fuzz), [differential testing vs REVM](./test/differential), and [benchmark testing](./test/benchmark)
+- 🧪 **Robust** - Guillotine takes testing and architecture very seriously with [full unit tests](./src) for all files, a robust [E2E test suite](./test/e2e), [fuzz testing](./test/fuzz), [differential testing](./test/differential) using MinimalEvm, and [benchmark testing](./test/benchmark)
 - ✨ **Useful** - 🚧 Coming soon 🚧 Guillotine is building a powerful [CLI](https://github.com/evmts/Guillotine/issues) and [native app](https://github.com/evmts/Guillotine/issues) that you can think of as a local-first, Tenderly-like tool
 
 ---
@@ -89,21 +108,37 @@ These benchmarks were taken using the [evm-bench](https://github.com/ziyadedher/
 - Benchmarking infra can be seen in previous commits but is currently being moved to its [own dedicated repo](https://github.com/evmts/evm-benchmarks).
 - Looking for contributors to help set up easily reproducible benchmarks
 
-| Test Case               | Guillotine | REVM     | Geth     | evmone   |
-| ----------------------- | ---------- | -------- | -------- | -------- |
-| erc20-approval-transfer | 1.59 ms    | 1.67 ms  | 3.65 ms  | 1.56 ms  |
-| erc20-mint              | 4.28 ms    | 5.76 ms  | 12.84 ms | 4.26 ms  |
-| erc20-transfer          | 6.65 ms    | 8.30 ms  | 17.50 ms | 6.01 ms  |
-| ten-thousand-hashes     | 2.46 ms    | 3.31 ms  | 9.36 ms  | 2.90 ms  |
-| snailtracer             | 26.41 ms   | 39.01 ms | 86.02 ms | 27.15 ms |
+| Test Case               | evmone   | Guillotine | REVM     | Geth     |
+| ----------------------- | -------- | ---------- | -------- | -------- |
+| erc20-approval-transfer | 1.56 ms  | 1.59 ms    | 1.67 ms  | 3.65 ms  |
+| erc20-mint              | 4.26 ms  | 4.28 ms    | 5.76 ms  | 12.84 ms |
+| erc20-transfer          | 6.01 ms  | 6.65 ms    | 8.30 ms  | 17.50 ms |
+| ten-thousand-hashes     | 2.90 ms  | 2.46 ms    | 3.31 ms  | 9.36 ms  |
+| snailtracer             | 27.15 ms | 26.41 ms   | 39.01 ms | 86.02 ms |
 
 ---
 
 ### Bundle size 🚧
 
-In past commits we reduced the EVM to ~110 KB, with further improvements expected.
+```
+WASM Bundle Sizes
+┌───────────────────────────────────────────────────────────────────────────────────────────┐
+│ Package         │ Size                                      │ Mode         │ Precompiles   │
+├───────────────────────────────────────────────────────────────────────────────────────────┤
+│ MinimalEvm     │ ▓▓▓ 56KB                                   │ ReleaseSmall │ ✗ Not included│
+│ Guillotine EVM │ ▓▓▓▓▓▓ 119KB                              │ ReleaseSmall │ ✗ Not included│
+│ Primitives     │ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ 687KB │ ReleaseSmall │ ✗ Not included│
+│ Full Package   │ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ 1.1MB │ ReleaseFast  │ ✓ Included    │
+└───────────────────────────────────────────────────────────────────────────────────────────┘
+```
 
-- We’re currently focused on `ReleaseFast`; `ReleaseSmall` support returns soon
+- **MinimalEvm**: Minimal implementation focused on tracing (57,641 bytes)
+- **Guillotine EVM**: Core EVM implementation
+- **Primitives**: Complete primitives library
+- **Full Package**: All features including precompiles
+
+Note: Smaller packages use `ReleaseSmall` optimization for size, while the full package uses `ReleaseFast` for performance.
+**ReleaseSafe** builds (recommended for alpha) are larger due to additional safety features and validation overhead.
 
 ---
 
@@ -138,12 +173,34 @@ There are many more optimizations that have not been implemented yet. The bigges
 
 ### How is Guillotine so safe?
 
-Guillotine is not yet “safe”; it’s in early alpha. But we do have features that help improve safety:
+Guillotine is in early alpha, but we prioritize safety through multiple build modes and extensive testing:
 
-- Guillotine can be built in `Debug`, `ReleaseFast`, `ReleaseSmall`, and `ReleaseSafe`.
-- We recommend `ReleaseSafe` while in alpha.
-- `ReleaseSafe` preserves debug‑mode‑only defensive checks, memory safety features, and other safeguards in the final binary.
-- Guillotine also features extensive unit, E2E, fuzz, benchmark, and differential test suites.
+#### Build Modes
+
+- **Debug**: Full debugging symbols and runtime checks
+- **ReleaseFast**: Optimized for maximum performance
+- **ReleaseSmall**: Optimized for minimal bundle size
+- **ReleaseSafe** (⭐ **RECOMMENDED FOR ALPHA**): Our most defensive build mode
+
+#### ReleaseSafe Features
+
+**ReleaseSafe** includes a comprehensive safety system that runs a simplified EVM as a sidecar to validate execution:
+
+- ✅ **Parallel Validation**: Runs a minimal EVM implementation alongside to cross-check results
+- ✅ **Safety Checks**: Validates execution at every step to ensure correctness
+- ✅ **Infinite Loop Protection**: Prevents runaway execution with instruction limits
+- ✅ **Advanced Tracing**: Full event system for monitoring EVM execution
+- ✅ **Debugging Support**: Can run as a debugger with step-by-step execution
+- ✅ **Memory Safety**: Preserves all debug-mode defensive checks
+- ✅ **Comprehensive Logging**: Detailed logging of all EVM operations
+
+While ReleaseSafe has performance overhead compared to ReleaseFast, it provides critical safety guarantees during alpha development.
+
+#### Additional Safety Measures
+
+- Extensive unit, E2E, fuzz, benchmark, and differential test suites
+- Continuous validation against reference implementations
+- Memory safety checks and bounds validation
 
 ---
 
@@ -245,7 +302,7 @@ We deeply appreciate these excellent EVM implementations that served as inspirat
 - **[EthereumJS](https://github.com/ethereumjs/ethereumjs-monorepo)** – A simple pure JavaScript/TypeScript EVM implementation used by Tevm featuring zero Wasm dependencies
 - **[evmone](https://github.com/ethereum/evmone)** – A hyperoptimized C++ EVM implementation known for its exceptional performance
 - **[Geth](https://github.com/ethereum/go-ethereum)** – The canonical Go Ethereum client. An EVM implementation that perfectly balances performance with simplicity
-- **[REVM](https://github.com/bluealloy/revm)** – A beautifully architected, highly customizable Rust EVM implementation. Used internally for differential tests.
+- **[REVM](https://github.com/bluealloy/revm)** – A beautifully architected, highly customizable Rust EVM implementation.
 
 ---
 

@@ -187,7 +187,11 @@ export class Bytes {
     if (index < 0 || index >= this._data.length) {
       throw new Error(`Index out of bounds: ${index}`);
     }
-    return this._data[index];
+    const value = this._data[index];
+    if (value === undefined) {
+      throw new Error(`Unexpected undefined value at index ${index}`);
+    }
+    return value;
   }
 
   /**

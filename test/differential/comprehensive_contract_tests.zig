@@ -2,7 +2,6 @@ const std = @import("std");
 const testing = std.testing;
 const primitives = @import("primitives");
 const guillotine_evm = @import("evm");
-const revm = @import("revm");
 const differential_testor = @import("differential_testor.zig");
 
 const DifferentialTestor = differential_testor.DifferentialTestor;

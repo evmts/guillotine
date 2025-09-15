@@ -10,12 +10,20 @@ pub fn Handlers(comptime FrameType: type) type {
         pub const Error = FrameType.Error;
         pub const Dispatch = FrameType.Dispatch;
         pub const WordType = FrameType.WordType;
+        const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
+
+        /// Continue to next instruction with afterInstruction tracking
+        pub inline fn next_instruction(self: *FrameType, cursor: [*]const Dispatch.Item, comptime opcode: Dispatch.UnifiedOpcode) Error!noreturn {
+            const op_data = dispatch_opcode_data.getOpData(opcode, Dispatch, Dispatch.Item, cursor);
+            self.afterInstruction(opcode, op_data.next_handler, op_data.next_cursor.cursor);
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+        }
 
         /// JUMP opcode (0x56) - Unconditional jump.
         /// Pops destination from stack and transfers control to that location.
         /// The destination must be a valid JUMPDEST.
-        pub fn jump(self: *FrameType, _: [*]const Dispatch.Item) Error!noreturn {
-            std.debug.assert(self.stack.size() >= 1); // JUMP requires 1 stack item
+        pub fn jump(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            self.beforeInstruction(.JUMP, cursor);
             // Get jump table from frame
             const jump_table = self.jump_table;
 
@@ -24,6 +32,7 @@ pub fn Handlers(comptime FrameType: type) type {
             // Validate jump destination range
             if (dest > std.math.maxInt(u32)) {
                 log.warn("JUMP: Invalid destination out of range: 0x{x}", .{dest});
+                self.afterComplete(.JUMP);
                 return Error.InvalidJump;
             }
 
@@ -38,10 +47,12 @@ pub fn Handlers(comptime FrameType: type) type {
                     frame_handlers.setCurrentPc(dest_pc);
                 }
 
+                self.afterInstruction(.JUMP, jump_dispatch.cursor[0].opcode_handler, jump_dispatch.cursor);
                 return @call(FrameType.getTailCallModifier(), jump_dispatch.cursor[0].opcode_handler, .{ self, jump_dispatch.cursor });
             } else {
                 // Not a valid JUMPDEST
                 log.warn("JUMP: Invalid jump destination PC=0x{x} - not a JUMPDEST", .{dest_pc});
+                self.afterComplete(.JUMP);
                 return Error.InvalidJump;
             }
         }
@@ -50,70 +61,96 @@ pub fn Handlers(comptime FrameType: type) type {
         /// Pops destination and condition from stack.
         /// Jumps to destination if condition is non-zero, otherwise continues to next instruction.
         pub fn jumpi(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            std.debug.assert(self.stack.size() >= 2); // JUMPI requires 2 stack items
-            // Get jump table from frame
+            self.beforeInstruction(.JUMPI, cursor);
             const jump_table = self.jump_table;
 
-            const dest = self.stack.pop_unsafe(); // Top of stack (destination)
-            const condition = self.stack.pop_unsafe(); // Second from top (condition)
+            const dest = self.stack.pop_unsafe();
+            const condition = self.stack.pop_unsafe();
 
             if (condition != 0) {
                 if (dest > std.math.maxInt(u32)) {
                     log.warn("JUMPI: Invalid destination out of range: 0x{x}", .{dest});
+                    self.afterComplete(.JUMPI);
                     return Error.InvalidJump;
                 }
 
                 const dest_pc: FrameType.PcType = @intCast(dest);
 
-                // Use binary search to find valid jump destination
                 if (jump_table.findJumpTarget(dest_pc)) |jump_dispatch| {
-                    // Found valid JUMPDEST - update thread-local PC for tracing (only when tracing is enabled)
                     const build_options = @import("build_options");
                     if (comptime build_options.enable_tracing) {
                         const frame_handlers = @import("../frame/frame_handlers.zig");
                         frame_handlers.setCurrentPc(dest_pc);
                     }
 
+                    self.afterInstruction(.JUMPI, jump_dispatch.cursor[0].opcode_handler, jump_dispatch.cursor);
                     return @call(FrameType.getTailCallModifier(), jump_dispatch.cursor[0].opcode_handler, .{ self, jump_dispatch.cursor });
                 } else {
                     // Not a valid JUMPDEST
                     log.warn("JUMPI: Invalid jump destination PC=0x{x} - not a JUMPDEST", .{dest_pc});
+                    self.afterComplete(.JUMPI);
                     return Error.InvalidJump;
                 }
             } else {
-                // Condition is false, continue to next instruction
-                // JUMPI has jump_dest metadata at cursor[1], so next instruction is at cursor + 2
-                const next_cursor = cursor + 2;
-                return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+                @branchHint(.likely);
+                return next_instruction(self, cursor, .JUMPI);
             }
         }
 
         /// JUMPDEST opcode (0x5b) - Mark valid jump destination.
         /// This opcode marks a valid destination for JUMP and JUMPI operations.
-        /// It also serves as a gas consumption point for the entire basic block.
+        /// It also serves as a gas consumption point and stack validation point for the entire basic block.
         pub fn jumpdest(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            self.beforeInstruction(.JUMPDEST, cursor);
             // Jump table not needed for JUMPDEST itself
             const dispatch = Dispatch{ .cursor = cursor };
             // JUMPDEST consumes gas for the entire basic block (static + dynamic)
             const op_data = dispatch.getOpData(.JUMPDEST);
             const gas_cost = op_data.metadata.gas;
+            const min_stack = op_data.metadata.min_stack;
+            const max_stack = op_data.metadata.max_stack;
 
             // Check and consume gas for the entire basic block
             // Use negative gas pattern for single-branch out-of-gas detection
             self.gas_remaining -= @as(FrameType.GasType, @intCast(gas_cost));
             if (self.gas_remaining < 0) {
                 log.warn("JUMPDEST: Out of gas - required={}, available={}", .{ gas_cost, self.gas_remaining + @as(FrameType.GasType, @intCast(gas_cost)) });
+                self.afterComplete(.JUMPDEST);
                 return Error.OutOfGas;
             }
 
-            return @call(FrameType.getTailCallModifier(), op_data.next.cursor[0].opcode_handler, .{ self, op_data.next.cursor });
+            // Check stack requirements for the entire basic block
+            const current_stack_size = self.stack.size();
+
+            // Check minimum stack requirement (won't underflow)
+            if (min_stack > 0 and current_stack_size < @as(usize, @intCast(min_stack))) {
+                log.warn("JUMPDEST: Stack underflow - required min={}, current={}", .{ min_stack, current_stack_size });
+                self.afterComplete(.JUMPDEST);
+                return Error.StackUnderflow;
+            }
+
+            // Check maximum stack requirement (won't overflow)
+            // max_stack represents the net stack change, so we need to ensure
+            // current_stack_size + max_stack <= stack_capacity
+            if (max_stack > 0) {
+                const stack_capacity = @TypeOf(self.stack).stack_capacity;
+                const max_final_size = @as(isize, @intCast(current_stack_size)) + @as(isize, max_stack);
+                if (max_final_size > @as(isize, @intCast(stack_capacity))) {
+                    log.warn("JUMPDEST: Stack overflow - current={}, max_change={}, capacity={}", .{ current_stack_size, max_stack, stack_capacity });
+                    self.afterComplete(.JUMPDEST);
+                    return Error.StackOverflow;
+                }
+            }
+
+            self.afterInstruction(.JUMPDEST, op_data.next_handler, op_data.next_cursor.cursor);
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// PC opcode (0x58) - Get program counter.
         /// Pushes the current program counter onto the stack.
         /// The actual PC value is provided by the planner through metadata.
         pub fn pc(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
+            self.beforeInstruction(.PC, cursor);
             // Jump table not needed for PC
             const dispatch = Dispatch{ .cursor = cursor };
             // Get PC value from metadata
@@ -121,7 +158,8 @@ pub fn Handlers(comptime FrameType: type) type {
 
             self.stack.push_unsafe(op_data.metadata.value);
 
-            return @call(FrameType.getTailCallModifier(), op_data.next.cursor[0].opcode_handler, .{ self, op_data.next.cursor });
+            self.afterInstruction(.PC, op_data.next_handler, op_data.next_cursor.cursor);
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
     };
 }
@@ -131,7 +169,7 @@ pub fn Handlers(comptime FrameType: type) type {
 const testing = std.testing;
 const Frame = @import("../frame/frame.zig").Frame;
 const dispatch_mod = @import("../preprocessor/dispatch.zig");
-const NoOpTracer = @import("../tracer/tracer.zig").NoOpTracer;
+const DefaultTracer = @import("../tracer/tracer.zig").DefaultTracer;
 const MemoryDatabase = @import("../storage/memory_database.zig").MemoryDatabase;
 const Address = @import("primitives").Address;
 const bytecode_mod = @import("../bytecode/bytecode.zig");
@@ -253,7 +291,7 @@ test "JUMPDEST opcode - gas consumption" {
     cursor[1] = .{ .opcode_handler = &mock_handler };
 
     // Set jump dest metadata with gas cost for the basic block
-    cursor[0].metadata = .{ .jump_dest = .{ .gas = 500 } };
+    cursor[0].metadata = .{ .jump_dest = .{ .gas = 500, .min_stack = 0, .max_stack = 0 } };
 
     const dispatch = TestFrame.Dispatch{
         .cursor = &cursor,
@@ -287,7 +325,7 @@ test "JUMPDEST opcode - out of gas" {
     cursor[1] = .{ .opcode_handler = &mock_handler };
 
     // Set jump dest metadata with high gas cost
-    cursor[0].metadata = .{ .jump_dest = .{ .gas = 1000 } };
+    cursor[0].metadata = .{ .jump_dest = .{ .gas = 1000, .min_stack = 0, .max_stack = 0 } };
 
     const dispatch = TestFrame.Dispatch{
         .cursor = &cursor,
@@ -451,7 +489,7 @@ test "JUMPDEST opcode - zero gas cost" {
     cursor[0] = .{ .opcode_handler = &mock_handler };
     cursor[1] = .{ .opcode_handler = &mock_handler };
 
-    cursor[0].metadata = .{ .jump_dest = .{ .gas = 0 } };
+    cursor[0].metadata = .{ .jump_dest = .{ .gas = 0, .min_stack = 0, .max_stack = 0 } };
 
     const dispatch = TestFrame.Dispatch{
         .cursor = &cursor,
@@ -551,7 +589,7 @@ test "JUMP opcode - invalid destination should revert" {
         0x5b, // JUMPDEST at position 5
         0x00, // STOP
     };
-    var bytecode = try TestBytecode.init(testing.allocator, &bytecode_data);
+    var bytecode = try TestBytecode.init(testing.allocator, &bytecode_data, null);
     defer bytecode.deinit();
 
     // Create dispatch with jump table
@@ -598,7 +636,7 @@ test "JUMPI opcode - invalid destination should revert when taken" {
         0x5b, // JUMPDEST at position 6
         0x00, // STOP
     };
-    var bytecode = try TestBytecode.init(testing.allocator, &bytecode_data);
+    var bytecode = try TestBytecode.init(testing.allocator, &bytecode_data, null);
     defer bytecode.deinit();
 
     // Create dispatch with jump table
@@ -798,7 +836,7 @@ test "JUMPDEST opcode - various gas costs" {
         cursor[0] = .{ .opcode_handler = &mock_handler };
         cursor[1] = .{ .opcode_handler = &mock_handler };
 
-        cursor[0].metadata = .{ .jump_dest = .{ .gas = gas_cost } };
+        cursor[0].metadata = .{ .jump_dest = .{ .gas = gas_cost, .min_stack = 0, .max_stack = 0 } };
 
         const dispatch = TestFrame.Dispatch{
             .cursor = &cursor,
@@ -845,7 +883,7 @@ test "JUMPDEST opcode - exact gas boundary" {
         cursor[0] = .{ .opcode_handler = &mock_handler };
         cursor[1] = .{ .opcode_handler = &mock_handler };
 
-        cursor[0].metadata = .{ .jump_dest = .{ .gas = tc.required_gas } };
+        cursor[0].metadata = .{ .jump_dest = .{ .gas = tc.required_gas, .min_stack = 0, .max_stack = 0 } };
 
         const dispatch = TestFrame.Dispatch{
             .cursor = &cursor,
@@ -976,6 +1014,114 @@ test "Jump operations - gas consumption patterns" {
 
     // Gas should not change (PC is a simple push operation, gas handled elsewhere)
     try testing.expectEqual(initial_gas, frame.gas_remaining);
+}
+
+test "JUMPDEST opcode - stack requirements validation" {
+    var frame = try createTestFrame(testing.allocator);
+    defer frame.deinit(testing.allocator);
+
+    // Test stack underflow check
+    {
+        // Set stack with 2 items
+        try frame.stack.push(100);
+        try frame.stack.push(200);
+
+        var cursor: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
+        const mock_handler = struct {
+            fn handler(f: TestFrame, d: TestFrame.Dispatch) TestFrame.Error!TestFrame.Success {
+                _ = f;
+                _ = d;
+                return TestFrame.Success.stop;
+            }
+        }.handler;
+
+        cursor[0] = .{ .opcode_handler = &mock_handler };
+        cursor[1] = .{ .opcode_handler = &mock_handler };
+
+        // Require 3 items minimum but we only have 2
+        cursor[0].metadata = .{ .jump_dest = .{ .gas = 100, .min_stack = 3, .max_stack = 0 } };
+
+        const dispatch = TestFrame.Dispatch{
+            .cursor = &cursor,
+            .bytecode_length = 0,
+        };
+
+        const result = TestFrame.JumpHandlers.jumpdest(frame, dispatch);
+        try testing.expectError(TestFrame.Error.StackUnderflow, result);
+    }
+
+    // Clear stack
+    while (frame.stack.len() > 0) {
+        _ = try frame.stack.pop();
+    }
+
+    // Test stack overflow check
+    {
+        // Fill stack to near maximum (leave room for testing)
+        const near_max = 1020;
+        for (0..near_max) |i| {
+            try frame.stack.push(@as(u256, i));
+        }
+
+        var cursor: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
+        const mock_handler = struct {
+            fn handler(f: TestFrame, d: TestFrame.Dispatch) TestFrame.Error!TestFrame.Success {
+                _ = f;
+                _ = d;
+                return TestFrame.Success.stop;
+            }
+        }.handler;
+
+        cursor[0] = .{ .opcode_handler = &mock_handler };
+        cursor[1] = .{ .opcode_handler = &mock_handler };
+
+        // max_stack of 10 would overflow (1020 + 10 > 1024)
+        cursor[0].metadata = .{ .jump_dest = .{ .gas = 100, .min_stack = 0, .max_stack = 10 } };
+
+        const dispatch = TestFrame.Dispatch{
+            .cursor = &cursor,
+            .bytecode_length = 0,
+        };
+
+        const result = TestFrame.JumpHandlers.jumpdest(frame, dispatch);
+        try testing.expectError(TestFrame.Error.StackOverflow, result);
+    }
+
+    // Clear stack
+    while (frame.stack.len() > 0) {
+        _ = try frame.stack.pop();
+    }
+
+    // Test valid stack requirements
+    {
+        // Set stack with 5 items
+        for (0..5) |i| {
+            try frame.stack.push(@as(u256, i));
+        }
+
+        var cursor: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
+        const mock_handler = struct {
+            fn handler(f: TestFrame, d: TestFrame.Dispatch) TestFrame.Error!TestFrame.Success {
+                _ = f;
+                _ = d;
+                return TestFrame.Success.stop;
+            }
+        }.handler;
+
+        cursor[0] = .{ .opcode_handler = &mock_handler };
+        cursor[1] = .{ .opcode_handler = &mock_handler };
+
+        // Valid requirements: min=3 (we have 5), max=2 (5+2=7 < 1024)
+        cursor[0].metadata = .{ .jump_dest = .{ .gas = 100, .min_stack = 3, .max_stack = 2 } };
+
+        const dispatch = TestFrame.Dispatch{
+            .cursor = &cursor,
+            .bytecode_length = 0,
+        };
+
+        _ = try TestFrame.JumpHandlers.jumpdest(frame, dispatch);
+        // Should succeed - no error
+    }
 }
 
 test "Jump operations - maximum stack depth" {

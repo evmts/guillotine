@@ -25,9 +25,8 @@ pub const Evm = @import("evm.zig").Evm;
 pub const EvmConfig = @import("evm_config.zig").EvmConfig;
 
 // Build-configured EVM
-const evm_build_config = @import("evm_build_config.zig");
-pub const getBuildConfig = evm_build_config.getBuildConfig;
-pub const BuildConfiguredEvm = evm_build_config.BuildConfiguredEvm;
+pub const getBuildConfig = EvmConfig.fromBuildOptions;
+pub const BuildConfiguredEvm = Evm(EvmConfig.fromBuildOptions());
 
 // Fixtures for testing
 pub const FixtureContract = @import("_test_utils/fixtures/popular_contracts.zig").FixtureContract;
@@ -45,9 +44,9 @@ pub const TracerConfig = @import("tracer/tracer.zig").TracerConfig;
 pub const MemoryCaptureMode = @import("tracer/tracer.zig").MemoryCaptureMode;
 pub const LoggingTracer = @import("tracer/tracer.zig").LoggingTracer;
 pub const FileTracer = @import("tracer/tracer.zig").FileTracer;
-pub const NoOpTracer = @import("tracer/tracer.zig").NoOpTracer;
+pub const DefaultTracer = @import("tracer/tracer.zig").DefaultTracer;
 pub const DebuggingTracer = @import("tracer/tracer.zig").DebuggingTracer;
-pub const differential_tracer = @import("_test_utils/differential_tracer.zig");
+// differential_tracer removed - using MinimalEvm for differential testing
 pub const trace_comparer = @import("_test_utils/trace_comparer.zig");
 pub const JSONRPCTracer = @import("tracer/tracer.zig").JSONRPCTracer;
 
@@ -113,11 +112,14 @@ test {
     _ = @import("instructions/handlers_stack.zig");
     _ = @import("instructions/handlers_storage.zig");
     _ = @import("instructions/handlers_system.zig");
-    
+
     // Test bytecode modules
     _ = @import("bytecode/bytecode_tests.zig");
-    _ = @import("bytecode/bytecode_jump_validation_tests.zig");
-    
+    _ = @import("bytecode/bytecode_jump_validation_test.zig");
+
+    // Test internal modules
+    _ = @import("internal/safety_counter.zig");
+
     // C API modules are not compiled in tests in this configuration
     // _ = @import("root_c.zig");
 }

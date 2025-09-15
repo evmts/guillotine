@@ -17,33 +17,57 @@ pub const GrowingArenaAllocator = struct {
     max_capacity: usize,
     /// Growth factor (as a percentage, e.g., 150 = 50% growth)
     growth_factor: u32,
+    /// Optional tracer for debugging and visibility
+    tracer: ?*anyopaque,
 
     /// Initialize a new growing arena allocator
     /// @param base_allocator: The underlying allocator to use
     /// @param initial_capacity: Initial capacity to preallocate (also used as max retained capacity)
     /// @param growth_factor: Growth percentage (e.g., 150 = 50% growth)
-    pub fn init(base_allocator: std.mem.Allocator, initial_capacity: usize, growth_factor: u32) Self {
+    pub fn init(base_allocator: std.mem.Allocator, initial_capacity: usize, growth_factor: u32) !Self {
         return initWithMaxCapacity(base_allocator, initial_capacity, initial_capacity, growth_factor);
     }
 
     /// Initialize with separate initial and max capacities
-    pub fn initWithMaxCapacity(base_allocator: std.mem.Allocator, initial_capacity: usize, max_capacity: usize, growth_factor: u32) Self {
+    pub fn initWithMaxCapacity(base_allocator: std.mem.Allocator, initial_capacity: usize, max_capacity: usize, growth_factor: u32) !Self {
+        return initWithMaxCapacityAndTracer(base_allocator, initial_capacity, max_capacity, growth_factor, null);
+    }
+
+    /// Initialize with separate initial and max capacities and optional tracer
+    pub fn initWithMaxCapacityAndTracer(base_allocator: std.mem.Allocator, initial_capacity: usize, max_capacity: usize, growth_factor: u32, tracer: ?*anyopaque) !Self {
         var arena = std.heap.ArenaAllocator.init(base_allocator);
+        errdefer arena.deinit();
         
         // Preallocate the initial capacity
+        var actual_capacity = initial_capacity;
         if (initial_capacity > 0) {
-            _ = arena.allocator().alloc(u8, initial_capacity) catch {};
+            const initial_alloc = arena.allocator().alloc(u8, initial_capacity) catch |err| {
+                // If we can't preallocate the requested capacity, start with 0
+                actual_capacity = 0;
+                return err;
+            };
+            _ = initial_alloc;
             _ = arena.reset(.retain_capacity);
         }
 
-        return Self{
+        const result = Self{
             .arena = arena,
             .base_allocator = base_allocator,
-            .current_capacity = initial_capacity,
+            .current_capacity = actual_capacity,
             .initial_capacity = initial_capacity,
             .max_capacity = max_capacity,
             .growth_factor = growth_factor,
+            .tracer = tracer,
         };
+
+        // Trace initialization
+        if (tracer) |t| {
+            const DefaultTracer = @import("tracer/tracer.zig").DefaultTracer;
+            const tracer_ptr = @as(*DefaultTracer, @ptrCast(@alignCast(t)));
+            tracer_ptr.onArenaInit(initial_capacity, max_capacity, growth_factor);
+        }
+
+        return result;
     }
 
     /// Deinitialize the allocator
@@ -66,47 +90,87 @@ pub const GrowingArenaAllocator = struct {
 
     /// Reset the arena while retaining capacity
     pub fn reset(self: *Self, mode: std.heap.ArenaAllocator.ResetMode) bool {
-        return self.arena.reset(mode);
+        const capacity_before = self.arena.queryCapacity();
+        const result = self.arena.reset(mode);
+        const capacity_after = self.arena.queryCapacity();
+
+        // Trace reset
+        if (self.tracer) |t| {
+            const DefaultTracer = @import("tracer/tracer.zig").DefaultTracer;
+            const tracer_ptr = @as(*DefaultTracer, @ptrCast(@alignCast(t)));
+            const mode_str = switch (mode) {
+                .retain_capacity => "retain_capacity",
+                .free_all => "free_all",
+            };
+            tracer_ptr.onArenaReset(mode_str, capacity_before, capacity_after);
+        }
+
+        return result;
     }
 
     /// Reset the arena to initial capacity
     /// This frees all memory and then pre-allocates the initial capacity again
-    pub fn resetToInitialCapacity(self: *Self) void {
+    pub fn resetToInitialCapacity(self: *Self) !void {
+        const capacity_before = self.arena.queryCapacity();
+
         // Free all memory
         _ = self.arena.reset(.free_all);
-        
+
         // Pre-allocate initial capacity again
         if (self.initial_capacity > 0) {
-            _ = self.arena.allocator().alloc(u8, self.initial_capacity) catch {};
+            const initial_alloc = try self.arena.allocator().alloc(u8, self.initial_capacity);
+            _ = initial_alloc;
             _ = self.arena.reset(.retain_capacity);
         }
-        
+
         // Reset current capacity tracker
         self.current_capacity = self.initial_capacity;
+
+        // Trace reset
+        if (self.tracer) |t| {
+            const DefaultTracer = @import("tracer/tracer.zig").DefaultTracer;
+            const tracer_ptr = @as(*DefaultTracer, @ptrCast(@alignCast(t)));
+            tracer_ptr.onArenaReset("reset_to_initial", capacity_before, self.initial_capacity);
+        }
     }
 
     /// Reset the arena while retaining capacity up to max_capacity limit
     /// This prevents unbounded memory growth while still being efficient
-    pub fn resetRetainCapacity(self: *Self) void {
+    pub fn resetRetainCapacity(self: *Self) !void {
         const current_actual_capacity = self.arena.queryCapacity();
-        
+        const capacity_before = current_actual_capacity;
+        var capacity_after: usize = undefined;
+        var reset_mode: []const u8 = undefined;
+
         // If we've grown beyond our max limit, reset to max capacity
         if (current_actual_capacity > self.max_capacity) {
             // Free all memory first
             _ = self.arena.reset(.free_all);
-            
+
             // Pre-allocate to max capacity
             if (self.max_capacity > 0) {
-                _ = self.arena.allocator().alloc(u8, self.max_capacity) catch {};
+                const max_alloc = try self.arena.allocator().alloc(u8, self.max_capacity);
+                _ = max_alloc;
                 _ = self.arena.reset(.retain_capacity);
             }
-            
+
             self.current_capacity = self.max_capacity;
+            capacity_after = self.max_capacity;
+            reset_mode = "retain_capped";
         } else {
             // Within limits, just reset and retain
             _ = self.arena.reset(.retain_capacity);
             // Update our tracked capacity to reflect actual growth
             self.current_capacity = current_actual_capacity;
+            capacity_after = current_actual_capacity;
+            reset_mode = "retain_capacity";
+        }
+
+        // Trace reset
+        if (self.tracer) |t| {
+            const DefaultTracer = @import("tracer/tracer.zig").DefaultTracer;
+            const tracer_ptr = @as(*DefaultTracer, @ptrCast(@alignCast(t)));
+            tracer_ptr.onArenaReset(reset_mode, capacity_before, capacity_after);
         }
     }
 
@@ -117,9 +181,18 @@ pub const GrowingArenaAllocator = struct {
 
     fn alloc(ctx: *anyopaque, len: usize, ptr_align: std.mem.Alignment, ret_addr: usize) ?[*]u8 {
         const self: *Self = @ptrCast(@alignCast(ctx));
-        
+
         // First, try to allocate with the current arena
         if (self.arena.allocator().rawAlloc(len, ptr_align, ret_addr)) |ptr| {
+            @branchHint(.likely);
+
+            // Trace successful allocation
+            if (self.tracer) |t| {
+                const DefaultTracer = @import("tracer/tracer.zig").DefaultTracer;
+                const tracer_ptr = @as(*DefaultTracer, @ptrCast(@alignCast(t)));
+                tracer_ptr.onArenaAlloc(len, @intFromEnum(ptr_align), self.current_capacity);
+            }
+
             return ptr;
         }
         
@@ -127,6 +200,8 @@ pub const GrowingArenaAllocator = struct {
         // Check if we need to grow the arena
         const current_used = self.arena.queryCapacity();
         if (current_used + len > self.current_capacity) {
+            const old_capacity = self.current_capacity;
+
             // Calculate new capacity with growth factor, respecting max limit
             var new_capacity = self.current_capacity;
             while (new_capacity < current_used + len) {
@@ -137,18 +212,48 @@ pub const GrowingArenaAllocator = struct {
                     break;
                 }
             }
-            
+
             // Try to preallocate more space
             const additional_capacity = new_capacity - self.current_capacity;
             if (additional_capacity > 0) {
                 // Allocate a dummy block to force the arena to grow
-                _ = self.arena.allocator().alloc(u8, additional_capacity) catch {};
-                self.current_capacity = new_capacity;
+                if (self.arena.allocator().alloc(u8, additional_capacity)) |dummy_alloc| {
+                    _ = dummy_alloc;
+                    self.current_capacity = new_capacity;
+
+                    // Trace growth
+                    if (self.tracer) |t| {
+                        const DefaultTracer = @import("tracer/tracer.zig").DefaultTracer;
+                        const tracer_ptr = @as(*DefaultTracer, @ptrCast(@alignCast(t)));
+                        tracer_ptr.onArenaGrow(old_capacity, new_capacity, len);
+                    }
+                } else |_| {
+                    // If we can't grow, continue with current capacity
+                    // The actual allocation attempt below may still succeed
+                }
             }
         }
         
         // Try allocation again after potential growth
-        return self.arena.allocator().rawAlloc(len, ptr_align, ret_addr);
+        const result = self.arena.allocator().rawAlloc(len, ptr_align, ret_addr);
+
+        if (result) |_| {
+            // Trace successful allocation after growth
+            if (self.tracer) |t| {
+                const DefaultTracer = @import("tracer/tracer.zig").DefaultTracer;
+                const tracer_ptr = @as(*DefaultTracer, @ptrCast(@alignCast(t)));
+                tracer_ptr.onArenaAlloc(len, @intFromEnum(ptr_align), self.current_capacity);
+            }
+        } else {
+            // Trace allocation failure
+            if (self.tracer) |t| {
+                const DefaultTracer = @import("tracer/tracer.zig").DefaultTracer;
+                const tracer_ptr = @as(*DefaultTracer, @ptrCast(@alignCast(t)));
+                tracer_ptr.onArenaAllocFailed(len, self.current_capacity, self.max_capacity);
+            }
+        }
+
+        return result;
     }
 
     fn resize(ctx: *anyopaque, buf: []u8, buf_align: std.mem.Alignment, new_len: usize, ret_addr: usize) bool {
@@ -174,7 +279,7 @@ pub const GrowingArenaAllocator = struct {
 };
 
 test "GrowingArenaAllocator basic functionality" {
-    var gaa = GrowingArenaAllocator.init(std.testing.allocator, 1024, 150);
+    var gaa = try GrowingArenaAllocator.init(std.testing.allocator, 1024, 150);
     defer gaa.deinit();
 
     const alloc = gaa.allocator();
@@ -193,7 +298,7 @@ test "GrowingArenaAllocator basic functionality" {
 }
 
 test "GrowingArenaAllocator growth strategy" {
-    var gaa = GrowingArenaAllocator.init(std.testing.allocator, 1000, 150);
+    var gaa = try GrowingArenaAllocator.init(std.testing.allocator, 1000, 150);
     defer gaa.deinit();
 
     const alloc = gaa.allocator();
@@ -212,7 +317,7 @@ test "GrowingArenaAllocator growth strategy" {
 
 test "GrowingArenaAllocator max capacity limit" {
     // Create allocator with 1KB initial and 4KB max
-    var gaa = GrowingArenaAllocator.initWithMaxCapacity(std.testing.allocator, 1024, 4096, 150);
+    var gaa = try GrowingArenaAllocator.initWithMaxCapacity(std.testing.allocator, 1024, 4096, 150);
     defer gaa.deinit();
 
     const alloc = gaa.allocator();
@@ -230,7 +335,7 @@ test "GrowingArenaAllocator max capacity limit" {
     const before_reset = grown_cap;
     
     // Reset with capacity retention
-    gaa.resetRetainCapacity();
+    try gaa.resetRetainCapacity();
     
     // After reset, if we were over max_capacity, we should have reset
     const reset_cap = gaa.queryCapacity();

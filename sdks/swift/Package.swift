@@ -16,6 +16,20 @@ let package = Package(
     ],
     targets: [
         .target(
+            name: "GuillotineC",
+            path: "Sources/GuillotineC"
+        ),
+        .target(
+            name: "GuillotinePrimitives",
+            dependencies: ["GuillotineC"],
+            path: "Sources/GuillotinePrimitives"
+        ),
+        .target(
+            name: "GuillotineCompilers",
+            dependencies: ["GuillotinePrimitives"],
+            path: "Sources/GuillotineCompilers"
+        ),
+        .target(
             name: "GuillotineFFI",
             path: "Sources/GuillotineFFI",
             publicHeadersPath: "include",
@@ -26,13 +40,28 @@ let package = Package(
         ),
         .target(
             name: "GuillotineEVM",
-            dependencies: ["GuillotineFFI"],
+            dependencies: ["GuillotineFFI", "GuillotinePrimitives", "GuillotineC"],
             path: "Sources/GuillotineEVM"
+        ),
+        .executableTarget(
+            name: "BasicTest",
+            dependencies: ["GuillotinePrimitives"],
+            path: "Sources/BasicTest"
         ),
         .testTarget(
             name: "GuillotineEVMTests",
             dependencies: ["GuillotineEVM"],
             path: "Tests/GuillotineEVMTests"
+        ),
+        .testTarget(
+            name: "GuillotinePrimitivesTests",
+            dependencies: ["GuillotinePrimitives"],
+            path: "Tests/GuillotinePrimitivesTests"
+        ),
+        .testTarget(
+            name: "GuillotineCompilersTests",
+            dependencies: ["GuillotinePrimitives"],
+            path: "Tests/GuillotineCompilersTests"
         ),
     ]
 )

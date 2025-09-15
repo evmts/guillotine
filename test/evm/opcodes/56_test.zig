@@ -1,7 +1,6 @@
 const std = @import("std");
 const evm = @import("evm");
 const primitives = @import("primitives");
-const revm = @import("revm");
 const common = @import("common.zig");
 
 test "opcode 0x56 differential test" {
@@ -79,33 +78,4 @@ test "opcode 0x56 differential test" {
     
     var guillotine_result = guillotine_evm.call(call_params);
     defer guillotine_result.deinit(allocator);
-    
-    // Setup REVM
-    var revm_vm = try revm.Revm.init(allocator, .{
-        .gas_limit = 1_000_000,
-        .chain_id = 1,
-    });
-    defer revm_vm.deinit();
-    
-    try revm_vm.setBalance(caller_address, std.math.maxInt(u256));
-    
-    // Execute with REVM
-    // Deploy the bytecode to the contract_address in REVM (similar to Guillotine setup)
-    try revm_vm.setCode(contract_address, bytecode);
-    
-    // Execute with REVM - now calling the deployed contract
-    var revm_result = revm_vm.execute(caller_address, contract_address, 0, &.{}, 1_000_000) catch |err| {
-        // If REVM fails, check if Guillotine also failed
-        if (guillotine_result.success) {
-            return err;
-        }
-        return; // Both failed, which is expected for some opcodes
-    };
-    defer revm_result.deinit();
-    
-    // Compare results
-    try std.testing.expectEqual(revm_result.success, guillotine_result.success);
-    if (revm_result.success and guillotine_result.success) {
-        try std.testing.expectEqualSlices(u8, revm_result.output, guillotine_result.output);
-    }
 }

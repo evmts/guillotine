@@ -12,16 +12,24 @@ pub fn Handlers(comptime FrameType: type) type {
         pub const Error = FrameType.Error;
         pub const Dispatch = FrameType.Dispatch;
         pub const WordType = FrameType.WordType;
-        
+        const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
+
+        /// Continue to next instruction with afterInstruction tracking
+        pub inline fn next_instruction(self: *FrameType, cursor: [*]const Dispatch.Item, comptime opcode: Dispatch.UnifiedOpcode) Error!noreturn {
+            const op_data = dispatch_opcode_data.getOpData(opcode, Dispatch, Dispatch.Item, cursor);
+            self.afterInstruction(opcode, op_data.next_handler, op_data.next_cursor.cursor);
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+        }
+
         /// Maximum memory size (24-bit limit)
         const MEMORY_LIMIT: usize = 0xFFFFFF;
-        
+
         /// Check if an offset plus size would exceed memory limit
         inline fn checkMemoryBounds(offset: usize, size: usize) bool {
             const end = offset + size;
             return end <= MEMORY_LIMIT;
         }
-        
+
         /// Check if a value fits within memory limit
         inline fn checkMemoryLimit(value: anytype) bool {
             return value <= MEMORY_LIMIT;
@@ -30,13 +38,14 @@ pub fn Handlers(comptime FrameType: type) type {
         /// MLOAD opcode (0x51) - Load word from memory.
         /// Pops memory offset from stack and pushes the 32-byte word at that offset.
         pub fn mload(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const dispatch = Dispatch{ .cursor = cursor };
+            self.beforeInstruction(.MLOAD, cursor);
+            self.validateOpcodeHandler(.MLOAD, cursor);
             // MLOAD loads a 32-byte word from memory
-            std.debug.assert(self.stack.size() >= 1); // MLOAD requires 1 stack item
-            const offset = self.stack.pop_unsafe();
+            const offset = self.stack.peek_unsafe();
 
             // Check if offset fits in usize
             if (offset > std.math.maxInt(usize)) {
+                self.afterComplete(.MLOAD);
                 return Error.OutOfBounds;
             }
             const offset_usize = @as(usize, @intCast(offset));
@@ -44,6 +53,7 @@ pub fn Handlers(comptime FrameType: type) type {
             // Calculate gas cost for memory expansion
             // Check if offset + 32 would overflow u24
             if (!checkMemoryBounds(offset_usize, 32)) {
+                self.afterComplete(.MLOAD);
                 return Error.OutOfBounds;
             }
             const end_offset = offset_usize + 32;
@@ -53,51 +63,46 @@ pub fn Handlers(comptime FrameType: type) type {
             self.gas_remaining -= @intCast(memory_expansion_cost);
             if (self.gas_remaining < 0) {
                 @branchHint(.unlikely);
+                self.afterComplete(.MLOAD);
                 return Error.OutOfGas;
             }
 
             // Read 32 bytes from memory (EVM-compliant with automatic expansion)
             const value_u256 = self.memory.get_u256_evm(self.getAllocator(), @as(u24, @intCast(offset_usize))) catch |err| switch (err) {
-                memory_mod.MemoryError.OutOfBounds => return Error.OutOfBounds,
-                memory_mod.MemoryError.MemoryOverflow => return Error.OutOfBounds,
-                else => return Error.AllocationError,
+                memory_mod.MemoryError.OutOfBounds => {
+                    self.afterComplete(.MLOAD);
+                    return Error.OutOfBounds;
+                },
+                memory_mod.MemoryError.MemoryOverflow => {
+                    self.afterComplete(.MLOAD);
+                    return Error.OutOfBounds;
+                },
+                else => {
+                    self.afterComplete(.MLOAD);
+                    return Error.AllocationError;
+                },
             };
 
             // Convert to WordType (truncate if necessary for smaller word types)
             const value = @as(WordType, @truncate(value_u256));
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
-            self.stack.push_unsafe(value);
+            self.stack.set_top_unsafe(value);
 
-            const op_data = dispatch.getOpData(.MLOAD);
-            const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            return next_instruction(self, cursor, .MLOAD);
         }
 
         /// MSTORE opcode (0x52) - Store word to memory.
         /// Pops memory offset and value from stack, stores 32 bytes at that offset.
         pub fn mstore(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const dispatch = Dispatch{ .cursor = cursor };
+            self.beforeInstruction(.MSTORE, cursor);
             // MSTORE stores a 32-byte word to memory
-            // log.err("MSTORE ENTRY: stack_size={}, stack_ptr={*}", .{
-            //     self.stack.size(),
-            //     self.stack.stack_ptr
-            // });
-            //
-            // // Log stack contents
-            // const stack_slice = self.stack.get_slice();
-            // log.err("MSTORE: Stack contents (top first):", .{});
-            // for (stack_slice, 0..) |val, i| {
-            //     if (i >= 3) break;
-            //     log.err("  [{}] = {x}", .{i, val});
-            // }
-
-            std.debug.assert(self.stack.size() >= 2); // MSTORE requires 2 stack items
+            self.validateOpcodeHandler(.MSTORE, cursor);
             const offset = self.stack.pop_unsafe();
             const value = self.stack.pop_unsafe();
             log.debug("MSTORE: offset={x}, value={x}", .{ offset, value });
 
             // Check if offset fits in usize
             if (offset > std.math.maxInt(usize)) {
+                self.afterComplete(.MSTORE);
                 return Error.OutOfBounds;
             }
             const offset_usize = @as(usize, @intCast(offset));
@@ -105,6 +110,7 @@ pub fn Handlers(comptime FrameType: type) type {
             // Calculate gas cost for memory expansion
             // Check if offset + 32 would overflow u24
             if (!checkMemoryBounds(offset_usize, 32)) {
+                self.afterComplete(.MSTORE);
                 return Error.OutOfBounds;
             }
             const end_offset = offset_usize + 32;
@@ -114,45 +120,41 @@ pub fn Handlers(comptime FrameType: type) type {
             self.gas_remaining -= @intCast(memory_expansion_cost);
             if (self.gas_remaining < 0) {
                 @branchHint(.unlikely);
+                self.afterComplete(.MSTORE);
                 return Error.OutOfGas;
             }
 
             // Convert to u256 if necessary and store
             const value_u256 = @as(u256, value);
             self.memory.set_u256_evm(self.getAllocator(), @as(u24, @intCast(offset_usize)), value_u256) catch |err| switch (err) {
-                memory_mod.MemoryError.OutOfBounds => return Error.OutOfBounds,
-                memory_mod.MemoryError.MemoryOverflow => return Error.OutOfBounds,
-                else => return Error.AllocationError,
+                memory_mod.MemoryError.OutOfBounds => {
+                    self.afterComplete(.MSTORE);
+                    return Error.OutOfBounds;
+                },
+                memory_mod.MemoryError.MemoryOverflow => {
+                    self.afterComplete(.MSTORE);
+                    return Error.OutOfBounds;
+                },
+                else => {
+                    self.afterComplete(.MSTORE);
+                    return Error.AllocationError;
+                },
             };
 
-            const op_data = dispatch.getOpData(.MSTORE);
-            const next = op_data.next;
-
-            // // Log exit state
-            // log.err("MSTORE EXIT: stack_size={}, gas_remaining={}, next_opcode={x}", .{
-            //     self.stack.size(),
-            //     self.gas_remaining,
-            //     @intFromPtr(next.cursor[0].opcode_handler),
-            // });
-            //
-            // // Check stack state before next operation
-            // if (self.stack.size() == 0) {
-            //     log.err("MSTORE EXIT WARNING: Stack is empty before next operation!", .{});
-            // }
-
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            return next_instruction(self, cursor, .MSTORE);
         }
 
         /// MSTORE8 opcode (0x53) - Store byte to memory.
         /// Pops memory offset and value from stack, stores the least significant byte at that offset.
         pub fn mstore8(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const dispatch = Dispatch{ .cursor = cursor };
-            std.debug.assert(self.stack.size() >= 2); // MSTORE8 requires 2 stack items
+            self.beforeInstruction(.MSTORE8, cursor);
+            self.validateOpcodeHandler(.MSTORE8, cursor);
             const offset = self.stack.pop_unsafe();
             const value = self.stack.pop_unsafe();
 
             // Check if offset fits in usize
             if (offset > std.math.maxInt(usize)) {
+                self.afterComplete(.MSTORE8);
                 return Error.OutOfBounds;
             }
             const offset_usize = @as(usize, @intCast(offset));
@@ -160,6 +162,7 @@ pub fn Handlers(comptime FrameType: type) type {
             // Calculate gas cost for memory expansion
             // Check if offset + 1 would overflow u24
             if (!checkMemoryBounds(offset_usize, 1)) {
+                self.afterComplete(.MSTORE8);
                 return Error.OutOfBounds;
             }
             const end_offset = offset_usize + 1;
@@ -169,46 +172,53 @@ pub fn Handlers(comptime FrameType: type) type {
             self.gas_remaining -= @intCast(memory_expansion_cost);
             if (self.gas_remaining < 0) {
                 @branchHint(.unlikely);
+                self.afterComplete(.MSTORE8);
                 return Error.OutOfGas;
             }
 
             // Store the least significant byte
             const byte_value = @as(u8, @truncate(value));
             self.memory.set_byte_evm(self.getAllocator(), @as(u24, @intCast(offset_usize)), byte_value) catch |err| switch (err) {
-                memory_mod.MemoryError.OutOfBounds => return Error.OutOfBounds,
-                memory_mod.MemoryError.MemoryOverflow => return Error.OutOfBounds,
-                else => return Error.AllocationError,
+                memory_mod.MemoryError.OutOfBounds => {
+                    self.afterComplete(.MSTORE8);
+                    return Error.OutOfBounds;
+                },
+                memory_mod.MemoryError.MemoryOverflow => {
+                    self.afterComplete(.MSTORE8);
+                    return Error.OutOfBounds;
+                },
+                else => {
+                    self.afterComplete(.MSTORE8);
+                    return Error.AllocationError;
+                },
             };
 
-            const op_data = dispatch.getOpData(.MSTORE8);
-            const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            return next_instruction(self, cursor, .MSTORE8);
         }
 
         /// MSIZE opcode (0x59) - Get size of active memory.
         /// Pushes the size of active memory in bytes onto the stack.
         pub fn msize(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const dispatch = Dispatch{ .cursor = cursor };
+            self.beforeInstruction(.MSIZE, cursor);
+            self.validateOpcodeHandler(.MSIZE, cursor);
             const size = self.memory.size();
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
             self.stack.push_unsafe(@as(WordType, @intCast(size)));
 
-            const op_data = dispatch.getOpData(.MSIZE);
-            const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            return next_instruction(self, cursor, .MSIZE);
         }
 
         /// MCOPY opcode (0x5e) - Memory copy operation (EIP-5656).
         /// Copies memory from one location to another.
         pub fn mcopy(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const dispatch = Dispatch{ .cursor = cursor };
-            std.debug.assert(self.stack.size() >= 3); // MCOPY requires 3 stack items
+            self.beforeInstruction(.MCOPY, cursor);
+            self.validateOpcodeHandler(.MCOPY, cursor);
             const size = self.stack.pop_unsafe(); // Top of stack
             const src_offset = self.stack.pop_unsafe(); // Second from top
             const dest_offset = self.stack.pop_unsafe(); // Third from top
 
             // Check if offsets and size fit in u24 (memory limit)
             if (!checkMemoryLimit(dest_offset) or !checkMemoryLimit(src_offset) or !checkMemoryLimit(size)) {
+                self.afterComplete(.MCOPY);
                 return Error.OutOfBounds;
             }
 
@@ -218,9 +228,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
             if (size_u24 == 0) {
                 // No operation for zero size
-                const op_data = dispatch.getOpData(.MCOPY);
-                const next = op_data.next;
-                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                return next_instruction(self, cursor, .MCOPY);
             }
 
             // Calculate dynamic gas cost (static gas handled by JUMPDEST)
@@ -231,6 +239,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const src_end = src_u24 + size_u24;
             const dest_end = dest_u24 + size_u24;
             if (!checkMemoryLimit(src_end) or !checkMemoryLimit(dest_end)) {
+                self.afterComplete(.MCOPY);
                 return Error.OutOfBounds;
             }
             const src_expansion_cost = self.memory.get_expansion_cost(src_end);
@@ -239,31 +248,37 @@ pub fn Handlers(comptime FrameType: type) type {
 
             const total_gas_cost = copy_gas_cost + memory_expansion_cost;
             if (self.gas_remaining < total_gas_cost) {
+                self.afterComplete(.MCOPY);
                 return Error.OutOfGas;
             }
             self.gas_remaining -= @intCast(total_gas_cost);
 
             // For overlapping memory regions, we need to copy via a temporary buffer
             // First, read the source data
-            const src_data = self.memory.get_slice(src_u24, size_u24) catch return Error.OutOfBounds;
+            const src_data = self.memory.get_slice(src_u24, size_u24) catch {
+                self.afterComplete(.MCOPY);
+                return Error.OutOfBounds;
+            };
 
             // Create a temporary buffer to handle overlapping regions correctly
-            const temp_buffer = self.getAllocator().alloc(u8, size_u24) catch return Error.AllocationError;
+            const temp_buffer = self.getAllocator().alloc(u8, size_u24) catch {
+                self.afterComplete(.MCOPY);
+                return Error.AllocationError;
+            };
 
             @memcpy(temp_buffer, src_data);
 
             // Write to destination
             self.memory.set_data_evm(self.getAllocator(), dest_u24, temp_buffer) catch {
                 self.getAllocator().free(temp_buffer);
+                self.afterComplete(.MCOPY);
                 return Error.AllocationError;
             };
 
             // Free the temporary buffer before tail call
             self.getAllocator().free(temp_buffer);
 
-            const op_data = dispatch.getOpData(.MCOPY);
-            const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            return next_instruction(self, cursor, .MCOPY);
         }
     };
 }
@@ -273,7 +288,7 @@ pub fn Handlers(comptime FrameType: type) type {
 const testing = std.testing;
 const Frame = @import("../frame/frame.zig").Frame;
 const dispatch_mod = @import("../preprocessor/dispatch.zig");
-const NoOpTracer = @import("../tracer/tracer.zig").NoOpTracer;
+const DefaultTracer = @import("../tracer/tracer.zig").DefaultTracer;
 const MemoryDatabase = @import("../storage/memory_database.zig").MemoryDatabase;
 const Address = @import("primitives").Address;
 
@@ -284,7 +299,6 @@ const test_config = FrameConfig{
     .max_bytecode_size = 1024,
     .block_gas_limit = 30_000_000,
     .DatabaseType = MemoryDatabase,
-    .TracerType = NoOpTracer,
     .memory_initial_capacity = 4096,
     .memory_limit = 0xFFFFFF,
 };
@@ -292,11 +306,11 @@ const test_config = FrameConfig{
 const TestFrame = Frame(test_config);
 
 fn createTestFrame(allocator: std.mem.Allocator) !TestFrame {
-    const database = MemoryDatabase.init(allocator);
+    _ = MemoryDatabase.init(allocator);
     const value = try allocator.create(u256);
     value.* = 0;
     const evm_ptr = @as(*anyopaque, @ptrFromInt(0x1000));
-    var frame = try TestFrame.init(allocator, 1_000_000, database, Address.ZERO_ADDRESS, value, &[_]u8{}, evm_ptr);
+    var frame = try TestFrame.init(allocator, 1_000_000, Address.ZERO_ADDRESS, value.*, &[_]u8{}, evm_ptr);
     frame.code = &[_]u8{};
     return frame;
 }

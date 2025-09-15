@@ -11,6 +11,8 @@
 /// and catch invalid parameter combinations early.
 const std = @import("std");
 const builtin = @import("builtin");
+const SafetyCounter = @import("../internal/safety_counter.zig").SafetyCounter;
+const Mode = @import("../internal/safety_counter.zig").Mode;
 
 // TODO add the Eip type from evm
 pub const FrameConfig = struct {
@@ -31,9 +33,6 @@ pub const FrameConfig = struct {
     /// Database implementation type for storage operations (always required).
     DatabaseType: type,
 
-    /// Optional tracer type for execution tracing (null for no tracing)
-    TracerType: ?type = null,
-
     /// Block info configuration for the frame
     block_info_config: @import("block_info_config.zig").BlockInfoConfig = .{},
 
@@ -52,6 +51,11 @@ pub const FrameConfig = struct {
     /// SIMD vector length for optimized operations
     /// Value of 1 means scalar operations (no SIMD)
     vector_length: comptime_int = 1,
+
+    /// Loop quota for safety counters to prevent infinite loops
+    /// null = disabled (default for optimized builds)
+    /// value = maximum iterations before panic (default for debug/safe builds)
+    loop_quota: ?u32 = if (builtin.mode == .Debug or builtin.mode == .ReleaseSafe) 1_000_000 else null,
 
     /// PcType: chosen PC integer type from max_bytecode_size
     pub fn PcType(comptime self: Self) type {
@@ -88,6 +92,27 @@ pub const FrameConfig = struct {
     /// The amount of data the frame plans on allocating based on config
     pub fn get_requested_alloc(comptime self: Self) u32 {
         return @as(u32, self.stack_size) * @as(u32, @intCast(@sizeOf(self.WordType)));
+    }
+
+    /// Create a loop safety counter based on the configuration
+    /// Returns either an enabled or disabled counter depending on loop_quota
+    /// Automatically selects the smallest type that can hold the quota
+    pub fn createLoopSafetyCounter(comptime self: Self) type {
+        const mode: Mode = if (self.loop_quota != null) .enabled else .disabled;
+        const limit = self.loop_quota orelse 0;
+
+        // Choose the smallest type that can hold the limit
+        const T = if (limit <= std.math.maxInt(u8))
+            u8
+        else if (limit <= std.math.maxInt(u16))
+            u16
+        else if (limit <= std.math.maxInt(u32))
+            u32
+        else
+            u64;
+
+        const Counter = SafetyCounter(T, mode);
+        return Counter;
     }
 
     pub fn validate(comptime self: Self) void {

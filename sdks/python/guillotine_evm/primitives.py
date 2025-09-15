@@ -7,7 +7,7 @@ This module provides Python wrappers for core Ethereum types like Address, U256,
 import re
 from typing import Union, Optional
 from .exceptions import InvalidAddressError, InvalidHashError
-from ._ffi import lib, ffi
+from ._ffi_ffi import lib, ffi
 
 
 class Address:

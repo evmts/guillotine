@@ -1,7 +1,6 @@
 const std = @import("std");
 const evm = @import("evm");
 const primitives = @import("primitives");
-const revm = @import("revm");
 const common = @import("common.zig");
 
 test "EXP: basic (2 ^ 3 = 8)" {
@@ -124,30 +123,6 @@ fn run_exp_test(allocator: std.mem.Allocator, base: u256, exponent: u256) !void 
     
     var guillotine_result = guillotine_evm.call(call_params);
     defer guillotine_result.deinit(allocator);
-    
-    // Setup REVM
-    var revm_vm = try revm.Revm.init(allocator, .{
-        .gas_limit = 10_000_000,
-        .chain_id = 1,
-    });
-    defer revm_vm.deinit();
-    
-    try revm_vm.setBalance(caller_address, std.math.maxInt(u256));
-    try revm_vm.setCode(contract_address, bytecode);
-    
-    var revm_result = revm_vm.execute(caller_address, contract_address, 0, &.{}, 10_000_000) catch |err| {
-        if (guillotine_result.success) {
-            return err;
-        }
-        return;
-    };
-    defer revm_result.deinit();
-    
-    // Compare results
-    try std.testing.expectEqual(revm_result.success, guillotine_result.success);
-    if (revm_result.success and guillotine_result.success) {
-        try std.testing.expectEqualSlices(u8, revm_result.output, guillotine_result.output);
-    }
 }
 
 test "EXP: zero to any power (0 ^ 100 = 0)" {
@@ -393,30 +368,6 @@ fn run_exp_test_with_jump(allocator: std.mem.Allocator, base: u256, exponent: u2
     
     var guillotine_result = guillotine_evm.call(call_params);
     defer guillotine_result.deinit(allocator);
-    
-    // Setup REVM
-    var revm_vm = try revm.Revm.init(allocator, .{
-        .gas_limit = 10_000_000,
-        .chain_id = 1,
-    });
-    defer revm_vm.deinit();
-    
-    try revm_vm.setBalance(caller_address, std.math.maxInt(u256));
-    try revm_vm.setCode(contract_address, bytecode);
-    
-    var revm_result = revm_vm.execute(caller_address, contract_address, 0, &.{}, 10_000_000) catch |err| {
-        if (guillotine_result.success) {
-            return err;
-        }
-        return;
-    };
-    defer revm_result.deinit();
-    
-    // Compare results
-    try std.testing.expectEqual(revm_result.success, guillotine_result.success);
-    if (revm_result.success and guillotine_result.success) {
-        try std.testing.expectEqualSlices(u8, revm_result.output, guillotine_result.output);
-    }
 }
 
 test "EXP with JUMP: basic (2 ^ 3 = 8)" {

@@ -1,0 +1,45 @@
+---
+title: Compatibility
+description: Supported behaviors and known non-support.
+---
+
+> **Note**: This documentation was generated with AI assistance. Please verify technical details and report any inaccuracies.
+
+# Compatibility
+
+Factual notes on what is and is not supported.
+
+## Bytecode format
+
+- EOF (EVM Object Format): not supported.
+  - Code must be legacy bytecode.
+  - Deploying EOF code will be executed as raw opcodes (non-compliant). Do not deploy EOF.
+
+## Precompiles
+
+- Precompiles are enabled by default; addresses 0x01–0x0A and selected others are implemented in `src/precompiles/`.
+- Behavior and gas follow the spec; see source for the current set.
+- Can be disabled via `-Dno_precompiles=true` (build option) if needed.
+
+## Transient storage
+
+- EIP‑1153 transient storage is implemented (`Database.get_transient_storage` / `set_transient_storage`).
+- Transient state is per-transaction and cleared by design.
+
+## Delegated code (EOA)
+
+- EIP‑7702‑style delegation is supported in `Database.get_code_by_address`:
+  - EOAs may delegate to another address’s code.
+  - Use `set_delegation` / `clear_delegation` accordingly.
+
+## Block-scope processing
+
+- On `Evm.init`, block-scoped updates are invoked when applicable:
+  - Beacon root (EIP‑4788), historical block hashes (EIP‑2935), validator deposits (EIP‑6110), validator withdrawals (EIP‑7002).
+- Errors are traced; see `src/evm.zig` init for details.
+
+## Hardforks
+
+- Default hardfork: Cancun. Override via `-Devm-hardfork=...` (see `zig build -h`).
+- Limits (bytecode/initcode size, memory, depth) are enforced per `EvmConfig`.
+

@@ -1,0 +1,124 @@
+name: Claude Code Auto Fix
+
+on:
+  schedule:
+    # Run every 10 minutes
+    - cron: '*/10 * * * *'
+  workflow_dispatch: # Allow manual triggering
+
+jobs:
+  auto-fix:
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: write
+      pull-requests: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Setup Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.15.1
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Install Claude CLI
+        run: |
+          # Install the Claude CLI
+          npm install -g claude-ai
+      
+      - name: Configure Git
+        run: |
+          git config --global user.name "Claude Code Bot"
+          git config --global user.email "claude-code-bot@github.com"
+      
+      - name: Run Claude Code Auto Fix
+        env:
+          CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+        run: |
+          set -e
+          
+          # Create a script to run Claude with the prompt
+          cat > run-claude.sh << 'SCRIPT'
+          #!/bin/bash
+          set -e
+          
+          # Pull latest changes and rebase
+          git pull --rebase origin $GITHUB_REF_NAME
+          
+          # Create prompt file
+          cat > prompt.txt << 'PROMPT'
+          Please run the following commands in order and fix any issues that arise:
+          1. zig build
+          2. zig build test-opcodes
+          3. zig build test
+          4. zig build test-snailtracer
+          
+          Fix any compilation errors, test failures, or bugs you encounter. Follow all the guidelines in CLAUDE.md strictly. Make the code production-ready by addressing any issues found during these builds and tests.
+          
+          IMPORTANT: 
+          - Do not create any new documentation files
+          - Only fix actual code issues
+          - Follow TDD approach
+          - Ensure all tests pass before finishing
+          - Never stub implementations
+          - Never swallow errors with catch
+          PROMPT
+          
+          # Run Claude with the prompt
+          # Note: You'll need to use the actual Claude CLI command here
+          # This is a placeholder as the exact command depends on the CLI you use
+          claude --api-key "$CLAUDE_API_KEY" --file prompt.txt --auto-confirm
+          
+          # Check if there are changes to commit
+          if [[ -n $(git status -s) ]]; then
+            # Stage all changes
+            git add -A
+            
+            # Create commit message
+            git commit -m "🤖 Auto-fix: Productionize code and fix bugs
+          
+          Ran build and test suite to identify and fix issues:
+          - zig build
+          - zig build test-opcodes
+          - zig build test
+          - zig build test-snailtracer
+          
+          🤖 Generated with Claude Code Auto-Fix Action
+          
+          Co-Authored-By: Claude <noreply@anthropic.com>"
+            
+            # Pull and rebase again before pushing to handle concurrent changes
+            git pull --rebase origin $GITHUB_REF_NAME
+            
+            # Push changes
+            git push origin $GITHUB_REF_NAME
+            
+            echo "✅ Changes committed and pushed successfully"
+          else
+            echo "✅ No changes needed - code is already production-ready"
+          fi
+          SCRIPT
+          
+          chmod +x run-claude.sh
+          ./run-claude.sh
+      
+      - name: Report Status
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const status = '${{ job.status }}';
+            const message = status === 'success' 
+              ? '✅ Claude Code auto-fix completed successfully'
+              : '❌ Claude Code auto-fix encountered an error';
+            console.log(message);

@@ -11,7 +11,7 @@ fn checkSubmodules() void {
     };
 
     var has_error = false;
-    
+
     for (submodules) |submodule| {
         std.fs.cwd().access(submodule.path, .{}) catch {
             if (!has_error) {
@@ -68,13 +68,12 @@ pub fn build(b: *std.Build) void {
     const blst_lib = build_pkg.BlstLib.createBlstLibrary(b, target, optimize);
     const c_kzg_lib = build_pkg.CKzgLib.createCKzgLibrary(b, target, optimize, blst_lib);
 
-    const rust_build_step = build_pkg.RevmLib.createRustBuildStep(b, optimize, rust_target);
+    const rust_build_step = build_pkg.FoundryLib.createRustBuildStep(b);
     const bn254_lib = build_pkg.Bn254Lib.createBn254Library(b, target, optimize, config.options, rust_build_step, rust_target);
-    const revm_lib = build_pkg.RevmLib.createRevmLibrary(b, target, optimize, rust_build_step, rust_target);
     const foundry_lib = build_pkg.FoundryLib.createFoundryLibrary(b, target, optimize, rust_build_step, rust_target);
 
     // Modules
-    const modules = build_pkg.Modules.createModules(b, target, optimize, config.options_mod, zbench_dep, c_kzg_lib, blst_lib, bn254_lib, revm_lib, foundry_lib);
+    const modules = build_pkg.Modules.createModules(b, target, optimize, config.options_mod, zbench_dep, c_kzg_lib, blst_lib, bn254_lib, foundry_lib);
 
     // Executables
     const guillotine_exe = build_pkg.GuillotineExe.createExecutable(b, modules.exe_mod);
@@ -101,15 +100,40 @@ pub fn build(b: *std.Build) void {
     const devtool_exe = build_pkg.DevtoolExe.createDevtoolExecutable(b, target, optimize, modules.lib_mod, modules.evm_mod, modules.primitives_mod, modules.provider_mod, &generate_assets.step);
     build_pkg.DevtoolExe.createDevtoolSteps(b, devtool_exe, target);
 
-    // Benchmark executables removed (moved to separate repo)
+    // Pattern analyzer tool (JSON fixtures)
+    const pattern_analyzer = b.addExecutable(.{
+        .name = "pattern-analyzer",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("scripts/analyze_patterns.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    pattern_analyzer.root_module.addImport("evm", modules.evm_mod);
+    pattern_analyzer.root_module.addImport("primitives", modules.primitives_mod);
+    pattern_analyzer.root_module.addImport("crypto", modules.crypto_mod);
+    b.installArtifact(pattern_analyzer);
 
-    // Libraries and utilities
-    build_pkg.Utils.createLibraries(b, modules.lib_mod, bn254_lib);
-    const lib = b.addLibrary(.{ .linkage = .static, .name = "Guillotine", .root_module = modules.lib_mod });
-    build_pkg.Utils.createDocsStep(b, lib);
-    _ = build_pkg.Utils.createOpcodeTestLib(b, target, optimize, modules.evm_mod, modules.primitives_mod, modules.crypto_mod, config.options_mod, bn254_lib);
-    build_pkg.Utils.createExternalBuildSteps(b);
-    
+    const pattern_analyzer_step = b.step("build-pattern-analyzer", "Build JSON fixture pattern analyzer");
+    pattern_analyzer_step.dependOn(&b.addInstallArtifact(pattern_analyzer, .{}).step);
+
+    // Bytecode pattern analyzer (text files)
+    const bytecode_patterns = b.addExecutable(.{
+        .name = "bytecode-patterns",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("scripts/bytecode_patterns.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    bytecode_patterns.root_module.addImport("evm", modules.evm_mod);
+    bytecode_patterns.root_module.addImport("primitives", modules.primitives_mod);
+    bytecode_patterns.root_module.addImport("crypto", modules.crypto_mod);
+    b.installArtifact(bytecode_patterns);
+
+    const bytecode_patterns_step = b.step("build-bytecode-patterns", "Build bytecode pattern analyzer");
+    bytecode_patterns_step.dependOn(&b.addInstallArtifact(bytecode_patterns, .{}).step);
+
     // Shared library for FFI bindings
     const shared_lib_mod = b.createModule(.{
         .root_source_file = b.path("src/evm_c_api.zig"),
@@ -120,7 +144,7 @@ pub fn build(b: *std.Build) void {
     shared_lib_mod.addImport("primitives", modules.primitives_mod);
     shared_lib_mod.addImport("crypto", modules.crypto_mod);
     shared_lib_mod.addImport("build_options", config.options_mod);
-    
+
     const shared_lib = b.addLibrary(.{
         .name = "guillotine_ffi",
         .linkage = .dynamic,
@@ -131,7 +155,7 @@ pub fn build(b: *std.Build) void {
     if (bn254_lib) |bn254| shared_lib.linkLibrary(bn254);
     shared_lib.linkLibC();
     b.installArtifact(shared_lib);
-    
+
     const shared_lib_step = b.step("shared", "Build shared library for FFI");
     shared_lib_step.dependOn(&b.addInstallArtifact(shared_lib, .{}).step);
 
@@ -146,7 +170,7 @@ pub fn build(b: *std.Build) void {
     if (bn254_lib) |bn254| static_lib.linkLibrary(bn254);
     static_lib.linkLibC();
     b.installArtifact(static_lib);
-    
+
     const static_lib_step = b.step("static", "Build static library for FFI");
     static_lib_step.dependOn(&b.addInstallArtifact(static_lib, .{}).step);
 
@@ -155,10 +179,10 @@ pub fn build(b: *std.Build) void {
     const lib_unit_tests = b.addTest(.{ .root_module = modules.lib_mod });
     const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
 
-    const integration_tests = tests_pkg.createIntegrationTests(b, target, optimize, modules, revm_lib, bn254_lib, c_kzg_lib, blst_lib, rust_target);
+    const integration_tests = tests_pkg.createIntegrationTests(b, target, optimize, modules, bn254_lib, c_kzg_lib, blst_lib);
     const run_integration_tests = b.addRunArtifact(integration_tests);
 
-    // Add test/root.zig tests  
+    // Add test/root.zig tests
     const root_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("test/root.zig"),
@@ -173,16 +197,10 @@ pub fn build(b: *std.Build) void {
     root_tests.root_module.addImport("provider", modules.provider_mod);
     root_tests.root_module.addImport("trie", modules.trie_mod);
     root_tests.root_module.addImport("Guillotine_lib", modules.lib_mod);
-    if (modules.revm_mod) |revm_mod| {
-        root_tests.root_module.addImport("revm", revm_mod);
-    }
+    // Using MinimalEvm for differential testing (REVM removed)
     root_tests.linkLibrary(c_kzg_lib);
     root_tests.linkLibrary(blst_lib);
     if (bn254_lib) |bn254| root_tests.linkLibrary(bn254);
-    if (revm_lib) |revm| {
-        root_tests.linkLibrary(revm);
-        root_tests.addIncludePath(b.path("lib/revm"));
-    }
     root_tests.linkLibC();
     const run_root_tests = b.addRunArtifact(root_tests);
 
@@ -203,7 +221,7 @@ pub fn build(b: *std.Build) void {
         compiler_tests.linkLibC();
     }
     const run_compiler_tests = b.addRunArtifact(compiler_tests);
-    
+
     // Add a dedicated compiler test step
     const compiler_test_step = b.step("test-compiler", "Run compiler tests");
     if (foundry_lib != null) {
@@ -261,14 +279,14 @@ pub fn build(b: *std.Build) void {
     const run_zbench_evm = b.addRunArtifact(zbench_evm);
     const zbench_evm_step = b.step("bench-evm", "Run zbench EVM benchmarks");
     zbench_evm_step.dependOn(&run_zbench_evm.step);
-    
+
     // ERC20 deployment gas issue test
     const erc20_gas_test = b.addTest(.{
         .name = "test-erc20-gas",
         .root_module = b.createModule(.{
             .root_source_file = b.path("test/erc20_deployment_gas_issue.zig"),
             .target = target,
-            .optimize = .Debug,  // Debug for better logging
+            .optimize = .Debug, // Debug for better logging
         }),
     });
     erc20_gas_test.root_module.addImport("evm", modules.evm_mod);
@@ -284,11 +302,11 @@ pub fn build(b: *std.Build) void {
     erc20_gas_test.linkLibrary(blst_lib);
     if (bn254_lib) |bn254| erc20_gas_test.linkLibrary(bn254);
     erc20_gas_test.linkLibC();
-    
+
     const run_erc20_gas_test = b.addRunArtifact(erc20_gas_test);
     const erc20_gas_test_step = b.step("test-erc20-gas", "Test ERC20 deployment gas issue");
     erc20_gas_test_step.dependOn(&run_erc20_gas_test.step);
-    
+
     // Jump table issue test
     const jump_table_test = b.addTest(.{
         .name = "test-jump-table",
@@ -311,7 +329,7 @@ pub fn build(b: *std.Build) void {
     jump_table_test.linkLibrary(blst_lib);
     if (bn254_lib) |bn254| jump_table_test.linkLibrary(bn254);
     jump_table_test.linkLibC();
-    
+
     const run_jump_table_test = b.addRunArtifact(jump_table_test);
     const jump_table_test_step = b.step("test-jump-table", "Test jump table JUMPDEST recognition");
     jump_table_test_step.dependOn(&run_jump_table_test.step);
@@ -334,41 +352,14 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = .Debug,
     }));
-    
-    // Add REVM module and library for differential testing
-    if (modules.revm_mod) |revm_mod| {
-        erc20_deployment_test.root_module.addImport("revm", revm_mod);
-        if (revm_lib) |revm| {
-            erc20_deployment_test.linkLibrary(revm);
-            erc20_deployment_test.addIncludePath(b.path("lib/revm"));
-            
-            const revm_rust_target_dir_test = if (optimize == .Debug) "debug" else "release";
-            const revm_dylib_path_test = if (rust_target) |target_triple|
-                b.fmt("target/{s}/{s}/librevm_wrapper.dylib", .{ target_triple, revm_rust_target_dir_test })
-            else
-                b.fmt("target/{s}/librevm_wrapper.dylib", .{revm_rust_target_dir_test});
-            erc20_deployment_test.addObjectFile(b.path(revm_dylib_path_test));
-            
-            if (target.result.os.tag == .linux) {
-                erc20_deployment_test.linkSystemLibrary("m");
-                erc20_deployment_test.linkSystemLibrary("pthread");
-                erc20_deployment_test.linkSystemLibrary("dl");
-            } else if (target.result.os.tag == .macos) {
-                erc20_deployment_test.linkSystemLibrary("c++");
-                erc20_deployment_test.linkFramework("Security");
-                erc20_deployment_test.linkFramework("SystemConfiguration");
-                erc20_deployment_test.linkFramework("CoreFoundation");
-            }
-            
-            erc20_deployment_test.step.dependOn(&revm.step);
-        }
-    }
-    
+
+    // Using MinimalEvm for differential testing (REVM removed)
+
     erc20_deployment_test.linkLibrary(c_kzg_lib);
     erc20_deployment_test.linkLibrary(blst_lib);
     if (bn254_lib) |bn254| erc20_deployment_test.linkLibrary(bn254);
     erc20_deployment_test.linkLibC();
-    
+
     const run_erc20_deployment_test = b.addRunArtifact(erc20_deployment_test);
     const erc20_deployment_test_step = b.step("test-erc20-deployment", "Test ERC20 deployment issue");
     erc20_deployment_test_step.dependOn(&run_erc20_deployment_test.step);
@@ -387,41 +378,14 @@ pub fn build(b: *std.Build) void {
     fixtures_differential_test.root_module.addImport("crypto", modules.crypto_mod);
     fixtures_differential_test.root_module.addImport("build_options", config.options_mod);
     fixtures_differential_test.root_module.addImport("log", b.createModule(.{ .root_source_file = b.path("src/log.zig"), .target = target, .optimize = .Debug }));
-    
-    // Add REVM module and library for differential testing
-    if (modules.revm_mod) |revm_mod| {
-        fixtures_differential_test.root_module.addImport("revm", revm_mod);
-        if (revm_lib) |revm| {
-            fixtures_differential_test.linkLibrary(revm);
-            fixtures_differential_test.addIncludePath(b.path("lib/revm"));
-            
-            const revm_rust_target_dir_test = if (optimize == .Debug) "debug" else "release";
-            const revm_dylib_path_test = if (rust_target) |target_triple|
-                b.fmt("target/{s}/{s}/librevm_wrapper.dylib", .{ target_triple, revm_rust_target_dir_test })
-            else
-                b.fmt("target/{s}/librevm_wrapper.dylib", .{revm_rust_target_dir_test});
-            fixtures_differential_test.addObjectFile(b.path(revm_dylib_path_test));
-            
-            if (target.result.os.tag == .linux) {
-                fixtures_differential_test.linkSystemLibrary("m");
-                fixtures_differential_test.linkSystemLibrary("pthread");
-                fixtures_differential_test.linkSystemLibrary("dl");
-            } else if (target.result.os.tag == .macos) {
-                fixtures_differential_test.linkSystemLibrary("c++");
-                fixtures_differential_test.linkFramework("Security");
-                fixtures_differential_test.linkFramework("SystemConfiguration");
-                fixtures_differential_test.linkFramework("CoreFoundation");
-            }
-            
-            fixtures_differential_test.step.dependOn(&revm.step);
-        }
-    }
-    
+
+    // Using MinimalEvm for differential testing (REVM removed)
+
     fixtures_differential_test.linkLibrary(c_kzg_lib);
     fixtures_differential_test.linkLibrary(blst_lib);
     if (bn254_lib) |bn254| fixtures_differential_test.linkLibrary(bn254);
     fixtures_differential_test.linkLibC();
-    
+
     const run_fixtures_differential_test = b.addRunArtifact(fixtures_differential_test);
     const fixtures_differential_test_step = b.step("test-fixtures-differential", "Run differential tests for benchmark fixtures (ERC20, snailtracer, etc.)");
     fixtures_differential_test_step.dependOn(&run_fixtures_differential_test.step);
@@ -440,41 +404,14 @@ pub fn build(b: *std.Build) void {
     snailtracer_test.root_module.addImport("crypto", modules.crypto_mod);
     snailtracer_test.root_module.addImport("build_options", config.options_mod);
     snailtracer_test.root_module.addImport("log", b.createModule(.{ .root_source_file = b.path("src/log.zig"), .target = target, .optimize = .Debug }));
-    
-    // Add REVM module and library for differential testing
-    if (modules.revm_mod) |revm_mod| {
-        snailtracer_test.root_module.addImport("revm", revm_mod);
-        if (revm_lib) |revm| {
-            snailtracer_test.linkLibrary(revm);
-            snailtracer_test.addIncludePath(b.path("lib/revm"));
-            
-            const revm_rust_target_dir_test = if (optimize == .Debug) "debug" else "release";
-            const revm_dylib_path_test = if (rust_target) |target_triple|
-                b.fmt("target/{s}/{s}/librevm_wrapper.dylib", .{ target_triple, revm_rust_target_dir_test })
-            else
-                b.fmt("target/{s}/librevm_wrapper.dylib", .{revm_rust_target_dir_test});
-            snailtracer_test.addObjectFile(b.path(revm_dylib_path_test));
-            
-            if (target.result.os.tag == .linux) {
-                snailtracer_test.linkSystemLibrary("m");
-                snailtracer_test.linkSystemLibrary("pthread");
-                snailtracer_test.linkSystemLibrary("dl");
-            } else if (target.result.os.tag == .macos) {
-                snailtracer_test.linkSystemLibrary("c++");
-                snailtracer_test.linkFramework("Security");
-                snailtracer_test.linkFramework("SystemConfiguration");
-                snailtracer_test.linkFramework("CoreFoundation");
-            }
-            
-            snailtracer_test.step.dependOn(&revm.step);
-        }
-    }
-    
+
+    // Using MinimalEvm for differential testing (REVM removed)
+
     snailtracer_test.linkLibrary(c_kzg_lib);
     snailtracer_test.linkLibrary(blst_lib);
     if (bn254_lib) |bn254| snailtracer_test.linkLibrary(bn254);
     snailtracer_test.linkLibC();
-    
+
     const run_snailtracer_test = b.addRunArtifact(snailtracer_test);
     const snailtracer_test_step = b.step("test-snailtracer", "Run snailtracer differential test");
     snailtracer_test_step.dependOn(&run_snailtracer_test.step);
@@ -513,9 +450,9 @@ pub fn build(b: *std.Build) void {
 
             const file_path = b.fmt("test/evm/opcodes/{s}", .{entry.name});
             const test_name = b.fmt("opcode-{s}", .{entry.name});
-            
+
             // Extract opcode hex from filename (e.g., "01_test.zig" -> "0x01")
-            const opcode_hex = entry.name[0..std.mem.indexOf(u8, entry.name, "_") orelse continue];
+            const opcode_hex = entry.name[0 .. std.mem.indexOf(u8, entry.name, "_") orelse continue];
             const individual_step_name = b.fmt("test-opcodes-0x{s}", .{opcode_hex});
             const individual_step_desc = b.fmt("Test opcode 0x{s}", .{opcode_hex});
 
@@ -540,38 +477,13 @@ pub fn build(b: *std.Build) void {
             if (bn254_lib) |bn254| t.linkLibrary(bn254);
             t.linkLibC();
 
-            // Add REVM integration for differential tests
-            if (modules.revm_mod) |revm_mod| {
-                t.root_module.addImport("revm", revm_mod);
-                if (revm_lib) |revm| {
-                    t.linkLibrary(revm);
-                    t.addIncludePath(b.path("lib/revm"));
-                    const revm_rust_target_dir_test = if (optimize == .Debug) "debug" else "release";
-                    const revm_dylib_path_test = if (rust_target) |target_triple|
-                        b.fmt("target/{s}/{s}/librevm_wrapper.dylib", .{ target_triple, revm_rust_target_dir_test })
-                    else
-                        b.fmt("target/{s}/librevm_wrapper.dylib", .{revm_rust_target_dir_test});
-                    t.addObjectFile(b.path(revm_dylib_path_test));
-
-                    if (target.result.os.tag == .linux) {
-                        t.linkSystemLibrary("m");
-                        t.linkSystemLibrary("pthread");
-                        t.linkSystemLibrary("dl");
-                    } else if (target.result.os.tag == .macos) {
-                        t.linkSystemLibrary("c++");
-                        t.linkFramework("Security");
-                        t.linkFramework("SystemConfiguration");
-                        t.linkFramework("CoreFoundation");
-                    }
-                    t.step.dependOn(&revm.step);
-                }
-            }
+            // Using MinimalEvm for differential testing (REVM removed)
 
             const run_t = b.addRunArtifact(t);
-            
+
             // Add to the "all opcodes" step
             opcode_tests_step.dependOn(&run_t.step);
-            
+
             // Create individual test step for this opcode
             const individual_step = b.step(individual_step_name, individual_step_desc);
             individual_step.dependOn(&run_t.step);
@@ -593,36 +505,9 @@ pub fn build(b: *std.Build) void {
         erc20_mint_test.root_module.addImport("evm", modules.evm_mod);
         erc20_mint_test.root_module.addImport("primitives", modules.primitives_mod);
         erc20_mint_test.root_module.addImport("crypto", modules.crypto_mod);
-        
-        // Add REVM module and library for differential testing
-        if (modules.revm_mod) |revm_mod| {
-            erc20_mint_test.root_module.addImport("revm", revm_mod);
-            if (revm_lib) |revm| {
-                erc20_mint_test.linkLibrary(revm);
-                erc20_mint_test.addIncludePath(b.path("lib/revm"));
-                
-                const revm_rust_target_dir_test = if (optimize == .Debug) "debug" else "release";
-                const revm_dylib_path_test = if (rust_target) |target_triple|
-                    b.fmt("target/{s}/{s}/librevm_wrapper.dylib", .{ target_triple, revm_rust_target_dir_test })
-                else
-                    b.fmt("target/{s}/librevm_wrapper.dylib", .{revm_rust_target_dir_test});
-                erc20_mint_test.addObjectFile(b.path(revm_dylib_path_test));
-                
-                if (target.result.os.tag == .linux) {
-                    erc20_mint_test.linkSystemLibrary("m");
-                    erc20_mint_test.linkSystemLibrary("pthread");
-                    erc20_mint_test.linkSystemLibrary("dl");
-                } else if (target.result.os.tag == .macos) {
-                    erc20_mint_test.linkSystemLibrary("c++");
-                    erc20_mint_test.linkFramework("Security");
-                    erc20_mint_test.linkFramework("SystemConfiguration");
-                    erc20_mint_test.linkFramework("CoreFoundation");
-                }
-                
-                erc20_mint_test.step.dependOn(&revm.step);
-            }
-        }
-        
+
+        // Using MinimalEvm for differential testing (REVM removed)
+
         // Link other required libraries
         erc20_mint_test.linkLibrary(c_kzg_lib);
         erc20_mint_test.linkLibrary(blst_lib);
@@ -630,7 +515,7 @@ pub fn build(b: *std.Build) void {
         erc20_mint_test.linkLibC();
 
         const run_erc20_mint_test = b.addRunArtifact(erc20_mint_test);
-        
+
         const erc20_mint_step = b.step("test-erc20-mint", "Run ERC20 mint differential test");
         erc20_mint_step.dependOn(&run_erc20_mint_test.step);
     }
@@ -650,13 +535,13 @@ pub fn build(b: *std.Build) void {
         erc20_transfer_test.root_module.addImport("primitives", modules.primitives_mod);
         erc20_transfer_test.root_module.addImport("crypto", modules.crypto_mod);
         erc20_transfer_test.root_module.addImport("build_options", config.options_mod);
-        
+
         // Link required libraries
         erc20_transfer_test.linkLibrary(c_kzg_lib);
         erc20_transfer_test.linkLibrary(blst_lib);
         if (bn254_lib) |bn254| erc20_transfer_test.linkLibrary(bn254);
         erc20_transfer_test.linkLibC();
-        
+
         const run_erc20_transfer_test = b.addRunArtifact(erc20_transfer_test);
         const erc20_transfer_step = b.step("test-erc20-transfer", "Run ERC20 transfer test");
         erc20_transfer_step.dependOn(&run_erc20_transfer_test.step);
@@ -673,22 +558,22 @@ pub fn build(b: *std.Build) void {
     //             .optimize = optimize,
     //         }),
     //     });
-    //     
+    //
     //     static_jumps_test.root_module.addImport("evm", modules.evm_mod);
     //     static_jumps_test.root_module.addImport("primitives", modules.primitives_mod);
     //     static_jumps_test.root_module.addImport("crypto", modules.crypto_mod);
     //     static_jumps_test.root_module.addImport("build_options", config.options_mod);
-    //     
+    //
     //     // Link required libraries
     //     static_jumps_test.linkLibrary(c_kzg_lib);
     //     static_jumps_test.linkLibrary(blst_lib);
     //     if (bn254_lib) |bn254| static_jumps_test.linkLibrary(bn254);
     //     static_jumps_test.linkLibC();
-    //     
+    //
     //     const run_static_jumps_test = b.addRunArtifact(static_jumps_test);
     //     const static_jumps_step = b.step("test-static-jumps", "Run static jumps test");
     //     static_jumps_step.dependOn(&run_static_jumps_test.step);
-    //     
+    //
     //     // Add to main test step
     //     test_step.dependOn(&run_static_jumps_test.step);
     // }
@@ -703,12 +588,12 @@ pub fn build(b: *std.Build) void {
                 .optimize = optimize,
             }),
         });
-        
+
         codecopy_test.root_module.addImport("evm", modules.evm_mod);
         codecopy_test.root_module.addImport("primitives", modules.primitives_mod);
         codecopy_test.root_module.addImport("crypto", modules.crypto_mod);
         codecopy_test.root_module.addImport("build_options", config.options_mod);
-        
+
         const run_codecopy_test = b.addRunArtifact(codecopy_test);
         const codecopy_step = b.step("test-codecopy-return", "Test CODECOPY and RETURN opcodes");
         codecopy_step.dependOn(&run_codecopy_test.step);
@@ -792,21 +677,32 @@ pub fn build(b: *std.Build) void {
                 .optimize = optimize,
             }),
         });
-        
+
         // Add module imports needed by the test
         synthetic_test.root_module.addImport("primitives", modules.primitives_mod);
         synthetic_test.root_module.addImport("crypto", modules.crypto_mod);
         synthetic_test.root_module.addImport("build_options", config.options_mod);
-        
+
         synthetic_test.linkLibrary(c_kzg_lib);
         synthetic_test.linkLibrary(blst_lib);
         if (bn254_lib) |bn254| synthetic_test.linkLibrary(bn254);
         synthetic_test.linkLibC();
-        
+
         const run_synthetic_test = b.addRunArtifact(synthetic_test);
         const synthetic_step = b.step("test-synthetic", "Test synthetic opcodes");
         synthetic_step.dependOn(&run_synthetic_test.step);
     }
+
+    // Python specs runner
+    const python_check = b.addSystemCommand(&[_][]const u8{ "which", "python3" });
+    python_check.addCheck(.{ .expect_stdout_match = "python3" });
+
+    const run_specs = b.addSystemCommand(&[_][]const u8{ "python3", "spec_runner.py" });
+    run_specs.setCwd(b.path("specs"));
+    run_specs.step.dependOn(&python_check.step);
+
+    const specs_step = b.step("specs", "Run Python execution specs");
+    specs_step.dependOn(&run_specs.step);
 
     // Language bindings
     build_pkg.WasmBindings.createWasmSteps(b, optimize, config.options_mod);
@@ -869,19 +765,7 @@ pub fn build(b: *std.Build) void {
         fusions_diff_toggle.root_module.addImport("crypto", modules.crypto_mod);
         fusions_diff_toggle.root_module.addImport("build_options", config.options_mod);
         fusions_diff_toggle.root_module.addImport("log", b.createModule(.{ .root_source_file = b.path("src/log.zig"), .target = target, .optimize = .Debug }));
-        if (modules.revm_mod) |revm_mod| {
-            fusions_diff_toggle.root_module.addImport("revm", revm_mod);
-            if (revm_lib) |revm| {
-                fusions_diff_toggle.linkLibrary(revm);
-                fusions_diff_toggle.addIncludePath(b.path("lib/revm"));
-                const revm_rust_target_dir_test = if (optimize == .Debug) "debug" else "release";
-                const revm_dylib_path_test = if (rust_target) |target_triple|
-                    b.fmt("target/{s}/{s}/librevm_wrapper.dylib", .{ target_triple, revm_rust_target_dir_test })
-                else
-                    b.fmt("target/{s}/librevm_wrapper.dylib", .{revm_rust_target_dir_test});
-                fusions_diff_toggle.addObjectFile(b.path(revm_dylib_path_test));
-            }
-        }
+        // Using MinimalEvm for differential testing (REVM removed)
         fusions_diff_toggle.linkLibrary(c_kzg_lib);
         fusions_diff_toggle.linkLibrary(blst_lib);
         if (bn254_lib) |bn254| fusions_diff_toggle.linkLibrary(bn254);

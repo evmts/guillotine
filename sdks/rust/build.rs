@@ -217,18 +217,103 @@ fn build_guillotine_library(project_dir: &Path) {
         extra_args.push("-Devm-disable-balance=true".to_string());
     }
     
+    // Input size configuration (not directly supported in build system)
+    // These features are documented but don't map to Zig build options yet
+    // Users would need to modify EvmConfig directly for now
+    if cfg!(feature = "max-input-size-64kb") {
+        println!("cargo:warning=max-input-size-64kb feature is documented but requires EvmConfig modification");
+    } else if cfg!(feature = "max-input-size-256kb") {
+        println!("cargo:warning=max-input-size-256kb feature is documented but requires EvmConfig modification");
+    } else if cfg!(feature = "max-input-size-1mb") {
+        println!("cargo:warning=max-input-size-1mb feature is documented but requires EvmConfig modification");
+    }
+
+    // Bytecode size configuration
+    if cfg!(feature = "max-bytecode-size-12kb") {
+        extra_args.push("-Devm-max-bytecode=12288".to_string());
+    } else if cfg!(feature = "max-bytecode-size-48kb") {
+        extra_args.push("-Devm-max-bytecode=49152".to_string());
+    } else if cfg!(feature = "max-bytecode-size-100kb") {
+        extra_args.push("-Devm-max-bytecode=102400".to_string());
+    }
+
+    // Init code size configuration
+    if cfg!(feature = "max-initcode-size-24kb") {
+        extra_args.push("-Devm-max-initcode=24576".to_string());
+    } else if cfg!(feature = "max-initcode-size-96kb") {
+        extra_args.push("-Devm-max-initcode=98304".to_string());
+    } else if cfg!(feature = "max-initcode-size-200kb") {
+        extra_args.push("-Devm-max-initcode=204800".to_string());
+    }
+
+    // Memory initial capacity configuration
+    if cfg!(feature = "memory-initial-capacity-2kb") {
+        extra_args.push("-Devm-memory-init=2048".to_string());
+    } else if cfg!(feature = "memory-initial-capacity-8kb") {
+        extra_args.push("-Devm-memory-init=8192".to_string());
+    } else if cfg!(feature = "memory-initial-capacity-16kb") {
+        extra_args.push("-Devm-memory-init=16384".to_string());
+    }
+
+    // Memory limit configuration
     if cfg!(feature = "large-memory-limit") {
         extra_args.push("-Devm-memory-limit=67108864".to_string()); // 64MB
     } else if cfg!(feature = "small-memory-limit") {
         extra_args.push("-Devm-memory-limit=1048576".to_string()); // 1MB
     }
-    
+
+    // Arena configuration
     if cfg!(feature = "large-arena") {
         extra_args.push("-Devm-arena-capacity=134217728".to_string()); // 128MB
     } else if cfg!(feature = "small-arena") {
         extra_args.push("-Devm-arena-capacity=16777216".to_string()); // 16MB
     }
-    
+
+    // Arena growth factor (not directly supported in Zig build system)
+    if cfg!(feature = "arena-growth-125") {
+        println!("cargo:warning=arena-growth-125 feature is documented but requires EvmConfig modification");
+    } else if cfg!(feature = "arena-growth-200") {
+        println!("cargo:warning=arena-growth-200 feature is documented but requires EvmConfig modification");
+    }
+
+    // Block gas limit configuration
+    if cfg!(feature = "block-gas-limit-8m") {
+        extra_args.push("-Devm-block-gas-limit=8000000".to_string());
+    } else if cfg!(feature = "block-gas-limit-15m") {
+        extra_args.push("-Devm-block-gas-limit=15000000".to_string());
+    } else if cfg!(feature = "block-gas-limit-50m") {
+        extra_args.push("-Devm-block-gas-limit=50000000".to_string());
+    }
+
+    // SIMD/Vector length configuration (not directly supported in build system)
+    if cfg!(feature = "vector-length-1") {
+        println!("cargo:warning=vector-length-1 feature is documented but requires EvmConfig modification");
+    } else if cfg!(feature = "vector-length-4") {
+        println!("cargo:warning=vector-length-4 feature is documented but requires EvmConfig modification");
+    } else if cfg!(feature = "vector-length-8") {
+        println!("cargo:warning=vector-length-8 feature is documented but requires EvmConfig modification");
+    } else if cfg!(feature = "vector-length-16") {
+        println!("cargo:warning=vector-length-16 feature is documented but requires EvmConfig modification");
+    }
+
+    // Safety configuration (not directly supported in build system)
+    if cfg!(feature = "disable-loop-quota") {
+        println!("cargo:warning=disable-loop-quota feature is documented but requires EvmConfig modification");
+    } else if cfg!(feature = "loop-quota-100k") {
+        println!("cargo:warning=loop-quota-100k feature is documented but requires EvmConfig modification");
+    } else if cfg!(feature = "loop-quota-10m") {
+        println!("cargo:warning=loop-quota-10m feature is documented but requires EvmConfig modification");
+    }
+
+    // Feature flags
+    if cfg!(feature = "enable-fusion") {
+        extra_args.push("-Devm-enable-fusion=true".to_string());
+    }
+
+    if cfg!(feature = "enable-precompiles") {
+        // Default is enabled, so this is mostly for explicit documentation
+    }
+
     if cfg!(feature = "tracing") {
         extra_args.push("-Denable-tracing=true".to_string());
     }

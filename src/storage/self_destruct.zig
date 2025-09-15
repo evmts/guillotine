@@ -176,7 +176,8 @@ test "SelfDestruct - basic marking and checking" {
     defer self_destruct.deinit();
 
     const contract_addr = primitives.ZERO_ADDRESS;
-    const recipient_addr = [_]u8{0x01} ++ [_]u8{0} ** 19;
+    const recipient_addr_bytes = [_]u8{0x01} ++ [_]u8{0} ** 19;
+    const recipient_addr = Address{ .bytes = recipient_addr_bytes };
 
     // Initially not marked
     try std.testing.expect(!self_destruct.is_marked_for_destruction(contract_addr));
@@ -189,7 +190,7 @@ test "SelfDestruct - basic marking and checking" {
     try std.testing.expect(self_destruct.is_marked_for_destruction(contract_addr));
     const retrieved_recipient = self_destruct.get_recipient(contract_addr);
     try std.testing.expect(retrieved_recipient != null);
-    try std.testing.expectEqualSlices(u8, &recipient_addr, &retrieved_recipient.?);
+    try std.testing.expectEqualSlices(u8, &recipient_addr.bytes, &retrieved_recipient.?.bytes);
 
     // Check count
     try std.testing.expectEqual(@as(u32, 1), self_destruct.count());
@@ -201,9 +202,12 @@ test "SelfDestruct - multiple contracts" {
     defer self_destruct.deinit();
 
     const contract1 = primitives.ZERO_ADDRESS;
-    const contract2 = [_]u8{0x02} ++ [_]u8{0} ** 19;
-    const recipient1 = [_]u8{0x01} ++ [_]u8{0} ** 19;
-    const recipient2 = [_]u8{0x03} ++ [_]u8{0} ** 19;
+    const contract2_bytes = [_]u8{0x02} ++ [_]u8{0} ** 19;
+    const contract2 = Address{ .bytes = contract2_bytes };
+    const recipient1_bytes = [_]u8{0x01} ++ [_]u8{0} ** 19;
+    const recipient1 = Address{ .bytes = recipient1_bytes };
+    const recipient2_bytes = [_]u8{0x03} ++ [_]u8{0} ** 19;
+    const recipient2 = Address{ .bytes = recipient2_bytes };
 
     // Mark multiple contracts
     try self_destruct.mark_for_destruction(contract1, recipient1);
@@ -219,8 +223,8 @@ test "SelfDestruct - multiple contracts" {
     // Check recipients
     const recp1 = self_destruct.get_recipient(contract1);
     const recp2 = self_destruct.get_recipient(contract2);
-    try std.testing.expectEqualSlices(u8, &recipient1, &recp1.?);
-    try std.testing.expectEqualSlices(u8, &recipient2, &recp2.?);
+    try std.testing.expectEqualSlices(u8, &recipient1.bytes, &recp1.?.bytes);
+    try std.testing.expectEqualSlices(u8, &recipient2.bytes, &recp2.?.bytes);
 }
 
 test "SelfDestruct - iterator functionality" {
@@ -229,9 +233,12 @@ test "SelfDestruct - iterator functionality" {
     defer self_destruct.deinit();
 
     const contract1 = primitives.ZERO_ADDRESS;
-    const contract2 = [_]u8{0x02} ++ [_]u8{0} ** 19;
-    const recipient1 = [_]u8{0x01} ++ [_]u8{0} ** 19;
-    const recipient2 = [_]u8{0x03} ++ [_]u8{0} ** 19;
+    const contract2_bytes = [_]u8{0x02} ++ [_]u8{0} ** 19;
+    const contract2 = Address{ .bytes = contract2_bytes };
+    const recipient1_bytes = [_]u8{0x01} ++ [_]u8{0} ** 19;
+    const recipient1 = Address{ .bytes = recipient1_bytes };
+    const recipient2_bytes = [_]u8{0x03} ++ [_]u8{0} ** 19;
+    const recipient2 = Address{ .bytes = recipient2_bytes };
 
     // Mark contracts
     try self_destruct.mark_for_destruction(contract1, recipient1);
@@ -252,7 +259,8 @@ test "SelfDestruct - unmark and clear" {
     defer self_destruct.deinit();
 
     const contract_addr = primitives.ZERO_ADDRESS;
-    const recipient_addr = [_]u8{0x01} ++ [_]u8{0} ** 19;
+    const recipient_addr_bytes = [_]u8{0x01} ++ [_]u8{0} ** 19;
+    const recipient_addr = Address{ .bytes = recipient_addr_bytes };
 
     // Mark and verify
     try self_destruct.mark_for_destruction(contract_addr, recipient_addr);

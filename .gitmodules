@@ -10,3 +10,6 @@
 [submodule "lib/c-kzg-4844"]
 	path = lib/c-kzg-4844
 	url = git@github.com:evmts/c-kzg-4844.git
+[submodule "specs/execution-specs"]
+	path = specs/execution-specs
+	url = https://github.com/ethereum/execution-specs

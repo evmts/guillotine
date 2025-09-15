@@ -4,7 +4,7 @@ const Frame = @import("../src/evm/frame.zig").Frame;
 const dispatch_mod = @import("../src/evm/dispatch.zig");
 const bytecode_mod = @import("../src/evm/bytecode.zig");
 const FrameConfig = @import("../src/evm/frame_config.zig").FrameConfig;
-const NoOpTracer = @import("../src/tracer/tracer.zig").NoOpTracer;
+const DefaultTracer = @import("../src/tracer/tracer.zig").DefaultTracer;
 const log = @import("../src/evm/log.zig");
 
 // Test configuration

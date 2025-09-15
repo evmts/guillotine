@@ -10,118 +10,136 @@ pub fn Handlers(comptime FrameType: type) type {
         pub const Dispatch = FrameType.Dispatch;
         pub const WordType = FrameType.WordType;
 
-        /// Advance to the next opcode instruction
-        pub inline fn next_instruction(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            // advance past the metadata
-            const next_cursor = cursor + 2;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+        const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
+
+        /// Continue to next instruction with afterInstruction tracking
+        pub inline fn next_instruction(self: *FrameType, cursor: [*]const Dispatch.Item, comptime opcode: Dispatch.UnifiedOpcode) Error!noreturn {
+            const op_data = dispatch_opcode_data.getOpData(opcode, Dispatch, Dispatch.Item, cursor);
+            self.afterInstruction(opcode, op_data.next_handler, op_data.next_cursor.cursor);
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// Validate stack constraints
         pub inline fn validate_stack(self: *FrameType) void {
-            std.debug.assert(self.stack.size() >= 1); 
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); 
+            self.getTracer().assert(self.stack.size() >= 1, "Arithmetic operation requires at least 1 stack item");
+            self.getTracer().assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "Arithmetic operation requires stack space");
         }
 
         /// PUSH_ADD_INLINE - Fused PUSH+ADD with inline value (≤8 bytes).
         /// Pushes a value and immediately adds it to the top of stack.
         pub fn push_add_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             @branchHint(.likely);
+            self.beforeInstruction(.PUSH_ADD_INLINE, cursor);
             validate_stack(self);
 
-            self.stack.push_unsafe(cursor[1].push_inline.value +% self.stack.pop_unsafe());
+            const op_data = dispatch_opcode_data.getOpData(.PUSH_ADD_INLINE, Dispatch, Dispatch.Item, cursor);
+            const top = self.stack.peek_unsafe();
+            self.stack.set_top_unsafe(op_data.metadata.value +% top);
 
-            return next_instruction(self, cursor);
+            return next_instruction(self, cursor, .PUSH_ADD_INLINE);
         }
 
         /// PUSH_ADD_POINTER - Fused PUSH+ADD with pointer value (>8 bytes).
         pub fn push_add_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            self.beforeInstruction(.PUSH_ADD_POINTER, cursor);
             validate_stack(self);
 
-            self.stack.push_unsafe(cursor[1].push_pointer.value.* +% self.stack.pop_unsafe());
-            
-            return next_instruction(self, cursor);
+            const op_data = dispatch_opcode_data.getOpData(.PUSH_ADD_POINTER, Dispatch, Dispatch.Item, cursor);
+            const top = self.stack.peek_unsafe();
+            self.stack.set_top_unsafe(self.u256_constants[op_data.metadata.index] +% top);
+
+            return next_instruction(self, cursor, .PUSH_ADD_POINTER);
         }
 
         /// PUSH_MUL_INLINE - Fused PUSH+MUL with inline value (≤8 bytes).
         pub fn push_mul_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            self.beforeInstruction(.PUSH_MUL_INLINE, cursor);
             validate_stack(self);
-            
-            self.stack.push_unsafe(cursor[1].push_inline.value *% self.stack.pop_unsafe());
 
-            return next_instruction(self, cursor);
+            const op_data = dispatch_opcode_data.getOpData(.PUSH_MUL_INLINE, Dispatch, Dispatch.Item, cursor);
+            const top = self.stack.peek_unsafe();
+            self.stack.set_top_unsafe(op_data.metadata.value *% top);
+
+            return next_instruction(self, cursor, .PUSH_MUL_INLINE);
         }
 
         /// PUSH_MUL_POINTER - Fused PUSH+MUL with pointer value (>8 bytes).
         pub fn push_mul_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            self.beforeInstruction(.PUSH_MUL_POINTER, cursor);
             validate_stack(self);
 
-            self.stack.push_unsafe(cursor[1].push_pointer.value.* *% self.stack.pop_unsafe());
+            const op_data = dispatch_opcode_data.getOpData(.PUSH_MUL_POINTER, Dispatch, Dispatch.Item, cursor);
+            const top = self.stack.peek_unsafe();
+            self.stack.set_top_unsafe(self.u256_constants[op_data.metadata.index] *% top);
 
-            return next_instruction(self, cursor);
+            return next_instruction(self, cursor, .PUSH_MUL_POINTER);
         }
 
         /// PUSH_DIV_INLINE - Fused PUSH+DIV with inline value (≤8 bytes).
         pub fn push_div_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const dividend = cursor[1].push_inline.value;
+            self.beforeInstruction(.PUSH_DIV_INLINE, cursor);
+            const op_data = dispatch_opcode_data.getOpData(.PUSH_DIV_INLINE, Dispatch, Dispatch.Item, cursor);
+            const dividend = op_data.metadata.value;
 
-            const divisor = self.stack.pop_unsafe();
-            
+            const divisor = self.stack.peek_unsafe();
+
             const Uint = @import("primitives").Uint;
             const U256 = Uint(256, 4);
             const dividend_u256 = U256.from_native(dividend);
             const divisor_u256 = U256.from_native(divisor);
-            
+
             const result_u256 = dividend_u256.wrapping_div(divisor_u256);
             const result = result_u256.to_native();
-            
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
-            self.stack.push_unsafe(result);
 
-            return @call(FrameType.getTailCallModifier(), cursor[2].opcode_handler, .{ self, cursor + 2 });
+            self.stack.set_top_unsafe(result);
+
+            return next_instruction(self, cursor, .PUSH_DIV_INLINE);
         }
 
         /// PUSH_DIV_POINTER - Fused PUSH+DIV with pointer value (>8 bytes).
         pub fn push_div_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            // For synthetic opcodes, cursor[1] contains the metadata directly
-            const dividend = cursor[1].push_pointer.value.*;
+            self.beforeInstruction(.PUSH_DIV_POINTER, cursor);
+            const op_data = dispatch_opcode_data.getOpData(.PUSH_DIV_POINTER, Dispatch, Dispatch.Item, cursor);
+            const dividend = self.u256_constants[op_data.metadata.index];
 
-            std.debug.assert(self.stack.size() >= 1); // PUSH_DIV_POINTER requires 1 stack item
-            const divisor = self.stack.pop_unsafe();
-            
+            self.getTracer().assert(self.stack.size() >= 1, "PUSH_DIV_POINTER requires 1 stack item");
+            const divisor = self.stack.peek_unsafe();
+
             // Convert to U256 for optimized division
             const Uint = @import("primitives").Uint;
             const U256 = Uint(256, 4);
             const dividend_u256 = U256.from_native(dividend);
             const divisor_u256 = U256.from_native(divisor);
-            
+
             const result_u256 = dividend_u256.wrapping_div(divisor_u256);
             const result = result_u256.to_native();
-            
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
-            self.stack.push_unsafe(result);
 
-            return @call(FrameType.getTailCallModifier(), cursor[2].opcode_handler, .{ self, cursor + 2 });
+            self.stack.set_top_unsafe(result);
+
+            return next_instruction(self, cursor, .PUSH_DIV_POINTER);
         }
 
         /// PUSH_SUB_INLINE - Fused PUSH+SUB with inline value (≤8 bytes).
         pub fn push_sub_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const push_value = cursor[1].push_inline.value;
-            std.debug.assert(self.stack.size() >= 1); // PUSH_SUB_INLINE requires 1 stack item
-            const top = self.stack.pop_unsafe();
+            self.beforeInstruction(.PUSH_SUB_INLINE, cursor);
+            const op_data = dispatch_opcode_data.getOpData(.PUSH_SUB_INLINE, Dispatch, Dispatch.Item, cursor);
+            const push_value = op_data.metadata.value;
+            self.getTracer().assert(self.stack.size() >= 1, "PUSH_SUB_INLINE requires 1 stack item");
+            const top = self.stack.peek_unsafe();
             const result = push_value -% top;
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
-            self.stack.push_unsafe(result);
-            return @call(FrameType.getTailCallModifier(), cursor[2].opcode_handler, .{ self, cursor + 2 });
+            self.stack.set_top_unsafe(result);
+            return next_instruction(self, cursor, .PUSH_SUB_INLINE);
         }
 
         /// PUSH_SUB_POINTER - Fused PUSH+SUB with pointer value (>8 bytes).
         pub fn push_sub_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            std.debug.assert(self.stack.size() >= 1); 
-            const result = cursor[1].push_pointer.value.* -% self.stack.pop_unsafe();
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); 
-            self.stack.push_unsafe(result);
-            return @call(FrameType.getTailCallModifier(), cursor[2].opcode_handler, .{ self, cursor + 2 });
+            self.beforeInstruction(.PUSH_SUB_POINTER, cursor);
+            const op_data = dispatch_opcode_data.getOpData(.PUSH_SUB_POINTER, Dispatch, Dispatch.Item, cursor);
+            self.getTracer().assert(self.stack.size() >= 1, "PUSH_SUB_POINTER requires 1 stack item");
+            const top = self.stack.peek_unsafe();
+            const result = self.u256_constants[op_data.metadata.index] -% top;
+            self.stack.set_top_unsafe(result);
+            return next_instruction(self, cursor, .PUSH_SUB_POINTER);
         }
     };
 }
@@ -131,7 +149,7 @@ pub fn Handlers(comptime FrameType: type) type {
 const testing = std.testing;
 const Frame = @import("../frame/frame.zig").Frame;
 const dispatch_mod = @import("../preprocessor/dispatch.zig");
-const NoOpTracer = @import("../tracer/tracer.zig").NoOpTracer;
+const DefaultTracer = @import("../tracer/tracer.zig").DefaultTracer;
 const bytecode_mod = @import("../bytecode/bytecode.zig");
 
 // Test configuration
@@ -141,7 +159,6 @@ const test_config = FrameConfig{
     .max_bytecode_size = 1024,
     .block_gas_limit = 30_000_000,
     .DatabaseType = @import("../storage/memory_database.zig").MemoryDatabase,
-    .TracerType = NoOpTracer,
     .memory_initial_capacity = 4096,
     .memory_limit = 0xFFFFFF,
 };
@@ -180,21 +197,21 @@ fn stopHandler(frame: *TestFrame, cursor: [*]const TestFrame.Dispatch.Item) Test
 fn createTestCursorInline(value: u256) [*]TestFrame.Dispatch.Item {
     // Store value as u64 (truncating for inline metadata)
     const inline_value = @as(u64, @truncate(value));
-    
+
     test_cursor_storage[0] = .{ .opcode_handler = undefined }; // Will be set by caller
     test_cursor_storage[1] = .{ .push_inline = .{ .value = inline_value } };
     test_cursor_storage[2] = .{ .opcode_handler = &stopHandler };
-    
+
     return &test_cursor_storage;
 }
 
 fn createTestCursorPointer(value: u256) [*]TestFrame.Dispatch.Item {
     test_value_storage = value;
-    
+
     test_cursor_storage[0] = .{ .opcode_handler = undefined }; // Will be set by caller
     test_cursor_storage[1] = .{ .push_pointer = .{ .value = &test_value_storage } };
     test_cursor_storage[2] = .{ .opcode_handler = &stopHandler };
-    
+
     return &test_cursor_storage;
 }
 
@@ -207,7 +224,7 @@ test "PUSH_ADD_INLINE - basic addition" {
 
     const cursor = createTestCursorInline(5);
     cursor[0].opcode_handler = &TestFrame.ArithmeticSyntheticHandlers.push_add_inline;
-    
+
     const result = TestFrame.ArithmeticSyntheticHandlers.push_add_inline(&frame, cursor);
     try testing.expectError(TestFrame.Error.Stop, result);
 
@@ -223,7 +240,7 @@ test "PUSH_ADD_POINTER - large value addition" {
 
     const cursor = createTestCursorPointer(large_value);
     cursor[0].opcode_handler = &TestFrame.ArithmeticSyntheticHandlers.push_add_pointer;
-    
+
     const result = TestFrame.ArithmeticSyntheticHandlers.push_add_pointer(&frame, cursor);
     try testing.expectError(TestFrame.Error.Stop, result);
 
@@ -239,7 +256,7 @@ test "PUSH_MUL_INLINE - multiplication" {
 
     const cursor = createTestCursorInline(6);
     cursor[0].opcode_handler = &TestFrame.ArithmeticSyntheticHandlers.push_mul_inline;
-    
+
     const result = TestFrame.ArithmeticSyntheticHandlers.push_mul_inline(&frame, cursor);
     try testing.expectError(TestFrame.Error.Stop, result);
 
@@ -254,7 +271,7 @@ test "PUSH_DIV_INLINE - division" {
 
     const cursor = createTestCursorInline(4);
     cursor[0].opcode_handler = &TestFrame.ArithmeticSyntheticHandlers.push_div_inline;
-    
+
     const result = TestFrame.ArithmeticSyntheticHandlers.push_div_inline(&frame, cursor);
     try testing.expectError(TestFrame.Error.Stop, result);
 
@@ -269,7 +286,7 @@ test "PUSH_DIV_INLINE - division by zero" {
 
     const cursor = createTestCursorInline(0);
     cursor[0].opcode_handler = &TestFrame.ArithmeticSyntheticHandlers.push_div_inline;
-    
+
     const result = TestFrame.ArithmeticSyntheticHandlers.push_div_inline(&frame, cursor);
     try testing.expectError(TestFrame.Error.Stop, result);
 
@@ -285,7 +302,7 @@ test "PUSH_SUB_INLINE - subtraction" {
 
     const cursor = createTestCursorInline(30);
     cursor[0].opcode_handler = &TestFrame.ArithmeticSyntheticHandlers.push_sub_inline;
-    
+
     const result = TestFrame.ArithmeticSyntheticHandlers.push_sub_inline(&frame, cursor);
     try testing.expectError(TestFrame.Error.Stop, result);
 
@@ -300,7 +317,7 @@ test "PUSH_SUB_INLINE - underflow" {
 
     const cursor = createTestCursorInline(20);
     cursor[0].opcode_handler = &TestFrame.ArithmeticSyntheticHandlers.push_sub_inline;
-    
+
     const result = TestFrame.ArithmeticSyntheticHandlers.push_sub_inline(&frame, cursor);
     try testing.expectError(TestFrame.Error.Stop, result);
 
@@ -350,7 +367,7 @@ test "PUSH_ADD_INLINE - overflow wrapping" {
 
     const cursor = createTestCursorInline(1);
     cursor[0].opcode_handler = &TestFrame.ArithmeticSyntheticHandlers.push_add_inline;
-    
+
     const result = TestFrame.ArithmeticSyntheticHandlers.push_add_inline(&frame, cursor);
     try testing.expectError(TestFrame.Error.Stop, result);
 
@@ -367,7 +384,7 @@ test "PUSH_MUL_INLINE - overflow wrapping" {
 
     const cursor = createTestCursorInline(2);
     cursor[0].opcode_handler = &TestFrame.ArithmeticSyntheticHandlers.push_mul_inline;
-    
+
     const result = TestFrame.ArithmeticSyntheticHandlers.push_mul_inline(&frame, cursor);
     try testing.expectError(TestFrame.Error.Stop, result);
 
@@ -384,7 +401,7 @@ test "PUSH_SUB_POINTER - underflow wrapping" {
 
     const cursor = createTestCursorPointer(sub_value);
     cursor[0].opcode_handler = &TestFrame.ArithmeticSyntheticHandlers.push_sub_pointer;
-    
+
     const result = TestFrame.ArithmeticSyntheticHandlers.push_sub_pointer(&frame, cursor);
     try testing.expectError(TestFrame.Error.Stop, result);
 
@@ -401,7 +418,7 @@ test "PUSH_DIV_POINTER - division by zero" {
 
     const cursor = createTestCursorPointer(zero_value);
     cursor[0].opcode_handler = &TestFrame.ArithmeticSyntheticHandlers.push_div_pointer;
-    
+
     const result = TestFrame.ArithmeticSyntheticHandlers.push_div_pointer(&frame, cursor);
     try testing.expectError(TestFrame.Error.Stop, result);
 
@@ -418,7 +435,7 @@ test "PUSH_MUL_POINTER - large value multiplication" {
 
     const cursor = createTestCursorPointer(large);
     cursor[0].opcode_handler = &TestFrame.ArithmeticSyntheticHandlers.push_mul_pointer;
-    
+
     const result = TestFrame.ArithmeticSyntheticHandlers.push_mul_pointer(&frame, cursor);
     try testing.expectError(TestFrame.Error.Stop, result);
 

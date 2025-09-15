@@ -1,6 +1,7 @@
 const std = @import("std");
 const primitives = @import("primitives");
 const differential_testor = @import("differential_testor.zig");
+const guillotine_evm = @import("evm");
 
 fn hex_decode(allocator: std.mem.Allocator, hex_str: []const u8) ![]u8 {
     const clean_hex = if (std.mem.startsWith(u8, hex_str, "0x")) hex_str[2..] else hex_str;
@@ -82,36 +83,42 @@ fn deployContract(testor: *differential_testor.DifferentialTestor, init_code: []
         .storage_root = [_]u8{0} ** 32,
     });
     
-    // Also set it in REVM
-    try testor.revm_instance.setCode(testor.contract, init_code);
-    
-    // Execute the deployment code with empty calldata to get runtime code
-    var revm_result = testor.revm_instance.execute(
-        testor.caller,
-        testor.contract,
-        0,
-        &.{}, // Empty calldata for deployment
-        10_000_000, // Generous gas for deployment
-    ) catch |err| {
-        log.err("REVM deployment execution failed: {}", .{err});
-        return err;
-    };
-    defer revm_result.deinit();
-    
-    if (!revm_result.success) {
-        log.err("REVM deployment failed", .{});
-        if (revm_result.output.len > 0) {
-            log.err("Revert data: {x}", .{revm_result.output});
+    // Use Guillotine EVM for deployment since we don't have revm_instance anymore
+    var execution_success = false;
+    var runtime_code: []u8 = &.{};
+
+    if (testor.guillotine_instance_no_trace) |*evm| {
+        // Execute deployment to get runtime code using Guillotine EVM
+        const params = guillotine_evm.CallParams{ .call = .{
+            .caller = testor.caller,
+            .to = testor.contract,
+            .value = 0,
+            .input = &.{}, // Empty calldata for deployment
+            .gas = 10_000_000, // Generous gas for deployment
+        } };
+        var execution_result = evm.call(params);
+        defer execution_result.deinit(testor.allocator);
+
+        if (!execution_result.success) {
+            log.err("Guillotine deployment failed", .{});
+            return DeploymentResult{
+                .success = false,
+                .runtime_code = try testor.allocator.alloc(u8, 0),
+                .address = testor.contract,
+            };
         }
+
+        execution_success = execution_result.success;
+        // The output should be the runtime code
+        runtime_code = try testor.allocator.dupe(u8, execution_result.output);
+    } else {
+        log.err("No Guillotine EVM instance available for deployment", .{});
         return DeploymentResult{
             .success = false,
             .runtime_code = try testor.allocator.alloc(u8, 0),
             .address = testor.contract,
         };
     }
-    
-    // The output should be the runtime code
-    const runtime_code = try testor.allocator.dupe(u8, revm_result.output);
     
     // Now set the runtime code for both EVMs
     const runtime_hash = try testor.guillotine_db.set_code(runtime_code);
@@ -129,9 +136,7 @@ fn deployContract(testor: *differential_testor.DifferentialTestor, init_code: []
         .code_hash = runtime_hash_no_trace,
         .storage_root = [_]u8{0} ** 32,
     });
-    
-    try testor.revm_instance.setCode(testor.contract, runtime_code);
-    
+
     return DeploymentResult{
         .success = true,
         .runtime_code = runtime_code,

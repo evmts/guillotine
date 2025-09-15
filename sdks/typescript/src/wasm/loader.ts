@@ -1,5 +1,43 @@
-import { readFileSync } from 'fs';
-import { join } from 'path';
+// File system imports are loaded dynamically in Node.js environment
+
+/**
+ * C-compatible types used by the WASM interface
+ * 
+ * CExecutionResult struct (for evm_execute result_ptr):
+ * - success: c_int (4 bytes)
+ * - gas_used: c_ulonglong (8 bytes) 
+ * - return_data_ptr: pointer (4 bytes in wasm32)
+ * - return_data_len: usize (4 bytes in wasm32)
+ * - error_code: c_int (4 bytes)
+ * 
+ * GuillotineExecutionResult struct (returned by guillotine_execute):
+ * - success: bool (1 byte)
+ * - gas_used: u64 (8 bytes)
+ * - output: pointer (4 bytes in wasm32)
+ * - output_len: usize (4 bytes in wasm32)
+ * - error_message: pointer or null (4 bytes in wasm32)
+ * 
+ * GuillotineAddress: 20 bytes
+ * GuillotineU256: 32 bytes (little-endian)
+ * 
+ * Error codes (EvmError enum):
+ * - EVM_OK = 0
+ * - EVM_ERROR_MEMORY = 1
+ * - EVM_ERROR_INVALID_PARAM = 2
+ * - EVM_ERROR_VM_NOT_INITIALIZED = 3
+ * - EVM_ERROR_EXECUTION_FAILED = 4
+ * - EVM_ERROR_INVALID_ADDRESS = 5
+ * - EVM_ERROR_INVALID_BYTECODE = 6
+ * 
+ * Frame error codes (FrameError enum):
+ * - FRAME_OK = 0
+ * - FRAME_ERROR_MEMORY = 1
+ * - FRAME_ERROR_INVALID_PARAM = 2
+ * - FRAME_ERROR_EXECUTION_FAILED = 3
+ * - FRAME_ERROR_STACK_OVERFLOW = 4
+ * - FRAME_ERROR_STACK_UNDERFLOW = 5
+ * - FRAME_ERROR_OUT_OF_GAS = 6
+ */
 
 /**
  * WASM module interface - represents the exported functions from Zig
@@ -9,16 +47,34 @@ export interface GuillotineWasm {
   memory: WebAssembly.Memory;
   
   // Core functions
-  evm_init(): number;
+  evm_init(): number; // Returns c_int (0 = success)
   evm_deinit(): void;
-  evm_is_initialized(): number;
-  evm_version(): number; // Returns pointer to string
+  evm_is_initialized(): number; // Returns c_int (1 if initialized, 0 otherwise)
+  evm_version(): number; // Returns pointer to null-terminated string
+  
+  // Legacy EVM execution
+  evm_execute(
+    bytecode_ptr: number,
+    bytecode_len: number,
+    caller_ptr: number,
+    value: bigint, // c_ulonglong
+    gas_limit: bigint, // c_ulonglong
+    result_ptr: number // Pointer to CExecutionResult struct
+  ): number; // Returns c_int error code
   
   // VM management
-  guillotine_vm_create(): number; // Returns pointer to VM
+  guillotine_vm_create(): number; // Returns pointer to GuillotineVm or null
   guillotine_vm_destroy(vm: number): void;
   
-  // Execution
+  // State management
+  guillotine_set_balance(vm: number, address_ptr: number, balance_ptr: number): boolean;
+  guillotine_set_code(vm: number, address_ptr: number, code_ptr: number, code_len: number): boolean;
+  guillotine_set_storage(vm: number, address_ptr: number, key_ptr: number, value_ptr: number): number;
+  guillotine_get_balance(vm: number, address_ptr: number): number; // Returns pointer to U256
+  guillotine_get_code(vm: number, address_ptr: number): number; // Returns pointer to bytes
+  guillotine_get_storage(vm: number, address_ptr: number, key_ptr: number): number; // Returns pointer to U256
+  
+  // VM execution
   guillotine_vm_execute(
     vm: number,
     bytecode_ptr: number,
@@ -30,73 +86,47 @@ export interface GuillotineWasm {
     input_len: number,
     gas_limit: bigint
   ): number; // Returns pointer to result
-  
-  // State management
-  guillotine_set_balance(vm: number, address_ptr: number, balance_ptr: number): number;
-  guillotine_set_code(vm: number, address_ptr: number, code_ptr: number, code_len: number): number;
-  guillotine_set_storage(vm: number, address_ptr: number, key_ptr: number, value_ptr: number): number;
-  guillotine_get_balance(vm: number, address_ptr: number): number; // Returns pointer to U256
-  guillotine_get_code(vm: number, address_ptr: number): number; // Returns pointer to bytes
-  guillotine_get_storage(vm: number, address_ptr: number, key_ptr: number): number; // Returns pointer to U256
-  
-  // Frame API (from evm_c.h)
-  evm_frame_create(bytecode: number, bytecode_len: number, initial_gas: bigint): number;
-  evm_frame_destroy(frame_ptr: number): void;
-  evm_frame_reset(frame_ptr: number, new_gas: bigint): number;
-  evm_frame_execute(frame_ptr: number): number;
-  
-  // Stack operations
-  evm_frame_push_u64(frame_ptr: number, value: bigint): number;
-  evm_frame_push_u32(frame_ptr: number, value: number): number;
-  evm_frame_push_bytes(frame_ptr: number, bytes: number, len: number): number;
-  evm_frame_pop_u64(frame_ptr: number, value_out: number): number;
-  evm_frame_pop_u32(frame_ptr: number, value_out: number): number;
-  evm_frame_pop_bytes(frame_ptr: number, bytes_out: number): number;
-  evm_frame_peek_u64(frame_ptr: number, value_out: number): number;
-  evm_frame_stack_size(frame_ptr: number): number;
-  evm_frame_stack_capacity(frame_ptr: number): number;
-  
-  // State inspection
-  evm_frame_get_gas_remaining(frame_ptr: number): bigint;
-  evm_frame_get_gas_used(frame_ptr: number): bigint;
-  evm_frame_get_pc(frame_ptr: number): number;
-  evm_frame_get_bytecode_len(frame_ptr: number): number;
-  evm_frame_get_current_opcode(frame_ptr: number): number;
-  evm_frame_is_stopped(frame_ptr: number): boolean;
-  
-  // Memory operations
-  evm_frame_get_memory(frame_ptr: number, offset: number, length: number, data_out: number): number;
-  evm_frame_get_memory_size(frame_ptr: number): number;
-  evm_frame_get_stack(frame_ptr: number, stack_out: number, max_items: number, count_out: number): number;
-  evm_frame_get_stack_item(frame_ptr: number, index: number, item_out: number): number;
-  
-  // Debug frame API
-  evm_debug_frame_create(bytecode: number, bytecode_len: number, initial_gas: bigint): number;
-  evm_debug_set_step_mode(frame_ptr: number, enabled: boolean): number;
-  evm_debug_is_paused(frame_ptr: number): boolean;
-  evm_debug_resume(frame_ptr: number): number;
-  evm_debug_step(frame_ptr: number): number;
-  evm_debug_add_breakpoint(frame_ptr: number, pc: number): number;
-  evm_debug_remove_breakpoint(frame_ptr: number, pc: number): number;
-  evm_debug_has_breakpoint(frame_ptr: number, pc: number): number;
-  evm_debug_clear_breakpoints(frame_ptr: number): number;
-  evm_debug_get_step_count(frame_ptr: number): bigint;
-  
-  // Error handling
-  evm_error_string(error_code: number): number;
-  evm_error_is_stop(error_code: number): boolean;
+  guillotine_execute(
+    vm: number,
+    from_ptr: number, // Pointer to GuillotineAddress
+    to_ptr: number, // Pointer to GuillotineAddress (nullable)
+    value_ptr: number, // Pointer to GuillotineU256 (nullable)
+    input_ptr: number, // Pointer to input bytes (nullable)
+    input_len: number,
+    gas_limit: bigint // u64
+  ): number; // Returns GuillotineExecutionResult struct (by value)
   
   // Utility functions
-  guillotine_address_from_hex(hex_ptr: number): number;
-  guillotine_address_to_hex(address_ptr: number): number;
-  guillotine_u256_from_hex(hex_ptr: number): number;
-  guillotine_u256_to_hex(u256_ptr: number): number;
-  guillotine_hash_from_hex(hex_ptr: number): number;
-  guillotine_hash_to_hex(hash_ptr: number): number;
+  guillotine_u256_from_u64(value: bigint, out_u256_ptr: number): void;
+  guillotine_version(): number; // Returns pointer to version string
   
-  // Memory allocation
-  __wbindgen_malloc(size: number): number;
-  __wbindgen_free(ptr: number, size: number): void;
+  // Frame API
+  evm_frame_create(bytecode_ptr: number, bytecode_len: number, initial_gas: bigint): number; // Returns pointer or null
+  evm_frame_destroy(frame_ptr: number): void;
+  evm_frame_reset(frame_ptr: number, new_gas: bigint): number; // Returns c_int error code
+  evm_frame_execute(frame_ptr: number): number; // Returns c_int error code
+  
+  // Frame gas operations
+  evm_frame_get_gas_remaining(frame_ptr: number): bigint; // Returns u64
+  evm_frame_get_gas_used(frame_ptr: number): bigint; // Returns u64
+  
+  // Frame state inspection
+  evm_frame_get_pc(frame_ptr: number): number; // Returns u32
+  evm_frame_stack_size(frame_ptr: number): number; // Returns u32
+  evm_frame_is_stopped(frame_ptr: number): number; // Returns c_int (1 if stopped, 0 if running)
+  evm_frame_get_memory_size(frame_ptr: number): number; // Returns usize
+  evm_frame_get_bytecode_len(frame_ptr: number): number; // Returns u32
+  evm_frame_get_current_opcode(frame_ptr: number): number; // Returns u8
+  
+  // Frame stack operations
+  evm_frame_push_u64(frame_ptr: number, value: bigint): number; // Returns c_int error code
+  evm_frame_pop_u64(frame_ptr: number, value_out_ptr: number): number; // Returns c_int error code
+  
+  // Frame memory operations
+  evm_frame_get_memory(frame_ptr: number, offset: number, length: number, data_out_ptr: number): number; // Returns c_int error code
+  
+  // Debug frame API
+  evm_debug_frame_create(bytecode_ptr: number, bytecode_len: number, initial_gas: bigint): number; // Returns pointer or null
 }
 
 /**
@@ -104,11 +134,10 @@ export interface GuillotineWasm {
  */
 export class WasmMemory {
   private memory: WebAssembly.Memory;
-  private wasm: GuillotineWasm;
 
-  constructor(memory: WebAssembly.Memory, wasm: GuillotineWasm) {
+  constructor(memory: WebAssembly.Memory, _wasm: GuillotineWasm) {
     this.memory = memory;
-    this.wasm = wasm;
+    // wasm parameter kept for API compatibility but not used internally
   }
 
   /**
@@ -122,23 +151,19 @@ export class WasmMemory {
    * Allocate memory in WASM
    */
   malloc(size: number): number {
-    // For Zig-compiled WASM without explicit memory management,
-    // we'll use a simple bump allocator
-    if (!this.wasm.__wbindgen_malloc) {
-      // Simple bump allocator - start after first 1MB
-      if (!this.allocOffset) {
-        this.allocOffset = 1024 * 1024; // Start at 1MB
-      }
-      const ptr = this.allocOffset;
-      this.allocOffset += size;
-      // Ensure we have enough memory
-      const needed = Math.ceil(this.allocOffset / 65536);
-      if (this.memory.buffer.byteLength < needed * 65536) {
-        this.memory.grow(needed - this.memory.buffer.byteLength / 65536);
-      }
-      return ptr;
+    // Simple bump allocator for Zig-compiled WASM
+    // Zig uses page_allocator for freestanding WASM
+    if (!this.allocOffset) {
+      this.allocOffset = 1024 * 1024; // Start at 1MB
     }
-    return this.wasm.__wbindgen_malloc(size);
+    const ptr = this.allocOffset;
+    this.allocOffset += size;
+    // Ensure we have enough memory
+    const needed = Math.ceil(this.allocOffset / 65536);
+    if (this.memory.buffer.byteLength < needed * 65536) {
+      this.memory.grow(needed - this.memory.buffer.byteLength / 65536);
+    }
+    return ptr;
   }
 
   private allocOffset?: number;
@@ -146,11 +171,9 @@ export class WasmMemory {
   /**
    * Free memory in WASM
    */
-  free(ptr: number, size: number): void {
+  free(_ptr: number, _size: number): void {
     // No-op for simple bump allocator
-    if (this.wasm.__wbindgen_free) {
-      this.wasm.__wbindgen_free(ptr, size);
-    }
+    // Zig's page_allocator doesn't expose free to WASM
   }
 
   /**
@@ -329,12 +352,12 @@ export class WasmLoader {
     };
 
     // Initialize the EVM
-    if (this.wasmModule.evm_init) {
+    if (this.wasmModule && this.wasmModule.evm_init) {
       const result = this.wasmModule.evm_init();
       if (result !== 0) {
         throw new Error('Failed to initialize Guillotine EVM');
       }
-    } else {
+    } else if (this.wasmModule) {
       console.warn('evm_init function not found in WASM exports');
     }
   }
@@ -379,7 +402,7 @@ export class WasmLoader {
   /**
    * Free bytes in WASM memory
    */
-  freeBytes(ptr: number): void {
+  freeBytes(_ptr: number): void {
     if (!this.memory) {
       throw new Error('WASM module not loaded');
     }
@@ -422,12 +445,12 @@ export class WasmLoader {
    * Cleanup the WASM module
    */
   cleanup(): void {
-    if (this.wasmModule) {
+    if (this.wasmModule && this.wasmModule.evm_deinit) {
       this.wasmModule.evm_deinit();
-      this.wasmModule = null;
-      this.memory = null;
-      this.exports = null;
     }
+    this.wasmModule = null;
+    this.memory = null;
+    this.exports = null;
   }
 
   // Console logging functions for WASM

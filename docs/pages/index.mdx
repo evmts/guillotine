@@ -1,448 +1,95 @@
 ---
-layout: landing
-title: Guillotine - The Ultrafast EVM for Every Language
-description: High-performance Ethereum Virtual Machine implementation in Zig with extreme speed, minimal bundle size, and universal language support.
+title: Guillotine Docs
+description: Minimal, functional documentation for building, testing, and using the Zig EVM.
 ---
 
-import { HomePage, Button, Callout } from 'vocs/components'
+> **Note**: This documentation was generated with AI assistance. Please verify technical details and report any inaccuracies.
 
-<HomePage.Root>
-  <div style={{ 
-    position: 'absolute', 
-    top: 0, 
-    left: 0, 
-    right: 0, 
-    height: '600px',
-    background: 'radial-gradient(ellipse at top, rgba(234, 88, 12, 0.1) 0%, transparent 50%)',
-    pointerEvents: 'none'
-  }} />
-  
-  <div style={{ position: 'relative', zIndex: 1 }}>
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '2rem' }}>
-      <span className="version-badge">v0.1.0-alpha</span>
-    </div>
-    
-    <h1 style={{
-      fontSize: '4rem',
-      fontWeight: '900',
-      letterSpacing: '-0.04em',
-      lineHeight: '1',
-      marginBottom: '1.5rem',
-      background: 'linear-gradient(135deg, #EA580C 0%, #DC2626 100%)',
-      WebkitBackgroundClip: 'text',
-      backgroundClip: 'text',
-      WebkitTextFillColor: 'transparent'
-    }}>
-      ⚔️ Guillotine
-    </h1>
-    
-    <HomePage.Tagline style={{ fontSize: '1.5rem', fontWeight: '500', marginBottom: '1rem' }}>
-      The ultrafast EVM for every language and platform
-    </HomePage.Tagline>
-    
-    <HomePage.Description style={{ fontSize: '1.125rem', maxWidth: '700px', margin: '0 auto 2rem' }}>
-      Blazingly fast Ethereum Virtual Machine implementation written in Zig, featuring extreme performance, 
-      minimal bundle size, and universal language support. Built with data-oriented design for maximum efficiency.
-    </HomePage.Description>
-    
-    <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', marginBottom: '3rem' }}>
-      <HomePage.Button href="/getting-started/installation" variant="accent" style={{ padding: '0.75rem 2rem', fontSize: '1.125rem' }}>
-        Get Started →
-      </HomePage.Button>
-      <HomePage.Button href="https://github.com/evmts/Guillotine" style={{ padding: '0.75rem 2rem', fontSize: '1.125rem' }}>
-        View on GitHub
-      </HomePage.Button>
-    </div>
-    
-    <div style={{ 
-      background: 'linear-gradient(135deg, rgba(234, 88, 12, 0.05), rgba(220, 38, 38, 0.02))',
-      border: '1px solid rgba(234, 88, 12, 0.2)',
-      borderRadius: '12px',
-      padding: '1.5rem',
-      marginBottom: '3rem',
-      position: 'relative',
-      overflow: 'hidden'
-    }}>
-      <div style={{ 
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        height: '3px',
-        background: 'linear-gradient(90deg, #EA580C, #DC2626)'
-      }} />
-      <code style={{ fontSize: '1.125rem', fontFamily: 'var(--font-mono)' }}>
-        <span style={{ color: '#666' }}>$ </span>
-        <span style={{ color: '#EA580C' }}>zig</span> build <span style={{ color: '#666' }}>&& </span>
-        <span style={{ color: '#EA580C' }}>zig</span> build test
-      </code>
-    </div>
-  </div>
-</HomePage.Root>
+# Guillotine Docs (Alpha)
 
-## 🚀 Performance Benchmarks
+Purely functional docs. No marketing. If anything is unclear or wrong, open an issue.
 
-<div style={{ 
-  display: 'grid', 
-  gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', 
-  gap: '1.5rem',
-  marginBottom: '3rem'
-}}>
-  <div style={{
-    padding: '1.5rem',
-    background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(5, 150, 105, 0.05))',
-    border: '1px solid rgba(16, 185, 129, 0.3)',
-    borderRadius: '12px'
-  }}>
-    <div style={{ fontSize: '2.5rem', fontWeight: '800', color: '#10B981' }}>35%</div>
-    <div style={{ fontSize: '1rem', fontWeight: '600', marginBottom: '0.5rem' }}>Faster than Revm</div>
-    <div style={{ fontSize: '0.875rem', color: '#666' }}>On average across all benchmarks</div>
-  </div>
-  
-  <div style={{
-    padding: '1.5rem',
-    background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(37, 99, 235, 0.05))',
-    border: '1px solid rgba(59, 130, 246, 0.3)',
-    borderRadius: '12px'
-  }}>
-    <div style={{ fontSize: '2.5rem', fontWeight: '800', color: '#3B82F6' }}>~110KB</div>
-    <div style={{ fontSize: '1rem', fontWeight: '600', marginBottom: '0.5rem' }}>Bundle Size</div>
-    <div style={{ fontSize: '0.875rem', color: '#666' }}>Minimal footprint with full features</div>
-  </div>
-  
-  <div style={{
-    padding: '1.5rem',
-    background: 'linear-gradient(135deg, rgba(168, 85, 247, 0.1), rgba(139, 92, 246, 0.05))',
-    border: '1px solid rgba(168, 85, 247, 0.3)',
-    borderRadius: '12px'
-  }}>
-    <div style={{ fontSize: '2.5rem', fontWeight: '800', color: '#A855F7' }}>1.59ms</div>
-    <div style={{ fontSize: '1rem', fontWeight: '600', marginBottom: '0.5rem' }}>ERC20 Transfer</div>
-    <div style={{ fontSize: '0.875rem', color: '#666' }}>Industry-leading execution speed</div>
-  </div>
-</div>
+## Quick Start
 
-## ✨ Key Features
+- Prerequisites: Zig 0.15.1+, Git
+- Build: `zig build`
+- Verify: `zig build && zig build test-opcodes`
+- Full test suite: `zig build test` (slower)
 
-<div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '2rem', marginBottom: '3rem' }}>
-  <div>
-    <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-      ⚡ Extreme Performance
-    </h3>
-    <p style={{ color: '#666' }}>
-      Data-oriented design with indirect threading, optimized opcode dispatch, and minimal branch prediction misses.
-    </p>
-  </div>
-  
-  <div>
-    <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-      🌐 Universal Support
-    </h3>
-    <p style={{ color: '#666' }}>
-      Native bindings for Go, C, TypeScript, Python, Rust, Swift, Kotlin, and WASM. Use Guillotine everywhere.
-    </p>
-  </div>
-  
-  <div>
-    <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-      📦 Minimal Bundle
-    </h3>
-    <p style={{ color: '#666' }}>
-      Comptime configuration means you only pay for features you use. Skip precompiles or hardforks without overhead.
-    </p>
-  </div>
-  
-  <div>
-    <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-      🔒 Type Safe
-    </h3>
-    <p style={{ color: '#666' }}>
-      Strong typing throughout with Zig's compile-time guarantees. Catch errors at build time, not runtime.
-    </p>
-  </div>
-  
-  <div>
-    <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-      🧪 Battle Tested
-    </h3>
-    <p style={{ color: '#666' }}>
-      Comprehensive test suite with unit tests, e2e tests, fuzz testing, and differential testing against Revm.
-    </p>
-  </div>
-  
-  <div>
-    <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-      🎨 Customizable
-    </h3>
-    <p style={{ color: '#666' }}>
-      Add custom opcodes, precompiles, and hardforks. Create your own EVM with zero-cost compile-time abstractions.
-    </p>
-  </div>
-</div>
+## Core Commands
 
-## 📊 Benchmark Results
+- `zig build`: Build project
+- `zig build test-opcodes`: Run opcode differential tests
+- `zig build test`: Run all tests
+- `zig build --list-steps`: Show available steps
 
-Performance comparison against leading EVM implementations:
+## Minimal Example
 
-| Test Case | Guillotine | REVM | Geth | evmone |
-|-----------|------------|------|------|--------|
-| **ERC20 Approval** | <span style={{color: '#10B981', fontWeight: 'bold'}}>1.59ms</span> | 1.67ms | 3.65ms | 1.56ms |
-| **ERC20 Mint** | <span style={{color: '#10B981', fontWeight: 'bold'}}>4.28ms</span> | 5.76ms | 12.84ms | 4.26ms |
-| **ERC20 Transfer** | <span style={{color: '#10B981', fontWeight: 'bold'}}>6.65ms</span> | 8.30ms | 17.50ms | 6.01ms |
-| **10K Hashes** | <span style={{color: '#10B981', fontWeight: 'bold'}}>2.46ms</span> | 3.31ms | 9.36ms | 2.90ms |
-| **Snailtracer** | <span style={{color: '#10B981', fontWeight: 'bold'}}>26.41ms</span> | 39.01ms | 86.02ms | 27.15ms |
-
-<Callout type="success">
-  **35% faster than Revm** on average • **65% faster than Geth** • Performance on par with evmone
-</Callout>
-
-## 🏗️ Architecture
-
-<div style={{ 
-  background: 'linear-gradient(135deg, rgba(234, 88, 12, 0.03), rgba(220, 38, 38, 0.01))',
-  border: '1px solid rgba(234, 88, 12, 0.1)',
-  borderRadius: '12px',
-  padding: '2rem',
-  marginBottom: '3rem'
-}}>
-  <h3 style={{ marginTop: 0 }}>Data-Oriented Design</h3>
-  <p>Guillotine is built from the ground up using data-oriented design principles:</p>
-  
-  <ul style={{ lineHeight: '1.8' }}>
-    <li>**Optimized Stack Frame** - Cache-conscious struct layout for minimal memory access</li>
-    <li>**Indirect Threading** - Tail-call recursion for excellent CPU branch prediction</li>
-    <li>**Opcode Fusion** - Common patterns compiled into single dispatch operations</li>
-    <li>**Assembly Keccak** - Hardware-accelerated cryptography via keccak-asm</li>
-    <li>**Batched Gas Calculation** - Static costs computed in advance</li>
-  </ul>
-</div>
-
-## 🚀 Quick Start
-
-Get up and running with Guillotine in seconds:
-
-::::steps
-### Install Zig
-
-```bash
-# macOS
-brew install zig
-
-# Linux
-wget https://ziglang.org/download/0.14.1/zig-linux-x86_64-0.14.1.tar.xz
-tar -xf zig-linux-x86_64-0.14.1.tar.xz
-
-# Windows
-scoop install zig
-```
-
-### Clone & Build
-
-```bash
-git clone https://github.com/evmts/Guillotine.git
-cd Guillotine
-zig build
-```
-
-### Run Tests
-
-```bash
-zig build test
-```
-
-### Use in Your Project
+This example executes a STOP-only contract at a fixed address.
 
 ```zig
-const guillotine = @import("guillotine");
+const std = @import("std");
+const primitives = @import("primitives");
+const DefaultEvm = @import("evm").DefaultEvm;
+const Database = @import("storage/database.zig").Database;
+const BlockInfo = @import("block/block_info.zig").DefaultBlockInfo;
+const TransactionContext = @import("block/transaction_context.zig").TransactionContext;
 
 pub fn main() !void {
-    var evm = try guillotine.Evm.init(allocator);
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var db = Database.init(allocator);
+    defer db.deinit();
+
+    const block = BlockInfo{
+        .number = 1,
+        .timestamp = 1,
+        .difficulty = 0,
+        .gas_limit = 30_000_000,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .base_fee = 0,
+        .prev_randao = [_]u8{0} ** 32,
+    };
+
+    const tx = TransactionContext{
+        .gas_limit = 1_000_000,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .chain_id = 1,
+    };
+
+    var evm = try DefaultEvm.init(allocator, &db, block, tx, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
-    
-    const result = try evm.execute(bytecode);
+
+    const addr: primitives.Address = .{ .bytes = [_]u8{0x12} ++ [_]u8{0} ** 19 };
+    const bytecode = [_]u8{0x00}; // STOP
+    const code_hash = try db.set_code(&bytecode);
+    try db.set_account(addr.bytes, .{ .balance = 0, .nonce = 0, .code_hash = code_hash, .storage_root = [_]u8{0} ** 32 });
+
+    const params = DefaultEvm.CallParams{ .call = .{
+        .caller = primitives.ZERO_ADDRESS,
+        .to = addr,
+        .value = 0,
+        .input = &.{},
+        .gas = 100_000,
+    } };
+
+    const result = evm.call(params);
+    if (!result.success) return error.ExecutionFailed;
 }
 ```
-::::
 
-## 🌟 Language Support
+## Notes
 
-<div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginBottom: '3rem' }}>
-  <Button href="/advanced/bindings/c-api">
-    C API ✅
-  </Button>
-  <Button href="/advanced/bindings/go">
-    Go 🚧
-  </Button>
-  <Button href="/advanced/bindings/typescript">
-    TypeScript 🚧
-  </Button>
-  <Button href="/advanced/bindings/python">
-    Python 🚧
-  </Button>
-  <Button href="/advanced/bindings/rust">
-    Rust 🚧
-  </Button>
-  <Button href="/advanced/bindings/wasm">
-    WASM 🚧
-  </Button>
-</div>
+- Alpha quality; interfaces can change.
+- Tests print nothing on success by design.
+- For debug logs in tests:
 
-## 📖 Documentation
+```zig
+test {
+    std.testing.log_level = .debug;
+}
+```
 
-<div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.5rem', marginBottom: '3rem' }}>
-  <a href="/getting-started/quick-start" style={{
-    display: 'block',
-    padding: '1.5rem',
-    background: 'linear-gradient(135deg, rgba(234, 88, 12, 0.05), rgba(220, 38, 38, 0.02))',
-    border: '1px solid rgba(234, 88, 12, 0.2)',
-    borderRadius: '12px',
-    textDecoration: 'none',
-    transition: 'all 0.2s'
-  }}>
-    <h3 style={{ margin: '0 0 0.5rem 0', color: '#EA580C' }}>🚀 Quick Start</h3>
-    <p style={{ margin: 0, color: 'var(--vocs-color_text2)' }}>
-      Get up and running with Guillotine in minutes
-    </p>
-  </a>
-  
-  <a href="/advanced/architecture/overview" style={{
-    display: 'block',
-    padding: '1.5rem',
-    background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.05), rgba(37, 99, 235, 0.02))',
-    border: '1px solid rgba(59, 130, 246, 0.2)',
-    borderRadius: '12px',
-    textDecoration: 'none',
-    transition: 'all 0.2s'
-  }}>
-    <h3 style={{ margin: '0 0 0.5rem 0', color: '#3B82F6' }}>🏗️ Architecture</h3>
-    <p style={{ margin: 0, color: 'var(--vocs-color_text2)' }}>
-      Deep dive into Guillotine's design and optimizations
-    </p>
-  </a>
-  
-  <a href="/examples" style={{
-    display: 'block',
-    padding: '1.5rem',
-    background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.05), rgba(5, 150, 105, 0.02))',
-    border: '1px solid rgba(16, 185, 129, 0.2)',
-    borderRadius: '12px',
-    textDecoration: 'none',
-    transition: 'all 0.2s'
-  }}>
-    <h3 style={{ margin: '0 0 0.5rem 0', color: '#10B981' }}>📝 Examples</h3>
-    <p style={{ margin: 0, color: 'var(--vocs-color_text2)' }}>
-      Real-world usage examples and code snippets
-    </p>
-  </a>
-  
-  <a href="#TODO" style={{
-    display: 'block',
-    padding: '1.5rem',
-    background: 'linear-gradient(135deg, rgba(168, 85, 247, 0.05), rgba(139, 92, 246, 0.02))',
-    border: '1px solid rgba(168, 85, 247, 0.2)',
-    borderRadius: '12px',
-    textDecoration: 'none',
-    transition: 'all 0.2s'
-  }}>
-    <h3 style={{ margin: '0 0 0.5rem 0', color: '#A855F7' }}>📚 API Reference</h3>
-    <p style={{ margin: 0, color: 'var(--vocs-color_text2)' }}>
-      Complete API documentation with types and methods
-    </p>
-  </a>
-  
-  <a href="/faq" style={{
-    display: 'block',
-    padding: '1.5rem',
-    background: 'linear-gradient(135deg, rgba(251, 146, 60, 0.05), rgba(251, 113, 133, 0.02))',
-    border: '1px solid rgba(251, 146, 60, 0.2)',
-    borderRadius: '12px',
-    textDecoration: 'none',
-    transition: 'all 0.2s'
-  }}>
-    <h3 style={{ margin: '0 0 0.5rem 0', color: '#FB923C' }}>❓ FAQ</h3>
-    <p style={{ margin: 0, color: 'var(--vocs-color_text2)' }}>
-      Answers to frequently asked questions
-    </p>
-  </a>
-  
-  <a href="/status" style={{
-    display: 'block',
-    padding: '1.5rem',
-    background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.05), rgba(220, 38, 38, 0.02))',
-    border: '1px solid rgba(239, 68, 68, 0.2)',
-    borderRadius: '12px',
-    textDecoration: 'none',
-    transition: 'all 0.2s'
-  }}>
-    <h3 style={{ margin: '0 0 0.5rem 0', color: '#EF4444' }}>📊 Status</h3>
-    <p style={{ margin: 0, color: 'var(--vocs-color_text2)' }}>
-      Current development status and known issues
-    </p>
-  </a>
-</div>
-
-## 🤝 Community & Support
-
-<div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '1.5rem', marginBottom: '3rem' }}>
-  <a href="https://github.com/evmts/Guillotine" style={{
-    display: 'block',
-    padding: '1.5rem',
-    background: 'var(--vocs-color_background2)',
-    border: '1px solid var(--vocs-color_border)',
-    borderRadius: '12px',
-    textDecoration: 'none',
-    transition: 'all 0.2s'
-  }}>
-    <h3 style={{ margin: '0 0 0.5rem 0' }}>📦 GitHub</h3>
-    <p style={{ margin: 0, color: 'var(--vocs-color_text2)' }}>
-      Star the repo, report issues, and contribute
-    </p>
-  </a>
-  
-  <a href="https://t.me/+ANThR9bHDLAwMjUx" style={{
-    display: 'block',
-    padding: '1.5rem',
-    background: 'var(--vocs-color_background2)',
-    border: '1px solid var(--vocs-color_border)',
-    borderRadius: '12px',
-    textDecoration: 'none',
-    transition: 'all 0.2s'
-  }}>
-    <h3 style={{ margin: '0 0 0.5rem 0' }}>💬 Telegram</h3>
-    <p style={{ margin: 0, color: 'var(--vocs-color_text2)' }}>
-      Join our community for discussions and support
-    </p>
-  </a>
-  
-  <a href="https://discord.gg/guillotine" style={{
-    display: 'block',
-    padding: '1.5rem',
-    background: 'var(--vocs-color_background2)',
-    border: '1px solid var(--vocs-color_border)',
-    borderRadius: '12px',
-    textDecoration: 'none',
-    transition: 'all 0.2s'
-  }}>
-    <h3 style={{ margin: '0 0 0.5rem 0' }}>🎮 Discord</h3>
-    <p style={{ margin: 0, color: 'var(--vocs-color_text2)' }}>
-      Real-time chat with developers and users
-    </p>
-  </a>
-</div>
-
-## 🙏 Acknowledgments
-
-Built with inspiration from [EthereumJS](https://github.com/ethereumjs/ethereumjs-monorepo), [Evmone](https://github.com/ethereum/evmone), [Geth](https://github.com/ethereum/go-ethereum), and [Revm](https://github.com/bluealloy/revm).
-
-Funded by the **Ethereum Foundation** 🏛️
-
----
-
-<div style={{ textAlign: 'center', marginTop: '4rem', paddingTop: '2rem', borderTop: '1px solid var(--vocs-color_border)' }}>
-  <p style={{ fontSize: '0.875rem', color: 'var(--vocs-color_text3)' }}>
-    Made with ⚡ by the <a href="https://github.com/evmts">Tevm</a> team
-  </p>
-  <p style={{ fontSize: '0.75rem', color: 'var(--vocs-color_text3)', marginTop: '0.5rem' }}>
-    MIT License • Copyright © 2024
-  </p>
-</div>
+Report issues and gaps on GitHub.

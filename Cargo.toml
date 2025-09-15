@@ -1,15 +1,13 @@
 [workspace]
 resolver = "2"
-members = ["lib/foundry-compilers", "lib/ark", "lib/revm"]
-exclude = ["bench/evm-bench", "sdks/rust"]
+members = ["lib/foundry-compilers", "lib/ark"]
+exclude = ["bench/evm-bench", "sdks/rust", "benchmarks"]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
 
 [workspace.dependencies]
-revm = { version = "14.0", features = ["c-kzg", "blst", "std", "serde", "serde-json", "dev"] }
-revm-primitives = "10.0"
 alloy-primitives = "0.8"
 # Arkworks dependencies for elliptic curve operations
 ark-bn254 = "0.5.0"
@@ -21,14 +19,14 @@ ark-bls12-381 = "0.5.0"
 [profile.release]
 # Optimize for size by default (smallest flag)
 opt-level = "z"
-lto = true
-codegen-units = 1
+lto = false  # Disabled for faster compilation
+# codegen-units = 1  # Allow multiple units for parallel compilation
 panic = "abort"
 
 [profile.release-fast]
 # Optimize for speed when fastest flag is used
 inherits = "release"
 opt-level = 3
-lto = true
-codegen-units = 1
+lto = false  # Disabled for faster compilation
+# codegen-units = 1  # Allow multiple units for parallel compilation
 panic = "abort"

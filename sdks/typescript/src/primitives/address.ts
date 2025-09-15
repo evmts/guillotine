@@ -123,10 +123,15 @@ export class Address {
     
     let result = '0x';
     for (let i = 0; i < hex.length; i++) {
-      if (parseInt(hash[i], 16) >= 8) {
-        result += hex[i].toUpperCase();
+      const hashChar = hash[i];
+      const hexChar = hex[i];
+      if (hashChar === undefined || hexChar === undefined) {
+        break;
+      }
+      if (parseInt(hashChar, 16) >= 8) {
+        result += hexChar.toUpperCase();
       } else {
-        result += hex[i];
+        result += hexChar;
       }
     }
     

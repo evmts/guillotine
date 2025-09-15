@@ -1,151 +1,240 @@
 # Memory
 
-EVM‑compliant memory with lazy growth, word alignment, and nested context isolation.
+EVM-compliant memory management with lazy expansion, SIMD optimizations, and hierarchical context isolation.
 
 ## Overview
 
-The `Memory(comptime config)` type implements byte‑addressable memory that grows on demand and always expands to 32‑byte word boundaries as required by the EVM. Child contexts (e.g., CALL frames) can share the same backing buffer using checkpoints, avoiding copies.
+The `Memory(comptime config)` type implements byte-addressable memory that grows on demand and always expands to 32-byte word boundaries as required by the EVM specification. Child contexts (e.g., CALL frames) can share the same backing buffer using checkpoints, avoiding expensive memory copies.
 
-Defaults (see `memory_config.zig`):
-- `initial_capacity = 4096`
-- `memory_limit = 0xFFFFFF` (~16 MiB, typical EVM limit)
+Key features:
+- **Lazy allocation** on first access
+- **Zero-initialization** guarantee for all new memory
+- **SIMD-optimized** memory operations for better performance
+- **Checkpoint system** for nested call contexts
+- **Cached gas cost** calculations
+- **Configurable memory limits** for DoS protection
+
+Default configuration (see `memory_config.zig`):
+- `initial_capacity = 4096` (4KB)
+- `memory_limit = 0xFFFFFF` (~16MB, EVM limit)
 - `owned = true`
+- `vector_length = 1` (SIMD disabled by default)
 
 ## Files
 
-- `memory.zig` — Core implementation and EVM‑style helpers
-- `memory_config.zig` — Compile‑time configuration and validation
-- `memory_c.zig`, `memory_bench.zig` — FFI and benchmarks
+- `memory.zig` — Core implementation with SIMD optimizations
+- `memory_config.zig` — Compile-time configuration and validation
+- `memory_c.zig` — C FFI interface for external integration
+- `memory_bench.zig` — Performance benchmarking suite
 
-## API Highlights
+## Core API
 
+### Memory Lifecycle
 - `init(allocator)` / `deinit(allocator)` — create/destroy owned memory
-- `init_child()` — borrow the same buffer with a new checkpoint
-- `ensure_capacity(allocator, new_size: u24)` — zero‑extends up to size
-- `set_data(allocator, off, bytes)` / `get_slice(off, len)` — raw ops
-- `set_data_evm(allocator, off, bytes)` — expands to next 32‑byte word
-- `get_u256(off)` / `set_u256(allocator, off, value)` — word helpers
-- `get_u256_evm(allocator, off)` — read with EVM expansion semantics
-- `get_expansion_cost(new_size)` — EVM gas delta for memory growth
+- `init_borrowed(buffer_ptr, checkpoint)` — create borrowed memory view
+- `init_child()` — create child memory with shared buffer
+- `clear()` — reset memory to initial state
+
+### Memory Operations
+- `ensure_capacity(allocator, new_size: u24)` — ensure memory capacity with zero-initialization
+- `set_data(allocator, offset, data)` — write raw data without EVM expansion
+- `set_data_evm(allocator, offset, data)` — write data with EVM word-alignment
+- `get_slice(offset, len)` — read raw data slice
+- `size()` — get current memory size
+
+### Word Operations (u256)
+- `set_u256(allocator, offset, value)` — write 256-bit word
+- `set_u256_evm(allocator, offset, value)` — write word with EVM expansion
+- `get_u256(offset)` — read 256-bit word
+- `get_u256_evm(allocator, offset)` — read word with EVM expansion
+
+### Byte Operations
+- `set_byte(allocator, offset, value)` — write single byte
+- `set_byte_evm(allocator, offset, value)` — write byte with EVM expansion
+- `get_byte(offset)` — read single byte
+
+### Gas Cost Calculation
+- `get_expansion_cost(new_size)` — calculate EVM memory expansion gas cost
 
 ## Examples
 
+### Basic Memory Usage
+
 ```zig
-const Memory = @import("memory.zig").Memory(.{ .owned = true });
-var mem = try Memory.init(allocator);
-defer mem.deinit(allocator);
+const std = @import("std");
+const MemoryConfig = @import("memory_config.zig").MemoryConfig;
+const Memory = @import("memory.zig").Memory;
 
-// Write a u256 at offset 0 (no implicit EVM expansion)
-try mem.set_u256(allocator, 0, 1234);
-try std.testing.expectEqual(@as(u256, 1234), try mem.get_u256(0));
+const OwnedMemory = Memory(.{ .owned = true });
 
-// EVM‑compliant write grows to next 32‑byte boundary
+var memory = try OwnedMemory.init(allocator);
+defer memory.deinit(allocator);
+
+// Write a u256 value at offset 0
+try memory.set_u256(allocator, 0, 1234);
+const value = try memory.get_u256(0);
+try std.testing.expectEqual(@as(u256, 1234), value);
+
+// EVM-compliant write expands to next 32-byte boundary
 const data = [_]u8{0xAA} ** 20;
-try mem.set_data_evm(allocator, 40, &data);
+try memory.set_data_evm(allocator, 40, &data);
 ```
 
-Checkpointed child memory:
+### Child Memory (Nested Contexts)
 
 ```zig
-var child = try mem.init_child();
-defer child.deinit(allocator); // no‑op for borrowed
-try child.set_data(allocator, 0, &[_]u8{1,2,3});
+// Parent memory with initial data
+var parent = try OwnedMemory.init(allocator);
+defer parent.deinit(allocator);
+
+const parent_data = [_]u8{ 0x01, 0x02, 0x03 };
+try parent.set_data(allocator, 0, &parent_data);
+
+// Create child memory sharing the same buffer
+var child = try parent.init_child();
+defer child.deinit(allocator); // no-op for borrowed memory
+
+// Child operations are isolated by checkpoint
+const child_data = [_]u8{ 0x11, 0x22 };
+try child.set_data(allocator, 0, &child_data);
+
+// Parent sees: [0x01, 0x02, 0x03, 0x11, 0x22]
+// Child sees:  [0x11, 0x22] (from its checkpoint)
 ```
 
-Gas cost (EVM formula):
+### Gas Cost Calculation
 
 ```zig
-const before = mem.get_expansion_cost(0);   // 0
-const after  = mem.get_expansion_cost(256); // 3*8 + 8*8/512
+// Calculate EVM memory expansion costs
+var memory = try OwnedMemory.init(allocator);
+defer memory.deinit(allocator);
+
+const cost_256 = memory.get_expansion_cost(256); // 3*8 + (8*8)/512 = 24
+try memory.ensure_capacity(allocator, 256);
+
+// No additional cost for sizes within current capacity
+const no_cost = memory.get_expansion_cost(128); // 0
 ```
 
-## Notes
+### SIMD Optimizations
 
-- All newly allocated bytes are zero‑initialized.
-- Owned and borrowed variants have identical layout; ownership only affects init/deinit.
-- The public API requires an allocator for any operation that may grow memory.
-    const new_cost = memory_gas_cost(new_size);
-    return new_cost - old_cost;
+```zig
+// Enable SIMD for better performance on large operations
+const SIMDMemory = Memory(.{
+    .owned = true,
+    .vector_length = 16, // 16-byte SIMD vectors
+});
+
+var memory = try SIMDMemory.init(allocator);
+defer memory.deinit(allocator);
+
+// Large data operations automatically use SIMD when beneficial
+var large_data: [1024]u8 = undefined;
+@memset(&large_data, 0xFF);
+try memory.set_data_evm(allocator, 0, &large_data);
+```
+
+## Performance Optimizations
+
+### Fast-Path Memory Growth
+Small memory expansions (≤32 bytes) use a fast path that:
+- Reuses existing capacity when possible
+- Avoids unnecessary memory allocations
+- Uses optimized zeroing for new regions
+
+### SIMD Memory Operations
+When `vector_length > 1`, memory operations automatically use SIMD:
+- **Zeroing**: Vectorized initialization of new memory regions
+- **Copying**: Optimized data transfer for large operations
+- **Alignment**: Automatic handling of alignment requirements
+
+### Cached Gas Calculations
+Gas costs are calculated using optimized bit operations:
+```zig
+// Memory cost formula: 3 * words + words² / 512
+fn calculate_memory_cost(words: u64) u64 {
+    return 3 * words + std.math.shr(u64, words * words, 9);
 }
-
-fn memory_gas_cost(size: u64) u64 {
-    const size_word = (size + 31) / 32;
-    return GasConstants.MEMORY * size_word + size_word * size_word / 512;
-}
 ```
 
-### Integration with Frame
+## Memory Configuration
+
 ```zig
-// Frame integration for gas accounting
-pub fn expand_to_with_gas(
-    self: *Self, 
-    offset: u64, 
-    gas_tracker: *GasTracker
-) !void {
-    const old_size = self.size();
-    const new_size = offset + 32;
-    const gas_cost = expansion_gas_cost(old_size, new_size);
-    
-    try gas_tracker.consume(gas_cost);
-    try self.expand_to(offset);
-}
-```
+const MemoryConfig = @import("memory_config.zig").MemoryConfig;
 
-## Checkpoint System
-
-Memory supports hierarchical checkpoints for nested execution contexts:
-
-### Checkpoint Creation
-```zig
-pub const Checkpoint = struct {
-    size: u32,
-    timestamp: u64,
+// High-performance configuration
+const HighPerf = MemoryConfig{
+    .initial_capacity = 8192,    // 8KB initial
+    .memory_limit = 0x1000000,   // 16MB limit
+    .vector_length = 32,         // 32-byte SIMD vectors
+    .owned = true,
 };
 
-pub fn create_checkpoint(self: *Self) Checkpoint {
-    return Checkpoint{
-        .size = @intCast(self.buffer_ptr.items.len),
-        .timestamp = std.time.timestamp(),
-    };
-}
+// Memory-constrained configuration
+const LowMemory = MemoryConfig{
+    .initial_capacity = 1024,    // 1KB initial
+    .memory_limit = 0x100000,    // 1MB limit
+    .vector_length = 1,          // No SIMD
+    .owned = true,
+};
 ```
 
-### Checkpoint Reversion
-```zig
-pub fn revert_to_checkpoint(self: *Self, checkpoint: Checkpoint) void {
-    if (checkpoint.size < self.buffer_ptr.items.len) {
-        self.buffer_ptr.shrinkAndFree(checkpoint.size);
-        // Memory beyond checkpoint is automatically freed
-    }
-}
-```
+## Integration with EVM
 
-## Integration Notes
+### Gas Cost Accounting
+Memory expansion follows EVM gas cost formula:
+- Linear component: 3 gas per word
+- Quadratic component: words² / 512 gas
+- Only charges for net expansion
 
-### With Frame Module
-Memory integrates with Frame for:
-- Gas cost accounting during expansion
-- Opcode-specific memory operations (MLOAD, MSTORE, etc.)
-- Context isolation during CALL operations
+### Word Alignment
+EVM operations automatically expand memory to 32-byte word boundaries:
+- `set_data_evm()` rounds up to next word boundary
+- `get_u256_evm()` expands memory if reading beyond current size
+- Standard operations (`set_data()`, `get_u256()`) do not auto-expand
 
-### With Instructions Module  
-Memory handlers provide:
-- Word-aligned load/store operations
-- Byte-level access for MSTORE8
-- Size queries for MSIZE opcode
-- Data copying for CALLDATACOPY, CODECOPY
-
-### With Stack Module
-Coordination with stack for:
-- Offset validation from stack values
-- Word size validation for operations
-- Error propagation patterns
+### Context Isolation
+Child memories provide clean isolation:
+- Share physical buffer to avoid copies
+- Maintain separate size accounting via checkpoints
+- Support nested call frames and exception handling
 
 ## Error Handling
 
-Memory operations use comprehensive error handling:
-- `OutOfMemory` - System allocation failure
-- `MemoryOverflow` - Size exceeds configured limits  
-- `OutOfBounds` - Access beyond valid memory range
+Memory operations use comprehensive error types:
 
-All errors propagate cleanly through the execution chain with proper resource cleanup via defer patterns.
+```zig
+pub const MemoryError = error{
+    OutOfMemory,      // System allocation failure
+    MemoryOverflow,   // Size exceeds configured limits
+    OutOfBounds,      // Access beyond valid memory range
+};
+```
+
+All memory operations properly handle errors with:
+- Clean resource management via defer/errdefer
+- Consistent error propagation
+- Memory safety guarantees
+
+## Testing and Benchmarking
+
+The memory module includes comprehensive test coverage:
+- Basic operations (read/write/expand)
+- Child memory isolation
+- Gas cost calculations
+- SIMD optimization verification
+- Edge cases and error conditions
+
+Performance benchmarks cover:
+- Memory allocation and expansion
+- SIMD vs scalar operation performance
+- Child memory overhead
+- Gas cost calculation performance
+
+## Notes
+
+- All newly allocated bytes are guaranteed zero-initialized
+- Owned and borrowed memory types have identical layout and performance
+- SIMD optimizations are conditionally compiled and alignment-aware
+- Memory limits provide protection against DoS attacks
+- The public API requires an allocator for any operation that may grow memory

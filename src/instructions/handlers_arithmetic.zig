@@ -1,6 +1,5 @@
 const std = @import("std");
 const FrameConfig = @import("../frame/frame_config.zig").FrameConfig;
-const log = @import("../log.zig");
 const GasConstants = @import("primitives").GasConstants;
 
 /// Arithmetic opcode handlers for the EVM stack frame.
@@ -11,74 +10,89 @@ pub fn Handlers(comptime FrameType: type) type {
         pub const Dispatch = FrameType.Dispatch;
         pub const WordType = FrameType.WordType;
 
-        /// Advance to the next opcode instruction
-        pub inline fn next_instruction(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const next_cursor = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+        const dispatch = @import("../preprocessor/dispatch_opcode_data.zig");
+
+        /// Advance to the next opcode instruction with tracking
+        pub inline fn next_instruction(self: *FrameType, cursor: [*]const Dispatch.Item, comptime opcode: Dispatch.UnifiedOpcode) Error!noreturn {
+            const op_data = dispatch.getOpData(opcode, Dispatch, Dispatch.Item, cursor);
+            self.afterInstruction(opcode, op_data.next_handler, op_data.next_cursor.cursor);
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// ADD opcode (0x01) - Addition with overflow wrapping.
         pub fn add(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            std.debug.assert(self.stack.size() >= 2); 
+            self.beforeInstruction(.ADD, cursor);
 
-            self.stack.set_top_unsafe(self.stack.pop_unsafe() +% self.stack.peek_unsafe());
+            self.stack.binary_op_unsafe(struct {
+                fn op(top: WordType, second: WordType) WordType {
+                    return top +% second;
+                }
+            }.op);
 
-            return next_instruction(self, cursor);
+            return next_instruction(self, cursor, .ADD);
         }
 
         /// MUL opcode (0x02) - Multiplication with overflow wrapping.
         pub fn mul(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            std.debug.assert(self.stack.size() >= 2);
-            
-            self.stack.set_top_unsafe(self.stack.pop_unsafe() *% self.stack.peek_unsafe());
+            self.beforeInstruction(.MUL, cursor);
 
-            return next_instruction(self, cursor);
+            self.stack.binary_op_unsafe(struct {
+                fn op(top: WordType, second: WordType) WordType {
+                    return top *% second;
+                }
+            }.op);
+
+            return next_instruction(self, cursor, .MUL);
         }
 
         /// SUB opcode (0x03) - Subtraction with underflow wrapping.
         pub fn sub(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            std.debug.assert(self.stack.size() >= 2); 
+            self.beforeInstruction(.SUB, cursor);
 
-            self.stack.set_top_unsafe(self.stack.pop_unsafe() -% self.stack.peek_unsafe());
+            self.stack.binary_op_unsafe(struct {
+                fn op(top: WordType, second: WordType) WordType {
+                    return top -% second; // SUB: µs[0] - µs[1] = top - second
+                }
+            }.op);
 
-            return next_instruction(self, cursor);
+            return next_instruction(self, cursor, .SUB);
         }
 
         const from_native = FrameType.UintN.from_native;
 
         /// DIV opcode (0x04) - Integer division. Division by zero returns 0.
         pub fn div(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            std.debug.assert(self.stack.size() >= 2); 
+            self.beforeInstruction(.DIV, cursor);
 
-            self.stack.set_top_unsafe(
-                from_native(self.stack.pop_unsafe()).wrapping_div(
-                    from_native(self.stack.peek_unsafe())
-                ).to_native()
-            );
+            self.stack.binary_op_unsafe(struct {
+                fn op(top: WordType, second: WordType) WordType {
+                    return from_native(top).wrapping_div(from_native(second)).to_native();
+                }
+            }.op);
 
-            return next_instruction(self, cursor);
+            return next_instruction(self, cursor, .DIV);
         }
 
         /// SDIV opcode (0x05) - Signed integer division.
         // TODO: Benchmark this branchless implementation against a simpler version with `if` statements.
         // The current approach might be slower if the sign of operands is predictable.
         pub fn sdiv(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            std.debug.assert(self.stack.size() >= 2); 
-            const top = self.stack.pop_unsafe(); 
-            const second = self.stack.peek_unsafe(); 
+            self.beforeInstruction(.SDIV, cursor);
+            const top = self.stack.pop_unsafe();
+            const second = self.stack.peek_unsafe();
 
             const SIGN_BIT = @as(u256, 1) << 255;
-            const MIN_SIGNED = SIGN_BIT; 
-            
+            const MIN_SIGNED = SIGN_BIT;
+
             if (second == 0) {
                 self.stack.set_top_unsafe(0);
-            return next_instruction(self, cursor);
+                return next_instruction(self, cursor, .SDIV);
             }
-            if (top == MIN_SIGNED and second == std.math.maxInt(u256)) { 
+            if (top == MIN_SIGNED and second == std.math.maxInt(u256)) {
                 self.stack.set_top_unsafe(MIN_SIGNED);
-                return next_instruction(self, cursor);
+                return next_instruction(self, cursor, .SDIV);
             }
-            
+
             // This section implements branchless two's complement arithmetic.
             // 1. Extract sign bits (1 for negative, 0 for positive).
             // 2. Create a mask that is all 1s for negative numbers and all 0s for positive.
@@ -90,84 +104,86 @@ pub fn Handlers(comptime FrameType: type) type {
             // 6. Conditionally negate the result using the same mask trick.
             const top_sign = top >> 255;
             const second_sign = second >> 255;
-            
+
             const top_mask = @as(u256, 0) -% top_sign;
-            const b_mask = @as(u256, 0) -% second_sign;
-            
+            const second_mask = @as(u256, 0) -% second_sign;
+
             const top_abs = (top ^ top_mask) -% top_mask;
-            const second_abs = (second ^ b_mask) -% b_mask;
-            
+            const second_abs = (second ^ second_mask) -% second_mask;
+
             const top_abs_u256 = FrameType.UintN.from_native(top_abs);
             const second_abs_u256 = FrameType.UintN.from_native(second_abs);
             const quotient_u256 = top_abs_u256.wrapping_div(second_abs_u256);
             const quotient = quotient_u256.to_native();
-            
+
             const result_sign = top_sign ^ second_sign;
             const result_mask = @as(u256, 0) -% result_sign;
-            
+
             const result = (quotient ^ result_mask) -% result_mask;
-            
+
             self.stack.set_top_unsafe(result);
-            return next_instruction(self, cursor);
+            return next_instruction(self, cursor, .SDIV);
         }
 
         /// MOD opcode (0x06) - Modulo operation. Modulo by zero returns 0.
         pub fn mod(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            std.debug.assert(self.stack.size() >= 2); 
+            self.beforeInstruction(.MOD, cursor);
 
-            self.stack.set_top_unsafe(FrameType.UintN.from_native(self.stack.pop_unsafe()).wrapping_rem(FrameType.UintN.from_native(self.stack.peek_unsafe())).to_native());
+            self.stack.binary_op_unsafe(struct {
+                fn op(top: WordType, second: WordType) WordType {
+                    return from_native(top).wrapping_rem(from_native(second)).to_native();
+                }
+            }.op);
 
-            return next_instruction(self, cursor);
+            return next_instruction(self, cursor, .MOD);
         }
 
         /// SMOD opcode (0x07) - Signed modulo operation.
         // TODO: Benchmark this branchless implementation against a simpler version with `if` statements.
         // The current approach might be slower if the sign of operands is predictable.
         pub fn smod(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            std.debug.assert(self.stack.size() >= 2); 
-            const top = self.stack.pop_unsafe(); 
-            const second = self.stack.peek_unsafe(); 
+            self.beforeInstruction(.SMOD, cursor);
+            const top = self.stack.pop_unsafe();
+            const second = self.stack.peek_unsafe();
 
             const SIGN_BIT = @as(u256, 1) << 255;
-            const MIN_SIGNED = SIGN_BIT; 
-            
+            const MIN_SIGNED = SIGN_BIT;
+
             if (second == 0) {
                 self.stack.set_top_unsafe(0);
-                const next_cursor = cursor + 1;
-                return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+                return next_instruction(self, cursor, .SMOD);
             }
             if (top == MIN_SIGNED and second == std.math.maxInt(u256)) { // -1 in two's complement
                 self.stack.set_top_unsafe(0);
-                const next_cursor = cursor + 1;
-                return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+                return next_instruction(self, cursor, .SMOD);
             }
-            
+
             // This section implements branchless two's complement arithmetic.
             // The result of a % n takes the sign of the dividend `a`.
             const top_sign = top >> 255;
             const second_sign = second >> 255;
-            
+
             const top_mask = @as(u256, 0) -% top_sign;
-            const b_mask = @as(u256, 0) -% second_sign;
-            
+            const second_mask = @as(u256, 0) -% second_sign;
+
             const top_abs = (top ^ top_mask) -% top_mask;
-            const second_abs = (second ^ b_mask) -% b_mask;
-            
+            const second_abs = (second ^ second_mask) -% second_mask;
+
             const top_abs_u256 = FrameType.UintN.from_native(top_abs);
             const second_abs_u256 = FrameType.UintN.from_native(second_abs);
             const remainder_u256 = top_abs_u256.wrapping_rem(second_abs_u256);
             const remainder = remainder_u256.to_native();
-            
+
             // Result takes sign of dividend (top_sign)
             const result = (remainder ^ top_mask) -% top_mask;
-            
+
             self.stack.set_top_unsafe(result);
-            return next_instruction(self, cursor);
+            return next_instruction(self, cursor, .SMOD);
         }
 
         /// ADDMOD opcode (0x08) - (a + b) % N. All intermediate calculations are performed with arbitrary precision.
         pub fn addmod(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            std.debug.assert(self.stack.size() >= 3); // ADDMOD requires 3 stack items
+            self.beforeInstruction(.ADDMOD, cursor);
             const addend1 = self.stack.pop_unsafe(); // Top of stack (a)
             const addend2 = self.stack.pop_unsafe(); // Second on stack (b)
             const modulus = self.stack.pop_unsafe(); // Third on stack (N)
@@ -187,18 +203,18 @@ pub fn Handlers(comptime FrameType: type) type {
                 var r = sum[0];
                 // If overflow occurred or r >= modulus, subtract once
                 if (sum[1] == 1 or r >= modulus) {
+                    @branchHint(.unlikely);
                     r -%= modulus;
                 }
                 result = r;
             }
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
             self.stack.push_unsafe(result);
-            return next_instruction(self, cursor);
+            return next_instruction(self, cursor, .ADDMOD);
         }
 
         /// MULMOD opcode (0x09) - (a * b) % N. All intermediate calculations are performed with arbitrary precision.
         pub fn mulmod(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            std.debug.assert(self.stack.size() >= 3); // MULMOD requires 3 stack items
+            self.beforeInstruction(.MULMOD, cursor);
             const factor1 = self.stack.pop_unsafe(); // Top of stack (a)
             const factor2 = self.stack.pop_unsafe(); // Second on stack (b)
             const modulus = self.stack.pop_unsafe(); // Third on stack (N)
@@ -208,9 +224,8 @@ pub fn Handlers(comptime FrameType: type) type {
             } else {
                 result = mulmod_safe(factor1, factor2, modulus);
             }
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
             self.stack.push_unsafe(result);
-            return next_instruction(self, cursor);
+            return next_instruction(self, cursor, .MULMOD);
         }
 
         /// Safe modular multiplication using double-width arithmetic to prevent overflow.
@@ -262,6 +277,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
             // Check if addition would overflow
             if (addend1_mod > modulus - addend2_mod) {
+                @branchHint(.unlikely);
                 // Overflow case: (addend1 + addend2) = modulus + (addend1 + addend2 - modulus)
                 return (addend1_mod - (modulus - addend2_mod));
             } else {
@@ -272,11 +288,11 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// EXP opcode (0x0a) - Exponential operation.
         pub fn exp(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            // Match REVM operand ordering: treat top-of-stack as base and
-            // second-from-top as exponent, computing base^exponent.
-            std.debug.assert(self.stack.size() >= 2); // EXP requires 2 stack items
-            const base = self.stack.pop_unsafe(); // Top of stack (base)
-            const exponent = self.stack.peek_unsafe(); // Below top (exponent)
+            // EVM stack ordering: first pop is exponent, second pop is base
+            // Computing base^exponent where base is second on stack
+            self.beforeInstruction(.EXP, cursor);
+            const exponent = self.stack.pop_unsafe(); // Top of stack (exponent)
+            const base = self.stack.peek_unsafe(); // Below top (base)
 
             // EIP-160: Dynamic gas cost for EXP
             // Gas cost = 10 + 50 * (number of non-zero bytes in exponent)
@@ -292,6 +308,7 @@ pub fn Handlers(comptime FrameType: type) type {
             // Use negative gas pattern for single-branch out-of-gas detection
             self.gas_remaining -= @intCast(gas_cost);
             if (self.gas_remaining < 0) {
+                self.afterComplete(.EXP);
                 return Error.OutOfGas;
             }
 
@@ -306,12 +323,12 @@ pub fn Handlers(comptime FrameType: type) type {
                 base_working *%= base_working;
             }
             self.stack.set_top_unsafe(result);
-            return next_instruction(self, cursor);
+            return next_instruction(self, cursor, .EXP);
         }
 
         /// SIGNEXTEND opcode (0x0b) - Sign extend operation.
         pub fn signextend(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            std.debug.assert(self.stack.size() >= 2); // SIGNEXTEND requires 2 stack items
+            self.beforeInstruction(.SIGNEXTEND, cursor);
             const ext = self.stack.pop_unsafe(); // Extension byte index (top of stack)
             const value = self.stack.peek_unsafe(); // Value to extend (second element)
 
@@ -331,6 +348,7 @@ pub fn Handlers(comptime FrameType: type) type {
                 const mask = std.math.shl(WordType, @as(WordType, 1), shift_amount) - 1;
                 const sign_bit = std.math.shr(WordType, value, shift_amount) & 1;
                 if (sign_bit == 1) {
+                    @branchHint(.unlikely);
                     result = value | ~mask;
                 } else {
                     result = value & mask;
@@ -339,7 +357,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
             self.stack.set_top_unsafe(result);
 
-            return next_instruction(self, cursor);
+            return next_instruction(self, cursor, .SIGNEXTEND);
         }
     };
 }
@@ -349,7 +367,7 @@ pub fn Handlers(comptime FrameType: type) type {
 const testing = std.testing;
 const Frame = @import("../frame/frame.zig").Frame;
 const dispatch_mod = @import("../preprocessor/dispatch.zig");
-const NoOpTracer = @import("../tracer/tracer.zig").NoOpTracer;
+const DefaultTracer = @import("../tracer/tracer.zig").DefaultTracer;
 const Address = @import("primitives").Address;
 
 const MemoryDatabase = @import("../storage/memory_database.zig").MemoryDatabase;

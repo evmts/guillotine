@@ -18,7 +18,8 @@ export class ExecutionResult {
 
   /**
    * Creates a successful execution result
-   */
+   * TODO: we probably don't want these exposed as exported ExecutionResult so probably need a better type for this
+  */
   static success(gasUsed: bigint, returnData: Bytes = Bytes.empty()): ExecutionResult {
     return new ExecutionResult(true, gasUsed, returnData, Bytes.empty());
   }

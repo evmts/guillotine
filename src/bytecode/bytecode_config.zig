@@ -1,5 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const SafetyCounter = @import("../internal/safety_counter.zig").SafetyCounter;
+const Mode = @import("../internal/safety_counter.zig").Mode;
 
 /// Configure Bytecode validation
 pub const BytecodeConfig = struct {
@@ -12,6 +14,10 @@ pub const BytecodeConfig = struct {
     max_bytecode_size: u32 = 24576,
     /// The maximum amount of bytes allowed in initcode (EIP-3860)
     max_initcode_size: u32 = 49152,
+    /// Loop quota for safety counters to prevent infinite loops
+    /// null = disabled (default for optimized builds)
+    /// value = maximum iterations before panic (default for debug/safe builds)
+    loop_quota: ?u32 = if (builtin.mode == .Debug or builtin.mode == .ReleaseSafe) 1_000_000 else null,
     /// PcType: chosen PC integer type from max_bytecode_size
     pub fn PcType(comptime self: Self) type {
         // https://ziglang.org/documentation/master/std/#std.math.maxInt
@@ -43,6 +49,27 @@ pub const BytecodeConfig = struct {
         if (self.max_initcode_size < self.max_bytecode_size) {
             @compileError("max_initcode_size must be at least as large as max_bytecode_size");
         }
+    }
+
+    /// Create a loop safety counter based on the configuration
+    /// Returns either an enabled or disabled counter depending on loop_quota
+    /// Automatically selects the smallest type that can hold the quota
+    pub fn createLoopSafetyCounter(comptime self: Self) type {
+        const mode: Mode = if (self.loop_quota != null) .enabled else .disabled;
+        const limit = self.loop_quota orelse 0;
+
+        // Choose the smallest type that can hold the limit
+        const T = if (limit <= std.math.maxInt(u8))
+            u8
+        else if (limit <= std.math.maxInt(u16))
+            u16
+        else if (limit <= std.math.maxInt(u32))
+            u32
+        else
+            u64;
+
+        const Counter = SafetyCounter(T, mode);
+        return Counter;
     }
 };
 

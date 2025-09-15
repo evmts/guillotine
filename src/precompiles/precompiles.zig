@@ -1412,9 +1412,9 @@ test "precompile address boundary checks" {
     
     // Test addresses outside range
     try testing.expect(!is_precompile(primitives.Address.ZERO));
-    try testing.expect(is_precompile([_]u8{0} ** 19 ++ [_]u8{0x0B})); // 0x0B is a valid BLS12-381 precompile
-    try testing.expect(!is_precompile([_]u8{0} ** 19 ++ [_]u8{0x13})); // 0x13 is beyond valid precompiles
-    try testing.expect(!is_precompile([_]u8{0xFF} ** 20)); // Max address
+    try testing.expect(is_precompile(Address{ .bytes = [_]u8{0} ** 19 ++ [_]u8{0x0B} })); // 0x0B is a valid BLS12-381 precompile
+    try testing.expect(!is_precompile(Address{ .bytes = [_]u8{0} ** 19 ++ [_]u8{0x13} })); // 0x13 is beyond valid precompiles
+    try testing.expect(!is_precompile(Address{ .bytes = [_]u8{0xFF} ** 20 })); // Max address
 }
 
 test "execute_all_precompiles smoke test" {

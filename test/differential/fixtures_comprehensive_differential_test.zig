@@ -1,8 +1,7 @@
 const std = @import("std");
 const evm = @import("evm");
 const primitives = @import("primitives");
-const revm = @import("revm");
-const log = @import("log");
+const log = evm.log;
 
 const testing = std.testing;
 
@@ -11,8 +10,8 @@ pub const std_options = .{
     .log_level = .info,
 };
 
-// Use the official differential tracer
-const DifferentialTracer = evm.differential_tracer.DifferentialTracer(revm);
+// Use DefaultEvm for regular EVM execution
+const DefaultEvm = evm.DefaultEvm;
 
 fn parse_hex_alloc(allocator: std.mem.Allocator, text: []const u8) ![]u8 {
     // First pass: count hex digits ignoring whitespace and 0x prefix occurrences
@@ -117,23 +116,17 @@ fn run_fixture_test(allocator: std.mem.Allocator, fixture_dir: []const u8) !void
         .chain_id = 1,
     };
 
-    // Create differential tracer
-    // Enable trace files only for ERC20 to debug deployment issues
-    const enable_traces = std.mem.indexOf(u8, fixture_dir, "erc20") != null;
-    var tracer = try DifferentialTracer.init(
+    // Create EVM instance
+    var evm_instance = try DefaultEvm.init(
         allocator,
         &database,
         block_info,
         tx_context,
-        caller,
-        .{ 
-            .write_trace_files = enable_traces,  // Only for ERC20 debugging
-            .context_before = 10,                 // Show 10 opcodes before divergence
-            .context_after = 10,                  // Show 10 opcodes after divergence
-            .max_differences = 5,                 // Show up to 5 differences
-        },
+        0, // gas_price
+        caller, // origin
+        .CANCUN // hardfork
     );
-    defer tracer.deinit();
+    defer evm_instance.deinit();
     
     // Check if this is deployment bytecode or runtime bytecode
     // Deployment bytecode typically starts with 0x6080604052 (PUSH1 0x80 PUSH1 0x40 MSTORE)
@@ -167,18 +160,17 @@ fn run_fixture_test(allocator: std.mem.Allocator, fixture_dir: []const u8) !void
         
         std.debug.print("Deploying contract with {} bytes of init code\n", .{init_bytecode.len});
         
-        // Deploy with differential testing
-        const deploy_result = tracer.call(deploy_params) catch |err| {
-            log.err("❌ Contract deployment failed for {s}: {}", .{ fixture_dir, err });
-            log.err("  This indicates a bug during deployment (constructor execution)", .{});
-            return err;
-        };
-        
+        // Deploy with regular EVM execution
+        const deploy_result = evm_instance.call(deploy_params);
         if (!deploy_result.success) {
-            log.err("❌ Contract deployment returned failure for {s}", .{fixture_dir});
+            log.err("❌ Contract deployment failed for {s}", .{fixture_dir});
+            log.err("  This indicates a bug during deployment (constructor execution)", .{});
             log.err("  Output length: {}", .{deploy_result.output.len});
             if (deploy_result.output.len > 0) {
                 log.err("  Output (first 64 bytes): {x}", .{deploy_result.output[0..@min(64, deploy_result.output.len)]});
+            }
+            if (deploy_result.error_info) |error_info| {
+                log.err("  Error: {s}", .{error_info});
             }
             return error.DeploymentFailed;
         }
@@ -202,9 +194,8 @@ fn run_fixture_test(allocator: std.mem.Allocator, fixture_dir: []const u8) !void
             .code_hash = code_hash,
             .storage_root = [_]u8{0} ** 32,
         });
-        
-        // Sync deployed contract to REVM
-        try tracer.revm_vm.setCode(contract_address, runtime_code);
+
+        // Contract is already deployed to our database, no need to sync
     } else {
         // Not deployment bytecode, use directly as runtime code
         contract_address = try primitives.Address.from_hex("0xc0de000000000000000000000000000000000000");
@@ -212,7 +203,7 @@ fn run_fixture_test(allocator: std.mem.Allocator, fixture_dir: []const u8) !void
         
         log.info("  Using bytecode as runtime code directly", .{});
         
-        // Deploy runtime code to both EVMs
+        // Deploy runtime code to database
         const code_hash = try database.set_code(runtime_code);
         try database.set_account(contract_address.bytes, .{
             .balance = 0,
@@ -220,8 +211,8 @@ fn run_fixture_test(allocator: std.mem.Allocator, fixture_dir: []const u8) !void
             .code_hash = code_hash,
             .storage_root = [_]u8{0} ** 32,
         });
-        
-        try tracer.revm_vm.setCode(contract_address, runtime_code);
+
+        // Contract code is already set in database
     }
     
     // Now execute with calldata if provided
@@ -241,16 +232,16 @@ fn run_fixture_test(allocator: std.mem.Allocator, fixture_dir: []const u8) !void
             },
         };
         
-        // Execute with differential testing
-        const result = tracer.call(call_params) catch |err| {
-            log.err("❌ Contract execution failed for {s}: {}", .{ fixture_dir, err });
+        // Execute with regular EVM execution
+        const result = evm_instance.call(call_params);
+        if (!result.success) {
+            log.err("❌ Contract execution failed for {s}", .{fixture_dir});
             log.err("  This indicates a bug during contract execution", .{});
-            if (err == DifferentialTracer.Error.ExecutionDivergence) {
-                log.err("  Check the trace files for detailed opcode-by-opcode comparison", .{});
-                log.err("  The divergence point will show the exact opcode where EVMs differ", .{});
+            if (result.error_info) |error_info| {
+                log.err("  Error: {s}", .{error_info});
             }
-            return err;
-        };
+            return error.ExecutionFailed;
+        }
         
         log.info("  ✅ Execution successful, gas used: {}", .{100_000_000 - result.gas_left});
         if (result.output.len > 0) {
@@ -273,7 +264,7 @@ fn run_fixture_test(allocator: std.mem.Allocator, fixture_dir: []const u8) !void
 
 test "differential: erc20-transfer fixture" {
     const allocator = testing.allocator;
-    try run_fixture_test(allocator, "src/evm/fixtures/erc20-transfer");
+    try run_fixture_test(allocator, "src/_test_utils/fixtures/erc20-transfer");
 }
 
 // test "differential: erc20-approval-transfer fixture" {

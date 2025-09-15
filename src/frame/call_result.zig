@@ -86,6 +86,7 @@ pub fn CallResult(comptime config: anytype) type {
             .selfdestructs = &.{},
             .accessed_addresses = &.{},
             .accessed_storage = &.{},
+            .error_info = null,  // Don't set error_info to avoid freeing string literal
         };
     }
 
@@ -198,6 +199,131 @@ pub fn CallResult(comptime config: anytype) type {
         self.accessed_storage = &.{};
         self.trace = null;
         self.error_info = null;
+    }
+
+    /// Create an owned copy of this CallResult
+    /// All dynamically allocated data (output, logs, etc.) is duplicated
+    /// The caller owns the returned result and must call deinit() when done
+    pub fn toOwnedResult(self: @This(), allocator: std.mem.Allocator) !@This() {
+        // Copy output data
+        const output_copy = if (self.output.len > 0) 
+            try allocator.dupe(u8, self.output) 
+        else 
+            &.{};
+        errdefer if (output_copy.len > 0) allocator.free(output_copy);
+
+        // Copy logs
+        const logs_copy = if (self.logs.len > 0) blk: {
+            const logs = try allocator.alloc(Log, self.logs.len);
+            errdefer allocator.free(logs);
+            
+            var copied_count: usize = 0;
+            errdefer {
+                for (logs[0..copied_count]) |log| {
+                    if (log.topics.len > 0) allocator.free(log.topics);
+                    if (log.data.len > 0) allocator.free(log.data);
+                }
+            }
+            
+            for (self.logs, 0..) |log, i| {
+                logs[i] = .{
+                    .address = log.address,
+                    .topics = if (log.topics.len > 0) 
+                        try allocator.dupe(u256, log.topics) 
+                    else 
+                        &.{},
+                    .data = if (log.data.len > 0) 
+                        try allocator.dupe(u8, log.data) 
+                    else 
+                        &.{},
+                };
+                copied_count += 1;
+            }
+            break :blk logs;
+        } else &.{};
+        errdefer if (logs_copy.len > 0) {
+            for (logs_copy) |log| {
+                if (log.topics.len > 0) allocator.free(log.topics);
+                if (log.data.len > 0) allocator.free(log.data);
+            }
+            allocator.free(logs_copy);
+        };
+
+        // Copy selfdestructs
+        const selfdestructs_copy = if (self.selfdestructs.len > 0)
+            try allocator.dupe(SelfDestructRecord, self.selfdestructs)
+        else
+            &.{};
+        errdefer if (selfdestructs_copy.len > 0) allocator.free(selfdestructs_copy);
+
+        // Copy accessed addresses
+        const accessed_addresses_copy = if (self.accessed_addresses.len > 0)
+            try allocator.dupe(Address, self.accessed_addresses)
+        else
+            &.{};
+        errdefer if (accessed_addresses_copy.len > 0) allocator.free(accessed_addresses_copy);
+
+        // Copy accessed storage
+        const accessed_storage_copy = if (self.accessed_storage.len > 0)
+            try allocator.dupe(StorageAccess, self.accessed_storage)
+        else
+            &.{};
+        errdefer if (accessed_storage_copy.len > 0) allocator.free(accessed_storage_copy);
+
+        // Copy error info
+        const error_info_copy = if (self.error_info) |info|
+            try allocator.dupe(u8, info)
+        else
+            null;
+        errdefer if (error_info_copy) |info| allocator.free(info);
+
+        // Copy trace if present
+        const trace_copy = if (self.trace) |trace| blk: {
+            const steps_copy = try allocator.alloc(TraceStep, trace.steps.len);
+            errdefer allocator.free(steps_copy);
+            
+            var copied_steps: usize = 0;
+            errdefer {
+                for (steps_copy[0..copied_steps]) |*step| {
+                    step.deinit(allocator);
+                }
+            }
+            
+            for (trace.steps, 0..) |step, i| {
+                steps_copy[i] = .{
+                    .pc = step.pc,
+                    .opcode = step.opcode,
+                    .opcode_name = try allocator.dupe(u8, step.opcode_name),
+                    .gas = step.gas,
+                    .depth = step.depth,
+                    .mem_size = step.mem_size,
+                    .gas_cost = step.gas_cost,
+                    .stack = try allocator.dupe(u256, step.stack),
+                    .memory = try allocator.dupe(u8, step.memory),
+                    .storage_reads = try allocator.dupe(TraceStep.StorageRead, step.storage_reads),
+                    .storage_writes = try allocator.dupe(TraceStep.StorageWrite, step.storage_writes),
+                };
+                copied_steps += 1;
+            }
+            
+            break :blk ExecutionTrace{
+                .steps = steps_copy,
+                .allocator = allocator,
+            };
+        } else null;
+
+        return @This(){
+            .success = self.success,
+            .gas_left = self.gas_left,
+            .output = output_copy,
+            .logs = logs_copy,
+            .selfdestructs = selfdestructs_copy,
+            .accessed_addresses = accessed_addresses_copy,
+            .accessed_storage = accessed_storage_copy,
+            .trace = trace_copy,
+            .error_info = error_info_copy,
+            .created_address = self.created_address,
+        };
     }
     };
 }
@@ -785,4 +911,177 @@ test "storage access and self destruct comprehensive" {
     try std.testing.expectEqual(ZERO_ADDRESS, selfdestruct1.beneficiary);
     try std.testing.expectEqual(Address{ .bytes = [_]u8{0xFF} ** 20 }, selfdestruct2.contract);
     try std.testing.expectEqual(Address{ .bytes = [_]u8{0xAA} ** 20 }, selfdestruct2.beneficiary);
+}
+
+test "call result toOwnedResult basic" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    // Test with simple success result
+    const original = DefaultCallResult.success_with_output(5000, "test output");
+    const owned = try original.toOwnedResult(allocator);
+    defer {
+        var mutable_owned = owned;
+        mutable_owned.deinit(allocator);
+    }
+
+    try testing.expect(owned.success);
+    try testing.expectEqual(@as(u64, 5000), owned.gas_left);
+    try testing.expectEqualSlices(u8, "test output", owned.output);
+    
+    // Verify it's a copy (different memory address)
+    if (original.output.len > 0) {
+        try testing.expect(original.output.ptr != owned.output.ptr);
+    }
+}
+
+test "call result toOwnedResult with logs" {
+    const testing = std.testing;
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    // Create logs
+    const topics = try allocator.dupe(u256, &[_]u256{ 0x1234, 0x5678 });
+    defer allocator.free(topics);
+    const data = try allocator.dupe(u8, "log data");
+    defer allocator.free(data);
+
+    const logs = try allocator.alloc(Log, 1);
+    defer allocator.free(logs);
+    logs[0] = Log{
+        .address = .{ .bytes = [_]u8{0x42} ++ [_]u8{0} ** 19 },
+        .topics = topics,
+        .data = data,
+    };
+
+    const original = DefaultCallResult.success_with_logs(3000, "output", logs);
+    const owned = try original.toOwnedResult(allocator);
+    defer {
+        var mutable_owned = owned;
+        mutable_owned.deinit(allocator);
+    }
+
+    try testing.expectEqual(@as(usize, 1), owned.logs.len);
+    try testing.expectEqual(@as(usize, 2), owned.logs[0].topics.len);
+    try testing.expectEqualSlices(u8, "log data", owned.logs[0].data);
+    
+    // Verify deep copy
+    try testing.expect(original.logs.ptr != owned.logs.ptr);
+    if (original.logs.len > 0) {
+        try testing.expect(original.logs[0].topics.ptr != owned.logs[0].topics.ptr);
+        try testing.expect(original.logs[0].data.ptr != owned.logs[0].data.ptr);
+    }
+}
+
+test "call result toOwnedResult empty result" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    const original = DefaultCallResult.success_empty(1000);
+    const owned = try original.toOwnedResult(allocator);
+    defer {
+        var mutable_owned = owned;
+        mutable_owned.deinit(allocator);
+    }
+
+    try testing.expect(owned.success);
+    try testing.expectEqual(@as(u64, 1000), owned.gas_left);
+    try testing.expectEqual(@as(usize, 0), owned.output.len);
+    try testing.expectEqual(@as(usize, 0), owned.logs.len);
+}
+
+test "call result toOwnedResult with error info" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    const original = DefaultCallResult.failure_with_error(500, "error message");
+    const owned = try original.toOwnedResult(allocator);
+    defer {
+        var mutable_owned = owned;
+        mutable_owned.deinit(allocator);
+    }
+
+    try testing.expect(!owned.success);
+    try testing.expectEqual(@as(u64, 500), owned.gas_left);
+    try testing.expectEqualSlices(u8, "error message", owned.error_info.?);
+    
+    // Verify it's a copy
+    if (original.error_info) |info| {
+        try testing.expect(info.ptr != owned.error_info.?.ptr);
+    }
+}
+
+test "call result toOwnedResult with all fields" {
+    const testing = std.testing;
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    // Create a result with all fields populated
+    var result = DefaultCallResult.success_with_output(2500, "test output");
+    
+    // Add logs
+    const topics = try allocator.dupe(u256, &[_]u256{0xABCD});
+    defer allocator.free(topics);
+    const log_data = try allocator.dupe(u8, "event");
+    defer allocator.free(log_data);
+    const logs = try allocator.alloc(Log, 1);
+    defer allocator.free(logs);
+    logs[0] = Log{
+        .address = .{ .bytes = [_]u8{0x11} ++ [_]u8{0} ** 19 },
+        .topics = topics,
+        .data = log_data,
+    };
+    result.logs = logs;
+    
+    // Add selfdestructs
+    const selfdestructs = try allocator.alloc(SelfDestructRecord, 1);
+    defer allocator.free(selfdestructs);
+    selfdestructs[0] = .{
+        .contract = .{ .bytes = [_]u8{0x22} ++ [_]u8{0} ** 19 },
+        .beneficiary = .{ .bytes = [_]u8{0x33} ++ [_]u8{0} ** 19 },
+    };
+    result.selfdestructs = selfdestructs;
+    
+    // Add accessed addresses
+    const addresses = try allocator.alloc(Address, 2);
+    defer allocator.free(addresses);
+    addresses[0] = .{ .bytes = [_]u8{0x44} ++ [_]u8{0} ** 19 };
+    addresses[1] = .{ .bytes = [_]u8{0x55} ++ [_]u8{0} ** 19 };
+    result.accessed_addresses = addresses;
+    
+    // Add accessed storage
+    const storage = try allocator.alloc(StorageAccess, 1);
+    defer allocator.free(storage);
+    storage[0] = .{
+        .address = .{ .bytes = [_]u8{0x66} ++ [_]u8{0} ** 19 },
+        .slot = 0x100,
+    };
+    result.accessed_storage = storage;
+    
+    // Add created address
+    result.created_address = .{ .bytes = [_]u8{0x77} ++ [_]u8{0} ** 19 };
+    
+    // Create owned copy
+    const owned = try result.toOwnedResult(allocator);
+    defer {
+        var mutable_owned = owned;
+        mutable_owned.deinit(allocator);
+    }
+    
+    // Verify all fields were copied
+    try testing.expectEqualSlices(u8, "test output", owned.output);
+    try testing.expectEqual(@as(usize, 1), owned.logs.len);
+    try testing.expectEqual(@as(usize, 1), owned.selfdestructs.len);
+    try testing.expectEqual(@as(usize, 2), owned.accessed_addresses.len);
+    try testing.expectEqual(@as(usize, 1), owned.accessed_storage.len);
+    try testing.expectEqual(Address{ .bytes = [_]u8{0x77} ++ [_]u8{0} ** 19 }, owned.created_address.?);
+    
+    // Verify deep copies
+    try testing.expect(result.output.ptr != owned.output.ptr);
+    try testing.expect(result.logs.ptr != owned.logs.ptr);
+    try testing.expect(result.selfdestructs.ptr != owned.selfdestructs.ptr);
+    try testing.expect(result.accessed_addresses.ptr != owned.accessed_addresses.ptr);
+    try testing.expect(result.accessed_storage.ptr != owned.accessed_storage.ptr);
 }

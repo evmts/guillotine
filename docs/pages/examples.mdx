@@ -1,23 +1,176 @@
 ---
 title: Examples
-description: Practical examples using the EVM API
+description: Minimal, copy-paste examples for Guillotine EVM.
 ---
+
+> **Note**: This documentation was generated with AI assistance. Please verify technical details and report any inaccuracies.
 
 # Examples
 
-Jump into working examples. These are small, copy-paste friendly snippets you can adapt.
+## Call a STOP-only contract
 
-## Hello Call
+```zig
+const std = @import("std");
+const primitives = @import("primitives");
+const DefaultEvm = @import("evm").DefaultEvm;
+const Database = @import("storage/database.zig").Database;
+const BlockInfo = @import("block/block_info.zig").DefaultBlockInfo;
+const TransactionContext = @import("block/transaction_context.zig").TransactionContext;
 
-Start with the [Quick Start](/getting-started/quick-start) to learn how to install code and call it.
+pub fn main() !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
 
-## End-to-end Program
+    var db = Database.init(allocator);
+    defer db.deinit();
 
-See the [Basic Example](/getting-started/basic-example) for a full main.zig that sets up context, deploys code, calls it, and prints the result.
+    const block = BlockInfo{ .number = 1, .timestamp = 1, .difficulty = 0, .gas_limit = 30_000_000, .coinbase = primitives.ZERO_ADDRESS, .base_fee = 0, .prev_randao = [_]u8{0} ** 32 };
+    const tx = TransactionContext{ .gas_limit = 1_000_000, .coinbase = primitives.ZERO_ADDRESS, .chain_id = 1 };
 
-## Execution Patterns
+    var evm = try DefaultEvm.init(allocator, &db, block, tx, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    defer evm.deinit();
 
-Read [Basic Execution](/usage/basic-execution) for call, staticcall, delegatecall, create, and create2 patterns.
+    const addr: primitives.Address = .{ .bytes = [_]u8{0x12} ++ [_]u8{0} ** 19 };
+    const bytecode = [_]u8{0x00};
+    const code_hash = try db.set_code(&bytecode);
+    try db.set_account(addr.bytes, .{ .balance = 0, .nonce = 0, .code_hash = code_hash, .storage_root = [_]u8{0} ** 32 });
 
-Have an example you’d like to see? Open an issue with the code you want to run and the expected behavior.
+    const params = DefaultEvm.CallParams{ .call = .{ .caller = primitives.ZERO_ADDRESS, .to = addr, .value = 0, .input = &.{}, .gas = 100_000 } };
+    const result = evm.call(params);
+    if (!result.success) return error.ExecutionFailed;
+}
+```
 
+## Contract Creation
+
+```zig
+const creation_bytecode = [_]u8{
+    0x60, 0x42,  // PUSH1 0x42
+    0x60, 0x00,  // PUSH1 0x00
+    0x52,        // MSTORE (store 0x42 at memory[0])
+    0x60, 0x20,  // PUSH1 0x20 (32 bytes)
+    0x60, 0x00,  // PUSH1 0x00 (from memory[0])
+    0xf3,        // RETURN (return 32 bytes from memory[0])
+};
+
+const params = DefaultEvm.CallParams{
+    .create = .{
+        .caller = primitives.ZERO_ADDRESS,
+        .value = 0,
+        .init_code = &creation_bytecode,
+        .gas = 100_000
+    }
+};
+
+const result = evm.call(params);
+// result.output contains the deployed contract bytecode
+// result.created_address contains the new contract address
+```
+
+## Storage Operations
+
+```zig
+// Contract that stores and loads a value
+const storage_contract = [_]u8{
+    0x60, 0x42,        // PUSH1 0x42
+    0x60, 0x00,        // PUSH1 0x00 (slot 0)
+    0x55,              // SSTORE (store 0x42 in slot 0)
+    0x60, 0x00,        // PUSH1 0x00 (slot 0)
+    0x54,              // SLOAD (load from slot 0)
+    0x00,              // STOP
+};
+
+// Deploy and call
+const code_hash = try db.set_code(&storage_contract);
+try db.set_account(addr.bytes, .{
+    .balance = 0,
+    .nonce = 0,
+    .code_hash = code_hash,
+    .storage_root = [_]u8{0} ** 32
+});
+
+const result = evm.call(DefaultEvm.CallParams{
+    .call = .{
+        .caller = primitives.ZERO_ADDRESS,
+        .to = addr,
+        .value = 0,
+        .input = &.{},
+        .gas = 100_000
+    }
+});
+```
+
+## Memory Management Details
+
+```zig
+// Arena allocator for transaction scope
+var arena = std.heap.ArenaAllocator.init(allocator);
+defer arena.deinit(); // All EVM memory freed here
+
+// Database lifecycle
+var db = Database.init(arena.allocator()); // Use arena
+defer db.deinit(); // Still call deinit for proper cleanup
+
+// EVM owns its frame stack and memory
+var evm = try DefaultEvm.init(arena.allocator(), &db, block, tx, 0, origin, .CANCUN);
+defer evm.deinit(); // Critical for frame stack cleanup
+```
+
+## Gas Accounting Example
+
+```zig
+// Check gas before and after execution
+const initial_gas = 100_000;
+const params = DefaultEvm.CallParams{
+    .call = .{
+        .caller = primitives.ZERO_ADDRESS,
+        .to = addr,
+        .value = 0,
+        .input = &.{},
+        .gas = initial_gas
+    }
+};
+
+const result = evm.call(params);
+const gas_used = initial_gas - result.gas_remaining;
+
+// Gas costs follow Yellow Paper:
+// - STOP: 0 gas
+// - PUSH1: 3 gas
+// - SSTORE: 20000 gas (new slot) or 5000 gas (existing)
+// - SLOAD: 2100 gas (cold) or 100 gas (warm)
+```
+
+## Error Handling Patterns
+
+```zig
+const result = evm.call(params);
+
+switch (result.exit_reason) {
+    .Success => {
+        // Normal execution completed
+        std.log.info("Success: {} gas used", .{initial_gas - result.gas_remaining});
+    },
+    .Revert => {
+        // Contract explicitly reverted
+        std.log.warn("Reverted with data: {any}", .{result.output});
+    },
+    .OutOfGas => {
+        // Ran out of gas during execution
+        return error.InsufficientGas;
+    },
+    .InvalidInstruction => {
+        // Hit unknown opcode
+        return error.BadBytecode;
+    },
+}
+```
+
+Notes:
+- Tests and examples print nothing on success by design
+- All allocations must be paired with `defer` statements
+- Gas calculations match Ethereum Yellow Paper specification
+- See `src/evm.zig` tests for more patterns (delegatecall, staticcall)
+
+Have a specific pattern in mind? Open an issue with the exact code and expected result.

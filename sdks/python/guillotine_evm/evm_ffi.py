@@ -59,7 +59,9 @@ class EvmResult:
     error: Optional[str] = None
 
 
-def _addr_to20(addr: Union[str, Address]) -> bytes:
+def _addr_to20(addr: Union[str, Address, None]) -> bytes:
+    if addr is None:
+        return b'\x00' * 20  # Zero address for None (CREATE transactions)
     if isinstance(addr, Address):
         return addr.to_bytes()
     # string hex

@@ -9,23 +9,27 @@ pub fn Handlers(comptime FrameType: type) type {
         pub const Error = FrameType.Error;
         pub const Dispatch = FrameType.Dispatch;
         pub const WordType = FrameType.WordType;
+        const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
+
+        /// Continue to next instruction with afterInstruction tracking
+        pub inline fn next_instruction(self: *FrameType, cursor: [*]const Dispatch.Item, comptime opcode: Dispatch.UnifiedOpcode) Error!noreturn {
+            const op_data = dispatch_opcode_data.getOpData(opcode, Dispatch, Dispatch.Item, cursor);
+            self.afterInstruction(opcode, op_data.next_handler, op_data.next_cursor.cursor);
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+        }
 
         /// POP opcode (0x50) - Remove item from stack.
         pub fn pop(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const dispatch = Dispatch{ .cursor = cursor };
-            std.debug.assert(self.stack.size() >= 1); // POP requires 1 stack item
+            self.beforeInstruction(.POP, cursor);
             _ = self.stack.pop_unsafe();
-            const op_data = dispatch.getOpData(.POP);
-            return @call(FrameType.getTailCallModifier(), op_data.next.cursor[0].opcode_handler, .{ self, op_data.next.cursor });
+            return next_instruction(self, cursor, .POP);
         }
 
         /// PUSH0 opcode (0x5f) - Push 0 onto stack.
         pub fn push0(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const dispatch = Dispatch{ .cursor = cursor };
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
+            self.beforeInstruction(.PUSH0, cursor);
             self.stack.push_unsafe(0);
-            const op_data = dispatch.getOpData(.PUSH0);
-            return @call(FrameType.getTailCallModifier(), op_data.next.cursor[0].opcode_handler, .{ self, op_data.next.cursor });
+            return next_instruction(self, cursor, .PUSH0);
         }
 
         /// Generate a push handler for PUSH1-PUSH32
@@ -34,16 +38,44 @@ pub fn Handlers(comptime FrameType: type) type {
             if (push_n == 0) @compileError("PUSH0 is handled as its own opcode");
             return &struct {
                 pub fn pushHandler(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+                    const opcode = switch (push_n) {
+                        1 => @import("../opcodes/opcode.zig").UnifiedOpcode.PUSH1,
+                        2 => .PUSH2,
+                        3 => .PUSH3,
+                        4 => .PUSH4,
+                        5 => .PUSH5,
+                        6 => .PUSH6,
+                        7 => .PUSH7,
+                        8 => .PUSH8,
+                        9 => .PUSH9,
+                        10 => .PUSH10,
+                        11 => .PUSH11,
+                        12 => .PUSH12,
+                        13 => .PUSH13,
+                        14 => .PUSH14,
+                        15 => .PUSH15,
+                        16 => .PUSH16,
+                        17 => .PUSH17,
+                        18 => .PUSH18,
+                        19 => .PUSH19,
+                        20 => .PUSH20,
+                        21 => .PUSH21,
+                        22 => .PUSH22,
+                        23 => .PUSH23,
+                        24 => .PUSH24,
+                        25 => .PUSH25,
+                        26 => .PUSH26,
+                        27 => .PUSH27,
+                        28 => .PUSH28,
+                        29 => .PUSH29,
+                        30 => .PUSH30,
+                        31 => .PUSH31,
+                        32 => .PUSH32,
+                        else => unreachable,
+                    };
+                    self.beforeInstruction(opcode, cursor);
                     const dispatch = Dispatch{ .cursor = cursor };
-                    
-                    // // Log entry state at error level to be visible
-                    // log.err("PUSH{} ENTRY: stack_size={}, stack_ptr={*}", .{
-                    //     push_n,
-                    //     self.stack.size(),
-                    //     self.stack.stack_ptr
-                    // });
-                    
-                    
+
                     // For PUSH1-PUSH8, we get push_inline metadata with u64 value
                     // For PUSH9-PUSH32, we get push_pointer metadata with *u256 value
                     const op_data = switch (push_n) {
@@ -81,23 +113,17 @@ pub fn Handlers(comptime FrameType: type) type {
                         32 => dispatch.getOpData(.PUSH32),
                         else => unreachable,
                     };
-                    
-                    if (push_n <= 8) {
-                        @branchHint(.likely);
+
+                    if (comptime push_n <= 8) {
                         const value = op_data.metadata.value;
-                        // log.debug("[PUSH{d}] Pushing inline value: {d}", .{ push_n, value });
-                        std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
                         self.stack.push_unsafe(value);
                     } else {
-                        const value = op_data.metadata.value.*;
+                        const value = self.u256_constants[op_data.metadata.index];
                         // log.debug("[PUSH{d}] Pushing pointer value: {d}", .{ push_n, value });
-                        std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
                         self.stack.push_unsafe(value);
                     }
-                    
-                    // log.debug("[PUSH{d}] Stack after: {any}", .{ push_n, self.stack.get_slice() });
-                    
-                    return @call(FrameType.getTailCallModifier(), op_data.next.cursor[0].opcode_handler, .{ self, op_data.next.cursor });
+                    self.afterInstruction(opcode, op_data.next_handler, op_data.next_cursor.cursor);
+                    return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
                 }
             }.pushHandler;
         }
@@ -107,10 +133,28 @@ pub fn Handlers(comptime FrameType: type) type {
             if (dup_n == 0 or dup_n > 16) @compileError("Only DUP1 to DUP16 is supported");
             return &struct {
                 pub fn dupHandler(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-                    const dispatch = Dispatch{ .cursor = cursor };
-                    std.debug.assert(self.stack.size() >= dup_n); // DUP{d} requires {d} stack items
-                    std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
+                    const opcode = switch (dup_n) {
+                        1 => @import("../opcodes/opcode.zig").UnifiedOpcode.DUP1,
+                        2 => .DUP2,
+                        3 => .DUP3,
+                        4 => .DUP4,
+                        5 => .DUP5,
+                        6 => .DUP6,
+                        7 => .DUP7,
+                        8 => .DUP8,
+                        9 => .DUP9,
+                        10 => .DUP10,
+                        11 => .DUP11,
+                        12 => .DUP12,
+                        13 => .DUP13,
+                        14 => .DUP14,
+                        15 => .DUP15,
+                        16 => .DUP16,
+                        else => unreachable,
+                    };
+                    self.beforeInstruction(opcode, cursor);
                     self.stack.dup_n_unsafe(dup_n);
+                    const dispatch = Dispatch{ .cursor = cursor };
                     // DUP operations don't have metadata, just get next
                     const op_data = switch (dup_n) {
                         1 => dispatch.getOpData(.DUP1),
@@ -131,7 +175,8 @@ pub fn Handlers(comptime FrameType: type) type {
                         16 => dispatch.getOpData(.DUP16),
                         else => unreachable,
                     };
-                    return @call(FrameType.getTailCallModifier(), op_data.next.cursor[0].opcode_handler, .{ self, op_data.next.cursor });
+                    self.afterInstruction(opcode, op_data.next_handler, op_data.next_cursor.cursor);
+                    return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
                 }
             }.dupHandler;
         }
@@ -141,9 +186,28 @@ pub fn Handlers(comptime FrameType: type) type {
             if (swap_n == 0 or swap_n > 16) @compileError("Only SWAP1 to SWAP16 is supported");
             return &struct {
                 pub fn swapHandler(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-                    const dispatch = Dispatch{ .cursor = cursor };
-                    std.debug.assert(self.stack.size() >= swap_n + 1); // SWAP{d} requires {d}+1 stack items
+                    const opcode = switch (swap_n) {
+                        1 => @import("../opcodes/opcode.zig").UnifiedOpcode.SWAP1,
+                        2 => .SWAP2,
+                        3 => .SWAP3,
+                        4 => .SWAP4,
+                        5 => .SWAP5,
+                        6 => .SWAP6,
+                        7 => .SWAP7,
+                        8 => .SWAP8,
+                        9 => .SWAP9,
+                        10 => .SWAP10,
+                        11 => .SWAP11,
+                        12 => .SWAP12,
+                        13 => .SWAP13,
+                        14 => .SWAP14,
+                        15 => .SWAP15,
+                        16 => .SWAP16,
+                        else => unreachable,
+                    };
+                    self.beforeInstruction(opcode, cursor);
                     self.stack.swap_n_unsafe(swap_n);
+                    const dispatch = Dispatch{ .cursor = cursor };
                     // SWAP operations don't have metadata, just get next
                     const op_data = switch (swap_n) {
                         1 => dispatch.getOpData(.SWAP1),
@@ -164,7 +228,8 @@ pub fn Handlers(comptime FrameType: type) type {
                         16 => dispatch.getOpData(.SWAP16),
                         else => unreachable,
                     };
-                    return @call(FrameType.getTailCallModifier(), op_data.next.cursor[0].opcode_handler, .{ self, op_data.next.cursor });
+                    self.afterInstruction(opcode, op_data.next_handler, op_data.next_cursor.cursor);
+                    return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
                 }
             }.swapHandler;
         }
@@ -176,7 +241,7 @@ pub fn Handlers(comptime FrameType: type) type {
 const testing = std.testing;
 const Frame = @import("../frame/frame.zig").Frame;
 const dispatch_mod = @import("../preprocessor/dispatch.zig");
-const NoOpTracer = @import("../tracer/tracer.zig").NoOpTracer;
+const DefaultTracer = @import("../tracer/tracer.zig").DefaultTracer;
 const MemoryDatabase = @import("../storage/memory_database.zig").MemoryDatabase;
 const Address = @import("primitives").Address;
 
@@ -187,7 +252,6 @@ const test_config = FrameConfig{
     .max_bytecode_size = 1024,
     .block_gas_limit = 30_000_000,
     .DatabaseType = @import("../storage/memory_database.zig").MemoryDatabase,
-    .TracerType = NoOpTracer,
     .memory_initial_capacity = 4096,
     .memory_limit = 0xFFFFFF,
 };

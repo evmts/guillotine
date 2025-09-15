@@ -1,0 +1,64 @@
+---
+title: Memory
+description: Allocation, ownership, and cleanup rules used by the EVM.
+---
+
+> **Note**: This documentation was generated with AI assistance. Please verify technical details and report any inaccuracies.
+
+# Memory
+
+Minimal rules for allocations, ownership, and cleanup.
+
+## Allocators
+
+- Per-call arena: `evm.getCallArenaAllocator()` returns a `std.mem.Allocator` backed by a growing arena.
+  - Used for all transient allocations within a call/inner calls (frames, temp buffers).
+  - Reset after each root `evm.call(...)` via `call_arena.resetRetainCapacity()`; capacity may be retained.
+  - Do not store pointers past the end of the root call.
+- Main allocator: `evm.allocator` (provided to `Evm.init`).
+  - Used for data that lives beyond a single call (e.g., returned output, logs slices, traces).
+  - Caller owns these and must free them when done.
+
+## Ownership by data type
+
+- `CallResult.output`: owned by the caller; free with `result.deinit(evm.allocator)` or `allocator.free(result.output)`.
+- `CallResult.logs`: owned by the caller; free with `result.deinit(evm.allocator)`.
+- `CallResult.trace`/`error_info`: owned by the caller; free with `result.deinit(evm.allocator)`.
+- Internal `evm.return_data`: EVM-managed; freed/overwritten internally. Use `CallResult.output` externally.
+- Frame allocations: allocated from the per-call arena; no individual frees; the arena reset handles cleanup.
+- Contract code in DB: `Database.set_code(bytes)` copies and owns the code; freed by `db.deinit()`.
+  - Slices from `get_code`/`get_code_by_address` are borrowed; do not free.
+
+## Patterns
+
+- Same-scope allocation
+
+```zig
+const thing = try allocator.create(Thing);
+defer allocator.destroy(thing);
+```
+
+- Ownership transfer (constructor-like)
+
+```zig
+const thing = try allocator.create(Thing);
+errdefer allocator.destroy(thing);
+thing.* = try Thing.init(allocator);
+return thing;
+```
+
+## Arena details
+
+- Impl: `src/evm_arena_allocator.zig` (GrowingArenaAllocator wraps `std.heap.ArenaAllocator`).
+- Growth: configurable via `EvmConfig.arena_growth_factor`; prealloc via `EvmConfig.arena_capacity_limit`.
+- Reset policy:
+  - End of root call: `resetRetainCapacity()` (caps growth at `arena_capacity_limit`).
+  - Full free + re-prealloc: `resetToInitialCapacity()` (rare; used if needed).
+
+## Practical guidance
+
+- Use arena for per-call temporaries; never escape them.
+- Use main allocator for anything returned to the caller.
+- Always free `CallResult` data using `result.deinit(evm.allocator)` when done.
+- Do not free slices returned by the Database; the DB owns that memory.
+

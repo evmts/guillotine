@@ -4,26 +4,24 @@ pub const ModuleSet = struct {
     lib_mod: *std.Build.Module,
     primitives_mod: *std.Build.Module,
     crypto_mod: *std.Build.Module,
-    utils_mod: *std.Build.Module,
     trie_mod: *std.Build.Module,
     provider_mod: *std.Build.Module,
     evm_mod: *std.Build.Module,
     compilers_mod: *std.Build.Module,
     c_kzg_mod: *std.Build.Module,
-    revm_mod: ?*std.Build.Module,
+    // revm_mod removed - using MinimalEvm for differential testing
     exe_mod: *std.Build.Module,
 };
 
 pub fn createModules(
-    b: *std.Build, 
-    target: std.Build.ResolvedTarget, 
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
     build_options_mod: *std.Build.Module,
     zbench_dep: *std.Build.Dependency,
     c_kzg_lib: *std.Build.Step.Compile,
     blst_lib: *std.Build.Step.Compile,
     bn254_lib: ?*std.Build.Step.Compile,
-    revm_lib: ?*std.Build.Step.Compile,
     foundry_lib: ?*std.Build.Step.Compile,
 ) ModuleSet {
     // C-KZG module
@@ -55,13 +53,6 @@ pub fn createModules(
     crypto_mod.addImport("build_options", build_options_mod);
     primitives_mod.addImport("crypto", crypto_mod);
 
-    // Utils module
-    const utils_mod = b.createModule(.{
-        .root_source_file = b.path("src/utils.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-
     // Trie module
     const trie_mod = b.createModule(.{
         .root_source_file = b.path("src/trie/root.zig"),
@@ -69,7 +60,6 @@ pub fn createModules(
         .optimize = optimize,
     });
     trie_mod.addImport("primitives", primitives_mod);
-    trie_mod.addImport("utils", utils_mod);
 
     // Provider module
     const provider_mod = b.createModule(.{
@@ -89,29 +79,14 @@ pub fn createModules(
     evm_mod.addImport("crypto", crypto_mod);
     evm_mod.addImport("build_options", build_options_mod);
     evm_mod.addImport("zbench", zbench_dep.module("zbench"));
-    evm_mod.addIncludePath(b.path("lib/revm"));
+    // revm include path removed
 
     if (bn254_lib) |bn254| {
         evm_mod.linkLibrary(bn254);
         evm_mod.addIncludePath(b.path("lib/ark"));
     }
 
-    // REVM module (optional)
-    const revm_mod = if (revm_lib != null) blk: {
-        const mod = b.createModule(.{
-            .root_source_file = b.path("lib/revm/revm.zig"),
-            .target = target,
-            .optimize = optimize,
-        });
-        mod.addImport("primitives", primitives_mod);
-
-        if (revm_lib) |revm| {
-            mod.linkLibrary(revm);
-            mod.addIncludePath(b.path("lib/revm"));
-        }
-
-        break :blk mod;
-    } else null;
+    // REVM module removed - using MinimalEvm for differential testing
 
     // Compilers module
     const compilers_mod = b.createModule(.{
@@ -121,7 +96,7 @@ pub fn createModules(
     });
     compilers_mod.addImport("primitives", primitives_mod);
     compilers_mod.addImport("evm", evm_mod);
-    
+
     // Link with foundry library if available
     if (foundry_lib) |lib| {
         compilers_mod.linkLibrary(lib);
@@ -142,29 +117,21 @@ pub fn createModules(
     lib_mod.addImport("provider", provider_mod);
     lib_mod.addImport("compilers", compilers_mod);
     lib_mod.addImport("trie", trie_mod);
-    if (revm_mod != null) {
-        lib_mod.addImport("revm", revm_mod.?);
-    }
+    // REVM import removed - using MinimalEvm for differential testing
 
     // Executable module
-    const exe_mod = b.createModule(.{ 
-        .root_source_file = b.path("src/main.zig"), 
-        .target = target, 
-        .optimize = optimize 
-    });
+    const exe_mod = b.createModule(.{ .root_source_file = b.path("src/main.zig"), .target = target, .optimize = optimize });
     exe_mod.addImport("Guillotine_lib", lib_mod);
 
     return ModuleSet{
         .lib_mod = lib_mod,
         .primitives_mod = primitives_mod,
         .crypto_mod = crypto_mod,
-        .utils_mod = utils_mod,
         .trie_mod = trie_mod,
         .provider_mod = provider_mod,
         .evm_mod = evm_mod,
         .compilers_mod = compilers_mod,
         .c_kzg_mod = c_kzg_mod,
-        .revm_mod = revm_mod,
         .exe_mod = exe_mod,
     };
 }

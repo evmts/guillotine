@@ -74,7 +74,7 @@ pub fn addWasmSizeReportStep(
         const seg1 = std.fmt.allocPrint(b.allocator, "echo '{s} WASM build:' && ", .{name}) catch @panic("OOM");
         defer b.allocator.free(seg1);
         script.appendSlice(b.allocator, seg1) catch @panic("OOM");
-        const seg2 = std.fmt.allocPrint(b.allocator, "ls -lh zig-out/bin/{s} | awk '{{print \\\"  Size: \\\" $5}}' && ", .{file}) catch @panic("OOM");
+        const seg2 = std.fmt.allocPrint(b.allocator, "ls -lh zig-out/bin/{s} | awk '{{print \"  Size: \" $5}}' && ", .{file}) catch @panic("OOM");
         defer b.allocator.free(seg2);
         script.appendSlice(b.allocator, seg2) catch @panic("OOM");
     }

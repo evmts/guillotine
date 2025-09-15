@@ -4,7 +4,6 @@ const std = @import("std");
 const testing = std.testing;
 const evm = @import("evm");
 const primitives = @import("primitives");
-const revm = @import("revm");
 const DifferentialTestor = @import("differential_testor.zig").DifferentialTestor;
 
 fn parse_hex_alloc(allocator: std.mem.Allocator, text: []const u8) ![]u8 {

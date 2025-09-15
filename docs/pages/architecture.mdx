@@ -1,0 +1,639 @@
+---
+title: Guillotine Architecture
+description: Deep dive into the Guillotine EVM architecture, design patterns, and implementation details
+---
+
+> **Note**: This documentation was generated with AI assistance. Please verify technical details and report any inaccuracies.
+
+# Guillotine EVM Architecture
+
+## Overview
+
+Guillotine is a high-performance EVM implementation written in Zig, designed for extreme speed, minimal bundle size, and compile-time customization. The architecture follows data-oriented design principles with an emphasis on CPU cache optimization and branch prediction.
+
+## Core Design Principles
+
+### 1. Data-Oriented Design
+- **Cache-line aligned structures** (64-byte boundaries)
+- **Minimal pointer chasing** with flat data layouts
+- **SIMD-friendly memory patterns** for vectorization
+- **Predictable memory access** patterns
+
+### 2. Zero-Cost Abstractions
+- **Compile-time configuration** via Zig `comptime`
+- **No vtables or dynamic dispatch** in hot paths
+- **Inlined operations** with tail-call optimization
+- **Static memory allocation** where possible
+
+### 3. Modular Architecture
+- **Clear separation of concerns** between modules
+- **Configurable components** without runtime overhead
+- **Pluggable tracer system** for debugging
+- **Extensible precompile framework**
+
+## Architecture Layers
+
+```
+┌─────────────────────────────────────────────────────┐
+│                    User SDKs                         │
+│         (Go, Python, Rust, TypeScript, etc.)         │
+├─────────────────────────────────────────────────────┤
+│                    C FFI Layer                       │
+│              (Opaque handles, WASM)                  │
+├─────────────────────────────────────────────────────┤
+│                   EVM Instance                       │
+│         (DefaultEvm, configuration, host)            │
+├─────────────────────────────────────────────────────┤
+│                 Execution Engine                     │
+│      ┌──────────┬──────────┬──────────────┐        │
+│      │  Frame   │ Dispatch │   Bytecode   │        │
+│      │          │  System  │   Analysis   │        │
+│      └──────────┴──────────┴──────────────┘        │
+├─────────────────────────────────────────────────────┤
+│                 Core Components                      │
+│  ┌────────┬────────┬────────┬────────┬─────────┐   │
+│  │ Stack  │ Memory │Storage │Tracer  │Precomp. │   │
+│  └────────┴────────┴────────┴────────┴─────────┘   │
+├─────────────────────────────────────────────────────┤
+│                    Primitives                        │
+│        (Address, u256, RLP, Keccak, etc.)           │
+└─────────────────────────────────────────────────────┘
+```
+
+## Dispatch-Based Execution: The Core Innovation
+
+### Traditional Interpreter vs Dispatch System
+
+```
+Traditional EVM (MinimalEvm)              Guillotine (Dispatch-Based)
+============================              ============================
+
+Bytecode: [0x60, 0x05, 0x01]             Bytecode: [0x60, 0x05, 0x01]
+          PUSH1  5    ADD                          PUSH1  5    ADD
+              ↓                                         ↓
+    ┌─────────────────────┐                   [Preprocessing Phase]
+    │  while (pc < len) { │                            ↓
+    │    switch(code[pc]){│              ┌──────────────────────────┐
+    │      0x60: push()   │              │   Dispatch Schedule:     │
+    │      0x01: add()    │              │   [0] first_block_gas    │
+    │      ...256 cases   │              │   [1] &push_handler      │
+    │    }                │              │   [2] push_inline {5}    │
+    │    pc++             │              │   [3] &add_handler       │
+    │  }                  │              └──────────────────────────┘
+    └─────────────────────┘                            ↓
+              ↓                              cursor[0].handler(frame)
+     [Runtime Validation]                              ↓
+     [Per-Op Gas Check]                       [Tail Call Chain]
+     [Bytecode Reads]                         [No Switch/PC]
+                                              [Pre-validated]
+```
+
+### How Jump Operations Differ
+
+```
+JUMP in Traditional Interpreter          JUMP in Dispatch System
+================================          ========================
+
+Stack: [dest_pc]                        Stack: [dest_pc]
+       ↓                                        ↓
+1. Pop destination                      1. Pop destination
+2. Validate dest < bytecode.len         2. Binary search jump table
+3. Check bytecode[dest] == JUMPDEST     3. Get pre-validated dispatch ptr
+4. If valid: pc = dest                  4. Tail call to destination
+5. If invalid: revert
+
+Per-Jump Cost:                          Per-Jump Cost:
+- Runtime validation                    - Binary search only
+- Bytecode access                       - Pre-validated
+- PC update                            - Direct function call
+```
+
+### Static Jump Optimization
+
+```
+Bytecode Pattern: PUSH1 10, JUMP        Traditional: 3 operations
+                                        Dispatch: 1 synthetic opcode!
+
+Traditional Execution:                  Dispatch Execution:
+======================                  ==================
+1. PUSH1 handler                       jump_to_static_location:
+2. Read immediate (10)                   ↓
+3. Push to stack                       cursor[1].jump_static.dispatch
+4. JUMP handler                          ↓
+5. Pop from stack                      Direct tail call!
+6. Validate destination                (No stack operations)
+7. Update PC                          (No validation)
+```
+
+## Module Deep Dive
+
+### Frame Module (`src/frame/`)
+
+The Frame is the execution context for EVM operations, handling direct opcode execution.
+
+#### Key Components:
+- **`frame.zig`**: Core execution context
+- **`frame_handlers.zig`**: Opcode handler implementations
+- **`call_params.zig`**: Call parameter validation
+- **`call_result.zig`**: Result handling
+
+#### Design Patterns:
+```zig
+// Lightweight frame structure with minimal allocations
+pub const Frame = struct {
+    stack: Stack,           // Fixed-size stack (1024 words)
+    memory: Memory,         // Expandable byte-addressable memory
+    gas_remaining: u64,     // Gas tracking
+    pc: u32,               // Program counter
+    contract_address: Address,
+    caller: Address,
+    // ... other execution context
+};
+```
+
+#### Opcode Dispatch:
+- **Jump table** for O(1) opcode lookup
+- **Tail-call optimization** for handler chaining
+- **Synthetic opcodes** for common patterns
+
+### Dispatch System (`src/preprocessor/dispatch.zig`)
+
+The dispatch system preprocesses bytecode for optimal execution.
+
+#### Complete Bytecode to Execution Flow
+
+```
+                    Input Bytecode
+                         ↓
+    ┌────────────────────────────────────────┐
+    │           Dispatch.init()              │
+    │  1. Analyze bytecode                   │
+    │  2. Detect fusion patterns              │
+    │  3. Build jump table                     │
+    │  4. Generate schedule                    │
+    └────────────────────────────────────────┘
+                         ↓
+    ┌────────────────────────────────────────┐
+    │         Dispatch Schedule               │
+    │  ┌──────────────────────────────┐      │
+    │  │ [0] first_block_gas {15}     │←─────┼─ Gas for basic block
+    │  │ [1] &push_handler             │      │
+    │  │ [2] push_inline {value: 5}    │←─────┼─ Inline metadata
+    │  │ [3] &add_handler              │      │
+    │  │ [4] &jump_handler             │      │
+    │  │ [5] &jumpdest_handler         │      │
+    │  │ [6] jump_dest {gas: 3}        │←─────┼─ Next block metadata
+    │  │ [7] &stop_handler             │      │
+    │  └──────────────────────────────┘      │
+    └────────────────────────────────────────┘
+                         ↓
+    ┌────────────────────────────────────────┐
+    │           Frame Execution               │
+    │                                         │
+    │  cursor = schedule.ptr                 │
+    │  cursor[0].handler(frame, cursor)      │
+    │       ↓ (tail call)                    │
+    │  cursor[3].handler(frame, cursor+3)    │
+    │       ↓ (tail call)                    │
+    │  cursor[4].handler(frame, cursor+4)    │
+    │       ↓ (tail call)                    │
+    │  ... continues via tail calls          │
+    └────────────────────────────────────────┘
+```
+
+#### Key Features:
+- **Schedule Generation**: Converts bytecode to dispatch items
+- **Jump Table Building**: Validates and caches jump destinations
+- **Fusion Detection**: Identifies common opcode patterns
+- **Static Jump Resolution**: Resolves jumps at preprocessing time
+
+#### Dispatch Item Types:
+```zig
+pub const Item = union(enum) {
+    opcode_handler: OpcodeHandler,    // Function pointer
+    jump_dest: JumpDestMetadata,       // Validated destination
+    push_inline: PushInlineMetadata,   // Small push values (≤8 bytes)
+    push_pointer: PushPointerMetadata, // Large push values (>8 bytes)
+    pc: PcMetadata,                   // Program counter value
+    jump_static: JumpStaticMetadata,  // Pre-resolved jump
+    first_block_gas: FirstBlockMetadata, // Gas for basic block
+};
+```
+
+#### Opcode Fusion Examples
+
+```
+Common Pattern Detection:
+========================
+
+PUSH + ADD Pattern:               Fused Synthetic Opcode:
+[0x60, 0x05, 0x01]               PUSH_ADD_INLINE
+ PUSH1  5    ADD                 Single operation!
+     3 ops                            1 op
+
+PUSH + JUMP Pattern:             Fused Synthetic Opcode:
+[0x60, 0x10, 0x56]              JUMP_TO_STATIC_LOCATION
+ PUSH1  16   JUMP                Pre-resolved destination!
+     3 ops                            1 op
+
+Function Selector Pattern:        Fused Synthetic Opcode:
+[0x63, ...., 0x14,               FUNCTION_DISPATCH
+ 0x60, ...., 0x57]               4-byte selector check
+ PUSH4 EQ PUSH JUMPI             with static jump!
+     4 ops                            1 op
+```
+
+#### Dispatch Cache:
+- **LRU cache** for preprocessed bytecode (256 entries)
+- **Direct bytecode comparison** (no hashing collisions)
+- **Skip small bytecode** (<256 bytes, compute on-demand)
+- **Thread-safe** with mutex protection
+
+### Stack Module (`src/stack/`)
+
+High-performance stack with downward growth for cache optimization.
+
+#### Architecture:
+```zig
+// Downward growth: push decrements, pop increments
+pub const Stack = struct {
+    buf_ptr: [*]align(64) WordType,  // Cache-aligned base
+    stack_ptr: [*]WordType,           // Current top
+
+    // Push: *--stack_ptr = value
+    // Pop:  return *stack_ptr++
+};
+```
+
+#### Key Features:
+- **1024 word capacity** (EVM specification)
+- **64-byte alignment** for cache lines
+- **Safe/unsafe variants** for debug/release
+- **Zero-copy operations** where possible
+
+### Memory Module (`src/memory/`)
+
+Byte-addressable memory with lazy expansion.
+
+#### Key Features:
+- **Word-aligned expansion** (32-byte boundaries)
+- **Lazy allocation** on first access
+- **Checkpoint system** for nested calls
+- **SIMD zeroing** for fast initialization
+
+#### Memory Management:
+```zig
+pub const Memory = struct {
+    checkpoint: u24,                    // Isolation boundary
+    buffer_ptr: *std.ArrayList(u8),     // Dynamic buffer
+
+    // Owned vs borrowed memory for efficient sub-contexts
+    pub const is_owned = config.owned;
+};
+```
+
+### Storage Module (`src/storage/`)
+
+World state management with journaling for rollback.
+
+#### Components:
+- **`database.zig`**: In-memory state database
+- **`journal.zig`**: Transaction change tracking
+- **`access_list.zig`**: EIP-2929 cold/warm tracking
+- **`self_destruct.zig`**: Contract destruction (EIP-6780)
+
+#### Journal System:
+```zig
+pub const JournalEntry = union(enum) {
+    AccountTouched: Address,
+    StorageChanged: struct {
+        address: Address,
+        key: u256,
+        old_value: u256
+    },
+    BalanceTransfer: struct {
+        from: Address,
+        to: Address,
+        amount: u256
+    },
+    // ... other state changes
+};
+```
+
+### Bytecode Module (`src/bytecode/`)
+
+Bytecode analysis and validation system.
+
+#### Key Features:
+- **Security-first validation** of untrusted bytecode
+- **Jump destination analysis** for JUMPDEST validation
+- **Pattern detection** for fusion opportunities
+- **Iterator interface** for efficient traversal
+
+#### Analysis Pipeline:
+1. **Validation Phase**: Treat as untrusted, validate all assumptions
+2. **Analysis Phase**: Build metadata (jump table, push data)
+3. **Optimization Phase**: Detect fusion patterns
+4. **Execution Phase**: Use unsafe operations after validation
+
+### Tracer Module (`src/tracer/`)
+
+Configurable execution monitoring and debugging.
+
+#### Tracer Types:
+- **DefaultTracer**: Minimal overhead with validation
+- **MinimalEvm**: Parallel reference implementation (65KB)
+- **Custom Tracers**: User-defined via interface
+
+#### MinimalEvm Validation:
+```zig
+// Parallel execution for validation in debug/safe modes
+pub fn onInterpret(self: *DefaultTracer, frame: anytype, bytecode: []const u8, gas_limit: i64) void {
+    // Initialize MinimalEvm as sidecar validator
+    self.minimal_evm = MinimalEvm.initWithHost(...);
+
+    // Execute in parallel and validate state matches
+}
+```
+
+#### Synchronization Model:
+- **Regular opcodes**: 1:1 execution with MinimalEvm
+- **Synthetic opcodes**: N:1 mapping (e.g., PUSH_ADD = PUSH + ADD)
+- **State validation**: After each instruction
+
+### Precompiles Module (`src/precompiles/`)
+
+Native implementations of cryptographic functions.
+
+#### Supported Precompiles:
+- **0x01**: ecRecover (ECDSA signature recovery)
+- **0x02**: SHA-256 hash
+- **0x03**: RIPEMD-160 hash
+- **0x04**: Identity (data copy)
+- **0x05**: ModExp (modular exponentiation)
+- **0x06-0x08**: BN254 elliptic curve operations
+- **0x09**: BLAKE2F compression
+- **0x0A**: KZG point evaluation (EIP-4844)
+
+#### Implementation Pattern:
+```zig
+pub fn execute_precompile(
+    allocator: std.mem.Allocator,
+    address: Address,
+    input: []const u8,
+    gas_limit: u64,
+) PrecompileError!PrecompileOutput {
+    // Validate address is precompile
+    // Calculate gas cost
+    // Execute cryptographic operation
+    // Return result with gas consumed
+}
+```
+
+## Performance Optimizations
+
+### 1. Indirect Threading via Tail Calls
+```zig
+// Handler chains via tail calls for optimal branch prediction
+pub fn add(self: *Frame, cursor: [*]const Dispatch.Item) Error!noreturn {
+    // ... perform ADD ...
+    return @call(getTailCallModifier(), next_handler, .{ self, next_cursor });
+}
+```
+
+### 2. Opcode Fusion
+Common patterns are detected and replaced with synthetic opcodes:
+- **PUSH_ADD_INLINE**: PUSH1 + ADD
+- **PUSH_MUL_INLINE**: PUSH1 + MUL
+- **FUNCTION_DISPATCH**: PUSH4 + EQ + PUSH + JUMPI
+- **DUP2_MSTORE_PUSH**: DUP2 + MSTORE + PUSH
+
+### 3. Static Gas Batching
+Gas costs are calculated for basic blocks rather than per-instruction.
+
+### 4. Memory Pooling
+```zig
+// Arena allocator for temporary allocations
+var frame_arena: std.heap.ArenaAllocator;
+// Reset between frames for zero-cost cleanup
+```
+
+### 5. SIMD Operations
+- **Memory zeroing** with vector instructions
+- **Batch operations** where applicable
+- **Configurable vector width** per platform
+
+## Safety Features
+
+### ReleaseSafe Mode (Recommended for Alpha)
+- **Parallel validation** with MinimalEvm
+- **Comprehensive assertions** with descriptive messages
+- **Infinite loop protection** (300M instruction limit)
+- **Memory bounds checking** on all operations
+- **Stack validation** for under/overflow
+
+### Safety Counter
+```zig
+// Prevents infinite loops in untrusted code
+pub const SafetyCounter = struct {
+    count: u64,
+    limit: u64 = 300_000_000, // ~10x block gas limit
+
+    pub fn increment(self: *SafetyCounter) !void {
+        self.count += 1;
+        if (self.count > self.limit) {
+            return error.InstructionLimitExceeded;
+        }
+    }
+};
+```
+
+## Compile-Time Configuration
+
+### EVM Configuration
+```zig
+pub const EvmConfig = struct {
+    hardfork: Hardfork = .CANCUN,
+    enable_fusions: bool = true,
+    enable_gas: bool = true,
+    word_type: type = u256,
+    stack_size: comptime_int = 1024,
+    memory_limit: comptime_int = 1 << 24, // 16MB
+    // ... other options
+};
+```
+
+### Build Modes
+- **Debug**: Full debugging, all assertions
+- **ReleaseSafe**: Validation with MinimalEvm
+- **ReleaseFast**: Maximum performance
+- **ReleaseSmall**: Minimum bundle size
+
+## Error Handling
+
+### Error Categories
+```zig
+pub const FrameError = error{
+    StackOverflow,
+    StackUnderflow,
+    OutOfGas,
+    InvalidJump,
+    InvalidOpcode,
+    OutOfMemory,
+    StateChangeInStaticContext,
+    CallDepthExceeded,
+    // ... other errors
+};
+```
+
+### Error Propagation
+- **Fail fast** on critical errors
+- **Rollback journal** on transaction failure
+- **Clear error messages** for debugging
+- **Gas consumption** even on failure
+
+## Testing Strategy
+
+### Test Categories
+1. **Unit Tests**: Per-module functionality
+2. **Differential Tests**: Against REVM/MinimalEvm
+3. **Spec Tests**: Ethereum test suite
+4. **Fuzz Tests**: Random input generation
+5. **Benchmark Tests**: Performance regression
+
+### Test Infrastructure
+```zig
+// Differential testing pattern
+test "opcode correctness" {
+    const frame_result = try executeWithFrame(bytecode);
+    const minimal_result = try executeWithMinimalEvm(bytecode);
+    try std.testing.expectEqual(frame_result, minimal_result);
+}
+```
+
+## Memory Layout
+
+### Frame Memory Layout
+```
+┌─────────────────────┐ High Address
+│     Stack Data      │ ← Stack grows down
+│        ...          │
+│    (1024 words)     │
+├─────────────────────┤ Stack Base
+│    Frame Struct     │
+├─────────────────────┤
+│   Dispatch Items    │
+├─────────────────────┤
+│   Jump Table        │
+├─────────────────────┤
+│  Deduplicated u256  │
+│      Storage        │
+├─────────────────────┤
+│    EVM Memory       │ ← Grows up on demand
+│   (lazy allocated)  │
+└─────────────────────┘ Low Address
+```
+
+### Cache Optimization
+- **Hot data together**: Frequently accessed fields in same cache line
+- **Cold data separate**: Rarely used fields in different cache lines
+- **Aligned structures**: 64-byte boundaries for cache lines
+- **Predictable access**: Sequential access patterns where possible
+
+## Future Optimizations
+
+### Planned Improvements
+1. **Register-based VM**: Transform stack to registers (~30% speedup)
+2. **JIT Compilation**: Hot path compilation to native code
+3. **Parallel Transaction Execution**: Multi-core utilization
+4. **Advanced Fusion Patterns**: More complex pattern detection
+5. **Speculative Execution**: Predict and pre-execute likely paths
+
+### Research Areas
+- **Persistent data structures** for cheaper state rollback
+- **SIMD instruction** usage for batch operations
+- **Hardware acceleration** for cryptographic operations
+- **Memory-mapped** storage for large state
+- **Differential state** encoding for efficiency
+
+## Integration Guidelines
+
+### SDK Integration
+```zig
+// Minimal integration example
+const evm = try DefaultEvm.init(allocator, database, block_info, tx_context);
+defer evm.deinit();
+
+const result = try evm.call(CallParams{
+    .caller = caller_address,
+    .to = contract_address,
+    .value = 0,
+    .input = calldata,
+    .gas = gas_limit,
+});
+```
+
+### FFI Integration
+```c
+// C FFI pattern
+void* evm = evm_create(bytecode, bytecode_len, gas_limit);
+evm_set_context(evm, caller, address, value);
+bool success = evm_execute(evm);
+uint64_t gas_used = evm_get_gas_used(evm);
+evm_destroy(evm);
+```
+
+### WASM Integration
+- **Minimal bundle**: 119KB without precompiles
+- **Full bundle**: 1.1MB with all features
+- **Memory limits**: Configurable per use case
+- **Interface**: C FFI with opaque handles
+
+## Debugging Support
+
+### Debug Features
+- **Step-by-step execution** with tracer
+- **State inspection** at any point
+- **Gas tracking** per operation
+- **Memory dumps** for analysis
+- **Stack traces** on errors
+
+### Debug Commands
+```bash
+# Run with debug tracer
+zig build test-opcodes -Dtracer=debug
+
+# Enable logging in tests
+zig build test -Dlog_level=debug
+
+# Differential testing
+zig build test-differential
+```
+
+## Security Considerations
+
+### Attack Vectors Protected Against
+1. **Stack overflow/underflow**: Bounds checking
+2. **Memory exhaustion**: Limits and lazy allocation
+3. **Infinite loops**: Instruction counter limits
+4. **Integer overflow**: Checked arithmetic in safe mode
+5. **Reentrancy**: Call depth limits
+6. **State corruption**: Journal rollback system
+
+### Security Best Practices
+- **Never trust bytecode**: Always validate
+- **Check all bounds**: Memory, stack, call depth
+- **Gas first**: Always check gas before operations
+- **Fail safely**: Clear error handling
+- **Test exhaustively**: Fuzzing and differential testing
+
+## Conclusion
+
+Guillotine's architecture achieves high performance through:
+- **Data-oriented design** for CPU efficiency
+- **Compile-time optimization** via Zig comptime
+- **Careful memory layout** for cache optimization
+- **Minimal abstractions** in hot paths
+- **Comprehensive safety** features in debug/safe modes
+
+The modular design allows for easy customization while maintaining performance, making it suitable for embedded systems, blockchain clients, testing frameworks, and analysis tools.

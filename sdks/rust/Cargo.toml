@@ -67,14 +67,58 @@ max-call-depth-2048 = []
 stack-size-256 = []
 stack-size-512 = []
 stack-size-2048 = []
-disable-precompiles = []
-disable-fusion = []
-disable-gas-checks = []
-disable-balance-checks = []
+
+# Input size configuration
+max-input-size-64kb = []    # 65536 bytes
+max-input-size-256kb = []   # 262143 bytes (max u18)
+max-input-size-1mb = []     # 1048576 bytes
+
+# Bytecode size configuration
+max-bytecode-size-12kb = []  # 12288 bytes
+max-bytecode-size-48kb = []  # 49152 bytes
+max-bytecode-size-100kb = [] # 102400 bytes
+
+# Init code size configuration
+max-initcode-size-24kb = []  # 24576 bytes
+max-initcode-size-96kb = []  # 98304 bytes
+max-initcode-size-200kb = [] # 204800 bytes
+
+# Memory configuration
+memory-initial-capacity-2kb = []  # 2048 bytes
+memory-initial-capacity-8kb = []  # 8192 bytes
+memory-initial-capacity-16kb = [] # 16384 bytes
 large-memory-limit = []
 small-memory-limit = []
+
+# Arena configuration
 large-arena = []
 small-arena = []
+arena-growth-125 = []        # 25% growth (125)
+arena-growth-200 = []        # 100% growth (200)
+
+# Block configuration
+block-gas-limit-8m = []      # 8,000,000
+block-gas-limit-15m = []     # 15,000,000
+block-gas-limit-50m = []     # 50,000,000
+
+# SIMD configuration
+vector-length-1 = []         # Disable SIMD (scalar operations)
+vector-length-4 = []         # Force 4-element SIMD
+vector-length-8 = []         # Force 8-element SIMD
+vector-length-16 = []        # Force 16-element SIMD
+
+# Safety configuration
+disable-loop-quota = []      # Disable infinite loop protection
+loop-quota-100k = []         # 100,000 instruction limit
+loop-quota-10m = []          # 10,000,000 instruction limit
+
+# Feature flags (separate enable/disable for clarity)
+enable-fusion = []           # Explicitly enable fusion (default on)
+disable-fusion = []          # Disable fusion optimizations
+enable-precompiles = []      # Explicitly enable precompiles (default on)
+disable-precompiles = []     # Disable precompiled contracts
+disable-gas-checks = []      # Disable gas accounting (testing only)
+disable-balance-checks = []  # Disable balance checks (testing only)
 
 [[bench]]
 name = "evm_comparison"

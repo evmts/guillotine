@@ -6,7 +6,7 @@ const frame_mod = evm.frame;
 const FrameConfig = evm.FrameConfig;
 const MemoryDatabase = evm.MemoryDatabase;
 const Address = @import("primitives").Address.Address;
-const NoOpTracer = @import("evm").tracer.NoOpTracer;
+const DefaultTracer = @import("evm").tracer.DefaultTracer;
 const Evm = @import("evm").evm.Evm;
 
 // Test configuration for frame
@@ -16,7 +16,7 @@ const test_config = FrameConfig{
     .max_bytecode_size = 1024,
     .block_gas_limit = 30_000_000,
     .DatabaseType = MemoryDatabase,
-    .TracerType = NoOpTracer,
+    .TracerType = DefaultTracer,
     .memory_initial_capacity = 4096,
     .memory_limit = 0xFFFFFF,
 };
@@ -36,7 +36,7 @@ test "fusion dispatch: verify jump resolution for ten-thousand-hashes" {
     var buf: [2048]u8 = undefined;
     const len = deployment_hex.len / 2;
     for (0..len) |i| {
-        const byte_str = deployment_hex[i*2..i*2+2];
+        const byte_str = deployment_hex[i * 2 .. i * 2 + 2];
         buf[i] = std.fmt.parseInt(u8, byte_str, 16) catch unreachable;
     }
     const deployment_bytes = buf[0..len];
@@ -69,36 +69,36 @@ test "fusion dispatch: verify jump resolution for ten-thousand-hashes" {
     const jump_table = try TestDispatch.createJumpTable(allocator, schedule.items, bc);
     defer allocator.free(jump_table.entries);
 
-    std.log.info("Jump table created with {} entries", .{ jump_table.entries.len });
+    std.log.info("Jump table created with {} entries", .{jump_table.entries.len});
     try testing.expect(jump_table.entries.len > 0);
 }
 
 test "fusion dispatch: simple PUSH+JUMPI resolution" {
     std.testing.log_level = .debug;
     const allocator = testing.allocator;
-    
+
     // Simple bytecode with PUSH+JUMPI that should be fused
     // PC: 0: PUSH1 1 (condition)
-    // PC: 2: PUSH1 7 (jump dest)  
+    // PC: 2: PUSH1 7 (jump dest)
     // PC: 4: JUMPI
     // PC: 5: INVALID
     // PC: 6: INVALID
     // PC: 7: JUMPDEST
     // PC: 8: STOP
     const bytecode_hex = "60016007576EFEFE5B00";
-    
+
     std.log.info("Testing simple PUSH+JUMPI dispatch resolution", .{});
-    
+
     // Convert hex to bytes and analyze
     var buf: [128]u8 = undefined;
     const len = bytecode_hex.len / 2;
     for (0..len) |i| {
-        const byte_str = bytecode_hex[i*2..i*2+2];
+        const byte_str = bytecode_hex[i * 2 .. i * 2 + 2];
         buf[i] = std.fmt.parseInt(u8, byte_str, 16) catch unreachable;
     }
     var bc = try TestBytecode.init(allocator, buf[0..len]);
     defer bc.deinit();
-    
+
     // Create dispatch
     const frame_handlers = @import("evm").frame_handlers;
     const opcode_handlers = frame_handlers.getOpcodeHandlers(TestFrame);
@@ -112,9 +112,9 @@ test "fusion dispatch: simple PUSH+JUMPI resolution" {
         bc,
     );
     defer allocator.free(jump_table.entries);
-    
+
     std.log.info("Jump table has {} entries", .{jump_table.entries.len});
-    
+
     // Verify resolution
     // Verify a known JUMPDEST is resolvable (PC=7)
     const maybe = jump_table.findJumpTarget(7);

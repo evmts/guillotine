@@ -62,7 +62,11 @@ export class Hash {
     // Simple hash - in practice you'd use keccak256 or similar
     const hash = new Uint8Array(32);
     for (let i = 0; i < bytes.length; i++) {
-      hash[i % 32] ^= bytes[i];
+      const index = i % 32;
+      const byteValue = bytes[i];
+      if (byteValue !== undefined) {
+        hash[index] = (hash[index] ?? 0) ^ byteValue;
+      }
     }
     
     return new Hash(hash);
@@ -129,7 +133,11 @@ export class Hash {
     if (index < 0 || index >= 32) {
       throw new Error(`Index out of bounds: ${index}`);
     }
-    return this._bytes[index];
+    const value = this._bytes[index];
+    if (value === undefined) {
+      throw new Error(`Unexpected undefined value at index ${index}`);
+    }
+    return value;
   }
 
   /**

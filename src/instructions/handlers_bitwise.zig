@@ -9,44 +9,54 @@ pub fn Handlers(comptime FrameType: type) type {
         pub const Error = FrameType.Error;
         pub const Dispatch = FrameType.Dispatch;
         pub const WordType = FrameType.WordType;
+        const dispatch = @import("../preprocessor/dispatch_opcode_data.zig");
+
+        /// Continue to next instruction with afterInstruction tracking
+        pub inline fn next_instruction(self: *FrameType, cursor: [*]const Dispatch.Item, comptime opcode: Dispatch.UnifiedOpcode) Error!noreturn {
+            const op_data = dispatch.getOpData(opcode, Dispatch, Dispatch.Item, cursor);
+            self.afterInstruction(opcode, op_data.next_handler, op_data.next_cursor.cursor);
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+        }
 
         /// AND opcode (0x16) - Bitwise AND operation.
         pub fn @"and"(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            std.debug.assert(self.stack.size() >= 2); // AND requires 2 stack items
-            const b = self.stack.pop_unsafe(); // Top of stack - second operand
-            const a = self.stack.peek_unsafe(); // Second from top - first operand
-            self.stack.set_top_unsafe(a & b);
-            const next_cursor = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            self.beforeInstruction(.AND, cursor);
+            self.stack.binary_op_unsafe(struct {
+                fn op(top: WordType, second: WordType) WordType {
+                    return top & second;
+                }
+            }.op);
+            return next_instruction(self, cursor, .AND);
         }
 
         /// OR opcode (0x17) - Bitwise OR operation.
         pub fn @"or"(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            std.debug.assert(self.stack.size() >= 2); // OR requires 2 stack items
-            const b = self.stack.pop_unsafe(); // Top of stack - second operand
-            const a = self.stack.peek_unsafe(); // Second from top - first operand
-            self.stack.set_top_unsafe(a | b);
-            const next_cursor = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            self.beforeInstruction(.OR, cursor);
+            self.stack.binary_op_unsafe(struct {
+                fn op(top: WordType, second: WordType) WordType {
+                    return top | second;
+                }
+            }.op);
+            return next_instruction(self, cursor, .OR);
         }
 
         /// XOR opcode (0x18) - Bitwise XOR operation.
         pub fn xor(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            std.debug.assert(self.stack.size() >= 2); // XOR requires 2 stack items
-            const b = self.stack.pop_unsafe(); // Top of stack - second operand
-            const a = self.stack.peek_unsafe(); // Second from top - first operand
-            self.stack.set_top_unsafe(a ^ b);
-            const next_cursor = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            self.beforeInstruction(.XOR, cursor);
+            self.stack.binary_op_unsafe(struct {
+                fn op(top: WordType, second: WordType) WordType {
+                    return top ^ second;
+                }
+            }.op);
+            return next_instruction(self, cursor, .XOR);
         }
 
         /// NOT opcode (0x19) - Bitwise NOT operation.
         pub fn not(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            std.debug.assert(self.stack.size() >= 1); // NOT requires 1 stack item
+            self.beforeInstruction(.NOT, cursor);
             const value = self.stack.peek_unsafe();
             self.stack.set_top_unsafe(~value);
-            const next_cursor = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            return next_instruction(self, cursor, .NOT);
         }
 
         /// BYTE opcode (0x1a) - Extract byte from word.
@@ -55,7 +65,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// Uses std.math.shr for consistent cross-platform behavior.
         /// See: https://ziglang.org/documentation/master/std/#std.math.shr
         pub fn byte(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            std.debug.assert(self.stack.size() >= 2); // BYTE requires 2 stack items
+            self.beforeInstruction(.BYTE, cursor);
             const byte_index = self.stack.pop_unsafe(); // Top of stack - byte index
             const value = self.stack.peek_unsafe(); // Second from top - value to extract from
             const result = if (byte_index >= 32) 0 else blk: {
@@ -65,14 +75,13 @@ pub fn Handlers(comptime FrameType: type) type {
                 break :blk std.math.shr(WordType, value, @as(ShiftType, @intCast(shift_amount))) & 0xFF;
             };
             self.stack.set_top_unsafe(result);
-            const next_cursor = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            return next_instruction(self, cursor, .BYTE);
         }
 
         /// SHL opcode (0x1b) - Shift left operation using std.math.shl for consistent behavior.
         /// See: https://ziglang.org/documentation/master/std/#std.math.shl
         pub fn shl(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            std.debug.assert(self.stack.size() >= 2); // SHL requires 2 stack items
+            self.beforeInstruction(.SHL, cursor);
             const shift = self.stack.pop_unsafe(); // Top of stack - shift amount
             const value = self.stack.peek_unsafe(); // Second from top - value to shift
             const result = if (shift >= @bitSizeOf(WordType)) blk: {
@@ -83,14 +92,13 @@ pub fn Handlers(comptime FrameType: type) type {
                 break :blk std.math.shl(WordType, value, @as(ShiftType, @truncate(shift)));
             };
             self.stack.set_top_unsafe(result);
-            const next_cursor = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            return next_instruction(self, cursor, .SHL);
         }
 
         /// SHR opcode (0x1c) - Logical shift right operation using std.math.shr.
         /// See: https://ziglang.org/documentation/master/std/#std.math.shr
         pub fn shr(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            std.debug.assert(self.stack.size() >= 2); // SHR requires 2 stack items
+            self.beforeInstruction(.SHR, cursor);
             const shift = self.stack.pop_unsafe(); // Top of stack - shift amount
             const value = self.stack.peek_unsafe(); // Second from top - value to shift
             const result = if (shift >= @bitSizeOf(WordType)) blk: {
@@ -101,15 +109,14 @@ pub fn Handlers(comptime FrameType: type) type {
                 break :blk std.math.shr(WordType, value, @as(ShiftType, @truncate(shift)));
             };
             self.stack.set_top_unsafe(result);
-            const next_cursor = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            return next_instruction(self, cursor, .SHR);
         }
 
         /// SAR opcode (0x1d) - Arithmetic shift right operation using std.math.shr.
         /// Preserves the sign bit during shift.
         /// See: https://ziglang.org/documentation/master/std/#std.math.shr
         pub fn sar(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            std.debug.assert(self.stack.size() >= 2); // SAR requires 2 stack items
+            self.beforeInstruction(.SAR, cursor);
             const shift = self.stack.pop_unsafe(); // Top of stack - shift amount
             const value = self.stack.peek_unsafe(); // Second from top - value to shift
             const word_bits = @bitSizeOf(WordType);
@@ -125,8 +132,7 @@ pub fn Handlers(comptime FrameType: type) type {
                 break :blk @as(WordType, @bitCast(result_signed));
             };
             self.stack.set_top_unsafe(result);
-            const next_cursor = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next_cursor[0].opcode_handler, .{ self, next_cursor });
+            return next_instruction(self, cursor, .SAR);
         }
     };
 }
@@ -136,7 +142,7 @@ pub fn Handlers(comptime FrameType: type) type {
 const testing = std.testing;
 const Frame = @import("../frame/frame.zig").Frame;
 const dispatch_mod = @import("../preprocessor/dispatch.zig");
-const NoOpTracer = @import("../tracer/tracer.zig").NoOpTracer;
+const DefaultTracer = @import("../tracer/tracer.zig").DefaultTracer;
 const MemoryDatabase = @import("../storage/memory_database.zig").MemoryDatabase;
 const Address = @import("primitives").Address;
 

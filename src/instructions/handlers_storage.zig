@@ -12,15 +12,22 @@ pub fn Handlers(comptime FrameType: type) type {
         pub const Error = FrameType.Error;
         pub const Dispatch = FrameType.Dispatch;
         pub const WordType = FrameType.WordType;
+        const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
+
+        /// Continue to next instruction with afterInstruction tracking
+        pub inline fn next_instruction(self: *FrameType, cursor: [*]const Dispatch.Item, comptime opcode: Dispatch.UnifiedOpcode) Error!noreturn {
+            const op_data = dispatch_opcode_data.getOpData(opcode, Dispatch, Dispatch.Item, cursor);
+            self.afterInstruction(opcode, op_data.next_handler, op_data.next_cursor.cursor);
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+        }
 
         /// SLOAD opcode (0x54) - Load from storage.
         /// Loads value from storage slot and pushes it onto the stack.
         pub fn sload(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const dispatch = Dispatch{ .cursor = cursor };
+            self.beforeInstruction(.SLOAD, cursor);
+            self.validateOpcodeHandler(.SLOAD, cursor);
             // SLOAD loads a value from storage
-
-            std.debug.assert(self.stack.size() >= 1); // SLOAD requires 1 stack item
-            const slot = self.stack.pop_unsafe();
+            const slot = self.stack.peek_unsafe();
 
             // Use the currently executing contract's address
             const contract_addr = self.contract_address;
@@ -28,33 +35,37 @@ pub fn Handlers(comptime FrameType: type) type {
             // Access storage slot and get gas cost (cold vs warm)
             const evm = self.getEvm();
             const access_cost = evm.access_storage_slot(contract_addr, slot) catch |err| switch (err) {
-                else => return Error.AllocationError,
+                else => {
+                    self.afterComplete(.SLOAD);
+                    return Error.AllocationError;
+                },
             };
 
             // Charge gas for storage access
             // Use negative gas pattern for single-branch out-of-gas detection
             self.gas_remaining -= @intCast(access_cost);
             if (self.gas_remaining < 0) {
+                self.afterComplete(.SLOAD);
                 return Error.OutOfGas;
             }
 
-            // Load value from storage directly from frame's database
-            const value = self.database.get_storage(contract_addr.bytes, slot) catch |err| switch (err) {
-                else => return Error.AllocationError,
+            // Load value from storage through EVM's database for better cache locality
+            const value = evm.database.get_storage(contract_addr.bytes, slot) catch |err| switch (err) {
+                else => {
+                    self.afterComplete(.SLOAD);
+                    return Error.AllocationError;
+                },
             };
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
-            self.stack.push_unsafe(value);
+            self.stack.set_top_unsafe(value);
 
-            const op_data = dispatch.getOpData(.SLOAD);
-            const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            return next_instruction(self, cursor, .SLOAD);
         }
 
         /// SSTORE opcode (0x55) - Store to storage.
         /// Stores value to storage slot. Subject to gas refunds and write protection checks.
         /// EIP-214: Static calls use database that throws WriteProtection errors
         pub fn sstore(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const dispatch = Dispatch{ .cursor = cursor };
+            self.beforeInstruction(.SSTORE, cursor);
             // SSTORE stores a value to storage
 
             // EIP-214: WriteProtection is handled by database interface for static calls
@@ -64,22 +75,30 @@ pub fn Handlers(comptime FrameType: type) type {
             // - First push 0x42 (goes to stack position 0)
             // - Then push 0x00 (goes to stack position 1, becoming the top)
             // - SSTORE pops key first (0x00), then value (0x42)
-            std.debug.assert(self.stack.size() >= 2); // SSTORE requires 2 stack items
+            self.validateOpcodeHandler(.SSTORE, cursor);
             const slot = self.stack.pop_unsafe(); // Pop key/slot first (top of stack)
             const value = self.stack.pop_unsafe(); // Pop value second
 
             // Use the currently executing contract's address
             const contract_addr = self.contract_address;
 
-            // Get current value for gas calculation
-            const current_value = self.database.get_storage(contract_addr.bytes, slot) catch |err| switch (err) {
-                else => return Error.AllocationError,
+            // Get EVM instance once for all storage operations (better cache locality)
+            const evm = self.getEvm();
+
+            // Get current value for gas calculation (through EVM's database)
+            const current_value = evm.database.get_storage(contract_addr.bytes, slot) catch |err| switch (err) {
+                else => {
+                    self.afterComplete(.SSTORE);
+                    return Error.AllocationError;
+                },
             };
 
             // Access storage slot once to both warm it and get cost
-            const evm = self.getEvm();
             const access_cost = evm.access_storage_slot(contract_addr, slot) catch |err| switch (err) {
-                else => return Error.AllocationError,
+                else => {
+                    self.afterComplete(.SSTORE);
+                    return Error.AllocationError;
+                },
             };
             const is_cold = access_cost == GasConstants.ColdSloadCost;
 
@@ -90,7 +109,6 @@ pub fn Handlers(comptime FrameType: type) type {
             // Calculate SSTORE operation cost (includes cold access cost if applicable)
             const total_gas_cost: u64 = GasConstants.sstore_gas_cost(current_value, original_value, value, is_cold);
 
-
             log.debug(
                 "SSTORE metering: slot={}, original={}, current={}, new={}, is_cold={}, total={}",
                 .{ slot, original_value, current_value, value, is_cold, total_gas_cost },
@@ -99,20 +117,30 @@ pub fn Handlers(comptime FrameType: type) type {
             // Use negative gas pattern for single-branch out-of-gas detection
             self.gas_remaining -= @intCast(total_gas_cost);
             if (self.gas_remaining < 0) {
+                self.afterComplete(.SSTORE);
                 return Error.OutOfGas;
             }
 
             // Record original value for journal on first write in this transaction
             if (original_opt == null) {
                 evm.record_storage_change(contract_addr, slot, original_value) catch |err| switch (err) {
-                    else => return Error.AllocationError,
+                    else => {
+                        self.afterComplete(.SSTORE);
+                        return Error.AllocationError;
+                    },
                 };
             }
 
-            // Store the value directly in frame's database
-            self.database.set_storage(contract_addr.bytes, slot, value) catch |err| switch (err) {
-                error.WriteProtection => return Error.WriteProtection,
-                else => return Error.AllocationError,
+            // Store the value through EVM's database (better cache locality)
+            evm.database.set_storage(contract_addr.bytes, slot, value) catch |err| switch (err) {
+                error.WriteProtection => {
+                    self.afterComplete(.SSTORE);
+                    return Error.WriteProtection;
+                },
+                else => {
+                    self.afterComplete(.SSTORE);
+                    return Error.AllocationError;
+                },
             };
 
             // EIP-3529: Only clearing (non-zero -> zero) is eligible for refund
@@ -120,43 +148,42 @@ pub fn Handlers(comptime FrameType: type) type {
                 evm.add_gas_refund(GasConstants.SstoreRefundGas);
             }
 
-            const op_data = dispatch.getOpData(.SSTORE);
-            const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            return next_instruction(self, cursor, .SSTORE);
         }
 
         /// TLOAD opcode (0x5c) - Load from transient storage (EIP-1153).
         /// Loads value from transient storage slot and pushes it onto the stack.
         pub fn tload(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const dispatch = Dispatch{ .cursor = cursor };
-            std.debug.assert(self.stack.size() >= 1); // TLOAD requires 1 stack item
-            const slot = self.stack.pop_unsafe();
+            self.beforeInstruction(.TLOAD, cursor);
+            self.validateOpcodeHandler(.TLOAD, cursor);
+            const slot = self.stack.peek_unsafe();
 
             // Use the currently executing contract's address
             const contract_addr = self.contract_address;
 
-            // Load value from transient storage directly from frame's database
-            const value = self.database.get_transient_storage(contract_addr.bytes, slot) catch |err| switch (err) {
-                else => return Error.AllocationError,
+            // Load value from transient storage through EVM's database
+            const evm = self.getEvm();
+            const value = evm.database.get_transient_storage(contract_addr.bytes, slot) catch |err| switch (err) {
+                else => {
+                    self.afterComplete(.TLOAD);
+                    return Error.AllocationError;
+                },
             };
 
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // Ensure space for push
-            self.stack.push_unsafe(value);
+            self.stack.set_top_unsafe(value);
 
-            const op_data = dispatch.getOpData(.TLOAD);
-            const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            return next_instruction(self, cursor, .TLOAD);
         }
 
         /// TSTORE opcode (0x5d) - Store to transient storage (EIP-1153).
         /// Stores value to transient storage slot (cleared after transaction).
         pub fn tstore(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const dispatch = Dispatch{ .cursor = cursor };
+            self.beforeInstruction(.TSTORE, cursor);
 
             // EIP-214: WriteProtection is handled by host interface for static calls
 
             // TSTORE expects stack: [..., key, value] where key is at top
-            std.debug.assert(self.stack.size() >= 2); // TSTORE requires 2 stack items
+            self.validateOpcodeHandler(.TSTORE, cursor);
             const slot = self.stack.pop_unsafe(); // Pop key/slot first (top of stack)
             const value = self.stack.pop_unsafe(); // Pop value second
 
@@ -168,18 +195,24 @@ pub fn Handlers(comptime FrameType: type) type {
             // Use negative gas pattern for single-branch out-of-gas detection
             self.gas_remaining -= @intCast(gas_cost);
             if (self.gas_remaining < 0) {
+                self.afterComplete(.TSTORE);
                 return Error.OutOfGas;
             }
 
-            // Store the value in transient storage directly in frame's database
-            self.database.set_transient_storage(contract_addr.bytes, slot, value) catch |err| switch (err) {
-                error.WriteProtection => return Error.WriteProtection,
-                else => return Error.AllocationError,
+            // Store the value in transient storage through EVM's database
+            const evm = self.getEvm();
+            evm.database.set_transient_storage(contract_addr.bytes, slot, value) catch |err| switch (err) {
+                error.WriteProtection => {
+                    self.afterComplete(.TSTORE);
+                    return Error.WriteProtection;
+                },
+                else => {
+                    self.afterComplete(.TSTORE);
+                    return Error.AllocationError;
+                },
             };
 
-            const op_data = dispatch.getOpData(.TSTORE);
-            const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            return next_instruction(self, cursor, .TSTORE);
         }
     };
 }
@@ -189,7 +222,7 @@ pub fn Handlers(comptime FrameType: type) type {
 const testing = std.testing;
 const Frame = @import("../frame/frame.zig").Frame;
 const dispatch_mod = @import("../preprocessor/dispatch.zig");
-const NoOpTracer = @import("../tracer/tracer.zig").NoOpTracer;
+const DefaultTracer = @import("../tracer/tracer.zig").DefaultTracer;
 // const Host = @import("evm.zig").Host;
 
 // Test configuration with database enabled
@@ -264,11 +297,11 @@ const MockEvm = struct {
 };
 
 fn createTestFrame(allocator: std.mem.Allocator, evm: *MockEvm) !TestFrame {
-    const database = try @import("../storage/memory_database.zig").MemoryDatabase.init(allocator);
+    _ = @import("../storage/memory_database.zig").MemoryDatabase.init(allocator);
     const value = try allocator.create(u256);
     value.* = 0;
     const evm_ptr = @as(*anyopaque, @ptrCast(evm));
-    var frame = try TestFrame.init(allocator, 1_000_000, database, Address.ZERO_ADDRESS, value, &[_]u8{}, evm_ptr);
+    var frame = try TestFrame.init(allocator, 1_000_000, Address.ZERO_ADDRESS, value.*, &[_]u8{}, evm_ptr);
     frame.code = &[_]u8{};
     return frame;
 }

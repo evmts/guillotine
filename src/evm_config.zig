@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 // const PlannerStrategy = @import("planner_strategy.zig").PlannerStrategy;
 const FrameConfig = @import("frame/frame_config.zig").FrameConfig;
 const BlockInfoConfig = @import("frame/block_info_config.zig").BlockInfoConfig;
@@ -6,6 +7,8 @@ const Eips = @import("eips_and_hardforks/eips.zig").Eips;
 const Hardfork = @import("eips_and_hardforks/hardfork.zig").Hardfork;
 const primitives = @import("primitives");
 const Address = primitives.Address;
+const SafetyCounter = @import("internal/safety_counter.zig").SafetyCounter;
+const Mode = @import("internal/safety_counter.zig").Mode;
 
 /// Custom opcode handler override
 pub const OpcodeOverride = struct {
@@ -90,9 +93,6 @@ pub const EvmConfig = struct {
     arena_growth_factor: u32 = 150,
     /// Database implementation type for storage operations (always required)
     DatabaseType: type = @import("storage/database.zig").Database,
-    /// Tracer type for execution tracing (default: null for no tracing)
-    /// Set to a tracer type (e.g., JSONRPCTracer) to enable execution tracing
-    TracerType: ?type = null,
 
     /// Block information configuration
     /// Controls the types used for difficulty and base_fee fields
@@ -108,6 +108,18 @@ pub const EvmConfig = struct {
     /// Set to empty slice for no overrides
     precompile_overrides: []const PrecompileOverride = &.{},
 
+    /// Loop quota for safety counters to prevent infinite loops
+    /// null = disabled (default for optimized builds)
+    /// value = maximum iterations before panic (default for debug/safe builds)
+    loop_quota: ?u32 = if (builtin.mode == .Debug or builtin.mode == .ReleaseSafe) 1_000_000 else null,
+    
+    /// Enable system contract updates (EIP-4788 beacon roots, EIP-2935 historical block hashes)
+    /// When true, these contracts are updated at the start of each transaction
+    enable_beacon_roots: bool = true,
+    enable_historical_block_hashes: bool = true,
+    enable_validator_deposits: bool = true,
+    enable_validator_withdrawals: bool = true,
+
     /// Get the effective SIMD vector length for the current target
     pub fn getVectorLength(self: EvmConfig) comptime_int {
         if (self.vector_length > 0) {
@@ -116,6 +128,27 @@ pub const EvmConfig = struct {
         // Auto-detect based on target CPU
         const target = @import("builtin").target;
         return std.simd.suggestVectorLengthForCpu(u8, target.cpu) orelse 1;
+    }
+
+    /// Create a loop safety counter based on the configuration
+    /// Returns either an enabled or disabled counter depending on loop_quota
+    /// Automatically selects the smallest type that can hold the quota
+    pub fn createLoopSafetyCounter(comptime self: EvmConfig) type {
+        const mode: Mode = if (self.loop_quota != null) .enabled else .disabled;
+        const limit = self.loop_quota orelse 0;
+
+        // Choose the smallest type that can hold the limit
+        const T = if (limit <= std.math.maxInt(u8))
+            u8
+        else if (limit <= std.math.maxInt(u16))
+            u16
+        else if (limit <= std.math.maxInt(u32))
+            u32
+        else
+            u64;
+
+        const Counter = SafetyCounter(T, mode);
+        return Counter;
     }
 
     /// Computed frame configuration from the fields above
@@ -129,12 +162,12 @@ pub const EvmConfig = struct {
             .memory_initial_capacity = self.memory_initial_capacity,
             .memory_limit = self.memory_limit,
             .DatabaseType = self.DatabaseType,
-            .TracerType = self.TracerType,
             .block_info_config = self.block_info_config,
             .disable_gas_checks = self.disable_gas_checks,
             .disable_balance_checks = self.disable_balance_checks,
             .disable_fusion = self.disable_fusion,
             .vector_length = self.getVectorLength(),
+            .loop_quota = self.loop_quota,
         };
     }
 
@@ -163,6 +196,60 @@ pub const EvmConfig = struct {
             // .planner_strategy = .minimal,
         };
     }
+
+    /// Generate configuration from build options
+    pub fn fromBuildOptions() EvmConfig {
+        const build_options = @import("build_options");
+        const optimize_str = build_options.optimize_strategy;
+        
+        // Base configuration from optimization strategy
+        var config = if (std.mem.eql(u8, optimize_str, "fast"))
+            EvmConfig.optimizeFast()
+        else if (std.mem.eql(u8, optimize_str, "small"))
+            EvmConfig.optimizeSmall()
+        else
+            EvmConfig{}; // safe/default
+        
+        // Apply build options
+        config.eips = Eips{ .hardfork = getHardforkFromString(build_options.hardfork) };
+        config.max_call_depth = build_options.max_call_depth;
+        config.stack_size = build_options.stack_size;
+        config.max_bytecode_size = build_options.max_bytecode_size;
+        config.max_initcode_size = build_options.max_initcode_size;
+        config.block_gas_limit = build_options.block_gas_limit;
+        config.memory_initial_capacity = build_options.memory_initial_capacity;
+        config.memory_limit = build_options.memory_limit;
+        config.arena_capacity_limit = build_options.arena_capacity_limit;
+        config.enable_fusion = build_options.enable_fusion and !build_options.disable_fusion;
+        config.enable_precompiles = !build_options.no_precompiles;
+        config.disable_gas_checks = build_options.disable_gas_checks;
+        config.disable_balance_checks = build_options.disable_balance_checks;
+        config.disable_fusion = build_options.disable_fusion;
+        
+        // Set tracer if enabled
+        if (build_options.enable_tracing) {
+            // For now, we'll leave TracerType as null since it requires more complex setup
+            // Users can still set up their own tracer through the configuration
+            // Tracer is now part of EVM struct, not config
+        }
+        
+        return config;
+    }
+
+    /// Get the hardfork enum from a string
+    fn getHardforkFromString(hardfork_str: []const u8) Hardfork {
+        if (std.mem.eql(u8, hardfork_str, "FRONTIER")) return .FRONTIER;
+        if (std.mem.eql(u8, hardfork_str, "HOMESTEAD")) return .HOMESTEAD;
+        if (std.mem.eql(u8, hardfork_str, "BYZANTIUM")) return .BYZANTIUM;
+        if (std.mem.eql(u8, hardfork_str, "ISTANBUL")) return .ISTANBUL;
+        if (std.mem.eql(u8, hardfork_str, "BERLIN")) return .BERLIN;
+        if (std.mem.eql(u8, hardfork_str, "LONDON")) return .LONDON;
+        if (std.mem.eql(u8, hardfork_str, "SHANGHAI")) return .SHANGHAI;
+        if (std.mem.eql(u8, hardfork_str, "CANCUN")) return .CANCUN;
+        
+        // Default to CANCUN if unknown
+        return .CANCUN;
+    }
 };
 
 // =============================================================================
@@ -181,7 +268,7 @@ test "EvmConfig - default initialization" {
     try testing.expectEqual(true, config.enable_fusion);
     try testing.expectEqual(false, config.disable_gas_checks);
     try testing.expectEqual(false, config.disable_balance_checks);
-    try testing.expectEqual(@as(?type, null), config.TracerType);
+    // TracerType is now part of EVM struct, not EvmConfig
 }
 
 test "EvmConfig - custom configuration" {
@@ -308,16 +395,18 @@ test "EvmConfig - precompiles and fusion combinations" {
 }
 
 test "EvmConfig - tracer type handling" {
-    const no_tracer_config = EvmConfig{};
-    try testing.expectEqual(@as(?type, null), no_tracer_config.TracerType);
+    _ = EvmConfig{};
+    // TracerType is now part of EVM struct, not EvmConfig
 
     // Test with a dummy tracer type
     const DummyTracer = struct {
         pub fn trace(_: @This()) void {}
     };
 
-    const with_tracer_config = EvmConfig{ .TracerType = DummyTracer };
-    try testing.expectEqual(DummyTracer, with_tracer_config.TracerType.?);
+    const with_tracer_config = EvmConfig{};
+    // TracerType is now part of EVM struct, not EvmConfig
+    _ = with_tracer_config;
+    _ = DummyTracer;
 }
 
 test "EvmConfig - block info config integration" {
@@ -328,15 +417,12 @@ test "EvmConfig - block info config integration" {
 }
 
 test "EvmConfig - complete custom configuration" {
-    const DummyTracer = struct {};
-
     const config = EvmConfig{
         .eips = Eips{ .hardfork = Hardfork.ISTANBUL },
         .max_call_depth = 2000,
         .max_input_size = 200000,
         .enable_precompiles = false,
         .enable_fusion = false,
-        .TracerType = DummyTracer,
     };
 
     try testing.expectEqual(Hardfork.ISTANBUL, config.eips.hardfork);
@@ -344,7 +430,6 @@ test "EvmConfig - complete custom configuration" {
     try testing.expectEqual(@as(u18, 200000), config.max_input_size);
     try testing.expectEqual(false, config.enable_precompiles);
     try testing.expectEqual(false, config.enable_fusion);
-    try testing.expectEqual(DummyTracer, config.TracerType.?);
     try testing.expectEqual(u11, config.get_depth_type());
 }
 

@@ -617,16 +617,17 @@ pub fn build_bytecode(allocator: std.mem.Allocator, opcode: u8) ![]u8 {
             try helpers.ret_top32(allocator, &buf);
         },
         0xf1 => { // CALL
-            // Call self with no data
+            // Call address 0x0 (which should be empty) with no data
+            // This will succeed but do nothing, returning 1 for success
             try helpers.push_u8(allocator, &buf, 0x00); // retLength
             try helpers.push_u8(allocator, &buf, 0x00); // retOffset
             try helpers.push_u8(allocator, &buf, 0x00); // argsLength
             try helpers.push_u8(allocator, &buf, 0x00); // argsOffset
             try helpers.push_u8(allocator, &buf, 0x00); // value
-            try buf.append(allocator, 0x30); // ADDRESS
+            try helpers.push_u8(allocator, &buf, 0x00); // address (0x0 - empty account)
             try helpers.push_u16(allocator, &buf, 0x2710); // gas 10000
-            try buf.append(allocator, 0xf1);
-            try helpers.ret_top32(allocator, &buf);
+            try buf.append(allocator, 0xf1); // CALL
+            try helpers.ret_top32(allocator, &buf); // Return the result (1 for success)
         },
         0xf2 => { // CALLCODE
             try helpers.push_u8(allocator, &buf, 0x00); // retLength

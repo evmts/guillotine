@@ -3,7 +3,7 @@ const log = @import("../log.zig");
 const zbench = @import("zbench");
 const evm_mod = @import("evm");
 const primitives = @import("primitives");
-const revm = @import("revm");
+// MinimalEvm is now used for differential testing instead of revm
 const crypto = @import("crypto");
 
 const Stack = evm_mod.Stack;
@@ -45,8 +45,9 @@ pub fn bench(b: *zbench.Benchmark) !void {
     // try b.add("EVM: Large Stack (10 values)", bench_evm_large_stack, .{});
     
     // REVM Comparison Benchmarks
-    try b.add("REVM: Push/Pop 100 values", bench_revm_push_pop, .{});
-    try b.add("REVM: Large Stack (10 values)", bench_revm_large_stack, .{});
+    // MinimalEvm benchmarks can be added here if needed
+    // try b.add("MinimalEvm: Push/Pop 100 values", bench_minimal_push_pop, .{});
+    // try b.add("MinimalEvm: Large Stack (10 values)", bench_minimal_large_stack, .{});
 }
 
 // ============================================================================
@@ -496,9 +497,14 @@ fn bench_evm_large_stack(allocator: std.mem.Allocator) void {
 }
 
 // ============================================================================
-// REVM Comparison Benchmarks
+// MinimalEvm Comparison Benchmarks (commented out - revm no longer used)
 // ============================================================================
 
+// MinimalEvm benchmarks can be added here if needed
+// fn bench_minimal_push_pop(allocator: std.mem.Allocator) void {
+
+// Original revm benchmark code (kept for reference but commented out):
+/*
 fn bench_revm_push_pop(allocator: std.mem.Allocator) void {
     // Generate bytecode
     const bytecode = generatePushPopBytecode(allocator) catch |err| {
@@ -538,7 +544,10 @@ fn bench_revm_push_pop(allocator: std.mem.Allocator) void {
     };
     defer result.deinit();
 }
+*/
 
+// Commented out second revm benchmark
+/*
 fn bench_revm_large_stack(allocator: std.mem.Allocator) void {
     // Generate bytecode
     const bytecode = generateLargeStackBytecode(allocator) catch |err| {
@@ -578,6 +587,7 @@ fn bench_revm_large_stack(allocator: std.mem.Allocator) void {
     };
     defer result.deinit();
 }
+*/
 
 // ============================================================================
 // Tests

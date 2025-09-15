@@ -106,6 +106,38 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
             is_inline: bool, // true if <= 8 bytes (can inline)
         };
 
+        // Basic block information for gas calculation
+        pub const BasicBlock = struct {
+            start: PcType,
+            end: PcType,
+            gas_cost: u32 = 0, // Total static gas cost for the block
+        };
+
+        // Fusion information for bytecode analysis
+        pub const FusionInfo = union(enum) {
+            constant_fold: struct {
+                value: u256,
+                original_length: PcType,
+            },
+            multi_push: struct {
+                values: [3]u256,
+                count: u8,
+                original_length: PcType,
+            },
+            multi_pop: struct {
+                count: u8,
+                original_length: PcType,
+            },
+            iszero_jumpi: struct {
+                target: u256,
+                original_length: PcType,
+            },
+            dup2_mstore_push: struct {
+                push_value: u256,
+                original_length: PcType,
+            },
+        };
+
         // Iterator for efficient bytecode traversal
         pub const Iterator = struct {
             bytecode: *const Self,
@@ -123,9 +155,21 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
                 }
                 const packed_bits = iterator.bytecode.packed_bitmap[iterator.pc];
 
+                // Debug logging for observability
+                log.debug("Iterator.next: PC={d}, opcode=0x{x:0>2}, packed_bits={{push_data={}, op_start={}, jumpdest={}, fusion={}}}", .{
+                    iterator.pc,
+                    opcode,
+                    packed_bits.is_push_data,
+                    packed_bits.is_op_start,
+                    packed_bits.is_jumpdest,
+                    packed_bits.is_fusion_candidate,
+                });
+
                 // Handle fusion opcodes first (only if fusions are enabled)
                 if (fusions_enabled and packed_bits.is_fusion_candidate) {
+                    log.debug("  Checking for fusion at PC={d}", .{iterator.pc});
                     const fusion_data = iterator.bytecode.getFusionData(iterator.pc);
+                    log.debug("  Fusion detected: {any}", .{fusion_data});
                     // Advance PC properly for fusion opcodes
                     switch (fusion_data) {
                         // 2-opcode fusions: PUSH + op
@@ -148,6 +192,31 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
                         },
                         .dup2_mstore_push => |dmp| {
                             iterator.pc += dmp.original_length;
+                        },
+                        // New high-impact fusions
+                        .dup3_add_mstore => |dam| {
+                            iterator.pc += dam.original_length;
+                        },
+                        .swap1_dup2_add => |sda| {
+                            iterator.pc += sda.original_length;
+                        },
+                        .push_dup3_add => |pda| {
+                            iterator.pc += pda.original_length;
+                        },
+                        .function_dispatch => |fd| {
+                            iterator.pc += fd.original_length;
+                        },
+                        .callvalue_check => |cc| {
+                            iterator.pc += cc.original_length;
+                        },
+                        .push0_revert => |pr| {
+                            iterator.pc += pr.original_length;
+                        },
+                        .push_add_dup1 => |pad| {
+                            iterator.pc += pad.original_length;
+                        },
+                        .mload_swap1_dup2 => |msd| {
+                            iterator.pc += msd.original_length;
                         },
                         .push => |push_data| {
                             iterator.pc += 1 + push_data.size;
@@ -177,8 +246,22 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
                         return OpcodeData{ .push = .{ .value = value, .size = push_size } };
                     },
                     0x5B => { // JUMPDEST
+                        const block_gas = iterator.calculateBlockGasAtJumpdest();
                         iterator.pc += 1;
-                        return OpcodeData{ .jumpdest = .{ .gas_cost = 1 } };
+                        return OpcodeData{ .jumpdest = .{ .gas_cost = @intCast(block_gas) } };
+                    },
+                    0x56 => { // JUMP - Dynamic jump (not fused)
+                        iterator.pc += 1;
+                        return OpcodeData{ .jump = {} };
+                    },
+                    0x57 => { // JUMPI - Dynamic jump (not fused)
+                        iterator.pc += 1;
+                        return OpcodeData{ .jumpi = {} };
+                    },
+                    0x58 => { // PC
+                        const current_pc = iterator.pc;
+                        iterator.pc += 1;
+                        return OpcodeData{ .pc = .{ .value = current_pc } };
                     },
                     0x00 => { // STOP
                         iterator.pc += 1;
@@ -194,6 +277,45 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
                     },
                 }
             }
+            
+            // Calculate gas cost for the block starting at current JUMPDEST
+            pub fn calculateBlockGasAtJumpdest(iterator: *Iterator) u32 {
+                const opcode_info = @import("../opcodes/opcode_data.zig").OPCODE_INFO;
+                var gas: u32 = 1; // JUMPDEST itself costs 1 gas
+                var pc = iterator.pc + 1; // Start after the JUMPDEST
+                var loop_counter = cfg.createLoopSafetyCounter().init(cfg.loop_quota orelse 0);
+
+                while (pc < iterator.bytecode.len()) {
+                    loop_counter.inc();
+                    const opcode = iterator.bytecode.get_unsafe(pc);
+                    
+                    // Check for block terminators
+                    switch (opcode) {
+                        0x5B, // Another JUMPDEST - end of block
+                        0x00, // STOP
+                        0x56, // JUMP  
+                        0x57, // JUMPI
+                        0xF3, // RETURN
+                        0xFD, // REVERT
+                        0xFE, // INVALID
+                        0xFF  // SELFDESTRUCT
+                        => {
+                            return gas;
+                        },
+                        0x60...0x7F => { // PUSH1-PUSH32
+                            gas += opcode_info[opcode].gas_cost;
+                            const push_size = opcode - 0x5F;
+                            pc += 1 + push_size;
+                        },
+                        else => {
+                            gas += opcode_info[opcode].gas_cost;
+                            pc += 1;
+                        },
+                    }
+                }
+                
+                return gas;
+            }
         };
 
         // Tagged union for opcode data returned by iterator
@@ -201,6 +323,9 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
             regular: struct { opcode: u8 },
             push: struct { value: u256, size: u8 },
             jumpdest: struct { gas_cost: u16 },
+            jump: void,  // Dynamic JUMP (not fused)
+            jumpi: void,  // Dynamic JUMPI (not fused)
+            pc: struct { value: PcType },  // PC opcode with current PC value
             push_add_fusion: struct { value: u256 },
             push_mul_fusion: struct { value: u256 },
             push_sub_fusion: struct { value: u256 },
@@ -218,6 +343,15 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
             multi_pop: struct { count: u8, original_length: u8 },
             iszero_jumpi: struct { target: u256, original_length: u8 },
             dup2_mstore_push: struct { push_value: u256, original_length: u8 },
+            // New high-impact fusions
+            dup3_add_mstore: struct { original_length: u8 },
+            swap1_dup2_add: struct { original_length: u8 },
+            push_dup3_add: struct { value: u256, original_length: u8 },
+            function_dispatch: struct { selector: u32, target: u256, original_length: u8 },
+            callvalue_check: struct { original_length: u8 },
+            push0_revert: struct { original_length: u8 },
+            push_add_dup1: struct { value: u256, original_length: u8 },
+            mload_swap1_dup2: struct { original_length: u8 },
             stop: void,
             invalid: void,
         };
@@ -231,41 +365,52 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
         packed_bitmap: []PackedBits,
 
         pub fn init(allocator: std.mem.Allocator, code: []const u8) ValidationError!Self {
+            return initWithTracer(allocator, code, null);
+        }
+
+        pub fn initWithTracer(allocator: std.mem.Allocator, code: []const u8, tracer: anytype) ValidationError!Self {
+            // Notify tracer of analysis start
+            if (tracer) |t| {
+                t.onBytecodeAnalysisStart(code.len);
+            }
+
             // Enforce EIP-170: maximum runtime bytecode size
             if (code.len > cfg.max_bytecode_size) {
                 return error.BytecodeTooLarge;
             }
 
-            // Detect and strip Solidity metadata from the end of bytecode
-            // Metadata format: 0xa2 0x64 "ipfs" <hash> ... or 0xa1 0x65 "bzzr0" <hash> ...
-            // The metadata is CBOR encoded and starts with 0xa2 (map with 2 entries) or 0xa1 (map with 1 entry)
+            // Validate bytecode length fits in PcType (required for len() method)
+            if (tracer) |t| {
+                t.assert(code.len <= std.math.maxInt(PcType), "Bytecode length must fit in PcType");
+            }
+
+            // Detect and strip Solidity metadata from the end of bytecode.
+            // Per the Solidity specification, metadata is appended to the bytecode.
+            // The last two bytes of the contract's raw bytecode form a big-endian
+            // integer that specifies the length of the CBOR-encoded metadata section.
+            // This allows for efficient O(1) retrieval of the metadata without scanning.
             var runtime_code = code;
-            if (code.len >= 2) {
-                // Look for metadata marker near the end
-                // Typical metadata is 50-60 bytes, but can vary
-                const search_start = if (code.len > 100) code.len - 100 else 0;
-                var i = search_start;
-                while (i < code.len - 1) : (i += 1) {
-                    // Check for CBOR metadata markers
-                    if ((code[i] == 0xa2 or code[i] == 0xa1) and i + 10 < code.len) {
-                        // Check for "ipfs" or "bzzr" following the marker
-                        if ((code[i] == 0xa2 and i + 5 < code.len and
-                            code[i + 1] == 0x64 and // string of length 4
-                            code[i + 2] == 0x69 and // 'i'
-                            code[i + 3] == 0x70 and // 'p'
-                            code[i + 4] == 0x66 and // 'f'
-                            code[i + 5] == 0x73) or // 's'
-                            (code[i] == 0xa1 and i + 6 < code.len and
-                                code[i + 1] == 0x65 and // string of length 5
-                                code[i + 2] == 0x62 and // 'b'
-                                code[i + 3] == 0x7a and // 'z'
-                                code[i + 4] == 0x7a and // 'z'
-                                code[i + 5] == 0x72)) // 'r'
+            if (code.len >= 4) { // Minimal length for metadata to be present.
+                const metadata_len = std.mem.readInt(u16, code[code.len - 2 ..][0..2], .big);
+
+                if (metadata_len > 0 and metadata_len + 2 <= code.len) {
+                    const metadata_start_idx = code.len - metadata_len - 2;
+                    const metadata_slice = code[metadata_start_idx .. code.len - 2];
+
+                    // A valid metadata block is a CBOR map. We check for common Solidity patterns for robustness.
+                    if (metadata_slice.len > 6) {
+                        const ipfs_pattern = &.{ 0xa2, 0x64, 'i', 'p', 'f', 's' };
+                        const bzzr0_pattern = &.{ 0xa1, 0x65, 'b', 'z', 'z', 'r', '0' };
+                        const bzzr1_pattern = &.{ 0xa1, 0x65, 'b', 'z', 'z', 'r', '1' };
+
+                        if (std.mem.startsWith(u8, metadata_slice, ipfs_pattern) or
+                            std.mem.startsWith(u8, metadata_slice, bzzr0_pattern) or
+                            std.mem.startsWith(u8, metadata_slice, bzzr1_pattern))
                         {
-                            // Found metadata, trim the bytecode here
-                            runtime_code = code[0..i];
-                            log.debug("Detected Solidity metadata at position {}, trimming bytecode from {} to {} bytes", .{ i, code.len, runtime_code.len });
-                            break;
+                            runtime_code = code[0..metadata_start_idx];
+                            if (tracer) |t| {
+                                t.debug("Detected Solidity metadata, trimming bytecode from {} to {} bytes", .{ code.len, runtime_code.len });
+                            }
                         }
                     }
                 }
@@ -278,9 +423,19 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
                 .packed_bitmap = &.{},
             };
             // Build bitmaps and validate only the runtime code
-            try self.buildBitmapsAndValidateWithLength(runtime_code.len);
+            try self.buildBitmapsAndValidateWithTracer(runtime_code.len, tracer);
+
+            // Notify tracer of analysis completion if not already done
+            if (tracer) |t| {
+                if (runtime_code.len == 0) {
+                    // For empty bytecode, notify completion with zero counts
+                    t.onBytecodeAnalysisComplete(0, 0, 0);
+                }
+            }
+
             return self;
         }
+
 
         /// Calculate the gas cost for initcode (EIP-3860)
         /// Returns 2 gas per 32-byte word of initcode
@@ -423,20 +578,228 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
             }};
         }
         
+        // New high-impact pattern detection functions
+        fn checkDup3AddMstorePattern(self: *const Self, pc: PcType) ?OpcodeData {
+            if (pc + 3 > self.len()) return null;
+            
+            // Check for DUP3 + ADD + MSTORE
+            if (self.get_unsafe(pc) != 0x82) return null;     // DUP3
+            if (self.get_unsafe(pc + 1) != 0x01) return null; // ADD
+            if (self.get_unsafe(pc + 2) != 0x52) return null; // MSTORE
+            
+            return OpcodeData{ .dup3_add_mstore = .{ .original_length = 3 }};
+        }
+        
+        fn checkSwap1Dup2AddPattern(self: *const Self, pc: PcType) ?OpcodeData {
+            if (pc + 3 > self.len()) return null;
+            
+            // Check for SWAP1 + DUP2 + ADD
+            if (self.get_unsafe(pc) != 0x90) return null;     // SWAP1
+            if (self.get_unsafe(pc + 1) != 0x81) return null; // DUP2
+            if (self.get_unsafe(pc + 2) != 0x01) return null; // ADD
+            
+            return OpcodeData{ .swap1_dup2_add = .{ .original_length = 3 }};
+        }
+        
+        fn checkPushDup3AddPattern(self: *const Self, pc: PcType) ?OpcodeData {
+            if (pc + 3 >= self.len()) return null;
+            
+            // Check for PUSH + DUP3 + ADD
+            const push_op = self.get_unsafe(pc);
+            if (push_op < 0x5F or push_op > 0x7F) return null; // PUSH0-PUSH32
+            
+            const push_size = if (push_op == 0x5F) 0 else push_op - 0x5F;
+            const dup3_pc = pc + 1 + push_size;
+            
+            if (dup3_pc + 2 > self.len()) return null;
+            if (self.get_unsafe(dup3_pc) != 0x82) return null;     // DUP3
+            if (self.get_unsafe(dup3_pc + 1) != 0x01) return null; // ADD
+            
+            // Extract push value
+            var value: u256 = 0;
+            if (push_op != 0x5F) { // Not PUSH0
+                const end = @min(pc + 1 + push_size, self.len());
+                for (pc + 1..end) |i| {
+                    value = std.math.shl(u256, value, 8) | self.get_unsafe(@intCast(i));
+                }
+            }
+            
+            return OpcodeData{ .push_dup3_add = .{ 
+                .value = value,
+                .original_length = @intCast(1 + push_size + 2)
+            }};
+        }
+        
+        fn checkFunctionDispatchPattern(self: *const Self, pc: PcType) ?OpcodeData {
+            if (pc + 8 >= self.len()) return null;
+            
+            // Check for PUSH4 + EQ + PUSH + JUMPI (function selector pattern)
+            if (self.get_unsafe(pc) != 0x63) return null; // PUSH4
+            
+            // Extract selector (4 bytes)
+            var selector: u32 = 0;
+            for (pc + 1..pc + 5) |i| {
+                selector = std.math.shl(u32, selector, 8) | @as(u32, self.get_unsafe(@intCast(i)));
+            }
+            
+            if (self.get_unsafe(pc + 5) != 0x14) return null; // EQ
+            
+            // Check for PUSH after EQ
+            const push_pc = pc + 6;
+            const push_op = self.get_unsafe(push_pc);
+            if (push_op < 0x60 or push_op > 0x62) return null; // PUSH1 or PUSH2 typically
+            
+            const push_size = push_op - 0x5F;
+            
+            // Extract jump target
+            var target: u256 = 0;
+            const end = @min(push_pc + 1 + push_size, self.len());
+            for (push_pc + 1..end) |i| {
+                target = std.math.shl(u256, target, 8) | self.get_unsafe(@intCast(i));
+            }
+            
+            const jumpi_pc = push_pc + 1 + push_size;
+            if (jumpi_pc >= self.len() or self.get_unsafe(jumpi_pc) != 0x57) return null; // JUMPI
+            
+            return OpcodeData{ .function_dispatch = .{
+                .selector = selector,
+                .target = target,
+                .original_length = @intCast(8 + push_size)
+            }};
+        }
+        
+        fn checkCallvalueCheckPattern(self: *const Self, pc: PcType) ?OpcodeData {
+            if (pc + 3 > self.len()) return null;
+            
+            // Check for CALLVALUE + DUP1 + ISZERO
+            if (self.get_unsafe(pc) != 0x34) return null;     // CALLVALUE
+            if (self.get_unsafe(pc + 1) != 0x80) return null; // DUP1
+            if (self.get_unsafe(pc + 2) != 0x15) return null; // ISZERO
+            
+            return OpcodeData{ .callvalue_check = .{ .original_length = 3 }};
+        }
+        
+        fn checkPush0RevertPattern(self: *const Self, pc: PcType) ?OpcodeData {
+            if (pc + 3 > self.len()) return null;
+            
+            // Check for PUSH0 + PUSH0 + REVERT
+            if (self.get_unsafe(pc) != 0x5F) return null;     // PUSH0
+            if (self.get_unsafe(pc + 1) != 0x5F) return null; // PUSH0
+            if (self.get_unsafe(pc + 2) != 0xFD) return null; // REVERT
+            
+            return OpcodeData{ .push0_revert = .{ .original_length = 3 }};
+        }
+        
+        fn checkPushAddDup1Pattern(self: *const Self, pc: PcType) ?OpcodeData {
+            if (pc + 3 >= self.len()) return null;
+            
+            // Check for PUSH + ADD + DUP1
+            const push_op = self.get_unsafe(pc);
+            if (push_op < 0x5F or push_op > 0x7F) return null; // PUSH0-PUSH32
+            
+            const push_size = if (push_op == 0x5F) 0 else push_op - 0x5F;
+            const add_pc = pc + 1 + push_size;
+            
+            if (add_pc + 2 > self.len()) return null;
+            if (self.get_unsafe(add_pc) != 0x01) return null;     // ADD
+            if (self.get_unsafe(add_pc + 1) != 0x80) return null; // DUP1
+            
+            // Extract push value
+            var value: u256 = 0;
+            if (push_op != 0x5F) { // Not PUSH0
+                const end = @min(pc + 1 + push_size, self.len());
+                for (pc + 1..end) |i| {
+                    value = std.math.shl(u256, value, 8) | self.get_unsafe(@intCast(i));
+                }
+            }
+            
+            return OpcodeData{ .push_add_dup1 = .{ 
+                .value = value,
+                .original_length = @intCast(1 + push_size + 2)
+            }};
+        }
+        
+        fn checkMloadSwap1Dup2Pattern(self: *const Self, pc: PcType) ?OpcodeData {
+            if (pc + 3 > self.len()) return null;
+            
+            // Check for MLOAD + SWAP1 + DUP2
+            if (self.get_unsafe(pc) != 0x51) return null;     // MLOAD
+            if (self.get_unsafe(pc + 1) != 0x90) return null; // SWAP1
+            if (self.get_unsafe(pc + 2) != 0x81) return null; // DUP2
+            
+            return OpcodeData{ .mload_swap1_dup2 = .{ .original_length = 3 }};
+        }
+        
         /// Get fusion data for a bytecode position marked as fusion candidate
         /// This method checks for advanced patterns first (in priority order)
         pub fn getFusionData(self: *const Self, pc: PcType) OpcodeData {
-            if (pc >= self.len()) return OpcodeData{ .regular = .{ .opcode = 0x00 } }; // STOP fallback
+            log.debug("getFusionData called at PC={d}", .{pc});
+            if (pc >= self.len()) {
+                log.debug("  PC out of bounds, returning STOP", .{});
+                return OpcodeData{ .regular = .{ .opcode = 0x00 } }; // STOP fallback
+            }
+
+            // Log what opcodes we're looking at for fusion
+            const opcode = self.get_unsafe(pc);
+            log.debug("  Checking fusion for opcode 0x{x:0>2} at PC={d}", .{opcode, pc});
+
+            // Special debug for PC=0
+            if (pc == 0) {
+                log.debug("    Debug PC=0: Bytecode[0]=0x{x:0>2} (PUSH0=0x5f)", .{opcode});
+                if (self.runtime_code.len > 1) {
+                    log.debug("    Debug PC=1: Bytecode[1]=0x{x:0>2}", .{self.get_unsafe(1)});
+                }
+                if (self.runtime_code.len > 2) {
+                    log.debug("    Debug PC=2: Bytecode[2]=0x{x:0>2}", .{self.get_unsafe(2)});
+                }
+            }
 
             // Check advanced fusion patterns in priority order (longest first)
+
+            // Check function dispatch pattern first (can be 8+ bytes)
+            if (self.checkFunctionDispatchPattern(pc)) |fusion| {
+                log.debug("  Found FUNCTION_DISPATCH fusion", .{});
+                return fusion;
+            }
             
             // 1. Check for ISZERO-JUMPI pattern (highest priority) (variable length)
             if (self.checkIszeroJumpiPattern(pc)) |fusion| {
                 return fusion;
             }
             
+            // Check PUSH + DUP3 + ADD pattern
+            if (self.checkPushDup3AddPattern(pc)) |fusion| {
+                return fusion;
+            }
+            
+            // Check PUSH + ADD + DUP1 pattern
+            if (self.checkPushAddDup1Pattern(pc)) |fusion| {
+                return fusion;
+            }
+            
             // 3. Check for DUP2-MSTORE-PUSH pattern (variable length)
             if (self.checkDup2MstorePushPattern(pc)) |fusion| {
+                return fusion;
+            }
+            
+            // Check new 3-opcode patterns
+            if (self.checkDup3AddMstorePattern(pc)) |fusion| {
+                return fusion;
+            }
+            
+            if (self.checkSwap1Dup2AddPattern(pc)) |fusion| {
+                return fusion;
+            }
+            
+            if (self.checkCallvalueCheckPattern(pc)) |fusion| {
+                return fusion;
+            }
+            
+            if (self.checkPush0RevertPattern(pc)) |fusion| {
+                return fusion;
+            }
+            
+            if (self.checkMloadSwap1Dup2Pattern(pc)) |fusion| {
                 return fusion;
             }
             
@@ -461,9 +824,11 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
             }
 
             const first_op = self.get_unsafe(pc);
+            log.debug("  First opcode at PC={d}: 0x{x:0>2} (PUSH range: 0x60-0x7F, PUSH0=0x5F)", .{pc, first_op});
 
             // Check for existing 2-opcode fusions (PUSH + op)
             if (first_op >= 0x60 and first_op <= 0x7F) { // PUSH opcode
+                log.debug("  Checking PUSH fusion: PUSH{d} at PC={d}", .{first_op - 0x5F, pc});
                 const push_size = first_op - 0x5F;
                 var value: u256 = 0;
                 const end_pc = @min(pc + 1 + push_size, self.len());
@@ -474,10 +839,14 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
                 // The second opcode comes AFTER the push data
                 const second_op_pc = pc + 1 + push_size;
                 const second_op = if (second_op_pc < self.len()) self.get_unsafe(second_op_pc) else 0x00;
+                log.debug("    Second opcode at PC={d}: 0x{x:0>2}", .{second_op_pc, second_op});
 
                 // Return appropriate fusion type based on second opcode
                 switch (second_op) {
-                    0x01 => return OpcodeData{ .push_add_fusion = .{ .value = value } }, // ADD
+                    0x01 => {
+                        log.debug("    FUSION: PUSH_ADD_FUSION", .{});
+                        return OpcodeData{ .push_add_fusion = .{ .value = value } };
+                    },
                     0x02 => return OpcodeData{ .push_mul_fusion = .{ .value = value } }, // MUL
                     0x03 => return OpcodeData{ .push_sub_fusion = .{ .value = value } }, // SUB
                     0x04 => return OpcodeData{ .push_div_fusion = .{ .value = value } }, // DIV
@@ -485,7 +854,10 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
                     0x17 => return OpcodeData{ .push_or_fusion = .{ .value = value } }, // OR
                     0x18 => return OpcodeData{ .push_xor_fusion = .{ .value = value } }, // XOR
                     0x51 => return OpcodeData{ .push_mload_fusion = .{ .value = value } }, // MLOAD
-                    0x52 => return OpcodeData{ .push_mstore_fusion = .{ .value = value } }, // MSTORE
+                    0x52 => {
+                        log.debug("    FUSION: PUSH_MSTORE_FUSION with value={d}", .{value});
+                        return OpcodeData{ .push_mstore_fusion = .{ .value = value } };
+                    },
                     0x53 => return OpcodeData{ .push_mstore8_fusion = .{ .value = value } }, // MSTORE8
                     0x56 => return OpcodeData{ .push_jump_fusion = .{ .value = value } }, // JUMP
                     0x57 => return OpcodeData{ .push_jumpi_fusion = .{ .value = value } }, // JUMPI
@@ -495,15 +867,16 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
                     },
                 }
             }
-            
+
             // No fusion pattern detected, return regular opcode
+            log.debug("  No fusion detected for opcode 0x{x:0>2}, returning regular", .{first_op});
             return OpcodeData{ .regular = .{ .opcode = first_op } };
         }
 
         /// Get the length of the bytecode
         pub inline fn len(self: Self) PcType {
             // Guaranteed by config that runtime_code.len fits in PcType
-            std.debug.assert(self.runtime_code.len <= std.math.maxInt(PcType));
+            // This is validated during init(), so this should always be true
             return @intCast(self.runtime_code.len);
         }
 
@@ -576,12 +949,20 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
 
         /// Build bitmaps and validate bytecode in a single pass
         fn buildBitmapsAndValidate(self: *Self) ValidationError!void {
-            return self.buildBitmapsAndValidateWithLength(self.runtime_code.len);
+            return self.buildBitmapsAndValidateWithTracer(self.runtime_code.len, null);
+        }
+
+        fn buildBitmapsAndValidateWithTracer(self: *Self, validation_length: usize, tracer: anytype) ValidationError!void {
+            return self.buildBitmapsAndValidateWithLengthAndTracer(validation_length, tracer);
         }
 
         /// Build bitmaps and validate bytecode with a specific validation length
         /// This allows validating only the code portion of deployment bytecode, excluding metadata
         fn buildBitmapsAndValidateWithLength(self: *Self, validation_length: usize) ValidationError!void {
+            return self.buildBitmapsAndValidateWithLengthAndTracer(validation_length, null);
+        }
+
+        fn buildBitmapsAndValidateWithLengthAndTracer(self: *Self, validation_length: usize, tracer: anytype) ValidationError!void {
             const N = self.runtime_code.len;
             const validate_up_to = @min(validation_length, N);
 
@@ -619,6 +1000,8 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
             var immediate_jumps = std.ArrayList(PcType){};
             defer immediate_jumps.deinit(self.allocator);
 
+            var opcode_count: usize = 0;
+            var jumpdest_count: usize = 0;
             var i: PcType = 0;
             while (i < validate_up_to) {
                 @branchHint(.likely);
@@ -641,12 +1024,22 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
                 const opcode_enum = std.meta.intToEnum(Opcode, op) catch blk: {
                     // Undefined opcodes are valid in EVM - they execute as INVALID operation
                     // which consumes all gas and reverts. We'll treat them as INVALID (0xFE)
+                    if (tracer) |t| {
+                        t.onInvalidOpcode(@intCast(i), op);
+                    }
                     break :blk Opcode.INVALID;
                 };
+                opcode_count += 1;
 
                 // Check if it's a JUMPDEST (and not push data)
                 if (op == @intFromEnum(Opcode.JUMPDEST)) {
                     self.packed_bitmap[i].is_jumpdest = true;
+                    jumpdest_count += 1;
+                    if (tracer) |t| {
+                        // Calculate gas cost for this JUMPDEST's basic block
+                        // (simplified for now - actual gas calculation happens during schedule build)
+                        t.onJumpdestFound(@intCast(i), 1);
+                    }
                 }
 
                 // Check for fusion candidates if enabled
@@ -666,6 +1059,7 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
                             };
 
                             if (is_fusable) {
+                                log.debug("Marking PC={d} as fusion candidate (PUSH{d} + 0x{x:0>2})", .{i, push_size, next_op});
                                 self.packed_bitmap[i].is_fusion_candidate = true;
                             }
                         }
@@ -683,7 +1077,12 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
                     // This means i+n must be less than the validation length
                     // PUSH32 at position 0 needs to read bytes 1-32, so position 32 must be valid
                     // Therefore i+1+n must be <= validate_up_to, or i+n < validate_up_to
-                    if (i + 1 + n > validate_up_to) return error.TruncatedPush;
+                    if (i + 1 + n > validate_up_to) {
+                        if (tracer) |t| {
+                            t.onTruncatedPush(@intCast(i), @intCast(n), validate_up_to - i - 1);
+                        }
+                        return error.TruncatedPush;
+                    }
 
                     // Extract push value for immediate jump validation (only if fusions enabled)
                     var push_value: u256 = 0;
@@ -711,7 +1110,9 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
 
                             // Case 1: PUSH + JUMP (for fusion optimization)
                             if (next_op == @intFromEnum(Opcode.JUMP)) {
-                                log.debug("Detected PUSH + JUMP fusion opportunity at pc={}, push_value={}, next_op={x}", .{ i, push_value, next_op });
+                                if (tracer) |t| {
+                                    t.debug("Detected PUSH + JUMP fusion opportunity at pc={}, push_value={}, next_op={x}", .{ i, push_value, next_op });
+                                }
                                 // Note: We do NOT validate jump targets here - that happens at runtime
                                 // This is only for marking fusion opportunities
                             }
@@ -723,7 +1124,9 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
                             {
                                 // We have PUSH(dest) + PUSH(cond) + JUMPI pattern
                                 const jump_dest = last_push_value.?;
-                                log.debug("Detected PUSH + PUSH + JUMPI fusion opportunity at pc={}, jump_dest={}, next_op={x}", .{ i, jump_dest, next_op });
+                                if (tracer) |t| {
+                                    t.debug("Detected PUSH + PUSH + JUMPI fusion opportunity at pc={}, jump_dest={}, next_op={x}", .{ i, jump_dest, next_op });
+                                }
                                 // Note: We do NOT validate jump targets here - that happens at runtime
                             }
                         }
@@ -748,6 +1151,11 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
             // 2. The EVM spec requires jump validation at execution time, not initialization time
             // 3. Validating jumps here would reject valid contracts that contain unreachable PUSH+JUMP patterns
             // The immediate jump detection above is ONLY for fusion optimization, not correctness validation.
+
+            // Notify tracer of analysis completion
+            if (tracer) |t| {
+                t.onBytecodeAnalysisComplete(validate_up_to, opcode_count, jumpdest_count);
+            }
         }
 
         pub fn analyze(self: Self, allocator: std.mem.Allocator) !Analysis {
@@ -819,98 +1227,6 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
             }
 
             return analysis;
-        }
-
-        /// Get statistics about the bytecode
-        pub fn getStats(self: Self) !Stats {
-            var stats = Stats{
-                .opcode_counts = [_]u32{0} ** OPCODE_TABLE_SIZE,
-                .push_values = &.{},
-                .potential_fusions = &.{},
-                .jumpdests = &.{},
-                .jumps = &.{},
-                .backwards_jumps = 0,
-                .is_create_code = false,
-            };
-            // https://ziglang.org/documentation/master/std/#std.array_list.Aligned
-            var push_values = std.ArrayList(Stats.PushValue){};
-            defer push_values.deinit(self.allocator);
-            // Fusion detection: use scalar approach (simple and robust)
-
-            // https://ziglang.org/documentation/master/std/#std.array_list.Aligned
-            var fusions = std.ArrayList(Stats.Fusion){};
-            defer fusions.deinit(self.allocator);
-            // https://ziglang.org/documentation/master/std/#std.array_list.Aligned
-            var jumpdests = std.ArrayList(PcType){};
-            defer jumpdests.deinit(self.allocator);
-            // https://ziglang.org/documentation/master/std/#std.array_list.Aligned
-            var jumps = std.ArrayList(Stats.Jump){};
-            defer jumps.deinit(self.allocator);
-            var i: PcType = 0;
-            while (i < self.runtime_code.len) {
-                // Prefetch ahead for stats collection
-                if (@as(usize, i) + PREFETCH_DISTANCE < self.runtime_code.len) {
-                    @prefetch(&self.runtime_code[@as(usize, i) + PREFETCH_DISTANCE], .{
-                        .rw = .read,
-                        .locality = 3,
-                        .cache = .data,
-                    });
-                }
-
-                if (!self.packed_bitmap[i].is_op_start) {
-                    i += 1;
-                    continue;
-                }
-                const op = self.runtime_code[i];
-                stats.opcode_counts[op] += 1;
-                if (op == @intFromEnum(Opcode.JUMPDEST)) try jumpdests.append(self.allocator, i);
-                if (op >= @intFromEnum(Opcode.PUSH1) and op <= @intFromEnum(Opcode.PUSH32)) {
-                    const n = op - (@intFromEnum(Opcode.PUSH1) - 1);
-                    if (self.readPushValueN(i, @intCast(n))) |value| {
-                        try push_values.append(self.allocator, .{ .pc = i, .value = value });
-                        const next_pc = i + 1 + n;
-
-                        // Detect simple PUSH+OP fusion opportunities
-                        if (next_pc < self.runtime_code.len) {
-                            const next_op = self.runtime_code[next_pc];
-                            if (next_op == @intFromEnum(Opcode.JUMP) or
-                                next_op == @intFromEnum(Opcode.JUMPI) or
-                                next_op == @intFromEnum(Opcode.ADD) or
-                                next_op == @intFromEnum(Opcode.MUL) or
-                                next_op == @intFromEnum(Opcode.SUB) or
-                                next_op == @intFromEnum(Opcode.DIV))
-                            {
-                                try fusions.append(self.allocator, .{ .pc = i, .second_opcode = @as(Opcode, @enumFromInt(next_op)) });
-                            }
-                        }
-                        if (next_pc < self.runtime_code.len and
-                            (self.runtime_code[next_pc] == @intFromEnum(Opcode.JUMP) or
-                                self.runtime_code[next_pc] == @intFromEnum(Opcode.JUMPI)))
-                        {
-                            try jumps.append(self.allocator, .{ .pc = next_pc, .target = value });
-                            if (value < i) {
-                                stats.backwards_jumps += 1;
-                            }
-                        }
-                    }
-                }
-                if (op == @intFromEnum(Opcode.CODECOPY)) {
-                    stats.is_create_code = true;
-                }
-                i += self.getInstructionSize(i);
-            }
-
-            stats.push_values = try self.allocator.dupe(Stats.PushValue, push_values.items);
-
-            // Use scalar-detected fusions
-            stats.potential_fusions = try self.allocator.dupe(Stats.Fusion, fusions.items);
-            const jumpdests_usize = try self.allocator.alloc(usize, jumpdests.items.len);
-            for (jumpdests.items, 0..) |pc, idx| {
-                jumpdests_usize[idx] = @intCast(pc);
-            }
-            stats.jumpdests = jumpdests_usize;
-            stats.jumps = try self.allocator.dupe(Stats.Jump, jumps.items);
-            return stats;
         }
 
         /// Pretty print bytecode with human-readable formatting, colors, and metadata
@@ -1101,7 +1417,7 @@ test "pretty_print: should format bytecode with colors and metadata" {
 
     for (expected_parts) |part| {
         std.testing.expect(std.mem.indexOf(u8, formatted, part) != null) catch |err| {
-            log.debug("Expected to find '{s}' in:\n{s}\n", .{ part, formatted });
+            std.debug.print("Expected to find '{s}' in:\n{s}\n", .{ part, formatted });
             return err;
         };
     }
@@ -1113,6 +1429,54 @@ test "pretty_print: should format bytecode with colors and metadata" {
 // Additional comprehensive test coverage for bytecode.zig
 
 const testing = std.testing;
+
+test "debug: fusion detection for CALL bytecode" {
+    std.testing.log_level = .debug;
+    const allocator = testing.allocator;
+
+    // The exact bytecode from failing CALL test
+    const test_bytecode = &[_]u8{
+        0x5f, // PC=0: PUSH0
+        0x5f, // PC=1: PUSH0
+        0x5f, // PC=2: PUSH0
+        0x5f, // PC=3: PUSH0
+        0x5f, // PC=4: PUSH0
+        0x30, // PC=5: ADDRESS
+        0x61, // PC=6: PUSH2
+        0x27, // PC=7: value byte 1
+        0x10, // PC=8: value byte 2
+        0xf1, // PC=9: CALL
+        0x60, // PC=10: PUSH1
+        0x00, // PC=11: value 0
+        0x52, // PC=12: MSTORE
+        0x60, // PC=13: PUSH1
+        0x20, // PC=14: value 32
+        0x60, // PC=15: PUSH1
+        0x00, // PC=16: value 0
+        0xf3, // PC=17: RETURN
+    };
+
+    const BytecodeType = Bytecode(.{
+        .max_bytecode_size = 24576,
+        .pc_type = u16,
+        .fusions_enabled = true,
+    });
+
+    log.debug("\n=== Creating bytecode object ===", .{});
+    var bytecode = try BytecodeType.init(allocator, test_bytecode);
+    defer bytecode.deinit();
+
+    log.debug("\n=== Testing iterator ===", .{});
+    var iter = bytecode.createIterator();
+    var op_count: usize = 0;
+
+    while (iter.next()) |op_data| {
+        log.debug("\nOp {d}: PC={d}, type={s}", .{op_count, iter.pc, @tagName(op_data)});
+        op_count += 1;
+    }
+
+    log.debug("\nTotal operations: {d}", .{op_count});
+}
 
 test "Bytecode init - valid simple bytecode" {
     const allocator = testing.allocator;
@@ -1362,7 +1726,7 @@ test "Fusion candidate detection" {
         .fusions_enabled = true,
     };
     const TestBytecode = Bytecode(config);
-    var bytecode = try TestBytecode.init(allocator, &code);
+    var bytecode = try TestBytecode.init(allocator, &code, null);
     defer bytecode.deinit();
 
     // PUSH1 at PC 0 followed by ADD should be fusion candidate
@@ -1514,6 +1878,86 @@ test "Security - malformed jump patterns" {
     // PUSH1 2, JUMP, JUMPDEST (but jump target is push data, not the JUMPDEST)
     const code = [_]u8{ 0x60, 0x02, 0x56, 0x5B };
     try testing.expectError(BytecodeDefault.ValidationError.InvalidJumpDestination, BytecodeDefault.init(allocator, &code));
+}
+
+test "Invalid jump - jumping to non-JUMPDEST opcode" {
+    const allocator = testing.allocator;
+
+    // This test reproduces the bug from 15_test.zig where we jump to position 37
+    // instead of position 36 where the JUMPDEST is located
+    // PUSH32 value (33 bytes total), PUSH1 37, JUMP, JUMPDEST (at 36), ISZERO (at 37)
+    var code = std.ArrayList(u8){};
+    defer code.deinit(allocator);
+
+    // PUSH32 with value 0
+    try code.append(allocator, 0x7F); // PUSH32 opcode
+    try code.appendNTimes(allocator, 0x00, 32); // 32 zero bytes
+
+    // PUSH1 37 - incorrect jump destination (should be 36)
+    try code.append(allocator, 0x60); // PUSH1
+    try code.append(allocator, 37);   // Jump to position 37 (ISZERO) instead of 36 (JUMPDEST)
+
+    // JUMP
+    try code.append(allocator, 0x56);
+
+    // JUMPDEST at position 36
+    try code.append(allocator, 0x5B);
+
+    // ISZERO at position 37
+    try code.append(allocator, 0x15);
+
+    // STOP
+    try code.append(allocator, 0x00);
+
+    // This bytecode is valid from a structural perspective (no truncated pushes)
+    // but contains an invalid jump that should be caught at runtime
+    var bytecode = try BytecodeDefault.init(allocator, code.items);
+    defer bytecode.deinit();
+
+    // Verify that position 36 is a valid JUMPDEST
+    try testing.expect(bytecode.isValidJumpDest(36) == true);
+
+    // Verify that position 37 is NOT a valid JUMPDEST (it's an ISZERO opcode)
+    try testing.expect(bytecode.isValidJumpDest(37) == false);
+
+    // The bytecode itself is valid - the invalid jump will be caught at runtime
+    // This test documents that bytecode validation does NOT catch runtime jump errors
+}
+
+test "Valid jump - jumping to correct JUMPDEST" {
+    const allocator = testing.allocator;
+
+    // Same as above but with correct jump destination
+    var code = std.ArrayList(u8){};
+    defer code.deinit(allocator);
+
+    // PUSH32 with value 0
+    try code.append(allocator, 0x7F); // PUSH32 opcode
+    try code.appendNTimes(allocator, 0x00, 32); // 32 zero bytes
+
+    // PUSH1 36 - correct jump destination
+    try code.append(allocator, 0x60); // PUSH1
+    try code.append(allocator, 36);   // Jump to position 36 (JUMPDEST)
+
+    // JUMP
+    try code.append(allocator, 0x56);
+
+    // JUMPDEST at position 36
+    try code.append(allocator, 0x5B);
+
+    // ISZERO at position 37
+    try code.append(allocator, 0x15);
+
+    // STOP
+    try code.append(allocator, 0x00);
+
+    var bytecode = try BytecodeDefault.init(allocator, code.items);
+    defer bytecode.deinit();
+
+    // Verify that position 36 is a valid JUMPDEST
+    try testing.expect(bytecode.isValidJumpDest(36) == true);
+
+    // This is valid bytecode with a valid jump
 }
 
 test "Minimal repro - deployment bytecode with apparent truncated PUSH" {

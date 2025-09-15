@@ -7,7 +7,8 @@ const primitives = @import("primitives");
 
 // Import types from evm module
 const DefaultEvm = evm.DefaultEvm;
-const TracerEvm = evm.Evm(.{ .TracerType = evm.tracer.JSONRPCTracer });
+// Tracer is now part of EVM struct, not a config option
+const TracerEvm = DefaultEvm;
 const Database = evm.Database;
 const BlockInfo = evm.BlockInfo;
 const TransactionContext = evm.TransactionContext;

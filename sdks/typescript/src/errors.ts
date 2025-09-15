@@ -25,7 +25,7 @@ export type GuillotineErrorType =
  */
 export class GuillotineError extends Error {
   public readonly type: GuillotineErrorType;
-  public readonly cause?: Error;
+  public override readonly cause?: Error | undefined;
 
   constructor(type: GuillotineErrorType, message: string, cause?: Error) {
     super(message);

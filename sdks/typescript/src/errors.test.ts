@@ -138,7 +138,7 @@ describe('GuillotineError', () => {
         { code: 5, type: 'InvalidAddress' },
         { code: 6, type: 'InvalidBytecode' },
         { code: 999, type: 'UnknownError' },
-      ];
+      ] as const;
 
       cases.forEach(({ code, type }) => {
         const error = GuillotineError.fromErrorCode(code);

@@ -16,6 +16,14 @@ pub fn Handlers(comptime FrameType: type) type {
         pub const Error = FrameType.Error;
         pub const Dispatch = FrameType.Dispatch;
         pub const WordType = FrameType.WordType;
+        const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
+
+        /// Continue to next instruction with afterInstruction tracking
+        pub inline fn next_instruction(self: *FrameType, cursor: [*]const Dispatch.Item, comptime opcode: Dispatch.UnifiedOpcode) Error!noreturn {
+            const op_data = dispatch_opcode_data.getOpData(opcode, Dispatch, Dispatch.Item, cursor);
+            self.afterInstruction(opcode, op_data.next_handler, op_data.next_cursor.cursor);
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+        }
 
         /// Helper to convert Address to WordType
         fn to_u256(addr: Address) WordType {
@@ -41,93 +49,87 @@ pub fn Handlers(comptime FrameType: type) type {
         /// ADDRESS opcode (0x30) - Get address of currently executing account.
         /// Stack: [] → [address]
         pub fn address(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const dispatch = Dispatch{ .cursor = cursor };
+            self.beforeInstruction(.ADDRESS, cursor);
             const addr_u256 = to_u256(self.contract_address);
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // ADDRESS requires stack space
+            self.getTracer().assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "ADDRESS requires stack space");
             self.stack.push_unsafe(addr_u256);
-            const op_data = dispatch.getOpData(.ADDRESS);
-            const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            return next_instruction(self, cursor, .ADDRESS);
         }
 
         /// BALANCE opcode (0x31) - Get balance of the given account.
         /// Stack: [address] → [balance]
         pub fn balance(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const dispatch = Dispatch{ .cursor = cursor };
-            std.debug.assert(self.stack.size() >= 1); // BALANCE requires 1 stack item
-            const address_u256 = self.stack.pop_unsafe();
+            self.beforeInstruction(.BALANCE, cursor);
+            self.getTracer().assert(self.stack.size() >= 1, "BALANCE requires 1 stack item");
+            const address_u256 = self.stack.peek_unsafe();
             const addr = from_u256(address_u256);
 
             // Access the address for warm/cold accounting (EIP-2929)
             const evm = self.getEvm();
             const access_cost = evm.access_address(addr) catch |err| switch (err) {
-                else => return Error.AllocationError,
+                else => {
+                    self.afterComplete(.BALANCE);
+                    return Error.AllocationError;
+                },
             };
-            
+
             // Charge gas for address access
             // Use negative gas pattern for single-branch out-of-gas detection
             self.gas_remaining -= @intCast(access_cost);
             if (self.gas_remaining < 0) {
+                self.afterComplete(.BALANCE);
                 return Error.OutOfGas;
             }
 
             const bal = evm.get_balance(addr);
             const balance_word = @as(WordType, @truncate(bal));
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // BALANCE push requires stack space
-            self.stack.push_unsafe(balance_word);
-            const op_data = dispatch.getOpData(.BALANCE);
-            const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            self.stack.set_top_unsafe(balance_word);
+            return next_instruction(self, cursor, .BALANCE);
         }
 
         /// ORIGIN opcode (0x32) - Get execution origination address.
         /// Stack: [] → [origin]
         pub fn origin(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const dispatch = Dispatch{ .cursor = cursor };
+            self.beforeInstruction(.ORIGIN, cursor);
             const tx_origin = self.getEvm().get_tx_origin();
             const origin_u256 = to_u256(tx_origin);
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // ORIGIN requires stack space
+            self.getTracer().assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "ORIGIN requires stack space");
             self.stack.push_unsafe(origin_u256);
-            const op_data = dispatch.getOpData(.ORIGIN);
-            const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            return next_instruction(self, cursor, .ORIGIN);
         }
 
         /// CALLER opcode (0x33) - Get caller address.
         /// Stack: [] → [caller]
         pub fn caller(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const dispatch = Dispatch{ .cursor = cursor };
+            self.beforeInstruction(.CALLER, cursor);
             const caller_u256 = to_u256(self.caller);
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // CALLER requires stack space
+            self.getTracer().assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "CALLER requires stack space");
             self.stack.push_unsafe(caller_u256);
-            const op_data = dispatch.getOpData(.CALLER);
-            const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            return next_instruction(self, cursor, .CALLER);
         }
 
         /// CALLVALUE opcode (0x34) - Get deposited value by the instruction/transaction responsible for this execution.
         /// Stack: [] → [value]
         pub fn callvalue(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            const dispatch = Dispatch{ .cursor = cursor };
-            const value = self.value.*;
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // CALLVALUE requires stack space
+            self.beforeInstruction(.CALLVALUE, cursor);
+            const value = self.value;
+            self.getTracer().assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "CALLVALUE requires stack space");
             self.stack.push_unsafe(value);
-            const op_data = dispatch.getOpData(.CALLVALUE); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            return next_instruction(self, cursor, .CALLVALUE);
         }
 
         /// CALLDATALOAD opcode (0x35) - Get input data of current environment.
         /// Stack: [offset] → [data]
         pub fn calldataload(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            self.beforeInstruction(.CALLDATALOAD, cursor);
             const dispatch = Dispatch{ .cursor = cursor };
-            std.debug.assert(self.stack.size() >= 1); // CALLDATALOAD requires 1 stack item
-            const offset = self.stack.pop_unsafe();
+            self.getTracer().assert(self.stack.size() >= 1, "CALLDATALOAD requires 1 stack item");
+            const offset = self.stack.peek_unsafe();
             // Convert u256 to usize, checking for overflow
             if (offset > std.math.maxInt(usize)) {
-                std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // CALLDATALOAD push requires stack space
-                self.stack.push_unsafe(0);
-                const op_data = dispatch.getOpData(.CALLDATALOAD); const next = op_data.next;
-                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                self.stack.set_top_unsafe(0);
+                const op_data = dispatch.getOpData(.CALLDATALOAD); // Use op_data.next_handler and op_data.next_cursor directly
+                return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             }
             const offset_usize = @as(usize, @intCast(offset));
 
@@ -145,32 +147,33 @@ pub fn Handlers(comptime FrameType: type) type {
             }
             // Convert to WordType (truncate if necessary for smaller word types)
             const word_typed = @as(WordType, @truncate(word));
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // CALLDATALOAD push requires stack space
-            self.stack.push_unsafe(word_typed);
-            const op_data = dispatch.getOpData(.CALLDATALOAD); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            self.stack.set_top_unsafe(word_typed);
+            const op_data = dispatch.getOpData(.CALLDATALOAD); // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// CALLDATASIZE opcode (0x36) - Get size of input data in current environment.
         /// Stack: [] → [size]
         pub fn calldatasize(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            self.beforeInstruction(.CALLDATASIZE, cursor);
             const dispatch = Dispatch{ .cursor = cursor };
             const calldata = self.calldata();
             const calldata_len = @as(WordType, @truncate(@as(u256, @intCast(calldata.len))));
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // CALLDATASIZE requires stack space
+            self.getTracer().assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "CALLDATASIZE requires stack space");
             self.stack.push_unsafe(calldata_len);
-            const op_data = dispatch.getOpData(.CALLDATASIZE); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(.CALLDATASIZE); // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// CALLDATACOPY opcode (0x37) - Copy input data in current environment to memory.
         /// Stack: [destOffset, offset, length] → []
         pub fn calldatacopy(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            self.beforeInstruction(.CALLDATACOPY, cursor);
             const dispatch = Dispatch{ .cursor = cursor };
-            std.debug.assert(self.stack.size() >= 3); // CALLDATACOPY requires 3 stack items
-            const length = self.stack.pop_unsafe();       // Top of stack
-            const offset = self.stack.pop_unsafe();       // Second from top
-            const dest_offset = self.stack.pop_unsafe();  // Third from top
+            self.getTracer().assert(self.stack.size() >= 3, "CALLDATACOPY requires 3 stack items");
+            const length = self.stack.pop_unsafe(); // Top of stack
+            const offset = self.stack.pop_unsafe(); // Second from top
+            const dest_offset = self.stack.pop_unsafe(); // Third from top
 
             // Check for overflow
             if (dest_offset > std.math.maxInt(usize) or
@@ -185,12 +188,25 @@ pub fn Handlers(comptime FrameType: type) type {
             const length_usize = @as(usize, @intCast(length));
 
             if (length_usize == 0) {
-                const op_data = dispatch.getOpData(.CALLDATACOPY); const next = op_data.next;
-                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                const op_data = dispatch.getOpData(.CALLDATACOPY); // Use op_data.next_handler and op_data.next_cursor directly
+                return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+            }
+
+            // Calculate gas cost for memory expansion and copy operation
+            const new_size = dest_offset_usize + length_usize;
+            const memory_expansion_cost = self.memory.get_expansion_cost(@as(u24, @intCast(new_size)));
+
+            // Dynamic gas cost: 3 gas per word (32 bytes) copied
+            const copy_cost = (length_usize + 31) / 32 * 3;
+            const total_gas = memory_expansion_cost + copy_cost;
+
+            // Use negative gas pattern for single-branch out-of-gas detection
+            self.gas_remaining -= @intCast(total_gas);
+            if (self.gas_remaining < 0) {
+                return Error.OutOfGas;
             }
 
             // Ensure memory capacity
-            const new_size = dest_offset_usize + length_usize;
             self.memory.ensure_capacity(self.getAllocator(), @as(u24, @intCast(new_size))) catch |err| switch (err) {
                 memory_mod.MemoryError.MemoryOverflow => return Error.OutOfBounds,
                 else => return Error.AllocationError,
@@ -206,29 +222,31 @@ pub fn Handlers(comptime FrameType: type) type {
                 self.memory.set_byte(self.getAllocator(), @as(u24, @intCast(dest_offset_usize + i)), byte_val) catch return Error.OutOfBounds;
             }
 
-            const op_data = dispatch.getOpData(.CALLDATACOPY); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(.CALLDATACOPY); // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// CODESIZE opcode (0x38) - Get size of code running in current environment.
         /// Stack: [] → [size]
         pub fn codesize(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            self.beforeInstruction(.CODESIZE, cursor);
             // Get codesize from frame's code
             const bytecode_len = @as(WordType, @intCast(self.code.len));
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // CODESIZE requires stack space
+            self.getTracer().assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "CODESIZE requires stack space");
             self.stack.push_unsafe(bytecode_len);
-            const next = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next[0].opcode_handler, .{ self, next });
+            const op_data = dispatch_opcode_data.getOpData(.CODESIZE, Dispatch, Dispatch.Item, cursor);
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// CODECOPY opcode (0x39) - Copy code running in current environment to memory.
         /// Stack: [destOffset, offset, length] → []
         pub fn codecopy(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            self.beforeInstruction(.CODECOPY, cursor);
             // EVM stack order: [destOffset, offset, length] with dest on top
-            std.debug.assert(self.stack.size() >= 3); // CODECOPY requires 3 stack items
-            const dest_offset = self.stack.pop_unsafe();  // Top of stack
-            const offset = self.stack.pop_unsafe();       // Next
-            const length = self.stack.pop_unsafe();       // Next
+            self.getTracer().assert(self.stack.size() >= 3, "CODECOPY requires 3 stack items");
+            const dest_offset = self.stack.pop_unsafe(); // Top of stack
+            const offset = self.stack.pop_unsafe(); // Next
+            const length = self.stack.pop_unsafe(); // Next
 
             // Check for overflow
             if (dest_offset > std.math.maxInt(usize) or
@@ -243,8 +261,8 @@ pub fn Handlers(comptime FrameType: type) type {
             const length_usize = @as(usize, @intCast(length));
 
             if (length_usize == 0) {
-                const next = cursor + 1;
-                return @call(FrameType.getTailCallModifier(), next[0].opcode_handler, .{ self, next });
+                const op_data = dispatch_opcode_data.getOpData(.CODECOPY, Dispatch, Dispatch.Item, cursor);
+                return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             }
 
             // Calculate gas cost for memory expansion and copy operation
@@ -278,59 +296,61 @@ pub fn Handlers(comptime FrameType: type) type {
                 self.memory.set_byte(self.getAllocator(), @as(u24, @intCast(dest_offset_usize + i)), byte_val) catch return Error.OutOfBounds;
             }
 
-            const next = cursor + 1;
-            return @call(FrameType.getTailCallModifier(), next[0].opcode_handler, .{ self, next });
+            const op_data = dispatch_opcode_data.getOpData(.CODECOPY, Dispatch, Dispatch.Item, cursor);
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// GASPRICE opcode (0x3A) - Get price of gas in current environment.
         /// Stack: [] → [gas_price]
         pub fn gasprice(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            log.before_instruction(self, .GASPRICE);
             const dispatch = Dispatch{ .cursor = cursor };
             const gas_price = self.getEvm().get_gas_price();
             const gas_price_truncated = @as(WordType, @truncate(gas_price));
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // GASPRICE requires stack space
+            self.getTracer().assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "GASPRICE requires stack space");
             self.stack.push_unsafe(gas_price_truncated);
-            const op_data = dispatch.getOpData(.GASPRICE); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(.GASPRICE); // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// EXTCODESIZE opcode (0x3B) - Get size of an account's code.
         /// Stack: [address] → [size]
         pub fn extcodesize(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            log.before_instruction(self, .EXTCODESIZE);
             const dispatch = Dispatch{ .cursor = cursor };
-            std.debug.assert(self.stack.size() >= 1); // EXTCODESIZE requires 1 stack item
-            const address_u256 = self.stack.pop_unsafe();
+            self.getTracer().assert(self.stack.size() >= 1, "EXTCODESIZE requires 1 stack item");
+            const address_u256 = self.stack.peek_unsafe();
             const addr = from_u256(address_u256);
-            
+
             // Access the address for warm/cold accounting (EIP-2929)
             const evm = self.getEvm();
             const access_cost = evm.access_address(addr) catch |err| switch (err) {
                 else => return Error.AllocationError,
             };
-            
+
             // Charge gas for address access
             // Use negative gas pattern for single-branch out-of-gas detection
             self.gas_remaining -= @intCast(access_cost);
             if (self.gas_remaining < 0) {
                 return Error.OutOfGas;
             }
-            
+
             const code = evm.get_code(addr);
             const code_len = @as(WordType, @truncate(@as(u256, @intCast(code.len))));
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // EXTCODESIZE push requires stack space
-            self.stack.push_unsafe(code_len);
-            const op_data = dispatch.getOpData(.EXTCODESIZE); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            self.stack.set_top_unsafe(code_len);
+            const op_data = dispatch.getOpData(.EXTCODESIZE); // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// EXTCODECOPY opcode (0x3C) - Copy an account's code to memory.
         /// Stack: [address, destOffset, offset, length] → []
         pub fn extcodecopy(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            log.before_instruction(self, .EXTCODECOPY);
             const dispatch = Dispatch{ .cursor = cursor };
-            std.debug.assert(self.stack.size() >= 4); // EXTCODECOPY requires 4 stack items
-            const length = self.stack.pop_unsafe();       // Top of stack  
-            const offset = self.stack.pop_unsafe();       // Second from top
-            const dest_offset = self.stack.pop_unsafe();  // Third from top
+            self.getTracer().assert(self.stack.size() >= 4, "EXTCODECOPY requires 4 stack items");
+            const length = self.stack.pop_unsafe(); // Top of stack
+            const offset = self.stack.pop_unsafe(); // Second from top
+            const dest_offset = self.stack.pop_unsafe(); // Third from top
             const address_u256 = self.stack.pop_unsafe(); // Fourth from top
 
             // Check for overflow
@@ -342,13 +362,13 @@ pub fn Handlers(comptime FrameType: type) type {
             }
 
             const addr = from_u256(address_u256);
-            
+
             // Access the address for warm/cold accounting (EIP-2929)
             const evm = self.getEvm();
             const access_cost = evm.access_address(addr) catch |err| switch (err) {
                 else => return Error.AllocationError,
             };
-            
+
             // Charge gas for address access
             // Use negative gas pattern for single-branch out-of-gas detection
             self.gas_remaining -= @intCast(access_cost);
@@ -360,12 +380,25 @@ pub fn Handlers(comptime FrameType: type) type {
             const length_usize = @as(usize, @intCast(length));
 
             if (length_usize == 0) {
-                const op_data = dispatch.getOpData(.EXTCODECOPY); const next = op_data.next;
-                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                const op_data = dispatch.getOpData(.EXTCODECOPY); // Use op_data.next_handler and op_data.next_cursor directly
+                return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+            }
+
+            // Calculate gas cost for memory expansion and copy operation
+            const new_size = dest_offset_usize + length_usize;
+            const memory_expansion_cost = self.memory.get_expansion_cost(@as(u24, @intCast(new_size)));
+
+            // Dynamic gas cost: 3 gas per word (32 bytes) copied
+            const copy_cost = (length_usize + 31) / 32 * 3;
+            const total_gas = memory_expansion_cost + copy_cost;
+
+            // Use negative gas pattern for single-branch out-of-gas detection
+            self.gas_remaining -= @intCast(total_gas);
+            if (self.gas_remaining < 0) {
+                return Error.OutOfGas;
             }
 
             // Ensure memory capacity
-            const new_size = dest_offset_usize + length_usize;
             self.memory.ensure_capacity(self.getAllocator(), @as(u24, @intCast(new_size))) catch |err| switch (err) {
                 memory_mod.MemoryError.MemoryOverflow => return Error.OutOfBounds,
                 else => return Error.AllocationError,
@@ -381,24 +414,25 @@ pub fn Handlers(comptime FrameType: type) type {
                 self.memory.set_byte(self.getAllocator(), @as(u24, @intCast(dest_offset_usize + i)), byte_val) catch return Error.OutOfBounds;
             }
 
-            const op_data = dispatch.getOpData(.EXTCODECOPY); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(.EXTCODECOPY); // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// EXTCODEHASH opcode (0x3F) - Get hash of account's code.
         /// Stack: [address] → [hash]
         pub fn extcodehash(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            log.before_instruction(self, .EXTCODEHASH);
             const dispatch = Dispatch{ .cursor = cursor };
-            std.debug.assert(self.stack.size() >= 1); // EXTCODEHASH requires 1 stack item
-            const address_u256 = self.stack.pop_unsafe();
+            self.getTracer().assert(self.stack.size() >= 1, "EXTCODEHASH requires 1 stack item");
+            const address_u256 = self.stack.peek_unsafe();
             const addr = from_u256(address_u256);
-            
+
             // Access the address for warm/cold accounting (EIP-2929)
             const evm = self.getEvm();
             const access_cost = evm.access_address(addr) catch |err| switch (err) {
                 else => return Error.AllocationError,
             };
-            
+
             // Charge gas for address access
             // Use negative gas pattern for single-branch out-of-gas detection
             self.gas_remaining -= @intCast(access_cost);
@@ -408,10 +442,9 @@ pub fn Handlers(comptime FrameType: type) type {
 
             if (!evm.account_exists(addr)) {
                 // Non-existent account returns 0 per EIP-1052
-                std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // EXTCODEHASH push requires stack space
-                self.stack.push_unsafe(0);
-                const op_data = dispatch.getOpData(.EXTCODEHASH); const next = op_data.next;
-                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                self.stack.set_top_unsafe(0);
+                const op_data = dispatch.getOpData(.EXTCODEHASH); // Use op_data.next_handler and op_data.next_cursor directly
+                return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             }
 
             const code = self.getEvm().get_code(addr);
@@ -419,10 +452,9 @@ pub fn Handlers(comptime FrameType: type) type {
                 // Existing account with empty code returns keccak256("") constant
                 const empty_hash_u256: u256 = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470;
                 const empty_hash_word = @as(WordType, @truncate(empty_hash_u256));
-                std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // EXTCODEHASH push requires stack space
-                self.stack.push_unsafe(empty_hash_word);
-                const op_data = dispatch.getOpData(.EXTCODEHASH); const next = op_data.next;
-                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                self.stack.set_top_unsafe(empty_hash_word);
+                const op_data = dispatch.getOpData(.EXTCODEHASH); // Use op_data.next_handler and op_data.next_cursor directly
+                return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             }
 
             // Compute keccak256 hash of the code
@@ -435,31 +467,32 @@ pub fn Handlers(comptime FrameType: type) type {
                 hash_u256 = (hash_u256 << 8) | @as(u256, b);
             }
             const hash_word = @as(WordType, @truncate(hash_u256));
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // EXTCODEHASH push requires stack space
-            self.stack.push_unsafe(hash_word);
+            self.stack.set_top_unsafe(hash_word);
 
-            const op_data = dispatch.getOpData(.EXTCODEHASH); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(.EXTCODEHASH); // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// RETURNDATASIZE opcode (0x3D) - Get size of output data from the previous call.
         /// Stack: [] → [size]
         pub fn returndatasize(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            log.before_instruction(self, .RETURNDATASIZE);
             const dispatch = Dispatch{ .cursor = cursor };
             // Return data is stored in the frame's output field after a call
             const return_data_len = @as(WordType, @truncate(@as(u256, @intCast(self.output.len))));
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // RETURNDATASIZE requires stack space
+            self.getTracer().assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "RETURNDATASIZE requires stack space");
             self.stack.push_unsafe(return_data_len);
-            const op_data = dispatch.getOpData(.RETURNDATASIZE); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(.RETURNDATASIZE); // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// RETURNDATACOPY opcode (0x3E) - Copy output data from the previous call to memory.
         /// Stack: [destOffset, offset, length] → []
         pub fn returndatacopy(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            log.before_instruction(self, .RETURNDATACOPY);
             const dispatch = Dispatch{ .cursor = cursor };
             // EVM stack order: [destOffset, offset, length] with dest on top
-            std.debug.assert(self.stack.size() >= 3); // RETURNDATACOPY requires 3 stack items
+            self.getTracer().assert(self.stack.size() >= 3, "RETURNDATACOPY requires 3 stack items");
             const dest_offset = self.stack.pop_unsafe();
             const offset = self.stack.pop_unsafe();
             const length = self.stack.pop_unsafe();
@@ -487,8 +520,8 @@ pub fn Handlers(comptime FrameType: type) type {
             }
 
             if (length_usize == 0) {
-                const op_data = dispatch.getOpData(.RETURNDATACOPY); const next = op_data.next;
-                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                const op_data = dispatch.getOpData(.RETURNDATACOPY); // Use op_data.next_handler and op_data.next_cursor directly
+                return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             }
 
             // Calculate gas cost for memory expansion and copy operation
@@ -515,13 +548,14 @@ pub fn Handlers(comptime FrameType: type) type {
             const src_slice = return_data[offset_usize..][0..length_usize];
             self.memory.set_data(self.getAllocator(), @as(u24, @intCast(dest_offset_usize)), src_slice) catch return Error.OutOfBounds;
 
-            const op_data = dispatch.getOpData(.RETURNDATACOPY); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(.RETURNDATACOPY); // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// BLOCKHASH opcode (0x40) - Get the hash of one of the 256 most recent complete blocks.
         /// Stack: [block_number] → [hash]
         pub fn blockhash(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            self.beforeInstruction(.BLOCKHASH, cursor);
             // BLOCKHASH costs 20 gas
             const gas_cost = 20;
             // Use negative gas pattern for single-branch out-of-gas detection
@@ -531,8 +565,8 @@ pub fn Handlers(comptime FrameType: type) type {
             }
 
             const dispatch = Dispatch{ .cursor = cursor };
-            std.debug.assert(self.stack.size() >= 1); // BLOCKHASH requires 1 stack item
-            const block_number = self.stack.pop_unsafe();
+            self.getTracer().assert(self.stack.size() >= 1, "BLOCKHASH requires 1 stack item");
+            const block_number = self.stack.peek_unsafe();
             // Cast to u64 - EVM spec says only last 256 blocks are accessible
             const block_number_u64 = @as(u64, @truncate(block_number));
             const block_hash_opt = self.getEvm().get_block_hash(block_number_u64);
@@ -545,20 +579,19 @@ pub fn Handlers(comptime FrameType: type) type {
                     hash_value = (hash_value << 8) | @as(u256, byte);
                 }
                 const hash_word = @as(WordType, @truncate(hash_value));
-                std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // BLOCKHASH push requires stack space
-                self.stack.push_unsafe(hash_word);
+                self.stack.set_top_unsafe(hash_word);
             } else {
-                std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // BLOCKHASH push requires stack space
-                self.stack.push_unsafe(0);
+                self.stack.set_top_unsafe(0);
             }
 
-            const op_data = dispatch.getOpData(.BLOCKHASH); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(.BLOCKHASH); // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// COINBASE opcode (0x41) - Get the current block's beneficiary address.
         /// Stack: [] → [coinbase]
         pub fn coinbase(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            self.beforeInstruction(.COINBASE, cursor);
             // COINBASE costs 2 gas
             const gas_cost = GasConstants.GasQuickStep;
             // Use negative gas pattern for single-branch out-of-gas detection
@@ -571,15 +604,16 @@ pub fn Handlers(comptime FrameType: type) type {
             const block_info = self.getEvm().get_block_info();
             const coinbase_u256 = to_u256(block_info.coinbase);
             const coinbase_word = @as(WordType, @truncate(coinbase_u256));
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // COINBASE requires stack space
+            self.getTracer().assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "COINBASE requires stack space");
             self.stack.push_unsafe(coinbase_word);
-            const op_data = dispatch.getOpData(.COINBASE); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(.COINBASE); // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// TIMESTAMP opcode (0x42) - Get the current block's timestamp.
         /// Stack: [] → [timestamp]
         pub fn timestamp(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            log.before_instruction(self, .TIMESTAMP);
             // TIMESTAMP costs 2 gas
             const gas_cost = GasConstants.GasQuickStep;
             // Use negative gas pattern for single-branch out-of-gas detection
@@ -591,15 +625,16 @@ pub fn Handlers(comptime FrameType: type) type {
             const dispatch = Dispatch{ .cursor = cursor };
             const block_info = self.getEvm().get_block_info();
             const timestamp_word = @as(WordType, @truncate(@as(u256, @intCast(block_info.timestamp))));
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // TIMESTAMP requires stack space
+            self.getTracer().assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "TIMESTAMP requires stack space");
             self.stack.push_unsafe(timestamp_word);
-            const op_data = dispatch.getOpData(.TIMESTAMP); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(.TIMESTAMP); // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// NUMBER opcode (0x43) - Get the current block's number.
         /// Stack: [] → [number]
         pub fn number(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            log.before_instruction(self, .NUMBER);
             // NUMBER costs 2 gas
             const gas_cost = GasConstants.GasQuickStep;
             // Use negative gas pattern for single-branch out-of-gas detection
@@ -611,15 +646,16 @@ pub fn Handlers(comptime FrameType: type) type {
             const dispatch = Dispatch{ .cursor = cursor };
             const block_info = self.getEvm().get_block_info();
             const block_number_word = @as(WordType, @truncate(@as(u256, @intCast(block_info.number))));
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // NUMBER requires stack space
+            self.getTracer().assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "NUMBER requires stack space");
             self.stack.push_unsafe(block_number_word);
-            const op_data = dispatch.getOpData(.NUMBER); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(.NUMBER); // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// DIFFICULTY opcode (0x44) - Get the current block's difficulty.
         /// Stack: [] → [difficulty]
         pub fn difficulty(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            self.beforeInstruction(.PREVRANDAO, cursor);
             // DIFFICULTY costs 2 gas
             const gas_cost = GasConstants.GasQuickStep;
             // Use negative gas pattern for single-branch out-of-gas detection
@@ -631,15 +667,16 @@ pub fn Handlers(comptime FrameType: type) type {
             const dispatch = Dispatch{ .cursor = cursor };
             const block_info = self.getEvm().get_block_info();
             const difficulty_word = @as(WordType, @truncate(block_info.difficulty));
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // DIFFICULTY requires stack space
+            self.getTracer().assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "DIFFICULTY requires stack space");
             self.stack.push_unsafe(difficulty_word);
-            const op_data = dispatch.getOpData(.PREVRANDAO); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(.PREVRANDAO); // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// PREVRANDAO opcode - Alias for DIFFICULTY post-merge.
         /// Stack: [] → [prevrandao]
         pub fn prevrandao(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            self.beforeInstruction(.PREVRANDAO, cursor);
             const dispatch = Dispatch{ .cursor = cursor };
             return difficulty(self, dispatch);
         }
@@ -647,63 +684,67 @@ pub fn Handlers(comptime FrameType: type) type {
         /// GASLIMIT opcode (0x45) - Get the current block's gas limit.
         /// Stack: [] → [gas_limit]
         pub fn gaslimit(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            log.before_instruction(self, .GASLIMIT);
             const dispatch = Dispatch{ .cursor = cursor };
             const block_info = self.getEvm().get_block_info();
             const gas_limit_word = @as(WordType, @truncate(@as(u256, @intCast(block_info.gas_limit))));
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // GASLIMIT requires stack space
+            self.getTracer().assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "GASLIMIT requires stack space");
             self.stack.push_unsafe(gas_limit_word);
-            const op_data = dispatch.getOpData(.GASLIMIT); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(.GASLIMIT); // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// CHAINID opcode (0x46) - Get the chain ID.
         /// Stack: [] → [chain_id]
         pub fn chainid(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            self.beforeInstruction(.CHAINID, cursor);
             const dispatch = Dispatch{ .cursor = cursor };
             const chain_id = self.getEvm().get_chain_id();
             const chain_id_word = @as(WordType, @truncate(@as(u256, chain_id)));
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // CHAINID requires stack space
+            self.getTracer().assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "CHAINID requires stack space");
             self.stack.push_unsafe(chain_id_word);
-            const op_data = dispatch.getOpData(.CHAINID); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(.CHAINID); // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// SELFBALANCE opcode (0x47) - Get balance of currently executing account.
         /// Stack: [] → [balance]
         pub fn selfbalance(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            log.before_instruction(self, .SELFBALANCE);
             const dispatch = Dispatch{ .cursor = cursor };
             const bal = self.getEvm().get_balance(self.contract_address);
             const balance_word = @as(WordType, @truncate(bal));
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // SELFBALANCE requires stack space
+            self.getTracer().assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "SELFBALANCE requires stack space");
             self.stack.push_unsafe(balance_word);
-            const op_data = dispatch.getOpData(.SELFBALANCE); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(.SELFBALANCE); // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// BASEFEE opcode (0x48) - Get the current block's base fee.
         /// Stack: [] → [base_fee]
         pub fn basefee(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            log.before_instruction(self, .BASEFEE);
             const dispatch = Dispatch{ .cursor = cursor };
             const block_info = self.getEvm().get_block_info();
             const base_fee_word = @as(WordType, @truncate(block_info.base_fee));
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // BASEFEE requires stack space
+            self.getTracer().assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "BASEFEE requires stack space");
             self.stack.push_unsafe(base_fee_word);
-            const op_data = dispatch.getOpData(.BASEFEE); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(.BASEFEE); // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// BLOBHASH opcode (0x49) - Get versioned hashes of blob transactions.
         /// Stack: [index] → [hash]
         pub fn blobhash(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            self.beforeInstruction(.BLOBHASH, cursor);
             const dispatch = Dispatch{ .cursor = cursor };
-            std.debug.assert(self.stack.size() >= 1); // BLOBHASH requires 1 stack item
-            const index = self.stack.pop_unsafe();
+            self.getTracer().assert(self.stack.size() >= 1, "BLOBHASH requires 1 stack item");
+            const index = self.stack.peek_unsafe();
             // Convert u256 to usize for array access
             if (index > std.math.maxInt(usize)) {
-                std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // BLOBHASH push requires stack space
-                self.stack.push_unsafe(0);
-                const op_data = dispatch.getOpData(.BLOBHASH); const next = op_data.next;
-                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+                self.stack.set_top_unsafe(0);
+                const op_data = dispatch.getOpData(.BLOBHASH); // Use op_data.next_handler and op_data.next_cursor directly
+                return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             }
             const index_usize = @as(usize, @intCast(index));
             // Check if index is within bounds of versioned hashes
@@ -716,53 +757,54 @@ pub fn Handlers(comptime FrameType: type) type {
                     hash_value = (hash_value << 8) | @as(u256, byte);
                 }
                 const hash_word = @as(WordType, @truncate(hash_value));
-                std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // BLOBHASH push requires stack space
-                self.stack.push_unsafe(hash_word);
+                self.stack.set_top_unsafe(hash_word);
             } else {
                 // Index out of bounds - push zero
-                std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // BLOBHASH push requires stack space
-                self.stack.push_unsafe(0);
+                self.stack.set_top_unsafe(0);
             }
-            const op_data = dispatch.getOpData(.BLOBHASH); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(.BLOBHASH); // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// BLOBBASEFEE opcode (0x4a) - Get the current block's blob base fee.
         /// Stack: [] → [blob_base_fee]
         pub fn blobbasefee(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            self.beforeInstruction(.BLOBBASEFEE, cursor);
             const dispatch = Dispatch{ .cursor = cursor };
             const block_info = self.getEvm().get_block_info();
             const blob_base_fee = block_info.blob_base_fee;
             const blob_base_fee_word = @as(WordType, @truncate(blob_base_fee));
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // BLOBBASEFEE requires stack space
+            self.getTracer().assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "BLOBBASEFEE requires stack space");
             self.stack.push_unsafe(blob_base_fee_word);
-            const op_data = dispatch.getOpData(.BLOBBASEFEE); const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            const op_data = dispatch.getOpData(.BLOBBASEFEE); // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// GAS opcode (0x5A) - Get the amount of available gas.
         /// Stack: [] → [gas]
         pub fn gas(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            log.before_instruction(self, .GAS);
             const dispatch = Dispatch{ .cursor = cursor };
             // Note: The gas value pushed should be after the gas for this instruction is consumed
             // The dispatch system handles the gas consumption before calling this handler
             const gas_value = @as(WordType, @max(self.gas_remaining, 0));
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // GAS requires stack space
+            self.getTracer().assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "GAS requires stack space");
             self.stack.push_unsafe(gas_value);
             const op_data = dispatch.getOpData(.GAS);
-            const next = op_data.next;
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
+            // Use op_data.next_handler and op_data.next_cursor directly
+            return @call(FrameType.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// PC opcode (0x58) - Get the value of the program counter prior to the increment.
         /// Stack: [] → [pc]
         pub fn pc(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            log.before_instruction(self, .PC);
             const dispatch = Dispatch{ .cursor = cursor };
             // Get PC value from metadata
             const op_data = dispatch.getOpData(.PC);
-            std.debug.assert(self.stack.size() < @TypeOf(self.stack).stack_capacity); // PC requires stack space
+            self.getTracer().assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "PC requires stack space");
             self.stack.push_unsafe(op_data.metadata.value);
-            return @call(FrameType.getTailCallModifier(), op_data.next.cursor[0].opcode_handler, .{ self, op_data.next.cursor });
+            return @call(FrameType.getTailCallModifier(), op_data.op_data.next_handler, .{ self, op_data.op_data.next_cursor.cursor });
         }
     };
 }
@@ -772,7 +814,7 @@ pub fn Handlers(comptime FrameType: type) type {
 const testing = std.testing;
 const Frame = @import("../frame/frame.zig").Frame;
 const dispatch_mod = @import("../preprocessor/dispatch.zig");
-const NoOpTracer = @import("../tracer/tracer.zig").NoOpTracer;
+const DefaultTracer = @import("../tracer/tracer.zig").DefaultTracer;
 const block_info_mod = @import("../block/block_info.zig");
 
 // Test configuration
@@ -782,7 +824,6 @@ const test_config = FrameConfig{
     .max_bytecode_size = 1024,
     .block_gas_limit = 30_000_000,
     .DatabaseType = @import("../storage/memory_database.zig").MemoryDatabase,
-    .TracerType = NoOpTracer,
     .memory_initial_capacity = 4096,
     .memory_limit = 0xFFFFFF,
 };
@@ -2283,7 +2324,6 @@ test "WordType truncation behavior" {
         .max_bytecode_size = 1024,
         .block_gas_limit = 30_000_000,
         .DatabaseType = @import("../storage/memory_database.zig").MemoryDatabase,
-        .TracerType = NoOpTracer,
         .memory_initial_capacity = 4096,
         .memory_limit = 0xFFFFFF,
     };

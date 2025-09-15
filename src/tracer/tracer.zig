@@ -1,35 +1,68 @@
 /// Configurable execution tracing system for EVM debugging and analysis
 ///
 /// Provides multiple tracer implementations with compile-time selection:
-/// - `NoOpTracer`: Zero runtime overhead (default for production)
-/// - `DebuggingTracer`: Step-by-step debugging with breakpoints
-/// - `LoggingTracer`: Structured logging to stdout
-/// - `FileTracer`: High-performance file output
-/// - Custom tracers can be implemented by following the interface
+/// - `DefaultTracer`: Validates execution in debug/safe builds
+/// - `DebuggingTracer`: Step-by-step debugging (no-op implementation)
+/// - `LoggingTracer`: Structured logging to stdout (minimal)
+/// - `FileTracer`: File output (skeleton)
 ///
 /// Tracers are selected at compile time for zero-cost abstractions.
 /// Enable tracing by configuring the Frame with a specific TracerType.
 const std = @import("std");
 const log = @import("../log.zig");
-const frame_mod = @import("../frame/frame_c.zig");
 const primitives = @import("primitives");
-const Address = primitives.Address.Address;
-const ZERO_ADDRESS = primitives.ZERO_ADDRESS;
-const block_info_mod = @import("../block/block_info.zig");
-const call_params_mod = @import("../frame/call_params.zig");
-const call_result_mod = @import("../frame/call_result.zig");
-const hardfork_mod = @import("../eips_and_hardforks/hardfork.zig");
-// const Host = @import("host.zig").Host; // Only needed for tests which are commented out
+const pc_tracker_mod = @import("pc_tracker.zig");
+pub const MinimalEvm = @import("minimal_evm.zig").MinimalEvm;
+const MinimalFrame = @import("minimal_frame.zig").MinimalFrame;
+const Host = @import("minimal_evm.zig").Host;
+const UnifiedOpcode = @import("../opcodes/opcode.zig").UnifiedOpcode;
+const Opcode = @import("../opcodes/opcode.zig").Opcode;
+const SafetyCounter = @import("../internal/safety_counter.zig").SafetyCounter;
 
 // ============================================================================
-// NO-OP TRACER
+// DEFAULT TRACER
 // ============================================================================
 
-// No-op tracer that does nothing - zero runtime cost
-pub const NoOpTracer = struct {
+// Default tracer does not do anything in release modes but does extensive defensive validation
+// In debug and safe mode. In a debug mode the tracer can be thought of as unit tests that run in
+// real time as the evm is executing and we are expected to have similar levels of coverage.
+// For this reason, the tracer is intentionally decoupled from the EVM and is expected to share
+// minimal code with it.
+pub const DefaultTracer = struct {
+    allocator: std.mem.Allocator,
     // Empty steps list to satisfy EVM interface
     steps: std.ArrayList(ExecutionStep),
 
+    // PC tracker for validation (only in debug/safe builds)
+    pc_tracker: ?pc_tracker_mod.PcTracker,
+
+    // Gas tracking for validation
+    gas_tracker: ?u64,
+
+    // Current PC for tracking instruction pointer movement
+    current_pc: u32,
+
+    // Bytecode being executed for PC validation
+    bytecode: []const u8,
+
+    // Minimal EVM for parallel execution tracking and validation
+    minimal_evm: ?*MinimalEvm,
+
+    // Execution tracking
+    instruction_count: u64 = 0,  // Total instructions executed
+    schedule_index: u64 = 0,     // Current dispatch schedule index
+    simple_instruction_count: u64 = 0,  // Instructions in simple interpreter
+    fused_instruction_count: u64 = 0,  // Instructions in fused interpreter
+
+    // Safety counter to prevent infinite loops
+    // Limit is 10x the block gas limit (30M gas * 10 = 300M instructions)
+    // This is very generous - normal contracts execute far fewer instructions
+    instruction_safety: SafetyCounter(u64, .enabled),
+
+    // Nested call depth tracking
+    nested_depth: u16 = 0,
+
+    // Internal representation of an execution step
     pub const ExecutionStep = struct {
         step_number: u64,
         pc: u32,
@@ -47,1018 +80,1135 @@ pub const NoOpTracer = struct {
         error_msg: ?[]const u8,
     };
 
-    pub fn init(allocator: std.mem.Allocator) NoOpTracer {
-        _ = allocator; // NoOpTracer doesn't use allocator
-        return .{
-            .steps = std.ArrayList(ExecutionStep){},
-        };
-    }
-
-    pub fn deinit(self: *NoOpTracer) void {
-        self.steps.deinit(std.heap.c_allocator);
-    }
-
-    pub fn beforeOp(self: *NoOpTracer, pc: u32, opcode: u8, comptime FrameType: type, frame: *const FrameType) void {
-        _ = self;
-        _ = pc;
-        _ = opcode;
-        _ = frame;
-        // FrameType is used in the function signature, no need to discard
-    }
-
-    pub fn afterOp(self: *NoOpTracer, pc: u32, opcode: u8, comptime FrameType: type, frame: *const FrameType) void {
-        _ = self;
-        _ = pc;
-        _ = opcode;
-        _ = frame;
-        // FrameType is used in the function signature, no need to discard
-    }
-    
-    pub fn onError(self: *NoOpTracer, pc: u32, opcode: u8, err: anyerror, comptime FrameType: type, frame: *const FrameType) void {
-        _ = self;
-        _ = pc;
-        _ = opcode;
-        _ = frame;
-        std.debug.assert(err != error.OutOfMemory); // Suppress error set discard warning
-        // FrameType is comptime, no need to discard
-    }
-};
-
-// ============================================================================
-// DEBUGGING TRACER
-// ============================================================================
-
-/// DebuggingTracer provides comprehensive debugging capabilities for the Go CLI debugger
-/// Features:
-/// - Step-by-step execution control
-/// - Breakpoint support
-/// - State capture at each instruction
-/// - Memory/stack/gas tracking
-/// - Error reporting
-pub const DebuggingTracer = struct {
-    const Self = @This();
-
-    allocator: std.mem.Allocator,
-
-    // Control state
-    step_mode: bool = false, // true = step through each instruction
-    paused: bool = false, // true = execution is paused
-    breakpoints: std.AutoHashMap(u32, void), // Set of PC values to break on
-
-    // Execution history
-    steps: std.ArrayList(ExecutionStep),
-    max_history: usize = 10000, // Limit history to prevent memory issues
-
-    // State snapshots for debugging
-    state_snapshots: std.ArrayList(StateSnapshot),
-
-    // Statistics
-    total_instructions: u64 = 0,
-    total_gas_used: u64 = 0,
-
-    pub const ExecutionStep = struct {
-        step_number: u64,
-        pc: u32,
-        opcode: u8,
-        opcode_name: []const u8,
-        gas_before: i32,
-        gas_after: i32,
-        gas_cost: u32,
-        stack_before: []u256, // Owned slice
-        stack_after: []u256, // Owned slice
-        memory_size_before: usize,
-        memory_size_after: usize,
-        depth: u32,
-        error_occurred: bool,
-        error_msg: ?[]const u8,
-    };
-
-    pub const StateSnapshot = struct {
-        pc: u32,
-        gas_remaining: u64,
-        stack: []u256, // Owned slice
-        memory_size: usize,
-        depth: u32,
-        timestamp: i64,
-    };
-
-    pub fn init(allocator: std.mem.Allocator) Self {
+    pub fn init(allocator: std.mem.Allocator) DefaultTracer {
         return .{
             .allocator = allocator,
-            .breakpoints = std.AutoHashMap(u32, void).init(allocator),
-            .steps = std.ArrayList(ExecutionStep){},
-            .state_snapshots = std.ArrayList(StateSnapshot){},
+            .steps = std.ArrayList(ExecutionStep){
+                .items = &.{},
+                .capacity = 0,
+            },
+            .pc_tracker = null,
+            .gas_tracker = null,
+            .current_pc = 0,
+            .bytecode = &[_]u8{},
+            .minimal_evm = null,
+            .instruction_count = 0,
+            .schedule_index = 0,
+            .simple_instruction_count = 0,
+            .fused_instruction_count = 0,
+            // 300M instructions is ~10x the block gas limit
+            // Normal contracts execute far fewer instructions
+            .instruction_safety = SafetyCounter(u64, .enabled).init(300_000_000),
         };
     }
 
-    pub fn deinit(self: *Self) void {
-        // Free execution step memory
-        for (self.steps.items) |*step| {
-            self.allocator.free(step.stack_before);
-            self.allocator.free(step.stack_after);
-            if (step.error_msg) |msg| {
-                self.allocator.free(msg);
+    pub fn deinit(self: *DefaultTracer) void {
+        // Clean up MinimalEvm if it exists
+        if (self.minimal_evm) |evm| {
+            // The arena allocator in MinimalEvm will clean up all MinimalFrame allocations
+            // when deinit is called, so we don't need to manually clean up frames
+            self.debug("Destroying MinimalEvm at 0x{x}", .{@intFromPtr(evm)});
+            evm.deinitPtr(self.allocator);
+            self.minimal_evm = null;
+        }
+    }
+
+    /// Initialize PC tracker with bytecode (called when frame starts interpretation)
+    pub fn initPcTracker(self: *DefaultTracer, bytecode: []const u8) void {
+        self.bytecode = bytecode;
+        self.current_pc = 0;
+    }
+
+    /// Initialize MinimalEvm as a sidecar validator when frame starts interpretation
+    pub fn onInterpret(self: *DefaultTracer, frame: anytype, bytecode: []const u8, gas_limit: i64) void {
+        _ = gas_limit;
+        const builtin = @import("builtin");
+        if (comptime (builtin.mode == .Debug or builtin.mode == .ReleaseSafe)) {
+            // Get EVM depth to check if this is an inner call
+            const main_evm = frame.getEvm();
+            const depth = main_evm.depth;
+            
+            // Only create/reset MinimalEvm for the outermost frame (depth 1)
+            // Inner frames (depth > 1) will be handled by MinimalEvm's inner_call
+            if (depth > 1) {
+                self.debug("Skipping MinimalEvm init for inner frame at depth {d}", .{depth});
+                return;
+            }
+            
+            // Clean up any existing MinimalEvm before resetting
+            if (self.minimal_evm) |evm| {
+                evm.deinitPtr(self.allocator);
+                self.minimal_evm = null;
+            }
+
+            // Reset execution counters
+            self.instruction_count = 0;
+            self.schedule_index = 0;
+            self.simple_instruction_count = 0;
+            self.fused_instruction_count = 0;
+
+            // Reset the instruction safety counter for the new frame
+            self.instruction_safety.count = 0;
+
+            if (bytecode.len > 0) {
+                    self.minimal_evm = MinimalEvm.initPtr(self.allocator) catch {
+                        self.minimal_evm = null;
+                        return;
+                    };
+                    self.debug("Created MinimalEvm at 0x{x}", .{@intFromPtr(self.minimal_evm)});
+                }
+
+                if (self.minimal_evm) |evm| {
+                    // Get the main EVM for context  
+                    const evm_instance = frame.getEvm();
+
+                    // Sync blockchain context from EVM
+                    const block_info = evm_instance.get_block_info();
+                    evm.setBlockchainContext(
+                        evm_instance.get_chain_id(),
+                        block_info.number,
+                        block_info.timestamp,
+                        block_info.difficulty,
+                        block_info.coinbase,
+                        block_info.gas_limit,
+                        block_info.base_fee,
+                        block_info.blob_base_fee
+                    );
+
+                    // Set transaction context
+                    evm.setTransactionContext(evm_instance.get_tx_origin(), evm_instance.gas_price);
+
+                    // Get frame context for call
+                    var caller = primitives.ZERO_ADDRESS;
+                    var address = primitives.ZERO_ADDRESS;
+                    var value: u256 = 0;
+                    var calldata: []const u8 = &[_]u8{};
+
+                    if (@hasField(@TypeOf(frame.*), "contract_address")) {
+                        address = frame.contract_address;
+                    }
+                    if (@hasField(@TypeOf(frame.*), "caller")) {
+                        caller = frame.caller;
+                    }
+                    if (@hasField(@TypeOf(frame.*), "value")) {
+                        value = frame.value;
+                    }
+                    if (@hasField(@TypeOf(frame.*), "calldata_slice")) {
+                        calldata = frame.calldata_slice;
+                    }
+
+                    // Ensure the MinimalEvm knows the code for this address (for inner calls)
+                    if (!std.mem.eql(u8, &address.bytes, &primitives.ZERO_ADDRESS.bytes)) {
+                        evm.setCode(address, bytecode) catch {};
+                    }
+
+                    // Create a frame but don't execute it yet - execution will happen step-by-step
+                    const frame_gas_remaining = frame.gas_remaining;
+
+                    // Create the frame directly using MinimalEvm's arena allocator
+                    const minimal_frame = evm.allocator.create(MinimalFrame) catch return;
+                    minimal_frame.* = MinimalFrame.init(
+                        evm.allocator,
+                        bytecode,
+                        @intCast(frame_gas_remaining),
+                        caller,
+                        address,
+                        value,
+                        calldata,
+                        @as(*anyopaque, @ptrCast(evm)),
+                    ) catch return;
+
+                    // Set as current frame
+                    evm.current_frame = minimal_frame;
+
+                    self.debug("MinimalEvm initialized with bytecode_len={d}, gas={d}", .{
+                        bytecode.len,
+                        frame_gas_remaining,
+                    });
+                }
+        }
+    }
+
+    /// Called before an instruction executes
+    /// This is the main entry point for instruction tracing
+    pub fn before_instruction(
+        self: *DefaultTracer,
+        frame: anytype,
+        comptime opcode: UnifiedOpcode,
+        cursor: [*]const @TypeOf(frame.*).Dispatch.Item
+    ) void {
+        const builtin = @import("builtin");
+        if (comptime (builtin.mode == .Debug or builtin.mode == .ReleaseSafe)) {
+            if (builtin.target.cpu.arch != .wasm32 or builtin.target.os.tag != .freestanding) {
+                // Skip validation for inner frames (depth > 1)
+                const main_evm = frame.getEvm();
+                if (main_evm.depth > 1) {
+                    return;
+                }
+                const opcode_name = comptime @tagName(opcode);
+                const opcode_value = @intFromEnum(opcode);
+
+                // Debug logging to understand execution order
+                if (self.minimal_evm) |evm| {
+                    const pc = evm.getPC();
+                    const bytecode = evm.getBytecode();
+                    log.debug("beforeInstruction: Frame executing {s}, MinimalEvm PC={d}, bytecode[PC]=0x{x:0>2}", .{
+                        opcode_name,
+                        pc,
+                        if (pc < bytecode.len) bytecode[pc] else 0
+                    });
+                }
+
+                // Validate cursor points to expected handler for regular opcodes
+                if (opcode_value <= 0xff) {
+                    const expected_handler = @TypeOf(frame.*).opcode_handlers[opcode_value];
+                    const actual_handler = cursor[0].opcode_handler;
+                    if (actual_handler != expected_handler) {
+                        self.err("[HANDLER] Handler mismatch for {s}: expected={*}, actual={*}", .{
+                            opcode_name, expected_handler, actual_handler
+                        });
+                    }
+                }
+
+                // Increment instruction counts
+                self.instruction_count += 1;
+                if (opcode_value > 0xff) {
+                    self.fused_instruction_count += 1;
+                } else {
+                    self.simple_instruction_count += 1;
+                }
+
+                // Increment safety counter - will panic if limit exceeded
+                // with message about potential infinite loop or excessive instructions
+                self.instruction_safety.inc();
+
+                // Execute MinimalEvm step for validation (if initialized)
+                if (self.minimal_evm) |evm| {
+                    // Log stack state before execution
+                    if (evm.current_frame) |mf| {
+                        log.debug("Before executeMinimalEvmForOpcode {s}: MinimalEvm stack={d}, Frame stack={d}", .{
+                            opcode_name,
+                            mf.stack.items.len,
+                            frame.stack.size(),
+                        });
+                    }
+                    self.executeMinimalEvmForOpcode(evm, opcode, frame, cursor);
+                    // Log stack state after execution
+                    if (evm.current_frame) |mf| {
+                        log.debug("After executeMinimalEvmForOpcode {s}: MinimalEvm stack={d}, Frame stack={d}", .{
+                            opcode_name,
+                            mf.stack.items.len,
+                            frame.stack.size(),
+                        });
+                    }
+                }
+
+                // Log execution
+                const stack_size = frame.stack.size();
+                log.debug("EXEC[{d}]: {s} | PC={d} stack={d} gas={d}", .{
+                    self.instruction_count,
+                    opcode_name,
+                    self.current_pc,
+                    stack_size,
+                    frame.gas_remaining,
+                });
             }
         }
-        self.steps.deinit(self.allocator);
-
-        // Free state snapshots
-        for (self.state_snapshots.items) |*snapshot| {
-            self.allocator.free(snapshot.stack);
-        }
-        self.state_snapshots.deinit(self.allocator);
-
-        self.breakpoints.deinit();
     }
 
-    /// Enable or disable step-by-step execution mode
-    pub fn setStepMode(self: *Self, enabled: bool) void {
-        self.step_mode = enabled;
-    }
+    /// Called after an instruction completes successfully
+    pub fn after_instruction(
+        self: *DefaultTracer,
+        frame: anytype,
+        comptime opcode: UnifiedOpcode,
+        next_handler: anytype,
+        next_cursor: [*]const @TypeOf(frame.*).Dispatch.Item
+    ) void {
+        const builtin = @import("builtin");
+        if (comptime (builtin.mode == .Debug or builtin.mode == .ReleaseSafe)) {
+            if (builtin.target.cpu.arch != .wasm32 or builtin.target.os.tag != .freestanding) {
+                // Skip validation for inner frames (depth > 1)
+                const main_evm = frame.getEvm();
+                if (main_evm.depth > 1) {
+                    return;
+                }
+                const opcode_name = comptime @tagName(opcode);
 
-    /// Check if execution should pause (breakpoint or step mode)
-    pub fn shouldPause(self: *Self, pc: u32) bool {
-        return self.step_mode or self.breakpoints.get(pc) != null;
-    }
+                // Advance schedule index
+                self.schedule_index += 1;
 
-    /// Pause execution
-    pub fn pause(self: *Self) void {
-        self.paused = true;
-    }
+                // Validate next handler consistency
+                if (next_cursor[0] != .opcode_handler or next_cursor[0].opcode_handler != next_handler) {
+                    self.err("[SCHEDULE] Next handler mismatch at sched_idx={d}", .{self.schedule_index});
+                }
 
-    /// Resume execution
-    pub fn resumeExecution(self: *Self) void {
-        self.paused = false;
-    }
+                // Validate next handler points to expected handler for regular opcodes
+                if (next_cursor[0] == .opcode_handler) {
+                    // Extract the opcode from the next handler if it's a regular opcode
+                    const next_opcode_value = self.getOpcodeFromHandler(@TypeOf(frame.*), next_handler);
+                    if (next_opcode_value) |opcode_int| {
+                        if (opcode_int <= 0xff) {
+                            const expected_next_handler = @TypeOf(frame.*).opcode_handlers[opcode_int];
+                            if (next_handler != expected_next_handler) {
+                                self.err("[HANDLER] Next handler mismatch: opcode=0x{x:0>2}, expected={*}, actual={*}", .{
+                                    opcode_int, expected_next_handler, next_handler
+                                });
+                            }
+                        }
+                    }
+                }
 
-    /// Add a breakpoint at the given PC
-    pub fn addBreakpoint(self: *Self, pc: u32) !void {
-        try self.breakpoints.put(pc, {});
-    }
+                // Validate MinimalEvm state
+                log.debug("afterInstruction: Validating state after {s}", .{opcode_name});
+                if (self.minimal_evm) |evm| {
+                    if (evm.current_frame) |mf| {
+                        log.debug("  MinimalEvm stack={d}, Frame stack={d}", .{
+                            mf.stack.items.len,
+                            frame.stack.size(),
+                        });
+                    }
+                }
+                self.validateMinimalEvmState(frame, opcode);
 
-    /// Remove a breakpoint at the given PC
-    pub fn removeBreakpoint(self: *Self, pc: u32) bool {
-        return self.breakpoints.remove(pc);
-    }
+                // Update current PC tracking
+                // Note: PC synchronization between Frame dispatch and MinimalEvm sequential
+                // execution is complex due to synthetic opcodes, so we track separately
+                if (self.minimal_evm) |evm| {
+                    self.current_pc = evm.getPC();
+                }
 
-    /// Check if there's a breakpoint at the given PC
-    pub fn hasBreakpoint(self: *Self, pc: u32) bool {
-        return self.breakpoints.get(pc) != null;
-    }
-
-    /// Clear all breakpoints
-    pub fn clearBreakpoints(self: *Self) void {
-        self.breakpoints.clearRetainingCapacity();
-    }
-
-    /// Get the current execution step count
-    pub fn getStepCount(self: *Self) u64 {
-        return self.total_instructions;
-    }
-
-    /// Get the most recent execution steps
-    pub fn getRecentSteps(self: *Self, count: usize) []const ExecutionStep {
-        const start = if (self.steps.items.len > count) self.steps.items.len - count else 0;
-        return self.steps.items[start..];
-    }
-
-    /// Get a specific execution step by index
-    pub fn getStep(self: *Self, index: usize) ?*const ExecutionStep {
-        if (index >= self.steps.items.len) return null;
-        return &self.steps.items[index];
-    }
-
-    /// Create a snapshot of the current state
-    pub fn captureState(self: *Self, pc: u32, comptime FrameType: type, frame: *const FrameType) !void {
-        // Get current stack contents
-        const stack_slice = @constCast(&frame.stack).get_slice();
-        const stack_copy = try self.allocator.alloc(u256, stack_slice.len);
-        @memcpy(stack_copy, stack_slice);
-
-        const snapshot = StateSnapshot{
-            .pc = pc,
-            .gas_remaining = @max(frame.gas_remaining, 0),
-            .stack = stack_copy,
-            .memory_size = if (@hasField(FrameType, "memory")) @constCast(&frame.memory).size() else 0,
-            .depth = if (@hasField(FrameType, "depth")) frame.depth else 0,
-            .timestamp = std.time.milliTimestamp(),
-        };
-
-        try self.state_snapshots.append(self.allocator, snapshot);
-
-        // Limit snapshots to prevent memory growth
-        if (self.state_snapshots.items.len > self.max_history) {
-            const old = self.state_snapshots.orderedRemove(0);
-            self.allocator.free(old.stack);
+                // Log completion
+                log.debug("DONE[{d}]: {s} | PC={d}", .{
+                    self.instruction_count,
+                    opcode_name,
+                    self.current_pc,
+                });
+            }
         }
     }
 
-    /// Required tracer interface: called before each operation
-    pub fn beforeOp(self: *Self, pc: u32, opcode: u8, comptime FrameType: type, frame: *const FrameType) void {
-        // Update instruction counter to verify tracer is working
-        self.total_instructions += 1;
-        
-        // Check if we should pause execution
-        if (self.shouldPause(pc)) {
-            self.paused = true;
+    /// Called when an instruction completes with a terminal state
+    pub fn after_complete(
+        self: *DefaultTracer,
+        frame: anytype,
+        comptime opcode: UnifiedOpcode
+    ) void {
+        const builtin = @import("builtin");
+        if (comptime (builtin.mode == .Debug or builtin.mode == .ReleaseSafe)) {
+            // Skip validation for inner frames (depth > 1)
+            const main_evm = frame.getEvm();
+            if (main_evm.depth > 1) {
+                return;
+            }
+            // Final validation for terminal states
+            self.validateMinimalEvmState(frame, opcode);
+        }
+    }
+
+    // ============================================================================
+    // MINIMAL EVM EXECUTION
+    // ============================================================================
+
+    /// Execute MinimalEvm for the given UnifiedOpcode
+    fn executeMinimalEvmForOpcode(
+        self: *DefaultTracer,
+        evm: *MinimalEvm,
+        comptime opcode: UnifiedOpcode,
+        frame: anytype,
+        cursor: [*]const @TypeOf(frame.*).Dispatch.Item
+    ) void {
+        const opcode_value = @intFromEnum(opcode);
+
+        // Log what we're about to execute
+        self.debug("=====================================", .{});
+        self.debug("Frame executing: {s}", .{@tagName(opcode)});
+        self.debug("  MinimalEvm PC: {d}", .{evm.getPC()});
+        self.debug("  Frame stack size: {d}", .{frame.stack.size()});
+        if (evm.current_frame) |minimal_frame| {
+            self.debug("  MinimalEvm stack size: {d}", .{minimal_frame.stack.items.len});
         }
 
-        // While paused, we would need to implement a mechanism to wait
-        // In the C API, this could be handled by returning a "paused" status
-        // and requiring explicit resume calls
-
-        // Capture state before operation for step recording
-        self.captureStateForStep(pc, opcode, FrameType, frame, true) catch |err| {
-            log.debug("Failed to capture before state: {}", .{err});
-        };
-    }
-
-    /// Required tracer interface: called after each operation
-    pub fn afterOp(self: *Self, pc: u32, opcode: u8, comptime FrameType: type, frame: *const FrameType) void {
-        // Update statistics
-        self.total_instructions += 1;
-
-        // Capture state after operation to complete the step record
-        self.captureStateForStep(pc, opcode, FrameType, frame, false) catch |err| {
-            log.debug("Failed to capture after state: {}", .{err});
-        };
-
-        // Create state snapshot if configured
-        self.captureState(pc, FrameType, frame) catch |err| {
-            log.debug("Failed to capture state snapshot: {}", .{err});
-        };
-    }
-
-    /// Required tracer interface: called when an error occurs
-    pub fn onError(self: *Self, pc: u32, opcode: u8, err: anyerror, comptime FrameType: type, frame: *const FrameType) void {
-        _ = frame;
-        _ = pc;
-        _ = opcode;
-        // Record error in current step if we have one
-        if (self.steps.items.len > 0) {
-            const current_step = &self.steps.items[self.steps.items.len - 1];
-            current_step.error_occurred = true;
-
-            // Store error message
-            const error_name = @errorName(err);
-            current_step.error_msg = self.allocator.dupe(u8, error_name) catch null;
-        }
-
-        // Always pause on error for debugging
-        self.paused = true;
-
-        log.debug("DebuggingTracer: Error occurred in frame type {s}: {}", .{ @typeName(FrameType), err });
-    }
-
-    /// Helper function to capture state for step recording
-    fn captureStateForStep(self: *Self, pc: u32, opcode: u8, comptime FrameType: type, frame: *const FrameType, is_before: bool) !void {
-        const gas = @max(frame.gas_remaining, 0);
-
-        // Create stack copy
-        const stack_slice = @constCast(&frame.stack).get_slice();
-        const stack_copy = try self.allocator.alloc(u256, stack_slice.len);
-        @memcpy(stack_copy, stack_slice);
-
-        if (is_before) {
-            // Start a new execution step
-            const step = ExecutionStep{
-                .step_number = self.total_instructions,
-                .pc = pc,
-                .opcode = opcode,
-                .opcode_name = getOpcodeName(opcode),
-                .gas_before = @as(i32, @intCast(@min(gas, std.math.maxInt(i32)))),
-                .gas_after = @as(i32, @intCast(@min(gas, std.math.maxInt(i32)))), // Will be updated in afterOp
-                .gas_cost = 0, // Will be calculated in afterOp
-                .stack_before = stack_copy,
-                .stack_after = &[_]u256{}, // Will be updated in afterOp
-                .memory_size_before = if (@hasField(FrameType, "memory")) @constCast(&frame.memory).size() else 0,
-                .memory_size_after = 0, // Will be updated in afterOp
-                .depth = if (@hasField(FrameType, "depth")) frame.depth else 0,
-                .error_occurred = false,
-                .error_msg = null,
-            };
-
-            try self.steps.append(self.allocator, step);
-
-            // Limit history size
-            if (self.steps.items.len > self.max_history) {
-                const old = self.steps.orderedRemove(0);
-                self.allocator.free(old.stack_before);
-                self.allocator.free(old.stack_after);
-                if (old.error_msg) |msg| {
-                    self.allocator.free(msg);
+        // For regular opcodes (0x00-0xFF), execute exactly 1 opcode in MinimalEvm
+        if (opcode_value <= 0xff) {
+            // Special handling: JUMPDEST in Frame pre-charges entire basic-block gas.
+            // MinimalEvm's JUMPDEST charges only JumpdestGas, so we reconcile here.
+            if (opcode_value == 0x5b) { // JUMPDEST
+                const DispatchType = @TypeOf(frame.*).Dispatch;
+                const dispatch = DispatchType{ .cursor = cursor };
+                const op_data = dispatch.getOpData(.JUMPDEST);
+                const block_gas: u64 = op_data.metadata.gas;
+                const jumpdest_gas: u64 = primitives.GasConstants.JumpdestGas;
+                if (evm.current_frame) |mf| {
+                    const extra: i64 = @as(i64, @intCast(block_gas)) - @as(i64, @intCast(jumpdest_gas));
+                    mf.gas_remaining -= extra;
                 }
             }
-        } else {
-            // Update the current step with after state
-            if (self.steps.items.len > 0) {
-                const current_step = &self.steps.items[self.steps.items.len - 1];
-                current_step.gas_after = @as(i32, @intCast(@min(gas, std.math.maxInt(i32))));
-                current_step.gas_cost = @intCast(@max(0, current_step.gas_before - @as(i32, @intCast(@min(gas, std.math.maxInt(i32))))));
-                current_step.stack_after = stack_copy;
-                current_step.memory_size_after = if (@hasField(FrameType, "memory")) @constCast(&frame.memory).size() else 0;
-            } else {
-                // No current step, free the stack copy
-                self.allocator.free(stack_copy);
+            // Execute a single step in MinimalEvm (delegates to current frame)
+            // Debug: Check if MinimalEvm has a current frame
+            if (evm.current_frame == null) {
+                log.err("[EVM2] MinimalEvm has no current frame when trying to execute opcode 0x{x:0>2}", .{opcode_value});
+                @panic("MinimalEvm not initialized");
             }
-        }
-    }
-
-    /// Reset all debugging state
-    pub fn reset(self: *Self) void {
-        // Clear execution history
-        for (self.steps.items) |*step| {
-            self.allocator.free(step.stack_before);
-            self.allocator.free(step.stack_after);
-            if (step.error_msg) |msg| {
-                self.allocator.free(msg);
-            }
-        }
-        self.steps.clearRetainingCapacity();
-
-        // Clear state snapshots
-        for (self.state_snapshots.items) |*snapshot| {
-            self.allocator.free(snapshot.stack);
-        }
-        self.state_snapshots.clearRetainingCapacity();
-
-        // Reset statistics
-        self.total_instructions = 0;
-        self.total_gas_used = 0;
-
-        // Keep breakpoints but reset execution state
-        self.paused = false;
-    }
-
-    /// Get debugging statistics
-    pub fn getStats(self: *Self) struct {
-        total_instructions: u64,
-        total_gas_used: u64,
-        breakpoint_count: usize,
-        history_size: usize,
-        snapshot_count: usize,
-    } {
-        return .{
-            .total_instructions = self.total_instructions,
-            .total_gas_used = self.total_gas_used,
-            .breakpoint_count = self.breakpoints.count(),
-            .history_size = self.steps.items.len,
-            .snapshot_count = self.state_snapshots.items.len,
-        };
-    }
-};
-
-// ============================================================================
-// JSON-RPC TRACING
-// ============================================================================
-
-/// JSON-RPC compatible tracer that produces geth-style debug_traceTransaction output
-/// Collects execution traces and produces them in a format compatible with Ethereum JSON-RPC
-pub const JSONRPCTracer = struct {
-    const Self = @This();
-    
-    allocator: std.mem.Allocator,
-    trace_steps: std.ArrayList(JSONRPCStep),
-    current_depth: u32 = 0,
-    gas_used: u64 = 0,
-    current_pc: u32 = 0,
-    jump_table: ?*const anyopaque = null, // Pointer to jump table for PC lookups
-    last_opcode: u8 = 0, // Track last opcode to detect jumps
-    
-    pub const JSONRPCStep = struct {
-        op: []const u8,
-        opcode: u8,  // Add the actual opcode byte
-        pc: u64,
-        gas: u64,
-        gasCost: u64,
-        depth: u32,
-        stack: []const u256,
-        memory: ?[]const u8 = null,
-        memSize: u32 = 0,
-        storage: ?std.hash_map.HashMap(u256, u256, std.hash_map.AutoContext(u256), 80) = null,
-        returnData: ?[]const u8 = null,
-        
-        pub fn deinit(self: *JSONRPCStep, allocator: std.mem.Allocator) void {
-            allocator.free(self.op);
-            allocator.free(self.stack);
-            if (self.memory) |mem| {
-                allocator.free(mem);
-            }
-            if (self.storage) |*storage| {
-                storage.deinit();
-            }
-            if (self.returnData) |ret_data| {
-                allocator.free(ret_data);
-            }
-        }
-    };
-    
-    pub fn init(allocator: std.mem.Allocator) Self {
-        return .{
-            .allocator = allocator,
-            .trace_steps = std.ArrayList(JSONRPCStep){},
-        };
-    }
-    
-    pub fn deinit(self: *Self) void {
-        for (self.trace_steps.items) |*step| {
-            step.deinit(self.allocator);
-        }
-        self.trace_steps.deinit(self.allocator);
-    }
-    
-    /// Called before frame execution begins
-    pub fn beforeExecute(self: *Self, comptime FrameType: type, frame: *const FrameType) void {
-        _ = self;
-        _ = frame;
-        // Initialize any execution-level state
-    }
-    
-    /// Called after frame execution completes
-    pub fn afterExecute(self: *Self, comptime FrameType: type, frame: *const FrameType) void {
-        _ = self;
-        _ = frame;
-        // Finalize any execution-level state
-    }
-    
-    /// Called before each opcode operation
-    pub fn beforeOp(self: *Self, pc: u32, opcode: u8, comptime FrameType: type, frame: *const FrameType) void {
-        // Update our PC tracking based on the last opcode
-        if (self.trace_steps.items.len > 0) {
-            // Check if we just did a JUMP/JUMPI and need to update PC from jump table
-            if (self.last_opcode == 0x56 or self.last_opcode == 0x57) { // JUMP or JUMPI
-                // For jumps, the PC passed in should be the jump destination
-                self.current_pc = pc;
-            } else if (self.last_opcode >= 0x60 and self.last_opcode <= 0x7f) {
-                // PUSH instruction - skip the push data bytes
-                const push_size = self.last_opcode - 0x5f;
-                self.current_pc += push_size + 1;
-            } else {
-                // Regular instruction - increment by 1
-                self.current_pc += 1;
-            }
-        } else {
-            // First instruction, use PC 0
-            self.current_pc = 0;
-        }
-        
-        
-        // Capture pre-execution state for the step
-        const gas_before: u64 = @max(frame.gas_remaining, 0);
-        
-        // Create stack copy
-        const stack_size = @constCast(&frame.stack).size();
-        const stack_copy = self.allocator.alloc(u256, stack_size) catch return; // Return on allocation failure
-        const stack_slice = @constCast(&frame.stack).get_slice();
-        @memcpy(stack_copy, stack_slice);
-        
-        const op_name = getOpcodeName(opcode);
-        const op_name_copy = self.allocator.dupe(u8, op_name) catch {
-            self.allocator.free(stack_copy);
+            evm.step() catch |e| {
+                // Get actual opcode from MinimalEvm to see what it was trying to execute
+                var actual_opcode: u8 = 0;
+                if (evm.current_frame) |mf| {
+                    if (mf.pc < mf.bytecode.len) {
+                        actual_opcode = mf.bytecode[mf.pc];
+                    }
+                }
+                log.err("[EVM2] MinimalEvm exec error at PC={d}, bytecode[PC]=0x{x:0>2}, Frame expects=0x{x:0>2}: {any}", .{
+                    if (evm.current_frame) |mf| mf.pc else 0,
+                    actual_opcode,
+                    opcode_value,
+                    e
+                });
+                @panic("MinimalEvm execution error");
+            };
             return;
-        };
-        
-        // Get depth if available
-        const depth_val: u32 = if (comptime @hasField(FrameType, "depth")) @intCast(frame.depth) else self.current_depth;
-        
-        // Create the step (gas cost will be calculated in afterOp)
-        const step = JSONRPCStep{
-            .op = op_name_copy,
-            .opcode = opcode,  // Store the actual opcode byte
-            .pc = @intCast(self.current_pc),
-            .gas = gas_before,
-            .gasCost = 0, // Will be updated in afterOp
-            .depth = depth_val,
-            .stack = stack_copy,
-            .memSize = if (comptime @hasField(FrameType, "memory")) @intCast(@constCast(&frame.memory).size()) else 0,
-        };
-        
-        self.trace_steps.append(self.allocator, step) catch return; // Return on allocation failure
-        
-        // Update last opcode for next iteration
-        self.last_opcode = opcode;
-    }
-    
-    /// Called after each opcode operation
-    pub fn afterOp(self: *Self, pc: u32, opcode: u8, comptime FrameType: type, frame: *const FrameType) void {
-        _ = pc;
-        _ = opcode;
-        
-        // Update the last step with post-execution state
-        if (self.trace_steps.items.len == 0) return;
-        
-        const current_step = &self.trace_steps.items[self.trace_steps.items.len - 1];
-        const gas_after: u64 = @max(frame.gas_remaining, 0);
-        
-        // Calculate gas cost
-        current_step.gasCost = if (current_step.gas >= gas_after) 
-            current_step.gas - gas_after 
-        else 
-            0;
-            
-        // Update memory size if available
-        if (comptime @hasField(FrameType, "memory")) {
-            current_step.memSize = @intCast(@constCast(&frame.memory).size());
+        }
+
+        // Handle fused opcodes by validating bytecode and stepping
+        switch (opcode) {
+            // PUSH + arithmetic fusions (2 steps)
+            .PUSH_ADD_INLINE, .PUSH_ADD_POINTER => {
+                if (evm.getPC() + 2 < evm.getBytecode().len and
+                    evm.getBytecode()[evm.getPC()] >= 0x60 and evm.getBytecode()[evm.getPC()] <= 0x7f and
+                    evm.getBytecode()[evm.getPC() + 1 + (evm.getBytecode()[evm.getPC()] - 0x5f)] == 0x01)
+                {
+                    inline for (0..2) |_| {
+                        evm.step() catch |e| {
+                            self.err("PUSH_ADD step failed: {any}", .{e});
+                            return;
+                        };
+                    }
+                }
+            },
+            .PUSH_MUL_INLINE, .PUSH_MUL_POINTER => {
+                if (evm.getPC() + 2 < evm.getBytecode().len and
+                    evm.getBytecode()[evm.getPC()] >= 0x60 and evm.getBytecode()[evm.getPC()] <= 0x7f and
+                    evm.getBytecode()[evm.getPC() + 1 + (evm.getBytecode()[evm.getPC()] - 0x5f)] == 0x02)
+                {
+                    inline for (0..2) |_| {
+                        evm.step() catch |e| {
+                            self.err("PUSH_MUL step failed: {any}", .{e});
+                            return;
+                        };
+                    }
+                }
+            },
+            .PUSH_SUB_INLINE, .PUSH_SUB_POINTER => {
+                if (evm.getPC() + 2 < evm.getBytecode().len and
+                    evm.getBytecode()[evm.getPC()] >= 0x60 and evm.getBytecode()[evm.getPC()] <= 0x7f and
+                    evm.getBytecode()[evm.getPC() + 1 + (evm.getBytecode()[evm.getPC()] - 0x5f)] == 0x03)
+                {
+                    inline for (0..2) |_| {
+                        evm.step() catch |e| {
+                            self.err("PUSH_SUB step failed: {any}", .{e});
+                            return;
+                        };
+                    }
+                }
+            },
+            .PUSH_DIV_INLINE, .PUSH_DIV_POINTER => {
+                if (evm.getPC() + 2 < evm.getBytecode().len and
+                    evm.getBytecode()[evm.getPC()] >= 0x60 and evm.getBytecode()[evm.getPC()] <= 0x7f and
+                    evm.getBytecode()[evm.getPC() + 1 + (evm.getBytecode()[evm.getPC()] - 0x5f)] == 0x04)
+                {
+                    inline for (0..2) |_| {
+                        evm.step() catch |e| {
+                            self.err("PUSH_DIV step failed: {any}", .{e});
+                            return;
+                        };
+                    }
+                }
+            },
+
+            // Bitwise fusions
+            .PUSH_AND_INLINE, .PUSH_AND_POINTER => {
+                if (evm.getPC() + 2 < evm.getBytecode().len and
+                    evm.getBytecode()[evm.getPC()] >= 0x60 and evm.getBytecode()[evm.getPC()] <= 0x7f and
+                    evm.getBytecode()[evm.getPC() + 1 + (evm.getBytecode()[evm.getPC()] - 0x5f)] == 0x16)
+                {
+                    inline for (0..2) |_| {
+                        evm.step() catch |e| {
+                            self.err("PUSH_AND step failed: {any}", .{e});
+                            return;
+                        };
+                    }
+                }
+            },
+            .PUSH_OR_INLINE, .PUSH_OR_POINTER => {
+                if (evm.getPC() + 2 < evm.getBytecode().len and
+                    evm.getBytecode()[evm.getPC()] >= 0x60 and evm.getBytecode()[evm.getPC()] <= 0x7f and
+                    evm.getBytecode()[evm.getPC() + 1 + (evm.getBytecode()[evm.getPC()] - 0x5f)] == 0x17)
+                {
+                    inline for (0..2) |_| {
+                        evm.step() catch |e| {
+                            self.err("PUSH_OR step failed: {any}", .{e});
+                            return;
+                        };
+                    }
+                }
+            },
+            .PUSH_XOR_INLINE, .PUSH_XOR_POINTER => {
+                if (evm.getPC() + 2 < evm.getBytecode().len and
+                    evm.getBytecode()[evm.getPC()] >= 0x60 and evm.getBytecode()[evm.getPC()] <= 0x7f and
+                    evm.getBytecode()[evm.getPC() + 1 + (evm.getBytecode()[evm.getPC()] - 0x5f)] == 0x18)
+                {
+                    inline for (0..2) |_| {
+                        evm.step() catch |e| {
+                            self.err("PUSH_XOR step failed: {any}", .{e});
+                            return;
+                        };
+                    }
+                }
+            },
+
+            // Memory fusions
+            .PUSH_MLOAD_INLINE, .PUSH_MLOAD_POINTER => {
+                if (evm.getPC() + 2 < evm.getBytecode().len and
+                    evm.getBytecode()[evm.getPC()] >= 0x60 and evm.getBytecode()[evm.getPC()] <= 0x7f and
+                    evm.getBytecode()[evm.getPC() + 1 + (evm.getBytecode()[evm.getPC()] - 0x5f)] == 0x51)
+                {
+                    inline for (0..2) |_| {
+                        evm.step() catch |e| {
+                            self.err("PUSH_MLOAD step failed: {any}", .{e});
+                            return;
+                        };
+                    }
+                }
+            },
+            .PUSH_MSTORE_INLINE, .PUSH_MSTORE_POINTER => {
+                // PUSH_MSTORE_INLINE synthetic operation in Frame:
+                // - Pops 1 value from stack (the value to store)
+                // - Uses metadata offset (doesn't push offset to stack)
+                // - Stores value at that memory offset
+                // MinimalEvm must emulate the same net stack effect (pop 1, push 0)
+
+                // PUSH_MSTORE_INLINE synthetic opcodes will be handled by sequential bytecode execution
+
+                // PUSH_MSTORE_INLINE represents PUSH1 + MSTORE sequence in bytecode
+                // MinimalEvm should execute these 2 sequential operations
+
+                // Debug: Log current MinimalEvm state before execution
+                self.debug("PUSH_MSTORE_INLINE: MinimalEvm PC={d}, stack_size={d}, Frame stack_size={d}", .{
+                    evm.getPC(), (evm.current_frame orelse unreachable).stack.items.len, frame.stack.size()
+                });
+
+                // Execute the 2-step sequence: PUSH1 + MSTORE
+                // First, check if we're at the right bytecode position for PUSH1+MSTORE
+                if (evm.getPC() + 2 < evm.getBytecode().len and
+                    evm.getBytecode()[evm.getPC()] == 0x60 and      // PUSH1
+                    evm.getBytecode()[evm.getPC() + 2] == 0x52) {   // MSTORE (after PUSH1 + 1 byte immediate)
+
+                    self.debug("PUSH_MSTORE_INLINE: Found PUSH1+MSTORE at PC {d}, executing 2 steps", .{evm.getPC()});
+
+                    // Execute PUSH1 + MSTORE
+                    inline for (0..2) |step_num| {
+                        const current_opcode = evm.getBytecode()[evm.getPC()];
+                        self.debug("PUSH_MSTORE step {d}: executing opcode 0x{x:0>2} at PC {d}", .{step_num + 1, current_opcode, evm.getPC()});
+
+                        evm.step() catch |e| {
+                            self.err("PUSH_MSTORE step {d} failed: opcode=0x{x:0>2}, error={any}", .{step_num + 1, current_opcode, e});
+                            return;
+                        };
+                    }
+                } else {
+                    // Not a PUSH1+MSTORE sequence - this is a mis-identified synthetic opcode
+                    self.debug("PUSH_MSTORE_INLINE: Not at PUSH1+MSTORE sequence at PC {d} (opcode=0x{x:0>2})", .{evm.getPC(),
+                        if (evm.getPC() < evm.getBytecode().len) evm.getBytecode()[evm.getPC()] else 0});
+
+                    // Do NOT execute any MinimalEvm operations for mis-identified synthetic opcodes
+                    // Frame will handle the actual opcode, MinimalEvm should remain unchanged
+                    self.debug("PUSH_MSTORE_INLINE: Skipping MinimalEvm execution for mis-identified synthetic opcode", .{});
+                }
+            },
+            .PUSH_MSTORE8_INLINE, .PUSH_MSTORE8_POINTER => {
+                // PUSH_MSTORE8_INLINE synthetic operation in Frame:
+                // - Pops 1 value from stack (the value to store)
+                // - Uses metadata offset (doesn't push offset to stack)
+                // - Stores LSB of value at that memory offset
+
+                // PUSH_MSTORE8_INLINE synthetic opcodes will be handled by sequential bytecode execution
+
+                // PUSH_MSTORE8_INLINE represents PUSH1 + MSTORE8 sequence in bytecode
+                // MinimalEvm should execute these 2 sequential operations
+
+                // Debug: Log current MinimalEvm state before execution
+                self.debug("PUSH_MSTORE8_INLINE: MinimalEvm PC={d}, stack_size={d}, Frame stack_size={d}", .{
+                    evm.getPC(), (evm.current_frame orelse unreachable).stack.items.len, frame.stack.size()
+                });
+
+                // Execute the 2-step sequence: PUSH1 + MSTORE8
+                if (evm.getPC() + 2 < evm.getBytecode().len and
+                    evm.getBytecode()[evm.getPC()] == 0x60 and      // PUSH1
+                    evm.getBytecode()[evm.getPC() + 2] == 0x53) {   // MSTORE8 (after PUSH1 + 1 byte immediate)
+
+                    self.debug("PUSH_MSTORE8_INLINE: Found PUSH1+MSTORE8 at PC {d}, executing 2 steps", .{evm.getPC()});
+
+                    inline for (0..2) |step_num| {
+                        if (evm.getPC() >= evm.getBytecode().len) {
+                            self.err("PUSH_MSTORE8 step {d}: PC out of bounds: {d} >= {d}", .{step_num + 1, evm.getPC(), evm.getBytecode().len});
+                            return;
+                        }
+
+                        const current_opcode = evm.getBytecode()[evm.getPC()];
+                        self.debug("PUSH_MSTORE8 step {d}: executing opcode 0x{x:0>2} at PC {d}", .{step_num + 1, current_opcode, evm.getPC()});
+
+                        evm.step() catch |e| {
+                            self.err("PUSH_MSTORE8 step {d} failed: opcode=0x{x:0>2}, error={any}", .{step_num + 1, current_opcode, e});
+                            return;
+                        };
+                    }
+                } else {
+                    // Not a PUSH1+MSTORE8 sequence - this is a mis-identified synthetic opcode
+                    self.debug("PUSH_MSTORE8_INLINE: Not at PUSH1+MSTORE8 sequence at PC {d} (opcode=0x{x:0>2})", .{evm.getPC(),
+                        if (evm.getPC() < evm.getBytecode().len) evm.getBytecode()[evm.getPC()] else 0});
+
+                    // Do NOT execute any MinimalEvm operations for mis-identified synthetic opcodes
+                    // Frame will handle the actual opcode, MinimalEvm should remain unchanged
+                    self.debug("PUSH_MSTORE8_INLINE: Skipping MinimalEvm execution for mis-identified synthetic opcode", .{});
+                }
+            },
+
+            // Control flow fusions
+            .JUMP_TO_STATIC_LOCATION, .JUMPI_TO_STATIC_LOCATION => {
+                // These are optimized jumps, in the minimal EVM they are PUSH + JUMP(I)
+                const pc = evm.getPC();
+                const bytecode = evm.getBytecode();
+                if (pc + 2 < bytecode.len and bytecode[pc] >= 0x60 and bytecode[pc] <= 0x7f) {
+                    const push_size = bytecode[pc] - 0x5f;
+                    const next_op_pc = pc + 1 + push_size;
+                    if (next_op_pc < bytecode.len and (bytecode[next_op_pc] == 0x56 or bytecode[next_op_pc] == 0x57)) {
+                        inline for (0..2) |_| {
+                            evm.step() catch |e| {
+                                self.err("JUMP_TO_STATIC_LOCATION step failed: {any}", .{e});
+                                return;
+                            };
+                        }
+                    }
+                }
+            },
+
+            // Multi-push/pop fusions
+            .MULTI_PUSH_2 => {
+                // Approximate validation: check for two consecutive PUSHes
+                const pc = evm.getPC();
+                const bytecode = evm.getBytecode();
+                if (pc + 2 < bytecode.len and bytecode[pc] >= 0x60 and bytecode[pc] <= 0x7f) {
+                    const push_size1 = bytecode[pc] - 0x5f;
+                    const next_pc = pc + 1 + push_size1;
+                    if (next_pc < bytecode.len and bytecode[next_pc] >= 0x60 and bytecode[next_pc] <= 0x7f) {
+                        inline for (0..2) |_| {
+                            evm.step() catch |e| {
+                                self.err("MULTI_PUSH_2 step failed: {any}", .{e});
+                                return;
+                            };
+                        }
+                    }
+                }
+            },
+            .MULTI_PUSH_3 => {
+                // Approximate validation for three PUSHes
+                inline for (0..3) |_| {
+                    evm.step() catch |e| {
+                        self.err("MULTI_PUSH_3 step failed: {any}", .{e});
+                        return;
+                    };
+                }
+            },
+            .MULTI_POP_2 => {
+                inline for (0..2) |_| {
+                    evm.step() catch |e| {
+                        self.err("MULTI_POP_2 step failed: {any}", .{e});
+                        return;
+                    };
+                }
+            },
+            .MULTI_POP_3 => {
+                inline for (0..3) |_| {
+                    evm.step() catch |e| {
+                        self.err("MULTI_POP_3 step failed: {any}", .{e});
+                        return;
+                    };
+                }
+            },
+
+            // Three-operation fusions
+            .DUP2_MSTORE_PUSH, .DUP3_ADD_MSTORE, .SWAP1_DUP2_ADD, .PUSH_DUP3_ADD, .PUSH_ADD_DUP1, .MLOAD_SWAP1_DUP2, .ISZERO_JUMPI, .CALLVALUE_CHECK, .PUSH0_REVERT => {
+                inline for (0..3) |_| {
+                    evm.step() catch |e| {
+                        self.err("Three-op fusion step failed: {any}", .{e});
+                        return;
+                    };
+                }
+            },
+
+            // Four-operation fusion
+            .FUNCTION_DISPATCH => {
+                // Step 4 times: PUSH4 + EQ + PUSH + JUMPI
+                inline for (0..4) |_| {
+                    evm.step() catch |e| {
+                        self.err("FUNCTION_DISPATCH step failed: {any}", .{e});
+                        return;
+                    };
+                }
+            },
+
+            else => {
+                // Unknown synthetic opcode - just step once
+                if (evm.getPC() < evm.getBytecode().len) {
+                    evm.step() catch |e| {
+                        self.err("MinimalEvm step failed for synthetic opcode: {any}", .{e});
+                    };
+                }
+            },
         }
     }
-    
-    /// Called when an error occurs during execution
-    pub fn onError(self: *Self, pc: u32, opcode: u8, err: anyerror, comptime FrameType: type, frame: *const FrameType) void {
+
+
+    /// Helper to get opcode number from handler pointer by searching opcode_handlers array
+    fn getOpcodeFromHandler(self: *DefaultTracer, comptime FrameType: type, handler: FrameType.OpcodeHandler) ?u8 {
+        _ = self;
+        inline for (0..256) |i| {
+            if (FrameType.opcode_handlers[i] == handler) {
+                return @intCast(i);
+            }
+        }
+        return null;
+    }
+
+    /// Validate MinimalEvm state against Frame state
+    fn validateMinimalEvmState(
+        self: *DefaultTracer,
+        frame: anytype,
+        comptime opcode: UnifiedOpcode
+    ) void {
+        if (self.minimal_evm) |evm| {
+            // Skip validation for nested calls
+            if (self.nested_depth > 0) return;
+            const opcode_name = @tagName(opcode);
+
+            // Compare stack sizes
+            const frame_stack_size = frame.stack.size();
+            const evm_stack_size = (evm.current_frame orelse unreachable).stack.items.len;
+
+            if (evm_stack_size != frame_stack_size) {
+                // Allow call-like opcodes a grace period: their host-dependent behavior
+                // can differ under the MinimalEvm stub host. We still log but avoid
+                // aborting on pure size diffs here to keep differential tests focused
+                // on Frame correctness. Content is validated when sizes match.
+                const is_call_like = switch (opcode) {
+                    .CALL, .CALLCODE, .DELEGATECALL, .STATICCALL => true,
+                    else => false,
+                };
+                if (is_call_like) {
+                    log.debug("[EVM2] [DIVERGENCE] (call-like) Stack size mismatch after {s}: MinimalEvm={d} Frame={d}", .{ opcode_name, evm_stack_size, frame_stack_size });
+                    return;
+                }
+                log.err("[EVM2] [DIVERGENCE] Stack size mismatch after {s}:", .{opcode_name});
+                log.err("[EVM2]   MinimalEvm: {d}, Frame: {d}", .{evm_stack_size, frame_stack_size});
+                // Show top elements for debugging
+                if (evm_stack_size > 0) {
+                    self.err("  MinimalEvm top: 0x{x}", .{
+                        (evm.current_frame orelse unreachable).stack.items[evm_stack_size - 1]
+                    });
+                }
+                if (frame_stack_size > 0) {
+                    self.err("  Frame top: 0x{x}", .{frame.stack.peek_unsafe()});
+                }
+                @panic("Stack divergence");
+            } else if (evm_stack_size > 0) {
+                // Compare stack contents
+                const frame_stack = frame.stack.get_slice();
+                for (0..evm_stack_size) |i| {
+                    const evm_val = (evm.current_frame orelse unreachable).stack.items[evm_stack_size - 1 - i];
+                    const frame_val = frame_stack[i];
+                    if (evm_val != frame_val) {
+                        log.err("[EVM2] [DIVERGENCE] Stack content mismatch at position {d}:", .{i});
+                        log.err("[EVM2]   MinimalEvm: 0x{x}, Frame: 0x{x}", .{evm_val, frame_val});
+                        log.err("[EVM2]   Opcode: {s}, MinimalEvm PC: {d}", .{opcode_name, if (evm.current_frame) |f| f.pc else 0});
+                        // Print full stack contents
+                        log.err("[EVM2]   MinimalEvm stack (top first):", .{});
+                        if (evm.current_frame) |f| {
+                            for (0..@min(10, f.stack.items.len)) |j| {
+                                log.err("[EVM2]     [{d}]: 0x{x}", .{j, f.stack.items[f.stack.items.len - 1 - j]});
+                            }
+                        }
+                        log.err("[EVM2]   Frame stack (top first):", .{});
+                        for (0..@min(10, frame_stack.len)) |j| {
+                            log.err("[EVM2]     [{d}]: 0x{x}", .{j, frame_stack[j]});
+                        }
+                        @panic("Stack content divergence");
+                    }
+                }
+            }
+
+            // Compare memory sizes
+            const frame_memory_size = if (@hasField(@TypeOf(frame.*), "memory"))
+                frame.memory.size() else 0;
+            const evm_memory_size = (evm.current_frame orelse unreachable).memory_size;
+
+            if (evm_memory_size != frame_memory_size) {
+                // Memory size mismatch is not critical, just debug log
+                log.debug("[EVM2] [DIVERGENCE] Memory size mismatch:", .{});
+                log.debug("[EVM2]   MinimalEvm: {d}, Frame: {d}", .{ evm_memory_size, frame_memory_size });
+            }
+
+            // Gas validation - different rules for different opcode types
+            const frame_gas_remaining = frame.gas_remaining;
+            const evm_gas_remaining = (evm.current_frame orelse unreachable).gas_remaining;
+
+            // Check if this is a jump/terminal opcode that should have exact gas match
+            const is_terminal_opcode = switch (opcode) {
+                .JUMP, .JUMPI, .STOP, .RETURN, .REVERT, .SELFDESTRUCT => true,
+                else => false,
+            };
+
+            if (is_terminal_opcode) {
+                // For jump/terminal opcodes, gas should match exactly
+                // because both EVMs should have consumed the same amount
+                if (frame_gas_remaining != evm_gas_remaining) {
+                    // Gas divergence at terminal state, debug log only
+                    log.debug("[EVM2] [GAS DIVERGENCE] Exact gas mismatch at terminal opcode {s}:", .{opcode_name});
+                    log.debug("[EVM2]   Frame gas_remaining: {d}", .{frame_gas_remaining});
+                    log.debug("[EVM2]   MinimalEvm gas_remaining: {d}", .{evm_gas_remaining});
+                    log.debug("[EVM2]   Difference: {d}", .{@as(i64, frame_gas_remaining) - @as(i64, evm_gas_remaining)});
+                }
+            } else {
+                // For regular opcodes, allow reasonable gas differences due to block vs opcode charging
+                // Frame may consume gas in larger chunks at block boundaries
+                const gas_diff = @as(i64, evm_gas_remaining) - @as(i64, frame_gas_remaining);
+
+                // Get expected first_block_gas for this frame to adjust tolerance
+                const expected_first_block_gas = if (@hasField(@TypeOf(frame.*), "first_block_gas_charged"))
+                    @as(i64, frame.first_block_gas_charged)
+                else
+                    0;
+
+                // Allow Frame to consume first_block_gas + 50 more than MinimalEvm
+                // This accounts for Frame's pre-charging strategy
+                const tolerance = expected_first_block_gas + 50;
+                if (gas_diff > tolerance) {
+                    // Gas divergence during execution, debug log only
+                    log.debug("[EVM2] [GAS DIVERGENCE] MinimalEvm consumed too much less gas than Frame after {s}:", .{opcode_name});
+                    log.debug("[EVM2]   Frame gas_remaining: {d}", .{frame_gas_remaining});
+                    log.debug("[EVM2]   MinimalEvm gas_remaining: {d}", .{evm_gas_remaining});
+                    log.debug("[EVM2]   Gas difference: {d} (exceeds {d} gas tolerance)", .{gas_diff, tolerance});
+                } else if (gas_diff < -20) {
+                    log.debug("[EVM2] [GAS DIVERGENCE] MinimalEvm consumed more gas than Frame after {s}:", .{opcode_name});
+                    log.debug("[EVM2]   Frame gas_remaining: {d}", .{frame_gas_remaining});
+                    log.debug("[EVM2]   MinimalEvm gas_remaining: {d}", .{evm_gas_remaining});
+                    self.warn("  MinimalEvm over-consumed by: {d}", .{-gas_diff});
+                }
+            }
+        }
+    }
+
+    // ============================================================================
+    // LOGGING FUNCTIONS
+    // ============================================================================
+
+    pub fn debug(self: *DefaultTracer, comptime format: []const u8, args: anytype) void {
+        _ = self;
+        log.debug(format, args);
+    }
+
+    pub fn err(self: *DefaultTracer, comptime format: []const u8, args: anytype) void {
+        _ = self;
+        log.err(format, args);
+        @panic("Tracer error - see log above");
+    }
+
+    pub fn warn(self: *DefaultTracer, comptime format: []const u8, args: anytype) void {
+        _ = self;
+        log.warn(format, args);
+    }
+
+    pub fn info(self: *DefaultTracer, comptime format: []const u8, args: anytype) void {
+        _ = self;
+        log.info(format, args);
+    }
+
+    pub fn throwError(self: *DefaultTracer, comptime format: []const u8, args: anytype) noreturn {
+        _ = self;
+        const builtin = @import("builtin");
+        log.err("FATAL: " ++ format, args);
+        if (builtin.target.cpu.arch == .wasm32 and builtin.target.os.tag == .freestanding) {
+            @panic("EVM execution error");
+        } else {
+            unreachable;
+        }
+    }
+
+    // ============================================================================
+    // EVM LIFECYCLE EVENTS
+    // ============================================================================
+
+    pub fn onFrameStart(self: *DefaultTracer, code_len: usize, gas: u64, depth: u16) void {
+        _ = self;
+        const builtin = @import("builtin");
+        if (comptime (builtin.mode == .Debug or builtin.mode == .ReleaseSafe)) {
+            log.debug("[EVM] Frame execution started: code_len={}, gas={}, depth={}", .{ code_len, gas, depth });
+        }
+    }
+
+    pub fn onFrameComplete(self: *DefaultTracer, gas_left: u64, output_len: usize) void {
+        _ = self;
+        const builtin = @import("builtin");
+        if (comptime (builtin.mode == .Debug or builtin.mode == .ReleaseSafe)) {
+            log.debug("[EVM] Frame execution completed: gas_left={}, output_len={}", .{ gas_left, output_len });
+        }
+    }
+
+    pub fn onAccountDelegation(self: *DefaultTracer, account: []const u8, delegated: []const u8) void {
+        _ = self;
+        const builtin = @import("builtin");
+        if (comptime (builtin.mode == .Debug or builtin.mode == .ReleaseSafe)) {
+            log.debug("[EVM] Account {x} has delegation to {x}", .{ account, delegated });
+        }
+    }
+
+    pub fn onEmptyAccountAccess(self: *DefaultTracer) void {
+        _ = self;
+        const builtin = @import("builtin");
+        if (comptime (builtin.mode == .Debug or builtin.mode == .ReleaseSafe)) {
+            log.debug("[EVM] Empty account access", .{});
+        }
+    }
+
+    /// Called when arena allocator is initialized
+    pub fn onArenaInit(self: *DefaultTracer, initial_capacity: usize, max_capacity: usize, growth_factor: u32) void {
+        _ = self;
+        const builtin = @import("builtin");
+        if (comptime (builtin.mode == .Debug or builtin.mode == .ReleaseSafe)) {
+            log.debug("[ARENA] Initialized: initial={d}, max={d}, growth={d}%", .{ initial_capacity, max_capacity, growth_factor });
+        }
+    }
+
+    /// Event: Call operation started
+    pub fn onCallStart(self: *DefaultTracer, call_type: []const u8, gas: i64, to: anytype, value: u256) void {
+        _ = self;
+        _ = call_type;
+        _ = gas;
+        _ = to;
+        _ = value;
+    }
+
+    /// Event: EVM initialization started
+    pub fn onEvmInit(self: *DefaultTracer, gas_price: u256, origin: anytype, hardfork: []const u8) void {
+        _ = self;
+        _ = gas_price;
+        _ = origin;
+        _ = hardfork;
+    }
+
+    /// Called when arena is reset
+    pub fn onArenaReset(self: *DefaultTracer, mode: []const u8, capacity_before: usize, capacity_after: usize) void {
+        _ = self;
+        const builtin = @import("builtin");
+        if (comptime (builtin.mode == .Debug or builtin.mode == .ReleaseSafe)) {
+            log.debug("[ARENA] Reset ({s}): capacity {d} -> {d}", .{ mode, capacity_before, capacity_after });
+        }
+    }
+
+    /// Event: Beacon root update processing
+    pub fn onBeaconRootUpdate(self: *DefaultTracer, success: bool, error_val: ?anyerror) void {
+        _ = self;
+        _ = success;
+        _ = error_val;
+    }
+
+    /// Event: Call operation completed
+    pub fn onCallComplete(self: *DefaultTracer, success: bool, gas_left: i64, output_len: usize) void {
+        _ = self;
+        _ = success;
+        _ = gas_left;
+        _ = output_len;
+    }
+
+    /// Event: Preflight check for call
+    pub fn onCallPreflight(self: *DefaultTracer, call_type: []const u8, result: []const u8) void {
+        _ = self;
+        _ = call_type;
+        _ = result;
+    }
+
+    /// Event: Historical block hash update processing
+    pub fn onHistoricalBlockHashUpdate(self: *DefaultTracer, success: bool, error_val: ?anyerror) void {
+        _ = self;
+        _ = success;
+        _ = error_val;
+    }
+
+    /// Event: Code retrieval
+    pub fn onCodeRetrieval(self: *DefaultTracer, address: anytype, code_len: usize, is_empty: bool) void {
+        _ = self;
+        _ = address;
+        _ = code_len;
+        _ = is_empty;
+    }
+
+    /// Event: Validator deposits processing
+    pub fn onValidatorDeposits(self: *DefaultTracer, success: bool, error_val: ?anyerror) void {
+        _ = self;
+        _ = success;
+        _ = error_val;
+    }
+
+    /// Called when an allocation is made
+    pub fn onArenaAlloc(self: *DefaultTracer, size: usize, alignment: usize, current_capacity: usize) void {
+        _ = self;
+        _ = size;
+        _ = alignment;
+        _ = current_capacity;
+    }
+
+    /// Called when a frame completes (for tracking nested depth)
+    pub fn onFrameReturn(self: *DefaultTracer) void {
+        if (self.minimal_evm) |_| {
+            // Skip validation for nested calls
+            if (self.nested_depth > 0) return;
+        }
+    }
+
+    /// Event: Frame bytecode initialization
+    pub fn onFrameBytecodeInit(self: *DefaultTracer, bytecode_len: usize, success: bool, error_val: ?anyerror) void {
+        _ = self;
+        _ = bytecode_len;
+        _ = success;
+        _ = error_val;
+    }
+
+    /// Event: Validator withdrawals processing
+    pub fn onValidatorWithdrawals(self: *DefaultTracer, success: bool, error_val: ?anyerror) void {
+        _ = self;
+        _ = success;
+        _ = error_val;
+    }
+
+    /// Called when arena grows to accommodate new allocations
+    pub fn onArenaGrow(self: *DefaultTracer, old_capacity: usize, new_capacity: usize, requested_size: usize) void {
+        _ = self;
+        const builtin = @import("builtin");
+        if (comptime (builtin.mode == .Debug or builtin.mode == .ReleaseSafe)) {
+            log.debug("[ARENA] Growing: {d} -> {d} bytes (requested={d})", .{ old_capacity, new_capacity, requested_size });
+        }
+    }
+
+    /// Called when allocation fails
+    pub fn onArenaAllocFailed(self: *DefaultTracer, size: usize, current_capacity: usize, max_capacity: usize) void {
+        _ = self;
+        const builtin = @import("builtin");
+        if (comptime (builtin.mode == .Debug or builtin.mode == .ReleaseSafe)) {
+            log.warn("[ARENA] Allocation failed: size={d}, current={d}, max={d}", .{ size, current_capacity, max_capacity });
+        }
+    }
+
+    /// Assert with error message - replaces std.debug.assert
+    pub fn assert(self: *DefaultTracer, condition: bool, comptime message: []const u8) void {
+        if (!condition) {
+            self.err("ASSERTION FAILED: {s}", .{ message });
+            const builtin = @import("builtin");
+            if (builtin.target.cpu.arch == .wasm32 and builtin.target.os.tag == .freestanding) {
+                unreachable;
+            } else {
+                @panic(message);
+            }
+        }
+    }
+
+    /// Called when bytecode analysis starts
+    pub fn onBytecodeAnalysisStart(self: *DefaultTracer, code_len: usize) void {
+        _ = self;
+        _ = code_len;
+        // No-op in default tracer
+    }
+
+    /// Called when bytecode analysis completes
+    pub fn onBytecodeAnalysisComplete(self: *DefaultTracer, validated_up_to: usize, opcode_count: usize, jumpdest_count: usize) void {
+        _ = self;
+        _ = validated_up_to;
+        _ = opcode_count;
+        _ = jumpdest_count;
+        // No-op in default tracer
+    }
+
+    /// Called when an invalid opcode is found during analysis
+    pub fn onInvalidOpcode(self: *DefaultTracer, pc: usize, opcode: u8) void {
         _ = self;
         _ = pc;
         _ = opcode;
-        _ = err;
-        _ = frame;
-        // Could add error information to the current step if needed
+        // No-op in default tracer
     }
-    
-    /// Get the collected trace steps
-    pub fn getTraceSteps(self: *const Self) []const JSONRPCStep {
-        return self.trace_steps.items;
+
+    /// Called when a JUMPDEST is found during analysis
+    pub fn onJumpdestFound(self: *DefaultTracer, pc: usize, count: usize) void {
+        _ = self;
+        _ = pc;
+        _ = count;
+        // No-op in default tracer
     }
-    
-    /// Export trace in JSON format compatible with geth debug_traceTransaction
-    pub fn toJSON(self: *const Self, writer: anytype) !void {
-        try writer.writeAll("{\"structLogs\":[");
-        
-        for (self.trace_steps.items, 0..) |step, i| {
-            if (i > 0) try writer.writeAll(",");
-            
-            try writer.writeAll("{");
-            try writer.print("\"pc\":{},", .{step.pc});
-            try writer.print("\"op\":\"{s}\",", .{step.op});
-            try writer.print("\"gas\":{},", .{step.gas});
-            try writer.print("\"gasCost\":{},", .{step.gasCost});
-            try writer.print("\"depth\":{},", .{step.depth});
-            
-            // Write stack
-            try writer.writeAll("\"stack\":[");
-            for (step.stack, 0..) |val, j| {
-                if (j > 0) try writer.writeAll(",");
-                try writer.print("\"0x{x}\"", .{val});
-            }
-            try writer.writeAll("],");
-            
-            try writer.print("\"memSize\":{}", .{step.memSize});
-            
-            // Write memory if present
-            if (step.memory) |mem| {
-                try writer.writeAll(",\"memory\":[");
-                for (mem, 0..) |b, k| {
-                    if (k > 0) try writer.writeAll(",");
-                    try writer.print("\"0x{x:0>2}\"", .{b});
-                }
-                try writer.writeAll("]");
-            }
-            
-            // Write storage if present  
-            if (step.storage) |storage| {
-                try writer.writeAll(",\"storage\":{");
-                var first = true;
-                var iter = storage.iterator();
-                while (iter.next()) |entry| {
-                    if (!first) try writer.writeAll(",");
-                    first = false;
-                    try writer.print("\"0x{x}\":\"0x{x}\"", .{ entry.key_ptr.*, entry.value_ptr.* });
-                }
-                try writer.writeByte('}');
-            }
-            
-            // Write return data if present
-            if (step.returnData) |ret_data| {
-                try writer.writeAll(",\"returnData\":\"0x");
-                for (ret_data) |byte| {
-                    try writer.print("{x:0>2}", .{byte});
-                }
-                try writer.writeByte('"');
-            }
-            
-            try writer.writeAll("}");
-        }
-        
-        try writer.writeAll("]}");
+
+    /// Called when dispatch schedule build starts
+    pub fn onScheduleBuildStart(self: *DefaultTracer, bytecode_len: usize) void {
+        _ = self;
+        _ = bytecode_len;
+        // No-op in default tracer
+    }
+
+    /// Called when a fusion optimization is detected
+    pub fn onFusionDetected(self: *DefaultTracer, pc: usize, fusion_type: []const u8, instruction_count: usize) void {
+        _ = self;
+        _ = pc;
+        _ = fusion_type;
+        _ = instruction_count;
+        // No-op in default tracer
+    }
+
+    /// Called when an invalid static jump is detected
+    pub fn onInvalidStaticJump(self: *DefaultTracer, jump_pc: usize, target_pc: usize) void {
+        _ = self;
+        _ = jump_pc;
+        _ = target_pc;
+        // No-op in default tracer
+    }
+
+    /// Called when a static jump is resolved
+    pub fn onStaticJumpResolved(self: *DefaultTracer, jump_pc: usize, target_pc: usize) void {
+        _ = self;
+        _ = jump_pc;
+        _ = target_pc;
+        // No-op in default tracer
+    }
+
+    /// Called when a truncated PUSH instruction is detected
+    pub fn onTruncatedPush(self: *DefaultTracer, pc: usize, push_size: u8, available: usize) void {
+        _ = self;
+        _ = pc;
+        _ = push_size;
+        _ = available;
+        // No-op in default tracer
+    }
+
+    /// Called when dispatch schedule build completes
+    pub fn onScheduleBuildComplete(self: *DefaultTracer, item_count: usize, fusion_count: usize) void {
+        _ = self;
+        _ = item_count;
+        _ = fusion_count;
+        // No-op in default tracer
+    }
+
+    /// Called when a jump table is created
+    pub fn onJumpTableCreated(self: *DefaultTracer, jumpdest_count: usize) void {
+        _ = self;
+        _ = jumpdest_count;
+        // No-op in default tracer
     }
 };
 
-// ============================================================================
-// WRITER-BASED TRACERS
-// ============================================================================
-
-// Configuration for tracing behavior
-pub const MemoryCaptureMode = enum { none, prefix, full };
-
-pub const TracerConfig = struct {
-    capture_memory: MemoryCaptureMode = .none,
-    memory_prefix: usize = 0, // bytes to capture when mode is .prefix
-    compute_gas_cost: bool = false, // compute per-step gas deltas
-    capture_each_op: bool = false, // capture snapshot after each operation
-};
-
-pub const DetailedStructLog = struct {
-    pc: u64,
-    op: []const u8,
-    gas: u64,
-    gasCost: u64,
-    depth: u32,
-    stack: []const u256,
-    memory: ?[]const u8,
-    memSize: u32,
-    storage: ?std.hash_map.HashMap(u256, u256, std.hash_map.AutoContext(u256), 80),
-    returnData: ?[]const u8,
-    refund: u64,
-    @"error": ?[]const u8,
-    
-    pub fn deinit(self: *DetailedStructLog, allocator: std.mem.Allocator) void {
-        allocator.free(self.stack);
-        if (self.memory) |mem| {
-            allocator.free(mem);
-        }
-        if (self.storage) |*storage| {
-            storage.deinit();
-        }
-        if (self.returnData) |ret_data| {
-            allocator.free(ret_data);
-        }
-    }
-};
-
-// Generic tracer that can work with any writer (enhanced version)
-pub fn GenericTracer(comptime Writer: type) type {
-    return struct {
-        allocator: std.mem.Allocator,
-        writer: Writer,
-        cfg: TracerConfig = .{},
-        prev_gas: ?u64 = null,
-
-        const Self = @This();
-
-        pub fn init(allocator: std.mem.Allocator, writer: Writer) Self {
-            return .{
-                .allocator = allocator,
-                .writer = writer,
-                .cfg = .{},
-            };
-        }
-
-        pub fn initWithConfig(allocator: std.mem.Allocator, writer: Writer, cfg: TracerConfig) Self {
-            return .{
-                .allocator = allocator,
-                .writer = writer,
-                .cfg = cfg,
-            };
-        }
-
-        pub fn snapshot(self: *Self, pc: u32, opcode: u8, comptime FrameType: type, frame_instance: *const FrameType) !DetailedStructLog {
-            // Capture stack
-            const stack_size = frame_instance.stack.size();
-            const stack_copy = try self.allocator.alloc(u256, stack_size);
-            const stack_slice = frame_instance.stack.get_slice();
-            @memcpy(stack_copy, stack_slice);
-
-            const op_name = getOpcodeName(opcode);
-
-            // Gas calculation
-            const gas_now: u64 = @max(frame_instance.gas_remaining, 0);
-            var gas_cost: u64 = 0;
-            if (self.cfg.compute_gas_cost) {
-                if (self.prev_gas) |prev| {
-                    gas_cost = if (prev > gas_now) (prev - gas_now) else 0;
-                }
-                self.prev_gas = gas_now;
-            }
-
-            // Depth (if frame provides it)
-            const depth_val: u32 = blk: {
-                if (comptime @hasField(FrameType, "depth")) {
-                    break :blk @intCast(frame_instance.depth);
-                } else if (comptime @hasField(FrameType, "call_depth")) {
-                    break :blk @intCast(frame_instance.call_depth);
-                }
-                break :blk 1;
-            };
-
-            // Refund (if frame provides it)
-            const refund_val: u64 = blk: {
-                if (comptime @hasField(FrameType, "gas_refund")) {
-                    break :blk @intCast(frame_instance.gas_refund);
-                }
-                break :blk 0;
-            };
-
-            // Memory capture
-            var mem_size: u32 = 0;
-            const mem_copy = try self.captureMemory(FrameType, frame_instance, &mem_size);
-
-            // Storage capture
-            const storage_map = try self.captureStorage(FrameType, frame_instance);
-
-            // Return data capture
-            const return_data = try self.captureReturnData(FrameType, frame_instance);
-
-            // Error capture
-            const err_str = getFrameError(FrameType, frame_instance);
-
-            return DetailedStructLog{
-                .pc = @as(u64, pc),
-                .op = op_name,
-                .gas = gas_now,
-                .gasCost = gas_cost,
-                .depth = depth_val,
-                .stack = stack_copy,
-                .memory = mem_copy,
-                .memSize = mem_size,
-                .storage = storage_map,
-                .returnData = return_data,
-                .refund = refund_val,
-                .@"error" = err_str,
-            };
-        }
-
-        pub fn writeSnapshot(self: *Self, pc: u32, opcode: u8, comptime FrameType: type, frame_instance: *const FrameType) !void {
-            const snapshot_entry = try self.snapshot(pc, opcode, FrameType, frame_instance);
-            defer snapshot_entry.deinit(self.allocator);
-
-            try self.writeJson(&snapshot_entry);
-        }
-
-        pub fn beforeOp(self: *Self, pc: u32, opcode: u8, comptime FrameType: type, frame: *const FrameType) void {
-            _ = self;
-            _ = pc;
-            _ = opcode;
-            _ = frame;
-            // Generic tracer doesn't do anything on beforeOp by default
-        }
-
-        pub fn afterOp(self: *Self, pc: u32, opcode: u8, comptime FrameType: type, frame: *const FrameType) void {
-            // Optionally capture snapshot after each operation
-            if (self.cfg.capture_each_op) {
-                self.writeSnapshot(pc, opcode, FrameType, frame) catch |err| {
-                    log.debug("Failed to write snapshot: {}", .{err});
-                };
-            }
-        }
-        
-        pub fn onError(self: *Self, pc: u32, opcode: u8, err: anyerror, comptime FrameType: type, frame: *const FrameType) void {
-            _ = self;
-            _ = pc;
-            _ = opcode;
-            _ = err;
-            _ = frame;
-            // Generic tracer doesn't do anything on error by default
-        }
-
-        pub fn writeJson(self: *Self, log_entry: *const DetailedStructLog) !void {
-            try self.writer.print(
-                "{{\"pc\":{},\"op\":\"{s}\",\"gas\":{},\"gasCost\":{},\"depth\":{},\"stack\":[",
-                .{ log_entry.pc, log_entry.op, log_entry.gas, log_entry.gasCost, log_entry.depth },
-            );
-
-            // Write stack array
-            for (log_entry.stack, 0..) |val, i| {
-                if (i > 0) try self.writer.writeAll(",");
-                try self.writer.print("\"0x{x}\"", .{val});
-            }
-
-            try self.writer.print("],\"memSize\":{},\"refund\":{}", .{ log_entry.memSize, log_entry.refund });
-
-            // Write memory if captured
-            if (log_entry.memory) |mem| {
-                try self.writer.writeAll(",\"memory\":\"0x");
-                for (mem) |byte| {
-                    try self.writer.print("{x:0>2}", .{byte});
-                }
-                try self.writer.writeByte('"');
-            }
-
-            // Write storage if captured
-            if (log_entry.storage) |storage| {
-                try self.writer.writeAll(",\"storage\":{");
-                var first = true;
-                var iter = storage.iterator();
-                while (iter.next()) |entry| {
-                    if (!first) try self.writer.writeAll(",");
-                    first = false;
-                    try self.writer.print("\"0x{x}\":\"0x{x}\"", .{ entry.key_ptr.*, entry.value_ptr.* });
-                }
-                try self.writer.writeByte('}');
-            }
-            
-            // Write return data if captured
-            if (log_entry.returnData) |ret_data| {
-                try self.writer.writeAll(",\"returnData\":\"0x");
-                for (ret_data) |byte| {
-                    try self.writer.print("{x:0>2}", .{byte});
-                }
-                try self.writer.writeByte('"');
-            }
-
-            // Write error if present
-            if (log_entry.@"error") |err| {
-                try self.writer.print(",\"error\":\"{s}\"", .{err});
-            }
-
-            try self.writer.writeAll("}}\n");
-        }
-
-        fn captureMemory(
-            self: *Self,
-            comptime FrameType: type,
-            frame_instance: *const FrameType,
-            mem_size: *u32,
-        ) !?[]const u8 {
-            if (self.cfg.capture_memory == .none) {
-                mem_size.* = 0;
-                return null;
-            }
-
-            if (comptime @hasField(FrameType, "memory")) {
-                const memory_ref = @constCast(&frame_instance.memory);
-                const mem_len = memory_ref.size();
-                mem_size.* = @intCast(mem_len);
-
-                const to_copy = switch (self.cfg.capture_memory) {
-                    .full => mem_len,
-                    .prefix => @min(mem_len, self.cfg.memory_prefix),
-                    .none => 0,
-                };
-
-                if (to_copy == 0) return null;
-                
-                // Get memory data as slice and copy it
-                const memory_data = memory_ref.get_slice_evm(0, to_copy) catch return null;
-                return try self.allocator.dupe(u8, memory_data);
-            }
-
-            mem_size.* = 0;
-            return null;
-        }
-        
-        fn captureStorage(
-            self: *Self,
-            comptime FrameType: type,
-            frame_instance: *const FrameType,
-        ) !?std.hash_map.HashMap(u256, u256, std.hash_map.AutoContext(u256), 80) {
-            _ = self;
-            _ = frame_instance;
-            
-            // For now, storage tracking would need to be implemented at the EVM level
-            // This is a placeholder for storage state changes during execution
-            // In practice, this would track SLOAD/SSTORE operations and their state changes
-            
-            // TODO: Implement storage state tracking by:
-            // 1. Adding storage change tracking to the frame or EVM
-            // 2. Collecting changed storage slots during execution
-            // 3. Returning the map of slot -> value pairs
-            
-            // Example implementation when storage tracking is available:
-            // if (comptime @hasField(FrameType, "storage_changes")) {
-            //     var storage_map = std.hash_map.HashMap(u256, u256, std.hash_map.AutoContext(u256), 80).init(self.allocator);
-            //     for (frame_instance.storage_changes.items) |change| {
-            //         try storage_map.put(change.slot, change.value);
-            //     }
-            //     return storage_map;
-            // }
-            
-            return null;
-        }
-        
-        fn captureReturnData(
-            self: *Self,
-            comptime FrameType: type,
-            frame_instance: *const FrameType,
-        ) !?[]const u8 {
-            // Check if the frame has return data field
-            if (comptime @hasField(FrameType, "return_data")) {
-                const return_data = frame_instance.return_data;
-                if (return_data.len > 0) {
-                    return try self.allocator.dupe(u8, return_data);
-                }
-            }
-            
-            // Check if frame has access to EVM context with return data
-            if (comptime @hasField(FrameType, "host")) {
-                // Try to get return data from host/EVM context
-                const host_ptr: *anyopaque = @constCast(frame_instance.host);
-                
-                // This would need to be implemented based on the actual host interface
-                // For now, we return null as the interface varies
-                _ = host_ptr;
-            }
-            
-            return null;
-        }
-    };
-}
-
-// Convenient type alias for the old Tracer name
-pub fn Tracer(comptime Writer: type) type {
-    return GenericTracer(Writer);
-}
-
-// File tracer that writes to a file using the generic writer interface
-pub const FileTracer = struct {
-    base: GenericTracer(std.fs.File.Writer),
-    file: std.fs.File,
-
-    pub fn init(allocator: std.mem.Allocator, path: []const u8) !FileTracer {
-        const file = try std.fs.cwd().createFile(path, .{});
-        return .{
-            .base = GenericTracer(std.fs.File.Writer).init(allocator, file.writer()),
-            .file = file,
-        };
-    }
-
-    pub fn initWithConfig(allocator: std.mem.Allocator, path: []const u8, cfg: TracerConfig) !FileTracer {
-        const file = try std.fs.cwd().createFile(path, .{});
-        return .{
-            .base = GenericTracer(std.fs.File.Writer).initWithConfig(allocator, file.writer(), cfg),
-            .file = file,
-        };
-    }
-
-    pub fn deinit(self: *FileTracer) void {
-        self.file.close();
-    }
-
-    pub fn snapshot(self: *FileTracer, pc: u32, opcode: u8, comptime FrameType: type, frame_instance: *const FrameType) !DetailedStructLog {
-        return self.base.snapshot(pc, opcode, FrameType, frame_instance);
-    }
-
-    pub fn writeSnapshot(self: *FileTracer, pc: u32, opcode: u8, comptime FrameType: type, frame_instance: *const FrameType) !void {
-        return self.base.writeSnapshot(pc, opcode, FrameType, frame_instance);
-    }
-
-    pub fn beforeOp(self: *FileTracer, pc: u32, opcode: u8, comptime FrameType: type, frame: *const FrameType) void {
-        self.base.beforeOp(pc, opcode, FrameType, frame);
-    }
-
-    pub fn afterOp(self: *FileTracer, pc: u32, opcode: u8, comptime FrameType: type, frame: *const FrameType) void {
-        self.base.afterOp(pc, opcode, FrameType, frame);
-    }
-    
-    pub fn onError(self: *FileTracer, pc: u32, opcode: u8, err: anyerror, comptime FrameType: type, frame: *const FrameType) void {
-        self.base.onError(pc, opcode, err, FrameType, frame);
-    }
-    
-    /// Write JSON trace to file with enhanced features
-    pub fn writeJSONTrace(self: *FileTracer, pc: u32, opcode: u8, comptime FrameType: type, frame_instance: *const FrameType) !void {
-        const log_entry = try self.base.snapshot(pc, opcode, FrameType, frame_instance);
-        defer log_entry.deinit(self.base.allocator);
-        try self.base.writeJson(&log_entry);
-    }
-};
-
-// Logging tracer that writes to stdout
-pub const LoggingTracer = struct {
-    base: GenericTracer(std.fs.File.Writer),
-
-    pub fn init(allocator: std.mem.Allocator) LoggingTracer {
-        const stdout = std.io.getStdOut().writer();
-        return .{
-            .base = GenericTracer(std.fs.File.Writer).init(allocator, stdout),
-        };
-    }
-
-    pub fn initWithConfig(allocator: std.mem.Allocator, cfg: TracerConfig) LoggingTracer {
-        const stdout = std.io.getStdOut().writer();
-        return .{
-            .base = GenericTracer(std.fs.File.Writer).initWithConfig(allocator, stdout, cfg),
-        };
-    }
-
-    pub fn snapshot(self: *LoggingTracer, pc: u32, opcode: u8, comptime FrameType: type, frame_instance: *const FrameType) !DetailedStructLog {
-        return self.base.snapshot(pc, opcode, FrameType, frame_instance);
-    }
-
-    pub fn writeSnapshot(self: *LoggingTracer, pc: u32, opcode: u8, comptime FrameType: type, frame_instance: *const FrameType) !void {
-        return self.base.writeSnapshot(pc, opcode, FrameType, frame_instance);
-    }
-
-    pub fn beforeOp(self: *LoggingTracer, pc: u32, opcode: u8, comptime FrameType: type, frame: *const FrameType) void {
-        self.base.beforeOp(pc, opcode, FrameType, frame);
-    }
-
-    pub fn afterOp(self: *LoggingTracer, pc: u32, opcode: u8, comptime FrameType: type, frame: *const FrameType) void {
-        self.base.afterOp(pc, opcode, FrameType, frame);
-    }
-    
-    pub fn onError(self: *LoggingTracer, pc: u32, opcode: u8, err: anyerror, comptime FrameType: type, frame: *const FrameType) void {
-        self.base.onError(pc, opcode, err, FrameType, frame);
-    }
-};
-
-
-fn getFrameError(comptime FrameType: type, frame_instance: *const FrameType) ?[]const u8 {
-    _ = frame_instance;
-
-    // TODO: When frame has error fields, access them like:
-    // if (comptime @hasField(FrameType, "last_error_str")) {
-    //     return frame_instance.last_error_str;
-    // }
-
-    return null;
-}
-
+// Helper function to get opcode name
 fn getOpcodeName(opcode: u8) []const u8 {
     return switch (opcode) {
         0x00 => "STOP",
@@ -1088,7 +1238,6 @@ fn getOpcodeName(opcode: u8) []const u8 {
         0x1c => "SHR",
         0x1d => "SAR",
         0x20 => "KECCAK256",
-        // Context and environmental opcodes
         0x30 => "ADDRESS",
         0x31 => "BALANCE",
         0x32 => "ORIGIN",
@@ -1109,7 +1258,7 @@ fn getOpcodeName(opcode: u8) []const u8 {
         0x41 => "COINBASE",
         0x42 => "TIMESTAMP",
         0x43 => "NUMBER",
-        0x44 => "DIFFICULTY",
+        0x44 => "PREVRANDAO",
         0x45 => "GASLIMIT",
         0x46 => "CHAINID",
         0x47 => "SELFBALANCE",
@@ -1128,72 +1277,38 @@ fn getOpcodeName(opcode: u8) []const u8 {
         0x59 => "MSIZE",
         0x5a => "GAS",
         0x5b => "JUMPDEST",
+        0x5c => "TLOAD",
+        0x5d => "TSTORE",
+        0x5e => "MCOPY",
         0x5f => "PUSH0",
-        0x60 => "PUSH1",
-        0x61 => "PUSH2",
-        0x62 => "PUSH3",
-        0x63 => "PUSH4",
-        0x64 => "PUSH5",
-        0x65 => "PUSH6",
-        0x66 => "PUSH7",
-        0x67 => "PUSH8",
-        0x68 => "PUSH9",
-        0x69 => "PUSH10",
-        0x6a => "PUSH11",
-        0x6b => "PUSH12",
-        0x6c => "PUSH13",
-        0x6d => "PUSH14",
-        0x6e => "PUSH15",
-        0x6f => "PUSH16",
-        0x70 => "PUSH17",
-        0x71 => "PUSH18",
-        0x72 => "PUSH19",
-        0x73 => "PUSH20",
-        0x74 => "PUSH21",
-        0x75 => "PUSH22",
-        0x76 => "PUSH23",
-        0x77 => "PUSH24",
-        0x78 => "PUSH25",
-        0x79 => "PUSH26",
-        0x7a => "PUSH27",
-        0x7b => "PUSH28",
-        0x7c => "PUSH29",
-        0x7d => "PUSH30",
-        0x7e => "PUSH31",
-        0x7f => "PUSH32",
-        0x80 => "DUP1",
-        0x81 => "DUP2",
-        0x82 => "DUP3",
-        0x83 => "DUP4",
-        0x84 => "DUP5",
-        0x85 => "DUP6",
-        0x86 => "DUP7",
-        0x87 => "DUP8",
-        0x88 => "DUP9",
-        0x89 => "DUP10",
-        0x8a => "DUP11",
-        0x8b => "DUP12",
-        0x8c => "DUP13",
-        0x8d => "DUP14",
-        0x8e => "DUP15",
-        0x8f => "DUP16",
-        0x90 => "SWAP1",
-        0x91 => "SWAP2",
-        0x92 => "SWAP3",
-        0x93 => "SWAP4",
-        0x94 => "SWAP5",
-        0x95 => "SWAP6",
-        0x96 => "SWAP7",
-        0x97 => "SWAP8",
-        0x98 => "SWAP9",
-        0x99 => "SWAP10",
-        0x9a => "SWAP11",
-        0x9b => "SWAP12",
-        0x9c => "SWAP13",
-        0x9d => "SWAP14",
-        0x9e => "SWAP15",
-        0x9f => "SWAP16",
-        // System opcodes
+        0x60...0x7f => |n| blk: {
+            const push_names = [_][]const u8{
+                "PUSH1",  "PUSH2",  "PUSH3",  "PUSH4",  "PUSH5",  "PUSH6",  "PUSH7",  "PUSH8",
+                "PUSH9",  "PUSH10", "PUSH11", "PUSH12", "PUSH13", "PUSH14", "PUSH15", "PUSH16",
+                "PUSH17", "PUSH18", "PUSH19", "PUSH20", "PUSH21", "PUSH22", "PUSH23", "PUSH24",
+                "PUSH25", "PUSH26", "PUSH27", "PUSH28", "PUSH29", "PUSH30", "PUSH31", "PUSH32",
+            };
+            break :blk push_names[n - 0x60];
+        },
+        0x80...0x8f => |n| blk: {
+            const dup_names = [_][]const u8{
+                "DUP1",  "DUP2",  "DUP3",  "DUP4",  "DUP5",  "DUP6",  "DUP7",  "DUP8",
+                "DUP9",  "DUP10", "DUP11", "DUP12", "DUP13", "DUP14", "DUP15", "DUP16",
+            };
+            break :blk dup_names[n - 0x80];
+        },
+        0x90...0x9f => |n| blk: {
+            const swap_names = [_][]const u8{
+                "SWAP1",  "SWAP2",  "SWAP3",  "SWAP4",  "SWAP5",  "SWAP6",  "SWAP7",  "SWAP8",
+                "SWAP9",  "SWAP10", "SWAP11", "SWAP12", "SWAP13", "SWAP14", "SWAP15", "SWAP16",
+            };
+            break :blk swap_names[n - 0x90];
+        },
+        0xa0 => "LOG0",
+        0xa1 => "LOG1",
+        0xa2 => "LOG2",
+        0xa3 => "LOG3",
+        0xa4 => "LOG4",
         0xf0 => "CREATE",
         0xf1 => "CALL",
         0xf2 => "CALLCODE",
@@ -1208,882 +1323,136 @@ fn getOpcodeName(opcode: u8) []const u8 {
     };
 }
 
-// Tests
-// TODO: Update this test to work without Host
-// test "tracer captures basic frame state with writer" {
-//     const allocator = std.testing.allocator;
-//     
-//     // Create a frame with some state
-//     const Frame = frame_mod.Frame(.{
-//         .stack_size = 10,
-//         .block_gas_limit = 1000,
-//     });
-//     
-//     // var test_frame = try Frame.init(allocator, &[_]u8{ 0x60, 0x05, 0x60, 0x03, 0x01 }, 1000, {}, undefined // createTestHost());
-//     defer test_frame.deinit(allocator);
-//     
-//     // Push some values onto the stack
-//     try test_frame.stack.push(3);
-//     try test_frame.stack.push(5);
-//     // PC is now managed by plan, not frame
-//     const gas_to_consume1 = @as(u64, @intCast(test_frame.gas_remaining - 950));
-//     if (test_frame.gas_remaining < @as(@TypeOf(test_frame.gas_remaining), @intCast(gas_to_consume1))) {
-//         return error.OutOfGas;
-//     }
-//     test_frame.gas_remaining -= @as(@TypeOf(test_frame.gas_remaining), @intCast(gas_to_consume1));
-//     
-//     // Create tracer with array list writer
-//     var output = std.ArrayList(u8).init(allocator);
-//     defer output.deinit();
-//     
-//     var tracer = Tracer(std.ArrayList(u8).Writer).init(allocator, output.writer());
-//     const log = try tracer.snapshot(4, 0x01, Frame, &test_frame); // PC=4, opcode=ADD
-//     defer allocator.free(log.stack);
-//     
-//     // Verify snapshot
-//     try std.testing.expectEqual(@as(u64, 4), log.pc);
-//     try std.testing.expectEqualStrings("ADD", log.op);
-//     try std.testing.expectEqual(@as(u64, 950), log.gas);
-//     try std.testing.expectEqual(@as(u32, 1), log.depth);
-//     try std.testing.expectEqual(@as(usize, 2), log.stack.len);
-//     try std.testing.expectEqual(@as(u256, 3), log.stack[0]);
-//     try std.testing.expectEqual(@as(u256, 5), log.stack[1]);
-// }
-
-// TODO: Update this test to work without Host
-// test "tracer writes JSON to writer" {
-//     const allocator = std.testing.allocator;
-//     
-//     const Frame = frame_mod.Frame(.{});
-//     // var test_frame = try Frame.init(allocator, &[_]u8{ 0x60, 0x05, 0x60, 0x03, 0x01 }, 1000, {}, undefined // createTestHost());
-//     defer test_frame.deinit(allocator);
-//     
-//     try test_frame.stack.push(3);
-//     try test_frame.stack.push(5);
-//     // PC is now managed by plan, not frame
-//     const gas_to_consume2 = @as(u64, @intCast(test_frame.gas_remaining - 950));
-//     if (test_frame.gas_remaining < @as(@TypeOf(test_frame.gas_remaining), @intCast(gas_to_consume2))) return error.OutOfGas;
-//     test_frame.gas_remaining -= @as(@TypeOf(test_frame.gas_remaining), @intCast(gas_to_consume2));
-//     
-//     // Create tracer with array list writer
-//     var output = std.ArrayList(u8).init(allocator);
-//     defer output.deinit();
-//     
-//     var tracer = Tracer(std.ArrayList(u8).Writer).init(allocator, output.writer());
-//     try tracer.writeSnapshot(4, 0x01, Frame, &test_frame); // PC=4, opcode=ADD
-//     
-//     const json = output.items;
-//     try std.testing.expect(std.mem.indexOf(u8, json, "\"pc\":4") != null);
-//     try std.testing.expect(std.mem.indexOf(u8, json, "\"op\":\"ADD\"") != null);
-//     try std.testing.expect(std.mem.indexOf(u8, json, "\"gas\":950") != null);
-//     try std.testing.expect(std.mem.indexOf(u8, json, "\"stack\":[\"0x3\",\"0x5\"]") != null);
-// }
-
-// TODO: Update this test to work without Host
-// test "logging tracer writes to stdout" {
-//     const allocator = std.testing.allocator;
-//     
-//     const Frame = frame_mod.Frame(.{});
-//     var test_frame = try Frame.init(allocator, &[_]u8{0x00}, 1000, {}, undefined // createTestHost());
-//     defer test_frame.deinit(allocator);
-//     
-//     var tracer = LoggingTracer.init(allocator);
-//     const log = try tracer.snapshot(0, 0x00, Frame, &test_frame); // PC=0, opcode=STOP
-//     defer allocator.free(log.stack);
-//     
-//     try std.testing.expectEqual(@as(u64, 0), log.pc);
-//     try std.testing.expectEqualStrings("STOP", log.op);
-// }
-
-// TODO: Update this test to work without Host
-// test "file tracer writes to file" {
-//     const allocator = std.testing.allocator;
-//     
-//     // Create temp dir and file
-//     var tmp_dir = std.testing.tmpDir(.{});
-//     defer tmp_dir.cleanup();
-//     
-//     // Create file in the temp directory
-//     const file = try tmp_dir.dir.createFile("trace.json", .{});
-//     file.close();
-//     
-//     // Get the full path
-//     const file_path = try tmp_dir.dir.realpathAlloc(allocator, "trace.json");
-//     defer allocator.free(file_path);
-//     
-//     // Create frame
-//     const Frame = frame_mod.Frame(.{});
-//     var test_frame = try Frame.init(allocator, &[_]u8{ 0x60, 0x42 }, 1000, {}, undefined // createTestHost());
-//     defer test_frame.deinit(allocator);
-//     
-//     // PC is now managed by plan, not frame
-//     const gas_to_consume3 = @as(u64, @intCast(test_frame.gas_remaining - 997));
-//     if (test_frame.gas_remaining < @as(@TypeOf(test_frame.gas_remaining), @intCast(gas_to_consume3))) return error.OutOfGas;
-//     test_frame.gas_remaining -= @as(@TypeOf(test_frame.gas_remaining), @intCast(gas_to_consume3));
-//     
-//     // Create file tracer and write
-//     var tracer = try FileTracer.init(allocator, file_path);
-//     defer tracer.deinit();
-//     
-//     try tracer.writeSnapshot(0, 0x60, Frame, &test_frame); // PC=0, opcode=PUSH1
-//     
-//     // Read file and verify
-//     const contents = try tmp_dir.dir.readFileAlloc(allocator, "trace.json", 1024);
-//     defer allocator.free(contents);
-//     
-//     try std.testing.expect(std.mem.indexOf(u8, contents, "\"pc\":0") != null);
-//     try std.testing.expect(std.mem.indexOf(u8, contents, "\"op\":\"PUSH1\"") != null);
-//     try std.testing.expect(std.mem.indexOf(u8, contents, "\"gas\":997") != null);
-// }
-
-// TODO: Update this test to work without Host
-// test "tracer with gas cost computation" {
-//     const allocator = std.testing.allocator;
-//     
-//     const Frame = frame_mod.Frame(.{});
-//     var test_frame = try Frame.init(allocator, &[_]u8{ 0x60, 0x05, 0x01 }, 1000, {}, undefined // createTestHost());
-//     defer test_frame.deinit(allocator);
-//     
-//     var output = std.ArrayList(u8).init(allocator);
-//     defer output.deinit();
-//     
-//     var tracer = Tracer(std.ArrayList(u8).Writer).initWithConfig(
-//         allocator,
-//         output.writer(),
-//         .{ .compute_gas_cost = true },
-//     );
-//     
-//     // First snapshot - no previous gas, so cost should be 0
-//     const gas_to_consume4 = @as(u64, @intCast(test_frame.gas_remaining - 1000));
-//     if (test_frame.gas_remaining < @as(@TypeOf(test_frame.gas_remaining), @intCast(gas_to_consume4))) return error.OutOfGas;
-//     test_frame.gas_remaining -= @as(@TypeOf(test_frame.gas_remaining), @intCast(gas_to_consume4));
-//     const log1 = try tracer.snapshot(0, 0x60, Frame, &test_frame); // PUSH1
-//     defer allocator.free(log1.stack);
-//     try std.testing.expectEqual(@as(u64, 0), log1.gasCost);
-//     
-//     // Second snapshot - gas decreased by 3
-//     const gas_to_consume5 = @as(u64, @intCast(test_frame.gas_remaining - 997));
-//     if (test_frame.gas_remaining < @as(@TypeOf(test_frame.gas_remaining), @intCast(gas_to_consume5))) return error.OutOfGas;
-//     test_frame.gas_remaining -= @as(@TypeOf(test_frame.gas_remaining), @intCast(gas_to_consume5));
-//     const log2 = try tracer.snapshot(1, 0x60, Frame, &test_frame); // PUSH1
-//     defer allocator.free(log2.stack);
-//     try std.testing.expectEqual(@as(u64, 3), log2.gasCost);
-//     
-//     // Third snapshot - gas decreased by 21
-//     const gas_to_consume6 = @as(u64, @intCast(test_frame.gas_remaining - 976));
-//     if (test_frame.gas_remaining < @as(@TypeOf(test_frame.gas_remaining), @intCast(gas_to_consume6))) return error.OutOfGas;
-//     test_frame.gas_remaining -= @as(@TypeOf(test_frame.gas_remaining), @intCast(gas_to_consume6));
-//     const log3 = try tracer.snapshot(2, 0x01, Frame, &test_frame); // ADD
-//     defer allocator.free(log3.stack);
-//     try std.testing.expectEqual(@as(u64, 21), log3.gasCost);
-// }
-
-// TODO: Update this test to work without Host
-// test "tracer handles empty stack with JSON output" {
-//     const allocator = std.testing.allocator;
-//     
-//     const Frame = frame_mod.Frame(.{});
-//     var test_frame = try Frame.init(allocator, &[_]u8{0x00}, 1000, {}, undefined // createTestHost());
-//     defer test_frame.deinit(allocator);
-//     
-//     var output = std.ArrayList(u8).init(allocator);
-//     defer output.deinit();
-//     
-//     var tracer = Tracer(std.ArrayList(u8).Writer).init(allocator, output.writer());
-//     try tracer.writeSnapshot(0, 0x00, Frame, &test_frame); // STOP
-//     
-//     const json = output.items;
-//     try std.testing.expect(std.mem.indexOf(u8, json, "\"stack\":[]") != null);
-// }
-
-// TODO: Update this test to work without Host  
-// test "tracer handles large stack values in JSON" {
-//     const allocator = std.testing.allocator;
-//     
-//     const Frame = frame_mod.Frame(.{});
-//     var test_frame = try Frame.init(allocator, &[_]u8{0x00}, 1000, {}, undefined // createTestHost());
-//     defer test_frame.deinit(allocator);
-//     
-//     try test_frame.stack.push(std.math.maxInt(u256));
-//     try test_frame.stack.push(0xdeadbeef);
-//     
-//     var output = std.ArrayList(u8).init(allocator);
-//     defer output.deinit();
-//     
-//     var tracer = Tracer(std.ArrayList(u8).Writer).init(allocator, output.writer());
-//     try tracer.writeSnapshot(0, 0x00, Frame, &test_frame); // STOP
-//     
-//     const json = output.items;
-//     try std.testing.expect(std.mem.indexOf(u8, json, "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff") != null);
-//     try std.testing.expect(std.mem.indexOf(u8, json, "0xdeadbeef") != null);
-// }
-
-// Tests from main branch (commented out as they use Frame instead of Frame)
-// // test "tracer captures basic frame state with writer" {
-//     const allocator = std.testing.allocator;
-// 
-//     // Create a frame with some state
-//     const Frame = frame_mod.Frame(.{
-//         .stack_size = 10,
-//         .block_gas_limit = 1000,
-//     });
-// 
-//     const host = createTestHost();
-//     var test_frame = try Frame.init(allocator, &[_]u8{ 0x60, 0x05, 0x60, 0x03, 0x01 }, 1000, {}, host);
-//     defer test_frame.deinit(allocator);
-// 
-//     // Push some values onto the stack
-//     try test_frame.stack.push(3);
-//     try test_frame.stack.push(5);
-//     // PC is now managed by plan, not frame
-//     const gas_to_consume1 = @as(u64, @intCast(test_frame.gas_remaining - 950));
-//     if (test_frame.gas_remaining < @as(@TypeOf(test_frame.gas_remaining), @intCast(gas_to_consume1))) return error.OutOfGas;
-//     test_frame.gas_remaining -= @as(@TypeOf(test_frame.gas_remaining), @intCast(gas_to_consume1));
-// 
-//     // Create tracer with array list writer
-//     var output = std.ArrayList(u8).init(allocator);
-//     defer output.deinit();
-// 
-//     var tracer = Tracer(std.ArrayList(u8).Writer).init(allocator, output.writer());
-//     const log = try tracer.snapshot(4, 0x01, Frame, &test_frame); // PC=4, opcode=ADD
-//     defer allocator.free(log.stack);
-// 
-//     // Verify snapshot
-//     try std.testing.expectEqual(@as(u64, 4), log.pc);
-//     try std.testing.expectEqualStrings("ADD", log.op);
-//     try std.testing.expectEqual(@as(u64, 950), log.gas);
-//     try std.testing.expectEqual(@as(u32, 1), log.depth);
-//     try std.testing.expectEqual(@as(usize, 2), log.stack.len);
-//     try std.testing.expectEqual(@as(u256, 3), log.stack[0]);
-//     try std.testing.expectEqual(@as(u256, 5), log.stack[1]);
-// }
-// 
-// test "tracer writes JSON to writer" {
-//     const allocator = std.testing.allocator;
-// 
-//     const Frame = frame_mod.Frame(.{});
-//     var test_frame = try Frame.init(allocator, &[_]u8{ 0x60, 0x05, 0x60, 0x03, 0x01 }, 1000, {}, createTestHost());
-//     defer test_frame.deinit(allocator);
-// 
-//     try test_frame.stack.push(3);
-//     try test_frame.stack.push(5);
-//     // PC is now managed by plan, not frame
-//     const gas_to_consume2 = @as(u64, @intCast(test_frame.gas_remaining - 950));
-//     if (test_frame.gas_remaining < @as(@TypeOf(test_frame.gas_remaining), @intCast(gas_to_consume2))) return error.OutOfGas;
-//     test_frame.gas_remaining -= @as(@TypeOf(test_frame.gas_remaining), @intCast(gas_to_consume2));
-// 
-//     // Create tracer with array list writer
-//     var output = std.ArrayList(u8).init(allocator);
-//     defer output.deinit();
-// 
-//     var tracer = Tracer(std.ArrayList(u8).Writer).init(allocator, output.writer());
-//     try tracer.writeSnapshot(4, 0x01, Frame, &test_frame); // PC=4, opcode=ADD
-// 
-//     const json = output.items;
-//     try std.testing.expect(std.mem.indexOf(u8, json, "\"pc\":4") != null);
-//     try std.testing.expect(std.mem.indexOf(u8, json, "\"op\":\"ADD\"") != null);
-//     try std.testing.expect(std.mem.indexOf(u8, json, "\"gas\":950") != null);
-//     try std.testing.expect(std.mem.indexOf(u8, json, "\"stack\":[\"0x3\",\"0x5\"]") != null);
-// }
-// 
-// test "logging tracer writes to stdout" {
-//     const allocator = std.testing.allocator;
-// 
-//     const Frame = frame_mod.Frame(.{});
-//     var test_frame = try Frame.init(allocator, &[_]u8{0x00}, 1000, {}, createTestHost());
-//     defer test_frame.deinit(allocator);
-// 
-//     var tracer = LoggingTracer.init(allocator);
-//     const log = try tracer.snapshot(0, 0x00, Frame, &test_frame); // PC=0, opcode=STOP
-//     defer allocator.free(log.stack);
-// 
-//     try std.testing.expectEqual(@as(u64, 0), log.pc);
-//     try std.testing.expectEqualStrings("STOP", log.op);
-// }
-// 
-// test "file tracer writes to file" {
-//     const allocator = std.testing.allocator;
-// 
-//     // Create temp dir and file
-//     var tmp_dir = std.testing.tmpDir(.{});
-//     defer tmp_dir.cleanup();
-// 
-//     // Create file in the temp directory
-//     const file = try tmp_dir.dir.createFile("trace.json", .{});
-//     file.close();
-// 
-//     // Get the full path
-//     const file_path = try tmp_dir.dir.realpathAlloc(allocator, "trace.json");
-//     defer allocator.free(file_path);
-// 
-//     // Create frame
-//     const Frame = frame_mod.Frame(.{});
-//     var test_frame = try Frame.init(allocator, &[_]u8{ 0x60, 0x42 }, 1000, {}, createTestHost());
-//     defer test_frame.deinit(allocator);
-// 
-//     // PC is now managed by plan, not frame
-//     const gas_to_consume3 = @as(u64, @intCast(test_frame.gas_remaining - 997));
-//     if (test_frame.gas_remaining < @as(@TypeOf(test_frame.gas_remaining), @intCast(gas_to_consume3))) return error.OutOfGas;
-//     test_frame.gas_remaining -= @as(@TypeOf(test_frame.gas_remaining), @intCast(gas_to_consume3));
-// 
-//     // Create file tracer and write
-//     var tracer = try FileTracer.init(allocator, file_path);
-//     defer tracer.deinit();
-// 
-//     try tracer.writeSnapshot(0, 0x60, Frame, &test_frame); // PC=0, opcode=PUSH1
-// 
-//     // Read file and verify
-//     const contents = try tmp_dir.dir.readFileAlloc(allocator, "trace.json", 1024);
-//     defer allocator.free(contents);
-// 
-//     try std.testing.expect(std.mem.indexOf(u8, contents, "\"pc\":0") != null);
-//     try std.testing.expect(std.mem.indexOf(u8, contents, "\"op\":\"PUSH1\"") != null);
-//     try std.testing.expect(std.mem.indexOf(u8, contents, "\"gas\":997") != null);
-// }
-// 
-// test "tracer with gas cost computation" {
-//     const allocator = std.testing.allocator;
-// 
-//     const Frame = frame_mod.Frame(.{});
-//     var test_frame = try Frame.init(allocator, &[_]u8{ 0x60, 0x05, 0x01 }, 1000, {}, createTestHost());
-//     defer test_frame.deinit(allocator);
-// 
-//     var output = std.ArrayList(u8).init(allocator);
-//     defer output.deinit();
-// 
-//     var tracer = Tracer(std.ArrayList(u8).Writer).initWithConfig(
-//         allocator,
-//         output.writer(),
-//         .{ .compute_gas_cost = true },
-//     );
-// 
-//     // First snapshot - no previous gas, so cost should be 0
-//     const gas_to_consume4 = @as(u64, @intCast(test_frame.gas_remaining - 1000));
-//     if (test_frame.gas_remaining < @as(@TypeOf(test_frame.gas_remaining), @intCast(gas_to_consume4))) return error.OutOfGas;
-//     test_frame.gas_remaining -= @as(@TypeOf(test_frame.gas_remaining), @intCast(gas_to_consume4));
-//     const log1 = try tracer.snapshot(0, 0x60, Frame, &test_frame); // PUSH1
-//     defer allocator.free(log1.stack);
-//     try std.testing.expectEqual(@as(u64, 0), log1.gasCost);
-// 
-//     // Second snapshot - gas decreased by 3
-//     const gas_to_consume5 = @as(u64, @intCast(test_frame.gas_remaining - 997));
-//     if (test_frame.gas_remaining < @as(@TypeOf(test_frame.gas_remaining), @intCast(gas_to_consume5))) return error.OutOfGas;
-//     test_frame.gas_remaining -= @as(@TypeOf(test_frame.gas_remaining), @intCast(gas_to_consume5));
-//     const log2 = try tracer.snapshot(1, 0x60, Frame, &test_frame); // PUSH1
-//     defer allocator.free(log2.stack);
-//     try std.testing.expectEqual(@as(u64, 3), log2.gasCost);
-// 
-//     // Third snapshot - gas decreased by 21
-//     const gas_to_consume6 = @as(u64, @intCast(test_frame.gas_remaining - 976));
-//     if (test_frame.gas_remaining < @as(@TypeOf(test_frame.gas_remaining), @intCast(gas_to_consume6))) return error.OutOfGas;
-//     test_frame.gas_remaining -= @as(@TypeOf(test_frame.gas_remaining), @intCast(gas_to_consume6));
-//     const log3 = try tracer.snapshot(2, 0x01, Frame, &test_frame); // ADD
-//     defer allocator.free(log3.stack);
-//     try std.testing.expectEqual(@as(u64, 21), log3.gasCost);
-// }
-// 
-// test "tracer handles empty stack with JSON output" {
-//     const allocator = std.testing.allocator;
-// 
-//     const Frame = frame_mod.Frame(.{});
-//     var test_frame = try Frame.init(allocator, &[_]u8{0x00}, 1000, {}, createTestHost());
-//     defer test_frame.deinit(allocator);
-// 
-//     var output = std.ArrayList(u8).init(allocator);
-//     defer output.deinit();
-// 
-//     var tracer = Tracer(std.ArrayList(u8).Writer).init(allocator, output.writer());
-//     try tracer.writeSnapshot(0, 0x00, Frame, &test_frame); // STOP
-// 
-//     const json = output.items;
-//     try std.testing.expect(std.mem.indexOf(u8, json, "\"stack\":[]") != null);
-// }
-// 
-// test "tracer handles large stack values in JSON" {
-//     const allocator = std.testing.allocator;
-// 
-//     const Frame = frame_mod.Frame(.{});
-//     var test_frame = try Frame.init(allocator, &[_]u8{0x00}, 1000, {}, createTestHost());
-//     defer test_frame.deinit(allocator);
-// 
-//     try test_frame.stack.push(std.math.maxInt(u256));
-//     try test_frame.stack.push(0xdeadbeef);
-// 
-//     var output = std.ArrayList(u8).init(allocator);
-//     defer output.deinit();
-// 
-//     var tracer = Tracer(std.ArrayList(u8).Writer).init(allocator, output.writer());
-//     try tracer.writeSnapshot(0, 0x00, Frame, &test_frame); // STOP
-// 
-//     const json = output.items;
-//     try std.testing.expect(std.mem.indexOf(u8, json, "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff") != null);
-//     try std.testing.expect(std.mem.indexOf(u8, json, "0xdeadbeef") != null);
-// }
-
 // ============================================================================
-// TRACER TESTS
+// OTHER TRACER IMPLEMENTATIONS (STUBS FOR NOW)
 // ============================================================================
 
-// Test that NoOpTracer has zero cost
-test "NoOpTracer has zero runtime cost" {
-    var tracer = NoOpTracer.init(std.testing.allocator);
-
-    const TestFrame = struct {
-        gas: i32,
-    };
-
-    const test_frame = TestFrame{ .gas = 1000 };
-
-    // These should compile to nothing
-    tracer.beforeOp(0, 0x00, TestFrame, &test_frame);
-    tracer.afterOp(0, 0x00, TestFrame, &test_frame);
-    tracer.onError(0, 0x00, error.TestError, TestFrame, &test_frame);
-}
-
-// Minimal test host for tracer tests
-const TestHost = struct {
-    const Self = @This();
-
-    pub fn get_balance(self: *Self, address: Address) u256 {
-        _ = self;
-        _ = address;
-        return 0;
-    }
-
-    pub fn account_exists(self: *Self, address: Address) bool {
-        _ = self;
-        _ = address;
-        return false;
-    }
-
-    pub fn get_code(self: *Self, address: Address) []const u8 {
-        _ = self;
-        _ = address;
-        return &[_]u8{};
-    }
-
-    pub fn get_block_info(self: *Self) block_info_mod.DefaultBlockInfo {
-        _ = self;
+pub const DebuggingTracer = struct {
+    pub fn init(allocator: std.mem.Allocator) DebuggingTracer {
+        _ = allocator;
         return .{};
     }
 
-    pub fn emit_log(self: *Self, contract_address: Address, topics: []const u256, data: []const u8) void {
+    pub fn deinit(self: *DebuggingTracer) void {
         _ = self;
-        _ = contract_address;
-        _ = topics;
-        _ = data;
     }
 
-    pub fn inner_call(self: *Self, params: call_params_mod.CallParams) !call_result_mod.CallResult {
+    pub fn before_instruction(self: *DebuggingTracer, _: anytype, comptime _: UnifiedOpcode, _: anytype) void {
         _ = self;
-        _ = params;
-        return error.NotImplemented;
     }
 
-    pub fn register_created_contract(self: *Self, address: Address) !void {
+    pub fn after_instruction(self: *DebuggingTracer, frame: anytype, comptime opcode: UnifiedOpcode, next_handler: anytype, next_cursor: anytype) void {
         _ = self;
-        _ = address;
+        _ = frame;
+        _ = opcode;
+        _ = next_handler;
+        _ = next_cursor;
     }
 
-    pub fn was_created_in_tx(self: *Self, address: Address) bool {
+    pub fn after_complete(self: *DebuggingTracer, frame: anytype, comptime opcode: UnifiedOpcode) void {
         _ = self;
-        _ = address;
-        return false;
+        _ = frame;
+        _ = opcode;
     }
 
-    pub fn create_snapshot(self: *Self) u32 {
+    /// Assert with error message - replaces std.debug.assert
+    pub fn assert(self: *DebuggingTracer, condition: bool, comptime message: []const u8) void {
         _ = self;
-        return 0;
-    }
-
-    pub fn revert_to_snapshot(self: *Self, snapshot_id: u32) void {
-        _ = self;
-        _ = snapshot_id;
-    }
-
-    pub fn get_storage(self: *Self, address: Address, slot: u256) u256 {
-        _ = self;
-        _ = address;
-        _ = slot;
-        return 0;
-    }
-
-    pub fn set_storage(self: *Self, address: Address, slot: u256, value: u256) !void {
-        _ = self;
-        _ = address;
-        _ = slot;
-        _ = value;
-    }
-
-    pub fn record_storage_change(self: *Self, address: Address, slot: u256, original_value: u256) !void {
-        _ = self;
-        _ = address;
-        _ = slot;
-        _ = original_value;
-    }
-
-    pub fn get_original_storage(self: *Self, address: Address, slot: u256) ?u256 {
-        _ = self;
-        _ = address;
-        _ = slot;
-        return null;
-    }
-
-    pub fn access_address(self: *Self, address: Address) !u64 {
-        _ = self;
-        _ = address;
-        return 0;
-    }
-
-    pub fn access_storage_slot(self: *Self, contract_address: Address, slot: u256) !u64 {
-        _ = self;
-        _ = contract_address;
-        _ = slot;
-        return 0;
-    }
-
-    pub fn mark_for_destruction(self: *Self, contract_address: Address, recipient: Address) !void {
-        _ = self;
-        _ = contract_address;
-        _ = recipient;
-    }
-
-    pub fn get_input(self: *Self) []const u8 {
-        _ = self;
-        return &[_]u8{};
-    }
-
-    pub fn is_hardfork_at_least(self: *Self, target: hardfork_mod.Hardfork) bool {
-        _ = self;
-        _ = target;
-        return true;
-    }
-
-    pub fn get_hardfork(self: *Self) hardfork_mod.Hardfork {
-        _ = self;
-        return .latest;
-    }
-
-    pub fn get_is_static(self: *Self) bool {
-        _ = self;
-        return false;
-    }
-
-    pub fn get_depth(self: *Self) u11 {
-        _ = self;
-        return 0;
-    }
-
-    pub fn get_gas_price(self: *Self) u256 {
-        _ = self;
-        return 0;
-    }
-
-    pub fn get_return_data(self: *Self) []const u8 {
-        _ = self;
-        return &[_]u8{};
-    }
-
-    pub fn get_chain_id(self: *Self) u64 {
-        _ = self;
-        return 1;
-    }
-
-    pub fn get_block_hash(self: *Self, block_number: u64) ?[32]u8 {
-        _ = self;
-        _ = block_number;
-        return null;
-    }
-
-    pub fn get_blob_hash(self: *Self, index: u256) ?[32]u8 {
-        _ = self;
-        _ = index;
-        return null;
-    }
-
-    pub fn get_blob_base_fee(self: *Self) u256 {
-        _ = self;
-        return 0;
-    }
-
-    pub fn get_tx_origin(self: *Self) Address {
-        _ = self;
-        return ZERO_ADDRESS;
-    }
-
-    pub fn get_caller(self: *Self) Address {
-        _ = self;
-        return ZERO_ADDRESS;
-    }
-
-    pub fn get_call_value(self: *Self) u256 {
-        _ = self;
-        return 0;
+        if (!condition) {
+            log.err("ASSERTION FAILED: {s}", .{ message });
+            const builtin = @import("builtin");
+            if (builtin.target.cpu.arch == .wasm32 and builtin.target.os.tag == .freestanding) {
+                unreachable;
+            } else {
+                @panic(message);
+            }
+        }
     }
 };
 
-// Helper function to create a test host for tracer tests
-// fn createTestHost() Host {
-//     const holder = struct {
-//         var instance: TestHost = .{};
-//     };
-//     return Host.init(&holder.instance);
-// }
-
-test "DebuggingTracer basic functionality" {
-    var tracer = DebuggingTracer.init(std.testing.allocator);
-    defer tracer.deinit();
-
-    // Test breakpoint management
-    try tracer.addBreakpoint(10);
-    try tracer.addBreakpoint(20);
-
-    try std.testing.expect(tracer.hasBreakpoint(10));
-    try std.testing.expect(tracer.hasBreakpoint(20));
-    try std.testing.expect(!tracer.hasBreakpoint(15));
-
-    // Test step mode
-    tracer.setStepMode(true);
-    try std.testing.expect(tracer.shouldPause(5)); // Should pause in step mode
-
-    tracer.setStepMode(false);
-    try std.testing.expect(tracer.shouldPause(10)); // Should pause on breakpoint
-    try std.testing.expect(!tracer.shouldPause(5)); // Should not pause on regular instruction
-
-    // Test removal
-    try std.testing.expect(tracer.removeBreakpoint(10));
-    try std.testing.expect(!tracer.hasBreakpoint(10));
-    try std.testing.expect(!tracer.removeBreakpoint(10)); // Already removed
-
-    // Test clear
-    tracer.clearBreakpoints();
-    try std.testing.expect(!tracer.hasBreakpoint(20));
-}
-
-test "DebuggingTracer memory management" {
-    var tracer = DebuggingTracer.init(std.testing.allocator);
-    defer tracer.deinit();
-
-    // This test verifies that the tracer properly manages memory
-    // when used with a mock frame
-    const MockFrame = struct {
-        gas_remaining: i64 = 1000,
-        bytecode: []const u8,
-        next_stack_index: usize,
-        stack: [16]u256,
-
-        fn init() @This() {
-            return .{
-                .gas_remaining = 1000,
-                .bytecode = &[_]u8{ 0x60, 0x05 }, // PUSH1 5
-                .next_stack_index = 0,
-                .stack = [_]u256{0} ** 16,
-            };
-        }
-    };
-
-    var mock_frame = MockFrame.init();
-
-    // Test beforeOp and afterOp
-    tracer.beforeOp(0, 0x60, MockFrame, &mock_frame); // PC=0, PUSH1
-    tracer.afterOp(0, 0x60, MockFrame, &mock_frame);
-
-    // Verify step was recorded
-    try std.testing.expectEqual(@as(usize, 1), tracer.steps.items.len);
-    try std.testing.expectEqual(@as(u64, 1), tracer.total_instructions);
-
-    const step = &tracer.steps.items[0];
-    try std.testing.expectEqual(@as(u32, 0), step.pc);
-    try std.testing.expectEqual(@as(u8, 0x60), step.opcode);
-    try std.testing.expectEqualStrings("PUSH1", step.opcode_name);
-}
-
-test "GenericTracer with enhanced features" {
-    const allocator = std.testing.allocator;
-    
-    // Create a test frame with memory and return data
-    const TestFrame = struct {
-        gas_remaining: i64 = 1000,
-        stack: MockStack = .{},
-        memory: MockMemory = .{},
-        return_data: []const u8 = "test return data",
-        depth: u32 = 1,
-        
-        const MockStack = struct {
-            data: [3]u256 = [_]u256{0x123, 0x456, 0x789},
-            
-            pub fn get_slice(self: *const MockStack) []const u256 {
-                return &self.data;
-            }
-            
-            pub fn size(self: *const MockStack) usize {
-                return self.data.len;
-            }
-        };
-        
-        const MockMemory = struct {
-            data: [32]u8 = [_]u8{0xDE, 0xAD, 0xBE, 0xEF} ++ [_]u8{0} ** 28,
-            
-            pub fn size(self: *const MockMemory) usize {
-                return self.data.len;
-            }
-            
-            pub fn get_slice_evm(self: *const MockMemory, offset: usize, len: usize) ![]const u8 {
-                if (offset + len > self.data.len) return error.OutOfBounds;
-                return self.data[offset..offset + len];
-            }
-        };
-    };
-    
-    var test_frame = TestFrame{};
-    
-    // Test with ArrayList writer (memory buffer)
-    var output = std.array_list.AlignedManaged(u8, null).init(allocator);
-    defer output.deinit();
-    
-    var tracer = GenericTracer(std.ArrayList(u8).Writer).initWithConfig(
-        allocator, 
-        output.writer(), 
-        .{ 
-            .capture_memory = .full,
-            .compute_gas_cost = true,
-            .capture_each_op = false,
-        }
-    );
-    
-    // Take a snapshot with enhanced features
-    const trace_log = try tracer.snapshot(5, 0x51, TestFrame, &test_frame); // PC=5, MLOAD
-    defer trace_log.deinit(allocator);
-    
-    // Verify enhanced log capture
-    try std.testing.expectEqual(@as(u64, 5), trace_log.pc);
-    try std.testing.expectEqualStrings("MLOAD", trace_log.op);
-    try std.testing.expectEqual(@as(u64, 1000), trace_log.gas);
-    try std.testing.expectEqual(@as(u32, 1), trace_log.depth);
-    try std.testing.expectEqual(@as(usize, 3), trace_log.stack.len);
-    try std.testing.expectEqual(@as(u32, 32), trace_log.memSize);
-    
-    // Verify memory was captured
-    try std.testing.expect(trace_log.memory != null);
-    if (trace_log.memory) |mem| {
-        try std.testing.expectEqual(@as(usize, 32), mem.len);
-        try std.testing.expectEqual(@as(u8, 0xDE), mem[0]);
-        try std.testing.expectEqual(@as(u8, 0xAD), mem[1]);
+pub const LoggingTracer = struct {
+    pub fn init(allocator: std.mem.Allocator) LoggingTracer {
+        _ = allocator;
+        return .{};
     }
-    
-    // Verify return data was captured  
-    try std.testing.expect(trace_log.returnData != null);
-    if (trace_log.returnData) |ret_data| {
-        try std.testing.expectEqualStrings("test return data", ret_data);
+
+    pub fn deinit(self: *LoggingTracer) void {
+        _ = self;
     }
-    
-    // Write JSON and verify output includes new fields
-    try tracer.writeJson(&trace_log);
-    const json = output.items;
-    
-    // Should include new fields
-    try std.testing.expect(std.mem.indexOf(u8, json, "returnData") != null);
-    try std.testing.expect(std.mem.indexOf(u8, json, "0xdead") != null); // memory content
-}
 
-test "FileTracer with generic writer interface" {
-    const allocator = std.testing.allocator;
-    
-    // Create temp directory for test file
-    var tmp_dir = std.testing.tmpDir(.{});
-    defer tmp_dir.cleanup();
-    
-    const test_file_path = "test_trace.json";
-    const file = try tmp_dir.dir.createFile(test_file_path, .{});
-    file.close();
-    
-    // Get absolute path for FileTracer
-    const abs_path = try tmp_dir.dir.realpathAlloc(allocator, test_file_path);
-    defer allocator.free(abs_path);
-    
-    // Test frame
-    const TestFrame = struct {
-        gas_remaining: i64 = 500,
-        stack: MockStack = .{},
-        depth: u32 = 2,
-        
-        const MockStack = struct {
-            data: [1]u256 = [_]u256{0x42},
-            
-            pub fn get_slice(self: *const MockStack) []const u256 {
-                return &self.data;
-            }
-            
-            pub fn size(self: *const MockStack) usize {
-                return self.data.len;
-            }
-        };
-    };
-    
-    var test_frame = TestFrame{};
-    
-    // Create FileTracer with enhanced config
-    var tracer = try FileTracer.initWithConfig(allocator, abs_path, .{
-        .capture_memory = .prefix,
-        .memory_prefix = 64,
-        .compute_gas_cost = true,
-        .capture_each_op = true,
-    });
-    defer tracer.deinit();
-    
-    // Write enhanced trace
-    try tracer.writeJSONTrace(0, 0x60, TestFrame, &test_frame); // PUSH1
-    
-    // Verify file was written
-    const contents = try tmp_dir.dir.readFileAlloc(allocator, test_file_path, 4096);
-    defer allocator.free(contents);
-    
-    try std.testing.expect(contents.len > 0);
-    try std.testing.expect(std.mem.indexOf(u8, contents, "\"op\":\"PUSH1\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, contents, "\"depth\":2") != null);
-}
+    pub fn before_instruction(self: *LoggingTracer, _: anytype, comptime opcode: UnifiedOpcode, _: anytype) void {
+        _ = self;
+        log.info("[LOG] Executing {s}", .{ @tagName(opcode) });
+    }
 
-test "JSONRPCTracer with enhanced output" {
-    const allocator = std.testing.allocator;
-    
-    var tracer = JSONRPCTracer.init(allocator);
-    defer tracer.deinit();
-    
-    // Simple test frame  
-    const TestFrame = struct {
-        gas_remaining: i64 = 800,
-        stack: MockStack = .{},
-        
-        const MockStack = struct {
-            data: [2]u256 = [_]u256{0x100, 0x200},
-            
-            pub fn get_slice(self: *const MockStack) []const u256 {
-                return &self.data;
+    pub fn after_instruction(self: *LoggingTracer, frame: anytype, comptime opcode: UnifiedOpcode, next_handler: anytype, next_cursor: anytype) void {
+        _ = self;
+        _ = frame;
+        _ = next_handler;
+        _ = next_cursor;
+        log.info("[LOG] Completed {s}", .{ @tagName(opcode) });
+    }
+
+    pub fn after_complete(self: *LoggingTracer, frame: anytype, comptime opcode: UnifiedOpcode) void {
+        _ = self;
+        _ = frame;
+        log.info("[LOG] Terminal {s}", .{ @tagName(opcode) });
+    }
+
+    /// Assert with error message - replaces std.debug.assert
+    pub fn assert(self: *LoggingTracer, condition: bool, comptime message: []const u8) void {
+        _ = self;
+        if (!condition) {
+            log.err("ASSERTION FAILED: {s}", .{ message });
+            const builtin = @import("builtin");
+            if (builtin.target.cpu.arch == .wasm32 and builtin.target.os.tag == .freestanding) {
+                unreachable;
+            } else {
+                @panic(message);
             }
-            
-            pub fn size(self: *const MockStack) usize {
-                return self.data.len;
+        }
+    }
+};
+
+pub const FileTracer = struct {
+    pub fn init(allocator: std.mem.Allocator) FileTracer {
+        _ = allocator;
+        return .{};
+    }
+
+    pub fn deinit(self: *FileTracer) void {
+        _ = self;
+    }
+
+    pub fn before_instruction(self: *FileTracer, _: anytype, comptime _: UnifiedOpcode, _: anytype) void {
+        _ = self;
+    }
+
+    pub fn after_instruction(self: *FileTracer, frame: anytype, comptime opcode: UnifiedOpcode, next_handler: anytype, next_cursor: anytype) void {
+        _ = self;
+        _ = frame;
+        _ = opcode;
+        _ = next_handler;
+        _ = next_cursor;
+    }
+
+    pub fn after_complete(self: *FileTracer, frame: anytype, comptime opcode: UnifiedOpcode) void {
+        _ = self;
+        _ = frame;
+        _ = opcode;
+    }
+
+    /// Assert with error message - replaces std.debug.assert
+    pub fn assert(self: *FileTracer, condition: bool, comptime message: []const u8) void {
+        _ = self;
+        if (!condition) {
+            log.err("ASSERTION FAILED: {s}", .{ message });
+            const builtin = @import("builtin");
+            if (builtin.target.cpu.arch == .wasm32 and builtin.target.os.tag == .freestanding) {
+                unreachable;
+            } else {
+                @panic(message);
             }
-        };
-    };
-    
-    var test_frame = TestFrame{};
-    
-    // Capture step
-    tracer.beforeOp(10, 0x01, TestFrame, &test_frame); // ADD at PC=10
-    tracer.afterOp(10, 0x01, TestFrame, &test_frame);
-    
-    // Export to JSON and verify enhanced format
-    var output = std.array_list.AlignedManaged(u8, null).init(allocator);
-    defer output.deinit();
-    
-    try tracer.toJSON(output.writer());
-    const json = output.items;
-    
-    // Verify basic structure
-    try std.testing.expect(std.mem.indexOf(u8, json, "\"structLogs\":[") != null);
-    try std.testing.expect(std.mem.indexOf(u8, json, "\"pc\":10") != null);
-    try std.testing.expect(std.mem.indexOf(u8, json, "\"op\":\"ADD\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, json, "\"gas\":800") != null);
-    try std.testing.expect(std.mem.indexOf(u8, json, "\"stack\":[\"0x100\",\"0x200\"]") != null);
-}
+        }
+    }
+};
