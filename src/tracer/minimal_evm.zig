@@ -261,12 +261,23 @@ pub const MinimalEvm = struct {
         value: u256,
         calldata: []const u8,
     ) MinimalEvmError!CallResult {
+        // Currently we only use this function for regular calls
+        const intrinsic_gas: i64 = @intCast(GasConstants.TxGas);
+        if (gas < intrinsic_gas) {
+            return CallResult{
+                .success = false,
+                .gas_left = 0,
+                .output = &[_]u8{},
+            };
+        }
+        const execution_gas = gas - intrinsic_gas;
+        
         // Create a new frame for execution
         const frame = try self.allocator.create(MinimalFrame);
         frame.* = try MinimalFrame.init(
             self.allocator,
             bytecode,
-            gas,
+            execution_gas,
             caller,
             address,
             value,
