@@ -12,18 +12,10 @@ const BlockInfo = @import("evm").BlockInfo;
 const TransactionContext = @import("evm").TransactionContext;
 const Hardfork = @import("evm").Hardfork;
 
-// Helper to convert number to Address
-fn to_address(value: u256) Address {
-    var addr: [20]u8 = [_]u8{0} ** 20;
-    var i: usize = 0;
-    while (i < 20) : (i += 1) {
-        addr[19 - i] = @truncate(value >> @intCast(i * 8));
-    }
-    return Address.fromBytes(&addr) catch unreachable; // 20 bytes is always valid
-}
-
-/// Helper to create a configured EVM instance for testing
-fn createTestEvm(allocator: std.mem.Allocator) !struct { evm: *Evm, database: *Database } {
+test "logs should be reverted on REVERT opcode" {
+    const allocator = std.testing.allocator;
+    
+    // Create real EVM instance
     const database = try allocator.create(Database);
     database.* = Database.init(allocator);
     
@@ -39,16 +31,6 @@ fn createTestEvm(allocator: std.mem.Allocator) !struct { evm: *Evm, database: *D
     
     const evm = try allocator.create(Evm);
     evm.* = try Evm.init(allocator, database, block_info, tx_context, gas_price, origin, hardfork);
-    return .{ .evm = evm, .database = database };
-}
-
-test "logs should be reverted on REVERT opcode" {
-    const allocator = std.testing.allocator;
-    
-    // Create real EVM instance
-    const ctx = try createTestEvm(allocator);
-    var evm = ctx.evm;
-    var database = ctx.database;
     defer {
         evm.deinit();
         allocator.destroy(evm);
@@ -56,7 +38,14 @@ test "logs should be reverted on REVERT opcode" {
         allocator.destroy(database);
     }
     
-    const contract_address = to_address(0x1000);
+    // Create contract address from 0x1000
+    var contract_addr_bytes: [20]u8 = [_]u8{0} ** 20;
+    var i: usize = 0;
+    const contract_value: u256 = 0x1000;
+    while (i < 20) : (i += 1) {
+        contract_addr_bytes[19 - i] = @truncate(contract_value >> @intCast(i * 8));
+    }
+    const contract_address = Address.fromBytes(&contract_addr_bytes) catch unreachable;
     
     // Bytecode: Emit LOG1 then REVERT
     // PUSH1 0x42, PUSH1 0x00, MSTORE (store data)
@@ -83,7 +72,14 @@ test "logs should be reverted on REVERT opcode" {
     try evm.database.set_account(contract_address.bytes, account);
     
     // Execute call
-    const caller_address = to_address(0x2000);
+    // Create caller address from 0x2000
+    var caller_addr_bytes: [20]u8 = [_]u8{0} ** 20;
+    i = 0;
+    const caller_value: u256 = 0x2000;
+    while (i < 20) : (i += 1) {
+        caller_addr_bytes[19 - i] = @truncate(caller_value >> @intCast(i * 8));
+    }
+    const caller_address = Address.fromBytes(&caller_addr_bytes) catch unreachable;
     const params = CallParams{ .call = .{
         .caller = caller_address,
         .to = contract_address,
@@ -107,9 +103,21 @@ test "logs should be preserved on successful execution" {
     const allocator = std.testing.allocator;
     
     // Create real EVM instance
-    const ctx = try createTestEvm(allocator);
-    var evm = ctx.evm;
-    var database = ctx.database;
+    const database = try allocator.create(Database);
+    database.* = Database.init(allocator);
+    
+    const block_info = BlockInfo.init();
+    const tx_context = TransactionContext{
+        .gas_limit = 30_000_000,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .chain_id = 1,
+    };
+    const gas_price = 0;
+    const origin = primitives.ZERO_ADDRESS;
+    const hardfork = Hardfork.CANCUN;
+    
+    const evm = try allocator.create(Evm);
+    evm.* = try Evm.init(allocator, database, block_info, tx_context, gas_price, origin, hardfork);
     defer {
         evm.deinit();
         allocator.destroy(evm);
@@ -117,7 +125,14 @@ test "logs should be preserved on successful execution" {
         allocator.destroy(database);
     }
     
-    const contract_address = to_address(0x1000);
+    // Create contract address from 0x1000
+    var contract_addr_bytes: [20]u8 = [_]u8{0} ** 20;
+    var i: usize = 0;
+    const contract_value: u256 = 0x1000;
+    while (i < 20) : (i += 1) {
+        contract_addr_bytes[19 - i] = @truncate(contract_value >> @intCast(i * 8));
+    }
+    const contract_address = Address.fromBytes(&contract_addr_bytes) catch unreachable;
     
     // Bytecode: Emit LOG1 then RETURN (success)
     // PUSH1 0x42, PUSH1 0x00, MSTORE (store data)
@@ -144,7 +159,14 @@ test "logs should be preserved on successful execution" {
     try evm.database.set_account(contract_address.bytes, account);
     
     // Execute call
-    const caller_address = to_address(0x2000);
+    // Create caller address from 0x2000
+    var caller_addr_bytes: [20]u8 = [_]u8{0} ** 20;
+    i = 0;
+    const caller_value: u256 = 0x2000;
+    while (i < 20) : (i += 1) {
+        caller_addr_bytes[19 - i] = @truncate(caller_value >> @intCast(i * 8));
+    }
+    const caller_address = Address.fromBytes(&caller_addr_bytes) catch unreachable;
     const params = CallParams{ .call = .{
         .caller = caller_address,
         .to = contract_address,
