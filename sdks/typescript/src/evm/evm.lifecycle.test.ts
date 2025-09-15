@@ -1,14 +1,14 @@
 import { describe, it, expect } from "bun:test";
-import { GuillotineEVM } from "./evm.js";
+import { GuillotineEvm } from "./evm.js";
 import { U256 } from "../primitives/u256.js";
 import { testAddress } from "../../test/test-helpers.js";
 
-describe("GuillotineEVM - Lifecycle Management", () => {
+describe("GuillotineEvm - Lifecycle Management", () => {
 	describe("Multiple Instance Coexistence", () => {
-		it("should allow multiple EVM instances to coexist", async () => {
-			const evm1 = await GuillotineEVM.create();
-			const evm2 = await GuillotineEVM.create();
-			const evm3 = await GuillotineEVM.create();
+		it("should allow multiple Evm instances to coexist", async () => {
+			const evm1 = await GuillotineEvm.create();
+			const evm2 = await GuillotineEvm.create();
+			const evm3 = await GuillotineEvm.create();
 
 			const addr = testAddress(42);
 			const balance = U256.fromBigInt(1000n);
@@ -30,14 +30,14 @@ describe("GuillotineEVM - Lifecycle Management", () => {
 		});
 
 		it("should allow new instances after closing others", async () => {
-			const evm1 = await GuillotineEVM.create();
+			const evm1 = await GuillotineEvm.create();
 			const addr = testAddress(1);
 			await evm1.setBalance(addr, U256.fromBigInt(100n));
 			expect((await evm1.getBalance(addr)).toBigInt()).toBe(100n);
 			evm1.close();
 
 			// Create new instance after closing first
-			const evm2 = await GuillotineEVM.create();
+			const evm2 = await GuillotineEvm.create();
 			expect((await evm2.getBalance(addr)).toBigInt()).toBe(0n);
 			await evm2.setBalance(addr, U256.fromBigInt(200n));
 			expect((await evm2.getBalance(addr)).toBigInt()).toBe(200n);
@@ -45,9 +45,9 @@ describe("GuillotineEVM - Lifecycle Management", () => {
 		});
 
 		it("should not affect other instances when one is closed", async () => {
-			const evm1 = await GuillotineEVM.create();
-			const evm2 = await GuillotineEVM.create();
-			const evm3 = await GuillotineEVM.create();
+			const evm1 = await GuillotineEvm.create();
+			const evm2 = await GuillotineEvm.create();
+			const evm3 = await GuillotineEvm.create();
 
 			const addr = testAddress(99);
 			await evm1.setBalance(addr, U256.fromBigInt(111n));
@@ -74,7 +74,7 @@ describe("GuillotineEVM - Lifecycle Management", () => {
 			
 			// Create 10 instances
 			for (let i = 0; i < 10; i++) {
-				const evm = await GuillotineEVM.create();
+				const evm = await GuillotineEvm.create();
 				const addr = testAddress(i);
 				await evm.setBalance(addr, U256.fromBigInt(BigInt(i * 100)));
 				instances.push({ evm, addr, expectedBalance: BigInt(i * 100) });
@@ -92,7 +92,7 @@ describe("GuillotineEVM - Lifecycle Management", () => {
 			}
 
 			// Create new instances and verify they start fresh
-			const newEvm = await GuillotineEVM.create();
+			const newEvm = await GuillotineEvm.create();
 			for (const { addr } of instances) {
 				const balance = await newEvm.getBalance(addr);
 				expect(balance.toBigInt()).toBe(0n);
@@ -101,9 +101,9 @@ describe("GuillotineEVM - Lifecycle Management", () => {
 		});
 
 		it("should handle mixed tracing and non-tracing instances", async () => {
-			const evmNoTrace1 = await GuillotineEVM.create(undefined, false);
-			const evmWithTrace = await GuillotineEVM.create(undefined, true);
-			const evmNoTrace2 = await GuillotineEVM.create(undefined, false);
+			const evmNoTrace1 = await GuillotineEvm.create(undefined, false);
+			const evmWithTrace = await GuillotineEvm.create(undefined, true);
+			const evmNoTrace2 = await GuillotineEvm.create(undefined, false);
 
 			const addr = testAddress(77);
 			
@@ -123,8 +123,8 @@ describe("GuillotineEVM - Lifecycle Management", () => {
 
 	describe("Error Handling", () => {
 		it("should properly handle errors without affecting other instances", async () => {
-			const evm1 = await GuillotineEVM.create();
-			const evm2 = await GuillotineEVM.create();
+			const evm1 = await GuillotineEvm.create();
+			const evm2 = await GuillotineEvm.create();
 
 			const addr = testAddress(1);
 			await evm1.setBalance(addr, U256.fromBigInt(100n));

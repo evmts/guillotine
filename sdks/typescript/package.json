@@ -2,7 +2,7 @@
 	"name": "@guillotine/sdk",
 	"version": "0.0.1",
 	"private": false,
-	"description": "TypeScript SDK for Guillotine EVM",
+	"description": "TypeScript SDK for Guillotine Evm",
 	"keywords": [
 		"evm",
 		"ethereum",

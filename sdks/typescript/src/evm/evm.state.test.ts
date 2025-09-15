@@ -1,15 +1,15 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { GuillotineEVM } from "./evm.js";
+import { GuillotineEvm } from "./evm.js";
 import { Address } from "../primitives/address.js";
 import { U256 } from "../primitives/u256.js";
 import { Bytes } from "../primitives/bytes.js";
 import { testAddress, hex } from "../../test/test-helpers.js";
 
-describe("GuillotineEVM - State Management", () => {
-	let evm: GuillotineEVM;
+describe("GuillotineEvm - State Management", () => {
+	let evm: GuillotineEvm;
 
 	beforeEach(async () => {
-		evm = await GuillotineEVM.create();
+		evm = await GuillotineEvm.create();
 	});
 
 	afterEach(() => {

@@ -14,7 +14,7 @@ const bls12_381_g1_add: PrecompileFunction = (
   _outputPtr: number,
   _outputLenPtr: number
 ): number => {
-  // Stub implementation - actual precompile handled by EVM
+  // Stub implementation - actual precompile handled by Evm
   return PrecompileResult.NOT_IMPLEMENTED;
 };
 
@@ -27,7 +27,7 @@ const bls12_381_g1_mul: PrecompileFunction = (
   _outputPtr: number,
   _outputLenPtr: number
 ): number => {
-  // Stub implementation - actual precompile handled by EVM
+  // Stub implementation - actual precompile handled by Evm
   return PrecompileResult.NOT_IMPLEMENTED;
 };
 
@@ -40,7 +40,7 @@ const bls12_381_g1_msm: PrecompileFunction = (
   _outputPtr: number,
   _outputLenPtr: number
 ): number => {
-  // Stub implementation - actual precompile handled by EVM
+  // Stub implementation - actual precompile handled by Evm
   return PrecompileResult.NOT_IMPLEMENTED;
 };
 
@@ -53,7 +53,7 @@ const bls12_381_g1_multiexp: PrecompileFunction = (
   _outputPtr: number,
   _outputLenPtr: number
 ): number => {
-  // Stub implementation - actual precompile handled by EVM
+  // Stub implementation - actual precompile handled by Evm
   return PrecompileResult.NOT_IMPLEMENTED;
 };
 
@@ -66,7 +66,7 @@ const bls12_381_g2_add: PrecompileFunction = (
   _outputPtr: number,
   _outputLenPtr: number
 ): number => {
-  // Stub implementation - actual precompile handled by EVM
+  // Stub implementation - actual precompile handled by Evm
   return PrecompileResult.NOT_IMPLEMENTED;
 };
 
@@ -79,7 +79,7 @@ const bls12_381_g2_mul: PrecompileFunction = (
   _outputPtr: number,
   _outputLenPtr: number
 ): number => {
-  // Stub implementation - actual precompile handled by EVM
+  // Stub implementation - actual precompile handled by Evm
   return PrecompileResult.NOT_IMPLEMENTED;
 };
 
@@ -92,7 +92,7 @@ const bls12_381_g2_msm: PrecompileFunction = (
   _outputPtr: number,
   _outputLenPtr: number
 ): number => {
-  // Stub implementation - actual precompile handled by EVM
+  // Stub implementation - actual precompile handled by Evm
   return PrecompileResult.NOT_IMPLEMENTED;
 };
 
@@ -105,7 +105,7 @@ const bls12_381_g2_multiexp: PrecompileFunction = (
   _outputPtr: number,
   _outputLenPtr: number
 ): number => {
-  // Stub implementation - actual precompile handled by EVM
+  // Stub implementation - actual precompile handled by Evm
   return PrecompileResult.NOT_IMPLEMENTED;
 };
 
@@ -118,7 +118,7 @@ const bls12_381_pairing: PrecompileFunction = (
   _outputPtr: number,
   _outputLenPtr: number
 ): number => {
-  // Stub implementation - actual precompile handled by EVM
+  // Stub implementation - actual precompile handled by Evm
   return PrecompileResult.NOT_IMPLEMENTED;
 };
 
@@ -131,7 +131,7 @@ const bls12_381_map_fp_to_g1: PrecompileFunction = (
   _outputPtr: number,
   _outputLenPtr: number
 ): number => {
-  // Stub implementation - actual precompile handled by EVM
+  // Stub implementation - actual precompile handled by Evm
   return PrecompileResult.NOT_IMPLEMENTED;
 };
 
@@ -144,7 +144,7 @@ const bls12_381_map_fp2_to_g2: PrecompileFunction = (
   _outputPtr: number,
   _outputLenPtr: number
 ): number => {
-  // Stub implementation - actual precompile handled by EVM
+  // Stub implementation - actual precompile handled by Evm
   return PrecompileResult.NOT_IMPLEMENTED;
 };
 

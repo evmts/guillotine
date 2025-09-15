@@ -6,7 +6,7 @@ import { GuillotineError } from '../errors.js';
 import { getWasmLoader, type WasmMemory, type GuillotineWasm } from '../wasm/loader.js';
 
 /**
- * Block information for EVM execution
+ * Block information for Evm execution
  */
 export interface BlockInfo {
   number?: bigint;
@@ -20,7 +20,7 @@ export interface BlockInfo {
 }
 
 /**
- * Call types for EVM execution
+ * Call types for Evm execution
  */
 export enum CallType {
   CALL = 0,
@@ -32,7 +32,7 @@ export enum CallType {
 }
 
 /**
- * Parameters for EVM execution
+ * Parameters for Evm execution
  */
 export interface ExecutionParams {
   /** The caller address */
@@ -52,9 +52,9 @@ export interface ExecutionParams {
 }
 
 /**
- * Main EVM execution engine using WebAssembly
+ * Main Evm execution engine using WebAssembly
  */
-export class GuillotineEVM {
+export class GuillotineEvm {
   private wasm: GuillotineWasm;
   private memory: WasmMemory;
   private evmHandle: number;
@@ -70,16 +70,16 @@ export class GuillotineEVM {
   }
 
   /**
-   * Create a new EVM instance
+   * Create a new Evm instance
    * 
    * INSTANCE CREATION PATTERN:
-   * - Creates independent EVM instance with its own state via handle
+   * - Creates independent Evm instance with its own state via handle
    * - Multiple instances can coexist on same thread (share WASM module)
    * - Each instance has separate storage/balance/code state
    * - Calls guillotine_evm_create() which allocates instance-specific memory
    * - We only init the WASM module and allocate memory once
    */
-  static async create(blockInfo?: BlockInfo, useTracing: boolean = false, wasmPath?: string): Promise<GuillotineEVM> {
+  static async create(blockInfo?: BlockInfo, useTracing: boolean = false, wasmPath?: string): Promise<GuillotineEvm> {
     try {
       const loader = getWasmLoader();
       
@@ -120,7 +120,7 @@ export class GuillotineEVM {
         view.setUint8(72 + i, prevRandaoBytes[i] || 0);
       }
       
-      // Create EVM instance
+      // Create Evm instance
       const evmHandle = useTracing
         ? wasm.guillotine_evm_create_tracing(blockInfoPtr)
         : wasm.guillotine_evm_create(blockInfoPtr);
@@ -130,16 +130,16 @@ export class GuillotineEVM {
       if (evmHandle === 0) {
         const errorPtr = wasm.guillotine_get_last_error();
         const errorMessage = memory.readString(errorPtr);
-        throw GuillotineError.vmNotInitialized(`Failed to create EVM instance: ${errorMessage}`);
+        throw GuillotineError.vmNotInitialized(`Failed to create Evm instance: ${errorMessage}`);
       }
       
-      return new GuillotineEVM(wasm, memory, evmHandle, useTracing);
+      return new GuillotineEvm(wasm, memory, evmHandle, useTracing);
     } catch (error) {
       if (error instanceof GuillotineError) {
         throw error;
       }
       throw GuillotineError.initializationFailed(
-        'Failed to create EVM instance',
+        'Failed to create Evm instance',
         error as Error
       );
     }
@@ -235,7 +235,7 @@ export class GuillotineEVM {
         throw error;
       }
       throw GuillotineError.executionFailed(
-        'EVM execution failed',
+        'Evm execution failed',
         error as Error
       );
     }
@@ -468,7 +468,7 @@ export class GuillotineEVM {
    * 
    * INSTANCE CLEANUP PATTERN:
    * - Frees THIS instance's resources via guillotine_evm_destroy()
-   * - Does NOT affect other EVM instances or global WASM module
+   * - Does NOT affect other Evm instances or global WASM module
    * - Does NOT call guillotine_cleanup() (would break all instances)
    * - Safe to create new instances after closing
    */
@@ -489,7 +489,7 @@ export class GuillotineEVM {
    */
   private ensureInitialized(): void {
     if (!this.isInitialized || this.evmHandle === 0) {
-      throw GuillotineError.vmNotInitialized('EVM instance is not initialized');
+      throw GuillotineError.vmNotInitialized('Evm instance is not initialized');
     }
   }
 

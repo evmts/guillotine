@@ -4,7 +4,7 @@ import { U256 } from '../primitives/u256.js';
 import type { Jsonified } from '../utils/json-types.js';
 
 /**
- * Log entry from EVM execution
+ * Log entry from Evm execution
  */
 export interface LogEntry {
   address: Address;
@@ -13,7 +13,7 @@ export interface LogEntry {
 }
 
 /**
- * Self-destruct record from EVM execution
+ * Self-destruct record from Evm execution
  */
 export interface SelfDestructRecord {
   contract: Address;
@@ -21,7 +21,7 @@ export interface SelfDestructRecord {
 }
 
 /**
- * Storage access record from EVM execution
+ * Storage access record from Evm execution
  */
 export interface StorageAccessRecord {
   address: Address;
@@ -29,7 +29,7 @@ export interface StorageAccessRecord {
 }
 
 /**
- * Result of EVM execution
+ * Result of Evm execution
  */
 export class ExecutionResult {
   public readonly success: boolean;

@@ -2,7 +2,7 @@ import { Address } from "../src/primitives/address.js";
 import { U256 } from "../src/primitives/u256.js";
 import { Bytes } from "../src/primitives/bytes.js";
 import {
-	type GuillotineEVM,
+	type GuillotineEvm,
 	CallType,
 	type ExecutionParams,
 	type BlockInfo,
@@ -13,7 +13,7 @@ import type { ExecutionResult } from "../src/evm/execution-result.js";
 export * from "./test-assertions.js";
 
 /**
- * Test helper utilities for EVM testing
+ * Test helper utilities for Evm testing
  */
 
 /**
@@ -206,7 +206,7 @@ export function defaultExecutionParams(
  * Deploy a contract and return its address
  */
 export async function deployContract(
-	evm: GuillotineEVM,
+	evm: GuillotineEvm,
 	code: Bytes,
 	deployer: Address = testAddress(1),
 ): Promise<Address> {

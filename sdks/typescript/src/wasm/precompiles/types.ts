@@ -1,5 +1,5 @@
 /**
- * Common type for all EVM precompile functions
+ * Common type for all Evm precompile functions
  * 
  * @param inputPtr - Pointer to input data in WASM memory
  * @param inputLen - Length of input data in bytes

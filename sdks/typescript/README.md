@@ -10,15 +10,15 @@
 - API stability: Unstable; breaking changes expected
 - Feedback: https://github.com/evmts/Guillotine/issues or Telegram https://t.me/+ANThR9bHDLAwMjUx
 
-High-performance Ethereum Virtual Machine (EVM) implementation for TypeScript/JavaScript, powered by WebAssembly.
+High-performance Ethereum Virtual Machine (Evm) implementation for TypeScript/JavaScript, powered by WebAssembly.
 
 ## Features
 
 - 🚀 **High Performance**: WebAssembly-compiled Zig implementation
 - 🔒 **Type Safe**: Full TypeScript support with strict typing
-- 🧩 **Modular**: Separate modules for different EVM components
+- 🧩 **Modular**: Separate modules for different Evm components
 - 🔄 **Async First**: Non-blocking operations with Promise-based API
-- 🧪 **Well Tested**: Comprehensive test suite with real EVM execution
+- 🧪 **Well Tested**: Comprehensive test suite with real Evm execution
 - 📦 **Zero Dependencies**: Only runtime dependency is the WASM module
 - 🌐 **Universal**: Works in Node.js, Bun, and browsers
 
@@ -36,7 +36,7 @@ bun add @evmts/guillotine
 
 The SDK requires a WebAssembly module compiled from the Zig implementation. The loader will automatically search for the WASM file in these locations:
 
-1. Custom path if provided to `GuillotineEVM.create(wasmPath)`
+1. Custom path if provided to `GuillotineEvm.create(wasmPath)`
 2. `../wasm/guillotine-evm.wasm` (relative to package)
 3. `../../../../zig-out/bin/guillotine-evm.wasm` (development)
 4. `zig-out/bin/guillotine-evm.wasm` (project root)
@@ -46,10 +46,10 @@ For browser usage, ensure the WASM file is served at `/wasm/guillotine-evm.wasm`
 ## Quick Start
 
 ```typescript
-import { GuillotineEVM, Address, U256, Bytes } from '@evmts/guillotine';
+import { GuillotineEvm, Address, U256, Bytes } from '@evmts/guillotine';
 
-// Create an EVM instance
-const evm = await GuillotineEVM.create();
+// Create an Evm instance
+const evm = await GuillotineEvm.create();
 
 // Execute bytecode
 const result = await evm.execute({
@@ -72,16 +72,16 @@ evm.close();
 
 ## Core Concepts
 
-### EVM Instance
+### Evm Instance
 
-The main entry point for executing EVM bytecode:
+The main entry point for executing Evm bytecode:
 
 ```typescript
-// Create EVM instance (no options currently supported)
-const evm = await GuillotineEVM.create();
+// Create Evm instance (no options currently supported)
+const evm = await GuillotineEvm.create();
 
 // Optionally specify custom WASM path
-const evm = await GuillotineEVM.create('/path/to/guillotine-evm.wasm');
+const evm = await GuillotineEvm.create('/path/to/guillotine-evm.wasm');
 ```
 
 ### State Management
@@ -141,9 +141,9 @@ if (result.isSuccess()) {
 
 ### Main Classes
 
-- **GuillotineEVM**: Main execution engine with state management
-- **ExecutionResult**: Result of EVM execution with gas usage and output data
-- **ExecutionParams**: Parameters for EVM execution (bytecode, caller, etc.)
+- **GuillotineEvm**: Main execution engine with state management
+- **ExecutionResult**: Result of Evm execution with gas usage and output data
+- **ExecutionParams**: Parameters for Evm execution (bytecode, caller, etc.)
 
 ### Primitive Types
 
@@ -154,12 +154,12 @@ if (result.isSuccess()) {
 
 ### Core API
 
-#### GuillotineEVM
+#### GuillotineEvm
 
 ```typescript
-class GuillotineEVM {
-  // Create new EVM instance
-  static async create(wasmPath?: string): Promise<GuillotineEVM>
+class GuillotineEvm {
+  // Create new Evm instance
+  static async create(wasmPath?: string): Promise<GuillotineEvm>
   
   // Execute bytecode
   async execute(params: ExecutionParams): Promise<ExecutionResult>
@@ -250,9 +250,9 @@ class GuillotineError extends Error {
 ### Simple Bytecode Execution
 
 ```typescript
-import { GuillotineEVM, Address, U256, Bytes } from '@evmts/guillotine';
+import { GuillotineEvm, Address, U256, Bytes } from '@evmts/guillotine';
 
-const evm = await GuillotineEVM.create();
+const evm = await GuillotineEvm.create();
 
 // Execute simple arithmetic: PUSH1 5, PUSH1 3, ADD
 const result = await evm.execute({
@@ -270,7 +270,7 @@ evm.close();
 ### Working with Account State
 
 ```typescript
-const evm = await GuillotineEVM.create();
+const evm = await GuillotineEvm.create();
 
 const address = Address.from('0x742d35Cc6634C0532925a3b844Bc9e7595f7BBDc');
 
@@ -307,7 +307,7 @@ evm.close();
 import { GuillotineError } from '@evmts/guillotine';
 
 try {
-  const evm = await GuillotineEVM.create();
+  const evm = await GuillotineEvm.create();
   
   const result = await evm.execute({
     bytecode: Bytes.from('0xfd'), // REVERT opcode
@@ -335,7 +335,7 @@ try {
 
 Guillotine is designed for maximum performance:
 
-- **WebAssembly**: Core EVM implementation compiled from Zig to WASM
+- **WebAssembly**: Core Evm implementation compiled from Zig to WASM
 - **Zero-copy operations**: Minimal data copying between JS and WASM
 - **Optimized bytecode**: Advanced bytecode analysis and optimization
 - **Memory pooling**: Efficient memory management in WASM
@@ -368,7 +368,7 @@ bun run format
 
 ```
 src/
-├── evm/           # EVM execution engine
+├── evm/           # Evm execution engine
 ├── primitives/    # Ethereum primitive types (Address, U256, Bytes, Hash)
 ├── wasm/          # WebAssembly loading and bindings
 ├── errors.ts      # Error types and handling

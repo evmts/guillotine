@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { GuillotineEVM, CallType } from "./evm.js";
+import { GuillotineEvm, CallType } from "./evm.js";
 import { Address } from "../primitives/address.js";
 import { U256 } from "../primitives/u256.js";
 import { Bytes } from "../primitives/bytes.js";
@@ -12,11 +12,11 @@ import {
 	assertFailure,
 } from "../../test/test-helpers.js";
 
-describe("GuillotineEVM - Error Handling", () => {
-	let evm: GuillotineEVM;
+describe("GuillotineEvm - Error Handling", () => {
+	let evm: GuillotineEvm;
 
 	beforeEach(async () => {
-		evm = await GuillotineEVM.create();
+		evm = await GuillotineEvm.create();
 	});
 
 	afterEach(() => {
@@ -26,7 +26,7 @@ describe("GuillotineEVM - Error Handling", () => {
 	});
 
 	describe("Initialization Errors", () => {
-		it("should throw error when using closed EVM", async () => {
+		it("should throw error when using closed Evm", async () => {
 			const addr = testAddress(1);
 			evm.close();
 
@@ -34,7 +34,7 @@ describe("GuillotineEVM - Error Handling", () => {
 			await expect(evm.getBalance(addr)).rejects.toThrow("not initialized");
 		});
 
-		it("should throw error for all operations on closed EVM", async () => {
+		it("should throw error for all operations on closed Evm", async () => {
 			const addr = testAddress(2);
 			const key = U256.zero();
 			const value = U256.fromBigInt(100n);
@@ -549,7 +549,7 @@ describe("GuillotineEVM - Error Handling", () => {
 		// TODO: Fix maximum call depth detection in Zig
 		it.todo("should handle maximum call depth", async () => {
 			// Create a chain of contracts that call each other
-			// EVM call depth limit is 1024
+			// Evm call depth limit is 1024
 
 			// This is a simplified test - in practice, reaching max depth
 			// requires careful gas management

@@ -4,8 +4,8 @@ export { U256 } from './primitives/u256.js';
 export { Hash } from './primitives/hash.js';
 export { Bytes } from './primitives/bytes.js';
 
-// Export EVM components
-export { GuillotineEVM, type ExecutionParams } from './evm/evm.js';
+// Export Evm components
+export { GuillotineEvm, type ExecutionParams } from './evm/evm.js';
 export { ExecutionResult } from './evm/execution-result.js';
 
 // Export errors

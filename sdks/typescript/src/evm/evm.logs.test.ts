@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { GuillotineEVM } from "./evm.js";
+import { GuillotineEvm } from "./evm.js";
 import { U256 } from "../primitives/u256.js";
 import { Bytes } from "../primitives/bytes.js";
 import {
@@ -12,11 +12,11 @@ import {
 } from "../../test/test-helpers.js";
 import { first, getElement } from "../../test/test-assertions.js";
 
-describe("GuillotineEVM - Logs and Events", () => {
-	let evm: GuillotineEVM;
+describe("GuillotineEvm - Logs and Events", () => {
+	let evm: GuillotineEvm;
 
 	beforeEach(async () => {
-		evm = await GuillotineEVM.create();
+		evm = await GuillotineEvm.create();
 	});
 
 	afterEach(() => {
@@ -44,7 +44,7 @@ describe("GuillotineEVM - Logs and Events", () => {
 			const log = first(result.logs, "log");
 			expect(log.address.toHex()).toBe(contractAddr.toHex());
 			expect(log.topics).toHaveLength(0);
-			expect(log.data.toBytes()[31]).toBe(0xab); // Our test data (raw bytes from EVM memory)
+			expect(log.data.toBytes()[31]).toBe(0xab); // Our test data (raw bytes from Evm memory)
 		});
 
 		it("should emit LOG1 with one topic", async () => {
@@ -69,7 +69,7 @@ describe("GuillotineEVM - Logs and Events", () => {
 			expect(log.topics).toHaveLength(1);
 			const topic0 = first(log.topics, "topic");
 			expect(topic0.toBytes()[31]).toBe(0x10); // Topic value (U256 big-endian)
-			expect(log.data.toBytes()[31]).toBe(0xab); // Log data (raw EVM memory)
+			expect(log.data.toBytes()[31]).toBe(0xab); // Log data (raw Evm memory)
 		});
 
 		it("should emit LOG2 with two topics", async () => {
@@ -558,7 +558,7 @@ describe("GuillotineEVM - Logs and Events", () => {
 
 	describe("Tracing", () => {
 		it("should include trace JSON when tracing enabled", async () => {
-			const evmWithTrace = await GuillotineEVM.create(undefined, true);
+			const evmWithTrace = await GuillotineEvm.create(undefined, true);
 
 			const contractAddr = testAddress(600);
 			const code = logBytecode(1);
@@ -609,7 +609,7 @@ describe("GuillotineEVM - Logs and Events", () => {
 		});
 
 		it("should trace nested calls", async () => {
-			const evmWithTrace = await GuillotineEVM.create(undefined, true);
+			const evmWithTrace = await GuillotineEvm.create(undefined, true);
 
 			const contractA = testAddress(602);
 			const contractB = testAddress(603);

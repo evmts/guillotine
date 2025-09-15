@@ -87,7 +87,7 @@ import { expect } from 'bun:test';
  * ## Usage Example
  * 
  * ```typescript
- * describe('EVM Logs', () => {
+ * describe('Evm Logs', () => {
  *   it('should emit log with topics', async () => {
  *     const result = await evm.call(params);
  *     

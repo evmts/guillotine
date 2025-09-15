@@ -61,7 +61,7 @@ export interface GuillotineWasm {
   guillotine_init(): void;
   guillotine_cleanup(): void;
   
-  // EVM instance management
+  // Evm instance management
   guillotine_evm_create(block_info_ptr: number): number; // Returns EvmHandle pointer or null
   guillotine_evm_create_tracing(block_info_ptr: number): number; // Returns EvmHandle pointer or null
   guillotine_evm_destroy(handle: number): void;
@@ -248,8 +248,8 @@ export class WasmLoader {
    * INITIALIZATION PATTERN:
    * - Called ONCE per application lifetime (singleton pattern)
    * - Initializes global FFI allocator via guillotine_init()
-   * - Shared by ALL EVM instances on the same thread
-   * - Do NOT call per EVM instance - use GuillotineEVM.create() instead
+   * - Shared by ALL Evm instances on the same thread
+   * - Do NOT call per Evm instance - use GuillotineEvm.create() instead
    */
   async load(wasmPath?: string): Promise<void> {
     let wasmBinary: Uint8Array;
@@ -294,7 +294,7 @@ export class WasmLoader {
         console_log: this.consoleLog.bind(this),
         console_warn: this.consoleWarn.bind(this),
         console_error: this.consoleError.bind(this),
-        // EVM precompile functions (organized in separate modules)
+        // Evm precompile functions (organized in separate modules)
         ...precompiles,
       },
       wasi_snapshot_preview1: {
@@ -332,7 +332,7 @@ export class WasmLoader {
       },
     };
 
-    // Initialize the EVM
+    // Initialize the Evm
     if (this.wasmModule?.guillotine_init) {
       this.wasmModule.guillotine_init();
     } else if (this.wasmModule) {
@@ -425,8 +425,8 @@ export class WasmLoader {
    * CLEANUP PATTERN:
    * - Called ONCE when unloading entire WASM module (application shutdown)
    * - Destroys global FFI allocator via guillotine_cleanup()
-   * - Will break ALL existing EVM instances
-   * - Do NOT call when closing individual EVMs - use evm.close() instead
+   * - Will break ALL existing Evm instances
+   * - Do NOT call when closing individual Evms - use evm.close() instead
    * - Only call if you need to fully unload and reload the WASM module
    */
   cleanup(): void {

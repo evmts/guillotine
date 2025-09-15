@@ -4,7 +4,7 @@
 
 ### WASM FFI Bridge
 
-The TypeScript SDK is a wrapper around the Guillotine EVM WASM implementation, which is compiled from the Zig FFI interface located at `src/evm_c.zig`. This provides:
+The TypeScript SDK is a wrapper around the Guillotine Evm WASM implementation, which is compiled from the Zig FFI interface located at `src/evm_c.zig`. This provides:
 
 - **High Performance**: Native Zig execution via WASM
 - **Type Safety**: Full TypeScript typing over the FFI boundary
@@ -83,7 +83,7 @@ pub const CallParams = extern struct {
 
 ### Handle-Based Architecture
 
-- EVM instances are managed via opaque handles
+- Evm instances are managed via opaque handles
 - Multiple instances can coexist (separate state)
 - Handles must be properly destroyed to prevent leaks
 
@@ -106,20 +106,20 @@ selfDestructBytecode(addr) // Self-destructs
 
 ### Test Patterns
 
-1. **Setup EVM Instance**: Always create fresh instances for isolation
+1. **Setup Evm Instance**: Always create fresh instances for isolation
 2. **Use Helpers**: Leverage test helpers for common scenarios
 3. **Verify State**: Check balances, storage, and code after operations
 4. **Clean Assertions**: Use clear, descriptive assertions
-5. **Resource Cleanup**: Always destroy EVM instances after tests
+5. **Resource Cleanup**: Always destroy Evm instances after tests
 
 ### Example Test Structure
 
 ```typescript
 describe('Feature', () => {
-  let evm: GuillotineEVM;
+  let evm: GuillotineEvm;
   
   beforeEach(async () => {
-    evm = await GuillotineEVM.create();
+    evm = await GuillotineEvm.create();
   });
   
   afterEach(() => {
@@ -166,7 +166,7 @@ GuillotineError.invalidInput(message)
 ### Optimization Guidelines
 
 1. **Batch Operations**: Group related state changes
-2. **Reuse Instances**: Don't recreate EVM instances unnecessarily
+2. **Reuse Instances**: Don't recreate Evm instances unnecessarily
 3. **Minimize Copies**: Use views where possible
 4. **Async Patterns**: Use Promise.all for parallel operations
 
@@ -184,8 +184,8 @@ GuillotineError.invalidInput(message)
 // Primitives
 import { Address, U256, Bytes } from '../primitives';
 
-// EVM Core
-import { GuillotineEVM, CallType, ExecutionParams } from '../evm';
+// Evm Core
+import { GuillotineEvm, CallType, ExecutionParams } from '../evm';
 
 // Errors
 import { GuillotineError } from '../errors';
@@ -297,4 +297,4 @@ zig build wasm
 
 ---
 
-_Remember: The SDK's purpose is to make the powerful Guillotine EVM accessible to JavaScript developers while maintaining performance and safety._
+_Remember: The SDK's purpose is to make the powerful Guillotine Evm accessible to JavaScript developers while maintaining performance and safety._

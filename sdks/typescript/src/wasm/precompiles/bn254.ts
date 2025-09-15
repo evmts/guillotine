@@ -15,7 +15,7 @@ const bn254_ecadd: PrecompileFunction = (
   _outputPtr: number,
   _outputLenPtr: number
 ): number => {
-  // Stub implementation - actual precompile handled by EVM
+  // Stub implementation - actual precompile handled by Evm
   return PrecompileResult.NOT_IMPLEMENTED;
 };
 
@@ -29,7 +29,7 @@ const bn254_ecmul: PrecompileFunction = (
   _outputPtr: number,
   _outputLenPtr: number
 ): number => {
-  // Stub implementation - actual precompile handled by EVM
+  // Stub implementation - actual precompile handled by Evm
   return PrecompileResult.NOT_IMPLEMENTED;
 };
 
@@ -43,7 +43,7 @@ const bn254_ecpairing: PrecompileFunction = (
   _outputPtr: number,
   _outputLenPtr: number
 ): number => {
-  // Stub implementation - actual precompile handled by EVM
+  // Stub implementation - actual precompile handled by Evm
   return PrecompileResult.NOT_IMPLEMENTED;
 };
 
