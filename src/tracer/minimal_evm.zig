@@ -7,6 +7,9 @@ const GasConstants = primitives.GasConstants;
 const MinimalFrame = @import("minimal_frame.zig").MinimalFrame;
 const minimal_host = @import("minimal_host.zig");
 
+// Reference imports (access list is simple enough to not create a minimal version for)
+const AccessList = @import("../storage/access_list.zig").AccessList;
+
 const Address = primitives.Address.Address;
 const ZERO_ADDRESS = primitives.ZERO_ADDRESS;
 const to_u256 = primitives.Address.to_u256;
