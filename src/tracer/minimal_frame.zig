@@ -1241,6 +1241,12 @@ pub const MinimalFrame = struct {
                     const off = std.math.cast(u32, offset) orelse return error.OutOfBounds;
                     const len = std.math.cast(u32, length) orelse return error.OutOfBounds;
 
+                    // Charge memory expansion for the return slice
+                    const end_bytes = @as(u64, off) + @as(u64, len);
+                    const mem_cost = self.memoryExpansionCost(end_bytes);
+                    try self.consumeGas(mem_cost);
+                    if (end_bytes > self.memory_size) self.memory_size = @intCast(end_bytes);
+
                     self.output = try self.allocator.alloc(u8, len);
                     var idx: u32 = 0;
                     while (idx < len) : (idx += 1) {
@@ -1469,6 +1475,12 @@ pub const MinimalFrame = struct {
                     const off = std.math.cast(u32, offset) orelse return error.OutOfBounds;
                     const len = std.math.cast(u32, length) orelse return error.OutOfBounds;
 
+                    // Charge memory expansion for the revert slice
+                    const end_bytes: u64 = @as(u64, off) + @as(u64, len);
+                    const mem_cost = self.memoryExpansionCost(end_bytes);
+                    try self.consumeGas(mem_cost);
+                    if (end_bytes > self.memory_size) self.memory_size = @intCast(end_bytes);
+
                     self.output = try self.allocator.alloc(u8, len);
                     var idx: u32 = 0;
                     while (idx < len) : (idx += 1) {
@@ -1693,6 +1705,8 @@ pub const MinimalFrame = struct {
             // INVALID
             0xfe => {
                 // INVALID opcode always fails
+                // Consume all remaining gas
+                self.gas_remaining = 0;
                 return error.InvalidOpcode;
             },
 
