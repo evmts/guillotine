@@ -900,7 +900,14 @@ pub const MinimalFrame = struct {
                 // EIP-2929: charge warm/cold storage access cost and warm the slot
                 // TODO: Gate EIP-2929 by hardfork
                 const access_cost = try self.getEvm().access_storage_slot(self.address, key);
-                try self.consumeGas(access_cost);
+                // Access list returns 2100 for cold and 100 for warm
+                // SLOAD total cost is 100 when warm and 2100 + 100 when cold
+                // Add the 100 base only for the cold case to avoid double-charging on warm
+                const total_cost: u64 = if (access_cost == GasConstants.ColdSloadCost)
+                    access_cost + GasConstants.SloadGas
+                else
+                    access_cost;
+                try self.consumeGas(total_cost);
 
                 const value = self.getEvm().get_storage(self.address, key);
                 try self.pushStack(value);
