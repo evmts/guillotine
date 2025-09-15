@@ -64,6 +64,17 @@ pub const CallResult = struct {
 pub const StorageSlotKey = struct {
     address: Address,
     slot: u256,
+
+    pub fn hash(key: StorageSlotKey) u32 {
+        var hasher = std.hash.Wyhash.init(0);
+        hasher.update(&key.address.bytes);
+        hasher.update(std.mem.asBytes(&key.slot));
+        return @truncate(hasher.final());
+    }
+
+    pub fn eql(a: StorageSlotKey, b: StorageSlotKey) bool {
+        return std.mem.eql(u8, &a.address.bytes, &b.address.bytes) and a.slot == b.slot;
+    }
 };
 
 // Context for Address ArrayHashMap
@@ -73,16 +84,13 @@ const AddressContext = std.array_hash_map.AutoContext(Address);
 const StorageSlotKeyContext = struct {
     pub fn hash(self: @This(), key: StorageSlotKey) u32 {
         _ = self;
-        var hasher = std.hash.Wyhash.init(0);
-        hasher.update(&key.address.bytes);
-        hasher.update(std.mem.asBytes(&key.slot));
-        return @truncate(hasher.final());
+        return StorageSlotKey.hash(key);
     }
 
     pub fn eql(self: @This(), a: StorageSlotKey, b: StorageSlotKey, b_index: usize) bool {
         _ = self;
         _ = b_index;
-        return std.mem.eql(u8, &a.address.bytes, &b.address.bytes) and a.slot == b.slot;
+        return StorageSlotKey.eql(a, b);
     }
 };
 
