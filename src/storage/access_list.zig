@@ -102,6 +102,41 @@ pub fn createAccessList(comptime config: AccessListConfig) type {
                 std.mem.doNotOptimizeAway(&result);
             }
         }
+
+        /// Extract owned copies of accessed addresses and storage slots
+        /// Returns a struct containing the accessed data that the caller owns
+        /// The caller is responsible for freeing the returned memory
+        /// 
+        /// The StorageAccessType parameter allows the caller to specify the
+        /// output type for storage access records, enabling compatibility
+        /// with different CallResult implementations.
+        pub fn toOwned(self: *Self, allocator: std.mem.Allocator, comptime StorageAccessType: type) !struct {
+            accessed_addresses: []const Address,
+            accessed_storage: []const StorageAccessType,
+        } {
+            // Extract addresses
+            const address_keys = self.addresses.keys();
+            const accessed_addresses = try allocator.dupe(Address, address_keys);
+            errdefer allocator.free(accessed_addresses);
+
+            // Extract storage slots and convert to StorageAccessType format
+            const storage_keys = self.storage_slots.keys();
+            const accessed_storage = if (storage_keys.len > 0) blk: {
+                const storage_access = try allocator.alloc(StorageAccessType, storage_keys.len);
+                for (storage_keys, 0..) |key, i| {
+                    storage_access[i] = StorageAccessType{
+                        .address = key.address,
+                        .slot = key.slot,
+                    };
+                }
+                break :blk storage_access;
+            } else &[_]StorageAccessType{};
+
+            return .{
+                .accessed_addresses = accessed_addresses,
+                .accessed_storage = accessed_storage,
+            };
+        }
     };
 }
 
