@@ -114,13 +114,21 @@ pub fn createAccessList(comptime config: AccessListConfig) type {
             accessed_addresses: []const Address,
             accessed_storage: []const StorageAccessType,
         } {
-            // Extract addresses
-            const address_keys = self.addresses.keys();
+            // Clone the addresses HashMap to extract owned data
+            var cloned_addresses = try self.addresses.cloneWithAllocator(allocator);
+            defer cloned_addresses.deinit();
+            
+            // Extract addresses from the cloned map
+            const address_keys = cloned_addresses.keys();
             const accessed_addresses = try allocator.dupe(Address, address_keys);
             errdefer allocator.free(accessed_addresses);
 
+            // Clone the storage_slots HashMap to extract owned data  
+            var cloned_storage = try self.storage_slots.cloneWithAllocator(allocator);
+            defer cloned_storage.deinit();
+            
             // Extract storage slots and convert to StorageAccessType format
-            const storage_keys = self.storage_slots.keys();
+            const storage_keys = cloned_storage.keys();
             const accessed_storage = if (storage_keys.len > 0) blk: {
                 const storage_access = try allocator.alloc(StorageAccessType, storage_keys.len);
                 for (storage_keys, 0..) |key, i| {
