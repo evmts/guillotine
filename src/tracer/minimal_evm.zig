@@ -7,9 +7,6 @@ const GasConstants = primitives.GasConstants;
 const MinimalFrame = @import("minimal_frame.zig").MinimalFrame;
 const minimal_host = @import("minimal_host.zig");
 
-// Reference imports (access list is simple enough to not create a minimal version for)
-const AccessList = @import("../storage/access_list.zig").AccessList;
-
 const Address = primitives.Address.Address;
 const ZERO_ADDRESS = primitives.ZERO_ADDRESS;
 const to_u256 = primitives.Address.to_u256;
@@ -50,6 +47,26 @@ const StorageSlotKeyContext = struct {
         _ = self;
         _ = b_index;
         return StorageSlotKey.eql(a, b);
+    }
+};
+
+// Context for Address ArrayHashMap
+const AddressContext = std.array_hash_map.AutoContext(Address);
+
+// Context for hashing/equality of StorageSlotKey for ArrayHashMap
+const StorageSlotKeyContext = struct {
+    pub fn hash(self: @This(), key: StorageSlotKey) u32 {
+        _ = self;
+        var hasher = std.hash.Wyhash.init(0);
+        hasher.update(&key.address.bytes);
+        hasher.update(std.mem.asBytes(&key.slot));
+        return @truncate(hasher.final());
+    }
+
+    pub fn eql(self: @This(), a: StorageSlotKey, b: StorageSlotKey, b_index: usize) bool {
+        _ = self;
+        _ = b_index;
+        return std.mem.eql(u8, &a.address.bytes, &b.address.bytes) and a.slot == b.slot;
     }
 };
 
@@ -318,7 +335,6 @@ pub const MinimalEvm = struct {
         // and include precompiles as warm from the start.
         // TODO: pre-warm EIP-2930 tx access list entries when wiring tx params into the tracer.
         try self.pre_warm_addresses(&[_]Address{ self.origin, address, self.block_coinbase });
-
         // Currently we only use this function for regular calls
         const intrinsic_gas: i64 = @intCast(GasConstants.TxGas);
         if (gas < intrinsic_gas) {
