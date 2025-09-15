@@ -395,7 +395,7 @@ pub fn Evm(comptime config: EvmConfig) type {
             }
             
             // Extract access list data before clearing
-            const access_list_data = self.access_list.toOwned(self.allocator, call_result_module.StorageAccess) catch {
+            const access_list_data = self.access_list.toOwnedSlices(self.allocator, call_result_module.StorageAccess) catch {
                 result.accessed_addresses = &.{};
                 result.accessed_storage = &.{};
                 return result;

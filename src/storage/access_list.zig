@@ -104,33 +104,23 @@ pub fn createAccessList(comptime config: AccessListConfig) type {
         }
 
         /// Extract owned copies of accessed addresses and storage slots
-        /// Returns a struct containing the accessed data that the caller owns
-        /// The caller is responsible for freeing the returned memory
-        /// 
-        /// The StorageAccessType parameter allows the caller to specify the
-        /// output type for storage access records, enabling compatibility
-        /// with different CallResult implementations.
-        pub fn toOwned(self: *Self, allocator: std.mem.Allocator, comptime StorageAccessType: type) !struct {
+        /// Returns the data in a format compatible with CallResult
+        /// The caller owns the returned memory and must free it
+        pub fn toOwnedSlices(self: *Self, allocator: std.mem.Allocator, comptime StorageAccessType: type) !struct {
             accessed_addresses: []const Address,
             accessed_storage: []const StorageAccessType,
         } {
-            // Clone the addresses HashMap to extract owned data
-            var cloned_addresses = try self.addresses.cloneWithAllocator(allocator);
-            defer cloned_addresses.deinit();
-            
-            // Extract addresses from the cloned map
-            const address_keys = cloned_addresses.keys();
+            // Get keys from addresses HashMap
+            const address_keys = self.addresses.keys();
             const accessed_addresses = try allocator.dupe(Address, address_keys);
             errdefer allocator.free(accessed_addresses);
 
-            // Clone the storage_slots HashMap to extract owned data  
-            var cloned_storage = try self.storage_slots.cloneWithAllocator(allocator);
-            defer cloned_storage.deinit();
-            
-            // Extract storage slots and convert to StorageAccessType format
-            const storage_keys = cloned_storage.keys();
+            // Convert storage keys to StorageAccessType format
+            const storage_keys = self.storage_slots.keys();
             const accessed_storage = if (storage_keys.len > 0) blk: {
                 const storage_access = try allocator.alloc(StorageAccessType, storage_keys.len);
+                errdefer allocator.free(storage_access);
+                
                 for (storage_keys, 0..) |key, i| {
                     storage_access[i] = StorageAccessType{
                         .address = key.address,
