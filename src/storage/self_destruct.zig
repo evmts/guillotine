@@ -49,7 +49,7 @@ pub const SelfDestruct = struct {
 
     /// Convert the internal HashMap to an owned slice of SelfDestructRecord for CallResult
     /// Returns an allocated slice that the caller must eventually free
-    pub fn toOwned(self: *SelfDestruct, allocator: std.mem.Allocator) ![]const SelfDestructRecord {
+    pub fn toOwnedSlice(self: *SelfDestruct, allocator: std.mem.Allocator) ![]const SelfDestructRecord {
         // Early return for empty case
         if (self.destructions.count() == 0) {
             return &.{};

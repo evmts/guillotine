@@ -376,7 +376,7 @@ pub fn Evm(comptime config: EvmConfig) type {
             // Extract self-destruct records if self-destruct is enabled
             // EIP-6780 restricts SELFDESTRUCT behavior in Cancun+
             if (comptime self.eips.eip_6780_enabled) {
-                result.selfdestructs = self.self_destruct.toOwned(self.allocator) catch |err| {
+                result.selfdestructs = self.self_destruct.toOwnedSlice(self.allocator) catch |err| {
                     log.err("Failed to extract self-destruct records: {}", .{err});
                     return CallResult.failure(result.gas_left);
                 };
