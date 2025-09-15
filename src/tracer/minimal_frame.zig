@@ -553,7 +553,10 @@ pub const MinimalFrame = struct {
                 }
                 const addr = Address{ .bytes = addr_bytes };
 
-                try self.consumeGas(GasConstants.WarmStorageReadCost);
+                // EIP-2929: warm/cold account access cost
+                // TODO: Treat precompiles as warm and gate by hardfork (Berlin+).
+                const access_cost = try evm.access_address(addr);
+                try self.consumeGas(access_cost);
                 const balance = evm.get_balance(addr);
                 try self.pushStack(balance);
                 self.pc += 1;
@@ -894,8 +897,10 @@ pub const MinimalFrame = struct {
             0x54 => {
                 const key = try self.popStack();
 
-                // Gas cost - warm vs cold access
-                try self.consumeGas(GasConstants.WarmStorageReadCost);
+                // EIP-2929: charge warm/cold storage access cost and warm the slot
+                // TODO: Gate EIP-2929 by hardfork
+                const access_cost = try self.getEvm().access_storage_slot(self.address, key);
+                try self.consumeGas(access_cost);
 
                 const value = self.getEvm().get_storage(self.address, key);
                 try self.pushStack(value);
@@ -908,6 +913,8 @@ pub const MinimalFrame = struct {
                 const value = try self.popStack();
 
                 // Simplified gas cost (actual is complex with refunds)
+                // TODO: Implement full EIP-2200/EIP-3529 metering using
+                // original value tracking and refund logic, reusing warm/cold state.
                 try self.consumeGas(GasConstants.SstoreResetGas);
 
                 try self.getEvm().set_storage(self.address, key, value);
@@ -1111,6 +1118,10 @@ pub const MinimalFrame = struct {
                 if (value_arg > 0) {
                     gas_cost += GasConstants.CallValueTransferGas;
                 }
+                // EIP-2929: access target account (warm/cold)
+                // TODO: Skip cold surcharge for precompiles and gate by hardfork.
+                const access_cost = try self.getEvm().access_address(call_address);
+                gas_cost += access_cost;
                 try self.consumeGas(gas_cost);
 
                 // Read input data from memory
@@ -1188,6 +1199,10 @@ pub const MinimalFrame = struct {
                 if (value_arg > 0) {
                     gas_cost += GasConstants.CallValueTransferGas;
                 }
+                // EIP-2929: access target account (warm/cold)
+                // TODO: Skip cold surcharge for precompiles and gate by hardfork.
+                const access_cost = try self.getEvm().access_address(call_address);
+                gas_cost += access_cost;
                 try self.consumeGas(gas_cost);
 
                 // Read input data from memory
@@ -1367,8 +1382,12 @@ pub const MinimalFrame = struct {
                 }
                 const call_address = Address{ .bytes = addr_bytes };
 
-                // Base gas cost
-                try self.consumeGas(GasConstants.CallGas);
+                // Base gas cost + EIP-2929 account access
+                var call_gas_cost: u64 = GasConstants.CallGas;
+                // TODO: Skip cold surcharge for precompiles and gate by hardfork.
+                const access_cost = try self.getEvm().access_address(call_address);
+                call_gas_cost += access_cost;
+                try self.consumeGas(call_gas_cost);
 
                 // Read input data from memory
                 var input_data: []const u8 = &.{};
@@ -1492,12 +1511,16 @@ pub const MinimalFrame = struct {
             // EXTCODESIZE
             0x3b => {
                 // Get code size of external account
-                try self.consumeGas(GasConstants.WarmStorageReadCost);
                 const addr_int = try self.popStack();
+                const ext_addr = primitives.Address.from_u256(addr_int);
+
+                // EIP-2929: charge account access cost
+                // TODO: Treat precompiles as warm and gate by hardfork.
+                const access_cost = try self.getEvm().access_address(ext_addr);
+                try self.consumeGas(access_cost);
 
                 // For MinimalFrame, we don't have access to external code
                 // Just return 0 for now
-                _ = addr_int;
                 try self.pushStack(0);
                 self.pc += 1;
             },
@@ -1510,11 +1533,17 @@ pub const MinimalFrame = struct {
                 const offset = try self.popStack();
                 const size = try self.popStack();
 
+                const ext_addr = primitives.Address.from_u256(addr_int);
+
                 // Gas cost calculation
                 if (size > 0) {
                     const words = @as(u64, @intCast((size + 31) / 32));
                     const copy_cost = GasConstants.CopyGas * words;
-                    try self.consumeGas(GasConstants.WarmStorageReadCost + copy_cost);
+
+                    // EIP-2929: account access + copy cost
+                    // TODO: Treat precompiles as warm and gate by hardfork.
+                    const access_cost = try self.getEvm().access_address(ext_addr);
+                    try self.consumeGas(access_cost + copy_cost);
 
                     // Memory expansion cost
                     if (dest_offset > std.math.maxInt(u32) or size > std.math.maxInt(u32)) {
@@ -1527,14 +1556,16 @@ pub const MinimalFrame = struct {
                     try self.consumeGas(mem_cost);
 
                     // For MinimalFrame, just write zeros to memory
-                    _ = addr_int;
                     _ = offset;
                     var i: u32 = 0;
                     while (i < len) : (i += 1) {
                         try self.writeMemory(dest + i, 0);
                     }
                 } else {
-                    try self.consumeGas(GasConstants.WarmStorageReadCost);
+                    // EIP-2929: charge account access cost even if size is zero
+                    // TODO: Treat precompiles as warm and gate by hardfork.
+                    const access_cost = try self.getEvm().access_address(ext_addr);
+                    try self.consumeGas(access_cost);
                 }
                 self.pc += 1;
             },
@@ -1542,11 +1573,15 @@ pub const MinimalFrame = struct {
             // EXTCODEHASH
             0x3f => {
                 // Get code hash of external account
-                try self.consumeGas(GasConstants.WarmStorageReadCost);
                 const addr_int = try self.popStack();
+                const ext_addr = primitives.Address.from_u256(addr_int);
+
+                // EIP-2929: charge account access cost
+                // TODO: Treat precompiles as warm and gate by hardfork.
+                const access_cost = try self.getEvm().access_address(ext_addr);
+                try self.consumeGas(access_cost);
 
                 // For MinimalFrame, return empty code hash
-                _ = addr_int;
                 // Empty code hash = keccak256("")
                 const empty_hash: u256 = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470;
                 try self.pushStack(empty_hash);
