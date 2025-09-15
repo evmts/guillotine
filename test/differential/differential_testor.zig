@@ -487,6 +487,7 @@ pub const DifferentialTestor = struct {
         self.minimal_evm.storage.clearRetainingCapacity();
         self.minimal_evm.balances.clearRetainingCapacity();
         self.minimal_evm.code.clearRetainingCapacity();
+        self.minimal_evm.access_list.clear();
 
         // Reset blockchain context to defaults
         self.minimal_evm.chain_id = 1;
