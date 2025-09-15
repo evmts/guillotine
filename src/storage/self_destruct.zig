@@ -50,22 +50,26 @@ pub const SelfDestruct = struct {
     /// Convert the internal HashMap to an owned slice of SelfDestructRecord for CallResult
     /// Returns an allocated slice that the caller must eventually free
     pub fn toOwned(self: *SelfDestruct, allocator: std.mem.Allocator) ![]const SelfDestructRecord {
-        const self_destruct_count = self.count();
-        if (self_destruct_count == 0) {
+        // Early return for empty case
+        if (self.destructions.count() == 0) {
             return &.{};
         }
 
-        const records = try allocator.alloc(SelfDestructRecord, self_destruct_count);
+        // Use ArrayList for efficient single-pass collection (idiomatic Zig pattern)
+        var list = std.ArrayList(SelfDestructRecord){};
+        errdefer list.deinit(allocator); // Clean up on error
+        
+        // Single iteration through HashMap
         var iter = self.iterator();
-        var i: usize = 0;
         while (iter.next()) |entry| {
-            records[i] = SelfDestructRecord{
+            try list.append(allocator, SelfDestructRecord{
                 .contract = entry.key_ptr.*,
                 .beneficiary = entry.value_ptr.*,
-            };
-            i += 1;
+            });
         }
-        return records;
+        
+        // Transfer ownership to caller
+        return try list.toOwnedSlice(allocator);
     }
 
     /// Mark a contract for destruction
