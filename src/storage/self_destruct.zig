@@ -46,13 +46,25 @@ pub const SelfDestruct = struct {
         self.destructions.deinit();
     }
 
-    /// Transfer ownership of this SelfDestruct to the caller
-    /// After calling this, the original SelfDestruct should not be used
-    pub fn to_owned(self: SelfDestruct) SelfDestruct {
-        return SelfDestruct{
-            .destructions = self.destructions,
-            .allocator = self.allocator,
-        };
+    /// Convert the internal HashMap to an owned slice of SelfDestructRecord for CallResult
+    /// Returns an allocated slice that the caller must eventually free
+    pub fn toOwned(self: *SelfDestruct, allocator: std.mem.Allocator) ![]const @import("../frame/call_result.zig").SelfDestructRecord {
+        const count = self.count();
+        if (count == 0) {
+            return &.{};
+        }
+
+        const records = try allocator.alloc(@import("../frame/call_result.zig").SelfDestructRecord, count);
+        var iter = self.iterator();
+        var i: usize = 0;
+        while (iter.next()) |entry| {
+            records[i] = @import("../frame/call_result.zig").SelfDestructRecord{
+                .contract = entry.key_ptr.*,
+                .beneficiary = entry.value_ptr.*,
+            };
+            i += 1;
+        }
+        return records;
     }
 
     /// Mark a contract for destruction

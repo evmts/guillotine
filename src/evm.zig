@@ -437,8 +437,16 @@ pub fn Evm(comptime config: EvmConfig) type {
                 // IMPORTANT: Reinitialize logs after toOwnedSlice() to maintain allocator reference
                 // toOwnedSlice() takes ownership and leaves the ArrayList in an undefined state
                 self.logs = .empty;
-                // Extract self-destruct records to result - similar to logs extraction
-                result.selfdestructs = self.extractSelfDestructRecords() catch &.{};
+                // Extract self-destruct records if self-destruct is enabled
+                // EIP-6780 restricts SELFDESTRUCT behavior in Cancun+
+                if (self.eips.eip_6780_enabled) {
+                    result.selfdestructs = self.self_destruct.toOwned(self.allocator) catch |err| {
+                        log.warn("Failed to extract self-destruct records: {}", .{err});
+                        return err;
+                    };
+                } else {
+                    result.selfdestructs = &.{};
+                }
                 result.accessed_addresses = &.{};
                 result.accessed_storage = &.{};
                 // Reset internal accumulators (logs already transferred)
@@ -1372,25 +1380,6 @@ pub fn Evm(comptime config: EvmConfig) type {
             return self.logs.toOwnedSlice(self.allocator) catch &.{};
         }
 
-        /// Extract self-destruct records from internal tracker to owned slice
-        pub fn extractSelfDestructRecords(self: *Self) ![]const @import("frame/call_result.zig").SelfDestructRecord {
-            const count = self.self_destruct.count();
-            if (count == 0) {
-                return &.{};
-            }
-
-            const records = try self.allocator.alloc(@import("frame/call_result.zig").SelfDestructRecord, count);
-            var iter = self.self_destruct.iterator();
-            var i: usize = 0;
-            while (iter.next()) |entry| {
-                records[i] = @import("frame/call_result.zig").SelfDestructRecord{
-                    .contract = entry.key_ptr.*,
-                    .beneficiary = entry.value_ptr.*,
-                };
-                i += 1;
-            }
-            return records;
-        }
 
         /// Execute nested EVM call - for Host interface
         pub fn host_inner_call(self: *Self, params: CallParams) !CallResult {
