@@ -496,6 +496,29 @@ pub fn getDebugInfo(
                     });
                 }
                 schedule_idx += 1;
+
+                // If this opcode carries inline PC metadata in the schedule (PC opcode),
+                // consume and record the following .pc metadata item to keep schedule_idx
+                // synchronized with subsequent bytecode entries.
+                if (std.meta.intToEnum(Opcode, data.opcode) catch unreachable == .PC) {
+                    if (schedule_idx < schedule_items.len) {
+                        const maybe_meta = schedule_items[schedule_idx];
+                        if (maybe_meta == .pc) {
+                            const meta = maybe_meta.pc;
+                            try entries.append(allocator, .{
+                                .schedule_index = schedule_idx,
+                                .pc = @intCast(bytecode_pc),
+                                .item_type = .pc,
+                                .handler_ptr = null,
+                                .handler_name = null,
+                                .metadata = .{ .pc = .{ .value = meta.value } },
+                                .expected_from_bytecode = null,
+                                .validation_status = .valid,
+                            });
+                            schedule_idx += 1;
+                        }
+                    }
+                }
             },
             
             .push => |data| {
@@ -742,19 +765,41 @@ pub fn getDebugInfo(
                 }
                 
                 const handler_item = schedule_items[schedule_idx];
-                const handler_ptr = @as(*const anyopaque, @ptrCast(handler_item.opcode_handler));
-                const handler_info = debug_info.handler_map.get(handler_ptr);
-                
-                try entries.append(allocator, .{
-                    .schedule_index = schedule_idx,
-                    .pc = @intCast(bytecode_pc),
-                    .item_type = .opcode_handler,
-                    .handler_ptr = handler_ptr,
-                    .handler_name = if (handler_info) |info| info.name else "UNKNOWN",
-                    .metadata = null,
-                    .expected_from_bytecode = null,
-                    .validation_status = .valid,
-                });
+                if (handler_item != .opcode_handler) {
+                    try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Expected fusion handler", "opcode_handler", @tagName(handler_item));
+                    try entries.append(allocator, .{
+                        .schedule_index = schedule_idx,
+                        .pc = @intCast(bytecode_pc),
+                        .item_type = switch (handler_item) {
+                            .opcode_handler => .opcode_handler,
+                            .jump_dest => .jump_dest,
+                            .push_inline => .push_inline,
+                            .push_pointer => .push_pointer,
+                            .pc => .pc,
+                            .jump_static => .jump_static,
+                            .first_block_gas => .first_block_gas,
+                        },
+                        .handler_ptr = null,
+                        .handler_name = "UNEXPECTED",
+                        .metadata = null,
+                        .expected_from_bytecode = null,
+                        .validation_status = .unexpected_item,
+                    });
+                } else {
+                    const handler_ptr = @as(*const anyopaque, @ptrCast(handler_item.opcode_handler));
+                    const handler_info = debug_info.handler_map.get(handler_ptr);
+
+                    try entries.append(allocator, .{
+                        .schedule_index = schedule_idx,
+                        .pc = @intCast(bytecode_pc),
+                        .item_type = .opcode_handler,
+                        .handler_ptr = handler_ptr,
+                        .handler_name = if (handler_info) |info| info.name else "UNKNOWN",
+                        .metadata = null,
+                        .expected_from_bytecode = null,
+                        .validation_status = .valid,
+                    });
+                }
                 schedule_idx += 1;
                 
                 // Expect metadata for fusion value
