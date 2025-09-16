@@ -25,12 +25,17 @@ export function PUSH0(f: Frame, cursor: number): Tail {
 
 export function PUSH(f: Frame, cursor: number): Tail {
   // Get inline data from next item
-  const inlineItem = f.schedule.items[cursor + 1] as any;
-  if (!inlineItem || inlineItem.kind !== 'inline') {
-    return new ScheduleError('Missing inline data for PUSH');
+  const metaItem = f.schedule.items[cursor + 1] as any;
+  if (!metaItem) return new ScheduleError('Missing metadata for PUSH');
+  let value: Word;
+  if (metaItem.kind === 'inline') {
+    value = metaItem.data.value as Word;
+  } else if (metaItem.kind === 'pointer') {
+    const idx: number = metaItem.index;
+    value = f.schedule.u256Pool[idx] as Word;
+  } else {
+    return new ScheduleError('Invalid metadata for PUSH');
   }
-  
-  const value = inlineItem.data.value as Word;
   const e = stackPush(f.stack, value);
   if (e instanceof Error) return e;
   return next(f, cursor);

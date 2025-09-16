@@ -20,12 +20,14 @@ import { analyzeBytecode } from '../bytecode/bytecode_analyze';
 export type Item =
   | { kind: 'meta'; gas?: number }
   | { kind: 'handler'; handler: Handler; nextCursor: number; opcode?: number; pc?: number }
-  | { kind: 'inline'; data: any };
+  | { kind: 'inline'; data: any }
+  | { kind: 'pointer'; index: number };
 
 export interface Schedule {
   items: Item[];
   entry: { handler: Handler; cursor: number };
   pcToCursor: Map<number, number>;
+  u256Pool: bigint[];
 }
 
 function getHandler(opcode: number): Handler | null {
@@ -142,6 +144,17 @@ export function compile(bytecode: Uint8Array): Schedule | InvalidOpcodeError {
   const items: Item[] = [];
   const handlerIndices: number[] = [];
   const pcToCursor = new Map<number, number>();
+  const u256Pool: bigint[] = [];
+  const poolIndex = new Map<bigint, number>();
+
+  function poolGetOrAdd(v: bigint): number {
+    const found = poolIndex.get(v);
+    if (found !== undefined) return found;
+    const idx = u256Pool.length;
+    u256Pool.push(v);
+    poolIndex.set(v, idx);
+    return idx;
+  }
   
   // Add initial metadata
   items.push({ kind: 'meta', gas: 0 });
@@ -167,7 +180,75 @@ export function compile(bytecode: Uint8Array): Schedule | InvalidOpcodeError {
 
     const opcode = bytecode[pc];
 
-    // FUSION: PUSH <imm> + (ADD|SUB|MUL|DIV)
+    // MULTI_PUSH fusion: try for 3, then 2
+    if (isPush(opcode)) {
+      const startPc = pc;
+      const values: { value: bigint; size: number }[] = [];
+      let lookPc = pc;
+      for (let k = 0; k < 3; k++) {
+        if (!isPush(bytecode[lookPc])) break;
+        const sz = getPushSize(bytecode[lookPc]);
+        const ds = lookPc + 1;
+        const de = Math.min(ds + sz, bytecode.length);
+        const imm = bytesToWord(bytecode.slice(ds, de));
+        values.push({ value: imm, size: sz });
+        lookPc = de;
+      }
+      if (values.length === 3) {
+        const handlerIndex = items.length;
+        handlerIndices.push(handlerIndex);
+        items.push({ kind: 'handler', handler: synth.MULTI_PUSH_3, nextCursor: -1, opcode, pc: startPc });
+        for (const v of values) {
+          if (v.size <= 8) items.push({ kind: 'inline', data: { value: v.value, n: v.size } });
+          else items.push({ kind: 'pointer', index: poolGetOrAdd(v.value) });
+        }
+        pc = lookPc; // consumed 3 pushes
+        continue;
+      } else if (values.length === 2) {
+        const handlerIndex = items.length;
+        handlerIndices.push(handlerIndex);
+        items.push({ kind: 'handler', handler: synth.MULTI_PUSH_2, nextCursor: -1, opcode, pc: startPc });
+        for (const v of values) {
+          if (v.size <= 8) items.push({ kind: 'inline', data: { value: v.value, n: v.size } });
+          else items.push({ kind: 'pointer', index: poolGetOrAdd(v.value) });
+        }
+        pc = lookPc; // consumed 2 pushes
+        continue;
+      }
+    }
+
+    // FUSION: ISZERO + PUSH <dest> + JUMPI
+    if (opcode === OPCODES.ISZERO) {
+      const op1 = bytecode[pc + 1];
+      if (op1 !== undefined && isPush(op1)) {
+        const pushSize = getPushSize(op1);
+        const dataStart = pc + 2;
+        const dataEnd = Math.min(dataStart + pushSize, bytecode.length);
+        if (dataEnd <= bytecode.length) {
+          const nextPc = pc + 2 + pushSize;
+          const op2 = bytecode[nextPc];
+          if (op2 === OPCODES.JUMPI) {
+            const immediateBytes = bytecode.slice(dataStart, dataEnd);
+            const paddedBytes = new Uint8Array(pushSize);
+            paddedBytes.set(immediateBytes);
+            const value = bytesToWord(paddedBytes);
+            const handlerIndex = items.length;
+            handlerIndices.push(handlerIndex);
+            items.push({ kind: 'handler', handler: (synth as any).ISZERO_JUMPI, nextCursor: -1, opcode: OPCODES.JUMPI, pc: nextPc });
+            if (pushSize <= 8) {
+              items.push({ kind: 'inline', data: { value, n: pushSize } });
+            } else {
+              const idx = poolGetOrAdd(value);
+              items.push({ kind: 'pointer', index: idx });
+            }
+            pc = nextPc + 1;
+            continue;
+          }
+        }
+      }
+    }
+
+    // FUSION: PUSH <imm> + (ADD|SUB|MUL|DIV|AND|OR|XOR)
     if (isPush(opcode)) {
       const pushSize = getPushSize(opcode);
       const dataStart = pc + 1;
@@ -200,7 +281,12 @@ export function compile(bytecode: Uint8Array): Schedule | InvalidOpcodeError {
           nextOpcode === OPCODES.OR  ? (synth as any).PUSH_OR_INLINE :
           (synth as any).PUSH_XOR_INLINE;
         items.push({ kind: 'handler', handler: fusedHandler, nextCursor: -1, opcode: nextOpcode, pc: nextPc });
-        items.push({ kind: 'inline', data: { value, n: pushSize } });
+        if (pushSize <= 8) {
+          items.push({ kind: 'inline', data: { value, n: pushSize } });
+        } else {
+          const idx = poolGetOrAdd(value);
+          items.push({ kind: 'pointer', index: idx });
+        }
         pc = nextPc + 1;
         continue;
       }
@@ -211,7 +297,12 @@ export function compile(bytecode: Uint8Array): Schedule | InvalidOpcodeError {
         handlerIndices.push(handlerIndex);
         const fusedHandler = nextOpcode === OPCODES.JUMP ? synth.PUSH_JUMP_INLINE : synth.PUSH_JUMPI_INLINE;
         items.push({ kind: 'handler', handler: fusedHandler, nextCursor: -1, opcode: nextOpcode, pc: nextPc });
-        items.push({ kind: 'inline', data: { value, n: pushSize } });
+        if (pushSize <= 8) {
+          items.push({ kind: 'inline', data: { value, n: pushSize } });
+        } else {
+          const idx = poolGetOrAdd(value);
+          items.push({ kind: 'pointer', index: idx });
+        }
         pc = nextPc + 1;
         continue;
       }
@@ -229,7 +320,12 @@ export function compile(bytecode: Uint8Array): Schedule | InvalidOpcodeError {
           nextOpcode === OPCODES.MSTORE ? synth.PUSH_MSTORE_INLINE :
           synth.PUSH_MSTORE8_INLINE;
         items.push({ kind: 'handler', handler: fusedHandler, nextCursor: -1, opcode: nextOpcode, pc });
-        items.push({ kind: 'inline', data: { value, n: pushSize } });
+        if (pushSize <= 8) {
+          items.push({ kind: 'inline', data: { value, n: pushSize } });
+        } else {
+          const idx = poolGetOrAdd(value);
+          items.push({ kind: 'pointer', index: idx });
+        }
         pc = nextPc + 1;
         continue;
       }
@@ -240,12 +336,47 @@ export function compile(bytecode: Uint8Array): Schedule | InvalidOpcodeError {
       const handlerIndex = items.length;
       handlerIndices.push(handlerIndex);
       items.push({ kind: 'handler', handler: pushHandler, nextCursor: -1, opcode, pc });
-      items.push({ kind: 'inline', data: { value, n: pushSize } });
+      if (pushSize <= 8) {
+        items.push({ kind: 'inline', data: { value, n: pushSize } });
+      } else {
+        const idx = poolGetOrAdd(value);
+        items.push({ kind: 'pointer', index: idx });
+      }
       pc += pushSize + 1;
       continue;
     }
 
     // Non-PUSH path
+    // FUSION: DUP2 + MSTORE + PUSH <imm>
+    if (opcode === 0x81 /* DUP2 */) {
+      const op1 = bytecode[pc + 1];
+      if (op1 === OPCODES.MSTORE) {
+        const op2 = bytecode[pc + 2];
+        if (op2 !== undefined && isPush(op2)) {
+          const pushSize = getPushSize(op2);
+          const dataStart = pc + 3;
+          const dataEnd = Math.min(dataStart + pushSize, bytecode.length);
+          if (dataEnd <= bytecode.length) {
+            const immediateBytes = bytecode.slice(dataStart, dataEnd);
+            const paddedBytes = new Uint8Array(pushSize);
+            paddedBytes.set(immediateBytes);
+            const value = bytesToWord(paddedBytes);
+            const handlerIndex = items.length;
+            handlerIndices.push(handlerIndex);
+            items.push({ kind: 'handler', handler: (synth as any).DUP2_MSTORE_PUSH, nextCursor: -1, opcode: OPCODES.MSTORE, pc: pc + 1 });
+            if (pushSize <= 8) {
+              items.push({ kind: 'inline', data: { value, n: pushSize } });
+            } else {
+              const idx = poolGetOrAdd(value);
+              items.push({ kind: 'pointer', index: idx });
+            }
+            pc = dataStart + pushSize;
+            continue;
+          }
+        }
+      }
+    }
+
     const handler = getHandler(opcode);
     if (!handler) return new InvalidOpcodeError(opcode);
     const handlerIndex = items.length;
@@ -299,6 +430,7 @@ export function compile(bytecode: Uint8Array): Schedule | InvalidOpcodeError {
       handler: firstHandler.handler,
       cursor: firstHandlerIdx
     },
-    pcToCursor
+    pcToCursor,
+    u256Pool
   };
 }
