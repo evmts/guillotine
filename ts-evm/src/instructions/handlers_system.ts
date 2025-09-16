@@ -1,5 +1,5 @@
 import type { Frame } from '../frame/frame';
-import { ErrorUnion, createError } from '../errors';
+import { ErrorUnion } from '../errors';
 import type { DispatchItem } from '../preprocessor/dispatch';
 import type { Word } from '../types';
 import type { Address } from '../types_blockchain';
