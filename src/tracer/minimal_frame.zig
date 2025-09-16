@@ -256,6 +256,163 @@ pub const MinimalFrame = struct {
         }
     }
 
+    /// Calculate SLOAD gas cost (matching REVM)
+    /// TODO: replace these with constants once we implement in guillotine
+    fn sloadGasCost(self: *Self, key: u256) !u64 {
+        if (self.hardfork.isAtLeast(.BERLIN)) {
+            // EIP-2929: Cold/warm access pattern
+            // access_storage_slot returns:
+            // - COLD_SLOAD_COST (2100) for cold access
+            // - WARM_STORAGE_READ_COST (100) for warm access
+            // We return this value directly, no additions needed
+            const evm = self.getEvm();
+            return try evm.access_storage_slot(self.address, key);
+        } else if (self.hardfork.isAtLeast(.ISTANBUL)) {
+            // EIP-1884: Repricing for trie-size-dependent opcodes
+            return 800;  // ISTANBUL_SLOAD_GAS
+        } else if (self.hardfork.isAtLeast(.TANGERINE_WHISTLE)) {
+            // EIP-150: Gas cost changes for IO-heavy operations  
+            return 200;
+        } else {
+            // Frontier and earlier
+            return 50;
+        }
+    }
+
+    /// Calculate SSTORE gas cost (matching REVM)
+    /// TODO: replace these with constants once we implement in guillotine
+    fn sstoreGasCost(self: *Self, key: u256, new_value: u256) !u64 {
+        const evm = self.getEvm();
+        const current_value = evm.get_storage(self.address, key);
+        const original_value = try evm.get_original_storage_value(self.address, key);
+        
+        // Calculate base gas cost
+        var gas_cost: u64 = 0;
+        
+        // Berlin+: Use warm costs in calculation, add cold cost if needed
+        if (self.hardfork.isAtLeast(.BERLIN)) {
+            if (new_value == current_value) {
+                // No-op: charge warm read cost
+                gas_cost = GasConstants.WarmStorageReadCost;
+            } else if (original_value == current_value) {
+                // First modification in this transaction
+                if (original_value == 0) {
+                    // Setting from zero
+                    gas_cost = GasConstants.SstoreSetGas;
+                } else {
+                    // Modifying non-zero value (use warm reset cost for Berlin+)
+                    // WARM_SSTORE_RESET = SSTORE_RESET - COLD_SLOAD_COST = 5000 - 2100 = 2900
+                    gas_cost = 2900;
+                }
+            } else {
+                // Subsequent modification - charge warm read cost
+                gas_cost = GasConstants.WarmStorageReadCost;
+            }
+            
+            // Add cold access cost if this is a cold slot
+            const access_cost = try evm.access_storage_slot(self.address, key);
+            if (access_cost == GasConstants.ColdSloadCost) {
+                // Cold access - add the cold cost
+                gas_cost += GasConstants.ColdSloadCost;
+            }
+            // Note: access_cost for warm is already included in gas_cost above
+            
+        } else if (self.hardfork.isAtLeast(.ISTANBUL)) {
+            // Istanbul: Use Istanbul costs
+            if (new_value == current_value) {
+                // No change - charge Istanbul SLOAD cost
+                gas_cost = 800;  // ISTANBUL_SLOAD_GAS
+            } else if (original_value == current_value) {
+                // First modification in this transaction
+                if (original_value == 0) {
+                    // Setting from zero
+                    gas_cost = GasConstants.SstoreSetGas;
+                } else {
+                    // Modifying non-zero value
+                    gas_cost = GasConstants.SstoreResetGas;
+                }
+            } else {
+                // Subsequent modification - charge Istanbul SLOAD cost
+                gas_cost = 800;  // ISTANBUL_SLOAD_GAS
+            }
+            
+        } else {
+            // Frontier: Simple logic
+            if (current_value == 0 and new_value != 0) {
+                gas_cost = GasConstants.SstoreSetGas;
+            } else {
+                gas_cost = GasConstants.SstoreResetGas;
+            }
+        }
+        
+        // Handle refunds separately
+        if (self.hardfork.isAtLeast(.ISTANBUL)) {
+            // Calculate refund amount based on hardfork
+            const sstore_clears_schedule: i64 = if (self.hardfork.isAtLeast(.LONDON)) blk: {
+                // London+: SSTORE_RESET - COLD_SLOAD_COST + ACCESS_LIST_STORAGE_KEY
+                // = 5000 - 2100 + 1900 = 4800
+                break :blk 4800;
+            } else blk: {
+                // Istanbul: REFUND_SSTORE_CLEARS = 15000
+                break :blk 15000;
+            };
+            
+            if (new_value == current_value) {
+                // No-op: no refund
+            } else {
+                if (original_value == current_value and new_value == 0 and original_value != 0) {
+                    // First time clearing a non-zero value
+                    evm.gas_refund += @intCast(sstore_clears_schedule);
+                } else if (original_value != current_value) {
+                    // Subsequent modification
+                    if (original_value != 0) {
+                        if (current_value == 0 and new_value != 0) {
+                            // Was cleared, now setting again - remove refund
+                            const to_remove: u64 = @intCast(sstore_clears_schedule);
+                            if (evm.gas_refund >= to_remove) {
+                                evm.gas_refund -= to_remove;
+                            } else {
+                                evm.gas_refund = 0;
+                            }
+                        } else if (current_value != 0 and new_value == 0) {
+                            // Clearing again - add refund
+                            evm.gas_refund += @intCast(sstore_clears_schedule);
+                        }
+                    }
+                    
+                    if (original_value == new_value) {
+                        // Restoring to original value
+                        const gas_sstore_reset: u64 = if (self.hardfork.isAtLeast(.BERLIN))
+                            2900  // WARM_SSTORE_RESET = SSTORE_RESET - COLD_SLOAD_COST
+                        else
+                            GasConstants.SstoreResetGas;
+                            
+                        const gas_sload: u64 = if (self.hardfork.isAtLeast(.BERLIN))
+                            GasConstants.WarmStorageReadCost
+                        else
+                            800;  // ISTANBUL_SLOAD_GAS
+                            
+                        const refund: i64 = if (original_value == 0)
+                            @as(i64, @intCast(GasConstants.SstoreSetGas - gas_sload))
+                        else
+                            @as(i64, @intCast(gas_sstore_reset - gas_sload));
+                            
+                        if (refund > 0) {
+                            evm.gas_refund += @intCast(refund);
+                        }
+                    }
+                }
+            }
+        } else {
+            // Pre-Istanbul: Simple refund logic
+            if (current_value != 0 and new_value == 0) {
+                evm.gas_refund += 15000;  // REFUND_SSTORE_CLEARS
+            }
+        }
+        
+        return gas_cost;
+    }
+
     /// Calculate SELFDESTRUCT gas cost (EIP-150 aware)
     fn selfdestructGasCost(self: *const Self) u64 {
         if (self.hardfork.isBefore(.TANGERINE_WHISTLE)) {
@@ -1042,10 +1199,8 @@ pub const MinimalFrame = struct {
             0x54 => {
                 const key = try self.popStack();
 
-                // EIP-2929: charge warm/cold storage access cost and warm the slot
-                const access_cost = try evm.access_storage_slot(self.address, key);
-                // Access cost already includes the full SLOAD gas cost (100 for warm, 2100 for cold)
-                try self.consumeGas(access_cost);
+                const gas_cost = try self.sloadGasCost(key);
+                try self.consumeGas(gas_cost);
 
                 const value = evm.get_storage(self.address, key);
                 try self.pushStack(value);
@@ -1057,41 +1212,9 @@ pub const MinimalFrame = struct {
                 const key = try self.popStack();
                 const value = try self.popStack();
 
-                // Get current and original values for gas calculation
-                const current_value = evm.get_storage(self.address, key);
-                const original_value = evm.get_original_storage(self.address, key);
-
-                // EIP-2929: Check if storage slot is cold and warm it
-                const access_cost = try evm.access_storage_slot(self.address, key);
-                const is_cold = access_cost == GasConstants.ColdSloadCost;
-
-                if (current_value == 0 and value != 0) {
-                    const sentry_gas: i64 = @as(i64, @intCast(GasConstants.SstoreSentryGas));
-                    if (self.gas_remaining < sentry_gas) {
-                        return error.OutOfGas;
-                    }
-                }
-
-                const total_gas_cost = GasConstants.sstore_gas_cost(current_value, original_value, value, is_cold);
-                try self.consumeGas(total_gas_cost);
-
-                if (value != current_value) {
-                    if (original_value == current_value) {
-                        if (original_value != 0 and value == 0) {
-                            evm.gas_refund += GasConstants.SstoreRefundGas;
-                        }
-                    } else if (original_value != 0) {
-                        if (current_value == 0 and value != 0) {
-                            if (evm.gas_refund >= GasConstants.SstoreRefundGas) {
-                                evm.gas_refund -= GasConstants.SstoreRefundGas;
-                            } else {
-                                evm.gas_refund = 0;
-                            }
-                        } else if (current_value != 0 and value == 0) {
-                            evm.gas_refund += GasConstants.SstoreRefundGas;
-                        }
-                    }
-                }
+                // Use comprehensive EIP-2200/EIP-2929 gas calculation
+                const gas_cost = try self.sstoreGasCost(key, value);
+                try self.consumeGas(gas_cost);
 
                 try evm.set_storage(self.address, key, value);
                 self.pc += 1;
