@@ -47,6 +47,22 @@ export interface CallResult {
   gasUsed: bigint;
 }
 
+// RETURN (0xf3) - Return output from memory
+export function RETURN(frame: FrameWithSystem, _cursor: number): import('../types_runtime').Tail {
+  const offset = frame.stack.pop();
+  if (offset instanceof Error) return offset as any;
+  const size = frame.stack.pop();
+  if (size instanceof Error) return size as any;
+  if (offset > BigInt(Number.MAX_SAFE_INTEGER) || size > BigInt(Number.MAX_SAFE_INTEGER)) {
+    return new (require('../errors').MemoryError)('return parameters too large') as any;
+  }
+  const data = frame.memory.readSlice(Number(offset), Number(size));
+  if (data instanceof Error) {
+    return new (require('../errors').MemoryError)(data.message) as any;
+  }
+  return { data } as import('../frame/call_result').ReturnData;
+}
+
 // CALL (0xf1) - Message call to another contract
 export function call(frame: FrameWithSystem, _cursor: DispatchItem[]): ErrorUnion | null {
   if (frame.stack.size() < 7) {

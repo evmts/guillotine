@@ -62,12 +62,6 @@ export function SWAP(f: Frame, cursor: number): Tail {
   return next(f, cursor);
 }
 
-export function RETURN(f: Frame, _cursor: number): Tail {
-  const top = stackPop(f.stack);
-  if (top instanceof Error) return top;
-  return { data: wordToBytes32(top as Word) } as ReturnData;
-}
-
 export function STOP(_f: Frame, _cursor: number): Tail {
   return { data: new Uint8Array(0) } as ReturnData;
 }
