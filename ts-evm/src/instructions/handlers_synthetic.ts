@@ -144,6 +144,7 @@ export function PUSH_MSTORE8_INLINE(f: Frame, cursor: number): Tail {
   return next(f, cursor);
 }
 
+
 // --- Static jump fusions ---
 
 function findCursorForPc(f: Frame, pc: number): { next: any; cursor: number } | InvalidJumpError {
