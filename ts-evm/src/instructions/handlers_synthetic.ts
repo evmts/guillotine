@@ -65,6 +65,42 @@ export function PUSH_DIV_INLINE(f: Frame, cursor: number): Tail {
   return next(f, cursor);
 }
 
+// PUSH_AND_INLINE: Replace TOS with TOS & value
+export function PUSH_AND_INLINE(f: Frame, cursor: number): Tail {
+  const value = getInlineValue(f, cursor);
+  if (value instanceof Error) return value;
+  const top = stackPeek(f.stack);
+  if (top instanceof Error) return top;
+  const r = u256((top as Word) & (value as Word));
+  const e = stackSetTop(f.stack, r);
+  if (e instanceof Error) return e;
+  return next(f, cursor);
+}
+
+// PUSH_OR_INLINE: Replace TOS with TOS | value
+export function PUSH_OR_INLINE(f: Frame, cursor: number): Tail {
+  const value = getInlineValue(f, cursor);
+  if (value instanceof Error) return value;
+  const top = stackPeek(f.stack);
+  if (top instanceof Error) return top;
+  const r = u256((top as Word) | (value as Word));
+  const e = stackSetTop(f.stack, r);
+  if (e instanceof Error) return e;
+  return next(f, cursor);
+}
+
+// PUSH_XOR_INLINE: Replace TOS with TOS ^ value
+export function PUSH_XOR_INLINE(f: Frame, cursor: number): Tail {
+  const value = getInlineValue(f, cursor);
+  if (value instanceof Error) return value;
+  const top = stackPeek(f.stack);
+  if (top instanceof Error) return top;
+  const r = u256((top as Word) ^ (value as Word));
+  const e = stackSetTop(f.stack, r);
+  if (e instanceof Error) return e;
+  return next(f, cursor);
+}
+
 // PUSH_MLOAD_INLINE: Push memory word at constant offset
 export function PUSH_MLOAD_INLINE(f: Frame, cursor: number): Tail {
   const offset = getInlineValue(f, cursor);
