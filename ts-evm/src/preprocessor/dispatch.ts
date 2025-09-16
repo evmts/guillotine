@@ -180,6 +180,133 @@ export function compile(bytecode: Uint8Array): Schedule | InvalidOpcodeError {
 
     const opcode = bytecode[pc];
 
+    // Prefer longest/most specific patterns first
+    // FUNCTION_DISPATCH: PUSH4 <sel> EQ PUSH <dest> JUMPI
+    if (opcode === OPCODES.PUSH0 + 4 && pc + 1 + 4 < bytecode.length) { // 0x60 + 4 = 0x64
+      const selStart = pc + 1;
+      const selEnd = selStart + 4;
+      const afterSel = selEnd;
+      if (bytecode[afterSel] === OPCODES.EQ) {
+        const pushAt = afterSel + 1;
+        if (pushAt < bytecode.length && isPush(bytecode[pushAt])) {
+          const ps = getPushSize(bytecode[pushAt]);
+          const dataStart = pushAt + 1;
+          const dataEnd = Math.min(dataStart + ps, bytecode.length);
+          if (dataEnd <= bytecode.length && dataEnd < bytecode.length && bytecode[dataEnd] === OPCODES.JUMPI) {
+            const selectorBytes = bytecode.slice(selStart, selEnd);
+            const selector = bytesToWord(selectorBytes) & 0xffffffffn;
+            const destVal = bytesToWord(bytecode.slice(dataStart, dataEnd));
+            const handlerIndex = items.length;
+            handlerIndices.push(handlerIndex);
+            items.push({ kind: 'handler', handler: (synth as any).FUNCTION_DISPATCH, nextCursor: -1, opcode, pc });
+            items.push({ kind: 'inline', data: { value: selector, n: 4 } });
+            if (ps <= 8) items.push({ kind: 'inline', data: { value: destVal, n: ps } });
+            else items.push({ kind: 'pointer', index: poolGetOrAdd(destVal) });
+            pc = dataEnd + 1; // consume PUSH4, EQ, PUSH, JUMPI
+            continue;
+          }
+        }
+      }
+    }
+
+    // ISZERO_JUMPI: ISZERO; PUSHk <target>; JUMPI
+    if (opcode === OPCODES.ISZERO) {
+      const pushAt = pc + 1;
+      if (pushAt < bytecode.length && isPush(bytecode[pushAt])) {
+        const ps = getPushSize(bytecode[pushAt]);
+        const dataStart = pushAt + 1;
+        const dataEnd = Math.min(dataStart + ps, bytecode.length);
+        if (dataEnd <= bytecode.length && dataEnd < bytecode.length && bytecode[dataEnd] === OPCODES.JUMPI) {
+          const targetVal = bytesToWord(bytecode.slice(dataStart, dataEnd));
+          const handlerIndex = items.length;
+          handlerIndices.push(handlerIndex);
+          items.push({ kind: 'handler', handler: (synth as any).ISZERO_JUMPI, nextCursor: -1, opcode, pc });
+          if (ps <= 8) items.push({ kind: 'inline', data: { value: targetVal, n: ps } });
+          else items.push({ kind: 'pointer', index: poolGetOrAdd(targetVal) });
+          pc = dataEnd + 1; // consume ISZERO, PUSHk, JUMPI
+          continue;
+        }
+      }
+    }
+
+    // CALLVALUE_CHECK: CALLVALUE; DUP1; ISZERO
+    if (opcode === OPCODES.CALLVALUE && pc + 2 < bytecode.length && bytecode[pc + 1] === OPCODES.POP - 0x30 /* DUP1 0x80 */ && bytecode[pc + 2] === OPCODES.ISZERO) {
+      const handlerIndex = items.length;
+      handlerIndices.push(handlerIndex);
+      items.push({ kind: 'handler', handler: (synth as any).CALLVALUE_CHECK, nextCursor: -1, opcode, pc });
+      pc += 3;
+      continue;
+    }
+
+    // PUSH0_REVERT: PUSH0; PUSH0; REVERT
+    if (opcode === OPCODES.PUSH0 && pc + 2 < bytecode.length && bytecode[pc + 1] === OPCODES.PUSH0 && bytecode[pc + 2] === 0xfd) {
+      const handlerIndex = items.length;
+      handlerIndices.push(handlerIndex);
+      items.push({ kind: 'handler', handler: (synth as any).PUSH0_REVERT, nextCursor: -1, opcode, pc });
+      pc += 3;
+      continue;
+    }
+
+    // MLOAD_SWAP1_DUP2: MLOAD; SWAP1; DUP2
+    if (opcode === OPCODES.MLOAD && pc + 2 < bytecode.length && bytecode[pc + 1] === 0x90 && bytecode[pc + 2] === 0x81) {
+      const handlerIndex = items.length;
+      handlerIndices.push(handlerIndex);
+      items.push({ kind: 'handler', handler: (synth as any).MLOAD_SWAP1_DUP2, nextCursor: -1, opcode, pc });
+      pc += 3;
+      continue;
+    }
+
+    // DUP3_ADD_MSTORE: DUP3; ADD; MSTORE
+    if (opcode === 0x82 && pc + 2 < bytecode.length && bytecode[pc + 1] === OPCODES.ADD && bytecode[pc + 2] === OPCODES.MSTORE) {
+      const handlerIndex = items.length;
+      handlerIndices.push(handlerIndex);
+      items.push({ kind: 'handler', handler: (synth as any).DUP3_ADD_MSTORE, nextCursor: -1, opcode, pc });
+      pc += 3;
+      continue;
+    }
+
+    // SWAP1_DUP2_ADD: SWAP1; DUP2; ADD
+    if (opcode === 0x90 && pc + 2 < bytecode.length && bytecode[pc + 1] === 0x81 && bytecode[pc + 2] === OPCODES.ADD) {
+      const handlerIndex = items.length;
+      handlerIndices.push(handlerIndex);
+      items.push({ kind: 'handler', handler: (synth as any).SWAP1_DUP2_ADD, nextCursor: -1, opcode, pc });
+      pc += 3;
+      continue;
+    }
+
+    // DUP2_MSTORE_PUSH: DUP2; MSTORE; PUSHk
+    if (opcode === 0x81 && pc + 2 < bytecode.length && bytecode[pc + 1] === OPCODES.MSTORE && isPush(bytecode[pc + 2])) {
+      const ps = getPushSize(bytecode[pc + 2]);
+      const ds = pc + 3;
+      const de = Math.min(ds + ps, bytecode.length);
+      const val = bytesToWord(bytecode.slice(ds, de));
+      const handlerIndex = items.length;
+      handlerIndices.push(handlerIndex);
+      items.push({ kind: 'handler', handler: (synth as any).DUP2_MSTORE_PUSH, nextCursor: -1, opcode, pc });
+      if (ps <= 8) items.push({ kind: 'inline', data: { value: val, n: ps } });
+      else items.push({ kind: 'pointer', index: poolGetOrAdd(val) });
+      pc = de;
+      continue;
+    }
+
+    // PUSH_DUP3_ADD: PUSHk; DUP3; ADD
+    if (isPush(opcode)) {
+      const ps = getPushSize(opcode);
+      const ds = pc + 1;
+      const de = Math.min(ds + ps, bytecode.length);
+      const after = de;
+      if (after + 1 < bytecode.length && bytecode[after] === 0x82 && bytecode[after + 1] === OPCODES.ADD) {
+        const val = bytesToWord(bytecode.slice(ds, de));
+        const handlerIndex = items.length;
+        handlerIndices.push(handlerIndex);
+        items.push({ kind: 'handler', handler: (synth as any).PUSH_DUP3_ADD, nextCursor: -1, opcode, pc });
+        if (ps <= 8) items.push({ kind: 'inline', data: { value: val, n: ps } });
+        else items.push({ kind: 'pointer', index: poolGetOrAdd(val) });
+        pc = after + 2;
+        continue;
+      }
+    }
+
     // MULTI_PUSH fusion: try for 3, then 2
     if (isPush(opcode)) {
       const startPc = pc;
