@@ -1,5 +1,5 @@
 import { Word } from '../types';
-import { stackPop, stackPush } from '../stack/stack';
+import { stackPop } from '../stack/stack';
 import { next } from '../interpreter';
 import type { Frame } from '../frame/frame';
 import type { Tail } from '../types_runtime';
@@ -25,18 +25,12 @@ export function JUMP(f: Frame, cursor: number): Tail {
     return new InvalidJumpError(destNum);
   }
   
-  // Find the cursor position for this PC in the schedule
-  // This is a simplified version - in the real implementation
-  // we'd need to map PC to schedule cursor efficiently
-  const items = f.schedule.items;
-  for (let i = 0; i < items.length; i++) {
-    const item = items[i] as any;
-    if (item.kind === 'handler' && item.pc === destNum) {
-      // Jump to this position
-      return { next: item.handler, cursor: i };
-    }
+  // Fast path: use prebuilt pc→cursor map
+  const target = f.schedule.pcToCursor.get(destNum);
+  if (target !== undefined) {
+    const item = f.schedule.items[target] as any;
+    return { next: item.handler, cursor: target };
   }
-  
   return new InvalidJumpError(destNum);
 }
 
@@ -58,16 +52,11 @@ export function JUMPI(f: Frame, cursor: number): Tail {
     return new InvalidJumpError(destNum);
   }
   
-  // Find the cursor position for this PC in the schedule
-  const items = f.schedule.items;
-  for (let i = 0; i < items.length; i++) {
-    const item = items[i] as any;
-    if (item.kind === 'handler' && item.pc === destNum) {
-      // Jump to this position
-      return { next: item.handler, cursor: i };
-    }
+  const target = f.schedule.pcToCursor.get(destNum);
+  if (target !== undefined) {
+    const item = f.schedule.items[target] as any;
+    return { next: item.handler, cursor: target };
   }
-  
   return new InvalidJumpError(destNum);
 }
 
