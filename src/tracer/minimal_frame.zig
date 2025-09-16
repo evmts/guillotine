@@ -3,11 +3,13 @@
 const std = @import("std");
 const primitives = @import("primitives");
 const minimal_evm_mod = @import("minimal_evm.zig");
+const MinimalEvm = minimal_evm_mod.MinimalEvm;
+
 const GasConstants = primitives.GasConstants;
 const Address = primitives.Address.Address;
-const MinimalEvm = minimal_evm_mod.MinimalEvm;
-const MinimalEvmError = MinimalEvm.Error;
 const Hardfork = @import("../eips_and_hardforks/eips.zig").Hardfork;
+const MinimalEvmError = MinimalEvm.Error;
+const StorageSlotKey = minimal_evm_mod.StorageSlotKey;
 
 pub const MinimalFrame = struct {
     const Self = @This();
@@ -1063,13 +1065,32 @@ pub const MinimalFrame = struct {
                 const access_cost = try evm.access_storage_slot(self.address, key);
                 const is_cold = access_cost == GasConstants.ColdSloadCost;
 
-                // Calculate SSTORE gas cost using proper EIP-2200/EIP-3529 logic
-                const gas_cost = GasConstants.sstore_gas_cost(current_value, original_value, value, is_cold);
-                try self.consumeGas(gas_cost);
+                if (current_value == 0 and value != 0) {
+                    const sentry_gas: i64 = @as(i64, @intCast(GasConstants.SstoreSentryGas));
+                    if (self.gas_remaining < sentry_gas) {
+                        return error.OutOfGas;
+                    }
+                }
 
-                // EIP-3529: Only clearing (non-zero -> zero) is eligible for refund
-                if (current_value != 0 and value == 0) {
-                    evm.add_refund(GasConstants.SstoreRefundGas);
+                const total_gas_cost = GasConstants.sstore_gas_cost(current_value, original_value, value, is_cold);
+                try self.consumeGas(total_gas_cost);
+
+                if (value != current_value) {
+                    if (original_value == current_value) {
+                        if (original_value != 0 and value == 0) {
+                            evm.gas_refund += GasConstants.SstoreRefundGas;
+                        }
+                    } else if (original_value != 0) {
+                        if (current_value == 0 and value != 0) {
+                            if (evm.gas_refund >= GasConstants.SstoreRefundGas) {
+                                evm.gas_refund -= GasConstants.SstoreRefundGas;
+                            } else {
+                                evm.gas_refund = 0;
+                            }
+                        } else if (current_value != 0 and value == 0) {
+                            evm.gas_refund += GasConstants.SstoreRefundGas;
+                        }
+                    }
                 }
 
                 try evm.set_storage(self.address, key, value);
