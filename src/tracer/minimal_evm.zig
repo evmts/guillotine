@@ -7,6 +7,8 @@ const GasConstants = primitives.GasConstants;
 const MinimalFrame = @import("minimal_frame.zig").MinimalFrame;
 const Hardfork = @import("../eips_and_hardforks/eips.zig").Hardfork;
 const minimal_host = @import("minimal_host.zig");
+const precompiles = @import("../precompiles/precompiles.zig");
+const Hardfork = @import("../eips_and_hardforks/hardfork.zig").Hardfork;
 
 const Address = primitives.Address.Address;
 const ZERO_ADDRESS = primitives.ZERO_ADDRESS;
@@ -30,9 +32,29 @@ pub const StorageSlotKey = struct {
     }
 
     pub fn eql(a: StorageSlotKey, b: StorageSlotKey) bool {
-        return std.mem.eql(u8, &a.address.bytes, &b.address.bytes) and a.slot == b.slot;
+        return a.address.equals(b.address) and a.slot == b.slot;
     }
 };
+
+const PRECOMPILE_ADDRESSES = [_]Address{
+    precompiles.ECRECOVER_ADDRESS,
+    precompiles.SHA256_ADDRESS,
+    precompiles.RIPEMD160_ADDRESS,
+    precompiles.IDENTITY_ADDRESS,
+    precompiles.MODEXP_ADDRESS,
+    precompiles.ECADD_ADDRESS,
+    precompiles.ECMUL_ADDRESS,
+    precompiles.ECPAIRING_ADDRESS,
+    precompiles.BLAKE2F_ADDRESS,
+    precompiles.POINT_EVALUATION_ADDRESS,
+};
+
+fn isPrecompileAddress(address: Address) bool {
+    for (PRECOMPILE_ADDRESSES) |precompile| {
+        if (address.equals(precompile)) return true;
+    }
+    return false;
+}
 
 // Context for Address ArrayHashMap
 const AddressContext = std.array_hash_map.AutoContext(Address);
@@ -107,6 +129,14 @@ pub const MinimalEvm = struct {
     // EIP-2929 warm/cold tracking (minimal)
     warm_addresses: std.array_hash_map.ArrayHashMap(Address, void, AddressContext, false),
     warm_storage_slots: std.array_hash_map.ArrayHashMap(StorageSlotKey, void, StorageSlotKeyContext, false),
+
+    // Transaction-scoped gas refund counter
+    gas_refund: u64,
+
+    // Active hardfork configuration for gas rules
+    hardfork: Hardfork,
+
+    // Blockchain context
     chain_id: u64,
     block_number: u64,
     block_timestamp: u64,
@@ -141,6 +171,8 @@ pub const MinimalEvm = struct {
             .code = code_map,
             .warm_addresses = warm_addresses,
             .warm_storage_slots = warm_storage_slots,
+            .gas_refund = 0,
+            .hardfork = Hardfork.DEFAULT,
             .chain_id = 1,
             .block_number = 0,
             .block_timestamp = 0,
@@ -176,6 +208,8 @@ pub const MinimalEvm = struct {
         self.code = std.AutoHashMap(Address, []const u8).init(arena_allocator);
         self.warm_addresses = std.array_hash_map.ArrayHashMap(Address, void, AddressContext, false).init(arena_allocator);
         self.warm_storage_slots = std.array_hash_map.ArrayHashMap(StorageSlotKey, void, StorageSlotKeyContext, false).init(arena_allocator);
+        self.gas_refund = 0;
+        self.hardfork = Hardfork.DEFAULT;
         self.chain_id = 1;
         self.block_number = 0;
         self.block_timestamp = 0;
@@ -241,6 +275,12 @@ pub const MinimalEvm = struct {
         self.gas_price = gas_price;
     }
 
+    /// Configure hardfork for gas and access list rules
+    pub fn setHardfork(self: *Self, hardfork: Hardfork) void {
+        self.hardfork = hardfork;
+    }
+
+    /// Set account code
     pub fn setCode(self: *Self, address: Address, code: []const u8) !void {
         const code_copy = try self.allocator.alloc(u8, code.len);
         @memcpy(code_copy, code);
@@ -252,6 +292,8 @@ pub const MinimalEvm = struct {
     }
 
     pub fn access_address(self: *Self, address: Address) !u64 {
+        if (!self.hardfork.isAtLeast(.BERLIN)) return GasConstants.CallCodeCost;
+
         const entry = try self.warm_addresses.getOrPut(address);
         return if (entry.found_existing)
             GasConstants.WarmStorageReadCost
@@ -261,6 +303,8 @@ pub const MinimalEvm = struct {
 
     /// Access a storage slot and return the gas cost (EIP-2929 warm/cold)
     pub fn access_storage_slot(self: *Self, contract_address: Address, slot: u256) !u64 {
+        if (!self.hardfork.isAtLeast(.BERLIN)) return GasConstants.SloadGas * 2;
+
         const key = StorageSlotKey{ .address = contract_address, .slot = slot };
         const entry = try self.warm_storage_slots.getOrPut(key);
         return if (entry.found_existing)
@@ -270,12 +314,37 @@ pub const MinimalEvm = struct {
     }
 
     /// Pre-warm addresses for transaction initialization
-    pub fn pre_warm_addresses(self: *Self, addresses: []const Address) !void {
+    fn pre_warm_addresses(self: *Self, addresses: []const Address) !void {
         for (addresses) |address| {
             _ = self.warm_addresses.getOrPut(address) catch {
                 return Error.StorageError;
             };
         }
+    }
+
+    fn pre_warm_transaction(self: *Self, target: Address) MinimalEvmError!void {
+        var warm: [3]Address = undefined;
+        var count: usize = 0;
+
+        warm[count] = self.origin;
+        count += 1;
+
+        if (!target.equals(ZERO_ADDRESS)) {
+            warm[count] = target;
+            count += 1;
+        }
+
+        if (self.hardfork.isAtLeast(.SHANGHAI)) {
+            warm[count] = self.block_coinbase;
+            count += 1;
+        }
+
+        // Pre-warm origin, target, and coinbase
+        try self.pre_warm_addresses(warm[0..count]);
+
+        // Pre-warm precompiles if Berlin+
+        if (!self.hardfork.isAtLeast(.BERLIN)) return;
+        try self.pre_warm_addresses(&PRECOMPILE_ADDRESSES);
     }
 
     /// Execute bytecode (main entry point like evm.execute)
@@ -287,13 +356,9 @@ pub const MinimalEvm = struct {
         address: Address,
         value: u256,
         calldata: []const u8,
-    ) Error!CallResult {
-        self.warm_addresses.clearRetainingCapacity();
-        self.warm_storage_slots.clearRetainingCapacity();
-        // TODO: Gate pre-warming by hardfork (Berlin enables access list rules, Shanghai warms coinbase)
-        // and include precompiles as warm from the start.
-        // TODO: pre-warm EIP-2930 tx access list entries when wiring tx params into the tracer.
-        try self.pre_warm_addresses(&[_]Address{ self.origin, address, self.block_coinbase });
+    ) Error!CallResult {        
+        // Pre-warm transaction, including precompiles depending on hardfork
+        try self.pre_warm_transaction(address);
 
         const intrinsic_gas: i64 = @intCast(GasConstants.TxGas);
         if (gas < intrinsic_gas) {
@@ -305,6 +370,7 @@ pub const MinimalEvm = struct {
             };
         }
         const execution_gas = gas - intrinsic_gas;
+        const execution_gas_limit: u64 = @as(u64, @intCast(execution_gas));
 
         const frame = try self.allocator.create(MinimalFrame);
         frame.* = try MinimalFrame.init(
@@ -337,12 +403,34 @@ pub const MinimalEvm = struct {
         const output = try self.allocator.alloc(u8, frame.output.len);
         @memcpy(output, frame.output);
 
+        var gas_left = @as(u64, @intCast(@max(frame.gas_remaining, 0)));
+        // Apply gas refund if the call was successful
+        if (!frame.reverted) {
+            // We only want to refund if the call actually used some gas
+            const gas_used = if (execution_gas_limit > gas_left) execution_gas_limit - gas_left else 0;
+            // Pre-London: refund up to half of gas used; post-London: refund up to one fifth of gas used
+            const capped_refund = if (!self.hardfork.isAtLeast(.LONDON))
+                @min(self.gas_refund, gas_used / 2)
+            else
+                @min(self.gas_refund, gas_used / 5);
+            
+            // Apply the refund without exceeding the gas limit
+            gas_left = @min(execution_gas_limit, gas_left + capped_refund);
+            self.gas_refund = 0;
+        }
+
+        // Return result
         const result = CallResult{
             .success = !frame.reverted,
-            .gas_left = @as(u64, @intCast(@max(frame.gas_remaining, 0))),
+            .gas_left = gas_left,
             .output = output,
         };
 
+        // Reset transaction-scoped caches
+        self.warm_addresses.clearRetainingCapacity();
+        self.warm_storage_slots.clearRetainingCapacity();
+
+        // No cleanup needed - arena handles it
         return result;
     }
 

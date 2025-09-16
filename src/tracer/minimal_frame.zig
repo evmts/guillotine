@@ -586,7 +586,6 @@ pub const MinimalFrame = struct {
                 const addr = Address{ .bytes = addr_bytes };
 
                 // EIP-2929: warm/cold account access cost
-                // TODO: Treat precompiles as warm and gate by hardfork (Berlin+).
                 const access_cost = try evm.access_address(addr);
                 try self.consumeGas(access_cost);
                 const balance = evm.get_balance(addr);
@@ -932,7 +931,6 @@ pub const MinimalFrame = struct {
                 const key = try self.popStack();
 
                 // EIP-2929: charge warm/cold storage access cost and warm the slot
-                // TODO: Gate EIP-2929 by hardfork
                 const access_cost = try evm.access_storage_slot(self.address, key);
                 // Access list returns 2100 for cold and 100 for warm
                 // SLOAD total cost is 100 when warm and 2100 + 100 when cold
@@ -1171,7 +1169,6 @@ pub const MinimalFrame = struct {
                     gas_cost += GasConstants.CallValueTransferGas;
                 }
                 // EIP-2929: access target account (warm/cold)
-                // TODO: Skip cold surcharge for precompiles and gate by hardfork.
                 const access_cost = try evm.access_address(call_address);
                 gas_cost += access_cost;
                 try self.consumeGas(gas_cost);
@@ -1252,7 +1249,6 @@ pub const MinimalFrame = struct {
                     gas_cost += GasConstants.CallValueTransferGas;
                 }
                 // EIP-2929: access target account (warm/cold)
-                // TODO: Skip cold surcharge for precompiles and gate by hardfork.
                 const access_cost = try evm.access_address(call_address);
                 gas_cost += access_cost;
                 try self.consumeGas(gas_cost);
@@ -1448,7 +1444,6 @@ pub const MinimalFrame = struct {
 
                 // Base gas cost + EIP-2929 account access
                 var call_gas_cost: u64 = GasConstants.CallGas;
-                // TODO: Skip cold surcharge for precompiles and gate by hardfork.
                 const access_cost = try evm.access_address(call_address);
                 call_gas_cost += access_cost;
                 try self.consumeGas(call_gas_cost);
@@ -1586,7 +1581,6 @@ pub const MinimalFrame = struct {
                 const ext_addr = primitives.Address.from_u256(addr_int);
 
                 // EIP-2929: charge account access cost
-                // TODO: Treat precompiles as warm and gate by hardfork.
                 const access_cost = try evm.access_address(ext_addr);
                 try self.consumeGas(access_cost);
 
@@ -1612,7 +1606,6 @@ pub const MinimalFrame = struct {
                     const copy_cost = GasConstants.CopyGas * words;
 
                     // EIP-2929: account access + copy cost
-                    // TODO: Treat precompiles as warm and gate by hardfork.
                     const access_cost = try evm.access_address(ext_addr);
                     try self.consumeGas(access_cost + copy_cost);
 
@@ -1630,7 +1623,6 @@ pub const MinimalFrame = struct {
                     }
                 } else {
                     // EIP-2929: charge account access cost even if size is zero
-                    // TODO: Treat precompiles as warm and gate by hardfork.
                     const access_cost = try evm.access_address(ext_addr);
                     try self.consumeGas(access_cost);
                 }
@@ -1647,7 +1639,6 @@ pub const MinimalFrame = struct {
                 const ext_addr = primitives.Address.from_u256(addr_int);
 
                 // EIP-2929: charge account access cost
-                // TODO: Treat precompiles as warm and gate by hardfork.
                 const access_cost = try evm.access_address(ext_addr);
                 try self.consumeGas(access_cost);
 
