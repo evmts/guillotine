@@ -199,6 +199,7 @@ bun.lock
 
 # Compiled binaries without extensions (common in development)
 test_benchmark_debug
+guillotine-cli
 test_hyperfine
 
 # KZG trusted setup file (large binary file)
