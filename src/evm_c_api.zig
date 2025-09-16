@@ -559,9 +559,9 @@ fn convertCallResultToEvmResult(result: anytype, allocator: std.mem.Allocator) ?
                 const topics_copy = allocator.alloc([32]u8, log_item.topics.len) catch {
                     setError("Failed to allocate topics", .{});
                     // Clean up already allocated
-                    for (logs_copy[0..i]) |prev_log_entry| {
-                        if (prev_log_entry.topics_len > 0) allocator.free(prev_log_entry.topics[0..prev_log_entry.topics_len]);
-                        if (prev_log_entry.data_len > 0) allocator.free(prev_log_entry.data[0..prev_log_entry.data_len]);
+                    for (logs_copy[0..i]) |prev_log| {
+                        if (prev_log.topics_len > 0) allocator.free(prev_log.topics[0..prev_log.topics_len]);
+                        if (prev_log.data_len > 0) allocator.free(prev_log.data[0..prev_log.data_len]);
                     }
                     allocator.free(logs_copy);
                     if (evm_result.output_len > 0) allocator.free(evm_result.output[0..evm_result.output_len]);
@@ -584,9 +584,9 @@ fn convertCallResultToEvmResult(result: anytype, allocator: std.mem.Allocator) ?
                     setError("Failed to allocate log data", .{});
                     // Clean up
                     if (logs_copy[i].topics_len > 0) allocator.free(logs_copy[i].topics[0..logs_copy[i].topics_len]);
-                    for (logs_copy[0..i]) |prev_log_entry| {
-                        if (prev_log_entry.topics_len > 0) allocator.free(prev_log_entry.topics[0..prev_log_entry.topics_len]);
-                        if (prev_log_entry.data_len > 0) allocator.free(prev_log_entry.data[0..prev_log_entry.data_len]);
+                    for (logs_copy[0..i]) |prev_log| {
+                        if (prev_log.topics_len > 0) allocator.free(prev_log.topics[0..prev_log.topics_len]);
+                        if (prev_log.data_len > 0) allocator.free(prev_log.data[0..prev_log.data_len]);
                     }
                     allocator.free(logs_copy);
                     if (evm_result.output_len > 0) allocator.free(evm_result.output[0..evm_result.output_len]);
