@@ -7,6 +7,7 @@ const GasConstants = primitives.GasConstants;
 const Address = primitives.Address.Address;
 const MinimalEvm = minimal_evm_mod.MinimalEvm;
 const MinimalEvmError = MinimalEvm.Error;
+const Hardfork = @import("../eips_and_hardforks/eips.zig").Hardfork;
 
 pub const MinimalFrame = struct {
     const Self = @This();
@@ -49,6 +50,9 @@ pub const MinimalFrame = struct {
     // EIP-3074 AUTH state
     authorized: ?u256,
     call_depth: u32,
+    
+    // Active hardfork configuration for gas rules
+    hardfork: Hardfork,
 
     /// Analyze bytecode to identify valid JUMPDEST locations
     fn validateJumpDests(_: std.mem.Allocator, bytecode: []const u8, valid_jumpdests: *std.AutoArrayHashMap(u32, void)) !void {
@@ -81,6 +85,7 @@ pub const MinimalFrame = struct {
         value: u256,
         calldata: []const u8,
         evm_ptr: *anyopaque,
+        hardfork: Hardfork,
     ) !Self {
         var stack = std.ArrayList(u256){};
         try stack.ensureTotalCapacity(allocator, 1024);
@@ -114,6 +119,7 @@ pub const MinimalFrame = struct {
             .allocator = allocator,
             .authorized = null,
             .call_depth = 0,
+            .hardfork = hardfork,
         };
     }
 
@@ -128,8 +134,8 @@ pub const MinimalFrame = struct {
     }
 
     /// Get the MinimalEvm instance
-    pub fn getEvm(self: *Self) *@import("minimal_evm.zig").MinimalEvm {
-        return @as(*@import("minimal_evm.zig").MinimalEvm, @ptrCast(@alignCast(self.evm_ptr)));
+    pub fn getEvm(self: *Self) *MinimalEvm {
+        return @as(*MinimalEvm, @ptrCast(@alignCast(self.evm_ptr)));
     }
 
     /// Push value onto stack
@@ -175,20 +181,6 @@ pub const MinimalFrame = struct {
         return (bytes + 31) / 32;
     }
 
-    fn memoryExpansionCost(self: *const Self, end_bytes: u64) u64 {
-        const current_size = @as(u64, self.memory_size);
-        return GasConstants.memory_gas_cost(current_size, end_bytes);
-    }
-
-    /// Consume gas
-    pub fn consumeGas(self: *Self, amount: u64) MinimalEvmError!void {
-        if (self.gas_remaining < @as(i64, @intCast(amount))) {
-            self.gas_remaining = 0;
-            return error.OutOfGas;
-        }
-        self.gas_remaining -= @intCast(amount);
-    }
-
     /// Get current opcode
     pub fn getCurrentOpcode(self: *const Self) ?u8 {
         if (self.pc >= self.bytecode.len) {
@@ -211,6 +203,123 @@ pub const MinimalFrame = struct {
         return result;
     }
 
+    /// ----------------------------------- GAS ---------------------------------- ///
+    /// Consume gas
+    pub fn consumeGas(self: *Self, amount: u64) MinimalEvmError!void {
+        if (self.gas_remaining < @as(i64, @intCast(amount))) {
+            self.gas_remaining = 0;
+            return error.OutOfGas;
+        }
+        self.gas_remaining -= @intCast(amount);
+    }
+
+    /// Calculate memory expansion cost
+    /// The total memory cost for n words is: 3n + n²/512, where a word is 32 bytes.
+    fn memoryExpansionCost(self: *const Self, end_bytes: u64) u64 {
+        const current_size = @as(u64, self.memory_size);
+
+        if (end_bytes <= current_size) return 0;
+
+        const current_words = wordCount(current_size);
+        const new_words = wordCount(end_bytes);
+
+        // Calculate cost for each size
+        const current_cost = GasConstants.MemoryGas * current_words + (current_words * current_words) / GasConstants.QuadCoeffDiv;
+        const new_cost = GasConstants.MemoryGas * new_words + (new_words * new_words) / GasConstants.QuadCoeffDiv;
+
+        return new_cost - current_cost;
+    }
+
+    /// Calculate gas cost for external account operations (EIP-150 aware)
+    fn externalAccountGasCost(self: *Self, address: Address) !u64 {
+        const evm = self.getEvm();
+        
+        if (!self.hardfork.isAtLeast(.TANGERINE_WHISTLE)) {
+            // Pre-EIP-150: Lower cost
+            return GasConstants.GasQuickStep;
+        } else if (!self.hardfork.isAtLeast(.BERLIN)) {
+            // Post-EIP-150, Pre-Berlin: Fixed higher cost
+            return GasConstants.GasExtStep;
+        } else {
+            // Post-Berlin: Cold/warm access pattern
+            return try evm.access_address(address);
+        }
+    }
+
+    /// Calculate SELFDESTRUCT gas cost (EIP-150 aware)
+    fn selfdestructGasCost(self: *const Self) u64 {
+        if (!self.hardfork.isAtLeast(.TANGERINE_WHISTLE)) {
+            return 0; // Pre-EIP-150: Free operation
+        }
+        return GasConstants.SelfdestructGas; // Post-EIP-150: 5000 gas
+    }
+
+    /// Calculate SELFDESTRUCT refund (EIP-3529 aware)
+    fn selfdestructRefund(self: *const Self) u64 {
+        if (self.hardfork.isAtLeast(.LONDON)) {
+            return 0; // EIP-3529: No refund in London+
+        }
+        return GasConstants.SelfdestructRefundGas; // Pre-London: 24,000 refund
+    }
+
+    /// Validate init code size (EIP-3860)
+    fn validateInitCodeSize(self: *const Self, size: u256) !void {
+        if (!self.hardfork.isAtLeast(.SHANGHAI)) return; // No limit pre-Shanghai
+        
+        if (size > GasConstants.MaxInitcodeSize) {
+            return error.InitCodeSizeExceeded;
+        }
+    }
+
+    /// Calculate CREATE gas cost (EIP-3860 aware)
+    fn createGasCost(self: *const Self, init_code_size: u32) u64 {
+        var gas_cost: u64 = GasConstants.CreateGas; // Base 32,000 gas
+        
+        if (self.hardfork.isAtLeast(.SHANGHAI)) {
+            const word_count = wordCount(@as(u64, init_code_size));
+            gas_cost += word_count * GasConstants.InitcodeWordGas;
+        }
+        
+        return gas_cost;
+    }
+
+    /// Calculate CREATE2 gas cost (EIP-3860 aware)
+    fn create2GasCost(self: *const Self, init_code_size: u32) u64 {
+        var gas_cost: u64 = GasConstants.CreateGas; // Base 32,000 gas
+        
+        // Keccak256 hash cost (always present for CREATE2)
+        const word_count = wordCount(@as(u64, init_code_size));
+        gas_cost += word_count * GasConstants.Keccak256WordGas;
+        
+        if (self.hardfork.isAtLeast(.SHANGHAI)) {
+            // Additional init code word cost
+            gas_cost += word_count * GasConstants.InitcodeWordGas;
+        }
+        
+        return gas_cost;
+    }
+
+    /// Calculate KECCAK256 gas cost (replaces manual calculation)
+    fn keccak256GasCost(data_size: u32) u64 {
+        const words = wordCount(@as(u64, data_size));
+        return GasConstants.Keccak256Gas + words * GasConstants.Keccak256WordGas;
+    }
+
+    /// Calculate copy operation gas cost (replaces manual calculations)
+    fn copyGasCost(size: u32) u64 {
+        const words = wordCount(@as(u64, size));
+        return GasConstants.CopyGas * words;
+    }
+
+    /// Calculate LOG operation gas cost (replaces manual calculation)
+    fn logGasCost(topic_count: u8, data_size: u32) u64 {
+        const base_cost = GasConstants.LogGas;
+        const topic_cost = @as(u64, topic_count) * GasConstants.LogTopicGas;
+        const data_cost = @as(u64, data_size) * GasConstants.LogDataGas;
+        return base_cost + topic_cost + data_cost;
+    }
+
+    /// ----------------------------------- OPCODES ---------------------------------- ///
     /// Execute a single opcode - delegates to MinimalEvm for external ops
     pub fn executeOpcode(self: *Self, opcode: u8) MinimalEvmError!void {
         const evm = self.getEvm();
@@ -526,9 +635,8 @@ pub const MinimalFrame = struct {
                 const offset = try self.popStack();
                 const size = try self.popStack();
 
-                // Gas cost: 30 + 6 * ((size + 31) / 32)
-                const words = @as(u64, @intCast((size + 31) / 32));
-                const gas_cost = GasConstants.Keccak256Gas + words * GasConstants.Keccak256WordGas;
+                // Use centralized gas calculation
+                const gas_cost = keccak256GasCost(@as(u32, @intCast(size)));
                 try self.consumeGas(gas_cost);
 
                 // Handle empty data case
@@ -585,8 +693,8 @@ pub const MinimalFrame = struct {
                 }
                 const addr = Address{ .bytes = addr_bytes };
 
-                // EIP-2929: warm/cold account access cost
-                const access_cost = try evm.access_address(addr);
+                // EIP-150/EIP-2929: hardfork-aware account access cost
+                const access_cost = try self.externalAccountGasCost(addr);
                 try self.consumeGas(access_cost);
                 const balance = evm.get_balance(addr);
                 try self.pushStack(balance);
@@ -656,8 +764,7 @@ pub const MinimalFrame = struct {
                 // Charge base + memory expansion + copy per word
                 const end_bytes_copy: u64 = @as(u64, dest_off) + @as(u64, len);
                 const mem_cost4 = self.memoryExpansionCost(end_bytes_copy);
-                const copy_words = wordCount(@as(u64, len));
-                const copy_cost = GasConstants.CopyGas * copy_words;
+                const copy_cost = copyGasCost(len);
                 try self.consumeGas(GasConstants.GasFastestStep + mem_cost4 + copy_cost);
 
                 // Copy calldata to memory
@@ -689,9 +796,8 @@ pub const MinimalFrame = struct {
 
                 const end_bytes_code: u64 = @as(u64, dest_off) + @as(u64, len);
                 const mem_cost5 = self.memoryExpansionCost(end_bytes_code);
-                const copy_words2 = wordCount(@as(u64, len));
-                const copy_cost2 = GasConstants.CopyGas * copy_words2;
-                try self.consumeGas(GasConstants.GasFastestStep + mem_cost5 + copy_cost2);
+                const copy_cost = copyGasCost(len);
+                try self.consumeGas(GasConstants.GasFastestStep + mem_cost5 + copy_cost);
 
                 // Copy code to memory
                 var i: u32 = 0;
@@ -740,9 +846,8 @@ pub const MinimalFrame = struct {
 
                 const end_bytes_ret: u64 = @as(u64, dest_off) + @as(u64, len);
                 const mem_cost6 = self.memoryExpansionCost(end_bytes_ret);
-                const copy_words3 = wordCount(@as(u64, len));
-                const copy_cost3 = GasConstants.CopyGas * copy_words3;
-                try self.consumeGas(GasConstants.GasFastestStep + mem_cost6 + copy_cost3);
+                const copy_cost = copyGasCost(len);
+                try self.consumeGas(GasConstants.GasFastestStep + mem_cost6 + copy_cost);
 
                 // Copy return data to memory
                 var i: u32 = 0;
@@ -1118,9 +1223,8 @@ pub const MinimalFrame = struct {
                 }
 
                 // Gas cost
-                const byte_cost = @as(u64, @intCast(8 * length));
-                const topic_cost = @as(u64, 375) * @as(u64, topic_count);
-                try self.consumeGas(375 + byte_cost + topic_cost);
+                const log_cost = logGasCost(topic_count, @as(u32, @intCast(length)));
+                try self.consumeGas(log_cost);
 
                 // In minimal implementation, we don't actually emit logs
                 _ = offset;
@@ -1133,13 +1237,14 @@ pub const MinimalFrame = struct {
                 const offset = try self.popStack();
                 const length = try self.popStack();
 
-                // Gas cost
-                try self.consumeGas(32000);
+                try self.validateInitCodeSize(length);
+                const len = try std.math.cast(u32, length) orelse return error.OutOfBounds;
+                const gas_cost = self.createGasCost(len);
+                try self.consumeGas(gas_cost);
 
                 // In minimal implementation, just return a dummy address
                 _ = value;
                 _ = offset;
-                _ = length;
                 try self.pushStack(0); // Dummy created address
                 self.pc += 1;
             },
@@ -1410,9 +1515,10 @@ pub const MinimalFrame = struct {
                 const length = try self.popStack();
                 const salt = try self.popStack();
 
-                // Gas cost
-                const word_count = @as(u64, @intCast((length + 31) / 32));
-                try self.consumeGas(32000 + 6 * word_count);
+                try self.validateInitCodeSize(length);
+                const len = try std.math.cast(u32, length) orelse return error.OutOfBounds;
+                const gas_cost = self.create2GasCost(len);
+                try self.consumeGas(gas_cost);
 
                 _ = value;
                 _ = offset;
@@ -1525,8 +1631,7 @@ pub const MinimalFrame = struct {
                 const mem_cost_src = self.memoryExpansionCost(end_src);
                 const mem_cost_dest = self.memoryExpansionCost(end_dest);
                 const mem_cost = @max(mem_cost_src, mem_cost_dest);
-                const words: u64 = wordCount(@as(u64, len_u32));
-                const copy_cost: u64 = GasConstants.CopyGas * words;
+                const copy_cost = copyGasCost(len_u32);
                 try self.consumeGas(mem_cost + copy_cost);
 
                 // Copy via temporary buffer to handle overlapping regions
@@ -1580,8 +1685,8 @@ pub const MinimalFrame = struct {
                 const addr_int = try self.popStack();
                 const ext_addr = primitives.Address.from_u256(addr_int);
 
-                // EIP-2929: charge account access cost
-                const access_cost = try evm.access_address(ext_addr);
+                // EIP-150/EIP-2929: hardfork-aware account access cost
+                const access_cost = try self.externalAccountGasCost(ext_addr);
                 try self.consumeGas(access_cost);
 
                 // For MinimalFrame, we don't have access to external code
@@ -1602,11 +1707,10 @@ pub const MinimalFrame = struct {
 
                 // Gas cost calculation
                 if (size > 0) {
-                    const words = @as(u64, @intCast((size + 31) / 32));
-                    const copy_cost = GasConstants.CopyGas * words;
+                    const copy_cost = copyGasCost(@as(u32, @intCast(size)));
 
-                    // EIP-2929: account access + copy cost
-                    const access_cost = try evm.access_address(ext_addr);
+                    // EIP-150/EIP-2929: hardfork-aware account access
+                    const access_cost = try self.externalAccountGasCost(ext_addr);
                     try self.consumeGas(access_cost + copy_cost);
 
                     const dest = std.math.cast(u32, dest_offset) orelse return error.OutOfBounds;
@@ -1622,8 +1726,8 @@ pub const MinimalFrame = struct {
                         try self.writeMemory(dest + i, 0);
                     }
                 } else {
-                    // EIP-2929: charge account access cost even if size is zero
-                    const access_cost = try evm.access_address(ext_addr);
+                    // EIP-150/EIP-2929: charge account access cost even if size is zero
+                    const access_cost = try self.externalAccountGasCost(ext_addr);
                     try self.consumeGas(access_cost);
                 }
                 self.pc += 1;
@@ -1638,8 +1742,8 @@ pub const MinimalFrame = struct {
                 const addr_int = try self.popStack();
                 const ext_addr = primitives.Address.from_u256(addr_int);
 
-                // EIP-2929: charge account access cost
-                const access_cost = try evm.access_address(ext_addr);
+                // EIP-150/EIP-2929: hardfork-aware account access cost
+                const access_cost = try self.externalAccountGasCost(ext_addr);
                 try self.consumeGas(access_cost);
 
                 // For MinimalFrame, return empty code hash
@@ -1797,7 +1901,16 @@ pub const MinimalFrame = struct {
             0xff => {
                 const beneficiary = try self.popStack();
                 _ = beneficiary;
-                try self.consumeGas(5000);
+                
+                const gas_cost = self.selfdestructGasCost();
+                try self.consumeGas(gas_cost);
+                
+                // Apply refund to EVM's gas_refund counter
+                const refund = self.selfdestructRefund();
+                if (refund > 0) {
+                    self.getEvm().gas_refund += refund;
+                }
+                
                 self.stopped = true;
             },
 

@@ -56,6 +56,32 @@ fn isPrecompileAddress(address: Address) bool {
     return false;
 }
 
+/// Get ECADD gas cost based on hardfork
+fn getEcaddGasCost(hardfork: Hardfork) u64 {
+    if (hardfork.isAtLeast(.ISTANBUL)) {
+        return GasConstants.ECADD_GAS_COST; // 150 gas
+    }
+    return GasConstants.ECADD_GAS_COST_BYZANTIUM; // 500 gas
+}
+
+/// Get ECMUL gas cost based on hardfork
+fn getEcmulGasCost(hardfork: Hardfork) u64 {
+    if (hardfork.isAtLeast(.ISTANBUL)) {
+        return GasConstants.ECMUL_GAS_COST; // 6,000 gas
+    }
+    return GasConstants.ECMUL_GAS_COST_BYZANTIUM; // 40,000 gas
+}
+
+/// Get ECPAIRING gas cost based on hardfork
+fn getEcpairingGasCost(hardfork: Hardfork, pair_count: usize) u64 {
+    if (hardfork.isAtLeast(.ISTANBUL)) {
+        return GasConstants.ECPAIRING_BASE_GAS_COST + 
+               @as(u64, pair_count) * GasConstants.ECPAIRING_PER_PAIR_GAS_COST;
+    }
+    return GasConstants.ECPAIRING_BASE_GAS_COST_BYZANTIUM + 
+           @as(u64, pair_count) * GasConstants.ECPAIRING_PER_PAIR_GAS_COST_BYZANTIUM;
+}
+
 // Context for Address ArrayHashMap
 const AddressContext = std.array_hash_map.AutoContext(Address);
 
@@ -86,6 +112,8 @@ pub const MinimalEvmError = error{
     OutOfBounds,
     // Access list
     AddressPreWarmError,
+    // EIP-3860
+    InitCodeSizeExceeded,
 };
 
 /// Minimal EVM - Orchestrates execution like evm.zig
@@ -303,7 +331,7 @@ pub const MinimalEvm = struct {
 
     /// Access a storage slot and return the gas cost (EIP-2929 warm/cold)
     pub fn access_storage_slot(self: *Self, contract_address: Address, slot: u256) !u64 {
-        if (!self.hardfork.isAtLeast(.BERLIN)) return GasConstants.SloadGas * 2;
+        if (!self.hardfork.isAtLeast(.BERLIN)) return GasConstants.SloadGas;
 
         const key = StorageSlotKey{ .address = contract_address, .slot = slot };
         const entry = try self.warm_storage_slots.getOrPut(key);
@@ -382,6 +410,7 @@ pub const MinimalEvm = struct {
             value,
             calldata,
             @as(*anyopaque, @ptrCast(self)),
+            self.hardfork,
         );
 
         // Push frame onto stack
@@ -453,6 +482,36 @@ pub const MinimalEvm = struct {
         // Get code for the target address
         const code = self.get_code(address);
         if (code.len == 0) {
+            // Check if this is a precompile address
+            if (isPrecompileAddress(address)) {
+                var precompile_gas: u64 = 0;
+                
+                if (address.equals(precompiles.ECADD_ADDRESS)) {
+                    precompile_gas = getEcaddGasCost(self.hardfork);
+                } else if (address.equals(precompiles.ECMUL_ADDRESS)) {
+                    precompile_gas = getEcmulGasCost(self.hardfork);
+                } else if (address.equals(precompiles.ECPAIRING_ADDRESS)) {
+                    // For ECPAIRING, need to calculate pair count from input
+                    const pair_count = input.len / 192; // Each pair is 192 bytes
+                    precompile_gas = getEcpairingGasCost(self.hardfork, pair_count);
+                }
+                
+                if (gas < precompile_gas) {
+                    return CallResult{
+                        .success = false,
+                        .gas_left = 0,
+                        .output = &[_]u8{},
+                    };
+                }
+                
+                // TODO: Implement precompile logic
+                return CallResult{
+                    .success = true,
+                    .gas_left = gas - precompile_gas,
+                    .output = &[_]u8{}, // Dummy output
+                };
+            }
+            
             // Empty account - just return success
             return CallResult{
                 .success = true,
@@ -475,6 +534,7 @@ pub const MinimalEvm = struct {
             value,
             input,
             @as(*anyopaque, @ptrCast(self)),
+            self.hardfork,
         );
 
         try self.frames.append(self.allocator, frame);

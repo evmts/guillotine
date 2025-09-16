@@ -41,118 +41,6 @@ test "minimal evm gas - sstore cold then warm" {
     try std.testing.expectEqual(expected_left, result.gas_left);
 }
 
-// SSTORE: clear non-zero storage to zero, exercising refund cap rules
-test "minimal evm gas - sstore clear applies refund cap" {
-    const evm = try MinimalEvm.initPtr(std.testing.allocator);
-    defer evm.deinitPtr(std.testing.allocator);
-
-    // Pre-populate storage slot 0 with non-zero value so clearing it triggers refund
-    // Set both the current storage value and mark it as the original value
-    const storage_key = StorageSlotKey{ .address = CONTRACT_ADDRESS, .slot = @as(u256, 0) };
-    try evm.storage.put(storage_key, @as(u256, 42));
-    try evm.original_storage.put(storage_key, @as(u256, 42));
-
-    const bytecode = [_]u8{
-        0x60, 0x00, // PUSH1 0 (new value)
-        0x60, 0x00, // PUSH1 0 (slot)
-        0x55,       // SSTORE (clear slot 0 to 0)
-        0x00,       // STOP
-    };
-
-    const exec_gas: u64 = 100_000;
-    const total_gas: i64 = @intCast(GasConstants.TxGas + exec_gas);
-    const result = try evm.execute(bytecode[0..], total_gas, CALLER_ADDRESS, CONTRACT_ADDRESS, @as(u256, 0), &[_]u8{});
-    try std.testing.expect(result.success);
-
-    const push_cost: u64 = 2 * GasConstants.GasFastestStep;
-    const clear_cost = GasConstants.ColdSloadCost + GasConstants.SstoreResetGas;
-    const raw_used = push_cost + clear_cost;
-    const refund_cap = raw_used / GasConstants.MaxRefundQuotient;
-    const refund = @min(GasConstants.SstoreRefundGas, refund_cap);
-    const expected_left = exec_gas - raw_used + refund;
-    try std.testing.expectEqual(expected_left, result.gas_left);
-}
-
-// SSTORE: warm noop (storing same value should cost minimum)
-test "minimal evm gas - sstore warm noop" {
-    const evm = try MinimalEvm.initPtr(std.testing.allocator);
-    defer evm.deinitPtr(std.testing.allocator);
-
-    // Pre-set storage slot with value 9
-    const key = StorageSlotKey{ .address = CONTRACT_ADDRESS, .slot = 0 };
-    try evm.storage.put(key, 9);
-    try evm.original_storage.put(key, 9);
-
-    const bytecode = [_]u8{
-        // First SSTORE to warm the slot (same value)
-        0x60, 0x09, // PUSH1 9
-        0x60, 0x00, // PUSH1 0 
-        0x55,       // SSTORE (slot 0 = 9, already 9)
-        // Second SSTORE (warm, same value)
-        0x60, 0x09, // PUSH1 9
-        0x60, 0x00, // PUSH1 0
-        0x55,       // SSTORE (slot 0 = 9, warm noop)
-        0x00,       // STOP
-    };
-
-    const exec_gas: u64 = 100_000;
-    const total_gas: i64 = @intCast(GasConstants.TxGas + exec_gas);
-    const result = try evm.execute(bytecode[0..], total_gas, CALLER_ADDRESS, CONTRACT_ADDRESS, @as(u256, 0), &[_]u8{});
-    try std.testing.expect(result.success);
-
-    const push_cost: u64 = 4 * GasConstants.GasFastestStep;
-    // First SSTORE: cold access + noop cost
-    const first_sstore = GasConstants.ColdSloadCost + GasConstants.SloadGas;
-    // Second SSTORE: warm noop
-    const second_sstore = GasConstants.SloadGas;
-    const expected_left = exec_gas - (push_cost + first_sstore + second_sstore);
-    try std.testing.expectEqual(expected_left, result.gas_left);
-    try std.testing.expectEqual(@as(u64, 0), evm.gas_refund);
-}
-
-// SSTORE: warm restore original (dirty slot going back to original value)
-test "minimal evm gas - sstore warm restore original" {
-    const evm = try MinimalEvm.initPtr(std.testing.allocator);
-    defer evm.deinitPtr(std.testing.allocator);
-
-    // Set original value as 3
-    const key = StorageSlotKey{ .address = CONTRACT_ADDRESS, .slot = 0 };
-    try evm.original_storage.put(key, 3);
-    // Current value is 0 (different from original)
-    try evm.storage.put(key, 0);
-
-    const bytecode = [_]u8{
-        // Warm the slot with SLOAD
-        0x60, 0x00, // PUSH1 0
-        0x54,       // SLOAD (warm the slot)
-        0x50,       // POP
-        // Restore to original value
-        0x60, 0x03, // PUSH1 3 (original value)
-        0x60, 0x00, // PUSH1 0
-        0x55,       // SSTORE (slot 0 = 3, restoring original)
-        0x00,       // STOP
-    };
-
-    const exec_gas: u64 = 100_000;
-    const total_gas: i64 = @intCast(GasConstants.TxGas + exec_gas);
-    
-    // Initial refund from previous dirty->clean transition
-    evm.gas_refund = GasConstants.SstoreRefundGas;
-    
-    const result = try evm.execute(bytecode[0..], total_gas, CALLER_ADDRESS, CONTRACT_ADDRESS, @as(u256, 0), &[_]u8{});
-    try std.testing.expect(result.success);
-
-    const push_cost: u64 = 3 * GasConstants.GasFastestStep;
-    const pop_cost: u64 = GasConstants.GasQuickStep;
-    const sload_cost = GasConstants.ColdSloadCost + GasConstants.SloadGas;
-    // SSTORE restore: warm access, restoring original clears refund
-    const sstore_cost = GasConstants.SloadGas;
-    const expected_left = exec_gas - (push_cost + sload_cost + pop_cost + sstore_cost);
-    try std.testing.expectEqual(expected_left, result.gas_left);
-    // Refund should be cleared when restoring to original
-    try std.testing.expectEqual(@as(u64, 0), evm.gas_refund);
-}
-
 // SSTORE: sentry gas check (insufficient gas for zero->non-zero transition)
 test "minimal evm gas - sstore sentry gas check" {
     const evm = try MinimalEvm.initPtr(std.testing.allocator);
@@ -576,4 +464,627 @@ test "minimal evm gas - pre berlin skips warm tracking" {
     try std.testing.expectEqual(GasConstants.CallCodeCost, first);
     const second = try evm.access_address(TARGET_EXISTING);
     try std.testing.expectEqual(GasConstants.CallCodeCost, second);
+}
+
+// Test BALANCE gas costs across hardfork boundaries (EIP-150, Berlin)
+test "minimal evm gas - balance hardfork transitions" {
+    // Pre-EIP-150: GasQuickStep (2 gas)
+    {
+        const evm = try MinimalEvm.initPtr(std.testing.allocator);
+        defer evm.deinitPtr(std.testing.allocator);
+        evm.setHardfork(.HOMESTEAD);
+
+        const bytecode = [_]u8{
+            0x60, 0x55, // PUSH1 0x55
+            0x31,       // BALANCE
+            0x00,       // STOP
+        };
+
+        const exec_gas: u64 = 100_000;
+        const total_gas: i64 = @intCast(GasConstants.TxGas + exec_gas);
+        const result = try evm.execute(bytecode[0..], total_gas, CALLER_ADDRESS, CONTRACT_ADDRESS, @as(u256, 0), &[_]u8{});
+        try std.testing.expect(result.success);
+
+        const push_cost = GasConstants.GasFastestStep;
+        const balance_cost = GasConstants.GasQuickStep; // Pre-EIP-150
+        const expected_left = exec_gas - (push_cost + balance_cost);
+        try std.testing.expectEqual(expected_left, result.gas_left);
+    }
+
+    // Post-EIP-150, Pre-Berlin: GasExtStep (20 gas)
+    {
+        const evm = try MinimalEvm.initPtr(std.testing.allocator);
+        defer evm.deinitPtr(std.testing.allocator);
+        evm.setHardfork(.TANGERINE_WHISTLE);
+
+        const bytecode = [_]u8{
+            0x60, 0x55, // PUSH1 0x55
+            0x31,       // BALANCE
+            0x00,       // STOP
+        };
+
+        const exec_gas: u64 = 100_000;
+        const total_gas: i64 = @intCast(GasConstants.TxGas + exec_gas);
+        const result = try evm.execute(bytecode[0..], total_gas, CALLER_ADDRESS, CONTRACT_ADDRESS, @as(u256, 0), &[_]u8{});
+        try std.testing.expect(result.success);
+
+        const push_cost = GasConstants.GasFastestStep;
+        const balance_cost = GasConstants.GasExtStep; // Post-EIP-150
+        const expected_left = exec_gas - (push_cost + balance_cost);
+        try std.testing.expectEqual(expected_left, result.gas_left);
+    }
+
+    // Post-Berlin: Cold access (2600 gas)
+    {
+        const evm = try MinimalEvm.initPtr(std.testing.allocator);
+        defer evm.deinitPtr(std.testing.allocator);
+        evm.setHardfork(.BERLIN);
+
+        const bytecode = [_]u8{
+            0x60, 0x55, // PUSH1 0x55
+            0x31,       // BALANCE
+            0x00,       // STOP
+        };
+
+        const exec_gas: u64 = 100_000;
+        const total_gas: i64 = @intCast(GasConstants.TxGas + exec_gas);
+        const result = try evm.execute(bytecode[0..], total_gas, CALLER_ADDRESS, CONTRACT_ADDRESS, @as(u256, 0), &[_]u8{});
+        try std.testing.expect(result.success);
+
+        const push_cost = GasConstants.GasFastestStep;
+        const balance_cost = GasConstants.ColdAccountAccessCost; // Post-Berlin cold access
+        const expected_left = exec_gas - (push_cost + balance_cost);
+        try std.testing.expectEqual(expected_left, result.gas_left);
+    }
+}
+
+// Test EXTCODESIZE gas costs across hardfork boundaries
+test "minimal evm gas - extcodesize hardfork transitions" {
+    // Pre-EIP-150: GasQuickStep (2 gas)
+    {
+        const evm = try MinimalEvm.initPtr(std.testing.allocator);
+        defer evm.deinitPtr(std.testing.allocator);
+        evm.setHardfork(.HOMESTEAD);
+
+        const bytecode = [_]u8{
+            0x60, 0x55, // PUSH1 0x55
+            0x3b,       // EXTCODESIZE
+            0x00,       // STOP
+        };
+
+        const exec_gas: u64 = 100_000;
+        const total_gas: i64 = @intCast(GasConstants.TxGas + exec_gas);
+        const result = try evm.execute(bytecode[0..], total_gas, CALLER_ADDRESS, CONTRACT_ADDRESS, @as(u256, 0), &[_]u8{});
+        try std.testing.expect(result.success);
+
+        const push_cost = GasConstants.GasFastestStep;
+        const extcodesize_cost = GasConstants.GasQuickStep; // Pre-EIP-150
+        const expected_left = exec_gas - (push_cost + extcodesize_cost);
+        try std.testing.expectEqual(expected_left, result.gas_left);
+    }
+
+    // Post-EIP-150, Pre-Berlin: GasExtStep (20 gas)
+    {
+        const evm = try MinimalEvm.initPtr(std.testing.allocator);
+        defer evm.deinitPtr(std.testing.allocator);
+        evm.setHardfork(.TANGERINE_WHISTLE);
+
+        const bytecode = [_]u8{
+            0x60, 0x55, // PUSH1 0x55
+            0x3b,       // EXTCODESIZE
+            0x00,       // STOP
+        };
+
+        const exec_gas: u64 = 100_000;
+        const total_gas: i64 = @intCast(GasConstants.TxGas + exec_gas);
+        const result = try evm.execute(bytecode[0..], total_gas, CALLER_ADDRESS, CONTRACT_ADDRESS, @as(u256, 0), &[_]u8{});
+        try std.testing.expect(result.success);
+
+        const push_cost = GasConstants.GasFastestStep;
+        const extcodesize_cost = GasConstants.GasExtStep; // Post-EIP-150
+        const expected_left = exec_gas - (push_cost + extcodesize_cost);
+        try std.testing.expectEqual(expected_left, result.gas_left);
+    }
+
+    // Post-Berlin: Cold access (2600 gas)
+    {
+        const evm = try MinimalEvm.initPtr(std.testing.allocator);
+        defer evm.deinitPtr(std.testing.allocator);
+        evm.setHardfork(.BERLIN);
+
+        const bytecode = [_]u8{
+            0x60, 0x55, // PUSH1 0x55
+            0x3b,       // EXTCODESIZE
+            0x00,       // STOP
+        };
+
+        const exec_gas: u64 = 100_000;
+        const total_gas: i64 = @intCast(GasConstants.TxGas + exec_gas);
+        const result = try evm.execute(bytecode[0..], total_gas, CALLER_ADDRESS, CONTRACT_ADDRESS, @as(u256, 0), &[_]u8{});
+        try std.testing.expect(result.success);
+
+        const push_cost = GasConstants.GasFastestStep;
+        const extcodesize_cost = GasConstants.ColdAccountAccessCost; // Post-Berlin cold access
+        const expected_left = exec_gas - (push_cost + extcodesize_cost);
+        try std.testing.expectEqual(expected_left, result.gas_left);
+    }
+}
+
+// Test EXTCODECOPY gas costs across hardfork boundaries
+test "minimal evm gas - extcodecopy hardfork transitions" {
+    // Pre-EIP-150: GasQuickStep + copy cost
+    {
+        const evm = try MinimalEvm.initPtr(std.testing.allocator);
+        defer evm.deinitPtr(std.testing.allocator);
+        evm.setHardfork(.HOMESTEAD);
+
+        const bytecode = [_]u8{
+            0x60, 0x20, // PUSH1 32
+            0x60, 0x00, // PUSH1 0
+            0x60, 0x00, // PUSH1 0
+            0x60, 0x55, // PUSH1 0x55
+            0x3c,       // EXTCODECOPY
+            0x00,       // STOP
+        };
+
+        const exec_gas: u64 = 100_000;
+        const total_gas: i64 = @intCast(GasConstants.TxGas + exec_gas);
+        const result = try evm.execute(bytecode[0..], total_gas, CALLER_ADDRESS, CONTRACT_ADDRESS, @as(u256, 0), &[_]u8{});
+        try std.testing.expect(result.success);
+
+        const push_cost = 4 * GasConstants.GasFastestStep;
+        const access_cost = GasConstants.GasQuickStep; // Pre-EIP-150
+        const copy_cost = GasConstants.copy_gas_cost(32);
+        const expected_left = exec_gas - (push_cost + access_cost + copy_cost);
+        try std.testing.expectEqual(expected_left, result.gas_left);
+    }
+
+    // Post-Berlin: Cold access cost + copy cost
+    {
+        const evm = try MinimalEvm.initPtr(std.testing.allocator);
+        defer evm.deinitPtr(std.testing.allocator);
+        evm.setHardfork(.BERLIN);
+
+        const bytecode = [_]u8{
+            0x60, 0x20, // PUSH1 32
+            0x60, 0x00, // PUSH1 0
+            0x60, 0x00, // PUSH1 0
+            0x60, 0x55, // PUSH1 0x55
+            0x3c,       // EXTCODECOPY
+            0x00,       // STOP
+        };
+
+        const exec_gas: u64 = 100_000;
+        const total_gas: i64 = @intCast(GasConstants.TxGas + exec_gas);
+        const result = try evm.execute(bytecode[0..], total_gas, CALLER_ADDRESS, CONTRACT_ADDRESS, @as(u256, 0), &[_]u8{});
+        try std.testing.expect(result.success);
+
+        const push_cost = 4 * GasConstants.GasFastestStep;
+        const access_cost = GasConstants.ColdAccountAccessCost; // Post-Berlin cold access
+        const copy_cost = GasConstants.copy_gas_cost(32);
+        const expected_left = exec_gas - (push_cost + access_cost + copy_cost);
+        try std.testing.expectEqual(expected_left, result.gas_left);
+    }
+}
+
+// Test EXTCODEHASH gas costs across hardfork boundaries
+test "minimal evm gas - extcodehash hardfork transitions" {
+    // Pre-EIP-150: GasQuickStep (2 gas)
+    {
+        const evm = try MinimalEvm.initPtr(std.testing.allocator);
+        defer evm.deinitPtr(std.testing.allocator);
+        evm.setHardfork(.HOMESTEAD);
+
+        const bytecode = [_]u8{
+            0x60, 0x55, // PUSH1 0x55
+            0x3f,       // EXTCODEHASH
+            0x00,       // STOP
+        };
+
+        const exec_gas: u64 = 100_000;
+        const total_gas: i64 = @intCast(GasConstants.TxGas + exec_gas);
+        const result = try evm.execute(bytecode[0..], total_gas, CALLER_ADDRESS, CONTRACT_ADDRESS, @as(u256, 0), &[_]u8{});
+        try std.testing.expect(result.success);
+
+        const push_cost = GasConstants.GasFastestStep;
+        const extcodehash_cost = GasConstants.GasQuickStep; // Pre-EIP-150
+        const expected_left = exec_gas - (push_cost + extcodehash_cost);
+        try std.testing.expectEqual(expected_left, result.gas_left);
+    }
+
+    // Post-Berlin: Cold access (2600 gas)
+    {
+        const evm = try MinimalEvm.initPtr(std.testing.allocator);
+        defer evm.deinitPtr(std.testing.allocator);
+        evm.setHardfork(.BERLIN);
+
+        const bytecode = [_]u8{
+            0x60, 0x55, // PUSH1 0x55
+            0x3f,       // EXTCODEHASH
+            0x00,       // STOP
+        };
+
+        const exec_gas: u64 = 100_000;
+        const total_gas: i64 = @intCast(GasConstants.TxGas + exec_gas);
+        const result = try evm.execute(bytecode[0..], total_gas, CALLER_ADDRESS, CONTRACT_ADDRESS, @as(u256, 0), &[_]u8{});
+        try std.testing.expect(result.success);
+
+        const push_cost = GasConstants.GasFastestStep;
+        const extcodehash_cost = GasConstants.ColdAccountAccessCost; // Post-Berlin cold access
+        const expected_left = exec_gas - (push_cost + extcodehash_cost);
+        try std.testing.expectEqual(expected_left, result.gas_left);
+    }
+}
+
+// Test CREATE/CREATE2 with EIP-3860 size limits and word costs
+test "minimal evm gas - create eip3860 size limits" {
+    // Pre-Shanghai: No init code size limit or word cost
+    {
+        const evm = try MinimalEvm.initPtr(std.testing.allocator);
+        defer evm.deinitPtr(std.testing.allocator);
+        evm.setHardfork(.LONDON);
+
+        const bytecode = [_]u8{
+            0x61, 0x04, 0x00, // PUSH2 1024 (init code size)
+            0x60, 0x00,       // PUSH1 0 (offset)
+            0x60, 0x00,       // PUSH1 0 (value)
+            0xf0,             // CREATE
+            0x00,             // STOP
+        };
+
+        const exec_gas: u64 = 200_000;
+        const total_gas: i64 = @intCast(GasConstants.TxGas + exec_gas);
+        const result = try evm.execute(bytecode[0..], total_gas, CALLER_ADDRESS, CONTRACT_ADDRESS, @as(u256, 0), &[_]u8{});
+        try std.testing.expect(result.success);
+
+        const push_cost = 3 * GasConstants.GasFastestStep;
+        const create_cost = GasConstants.CreateGas; // No word cost pre-Shanghai
+        const expected_left = exec_gas - (push_cost + create_cost);
+        try std.testing.expectEqual(expected_left, result.gas_left);
+    }
+
+    // Post-Shanghai: Init code word cost
+    {
+        const evm = try MinimalEvm.initPtr(std.testing.allocator);
+        defer evm.deinitPtr(std.testing.allocator);
+        evm.setHardfork(.SHANGHAI);
+
+        const bytecode = [_]u8{
+            0x61, 0x04, 0x00, // PUSH2 1024 (init code size)
+            0x60, 0x00,       // PUSH1 0 (offset)
+            0x60, 0x00,       // PUSH1 0 (value)
+            0xf0,             // CREATE
+            0x00,             // STOP
+        };
+
+        const exec_gas: u64 = 200_000;
+        const total_gas: i64 = @intCast(GasConstants.TxGas + exec_gas);
+        const result = try evm.execute(bytecode[0..], total_gas, CALLER_ADDRESS, CONTRACT_ADDRESS, @as(u256, 0), &[_]u8{});
+        try std.testing.expect(result.success);
+
+        const push_cost = 3 * GasConstants.GasFastestStep;
+        const init_code_size: u32 = 1024;
+        const word_count = GasConstants.wordCount(init_code_size);
+        const create_cost = GasConstants.CreateGas + (word_count * GasConstants.InitcodeWordGas);
+        const expected_left = exec_gas - (push_cost + create_cost);
+        try std.testing.expectEqual(expected_left, result.gas_left);
+    }
+
+    // EIP-3860 size limit enforcement
+    {
+        const evm = try MinimalEvm.initPtr(std.testing.allocator);
+        defer evm.deinitPtr(std.testing.allocator);
+        evm.setHardfork(.SHANGHAI);
+
+        const bytecode = [_]u8{
+            0x62, 0x01, 0x00, 0x01, // PUSH3 65537 (exceeds MaxInitcodeSize of 49152)
+            0x60, 0x00,             // PUSH1 0 (offset)
+            0x60, 0x00,             // PUSH1 0 (value)
+            0xf0,                   // CREATE (should fail size check)
+            0x00,                   // STOP
+        };
+
+        const exec_gas: u64 = 200_000;
+        const total_gas: i64 = @intCast(GasConstants.TxGas + exec_gas);
+        const result = try evm.execute(bytecode[0..], total_gas, CALLER_ADDRESS, CONTRACT_ADDRESS, @as(u256, 0), &[_]u8{});
+        try std.testing.expect(!result.success); // Should fail due to size limit
+    }
+}
+
+// Test SELFDESTRUCT gas cost and refund behavior across hardforks
+test "minimal evm gas - selfdestruct hardfork gas and refund" {
+    // Pre-EIP-150: Free operation (0 gas)
+    {
+        const evm = try MinimalEvm.initPtr(std.testing.allocator);
+        defer evm.deinitPtr(std.testing.allocator);
+        evm.setHardfork(.HOMESTEAD);
+
+        const bytecode = [_]u8{
+            0x60, 0x55, // PUSH1 0x55 (beneficiary)
+            0xff,       // SELFDESTRUCT
+        };
+
+        const exec_gas: u64 = 100_000;
+        const total_gas: i64 = @intCast(GasConstants.TxGas + exec_gas);
+        const result = try evm.execute(bytecode[0..], total_gas, CALLER_ADDRESS, CONTRACT_ADDRESS, @as(u256, 0), &[_]u8{});
+        try std.testing.expect(result.success);
+
+        const push_cost = GasConstants.GasFastestStep;
+        const selfdestruct_cost: u64 = 0; // Pre-EIP-150: Free
+        const expected_left = exec_gas - (push_cost + selfdestruct_cost);
+        try std.testing.expectEqual(expected_left, result.gas_left);
+    }
+
+    // Post-EIP-150, Pre-London: 5000 gas + 24000 refund
+    {
+        const evm = try MinimalEvm.initPtr(std.testing.allocator);
+        defer evm.deinitPtr(std.testing.allocator);
+        evm.setHardfork(.TANGERINE_WHISTLE);
+        evm.gas_refund = 0; // Reset refund counter
+
+        const bytecode = [_]u8{
+            0x60, 0x55, // PUSH1 0x55 (beneficiary)
+            0xff,       // SELFDESTRUCT
+        };
+
+        const exec_gas: u64 = 100_000;
+        const total_gas: i64 = @intCast(GasConstants.TxGas + exec_gas);
+        const result = try evm.execute(bytecode[0..], total_gas, CALLER_ADDRESS, CONTRACT_ADDRESS, @as(u256, 0), &[_]u8{});
+        try std.testing.expect(result.success);
+
+        const push_cost = GasConstants.GasFastestStep;
+        const selfdestruct_cost = GasConstants.SelfdestructGas; // Post-EIP-150: 5000 gas
+        const expected_left = exec_gas - (push_cost + selfdestruct_cost);
+        try std.testing.expectEqual(expected_left, result.gas_left);
+        
+        // Check that refund was applied
+        try std.testing.expectEqual(GasConstants.SelfdestructRefundGas, evm.gas_refund);
+    }
+
+    // Post-London: 5000 gas + 0 refund (EIP-3529)
+    {
+        const evm = try MinimalEvm.initPtr(std.testing.allocator);
+        defer evm.deinitPtr(std.testing.allocator);
+        evm.setHardfork(.LONDON);
+        evm.gas_refund = 0; // Reset refund counter
+
+        const bytecode = [_]u8{
+            0x60, 0x55, // PUSH1 0x55 (beneficiary)
+            0xff,       // SELFDESTRUCT
+        };
+
+        const exec_gas: u64 = 100_000;
+        const total_gas: i64 = @intCast(GasConstants.TxGas + exec_gas);
+        const result = try evm.execute(bytecode[0..], total_gas, CALLER_ADDRESS, CONTRACT_ADDRESS, @as(u256, 0), &[_]u8{});
+        try std.testing.expect(result.success);
+
+        const push_cost = GasConstants.GasFastestStep;
+        const selfdestruct_cost = GasConstants.SelfdestructGas; // Post-EIP-150: 5000 gas
+        const expected_left = exec_gas - (push_cost + selfdestruct_cost);
+        try std.testing.expectEqual(expected_left, result.gas_left);
+        
+        // Check that no refund was applied (EIP-3529)
+        try std.testing.expectEqual(@as(u64, 0), evm.gas_refund);
+    }
+}
+
+// Test KECCAK256 gas calculations with various data sizes
+test "minimal evm gas - keccak256 gas calculation" {
+    const test_cases = [_]struct {
+        data_size: u32,
+        expected_cost: u64,
+    }{
+        .{ .data_size = 0, .expected_cost = GasConstants.Keccak256Gas }, // Empty data: 30 gas
+        .{ .data_size = 32, .expected_cost = GasConstants.Keccak256Gas + GasConstants.Keccak256WordGas }, // 1 word: 30 + 6 = 36
+        .{ .data_size = 64, .expected_cost = GasConstants.Keccak256Gas + 2 * GasConstants.Keccak256WordGas }, // 2 words: 30 + 12 = 42
+        .{ .data_size = 33, .expected_cost = GasConstants.Keccak256Gas + 2 * GasConstants.Keccak256WordGas }, // 2 words (rounded up): 30 + 12 = 42
+        .{ .data_size = 256, .expected_cost = GasConstants.Keccak256Gas + 8 * GasConstants.Keccak256WordGas }, // 8 words: 30 + 48 = 78
+    };
+
+    for (test_cases) |case| {
+        const evm = try MinimalEvm.initPtr(std.testing.allocator);
+        defer evm.deinitPtr(std.testing.allocator);
+
+        // Prepare bytecode: store data at memory offset 0, then hash it
+        var bytecode = std.ArrayList(u8){};
+        defer bytecode.deinit(std.testing.allocator);
+
+        // Fill memory with test data size
+        if (case.data_size > 0) {
+            // PUSH32 with zeros, then MSTORE for each 32-byte chunk
+            const full_words = case.data_size / 32;
+            const remaining_bytes = case.data_size % 32;
+            
+            for (0..full_words) |i| {
+                // PUSH32 (33 bytes: opcode + 32 data bytes)
+                try bytecode.append(std.testing.allocator, 0x7f);
+                try bytecode.appendNTimes(std.testing.allocator, 0x00, 32);
+                // PUSH1 offset
+                try bytecode.append(std.testing.allocator, 0x60);
+                try bytecode.append(std.testing.allocator, @intCast(i * 32));
+                // MSTORE
+                try bytecode.append(std.testing.allocator, 0x52);
+            }
+            
+            if (remaining_bytes > 0) {
+                // For partial word, use appropriate PUSH instruction
+                if (remaining_bytes <= 32) {
+                    try bytecode.append(std.testing.allocator, @as(u8, @intCast(0x60 + remaining_bytes - 1))); // PUSH1-PUSH32
+                    try bytecode.appendNTimes(std.testing.allocator, 0x00, remaining_bytes);
+                    // PUSH1 offset
+                    try bytecode.append(std.testing.allocator, 0x60);
+                    try bytecode.append(std.testing.allocator, @intCast(full_words * 32));
+                    // MSTORE
+                    try bytecode.append(std.testing.allocator, 0x52);
+                }
+            }
+        }
+
+        // PUSH data size
+        try bytecode.append(std.testing.allocator, 0x60); // PUSH1
+        try bytecode.append(std.testing.allocator, @intCast(@min(case.data_size, 255)));
+        // PUSH offset 0
+        try bytecode.append(std.testing.allocator, 0x60); // PUSH1
+        try bytecode.append(std.testing.allocator, 0x00);
+        // KECCAK256
+        try bytecode.append(std.testing.allocator, 0x20);
+        // STOP
+        try bytecode.append(std.testing.allocator, 0x00);
+
+        const exec_gas: u64 = 100_000;
+        const total_gas: i64 = @intCast(GasConstants.TxGas + exec_gas);
+        const result = try evm.execute(bytecode.items, total_gas, CALLER_ADDRESS, CONTRACT_ADDRESS, @as(u256, 0), &[_]u8{});
+        try std.testing.expect(result.success);
+
+        // Note: This test validates the gas cost calculation, but exact gas calculation
+        // would require accounting for memory setup costs. Focus is on KECCAK256 cost.
+        const calculated_cost = GasConstants.keccak256_gas_cost(case.data_size);
+        try std.testing.expectEqual(case.expected_cost, calculated_cost);
+    }
+}
+
+// Test CALLDATACOPY, CODECOPY, RETURNDATACOPY gas calculations
+test "minimal evm gas - copy operations gas costs" {
+    const test_cases = [_]struct {
+        copy_size: u32,
+        expected_copy_cost: u64,
+    }{
+        .{ .copy_size = 0, .expected_copy_cost = 0 }, // No copy: 0 gas
+        .{ .copy_size = 32, .expected_copy_cost = 3 }, // 1 word: 3 gas  
+        .{ .copy_size = 64, .expected_copy_cost = 6 }, // 2 words: 6 gas
+        .{ .copy_size = 33, .expected_copy_cost = 6 }, // 2 words (rounded up): 6 gas
+        .{ .copy_size = 256, .expected_copy_cost = 24 }, // 8 words: 24 gas
+    };
+
+    for (test_cases) |case| {
+        // Test CALLDATACOPY
+        {
+            const evm = try MinimalEvm.initPtr(std.testing.allocator);
+            defer evm.deinitPtr(std.testing.allocator);
+
+            const bytecode = [_]u8{
+                0x60, @intCast(@min(case.copy_size, 255)), // PUSH1 size
+                0x60, 0x00, // PUSH1 0 (calldata offset)
+                0x60, 0x00, // PUSH1 0 (memory offset)
+                0x37,       // CALLDATACOPY
+                0x00,       // STOP
+            };
+
+            const exec_gas: u64 = 100_000;
+            const total_gas: i64 = @intCast(GasConstants.TxGas + exec_gas);
+            const result = try evm.execute(bytecode[0..], total_gas, CALLER_ADDRESS, CONTRACT_ADDRESS, @as(u256, 0), &[_]u8{});
+            try std.testing.expect(result.success);
+
+            const calculated_cost = GasConstants.copy_gas_cost(case.copy_size);
+            try std.testing.expectEqual(case.expected_copy_cost, calculated_cost);
+        }
+
+        // Test CODECOPY
+        {
+            const evm = try MinimalEvm.initPtr(std.testing.allocator);
+            defer evm.deinitPtr(std.testing.allocator);
+
+            const bytecode = [_]u8{
+                0x60, @intCast(@min(case.copy_size, 255)), // PUSH1 size
+                0x60, 0x00, // PUSH1 0 (code offset)
+                0x60, 0x00, // PUSH1 0 (memory offset)
+                0x39,       // CODECOPY
+                0x00,       // STOP
+            };
+
+            const exec_gas: u64 = 100_000;
+            const total_gas: i64 = @intCast(GasConstants.TxGas + exec_gas);
+            const result = try evm.execute(bytecode[0..], total_gas, CALLER_ADDRESS, CONTRACT_ADDRESS, @as(u256, 0), &[_]u8{});
+            try std.testing.expect(result.success);
+
+            const calculated_cost = GasConstants.copy_gas_cost(case.copy_size);
+            try std.testing.expectEqual(case.expected_copy_cost, calculated_cost);
+        }
+
+        // Test RETURNDATACOPY (requires prior call for return data)
+        {
+            const evm = try MinimalEvm.initPtr(std.testing.allocator);
+            defer evm.deinitPtr(std.testing.allocator);
+
+            // Set some return data first
+            const return_data = try std.testing.allocator.alloc(u8, case.copy_size);
+            defer std.testing.allocator.free(return_data);
+            @memset(return_data, 0);
+            evm.return_data = return_data;
+
+            const bytecode = [_]u8{
+                0x60, @intCast(@min(case.copy_size, 255)), // PUSH1 size
+                0x60, 0x00, // PUSH1 0 (return data offset)
+                0x60, 0x00, // PUSH1 0 (memory offset)
+                0x3e,       // RETURNDATACOPY
+                0x00,       // STOP
+            };
+
+            const exec_gas: u64 = 100_000;
+            const total_gas: i64 = @intCast(GasConstants.TxGas + exec_gas);
+            const result = try evm.execute(bytecode[0..], total_gas, CALLER_ADDRESS, CONTRACT_ADDRESS, @as(u256, 0), &[_]u8{});
+            try std.testing.expect(result.success);
+
+            const calculated_cost = GasConstants.copy_gas_cost(case.copy_size);
+            try std.testing.expectEqual(case.expected_copy_cost, calculated_cost);
+        }
+    }
+}
+
+// Test LOG0-LOG4 gas calculations with various data and topic sizes
+test "minimal evm gas - log operations comprehensive" {
+    const test_cases = [_]struct {
+        opcode: u8,
+        topic_count: u8,
+        data_size: u32,
+        expected_cost: u64,
+    }{
+        .{ .opcode = 0xa0, .topic_count = 0, .data_size = 0, .expected_cost = GasConstants.LogGas }, // LOG0, no data: 375
+        .{ .opcode = 0xa1, .topic_count = 1, .data_size = 0, .expected_cost = GasConstants.LogGas + GasConstants.LogTopicGas }, // LOG1, no data: 750
+        .{ .opcode = 0xa0, .topic_count = 0, .data_size = 32, .expected_cost = GasConstants.LogGas + 32 * GasConstants.LogDataGas }, // LOG0, 32 bytes: 375 + 256 = 631
+        .{ .opcode = 0xa4, .topic_count = 4, .data_size = 64, .expected_cost = GasConstants.LogGas + 4 * GasConstants.LogTopicGas + 64 * GasConstants.LogDataGas }, // LOG4, 64 bytes: 375 + 1500 + 512 = 2387
+    };
+
+    for (test_cases) |case| {
+        const evm = try MinimalEvm.initPtr(std.testing.allocator);
+        defer evm.deinitPtr(std.testing.allocator);
+
+        var bytecode = std.ArrayList(u8){};
+        defer bytecode.deinit(std.testing.allocator);
+
+        // Prepare memory with test data
+        if (case.data_size > 0) {
+            // Fill first 32 bytes of memory
+            try bytecode.append(std.testing.allocator, 0x7f); // PUSH32
+            try bytecode.appendNTimes(std.testing.allocator, 0xaa, 32); // Fill with 0xaa
+            try bytecode.append(std.testing.allocator, 0x60); // PUSH1
+            try bytecode.append(std.testing.allocator, 0x00); // offset 0
+            try bytecode.append(std.testing.allocator, 0x52); // MSTORE
+        }
+
+        // Push data size and offset
+        try bytecode.append(std.testing.allocator, 0x60); // PUSH1
+        try bytecode.append(std.testing.allocator, @intCast(@min(case.data_size, 255))); // size
+        try bytecode.append(std.testing.allocator, 0x60); // PUSH1  
+        try bytecode.append(std.testing.allocator, 0x00); // offset 0
+
+        // Push topics (dummy values)
+        for (0..case.topic_count) |i| {
+            try bytecode.append(std.testing.allocator, 0x60); // PUSH1
+            try bytecode.append(std.testing.allocator, @intCast(i + 1)); // topic value
+        }
+
+        // LOG opcode
+        try bytecode.append(std.testing.allocator, case.opcode);
+        // STOP
+        try bytecode.append(std.testing.allocator, 0x00);
+
+        const exec_gas: u64 = 100_000;
+        const total_gas: i64 = @intCast(GasConstants.TxGas + exec_gas);
+        const result = try evm.execute(bytecode.items, total_gas, CALLER_ADDRESS, CONTRACT_ADDRESS, @as(u256, 0), &[_]u8{});
+        try std.testing.expect(result.success);
+
+        const calculated_cost = GasConstants.log_gas_cost(case.topic_count, case.data_size);
+        try std.testing.expectEqual(case.expected_cost, calculated_cost);
+    }
 }

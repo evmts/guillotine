@@ -203,6 +203,7 @@ pub const Tracer = struct {
                     value,
                     calldata,
                     @as(*anyopaque, @ptrCast(evm)),
+                    evm.hardfork,
                 ) catch return;
 
                 evm.frames.append(evm.allocator, minimal_frame) catch return;
