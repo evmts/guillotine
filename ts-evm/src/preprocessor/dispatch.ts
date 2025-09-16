@@ -13,6 +13,9 @@ import * as crypto from '../instructions/handlers_crypto';
 import * as storage from '../instructions/handlers_storage';
 import * as log from '../instructions/handlers_log';
 import * as synth from '../instructions/handlers_synthetic';
+import * as meta from '../instructions/handlers_meta';
+import * as system from '../instructions/handlers_system';
+import { analyzeBytecode } from '../bytecode/bytecode_analyze';
 
 export type Item =
   | { kind: 'meta'; gas?: number }
@@ -22,6 +25,7 @@ export type Item =
 export interface Schedule {
   items: Item[];
   entry: { handler: Handler; cursor: number };
+  pcToCursor: Map<number, number>;
 }
 
 function getHandler(opcode: number): Handler | null {
@@ -124,7 +128,7 @@ function getHandler(opcode: number): Handler | null {
     case OPCODES.LOG4: return log.LOG4;
     
     // System
-    case OPCODES.RETURN: return stack.RETURN;
+    case OPCODES.RETURN: return system.RETURN;
     
     default:
       if (isPush(opcode)) return stack.PUSH;
@@ -137,12 +141,30 @@ function getHandler(opcode: number): Handler | null {
 export function compile(bytecode: Uint8Array): Schedule | InvalidOpcodeError {
   const items: Item[] = [];
   const handlerIndices: number[] = [];
+  const pcToCursor = new Map<number, number>();
   
   // Add initial metadata
   items.push({ kind: 'meta', gas: 0 });
-  
+  // Analyze bytecode for basic blocks
+  const analysis = analyzeBytecode(bytecode);
+  const blocks = analysis.basicBlocks;
+
   let pc = 0;
+  const sortedBlocks = blocks.slice().sort((a, b) => a.start - b.start);
+  let blockIdx = 0;
+
   while (pc < bytecode.length) {
+    // If at the start of a basic block, insert FIRST_BLOCK_GAS handler
+    if (blockIdx < sortedBlocks.length && pc === sortedBlocks[blockIdx].start) {
+      const gas = sortedBlocks[blockIdx].gasUsed;
+      const handlerIndex = items.length;
+      handlerIndices.push(handlerIndex);
+      items.push({ kind: 'handler', handler: meta.FIRST_BLOCK_GAS, nextCursor: -1, opcode: undefined, pc: pc });
+      items.push({ kind: 'inline', data: { gas } });
+      // do not advance pc; meta is schedule-only
+      blockIdx++;
+    }
+
     const opcode = bytecode[pc];
 
     // FUSION: PUSH <imm> + (ADD|SUB|MUL|DIV)
@@ -177,7 +199,7 @@ export function compile(bytecode: Uint8Array): Schedule | InvalidOpcodeError {
           nextOpcode === OPCODES.AND ? (synth as any).PUSH_AND_INLINE :
           nextOpcode === OPCODES.OR  ? (synth as any).PUSH_OR_INLINE :
           (synth as any).PUSH_XOR_INLINE;
-        items.push({ kind: 'handler', handler: fusedHandler, nextCursor: -1, opcode: nextOpcode, pc });
+        items.push({ kind: 'handler', handler: fusedHandler, nextCursor: -1, opcode: nextOpcode, pc: nextPc });
         items.push({ kind: 'inline', data: { value, n: pushSize } });
         pc = nextPc + 1;
         continue;
@@ -188,7 +210,7 @@ export function compile(bytecode: Uint8Array): Schedule | InvalidOpcodeError {
         const handlerIndex = items.length;
         handlerIndices.push(handlerIndex);
         const fusedHandler = nextOpcode === OPCODES.JUMP ? synth.PUSH_JUMP_INLINE : synth.PUSH_JUMPI_INLINE;
-        items.push({ kind: 'handler', handler: fusedHandler, nextCursor: -1, opcode: nextOpcode, pc });
+        items.push({ kind: 'handler', handler: fusedHandler, nextCursor: -1, opcode: nextOpcode, pc: nextPc });
         items.push({ kind: 'inline', data: { value, n: pushSize } });
         pc = nextPc + 1;
         continue;
@@ -230,6 +252,11 @@ export function compile(bytecode: Uint8Array): Schedule | InvalidOpcodeError {
     handlerIndices.push(handlerIndex);
     items.push({ kind: 'handler', handler, nextCursor: -1, opcode, pc });
 
+    // Record jumpdest pc to cursor mapping for fast JUMP/JUMPI
+    if (opcode === OPCODES.JUMPDEST) {
+      pcToCursor.set(pc, handlerIndex);
+    }
+
     if (isDup(opcode)) {
       const n = getDupN(opcode);
       items.push({ kind: 'inline', data: { n } });
@@ -240,15 +267,17 @@ export function compile(bytecode: Uint8Array): Schedule | InvalidOpcodeError {
     pc++;
   }
   
-  // Add terminal handler
-  const terminalIndex = items.length;
-  handlerIndices.push(terminalIndex);
-  items.push({
-    kind: 'handler',
-    handler: stack.STOP,
-    nextCursor: -1,
-    opcode: OPCODES.STOP
-  });
+  // Add two terminal STOP handlers for parity with Zig
+  for (let k = 0; k < 2; k++) {
+    const terminalIndex = items.length;
+    handlerIndices.push(terminalIndex);
+    items.push({
+      kind: 'handler',
+      handler: stack.STOP,
+      nextCursor: -1,
+      opcode: OPCODES.STOP
+    });
+  }
   
   // Update nextCursor for each handler
   for (let i = 0; i < handlerIndices.length - 1; i++) {
@@ -269,6 +298,7 @@ export function compile(bytecode: Uint8Array): Schedule | InvalidOpcodeError {
     entry: {
       handler: firstHandler.handler,
       cursor: firstHandlerIdx
-    }
+    },
+    pcToCursor
   };
 }
