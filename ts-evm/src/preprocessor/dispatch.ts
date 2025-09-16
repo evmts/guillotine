@@ -162,7 +162,10 @@ export function compile(bytecode: Uint8Array): Schedule | InvalidOpcodeError {
         nextOpcode === OPCODES.ADD ||
         nextOpcode === OPCODES.SUB ||
         nextOpcode === OPCODES.MUL ||
-        nextOpcode === OPCODES.DIV
+        nextOpcode === OPCODES.DIV ||
+        nextOpcode === OPCODES.AND ||
+        nextOpcode === OPCODES.OR  ||
+        nextOpcode === OPCODES.XOR
       ) {
         const handlerIndex = items.length;
         handlerIndices.push(handlerIndex);
@@ -170,7 +173,21 @@ export function compile(bytecode: Uint8Array): Schedule | InvalidOpcodeError {
           nextOpcode === OPCODES.ADD ? synth.PUSH_ADD_INLINE :
           nextOpcode === OPCODES.SUB ? synth.PUSH_SUB_INLINE :
           nextOpcode === OPCODES.MUL ? synth.PUSH_MUL_INLINE :
-          synth.PUSH_DIV_INLINE;
+          nextOpcode === OPCODES.DIV ? synth.PUSH_DIV_INLINE :
+          nextOpcode === OPCODES.AND ? (synth as any).PUSH_AND_INLINE :
+          nextOpcode === OPCODES.OR  ? (synth as any).PUSH_OR_INLINE :
+          (synth as any).PUSH_XOR_INLINE;
+        items.push({ kind: 'handler', handler: fusedHandler, nextCursor: -1, opcode: nextOpcode, pc });
+        items.push({ kind: 'inline', data: { value, n: pushSize } });
+        pc = nextPc + 1;
+        continue;
+      }
+
+      // FUSION: PUSH <imm> + (JUMP|JUMPI)
+      if (nextOpcode === OPCODES.JUMP || nextOpcode === OPCODES.JUMPI) {
+        const handlerIndex = items.length;
+        handlerIndices.push(handlerIndex);
+        const fusedHandler = nextOpcode === OPCODES.JUMP ? synth.PUSH_JUMP_INLINE : synth.PUSH_JUMPI_INLINE;
         items.push({ kind: 'handler', handler: fusedHandler, nextCursor: -1, opcode: nextOpcode, pc });
         items.push({ kind: 'inline', data: { value, n: pushSize } });
         pc = nextPc + 1;
