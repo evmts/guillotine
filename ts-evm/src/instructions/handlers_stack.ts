@@ -11,6 +11,11 @@ import type { Tail } from '../types_runtime';
 import type { ReturnData } from '../frame/call_result';
 import { ScheduleError } from '../errors';
 
+// STOP (0x00) - Stop execution and return empty data
+export function STOP(f: Frame, cursor: number): Tail {
+  return { data: new Uint8Array() } as ReturnData;
+}
+
 export function POP(f: Frame, cursor: number): Tail {
   const val = stackPop(f.stack);
   if (val instanceof Error) return val;

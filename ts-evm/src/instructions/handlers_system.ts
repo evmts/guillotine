@@ -1,11 +1,15 @@
 import type { Frame } from '../frame/frame';
 import { ErrorUnion } from '../errors';
-import type { DispatchItem } from '../preprocessor/dispatch';
+import type { Tail } from '../types_runtime';
 import type { Word } from '../types';
 import type { Address } from '../types_blockchain';
 import { Database } from '../storage/database';
 import { AccessList } from '../storage/access_list';
 import { Journal } from '../storage/journal';
+import { stackPop } from '../stack/stack';
+import { getSlice } from '../memory/memory';
+import type { ReturnData } from '../frame/call_result';
+import { next } from '../interpreter';
 import * as crypto from 'crypto';
 
 // System operations for calls, creates, and contract management
@@ -48,19 +52,21 @@ export interface CallResult {
 }
 
 // RETURN (0xf3) - Return output from memory
-export function RETURN(frame: FrameWithSystem, _cursor: number): import('../types_runtime').Tail {
-  const offset = frame.stack.pop();
-  if (offset instanceof Error) return offset as any;
-  const size = frame.stack.pop();
-  if (size instanceof Error) return size as any;
-  if (offset > BigInt(Number.MAX_SAFE_INTEGER) || size > BigInt(Number.MAX_SAFE_INTEGER)) {
-    return new (require('../errors').MemoryError)('return parameters too large') as any;
+export function RETURN(frame: Frame, cursor: number): Tail {
+  const offset = stackPop(frame.stack);
+  if (offset instanceof Error) return offset;
+  const size = stackPop(frame.stack);
+  if (size instanceof Error) return size;
+  
+  if ((offset as Word) > BigInt(Number.MAX_SAFE_INTEGER) || 
+      (size as Word) > BigInt(Number.MAX_SAFE_INTEGER)) {
+    return { data: new Uint8Array() } as ReturnData;
   }
-  const data = frame.memory.readSlice(Number(offset), Number(size));
-  if (data instanceof Error) {
-    return new (require('../errors').MemoryError)(data.message) as any;
-  }
-  return { data } as import('../frame/call_result').ReturnData;
+  
+  const data = getSlice(frame.memory, Number(offset as Word), Number(size as Word));
+  if (data instanceof Error) return data;
+  
+  return { data: data as Uint8Array } as ReturnData;
 }
 
 // CALL (0xf1) - Message call to another contract
