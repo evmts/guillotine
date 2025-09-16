@@ -147,12 +147,10 @@ export function PUSH_MSTORE8_INLINE(f: Frame, cursor: number): Tail {
 // --- Static jump fusions ---
 
 function findCursorForPc(f: Frame, pc: number): { next: any; cursor: number } | InvalidJumpError {
-  const items = f.schedule.items;
-  for (let i = 0; i < items.length; i++) {
-    const it = items[i] as any;
-    if (it.kind === 'handler' && typeof it.pc === 'number' && it.pc === pc) {
-      return { next: it.handler, cursor: i };
-    }
+  const target = f.schedule.pcToCursor.get(pc);
+  if (target !== undefined) {
+    const it = f.schedule.items[target] as any;
+    return { next: it.handler, cursor: target };
   }
   return new InvalidJumpError(pc);
 }
