@@ -12,6 +12,9 @@ test {
     // Test snailtracer first
     _ = @import("evm/snailtracer_test.zig");
     
+    // Minimal EVM
+    _ = @import("minimal_evm_gas_accounting_test.zig");
+
     // Differential tests - gradually re-enabling
     // These tests work without hanging:
     _ = @import("differential/stop_opcode_test.zig");

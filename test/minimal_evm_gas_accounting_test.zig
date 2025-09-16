@@ -8,6 +8,7 @@ const Hardfork = evm_mod.Hardfork;
 
 const GasConstants = primitives.GasConstants;
 const Address = primitives.Address;
+const StorageSlotKey = evm_mod.tracer.StorageSlotKey;
 
 const CONTRACT_ADDRESS = Address.from_hex("0x00000000000000000000000000000000000000aa") catch unreachable;
 const CALLER_ADDRESS = Address.from_hex("0x00000000000000000000000000000000000000bb") catch unreachable;
@@ -15,8 +16,8 @@ const TARGET_EXISTING = Address.from_hex("0x000000000000000000000000000000000000
 
 // SSTORE: cold zero->non-zero followed by warm modification (dirty slot path)
 test "minimal evm gas - sstore cold then warm" {
-    var evm = try MinimalEvm.init(std.testing.allocator);
-    defer evm.deinit();
+    const evm = try MinimalEvm.initPtr(std.testing.allocator);
+    defer evm.deinitPtr(std.testing.allocator);
 
     const bytecode = [_]u8{
         0x60, 0x01, // PUSH1 1
@@ -40,19 +41,58 @@ test "minimal evm gas - sstore cold then warm" {
     try std.testing.expectEqual(expected_left, result.gas_left);
 }
 
-// SSTORE: zero->non-zero then clear back to zero, exercising refund cap rules
+// SSTORE: clear non-zero storage to zero, exercising refund cap rules
 test "minimal evm gas - sstore clear applies refund cap" {
-    var evm = try MinimalEvm.init(std.testing.allocator);
-    defer evm.deinit();
+    const evm = try MinimalEvm.initPtr(std.testing.allocator);
+    defer evm.deinitPtr(std.testing.allocator);
+
+    // Pre-populate storage slot 0 with non-zero value so clearing it triggers refund
+    // Set both the current storage value and mark it as the original value
+    const storage_key = StorageSlotKey{ .address = CONTRACT_ADDRESS, .slot = @as(u256, 0) };
+    try evm.storage.put(storage_key, @as(u256, 42));
+    try evm.original_storage.put(storage_key, @as(u256, 42));
 
     const bytecode = [_]u8{
-        0x60, 0x01,
-        0x60, 0x00,
-        0x55,
-        0x60, 0x00,
-        0x60, 0x00,
-        0x55,
-        0x00,
+        0x60, 0x00, // PUSH1 0 (new value)
+        0x60, 0x00, // PUSH1 0 (slot)
+        0x55,       // SSTORE (clear slot 0 to 0)
+        0x00,       // STOP
+    };
+
+    const exec_gas: u64 = 100_000;
+    const total_gas: i64 = @intCast(GasConstants.TxGas + exec_gas);
+    const result = try evm.execute(bytecode[0..], total_gas, CALLER_ADDRESS, CONTRACT_ADDRESS, @as(u256, 0), &[_]u8{});
+    try std.testing.expect(result.success);
+
+    const push_cost: u64 = 2 * GasConstants.GasFastestStep;
+    const clear_cost = GasConstants.ColdSloadCost + GasConstants.SstoreResetGas;
+    const raw_used = push_cost + clear_cost;
+    const refund_cap = raw_used / GasConstants.MaxRefundQuotient;
+    const refund = @min(GasConstants.SstoreRefundGas, refund_cap);
+    const expected_left = exec_gas - raw_used + refund;
+    try std.testing.expectEqual(expected_left, result.gas_left);
+}
+
+// SSTORE: warm noop (storing same value should cost minimum)
+test "minimal evm gas - sstore warm noop" {
+    const evm = try MinimalEvm.initPtr(std.testing.allocator);
+    defer evm.deinitPtr(std.testing.allocator);
+
+    // Pre-set storage slot with value 9
+    const key = StorageSlotKey{ .address = CONTRACT_ADDRESS, .slot = 0 };
+    try evm.storage.put(key, 9);
+    try evm.original_storage.put(key, 9);
+
+    const bytecode = [_]u8{
+        // First SSTORE to warm the slot (same value)
+        0x60, 0x09, // PUSH1 9
+        0x60, 0x00, // PUSH1 0 
+        0x55,       // SSTORE (slot 0 = 9, already 9)
+        // Second SSTORE (warm, same value)
+        0x60, 0x09, // PUSH1 9
+        0x60, 0x00, // PUSH1 0
+        0x55,       // SSTORE (slot 0 = 9, warm noop)
+        0x00,       // STOP
     };
 
     const exec_gas: u64 = 100_000;
@@ -61,30 +101,100 @@ test "minimal evm gas - sstore clear applies refund cap" {
     try std.testing.expect(result.success);
 
     const push_cost: u64 = 4 * GasConstants.GasFastestStep;
-    const set_cost = GasConstants.ColdSloadCost + GasConstants.SstoreSetGas;
-    const clear_cost = GasConstants.SloadGas;
-    const raw_used = push_cost + set_cost + clear_cost;
-    const refund_cap = raw_used / GasConstants.MaxRefundQuotient;
-    const refund = @min(GasConstants.SstoreRefundGas, refund_cap);
-    const expected_left = exec_gas - raw_used + refund;
+    // First SSTORE: cold access + noop cost
+    const first_sstore = GasConstants.ColdSloadCost + GasConstants.SloadGas;
+    // Second SSTORE: warm noop
+    const second_sstore = GasConstants.SloadGas;
+    const expected_left = exec_gas - (push_cost + first_sstore + second_sstore);
     try std.testing.expectEqual(expected_left, result.gas_left);
+    try std.testing.expectEqual(@as(u64, 0), evm.gas_refund);
+}
+
+// SSTORE: warm restore original (dirty slot going back to original value)
+test "minimal evm gas - sstore warm restore original" {
+    const evm = try MinimalEvm.initPtr(std.testing.allocator);
+    defer evm.deinitPtr(std.testing.allocator);
+
+    // Set original value as 3
+    const key = StorageSlotKey{ .address = CONTRACT_ADDRESS, .slot = 0 };
+    try evm.original_storage.put(key, 3);
+    // Current value is 0 (different from original)
+    try evm.storage.put(key, 0);
+
+    const bytecode = [_]u8{
+        // Warm the slot with SLOAD
+        0x60, 0x00, // PUSH1 0
+        0x54,       // SLOAD (warm the slot)
+        0x50,       // POP
+        // Restore to original value
+        0x60, 0x03, // PUSH1 3 (original value)
+        0x60, 0x00, // PUSH1 0
+        0x55,       // SSTORE (slot 0 = 3, restoring original)
+        0x00,       // STOP
+    };
+
+    const exec_gas: u64 = 100_000;
+    const total_gas: i64 = @intCast(GasConstants.TxGas + exec_gas);
+    
+    // Initial refund from previous dirty->clean transition
+    evm.gas_refund = GasConstants.SstoreRefundGas;
+    
+    const result = try evm.execute(bytecode[0..], total_gas, CALLER_ADDRESS, CONTRACT_ADDRESS, @as(u256, 0), &[_]u8{});
+    try std.testing.expect(result.success);
+
+    const push_cost: u64 = 3 * GasConstants.GasFastestStep;
+    const pop_cost: u64 = GasConstants.GasQuickStep;
+    const sload_cost = GasConstants.ColdSloadCost + GasConstants.SloadGas;
+    // SSTORE restore: warm access, restoring original clears refund
+    const sstore_cost = GasConstants.SloadGas;
+    const expected_left = exec_gas - (push_cost + sload_cost + pop_cost + sstore_cost);
+    try std.testing.expectEqual(expected_left, result.gas_left);
+    // Refund should be cleared when restoring to original
+    try std.testing.expectEqual(@as(u64, 0), evm.gas_refund);
+}
+
+// SSTORE: sentry gas check (insufficient gas for zero->non-zero transition)
+test "minimal evm gas - sstore sentry gas check" {
+    const evm = try MinimalEvm.initPtr(std.testing.allocator);
+    defer evm.deinitPtr(std.testing.allocator);
+
+    const bytecode = [_]u8{
+        // Try to store non-zero value with insufficient gas
+        0x60, 0x05, // PUSH1 5
+        0x60, 0x00, // PUSH1 0
+        0x55,       // SSTORE (should fail sentry check)
+        0x00,       // STOP (shouldn't reach)
+    };
+
+    // Gas just below sentry requirement
+    const exec_gas: u64 = GasConstants.SstoreSentryGas - 1;
+    const total_gas: i64 = @intCast(GasConstants.TxGas + exec_gas);
+    const result = try evm.execute(bytecode[0..], total_gas, CALLER_ADDRESS, CONTRACT_ADDRESS, @as(u256, 0), &[_]u8{});
+    
+    // Should fail due to sentry gas check
+    try std.testing.expect(!result.success);
+    
+    // Verify storage wasn't modified
+    const key = StorageSlotKey{ .address = CONTRACT_ADDRESS, .slot = 0 };
+    const value = evm.storage.get(key) orelse 0;
+    try std.testing.expectEqual(@as(u256, 0), value);
 }
 
 // CALL: first call to cold account with no value (should charge cold access surcharge)
 test "minimal evm gas - call cold no value" {
-    var evm = try MinimalEvm.init(std.testing.allocator);
-    defer evm.deinit();
+    const evm = try MinimalEvm.initPtr(std.testing.allocator);
+    defer evm.deinitPtr(std.testing.allocator);
 
     const bytecode = [_]u8{
-        0x60, 0x00,
-        0x60, 0x00,
-        0x60, 0x00,
-        0x60, 0x00,
-        0x60, 0x00,
-        0x60, 0x55,
-        0x61, 0x27, 0x10,
-        0xf1,
-        0x00,
+        0x60, 0x00,        // PUSH1 0
+        0x60, 0x00,        // PUSH1 0
+        0x60, 0x00,        // PUSH1 0
+        0x60, 0x00,        // PUSH1 0
+        0x60, 0x00,        // PUSH1 0
+        0x60, 0x55,        // PUSH1 0x55
+        0x61, 0x27, 0x10,  // PUSH2 10000
+        0xf1,              // CALL
+        0x00,              // STOP
     };
 
     const exec_gas: u64 = 100_000;
@@ -100,30 +210,30 @@ test "minimal evm gas - call cold no value" {
 
 // CALL: warm second invocation with value transfer on warmed account
 test "minimal evm gas - call warm with value transfer" {
-    var evm = try MinimalEvm.init(std.testing.allocator);
-    defer evm.deinit();
+    const evm = try MinimalEvm.initPtr(std.testing.allocator);
+    defer evm.deinitPtr(std.testing.allocator);
 
     try evm.setBalance(CONTRACT_ADDRESS, @as(u256, 10));
     try evm.setBalance(TARGET_EXISTING, @as(u256, 5));
 
     const bytecode = [_]u8{
-        0x60, 0x00,
-        0x60, 0x00,
-        0x60, 0x00,
-        0x60, 0x00,
-        0x60, 0x00,
-        0x60, 0x55,
-        0x61, 0x27, 0x10,
-        0xf1,
-        0x60, 0x00,
-        0x60, 0x00,
-        0x60, 0x00,
-        0x60, 0x00,
-        0x60, 0x01,
-        0x60, 0x55,
-        0x61, 0x27, 0x10,
-        0xf1,
-        0x00,
+        0x60, 0x00,        // PUSH1 0
+        0x60, 0x00,        // PUSH1 0
+        0x60, 0x00,        // PUSH1 0
+        0x60, 0x00,        // PUSH1 0
+        0x60, 0x00,        // PUSH1 0
+        0x60, 0x55,        // PUSH1 0x55
+        0x61, 0x27, 0x10,  // PUSH2 10000
+        0xf1,              // CALL
+        0x60, 0x00,        // PUSH1 0
+        0x60, 0x00,        // PUSH1 0
+        0x60, 0x00,        // PUSH1 0
+        0x60, 0x00,        // PUSH1 0
+        0x60, 0x01,        // PUSH1 1
+        0x60, 0x55,        // PUSH1 0x55
+        0x61, 0x27, 0x10,  // PUSH2 10000
+        0xf1,              // CALL
+        0x00,              // STOP
     };
 
     const exec_gas: u64 = 100_000;
@@ -140,21 +250,21 @@ test "minimal evm gas - call warm with value transfer" {
 
 // CALL: value transfer to entirely new account should include new-account surcharge
 test "minimal evm gas - call new account surcharge" {
-    var evm = try MinimalEvm.init(std.testing.allocator);
-    defer evm.deinit();
+    const evm = try MinimalEvm.initPtr(std.testing.allocator);
+    defer evm.deinitPtr(std.testing.allocator);
 
     try evm.setBalance(CONTRACT_ADDRESS, @as(u256, 10));
 
     const bytecode = [_]u8{
-        0x60, 0x00,
-        0x60, 0x00,
-        0x60, 0x00,
-        0x60, 0x00,
-        0x60, 0x01,
-        0x60, 0x66,
-        0x61, 0x27, 0x10,
-        0xf1,
-        0x00,
+        0x60, 0x00,        // PUSH1 0
+        0x60, 0x00,        // PUSH1 0
+        0x60, 0x00,        // PUSH1 0
+        0x60, 0x00,        // PUSH1 0
+        0x60, 0x01,        // PUSH1 1
+        0x60, 0x66,        // PUSH1 0x66
+        0x61, 0x27, 0x10,  // PUSH2 10000
+        0xf1,              // CALL
+        0x00,              // STOP
     };
 
     const exec_gas: u64 = 100_000;
@@ -170,18 +280,18 @@ test "minimal evm gas - call new account surcharge" {
 
 // DELEGATECALL: cold account access should match call gas schedule with no value
 test "minimal evm gas - delegatecall cold" {
-    var evm = try MinimalEvm.init(std.testing.allocator);
-    defer evm.deinit();
+    const evm = try MinimalEvm.initPtr(std.testing.allocator);
+    defer evm.deinitPtr(std.testing.allocator);
 
     const bytecode = [_]u8{
-        0x60, 0x00,
-        0x60, 0x00,
-        0x60, 0x00,
-        0x60, 0x00,
-        0x60, 0x55,
-        0x61, 0x27, 0x10,
-        0xf4,
-        0x00,
+        0x60, 0x00,        // PUSH1 0
+        0x60, 0x00,        // PUSH1 0
+        0x60, 0x00,        // PUSH1 0
+        0x60, 0x00,        // PUSH1 0
+        0x60, 0x55,        // PUSH1 0x55
+        0x61, 0x27, 0x10,  // PUSH2 10000
+        0xf4,              // DELEGATECALL
+        0x00,              // STOP
     };
 
     const exec_gas: u64 = 100_000;
@@ -197,19 +307,19 @@ test "minimal evm gas - delegatecall cold" {
 
 // CALLCODE: should follow same base/cold costs as CALL without creating new accounts
 test "minimal evm gas - callcode cold" {
-    var evm = try MinimalEvm.init(std.testing.allocator);
-    defer evm.deinit();
+    const evm = try MinimalEvm.initPtr(std.testing.allocator);
+    defer evm.deinitPtr(std.testing.allocator);
 
     const bytecode = [_]u8{
-        0x60, 0x00,
-        0x60, 0x00,
-        0x60, 0x00,
-        0x60, 0x00,
-        0x60, 0x00,
-        0x60, 0x55,
-        0x61, 0x27, 0x10,
-        0xf2,
-        0x00,
+        0x60, 0x00,        // PUSH1 0
+        0x60, 0x00,        // PUSH1 0
+        0x60, 0x00,        // PUSH1 0
+        0x60, 0x00,        // PUSH1 0
+        0x60, 0x00,        // PUSH1 0
+        0x60, 0x55,        // PUSH1 0x55
+        0x61, 0x27, 0x10,  // PUSH2 10000
+        0xf2,              // CALLCODE
+        0x00,              // STOP
     };
 
     const exec_gas: u64 = 100_000;
@@ -225,18 +335,18 @@ test "minimal evm gas - callcode cold" {
 
 // STATICCALL: cold account access with zero value
 test "minimal evm gas - staticcall cold" {
-    var evm = try MinimalEvm.init(std.testing.allocator);
-    defer evm.deinit();
+    const evm = try MinimalEvm.initPtr(std.testing.allocator);
+    defer evm.deinitPtr(std.testing.allocator);
 
     const bytecode = [_]u8{
-        0x60, 0x00,
-        0x60, 0x00,
-        0x60, 0x00,
-        0x60, 0x00,
-        0x60, 0x55,
-        0x61, 0x27, 0x10,
-        0xfa,
-        0x00,
+        0x60, 0x00,        // PUSH1 0
+        0x60, 0x00,        // PUSH1 0
+        0x60, 0x00,        // PUSH1 0
+        0x60, 0x00,        // PUSH1 0
+        0x60, 0x55,        // PUSH1 0x55
+        0x61, 0x27, 0x10,  // PUSH2 10000
+        0xfa,              // STATICCALL
+        0x00,              // STOP
     };
 
     const exec_gas: u64 = 100_000;
@@ -252,15 +362,15 @@ test "minimal evm gas - staticcall cold" {
 
 // CREATE: zero-length init code (charges base create cost)
 test "minimal evm gas - create base cost" {
-    var evm = try MinimalEvm.init(std.testing.allocator);
-    defer evm.deinit();
+    const evm = try MinimalEvm.initPtr(std.testing.allocator);
+    defer evm.deinitPtr(std.testing.allocator);
 
     const bytecode = [_]u8{
-        0x60, 0x00,
-        0x60, 0x00,
-        0x60, 0x00,
-        0xf0,
-        0x00,
+        0x60, 0x00,  // PUSH1 0
+        0x60, 0x00,  // PUSH1 0
+        0x60, 0x00,  // PUSH1 0
+        0xf0,        // CREATE
+        0x00,        // STOP
     };
 
     const exec_gas: u64 = 200_000;
@@ -276,16 +386,16 @@ test "minimal evm gas - create base cost" {
 
 // CREATE2: zero-length init code should charge create cost plus keccak hashing
 test "minimal evm gas - create2 base and hash cost" {
-    var evm = try MinimalEvm.init(std.testing.allocator);
-    defer evm.deinit();
+    const evm = try MinimalEvm.initPtr(std.testing.allocator);
+    defer evm.deinitPtr(std.testing.allocator);
 
     const bytecode = [_]u8{
-        0x60, 0x00,
-        0x60, 0x00,
-        0x60, 0x00,
-        0x60, 0x00,
-        0xf5,
-        0x00,
+        0x60, 0x00,  // PUSH1 0
+        0x60, 0x00,  // PUSH1 0
+        0x60, 0x00,  // PUSH1 0
+        0x60, 0x00,  // PUSH1 0
+        0xf5,        // CREATE2
+        0x00,        // STOP
     };
 
     const exec_gas: u64 = 200_000;
@@ -303,22 +413,22 @@ test "minimal evm gas - create2 base and hash cost" {
 
 // LOG1: log 32 bytes with one topic (includes data cost and memory expansion once)
 test "minimal evm gas - log1 data and topic costs" {
-    var evm = try MinimalEvm.init(std.testing.allocator);
-    defer evm.deinit();
+    const evm = try MinimalEvm.initPtr(std.testing.allocator);
+    defer evm.deinitPtr(std.testing.allocator);
 
     const bytecode = [_]u8{
-        0x7f,
+        0x7f,              // PUSH32
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x60, 0x00,
-        0x52,
-        0x60, 0x00,
-        0x60, 0x20,
-        0x60, 0x00,
-        0xa1,
-        0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 32 bytes of zeros
+        0x60, 0x00,        // PUSH1 0
+        0x52,              // MSTORE
+        0x60, 0x00,        // PUSH1 0
+        0x60, 0x20,        // PUSH1 32
+        0x60, 0x00,        // PUSH1 0
+        0xa1,              // LOG1
+        0x00,              // STOP
     };
 
     const exec_gas: u64 = 100_000;
@@ -337,22 +447,22 @@ test "minimal evm gas - log1 data and topic costs" {
 
 // MCOPY: copy 32 bytes from offset 0 to 32 (covers base + copy gas + memory expansion)
 test "minimal evm gas - mcopy base copy and memory expansion" {
-    var evm = try MinimalEvm.init(std.testing.allocator);
-    defer evm.deinit();
+    const evm = try MinimalEvm.initPtr(std.testing.allocator);
+    defer evm.deinitPtr(std.testing.allocator);
 
     const bytecode = [_]u8{
-        0x7f,
+        0x7f,              // PUSH32
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x60, 0x00,
-        0x52,
-        0x60, 0x20,
-        0x60, 0x00,
-        0x60, 0x20,
-        0x5e,
-        0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 32 bytes of zeros
+        0x60, 0x00,        // PUSH1 0
+        0x52,              // MSTORE
+        0x60, 0x20,        // PUSH1 32
+        0x60, 0x00,        // PUSH1 0
+        0x60, 0x20,        // PUSH1 32
+        0x5e,              // MCOPY
+        0x00,              // STOP
     };
 
     const exec_gas: u64 = 100_000;
@@ -374,15 +484,15 @@ test "minimal evm gas - mcopy base copy and memory expansion" {
 
 // SELFDESTRUCT: cold beneficiary with non-zero balance triggers cold + new account charges
 test "minimal evm gas - selfdestruct cold beneficiary" {
-    var evm = try MinimalEvm.init(std.testing.allocator);
-    defer evm.deinit();
+    const evm = try MinimalEvm.initPtr(std.testing.allocator);
+    defer evm.deinitPtr(std.testing.allocator);
 
     try evm.setBalance(CONTRACT_ADDRESS, @as(u256, 5));
 
     const bytecode = [_]u8{
-        0x60, 0x77,
-        0xff,
-        0x00,
+        0x60, 0x77,  // PUSH1 0x77
+        0xff,        // SELFDESTRUCT
+        0x00,        // STOP
     };
 
     const exec_gas: u64 = 100_000;
@@ -400,26 +510,26 @@ test "minimal evm gas - selfdestruct cold beneficiary" {
 
 // AUTH + AUTHCALL: authorization flow then authenticated call should follow call gas schedule
 test "minimal evm gas - auth and authcall gas accounting" {
-    var evm = try MinimalEvm.init(std.testing.allocator);
-    defer evm.deinit();
+    const evm = try MinimalEvm.initPtr(std.testing.allocator);
+    defer evm.deinitPtr(std.testing.allocator);
 
     const bytecode = [_]u8{
-        0x60, 0x99,
-        0x60, 0x01,
-        0x60, 0x1b,
-        0x60, 0x01,
-        0x60, 0x01,
-        0xf6,
-        0x61, 0x27, 0x10,
-        0x60, 0x44,
-        0x60, 0x00,
-        0x60, 0x00,
-        0x60, 0x00,
-        0x60, 0x00,
-        0x60, 0x00,
-        0x60, 0x01,
-        0xf7,
-        0x00,
+        0x60, 0x99,        // PUSH1 0x99
+        0x60, 0x01,        // PUSH1 1
+        0x60, 0x1b,        // PUSH1 0x1b
+        0x60, 0x01,        // PUSH1 1
+        0x60, 0x01,        // PUSH1 1
+        0xf6,              // AUTH
+        0x61, 0x27, 0x10,  // PUSH2 10000
+        0x60, 0x44,        // PUSH1 0x44
+        0x60, 0x00,        // PUSH1 0
+        0x60, 0x00,        // PUSH1 0
+        0x60, 0x00,        // PUSH1 0
+        0x60, 0x00,        // PUSH1 0
+        0x60, 0x00,        // PUSH1 0
+        0x60, 0x01,        // PUSH1 1
+        0xf7,              // AUTHCALL
+        0x00,              // STOP
     };
 
     const exec_gas: u64 = 100_000;
@@ -436,8 +546,8 @@ test "minimal evm gas - auth and authcall gas accounting" {
 }
 
 test "minimal evm gas - precompiles start warm" {
-    var evm = try MinimalEvm.init(std.testing.allocator);
-    defer evm.deinit();
+    const evm = try MinimalEvm.initPtr(std.testing.allocator);
+    defer evm.deinitPtr(std.testing.allocator);
 
     const bytecode = [_]u8{ 0x00 };
     const exec_gas: u64 = 10_000;
@@ -451,8 +561,8 @@ test "minimal evm gas - precompiles start warm" {
 }
 
 test "minimal evm gas - pre berlin skips warm tracking" {
-    var evm = try MinimalEvm.init(std.testing.allocator);
-    defer evm.deinit();
+    const evm = try MinimalEvm.initPtr(std.testing.allocator);
+    defer evm.deinitPtr(std.testing.allocator);
 
     evm.setHardfork(Hardfork.ISTANBUL);
 
