@@ -221,18 +221,18 @@ func TestAnalyzeBytecode_SimpleContract(t *testing.T) {
 	}
 
 	// Test BasicBlocks are populated and make sense
-	if len(result.BasicBlocks) == 0 {
+	if len(result.Analysis.BasicBlocks) == 0 {
 		t.Error("No basic blocks found, expected at least one")
 	} else {
 		// Verify basic blocks have valid ranges
-		for i, block := range result.BasicBlocks {
+		for i, block := range result.Analysis.BasicBlocks {
 			if block.Start > block.End {
 				t.Errorf("BasicBlock %d: invalid range, start %d > end %d", i, block.Start, block.End)
 			}
 			
 			// Check that basic blocks don't overlap with next block (allow adjacent blocks)
-			if i < len(result.BasicBlocks)-1 {
-				nextBlock := result.BasicBlocks[i+1]
+			if i < len(result.Analysis.BasicBlocks)-1 {
+				nextBlock := result.Analysis.BasicBlocks[i+1]
 				if block.End > nextBlock.Start {
 					t.Errorf("BasicBlocks %d and %d overlap: block %d ends at %d, block %d starts at %d", 
 						i, i+1, i, block.End, i+1, nextBlock.Start)
@@ -247,8 +247,8 @@ func TestAnalyzeBytecode_SimpleContract(t *testing.T) {
 		}
 		
 		// First basic block should start at 0
-		if result.BasicBlocks[0].Start != 0 {
-			t.Errorf("First basic block should start at 0, got %d", result.BasicBlocks[0].Start)
+		if result.Analysis.BasicBlocks[0].Start != 0 {
+			t.Errorf("First basic block should start at 0, got %d", result.Analysis.BasicBlocks[0].Start)
 		}
 		
 		// Check if our loop creates expected basic blocks
@@ -256,8 +256,8 @@ func TestAnalyzeBytecode_SimpleContract(t *testing.T) {
 		// Block 1: 0-10 (before JUMPDEST at PC 13)
 		// Block 2: 11-23 (JUMPDEST to JUMPI) 
 		// Block 3: 24-24 (STOP)
-		if len(result.BasicBlocks) < 2 {
-			t.Errorf("Expected at least 2 basic blocks for this bytecode pattern, got %d", len(result.BasicBlocks))
+		if len(result.Analysis.BasicBlocks) < 2 {
+			t.Errorf("Expected at least 2 basic blocks for this bytecode pattern, got %d", len(result.Analysis.BasicBlocks))
 		}
 	}
 }
@@ -291,8 +291,8 @@ func TestAnalyzeBytecode_EmptyBytecode(t *testing.T) {
 	}
 
 	// Empty bytecode should have no basic blocks
-	if len(result.BasicBlocks) != 0 {
-		t.Errorf("Expected 0 basic blocks for empty bytecode, got %d", len(result.BasicBlocks))
+	if len(result.Analysis.BasicBlocks) != 0 {
+		t.Errorf("Expected 0 basic blocks for empty bytecode, got %d", len(result.Analysis.BasicBlocks))
 	}
 }
 
@@ -372,19 +372,19 @@ func TestAnalyzeBytecode_PUSHVariations(t *testing.T) {
 
 	// Test BasicBlocks for simple sequential code (no jumps)
 	// Should have one basic block covering the entire sequence
-	if len(result.BasicBlocks) == 0 {
+	if len(result.Analysis.BasicBlocks) == 0 {
 		t.Error("Expected at least one basic block")
 	} else {
 		// Should start at 0 and cover the entire bytecode
-		firstBlock := result.BasicBlocks[0]
+		firstBlock := result.Analysis.BasicBlocks[0]
 		if firstBlock.Start != 0 {
 			t.Errorf("First basic block should start at 0, got %d", firstBlock.Start)
 		}
 		
 		// For sequential code with no jumps, we might have one or more blocks
 		// Just ensure they cover the range properly
-		if len(result.BasicBlocks) >= 1 {
-			lastBlock := result.BasicBlocks[len(result.BasicBlocks)-1]
+		if len(result.Analysis.BasicBlocks) >= 1 {
+			lastBlock := result.Analysis.BasicBlocks[len(result.Analysis.BasicBlocks)-1]
 			if lastBlock.End > uint32(len(code)) {
 				t.Errorf("Last basic block end %d exceeds bytecode length %d", 
 					lastBlock.End, len(code))

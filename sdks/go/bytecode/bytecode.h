@@ -5,24 +5,11 @@
 #include <stddef.h>
 
 // ========================
-// Types from bytecode_c.zig
+// Types from evm_c_api.zig
 // ========================
 
 // Opaque bytecode handle
 typedef struct BytecodeHandle BytecodeHandle;
-
-// Bytecode statistics
-typedef struct {
-    size_t total_bytes;
-    uint32_t instruction_count;
-    uint32_t jump_dest_count;
-    uint32_t invalid_opcode_count;
-    uint32_t push_instruction_count;
-    uint32_t jump_instruction_count;
-    uint32_t call_instruction_count;
-    uint32_t create_instruction_count;
-    uint64_t complexity_score;
-} CBytecodeStats;
 
 // Basic block information
 typedef struct {
@@ -85,7 +72,7 @@ typedef struct {
 } CBytecodeAnalysis;
 
 // ========================
-// Functions from bytecode_c.zig
+// Functions from evm_c_api.zig
 // ========================
 
 // Bytecode lifecycle
@@ -94,16 +81,10 @@ void evm_bytecode_destroy(BytecodeHandle* handle);
 
 // Bytecode inspection
 size_t evm_bytecode_get_length(const BytecodeHandle* handle);
-size_t evm_bytecode_get_data(const BytecodeHandle* handle, uint8_t* buffer, size_t buffer_len);
 uint8_t evm_bytecode_get_opcode_at(const BytecodeHandle* handle, size_t position);
-int evm_bytecode_is_jump_dest(const BytecodeHandle* handle, size_t position);
 
-// Runtime vs full bytes
-size_t evm_bytecode_get_full_length(const BytecodeHandle* handle);
+// Runtime bytes
 size_t evm_bytecode_get_runtime_data(const BytecodeHandle* handle, uint8_t* buffer, size_t buffer_len);
-
-// Bytecode validation
-int evm_bytecode_find_jump_dests(const BytecodeHandle* handle, uint32_t* jump_dests, uint32_t max_dests, uint32_t* count_out);
 
 // Bytecode analysis
 int evm_bytecode_analyze(const BytecodeHandle* handle, CBytecodeAnalysis* analysis_out);

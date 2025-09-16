@@ -9,12 +9,12 @@ package bytecode
 */
 import "C"
 import (
-	"fmt"
-	"unsafe"
 	"errors"
+	"fmt"
 	"math/big"
 	"runtime"
 	"sync"
+	"unsafe"
 )
 
 // PrettyPrint formats EVM bytecode with colorized disassembly
@@ -57,12 +57,12 @@ func PrettyPrint(bytecode []byte) (string, error) {
 // ========================
 
 var (
-	ErrNullPointer      = errors.New("null pointer")
-	ErrInvalidBytecode  = errors.New("invalid bytecode")
-	ErrOutOfMemory      = errors.New("out of memory")
-	ErrBytecodeTooLarge = errors.New("bytecode too large")
-	ErrInvalidOpcode    = errors.New("invalid opcode")
-	ErrOutOfBounds      = errors.New("out of bounds")
+	ErrNullPointer       = errors.New("null pointer")
+	ErrInvalidBytecode   = errors.New("invalid bytecode")
+	ErrOutOfMemory       = errors.New("out of memory")
+	ErrBytecodeTooLarge  = errors.New("bytecode too large")
+	ErrInvalidOpcode     = errors.New("invalid opcode")
+	ErrOutOfBounds       = errors.New("out of bounds")
 	ErrBytecodeDestroyed = errors.New("bytecode handle has been destroyed")
 )
 
@@ -84,17 +84,17 @@ type Bytecode struct {
 func New(data []byte) (*Bytecode, error) {
 	// Initialize FFI allocator
 	C.guillotine_init()
-	
+
 	// Pin memory for the bytecode data
 	var pinner runtime.Pinner
 	defer pinner.Unpin()
-	
+
 	var dataPtr *C.uint8_t
 	if len(data) > 0 {
 		pinner.Pin(&data[0])
 		dataPtr = (*C.uint8_t)(unsafe.Pointer(&data[0]))
 	}
-	
+
 	ptr := C.evm_bytecode_create(dataPtr, C.size_t(len(data)))
 	if ptr == nil {
 		errMsg := C.GoString(C.guillotine_get_last_error())
@@ -103,7 +103,7 @@ func New(data []byte) (*Bytecode, error) {
 		}
 		return nil, ErrInvalidBytecode
 	}
-	
+
 	bc := &Bytecode{ptr: ptr}
 	runtime.SetFinalizer(bc, (*Bytecode).finalize)
 	return bc, nil
@@ -118,7 +118,7 @@ func (b *Bytecode) finalize() {
 func (b *Bytecode) Destroy() error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	
+
 	if b.ptr != nil {
 		C.evm_bytecode_destroy(b.ptr)
 		b.ptr = nil
@@ -136,69 +136,34 @@ func (b *Bytecode) Destroy() error {
 func (b *Bytecode) Length() (uint64, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	
+
 	if b.ptr == nil {
 		return 0, ErrBytecodeDestroyed
 	}
-	
+
 	return uint64(C.evm_bytecode_get_length(b.ptr)), nil
-}
-
-// FullLength returns the full bytecode length (includes metadata if present)
-func (b *Bytecode) FullLength() (uint64, error) {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-	
-	if b.ptr == nil {
-		return 0, ErrBytecodeDestroyed
-	}
-	
-	return uint64(C.evm_bytecode_get_full_length(b.ptr)), nil
-}
-
-// Data returns a copy of the full bytecode data
-func (b *Bytecode) Data() ([]byte, error) {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-	
-	if b.ptr == nil {
-		return nil, ErrBytecodeDestroyed
-	}
-	
-	length := C.evm_bytecode_get_full_length(b.ptr)
-	if length == 0 {
-		return []byte{}, nil
-	}
-	
-	buffer := make([]byte, length)
-	copied := C.evm_bytecode_get_data(b.ptr, (*C.uint8_t)(unsafe.Pointer(&buffer[0])), length)
-	if copied != length {
-		return nil, fmt.Errorf("failed to copy bytecode data: expected %d, got %d", length, copied)
-	}
-	
-	return buffer, nil
 }
 
 // RuntimeData returns a copy of the runtime bytecode (excludes metadata)
 func (b *Bytecode) RuntimeData() ([]byte, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	
+
 	if b.ptr == nil {
 		return nil, ErrBytecodeDestroyed
 	}
-	
+
 	length := C.evm_bytecode_get_length(b.ptr)
 	if length == 0 {
 		return []byte{}, nil
 	}
-	
+
 	buffer := make([]byte, length)
 	copied := C.evm_bytecode_get_runtime_data(b.ptr, (*C.uint8_t)(unsafe.Pointer(&buffer[0])), length)
 	if copied != length {
 		return nil, fmt.Errorf("failed to copy runtime data: expected %d, got %d", length, copied)
 	}
-	
+
 	return buffer, nil
 }
 
@@ -210,11 +175,11 @@ func (b *Bytecode) RuntimeData() ([]byte, error) {
 func (b *Bytecode) OpcodeAt(position uint64) (uint8, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	
+
 	if b.ptr == nil {
 		return 0, ErrBytecodeDestroyed
 	}
-	
+
 	opcode := C.evm_bytecode_get_opcode_at(b.ptr, C.size_t(position))
 	if opcode == 0xFF {
 		length, _ := b.Length()
@@ -222,49 +187,8 @@ func (b *Bytecode) OpcodeAt(position uint64) (uint8, error) {
 			return 0, ErrOutOfBounds
 		}
 	}
-	
+
 	return uint8(opcode), nil
-}
-
-// IsJumpDest checks if the position is a valid jump destination
-func (b *Bytecode) IsJumpDest(position uint64) (bool, error) {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-	
-	if b.ptr == nil {
-		return false, ErrBytecodeDestroyed
-	}
-	
-	result := C.evm_bytecode_is_jump_dest(b.ptr, C.size_t(position))
-	return result != 0, nil
-}
-
-// FindJumpDests returns all jump destinations in the bytecode
-func (b *Bytecode) FindJumpDests() ([]uint32, error) {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-	
-	if b.ptr == nil {
-		return nil, ErrBytecodeDestroyed
-	}
-	
-	// First, get the count
-	var count C.uint32_t
-	maxDests := C.uint32_t(65536) // Max reasonable number of jump dests
-	buffer := make([]C.uint32_t, maxDests)
-	
-	result := C.evm_bytecode_find_jump_dests(b.ptr, &buffer[0], maxDests, &count)
-	if result != 0 {
-		return nil, fmt.Errorf("failed to find jump destinations: error code %d", result)
-	}
-	
-	// Convert to Go slice
-	jumpDests := make([]uint32, count)
-	for i := uint32(0); i < uint32(count); i++ {
-		jumpDests[i] = uint32(buffer[i])
-	}
-	
-	return jumpDests, nil
 }
 
 // ========================
@@ -275,20 +199,20 @@ func (b *Bytecode) FindJumpDests() ([]uint32, error) {
 func (b *Bytecode) Analyze() (*Analysis, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	
+
 	if b.ptr == nil {
 		return nil, ErrBytecodeDestroyed
 	}
-	
+
 	var cAnalysis C.CBytecodeAnalysis
 	result := C.evm_bytecode_analyze(b.ptr, &cAnalysis)
 	if result != 0 {
 		return nil, fmt.Errorf("failed to analyze: error code %d", result)
 	}
 	defer C.evm_bytecode_free_analysis(&cAnalysis)
-	
+
 	analysis := &Analysis{}
-	
+
 	// Copy push PCs
 	if cAnalysis.push_pcs_count > 0 {
 		pushPCs := (*[1 << 30]C.uint32_t)(unsafe.Pointer(cAnalysis.push_pcs))[:cAnalysis.push_pcs_count:cAnalysis.push_pcs_count]
@@ -297,7 +221,7 @@ func (b *Bytecode) Analyze() (*Analysis, error) {
 			analysis.PushPCs[i] = uint32(pc)
 		}
 	}
-	
+
 	// Copy jump destinations
 	if cAnalysis.jumpdests_count > 0 {
 		jumpDests := (*[1 << 30]C.uint32_t)(unsafe.Pointer(cAnalysis.jumpdests))[:cAnalysis.jumpdests_count:cAnalysis.jumpdests_count]
@@ -306,7 +230,7 @@ func (b *Bytecode) Analyze() (*Analysis, error) {
 			analysis.JumpDests[i] = uint32(dest)
 		}
 	}
-	
+
 	// Copy basic blocks
 	if cAnalysis.basic_blocks_count > 0 {
 		blocks := (*[1 << 30]C.CBasicBlock)(unsafe.Pointer(cAnalysis.basic_blocks))[:cAnalysis.basic_blocks_count:cAnalysis.basic_blocks_count]
@@ -318,7 +242,7 @@ func (b *Bytecode) Analyze() (*Analysis, error) {
 			}
 		}
 	}
-	
+
 	// Copy jump fusions
 	if cAnalysis.jump_fusions_count > 0 {
 		jumpFusions := (*[1 << 30]C.CJumpFusion)(unsafe.Pointer(cAnalysis.jump_fusions))[:cAnalysis.jump_fusions_count:cAnalysis.jump_fusions_count]
@@ -330,7 +254,7 @@ func (b *Bytecode) Analyze() (*Analysis, error) {
 			}
 		}
 	}
-	
+
 	// Copy advanced fusions
 	if cAnalysis.advanced_fusions_count > 0 {
 		advFusions := (*[1 << 30]C.CAdvancedFusion)(unsafe.Pointer(cAnalysis.advanced_fusions))[:cAnalysis.advanced_fusions_count:cAnalysis.advanced_fusions_count]
@@ -345,7 +269,7 @@ func (b *Bytecode) Analyze() (*Analysis, error) {
 			foldedValue.Or(foldedValue, new(big.Int).SetUint64(uint64(fusion.info.folded_value_high)))
 			foldedValue.Lsh(foldedValue, 64)
 			foldedValue.Or(foldedValue, new(big.Int).SetUint64(uint64(fusion.info.folded_value_low)))
-			
+
 			analysis.AdvancedFusions[i] = AdvancedFusion{
 				PC: uint32(fusion.pc),
 				Info: FusionInfo{
@@ -357,7 +281,7 @@ func (b *Bytecode) Analyze() (*Analysis, error) {
 			}
 		}
 	}
-	
+
 	return analysis, nil
 }
 
