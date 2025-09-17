@@ -347,8 +347,10 @@ pub const MinimalFrame = struct {
         if (self.hardfork.isAtLeast(.ISTANBUL)) {
             // Calculate refund amount based on hardfork
             const sstore_clears_schedule: i64 = if (self.hardfork.isAtLeast(.LONDON)) blk: {
-                // London+: SSTORE_RESET - COLD_SLOAD_COST + ACCESS_LIST_STORAGE_KEY
-                // = 5000 - 2100 + 1900 = 4800
+                // London+: EIP-3529 reduces refund to prevent abuse
+                // Refund = SSTORE_RESET_GAS + ACCESS_LIST_STORAGE_KEY_COST
+                // Where SSTORE_RESET_GAS = 5000 - 2100 = 2900 (warm reset cost)
+                // So refund = 2900 + 1900 = 4800
                 break :blk 4800;
             } else blk: {
                 // Istanbul: REFUND_SSTORE_CLEARS = 15000
