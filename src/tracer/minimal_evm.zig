@@ -460,8 +460,8 @@ pub const MinimalEvm = struct {
                 break :blk @min(self.gas_refund, total_gas_used / 5);
             };
             
-            // Apply the refund without exceeding the gas limit
-            gas_left = @min(execution_gas_limit, gas_left + capped_refund);
+            // Apply the refund
+            gas_left = gas_left + capped_refund;
             self.gas_refund = 0;
         }
 
