@@ -515,12 +515,7 @@ pub fn Dispatch(comptime FrameType: type) type {
 
             // Notify tracer of schedule build start
             if (tracer) |t| {
-                // Handle both error union and direct bytecode types
-                const bc_len = if (@typeInfo(@TypeOf(bytecode)) == .error_union)
-                    (try bytecode).len()
-                else
-                    bytecode.len();
-                t.onScheduleBuildStart(bc_len);
+                t.onScheduleBuildStart(bytecode.*.len());
             }
             
             const ScheduleList = ArrayList(Self.Item, null);
@@ -536,15 +531,9 @@ pub fn Dispatch(comptime FrameType: type) type {
             var unresolved_jumps = ArrayList(UnresolvedJump, null){};
             defer unresolved_jumps.deinit(allocator);
 
-            // Handle both error union and direct bytecode types
-            const actual_bytecode = if (@typeInfo(@TypeOf(bytecode)) == .error_union)
-                try bytecode
-            else
-                bytecode;
-            
-            var iter = actual_bytecode.createIterator();
+            var iter = bytecode.*.createIterator();
 
-            const first_block_gas = calculateFirstBlockGas(actual_bytecode);
+            const first_block_gas = calculateFirstBlockGas(bytecode.*);
 
             if (first_block_gas > 0) {
                 try schedule_items.append(allocator, .{ .first_block_gas = .{ .gas = @intCast(first_block_gas) } });
