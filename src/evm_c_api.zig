@@ -106,7 +106,7 @@ const empty_buffer: [0]u8 = .{};
 pub const EvmConfiguration = enum(u8) {
     mainnet = 0,
     mainnet_with_tracer = 1,
-    test = 2,
+    test_config = 2,
 };
 
 // Instance pooling for performance
@@ -239,7 +239,7 @@ export fn guillotine_evm_create_with_config(block_info_ptr: *const BlockInfoFFI,
     return switch (config) {
         .mainnet => guillotine_evm_create_mainnet(block_info_ptr),
         .mainnet_with_tracer => guillotine_evm_create_tracing(block_info_ptr),
-        .test => guillotine_evm_create_test(block_info_ptr),
+        .test_config => guillotine_evm_create_mainnet(block_info_ptr), // TODO: Implement test configuration
     };
 }
 

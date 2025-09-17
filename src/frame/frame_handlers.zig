@@ -290,7 +290,11 @@ pub fn getTracedOpcodeHandlers(
 
 /// Set the tracer instance for traced execution
 pub fn setTracerInstance(tracer: anytype) void {
-    tracer_instance = @ptrCast(@alignCast(tracer));
+    if (@TypeOf(tracer) == void) {
+        tracer_instance = null;
+    } else {
+        tracer_instance = @ptrCast(@alignCast(tracer));
+    }
 }
 
 /// Clear the tracer instance
