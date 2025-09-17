@@ -1392,6 +1392,10 @@ pub const MinimalFrame = struct {
                     available_gas = std.math.add(u64, available_gas, gas_limit_info.gas_stipend) catch std.math.maxInt(u64);
                 }
 
+                // Deduct the gas we're forwarding from our remaining gas
+                // This prevents double-counting when the callee returns unused gas
+                self.gas_remaining -= @as(i64, @intCast(gas_limit_info.gas_limit));
+
                 // Read input data from memory
                 var input_data: []const u8 = &.{};
                 if (in_length > 0 and in_length <= std.math.maxInt(u32)) {
@@ -1409,16 +1413,17 @@ pub const MinimalFrame = struct {
                 if (isPrecompileAddress(call_address)) {
                     // Note: inner_call handles precompiles internally
                     // Precompiles use the calculated available_gas (which includes stipend if value transfer)
+                    // Gas has already been deducted above, so we just need to add back what's returned
                     const result = try evm.inner_call(call_address, value_arg, input_data, available_gas);
                     
                     // Ensure return_data consistency and proper gas accounting
                     self.return_data = result.output;
                     try self.pushStack(if (result.success) 1 else 0);
                     
-                    // Refund unused gas properly (only what the precompile didn't use)
-                    const gas_to_refund = @as(i64, @intCast(result.gas_left));
+                    // Refund unused gas properly - cap to what we deducted (same as regular calls)
+                    const gas_to_refund = @min(result.gas_left, gas_limit_info.gas_limit);
                     // Saturate at max if overflow
-                    self.gas_remaining = std.math.add(i64, self.gas_remaining, gas_to_refund) catch std.math.maxInt(i64);
+                    self.gas_remaining = std.math.add(i64, self.gas_remaining, @as(i64, @intCast(gas_to_refund))) catch std.math.maxInt(i64);
                     
                     self.pc += 1;
                     return;
@@ -1446,10 +1451,11 @@ pub const MinimalFrame = struct {
                 // Push success status
                 try self.pushStack(if (result.success) 1 else 0);
                 
-                // Proper gas refunding - caller costs already deducted, only account for child gas usage
-                const gas_to_refund = @as(i64, @intCast(result.gas_left));
+                // Proper gas refunding - only refund up to what we deducted from caller
+                // The callee might return gas including the stipend, but we only deducted gas_limit
+                const gas_to_refund = @min(result.gas_left, gas_limit_info.gas_limit);
                 // Saturate at max if overflow
-                self.gas_remaining = std.math.add(i64, self.gas_remaining, gas_to_refund) catch std.math.maxInt(i64);
+                self.gas_remaining = std.math.add(i64, self.gas_remaining, @as(i64, @intCast(gas_to_refund))) catch std.math.maxInt(i64);
 
                 self.pc += 1;
             },
@@ -1492,6 +1498,9 @@ pub const MinimalFrame = struct {
                 if (gas_costs.has_value_transfer) {
                     available_gas = std.math.add(u64, available_gas, gas_limit_info.gas_stipend) catch std.math.maxInt(u64);
                 }
+                
+                // Deduct the gas we're forwarding from our remaining gas
+                self.gas_remaining -= @as(i64, @intCast(gas_limit_info.gas_limit));
 
                 // Read input data from memory
                 var input_data: []const u8 = &.{};
@@ -1528,10 +1537,10 @@ pub const MinimalFrame = struct {
                 // Push success status
                 try self.pushStack(if (result.success) 1 else 0);
 
-                // Update gas
-                const gas_to_refund = @as(i64, @intCast(result.gas_left));
+                // Update gas - only refund up to what we deducted
+                const gas_to_refund = @min(result.gas_left, gas_limit_info.gas_limit);
                 // Saturate at max if overflow
-                self.gas_remaining = std.math.add(i64, self.gas_remaining, gas_to_refund) catch std.math.maxInt(i64);
+                self.gas_remaining = std.math.add(i64, self.gas_remaining, @as(i64, @intCast(gas_to_refund))) catch std.math.maxInt(i64);
 
                 self.pc += 1;
             },
@@ -1595,6 +1604,9 @@ pub const MinimalFrame = struct {
                 // Calculate child gas limit from remaining gas (no stipend for DELEGATECALL)
                 const gas_limit_info = self.calculateCallGasLimit(@as(u64, @intCast(gas)), false);
                 const available_gas = gas_limit_info.gas_limit;
+                
+                // Deduct the gas we're forwarding from our remaining gas
+                self.gas_remaining -= @as(i64, @intCast(gas_limit_info.gas_limit));
 
                 // Read input data from memory
                 var input_data: []const u8 = &.{};
@@ -1631,10 +1643,10 @@ pub const MinimalFrame = struct {
                 // Push success status
                 try self.pushStack(if (result.success) 1 else 0);
 
-                // Update gas
-                const gas_to_refund = @as(i64, @intCast(result.gas_left));
+                // Update gas - only refund up to what we deducted
+                const gas_to_refund = @min(result.gas_left, gas_limit_info.gas_limit);
                 // Saturate at max if overflow
-                self.gas_remaining = std.math.add(i64, self.gas_remaining, gas_to_refund) catch std.math.maxInt(i64);
+                self.gas_remaining = std.math.add(i64, self.gas_remaining, @as(i64, @intCast(gas_to_refund))) catch std.math.maxInt(i64);
 
                 self.pc += 1;
             },
@@ -1696,6 +1708,9 @@ pub const MinimalFrame = struct {
                 // Calculate child gas limit from remaining gas (no stipend for STATICCALL)
                 const gas_limit_info = self.calculateCallGasLimit(@as(u64, @intCast(gas)), false);
                 const available_gas = gas_limit_info.gas_limit;
+                
+                // Deduct the gas we're forwarding from our remaining gas
+                self.gas_remaining -= @as(i64, @intCast(gas_limit_info.gas_limit));
 
                 // Read input data from memory
                 var input_data: []const u8 = &.{};
@@ -1732,10 +1747,10 @@ pub const MinimalFrame = struct {
                 // Push success status
                 try self.pushStack(if (result.success) 1 else 0);
 
-                // Update gas
-                const gas_to_refund = @as(i64, @intCast(result.gas_left));
+                // Update gas - only refund up to what we deducted
+                const gas_to_refund = @min(result.gas_left, gas_limit_info.gas_limit);
                 // Saturate at max if overflow
-                self.gas_remaining = std.math.add(i64, self.gas_remaining, gas_to_refund) catch std.math.maxInt(i64);
+                self.gas_remaining = std.math.add(i64, self.gas_remaining, @as(i64, @intCast(gas_to_refund))) catch std.math.maxInt(i64);
 
                 self.pc += 1;
             },
