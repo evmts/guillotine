@@ -112,8 +112,9 @@ pub const MinimalEvmError = error{
     OutOfBounds,
     // Access list
     AddressPreWarmError,
-    // EIP-3860
-    InitCodeSizeExceeded,
+    // CREATE/CREATE2 code size limits
+    CreateInitCodeSizeLimit,    // EIP-3860: Init code exceeds size limit
+    CreateContractSizeLimit,    // EIP-170: Deployed contract code exceeds size limit
 };
 
 /// Minimal EVM - Orchestrates execution like evm.zig

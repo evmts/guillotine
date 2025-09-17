@@ -9,6 +9,7 @@ const Hardfork = evm_mod.Hardfork;
 const GasConstants = primitives.GasConstants;
 const Address = primitives.Address;
 const StorageSlotKey = evm_mod.tracer.StorageSlotKey;
+const MinimalEvmError = evm_mod.tracer.MinimalEvmError;
 
 const CONTRACT_ADDRESS = Address.from_hex("0x00000000000000000000000000000000000000aa") catch unreachable;
 const CALLER_ADDRESS = Address.from_hex("0x00000000000000000000000000000000000000bb") catch unreachable;
@@ -770,7 +771,7 @@ test "minimal evm gas - create eip3860 size limits" {
         try std.testing.expectEqual(expected_left, result.gas_left);
     }
 
-    // EIP-3860 size limit enforcement
+    // EIP-3860 init code size limit enforcement - CREATE returns error
     {
         const evm = try MinimalEvm.initPtr(std.testing.allocator);
         defer evm.deinitPtr(std.testing.allocator);
@@ -780,14 +781,86 @@ test "minimal evm gas - create eip3860 size limits" {
             0x62, 0x01, 0x00, 0x01, // PUSH3 65537 (exceeds MaxInitcodeSize of 49152)
             0x60, 0x00,             // PUSH1 0 (offset)
             0x60, 0x00,             // PUSH1 0 (value)
-            0xf0,                   // CREATE (should fail size check)
+            0xf0,                   // CREATE (should return CreateInitCodeSizeLimit error)
+            0x00,                   // STOP (never reached)
+        };
+
+        const exec_gas: u64 = 200_000;
+        const total_gas: i64 = @intCast(GasConstants.TxGas + exec_gas);
+        
+        // Execution should return an error for exceeding init code size
+        const result = evm.execute(bytecode[0..], total_gas, CALLER_ADDRESS, CONTRACT_ADDRESS, @as(u256, 0), &[_]u8{}) catch |err| {
+            // Should return CreateInitCodeSizeLimit error when init code size is exceeded
+            try std.testing.expectEqual(MinimalEvmError.CreateInitCodeSizeLimit, err);
+            return;
+        };
+        
+        // Should not reach here - execution should have failed with error
+        try std.testing.expect(false);
+        _ = result;
+    }
+
+    // EIP-3860 init code size limit enforcement - CREATE2 returns error
+    {
+        const evm = try MinimalEvm.initPtr(std.testing.allocator);
+        defer evm.deinitPtr(std.testing.allocator);
+        evm.setHardfork(.SHANGHAI);
+
+        const bytecode = [_]u8{
+            0x60, 0x12,             // PUSH1 0x12 (salt)
+            0x62, 0x01, 0x00, 0x01, // PUSH3 65537 (exceeds MaxInitcodeSize of 49152)
+            0x60, 0x00,             // PUSH1 0 (offset)
+            0x60, 0x00,             // PUSH1 0 (value)
+            0xf5,                   // CREATE2 (should return CreateInitCodeSizeLimit error)
+            0x00,                   // STOP (never reached)
+        };
+
+        const exec_gas: u64 = 200_000;
+        const total_gas: i64 = @intCast(GasConstants.TxGas + exec_gas);
+        
+        // Execution should return an error for exceeding init code size
+        const result = evm.execute(bytecode[0..], total_gas, CALLER_ADDRESS, CONTRACT_ADDRESS, @as(u256, 0), &[_]u8{}) catch |err| {
+            // Should return CreateInitCodeSizeLimit error when init code size is exceeded
+            try std.testing.expectEqual(MinimalEvmError.CreateInitCodeSizeLimit, err);
+            return;
+        };
+        
+        // Should not reach here - execution should have failed with error
+        try std.testing.expect(false);
+        _ = result;
+    }
+
+    // TODO: EIP-170 created code size limit enforcement - CREATE returns error
+    // When CREATE successfully deploys but the resulting contract code exceeds 24576 bytes,
+    // it should fail with CreateContractSizeLimit error.
+    // This requires implementing the contract code size check after init code execution.
+    // Note: The init code would need to generate a large contract by returning more than 24576 bytes.
+    
+    // TODO: EIP-170 created code size limit enforcement - CREATE2 returns error
+    // Similar to CREATE, when CREATE2 deploys code exceeding the size limit,
+    // it should fail with CreateContractSizeLimit error.
+    
+    // Test that pre-Shanghai doesn't enforce EIP-3860 init code limit
+    {
+        const evm = try MinimalEvm.initPtr(std.testing.allocator);
+        defer evm.deinitPtr(std.testing.allocator);
+        evm.setHardfork(.LONDON); // Pre-Shanghai
+
+        const bytecode = [_]u8{
+            0x62, 0x01, 0x00, 0x01, // PUSH3 65537 (exceeds future MaxInitcodeSize but not enforced)
+            0x60, 0x00,             // PUSH1 0 (offset)
+            0x60, 0x00,             // PUSH1 0 (value)
+            0xf0,                   // CREATE (should succeed pre-Shanghai)
             0x00,                   // STOP
         };
 
         const exec_gas: u64 = 200_000;
         const total_gas: i64 = @intCast(GasConstants.TxGas + exec_gas);
         const result = try evm.execute(bytecode[0..], total_gas, CALLER_ADDRESS, CONTRACT_ADDRESS, @as(u256, 0), &[_]u8{});
-        try std.testing.expect(!result.success); // Should fail due to size limit
+        
+        // Pre-Shanghai: Should succeed even with large init code
+        // (Note: In practice this would still fail for other reasons like memory allocation)
+        try std.testing.expect(result.success);
     }
 }
 

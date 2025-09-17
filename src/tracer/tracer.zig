@@ -5,6 +5,7 @@ const pc_tracker_mod = @import("pc_tracker.zig");
 const minimal_evm_mod = @import("minimal_evm.zig");
 pub const MinimalEvm = minimal_evm_mod.MinimalEvm;
 pub const StorageSlotKey = minimal_evm_mod.StorageSlotKey;
+pub const MinimalEvmError = minimal_evm_mod.MinimalEvmError;
 const MinimalFrame = @import("minimal_frame.zig").MinimalFrame;
 const Host = minimal_evm_mod.Host;
 const UnifiedOpcode = @import("../opcodes/opcode.zig").UnifiedOpcode;
