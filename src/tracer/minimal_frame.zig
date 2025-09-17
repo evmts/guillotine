@@ -260,6 +260,7 @@ pub const MinimalFrame = struct {
     /// TODO: replace these with constants once we implement in guillotine
     fn sloadGasCost(self: *Self, key: u256) !u64 {
         if (self.hardfork.isAtLeast(.BERLIN)) {
+            @branchHint(.likely);
             // EIP-2929: Cold/warm access pattern
             // access_storage_slot returns:
             // - COLD_SLOAD_COST (2100) for cold access
@@ -291,6 +292,7 @@ pub const MinimalFrame = struct {
         
         // Berlin+: Use warm costs in calculation, add cold cost if needed
         if (self.hardfork.isAtLeast(.BERLIN)) {
+            @branchHint(.likely);
             if (new_value == current_value) {
                 // No-op: charge warm read cost
                 gas_cost = GasConstants.WarmStorageReadCost;
