@@ -341,9 +341,8 @@ pub const MinimalFrame = struct {
         }
         
         // Handle refunds separately
-        // -> Pre-Istanbul: +15000 for clearing a non-zero value
-        // -> Istanbul: +15000 for clearing a non-zero value (more complex tracking of original-current-new values)
-        // -> London: +4800 for clearing a non-zero value
+        // -> Pre-London: +15000 for clearing a non-zero value
+        // -> London+: +4800 for clearing a non-zero value (EIP-3529)
         if (self.hardfork.isAtLeast(.ISTANBUL)) {
             // Calculate refund amount based on hardfork
             const sstore_clears_schedule: i64 = if (self.hardfork.isAtLeast(.LONDON)) blk: {
@@ -376,6 +375,13 @@ pub const MinimalFrame = struct {
                             }
                         } else if (current_value != 0 and new_value == 0) {
                             // Clearing again - add refund
+                            evm.gas_refund += @intCast(sstore_clears_schedule);
+                        }
+                    } else {
+                        // original_value = 0, handling transitions from empty storage
+                        if (current_value != 0 and new_value == 0) {
+                            // Storage was set from 0 to non-zero in this tx, now clearing back to 0
+                            // This deserves a refund as we're cleaning up storage
                             evm.gas_refund += @intCast(sstore_clears_schedule);
                         }
                     }
