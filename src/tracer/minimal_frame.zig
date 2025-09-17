@@ -256,7 +256,7 @@ pub const MinimalFrame = struct {
         }
     }
 
-    /// Calculate SLOAD gas cost (matching REVM)
+    /// Calculate SLOAD gas cost
     /// TODO: replace these with constants once we implement in guillotine
     fn sloadGasCost(self: *Self, key: u256) !u64 {
         if (self.hardfork.isAtLeast(.BERLIN)) {
@@ -280,7 +280,7 @@ pub const MinimalFrame = struct {
         }
     }
 
-    /// Calculate SSTORE gas cost (matching REVM)
+    /// Calculate SSTORE gas cost
     /// TODO: replace these with constants once we implement in guillotine
     fn sstoreGasCost(self: *Self, key: u256, new_value: u256) !u64 {
         const evm = self.getEvm();
