@@ -6,8 +6,10 @@ const minimal_evm_mod = @import("minimal_evm.zig");
 const GasConstants = primitives.GasConstants;
 const Address = primitives.Address.Address;
 const MinimalEvm = minimal_evm_mod.MinimalEvm;
-const MinimalEvmError = MinimalEvm.Error;
 const Hardfork = @import("../eips_and_hardforks/eips.zig").Hardfork;
+const MinimalEvmError = MinimalEvm.Error;
+const StorageSlotKey = minimal_evm_mod.StorageSlotKey;
+const isPrecompileAddress = minimal_evm_mod.isPrecompileAddress;
 
 pub const MinimalFrame = struct {
     const Self = @This();
@@ -320,6 +322,130 @@ pub const MinimalFrame = struct {
         const topic_cost = @as(u64, topic_count) * GasConstants.LogTopicGas;
         const data_cost = @as(u64, data_size) * GasConstants.LogDataGas;
         return base_cost + topic_cost + data_cost;
+    }
+
+    /// Calculate base gas cost for CALL operations (matching REVM)
+    fn callGasCost(self: *Self, address: Address, value: u256, is_static_context: bool) !struct {
+        total_cost: u64,
+        has_value_transfer: bool,
+    } {
+        const evm = self.getEvm();
+        var gas: u64 = 0;
+        
+        // Correct base call cost by hardfork with proper account access
+        if (self.hardfork.isAtLeast(.BERLIN)) {
+            // EIP-2929: Cold/warm access pattern with account load state
+            const access_cost = try evm.access_address(address);
+            gas += access_cost; // This returns 100 (warm) or 2600 (cold)
+        } else if (self.hardfork.isAtLeast(.TANGERINE_WHISTLE)) {
+            // EIP-150: Fixed higher cost of 700 gas
+            gas += GasConstants.CallCodeCost; // 700 gas
+        } else {
+            // Pre-EIP-150: Original low cost
+            gas += GasConstants.CallGas; // 40 gas
+        }
+        
+        // Value transfer cost (all hardforks)
+        if (value > 0 and !is_static_context) {
+            gas += GasConstants.CallValueTransferGas; // 9000 gas
+            
+            // New account creation cost
+            if (!evm.account_exists(address)) {
+                gas += GasConstants.CallNewAccountGas; // 25000 gas
+            }
+        }
+        
+        return .{
+            .total_cost = gas,
+            .has_value_transfer = value > 0 and !is_static_context,
+        };
+    }
+
+    /// Calculate available gas for call (matching REVM)
+    fn calculateCallGasLimit(self: *Self, requested_gas: u64, has_value: bool) struct {
+        gas_limit: u64,
+        gas_stipend: u64,
+    } {
+        const remaining_gas = @as(u64, @intCast(@max(self.gas_remaining, 0)));
+        
+        if (!self.hardfork.isAtLeast(.TANGERINE_WHISTLE)) {
+            // Pre-EIP-150: No gas limit restriction, no stipend
+            return .{
+                .gas_limit = @min(requested_gas, remaining_gas),
+                .gas_stipend = 0,
+            };
+        }
+        
+        // EIP-150: Can use at most 63/64 of remaining gas (leave 1/64 for caller)
+        // Correct calculation - caller can forward at most 63/64, not remaining - 1/64
+        const max_forwardable = remaining_gas - (remaining_gas / 64);
+        const actual_gas_limit = @min(requested_gas, max_forwardable);
+        
+        // Gas stipend for value transfers (EIP-150+)
+        // Stipend is ADDED to the gas limit, not included in it
+        const stipend = if (has_value and self.hardfork.isAtLeast(.TANGERINE_WHISTLE))
+            GasConstants.CallStipend // 2300 gas
+        else
+            0;
+        
+        return .{
+            .gas_limit = actual_gas_limit,
+            .gas_stipend = stipend, // This is added to gas_limit when forwarding
+        };
+    }
+
+    /// Calculate memory expansion cost for call operations using existing helper
+    fn callMemoryExpansionCost(self: *const Self, in_offset: u256, in_length: u256, out_offset: u256, out_length: u256) !u64 {
+        var max_end: u64 = 0;
+        
+        // Input memory range
+        if (in_length > 0) {
+            const in_end = std.math.add(u256, in_offset, in_length) catch return error.OutOfBounds;
+            const in_end_u32 = std.math.cast(u32, in_end) orelse return error.OutOfBounds;
+            max_end = @max(max_end, in_end_u32);
+        }
+        
+        // Output memory range
+        if (out_length > 0) {
+            const out_end = std.math.add(u256, out_offset, out_length) catch return error.OutOfBounds;
+            const out_end_u32 = std.math.cast(u32, out_end) orelse return error.OutOfBounds;
+            max_end = @max(max_end, out_end_u32);
+        }
+        
+        // Use existing memory expansion helper (src/tracer/minimal_frame.zig:147-156)
+        return self.memoryExpansionCost(max_end);
+    }
+
+    /// Calculate copy gas cost for call data and return data transfers
+    /// Follows REVM's copy gas calculation with correct word alignment
+    fn calculateCopyGasCost(input_size: u256, output_size: u256) !u64 {
+        var total_copy_cost: u64 = 0;
+        
+        // Copy gas for input data
+        if (input_size > 0) {
+            // Round up to word boundary (32 bytes per word)
+            const input_words_with_round = std.math.add(u256, input_size, 31) catch return error.OutOfBounds;
+            const input_words = input_words_with_round / 32;
+            if (input_words > std.math.maxInt(u64)) return error.OutOfBounds;
+            
+            // Use standard 3 gas per word copy cost (GasConstants.COPY)
+            const input_copy_cost = std.math.mul(u64, @as(u64, @intCast(input_words)), 3) catch return error.OutOfBounds;
+            total_copy_cost = std.math.add(u64, total_copy_cost, input_copy_cost) catch return error.OutOfBounds;
+        }
+        
+        // Copy gas for output data
+        if (output_size > 0) {
+            // Round up to word boundary (32 bytes per word)
+            const output_words_with_round = std.math.add(u256, output_size, 31) catch return error.OutOfBounds;
+            const output_words = output_words_with_round / 32;
+            if (output_words > std.math.maxInt(u64)) return error.OutOfBounds;
+            
+            // Use standard 3 gas per word copy cost (GasConstants.COPY)
+            const output_copy_cost = std.math.mul(u64, @as(u64, @intCast(output_words)), 3) catch return error.OutOfBounds;
+            total_copy_cost = std.math.add(u64, total_copy_cost, output_copy_cost) catch return error.OutOfBounds;
+        }
+        
+        return total_copy_cost;
     }
 
     /// ----------------------------------- OPCODES ---------------------------------- ///
@@ -1271,22 +1397,42 @@ pub const MinimalFrame = struct {
                 const out_length = try self.popStack();
 
                 // Convert address
-                var addr_bytes: [20]u8 = undefined;
-                var i: usize = 0;
-                while (i < 20) : (i += 1) {
-                    addr_bytes[19 - i] = @as(u8, @truncate(address_u256 >> @intCast(i * 8)));
-                }
-                const call_address = Address{ .bytes = addr_bytes };
+                const call_address = Address.from_u256(address_u256);
 
-                // Base gas cost
-                var gas_cost: u64 = GasConstants.CallGas;
-                if (value_arg > 0) {
-                    gas_cost += GasConstants.CallValueTransferGas;
+                // Calculate gas costs with full hardfork compliance
+                const gas_costs = try self.callGasCost(call_address, value_arg, false);
+
+                // Calculate memory expansion cost
+                const memory_cost = try self.callMemoryExpansionCost(in_offset, in_length, out_offset, out_length);
+                
+                // First check: base + memory costs only
+                const base_and_memory = std.math.add(u64, gas_costs.total_cost, memory_cost) catch return error.OutOfGas;
+                
+                if (@as(u64, @intCast(@max(self.gas_remaining, 0))) < base_and_memory) {
+                    try self.pushStack(0); // Failure
+                    self.pc += 1;
+                    return;
                 }
-                // EIP-2929: access target account (warm/cold)
-                const access_cost = try evm.access_address(call_address);
-                gas_cost += access_cost;
-                try self.consumeGas(gas_cost);
+
+                // Deduct base and memory costs ONLY (not copy costs yet)
+                try self.consumeGas(base_and_memory);
+                
+                // NOW calculate child gas limit with correct remaining gas (before copy costs)
+                const gas_limit_info = self.calculateCallGasLimit(@as(u64, @intCast(gas)), value_arg > 0);
+                const available_gas = gas_limit_info.gas_limit + gas_limit_info.gas_stipend;
+                
+                // Calculate copy gas cost
+                const copy_cost = try calculateCopyGasCost(in_length, out_length);
+                
+                // Check if we have enough gas for copy costs
+                if (@as(u64, @intCast(@max(self.gas_remaining, 0))) < copy_cost) {
+                    try self.pushStack(0); // Failure
+                    self.pc += 1;
+                    return;
+                }
+                
+                // Now deduct copy costs
+                try self.consumeGas(copy_cost);
 
                 // Read input data from memory
                 var input_data: []const u8 = &.{};
@@ -1301,25 +1447,42 @@ pub const MinimalFrame = struct {
                     input_data = data;
                 }
 
-                // Calculate available gas
-                const gas_limit = if (gas > std.math.maxInt(u64)) std.math.maxInt(u64) else @as(u64, @intCast(gas));
-                const remaining_gas = @as(u64, @intCast(@max(self.gas_remaining, 0)));
-                const max_gas = remaining_gas - (remaining_gas / 64);
-                const available_gas = @min(gas_limit, max_gas);
+                // Check for precompile addresses and handle gas correctly
+                if (isPrecompileAddress(call_address)) {
+                    // Precompiles are always warm, so account access cost is already included in base cost
+                    // No additional cold access surcharge should be applied to precompiles
+                    
+                    // For precompiles, only forward the requested gas amount (not including stipend)
+                    // Stipend is only for regular calls that might run out of gas
+                    const precompile_gas = gas_limit_info.gas_limit; // Exclude stipend for precompiles
+                    
+                    // Note: inner_call handles precompiles internally
+                    // The inner_call method will detect the precompile and handle it correctly
+                    // with precompile-specific pricing
+                    const result = try evm.inner_call(call_address, value_arg, input_data, precompile_gas);
+                    
+                    // Ensure return_data consistency and proper gas accounting
+                    self.return_data = result.output;
+                    try self.pushStack(if (result.success) 1 else 0);
+                    
+                    // Refund unused gas properly (only what the precompile didn't use)
+                    const gas_to_refund = @as(i64, @intCast(result.gas_left));
+                    // Saturate at max if overflow
+                    self.gas_remaining = std.math.add(i64, self.gas_remaining, gas_to_refund) catch std.math.maxInt(i64);
+                    
+                    self.pc += 1;
+                    return;
+                }
 
                 // Perform the inner call
                 const result = try evm.inner_call(call_address, value_arg, input_data, available_gas);
 
-                // Write output to memory
+                // Write output to memory (copy gas already charged upfront)
                 if (out_length > 0 and result.output.len > 0) {
                     const out_off = std.math.cast(u32, out_offset) orelse return error.OutOfBounds;
                     const out_len_u32 = std.math.cast(u32, out_length) orelse return error.OutOfBounds;
                     const result_len_u32 = std.math.cast(u32, result.output.len) orelse return error.OutOfBounds;
                     const copy_len = @min(out_len_u32, result_len_u32);
-
-                    const end_bytes_callcopy: u64 = @as(u64, out_off) + @as(u64, copy_len);
-                    const mem_cost_out = self.memoryExpansionCost(end_bytes_callcopy);
-                    try self.consumeGas(mem_cost_out);
 
                     var k: u32 = 0;
                     while (k < copy_len) : (k += 1) {
@@ -1333,16 +1496,22 @@ pub const MinimalFrame = struct {
                 // Push success status
                 try self.pushStack(if (result.success) 1 else 0);
 
-                // Update gas
-                const gas_used = available_gas - result.gas_left;
-                self.gas_remaining -= @intCast(gas_used);
+                // Warm set is already updated by access_address calls in gas calculation
+                // No need to duplicate the access_address calls here
+                
+                // Proper gas refunding - caller costs already deducted, only account for child gas usage
+                const gas_to_refund = @as(i64, @intCast(result.gas_left));
+                // Saturate at max if overflow
+                self.gas_remaining = std.math.add(i64, self.gas_remaining, gas_to_refund) catch std.math.maxInt(i64);
+                // Note: Caller's fees (total_fees) were already deducted above
+                // Child used gas_used_by_child out of available_gas forwarded to it
+                // No additional deduction needed from caller's remaining gas
 
                 self.pc += 1;
             },
 
             // CALLCODE
             0xf2 => {
-                // Similar to CALL but executes code in current context
                 // Pop all 7 arguments
                 const gas = try self.popStack();
                 const address_u256 = try self.popStack();
@@ -1353,22 +1522,43 @@ pub const MinimalFrame = struct {
                 const out_length = try self.popStack();
 
                 // Convert address
-                var addr_bytes: [20]u8 = undefined;
-                var i: usize = 0;
-                while (i < 20) : (i += 1) {
-                    addr_bytes[19 - i] = @as(u8, @truncate(address_u256 >> @intCast(i * 8)));
-                }
-                const call_address = Address{ .bytes = addr_bytes };
+                const call_address = Address.from_u256(address_u256);
 
-                // Base gas cost
-                var gas_cost: u64 = GasConstants.CallGas;
-                if (value_arg > 0) {
-                    gas_cost += GasConstants.CallValueTransferGas;
+                // CALLCODE-specific: value transfer but code execution in current context
+                // Gas costs are similar to CALL but context handling differs
+                const gas_costs = try self.callGasCost(call_address, value_arg, false);
+
+                // Calculate memory expansion cost
+                const memory_cost = try self.callMemoryExpansionCost(in_offset, in_length, out_offset, out_length);
+                
+                // First check: base + memory costs only
+                const base_and_memory = std.math.add(u64, gas_costs.total_cost, memory_cost) catch return error.OutOfGas;
+                
+                if (@as(u64, @intCast(@max(self.gas_remaining, 0))) < base_and_memory) {
+                    try self.pushStack(0); // Failure
+                    self.pc += 1;
+                    return;
                 }
-                // EIP-2929: access target account (warm/cold)
-                const access_cost = try evm.access_address(call_address);
-                gas_cost += access_cost;
-                try self.consumeGas(gas_cost);
+
+                // Deduct base and memory costs ONLY
+                try self.consumeGas(base_and_memory);
+                
+                // NOW calculate child gas limit with correct remaining gas
+                const gas_limit_info = self.calculateCallGasLimit(@as(u64, @intCast(gas)), value_arg > 0);
+                const available_gas = gas_limit_info.gas_limit + gas_limit_info.gas_stipend;
+                
+                // Calculate copy gas cost
+                const copy_cost = try calculateCopyGasCost(in_length, out_length);
+                
+                // Check if we have enough gas for copy costs
+                if (@as(u64, @intCast(@max(self.gas_remaining, 0))) < copy_cost) {
+                    try self.pushStack(0); // Failure
+                    self.pc += 1;
+                    return;
+                }
+                
+                // Now deduct copy costs
+                try self.consumeGas(copy_cost);
 
                 // Read input data from memory
                 var input_data: []const u8 = &.{};
@@ -1383,25 +1573,15 @@ pub const MinimalFrame = struct {
                     input_data = data;
                 }
 
-                // Calculate available gas
-                const gas_limit = if (gas > std.math.maxInt(u64)) std.math.maxInt(u64) else @as(u64, @intCast(gas));
-                const remaining_gas = @as(u64, @intCast(@max(self.gas_remaining, 0)));
-                const max_gas = remaining_gas - (remaining_gas / 64);
-                const available_gas = @min(gas_limit, max_gas);
-
-                // Perform the inner call
+                // Perform the inner call (CALLCODE executes target's code in current context)
                 const result = try evm.inner_call(call_address, value_arg, input_data, available_gas);
 
-                // Write output to memory
+                // Write output to memory (copy gas already charged upfront)
                 if (out_length > 0 and result.output.len > 0) {
                     const out_off = std.math.cast(u32, out_offset) orelse return error.OutOfBounds;
                     const out_len_u32 = std.math.cast(u32, out_length) orelse return error.OutOfBounds;
                     const result_len_u32 = std.math.cast(u32, result.output.len) orelse return error.OutOfBounds;
                     const copy_len = @min(out_len_u32, result_len_u32);
-
-                    const end_bytes_callcode: u64 = @as(u64, out_off) + @as(u64, copy_len);
-                    const mem_cost_out = self.memoryExpansionCost(end_bytes_callcode);
-                    try self.consumeGas(mem_cost_out);
 
                     var k: u32 = 0;
                     while (k < copy_len) : (k += 1) {
@@ -1416,8 +1596,9 @@ pub const MinimalFrame = struct {
                 try self.pushStack(if (result.success) 1 else 0);
 
                 // Update gas
-                const gas_used = available_gas - result.gas_left;
-                self.gas_remaining -= @intCast(gas_used);
+                const gas_to_refund = @as(i64, @intCast(result.gas_left));
+                // Saturate at max if overflow
+                self.gas_remaining = std.math.add(i64, self.gas_remaining, gas_to_refund) catch std.math.maxInt(i64);
 
                 self.pc += 1;
             },
@@ -1451,7 +1632,7 @@ pub const MinimalFrame = struct {
 
             // DELEGATECALL
             0xf4 => {
-                // Pop all 6 arguments (no value)
+                // Pop all 6 arguments (no value for DELEGATECALL)
                 const gas = try self.popStack();
                 const address_u256 = try self.popStack();
                 const in_offset = try self.popStack();
@@ -1460,15 +1641,42 @@ pub const MinimalFrame = struct {
                 const out_length = try self.popStack();
 
                 // Convert address
-                var addr_bytes: [20]u8 = undefined;
-                var i: usize = 0;
-                while (i < 20) : (i += 1) {
-                    addr_bytes[19 - i] = @as(u8, @truncate(address_u256 >> @intCast(i * 8)));
-                }
-                const call_address = Address{ .bytes = addr_bytes };
+                const call_address = Address.from_u256(address_u256);
 
-                // Base gas cost
-                try self.consumeGas(GasConstants.CallGas);
+                // DELEGATECALL-specific: no value transfer, execution in caller's full context
+                const gas_costs = try self.callGasCost(call_address, 0, true); // No value transfer
+
+                // Calculate memory expansion cost
+                const memory_cost = try self.callMemoryExpansionCost(in_offset, in_length, out_offset, out_length);
+                
+                // First check: base + memory costs only
+                const base_and_memory = std.math.add(u64, gas_costs.total_cost, memory_cost) catch return error.OutOfGas;
+                
+                if (@as(u64, @intCast(@max(self.gas_remaining, 0))) < base_and_memory) {
+                    try self.pushStack(0); // Failure
+                    self.pc += 1;
+                    return;
+                }
+
+                // Deduct base and memory costs ONLY
+                try self.consumeGas(base_and_memory);
+                
+                // NOW calculate child gas limit with correct remaining gas (no value transfer, so no stipend)
+                const gas_limit_info = self.calculateCallGasLimit(@as(u64, @intCast(gas)), false);
+                const available_gas = gas_limit_info.gas_limit;
+                
+                // Calculate copy gas cost
+                const copy_cost = try calculateCopyGasCost(in_length, out_length);
+                
+                // Check if we have enough gas for copy costs
+                if (@as(u64, @intCast(@max(self.gas_remaining, 0))) < copy_cost) {
+                    try self.pushStack(0); // Failure
+                    self.pc += 1;
+                    return;
+                }
+                
+                // Now deduct copy costs
+                try self.consumeGas(copy_cost);
 
                 // Read input data from memory
                 var input_data: []const u8 = &.{};
@@ -1483,25 +1691,15 @@ pub const MinimalFrame = struct {
                     input_data = data;
                 }
 
-                // Calculate available gas
-                const gas_limit = if (gas > std.math.maxInt(u64)) std.math.maxInt(u64) else @as(u64, @intCast(gas));
-                const remaining_gas = @as(u64, @intCast(@max(self.gas_remaining, 0)));
-                const max_gas = remaining_gas - (remaining_gas / 64);
-                const available_gas = @min(gas_limit, max_gas);
-
-                // Perform the inner call
+                // Perform the inner call (DELEGATECALL preserves caller's value and caller)
                 const result = try evm.inner_call(call_address, self.value, input_data, available_gas);
 
-                // Write output to memory
+                // Write output to memory (copy gas already charged upfront)
                 if (out_length > 0 and result.output.len > 0) {
                     const out_off = std.math.cast(u32, out_offset) orelse return error.OutOfBounds;
                     const out_len_u32 = std.math.cast(u32, out_length) orelse return error.OutOfBounds;
                     const result_len_u32 = std.math.cast(u32, result.output.len) orelse return error.OutOfBounds;
                     const copy_len = @min(out_len_u32, result_len_u32);
-
-                    const end_bytes_delegate: u64 = @as(u64, out_off) + @as(u64, copy_len);
-                    const mem_cost_out = self.memoryExpansionCost(end_bytes_delegate);
-                    try self.consumeGas(mem_cost_out);
 
                     var k: u32 = 0;
                     while (k < copy_len) : (k += 1) {
@@ -1516,8 +1714,9 @@ pub const MinimalFrame = struct {
                 try self.pushStack(if (result.success) 1 else 0);
 
                 // Update gas
-                const gas_used = available_gas - result.gas_left;
-                self.gas_remaining -= @intCast(gas_used);
+                const gas_to_refund = @as(i64, @intCast(result.gas_left));
+                // Saturate at max if overflow
+                self.gas_remaining = std.math.add(i64, self.gas_remaining, gas_to_refund) catch std.math.maxInt(i64);
 
                 self.pc += 1;
             },
@@ -1558,18 +1757,42 @@ pub const MinimalFrame = struct {
                 const out_length = try self.popStack();
 
                 // Convert address
-                var addr_bytes: [20]u8 = undefined;
-                var i: usize = 0;
-                while (i < 20) : (i += 1) {
-                    addr_bytes[19 - i] = @as(u8, @truncate(address_u256 >> @intCast(i * 8)));
-                }
-                const call_address = Address{ .bytes = addr_bytes };
+                const call_address = Address.from_u256(address_u256);
 
-                // Base gas cost + EIP-2929 account access
-                var call_gas_cost: u64 = GasConstants.CallGas;
-                const access_cost = try evm.access_address(call_address);
-                call_gas_cost += access_cost;
-                try self.consumeGas(call_gas_cost);
+                // STATICCALL-specific: no value transfer, no state modification allowed
+                const gas_costs = try self.callGasCost(call_address, 0, true); // No value transfer
+
+                // Calculate memory expansion cost
+                const memory_cost = try self.callMemoryExpansionCost(in_offset, in_length, out_offset, out_length);
+                
+                // First check: base + memory costs only
+                const base_and_memory = std.math.add(u64, gas_costs.total_cost, memory_cost) catch return error.OutOfGas;
+                
+                if (@as(u64, @intCast(@max(self.gas_remaining, 0))) < base_and_memory) {
+                    try self.pushStack(0); // Failure
+                    self.pc += 1;
+                    return;
+                }
+
+                // Deduct base and memory costs ONLY
+                try self.consumeGas(base_and_memory);
+                
+                // NOW calculate child gas limit with correct remaining gas (no value transfer, so no stipend)
+                const gas_limit_info = self.calculateCallGasLimit(@as(u64, @intCast(gas)), false);
+                const available_gas = gas_limit_info.gas_limit;
+                
+                // Calculate copy gas cost
+                const copy_cost = try calculateCopyGasCost(in_length, out_length);
+                
+                // Check if we have enough gas for copy costs
+                if (@as(u64, @intCast(@max(self.gas_remaining, 0))) < copy_cost) {
+                    try self.pushStack(0); // Failure
+                    self.pc += 1;
+                    return;
+                }
+                
+                // Now deduct copy costs
+                try self.consumeGas(copy_cost);
 
                 // Read input data from memory
                 var input_data: []const u8 = &.{};
@@ -1584,25 +1807,15 @@ pub const MinimalFrame = struct {
                     input_data = data;
                 }
 
-                // Calculate available gas
-                const gas_limit = if (gas > std.math.maxInt(u64)) std.math.maxInt(u64) else @as(u64, @intCast(gas));
-                const remaining_gas = @as(u64, @intCast(@max(self.gas_remaining, 0)));
-                const max_gas = remaining_gas - (remaining_gas / 64);
-                const available_gas = @min(gas_limit, max_gas);
-
-                // Perform the inner call
+                // Perform the inner call (STATICCALL cannot modify state)
                 const result = try evm.inner_call(call_address, 0, input_data, available_gas);
 
-                // Write output to memory
+                // Write output to memory (copy gas already charged upfront)
                 if (out_length > 0 and result.output.len > 0) {
                     const out_off = std.math.cast(u32, out_offset) orelse return error.OutOfBounds;
                     const out_len_u32 = std.math.cast(u32, out_length) orelse return error.OutOfBounds;
                     const result_len_u32 = std.math.cast(u32, result.output.len) orelse return error.OutOfBounds;
                     const copy_len = @min(out_len_u32, result_len_u32);
-
-                    const end_bytes_static: u64 = @as(u64, out_off) + @as(u64, copy_len);
-                    const mem_cost_out = self.memoryExpansionCost(end_bytes_static);
-                    try self.consumeGas(mem_cost_out);
 
                     var k: u32 = 0;
                     while (k < copy_len) : (k += 1) {
@@ -1617,8 +1830,9 @@ pub const MinimalFrame = struct {
                 try self.pushStack(if (result.success) 1 else 0);
 
                 // Update gas
-                const gas_used = available_gas - result.gas_left;
-                self.gas_remaining -= @intCast(gas_used);
+                const gas_to_refund = @as(i64, @intCast(result.gas_left));
+                // Saturate at max if overflow
+                self.gas_remaining = std.math.add(i64, self.gas_remaining, gas_to_refund) catch std.math.maxInt(i64);
 
                 self.pc += 1;
             },
@@ -1833,14 +2047,14 @@ pub const MinimalFrame = struct {
             // AUTHCALL (EIP-3074)
             0xf7 => {
                 // AUTHCALL opcode from EIP-3074
-                // Stack: [gas, to, value, in_offset, in_size, out_offset, out_size, auth] → [success]
+                // Stack: [gas, to, value, in_offset, in_length, out_offset, out_length, auth] → [success]
                 try self.consumeGas(GasConstants.WarmStorageReadCost);
 
                 // Pop 8 values from stack (in reverse order, top first)
                 const auth_flag = try self.popStack();
-                const out_size = try self.popStack();
+                const out_length = try self.popStack();
                 const out_offset = try self.popStack();
-                const in_size = try self.popStack();
+                const in_length = try self.popStack();
                 const in_offset = try self.popStack();
                 const value = try self.popStack();
                 const to_addr = try self.popStack();
@@ -1863,8 +2077,8 @@ pub const MinimalFrame = struct {
                 }
 
                 // Calculate memory expansion cost for input
-                if (in_size > 0) {
-                    const in_end = std.math.add(u256, in_offset, in_size) catch {
+                if (in_length > 0) {
+                    const in_end = std.math.add(u256, in_offset, in_length) catch {
                         try self.pushStack(0);
                         self.pc += 1;
                         return;
@@ -1880,8 +2094,8 @@ pub const MinimalFrame = struct {
                 }
 
                 // Calculate memory expansion cost for output
-                if (out_size > 0) {
-                    const out_end = std.math.add(u256, out_offset, out_size) catch {
+                if (out_length > 0) {
+                    const out_end = std.math.add(u256, out_offset, out_length) catch {
                         try self.pushStack(0);
                         self.pc += 1;
                         return;

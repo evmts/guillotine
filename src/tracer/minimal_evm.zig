@@ -553,6 +553,14 @@ pub const MinimalEvm = struct {
         self.gas_refund +%= amount;
     }
 
+    /// Check if an account exists (non-empty per EIP-158)
+    /// TODO: include nonce
+    pub fn account_exists(self: *Self, address: Address) bool {
+        const balance = self.get_balance(address);
+        const code = self.get_code(address);
+        return balance > 0 or code.len > 0;
+    }
+
     /// Check if an address is a precompile
     /// TODO: implement this
     pub fn is_precompile(self: *const Self, address: Address) bool {
