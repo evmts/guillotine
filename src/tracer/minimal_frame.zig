@@ -164,6 +164,16 @@ pub const MinimalFrame = struct {
         return self.stack.items[self.stack.items.len - 1 - index];
     }
 
+    inline fn wordCount(bytes: u64) u64 {
+        return (bytes + 31) / 32;
+    }
+    
+    /// Calculate word-aligned memory size for EVM compliance
+    inline fn wordAlignedSize(bytes: u64) u32 {
+        const words = wordCount(bytes);
+        return @intCast(words * 32);
+    }
+
     /// Read byte from memory
     pub fn readMemory(self: *Self, offset: u32) u8 {
         return self.memory.get(offset) orelse 0;
@@ -172,13 +182,10 @@ pub const MinimalFrame = struct {
     /// Write byte to memory
     pub fn writeMemory(self: *Self, offset: u32, value: u8) MinimalEvmError!void {
         try self.memory.put(offset, value);
-        if (offset >= self.memory_size) {
-            self.memory_size = offset + 1;
-        }
-    }
-
-    inline fn wordCount(bytes: u64) u64 {
-        return (bytes + 31) / 32;
+        // EVM memory expands to word-aligned (32-byte) boundaries
+        const end_offset = std.math.cast(u64, offset + 1) orelse return error.OutOfBounds;
+        const word_aligned_size = wordAlignedSize(end_offset);
+        if (word_aligned_size > self.memory_size) self.memory_size = word_aligned_size;
     }
 
     /// Get init code size limit based on hardfork (EIP-3860)
@@ -671,7 +678,8 @@ pub const MinimalFrame = struct {
                     const end_addr = @as(u64, offset_u32) + @as(u64, size_u32);
                     const mem_cost = self.memoryExpansionCost(end_addr);
                     try self.consumeGas(mem_cost);
-                    if (end_addr > self.memory_size) self.memory_size = @intCast(end_addr);
+                    const aligned_size = wordAlignedSize(end_addr);
+                    if (aligned_size > self.memory_size) self.memory_size = aligned_size;
 
                     // Read data from memory
                     var data = try self.allocator.alloc(u8, size_u32);
@@ -1001,7 +1009,8 @@ pub const MinimalFrame = struct {
                 const end_bytes: u64 = @as(u64, off) + 32;
                 const mem_cost = self.memoryExpansionCost(end_bytes);
                 try self.consumeGas(GasConstants.GasFastestStep + mem_cost);
-                if (end_bytes > self.memory_size) self.memory_size = @intCast(end_bytes);
+                const aligned_size = wordAlignedSize(end_bytes);
+                if (aligned_size > self.memory_size) self.memory_size = aligned_size;
 
                 // Read word from memory
                 var result: u256 = 0;
@@ -1123,10 +1132,8 @@ pub const MinimalFrame = struct {
             // MSIZE
             0x59 => {
                 try self.consumeGas(GasConstants.GasQuickStep);
-                // Memory size is tracked in memory_size field (word-aligned)
-                const size_in_words = (self.memory_size + 31) / 32;
-                const size_in_bytes = size_in_words * 32;
-                try self.pushStack(size_in_bytes);
+                // Memory size is already tracked as word-aligned in memory_size field
+                try self.pushStack(self.memory_size);
                 self.pc += 1;
             },
 
@@ -1447,7 +1454,8 @@ pub const MinimalFrame = struct {
                     const end_bytes = @as(u64, off) + @as(u64, len);
                     const mem_cost = self.memoryExpansionCost(end_bytes);
                     try self.consumeGas(mem_cost);
-                    if (end_bytes > self.memory_size) self.memory_size = @intCast(end_bytes);
+                    const aligned_size = wordAlignedSize(end_bytes);
+                    if (aligned_size > self.memory_size) self.memory_size = aligned_size;
 
                     self.output = try self.allocator.alloc(u8, len);
                     var idx: u32 = 0;
@@ -1700,7 +1708,8 @@ pub const MinimalFrame = struct {
                     const end_bytes: u64 = @as(u64, off) + @as(u64, len);
                     const mem_cost = self.memoryExpansionCost(end_bytes);
                     try self.consumeGas(mem_cost);
-                    if (end_bytes > self.memory_size) self.memory_size = @intCast(end_bytes);
+                    const aligned_size = wordAlignedSize(end_bytes);
+                    if (aligned_size > self.memory_size) self.memory_size = aligned_size;
 
                     self.output = try self.allocator.alloc(u8, len);
                     var idx: u32 = 0;
