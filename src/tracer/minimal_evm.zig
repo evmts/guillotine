@@ -446,15 +446,18 @@ pub const MinimalEvm = struct {
         var gas_left = @as(u64, @intCast(@max(frame.gas_remaining, 0)));
         // Apply gas refund if the call was successful
         if (!frame.reverted) {
-            // We only want to refund if the call actually used some gas
-            const gas_used = if (execution_gas_limit > gas_left) execution_gas_limit - gas_left else 0;
+            // Calculate total gas used including intrinsic gas (TxGas)
+            // The refund cap should be based on total gas used, not just execution gas
+            const execution_gas_used = if (execution_gas_limit > gas_left) execution_gas_limit - gas_left else 0;
+            const total_gas_used = GasConstants.TxGas + execution_gas_used;
+            
             // Pre-London: refund up to half of gas used; post-London: refund up to one fifth of gas used
             const capped_refund = if (self.hardfork.isBefore(.LONDON)) blk: {
                 @branchHint(.cold);
-                break :blk @min(self.gas_refund, gas_used / 2);
+                break :blk @min(self.gas_refund, total_gas_used / 2);
             } else blk: {
                 @branchHint(.likely);
-                break :blk @min(self.gas_refund, gas_used / 5);
+                break :blk @min(self.gas_refund, total_gas_used / 5);
             };
             
             // Apply the refund without exceeding the gas limit
