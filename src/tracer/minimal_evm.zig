@@ -96,7 +96,7 @@ pub const MinimalEvm = struct {
     warm_storage_slots: std.array_hash_map.ArrayHashMap(StorageSlotKey, void, StorageSlotKeyContext, false),
 
     // Original storage snapshots for SSTORE metering
-    original_storage: std.AutoHashMap(StorageSlotKey, u256),
+    original_storage: std.array_hash_map.ArrayHashMap(StorageSlotKey, u256, StorageSlotKeyContext, false),
 
     // Transaction-scoped gas refund counter
     gas_refund: u64,
@@ -125,6 +125,7 @@ pub const MinimalEvm = struct {
         errdefer arena.deinit();
         const arena_allocator = arena.allocator();
         const storage_map = std.AutoHashMap(StorageSlotKey, u256).init(arena_allocator);
+        const original_storage_map = std.array_hash_map.ArrayHashMap(StorageSlotKey, u256, StorageSlotKeyContext, false).init(arena_allocator);
         const balances_map = std.AutoHashMap(Address, u256).init(arena_allocator);
         const code_map = std.AutoHashMap(Address, []const u8).init(arena_allocator);
         const warm_addresses = std.array_hash_map.ArrayHashMap(Address, void, AddressContext, false).init(arena_allocator);
@@ -132,7 +133,6 @@ pub const MinimalEvm = struct {
         var frames_list = std.ArrayList(*MinimalFrame){};
         try frames_list.ensureTotalCapacity(arena_allocator, 16);
 
-        const original_storage_map = std.AutoHashMap(StorageSlotKey, u256).init(arena_allocator);
 
         return Self{
             .frames = frames_list,
@@ -174,12 +174,11 @@ pub const MinimalEvm = struct {
 
         self.frames = std.ArrayList(*MinimalFrame){}; // Unmanaged ArrayList, default init
         self.storage = std.AutoHashMap(StorageSlotKey, u256).init(arena_allocator);
-        self.original_storage = std.AutoHashMap(StorageSlotKey, u256).init(arena_allocator);
+        self.original_storage = std.array_hash_map.ArrayHashMap(StorageSlotKey, u256, StorageSlotKeyContext, false).init(arena_allocator);
         self.balances = std.AutoHashMap(Address, u256).init(arena_allocator);
         self.code = std.AutoHashMap(Address, []const u8).init(arena_allocator);
         self.warm_addresses = std.array_hash_map.ArrayHashMap(Address, void, AddressContext, false).init(arena_allocator);
         self.warm_storage_slots = std.array_hash_map.ArrayHashMap(StorageSlotKey, void, StorageSlotKeyContext, false).init(arena_allocator);
-        self.original_storage = std.AutoHashMap(StorageSlotKey, u256).init(arena_allocator);
         self.gas_refund = 0;
         self.hardfork = Hardfork.DEFAULT;
         self.chain_id = 1;
