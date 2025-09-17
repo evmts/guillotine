@@ -549,7 +549,7 @@ pub fn Frame(comptime config: FrameConfig) type {
                         self.getTracer().debug("Frame: Cache miss, creating new dispatch", .{});
                     }
                     // Cache miss - create new dispatch
-                    const bytecode = (if (comptime frame_config.TracerType != null) 
+                    const bytecode = (if (comptime frame_config.TracerType != null)
                         Bytecode.initWithTracer(allocator, bytecode_raw, @as(?@TypeOf(self.getTracer()), self.getTracer()))
                     else
                         Bytecode.init(allocator, bytecode_raw))
