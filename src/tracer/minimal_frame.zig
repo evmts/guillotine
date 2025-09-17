@@ -779,7 +779,7 @@ pub const MinimalFrame = struct {
                     const offset_u32 = std.math.cast(u32, offset) orelse return error.OutOfBounds;
 
                     // Charge memory expansion to cover [offset, offset+size)
-                    const end_addr = @as(u64, offset_u32) + @as(u64, size_u32);
+                    const end_addr = std.math.add(u64, @as(u64, offset_u32), @as(u64, size_u32)) catch return error.OutOfBounds;
                     const mem_cost = self.memoryExpansionCost(end_addr);
                     try self.consumeGas(mem_cost);
                     const aligned_size = wordAlignedSize(end_addr);
@@ -892,7 +892,7 @@ pub const MinimalFrame = struct {
                 const len = std.math.cast(u32, length) orelse return error.OutOfBounds;
 
                 // Charge base + memory expansion + copy per word
-                const end_bytes_copy: u64 = @as(u64, dest_off) + @as(u64, len);
+                const end_bytes_copy = std.math.add(u64, @as(u64, dest_off), @as(u64, len)) catch return error.OutOfBounds;
                 const mem_cost4 = self.memoryExpansionCost(end_bytes_copy);
                 const copy_cost = copyGasCost(len);
                 try self.consumeGas(GasConstants.GasFastestStep + mem_cost4 + copy_cost);
@@ -924,7 +924,7 @@ pub const MinimalFrame = struct {
                 const src_off = std.math.cast(u32, offset) orelse return error.OutOfBounds;
                 const len = std.math.cast(u32, length) orelse return error.OutOfBounds;
 
-                const end_bytes_code: u64 = @as(u64, dest_off) + @as(u64, len);
+                const end_bytes_code = std.math.add(u64, @as(u64, dest_off), @as(u64, len)) catch return error.OutOfBounds;
                 const mem_cost5 = self.memoryExpansionCost(end_bytes_code);
                 const copy_cost = copyGasCost(len);
                 try self.consumeGas(GasConstants.GasFastestStep + mem_cost5 + copy_cost);
@@ -970,11 +970,10 @@ pub const MinimalFrame = struct {
                 const len = std.math.cast(u32, length) orelse return error.OutOfBounds;
 
                 // Check bounds
-                if (src_off + len > self.return_data.len) {
-                    return error.OutOfBounds;
-                }
+                const src_end = std.math.add(u32, src_off, len) catch return error.OutOfBounds;
+                if (src_end > self.return_data.len) return error.OutOfBounds;
 
-                const end_bytes_ret: u64 = @as(u64, dest_off) + @as(u64, len);
+                const end_bytes_ret = std.math.add(u64, @as(u64, dest_off), @as(u64, len)) catch return error.OutOfBounds;
                 const mem_cost6 = self.memoryExpansionCost(end_bytes_ret);
                 const copy_cost = copyGasCost(len);
                 try self.consumeGas(GasConstants.GasFastestStep + mem_cost6 + copy_cost);
@@ -1110,7 +1109,7 @@ pub const MinimalFrame = struct {
                 const off = std.math.cast(u32, offset) orelse return error.OutOfBounds;
 
                 // Charge base + memory expansion for reading 32 bytes
-                const end_bytes: u64 = @as(u64, off) + 32;
+                const end_bytes = std.math.add(u64, @as(u64, off), 32) catch return error.OutOfBounds;
                 const mem_cost = self.memoryExpansionCost(end_bytes);
                 try self.consumeGas(GasConstants.GasFastestStep + mem_cost);
                 const aligned_size = wordAlignedSize(end_bytes);
@@ -1135,7 +1134,7 @@ pub const MinimalFrame = struct {
                 const off = std.math.cast(u32, offset) orelse return error.OutOfBounds;
 
                 // Charge base + memory expansion for writing 32 bytes
-                const end_bytes2: u64 = @as(u64, off) + 32;
+                const end_bytes2 = std.math.add(u64, @as(u64, off), 32) catch return error.OutOfBounds;
                 const mem_cost2 = self.memoryExpansionCost(end_bytes2);
                 try self.consumeGas(GasConstants.GasFastestStep + mem_cost2);
 
@@ -1154,7 +1153,7 @@ pub const MinimalFrame = struct {
                 const value = try self.popStack();
 
                 const off = std.math.cast(u32, offset) orelse return error.OutOfBounds;
-                const end_bytes3: u64 = @as(u64, off) + 1;
+                const end_bytes3 = std.math.add(u64, @as(u64, off), 1) catch return error.OutOfBounds;
                 const mem_cost3 = self.memoryExpansionCost(end_bytes3);
                 try self.consumeGas(GasConstants.GasFastestStep + mem_cost3);
                 const byte_value = @as(u8, @truncate(value));
@@ -1242,7 +1241,7 @@ pub const MinimalFrame = struct {
             // MSIZE
             0x59 => {
                 try self.consumeGas(GasConstants.GasQuickStep);
-                // Memory size is already tracked as word-aligned in memory_size field
+                // Note: Memory size is already tracked as word-aligned in memory_size
                 try self.pushStack(self.memory_size);
                 self.pc += 1;
             },
@@ -1613,7 +1612,7 @@ pub const MinimalFrame = struct {
                     const len = std.math.cast(u32, length) orelse return error.OutOfBounds;
 
                     // Charge memory expansion for the return slice
-                    const end_bytes = @as(u64, off) + @as(u64, len);
+                    const end_bytes = std.math.add(u64, @as(u64, off), @as(u64, len)) catch return error.OutOfBounds;
                     const mem_cost = self.memoryExpansionCost(end_bytes);
                     try self.consumeGas(mem_cost);
                     const aligned_size = wordAlignedSize(end_bytes);
@@ -1859,8 +1858,8 @@ pub const MinimalFrame = struct {
                 const len_u32 = std.math.cast(u32, len) orelse return error.OutOfBounds;
 
                 // Gas: memory expansion + copy gas (CopyGas per 32-byte word)
-                const end_src: u64 = @as(u64, src_u32) + @as(u64, len_u32);
-                const end_dest: u64 = @as(u64, dest_u32) + @as(u64, len_u32);
+                const end_src = std.math.add(u64, @as(u64, src_u32), @as(u64, len_u32)) catch return error.OutOfBounds;
+                const end_dest = std.math.add(u64, @as(u64, dest_u32), @as(u64, len_u32)) catch return error.OutOfBounds;
                 const mem_cost_src = self.memoryExpansionCost(end_src);
                 const mem_cost_dest = self.memoryExpansionCost(end_dest);
                 const mem_cost = @max(mem_cost_src, mem_cost_dest);
@@ -1896,7 +1895,7 @@ pub const MinimalFrame = struct {
                     const len = std.math.cast(u32, length) orelse return error.OutOfBounds;
 
                     // Charge memory expansion for the revert slice
-                    const end_bytes: u64 = @as(u64, off) + @as(u64, len);
+                    const end_bytes = std.math.add(u64, @as(u64, off), @as(u64, len)) catch return error.OutOfBounds;
                     const mem_cost = self.memoryExpansionCost(end_bytes);
                     try self.consumeGas(mem_cost);
                     const aligned_size = wordAlignedSize(end_bytes);
