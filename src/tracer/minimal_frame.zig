@@ -273,144 +273,170 @@ pub const MinimalFrame = struct {
         }
     }
 
-    /// Calculate SSTORE gas cost
-    /// TODO: replace these with constants once we implement in guillotine
+    /// Calculate SSTORE gas cost and handle refunds
+    /// TODO: replace hardcoded values with constants once we implement in guillotine
+    /// 
+    /// Roughly, cost and refund logic follow these guidelines:
+    /// - Pre-Istanbul: Simple set/reset with basic clearing refund
+    /// - Istanbul+: Complex EIP-2200 refund logic with multiple state transitions
+    /// - Berlin+: Cold/warm access patterns (EIP-2929)
+    /// - London+: Reduced refunds (EIP-3529)
     fn sstoreGasCost(self: *Self, key: u256, new_value: u256) !u64 {
         const evm = self.getEvm();
-        const current_value = evm.get_storage(self.address, key);
-        const original_value = try evm.get_original_storage_value(self.address, key);
         
-        // Calculate base gas cost
+        // Get the current and original values
+        const current_value = evm.get_storage(self.address, key);  // Present value in storage
+        const original_value = try evm.get_original_storage_value(self.address, key);  // Value at tx start
+        
         var gas_cost: u64 = 0;
 
-        // Calculate gas based on hardfork
-        // 1. Calculate base gas:
-        // - No-op: 100 gas
-        // - Zero -> non-zero: 20000 gas
-        // - Non-zero -> different: 2900 gas (warm reset) (SSTORE_RESET - COLD_SLOAD_COST = 5000 - 2100)
-        // - Subsequent modification: 100 gas
-        // 2. Calculate cold penalty if slot was never touched:
-        // - +2100 for cold access
-        // -> Cold reset: 2900 + 2100 = 5000 gas
-        // -> Warm reset: 2900 + 0 = 2900 gas
-        // -> Cold set: 20000 + 2100 = 22100 gas
-        // -> Warm set: 20000 + 0 = 20000 gas
+        // =====================================================================
+        // PART 1: Calculate Base Gas Cost
+        // =====================================================================
+        // The gas cost calculation depends on the hardfork and the state transition.
+        // Three paths here:
+        // 1. Berlin+: EIP-2929 cold/warm access patterns
+        // 2. Istanbul: EIP-2200 without cold/warm
+        // 3. Pre-Istanbul: Simple frontier rules
         if (self.hardfork.isAtLeast(.BERLIN)) {
             @branchHint(.likely);
+            // Berlin+: EIP-2929 cold/warm access patterns
+            // Base costs (before cold penalty):
+            // - No-op: 100 gas (warm read)
+            // - First modification (original == current):
+            //   - Zero -> non-zero: 20000 gas
+            //   - Non-zero -> different: 2900 gas (5000 - 2100 cold penalty)
+            // - Subsequent modification: 100 gas
+            
             if (new_value == current_value) {
-                gas_cost = GasConstants.WarmStorageReadCost; // No-op: 100 gas
+                // No-op: just reading, no change
+                gas_cost = GasConstants.WarmStorageReadCost; // 100 gas
             } else if (original_value == current_value) {
-                // First modification in transaction
+                // First modification in this transaction
                 if (original_value == 0) {
-                    gas_cost = GasConstants.SstoreSetGas; // Zero -> non-zero: 20000 gas
+                    // Setting from zero to non-zero
+                    gas_cost = GasConstants.SstoreSetGas; // 20000 gas
                 } else {
-                    gas_cost = 2900; // Non-zero -> different: 2900 (warm reset) (SSTORE_RESET - COLD_SLOAD_COST = 5000 - 2100)
+                    // Changing from non-zero to different value
+                    // 2900 = SSTORE_RESET(5000) - COLD_SLOAD_COST(2100)
+                    gas_cost = 2900;
                 }
             } else {
-                gas_cost = GasConstants.WarmStorageReadCost; // Subsequent modification: 100 gas
+                // Subsequent modification within same transaction
+                gas_cost = GasConstants.WarmStorageReadCost; // 100 gas
             }
 
-            // Access slot and get cost (2100 if cold, 100 if warm)
+            // Add cold access penalty if this is the first touch of this slot
             const access_cost = try evm.access_storage_slot(self.address, key);
-
-            // Add cold penalty if needed (brings warm costs back to cold costs)
             if (access_cost == GasConstants.ColdSloadCost) {
-                gas_cost += GasConstants.ColdSloadCost; // +2100 for cold access
+                // First access in transaction, add cold penalty
+                gas_cost += GasConstants.ColdSloadCost; // +2100 gas
             }
         } else if (self.hardfork.isAtLeast(.ISTANBUL)) {
-            // Istanbul gas calculation
+            // Istanbul (pre-Berlin): EIP-2200 without cold/warm
             if (new_value == current_value) {
-                gas_cost = 800; // No-op: 800 gas
+                // No-op
+                gas_cost = 800; // Istanbul SLOAD cost
             } else if (original_value == current_value) {
                 // First modification in transaction
                 if (original_value == 0) {
-                    gas_cost = GasConstants.SstoreSetGas; // Zero -> non-zero: 20000
+                    gas_cost = GasConstants.SstoreSetGas; // 20000 gas
                 } else {
-                    gas_cost = GasConstants.SstoreResetGas; // Non-zero -> different: 5000
+                    gas_cost = GasConstants.SstoreResetGas; // 5000 gas
                 }
             } else {
-                gas_cost = 800; // Subsequent mod: 800 gas
+                // Subsequent modification
+                gas_cost = 800; // Istanbul SLOAD cost
             }
+            
         } else {
-            // Frontier: simple set/reset
+            // Pre-Istanbul: Simple frontier rules
             if (current_value == 0 and new_value != 0) {
-                gas_cost = GasConstants.SstoreSetGas; // Set: 20000
+                // Setting from zero
+                gas_cost = GasConstants.SstoreSetGas; // 20000 gas
             } else {
-                gas_cost = GasConstants.SstoreResetGas; // Reset: 5000
+                // All other cases (including no-op)
+                gas_cost = GasConstants.SstoreResetGas; // 5000 gas
             }
         }
         
-        // Handle refunds separately
-        // -> Pre-London: +15000 for clearing a non-zero value
-        // -> London+: +4800 for clearing a non-zero value (EIP-3529)
+        // =====================================================================
+        // PART 2: Calculate Refunds (EIP-2200 for Istanbul+)
+        // =====================================================================
+        
         if (self.hardfork.isAtLeast(.ISTANBUL)) {
-            // Calculate refund amount based on hardfork
-            const sstore_clears_schedule: i64 = if (self.hardfork.isAtLeast(.LONDON)) blk: {
-                // London+: EIP-3529 reduces refund to prevent abuse
-                // Refund = SSTORE_RESET_GAS + ACCESS_LIST_STORAGE_KEY_COST
-                // Where SSTORE_RESET_GAS = 5000 - 2100 = 2900 (warm reset cost)
-                // So refund = 2900 + 1900 = 4800
-                break :blk 4800;
-            } else blk: {
-                // Istanbul: REFUND_SSTORE_CLEARS = 15000
-                break :blk 15000;
-            };
+            // Istanbul+: Complex EIP-2200 refund logic
             
+            // Determine refund amount based on hardfork
+            const sstore_clears_schedule: u64 = if (self.hardfork.isAtLeast(.LONDON))
+                // London+ (EIP-3529): Reduced refund
+                // Formula: SSTORE_RESET(5000) - COLD_SLOAD_COST(2100) + ACCESS_LIST_STORAGE_KEY(1900) = 4800
+                4800
+            else
+                // Istanbul-Berlin: Original clearing refund
+                15000;
+            
+            // === PRIMARY CHECK: No-op (new == current) ===
             if (new_value == current_value) {
-                // No-op: no refund
+                // No state change, no refund
+                return gas_cost;
+            }
+            
+            // === SECONDARY CHECK: First vs Subsequent Modification ===
+            if (original_value == current_value) {
+                // --- FIRST MODIFICATION in this transaction ---
+                // Only one refund case: clearing storage (non-zero to zero)
+                if (new_value == 0 and original_value != 0) {
+                    evm.gas_refund += sstore_clears_schedule;
+                }
+                // All other first modifications have no refund:
+                // - 0 -> non-zero: no refund (setting new storage)
+                // - non-zero -> different non-zero: no refund (changing value)
             } else {
-                if (original_value == current_value and new_value == 0 and original_value != 0) {
-                    // First time clearing a non-zero value
-                    evm.gas_refund += @intCast(sstore_clears_schedule);
-                } else if (original_value != current_value) {
-                    // Subsequent modification
-                    if (original_value != 0) {
-                        if (current_value == 0 and new_value != 0) {
-                            // Was cleared, now setting again - remove refund
-                            const to_remove: u64 = @intCast(sstore_clears_schedule);
-                            if (evm.gas_refund >= to_remove) {
-                                evm.gas_refund -= to_remove;
-                            } else {
-                                evm.gas_refund = 0;
-                            }
-                        } else if (current_value != 0 and new_value == 0) {
-                            // Clearing again - add refund
-                            evm.gas_refund += @intCast(sstore_clears_schedule);
-                        }
+                // --- SUBSEQUENT MODIFICATION (slot was touched before in this tx) ---
+                // Check restore-to-original FIRST (it takes precedence)
+                if (new_value == original_value) {
+                    // === RESTORING TO ORIGINAL VALUE ===
+                    if (original_value == 0) {
+                        // Case: Restore to original zero
+                        // This counts as a clearing operation per EIP-2200
+                        evm.gas_refund += sstore_clears_schedule;
                     } else {
-                        // original_value = 0, handling transitions from empty storage
-                        if (current_value != 0 and new_value == 0) {
-                            // Storage was set from 0 to non-zero in this tx, now clearing back to 0
-                            // This deserves a refund as we're cleaning up storage
-                            evm.gas_refund += @intCast(sstore_clears_schedule);
-                        }
-                    }
-                    
-                    if (original_value == new_value) {
-                        // Restoring to original value
+                        // Case: Restore to original non-zero
+                        // Refund the difference between reset cost and load cost
                         const gas_sstore_reset: u64 = if (self.hardfork.isAtLeast(.BERLIN))
-                            2900  // WARM_SSTORE_RESET = SSTORE_RESET - COLD_SLOAD_COST
+                            2900  // Berlin: 5000 - 2100 (adjusted for warm access)
                         else
-                            GasConstants.SstoreResetGas;
+                            GasConstants.SstoreResetGas;  // Pre-Berlin: 5000
                             
                         const gas_sload: u64 = if (self.hardfork.isAtLeast(.BERLIN))
-                            GasConstants.WarmStorageReadCost
+                            GasConstants.WarmStorageReadCost  // Berlin+: 100
                         else
-                            800;  // ISTANBUL_SLOAD_GAS
-                            
-                        const refund: i64 = if (original_value == 0)
-                            @as(i64, @intCast(GasConstants.SstoreSetGas - gas_sload))
-                        else
-                            @as(i64, @intCast(gas_sstore_reset - gas_sload));
-                            
-                        if (refund > 0) {
-                            evm.gas_refund += @intCast(refund);
+                            800;  // Istanbul: 800
+                        
+                        evm.gas_refund += gas_sstore_reset - gas_sload;
+                    }
+                    
+                } else {
+                    // === NOT RESTORING TO ORIGINAL ===
+                    if (new_value == 0 and current_value != 0) {
+                        // Case: Standard clearing (current non-zero -> zero)
+                        evm.gas_refund += sstore_clears_schedule;
+                        
+                    } else if (new_value != 0 and current_value == 0 and original_value != 0) {
+                        // Case: Re-setting after clearing in same transaction
+                        // Logic: If original!=0, current=0, and original!=current,
+                        // then current MUST be 0 from a clearing operation in this tx.
+                        // We need to remove the clearing refund that was previously added.
+                        if (evm.gas_refund >= sstore_clears_schedule) {
+                            evm.gas_refund -= sstore_clears_schedule;
                         }
                     }
                 }
             }
         } else {
             // Pre-Istanbul: Simple refund logic
+            // Only refund when clearing storage (non-zero to zero)
             if (current_value != 0 and new_value == 0) {
                 evm.gas_refund += 15000;  // REFUND_SSTORE_CLEARS
             }
