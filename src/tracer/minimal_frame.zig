@@ -558,7 +558,7 @@ pub const MinimalFrame = struct {
             // ORIGIN
             0x32 => {
                 try self.consumeGas(GasConstants.GasQuickStep);
-                const origin_u256 = primitives.Address.to_u256(self.getEvm().origin);
+                const origin_u256 = primitives.Address.to_u256(evm.origin);
                 try self.pushStack(origin_u256);
                 self.pc += 1;
             },
@@ -668,7 +668,7 @@ pub const MinimalFrame = struct {
             // GASPRICE
             0x3a => {
                 try self.consumeGas(GasConstants.GasQuickStep);
-                try self.pushStack(self.getEvm().gas_price);
+                try self.pushStack(evm.gas_price);
                 self.pc += 1;
             },
 
@@ -714,7 +714,7 @@ pub const MinimalFrame = struct {
                 try self.consumeGas(GasConstants.GasExtStep);
                 const block_number = try self.popStack();
                 // Simple mock: return a hash based on block number
-                const current_block = self.getEvm().block_number;
+                const current_block = evm.block_number;
                 if (block_number >= current_block or current_block > block_number + 256) {
                     try self.pushStack(0);
                 } else {
@@ -727,7 +727,7 @@ pub const MinimalFrame = struct {
             // COINBASE
             0x41 => {
                 try self.consumeGas(GasConstants.GasQuickStep);
-                const coinbase_u256 = primitives.Address.to_u256(self.getEvm().block_coinbase);
+                const coinbase_u256 = primitives.Address.to_u256(evm.block_coinbase);
                 try self.pushStack(coinbase_u256);
                 self.pc += 1;
             },
@@ -735,42 +735,42 @@ pub const MinimalFrame = struct {
             // TIMESTAMP
             0x42 => {
                 try self.consumeGas(GasConstants.GasQuickStep);
-                try self.pushStack(self.getEvm().block_timestamp);
+                try self.pushStack(evm.block_timestamp);
                 self.pc += 1;
             },
 
             // NUMBER
             0x43 => {
                 try self.consumeGas(GasConstants.GasQuickStep);
-                try self.pushStack(self.getEvm().block_number);
+                try self.pushStack(evm.block_number);
                 self.pc += 1;
             },
 
             // DIFFICULTY/PREVRANDAO
             0x44 => {
                 try self.consumeGas(GasConstants.GasQuickStep);
-                try self.pushStack(self.getEvm().block_difficulty);
+                try self.pushStack(evm.block_difficulty);
                 self.pc += 1;
             },
 
             // GASLIMIT
             0x45 => {
                 try self.consumeGas(GasConstants.GasQuickStep);
-                try self.pushStack(self.getEvm().block_gas_limit);
+                try self.pushStack(evm.block_gas_limit);
                 self.pc += 1;
             },
 
             // CHAINID
             0x46 => {
                 try self.consumeGas(GasConstants.GasQuickStep);
-                try self.pushStack(self.getEvm().chain_id);
+                try self.pushStack(evm.chain_id);
                 self.pc += 1;
             },
 
             // SELFBALANCE
             0x47 => {
                 try self.consumeGas(GasConstants.GasFastStep);
-                const balance = self.getEvm().get_balance(self.address);
+                const balance = evm.get_balance(self.address);
                 try self.pushStack(balance);
                 self.pc += 1;
             },
@@ -778,7 +778,7 @@ pub const MinimalFrame = struct {
             // BASEFEE
             0x48 => {
                 try self.consumeGas(GasConstants.GasQuickStep);
-                try self.pushStack(self.getEvm().block_base_fee);
+                try self.pushStack(evm.block_base_fee);
                 self.pc += 1;
             },
 
@@ -795,7 +795,7 @@ pub const MinimalFrame = struct {
             // BLOBBASEFEE
             0x4a => {
                 try self.consumeGas(GasConstants.GasQuickStep);
-                try self.pushStack(self.getEvm().blob_base_fee);
+                try self.pushStack(evm.blob_base_fee);
                 self.pc += 1;
             },
 
@@ -869,7 +869,7 @@ pub const MinimalFrame = struct {
 
                 // EIP-2929: charge warm/cold storage access cost and warm the slot
                 // TODO: Gate EIP-2929 by hardfork
-                const access_cost = try self.getEvm().access_storage_slot(self.address, key);
+                const access_cost = try evm.access_storage_slot(self.address, key);
                 // Access list returns 2100 for cold and 100 for warm
                 // SLOAD total cost is 100 when warm and 2100 + 100 when cold
                 // Add the 100 base only for the cold case to avoid double-charging on warm
@@ -879,7 +879,7 @@ pub const MinimalFrame = struct {
                     access_cost;
                 try self.consumeGas(total_cost);
 
-                const value = self.getEvm().get_storage(self.address, key);
+                const value = evm.get_storage(self.address, key);
                 try self.pushStack(value);
                 self.pc += 1;
             },
@@ -894,7 +894,7 @@ pub const MinimalFrame = struct {
                 // original value tracking and refund logic, reusing warm/cold state.
                 try self.consumeGas(GasConstants.SstoreResetGas);
 
-                try self.getEvm().set_storage(self.address, key, value);
+                try evm.set_storage(self.address, key, value);
                 self.pc += 1;
             },
 
@@ -962,7 +962,7 @@ pub const MinimalFrame = struct {
                 const key = try self.popStack();
                 // For MinimalEvm tracer, we use regular storage for transient storage
                 // In a real implementation, this would be separate
-                const value = self.getEvm().get_storage(self.address, key);
+                const value = evm.get_storage(self.address, key);
                 try self.pushStack(value);
                 self.pc += 1;
             },
@@ -974,7 +974,7 @@ pub const MinimalFrame = struct {
                 const value = try self.popStack();
                 // For MinimalEvm tracer, we can just track transient storage in the EVM
                 // Transient storage behaves like regular storage but is cleared after tx
-                try self.getEvm().set_storage(self.address, key, value);
+                try evm.set_storage(self.address, key, value);
                 self.pc += 1;
             },
 
@@ -1097,7 +1097,7 @@ pub const MinimalFrame = struct {
                 }
                 // EIP-2929: access target account (warm/cold)
                 // TODO: Skip cold surcharge for precompiles and gate by hardfork.
-                const access_cost = try self.getEvm().access_address(call_address);
+                const access_cost = try evm.access_address(call_address);
                 gas_cost += access_cost;
                 try self.consumeGas(gas_cost);
 
@@ -1121,7 +1121,7 @@ pub const MinimalFrame = struct {
                 const available_gas = @min(gas_limit, max_gas);
 
                 // Perform the inner call
-                const result = try self.getEvm().inner_call(call_address, value_arg, input_data, available_gas);
+                const result = try evm.inner_call(call_address, value_arg, input_data, available_gas);
 
                 // Write output to memory
                 if (out_length > 0 and result.output.len > 0) {
@@ -1178,7 +1178,7 @@ pub const MinimalFrame = struct {
                 }
                 // EIP-2929: access target account (warm/cold)
                 // TODO: Skip cold surcharge for precompiles and gate by hardfork.
-                const access_cost = try self.getEvm().access_address(call_address);
+                const access_cost = try evm.access_address(call_address);
                 gas_cost += access_cost;
                 try self.consumeGas(gas_cost);
 
@@ -1202,7 +1202,7 @@ pub const MinimalFrame = struct {
                 const available_gas = @min(gas_limit, max_gas);
 
                 // Perform the inner call
-                const result = try self.getEvm().inner_call(call_address, value_arg, input_data, available_gas);
+                const result = try evm.inner_call(call_address, value_arg, input_data, available_gas);
 
                 // Write output to memory
                 if (out_length > 0 and result.output.len > 0) {
@@ -1293,7 +1293,7 @@ pub const MinimalFrame = struct {
                 const available_gas = @min(gas_limit, max_gas);
 
                 // Perform the inner call
-                const result = try self.getEvm().inner_call(call_address, self.value, input_data, available_gas);
+                const result = try evm.inner_call(call_address, self.value, input_data, available_gas);
 
                 // Write output to memory
                 if (out_length > 0 and result.output.len > 0) {
@@ -1362,7 +1362,7 @@ pub const MinimalFrame = struct {
                 // Base gas cost + EIP-2929 account access
                 var call_gas_cost: u64 = GasConstants.CallGas;
                 // TODO: Skip cold surcharge for precompiles and gate by hardfork.
-                const access_cost = try self.getEvm().access_address(call_address);
+                const access_cost = try evm.access_address(call_address);
                 call_gas_cost += access_cost;
                 try self.consumeGas(call_gas_cost);
 
@@ -1386,7 +1386,7 @@ pub const MinimalFrame = struct {
                 const available_gas = @min(gas_limit, max_gas);
 
                 // Perform the inner call
-                const result = try self.getEvm().inner_call(call_address, 0, input_data, available_gas);
+                const result = try evm.inner_call(call_address, 0, input_data, available_gas);
 
                 // Write output to memory
                 if (out_length > 0 and result.output.len > 0) {
@@ -1488,7 +1488,7 @@ pub const MinimalFrame = struct {
 
                 // EIP-2929: charge account access cost
                 // TODO: Treat precompiles as warm and gate by hardfork.
-                const access_cost = try self.getEvm().access_address(ext_addr);
+                const access_cost = try evm.access_address(ext_addr);
                 try self.consumeGas(access_cost);
 
                 // For MinimalFrame, we don't have access to external code
@@ -1514,7 +1514,7 @@ pub const MinimalFrame = struct {
 
                     // EIP-2929: account access + copy cost
                     // TODO: Treat precompiles as warm and gate by hardfork.
-                    const access_cost = try self.getEvm().access_address(ext_addr);
+                    const access_cost = try evm.access_address(ext_addr);
                     try self.consumeGas(access_cost + copy_cost);
 
                     const dest = std.math.cast(u32, dest_offset) orelse return error.OutOfBounds;
@@ -1532,7 +1532,7 @@ pub const MinimalFrame = struct {
                 } else {
                     // EIP-2929: charge account access cost even if size is zero
                     // TODO: Treat precompiles as warm and gate by hardfork.
-                    const access_cost = try self.getEvm().access_address(ext_addr);
+                    const access_cost = try evm.access_address(ext_addr);
                     try self.consumeGas(access_cost);
                 }
                 self.pc += 1;
@@ -1546,7 +1546,7 @@ pub const MinimalFrame = struct {
 
                 // EIP-2929: charge account access cost
                 // TODO: Treat precompiles as warm and gate by hardfork.
-                const access_cost = try self.getEvm().access_address(ext_addr);
+                const access_cost = try evm.access_address(ext_addr);
                 try self.consumeGas(access_cost);
 
                 // For MinimalFrame, return empty code hash
