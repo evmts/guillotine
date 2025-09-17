@@ -256,27 +256,20 @@ pub const MinimalFrame = struct {
         }
     }
 
-    /// Calculate SLOAD gas cost
+    /// Calculate SLOAD gas cost based on hardfork
     /// TODO: replace these with constants once we implement in guillotine
     fn sloadGasCost(self: *Self, key: u256) !u64 {
         if (self.hardfork.isAtLeast(.BERLIN)) {
             @branchHint(.likely);
-            // EIP-2929: Cold/warm access pattern
-            // access_storage_slot returns:
-            // - COLD_SLOAD_COST (2100) for cold access
-            // - WARM_STORAGE_READ_COST (100) for warm access
-            // We return this value directly, no additions needed
+            // Berlin+: access_storage_slot returns 2100 (cold) or 100 (warm)
             const evm = self.getEvm();
             return try evm.access_storage_slot(self.address, key);
         } else if (self.hardfork.isAtLeast(.ISTANBUL)) {
-            // EIP-1884: Repricing for trie-size-dependent opcodes
-            return 800;  // ISTANBUL_SLOAD_GAS
+            return 800; // Istanbul: 800 gas
         } else if (self.hardfork.isAtLeast(.TANGERINE_WHISTLE)) {
-            // EIP-150: Gas cost changes for IO-heavy operations  
-            return 200;
+            return 200; // EIP-150: 200 gas
         } else {
-            // Frontier and earlier
-            return 50;
+            return 50; // Frontier: 50 gas
         }
     }
 
@@ -289,65 +282,68 @@ pub const MinimalFrame = struct {
         
         // Calculate base gas cost
         var gas_cost: u64 = 0;
-        
-        // Berlin+: Use warm costs in calculation, add cold cost if needed
+
+        // Calculate gas based on hardfork
+        // 1. Calculate base gas:
+        // - No-op: 100 gas
+        // - Zero -> non-zero: 20000 gas
+        // - Non-zero -> different: 2900 gas (warm reset) (SSTORE_RESET - COLD_SLOAD_COST = 5000 - 2100)
+        // - Subsequent modification: 100 gas
+        // 2. Calculate cold penalty if slot was never touched:
+        // - +2100 for cold access
+        // -> Cold reset: 2900 + 2100 = 5000 gas
+        // -> Warm reset: 2900 + 0 = 2900 gas
+        // -> Cold set: 20000 + 2100 = 22100 gas
+        // -> Warm set: 20000 + 0 = 20000 gas
         if (self.hardfork.isAtLeast(.BERLIN)) {
             @branchHint(.likely);
             if (new_value == current_value) {
-                // No-op: charge warm read cost
-                gas_cost = GasConstants.WarmStorageReadCost;
+                gas_cost = GasConstants.WarmStorageReadCost; // No-op: 100 gas
             } else if (original_value == current_value) {
-                // First modification in this transaction
+                // First modification in transaction
                 if (original_value == 0) {
-                    // Setting from zero
-                    gas_cost = GasConstants.SstoreSetGas;
+                    gas_cost = GasConstants.SstoreSetGas; // Zero -> non-zero: 20000 gas
                 } else {
-                    // Modifying non-zero value (use warm reset cost for Berlin+)
-                    // WARM_SSTORE_RESET = SSTORE_RESET - COLD_SLOAD_COST = 5000 - 2100 = 2900
-                    gas_cost = 2900;
+                    gas_cost = 2900; // Non-zero -> different: 2900 (warm reset) (SSTORE_RESET - COLD_SLOAD_COST = 5000 - 2100)
                 }
             } else {
-                // Subsequent modification - charge warm read cost
-                gas_cost = GasConstants.WarmStorageReadCost;
+                gas_cost = GasConstants.WarmStorageReadCost; // Subsequent modification: 100 gas
             }
-            
-            // Add cold access cost if this is a cold slot
+
+            // Access slot and get cost (2100 if cold, 100 if warm)
             const access_cost = try evm.access_storage_slot(self.address, key);
+
+            // Add cold penalty if needed (brings warm costs back to cold costs)
             if (access_cost == GasConstants.ColdSloadCost) {
-                // Cold access - add the cold cost
-                gas_cost += GasConstants.ColdSloadCost;
+                gas_cost += GasConstants.ColdSloadCost; // +2100 for cold access
             }
-            // Note: access_cost for warm is already included in gas_cost above
-            
         } else if (self.hardfork.isAtLeast(.ISTANBUL)) {
-            // Istanbul: Use Istanbul costs
+            // Istanbul gas calculation
             if (new_value == current_value) {
-                // No change - charge Istanbul SLOAD cost
-                gas_cost = 800;  // ISTANBUL_SLOAD_GAS
+                gas_cost = 800; // No-op: 800 gas
             } else if (original_value == current_value) {
-                // First modification in this transaction
+                // First modification in transaction
                 if (original_value == 0) {
-                    // Setting from zero
-                    gas_cost = GasConstants.SstoreSetGas;
+                    gas_cost = GasConstants.SstoreSetGas; // Zero -> non-zero: 20000
                 } else {
-                    // Modifying non-zero value
-                    gas_cost = GasConstants.SstoreResetGas;
+                    gas_cost = GasConstants.SstoreResetGas; // Non-zero -> different: 5000
                 }
             } else {
-                // Subsequent modification - charge Istanbul SLOAD cost
-                gas_cost = 800;  // ISTANBUL_SLOAD_GAS
+                gas_cost = 800; // Subsequent mod: 800 gas
             }
-            
         } else {
-            // Frontier: Simple logic
+            // Frontier: simple set/reset
             if (current_value == 0 and new_value != 0) {
-                gas_cost = GasConstants.SstoreSetGas;
+                gas_cost = GasConstants.SstoreSetGas; // Set: 20000
             } else {
-                gas_cost = GasConstants.SstoreResetGas;
+                gas_cost = GasConstants.SstoreResetGas; // Reset: 5000
             }
         }
         
         // Handle refunds separately
+        // -> Pre-Istanbul: +15000 for clearing a non-zero value
+        // -> Istanbul: +15000 for clearing a non-zero value (more complex tracking of original-current-new values)
+        // -> London: +4800 for clearing a non-zero value
         if (self.hardfork.isAtLeast(.ISTANBUL)) {
             // Calculate refund amount based on hardfork
             const sstore_clears_schedule: i64 = if (self.hardfork.isAtLeast(.LONDON)) blk: {
