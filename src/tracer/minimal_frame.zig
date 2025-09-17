@@ -141,11 +141,6 @@ pub const MinimalFrame = struct {
 
     inline fn wordCount(bytes: u64) u64 { return (bytes + 31) / 32; }
 
-    inline fn safeCastU32(value: u256) MinimalEvmError!u32 {
-        if (value > std.math.maxInt(u32)) return error.OutOfBounds;
-        return @intCast(value);
-    }
-
     fn memoryExpansionCost(self: *const Self, end_bytes: u64) u64 {
         const current_size = @as(u64, self.memory_size);
         return GasConstants.memory_gas_cost(current_size, end_bytes);
@@ -504,8 +499,8 @@ pub const MinimalFrame = struct {
                     try self.pushStack(empty_hash);
                     self.pc += 1;
                 } else {
-                    const offset_u32 = try safeCastU32(offset);
-                    const size_u32 = try safeCastU32(size);
+                    const offset_u32 = std.math.cast(u32, offset) orelse return error.OutOfBounds;
+                    const size_u32 = std.math.cast(u32, size) orelse return error.OutOfBounds;
 
                     // Charge memory expansion to cover [offset, offset+size)
                     const end_addr = @as(u64, offset_u32) + @as(u64, size_u32);
@@ -616,9 +611,9 @@ pub const MinimalFrame = struct {
                 const offset = try self.popStack();
                 const length = try self.popStack();
 
-                const dest_off = try safeCastU32(dest_offset);
-                const src_off = try safeCastU32(offset);
-                const len = try safeCastU32(length);
+                const dest_off = std.math.cast(u32, dest_offset) orelse return error.OutOfBounds;
+                const src_off = std.math.cast(u32, offset) orelse return error.OutOfBounds;
+                const len = std.math.cast(u32, length) orelse return error.OutOfBounds;
 
                 // Charge base + memory expansion + copy per word
                 const end_bytes_copy: u64 = @as(u64, dest_off) + @as(u64, len);
@@ -650,9 +645,9 @@ pub const MinimalFrame = struct {
                 const offset = try self.popStack();
                 const length = try self.popStack();
 
-                const dest_off = try safeCastU32(dest_offset);
-                const src_off = try safeCastU32(offset);
-                const len = try safeCastU32(length);
+                const dest_off = std.math.cast(u32, dest_offset) orelse return error.OutOfBounds;
+                const src_off = std.math.cast(u32, offset) orelse return error.OutOfBounds;
+                const len = std.math.cast(u32, length) orelse return error.OutOfBounds;
 
                 const end_bytes_code: u64 = @as(u64, dest_off) + @as(u64, len);
                 const mem_cost5 = self.memoryExpansionCost(end_bytes_code);
@@ -690,9 +685,9 @@ pub const MinimalFrame = struct {
                 const offset = try self.popStack();
                 const length = try self.popStack();
 
-                const dest_off = try safeCastU32(dest_offset);
-                const src_off = try safeCastU32(offset);
-                const len = try safeCastU32(length);
+                const dest_off = std.math.cast(u32, dest_offset) orelse return error.OutOfBounds;
+                const src_off = std.math.cast(u32, offset) orelse return error.OutOfBounds;
+                const len = std.math.cast(u32, length) orelse return error.OutOfBounds;
 
                 // Check bounds
                 if (src_off + len > self.return_data.len) {
@@ -814,7 +809,7 @@ pub const MinimalFrame = struct {
             // MLOAD
             0x51 => {
                 const offset = try self.popStack();
-                const off = try safeCastU32(offset);
+                const off = std.math.cast(u32, offset) orelse return error.OutOfBounds;
 
                 // Charge base + memory expansion for reading 32 bytes
                 const end_bytes: u64 = @as(u64, off) + 32;
@@ -838,7 +833,7 @@ pub const MinimalFrame = struct {
                 const offset = try self.popStack();
                 const value = try self.popStack();
 
-                const off = try safeCastU32(offset);
+                const off = std.math.cast(u32, offset) orelse return error.OutOfBounds;
 
                 // Charge base + memory expansion for writing 32 bytes
                 const end_bytes2: u64 = @as(u64, off) + 32;
@@ -859,7 +854,7 @@ pub const MinimalFrame = struct {
                 const offset = try self.popStack();
                 const value = try self.popStack();
 
-                const off = try safeCastU32(offset);
+                const off = std.math.cast(u32, offset) orelse return error.OutOfBounds;
                 const end_bytes3: u64 = @as(u64, off) + 1;
                 const mem_cost3 = self.memoryExpansionCost(end_bytes3);
                 try self.consumeGas(GasConstants.GasFastestStep + mem_cost3);
@@ -1243,8 +1238,8 @@ pub const MinimalFrame = struct {
                 const length = try self.popStack();
 
                 if (length > 0) {
-                    const off = try safeCastU32(offset);
-                    const len = try safeCastU32(length);
+                    const off = std.math.cast(u32, offset) orelse return error.OutOfBounds;
+                    const len = std.math.cast(u32, length) orelse return error.OutOfBounds;
 
                     self.output = try self.allocator.alloc(u8, len);
                     var idx: u32 = 0;
@@ -1435,9 +1430,9 @@ pub const MinimalFrame = struct {
                 }
 
                 // Bounds and type conversions (clamp to u64 before u32/u24 style ops)
-                const dest_u32 = try safeCastU32(dest);
-                const src_u32 = try safeCastU32(src);
-                const len_u32 = try safeCastU32(len);
+                const dest_u32 = std.math.cast(u32, dest) orelse return error.OutOfBounds;
+                const src_u32 = std.math.cast(u32, src) orelse return error.OutOfBounds;
+                const len_u32 = std.math.cast(u32, len) orelse return error.OutOfBounds;
 
                 // Gas: memory expansion + copy gas (CopyGas per 32-byte word)
                 const end_src: u64 = @as(u64, src_u32) + @as(u64, len_u32);
@@ -1471,8 +1466,8 @@ pub const MinimalFrame = struct {
                 const length = try self.popStack();
 
                 if (length > 0) {
-                    const off = try safeCastU32(offset);
-                    const len = try safeCastU32(length);
+                    const off = std.math.cast(u32, offset) orelse return error.OutOfBounds;
+                    const len = std.math.cast(u32, length) orelse return error.OutOfBounds;
 
                     self.output = try self.allocator.alloc(u8, len);
                     var idx: u32 = 0;
@@ -1522,8 +1517,8 @@ pub const MinimalFrame = struct {
                     const access_cost = try self.getEvm().access_address(ext_addr);
                     try self.consumeGas(access_cost + copy_cost);
 
-                    const dest = try safeCastU32(dest_offset);
-                    const len = try safeCastU32(size);
+                    const dest = std.math.cast(u32, dest_offset) orelse return error.OutOfBounds;
+                    const len = std.math.cast(u32, size) orelse return error.OutOfBounds;
                     const end = @as(u64, dest) + @as(u64, len);
                     const mem_cost = self.memoryExpansionCost(end);
                     try self.consumeGas(mem_cost);
