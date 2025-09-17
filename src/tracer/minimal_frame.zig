@@ -255,22 +255,24 @@ pub const MinimalFrame = struct {
     /// Calculate gas cost for external account operations (EIP-150 aware)
     fn externalAccountGasCost(self: *Self, address: Address) !u64 {
         const evm = self.getEvm();
-        
-        if (!self.hardfork.isAtLeast(.TANGERINE_WHISTLE)) {
-            // Pre-EIP-150: Lower cost
-            return GasConstants.GasQuickStep;
-        } else if (!self.hardfork.isAtLeast(.BERLIN)) {
+
+        if (self.hardfork.isAtLeast(.BERLIN)) {
+            // Post-Berlin: Cold/warm access pattern
+            @branchHint(.likely);
+            return try evm.access_address(address);
+        } else if (self.hardfork.isAtLeast(.TANGERINE_WHISTLE)) {
             // Post-EIP-150, Pre-Berlin: Fixed higher cost
             return GasConstants.GasExtStep;
         } else {
-            // Post-Berlin: Cold/warm access pattern
-            return try evm.access_address(address);
+            // Pre-EIP-150: Lower cost
+            return GasConstants.GasQuickStep;
         }
     }
 
     /// Calculate SELFDESTRUCT gas cost (EIP-150 aware)
     fn selfdestructGasCost(self: *const Self) u64 {
-        if (!self.hardfork.isAtLeast(.TANGERINE_WHISTLE)) {
+        if (self.hardfork.isBefore(.TANGERINE_WHISTLE)) {
+            @branchHint(.cold);
             return 0; // Pre-EIP-150: Free operation
         }
         return GasConstants.SelfdestructGas; // Post-EIP-150: 5000 gas
@@ -279,6 +281,7 @@ pub const MinimalFrame = struct {
     /// Calculate SELFDESTRUCT refund (EIP-3529 aware)
     fn selfdestructRefund(self: *const Self) u64 {
         if (self.hardfork.isAtLeast(.LONDON)) {
+            @branchHint(.likely);
             return 0; // EIP-3529: No refund in London+
         }
         return GasConstants.SelfdestructRefundGas; // Pre-London: 24,000 refund
@@ -289,6 +292,7 @@ pub const MinimalFrame = struct {
         var gas_cost: u64 = GasConstants.CreateGas; // Base 32,000 gas
         
         if (self.hardfork.isAtLeast(.SHANGHAI)) {
+            @branchHint(.likely);
             const word_count = wordCount(@as(u64, init_code_size));
             gas_cost += word_count * GasConstants.InitcodeWordGas;
         }
@@ -306,6 +310,7 @@ pub const MinimalFrame = struct {
         
         if (self.hardfork.isAtLeast(.SHANGHAI)) {
             // Additional init code word cost
+            @branchHint(.likely);
             gas_cost += word_count * GasConstants.InitcodeWordGas;
         }
         
@@ -1252,6 +1257,7 @@ pub const MinimalFrame = struct {
 
                 // EIP-3860: Check init code size limit
                 if (length > self.getInitCodeSizeLimit()) {
+                    @branchHint(.cold);
                     // Init code too large - exceptional abort (halt execution)
                     self.gas_remaining = 0;
                     return error.CreateInitCodeSizeLimit;
@@ -1537,6 +1543,7 @@ pub const MinimalFrame = struct {
 
                 // EIP-3860: Check init code size limit
                 if (length > self.getInitCodeSizeLimit()) {
+                    @branchHint(.cold);
                     // Init code too large - exceptional abort (halt execution)
                     self.gas_remaining = 0;
                     return error.CreateInitCodeSizeLimit;

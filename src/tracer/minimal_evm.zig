@@ -59,6 +59,7 @@ fn isPrecompileAddress(address: Address) bool {
 /// Get ECADD gas cost based on hardfork
 fn getEcaddGasCost(hardfork: Hardfork) u64 {
     if (hardfork.isAtLeast(.ISTANBUL)) {
+        @branchHint(.likely);
         return GasConstants.ECADD_GAS_COST; // 150 gas
     }
     return GasConstants.ECADD_GAS_COST_BYZANTIUM; // 500 gas
@@ -67,6 +68,7 @@ fn getEcaddGasCost(hardfork: Hardfork) u64 {
 /// Get ECMUL gas cost based on hardfork
 fn getEcmulGasCost(hardfork: Hardfork) u64 {
     if (hardfork.isAtLeast(.ISTANBUL)) {
+        @branchHint(.likely);
         return GasConstants.ECMUL_GAS_COST; // 6,000 gas
     }
     return GasConstants.ECMUL_GAS_COST_BYZANTIUM; // 40,000 gas
@@ -75,6 +77,7 @@ fn getEcmulGasCost(hardfork: Hardfork) u64 {
 /// Get ECPAIRING gas cost based on hardfork
 fn getEcpairingGasCost(hardfork: Hardfork, pair_count: usize) u64 {
     if (hardfork.isAtLeast(.ISTANBUL)) {
+        @branchHint(.likely);
         return GasConstants.ECPAIRING_BASE_GAS_COST + 
                @as(u64, pair_count) * GasConstants.ECPAIRING_PER_PAIR_GAS_COST;
     }
@@ -321,7 +324,10 @@ pub const MinimalEvm = struct {
     }
 
     pub fn access_address(self: *Self, address: Address) !u64 {
-        if (!self.hardfork.isAtLeast(.BERLIN)) return GasConstants.CallCodeCost;
+        if (self.hardfork.isBefore(.BERLIN)) {
+            @branchHint(.cold);
+            return GasConstants.CallCodeCost;
+        }
 
         const entry = try self.warm_addresses.getOrPut(address);
         return if (entry.found_existing)
@@ -332,7 +338,10 @@ pub const MinimalEvm = struct {
 
     /// Access a storage slot and return the gas cost (EIP-2929 warm/cold)
     pub fn access_storage_slot(self: *Self, contract_address: Address, slot: u256) !u64 {
-        if (!self.hardfork.isAtLeast(.BERLIN)) return GasConstants.SloadGas;
+        if (self.hardfork.isBefore(.BERLIN)) {
+            @branchHint(.cold);
+            return GasConstants.SloadGas;
+        }
 
         const key = StorageSlotKey{ .address = contract_address, .slot = slot };
         const entry = try self.warm_storage_slots.getOrPut(key);
@@ -364,6 +373,7 @@ pub const MinimalEvm = struct {
         }
 
         if (self.hardfork.isAtLeast(.SHANGHAI)) {
+            @branchHint(.likely);
             warm[count] = self.block_coinbase;
             count += 1;
         }
@@ -439,10 +449,13 @@ pub const MinimalEvm = struct {
             // We only want to refund if the call actually used some gas
             const gas_used = if (execution_gas_limit > gas_left) execution_gas_limit - gas_left else 0;
             // Pre-London: refund up to half of gas used; post-London: refund up to one fifth of gas used
-            const capped_refund = if (!self.hardfork.isAtLeast(.LONDON))
-                @min(self.gas_refund, gas_used / 2)
-            else
-                @min(self.gas_refund, gas_used / 5);
+            const capped_refund = if (self.hardfork.isBefore(.LONDON)) blk: {
+                @branchHint(.cold);
+                break :blk @min(self.gas_refund, gas_used / 2);
+            } else blk: {
+                @branchHint(.likely);
+                break :blk @min(self.gas_refund, gas_used / 5);
+            };
             
             // Apply the refund without exceeding the gas limit
             gas_left = @min(execution_gas_limit, gas_left + capped_refund);
