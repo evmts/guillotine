@@ -292,17 +292,22 @@ pub const MinimalFrame = struct {
                 const base = try self.popStack();
 
                 // EIP-160: Dynamic gas cost for EXP
-                // Gas cost = 10 + 50 * (number of bytes in exponent)
-                var exp_bytes: u32 = 0;
-                if (exp > 0) {
-                    var temp_exp = exp;
-                    while (temp_exp > 0) : (temp_exp >>= 8) {
-                        exp_bytes += 1;
-                    }
-                }
-                const gas_cost = GasConstants.GasSlowStep + 50 * exp_bytes;
+                // Gas cost = GasSlowStep + gas_per_byte * ((log2(exponent) / 8) + 1)
+                // This calculates the number of bytes needed to represent the exponent
+                const exp_bytes: u32 = if (exp == 0) 0 else blk: {
+                    // Find position of highest bit set
+                    const bit_position = 255 - @clz(exp);
+                    // Calculate byte count: (bit_position / 8) + 1
+                    break :blk @as(u32, bit_position / 8 + 1);
+                };
+
+                // TODO: these constants should be in gas_constants.zig as well
+                const gas_per_byte = if (self.hardfork.isAtLeast(.SPURIOUS_DRAGON)) @as(u32, 50) else @as(u32, 10);
+                // Calculate gas cost based on the number of bytes needed to represent the exponent
+                const gas_cost = GasConstants.GasSlowStep + gas_per_byte * exp_bytes;
                 try self.consumeGas(gas_cost);
 
+                // Square-and-multiply algorithm for base^exp
                 var result: u256 = 1;
                 var b = base;
                 var e = exp;
