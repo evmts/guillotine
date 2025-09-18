@@ -13,7 +13,7 @@ test {
     _ = @import("evm/snailtracer_test.zig");
     
     // Minimal EVM
-    _ = @import("minimal_evm_gas_accounting_test.zig");
+    _ = @import("minimal_evm_revm_differential_test.zig");
 
     // Differential tests - gradually re-enabling
     // These tests work without hanging:
