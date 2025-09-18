@@ -7,6 +7,8 @@ const GasConstants = primitives.GasConstants;
 const MinimalFrame = @import("minimal_frame.zig").MinimalFrame;
 const Hardfork = @import("../eips_and_hardforks/eips.zig").Hardfork;
 const minimal_host = @import("minimal_host.zig");
+const Hardfork = @import("../eips_and_hardforks/hardfork.zig").Hardfork;
+const precompiles = @import("../precompiles/precompiles.zig");
 
 const Address = primitives.Address.Address;
 
@@ -31,6 +33,346 @@ pub const StorageSlotKey = struct {
         return a.address.equals(b.address) and a.slot == b.slot;
     }
 };
+
+const PRECOMPILE_ADDRESSES = [_]Address{
+    precompiles.ECRECOVER_ADDRESS,
+    precompiles.SHA256_ADDRESS,
+    precompiles.RIPEMD160_ADDRESS,
+    precompiles.IDENTITY_ADDRESS,
+    precompiles.MODEXP_ADDRESS,
+    precompiles.ECADD_ADDRESS,
+    precompiles.ECMUL_ADDRESS,
+    precompiles.ECPAIRING_ADDRESS,
+    precompiles.BLAKE2F_ADDRESS,
+    precompiles.POINT_EVALUATION_ADDRESS,
+    precompiles.BLS12_381_G1_ADD_ADDRESS,
+    precompiles.BLS12_381_G1_MSM_ADDRESS,
+    precompiles.BLS12_381_G2_ADD_ADDRESS,
+    precompiles.BLS12_381_G2_MSM_ADDRESS,
+    precompiles.BLS12_381_PAIRING_ADDRESS,
+    precompiles.BLS12_381_MAP_FP_TO_G1_ADDRESS,
+    precompiles.BLS12_381_MAP_FP2_TO_G2_ADDRESS,
+};
+
+/// Get ECRECOVER gas cost (fixed across all hardforks)
+fn getEcrecoverGasCost() u64 {
+    return GasConstants.ECRECOVER_COST;
+}
+
+/// Get SHA256 gas cost based on input length
+fn getSha256GasCost(input_len: usize) u64 {
+    const word_count = (input_len + 31) / 32;
+    return GasConstants.SHA256_BASE_COST + word_count * GasConstants.SHA256_WORD_COST;
+}
+
+/// Get RIPEMD160 gas cost based on input length
+fn getRipemd160GasCost(input_len: usize) u64 {
+    const word_count = (input_len + 31) / 32;
+    return GasConstants.RIPEMD160_BASE_COST + word_count * GasConstants.RIPEMD160_WORD_COST;
+}
+
+/// Get IDENTITY gas cost based on input length
+fn getIdentityGasCost(input_len: usize) u64 {
+    const word_count = (input_len + 31) / 32;
+    return GasConstants.IDENTITY_BASE_COST + word_count * GasConstants.IDENTITY_WORD_COST;
+}
+
+/// Right pad input with zeros to get a 32-byte slice starting at offset
+fn rightPadWithOffset(input: []const u8, offset: usize) [32]u8 {
+    var result = [_]u8{0} ** 32;
+    if (offset >= input.len) return result;
+    
+    const bytes_to_copy = @min(32, input.len - offset);
+    @memcpy(result[0..bytes_to_copy], input[offset..offset + bytes_to_copy]);
+    return result;
+}
+
+/// Left pad bytes with zeros to make 32 bytes
+fn leftPad(bytes: []const u8) [32]u8 {
+    var result = [_]u8{0} ** 32;
+    const len = @min(bytes.len, 32);
+    const start_pos = 32 - len;
+    @memcpy(result[start_pos..start_pos + len], bytes[0..len]);
+    return result;
+}
+
+/// Extract a u64 value from input at given offset (reads 32 bytes as big-endian u256, then converts to u64)
+fn extractU64FromInput(input: []const u8, offset: usize) u64 {
+    const padded = rightPadWithOffset(input, offset);
+    // Read 32 bytes as big-endian u256
+    const value = std.mem.readInt(u256, &padded, .big);
+    // Saturate to u64 max if value exceeds it
+    return @min(value, std.math.maxInt(u64));
+}
+
+/// Extract the high part of the exponent for iteration count calculation (matches REVM logic)
+fn extractExpHighp(input: []const u8, base_len: u64, exp_len: u64) u256 {
+    // Header is 96 bytes (3 x 32-byte length fields)
+    const header_length = 96;
+    
+    // Get how many bytes we need from the exponent (max 32)
+    const exp_highp_len: usize = @intCast(@min(exp_len, 32));
+    
+    // Skip the header
+    const input_after_header = if (input.len > header_length) 
+        input[header_length..] 
+    else 
+        &[_]u8{};
+    
+    // Get right-padded bytes from the exponent position
+    // This handles the case where input is shorter than expected
+    const right_padded_highp = rightPadWithOffset(input_after_header, @intCast(base_len));
+    
+    // If exp_len is less than 32 bytes, get only exp_len bytes and left-pad
+    const exp_bytes = right_padded_highp[0..exp_highp_len];
+    const left_padded = leftPad(exp_bytes);
+    
+    // Convert to u256 from big-endian bytes
+    var result: u256 = 0;
+    for (left_padded) |byte| {
+        result = (result << 8) | byte;
+    }
+    
+    return result;
+}
+
+/// Count the number of bits in a u256 value
+fn bitLen256(value: u256) u64 {
+    if (value == 0) return 0;
+    // For u256, we need to count leading zeros and subtract from 256
+    return 256 - @clz(value);
+}
+
+/// Calculate iteration count for MODEXP (same for all hardforks)
+fn calculateIterationCount(exp_len: u64, exp_highp: u256, multiplier: u64) u64 {
+    var iteration_count: u64 = 0;
+    
+    if (exp_len <= 32 and exp_highp == 0) {
+        iteration_count = 0;
+    } else if (exp_len <= 32) {
+        const bit_length = bitLen256(exp_highp);
+        iteration_count = if (bit_length > 0) bit_length - 1 else 0;
+    } else {
+        // exp_len > 32
+        const bit_length = bitLen256(exp_highp);
+        const adjusted_bit_len = @max(1, bit_length);
+        iteration_count = multiplier *% (exp_len - 32) +% (adjusted_bit_len - 1);
+    }
+    
+    return @max(iteration_count, 1);
+}
+
+/// Calculate multiplication complexity for Byzantium
+fn byzantiumMultiplicationComplexity(max_len: u64) u64 {
+    if (max_len <= 64) {
+        return max_len *% max_len;
+    } else if (max_len <= 1024) {
+        return (max_len *% max_len / 4) +% (96 *% max_len) -% 3072;
+    } else {
+        // Use 128-bit arithmetic to prevent overflow
+        const x = @as(u128, max_len);
+        const x_sq = x * x;
+        const result = (x_sq / 16) + (480 * x) - 199680;
+        return @intCast(@min(result, std.math.maxInt(u64)));
+    }
+}
+
+/// Calculate multiplication complexity for Berlin
+fn berlinMultiplicationComplexity(max_len: u64) u64 {
+    const words = (max_len + 7) / 8; // div_ceil
+    return words *% words;
+}
+
+/// Calculate multiplication complexity for Osaka (EIP-7883)
+fn osakaMultiplicationComplexity(max_len: u64) u64 {
+    if (max_len <= 32) {
+        return 16; // Fixed cost for small inputs
+    }
+    const words = (max_len + 7) / 8; // div_ceil
+    return 2 *% words *% words; // 2x multiplier for larger inputs
+}
+
+/// Get MODEXP gas cost based on hardfork and input
+fn getModexpGasCost(hardfork: Hardfork, input: []const u8) u64 {
+    // Extract base_len, exp_len, mod_len from first 96 bytes (as u256 then convert to u64)
+    const base_len = extractU64FromInput(input, 0);
+    const exp_len = extractU64FromInput(input, 32);
+    const mod_len = extractU64FromInput(input, 64);
+    
+    // Special case: both base and mod length being 0
+    if (base_len == 0 and mod_len == 0) {
+        // Return minimum gas for the hardfork
+        if (hardfork.isAtLeast(.BERLIN)) {
+            return GasConstants.MODEXP_MIN_GAS; // 200
+        }
+        return 0; // Byzantium has no minimum
+    }
+    
+    // TODO: When we add the Osaka hardfork, enforce size limits:
+    // if (hardfork.isAtLeast(.OSAKA)) {
+    //     const INPUT_SIZE_LIMIT = 1024; // EIP-7823
+    //     if (base_len > INPUT_SIZE_LIMIT or exp_len > INPUT_SIZE_LIMIT or mod_len > INPUT_SIZE_LIMIT) {
+    //         // In real EVM this would be an error, for now return max gas
+    //         return std.math.maxInt(u64);
+    //     }
+    // }
+    
+    // Extract high part of exponent for iteration count (as u256)
+    const exp_highp = extractExpHighp(input, base_len, exp_len);
+    
+    // Calculate gas based on hardfork
+    const max_len = @max(base_len, mod_len);
+    
+    // TODO: When we add the Osaka hardfork, uncomment:
+    // if (hardfork.isAtLeast(.OSAKA)) {
+    //     // Osaka (EIP-7883): MIN_PRICE=500, MULTIPLIER=16, GAS_DIVISOR=3
+    //     const multiplication_complexity = osakaMultiplicationComplexity(max_len);
+    //     const iteration_count = calculateIterationCount(exp_len, exp_highp, 16);
+    //     const gas = (multiplication_complexity *% iteration_count) / 3;
+    //     return @max(500, gas);
+    // }
+    
+    if (hardfork.isAtLeast(.BERLIN)) {
+        // Berlin (EIP-2565): MIN_PRICE=200, MULTIPLIER=8, GAS_DIVISOR=3
+        const multiplication_complexity = berlinMultiplicationComplexity(max_len);
+        const iteration_count = calculateIterationCount(exp_len, exp_highp, 8);
+        const gas = (multiplication_complexity *% iteration_count) / 3;
+        return @max(GasConstants.MODEXP_MIN_GAS, gas);
+    } else {
+        // Byzantium (EIP-198): MIN_PRICE=0, MULTIPLIER=8, GAS_DIVISOR=20
+        const multiplication_complexity = byzantiumMultiplicationComplexity(max_len);
+        const iteration_count = calculateIterationCount(exp_len, exp_highp, 8);
+        const gas = (multiplication_complexity *% iteration_count) / 20;
+        return gas; // No minimum for Byzantium
+    }
+}
+
+/// Get BLAKE2F gas cost based on rounds
+fn getBlake2fGasCost(input: []const u8) u64 {
+    if (input.len < 4) return 0;
+    // First 4 bytes are the number of rounds (big-endian)
+    const rounds = (@as(u32, input[0]) << 24) |
+                   (@as(u32, input[1]) << 16) |
+                   (@as(u32, input[2]) << 8) |
+                   @as(u32, input[3]);
+    return rounds * GasConstants.BLAKE2F_PER_ROUND;
+}
+
+/// Get KZG point evaluation gas cost (fixed)
+fn getPointEvaluationGasCost() u64 {
+    return GasConstants.POINT_EVALUATION_COST;
+}
+
+/// Get BLS12-381 G1 ADD gas cost (fixed)
+fn getBls12381G1AddGasCost() u64 {
+    return GasConstants.BLS12_381_G1_ADD;
+}
+
+/// Get BLS12-381 G1 MSM (Multi-Scalar Multiplication) gas cost
+/// Note: G1_MUL uses MSM with k=1 (single scalar multiplication)
+/// IMPORTANT: The precompile execution MUST validate that input_len % 160 == 0
+/// and perform point/scalar validation before consuming gas
+fn getBls12381G1MsmGasCost(input_len: usize) u64 {
+    // Each pair is 160 bytes (128 bytes G1 point + 32 bytes scalar)
+    // For invalid input lengths, we still calculate gas based on truncated pairs
+    // The precompile will fail with this gas consumed if input is invalid
+    const num_pairs = input_len / 160;
+    
+    // Empty input (k=0) returns 0 gas per REVM formula
+    if (num_pairs == 0) {
+        return 0;
+    }
+    
+    // Apply discount table for MSM operations
+    const discount_index = @min(num_pairs - 1, GasConstants.BLS12_381_G1_MSM_DISCOUNT.len - 1);
+    const discount = GasConstants.BLS12_381_G1_MSM_DISCOUNT[discount_index];
+    
+    // Formula: (k * BASE_GAS * DISCOUNT[k]) / MSM_MULTIPLIER
+    return (@as(u64, num_pairs) * GasConstants.BLS12_381_G1_MSM * discount) / GasConstants.MSM_MULTIPLIER;
+}
+
+/// Get BLS12-381 G2 ADD gas cost (fixed)
+fn getBls12381G2AddGasCost() u64 {
+    return GasConstants.BLS12_381_G2_ADD;
+}
+
+/// Get BLS12-381 G2 MSM (Multi-Scalar Multiplication) gas cost
+/// Note: G2_MUL uses MSM with k=1 (single scalar multiplication)
+/// IMPORTANT: The precompile execution MUST validate that input_len % 288 == 0
+/// and perform point/scalar validation before consuming gas
+fn getBls12381G2MsmGasCost(input_len: usize) u64 {
+    // Each pair is 288 bytes (256 bytes G2 point + 32 bytes scalar)
+    // For invalid input lengths, we still calculate gas based on truncated pairs
+    // The precompile will fail with this gas consumed if input is invalid
+    const num_pairs = input_len / 288;
+    
+    // Empty input (k=0) returns 0 gas per REVM formula
+    if (num_pairs == 0) {
+        return 0;
+    }
+    
+    // Apply discount table for MSM operations
+    const discount_index = @min(num_pairs - 1, GasConstants.BLS12_381_G2_MSM_DISCOUNT.len - 1);
+    const discount = GasConstants.BLS12_381_G2_MSM_DISCOUNT[discount_index];
+    
+    // Formula: (k * BASE_GAS * DISCOUNT[k]) / MSM_MULTIPLIER
+    return (@as(u64, num_pairs) * GasConstants.BLS12_381_G2_MSM * discount) / GasConstants.MSM_MULTIPLIER;
+}
+
+/// Get BLS12-381 PAIRING gas cost based on number of pairs
+/// IMPORTANT: The precompile execution MUST validate that input_len % 384 == 0
+/// and perform G1/G2 point validation before consuming gas
+fn getBls12381PairingGasCost(input_len: usize) u64 {
+    // Each pair is 384 bytes (128 bytes G1 + 256 bytes G2)
+    // For invalid input lengths, we still calculate gas based on truncated pairs
+    // The precompile will fail with this gas consumed if input is invalid
+    const num_pairs = input_len / 384;
+    
+    // Pairing always has base cost even for zero pairs (empty pairing returns 1)
+    return GasConstants.BLS12_381_PAIRING_BASE + @as(u64, num_pairs) * GasConstants.BLS12_381_PAIRING_PER_PAIR;
+}
+
+/// Get BLS12-381 MAP_FP_TO_G1 gas cost (fixed)
+fn getBls12381MapFpToG1GasCost() u64 {
+    return GasConstants.BLS12_381_MAP_FP_TO_G1;
+}
+
+/// Get BLS12-381 MAP_FP2_TO_G2 gas cost (fixed)
+fn getBls12381MapFp2ToG2GasCost() u64 {
+    return GasConstants.BLS12_381_MAP_FP2_TO_G2;
+}
+
+/// Get ECADD gas cost based on hardfork
+fn getEcaddGasCost(hardfork: Hardfork) u64 {
+    if (hardfork.isAtLeast(.ISTANBUL)) {
+        @branchHint(.likely);
+        return GasConstants.ECADD_GAS_COST; // 150 gas
+    }
+    return GasConstants.ECADD_GAS_COST_BYZANTIUM; // 500 gas
+}
+
+/// Get ECMUL gas cost based on hardfork
+fn getEcmulGasCost(hardfork: Hardfork) u64 {
+    if (hardfork.isAtLeast(.ISTANBUL)) {
+        @branchHint(.likely);
+        return GasConstants.ECMUL_GAS_COST; // 6,000 gas
+    }
+    return GasConstants.ECMUL_GAS_COST_BYZANTIUM; // 40,000 gas
+}
+
+/// Get ECPAIRING gas cost based on hardfork and input length
+fn getEcpairingGasCost(hardfork: Hardfork, input_len: usize) u64 {
+    // Each pair is 192 bytes (64 bytes G1 + 128 bytes G2)
+    const pair_count = input_len / 192;
+    
+    if (hardfork.isAtLeast(.ISTANBUL)) {
+        @branchHint(.likely);
+        return GasConstants.ECPAIRING_BASE_GAS_COST + 
+               @as(u64, pair_count) * GasConstants.ECPAIRING_PER_PAIR_GAS_COST;
+    }
+    return GasConstants.ECPAIRING_BASE_GAS_COST_BYZANTIUM + 
+           @as(u64, pair_count) * GasConstants.ECPAIRING_PER_PAIR_GAS_COST_BYZANTIUM;
+}
 
 // Context for Address ArrayHashMap
 const AddressContext = std.array_hash_map.AutoContext(Address);
@@ -319,7 +661,7 @@ pub const MinimalEvm = struct {
 
         // Pre-warm precompiles if Berlin+
         if (!self.hardfork.isAtLeast(.BERLIN)) return;
-        // TODO: Pre-warm precompiles
+        try self.pre_warm_addresses(&PRECOMPILE_ADDRESSES);
     }
 
     /// Execute bytecode (main entry point like evm.execute)
@@ -435,7 +777,81 @@ pub const MinimalEvm = struct {
         // Get code for the target address
         const code = self.get_code(address);
         if (code.len == 0) {
-            // TODO: Implement precompiles
+            // Check if this is a precompile address
+            if (self.is_precompile(address)) {
+                var precompile_gas: u64 = 0;
+                
+                // Calculate gas cost based on precompile type
+                if (address.equals(precompiles.ECRECOVER_ADDRESS)) {
+                    precompile_gas = getEcrecoverGasCost();
+                } else if (address.equals(precompiles.SHA256_ADDRESS)) {
+                    precompile_gas = getSha256GasCost(input.len);
+                } else if (address.equals(precompiles.RIPEMD160_ADDRESS)) {
+                    precompile_gas = getRipemd160GasCost(input.len);
+                } else if (address.equals(precompiles.IDENTITY_ADDRESS)) {
+                    precompile_gas = getIdentityGasCost(input.len);
+                } else if (address.equals(precompiles.MODEXP_ADDRESS)) {
+                    precompile_gas = getModexpGasCost(self.hardfork, input);
+                } else if (address.equals(precompiles.ECADD_ADDRESS)) {
+                    precompile_gas = getEcaddGasCost(self.hardfork);
+                } else if (address.equals(precompiles.ECMUL_ADDRESS)) {
+                    precompile_gas = getEcmulGasCost(self.hardfork);
+                } else if (address.equals(precompiles.ECPAIRING_ADDRESS)) {
+                    precompile_gas = getEcpairingGasCost(self.hardfork, input.len);
+                } else if (address.equals(precompiles.BLAKE2F_ADDRESS)) {
+                    precompile_gas = getBlake2fGasCost(input);
+                } else if (address.equals(precompiles.POINT_EVALUATION_ADDRESS)) {
+                    precompile_gas = getPointEvaluationGasCost();
+                } else if (address.equals(precompiles.BLS12_381_G1_ADD_ADDRESS)) {
+                    precompile_gas = getBls12381G1AddGasCost();
+                } else if (address.equals(precompiles.BLS12_381_G1_MSM_ADDRESS)) {
+                    // G1 MSM (Multi-Scalar Multiplication)
+                    // Input is 160*k bytes (128 bytes G1 point + 32 bytes scalar per pair)
+                    precompile_gas = getBls12381G1MsmGasCost(input.len);
+                } else if (address.equals(precompiles.BLS12_381_G2_ADD_ADDRESS)) {
+                    precompile_gas = getBls12381G2AddGasCost();
+                } else if (address.equals(precompiles.BLS12_381_G2_MSM_ADDRESS)) {
+                    // G2 MSM (Multi-Scalar Multiplication)
+                    // Input is 288*k bytes (256 bytes G2 point + 32 bytes scalar per pair)
+                    precompile_gas = getBls12381G2MsmGasCost(input.len);
+                } else if (address.equals(precompiles.BLS12_381_PAIRING_ADDRESS)) {
+                    precompile_gas = getBls12381PairingGasCost(input.len);
+                } else if (address.equals(precompiles.BLS12_381_MAP_FP_TO_G1_ADDRESS)) {
+                    precompile_gas = getBls12381MapFpToG1GasCost();
+                } else if (address.equals(precompiles.BLS12_381_MAP_FP2_TO_G2_ADDRESS)) {
+                    precompile_gas = getBls12381MapFp2ToG2GasCost();
+                }
+                
+                if (gas < precompile_gas) {
+                    return CallResult{
+                        .success = false,
+                        .gas_left = 0,
+                        .output = &[_]u8{},
+                    };
+                }
+                
+                // TODO: Implement actual precompile logic and output
+                // For now, return dummy output with correct gas consumption
+                const output = if (address.equals(precompiles.SHA256_ADDRESS) or
+                                   address.equals(precompiles.ECRECOVER_ADDRESS) or
+                                   address.equals(precompiles.RIPEMD160_ADDRESS)) blk: {
+                    // These return 32 bytes
+                    const result = try self.allocator.alloc(u8, 32);
+                    @memset(result, 0);
+                    break :blk result;
+                } else if (address.equals(precompiles.IDENTITY_ADDRESS)) blk: {
+                    // Identity returns the input
+                    const result = try self.allocator.alloc(u8, input.len);
+                    @memcpy(result, input);
+                    break :blk result;
+                } else &[_]u8{};
+                
+                return CallResult{
+                    .success = true,
+                    .gas_left = gas - precompile_gas,
+                    .output = output,
+                };
+            }
             
             // Empty account - just return success
             return CallResult{
@@ -554,10 +970,11 @@ pub const MinimalEvm = struct {
     }
 
     /// Check if an address is a precompile
-    /// TODO: implement this
     pub fn is_precompile(self: *const Self, address: Address) bool {
         _ = self;
-        _ = address;
+        for (PRECOMPILE_ADDRESSES) |precompile| {
+            if (address.equals(precompile)) return true;
+        }
         return false;
     }
 
