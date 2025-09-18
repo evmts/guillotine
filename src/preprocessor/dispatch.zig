@@ -515,7 +515,7 @@ pub fn Dispatch(comptime FrameType: type) type {
 
             // Notify tracer of schedule build start
             if (tracer) |t| {
-                t.onScheduleBuildStart(bytecode.*.len());
+                t.onScheduleBuildStart(bytecode.len());
             }
             
             const ScheduleList = ArrayList(Self.Item, null);
@@ -531,9 +531,9 @@ pub fn Dispatch(comptime FrameType: type) type {
             var unresolved_jumps = ArrayList(UnresolvedJump, null){};
             defer unresolved_jumps.deinit(allocator);
 
-            var iter = bytecode.*.createIterator();
+            var iter = bytecode.createIterator();
 
-            const first_block_gas = calculateFirstBlockGas(bytecode.*);
+            const first_block_gas = calculateFirstBlockGas(bytecode);
 
             if (first_block_gas > 0) {
                 try schedule_items.append(allocator, .{ .first_block_gas = .{ .gas = @intCast(first_block_gas) } });
