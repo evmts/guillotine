@@ -301,12 +301,14 @@ pub fn Frame(comptime config: FrameConfig) type {
         pub const vector_length = config.vector_length;
 
         /// Returns the appropriate tail call modifier based on the target architecture.
-        /// WebAssembly doesn't support tail calls by default, so we use .auto for wasm targets.
+        /// WebAssembly and x86_64 stage2 backend don't support tail calls, so we use .auto for those targets.
         pub inline fn getTailCallModifier() std.builtin.CallModifier {
-            return if (builtin.target.cpu.arch == .wasm32 or builtin.target.cpu.arch == .wasm64)
+            return if (builtin.target.cpu.arch == .wasm32 or 
+                      builtin.target.cpu.arch == .wasm64 or
+                      builtin.target.cpu.arch == .x86_64)
                 .auto
             else
-                .always_tail; // Must use always_tail for performance
+                .always_tail; // Must use always_tail for performance on supported architectures
         }
         /// The "word" type used by the evm. Defaults to u256. "Word" is the type used by Stack and throughout the Evm
         /// If set to something else the EVM will update to that new word size. e.g. run kekkak128 instead of kekkak256
