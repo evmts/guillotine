@@ -80,6 +80,32 @@ fn runTestCase(allocator: std.mem.Allocator, test_case: std.json.Value) !void {
         }
     }
     
+    // Set up initial storage
+    if (initial_state.get("storage")) |storage| {
+        if (storage == .object) {
+            var it = storage.object.iterator();
+            while (it.next()) |entry| {
+                const addr_str = entry.key_ptr.*;
+                const addr_storage = entry.value_ptr.*;
+                
+                if (addr_storage == .object) {
+                    const addr = try primitives.Address.fromHex(addr_str);
+                    var storage_it = addr_storage.object.iterator();
+                    while (storage_it.next()) |storage_entry| {
+                        const slot_str = storage_entry.key_ptr.*;
+                        const storage_value_str = storage_entry.value_ptr.*;
+                        
+                        if (storage_value_str == .string) {
+                            const slot = if (slot_str.len > 0) try primitives.Hex.hex_to_u256(slot_str) else 0;
+                            const storage_value = if (storage_value_str.string.len > 0) try primitives.Hex.hex_to_u256(storage_value_str.string) else 0;
+                            try evm.set_storage(addr, slot, storage_value);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
     // Set contract code
     try evm.setCode(contract_addr, bytecode);
     
