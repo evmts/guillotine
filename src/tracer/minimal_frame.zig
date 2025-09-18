@@ -935,7 +935,7 @@ pub const MinimalFrame = struct {
             // GASLIMIT
             0x45 => {
                 try self.consumeGas(GasConstants.GasQuickStep);
-                try self.pushStack(evm.block_gas_limit);
+                try self.pushStack(@as(u256, evm.block_gas_limit));
                 self.pc += 1;
             },
 
@@ -945,7 +945,7 @@ pub const MinimalFrame = struct {
                 if (evm.hardfork.isBefore(.ISTANBUL)) return error.InvalidOpcode;
 
                 try self.consumeGas(GasConstants.GasQuickStep);
-                try self.pushStack(evm.chain_id);
+                try self.pushStack(@as(u256, evm.chain_id));
                 self.pc += 1;
             },
 

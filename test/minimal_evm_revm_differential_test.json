@@ -18,11 +18,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -55,11 +55,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -93,11 +93,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -131,11 +131,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -168,11 +168,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -206,11 +206,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -243,11 +243,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -281,11 +281,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -318,11 +318,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -356,11 +356,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -393,11 +393,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -430,11 +430,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -467,11 +467,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -505,11 +505,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -543,11 +543,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -580,11 +580,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -617,11 +617,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -654,11 +654,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -691,11 +691,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -728,11 +728,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -765,11 +765,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -802,11 +802,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -839,11 +839,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -876,11 +876,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -913,11 +913,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -950,11 +950,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -988,11 +988,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -1026,11 +1026,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -1065,11 +1065,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -1102,11 +1102,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -1139,11 +1139,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -1176,11 +1176,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -1218,11 +1218,11 @@
         }
       },
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -1261,11 +1261,11 @@
         }
       },
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -1305,11 +1305,11 @@
         }
       },
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -1348,11 +1348,11 @@
         }
       },
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -1386,11 +1386,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -1424,11 +1424,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -1462,11 +1462,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -1499,11 +1499,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -1536,11 +1536,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -1573,11 +1573,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -1610,11 +1610,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -1648,11 +1648,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -1686,11 +1686,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -1723,11 +1723,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -1760,11 +1760,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -1798,11 +1798,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -1835,11 +1835,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -1873,11 +1873,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -1910,11 +1910,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -1948,11 +1948,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -1985,11 +1985,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -2022,11 +2022,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -2059,11 +2059,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -2096,11 +2096,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -2133,11 +2133,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -2170,11 +2170,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -2207,11 +2207,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -2244,11 +2244,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -2281,11 +2281,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -2318,18 +2318,18 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
       "success": true,
       "gas_used": 21017,
       "gas_refunded": 0,
-      "output": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      "output": "0x0000000000000000000000000000000000000000000000000000000001c9c380"
     },
     "tags": [
       "block",
@@ -2355,11 +2355,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -2392,11 +2392,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -2429,11 +2429,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -2465,11 +2465,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -2501,11 +2501,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -2537,11 +2537,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -2573,11 +2573,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -2610,11 +2610,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -2647,11 +2647,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -2685,11 +2685,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -2722,11 +2722,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -2760,11 +2760,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -2798,11 +2798,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -2842,11 +2842,11 @@
         }
       },
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -2893,11 +2893,11 @@
         }
       },
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -2931,11 +2931,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -2969,11 +2969,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -3007,11 +3007,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -3045,11 +3045,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -3082,11 +3082,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -3120,11 +3120,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -3158,11 +3158,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -3195,11 +3195,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -3232,11 +3232,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -3270,11 +3270,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -3307,11 +3307,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -3345,11 +3345,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -3384,11 +3384,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -3423,11 +3423,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -3461,11 +3461,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -3499,11 +3499,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -3538,11 +3538,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -3581,11 +3581,11 @@
         }
       },
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -3620,11 +3620,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -3658,11 +3658,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -3696,11 +3696,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -3734,11 +3734,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -3772,11 +3772,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
@@ -3810,11 +3810,11 @@
       },
       "storage": {},
       "block_info": {
-        "number": 18000000,
-        "timestamp": 1700000000,
+        "number": 0,
+        "timestamp": 1,
         "gas_limit": 30000000,
         "difficulty": "0x0",
-        "base_fee": "0x1"
+        "base_fee": "0x0"
       }
     },
     "expected": {
