@@ -4,25 +4,34 @@ const primitives = @import("primitives");
 const common = @import("common.zig");
 
 fn run_slt_test(allocator: std.mem.Allocator, a: u256, b: u256, expected: u256) !void {
-    _ = expected; // TODO: Use when stack comparison is re-enabled
-    // Build bytecode: PUSH a, PUSH b, SLT
+    // Build bytecode: PUSH b, PUSH a, SLT
     var bytecode = try std.ArrayList(u8).initCapacity(allocator, 0);
     defer bytecode.deinit(allocator);
     
-    // PUSH a
-    try bytecode.append(allocator, 0x7f); // PUSH32
-    var a_bytes: [32]u8 = undefined;
-    std.mem.writeInt(u256, &a_bytes, a, .big);
-    try bytecode.appendSlice(allocator, &a_bytes);
-    
-    // PUSH b
+    // PUSH b first (will be second from top)
     try bytecode.append(allocator, 0x7f); // PUSH32
     var b_bytes: [32]u8 = undefined;
     std.mem.writeInt(u256, &b_bytes, b, .big);
     try bytecode.appendSlice(allocator, &b_bytes);
     
+    // PUSH a second (will be on top)
+    try bytecode.append(allocator, 0x7f); // PUSH32
+    var a_bytes: [32]u8 = undefined;
+    std.mem.writeInt(u256, &a_bytes, a, .big);
+    try bytecode.appendSlice(allocator, &a_bytes);
+    
     // SLT
     try bytecode.append(allocator, 0x12);
+    
+    // Store result and return
+    try bytecode.append(allocator, 0x60); // PUSH1
+    try bytecode.append(allocator, 0x00); // 0 (memory offset)
+    try bytecode.append(allocator, 0x52); // MSTORE
+    try bytecode.append(allocator, 0x60); // PUSH1
+    try bytecode.append(allocator, 0x20); // 32 (length)
+    try bytecode.append(allocator, 0x60); // PUSH1
+    try bytecode.append(allocator, 0x00); // 0 (offset)
+    try bytecode.append(allocator, 0xf3); // RETURN
     
     // Setup Guillotine EVM
     var database = evm.Database.init(allocator);
@@ -89,25 +98,39 @@ fn run_slt_test(allocator: std.mem.Allocator, a: u256, b: u256, expected: u256) 
     
     var guillotine_result = guillotine_evm.call(call_params);
     defer guillotine_result.deinit(allocator);
+    
+    // Verify the result
+    // The bytecode pushes b, then a, so stack is [a, b] with a on top
+    // SLT pops a (first), then b (second), and computes a < b (signed comparison)
+    
+    // The result should be 32 bytes with the value at the end
+    try std.testing.expect(guillotine_result.output.len == 32);
+    
+    // Convert output bytes to u256 (big-endian)
+    var result_value: u256 = 0;
+    for (guillotine_result.output) |byte| {
+        result_value = (result_value << 8) | byte;
+    }
+    
+    try std.testing.expectEqual(expected, result_value);
 }
 
 fn run_slt_test_with_jump(allocator: std.mem.Allocator, a: u256, b: u256, expected: u256) !void {
-    _ = expected; // TODO: Use when stack comparison is re-enabled
-    // Build bytecode with JUMP to prevent opcode fusion: PUSH a, PUSH b, PUSH dest, JUMP, JUMPDEST, SLT
+    // Build bytecode with JUMP to prevent opcode fusion: PUSH b, PUSH a, PUSH dest, JUMP, JUMPDEST, SLT
     var bytecode = try std.ArrayList(u8).initCapacity(allocator, 0);
     defer bytecode.deinit(allocator);
     
-    // PUSH a
-    try bytecode.append(allocator, 0x7f); // PUSH32
-    var a_bytes: [32]u8 = undefined;
-    std.mem.writeInt(u256, &a_bytes, a, .big);
-    try bytecode.appendSlice(allocator, &a_bytes);
-    
-    // PUSH b
+    // PUSH b first (will be second from top)
     try bytecode.append(allocator, 0x7f); // PUSH32
     var b_bytes: [32]u8 = undefined;
     std.mem.writeInt(u256, &b_bytes, b, .big);
     try bytecode.appendSlice(allocator, &b_bytes);
+    
+    // PUSH a second (will be on top)
+    try bytecode.append(allocator, 0x7f); // PUSH32
+    var a_bytes: [32]u8 = undefined;
+    std.mem.writeInt(u256, &a_bytes, a, .big);
+    try bytecode.appendSlice(allocator, &a_bytes);
     
     // PUSH destination (position after JUMP: 32 + 1 + 32 + 1 + 1 + 1 + 1 = 69)
     try bytecode.append(allocator, 0x60); // PUSH1
@@ -121,6 +144,16 @@ fn run_slt_test_with_jump(allocator: std.mem.Allocator, a: u256, b: u256, expect
     
     // SLT
     try bytecode.append(allocator, 0x12);
+    
+    // Store result and return
+    try bytecode.append(allocator, 0x60); // PUSH1
+    try bytecode.append(allocator, 0x00); // 0 (memory offset)
+    try bytecode.append(allocator, 0x52); // MSTORE
+    try bytecode.append(allocator, 0x60); // PUSH1
+    try bytecode.append(allocator, 0x20); // 32 (length)
+    try bytecode.append(allocator, 0x60); // PUSH1
+    try bytecode.append(allocator, 0x00); // 0 (offset)
+    try bytecode.append(allocator, 0xf3); // RETURN
     
     // Setup and execute (same as regular test)
     var database = evm.Database.init(allocator);
@@ -187,6 +220,21 @@ fn run_slt_test_with_jump(allocator: std.mem.Allocator, a: u256, b: u256, expect
     
     var guillotine_result = guillotine_evm.call(call_params);
     defer guillotine_result.deinit(allocator);
+    
+    // Verify the result
+    // The bytecode pushes b, then a, so stack is [a, b] with a on top
+    // SLT pops a (first), then b (second), and computes a < b (signed comparison)
+    
+    // The result should be 32 bytes with the value at the end
+    try std.testing.expect(guillotine_result.output.len == 32);
+    
+    // Convert output bytes to u256 (big-endian)
+    var result_value: u256 = 0;
+    for (guillotine_result.output) |byte| {
+        result_value = (result_value << 8) | byte;
+    }
+    
+    try std.testing.expectEqual(expected, result_value);
 }
 
 test "SLT: basic positive numbers" {

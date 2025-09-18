@@ -4,20 +4,20 @@ const primitives = @import("primitives");
 const common = @import("common.zig");
 
 test "LT: basic (5 < 10 = 1)" {
-    try run_lt_test(std.testing.allocator, 5, 10);
+    try run_lt_test(std.testing.allocator, 5, 10, 1); // 5 < 10 = true
 }
 
-fn run_lt_test(allocator: std.mem.Allocator, a: u256, b: u256) !void {
+fn run_lt_test(allocator: std.mem.Allocator, a: u256, b: u256, expected: u256) !void {
     // Build custom bytecode for LT test
     var buf = std.ArrayList(u8){};
     defer buf.deinit(allocator);
     
-    // Push a
-    if (a == 0) {
+    // Push b first (will be second from top)
+    if (b == 0) {
         try buf.append(allocator, 0x5f); // PUSH0
     } else {
         var tmp: [32]u8 = [_]u8{0} ** 32;
-        std.mem.writeInt(u256, &tmp, a, .big);
+        std.mem.writeInt(u256, &tmp, b, .big);
         const first_non_zero = std.mem.indexOfNonePos(u8, &tmp, 0, &[_]u8{0}) orelse 32;
         const slice = tmp[first_non_zero..];
         if (slice.len > 0 and slice.len <= 32) {
@@ -27,12 +27,12 @@ fn run_lt_test(allocator: std.mem.Allocator, a: u256, b: u256) !void {
         }
     }
     
-    // Push b
-    if (b == 0) {
+    // Push a second (will be on top)
+    if (a == 0) {
         try buf.append(allocator, 0x5f); // PUSH0
     } else {
         var tmp: [32]u8 = [_]u8{0} ** 32;
-        std.mem.writeInt(u256, &tmp, b, .big);
+        std.mem.writeInt(u256, &tmp, a, .big);
         const first_non_zero = std.mem.indexOfNonePos(u8, &tmp, 0, &[_]u8{0}) orelse 32;
         const slice = tmp[first_non_zero..];
         if (slice.len > 0 and slice.len <= 32) {
@@ -123,124 +123,139 @@ fn run_lt_test(allocator: std.mem.Allocator, a: u256, b: u256) !void {
     
     var guillotine_result = guillotine_evm.call(call_params);
     defer guillotine_result.deinit(allocator);
+    
+    // Verify the result
+    // The bytecode pushes b, then a, so stack is [a, b] with a on top
+    // LT pops a (first), then b (second), and computes a < b
+    
+    // The result should be 32 bytes with the value at the end
+    try std.testing.expect(guillotine_result.output.len == 32);
+    
+    // Convert output bytes to u256 (big-endian)
+    var result_value: u256 = 0;
+    for (guillotine_result.output) |byte| {
+        result_value = (result_value << 8) | byte;
+    }
+    
+    try std.testing.expectEqual(expected, result_value);
 }
 
 test "LT: equal values (10 < 10 = 0)" {
-    try run_lt_test(std.testing.allocator, 10, 10);
+    try run_lt_test(std.testing.allocator, 10, 10, 0); // 10 < 10 = false
 }
 
 test "LT: greater than (10 < 5 = 0)" {
-    try run_lt_test(std.testing.allocator, 10, 5);
+    try run_lt_test(std.testing.allocator, 10, 5, 0); // 10 < 5 = false
 }
 
 test "LT: zero comparison (0 < 1 = 1)" {
-    try run_lt_test(std.testing.allocator, 0, 1);
+    try run_lt_test(std.testing.allocator, 0, 1, 1); // 0 < 1 = true
 }
 
 test "LT: zero comparison reversed (1 < 0 = 0)" {
-    try run_lt_test(std.testing.allocator, 1, 0);
+    try run_lt_test(std.testing.allocator, 1, 0, 0); // 1 < 0 = false
 }
 
 test "LT: both zero (0 < 0 = 0)" {
-    try run_lt_test(std.testing.allocator, 0, 0);
+    try run_lt_test(std.testing.allocator, 0, 0, 0); // 0 < 0 = false
 }
 
 test "LT: one and zero (1 < 0 = 0)" {
-    try run_lt_test(std.testing.allocator, 1, 0);
+    try run_lt_test(std.testing.allocator, 1, 0, 0); // 1 < 0 = false
 }
 
 test "LT: large numbers" {
-    try run_lt_test(std.testing.allocator, 999999, 1000000);
+    try run_lt_test(std.testing.allocator, 999999, 1000000, 1); // 999999 < 1000000 = true
 }
 
 test "LT: near u64 boundary" {
     const near_u64 = @as(u256, std.math.maxInt(u64)) - 10;
-    try run_lt_test(std.testing.allocator, near_u64, @as(u256, std.math.maxInt(u64)));
+    try run_lt_test(std.testing.allocator, near_u64, @as(u256, std.math.maxInt(u64)), 1); // near_u64 < u64_max = true
 }
 
 test "LT: exactly u64 max" {
     const u64_max = @as(u256, std.math.maxInt(u64));
-    try run_lt_test(std.testing.allocator, u64_max, u64_max + 1);
+    try run_lt_test(std.testing.allocator, u64_max, u64_max + 1, 1); // u64_max < (u64_max + 1) = true
 }
 
 test "LT: large 128-bit numbers" {
     const large_128 = @as(u256, 1) << 120;
-    try run_lt_test(std.testing.allocator, large_128, large_128 + 1);
+    try run_lt_test(std.testing.allocator, large_128, large_128 + 1, 1); // large_128 < (large_128 + 1) = true
 }
 
 test "LT: MAX_U256 comparisons" {
-    try run_lt_test(std.testing.allocator, std.math.maxInt(u256) - 1, std.math.maxInt(u256));
+    try run_lt_test(std.testing.allocator, std.math.maxInt(u256) - 1, std.math.maxInt(u256), 1); // (MAX - 1) < MAX = true
 }
 
 test "LT: MAX_U256 with self" {
-    try run_lt_test(std.testing.allocator, std.math.maxInt(u256), std.math.maxInt(u256));
+    try run_lt_test(std.testing.allocator, std.math.maxInt(u256), std.math.maxInt(u256), 0); // MAX < MAX = false
 }
 
 test "LT: zero and MAX" {
-    try run_lt_test(std.testing.allocator, 0, std.math.maxInt(u256));
+    try run_lt_test(std.testing.allocator, 0, std.math.maxInt(u256), 1); // 0 < MAX = true
 }
 
 test "LT: MAX and zero" {
-    try run_lt_test(std.testing.allocator, std.math.maxInt(u256), 0);
+    try run_lt_test(std.testing.allocator, std.math.maxInt(u256), 0, 0); // MAX < 0 = false
 }
 
 test "LT: consecutive numbers" {
-    try run_lt_test(std.testing.allocator, 12345, 12346);
+    try run_lt_test(std.testing.allocator, 12345, 12346, 1); // 12345 < 12346 = true
 }
 
 test "LT: powers of 2" {
-    try run_lt_test(std.testing.allocator, 256, 512);
+    try run_lt_test(std.testing.allocator, 256, 512, 1); // 256 < 512 = true
 }
 
 test "LT: near 256-bit boundary" {
     const near_max = std.math.maxInt(u256) - 1000;
-    try run_lt_test(std.testing.allocator, near_max, std.math.maxInt(u256));
+    try run_lt_test(std.testing.allocator, near_max, std.math.maxInt(u256), 1); // (MAX - 1000) < MAX = true
 }
 
 test "LT: alternating bit patterns" {
     const pattern1 = 0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA;
     const pattern2 = 0x5555555555555555555555555555555555555555555555555555555555555555;
-    try run_lt_test(std.testing.allocator, pattern2, pattern1);
+    try run_lt_test(std.testing.allocator, pattern2, pattern1, 1); // 0x555... < 0xAAA... = true
 }
 
 test "LT: all ones pattern" {
     const all_ones_128 = (@as(u256, 1) << 128) - 1;
-    try run_lt_test(std.testing.allocator, all_ones_128, (@as(u256, 1) << 128));
+    try run_lt_test(std.testing.allocator, all_ones_128, (@as(u256, 1) << 128), 1); // (2^128 - 1) < 2^128 = true
 }
 
 test "LT: fibonacci numbers" {
-    try run_lt_test(std.testing.allocator, 13, 21);
+    try run_lt_test(std.testing.allocator, 13, 21, 1); // 13 < 21 = true
 }
 
 test "LT: prime numbers" {
-    try run_lt_test(std.testing.allocator, 997, 1009);
+    try run_lt_test(std.testing.allocator, 997, 1009, 1); // 997 < 1009 = true
 }
 
 test "LT: edge case near middle" {
     const mid = @as(u256, 1) << 128;
-    try run_lt_test(std.testing.allocator, mid - 1, mid);
+    try run_lt_test(std.testing.allocator, mid - 1, mid, 1); // (mid - 1) < mid = true
 }
 
 test "LT: very large difference" {
-    try run_lt_test(std.testing.allocator, 1, @as(u256, 1) << 255);
+    try run_lt_test(std.testing.allocator, 1, @as(u256, 1) << 255, 1); // 1 < 2^255 = true
 }
 
 test "LT: one apart at boundary" {
     const boundary = @as(u256, 1) << 64;
-    try run_lt_test(std.testing.allocator, boundary - 1, boundary);
+    try run_lt_test(std.testing.allocator, boundary - 1, boundary, 1); // (boundary - 1) < boundary = true
 }
 
-fn run_lt_test_with_jump(allocator: std.mem.Allocator, a: u256, b: u256) !void {
+fn run_lt_test_with_jump(allocator: std.mem.Allocator, a: u256, b: u256, expected: u256) !void {
     // Build custom bytecode for LT test with jump to prevent fusion
     var buf = std.ArrayList(u8){};
     defer buf.deinit(allocator);
     
-    // Push a
-    if (a == 0) {
+    // Push b first (will be second from top)
+    if (b == 0) {
         try buf.append(allocator, 0x5f); // PUSH0
     } else {
         var tmp: [32]u8 = [_]u8{0} ** 32;
-        std.mem.writeInt(u256, &tmp, a, .big);
+        std.mem.writeInt(u256, &tmp, b, .big);
         const first_non_zero = std.mem.indexOfNonePos(u8, &tmp, 0, &[_]u8{0}) orelse 32;
         const slice = tmp[first_non_zero..];
         if (slice.len > 0 and slice.len <= 32) {
@@ -250,12 +265,12 @@ fn run_lt_test_with_jump(allocator: std.mem.Allocator, a: u256, b: u256) !void {
         }
     }
     
-    // Push b
-    if (b == 0) {
+    // Push a second (will be on top)
+    if (a == 0) {
         try buf.append(allocator, 0x5f); // PUSH0
     } else {
         var tmp: [32]u8 = [_]u8{0} ** 32;
-        std.mem.writeInt(u256, &tmp, b, .big);
+        std.mem.writeInt(u256, &tmp, a, .big);
         const first_non_zero = std.mem.indexOfNonePos(u8, &tmp, 0, &[_]u8{0}) orelse 32;
         const slice = tmp[first_non_zero..];
         if (slice.len > 0 and slice.len <= 32) {
@@ -355,25 +370,40 @@ fn run_lt_test_with_jump(allocator: std.mem.Allocator, a: u256, b: u256) !void {
     
     var guillotine_result = guillotine_evm.call(call_params);
     defer guillotine_result.deinit(allocator);
+    
+    // Verify the result
+    // The bytecode pushes b, then a, so stack is [a, b] with a on top
+    // LT pops a (first), then b (second), and computes a < b
+    
+    // The result should be 32 bytes with the value at the end
+    try std.testing.expect(guillotine_result.output.len == 32);
+    
+    // Convert output bytes to u256 (big-endian)
+    var result_value: u256 = 0;
+    for (guillotine_result.output) |byte| {
+        result_value = (result_value << 8) | byte;
+    }
+    
+    try std.testing.expectEqual(expected, result_value);
 }
 
 test "LT with JUMP: basic (5 < 10 = 1)" {
-    try run_lt_test_with_jump(std.testing.allocator, 5, 10);
+    try run_lt_test_with_jump(std.testing.allocator, 5, 10, 1); // 5 < 10 = true
 }
 
 test "LT with JUMP: equal values (100 < 100 = 0)" {
-    try run_lt_test_with_jump(std.testing.allocator, 100, 100);
+    try run_lt_test_with_jump(std.testing.allocator, 100, 100, 0); // 100 < 100 = false
 }
 
 test "LT with JUMP: large numbers" {
-    try run_lt_test_with_jump(std.testing.allocator, 1000000, 2000000);
+    try run_lt_test_with_jump(std.testing.allocator, 1000000, 2000000, 1); // 1000000 < 2000000 = true
 }
 
 test "LT with JUMP: MAX comparison" {
-    try run_lt_test_with_jump(std.testing.allocator, std.math.maxInt(u256) - 1, std.math.maxInt(u256));
+    try run_lt_test_with_jump(std.testing.allocator, std.math.maxInt(u256) - 1, std.math.maxInt(u256), 1); // (MAX - 1) < MAX = true
 }
 
 test "LT with JUMP: near u64 boundary" {
     const near_u64 = @as(u256, std.math.maxInt(u64)) - 10;
-    try run_lt_test_with_jump(std.testing.allocator, near_u64, @as(u256, std.math.maxInt(u64)));
+    try run_lt_test_with_jump(std.testing.allocator, near_u64, @as(u256, std.math.maxInt(u64)), 1); // near_u64 < u64_max = true
 }

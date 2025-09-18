@@ -288,11 +288,10 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// EXP opcode (0x0a) - Exponential operation.
         pub fn exp(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            // EVM stack ordering: first pop is exponent, second pop is base
-            // Computing base^exponent where base is second on stack
+            // Pop base (top), then exponent (second); compute base^exponent
             self.beforeInstruction(.EXP, cursor);
-            const exponent = self.stack.pop_unsafe(); // Top of stack (exponent)
-            const base = self.stack.peek_unsafe(); // Below top (base)
+            const base = self.stack.pop_unsafe(); // Top of stack (base)
+            const exponent = self.stack.peek_unsafe(); // Below top (exponent)
 
             // EIP-160: Dynamic gas cost for EXP
             // Gas cost = 10 + 50 * (number of non-zero bytes in exponent)

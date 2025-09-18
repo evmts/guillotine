@@ -21,10 +21,10 @@ pub fn Handlers(comptime FrameType: type) type {
         /// LT opcode (0x10) - Less than comparison.
         pub fn lt(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             self.beforeInstruction(.LT, cursor);
-            // EVM: pops top, then second; pushes (second < top)
+            // EVM: pops a (top), then b (second); pushes (a < b)
             self.stack.binary_op_unsafe(struct {
                 fn op(top: WordType, second: WordType) WordType {
-                    return @intFromBool(second < top);
+                    return @intFromBool(top < second);
                 }
             }.op);
             return next_instruction(self, cursor, .LT);
@@ -33,10 +33,10 @@ pub fn Handlers(comptime FrameType: type) type {
         /// GT opcode (0x11) - Greater than comparison.
         pub fn gt(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             self.beforeInstruction(.GT, cursor);
-            // EVM: pops top, then second; pushes (second > top)
+            // EVM: pops a (top), then b (second); pushes (a > b)
             self.stack.binary_op_unsafe(struct {
                 fn op(top: WordType, second: WordType) WordType {
-                    return @intFromBool(second > top);
+                    return @intFromBool(top > second);
                 }
             }.op);
             return next_instruction(self, cursor, .GT);
@@ -49,8 +49,8 @@ pub fn Handlers(comptime FrameType: type) type {
             const b = self.stack.peek_unsafe(); // Second from top (first pushed value)
             const a_signed = @as(std.meta.Int(.signed, @bitSizeOf(WordType)), @bitCast(a));
             const b_signed = @as(std.meta.Int(.signed, @bitSizeOf(WordType)), @bitCast(b));
-            // EVM: pops a (top), then b; pushes (b < a) with signed comparison
-            const result: WordType = @intFromBool(b_signed < a_signed);
+            // EVM: pops a (top), then b; pushes (a < b) with signed comparison
+            const result: WordType = @intFromBool(a_signed < b_signed);
             self.stack.set_top_unsafe(result);
             return next_instruction(self, cursor, .SLT);
         }
@@ -62,8 +62,8 @@ pub fn Handlers(comptime FrameType: type) type {
             const b = self.stack.peek_unsafe(); // Second from top (first pushed value)
             const a_signed = @as(std.meta.Int(.signed, @bitSizeOf(WordType)), @bitCast(a));
             const b_signed = @as(std.meta.Int(.signed, @bitSizeOf(WordType)), @bitCast(b));
-            // EVM: pops a (top), then b; pushes (b > a) with signed comparison
-            const result: WordType = @intFromBool(b_signed > a_signed);
+            // EVM: pops a (top), then b; pushes (a > b) with signed comparison
+            const result: WordType = @intFromBool(a_signed > b_signed);
             self.stack.set_top_unsafe(result);
             return next_instruction(self, cursor, .SGT);
         }
