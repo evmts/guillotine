@@ -348,6 +348,103 @@ pub const MODEXP_QUADRATIC_THRESHOLD: usize = 64;
 pub const MODEXP_LINEAR_THRESHOLD: usize = 1024;
 
 // ============================================================================
+// BLAKE2F Precompile Cost (EIP-152)
+// ============================================================================
+
+/// Gas cost per round for BLAKE2F precompile (address 0x09)
+/// EIP-152 (Istanbul): Cost is linear based on number of rounds
+pub const BLAKE2F_PER_ROUND: u64 = 1;
+
+// ============================================================================
+// KZG Point Evaluation Precompile Cost (EIP-4844)
+// ============================================================================
+
+/// Fixed gas cost for POINT_EVALUATION precompile (address 0x0A)
+/// EIP-4844 (Cancun): KZG point evaluation for blob transactions
+pub const POINT_EVALUATION_COST: u64 = 50000;
+
+// ============================================================================
+// BLS12-381 Precompile Costs (EIP-2537) - Prague Hardfork
+// ============================================================================
+
+/// Fixed gas cost for BLS12_381_G1_ADD precompile (address 0x0B)
+/// EIP-2537 (Prague): BLS12-381 curve G1 point addition
+pub const BLS12_381_G1_ADD: u64 = 375;
+
+/// Base gas cost for BLS12_381_G1_MSM precompile (address 0x0C) 
+/// EIP-2537 (Prague): BLS12-381 curve G1 multi-scalar multiplication
+/// Note: Single scalar multiplication (k=1) uses this base cost
+/// Formula: (k * BLS12_381_G1_MSM * DISCOUNT[k]) / MSM_MULTIPLIER
+pub const BLS12_381_G1_MSM: u64 = 12000;
+
+/// Fixed gas cost for BLS12_381_G1_MULTIEXP precompile (address 0x0D)
+/// EIP-2537 (Prague): BLS12-381 curve G1 multi-exponentiation
+/// Note: This uses the same calculation as G1_MSM with discount table
+pub const BLS12_381_G1_MULTIEXP: u64 = 12000;
+
+/// Fixed gas cost for BLS12_381_G2_ADD precompile (address 0x0E)
+/// EIP-2537 (Prague): BLS12-381 curve G2 point addition
+pub const BLS12_381_G2_ADD: u64 = 600;
+
+/// Base gas cost for BLS12_381_G2_MSM precompile (address 0x0F)
+/// EIP-2537 (Prague): BLS12-381 curve G2 multi-scalar multiplication
+/// Note: Single scalar multiplication (k=1) uses this base cost
+/// Formula: (k * BLS12_381_G2_MSM * DISCOUNT[k]) / MSM_MULTIPLIER
+pub const BLS12_381_G2_MSM: u64 = 22500;
+
+/// Fixed gas cost for BLS12_381_G2_MULTIEXP precompile (address 0x10)
+/// EIP-2537 (Prague): BLS12-381 curve G2 multi-exponentiation
+/// Note: This uses the same calculation as G2_MSM with discount table
+pub const BLS12_381_G2_MULTIEXP: u64 = 22500;
+
+/// Base gas cost for BLS12_381_PAIRING precompile (address 0x11)
+/// EIP-2537 (Prague): BLS12-381 pairing check base cost
+pub const BLS12_381_PAIRING_BASE: u64 = 37700;
+
+/// Per-pair gas cost for BLS12_381_PAIRING precompile
+/// EIP-2537 (Prague): Additional cost per pairing pair
+/// Total cost = BLS12_381_PAIRING_BASE + (pair_count * BLS12_381_PAIRING_PER_PAIR)
+pub const BLS12_381_PAIRING_PER_PAIR: u64 = 32600;
+
+/// Fixed gas cost for BLS12_381_MAP_FP_TO_G1 precompile (address 0x12)
+/// EIP-2537 (Prague): Map field element to BLS12-381 G1 point
+pub const BLS12_381_MAP_FP_TO_G1: u64 = 5500;
+
+/// Fixed gas cost for BLS12_381_MAP_FP2_TO_G2 precompile (address 0x13)
+/// EIP-2537 (Prague): Map field element to BLS12-381 G2 point
+pub const BLS12_381_MAP_FP2_TO_G2: u64 = 23800;
+
+/// MSM multiplier for discount calculation
+/// Used in formula: (k * BASE_GAS * DISCOUNT[k]) / MSM_MULTIPLIER
+pub const MSM_MULTIPLIER: u64 = 1000;
+
+/// Discount table for BLS12-381 G1 MSM operations
+/// Index k-1 gives discount factor for k pairs (multiply by BASE_GAS * k / 1000)
+pub const BLS12_381_G1_MSM_DISCOUNT: [128]u16 = .{
+    1000, 949, 848, 797, 764, 750, 738, 728, 719, 712, 705, 698, 692, 687, 682, 677,
+    673, 669, 665, 661, 658, 654, 651, 648, 645, 642, 640, 637, 635, 632, 630, 627,
+    625, 623, 621, 619, 617, 615, 613, 611, 609, 608, 606, 604, 603, 601, 599, 598,
+    596, 595, 593, 592, 591, 589, 588, 586, 585, 584, 582, 581, 580, 579, 577, 576,
+    575, 574, 573, 572, 570, 569, 568, 567, 566, 565, 564, 563, 562, 561, 560, 559,
+    558, 557, 556, 555, 554, 553, 552, 551, 550, 549, 548, 547, 547, 546, 545, 544,
+    543, 542, 541, 540, 540, 539, 538, 537, 536, 536, 535, 534, 533, 532, 532, 531,
+    530, 529, 528, 528, 527, 526, 525, 525, 524, 523, 522, 522, 521, 520, 520, 519,
+};
+
+/// Discount table for BLS12-381 G2 MSM operations
+/// Index k-1 gives discount factor for k pairs (multiply by BASE_GAS * k / 1000)
+pub const BLS12_381_G2_MSM_DISCOUNT: [128]u16 = .{
+    1000, 1000, 923, 884, 855, 832, 812, 796, 782, 770, 759, 749, 740, 732, 724, 717,
+    711, 704, 699, 693, 688, 683, 679, 674, 670, 666, 663, 659, 655, 652, 649, 646,
+    643, 640, 637, 634, 632, 629, 627, 624, 622, 620, 618, 615, 613, 611, 609, 607,
+    606, 604, 602, 600, 598, 597, 595, 593, 592, 590, 589, 587, 586, 584, 583, 582,
+    580, 579, 578, 576, 575, 574, 573, 571, 570, 569, 568, 567, 566, 565, 563, 562,
+    561, 560, 559, 558, 557, 556, 555, 554, 553, 552, 552, 551, 550, 549, 548, 547,
+    546, 545, 545, 544, 543, 542, 541, 541, 540, 539, 538, 537, 537, 536, 535, 535,
+    534, 533, 532, 532, 531, 530, 530, 529, 528, 528, 527, 526, 526, 525, 524, 524,
+};
+
+// ============================================================================
 // Call Operation Gas Constants (EIP-150 & EIP-2929)
 // ============================================================================
 

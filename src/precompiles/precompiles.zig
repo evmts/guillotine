@@ -17,6 +17,7 @@
 const std = @import("std");
 const primitives = @import("primitives");
 const Address = primitives.Address;
+const GasConstants = primitives.GasConstants;
 // Use the real crypto and build_options modules
 const crypto = @import("crypto");
 const build_options = @import("build_options");
@@ -35,13 +36,12 @@ pub const POINT_EVALUATION_ADDRESS = primitives.Address.from_u256(10);
 
 /// BLS12-381 precompile addresses (EIP-2537)
 pub const BLS12_381_G1_ADD_ADDRESS = primitives.Address.from_u256(0x0B);
-pub const BLS12_381_G1_MUL_ADDRESS = primitives.Address.from_u256(0x0C);
-pub const BLS12_381_G1_MULTIEXP_ADDRESS = primitives.Address.from_u256(0x0D);
-pub const BLS12_381_G2_ADD_ADDRESS = primitives.Address.from_u256(0x0E);
-pub const BLS12_381_G2_MUL_ADDRESS = primitives.Address.from_u256(0x0F);
-pub const BLS12_381_G2_MULTIEXP_ADDRESS = primitives.Address.from_u256(0x10);
-pub const BLS12_381_PAIRING_ADDRESS = primitives.Address.from_u256(0x11);
-pub const BLS12_381_MAP_FP_TO_G1_ADDRESS = primitives.Address.from_u256(0x12);
+pub const BLS12_381_G1_MSM_ADDRESS = primitives.Address.from_u256(0x0C);
+pub const BLS12_381_G2_ADD_ADDRESS = primitives.Address.from_u256(0x0D);
+pub const BLS12_381_G2_MSM_ADDRESS = primitives.Address.from_u256(0x0E);
+pub const BLS12_381_PAIRING_ADDRESS = primitives.Address.from_u256(0x0F);
+pub const BLS12_381_MAP_FP_TO_G1_ADDRESS = primitives.Address.from_u256(0x10);
+pub const BLS12_381_MAP_FP2_TO_G2_ADDRESS = primitives.Address.from_u256(0x11);
 
 /// Precompile error types
 pub const PrecompileError = error{
@@ -73,14 +73,14 @@ pub fn is_precompile(address: Address) bool {
     // Check if the address is one of the known precompile addresses
     // Precompiles are at addresses:
     // 0x01-0x0A: Standard precompiles (ECRECOVER through POINT_EVALUATION)
-    // 0x0B-0x12: BLS12-381 precompiles (EIP-2537)
+    // 0x0B-0x13: BLS12-381 precompiles (EIP-2537)
     
     // Check if all bytes except the last one are zero
     for (address.bytes[0..19]) |byte| {
         if (byte != 0) return false;
     }
-    // Check if the last byte is between 1 and 18 (0x12)
-    return address.bytes[19] >= 1 and address.bytes[19] <= 0x12;
+    // Check if the last byte is between 1 and 0x11 (17)
+    return address.bytes[19] >= 1 and address.bytes[19] <= 0x11;
 }
 
 /// Execute a precompile based on its address
@@ -105,13 +105,12 @@ pub fn execute_precompile(
         9 => execute_blake2f(allocator, input, gas_limit),
         10 => execute_point_evaluation(allocator, input, gas_limit),
         0x0B => execute_bls12_381_g1_add(allocator, input, gas_limit),
-        0x0C => execute_bls12_381_g1_mul(allocator, input, gas_limit),
-        0x0D => execute_bls12_381_g1_multiexp(allocator, input, gas_limit),
-        0x0E => execute_bls12_381_g2_add(allocator, input, gas_limit),
-        0x0F => execute_bls12_381_g2_mul(allocator, input, gas_limit),
-        0x10 => execute_bls12_381_g2_multiexp(allocator, input, gas_limit),
-        0x11 => execute_bls12_381_pairing(allocator, input, gas_limit),
-        0x12 => execute_bls12_381_map_fp_to_g1(allocator, input, gas_limit),
+        0x0C => execute_bls12_381_g1_msm(allocator, input, gas_limit),
+        0x0D => execute_bls12_381_g2_add(allocator, input, gas_limit),
+        0x0E => execute_bls12_381_g2_msm(allocator, input, gas_limit),
+        0x0F => execute_bls12_381_pairing(allocator, input, gas_limit),
+        0x10 => execute_bls12_381_map_fp_to_g1(allocator, input, gas_limit),
+        0x11 => execute_bls12_381_map_fp2_to_g2(allocator, input, gas_limit),
         else => PrecompileOutput{
             .output = &.{},
             .gas_used = 0,
@@ -147,6 +146,7 @@ pub const GasCosts = struct {
     pub const BLS12_381_PAIRING_BASE = 65000;
     pub const BLS12_381_PAIRING_PER_PAIR = 43000;
     pub const BLS12_381_MAP_FP_TO_G1 = 5500;
+    pub const BLS12_381_MAP_FP2_TO_G2 = 23800;
 };
 
 /// 0x01: ecRecover - ECDSA signature recovery
@@ -796,41 +796,28 @@ pub fn execute_bls12_381_g1_add(allocator: std.mem.Allocator, input: []const u8,
     };
 }
 
-/// 0x0C: BLS12-381 G1 scalar multiplication
-pub fn execute_bls12_381_g1_mul(allocator: std.mem.Allocator, input: []const u8, gas_limit: u64) PrecompileError!PrecompileOutput {
-    const required_gas = GasCosts.BLS12_381_G1_MUL;
-    if (gas_limit < required_gas) {
+/// 0x0C: BLS12-381 G1 MSM (Multi-scalar multiplication)
+/// For single scalar multiplication, use with k=1 (one point-scalar pair)
+pub fn execute_bls12_381_g1_msm(allocator: std.mem.Allocator, input: []const u8, gas_limit: u64) PrecompileError!PrecompileOutput {
+    const G1_MSM_INPUT_LENGTH = 160; // 128 bytes G1 + 32 bytes scalar
+    
+    // Input validation: must be multiple of 160 bytes
+    if (input.len % G1_MSM_INPUT_LENGTH != 0) {
         return PrecompileOutput{
             .output = &.{},
-            .gas_used = gas_limit,
+            .gas_used = 0,
             .success = false,
         };
     }
-
-    const output = try allocator.alloc(u8, 128);
-    errdefer allocator.free(output);
-
-    crypto.bls12_381.g1_mul(input, output) catch {
-        allocator.free(output);
-        return PrecompileOutput{
-            .output = &.{},
-            .gas_used = required_gas,
-            .success = false,
-        };
+    
+    const num_pairs = input.len / G1_MSM_INPUT_LENGTH;
+    
+    // Calculate gas using discount table
+    const required_gas = if (num_pairs == 0) 0 else blk: {
+        const discount_index = @min(num_pairs - 1, GasConstants.BLS12_381_G1_MSM_DISCOUNT.len - 1);
+        const discount = GasConstants.BLS12_381_G1_MSM_DISCOUNT[discount_index];
+        break :blk (@as(u64, num_pairs) * GasConstants.BLS12_381_G1_MSM * discount) / GasConstants.MSM_MULTIPLIER;
     };
-
-    return PrecompileOutput{
-        .output = output,
-        .gas_used = required_gas,
-        .success = true,
-    };
-}
-
-/// 0x0D: BLS12-381 G1 multi-exponentiation
-pub fn execute_bls12_381_g1_multiexp(allocator: std.mem.Allocator, input: []const u8, gas_limit: u64) PrecompileError!PrecompileOutput {
-    // Dynamic gas based on number of pairs
-    const num_pairs = input.len / 160;
-    const required_gas = GasCosts.BLS12_381_G1_MULTIEXP_BASE * num_pairs;
     
     if (gas_limit < required_gas) {
         return PrecompileOutput{
@@ -839,10 +826,23 @@ pub fn execute_bls12_381_g1_multiexp(allocator: std.mem.Allocator, input: []cons
             .success = false,
         };
     }
+    
+    // Handle empty input: return point at infinity (all zeros)
+    if (num_pairs == 0) {
+        const output = try allocator.alloc(u8, 128);
+        @memset(output, 0);
+        return PrecompileOutput{
+            .output = output,
+            .gas_used = required_gas,
+            .success = true,
+        };
+    }
 
     const output = try allocator.alloc(u8, 128);
     errdefer allocator.free(output);
 
+    // Perform the multi-scalar multiplication
+    // Note: The crypto module should validate points and scalars internally
     crypto.bls12_381.g1_multiexp(input, output) catch {
         allocator.free(output);
         return PrecompileOutput{
@@ -867,19 +867,49 @@ pub fn execute_bls12_381_g2_add(allocator: std.mem.Allocator, input: []const u8,
     return PrecompileError.NotImplemented;
 }
 
-/// 0x0F: BLS12-381 G2 scalar multiplication (not implemented in Rust wrapper yet)
-pub fn execute_bls12_381_g2_mul(allocator: std.mem.Allocator, input: []const u8, gas_limit: u64) PrecompileError!PrecompileOutput {
-    _ = allocator;
-    _ = input;
-    _ = gas_limit;
-    return PrecompileError.NotImplemented;
-}
+/// 0x0E: BLS12-381 G2 multi-scalar multiplication (MSM)
+/// Includes single scalar multiplication (k=1) and multi-scalar multiplication (k>1)
+pub fn execute_bls12_381_g2_msm(allocator: std.mem.Allocator, input: []const u8, gas_limit: u64) PrecompileError!PrecompileOutput {
+    const G2_MSM_INPUT_LENGTH = 288; // 256 bytes G2 + 32 bytes scalar
+    
+    // Input validation: must be multiple of 288 bytes
+    if (input.len % G2_MSM_INPUT_LENGTH != 0) {
+        return PrecompileOutput{
+            .output = &.{},
+            .gas_used = 0,
+            .success = false,
+        };
+    }
+    
+    const num_pairs = input.len / G2_MSM_INPUT_LENGTH;
+    
+    // Calculate gas using discount table
+    const required_gas = if (num_pairs == 0) 0 else blk: {
+        const discount_index = @min(num_pairs - 1, GasConstants.BLS12_381_G2_MSM_DISCOUNT.len - 1);
+        const discount = GasConstants.BLS12_381_G2_MSM_DISCOUNT[discount_index];
+        break :blk (@as(u64, num_pairs) * GasConstants.BLS12_381_G2_MSM * discount) / GasConstants.MSM_MULTIPLIER;
+    };
+    
+    if (gas_limit < required_gas) {
+        return PrecompileOutput{
+            .output = &.{},
+            .gas_used = gas_limit,
+            .success = false,
+        };
+    }
+    
+    // Handle empty input: return point at infinity (all zeros)
+    if (num_pairs == 0) {
+        const output = try allocator.alloc(u8, 256);
+        @memset(output, 0);
+        return PrecompileOutput{
+            .output = output,
+            .gas_used = required_gas,
+            .success = true,
+        };
+    }
 
-/// 0x10: BLS12-381 G2 multi-exponentiation (not implemented in Rust wrapper yet)
-pub fn execute_bls12_381_g2_multiexp(allocator: std.mem.Allocator, input: []const u8, gas_limit: u64) PrecompileError!PrecompileOutput {
-    _ = allocator;
-    _ = input;
-    _ = gas_limit;
+    // Not implemented in crypto module yet
     return PrecompileError.NotImplemented;
 }
 
@@ -918,6 +948,14 @@ pub fn execute_bls12_381_pairing(allocator: std.mem.Allocator, input: []const u8
 
 /// 0x12: BLS12-381 map field element to G1 (not implemented in Rust wrapper yet)
 pub fn execute_bls12_381_map_fp_to_g1(allocator: std.mem.Allocator, input: []const u8, gas_limit: u64) PrecompileError!PrecompileOutput {
+    _ = allocator;
+    _ = input;
+    _ = gas_limit;
+    return PrecompileError.NotImplemented;
+}
+
+/// 0x13: BLS12-381 map field element pair to G2 (not implemented in Rust wrapper yet)
+pub fn execute_bls12_381_map_fp2_to_g2(allocator: std.mem.Allocator, input: []const u8, gas_limit: u64) PrecompileError!PrecompileOutput {
     _ = allocator;
     _ = input;
     _ = gas_limit;
@@ -968,13 +1006,12 @@ test "is_precompile detects valid precompile addresses" {
 
     // Test BLS12-381 precompile addresses (EIP-2537)
     try testing.expect(is_precompile(BLS12_381_G1_ADD_ADDRESS));
-    try testing.expect(is_precompile(BLS12_381_G1_MUL_ADDRESS));
-    try testing.expect(is_precompile(BLS12_381_G1_MULTIEXP_ADDRESS));
+    try testing.expect(is_precompile(BLS12_381_G1_MSM_ADDRESS));
     try testing.expect(is_precompile(BLS12_381_G2_ADD_ADDRESS));
-    try testing.expect(is_precompile(BLS12_381_G2_MUL_ADDRESS));
-    try testing.expect(is_precompile(BLS12_381_G2_MULTIEXP_ADDRESS));
+    try testing.expect(is_precompile(BLS12_381_G2_MSM_ADDRESS));
     try testing.expect(is_precompile(BLS12_381_PAIRING_ADDRESS));
     try testing.expect(is_precompile(BLS12_381_MAP_FP_TO_G1_ADDRESS));
+    try testing.expect(is_precompile(BLS12_381_MAP_FP2_TO_G2_ADDRESS));
 
     // Test invalid addresses
     try testing.expect(!is_precompile(primitives.Address.from_u256(0)));
