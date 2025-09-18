@@ -401,18 +401,12 @@ pub const MinimalFrame = struct {
         };
     }
 
-    /// Calculate memory expansion cost for call operations using existing helper
-    fn callMemoryExpansionCost(self: *const Self, in_offset: u256, in_length: u256, out_offset: u256, out_length: u256) !u64 {
+    /// Calculate memory expansion cost for call operations
+    /// Note: we don't charge for reading from uninitialized memory
+    fn callMemoryExpansionCost(self: *const Self, out_offset: u256, out_length: u256) !u64 {
         var max_end: u64 = 0;
-        
-        // Input memory range
-        if (in_length > 0) {
-            const in_end = std.math.add(u256, in_offset, in_length) catch return error.OutOfBounds;
-            const in_end_u32 = std.math.cast(u32, in_end) orelse return error.OutOfBounds;
-            max_end = @max(max_end, in_end_u32);
-        }
-        
-        // Output memory range
+
+        // Output memory range (we need to pay for expanding memory when writing to it)
         if (out_length > 0) {
             const out_end = std.math.add(u256, out_offset, out_length) catch return error.OutOfBounds;
             const out_end_u32 = std.math.cast(u32, out_end) orelse return error.OutOfBounds;
@@ -1375,7 +1369,7 @@ pub const MinimalFrame = struct {
 
                 // Calculate all gas costs upfront
                 const gas_costs = try self.callGasCost(call_address, value_arg, false);
-                const memory_cost = try self.callMemoryExpansionCost(in_offset, in_length, out_offset, out_length);
+                const memory_cost = try self.callMemoryExpansionCost(out_offset, out_length);
                 
                 // Total cost: base call cost + memory expansion (including memory access)
                 const total_cost = std.math.add(u64, gas_costs.total_cost, memory_cost) catch return error.OutOfGas;
@@ -1481,7 +1475,7 @@ pub const MinimalFrame = struct {
 
                 // CALLCODE: executes target's code in current context
                 const gas_costs = try self.callGasCost(call_address, value_arg, false);
-                const memory_cost = try self.callMemoryExpansionCost(in_offset, in_length, out_offset, out_length);
+                const memory_cost = try self.callMemoryExpansionCost(out_offset, out_length);
                 
                 // Total cost: base call cost + memory expansion
                 const total_cost = std.math.add(u64, gas_costs.total_cost, memory_cost) catch return error.OutOfGas;
@@ -1592,7 +1586,7 @@ pub const MinimalFrame = struct {
 
                 // DELEGATECALL: no value transfer, preserves caller context
                 const gas_costs = try self.callGasCost(call_address, 0, true);
-                const memory_cost = try self.callMemoryExpansionCost(in_offset, in_length, out_offset, out_length);
+                const memory_cost = try self.callMemoryExpansionCost(out_offset, out_length);
                 
                 // Total cost: base call cost + memory expansion
                 const total_cost = std.math.add(u64, gas_costs.total_cost, memory_cost) catch return error.OutOfGas;
@@ -1696,7 +1690,7 @@ pub const MinimalFrame = struct {
 
                 // STATICCALL: read-only call, no state modifications
                 const gas_costs = try self.callGasCost(call_address, 0, true);
-                const memory_cost = try self.callMemoryExpansionCost(in_offset, in_length, out_offset, out_length);
+                const memory_cost = try self.callMemoryExpansionCost(out_offset, out_length);
                 
                 // Total cost: base call cost + memory expansion
                 const total_cost = std.math.add(u64, gas_costs.total_cost, memory_cost) catch return error.OutOfGas;
