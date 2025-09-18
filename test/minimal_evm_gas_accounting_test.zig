@@ -9,7 +9,7 @@ const Hardfork = evm_mod.Hardfork;
 const GasConstants = primitives.GasConstants;
 const Address = primitives.Address;
 const StorageSlotKey = evm_mod.tracer.StorageSlotKey;
-const MinimalEvmError = evm_mod.tracer.MinimalEvmError;
+const MinimalEvmError = MinimalEvm.Error;
 
 const CONTRACT_ADDRESS = Address.from_hex("0x00000000000000000000000000000000000000aa") catch unreachable;
 const CALLER_ADDRESS = Address.from_hex("0x00000000000000000000000000000000000000bb") catch unreachable;

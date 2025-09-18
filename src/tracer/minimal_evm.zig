@@ -102,24 +102,6 @@ const StorageSlotKeyContext = struct {
     }
 };
 
-/// Legacy error set (deprecated, use MinimalEvm.Error instead)
-pub const MinimalEvmError = error{
-    OutOfMemory,
-    StackOverflow,
-    StackUnderflow,
-    OutOfGas,
-    InvalidOpcode,
-    InvalidJump,
-    InvalidPush,
-    // Memory
-    OutOfBounds,
-    // Access list
-    AddressPreWarmError,
-    // CREATE/CREATE2 code size limits
-    CreateInitCodeSizeLimit,    // EIP-3860: Init code exceeds size limit
-    CreateContractSizeLimit,    // EIP-170: Deployed contract code exceeds size limit
-};
-
 /// Minimal EVM - Orchestrates execution like evm.zig
 pub const MinimalEvm = struct {
     /// Error set for MinimalEvm operations
@@ -144,12 +126,16 @@ pub const MinimalEvm = struct {
         AccountNotFound,
         InvalidJumpDestination,
         MissingJumpDestMetadata,
-        InitcodeTooLarge,
+        InitcodeTooLarge, // this one is never used anywhere
         TruncatedPush,
         OutOfBounds,
         WriteProtection,
-        BytecodeTooLarge,
+        BytecodeTooLarge, // we use CreateInitCodeSizeLimit instead for conventions
         InvalidPush,
+        // EIP-3860: Init code exceeds size limit
+        CreateInitCodeSizeLimit,
+        // EIP-170: Deployed contract code exceeds size limit
+        CreateContractSizeLimit,
     };
 
     const Self = @This();
@@ -360,7 +346,7 @@ pub const MinimalEvm = struct {
         }
     }
 
-    fn pre_warm_transaction(self: *Self, target: Address) MinimalEvmError!void {
+    fn pre_warm_transaction(self: *Self, target: Address) Error!void {
         var warm: [3]Address = undefined;
         var count: usize = 0;
 
