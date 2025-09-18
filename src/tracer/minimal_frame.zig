@@ -288,8 +288,8 @@ pub const MinimalFrame = struct {
 
             // EXP
             0x0a => {
-                const exp = try self.popStack();
                 const base = try self.popStack();
+                const exp = try self.popStack();
 
                 // EIP-160: Dynamic gas cost for EXP
                 // Gas cost = GasSlowStep + gas_per_byte * ((log2(exponent) / 8) + 1)
@@ -344,40 +344,40 @@ pub const MinimalFrame = struct {
             // LT
             0x10 => {
                 try self.consumeGas(GasConstants.GasFastestStep);
-                const top = try self.popStack(); // Top of stack
-                const second = try self.popStack(); // Second from top
-                try self.pushStack(if (second < top) 1 else 0); // Compare second < top
+                const a = try self.popStack();     // Top of stack
+                const b = try self.popStack();     // Second from top
+                try self.pushStack(if (a < b) 1 else 0);  // Compare a < b
                 self.pc += 1;
             },
 
             // GT
             0x11 => {
                 try self.consumeGas(GasConstants.GasFastestStep);
-                const top = try self.popStack(); // Top of stack
-                const second = try self.popStack(); // Second from top
-                try self.pushStack(if (second > top) 1 else 0); // Compare second > top
+                const a = try self.popStack();     // Top of stack
+                const b = try self.popStack();     // Second from top
+                try self.pushStack(if (a > b) 1 else 0);  // Compare a > b
                 self.pc += 1;
             },
 
             // SLT
             0x12 => {
                 try self.consumeGas(GasConstants.GasFastestStep);
-                const top = try self.popStack(); // Top of stack
-                const second = try self.popStack(); // Second from top
-                const top_signed = @as(i256, @bitCast(top));
-                const second_signed = @as(i256, @bitCast(second));
-                try self.pushStack(if (second_signed < top_signed) 1 else 0); // Compare second < top (signed)
+                const a = try self.popStack();     // Top of stack
+                const b = try self.popStack();     // Second from top
+                const a_signed = @as(i256, @bitCast(a));
+                const b_signed = @as(i256, @bitCast(b));
+                try self.pushStack(if (a_signed < b_signed) 1 else 0);  // Compare a < b (signed)
                 self.pc += 1;
             },
 
             // SGT
             0x13 => {
                 try self.consumeGas(GasConstants.GasFastestStep);
-                const top = try self.popStack(); // Top of stack
-                const second = try self.popStack(); // Second from top
-                const top_signed = @as(i256, @bitCast(top));
-                const second_signed = @as(i256, @bitCast(second));
-                try self.pushStack(if (second_signed > top_signed) 1 else 0); // Compare second > top (signed)
+                const a = try self.popStack();     // Top of stack
+                const b = try self.popStack();     // Second from top
+                const a_signed = @as(i256, @bitCast(a));
+                const b_signed = @as(i256, @bitCast(b));
+                try self.pushStack(if (a_signed > b_signed) 1 else 0);  // Compare a > b (signed)
                 self.pc += 1;
             },
 
