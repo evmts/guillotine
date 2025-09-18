@@ -103,37 +103,9 @@ pub fn createAccessList(comptime config: AccessListConfig) type {
             }
         }
 
-        /// Extract owned copies of accessed addresses and storage slots
-        /// Returns the data in a format compatible with CallResult
-        /// The caller owns the returned memory and must free it
-        pub fn toOwnedSlices(self: *Self, allocator: std.mem.Allocator, comptime StorageAccessType: type) !struct {
-            accessed_addresses: []const Address,
-            accessed_storage: []const StorageAccessType,
-        } {
-            // Get keys from addresses HashMap
-            const address_keys = self.addresses.keys();
-            const accessed_addresses = try allocator.dupe(Address, address_keys);
-            errdefer allocator.free(accessed_addresses);
-
-            // Convert storage keys to StorageAccessType format
-            const storage_keys = self.storage_slots.keys();
-            const accessed_storage = if (storage_keys.len > 0) blk: {
-                const storage_access = try allocator.alloc(StorageAccessType, storage_keys.len);
-                errdefer allocator.free(storage_access);
-                
-                for (storage_keys, 0..) |key, i| {
-                    storage_access[i] = StorageAccessType{
-                        .address = key.address,
-                        .slot = key.slot,
-                    };
-                }
-                break :blk storage_access;
-            } else &[_]StorageAccessType{};
-
-            return .{
-                .accessed_addresses = accessed_addresses,
-                .accessed_storage = accessed_storage,
-            };
+        /// Clone the access list
+        pub fn clone(self: *const Self) !Self {
+            return Self{ .addresses = try self.addresses.clone(), .storage_slots = try self.storage_slots.clone() };
         }
     };
 }

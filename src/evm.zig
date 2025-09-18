@@ -395,13 +395,15 @@ pub fn Evm(comptime config: EvmConfig) type {
             }
             
             // Extract access list data before clearing
-            const access_list_data = self.access_list.toOwnedSlices(self.allocator, call_result_module.StorageAccess) catch {
-                result.accessed_addresses = &.{};
-                result.accessed_storage = &.{};
-                return result;
-            };
-            result.accessed_addresses = access_list_data.accessed_addresses;
-            result.accessed_storage = access_list_data.accessed_storage;
+            result.accessed_addresses = try self.allocator.dupe(primitives.Address, self.access_list.addresses.keys());
+            
+            // Convert StorageKey to StorageAccess (same fields, different type)
+            const storage_keys = self.access_list.storage_slots.keys();
+            const storage_access = try self.allocator.alloc(call_result_module.StorageAccess, storage_keys.len);
+            for (storage_keys, 0..) |key, i| {
+                storage_access[i] = .{ .address = key.address, .slot = key.slot };
+            }
+            result.accessed_storage = storage_access;
             
             // Reset internal accumulators (logs and access data already transferred)
             self.self_destruct.clear();
