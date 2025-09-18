@@ -398,9 +398,19 @@ pub const MinimalFrame = struct {
                 if (new_value == original_value) {
                     // === RESTORING TO ORIGINAL VALUE ===
                     if (original_value == 0) {
-                        // Case: Restore to original zero
-                        // This counts as a clearing operation per EIP-2200
-                        evm.gas_refund += sstore_clears_schedule;
+                        // Case: Restore to original zero (0->non-zero->0)
+                        // Per EIP-2200: When original=0, current!=0, new=0
+                        // The refund is SSTORE_SET_GAS - SLOAD_GAS
+                        if (current_value != 0) {
+                            const gas_sload: u64 = if (self.hardfork.isAtLeast(.BERLIN))
+                                GasConstants.WarmStorageReadCost  // Berlin+: 100
+                            else
+                                800;  // Istanbul: 800
+                            
+                            // EIP-2200 specifies this special case gets SSTORE_SET - SLOAD refund
+                            // This is 20000 - 100 = 19900 for Berlin+
+                            evm.gas_refund += GasConstants.SstoreSetGas - gas_sload;
+                        }
                     } else {
                         // Case: Restore to original non-zero
                         // Refund the difference between reset cost and load cost
