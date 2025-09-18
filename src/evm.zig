@@ -395,11 +395,15 @@ pub fn Evm(comptime config: EvmConfig) type {
             }
             
             // Extract access list data before clearing
-            result.accessed_addresses = try self.allocator.dupe(primitives.Address, self.access_list.addresses.keys());
+            result.accessed_addresses = self.allocator.dupe(primitives.Address, self.access_list.addresses.keys()) catch {
+                return CallResult.failure_with_error(0, "Out of memory");
+            };
             
             // Convert StorageKey to StorageAccess (same fields, different type)
             const storage_keys = self.access_list.storage_slots.keys();
-            const storage_access = try self.allocator.alloc(call_result_module.StorageAccess, storage_keys.len);
+            const storage_access = self.allocator.alloc(call_result_module.StorageAccess, storage_keys.len) catch {
+                return CallResult.failure_with_error(0, "Out of memory");
+            };
             for (storage_keys, 0..) |key, i| {
                 storage_access[i] = .{ .address = key.address, .slot = key.slot };
             }
