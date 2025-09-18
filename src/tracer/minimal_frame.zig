@@ -661,7 +661,8 @@ pub const MinimalFrame = struct {
                 const size = try self.popStack();
 
                 // Use centralized gas calculation
-                const gas_cost = keccak256GasCost(@as(u32, @intCast(size)));
+                const size_u32 = std.math.cast(u32, size) orelse return error.OutOfBounds;
+                const gas_cost = keccak256GasCost(size_u32);
                 try self.consumeGas(gas_cost);
 
                 // Handle empty data case
@@ -672,7 +673,6 @@ pub const MinimalFrame = struct {
                     self.pc += 1;
                 } else {
                     const offset_u32 = std.math.cast(u32, offset) orelse return error.OutOfBounds;
-                    const size_u32 = std.math.cast(u32, size) orelse return error.OutOfBounds;
 
                     // Charge memory expansion to cover [offset, offset+size)
                     const end_addr = @as(u64, offset_u32) + @as(u64, size_u32);
