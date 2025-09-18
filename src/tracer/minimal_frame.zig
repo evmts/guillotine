@@ -381,7 +381,12 @@ pub const MinimalFrame = struct {
         // EIP-150: Can use at most 63/64 of remaining gas (leave 1/64 for caller)
         // Correct calculation - caller can forward at most 63/64, not remaining - 1/64
         const max_forwardable = remaining_gas - (remaining_gas / 64);
-        const actual_gas_limit = @min(requested_gas, max_forwardable);
+        
+        // When requested_gas is 0, forward all available gas (EIP-150 behavior)
+        const actual_gas_limit = if (requested_gas == 0)
+            max_forwardable
+        else
+            @min(requested_gas, max_forwardable);
         
         // Gas stipend for value transfers (EIP-150+)
         // Stipend is ADDED to the gas limit, not included in it
