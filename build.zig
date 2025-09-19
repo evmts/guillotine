@@ -108,6 +108,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
         }),
+        .use_llvm = if (target.result.cpu.arch == .x86_64) true else null,
     });
     pattern_analyzer.root_module.addImport("evm", modules.evm_mod);
     pattern_analyzer.root_module.addImport("primitives", modules.primitives_mod);
@@ -125,6 +126,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
         }),
+        .use_llvm = if (target.result.cpu.arch == .x86_64) true else null,
     });
     bytecode_patterns.root_module.addImport("evm", modules.evm_mod);
     bytecode_patterns.root_module.addImport("primitives", modules.primitives_mod);
@@ -149,6 +151,7 @@ pub fn build(b: *std.Build) void {
         .name = "guillotine_ffi",
         .linkage = .dynamic,
         .root_module = shared_lib_mod,
+        .use_llvm = if (target.result.cpu.arch == .x86_64) true else null,
     });
     shared_lib.linkLibrary(c_kzg_lib);
     shared_lib.linkLibrary(blst_lib);
@@ -164,6 +167,7 @@ pub fn build(b: *std.Build) void {
         .name = "guillotine_ffi_static",
         .linkage = .static,
         .root_module = shared_lib_mod,
+        .use_llvm = if (target.result.cpu.arch == .x86_64) true else null,
     });
     static_lib.linkLibrary(c_kzg_lib);
     static_lib.linkLibrary(blst_lib);
