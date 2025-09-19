@@ -117,8 +117,10 @@ pub const MinimalEvm = struct {
     origin: Address,
     gas_price: u256,
     host: ?HostInterface,
+    is_static: bool,
     arena: std.heap.ArenaAllocator,
     allocator: std.mem.Allocator,
+    
     pub fn init(allocator: std.mem.Allocator) !Self {
         var arena = std.heap.ArenaAllocator.init(allocator);
         errdefer arena.deinit();
@@ -149,6 +151,7 @@ pub const MinimalEvm = struct {
             .origin = ZERO_ADDRESS,
             .gas_price = 0,
             .host = null,
+            .is_static = false,
             .arena = arena,
             .allocator = arena_allocator,
         };
@@ -182,6 +185,7 @@ pub const MinimalEvm = struct {
         self.origin = ZERO_ADDRESS;
         self.gas_price = 0;
         self.host = null;
+        self.is_static = false;
         self.allocator = arena_allocator;
 
         return self;
@@ -230,6 +234,16 @@ pub const MinimalEvm = struct {
     pub fn setTransactionContext(self: *Self, origin: Address, gas_price: u256) void {
         self.origin = origin;
         self.gas_price = gas_price;
+    }
+
+    /// Set the static context flag
+    pub fn set_is_static(self: *Self, is_static: bool) void {
+        self.is_static = is_static;
+    }
+
+    /// Check if current context is static (EIP-214)
+    pub fn is_static_context(self: *Self) bool {
+        return self.is_static;
     }
 
     pub fn setCode(self: *Self, address: Address, code: []const u8) !void {

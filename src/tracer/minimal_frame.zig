@@ -880,6 +880,9 @@ pub const MinimalFrame = struct {
                 const key = try self.popStack();
                 const value = try self.popStack();
 
+                // Check static context (EIP-214)
+                if (evm.is_static_context()) return error.StaticCallViolation;
+
                 // Simplified gas cost (actual is complex with refunds)
                 // TODO: Implement full EIP-2200/EIP-3529 metering using
                 // original value tracking and refund logic, reusing warm/cold state.
@@ -1029,6 +1032,9 @@ pub const MinimalFrame = struct {
                 const offset = try self.popStack();
                 const length = try self.popStack();
 
+                // Check static context (EIP-214)
+                if (evm.is_static_context()) return error.StaticCallViolation;
+
                 // Pop topics
                 var i: u8 = 0;
                 while (i < topic_count) : (i += 1) {
@@ -1050,6 +1056,9 @@ pub const MinimalFrame = struct {
                 const value = try self.popStack();
                 const offset = try self.popStack();
                 const length = try self.popStack();
+
+                // Check static context (EIP-214)
+                if (evm.is_static_context()) return error.StaticCallViolation;
 
                 // Gas cost
                 try self.consumeGas(32000);
@@ -1084,6 +1093,9 @@ pub const MinimalFrame = struct {
                 // Base gas cost
                 var gas_cost: u64 = GasConstants.CallGas;
                 if (value_arg > 0) {
+                    // Check static context for value transfer (EIP-214)
+                    if (evm.is_static_context()) return error.StaticCallViolation;
+
                     gas_cost += GasConstants.CallValueTransferGas;
                 }
                 // EIP-2929: access target account (warm/cold)
@@ -1165,6 +1177,9 @@ pub const MinimalFrame = struct {
                 // Base gas cost
                 var gas_cost: u64 = GasConstants.CallGas;
                 if (value_arg > 0) {
+                    // Check static context for value transfer (EIP-214)
+                    if (evm.is_static_context()) return error.StaticCallViolation;
+
                     gas_cost += GasConstants.CallValueTransferGas;
                 }
                 // EIP-2929: access target account (warm/cold)
@@ -1326,6 +1341,9 @@ pub const MinimalFrame = struct {
                 const offset = try self.popStack();
                 const length = try self.popStack();
                 const salt = try self.popStack();
+
+                // Check static context (EIP-214)
+                if (evm.is_static_context()) return error.StaticCallViolation;
 
                 // Gas cost
                 const word_count = @as(u64, @intCast((length + 31) / 32));
@@ -1704,6 +1722,10 @@ pub const MinimalFrame = struct {
             // SELFDESTRUCT
             0xff => {
                 const beneficiary = try self.popStack();
+
+                // Check static context (EIP-214)
+                if (evm.is_static_context()) return error.StaticCallViolation;
+
                 _ = beneficiary;
                 try self.consumeGas(5000);
                 self.stopped = true;

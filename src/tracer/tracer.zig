@@ -176,6 +176,7 @@ pub const Tracer = struct {
                 const block_info = evm_instance.get_block_info();
                 evm.setBlockchainContext(evm_instance.get_chain_id(), block_info.number, block_info.timestamp, block_info.difficulty, block_info.coinbase, block_info.gas_limit, block_info.base_fee, block_info.blob_base_fee);
                 evm.setTransactionContext(evm_instance.get_tx_origin(), evm_instance.gas_price);
+                evm.set_is_static(evm_instance.is_static_context());
                 var caller = primitives.ZERO_ADDRESS;
                 var address = primitives.ZERO_ADDRESS;
                 var value: u256 = 0;
@@ -186,7 +187,7 @@ pub const Tracer = struct {
                 if (@hasField(@TypeOf(frame.*), "value")) value = frame.value;
                 if (@hasField(@TypeOf(frame.*), "calldata_slice")) calldata = frame.calldata_slice;
 
-                if (!std.mem.eql(u8, &address.bytes, &primitives.ZERO_ADDRESS.bytes)) evm.setCode(address, bytecode) catch {};
+                if (!address.equals(primitives.ZERO_ADDRESS)) evm.setCode(address, bytecode) catch {};
 
                 const frame_gas_remaining = frame.gas_remaining;
 
