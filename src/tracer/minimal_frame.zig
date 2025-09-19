@@ -55,6 +55,9 @@ pub const MinimalFrame = struct {
     // Active hardfork configuration for gas rules
     hardfork: Hardfork,
 
+    // Hardfork for gas calculations
+    hardfork: Hardfork,
+
     /// Analyze bytecode to identify valid JUMPDEST locations
     fn validateJumpDests(_: std.mem.Allocator, bytecode: []const u8, valid_jumpdests: *std.AutoArrayHashMap(u32, void)) !void {
         var pc: u32 = 0;
