@@ -113,6 +113,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
         }),
+        .use_llvm = use_llvm,
     });
     pattern_analyzer.root_module.addImport("evm", modules.evm_mod);
     pattern_analyzer.root_module.addImport("primitives", modules.primitives_mod);
@@ -130,6 +131,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
         }),
+        .use_llvm = use_llvm,
     });
     bytecode_patterns.root_module.addImport("evm", modules.evm_mod);
     bytecode_patterns.root_module.addImport("primitives", modules.primitives_mod);
@@ -274,6 +276,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = .ReleaseFast,
         }),
+        .use_llvm = use_llvm,
     });
     zbench_evm.root_module.addImport("zbench", zbench_module);
     zbench_evm.root_module.addImport("log", b.createModule(.{
@@ -302,6 +305,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = .Debug, // Debug for better logging
         }),
+        .use_llvm = use_llvm,
     });
     erc20_gas_test.root_module.addImport("evm", modules.evm_mod);
     erc20_gas_test.root_module.addImport("primitives", modules.primitives_mod);
@@ -329,6 +333,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = .Debug,
         }),
+        .use_llvm = use_llvm,
     });
     jump_table_test.root_module.addImport("evm", modules.evm_mod);
     jump_table_test.root_module.addImport("primitives", modules.primitives_mod);
