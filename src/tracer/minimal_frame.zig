@@ -238,30 +238,126 @@ pub const MinimalFrame = struct {
         return new_cost - current_cost;
     }
 
-    /// Calculate gas cost for external account operations (EIP-150 aware)
-    fn externalAccountGasCost(self: *Self, address: Address) !u64 {
+    /// Calculate gas cost for BALANCE opcode
+    fn balanceGasCost(self: *Self, address: Address) !u64 {
         const evm = self.getEvm();
 
         if (self.hardfork.isAtLeast(.BERLIN)) {
-            // Post-Berlin: Cold/warm access pattern
+            // Post-Berlin: Cold/warm access pattern (100/2600)
             @branchHint(.likely);
             return try evm.access_address(address);
+        } else if (self.hardfork.isAtLeast(.ISTANBUL)) {
+            // EIP-1884: Increased cost
+            return 700;
         } else if (self.hardfork.isAtLeast(.TANGERINE_WHISTLE)) {
-            // Post-EIP-150, Pre-Berlin: Fixed higher cost
-            return GasConstants.GasExtStep;
+            // EIP-150: Increased from 20 to 400
+            return 400;
         } else {
-            // Pre-EIP-150: Lower cost
-            return GasConstants.GasQuickStep;
+            // Pre-Tangerine Whistle: Original low cost
+            return 20;
         }
     }
 
-    /// Calculate SELFDESTRUCT gas cost (EIP-150 aware)
-    fn selfdestructGasCost(self: *const Self) u64 {
-        if (self.hardfork.isBefore(.TANGERINE_WHISTLE)) {
-            @branchHint(.cold);
-            return 0; // Pre-EIP-150: Free operation
+    /// Calculate gas cost for EXTCODESIZE opcode
+    fn extcodesizeGasCost(self: *Self, address: Address) !u64 {
+        const evm = self.getEvm();
+
+        if (self.hardfork.isAtLeast(.BERLIN)) {
+            // Post-Berlin: Cold/warm access pattern (100/2600)
+            @branchHint(.likely);
+            return try evm.access_address(address);
+        } else if (self.hardfork.isAtLeast(.TANGERINE_WHISTLE)) {
+            // EIP-150: Increased to 700
+            return 700;
+        } else {
+            // Pre-Tangerine Whistle: Original low cost
+            return 20;
         }
-        return GasConstants.SelfdestructGas; // Post-EIP-150: 5000 gas
+    }
+
+    /// Calculate gas cost for EXTCODEHASH opcode
+    fn extcodehashGasCost(self: *Self, address: Address) !u64 {
+        const evm = self.getEvm();
+
+        if (self.hardfork.isAtLeast(.BERLIN)) {
+            // Post-Berlin: Cold/warm access pattern (100/2600)
+            @branchHint(.likely);
+            return try evm.access_address(address);
+        } else if (self.hardfork.isAtLeast(.ISTANBUL)) {
+            // EIP-1884: Same cost as BALANCE
+            return 700;
+        } else {
+            // Constantinople to pre-Istanbul: 400 gas
+            // Note: EXTCODEHASH was introduced in Constantinople
+            return 400;
+        }
+    }
+
+    /// Calculate base gas cost for EXTCODECOPY opcode (before copy costs)
+    fn extcodecopyBaseGasCost(self: *Self, address: Address) !u64 {
+        const evm = self.getEvm();
+
+        if (self.hardfork.isAtLeast(.BERLIN)) {
+            // Post-Berlin: Cold/warm access pattern (100/2600)
+            @branchHint(.likely);
+            return try evm.access_address(address);
+        } else if (self.hardfork.isAtLeast(.TANGERINE_WHISTLE)) {
+            // EIP-150: Increased to 700
+            return 700;
+        } else {
+            // Pre-Tangerine Whistle: Original low cost
+            return 20;
+        }
+    }
+
+    /// Calculate SELFDESTRUCT gas cost
+    fn selfdestructGasCost(self: *Self, beneficiary: Address) !u64 {
+        const evm = self.getEvm();
+        var gas: u64 = 0;
+
+        // Base cost (EIP-150: Tangerine Whistle)
+        if (self.hardfork.isAtLeast(.TANGERINE_WHISTLE)) {
+            gas = GasConstants.SelfdestructGas; // 5000 gas
+        }
+        // Pre-EIP-150: Free operation (0 gas)
+
+        // Account creation cost (EIP-150 + EIP-161)
+        // Should charge 25000 if target doesn't exist and conditions are met
+        const target_exists = evm.account_exists(beneficiary);
+        if (!target_exists) {
+            // EIP-161 (Spurious Dragon): Only charge if contract has value
+            // Pre-Spurious: Always charge for non-existent accounts
+            const should_charge_topup = if (self.hardfork.isAtLeast(.SPURIOUS_DRAGON))
+                evm.get_balance(self.address) > 0  // Only charge if contract has value
+            else
+                true;  // Pre-Spurious: Always charge
+
+            if (self.hardfork.isAtLeast(.TANGERINE_WHISTLE) and should_charge_topup) {
+                gas += GasConstants.CallNewAccountGas; // 25000 gas
+            }
+        }
+
+        // Cold account access cost (EIP-2929: Berlin)
+        if (self.hardfork.isAtLeast(.BERLIN)) {
+            @branchHint(.likely);
+            // Only charge if beneficiary is not the same as current contract
+            if (!beneficiary.eql(self.address)) {
+                const access_cost = try evm.access_address(beneficiary);
+                // If cold, add cold account access cost
+                if (access_cost == GasConstants.ColdAccountAccessCost) {
+                    gas += GasConstants.ColdAccountAccessCost;
+                }
+            }
+        }
+
+        // TODO: uncomment once refund PR is merged (#767)
+        // Handle refund (EIP-3529: only before London)
+        // if (self.hardfork.isBefore(.LONDON)) {
+        //     @branchHint(.cold);
+        //     evm.gas_refund += GasConstants.SelfdestructRefundGas; // 24,000 refund
+        // }
+
+        return gas;
     }
 
     /// Calculate SELFDESTRUCT refund (EIP-3529 aware)
@@ -791,9 +887,9 @@ pub const MinimalFrame = struct {
                 }
                 const addr = Address{ .bytes = addr_bytes };
 
-                // EIP-150/EIP-2929: hardfork-aware account access cost
-                const access_cost = try self.externalAccountGasCost(addr);
-                try self.consumeGas(access_cost);
+                // Calculate gas cost based on hardfork
+                const gas_cost = try self.balanceGasCost(addr);
+                try self.consumeGas(gas_cost);
                 const balance = evm.get_balance(addr);
                 try self.pushStack(balance);
                 self.pc += 1;
@@ -1835,9 +1931,9 @@ pub const MinimalFrame = struct {
                 const addr_int = try self.popStack();
                 const ext_addr = primitives.Address.from_u256(addr_int);
 
-                // EIP-150/EIP-2929: hardfork-aware account access cost
-                const access_cost = try self.externalAccountGasCost(ext_addr);
-                try self.consumeGas(access_cost);
+                // Calculate gas cost based on hardfork
+                const gas_cost = try self.extcodesizeGasCost(ext_addr);
+                try self.consumeGas(gas_cost);
 
                 // For MinimalFrame, we don't have access to external code
                 // Just return 0 for now
@@ -1855,14 +1951,16 @@ pub const MinimalFrame = struct {
 
                 const ext_addr = primitives.Address.from_u256(addr_int);
 
+                // Calculate base gas cost based on hardfork
+                const base_cost = try self.extcodecopyBaseGasCost(ext_addr);
+
                 // Gas cost calculation
                 if (size > 0) {
                     const size_u32 = std.math.cast(u32, size) orelse return error.OutOfBounds;
                     const copy_cost = copyGasCost(size_u32);
 
-                    // EIP-150/EIP-2929: hardfork-aware account access
-                    const access_cost = try self.externalAccountGasCost(ext_addr);
-                    try self.consumeGas(access_cost + copy_cost);
+                    // Total cost: base (account access) + copy cost
+                    try self.consumeGas(base_cost + copy_cost);
 
                     const dest = std.math.cast(u32, dest_offset) orelse return error.OutOfBounds;
                     const len = size_u32;
@@ -1877,9 +1975,8 @@ pub const MinimalFrame = struct {
                         try self.writeMemory(dest + i, 0);
                     }
                 } else {
-                    // EIP-150/EIP-2929: charge account access cost even if size is zero
-                    const access_cost = try self.externalAccountGasCost(ext_addr);
-                    try self.consumeGas(access_cost);
+                    // Charge account access cost even if size is zero
+                    try self.consumeGas(base_cost);
                 }
                 self.pc += 1;
             },
@@ -1893,9 +1990,9 @@ pub const MinimalFrame = struct {
                 const addr_int = try self.popStack();
                 const ext_addr = primitives.Address.from_u256(addr_int);
 
-                // EIP-150/EIP-2929: hardfork-aware account access cost
-                const access_cost = try self.externalAccountGasCost(ext_addr);
-                try self.consumeGas(access_cost);
+                // Calculate gas cost based on hardfork
+                const gas_cost = try self.extcodehashGasCost(ext_addr);
+                try self.consumeGas(gas_cost);
 
                 // For MinimalFrame, return empty code hash
                 // Empty code hash = keccak256("")
@@ -2052,18 +2149,15 @@ pub const MinimalFrame = struct {
 
             // SELFDESTRUCT
             0xff => {
-                const beneficiary = try self.popStack();
-                _ = beneficiary;
-                
-                const gas_cost = self.selfdestructGasCost();
+                const beneficiary_u256 = try self.popStack();
+                const beneficiary = Address.from_u256(beneficiary_u256);
+
+                // Calculate gas cost based on hardfork and beneficiary
+                const gas_cost = try self.selfdestructGasCost(beneficiary);
                 try self.consumeGas(gas_cost);
-                
-                // Apply refund to EVM's gas_refund counter
-                const refund = self.selfdestructRefund();
-                if (refund > 0) {
-                    self.getEvm().gas_refund += refund;
-                }
-                
+
+                // TODO: Actually transfer balance to beneficiary
+                // For MinimalFrame, just mark as stopped
                 self.stopped = true;
             },
 
