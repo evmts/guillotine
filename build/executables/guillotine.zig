@@ -7,6 +7,7 @@ pub fn createExecutable(
     const exe = b.addExecutable(.{
         .name = "Guillotine",
         .root_module = exe_mod,
+        .use_llvm = if (@import("builtin").target.cpu.arch == .x86_64) true else null,
     });
 
     b.installArtifact(exe);

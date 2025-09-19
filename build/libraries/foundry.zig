@@ -21,6 +21,14 @@ pub fn createFoundryLibrary(
         "--manifest-path",
         b.pathFromRoot("lib/foundry-compilers/Cargo.toml"),
     });
+    
+    // Set environment variables for cross-compilation compatibility on x86_64 Linux
+    if (target.result.os.tag == .linux and target.result.cpu.arch == .x86_64) {
+        cargo_build.setEnvironmentVariable("CC", "gcc");
+        cargo_build.setEnvironmentVariable("CXX", "g++");
+        cargo_build.setEnvironmentVariable("AR", "ar");
+        cargo_build.setEnvironmentVariable("RUSTFLAGS", "-C target-feature=-crt-static");
+    }
 
     if (rust_target) |target_triple| {
         cargo_build.addArg("--target");
