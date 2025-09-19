@@ -153,12 +153,12 @@ pub fn build(b: *std.Build) void {
         shared_lib_mod.addImport("crypto", modules.crypto_mod);
         shared_lib_mod.addImport("build_options", config.options_mod);
 
-        // FFI libraries use self-hosted backend to avoid LLVM crashes with tail calls
+        // FFI libraries need LLVM backend for tail call support
         const shared_lib = b.addLibrary(.{
             .name = "guillotine_ffi",
             .linkage = .dynamic,
             .root_module = shared_lib_mod,
-            .use_llvm = null,
+            .use_llvm = use_llvm,
         });
         shared_lib.linkLibrary(c_kzg_lib);
         shared_lib.linkLibrary(blst_lib);
@@ -174,7 +174,7 @@ pub fn build(b: *std.Build) void {
             .name = "guillotine_ffi_static",
             .linkage = .static,
             .root_module = shared_lib_mod,
-            .use_llvm = null,
+            .use_llvm = use_llvm,
         });
         static_lib.linkLibrary(c_kzg_lib);
         static_lib.linkLibrary(blst_lib);
