@@ -142,7 +142,9 @@ pub fn build(b: *std.Build) void {
     bytecode_patterns_step.dependOn(&b.addInstallArtifact(bytecode_patterns, .{}).step);
 
     // Shared library for FFI bindings
-    {
+    // TEMPORARILY DISABLED on x86_64: FFI libraries crash with LLVM and fail with self-hosted (358 tail call errors)
+    // TODO: Restructure FFI to avoid direct EVM execution or find LLVM crash workaround  
+    if (target.result.cpu.arch != .x86_64) {
         const shared_lib_mod = b.createModule(.{
             .root_source_file = b.path("src/evm_c_api.zig"),
             .target = target,
