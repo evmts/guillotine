@@ -49,13 +49,6 @@ const PRECOMPILE_ADDRESSES = [_]Address{
     precompiles.POINT_EVALUATION_ADDRESS,
 };
 
-fn isPrecompileAddress(address: Address) bool {
-    for (PRECOMPILE_ADDRESSES) |precompile| {
-        if (address.equals(precompile)) return true;
-    }
-    return false;
-}
-
 /// Get ECADD gas cost based on hardfork
 fn getEcaddGasCost(hardfork: Hardfork) u64 {
     if (hardfork.isAtLeast(.ISTANBUL)) {
@@ -486,7 +479,7 @@ pub const MinimalEvm = struct {
         const code = self.get_code(address);
         if (code.len == 0) {
             // Check if this is a precompile address
-            if (isPrecompileAddress(address)) {
+            if (self.is_precompile(address)) {
                 var precompile_gas: u64 = 0;
                 
                 if (address.equals(precompiles.ECADD_ADDRESS)) {
@@ -606,6 +599,15 @@ pub const MinimalEvm = struct {
         }
         const key = StorageSlotKey{ .address = address, .slot = slot };
         try self.storage.put(key, value);
+    }
+
+    /// Check if an address is a precompile
+    pub fn is_precompile(self: *const Self, address: Address) bool {
+        _ = self;
+        for (PRECOMPILE_ADDRESSES) |precompile| {
+            if (address.equals(precompile)) return true;
+        }
+        return false;
     }
 
     /// Get current frame (top of the frame stack)
