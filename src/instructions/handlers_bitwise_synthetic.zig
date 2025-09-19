@@ -41,7 +41,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const op_data = dispatch_opcode_data.getOpData(.PUSH_AND_POINTER, Dispatch, Dispatch.Item, cursor);
 
             // For synthetic opcodes, cursor now points to metadata
-            const push_value = self.u256_constants[op_data.metadata.index];
+            const push_value = op_data.metadata.value_ptr.*;
 
             {
                 {
@@ -85,7 +85,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const op_data = dispatch_opcode_data.getOpData(.PUSH_OR_POINTER, Dispatch, Dispatch.Item, cursor);
 
             // For synthetic opcodes, cursor now points to metadata
-            const push_value = self.u256_constants[op_data.metadata.index];
+            const push_value = op_data.metadata.value_ptr.*;
 
             {
                 {
@@ -129,7 +129,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const op_data = dispatch_opcode_data.getOpData(.PUSH_XOR_POINTER, Dispatch, Dispatch.Item, cursor);
 
             // For synthetic opcodes, cursor now points to metadata
-            const push_value = self.u256_constants[op_data.metadata.index];
+            const push_value = op_data.metadata.value_ptr.*;
 
             {
                 {

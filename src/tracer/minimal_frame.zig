@@ -2,10 +2,11 @@
 /// This mirrors the architecture of frame/frame.zig but simplified for validation
 const std = @import("std");
 const primitives = @import("primitives");
+const minimal_evm_mod = @import("minimal_evm.zig");
 const GasConstants = primitives.GasConstants;
 const Address = primitives.Address.Address;
-const MinimalEvmError = @import("minimal_evm.zig").MinimalEvm.Error;
-const Hardfork = @import("../eips_and_hardforks/eips.zig").Hardfork;
+const MinimalEvm = minimal_evm_mod.MinimalEvm;
+const MinimalEvmError = MinimalEvm.Error;
 
 pub const MinimalFrame = struct {
     const Self = @This();
@@ -21,6 +22,9 @@ pub const MinimalFrame = struct {
     pc: u32,
     gas_remaining: i64,
     bytecode: []const u8,
+
+    // Valid jump destinations for JUMP/JUMPI
+    valid_jumpdests: std.AutoArrayHashMap(u32, void),
 
     // Call context
     caller: Address,
@@ -46,6 +50,27 @@ pub const MinimalFrame = struct {
     authorized: ?u256,
     call_depth: u32,
 
+    /// Analyze bytecode to identify valid JUMPDEST locations
+    fn validateJumpDests(_: std.mem.Allocator, bytecode: []const u8, valid_jumpdests: *std.AutoArrayHashMap(u32, void)) !void {
+        var pc: u32 = 0;
+        while (pc < bytecode.len) {
+            const opcode = bytecode[pc];
+
+            // Check if this is a JUMPDEST
+            if (opcode == 0x5b) {
+                try valid_jumpdests.put(pc, {});
+                pc += 1;
+            } else if (opcode >= 0x60 and opcode <= 0x7f) {
+                // PUSH1 through PUSH32
+                const push_size = opcode - 0x5f; // Number of bytes to push
+                // Skip the PUSH opcode and its immediate data
+                pc += 1 + push_size;
+            } else {
+                pc += 1;
+            }
+        }
+    }
+
     /// Initialize a new frame
     pub fn init(
         allocator: std.mem.Allocator,
@@ -64,6 +89,11 @@ pub const MinimalFrame = struct {
         var memory_map = std.AutoHashMap(u32, u8).init(allocator);
         errdefer memory_map.deinit();
 
+        // Analyze bytecode to identify valid jump destinations
+        var valid_jumpdests = std.AutoArrayHashMap(u32, void).init(allocator);
+        errdefer valid_jumpdests.deinit();
+        try validateJumpDests(allocator, bytecode, &valid_jumpdests);
+
         return Self{
             .stack = stack,
             .memory = memory_map,
@@ -71,6 +101,7 @@ pub const MinimalFrame = struct {
             .pc = 0,
             .gas_remaining = gas,
             .bytecode = bytecode,
+            .valid_jumpdests = valid_jumpdests,
             .caller = caller,
             .address = address,
             .value = value,
@@ -92,6 +123,7 @@ pub const MinimalFrame = struct {
         // The arena will clean up all memory at once when MinimalEvm is destroyed
         self.stack.deinit(self.allocator);
         self.memory.deinit();
+        self.valid_jumpdests.deinit();
         // No need to free output or return_data when using arena
     }
 
@@ -289,21 +321,26 @@ pub const MinimalFrame = struct {
 
             // EXP
             0x0a => {
-                const exp = try self.popStack();
                 const base = try self.popStack();
+                const exp = try self.popStack();
 
                 // EIP-160: Dynamic gas cost for EXP
-                // Gas cost = 10 + 50 * (number of bytes in exponent)
-                var exp_bytes: u32 = 0;
-                if (exp > 0) {
-                    var temp_exp = exp;
-                    while (temp_exp > 0) : (temp_exp >>= 8) {
-                        exp_bytes += 1;
-                    }
-                }
-                const gas_cost = GasConstants.GasSlowStep + 50 * exp_bytes;
+                // Gas cost = GasSlowStep + gas_per_byte * ((log2(exponent) / 8) + 1)
+                // This calculates the number of bytes needed to represent the exponent
+                const exp_bytes: u32 = if (exp == 0) 0 else blk: {
+                    // Find position of highest bit set
+                    const bit_position = 255 - @clz(exp);
+                    // Calculate byte count: (bit_position / 8) + 1
+                    break :blk @as(u32, bit_position / 8 + 1);
+                };
+
+                // TODO: these constants should be in gas_constants.zig as well
+                const gas_per_byte = if (self.hardfork.isAtLeast(.SPURIOUS_DRAGON)) @as(u32, 50) else @as(u32, 10);
+                // Calculate gas cost based on the number of bytes needed to represent the exponent
+                const gas_cost = GasConstants.GasSlowStep + gas_per_byte * exp_bytes;
                 try self.consumeGas(gas_cost);
 
+                // Square-and-multiply algorithm for base^exp
                 var result: u256 = 1;
                 var b = base;
                 var e = exp;
@@ -340,40 +377,40 @@ pub const MinimalFrame = struct {
             // LT
             0x10 => {
                 try self.consumeGas(GasConstants.GasFastestStep);
-                const top = try self.popStack(); // Top of stack
-                const second = try self.popStack(); // Second from top
-                try self.pushStack(if (second < top) 1 else 0); // Compare second < top
+                const a = try self.popStack();     // Top of stack
+                const b = try self.popStack();     // Second from top
+                try self.pushStack(if (a < b) 1 else 0);  // Compare a < b
                 self.pc += 1;
             },
 
             // GT
             0x11 => {
                 try self.consumeGas(GasConstants.GasFastestStep);
-                const top = try self.popStack(); // Top of stack
-                const second = try self.popStack(); // Second from top
-                try self.pushStack(if (second > top) 1 else 0); // Compare second > top
+                const a = try self.popStack();     // Top of stack
+                const b = try self.popStack();     // Second from top
+                try self.pushStack(if (a > b) 1 else 0);  // Compare a > b
                 self.pc += 1;
             },
 
             // SLT
             0x12 => {
                 try self.consumeGas(GasConstants.GasFastestStep);
-                const top = try self.popStack(); // Top of stack
-                const second = try self.popStack(); // Second from top
-                const top_signed = @as(i256, @bitCast(top));
-                const second_signed = @as(i256, @bitCast(second));
-                try self.pushStack(if (second_signed < top_signed) 1 else 0); // Compare second < top (signed)
+                const a = try self.popStack();     // Top of stack
+                const b = try self.popStack();     // Second from top
+                const a_signed = @as(i256, @bitCast(a));
+                const b_signed = @as(i256, @bitCast(b));
+                try self.pushStack(if (a_signed < b_signed) 1 else 0);  // Compare a < b (signed)
                 self.pc += 1;
             },
 
             // SGT
             0x13 => {
                 try self.consumeGas(GasConstants.GasFastestStep);
-                const top = try self.popStack(); // Top of stack
-                const second = try self.popStack(); // Second from top
-                const top_signed = @as(i256, @bitCast(top));
-                const second_signed = @as(i256, @bitCast(second));
-                try self.pushStack(if (second_signed > top_signed) 1 else 0); // Compare second > top (signed)
+                const a = try self.popStack();     // Top of stack
+                const b = try self.popStack();     // Second from top
+                const a_signed = @as(i256, @bitCast(a));
+                const b_signed = @as(i256, @bitCast(b));
+                try self.pushStack(if (a_signed > b_signed) 1 else 0);  // Compare a > b (signed)
                 self.pc += 1;
             },
 
@@ -928,25 +965,27 @@ pub const MinimalFrame = struct {
             0x56 => {
                 try self.consumeGas(GasConstants.GasMidStep);
                 const dest = try self.popStack();
-                if (dest > std.math.maxInt(u32)) {
-                    return error.InvalidJump;
-                }
-                // In a real implementation, we'd validate the jump destination
-                // For now, just set PC
-                self.pc = @intCast(dest);
+                const dest_pc = std.math.cast(u32, dest) orelse return error.OutOfBounds;
+
+                // Validate jump destination
+                if (!self.valid_jumpdests.contains(dest_pc)) return error.InvalidJump;
+                
+                self.pc = dest_pc;
             },
 
             // JUMPI
             0x57 => {
                 try self.consumeGas(GasConstants.GasSlowStep);
-                const dest = try self.popStack();
                 const condition = try self.popStack();
+                const dest = try self.popStack();
 
                 if (condition != 0) {
-                    if (dest > std.math.maxInt(u32)) {
-                        return error.InvalidJump;
-                    }
-                    self.pc = @intCast(dest);
+                    const dest_pc = std.math.cast(u32, dest) orelse return error.OutOfBounds;
+
+                    // Validate jump destination
+                    if (!self.valid_jumpdests.contains(dest_pc)) return error.InvalidJump;
+
+                    self.pc = dest_pc;
                 } else {
                     self.pc += 1;
                 }
@@ -1792,3 +1831,193 @@ pub const MinimalFrame = struct {
         }
     }
 };
+
+test "MinimalFrame JUMP and JUMPI validation" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    // Use the real MinimalEvm for testing
+    var evm = try MinimalEvm.init(allocator);
+    defer evm.deinit();
+
+    // Set up some basic blockchain context
+    evm.setBlockchainContext(
+        1, // chain_id
+        100, // block_number
+        1000, // block_timestamp
+        1, // block_difficulty
+        Address{ .bytes = .{0} ** 20 }, // block_coinbase
+        30000000, // block_gas_limit
+        1, // block_base_fee
+        1, // blob_base_fee
+    );
+    evm.setTransactionContext(
+        Address{ .bytes = .{0} ** 20 }, // origin
+        1, // gas_price
+    );
+
+    // Test 1: Valid JUMP to JUMPDEST
+    {
+        const bytecode = [_]u8{
+            0x60, 0x04,  // PUSH1 4
+            0x56,        // JUMP (pc=2)
+            0xFE,        // INVALID (pc=3) - should be skipped
+            0x5b,        // JUMPDEST (pc=4) - valid destination
+            0x00,        // STOP (pc=5)
+        };
+
+        var frame = try MinimalFrame.init(
+            allocator,
+            &bytecode,
+            10000,
+            Address{ .bytes = .{0} ** 20 },
+            Address{ .bytes = .{0} ** 20 },
+            0,
+            &.{},
+            &evm,
+        );
+        defer frame.deinit();
+
+        // Execute and verify we jumped to pc=4
+        try frame.execute();
+        try testing.expectEqual(@as(u32, 5), frame.pc); // Should be at STOP after JUMPDEST
+        try testing.expect(frame.stopped);
+    }
+
+    // Test 2: Invalid JUMP (not to JUMPDEST)
+    {
+        const bytecode = [_]u8{
+            0x60, 0x03,  // PUSH1 3 - invalid destination
+            0x56,        // JUMP (pc=2)
+            0xFE,        // INVALID (pc=3) - not a JUMPDEST
+            0x5b,        // JUMPDEST (pc=4)
+            0x00,        // STOP
+        };
+
+        var frame = try MinimalFrame.init(
+            allocator,
+            &bytecode,
+            10000,
+            Address{ .bytes = .{0} ** 20 },
+            Address{ .bytes = .{0} ** 20 },
+            0,
+            &.{},
+            &evm,
+        );
+        defer frame.deinit();
+
+        // Execute and expect InvalidJump error
+        const result = frame.execute();
+        try testing.expectError(error.InvalidJump, result);
+    }
+
+    // Test 3: Valid JUMPI with true condition
+    {
+        const bytecode = [_]u8{
+            0x60, 0x06,  // PUSH1 6 - destination
+            0x60, 0x01,  // PUSH1 1 - true condition
+            0x57,        // JUMPI (pc=4)
+            0xFE,        // INVALID (pc=5) - should be skipped
+            0x5b,        // JUMPDEST (pc=6) - valid destination
+            0x00,        // STOP
+        };
+
+        var frame = try MinimalFrame.init(
+            allocator,
+            &bytecode,
+            10000,
+            Address{ .bytes = .{0} ** 20 },
+            Address{ .bytes = .{0} ** 20 },
+            0,
+            &.{},
+            &evm,
+        );
+        defer frame.deinit();
+
+        // Execute and verify we jumped
+        try frame.execute();
+        try testing.expectEqual(@as(u32, 7), frame.pc); // Should be at STOP after JUMPDEST
+        try testing.expect(frame.stopped);
+    }
+
+    // Test 4: JUMPI with false condition (no jump)
+    {
+        const bytecode = [_]u8{
+            0x60, 0x06,  // PUSH1 6 - destination
+            0x60, 0x00,  // PUSH1 0 - false condition
+            0x57,        // JUMPI (pc=4)
+            0x00,        // STOP (pc=5) - should execute this
+            0x5b,        // JUMPDEST (pc=6)
+        };
+
+        var frame = try MinimalFrame.init(
+            allocator,
+            &bytecode,
+            10000,
+            Address{ .bytes = .{0} ** 20 },
+            Address{ .bytes = .{0} ** 20 },
+            0,
+            &.{},
+            &evm,
+        );
+        defer frame.deinit();
+
+        // Execute and verify we didn't jump
+        try frame.execute();
+        try testing.expectEqual(@as(u32, 5), frame.pc); // Should stop at STOP
+        try testing.expect(frame.stopped);
+    }
+
+    // Test 5: Invalid JUMPI to non-JUMPDEST
+    {
+        const bytecode = [_]u8{
+            0x60, 0x05,  // PUSH1 5 - invalid destination
+            0x60, 0x01,  // PUSH1 1 - true condition
+            0x57,        // JUMPI (pc=4)
+            0xFE,        // INVALID (pc=5) - not a JUMPDEST
+            0x5b,        // JUMPDEST (pc=6)
+        };
+
+        var frame = try MinimalFrame.init(
+            allocator,
+            &bytecode,
+            10000,
+            Address{ .bytes = .{0} ** 20 },
+            Address{ .bytes = .{0} ** 20 },
+            0,
+            &.{},
+            &evm,
+        );
+        defer frame.deinit();
+
+        // Execute and expect InvalidJump error
+        const result = frame.execute();
+        try testing.expectError(error.InvalidJump, result);
+    }
+
+    // Test 6: Jump destination inside PUSH data should fail
+    {
+        const bytecode = [_]u8{
+            0x60, 0x03,  // PUSH1 3 - trying to jump into PUSH data
+            0x56,        // JUMP (pc=2)
+            0x60, 0x5b,  // PUSH1 0x5b (pc=3,4) - the 0x5b at pc=4 looks like JUMPDEST but it's data!
+            0x00,        // STOP
+        };
+
+        var frame = try MinimalFrame.init(
+            allocator,
+            &bytecode,
+            10000,
+            Address{ .bytes = .{0} ** 20 },
+            Address{ .bytes = .{0} ** 20 },
+            0,
+            &.{},
+            &evm,
+        );
+        defer frame.deinit();
+
+        // Execute and expect InvalidJump error (pc=3 is inside PUSH1 instruction)
+        const result = frame.execute();
+        try testing.expectError(error.InvalidJump, result);
+    }
+}

@@ -118,7 +118,7 @@ pub fn Handlers(comptime FrameType: type) type {
                         const value = op_data.metadata.value;
                         self.stack.push_unsafe(value);
                     } else {
-                        const value = self.u256_constants[op_data.metadata.index];
+                        const value = op_data.metadata.value_ptr.*;
                         // log.debug("[PUSH{d}] Pushing pointer value: {d}", .{ push_n, value });
                         self.stack.push_unsafe(value);
                     }

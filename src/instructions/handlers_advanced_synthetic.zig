@@ -32,14 +32,14 @@ pub fn Handlers(comptime FrameType: type) type {
             if (value1_item == .push_inline) {
                 self.stack.push_unsafe(value1_item.push_inline.value);
             } else if (value1_item == .push_pointer) {
-                self.stack.push_unsafe(self.u256_constants[value1_item.push_pointer.index]);
+                self.stack.push_unsafe(value1_item.push_pointer.value_ptr.*);
             }
 
             // Push second value
             if (value2_item == .push_inline) {
                 self.stack.push_unsafe(value2_item.push_inline.value);
             } else if (value2_item == .push_pointer) {
-                self.stack.push_unsafe(self.u256_constants[value2_item.push_pointer.index]);
+                self.stack.push_unsafe(value2_item.push_pointer.value_ptr.*);
             }
 
             // Use getOpData for next instruction
@@ -62,19 +62,19 @@ pub fn Handlers(comptime FrameType: type) type {
             if (value1_item == .push_inline) {
                 self.stack.push_unsafe(value1_item.push_inline.value);
             } else if (value1_item == .push_pointer) {
-                self.stack.push_unsafe(self.u256_constants[value1_item.push_pointer.index]);
+                self.stack.push_unsafe(value1_item.push_pointer.value_ptr.*);
             }
 
             if (value2_item == .push_inline) {
                 self.stack.push_unsafe(value2_item.push_inline.value);
             } else if (value2_item == .push_pointer) {
-                self.stack.push_unsafe(self.u256_constants[value2_item.push_pointer.index]);
+                self.stack.push_unsafe(value2_item.push_pointer.value_ptr.*);
             }
 
             if (value3_item == .push_inline) {
                 self.stack.push_unsafe(value3_item.push_inline.value);
             } else if (value3_item == .push_pointer) {
-                self.stack.push_unsafe(self.u256_constants[value3_item.push_pointer.index]);
+                self.stack.push_unsafe(value3_item.push_pointer.value_ptr.*);
             }
 
             // Use getOpData for next instruction
@@ -153,7 +153,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const push_value = if (push_item == .push_inline)
                 push_item.push_inline.value
             else if (push_item == .push_pointer)
-                self.u256_constants[push_item.push_pointer.index]
+                push_item.push_pointer.value_ptr.*
             else
                 unreachable;
 
@@ -250,7 +250,7 @@ pub fn Handlers(comptime FrameType: type) type {
             if (push_item == .push_inline) {
                 self.stack.push_unsafe(push_item.push_inline.value);
             } else if (push_item == .push_pointer) {
-                self.stack.push_unsafe(self.u256_constants[push_item.push_pointer.index]);
+                self.stack.push_unsafe(push_item.push_pointer.value_ptr.*);
             }
 
             // DUP3: duplicate 3rd stack item
@@ -277,7 +277,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const target = if (target_item == .push_inline)
                 target_item.push_inline.value
             else
-                self.u256_constants[target_item.push_pointer.index];
+                target_item.push_pointer.value_ptr.*;
 
             // PUSH4 selector
             self.stack.push_unsafe(selector);
@@ -361,7 +361,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const push_value = if (push_item == .push_inline)
                 push_item.push_inline.value
             else
-                self.u256_constants[push_item.push_pointer.index];
+                push_item.push_pointer.value_ptr.*;
             self.stack.push_unsafe(push_value);
 
             // ADD: pop two values and add

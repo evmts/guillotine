@@ -32,8 +32,8 @@ pub fn DispatchMetadata(comptime FrameType: type) type {
         pub const PushInlineMetadata = packed struct(u64) { value: u64 };
 
         /// Metadata for PUSH operations with values larger than 64 bits.
-        /// Contains an index into the u256 values array stored in the dispatch schedule.
-        pub const PushPointerMetadata = packed struct(u32) { index: u32 };
+        /// Contains a direct pointer to the u256 value for efficient access without indirection.
+        pub const PushPointerMetadata = packed struct(usize) { value_ptr: *const FrameType.WordType };
 
         /// Metadata for PC opcode containing the program counter value.
         /// Metadata for static jump locations - contains a direct pointer to the jump destination dispatch

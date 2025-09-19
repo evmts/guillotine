@@ -154,10 +154,7 @@ pub fn Frame(comptime _config: FrameConfig) type {
         // Total: 64 bytes exactly
 
         // CACHE LINE 2 (64 bytes) - STORAGE/CONTEXT/EXECUTION
-        // TODO: We should be able to store direct pointers to the constant thus we shouldn't need to store it here
-        // We can keep it stored where it's originally stored
         // These fields are accessed together during storage ops and execution
-        u256_constants: []const WordType, // 16B - Constants from dispatch (PUSH9-32)
         contract_address: Address, // 20B - Current contract (storage ops, ADDRESS)
         // Output is now returned via thread-local storage, not stored on frame
         // Total: 64 bytes
@@ -200,7 +197,6 @@ pub fn Frame(comptime _config: FrameConfig) type {
                 .memory = memory,
                 .evm_ptr = evm_ptr,
                 .contract_address = Address.ZERO_ADDRESS,
-                .u256_constants = &[_]WordType{}, // Will be set during interpret
                 .jump_table = &Dispatch.JumpTable{ .entries = &[_]Dispatch.JumpTable.JumpTableEntry{} }, // Pointer to empty jump table
                 .caller = caller,
                 .value = value,
@@ -382,9 +378,6 @@ pub fn Frame(comptime _config: FrameConfig) type {
 
             // Note: first_block_gas_amount is tracked locally for this execution only
 
-            // Store u256_constants slice for Frame access
-            self.u256_constants = if (owned_schedule) |s| s.u256_values else &[_]WordType{};
-
             // Verify bytecode stream ends with 2 stop handlers (debug builds only)
             if (builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
                 if (schedule.len >= 2) {
@@ -440,7 +433,6 @@ pub fn Frame(comptime _config: FrameConfig) type {
                 .evm_ptr = self.evm_ptr,
                 // Cache line 2 - STORAGE/CONTEXT/EXECUTION
                 .contract_address = self.contract_address,
-                .u256_constants = self.u256_constants,
                 .jump_table = self.jump_table,
                 // Cache line 3+ - COLD PATH
                 .caller = self.caller,

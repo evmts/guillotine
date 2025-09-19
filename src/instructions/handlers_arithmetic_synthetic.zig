@@ -48,7 +48,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
             const op_data = dispatch_opcode_data.getOpData(.PUSH_ADD_POINTER, Dispatch, Dispatch.Item, cursor);
             const top = self.stack.peek_unsafe();
-            self.stack.set_top_unsafe(self.u256_constants[op_data.metadata.index] +% top);
+            self.stack.set_top_unsafe(op_data.metadata.value_ptr.* +% top);
 
             return next_instruction(self, cursor, .PUSH_ADD_POINTER);
         }
@@ -72,7 +72,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
             const op_data = dispatch_opcode_data.getOpData(.PUSH_MUL_POINTER, Dispatch, Dispatch.Item, cursor);
             const top = self.stack.peek_unsafe();
-            self.stack.set_top_unsafe(self.u256_constants[op_data.metadata.index] *% top);
+            self.stack.set_top_unsafe(op_data.metadata.value_ptr.* *% top);
 
             return next_instruction(self, cursor, .PUSH_MUL_POINTER);
         }
@@ -102,7 +102,7 @@ pub fn Handlers(comptime FrameType: type) type {
         pub fn push_div_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             self.beforeInstruction(.PUSH_DIV_POINTER, cursor);
             const op_data = dispatch_opcode_data.getOpData(.PUSH_DIV_POINTER, Dispatch, Dispatch.Item, cursor);
-            const dividend = self.u256_constants[op_data.metadata.index];
+            const dividend = op_data.metadata.value_ptr.*;
 
             {
                 self.getTracer().assert(self.stack.size() >= 1, "PUSH_DIV_POINTER requires 1 stack item");
@@ -145,7 +145,7 @@ pub fn Handlers(comptime FrameType: type) type {
                 self.getTracer().assert(self.stack.size() >= 1, "PUSH_SUB_POINTER requires 1 stack item");
             }
             const top = self.stack.peek_unsafe();
-            const result = self.u256_constants[op_data.metadata.index] -% top;
+            const result = op_data.metadata.value_ptr.* -% top;
             self.stack.set_top_unsafe(result);
             return next_instruction(self, cursor, .PUSH_SUB_POINTER);
         }

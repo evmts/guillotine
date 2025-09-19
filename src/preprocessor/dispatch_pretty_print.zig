@@ -38,7 +38,7 @@ pub fn DispatchDebugInfo(comptime FrameType: type) type {
         
         pub const MetadataInfo = union(enum) {
             push_inline: struct { value: u64 },
-            push_pointer: struct { index: u32, value: FrameType.WordType },
+            push_pointer: struct { value_ptr: *const FrameType.WordType, value: FrameType.WordType },
             jump_dest: struct { 
                 gas: u32,
                 min_stack: u16,
@@ -592,7 +592,7 @@ pub fn getDebugInfo(
                             .item_type = .push_pointer,
                             .handler_ptr = null,
                             .handler_name = null,
-                            .metadata = .{ .push_pointer = .{ .index = meta.index, .value = data.value } }, // Use expected value
+                            .metadata = .{ .push_pointer = .{ .value_ptr = meta.value_ptr, .value = data.value } }, // Use expected value
                             .expected_from_bytecode = null,
                             .validation_status = .valid, // Assume valid since we can't verify
                         });
@@ -832,7 +832,7 @@ pub fn getDebugInfo(
                                 .item_type = .push_pointer,
                                 .handler_ptr = null,
                                 .handler_name = null,
-                                .metadata = .{ .push_pointer = .{ .index = meta.index, .value = 0 } }, // Can't get actual value
+                                .metadata = .{ .push_pointer = .{ .value_ptr = meta.value_ptr, .value = 0 } }, // Can't get actual value
                                 .expected_from_bytecode = null,
                                 .validation_status = .valid,
                             });

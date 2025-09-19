@@ -81,7 +81,8 @@ pub fn Preprocessor(comptime FrameType: type) type {
                 try schedule_items.append(allocator, .{ .push_inline = .{ .value = inline_value } });
             } else {
                 const index = try u256_storage.getOrAdd(allocator, data.value);
-                try schedule_items.append(allocator, .{ .push_pointer = .{ .index = index } });
+                const value_ptr = &u256_storage.values.items[index];
+                try schedule_items.append(allocator, .{ .push_pointer = .{ .value_ptr = value_ptr } });
             }
         }
 
@@ -624,7 +625,8 @@ pub fn Preprocessor(comptime FrameType: type) type {
                                 try schedule_items.append(allocator, .{ .push_inline = .{ .value = @intCast(value) } });
                             } else {
                                 const index = try u256_storage.getOrAdd(allocator, value);
-                                try schedule_items.append(allocator, .{ .push_pointer = .{ .index = index } });
+                                const value_ptr = &u256_storage.values.items[index];
+                                try schedule_items.append(allocator, .{ .push_pointer = .{ .value_ptr = value_ptr } });
                             }
                         }
                     },
@@ -645,7 +647,8 @@ pub fn Preprocessor(comptime FrameType: type) type {
                             try schedule_items.append(allocator, .{ .push_inline = .{ .value = @intCast(ij.target) } });
                         } else {
                             const index = try u256_storage.getOrAdd(allocator, ij.target);
-                            try schedule_items.append(allocator, .{ .push_pointer = .{ .index = index } });
+                            const value_ptr = &u256_storage.values.items[index];
+                            try schedule_items.append(allocator, .{ .push_pointer = .{ .value_ptr = value_ptr } });
                         }
                     },
                     .dup2_mstore_push => |dmp| {
@@ -657,7 +660,8 @@ pub fn Preprocessor(comptime FrameType: type) type {
                             try schedule_items.append(allocator, .{ .push_inline = .{ .value = @intCast(dmp.push_value) } });
                         } else {
                             const index = try u256_storage.getOrAdd(allocator, dmp.push_value);
-                            try schedule_items.append(allocator, .{ .push_pointer = .{ .index = index } });
+                            const value_ptr = &u256_storage.values.items[index];
+                            try schedule_items.append(allocator, .{ .push_pointer = .{ .value_ptr = value_ptr } });
                         }
                     },
                     .dup3_add_mstore => {
@@ -679,7 +683,8 @@ pub fn Preprocessor(comptime FrameType: type) type {
                             try schedule_items.append(allocator, .{ .push_inline = .{ .value = @intCast(pda.value) } });
                         } else {
                             const index = try u256_storage.getOrAdd(allocator, pda.value);
-                            try schedule_items.append(allocator, .{ .push_pointer = .{ .index = index } });
+                            const value_ptr = &u256_storage.values.items[index];
+                            try schedule_items.append(allocator, .{ .push_pointer = .{ .value_ptr = value_ptr } });
                         }
                     },
                     .function_dispatch => |fd| {
@@ -693,7 +698,8 @@ pub fn Preprocessor(comptime FrameType: type) type {
                             try schedule_items.append(allocator, .{ .push_inline = .{ .value = @intCast(fd.target) } });
                         } else {
                             const index = try u256_storage.getOrAdd(allocator, fd.target);
-                            try schedule_items.append(allocator, .{ .push_pointer = .{ .index = index } });
+                            const value_ptr = &u256_storage.values.items[index];
+                            try schedule_items.append(allocator, .{ .push_pointer = .{ .value_ptr = value_ptr } });
                         }
                     },
                     .callvalue_check => {
@@ -716,7 +722,8 @@ pub fn Preprocessor(comptime FrameType: type) type {
                             try schedule_items.append(allocator, .{ .push_inline = .{ .value = @intCast(pad.value) } });
                         } else {
                             const index = try u256_storage.getOrAdd(allocator, pad.value);
-                            try schedule_items.append(allocator, .{ .push_pointer = .{ .index = index } });
+                            const value_ptr = &u256_storage.values.items[index];
+                            try schedule_items.append(allocator, .{ .push_pointer = .{ .value_ptr = value_ptr } });
                         }
                     },
                     .mload_swap1_dup2 => {
@@ -769,7 +776,8 @@ pub fn Preprocessor(comptime FrameType: type) type {
                 try schedule_items.append(allocator, .{ .push_inline = .{ .value = inline_val } });
             } else {
                 const index = try u256_storage.getOrAdd(allocator, value);
-                try schedule_items.append(allocator, .{ .push_pointer = .{ .index = index } });
+                const value_ptr = &u256_storage.values.items[index];
+                try schedule_items.append(allocator, .{ .push_pointer = .{ .value_ptr = value_ptr } });
             }
         }
 
@@ -819,7 +827,8 @@ pub fn Preprocessor(comptime FrameType: type) type {
                 });
             } else {
                 const index = try u256_storage.getOrAdd(allocator, value);
-                try schedule_items.append(allocator, .{ .push_pointer = .{ .index = index } });
+                const value_ptr = &u256_storage.values.items[index];
+                try schedule_items.append(allocator, .{ .push_pointer = .{ .value_ptr = value_ptr } });
             }
         }
 
