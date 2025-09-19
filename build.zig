@@ -134,47 +134,47 @@ pub fn build(b: *std.Build) void {
     const bytecode_patterns_step = b.step("build-bytecode-patterns", "Build bytecode pattern analyzer");
     bytecode_patterns_step.dependOn(&b.addInstallArtifact(bytecode_patterns, .{}).step);
 
-    // Shared library for FFI bindings
-    const shared_lib_mod = b.createModule(.{
-        .root_source_file = b.path("src/evm_c_api.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    shared_lib_mod.addImport("evm", modules.evm_mod);
-    shared_lib_mod.addImport("primitives", modules.primitives_mod);
-    shared_lib_mod.addImport("crypto", modules.crypto_mod);
-    shared_lib_mod.addImport("build_options", config.options_mod);
+    // Shared library for FFI bindings (skip on x86_64 due to LLVM backend crashes)
+    if (target.result.cpu.arch != .x86_64) {
+        const shared_lib_mod = b.createModule(.{
+            .root_source_file = b.path("src/evm_c_api.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+        shared_lib_mod.addImport("evm", modules.evm_mod);
+        shared_lib_mod.addImport("primitives", modules.primitives_mod);
+        shared_lib_mod.addImport("crypto", modules.crypto_mod);
+        shared_lib_mod.addImport("build_options", config.options_mod);
 
-    const shared_lib = b.addLibrary(.{
-        .name = "guillotine_ffi",
-        .linkage = .dynamic,
-        .root_module = shared_lib_mod,
-        .use_llvm = if (target.result.cpu.arch == .x86_64) true else null,
-    });
-    shared_lib.linkLibrary(c_kzg_lib);
-    shared_lib.linkLibrary(blst_lib);
-    if (bn254_lib) |bn254| shared_lib.linkLibrary(bn254);
-    shared_lib.linkLibC();
-    b.installArtifact(shared_lib);
+        const shared_lib = b.addLibrary(.{
+            .name = "guillotine_ffi",
+            .linkage = .dynamic,
+            .root_module = shared_lib_mod,
+        });
+        shared_lib.linkLibrary(c_kzg_lib);
+        shared_lib.linkLibrary(blst_lib);
+        if (bn254_lib) |bn254| shared_lib.linkLibrary(bn254);
+        shared_lib.linkLibC();
+        b.installArtifact(shared_lib);
 
-    const shared_lib_step = b.step("shared", "Build shared library for FFI");
-    shared_lib_step.dependOn(&b.addInstallArtifact(shared_lib, .{}).step);
+        const shared_lib_step = b.step("shared", "Build shared library for FFI");
+        shared_lib_step.dependOn(&b.addInstallArtifact(shared_lib, .{}).step);
 
-    // Also create a static library for Rust FFI
-    const static_lib = b.addLibrary(.{
-        .name = "guillotine_ffi_static",
-        .linkage = .static,
-        .root_module = shared_lib_mod,
-        .use_llvm = if (target.result.cpu.arch == .x86_64) true else null,
-    });
-    static_lib.linkLibrary(c_kzg_lib);
-    static_lib.linkLibrary(blst_lib);
-    if (bn254_lib) |bn254| static_lib.linkLibrary(bn254);
-    static_lib.linkLibC();
-    b.installArtifact(static_lib);
+        // Also create a static library for Rust FFI
+        const static_lib = b.addLibrary(.{
+            .name = "guillotine_ffi_static",
+            .linkage = .static,
+            .root_module = shared_lib_mod,
+        });
+        static_lib.linkLibrary(c_kzg_lib);
+        static_lib.linkLibrary(blst_lib);
+        if (bn254_lib) |bn254| static_lib.linkLibrary(bn254);
+        static_lib.linkLibC();
+        b.installArtifact(static_lib);
 
-    const static_lib_step = b.step("static", "Build static library for FFI");
-    static_lib_step.dependOn(&b.addInstallArtifact(static_lib, .{}).step);
+        const static_lib_step = b.step("static", "Build static library for FFI");
+        static_lib_step.dependOn(&b.addInstallArtifact(static_lib, .{}).step);
+    }
 
     // Tests
     const tests_pkg = build_pkg.Tests;
