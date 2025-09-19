@@ -459,7 +459,7 @@ pub const MinimalEvm = struct {
             value,
             input,
             @as(*anyopaque, @ptrCast(self)),
-            self.hardfork,
+            .DEFAULT,
         );
 
         try self.frames.append(self.allocator, frame);
