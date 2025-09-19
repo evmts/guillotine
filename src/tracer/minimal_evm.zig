@@ -7,7 +7,6 @@ const GasConstants = primitives.GasConstants;
 const MinimalFrame = @import("minimal_frame.zig").MinimalFrame;
 const Hardfork = @import("../eips_and_hardforks/eips.zig").Hardfork;
 const minimal_host = @import("minimal_host.zig");
-const precompiles = @import("../precompiles/precompiles.zig");
 const Hardfork = @import("../eips_and_hardforks/hardfork.zig").Hardfork;
 
 const Address = primitives.Address.Address;
@@ -35,48 +34,6 @@ pub const StorageSlotKey = struct {
         return a.address.equals(b.address) and a.slot == b.slot;
     }
 };
-
-const PRECOMPILE_ADDRESSES = [_]Address{
-    precompiles.ECRECOVER_ADDRESS,
-    precompiles.SHA256_ADDRESS,
-    precompiles.RIPEMD160_ADDRESS,
-    precompiles.IDENTITY_ADDRESS,
-    precompiles.MODEXP_ADDRESS,
-    precompiles.ECADD_ADDRESS,
-    precompiles.ECMUL_ADDRESS,
-    precompiles.ECPAIRING_ADDRESS,
-    precompiles.BLAKE2F_ADDRESS,
-    precompiles.POINT_EVALUATION_ADDRESS,
-};
-
-/// Get ECADD gas cost based on hardfork
-fn getEcaddGasCost(hardfork: Hardfork) u64 {
-    if (hardfork.isAtLeast(.ISTANBUL)) {
-        @branchHint(.likely);
-        return GasConstants.ECADD_GAS_COST; // 150 gas
-    }
-    return GasConstants.ECADD_GAS_COST_BYZANTIUM; // 500 gas
-}
-
-/// Get ECMUL gas cost based on hardfork
-fn getEcmulGasCost(hardfork: Hardfork) u64 {
-    if (hardfork.isAtLeast(.ISTANBUL)) {
-        @branchHint(.likely);
-        return GasConstants.ECMUL_GAS_COST; // 6,000 gas
-    }
-    return GasConstants.ECMUL_GAS_COST_BYZANTIUM; // 40,000 gas
-}
-
-/// Get ECPAIRING gas cost based on hardfork
-fn getEcpairingGasCost(hardfork: Hardfork, pair_count: usize) u64 {
-    if (hardfork.isAtLeast(.ISTANBUL)) {
-        @branchHint(.likely);
-        return GasConstants.ECPAIRING_BASE_GAS_COST + 
-               @as(u64, pair_count) * GasConstants.ECPAIRING_PER_PAIR_GAS_COST;
-    }
-    return GasConstants.ECPAIRING_BASE_GAS_COST_BYZANTIUM + 
-           @as(u64, pair_count) * GasConstants.ECPAIRING_PER_PAIR_GAS_COST_BYZANTIUM;
-}
 
 // Context for Address ArrayHashMap
 const AddressContext = std.array_hash_map.AutoContext(Address);
@@ -362,7 +319,7 @@ pub const MinimalEvm = struct {
 
         // Pre-warm precompiles if Berlin+
         if (!self.hardfork.isAtLeast(.BERLIN)) return;
-        try self.pre_warm_addresses(&PRECOMPILE_ADDRESSES);
+        // TODO: Pre-warm precompiles
     }
 
     /// Execute bytecode (main entry point like evm.execute)
@@ -478,35 +435,7 @@ pub const MinimalEvm = struct {
         // Get code for the target address
         const code = self.get_code(address);
         if (code.len == 0) {
-            // Check if this is a precompile address
-            if (self.is_precompile(address)) {
-                var precompile_gas: u64 = 0;
-                
-                if (address.equals(precompiles.ECADD_ADDRESS)) {
-                    precompile_gas = getEcaddGasCost(self.hardfork);
-                } else if (address.equals(precompiles.ECMUL_ADDRESS)) {
-                    precompile_gas = getEcmulGasCost(self.hardfork);
-                } else if (address.equals(precompiles.ECPAIRING_ADDRESS)) {
-                    // For ECPAIRING, need to calculate pair count from input
-                    const pair_count = input.len / 192; // Each pair is 192 bytes
-                    precompile_gas = getEcpairingGasCost(self.hardfork, pair_count);
-                }
-                
-                if (gas < precompile_gas) {
-                    return CallResult{
-                        .success = false,
-                        .gas_left = 0,
-                        .output = &[_]u8{},
-                    };
-                }
-                
-                // TODO: Implement precompile logic
-                return CallResult{
-                    .success = true,
-                    .gas_left = gas - precompile_gas,
-                    .output = &[_]u8{}, // Dummy output
-                };
-            }
+            // TODO: Implement precompiles
             
             // Empty account - just return success
             return CallResult{
@@ -602,11 +531,10 @@ pub const MinimalEvm = struct {
     }
 
     /// Check if an address is a precompile
+    /// TODO: implement this
     pub fn is_precompile(self: *const Self, address: Address) bool {
         _ = self;
-        for (PRECOMPILE_ADDRESSES) |precompile| {
-            if (address.equals(precompile)) return true;
-        }
+        _ = address;
         return false;
     }
 
