@@ -361,6 +361,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = .Debug,
         }),
+        .use_llvm = use_llvm,
     });
     erc20_deployment_test.root_module.addImport("evm", modules.evm_mod);
     erc20_deployment_test.root_module.addImport("primitives", modules.primitives_mod);
@@ -391,6 +392,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = .Debug,
         }),
+        .use_llvm = use_llvm,
     });
     fixtures_differential_test.root_module.addImport("evm", modules.evm_mod);
     fixtures_differential_test.root_module.addImport("primitives", modules.primitives_mod);
@@ -417,6 +419,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = .Debug,
         }),
+        .use_llvm = use_llvm,
     });
     snailtracer_test.root_module.addImport("evm", modules.evm_mod);
     snailtracer_test.root_module.addImport("primitives", modules.primitives_mod);
@@ -443,6 +446,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = .Debug,
         }),
+        .use_llvm = use_llvm,
     });
     gt_bug_test.root_module.addImport("evm", modules.evm_mod);
     gt_bug_test.root_module.addImport("primitives", modules.primitives_mod);
@@ -464,6 +468,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = .Debug,
         }),
+        .use_llvm = use_llvm,
     });
     dev_test.root_module.addImport("evm", modules.evm_mod);
     dev_test.root_module.addImport("primitives", modules.primitives_mod);
@@ -502,6 +507,7 @@ pub fn build(b: *std.Build) void {
                     .target = target,
                     .optimize = .Debug,
                 }),
+                .use_llvm = use_llvm,
             });
             // Inject module dependencies used by the differential harness
             t.root_module.addImport("evm", modules.evm_mod);
@@ -760,6 +766,7 @@ pub fn build(b: *std.Build) void {
                 .target = target,
                 .optimize = .Debug,
             }),
+            .use_llvm = use_llvm,
         });
         fusions_basic.root_module.addImport("evm", modules.evm_mod);
         fusions_basic.root_module.addImport("primitives", modules.primitives_mod);
@@ -779,6 +786,7 @@ pub fn build(b: *std.Build) void {
                 .target = target,
                 .optimize = .Debug,
             }),
+            .use_llvm = use_llvm,
         });
         fusions_dispatch.root_module.addImport("evm", modules.evm_mod);
         fusions_dispatch.root_module.addImport("primitives", modules.primitives_mod);
@@ -798,6 +806,7 @@ pub fn build(b: *std.Build) void {
                 .target = target,
                 .optimize = .Debug,
             }),
+            .use_llvm = use_llvm,
         });
         fusions_diff_toggle.root_module.addImport("evm", modules.evm_mod);
         fusions_diff_toggle.root_module.addImport("primitives", modules.primitives_mod);

@@ -20,9 +20,13 @@ pub fn createDevtoolExecutable(
     devtool_mod.addImport("primitives", primitives_mod);
     devtool_mod.addImport("provider", provider_mod);
 
+    // Force LLVM backend on x86_64 to maintain tail call optimization for EVM dispatch performance
+    const use_llvm = if (target.result.cpu.arch == .x86_64) true else null;
+    
     const exe = b.addExecutable(.{
         .name = "guillotine-devtool",
         .root_module = devtool_mod,
+        .use_llvm = use_llvm,
     });
     
     // macOS-specific Swift integration
