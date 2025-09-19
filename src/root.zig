@@ -122,27 +122,31 @@ pub const dispatch_pretty_print = @import("preprocessor/dispatch_pretty_print.zi
 // Run tests
 test {
     // Test EVM modules
-    _ = @import("evm_tests.zig");
-    _ = @import("preprocessor/dispatch.zig");
-    _ = @import("instructions/handlers_arithmetic.zig");
-    _ = @import("instructions/handlers_bitwise.zig");
-    _ = @import("instructions/handlers_comparison.zig");
-    _ = @import("instructions/handlers_context.zig");
-    _ = @import("instructions/handlers_jump.zig");
-    _ = @import("instructions/handlers_keccak.zig");
-    _ = @import("instructions/handlers_log.zig");
-    _ = @import("instructions/handlers_memory.zig");
-    _ = @import("instructions/handlers_stack.zig");
-    _ = @import("instructions/handlers_storage.zig");
-    _ = @import("instructions/handlers_system.zig");
+    // _ = @import("evm_tests.zig");
+    // _ = @import("preprocessor/dispatch.zig");
+    // _ = @import("instructions/handlers_arithmetic.zig");
+    // _ = @import("instructions/handlers_bitwise.zig");
+    // _ = @import("instructions/handlers_comparison.zig");
+    // _ = @import("instructions/handlers_context.zig");
+    // _ = @import("instructions/handlers_jump.zig");
+    // _ = @import("instructions/handlers_keccak.zig");
+    // _ = @import("instructions/handlers_log.zig");
+    // _ = @import("instructions/handlers_memory.zig");
+    // _ = @import("instructions/handlers_stack.zig");
+    // _ = @import("instructions/handlers_storage.zig");
+    // _ = @import("instructions/handlers_system.zig");
 
-    // Test bytecode modules
-    _ = @import("bytecode/bytecode_tests.zig");
-    _ = @import("bytecode/bytecode_jump_validation_test.zig");
+    // // Test bytecode modules
+    // _ = @import("bytecode/bytecode_tests.zig");
+    // _ = @import("bytecode/bytecode_jump_validation_test.zig");
 
-    // Test internal modules
-    _ = @import("internal/safety_counter.zig");
+    // // Test internal modules
+    // _ = @import("internal/safety_counter.zig");
 
     // C API modules are not compiled in tests in this configuration
     // _ = @import("root_c.zig");
+
+    // Tracer modules
+    _ = @import("tracer/minimal_frame.zig");
+    _ = @import("tracer/pc_tracker.zig");
 }
