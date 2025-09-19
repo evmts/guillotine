@@ -17,6 +17,7 @@ pub fn createIntegrationTests(
             .target = target,
             .optimize = optimize,
         }),
+        .use_llvm = if (target.result.cpu.arch == .x86_64) true else null,
     });
     
     // Add all necessary imports to integration tests

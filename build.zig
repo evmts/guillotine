@@ -69,7 +69,8 @@ pub fn build(b: *std.Build) void {
     const c_kzg_lib = build_pkg.CKzgLib.createCKzgLibrary(b, target, optimize, blst_lib);
 
     const rust_build_step = build_pkg.FoundryLib.createRustBuildStep(b);
-    const bn254_lib = build_pkg.Bn254Lib.createBn254Library(b, target, optimize, config.options, rust_build_step, rust_target);
+    const bn254_build_step = build_pkg.Bn254Lib.createBn254BuildStep(b, target, optimize, rust_target);
+    const bn254_lib = build_pkg.Bn254Lib.createBn254Library(b, target, optimize, config.options, bn254_build_step, rust_target);
     const foundry_lib = build_pkg.FoundryLib.createFoundryLibrary(b, target, optimize, rust_build_step, rust_target);
 
     // Modules
@@ -134,8 +135,8 @@ pub fn build(b: *std.Build) void {
     const bytecode_patterns_step = b.step("build-bytecode-patterns", "Build bytecode pattern analyzer");
     bytecode_patterns_step.dependOn(&b.addInstallArtifact(bytecode_patterns, .{}).step);
 
-    // Shared library for FFI bindings (skip on x86_64 due to LLVM backend crashes)
-    if (target.result.cpu.arch != .x86_64) {
+    // Shared library for FFI bindings
+    {
         const shared_lib_mod = b.createModule(.{
             .root_source_file = b.path("src/evm_c_api.zig"),
             .target = target,
@@ -150,6 +151,7 @@ pub fn build(b: *std.Build) void {
             .name = "guillotine_ffi",
             .linkage = .dynamic,
             .root_module = shared_lib_mod,
+            .use_llvm = if (target.result.cpu.arch == .x86_64) true else null,
         });
         shared_lib.linkLibrary(c_kzg_lib);
         shared_lib.linkLibrary(blst_lib);
@@ -165,6 +167,7 @@ pub fn build(b: *std.Build) void {
             .name = "guillotine_ffi_static",
             .linkage = .static,
             .root_module = shared_lib_mod,
+            .use_llvm = if (target.result.cpu.arch == .x86_64) true else null,
         });
         static_lib.linkLibrary(c_kzg_lib);
         static_lib.linkLibrary(blst_lib);
@@ -178,7 +181,10 @@ pub fn build(b: *std.Build) void {
 
     // Tests
     const tests_pkg = build_pkg.Tests;
-    const lib_unit_tests = b.addTest(.{ .root_module = modules.lib_mod });
+    const lib_unit_tests = b.addTest(.{ 
+        .root_module = modules.lib_mod,
+        .use_llvm = if (target.result.cpu.arch == .x86_64) true else null,
+    });
     const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
 
     const integration_tests = tests_pkg.createIntegrationTests(b, target, optimize, modules, bn254_lib, c_kzg_lib, blst_lib);
@@ -191,6 +197,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
         }),
+        .use_llvm = if (target.result.cpu.arch == .x86_64) true else null,
     });
     root_tests.root_module.addImport("evm", modules.evm_mod);
     root_tests.root_module.addImport("primitives", modules.primitives_mod);
