@@ -44,6 +44,10 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    // Zig 0.15 switched from LLVM to Zig's self-hosted x86_64 backend by default, but it lacks tail call support.
+    // Force LLVM backend on x86_64 to maintain tail call optimization for EVM dispatch performance.
+    const use_llvm = if (target.result.cpu.arch == .x86_64) true else null;
+
     // Download KZG trusted setup if it doesn't exist
     const kzg_path = "src/kzg/trusted_setup.txt";
     std.fs.cwd().access(kzg_path, .{}) catch {
@@ -147,11 +151,12 @@ pub fn build(b: *std.Build) void {
         shared_lib_mod.addImport("crypto", modules.crypto_mod);
         shared_lib_mod.addImport("build_options", config.options_mod);
 
+        // FFI libraries use self-hosted backend to avoid LLVM crashes with tail calls
         const shared_lib = b.addLibrary(.{
             .name = "guillotine_ffi",
             .linkage = .dynamic,
             .root_module = shared_lib_mod,
-            .use_llvm = if (target.result.cpu.arch == .x86_64) true else null,
+            .use_llvm = null,
         });
         shared_lib.linkLibrary(c_kzg_lib);
         shared_lib.linkLibrary(blst_lib);
@@ -167,7 +172,7 @@ pub fn build(b: *std.Build) void {
             .name = "guillotine_ffi_static",
             .linkage = .static,
             .root_module = shared_lib_mod,
-            .use_llvm = if (target.result.cpu.arch == .x86_64) true else null,
+            .use_llvm = null,
         });
         static_lib.linkLibrary(c_kzg_lib);
         static_lib.linkLibrary(blst_lib);
@@ -183,7 +188,7 @@ pub fn build(b: *std.Build) void {
     const tests_pkg = build_pkg.Tests;
     const lib_unit_tests = b.addTest(.{ 
         .root_module = modules.lib_mod,
-        .use_llvm = if (target.result.cpu.arch == .x86_64) true else null,
+        .use_llvm = use_llvm,
     });
     const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
 
@@ -197,7 +202,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
         }),
-        .use_llvm = if (target.result.cpu.arch == .x86_64) true else null,
+        .use_llvm = use_llvm,
     });
     root_tests.root_module.addImport("evm", modules.evm_mod);
     root_tests.root_module.addImport("primitives", modules.primitives_mod);

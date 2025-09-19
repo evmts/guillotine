@@ -27,7 +27,8 @@ pub fn createFoundryLibrary(
         cargo_build.setEnvironmentVariable("CC", "gcc");
         cargo_build.setEnvironmentVariable("CXX", "g++");
         cargo_build.setEnvironmentVariable("AR", "ar");
-        cargo_build.setEnvironmentVariable("RUSTFLAGS", "-C target-feature=-crt-static");
+        // Improve Rust static library compatibility with Zig's linker
+        cargo_build.setEnvironmentVariable("RUSTFLAGS", "-C target-feature=-crt-static -C relocation-model=pic -C link-arg=-static");
     }
 
     if (rust_target) |target_triple| {
