@@ -188,28 +188,6 @@ pub const MinimalFrame = struct {
         if (word_aligned_size > self.memory_size) self.memory_size = word_aligned_size;
     }
 
-    /// Get init code size limit based on hardfork (EIP-3860)
-    /// Pre-Shanghai: Use contract code size limit (24KB)
-    /// Shanghai-Prague: 49,152 bytes (2 × contract code limit)
-    /// TODO: Osaka+: 73,728 bytes - update when OSAKA hardfork is added
-    /// TODO: Both size limits below should use constants
-    pub fn getInitCodeSizeLimit(self: *const Self) u256 {
-        // 0xC000 - 2 × contract code limit
-        if (self.hardfork.isAtLeast(.SHANGHAI)) return 49152;
-        // Pre-Shanghai: Use the contract code size limit
-        return self.getContractCodeSizeLimit();
-    }
-
-    /// Get contract code size limit based on hardfork (EIP-170)
-    /// Pre-Spurious Dragon: No limit (returns large value)
-    /// Spurious Dragon-Prague: 24,576 bytes (0x6000)
-    /// TODO: Osaka+: 49,152 bytes - update when OSAKA hardfork is added
-    pub fn getContractCodeSizeLimit(self: *const Self) u256 {
-        // No limit before Spurious Dragon
-        if (self.hardfork.isBefore(.SPURIOUS_DRAGON)) return std.math.maxInt(u256);
-        return 24576; // 0x6000 - 24KB limit
-    }
-
     /// Get current opcode
     pub fn getCurrentOpcode(self: *const Self) ?u8 {
         if (self.pc >= self.bytecode.len) {
@@ -1261,14 +1239,6 @@ pub const MinimalFrame = struct {
                 const value = try self.popStack();
                 const offset = try self.popStack();
                 const length = try self.popStack();
-
-                // EIP-3860: Check init code size limit
-                if (length > self.getInitCodeSizeLimit()) {
-                    @branchHint(.cold);
-                    // Init code too large - exceptional abort (halt execution)
-                    self.gas_remaining = 0;
-                    return error.CreateInitCodeSizeLimit;
-                }
                 
                 const len = std.math.cast(u32, length) orelse return error.OutOfBounds;
                 const gas_cost = self.createGasCost(len);
@@ -1548,14 +1518,6 @@ pub const MinimalFrame = struct {
                 const offset = try self.popStack();
                 const length = try self.popStack();
                 const salt = try self.popStack();
-
-                // EIP-3860: Check init code size limit
-                if (length > self.getInitCodeSizeLimit()) {
-                    @branchHint(.cold);
-                    // Init code too large - exceptional abort (halt execution)
-                    self.gas_remaining = 0;
-                    return error.CreateInitCodeSizeLimit;
-                }
                 
                 const len = std.math.cast(u32, length) orelse return error.OutOfBounds;
                 const gas_cost = self.create2GasCost(len);
