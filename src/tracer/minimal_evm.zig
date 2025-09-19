@@ -5,6 +5,7 @@ const std = @import("std");
 const primitives = @import("primitives");
 const GasConstants = primitives.GasConstants;
 const MinimalFrame = @import("minimal_frame.zig").MinimalFrame;
+const Hardfork = @import("../eips_and_hardforks/eips.zig").Hardfork;
 const minimal_host = @import("minimal_host.zig");
 
 const Address = primitives.Address.Address;
@@ -119,6 +120,7 @@ pub const MinimalEvm = struct {
     host: ?HostInterface,
     arena: std.heap.ArenaAllocator,
     allocator: std.mem.Allocator,
+    hardfork: Hardfork,
     pub fn init(allocator: std.mem.Allocator) !Self {
         var arena = std.heap.ArenaAllocator.init(allocator);
         errdefer arena.deinit();
@@ -151,6 +153,7 @@ pub const MinimalEvm = struct {
             .host = null,
             .arena = arena,
             .allocator = arena_allocator,
+            .hardfork = Hardfork.CANCUN,
         };
     }
 
@@ -183,6 +186,7 @@ pub const MinimalEvm = struct {
         self.gas_price = 0;
         self.host = null;
         self.allocator = arena_allocator;
+        self.hardfork = Hardfork.CANCUN;
 
         return self;
     }
