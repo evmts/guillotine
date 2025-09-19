@@ -10,9 +10,9 @@ pub fn createIntegrationTests(
     c_kzg_lib: *std.Build.Step.Compile,
     blst_lib: *std.Build.Step.Compile,
 ) *std.Build.Step.Compile {
-    // Zig 0.15 switched from LLVM to Zig's self-hosted x86_64 backend, but it lacks tail call support.
-    // Force LLVM backend on x86_64 to maintain tail call optimization for EVM dispatch performance
-    const use_llvm = if (target.result.cpu.arch == .x86_64) true else null;
+    // Use self-hosted backend for tests on x86_64 (LLVM crashes on test compilation)
+    // Trade-off: Tests may have limited tail call performance but will compile successfully
+    const use_llvm = null;
     
     const integration_tests = b.addTest(.{
         .name = "integration-tests",
