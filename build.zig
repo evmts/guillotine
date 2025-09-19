@@ -149,6 +149,7 @@ pub fn build(b: *std.Build) void {
         .name = "guillotine_ffi",
         .linkage = .dynamic,
         .root_module = shared_lib_mod,
+        .use_llvm = if (target.result.cpu.arch == .x86_64) true else null,
     });
     shared_lib.linkLibrary(c_kzg_lib);
     shared_lib.linkLibrary(blst_lib);
@@ -164,6 +165,7 @@ pub fn build(b: *std.Build) void {
         .name = "guillotine_ffi_static",
         .linkage = .static,
         .root_module = shared_lib_mod,
+        .use_llvm = if (target.result.cpu.arch == .x86_64) true else null,
     });
     static_lib.linkLibrary(c_kzg_lib);
     static_lib.linkLibrary(blst_lib);
