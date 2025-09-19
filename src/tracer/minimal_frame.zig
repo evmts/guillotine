@@ -5,9 +5,11 @@ const primitives = @import("primitives");
 const minimal_evm_mod = @import("minimal_evm.zig");
 const GasConstants = primitives.GasConstants;
 const Address = primitives.Address.Address;
-const MinimalEvm = minimal_evm_mod.MinimalEvm;
+const MinimalEvm = @import("minimal_evm.zig").MinimalEvm;
 const MinimalEvmError = MinimalEvm.Error;
+const CallParams = MinimalEvm.CallParams;
 const Hardfork = @import("../eips_and_hardforks/eips.zig").Hardfork;
+const log = @import("../log.zig");
 
 pub const MinimalFrame = struct {
     const Self = @This();
@@ -32,6 +34,7 @@ pub const MinimalFrame = struct {
     address: Address,
     value: u256,
     calldata: []const u8,
+    is_static: bool,
 
     // Output
     output: []u8,
@@ -84,6 +87,7 @@ pub const MinimalFrame = struct {
         address: Address,
         value: u256,
         calldata: []const u8,
+        is_static: bool,
         evm_ptr: *anyopaque,
         hardfork: Hardfork,
     ) !Self {
@@ -111,6 +115,7 @@ pub const MinimalFrame = struct {
             .address = address,
             .value = value,
             .calldata = calldata,
+            .is_static = is_static,
             .output = &[_]u8{},
             .return_data = &[_]u8{},
             .stopped = false,
@@ -1251,11 +1256,48 @@ pub const MinimalFrame = struct {
                 const gas_cost = self.createGasCost(len);
                 try self.consumeGas(gas_cost);
 
-                // In minimal implementation, just return a dummy address
-                // TODO: Add contract code size validation after CREATE executes init code
-                _ = value;
-                _ = offset;
-                try self.pushStack(0); // Dummy created address
+                // Read init code from memory
+                var init_code: []const u8 = &.{};
+                if (len > 0) {
+                    const init_code_buf = try self.allocator.alloc(u8, len);
+                    var j: u32 = 0;
+                    while (j < len) : (j += 1) {
+                        init_code_buf[j] = self.readMemory(@as(u32, @intCast(offset)) + j);
+                    }
+                    init_code = init_code_buf;
+                }
+
+                // Calculate available gas (63/64 rule per EIP-150)
+                const remaining_gas = @as(u64, @intCast(@max(self.gas_remaining, 0)));
+                const max_gas = remaining_gas - (remaining_gas / 64);
+
+                // Perform CREATE using inner_call
+                const params = CallParams{
+                    .create = .{
+                        .caller = self.address,
+                        .value = value,
+                        .init_code = init_code,
+                        .gas = max_gas,
+                    },
+                };
+
+                const result = try evm.inner_call(params);
+
+                // Update gas
+                const gas_used = max_gas - result.gas_left;
+                self.gas_remaining -= @intCast(gas_used);
+
+                // Push created address or 0 on failure
+                if (result.success and result.output.len == 20) {
+                    const address_value = primitives.Hex.hex_to_u256(result.output) catch |err| {
+                        log.err("Failed to convert created address to u256: {}", .{err});
+                        return error.InvalidBytecode;
+                    };
+                    try self.pushStack(address_value);
+                } else {
+                    try self.pushStack(0);
+                }
+
                 self.pc += 1;
             },
 
@@ -1271,12 +1313,7 @@ pub const MinimalFrame = struct {
                 const out_length = try self.popStack();
 
                 // Convert address
-                var addr_bytes: [20]u8 = undefined;
-                var i: usize = 0;
-                while (i < 20) : (i += 1) {
-                    addr_bytes[19 - i] = @as(u8, @truncate(address_u256 >> @intCast(i * 8)));
-                }
-                const call_address = Address{ .bytes = addr_bytes };
+                const address_bytes = primitives.Address.from_u256(address_u256);
 
                 // Base gas cost
                 var gas_cost: u64 = GasConstants.CallGas;
@@ -1284,7 +1321,7 @@ pub const MinimalFrame = struct {
                     gas_cost += GasConstants.CallValueTransferGas;
                 }
                 // EIP-2929: access target account (warm/cold)
-                const access_cost = try evm.access_address(call_address);
+                const access_cost = try evm.access_address(address_bytes);
                 gas_cost += access_cost;
                 try self.consumeGas(gas_cost);
 
@@ -1307,8 +1344,18 @@ pub const MinimalFrame = struct {
                 const max_gas = remaining_gas - (remaining_gas / 64);
                 const available_gas = @min(gas_limit, max_gas);
 
-                // Perform the inner call
-                const result = try evm.inner_call(call_address, value_arg, input_data, available_gas);
+                // Perform the CALL using inner_call
+                const params = CallParams{
+                    .call = .{
+                        .caller = self.address,
+                        .to = address_bytes,
+                        .value = value_arg,
+                        .input = input_data,
+                        .gas = available_gas,
+                    },
+                };
+
+                const result = try evm.inner_call(params);
 
                 // Write output to memory
                 if (out_length > 0 and result.output.len > 0) {
@@ -1353,12 +1400,7 @@ pub const MinimalFrame = struct {
                 const out_length = try self.popStack();
 
                 // Convert address
-                var addr_bytes: [20]u8 = undefined;
-                var i: usize = 0;
-                while (i < 20) : (i += 1) {
-                    addr_bytes[19 - i] = @as(u8, @truncate(address_u256 >> @intCast(i * 8)));
-                }
-                const call_address = Address{ .bytes = addr_bytes };
+                const address_bytes = primitives.Address.from_u256(address_u256);
 
                 // Base gas cost
                 var gas_cost: u64 = GasConstants.CallGas;
@@ -1366,7 +1408,7 @@ pub const MinimalFrame = struct {
                     gas_cost += GasConstants.CallValueTransferGas;
                 }
                 // EIP-2929: access target account (warm/cold)
-                const access_cost = try evm.access_address(call_address);
+                const access_cost = try evm.access_address(address_bytes);
                 gas_cost += access_cost;
                 try self.consumeGas(gas_cost);
 
@@ -1389,8 +1431,18 @@ pub const MinimalFrame = struct {
                 const max_gas = remaining_gas - (remaining_gas / 64);
                 const available_gas = @min(gas_limit, max_gas);
 
-                // Perform the inner call
-                const result = try evm.inner_call(call_address, value_arg, input_data, available_gas);
+                // Perform CALLCODE using inner_call
+                const params = CallParams{
+                    .callcode = .{
+                        .caller = self.address,
+                        .to = address_bytes,
+                        .value = value_arg,
+                        .input = input_data,
+                        .gas = available_gas,
+                    },
+                };
+
+                const result = try evm.inner_call(params);
 
                 // Write output to memory
                 if (out_length > 0 and result.output.len > 0) {
@@ -1460,12 +1512,7 @@ pub const MinimalFrame = struct {
                 const out_length = try self.popStack();
 
                 // Convert address
-                var addr_bytes: [20]u8 = undefined;
-                var i: usize = 0;
-                while (i < 20) : (i += 1) {
-                    addr_bytes[19 - i] = @as(u8, @truncate(address_u256 >> @intCast(i * 8)));
-                }
-                const call_address = Address{ .bytes = addr_bytes };
+                const address_bytes = primitives.Address.from_u256(address_u256);
 
                 // Base gas cost
                 try self.consumeGas(GasConstants.CallGas);
@@ -1489,8 +1536,17 @@ pub const MinimalFrame = struct {
                 const max_gas = remaining_gas - (remaining_gas / 64);
                 const available_gas = @min(gas_limit, max_gas);
 
-                // Perform the inner call
-                const result = try evm.inner_call(call_address, self.value, input_data, available_gas);
+                // Perform DELEGATECALL using inner_call
+                const params = CallParams{
+                    .delegatecall = .{
+                        .caller = self.caller,  // Preserve original caller
+                        .to = address_bytes,
+                        .input = input_data,
+                        .gas = available_gas,
+                    },
+                };
+                
+                const result = try evm.inner_call(params);
 
                 // Write output to memory
                 if (out_length > 0 and result.output.len > 0) {
@@ -1536,11 +1592,49 @@ pub const MinimalFrame = struct {
                 const gas_cost = self.create2GasCost(len);
                 try self.consumeGas(gas_cost);
 
-                // TODO: Add contract code size validation after CREATE2 executes init code
-                _ = value;
-                _ = offset;
-                _ = salt;
-                try self.pushStack(0); // Dummy created address
+                // Read init code from memory
+                var init_code: []const u8 = &.{};
+                if (len > 0) {
+                    const init_code_buf = try self.allocator.alloc(u8, len);
+                    var j: u32 = 0;
+                    while (j < len) : (j += 1) {
+                        init_code_buf[j] = self.readMemory(@as(u32, @intCast(offset)) + j);
+                    }
+                    init_code = init_code_buf;
+                }
+
+                // Calculate available gas (63/64 rule per EIP-150)
+                const remaining_gas = @as(u64, @intCast(@max(self.gas_remaining, 0)));
+                const max_gas = remaining_gas - (remaining_gas / 64);
+
+                // Perform CREATE2 using inner_call
+                const params = CallParams{
+                    .create2 = .{
+                        .caller = self.address,
+                        .value = value,
+                        .init_code = init_code,
+                        .salt = salt,
+                        .gas = max_gas,
+                    },
+                };
+
+                const result = try evm.inner_call(params);
+
+                // Update gas
+                const gas_used = max_gas - result.gas_left;
+                self.gas_remaining -= @intCast(gas_used);
+
+                // Push created address or 0 on failure
+                if (result.success and result.output.len == 20) {
+                    const address_value = primitives.Hex.hex_to_u256(result.output) catch |err| {
+                        log.err("Failed to convert created address to u256: {}", .{err});
+                        return error.InvalidBytecode;
+                    };
+                    try self.pushStack(address_value);
+                } else {
+                    try self.pushStack(0);
+                }
+
                 self.pc += 1;
             },
 
@@ -1558,16 +1652,11 @@ pub const MinimalFrame = struct {
                 const out_length = try self.popStack();
 
                 // Convert address
-                var addr_bytes: [20]u8 = undefined;
-                var i: usize = 0;
-                while (i < 20) : (i += 1) {
-                    addr_bytes[19 - i] = @as(u8, @truncate(address_u256 >> @intCast(i * 8)));
-                }
-                const call_address = Address{ .bytes = addr_bytes };
+                const address_bytes = primitives.Address.from_u256(address_u256);
 
                 // Base gas cost + EIP-2929 account access
                 var call_gas_cost: u64 = GasConstants.CallGas;
-                const access_cost = try evm.access_address(call_address);
+                const access_cost = try evm.access_address(address_bytes);
                 call_gas_cost += access_cost;
                 try self.consumeGas(call_gas_cost);
 
@@ -1590,8 +1679,17 @@ pub const MinimalFrame = struct {
                 const max_gas = remaining_gas - (remaining_gas / 64);
                 const available_gas = @min(gas_limit, max_gas);
 
-                // Perform the inner call
-                const result = try evm.inner_call(call_address, 0, input_data, available_gas);
+                // Perform STATICCALL using inner_call
+                const params = CallParams{
+                    .staticcall = .{
+                        .caller = self.address,
+                        .to = address_bytes,
+                        .input = input_data,
+                        .gas = available_gas,
+                    },
+                };
+
+                const result = try evm.inner_call(params);
 
                 // Write output to memory
                 if (out_length > 0 and result.output.len > 0) {

@@ -193,7 +193,7 @@ pub const Tracer = struct {
                 if (@hasField(@TypeOf(frame.*), "value")) value = frame.value;
                 if (@hasField(@TypeOf(frame.*), "calldata_slice")) calldata = frame.calldata_slice;
 
-                if (!std.mem.eql(u8, &address.bytes, &primitives.ZERO_ADDRESS.bytes)) evm.setCode(address, bytecode) catch {};
+                if (!std.mem.eql(u8, &address.bytes, &primitives.ZERO_ADDRESS.bytes)) evm.set_code(address, bytecode) catch {};
 
                 const frame_gas_remaining = frame.gas_remaining;
 
@@ -206,6 +206,7 @@ pub const Tracer = struct {
                     address,
                     value,
                     calldata,
+                    false, // TODO: add static context
                     @as(*anyopaque, @ptrCast(evm)),
                     evm.hardfork,
                 ) catch return;

@@ -73,7 +73,7 @@ fn runTestCase(allocator: std.mem.Allocator, test_case: std.json.Value) !void {
                     if (account.object.get("balance")) |balance_val| {
                         if (balance_val == .string) {
                             const balance = if (balance_val.string.len > 0) try primitives.Hex.hex_to_u256(balance_val.string) else 0;
-                            try evm.setBalance(addr, balance);
+                            try evm.set_balance(addr, balance);
                         }
                     }
                 }
@@ -108,17 +108,20 @@ fn runTestCase(allocator: std.mem.Allocator, test_case: std.json.Value) !void {
     }
     
     // Set contract code
-    try evm.setCode(contract_addr, bytecode);
+    try evm.set_code(contract_addr, bytecode);
     
     // Execute
-    const result = try evm.execute(
-        bytecode,
-        @intCast(gas_limit),
-        caller_addr,
-        contract_addr,
-        value,
-        calldata,
-    );
+    const params = MinimalEvm.CallParams{
+        .call = .{
+            .caller = caller_addr,
+            .to = contract_addr,
+            .value = value,
+            .input = calldata,
+            .gas = gas_limit,
+        },
+    };
+
+    const result = evm.call(params);
     
     // Compare results
     const gas_used = gas_limit - @as(u64, @intCast(result.gas_left));

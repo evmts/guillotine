@@ -330,7 +330,7 @@ export fn evm_set_balance(
             balance = (balance << 8) | balance_bytes[i];
         }
 
-        ctx.evm.setBalance(address, balance) catch return false;
+        ctx.evm.set_balance(address, balance) catch return false;
         return true;
     }
     return false;
@@ -350,7 +350,7 @@ export fn evm_set_code(
         @memcpy(&address.bytes, address_bytes[0..20]);
 
         const code_slice = if (code_len > 0) code[0..code_len] else &[_]u8{};
-        ctx.evm.setCode(address, code_slice) catch return false;
+        ctx.evm.set_code(address, code_slice) catch return false;
         return true;
     }
     return false;
