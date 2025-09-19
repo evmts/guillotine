@@ -6,7 +6,6 @@ const minimal_evm_mod = @import("minimal_evm.zig");
 pub const MinimalEvm = minimal_evm_mod.MinimalEvm;
 pub const MinimalEvmError = MinimalEvm.Error;
 pub const StorageSlotKey = minimal_evm_mod.StorageSlotKey;
-pub const isPrecompileAddress = minimal_evm_mod.isPrecompileAddress;
 const MinimalFrame = @import("minimal_frame.zig").MinimalFrame;
 const Host = minimal_evm_mod.Host;
 const UnifiedOpcode = @import("../opcodes/opcode.zig").UnifiedOpcode;

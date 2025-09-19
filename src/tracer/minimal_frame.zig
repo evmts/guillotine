@@ -9,7 +9,6 @@ const MinimalEvm = minimal_evm_mod.MinimalEvm;
 const Hardfork = @import("../eips_and_hardforks/eips.zig").Hardfork;
 const MinimalEvmError = MinimalEvm.Error;
 const StorageSlotKey = minimal_evm_mod.StorageSlotKey;
-const isPrecompileAddress = minimal_evm_mod.isPrecompileAddress;
 
 pub const MinimalFrame = struct {
     const Self = @This();
@@ -1409,7 +1408,7 @@ pub const MinimalFrame = struct {
                 }
 
                 // Check for precompile addresses and handle gas correctly
-                if (isPrecompileAddress(call_address)) {
+                if (evm.is_precompile(call_address)) {
                     // Note: inner_call handles precompiles internally
                     // Precompiles use the calculated available_gas (which includes stipend if value transfer)
                     // Gas has already been deducted above, so we just need to add back what's returned
