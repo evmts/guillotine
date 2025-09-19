@@ -66,15 +66,15 @@ pub fn isOnCurve(self: *const G2) bool {
 pub fn isInSubgroup(self: *const G2) bool {
     // For BN254, G2 points are in the correct subgroup if [r]P = O
     // where r is the order of the scalar field (FR_MOD) and O is infinity
-    
+
     // If point is infinity, it's in the subgroup
     if (self.isInfinity()) {
         return true;
     }
-    
+
     // Create Fr element from curve order
     const r = Fr{ .value = curve_parameters.FR_MOD };
-    
+
     // Check if [r]P = O (infinity)
     const r_times_p = self.mul(&r);
     return r_times_p.isInfinity();
@@ -206,8 +206,81 @@ pub fn addAssign(self: *G2, other: *const G2) void {
     self.* = self.add(other);
 }
 
+pub const scalar_decomposition = struct {
+    k1: i70,
+    k2: i70,
+    k3: i70,
+    k4: i70,
+};
+
+pub fn decomposeScalar(scalar: u256) scalar_decomposition {
+    const k: i512 = @intCast(scalar);
+    const r_mod = curve_parameters.FR_MOD;
+    const v1 = curve_parameters.G2_v1;
+    const v2 = curve_parameters.G2_v2;
+    const v3 = curve_parameters.G2_v3;
+    const v4 = curve_parameters.G2_v4;
+
+    const c1 = curve_parameters.G2_c1;
+    const c2 = curve_parameters.G2_c2;
+    const c3 = curve_parameters.G2_c3;
+    const c4 = curve_parameters.G2_c4;
+
+    const b1 = @divTrunc(c1 * k, r_mod);
+    const b2 = @divTrunc(c2 * k, r_mod);
+    const b3 = @divTrunc(c3 * k, r_mod);
+    const b4 = @divTrunc(c4 * k, r_mod);
+
+    const k1 = k - b1 * v1[0] - b2 * v2[0] - b3 * v3[0] - b4 * v4[0];
+    const k2 = 0 - b1 * v1[1] - b2 * v2[1] - b3 * v3[1] - b4 * v4[1];
+    const k3 = 0 - b1 * v1[2] - b2 * v2[2] - b3 * v3[2] - b4 * v4[2];
+    const k4 = 0 - b1 * v1[3] - b2 * v2[3] - b3 * v3[3] - b4 * v4[3];
+
+    return scalar_decomposition{ .k1 = @intCast(k1), .k2 = @intCast(k2), .k3 = @intCast(k3), .k4 = @intCast(k4) };
+}
+
+test "G2.decomposeScalar" {
+    const scalar = Fr.init(1234567890123456789012345678901234567890);
+    const decomposition = G2.decomposeScalar(scalar.value);
+    const k1_is_negative = decomposition.k1 < 0;
+    const k2_is_negative = decomposition.k2 < 0;
+    const k3_is_negative = decomposition.k3 < 0;
+    const k4_is_negative = decomposition.k4 < 0;
+    var k1 = Fr.init(@as(u256, @intCast(if (k1_is_negative) -decomposition.k1 else decomposition.k1)));
+    if (k1_is_negative) {
+        k1 = k1.neg();
+    }
+    var k2 = Fr.init(@as(u256, @intCast(if (k2_is_negative) -decomposition.k2 else decomposition.k2)));
+    if (k2_is_negative) {
+        k2 = k2.neg();
+    }
+    var k3 = Fr.init(@as(u256, @intCast(if (k3_is_negative) -decomposition.k3 else decomposition.k3)));
+    if (k3_is_negative) {
+        k3 = k3.neg();
+    }
+    var k4 = Fr.init(@as(u256, @intCast(if (k4_is_negative) -decomposition.k4 else decomposition.k4)));
+    if (k4_is_negative) {
+        k4 = k4.neg();
+    }
+    std.debug.print("k1: {}\n", .{decomposition.k1});
+    std.debug.print("k2: {}\n", .{decomposition.k2});
+    std.debug.print("k3: {}\n", .{decomposition.k3});
+    std.debug.print("k4: {}\n", .{decomposition.k4});
+
+    const gamma = curve_parameters.G2_gamma;
+    const lambda = curve_parameters.G2_lambda;
+    const gamma_lambda = curve_parameters.G2_gamma_lambda;
+    const k2_lambda = k2.mul(&Fr.init(lambda));
+    const k3_gamma = k3.mul(&Fr.init(gamma));
+    const k4_gamma_lambda = k4.mul(&Fr.init(gamma_lambda));
+    const f = k1.add(&k2_lambda).add(&k3_gamma).add(&k4_gamma_lambda);
+    std.debug.print("f: {}\n", .{f});
+    std.debug.print("scalar: {}\n", .{scalar});
+    //try std.testing.expect(f.equal(&scalar));
+}
+
 pub fn mul(self: *const G2, scalar: *const Fr) G2 {
-    return self.mul_by_int(scalar.value);
+    return self.mul_by_int_2(scalar.value);
 }
 
 pub fn mul_by_int(self: *const G2, scalar: u256) G2 {
@@ -226,6 +299,90 @@ pub fn mul_by_int(self: *const G2, scalar: u256) G2 {
     return result;
 }
 
+pub fn mul_by_int_2(self: *const G2, scalar: u256) G2 {
+    if (self.isInfinity()) {
+        return INFINITY;
+    }
+
+    const decomposition = decomposeScalar(scalar);
+    const k1_is_negative = decomposition.k1 < 0;
+    const k2_is_negative = decomposition.k2 < 0;
+    const k3_is_negative = decomposition.k3 < 0;
+    const k4_is_negative = decomposition.k4 < 0;
+
+    const P = if (k1_is_negative) self.neg() else self.*;
+    const lambda_P = if (k2_is_negative) self.neg().lambda_endomorphism() else self.lambda_endomorphism();
+    const gamma_P = if (k3_is_negative) self.neg().gamma_endomorphism() else self.gamma_endomorphism();
+    const gamma_lambda_P = if (k4_is_negative) self.neg().gamma_lambda_endomorphism() else self.gamma_lambda_endomorphism();
+
+    const points = [4]G2{ P, lambda_P, gamma_P, gamma_lambda_P };
+    const precomputed_points: [16]G2 = init_precomputed_points(&points);
+
+    const k1 = @abs(decomposition.k1);
+    const k2 = @abs(decomposition.k2);
+    const k3 = @abs(decomposition.k3);
+    const k4 = @abs(decomposition.k4);
+
+    var result = INFINITY;
+
+    for (0..70) |i| {
+        result.doubleAssign();
+        const bit_index: u7 = @intCast(70 - i - 1);
+        const prec_index = get_precomputed_index(k1, k2, k3, k4, bit_index);
+        if (prec_index != 0) {
+            result.addAssign(&precomputed_points[prec_index]);
+        }
+    }
+    return result;
+}
+
+fn get_precomputed_index(k1: u70, k2: u70, k3: u70, k4: u70, i: u7) u4 {
+    const k4_bit = @as(u4, @intCast((k4 >> i) & 1));
+    const k3_bit = @as(u4, @intCast((k3 >> i) & 1));
+    const k2_bit = @as(u4, @intCast((k2 >> i) & 1));
+    const k1_bit = @as(u4, @intCast((k1 >> i) & 1));
+    return k4_bit << 3 | k3_bit << 2 | k2_bit << 1 | k1_bit;
+}
+
+fn init_precomputed_points(points: *const [4]G2) [16]G2 {
+    var result: [16]G2 = undefined;
+    result[0] = INFINITY;
+    inline for (0..4) |i| {
+        const current_size = 1 << i;
+        for (0..current_size) |j| {
+            result[current_size + j] = result[j].add(&points[i]);
+        }
+    }
+    return result;
+}
+
+test "G2.mul_by_int_2" {
+    const scalars = [_]Fr{
+        Fr.init(1),
+        Fr.init(3),
+        Fr.init(5),
+        Fr.init(7),
+        Fr.init(11),
+        Fr.init(19),
+        Fr.init(123),
+        Fr.init(999),
+        Fr.init(10007),
+        Fr.init(123456),
+        Fr.init(987654321),
+        Fr.init(3141592653),
+        Fr.init(9007199254740991),
+        Fr.init(18446744073709551557),
+        Fr.init(12345678987654345678765456787654567876543567),
+        Fr.init(23456543456543456754345654324565432456543456),
+    };
+    const Gen = G2.GENERATOR;
+    for (scalars) |k| {
+        const result = Gen.mul_by_int_2(k.value);
+        const expected_result = Gen.mul_by_int(k.value);
+        try std.testing.expect(result.equal(&expected_result));
+    }
+}
+
 pub fn mulAssign(self: *G2, scalar: *const Fr) void {
     self.* = self.mul(scalar);
 }
@@ -236,6 +393,25 @@ pub fn frobenius(self: *const G2) G2 {
         .y = self.y.frobeniusMap().mul(&FROBENIUS_Y_COEFF),
         .z = self.z.frobeniusMap(),
     };
+}
+
+pub fn lambda_endomorphism(self: *const G2) G2 {
+    const cube_root = FpMont.init(curve_parameters.G2_cube_root);
+
+    const self_aff = self.toAffine();
+    return G2{
+        .x = self_aff.x.scalarMul(&cube_root),
+        .y = self_aff.y,
+        .z = Fp2Mont.ONE,
+    };
+}
+
+pub fn gamma_endomorphism(self: *const G2) G2 {
+    return self.frobenius().frobenius().frobenius();
+}
+
+pub fn gamma_lambda_endomorphism(self: *const G2) G2 {
+    return self.gamma_endomorphism().lambda_endomorphism();
 }
 
 // ============================================================================
