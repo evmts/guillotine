@@ -239,23 +239,6 @@ pub const MinimalFrame = struct {
         return new_cost - current_cost;
     }
 
-    /// Calculate gas cost for external account operations (EIP-150 aware)
-    fn externalAccountGasCost(self: *Self, address: Address) !u64 {
-        const evm = self.getEvm();
-
-        if (self.hardfork.isAtLeast(.BERLIN)) {
-            // Post-Berlin: Cold/warm access pattern
-            @branchHint(.likely);
-            return try evm.access_address(address);
-        } else if (self.hardfork.isAtLeast(.TANGERINE_WHISTLE)) {
-            // Post-EIP-150, Pre-Berlin: Fixed higher cost
-            return GasConstants.GasExtStep;
-        } else {
-            // Pre-EIP-150: Lower cost
-            return GasConstants.GasQuickStep;
-        }
-    }
-
     /// Calculate SLOAD gas cost based on hardfork
     /// TODO: replace these with constants once we implement in guillotine
     fn sloadGasCost(self: *Self, key: u256) !u64 {
