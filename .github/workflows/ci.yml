@@ -25,6 +25,8 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - name: Build
-        run: zig build
+        run: zig build -Doptimize=ReleaseFast
       - name: Test
-        run: zig build test
+        run: zig build test -Doptimize=ReleaseFast
+
+
