@@ -198,7 +198,7 @@ pub fn addAssign(self: *G1, other: *const G1) void {
 
 // This is a easy to compute morphism, G -> λG, where λ is a fixed field element, it can be found in curve_parameters.zig
 pub fn GLS_endomorphism(self: *const G1) G1 {
-    const cube_root = FpMont.init(curve_parameters.cube_root_of_unity);
+    const cube_root = FpMont.init(curve_parameters.G1_SCALAR.cube_root);
     const point_aff = self.toAffine();
     return G1{
         .x = point_aff.x.mul(&cube_root),
@@ -216,16 +216,15 @@ pub const scalar_decomposition = struct {
 pub fn decomposeScalar(scalar: u256) scalar_decomposition {
     const k: i512 = @intCast(scalar);
     const r_mod = curve_parameters.FR_MOD;
-    const v1_x = curve_parameters.v1_x;
-    const v1_y = curve_parameters.v1_y;
-    const v2_x = curve_parameters.v2_x;
-    const v2_y = curve_parameters.v2_y;
+    const basis = curve_parameters.G1_SCALAR.lattice_basis;
+    const v1 = basis[0];
+    const v2 = basis[1];
 
-    const c1 = @divTrunc(v2_y * k, r_mod);
-    const c2 = @divTrunc(v1_y * k, r_mod);
+    const c1 = @divTrunc(@as(i512, v2.y) * k, r_mod);
+    const c2 = @divTrunc(@as(i512, v1.y) * k, r_mod);
 
-    const k1 = k - c1 * v1_x - c2 * v2_x;
-    const k2 = c1 * (-v1_y) + c2 * v2_y;
+    const k1 = k - c1 * @as(i512, v1.x) - c2 * @as(i512, v2.x);
+    const k2 = c1 * -@as(i512, v1.y) + c2 * @as(i512, v2.y);
 
     return scalar_decomposition{ .k1 = @intCast(k1), .k2 = @intCast(k2) };
 }
@@ -479,13 +478,13 @@ test "G1.GLS_endomorphism" {
     for (test_values) |value| {
         const point = gen.mul(&value);
         const endo = point.GLS_endomorphism();
-        const point_times_lambda = point.mul(&Fr.init(curve_parameters.GLS_LAMBDA));
+        const point_times_lambda = point.mul(&Fr.init(curve_parameters.G1_SCALAR.lambda));
         try std.testing.expect(point_times_lambda.equal(&endo));
     }
 }
 
 test "G1.decomposeScalar" {
-    const lambda = curve_parameters.GLS_LAMBDA;
+    const lambda = curve_parameters.G1_SCALAR.lambda;
 
     const test_values = [_]Fr{
         Fr.init(1),

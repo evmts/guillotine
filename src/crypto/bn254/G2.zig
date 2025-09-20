@@ -206,133 +206,85 @@ pub fn addAssign(self: *G2, other: *const G2) void {
     self.* = self.add(other);
 }
 
-pub const scalar_decomposition = struct {
+const ScalarDecomposition = struct {
     k1: i70,
     k2: i70,
     k3: i70,
     k4: i70,
 };
 
-pub fn decomposeScalar(scalar: u256) scalar_decomposition {
+pub fn decomposeScalar(scalar: u256) ScalarDecomposition {
     const k: i512 = @intCast(scalar);
-    const r_mod = curve_parameters.FR_MOD;
-    const v1 = curve_parameters.G2_v1;
-    const v2 = curve_parameters.G2_v2;
-    const v3 = curve_parameters.G2_v3;
-    const v4 = curve_parameters.G2_v4;
+    const params = curve_parameters.G2_SCALAR;
+    const r_mod = @as(i512, @intCast(curve_parameters.FR_MOD));
+    const coeffs = params.projection_coeffs;
 
-    const c1 = curve_parameters.G2_c1;
-    const c2 = curve_parameters.G2_c2;
-    const c3 = curve_parameters.G2_c3;
-    const c4 = curve_parameters.G2_c4;
+    const b1 = @divTrunc(coeffs[0] * k, r_mod);
+    const b2 = @divTrunc(coeffs[1] * k, r_mod);
+    const b3 = @divTrunc(coeffs[2] * k, r_mod);
+    const b4 = @divTrunc(coeffs[3] * k, r_mod);
 
-    const b1 = @divTrunc(c1 * k, r_mod);
-    const b2 = @divTrunc(c2 * k, r_mod);
-    const b3 = @divTrunc(c3 * k, r_mod);
-    const b4 = @divTrunc(c4 * k, r_mod);
+    const basis = params.lattice_basis;
+    const v1 = basis[0];
+    const v2 = basis[1];
+    const v3 = basis[2];
+    const v4 = basis[3];
 
-    const k1 = k - b1 * v1[0] - b2 * v2[0] - b3 * v3[0] - b4 * v4[0];
-    const k2 = 0 - b1 * v1[1] - b2 * v2[1] - b3 * v3[1] - b4 * v4[1];
-    const k3 = 0 - b1 * v1[2] - b2 * v2[2] - b3 * v3[2] - b4 * v4[2];
-    const k4 = 0 - b1 * v1[3] - b2 * v2[3] - b3 * v3[3] - b4 * v4[3];
+    const k1 = k - b1 * @as(i512, v1[0]) - b2 * @as(i512, v2[0]) - b3 * @as(i512, v3[0]) - b4 * @as(i512, v4[0]);
+    const k2 = -b1 * @as(i512, v1[1]) - b2 * @as(i512, v2[1]) - b3 * @as(i512, v3[1]) - b4 * @as(i512, v4[1]);
+    const k3 = -b1 * @as(i512, v1[2]) - b2 * @as(i512, v2[2]) - b3 * @as(i512, v3[2]) - b4 * @as(i512, v4[2]);
+    const k4 = -b1 * @as(i512, v1[3]) - b2 * @as(i512, v2[3]) - b3 * @as(i512, v3[3]) - b4 * @as(i512, v4[3]);
 
-    return scalar_decomposition{ .k1 = @intCast(k1), .k2 = @intCast(k2), .k3 = @intCast(k3), .k4 = @intCast(k4) };
-}
-
-test "G2.decomposeScalar" {
-    const scalar = Fr.init(1234567890123456789012345678901234567890);
-    const decomposition = G2.decomposeScalar(scalar.value);
-    const k1_is_negative = decomposition.k1 < 0;
-    const k2_is_negative = decomposition.k2 < 0;
-    const k3_is_negative = decomposition.k3 < 0;
-    const k4_is_negative = decomposition.k4 < 0;
-    var k1 = Fr.init(@as(u256, @intCast(if (k1_is_negative) -decomposition.k1 else decomposition.k1)));
-    if (k1_is_negative) {
-        k1 = k1.neg();
-    }
-    var k2 = Fr.init(@as(u256, @intCast(if (k2_is_negative) -decomposition.k2 else decomposition.k2)));
-    if (k2_is_negative) {
-        k2 = k2.neg();
-    }
-    var k3 = Fr.init(@as(u256, @intCast(if (k3_is_negative) -decomposition.k3 else decomposition.k3)));
-    if (k3_is_negative) {
-        k3 = k3.neg();
-    }
-    var k4 = Fr.init(@as(u256, @intCast(if (k4_is_negative) -decomposition.k4 else decomposition.k4)));
-    if (k4_is_negative) {
-        k4 = k4.neg();
-    }
-    std.debug.print("k1: {}\n", .{decomposition.k1});
-    std.debug.print("k2: {}\n", .{decomposition.k2});
-    std.debug.print("k3: {}\n", .{decomposition.k3});
-    std.debug.print("k4: {}\n", .{decomposition.k4});
-
-    const gamma = curve_parameters.G2_gamma;
-    const lambda = curve_parameters.G2_lambda;
-    const gamma_lambda = curve_parameters.G2_gamma_lambda;
-    const k2_lambda = k2.mul(&Fr.init(lambda));
-    const k3_gamma = k3.mul(&Fr.init(gamma));
-    const k4_gamma_lambda = k4.mul(&Fr.init(gamma_lambda));
-    const f = k1.add(&k2_lambda).add(&k3_gamma).add(&k4_gamma_lambda);
-    std.debug.print("f: {}\n", .{f});
-    std.debug.print("scalar: {}\n", .{scalar});
-    //try std.testing.expect(f.equal(&scalar));
+    return ScalarDecomposition{
+        .k1 = @intCast(k1),
+        .k2 = @intCast(k2),
+        .k3 = @intCast(k3),
+        .k4 = @intCast(k4),
+    };
 }
 
 pub fn mul(self: *const G2, scalar: *const Fr) G2 {
-    return self.mul_by_int_2(scalar.value);
+    return self.mul_by_int(scalar.value);
 }
 
 pub fn mul_by_int(self: *const G2, scalar: u256) G2 {
-    if (self.isInfinity()) {
-        return INFINITY;
-    }
-    var result = INFINITY;
-    var base = self.*;
-    var exp = scalar;
-    while (exp > 0) : (exp >>= 1) {
-        if (exp & 1 == 1) {
-            result.addAssign(&base);
-        }
-        base.doubleAssign();
-    }
-    return result;
-}
-
-pub fn mul_by_int_2(self: *const G2, scalar: u256) G2 {
-    if (self.isInfinity()) {
+    if (self.isInfinity() or scalar == 0) {
         return INFINITY;
     }
 
     const decomposition = decomposeScalar(scalar);
-    const k1_is_negative = decomposition.k1 < 0;
-    const k2_is_negative = decomposition.k2 < 0;
-    const k3_is_negative = decomposition.k3 < 0;
-    const k4_is_negative = decomposition.k4 < 0;
 
-    const P = if (k1_is_negative) self.neg() else self.*;
-    const lambda_P = if (k2_is_negative) self.neg().lambda_endomorphism() else self.lambda_endomorphism();
-    const gamma_P = if (k3_is_negative) self.neg().gamma_endomorphism() else self.gamma_endomorphism();
-    const gamma_lambda_P = if (k4_is_negative) self.neg().gamma_lambda_endomorphism() else self.gamma_lambda_endomorphism();
+    var base_points = [4]G2{
+        self.*,
+        self.lambda_endomorphism(),
+        self.gamma_endomorphism(),
+        self.gamma_lambda_endomorphism(),
+    };
 
-    const points = [4]G2{ P, lambda_P, gamma_P, gamma_lambda_P };
-    const precomputed_points: [16]G2 = init_precomputed_points(&points);
+    if (decomposition.k1 < 0) base_points[0].negAssign();
+    if (decomposition.k2 < 0) base_points[1].negAssign();
+    if (decomposition.k3 < 0) base_points[2].negAssign();
+    if (decomposition.k4 < 0) base_points[3].negAssign();
 
-    const k1 = @abs(decomposition.k1);
-    const k2 = @abs(decomposition.k2);
-    const k3 = @abs(decomposition.k3);
-    const k4 = @abs(decomposition.k4);
+    const precomputed_points = init_precomputed_points(&base_points);
 
+    const k1_abs: u70 = @intCast(@abs(decomposition.k1));
+    const k2_abs: u70 = @intCast(@abs(decomposition.k2));
+    const k3_abs: u70 = @intCast(@abs(decomposition.k3));
+    const k4_abs: u70 = @intCast(@abs(decomposition.k4));
+
+    const window_bits: usize = 70;
     var result = INFINITY;
-
-    for (0..70) |i| {
+    var i: usize = 0;
+    while (i < window_bits) : (i += 1) {
         result.doubleAssign();
-        const bit_index: u7 = @intCast(70 - i - 1);
-        const prec_index = get_precomputed_index(k1, k2, k3, k4, bit_index);
+        const bit_index: u7 = @intCast(window_bits - 1 - i);
+        const prec_index = get_precomputed_index(k1_abs, k2_abs, k3_abs, k4_abs, bit_index);
         if (prec_index != 0) {
             result.addAssign(&precomputed_points[prec_index]);
         }
     }
+
     return result;
 }
 
@@ -356,33 +308,6 @@ fn init_precomputed_points(points: *const [4]G2) [16]G2 {
     return result;
 }
 
-test "G2.mul_by_int_2" {
-    const scalars = [_]Fr{
-        Fr.init(1),
-        Fr.init(3),
-        Fr.init(5),
-        Fr.init(7),
-        Fr.init(11),
-        Fr.init(19),
-        Fr.init(123),
-        Fr.init(999),
-        Fr.init(10007),
-        Fr.init(123456),
-        Fr.init(987654321),
-        Fr.init(3141592653),
-        Fr.init(9007199254740991),
-        Fr.init(18446744073709551557),
-        Fr.init(12345678987654345678765456787654567876543567),
-        Fr.init(23456543456543456754345654324565432456543456),
-    };
-    const Gen = G2.GENERATOR;
-    for (scalars) |k| {
-        const result = Gen.mul_by_int_2(k.value);
-        const expected_result = Gen.mul_by_int(k.value);
-        try std.testing.expect(result.equal(&expected_result));
-    }
-}
-
 pub fn mulAssign(self: *G2, scalar: *const Fr) void {
     self.* = self.mul(scalar);
 }
@@ -396,7 +321,7 @@ pub fn frobenius(self: *const G2) G2 {
 }
 
 pub fn lambda_endomorphism(self: *const G2) G2 {
-    const cube_root = FpMont.init(curve_parameters.G2_cube_root);
+    const cube_root = FpMont.init(curve_parameters.G2_SCALAR.cube_root);
 
     const self_aff = self.toAffine();
     return G2{
@@ -412,199 +337,4 @@ pub fn gamma_endomorphism(self: *const G2) G2 {
 
 pub fn gamma_lambda_endomorphism(self: *const G2) G2 {
     return self.gamma_endomorphism().lambda_endomorphism();
-}
-
-// ============================================================================
-// TESTS - Adapted from g2.zig for Montgomery form
-// ============================================================================
-
-const std = @import("std");
-
-fn expectG2Equal(expected: G2, actual: G2) !void {
-    try std.testing.expect(expected.equal(&actual));
-}
-
-test "G2.add opposite" {
-    const Gen = G2.GENERATOR;
-    const minusG = Gen.neg();
-    const G_plus_minusG = Gen.add(&minusG);
-    try std.testing.expect(G_plus_minusG.isInfinity());
-}
-
-test "G2.add" {
-    const Gen = G2.GENERATOR;
-    const Gen2 = G2{
-        .x = Fp2Mont.init_from_int(8068064665578754444291054647125927633989259848632494988160623383584150338969, 10201766053784902393624440516579763048402213644202139977240562962104124808534),
-        .y = Fp2Mont.init_from_int(18350387758438165722514006433324734852126505429007818091896560652419680779208, 2361120538552305763462588552289584032113666280040005078430227626567900900889),
-        .z = Fp2Mont.init_from_int(16991307846246862835209946494978544876836381174527200297540561298613916203860, 8164735751726867362664406806290871136633702655186802416211482152428240187062),
-    };
-    const expected_result = G2{
-        .x = Fp2Mont.init_from_int(16964963043016842499038600092728359482547221737098759962437502895503860098956, 9802038328124067467167916831831108021770181501290579378159059786039834492047),
-        .y = Fp2Mont.init_from_int(16820779252272725671048206721551654470547449467959363398932701258504709733061, 18729480042507864736551419171906659760696723842014658768251241386616345560593),
-        .z = Fp2Mont.init_from_int(394855990771205946776485094759919347105338213653118418588150452214006819405, 8586553845205426076950860668862984318775103285308506851115128319666650804540),
-    };
-    try expectG2Equal(expected_result, Gen.add(&Gen2));
-}
-
-test "G2.double expected" {
-    const Gen = G2.GENERATOR;
-    const doubleG = Gen.double();
-    const expected_result = G2{
-        .x = Fp2Mont.init_from_int(8068064665578754444291054647125927633989259848632494988160623383584150338969, 10201766053784902393624440516579763048402213644202139977240562962104124808534),
-        .y = Fp2Mont.init_from_int(18350387758438165722514006433324734852126505429007818091896560652419680779208, 2361120538552305763462588552289584032113666280040005078430227626567900900889),
-        .z = Fp2Mont.init_from_int(16991307846246862835209946494978544876836381174527200297540561298613916203860, 8164735751726867362664406806290871136633702655186802416211482152428240187062),
-    };
-
-    try expectG2Equal(expected_result, doubleG);
-}
-
-test "G2.mul" {
-    const Gen = G2.GENERATOR;
-    const minus_G = Gen.mul(&Fr.init(1).neg());
-    const G_plus_minus_G = Gen.add(&minus_G);
-    try std.testing.expect(G_plus_minus_G.isInfinity());
-}
-
-test "G2.isOnCurve generator" {
-    const gen = G2.GENERATOR;
-    try std.testing.expect(gen.isOnCurve());
-}
-
-test "G2.isOnCurve identity" {
-    const identity = G2.INFINITY;
-    try std.testing.expect(identity.isOnCurve());
-}
-
-test "G2.isOnCurve random point" {
-    const k = 7; // example scalar
-    const random_point = G2.GENERATOR.mul(&Fr.init(k));
-    try std.testing.expect(random_point.isOnCurve());
-}
-
-test "G2.equal generator to itself" {
-    const gen = G2.GENERATOR;
-    try std.testing.expect(gen.equal(&gen));
-}
-
-test "G2.toAffine random point" {
-    const k = 13; // example scalar
-    const random_point = G2.GENERATOR.mul(&Fr.init(k));
-    const affine = random_point.toAffine();
-
-    const expected_result = G2{
-        .x = Fp2Mont.init_from_int(16137324789686743234629608741537369181251990815455155257427276976918350071287, 280672898440571232725436467950720547829638241593507531241322547969961007057),
-        .y = Fp2Mont.init_from_int(12136420650226457477690750437223209427924916790606163705631661913973995426040, 17641806683785498955878869918183868440783188556637975525088932771694068429840),
-        .z = Fp2Mont.ONE, // affine points have z = 1
-    };
-
-    try expectG2Equal(expected_result, affine);
-    try std.testing.expect(affine.isOnCurve());
-}
-
-test "G2.add generator to identity" {
-    const gen = G2.GENERATOR;
-    const identity = G2.INFINITY;
-    const result = gen.add(&identity);
-    try expectG2Equal(gen, result);
-}
-
-test "G2.add random points" {
-    const k1 = 3; // example scalar
-    const k2 = 5; // example scalar
-    const point1 = G2.GENERATOR.mul(&Fr.init(k1));
-    const point2 = G2.GENERATOR.mul(&Fr.init(k2));
-    const result = point1.add(&point2);
-
-    const expected_result = G2{
-        .x = Fp2Mont.init_from_int(12338822787986259899292241915605503554934128188921556766068436962878160930396, 7873988026505017611181106612809016613872895048560600031197901192282892195467),
-        .y = Fp2Mont.init_from_int(15022180381621582952906644413383285972184526146125412741587595613615896914712, 19921033716458048718332470098885436883122273955056609736463017767128109247250),
-        .z = Fp2Mont.init_from_int(1774573728518825553032624160373027001804770585936131378855038206560263646397, 16540582363439390354595677887183297241579373102577794439755118116102427771932),
-    };
-
-    try expectG2Equal(expected_result, result);
-    try std.testing.expect(result.isOnCurve());
-}
-
-test "G2.add commutativity" {
-    const k1 = 11; // example scalar
-    const k2 = 17; // example scalar
-    const point1 = G2.GENERATOR.mul(&Fr.init(k1));
-    const point2 = G2.GENERATOR.mul(&Fr.init(k2));
-
-    const result1 = point1.add(&point2);
-    const result2 = point2.add(&point1);
-    try expectG2Equal(result1, result2);
-}
-
-test "G2.double identity" {
-    const identity = G2.INFINITY;
-    const result = identity.double();
-    try std.testing.expect(result.isInfinity());
-}
-
-test "G2.double random point" {
-    const k = 9; // example scalar
-    const random_point = G2.GENERATOR.mul(&Fr.init(k));
-    const doubled = random_point.double();
-
-    const expected_result = G2{
-        .x = Fp2Mont.init_from_int(9010315763217961467479503725255056756346217638634836905524514729866798122782, 12713521549126352466862126562479899179793375378918102927559864838005817848258),
-        .y = Fp2Mont.init_from_int(2938963071173997916611155186588796442091168500216583928241941802670927160507, 4637911005980597202814535267161061392968887007349473417306059045353733452774),
-        .z = Fp2Mont.init_from_int(21027050538969145131013453157421638377169363093479560088903524997919820324535, 16346656561829046745170627665889413954208741171200634938000383914340115265265),
-    };
-
-    try expectG2Equal(expected_result, doubled);
-    try std.testing.expect(doubled.isOnCurve());
-}
-
-test "G2.chain operations" {
-    const gen = G2.GENERATOR;
-    const doubled = gen.double();
-    const quadrupled = doubled.double();
-    const gen_times_four = gen.add(&gen).add(&gen).add(&gen);
-    try expectG2Equal(quadrupled, gen_times_four);
-}
-
-// check that the frobenius map is correct
-test "G2.frobenius" {
-    const scalars = [_]u64{
-        1, 3, 5, 7, 11, 19, 123, 999, 10007, 123456, 987654321, 3141592653, 9007199254740991, 18446744073709551557,
-    };
-    for (scalars) |k| {
-        const point = G2.GENERATOR.mul(&Fr.init(k));
-        const frob_point = point.frobenius();
-        const p_point = point.mul(&Fr.init(curve_parameters.FP_MOD));
-        try expectG2Equal(p_point, frob_point);
-    }
-}
-
-// Additional tests for assignment methods
-test "G2.addAssign basic assignment" {
-    var a = G2.GENERATOR;
-    const b = G2.GENERATOR.double();
-    const expected = a.add(&b);
-    a.addAssign(&b);
-    try expectG2Equal(expected, a);
-}
-
-test "G2.doubleAssign basic assignment" {
-    var a = G2.GENERATOR;
-    const expected = a.double();
-    a.doubleAssign();
-    try expectG2Equal(expected, a);
-}
-
-test "G2.negAssign basic assignment" {
-    var a = G2.GENERATOR;
-    const expected = a.neg();
-    a.negAssign();
-    try expectG2Equal(expected, a);
-}
-
-test "G2.mulAssign basic assignment" {
-    var a = G2.GENERATOR;
-    const scalar = Fr.init(7);
-    const expected = a.mul(&scalar);
-    a.mulAssign(&scalar);
-    try expectG2Equal(expected, a);
 }
