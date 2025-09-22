@@ -23,6 +23,8 @@ pub const HostInterface = struct {
         set_code: *const fn (ptr: *anyopaque, address: Address, code: []const u8) void,
         get_storage: *const fn (ptr: *anyopaque, address: Address, slot: u256) u256,
         set_storage: *const fn (ptr: *anyopaque, address: Address, slot: u256, value: u256) void,
+        get_transient_storage: *const fn (ptr: *anyopaque, address: Address, slot: u256) u256,
+        set_transient_storage: *const fn (ptr: *anyopaque, address: Address, slot: u256, value: u256) void,
     };
 
     pub fn innerCall(self: HostInterface, params: CallParams) CallResult {
@@ -60,6 +62,14 @@ pub const HostInterface = struct {
     pub fn setStorage(self: HostInterface, address: Address, slot: u256, value: u256) void {
         self.vtable.set_storage(self.ptr, address, slot, value);
     }
+
+    pub fn getTransientStorage(self: HostInterface, address: Address, slot: u256) u256 {
+        return self.vtable.get_transient_storage(self.ptr, address, slot);
+    }
+
+    pub fn setTransientStorage(self: HostInterface, address: Address, slot: u256, value: u256) void {
+        self.vtable.set_transient_storage(self.ptr, address, slot, value);
+    }
 };
 
 /// Host implementation that reads from real EVM
@@ -89,6 +99,8 @@ pub const Host = struct {
                 .set_code = setCode,
                 .get_storage = getStorage,
                 .set_storage = setStorage,
+                .get_transient_storage = getTransientStorage,
+                .set_transient_storage = setTransientStorage,
             },
         };
     }
@@ -203,6 +215,22 @@ pub const Host = struct {
         // 1. Host would need to hold a reference to the EVM instance
         // 2. Access the database through: evm.database
         // 3. Store value: evm.database.storage.put(StorageKey{address.bytes, slot}, value)
+        _ = address;
+        _ = slot;
+        _ = value;
+    }
+
+    fn getTransientStorage(ptr: *anyopaque, address: Address, slot: u256) u256 {
+        const self = @as(*Self, @ptrCast(@alignCast(ptr)));
+        _ = self;
+        _ = address;
+        _ = slot;
+        return 0;
+    }
+
+    fn setTransientStorage(ptr: *anyopaque, address: Address, slot: u256, value: u256) void {
+        const self = @as(*Self, @ptrCast(@alignCast(ptr)));
+        _ = self;
         _ = address;
         _ = slot;
         _ = value;

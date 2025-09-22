@@ -97,6 +97,8 @@ pub const MinimalEvm = struct {
     frames: std.ArrayList(*MinimalFrame),
     storage: std.AutoHashMap(StorageSlotKey, u256),
     original_storage: std.AutoHashMap(StorageSlotKey, u256),
+    // EIP-1153 transient storage (cleared after each transaction)
+    transient_storage: std.AutoHashMap(StorageSlotKey, u256),
     balances: std.AutoHashMap(Address, u256),
     code: std.AutoHashMap(Address, []const u8),
     nonces: std.AutoHashMap(Address, u64),
@@ -131,6 +133,7 @@ pub const MinimalEvm = struct {
         errdefer arena.deinit();
         const arena_allocator = arena.allocator();
         const storage_map = std.AutoHashMap(StorageSlotKey, u256).init(arena_allocator);
+        const transient_storage_map = std.AutoHashMap(StorageSlotKey, u256).init(arena_allocator);
         const balances_map = std.AutoHashMap(Address, u256).init(arena_allocator);
         const code_map = std.AutoHashMap(Address, []const u8).init(arena_allocator);
         const nonces_map = std.AutoHashMap(Address, u64).init(arena_allocator);
@@ -145,6 +148,7 @@ pub const MinimalEvm = struct {
             .frames = frames_list,
             .storage = storage_map,
             .original_storage = original_storage_map,
+            .transient_storage = transient_storage_map,
             .balances = balances_map,
             .code = code_map,
             .nonces = nonces_map,
@@ -183,6 +187,7 @@ pub const MinimalEvm = struct {
         self.frames = std.ArrayList(*MinimalFrame){}; // Unmanaged ArrayList, default init
         self.storage = std.AutoHashMap(StorageSlotKey, u256).init(arena_allocator);
         self.original_storage = std.AutoHashMap(StorageSlotKey, u256).init(arena_allocator);
+        self.transient_storage = std.AutoHashMap(StorageSlotKey, u256).init(arena_allocator);
         self.balances = std.AutoHashMap(Address, u256).init(arena_allocator);
         self.code = std.AutoHashMap(Address, []const u8).init(arena_allocator);
         self.nonces = std.AutoHashMap(Address, u64).init(arena_allocator);
@@ -339,6 +344,8 @@ pub const MinimalEvm = struct {
             self.gas_refund = 0;
             self.warm_addresses.clearRetainingCapacity();
             self.warm_storage_slots.clearRetainingCapacity();
+            // EIP-1153: Clear transient storage after transaction
+            self.transient_storage.clearRetainingCapacity();
         }
 
         // Pre-warm transaction, including precompiles depending on hardfork
@@ -916,9 +923,8 @@ pub const MinimalEvm = struct {
 
     /// Get storage value (called by frame)
     pub fn get_storage(self: *Self, address: Address, slot: u256) u256 {
-        if (self.host) |host| {
-            return host.getStorage(address, slot);
-        }
+        if (self.host) |host| return host.getStorage(address, slot);
+
         const key = StorageSlotKey{ .address = address, .slot = slot };
         return self.storage.get(key) orelse 0;
     }
@@ -931,6 +937,7 @@ pub const MinimalEvm = struct {
             host.setStorage(address, slot, value);
             return;
         }
+
         const key = StorageSlotKey{ .address = address, .slot = slot };
 
         // Track original value on first write in transaction
@@ -951,6 +958,32 @@ pub const MinimalEvm = struct {
         }
         // Otherwise return current value (unchanged in this transaction)
         return self.storage.get(key) orelse 0;
+    }
+
+    /// Get transient storage value (EIP-1153)
+    pub fn get_transient_storage(self: *Self, address: Address, slot: u256) u256 {
+        if (self.host) |host| return host.getTransientStorage(address, slot);
+
+        const key = StorageSlotKey{ .address = address, .slot = slot };
+        return self.transient_storage.get(key) orelse 0;
+    }
+
+    /// Set transient storage value (EIP-1153)
+    pub fn set_transient_storage(self: *Self, address: Address, slot: u256, value: u256) !void {
+        if (self.is_static_context()) return error.StaticCallViolation;
+
+        if (self.host) |host| {
+            host.setTransientStorage(address, slot, value);
+            return;
+        }
+
+        const key = StorageSlotKey{ .address = address, .slot = slot };
+        if (value == 0) {
+            // Remove entry when storing zero (storage optimization)
+            _ = self.transient_storage.remove(key);
+        } else {
+            try self.transient_storage.put(key, value);
+        }
     }
 
     /// Add gas refund
