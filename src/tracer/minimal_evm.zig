@@ -330,7 +330,7 @@ pub const MinimalEvm = struct {
     pub fn call(
         self: *Self,
         params: CallParams,
-    ) CallResult {        
+    ) CallResult {
         const to = params.get_to() orelse Address.ZERO_ADDRESS;
         const gas = params.getGas();
 
@@ -416,6 +416,22 @@ pub const MinimalEvm = struct {
                 result.gas_left = gas - floor_gas;
             }
         }
+        // Extract accessed addresses and storage before clearing
+        result.accessed_addresses = self.allocator.dupe(Address, self.warm_addresses.keys()) catch |err| {
+            log.err("Failed to allocate accessed addresses: {s}", .{@errorName(err)});
+            return CallResult.failure_with_error(result.gas_left, @errorName(err));
+        };
+
+        // Convert StorageSlotKey to StorageAccess
+        const storage_keys = self.warm_storage_slots.keys();
+        const storage_access = self.allocator.alloc(call_result_mod.StorageAccess, storage_keys.len) catch |err| {
+            log.err("Failed to allocate accessed storage: {s}", .{@errorName(err)});
+            return CallResult.failure_with_error(result.gas_left, @errorName(err));
+        };
+        for (storage_keys, 0..) |key, i| {
+            storage_access[i] = .{ .address = key.address, .slot = key.slot };
+        }
+        result.accessed_storage = storage_access;
 
         return result;
     }
