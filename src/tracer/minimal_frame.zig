@@ -179,6 +179,11 @@ pub const MinimalFrame = struct {
         return @intCast(words * 32);
     }
 
+    pub fn expandMemory(self: *Self, bytes: u64) MinimalEvmError!void {
+        const word_aligned_size = wordAlignedSize(bytes);
+        if (word_aligned_size > self.memory_size) self.memory_size = word_aligned_size;
+    }
+
     /// Read byte from memory
     pub fn readMemory(self: *Self, offset: u32) u8 {
         return self.memory.get(offset) orelse 0;
@@ -189,8 +194,7 @@ pub const MinimalFrame = struct {
         try self.memory.put(offset, value);
         // EVM memory expands to word-aligned (32-byte) boundaries
         const end_offset = std.math.cast(u64, offset + 1) orelse return error.OutOfBounds;
-        const word_aligned_size = wordAlignedSize(end_offset);
-        if (word_aligned_size > self.memory_size) self.memory_size = word_aligned_size;
+        try self.expandMemory(end_offset);
     }
 
     /// Get current opcode
@@ -1231,18 +1235,50 @@ pub const MinimalFrame = struct {
                 const length = try self.popStack();
 
                 // Pop topics
+                var topics: [4]u256 = undefined;
                 var i: u8 = 0;
                 while (i < topic_count) : (i += 1) {
-                    _ = try self.popStack();
+                    topics[i] = try self.popStack();
                 }
 
-                // Gas cost
+                // Validate bounds
+                const offset_u32 = std.math.cast(u32, offset) orelse return error.OutOfBounds;
                 const length_u32 = std.math.cast(u32, length) orelse return error.OutOfBounds;
-                const log_cost = logGasCost(topic_count, length_u32);
-                try self.consumeGas(log_cost);
 
-                // In minimal implementation, we don't actually emit logs
-                _ = offset;
+                // Calculate total gas: base log cost + memory expansion
+                var gas_cost = logGasCost(topic_count, length_u32);
+                if (length_u32 > 0) {
+                    const end_offset = @as(u64, offset_u32) + @as(u64, length_u32);
+                    const mem_expansion_cost = self.memoryExpansionCost(end_offset);
+                    gas_cost += mem_expansion_cost;
+
+                    try self.expandMemory(end_offset);
+                }
+                try self.consumeGas(gas_cost);
+
+                // Read data from memory
+                var data: []const u8 = &[_]u8{};
+                if (length_u32 > 0) {
+                    // Allocate buffer for log data (arena allocator handles cleanup)
+                    const data_buf = try self.allocator.alloc(u8, length_u32);
+
+                    // Copy bytes from memory
+                    var j: u32 = 0;
+                    while (j < length_u32) : (j += 1) {
+                        data_buf[j] = self.readMemory(offset_u32 + j);
+                    }
+                    data = data_buf;
+                }
+
+                // Prepare topics slice (only the portion we actually use)
+                const topics_slice = if (topic_count > 0)
+                    topics[0..topic_count]
+                else
+                    &[_]u256{};
+
+                // Emit the log via MinimalEvm
+                try evm.emit_log(self.address, topics_slice, data);
+
                 self.pc += 1;
             },
 

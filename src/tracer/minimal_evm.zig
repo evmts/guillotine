@@ -11,6 +11,7 @@ const minimal_host = @import("minimal_host.zig");
 const call_params_mod = @import("../frame/call_params.zig");
 const call_result_mod = @import("../frame/call_result.zig");
 const Hardfork = @import("../eips_and_hardforks/eips.zig").Hardfork;
+const Log = call_result_mod.Log;
 
 const Address = primitives.Address.Address;
 
@@ -104,6 +105,9 @@ pub const MinimalEvm = struct {
     warm_addresses: std.array_hash_map.ArrayHashMap(Address, void, AddressContext, false),
     warm_storage_slots: std.array_hash_map.ArrayHashMap(StorageSlotKey, void, StorageSlotKeyContext, false),
 
+    // Logs captured during execution
+    logs: std.ArrayList(Log),
+
     // Transaction-scoped gas refund counter
     gas_refund: u64,
 
@@ -136,6 +140,7 @@ pub const MinimalEvm = struct {
         const nonces_map = std.AutoHashMap(Address, u64).init(arena_allocator);
         const warm_addresses = std.array_hash_map.ArrayHashMap(Address, void, AddressContext, false).init(arena_allocator);
         const warm_storage_slots = std.array_hash_map.ArrayHashMap(StorageSlotKey, void, StorageSlotKeyContext, false).init(arena_allocator);
+        const logs = std.ArrayList(Log){};
         var frames_list = std.ArrayList(*MinimalFrame){};
         try frames_list.ensureTotalCapacity(arena_allocator, 16);
 
@@ -150,6 +155,7 @@ pub const MinimalEvm = struct {
             .nonces = nonces_map,
             .warm_addresses = warm_addresses,
             .warm_storage_slots = warm_storage_slots,
+            .logs = logs,
             .gas_refund = 0,
             .hardfork = Hardfork.DEFAULT,
             .chain_id = 1,
@@ -188,6 +194,7 @@ pub const MinimalEvm = struct {
         self.nonces = std.AutoHashMap(Address, u64).init(arena_allocator);
         self.warm_addresses = std.array_hash_map.ArrayHashMap(Address, void, AddressContext, false).init(arena_allocator);
         self.warm_storage_slots = std.array_hash_map.ArrayHashMap(StorageSlotKey, void, StorageSlotKeyContext, false).init(arena_allocator);
+        self.logs = std.ArrayList(Log){};
         self.gas_refund = 0;
         self.hardfork = Hardfork.DEFAULT;
         self.chain_id = 1;
@@ -339,6 +346,8 @@ pub const MinimalEvm = struct {
             self.gas_refund = 0;
             self.warm_addresses.clearRetainingCapacity();
             self.warm_storage_slots.clearRetainingCapacity();
+            self.logs = .empty;
+            self.logs.clearRetainingCapacity();
         }
 
         // Pre-warm transaction, including precompiles depending on hardfork
@@ -406,6 +415,12 @@ pub const MinimalEvm = struct {
 
             // Apply the refund
             result.gas_left += capped_refund;
+
+            // Copy logs to result
+            result.logs = self.logs.toOwnedSlice(self.allocator) catch |err| {
+                log.err("Failed to copy logs to result: {s}", .{@errorName(err)});
+                return CallResult.failure_with_error(result.gas_left, @errorName(err));
+            };
         }
 
         // EIP-7623 (Prague): Ensure at least floor_gas is consumed
@@ -782,12 +797,18 @@ pub const MinimalEvm = struct {
         return CallResult.success_with_output(gas_left, output);
     }
 
-    /// TODO: Function called in LOG handlers to emit logs for the current tx
-    pub fn emit_log(self: *Self, topics: []const u256, data: []const u8) Error!void {
+    /// Emit a log event in the current transaction
+    pub fn emit_log(self: *Self, contract_address: Address, topics: []const u256, data: []const u8) Error!void {
         if (self.is_static_context()) return error.StaticCallViolation;
 
-        _ = topics;
-        _ = data;
+        const topics_copy = self.allocator.dupe(u256, topics) catch return error.AllocationError;
+        const data_copy = self.allocator.dupe(u8, data) catch return error.AllocationError;
+
+        self.logs.append(self.allocator, Log{
+            .address = contract_address,
+            .topics = topics_copy,
+            .data = data_copy,
+        }) catch return error.AllocationError;
     }
 
     /// TODO: Function called in SELFDESTRUCT handler
