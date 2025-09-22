@@ -9,8 +9,6 @@ const Hardfork = @import("../eips_and_hardforks/eips.zig").Hardfork;
 const minimal_host = @import("minimal_host.zig");
 
 const Address = primitives.Address.Address;
-const ZERO_ADDRESS = primitives.ZERO_ADDRESS;
-const to_u256 = primitives.Address.to_u256;
 
 // Re-export host types for compatibility
 pub const HostInterface = minimal_host.HostInterface;
@@ -145,11 +143,11 @@ pub const MinimalEvm = struct {
             .block_timestamp = 0,
             .block_difficulty = 0,
             .block_prevrandao = 0,
-            .block_coinbase = ZERO_ADDRESS,
+            .block_coinbase = primitives.ZERO_ADDRESS,
             .block_gas_limit = 30_000_000,
             .block_base_fee = 0,
             .blob_base_fee = 0,
-            .origin = ZERO_ADDRESS,
+            .origin = primitives.ZERO_ADDRESS,
             .gas_price = 0,
             .host = null,
             .arena = arena,
@@ -181,11 +179,11 @@ pub const MinimalEvm = struct {
         self.block_timestamp = 0;
         self.block_difficulty = 0;
         self.block_prevrandao = 0;
-        self.block_coinbase = ZERO_ADDRESS;
+        self.block_coinbase = primitives.ZERO_ADDRESS;
         self.block_gas_limit = 30_000_000;
         self.block_base_fee = 0;
         self.blob_base_fee = 0;
-        self.origin = ZERO_ADDRESS;
+        self.origin = primitives.ZERO_ADDRESS;
         self.gas_price = 0;
         self.host = null;
         self.allocator = arena_allocator;
@@ -300,7 +298,7 @@ pub const MinimalEvm = struct {
         warm[count] = self.origin;
         count += 1;
 
-        if (!target.equals(ZERO_ADDRESS)) {
+        if (!target.equals(primitives.ZERO_ADDRESS)) {
             warm[count] = target;
             count += 1;
         }
