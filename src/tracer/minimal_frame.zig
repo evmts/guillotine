@@ -310,65 +310,6 @@ pub const MinimalFrame = struct {
         }
     }
 
-    /// Calculate SELFDESTRUCT gas cost
-    fn selfdestructGasCost(self: *Self, beneficiary: Address) !u64 {
-        const evm = self.getEvm();
-        var gas: u64 = 0;
-
-        // Base cost (EIP-150: Tangerine Whistle)
-        if (self.hardfork.isAtLeast(.TANGERINE_WHISTLE)) {
-            gas = GasConstants.SelfdestructGas; // 5000 gas
-        }
-        // Pre-EIP-150: Free operation (0 gas)
-
-        // Account creation cost (EIP-150 + EIP-161)
-        // Should charge 25000 if target doesn't exist and conditions are met
-        const target_exists = evm.account_exists(beneficiary);
-        if (!target_exists) {
-            // EIP-161 (Spurious Dragon): Only charge if contract has value
-            // Pre-Spurious: Always charge for non-existent accounts
-            const should_charge_topup = if (self.hardfork.isAtLeast(.SPURIOUS_DRAGON))
-                evm.get_balance(self.address) > 0  // Only charge if contract has value
-            else
-                true;  // Pre-Spurious: Always charge
-
-            if (self.hardfork.isAtLeast(.TANGERINE_WHISTLE) and should_charge_topup) {
-                gas += GasConstants.CallNewAccountGas; // 25000 gas
-            }
-        }
-
-        // Cold account access cost (EIP-2929: Berlin)
-        if (self.hardfork.isAtLeast(.BERLIN)) {
-            @branchHint(.likely);
-            // Only charge if beneficiary is not the same as current contract
-            if (!beneficiary.eql(self.address)) {
-                const access_cost = try evm.access_address(beneficiary);
-                // If cold, add cold account access cost
-                if (access_cost == GasConstants.ColdAccountAccessCost) {
-                    gas += GasConstants.ColdAccountAccessCost;
-                }
-            }
-        }
-
-        // TODO: uncomment once refund PR is merged (#767)
-        // Handle refund (EIP-3529: only before London)
-        // if (self.hardfork.isBefore(.LONDON)) {
-        //     @branchHint(.cold);
-        //     evm.gas_refund += GasConstants.SelfdestructRefundGas; // 24,000 refund
-        // }
-
-        return gas;
-    }
-
-    /// Calculate SELFDESTRUCT refund (EIP-3529 aware)
-    fn selfdestructRefund(self: *const Self) u64 {
-        if (self.hardfork.isAtLeast(.LONDON)) {
-            @branchHint(.likely);
-            return 0; // EIP-3529: No refund in London+
-        }
-        return GasConstants.SelfdestructRefundGas; // Pre-London: 24,000 refund
-    }
-
     /// Calculate CREATE gas cost (EIP-3860 aware)
     fn createGasCost(self: *const Self, init_code_size: u32) u64 {
         var gas_cost: u64 = GasConstants.CreateGas; // Base 32,000 gas
@@ -2149,14 +2090,13 @@ pub const MinimalFrame = struct {
 
             // SELFDESTRUCT
             0xff => {
-                const beneficiary_u256 = try self.popStack();
-                const beneficiary = Address.from_u256(beneficiary_u256);
+                _ = try self.popStack();
 
                 // Calculate gas cost based on hardfork and beneficiary
-                const gas_cost = try self.selfdestructGasCost(beneficiary);
+                // TODO: Gas and logic (#809)
+                const gas_cost = 0;
                 try self.consumeGas(gas_cost);
 
-                // TODO: Actually transfer balance to beneficiary
                 // For MinimalFrame, just mark as stopped
                 self.stopped = true;
             },
