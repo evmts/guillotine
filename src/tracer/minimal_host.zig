@@ -2,9 +2,11 @@
 const std = @import("std");
 const primitives = @import("primitives");
 const call_params_mod = @import("../frame/call_params.zig");
+const call_result_mod = @import("../frame/call_result.zig");
 const Address = primitives.Address.Address;
 
 const CallParams = call_params_mod.CallParams(.{});
+const CallResult = call_result_mod.CallResult(.{});
 
 /// Host interface for system operations
 pub const HostInterface = struct {
@@ -58,13 +60,6 @@ pub const HostInterface = struct {
     pub fn setStorage(self: HostInterface, address: Address, slot: u256, value: u256) void {
         self.vtable.set_storage(self.ptr, address, slot, value);
     }
-};
-
-/// Call result type
-pub const CallResult = struct {
-    success: bool,
-    gas_left: u64,
-    output: []const u8,
 };
 
 /// Host implementation that reads from real EVM

@@ -9,13 +9,13 @@ const GasConstants = primitives.GasConstants;
 const MinimalFrame = @import("minimal_frame.zig").MinimalFrame;
 const minimal_host = @import("minimal_host.zig");
 const call_params_mod = @import("../frame/call_params.zig");
+const call_result_mod = @import("../frame/call_result.zig");
 const Hardfork = @import("../eips_and_hardforks/eips.zig").Hardfork;
 
 const Address = primitives.Address.Address;
 
 // Re-export host types for compatibility
 pub const HostInterface = minimal_host.HostInterface;
-pub const CallResult = minimal_host.CallResult;
 pub const Host = minimal_host.Host;
 
 /// Storage slot key for tracking
@@ -88,8 +88,9 @@ pub const MinimalEvm = struct {
         CreateContractSizeLimit,
     };
 
-    // Expose CallParams
+    // Expose call input/output interfaces
     pub const CallParams = call_params_mod.CallParams(.{});
+    pub const CallResult = call_result_mod.CallResult(.{});
 
     const Self = @This();
 
@@ -323,6 +324,9 @@ pub const MinimalEvm = struct {
     }
 
     /// Execute an EVM operation, which will route to specific handlers based on the operation type
+    ///
+    /// We never handle errors in inner_call and specific execute functions so we can propagate raw errors back to this handler,
+    /// and handle them with logs and typed error results here in a consistent way.
     pub fn call(
         self: *Self,
         params: CallParams,
@@ -342,22 +346,17 @@ pub const MinimalEvm = struct {
             switch (err) {
                 error.StorageError => {
                     log.err("Pre-warm transaction failed: {s}", .{@errorName(err)});
-                    return CallResult{
-                        .success = false,
-                        .gas_left = 0,
-                        .output = &[_]u8{},
-                    };
+                    return CallResult.failure_with_error(0, @errorName(err));
                 },
                 else => unreachable, // nothing else should happen so far
             }
         };
 
         // Validate base gas
-        if (gas == 0) return CallResult{
-            .success = false,
-            .gas_left = 0,
-            .output = &[_]u8{},
-        };
+        if (gas == 0) {
+            log.err("Gas provided to transaction is 0");
+            return CallResult.failure_with_error(0, @errorName(error.GasZeroError));
+        }
 
         // Calculate floor gas for EIP-7623 (Prague), which we will enforce post-execution
         const floor_gas = self.get_floor_gas(params);
@@ -377,11 +376,8 @@ pub const MinimalEvm = struct {
 
         if (gas < intrinsic_gas) {
             @branchHint(.cold);
-            return CallResult{
-                .success = false,
-                .gas_left = 0,
-                .output = &[_]u8{},
-            };
+            log.err("Gas provided to transaction is no enough to pay for intrinsic gas: {d} < {d}", .{ gas, intrinsic_gas });
+            return CallResult.failure_with_error(0, @errorName(error.OutOfGas));
         }
 
         const execution_gas = gas - intrinsic_gas;
@@ -389,14 +385,10 @@ pub const MinimalEvm = struct {
         var modified_params = params;
         modified_params.setGas(execution_gas);
 
-        var result = self.inner_call(modified_params) catch {
+        var result = self.inner_call(modified_params) catch |err| {
+            log.err("Inner call failed: {s}", .{@errorName(err)});
             // Any other error than revert is caught here
-            // TODO: add error info to CallResult
-            return CallResult{
-                .success = false,
-                .gas_left = 0,
-                .output = &[_]u8{},
-            };
+            return CallResult.failure_with_error(0, @errorName(err));
         };
 
         if (result.success) {
@@ -440,21 +432,22 @@ pub const MinimalEvm = struct {
         if (self.frames.items.len >= 1024) return error.CallDepthExceeded;
 
         // Route to appropriate handler based on call type
+        // We don't catch here so we can propagate the error back to the top-level call handler
         return switch (params) {
             .call => |p| blk: {
                 @branchHint(.likely);
-                break :blk self.execute_call(.{ .caller = p.caller, .to = p.to, .value = p.value, .input = p.input, .gas = execution_gas }) catch CallResult{ .success = false, .gas_left = 0, .output = &[_]u8{} };
+                break :blk try self.execute_call(.{ .caller = p.caller, .to = p.to, .value = p.value, .input = p.input, .gas = execution_gas });
             },
             .staticcall => |p| blk: {
                 @branchHint(.likely);
-                break :blk self.execute_staticcall(.{ .caller = p.caller, .to = p.to, .input = p.input, .gas = execution_gas }) catch CallResult{ .success = false, .gas_left = 0, .output = &[_]u8{} };
+                break :blk try self.execute_staticcall(.{ .caller = p.caller, .to = p.to, .input = p.input, .gas = execution_gas });
             },
-            .delegatecall => |p| self.execute_delegatecall(.{ .caller = p.caller, .to = p.to, .input = p.input, .gas = execution_gas }) catch CallResult{ .success = false, .gas_left = 0, .output = &[_]u8{} },
-            .create => |p| self.execute_create(.{ .caller = p.caller, .value = p.value, .init_code = p.init_code, .gas = execution_gas }) catch CallResult{ .success = false, .gas_left = 0, .output = &[_]u8{} },
-            .create2 => |p| self.execute_create2(.{ .caller = p.caller, .value = p.value, .init_code = p.init_code, .salt = p.salt, .gas = execution_gas }) catch CallResult{ .success = false, .gas_left = 0, .output = &[_]u8{} },
+            .delegatecall => |p| try self.execute_delegatecall(.{ .caller = p.caller, .to = p.to, .input = p.input, .gas = execution_gas }),
+            .create => |p| try self.execute_create(.{ .caller = p.caller, .value = p.value, .init_code = p.init_code, .gas = execution_gas }),
+            .create2 => |p| try self.execute_create2(.{ .caller = p.caller, .value = p.value, .init_code = p.init_code, .salt = p.salt, .gas = execution_gas }),
             .callcode => |p| blk: {
                 @branchHint(.cold);
-                break :blk self.execute_callcode(.{ .caller = p.caller, .to = p.to, .value = p.value, .input = p.input, .gas = execution_gas }) catch CallResult{ .success = false, .gas_left = 0, .output = &[_]u8{} };
+                break :blk try self.execute_callcode(.{ .caller = p.caller, .to = p.to, .value = p.value, .input = p.input, .gas = execution_gas });
             },
         };
     }
@@ -487,14 +480,8 @@ pub const MinimalEvm = struct {
 
         // Get target contract code
         const code = self.get_code(params.to);
-        if (code.len == 0) {
-            // Empty account - just return success
-            return CallResult{
-                .success = true,
-                .gas_left = params.gas,
-                .output = &[_]u8{},
-            };
-        }
+        // Empty account - just return success
+        if (code.len == 0) return CallResult.success_empty(params.gas);
 
         // Execute the call in a new frame
         return self.execute_frame(
@@ -528,13 +515,7 @@ pub const MinimalEvm = struct {
 
         // Get code from target address
         const code = self.get_code(params.to);
-        if (code.len == 0) {
-            return CallResult{
-                .success = true,
-                .gas_left = params.gas,
-                .output = &[_]u8{},
-            };
-        }
+        if (code.len == 0) return CallResult.success_empty(params.gas);
 
         // Execute in current context
         return self.execute_frame(
@@ -558,13 +539,7 @@ pub const MinimalEvm = struct {
         // TODO: call preflight (precompiles, delegation, etc, see evm.zig)
 
         const code = self.get_code(params.to);
-        if (code.len == 0) {
-            return CallResult{
-                .success = true,
-                .gas_left = params.gas,
-                .output = &[_]u8{},
-            };
-        }
+        if (code.len == 0) return CallResult.success_empty(params.gas);
 
         // Get current call value from parent call (current frame)
         const current_frame = self.getCurrentFrame();
@@ -592,13 +567,7 @@ pub const MinimalEvm = struct {
         // TODO: staticcall preflight (precompiles, delegation, etc, see evm.zig)
 
         const code = self.get_code(params.to);
-        if (code.len == 0) {
-            return CallResult{
-                .success = true,
-                .gas_left = params.gas,
-                .output = &[_]u8{},
-            };
-        }
+        if (code.len == 0) return CallResult.success_empty(params.gas);
 
         // Execute in static context (read-only)
         return self.execute_frame(
@@ -723,11 +692,7 @@ pub const MinimalEvm = struct {
         const address_bytes = try self.allocator.alloc(u8, 20);
         @memcpy(address_bytes, &params.contract_address.bytes);
 
-        return CallResult{
-            .success = true,
-            .gas_left = result.gas_left,
-            .output = address_bytes,
-        };
+        return CallResult.success_with_output(result.gas_left, address_bytes);
     }
 
     /// Get init code size limit based on hardfork (EIP-3860)
@@ -796,7 +761,7 @@ pub const MinimalEvm = struct {
                     break :blk out;
                 } else &[_]u8{};
 
-                return CallResult{ .success = false, .gas_left = gas_left, .output = output };
+                return CallResult.revert_with_data(gas_left, output);
             },
             else => return err,
         };
@@ -811,11 +776,10 @@ pub const MinimalEvm = struct {
         // Calculate gas left
         const gas_left: u64 = @intCast(@max(frame.gas_remaining, 0));
 
-        return CallResult{
-            .success = !frame.reverted,
-            .gas_left = gas_left,
-            .output = output,
-        };
+        // TODO: This should be caught in the execute function so might need some cleanup (remove reverted)
+        // But "reverted" is probably useful for executing MinimalFrame step-by-step
+        if (frame.reverted) return CallResult.revert_with_data(gas_left, output);
+        return CallResult.success_with_output(gas_left, output);
     }
 
     /// TODO: Function called in LOG handlers to emit logs for the current tx
