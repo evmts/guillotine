@@ -7,7 +7,6 @@ const GasConstants = primitives.GasConstants;
 const MinimalFrame = @import("minimal_frame.zig").MinimalFrame;
 const Hardfork = @import("../eips_and_hardforks/eips.zig").Hardfork;
 const minimal_host = @import("minimal_host.zig");
-const Hardfork = @import("../eips_and_hardforks/hardfork.zig").Hardfork;
 const precompiles = @import("../precompiles/precompiles.zig");
 
 const Address = primitives.Address.Address;
