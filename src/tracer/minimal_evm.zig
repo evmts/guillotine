@@ -692,7 +692,9 @@ pub const MinimalEvm = struct {
         const address_bytes = try self.allocator.alloc(u8, 20);
         @memcpy(address_bytes, &params.contract_address.bytes);
 
-        return CallResult.success_with_output(result.gas_left, address_bytes);
+        var full_result = CallResult.success_with_output(result.gas_left, address_bytes);
+        full_result.created_address = params.contract_address;
+        return full_result;
     }
 
     /// Get init code size limit based on hardfork (EIP-3860)
