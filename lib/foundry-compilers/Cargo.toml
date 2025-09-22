@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [lib]
-crate-type = ["cdylib"]  # Build as a static library for Zig to link
+crate-type = ["staticlib"]  # Build as a static library for Zig to link
 
 [dependencies]
 foundry-compilers = { version = "0.10.1", features = ["svm-solc"] }

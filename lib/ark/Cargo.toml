@@ -5,7 +5,7 @@ edition = "2021"
 
 [lib]
 name = "bn254_wrapper"
-crate-type = ["cdylib"]
+crate-type = ["staticlib"]
 
 [dependencies]
 # Using arkworks for BN254 elliptic curve operations - from workspace
