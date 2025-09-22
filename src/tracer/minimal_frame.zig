@@ -275,51 +275,19 @@ pub const MinimalFrame = struct {
 
     /// Calculate SSTORE gas cost and handle refunds
     /// TODO: replace hardcoded values with constants once we implement in guillotine
-    /// 
-    /// Calculate SSTORE gas cost with EIP-2200 refund logic.
-    /// Handles all hardforks: Frontier, Istanbul, Berlin, London+
-    fn sstoreGasCost(self: *Self, key: u256, new_value: u256) !u64 {
+    fn sstoreGasCost(self: *Self, key: u256, current_value: u256, original_value: u256, new_value: u256) !u64 {
         const evm = self.getEvm();
-        const current = evm.get_storage(self.address, key);
-        const original = try evm.get_original_storage_value(self.address, key);
 
         // Early return for no-op across all hardforks
-        if (new_value == current) {
-            if (!self.hardfork.isAtLeast(.ISTANBUL)) {
-                return GasConstants.SstoreResetGas; // Pre-Istanbul treats no-op as reset
-            }
-            // Calculate no-op cost based on hardfork
-            const base_cost = if (self.hardfork.isAtLeast(.BERLIN))
-                GasConstants.WarmStorageReadCost  // Berlin+: 100
-            else
-                800;  // Istanbul: 800
-
-            // Add cold penalty for Berlin+ if needed
-            if (self.hardfork.isAtLeast(.BERLIN)) {
-                const access_cost = try evm.access_storage_slot(self.address, key);
-                return base_cost + access_cost;
-            }
-            return base_cost;
-        }
-
-        // Calculate base gas cost
-        const gas_cost = try self.calculateSstoreBaseCost(key, original, current, new_value);
-
-        // Add refunds if applicable
-        try self.applySstoreRefunds(original, current, new_value);
-
-        return gas_cost;
-    }
-
-    /// Calculate base SSTORE gas cost without refunds
-    fn calculateSstoreBaseCost(self: *Self, key: u256, original: u256, current: u256, new: u256) !u64 {
-        const evm = self.getEvm();
+        if (new_value == current_value) return self.sstoreGasCostNoOp(key);
 
         // Pre-Istanbul: Simple frontier rules
-        if (!self.hardfork.isAtLeast(.ISTANBUL)) {
-            if (current == 0 and new != 0) {
+        if (self.hardfork.isBefore(.ISTANBUL)) {
+            @branchHint(.cold);
+            if (current_value == 0 and new_value != 0) {
                 return GasConstants.SstoreSetGas;  // 20000
             }
+
             return GasConstants.SstoreResetGas;  // 5000
         }
 
@@ -327,8 +295,8 @@ pub const MinimalFrame = struct {
         var base_cost: u64 = undefined;
 
         // First modification in transaction (original == current)
-        if (original == current) {
-            if (original == 0) {
+        if (original_value == current_value) {
+            if (original_value == 0) {
                 base_cost = GasConstants.SstoreSetGas;  // 20000
             } else if (self.hardfork.isAtLeast(.BERLIN)) {
                 base_cost = 2900;  // SSTORE_RESET(5000) - COLD_SLOAD_COST(2100)
@@ -352,71 +320,108 @@ pub const MinimalFrame = struct {
         return base_cost;
     }
 
-    /// Apply SSTORE refunds according to EIP-2200
-    fn applySstoreRefunds(self: *Self, original: u256, current: u256, new: u256) !void {
-        const evm = self.getEvm();
+    fn sstoreGasCostNoOp(self: *Self, key: u256) !u64 {
+        if (self.hardfork.isBefore(.ISTANBUL)) {
+            @branchHint(.cold);
+            return GasConstants.SstoreResetGas; // Pre-Istanbul treats no-op as reset
+        }
 
-        // No refunds before Istanbul
-        if (!self.hardfork.isAtLeast(.ISTANBUL)) {
-            // Pre-Istanbul: Simple clearing refund
-            if (current != 0 and new == 0) {
-                evm.gas_refund += 15000;
+        // Calculate cost based on hardfork
+        const base_cost = blk: {
+            if (self.hardfork.isBefore(.BERLIN)) {
+                @branchHint(.cold);
+                break :blk 800;  // Istanbul: 800
             }
-            return;
+
+            break :blk GasConstants.WarmStorageReadCost; // Berlin+: 100
+        };
+
+        // Add cold penalty for Berlin+ if needed
+        if (self.hardfork.isAtLeast(.BERLIN)) {
+            const access_cost = try self.getEvm().access_storage_slot(self.address, key);
+            return base_cost + access_cost;
+        }
+
+        return base_cost;
+    }
+
+    /// Apply SSTORE refunds according to EIP-2200
+    fn sstoreRefund(self: *Self, current_value: u256, original_value: u256, new_value: u256) !i64 {
+        // No refunds before Istanbul
+        if (self.hardfork.isBefore(.ISTANBUL)) {
+            @branchHint(.cold);
+            // Pre-Istanbul: Simple clearing refund
+            if (current_value != 0 and new_value == 0) {
+                return 15000;
+            }
+
+            return 0;
         }
 
         // Refund schedule based on hardfork
-        const clears_refund: u64 = if (self.hardfork.isAtLeast(.LONDON))
+        const clearing_refund: i64 = if (self.hardfork.isAtLeast(.LONDON))
             4800   // London+: 5000 - 2100 + 1900
         else
             15000; // Istanbul-Berlin
 
+        // No-op: no refund if value doesn't change
+        if (new_value == current_value) return 0;
+
         // First modification: only refund for clearing
-        if (original == current) {
-            if (new == 0 and original != 0) {
-                evm.gas_refund += clears_refund;
+        if (original_value == current_value) {
+            if (new_value == 0 and original_value != 0) {
+                return clearing_refund;
             }
-            return;
+
+            return 0;
         }
 
-        // Subsequent modifications
+        // Subsequent modifications - accumulate refunds
+        var refund: i64 = 0;
 
-        // Restoring to original value (highest priority)
-        if (new == original) {
-            try self.applyRestoreRefund(original, current);
-            return;
+        // Clearing/setting a value that was originally non-zero
+        if (original_value != 0) {
+            refund = try self.sstoreSetNonZeroRefund(clearing_refund, original_value, current_value);
         }
 
-        // Standard clearing
-        if (new == 0 and current != 0) {
-            evm.gas_refund += clears_refund;
-            return;
+        // Restoring to original value
+        if (new_value == original_value) {
+            refund += try self.sstoreRestoringRefund(original_value, current_value);
         }
 
-        // Re-setting after clearing in same transaction
-        if (new != 0 and current == 0 and original != 0) {
-            // Remove the clearing refund that was previously added
-            if (evm.gas_refund >= clears_refund) {
-                evm.gas_refund -= clears_refund;
-            }
-        }
+        return refund;
     }
 
-    /// Apply refund for restoring to original value
-    fn applyRestoreRefund(self: *Self, original: u256, current: u256) !void {
-        const evm = self.getEvm();
+    /// Get refund or negative refund for clearing/setting a non-zero value that might have been cleared already
+    fn sstoreSetNonZeroRefund(_: *Self, clearing_refund: i64, current_value: u256, new_value: u256) !i64 {
+        if (current_value == 0) {
+            // Setting again after clearing previously during the transaction
+            // -> Remove the clearing refund that was previously added
+            return -clearing_refund;
+        } else if (new_value == 0) {
+            // Clearing a non-zero value
+            // -> Give the refund for clearing
+            return clearing_refund;
+        }
 
+        return 0;
+    }
+
+    /// Get refund for restoring to original value
+    fn sstoreRestoringRefund(self: *Self, original_value: u256, current_value: u256) !i64 {
         // Get SLOAD cost for refund calculation
         const gas_sload: u64 = if (self.hardfork.isAtLeast(.BERLIN))
             GasConstants.WarmStorageReadCost  // 100
         else
             800;  // Istanbul
 
-        if (original == 0) {
+        if (original_value == 0) {
             // Restore to original zero (was set then cleared)
-            if (current != 0) {
-                evm.gas_refund += GasConstants.SstoreSetGas - gas_sload;
+            if (current_value != 0) {
+                return @as(i64, @intCast(GasConstants.SstoreSetGas)) - @as(i64, @intCast(gas_sload));
             }
+            // Already zero, no refund
+            return 0;
         } else {
             // Restore to original non-zero
             const gas_reset: u64 = if (self.hardfork.isAtLeast(.BERLIN))
@@ -424,7 +429,7 @@ pub const MinimalFrame = struct {
             else
                 GasConstants.SstoreResetGas;  // 5000
 
-            evm.gas_refund += gas_reset - gas_sload;
+            return @as(i64, @intCast(gas_reset)) - @as(i64, @intCast(gas_sload));
         }
     }
 
@@ -1227,9 +1232,28 @@ pub const MinimalFrame = struct {
                 const key = try self.popStack();
                 const value = try self.popStack();
 
+                const current_value = evm.get_storage(self.address, key);
+                const original_value = try evm.get_original_storage_value(self.address, key);
+
                 // Use comprehensive EIP-2200/EIP-2929 gas calculation
-                const gas_cost = try self.sstoreGasCost(key, value);
+                const gas_cost = try self.sstoreGasCost(key, current_value, original_value, value);
                 try self.consumeGas(gas_cost);
+
+                // Calculate refunds
+                const sstore_refund = try self.sstoreRefund(current_value, original_value, value);
+                // We return a negative refund when setting a slot that was cleared previously in this transaction
+                // to prevent farming refunds
+                if (sstore_refund < 0) {
+                    const negative_refund = @as(u64, @intCast(-sstore_refund));
+                    if (evm.gas_refund >= negative_refund) {
+                        evm.gas_refund -= negative_refund;
+                    } else {
+                        // This should never happen
+                        return error.OutOfGas;
+                    }
+                } else {
+                    evm.gas_refund += @as(u64, @intCast(sstore_refund));
+                }
 
                 try evm.set_storage(self.address, key, value);
                 self.pc += 1;
