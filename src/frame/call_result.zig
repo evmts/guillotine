@@ -69,6 +69,7 @@ pub fn CallResult(config: anytype) type {
         }
 
         /// Create a reverted call result with revert data
+        /// TODO: Try to decode output as ASCII string and if successful set error_info = `revert: {string}`
         pub fn revert_with_data(allocator: std.mem.Allocator, gas_left: u64, revert_data: []const u8) !Self {
             return Self{
                 .success = false,
