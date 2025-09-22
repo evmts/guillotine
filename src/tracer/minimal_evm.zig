@@ -104,6 +104,11 @@ pub const MinimalEvm = struct {
     warm_addresses: std.array_hash_map.ArrayHashMap(Address, void, AddressContext, false),
     warm_storage_slots: std.array_hash_map.ArrayHashMap(StorageSlotKey, void, StorageSlotKeyContext, false),
 
+    // Contracts created in current transaction (for EIP-6780 specific behavior)
+    created_contracts: std.array_hash_map.ArrayHashMap(Address, void, AddressContext, false),
+    // Accounts marked for selfdestruction (deleted at transaction end)
+    selfdestructed_accounts: std.array_hash_map.ArrayHashMap(Address, Address, AddressContext, false), // maps contract -> beneficiary
+
     // Transaction-scoped gas refund counter
     gas_refund: u64,
 
@@ -136,6 +141,8 @@ pub const MinimalEvm = struct {
         const nonces_map = std.AutoHashMap(Address, u64).init(arena_allocator);
         const warm_addresses = std.array_hash_map.ArrayHashMap(Address, void, AddressContext, false).init(arena_allocator);
         const warm_storage_slots = std.array_hash_map.ArrayHashMap(StorageSlotKey, void, StorageSlotKeyContext, false).init(arena_allocator);
+        const created_contracts = std.array_hash_map.ArrayHashMap(Address, void, AddressContext, false).init(arena_allocator);
+        const selfdestructed_accounts = std.array_hash_map.ArrayHashMap(Address, Address, AddressContext, false).init(arena_allocator);
         var frames_list = std.ArrayList(*MinimalFrame){};
         try frames_list.ensureTotalCapacity(arena_allocator, 16);
 
@@ -150,6 +157,8 @@ pub const MinimalEvm = struct {
             .nonces = nonces_map,
             .warm_addresses = warm_addresses,
             .warm_storage_slots = warm_storage_slots,
+            .created_contracts = created_contracts,
+            .selfdestructed_accounts = selfdestructed_accounts,
             .gas_refund = 0,
             .hardfork = Hardfork.DEFAULT,
             .chain_id = 1,
@@ -188,6 +197,8 @@ pub const MinimalEvm = struct {
         self.nonces = std.AutoHashMap(Address, u64).init(arena_allocator);
         self.warm_addresses = std.array_hash_map.ArrayHashMap(Address, void, AddressContext, false).init(arena_allocator);
         self.warm_storage_slots = std.array_hash_map.ArrayHashMap(StorageSlotKey, void, StorageSlotKeyContext, false).init(arena_allocator);
+        self.created_contracts = std.array_hash_map.ArrayHashMap(Address, void, AddressContext, false).init(arena_allocator);
+        self.selfdestructed_accounts = std.array_hash_map.ArrayHashMap(Address, Address, AddressContext, false).init(arena_allocator);
         self.gas_refund = 0;
         self.hardfork = Hardfork.DEFAULT;
         self.chain_id = 1;
@@ -339,6 +350,8 @@ pub const MinimalEvm = struct {
             self.gas_refund = 0;
             self.warm_addresses.clearRetainingCapacity();
             self.warm_storage_slots.clearRetainingCapacity();
+            self.created_contracts.clearRetainingCapacity();
+            self.selfdestructed_accounts.clearRetainingCapacity();
         }
 
         // Pre-warm transaction, including precompiles depending on hardfork
@@ -406,6 +419,12 @@ pub const MinimalEvm = struct {
 
             // Apply the refund
             result.gas_left += capped_refund;
+
+            // Process all selfdestructs at transaction end
+            self.handle_selfdestructs() catch |err| {
+                log.err("Failed to destroy accounts marked for deletion: {s}", .{@errorName(err)});
+                return CallResult.failure_with_error(result.gas_left, @errorName(err));
+            };
         }
 
         // EIP-7623 (Prague): Ensure at least floor_gas is consumed
@@ -688,6 +707,9 @@ pub const MinimalEvm = struct {
         // Set contract nonce to 1 (per EIP-161)
         try self.set_nonce(params.contract_address, 1);
 
+        // Track that this contract was created in the current transaction (for EIP-6780)
+        try self.created_contracts.put(params.contract_address, {});
+
         // Return success with created address as output
         const address_bytes = try self.allocator.alloc(u8, 20);
         @memcpy(address_bytes, &params.contract_address.bytes);
@@ -790,13 +812,49 @@ pub const MinimalEvm = struct {
         _ = data;
     }
 
-    /// TODO: Function called in SELFDESTRUCT handler
-    /// See pre/post cancun logic
-    pub fn handle_selfdestruct(self: *Self, contract_address: Address, recipient: Address) Error!void {
+    /// Mark account for SELFDESTRUCT - actual deletion happens at transaction end
+    pub fn mark_for_selfdestruct(self: *Self, contract_address: Address, recipient: Address) Error!void {
         if (self.is_static_context()) return error.StaticCallViolation;
 
-        _ = contract_address;
-        _ = recipient;
+        // Get the contract's balance before any changes
+        const balance = self.get_balance(contract_address);
+
+        // Transfer balance to recipient immediately
+        if (!contract_address.equals(recipient)) {
+            const recipient_balance = self.get_balance(recipient);
+            try self.set_balance(contract_address, 0);
+            try self.set_balance(recipient, recipient_balance + balance);
+        } else {
+            // Self-destruct to self: zero the balance
+            try self.set_balance(contract_address, 0);
+        }
+
+        // Clear the code immediately (account still exists)
+        try self.set_code(contract_address, &[_]u8{});
+
+        // Only actually delete if pre-Cancun OR created in same transaction
+        const should_delete = if (self.hardfork.isAtLeast(.CANCUN)) blk: {
+            // EIP-6780 (Cancun): Only destroy if account was created in same transaction
+            break :blk self.created_contracts.contains(contract_address);
+        } else blk: {
+            // Pre-Cancun: Always destroy
+            break :blk true;
+        };
+
+        if (should_delete) {
+            try self.selfdestructed_accounts.put(contract_address, recipient);
+        }
+    }
+
+    /// Delete all accounts marked for selfdestruction from state
+    /// In this minimal implementation that means deleting the nonce (code and balance were already cleared),
+    /// which means account_exists() will return false.
+    fn handle_selfdestructs(self: *Self) !void {
+        var iterator = self.selfdestructed_accounts.iterator();
+        while (iterator.next()) |entry| {
+            const contract_address = entry.key_ptr.*;
+            try self.set_nonce(contract_address, 0);
+        }
     }
 
     /// Get the static context at the current frame
@@ -956,6 +1014,14 @@ pub const MinimalEvm = struct {
     /// Add gas refund
     pub fn add_refund(self: *Self, amount: u64) void {
         self.gas_refund +%= amount;
+    }
+
+    /// Check if an account exists (non-empty per EIP-158)
+    pub fn account_exists(self: *Self, address: Address) bool {
+        const balance = self.get_balance(address);
+        const nonce = self.get_nonce(address);
+        const code = self.get_code(address);
+        return balance > 0 or nonce > 0 or code.len > 0;
     }
 
     /// Check if an address is a precompile

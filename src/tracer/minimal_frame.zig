@@ -259,21 +259,68 @@ pub const MinimalFrame = struct {
         }
     }
 
-    /// Calculate SELFDESTRUCT gas cost (EIP-150 aware)
-    fn selfdestructGasCost(self: *const Self) u64 {
-        if (self.hardfork.isBefore(.TANGERINE_WHISTLE)) {
-            @branchHint(.cold);
-            return 0; // Pre-EIP-150: Free operation
-        }
-        return GasConstants.SelfdestructGas; // Post-EIP-150: 5000 gas
+    /// Calculate SELFDESTRUCT gas cost
+    fn selfdestructGasCost(self: *Self, beneficiary: Address) !u64 {
+        // 1. Base static cost
+        const static_gas = blk: {
+            if (self.hardfork.isBefore(.TANGERINE_WHISTLE)) {
+                @branchHint(.cold);
+                break :blk 0; // free operation
+            }
+            
+            break :blk GasConstants.SelfdestructGas; // 5000 gas
+        };
+
+        const evm = self.getEvm();
+        // Figure out if the account exists so we can charge for creation
+        const beneficiary_exists = evm.account_exists(beneficiary);
+        const had_value = evm.get_balance(self.address) > 0;
+
+        // 2. Account creation cost
+        const account_creation_cost = blk: {
+            // No cost:
+            if (
+                // Before Tangerine
+                self.hardfork.isBefore(.TANGERINE_WHISTLE) or 
+                // On any hardfork if the account exists
+                beneficiary_exists or
+                // After Spurious Dragon AND the contract has no value to transfer
+                (self.hardfork.isAtLeast(.SPURIOUS_DRAGON) and !had_value)
+            ) {
+                break :blk 0;
+            }
+
+            // Either between Tangerine-Spurious Dragon OR after and the contract had value
+            break :blk GasConstants.NewAccountCost;
+        };
+
+        // 3. Dynamic cold/warm access cost
+        const dynamic_gas = blk: {
+            if (self.hardfork.isBefore(.BERLIN)) {
+                @branchHint(.cold);
+                break :blk 0;
+            }
+
+            // Access the beneficiary address and get the warm/cold cost
+            const access_cost = try evm.access_address(beneficiary);
+            if (access_cost == GasConstants.ColdAccountAccessCost) {
+                break :blk GasConstants.ColdAccountAccessCost;
+            }
+
+            // Account was warm
+            break :blk 0;
+        };
+
+        return static_gas + account_creation_cost + dynamic_gas;
     }
 
-    /// Calculate SELFDESTRUCT refund (EIP-3529 aware)
+    /// Calculate SELFDESTRUCT refund
     fn selfdestructRefund(self: *const Self) u64 {
         if (self.hardfork.isAtLeast(.LONDON)) {
             @branchHint(.likely);
             return 0; // EIP-3529: No refund in London+
         }
+
         return GasConstants.SelfdestructRefundGas; // Pre-London: 24,000 refund
     }
 
@@ -2020,18 +2067,22 @@ pub const MinimalFrame = struct {
 
             // SELFDESTRUCT
             0xff => {
+                // Pop beneficiary address from stack
                 const beneficiary = try self.popStack();
-                _ = beneficiary;
-                
-                const gas_cost = self.selfdestructGasCost();
+                const beneficiary_bytes = primitives.Address.from_u256(beneficiary);
+
+                // Calculate and consume gas cost (base + account creation + warm/cold access)
+                const gas_cost = try self.selfdestructGasCost(beneficiary_bytes);
                 try self.consumeGas(gas_cost);
-                
+
                 // Apply refund to EVM's gas_refund counter
                 const refund = self.selfdestructRefund();
-                if (refund > 0) {
-                    self.getEvm().gas_refund += refund;
-                }
-                
+                if (refund > 0) evm.gas_refund += refund;
+
+                // Mark the account for selfdestruction (actual deletion at transaction end)
+                try evm.mark_for_selfdestruct(self.address, beneficiary_bytes);
+
+                // Halt execution
                 self.stopped = true;
             },
 
