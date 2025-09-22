@@ -833,18 +833,16 @@ pub const MinimalEvm = struct {
         // Clear the code immediately (account still exists)
         try self.set_code(contract_address, &[_]u8{});
 
-        // Only actually delete if pre-Cancun OR created in same transaction
-        const should_delete = if (self.hardfork.isAtLeast(.CANCUN)) blk: {
-            // EIP-6780 (Cancun): Only destroy if account was created in same transaction
-            break :blk self.created_contracts.contains(contract_address);
-        } else blk: {
-            // Pre-Cancun: Always destroy
-            break :blk true;
-        };
-
-        if (should_delete) {
+        // Only actually delete if:
+        if (
+            // Pre-Cancun
+            self.hardfork.isBefore(.CANCUN) or
+            // Account was created in same transaction
+            self.created_contracts.contains(contract_address)
+        ) {
             try self.selfdestructed_accounts.put(contract_address, recipient);
         }
+        
     }
 
     /// Delete all accounts marked for selfdestruction from state
