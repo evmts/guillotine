@@ -52,6 +52,30 @@ const StorageSlotKeyContext = struct {
     }
 };
 
+/// Snapshots for minimal journaling
+// We store the original value before any change on first modification
+const Snapshot = struct {
+    id: u32,
+    storage: std.AutoHashMap(StorageSlotKey, u256),
+    transient_storage: std.AutoHashMap(StorageSlotKey, u256),
+    balances: std.AutoHashMap(Address, u256),
+    nonces: std.AutoHashMap(Address, u64),
+    code: std.AutoHashMap(Address, []const u8),
+    gas_refund: u64,
+
+    pub fn init(allocator: std.mem.Allocator, id: u32, gas_refund: u64) Snapshot {
+        return .{
+            .id = id,
+            .storage = std.AutoHashMap(StorageSlotKey, u256).init(allocator),
+            .transient_storage = std.AutoHashMap(StorageSlotKey, u256).init(allocator),
+            .balances = std.AutoHashMap(Address, u256).init(allocator),
+            .nonces = std.AutoHashMap(Address, u64).init(allocator),
+            .code = std.AutoHashMap(Address, []const u8).init(allocator),
+            .gas_refund = gas_refund,
+        };
+    }
+};
+
 /// Minimal EVM - Orchestrates execution like evm.zig
 pub const MinimalEvm = struct {
     /// Error set for MinimalEvm operations
@@ -109,6 +133,9 @@ pub const MinimalEvm = struct {
     // Transaction-scoped gas refund counter
     gas_refund: u64,
 
+    // Snapshot stack for nested calls
+    snapshots: std.ArrayList(Snapshot),
+
     // Active hardfork configuration for gas rules
     hardfork: Hardfork,
 
@@ -141,6 +168,8 @@ pub const MinimalEvm = struct {
         const warm_storage_slots = std.array_hash_map.ArrayHashMap(StorageSlotKey, void, StorageSlotKeyContext, false).init(arena_allocator);
         var frames_list = std.ArrayList(*MinimalFrame){};
         try frames_list.ensureTotalCapacity(arena_allocator, 16);
+        var snapshots_list = std.ArrayList(Snapshot){};
+        try snapshots_list.ensureTotalCapacity(arena_allocator, 16);
 
         const original_storage_map = std.AutoHashMap(StorageSlotKey, u256).init(arena_allocator);
 
@@ -155,6 +184,7 @@ pub const MinimalEvm = struct {
             .warm_addresses = warm_addresses,
             .warm_storage_slots = warm_storage_slots,
             .gas_refund = 0,
+            .snapshots = snapshots_list,
             .hardfork = Hardfork.DEFAULT,
             .chain_id = 1,
             .block_number = 0,
@@ -194,6 +224,7 @@ pub const MinimalEvm = struct {
         self.warm_addresses = std.array_hash_map.ArrayHashMap(Address, void, AddressContext, false).init(arena_allocator);
         self.warm_storage_slots = std.array_hash_map.ArrayHashMap(StorageSlotKey, void, StorageSlotKeyContext, false).init(arena_allocator);
         self.gas_refund = 0;
+        self.snapshots = std.ArrayList(Snapshot){};
         self.hardfork = Hardfork.DEFAULT;
         self.chain_id = 1;
         self.block_number = 0;
@@ -346,6 +377,7 @@ pub const MinimalEvm = struct {
             self.warm_storage_slots.clearRetainingCapacity();
             // EIP-1153: Clear transient storage after transaction
             self.transient_storage.clearRetainingCapacity();
+            self.snapshots.clearRetainingCapacity();
         }
 
         // Pre-warm transaction, including precompiles depending on hardfork
@@ -427,9 +459,7 @@ pub const MinimalEvm = struct {
         return result;
     }
 
-
     /// Unified inner call handler for all call types
-    /// TODO: add journaling to be able to revert to snapshot in case of failure
     pub fn inner_call(self: *Self, params: CallParams) Error!CallResult {
         // Validate gas parameter
         const execution_gas = params.getGas();
@@ -438,25 +468,36 @@ pub const MinimalEvm = struct {
         // Check depth limit (EVM allows max 1024 depth)
         if (self.frames.items.len >= 1024) return error.CallDepthExceeded;
 
+        // Start a snapshot for this call
+        try self.init_snapshot();
+
         // Route to appropriate handler based on call type
         // We don't catch here so we can propagate the error back to the top-level call handler
-        return switch (params) {
+        const result = switch (params) {
             .call => |p| blk: {
                 @branchHint(.likely);
-                break :blk try self.execute_call(.{ .caller = p.caller, .to = p.to, .value = p.value, .input = p.input, .gas = execution_gas });
+                break :blk self.execute_call(.{ .caller = p.caller, .to = p.to, .value = p.value, .input = p.input, .gas = execution_gas }) catch |err| return self.error_with_revert_to_snapshot(err);
             },
             .staticcall => |p| blk: {
                 @branchHint(.likely);
-                break :blk try self.execute_staticcall(.{ .caller = p.caller, .to = p.to, .input = p.input, .gas = execution_gas });
+                break :blk self.execute_staticcall(.{ .caller = p.caller, .to = p.to, .input = p.input, .gas = execution_gas }) catch |err| return self.error_with_revert_to_snapshot(err);
             },
-            .delegatecall => |p| try self.execute_delegatecall(.{ .caller = p.caller, .to = p.to, .input = p.input, .gas = execution_gas }),
-            .create => |p| try self.execute_create(.{ .caller = p.caller, .value = p.value, .init_code = p.init_code, .gas = execution_gas }),
-            .create2 => |p| try self.execute_create2(.{ .caller = p.caller, .value = p.value, .init_code = p.init_code, .salt = p.salt, .gas = execution_gas }),
+            .delegatecall => |p| self.execute_delegatecall(.{ .caller = p.caller, .to = p.to, .input = p.input, .gas = execution_gas }) catch |err| return self.error_with_revert_to_snapshot(err),
+            .create => |p| self.execute_create(.{ .caller = p.caller, .value = p.value, .init_code = p.init_code, .gas = execution_gas }) catch |err| return self.error_with_revert_to_snapshot(err),
+            .create2 => |p| self.execute_create2(.{ .caller = p.caller, .value = p.value, .init_code = p.init_code, .salt = p.salt, .gas = execution_gas }) catch |err| return self.error_with_revert_to_snapshot(err),
             .callcode => |p| blk: {
                 @branchHint(.cold);
-                break :blk try self.execute_callcode(.{ .caller = p.caller, .to = p.to, .value = p.value, .input = p.input, .gas = execution_gas });
+                break :blk self.execute_callcode(.{ .caller = p.caller, .to = p.to, .value = p.value, .input = p.input, .gas = execution_gas }) catch |err| return self.error_with_revert_to_snapshot(err);
             },
         };
+
+        if (result.success) {
+            self.drop_snapshot();
+        } else {
+            try self.revert_to_snapshot();
+        }
+
+        return result;
     }
 
     /// Execute a regular CALL
@@ -881,6 +922,8 @@ pub const MinimalEvm = struct {
 
     // Set balance of an address
     pub fn set_balance(self: *Self, address: Address, balance: u256) !void {
+        try self.snapshot_balance(address);
+
         if (self.host) |host| {
             host.setBalance(address, balance);
         }
@@ -897,6 +940,8 @@ pub const MinimalEvm = struct {
 
     /// Set nonce for an address
     pub fn set_nonce(self: *Self, address: Address, nonce: u64) !void {
+        try self.snapshot_nonce(address);
+
         if (self.host) |host| {
             host.setNonce(address, nonce);
         }
@@ -913,6 +958,8 @@ pub const MinimalEvm = struct {
 
     // Set code for an address
     pub fn set_code(self: *Self, address: Address, code: []const u8) !void {
+        try self.snapshot_code(address);
+
         if (self.host) |host| {
             host.setCode(address, code);
         }
@@ -932,6 +979,8 @@ pub const MinimalEvm = struct {
     /// Set storage value (called by frame)
     pub fn set_storage(self: *Self, address: Address, slot: u256, value: u256) !void {
         if (self.is_static_context()) return error.StaticCallViolation;
+
+        try self.snapshot_storage(address, slot);
 
         if (self.host) |host| {
             host.setStorage(address, slot, value);
@@ -972,6 +1021,8 @@ pub const MinimalEvm = struct {
     pub fn set_transient_storage(self: *Self, address: Address, slot: u256, value: u256) !void {
         if (self.is_static_context()) return error.StaticCallViolation;
 
+        try self.snapshot_transient_storage(address, slot);
+
         if (self.host) |host| {
             host.setTransientStorage(address, slot, value);
             return;
@@ -997,6 +1048,120 @@ pub const MinimalEvm = struct {
         _ = self;
         _ = address;
         return false;
+    }
+
+    /// Start a new snapshot
+    fn init_snapshot(self: *Self) !void {
+        const snapshot_id = @as(u32, @intCast(self.snapshots.items.len));
+        const snapshot = Snapshot.init(self.allocator, snapshot_id, self.gas_refund);
+        try self.snapshots.append(self.allocator, snapshot);
+    }
+
+    /// Get current snapshot (if any)
+    fn get_current_snapshot(self: *Self) ?*Snapshot {
+        if (self.snapshots.items.len == 0) return null;
+        return &self.snapshots.items[self.snapshots.items.len - 1];
+    }
+
+    /// Return an original error after reverting to the latest snapshot
+    fn error_with_revert_to_snapshot(self: *Self, err: Error) Error {
+        try self.revert_to_snapshot();
+        return err;
+    }
+
+    /// Revert to the most recent snapshot
+    fn revert_to_snapshot(self: *Self) !void {
+        if (self.snapshots.items.len == 0) return;
+        const snapshot = self.snapshots.pop() orelse unreachable;
+
+        // Restore all original values
+        var storage_iter = snapshot.storage.iterator();
+        while (storage_iter.next()) |entry| {
+            try self.storage.put(entry.key_ptr.*, entry.value_ptr.*);
+        }
+
+        var balance_iter = snapshot.balances.iterator();
+        while (balance_iter.next()) |entry| {
+            try self.balances.put(entry.key_ptr.*, entry.value_ptr.*);
+        }
+
+        var nonce_iter = snapshot.nonces.iterator();
+        while (nonce_iter.next()) |entry| {
+            try self.nonces.put(entry.key_ptr.*, entry.value_ptr.*);
+        }
+
+        var code_iter = snapshot.code.iterator();
+        while (code_iter.next()) |entry| {
+            try self.code.put(entry.key_ptr.*, entry.value_ptr.*);
+        }
+
+        self.gas_refund = snapshot.gas_refund;
+    }
+
+    /// Drop the most recent snapshot (after a successful call)
+    fn drop_snapshot(self: *Self) void {
+        _ = self.snapshots.pop();
+    }
+
+    /// Snapshot the value of a storage slot on first modification
+    fn snapshot_storage(self: *Self, address: Address, slot: u256) !void {
+        try self.snapshot_storage_internal(address, slot, .storage);
+    }
+
+    /// Snapshot the value of a transient storage slot on first modification
+    fn snapshot_transient_storage(self: *Self, address: Address, slot: u256) !void {
+        try self.snapshot_storage_internal(address, slot, .transient_storage);
+    }
+
+    /// Snapshot the value of a storage or transient storage slot
+    fn snapshot_storage_internal(self: *Self, address: Address, slot: u256, storage_type: enum { storage, transient_storage }) !void {
+        const value = self.get_storage(address, slot);
+        if (self.get_current_snapshot()) |snapshot| {
+            const key = StorageSlotKey{ .address = address, .slot = slot };
+
+            // Only save if we haven't already saved this slot
+            const result = blk: {
+                if (storage_type == .storage) {
+                    break :blk try snapshot.storage.getOrPut(key);
+                } else {
+                    break :blk try snapshot.transient_storage.getOrPut(key);
+                }
+            };
+
+            if (!result.found_existing) result.value_ptr.* = value;
+        }
+    }
+
+    /// Snapshot the balance of an address on first modification
+    fn snapshot_balance(self: *Self, address: Address) !void {
+        const balance = self.get_balance(address);
+        if (self.get_current_snapshot()) |snapshot| {
+            const result = try snapshot.balances.getOrPut(address);
+            if (!result.found_existing) result.value_ptr.* = balance;
+        }
+    }
+
+    /// Snapshot the nonce of an address on first modification
+    fn snapshot_nonce(self: *Self, address: Address) !void {
+        const nonce = self.get_nonce(address);
+        if (self.get_current_snapshot()) |snapshot| {
+            const result = try snapshot.nonces.getOrPut(address);
+            if (!result.found_existing) result.value_ptr.* = nonce;
+        }
+    }
+
+    /// Snapshot the code of an address on first modification
+    fn snapshot_code(self: *Self, address: Address) !void {
+        const code = self.get_code(address);
+        if (self.get_current_snapshot()) |snapshot| {
+            const result = try snapshot.code.getOrPut(address);
+            if (!result.found_existing) {
+                // Clone the code since we need to keep it
+                const code_copy = try self.allocator.alloc(u8, code.len);
+                @memcpy(code_copy, code);
+                result.value_ptr.* = code_copy;
+            }
+        }
     }
 
     /// Get current frame (top of the frame stack)
