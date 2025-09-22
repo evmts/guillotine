@@ -1,0 +1,182 @@
+name: Publish Python Package to PyPI
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: 'Release type'
+        required: true
+        type: choice
+        options:
+          - test
+          - production
+      version_bump:
+        description: 'Version bump type'
+        required: false
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+        default: patch
+
+jobs:
+  build-and-publish:
+    name: Build and publish Python package
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+      id-token: write  # Required for PyPI trusted publishing
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Need full history for version tagging
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.15.1
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install build twine wheel setuptools cffi typing-extensions
+          pip install bump2version  # For version management
+
+      - name: Bump version (if specified)
+        if: ${{ github.event.inputs.version_bump != '' }}
+        working-directory: sdks/python
+        run: |
+          # Read current version
+          current_version=$(python -c "import toml; print(toml.load('pyproject.toml')['project']['version'])")
+          echo "Current version: $current_version"
+
+          # Bump version using bump2version
+          bump2version ${{ github.event.inputs.version_bump }} --current-version $current_version --no-tag
+
+          # Read new version
+          new_version=$(python -c "import toml; print(toml.load('pyproject.toml')['project']['version'])")
+          echo "New version: $new_version"
+          echo "VERSION=$new_version" >> $GITHUB_ENV
+
+      - name: Build Guillotine shared library
+        run: |
+          zig build python
+
+      - name: Build Python distribution
+        working-directory: sdks/python
+        run: |
+          python -m build --sdist --wheel
+
+          # Display built distributions
+          echo "Built distributions:"
+          ls -lh dist/
+
+      - name: Check distribution
+        working-directory: sdks/python
+        run: |
+          # Check the built distributions
+          twine check dist/*
+
+          # Show package contents
+          echo "Package contents:"
+          tar -tzf dist/*.tar.gz | head -20
+
+      - name: Publish to TestPyPI
+        if: ${{ github.event.inputs.release_type == 'test' }}
+        working-directory: sdks/python
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.TEST_PYPI_API_TOKEN }}
+        run: |
+          python -m twine upload --repository testpypi dist/*
+          echo "Package published to TestPyPI!"
+          echo "Install with: pip install --index-url https://test.pypi.org/simple/ test-guillotine-publish"
+
+      - name: Publish to PyPI
+        if: ${{ github.event.inputs.release_type == 'production' }}
+        working-directory: sdks/python
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: |
+          python -m twine upload dist/*
+          echo "Package published to PyPI!"
+          echo "Install with: pip install test-guillotine-publish"
+
+      - name: Create GitHub Release (production only)
+        if: ${{ github.event.inputs.release_type == 'production' && github.event.inputs.version_bump != '' }}
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: python-v${{ env.VERSION }}
+          name: Python SDK v${{ env.VERSION }}
+          body: |
+            ## Python SDK Release v${{ env.VERSION }}
+
+            ### Installation
+            ```bash
+            pip install test-guillotine-publish==${{ env.VERSION }}
+            ```
+
+            ### What's Changed
+            - Version bump: ${{ github.event.inputs.version_bump }}
+            - Published to PyPI
+
+            ### Links
+            - [PyPI Package](https://pypi.org/project/test-guillotine-publish/${{ env.VERSION }}/)
+            - [Documentation](https://github.com/evmts/guillotine/tree/main/sdks/python)
+          files: |
+            sdks/python/dist/*
+          draft: false
+          prerelease: ${{ contains(env.VERSION, 'rc') || contains(env.VERSION, 'beta') || contains(env.VERSION, 'alpha') }}
+
+  build-wheels:
+    name: Build wheels for ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    if: ${{ github.event.inputs.release_type == 'production' }}
+
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.15.1
+
+      - name: Install cibuildwheel
+        run: python -m pip install cibuildwheel==2.16.2
+
+      - name: Build wheels
+        working-directory: sdks/python
+        env:
+          CIBW_BUILD: cp${{ matrix.python-version }}-*
+          CIBW_SKIP: "*-musllinux_*"  # Skip musl builds for now
+          CIBW_BEFORE_BUILD: |
+            pip install cffi setuptools wheel
+            cd ../.. && zig build python
+        run: |
+          python -m cibuildwheel --output-dir dist
+
+      - name: Upload wheels as artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}-py${{ matrix.python-version }}
+          path: sdks/python/dist/*.whl

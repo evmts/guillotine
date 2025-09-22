@@ -3,7 +3,7 @@ requires = ["setuptools>=64", "wheel", "cffi>=1.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "guillotine-evm"
+name = "test-guillotine-publish"
 version = "0.1.0"
 description = "Python bindings for Guillotine EVM - A high-performance Ethereum Virtual Machine implementation"
 readme = "README.md"
@@ -11,19 +11,26 @@ license = {text = "MIT"}
 authors = [
     {name = "EVMts Contributors", email = "noreply@evmts.dev"}
 ]
-keywords = ["ethereum", "evm", "blockchain", "smart-contracts", "virtual-machine"]
+maintainers = [
+    {name = "Will Cory", email = "roninjin10@users.noreply.github.com"}
+]
+keywords = ["ethereum", "evm", "blockchain", "smart-contracts", "virtual-machine", "web3"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: Implementation :: CPython",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: System :: Distributed Computing",
+    "Topic :: Software Development :: Compilers",
+    "Typing :: Typed",
 ]
 requires-python = ">=3.8"
 dependencies = [

@@ -1,0 +1,29 @@
+# Include package metadata
+include LICENSE
+include README.md
+include pyproject.toml
+include setup.py
+
+# Include type stubs
+include guillotine_evm/py.typed
+
+# Include C extension source files if any
+recursive-include guillotine_evm *.c *.h *.pyx
+
+# Include compiled libraries
+recursive-include guillotine_evm *.so *.dll *.dylib *.pyd
+
+# Include test files
+recursive-include tests *.py
+
+# Include examples
+include examples.py
+include examples_comprehensive.py
+
+# Exclude build artifacts
+global-exclude __pycache__
+global-exclude *.py[cod]
+global-exclude .DS_Store
+global-exclude *.egg-info
+recursive-exclude build *
+recursive-exclude dist *
