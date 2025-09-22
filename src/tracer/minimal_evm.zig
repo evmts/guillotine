@@ -467,6 +467,10 @@ pub const MinimalEvm = struct {
         input: []const u8,
         gas: u64,
     }) Error!CallResult {
+        // Get the static context at the current frame and error if trying to transfer value
+        const is_static = self.is_static_context();
+        if (is_static and params.value > 0) return error.StaticCallViolation;
+
         // Handle value transfer if needed
         if (params.value > 0) {
             const caller_balance = self.get_balance(params.caller);
@@ -500,7 +504,7 @@ pub const MinimalEvm = struct {
             params.caller,
             params.to,
             params.value,
-            false,
+            is_static,
         );
     }
 
@@ -512,6 +516,10 @@ pub const MinimalEvm = struct {
         input: []const u8,
         gas: u64,
     }) Error!CallResult {
+        // Error if trying to transfer value in static context
+        const is_static = self.is_static_context();
+        if (is_static and params.value > 0) return error.StaticCallViolation;
+
         // Check balance but don't transfer
         if (params.value > 0) {
             const caller_balance = self.get_balance(params.caller);
@@ -536,7 +544,7 @@ pub const MinimalEvm = struct {
             params.caller,
             params.caller,
             params.value,
-            false,
+            is_static,
         );
     }
 
@@ -570,7 +578,7 @@ pub const MinimalEvm = struct {
             params.caller,
             params.caller,
             current_value,
-            false,
+            self.is_static_context(),
         );
     }
 
@@ -599,8 +607,8 @@ pub const MinimalEvm = struct {
             params.gas,
             params.caller,
             params.to,
-            0, // No value in static calls
-            true, // Static context
+            0,
+            true,
         );
     }
 
@@ -611,6 +619,9 @@ pub const MinimalEvm = struct {
         init_code: []const u8,
         gas: u64,
     }) Error!CallResult {
+        // Error if trying to create a contract in static context
+        if (self.is_static_context()) return error.StaticCallViolation;
+
         // TODO: we need to increment nonces correctly
         const nonce = self.get_nonce(params.caller);
         // Calculate contract address
@@ -634,6 +645,9 @@ pub const MinimalEvm = struct {
         salt: u256,
         gas: u64,
     }) Error!CallResult {
+        // Error if trying to create a contract in static context
+        if (self.is_static_context()) return error.StaticCallViolation;
+
         // Calculate CREATE2 address
         var init_code_hash_bytes: [32]u8 = undefined;
         try crypto.keccak_asm.keccak256(params.init_code, &init_code_hash_bytes);
@@ -804,6 +818,29 @@ pub const MinimalEvm = struct {
         };
     }
 
+    /// TODO: Function called in LOG handlers to emit logs for the current tx
+    pub fn emit_log(self: *Self, topics: []const u256, data: []const u8) Error!void {
+        if (self.is_static_context()) return error.StaticCallViolation;
+
+        _ = topics;
+        _ = data;
+    }
+
+    /// TODO: Function called in SELFDESTRUCT handler
+    /// See pre/post cancun logic
+    pub fn handle_selfdestruct(self: *Self, contract_address: Address, recipient: Address) Error!void {
+        if (self.is_static_context()) return error.StaticCallViolation;
+
+        _ = contract_address;
+        _ = recipient;
+    }
+
+    /// Get the static context at the current frame
+    fn is_static_context(self: *const Self) bool {
+        if (self.getCurrentFrame()) |frame| return frame.is_static;
+        return false;
+    }
+
     /// Calculate gas cost for calldata/init code (zero vs non-zero bytes)
     /// Implements EIP-2028 (Istanbul) and EIP-3860 (Shanghai) gas metering
     ///
@@ -924,6 +961,8 @@ pub const MinimalEvm = struct {
 
     /// Set storage value (called by frame)
     pub fn set_storage(self: *Self, address: Address, slot: u256, value: u256) !void {
+        if (self.is_static_context()) return error.StaticCallViolation;
+
         if (self.host) |host| {
             host.setStorage(address, slot, value);
             return;
