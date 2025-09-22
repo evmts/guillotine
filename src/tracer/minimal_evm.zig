@@ -421,10 +421,11 @@ pub const MinimalEvm = struct {
             result.gas_left += capped_refund;
 
             // Process all selfdestructs at transaction end
-            self.handle_selfdestructs() catch |err| {
+            const selfdestruct_records = self.handle_selfdestructs() catch |err| {
                 log.err("Failed to destroy accounts marked for deletion: {s}", .{@errorName(err)});
                 return CallResult.failure_with_error(result.gas_left, @errorName(err));
             };
+            result.selfdestructs = selfdestruct_records;
         }
 
         // EIP-7623 (Prague): Ensure at least floor_gas is consumed
@@ -849,12 +850,32 @@ pub const MinimalEvm = struct {
     /// Delete all accounts marked for selfdestruction from state
     /// In this minimal implementation that means deleting the nonce (code and balance were already cleared),
     /// which means account_exists() will return false.
-    fn handle_selfdestructs(self: *Self) !void {
+    /// Returns an array of SelfDestructRecord for inclusion in CallResult
+    fn handle_selfdestructs(self: *Self) ![]const call_result_mod.SelfDestructRecord {
+        // Early return for empty case
+        if (self.selfdestructed_accounts.count() == 0) return &.{};
+
+        // Collect self-destruct records
+        var list = std.ArrayList(call_result_mod.SelfDestructRecord){};
+        errdefer list.deinit(self.allocator);
+
         var iterator = self.selfdestructed_accounts.iterator();
         while (iterator.next()) |entry| {
             const contract_address = entry.key_ptr.*;
+            const beneficiary = entry.value_ptr.*;
+
+            // Add to the list
+            try list.append(self.allocator, call_result_mod.SelfDestructRecord{
+                .contract = contract_address,
+                .beneficiary = beneficiary,
+            });
+
+            // Delete the account
             try self.set_nonce(contract_address, 0);
         }
+
+        // Transfer ownership to caller
+        return try list.toOwnedSlice(self.allocator);
     }
 
     /// Get the static context at the current frame
