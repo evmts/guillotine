@@ -51,9 +51,6 @@ pub const MinimalFrame = struct {
     // EIP-3074 AUTH state
     authorized: ?u256,
     call_depth: u32,
-    
-    // Active hardfork configuration for gas rules
-    hardfork: Hardfork,
 
     // Hardfork for gas calculations
     hardfork: Hardfork,
