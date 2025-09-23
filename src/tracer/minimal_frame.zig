@@ -14,47 +14,36 @@ const log = @import("../log.zig");
 pub const MinimalFrame = struct {
     const Self = @This();
 
-    // Stack
     stack: std.ArrayList(u256),
 
-    // Memory
     memory: std.AutoHashMap(u32, u8),
     memory_size: u32,
 
-    // Execution state
     pc: u32,
     gas_remaining: i64,
     bytecode: []const u8,
 
-    // Valid jump destinations for JUMP/JUMPI
     valid_jumpdests: std.AutoArrayHashMap(u32, void),
 
-    // Call context
     caller: Address,
     address: Address,
     value: u256,
     calldata: []const u8,
     is_static: bool,
 
-    // Output
     output: []u8,
     return_data: []const u8,
 
-    // Execution status
     stopped: bool,
     reverted: bool,
 
-    // Reference to MinimalEvm (like Frame has evm_ptr)
     evm_ptr: *anyopaque,
 
-    // Allocator for frame operations
     allocator: std.mem.Allocator,
 
-    // EIP-3074 AUTH state
     authorized: ?u256,
     call_depth: u32,
     
-    // Active hardfork configuration for gas rules
     hardfork: Hardfork,
 
     /// Analyze bytecode to identify valid JUMPDEST locations
@@ -63,7 +52,6 @@ pub const MinimalFrame = struct {
         while (pc < bytecode.len) {
             const opcode = bytecode[pc];
 
-            // Check if this is a JUMPDEST
             if (opcode == 0x5b) {
                 try valid_jumpdests.put(pc, {});
                 pc += 1;
@@ -98,7 +86,6 @@ pub const MinimalFrame = struct {
         var memory_map = std.AutoHashMap(u32, u8).init(allocator);
         errdefer memory_map.deinit();
 
-        // Analyze bytecode to identify valid jump destinations
         var valid_jumpdests = std.AutoArrayHashMap(u32, void).init(allocator);
         errdefer valid_jumpdests.deinit();
         try validateJumpDests(allocator, bytecode, &valid_jumpdests);
@@ -265,10 +252,10 @@ pub const MinimalFrame = struct {
         const static_gas = blk: {
             if (self.hardfork.isBefore(.TANGERINE_WHISTLE)) {
                 @branchHint(.cold);
-                break :blk 0; // free operation
+                break :blk 0;
             }
             
-            break :blk GasConstants.SelfdestructGas; // 5000 gas
+            break :blk GasConstants.SelfdestructGas;
         };
 
         const evm = self.getEvm();
@@ -380,12 +367,10 @@ pub const MinimalFrame = struct {
         const evm = self.getEvm();
 
         switch (opcode) {
-            // STOP
             0x00 => {
                 self.stopped = true;
                 return;
             },
-            // ADD
             0x01 => {
                 try self.consumeGas(GasConstants.GasFastestStep);
                 const a = try self.popStack();
@@ -393,7 +378,6 @@ pub const MinimalFrame = struct {
                 try self.pushStack(a +% b);
                 self.pc += 1;
             },
-            // MUL
             0x02 => {
                 try self.consumeGas(GasConstants.GasFastStep);
                 const a = try self.popStack();
@@ -401,7 +385,6 @@ pub const MinimalFrame = struct {
                 try self.pushStack(a *% b);
                 self.pc += 1;
             },
-            // SUB
             0x03 => {
                 try self.consumeGas(GasConstants.GasFastestStep);
                 const top = try self.popStack();
@@ -409,7 +392,6 @@ pub const MinimalFrame = struct {
                 try self.pushStack(top -% second);
                 self.pc += 1;
             },
-            // DIV
             0x04 => {
                 try self.consumeGas(GasConstants.GasFastStep);
                 const top = try self.popStack();
@@ -418,7 +400,6 @@ pub const MinimalFrame = struct {
                 try self.pushStack(result);
                 self.pc += 1;
             },
-            // SDIV
             0x05 => {
                 try self.consumeGas(GasConstants.GasFastStep);
                 const top = try self.popStack();
@@ -430,7 +411,6 @@ pub const MinimalFrame = struct {
                 try self.pushStack(result);
                 self.pc += 1;
             },
-            // MOD
             0x06 => {
                 try self.consumeGas(GasConstants.GasFastStep);
                 const top = try self.popStack();
@@ -439,7 +419,6 @@ pub const MinimalFrame = struct {
                 try self.pushStack(result);
                 self.pc += 1;
             },
-            // SMOD
             0x07 => {
                 try self.consumeGas(GasConstants.GasFastStep);
                 const top = try self.popStack();
@@ -451,7 +430,6 @@ pub const MinimalFrame = struct {
                 try self.pushStack(result);
                 self.pc += 1;
             },
-            // ADDMOD
             0x08 => {
                 try self.consumeGas(GasConstants.GasMidStep);
                 const a = try self.popStack();
@@ -466,14 +444,12 @@ pub const MinimalFrame = struct {
                 try self.pushStack(result);
                 self.pc += 1;
             },
-            // MULMOD
             0x09 => {
                 try self.consumeGas(GasConstants.GasMidStep);
                 const a = try self.popStack();
                 const b = try self.popStack();
                 const n = try self.popStack();
                 const result = if (n == 0) 0 else blk: {
-                    // Use u512 to avoid overflow
                     const a_wide = @as(u512, a);
                     const b_wide = @as(u512, b);
                     const n_wide = @as(u512, n);
@@ -483,7 +459,6 @@ pub const MinimalFrame = struct {
                 self.pc += 1;
             },
 
-            // EXP
             0x0a => {
                 const base = try self.popStack();
                 const exp = try self.popStack();
@@ -519,7 +494,6 @@ pub const MinimalFrame = struct {
                 self.pc += 1;
             },
 
-            // SIGNEXTEND
             0x0b => {
                 try self.consumeGas(GasConstants.GasFastStep);
                 const byte_num = try self.popStack();
@@ -539,56 +513,50 @@ pub const MinimalFrame = struct {
                 self.pc += 1;
             },
 
-            // LT
             0x10 => {
                 try self.consumeGas(GasConstants.GasFastestStep);
-                const a = try self.popStack();     // Top of stack
-                const b = try self.popStack();     // Second from top
-                try self.pushStack(if (a < b) 1 else 0);  // Compare a < b
+                const a = try self.popStack();
+                const b = try self.popStack();
+                try self.pushStack(if (a < b) 1 else 0);
                 self.pc += 1;
             },
 
-            // GT
             0x11 => {
                 try self.consumeGas(GasConstants.GasFastestStep);
-                const a = try self.popStack();     // Top of stack
-                const b = try self.popStack();     // Second from top
-                try self.pushStack(if (a > b) 1 else 0);  // Compare a > b
+                const a = try self.popStack();
+                const b = try self.popStack();
+                try self.pushStack(if (a > b) 1 else 0);
                 self.pc += 1;
             },
 
-            // SLT
             0x12 => {
                 try self.consumeGas(GasConstants.GasFastestStep);
-                const a = try self.popStack();     // Top of stack
-                const b = try self.popStack();     // Second from top
+                const a = try self.popStack();
+                const b = try self.popStack();
                 const a_signed = @as(i256, @bitCast(a));
                 const b_signed = @as(i256, @bitCast(b));
-                try self.pushStack(if (a_signed < b_signed) 1 else 0);  // Compare a < b (signed)
+                try self.pushStack(if (a_signed < b_signed) 1 else 0);
                 self.pc += 1;
             },
 
-            // SGT
             0x13 => {
                 try self.consumeGas(GasConstants.GasFastestStep);
-                const a = try self.popStack();     // Top of stack
-                const b = try self.popStack();     // Second from top
+                const a = try self.popStack();
+                const b = try self.popStack();
                 const a_signed = @as(i256, @bitCast(a));
                 const b_signed = @as(i256, @bitCast(b));
-                try self.pushStack(if (a_signed > b_signed) 1 else 0);  // Compare a > b (signed)
+                try self.pushStack(if (a_signed > b_signed) 1 else 0);
                 self.pc += 1;
             },
 
-            // EQ
             0x14 => {
                 try self.consumeGas(GasConstants.GasFastestStep);
                 const top = try self.popStack();
                 const second = try self.popStack();
-                try self.pushStack(if (top == second) 1 else 0); // EQ is symmetric
+                try self.pushStack(if (top == second) 1 else 0);
                 self.pc += 1;
             },
 
-            // ISZERO
             0x15 => {
                 try self.consumeGas(GasConstants.GasFastestStep);
                 const a = try self.popStack();
@@ -596,7 +564,6 @@ pub const MinimalFrame = struct {
                 self.pc += 1;
             },
 
-            // AND
             0x16 => {
                 try self.consumeGas(GasConstants.GasFastestStep);
                 const a = try self.popStack();
@@ -605,7 +572,6 @@ pub const MinimalFrame = struct {
                 self.pc += 1;
             },
 
-            // OR
             0x17 => {
                 try self.consumeGas(GasConstants.GasFastestStep);
                 const a = try self.popStack();
@@ -614,7 +580,6 @@ pub const MinimalFrame = struct {
                 self.pc += 1;
             },
 
-            // XOR
             0x18 => {
                 try self.consumeGas(GasConstants.GasFastestStep);
                 const a = try self.popStack();
@@ -623,7 +588,6 @@ pub const MinimalFrame = struct {
                 self.pc += 1;
             },
 
-            // NOT
             0x19 => {
                 try self.consumeGas(GasConstants.GasFastestStep);
                 const a = try self.popStack();
@@ -631,7 +595,6 @@ pub const MinimalFrame = struct {
                 self.pc += 1;
             },
 
-            // BYTE
             0x1a => {
                 try self.consumeGas(GasConstants.GasFastestStep);
                 const i = try self.popStack();
@@ -641,7 +604,6 @@ pub const MinimalFrame = struct {
                 self.pc += 1;
             },
 
-            // SHL
             0x1b => {
                 // EIP-145: SHL opcode was introduced in Constantinople hardfork
                 if (evm.hardfork.isBefore(.CONSTANTINOPLE)) return error.InvalidOpcode;
@@ -654,7 +616,6 @@ pub const MinimalFrame = struct {
                 self.pc += 1;
             },
 
-            // SHR
             0x1c => {
                 // EIP-145: SHR opcode was introduced in Constantinople hardfork
                 if (evm.hardfork.isBefore(.CONSTANTINOPLE)) return error.InvalidOpcode;
@@ -667,7 +628,6 @@ pub const MinimalFrame = struct {
                 self.pc += 1;
             },
 
-            // SAR
             0x1d => {
                 // EIP-145: SAR opcode was introduced in Constantinople hardfork
                 if (evm.hardfork.isBefore(.CONSTANTINOPLE)) return error.InvalidOpcode;
@@ -685,7 +645,6 @@ pub const MinimalFrame = struct {
                 self.pc += 1;
             },
 
-            // SHA3/KECCAK256
             0x20 => {
                 const offset = try self.popStack();
                 const size = try self.popStack();
@@ -731,7 +690,6 @@ pub const MinimalFrame = struct {
                 }
             },
 
-            // ADDRESS
             0x30 => {
                 try self.consumeGas(GasConstants.GasQuickStep);
                 const addr_u256 = primitives.Address.to_u256(self.address);
@@ -739,7 +697,6 @@ pub const MinimalFrame = struct {
                 self.pc += 1;
             },
 
-            // BALANCE
             0x31 => {
                 const addr_int = try self.popStack();
                 var addr_bytes: [20]u8 = undefined;
@@ -757,7 +714,6 @@ pub const MinimalFrame = struct {
                 self.pc += 1;
             },
 
-            // ORIGIN
             0x32 => {
                 try self.consumeGas(GasConstants.GasQuickStep);
                 const origin_u256 = primitives.Address.to_u256(evm.origin);
@@ -765,7 +721,6 @@ pub const MinimalFrame = struct {
                 self.pc += 1;
             },
 
-            // CALLER
             0x33 => {
                 try self.consumeGas(GasConstants.GasQuickStep);
                 const caller_u256 = primitives.Address.to_u256(self.caller);
@@ -773,14 +728,12 @@ pub const MinimalFrame = struct {
                 self.pc += 1;
             },
 
-            // CALLVALUE
             0x34 => {
                 try self.consumeGas(GasConstants.GasQuickStep);
                 try self.pushStack(self.value);
                 self.pc += 1;
             },
 
-            // CALLDATALOAD
             0x35 => {
                 try self.consumeGas(GasConstants.GasFastestStep);
                 const offset = try self.popStack();
@@ -800,14 +753,12 @@ pub const MinimalFrame = struct {
                 self.pc += 1;
             },
 
-            // CALLDATASIZE
             0x36 => {
                 try self.consumeGas(GasConstants.GasQuickStep);
                 try self.pushStack(self.calldata.len);
                 self.pc += 1;
             },
 
-            // CALLDATACOPY
             0x37 => {
                 const dest_offset = try self.popStack();
                 const offset = try self.popStack();
@@ -833,14 +784,12 @@ pub const MinimalFrame = struct {
                 self.pc += 1;
             },
 
-            // CODESIZE
             0x38 => {
                 try self.consumeGas(GasConstants.GasQuickStep);
                 try self.pushStack(self.bytecode.len);
                 self.pc += 1;
             },
 
-            // CODECOPY
             0x39 => {
                 const dest_offset = try self.popStack();
                 const offset = try self.popStack();
@@ -865,14 +814,12 @@ pub const MinimalFrame = struct {
                 self.pc += 1;
             },
 
-            // GASPRICE
             0x3a => {
                 try self.consumeGas(GasConstants.GasQuickStep);
                 try self.pushStack(evm.gas_price);
                 self.pc += 1;
             },
 
-            // RETURNDATASIZE
             0x3d => {
                 // EIP-211: RETURNDATASIZE was introduced in Byzantium hardfork
                 if (evm.hardfork.isBefore(.BYZANTIUM)) return error.InvalidOpcode;
@@ -882,7 +829,6 @@ pub const MinimalFrame = struct {
                 self.pc += 1;
             },
 
-            // RETURNDATACOPY
             0x3e => {
                 // EIP-211: RETURNDATACOPY was introduced in Byzantium hardfork
                 if (evm.hardfork.isBefore(.BYZANTIUM)) return error.InvalidOpcode;
@@ -914,7 +860,6 @@ pub const MinimalFrame = struct {
                 self.pc += 1;
             },
 
-            // BLOCKHASH
             0x40 => {
                 try self.consumeGas(GasConstants.GasExtStep);
                 const block_number = try self.popStack();
@@ -929,7 +874,6 @@ pub const MinimalFrame = struct {
                 self.pc += 1;
             },
 
-            // COINBASE
             0x41 => {
                 try self.consumeGas(GasConstants.GasQuickStep);
                 const coinbase_u256 = primitives.Address.to_u256(evm.block_coinbase);
@@ -937,21 +881,18 @@ pub const MinimalFrame = struct {
                 self.pc += 1;
             },
 
-            // TIMESTAMP
             0x42 => {
                 try self.consumeGas(GasConstants.GasQuickStep);
                 try self.pushStack(evm.block_timestamp);
                 self.pc += 1;
             },
 
-            // NUMBER
             0x43 => {
                 try self.consumeGas(GasConstants.GasQuickStep);
                 try self.pushStack(evm.block_number);
                 self.pc += 1;
             },
 
-            // DIFFICULTY/PREVRANDAO
             0x44 => {
                 try self.consumeGas(GasConstants.GasQuickStep);
                 if (evm.hardfork.isAtLeast(.MERGE)) {
@@ -962,14 +903,12 @@ pub const MinimalFrame = struct {
                 self.pc += 1;
             },
 
-            // GASLIMIT
             0x45 => {
                 try self.consumeGas(GasConstants.GasQuickStep);
                 try self.pushStack(@as(u256, evm.block_gas_limit));
                 self.pc += 1;
             },
 
-            // CHAINID
             0x46 => {
                 // EIP-1344: CHAINID was introduced in Istanbul hardfork
                 if (evm.hardfork.isBefore(.ISTANBUL)) return error.InvalidOpcode;
@@ -979,7 +918,6 @@ pub const MinimalFrame = struct {
                 self.pc += 1;
             },
 
-            // SELFBALANCE
             0x47 => {
                 // EIP-1884: SELFBALANCE was introduced in Istanbul hardfork
                 if (evm.hardfork.isBefore(.ISTANBUL)) return error.InvalidOpcode;
@@ -990,7 +928,6 @@ pub const MinimalFrame = struct {
                 self.pc += 1;
             },
 
-            // BASEFEE
             0x48 => {
                 // EIP-3198: BASEFEE was introduced in London hardfork
                 if (evm.hardfork.isBefore(.LONDON)) return error.InvalidOpcode;
@@ -1000,7 +937,6 @@ pub const MinimalFrame = struct {
                 self.pc += 1;
             },
 
-            // BLOBHASH
             0x49 => {
                 // EIP-4844: BLOBHASH was introduced in Cancun hardfork
                 if (evm.hardfork.isBefore(.CANCUN)) return error.InvalidOpcode;
@@ -1008,12 +944,10 @@ pub const MinimalFrame = struct {
                 try self.consumeGas(GasConstants.GasFastestStep);
                 const index = try self.popStack();
                 _ = index;
-                // For now, return zero (no blob hashes in test context)
                 try self.pushStack(0);
                 self.pc += 1;
             },
 
-            // BLOBBASEFEE
             0x4a => {
                 // EIP-7516: BLOBBASEFEE was introduced in Cancun hardfork
                 if (evm.hardfork.isBefore(.CANCUN)) return error.InvalidOpcode;
@@ -1023,14 +957,12 @@ pub const MinimalFrame = struct {
                 self.pc += 1;
             },
 
-            // POP
             0x50 => {
                 try self.consumeGas(GasConstants.GasQuickStep);
                 _ = try self.popStack();
                 self.pc += 1;
             },
 
-            // MLOAD
             0x51 => {
                 const offset = try self.popStack();
                 const off = std.math.cast(u32, offset) orelse return error.OutOfBounds;
@@ -1053,7 +985,6 @@ pub const MinimalFrame = struct {
                 self.pc += 1;
             },
 
-            // MSTORE
             0x52 => {
                 const offset = try self.popStack();
                 const value = try self.popStack();
@@ -1074,7 +1005,6 @@ pub const MinimalFrame = struct {
                 self.pc += 1;
             },
 
-            // MSTORE8
             0x53 => {
                 const offset = try self.popStack();
                 const value = try self.popStack();
@@ -1088,7 +1018,6 @@ pub const MinimalFrame = struct {
                 self.pc += 1;
             },
 
-            // SLOAD
             0x54 => {
                 const key = try self.popStack();
 
@@ -1102,7 +1031,6 @@ pub const MinimalFrame = struct {
                 self.pc += 1;
             },
 
-            // SSTORE
             0x55 => {
                 const key = try self.popStack();
                 const value = try self.popStack();
@@ -1128,7 +1056,6 @@ pub const MinimalFrame = struct {
                 self.pc += 1;
             },
 
-            // JUMP
             0x56 => {
                 try self.consumeGas(GasConstants.GasMidStep);
                 const dest = try self.popStack();
@@ -1140,7 +1067,6 @@ pub const MinimalFrame = struct {
                 self.pc = dest_pc;
             },
 
-            // JUMPI
             0x57 => {
                 try self.consumeGas(GasConstants.GasSlowStep);
                 const dest = try self.popStack();
@@ -1158,14 +1084,12 @@ pub const MinimalFrame = struct {
                 }
             },
 
-            // PC
             0x58 => {
                 try self.consumeGas(GasConstants.GasQuickStep);
                 try self.pushStack(self.pc);
                 self.pc += 1;
             },
 
-            // MSIZE
             0x59 => {
                 try self.consumeGas(GasConstants.GasQuickStep);
                 // Memory size is already tracked as word-aligned in memory_size field
@@ -1173,20 +1097,17 @@ pub const MinimalFrame = struct {
                 self.pc += 1;
             },
 
-            // GAS
             0x5a => {
                 try self.consumeGas(GasConstants.GasQuickStep);
                 try self.pushStack(@intCast(self.gas_remaining));
                 self.pc += 1;
             },
 
-            // JUMPDEST
             0x5b => {
                 try self.consumeGas(GasConstants.JumpdestGas);
                 self.pc += 1;
             },
 
-            // TLOAD
             0x5c => {
                 // EIP-1153: TLOAD was introduced in Cancun hardfork
                 if (evm.hardfork.isBefore(.CANCUN)) return error.InvalidOpcode;
@@ -1200,7 +1121,6 @@ pub const MinimalFrame = struct {
                 self.pc += 1;
             },
 
-            // TSTORE
             0x5d => {
                 // EIP-1153: TSTORE was introduced in Cancun hardfork
                 if (evm.hardfork.isBefore(.CANCUN)) return error.InvalidOpcode;
@@ -1214,7 +1134,6 @@ pub const MinimalFrame = struct {
                 self.pc += 1;
             },
 
-            // PUSH0
             0x5f => {
                 // EIP-3855: PUSH0 was introduced in Shanghai hardfork
                 if (evm.hardfork.isBefore(.SHANGHAI)) return error.InvalidOpcode;
@@ -1224,7 +1143,6 @@ pub const MinimalFrame = struct {
                 self.pc += 1;
             },
 
-            // PUSH1-PUSH32
             0x60...0x7f => {
                 try self.consumeGas(GasConstants.GasFastestStep);
                 const push_size = opcode - 0x5f;
@@ -1244,7 +1162,6 @@ pub const MinimalFrame = struct {
                 self.pc += 1 + push_size;
             },
 
-            // DUP1-DUP16
             0x80...0x8f => {
                 try self.consumeGas(GasConstants.GasFastestStep);
                 const n = opcode - 0x7f;
@@ -1256,7 +1173,6 @@ pub const MinimalFrame = struct {
                 self.pc += 1;
             },
 
-            // SWAP1-SWAP16
             0x90...0x9f => {
                 try self.consumeGas(GasConstants.GasFastestStep);
                 const n = opcode - 0x8f;
@@ -1271,29 +1187,23 @@ pub const MinimalFrame = struct {
                 self.pc += 1;
             },
 
-            // LOG0-LOG4
             0xa0...0xa4 => {
                 const topic_count = opcode - 0xa0;
                 const offset = try self.popStack();
                 const length = try self.popStack();
 
-                // Pop topics
                 var i: u8 = 0;
                 while (i < topic_count) : (i += 1) {
                     _ = try self.popStack();
                 }
 
-                // Gas cost
-                const length_u32 = std.math.cast(u32, length) orelse return error.OutOfBounds;
-                const log_cost = logGasCost(topic_count, length_u32);
+                const log_cost = logGasCost(topic_count, @as(u32, @intCast(length)));
                 try self.consumeGas(log_cost);
 
-                // In minimal implementation, we don't actually emit logs
                 _ = offset;
                 self.pc += 1;
             },
 
-            // CREATE
             0xf0 => {
                 const value = try self.popStack();
                 const offset = try self.popStack();
@@ -1303,7 +1213,6 @@ pub const MinimalFrame = struct {
                 const gas_cost = self.createGasCost(len);
                 try self.consumeGas(gas_cost);
 
-                // Read init code from memory
                 var init_code: []const u8 = &.{};
                 if (len > 0) {
                     const init_code_buf = try self.allocator.alloc(u8, len);
@@ -1330,11 +1239,9 @@ pub const MinimalFrame = struct {
 
                 const result = try evm.inner_call(params);
 
-                // Update gas
                 const gas_used = max_gas - result.gas_left;
                 self.gas_remaining -= @intCast(gas_used);
 
-                // Push created address or 0 on failure
                 if (result.success and result.output.len == 20) {
                     const address_value = primitives.Hex.hex_to_u256(result.output) catch |err| {
                         log.err("Failed to convert created address to u256: {}", .{err});
@@ -1348,9 +1255,7 @@ pub const MinimalFrame = struct {
                 self.pc += 1;
             },
 
-            // CALL
             0xf1 => {
-                // Pop all 7 arguments
                 const gas = try self.popStack();
                 const address_u256 = try self.popStack();
                 const value_arg = try self.popStack();
@@ -1359,10 +1264,8 @@ pub const MinimalFrame = struct {
                 const out_offset = try self.popStack();
                 const out_length = try self.popStack();
 
-                // Convert address
                 const address_bytes = primitives.Address.from_u256(address_u256);
 
-                // Base gas cost
                 var gas_cost: u64 = GasConstants.CallGas;
                 if (value_arg > 0) {
                     gas_cost += GasConstants.CallValueTransferGas;
@@ -1372,7 +1275,6 @@ pub const MinimalFrame = struct {
                 gas_cost += access_cost;
                 try self.consumeGas(gas_cost);
 
-                // Read input data from memory
                 var input_data: []const u8 = &.{};
                 if (in_length > 0 and in_length <= std.math.maxInt(u32)) {
                     const in_off = std.math.cast(u32, in_offset) orelse return error.OutOfBounds;
@@ -1385,7 +1287,6 @@ pub const MinimalFrame = struct {
                     input_data = data;
                 }
 
-                // Calculate available gas
                 const gas_limit = if (gas > std.math.maxInt(u64)) std.math.maxInt(u64) else @as(u64, @intCast(gas));
                 const remaining_gas = @as(u64, @intCast(@max(self.gas_remaining, 0)));
                 const max_gas = remaining_gas - (remaining_gas / 64);
@@ -1404,7 +1305,6 @@ pub const MinimalFrame = struct {
 
                 const result = try evm.inner_call(params);
 
-                // Write output to memory
                 if (out_length > 0 and result.output.len > 0) {
                     const out_off = std.math.cast(u32, out_offset) orelse return error.OutOfBounds;
                     const out_len_u32 = std.math.cast(u32, out_length) orelse return error.OutOfBounds;
@@ -1421,23 +1321,18 @@ pub const MinimalFrame = struct {
                     }
                 }
 
-                // Store return data
                 self.return_data = result.output;
 
-                // Push success status
                 try self.pushStack(if (result.success) 1 else 0);
 
-                // Update gas
                 const gas_used = available_gas - result.gas_left;
                 self.gas_remaining -= @intCast(gas_used);
 
                 self.pc += 1;
             },
 
-            // CALLCODE
             0xf2 => {
                 // Similar to CALL but executes code in current context
-                // Pop all 7 arguments
                 const gas = try self.popStack();
                 const address_u256 = try self.popStack();
                 const value_arg = try self.popStack();
@@ -1446,10 +1341,8 @@ pub const MinimalFrame = struct {
                 const out_offset = try self.popStack();
                 const out_length = try self.popStack();
 
-                // Convert address
                 const address_bytes = primitives.Address.from_u256(address_u256);
 
-                // Base gas cost
                 var gas_cost: u64 = GasConstants.CallGas;
                 if (value_arg > 0) {
                     gas_cost += GasConstants.CallValueTransferGas;
@@ -1459,7 +1352,6 @@ pub const MinimalFrame = struct {
                 gas_cost += access_cost;
                 try self.consumeGas(gas_cost);
 
-                // Read input data from memory
                 var input_data: []const u8 = &.{};
                 if (in_length > 0 and in_length <= std.math.maxInt(u32)) {
                     const in_off = std.math.cast(u32, in_offset) orelse return error.OutOfBounds;
@@ -1472,7 +1364,6 @@ pub const MinimalFrame = struct {
                     input_data = data;
                 }
 
-                // Calculate available gas
                 const gas_limit = if (gas > std.math.maxInt(u64)) std.math.maxInt(u64) else @as(u64, @intCast(gas));
                 const remaining_gas = @as(u64, @intCast(@max(self.gas_remaining, 0)));
                 const max_gas = remaining_gas - (remaining_gas / 64);
@@ -1491,7 +1382,6 @@ pub const MinimalFrame = struct {
 
                 const result = try evm.inner_call(params);
 
-                // Write output to memory
                 if (out_length > 0 and result.output.len > 0) {
                     const out_off = std.math.cast(u32, out_offset) orelse return error.OutOfBounds;
                     const out_len_u32 = std.math.cast(u32, out_length) orelse return error.OutOfBounds;
@@ -1508,20 +1398,16 @@ pub const MinimalFrame = struct {
                     }
                 }
 
-                // Store return data
                 self.return_data = result.output;
 
-                // Push success status
                 try self.pushStack(if (result.success) 1 else 0);
 
-                // Update gas
                 const gas_used = available_gas - result.gas_left;
                 self.gas_remaining -= @intCast(gas_used);
 
                 self.pc += 1;
             },
 
-            // RETURN
             0xf3 => {
                 const offset = try self.popStack();
                 const length = try self.popStack();
@@ -1548,9 +1434,7 @@ pub const MinimalFrame = struct {
                 return;
             },
 
-            // DELEGATECALL
             0xf4 => {
-                // Pop all 6 arguments (no value)
                 const gas = try self.popStack();
                 const address_u256 = try self.popStack();
                 const in_offset = try self.popStack();
@@ -1558,13 +1442,10 @@ pub const MinimalFrame = struct {
                 const out_offset = try self.popStack();
                 const out_length = try self.popStack();
 
-                // Convert address
                 const address_bytes = primitives.Address.from_u256(address_u256);
 
-                // Base gas cost
                 try self.consumeGas(GasConstants.CallGas);
 
-                // Read input data from memory
                 var input_data: []const u8 = &.{};
                 if (in_length > 0 and in_length <= std.math.maxInt(u32)) {
                     const in_off = std.math.cast(u32, in_offset) orelse return error.OutOfBounds;
@@ -1577,7 +1458,6 @@ pub const MinimalFrame = struct {
                     input_data = data;
                 }
 
-                // Calculate available gas
                 const gas_limit = if (gas > std.math.maxInt(u64)) std.math.maxInt(u64) else @as(u64, @intCast(gas));
                 const remaining_gas = @as(u64, @intCast(@max(self.gas_remaining, 0)));
                 const max_gas = remaining_gas - (remaining_gas / 64);
@@ -1595,7 +1475,6 @@ pub const MinimalFrame = struct {
                 
                 const result = try evm.inner_call(params);
 
-                // Write output to memory
                 if (out_length > 0 and result.output.len > 0) {
                     const out_off = std.math.cast(u32, out_offset) orelse return error.OutOfBounds;
                     const out_len_u32 = std.math.cast(u32, out_length) orelse return error.OutOfBounds;
@@ -1612,20 +1491,16 @@ pub const MinimalFrame = struct {
                     }
                 }
 
-                // Store return data
                 self.return_data = result.output;
 
-                // Push success status
                 try self.pushStack(if (result.success) 1 else 0);
 
-                // Update gas
                 const gas_used = available_gas - result.gas_left;
                 self.gas_remaining -= @intCast(gas_used);
 
                 self.pc += 1;
             },
 
-            // CREATE2
             0xf5 => {
                 // EIP-1014: CREATE2 opcode was introduced in Constantinople hardfork
                 if (evm.hardfork.isBefore(.CONSTANTINOPLE)) return error.InvalidOpcode;
@@ -1639,7 +1514,6 @@ pub const MinimalFrame = struct {
                 const gas_cost = self.create2GasCost(len);
                 try self.consumeGas(gas_cost);
 
-                // Read init code from memory
                 var init_code: []const u8 = &.{};
                 if (len > 0) {
                     const init_code_buf = try self.allocator.alloc(u8, len);
@@ -1667,11 +1541,9 @@ pub const MinimalFrame = struct {
 
                 const result = try evm.inner_call(params);
 
-                // Update gas
                 const gas_used = max_gas - result.gas_left;
                 self.gas_remaining -= @intCast(gas_used);
 
-                // Push created address or 0 on failure
                 if (result.success and result.output.len == 20) {
                     const address_value = primitives.Hex.hex_to_u256(result.output) catch |err| {
                         log.err("Failed to convert created address to u256: {}", .{err});
@@ -1685,12 +1557,10 @@ pub const MinimalFrame = struct {
                 self.pc += 1;
             },
 
-            // STATICCALL
             0xfa => {
                 // EIP-214: STATICCALL was introduced in Byzantium hardfork
                 if (evm.hardfork.isBefore(.BYZANTIUM)) return error.InvalidOpcode;
 
-                // Pop all 6 arguments (no value for static call)
                 const gas = try self.popStack();
                 const address_u256 = try self.popStack();
                 const in_offset = try self.popStack();
@@ -1698,7 +1568,6 @@ pub const MinimalFrame = struct {
                 const out_offset = try self.popStack();
                 const out_length = try self.popStack();
 
-                // Convert address
                 const address_bytes = primitives.Address.from_u256(address_u256);
 
                 // Base gas cost + EIP-2929 account access
@@ -1707,7 +1576,6 @@ pub const MinimalFrame = struct {
                 call_gas_cost += access_cost;
                 try self.consumeGas(call_gas_cost);
 
-                // Read input data from memory
                 var input_data: []const u8 = &.{};
                 if (in_length > 0 and in_length <= std.math.maxInt(u32)) {
                     const in_off = std.math.cast(u32, in_offset) orelse return error.OutOfBounds;
@@ -1720,7 +1588,6 @@ pub const MinimalFrame = struct {
                     input_data = data;
                 }
 
-                // Calculate available gas
                 const gas_limit = if (gas > std.math.maxInt(u64)) std.math.maxInt(u64) else @as(u64, @intCast(gas));
                 const remaining_gas = @as(u64, @intCast(@max(self.gas_remaining, 0)));
                 const max_gas = remaining_gas - (remaining_gas / 64);
@@ -1738,7 +1605,6 @@ pub const MinimalFrame = struct {
 
                 const result = try evm.inner_call(params);
 
-                // Write output to memory
                 if (out_length > 0 and result.output.len > 0) {
                     const out_off = std.math.cast(u32, out_offset) orelse return error.OutOfBounds;
                     const out_len_u32 = std.math.cast(u32, out_length) orelse return error.OutOfBounds;
@@ -1755,20 +1621,16 @@ pub const MinimalFrame = struct {
                     }
                 }
 
-                // Store return data
                 self.return_data = result.output;
 
-                // Push success status
                 try self.pushStack(if (result.success) 1 else 0);
 
-                // Update gas
                 const gas_used = available_gas - result.gas_left;
                 self.gas_remaining -= @intCast(gas_used);
 
                 self.pc += 1;
             },
 
-            // MCOPY (EIP-5656)
             0x5e => {
                 // EIP-5656: MCOPY was introduced in Cancun hardfork
                 if (evm.hardfork.isBefore(.CANCUN)) return error.InvalidOpcode;
@@ -1814,7 +1676,6 @@ pub const MinimalFrame = struct {
                 self.pc += 1;
             },
 
-            // REVERT
             0xfd => {
                 // EIP-140: REVERT was introduced in Byzantium hardfork
                 if (evm.hardfork.isBefore(.BYZANTIUM)) return error.InvalidOpcode;
@@ -1844,7 +1705,6 @@ pub const MinimalFrame = struct {
                 return;
             },
 
-            // EXTCODESIZE
             0x3b => {
                 // Get code size of external account
                 const addr_int = try self.popStack();
@@ -1860,7 +1720,6 @@ pub const MinimalFrame = struct {
                 self.pc += 1;
             },
 
-            // EXTCODECOPY
             0x3c => {
                 // Copy external account code to memory
                 const addr_int = try self.popStack();
@@ -1899,7 +1758,6 @@ pub const MinimalFrame = struct {
                 self.pc += 1;
             },
 
-            // EXTCODEHASH
             0x3f => {
                 // EIP-1052: EXTCODEHASH opcode was introduced in Constantinople hardfork
                 if (evm.hardfork.isBefore(.CONSTANTINOPLE)) return error.InvalidOpcode;
@@ -1921,7 +1779,6 @@ pub const MinimalFrame = struct {
 
             // TODO: Figure out what we want to do with AUTH and AUTHCALL as they were removed
             // from prague in favor of EIP-7702 (account abstraction) and currently not planned to be implemented
-            // AUTH (EIP-3074)
             0xf6 => {
                 // AUTH opcode from EIP-3074
                 // Stack: [authority, commitment, sig_v, sig_r, sig_s] → [success]
@@ -1966,16 +1823,15 @@ pub const MinimalFrame = struct {
                 if (authority != 0) {
                     // Store the authorized address (lower 160 bits of authority)
                     self.authorized = authority & (((@as(u256, 1) << 160) - 1));
-                    try self.pushStack(1); // Success
+                    try self.pushStack(1);
                 } else {
                     // Zero authority always fails
                     self.authorized = null;
-                    try self.pushStack(0); // Failure
+                    try self.pushStack(0);
                 }
                 self.pc += 1;
             },
 
-            // AUTHCALL (EIP-3074)
             0xf7 => {
                 // AUTHCALL opcode from EIP-3074
                 // Stack: [gas, to, value, in_offset, in_size, out_offset, out_size, auth] → [success]
@@ -2057,7 +1913,6 @@ pub const MinimalFrame = struct {
                 self.pc += 1;
             },
 
-            // INVALID
             0xfe => {
                 // INVALID opcode always fails
                 // Consume all remaining gas
@@ -2065,7 +1920,6 @@ pub const MinimalFrame = struct {
                 return error.InvalidOpcode;
             },
 
-            // SELFDESTRUCT
             0xff => {
                 // Pop beneficiary address from stack
                 const beneficiary = try self.popStack();
@@ -2082,7 +1936,6 @@ pub const MinimalFrame = struct {
                 // Mark the account for selfdestruction (actual deletion at transaction end)
                 try evm.mark_for_selfdestruct(self.address, beneficiary_bytes);
 
-                // Halt execution
                 self.stopped = true;
             },
 
