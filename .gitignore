@@ -210,3 +210,6 @@ src/kzg/trusted_setup.txt
 # Benchmarks directory (cloned on demand)
 benchmarks/
 sdks/python/guillotine_evm/_ffi.c
+
+# Test fixtures
+test/execution-spec-tests/fixtures/
