@@ -228,7 +228,6 @@ pub const Eips = struct {
         return false;
     }
 
-
     /// EIP-170: Get maximum contract code size based on hardfork
     pub fn eip_170_max_code_size(self: Self) u32 {
         // EIP-170: Contract code size limit (Spurious Dragon)
@@ -448,7 +447,7 @@ pub const Eips = struct {
 
     /// Get calldata gas cost for zero/non-zero bytes depending on hardfork
     /// Introduced in genesis hardfork and non-zero bytes reduced from 68 to 16 gas in EIP-2028 (Istanbul)
-    /// 
+    ///
     /// The zero/non-zero bytes are counted in tokens with hardfork-dependent logic above so we can reuse
     /// tokens for both calldata and floor gas
     pub fn calldata_gas_cost(self: Self, calldata_tokens: u64, is_create: bool, input_len: usize) u64 {
@@ -459,7 +458,7 @@ pub const Eips = struct {
             }
             break :blk 0;
         };
-        
+
         return base_calldata_cost + init_code_cost;
     }
 
@@ -941,9 +940,9 @@ test "edge cases - large calldata" {
 test "regression - hardfork ordering" {
     // Ensure EIPs are activated in correct order
     const hardforks = [_]Hardfork{
-        .FRONTIER, .HOMESTEAD, .DAO, .TANGERINE, .SPURIOUS, .BYZANTIUM,
-        .CONSTANTINOPLE, .PETERSBURG, .ISTANBUL, .BERLIN, .LONDON,
-        .MERGE, .SHANGHAI, .CANCUN, .PRAGUE,
+        .FRONTIER,       .HOMESTEAD,  .DAO,      .TANGERINE, .SPURIOUS, .BYZANTIUM,
+        .CONSTANTINOPLE, .PETERSBURG, .ISTANBUL, .BERLIN,    .LONDON,   .MERGE,
+        .SHANGHAI,       .CANCUN,     .PRAGUE,
     };
 
     // EIP-2028 should be active from Istanbul onwards
@@ -1212,7 +1211,6 @@ test "initcode_size_boundaries" {
     // Test that the limit doubled
     try std.testing.expectEqual(pre_shanghai.size_limit() * 2, post_shanghai.size_limit());
 }
-
 
 test "specific eip helper functions" {
     const frontier = Eips{ .hardfork = Hardfork.FRONTIER };

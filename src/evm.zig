@@ -125,13 +125,12 @@ pub fn Evm(config: EvmConfig) type {
         /// Contracts marked for self-destruction (cold - only used in old hardforks)
         self_destruct: SelfDestruct,
 
-
         // State dump tracking - persists across calls
         /// Tracks all addresses that have been touched (for state dump)
         touched_addresses: std.AutoHashMap(primitives.Address, void),
         /// Tracks storage slots that have been modified (address -> list of storage keys)
         touched_storage: std.AutoHashMap(primitives.Address, std.ArrayList(u256)),
-        
+
         // Tracer - at the very bottom of memory layout for minimal impact on cache performance
         /// Tracer for debugging and logging - can be accessed via evm.tracer or frame.evm_ptr.tracer
         tracer: @import("tracer/tracer.zig").Tracer,
@@ -297,14 +296,14 @@ pub fn Evm(config: EvmConfig) type {
         /// State dump structure for post-state validation
         pub const StateDump = struct {
             accounts: std.StringHashMap(AccountState),
-            
+
             pub const AccountState = struct {
                 balance: u256,
                 nonce: u64,
                 code: []const u8,
                 storage: std.AutoHashMap(u256, u256),
             };
-            
+
             pub fn deinit(self: *StateDump, allocator: std.mem.Allocator) void {
                 var it = self.accounts.iterator();
                 while (it.next()) |entry| {
@@ -315,7 +314,7 @@ pub fn Evm(config: EvmConfig) type {
                 self.accounts.deinit();
             }
         };
-        
+
         /// Dump the current state of all accounts in the database
         /// This is useful for post-state validation in tests
         pub fn dumpState(self: *Self, allocator: std.mem.Allocator) !StateDump {
@@ -334,13 +333,13 @@ pub fn Evm(config: EvmConfig) type {
                     std.debug.print("[DUMP] account not found in database\n", .{});
                     continue;
                 };
-                std.debug.print("[DUMP] found account: balance={d}, nonce={d}\n", .{account.balance, account.nonce});
-                
+                std.debug.print("[DUMP] found account: balance={d}, nonce={d}\n", .{ account.balance, account.nonce });
+
                 // Skip zero balance, zero nonce accounts with no code
                 if (account.balance == 0 and account.nonce == 0 and std.mem.eql(u8, &account.code_hash, &([_]u8{0} ** 32))) {
                     continue;
                 }
-                
+
                 // Convert address to hex string
                 var addr_hex: [42]u8 = undefined;
                 @memcpy(addr_hex[0..2], "0x");
@@ -350,17 +349,17 @@ pub fn Evm(config: EvmConfig) type {
                     addr_hex[2 + i * 2 + 1] = chars[byte & 0x0F];
                 }
                 const addr_str = try allocator.dupe(u8, &addr_hex);
-                
+
                 // Get code if present
                 var code: []u8 = &.{};
                 if (!std.mem.eql(u8, &account.code_hash, &([_]u8{0} ** 32))) {
                     const db_code = try self.database.get_code(account.code_hash);
                     code = try allocator.dupe(u8, db_code);
                 }
-                
+
                 // Get storage
                 var storage = std.AutoHashMap(u256, u256).init(allocator);
-                
+
                 // Get tracked storage slots for this address
                 if (self.touched_storage.get(addr)) |slots| {
                     for (slots.items) |slot| {
@@ -370,7 +369,7 @@ pub fn Evm(config: EvmConfig) type {
                         }
                     }
                 }
-                
+
                 try state_dump.accounts.put(addr_str, StateDump.AccountState{
                     .balance = account.balance,
                     .nonce = account.nonce,
@@ -378,7 +377,7 @@ pub fn Evm(config: EvmConfig) type {
                     .storage = storage,
                 });
             }
-            
+
             return state_dump;
         }
 
@@ -659,16 +658,14 @@ pub fn Evm(config: EvmConfig) type {
                     // Base fee (execution_gas_fee - coinbase_reward) is effectively burned
                 } else if (execution_gas_fee > 0) {
                     // Pre-EIP-1559: All execution gas fees go to coinbase (blob gas is still burned)
-                    var coinbase_account = self.database.get_account(
-                        self.block_info.coinbase.bytes
-                    ) catch {
+                    var coinbase_account = self.database.get_account(self.block_info.coinbase.bytes) catch {
                         return result;
                     } orelse Account.zero();
 
                     self.journal.record_balance_change(0, self.block_info.coinbase, coinbase_account.balance) catch {
                         return result;
                     };
-                    
+
                     coinbase_account.balance += execution_gas_fee;
                     self.database.set_account(self.block_info.coinbase.bytes, coinbase_account) catch {
                         return result;
