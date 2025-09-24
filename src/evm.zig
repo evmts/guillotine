@@ -665,7 +665,6 @@ pub fn Evm(config: EvmConfig) type {
                     self.journal.record_balance_change(0, self.block_info.coinbase, coinbase_account.balance) catch {
                         return result;
                     };
-
                     coinbase_account.balance += execution_gas_fee;
                     self.database.set_account(self.block_info.coinbase.bytes, coinbase_account) catch {
                         return result;
