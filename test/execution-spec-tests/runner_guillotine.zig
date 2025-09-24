@@ -48,7 +48,7 @@ pub fn runTest(
     var result = TestResult{
         .name = test_name,
         .hardfork = hardfork_str,
-        .success = true, // default to success and fail on any mismatch or error
+        .success = false,
     };
 
     // Parse hardfork and context data
@@ -279,12 +279,12 @@ pub fn runTest(
     std.debug.print("debug: Exited evm.call\n", .{});
 
     // Check if execution was successful
-    // We explicitely don't fail the test if the execution fails as this is not how these specs work;
+    // We explicitely don't return early if the execution fails as this is not how these specs work;
     // some cases are actually expected to revert.
     if (!call_result.success) {
         const error_msg = if (call_result.error_info) |info| info else "Unknown error";
         result.error_message = try std.fmt.allocPrint(allocator, "Execution failed: {s}", .{error_msg});
-        return result;
+        std.debug.print("debug: Execution failed: {s}\n", .{error_msg});
     }
 
     // Get expected post state for this hardfork
