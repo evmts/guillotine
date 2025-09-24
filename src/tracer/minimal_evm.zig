@@ -415,7 +415,6 @@ pub const MinimalEvm = struct {
             // Apply the refund
             result.gas_left += capped_refund;
 
-            // Copy logs to result
             result.logs = self.logs.toOwnedSlice(self.allocator) catch |err| {
                 log.err("Failed to copy logs to result: {s}", .{@errorName(err)});
                 return CallResult.failure_with_error(result.gas_left, @errorName(err));
