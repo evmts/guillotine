@@ -70,7 +70,7 @@ pub fn runTest(
     else if (test_case.transaction.maxFeePerGas) |mfpg|
         try primitives.Hex.hex_to_u256(mfpg) // Use maxFeePerGas as effective gas price for now
     else
-        0; // Shouldn't happen, but handle gracefully
+        unreachable;
 
     // Create database
     const db = try allocator.create(Database);
@@ -142,7 +142,13 @@ pub fn runTest(
     defer allocator.free(data);
 
     // Execute transaction
-    const to_address = if (test_case.transaction.to) |to| try primitives.Address.from_hex(to) else null;
+    const to_address = blk: {
+        if (test_case.transaction.to) |to| {
+            if (to.len == 0) break :blk null;
+            break :blk try primitives.Address.from_hex(to);
+        }
+        break :blk null;
+    };
 
     const call_params = if (to_address) |to| CallParams{
         .call = .{
@@ -161,32 +167,152 @@ pub fn runTest(
         },
     };
 
+    // Debug logging for transaction execution
+    std.debug.print("\n========================================\n", .{});
+    std.debug.print("TEST: {s}\n", .{test_name});
+    std.debug.print("HARDFORK: {s}\n", .{hardfork_str});
+    std.debug.print("========================================\n", .{});
+
+    // Log blockchain context
+    std.debug.print("\n--- BLOCKCHAIN CONTEXT ---\n", .{});
+    std.debug.print("Block Number:     {}\n", .{block_number});
+    std.debug.print("Block Timestamp:  {}\n", .{block_timestamp});
+    std.debug.print("Block Gas Limit:  {}\n", .{block_gas_limit});
+    std.debug.print("Block Base Fee:   {}\n", .{block_base_fee});
+    std.debug.print("Block Coinbase:   {s}\n", .{block_coinbase.address_to_hex()});
+    std.debug.print("Chain ID:         {}\n", .{chain_id});
+    std.debug.print("Gas Price:        {}\n", .{gas_price});
+
+    // Log transaction parameters
+    std.debug.print("\n--- TRANSACTION PARAMETERS ---\n", .{});
+    std.debug.print("Type:             {s}\n", .{if (to_address == null) "CREATE" else "CALL"});
+    std.debug.print("From (Origin):    {s}\n", .{origin.address_to_hex()});
+    if (to_address) |to| {
+        std.debug.print("To:               {s}\n", .{to.address_to_hex()});
+    } else {
+        std.debug.print("To:               (contract creation)\n", .{});
+    }
+    std.debug.print("Value:            0x{s}\n", .{try primitives.Hex.u256_to_hex(allocator, value)});
+    std.debug.print("Gas Limit:        {}\n", .{gas_limit});
+    std.debug.print("Data Length:      {} bytes\n", .{data.len});
+    if (data.len > 0 and data.len <= 64) {
+        std.debug.print("Data:             0x{s}\n", .{try primitives.Hex.bytes_to_hex(allocator, data)});
+    } else if (data.len > 64) {
+        std.debug.print("Data (first 64):  0x{s}...\n", .{try primitives.Hex.bytes_to_hex(allocator, data[0..@min(64, data.len)])});
+    }
+
+    // Log call parameters details
+    std.debug.print("\n--- CALL PARAMS STRUCT ---\n", .{});
+    switch (call_params) {
+        .call => |params| {
+            std.debug.print("Type:             CALL\n", .{});
+            std.debug.print("  Caller:         {s}\n", .{params.caller.address_to_hex()});
+            std.debug.print("  To:             {s}\n", .{params.to.address_to_hex()});
+            std.debug.print("  Value:          0x{s}\n", .{try primitives.Hex.u256_to_hex(allocator, params.value)});
+            std.debug.print("  Gas:            {}\n", .{params.gas});
+            std.debug.print("  Input Length:   {} bytes\n", .{params.input.len});
+        },
+        .create => |params| {
+            std.debug.print("Type:             CREATE\n", .{});
+            std.debug.print("  Caller:         {s}\n", .{params.caller.address_to_hex()});
+            std.debug.print("  Value:          0x{s}\n", .{try primitives.Hex.u256_to_hex(allocator, params.value)});
+            std.debug.print("  Gas:            {}\n", .{params.gas});
+            std.debug.print("  Init Code Len:  {} bytes\n", .{params.init_code.len});
+        },
+        else => unreachable,
+    }
+
+    // Log pre-state of origin account
+    std.debug.print("\n--- ORIGIN ACCOUNT STATE ---\n", .{});
+    const origin_account = evm.database.get_account(origin.bytes) catch null orelse Account.zero();
+    std.debug.print("Balance:          0x{s}\n", .{try primitives.Hex.u256_to_hex(allocator, origin_account.balance)});
+    std.debug.print("Nonce:            {}\n", .{origin_account.nonce});
+
+    // Log pre-state of to account if it's a call
+    if (to_address) |to| {
+        std.debug.print("\n--- TO ACCOUNT PRE-STATE ---\n", .{});
+        const to_account = evm.database.get_account(to.bytes) catch null orelse Account.zero();
+        std.debug.print("Address:          {s}\n", .{to.address_to_hex()});
+        std.debug.print("Balance:          0x{s}\n", .{try primitives.Hex.u256_to_hex(allocator, to_account.balance)});
+        std.debug.print("Nonce:            {}\n", .{to_account.nonce});
+        std.debug.print("Code Hash:        0x{s}\n", .{try primitives.Hex.bytes_to_hex(allocator, &to_account.code_hash)});
+        std.debug.print("Storage Root:     0x{s}\n", .{try primitives.Hex.bytes_to_hex(allocator, &to_account.storage_root)});
+
+        // Check if account has code
+        const code = evm.database.get_code(to_account.code_hash) catch null;
+        if (code) |c| {
+            // Note: 'c' is owned by the database, do NOT free it
+            std.debug.print("Code Length:      {} bytes\n", .{c.len});
+            if (c.len > 0 and c.len <= 64) {
+                const hex_str = try primitives.Hex.bytes_to_hex(allocator, c);
+                defer allocator.free(hex_str);
+                std.debug.print("Code:             0x{s}\n", .{hex_str});
+            } else if (c.len > 64) {
+                const hex_str = try primitives.Hex.bytes_to_hex(allocator, c[0..@min(64, c.len)]);
+                defer allocator.free(hex_str);
+                std.debug.print("Code (first 64):  0x{s}...\n", .{hex_str});
+            }
+        } else {
+            std.debug.print("Code:             (none)\n", .{});
+        }
+
+        // Log some storage slots if they exist
+        std.debug.print("\n--- TO ACCOUNT STORAGE (sample) ---\n", .{});
+        const slot_0 = evm.database.get_storage(to.bytes, 0) catch null orelse 0;
+        const slot_1 = evm.database.get_storage(to.bytes, 1) catch null orelse 0;
+        if (slot_0 != 0) {
+            std.debug.print("Slot[0]:          0x{s}\n", .{try primitives.Hex.u256_to_hex(allocator, slot_0)});
+        }
+        if (slot_1 != 0) {
+            std.debug.print("Slot[1]:          0x{s}\n", .{try primitives.Hex.u256_to_hex(allocator, slot_1)});
+        }
+        if (slot_0 == 0 and slot_1 == 0) {
+            std.debug.print("(empty or zero storage)\n", .{});
+        }
+    }
+
+    std.debug.print("\n========================================\n", .{});
+
+    // Execute the transaction
+    std.debug.print("debug: Entering evm.call\n", .{});
     const call_result = evm.call(call_params);
+    std.debug.print("debug: Exited evm.call\n", .{});
 
     // Check if execution was successful
     if (!call_result.success) {
-        const error_msg = call_result.error_info orelse "Unknown error";
+        const error_msg = if (call_result.error_info) |info| info else "Unknown error";
         result.error_message = try std.fmt.allocPrint(allocator, "Execution failed: {s}", .{error_msg});
-        // Mark as success=false but return normally (not an error)
         result.success = false;
         return result;
     }
 
     // Get expected post state for this hardfork
-    const post_entries = try parser.getPostStateEntries(allocator, test_case.post, hardfork_str);
+    const post_entries = parser.getPostStateEntries(allocator, test_case.post, hardfork_str) catch |err| {
+        result.error_message = try std.fmt.allocPrint(allocator, "Failed to get post state: {s}", .{@errorName(err)});
+        result.success = false;
+        return result;
+    };
+    defer allocator.free(post_entries);
+
     if (post_entries.len == 0) {
         result.error_message = try std.fmt.allocPrint(allocator, "No post state for hardfork: {s}", .{hardfork_str});
+        result.success = false;
         return result;
     }
 
     // Compare with expected state (using first entry)
     const expected_state = post_entries[0].state;
-    const comp_result = try comparison.compareState(allocator, evm, expected_state);
+    const comp_result = comparison.compareState(allocator, evm, expected_state) catch |err| {
+        result.error_message = try std.fmt.allocPrint(allocator, "Failed to compare state: {s}", .{@errorName(err)});
+        result.success = false;
+        return result;
+    };
 
     if (comp_result.success) {
         result.success = true;
     } else {
         result.mismatches = comp_result.mismatches;
+        result.success = false;
     }
 
     return result;

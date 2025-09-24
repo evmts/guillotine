@@ -124,7 +124,13 @@ pub fn runTest(
     defer allocator.free(data);
 
     // Execute transaction
-    const to_address = if (test_case.transaction.to) |to| try primitives.Address.from_hex(to) else null;
+    const to_address = blk: {
+        if (test_case.transaction.to) |to| {
+            if (to.len == 0) break :blk null;
+            break :blk try primitives.Address.from_hex(to);
+        }
+        break :blk null;
+    };
 
     const call_params = if (to_address) |to| CallParams{
         .call = .{
