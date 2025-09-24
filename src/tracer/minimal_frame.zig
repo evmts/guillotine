@@ -1241,11 +1241,9 @@ pub const MinimalFrame = struct {
                     topics[i] = try self.popStack();
                 }
 
-                // Validate bounds
                 const offset_u32 = std.math.cast(u32, offset) orelse return error.OutOfBounds;
                 const length_u32 = std.math.cast(u32, length) orelse return error.OutOfBounds;
 
-                // Calculate total gas: base log cost + memory expansion
                 var gas_cost = logGasCost(topic_count, length_u32);
                 if (length_u32 > 0) {
                     const end_offset = @as(u64, offset_u32) + @as(u64, length_u32);
@@ -1256,13 +1254,10 @@ pub const MinimalFrame = struct {
                 }
                 try self.consumeGas(gas_cost);
 
-                // Read data from memory
                 var data: []const u8 = &[_]u8{};
                 if (length_u32 > 0) {
-                    // Allocate buffer for log data (arena allocator handles cleanup)
                     const data_buf = try self.allocator.alloc(u8, length_u32);
 
-                    // Copy bytes from memory
                     var j: u32 = 0;
                     while (j < length_u32) : (j += 1) {
                         data_buf[j] = self.readMemory(offset_u32 + j);
@@ -1270,7 +1265,6 @@ pub const MinimalFrame = struct {
                     data = data_buf;
                 }
 
-                // Prepare topics slice (only the portion we actually use)
                 const topics_slice = if (topic_count > 0)
                     topics[0..topic_count]
                 else

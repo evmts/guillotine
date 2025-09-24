@@ -105,7 +105,6 @@ pub const MinimalEvm = struct {
     warm_addresses: std.array_hash_map.ArrayHashMap(Address, void, AddressContext, false),
     warm_storage_slots: std.array_hash_map.ArrayHashMap(StorageSlotKey, void, StorageSlotKeyContext, false),
 
-    // Logs captured during execution
     logs: std.ArrayList(Log),
 
     // Transaction-scoped gas refund counter
