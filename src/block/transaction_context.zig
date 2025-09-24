@@ -28,6 +28,9 @@ pub const TransactionContext = struct {
     /// Priority fee per gas / tip (EIP-1559 type 2+ transactions)
     /// For legacy tx, this is 0
     max_priority_fee_per_gas: u64 = 0,
+    /// Maximum fee per blob gas the transaction is willing to pay (EIP-4844)
+    /// Set to 0 for non-blob transactions
+    max_fee_per_blob_gas: u256 = 0,
 };
 
 test "TransactionContext creation and field access" {
