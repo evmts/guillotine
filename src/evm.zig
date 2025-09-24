@@ -15,6 +15,7 @@ const TransactionContext = @import("block/transaction_context.zig").TransactionC
 const GrowingArenaAllocator = @import("evm_arena_allocator.zig").GrowingArenaAllocator;
 const call_result_module = @import("frame/call_result.zig");
 const call_params_module = @import("frame/call_params.zig");
+const GasConstants = primitives.GasConstants;
 
 /// Creates a configured EVM instance type.
 pub fn Evm(config: EvmConfig) type {
@@ -448,25 +449,31 @@ pub fn Evm(config: EvmConfig) type {
                 return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
             };
 
-            const call_gas = params.getGas();
-            if (!config.disable_gas_checks) {
-                if (call_gas == 0) return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+            const gas_limit = params.getGas();
+            if (comptime !config.disable_gas_checks) {
+                if (gas_limit == 0) return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
             }
 
-            const initial_gas = call_gas;
+            // Calculate all base gas costs:
+            // - intrinsic gas (base 21,000 or 53,000 for create)
+            // - calldata gas (from zero and non-zero bytes, non-zero being more expensive)
+            // - floor gas (same as above, will enfore a minimum gas spent at the end of the tx)
+            // TODO: cost for access list accounts & storage (EIP-2930)
+            // gas += access_list_accounts * ACCESS_LIST_ADDRESS (2400);
+            // gas += access_list_storages * ACCESS_LIST_STORAGE_KEY (1900);
+            // TODO: cost for authorization list (EIP-7702)
+            // gas += authorization_list_num * PER_EMPTY_ACCOUNT_COST (25000);
+            const calldata_tokens = config.eips.tokens_in_calldata(params.getInput());
+            const intrinsic_gas_cost = config.eips.intrinsic_gas_cost(params.isCreate());
+            const calldata_gas_cost = config.eips.calldata_gas_cost(calldata_tokens, params.isCreate(), params.getInput().len);
+            const floor_gas_cost = config.eips.floor_gas_cost(calldata_tokens);
 
-            const execution_gas = blk: {
-                const GasConstants = primitives.GasConstants;
-                const intrinsic_gas = switch (params) {
-                    .create, .create2 => GasConstants.TxGasContractCreation, // 53000 for contract creation
-                    else => GasConstants.TxGas, // 21000 for regular calls
-                };
-
-                // Check if we have enough gas for intrinsic cost
-                if (params.getGas() < intrinsic_gas) return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
-
-                break :blk params.getGas() - intrinsic_gas;
-            };
+            const initial_gas_cost = intrinsic_gas_cost + calldata_gas_cost;
+            if (comptime !config.disable_gas_checks) {
+                if (gas_limit < initial_gas_cost) return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                if (gas_limit < floor_gas_cost) return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+            }
+            const execution_gas_limit = gas_limit - initial_gas_cost;
 
             // Increment origin nonce for top-level transactions (EIP-2718)
             // This must happen after gas deduction but before inner_call execution
@@ -489,7 +496,7 @@ pub fn Evm(config: EvmConfig) type {
             }
 
             var modified_params = params;
-            modified_params.setGas(@as(u64, @intCast(execution_gas)));
+            modified_params.setGas(@as(u64, @intCast(execution_gas_limit)));
 
             const arena_result = self.inner_call(modified_params);
             // Clone result to main allocator since we're at depth 0 (top-level call)
@@ -502,13 +509,21 @@ pub fn Evm(config: EvmConfig) type {
 
             // Apply EIP-3529 gas refund cap if transaction succeeded
             if (result.success) {
-                result.gas_left = config.eips.eip_3529_apply_gas_refund(initial_gas, result.gas_left, self.gas_refund_counter);
+                result.gas_left = config.eips.eip_3529_apply_gas_refund(gas_limit, result.gas_left, self.gas_refund_counter);
                 // Reset refund counter for next transaction
                 self.gas_refund_counter = 0;
             }
 
+            var gas_consumed = gas_limit - result.gas_left;
+            // EIP-7623 (Prague): Ensure at least floor_gas_cost is consumed
+            if (gas_consumed < floor_gas_cost) {
+                gas_consumed = floor_gas_cost;
+                if (!comptime config.disable_gas_checks) {
+                    result.gas_left = gas_limit - floor_gas_cost;
+                }
+            }
+
             // Deduct gas fees from sender's balance and pay coinbase
-            const gas_consumed = initial_gas - result.gas_left;
             if (gas_consumed > 0 and self.gas_price > 0) {
                 const gas_consumed_u256: u256 = @intCast(gas_consumed);
                 const total_gas_fee = self.gas_price * gas_consumed_u256;
@@ -691,25 +706,25 @@ pub fn Evm(config: EvmConfig) type {
 
             if (self.depth >= config.max_call_depth) return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
 
-            const execution_gas = params.getGas();
+            const execution_gas_limit = params.getGas();
 
             var result = switch (params) {
                 .call => |p| blk: {
                     @branchHint(.likely);
-                    break :blk self.executeCall(.{ .caller = p.caller, .to = p.to, .value = p.value, .input = p.input, .gas = execution_gas }) catch {
+                    break :blk self.executeCall(.{ .caller = p.caller, .to = p.to, .value = p.value, .input = p.input, .gas = execution_gas_limit }) catch {
                         return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
                     };
                 },
                 .staticcall => |p| blk: {
                     @branchHint(.likely);
-                    break :blk self.executeStaticcall(.{ .caller = p.caller, .to = p.to, .input = p.input, .gas = execution_gas }) catch (CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable);
+                    break :blk self.executeStaticcall(.{ .caller = p.caller, .to = p.to, .input = p.input, .gas = execution_gas_limit }) catch CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
                 },
-                .delegatecall => |p| self.executeDelegatecall(.{ .caller = p.caller, .to = p.to, .input = p.input, .gas = execution_gas }) catch (CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable),
-                .create => |p| self.executeCreate(.{ .caller = p.caller, .value = p.value, .init_code = p.init_code, .gas = execution_gas }) catch (CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable),
-                .create2 => |p| self.executeCreate2(.{ .caller = p.caller, .value = p.value, .init_code = p.init_code, .salt = p.salt, .gas = execution_gas }) catch (CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable),
+                .delegatecall => |p| self.executeDelegatecall(.{ .caller = p.caller, .to = p.to, .input = p.input, .gas = execution_gas_limit }) catch CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable,
+                .create => |p| self.executeCreate(.{ .caller = p.caller, .value = p.value, .init_code = p.init_code, .gas = execution_gas_limit }) catch CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable,
+                .create2 => |p| self.executeCreate2(.{ .caller = p.caller, .value = p.value, .init_code = p.init_code, .salt = p.salt, .gas = execution_gas_limit }) catch CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable,
                 .callcode => |p| blk: {
                     @branchHint(.cold);
-                    break :blk self.executeCallcode(.{ .caller = p.caller, .to = p.to, .value = p.value, .input = p.input, .gas = execution_gas }) catch (CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable);
+                    break :blk self.executeCallcode(.{ .caller = p.caller, .to = p.to, .value = p.value, .input = p.input, .gas = execution_gas_limit }) catch CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
                 },
             };
 
@@ -1060,7 +1075,6 @@ pub fn Evm(config: EvmConfig) type {
                     return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
                 }
             }
-            const GasConstants = primitives.GasConstants;
             const create_overhead = GasConstants.CreateGas;
             if (params.gas < create_overhead) {
                 self.journal.revert_to_snapshot(snapshot_id);
@@ -1134,7 +1148,6 @@ pub fn Evm(config: EvmConfig) type {
                 }
             }
 
-            const GasConstants = primitives.GasConstants;
             const create_overhead = GasConstants.CreateGas;
             const hash_cost = @as(u64, @intCast(params.init_code.len)) * GasConstants.Keccak256WordGas / 32;
             const total_overhead = create_overhead + hash_cost;

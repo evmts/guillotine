@@ -1,6 +1,7 @@
 const primitives = @import("primitives");
 const AccessList = @import("../storage/access_list.zig").AccessList;
 pub const Hardfork = @import("hardfork.zig").Hardfork;
+pub const GasConstants = primitives.GasConstants;
 
 /// EIP Override entry - allows enabling/disabling specific EIPs
 pub const EipOverride = struct {
@@ -210,7 +211,7 @@ pub const Eips = struct {
             .MERGE => &[_]u16{ 2, 7, 8, 150, 155, 160, 161, 100, 140, 196, 197, 198, 211, 214, 649, 658, 145, 1014, 1052, 1283, 152, 1108, 1344, 1884, 2028, 2200, 2565, 2718, 2929, 2930, 1559, 3198, 3529, 3541, 4345, 5133, 3675, 4399 },
             .SHANGHAI => &[_]u16{ 2, 7, 8, 150, 155, 160, 161, 100, 140, 196, 197, 198, 211, 214, 649, 658, 145, 1014, 1052, 1283, 152, 1108, 1344, 1884, 2028, 2200, 2565, 2718, 2929, 2930, 1559, 3198, 3529, 3541, 4345, 5133, 3675, 4399, 3651, 3855, 3860, 4895 },
             .CANCUN => &[_]u16{ 2, 7, 8, 150, 155, 160, 161, 100, 140, 196, 197, 198, 211, 214, 649, 658, 145, 1014, 1052, 1283, 152, 1108, 1344, 1884, 2028, 2200, 2565, 2718, 2929, 2930, 1559, 3198, 3529, 3541, 4345, 5133, 3675, 4399, 3651, 3855, 3860, 4895, 1153, 4788, 4844, 5656, 6780, 7516 },
-            .PRAGUE => &[_]u16{ 2, 7, 8, 150, 155, 160, 161, 100, 140, 196, 197, 198, 211, 214, 649, 658, 145, 1014, 1052, 1283, 152, 1108, 1344, 1884, 2028, 2200, 2565, 2718, 2929, 2930, 1559, 3198, 3529, 3541, 4345, 5133, 3675, 4399, 3651, 3855, 3860, 4895, 1153, 4788, 4844, 5656, 6780, 7516, 2537, 2935, 6110, 7002, 7702 },
+            .PRAGUE => &[_]u16{ 2, 7, 8, 150, 155, 160, 161, 100, 140, 196, 197, 198, 211, 214, 649, 658, 145, 1014, 1052, 1283, 152, 1108, 1344, 1884, 2028, 2200, 2565, 2718, 2929, 2930, 1559, 3198, 3529, 3541, 4345, 5133, 3675, 4399, 3651, 3855, 3860, 4895, 1153, 4788, 4844, 5656, 6780, 7516, 2537, 2935, 6110, 7002, 7623, 7702 },
         };
     }
 
@@ -258,9 +259,15 @@ pub const Eips = struct {
 
     /// EIP-2028: Get calldata gas costs (reduced non-zero byte cost)
     pub fn eip_2028_calldata_gas_cost(self: Self, is_zero: bool) u64 {
-        if (is_zero) return 4;
-        if (!self.is_eip_active(2028)) return 68;
-        return 16; // Post-Istanbul
+        if (is_zero) return GasConstants.TxDataZeroGas;
+        if (!self.is_eip_active(2028)) return GasConstants.TxDataNonZeroGas;
+        return GasConstants.TxDataNonZeroGasPreIstanbul;
+    }
+
+    /// EIP-2028: Get calldata gas cost multiplier for non-zero bytes
+    pub fn eip_2028_calldata_gas_cost_multiplier(self: Self) u64 {
+        if (!self.is_eip_active(2028)) return GasConstants.TxDataNonZeroGasMultiplierPreIstanbul;
+        return GasConstants.TxDataNonZeroGasMultiplier;
     }
 
     /// EIP-1153: Check if transient storage is available
@@ -418,6 +425,49 @@ pub const Eips = struct {
         const capped_refund = self.eip_3529_gas_refund_cap(gas_used, gas_refund_counter);
         return @min(initial_gas, gas_left + capped_refund);
     }
+
+    /// Count tokens in calldata
+    pub fn tokens_in_calldata(self: Self, input: []const u8) u64 {
+        const zero_bytes_count = std.mem.count(u8, input, "\x00");
+        const non_zero_bytes_count = input.len - zero_bytes_count;
+        const non_zero_bytes_multiplier = self.eip_2028_calldata_gas_cost_multiplier();
+        return zero_bytes_count + non_zero_bytes_count * non_zero_bytes_multiplier;
+    }
+
+    /// EIP-3860: Get init code word cost
+    pub fn eip_3860_initcode_word_cost(self: Self, input_len: usize) u64 {
+        if (!self.is_eip_active(3860)) return 0;
+        const word_count = GasConstants.wordCount(input_len);
+        return word_count * GasConstants.InitcodeWordGas;
+    }
+
+    /// Get intrinsic gas cost for a transaction depending on the type (call/create)
+    pub fn intrinsic_gas_cost(_: Self, is_create: bool) u64 {
+        return if (is_create) GasConstants.TxGasContractCreation else GasConstants.TxGas;
+    }
+
+    /// Get calldata gas cost for zero/non-zero bytes depending on hardfork
+    /// Introduced in genesis hardfork and non-zero bytes reduced from 68 to 16 gas in EIP-2028 (Istanbul)
+    /// 
+    /// The zero/non-zero bytes are counted in tokens with hardfork-dependent logic above so we can reuse
+    /// tokens for both calldata and floor gas
+    pub fn calldata_gas_cost(self: Self, calldata_tokens: u64, is_create: bool, input_len: usize) u64 {
+        const base_calldata_cost = calldata_tokens * GasConstants.TxDataZeroGas;
+        const init_code_cost = blk: {
+            if (is_create and self.is_eip_active(3860)) {
+                break :blk self.eip_3860_initcode_word_cost(input_len);
+            }
+            break :blk 0;
+        };
+        
+        return base_calldata_cost + init_code_cost;
+    }
+
+    /// Get floor gas a transaction is forced to consume
+    pub fn floor_gas_cost(self: Self, calldata_tokens: u64) u64 {
+        if (!self.is_eip_active(7623)) return 0;
+        return calldata_tokens * GasConstants.TxDataFloorTokenGas + GasConstants.TxGas;
+    }
 };
 
 const std = @import("std");
@@ -521,6 +571,289 @@ test "eip_1153_transient_storage" {
 
     try std.testing.expect(!pre_cancun.eip_1153_transient_storage_enabled());
     try std.testing.expect(post_cancun.eip_1153_transient_storage_enabled());
+}
+
+test "eip_2028_calldata_gas_cost_multiplier" {
+    // Pre-Istanbul: 68/4 = 17
+    var pre_istanbul = Eips{ .hardfork = Hardfork.BERLIN };
+    pre_istanbul.overrides = &[_]EipOverride{
+        .{ .eip = 2028, .enabled = false },
+    };
+    try std.testing.expectEqual(@as(u64, 17), pre_istanbul.eip_2028_calldata_gas_cost_multiplier());
+
+    // Istanbul and later: 16/4 = 4
+    const istanbul = Eips{ .hardfork = Hardfork.ISTANBUL };
+    try std.testing.expectEqual(@as(u64, 4), istanbul.eip_2028_calldata_gas_cost_multiplier());
+
+    const london = Eips{ .hardfork = Hardfork.LONDON };
+    try std.testing.expectEqual(@as(u64, 4), london.eip_2028_calldata_gas_cost_multiplier());
+
+    const cancun = Eips{ .hardfork = Hardfork.CANCUN };
+    try std.testing.expectEqual(@as(u64, 4), cancun.eip_2028_calldata_gas_cost_multiplier());
+}
+
+test "tokens_in_calldata - empty" {
+    const istanbul = Eips{ .hardfork = Hardfork.ISTANBUL };
+    const empty_data: []const u8 = &[_]u8{};
+    try std.testing.expectEqual(@as(u64, 0), istanbul.tokens_in_calldata(empty_data));
+}
+
+test "tokens_in_calldata - all zeros" {
+    const istanbul = Eips{ .hardfork = Hardfork.ISTANBUL };
+    const all_zeros = &[_]u8{0x00} ** 10;
+    // 10 zero bytes = 10 tokens (1 token per zero byte)
+    try std.testing.expectEqual(@as(u64, 10), istanbul.tokens_in_calldata(all_zeros));
+}
+
+test "tokens_in_calldata - all non-zeros" {
+    const istanbul = Eips{ .hardfork = Hardfork.ISTANBUL };
+    const all_non_zeros = &[_]u8{0xFF} ** 10;
+    // Post-Istanbul: 10 non-zero bytes * 4 multiplier = 40 tokens
+    try std.testing.expectEqual(@as(u64, 40), istanbul.tokens_in_calldata(all_non_zeros));
+}
+
+test "tokens_in_calldata - mixed data" {
+    const istanbul = Eips{ .hardfork = Hardfork.ISTANBUL };
+    const mixed = &[_]u8{ 0x00, 0xFF, 0x00, 0x12, 0x00, 0x00, 0xAB, 0xCD, 0x00, 0xEF };
+    // 5 zero bytes (5 tokens) + 5 non-zero bytes * 4 = 25 tokens
+    try std.testing.expectEqual(@as(u64, 25), istanbul.tokens_in_calldata(mixed));
+}
+
+test "tokens_in_calldata - pre vs post Istanbul" {
+    // Pre-Istanbul configuration
+    var pre_istanbul = Eips{ .hardfork = Hardfork.BERLIN };
+    pre_istanbul.overrides = &[_]EipOverride{
+        .{ .eip = 2028, .enabled = false },
+    };
+
+    const istanbul = Eips{ .hardfork = Hardfork.ISTANBUL };
+
+    const data = &[_]u8{ 0x00, 0x00, 0xFF, 0xFF, 0xFF };
+
+    // Pre-Istanbul: 2 zeros (2 tokens) + 3 non-zeros * 17 = 53 tokens
+    try std.testing.expectEqual(@as(u64, 53), pre_istanbul.tokens_in_calldata(data));
+
+    // Post-Istanbul: 2 zeros (2 tokens) + 3 non-zeros * 4 = 14 tokens
+    try std.testing.expectEqual(@as(u64, 14), istanbul.tokens_in_calldata(data));
+}
+
+test "eip_3860_initcode_word_cost - pre-Shanghai" {
+    const pre_shanghai = Eips{ .hardfork = Hardfork.LONDON };
+
+    // Pre-Shanghai: always returns 0
+    try std.testing.expectEqual(@as(u64, 0), pre_shanghai.eip_3860_initcode_word_cost(0));
+    try std.testing.expectEqual(@as(u64, 0), pre_shanghai.eip_3860_initcode_word_cost(1));
+    try std.testing.expectEqual(@as(u64, 0), pre_shanghai.eip_3860_initcode_word_cost(32));
+    try std.testing.expectEqual(@as(u64, 0), pre_shanghai.eip_3860_initcode_word_cost(1000));
+}
+
+test "eip_3860_initcode_word_cost - post-Shanghai" {
+    const shanghai = Eips{ .hardfork = Hardfork.SHANGHAI };
+
+    // 0 bytes = 0 words = 0 cost
+    try std.testing.expectEqual(@as(u64, 0), shanghai.eip_3860_initcode_word_cost(0));
+
+    // 1 byte = 1 word = 2 gas
+    try std.testing.expectEqual(@as(u64, 2), shanghai.eip_3860_initcode_word_cost(1));
+
+    // 31 bytes = 1 word = 2 gas
+    try std.testing.expectEqual(@as(u64, 2), shanghai.eip_3860_initcode_word_cost(31));
+
+    // 32 bytes = 1 word = 2 gas
+    try std.testing.expectEqual(@as(u64, 2), shanghai.eip_3860_initcode_word_cost(32));
+
+    // 33 bytes = 2 words = 4 gas
+    try std.testing.expectEqual(@as(u64, 4), shanghai.eip_3860_initcode_word_cost(33));
+
+    // 64 bytes = 2 words = 4 gas
+    try std.testing.expectEqual(@as(u64, 4), shanghai.eip_3860_initcode_word_cost(64));
+
+    // 1024 bytes = 32 words = 64 gas
+    try std.testing.expectEqual(@as(u64, 64), shanghai.eip_3860_initcode_word_cost(1024));
+}
+
+test "intrinsic_gas_cost" {
+    const eips = Eips{ .hardfork = Hardfork.CANCUN };
+
+    // Call transaction
+    try std.testing.expectEqual(@as(u64, 21000), eips.intrinsic_gas_cost(false));
+
+    // Create transaction
+    try std.testing.expectEqual(@as(u64, 53000), eips.intrinsic_gas_cost(true));
+}
+
+test "calldata_gas_cost - call with empty data" {
+    const istanbul = Eips{ .hardfork = Hardfork.ISTANBUL };
+
+    // Call with no data: 0 tokens * 4 gas = 0
+    try std.testing.expectEqual(@as(u64, 0), istanbul.calldata_gas_cost(0, false, 0));
+}
+
+test "calldata_gas_cost - call with data" {
+    const istanbul = Eips{ .hardfork = Hardfork.ISTANBUL };
+
+    // Call with 25 tokens: 25 * 4 = 100 gas
+    try std.testing.expectEqual(@as(u64, 100), istanbul.calldata_gas_cost(25, false, 10));
+}
+
+test "calldata_gas_cost - create pre-Shanghai" {
+    const london = Eips{ .hardfork = Hardfork.LONDON };
+
+    // Create with 10 tokens, 100 bytes init code
+    // No init code cost pre-Shanghai
+    try std.testing.expectEqual(@as(u64, 40), london.calldata_gas_cost(10, true, 100));
+}
+
+test "calldata_gas_cost - create post-Shanghai" {
+    const shanghai = Eips{ .hardfork = Hardfork.SHANGHAI };
+
+    // Create with 10 tokens, 0 bytes init code
+    // 10 * 4 = 40 gas (no init code cost)
+    try std.testing.expectEqual(@as(u64, 40), shanghai.calldata_gas_cost(10, true, 0));
+
+    // Create with 10 tokens, 32 bytes init code
+    // 10 * 4 = 40 gas + 1 word * 2 = 42 gas
+    try std.testing.expectEqual(@as(u64, 42), shanghai.calldata_gas_cost(10, true, 32));
+
+    // Create with 10 tokens, 33 bytes init code
+    // 10 * 4 = 40 gas + 2 words * 2 = 44 gas
+    try std.testing.expectEqual(@as(u64, 44), shanghai.calldata_gas_cost(10, true, 33));
+
+    // Create with 10 tokens, 64 bytes init code
+    // 10 * 4 = 40 gas + 2 words * 2 = 44 gas
+    try std.testing.expectEqual(@as(u64, 44), shanghai.calldata_gas_cost(10, true, 64));
+}
+
+test "calldata_gas_cost - hardfork transitions" {
+    // Pre-Shanghai: no init code cost
+    const london = Eips{ .hardfork = Hardfork.LONDON };
+    try std.testing.expectEqual(@as(u64, 100), london.calldata_gas_cost(25, true, 1024));
+
+    // Shanghai: includes init code cost
+    const shanghai = Eips{ .hardfork = Hardfork.SHANGHAI };
+    // 25 * 4 = 100 gas + 32 words * 2 = 164 gas
+    try std.testing.expectEqual(@as(u64, 164), shanghai.calldata_gas_cost(25, true, 1024));
+
+    // Cancun: same as Shanghai
+    const cancun = Eips{ .hardfork = Hardfork.CANCUN };
+    try std.testing.expectEqual(@as(u64, 164), cancun.calldata_gas_cost(25, true, 1024));
+}
+
+test "floor_gas_cost - pre-Prague" {
+    const cancun = Eips{ .hardfork = Hardfork.CANCUN };
+
+    // Pre-Prague: always returns 0
+    try std.testing.expectEqual(@as(u64, 0), cancun.floor_gas_cost(0));
+    try std.testing.expectEqual(@as(u64, 0), cancun.floor_gas_cost(100));
+    try std.testing.expectEqual(@as(u64, 0), cancun.floor_gas_cost(10000));
+}
+
+test "floor_gas_cost - Prague" {
+    const prague = Eips{ .hardfork = Hardfork.PRAGUE };
+
+    // 0 tokens: 0 * 10 + 21000 = 21000
+    try std.testing.expectEqual(@as(u64, 21000), prague.floor_gas_cost(0));
+
+    // 100 tokens: 100 * 10 + 21000 = 22000
+    try std.testing.expectEqual(@as(u64, 22000), prague.floor_gas_cost(100));
+
+    // 1000 tokens: 1000 * 10 + 21000 = 31000
+    try std.testing.expectEqual(@as(u64, 31000), prague.floor_gas_cost(1000));
+
+    // 10000 tokens: 10000 * 10 + 21000 = 121000
+    try std.testing.expectEqual(@as(u64, 121000), prague.floor_gas_cost(10000));
+}
+
+test "integration - full gas calculation flow" {
+    const shanghai = Eips{ .hardfork = Hardfork.SHANGHAI };
+    const prague = Eips{ .hardfork = Hardfork.PRAGUE };
+
+    // Scenario: CREATE transaction with mixed calldata
+    const calldata = &[_]u8{ 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0x00, 0xAB, 0xCD };
+    const init_code_size: usize = 100;
+
+    // Calculate tokens: 3 zeros + 5 non-zeros * 4 = 23 tokens
+    const tokens = shanghai.tokens_in_calldata(calldata);
+    try std.testing.expectEqual(@as(u64, 23), tokens);
+
+    // Calculate intrinsic gas for CREATE
+    const intrinsic = shanghai.intrinsic_gas_cost(true);
+    try std.testing.expectEqual(@as(u64, 53000), intrinsic);
+
+    // Calculate calldata gas (Shanghai)
+    // 23 * 4 = 92 + ceil(100/32) * 2 = 92 + 4 * 2 = 100
+    const calldata_gas = shanghai.calldata_gas_cost(tokens, true, init_code_size);
+    try std.testing.expectEqual(@as(u64, 100), calldata_gas);
+
+    // Calculate floor gas (Prague only)
+    const floor_gas_shanghai = shanghai.floor_gas_cost(tokens);
+    try std.testing.expectEqual(@as(u64, 0), floor_gas_shanghai); // Not active in Shanghai
+
+    const floor_gas_prague = prague.floor_gas_cost(tokens);
+    try std.testing.expectEqual(@as(u64, 21230), floor_gas_prague); // 23 * 10 + 21000
+}
+
+test "edge cases - word boundaries" {
+    const shanghai = Eips{ .hardfork = Hardfork.SHANGHAI };
+
+    // Test word boundary calculations
+    const sizes = [_]usize{ 0, 1, 31, 32, 33, 63, 64, 65, 95, 96, 97 };
+    const expected_costs = [_]u64{ 0, 2, 2, 2, 4, 4, 4, 6, 6, 6, 8 };
+
+    for (sizes, expected_costs) |size, expected| {
+        const cost = shanghai.eip_3860_initcode_word_cost(size);
+        try std.testing.expectEqual(expected, cost);
+    }
+}
+
+test "edge cases - large calldata" {
+    const prague = Eips{ .hardfork = Hardfork.PRAGUE };
+
+    // Large calldata scenario
+    var large_data: [10000]u8 = undefined;
+
+    // Fill with pattern: alternating zeros and non-zeros
+    for (&large_data, 0..) |*byte, i| {
+        byte.* = if (i % 2 == 0) 0x00 else 0xFF;
+    }
+
+    // 5000 zeros + 5000 non-zeros * 4 = 25000 tokens
+    const tokens = prague.tokens_in_calldata(&large_data);
+    try std.testing.expectEqual(@as(u64, 25000), tokens);
+
+    // Floor gas: 25000 * 10 + 21000 = 271000
+    const floor_gas = prague.floor_gas_cost(tokens);
+    try std.testing.expectEqual(@as(u64, 271000), floor_gas);
+}
+
+test "regression - hardfork ordering" {
+    // Ensure EIPs are activated in correct order
+    const hardforks = [_]Hardfork{
+        .FRONTIER, .HOMESTEAD, .DAO, .TANGERINE, .SPURIOUS, .BYZANTIUM,
+        .CONSTANTINOPLE, .PETERSBURG, .ISTANBUL, .BERLIN, .LONDON,
+        .MERGE, .SHANGHAI, .CANCUN, .PRAGUE,
+    };
+
+    // EIP-2028 should be active from Istanbul onwards
+    for (hardforks, 0..) |fork, i| {
+        const eips = Eips{ .hardfork = fork };
+        const should_be_active = i >= @intFromEnum(Hardfork.ISTANBUL);
+        try std.testing.expectEqual(should_be_active, eips.is_eip_active(2028));
+    }
+
+    // EIP-3860 should be active from Shanghai onwards
+    for (hardforks, 0..) |fork, i| {
+        const eips = Eips{ .hardfork = fork };
+        const should_be_active = i >= @intFromEnum(Hardfork.SHANGHAI);
+        try std.testing.expectEqual(should_be_active, eips.is_eip_active(3860));
+    }
+
+    // EIP-7623 should be active from Prague onwards
+    for (hardforks, 0..) |fork, i| {
+        const eips = Eips{ .hardfork = fork };
+        const should_be_active = i >= @intFromEnum(Hardfork.PRAGUE);
+        try std.testing.expectEqual(should_be_active, eips.is_eip_active(7623));
+    }
 }
 
 test "eip_4844_blob_transactions" {
