@@ -1233,7 +1233,7 @@ pub const MinimalFrame = struct {
                 const value = try self.popStack();
 
                 const current_value = evm.get_storage(self.address, key);
-                const original_value = try evm.get_original_storage_value(self.address, key);
+                const original_value = evm.get_original_storage(self.address, key);
 
                 // Use comprehensive EIP-2200/EIP-2929 gas calculation
                 const gas_cost = try self.sstoreGasCost(key, current_value, original_value, value);

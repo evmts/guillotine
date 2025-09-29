@@ -89,14 +89,12 @@ pub const MinimalEvm = struct {
 
     frames: std.ArrayList(*MinimalFrame),
     storage: std.AutoHashMap(StorageSlotKey, u256),
+    original_storage: std.array_hash_map.ArrayHashMap(StorageSlotKey, u256, StorageSlotKeyContext, false),
     balances: std.AutoHashMap(Address, u256),
     code: std.AutoHashMap(Address, []const u8),
     // EIP-2929 warm/cold tracking (minimal)
     warm_addresses: std.array_hash_map.ArrayHashMap(Address, void, AddressContext, false),
     warm_storage_slots: std.array_hash_map.ArrayHashMap(StorageSlotKey, void, StorageSlotKeyContext, false),
-
-    // Original storage snapshots for SSTORE metering
-    original_storage: std.array_hash_map.ArrayHashMap(StorageSlotKey, u256, StorageSlotKeyContext, false),
 
     // Transaction-scoped gas refund counter
     gas_refund: u64,
@@ -137,11 +135,11 @@ pub const MinimalEvm = struct {
         return Self{
             .frames = frames_list,
             .storage = storage_map,
+            .original_storage = original_storage_map,
             .balances = balances_map,
             .code = code_map,
             .warm_addresses = warm_addresses,
             .warm_storage_slots = warm_storage_slots,
-            .original_storage = original_storage_map,
             .gas_refund = 0,
             .hardfork = Hardfork.DEFAULT,
             .chain_id = 1,
@@ -524,12 +522,10 @@ pub const MinimalEvm = struct {
 
     /// Set storage value (called by frame)
     pub fn set_storage(self: *Self, address: Address, slot: u256, value: u256) !void {
-        // Set the storage value
         if (self.host) |host| {
             host.setStorage(address, slot, value);
             return;
         }
-
         const key = StorageSlotKey{ .address = address, .slot = slot };
 
         // Track original value on first write in transaction
