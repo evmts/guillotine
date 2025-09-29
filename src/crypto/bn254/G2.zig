@@ -338,3 +338,260 @@ pub fn gamma_endomorphism(self: *const G2) G2 {
 pub fn gamma_lambda_endomorphism(self: *const G2) G2 {
     return self.gamma_endomorphism().lambda_endomorphism();
 }
+
+const std = @import("std");
+
+test "G2.isOnCurve generator" {
+    try std.testing.expect(G2.GENERATOR.isOnCurve());
+}
+
+test "G2.isOnCurve identity" {
+    try std.testing.expect(G2.INFINITY.isOnCurve());
+}
+
+test "G2.isOnCurve multiples" {
+    const scalars = [_]u256{ 2, 3, 7, 13, 27 };
+    for (scalars) |k| {
+        var scalar = Fr.init(k);
+        const point = G2.GENERATOR.mul(&scalar);
+        try std.testing.expect(point.isOnCurve());
+    }
+}
+
+test "G2.curve order annihilates subgroup points" {
+    const order = curve_parameters.FR_MOD;
+    const scalars = [_]u256{ 1, 5, 9, 33, 101 };
+    for (scalars) |k| {
+        var scalar = Fr.init(k);
+        const point = G2.GENERATOR.mul(&scalar);
+        const multiple = point.mul_by_int(order);
+        try std.testing.expect(multiple.isInfinity());
+    }
+}
+
+test "G2.isInSubgroup generator multiples" {
+    const scalars = [_]u256{ 1, 7, 19, 123, 98765 };
+    for (scalars) |k| {
+        var scalar = Fr.init(k);
+        const point = G2.GENERATOR.mul(&scalar);
+        try std.testing.expect(point.isInSubgroup());
+    }
+}
+
+test "G2.equal different representations same point" {
+    var scalar = Fr.init(11);
+    const point = G2.GENERATOR.mul(&scalar);
+    const scale = Fp2Mont.init_from_int(5, 0);
+    const scale_sq = scale.mul(&scale);
+    const scale_cu = scale_sq.mul(&scale);
+    const scaled = G2{
+        .x = point.x.mul(&scale_sq),
+        .y = point.y.mul(&scale_cu),
+        .z = point.z.mul(&scale),
+    };
+    try std.testing.expect(point.equal(&scaled));
+}
+
+test "G2.toAffine normalizes coordinates" {
+    var scalar = Fr.init(19);
+    const projective = G2.GENERATOR.mul(&scalar);
+    const affine = projective.toAffine();
+    try std.testing.expect(affine.z.equal(&Fp2Mont.ONE));
+    try std.testing.expect(projective.equal(&affine));
+    try std.testing.expect(affine.isOnCurve());
+}
+
+test "G2.add inverse gives infinity" {
+    var scalar = Fr.init(23);
+    const point = G2.GENERATOR.mul(&scalar);
+    const inverse = point.neg();
+    const sum = point.add(&inverse);
+    try std.testing.expect(sum.isInfinity());
+}
+
+test "G2.add commutativity" {
+    var s1 = Fr.init(9);
+    var s2 = Fr.init(17);
+    const p1 = G2.GENERATOR.mul(&s1);
+    const p2 = G2.GENERATOR.mul(&s2);
+    const left = p1.add(&p2);
+    const right = p2.add(&p1);
+    try std.testing.expect(left.equal(&right));
+}
+
+test "G2.add associativity" {
+    var s1 = Fr.init(5);
+    var s2 = Fr.init(11);
+    var s3 = Fr.init(19);
+    const p1 = G2.GENERATOR.mul(&s1);
+    const p2 = G2.GENERATOR.mul(&s2);
+    const p3 = G2.GENERATOR.mul(&s3);
+
+    var left = p1.add(&p2);
+    left.addAssign(&p3);
+    var right = p2.add(&p3);
+    right.addAssign(&p1);
+    try std.testing.expect(left.equal(&right));
+}
+
+test "G2.double matches add self" {
+    var scalar = Fr.init(29);
+    const point = G2.GENERATOR.mul(&scalar);
+    const doubled = point.double();
+    const sum = point.add(&point);
+    try std.testing.expect(doubled.equal(&sum));
+}
+
+test "G2.assignment helpers" {
+    var s1 = Fr.init(7);
+    var s2 = Fr.init(13);
+    var p = G2.GENERATOR.mul(&s1);
+    const q = G2.GENERATOR.mul(&s2);
+
+    const add_expected = p.add(&q);
+    p.addAssign(&q);
+    try std.testing.expect(p.equal(&add_expected));
+
+    p = G2.GENERATOR.mul(&s1);
+    const double_expected = p.double();
+    p.doubleAssign();
+    try std.testing.expect(p.equal(&double_expected));
+
+    p = G2.GENERATOR.mul(&s1);
+    const neg_expected = p.neg();
+    p.negAssign();
+    try std.testing.expect(p.equal(&neg_expected));
+
+    p = G2.GENERATOR.mul(&s1);
+    var scalar = Fr.init(21);
+    const mul_expected = p.mul(&scalar);
+    p.mulAssign(&scalar);
+    try std.testing.expect(p.equal(&mul_expected));
+}
+
+test "G2.mul matches naive ladder" {
+    const scalars = [_]u256{ 0, 1, 2, 3, 5, 9, 15, 37 };
+    for (scalars) |k| {
+        var expected = INFINITY;
+        var addend = G2.GENERATOR;
+        var tmp = k;
+        while (tmp != 0) : (tmp >>= 1) {
+            if ((tmp & 1) == 1) {
+                expected = expected.add(&addend);
+            }
+            addend = addend.double();
+        }
+        const actual = G2.GENERATOR.mul_by_int(k);
+        try std.testing.expect(expected.equal(&actual));
+    }
+}
+
+test "G2.mul edge cases" {
+    const zero = G2.GENERATOR.mul_by_int(0);
+    try std.testing.expect(zero.isInfinity());
+
+    const one = G2.GENERATOR.mul_by_int(1);
+    try std.testing.expect(one.equal(&G2.GENERATOR));
+
+    const near_order = curve_parameters.FR_MOD - 1;
+    const neg_point = G2.GENERATOR.neg();
+    const result = G2.GENERATOR.mul_by_int(near_order);
+    try std.testing.expect(result.equal(&neg_point));
+}
+
+test "G2.distributivity over addition" {
+    var s1 = Fr.init(8);
+    var s2 = Fr.init(21);
+    const scalar = Fr.init(17);
+    const p = G2.GENERATOR.mul(&s1);
+    const q = G2.GENERATOR.mul(&s2);
+
+    const lhs = p.mul(&scalar).add(&q.mul(&scalar));
+    const rhs = p.add(&q).mul(&scalar);
+    try std.testing.expect(lhs.equal(&rhs));
+}
+
+test "G2.lambda endomorphism equals multiplication by lambda" {
+    const lambda = Fr{ .value = curve_parameters.G2_SCALAR.lambda };
+    const scalars = [_]u256{ 1, 3, 17, 55, 1234 };
+    for (scalars) |k| {
+        var scalar = Fr.init(k);
+        const point = G2.GENERATOR.mul(&scalar);
+        const by_lambda = point.mul(&lambda);
+        const endo = point.lambda_endomorphism();
+        try std.testing.expect(by_lambda.equal(&endo));
+    }
+}
+
+test "G2.gamma endomorphism equals multiplication by gamma" {
+    const gamma = Fr{ .value = curve_parameters.G2_SCALAR.gamma };
+    const scalars = [_]u256{ 2, 9, 27, 91 };
+    for (scalars) |k| {
+        var scalar = Fr.init(k);
+        const point = G2.GENERATOR.mul(&scalar);
+        const by_gamma = point.mul(&gamma);
+        const endo = point.gamma_endomorphism();
+        try std.testing.expect(by_gamma.equal(&endo));
+    }
+}
+
+test "G2.gamma lambda endomorphism equals multiplication by gamma lambda" {
+    const gamma_lambda = Fr{ .value = curve_parameters.G2_SCALAR.gamma_lambda };
+    const scalars = [_]u256{ 4, 13, 29, 123 };
+    for (scalars) |k| {
+        var scalar = Fr.init(k);
+        const point = G2.GENERATOR.mul(&scalar);
+        const composed = point.gamma_endomorphism().lambda_endomorphism();
+        const by_gamma_lambda = point.mul(&gamma_lambda);
+        const direct = point.gamma_lambda_endomorphism();
+        try std.testing.expect(by_gamma_lambda.equal(&direct));
+        try std.testing.expect(composed.equal(&direct));
+    }
+}
+
+test "G2.frobenius has order 12" {
+    var scalar = Fr.init(15);
+    const point = G2.GENERATOR.mul(&scalar);
+    var iter = point;
+    var i: usize = 0;
+    while (i < 12) : (i += 1) {
+        iter = iter.frobenius();
+        try std.testing.expect(iter.isOnCurve());
+    }
+    try std.testing.expect(iter.equal(&point));
+}
+
+test "G2.decomposeScalar recomposes original" {
+    const scalars = [_]Fr{
+        Fr.init(1),
+        Fr.init(56789),
+        Fr.init(9876543210),
+        Fr.init(curve_parameters.FR_MOD - 5),
+        Fr.init(curve_parameters.FR_MOD / 2 + 12345),
+    };
+
+    const lambda = @as(i512, @intCast(curve_parameters.G2_SCALAR.lambda));
+    const gamma = @as(i512, @intCast(curve_parameters.G2_SCALAR.gamma));
+    const gamma_lambda = @as(i512, @intCast(curve_parameters.G2_SCALAR.gamma_lambda));
+    const modulus = @as(i512, @intCast(curve_parameters.FR_MOD));
+
+    for (scalars) |scalar_val| {
+        const decomposition = G2.decomposeScalar(scalar_val.value);
+        const k1 = @as(i512, decomposition.k1);
+        const k2 = @as(i512, decomposition.k2);
+        const k3 = @as(i512, decomposition.k3);
+        const k4 = @as(i512, decomposition.k4);
+
+        var acc = k1;
+        acc += lambda * k2;
+        acc += gamma * k3;
+        acc += gamma_lambda * k4;
+
+        var reconstructed = @mod(acc, modulus);
+        if (reconstructed < 0) {
+            reconstructed += modulus;
+        }
+        const expected = @as(i512, @intCast(scalar_val.value));
+        try std.testing.expect(reconstructed == expected);
+    }
+}

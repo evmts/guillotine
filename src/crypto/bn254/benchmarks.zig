@@ -64,6 +64,7 @@ const OperationSampleSizes = struct {
 
     g2_add: usize = 5,
     g2_double: usize = 5,
+    g2_is_in_subgroup: usize = 5,
     g2_scalar_mul: usize = 1,
 
     // Pairing operations - always single
@@ -809,6 +810,15 @@ fn benchG2Double(sample_size: usize) void {
     }
 }
 
+fn benchG2IsInSubgroup(sample_size: usize) void {
+    const test_inputs = getInputs();
+    const i = nextInputIndex();
+    for (0..sample_size) |j| {
+        const result = test_inputs.g2_points[(i + j) % 1000].isInSubgroup();
+        std.mem.doNotOptimizeAway(result);
+    }
+}
+
 fn benchG2ScalarMul(sample_size: usize) void {
     const test_inputs = getInputs();
     const i = nextInputIndex();
@@ -899,6 +909,7 @@ pub fn runComprehensiveBenchmarks(allocator: std.mem.Allocator) !void {
 
         .{ .name = "G2 Addition", .func = benchG2Add, .sample_size = operation_sample_sizes.g2_add, .is_slow = false },
         .{ .name = "G2 Doubling", .func = benchG2Double, .sample_size = operation_sample_sizes.g2_double, .is_slow = false },
+        .{ .name = "G2 Subgroup Check", .func = benchG2IsInSubgroup, .sample_size = operation_sample_sizes.g2_is_in_subgroup, .is_slow = true },
         .{ .name = "G2 Scalar Multiplication", .func = benchG2ScalarMul, .sample_size = operation_sample_sizes.g2_scalar_mul, .is_slow = true },
 
         // Pairing operations (slow)
