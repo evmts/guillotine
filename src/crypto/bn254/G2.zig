@@ -66,6 +66,8 @@ pub fn isOnCurve(self: *const G2) bool {
 pub fn isInSubgroup(self: *const G2) bool {
     // For BN254, G2 points are in the correct subgroup if [r]P = O
     // where r is the order of the scalar field (FR_MOD) and O is infinity
+    // you can reduce this to a smaller exponent check by using the frobenius map
+    // we use the shortest vector as given by https://eprint.iacr.org/2022/348.pdf
 
     // If point is infinity, it's in the subgroup
     if (self.isInfinity()) {
@@ -76,21 +78,16 @@ pub fn isInSubgroup(self: *const G2) bool {
         return false;
     }
 
-    // Create Fr element from curve order
-    //const r = Fr{ .value = curve_parameters.FR_MOD };
+    const point_times_t = self.mul_by_int(curve_parameters.CURVE_PARAM_T);
+    const point_times_2t = point_times_t.double();
+    const point_times_tp1 = point_times_t.add(self);
 
-    // Check if [r]P = O (infinity)
-    var exp = @as(u256, @intCast(curve_parameters.FR_MOD));
-    var result = INFINITY;
-    var base = self.*;
-    while (exp > 0) : (exp >>= 1) {
-        if (exp & 1 == 1) {
-            result.addAssign(&base);
-        }
-        base.doubleAssign();
-    }
+    const lhs = point_times_tp1
+        .add(&point_times_t.frobenius())
+        .add(&point_times_t.frobenius().frobenius());
+    const rhs = point_times_2t.frobenius().frobenius().frobenius();
 
-    return result.isInfinity();
+    return lhs.equal(&rhs);
 }
 
 pub fn neg(self: *const G2) G2 {
