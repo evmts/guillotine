@@ -72,12 +72,25 @@ pub fn isInSubgroup(self: *const G2) bool {
         return true;
     }
 
+    if (!self.isOnCurve()) {
+        return false;
+    }
+
     // Create Fr element from curve order
-    const r = Fr{ .value = curve_parameters.FR_MOD };
+    //const r = Fr{ .value = curve_parameters.FR_MOD };
 
     // Check if [r]P = O (infinity)
-    const r_times_p = self.mul(&r);
-    return r_times_p.isInfinity();
+    var exp = @as(u256, @intCast(curve_parameters.FR_MOD));
+    var result = INFINITY;
+    var base = self.*;
+    while (exp > 0) : (exp >>= 1) {
+        if (exp & 1 == 1) {
+            result.addAssign(&base);
+        }
+        base.doubleAssign();
+    }
+
+    return result.isInfinity();
 }
 
 pub fn neg(self: *const G2) G2 {
@@ -376,6 +389,15 @@ test "G2.isInSubgroup generator multiples" {
         const point = G2.GENERATOR.mul(&scalar);
         try std.testing.expect(point.isInSubgroup());
     }
+}
+
+test "G2.isInSubgroup non subgroup point" {
+    const x = Fp2Mont{ .u0 = FpMont{ .value = 122 }, .u1 = FpMont{ .value = 3333 } };
+    const y = Fp2Mont{ .u0 = FpMont{ .value = 4562906498667794019468448659772613644715180855375958127421599247974276735405 }, .u1 = FpMont{ .value = 11306249705311604911826567979787687424320829738512421461876664403170710609448 } };
+    const z = Fp2Mont.ONE;
+    const point = G2.initUnchecked(&x, &y, &z);
+    try std.testing.expect(point.isOnCurve());
+    try std.testing.expect(!point.isInSubgroup());
 }
 
 test "G2.equal different representations same point" {

@@ -85,6 +85,15 @@ pub fn mulAssign(self: *Fp2Mont, other: *const Fp2Mont) void {
     self.* = self.mul(other);
 }
 
+pub fn div(self: *const Fp2Mont, other: *const Fp2Mont) !Fp2Mont {
+    var inverse = try other.inv();
+    return self.mul(&inverse);
+}
+
+pub fn divAssign(self: *Fp2Mont, other: *const Fp2Mont) !void {
+    self.* = try self.div(other);
+}
+
 //we use double and add to multiply by a small integer
 pub fn mulBySmallInt(self: *const Fp2Mont, other: u8) Fp2Mont {
     var result = ZERO;

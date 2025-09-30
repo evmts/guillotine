@@ -93,6 +93,15 @@ pub fn mulAssign(self: *FpMont, other: *const FpMont) void {
     self.* = self.mul(other);
 }
 
+pub fn div(self: *const FpMont, other: *const FpMont) !FpMont {
+    var inverse = try other.inv();
+    return self.mul(&inverse);
+}
+
+pub fn divAssign(self: *FpMont, other: *const FpMont) !void {
+    self.* = try self.div(other);
+}
+
 // we use double and add to multiply by a small integer, this is faster than Montgomery multiplication for very small hamming weights
 pub fn mulBySmallInt(self: *const FpMont, other: u8) FpMont {
     var result = ZERO;
