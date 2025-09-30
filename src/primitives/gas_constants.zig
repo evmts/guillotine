@@ -227,6 +227,14 @@ pub const TxDataZeroGas: u64 = 4;
 /// Gas cost per non-zero byte in transaction data
 /// Higher cost reflects increased storage and bandwidth requirements
 pub const TxDataNonZeroGas: u64 = 16;
+pub const TxDataNonZeroGasPreIstanbul: u64 = 68;
+
+/// Multiplier for a non-zero byte in transaction data
+pub const TxDataNonZeroGasMultiplier: u64 = TxDataNonZeroGas / TxDataZeroGas;
+pub const TxDataNonZeroGasMultiplierPreIstanbul: u64 = TxDataNonZeroGasPreIstanbul / TxDataZeroGas;
+
+/// Gas cost per token for floor price
+pub const TxDataFloorTokenGas: u64 = 10;
 
 /// Gas cost per word for copy operations
 /// Applied to CODECOPY, EXTCODECOPY, RETURNDATACOPY, etc.
