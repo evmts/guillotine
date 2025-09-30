@@ -63,6 +63,22 @@ pub fn isOnCurve(self: *const G2) bool {
     return y_squared.equal(&rhs);
 }
 
+pub fn mulByCurveParamT(self: *const G2) G2 {
+    var result = INFINITY;
+    var base = self.*;
+    //var exp: u64 = curve_parameters.CURVE_PARAM_T;
+    const exp = curve_parameters.CURVE_PARAM_T_NAF;
+    for (exp) |bit| {
+        if (bit == 1) {
+            result.addAssign(&base);
+        } else if (bit == -1) {
+            result.addAssign(&base.neg());
+        }
+        base.doubleAssign();
+    }
+    return result;
+}
+
 pub fn isInSubgroup(self: *const G2) bool {
     // For BN254, G2 points are in the correct subgroup if [r]P = O
     // where r is the order of the scalar field (FR_MOD) and O is infinity
@@ -78,7 +94,7 @@ pub fn isInSubgroup(self: *const G2) bool {
         return false;
     }
 
-    const point_times_t = self.mul_by_int(curve_parameters.CURVE_PARAM_T);
+    const point_times_t = self.mulByCurveParamT();
     const point_times_2t = point_times_t.double();
     const point_times_tp1 = point_times_t.add(self);
 
