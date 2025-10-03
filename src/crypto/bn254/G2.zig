@@ -2,6 +2,7 @@ const FpMont = @import("FpMont.zig");
 const Fp2Mont = @import("Fp2Mont.zig");
 const Fr = @import("Fr.zig");
 const curve_parameters = @import("curve_parameters.zig");
+const wnaf = @import("NAF.zig").wnaf;
 
 pub const G2 = @This();
 x: Fp2Mont,
@@ -312,6 +313,77 @@ pub fn mul_by_int(self: *const G2, scalar: u256) G2 {
     }
 
     return result;
+}
+
+pub fn mul_by_int_gls_wnaf(self: *const G2, scalar: u256, window_size: comptime_int) G2 {
+    if (self.isInfinity() or scalar == 0) {
+        return INFINITY;
+    }
+
+    const decomposition = decomposeScalar(scalar);
+
+    var base_points = [4]G2{
+        self.*,
+        self.lambda_endomorphism(),
+        self.gamma_endomorphism(),
+        self.gamma_lambda_endomorphism(),
+    };
+
+    if (decomposition.k1 < 0) base_points[0].negAssign();
+    if (decomposition.k2 < 0) base_points[1].negAssign();
+    if (decomposition.k3 < 0) base_points[2].negAssign();
+    if (decomposition.k4 < 0) base_points[3].negAssign();
+
+    const PrecomputedPoints = [4][1 << (window_size - 2)]G2{
+        base_points[0].createTable(1 << (window_size - 2)),
+        base_points[1].createTable(1 << (window_size - 2)),
+        base_points[2].createTable(1 << (window_size - 2)),
+        base_points[3].createTable(1 << (window_size - 2)),
+    };
+
+    const k = [4][71]i8{
+        wnaf(window_size, u70, @abs(decomposition.k1)),
+        wnaf(window_size, u70, @abs(decomposition.k2)),
+        wnaf(window_size, u70, @abs(decomposition.k3)),
+        wnaf(window_size, u70, @abs(decomposition.k4)),
+    };
+
+    var result = INFINITY;
+    for (0..70) |i| {
+        result.doubleAssign();
+        for (0..4) |j| {
+            const bit = k[j][70 - i - 1];
+            if (bit != 0) {
+                const is_neg = if (bit < 0) true else false;
+                const index = @abs(bit) >> 1;
+                if (is_neg) {
+                    result.addAssign(&PrecomputedPoints[j][index].neg());
+                } else {
+                    result.addAssign(&PrecomputedPoints[j][index]);
+                }
+            }
+        }
+    }
+
+    return result;
+}
+
+//creates a table of size size containing P, 3P, 5P, 7P, ..., (2*size-1)P
+pub fn createTable(self: *const G2, size: comptime_int) [size]G2 {
+    var result: [size]G2 = undefined;
+    result[0] = self.*;
+    const double_point = self.double();
+    for (0..size - 1) |i| {
+        result[i + 1] = result[i].add(&double_point);
+    }
+    return result;
+}
+
+test "G2.mul_by_int_gls_wnaf" {
+    const point = G2.GENERATOR;
+    const scalar = Fr.init(11);
+    const result = point.mul_by_int_gls_wnaf(scalar.value, 4);
+    try std.testing.expect(result.equal(&point.mul(&scalar)));
 }
 
 fn get_precomputed_index(k1: u70, k2: u70, k3: u70, k4: u70, i: u7) u4 {

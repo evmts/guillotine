@@ -40,7 +40,7 @@ pub fn naf(n: u128) [128]i2 {
 /// Returns an array of length `@bitSizeOf(T) + 1` of signed i16 digits.
 /// Digits are in little-endian "bit index order": digit for 2^0 at index 0, etc.
 /// Non-zero digits are odd and in ±{1,3,...,2^{w-1}-1}, with ≥(w-1) zeros between them.
-pub fn wnaf(comptime w: comptime_int, comptime T: type, k: T) [@bitSizeOf(T) + 1]i16 {
+pub fn wnaf(comptime w: comptime_int, comptime T: type, k: T) [@bitSizeOf(T) + 1]i8 {
     comptime {
         if (w < 2) @compileError("wNAF width must be at least 2");
         // With i16 digits, the max nonzero is 2^{w-1}-1; w up to 16 fits safely.
@@ -51,7 +51,7 @@ pub fn wnaf(comptime w: comptime_int, comptime T: type, k: T) [@bitSizeOf(T) + 1
     // Wide type to allow +/- digit adjustments safely
     const Wide = std.meta.Int(.unsigned, nbits + w + 1);
 
-    var out: [nbits + 1]i16 = [_]i16{0} ** (nbits + 1);
+    var out: [nbits + 1]i8 = [_]i8{0} ** (nbits + 1);
 
     const base: Wide = @as(Wide, 1) << w; // 2^w
     const mask: Wide = base - 1; // (1<<w) - 1
@@ -64,7 +64,7 @@ pub fn wnaf(comptime w: comptime_int, comptime T: type, k: T) [@bitSizeOf(T) + 1
         if ((remaining & 1) == 1) {
             // Take the low w bits
             const chunk = remaining & mask;
-            var d: i16 = @intCast(chunk);
+            var d: i8 = @intCast(chunk);
             // Make it centered and odd in ±{1,3,...,2^{w-1}-1}
             if (chunk >= half) d -= @intCast(base);
 
@@ -136,8 +136,6 @@ test "wnaf decomposition" {
 
         for (values) |scalar| {
             const digits = wnaf(w, u128, scalar);
-            std.debug.print("scalar: {}, width: {}\n", .{ scalar, w });
-            std.debug.print("digits: {any}\n", .{digits});
 
             // Reconstruct and check invariants
             var recon: Signed = 0;
@@ -161,7 +159,7 @@ test "wnaf decomposition" {
                     try std.testing.expect((d & 1) != 0);
 
                     // Magnitude
-                    const ad: i16 = if (d >= 0) d else -d;
+                    const ad: i8 = if (d >= 0) d else -d;
                     try std.testing.expect(ad <= abs_bound);
 
                     // Sparsity: distance ≥ w between consecutive nonzeros
