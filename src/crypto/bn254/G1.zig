@@ -1,7 +1,9 @@
 const FpMont = @import("FpMont.zig");
 const Fr = @import("Fr.zig");
+const std = @import("std");
 const curve_parameters = @import("curve_parameters.zig");
 const naf = @import("NAF.zig").naf;
+const wnaf = @import("NAF.zig").wnaf;
 
 //G1 is the group of points on the elliptic curve y^2 = x^3 + 3
 // We use the Jacobian projective coordinates to represent the points
@@ -268,6 +270,58 @@ pub fn mul_by_int(self: *const G1, scalar: u256) G1 {
     return result;
 }
 
+// This uses GLS in NAF, we first compute k1 and k2 in NAF, such that k = k1 + λ * k2
+// we then use Shamir's trick to reduce the number of doublings
+pub fn mul_by_int_gls_wnaf(self: *const G1, scalar: u256, window_size: comptime_int) G1 {
+    const decomposition = decomposeScalar(scalar);
+    const k1 = decomposition.k1;
+    const naf_k1 = wnaf(window_size, u128, k1);
+    const k2 = decomposition.k2;
+    const naf_k2 = wnaf(window_size, u128, k2);
+
+    const PTable = self.createTable(1 << (window_size - 2));
+    const QTable = self.GLS_endomorphism().neg().createTable(1 << (window_size - 2));
+
+    var result = INFINITY;
+
+    for (0..128) |i| {
+        result.doubleAssign();
+
+        const k1_bit = naf_k1[127 - i];
+        const k2_bit = naf_k2[127 - i];
+        if (k1_bit != 0) {
+            const is_neg = if (k1_bit < 0) true else false;
+            const index = @abs(k1_bit) >> 1;
+            if (is_neg) {
+                result.addAssign(&PTable[index].neg());
+            } else {
+                result.addAssign(&PTable[index]);
+            }
+        }
+        if (k2_bit != 0) {
+            const is_neg = if (k2_bit < 0) true else false;
+            const index = @abs(k2_bit) >> 1;
+            if (is_neg) {
+                result.addAssign(&QTable[index].neg());
+            } else {
+                result.addAssign(&QTable[index]);
+            }
+        }
+    }
+    return result;
+}
+
+//creates a table of size size containing P, 3P, 5P, 7P, ..., (2*size-1)P
+pub fn createTable(self: *const G1, size: comptime_int) [size]G1 {
+    var result: [size]G1 = undefined;
+    result[0] = self.*;
+    const double_point = self.double();
+    for (0..size - 1) |i| {
+        result[i + 1] = result[i].add(&double_point);
+    }
+    return result;
+}
+
 pub fn mul(self: *const G1, scalar: *const Fr) G1 {
     return self.mul_by_int(scalar.value);
 }
@@ -279,8 +333,6 @@ pub fn mulAssign(self: *G1, scalar: *const Fr) void {
 // ============================================================================
 // TESTS - Adapted from g1.zig for Montgomery form
 // ============================================================================
-
-const std = @import("std");
 
 test "G1.add opposite" {
     const Gen = G1.GENERATOR;
