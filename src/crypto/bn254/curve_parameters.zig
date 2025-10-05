@@ -54,6 +54,7 @@ pub const FROBENIUS_COEFF_FP12 = Fp2Mont{ .u0 = FpMont{ .value = 0x2f34d751a1f3a
 
 // GLS constants grouped for G1 scalar decompositions
 pub const G1_SCALAR = struct {
+    pub const window_size: usize = 4;
     pub const cube_root: u256 = 2203960485148121921418603742825762020974279258880205651966;
     pub const lambda: u256 = 4407920970296243842393367215006156084916469457145843978461;
     pub const lattice_basis = [_]struct { x: i128, y: i128 }{
@@ -64,6 +65,7 @@ pub const G1_SCALAR = struct {
 
 // G2 GLS constants grouped similarly
 pub const G2_SCALAR = struct {
+    pub const window_size: usize = 3;
     pub const cube_root: u256 = 2203960485148121921418603742825762020974279258880205651966;
     pub const gamma: u256 = 21888242871839275217838484774961031246007050428528088939761107053157389710902;
     pub const lambda: u256 = 21888242871839275217838484774961031246154997185409878258781734729429964517155;

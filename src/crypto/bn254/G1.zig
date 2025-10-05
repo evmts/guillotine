@@ -231,53 +231,14 @@ pub fn decomposeScalar(scalar: u256) scalar_decomposition {
     return scalar_decomposition{ .k1 = @intCast(k1), .k2 = @intCast(k2) };
 }
 
-// This uses GLS in NAF, we first compute k1 and k2 in NAF, such that k = k1 + λ * k2
+// This uses GLS and wNAF, we first compute k1 and k2 in wNAF, such that k = k1 + λ * k2
 // we then use Shamir's trick to reduce the number of doublings
-pub fn mul_by_int(self: *const G1, scalar: u256) G1 {
+pub fn mul_by_int(self: *const G1, scalar: u256, window_size: comptime_int) G1 {
     const decomposition = decomposeScalar(scalar);
     const k1 = decomposition.k1;
-    const naf_k1 = naf(k1);
+    const wnaf_k1 = wnaf(window_size, u128, k1);
     const k2 = decomposition.k2;
-    const naf_k2 = naf(k2);
-
-    const P = self;
-    const Q = self.GLS_endomorphism().neg();
-    const P_plus_Q = P.add(&Q);
-    const P_minus_Q = P.sub(&Q);
-
-    var result = INFINITY;
-
-    for (0..128) |i| {
-        result.doubleAssign();
-
-        const k1_bit = naf_k1[127 - i];
-        const k2_bit = naf_k2[127 - i];
-        const switch_case: u4 = (@as(u4, @as(u2, @bitCast(k1_bit))) << 2) | @as(u2, @bitCast(k2_bit)); //combine k1 and k2 bits into a single switch case
-
-        switch (switch_case) { //(k1_bit, k2_bit)
-            0 => {}, // (0, 0)
-            1 => result.addAssign(&Q), // (0, 1)
-            3 => result.addAssign(&Q.neg()), // (0, -1)
-            4 => result.addAssign(P), // (1, 0)
-            5 => result.addAssign(&P_plus_Q), // (1, 1)
-            7 => result.addAssign(&P_minus_Q), // (1, -1)
-            12 => result.addAssign(&P.neg()), // (-1, 0)
-            13 => result.addAssign(&P_minus_Q.neg()), // (-1, 1)
-            15 => result.addAssign(&P_plus_Q.neg()), // (-1, -1)
-            else => unreachable,
-        }
-    }
-    return result;
-}
-
-// This uses GLS in NAF, we first compute k1 and k2 in NAF, such that k = k1 + λ * k2
-// we then use Shamir's trick to reduce the number of doublings
-pub fn mul_by_int_gls_wnaf(self: *const G1, scalar: u256, window_size: comptime_int) G1 {
-    const decomposition = decomposeScalar(scalar);
-    const k1 = decomposition.k1;
-    const naf_k1 = wnaf(window_size, u128, k1);
-    const k2 = decomposition.k2;
-    const naf_k2 = wnaf(window_size, u128, k2);
+    const wnaf_k2 = wnaf(window_size, u128, k2);
 
     const PTable = self.createTable(1 << (window_size - 2));
     const QTable = self.GLS_endomorphism().neg().createTable(1 << (window_size - 2));
@@ -287,8 +248,8 @@ pub fn mul_by_int_gls_wnaf(self: *const G1, scalar: u256, window_size: comptime_
     for (0..128) |i| {
         result.doubleAssign();
 
-        const k1_bit = naf_k1[127 - i];
-        const k2_bit = naf_k2[127 - i];
+        const k1_bit = wnaf_k1[127 - i];
+        const k2_bit = wnaf_k2[127 - i];
         if (k1_bit != 0) {
             const is_neg = if (k1_bit < 0) true else false;
             const index = @abs(k1_bit) >> 1;
@@ -323,7 +284,7 @@ pub fn createTable(self: *const G1, size: comptime_int) [size]G1 {
 }
 
 pub fn mul(self: *const G1, scalar: *const Fr) G1 {
-    return self.mul_by_int(scalar.value);
+    return self.mul_by_int(scalar.value, curve_parameters.G1_SCALAR.window_size);
 }
 
 pub fn mulAssign(self: *G1, scalar: *const Fr) void {

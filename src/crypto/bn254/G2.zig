@@ -271,51 +271,10 @@ pub fn decomposeScalar(scalar: u256) ScalarDecomposition {
 }
 
 pub fn mul(self: *const G2, scalar: *const Fr) G2 {
-    return self.mul_by_int(scalar.value);
+    return self.mul_by_int(scalar.value, curve_parameters.G2_SCALAR.window_size);
 }
 
-pub fn mul_by_int(self: *const G2, scalar: u256) G2 {
-    if (self.isInfinity() or scalar == 0) {
-        return INFINITY;
-    }
-
-    const decomposition = decomposeScalar(scalar);
-
-    var base_points = [4]G2{
-        self.*,
-        self.lambda_endomorphism(),
-        self.gamma_endomorphism(),
-        self.gamma_lambda_endomorphism(),
-    };
-
-    if (decomposition.k1 < 0) base_points[0].negAssign();
-    if (decomposition.k2 < 0) base_points[1].negAssign();
-    if (decomposition.k3 < 0) base_points[2].negAssign();
-    if (decomposition.k4 < 0) base_points[3].negAssign();
-
-    const precomputed_points = init_precomputed_points(&base_points);
-
-    const k1_abs: u70 = @intCast(@abs(decomposition.k1));
-    const k2_abs: u70 = @intCast(@abs(decomposition.k2));
-    const k3_abs: u70 = @intCast(@abs(decomposition.k3));
-    const k4_abs: u70 = @intCast(@abs(decomposition.k4));
-
-    const window_bits: usize = 70;
-    var result = INFINITY;
-    var i: usize = 0;
-    while (i < window_bits) : (i += 1) {
-        result.doubleAssign();
-        const bit_index: u7 = @intCast(window_bits - 1 - i);
-        const prec_index = get_precomputed_index(k1_abs, k2_abs, k3_abs, k4_abs, bit_index);
-        if (prec_index != 0) {
-            result.addAssign(&precomputed_points[prec_index]);
-        }
-    }
-
-    return result;
-}
-
-pub fn mul_by_int_gls_wnaf(self: *const G2, scalar: u256, window_size: comptime_int) G2 {
+pub fn mul_by_int(self: *const G2, scalar: u256, window_size: comptime_int) G2 {
     if (self.isInfinity() or scalar == 0) {
         return INFINITY;
     }
@@ -379,33 +338,6 @@ pub fn createTable(self: *const G2, size: comptime_int) [size]G2 {
     return result;
 }
 
-test "G2.mul_by_int_gls_wnaf" {
-    const point = G2.GENERATOR;
-    const scalar = Fr.init(11);
-    const result = point.mul_by_int_gls_wnaf(scalar.value, 4);
-    try std.testing.expect(result.equal(&point.mul(&scalar)));
-}
-
-fn get_precomputed_index(k1: u70, k2: u70, k3: u70, k4: u70, i: u7) u4 {
-    const k4_bit = @as(u4, @intCast((k4 >> i) & 1));
-    const k3_bit = @as(u4, @intCast((k3 >> i) & 1));
-    const k2_bit = @as(u4, @intCast((k2 >> i) & 1));
-    const k1_bit = @as(u4, @intCast((k1 >> i) & 1));
-    return k4_bit << 3 | k3_bit << 2 | k2_bit << 1 | k1_bit;
-}
-
-fn init_precomputed_points(points: *const [4]G2) [16]G2 {
-    var result: [16]G2 = undefined;
-    result[0] = INFINITY;
-    inline for (0..4) |i| {
-        const current_size = 1 << i;
-        for (0..current_size) |j| {
-            result[current_size + j] = result[j].add(&points[i]);
-        }
-    }
-    return result;
-}
-
 pub fn mulAssign(self: *G2, scalar: *const Fr) void {
     self.* = self.mul(scalar);
 }
@@ -462,7 +394,7 @@ test "G2.curve order annihilates subgroup points" {
     for (scalars) |k| {
         var scalar = Fr.init(k);
         const point = G2.GENERATOR.mul(&scalar);
-        const multiple = point.mul_by_int(order);
+        const multiple = point.mul_by_int(order, curve_parameters.G2_SCALAR.window_size);
         try std.testing.expect(multiple.isInfinity());
     }
 }
@@ -588,21 +520,21 @@ test "G2.mul matches naive ladder" {
             }
             addend = addend.double();
         }
-        const actual = G2.GENERATOR.mul_by_int(k);
+        const actual = G2.GENERATOR.mul_by_int(k, curve_parameters.G2_SCALAR.window_size);
         try std.testing.expect(expected.equal(&actual));
     }
 }
 
 test "G2.mul edge cases" {
-    const zero = G2.GENERATOR.mul_by_int(0);
+    const zero = G2.GENERATOR.mul_by_int(0, curve_parameters.G2_SCALAR.window_size);
     try std.testing.expect(zero.isInfinity());
 
-    const one = G2.GENERATOR.mul_by_int(1);
+    const one = G2.GENERATOR.mul_by_int(1, curve_parameters.G2_SCALAR.window_size);
     try std.testing.expect(one.equal(&G2.GENERATOR));
 
     const near_order = curve_parameters.FR_MOD - 1;
     const neg_point = G2.GENERATOR.neg();
-    const result = G2.GENERATOR.mul_by_int(near_order);
+    const result = G2.GENERATOR.mul_by_int(near_order, curve_parameters.G2_SCALAR.window_size);
     try std.testing.expect(result.equal(&neg_point));
 }
 

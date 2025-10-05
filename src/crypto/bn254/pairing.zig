@@ -277,10 +277,10 @@ test "pairing bilinearity and infinity montgomery" {
     var i: u256 = 0;
     for (test_cases) |test_case| {
         i += 1;
-        const p1 = G1.GENERATOR.mul_by_int(test_case.p1);
-        const p2 = G1.GENERATOR.mul_by_int(test_case.p2);
-        const q1 = G2.GENERATOR.mul_by_int(test_case.q1);
-        const q2 = G2.GENERATOR.mul_by_int(test_case.q2);
+        const p1 = G1.GENERATOR.mul_by_int(test_case.p1, curve_parameters.G1_SCALAR.window_size);
+        const p2 = G1.GENERATOR.mul_by_int(test_case.p2, curve_parameters.G1_SCALAR.window_size);
+        const q1 = G2.GENERATOR.mul_by_int(test_case.q1, curve_parameters.G2_SCALAR.window_size);
+        const q2 = G2.GENERATOR.mul_by_int(test_case.q2, curve_parameters.G2_SCALAR.window_size);
 
         // Test bilinearity in first argument: e(P1 + P2, Q) = e(P1, Q) * e(P2, Q)
         const p1_plus_p2 = p1.add(&p2);
@@ -298,7 +298,7 @@ test "pairing bilinearity and infinity montgomery" {
         try std.testing.expect(left_side_2.equal(&right_side_2));
 
         // Test scalar multiplication
-        const scalar_times_p1 = p1.mul_by_int(test_case.scalar);
+        const scalar_times_p1 = p1.mul_by_int(test_case.scalar, curve_parameters.G1_SCALAR.window_size);
         const left_side_3 = pairing(&scalar_times_p1, &q1);
         const right_side_3 = e_p1_q1.pow(test_case.scalar);
         try std.testing.expect(left_side_3.equal(&right_side_3));

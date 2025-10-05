@@ -61,20 +61,10 @@ const OperationSampleSizes = struct {
     g1_add: usize = 10,
     g1_double: usize = 10,
     g1_scalar_mul: usize = 1,
-    g1_mul_by_int_gls_wnaf_window_2: usize = 1,
-    g1_mul_by_int_gls_wnaf_window_3: usize = 1,
-    g1_mul_by_int_gls_wnaf_window_4: usize = 1,
-    g1_mul_by_int_gls_wnaf_window_5: usize = 1,
-
     g2_add: usize = 5,
     g2_double: usize = 5,
     g2_is_in_subgroup: usize = 5,
     g2_scalar_mul: usize = 1,
-    g2_mul_by_int_gls_wnaf_window_2: usize = 1,
-    g2_mul_by_int_gls_wnaf_window_3: usize = 1,
-    g2_mul_by_int_gls_wnaf_window_4: usize = 1,
-    g2_mul_by_int_gls_wnaf_window_5: usize = 1,
-    g2_mul_by_int_gls_wnaf_window_6: usize = 1,
 
     // Pairing operations - always single
     pairing: usize = 1,
@@ -801,46 +791,6 @@ fn benchG1ScalarMul(sample_size: usize) void {
     }
 }
 
-fn benchG1MulByIntGlsWnafWindow2(sample_size: usize) void {
-    const test_inputs = getInputs();
-    const i = nextInputIndex();
-    for (0..sample_size) |j| {
-        const index = (i + j) % 1000;
-        const result = test_inputs.g1_points[index].mul_by_int_gls_wnaf(test_inputs.fr_a[index].value, 2);
-        std.mem.doNotOptimizeAway(result);
-    }
-}
-
-fn benchG1MulByIntGlsWnafWindow3(sample_size: usize) void {
-    const test_inputs = getInputs();
-    const i = nextInputIndex();
-    for (0..sample_size) |j| {
-        const index = (i + j) % 1000;
-        const result = test_inputs.g1_points[index].mul_by_int_gls_wnaf(test_inputs.fr_a[index].value, 3);
-        std.mem.doNotOptimizeAway(result);
-    }
-}
-
-fn benchG1MulByIntGlsWnafWindow4(sample_size: usize) void {
-    const test_inputs = getInputs();
-    const i = nextInputIndex();
-    for (0..sample_size) |j| {
-        const index = (i + j) % 1000;
-        const result = test_inputs.g1_points[index].mul_by_int_gls_wnaf(test_inputs.fr_a[index].value, 4);
-        std.mem.doNotOptimizeAway(result);
-    }
-}
-
-fn benchG1MulByIntGlsWnafWindow5(sample_size: usize) void {
-    const test_inputs = getInputs();
-    const i = nextInputIndex();
-    for (0..sample_size) |j| {
-        const index = (i + j) % 1000;
-        const result = test_inputs.g1_points[index].mul_by_int_gls_wnaf(test_inputs.fr_a[index].value, 5);
-        std.mem.doNotOptimizeAway(result);
-    }
-}
-
 fn benchG2Add(sample_size: usize) void {
     const test_inputs = getInputs();
     const i = nextInputIndex();
@@ -873,56 +823,6 @@ fn benchG2ScalarMul(sample_size: usize) void {
     const i = nextInputIndex();
     for (0..sample_size) |j| {
         const result = test_inputs.g2_points[(i + j) % 1000].mul(&test_inputs.fr_a[(i + j) % 1000]);
-        std.mem.doNotOptimizeAway(result);
-    }
-}
-
-fn benchG2MulByIntGlsWnafWindow2(sample_size: usize) void {
-    const test_inputs = getInputs();
-    const i = nextInputIndex();
-    for (0..sample_size) |j| {
-        const index = (i + j) % 1000;
-        const result = test_inputs.g2_points[index].mul_by_int_gls_wnaf(test_inputs.fr_a[index].value, 2);
-        std.mem.doNotOptimizeAway(result);
-    }
-}
-
-fn benchG2MulByIntGlsWnafWindow3(sample_size: usize) void {
-    const test_inputs = getInputs();
-    const i = nextInputIndex();
-    for (0..sample_size) |j| {
-        const index = (i + j) % 1000;
-        const result = test_inputs.g2_points[index].mul_by_int_gls_wnaf(test_inputs.fr_a[index].value, 3);
-        std.mem.doNotOptimizeAway(result);
-    }
-}
-
-fn benchG2MulByIntGlsWnafWindow4(sample_size: usize) void {
-    const test_inputs = getInputs();
-    const i = nextInputIndex();
-    for (0..sample_size) |j| {
-        const index = (i + j) % 1000;
-        const result = test_inputs.g2_points[index].mul_by_int_gls_wnaf(test_inputs.fr_a[index].value, 4);
-        std.mem.doNotOptimizeAway(result);
-    }
-}
-
-fn benchG2MulByIntGlsWnafWindow5(sample_size: usize) void {
-    const test_inputs = getInputs();
-    const i = nextInputIndex();
-    for (0..sample_size) |j| {
-        const index = (i + j) % 1000;
-        const result = test_inputs.g2_points[index].mul_by_int_gls_wnaf(test_inputs.fr_a[index].value, 5);
-        std.mem.doNotOptimizeAway(result);
-    }
-}
-
-fn benchG2MulByIntGlsWnafWindow6(sample_size: usize) void {
-    const test_inputs = getInputs();
-    const i = nextInputIndex();
-    for (0..sample_size) |j| {
-        const index = (i + j) % 1000;
-        const result = test_inputs.g2_points[index].mul_by_int_gls_wnaf(test_inputs.fr_a[index].value, 6);
         std.mem.doNotOptimizeAway(result);
     }
 }
@@ -1005,20 +905,11 @@ pub fn runComprehensiveBenchmarks(allocator: std.mem.Allocator) !void {
         .{ .name = "G1 Addition", .func = benchG1Add, .sample_size = operation_sample_sizes.g1_add, .is_slow = false },
         .{ .name = "G1 Doubling", .func = benchG1Double, .sample_size = operation_sample_sizes.g1_double, .is_slow = false },
         .{ .name = "G1 Scalar Multiplication", .func = benchG1ScalarMul, .sample_size = operation_sample_sizes.g1_scalar_mul, .is_slow = true },
-        .{ .name = "G1 GLS WNAF Scalar Multiplication (window 2)", .func = benchG1MulByIntGlsWnafWindow2, .sample_size = operation_sample_sizes.g1_mul_by_int_gls_wnaf_window_2, .is_slow = true },
-        .{ .name = "G1 GLS WNAF Scalar Multiplication (window 3)", .func = benchG1MulByIntGlsWnafWindow3, .sample_size = operation_sample_sizes.g1_mul_by_int_gls_wnaf_window_3, .is_slow = true },
-        .{ .name = "G1 GLS WNAF Scalar Multiplication (window 4)", .func = benchG1MulByIntGlsWnafWindow4, .sample_size = operation_sample_sizes.g1_mul_by_int_gls_wnaf_window_4, .is_slow = true },
-        .{ .name = "G1 GLS WNAF Scalar Multiplication (window 5)", .func = benchG1MulByIntGlsWnafWindow5, .sample_size = operation_sample_sizes.g1_mul_by_int_gls_wnaf_window_5, .is_slow = true },
 
         .{ .name = "G2 Addition", .func = benchG2Add, .sample_size = operation_sample_sizes.g2_add, .is_slow = false },
         .{ .name = "G2 Doubling", .func = benchG2Double, .sample_size = operation_sample_sizes.g2_double, .is_slow = false },
         .{ .name = "G2 Subgroup Check", .func = benchG2IsInSubgroup, .sample_size = operation_sample_sizes.g2_is_in_subgroup, .is_slow = true },
         .{ .name = "G2 Scalar Multiplication", .func = benchG2ScalarMul, .sample_size = operation_sample_sizes.g2_scalar_mul, .is_slow = true },
-        .{ .name = "G2 GLS WNAF Scalar Multiplication (window 2)", .func = benchG2MulByIntGlsWnafWindow2, .sample_size = operation_sample_sizes.g2_mul_by_int_gls_wnaf_window_2, .is_slow = true },
-        .{ .name = "G2 GLS WNAF Scalar Multiplication (window 3)", .func = benchG2MulByIntGlsWnafWindow3, .sample_size = operation_sample_sizes.g2_mul_by_int_gls_wnaf_window_3, .is_slow = true },
-        .{ .name = "G2 GLS WNAF Scalar Multiplication (window 4)", .func = benchG2MulByIntGlsWnafWindow4, .sample_size = operation_sample_sizes.g2_mul_by_int_gls_wnaf_window_4, .is_slow = true },
-        .{ .name = "G2 GLS WNAF Scalar Multiplication (window 5)", .func = benchG2MulByIntGlsWnafWindow5, .sample_size = operation_sample_sizes.g2_mul_by_int_gls_wnaf_window_5, .is_slow = true },
-        .{ .name = "G2 GLS WNAF Scalar Multiplication (window 6)", .func = benchG2MulByIntGlsWnafWindow6, .sample_size = operation_sample_sizes.g2_mul_by_int_gls_wnaf_window_6, .is_slow = true },
 
         // Pairing operations (slow)
         .{ .name = "Full Pairing", .func = benchPairing, .sample_size = operation_sample_sizes.pairing, .is_slow = true },
