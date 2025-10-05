@@ -2247,4 +2247,12 @@ test {
     _ = @import("eest/prague/eip7002_el_triggerable_withdrawals/contract_deploy_tx_hash_test.zig");
     _ = @import("eest/prague/eip7002_el_triggerable_withdrawals/contract_deploy_tx_protected_test.zig");
     _ = @import("eest/prague/eip7002_el_triggerable_withdrawals/contract_deploy_tx_sender_test.zig");
+
+    _ = @import("eest/prague/eip7623_increase_calldata_cost/test_full_gas_consumption.zig");
+    _ = @import("eest/prague/eip7623_increase_calldata_cost/test_gas_consumption_below_data_floor.zig");
+    _ = @import("eest/prague/eip7623_increase_calldata_cost/test_gas_refunds_from_data_floor.zig");
+    _ = @import("eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_0.zig");
+    _ = @import("eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_1_type_2.zig");
+    _ = @import("eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_3.zig");
+    _ = @import("eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.zig");
 }
