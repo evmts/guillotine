@@ -272,11 +272,23 @@ pub fn runJsonTest(allocator: std.mem.Allocator, test_case: std.json.Value) !voi
                 break :blk try parseIntFromJson(g);
             } else 10;
 
+            // Determine max fee per gas
+            const max_fee_per_gas = if (tx.object.get("maxFeePerGas")) |m| blk: {
+                break :blk try parseIntFromJson(m);
+            } else 10;
+
+            // Determine max priority fee per gas
+            const max_priority_fee_per_gas = if (tx.object.get("maxPriorityFeePerGas")) |m| blk: {
+                break :blk try parseIntFromJson(m);
+            } else 10;
+
             // Create EVM with transaction context (create per transaction to set correct origin)
             const tx_context = evm.TransactionContext{
                 .gas_limit = 10000000,
                 .coinbase = block_info.coinbase,
                 .chain_id = 1,
+                .max_fee_per_gas = max_fee_per_gas,
+                .max_priority_fee_per_gas = max_priority_fee_per_gas,
             };
 
             var evm_instance = try evm.DefaultEvm.init(

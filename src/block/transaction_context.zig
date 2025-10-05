@@ -22,6 +22,12 @@ pub const TransactionContext = struct {
     /// Set to 0 for non-Cancun hardforks
     /// TODO: this is a block-level setting (and already present in BlockInfo), should be removed
     blob_base_fee: u256 = 0,
+    /// Maximum fee per gas (EIP-1559 type 2+ transactions)
+    /// For legacy tx, this should equal gasPrice
+    max_fee_per_gas: u64 = 0,
+    /// Priority fee per gas / tip (EIP-1559 type 2+ transactions)
+    /// For legacy tx, this is 0
+    max_priority_fee_per_gas: u64 = 0,
 };
 
 test "TransactionContext creation and field access" {

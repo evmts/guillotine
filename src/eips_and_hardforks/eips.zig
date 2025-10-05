@@ -468,6 +468,44 @@ pub const Eips = struct {
         if (!self.is_eip_active(7623)) return 0;
         return calldata_tokens * GasConstants.TxDataFloorTokenGas + GasConstants.TxGas;
     }
+
+    /// Calculate effective gas price for a transaction based on EIP-1559
+    ///
+    /// For legacy transactions (pre-EIP-1559):
+    /// - Returns max_fee_per_gas (which equals the legacy gas_price field)
+    ///
+    /// For EIP-1559 transactions (London+):
+    /// - Returns min(max_fee_per_gas, base_fee_per_gas + max_priority_fee_per_gas)
+    /// - This is the actual price the sender pays per gas
+    ///
+    /// Parameters:
+    /// - base_fee_per_gas: Current block's base fee (from BlockInfo)
+    /// - max_fee_per_gas: Maximum fee per gas sender willing to pay (from TransactionContext)
+    /// - max_priority_fee_per_gas: Maximum priority fee (tip) sender willing to pay (from TransactionContext)
+    ///
+    /// Returns:
+    /// - effective_gas_price: Actual gas price charged to sender
+    /// - miner_fee: Fee that goes to the miner/validator
+    pub fn effective_gas_price(self: Self, base_fee_per_gas: u64, max_fee_per_gas: u64, max_priority_fee_per_gas: u64) struct { effective_gas_price: u64, miner_fee: u64 } {
+        // Pre-EIP-1559: Use max_fee_per_gas directly (which is the legacy gas_price)
+        // For legacy transactions, the entire gas price goes to the miner (no base fee burned)
+        if (!self.is_eip_active(1559)) {
+            return .{ .effective_gas_price = max_fee_per_gas, .miner_fee = max_fee_per_gas };
+        }
+
+        // EIP-1559: Calculate effective gas price using base fee and priority fee
+        // Ensure the transaction at least pays the base fee
+        if (max_fee_per_gas < base_fee_per_gas) {
+            // Transaction's max fee is less than base fee (would be rejected in practice)
+            return .{ .effective_gas_price = max_fee_per_gas, .miner_fee = 0 };
+        }
+
+        // Calculate the priority fee (tip to miner)
+        // Limited by both max_priority_fee_per_gas and the leftover after base fee
+        const max_priority_fee = @min(max_priority_fee_per_gas, max_fee_per_gas - base_fee_per_gas);
+
+        return .{ .effective_gas_price = base_fee_per_gas + max_priority_fee, .miner_fee = max_priority_fee };
+    }
 };
 
 const std = @import("std");
@@ -1303,4 +1341,113 @@ test "EIP overrides - no overrides" {
     try std.testing.expectEqual(cancun_default.is_eip_active(4844), cancun_no_overrides.is_eip_active(4844));
     try std.testing.expectEqual(cancun_default.eip_1559_is_enabled(), cancun_no_overrides.eip_1559_is_enabled());
     try std.testing.expectEqual(cancun_default.eip_3855_push0_enabled(), cancun_no_overrides.eip_3855_push0_enabled());
+}
+
+test "effective_gas_price - pre-EIP-1559 (legacy transactions)" {
+    const pre_london = Eips{ .hardfork = Hardfork.BERLIN };
+
+    // Legacy transaction: max_fee_per_gas is the gas_price, max_priority_fee is ignored
+    const result = pre_london.effective_gas_price(
+        0, // base_fee (ignored for legacy)
+        20_000_000_000, // max_fee_per_gas (legacy gas_price: 20 gwei)
+        0, // max_priority_fee_per_gas (ignored for legacy)
+    );
+
+    // For legacy transactions, effective price equals max_fee_per_gas
+    try std.testing.expectEqual(@as(u64, 20_000_000_000), result.effective_gas_price);
+    try std.testing.expectEqual(@as(u64, 20_000_000_000), result.miner_fee);
+}
+
+test "effective_gas_price - EIP-1559 normal case" {
+    const london = Eips{ .hardfork = Hardfork.LONDON };
+
+    // EIP-1559 transaction with sufficient max fee
+    const result = london.effective_gas_price(
+        1_000_000_000, // base_fee: 1 gwei
+        3_000_000_000, // max_fee_per_gas: 3 gwei
+        500_000_000, // max_priority_fee_per_gas: 0.5 gwei
+    );
+
+    // Effective price = base_fee + min(max_priority_fee, max_fee - base_fee)
+    // = 1 + min(0.5, 3 - 1) = 1 + 0.5 = 1.5 gwei
+    try std.testing.expectEqual(@as(u64, 1_500_000_000), result.effective_gas_price);
+    try std.testing.expectEqual(@as(u64, 500_000_000), result.miner_fee);
+}
+
+test "effective_gas_price - EIP-1559 capped priority fee" {
+    const london = Eips{ .hardfork = Hardfork.LONDON };
+
+    // EIP-1559 transaction where priority fee is capped by max_fee
+    const result = london.effective_gas_price(
+        1_000_000_000, // base_fee: 1 gwei
+        1_200_000_000, // max_fee_per_gas: 1.2 gwei
+        500_000_000, // max_priority_fee_per_gas: 0.5 gwei (wants to tip 0.5)
+    );
+
+    // max_fee - base_fee = 0.2 gwei (only 0.2 available for tip)
+    // Effective price = 1 + min(0.5, 0.2) = 1.2 gwei
+    try std.testing.expectEqual(@as(u64, 1_200_000_000), result.effective_gas_price);
+    try std.testing.expectEqual(@as(u64, 200_000_000), result.miner_fee);
+}
+
+test "effective_gas_price - EIP-1559 max_fee below base_fee" {
+    const london = Eips{ .hardfork = Hardfork.LONDON };
+
+    // Transaction with max_fee below base_fee (would be rejected in practice)
+    const result = london.effective_gas_price(
+        1_000_000_000, // base_fee: 1 gwei
+        800_000_000, // max_fee_per_gas: 0.8 gwei (below base fee!)
+        500_000_000, // max_priority_fee_per_gas: 0.5 gwei
+    );
+
+    // This transaction would be rejected, but the function returns max_fee
+    try std.testing.expectEqual(@as(u64, 800_000_000), result.effective_gas_price);
+    try std.testing.expectEqual(@as(u64, 0), result.miner_fee);
+}
+
+test "effective_gas_price - EIP-1559 zero priority fee" {
+    const london = Eips{ .hardfork = Hardfork.LONDON };
+
+    // Transaction with no tip
+    const result = london.effective_gas_price(
+        1_000_000_000, // base_fee: 1 gwei
+        2_000_000_000, // max_fee_per_gas: 2 gwei
+        0, // max_priority_fee_per_gas: 0 (no tip)
+    );
+
+    // Effective price = base_fee + 0 = 1 gwei
+    try std.testing.expectEqual(@as(u64, 1_000_000_000), result.effective_gas_price);
+    try std.testing.expectEqual(@as(u64, 0), result.miner_fee);
+}
+
+test "effective_gas_price - hardfork progression" {
+    // Test that EIP-1559 behavior activates at London
+    const hardforks = [_]struct { fork: Hardfork, uses_eip1559: bool }{
+        .{ .fork = Hardfork.FRONTIER, .uses_eip1559 = false },
+        .{ .fork = Hardfork.HOMESTEAD, .uses_eip1559 = false },
+        .{ .fork = Hardfork.BERLIN, .uses_eip1559 = false },
+        .{ .fork = Hardfork.LONDON, .uses_eip1559 = true },
+        .{ .fork = Hardfork.SHANGHAI, .uses_eip1559 = true },
+        .{ .fork = Hardfork.CANCUN, .uses_eip1559 = true },
+        .{ .fork = Hardfork.PRAGUE, .uses_eip1559 = true },
+    };
+
+    for (hardforks) |hf| {
+        const eips = Eips{ .hardfork = hf.fork };
+        const result = eips.effective_gas_price(
+            1_000_000_000, // base_fee: 1 gwei
+            2_000_000_000, // max_fee_per_gas: 2 gwei
+            500_000_000, // max_priority_fee_per_gas: 0.5 gwei
+        );
+
+        if (hf.uses_eip1559) {
+            // Post-London: effective_gas_price = base_fee + priority_fee
+            try std.testing.expectEqual(@as(u64, 1_500_000_000), result.effective_gas_price);
+            try std.testing.expectEqual(@as(u64, 500_000_000), result.miner_fee);
+        } else {
+            // Pre-London: effective_gas_price = max_fee_per_gas
+            try std.testing.expectEqual(@as(u64, 2_000_000_000), result.effective_gas_price);
+            try std.testing.expectEqual(@as(u64, 2_000_000_000), result.miner_fee);
+        }
+    }
 }

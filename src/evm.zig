@@ -141,7 +141,25 @@ pub fn Evm(config: EvmConfig) type {
         /// Sets up the execution environment with state storage, block context,
         /// and transaction parameters. The planner cache is initialized with
         /// a default size for bytecode optimization.
+        ///
+        /// The effective gas price is calculated automatically from transaction context:
+        /// - Pre-EIP-1559: Uses max_fee_per_gas (which contains the legacy gas_price)
+        /// - Post-EIP-1559 (London+): min(max_fee_per_gas, base_fee + max_priority_fee_per_gas)
+        ///
+        /// If gas_price parameter is non-zero, it will be used as-is (for backward compatibility).
+        /// If gas_price parameter is 0, it will be calculated from context and block_info.
         pub fn init(allocator: std.mem.Allocator, database: ?*Database, block_info: BlockInfo, context: TransactionContext, gas_price: u256, origin: primitives.Address) !Self {
+            // Calculate effective gas price from transaction context and block info if not provided
+            const effective_gas_price = if (gas_price == 0) blk: {
+                const base_fee_u64 = @as(u64, @truncate(block_info.base_fee));
+                const gas_price_result = config.eips.effective_gas_price(
+                    base_fee_u64,
+                    context.max_fee_per_gas,
+                    context.max_priority_fee_per_gas,
+                );
+                break :blk @as(u256, gas_price_result.effective_gas_price);
+            } else gas_price;
+
             var access_list = AccessList.init(allocator);
             errdefer access_list.deinit();
 
@@ -166,7 +184,7 @@ pub fn Evm(config: EvmConfig) type {
                 .created_contracts = CreatedContracts.init(allocator),
                 .block_info = block_info,
                 .context = context,
-                .gas_price = gas_price,
+                .gas_price = effective_gas_price,
                 .origin = origin,
                 .call_arena = arena,
                 .self_destruct = SelfDestruct.init(allocator),
@@ -177,7 +195,7 @@ pub fn Evm(config: EvmConfig) type {
 
             self.call_arena.tracer = @as(*anyopaque, @ptrCast(&self.tracer));
             self.tracer.onArenaInit(config.arena_capacity_limit, config.arena_capacity_limit, config.arena_growth_factor);
-            self.tracer.onEvmInit(gas_price, origin, @tagName(config.eips.hardfork));
+            self.tracer.onEvmInit(effective_gas_price, origin, @tagName(config.eips.hardfork));
 
             // Process system contract updates based on configuration
             if (config.enable_beacon_roots) {
