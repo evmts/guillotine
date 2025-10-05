@@ -72,14 +72,14 @@ test "Integration - DeFi contract with blob data and coinbase interaction" {
         .coinbase = coinbase_address,
         .base_fee = 20_000_000_000, // 20 gwei
         .prev_randao = [_]u8{0xAA} ** 32,
+        .blob_base_fee = 1_000_000_000, // 1 gwei
     };
-    
+
     const context = TransactionContext{
         .gas_limit = 5_000_000,
         .coinbase = coinbase_address,
         .chain_id = 1,
         .blob_versioned_hashes = &blob_hashes,
-        .blob_base_fee = 1_000_000_000, // 1 gwei
     };
     
     var evm = try Evm(.{}).init(allocator, db_interface, block_info, context, 25_000_000_000, user_address, Hardfork.CANCUN);
@@ -170,7 +170,7 @@ test "Integration - DeFi contract with blob data and coinbase interaction" {
     for (0..32) |i| {
         blob_base_fee_stored = (blob_base_fee_stored << 8) | memory_slice[i];
     }
-    try testing.expectEqual(context.blob_base_fee, blob_base_fee_stored);
+    try testing.expectEqual(block_info.blob_base_fee, blob_base_fee_stored);
 }
 
 // Test gas accounting precision with all EIPs
@@ -192,17 +192,17 @@ test "Integration - Precise gas accounting with warm/cold transitions" {
     });
     
     const db_interface = memory_db.to_database_interface();
-    
-    const block_info = BlockInfo.init();
+
+    var block_info = BlockInfo.init();
+    block_info.blob_base_fee = 5_000_000_000;
     const blob_hash = [_]u8{0x01} ++ [_]u8{0xFF} ** 31;
     const blob_hashes = [_][32]u8{blob_hash};
-    
+
     const context = TransactionContext{
         .gas_limit = 10_000_000,
         .coinbase = coinbase_address,
         .chain_id = 1,
         .blob_versioned_hashes = &blob_hashes,
-        .blob_base_fee = 5_000_000_000,
     };
     
     var evm = try Evm(.{}).init(allocator, db_interface, block_info, context, 0, contract_address, Hardfork.CANCUN);
@@ -273,13 +273,13 @@ test "Integration - Maximum complexity transaction" {
     }
     
     const db_interface = memory_db.to_database_interface();
-    const block_info = BlockInfo.init();
+    var block_info = BlockInfo.init();
+    block_info.blob_base_fee = 10_000_000_000;
     const context = TransactionContext{
         .gas_limit = 30_000_000,
         .coinbase = coinbase_address,
         .chain_id = 1,
         .blob_versioned_hashes = &blob_hashes,
-        .blob_base_fee = 10_000_000_000,
     };
     
     var evm = try Evm(.{}).init(allocator, db_interface, block_info, context, 0, addresses[0], Hardfork.CANCUN);
@@ -331,14 +331,14 @@ test "Integration - Hardfork transition behavior" {
     const coinbase_address = [_]u8{0xC0} ** 20;
     const blob_hash = [_]u8{0x01} ++ [_]u8{0xAA} ** 31;
     const blob_hashes = [_][32]u8{blob_hash};
-    
-    const block_info = BlockInfo.init();
+
+    var block_info = BlockInfo.init();
+    block_info.blob_base_fee = 1_000_000_000;
     const context = TransactionContext{
         .gas_limit = 1_000_000,
         .coinbase = coinbase_address,
         .chain_id = 1,
         .blob_versioned_hashes = &blob_hashes,
-        .blob_base_fee = 1_000_000_000,
     };
     
     // Test progression through hardforks
@@ -382,9 +382,9 @@ test "Integration - Hardfork transition behavior" {
             const blob = evm.get_blob_hash(0);
             try testing.expect(blob != null);
             try testing.expectEqual(blob_hash, blob.?);
-            
+
             const fee = evm.get_blob_base_fee();
-            try testing.expectEqual(context.blob_base_fee, fee);
+            try testing.expectEqual(block_info.blob_base_fee, fee);
         }
     }
 }
