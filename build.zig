@@ -64,19 +64,61 @@ pub fn build(b: *std.Build) void {
     const build_options = b.addOptions();
     build_options.addOption(bool, "enable_tracing", b.option(bool, "enable-tracing", "Enable EVM instruction tracing") orelse false);
     build_options.addOption(bool, "disable_tailcall_dispatch", b.option(bool, "disable-tailcall-dispatch", "Disable tailcall-based dispatch") orelse true);
+
+    // EIPs & Hardforks
     build_options.addOption([]const u8, "hardfork", b.option([]const u8, "evm-hardfork", "EVM hardfork (default: CANCUN)") orelse "CANCUN");
-    build_options.addOption(bool, "disable_gas_checks", b.option(bool, "evm-disable-gas", "Disable gas checks for testing") orelse false);
-    build_options.addOption(bool, "enable_fusion", b.option(bool, "evm-enable-fusion", "Enable bytecode fusion") orelse true);
-    build_options.addOption([]const u8, "optimize_strategy", b.option([]const u8, "evm-optimize", "EVM optimization strategy") orelse "safe");
+    build_options.addOption([]const u8, "eip_overrides", b.option([]const u8, "evm-eip-overrides", "EIP overrides (format: '3855:true,1153:false')") orelse "");
+
+    // Call & Stack Limits
     build_options.addOption(u11, "max_call_depth", b.option(u11, "max-call-depth", "Maximum call depth (default: 1024)") orelse 1024);
+    build_options.addOption(u18, "max_input_size", b.option(u18, "max-input-size", "Maximum input size (default: 131072)") orelse 131072);
     build_options.addOption(u12, "stack_size", b.option(u12, "stack-size", "Maximum stack size (default: 1024)") orelse 1024);
+
+    // Code Size Limits
     build_options.addOption(u32, "max_bytecode_size", b.option(u32, "max-bytecode-size", "Maximum bytecode size (default: 24576)") orelse 24576);
     build_options.addOption(u32, "max_initcode_size", b.option(u32, "max-initcode-size", "Maximum initcode size (default: 49152)") orelse 49152);
+
+    // Gas & Balance
     build_options.addOption(u64, "block_gas_limit", b.option(u64, "block-gas-limit", "Block gas limit (default: 30000000)") orelse 30_000_000);
+    build_options.addOption(bool, "disable_gas_checks", b.option(bool, "evm-disable-gas", "Disable gas checks for testing") orelse false);
+    build_options.addOption(bool, "disable_balance_checks", b.option(bool, "disable-balance-checks", "Disable balance checks") orelse false);
+
+    // Memory Configuration
     build_options.addOption(usize, "memory_initial_capacity", b.option(usize, "memory-initial-capacity", "Memory initial capacity (default: 4096)") orelse 4096);
     build_options.addOption(u64, "memory_limit", b.option(u64, "memory-limit", "Memory limit (default: 0xFFFFFF)") orelse 0xFFFFFF);
+
+    // Arena Allocator
     build_options.addOption(usize, "arena_capacity_limit", b.option(usize, "arena-capacity-limit", "Arena capacity limit (default: 64MB)") orelse (64 * 1024 * 1024));
-    build_options.addOption(bool, "disable_balance_checks", b.option(bool, "disable-balance-checks", "Disable balance checks") orelse false);
+    build_options.addOption(u32, "arena_growth_factor", b.option(u32, "arena-growth-factor", "Arena growth factor percentage (default: 150)") orelse 150);
+
+    // Optimization & Features
+    build_options.addOption([]const u8, "optimize_strategy", b.option([]const u8, "evm-optimize", "EVM optimization strategy") orelse "safe");
+    build_options.addOption(bool, "enable_fusion", b.option(bool, "evm-enable-fusion", "Enable bytecode fusion") orelse true);
+    build_options.addOption(bool, "enable_precompiles", b.option(bool, "evm-enable-precompiles", "Enable precompiles (default: true)") orelse true);
+    build_options.addOption(u32, "vector_length", b.option(u32, "vector-length", "SIMD vector length (default: 0 = auto)") orelse 0);
+
+    // Loop Safety
+    build_options.addOption(?u32, "loop_quota", b.option(u32, "loop-quota", "Loop safety quota (default: null for release, 1000000 for debug)"));
+
+    // Block Info Configuration
+    build_options.addOption(bool, "block_info_use_compact_types", b.option(bool, "block-info-use-compact-types", "Use u64 for difficulty/base_fee (default: false)") orelse false);
+
+    // System Contracts
+    build_options.addOption(bool, "enable_beacon_roots", b.option(bool, "enable-beacon-roots", "Enable EIP-4788 beacon roots (default: true)") orelse true);
+    build_options.addOption(bool, "enable_historical_block_hashes", b.option(bool, "enable-historical-block-hashes", "Enable EIP-2935 historical hashes (default: true)") orelse true);
+    build_options.addOption(bool, "enable_validator_deposits", b.option(bool, "enable-validator-deposits", "Enable validator deposits (default: true)") orelse true);
+    build_options.addOption(bool, "enable_validator_withdrawals", b.option(bool, "enable-validator-withdrawals", "Enable validator withdrawals (default: true)") orelse true);
+
+    // Tracer Configuration
+    build_options.addOption(bool, "tracer_enabled", b.option(bool, "enable-tracer", "Enable tracer system (default: false)") orelse false);
+    build_options.addOption(bool, "tracer_validation", b.option(bool, "tracer-validation", "Enable tracer validation (default: false)") orelse false);
+    build_options.addOption(bool, "tracer_step_capture", b.option(bool, "tracer-step-capture", "Enable tracer step capture (default: false)") orelse false);
+    build_options.addOption(bool, "tracer_pc_tracking", b.option(bool, "tracer-pc-tracking", "Enable tracer PC tracking (default: false)") orelse false);
+    build_options.addOption(bool, "tracer_gas_tracking", b.option(bool, "tracer-gas-tracking", "Enable tracer gas tracking (default: false)") orelse false);
+    build_options.addOption(bool, "tracer_debug_logging", b.option(bool, "tracer-debug-logging", "Enable tracer debug logging (default: false)") orelse false);
+    build_options.addOption(bool, "tracer_advanced_trace", b.option(bool, "tracer-advanced-trace", "Enable tracer advanced trace (default: false)") orelse false);
+    build_options.addOption([]const u8, "tracer_preset", b.option([]const u8, "tracer-preset", "Tracer preset: disabled, debug, full") orelse "");
+
     const options_mod = build_options.createModule();
 
     const rust_target = b: {
