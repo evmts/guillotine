@@ -312,9 +312,23 @@ pub fn runJsonTest(allocator: std.mem.Allocator, test_case: std.json.Value) !voi
     }
 
     // Validate post-state
-    if (test_case.object.get("post")) |post| {
-        if (post == .object) {
-            var it = post.object.iterator();
+    // Post structure: { "Prague": [ { "state": { "0x...": {...} } } ] }
+    // Extract state directly from post.Prague[0].state
+    const post_state = blk: {
+        const post = test_case.object.get("post") orelse break :blk null;
+        if (post != .object) break :blk null;
+
+        // TODO: when we run on specific hardforks don't hardcode that
+        const prague = post.object.get("Prague") orelse break :blk null;
+        if (prague != .array or prague.array.items.len == 0) break :blk null;
+
+        const expectation = prague.array.items[0];
+        break :blk expectation.object.get("state");
+    };
+
+    if (post_state) |state| {
+        if (state == .object) {
+            var it = state.object.iterator();
             while (it.next()) |kv| {
                 const address = try parseAddress(kv.key_ptr.*);
                 const expected = kv.value_ptr.*;
