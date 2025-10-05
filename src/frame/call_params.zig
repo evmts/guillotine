@@ -152,15 +152,15 @@ pub fn CallParams(config: anytype) type {
             };
         }
 
-        /// Check if this call operation transfers value
-        pub fn hasValue(self: @This()) bool {
+        /// Get the value for this call operation
+        pub fn getValue(self: @This()) u256 {
             return switch (self) {
-                .call => |params| params.value > 0,
-                .callcode => |params| params.value > 0,
-                .delegatecall => false, // DELEGATECALL preserves value from parent context
-                .staticcall => false, // STATICCALL cannot transfer value
-                .create => |params| params.value > 0,
-                .create2 => |params| params.value > 0,
+                .call => |params| params.value,
+                .callcode => |params| params.value,
+                .delegatecall => 0, // DELEGATECALL preserves value from parent context
+                .staticcall => 0, // STATICCALL cannot transfer value
+                .create => |params| params.value,
+                .create2 => |params| params.value,
             };
         }
 
@@ -345,7 +345,7 @@ test "call params input access" {
     try std.testing.expectEqualSlices(u8, init_code, create_op.getInput());
 }
 
-test "call params has value checks" {
+test "call params getValue checks" {
     const caller = primitives.ZERO_ADDRESS;
     const to: Address = .{ .bytes = [_]u8{1} ++ [_]u8{0} ** 19 };
     const input = &[_]u8{};
@@ -358,7 +358,7 @@ test "call params has value checks" {
         .input = input,
         .gas = 21000,
     } };
-    try std.testing.expect(call_with_value.hasValue());
+    try std.testing.expect(call_with_value.getValue() == 1000);
 
     // CALL without value
     const call_no_value = DefaultCallParams{ .call = .{
@@ -368,7 +368,7 @@ test "call params has value checks" {
         .input = input,
         .gas = 21000,
     } };
-    try std.testing.expect(!call_no_value.hasValue());
+    try std.testing.expect(call_no_value.getValue() == 0);
 
     // DELEGATECALL never has value
     const delegatecall_op = DefaultCallParams{ .delegatecall = .{
@@ -377,7 +377,7 @@ test "call params has value checks" {
         .input = input,
         .gas = 21000,
     } };
-    try std.testing.expect(!delegatecall_op.hasValue());
+    try std.testing.expect(delegatecall_op.getValue() == 0);
 
     // STATICCALL never has value
     const staticcall_op = DefaultCallParams{ .staticcall = .{
@@ -386,7 +386,7 @@ test "call params has value checks" {
         .input = input,
         .gas = 21000,
     } };
-    try std.testing.expect(!staticcall_op.hasValue());
+    try std.testing.expect(staticcall_op.getValue() == 0);
 
     // CREATE with value
     const create_with_value = DefaultCallParams{ .create = .{
@@ -395,7 +395,7 @@ test "call params has value checks" {
         .init_code = &[_]u8{0x00},
         .gas = 53000,
     } };
-    try std.testing.expect(create_with_value.hasValue());
+    try std.testing.expect(create_with_value.getValue() == 500);
 }
 
 test "call params read only checks" {
@@ -479,7 +479,7 @@ test "call params edge cases" {
         .gas = std.math.maxInt(u64),
     } };
     try std.testing.expectEqual(std.math.maxInt(u64), max_gas_call.getGas());
-    try std.testing.expect(max_gas_call.hasValue());
+    try std.testing.expect(max_gas_call.getValue() == std.math.maxInt(u256));
 
     // CREATE2 with maximum salt
     const create2_max_salt = DefaultCallParams{ .create2 = .{
@@ -490,7 +490,7 @@ test "call params edge cases" {
         .gas = 100000,
     } };
     try std.testing.expect(create2_max_salt.isCreate());
-    try std.testing.expect(!create2_max_salt.hasValue());
+    try std.testing.expect(create2_max_salt.getValue() == 0);
 
     // Empty input data
     const call_empty_input = DefaultCallParams{
@@ -616,7 +616,7 @@ test "call params callcode operation" {
     try std.testing.expectEqual(@as(u64, 25000), callcode_op.getGas());
     try std.testing.expectEqual(caller, callcode_op.getCaller());
     try std.testing.expectEqualSlices(u8, input_data, callcode_op.getInput());
-    try std.testing.expect(callcode_op.hasValue());
+    try std.testing.expect(callcode_op.getValue() == 1000);
     try std.testing.expect(!callcode_op.isReadOnly());
     try std.testing.expect(!callcode_op.isCreate());
 }
@@ -648,7 +648,7 @@ test "call params create2 salt handling" {
         try std.testing.expectEqual(@as(u64, 32000), create2_op.getGas());
         try std.testing.expectEqual(caller, create2_op.getCaller());
         try std.testing.expectEqualSlices(u8, init_code, create2_op.getInput());
-        try std.testing.expect(!create2_op.hasValue());
+        try std.testing.expect(create2_op.getValue() == 0);
         try std.testing.expect(!create2_op.isReadOnly());
         try std.testing.expect(create2_op.isCreate());
     }
@@ -714,7 +714,7 @@ test "call params value edge cases" {
         .input = &[_]u8{},
         .gas = 21000,
     } };
-    try std.testing.expect(call_min_value.hasValue());
+    try std.testing.expect(call_min_value.getValue() == 1);
 
     // Test maximum value
     const call_max_value = DefaultCallParams{ .call = .{
@@ -724,7 +724,7 @@ test "call params value edge cases" {
         .input = &[_]u8{},
         .gas = 21000,
     } };
-    try std.testing.expect(call_max_value.hasValue());
+    try std.testing.expect(call_max_value.getValue() == std.math.maxInt(u256));
 
     // Test CREATE with max value
     const create_max_value = DefaultCallParams{ .create = .{
@@ -733,7 +733,7 @@ test "call params value edge cases" {
         .init_code = init_code,
         .gas = 53000,
     } };
-    try std.testing.expect(create_max_value.hasValue());
+    try std.testing.expect(create_max_value.getValue() == std.math.maxInt(u256));
     try std.testing.expect(create_max_value.isCreate());
 
     // Test CREATE2 with max value
@@ -744,7 +744,7 @@ test "call params value edge cases" {
         .salt = 0x123,
         .gas = 53000,
     } };
-    try std.testing.expect(create2_max_value.hasValue());
+    try std.testing.expect(create2_max_value.getValue() == std.math.maxInt(u256));
     try std.testing.expect(create2_max_value.isCreate());
 }
 
@@ -973,7 +973,7 @@ test "call params all operation types coverage" {
         _ = op.getGas();
         _ = op.getCaller();
         _ = op.getInput();
-        _ = op.hasValue();
+        _ = op.getValue();
         _ = op.isReadOnly();
         _ = op.isCreate();
     }
@@ -992,7 +992,7 @@ test "call params method consistency" {
         .gas = 25000,
     } };
 
-    try std.testing.expect(!delegatecall_op.hasValue());
+    try std.testing.expect(delegatecall_op.getValue() == 0);
     try std.testing.expect(!delegatecall_op.isReadOnly());
     try std.testing.expect(!delegatecall_op.isCreate());
 
@@ -1004,7 +1004,7 @@ test "call params method consistency" {
         .gas = 25000,
     } };
 
-    try std.testing.expect(!staticcall_op.hasValue());
+    try std.testing.expect(staticcall_op.getValue() == 0);
     try std.testing.expect(staticcall_op.isReadOnly());
     try std.testing.expect(!staticcall_op.isCreate());
 }

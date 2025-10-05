@@ -11,9 +11,19 @@ pub const BYTES_PER_FIELD_ELEMENT = 32;
 pub const BYTES_PER_BLOB = FIELD_ELEMENTS_PER_BLOB * BYTES_PER_FIELD_ELEMENT; // 131072
 pub const MAX_BLOBS_PER_TRANSACTION = 6;
 pub const BLOB_COMMITMENT_VERSION_KZG = 0x01;
-pub const BLOB_BASE_FEE_UPDATE_FRACTION = 3338477;
 pub const MIN_BLOB_BASE_FEE = 1;
 pub const BLOB_GAS_PER_BLOB = 131072; // 2^17
+
+// Hardfork-specific blob gas parameters
+// Cancun (EIP-4844)
+pub const TARGET_BLOB_GAS_PER_BLOCK_CANCUN = 393216; // 3 * BLOB_GAS_PER_BLOB
+pub const MAX_BLOB_GAS_PER_BLOCK_CANCUN = 786432; // 6 * BLOB_GAS_PER_BLOB
+pub const BLOB_BASE_FEE_UPDATE_FRACTION_CANCUN = 3338477;
+
+// Prague/Electra (EIP-7691)
+pub const TARGET_BLOB_GAS_PER_BLOCK_PRAGUE = 786432; // 6 * BLOB_GAS_PER_BLOB
+pub const MAX_BLOB_GAS_PER_BLOCK_PRAGUE = 1179648; // 9 * BLOB_GAS_PER_BLOB
+pub const BLOB_BASE_FEE_UPDATE_FRACTION_PRAGUE = 5007716;
 
 // Blob error types
 pub const BlobError = error{
@@ -52,9 +62,8 @@ pub fn is_valid_versioned_hash(h: VersionedHash) bool {
 }
 
 // Calculate blob gas price
-pub fn calculate_blob_gas_price(excess_blob_gas: u64) u64 {
-    // fake_exponential(MIN_BLOB_BASE_FEE, excess_blob_gas, BLOB_BASE_FEE_UPDATE_FRACTION)
-    return fake_exponential(MIN_BLOB_BASE_FEE, excess_blob_gas, BLOB_BASE_FEE_UPDATE_FRACTION);
+pub fn calculate_blob_gas_price(excess_gas: u64, update_fraction: u64) u64 {
+    return fake_exponential(MIN_BLOB_BASE_FEE, excess_gas, update_fraction);
 }
 
 // Fake exponential from EIP-4844
@@ -76,13 +85,11 @@ fn fake_exponential(factor: u64, numerator: u64, denominator: u64) u64 {
 }
 
 // Calculate excess blob gas for next block
-pub fn calculate_excess_blob_gas(parent_excess_blob_gas: u64, parent_blob_gas_used: u64) u64 {
-    const target_blob_gas_per_block = 393216; // 3 * BLOB_GAS_PER_BLOB
-
-    if (parent_excess_blob_gas + parent_blob_gas_used < target_blob_gas_per_block) {
+pub fn excess_blob_gas(parent_excess_blob_gas: u64, parent_blob_gas_used: u64, target_blob_gas: u64) u64 {
+    if (parent_excess_blob_gas + parent_blob_gas_used < target_blob_gas) {
         return 0;
     } else {
-        return parent_excess_blob_gas + parent_blob_gas_used - target_blob_gas_per_block;
+        return parent_excess_blob_gas + parent_blob_gas_used - target_blob_gas;
     }
 }
 
@@ -191,35 +198,33 @@ test "invalid versioned hash" {
 
 test "blob gas price calculation" {
     // Test with no excess gas
-    const price_zero = calculate_blob_gas_price(0);
+    const price_zero = calculate_blob_gas_price(0, BLOB_BASE_FEE_UPDATE_FRACTION_CANCUN);
     try testing.expectEqual(@as(u64, 1), price_zero); // MIN_BLOB_BASE_FEE
 
     // Test with some excess gas
-    const price_low = calculate_blob_gas_price(131072); // 1 blob worth
+    const price_low = calculate_blob_gas_price(131072, BLOB_BASE_FEE_UPDATE_FRACTION_CANCUN); // 1 blob worth
     try testing.expect(price_low > 1);
 
     // Test with high excess gas
-    const price_high = calculate_blob_gas_price(10 * BLOB_GAS_PER_BLOB);
+    const price_high = calculate_blob_gas_price(10 * BLOB_GAS_PER_BLOB, BLOB_BASE_FEE_UPDATE_FRACTION_CANCUN);
     try testing.expect(price_high > price_low);
 }
 
 test "excess blob gas calculation" {
-    const target = 393216; // 3 blobs
-
     // No blobs used, no excess
-    var excess = calculate_excess_blob_gas(0, 0);
+    var excess = excess_blob_gas(0, 0, TARGET_BLOB_GAS_PER_BLOCK_CANCUN);
     try testing.expectEqual(@as(u64, 0), excess);
 
     // Used exactly target
-    excess = calculate_excess_blob_gas(0, target);
+    excess = excess_blob_gas(0, 0, TARGET_BLOB_GAS_PER_BLOCK_CANCUN);
     try testing.expectEqual(@as(u64, 0), excess);
 
     // Used more than target
-    excess = calculate_excess_blob_gas(0, target + BLOB_GAS_PER_BLOB);
+    excess = excess_blob_gas(0, 0, TARGET_BLOB_GAS_PER_BLOCK_CANCUN + BLOB_GAS_PER_BLOB);
     try testing.expectEqual(BLOB_GAS_PER_BLOB, excess);
 
     // With existing excess
-    excess = calculate_excess_blob_gas(BLOB_GAS_PER_BLOB, target);
+    excess = excess_blob_gas(BLOB_GAS_PER_BLOB, 0, TARGET_BLOB_GAS_PER_BLOCK_CANCUN);
     try testing.expectEqual(BLOB_GAS_PER_BLOB, excess);
 }
 
@@ -295,24 +300,24 @@ test "blob sidecar" {
 
 test "blob gas economics" {
     // Simulate block progression
-    var excess_blob_gas: u64 = 0;
+    var excess_gas: u64 = 0;
 
     // Block 1: 4 blobs used (above target)
     var blob_gas_used: u64 = 4 * BLOB_GAS_PER_BLOB;
-    var blob_price = calculate_blob_gas_price(excess_blob_gas);
+    var blob_price = calculate_blob_gas_price(excess_gas, BLOB_BASE_FEE_UPDATE_FRACTION_CANCUN);
     try testing.expectEqual(@as(u64, 1), blob_price); // Min price initially
 
-    excess_blob_gas = calculate_excess_blob_gas(excess_blob_gas, blob_gas_used);
+    excess_blob_gas = excess_blob_gas(excess_gas, blob_gas_used, TARGET_BLOB_GAS_PER_BLOCK_CANCUN);
     try testing.expect(excess_blob_gas > 0); // Should increase
 
     // Block 2: Price should have increased
-    blob_price = calculate_blob_gas_price(excess_blob_gas);
+    blob_price = calculate_blob_gas_price(excess_gas, BLOB_BASE_FEE_UPDATE_FRACTION_CANCUN);
     try testing.expect(blob_price > 1);
 
     // Block 3: Use only 1 blob (below target)
     blob_gas_used = BLOB_GAS_PER_BLOB;
     const old_excess = excess_blob_gas;
-    excess_blob_gas = calculate_excess_blob_gas(excess_blob_gas, blob_gas_used);
+    excess_gas = excess_blob_gas(excess_blob_gas, blob_gas_used, TARGET_BLOB_GAS_PER_BLOCK_CANCUN);
     try testing.expect(excess_blob_gas < old_excess); // Should decrease
 }
 

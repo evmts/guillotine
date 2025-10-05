@@ -48,6 +48,11 @@ pub fn runJsonTest(allocator: std.mem.Allocator, test_case: std.json.Value) !voi
 
     // Parse environment
     const env = test_case.object.get("env");
+
+    const excess_blob_gas = if (env != null and env.?.object.get("currentExcessBlobGas") != null)
+        try std.fmt.parseInt(u64, env.?.object.get("currentExcessBlobGas").?.string, 0)
+    else 0;
+
     const block_info = evm.BlockInfo{
         .number = if (env != null and env.?.object.get("currentNumber") != null)
             try parseIntFromJson(env.?.object.get("currentNumber").?)
@@ -73,18 +78,10 @@ pub fn runJsonTest(allocator: std.mem.Allocator, test_case: std.json.Value) !voi
             try std.fmt.parseInt(u256, env.?.object.get("currentBaseFee").?.string, 0)
         else 10,
 
-        .blob_base_fee = if (env != null and env.?.object.get("currentBlobBaseFee") != null)
-            try std.fmt.parseInt(u256, env.?.object.get("currentBlobBaseFee").?.string, 0)
-        else 0,
+        .excess_blob_gas = excess_blob_gas,
 
-        .blob_versioned_hashes = blk: {
-            if (env) |e| if (e.object.get("currentBlobVersionedHashes")) |hashes| {
-                const bytes = try primitives.Hex.hex_to_bytes(allocator, hashes.string);
-                break :blk std.mem.bytesAsSlice([32]u8, bytes);
-            };
-            break :blk &.{};
-        },
-        
+        .blob_base_fee = primitives.Blob.calculate_blob_gas_price(excess_blob_gas, primitives.Blob.BLOB_BASE_FEE_UPDATE_FRACTION_PRAGUE),
+
         .prev_randao = blk: {
             if (env) |e| if (e.object.get("currentRandom")) |rand| {
                 const bytes = try primitives.Hex.hex_to_bytes(allocator, rand.string);
@@ -281,6 +278,25 @@ pub fn runJsonTest(allocator: std.mem.Allocator, test_case: std.json.Value) !voi
             const max_priority_fee_per_gas = if (tx.object.get("maxPriorityFeePerGas")) |m| blk: {
                 break :blk try parseIntFromJson(m);
             } else 0;
+            
+            // Determine max fee per blob gas
+            const max_fee_per_blob_gas = if (tx.object.get("maxFeePerBlobGas")) |m| blk: {
+                break :blk try parseIntFromJson(m);
+            } else 0;
+
+            const blob_versioned_hashes = blk: {
+                if (tx.object.get("blobVersionedHashes")) |hashes| if (hashes == .array) {
+                    var list = try allocator.alloc([32]u8, hashes.array.items.len);
+                    for (hashes.array.items, 0..) |item, i| {
+                        const bytes = try primitives.Hex.hex_to_bytes(allocator, item.string);
+                        defer allocator.free(bytes);
+                        @memcpy(&list[i], bytes[0..32]);
+                    }
+                    break :blk list;
+                };
+                break :blk &.{};
+            };
+            defer if (blob_versioned_hashes.len > 0) allocator.free(blob_versioned_hashes);
 
             // Create EVM with transaction context (create per transaction to set correct origin)
             const tx_context = evm.TransactionContext{
@@ -289,6 +305,8 @@ pub fn runJsonTest(allocator: std.mem.Allocator, test_case: std.json.Value) !voi
                 .chain_id = 1,
                 .max_fee_per_gas = max_fee_per_gas,
                 .max_priority_fee_per_gas = max_priority_fee_per_gas,
+                .max_fee_per_blob_gas = max_fee_per_blob_gas,
+                .blob_versioned_hashes = blob_versioned_hashes,
             };
 
             var evm_instance = try evm.DefaultEvm.init(

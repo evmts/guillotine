@@ -228,7 +228,6 @@ pub const Eips = struct {
         return false;
     }
 
-
     /// EIP-170: Get maximum contract code size based on hardfork
     pub fn eip_170_max_code_size(self: Self) u32 {
         // EIP-170: Contract code size limit (Spurious Dragon)
@@ -448,7 +447,7 @@ pub const Eips = struct {
 
     /// Get calldata gas cost for zero/non-zero bytes depending on hardfork
     /// Introduced in genesis hardfork and non-zero bytes reduced from 68 to 16 gas in EIP-2028 (Istanbul)
-    /// 
+    ///
     /// The zero/non-zero bytes are counted in tokens with hardfork-dependent logic above so we can reuse
     /// tokens for both calldata and floor gas
     pub fn calldata_gas_cost(self: Self, calldata_tokens: u64, is_create: bool, input_len: usize) u64 {
@@ -459,7 +458,7 @@ pub const Eips = struct {
             }
             break :blk 0;
         };
-        
+
         return base_calldata_cost + init_code_cost;
     }
 
@@ -505,6 +504,80 @@ pub const Eips = struct {
         const max_priority_fee = @min(max_priority_fee_per_gas, max_fee_per_gas - base_fee_per_gas);
 
         return .{ .effective_gas_price = base_fee_per_gas + max_priority_fee, .miner_fee = max_priority_fee };
+    }
+    
+    /// Get target blob gas per block for current hardfork
+    pub fn target_blob_gas(self: Self) u64 {
+        if (!self.is_eip_active(4844)) return 0;
+        // EIP-7691: Increased blob throughput in Prague
+        return if (self.hardfork.isAtLeast(.PRAGUE))
+            primitives.Blob.TARGET_BLOB_GAS_PER_BLOCK_PRAGUE
+        else
+            primitives.Blob.TARGET_BLOB_GAS_PER_BLOCK_CANCUN;
+    }
+
+    /// Get maximum blob gas per block for current hardfork
+    pub fn max_blob_gas(self: Self) u64 {
+        if (!self.is_eip_active(4844)) return 0;
+        // EIP-7691: Increased blob throughput in Prague
+        return if (self.hardfork.isAtLeast(.PRAGUE))
+            primitives.Blob.MAX_BLOB_GAS_PER_BLOCK_PRAGUE
+        else
+            primitives.Blob.MAX_BLOB_GAS_PER_BLOCK_CANCUN;
+    }
+
+    /// Get blob base fee update fraction for current hardfork
+    pub fn blob_base_fee_update_fraction(self: Self) u64 {
+        if (!self.is_eip_active(4844)) return 0;
+        // EIP-7691: Adjusted update fraction in Prague
+        return if (self.hardfork.isAtLeast(.PRAGUE))
+            primitives.Blob.BLOB_BASE_FEE_UPDATE_FRACTION_PRAGUE
+        else
+            primitives.Blob.BLOB_BASE_FEE_UPDATE_FRACTION_CANCUN;
+    }
+
+    /// Calculate blob gas price using exponential formula (EIP-4844)
+    pub fn blob_gas_price(self: Self, excess_gas: u64) u128 {
+        if (!self.is_eip_active(4844)) return 0;
+        const update_fraction = self.blob_base_fee_update_fraction();
+        return @as(u128, primitives.Blob.calculate_blob_gas_price(excess_gas, update_fraction));
+    }
+
+    /// Validate blob gas parameters for a transaction
+    pub fn validate_blob_gas(self: Self, blob_count: usize, max_fee_per_blob_gas: u256, current_blob_base_fee: u256) bool {
+        if (!self.is_eip_active(4844)) return true;
+        if (blob_count == 0) return true;
+
+        if (blob_count > primitives.Blob.MAX_BLOBS_PER_TRANSACTION) return false;
+        if (max_fee_per_blob_gas == 0) return false;
+        if (max_fee_per_blob_gas < current_blob_base_fee) return false;
+
+        return true;
+    }
+
+    /// Calculate total blob gas cost for a transaction
+    pub fn blob_gas_cost(self: Self, base_fee: u256, blob_count: usize) u256 {
+        if (!self.is_eip_active(4844)) return 0;
+        if (blob_count == 0) return 0;
+
+        const blob_gas = @as(u64, blob_count) * primitives.Blob.BLOB_GAS_PER_BLOB;
+        return @as(u256, blob_gas) * base_fee;
+    }
+
+    /// Calculate maximum blob gas cost for balance checks
+    pub fn max_blob_gas_cost(self: Self, max_fee_per_blob_gas: u256, blob_count: usize) u256 {
+        if (!self.is_eip_active(4844)) return 0;
+        if (blob_count == 0) return 0;
+
+        const blob_gas = @as(u64, blob_count) * primitives.Blob.BLOB_GAS_PER_BLOB;
+        return @as(u256, blob_gas) * max_fee_per_blob_gas;
+    }
+
+    /// Calculate excess blob gas for next block (wrapper for EIP checking)
+    pub fn excess_blob_gas(self: Self, parent_excess: u64, parent_blob_gas_used: u64) u64 {
+        if (!self.is_eip_active(4844)) return 0;
+        const target = self.target_blob_gas();
+        return primitives.Blob.excess_blob_gas(parent_excess, parent_blob_gas_used, target);
     }
 };
 
@@ -867,9 +940,9 @@ test "edge cases - large calldata" {
 test "regression - hardfork ordering" {
     // Ensure EIPs are activated in correct order
     const hardforks = [_]Hardfork{
-        .FRONTIER, .HOMESTEAD, .DAO, .TANGERINE, .SPURIOUS, .BYZANTIUM,
-        .CONSTANTINOPLE, .PETERSBURG, .ISTANBUL, .BERLIN, .LONDON,
-        .MERGE, .SHANGHAI, .CANCUN, .PRAGUE,
+        .FRONTIER,       .HOMESTEAD,  .DAO,      .TANGERINE, .SPURIOUS, .BYZANTIUM,
+        .CONSTANTINOPLE, .PETERSBURG, .ISTANBUL, .BERLIN,    .LONDON,   .MERGE,
+        .SHANGHAI,       .CANCUN,     .PRAGUE,
     };
 
     // EIP-2028 should be active from Istanbul onwards
@@ -1138,7 +1211,6 @@ test "initcode_size_boundaries" {
     // Test that the limit doubled
     try std.testing.expectEqual(pre_shanghai.size_limit() * 2, post_shanghai.size_limit());
 }
-
 
 test "specific eip helper functions" {
     const frontier = Eips{ .hardfork = Hardfork.FRONTIER };

@@ -51,6 +51,10 @@ pub fn BlockInfo(comptime config: BlockInfoConfig) type {
         /// Empty slice for non-blob transactions
         /// TODO: this is a transaction-level setting (should be in TransactionContext)
         blob_versioned_hashes: []const [32]u8 = &.{},
+        /// Excess blob gas after this block (for next block's pricing)
+        excess_blob_gas: u64 = 0,
+        /// Blob gas used in this block
+        blob_gas_used: u64 = 0,
         /// Beacon block root for EIP-4788 (Dencun)
         /// Contains the parent beacon block root for trust-minimized access to consensus layer
         beacon_root: ?[32]u8 = null,

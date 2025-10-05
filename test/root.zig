@@ -125,6 +125,9 @@ test {
     // C FFI API tracing tests
     // _ = @import("evm_c_api_tracing_test.zig"); // Temporarily disabled - missing C symbols
 
+    // Blob gas tests
+    _ = @import("blob_gas_test.zig");
+
     // Benchmarks
     // _ = @import("benchmark/baseline_benchmark.zig");
 }
