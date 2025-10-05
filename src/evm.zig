@@ -514,7 +514,7 @@ pub fn Evm(config: EvmConfig) type {
                 } else if (blob_count > 0 and max_fee_per_blob_gas < blob_base_fee) {
                     log.err("Max fee per blob gas too low: max={d}, current={d}", .{ self.context.max_fee_per_blob_gas, self.block_info.blob_base_fee });
                 }
-                return CallResult.failure(0);
+                return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
             }
 
             const blob_gas_cost = config.eips.blob_gas_cost(blob_base_fee, blob_count);
@@ -526,7 +526,7 @@ pub fn Evm(config: EvmConfig) type {
             if (comptime !config.disable_balance_checks) {
                 const origin_account = self.database.get_account(self.origin.bytes) catch {
                     log.err("Failed to get origin account for balance check", .{});
-                    return CallResult.failure(0);
+                    return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
                 } orelse Account.zero();
 
                 // Calculate total cost including blob gas
@@ -536,7 +536,7 @@ pub fn Evm(config: EvmConfig) type {
                 const total_cost = max_gas_cost + value_transfer + max_blob_gas_cost;
                 if (origin_account.balance < total_cost) {
                     log.err("Insufficient balance for gas + value + blob gas: balance={d}, cost={d}", .{ origin_account.balance, total_cost });
-                    return CallResult.failure(0);
+                    return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
                 }
             }
 
