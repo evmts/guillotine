@@ -1976,7 +1976,7 @@ pub fn Evm(config: EvmConfig) type {
 
         /// Get blob base fee (EIP-4844)
         pub fn get_blob_base_fee(self: *Self) u256 {
-            return self.context.blob_base_fee;
+            return self.block_info.blob_base_fee;
         }
 
         /// Add gas refund amount for SSTORE operations

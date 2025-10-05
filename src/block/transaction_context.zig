@@ -20,6 +20,7 @@ pub const TransactionContext = struct {
     blob_versioned_hashes: []const [32]u8 = &.{},
     /// Blob base fee for EIP-4844
     /// Set to 0 for non-Cancun hardforks
+    /// TODO: this is a block-level setting (and already present in BlockInfo), should be removed
     blob_base_fee: u256 = 0,
 };
 
