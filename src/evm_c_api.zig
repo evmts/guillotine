@@ -1165,11 +1165,11 @@ export fn guillotine_call_tracing(handle: *EvmHandle, params: *const CallParams)
         setError("FFI not initialized", .{});
         return null;
     };
-    
+
     // Set the origin to the caller for top-level transactions
     // This ensures nonce increments and gas fees are properly handled
     evm_ptr.origin = primitives.Address{ .bytes = params.caller };
-    
+
     const input_slice = if (params.input_len > 0) params.input[0..params.input_len] else &[_]u8{};
     const value = std.mem.readInt(u256, &params.value, .big);
     const call_params = switch (params.call_type) {
@@ -1608,12 +1608,12 @@ export fn guillotine_dump_state(handle: *EvmHandle) ?*StateDumpFFI {
         }
 
         accounts_array[idx].address = addr_bytes;
-        
+
         // Convert balance to bytes
         var balance_bytes: [32]u8 = undefined;
         std.mem.writeInt(u256, &balance_bytes, entry.value_ptr.balance, .big);
         accounts_array[idx].balance = balance_bytes;
-        
+
         accounts_array[idx].nonce = entry.value_ptr.nonce;
 
         // Copy code
@@ -1644,7 +1644,7 @@ export fn guillotine_dump_state(handle: *EvmHandle) ?*StateDumpFFI {
         if (storage_count > 0) {
             const keys_array = allocator.alloc([32]u8, storage_count) catch {
                 // Clean up
-                for (accounts_array[0..idx + 1]) |*acc| {
+                for (accounts_array[0 .. idx + 1]) |*acc| {
                     if (acc.code_len > 0) allocator.free(acc.code[0..acc.code_len]);
                     if (acc.storage_count > 0 and acc != &accounts_array[idx]) {
                         allocator.free(acc.storage_keys[0..acc.storage_count]);
@@ -1659,7 +1659,7 @@ export fn guillotine_dump_state(handle: *EvmHandle) ?*StateDumpFFI {
             const values_array = allocator.alloc([32]u8, storage_count) catch {
                 allocator.free(keys_array);
                 // Clean up
-                for (accounts_array[0..idx + 1]) |*acc| {
+                for (accounts_array[0 .. idx + 1]) |*acc| {
                     if (acc.code_len > 0) allocator.free(acc.code[0..acc.code_len]);
                     if (acc.storage_count > 0 and acc != &accounts_array[idx]) {
                         allocator.free(acc.storage_keys[0..acc.storage_count]);
@@ -1767,12 +1767,12 @@ export fn guillotine_dump_state_test(handle: *EvmHandle) ?*StateDumpFFI {
         }
 
         accounts_array[idx].address = addr_bytes;
-        
+
         // Convert balance to bytes
         var balance_bytes: [32]u8 = undefined;
         std.mem.writeInt(u256, &balance_bytes, entry.value_ptr.balance, .big);
         accounts_array[idx].balance = balance_bytes;
-        
+
         accounts_array[idx].nonce = entry.value_ptr.nonce;
 
         // Copy code
@@ -1803,7 +1803,7 @@ export fn guillotine_dump_state_test(handle: *EvmHandle) ?*StateDumpFFI {
         if (storage_count > 0) {
             const keys_array = allocator.alloc([32]u8, storage_count) catch {
                 // Clean up
-                for (accounts_array[0..idx + 1]) |*acc| {
+                for (accounts_array[0 .. idx + 1]) |*acc| {
                     if (acc.code_len > 0) allocator.free(acc.code[0..acc.code_len]);
                     if (acc.storage_count > 0 and acc != &accounts_array[idx]) {
                         allocator.free(acc.storage_keys[0..acc.storage_count]);
@@ -1818,7 +1818,7 @@ export fn guillotine_dump_state_test(handle: *EvmHandle) ?*StateDumpFFI {
             const values_array = allocator.alloc([32]u8, storage_count) catch {
                 allocator.free(keys_array);
                 // Clean up
-                for (accounts_array[0..idx + 1]) |*acc| {
+                for (accounts_array[0 .. idx + 1]) |*acc| {
                     if (acc.code_len > 0) allocator.free(acc.code[0..acc.code_len]);
                     if (acc.storage_count > 0 and acc != &accounts_array[idx]) {
                         allocator.free(acc.storage_keys[0..acc.storage_count]);

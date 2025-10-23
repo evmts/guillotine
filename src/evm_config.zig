@@ -11,7 +11,6 @@ const Address = primitives.Address;
 const SafetyCounter = @import("internal/safety_counter.zig").SafetyCounter;
 const Mode = @import("internal/safety_counter.zig").Mode;
 
-
 /// Custom precompile implementation
 pub const PrecompileOverride = struct {
     address: Address,
@@ -217,8 +216,86 @@ pub const EvmConfig = struct {
         };
     }
 
-    // TODO: This is either dead code or code that should be dead
-    // Remove it
+    /// Parse EIP overrides from build options string format
+    /// Format: "3855:true,1153:false,6780:false"
+    fn parseEipOverrides(comptime override_str: []const u8) []const EipOverride {
+        if (override_str.len == 0) return &.{};
+
+        // Count commas to determine array size
+        comptime var count: usize = 1;
+        comptime for (override_str) |c| {
+            if (c == ',') count += 1;
+        };
+
+        comptime var overrides: [count]EipOverride = undefined;
+        comptime var idx: usize = 0;
+        comptime var start: usize = 0;
+
+        comptime for (override_str, 0..) |c, i| {
+            if (c == ',' or i == override_str.len - 1) {
+                const end = if (c == ',') i else i + 1;
+                const segment = override_str[start..end];
+
+                // Find colon separator
+                var colon_pos: usize = 0;
+                for (segment, 0..) |sc, si| {
+                    if (sc == ':') {
+                        colon_pos = si;
+                        break;
+                    }
+                }
+
+                const eip_str = segment[0..colon_pos];
+                const enabled_str = segment[colon_pos + 1 ..];
+
+                // Parse EIP number
+                var eip_num: u16 = 0;
+                for (eip_str) |digit| {
+                    if (digit >= '0' and digit <= '9') {
+                        eip_num = eip_num * 10 + (digit - '0');
+                    }
+                }
+
+                // Parse boolean
+                const enabled = std.mem.eql(u8, enabled_str, "true");
+
+                overrides[idx] = EipOverride{ .eip = eip_num, .enabled = enabled };
+                idx += 1;
+                start = i + 1;
+            }
+        };
+
+        const result = overrides;
+        return &result;
+    }
+
+    /// Parse tracer configuration from preset string
+    fn parseTracerConfig(comptime preset: []const u8, comptime build_opts: anytype) @import("tracer/tracer.zig").TracerConfig {
+        const TracerConfig = @import("tracer/tracer.zig").TracerConfig;
+
+        // If preset is specified, use it
+        if (preset.len > 0) {
+            if (std.mem.eql(u8, preset, "full")) {
+                return TracerConfig.full;
+            } else if (std.mem.eql(u8, preset, "debug")) {
+                return TracerConfig.debug;
+            } else if (std.mem.eql(u8, preset, "disabled")) {
+                return TracerConfig.disabled;
+            }
+        }
+
+        // Otherwise, build from individual flags
+        return TracerConfig{
+            .enabled = build_opts.tracer_enabled,
+            .enable_validation = build_opts.tracer_validation,
+            .enable_step_capture = build_opts.tracer_step_capture,
+            .enable_pc_tracking = build_opts.tracer_pc_tracking,
+            .enable_gas_tracking = build_opts.tracer_gas_tracking,
+            .enable_debug_logging = build_opts.tracer_debug_logging,
+            .enable_advanced_trace = build_opts.tracer_advanced_trace,
+        };
+    }
+
     /// Generate configuration from build options
     pub fn fromBuildOptions() EvmConfig {
         const build_options = @import("build_options");
@@ -232,30 +309,61 @@ pub const EvmConfig = struct {
         else
             EvmConfig{}; // safe/default
 
+        // Parse EIP overrides from build options
+        const eip_overrides = parseEipOverrides(build_options.eip_overrides);
+
         // Apply build options
         config.eips = Eips{
             .hardfork = getHardforkFromString(build_options.hardfork),
-            .overrides = config.eip_overrides,
+            .overrides = eip_overrides,
         };
+        config.eip_overrides = eip_overrides;
+
+        // Call & Stack Limits
         config.max_call_depth = build_options.max_call_depth;
+        config.max_input_size = build_options.max_input_size;
         config.stack_size = build_options.stack_size;
+
+        // Code Size Limits
         config.max_bytecode_size = build_options.max_bytecode_size;
         config.max_initcode_size = build_options.max_initcode_size;
+
+        // Gas & Balance
         config.block_gas_limit = build_options.block_gas_limit;
-        config.memory_initial_capacity = build_options.memory_initial_capacity;
-        config.memory_limit = build_options.memory_limit;
-        config.arena_capacity_limit = build_options.arena_capacity_limit;
-        config.enable_fusion = build_options.enable_fusion;
-        config.enable_precompiles = true; // Always enable precompiles
         config.disable_gas_checks = build_options.disable_gas_checks;
         config.disable_balance_checks = build_options.disable_balance_checks;
 
-        // Set tracer if enabled
-        if (build_options.enable_tracing) {
-            // For now, we'll leave TracerType as null since it requires more complex setup
-            // Users can still set up their own tracer through the configuration
-            // Tracer is now part of EVM struct, not config
-        }
+        // Memory Configuration
+        config.memory_initial_capacity = build_options.memory_initial_capacity;
+        config.memory_limit = build_options.memory_limit;
+
+        // Arena Allocator
+        config.arena_capacity_limit = build_options.arena_capacity_limit;
+        config.arena_growth_factor = build_options.arena_growth_factor;
+
+        // Optimization & Features
+        config.enable_fusion = build_options.enable_fusion;
+        config.enable_precompiles = build_options.enable_precompiles;
+        config.vector_length = build_options.vector_length;
+
+        // Loop Safety
+        config.loop_quota = build_options.loop_quota;
+
+        // Block Info Configuration
+        config.block_info_config = .{
+            .DifficultyType = if (build_options.block_info_use_compact_types) u64 else u256,
+            .BaseFeeType = if (build_options.block_info_use_compact_types) u64 else u256,
+            .use_compact_types = build_options.block_info_use_compact_types,
+        };
+
+        // System Contracts
+        config.enable_beacon_roots = build_options.enable_beacon_roots;
+        config.enable_historical_block_hashes = build_options.enable_historical_block_hashes;
+        config.enable_validator_deposits = build_options.enable_validator_deposits;
+        config.enable_validator_withdrawals = build_options.enable_validator_withdrawals;
+
+        // Tracer Configuration
+        config.tracer_config = parseTracerConfig(build_options.tracer_preset, build_options);
 
         return config;
     }
