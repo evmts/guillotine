@@ -4,6 +4,7 @@ pub const ModuleSet = struct {
     lib_mod: *std.Build.Module,
     primitives_mod: *std.Build.Module,
     crypto_mod: *std.Build.Module,
+    precompiles_mod: *std.Build.Module,
     trie_mod: *std.Build.Module,
     provider_mod: *std.Build.Module,
     evm_mod: *std.Build.Module,
@@ -25,7 +26,13 @@ pub fn createModules(
     bn254_lib: ?*std.Build.Step.Compile,
     foundry_lib: ?*std.Build.Step.Compile,
 ) ModuleSet {
-    // C-KZG module
+    // Get primitives package dependency
+    const primitives_dep = b.dependency("primitives", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
+    // C-KZG module (still local for now, primitives package has its own)
     const c_kzg_mod = b.createModule(.{
         .root_source_file = b.path("lib/c-kzg-4844/bindings/zig/root.zig"),
         .target = target,
@@ -36,24 +43,10 @@ pub fn createModules(
     c_kzg_mod.addIncludePath(b.path("lib/c-kzg-4844/src"));
     c_kzg_mod.addIncludePath(b.path("lib/c-kzg-4844/blst/bindings"));
 
-    // Primitives module
-    const primitives_mod = b.createModule(.{
-        .root_source_file = b.path("src/primitives/root.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-
-    // Crypto module
-    const crypto_mod = b.createModule(.{
-        .root_source_file = b.path("src/crypto/root.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    crypto_mod.addImport("primitives", primitives_mod);
-    crypto_mod.addImport("c_kzg", c_kzg_mod);
-    crypto_mod.addImport("build_options", build_options_mod);
-    crypto_mod.linkLibrary(blst_lib);
-    primitives_mod.addImport("crypto", crypto_mod);
+    // Use primitives package modules (primitives, crypto, precompiles)
+    const primitives_mod = primitives_dep.module("primitives");
+    const crypto_mod = primitives_dep.module("crypto");
+    const precompiles_mod = primitives_dep.module("precompiles");
 
     // Trie module
     const trie_mod = b.createModule(.{
@@ -79,6 +72,7 @@ pub fn createModules(
     });
     evm_mod.addImport("primitives", primitives_mod);
     evm_mod.addImport("crypto", crypto_mod);
+    evm_mod.addImport("precompiles", precompiles_mod);
     evm_mod.addImport("build_options", build_options_mod);
     evm_mod.addImport("zbench", zbench_dep.module("zbench"));
     // revm include path removed
@@ -115,6 +109,7 @@ pub fn createModules(
     lib_mod.addImport("build_options", build_options_mod);
     lib_mod.addImport("primitives", primitives_mod);
     lib_mod.addImport("crypto", crypto_mod);
+    lib_mod.addImport("precompiles", precompiles_mod);
     // evm_mod is not needed since lib_mod IS the evm module now
     lib_mod.addImport("provider", provider_mod);
     lib_mod.addImport("compilers", compilers_mod);
@@ -144,6 +139,7 @@ pub fn createModules(
         .lib_mod = lib_mod,
         .primitives_mod = primitives_mod,
         .crypto_mod = crypto_mod,
+        .precompiles_mod = precompiles_mod,
         .trie_mod = trie_mod,
         .provider_mod = provider_mod,
         .evm_mod = evm_mod,

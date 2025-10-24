@@ -9,7 +9,7 @@ const SelfDestruct = @import("storage/self_destruct.zig").SelfDestruct;
 const CreatedContracts = @import("storage/created_contracts.zig").CreatedContracts;
 const AccessList = @import("storage/access_list.zig").AccessList;
 const Hardfork = @import("eips_and_hardforks/eips.zig").Hardfork;
-const precompiles = @import("precompiles/precompiles.zig");
+const precompiles = @import("precompiles");
 const EvmConfig = @import("evm_config.zig").EvmConfig;
 const TransactionContext = @import("block/transaction_context.zig").TransactionContext;
 const GrowingArenaAllocator = @import("evm_arena_allocator.zig").GrowingArenaAllocator;
@@ -736,7 +736,7 @@ pub fn Evm(config: EvmConfig) type {
 
         /// Perform pre-flight checks common to all call operations
         fn performCallPreflight(self: *Self, to: primitives.Address, input: []const u8, gas: u64, is_static: bool, snapshot_id: Journal.SnapshotIdType) !PreflightResult {
-            if (config.enable_precompiles and precompiles.is_precompile(to)) {
+            if (config.enable_precompiles and precompiles.isPrecompile(to, config.eips.hardfork)) {
                 const result = self.executePrecompileInline(to, input, gas, is_static, snapshot_id) catch {
                     self.journal.revert_to_snapshot(snapshot_id);
                     return PreflightResult{ .precompile_result = CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable };
@@ -1103,7 +1103,7 @@ pub fn Evm(config: EvmConfig) type {
                 return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
             }
 
-            const contract_address = primitives.Address.get_contract_address(params.caller, caller_account.nonce);
+            const contract_address = try primitives.Address.getContractAddress(self.getCallArenaAllocator(), params.caller, caller_account.nonce);
 
             // Always increment nonce for CREATE operations
             try self.journal.record_nonce_change(snapshot_id, params.caller, caller_account.nonce);
@@ -1195,7 +1195,7 @@ pub fn Evm(config: EvmConfig) type {
             try keccak_asm.keccak256(params.init_code, &init_code_hash_bytes);
             var salt_bytes: [32]u8 = undefined;
             std.mem.writeInt(u256, &salt_bytes, params.salt, .big);
-            const contract_address = primitives.Address.get_create2_address(params.caller, salt_bytes, init_code_hash_bytes);
+            const contract_address = primitives.Address.getCreate2Address(params.caller, salt_bytes, init_code_hash_bytes);
 
             const existed_before = self.database.account_exists(contract_address.bytes);
             if (existed_before) {
@@ -1545,9 +1545,9 @@ pub fn Evm(config: EvmConfig) type {
         fn executePrecompileInline(self: *Self, address: primitives.Address, input: []const u8, gas: u64, is_static: bool, snapshot_id: Journal.SnapshotIdType) !CallResult {
             _ = snapshot_id;
             _ = is_static;
-            if (!precompiles.is_precompile(address)) return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+            if (!precompiles.isPrecompile(address, config.eips.hardfork)) return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
 
-            const result = precompiles.execute_precompile(self.getCallArenaAllocator(), address, input, gas) catch {
+            const result = precompiles.execute(self.getCallArenaAllocator(), address, input, gas, config.eips.hardfork) catch {
                 return CallResult{
                     .success = false,
                     .gas_left = 0,
@@ -1555,20 +1555,13 @@ pub fn Evm(config: EvmConfig) type {
                 };
             };
 
-            // Convert PrecompileOutput to CallResult
-            if (result.success) {
-                return CallResult{
-                    .success = true,
-                    .gas_left = gas - result.gas_used,
-                    .output = result.output,
-                };
-            } else {
-                return CallResult{
-                    .success = false,
-                    .gas_left = gas - result.gas_used,
-                    .output = result.output,
-                };
-            }
+            // Convert PrecompileResult to CallResult
+            // Success is indicated by execute() not returning an error
+            return CallResult{
+                .success = true,
+                .gas_left = gas - result.gas_used,
+                .output = result.output,
+            };
         }
 
         /// Get account balance
@@ -3232,7 +3225,7 @@ test "EVM CREATE operation - collision detection" {
     const caller_address: primitives.Address = .{ .bytes = [_]u8{0x01} ++ [_]u8{0} ** 19 };
 
     // Calculate what the contract address will be
-    const expected_address = primitives.Address.get_contract_address(caller_address, 0);
+    const expected_address = primitives.Address.getContractAddress(caller_address, 0);
 
     // Pre-create an account at that address with code
     const existing_code = [_]u8{ 0x60, 0x00 }; // PUSH1 0

@@ -682,7 +682,7 @@ pub const MinimalFrame = struct {
             // ADDRESS
             0x30 => {
                 try self.consumeGas(GasConstants.GasQuickStep);
-                const addr_u256 = primitives.Address.to_u256(self.address);
+                const addr_u256 = primitives.Address.toU256(self.address);
                 try self.pushStack(addr_u256);
                 self.pc += 1;
             },
@@ -708,7 +708,7 @@ pub const MinimalFrame = struct {
             // ORIGIN
             0x32 => {
                 try self.consumeGas(GasConstants.GasQuickStep);
-                const origin_u256 = primitives.Address.to_u256(evm.origin);
+                const origin_u256 = primitives.Address.toU256(evm.origin);
                 try self.pushStack(origin_u256);
                 self.pc += 1;
             },
@@ -716,7 +716,7 @@ pub const MinimalFrame = struct {
             // CALLER
             0x33 => {
                 try self.consumeGas(GasConstants.GasQuickStep);
-                const caller_u256 = primitives.Address.to_u256(self.caller);
+                const caller_u256 = primitives.Address.toU256(self.caller);
                 try self.pushStack(caller_u256);
                 self.pc += 1;
             },
@@ -880,7 +880,7 @@ pub const MinimalFrame = struct {
             // COINBASE
             0x41 => {
                 try self.consumeGas(GasConstants.GasQuickStep);
-                const coinbase_u256 = primitives.Address.to_u256(evm.block_coinbase);
+                const coinbase_u256 = primitives.Address.toU256(evm.block_coinbase);
                 try self.pushStack(coinbase_u256);
                 self.pc += 1;
             },
@@ -1064,7 +1064,7 @@ pub const MinimalFrame = struct {
                 const is_cold = access_cost == GasConstants.ColdSloadCost;
 
                 // Calculate SSTORE gas cost using proper EIP-2200/EIP-3529 logic
-                const gas_cost = GasConstants.sstore_gas_cost(current_value, original_value, value, is_cold);
+                const gas_cost = GasConstants.sstoreGasCost(current_value, original_value, value, is_cold);
                 try self.consumeGas(gas_cost);
 
                 // EIP-3529: Only clearing (non-zero -> zero) is eligible for refund
@@ -1703,7 +1703,7 @@ pub const MinimalFrame = struct {
             0x3b => {
                 // Get code size of external account
                 const addr_int = try self.popStack();
-                const ext_addr = primitives.Address.from_u256(addr_int);
+                const ext_addr = primitives.Address.fromU256(addr_int);
 
                 // EIP-150/EIP-2929: hardfork-aware account access cost
                 const access_cost = try self.externalAccountGasCost(ext_addr);
@@ -1723,7 +1723,7 @@ pub const MinimalFrame = struct {
                 const offset = try self.popStack();
                 const size = try self.popStack();
 
-                const ext_addr = primitives.Address.from_u256(addr_int);
+                const ext_addr = primitives.Address.fromU256(addr_int);
 
                 // Gas cost calculation
                 if (size > 0) {
@@ -1761,7 +1761,7 @@ pub const MinimalFrame = struct {
 
                 // Get code hash of external account
                 const addr_int = try self.popStack();
-                const ext_addr = primitives.Address.from_u256(addr_int);
+                const ext_addr = primitives.Address.fromU256(addr_int);
 
                 // EIP-150/EIP-2929: hardfork-aware account access cost
                 const access_cost = try self.externalAccountGasCost(ext_addr);

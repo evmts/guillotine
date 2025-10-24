@@ -181,18 +181,6 @@ pub fn build(b: *std.Build) void {
     const bytecode_patterns_step = b.step("build-bytecode-patterns", "Build bytecode pattern analyzer");
     bytecode_patterns_step.dependOn(&b.addInstallArtifact(bytecode_patterns, .{}).step);
 
-    // BLS wrapper for missing symbols
-    const bls_wrapper = b.addLibrary(.{
-        .name = "bls_wrapper",
-        .linkage = .static,
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("lib/bls_wrapper.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
-    });
-    bls_wrapper.root_module.addImport("build_options", options_mod);
-
     // Shared library for FFI bindings
     const shared_lib_mod = b.createModule(.{
         .root_source_file = b.path("src/evm_c_api.zig"),
@@ -211,7 +199,6 @@ pub fn build(b: *std.Build) void {
         // Force LLVM backend: native Zig backend on Linux x86 doesn't support tail calls yet
         .use_llvm = true,
     });
-    shared_lib.linkLibrary(bls_wrapper); // Add BLS wrapper symbols
     shared_lib.linkLibrary(c_kzg_lib);
     shared_lib.linkLibrary(blst_lib);
     if (bn254_lib) |bn254| shared_lib.linkLibrary(bn254);
@@ -255,7 +242,6 @@ pub fn build(b: *std.Build) void {
         .use_llvm = true,
         .test_runner = .{ .path = b.path("test_runner.zig"), .mode = .simple },
     });
-    unit_tests.linkLibrary(bls_wrapper);
     if (test_filter) |filter| {
         unit_tests.filters = &[_][]const u8{filter};
     }
@@ -328,7 +314,6 @@ pub fn build(b: *std.Build) void {
     integration_tests.linkLibrary(c_kzg_lib);
     integration_tests.linkLibrary(blst_lib);
     if (bn254_lib) |bn254| integration_tests.linkLibrary(bn254);
-    integration_tests.linkLibrary(bls_wrapper);
     integration_tests.linkLibC();
     if (test_filter) |filter| {
         integration_tests.filters = &[_][]const u8{filter};
@@ -905,7 +890,6 @@ pub fn build(b: *std.Build) void {
     specs_test.linkLibrary(c_kzg_lib);
     specs_test.linkLibrary(blst_lib);
     if (bn254_lib) |bn254| specs_test.linkLibrary(bn254);
-    specs_test.linkLibrary(bls_wrapper);
     specs_test.linkLibC();
     
     // Apply test filter if specified

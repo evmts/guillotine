@@ -40,13 +40,17 @@
         //     .url = "https://github.com/webui-dev/webui/archive/699119f42fc64ae42c9121bc4749b740f71949af.tar.gz",
         //     .hash = "webui-2.5.0-beta.4-pxqD5esSNwCHzwq6ndnW-ShzC_nPNAzGu13l4Unk0rFl",
         // },
+        .primitives = .{
+            .url = "https://github.com/evmts/primitives/archive/refs/heads/main.tar.gz",
+            .hash = "guillotine_primitives-0.0.0-yOt5gSBWkgBbcfH9pdFWgRhAv9fcx8MpwTEAgWI7AGUC",
+        },
         .zbench = .{
             .url = "https://github.com/hendriknielaender/zBench/archive/refs/heads/main.tar.gz",
             .hash = "zbench-0.11.2-YTdc7zolAQDlBF9i0ywXIvDjafL3Kg27S-aFUq6dU5zy",
         },
         .clap = .{
             .url = "https://github.com/Hejsil/zig-clap/archive/refs/heads/master.tar.gz",
-            .hash = "clap-0.11.0-oBajB-HnAQDPCKYzwF7rO3qDFwRcD39Q0DALlTSz5H7e",
+            .hash = "clap-0.11.0-oBajB-TnAQC7yPLnZRT5WzHZ_4Ly4dX2OILskli74b9H",
         },
     },
 

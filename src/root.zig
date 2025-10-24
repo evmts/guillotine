@@ -93,8 +93,8 @@ pub const OpcodeSynthetic = @import("opcodes/opcode_synthetic.zig");
 pub const opcode_synthetic = @import("opcodes/opcode_synthetic.zig");
 pub const opcode_data = @import("opcodes/opcode_data.zig");
 
-// Precompiles module
-pub const precompiles = @import("precompiles/precompiles.zig");
+// Precompiles module (from primitives package)
+pub const precompiles = @import("precompiles");
 
 // Database and state modules
 pub const BlockInfo = @import("block/block_info.zig").BlockInfo(.{});
@@ -115,7 +115,8 @@ pub const Log = @import("primitives").logs.Log;
 pub const TransactionContext = @import("block/transaction_context.zig").TransactionContext;
 pub const AuthorizationProcessor = @import("eips_and_hardforks/authorization_processor.zig").AuthorizationProcessor;
 pub const AuthorizationError = @import("eips_and_hardforks/authorization_processor.zig").AuthorizationError;
-pub const kzg_setup = @import("precompiles/kzg_setup.zig");
+// KZG setup from primitives package crypto module
+pub const kzg_setup = @import("crypto").kzg_setup;
 
 // Re-export from evm module for compatibility
 pub const Primitives = @import("primitives");
