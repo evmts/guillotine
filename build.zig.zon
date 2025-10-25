@@ -67,7 +67,6 @@
         "build.zig.zon",
         "src",
         "lib",
-        "apps",
         "LICENSE",
         "README.md",
     },
