@@ -21,32 +21,15 @@ pub fn createModules(
     optimize: std.builtin.OptimizeMode,
     build_options_mod: *std.Build.Module,
     zbench_dep: *std.Build.Dependency,
-    c_kzg_lib: *std.Build.Step.Compile,
-    blst_lib: *std.Build.Step.Compile,
+    primitives_dep: *std.Build.Dependency,
     bn254_lib: ?*std.Build.Step.Compile,
     foundry_lib: ?*std.Build.Step.Compile,
 ) ModuleSet {
-    // Get primitives package dependency
-    const primitives_dep = b.dependency("primitives", .{
-        .target = target,
-        .optimize = optimize,
-    });
-
-    // C-KZG module (still local for now, primitives package has its own)
-    const c_kzg_mod = b.createModule(.{
-        .root_source_file = b.path("lib/c-kzg-4844/bindings/zig/root.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    c_kzg_mod.linkLibrary(c_kzg_lib);
-    c_kzg_mod.linkLibrary(blst_lib);
-    c_kzg_mod.addIncludePath(b.path("lib/c-kzg-4844/src"));
-    c_kzg_mod.addIncludePath(b.path("lib/c-kzg-4844/blst/bindings"));
-
-    // Use primitives package modules (primitives, crypto, precompiles)
+    // Use primitives package modules (primitives, crypto, precompiles, c_kzg)
     const primitives_mod = primitives_dep.module("primitives");
     const crypto_mod = primitives_dep.module("crypto");
     const precompiles_mod = primitives_dep.module("precompiles");
+    const c_kzg_mod = primitives_dep.module("c_kzg");
 
     // Trie module
     const trie_mod = b.createModule(.{

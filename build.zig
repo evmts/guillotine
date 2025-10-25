@@ -63,22 +63,18 @@ pub fn build(b: *std.Build) void {
 
     // Dependencies
     const zbench_dep = b.dependency("zbench", .{ .target = target, .optimize = optimize }); // retained for module wiring; not used to build benches
+    const primitives_dep = b.dependency("primitives", .{ .target = target, .optimize = optimize });
 
-    // Libraries
-    const blst_lib = lib_build.BlstLib.createBlstLibrary(b, target, optimize);
-    const c_kzg_lib = lib_build.CKzgLib.createCKzgLibrary(b, target, optimize, blst_lib);
-
+    // Use Rust build step for Guillotine-specific libraries
     const rust_build_step = lib_build.FoundryLib.createRustBuildStep(b, rust_target, optimize);
     const bn254_lib = lib_build.Bn254Lib.createBn254Library(b, target, optimize, .{ .enable_tracy = false }, rust_build_step, rust_target);
     const foundry_lib = lib_build.FoundryLib.createFoundryLibrary(b, target, optimize, rust_build_step, rust_target);
 
-    // Install BLS libraries to zig-out/lib for stable paths
-    b.installArtifact(blst_lib);
-    b.installArtifact(c_kzg_lib);
+    // Install Guillotine-specific libraries
     if (bn254_lib) |bn254| b.installArtifact(bn254);
 
     // Modules
-    const modules = Modules.createModules(b, target, optimize, options_mod, zbench_dep, c_kzg_lib, blst_lib, bn254_lib, foundry_lib);
+    const modules = Modules.createModules(b, target, optimize, options_mod, zbench_dep, primitives_dep, bn254_lib, foundry_lib);
 
     // Executables
     const guillotine_exe = GuillotineExe.createExecutable(b, modules.exe_mod);
@@ -123,8 +119,6 @@ pub fn build(b: *std.Build) void {
         // Force LLVM backend: native Zig backend on Linux x86 doesn't support tail calls yet
         .use_llvm = true,
     });
-    shared_lib.linkLibrary(c_kzg_lib);
-    shared_lib.linkLibrary(blst_lib);
     if (bn254_lib) |bn254| shared_lib.linkLibrary(bn254);
     shared_lib.linkLibC();
     // Export all symbols for Linux to ensure BLS symbols are available
@@ -142,8 +136,6 @@ pub fn build(b: *std.Build) void {
         // Force LLVM backend: native Zig backend on Linux x86 doesn't support tail calls yet
         .use_llvm = true,
     });
-    static_lib.linkLibrary(c_kzg_lib);
-    static_lib.linkLibrary(blst_lib);
     if (bn254_lib) |bn254| static_lib.linkLibrary(bn254);
     static_lib.linkLibC();
     b.installArtifact(static_lib);
@@ -198,8 +190,6 @@ pub fn build(b: *std.Build) void {
         lib_tests.linkLibrary(foundry);
         lib_tests.addIncludePath(b.path("lib/foundry-compilers"));
     }
-    lib_tests.linkLibrary(c_kzg_lib);
-    lib_tests.linkLibrary(blst_lib);
     if (bn254_lib) |bn254| lib_tests.linkLibrary(bn254);
     lib_tests.linkLibC();
     if (test_filter) |filter| {
@@ -236,8 +226,6 @@ pub fn build(b: *std.Build) void {
     integration_tests.root_module.addImport("provider", modules.provider_mod);
     integration_tests.root_module.addImport("trie", modules.trie_mod);
     integration_tests.root_module.addImport("Guillotine_lib", modules.lib_mod);
-    integration_tests.linkLibrary(c_kzg_lib);
-    integration_tests.linkLibrary(blst_lib);
     if (bn254_lib) |bn254| integration_tests.linkLibrary(bn254);
     integration_tests.linkLibC();
     if (test_filter) |filter| {
@@ -268,8 +256,6 @@ pub fn build(b: *std.Build) void {
     });
     fixture_tests.root_module.addImport("evm", modules.evm_mod);
     fixture_tests.root_module.addImport("primitives", modules.primitives_mod);
-    fixture_tests.linkLibrary(c_kzg_lib);
-    fixture_tests.linkLibrary(blst_lib);
     if (bn254_lib) |bn254| fixture_tests.linkLibrary(bn254);
     if (foundry_lib) |foundry| {
         fixture_tests.linkLibrary(foundry);
@@ -332,8 +318,6 @@ pub fn build(b: *std.Build) void {
     zbench_evm.root_module.addImport("primitives", modules.primitives_mod);
     zbench_evm.root_module.addImport("crypto", modules.crypto_mod);
     zbench_evm.root_module.addImport("build_options", options_mod);
-    zbench_evm.linkLibrary(c_kzg_lib);
-    zbench_evm.linkLibrary(blst_lib);
     if (bn254_lib) |bn254| zbench_evm.linkLibrary(bn254);
     zbench_evm.linkLibC();
 
@@ -355,8 +339,6 @@ pub fn build(b: *std.Build) void {
     zbench_main.root_module.addImport("evm", modules.evm_mod);
     zbench_main.root_module.addImport("primitives", modules.primitives_mod);
     zbench_main.root_module.addImport("foundry_compilers", modules.compilers_mod);
-    zbench_main.linkLibrary(c_kzg_lib);
-    zbench_main.linkLibrary(blst_lib);
     if (bn254_lib) |bn254| zbench_main.linkLibrary(bn254);
     if (foundry_lib) |foundry| {
         zbench_main.linkLibrary(foundry);
@@ -388,8 +370,6 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = .Debug,
     }));
-    erc20_gas_test.linkLibrary(c_kzg_lib);
-    erc20_gas_test.linkLibrary(blst_lib);
     if (bn254_lib) |bn254| erc20_gas_test.linkLibrary(bn254);
     erc20_gas_test.linkLibC();
 
@@ -417,8 +397,6 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = .Debug,
     }));
-    jump_table_test.linkLibrary(c_kzg_lib);
-    jump_table_test.linkLibrary(blst_lib);
     if (bn254_lib) |bn254| jump_table_test.linkLibrary(bn254);
     jump_table_test.linkLibC();
 
@@ -449,8 +427,6 @@ pub fn build(b: *std.Build) void {
 
     // Using MinimalEvm for differential testing (REVM removed)
 
-    erc20_deployment_test.linkLibrary(c_kzg_lib);
-    erc20_deployment_test.linkLibrary(blst_lib);
     if (bn254_lib) |bn254| erc20_deployment_test.linkLibrary(bn254);
     erc20_deployment_test.linkLibC();
 
@@ -481,8 +457,6 @@ pub fn build(b: *std.Build) void {
 
     // Using MinimalEvm for differential testing (REVM removed)
 
-    fixtures_differential_test.linkLibrary(c_kzg_lib);
-    fixtures_differential_test.linkLibrary(blst_lib);
     if (bn254_lib) |bn254| fixtures_differential_test.linkLibrary(bn254);
     fixtures_differential_test.linkLibC();
 
@@ -510,8 +484,6 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = .Debug,
     }));
-    gt_bug_test.linkLibrary(c_kzg_lib);
-    gt_bug_test.linkLibrary(blst_lib);
     if (bn254_lib) |bn254| gt_bug_test.linkLibrary(bn254);
     gt_bug_test.linkLibC();
     const test_gt_bug = b.step("test-gt-bug", "Test GT opcode bug");
@@ -532,8 +504,6 @@ pub fn build(b: *std.Build) void {
     dev_test.root_module.addImport("primitives", modules.primitives_mod);
     dev_test.root_module.addImport("crypto", modules.crypto_mod);
     dev_test.root_module.addImport("build_options", options_mod);
-    dev_test.linkLibrary(c_kzg_lib);
-    dev_test.linkLibrary(blst_lib);
     if (bn254_lib) |bn254| dev_test.linkLibrary(bn254);
     dev_test.linkLibC();
     const test_dev = b.step("test-dev", "Run development test for debugging");
@@ -584,8 +554,6 @@ pub fn build(b: *std.Build) void {
             }));
 
             // Link external libs
-            t.linkLibrary(c_kzg_lib);
-            t.linkLibrary(blst_lib);
             if (bn254_lib) |bn254| t.linkLibrary(bn254);
             t.linkLibC();
 
@@ -623,8 +591,6 @@ pub fn build(b: *std.Build) void {
         // Using MinimalEvm for differential testing (REVM removed)
 
         // Link other required libraries
-        erc20_mint_test.linkLibrary(c_kzg_lib);
-        erc20_mint_test.linkLibrary(blst_lib);
         if (bn254_lib) |bn254| erc20_mint_test.linkLibrary(bn254);
         erc20_mint_test.linkLibC();
 
@@ -653,8 +619,6 @@ pub fn build(b: *std.Build) void {
         erc20_transfer_test.root_module.addImport("build_options", options_mod);
 
         // Link required libraries
-        erc20_transfer_test.linkLibrary(c_kzg_lib);
-        erc20_transfer_test.linkLibrary(blst_lib);
         if (bn254_lib) |bn254| erc20_transfer_test.linkLibrary(bn254);
         erc20_transfer_test.linkLibC();
 
@@ -737,8 +701,6 @@ pub fn build(b: *std.Build) void {
         official_state_test.root_module.addImport("build_options", options_mod);
 
         // Link libraries used by EVM
-        official_state_test.linkLibrary(c_kzg_lib);
-        official_state_test.linkLibrary(blst_lib);
         if (bn254_lib) |bn254| official_state_test.linkLibrary(bn254);
         official_state_test.linkLibC();
 
@@ -773,8 +735,6 @@ pub fn build(b: *std.Build) void {
         official_chain_test.root_module.addImport("crypto", modules.crypto_mod);
         official_chain_test.root_module.addImport("build_options", options_mod);
 
-        official_chain_test.linkLibrary(c_kzg_lib);
-        official_chain_test.linkLibrary(blst_lib);
         if (bn254_lib) |bn254| official_chain_test.linkLibrary(bn254);
         official_chain_test.linkLibC();
 
@@ -807,8 +767,6 @@ pub fn build(b: *std.Build) void {
         synthetic_test.root_module.addImport("crypto", modules.crypto_mod);
         synthetic_test.root_module.addImport("build_options", options_mod);
 
-        synthetic_test.linkLibrary(c_kzg_lib);
-        synthetic_test.linkLibrary(blst_lib);
         if (bn254_lib) |bn254| synthetic_test.linkLibrary(bn254);
         synthetic_test.linkLibC();
 
@@ -839,8 +797,6 @@ pub fn build(b: *std.Build) void {
     runner_module.addImport("evm", modules.evm_mod);
     runner_module.addImport("primitives", modules.primitives_mod);
     specs_test.root_module.addImport("runner", runner_module);
-    specs_test.linkLibrary(c_kzg_lib);
-    specs_test.linkLibrary(blst_lib);
     if (bn254_lib) |bn254| specs_test.linkLibrary(bn254);
     specs_test.linkLibC();
 
@@ -894,8 +850,6 @@ pub fn build(b: *std.Build) void {
     state_tests.root_module.addImport("crypto", modules.crypto_mod);
     state_tests.root_module.addImport("build_options", options_mod);
     state_tests.root_module.addImport("runner", runner_module); // Reuse runner_module from specs_test
-    state_tests.linkLibrary(c_kzg_lib);
-    state_tests.linkLibrary(blst_lib);
     if (bn254_lib) |bn254| state_tests.linkLibrary(bn254);
     state_tests.linkLibC();
 
@@ -967,8 +921,6 @@ pub fn build(b: *std.Build) void {
         fusions_basic.root_module.addImport("crypto", modules.crypto_mod);
         fusions_basic.root_module.addImport("build_options", options_mod);
         fusions_basic.root_module.addImport("log", b.createModule(.{ .root_source_file = b.path("src/log.zig"), .target = target, .optimize = .Debug }));
-        fusions_basic.linkLibrary(c_kzg_lib);
-        fusions_basic.linkLibrary(blst_lib);
         if (bn254_lib) |bn254| fusions_basic.linkLibrary(bn254);
         fusions_basic.linkLibC();
 
@@ -988,8 +940,6 @@ pub fn build(b: *std.Build) void {
         fusions_dispatch.root_module.addImport("crypto", modules.crypto_mod);
         fusions_dispatch.root_module.addImport("build_options", options_mod);
         fusions_dispatch.root_module.addImport("log", b.createModule(.{ .root_source_file = b.path("src/log.zig"), .target = target, .optimize = .Debug }));
-        fusions_dispatch.linkLibrary(c_kzg_lib);
-        fusions_dispatch.linkLibrary(blst_lib);
         if (bn254_lib) |bn254| fusions_dispatch.linkLibrary(bn254);
         fusions_dispatch.linkLibC();
 
@@ -1010,8 +960,6 @@ pub fn build(b: *std.Build) void {
         fusions_diff_toggle.root_module.addImport("build_options", options_mod);
         fusions_diff_toggle.root_module.addImport("log", b.createModule(.{ .root_source_file = b.path("src/log.zig"), .target = target, .optimize = .Debug }));
         // Using MinimalEvm for differential testing (REVM removed)
-        fusions_diff_toggle.linkLibrary(c_kzg_lib);
-        fusions_diff_toggle.linkLibrary(blst_lib);
         if (bn254_lib) |bn254| fusions_diff_toggle.linkLibrary(bn254);
         fusions_diff_toggle.linkLibC();
 
