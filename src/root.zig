@@ -57,9 +57,10 @@ pub const TestEvm = Evm(EvmConfig{
     .disable_gas_checks = true,
 });
 
-// Fixtures for testing
-pub const FixtureContract = @import("fixtures").FixtureContract;
-pub const ContractName = @import("fixtures").ContractName;
+// Fixtures for testing - not included in package distribution
+// Only available when building from git repository with fixtures/ directory
+// pub const FixtureContract = @import("fixtures").FixtureContract;
+// pub const ContractName = @import("fixtures").ContractName;
 
 // Default EVM types - now uses build configuration
 pub const DefaultEvm = BuildConfiguredEvm;

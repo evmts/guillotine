@@ -10,7 +10,7 @@ pub const ModuleSet = struct {
     evm_mod: *std.Build.Module,
     compilers_mod: *std.Build.Module,
     c_kzg_mod: *std.Build.Module,
-    fixtures_mod: *std.Build.Module,
+    // fixtures_mod removed - only for testing/benchmarking, not in package distribution
     // revm_mod removed - using MinimalEvm for differential testing
     exe_mod: *std.Build.Module,
 };
@@ -98,16 +98,15 @@ pub fn createModules(
     lib_mod.addImport("trie", trie_mod);
     // REVM import removed - using MinimalEvm for differential testing
 
-    // Fixtures module
-    const fixtures_mod = b.createModule(.{
-        .root_source_file = b.path("fixtures/popular_contracts.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-
-    // Add fixtures import to evm_mod
-    evm_mod.addImport("fixtures", fixtures_mod);
-    lib_mod.addImport("fixtures", fixtures_mod);
+    // Fixtures module - optional, only for testing/benchmarking
+    // Not included in package distribution via .gitattributes export-ignore
+    // const fixtures_mod = b.createModule(.{
+    //     .root_source_file = b.path("fixtures/popular_contracts.zig"),
+    //     .target = target,
+    //     .optimize = optimize,
+    // });
+    // evm_mod.addImport("fixtures", fixtures_mod);
+    // lib_mod.addImport("fixtures", fixtures_mod);
 
     // Executable module
     const exe_mod = b.createModule(.{
@@ -127,7 +126,6 @@ pub fn createModules(
         .evm_mod = evm_mod,
         .compilers_mod = compilers_mod,
         .c_kzg_mod = c_kzg_mod,
-        .fixtures_mod = fixtures_mod,
         .exe_mod = exe_mod,
     };
 }
