@@ -20,7 +20,6 @@ pub fn createModules(
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
     build_options_mod: *std.Build.Module,
-    zbench_dep: *std.Build.Dependency,
     primitives_dep: *std.Build.Dependency,
     bn254_lib: ?*std.Build.Step.Compile,
     foundry_lib: ?*std.Build.Step.Compile,
@@ -57,7 +56,7 @@ pub fn createModules(
     evm_mod.addImport("crypto", crypto_mod);
     evm_mod.addImport("precompiles", precompiles_mod);
     evm_mod.addImport("build_options", build_options_mod);
-    evm_mod.addImport("zbench", zbench_dep.module("zbench"));
+    // zbench import removed - only needed for *_bench.zig files in benchmark executables
     // revm include path removed
 
     if (bn254_lib) |bn254| {

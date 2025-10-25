@@ -62,7 +62,7 @@ pub fn build(b: *std.Build) void {
     };
 
     // Dependencies
-    const zbench_dep = b.dependency("zbench", .{ .target = target, .optimize = optimize }); // retained for module wiring; not used to build benches
+    const zbench_dep = b.lazyDependency("zbench", .{ .target = target, .optimize = optimize }); // retained for module wiring; not used to build benches
     const primitives_dep = b.dependency("primitives", .{ .target = target, .optimize = optimize });
 
     // Use Rust build step for Guillotine-specific libraries
@@ -73,8 +73,8 @@ pub fn build(b: *std.Build) void {
     // Install Guillotine-specific libraries
     if (bn254_lib) |bn254| b.installArtifact(bn254);
 
-    // Modules
-    const modules = Modules.createModules(b, target, optimize, options_mod, zbench_dep, primitives_dep, bn254_lib, foundry_lib);
+    // Modules (zbench no longer needed for core evm_mod)
+    const modules = Modules.createModules(b, target, optimize, options_mod, primitives_dep, bn254_lib, foundry_lib);
 
     // Executables
     const guillotine_exe = GuillotineExe.createExecutable(b, modules.exe_mod);
@@ -279,8 +279,9 @@ pub fn build(b: *std.Build) void {
     // Main test step runs tests in priority order: specs -> integration -> unit
     const test_step = b.step("test", "Run all tests (specs -> integration -> unit)");
 
-    // BN254 benchmarks
-    const zbench_module = zbench_dep.module("zbench");
+    // BN254 benchmarks (only if zbench available)
+    if (zbench_dep) |dep| {
+        const zbench_module = dep.module("zbench");
     const zbench_bn254 = b.addExecutable(.{
         .name = "zbench-bn254",
         .root_module = b.createModule(.{
@@ -347,8 +348,9 @@ pub fn build(b: *std.Build) void {
     zbench_main.linkLibC();
 
     const run_zbench_main = b.addRunArtifact(zbench_main);
-    const zbench_step = b.step("bench", "Run all EVM fixture benchmarks");
-    zbench_step.dependOn(&run_zbench_main.step);
+        const zbench_step = b.step("bench", "Run all EVM fixture benchmarks");
+        zbench_step.dependOn(&run_zbench_main.step);
+    }
 
     // ERC20 deployment gas issue test
     const erc20_gas_test = b.addTest(.{
