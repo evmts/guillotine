@@ -18,8 +18,6 @@ bench/*/results
 **/zig-cache/**
 **/zig-out/**
 **/target/**
-apps/cli/guillotine-cli
-cli/guil
 
 # IDE files
 .vscode/
