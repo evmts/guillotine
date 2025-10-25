@@ -1,15 +1,3 @@
-[submodule "third_party/mcl"]
-	path = third_party/mcl
-	url = https://github.com/herumi/mcl.git
-[submodule "evm-bench"]
-	path = evm-bench
-	url = https://github.com/ziyadedher/evm-bench.git
-[submodule "bench/official/evms/evmone/evmone"]
-	path = bench/official/evms/evmone/evmone
-	url = https://github.com/ethereum/evmone
-[submodule "lib/c-kzg-4844"]
-	path = lib/c-kzg-4844
-	url = git@github.com:evmts/c-kzg-4844.git
 [submodule "specs/execution-specs"]
 	path = specs/execution-specs
 	url = https://github.com/ethereum/execution-specs

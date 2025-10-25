@@ -4,45 +4,7 @@ const GuillotineExe = @import("src/build.zig");
 const lib_build = @import("lib/build.zig");
 const DevtoolExe = @import("apps/devtool/build.zig");
 
-fn checkSubmodules() void {
-    // Check if critical submodules are initialized
-    const submodules = [_]struct {
-        path: []const u8,
-        name: []const u8,
-    }{
-        .{ .path = "lib/c-kzg-4844/.git", .name = "c-kzg-4844" },
-    };
-
-    var has_error = false;
-
-    for (submodules) |submodule| {
-        std.fs.cwd().access(submodule.path, .{}) catch {
-            if (!has_error) {
-                std.debug.print("\n", .{});
-                std.debug.print("❌ ERROR: Git submodules are not initialized!\n", .{});
-                std.debug.print("\n", .{});
-                std.debug.print("The following required submodules are missing:\n", .{});
-                has_error = true;
-            }
-            std.debug.print("  • {s}\n", .{submodule.name});
-        };
-    }
-
-    if (has_error) {
-        std.debug.print("\n", .{});
-        std.debug.print("To fix this, run the following commands:\n", .{});
-        std.debug.print("\n", .{});
-        std.debug.print("  git submodule update --init --recursive\n", .{});
-        std.debug.print("\n", .{});
-        std.debug.print("This will download and initialize all required dependencies.\n", .{});
-        std.debug.print("\n", .{});
-        std.process.exit(1);
-    }
-}
-
 pub fn build(b: *std.Build) void {
-    // Check submodules first
-    checkSubmodules();
 
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
