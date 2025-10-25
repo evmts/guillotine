@@ -2,7 +2,7 @@ const std = @import("std");
 const Modules = @import("../src/modules.build.zig");
 const GuillotineExe = @import("../src/build.zig");
 const lib_build = @import("../lib/build.zig");
-const DevtoolExe = @import("../apps/devtool/build.zig");
+const DevtoolExe = @import("../src/devtool/build.zig");
 
 fn checkSubmodules() void {
     // Check if critical submodules are initialized

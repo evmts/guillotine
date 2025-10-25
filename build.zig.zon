@@ -42,7 +42,7 @@
         // },
         .primitives = .{
             .url = "https://github.com/evmts/primitives/archive/refs/heads/main.tar.gz",
-            .hash = "guillotine_primitives-0.0.0-yOt5gSBWkgBbcfH9pdFWgRhAv9fcx8MpwTEAgWI7AGUC",
+            .hash = "guillotine_primitives-0.0.0-yOt5gRWAkgDU8m5Sb8-E8C6RhjMlAjK7-hhIjgt1hFeF",
         },
         .zbench = .{
             .url = "https://github.com/hendriknielaender/zBench/archive/refs/heads/main.tar.gz",
