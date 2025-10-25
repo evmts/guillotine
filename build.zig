@@ -62,7 +62,6 @@ pub fn build(b: *std.Build) void {
     };
 
     // Dependencies
-    const zbench_dep = b.lazyDependency("zbench", .{ .target = target, .optimize = optimize }); // retained for module wiring; not used to build benches
     const primitives_dep = b.dependency("primitives", .{ .target = target, .optimize = optimize });
 
     // Use Rust build step for Guillotine-specific libraries
@@ -278,79 +277,6 @@ pub fn build(b: *std.Build) void {
 
     // Main test step runs tests in priority order: specs -> integration -> unit
     const test_step = b.step("test", "Run all tests (specs -> integration -> unit)");
-
-    // BN254 benchmarks (only if zbench available)
-    if (zbench_dep) |dep| {
-        const zbench_module = dep.module("zbench");
-    const zbench_bn254 = b.addExecutable(.{
-        .name = "zbench-bn254",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/crypto/bn254/zbench_benchmarks.zig"),
-            .target = target,
-            .optimize = .ReleaseFast,
-        }),
-        // Force LLVM backend: native Zig backend on Linux x86 doesn't support tail calls yet
-        .use_llvm = true,
-    });
-    zbench_bn254.root_module.addImport("zbench", zbench_module);
-
-    const run_zbench_bn254 = b.addRunArtifact(zbench_bn254);
-    const zbench_bn254_step = b.step("bench-bn254", "Run zbench BN254 benchmarks");
-    zbench_bn254_step.dependOn(&run_zbench_bn254.step);
-
-    // EVM benchmarks
-    const zbench_evm = b.addExecutable(.{
-        .name = "zbench-evm",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/evm/evm_bench.zig"),
-            .target = target,
-            .optimize = .ReleaseFast,
-        }),
-        // Force LLVM backend: native Zig backend on Linux x86 doesn't support tail calls yet
-        .use_llvm = true,
-    });
-    zbench_evm.root_module.addImport("zbench", zbench_module);
-    zbench_evm.root_module.addImport("log", b.createModule(.{
-        .root_source_file = b.path("src/log.zig"),
-        .target = target,
-        .optimize = optimize,
-    }));
-    zbench_evm.root_module.addImport("evm", modules.evm_mod);
-    zbench_evm.root_module.addImport("primitives", modules.primitives_mod);
-    zbench_evm.root_module.addImport("crypto", modules.crypto_mod);
-    zbench_evm.root_module.addImport("build_options", options_mod);
-    if (bn254_lib) |bn254| zbench_evm.linkLibrary(bn254);
-    zbench_evm.linkLibC();
-
-    const run_zbench_evm = b.addRunArtifact(zbench_evm);
-    const zbench_evm_step = b.step("bench-evm", "Run zbench EVM benchmarks");
-    zbench_evm_step.dependOn(&run_zbench_evm.step);
-
-    // Main benchmark command - runs all fixture benchmarks
-    const zbench_main = b.addExecutable(.{
-        .name = "zbench",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("bench/evm_fixture_benchmarks.zig"),
-            .target = target,
-            .optimize = .ReleaseFast,
-        }),
-        .use_llvm = true, // For tail call optimization
-    });
-    zbench_main.root_module.addImport("zbench", zbench_module);
-    zbench_main.root_module.addImport("evm", modules.evm_mod);
-    zbench_main.root_module.addImport("primitives", modules.primitives_mod);
-    zbench_main.root_module.addImport("foundry_compilers", modules.compilers_mod);
-    if (bn254_lib) |bn254| zbench_main.linkLibrary(bn254);
-    if (foundry_lib) |foundry| {
-        zbench_main.linkLibrary(foundry);
-        zbench_main.addIncludePath(b.path("lib/foundry-compilers"));
-    }
-    zbench_main.linkLibC();
-
-    const run_zbench_main = b.addRunArtifact(zbench_main);
-        const zbench_step = b.step("bench", "Run all EVM fixture benchmarks");
-        zbench_step.dependOn(&run_zbench_main.step);
-    }
 
     // ERC20 deployment gas issue test
     const erc20_gas_test = b.addTest(.{
