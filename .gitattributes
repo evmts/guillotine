@@ -1,0 +1,17 @@
+# Exclude test fixtures and development files from GitHub archives
+test/ export-ignore
+specs/ export-ignore
+bench/ export-ignore
+fixtures/ export-ignore
+apps/ export-ignore
+target/ export-ignore
+node_modules/ export-ignore
+zig-out/ export-ignore
+profile_results/ export-ignore
+go-ethereum/ export-ignore
+guillotine-cli/ export-ignore
+sdks/ export-ignore
+.github/ export-ignore
+*.log export-ignore
+*.o export-ignore
+*.dylib export-ignore
