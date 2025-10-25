@@ -1,8 +1,0 @@
-node_modules
-dist
-
-# Generated files
-assets.zig
-
-# Don't ignore lib folder (ignored because of python)
-!lib/
