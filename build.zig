@@ -2,7 +2,7 @@ const std = @import("std");
 const Modules = @import("src/modules.build.zig");
 const GuillotineExe = @import("src/build.zig");
 const lib_build = @import("lib/build.zig");
-const DevtoolExe = @import("apps/devtool/build.zig");
+// DevtoolExe removed - apps/ not included in package distribution
 
 pub fn build(b: *std.Build) void {
 
@@ -81,24 +81,6 @@ pub fn build(b: *std.Build) void {
 
     // Bench runner executables are removed (moved to separate repo)
 
-    // Asset generation for devtool
-    const AssetGenerator = DevtoolExe.AssetGenerator;
-    const npm_check = b.addSystemCommand(&[_][]const u8{ "which", "npm" });
-    npm_check.addCheck(.{ .expect_stdout_match = "npm" });
-
-    const npm_install = b.addSystemCommand(&[_][]const u8{ "npm", "install" });
-    npm_install.setCwd(b.path("src/devtool"));
-    npm_install.step.dependOn(&npm_check.step);
-
-    const npm_build = b.addSystemCommand(&[_][]const u8{ "npm", "run", "build" });
-    npm_build.setCwd(b.path("src/devtool"));
-    npm_build.step.dependOn(&npm_install.step);
-
-    const generate_assets = AssetGenerator.GenerateAssetsStep.init(b, "src/devtool/dist", "src/devtool/assets.zig");
-    generate_assets.step.dependOn(&npm_build.step);
-
-    const devtool_exe = DevtoolExe.createDevtoolExecutable(b, target, optimize, modules.lib_mod, modules.evm_mod, modules.primitives_mod, modules.provider_mod, &generate_assets.step);
-    DevtoolExe.createDevtoolSteps(b, devtool_exe, target);
 
     // Shared library for FFI bindings
     const shared_lib_mod = b.createModule(.{
