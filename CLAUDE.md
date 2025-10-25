@@ -413,7 +413,6 @@ Key Steps:
   wasm                         Build WASM library and show bundle size
   wasm-minimal-evm             Build MinimalEvm WASM and show bundle size
   wasm-debug                   Build debug WASM for analysis
-  devtool                      Build and run the Ethereum devtool
   python                       Build Python bindings
   swift                        Build Swift bindings
   go                           Build Go bindings
