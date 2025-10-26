@@ -98,15 +98,6 @@ pub fn createModules(
     lib_mod.addImport("trie", trie_mod);
     // REVM import removed - using MinimalEvm for differential testing
 
-    // Fixtures module - optional, only for testing/benchmarking
-    // Not included in package distribution via .gitattributes export-ignore
-    // const fixtures_mod = b.createModule(.{
-    //     .root_source_file = b.path("fixtures/popular_contracts.zig"),
-    //     .target = target,
-    //     .optimize = optimize,
-    // });
-    // evm_mod.addImport("fixtures", fixtures_mod);
-    // lib_mod.addImport("fixtures", fixtures_mod);
 
     // Executable module
     const exe_mod = b.createModule(.{

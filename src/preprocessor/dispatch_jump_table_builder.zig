@@ -151,9 +151,6 @@ pub fn JumpTableBuilder(comptime FrameType: type, comptime DispatchType: type) t
                 };
             }
 
-            // Debug: Log final jump table entries if needed
-            // const log = @import("../log.zig");
-            // log.debug("Final jump table has {} entries", .{entries.len});
 
             return Self.JumpTable{ .entries = entries };
         }
