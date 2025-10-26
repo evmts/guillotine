@@ -13,6 +13,200 @@ const TrieError = trie.TrieError;
 /// Error types for HashBuilder operations
 const HashBuilderError = std.mem.Allocator.Error || TrieError;
 
+/// Iterator for traversing all key-value pairs in the trie
+pub const TrieIterator = struct {
+    const StackItem = struct {
+        node: TrieNode,
+        path: []u8, // Nibbles traversed so far
+        branch_index: u8, // For branch nodes, which child we're on
+    };
+
+    allocator: Allocator,
+    builder: *const HashBuilder,
+    stack: std.ArrayList(StackItem),
+    finished: bool,
+
+    pub fn init(allocator: Allocator, builder: *const HashBuilder) !TrieIterator {
+        var stack = std.ArrayList(StackItem).empty;
+
+        // Initialize with root if it exists
+        if (builder.root_hash) |root| {
+            const hash_str = try bytes_to_hex_string(allocator, &root);
+            defer allocator.free(hash_str);
+
+            if (builder.nodes.get(hash_str)) |root_node| {
+                const path = try allocator.alloc(u8, 0);
+                try stack.append(allocator, StackItem{
+                    .node = root_node,
+                    .path = path,
+                    .branch_index = 0,
+                });
+            }
+        }
+
+        return TrieIterator{
+            .allocator = allocator,
+            .builder = builder,
+            .stack = stack,
+            .finished = builder.root_hash == null,
+        };
+    }
+
+    pub fn deinit(self: *TrieIterator) void {
+        // Free all path allocations
+        for (self.stack.items) |item| {
+            self.allocator.free(item.path);
+        }
+        self.stack.deinit(self.allocator);
+    }
+
+    /// Get the next key-value pair
+    /// Returns null when iteration is complete
+    /// Caller must free the returned key and value
+    pub fn next(self: *TrieIterator) !?struct { key: []u8, value: []u8 } {
+        if (self.finished or self.stack.items.len == 0) {
+            return null;
+        }
+
+        while (self.stack.items.len > 0) {
+            var current = &self.stack.items[self.stack.items.len - 1];
+
+            switch (current.node) {
+                .Empty => {
+                    // Pop empty nodes and continue
+                    self.allocator.free(current.path);
+                    _ = self.stack.pop();
+                },
+                .Leaf => |leaf| {
+                    // Construct full path
+                    const full_path = try self.allocator.alloc(u8, current.path.len + leaf.nibbles.len);
+                    @memcpy(full_path[0..current.path.len], current.path);
+                    @memcpy(full_path[current.path.len..], leaf.nibbles);
+
+                    // Convert nibbles to key
+                    const key = try trie.nibbles_to_key(self.allocator, full_path);
+                    self.allocator.free(full_path);
+
+                    // Extract value
+                    const value = switch (leaf.value) {
+                        .Raw => |data| try self.allocator.dupe(u8, data),
+                        .Hash => return TrieError.InvalidNode,
+                    };
+
+                    // Pop this leaf
+                    self.allocator.free(current.path);
+                    _ = self.stack.pop();
+
+                    return .{ .key = key, .value = value };
+                },
+                .Extension => |extension| {
+                    // Construct new path
+                    const new_path = try self.allocator.alloc(u8, current.path.len + extension.nibbles.len);
+                    @memcpy(new_path[0..current.path.len], current.path);
+                    @memcpy(new_path[current.path.len..], extension.nibbles);
+
+                    // Pop current extension
+                    self.allocator.free(current.path);
+                    _ = self.stack.pop();
+
+                    // Get next node
+                    const next_node = switch (extension.next) {
+                        .Raw => return TrieError.InvalidNode,
+                        .Hash => |hash| blk: {
+                            const hash_str = try bytes_to_hex_string(self.allocator, &hash);
+                            defer self.allocator.free(hash_str);
+                            break :blk self.builder.nodes.get(hash_str) orelse {
+                                self.allocator.free(new_path);
+                                return TrieError.NonExistentNode;
+                            };
+                        },
+                    };
+
+                    // Push next node with accumulated path
+                    try self.stack.append(self.allocator, StackItem{
+                        .node = next_node,
+                        .path = new_path,
+                        .branch_index = 0,
+                    });
+                },
+                .Branch => |branch| {
+                    // Check if we should return the branch's own value first
+                    if (current.branch_index == 0 and branch.value != null) {
+                        // Return branch value
+                        const key = try trie.nibbles_to_key(self.allocator, current.path);
+                        const value = switch (branch.value.?) {
+                            .Raw => |data| try self.allocator.dupe(u8, data),
+                            .Hash => return TrieError.InvalidNode,
+                        };
+
+                        // Move to first child
+                        current.branch_index = 1;
+                        return .{ .key = key, .value = value };
+                    }
+
+                    // Find next child to explore
+                    var found_child = false;
+                    while (current.branch_index < 16) : (current.branch_index += 1) {
+                        const idx: u4 = @intCast(current.branch_index);
+                        if (branch.children_mask.is_set(idx)) {
+                            const child = branch.children[current.branch_index].?;
+
+                            // Create new path with this branch index
+                            const new_path = try self.allocator.alloc(u8, current.path.len + 1);
+                            @memcpy(new_path[0..current.path.len], current.path);
+                            new_path[current.path.len] = current.branch_index;
+
+                            // Move to next child for future iterations
+                            current.branch_index += 1;
+
+                            // Handle child based on type
+                            switch (child) {
+                                .Raw => |data| {
+                                    // Direct value at this branch
+                                    const key = try trie.nibbles_to_key(self.allocator, new_path);
+                                    self.allocator.free(new_path);
+                                    const value = try self.allocator.dupe(u8, data);
+                                    return .{ .key = key, .value = value };
+                                },
+                                .Hash => |hash| {
+                                    // Get the child node
+                                    const hash_str = try bytes_to_hex_string(self.allocator, &hash);
+                                    defer self.allocator.free(hash_str);
+
+                                    const child_node = self.builder.nodes.get(hash_str) orelse {
+                                        self.allocator.free(new_path);
+                                        return TrieError.NonExistentNode;
+                                    };
+
+                                    // Push child onto stack
+                                    try self.stack.append(self.allocator, StackItem{
+                                        .node = child_node,
+                                        .path = new_path,
+                                        .branch_index = 0,
+                                    });
+
+                                    found_child = true;
+                                    break;
+                                },
+                            }
+                        }
+                    }
+
+                    // If no more children, pop this branch
+                    if (!found_child) {
+                        self.allocator.free(current.path);
+                        _ = self.stack.pop();
+                    }
+                },
+            }
+        }
+
+        // Stack is empty, iteration complete
+        self.finished = true;
+        return null;
+    }
+};
+
 /// Complete Patricia Merkle Trie implementation with safe memory management
 pub const HashBuilder = struct {
     allocator: Allocator,
@@ -130,6 +324,12 @@ pub const HashBuilder = struct {
     /// Get the root hash
     pub fn get_root_hash(self: *const HashBuilder) ?[32]u8 {
         return self.root_hash;
+    }
+
+    /// Create an iterator for traversing all key-value pairs
+    /// Returns keys in lexicographic order (depth-first traversal)
+    pub fn iterator(self: *const HashBuilder, allocator: Allocator) !TrieIterator {
+        return try TrieIterator.init(allocator, self);
     }
 
     // Internal implementation methods

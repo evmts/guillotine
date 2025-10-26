@@ -1,5 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const testing = std.testing;
 const primitives = @import("primitives");
 const utils = @import("utils");
 
@@ -454,8 +455,6 @@ pub const HashBuilder = struct {
 // Tests
 
 test "TrieMask operations" {
-    const testing = std.testing;
-
     var mask = TrieMask.init();
     try testing.expect(mask.is_empty());
     try testing.expectEqual(@as(u5, 0), mask.bit_count());
@@ -479,7 +478,6 @@ test "TrieMask operations" {
 }
 
 test "key_to_nibbles and nibbles_to_key" {
-    const testing = std.testing;
     const allocator = testing.allocator;
 
     const key = [_]u8{ 0x12, 0x34, 0xAB, 0xCD };
@@ -502,49 +500,380 @@ test "key_to_nibbles and nibbles_to_key" {
     try testing.expectEqualSlices(u8, &key, round_trip);
 }
 
-test "encode_path and decode_path" {
-    const testing = std.testing;
+test "encode_path and decode_path - basic even extension" {
+
     const allocator = testing.allocator;
 
-    // Test with even number of nibbles - extension node
+    const nibbles = [_]u8{ 1, 2, 3, 4 };
+    const encoded = try encode_path(allocator, &nibbles, false);
+    defer allocator.free(encoded);
+
+    try testing.expectEqual(@as(usize, 3), encoded.len);
+    try testing.expectEqual(@as(u8, 0x00), encoded[0]);
+    try testing.expectEqual(@as(u8, 0x12), encoded[1]);
+    try testing.expectEqual(@as(u8, 0x34), encoded[2]);
+
+    const decoded = try decode_path(allocator, encoded);
+    defer allocator.free(decoded.nibbles);
+
+    try testing.expectEqual(false, decoded.is_leaf);
+    try testing.expectEqualSlices(u8, &nibbles, decoded.nibbles);
+}
+
+test "encode_path and decode_path - basic odd leaf" {
+
+    const allocator = testing.allocator;
+
+    const nibbles = [_]u8{ 1, 2, 3, 4, 5 };
+    const encoded = try encode_path(allocator, &nibbles, true);
+    defer allocator.free(encoded);
+
+    try testing.expectEqual(@as(usize, 3), encoded.len);
+    try testing.expectEqual(@as(u8, 0x31), encoded[0]);
+    try testing.expectEqual(@as(u8, 0x23), encoded[1]);
+    try testing.expectEqual(@as(u8, 0x45), encoded[2]);
+
+    const decoded = try decode_path(allocator, encoded);
+    defer allocator.free(decoded.nibbles);
+
+    try testing.expectEqual(true, decoded.is_leaf);
+    try testing.expectEqualSlices(u8, &nibbles, decoded.nibbles);
+}
+
+test "encode_path - empty path extension" {
+
+    const allocator = testing.allocator;
+
+    const nibbles = [_]u8{};
+    const encoded = try encode_path(allocator, &nibbles, false);
+    defer allocator.free(encoded);
+
+    try testing.expectEqual(@as(usize, 1), encoded.len);
+    try testing.expectEqual(@as(u8, 0x00), encoded[0]);
+
+    const decoded = try decode_path(allocator, encoded);
+    defer allocator.free(decoded.nibbles);
+
+    try testing.expectEqual(false, decoded.is_leaf);
+    try testing.expectEqual(@as(usize, 0), decoded.nibbles.len);
+}
+
+test "encode_path - empty path leaf" {
+
+    const allocator = testing.allocator;
+
+    const nibbles = [_]u8{};
+    const encoded = try encode_path(allocator, &nibbles, true);
+    defer allocator.free(encoded);
+
+    try testing.expectEqual(@as(usize, 1), encoded.len);
+    try testing.expectEqual(@as(u8, 0x20), encoded[0]);
+
+    const decoded = try decode_path(allocator, encoded);
+    defer allocator.free(decoded.nibbles);
+
+    try testing.expectEqual(true, decoded.is_leaf);
+    try testing.expectEqual(@as(usize, 0), decoded.nibbles.len);
+}
+
+test "encode_path - single nibble extension" {
+
+    const allocator = testing.allocator;
+
+    const nibbles = [_]u8{7};
+    const encoded = try encode_path(allocator, &nibbles, false);
+    defer allocator.free(encoded);
+
+    try testing.expectEqual(@as(usize, 1), encoded.len);
+    try testing.expectEqual(@as(u8, 0x17), encoded[0]);
+
+    const decoded = try decode_path(allocator, encoded);
+    defer allocator.free(decoded.nibbles);
+
+    try testing.expectEqual(false, decoded.is_leaf);
+    try testing.expectEqualSlices(u8, &nibbles, decoded.nibbles);
+}
+
+test "encode_path - single nibble leaf" {
+
+    const allocator = testing.allocator;
+
+    const nibbles = [_]u8{9};
+    const encoded = try encode_path(allocator, &nibbles, true);
+    defer allocator.free(encoded);
+
+    try testing.expectEqual(@as(usize, 1), encoded.len);
+    try testing.expectEqual(@as(u8, 0x39), encoded[0]);
+
+    const decoded = try decode_path(allocator, encoded);
+    defer allocator.free(decoded.nibbles);
+
+    try testing.expectEqual(true, decoded.is_leaf);
+    try testing.expectEqualSlices(u8, &nibbles, decoded.nibbles);
+}
+
+test "encode_path - even length leaf" {
+
+    const allocator = testing.allocator;
+
+    const nibbles = [_]u8{ 0, 1, 2, 3, 4, 5 };
+    const encoded = try encode_path(allocator, &nibbles, true);
+    defer allocator.free(encoded);
+
+    try testing.expectEqual(@as(usize, 4), encoded.len);
+    try testing.expectEqual(@as(u8, 0x20), encoded[0]);
+    try testing.expectEqual(@as(u8, 0x01), encoded[1]);
+    try testing.expectEqual(@as(u8, 0x23), encoded[2]);
+    try testing.expectEqual(@as(u8, 0x45), encoded[3]);
+
+    const decoded = try decode_path(allocator, encoded);
+    defer allocator.free(decoded.nibbles);
+
+    try testing.expectEqual(true, decoded.is_leaf);
+    try testing.expectEqualSlices(u8, &nibbles, decoded.nibbles);
+}
+
+test "encode_path - odd length extension" {
+
+    const allocator = testing.allocator;
+
+    const nibbles = [_]u8{ 1, 2, 3 };
+    const encoded = try encode_path(allocator, &nibbles, false);
+    defer allocator.free(encoded);
+
+    try testing.expectEqual(@as(usize, 2), encoded.len);
+    try testing.expectEqual(@as(u8, 0x11), encoded[0]);
+    try testing.expectEqual(@as(u8, 0x23), encoded[1]);
+
+    const decoded = try decode_path(allocator, encoded);
+    defer allocator.free(decoded.nibbles);
+
+    try testing.expectEqual(false, decoded.is_leaf);
+    try testing.expectEqualSlices(u8, &nibbles, decoded.nibbles);
+}
+
+test "encode_path - all zeros even extension" {
+
+    const allocator = testing.allocator;
+
+    const nibbles = [_]u8{ 0, 0, 0, 0 };
+    const encoded = try encode_path(allocator, &nibbles, false);
+    defer allocator.free(encoded);
+
+    try testing.expectEqual(@as(usize, 3), encoded.len);
+    try testing.expectEqual(@as(u8, 0x00), encoded[0]);
+    try testing.expectEqual(@as(u8, 0x00), encoded[1]);
+    try testing.expectEqual(@as(u8, 0x00), encoded[2]);
+
+    const decoded = try decode_path(allocator, encoded);
+    defer allocator.free(decoded.nibbles);
+
+    try testing.expectEqual(false, decoded.is_leaf);
+    try testing.expectEqualSlices(u8, &nibbles, decoded.nibbles);
+}
+
+test "encode_path - all 0xF even leaf" {
+
+    const allocator = testing.allocator;
+
+    const nibbles = [_]u8{ 0xF, 0xF, 0xF, 0xF };
+    const encoded = try encode_path(allocator, &nibbles, true);
+    defer allocator.free(encoded);
+
+    try testing.expectEqual(@as(usize, 3), encoded.len);
+    try testing.expectEqual(@as(u8, 0x20), encoded[0]);
+    try testing.expectEqual(@as(u8, 0xFF), encoded[1]);
+    try testing.expectEqual(@as(u8, 0xFF), encoded[2]);
+
+    const decoded = try decode_path(allocator, encoded);
+    defer allocator.free(decoded.nibbles);
+
+    try testing.expectEqual(true, decoded.is_leaf);
+    try testing.expectEqualSlices(u8, &nibbles, decoded.nibbles);
+}
+
+test "encode_path - all 0xF odd leaf" {
+
+    const allocator = testing.allocator;
+
+    const nibbles = [_]u8{ 0xF, 0xF, 0xF };
+    const encoded = try encode_path(allocator, &nibbles, true);
+    defer allocator.free(encoded);
+
+    try testing.expectEqual(@as(usize, 2), encoded.len);
+    try testing.expectEqual(@as(u8, 0x3F), encoded[0]);
+    try testing.expectEqual(@as(u8, 0xFF), encoded[1]);
+
+    const decoded = try decode_path(allocator, encoded);
+    defer allocator.free(decoded.nibbles);
+
+    try testing.expectEqual(true, decoded.is_leaf);
+    try testing.expectEqualSlices(u8, &nibbles, decoded.nibbles);
+}
+
+test "encode_path - prefix flags verification" {
+
+    const allocator = testing.allocator;
+
+    // Test all four prefix types
+    // 0x0_ = even extension (no terminator, even flag)
     {
-        const nibbles = [_]u8{ 1, 2, 3, 4 };
+        const nibbles = [_]u8{ 1, 2 };
         const encoded = try encode_path(allocator, &nibbles, false);
         defer allocator.free(encoded);
+        try testing.expectEqual(@as(u8, 0x00), encoded[0] & 0xF0);
+    }
 
-        try testing.expectEqual(@as(usize, 3), encoded.len);
-        try testing.expectEqual(@as(u8, 0x00), encoded[0]);
-        try testing.expectEqual(@as(u8, 0x12), encoded[1]);
-        try testing.expectEqual(@as(u8, 0x34), encoded[2]);
+    // 0x1_ = odd extension (no terminator, odd flag)
+    {
+        const nibbles = [_]u8{1};
+        const encoded = try encode_path(allocator, &nibbles, false);
+        defer allocator.free(encoded);
+        try testing.expectEqual(@as(u8, 0x10), encoded[0] & 0xF0);
+    }
+
+    // 0x2_ = even leaf (terminator, even flag)
+    {
+        const nibbles = [_]u8{ 1, 2 };
+        const encoded = try encode_path(allocator, &nibbles, true);
+        defer allocator.free(encoded);
+        try testing.expectEqual(@as(u8, 0x20), encoded[0] & 0xF0);
+    }
+
+    // 0x3_ = odd leaf (terminator, odd flag)
+    {
+        const nibbles = [_]u8{1};
+        const encoded = try encode_path(allocator, &nibbles, true);
+        defer allocator.free(encoded);
+        try testing.expectEqual(@as(u8, 0x30), encoded[0] & 0xF0);
+    }
+}
+
+test "encode_path - round trip even extension with various lengths" {
+
+    const allocator = testing.allocator;
+
+    const test_cases = [_][]const u8{
+        &[_]u8{ 0, 0 },
+        &[_]u8{ 1, 2 },
+        &[_]u8{ 0xA, 0xB },
+        &[_]u8{ 0xF, 0xF },
+        &[_]u8{ 1, 2, 3, 4 },
+        &[_]u8{ 1, 2, 3, 4, 5, 6 },
+        &[_]u8{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF },
+    };
+
+    for (test_cases) |nibbles| {
+        const encoded = try encode_path(allocator, nibbles, false);
+        defer allocator.free(encoded);
 
         const decoded = try decode_path(allocator, encoded);
         defer allocator.free(decoded.nibbles);
 
         try testing.expectEqual(false, decoded.is_leaf);
-        try testing.expectEqualSlices(u8, &nibbles, decoded.nibbles);
+        try testing.expectEqualSlices(u8, nibbles, decoded.nibbles);
     }
+}
 
-    // Test with odd number of nibbles - leaf node
-    {
-        const nibbles = [_]u8{ 1, 2, 3, 4, 5 };
-        const encoded = try encode_path(allocator, &nibbles, true);
+test "encode_path - round trip odd leaf with various lengths" {
+
+    const allocator = testing.allocator;
+
+    const test_cases = [_][]const u8{
+        &[_]u8{0},
+        &[_]u8{1},
+        &[_]u8{0xF},
+        &[_]u8{ 1, 2, 3 },
+        &[_]u8{ 1, 2, 3, 4, 5 },
+        &[_]u8{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0xA, 0xB, 0xC, 0xD, 0xE },
+    };
+
+    for (test_cases) |nibbles| {
+        const encoded = try encode_path(allocator, nibbles, true);
         defer allocator.free(encoded);
-
-        try testing.expectEqual(@as(usize, 3), encoded.len);
-        try testing.expectEqual(@as(u8, 0x31), encoded[0]);
-        try testing.expectEqual(@as(u8, 0x23), encoded[1]);
-        try testing.expectEqual(@as(u8, 0x45), encoded[2]);
 
         const decoded = try decode_path(allocator, encoded);
         defer allocator.free(decoded.nibbles);
 
         try testing.expectEqual(true, decoded.is_leaf);
-        try testing.expectEqualSlices(u8, &nibbles, decoded.nibbles);
+        try testing.expectEqualSlices(u8, nibbles, decoded.nibbles);
     }
 }
 
+test "encode_path - nibble with first nibble 0 in odd path" {
+
+    const allocator = testing.allocator;
+
+    const nibbles = [_]u8{ 0, 1, 2 };
+    const encoded = try encode_path(allocator, &nibbles, false);
+    defer allocator.free(encoded);
+
+    try testing.expectEqual(@as(usize, 2), encoded.len);
+    try testing.expectEqual(@as(u8, 0x10), encoded[0]);
+    try testing.expectEqual(@as(u8, 0x12), encoded[1]);
+
+    const decoded = try decode_path(allocator, encoded);
+    defer allocator.free(decoded.nibbles);
+
+    try testing.expectEqual(false, decoded.is_leaf);
+    try testing.expectEqualSlices(u8, &nibbles, decoded.nibbles);
+}
+
+test "encode_path - long path even extension" {
+
+    const allocator = testing.allocator;
+
+    var nibbles: [64]u8 = undefined;
+    for (0..64) |i| {
+        nibbles[i] = @intCast(i % 16);
+    }
+
+    const encoded = try encode_path(allocator, &nibbles, false);
+    defer allocator.free(encoded);
+
+    try testing.expectEqual(@as(usize, 33), encoded.len);
+    try testing.expectEqual(@as(u8, 0x00), encoded[0]);
+
+    const decoded = try decode_path(allocator, encoded);
+    defer allocator.free(decoded.nibbles);
+
+    try testing.expectEqual(false, decoded.is_leaf);
+    try testing.expectEqualSlices(u8, &nibbles, decoded.nibbles);
+}
+
+test "encode_path - long path odd leaf" {
+
+    const allocator = testing.allocator;
+
+    var nibbles: [63]u8 = undefined;
+    for (0..63) |i| {
+        nibbles[i] = @intCast(i % 16);
+    }
+
+    const encoded = try encode_path(allocator, &nibbles, true);
+    defer allocator.free(encoded);
+
+    try testing.expectEqual(@as(usize, 32), encoded.len);
+    try testing.expectEqual(@as(u8, 0x30), encoded[0] & 0xF0);
+
+    const decoded = try decode_path(allocator, encoded);
+    defer allocator.free(decoded.nibbles);
+
+    try testing.expectEqual(true, decoded.is_leaf);
+    try testing.expectEqualSlices(u8, &nibbles, decoded.nibbles);
+}
+
+test "decode_path - error on empty input" {
+
+    const allocator = testing.allocator;
+
+    const empty = [_]u8{};
+    const result = decode_path(allocator, &empty);
+    try testing.expectError(TrieError.InvalidPath, result);
+}
+
 test "BranchNode encoding" {
-    const testing = std.testing;
+
     const allocator = testing.allocator;
 
     var branch = BranchNode.init();
@@ -577,7 +906,7 @@ test "BranchNode encoding" {
 }
 
 test "LeafNode encoding" {
-    const testing = std.testing;
+
     const allocator = testing.allocator;
 
     const path = [_]u8{ 1, 2, 3, 4 };
@@ -604,7 +933,7 @@ test "LeafNode encoding" {
 }
 
 test "ExtensionNode encoding" {
-    const testing = std.testing;
+
     const allocator = testing.allocator;
 
     const path = [_]u8{ 1, 2, 3, 4 };
@@ -631,7 +960,7 @@ test "ExtensionNode encoding" {
 }
 
 test "TrieNode hash" {
-    const testing = std.testing;
+
     const allocator = testing.allocator;
 
     // Create a leaf node
@@ -655,4 +984,489 @@ test "TrieNode hash" {
         }
     }
     try testing.expect(!is_zero);
+}
+
+test "BranchNode - empty branch full RLP structure" {
+    const allocator = testing.allocator;
+
+    var branch = BranchNode.init();
+    defer branch.deinit(allocator);
+
+    const encoded = try branch.encode(allocator);
+    defer allocator.free(encoded);
+
+    // Decode to verify all 17 elements
+    const decoded = try primitives.Rlp.decode(allocator, encoded, false);
+    defer decoded.data.deinit(allocator);
+
+    switch (decoded.data) {
+        .List => |items| {
+            try testing.expectEqual(@as(usize, 17), items.len);
+
+            // All children should be empty
+            for (items[0..16]) |item| {
+                switch (item) {
+                    .String => |str| {
+                        try testing.expectEqual(@as(usize, 0), str.len);
+                    },
+                    .List => return error.TestExpectedString,
+                }
+            }
+
+            // Value slot should be empty
+            switch (items[16]) {
+                .String => |str| {
+                    try testing.expectEqual(@as(usize, 0), str.len);
+                },
+                .List => return error.TestExpectedString,
+            }
+        },
+        .String => return error.TestExpectedList,
+    }
+}
+
+test "BranchNode - multiple children full RLP structure" {
+    const allocator = testing.allocator;
+
+    var branch = BranchNode.init();
+    defer branch.deinit(allocator);
+
+    // Add values at multiple indices
+    const data1 = "value1";
+    const data1_copy = try allocator.dupe(u8, data1);
+    branch.children[1] = HashValue{ .Raw = data1_copy };
+    branch.children_mask.set(1);
+
+    const data2 = "value2";
+    const data2_copy = try allocator.dupe(u8, data2);
+    branch.children[9] = HashValue{ .Raw = data2_copy };
+    branch.children_mask.set(9);
+
+    const data3 = "value3";
+    const data3_copy = try allocator.dupe(u8, data3);
+    branch.children[15] = HashValue{ .Raw = data3_copy };
+    branch.children_mask.set(15);
+
+    const encoded = try branch.encode(allocator);
+    defer allocator.free(encoded);
+
+    // Decode to verify structure
+    const decoded = try primitives.Rlp.decode(allocator, encoded, false);
+    defer decoded.data.deinit(allocator);
+
+    switch (decoded.data) {
+        .List => |items| {
+            try testing.expectEqual(@as(usize, 17), items.len);
+
+            // Check specific children are present
+            switch (items[1]) {
+                .String => |str| try testing.expect(str.len > 0),
+                .List => return error.TestExpectedString,
+            }
+            switch (items[9]) {
+                .String => |str| try testing.expect(str.len > 0),
+                .List => return error.TestExpectedString,
+            }
+            switch (items[15]) {
+                .String => |str| try testing.expect(str.len > 0),
+                .List => return error.TestExpectedString,
+            }
+
+            // Other children should be empty
+            switch (items[0]) {
+                .String => |str| try testing.expectEqual(@as(usize, 0), str.len),
+                .List => return error.TestExpectedString,
+            }
+        },
+        .String => return error.TestExpectedList,
+    }
+}
+
+test "BranchNode - with terminal value RLP structure" {
+    const allocator = testing.allocator;
+
+    var branch = BranchNode.init();
+    defer branch.deinit(allocator);
+
+    // Set terminal value
+    const terminal_data = "terminal";
+    const terminal_copy = try allocator.dupe(u8, terminal_data);
+    branch.value = HashValue{ .Raw = terminal_copy };
+
+    const encoded = try branch.encode(allocator);
+    defer allocator.free(encoded);
+
+    // Decode to verify terminal value
+    const decoded = try primitives.Rlp.decode(allocator, encoded, false);
+    defer decoded.data.deinit(allocator);
+
+    switch (decoded.data) {
+        .List => |items| {
+            try testing.expectEqual(@as(usize, 17), items.len);
+
+            // Last item should be terminal value
+            switch (items[16]) {
+                .String => |str| try testing.expect(str.len > 0),
+                .List => return error.TestExpectedString,
+            }
+        },
+        .String => return error.TestExpectedList,
+    }
+}
+
+test "BranchNode - hash children RLP encoding" {
+    const allocator = testing.allocator;
+
+    var branch = BranchNode.init();
+    defer branch.deinit(allocator);
+
+    // Add hash value
+    var hash: [32]u8 = undefined;
+    for (&hash, 0..) |*byte, i| {
+        byte.* = @intCast(i);
+    }
+
+    branch.children[3] = HashValue{ .Hash = hash };
+    branch.children_mask.set(3);
+
+    const encoded = try branch.encode(allocator);
+    defer allocator.free(encoded);
+
+    // Decode to verify hash is present
+    const decoded = try primitives.Rlp.decode(allocator, encoded, false);
+    defer decoded.data.deinit(allocator);
+
+    switch (decoded.data) {
+        .List => |items| {
+            try testing.expectEqual(@as(usize, 17), items.len);
+            switch (items[3]) {
+                .String => |str| try testing.expect(str.len > 0),
+                .List => return error.TestExpectedString,
+            }
+        },
+        .String => return error.TestExpectedList,
+    }
+}
+
+test "LeafNode - empty path encoding" {
+    const allocator = testing.allocator;
+
+    const value = "value";
+    const value_copy = try allocator.dupe(u8, value);
+    const path_copy = try allocator.alloc(u8, 0);
+
+    var leaf = try LeafNode.init(allocator, path_copy, HashValue{ .Raw = value_copy });
+    defer leaf.deinit(allocator);
+
+    const encoded = try leaf.encode(allocator);
+    defer allocator.free(encoded);
+
+    // Decode to verify 2-element structure
+    const decoded = try primitives.Rlp.decode(allocator, encoded, false);
+    defer decoded.data.deinit(allocator);
+
+    switch (decoded.data) {
+        .List => |items| {
+            try testing.expectEqual(@as(usize, 2), items.len);
+        },
+        .String => return error.TestExpectedList,
+    }
+}
+
+test "LeafNode - long value encoding (>55 bytes)" {
+    const allocator = testing.allocator;
+
+    const path = [_]u8{ 1, 2 };
+    // Value longer than 55 bytes to test long string encoding
+    const long_value = try allocator.alloc(u8, 100);
+    defer allocator.free(long_value);
+    for (long_value, 0..) |*byte, i| {
+        byte.* = @intCast(i % 256);
+    }
+
+    const value_copy = try allocator.dupe(u8, long_value);
+    const path_copy = try allocator.dupe(u8, &path);
+
+    var leaf = try LeafNode.init(allocator, path_copy, HashValue{ .Raw = value_copy });
+    defer leaf.deinit(allocator);
+
+    const encoded = try leaf.encode(allocator);
+    defer allocator.free(encoded);
+
+    // Decode to verify long value is present
+    const decoded = try primitives.Rlp.decode(allocator, encoded, false);
+    defer decoded.data.deinit(allocator);
+
+    switch (decoded.data) {
+        .List => |items| {
+            try testing.expectEqual(@as(usize, 2), items.len);
+            switch (items[1]) {
+                .String => |str| try testing.expect(str.len > 55),
+                .List => return error.TestExpectedString,
+            }
+        },
+        .String => return error.TestExpectedList,
+    }
+}
+
+test "ExtensionNode - hash pointer encoding" {
+    const allocator = testing.allocator;
+
+    const path = [_]u8{ 5, 6 };
+    var hash: [32]u8 = undefined;
+    for (&hash, 0..) |*byte, i| {
+        byte.* = @intCast(i * 7 % 256);
+    }
+
+    const path_copy = try allocator.dupe(u8, &path);
+
+    var extension = try ExtensionNode.init(allocator, path_copy, HashValue{ .Hash = hash });
+    defer extension.deinit(allocator);
+
+    const encoded = try extension.encode(allocator);
+    defer allocator.free(encoded);
+
+    // Decode to verify 2-element structure
+    const decoded = try primitives.Rlp.decode(allocator, encoded, false);
+    defer decoded.data.deinit(allocator);
+
+    switch (decoded.data) {
+        .List => |items| {
+            try testing.expectEqual(@as(usize, 2), items.len);
+        },
+        .String => return error.TestExpectedList,
+    }
+}
+
+test "TrieNode - Empty encoding" {
+    const allocator = testing.allocator;
+
+    const node = TrieNode{ .Empty = {} };
+    const encoded = try node.encode(allocator);
+    defer allocator.free(encoded);
+
+    // Empty node should encode as empty string
+    try testing.expect(encoded.len > 0);
+
+    // Decode to verify
+    const decoded = try primitives.Rlp.decode(allocator, encoded, false);
+    defer decoded.data.deinit(allocator);
+
+    switch (decoded.data) {
+        .String => |str| {
+            try testing.expectEqual(@as(usize, 0), str.len);
+        },
+        .List => return error.TestExpectedString,
+    }
+}
+
+test "TrieNode - hash determinism for branch" {
+    const allocator = testing.allocator;
+
+    // Create two identical branches
+    var branch1 = BranchNode.init();
+    defer branch1.deinit(allocator);
+    const data1 = "test";
+    const data1_copy = try allocator.dupe(u8, data1);
+    branch1.children[0] = HashValue{ .Raw = data1_copy };
+    branch1.children_mask.set(0);
+
+    var node1 = TrieNode{ .Branch = branch1 };
+    const hash1 = try node1.hash(allocator);
+
+    var branch2 = BranchNode.init();
+    const data2_copy = try allocator.dupe(u8, data1);
+    branch2.children[0] = HashValue{ .Raw = data2_copy };
+    branch2.children_mask.set(0);
+
+    var node2 = TrieNode{ .Branch = branch2 };
+    defer node2.deinit(allocator);
+    const hash2 = try node2.hash(allocator);
+
+    // Hashes should be identical (deterministic)
+    try testing.expectEqualSlices(u8, &hash1, &hash2);
+}
+
+test "TrieNode - hash determinism for leaf" {
+    const allocator = testing.allocator;
+
+    const path = [_]u8{ 1, 2, 3 };
+    const value = "value";
+
+    const value_copy1 = try allocator.dupe(u8, value);
+    const path_copy1 = try allocator.dupe(u8, &path);
+    const leaf1 = try LeafNode.init(allocator, path_copy1, HashValue{ .Raw = value_copy1 });
+    var node1 = TrieNode{ .Leaf = leaf1 };
+    defer node1.deinit(allocator);
+    const hash1 = try node1.hash(allocator);
+
+    const value_copy2 = try allocator.dupe(u8, value);
+    const path_copy2 = try allocator.dupe(u8, &path);
+    const leaf2 = try LeafNode.init(allocator, path_copy2, HashValue{ .Raw = value_copy2 });
+    var node2 = TrieNode{ .Leaf = leaf2 };
+    defer node2.deinit(allocator);
+    const hash2 = try node2.hash(allocator);
+
+    // Hashes should be identical
+    try testing.expectEqualSlices(u8, &hash1, &hash2);
+}
+
+test "HashValue - hash calculation for raw data" {
+    const allocator = testing.allocator;
+
+    const data = "test_data";
+    const data_copy = try allocator.dupe(u8, data);
+    const value = HashValue{ .Raw = data_copy };
+    defer value.deinit(allocator);
+
+    const hash = try value.hash(allocator);
+
+    // Hash should be non-zero
+    var is_zero = true;
+    for (hash) |byte| {
+        if (byte != 0) {
+            is_zero = false;
+            break;
+        }
+    }
+    try testing.expect(!is_zero);
+}
+
+test "HashValue - hash passthrough for hash value" {
+    const allocator = testing.allocator;
+
+    var hash_input: [32]u8 = undefined;
+    for (&hash_input, 0..) |*byte, i| {
+        byte.* = @intCast(i);
+    }
+
+    const value = HashValue{ .Hash = hash_input };
+    const hash = try value.hash(allocator);
+
+    // Should return the same hash (passthrough)
+    try testing.expectEqualSlices(u8, &hash_input, &hash);
+}
+
+test "Node serialization - inline small values" {
+    const allocator = testing.allocator;
+
+    // Small value stored as Raw
+    const small_data = "small";
+    const small_copy = try allocator.dupe(u8, small_data);
+    const path_copy = try allocator.dupe(u8, &[_]u8{ 1, 2 });
+
+    var leaf = try LeafNode.init(allocator, path_copy, HashValue{ .Raw = small_copy });
+    defer leaf.deinit(allocator);
+
+    const encoded = try leaf.encode(allocator);
+    defer allocator.free(encoded);
+
+    // Small values should encode compactly
+    try testing.expect(encoded.len < 100);
+}
+
+test "Node serialization - large value encoding" {
+    const allocator = testing.allocator;
+
+    const large_data = try allocator.alloc(u8, 50);
+    defer allocator.free(large_data);
+    for (large_data, 0..) |*byte, i| {
+        byte.* = @intCast(i % 256);
+    }
+
+    const large_copy = try allocator.dupe(u8, large_data);
+    const path_copy = try allocator.dupe(u8, &[_]u8{ 3, 4 });
+
+    var leaf = try LeafNode.init(allocator, path_copy, HashValue{ .Raw = large_copy });
+    defer leaf.deinit(allocator);
+
+    const encoded = try leaf.encode(allocator);
+    defer allocator.free(encoded);
+
+    // Large values should be fully encoded
+    try testing.expect(encoded.len > 50);
+}
+
+test "Node serialization - hash value encoding" {
+    const allocator = testing.allocator;
+
+    var hash: [32]u8 = undefined;
+    for (&hash, 0..) |*byte, i| {
+        byte.* = @intCast((i * 13) % 256);
+    }
+
+    const path_copy = try allocator.dupe(u8, &[_]u8{ 5, 6 });
+
+    var leaf = try LeafNode.init(allocator, path_copy, HashValue{ .Hash = hash });
+    defer leaf.deinit(allocator);
+
+    const encoded = try leaf.encode(allocator);
+    defer allocator.free(encoded);
+
+    // Hash values should result in compact encoding
+    try testing.expect(encoded.len > 0);
+    try testing.expect(encoded.len < 100);
+}
+
+test "BranchNode - all children populated" {
+    const allocator = testing.allocator;
+
+    var branch = BranchNode.init();
+    defer branch.deinit(allocator);
+
+    // Populate all 16 children
+    var i: u4 = 0;
+    while (i < 16) : (i += 1) {
+        var buf: [10]u8 = undefined;
+        const data = std.fmt.bufPrint(&buf, "child{d}", .{i}) catch unreachable;
+        const data_copy = try allocator.dupe(u8, data);
+        branch.children[i] = HashValue{ .Raw = data_copy };
+        branch.children_mask.set(i);
+    }
+
+    const encoded = try branch.encode(allocator);
+    defer allocator.free(encoded);
+
+    // Decode to verify all children
+    const decoded = try primitives.Rlp.decode(allocator, encoded, false);
+    defer decoded.data.deinit(allocator);
+
+    switch (decoded.data) {
+        .List => |items| {
+            try testing.expectEqual(@as(usize, 17), items.len);
+
+            // All 16 children should be non-empty
+            for (items[0..16]) |item| {
+                switch (item) {
+                    .String => |str| try testing.expect(str.len > 0),
+                    .List => return error.TestExpectedString,
+                }
+            }
+        },
+        .String => return error.TestExpectedList,
+    }
+}
+
+test "Node encoding - round trip consistency" {
+    const allocator = testing.allocator;
+
+    // Test leaf round trip
+    {
+        const path = [_]u8{ 1, 2, 3 };
+        const value = "test_value";
+        const value_copy = try allocator.dupe(u8, value);
+        const path_copy = try allocator.dupe(u8, &path);
+
+        var leaf = try LeafNode.init(allocator, path_copy, HashValue{ .Raw = value_copy });
+        defer leaf.deinit(allocator);
+
+        const encoded1 = try leaf.encode(allocator);
+        defer allocator.free(encoded1);
+
+        // Re-encode and compare
+        const encoded2 = try leaf.encode(allocator);
+        defer allocator.free(encoded2);
+
+        try testing.expectEqualSlices(u8, encoded1, encoded2);
+    }
 }

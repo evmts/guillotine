@@ -313,3 +313,271 @@ test "MerkleTrie - multiple operations" {
     const cleared2 = try trie_instance.get(&[_]u8{ 2, 3, 4 });
     try testing.expect(cleared2 == null);
 }
+
+test "MerkleTrie - proof for multiple keys" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    var trie_instance = MerkleTrie.init(allocator);
+    defer trie_instance.deinit();
+
+    // Insert multiple keys to create a complex trie structure
+    try trie_instance.put(&[_]u8{ 0x12, 0x34 }, "value1");
+    try trie_instance.put(&[_]u8{ 0x12, 0x56 }, "value2");
+    try trie_instance.put(&[_]u8{ 0x78, 0x9A }, "value3");
+
+    const root = trie_instance.root_hash().?;
+
+    // Generate and verify proof for each key
+    const proof1 = try trie_instance.prove(&[_]u8{ 0x12, 0x34 });
+    defer {
+        for (proof1) |node| {
+            allocator.free(node);
+        }
+        allocator.free(proof1);
+    }
+
+    const valid1 = try trie_instance.verify_proof(root, &[_]u8{ 0x12, 0x34 }, proof1, "value1");
+    try testing.expect(valid1);
+
+    const proof2 = try trie_instance.prove(&[_]u8{ 0x12, 0x56 });
+    defer {
+        for (proof2) |node| {
+            allocator.free(node);
+        }
+        allocator.free(proof2);
+    }
+
+    const valid2 = try trie_instance.verify_proof(root, &[_]u8{ 0x12, 0x56 }, proof2, "value2");
+    try testing.expect(valid2);
+
+    const proof3 = try trie_instance.prove(&[_]u8{ 0x78, 0x9A });
+    defer {
+        for (proof3) |node| {
+            allocator.free(node);
+        }
+        allocator.free(proof3);
+    }
+
+    const valid3 = try trie_instance.verify_proof(root, &[_]u8{ 0x78, 0x9A }, proof3, "value3");
+    try testing.expect(valid3);
+}
+
+test "MerkleTrie - proof for non-existent key" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    var trie_instance = MerkleTrie.init(allocator);
+    defer trie_instance.deinit();
+
+    try trie_instance.put(&[_]u8{ 0x12, 0x34 }, "value1");
+    try trie_instance.put(&[_]u8{ 0x56, 0x78 }, "value2");
+
+    const root = trie_instance.root_hash().?;
+
+    // Generate proof for non-existent key
+    const proof = try trie_instance.prove(&[_]u8{ 0xAB, 0xCD });
+    defer {
+        for (proof) |node| {
+            allocator.free(node);
+        }
+        allocator.free(proof);
+    }
+
+    // Should verify as exclusion proof (null value)
+    const valid = try trie_instance.verify_proof(root, &[_]u8{ 0xAB, 0xCD }, proof, null);
+    try testing.expect(valid);
+}
+
+test "MerkleTrie - proof with wrong value fails" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    var trie_instance = MerkleTrie.init(allocator);
+    defer trie_instance.deinit();
+
+    try trie_instance.put(&[_]u8{ 0x12, 0x34 }, "correct_value");
+
+    const root = trie_instance.root_hash().?;
+
+    const proof = try trie_instance.prove(&[_]u8{ 0x12, 0x34 });
+    defer {
+        for (proof) |node| {
+            allocator.free(node);
+        }
+        allocator.free(proof);
+    }
+
+    // Verify with wrong value should fail
+    const invalid = try trie_instance.verify_proof(root, &[_]u8{ 0x12, 0x34 }, proof, "wrong_value");
+    try testing.expect(!invalid);
+}
+
+test "MerkleTrie - proof after updates" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    var trie_instance = MerkleTrie.init(allocator);
+    defer trie_instance.deinit();
+
+    // Insert initial value
+    try trie_instance.put(&[_]u8{ 0x12, 0x34 }, "old_value");
+    const old_root = trie_instance.root_hash().?;
+
+    const old_proof = try trie_instance.prove(&[_]u8{ 0x12, 0x34 });
+    defer {
+        for (old_proof) |node| {
+            allocator.free(node);
+        }
+        allocator.free(old_proof);
+    }
+
+    // Old proof should verify old value
+    const old_valid = try trie_instance.verify_proof(old_root, &[_]u8{ 0x12, 0x34 }, old_proof, "old_value");
+    try testing.expect(old_valid);
+
+    // Update the value
+    try trie_instance.put(&[_]u8{ 0x12, 0x34 }, "new_value");
+    const new_root = trie_instance.root_hash().?;
+
+    // Root should have changed
+    try testing.expect(!std.mem.eql(u8, &old_root, &new_root));
+
+    const new_proof = try trie_instance.prove(&[_]u8{ 0x12, 0x34 });
+    defer {
+        for (new_proof) |node| {
+            allocator.free(node);
+        }
+        allocator.free(new_proof);
+    }
+
+    // New proof should verify new value
+    const new_valid = try trie_instance.verify_proof(new_root, &[_]u8{ 0x12, 0x34 }, new_proof, "new_value");
+    try testing.expect(new_valid);
+
+    // Old proof should NOT verify against new root
+    const cross_invalid = try trie_instance.verify_proof(new_root, &[_]u8{ 0x12, 0x34 }, old_proof, "old_value");
+    try testing.expect(!cross_invalid);
+}
+
+test "MerkleTrie - deep trie proof" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    var trie_instance = MerkleTrie.init(allocator);
+    defer trie_instance.deinit();
+
+    // Insert keys with various prefixes to create a deep trie
+    try trie_instance.put(&[_]u8{ 0x11, 0x11, 0x11, 0x11 }, "deep1");
+    try trie_instance.put(&[_]u8{ 0x11, 0x11, 0x11, 0x22 }, "deep2");
+    try trie_instance.put(&[_]u8{ 0x11, 0x11, 0x22, 0x33 }, "deep3");
+    try trie_instance.put(&[_]u8{ 0x11, 0x22, 0x33, 0x44 }, "deep4");
+    try trie_instance.put(&[_]u8{ 0x22, 0x33, 0x44, 0x55 }, "deep5");
+
+    const root = trie_instance.root_hash().?;
+
+    // Verify proof for a deeply nested key
+    const proof = try trie_instance.prove(&[_]u8{ 0x11, 0x11, 0x11, 0x11 });
+    defer {
+        for (proof) |node| {
+            allocator.free(node);
+        }
+        allocator.free(proof);
+    }
+
+    const valid = try trie_instance.verify_proof(root, &[_]u8{ 0x11, 0x11, 0x11, 0x11 }, proof, "deep1");
+    try testing.expect(valid);
+}
+
+test "MerkleTrie - empty trie proof" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    var trie_instance = MerkleTrie.init(allocator);
+    defer trie_instance.deinit();
+
+    // Empty trie should have no root hash
+    try testing.expect(trie_instance.root_hash() == null);
+
+    // Generate proof for any key in empty trie
+    const proof = try trie_instance.prove(&[_]u8{ 0x12, 0x34 });
+    defer {
+        for (proof) |node| {
+            allocator.free(node);
+        }
+        allocator.free(proof);
+    }
+
+    // Empty proof for empty trie
+    try testing.expectEqual(@as(usize, 0), proof.len);
+}
+
+test "MerkleTrie - single node trie proof" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    var trie_instance = MerkleTrie.init(allocator);
+    defer trie_instance.deinit();
+
+    // Single key-value pair
+    try trie_instance.put(&[_]u8{ 0xFF }, "singleton");
+
+    const root = trie_instance.root_hash().?;
+
+    const proof = try trie_instance.prove(&[_]u8{ 0xFF });
+    defer {
+        for (proof) |node| {
+            allocator.free(node);
+        }
+        allocator.free(proof);
+    }
+
+    const valid = try trie_instance.verify_proof(root, &[_]u8{ 0xFF }, proof, "singleton");
+    try testing.expect(valid);
+}
+
+test "MerkleTrie - proof preserves after deletion" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    var trie_instance = MerkleTrie.init(allocator);
+    defer trie_instance.deinit();
+
+    try trie_instance.put(&[_]u8{ 0x12, 0x34 }, "value1");
+    try trie_instance.put(&[_]u8{ 0x56, 0x78 }, "value2");
+
+    const old_root = trie_instance.root_hash().?;
+
+    const proof_before = try trie_instance.prove(&[_]u8{ 0x12, 0x34 });
+    defer {
+        for (proof_before) |node| {
+            allocator.free(node);
+        }
+        allocator.free(proof_before);
+    }
+
+    // Delete different key
+    try trie_instance.delete(&[_]u8{ 0x56, 0x78 });
+
+    const new_root = trie_instance.root_hash().?;
+
+    // Root should change
+    try testing.expect(!std.mem.eql(u8, &old_root, &new_root));
+
+    // Old proof should still verify against old root
+    const valid_old = try trie_instance.verify_proof(old_root, &[_]u8{ 0x12, 0x34 }, proof_before, "value1");
+    try testing.expect(valid_old);
+
+    // Generate new proof after deletion
+    const proof_after = try trie_instance.prove(&[_]u8{ 0x12, 0x34 });
+    defer {
+        for (proof_after) |node| {
+            allocator.free(node);
+        }
+        allocator.free(proof_after);
+    }
+
+    // New proof should verify against new root
+    const valid_new = try trie_instance.verify_proof(new_root, &[_]u8{ 0x12, 0x34 }, proof_after, "value1");
+    try testing.expect(valid_new);
+}

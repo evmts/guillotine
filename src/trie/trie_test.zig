@@ -3,6 +3,8 @@ const trie = @import("trie.zig");
 const hash_builder = @import("hash_builder.zig");
 const proof = @import("proof.zig");
 const merkle_trie = @import("merkle_trie.zig");
+const node_type_test = @import("node_type_test.zig");
+const iterator_test = @import("iterator_test.zig");
 
 // Test all trie modules
 test {
@@ -10,4 +12,6 @@ test {
     std.testing.refAllDeclsRecursive(hash_builder);
     std.testing.refAllDeclsRecursive(proof);
     std.testing.refAllDeclsRecursive(merkle_trie);
+    std.testing.refAllDeclsRecursive(node_type_test);
+    std.testing.refAllDeclsRecursive(iterator_test);
 }

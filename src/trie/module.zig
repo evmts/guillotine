@@ -4,17 +4,25 @@ const std = @import("std");
 pub const trie = @import("trie.zig");
 pub const merkle_trie = @import("merkle_trie.zig");
 pub const hash_builder = @import("hash_builder_complete.zig");
+pub const hash_builder_optimized = @import("hash_builder_optimized.zig");
 pub const proof = @import("proof.zig");
 pub const optimized_branch = @import("optimized_branch.zig");
+pub const node_cache = @import("node_cache.zig");
+pub const benchmarks = @import("benchmarks.zig");
+pub const stress_tests = @import("stress_tests.zig");
+pub const performance_validation = @import("performance_validation.zig");
 pub const known_roots_test = @import("known_roots_test.zig");
+pub const node_type_test = @import("node_type_test.zig");
 
 // Main types
 pub const MerkleTrie = merkle_trie.MerkleTrie;
 pub const TrieNode = trie.TrieNode;
 pub const HashBuilder = hash_builder.HashBuilder;
+pub const HashBuilderOptimized = hash_builder_optimized.HashBuilderOptimized;
 pub const ProofNodes = proof.ProofNodes;
 pub const ProofRetainer = proof.ProofRetainer;
 pub const CompactBranchNode = optimized_branch.CompactBranchNode;
+pub const NodeCache = node_cache.NodeCache;
 
 // Error types
 pub const TrieError = trie.TrieError;
