@@ -47,10 +47,14 @@ pub const BeaconRootsError = error{
     InvalidSystemCallInput,
     InvalidReadInput,
     OutOfGas,
+    TimestampOverflow,
 } || Database.Error;
 
 /// Compute storage slots for a given timestamp
 /// Returns: { timestamp_slot, root_slot }
+///
+/// Memory safety: All values computed on stack, no heap allocation.
+/// Overflow safety: u64 modulo and addition operations are bounds-checked.
 pub fn computeSlots(timestamp: u64) struct { timestamp_slot: u64, root_slot: u64 } {
     const timestamp_slot = timestamp % HISTORY_BUFFER_LENGTH;
     const root_slot = timestamp_slot + HISTORY_BUFFER_LENGTH;
@@ -65,7 +69,7 @@ pub const BeaconRootsContract = struct {
     const Self = @This();
     
     /// Execute the beacon roots contract
-    /// 
+    ///
     /// If called by the system address with 64 bytes input:
     /// - First 32 bytes: timestamp
     /// - Second 32 bytes: beacon root
@@ -73,6 +77,17 @@ pub const BeaconRootsContract = struct {
     ///
     /// If called with 32 bytes input (timestamp):
     /// Returns the beacon root for that timestamp if available
+    ///
+    /// MEMORY OWNERSHIP:
+    /// - Caller must free result.output using the same allocator passed to BeaconRootsContract
+    /// - Empty output (len=0) still requires freeing
+    /// - Output is heap-allocated and owned by caller
+    /// - Use: defer allocator.free(result.output);
+    ///
+    /// SAFETY:
+    /// - Timestamp overflow protection: u256 values > u64::MAX rejected
+    /// - Ring buffer collision detection via bidirectional timestamp verification
+    /// - All memory allocations use provided allocator
     pub fn execute(
         self: *Self,
         caller: Address,
@@ -91,12 +106,20 @@ pub const BeaconRootsContract = struct {
             }
             
             // Parse timestamp and beacon root using consistent serialization
-            const timestamp = std.mem.readInt(u256, input[0..32], .big);
+            const timestamp_u256 = std.mem.readInt(u256, input[0..32], .big);
+
+            // CRITICAL: Validate timestamp fits in u64 to prevent overflow
+            if (timestamp_u256 > std.math.maxInt(u64)) {
+                log.debug("BeaconRoots: Timestamp overflow: {}", .{timestamp_u256});
+                return BeaconRootsError.TimestampOverflow;
+            }
+            const timestamp: u64 = @intCast(timestamp_u256);
+
             var beacon_root: [32]u8 = undefined;
             @memcpy(&beacon_root, input[32..64]);
-            
+
             // Store in ring buffer using helper
-            const slots = computeSlots(@intCast(timestamp));
+            const slots = computeSlots(timestamp);
             
             // Store timestamp -> beacon_root
             try self.database.set_storage(
@@ -128,10 +151,17 @@ pub const BeaconRootsContract = struct {
         }
         
         // Parse timestamp using consistent serialization
-        const timestamp = std.mem.readInt(u256, input[0..32], .big);
-        
+        const timestamp_u256 = std.mem.readInt(u256, input[0..32], .big);
+
+        // CRITICAL: Validate timestamp fits in u64 to prevent overflow
+        if (timestamp_u256 > std.math.maxInt(u64)) {
+            log.debug("BeaconRoots: Timestamp overflow in read: {}", .{timestamp_u256});
+            return BeaconRootsError.TimestampOverflow;
+        }
+        const timestamp: u64 = @intCast(timestamp_u256);
+
         // Retrieve from ring buffer using helper
-        const slots = computeSlots(@intCast(timestamp));
+        const slots = computeSlots(timestamp);
         const stored_root = try self.database.get_storage(
             BEACON_ROOTS_ADDRESS.bytes,
             slots.timestamp_slot,
@@ -329,49 +359,361 @@ test "beacon roots timestamp not found" {
 test "beacon roots ring buffer wrap around" {
     const testing = std.testing;
     const allocator = testing.allocator;
-    
+
     var database = Database.init(allocator);
     defer database.deinit();
-    
+
     var contract = BeaconRootsContract{ .database = &database, .allocator = allocator };
-    
+
     // Store a root at timestamp that will wrap around
     const timestamp1: u64 = 1000;
     const timestamp2: u64 = timestamp1 + HISTORY_BUFFER_LENGTH; // Will map to same slot
-    
+
     const root1 = [_]u8{0x11} ** 32;
     const root2 = [_]u8{0x22} ** 32;
-    
+
     // Store first root
     var input1: [64]u8 = undefined;
     std.mem.writeInt(u256, input1[0..32], timestamp1, .big);
     @memcpy(input1[32..64], &root1);
-    
+
     _ = try contract.execute(SYSTEM_ADDRESS, &input1, 100000);
-    
+
     // Store second root (overwrites first due to ring buffer)
     var input2: [64]u8 = undefined;
     std.mem.writeInt(u256, input2[0..32], timestamp2, .big);
     @memcpy(input2[32..64], &root2);
-    
+
     _ = try contract.execute(SYSTEM_ADDRESS, &input2, 100000);
-    
+
     // Try to read first timestamp - should not be found due to overwrite
     var read_input1: [32]u8 = undefined;
     std.mem.writeInt(u256, &read_input1, timestamp1, .big);
-    
+
     const result1 = try contract.execute(Address{ .bytes = [_]u8{0x11} ** 20 }, &read_input1, 10000);
     defer allocator.free(result1.output);
-    
+
     try testing.expectEqual(@as(usize, 0), result1.output.len);
-    
+
     // Read second timestamp - should be found
     var read_input2: [32]u8 = undefined;
     std.mem.writeInt(u256, &read_input2, timestamp2, .big);
-    
+
     const result2 = try contract.execute(Address{ .bytes = [_]u8{0x11} ** 20 }, &read_input2, 10000);
     defer allocator.free(result2.output);
-    
+
     try testing.expectEqual(@as(usize, 32), result2.output.len);
     try testing.expectEqualSlices(u8, &root2, result2.output);
+}
+
+// ============================================================================
+// CRITICAL SAFETY TESTS
+// ============================================================================
+
+test "beacon roots memory safety - use after free detection" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    var database = Database.init(allocator);
+    defer database.deinit();
+
+    var contract = BeaconRootsContract{ .database = &database, .allocator = allocator };
+
+    // Store a beacon root
+    const timestamp: u64 = 12345;
+    const beacon_root = [_]u8{0xDE} ** 32;
+
+    var input: [64]u8 = undefined;
+    std.mem.writeInt(u256, input[0..32], timestamp, .big);
+    @memcpy(input[32..64], &beacon_root);
+
+    _ = try contract.execute(SYSTEM_ADDRESS, &input, 100000);
+
+    // Read it back
+    var read_input: [32]u8 = undefined;
+    std.mem.writeInt(u256, &read_input, timestamp, .big);
+
+    const result = try contract.execute(Address{ .bytes = [_]u8{0x11} ** 20 }, &read_input, 10000);
+
+    // CRITICAL: Verify the output pointer is valid and contains correct data
+    try testing.expectEqual(@as(usize, 32), result.output.len);
+    try testing.expectEqualSlices(u8, &beacon_root, result.output);
+
+    // Free the output - this must not cause issues
+    allocator.free(result.output);
+
+    // Read again to ensure database state is still valid
+    const result2 = try contract.execute(Address{ .bytes = [_]u8{0x11} ** 20 }, &read_input, 10000);
+    defer allocator.free(result2.output);
+
+    try testing.expectEqual(@as(usize, 32), result2.output.len);
+    try testing.expectEqualSlices(u8, &beacon_root, result2.output);
+}
+
+test "beacon roots collision detection - same slot different timestamps" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    var database = Database.init(allocator);
+    defer database.deinit();
+
+    var contract = BeaconRootsContract{ .database = &database, .allocator = allocator };
+
+    // Two timestamps that map to the same slot in the ring buffer
+    const timestamp1: u64 = 100;
+    const timestamp2: u64 = 100 + HISTORY_BUFFER_LENGTH;
+
+    // Verify they map to the same slot
+    const slots1 = computeSlots(timestamp1);
+    const slots2 = computeSlots(timestamp2);
+    try testing.expectEqual(slots1.timestamp_slot, slots2.timestamp_slot);
+
+    const root1 = [_]u8{0xAA} ** 32;
+    const root2 = [_]u8{0xBB} ** 32;
+
+    // Store first root
+    var input1: [64]u8 = undefined;
+    std.mem.writeInt(u256, input1[0..32], timestamp1, .big);
+    @memcpy(input1[32..64], &root1);
+    _ = try contract.execute(SYSTEM_ADDRESS, &input1, 100000);
+
+    // Verify first root is readable
+    var read_input1: [32]u8 = undefined;
+    std.mem.writeInt(u256, &read_input1, timestamp1, .big);
+    const result1 = try contract.execute(Address{ .bytes = [_]u8{0x11} ** 20 }, &read_input1, 10000);
+    defer allocator.free(result1.output);
+
+    try testing.expectEqual(@as(usize, 32), result1.output.len);
+    try testing.expectEqualSlices(u8, &root1, result1.output);
+
+    // Store second root (collision)
+    var input2: [64]u8 = undefined;
+    std.mem.writeInt(u256, input2[0..32], timestamp2, .big);
+    @memcpy(input2[32..64], &root2);
+    _ = try contract.execute(SYSTEM_ADDRESS, &input2, 100000);
+
+    // CRITICAL: First timestamp should now be unreadable (collision detected)
+    const result1_after = try contract.execute(Address{ .bytes = [_]u8{0x11} ** 20 }, &read_input1, 10000);
+    defer allocator.free(result1_after.output);
+
+    try testing.expectEqual(@as(usize, 0), result1_after.output.len);
+
+    // Second timestamp should be readable
+    var read_input2: [32]u8 = undefined;
+    std.mem.writeInt(u256, &read_input2, timestamp2, .big);
+    const result2 = try contract.execute(Address{ .bytes = [_]u8{0x11} ** 20 }, &read_input2, 10000);
+    defer allocator.free(result2.output);
+
+    try testing.expectEqual(@as(usize, 32), result2.output.len);
+    try testing.expectEqualSlices(u8, &root2, result2.output);
+}
+
+test "beacon roots overflow protection - write timestamp" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    var database = Database.init(allocator);
+    defer database.deinit();
+
+    var contract = BeaconRootsContract{ .database = &database, .allocator = allocator };
+
+    // Timestamp that exceeds u64::MAX
+    const overflow_timestamp: u256 = @as(u256, std.math.maxInt(u64)) + 1;
+    const beacon_root = [_]u8{0xFF} ** 32;
+
+    var input: [64]u8 = undefined;
+    std.mem.writeInt(u256, input[0..32], overflow_timestamp, .big);
+    @memcpy(input[32..64], &beacon_root);
+
+    // CRITICAL: Must reject overflow timestamp
+    const result = contract.execute(SYSTEM_ADDRESS, &input, 100000);
+    try testing.expectError(BeaconRootsError.TimestampOverflow, result);
+}
+
+test "beacon roots overflow protection - read timestamp" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    var database = Database.init(allocator);
+    defer database.deinit();
+
+    var contract = BeaconRootsContract{ .database = &database, .allocator = allocator };
+
+    // Timestamp that exceeds u64::MAX
+    const overflow_timestamp: u256 = @as(u256, std.math.maxInt(u64)) + 1;
+
+    var read_input: [32]u8 = undefined;
+    std.mem.writeInt(u256, &read_input, overflow_timestamp, .big);
+
+    // CRITICAL: Must reject overflow timestamp
+    const result = contract.execute(Address{ .bytes = [_]u8{0x11} ** 20 }, &read_input, 10000);
+    try testing.expectError(BeaconRootsError.TimestampOverflow, result);
+}
+
+test "beacon roots ring buffer boundaries" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    var database = Database.init(allocator);
+    defer database.deinit();
+
+    var contract = BeaconRootsContract{ .database = &database, .allocator = allocator };
+
+    // Test boundary values
+    const boundary_timestamps = [_]u64{
+        0,                           // Minimum
+        HISTORY_BUFFER_LENGTH - 1,   // Just before wrap
+        HISTORY_BUFFER_LENGTH,       // Exact wrap point
+        HISTORY_BUFFER_LENGTH + 1,   // Just after wrap
+        std.math.maxInt(u64) - 1,    // Near maximum
+        std.math.maxInt(u64),        // Maximum u64
+    };
+
+    for (boundary_timestamps, 0..) |timestamp, i| {
+        const root = [_]u8{@as(u8, @intCast(i))} ** 32;
+
+        var input: [64]u8 = undefined;
+        std.mem.writeInt(u256, input[0..32], timestamp, .big);
+        @memcpy(input[32..64], &root);
+
+        _ = try contract.execute(SYSTEM_ADDRESS, &input, 100000);
+
+        // Verify it can be read back
+        var read_input: [32]u8 = undefined;
+        std.mem.writeInt(u256, &read_input, timestamp, .big);
+
+        const result = try contract.execute(Address{ .bytes = [_]u8{0x11} ** 20 }, &read_input, 10000);
+        defer allocator.free(result.output);
+
+        try testing.expectEqual(@as(usize, 32), result.output.len);
+        try testing.expectEqualSlices(u8, &root, result.output);
+    }
+}
+
+test "beacon roots multiple sequential reads" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    var database = Database.init(allocator);
+    defer database.deinit();
+
+    var contract = BeaconRootsContract{ .database = &database, .allocator = allocator };
+
+    // Store a root
+    const timestamp: u64 = 7777;
+    const beacon_root = [_]u8{0x77} ** 32;
+
+    var input: [64]u8 = undefined;
+    std.mem.writeInt(u256, input[0..32], timestamp, .big);
+    @memcpy(input[32..64], &beacon_root);
+
+    _ = try contract.execute(SYSTEM_ADDRESS, &input, 100000);
+
+    var read_input: [32]u8 = undefined;
+    std.mem.writeInt(u256, &read_input, timestamp, .big);
+
+    // Read multiple times to ensure no memory corruption
+    var i: usize = 0;
+    while (i < 10) : (i += 1) {
+        const result = try contract.execute(Address{ .bytes = [_]u8{0x11} ** 20 }, &read_input, 10000);
+        defer allocator.free(result.output);
+
+        try testing.expectEqual(@as(usize, 32), result.output.len);
+        try testing.expectEqualSlices(u8, &beacon_root, result.output);
+    }
+}
+
+test "beacon roots empty output memory ownership" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    var database = Database.init(allocator);
+    defer database.deinit();
+
+    var contract = BeaconRootsContract{ .database = &database, .allocator = allocator };
+
+    // Try to read a non-existent timestamp
+    var read_input: [32]u8 = undefined;
+    std.mem.writeInt(u256, &read_input, 99999, .big);
+
+    const result = try contract.execute(Address{ .bytes = [_]u8{0x11} ** 20 }, &read_input, 10000);
+
+    // CRITICAL: Even empty output must be freed
+    try testing.expectEqual(@as(usize, 0), result.output.len);
+    allocator.free(result.output);
+}
+
+test "beacon roots slot computation consistency" {
+    const testing = std.testing;
+
+    // Verify slot computation is deterministic
+    const timestamp: u64 = 12345;
+    const slots1 = computeSlots(timestamp);
+    const slots2 = computeSlots(timestamp);
+
+    try testing.expectEqual(slots1.timestamp_slot, slots2.timestamp_slot);
+    try testing.expectEqual(slots1.root_slot, slots2.root_slot);
+
+    // Verify root_slot is always timestamp_slot + HISTORY_BUFFER_LENGTH
+    try testing.expectEqual(slots1.root_slot, slots1.timestamp_slot + HISTORY_BUFFER_LENGTH);
+
+    // Verify timestamp_slot is always < HISTORY_BUFFER_LENGTH
+    try testing.expect(slots1.timestamp_slot < HISTORY_BUFFER_LENGTH);
+}
+
+test "beacon roots full ring buffer cycle" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    var database = Database.init(allocator);
+    defer database.deinit();
+
+    var contract = BeaconRootsContract{ .database = &database, .allocator = allocator };
+
+    // Fill the entire ring buffer
+    var timestamp: u64 = 0;
+    while (timestamp < HISTORY_BUFFER_LENGTH) : (timestamp += 1) {
+        const root = [_]u8{@as(u8, @intCast(timestamp % 256))} ** 32;
+
+        var input: [64]u8 = undefined;
+        std.mem.writeInt(u256, input[0..32], timestamp, .big);
+        @memcpy(input[32..64], &root);
+
+        _ = try contract.execute(SYSTEM_ADDRESS, &input, 100000);
+    }
+
+    // Verify all entries are readable
+    timestamp = 0;
+    while (timestamp < HISTORY_BUFFER_LENGTH) : (timestamp += 1) {
+        const expected_root = [_]u8{@as(u8, @intCast(timestamp % 256))} ** 32;
+
+        var read_input: [32]u8 = undefined;
+        std.mem.writeInt(u256, &read_input, timestamp, .big);
+
+        const result = try contract.execute(Address{ .bytes = [_]u8{0x11} ** 20 }, &read_input, 10000);
+        defer allocator.free(result.output);
+
+        try testing.expectEqual(@as(usize, 32), result.output.len);
+        try testing.expectEqualSlices(u8, &expected_root, result.output);
+    }
+
+    // Now write one more entry to trigger a wrap
+    const wrap_timestamp: u64 = HISTORY_BUFFER_LENGTH;
+    const wrap_root = [_]u8{0xFF} ** 32;
+
+    var wrap_input: [64]u8 = undefined;
+    std.mem.writeInt(u256, wrap_input[0..32], wrap_timestamp, .big);
+    @memcpy(wrap_input[32..64], &wrap_root);
+
+    _ = try contract.execute(SYSTEM_ADDRESS, &wrap_input, 100000);
+
+    // First entry (timestamp 0) should now be overwritten
+    var read_input: [32]u8 = undefined;
+    std.mem.writeInt(u256, &read_input, 0, .big);
+
+    const result = try contract.execute(Address{ .bytes = [_]u8{0x11} ** 20 }, &read_input, 10000);
+    defer allocator.free(result.output);
+
+    // Should be empty because timestamp mismatch
+    try testing.expectEqual(@as(usize, 0), result.output.len);
 }

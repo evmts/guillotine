@@ -215,7 +215,9 @@ pub const AuthorizationProcessor = struct {
         auth_list: []const Authorization,
     ) AuthorizationError!void {
         // Gas costs per EIP-7702 (configurable via hardfork)
-        // TODO: Implement gas cost calculation once gas metering is integrated
+        // Gas cost accounting is handled by the caller (EVM frame)
+        // These values are available via eips.eip_7702_per_auth_base_cost() and
+        // eips.eip_7702_per_empty_account_cost() for external gas calculation
         _ = self.eips.eip_7702_per_auth_base_cost();
         _ = self.eips.eip_7702_per_empty_account_cost();
         
@@ -377,21 +379,490 @@ test "Authorization processor - wrong nonce rejected" {
 test "Authorization processor - delegation designator format" {
     const testing = std.testing;
     const allocator = testing.allocator;
-    
+
     const delegate_address = try Address.from_hex("0x1234567890123456789012345678901234567890");
-    
+
     // Create delegation designator
     const designator = try AuthorizationProcessor.createDelegationDesignator(allocator, delegate_address);
     defer allocator.free(designator);
-    
+
     // Verify format: 0xef0100 (3 bytes) + address (20 bytes) = 23 bytes total
     try testing.expectEqual(@as(usize, 23), designator.len);
     try testing.expectEqual(@as(u8, 0xef), designator[0]);
     try testing.expectEqual(@as(u8, 0x01), designator[1]);
     try testing.expectEqual(@as(u8, 0x00), designator[2]);
     try testing.expectEqualSlices(u8, &delegate_address.bytes, designator[3..23]);
-    
+
     // Parse it back
     const parsed_address = try AuthorizationProcessor.parseDelegationDesignator(designator);
     try testing.expectEqual(delegate_address, parsed_address);
+}
+
+test "Authorization processor - wrong chain ID rejected" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+    const MemoryDatabase = @import("../storage/memory_database.zig");
+
+    var db = MemoryDatabase.init(allocator);
+    defer db.deinit();
+
+    const eoa_address = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    var eoa_account = Account.zero();
+    eoa_account.nonce = 5;
+    try db.set_account(eoa_address.bytes, eoa_account);
+
+    const auth = Authorization{
+        .chain_id = 999, // Wrong chain ID
+        .address = try Address.from_hex("0x2222222222222222222222222222222222222222"),
+        .nonce = 5,
+        .v = 27,
+        .r = [_]u8{0x12} ** 32,
+        .s = [_]u8{0x34} ** 32,
+    };
+
+    var gas_remaining: i64 = 100_000;
+    const eips = Eips{ .hardfork = @import("eips.zig").Hardfork.PRAGUE };
+    var processor = AuthorizationProcessor{
+        .db = &db,
+        .chain_id = 1,
+        .gas_remaining = &gas_remaining,
+        .eips = eips,
+    };
+
+    try testing.expectError(AuthorizationError.InvalidChainId, processor.processAuthorization(auth, eoa_address));
+}
+
+test "Authorization processor - contract account rejected" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+    const MemoryDatabase = @import("../storage/memory_database.zig");
+
+    var db = MemoryDatabase.init(allocator);
+    defer db.deinit();
+
+    const contract_address = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    var contract_account = Account.zero();
+    contract_account.nonce = 5;
+    contract_account.code_hash = [_]u8{0x42} ** 32; // Has code, not an EOA
+    try db.set_account(contract_address.bytes, contract_account);
+
+    const auth = Authorization{
+        .chain_id = 1,
+        .address = try Address.from_hex("0x2222222222222222222222222222222222222222"),
+        .nonce = 5,
+        .v = 27,
+        .r = [_]u8{0x12} ** 32,
+        .s = [_]u8{0x34} ** 32,
+    };
+
+    var gas_remaining: i64 = 100_000;
+    const eips = Eips{ .hardfork = @import("eips.zig").Hardfork.PRAGUE };
+    var processor = AuthorizationProcessor{
+        .db = &db,
+        .chain_id = 1,
+        .gas_remaining = &gas_remaining,
+        .eips = eips,
+    };
+
+    try testing.expectError(AuthorizationError.NotEOA, processor.processAuthorization(auth, contract_address));
+}
+
+test "Authorization processor - revocation with max nonce" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+    const MemoryDatabase = @import("../storage/memory_database.zig");
+
+    var db = MemoryDatabase.init(allocator);
+    defer db.deinit();
+
+    const eoa_address = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    var eoa_account = Account.zero();
+    eoa_account.nonce = 5;
+    const delegate_addr = try Address.from_hex("0x2222222222222222222222222222222222222222");
+    eoa_account.set_delegation(delegate_addr);
+    try db.set_account(eoa_address.bytes, eoa_account);
+
+    // Verify delegation is set
+    const before_account = try db.get_account(eoa_address.bytes);
+    try testing.expect(before_account.?.has_delegation());
+
+    // Revoke with max nonce
+    const auth = Authorization{
+        .chain_id = 1,
+        .address = try Address.from_hex("0x3333333333333333333333333333333333333333"),
+        .nonce = std.math.maxInt(u64), // Max nonce for revocation
+        .v = 27,
+        .r = [_]u8{0x12} ** 32,
+        .s = [_]u8{0x34} ** 32,
+    };
+
+    var gas_remaining: i64 = 100_000;
+    const eips = Eips{ .hardfork = @import("eips.zig").Hardfork.PRAGUE };
+    var processor = AuthorizationProcessor{
+        .db = &db,
+        .chain_id = 1,
+        .gas_remaining = &gas_remaining,
+        .eips = eips,
+    };
+
+    try processor.processAuthorization(auth, eoa_address);
+
+    // Verify delegation was cleared
+    const after_account = try db.get_account(eoa_address.bytes);
+    try testing.expect(!after_account.?.has_delegation());
+    try testing.expectEqual(@as(u64, 5), after_account.?.nonce); // Nonce not incremented for revocation
+}
+
+test "Authorization processor - account not found" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+    const MemoryDatabase = @import("../storage/memory_database.zig");
+
+    var db = MemoryDatabase.init(allocator);
+    defer db.deinit();
+
+    const missing_address = try Address.from_hex("0x1111111111111111111111111111111111111111");
+
+    const auth = Authorization{
+        .chain_id = 1,
+        .address = try Address.from_hex("0x2222222222222222222222222222222222222222"),
+        .nonce = 5,
+        .v = 27,
+        .r = [_]u8{0x12} ** 32,
+        .s = [_]u8{0x34} ** 32,
+    };
+
+    var gas_remaining: i64 = 100_000;
+    const eips = Eips{ .hardfork = @import("eips.zig").Hardfork.PRAGUE };
+    var processor = AuthorizationProcessor{
+        .db = &db,
+        .chain_id = 1,
+        .gas_remaining = &gas_remaining,
+        .eips = eips,
+    };
+
+    try testing.expectError(AuthorizationError.AccountNotFound, processor.processAuthorization(auth, missing_address));
+}
+
+test "Authorization processor - gas cost calculation for existing account" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+    const MemoryDatabase = @import("../storage/memory_database.zig");
+
+    var db = MemoryDatabase.init(allocator);
+    defer db.deinit();
+
+    const eoa_address = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    var eoa_account = Account.zero();
+    eoa_account.balance = 1_000_000_000_000_000_000;
+    eoa_account.nonce = 5;
+    try db.set_account(eoa_address.bytes, eoa_account);
+
+    const auth = Authorization{
+        .chain_id = 1,
+        .address = try Address.from_hex("0x2222222222222222222222222222222222222222"),
+        .nonce = 5,
+        .v = 27,
+        .r = [_]u8{0x12} ** 32,
+        .s = [_]u8{0x34} ** 32,
+    };
+
+    var gas_remaining: i64 = 100_000;
+    const eips = Eips{ .hardfork = @import("eips.zig").Hardfork.PRAGUE };
+    var processor = AuthorizationProcessor{
+        .db = &db,
+        .chain_id = 1,
+        .gas_remaining = &gas_remaining,
+        .eips = eips,
+    };
+
+    const gas_cost = try processor.calculateAuthorizationGasCost(auth);
+    // Should only charge base cost for existing account
+    const expected_cost = eips.eip_7702_per_auth_base_cost();
+    try testing.expectEqual(expected_cost, gas_cost);
+}
+
+test "Authorization processor - gas cost calculation for empty account" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+    const MemoryDatabase = @import("../storage/memory_database.zig");
+
+    var db = MemoryDatabase.init(allocator);
+    defer db.deinit();
+
+    // Don't create account - it should be treated as empty
+    const auth = Authorization{
+        .chain_id = 1,
+        .address = try Address.from_hex("0x2222222222222222222222222222222222222222"),
+        .nonce = 0,
+        .v = 27,
+        .r = [_]u8{0x12} ** 32,
+        .s = [_]u8{0x34} ** 32,
+    };
+
+    var gas_remaining: i64 = 100_000;
+    const eips = Eips{ .hardfork = @import("eips.zig").Hardfork.PRAGUE };
+    var processor = AuthorizationProcessor{
+        .db = &db,
+        .chain_id = 1,
+        .gas_remaining = &gas_remaining,
+        .eips = eips,
+    };
+
+    const gas_cost = try processor.calculateAuthorizationGasCost(auth);
+    // Should charge base cost + empty account cost
+    const expected_cost = eips.eip_7702_per_auth_base_cost() + eips.eip_7702_per_empty_account_cost();
+    try testing.expectEqual(expected_cost, gas_cost);
+}
+
+test "Authorization processor - out of gas during list processing" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+    const MemoryDatabase = @import("../storage/memory_database.zig");
+
+    var db = MemoryDatabase.init(allocator);
+    defer db.deinit();
+
+    const eoa_address = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    var eoa_account = Account.zero();
+    eoa_account.nonce = 5;
+    try db.set_account(eoa_address.bytes, eoa_account);
+
+    const auth = Authorization{
+        .chain_id = 1,
+        .address = try Address.from_hex("0x2222222222222222222222222222222222222222"),
+        .nonce = 5,
+        .v = 27,
+        .r = [_]u8{0x12} ** 32,
+        .s = [_]u8{0x34} ** 32,
+    };
+
+    const auth_list = [_]Authorization{auth};
+
+    var gas_remaining: i64 = 1; // Very low gas
+    const eips = Eips{ .hardfork = @import("eips.zig").Hardfork.PRAGUE };
+    var processor = AuthorizationProcessor{
+        .db = &db,
+        .chain_id = 1,
+        .gas_remaining = &gas_remaining,
+        .eips = eips,
+    };
+
+    var result = try processor.processAuthorizationListWithResults(allocator, &auth_list);
+    defer result.deinit(allocator);
+
+    try testing.expectEqual(@as(u32, 0), result.successful_count);
+    try testing.expectEqual(@as(u32, 1), result.failed_count);
+    try testing.expectEqual(AuthorizationError.OutOfGas, result.results[0].error_type.?);
+}
+
+test "Authorization processor - multiple authorizations in list" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+    const MemoryDatabase = @import("../storage/memory_database.zig");
+
+    var db = MemoryDatabase.init(allocator);
+    defer db.deinit();
+
+    // Create two EOA accounts
+    const eoa1 = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    var account1 = Account.zero();
+    account1.nonce = 5;
+    try db.set_account(eoa1.bytes, account1);
+
+    const eoa2 = try Address.from_hex("0x3333333333333333333333333333333333333333");
+    var account2 = Account.zero();
+    account2.nonce = 10;
+    try db.set_account(eoa2.bytes, account2);
+
+    const auth_list = [_]Authorization{
+        Authorization{
+            .chain_id = 1,
+            .address = try Address.from_hex("0x2222222222222222222222222222222222222222"),
+            .nonce = 5,
+            .v = 27,
+            .r = [_]u8{0x12} ** 32,
+            .s = [_]u8{0x34} ** 32,
+        },
+        Authorization{
+            .chain_id = 1,
+            .address = try Address.from_hex("0x4444444444444444444444444444444444444444"),
+            .nonce = 10,
+            .v = 27,
+            .r = [_]u8{0x56} ** 32,
+            .s = [_]u8{0x78} ** 32,
+        },
+    };
+
+    var gas_remaining: i64 = 100_000;
+    const eips = Eips{ .hardfork = @import("eips.zig").Hardfork.PRAGUE };
+    var processor = AuthorizationProcessor{
+        .db = &db,
+        .chain_id = 1,
+        .gas_remaining = &gas_remaining,
+        .eips = eips,
+    };
+
+    try processor.processAuthorizationList(&auth_list);
+
+    // Verify both delegations were set
+    const updated1 = try db.get_account(eoa1.bytes);
+    try testing.expect(updated1.?.has_delegation());
+    try testing.expectEqual(@as(u64, 6), updated1.?.nonce);
+
+    const updated2 = try db.get_account(eoa2.bytes);
+    try testing.expect(updated2.?.has_delegation());
+    try testing.expectEqual(@as(u64, 11), updated2.?.nonce);
+}
+
+test "Authorization processor - delegation designator parse invalid length" {
+    const testing = std.testing;
+
+    const invalid_designator = [_]u8{0xef, 0x01, 0x00, 0x12, 0x34}; // Too short
+    try testing.expectError(AuthorizationError.InvalidSignature, AuthorizationProcessor.parseDelegationDesignator(&invalid_designator));
+}
+
+test "Authorization processor - delegation designator parse invalid prefix" {
+    const testing = std.testing;
+
+    const invalid_designator = [_]u8{0xff, 0x01, 0x00} ++ [_]u8{0x12} ** 20; // Wrong prefix
+    try testing.expectError(AuthorizationError.InvalidSignature, AuthorizationProcessor.parseDelegationDesignator(&invalid_designator));
+}
+
+test "Authorization processor - nonce incremented after successful delegation" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+    const MemoryDatabase = @import("../storage/memory_database.zig");
+
+    var db = MemoryDatabase.init(allocator);
+    defer db.deinit();
+
+    const eoa_address = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    var eoa_account = Account.zero();
+    eoa_account.nonce = 0;
+    try db.set_account(eoa_address.bytes, eoa_account);
+
+    const auth = Authorization{
+        .chain_id = 1,
+        .address = try Address.from_hex("0x2222222222222222222222222222222222222222"),
+        .nonce = 0,
+        .v = 27,
+        .r = [_]u8{0x12} ** 32,
+        .s = [_]u8{0x34} ** 32,
+    };
+
+    var gas_remaining: i64 = 100_000;
+    const eips = Eips{ .hardfork = @import("eips.zig").Hardfork.PRAGUE };
+    var processor = AuthorizationProcessor{
+        .db = &db,
+        .chain_id = 1,
+        .gas_remaining = &gas_remaining,
+        .eips = eips,
+    };
+
+    try processor.processAuthorization(auth, eoa_address);
+
+    const updated_account = try db.get_account(eoa_address.bytes);
+    try testing.expectEqual(@as(u64, 1), updated_account.?.nonce);
+}
+
+test "Authorization processor - multiple delegations update same account" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+    const MemoryDatabase = @import("../storage/memory_database.zig");
+
+    var db = MemoryDatabase.init(allocator);
+    defer db.deinit();
+
+    const eoa_address = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    var eoa_account = Account.zero();
+    eoa_account.nonce = 0;
+    try db.set_account(eoa_address.bytes, eoa_account);
+
+    var gas_remaining: i64 = 100_000;
+    const eips = Eips{ .hardfork = @import("eips.zig").Hardfork.PRAGUE };
+    var processor = AuthorizationProcessor{
+        .db = &db,
+        .chain_id = 1,
+        .gas_remaining = &gas_remaining,
+        .eips = eips,
+    };
+
+    // First delegation
+    const auth1 = Authorization{
+        .chain_id = 1,
+        .address = try Address.from_hex("0x2222222222222222222222222222222222222222"),
+        .nonce = 0,
+        .v = 27,
+        .r = [_]u8{0x12} ** 32,
+        .s = [_]u8{0x34} ** 32,
+    };
+    try processor.processAuthorization(auth1, eoa_address);
+
+    // Second delegation (overwrites first)
+    const auth2 = Authorization{
+        .chain_id = 1,
+        .address = try Address.from_hex("0x3333333333333333333333333333333333333333"),
+        .nonce = 1,
+        .v = 27,
+        .r = [_]u8{0x56} ** 32,
+        .s = [_]u8{0x78} ** 32,
+    };
+    try processor.processAuthorization(auth2, eoa_address);
+
+    // Verify latest delegation
+    const updated_account = try db.get_account(eoa_address.bytes);
+    try testing.expect(updated_account.?.has_delegation());
+    try testing.expectEqual(auth2.address, updated_account.?.get_effective_code_address().?);
+    try testing.expectEqual(@as(u64, 2), updated_account.?.nonce);
+}
+
+test "Authorization processor - processAuthorizationListWithResults detailed results" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+    const MemoryDatabase = @import("../storage/memory_database.zig");
+
+    var db = MemoryDatabase.init(allocator);
+    defer db.deinit();
+
+    const eoa_address = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    var eoa_account = Account.zero();
+    eoa_account.nonce = 5;
+    try db.set_account(eoa_address.bytes, eoa_account);
+
+    const auth_list = [_]Authorization{
+        Authorization{
+            .chain_id = 1,
+            .address = try Address.from_hex("0x2222222222222222222222222222222222222222"),
+            .nonce = 5, // Valid
+            .v = 27,
+            .r = [_]u8{0x12} ** 32,
+            .s = [_]u8{0x34} ** 32,
+        },
+        Authorization{
+            .chain_id = 999, // Invalid chain ID
+            .address = try Address.from_hex("0x3333333333333333333333333333333333333333"),
+            .nonce = 6,
+            .v = 27,
+            .r = [_]u8{0x56} ** 32,
+            .s = [_]u8{0x78} ** 32,
+        },
+    };
+
+    var gas_remaining: i64 = 100_000;
+    const eips = Eips{ .hardfork = @import("eips.zig").Hardfork.PRAGUE };
+    var processor = AuthorizationProcessor{
+        .db = &db,
+        .chain_id = 1,
+        .gas_remaining = &gas_remaining,
+        .eips = eips,
+    };
+
+    var result = try processor.processAuthorizationListWithResults(allocator, &auth_list);
+    defer result.deinit(allocator);
+
+    try testing.expectEqual(@as(usize, 2), result.results.len);
+    try testing.expect(result.results[0].success);
+    try testing.expect(!result.results[1].success);
+    try testing.expectEqual(AuthorizationError.InvalidChainId, result.results[1].error_type.?);
 }
