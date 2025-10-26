@@ -114,3 +114,13 @@
 // Simple provider implementation
 pub const Provider = @import("provider.zig").Provider;
 pub const Block = @import("provider.zig").Block;
+
+// Export transport layer for testing
+pub const transport = struct {
+    pub const json_rpc = @import("transport/json_rpc.zig");
+    pub const HttpTransport = @import("transport/http_simple.zig").HttpTransport;
+};
+
+// Export utilities for testing
+pub const ConnectionPool = @import("connection_pool.zig").ConnectionPool;
+pub const RateLimiter = @import("rate_limiter.zig").RateLimiter;

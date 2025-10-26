@@ -80,4 +80,63 @@ pub const Provider = struct {
     pub fn get_chain_id(self: *Provider) ProviderError!json_rpc.JsonRpcResponse {
         return self.request("eth_chainId", "[]");
     }
+
+    pub fn get_block_number(self: *Provider) ProviderError!json_rpc.JsonRpcResponse {
+        return self.request("eth_blockNumber", "[]");
+    }
+
+    pub fn get_balance(self: *Provider, address: []const u8, block_tag: []const u8) ProviderError!json_rpc.JsonRpcResponse {
+        const params = std.fmt.allocPrint(self.allocator,
+            \\["{s}","{s}"]
+        , .{ address, block_tag }) catch |err| switch (err) {
+            error.OutOfMemory => return ProviderError.OutOfMemory,
+        };
+        defer self.allocator.free(params);
+
+        return self.request("eth_getBalance", params);
+    }
+
+    pub fn get_transaction_count(self: *Provider, address: []const u8, block_tag: []const u8) ProviderError!json_rpc.JsonRpcResponse {
+        const params = std.fmt.allocPrint(self.allocator,
+            \\["{s}","{s}"]
+        , .{ address, block_tag }) catch |err| switch (err) {
+            error.OutOfMemory => return ProviderError.OutOfMemory,
+        };
+        defer self.allocator.free(params);
+
+        return self.request("eth_getTransactionCount", params);
+    }
+
+    pub fn get_code(self: *Provider, address: []const u8, block_tag: []const u8) ProviderError!json_rpc.JsonRpcResponse {
+        const params = std.fmt.allocPrint(self.allocator,
+            \\["{s}","{s}"]
+        , .{ address, block_tag }) catch |err| switch (err) {
+            error.OutOfMemory => return ProviderError.OutOfMemory,
+        };
+        defer self.allocator.free(params);
+
+        return self.request("eth_getCode", params);
+    }
+
+    pub fn get_storage_at(self: *Provider, address: []const u8, slot: []const u8, block_tag: []const u8) ProviderError!json_rpc.JsonRpcResponse {
+        const params = std.fmt.allocPrint(self.allocator,
+            \\["{s}","{s}","{s}"]
+        , .{ address, slot, block_tag }) catch |err| switch (err) {
+            error.OutOfMemory => return ProviderError.OutOfMemory,
+        };
+        defer self.allocator.free(params);
+
+        return self.request("eth_getStorageAt", params);
+    }
+
+    pub fn call(self: *Provider, call_params: []const u8, block_tag: []const u8) ProviderError!json_rpc.JsonRpcResponse {
+        const params = std.fmt.allocPrint(self.allocator,
+            \\[{s},"{s}"]
+        , .{ call_params, block_tag }) catch |err| switch (err) {
+            error.OutOfMemory => return ProviderError.OutOfMemory,
+        };
+        defer self.allocator.free(params);
+
+        return self.request("eth_call", params);
+    }
 };
