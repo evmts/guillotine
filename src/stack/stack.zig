@@ -323,7 +323,7 @@ test "Stack push and push_unsafe" {
     const allocator = std.testing.allocator;
     const StackType = Stack(.{});
 
-    var stack = try StackType.init(allocator);
+    var stack = try StackType.init(allocator, null);
     defer stack.deinit(allocator);
 
     // Test push_unsafe
@@ -354,7 +354,7 @@ test "Stack pop and pop_unsafe" {
     const allocator = std.testing.allocator;
     const StackType = Stack(.{});
 
-    var stack = try StackType.init(allocator);
+    var stack = try StackType.init(allocator, null);
     defer stack.deinit(allocator);
 
     try stack.push(10);
@@ -384,7 +384,7 @@ test "Stack set_top and set_top_unsafe" {
     const allocator = std.testing.allocator;
     const StackType = Stack(.{});
 
-    var stack = try StackType.init(allocator);
+    var stack = try StackType.init(allocator, null);
     defer stack.deinit(allocator);
 
     try stack.push(10);
@@ -416,7 +416,7 @@ test "Stack peek and peek_unsafe" {
     const allocator = std.testing.allocator;
     const StackType = Stack(.{});
 
-    var stack = try StackType.init(allocator);
+    var stack = try StackType.init(allocator, null);
     defer stack.deinit(allocator);
 
     try stack.push(100);
@@ -445,7 +445,7 @@ test "Stack op_dup1 duplicates top stack item" {
     const allocator = std.testing.allocator;
     const StackType = Stack(.{});
 
-    var stack = try StackType.init(allocator);
+    var stack = try StackType.init(allocator, null);
     defer stack.deinit(allocator);
 
     try stack.push(42);
@@ -463,7 +463,7 @@ test "Stack op_dup16 duplicates 16th stack item" {
     const allocator = std.testing.allocator;
     const StackType = Stack(.{});
 
-    var stack = try StackType.init(allocator);
+    var stack = try StackType.init(allocator, null);
     defer stack.deinit(allocator);
 
     var i: u8 = 1;
@@ -485,7 +485,7 @@ test "Stack op_swap1 swaps top two stack items" {
     const allocator = std.testing.allocator;
     const StackType = Stack(.{});
 
-    var stack = try StackType.init(allocator);
+    var stack = try StackType.init(allocator, null);
     defer stack.deinit(allocator);
 
     // Setup stack with two values
@@ -506,7 +506,7 @@ test "Stack op_swap16 swaps top with 17th stack item" {
     const allocator = std.testing.allocator;
     const StackType = Stack(.{});
 
-    var stack = try StackType.init(allocator);
+    var stack = try StackType.init(allocator, null);
     defer stack.deinit(allocator);
 
     // Setup stack with 17 values
@@ -529,7 +529,7 @@ test "Stack set_top underflow detection (bug fix validation)" {
     const allocator = std.testing.allocator;
     const StackType = Stack(.{});
 
-    var stack = try StackType.init(allocator);
+    var stack = try StackType.init(allocator, null);
     defer stack.deinit(allocator);
 
     // Test the bug fix: set_top should detect underflow on empty stack
@@ -545,7 +545,7 @@ test "Stack peek underflow detection (bug fix validation)" {
     const allocator = std.testing.allocator;
     const StackType = Stack(.{});
 
-    var stack = try StackType.init(allocator);
+    var stack = try StackType.init(allocator, null);
     defer stack.deinit(allocator);
 
     // Test the bug fix: peek should detect underflow on empty stack
@@ -560,7 +560,7 @@ test "Stack unsafe operations assertion validation (bug fix)" {
     const allocator = std.testing.allocator;
     const StackType = Stack(.{});
 
-    var stack = try StackType.init(allocator);
+    var stack = try StackType.init(allocator, null);
     defer stack.deinit(allocator);
 
     // Add one item to test valid operations
@@ -585,7 +585,7 @@ test "Stack maximum configuration comprehensive test" {
         .WordType = u256, // Maximum word size
     });
 
-    var stack = try StackType.init(allocator);
+    var stack = try StackType.init(allocator, null);
     defer stack.deinit(allocator);
 
     // Test all operations with maximum values
@@ -650,7 +650,7 @@ test "Stack minimum configuration comprehensive test" {
         .WordType = u8, // Smallest practical word type
     });
 
-    var stack = try StackType.init(allocator);
+    var stack = try StackType.init(allocator, null);
     defer stack.deinit(allocator);
 
     // Test all operations with small values
@@ -726,7 +726,7 @@ test "Stack index type boundaries" {
 
     // Test u4 boundary (stack_size = 15 uses u4, 16 uses u8)
     const Stack15 = Stack(.{ .stack_size = 15 });
-    var stack15 = try Stack15.init(allocator);
+    var stack15 = try Stack15.init(allocator, null);
     defer stack15.deinit(allocator);
 
     // Fill to capacity (15 items)
@@ -739,7 +739,7 @@ test "Stack index type boundaries" {
 
     // Test u8 boundary (stack_size = 255 uses u8, 256 uses u12)
     const Stack255 = Stack(.{ .stack_size = 255 });
-    var stack255 = try Stack255.init(allocator);
+    var stack255 = try Stack255.init(allocator, null);
     defer stack255.deinit(allocator);
 
     // Fill to capacity
@@ -752,7 +752,7 @@ test "Stack index type boundaries" {
 
     // Test u12 at boundary (stack_size = 256 uses u12)
     const Stack256 = Stack(.{ .stack_size = 256 });
-    var stack256 = try Stack256.init(allocator);
+    var stack256 = try Stack256.init(allocator, null);
     defer stack256.deinit(allocator);
 
     // Push one item to verify u12 type works
@@ -764,7 +764,7 @@ test "All DUP operations DUP1-DUP16" {
     const allocator = std.testing.allocator;
     const StackType = Stack(.{ .stack_size = 32 });
 
-    var stack = try StackType.init(allocator);
+    var stack = try StackType.init(allocator, null);
     defer stack.deinit(allocator);
 
     // Test each DUP operation with exactly the minimum required items
@@ -833,7 +833,7 @@ test "All SWAP operations SWAP1-SWAP16" {
     const allocator = std.testing.allocator;
     const StackType = Stack(.{ .stack_size = 32 });
 
-    var stack = try StackType.init(allocator);
+    var stack = try StackType.init(allocator, null);
     defer stack.deinit(allocator);
 
     // Test each SWAP operation with exactly the minimum required items
@@ -931,7 +931,7 @@ test "Complex operation sequences at boundaries" {
     const allocator = std.testing.allocator;
     const StackType = Stack(.{ .stack_size = 8 }); // Small stack for boundary testing
 
-    var stack = try StackType.init(allocator);
+    var stack = try StackType.init(allocator, null);
     defer stack.deinit(allocator);
 
     // Complex sequence: Push → DUP → SWAP → Pop at boundaries
@@ -1005,19 +1005,19 @@ test "Zero values and boundary values" {
     const StackU64 = Stack(.{ .WordType = u64 });
     const StackU128 = Stack(.{ .WordType = u128 });
 
-    var stack_u8 = try StackU8.init(allocator);
+    var stack_u8 = try StackU8.init(allocator, null);
     defer stack_u8.deinit(allocator);
 
-    var stack_u16 = try StackU16.init(allocator);
+    var stack_u16 = try StackU16.init(allocator, null);
     defer stack_u16.deinit(allocator);
 
-    var stack_u32 = try StackU32.init(allocator);
+    var stack_u32 = try StackU32.init(allocator, null);
     defer stack_u32.deinit(allocator);
 
-    var stack_u64 = try StackU64.init(allocator);
+    var stack_u64 = try StackU64.init(allocator, null);
     defer stack_u64.deinit(allocator);
 
-    var stack_u128 = try StackU128.init(allocator);
+    var stack_u128 = try StackU128.init(allocator, null);
     defer stack_u128.deinit(allocator);
 
     // Test zero values (distinct from empty)
@@ -1043,7 +1043,7 @@ test "Zero values and boundary values" {
 
     // Test minimal stack size (1 element)
     const StackMin = Stack(.{ .stack_size = 1 });
-    var stack_min = try StackMin.init(allocator);
+    var stack_min = try StackMin.init(allocator, null);
     defer stack_min.deinit(allocator);
 
     try stack_min.push(42);
@@ -1065,7 +1065,7 @@ test "Unsafe operations at exact boundaries" {
     const allocator = std.testing.allocator;
     const StackType = Stack(.{ .stack_size = 4 });
 
-    var stack = try StackType.init(allocator);
+    var stack = try StackType.init(allocator, null);
     defer stack.deinit(allocator);
 
     // Test push_unsafe at exact capacity

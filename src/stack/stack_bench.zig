@@ -39,15 +39,6 @@ pub fn bench(b: *zbench.Benchmark) !void {
     // Push/Pop Patterns
     try b.add("Stack: Direct Push/Pop 100 values", bench_direct_push_pop_100, .{});
     try b.add("Stack: Direct Push/Pop 1000 values", bench_direct_push_pop_1000, .{});
-    
-    // EVM Execution Benchmarks (currently disabled due to execution issues)
-    // try b.add("EVM: Push/Pop 100 values", bench_evm_push_pop, .{});
-    // try b.add("EVM: Large Stack (10 values)", bench_evm_large_stack, .{});
-    
-    // REVM Comparison Benchmarks
-    // MinimalEvm benchmarks can be added here if needed
-    // try b.add("MinimalEvm: Push/Pop 100 values", bench_minimal_push_pop, .{});
-    // try b.add("MinimalEvm: Large Stack (10 values)", bench_minimal_large_stack, .{});
 }
 
 // ============================================================================
@@ -500,94 +491,6 @@ fn bench_evm_large_stack(allocator: std.mem.Allocator) void {
 // MinimalEvm Comparison Benchmarks (commented out - revm no longer used)
 // ============================================================================
 
-// MinimalEvm benchmarks can be added here if needed
-// fn bench_minimal_push_pop(allocator: std.mem.Allocator) void {
-
-// Original revm benchmark code (kept for reference but commented out):
-/*
-fn bench_revm_push_pop(allocator: std.mem.Allocator) void {
-    // Generate bytecode
-    const bytecode = generatePushPopBytecode(allocator) catch |err| {
-        log.err("REVM push/pop benchmark failed to generate bytecode: {}", .{err});
-        @panic("REVM push/pop benchmark failed");
-    };
-    defer allocator.free(bytecode);
-    
-    // Set up REVM
-    const settings = revm.RevmSettings{
-        .gas_limit = BENCHMARK_GAS_LIMIT,
-        .chain_id = 1,
-    };
-    
-    var vm = revm.Revm.init(allocator, settings) catch |err| {
-        log.err("REVM push/pop benchmark failed to init VM: {}", .{err});
-        @panic("REVM push/pop benchmark failed");
-    };
-    defer vm.deinit();
-    
-    // Deploy contract
-    vm.setCode(CONTRACT_ADDRESS, bytecode) catch |err| {
-        log.err("REVM push/pop benchmark failed to set code: {}", .{err});
-        @panic("REVM push/pop benchmark failed");
-    };
-    
-    // Set balance for caller
-    vm.setBalance(CALLER_ADDRESS, 1000000) catch |err| {
-        log.err("REVM push/pop benchmark failed to set balance: {}", .{err});
-        @panic("REVM push/pop benchmark failed");
-    };
-    
-    // Execute the call
-    var result = vm.call(CALLER_ADDRESS, CONTRACT_ADDRESS, 0, &.{}, BENCHMARK_GAS_LIMIT) catch |err| {
-        log.err("REVM push/pop benchmark failed to call: {}", .{err});
-        @panic("REVM push/pop benchmark failed");
-    };
-    defer result.deinit();
-}
-*/
-
-// Commented out second revm benchmark
-/*
-fn bench_revm_large_stack(allocator: std.mem.Allocator) void {
-    // Generate bytecode
-    const bytecode = generateLargeStackBytecode(allocator) catch |err| {
-        log.err("REVM large stack benchmark failed to generate bytecode: {}", .{err});
-        @panic("REVM large stack benchmark failed");
-    };
-    defer allocator.free(bytecode);
-    
-    // Set up REVM
-    const settings = revm.RevmSettings{
-        .gas_limit = BENCHMARK_GAS_LIMIT,
-        .chain_id = 1,
-    };
-    
-    var vm = revm.Revm.init(allocator, settings) catch |err| {
-        log.err("REVM large stack benchmark failed to init VM: {}", .{err});
-        @panic("REVM large stack benchmark failed");
-    };
-    defer vm.deinit();
-    
-    // Deploy contract
-    vm.setCode(CONTRACT_ADDRESS, bytecode) catch |err| {
-        log.err("REVM large stack benchmark failed to set code: {}", .{err});
-        @panic("REVM large stack benchmark failed");
-    };
-    
-    // Set balance for caller
-    vm.setBalance(CALLER_ADDRESS, 1000000) catch |err| {
-        log.err("REVM large stack benchmark failed to set balance: {}", .{err});
-        @panic("REVM large stack benchmark failed");
-    };
-    
-    // Execute the call
-    var result = vm.call(CALLER_ADDRESS, CONTRACT_ADDRESS, 0, &.{}, BENCHMARK_GAS_LIMIT) catch |err| {
-        log.err("REVM large stack benchmark failed to call: {}", .{err});
-        @panic("REVM large stack benchmark failed");
-    };
-    defer result.deinit();
-}
-*/
 
 // ============================================================================
 // Tests
