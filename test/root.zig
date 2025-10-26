@@ -125,6 +125,11 @@ test {
     // C FFI API tracing tests
     // _ = @import("evm_c_api_tracing_test.zig"); // Temporarily disabled - missing C symbols
 
+    // Provider integration tests
+    _ = @import("provider/mock_provider.zig");
+    _ = @import("provider/provider_integration_test.zig");
+    _ = @import("provider/provider_advanced_test.zig");
+
     // Benchmarks
     // _ = @import("benchmark/baseline_benchmark.zig");
 }

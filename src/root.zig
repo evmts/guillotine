@@ -164,6 +164,7 @@ test {
     _ = @import("tracer/events/events.zig");
     _ = @import("tracer/events/lifecycle.zig");
     _ = @import("tracer/minimal_frame.zig");
+    _ = @import("tracer/minimal_evm_precompile_test.zig");
 
     // Crypto modules with tests are handled by crypto module
     // These are already imported through the crypto module to avoid conflicts
