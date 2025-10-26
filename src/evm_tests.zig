@@ -628,7 +628,7 @@ test "Journal - snapshot creation and management" {
     const journal_mod = @import("storage/journal.zig");
     const JournalType = journal_mod.Journal(.{});
 
-    var journal = JournalType.init(std.testing.allocator);
+    var journal = try JournalType.init(std.testing.allocator);
     defer journal.deinit();
 
     try std.testing.expectEqual(@as(u32, 0), journal.next_snapshot_id);
@@ -649,7 +649,7 @@ test "Journal - storage change recording" {
     const journal_mod = @import("storage/journal.zig");
     const JournalType = journal_mod.Journal(.{});
 
-    var journal = JournalType.init(std.testing.allocator);
+    var journal = try JournalType.init(std.testing.allocator);
     defer journal.deinit();
 
     const snapshot_id = journal.create_snapshot();
@@ -684,7 +684,7 @@ test "Journal - revert to snapshot" {
     const journal_mod = @import("storage/journal.zig");
     const JournalType = journal_mod.Journal(.{});
 
-    var journal = JournalType.init(std.testing.allocator);
+    var journal = try JournalType.init(std.testing.allocator);
     defer journal.deinit();
 
     const snapshot1 = journal.create_snapshot();
@@ -713,7 +713,7 @@ test "Journal - multiple entry types" {
     const journal_mod = @import("storage/journal.zig");
     const JournalType = journal_mod.Journal(.{});
 
-    var journal = JournalType.init(std.testing.allocator);
+    var journal = try JournalType.init(std.testing.allocator);
     defer journal.deinit();
 
     const snapshot_id = journal.create_snapshot();
@@ -754,19 +754,20 @@ test "Journal - empty revert" {
     const journal_mod = @import("storage/journal.zig");
     const JournalType = journal_mod.Journal(.{});
 
-    var journal = JournalType.init(std.testing.allocator);
+    var journal = try JournalType.init(std.testing.allocator);
     defer journal.deinit();
 
     // Revert with no entries should not crash
     journal.revert_to_snapshot(0);
     try std.testing.expectEqual(@as(usize, 0), journal.entry_count());
 
-    // Create entries and revert to future snapshot
+    // Create snapshot and add entry
     const snapshot = journal.create_snapshot();
     try journal.record_storage_change(snapshot, primitives.ZERO_ADDRESS, 1, 100);
+    try std.testing.expectEqual(@as(usize, 1), journal.entry_count());
 
-    // Revert to future snapshot (should remove all entries)
-    journal.revert_to_snapshot(999);
+    // Revert to the snapshot (should remove entries added with this snapshot ID)
+    journal.revert_to_snapshot(snapshot);
     try std.testing.expectEqual(@as(usize, 0), journal.entry_count());
 }
 

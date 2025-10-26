@@ -1,6 +1,5 @@
 const std = @import("std");
 const builtin = @import("builtin");
-// const PlannerStrategy = @import("planner_strategy.zig").PlannerStrategy;
 const FrameConfig = @import("frame/frame_config.zig").FrameConfig;
 const BlockInfoConfig = @import("frame/block_info_config.zig").BlockInfoConfig;
 const Eips = @import("eips_and_hardforks/eips.zig").Eips;
@@ -132,8 +131,8 @@ pub const EvmConfig = struct {
     /// Default: disabled (must be explicitly enabled when needed)
     tracer_config: @import("tracer/tracer.zig").TracerConfig = @import("tracer/tracer.zig").TracerConfig.disabled,
 
-    // TODO: this method is completely
     /// Get the effective SIMD vector length for the current target
+    /// Automatically detects optimal vector length for CPU if not explicitly set
     pub fn getVectorLength(self: EvmConfig) comptime_int {
         if (self.vector_length > 0) return self.vector_length;
         const target = @import("builtin").target;
@@ -195,85 +194,6 @@ pub const EvmConfig = struct {
             u11
         else
             @compileError("max_call_depth too large");
-    }
-
-    // TODO: This is either dead code or code that should be dead
-    // Remove it
-    /// Predefined configuration optimized for performance
-    /// Uses advanced planner strategy for maximum optimization
-    pub fn optimizeFast() EvmConfig {
-        return EvmConfig{
-            // .planner_strategy = .advanced,
-        };
-    }
-
-    // TODO: This is either dead code or code that should be dead
-    // Remove it
-    /// Predefined configuration optimized for binary size
-    /// Uses minimal planner strategy to reduce executable size
-    pub fn optimizeSmall() EvmConfig {
-        return EvmConfig{
-            // .planner_strategy = .minimal,
-        };
-    }
-
-    // TODO: This is either dead code or code that should be dead
-    // Remove it
-    /// Generate configuration from build options
-    pub fn fromBuildOptions() EvmConfig {
-        const build_options = @import("build_options");
-        const optimize_str = build_options.optimize_strategy;
-
-        // Base configuration from optimization strategy
-        var config = if (std.mem.eql(u8, optimize_str, "fast"))
-            EvmConfig.optimizeFast()
-        else if (std.mem.eql(u8, optimize_str, "small"))
-            EvmConfig.optimizeSmall()
-        else
-            EvmConfig{}; // safe/default
-
-        // Apply build options
-        config.eips = Eips{
-            .hardfork = getHardforkFromString(build_options.hardfork),
-            .overrides = config.eip_overrides,
-        };
-        config.max_call_depth = build_options.max_call_depth;
-        config.stack_size = build_options.stack_size;
-        config.max_bytecode_size = build_options.max_bytecode_size;
-        config.max_initcode_size = build_options.max_initcode_size;
-        config.block_gas_limit = build_options.block_gas_limit;
-        config.memory_initial_capacity = build_options.memory_initial_capacity;
-        config.memory_limit = build_options.memory_limit;
-        config.arena_capacity_limit = build_options.arena_capacity_limit;
-        config.enable_fusion = build_options.enable_fusion;
-        config.enable_precompiles = true; // Always enable precompiles
-        config.disable_gas_checks = build_options.disable_gas_checks;
-        config.disable_balance_checks = build_options.disable_balance_checks;
-
-        // Set tracer if enabled
-        if (build_options.enable_tracing) {
-            // For now, we'll leave TracerType as null since it requires more complex setup
-            // Users can still set up their own tracer through the configuration
-            // Tracer is now part of EVM struct, not config
-        }
-
-        return config;
-    }
-
-    /// Get the hardfork enum from a string
-    fn getHardforkFromString(hardfork_str: []const u8) Hardfork {
-        // TODO: We need to stop making cancun the default and instead make latest the default
-        // We should also alias latest so we can update latest hardfork in a single spot to update the default latest hardfork everywhere
-        if (std.mem.eql(u8, hardfork_str, "FRONTIER")) return .FRONTIER;
-        if (std.mem.eql(u8, hardfork_str, "HOMESTEAD")) return .HOMESTEAD;
-        if (std.mem.eql(u8, hardfork_str, "BYZANTIUM")) return .BYZANTIUM;
-        if (std.mem.eql(u8, hardfork_str, "ISTANBUL")) return .ISTANBUL;
-        if (std.mem.eql(u8, hardfork_str, "BERLIN")) return .BERLIN;
-        if (std.mem.eql(u8, hardfork_str, "LONDON")) return .LONDON;
-        if (std.mem.eql(u8, hardfork_str, "SHANGHAI")) return .SHANGHAI;
-        if (std.mem.eql(u8, hardfork_str, "CANCUN")) return .CANCUN;
-        // Default to CANCUN if unknown
-        return .CANCUN;
     }
 };
 
@@ -338,24 +258,6 @@ test "EvmConfig - depth type edge cases" {
 
     const config_max_u11 = EvmConfig{ .max_call_depth = 2047 };
     try testing.expectEqual(u11, config_max_u11.get_depth_type());
-}
-
-test "EvmConfig - optimizeFast configuration" {
-    const config = EvmConfig.optimizeFast();
-
-    // Should have default values since planner_strategy is commented out
-    try testing.expectEqual(Hardfork.CANCUN, config.eips.hardfork);
-    try testing.expectEqual(@as(u11, 1024), config.max_call_depth);
-    try testing.expectEqual(true, config.enable_fusion);
-}
-
-test "EvmConfig - optimizeSmall configuration" {
-    const config = EvmConfig.optimizeSmall();
-
-    // Should have default values since planner_strategy is commented out
-    try testing.expectEqual(Hardfork.CANCUN, config.eips.hardfork);
-    try testing.expectEqual(@as(u11, 1024), config.max_call_depth);
-    try testing.expectEqual(true, config.enable_fusion);
 }
 
 test "EvmConfig - hardfork variations" {

@@ -160,7 +160,7 @@ pub fn Evm(config: EvmConfig) type {
                 .access_list = access_list,
                 .current_snapshot_id = 0,
                 .gas_refund_counter = 0,
-                .journal = Journal.init(allocator),
+                .journal = try Journal.init(allocator),
                 .logs = std.ArrayList(@import("frame/call_result.zig").Log).empty,
                 .created_contracts = CreatedContracts.init(allocator),
                 .block_info = block_info,
@@ -212,6 +212,21 @@ pub fn Evm(config: EvmConfig) type {
             return self.call_arena.allocator();
         }
 
+        /// Clean up all EVM resources and free allocated memory.
+        ///
+        /// Deallocates all memory owned by the EVM including:
+        /// - Return data buffers
+        /// - Journal entries
+        /// - Created contracts tracking
+        /// - Self-destruct list
+        /// - Access lists (EIP-2929)
+        /// - Log entries (topics and data)
+        /// - Touched addresses and storage
+        /// - Call arena allocator
+        /// - Tracer state
+        ///
+        /// MUST be called to prevent memory leaks. The EVM instance
+        /// is invalid after calling deinit and must not be used.
         pub fn deinit(self: *Self) void {
             self.tracer.deinit();
             // Free return_data if it exists
@@ -297,8 +312,24 @@ pub fn Evm(config: EvmConfig) type {
             }
         };
         
-        /// Dump the current state of all accounts in the database
-        /// This is useful for post-state validation in tests
+        /// Dump the current state of all touched accounts in the database.
+        ///
+        /// Creates a snapshot of all accounts that have been accessed or modified
+        /// during execution. Includes balance, nonce, code, and storage for each account.
+        ///
+        /// Returns:
+        ///   StateDump containing all touched accounts and their state
+        ///
+        /// Errors:
+        ///   OutOfMemory: Allocation failed
+        ///   AccountNotFound: Referenced account doesn't exist
+        ///   CodeNotFound: Code hash doesn't exist
+        ///
+        /// Usage:
+        ///   Primarily used for post-state validation in tests to verify
+        ///   expected state changes after transaction execution.
+        ///
+        /// Note: Caller owns returned StateDump and must call deinit() to free.
         pub fn dumpState(self: *Self, allocator: std.mem.Allocator) !StateDump {
             var state_dump = StateDump{
                 .accounts = std.StringHashMap(StateDump.AccountState).init(allocator),
@@ -418,6 +449,9 @@ pub fn Evm(config: EvmConfig) type {
                 self.created_contracts.clear();
                 // Clear self destruct list
                 self.self_destruct.clear();
+                // Clear transient storage at transaction end (EIP-1153)
+                // Transient storage MUST NOT persist between transactions
+                self.database.clear_transient_storage();
 
                 // Reset call stack to initial state
                 // This is critical when reusing EVM instances across multiple transactions
@@ -777,7 +811,7 @@ pub fn Evm(config: EvmConfig) type {
             // Handle EIP-2935 historical block hashes contract
             const historical_block_hashes = @import("eips_and_hardforks/historical_block_hashes.zig");
             if (config.eips.eip_2935_is_historical_block_hashes_address(to)) {
-                var contract = historical_block_hashes.HistoricalBlockHashesContract{ .database = self.database };
+                var contract = historical_block_hashes.HistoricalBlockHashesContract{ .database = self.database, .allocator = self.allocator };
                 const caller = if (self.depth > 0) self.call_stack[self.depth - 1].caller else primitives.ZERO_ADDRESS;
 
                 const result = contract.execute(caller, input, gas) catch |err| {

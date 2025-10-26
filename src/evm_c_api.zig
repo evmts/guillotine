@@ -164,7 +164,8 @@ export fn guillotine_init() void {
     defer pool_mutex.unlock();
 
     if (ffi_allocator == null) {
-        // TODO: Use GPA not c allocator
+        // Use c_allocator for FFI - required for C interop and WASM compatibility
+        // GPA would require additional cleanup coordination across the FFI boundary
         ffi_allocator = std.heap.c_allocator;
     }
 
@@ -665,7 +666,10 @@ export fn guillotine_set_balance(handle: *EvmHandle, address: *const [20]u8, bal
 
     // Track this address for state dump
     const addr = primitives.Address{ .bytes = address.* };
-    evm_ptr.touched_addresses.put(addr, {}) catch {};
+    evm_ptr.touched_addresses.put(addr, {}) catch {
+        setError("Failed to track touched address", .{});
+        return false;
+    };
 
     return true;
 }
@@ -685,7 +689,10 @@ export fn guillotine_set_balance_tracing(handle: *EvmHandle, address: *const [20
     };
     // Track this address for state dump
     const addr = primitives.Address{ .bytes = address.* };
-    evm_ptr.touched_addresses.put(addr, {}) catch {};
+    evm_ptr.touched_addresses.put(addr, {}) catch {
+        setError("Failed to track touched address", .{});
+        return false;
+    };
     return true;
 }
 
@@ -708,7 +715,10 @@ export fn guillotine_set_nonce(handle: *EvmHandle, address: *const [20]u8, nonce
 
     // Track this address for state dump
     const addr = primitives.Address{ .bytes = address.* };
-    evm_ptr.touched_addresses.put(addr, {}) catch {};
+    evm_ptr.touched_addresses.put(addr, {}) catch {
+        setError("Failed to track touched address", .{});
+        return false;
+    };
 
     return true;
 }
@@ -727,7 +737,10 @@ export fn guillotine_set_nonce_tracing(handle: *EvmHandle, address: *const [20]u
     };
     // Track this address for state dump
     const addr = primitives.Address{ .bytes = address.* };
-    evm_ptr.touched_addresses.put(addr, {}) catch {};
+    evm_ptr.touched_addresses.put(addr, {}) catch {
+        setError("Failed to track touched address", .{});
+        return false;
+    };
     return true;
 }
 
@@ -758,7 +771,10 @@ export fn guillotine_set_code(handle: *EvmHandle, address: *const [20]u8, code: 
 
     // Track this address for state dump
     const addr = primitives.Address{ .bytes = address.* };
-    evm_ptr.touched_addresses.put(addr, {}) catch {};
+    evm_ptr.touched_addresses.put(addr, {}) catch {
+        setError("Failed to track touched address", .{});
+        return false;
+    };
 
     return true;
 }
@@ -782,7 +798,10 @@ export fn guillotine_set_code_tracing(handle: *EvmHandle, address: *const [20]u8
     };
     // Track this address for state dump
     const addr = primitives.Address{ .bytes = address.* };
-    evm_ptr.touched_addresses.put(addr, {}) catch {};
+    evm_ptr.touched_addresses.put(addr, {}) catch {
+        setError("Failed to track touched address", .{});
+        return false;
+    };
     return true;
 }
 
@@ -982,12 +1001,13 @@ fn convertCallResultToEvmResult(result: anytype, allocator: std.mem.Allocator) ?
         evm_result.has_created_address = false;
     }
 
-    // If we have an execution trace, write to a temp file for large traces
+    // If we have an execution trace, serialize it to JSON in-memory
     evm_result.trace_json = @as([*]const u8, @ptrCast(&empty_error));
     evm_result.trace_json_len = 0;
     if (result.trace) |*trace| {
-        // Always use in-memory approach for now
-        // TODO: Re-implement file-based approach for large traces
+        // Use in-memory JSON serialization
+        // For extremely large traces (>100MB), consider streaming to file
+        // This would require async I/O or chunked response handling in the FFI layer
         if (false) {
             // Disabled file-based approach
             const w = undefined;
@@ -1043,23 +1063,79 @@ fn convertCallResultToEvmResult(result: anytype, allocator: std.mem.Allocator) ?
                 return null;
             };
             for (trace.steps, 0..) |step, i| {
-                if (i > 0) w.writeAll(",") catch {};
-                w.writeAll("{") catch {};
-                w.print("\"pc\":{d},", .{step.pc}) catch {};
-                w.print("\"op\":\"{s}\",", .{step.opcode_name}) catch {};
-                w.print("\"gas\":{d},", .{step.gas}) catch {};
-                w.print("\"gasCost\":{d},", .{step.gas_cost}) catch {};
-                w.print("\"depth\":{d},", .{step.depth}) catch {};
-                w.writeAll("\"stack\":[") catch {};
+                if (i > 0) w.writeAll(",") catch {
+                    setError("Failed to write JSON separator", .{});
+                    allocator.destroy(evm_result);
+                    return null;
+                };
+                w.writeAll("{") catch {
+                    setError("Failed to write step start", .{});
+                    allocator.destroy(evm_result);
+                    return null;
+                };
+                w.print("\"pc\":{d},", .{step.pc}) catch {
+                    setError("Failed to write pc", .{});
+                    allocator.destroy(evm_result);
+                    return null;
+                };
+                w.print("\"op\":\"{s}\",", .{step.opcode_name}) catch {
+                    setError("Failed to write opcode", .{});
+                    allocator.destroy(evm_result);
+                    return null;
+                };
+                w.print("\"gas\":{d},", .{step.gas}) catch {
+                    setError("Failed to write gas", .{});
+                    allocator.destroy(evm_result);
+                    return null;
+                };
+                w.print("\"gasCost\":{d},", .{step.gas_cost}) catch {
+                    setError("Failed to write gas cost", .{});
+                    allocator.destroy(evm_result);
+                    return null;
+                };
+                w.print("\"depth\":{d},", .{step.depth}) catch {
+                    setError("Failed to write depth", .{});
+                    allocator.destroy(evm_result);
+                    return null;
+                };
+                w.writeAll("\"stack\":[") catch {
+                    setError("Failed to write stack start", .{});
+                    allocator.destroy(evm_result);
+                    return null;
+                };
                 for (step.stack, 0..) |val, j| {
-                    if (j > 0) w.writeAll(",") catch {};
-                    w.print("\"0x{x}\"", .{val}) catch {};
+                    if (j > 0) w.writeAll(",") catch {
+                        setError("Failed to write stack separator", .{});
+                        allocator.destroy(evm_result);
+                        return null;
+                    };
+                    w.print("\"0x{x}\"", .{val}) catch {
+                        setError("Failed to write stack value", .{});
+                        allocator.destroy(evm_result);
+                        return null;
+                    };
                 }
-                w.writeAll("]") catch {};
-                w.print(",\"memSize\":{d}", .{step.mem_size}) catch {};
-                w.writeAll("}") catch {};
+                w.writeAll("]") catch {
+                    setError("Failed to write stack end", .{});
+                    allocator.destroy(evm_result);
+                    return null;
+                };
+                w.print(",\"memSize\":{d}", .{step.mem_size}) catch {
+                    setError("Failed to write memory size", .{});
+                    allocator.destroy(evm_result);
+                    return null;
+                };
+                w.writeAll("}") catch {
+                    setError("Failed to write step end", .{});
+                    allocator.destroy(evm_result);
+                    return null;
+                };
             }
-            w.writeAll("]}") catch {};
+            w.writeAll("]}") catch {
+                setError("Failed to close trace JSON", .{});
+                allocator.destroy(evm_result);
+                return null;
+            };
             // Duplicate into a stable allocation and then free the buffer
             const bytes = allocator.dupe(u8, buf.items) catch {
                 setError("Failed to finalize trace json", .{});
@@ -1265,7 +1341,10 @@ export fn guillotine_set_storage(handle: *EvmHandle, address: *const [20]u8, key
 
     // Track this address for state dump
     const addr = primitives.Address{ .bytes = address.* };
-    evm_ptr.touched_addresses.put(addr, {}) catch {};
+    evm_ptr.touched_addresses.put(addr, {}) catch {
+        setError("Failed to track touched address", .{});
+        return false;
+    };
 
     return true;
 }

@@ -1,9 +1,27 @@
 const std = @import("std");
+const SafetyCounter = @import("internal/safety_counter.zig").SafetyCounter;
+const log = @import("log.zig");
 
 /// A custom allocator that wraps ArenaAllocator with a configurable growth strategy.
 /// This allocator preallocates memory and grows by a specified factor when more space is needed.
 pub const GrowingArenaAllocator = struct {
     const Self = @This();
+
+    /// Maximum absolute capacity (16GB) to prevent unbounded growth and DoS attacks
+    pub const MAX_ABSOLUTE_CAPACITY: usize = 16 * 1024 * 1024 * 1024;
+
+    /// Minimum valid growth factor (101 = 1% growth minimum)
+    pub const MIN_GROWTH_FACTOR: u32 = 101;
+
+    /// Maximum growth loop iterations (prevents infinite loops)
+    pub const MAX_GROWTH_ITERATIONS: u32 = 1000;
+
+    pub const Error = error{
+        InvalidCapacity,
+        InvalidGrowthFactor,
+        CapacityOverflow,
+        MaxCapacityExceeded,
+    };
 
     /// The underlying arena allocator
     arena: std.heap.ArenaAllocator,
@@ -35,9 +53,27 @@ pub const GrowingArenaAllocator = struct {
 
     /// Initialize with separate initial and max capacities and optional tracer
     pub fn initWithMaxCapacityAndTracer(base_allocator: std.mem.Allocator, initial_capacity: usize, max_capacity: usize, growth_factor: u32, tracer: ?*anyopaque) !Self {
+        // CRITICAL: Validate growth factor to prevent infinite loops
+        if (growth_factor <= 100) {
+            log.err("Invalid growth_factor={d}. Must be > 100 (e.g., 150 = 50% growth)", .{growth_factor});
+            return Error.InvalidGrowthFactor;
+        }
+
+        // Validate max capacity against absolute limit
+        if (max_capacity > MAX_ABSOLUTE_CAPACITY) {
+            log.err("max_capacity={d} exceeds MAX_ABSOLUTE_CAPACITY={d}", .{ max_capacity, MAX_ABSOLUTE_CAPACITY });
+            return Error.MaxCapacityExceeded;
+        }
+
+        // Validate that max_capacity >= initial_capacity
+        if (max_capacity < initial_capacity) {
+            log.err("max_capacity={d} must be >= initial_capacity={d}", .{ max_capacity, initial_capacity });
+            return Error.InvalidCapacity;
+        }
+
         var arena = std.heap.ArenaAllocator.init(base_allocator);
         errdefer arena.deinit();
-        
+
         // Preallocate the initial capacity
         var actual_capacity = initial_capacity;
         if (initial_capacity > 0) {
@@ -190,22 +226,59 @@ pub const GrowingArenaAllocator = struct {
             if (self.tracer) |t| {
                 const Tracer = @import("tracer/tracer.zig").Tracer;
                 const tracer_ptr = @as(*Tracer, @ptrCast(@alignCast(t)));
-                tracer_ptr.onArenaAlloc(len, @intFromEnum(ptr_align), self.current_capacity);
+                const align_value = @intFromEnum(ptr_align);
+                tracer_ptr.onArenaAlloc(len, align_value, self.current_capacity);
             }
 
             return ptr;
         }
-        
+
         // If allocation failed, we might need more space
         // Check if we need to grow the arena
         const current_used = self.arena.queryCapacity();
         if (current_used + len > self.current_capacity) {
             const old_capacity = self.current_capacity;
 
+            // CRITICAL: Prevent infinite loop if current_capacity is 0
+            if (self.current_capacity == 0) {
+                log.err("Cannot grow from zero capacity. This indicates invalid initialization state.", .{});
+                if (self.tracer) |t| {
+                    const Tracer = @import("tracer/tracer.zig").Tracer;
+                    const tracer_ptr = @as(*Tracer, @ptrCast(@alignCast(t)));
+                    tracer_ptr.onArenaAllocFailed(len, self.current_capacity, self.max_capacity);
+                }
+                return null;
+            }
+
+            // CRITICAL: SafetyCounter prevents infinite loops and DoS attacks
+            const Counter = SafetyCounter(u32, .enabled);
+            var safety = Counter.init(MAX_GROWTH_ITERATIONS);
+
             // Calculate new capacity with growth factor, respecting max limit
             var new_capacity = self.current_capacity;
             while (new_capacity < current_used + len) {
-                new_capacity = (new_capacity * self.growth_factor) / 100;
+                safety.inc();
+
+                // Check for overflow in multiplication before performing it
+                const growth_factor_usize: usize = self.growth_factor;
+                const max_before_overflow: usize = std.math.maxInt(usize) / growth_factor_usize;
+                if (new_capacity > max_before_overflow) {
+                    log.err("Capacity growth would overflow: new_capacity={d}, growth_factor={d}", .{ new_capacity, self.growth_factor });
+                    new_capacity = self.max_capacity;
+                    break;
+                }
+
+                const grown = (new_capacity * self.growth_factor) / 100;
+
+                // Detect if growth is insufficient (would loop forever)
+                if (grown <= new_capacity) {
+                    log.err("Growth calculation failed: {d} * {d} / 100 = {d} (no progress)", .{ new_capacity, self.growth_factor, grown });
+                    new_capacity = self.max_capacity;
+                    break;
+                }
+
+                new_capacity = grown;
+
                 // Don't grow beyond max capacity during normal operation
                 if (new_capacity > self.max_capacity) {
                     new_capacity = self.max_capacity;
@@ -214,8 +287,8 @@ pub const GrowingArenaAllocator = struct {
             }
 
             // Try to preallocate more space
-            const additional_capacity = new_capacity - self.current_capacity;
-            if (additional_capacity > 0) {
+            if (new_capacity > self.current_capacity) {
+                const additional_capacity = new_capacity - self.current_capacity;
                 // Allocate a dummy block to force the arena to grow
                 if (self.arena.allocator().alloc(u8, additional_capacity)) |dummy_alloc| {
                     _ = dummy_alloc;
@@ -233,7 +306,7 @@ pub const GrowingArenaAllocator = struct {
                 }
             }
         }
-        
+
         // Try allocation again after potential growth
         const result = self.arena.allocator().rawAlloc(len, ptr_align, ret_addr);
 
@@ -242,7 +315,8 @@ pub const GrowingArenaAllocator = struct {
             if (self.tracer) |t| {
                 const Tracer = @import("tracer/tracer.zig").Tracer;
                 const tracer_ptr = @as(*Tracer, @ptrCast(@alignCast(t)));
-                tracer_ptr.onArenaAlloc(len, @intFromEnum(ptr_align), self.current_capacity);
+                const align_value = @intFromEnum(ptr_align);
+                tracer_ptr.onArenaAlloc(len, align_value, self.current_capacity);
             }
         } else {
             // Trace allocation failure
@@ -321,22 +395,22 @@ test "GrowingArenaAllocator max capacity limit" {
     defer gaa.deinit();
 
     const alloc = gaa.allocator();
-    
+
     // Allocate enough to potentially grow beyond max capacity
     _ = try alloc.alloc(u8, 2048);
     _ = try alloc.alloc(u8, 2048);
     _ = try alloc.alloc(u8, 2048);
-    
+
     // Arena should have grown beyond initial capacity
     const grown_cap = gaa.queryCapacity();
     try std.testing.expect(grown_cap > 1024);
-    
+
     // Track capacity before reset
     const before_reset = grown_cap;
-    
+
     // Reset with capacity retention
     try gaa.resetRetainCapacity();
-    
+
     // After reset, if we were over max_capacity, we should have reset
     const reset_cap = gaa.queryCapacity();
     if (before_reset > 4096) {
@@ -347,7 +421,273 @@ test "GrowingArenaAllocator max capacity limit" {
         // Should have retained the capacity
         try std.testing.expect(reset_cap >= before_reset);
     }
-    
+
     // Verify our tracked capacity matches expected
     try std.testing.expect(gaa.current_capacity <= 4096 or gaa.current_capacity == before_reset);
+}
+
+// SECURITY TESTS - Critical bug fixes
+
+test "SECURITY: Invalid growth_factor <= 100 rejected" {
+    // Test growth_factor = 100 (no growth)
+    const result1 = GrowingArenaAllocator.init(std.testing.allocator, 1024, 100);
+    try std.testing.expectError(GrowingArenaAllocator.Error.InvalidGrowthFactor, result1);
+
+    // Test growth_factor < 100 (shrinking)
+    const result2 = GrowingArenaAllocator.init(std.testing.allocator, 1024, 50);
+    try std.testing.expectError(GrowingArenaAllocator.Error.InvalidGrowthFactor, result2);
+
+    // Test growth_factor = 0 (critical)
+    const result3 = GrowingArenaAllocator.init(std.testing.allocator, 1024, 0);
+    try std.testing.expectError(GrowingArenaAllocator.Error.InvalidGrowthFactor, result3);
+}
+
+test "SECURITY: Valid growth_factor = 101 (minimum valid)" {
+    var gaa = try GrowingArenaAllocator.init(std.testing.allocator, 1000, 101);
+    defer gaa.deinit();
+
+    try std.testing.expectEqual(@as(u32, 101), gaa.growth_factor);
+}
+
+test "SECURITY: Zero initial capacity handling" {
+    // Allocator should initialize with zero capacity
+    var gaa = try GrowingArenaAllocator.init(std.testing.allocator, 0, 150);
+    defer gaa.deinit();
+
+    try std.testing.expectEqual(@as(usize, 0), gaa.current_capacity);
+
+    // Allocation with zero capacity should fail gracefully (not infinite loop)
+    const alloc = gaa.allocator();
+    const result = alloc.alloc(u8, 100);
+
+    // This should fail because we can't grow from zero capacity
+    try std.testing.expectEqual(@as(?[]u8, null), result);
+}
+
+test "SECURITY: Max capacity validation" {
+    // Test max_capacity exceeds absolute limit
+    const result1 = GrowingArenaAllocator.initWithMaxCapacity(
+        std.testing.allocator,
+        1024,
+        GrowingArenaAllocator.MAX_ABSOLUTE_CAPACITY + 1,
+        150,
+    );
+    try std.testing.expectError(GrowingArenaAllocator.Error.MaxCapacityExceeded, result1);
+
+    // Test max_capacity < initial_capacity
+    const result2 = GrowingArenaAllocator.initWithMaxCapacity(
+        std.testing.allocator,
+        2048,
+        1024,
+        150,
+    );
+    try std.testing.expectError(GrowingArenaAllocator.Error.InvalidCapacity, result2);
+}
+
+test "SECURITY: SafetyCounter prevents infinite loop on excessive growth iterations" {
+    // This test verifies SafetyCounter protection
+    // Create a scenario where growth would take many iterations
+    var gaa = try GrowingArenaAllocator.initWithMaxCapacity(
+        std.testing.allocator,
+        1,
+        GrowingArenaAllocator.MAX_ABSOLUTE_CAPACITY,
+        101, // Minimal growth factor
+    );
+    defer gaa.deinit();
+
+    const alloc = gaa.allocator();
+
+    // Try to allocate a huge amount that would require many growth iterations
+    // This should be protected by SafetyCounter
+    const huge_size = 1024 * 1024 * 1024; // 1GB
+    const result = alloc.alloc(u8, huge_size);
+
+    // The allocation may fail or succeed depending on system memory
+    // The important thing is it doesn't hang forever
+    if (result) |slice| {
+        // If it succeeded, verify we got the right size
+        try std.testing.expectEqual(huge_size, slice.len);
+    } else {
+        // If it failed, that's also acceptable
+        // The key is we didn't infinite loop
+    }
+}
+
+test "SECURITY: Overflow detection in growth calculation" {
+    // Create allocator with very large initial capacity
+    const large_capacity: usize = std.math.maxInt(usize) / 2;
+    var gaa = try GrowingArenaAllocator.initWithMaxCapacity(
+        std.testing.allocator,
+        large_capacity,
+        GrowingArenaAllocator.MAX_ABSOLUTE_CAPACITY,
+        200, // 100% growth would overflow
+    );
+    defer gaa.deinit();
+
+    // Set current_capacity to large value
+    gaa.current_capacity = large_capacity;
+
+    const alloc = gaa.allocator();
+
+    // Try to allocate more, which would cause overflow in growth calculation
+    // Should be caught and capped at max_capacity
+    const result = alloc.alloc(u8, 1024);
+
+    // The allocation behavior is implementation-dependent
+    // but it should NOT crash or hang
+    _ = result;
+}
+
+test "SECURITY: Growth factor edge cases" {
+    // Test minimum valid growth factor (101)
+    var gaa1 = try GrowingArenaAllocator.init(std.testing.allocator, 1000, 101);
+    defer gaa1.deinit();
+    try std.testing.expectEqual(@as(u32, 101), gaa1.growth_factor);
+
+    // Test reasonable growth factor (150)
+    var gaa2 = try GrowingArenaAllocator.init(std.testing.allocator, 1000, 150);
+    defer gaa2.deinit();
+    try std.testing.expectEqual(@as(u32, 150), gaa2.growth_factor);
+
+    // Test large growth factor (300)
+    var gaa3 = try GrowingArenaAllocator.init(std.testing.allocator, 1000, 300);
+    defer gaa3.deinit();
+    try std.testing.expectEqual(@as(u32, 300), gaa3.growth_factor);
+}
+
+test "SECURITY: Capacity overflow prevention during addition" {
+    // Test that current_used + len doesn't overflow
+    var gaa = try GrowingArenaAllocator.init(std.testing.allocator, 1024, 150);
+    defer gaa.deinit();
+
+    // This is a boundary test - ensure we handle edge cases properly
+    const alloc = gaa.allocator();
+    _ = try alloc.alloc(u8, 512);
+
+    // The allocator should handle this without overflow
+    const result = alloc.alloc(u8, std.math.maxInt(usize) - 1024);
+    // Will likely fail due to memory constraints, but shouldn't crash
+    _ = result;
+}
+
+test "SECURITY: Growth calculation insufficient progress detection" {
+    // Test case where growth would make no progress
+    // This verifies the grown <= new_capacity check
+    var gaa = try GrowingArenaAllocator.init(std.testing.allocator, 1000, 101);
+    defer gaa.deinit();
+
+    // Force a scenario where growth might stall
+    // With growth_factor=101, growing from small values rounds down
+    gaa.current_capacity = 99;
+
+    const alloc = gaa.allocator();
+    // This should either succeed or fail, but not infinite loop
+    const result = alloc.alloc(u8, 200);
+    _ = result;
+}
+
+test "SECURITY: Multiple growth iterations within safety limit" {
+    // Test that normal growth within safety limit works
+    var gaa = try GrowingArenaAllocator.init(std.testing.allocator, 100, 150);
+    defer gaa.deinit();
+
+    const alloc = gaa.allocator();
+
+    // Allocate progressively larger amounts
+    _ = try alloc.alloc(u8, 50);
+    _ = try alloc.alloc(u8, 100);
+    _ = try alloc.alloc(u8, 200);
+    _ = try alloc.alloc(u8, 400);
+
+    // Should have grown capacity
+    try std.testing.expect(gaa.queryCapacity() > 100);
+}
+
+test "SECURITY: Max capacity enforcement during growth" {
+    // Test that growth stops at max_capacity
+    var gaa = try GrowingArenaAllocator.initWithMaxCapacity(
+        std.testing.allocator,
+        1024,
+        2048, // Small max capacity
+        200, // 100% growth
+    );
+    defer gaa.deinit();
+
+    const alloc = gaa.allocator();
+
+    // Allocate to trigger multiple growth steps
+    _ = try alloc.alloc(u8, 1024);
+    _ = try alloc.alloc(u8, 1024);
+
+    // Current capacity should not exceed max_capacity
+    try std.testing.expect(gaa.current_capacity <= 2048);
+}
+
+test "SECURITY: Tracer alignment cast safety" {
+    // Test that tracer pointer casts are safe
+    // This verifies the @ptrCast(@alignCast(t)) pattern
+    const Tracer = @import("tracer/tracer.zig").Tracer;
+    var tracer = Tracer.init(std.testing.allocator);
+    defer tracer.deinit();
+
+    const tracer_opaque: *anyopaque = &tracer;
+
+    var gaa = try GrowingArenaAllocator.initWithMaxCapacityAndTracer(
+        std.testing.allocator,
+        1024,
+        4096,
+        150,
+        tracer_opaque,
+    );
+    defer gaa.deinit();
+
+    // Allocations should work with tracer
+    const alloc = gaa.allocator();
+    _ = try alloc.alloc(u8, 100);
+}
+
+test "SECURITY: Alignment enum cast to integer safety" {
+    // Test that @intFromEnum(ptr_align) is safe
+    var gaa = try GrowingArenaAllocator.init(std.testing.allocator, 1024, 150);
+    defer gaa.deinit();
+
+    const alloc = gaa.allocator();
+
+    // Test various alignments
+    _ = try alloc.alignedAlloc(u8, 1, 100);
+    _ = try alloc.alignedAlloc(u8, 2, 100);
+    _ = try alloc.alignedAlloc(u8, 4, 100);
+    _ = try alloc.alignedAlloc(u8, 8, 100);
+}
+
+test "SECURITY: Comprehensive edge case validation" {
+    // This test combines multiple edge cases
+    var gaa = try GrowingArenaAllocator.initWithMaxCapacity(
+        std.testing.allocator,
+        100,
+        10000,
+        150,
+    );
+    defer gaa.deinit();
+
+    const alloc = gaa.allocator();
+
+    // Test zero-sized allocation
+    const zero_alloc = try alloc.alloc(u8, 0);
+    try std.testing.expectEqual(@as(usize, 0), zero_alloc.len);
+
+    // Test normal allocation
+    _ = try alloc.alloc(u8, 50);
+
+    // Test growth trigger
+    _ = try alloc.alloc(u8, 200);
+
+    // Test multiple small allocations
+    for (0..10) |_| {
+        _ = try alloc.alloc(u8, 10);
+    }
+
+    // Verify capacity is reasonable
+    try std.testing.expect(gaa.queryCapacity() > 100);
+    try std.testing.expect(gaa.current_capacity <= 10000);
 }

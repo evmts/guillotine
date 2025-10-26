@@ -881,23 +881,47 @@ fn convertCallResultToEvmResult(result: anytype, alloc: std.mem.Allocator) ?*Evm
         };
         
         for (trace.steps, 0..) |step, i| {
-            if (i > 0) buf.append(',') catch {};
+            if (i > 0) buf.append(',') catch {
+                setError("Failed to append JSON separator", .{});
+                alloc.destroy(evm_result);
+                return null;
+            };
             // WASM32: Be careful with stack values (u256 = 32 bytes each)
             buf.writer().print(
                 "{{\"pc\":{d},\"op\":\"{s}\",\"gas\":{d},\"gasCost\":{d},\"depth\":{d},\"stack\":[",
                 .{step.pc, step.opcode_name, step.gas, step.gas_cost, step.depth}
-            ) catch {};
-            
+            ) catch {
+                setError("Failed to write step JSON", .{});
+                alloc.destroy(evm_result);
+                return null;
+            };
+
             for (step.stack, 0..) |val, j| {
-                if (j > 0) buf.append(',') catch {};
+                if (j > 0) buf.append(',') catch {
+                    setError("Failed to append stack separator", .{});
+                    alloc.destroy(evm_result);
+                    return null;
+                };
                 // WASM32: u256 values must be formatted as hex strings
-                buf.writer().print("\"0x{x}\"", .{val}) catch {};
+                buf.writer().print("\"0x{x}\"", .{val}) catch {
+                    setError("Failed to write stack value", .{});
+                    alloc.destroy(evm_result);
+                    return null;
+                };
             }
-            
-            buf.writer().print("],\"memSize\":{d}}}", .{step.mem_size}) catch {};
+
+            buf.writer().print("],\"memSize\":{d}}}", .{step.mem_size}) catch {
+                setError("Failed to write memory size", .{});
+                alloc.destroy(evm_result);
+                return null;
+            };
         }
-        
-        buf.appendSlice("]}") catch {};
+
+        buf.appendSlice("]}") catch {
+            setError("Failed to close trace JSON", .{});
+            alloc.destroy(evm_result);
+            return null;
+        };
         
         // WASM32: Allocate final buffer with page_allocator
         const bytes = alloc.dupe(u8, buf.items) catch {
