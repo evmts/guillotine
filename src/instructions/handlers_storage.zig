@@ -226,7 +226,6 @@ const testing = std.testing;
 const Frame = @import("../frame/frame.zig").Frame;
 const dispatch_mod = @import("../preprocessor/dispatch.zig");
 const DefaultTracer = @import("../tracer/tracer.zig").DefaultTracer;
-// const Host = @import("evm.zig").Host;
 
 // Test configuration with database enabled
 const test_config = FrameConfig{
@@ -965,3 +964,460 @@ test "storage operations - max values" {
 }
 
 // NOTE: Database is now always required - no test needed for disabled database
+
+// ====== EIP-1153 TRANSIENT STORAGE COMPREHENSIVE TESTS ======
+
+test "EIP-1153 - TSTORE then TLOAD in same transaction" {
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
+
+    var frame = try createTestFrame(testing.allocator, &evm);
+    defer frame.deinit(testing.allocator);
+    evm.is_static = false;
+
+    const slot: u256 = 42;
+    const value: u256 = 0xDEADBEEF;
+
+    // TSTORE value at slot
+    try frame.stack.push(slot);
+    try frame.stack.push(value);
+    var dispatch = createMockDispatch();
+    _ = try TestHandlers.tstore(&frame, dispatch);
+
+    // TLOAD from same slot
+    try frame.stack.push(slot);
+    dispatch = createMockDispatch();
+    _ = try TestHandlers.tload(&frame, dispatch);
+
+    // Should return the stored value
+    try testing.expectEqual(value, try frame.stack.pop());
+}
+
+test "EIP-1153 - TLOAD of unset key returns zero" {
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
+
+    var frame = try createTestFrame(testing.allocator, &evm);
+    defer frame.deinit(testing.allocator);
+
+    const slot: u256 = 999;
+
+    // TLOAD from unset slot
+    try frame.stack.push(slot);
+    const dispatch = createMockDispatch();
+    _ = try TestHandlers.tload(&frame, dispatch);
+
+    // Should return zero
+    try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
+}
+
+test "EIP-1153 - transient storage isolated from permanent storage" {
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
+
+    var frame = try createTestFrame(testing.allocator, &evm);
+    defer frame.deinit(testing.allocator);
+    evm.is_static = false;
+
+    const slot: u256 = 100;
+
+    // Store value in permanent storage
+    try frame.stack.push(slot);
+    try frame.stack.push(111);
+    var dispatch = createMockDispatch();
+    _ = try TestHandlers.sstore(&frame, dispatch);
+
+    // Store different value in transient storage
+    try frame.stack.push(slot);
+    try frame.stack.push(222);
+    dispatch = createMockDispatch();
+    _ = try TestHandlers.tstore(&frame, dispatch);
+
+    // SLOAD should return permanent value
+    try frame.stack.push(slot);
+    dispatch = createMockDispatch();
+    _ = try TestFrame.StorageHandlers.sload(frame, dispatch);
+    try testing.expectEqual(@as(u256, 111), try frame.stack.pop());
+
+    // TLOAD should return transient value
+    try frame.stack.push(slot);
+    dispatch = createMockDispatch();
+    _ = try TestHandlers.tload(&frame, dispatch);
+    try testing.expectEqual(@as(u256, 222), try frame.stack.pop());
+}
+
+test "EIP-1153 - TSTORE overwrite previous value" {
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
+
+    var frame = try createTestFrame(testing.allocator, &evm);
+    defer frame.deinit(testing.allocator);
+    evm.is_static = false;
+
+    const slot: u256 = 50;
+
+    // Store initial value
+    try frame.stack.push(slot);
+    try frame.stack.push(100);
+    var dispatch = createMockDispatch();
+    _ = try TestHandlers.tstore(&frame, dispatch);
+
+    // Overwrite with new value
+    try frame.stack.push(slot);
+    try frame.stack.push(200);
+    dispatch = createMockDispatch();
+    _ = try TestHandlers.tstore(&frame, dispatch);
+
+    // Load should return latest value
+    try frame.stack.push(slot);
+    dispatch = createMockDispatch();
+    _ = try TestHandlers.tload(&frame, dispatch);
+    try testing.expectEqual(@as(u256, 200), try frame.stack.pop());
+}
+
+test "EIP-1153 - TSTORE with zero value" {
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
+
+    var frame = try createTestFrame(testing.allocator, &evm);
+    defer frame.deinit(testing.allocator);
+    evm.is_static = false;
+
+    const slot: u256 = 77;
+
+    // Store zero value
+    try frame.stack.push(slot);
+    try frame.stack.push(0);
+    var dispatch = createMockDispatch();
+    _ = try TestHandlers.tstore(&frame, dispatch);
+
+    // Load should return zero
+    try frame.stack.push(slot);
+    dispatch = createMockDispatch();
+    _ = try TestHandlers.tload(&frame, dispatch);
+    try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
+}
+
+test "EIP-1153 - multiple TSTORE/TLOAD operations" {
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
+
+    var frame = try createTestFrame(testing.allocator, &evm);
+    defer frame.deinit(testing.allocator);
+    evm.is_static = false;
+
+    // Store multiple values in different slots
+    const test_data = [_]struct { slot: u256, value: u256 }{
+        .{ .slot = 0, .value = 10 },
+        .{ .slot = 1, .value = 20 },
+        .{ .slot = 10, .value = 30 },
+        .{ .slot = 100, .value = 40 },
+        .{ .slot = 1000, .value = 50 },
+    };
+
+    // Store all values
+    for (test_data) |data| {
+        try frame.stack.push(data.slot);
+        try frame.stack.push(data.value);
+        const dispatch = createMockDispatch();
+        _ = try TestHandlers.tstore(&frame, dispatch);
+    }
+
+    // Load and verify all values
+    for (test_data) |data| {
+        try frame.stack.push(data.slot);
+        const dispatch = createMockDispatch();
+        _ = try TestHandlers.tload(&frame, dispatch);
+        try testing.expectEqual(data.value, try frame.stack.pop());
+    }
+}
+
+test "EIP-1153 - TLOAD gas cost is always 100" {
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
+
+    var frame = try createTestFrame(testing.allocator, &evm);
+    defer frame.deinit(testing.allocator);
+
+    // Store a value first
+    try evm.set_transient_storage(frame.contract_address, 42, 123);
+
+    const test_slots = [_]u256{ 42, 43, 44 }; // Warm and cold slots
+
+    for (test_slots) |slot| {
+        frame.gas_remaining = 1000;
+        const gas_before = frame.gas_remaining;
+
+        try frame.stack.push(slot);
+        const dispatch = createMockDispatch();
+        _ = try TestHandlers.tload(&frame, dispatch);
+        _ = try frame.stack.pop(); // Clear result
+
+        // Gas should always be 100 (no cold/warm distinction for transient storage)
+        const gas_used = gas_before - frame.gas_remaining;
+        try testing.expectEqual(@as(i64, 100), gas_used);
+    }
+}
+
+test "EIP-1153 - TSTORE gas cost is always 100" {
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
+
+    var frame = try createTestFrame(testing.allocator, &evm);
+    defer frame.deinit(testing.allocator);
+    evm.is_static = false;
+
+    const test_cases = [_]struct { slot: u256, value: u256 }{
+        .{ .slot = 0, .value = 1 }, // New slot
+        .{ .slot = 0, .value = 2 }, // Overwrite
+        .{ .slot = 1, .value = 999 }, // Another new slot
+        .{ .slot = 1, .value = 0 }, // Clear to zero
+        .{ .slot = 1, .value = 0 }, // No-op (already zero)
+    };
+
+    for (test_cases) |tc| {
+        frame.gas_remaining = 1000;
+        const gas_before = frame.gas_remaining;
+
+        try frame.stack.push(tc.slot);
+        try frame.stack.push(tc.value);
+        const dispatch = createMockDispatch();
+        _ = try TestHandlers.tstore(&frame, dispatch);
+
+        // Gas should always be 100 regardless of operation type
+        const gas_used = gas_before - frame.gas_remaining;
+        try testing.expectEqual(@as(i64, 100), gas_used);
+    }
+}
+
+test "EIP-1153 - different contracts have isolated transient storage" {
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
+
+    const addr1 = Address{ .bytes = [_]u8{1} ** 20 };
+    const addr2 = Address{ .bytes = [_]u8{2} ** 20 };
+
+    var frame1 = try createTestFrame(testing.allocator, &evm);
+    defer frame1.deinit(testing.allocator);
+    frame1.contract_address = addr1;
+    evm.is_static = false;
+
+    var frame2 = try createTestFrame(testing.allocator, &evm);
+    defer frame2.deinit(testing.allocator);
+    frame2.contract_address = addr2;
+
+    const slot: u256 = 42;
+
+    // Contract 1 stores value
+    try frame1.stack.push(slot);
+    try frame1.stack.push(111);
+    var dispatch = createMockDispatch();
+    _ = try TestHandlers.tstore(&frame1, dispatch);
+
+    // Contract 2 stores different value in same slot
+    try frame2.stack.push(slot);
+    try frame2.stack.push(222);
+    dispatch = createMockDispatch();
+    _ = try TestHandlers.tstore(&frame2, dispatch);
+
+    // Verify isolation
+    try frame1.stack.push(slot);
+    dispatch = createMockDispatch();
+    _ = try TestHandlers.tload(&frame1, dispatch);
+    try testing.expectEqual(@as(u256, 111), try frame1.stack.pop());
+
+    try frame2.stack.push(slot);
+    dispatch = createMockDispatch();
+    _ = try TestHandlers.tload(&frame2, dispatch);
+    try testing.expectEqual(@as(u256, 222), try frame2.stack.pop());
+}
+
+test "EIP-1153 - TSTORE respects write protection in static call" {
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
+
+    var frame = try createTestFrame(testing.allocator, &evm);
+    defer frame.deinit(testing.allocator);
+    evm.is_static = true; // Static call
+
+    // TSTORE should fail in static context
+    try frame.stack.push(0);
+    try frame.stack.push(42);
+
+    const dispatch = createMockDispatch();
+    const result = TestHandlers.tstore(&frame, dispatch);
+
+    try testing.expectError(TestFrame.Error.WriteProtection, result);
+}
+
+test "EIP-1153 - TLOAD works in static call" {
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
+
+    // Pre-populate transient storage (would happen before static call)
+    const contract_addr = Address{ .bytes = .{0} ** 20 };
+    try evm.set_transient_storage(contract_addr, 5, 123);
+
+    var frame = try createTestFrame(testing.allocator, &evm);
+    defer frame.deinit(testing.allocator);
+    frame.contract_address = contract_addr;
+    evm.is_static = true; // Static call
+
+    // TLOAD should work in static context
+    try frame.stack.push(5);
+    const dispatch = createMockDispatch();
+    _ = try TestHandlers.tload(&frame, dispatch);
+
+    try testing.expectEqual(@as(u256, 123), try frame.stack.pop());
+}
+
+test "EIP-1153 - boundary values in transient storage" {
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
+
+    var frame = try createTestFrame(testing.allocator, &evm);
+    defer frame.deinit(testing.allocator);
+    evm.is_static = false;
+
+    const max_u256 = std.math.maxInt(u256);
+
+    // Test max slot with max value
+    try frame.stack.push(max_u256);
+    try frame.stack.push(max_u256);
+    var dispatch = createMockDispatch();
+    _ = try TestHandlers.tstore(&frame, dispatch);
+
+    try frame.stack.push(max_u256);
+    dispatch = createMockDispatch();
+    _ = try TestHandlers.tload(&frame, dispatch);
+    try testing.expectEqual(max_u256, try frame.stack.pop());
+
+    // Test zero slot with zero value
+    try frame.stack.push(0);
+    try frame.stack.push(0);
+    dispatch = createMockDispatch();
+    _ = try TestHandlers.tstore(&frame, dispatch);
+
+    try frame.stack.push(0);
+    dispatch = createMockDispatch();
+    _ = try TestHandlers.tload(&frame, dispatch);
+    try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
+}
+
+test "EIP-1153 - transient storage does not affect gas refunds" {
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
+
+    var frame = try createTestFrame(testing.allocator, &evm);
+    defer frame.deinit(testing.allocator);
+    evm.is_static = false;
+
+    // TSTORE should NOT generate gas refunds (unlike SSTORE clearing)
+    const slot: u256 = 10;
+
+    // Store non-zero value
+    try frame.stack.push(slot);
+    try frame.stack.push(100);
+    var dispatch = createMockDispatch();
+    _ = try TestHandlers.tstore(&frame, dispatch);
+
+    // Store zero value (this does NOT generate refunds for transient storage)
+    try frame.stack.push(slot);
+    try frame.stack.push(0);
+    dispatch = createMockDispatch();
+    _ = try TestHandlers.tstore(&frame, dispatch);
+
+    // Gas cost should be exactly 200 (100 + 100), no refunds
+    try testing.expect(frame.gas_remaining == 1_000_000 - 200);
+}
+
+test "EIP-1153 - TSTORE/TLOAD with rapid succession" {
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
+
+    var frame = try createTestFrame(testing.allocator, &evm);
+    defer frame.deinit(testing.allocator);
+    evm.is_static = false;
+
+    const slot: u256 = 88;
+
+    // Rapidly store and load values
+    for (0..10) |i| {
+        const value: u256 = @intCast(i * 100);
+
+        // Store
+        try frame.stack.push(slot);
+        try frame.stack.push(value);
+        var dispatch = createMockDispatch();
+        _ = try TestHandlers.tstore(&frame, dispatch);
+
+        // Load immediately
+        try frame.stack.push(slot);
+        dispatch = createMockDispatch();
+        _ = try TestHandlers.tload(&frame, dispatch);
+
+        // Verify
+        try testing.expectEqual(value, try frame.stack.pop());
+    }
+}
+
+test "EIP-1153 - TLOAD/TSTORE stack requirements" {
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
+
+    var frame = try createTestFrame(testing.allocator, &evm);
+    defer frame.deinit(testing.allocator);
+
+    const dispatch = createMockDispatch();
+
+    // TLOAD requires 1 stack item
+    const tload_result = TestHandlers.tload(&frame, dispatch);
+    try testing.expectError(TestFrame.Error.StackUnderflow, tload_result);
+
+    // TSTORE requires 2 stack items
+    const tstore_result = TestHandlers.tstore(&frame, dispatch);
+    try testing.expectError(TestFrame.Error.StackUnderflow, tstore_result);
+
+    // TSTORE with only 1 item
+    try frame.stack.push(42);
+    const tstore_result2 = TestHandlers.tstore(&frame, dispatch);
+    try testing.expectError(TestFrame.Error.StackUnderflow, tstore_result2);
+}
+
+test "EIP-1153 - TSTORE with out of gas" {
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
+
+    var frame = try createTestFrame(testing.allocator, &evm);
+    defer frame.deinit(testing.allocator);
+    evm.is_static = false;
+
+    // Set gas below cost
+    frame.gas_remaining = 99; // Less than 100 required
+
+    try frame.stack.push(0);
+    try frame.stack.push(42);
+
+    const dispatch = createMockDispatch();
+    const result = TestHandlers.tstore(&frame, dispatch);
+
+    try testing.expectError(TestFrame.Error.OutOfGas, result);
+}
+
+test "EIP-1153 - TLOAD with out of gas" {
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
+
+    var frame = try createTestFrame(testing.allocator, &evm);
+    defer frame.deinit(testing.allocator);
+
+    // Set gas below cost
+    frame.gas_remaining = 99; // Less than 100 required
+
+    try frame.stack.push(0);
+
+    const dispatch = createMockDispatch();
+    const result = TestHandlers.tload(&frame, dispatch);
+
+    try testing.expectError(TestFrame.Error.OutOfGas, result);
+}

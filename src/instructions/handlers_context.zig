@@ -344,8 +344,7 @@ pub fn Handlers(FrameType: type) type {
         /// EXTCODESIZE opcode (0x3B) - Get size of an account's code.
         /// Stack: [address] → [size]
         pub fn extcodesize(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            // log.before_instruction(self, .EXTCODESIZE);
-            const dispatch = Dispatch{ .cursor = cursor };
+            self.beforeInstruction(.EXTCODESIZE, cursor);
             {
                 (&self.getEvm().tracer).assert(self.stack.size() >= 1, "EXTCODESIZE requires 1 stack item");
             }
@@ -355,33 +354,35 @@ pub fn Handlers(FrameType: type) type {
             // Access the address for warm/cold accounting (EIP-2929)
             const evm = self.getEvm();
             const access_cost = evm.access_address(addr) catch |err| switch (err) {
-                else => return Error.AllocationError,
+                else => {
+                    self.afterComplete(.EXTCODESIZE);
+                    return Error.AllocationError;
+                },
             };
 
             // Charge gas for address access
             // Use negative gas pattern for single-branch out-of-gas detection
             self.gas_remaining -= @intCast(access_cost);
             if (self.gas_remaining < 0) {
+                self.afterComplete(.EXTCODESIZE);
                 return Error.OutOfGas;
             }
 
-            const code = evm.get_code(addr) catch {
-                // On database error, treat as empty code (size 0)
-                self.stack.set_top_unsafe(0);
-                const op_data = dispatch.getOpData(.EXTCODESIZE);
-                return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+            const code = evm.get_code(addr) catch |err| switch (err) {
+                else => {
+                    self.afterComplete(.EXTCODESIZE);
+                    return Error.AllocationError;
+                },
             };
             const code_len = @as(WordType, @truncate(@as(u256, @intCast(code.len))));
             self.stack.set_top_unsafe(code_len);
-            const op_data = dispatch.getOpData(.EXTCODESIZE); // Use op_data.next_handler and op_data.next_cursor directly
-            return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+            return next_instruction(self, cursor, .EXTCODESIZE);
         }
 
         /// EXTCODECOPY opcode (0x3C) - Copy an account's code to memory.
         /// Stack: [address, destOffset, offset, length] → []
         pub fn extcodecopy(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            // log.before_instruction(self, .EXTCODECOPY);
-            const dispatch = Dispatch{ .cursor = cursor };
+            self.beforeInstruction(.EXTCODECOPY, cursor);
             {
                 (&self.getEvm().tracer).assert(self.stack.size() >= 4, "EXTCODECOPY requires 4 stack items");
             }
@@ -395,6 +396,7 @@ pub fn Handlers(FrameType: type) type {
                 offset > std.math.maxInt(usize) or
                 length > std.math.maxInt(usize))
             {
+                self.afterComplete(.EXTCODECOPY);
                 return Error.OutOfBounds;
             }
 
@@ -403,13 +405,17 @@ pub fn Handlers(FrameType: type) type {
             // Access the address for warm/cold accounting (EIP-2929)
             const evm = self.getEvm();
             const access_cost = evm.access_address(addr) catch |err| switch (err) {
-                else => return Error.AllocationError,
+                else => {
+                    self.afterComplete(.EXTCODECOPY);
+                    return Error.AllocationError;
+                },
             };
 
             // Charge gas for address access
             // Use negative gas pattern for single-branch out-of-gas detection
             self.gas_remaining -= @intCast(access_cost);
             if (self.gas_remaining < 0) {
+                self.afterComplete(.EXTCODECOPY);
                 return Error.OutOfGas;
             }
             const dest_offset_usize = @as(usize, @intCast(dest_offset));
@@ -417,13 +423,13 @@ pub fn Handlers(FrameType: type) type {
             const length_usize = @as(usize, @intCast(length));
 
             if (length_usize == 0) {
-                const op_data = dispatch.getOpData(.EXTCODECOPY); // Use op_data.next_handler and op_data.next_cursor directly
-                return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+                return next_instruction(self, cursor, .EXTCODECOPY);
             }
 
             // Calculate gas cost for memory expansion and copy operation
             const new_size = dest_offset_usize + length_usize;
             if (new_size > std.math.maxInt(u24)) {
+                self.afterComplete(.EXTCODECOPY);
                 return Error.OutOfBounds;
             }
             const memory_expansion_cost = self.memory.get_expansion_cost(@as(u24, @intCast(new_size)));
@@ -435,34 +441,47 @@ pub fn Handlers(FrameType: type) type {
             // Use negative gas pattern for single-branch out-of-gas detection
             self.gas_remaining -= @intCast(total_gas);
             if (self.gas_remaining < 0) {
+                self.afterComplete(.EXTCODECOPY);
                 return Error.OutOfGas;
             }
 
             // Ensure memory capacity (new_size already validated to fit in u24)
             self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u24, @intCast(new_size))) catch |err| switch (err) {
-                memory_mod.MemoryError.MemoryOverflow => return Error.OutOfBounds,
-                else => return Error.AllocationError,
+                memory_mod.MemoryError.MemoryOverflow => {
+                    self.afterComplete(.EXTCODECOPY);
+                    return Error.OutOfBounds;
+                },
+                else => {
+                    self.afterComplete(.EXTCODECOPY);
+                    return Error.AllocationError;
+                },
             };
 
-            const code = self.getEvm().get_code(addr) catch &.{};
+            const code = self.getEvm().get_code(addr) catch |err| switch (err) {
+                else => {
+                    self.afterComplete(.EXTCODECOPY);
+                    return Error.AllocationError;
+                },
+            };
 
             // Copy external code to memory with proper zero-padding
             var i: usize = 0;
             while (i < length_usize) : (i += 1) {
                 const src_index = offset_usize + i;
                 const byte_val = if (src_index < code.len) code[src_index] else 0;
-                self.memory.set_byte(self.getEvm().getCallArenaAllocator(), @as(u24, @intCast(dest_offset_usize + i)), byte_val) catch return Error.OutOfBounds;
+                self.memory.set_byte(self.getEvm().getCallArenaAllocator(), @as(u24, @intCast(dest_offset_usize + i)), byte_val) catch {
+                    self.afterComplete(.EXTCODECOPY);
+                    return Error.OutOfBounds;
+                };
             }
 
-            const op_data = dispatch.getOpData(.EXTCODECOPY); // Use op_data.next_handler and op_data.next_cursor directly
-            return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+            return next_instruction(self, cursor, .EXTCODECOPY);
         }
 
         /// EXTCODEHASH opcode (0x3F) - Get hash of account's code.
         /// Stack: [address] → [hash]
         pub fn extcodehash(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            // log.before_instruction(self, .EXTCODEHASH);
-            const dispatch = Dispatch{ .cursor = cursor };
+            self.beforeInstruction(.EXTCODEHASH, cursor);
             {
                 (&self.getEvm().tracer).assert(self.stack.size() >= 1, "EXTCODEHASH requires 1 stack item");
             }
@@ -472,36 +491,46 @@ pub fn Handlers(FrameType: type) type {
             // Access the address for warm/cold accounting (EIP-2929)
             const evm = self.getEvm();
             const access_cost = evm.access_address(addr) catch |err| switch (err) {
-                else => return Error.AllocationError,
+                else => {
+                    self.afterComplete(.EXTCODEHASH);
+                    return Error.AllocationError;
+                },
             };
 
             // Charge gas for address access
             // Use negative gas pattern for single-branch out-of-gas detection
             self.gas_remaining -= @intCast(access_cost);
             if (self.gas_remaining < 0) {
+                self.afterComplete(.EXTCODEHASH);
                 return Error.OutOfGas;
             }
 
             if (!evm.account_exists(addr)) {
                 // Non-existent account returns 0 per EIP-1052
                 self.stack.set_top_unsafe(0);
-                const op_data = dispatch.getOpData(.EXTCODEHASH); // Use op_data.next_handler and op_data.next_cursor directly
-                return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+                return next_instruction(self, cursor, .EXTCODEHASH);
             }
 
-            const code = self.getEvm().get_code(addr) catch &.{};
+            const code = self.getEvm().get_code(addr) catch |err| switch (err) {
+                else => {
+                    self.afterComplete(.EXTCODEHASH);
+                    return Error.AllocationError;
+                },
+            };
             if (code.len == 0) {
                 // Existing account with empty code returns keccak256("") constant
                 const empty_hash_u256: u256 = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470;
                 const empty_hash_word = @as(WordType, @truncate(empty_hash_u256));
                 self.stack.set_top_unsafe(empty_hash_word);
-                const op_data = dispatch.getOpData(.EXTCODEHASH); // Use op_data.next_handler and op_data.next_cursor directly
-                return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+                return next_instruction(self, cursor, .EXTCODEHASH);
             }
 
             // Compute keccak256 hash of the code
             var hash: [32]u8 = undefined;
-            keccak_asm.keccak256(code, &hash) catch return Error.OutOfBounds;
+            keccak_asm.keccak256(code, &hash) catch {
+                self.afterComplete(.EXTCODEHASH);
+                return Error.OutOfBounds;
+            };
 
             // Convert hash to u256 (big-endian)
             var hash_u256: u256 = 0;
@@ -511,15 +540,13 @@ pub fn Handlers(FrameType: type) type {
             const hash_word = @as(WordType, @truncate(hash_u256));
             self.stack.set_top_unsafe(hash_word);
 
-            const op_data = dispatch.getOpData(.EXTCODEHASH); // Use op_data.next_handler and op_data.next_cursor directly
-            return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+            return next_instruction(self, cursor, .EXTCODEHASH);
         }
 
         /// RETURNDATASIZE opcode (0x3D) - Get size of output data from the previous call.
         /// Stack: [] → [size]
         pub fn returndatasize(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            // log.before_instruction(self, .RETURNDATASIZE);
-            const dispatch = Dispatch{ .cursor = cursor };
+            self.beforeInstruction(.RETURNDATASIZE, cursor);
             // Return data from the last call is stored in the EVM's return_data field
             const return_data = self.getEvm().get_return_data() orelse &[_]u8{};
             const return_data_len = @as(WordType, @truncate(@as(u256, @intCast(return_data.len))));
@@ -527,15 +554,13 @@ pub fn Handlers(FrameType: type) type {
                 (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "RETURNDATASIZE requires stack space");
             }
             self.stack.push_unsafe(return_data_len);
-            const op_data = dispatch.getOpData(.RETURNDATASIZE); // Use op_data.next_handler and op_data.next_cursor directly
-            return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+            return next_instruction(self, cursor, .RETURNDATASIZE);
         }
 
         /// RETURNDATACOPY opcode (0x3E) - Copy output data from the previous call to memory.
         /// Stack: [destOffset, offset, length] → []
         pub fn returndatacopy(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            // log.before_instruction(self, .RETURNDATACOPY);
-            const dispatch = Dispatch{ .cursor = cursor };
+            self.beforeInstruction(.RETURNDATACOPY, cursor);
             // EVM stack order: [destOffset, offset, length] with dest on top
             {
                 (&self.getEvm().tracer).assert(self.stack.size() >= 3, "RETURNDATACOPY requires 3 stack items");
@@ -549,6 +574,7 @@ pub fn Handlers(FrameType: type) type {
                 offset > std.math.maxInt(usize) or
                 length > std.math.maxInt(usize))
             {
+                self.afterComplete(.RETURNDATACOPY);
                 return Error.OutOfBounds;
             }
 
@@ -557,23 +583,27 @@ pub fn Handlers(FrameType: type) type {
             const length_usize = @as(usize, @intCast(length));
 
             // Return data from the last call is stored in the EVM's return_data field
-            const return_data = self.getEvm().get_return_data() orelse return Error.ReturnDataNotAvailable;
+            const return_data = self.getEvm().get_return_data() orelse {
+                self.afterComplete(.RETURNDATACOPY);
+                return Error.ReturnDataNotAvailable;
+            };
 
             // Check if we're trying to read past the end of return data
             if (offset_usize > return_data.len or
                 (length_usize > 0 and offset_usize + length_usize > return_data.len))
             {
+                self.afterComplete(.RETURNDATACOPY);
                 return Error.OutOfBounds;
             }
 
             if (length_usize == 0) {
-                const op_data = dispatch.getOpData(.RETURNDATACOPY); // Use op_data.next_handler and op_data.next_cursor directly
-                return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+                return next_instruction(self, cursor, .RETURNDATACOPY);
             }
 
             // Calculate gas cost for memory expansion and copy operation
             const new_size = dest_offset_usize + length_usize;
             if (new_size > std.math.maxInt(u24)) {
+                self.afterComplete(.RETURNDATACOPY);
                 return Error.OutOfBounds;
             }
             const memory_expansion_cost = self.memory.get_expansion_cost(@as(u24, @intCast(new_size)));
@@ -585,21 +615,30 @@ pub fn Handlers(FrameType: type) type {
             // Use negative gas pattern for single-branch out-of-gas detection
             self.gas_remaining -= @intCast(total_gas);
             if (self.gas_remaining < 0) {
+                self.afterComplete(.RETURNDATACOPY);
                 return Error.OutOfGas;
             }
 
             // Ensure memory capacity (new_size already validated to fit in u24)
             self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u24, @intCast(new_size))) catch |err| switch (err) {
-                memory_mod.MemoryError.MemoryOverflow => return Error.OutOfBounds,
-                else => return Error.AllocationError,
+                memory_mod.MemoryError.MemoryOverflow => {
+                    self.afterComplete(.RETURNDATACOPY);
+                    return Error.OutOfBounds;
+                },
+                else => {
+                    self.afterComplete(.RETURNDATACOPY);
+                    return Error.AllocationError;
+                },
             };
 
             // Copy return data to memory (no zero-padding needed since bounds are checked)
             const src_slice = return_data[offset_usize..][0..length_usize];
-            self.memory.set_data(self.getEvm().getCallArenaAllocator(), @as(u24, @intCast(dest_offset_usize)), src_slice) catch return Error.OutOfBounds;
+            self.memory.set_data(self.getEvm().getCallArenaAllocator(), @as(u24, @intCast(dest_offset_usize)), src_slice) catch {
+                self.afterComplete(.RETURNDATACOPY);
+                return Error.OutOfBounds;
+            };
 
-            const op_data = dispatch.getOpData(.RETURNDATACOPY); // Use op_data.next_handler and op_data.next_cursor directly
-            return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+            return next_instruction(self, cursor, .RETURNDATACOPY);
         }
 
         /// BLOCKHASH opcode (0x40) - Get the hash of one of the 256 most recent complete blocks.

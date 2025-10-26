@@ -217,7 +217,6 @@ const dispatch_mod = @import("../preprocessor/dispatch.zig");
 const bytecode_mod = @import("../bytecode/bytecode.zig");
 const DefaultTracer = @import("../tracer/tracer.zig").DefaultTracer;
 const MemoryDatabase = @import("../storage/memory_database.zig").MemoryDatabase;
-// const host_mod = @import("host.zig");
 
 // Test configuration
 const test_config = FrameConfig{

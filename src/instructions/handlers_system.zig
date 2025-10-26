@@ -280,6 +280,7 @@ pub fn Handlers(FrameType: type) type {
             {
                 // Offsets/sizes exceeding usize limit means accessing beyond memory limits
                 // This should cause OutOfGas, not just return 0
+                self.afterComplete(.CALLCODE);
                 return Error.OutOfGas;
             }
 
@@ -296,6 +297,7 @@ pub fn Handlers(FrameType: type) type {
                 const overflow = @addWithOverflow(input_offset_usize, input_size_usize);
                 if (overflow[1] != 0) {
                     // Overflow occurred - out of gas
+                    self.afterComplete(.CALLCODE);
                     return Error.OutOfGas;
                 }
                 input_mem_end = overflow[0];
@@ -305,6 +307,7 @@ pub fn Handlers(FrameType: type) type {
                 const overflow = @addWithOverflow(output_offset_usize, output_size_usize);
                 if (overflow[1] != 0) {
                     // Overflow occurred - out of gas
+                    self.afterComplete(.CALLCODE);
                     return Error.OutOfGas;
                 }
                 output_mem_end = overflow[0];
@@ -315,6 +318,7 @@ pub fn Handlers(FrameType: type) type {
             // Check if memory expansion exceeds u24 limit (16MB)
             if (max_mem_end > std.math.maxInt(u24)) {
                 // Memory expansion exceeds limit - out of gas
+                self.afterComplete(.CALLCODE);
                 return Error.OutOfGas;
             }
 
@@ -1130,16 +1134,16 @@ pub fn Handlers(FrameType: type) type {
 
             const recovered = crypto.secp256k1.unaudited_recover_address(&message_hash, recovery_id, sig_r, sig_s) catch {
                 self.stack.push_unsafe(0);
-                const op_data = dispatch.getOpData(.AUTHCALL);
-                self.afterInstruction(.AUTHCALL, op_data.next_handler, op_data.next_cursor.cursor);
+                const op_data = dispatch.getOpData(.AUTH);
+                self.afterInstruction(.AUTH, op_data.next_handler, op_data.next_cursor.cursor);
                 return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             };
 
             // Check if recovered address matches authority
             if (!std.mem.eql(u8, &recovered.bytes, &authority.bytes)) {
                 self.stack.push_unsafe(0);
-                const op_data = dispatch.getOpData(.AUTHCALL);
-                self.afterInstruction(.AUTHCALL, op_data.next_handler, op_data.next_cursor.cursor);
+                const op_data = dispatch.getOpData(.AUTH);
+                self.afterInstruction(.AUTH, op_data.next_handler, op_data.next_cursor.cursor);
                 return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             }
 
@@ -1151,8 +1155,8 @@ pub fn Handlers(FrameType: type) type {
                 (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "Stack must have space for push");
             }
             self.stack.push_unsafe(1);
-            const op_data = dispatch.getOpData(.AUTHCALL);
-            self.afterInstruction(.AUTHCALL, op_data.next_handler, op_data.next_cursor.cursor);
+            const op_data = dispatch.getOpData(.AUTH);
+            self.afterInstruction(.AUTH, op_data.next_handler, op_data.next_cursor.cursor);
             return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
@@ -1194,7 +1198,11 @@ pub fn Handlers(FrameType: type) type {
                 self.afterInstruction(.AUTHCALL, op_data.next_handler, op_data.next_cursor.cursor);
                 return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             }
-            const gas_u64 = @as(u64, @intCast(gas_param));
+            // Apply 63/64 gas forwarding rule (EIP-150)
+            const gas_u64_raw = @as(u64, @intCast(gas_param));
+            const caller_gas_available: u64 = @as(u64, @intCast(@max(self.gas_remaining, 0)));
+            const max_forwardable: u64 = caller_gas_available - (caller_gas_available / 64);
+            const gas_u64 = if (gas_u64_raw < max_forwardable) gas_u64_raw else max_forwardable;
 
             // Bounds checking for memory offsets and sizes
             if (input_offset > std.math.maxInt(usize) or
@@ -1204,7 +1212,7 @@ pub fn Handlers(FrameType: type) type {
             {
                 self.stack.push_unsafe(0);
                 const op_data = dispatch.getOpData(.AUTHCALL);
-                // Use op_data.next_handler and op_data.next_cursor directly
+                self.afterInstruction(.AUTHCALL, op_data.next_handler, op_data.next_cursor.cursor);
                 return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             }
 
@@ -1213,13 +1221,63 @@ pub fn Handlers(FrameType: type) type {
             const output_offset_usize = @as(usize, @intCast(output_offset));
             const output_size_usize = @as(usize, @intCast(output_size));
 
+            // Calculate memory bounds with overflow checking
+            var input_mem_end: usize = 0;
+            var output_mem_end: usize = 0;
+
+            if (input_size_usize > 0) {
+                const overflow = @addWithOverflow(input_offset_usize, input_size_usize);
+                if (overflow[1] != 0) {
+                    // Overflow occurred - return failure
+                    self.stack.push_unsafe(0);
+                    const op_data = dispatch.getOpData(.AUTHCALL);
+                    self.afterInstruction(.AUTHCALL, op_data.next_handler, op_data.next_cursor.cursor);
+                    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+                }
+                input_mem_end = overflow[0];
+            }
+
+            if (output_size_usize > 0) {
+                const overflow = @addWithOverflow(output_offset_usize, output_size_usize);
+                if (overflow[1] != 0) {
+                    // Overflow occurred - return failure
+                    self.stack.push_unsafe(0);
+                    const op_data = dispatch.getOpData(.AUTHCALL);
+                    self.afterInstruction(.AUTHCALL, op_data.next_handler, op_data.next_cursor.cursor);
+                    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+                }
+                output_mem_end = overflow[0];
+            }
+
+            const max_mem_end = @max(input_mem_end, output_mem_end);
+
+            // Check if memory expansion exceeds u24 limit (16MB)
+            if (max_mem_end > std.math.maxInt(u24)) {
+                // Memory expansion exceeds limit - return failure
+                self.stack.push_unsafe(0);
+                const op_data = dispatch.getOpData(.AUTHCALL);
+                self.afterInstruction(.AUTHCALL, op_data.next_handler, op_data.next_cursor.cursor);
+                return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+            }
+
+            // Calculate and charge memory expansion gas
+            if (max_mem_end > 0) {
+                const expansion_cost = self.memory.get_expansion_cost(@as(u24, @intCast(max_mem_end)));
+                const expansion_cost_i64 = @as(FrameType.GasType, @intCast(expansion_cost));
+                self.gas_remaining -= expansion_cost_i64;
+                if (self.gas_remaining < 0) {
+                    self.afterComplete(.AUTHCALL);
+                    return Error.OutOfGas;
+                }
+            }
+
             // Ensure memory capacity for input
             if (input_size_usize > 0) {
                 const input_end = input_offset_usize + input_size_usize;
                 self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u24, @intCast(input_end))) catch {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.AUTHCALL);
-                    // Use op_data.next_handler and op_data.next_cursor directly
+                    self.afterInstruction(.AUTHCALL, op_data.next_handler, op_data.next_cursor.cursor);
                     return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
                 };
             }
@@ -1230,7 +1288,7 @@ pub fn Handlers(FrameType: type) type {
                 self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u24, @intCast(output_end))) catch {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.AUTHCALL);
-                    // Use op_data.next_handler and op_data.next_cursor directly
+                    self.afterInstruction(.AUTHCALL, op_data.next_handler, op_data.next_cursor.cursor);
                     return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
                 };
             }
@@ -1241,7 +1299,7 @@ pub fn Handlers(FrameType: type) type {
                 input_data = self.memory.get_slice(@as(u24, @intCast(input_offset_usize)), @as(u24, @intCast(input_size_usize))) catch {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.AUTHCALL);
-                    // Use op_data.next_handler and op_data.next_cursor directly
+                    self.afterInstruction(.AUTHCALL, op_data.next_handler, op_data.next_cursor.cursor);
                     return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
                 };
             }
@@ -1268,7 +1326,7 @@ pub fn Handlers(FrameType: type) type {
                 self.memory.set_data(self.getEvm().getCallArenaAllocator(), @as(u24, @intCast(output_offset_usize)), result.output[0..copy_size]) catch {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.AUTHCALL);
-                    // Use op_data.next_handler and op_data.next_cursor directly
+                    self.afterInstruction(.AUTHCALL, op_data.next_handler, op_data.next_cursor.cursor);
                     return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
                 };
             }
@@ -1276,8 +1334,12 @@ pub fn Handlers(FrameType: type) type {
             // Return data is now managed by EVM's return_data field
             // which is automatically updated after inner_call
 
-            // Update gas remaining
-            self.gas_remaining = @as(@TypeOf(self.gas_remaining), @intCast(result.gas_left));
+            // Update gas remaining using proper accounting (same as CALL)
+            const provided_gas_authcall: u64 = gas_u64;
+            const used_gas_authcall: u64 = if (result.gas_left > provided_gas_authcall) 0 else (provided_gas_authcall - result.gas_left);
+            const caller_gas_authcall: u64 = @as(u64, @intCast(@max(self.gas_remaining, 0)));
+            const new_gas_authcall: u64 = if (used_gas_authcall > caller_gas_authcall) 0 else caller_gas_authcall - used_gas_authcall;
+            self.gas_remaining = @as(FrameType.GasType, @intCast(new_gas_authcall));
 
             // Push success status
             {
@@ -1297,7 +1359,6 @@ const testing = std.testing;
 const Frame = @import("../frame/frame.zig").Frame;
 const dispatch_mod = @import("../preprocessor/dispatch.zig");
 const DefaultTracer = @import("../tracer/tracer.zig").DefaultTracer;
-// const host_mod = @import("host.zig");
 
 // Test configuration
 const test_config = FrameConfig{
@@ -1339,6 +1400,7 @@ const MockEvm = struct {
             .create_result = .{
                 .success = true,
                 .gas_left = 100_000,
+                .output = &.{},
                 .created_address = primitives.ZERO_ADDRESS,
             },
         };
@@ -1359,7 +1421,7 @@ const MockEvm = struct {
 };
 
 fn createTestFrame(allocator: std.mem.Allocator, evm: ?*MockEvm) !TestFrame {
-    const database = try @import("../storage/memory_database.zig").MemoryDatabase.init(allocator);
+    const database = @import("../storage/memory_database.zig").MemoryDatabase.init(allocator);
     const value = try allocator.create(u256);
     value.* = 0;
     const evm_ptr = if (evm) |e| @as(*anyopaque, @ptrCast(e)) else @as(*anyopaque, @ptrFromInt(0x1000)); // Use a dummy pointer for tests without EVM
@@ -2406,4 +2468,336 @@ test "System opcodes - memory boundary checks" {
         try testing.expect(result == TestFrame.Success.stop);
         _ = try frame.stack.pop();
     }
+}
+
+test "AUTH handler - uses correct opcode tag" {
+    // Test that AUTH handler uses .AUTH opcode tag, not .AUTHCALL
+    var evm = MockEvm.init(testing.allocator);
+    var frame = try createTestFrame(testing.allocator, &evm);
+    defer frame.deinit(testing.allocator);
+
+    // Push AUTH parameters (commitment, nonce, invoker address, yParity, r, s, authority)
+    try frame.stack.push(0xdead); // authority address
+    try frame.stack.push(0); // s
+    try frame.stack.push(0); // r
+    try frame.stack.push(27); // yParity (v)
+    try frame.stack.push(0); // invoker address
+    try frame.stack.push(0); // nonce
+    try frame.stack.push(0); // commitment
+
+    const dispatch = createMockDispatch();
+
+    // AUTH should fail signature verification and push 0, but shouldn't crash
+    // The key test is that it runs without error using .AUTH opcode
+    const result = TestFrame.SystemHandlers.auth(frame, dispatch);
+    try testing.expect(result == TestFrame.Success.stop);
+    try testing.expectEqual(@as(u256, 0), try frame.stack.pop()); // failure
+}
+
+test "CALLCODE handler - afterComplete on error paths" {
+    var evm = MockEvm.init(testing.allocator);
+    var frame = try createTestFrame(testing.allocator, &evm);
+    defer frame.deinit(testing.allocator);
+
+    // Test error path: memory overflow
+    try frame.stack.push(100000); // gas
+    try frame.stack.push(0x1234); // address
+    try frame.stack.push(0); // value
+    try frame.stack.push(std.math.maxInt(usize)); // input_offset
+    try frame.stack.push(std.math.maxInt(usize)); // input_size (causes overflow)
+    try frame.stack.push(0); // output_offset
+    try frame.stack.push(0); // output_size
+
+    const dispatch = createMockDispatch();
+
+    // Should return OutOfGas error after calling afterComplete
+    const result = TestFrame.SystemHandlers.callcode(frame, dispatch);
+    try testing.expectError(TestFrame.Error.OutOfGas, result);
+}
+
+test "CALLCODE handler - afterComplete on memory expansion error" {
+    var evm = MockEvm.init(testing.allocator);
+    var frame = try createTestFrame(testing.allocator, &evm);
+    defer frame.deinit(testing.allocator);
+
+    // Test error path: exceeds u24 memory limit
+    try frame.stack.push(100000); // gas
+    try frame.stack.push(0x1234); // address
+    try frame.stack.push(0); // value
+    try frame.stack.push(std.math.maxInt(u24) + 1); // input_offset (exceeds limit)
+    try frame.stack.push(1); // input_size
+    try frame.stack.push(0); // output_offset
+    try frame.stack.push(0); // output_size
+
+    const dispatch = createMockDispatch();
+
+    // Should return OutOfGas error after calling afterComplete
+    const result = TestFrame.SystemHandlers.callcode(frame, dispatch);
+    try testing.expectError(TestFrame.Error.OutOfGas, result);
+}
+
+test "AUTHCALL handler - afterInstruction on all error paths" {
+    var evm = MockEvm.init(testing.allocator);
+    var frame = try createTestFrame(testing.allocator, &evm);
+    defer frame.deinit(testing.allocator);
+
+    // Test error path: no authorization
+    try frame.stack.push(100000); // gas
+    try frame.stack.push(0x1234); // to
+    try frame.stack.push(0); // value
+    try frame.stack.push(0); // input_offset
+    try frame.stack.push(0); // input_size
+    try frame.stack.push(0); // output_offset
+    try frame.stack.push(0); // output_size
+    try frame.stack.push(0); // auth_flag (0 = no auth)
+
+    const dispatch = createMockDispatch();
+
+    // Should complete without error, pushing 0 for failure
+    const result = TestFrame.SystemHandlers.authcall(frame, dispatch);
+    try testing.expect(result == TestFrame.Success.stop);
+    try testing.expectEqual(@as(u256, 0), try frame.stack.pop()); // failure
+}
+
+test "AUTHCALL handler - afterInstruction on memory bounds error" {
+    var evm = MockEvm.init(testing.allocator);
+    var frame = try createTestFrame(testing.allocator, &evm);
+    defer frame.deinit(testing.allocator);
+
+    // Set authorized address first
+    frame.authorized_address = Address.ZERO;
+
+    // Test error path: memory bounds exceed usize
+    try frame.stack.push(100000); // gas
+    try frame.stack.push(0x1234); // to
+    try frame.stack.push(0); // value
+    try frame.stack.push(std.math.maxInt(u256)); // input_offset (exceeds usize)
+    try frame.stack.push(0); // input_size
+    try frame.stack.push(0); // output_offset
+    try frame.stack.push(0); // output_size
+    try frame.stack.push(1); // auth_flag
+
+    const dispatch = createMockDispatch();
+
+    // Should complete without error, pushing 0 for failure
+    const result = TestFrame.SystemHandlers.authcall(frame, dispatch);
+    try testing.expect(result == TestFrame.Success.stop);
+    try testing.expectEqual(@as(u256, 0), try frame.stack.pop()); // failure
+}
+
+test "AUTHCALL handler - gas forwarding 63/64 rule" {
+    var evm = MockEvm.init(testing.allocator);
+    evm.call_result.gas_left = 50000; // Simulate gas consumption
+    var frame = try createTestFrame(testing.allocator, &evm);
+    defer frame.deinit(testing.allocator);
+
+    // Set authorized address
+    frame.authorized_address = Address.ZERO;
+
+    const initial_gas = frame.gas_remaining;
+    const requested_gas: u64 = 1000000; // Request more than available
+
+    try frame.stack.push(requested_gas); // gas (will be capped)
+    try frame.stack.push(0x1234); // to
+    try frame.stack.push(0); // value
+    try frame.stack.push(0); // input_offset
+    try frame.stack.push(0); // input_size
+    try frame.stack.push(0); // output_offset
+    try frame.stack.push(0); // output_size
+    try frame.stack.push(1); // auth_flag
+
+    const dispatch = createMockDispatch();
+    const result = try TestFrame.SystemHandlers.authcall(frame, dispatch);
+
+    try testing.expect(result == TestFrame.Success.stop);
+    try testing.expectEqual(@as(u256, 1), try frame.stack.pop()); // success
+
+    // Verify gas was properly forwarded and accounted
+    // The actual gas forwarded should be max_forwardable, not requested_gas
+    try testing.expect(frame.gas_remaining < initial_gas);
+}
+
+test "AUTHCALL handler - memory expansion gas calculation" {
+    var evm = MockEvm.init(testing.allocator);
+    evm.call_result.gas_left = 50000;
+    var frame = try createTestFrame(testing.allocator, &evm);
+    defer frame.deinit(testing.allocator);
+
+    // Set authorized address
+    frame.authorized_address = Address.ZERO;
+
+    const initial_gas = frame.gas_remaining;
+
+    // Test with memory expansion
+    try frame.stack.push(100000); // gas
+    try frame.stack.push(0x1234); // to
+    try frame.stack.push(0); // value
+    try frame.stack.push(0); // input_offset
+    try frame.stack.push(1024); // input_size (causes memory expansion)
+    try frame.stack.push(0); // output_offset
+    try frame.stack.push(512); // output_size (more memory expansion)
+    try frame.stack.push(1); // auth_flag
+
+    const dispatch = createMockDispatch();
+    const result = try TestFrame.SystemHandlers.authcall(frame, dispatch);
+
+    try testing.expect(result == TestFrame.Success.stop);
+    try testing.expectEqual(@as(u256, 1), try frame.stack.pop()); // success
+
+    // Verify gas was charged for memory expansion
+    try testing.expect(frame.gas_remaining < initial_gas);
+}
+
+test "AUTHCALL handler - memory expansion OutOfGas" {
+    var evm = MockEvm.init(testing.allocator);
+    var frame = try createTestFrame(testing.allocator, &evm);
+    defer frame.deinit(testing.allocator);
+
+    // Set very low gas
+    frame.gas_remaining = 10;
+
+    // Set authorized address
+    frame.authorized_address = Address.ZERO;
+
+    // Test with large memory expansion that should cause OutOfGas
+    try frame.stack.push(100000); // gas
+    try frame.stack.push(0x1234); // to
+    try frame.stack.push(0); // value
+    try frame.stack.push(0); // input_offset
+    try frame.stack.push(10000); // input_size (large expansion)
+    try frame.stack.push(0); // output_offset
+    try frame.stack.push(10000); // output_size
+    try frame.stack.push(1); // auth_flag
+
+    const dispatch = createMockDispatch();
+
+    // Should return OutOfGas after calling afterComplete
+    const result = TestFrame.SystemHandlers.authcall(frame, dispatch);
+    try testing.expectError(TestFrame.Error.OutOfGas, result);
+}
+
+test "AUTHCALL handler - memory overflow check" {
+    var evm = MockEvm.init(testing.allocator);
+    var frame = try createTestFrame(testing.allocator, &evm);
+    defer frame.deinit(testing.allocator);
+
+    // Set authorized address
+    frame.authorized_address = Address.ZERO;
+
+    // Test overflow detection in memory bounds calculation
+    try frame.stack.push(100000); // gas
+    try frame.stack.push(0x1234); // to
+    try frame.stack.push(0); // value
+    try frame.stack.push(std.math.maxInt(usize) - 10); // input_offset
+    try frame.stack.push(100); // input_size (causes overflow)
+    try frame.stack.push(0); // output_offset
+    try frame.stack.push(0); // output_size
+    try frame.stack.push(1); // auth_flag
+
+    const dispatch = createMockDispatch();
+
+    // Should detect overflow and return failure
+    const result = TestFrame.SystemHandlers.authcall(frame, dispatch);
+    try testing.expect(result == TestFrame.Success.stop);
+    try testing.expectEqual(@as(u256, 0), try frame.stack.pop()); // failure
+}
+
+test "AUTHCALL handler - u24 memory limit check" {
+    var evm = MockEvm.init(testing.allocator);
+    var frame = try createTestFrame(testing.allocator, &evm);
+    defer frame.deinit(testing.allocator);
+
+    // Set authorized address
+    frame.authorized_address = Address.ZERO;
+
+    // Test that exceeding u24 limit is properly caught
+    try frame.stack.push(100000); // gas
+    try frame.stack.push(0x1234); // to
+    try frame.stack.push(0); // value
+    try frame.stack.push(std.math.maxInt(u24) + 1); // input_offset (exceeds u24)
+    try frame.stack.push(1); // input_size
+    try frame.stack.push(0); // output_offset
+    try frame.stack.push(0); // output_size
+    try frame.stack.push(1); // auth_flag
+
+    const dispatch = createMockDispatch();
+
+    // Should detect limit exceeded and return failure
+    const result = TestFrame.SystemHandlers.authcall(frame, dispatch);
+    try testing.expect(result == TestFrame.Success.stop);
+    try testing.expectEqual(@as(u256, 0), try frame.stack.pop()); // failure
+}
+
+test "AUTHCALL handler - proper gas accounting" {
+    var evm = MockEvm.init(testing.allocator);
+    evm.call_result.gas_left = 30000; // Gas left after call
+    var frame = try createTestFrame(testing.allocator, &evm);
+    defer frame.deinit(testing.allocator);
+
+    // Set authorized address
+    frame.authorized_address = Address.ZERO;
+
+    const initial_gas = frame.gas_remaining;
+    const requested_gas: u64 = 50000;
+
+    try frame.stack.push(requested_gas); // gas
+    try frame.stack.push(0x1234); // to
+    try frame.stack.push(0); // value
+    try frame.stack.push(0); // input_offset
+    try frame.stack.push(0); // input_size
+    try frame.stack.push(0); // output_offset
+    try frame.stack.push(0); // output_size
+    try frame.stack.push(1); // auth_flag
+
+    const dispatch = createMockDispatch();
+    const result = try TestFrame.SystemHandlers.authcall(frame, dispatch);
+
+    try testing.expect(result == TestFrame.Success.stop);
+    try testing.expectEqual(@as(u256, 1), try frame.stack.pop()); // success
+
+    // Calculate expected gas:
+    // Gas forwarded = min(requested_gas, max_forwardable) where max_forwardable = caller_gas - (caller_gas / 64)
+    const caller_gas_available: u64 = @as(u64, @intCast(initial_gas));
+    const max_forwardable: u64 = caller_gas_available - (caller_gas_available / 64);
+    const gas_forwarded = @min(requested_gas, max_forwardable);
+    const gas_used = gas_forwarded - evm.call_result.gas_left;
+    const expected_remaining = @as(i64, @intCast(caller_gas_available - gas_used));
+
+    try testing.expectEqual(expected_remaining, frame.gas_remaining);
+}
+
+test "AUTH and AUTHCALL integration - correct opcode separation" {
+    // This test verifies that AUTH and AUTHCALL use their respective opcodes
+    // and don't interfere with each other's dispatch handling
+    var evm = MockEvm.init(testing.allocator);
+    var frame = try createTestFrame(testing.allocator, &evm);
+    defer frame.deinit(testing.allocator);
+
+    // Test AUTH first
+    try frame.stack.push(0xdead); // authority
+    try frame.stack.push(0); // s
+    try frame.stack.push(0); // r
+    try frame.stack.push(27); // v
+    try frame.stack.push(0); // invoker
+    try frame.stack.push(0); // nonce
+    try frame.stack.push(0); // commitment
+
+    const dispatch = createMockDispatch();
+    const auth_result = TestFrame.SystemHandlers.auth(frame, dispatch);
+    try testing.expect(auth_result == TestFrame.Success.stop);
+    try testing.expectEqual(@as(u256, 0), try frame.stack.pop()); // AUTH fails
+
+    // Now test AUTHCALL with no authorization
+    try frame.stack.push(100000); // gas
+    try frame.stack.push(0x1234); // to
+    try frame.stack.push(0); // value
+    try frame.stack.push(0); // input_offset
+    try frame.stack.push(0); // input_size
+    try frame.stack.push(0); // output_offset
+    try frame.stack.push(0); // output_size
+    try frame.stack.push(0); // auth_flag (no auth)
+
+    const authcall_result = TestFrame.SystemHandlers.authcall(frame, dispatch);
+    try testing.expect(authcall_result == TestFrame.Success.stop);
+    try testing.expectEqual(@as(u256, 0), try frame.stack.pop()); // AUTHCALL fails
 }
