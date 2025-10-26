@@ -29,6 +29,9 @@ pub fn DispatchTest() type {
             cursor: [*]const @import("dispatch.zig").Preprocessor(@This()).Item,
         ) @This().Error!noreturn;
 
+        // Provide Dispatch alias expected by some handlers
+        pub const Dispatch = @import("dispatch.zig").Preprocessor(@This());
+
         // Minimal frame configuration required by the preprocessor
         pub const config = FrameConfig{
             .DatabaseType = struct {},
