@@ -36,7 +36,7 @@ const SyntheticOpcodeSteps = struct {
     const MULTI_PUSH_3 = 3;
     const MULTI_POP_2 = 2;
     const MULTI_POP_3 = 3;
-    const ISZERO_JUMPI = 2;
+    const ISZERO_JUMPI = 3; // ISZERO + PUSH + JUMPI = 3 steps
     const DUP2_MSTORE_PUSH = 3;
     const DUP3_ADD_MSTORE = 3;
     const SWAP1_DUP2_ADD = 3;
@@ -133,7 +133,6 @@ pub fn executeMinimalEvmForOpcode(
                 }
             }
 
-            // const bytecode = evm.getBytecode();
             evm.step() catch |e| {
                 if (step_before) |mut_step| {
                     var step = mut_step;
@@ -142,7 +141,9 @@ pub fn executeMinimalEvmForOpcode(
                     step.gas_after = @intCast(mf.gas_remaining);
                     step.stack_after = &[_]u256{};
                     step.memory_size_after = mf.memory_size;
-                    tracer.steps.append(tracer.allocator, step) catch {};
+                    tracer.steps.append(tracer.allocator, step) catch |append_err| {
+                        tracer.debug("Failed to append error step for {s}: {any}", .{ @tagName(opcode), append_err });
+                    };
                 }
 
                 // Don't panic on any errors - just log and continue
@@ -174,7 +175,9 @@ pub fn executeMinimalEvmForOpcode(
                 step.memory_size_after = mf.memory_size;
                 step.error_occurred = false;
 
-                tracer.steps.append(tracer.allocator, step) catch {};
+                tracer.steps.append(tracer.allocator, step) catch |append_err| {
+                    tracer.debug("Failed to append step for {s}: {any}", .{ @tagName(opcode), append_err });
+                };
             }
         } else {
             tracer.debug("MinimalEvm has no current frame when trying to execute opcode {s}", .{@tagName(opcode)});

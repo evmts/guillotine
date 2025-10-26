@@ -9,8 +9,17 @@ const Address = primitives.Address.Address;
 const ZERO_ADDRESS = primitives.ZERO_ADDRESS;
 
 // Global allocator for C interface
+// NOTE: Thread safety - WASM is single-threaded, but multiple create/destroy cycles
+// need proper cleanup. Each EvmHandle owns its own allocations.
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-var allocator = gpa.allocator();
+const allocator = gpa.allocator();
+
+/// Global cleanup - deinitializes the allocator and checks for leaks
+/// Should be called when shutting down the WASM module
+export fn evm_cleanup_global() bool {
+    const status = gpa.deinit();
+    return status == .ok;
+}
 
 // Opaque handle for EVM instance
 const EvmHandle = opaque {};
@@ -60,6 +69,17 @@ export fn evm_create() ?*EvmHandle {
 export fn evm_destroy(handle: ?*EvmHandle) void {
     if (handle) |h| {
         const ctx: *ExecutionContext = @ptrCast(@alignCast(h));
+
+        // Free bytecode if allocated
+        if (ctx.bytecode.len > 0 and ctx.bytecode.ptr != @as([*]const u8, @ptrCast(&[_]u8{}))) {
+            allocator.free(ctx.bytecode);
+        }
+
+        // Free calldata if allocated
+        if (ctx.calldata.len > 0 and ctx.calldata.ptr != @as([*]const u8, @ptrCast(&[_]u8{}))) {
+            allocator.free(ctx.calldata);
+        }
+
         ctx.evm.deinit();
         allocator.destroy(ctx.evm);
         allocator.destroy(ctx);
@@ -354,4 +374,321 @@ export fn evm_set_code(
         return true;
     }
     return false;
+}
+
+// ============================================================================
+// Memory Safety Tests
+// ============================================================================
+
+test "minimal_evm_c: create and destroy without leaks" {
+    const handle = evm_create();
+    try std.testing.expect(handle != null);
+    evm_destroy(handle);
+}
+
+test "minimal_evm_c: multiple create/destroy cycles" {
+    var i: usize = 0;
+    while (i < 100) : (i += 1) {
+        const handle = evm_create();
+        try std.testing.expect(handle != null);
+        evm_destroy(handle);
+    }
+}
+
+test "minimal_evm_c: bytecode allocation and cleanup" {
+    const handle = evm_create();
+    defer evm_destroy(handle);
+    try std.testing.expect(handle != null);
+
+    const bytecode = [_]u8{ 0x60, 0x01, 0x60, 0x02, 0x01, 0x00 }; // PUSH1 1 PUSH1 2 ADD STOP
+    const success = evm_set_bytecode(handle, &bytecode, bytecode.len);
+    try std.testing.expect(success);
+}
+
+test "minimal_evm_c: multiple bytecode sets" {
+    const handle = evm_create();
+    defer evm_destroy(handle);
+    try std.testing.expect(handle != null);
+
+    // Set bytecode multiple times to test memory management
+    const bytecode1 = [_]u8{ 0x60, 0x01, 0x00 };
+    var success = evm_set_bytecode(handle, &bytecode1, bytecode1.len);
+    try std.testing.expect(success);
+
+    const bytecode2 = [_]u8{ 0x60, 0x02, 0x60, 0x03, 0x01, 0x00 };
+    success = evm_set_bytecode(handle, &bytecode2, bytecode2.len);
+    try std.testing.expect(success);
+
+    const bytecode3 = [_]u8{ 0x60, 0x05, 0x60, 0x06, 0x02, 0x00 };
+    success = evm_set_bytecode(handle, &bytecode3, bytecode3.len);
+    try std.testing.expect(success);
+}
+
+test "minimal_evm_c: calldata allocation and cleanup" {
+    const handle = evm_create();
+    defer evm_destroy(handle);
+    try std.testing.expect(handle != null);
+
+    const caller = ZERO_ADDRESS;
+    const address = ZERO_ADDRESS;
+    const value = [_]u8{0} ** 32;
+    const calldata = [_]u8{ 0xAA, 0xBB, 0xCC, 0xDD };
+
+    const success = evm_set_execution_context(
+        handle,
+        1000000,
+        &caller.bytes,
+        &address.bytes,
+        &value,
+        &calldata,
+        calldata.len,
+    );
+    try std.testing.expect(success);
+}
+
+test "minimal_evm_c: multiple calldata sets" {
+    const handle = evm_create();
+    defer evm_destroy(handle);
+    try std.testing.expect(handle != null);
+
+    const caller = ZERO_ADDRESS;
+    const address = ZERO_ADDRESS;
+    const value = [_]u8{0} ** 32;
+
+    // Set calldata multiple times
+    const calldata1 = [_]u8{ 0xAA, 0xBB };
+    var success = evm_set_execution_context(
+        handle,
+        1000000,
+        &caller.bytes,
+        &address.bytes,
+        &value,
+        &calldata1,
+        calldata1.len,
+    );
+    try std.testing.expect(success);
+
+    const calldata2 = [_]u8{ 0xCC, 0xDD, 0xEE, 0xFF };
+    success = evm_set_execution_context(
+        handle,
+        1000000,
+        &caller.bytes,
+        &address.bytes,
+        &value,
+        &calldata2,
+        calldata2.len,
+    );
+    try std.testing.expect(success);
+
+    const calldata3 = [_]u8{ 0x11, 0x22, 0x33, 0x44, 0x55, 0x66 };
+    success = evm_set_execution_context(
+        handle,
+        1000000,
+        &caller.bytes,
+        &address.bytes,
+        &value,
+        &calldata3,
+        calldata3.len,
+    );
+    try std.testing.expect(success);
+}
+
+test "minimal_evm_c: empty calldata handling" {
+    const handle = evm_create();
+    defer evm_destroy(handle);
+    try std.testing.expect(handle != null);
+
+    const caller = ZERO_ADDRESS;
+    const address = ZERO_ADDRESS;
+    const value = [_]u8{0} ** 32;
+
+    // Set empty calldata
+    const success = evm_set_execution_context(
+        handle,
+        1000000,
+        &caller.bytes,
+        &address.bytes,
+        &value,
+        undefined,
+        0,
+    );
+    try std.testing.expect(success);
+}
+
+test "minimal_evm_c: large bytecode allocation" {
+    const handle = evm_create();
+    defer evm_destroy(handle);
+    try std.testing.expect(handle != null);
+
+    // Allocate 10KB bytecode
+    var large_bytecode: [10000]u8 = undefined;
+    for (&large_bytecode, 0..) |*byte, i| {
+        byte.* = @truncate(i);
+    }
+
+    const success = evm_set_bytecode(handle, &large_bytecode, large_bytecode.len);
+    try std.testing.expect(success);
+}
+
+test "minimal_evm_c: large calldata allocation" {
+    const handle = evm_create();
+    defer evm_destroy(handle);
+    try std.testing.expect(handle != null);
+
+    const caller = ZERO_ADDRESS;
+    const address = ZERO_ADDRESS;
+    const value = [_]u8{0} ** 32;
+
+    // Allocate 10KB calldata
+    var large_calldata: [10000]u8 = undefined;
+    for (&large_calldata, 0..) |*byte, i| {
+        byte.* = @truncate(i);
+    }
+
+    const success = evm_set_execution_context(
+        handle,
+        1000000,
+        &caller.bytes,
+        &address.bytes,
+        &value,
+        &large_calldata,
+        large_calldata.len,
+    );
+    try std.testing.expect(success);
+}
+
+test "minimal_evm_c: full execution cycle with memory cleanup" {
+    const handle = evm_create();
+    defer evm_destroy(handle);
+    try std.testing.expect(handle != null);
+
+    // Set bytecode (PUSH1 1 PUSH1 2 ADD STOP)
+    const bytecode = [_]u8{ 0x60, 0x01, 0x60, 0x02, 0x01, 0x00 };
+    var success = evm_set_bytecode(handle, &bytecode, bytecode.len);
+    try std.testing.expect(success);
+
+    // Set execution context
+    const caller = ZERO_ADDRESS;
+    const address = ZERO_ADDRESS;
+    const value = [_]u8{0} ** 32;
+    const calldata = [_]u8{};
+    success = evm_set_execution_context(
+        handle,
+        1000000,
+        &caller.bytes,
+        &address.bytes,
+        &value,
+        &calldata,
+        0,
+    );
+    try std.testing.expect(success);
+
+    // Set blockchain context
+    evm_set_blockchain_context(
+        handle,
+        1, // chain_id
+        100, // block_number
+        1000000, // timestamp
+        &ZERO_ADDRESS.bytes,
+        30000000, // gas_limit
+    );
+
+    // Execute
+    success = evm_execute(handle);
+    try std.testing.expect(success);
+
+    // Verify success
+    const is_success = evm_is_success(handle);
+    try std.testing.expect(is_success);
+}
+
+test "minimal_evm_c: null handle operations" {
+    // All operations should safely handle null handles
+    evm_destroy(null);
+
+    const success = evm_set_bytecode(null, undefined, 0);
+    try std.testing.expect(!success);
+
+    const exec_success = evm_execute(null);
+    try std.testing.expect(!exec_success);
+
+    const gas = evm_get_gas_remaining(null);
+    try std.testing.expect(gas == 0);
+
+    const is_success = evm_is_success(null);
+    try std.testing.expect(!is_success);
+
+    const output_len = evm_get_output_len(null);
+    try std.testing.expect(output_len == 0);
+}
+
+test "minimal_evm_c: interleaved operations stress test" {
+    // Create multiple handles and perform interleaved operations
+    const handle1 = evm_create();
+    const handle2 = evm_create();
+    const handle3 = evm_create();
+
+    defer evm_destroy(handle1);
+    defer evm_destroy(handle2);
+    defer evm_destroy(handle3);
+
+    try std.testing.expect(handle1 != null);
+    try std.testing.expect(handle2 != null);
+    try std.testing.expect(handle3 != null);
+
+    // Set different bytecodes
+    const bytecode1 = [_]u8{ 0x60, 0x01, 0x00 };
+    const bytecode2 = [_]u8{ 0x60, 0x02, 0x60, 0x03, 0x01, 0x00 };
+    const bytecode3 = [_]u8{ 0x60, 0x05, 0x00 };
+
+    var success = evm_set_bytecode(handle1, &bytecode1, bytecode1.len);
+    try std.testing.expect(success);
+
+    success = evm_set_bytecode(handle2, &bytecode2, bytecode2.len);
+    try std.testing.expect(success);
+
+    success = evm_set_bytecode(handle3, &bytecode3, bytecode3.len);
+    try std.testing.expect(success);
+
+    // Set different calldata
+    const calldata1 = [_]u8{0x11};
+    const calldata2 = [_]u8{ 0x22, 0x33 };
+    const calldata3 = [_]u8{ 0x44, 0x55, 0x66 };
+
+    const caller = ZERO_ADDRESS;
+    const address = ZERO_ADDRESS;
+    const value = [_]u8{0} ** 32;
+
+    success = evm_set_execution_context(
+        handle1,
+        1000000,
+        &caller.bytes,
+        &address.bytes,
+        &value,
+        &calldata1,
+        calldata1.len,
+    );
+    try std.testing.expect(success);
+
+    success = evm_set_execution_context(
+        handle2,
+        1000000,
+        &caller.bytes,
+        &address.bytes,
+        &value,
+        &calldata2,
+        calldata2.len,
+    );
+    try std.testing.expect(success);
+
+    success = evm_set_execution_context(
+        handle3,
+        1000000,
+        &caller.bytes,
+        &address.bytes,
+        &value,
+        &calldata3,
+        calldata3.len,
+    );
+    try std.testing.expect(success);
 }

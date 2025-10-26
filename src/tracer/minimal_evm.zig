@@ -7,6 +7,7 @@ const GasConstants = primitives.GasConstants;
 const MinimalFrame = @import("minimal_frame.zig").MinimalFrame;
 const Hardfork = @import("../eips_and_hardforks/eips.zig").Hardfork;
 const minimal_host = @import("minimal_host.zig");
+const precompiles = @import("precompiles");
 
 const Address = primitives.Address.Address;
 
@@ -319,7 +320,27 @@ pub const MinimalEvm = struct {
 
         // Pre-warm precompiles if Berlin+
         if (!self.hardfork.isAtLeast(.BERLIN)) return;
-        // TODO: Pre-warm precompiles
+
+        // Pre-warm precompile addresses (0x01 - 0x0a)
+        // The range depends on hardfork - newer hardforks have more precompiles
+        var precompile_addresses: [10]Address = undefined;
+        var precompile_count: usize = 0;
+
+        // Check each potential precompile address and pre-warm if active
+        var i: u8 = 1;
+        while (i <= 10) : (i += 1) {
+            var addr_bytes: [20]u8 = [_]u8{0} ** 20;
+            addr_bytes[19] = i;
+            const addr = Address{ .bytes = addr_bytes };
+            if (self.is_precompile(addr)) {
+                precompile_addresses[precompile_count] = addr;
+                precompile_count += 1;
+            }
+        }
+
+        if (precompile_count > 0) {
+            try self.pre_warm_addresses(precompile_addresses[0..precompile_count]);
+        }
     }
 
     /// Execute bytecode (main entry point like evm.execute)
@@ -416,6 +437,34 @@ pub const MinimalEvm = struct {
         return result;
     }
 
+    /// Execute a precompile call
+    fn execute_precompile(
+        self: *Self,
+        address: Address,
+        input: []const u8,
+        gas: u64,
+    ) Error!CallResult {
+        const result = precompiles.execute(self.allocator, address, input, gas, self.hardfork) catch {
+            // Precompile execution failed - return failure with no gas refund
+            return CallResult{
+                .success = false,
+                .gas_left = 0,
+                .output = &[_]u8{},
+            };
+        };
+
+        // Calculate gas left after precompile execution
+        const gas_left = if (result.gas_used <= gas) gas - result.gas_used else 0;
+
+        // Output is already allocated by precompile, just use it
+        // (arena allocator will clean it up)
+        return CallResult{
+            .success = true,
+            .gas_left = gas_left,
+            .output = result.output,
+        };
+    }
+
     /// Handle inner call from frame (like evm.inner_call)
     pub fn inner_call(
         self: *Self,
@@ -432,11 +481,14 @@ pub const MinimalEvm = struct {
             };
         }
 
+        // Check if this is a precompile call
+        if (self.is_precompile(address)) {
+            return self.execute_precompile(address, input, gas);
+        }
+
         // Get code for the target address
         const code = self.get_code(address);
         if (code.len == 0) {
-            // TODO: Implement precompiles
-            
             // Empty account - just return success
             return CallResult{
                 .success = true,
@@ -521,9 +573,11 @@ pub const MinimalEvm = struct {
     }
 
     /// Set storage value (called by frame)
-    pub fn set_storage(self: *Self, address: Address, slot: u256, value: u256) !void {
+    pub fn set_storage(self: *Self, address: Address, slot: u256, value: u256) Error!void {
         if (self.host) |host| {
-            host.setStorage(address, slot, value);
+            host.setStorage(address, slot, value) catch {
+                return Error.StorageError;
+            };
             return;
         }
         const key = StorageSlotKey{ .address = address, .slot = slot };
@@ -531,10 +585,14 @@ pub const MinimalEvm = struct {
         // Track original value on first write in transaction
         if (!self.original_storage.contains(key)) {
             const current = self.storage.get(key) orelse 0;
-            try self.original_storage.put(key, current);
+            self.original_storage.put(key, current) catch {
+                return Error.StorageError;
+            };
         }
 
-        try self.storage.put(key, value);
+        self.storage.put(key, value) catch {
+            return Error.StorageError;
+        };
     }
 
     /// Get original storage value (before transaction modifications)
@@ -554,11 +612,8 @@ pub const MinimalEvm = struct {
     }
 
     /// Check if an address is a precompile
-    /// TODO: implement this
     pub fn is_precompile(self: *const Self, address: Address) bool {
-        _ = self;
-        _ = address;
-        return false;
+        return precompiles.isPrecompile(address, self.hardfork);
     }
 
     /// Get current frame (top of the frame stack)

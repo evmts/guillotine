@@ -237,6 +237,27 @@ pub const MinimalFrame = struct {
         return new_cost - current_cost;
     }
 
+    /// Calculate memory expansion cost for CALL family opcodes
+    /// Must consider BOTH input and return memory regions and charge for the maximum
+    fn callMemoryExpansionCost(self: *const Self, in_offset: u64, in_size: u64, out_offset: u64, out_size: u64) !u64 {
+        // Calculate end addresses with overflow protection
+        const in_end = if (in_size > 0) blk: {
+            const result = std.math.add(u64, in_offset, in_size) catch return error.OutOfBounds;
+            break :blk result;
+        } else 0;
+
+        const out_end = if (out_size > 0) blk: {
+            const result = std.math.add(u64, out_offset, out_size) catch return error.OutOfBounds;
+            break :blk result;
+        } else 0;
+
+        // Take maximum of both regions to get the new memory size
+        const max_end = @max(in_end, out_end);
+
+        // Calculate expansion cost from current size to max_end
+        return self.memoryExpansionCost(max_end);
+    }
+
     /// Calculate gas cost for external account operations (EIP-150 aware)
     fn externalAccountGasCost(self: *Self, address: Address) !u64 {
         const evm = self.getEvm();
@@ -1286,7 +1307,25 @@ pub const MinimalFrame = struct {
                 // EIP-2929: access target account (warm/cold)
                 const access_cost = try evm.access_address(call_address);
                 gas_cost += access_cost;
+
+                // Memory expansion gas - charge for BOTH input and return regions
+                const in_offset_u64 = std.math.cast(u64, in_offset) orelse return error.OutOfBounds;
+                const in_length_u64 = std.math.cast(u64, in_length) orelse return error.OutOfBounds;
+                const out_offset_u64 = std.math.cast(u64, out_offset) orelse return error.OutOfBounds;
+                const out_length_u64 = std.math.cast(u64, out_length) orelse return error.OutOfBounds;
+                const mem_expansion_cost = try self.callMemoryExpansionCost(in_offset_u64, in_length_u64, out_offset_u64, out_length_u64);
+                gas_cost += mem_expansion_cost;
+
                 try self.consumeGas(gas_cost);
+
+                // Update memory size if expanded
+                const in_end = if (in_length_u64 > 0) in_offset_u64 + in_length_u64 else 0;
+                const out_end = if (out_length_u64 > 0) out_offset_u64 + out_length_u64 else 0;
+                const max_end = @max(in_end, out_end);
+                if (max_end > 0) {
+                    const aligned_size = wordAlignedSize(max_end);
+                    if (aligned_size > self.memory_size) self.memory_size = aligned_size;
+                }
 
                 // Read input data from memory
                 var input_data: []const u8 = &.{};
@@ -1310,16 +1349,12 @@ pub const MinimalFrame = struct {
                 // Perform the inner call
                 const result = try evm.inner_call(call_address, value_arg, input_data, available_gas);
 
-                // Write output to memory
+                // Write output to memory (memory expansion already charged above)
                 if (out_length > 0 and result.output.len > 0) {
                     const out_off = std.math.cast(u32, out_offset) orelse return error.OutOfBounds;
                     const out_len_u32 = std.math.cast(u32, out_length) orelse return error.OutOfBounds;
                     const result_len_u32 = std.math.cast(u32, result.output.len) orelse return error.OutOfBounds;
                     const copy_len = @min(out_len_u32, result_len_u32);
-
-                    const end_bytes_callcopy: u64 = @as(u64, out_off) + @as(u64, copy_len);
-                    const mem_cost_out = self.memoryExpansionCost(end_bytes_callcopy);
-                    try self.consumeGas(mem_cost_out);
 
                     var k: u32 = 0;
                     while (k < copy_len) : (k += 1) {
@@ -1368,7 +1403,25 @@ pub const MinimalFrame = struct {
                 // EIP-2929: access target account (warm/cold)
                 const access_cost = try evm.access_address(call_address);
                 gas_cost += access_cost;
+
+                // Memory expansion gas - charge for BOTH input and return regions
+                const in_offset_u64 = std.math.cast(u64, in_offset) orelse return error.OutOfBounds;
+                const in_length_u64 = std.math.cast(u64, in_length) orelse return error.OutOfBounds;
+                const out_offset_u64 = std.math.cast(u64, out_offset) orelse return error.OutOfBounds;
+                const out_length_u64 = std.math.cast(u64, out_length) orelse return error.OutOfBounds;
+                const mem_expansion_cost = try self.callMemoryExpansionCost(in_offset_u64, in_length_u64, out_offset_u64, out_length_u64);
+                gas_cost += mem_expansion_cost;
+
                 try self.consumeGas(gas_cost);
+
+                // Update memory size if expanded
+                const in_end = if (in_length_u64 > 0) in_offset_u64 + in_length_u64 else 0;
+                const out_end = if (out_length_u64 > 0) out_offset_u64 + out_length_u64 else 0;
+                const max_end = @max(in_end, out_end);
+                if (max_end > 0) {
+                    const aligned_size = wordAlignedSize(max_end);
+                    if (aligned_size > self.memory_size) self.memory_size = aligned_size;
+                }
 
                 // Read input data from memory
                 var input_data: []const u8 = &.{};
@@ -1392,16 +1445,12 @@ pub const MinimalFrame = struct {
                 // Perform the inner call
                 const result = try evm.inner_call(call_address, value_arg, input_data, available_gas);
 
-                // Write output to memory
+                // Write output to memory (memory expansion already charged above)
                 if (out_length > 0 and result.output.len > 0) {
                     const out_off = std.math.cast(u32, out_offset) orelse return error.OutOfBounds;
                     const out_len_u32 = std.math.cast(u32, out_length) orelse return error.OutOfBounds;
                     const result_len_u32 = std.math.cast(u32, result.output.len) orelse return error.OutOfBounds;
                     const copy_len = @min(out_len_u32, result_len_u32);
-
-                    const end_bytes_callcode: u64 = @as(u64, out_off) + @as(u64, copy_len);
-                    const mem_cost_out = self.memoryExpansionCost(end_bytes_callcode);
-                    try self.consumeGas(mem_cost_out);
 
                     var k: u32 = 0;
                     while (k < copy_len) : (k += 1) {
@@ -1468,7 +1517,26 @@ pub const MinimalFrame = struct {
                 const call_address = Address{ .bytes = addr_bytes };
 
                 // Base gas cost
-                try self.consumeGas(GasConstants.CallGas);
+                var gas_cost: u64 = GasConstants.CallGas;
+
+                // Memory expansion gas - charge for BOTH input and return regions
+                const in_offset_u64 = std.math.cast(u64, in_offset) orelse return error.OutOfBounds;
+                const in_length_u64 = std.math.cast(u64, in_length) orelse return error.OutOfBounds;
+                const out_offset_u64 = std.math.cast(u64, out_offset) orelse return error.OutOfBounds;
+                const out_length_u64 = std.math.cast(u64, out_length) orelse return error.OutOfBounds;
+                const mem_expansion_cost = try self.callMemoryExpansionCost(in_offset_u64, in_length_u64, out_offset_u64, out_length_u64);
+                gas_cost += mem_expansion_cost;
+
+                try self.consumeGas(gas_cost);
+
+                // Update memory size if expanded
+                const in_end = if (in_length_u64 > 0) in_offset_u64 + in_length_u64 else 0;
+                const out_end = if (out_length_u64 > 0) out_offset_u64 + out_length_u64 else 0;
+                const max_end = @max(in_end, out_end);
+                if (max_end > 0) {
+                    const aligned_size = wordAlignedSize(max_end);
+                    if (aligned_size > self.memory_size) self.memory_size = aligned_size;
+                }
 
                 // Read input data from memory
                 var input_data: []const u8 = &.{};
@@ -1492,16 +1560,12 @@ pub const MinimalFrame = struct {
                 // Perform the inner call
                 const result = try evm.inner_call(call_address, self.value, input_data, available_gas);
 
-                // Write output to memory
+                // Write output to memory (memory expansion already charged above)
                 if (out_length > 0 and result.output.len > 0) {
                     const out_off = std.math.cast(u32, out_offset) orelse return error.OutOfBounds;
                     const out_len_u32 = std.math.cast(u32, out_length) orelse return error.OutOfBounds;
                     const result_len_u32 = std.math.cast(u32, result.output.len) orelse return error.OutOfBounds;
                     const copy_len = @min(out_len_u32, result_len_u32);
-
-                    const end_bytes_delegate: u64 = @as(u64, out_off) + @as(u64, copy_len);
-                    const mem_cost_out = self.memoryExpansionCost(end_bytes_delegate);
-                    try self.consumeGas(mem_cost_out);
 
                     var k: u32 = 0;
                     while (k < copy_len) : (k += 1) {
@@ -1569,7 +1633,25 @@ pub const MinimalFrame = struct {
                 var call_gas_cost: u64 = GasConstants.CallGas;
                 const access_cost = try evm.access_address(call_address);
                 call_gas_cost += access_cost;
+
+                // Memory expansion gas - charge for BOTH input and return regions
+                const in_offset_u64 = std.math.cast(u64, in_offset) orelse return error.OutOfBounds;
+                const in_length_u64 = std.math.cast(u64, in_length) orelse return error.OutOfBounds;
+                const out_offset_u64 = std.math.cast(u64, out_offset) orelse return error.OutOfBounds;
+                const out_length_u64 = std.math.cast(u64, out_length) orelse return error.OutOfBounds;
+                const mem_expansion_cost = try self.callMemoryExpansionCost(in_offset_u64, in_length_u64, out_offset_u64, out_length_u64);
+                call_gas_cost += mem_expansion_cost;
+
                 try self.consumeGas(call_gas_cost);
+
+                // Update memory size if expanded
+                const in_end = if (in_length_u64 > 0) in_offset_u64 + in_length_u64 else 0;
+                const out_end = if (out_length_u64 > 0) out_offset_u64 + out_length_u64 else 0;
+                const max_end = @max(in_end, out_end);
+                if (max_end > 0) {
+                    const aligned_size = wordAlignedSize(max_end);
+                    if (aligned_size > self.memory_size) self.memory_size = aligned_size;
+                }
 
                 // Read input data from memory
                 var input_data: []const u8 = &.{};
@@ -1593,16 +1675,12 @@ pub const MinimalFrame = struct {
                 // Perform the inner call
                 const result = try evm.inner_call(call_address, 0, input_data, available_gas);
 
-                // Write output to memory
+                // Write output to memory (memory expansion already charged above)
                 if (out_length > 0 and result.output.len > 0) {
                     const out_off = std.math.cast(u32, out_offset) orelse return error.OutOfBounds;
                     const out_len_u32 = std.math.cast(u32, out_length) orelse return error.OutOfBounds;
                     const result_len_u32 = std.math.cast(u32, result.output.len) orelse return error.OutOfBounds;
                     const copy_len = @min(out_len_u32, result_len_u32);
-
-                    const end_bytes_static: u64 = @as(u64, out_off) + @as(u64, copy_len);
-                    const mem_cost_out = self.memoryExpansionCost(end_bytes_static);
-                    try self.consumeGas(mem_cost_out);
 
                     var k: u32 = 0;
                     while (k < copy_len) : (k += 1) {
@@ -2148,5 +2226,222 @@ test "MinimalFrame JUMP and JUMPI validation" {
         // Execute and expect InvalidJump error (pc=3 is inside PUSH1 instruction)
         const result = frame.execute();
         try testing.expectError(error.InvalidJump, result);
+    }
+}
+
+test "callMemoryExpansionCost - basic functionality" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    var evm = try MinimalEvm.init(allocator);
+    defer evm.deinit();
+
+    evm.setBlockchainContext(
+        1, 100, 1000, 1, 1,
+        Address{ .bytes = .{0} ** 20 },
+        30000000, 1, 1,
+    );
+    evm.setTransactionContext(Address{ .bytes = .{0} ** 20 }, 1);
+
+    const bytecode = [_]u8{0x00}; // STOP
+    var frame = try MinimalFrame.init(
+        allocator,
+        &bytecode,
+        1000000,
+        Address{ .bytes = .{0} ** 20 },
+        Address{ .bytes = .{0} ** 20 },
+        0,
+        &.{},
+        &evm,
+        .CANCUN,
+    );
+    defer frame.deinit();
+
+    // Test 1: No memory expansion (both sizes are 0)
+    {
+        const cost = try frame.callMemoryExpansionCost(0, 0, 0, 0);
+        try testing.expectEqual(@as(u64, 0), cost);
+    }
+
+    // Test 2: Input only (32 bytes at offset 0)
+    {
+        const cost = try frame.callMemoryExpansionCost(0, 32, 0, 0);
+        // 1 word = 3 gas + 1²/512 = 3 gas
+        try testing.expectEqual(@as(u64, 3), cost);
+    }
+
+    // Test 3: Return only (32 bytes at offset 0)
+    {
+        frame.memory_size = 0; // Reset
+        const cost = try frame.callMemoryExpansionCost(0, 0, 0, 32);
+        try testing.expectEqual(@as(u64, 3), cost);
+    }
+
+    // Test 4: Both input and return at same location (no additional cost)
+    {
+        frame.memory_size = 0; // Reset
+        const cost = try frame.callMemoryExpansionCost(0, 32, 0, 32);
+        try testing.expectEqual(@as(u64, 3), cost); // Still 1 word
+    }
+
+    // Test 5: Non-overlapping regions - return extends further
+    {
+        frame.memory_size = 0; // Reset
+        const cost = try frame.callMemoryExpansionCost(0, 32, 32, 32);
+        // 2 words = 3*2 + 4/512 = 6 gas
+        try testing.expectEqual(@as(u64, 6), cost);
+    }
+
+    // Test 6: Non-overlapping regions - input extends further
+    {
+        frame.memory_size = 0; // Reset
+        const cost = try frame.callMemoryExpansionCost(0, 64, 0, 32);
+        // 2 words = 3*2 + 4/512 = 6 gas
+        try testing.expectEqual(@as(u64, 6), cost);
+    }
+
+    // Test 7: Large memory expansion with quadratic term
+    {
+        frame.memory_size = 0; // Reset
+        const cost = try frame.callMemoryExpansionCost(0, 1024, 0, 0);
+        // 32 words = 3*32 + 32²/512 = 96 + 2 = 98 gas
+        try testing.expectEqual(@as(u64, 98), cost);
+    }
+
+    // Test 8: Expansion from existing memory
+    {
+        frame.memory_size = 64; // 2 words already allocated
+        const cost = try frame.callMemoryExpansionCost(0, 128, 0, 0);
+        // Expansion from 2 words to 4 words
+        // Current cost: 3*2 + 4/512 = 6
+        // New cost: 3*4 + 16/512 = 12
+        // Expansion: 12 - 6 = 6 gas
+        try testing.expectEqual(@as(u64, 6), cost);
+    }
+
+    // Test 9: Both regions beyond current memory
+    {
+        frame.memory_size = 0; // Reset
+        const cost = try frame.callMemoryExpansionCost(64, 32, 128, 32);
+        // max(96, 160) = 160 bytes = 5 words
+        // Cost = 3*5 + 25/512 = 15 gas
+        try testing.expectEqual(@as(u64, 15), cost);
+    }
+
+    // Test 10: Zero-size input with large return
+    {
+        frame.memory_size = 0; // Reset
+        const cost = try frame.callMemoryExpansionCost(0, 0, 1000, 100);
+        // 1100 bytes = 35 words (ceil(1100/32))
+        // Cost = 3*35 + 35²/512 = 105 + 2 = 107 gas
+        try testing.expectEqual(@as(u64, 107), cost);
+    }
+
+    // Test 11: Large input with zero-size return
+    {
+        frame.memory_size = 0; // Reset
+        const cost = try frame.callMemoryExpansionCost(2000, 200, 0, 0);
+        // 2200 bytes = 69 words (ceil(2200/32))
+        // Cost = 3*69 + 69²/512 = 207 + 9 = 216 gas
+        try testing.expectEqual(@as(u64, 216), cost);
+    }
+
+    // Test 12: Offset at 0, size 0 (edge case)
+    {
+        frame.memory_size = 0; // Reset
+        const cost = try frame.callMemoryExpansionCost(0, 0, 0, 0);
+        try testing.expectEqual(@as(u64, 0), cost);
+    }
+
+    // Test 13: Large offset with small size
+    {
+        frame.memory_size = 0; // Reset
+        const cost = try frame.callMemoryExpansionCost(10000, 32, 0, 0);
+        // 10032 bytes = 314 words (ceil(10032/32))
+        // Cost = 3*314 + 314²/512 = 942 + 192 = 1134 gas
+        try testing.expectEqual(@as(u64, 1134), cost);
+    }
+
+    // Test 14: Return region larger and further than input
+    {
+        frame.memory_size = 0; // Reset
+        const cost = try frame.callMemoryExpansionCost(0, 32, 100, 200);
+        // max(32, 300) = 300 bytes = 10 words (ceil(300/32))
+        // Cost = 3*10 + 100/512 = 30 gas
+        try testing.expectEqual(@as(u64, 30), cost);
+    }
+
+    // Test 15: Input region larger and further than return
+    {
+        frame.memory_size = 0; // Reset
+        const cost = try frame.callMemoryExpansionCost(100, 200, 0, 32);
+        // max(300, 32) = 300 bytes = 10 words
+        // Cost = 3*10 + 100/512 = 30 gas
+        try testing.expectEqual(@as(u64, 30), cost);
+    }
+
+    // Test 16: Exactly one word boundary
+    {
+        frame.memory_size = 0; // Reset
+        const cost = try frame.callMemoryExpansionCost(0, 31, 0, 0);
+        // 31 bytes = 1 word (ceil(31/32))
+        // Cost = 3*1 + 1/512 = 3 gas
+        try testing.expectEqual(@as(u64, 3), cost);
+    }
+
+    // Test 17: Just over one word boundary
+    {
+        frame.memory_size = 0; // Reset
+        const cost = try frame.callMemoryExpansionCost(0, 33, 0, 0);
+        // 33 bytes = 2 words (ceil(33/32))
+        // Cost = 3*2 + 4/512 = 6 gas
+        try testing.expectEqual(@as(u64, 6), cost);
+    }
+}
+
+test "callMemoryExpansionCost - overflow protection" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    var evm = try MinimalEvm.init(allocator);
+    defer evm.deinit();
+
+    evm.setBlockchainContext(
+        1, 100, 1000, 1, 1,
+        Address{ .bytes = .{0} ** 20 },
+        30000000, 1, 1,
+    );
+    evm.setTransactionContext(Address{ .bytes = .{0} ** 20 }, 1);
+
+    const bytecode = [_]u8{0x00}; // STOP
+    var frame = try MinimalFrame.init(
+        allocator,
+        &bytecode,
+        1000000,
+        Address{ .bytes = .{0} ** 20 },
+        Address{ .bytes = .{0} ** 20 },
+        0,
+        &.{},
+        &evm,
+        .CANCUN,
+    );
+    defer frame.deinit();
+
+    // Test overflow in input region
+    {
+        const result = frame.callMemoryExpansionCost(std.math.maxInt(u64) - 10, 20, 0, 0);
+        try testing.expectError(error.OutOfBounds, result);
+    }
+
+    // Test overflow in return region
+    {
+        const result = frame.callMemoryExpansionCost(0, 0, std.math.maxInt(u64) - 10, 20);
+        try testing.expectError(error.OutOfBounds, result);
+    }
+
+    // Test overflow in both regions
+    {
+        const result = frame.callMemoryExpansionCost(std.math.maxInt(u64) - 10, 20, std.math.maxInt(u64) - 10, 20);
+        try testing.expectError(error.OutOfBounds, result);
     }
 }
