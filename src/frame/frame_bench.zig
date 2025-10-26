@@ -10,8 +10,6 @@ const Database = @import("../storage/database.zig").Database;
 const MemoryDatabase = @import("../storage/memory_database.zig").MemoryDatabase;
 const evm_mod = @import("../root.zig");
 const Host = evm_mod.Host;
-// MinimalEvm is now used for differential testing instead of revm
-// const MinimalEvm = @import("../tracer/tracer.zig").MinimalEvm;
 const block_info_mod = @import("../block/block_info.zig");
 const call_params_mod = @import("call_params.zig");
 const call_result_mod = @import("call_result.zig");
@@ -470,18 +468,6 @@ pub fn main() !void {
     try bench.add("Frame/Arithmetic", benchmarkFrameArithmetic, .{});
     try bench.add("Frame/Jumps", benchmarkFrameJumps, .{});
 
-    // MinimalEvm benchmarks can be added here if needed
-    // try bench.add("MinimalEvm/ERC20", benchmarkMinimalERC20, .{});
-    // try bench.add("MinimalEvm/Snailtracer", benchmarkMinimalSnailtracer, .{});
-    // try bench.add("MinimalEvm/TenKHashes", benchmarkMinimalTenKHashes, .{});
-    // try bench.add("MinimalEvm/Arithmetic", benchmarkMinimalArithmetic, .{});
-    // try bench.add("MinimalEvm/Jumps", benchmarkMinimalJumps, .{});
-
-    // Add Schedule generation benchmarks
-    // TODO: Fix ArrayList initialization for Zig 0.15
-    // try bench.add("Schedule/ERC20", benchmarkScheduleGenERC20, .{});
-    // try bench.add("Schedule/Snailtracer", benchmarkScheduleGenSnailtracer, .{});
-
     try stdout.print("Running benchmarks...\n\n", .{});
     try stdout.flush();
 
@@ -520,9 +506,4 @@ test "benchmark Frame initialization" {
 test "benchmark MinimalEvm initialization" {
     const allocator = std.testing.allocator;
     _ = allocator;
-    // MinimalEvm initialization test can be added here
-    // var vm = try MinimalEvm.init(allocator);
-    defer vm.deinit();
-
-    // Just verify it initializes
 }

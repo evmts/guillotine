@@ -155,6 +155,26 @@ pub fn Frame(_config: FrameConfig) type {
         // Output data for RETURN and REVERT operations
         output_data: []const u8 = &[_]u8{},
 
+        /// Initialize a new frame for EVM bytecode execution.
+        ///
+        /// Creates a frame with its own isolated stack and memory for executing
+        /// contract code. The frame receives gas, caller context, call value,
+        /// and input data.
+        ///
+        /// Parameters:
+        ///   allocator: Memory allocator for stack and memory
+        ///   gas_remaining: Gas available for this frame's execution
+        ///   caller: Address of the account making the call
+        ///   value: Amount of wei transferred with the call
+        ///   calldata_input: Input data for the call (calldata)
+        ///   evm_ptr: Opaque pointer to parent EVM instance
+        ///
+        /// Returns:
+        ///   Initialized frame ready for interpret() call
+        ///
+        /// Errors:
+        ///   AllocationError: Failed to allocate stack or memory
+        ///   InvalidAmount: Gas value out of range
         pub fn init(allocator: std.mem.Allocator, gas_remaining: GasType, caller: Address, value: WordType, calldata_input: []const u8, evm_ptr: *anyopaque) Error!Self {
             var stack = Stack.init(allocator, null) catch return Error.AllocationError;
             errdefer stack.deinit(allocator);
@@ -190,6 +210,29 @@ pub fn Frame(_config: FrameConfig) type {
             (&self.getEvm().tracer).debug("Frame.deinit: Cleanup complete", .{});
         }
 
+        /// Execute bytecode using the preprocessed dispatch schedule.
+        ///
+        /// This is the main execution entry point for the frame. It uses the
+        /// dispatch-based execution model (NOT a traditional interpreter):
+        ///
+        /// - Takes a preprocessed dispatch schedule (not raw bytecode)
+        /// - Schedule contains metadata and function pointers
+        /// - Uses tail-call optimization for performance
+        /// - Validates gas and stack requirements per basic block
+        ///
+        /// CRITICAL: This is NOT a PC-based interpreter! The schedule cursor
+        /// is an index into the dispatch schedule, not a bytecode PC.
+        ///
+        /// Parameters:
+        ///   dispatch_schedule: Preprocessed execution schedule with metadata
+        ///   jump_table: Precomputed jump destinations for JUMP/JUMPI
+        ///   bytecode_raw: Original bytecode (for tracer/debugging only)
+        ///
+        /// Errors:
+        ///   OutOfGas: Insufficient gas for basic block
+        ///   StackUnderflow: Stack has fewer items than required
+        ///   StackOverflow: Stack would exceed capacity
+        ///   All other execution errors from handlers
         pub fn interpret(self: *Self, dispatch_schedule: *const Dispatch.DispatchSchedule, jump_table: *const Dispatch.JumpTable, bytecode_raw: []const u8) Error!void {
             @branchHint(.likely);
             const evm = self.getEvm();
