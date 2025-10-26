@@ -79,10 +79,11 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
             },
         };
 
-        // TODO: this idea of creating an Iterator is pretty old idea by me (fucory) early in the development process of this evm
-        // We should revisit this from first principles. We might be able to accomplish all this iterator logic in the same
-        // bytecode pass we do over the bytecode. We might be able to simplify/delete code. This should be scrutnized carefully
-        // and possibly refactored.
+        /// Iterator for traversing bytecode instructions
+        /// Handles fusion patterns and provides sequential access to opcodes with their metadata
+        /// Note: Current implementation works well. Future optimization could potentially merge
+        /// iterator logic into the initial bytecode analysis pass, but this would require
+        /// careful refactoring to maintain fusion detection and gas calculation accuracy.
         pub const Iterator = struct {
             bytecode: *const Self,
             pc: PcType,
@@ -1922,23 +1923,7 @@ test "Jump destination validation - valid JUMPDEST" {
     try testing.expect(bytecode.isValidJumpDest(2) == false); // JUMP is not a JUMPDEST
 }
 
-// NOTE: Jump validation now happens at runtime, not init time
-// test "Jump destination validation - invalid jump target" {
-//     const allocator = testing.allocator;
-//
-//     // PUSH1 3, JUMP, STOP (no JUMPDEST at PC 3)
-//     const code = [_]u8{ 0x60, 0x03, 0x56, 0x00 };
-//     try testing.expectError(BytecodeDefault.ValidationError.InvalidJumpDestination, BytecodeDefault.init(allocator, &code));
-// }
 
-// NOTE: Jump validation now happens at runtime, not init time
-// test "Jump destination validation - jump to push data" {
-//     const allocator = testing.allocator;
-//
-//     // PUSH1 1, JUMP, 0x5B (this 0x5B is push data, not a real JUMPDEST)
-//     const code = [_]u8{ 0x60, 0x01, 0x56, 0x60, 0x5B };
-//     try testing.expectError(BytecodeDefault.ValidationError.InvalidJumpDestination, BytecodeDefault.init(allocator, &code));
-// }
 
 test "Jump destination validation - JUMPI pattern" {
     const allocator = testing.allocator;
@@ -2150,14 +2135,6 @@ test "Complex jump patterns - multiple JUMPDESTs" {
     try testing.expect(bytecode.isValidJumpDest(0) == false); // PUSH1 is not a JUMPDEST
 }
 
-// NOTE: Jump validation now happens at runtime, not init time
-// test "Error resilience - out of bounds jump" {
-//     const allocator = testing.allocator;
-//
-//     // PUSH1 100, JUMP (target 100 is beyond bytecode end)
-//     const code = [_]u8{ 0x60, 100, 0x56 };
-//     try testing.expectError(BytecodeDefault.ValidationError.InvalidJumpDestination, BytecodeDefault.init(allocator, &code));
-// }
 
 test "Bitmap utility functions - countBitsInRange" {
     // Test the bitmap counting utility
@@ -2295,14 +2272,6 @@ test "Boundary conditions - jump to last instruction" {
     try testing.expect(bytecode.isValidJumpDest(3) == true);
 }
 
-// NOTE: Jump validation now happens at runtime, not init time
-// test "Security - malformed jump patterns" {
-//     const allocator = testing.allocator;
-//
-//     // PUSH1 2, JUMP, JUMPDEST (but jump target is push data, not the JUMPDEST)
-//     const code = [_]u8{ 0x60, 0x02, 0x56, 0x5B };
-//     try testing.expectError(BytecodeDefault.ValidationError.InvalidJumpDestination, BytecodeDefault.init(allocator, &code));
-// }
 
 test "Invalid jump - jumping to non-JUMPDEST opcode" {
     const allocator = testing.allocator;

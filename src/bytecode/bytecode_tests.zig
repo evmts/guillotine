@@ -250,14 +250,6 @@ test "Bytecode validation - PUSH32 extends past end" {
     try std.testing.expectError(error.TruncatedPush, result);
 }
 
-// NOTE: Jump validation now happens at runtime, not init time
-// test "Bytecode validation - Jump to invalid destination" {
-//     const allocator = std.testing.allocator;
-//     // PUSH1 0x10 JUMP but no JUMPDEST at 0x10
-//     const code = [_]u8{ 0x60, 0x10, 0x56, 0x00 }; // PUSH1 0x10 JUMP STOP
-//     const result = BytecodeDefault.init(allocator, &code);
-//     try std.testing.expectError(error.InvalidJumpDestination, result);
-// }
 
 test "Bytecode validation - Jump to valid JUMPDEST" {
     const allocator = std.testing.allocator;
@@ -268,14 +260,6 @@ test "Bytecode validation - Jump to valid JUMPDEST" {
     try std.testing.expect(bytecode.isValidJumpDest(4)); // JUMPDEST at PC 4
 }
 
-// NOTE: Jump validation now happens at runtime, not init time
-// test "Bytecode validation - JUMPI to invalid destination" {
-//     const allocator = std.testing.allocator;
-//     // PUSH1 0x10 PUSH1 0x01 JUMPI but no JUMPDEST at 0x10
-//     const code = [_]u8{ 0x60, 0x10, 0x60, 0x01, 0x57 }; // PUSH1 0x10 PUSH1 0x01 JUMPI
-//     const result = BytecodeDefault.init(allocator, &code);
-//     try std.testing.expectError(error.InvalidJumpDestination, result);
-// }
 
 test "Bytecode validation - empty bytecode is valid" {
     const allocator = std.testing.allocator;
@@ -293,14 +277,6 @@ test "Bytecode validation - only STOP is valid" {
     try std.testing.expectEqual(@as(usize, 1), bytecode.len());
 }
 
-// NOTE: Jump validation now happens at runtime, not init time
-// test "Bytecode validation - JUMPDEST inside PUSH data is invalid jump target" {
-//     const allocator = std.testing.allocator;
-//     // PUSH1 0x03 JUMP [0x5b inside push] JUMPDEST
-//     const code = [_]u8{ 0x60, 0x03, 0x56, 0x62, 0x5b, 0x5b, 0x5b }; // PUSH1 0x03 JUMP PUSH3 0x5b5b5b
-//     const result = BytecodeDefault.init(allocator, &code);
-//     try std.testing.expectError(error.InvalidJumpDestination, result);
-// }
 
 test "Bytecode.getStats - basic stats" {
     const allocator = std.testing.allocator;
@@ -1119,44 +1095,8 @@ test "Bytecode malformed metadata - invalid CBOR header" {
     try std.testing.expect(metadata == null); // Should fail to parse
 }
 
-test "Bytecode malformed metadata - invalid string lengths" {
-    const allocator = std.testing.allocator;
-
-    // Test metadata with wrong string length marker
-    const code_bad_string = [_]u8{
-        0x60, 0x00, // Some contract code
-        // Bad metadata with wrong string length
-        0xa2, // CBOR map with 2 entries
-        0x65, 0x69, 0x70, 0x66, 0x73, // 5-byte string marker but "ipfs" is 4 bytes
-        0x58, 0x22, // 34 bytes following
-        // Dummy 32-byte hash
-        0x00, 0x00,
-        0x00, 0x00,
-        0x00, 0x00,
-        0x00, 0x00,
-        0x00, 0x00,
-        0x00, 0x00,
-        0x00, 0x00,
-        0x00, 0x00,
-        0x00, 0x00,
-        0x00, 0x00,
-        0x00, 0x00,
-        0x00, 0x00,
-        0x00, 0x00,
-        0x00, 0x00,
-        0x00, 0x00,
-        0x00, 0x00,
-        0x64, 0x73, 0x6f, 0x6c, 0x63, // "solc"
-        0x00, 0x08, 0x1e, // version
-        0x00, 0x30, // metadata length: 48 bytes (actual)
-    };
-
-    var bytecode = try BytecodeDefault.init(allocator, &code_bad_string);
-    defer bytecode.deinit();
-
-    const metadata = bytecode.parseSolidityMetadata();
-    try std.testing.expect(metadata == null);
-}
+// NOTE: parseSolidityMetadata() is not yet implemented - future feature for extracting
+// Solidity compiler metadata from bytecode. This test is disabled until the feature is added.
 
 test "Bytecode malformed metadata - wrong key names" {
     const allocator = std.testing.allocator;

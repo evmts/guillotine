@@ -585,7 +585,7 @@ pub const BytecodeStats = struct {
     
     pub fn formatStats(self: BytecodeStats, allocator: std.mem.Allocator) ![]const u8 {
         // https://ziglang.org/documentation/master/std/#std.array_list.Aligned
-        var list = try std.ArrayList(u8).initCapacity(allocator, 0);
+        var list = std.ArrayList(u8){};
         defer list.deinit(allocator);
         const writer = list.writer(allocator);
         
@@ -661,9 +661,30 @@ pub const BytecodeStats = struct {
             }
         }
         
-        if (self.patterns_5_plus.len > 0) {
+        if (self.patterns_5.len > 0) {
             try writer.writeAll("\nTop 5-opcode patterns:\n");
-            for (self.patterns_5_plus) |pattern| {
+            for (self.patterns_5) |pattern| {
+                try writer.print("  {} × {}\n", .{ pattern.count, pattern });
+            }
+        }
+
+        if (self.patterns_6.len > 0) {
+            try writer.writeAll("\nTop 6-opcode patterns:\n");
+            for (self.patterns_6) |pattern| {
+                try writer.print("  {} × {}\n", .{ pattern.count, pattern });
+            }
+        }
+
+        if (self.patterns_7.len > 0) {
+            try writer.writeAll("\nTop 7-opcode patterns:\n");
+            for (self.patterns_7) |pattern| {
+                try writer.print("  {} × {}\n", .{ pattern.count, pattern });
+            }
+        }
+
+        if (self.patterns_8.len > 0) {
+            try writer.writeAll("\nTop 8-opcode patterns:\n");
+            for (self.patterns_8) |pattern| {
                 try writer.print("  {} × {}\n", .{ pattern.count, pattern });
             }
         }
@@ -709,6 +730,13 @@ test "BytecodeStats formatStats basic functionality" {
         .jumps = &jumps,
         .backwards_jumps = 0,
         .is_create_code = false,
+        .patterns_2 = &.{},
+        .patterns_3 = &.{},
+        .patterns_4 = &.{},
+        .patterns_5 = &.{},
+        .patterns_6 = &.{},
+        .patterns_7 = &.{},
+        .patterns_8 = &.{},
     };
     
     const output = try stats.formatStats(allocator);
@@ -749,7 +777,7 @@ test "BytecodeStats formatStats basic functionality" {
 
 test "BytecodeStats formatStats empty statistics" {
     const allocator = std.testing.allocator;
-    
+
     const opcode_counts = [_]u32{0} ** 256;
     const stats = BytecodeStats{
         .opcode_counts = opcode_counts,
@@ -759,6 +787,13 @@ test "BytecodeStats formatStats empty statistics" {
         .jumps = &.{},
         .backwards_jumps = 0,
         .is_create_code = false,
+        .patterns_2 = &.{},
+        .patterns_3 = &.{},
+        .patterns_4 = &.{},
+        .patterns_5 = &.{},
+        .patterns_6 = &.{},
+        .patterns_7 = &.{},
+        .patterns_8 = &.{},
     };
     
     const output = try stats.formatStats(allocator);
@@ -778,10 +813,10 @@ test "BytecodeStats formatStats empty statistics" {
 
 test "BytecodeStats formatStats create code detection" {
     const allocator = std.testing.allocator;
-    
+
     var opcode_counts = [_]u32{0} ** 256;
     opcode_counts[@intFromEnum(Opcode.CODECOPY)] = 1;
-    
+
     const stats = BytecodeStats{
         .opcode_counts = opcode_counts,
         .push_values = &.{},
@@ -790,6 +825,13 @@ test "BytecodeStats formatStats create code detection" {
         .jumps = &.{},
         .backwards_jumps = 0,
         .is_create_code = true,
+        .patterns_2 = &.{},
+        .patterns_3 = &.{},
+        .patterns_4 = &.{},
+        .patterns_5 = &.{},
+        .patterns_6 = &.{},
+        .patterns_7 = &.{},
+        .patterns_8 = &.{},
     };
     
     const output = try stats.formatStats(allocator);
@@ -801,14 +843,14 @@ test "BytecodeStats formatStats create code detection" {
 
 test "BytecodeStats formatStats backwards jumps" {
     const allocator = std.testing.allocator;
-    
+
     const opcode_counts = [_]u32{0} ** 256;
     const jumps = [_]BytecodeStats.Jump{
         .{ .pc = 10, .target = 5 },  // Backwards jump
         .{ .pc = 15, .target = 20 }, // Forward jump
         .{ .pc = 25, .target = 8 },  // Backwards jump
     };
-    
+
     const stats = BytecodeStats{
         .opcode_counts = opcode_counts,
         .push_values = &.{},
@@ -817,6 +859,13 @@ test "BytecodeStats formatStats backwards jumps" {
         .jumps = &jumps,
         .backwards_jumps = 2,
         .is_create_code = false,
+        .patterns_2 = &.{},
+        .patterns_3 = &.{},
+        .patterns_4 = &.{},
+        .patterns_5 = &.{},
+        .patterns_6 = &.{},
+        .patterns_7 = &.{},
+        .patterns_8 = &.{},
     };
     
     const output = try stats.formatStats(allocator);
@@ -831,18 +880,18 @@ test "BytecodeStats formatStats backwards jumps" {
 
 test "BytecodeStats formatStats large values" {
     const allocator = std.testing.allocator;
-    
+
     var opcode_counts = [_]u32{0} ** 256;
     opcode_counts[@intFromEnum(Opcode.PUSH32)] = 999999;
-    
+
     const push_values = [_]BytecodeStats.PushValue{
         .{ .pc = 0, .value = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF }, // Max u256
     };
-    
+
     const jumps = [_]BytecodeStats.Jump{
         .{ .pc = 100000, .target = 0xDEADBEEFCAFEBABE },
     };
-    
+
     const stats = BytecodeStats{
         .opcode_counts = opcode_counts,
         .push_values = &push_values,
@@ -851,6 +900,13 @@ test "BytecodeStats formatStats large values" {
         .jumps = &jumps,
         .backwards_jumps = 0,
         .is_create_code = false,
+        .patterns_2 = &.{},
+        .patterns_3 = &.{},
+        .patterns_4 = &.{},
+        .patterns_5 = &.{},
+        .patterns_6 = &.{},
+        .patterns_7 = &.{},
+        .patterns_8 = &.{},
     };
     
     const output = try stats.formatStats(allocator);
@@ -865,7 +921,7 @@ test "BytecodeStats formatStats large values" {
 
 test "BytecodeStats formatStats all fusion types" {
     const allocator = std.testing.allocator;
-    
+
     const opcode_counts = [_]u32{0} ** 256;
     const fusions = [_]BytecodeStats.Fusion{
         .{ .pc = 0, .second_opcode = Opcode.ADD },
@@ -875,7 +931,7 @@ test "BytecodeStats formatStats all fusion types" {
         .{ .pc = 12, .second_opcode = Opcode.JUMP },
         .{ .pc = 15, .second_opcode = Opcode.JUMPI },
     };
-    
+
     const stats = BytecodeStats{
         .opcode_counts = opcode_counts,
         .push_values = &.{},
@@ -884,6 +940,13 @@ test "BytecodeStats formatStats all fusion types" {
         .jumps = &.{},
         .backwards_jumps = 0,
         .is_create_code = false,
+        .patterns_2 = &.{},
+        .patterns_3 = &.{},
+        .patterns_4 = &.{},
+        .patterns_5 = &.{},
+        .patterns_6 = &.{},
+        .patterns_7 = &.{},
+        .patterns_8 = &.{},
     };
     
     const output = try stats.formatStats(allocator);
@@ -901,11 +964,11 @@ test "BytecodeStats formatStats all fusion types" {
 
 test "BytecodeStats formatStats invalid opcode handling" {
     const allocator = std.testing.allocator;
-    
+
     var opcode_counts = [_]u32{0} ** 256;
     opcode_counts[0xFE] = 1; // Invalid opcode
     opcode_counts[0xFF] = 2; // Invalid opcode
-    
+
     const stats = BytecodeStats{
         .opcode_counts = opcode_counts,
         .push_values = &.{},
@@ -914,6 +977,13 @@ test "BytecodeStats formatStats invalid opcode handling" {
         .jumps = &.{},
         .backwards_jumps = 0,
         .is_create_code = false,
+        .patterns_2 = &.{},
+        .patterns_3 = &.{},
+        .patterns_4 = &.{},
+        .patterns_5 = &.{},
+        .patterns_6 = &.{},
+        .patterns_7 = &.{},
+        .patterns_8 = &.{},
     };
     
     const output = try stats.formatStats(allocator);
@@ -1303,16 +1373,260 @@ test "BytecodeStats deinit memory management" {
         @intFromEnum(Opcode.PUSH1), 0x03,
         @intFromEnum(Opcode.JUMP),
     };
-    
+
     var stats = try BytecodeStats.analyze(allocator, &bytecode);
-    
+
     // Verify we have some data to cleanup
     try std.testing.expect(stats.push_values.len > 0);
     try std.testing.expect(stats.potential_fusions.len > 0);
     try std.testing.expect(stats.jumpdests.len > 0);
     try std.testing.expect(stats.jumps.len > 0);
-    
+
     // This should not leak memory
     stats.deinit(allocator);
+}
+
+test "BytecodeStats pattern extraction - 2-opcode patterns" {
+    const allocator = std.testing.allocator;
+    const bytecode = [_]u8{
+        @intFromEnum(Opcode.PUSH1), 0x01,
+        @intFromEnum(Opcode.PUSH1), 0x02,
+        @intFromEnum(Opcode.ADD),
+        @intFromEnum(Opcode.PUSH1), 0x03,
+        @intFromEnum(Opcode.ADD),
+        @intFromEnum(Opcode.PUSH1), 0x04,
+        @intFromEnum(Opcode.ADD),
+    };
+
+    var stats = try BytecodeStats.analyze(allocator, &bytecode);
+    defer stats.deinit(allocator);
+
+    // Should detect PUSH1, ADD pattern (appears 3 times)
+    try std.testing.expect(stats.patterns_2.len > 0);
+    try std.testing.expectEqual(@intFromEnum(Opcode.PUSH1), stats.patterns_2[0].opcodes[0]);
+    try std.testing.expectEqual(@intFromEnum(Opcode.ADD), stats.patterns_2[0].opcodes[1]);
+    try std.testing.expectEqual(@as(u32, 3), stats.patterns_2[0].count);
+}
+
+test "BytecodeStats pattern extraction - 3-opcode patterns" {
+    const allocator = std.testing.allocator;
+    const bytecode = [_]u8{
+        @intFromEnum(Opcode.PUSH1), 0x01,
+        @intFromEnum(Opcode.PUSH1), 0x02,
+        @intFromEnum(Opcode.ADD),
+        @intFromEnum(Opcode.PUSH1), 0x03,
+        @intFromEnum(Opcode.PUSH1), 0x04,
+        @intFromEnum(Opcode.ADD),
+    };
+
+    var stats = try BytecodeStats.analyze(allocator, &bytecode);
+    defer stats.deinit(allocator);
+
+    // Should detect PUSH1, PUSH1, ADD pattern (appears 2 times)
+    try std.testing.expect(stats.patterns_3.len > 0);
+    try std.testing.expectEqual(@intFromEnum(Opcode.PUSH1), stats.patterns_3[0].opcodes[0]);
+    try std.testing.expectEqual(@intFromEnum(Opcode.PUSH1), stats.patterns_3[0].opcodes[1]);
+    try std.testing.expectEqual(@intFromEnum(Opcode.ADD), stats.patterns_3[0].opcodes[2]);
+    try std.testing.expectEqual(@as(u32, 2), stats.patterns_3[0].count);
+}
+
+test "BytecodeStats pattern extraction - 4-opcode patterns" {
+    const allocator = std.testing.allocator;
+    const bytecode = [_]u8{
+        @intFromEnum(Opcode.DUP1),
+        @intFromEnum(Opcode.PUSH1), 0x01,
+        @intFromEnum(Opcode.ADD),
+        @intFromEnum(Opcode.SWAP1),
+        @intFromEnum(Opcode.DUP1),
+        @intFromEnum(Opcode.PUSH1), 0x02,
+        @intFromEnum(Opcode.ADD),
+        @intFromEnum(Opcode.SWAP1),
+    };
+
+    var stats = try BytecodeStats.analyze(allocator, &bytecode);
+    defer stats.deinit(allocator);
+
+    // Should detect DUP1, PUSH1, ADD, SWAP1 pattern
+    try std.testing.expect(stats.patterns_4.len > 0);
+    try std.testing.expectEqual(@intFromEnum(Opcode.DUP1), stats.patterns_4[0].opcodes[0]);
+    try std.testing.expectEqual(@intFromEnum(Opcode.PUSH1), stats.patterns_4[0].opcodes[1]);
+    try std.testing.expectEqual(@intFromEnum(Opcode.ADD), stats.patterns_4[0].opcodes[2]);
+    try std.testing.expectEqual(@intFromEnum(Opcode.SWAP1), stats.patterns_4[0].opcodes[3]);
+    try std.testing.expectEqual(@as(u32, 2), stats.patterns_4[0].count);
+}
+
+test "BytecodeStats pattern extraction - 5-opcode patterns" {
+    const allocator = std.testing.allocator;
+    const bytecode = [_]u8{
+        @intFromEnum(Opcode.PUSH1), 0x00,
+        @intFromEnum(Opcode.DUP1),
+        @intFromEnum(Opcode.REVERT),
+        @intFromEnum(Opcode.JUMPDEST),
+        @intFromEnum(Opcode.STOP),
+        @intFromEnum(Opcode.PUSH1), 0x00,
+        @intFromEnum(Opcode.DUP1),
+        @intFromEnum(Opcode.REVERT),
+        @intFromEnum(Opcode.JUMPDEST),
+        @intFromEnum(Opcode.STOP),
+    };
+
+    var stats = try BytecodeStats.analyze(allocator, &bytecode);
+    defer stats.deinit(allocator);
+
+    // Should detect 5-opcode pattern
+    try std.testing.expect(stats.patterns_5.len > 0);
+    try std.testing.expectEqual(@as(u32, 2), stats.patterns_5[0].count);
+}
+
+test "BytecodeStats pattern extraction - 6-opcode patterns" {
+    const allocator = std.testing.allocator;
+    var bytecode: [18]u8 = undefined;
+    // Create a 6-opcode pattern that repeats 3 times
+    const pattern = [_]u8{
+        @intFromEnum(Opcode.DUP1),
+        @intFromEnum(Opcode.DUP2),
+        @intFromEnum(Opcode.ADD),
+        @intFromEnum(Opcode.SWAP1),
+        @intFromEnum(Opcode.POP),
+        @intFromEnum(Opcode.JUMPDEST),
+    };
+    for (0..3) |i| {
+        @memcpy(bytecode[i * 6 .. (i + 1) * 6], &pattern);
+    }
+
+    var stats = try BytecodeStats.analyze(allocator, &bytecode);
+    defer stats.deinit(allocator);
+
+    // Should detect 6-opcode pattern repeated 3 times
+    try std.testing.expect(stats.patterns_6.len > 0);
+    try std.testing.expectEqual(@as(u32, 3), stats.patterns_6[0].count);
+}
+
+test "BytecodeStats pattern extraction - 7-opcode patterns" {
+    const allocator = std.testing.allocator;
+    var bytecode: [14]u8 = undefined;
+    const pattern = [_]u8{
+        @intFromEnum(Opcode.PUSH1), 0x00,
+        @intFromEnum(Opcode.CALLDATALOAD),
+        @intFromEnum(Opcode.PUSH1), 0xE0,
+        @intFromEnum(Opcode.SHR),
+        @intFromEnum(Opcode.DUP1),
+        @intFromEnum(Opcode.PUSH4),
+    };
+    @memcpy(bytecode[0..7], &pattern);
+    @memcpy(bytecode[7..14], &pattern);
+
+    var stats = try BytecodeStats.analyze(allocator, &bytecode);
+    defer stats.deinit(allocator);
+
+    try std.testing.expect(stats.patterns_7.len > 0);
+    try std.testing.expectEqual(@as(u32, 2), stats.patterns_7[0].count);
+}
+
+test "BytecodeStats pattern extraction - 8-opcode patterns" {
+    const allocator = std.testing.allocator;
+    var bytecode: [16]u8 = undefined;
+    const pattern = [_]u8{
+        @intFromEnum(Opcode.PUSH1), 0x00,
+        @intFromEnum(Opcode.CALLDATALOAD),
+        @intFromEnum(Opcode.PUSH1), 0xE0,
+        @intFromEnum(Opcode.SHR),
+        @intFromEnum(Opcode.DUP1),
+        @intFromEnum(Opcode.PUSH4), 0xAA,
+    };
+    @memcpy(bytecode[0..8], &pattern);
+    @memcpy(bytecode[8..16], &pattern);
+
+    var stats = try BytecodeStats.analyze(allocator, &bytecode);
+    defer stats.deinit(allocator);
+
+    try std.testing.expect(stats.patterns_8.len > 0);
+    try std.testing.expectEqual(@as(u32, 2), stats.patterns_8[0].count);
+}
+
+test "BytecodeStats pattern extraction - no memory leaks" {
+    const allocator = std.testing.allocator;
+    const bytecode = [_]u8{
+        @intFromEnum(Opcode.PUSH1), 0x01,
+        @intFromEnum(Opcode.PUSH1), 0x02,
+        @intFromEnum(Opcode.ADD),
+        @intFromEnum(Opcode.DUP1),
+        @intFromEnum(Opcode.PUSH1), 0x03,
+        @intFromEnum(Opcode.MUL),
+        @intFromEnum(Opcode.SWAP1),
+        @intFromEnum(Opcode.POP),
+    };
+
+    var stats = try BytecodeStats.analyze(allocator, &bytecode);
+    defer stats.deinit(allocator);
+
+    // Verify patterns were extracted
+    try std.testing.expect(stats.patterns_2.len > 0);
+    try std.testing.expect(stats.patterns_3.len > 0);
+    try std.testing.expect(stats.patterns_4.len > 0);
+
+    // If we get here without leaks, the test passes
+}
+
+test "BytecodeStats pattern extraction - top 3 limit" {
+    const allocator = std.testing.allocator;
+    // Create bytecode with many different patterns
+    var bytecode: [30]u8 = undefined;
+    for (0..15) |i| {
+        bytecode[i * 2] = @intFromEnum(Opcode.PUSH1);
+        bytecode[i * 2 + 1] = @as(u8, @intCast(i));
+    }
+
+    var stats = try BytecodeStats.analyze(allocator, &bytecode);
+    defer stats.deinit(allocator);
+
+    // Should return at most 3 patterns for each length
+    try std.testing.expect(stats.patterns_2.len <= 3);
+    try std.testing.expect(stats.patterns_3.len <= 3);
+    try std.testing.expect(stats.patterns_4.len <= 3);
+    try std.testing.expect(stats.patterns_5.len <= 3);
+    try std.testing.expect(stats.patterns_6.len <= 3);
+    try std.testing.expect(stats.patterns_7.len <= 3);
+    try std.testing.expect(stats.patterns_8.len <= 3);
+}
+
+test "BytecodeStats pattern extraction - empty bytecode" {
+    const allocator = std.testing.allocator;
+    const bytecode: []const u8 = &.{};
+
+    var stats = try BytecodeStats.analyze(allocator, bytecode);
+    defer stats.deinit(allocator);
+
+    // All pattern arrays should be empty
+    try std.testing.expectEqual(@as(usize, 0), stats.patterns_2.len);
+    try std.testing.expectEqual(@as(usize, 0), stats.patterns_3.len);
+    try std.testing.expectEqual(@as(usize, 0), stats.patterns_4.len);
+    try std.testing.expectEqual(@as(usize, 0), stats.patterns_5.len);
+    try std.testing.expectEqual(@as(usize, 0), stats.patterns_6.len);
+    try std.testing.expectEqual(@as(usize, 0), stats.patterns_7.len);
+    try std.testing.expectEqual(@as(usize, 0), stats.patterns_8.len);
+}
+
+test "BytecodeStats pattern Format implementation" {
+    const allocator = std.testing.allocator;
+    const bytecode = [_]u8{
+        @intFromEnum(Opcode.PUSH1), 0x01,
+        @intFromEnum(Opcode.ADD),
+    };
+
+    var stats = try BytecodeStats.analyze(allocator, &bytecode);
+    defer stats.deinit(allocator);
+
+    // Test pattern formatting
+    if (stats.patterns_2.len > 0) {
+        var buffer: [256]u8 = undefined;
+        var fba = std.heap.FixedBufferAllocator.init(&buffer);
+        const fba_alloc = fba.allocator();
+
+        const pattern_str = try std.fmt.allocPrint(fba_alloc, "{}", .{stats.patterns_2[0]});
+        // Should contain "[PUSH1, ADD]" or similar
+        try std.testing.expect(std.mem.indexOf(u8, pattern_str, "[") != null);
+        try std.testing.expect(std.mem.indexOf(u8, pattern_str, "]") != null);
+    }
 }
 

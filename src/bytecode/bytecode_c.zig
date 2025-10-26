@@ -639,23 +639,24 @@ pub fn evm_bytecode_pretty_print(data: [*]const u8, data_len: usize, buffer: [*]
 
 pub fn evm_bytecode_pretty_print_with_allocator(alloc: std.mem.Allocator, data: [*]const u8, data_len: usize, buffer: [*]u8, buffer_len: usize) usize {
     if (data_len == 0) return 0;
-    
+
     const bytecode_slice = data[0..data_len];
-    
+
     // Create bytecode instance
-    const bytecode = BytecodeType.init(alloc, bytecode_slice) catch return 0;
-    
-    // Call pretty_print 
+    var bytecode = BytecodeType.init(alloc, bytecode_slice) catch return 0;
+    defer bytecode.deinit(); // CRITICAL: Clean up bytecode resources
+
+    // Call pretty_print
     const output = bytecode.pretty_print(alloc) catch return 0;
     defer alloc.free(output);
-    
+
     // Copy to buffer
     if (buffer_len == 0) return output.len + 1; // Return required size
-    
+
     const copy_len = @min(output.len, buffer_len - 1);
     @memcpy(buffer[0..copy_len], output[0..copy_len]);
     buffer[copy_len] = 0; // Null terminate
-    
+
     return copy_len + 1;
 }
 
@@ -748,19 +749,186 @@ test "Bytecode C API analysis" {
     try std.testing.expect(h_opt != null);
     const h = h_opt.?;
     defer evm_bytecode_destroy(h);
-    
+
     var analysis: CBytecodeAnalysis = undefined;
     const rc = evm_bytecode_analyze(h, &analysis);
     defer evm_bytecode_free_analysis(&analysis);
-    
+
     try std.testing.expectEqual(@as(c_int, EVM_BYTECODE_SUCCESS), rc);
-    
+
     // Should have detected the constant folding fusion
     try std.testing.expectEqual(@as(u32, 1), analysis.advanced_fusions_count);
     try std.testing.expectEqual(@as(u32, 0), analysis.advanced_fusions[0].pc);
     try std.testing.expectEqual(CFusionType.constant_fold, analysis.advanced_fusions[0].info.fusion_type);
     try std.testing.expectEqual(@as(u32, 5), analysis.advanced_fusions[0].info.original_length);
-    
+
     // Folded value should be 8 (5 + 3)
     try std.testing.expectEqual(@as(u64, 8), analysis.advanced_fusions[0].info.folded_value_low);
+}
+
+test "Pretty print basic bytecode" {
+    // PUSH1 0x2A PUSH1 0x0A ADD STOP
+    const code = [_]u8{ 0x60, 0x2A, 0x60, 0x0A, 0x01, 0x00 };
+    var buffer: [1024]u8 = undefined;
+
+    const written = evm_bytecode_pretty_print(&code, code.len, &buffer, buffer.len);
+
+    // Should write something
+    try std.testing.expect(written > 0);
+    try std.testing.expect(written <= buffer.len);
+
+    // Output should be null-terminated
+    try std.testing.expectEqual(@as(u8, 0), buffer[written - 1]);
+
+    // Output should contain expected opcodes
+    const output = buffer[0..written-1];
+    try std.testing.expect(std.mem.indexOf(u8, output, "PUSH1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "ADD") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "STOP") != null);
+}
+
+test "Pretty print with small buffer (size query)" {
+    const code = [_]u8{ 0x60, 0x2A, 0x01, 0x00 };
+    var dummy_buffer: [1]u8 = undefined;
+
+    // Query required size by passing buffer_len=0
+    const required = evm_bytecode_pretty_print(&code, code.len, &dummy_buffer, 0);
+
+    // Should return required size
+    try std.testing.expect(required > 0);
+
+    // Now allocate exact size and test
+    const test_allocator = std.testing.allocator;
+    const buffer = try test_allocator.alloc(u8, required);
+    defer test_allocator.free(buffer);
+
+    const written = evm_bytecode_pretty_print(&code, code.len, buffer.ptr, buffer.len);
+    try std.testing.expectEqual(required, written);
+}
+
+test "Pretty print with insufficient buffer" {
+    const code = [_]u8{ 0x60, 0x2A, 0x60, 0x0A, 0x01, 0x00 };
+    var small_buffer: [10]u8 = undefined;
+
+    const written = evm_bytecode_pretty_print(&code, code.len, &small_buffer, small_buffer.len);
+
+    // Should write up to buffer size
+    try std.testing.expect(written > 0);
+    try std.testing.expectEqual(@as(usize, small_buffer.len), written);
+
+    // Last byte should be null terminator
+    try std.testing.expectEqual(@as(u8, 0), small_buffer[written - 1]);
+}
+
+test "Pretty print empty bytecode" {
+    const code = [_]u8{};
+    var buffer: [256]u8 = undefined;
+
+    const written = evm_bytecode_pretty_print(&code, code.len, &buffer, buffer.len);
+
+    // Empty bytecode should return 0
+    try std.testing.expectEqual(@as(usize, 0), written);
+}
+
+test "Pretty print with invalid bytecode" {
+    // Invalid opcode (0x0C not defined)
+    const code = [_]u8{ 0x0C };
+    var buffer: [256]u8 = undefined;
+
+    const written = evm_bytecode_pretty_print(&code, code.len, &buffer, buffer.len);
+
+    // Should handle gracefully (returns 0 on bytecode init error)
+    // Note: 0x0C is actually handled as INVALID opcode, so this might succeed
+    // The key is that it doesn't crash
+    _ = written;
+}
+
+test "Pretty print complex bytecode with jumpdest" {
+    // PUSH1 0x05 JUMPI STOP JUMPDEST POP STOP
+    const code = [_]u8{ 0x60, 0x05, 0x57, 0x00, 0x5b, 0x50, 0x00 };
+    var buffer: [2048]u8 = undefined;
+
+    const written = evm_bytecode_pretty_print(&code, code.len, &buffer, buffer.len);
+
+    try std.testing.expect(written > 0);
+
+    const output = buffer[0..written-1];
+    try std.testing.expect(std.mem.indexOf(u8, output, "PUSH1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "JUMPI") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "JUMPDEST") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "POP") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "STOP") != null);
+}
+
+test "Pretty print large bytecode" {
+    const test_allocator = std.testing.allocator;
+
+    // Create a large bytecode (1000 STOP instructions)
+    const large_code = try test_allocator.alloc(u8, 1000);
+    defer test_allocator.free(large_code);
+    @memset(large_code, 0x00); // STOP
+
+    // Query required size
+    var dummy: [1]u8 = undefined;
+    const required = evm_bytecode_pretty_print(large_code.ptr, large_code.len, &dummy, 0);
+    try std.testing.expect(required > 0);
+
+    // Allocate and pretty print
+    const buffer = try test_allocator.alloc(u8, required);
+    defer test_allocator.free(buffer);
+
+    const written = evm_bytecode_pretty_print(large_code.ptr, large_code.len, buffer.ptr, buffer.len);
+    try std.testing.expectEqual(required, written);
+}
+
+test "Pretty print memory leak detection" {
+    const test_allocator = std.testing.allocator;
+
+    // PUSH1 0x2A PUSH1 0x0A ADD STOP
+    const code = [_]u8{ 0x60, 0x2A, 0x60, 0x0A, 0x01, 0x00 };
+
+    // Call pretty_print multiple times to detect leaks
+    for (0..100) |_| {
+        var buffer: [1024]u8 = undefined;
+        const written = evm_bytecode_pretty_print_with_allocator(
+            test_allocator,
+            &code,
+            code.len,
+            &buffer,
+            buffer.len
+        );
+        try std.testing.expect(written > 0);
+    }
+
+    // If there were memory leaks, test_allocator would catch them
+}
+
+test "Pretty print with truncated PUSH data" {
+    // PUSH2 but only 1 byte of data follows (malformed)
+    const code = [_]u8{ 0x61, 0x2A };
+    var buffer: [256]u8 = undefined;
+
+    // Should return 0 on init error (truncated PUSH)
+    const written = evm_bytecode_pretty_print(&code, code.len, &buffer, buffer.len);
+    try std.testing.expectEqual(@as(usize, 0), written);
+}
+
+test "Pretty print with all PUSH variants" {
+    // Test PUSH1 through PUSH4
+    const code = [_]u8{
+        0x60, 0x01,             // PUSH1 0x01
+        0x61, 0x01, 0x02,       // PUSH2 0x0102
+        0x62, 0x01, 0x02, 0x03, // PUSH3 0x010203
+        0x63, 0x01, 0x02, 0x03, 0x04, // PUSH4 0x01020304
+    };
+    var buffer: [2048]u8 = undefined;
+
+    const written = evm_bytecode_pretty_print(&code, code.len, &buffer, buffer.len);
+    try std.testing.expect(written > 0);
+
+    const output = buffer[0..written-1];
+    try std.testing.expect(std.mem.indexOf(u8, output, "PUSH1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "PUSH2") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "PUSH3") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "PUSH4") != null);
 }
