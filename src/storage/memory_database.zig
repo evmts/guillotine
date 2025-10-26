@@ -255,11 +255,17 @@ pub const MemoryDatabase = struct {
     }
 
     pub fn commit_changes(self: *Self) Database.Error![32]u8 {
-        // Clear transient storage
-        self.transient_storage.clearAndFree();
-        
+        // Clear transient storage (EIP-1153)
+        self.clear_transient_storage();
+
         // Return dummy root
         return [_]u8{0} ** 32;
+    }
+
+    /// Clear transient storage (called at transaction end per EIP-1153)
+    /// Uses clearRetainingCapacity to avoid memory churn between transactions
+    pub fn clear_transient_storage(self: *Self) void {
+        self.transient_storage.clearRetainingCapacity();
     }
 
     // Snapshot operations
@@ -578,178 +584,10 @@ const CONSTRUCTOR_CONTRACT = [_]u8{
 
 test "CREATE stores code and retrieves via get_code_by_address" {
     return error.SkipZigTest; // TODO: Update to use new architecture
-
-    //     return error.SkipZigTest; // TODO: Update to use new architecture
-    //     const skip = std.time.nanoTimestamp() >= 0; // runtime-true to skip without unreachable
-    //     if (skip) return error.SkipZigTest;
-    //     const allocator = std.testing.allocator;
-    
-    //     // Create EVM
-    //     const result = try createTestEvm(allocator);
-    //     var evm = result.evm;
-    //     var memory_db = result.memory_db;
-    //     defer {
-    //         evm.deinit();
-    //         allocator.destroy(evm);
-    //         db.deinit();
-    //         allocator.destroy(memory_db);
-    //     }
-    
-    //     const creator_address = to_address(0x1000);
-    //     const host = evm.to_host();
-    //     const FrameInterpreterType = @import("../evm/frame_interpreter.zig").FrameInterpreter(.{ .has_database = true });
-    
-    //     // Set up creator account with balance
-    //     var creator_account = Account.zero();
-    //     creator_account.balance = 100000;
-    //     try evm.database.set_account(creator_address, creator_account);
-    
-    //     // Prepare CREATE bytecode:
-    //     // 1. Put constructor code in memory
-    //     // 2. Call CREATE
-    //     var create_bytecode = std.ArrayList(u8).init(allocator);
-    //     defer create_bytecode.deinit();
-    
-    //     // Store constructor code in memory at offset 0
-    //     for (CONSTRUCTOR_CONTRACT, 0..) |byte, i| {
-    //         try create_bytecode.append(0x60); // PUSH1
-    //         try create_bytecode.append(byte);
-    //         try create_bytecode.append(0x60); // PUSH1
-    //         try create_bytecode.append(@intCast(i));
-    //         try create_bytecode.append(0x52); // MSTORE8
-    //     }
-    
-    //     // CREATE: value=0, offset=0, size=len(CONSTRUCTOR_CONTRACT)
-    //     try create_bytecode.append(0x60); // PUSH1
-    //     try create_bytecode.append(@intCast(CONSTRUCTOR_CONTRACT.len)); // size
-    //     try create_bytecode.append(0x60); // PUSH1 
-    //     try create_bytecode.append(0x00); // offset
-    //     try create_bytecode.append(0x60); // PUSH1
-    //     try create_bytecode.append(0x00); // value
-    //     try create_bytecode.append(0xF0); // CREATE
-    
-    //     // STOP
-    //     try create_bytecode.append(0x00);
-    
-    //     // Execute CREATE
-    //     var interpreter = try FrameInterpreterType.init(allocator, create_bytecode.items, 1000000, evm.database, host);
-    //     defer interpreter.deinit(allocator);
-    
-    //     interpreter.frame.contract_address = creator_address;
-    
-    //     // Execute until STOP (interpret handles STOP internally)
-    //     try interpreter.interpret();
-    
-    //     // Get the created address from stack
-    //     try std.testing.expectEqual(@as(usize, 1), interpreter.frame.stack.size());
-    //     const created_address_u256 = try interpreter.frame.stack.pop();
-    //     const created_address = @import("primitives").Address.from_u256(created_address_u256);
-    
-    //     // Verify the created contract exists
-    //     const created_account = try evm.database.get_account(created_address);
-    //     try std.testing.expect(created_account != null);
-    
-    //     // Get the deployed code
-    //     const deployed_code = try evm.database.get_code_by_address(created_address);
-    
-    //     // The deployed code should be the runtime code (last 10 bytes of CONSTRUCTOR_CONTRACT)
-    //     const expected_runtime_code = CONSTRUCTOR_CONTRACT[12..];
-    //     try std.testing.expectEqualSlices(u8, expected_runtime_code, deployed_code);
-    
-    //     // Verify we can also get code by address
-    //     const code_by_address = try evm.database.get_code_by_address(created_address);
-    //     try std.testing.expectEqualSlices(u8, expected_runtime_code, code_by_address);
 }
 
 test "CREATE2 stores code with deterministic address" {
     return error.SkipZigTest; // TODO: Update to use new architecture
-
-    //     return error.SkipZigTest; // TODO: Update to use new architecture
-    //     const skip = std.time.nanoTimestamp() >= 0; // runtime-true to skip without unreachable
-    //     if (skip) return error.SkipZigTest;
-    //     const allocator = std.testing.allocator;
-    
-    //     // Create EVM
-    //     const result = try createTestEvm(allocator);
-    //     var evm = result.evm;
-    //     var memory_db = result.memory_db;
-    //     defer {
-    //         evm.deinit();
-    //         allocator.destroy(evm);
-    //         db.deinit();
-    //         allocator.destroy(memory_db);
-    //     }
-    
-    //     const creator_address = to_address(0x2000);
-    //     const salt: u256 = 0x123456789abcdef;
-    
-    //     // Set up creator account
-    //     var creator_account = Account.zero();
-    //     creator_account.balance = 100000;
-    //     try evm.database.set_account(creator_address, creator_account);
-    
-    //     // Calculate expected CREATE2 address
-    //     const expected_address = try calculateCreate2Address(creator_address, salt, &CONSTRUCTOR_CONTRACT);
-    
-    //     const host = evm.to_host();
-    //     const FrameInterpreterType = @import("../evm/frame_interpreter.zig").FrameInterpreter(.{ .has_database = true });
-    
-    //     // Prepare CREATE2 bytecode
-    //     var create2_bytecode = std.ArrayList(u8).init(allocator);
-    //     defer create2_bytecode.deinit();
-    
-    //     // Store constructor code in memory
-    //     for (CONSTRUCTOR_CONTRACT, 0..) |byte, i| {
-    //         try create2_bytecode.append(0x60); // PUSH1
-    //         try create2_bytecode.append(byte);
-    //         try create2_bytecode.append(0x60); // PUSH1
-    //         try create2_bytecode.append(@intCast(i));
-    //         try create2_bytecode.append(0x52); // MSTORE8
-    //     }
-    
-    //     // CREATE2: salt, size, offset, value
-    //     // Push salt (32 bytes)
-    //     try create2_bytecode.appendSlice(&[_]u8{ 0x7F }); // PUSH32
-    //     var salt_bytes: [32]u8 = @bitCast(salt);
-    //     // Convert to big-endian
-    //     std.mem.reverse(u8, &salt_bytes);
-    //     try create2_bytecode.appendSlice(&salt_bytes);
-    
-    //     try create2_bytecode.append(0x60); // PUSH1
-    //     try create2_bytecode.append(@intCast(CONSTRUCTOR_CONTRACT.len)); // size
-    //     try create2_bytecode.append(0x60); // PUSH1
-    //     try create2_bytecode.append(0x00); // offset
-    //     try create2_bytecode.append(0x60); // PUSH1
-    //     try create2_bytecode.append(0x00); // value
-    //     try create2_bytecode.append(0xF5); // CREATE2
-    
-    //     // STOP
-    //     try create2_bytecode.append(0x00);
-    
-    //     // Execute CREATE2
-    //     var interpreter = try FrameInterpreterType.init(allocator, create2_bytecode.items, 1000000, evm.database, host);
-    //     defer interpreter.deinit(allocator);
-    
-    //     interpreter.frame.contract_address = creator_address;
-    
-    //     // Execute until STOP
-    //     try interpreter.interpret();
-    
-    //     // Get the created address from stack
-    //     try std.testing.expectEqual(@as(usize, 1), interpreter.frame.stack.size());
-    //     const created_address_u256 = try interpreter.frame.stack.pop();
-    //     const created_address = @import("primitives").Address.from_u256(created_address_u256);
-    
-    //     // Verify it matches the expected CREATE2 address
-    //     try std.testing.expectEqual(expected_address, created_address);
-    
-    //     // Verify the contract exists and has correct code
-    //     const created_account = try evm.database.get_account(created_address);
-    //     try std.testing.expect(created_account != null);
-    
-    //     const deployed_code = try evm.database.get_code_by_address(created_address);
-    //     const expected_runtime_code = CONSTRUCTOR_CONTRACT[12..];
-    //     try std.testing.expectEqualSlices(u8, expected_runtime_code, deployed_code);
 }
 
 test "get_code_by_address returns empty for non-existent contracts" {

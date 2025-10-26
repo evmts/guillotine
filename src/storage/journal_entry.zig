@@ -147,7 +147,7 @@ test "JournalEntry creation and field access" {
     };
     const Entry = JournalEntry(config);
     
-    const addr = address_mod.from_hex("0x1234567890123456789012345678901234567890") catch unreachable;
+    const addr = address_mod.fromHex("0x1234567890123456789012345678901234567890") catch unreachable;
     const key: u128 = 42;
     const value: u128 = 100;
     
@@ -208,7 +208,7 @@ test "JournalEntry creation and field access" {
     }
     
     // Test account destroyed
-    const beneficiary = address_mod.from_hex("0x9876543210987654321098765432109876543210") catch unreachable;
+    const beneficiary = address_mod.fromHex("0x9876543210987654321098765432109876543210") catch unreachable;
     const destroyed_entry = Entry.account_destroyed(6, addr, beneficiary, 50000);
     try testing.expectEqual(@as(u16, 6), destroyed_entry.snapshot_id);
     switch (destroyed_entry.data) {
@@ -453,7 +453,7 @@ test "JournalEntry - mixed type sizes" {
         .NonceType = u16,        // Medium nonce
     };
     const Entry = JournalEntry(config);
-    const addr = address_mod.from_hex("0x1111111111111111111111111111111111111111") catch unreachable;
+    const addr = address_mod.fromHex("0x1111111111111111111111111111111111111111") catch unreachable;
     
     // Test mixed type sizes work together
     const storage_entry = Entry.storage_change(

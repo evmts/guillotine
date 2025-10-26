@@ -240,8 +240,10 @@ pub fn LruCache(comptime K: type, comptime V: type, comptime config: LruConfig) 
         }
         
         fn evictLru(self: *Self) EvictedItem {
-            std.debug.assert(self.tail != INVALID_INDEX);
-            
+            if (self.tail == INVALID_INDEX) {
+                @panic("LRU cache eviction called with empty cache");
+            }
+
             const idx = self.tail;
             const node = self.nodes[idx];
             
@@ -267,8 +269,10 @@ pub fn LruCache(comptime K: type, comptime V: type, comptime config: LruConfig) 
         }
         
         fn allocateNode(self: *Self) usize {
-            std.debug.assert(self.free_head != INVALID_INDEX);
-            
+            if (self.free_head == INVALID_INDEX) {
+                @panic("LRU cache allocation called with no free nodes");
+            }
+
             const idx = self.free_head;
             const node = &self.nodes[idx];
             

@@ -697,52 +697,101 @@ const MemoryDatabase = @import("memory_database.zig").MemoryDatabase;
 const BlockInfo = @import("../block/block_info.zig").BlockInfo;
 const TransactionContext = @import("../block/transaction_context.zig").TransactionContext;
 const Hardfork = @import("../eips_and_hardforks/eips.zig").Hardfork;
-// const FrameInterpreter = @import("../evm/frame_interpreter.zig").FrameInterpreter;
 
 test "EIP-2929 - SLOAD multiple slots warm/cold pattern" {
-    return error.SkipZigTest; // TODO: Update to use new architecture
+    const allocator = testing.allocator;
 
-    //     return error.SkipZigTest; // TODO: Update this test to use the new architecture
-    //     const allocator = testing.allocator;
+    var db = Database.init(allocator);
+    defer db.deinit();
 
-    //     var db = Database.init(allocator);
-    //     defer db.deinit();
+    const block_info = BlockInfo{
+        .number = 1,
+        .timestamp = 1000,
+        .difficulty = 100,
+        .gas_limit = 30_000_000,
+        .base_fee = 10,
+        .coinbase = ZERO_ADDRESS,
+        .prev_randao = [_]u8{1} ** 32,
+    };
 
-    //     const block_info = BlockInfo.init();
-    //     const context = TransactionContext{
-    //         .gas_limit = 1_000_000,
-    //         .coinbase = ZERO_ADDRESS,
-    //         .chain_id = 1,
-    //     };
+    const tx_context = TransactionContext{
+        .gas_limit = 1_000_000,
+        .coinbase = ZERO_ADDRESS,
+        .chain_id = 1,
+        .blob_versioned_hashes = &.{},
+        .blob_base_fee = 0,
+    };
 
-    //     var evm = try Evm(.{}).init(allocator, &db, block_info, context, 0, ZERO_ADDRESS, Hardfork.BERLIN);
-    //     defer evm.deinit();
+    var evm = try Evm(.{}).init(allocator, &db, block_info, tx_context, 20, ZERO_ADDRESS, Hardfork.BERLIN);
+    defer evm.deinit();
 
-    //     const contract_address = Address{ .bytes = [_]u8{0x12} ** 20 };
+    const contract_address = Address{ .bytes = [_]u8{0x12} ** 20 };
 
-    //     // Test multiple slots
-    //     const slots = [_]u256{ 0, 1, 100, 0xFFFF, std.math.maxInt(u256) };
+    // Test multiple slots
+    const slots = [_]u256{ 0, 1, 100, 0xFFFF, std.math.maxInt(u256) };
 
-    //     // First access to each slot should be cold
-    //     for (slots) |slot| {
-    //         const cost = try evm.access_storage_slot(contract_address, slot);
-    //         try testing.expectEqual(GasConstants.ColdSloadCost, cost);
-    //     }
+    // First access to each slot should be cold
+    for (slots) |slot| {
+        const cost = try evm.access_storage_slot(contract_address, slot);
+        try testing.expectEqual(GasConstants.ColdSloadCost, cost);
+    }
 
-    //     // Second access to each slot should be warm
-    //     for (slots) |slot| {
-    //         const cost = try evm.access_storage_slot(contract_address, slot);
-    //         try testing.expectEqual(GasConstants.WarmStorageReadCost, cost);
-    //     }
+    // Second access to each slot should be warm
+    for (slots) |slot| {
+        const cost = try evm.access_storage_slot(contract_address, slot);
+        try testing.expectEqual(GasConstants.WarmStorageReadCost, cost);
+    }
 
-    //     // Access a new slot - should be cold
-    //     const new_slot_cost = try evm.access_storage_slot(contract_address, 0xDEADBEEF);
-    //     try testing.expectEqual(GasConstants.ColdSloadCost, new_slot_cost);
+    // Access a new slot - should be cold
+    const new_slot_cost = try evm.access_storage_slot(contract_address, 0xDEADBEEF);
+    try testing.expectEqual(GasConstants.ColdSloadCost, new_slot_cost);
 }
 
 test "EIP-2929 - SSTORE warm/cold access patterns" {
-    // TODO: Update to use new architecture
-    return error.SkipZigTest;
+    const allocator = testing.allocator;
+
+    var db = Database.init(allocator);
+    defer db.deinit();
+
+    const block_info = BlockInfo{
+        .number = 1,
+        .timestamp = 1000,
+        .difficulty = 100,
+        .gas_limit = 30_000_000,
+        .base_fee = 10,
+        .coinbase = ZERO_ADDRESS,
+        .prev_randao = [_]u8{1} ** 32,
+    };
+
+    const tx_context = TransactionContext{
+        .gas_limit = 1_000_000,
+        .coinbase = ZERO_ADDRESS,
+        .chain_id = 1,
+        .blob_versioned_hashes = &.{},
+        .blob_base_fee = 0,
+    };
+
+    var evm = try Evm(.{}).init(allocator, &db, block_info, tx_context, 20, ZERO_ADDRESS, Hardfork.BERLIN);
+    defer evm.deinit();
+
+    const contract_address = Address{ .bytes = [_]u8{0x12} ** 20 };
+    const slot: u256 = 42;
+
+    // First SSTORE access to a slot - storage slot should become warm after access
+    const first_cost = try evm.access_storage_slot(contract_address, slot);
+    try testing.expectEqual(GasConstants.ColdSloadCost, first_cost);
+
+    // Second SSTORE to same slot - should be warm
+    const second_cost = try evm.access_storage_slot(contract_address, slot);
+    try testing.expectEqual(GasConstants.WarmStorageReadCost, second_cost);
+
+    // Access different slot - should be cold
+    const different_slot_cost = try evm.access_storage_slot(contract_address, 100);
+    try testing.expectEqual(GasConstants.ColdSloadCost, different_slot_cost);
+
+    // Second access to different slot - should be warm
+    const different_slot_warm = try evm.access_storage_slot(contract_address, 100);
+    try testing.expectEqual(GasConstants.WarmStorageReadCost, different_slot_warm);
 }
 
 test "EIP-2929 - Cross-opcode warm address sharing" {
