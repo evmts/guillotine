@@ -76,3 +76,39 @@ pub fn set_top(self: *Self, value: u256) Error!void {
     }
     self.items.items[self.items.items.len - 1] = value;
 }
+
+/// Duplicate stack item at position n
+/// DUP1 (n=1) duplicates top, DUP2 (n=2) duplicates second, etc.
+/// Returns StackUnderflow if stack has fewer than n items
+/// Returns StackOverflow if stack is at capacity
+pub fn dup_n(self: *Self, n: usize) Error!void {
+    if (n == 0 or n > 16) {
+        return Error.StackUnderflow; // Invalid n
+    }
+    if (self.items.items.len < n) {
+        return Error.StackUnderflow;
+    }
+    if (self.items.items.len >= MAX_STACK_SIZE) {
+        return Error.StackOverflow;
+    }
+    // Duplicate item at depth n (1-indexed from top)
+    const value = self.items.items[self.items.items.len - n];
+    self.items.append(self.allocator, value) catch return Error.AllocationError;
+}
+
+/// Swap top stack item with item at position n+1
+/// SWAP1 (n=1) swaps top with second, SWAP2 (n=2) swaps top with third, etc.
+/// Returns StackUnderflow if stack has n+1 or fewer items
+pub fn swap_n(self: *Self, n: usize) Error!void {
+    if (n == 0 or n > 16) {
+        return Error.StackUnderflow; // Invalid n
+    }
+    if (self.items.items.len <= n) {
+        return Error.StackUnderflow;
+    }
+    const top_idx = self.items.items.len - 1;
+    const swap_idx = self.items.items.len - 1 - n;
+    const temp = self.items.items[top_idx];
+    self.items.items[top_idx] = self.items.items[swap_idx];
+    self.items.items[swap_idx] = temp;
+}
