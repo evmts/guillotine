@@ -101,13 +101,13 @@ pub const JsonRpcRequest = struct {
             else => return error.InvalidRequest,
         };
 
-        var params_str = std.array_list.AlignedManaged(u8, null).init(allocator);
-        defer params_str.deinit();
-        try std.json.stringify(params, .{}, params_str.writer());
-
+        const params_json = try std.json.Stringify.valueAlloc(allocator, params, .{});
+        errdefer allocator.free(params_json);
+        const method_copy = try allocator.dupe(u8, method.string);
+        errdefer allocator.free(method_copy);
         return JsonRpcRequest{
-            .method = try allocator.dupe(u8, method.string),
-            .params = try allocator.dupe(u8, params_str.items),
+            .method = method_copy,
+            .params = params_json,
             .id = id_value,
         };
     }
@@ -239,13 +239,10 @@ pub const JsonRpcResponse = struct {
         }
 
         if (root.get("result")) |result_val| {
-            var result_str = std.array_list.AlignedManaged(u8, null).init(allocator);
-            defer result_str.deinit();
-
-            try std.json.stringify(result_val, .{}, result_str.writer());
+            const result_json = try std.json.Stringify.valueAlloc(allocator, result_val, .{});
 
             return JsonRpcResponse{
-                .result = try allocator.dupe(u8, result_str.items),
+                .result = result_json,
                 .error_info = null,
                 .id = id,
             };

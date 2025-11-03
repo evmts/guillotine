@@ -79,7 +79,7 @@ pub fn runJsonTest(allocator: std.mem.Allocator, test_case: std.json.Value) !voi
 
         .blob_versioned_hashes = blk: {
             if (env) |e| if (e.object.get("currentBlobVersionedHashes")) |hashes| {
-                const bytes = try primitives.Hex.hex_to_bytes(allocator, hashes.string);
+                const bytes = try primitives.Hex.hexToBytes(allocator, hashes.string);
                 break :blk std.mem.bytesAsSlice([32]u8, bytes);
             };
             break :blk &.{};
@@ -87,7 +87,7 @@ pub fn runJsonTest(allocator: std.mem.Allocator, test_case: std.json.Value) !voi
         
         .prev_randao = blk: {
             if (env) |e| if (e.object.get("currentRandom")) |rand| {
-                const bytes = try primitives.Hex.hex_to_bytes(allocator, rand.string);
+                const bytes = try primitives.Hex.hexToBytes(allocator, rand.string);
                 defer allocator.free(bytes);
                 break :blk std.mem.bytesAsValue([32]u8, bytes).*;
             };
@@ -152,7 +152,7 @@ pub fn runJsonTest(allocator: std.mem.Allocator, test_case: std.json.Value) !voi
                                 defer allocator.free(hex_data);
 
                                 if (hex_data.len > 2) { // More than just "0x"
-                                    code_bytes = try primitives.Hex.hex_to_bytes(allocator, hex_data);
+                                    code_bytes = try primitives.Hex.hexToBytes(allocator, hex_data);
                                 } else {
                                     continue;
                                 }
@@ -168,7 +168,7 @@ pub fn runJsonTest(allocator: std.mem.Allocator, test_case: std.json.Value) !voi
                                 defer allocator.free(hex_data);
 
                                 if (hex_data.len > 2) { // More than just "0x"
-                                    code_bytes = try primitives.Hex.hex_to_bytes(allocator, hex_data);
+                                    code_bytes = try primitives.Hex.hexToBytes(allocator, hex_data);
                                 } else {
                                     continue;
                                 }
@@ -251,7 +251,7 @@ pub fn runJsonTest(allocator: std.mem.Allocator, test_case: std.json.Value) !voi
                 const hex = try parseHexData(allocator, data_str);
                 defer allocator.free(hex);
                 if (hex.len > 2) {
-                    break :blk try primitives.Hex.hex_to_bytes(allocator, hex);
+                    break :blk try primitives.Hex.hexToBytes(allocator, hex);
                 } else {
                     break :blk try allocator.alloc(u8, 0);
                 }
@@ -382,7 +382,7 @@ pub fn runJsonTest(allocator: std.mem.Allocator, test_case: std.json.Value) !voi
                             defer allocator.free(hex_data);
 
                             if (hex_data.len > 2) {
-                                const exp_bytes = try primitives.Hex.hex_to_bytes(allocator, hex_data);
+                                const exp_bytes = try primitives.Hex.hexToBytes(allocator, hex_data);
                                 defer allocator.free(exp_bytes);
 
                                 const actual_account = try database.get_account(address.bytes);
@@ -955,7 +955,7 @@ pub fn runTest(allocator: std.mem.Allocator, test_data: TestData) !void {
                     defer allocator.free(hex_data);
                     
                     if (hex_data.len > 2) { // More than just "0x"
-                        const code_bytes = try primitives.Hex.hex_to_bytes(allocator, hex_data);
+                        const code_bytes = try primitives.Hex.hexToBytes(allocator, hex_data);
                         defer allocator.free(code_bytes);
                         const code_hash = try database.set_code(code_bytes);
                         acc.code_hash = code_hash;
@@ -1019,7 +1019,7 @@ pub fn runTest(allocator: std.mem.Allocator, test_data: TestData) !void {
                 const hex = try parseHexData(allocator, data);
                 defer allocator.free(hex);
                 if (hex.len > 2) {
-                    break :blk try primitives.Hex.hex_to_bytes(allocator, hex);
+                    break :blk try primitives.Hex.hexToBytes(allocator, hex);
                 } else {
                     break :blk try allocator.alloc(u8, 0);
                 }
@@ -1098,7 +1098,7 @@ pub fn runTest(allocator: std.mem.Allocator, test_data: TestData) !void {
                     defer allocator.free(hex_data);
                     
                     if (hex_data.len > 2) {
-                        const exp_bytes = try primitives.Hex.hex_to_bytes(allocator, hex_data);
+                        const exp_bytes = try primitives.Hex.hexToBytes(allocator, hex_data);
                         defer allocator.free(exp_bytes);
                         
                         const actual_account = try database.get_account(address.bytes);
