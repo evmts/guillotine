@@ -44,7 +44,7 @@ test "ERC20 deployment gas consumption issue" {
     };
     
     // Create caller account with balance
-    const caller_address = Address.from_hex("0x1234567890123456789012345678901234567890") catch unreachable;
+    const caller_address = Address.fromHex("0x1234567890123456789012345678901234567890") catch unreachable;
     const caller_account = evm.Account{
         .balance = 1_000_000_000,
         .nonce = 0,

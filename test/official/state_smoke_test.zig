@@ -31,14 +31,14 @@ fn parseBytesHex(allocator: std.mem.Allocator, s: []const u8) ![]u8 {
     // Accept empty string and "0x" as empty bytes
     const t = std.mem.trim(u8, s, &std.ascii.whitespace);
     if (t.len == 0 or std.mem.eql(u8, t, "0x")) return allocator.alloc(u8, 0);
-    return try hex.hex_to_bytes(allocator, t);
+    return try hex.hexToBytes(allocator, t);
 }
 
 fn parseHash32(s: []const u8) ![32]u8 {
     const hex = primitives.Hex;
     const t = std.mem.trim(u8, s, &std.ascii.whitespace);
     if (t.len == 0 or std.mem.eql(u8, t, "0x")) return [_]u8{0} ** 32;
-    return try hex.hex_to_bytes_fixed(32, t);
+    return try hex.hexToBytes_fixed(32, t);
 }
 
 fn hfFromName(name: []const u8) Hardfork {
@@ -65,7 +65,7 @@ fn setPreState(allocator: std.mem.Allocator, db: *Database, pre_obj: std.json.Va
         if (entry.value_ptr.* != .object) return error.InvalidFixture;
         const acc = entry.value_ptr.*.object;
 
-        const address = try primitives.Address.from_hex(addr_str);
+        const address = try primitives.Address.fromHex(addr_str);
         const nonce = try parseU64Hex(acc.get("nonce").?.string);
         const balance = try parseU256Hex(acc.get("balance").?.string);
         const code_hex = acc.get("code").?.string;
@@ -120,7 +120,7 @@ fn expectPostState(db: *Database, post_state_obj: std.json.Value) !void {
     const obj = post_state_obj.object;
     var it = obj.iterator();
     while (it.next()) |entry| {
-        const addr = try primitives.Address.from_hex(entry.key_ptr.*);
+        const addr = try primitives.Address.fromHex(entry.key_ptr.*);
         if (entry.value_ptr.* != .object) return error.InvalidFixture;
         const acc_expected = entry.value_ptr.*.object;
 
@@ -201,7 +201,7 @@ fn runSingleStateCase(allocator: std.mem.Allocator, json_path: []const u8) !void
     const env_ptr = tc.get("env").?;
     if (env_ptr != .object) return error.InvalidFixture;
     const env = env_ptr.object;
-    const coinbase = try primitives.Address.from_hex(env.get("currentCoinbase").?.string);
+    const coinbase = try primitives.Address.fromHex(env.get("currentCoinbase").?.string);
     const gas_limit = try parseU64Hex(env.get("currentGasLimit").?.string);
     const number = try parseU64Hex(env.get("currentNumber").?.string);
     const timestamp = try parseU64Hex(env.get("currentTimestamp").?.string);
@@ -222,11 +222,11 @@ fn runSingleStateCase(allocator: std.mem.Allocator, json_path: []const u8) !void
     const tx_ptr = tc.get("transaction").?;
     if (tx_ptr != .object) return error.InvalidFixture;
     const tx = tx_ptr.object;
-    const sender = try primitives.Address.from_hex(tx.get("sender").?.string);
+    const sender = try primitives.Address.fromHex(tx.get("sender").?.string);
     const to_field = tx.get("to").?.string;
     const is_create = to_field.len == 0;
     var to_addr: primitives.Address = primitives.ZERO_ADDRESS;
-    if (!is_create) to_addr = try primitives.Address.from_hex(to_field);
+    if (!is_create) to_addr = try primitives.Address.fromHex(to_field);
     const gas_price = try parseU256Hex(tx.get("gasPrice").?.string);
     const gas_lim = try parseU64Hex(tx.get("gasLimit").?.array.items[0].string);
     const value = try parseU256Hex(tx.get("value").?.array.items[0].string);

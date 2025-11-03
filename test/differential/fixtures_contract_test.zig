@@ -24,11 +24,11 @@ test "FixtureContract enum-based get method" {
 
 test "FixtureContract address validation" {
     const weth = FixtureContract.get(.weth_mainnet);
-    const expected_weth = Address.from_hex("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2") catch unreachable;
+    const expected_weth = Address.fromHex("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2") catch unreachable;
     try std.testing.expect(weth.address.equals(expected_weth));
     
     const usdc = FixtureContract.get(.usdc_proxy);
-    const expected_usdc = Address.from_hex("0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48") catch unreachable;
+    const expected_usdc = Address.fromHex("0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48") catch unreachable;
     try std.testing.expect(usdc.address.equals(expected_usdc));
 }
 

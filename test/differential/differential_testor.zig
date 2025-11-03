@@ -111,7 +111,7 @@ pub const DifferentialTestor = struct {
     pub fn initWithConfig(allocator: std.mem.Allocator, config: DifferentialTestConfig) !DifferentialTestor {
         // Setup addresses
         const caller = primitives.Address.ZERO_ADDRESS;
-        const contract = try primitives.Address.from_hex("0xc0de000000000000000000000000000000000000");
+        const contract = try primitives.Address.fromHex("0xc0de000000000000000000000000000000000000");
 
         // Setup MinimalEvm for differential testing
         const minimal_evm = try guillotine_evm.tracer.MinimalEvm.initPtr(allocator);

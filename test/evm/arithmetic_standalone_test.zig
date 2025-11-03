@@ -13,7 +13,7 @@ test "guillotine standalone: basic arithmetic operations" {
     defer db.deinit();
 
     const caller = primitives.Address.ZERO_ADDRESS;
-    const contract = try primitives.Address.from_hex("0xc0de000000000000000000000000000000000000");
+    const contract = try primitives.Address.fromHex("0xc0de000000000000000000000000000000000000");
 
     try db.set_account(caller.bytes, .{
         .balance = 10000000,

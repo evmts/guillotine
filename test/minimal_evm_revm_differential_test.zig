@@ -23,11 +23,11 @@ fn runTestCase(allocator: std.mem.Allocator, test_case: std.json.Value) !void {
     const expected = tc.get("expected").?.object;
     
     // Parse bytecode
-    const bytecode = if (bytecode_str.len > 0) try primitives.Hex.hex_to_bytes(allocator, bytecode_str) else try allocator.alloc(u8, 0);
+    const bytecode = if (bytecode_str.len > 0) try primitives.Hex.hexToBytes(allocator, bytecode_str) else try allocator.alloc(u8, 0);
     defer allocator.free(bytecode);
-    
+
     // Parse calldata
-    const calldata = if (calldata_str.len > 0) try primitives.Hex.hex_to_bytes(allocator, calldata_str) else try allocator.alloc(u8, 0);
+    const calldata = if (calldata_str.len > 0) try primitives.Hex.hexToBytes(allocator, calldata_str) else try allocator.alloc(u8, 0);
     defer allocator.free(calldata);
     
     // Parse addresses
@@ -35,7 +35,7 @@ fn runTestCase(allocator: std.mem.Allocator, test_case: std.json.Value) !void {
     const contract_addr = try primitives.Address.fromHex(contract_str);
     
     // Parse value
-    const value = if (value_str.len > 0) try primitives.Hex.hex_to_u256(value_str) else 0;
+    const value = if (value_str.len > 0) try primitives.Hex.hexToU256(value_str) else 0;
     
     // Set up blockchain context
     const block_info = initial_state.get("block_info").?.object;
@@ -49,11 +49,11 @@ fn runTestCase(allocator: std.mem.Allocator, test_case: std.json.Value) !void {
         1, // chain_id
         block_number,
         block_timestamp,
-        if (difficulty_str.len > 0) try primitives.Hex.hex_to_u256(difficulty_str) else 0,
+        if (difficulty_str.len > 0) try primitives.Hex.hexToU256(difficulty_str) else 0,
         0, // block_prevrandao (use 0 for older tests)
         primitives.ZERO_ADDRESS, // coinbase
         block_gas_limit,
-        if (base_fee_str.len > 0) try primitives.Hex.hex_to_u256(base_fee_str) else 0,
+        if (base_fee_str.len > 0) try primitives.Hex.hexToU256(base_fee_str) else 0,
         0, // blob_base_fee
     );
     
@@ -72,7 +72,7 @@ fn runTestCase(allocator: std.mem.Allocator, test_case: std.json.Value) !void {
                     const addr = try primitives.Address.fromHex(addr_str);
                     if (account.object.get("balance")) |balance_val| {
                         if (balance_val == .string) {
-                            const balance = if (balance_val.string.len > 0) try primitives.Hex.hex_to_u256(balance_val.string) else 0;
+                            const balance = if (balance_val.string.len > 0) try primitives.Hex.hexToU256(balance_val.string) else 0;
                             try evm.setBalance(addr, balance);
                         }
                     }
@@ -97,8 +97,8 @@ fn runTestCase(allocator: std.mem.Allocator, test_case: std.json.Value) !void {
                         const storage_value_str = storage_entry.value_ptr.*;
                         
                         if (storage_value_str == .string) {
-                            const slot = if (slot_str.len > 0) try primitives.Hex.hex_to_u256(slot_str) else 0;
-                            const storage_value = if (storage_value_str.string.len > 0) try primitives.Hex.hex_to_u256(storage_value_str.string) else 0;
+                            const slot = if (slot_str.len > 0) try primitives.Hex.hexToU256(slot_str) else 0;
+                            const storage_value = if (storage_value_str.string.len > 0) try primitives.Hex.hexToU256(storage_value_str.string) else 0;
                             try evm.set_storage(addr, slot, storage_value);
                         }
                     }
@@ -148,7 +148,7 @@ fn runTestCase(allocator: std.mem.Allocator, test_case: std.json.Value) !void {
     const expected_output = if (std.mem.startsWith(u8, expected_output_str, "HALT:")) 
         expected_output_str  // Use as-is for HALT messages
     else 
-        try primitives.Hex.hex_to_bytes(allocator, expected_output_str);  // Parse hex
+        try primitives.Hex.hexToBytes(allocator, expected_output_str);  // Parse hex
     defer if (!std.mem.startsWith(u8, expected_output_str, "HALT:")) 
         allocator.free(expected_output);
     

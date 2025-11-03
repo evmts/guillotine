@@ -82,7 +82,7 @@ fn run_fixture_test(allocator: std.mem.Allocator, fixture_dir: []const u8) !void
     defer allocator.free(calldata);
 
     // Setup addresses
-    const caller = try primitives.Address.from_hex("0x1000000000000000000000000000000000000001");
+    const caller = try primitives.Address.fromHex("0x1000000000000000000000000000000000000001");
 
     // Setup database
     var database = evm.Database.init(allocator);
@@ -198,7 +198,7 @@ fn run_fixture_test(allocator: std.mem.Allocator, fixture_dir: []const u8) !void
         // Contract is already deployed to our database, no need to sync
     } else {
         // Not deployment bytecode, use directly as runtime code
-        contract_address = try primitives.Address.from_hex("0xc0de000000000000000000000000000000000000");
+        contract_address = try primitives.Address.fromHex("0xc0de000000000000000000000000000000000000");
         runtime_code = init_bytecode;
         
         log.info("  Using bytecode as runtime code directly", .{});

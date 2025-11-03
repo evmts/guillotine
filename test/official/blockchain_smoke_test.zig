@@ -30,14 +30,14 @@ fn parseBytesHex(allocator: std.mem.Allocator, s: []const u8) ![]u8 {
     const hex = primitives.Hex;
     const t = std.mem.trim(u8, s, &std.ascii.whitespace);
     if (t.len == 0 or std.mem.eql(u8, t, "0x")) return allocator.alloc(u8, 0);
-    return try hex.hex_to_bytes(allocator, t);
+    return try hex.hexToBytes(allocator, t);
 }
 
 fn parseHash32(s: []const u8) ![32]u8 {
     const hex = primitives.Hex;
     const t = std.mem.trim(u8, s, &std.ascii.whitespace);
     if (t.len == 0 or std.mem.eql(u8, t, "0x")) return [_]u8{0} ** 32;
-    return try hex.hex_to_bytes_fixed(32, t);
+    return try hex.hexToBytes_fixed(32, t);
 }
 
 fn hfFromName(name: []const u8) Hardfork {
@@ -63,7 +63,7 @@ fn setPreState(allocator: std.mem.Allocator, db: *Database, pre_obj: std.json.Va
         if (entry.value_ptr.* != .object) return error.InvalidFixture;
         const acc = entry.value_ptr.*.object;
 
-        const address = try primitives.Address.from_hex(addr_str);
+        const address = try primitives.Address.fromHex(addr_str);
         const nonce = try parseU64Hex(acc.get("nonce").?.string);
         const balance = try parseU256Hex(acc.get("balance").?.string);
         const code_hex = acc.get("code").?.string;
@@ -115,7 +115,7 @@ fn expectPostState(db: *Database, post_state_obj: std.json.Value) !void {
     const obj = post_state_obj.object;
     var it = obj.iterator();
     while (it.next()) |entry| {
-        const addr = try primitives.Address.from_hex(entry.key_ptr.*);
+        const addr = try primitives.Address.fromHex(entry.key_ptr.*);
         if (entry.value_ptr.* != .object) return error.InvalidFixture;
         const acc_expected = entry.value_ptr.*.object;
 
@@ -181,7 +181,7 @@ fn runBlockchainCase(allocator: std.mem.Allocator, json_path: []const u8) !void 
 
     // Genesis header and defaults
     const gen = tc.get("genesisBlockHeader").?.object;
-    const coinbase = try primitives.Address.from_hex(gen.get("coinbase").?.string);
+    const coinbase = try primitives.Address.fromHex(gen.get("coinbase").?.string);
     const gas_limit = try parseU64Hex(gen.get("gasLimit").?.string);
 
     // Transaction context template (will be overridden per tx)
@@ -200,7 +200,7 @@ fn runBlockchainCase(allocator: std.mem.Allocator, json_path: []const u8) !void 
         const block = blocks_val.items[bidx].object;
         const hdr = block.get("blockHeader").?.object;
 
-        const b_coinbase = try primitives.Address.from_hex(hdr.get("coinbase").?.string);
+        const b_coinbase = try primitives.Address.fromHex(hdr.get("coinbase").?.string);
         const b_base_fee = try parseU256Hex(hdr.get("baseFeePerGas").?.string);
         const b_gas_limit = try parseU64Hex(hdr.get("gasLimit").?.string);
         const b_timestamp = try parseU64Hex(hdr.get("timestamp").?.string);
@@ -230,11 +230,11 @@ fn runBlockchainCase(allocator: std.mem.Allocator, json_path: []const u8) !void 
         var tidx: usize = 0;
         while (tidx < txs.items.len) : (tidx += 1) {
             const txobj = txs.items[tidx].object;
-            const sender = try primitives.Address.from_hex(txobj.get("sender").?.string);
+            const sender = try primitives.Address.fromHex(txobj.get("sender").?.string);
             const to_str = txobj.get("to").?.string;
             const is_create = to_str.len == 0;
             var to_addr: primitives.Address = primitives.ZERO_ADDRESS;
-            if (!is_create) to_addr = try primitives.Address.from_hex(to_str);
+            if (!is_create) to_addr = try primitives.Address.fromHex(to_str);
             const gas_price = try parseU256Hex(txobj.get("gasPrice").?.string);
             const gas_lim_tx = try parseU64Hex(txobj.get("gasLimit").?.string);
             const value = try parseU256Hex(txobj.get("value").?.string);

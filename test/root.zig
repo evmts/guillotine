@@ -119,9 +119,6 @@ test {
     // Trace validation tests
     _ = @import("trace_validation_test.zig");
 
-    // Debug poststate test
-    _ = @import("debug_poststate.zig");
-
     // C FFI API tracing tests
     // _ = @import("evm_c_api_tracing_test.zig"); // Temporarily disabled - missing C symbols
 

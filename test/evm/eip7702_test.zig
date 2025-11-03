@@ -30,7 +30,7 @@ fn createEOAAccount() evm.Account {
 test "EIP-7702: Authorization tuple must have correct structure" {
     const auth = Authorization{
         .chain_id = 1,
-        .address = try Address.from_hex("0x1234567890123456789012345678901234567890"),
+        .address = try Address.fromHex("0x1234567890123456789012345678901234567890"),
         .nonce = 42,
         .v = 27,
         .r = [_]u8{0x12} ** 32,
@@ -46,7 +46,7 @@ test "EIP-7702: Authorization tuple must have correct structure" {
 test "EIP-7702: Authorization validation rejects invalid chain_id" {
     var auth = Authorization{
         .chain_id = 0, // Invalid: must be non-zero
-        .address = try Address.from_hex("0x1234567890123456789012345678901234567890"),
+        .address = try Address.fromHex("0x1234567890123456789012345678901234567890"),
         .nonce = 0,
         .v = 27,
         .r = [_]u8{0x12} ** 32,
@@ -75,7 +75,7 @@ test "EIP-7702: Authorization validation rejects zero address" {
 
 test "EIP-7702: Delegation designator format must be 0xef0100 + address" {
     const allocator = testing.allocator;
-    const delegate_address = try Address.from_hex("0x1234567890123456789012345678901234567890");
+    const delegate_address = try Address.fromHex("0x1234567890123456789012345678901234567890");
     
     // Create delegation designator
     const designator = try createDelegationDesignator(allocator, delegate_address);
@@ -90,7 +90,7 @@ test "EIP-7702: Delegation designator format must be 0xef0100 + address" {
 }
 
 test "EIP-7702: Parse delegation designator correctly" {
-    const delegate_address = try Address.from_hex("0x1234567890123456789012345678901234567890");
+    const delegate_address = try Address.fromHex("0x1234567890123456789012345678901234567890");
     
     // Create valid designator
     var designator = [_]u8{0xef, 0x01, 0x00} ++ delegate_address.bytes;
@@ -112,7 +112,7 @@ test "EIP-7702: Transaction type 0x04 must include authorization_list" {
     
     const auth1 = Authorization{
         .chain_id = 1,
-        .address = try Address.from_hex("0x1111111111111111111111111111111111111111"),
+        .address = try Address.fromHex("0x1111111111111111111111111111111111111111"),
         .nonce = 0,
         .v = 27,
         .r = [_]u8{0x12} ** 32,
@@ -121,7 +121,7 @@ test "EIP-7702: Transaction type 0x04 must include authorization_list" {
     
     const auth2 = Authorization{
         .chain_id = 1,
-        .address = try Address.from_hex("0x2222222222222222222222222222222222222222"),
+        .address = try Address.fromHex("0x2222222222222222222222222222222222222222"),
         .nonce = 1,
         .v = 28,
         .r = [_]u8{0x56} ** 32,
@@ -134,7 +134,7 @@ test "EIP-7702: Transaction type 0x04 must include authorization_list" {
         .max_priority_fee_per_gas = 1_000_000_000,
         .max_fee_per_gas = 20_000_000_000,
         .gas_limit = 100_000,
-        .to = try Address.from_hex("0x3333333333333333333333333333333333333333"),
+        .to = try Address.fromHex("0x3333333333333333333333333333333333333333"),
         .value = 1_000_000_000_000_000_000,
         .data = &[_]u8{},
         .access_list = &[_]primitives.Transaction.AccessListItem{},
@@ -154,7 +154,7 @@ test "EIP-7702: Transaction type 0x04 RLP encoding" {
     
     const auth = Authorization{
         .chain_id = 1,
-        .address = try Address.from_hex("0x1111111111111111111111111111111111111111"),
+        .address = try Address.fromHex("0x1111111111111111111111111111111111111111"),
         .nonce = 0,
         .v = 27,
         .r = [_]u8{0x12} ** 32,
@@ -167,7 +167,7 @@ test "EIP-7702: Transaction type 0x04 RLP encoding" {
         .max_priority_fee_per_gas = 1_000_000_000,
         .max_fee_per_gas = 20_000_000_000,
         .gas_limit = 100_000,
-        .to = try Address.from_hex("0x2222222222222222222222222222222222222222"),
+        .to = try Address.fromHex("0x2222222222222222222222222222222222222222"),
         .value = 0,
         .data = &[_]u8{},
         .access_list = &[_]primitives.Transaction.AccessListItem{},
@@ -199,14 +199,14 @@ test "EIP-7702: Process authorizations before transaction execution" {
     defer db.deinit();
     
     // Create EOA that will delegate
-    const eoa_address = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    const eoa_address = try Address.fromHex("0x1111111111111111111111111111111111111111");
     var eoa_account = createEOAAccount();
     eoa_account.balance = 1_000_000_000_000_000_000; // 1 ETH
     eoa_account.nonce = 5;
     try db.set_account(eoa_address.bytes, eoa_account);
     
     // Create contract to delegate to
-    const contract_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
+    const contract_address = try Address.fromHex("0x2222222222222222222222222222222222222222");
     const contract_code = [_]u8{0x60, 0x42, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3}; // PUSH1 0x42, PUSH1 0x00, MSTORE, PUSH1 0x20, PUSH1 0x00, RETURN
     // Set the contract code - get code hash and set up account
     const code_hash = try db.set_code(&contract_code);
@@ -252,14 +252,14 @@ test "EIP-7702: Authorization with wrong nonce is rejected" {
     var db = evm.Database.init(allocator);
     defer db.deinit();
     
-    const eoa_address = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    const eoa_address = try Address.fromHex("0x1111111111111111111111111111111111111111");
     var eoa_account = createEOAAccount();
     eoa_account.nonce = 5;
     try db.set_account(eoa_address.bytes, eoa_account);
     
     const auth = Authorization{
         .chain_id = 1,
-        .address = try Address.from_hex("0x2222222222222222222222222222222222222222"),
+        .address = try Address.fromHex("0x2222222222222222222222222222222222222222"),
         .nonce = 10, // Wrong nonce
         .v = 27,
         .r = [_]u8{0x12} ** 32,
@@ -286,7 +286,7 @@ test "EIP-7702: Authorization with wrong chain_id is rejected" {
     
     const auth = Authorization{
         .chain_id = 999, // Wrong chain
-        .address = try Address.from_hex("0x2222222222222222222222222222222222222222"),
+        .address = try Address.fromHex("0x2222222222222222222222222222222222222222"),
         .nonce = 0,
         .v = 27,
         .r = [_]u8{0x12} ** 32,
@@ -302,7 +302,7 @@ test "EIP-7702: Authorization with wrong chain_id is rejected" {
         .gas_remaining = &gas_remaining,
         .eips = Eips{ .hardfork = Hardfork.PRAGUE },
     };
-    try testing.expectError(AuthorizationError.InvalidChainId, processor.processAuthorization(auth, try Address.from_hex("0x1111111111111111111111111111111111111111")));
+    try testing.expectError(AuthorizationError.InvalidChainId, processor.processAuthorization(auth, try Address.fromHex("0x1111111111111111111111111111111111111111")));
 }
 
 // ============================================================================
@@ -318,10 +318,10 @@ test "EIP-7702: EOA with delegation executes delegated contract code" {
     defer db.deinit();
     
     // Setup EOA with delegation
-    const eoa_address = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    const eoa_address = try Address.fromHex("0x1111111111111111111111111111111111111111");
     var eoa_account = createEOAAccount();
     eoa_account.balance = 1_000_000_000_000_000_000;
-    const delegated_addr = try Address.from_hex("0x2222222222222222222222222222222222222222");
+    const delegated_addr = try Address.fromHex("0x2222222222222222222222222222222222222222");
     eoa_account.set_delegation(delegated_addr);
     try db.set_account(eoa_address.bytes, eoa_account);
     
@@ -332,7 +332,7 @@ test "EIP-7702: EOA with delegation executes delegated contract code" {
     try testing.expect(effective_addr != null);
     
     // Setup contract code
-    const contract_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
+    const contract_address = try Address.fromHex("0x2222222222222222222222222222222222222222");
     const contract_code = [_]u8{
         0x60, 0x42, // PUSH1 0x42
         0x60, 0x00, // PUSH1 0x00  
@@ -350,7 +350,7 @@ test "EIP-7702: EOA with delegation executes delegated contract code" {
     // Call EOA (should execute contract code)
     const call_params = evm.CallParams{
         .call = .{
-            .caller = try Address.from_hex("0x3333333333333333333333333333333333333333"),
+            .caller = try Address.fromHex("0x3333333333333333333333333333333333333333"),
             .to = eoa_address,
             .value = 0,
             .input = &[_]u8{},
@@ -365,7 +365,7 @@ test "EIP-7702: EOA with delegation executes delegated contract code" {
         .timestamp = 1000000,
         .difficulty = 0,
         .gas_limit = 30_000_000,
-        .coinbase = try Address.from_hex("0x0000000000000000000000000000000000000000"),
+        .coinbase = try Address.fromHex("0x0000000000000000000000000000000000000000"),
         .base_fee = 0,
         .prev_randao = [_]u8{0} ** 32,
         .blob_base_fee = 0,
@@ -373,7 +373,7 @@ test "EIP-7702: EOA with delegation executes delegated contract code" {
     };
     const tx_context = evm.TransactionContext{
         .gas_limit = 100_000,
-        .coinbase = try Address.from_hex("0x0000000000000000000000000000000000000000"),
+        .coinbase = try Address.fromHex("0x0000000000000000000000000000000000000000"),
         .chain_id = 1,
     };
     var evm_instance = try evm.Evm(.{}).init(
@@ -382,7 +382,7 @@ test "EIP-7702: EOA with delegation executes delegated contract code" {
         block_info,
         tx_context,
         1, // gas_price
-        try Address.from_hex("0x9999999999999999999999999999999999999999"), // origin
+        try Address.fromHex("0x9999999999999999999999999999999999999999"), // origin
         evm.Hardfork.PRAGUE // hardfork
     );
     defer evm_instance.deinit();
@@ -404,10 +404,10 @@ test "EIP-7702: ADDRESS opcode returns EOA address, not delegated address" {
     var db = evm.Database.init(allocator);
     defer db.deinit();
     
-    const eoa_address = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    const eoa_address = try Address.fromHex("0x1111111111111111111111111111111111111111");
     var eoa_account = createEOAAccount();
     eoa_account.balance = 1_000_000_000_000_000_000;
-    const delegated_addr = try Address.from_hex("0x2222222222222222222222222222222222222222");
+    const delegated_addr = try Address.fromHex("0x2222222222222222222222222222222222222222");
     eoa_account.set_delegation(delegated_addr);
     try db.set_account(eoa_address.bytes, eoa_account);
     
@@ -421,7 +421,7 @@ test "EIP-7702: ADDRESS opcode returns EOA address, not delegated address" {
         0xf3,       // RETURN
     };
     // Set the contract code - get code hash and set up account
-    const contract_address_2 = try Address.from_hex("0x2222222222222222222222222222222222222222");
+    const contract_address_2 = try Address.fromHex("0x2222222222222222222222222222222222222222");
     const code_hash_2 = try db.set_code(&contract_code);
     var contract_account_2 = evm.Account.zero();
     contract_account_2.code_hash = code_hash_2;
@@ -429,7 +429,7 @@ test "EIP-7702: ADDRESS opcode returns EOA address, not delegated address" {
     
     const call_params = evm.CallParams{
         .call = .{
-            .caller = try Address.from_hex("0x3333333333333333333333333333333333333333"),
+            .caller = try Address.fromHex("0x3333333333333333333333333333333333333333"),
             .to = eoa_address,
             .value = 0,
             .input = &[_]u8{},
@@ -444,7 +444,7 @@ test "EIP-7702: ADDRESS opcode returns EOA address, not delegated address" {
         .timestamp = 1000000,
         .difficulty = 0,
         .gas_limit = 30_000_000,
-        .coinbase = try Address.from_hex("0x0000000000000000000000000000000000000000"),
+        .coinbase = try Address.fromHex("0x0000000000000000000000000000000000000000"),
         .base_fee = 0,
         .prev_randao = [_]u8{0} ** 32,
         .blob_base_fee = 0,
@@ -452,7 +452,7 @@ test "EIP-7702: ADDRESS opcode returns EOA address, not delegated address" {
     };
     const tx_context = evm.TransactionContext{
         .gas_limit = 100_000,
-        .coinbase = try Address.from_hex("0x0000000000000000000000000000000000000000"),
+        .coinbase = try Address.fromHex("0x0000000000000000000000000000000000000000"),
         .chain_id = 1,
     };
     var evm_instance = try evm.Evm(.{}).init(
@@ -461,7 +461,7 @@ test "EIP-7702: ADDRESS opcode returns EOA address, not delegated address" {
         block_info,
         tx_context,
         1, // gas_price
-        try Address.from_hex("0x9999999999999999999999999999999999999999"), // origin
+        try Address.fromHex("0x9999999999999999999999999999999999999999"), // origin
         evm.Hardfork.PRAGUE // hardfork
     );
     defer evm_instance.deinit();
@@ -484,7 +484,7 @@ test "EIP-7702: Gas cost for authorization processing" {
     // Test with 3 authorizations, 2 of which are for empty accounts
     const auth1 = Authorization{
         .chain_id = 1,
-        .address = try Address.from_hex("0x1111111111111111111111111111111111111111"),
+        .address = try Address.fromHex("0x1111111111111111111111111111111111111111"),
         .nonce = 0,
         .v = 27,
         .r = [_]u8{0x12} ** 32,
@@ -493,7 +493,7 @@ test "EIP-7702: Gas cost for authorization processing" {
     
     const auth2 = Authorization{
         .chain_id = 1,
-        .address = try Address.from_hex("0x2222222222222222222222222222222222222222"),
+        .address = try Address.fromHex("0x2222222222222222222222222222222222222222"),
         .nonce = 0,
         .v = 27,
         .r = [_]u8{0x56} ** 32,
@@ -502,7 +502,7 @@ test "EIP-7702: Gas cost for authorization processing" {
     
     const auth3 = Authorization{
         .chain_id = 1,
-        .address = try Address.from_hex("0x3333333333333333333333333333333333333333"),
+        .address = try Address.fromHex("0x3333333333333333333333333333333333333333"),
         .nonce = 0,
         .v = 27,
         .r = [_]u8{0x9a} ** 32,
@@ -523,7 +523,7 @@ test "EIP-7702: Transaction intrinsic gas includes authorization costs" {
     
     const auth = Authorization{
         .chain_id = 1,
-        .address = try Address.from_hex("0x1111111111111111111111111111111111111111"),
+        .address = try Address.fromHex("0x1111111111111111111111111111111111111111"),
         .nonce = 0,
         .v = 27,
         .r = [_]u8{0x12} ** 32,
@@ -536,7 +536,7 @@ test "EIP-7702: Transaction intrinsic gas includes authorization costs" {
         .max_priority_fee_per_gas = 1_000_000_000,
         .max_fee_per_gas = 20_000_000_000,
         .gas_limit = 100_000,
-        .to = try Address.from_hex("0x2222222222222222222222222222222222222222"),
+        .to = try Address.fromHex("0x2222222222222222222222222222222222222222"),
         .value = 0,
         .data = &[_]u8{},
         .access_list = &[_]primitives.Transaction.AccessListItem{},
@@ -563,7 +563,7 @@ test "EIP-7702: Cannot delegate from contract account" {
     defer db.deinit();
     
     // Create contract account (has code)
-    const contract_address = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    const contract_address = try Address.fromHex("0x1111111111111111111111111111111111111111");
     // Set some dummy code for the contract
     const dummy_code = [_]u8{0x00};
     const code_hash = try db.set_code(&dummy_code);
@@ -573,7 +573,7 @@ test "EIP-7702: Cannot delegate from contract account" {
     
     const auth = Authorization{
         .chain_id = 1,
-        .address = try Address.from_hex("0x2222222222222222222222222222222222222222"),
+        .address = try Address.fromHex("0x2222222222222222222222222222222222222222"),
         .nonce = 0,
         .v = 27,
         .r = [_]u8{0x12} ** 32,
@@ -601,7 +601,7 @@ test "EIP-7702: Signature recovery validates authority" {
     
     const public_key = try crypto.unaudited_getPublicKey(private_key);
     const signer_address = public_key.to_address();
-    const target_address = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    const target_address = try Address.fromHex("0x1111111111111111111111111111111111111111");
     
     const auth = try primitives.Authorization.create_authorization(
         allocator,
@@ -626,10 +626,10 @@ test "EIP-7702: Authorization revocation (nonce = 2^64 - 1)" {
     defer db.deinit();
     
     // Setup EOA with existing delegation
-    const eoa_address = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    const eoa_address = try Address.fromHex("0x1111111111111111111111111111111111111111");
     var eoa_account = createEOAAccount();
     eoa_account.nonce = 5;
-    const delegated_addr = try Address.from_hex("0x2222222222222222222222222222222222222222");
+    const delegated_addr = try Address.fromHex("0x2222222222222222222222222222222222222222");
     eoa_account.set_delegation(delegated_addr);
     try db.set_account(eoa_address.bytes, eoa_account);
     
@@ -674,20 +674,20 @@ test "EIP-7702: Full transaction execution with authorization list" {
     defer db.deinit();
     
     // Create sender account
-    const sender_address = try Address.from_hex("0x9999999999999999999999999999999999999999");
+    const sender_address = try Address.fromHex("0x9999999999999999999999999999999999999999");
     var sender_account = createEOAAccount();
     sender_account.balance = 10_000_000_000_000_000_000; // 10 ETH
     try db.set_account(sender_address.bytes, sender_account);
     
     // Create EOA that will delegate
-    const eoa_address = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    const eoa_address = try Address.fromHex("0x1111111111111111111111111111111111111111");
     var eoa_account = createEOAAccount();
     eoa_account.balance = 1_000_000_000_000_000_000; // 1 ETH
     eoa_account.nonce = 0;
     try db.set_account(eoa_address.bytes, eoa_account);
     
     // Create contract to delegate to
-    const contract_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
+    const contract_address = try Address.fromHex("0x2222222222222222222222222222222222222222");
     const contract_code = [_]u8{
         0x60, 0x42, // PUSH1 0x42
         0x60, 0x00, // PUSH1 0x00
@@ -738,7 +738,7 @@ test "EIP-7702: Full transaction execution with authorization list" {
         .timestamp = 1000000,
         .difficulty = 0,
         .gas_limit = 30_000_000,
-        .coinbase = try Address.from_hex("0x0000000000000000000000000000000000000000"),
+        .coinbase = try Address.fromHex("0x0000000000000000000000000000000000000000"),
         .base_fee = 0,
         .prev_randao = [_]u8{0} ** 32,
         .blob_base_fee = 0,
@@ -746,7 +746,7 @@ test "EIP-7702: Full transaction execution with authorization list" {
     };
     const tx_context = evm.TransactionContext{
         .gas_limit = 100_000,
-        .coinbase = try Address.from_hex("0x0000000000000000000000000000000000000000"),
+        .coinbase = try Address.fromHex("0x0000000000000000000000000000000000000000"),
         .chain_id = 1,
     };
     var evm_instance = try evm.Evm(.{}).init(
@@ -755,7 +755,7 @@ test "EIP-7702: Full transaction execution with authorization list" {
         block_info,
         tx_context,
         1, // gas_price
-        try Address.from_hex("0x9999999999999999999999999999999999999999"), // origin
+        try Address.fromHex("0x9999999999999999999999999999999999999999"), // origin
         evm.Hardfork.PRAGUE // hardfork
     );
     defer evm_instance.deinit();

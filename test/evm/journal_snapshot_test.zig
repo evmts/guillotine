@@ -465,8 +465,8 @@ test "Journal snapshot - snapshot ID uniqueness across clear operations" {
 }
 
 test "Journal snapshot - all entry types with selective reversion" {
-    const addr1 = Address.from_hex("0x1234567890123456789012345678901234567890") catch unreachable;
-    const addr2 = Address.from_hex("0x9876543210987654321098765432109876543210") catch unreachable;
+    const addr1 = Address.fromHex("0x1234567890123456789012345678901234567890") catch unreachable;
+    const addr2 = Address.fromHex("0x9876543210987654321098765432109876543210") catch unreachable;
     const code_hash = [_]u8{0xAB} ** 32;
     
     var journal = Journal(.{}).init(testing.allocator);

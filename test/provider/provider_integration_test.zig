@@ -3,6 +3,7 @@
 //! Tests all RPC methods, error scenarios, retries, timeouts, and concurrent access.
 
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 const provider_mod = @import("provider");
 const MockProvider = @import("mock_provider.zig").MockProvider;
 const MockResponse = @import("mock_provider.zig").MockResponse;
@@ -503,7 +504,7 @@ test "rate limiter refills over time" {
         try std.testing.expect(limiter.tryAcquire());
     }
 
-    std.time.sleep(std.time.ns_per_s);
+    std.Thread.sleep(std.time.ns_per_s);
 
     i = 0;
     while (i < 10) : (i += 1) {
@@ -567,7 +568,7 @@ test "provider handles burst then sustained load" {
         response.deinit(allocator);
     }
 
-    std.time.sleep(100 * std.time.ns_per_ms);
+    std.Thread.sleep(100 * std.time.ns_per_ms);
 
     i = 0;
     while (i < 100) : (i += 1) {

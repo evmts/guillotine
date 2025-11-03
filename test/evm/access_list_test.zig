@@ -40,7 +40,7 @@ test "Access lists should be populated in CallResult" {
     };
     
     // Create caller account with balance
-    const caller_address = Address.from_hex("0x1234567890123456789012345678901234567890") catch unreachable;
+    const caller_address = Address.fromHex("0x1234567890123456789012345678901234567890") catch unreachable;
     const caller_account = evm.Account{
         .balance = 1_000_000_000,
         .nonce = 0,
@@ -62,8 +62,8 @@ test "Access lists should be populated in CallResult" {
     defer evm_instance.deinit();
     
     // Deploy contracts
-    const contract_a = Address.from_hex("0x1111111111111111111111111111111111111111") catch unreachable;
-    const contract_b = Address.from_hex("0x2222222222222222222222222222222222222222") catch unreachable;
+    const contract_a = Address.fromHex("0x1111111111111111111111111111111111111111") catch unreachable;
+    const contract_b = Address.fromHex("0x2222222222222222222222222222222222222222") catch unreachable;
     
     // Bytecode for contract A:
     // PUSH20 contract_b, BALANCE (accesses address)

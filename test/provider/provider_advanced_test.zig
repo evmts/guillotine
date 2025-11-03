@@ -70,6 +70,7 @@ test "provider handles response with both result and error" {
 
 test "provider handles response with neither result nor error" {
     const allocator = std.testing.allocator;
+    _ = allocator;
 
     var response = json_rpc.JsonRpcResponse{
         .result = null,
@@ -83,7 +84,6 @@ test "provider handles response with neither result nor error" {
 
 test "provider handles malformed error object" {
     const allocator = std.testing.allocator;
-
     const json =
         \\{"jsonrpc":"2.0","error":"not an object","id":1}
     ;
@@ -119,15 +119,15 @@ test "provider handles large response" {
     var provider = MockProvider.init(allocator);
     defer provider.deinit();
 
-    var large_data = std.ArrayList(u8).init(allocator);
-    defer large_data.deinit();
+    var large_data = std.ArrayList(u8){};
+    defer large_data.deinit(allocator);
 
-    try large_data.appendSlice("\"0x");
+    try large_data.appendSlice(allocator, "\"0x");
     var i: usize = 0;
     while (i < 10000) : (i += 1) {
-        try large_data.appendSlice("ab");
+        try large_data.appendSlice(allocator, "ab");
     }
-    try large_data.appendSlice("\"");
+    try large_data.appendSlice(allocator, "\"");
 
     try provider.setResponse("eth_getCode", MockResponse.success(large_data.items));
 
@@ -159,8 +159,6 @@ test "provider handles multiple large responses" {
 // Request Validation Tests
 
 test "json rpc request validates method" {
-    const allocator = std.testing.allocator;
-
     const request = json_rpc.JsonRpcRequest{
         .method = "",
         .params = "[]",
@@ -172,8 +170,6 @@ test "json rpc request validates method" {
 }
 
 test "json rpc request validates params" {
-    const allocator = std.testing.allocator;
-
     const request = json_rpc.JsonRpcRequest{
         .method = "eth_blockNumber",
         .params = "",

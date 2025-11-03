@@ -142,7 +142,7 @@ pub const MockProvider = struct {
 
         if (response.delay_ms > 0) {
             self.mutex.unlock();
-            std.time.sleep(response.delay_ms * std.time.ns_per_ms);
+            std.Thread.sleep(response.delay_ms * std.time.ns_per_ms);
             self.mutex.lock();
         }
 
@@ -162,21 +162,21 @@ pub const MockProvider = struct {
 test "mock provider initialization" {
     const allocator = std.testing.allocator;
 
-    var provider = MockProvider.init(allocator);
-    defer provider.deinit();
+    var mock = MockProvider.init(allocator);
+    defer mock.deinit();
 
-    try std.testing.expectEqual(@as(u32, 0), provider.getCallCount("eth_blockNumber"));
+    try std.testing.expectEqual(@as(u32, 0), mock.getCallCount("eth_blockNumber"));
 }
 
 test "mock provider set and get response" {
     const allocator = std.testing.allocator;
 
-    var provider = MockProvider.init(allocator);
-    defer provider.deinit();
+    var mock = MockProvider.init(allocator);
+    defer mock.deinit();
 
-    try provider.setResponse("eth_blockNumber", MockResponse.success("\"0x123456\""));
+    try mock.setResponse("eth_blockNumber", MockResponse.success("\"0x123456\""));
 
-    const response = try provider.request("eth_blockNumber", "[]", 1);
+    const response = try mock.request("eth_blockNumber", "[]", 1);
     defer response.deinit(allocator);
 
     try std.testing.expect(response.result != null);
@@ -186,12 +186,12 @@ test "mock provider set and get response" {
 test "mock provider error response" {
     const allocator = std.testing.allocator;
 
-    var provider = MockProvider.init(allocator);
-    defer provider.deinit();
+    var mock = MockProvider.init(allocator);
+    defer mock.deinit();
 
-    try provider.setResponse("eth_getBalance", MockResponse.failure(-32000, "Server error"));
+    try mock.setResponse("eth_getBalance", MockResponse.failure(-32000, "Server error"));
 
-    const response = try provider.request("eth_getBalance", "[\"0x123\",\"latest\"]", 1);
+    const response = try mock.request("eth_getBalance", "[\"0x123\",\"latest\"]", 1);
     defer response.deinit(allocator);
 
     try std.testing.expect(response.error_info != null);
@@ -201,64 +201,64 @@ test "mock provider error response" {
 test "mock provider call counting" {
     const allocator = std.testing.allocator;
 
-    var provider = MockProvider.init(allocator);
-    defer provider.deinit();
+    var mock = MockProvider.init(allocator);
+    defer mock.deinit();
 
-    try provider.setResponse("eth_blockNumber", MockResponse.success("\"0x123\""));
+    try mock.setResponse("eth_blockNumber", MockResponse.success("\"0x123\""));
 
     var i: u32 = 0;
     while (i < 5) : (i += 1) {
-        const response = try provider.request("eth_blockNumber", "[]", i);
+        const response = try mock.request("eth_blockNumber", "[]", i);
         response.deinit(allocator);
     }
 
-    try std.testing.expectEqual(@as(u32, 5), provider.getCallCount("eth_blockNumber"));
+    try std.testing.expectEqual(@as(u32, 5), mock.getCallCount("eth_blockNumber"));
 }
 
 test "mock provider fail after calls" {
     const allocator = std.testing.allocator;
 
-    var provider = MockProvider.init(allocator);
-    defer provider.deinit();
+    var mock = MockProvider.init(allocator);
+    defer mock.deinit();
 
-    try provider.setResponse("eth_blockNumber", MockResponse.success("\"0x123\""));
-    provider.setFailAfterCalls(3);
+    try mock.setResponse("eth_blockNumber", MockResponse.success("\"0x123\""));
+    mock.setFailAfterCalls(3);
 
     var i: u32 = 0;
     while (i < 3) : (i += 1) {
-        const response = try provider.request("eth_blockNumber", "[]", i);
+        const response = try mock.request("eth_blockNumber", "[]", i);
         response.deinit(allocator);
     }
 
-    const result = provider.request("eth_blockNumber", "[]", 4);
+    const result = mock.request("eth_blockNumber", "[]", 4);
     try std.testing.expectError(error.NetworkError, result);
 }
 
 test "mock provider reset" {
     const allocator = std.testing.allocator;
 
-    var provider = MockProvider.init(allocator);
-    defer provider.deinit();
+    var mock = MockProvider.init(allocator);
+    defer mock.deinit();
 
-    try provider.setResponse("eth_blockNumber", MockResponse.success("\"0x123\""));
+    try mock.setResponse("eth_blockNumber", MockResponse.success("\"0x123\""));
 
-    const response1 = try provider.request("eth_blockNumber", "[]", 1);
+    const response1 = try mock.request("eth_blockNumber", "[]", 1);
     response1.deinit(allocator);
 
-    try std.testing.expectEqual(@as(u32, 1), provider.getCallCount("eth_blockNumber"));
+    try std.testing.expectEqual(@as(u32, 1), mock.getCallCount("eth_blockNumber"));
 
-    provider.reset();
+    mock.reset();
 
-    try std.testing.expectEqual(@as(u32, 0), provider.getCallCount("eth_blockNumber"));
+    try std.testing.expectEqual(@as(u32, 0), mock.getCallCount("eth_blockNumber"));
 }
 
 test "mock provider method not found" {
     const allocator = std.testing.allocator;
 
-    var provider = MockProvider.init(allocator);
-    defer provider.deinit();
+    var mock = MockProvider.init(allocator);
+    defer mock.deinit();
 
-    const response = try provider.request("unknown_method", "[]", 1);
+    const response = try mock.request("unknown_method", "[]", 1);
     defer response.deinit(allocator);
 
     try std.testing.expect(response.error_info != null);
@@ -268,14 +268,14 @@ test "mock provider method not found" {
 test "mock provider delayed response" {
     const allocator = std.testing.allocator;
 
-    var provider = MockProvider.init(allocator);
-    defer provider.deinit();
+    var mock = MockProvider.init(allocator);
+    defer mock.deinit();
 
     const delayed = MockResponse.success("\"0x123\"").withDelay(50);
-    try provider.setResponse("eth_blockNumber", delayed);
+    try mock.setResponse("eth_blockNumber", delayed);
 
     const start = std.time.milliTimestamp();
-    const response = try provider.request("eth_blockNumber", "[]", 1);
+    const response = try mock.request("eth_blockNumber", "[]", 1);
     defer response.deinit(allocator);
     const elapsed = std.time.milliTimestamp() - start;
 
@@ -285,10 +285,10 @@ test "mock provider delayed response" {
 test "mock provider concurrent requests" {
     const allocator = std.testing.allocator;
 
-    var provider = MockProvider.init(allocator);
-    defer provider.deinit();
+    var mock = MockProvider.init(allocator);
+    defer mock.deinit();
 
-    try provider.setResponse("eth_blockNumber", MockResponse.success("\"0x123\""));
+    try mock.setResponse("eth_blockNumber", MockResponse.success("\"0x123\""));
 
     const ThreadContext = struct {
         provider: *MockProvider,
@@ -304,7 +304,7 @@ test "mock provider concurrent requests" {
     };
 
     var context = ThreadContext{
-        .provider = &provider,
+        .provider = &mock,
         .allocator = allocator,
     };
 
@@ -314,5 +314,5 @@ test "mock provider concurrent requests" {
     thread1.join();
     thread2.join();
 
-    try std.testing.expectEqual(@as(u32, 20), provider.getCallCount("eth_blockNumber"));
+    try std.testing.expectEqual(@as(u32, 20), mock.getCallCount("eth_blockNumber"));
 }
