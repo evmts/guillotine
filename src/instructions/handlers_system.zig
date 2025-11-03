@@ -1132,7 +1132,7 @@ pub fn Handlers(FrameType: type) type {
             // Verify signature
             const recovery_id = @as(u8, @intCast(sig_v - 27));
 
-            const recovered = crypto.secp256k1.unaudited_recover_address(&message_hash, recovery_id, sig_r, sig_s) catch {
+            const recovered = crypto.secp256k1.unauditedRecoverAddress(&message_hash, recovery_id, sig_r, sig_s) catch {
                 self.stack.push_unsafe(0);
                 const op_data = dispatch.getOpData(.AUTH);
                 self.afterInstruction(.AUTH, op_data.next_handler, op_data.next_cursor.cursor);

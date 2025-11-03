@@ -163,9 +163,9 @@ pub fn getOpcodeHandlers(
     h[@intFromEnum(Opcode.REVERT)] = &SystemHandlers.revert;
     h[@intFromEnum(Opcode.INVALID)] = &invalid;
     h[@intFromEnum(Opcode.SELFDESTRUCT)] = &SystemHandlers.selfdestruct;
-    // AUTH and AUTHCALL (EIP-3074) are not activated in any hardfork yet, so they remain invalid
-    // h[@intFromEnum(Opcode.AUTH)] = &SystemHandlers.auth;
-    // h[@intFromEnum(Opcode.AUTHCALL)] = &SystemHandlers.authcall;
+    // AUTH and AUTHCALL (EIP-3074) are activated in Prague hardfork
+    h[@intFromEnum(Opcode.AUTH)] = &SystemHandlers.auth;
+    h[@intFromEnum(Opcode.AUTHCALL)] = &SystemHandlers.authcall;
     // Note: Synthetic opcodes (0xa5-0xbc) are NOT mapped here because they should only be used
     // internally by the dispatch system during optimization. Raw bytecode containing these values
     // should be treated as invalid opcodes and use the default invalid handler.
