@@ -18,9 +18,18 @@ pub fn PopInstruction(comptime FrameType: type) type {
 /// PUSH0-PUSH32 opcodes (0x5f-0x7f) - Push immediate value onto stack
 /// Opcode determines number of bytes to read from bytecode
 /// PUSH0 (size=0) pushes 0, PUSH1-PUSH32 (size=1-32) read from bytecode
+/// EIP-3855: PUSH0 requires Shanghai+ hardfork
 pub fn PushInstruction(comptime FrameType: type, comptime push_size: u8) type {
     return struct {
         pub fn run(frame: *FrameType) FrameType.Error!void {
+            // EIP-3855: PUSH0 was introduced in Shanghai hardfork
+            if (push_size == 0) {
+                const primitives = @import("primitives");
+                if (frame.hardfork.isBefore(.SHANGHAI)) {
+                    return error.InvalidOpcode;
+                }
+            }
+
             // Use the frame's readImmediate method
             const value = frame.readImmediate(push_size) orelse return error.InvalidPush;
             try frame.stack.push(value);
