@@ -26,11 +26,11 @@ Guillotine is not suitable for production use at this time. Any use of Guillotin
 
 ### 📊 Ethereum Specification Test Results
 
-**Latest Test Run**: 3167 tests executed
-- ✅ **3164 passing** (99.9% pass rate)
-- ❌ **3 failing** (0.1% fail rate)
+**Latest Test Run**: 2251 tests executed
+- ✅ **1165 passing** (~52% pass rate)
+- ❌ **1086 failing** (~48% fail rate)
 
-Run specs with: `zig build specs`
+Most failures are in ecmul/BN254 elliptic curve tests. Run specs with: `zig build specs`
 
 See [specs/README.md](specs/README.md) for detailed instructions on running the test suite.
 
@@ -73,12 +73,30 @@ For an in-depth understanding of Guillotine's design and implementation, see our
 
 ## 🔨 Building from Source
 
-**Currently Supported**: macOS (building from source)
-**Coming Soon**: Linux support (coming next week!)
+**Currently Supported**: macOS
+**Planned**: Linux support
 
-To build Guillotine from source on macOS:
+### Prerequisites
+
+- **Zig 0.15.1** (exactly - use [zvm](https://github.com/marler182/zvm) to manage versions)
+- **Rust toolchain** 1.75+ (for cryptographic dependencies)
+- **Git** (with submodule support)
+
+### Build Steps
+
 ```bash
+# 1. Clone with submodules
+git clone --recursive https://github.com/evmts/Guillotine.git
+cd Guillotine
+
+# Or if already cloned:
+git submodule update --init --recursive
+
+# 2. Build the project
 zig build
+
+# 3. Verify the build
+zig build test-opcodes
 ```
 
 ---

@@ -176,10 +176,10 @@ build/
 
 ### Prerequisites
 
-- Zig 0.15.1 or later
+- **Zig 0.15.1** (exactly - newer versions like 0.16.x have breaking API changes)
 - Git
-- Rust toolchain (required for ark and revm dependencies)
-- Golang and node.js if working with the cli and native app
+- Rust toolchain 1.75+ (required for ark and foundry-compilers dependencies)
+- Golang and Node.js if working with the CLI and native app
 
 ### Building the Project
 
@@ -257,3 +257,60 @@ zig build test -Dtest-filter='get_balance'
    ```bash
    zig build test-snailtracer  # Differential testing
    ```
+
+## Troubleshooting
+
+### Common Build Issues
+
+#### Rust Dependency Errors (svm-rs-builds)
+
+If you see errors like `SOLC_VERSION_0_8_31 is defined multiple times`:
+
+```bash
+# Update the problematic dependency
+cargo update -p svm-rs-builds
+
+# Clean and rebuild
+rm -rf target/ .zig-cache/
+zig build
+```
+
+#### Zig Version Mismatch
+
+If you see errors about `writer` method not found on ArrayList, or other API errors:
+
+```bash
+# Check your Zig version
+zig version
+
+# Must be exactly 0.15.1, NOT 0.16.x
+# Use zvm to manage versions:
+zvm install 0.15.1
+zvm use 0.15.1
+```
+
+#### Submodule Not Initialized
+
+If specs tests fail to find test files:
+
+```bash
+git submodule update --init --recursive
+```
+
+#### Cargo Build Fails
+
+Ensure Rust toolchain is installed:
+
+```bash
+# Check Rust version (1.75+ recommended)
+rustc --version
+
+# If not installed:
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+### Test Failures
+
+- **ecmul tests failing**: Known issue with BN254 elliptic curve implementation
+- **Memory leak detected**: Check that all allocations have corresponding `defer` cleanup
+- **No output from tests**: This is normal - Zig tests only output on failure
