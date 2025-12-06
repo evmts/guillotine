@@ -18,6 +18,10 @@
 
 ---
 
+> **🔄 Repository in Flux**: This repo is currently undergoing significant refactoring as we prepare to release a new Zig library that will be like ethers.js or alloy for Zig. More updates coming soon!
+
+---
+
 ## 🚧 Development Status (Early Alpha)
 
 **Current Status**: DO NOT USE IN PRODUCTION
