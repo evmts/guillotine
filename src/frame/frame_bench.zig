@@ -74,8 +74,17 @@ const TestHost = struct {
 
     pub fn inner_call(self: *Self, params: call_params_mod.CallParams) !call_result_mod.CallResult {
         _ = self;
-        _ = params;
-        return error.NotImplemented;
+        // Return a successful empty call result for benchmarking purposes
+        // Real calls would delegate to the actual EVM implementation
+        return call_result_mod.CallResult{
+            .success = true,
+            .gas_left = params.getGas(),
+            .output = &.{},
+            .logs = &.{},
+            .selfdestructs = &.{},
+            .accessed_addresses = &.{},
+            .accessed_storage = &.{},
+        };
     }
 
     pub fn register_created_contract(self: *Self, address: Address) !void {
