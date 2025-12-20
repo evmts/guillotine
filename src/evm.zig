@@ -337,16 +337,16 @@ pub fn Evm(config: EvmConfig) type {
             errdefer state_dump.deinit(allocator);
 
             // Use the persistent touched_addresses tracker
-            std.debug.print("[DUMP] touched_addresses count = {d}\n", .{self.touched_addresses.count()});
+            log.debug("[DUMP] touched_addresses count = {d}", .{self.touched_addresses.count()});
             var addr_it = self.touched_addresses.iterator();
             while (addr_it.next()) |entry| {
                 const addr = entry.key_ptr.*;
-                std.debug.print("[DUMP] checking address {any}\n", .{addr.bytes});
+                log.debug("[DUMP] checking address {any}", .{addr.bytes});
                 const account = (try self.database.get_account(addr.bytes)) orelse {
-                    std.debug.print("[DUMP] account not found in database\n", .{});
+                    log.debug("[DUMP] account not found in database", .{});
                     continue;
                 };
-                std.debug.print("[DUMP] found account: balance={d}, nonce={d}\n", .{account.balance, account.nonce});
+                log.debug("[DUMP] found account: balance={d}, nonce={d}", .{account.balance, account.nonce});
                 
                 // Skip zero balance, zero nonce accounts with no code
                 if (account.balance == 0 and account.nonce == 0 and std.mem.eql(u8, &account.code_hash, &([_]u8{0} ** 32))) {
