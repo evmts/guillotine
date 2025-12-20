@@ -24,8 +24,8 @@ pub fn createModules(
     bn254_lib: ?*std.Build.Step.Compile,
     foundry_lib: ?*std.Build.Step.Compile,
 ) ModuleSet {
-    // Use primitives package modules (primitives, crypto, precompiles, c_kzg)
-    const primitives_mod = primitives_dep.module("primitives");
+    // Use voltaire package modules (voltaire, crypto, precompiles, c_kzg)
+    const primitives_mod = primitives_dep.module("voltaire");
     const crypto_mod = primitives_dep.module("crypto");
     const precompiles_mod = primitives_dep.module("precompiles");
     const c_kzg_mod = primitives_dep.module("c_kzg");
@@ -36,7 +36,7 @@ pub fn createModules(
         .target = target,
         .optimize = optimize,
     });
-    trie_mod.addImport("primitives", primitives_mod);
+    trie_mod.addImport("voltaire", primitives_mod);
 
     // Provider module
     const provider_mod = b.createModule(.{
@@ -44,7 +44,7 @@ pub fn createModules(
         .target = target,
         .optimize = optimize,
     });
-    provider_mod.addImport("primitives", primitives_mod);
+    provider_mod.addImport("voltaire", primitives_mod);
 
     // EVM module - unified src module
     const evm_mod = b.createModule(.{
@@ -52,7 +52,7 @@ pub fn createModules(
         .target = target,
         .optimize = optimize,
     });
-    evm_mod.addImport("primitives", primitives_mod);
+    evm_mod.addImport("voltaire", primitives_mod);
     evm_mod.addImport("crypto", crypto_mod);
     evm_mod.addImport("precompiles", precompiles_mod);
     evm_mod.addImport("build_options", build_options_mod);
@@ -72,7 +72,7 @@ pub fn createModules(
         .target = target,
         .optimize = optimize,
     });
-    compilers_mod.addImport("primitives", primitives_mod);
+    compilers_mod.addImport("voltaire", primitives_mod);
     compilers_mod.addImport("evm", evm_mod);
 
     // Link with foundry library if available
@@ -89,7 +89,7 @@ pub fn createModules(
     });
     lib_mod.addIncludePath(b.path("lib/ark"));
     lib_mod.addImport("build_options", build_options_mod);
-    lib_mod.addImport("primitives", primitives_mod);
+    lib_mod.addImport("voltaire", primitives_mod);
     lib_mod.addImport("crypto", crypto_mod);
     lib_mod.addImport("precompiles", precompiles_mod);
     // evm_mod is not needed since lib_mod IS the evm module now

@@ -25,7 +25,7 @@ pub fn createWasmSteps(
         .single_threaded = true,
     });
     // crypto - primitives dependency is circular as in main build
-    wasm_crypto_mod.addImport("primitives", wasm_primitives_mod);
+    wasm_crypto_mod.addImport("voltaire", wasm_primitives_mod);
     wasm_crypto_mod.addImport("build_options", build_options_mod);
     wasm_primitives_mod.addImport("crypto", wasm_crypto_mod);
 
@@ -36,7 +36,7 @@ pub fn createWasmSteps(
         .optimize = wasm_optimize,
         .single_threaded = true,
     });
-    wasm_evm_mod.addImport("primitives", wasm_primitives_mod);
+    wasm_evm_mod.addImport("voltaire", wasm_primitives_mod);
     wasm_evm_mod.addImport("crypto", wasm_crypto_mod);
     wasm_evm_mod.addImport("build_options", build_options_mod);
 
@@ -48,7 +48,7 @@ pub fn createWasmSteps(
         .optimize = wasm_optimize,
         .single_threaded = true,
     });
-    wasm_c_api_mod.addImport("primitives", wasm_primitives_mod);
+    wasm_c_api_mod.addImport("voltaire", wasm_primitives_mod);
     wasm_c_api_mod.addImport("evm", wasm_evm_mod);
 
     const wasm_lib = b.addExecutable(.{
@@ -73,7 +73,7 @@ pub fn createWasmSteps(
         .optimize = .Debug,
         .single_threaded = true,
     });
-    wasm_evm_debug_mod.addImport("primitives", wasm_primitives_mod);
+    wasm_evm_debug_mod.addImport("voltaire", wasm_primitives_mod);
     wasm_evm_debug_mod.addImport("crypto", wasm_crypto_mod);
     wasm_evm_debug_mod.addImport("build_options", build_options_mod);
 
@@ -87,7 +87,7 @@ pub fn createWasmSteps(
         }),
         .use_llvm = true,
     });
-    wasm_lib_debug.root_module.addImport("primitives", wasm_primitives_mod);
+    wasm_lib_debug.root_module.addImport("voltaire", wasm_primitives_mod);
     wasm_lib_debug.root_module.addImport("evm", wasm_evm_debug_mod);
     wasm_lib_debug.entry = .disabled;
     wasm_lib_debug.rdynamic = true;
@@ -160,7 +160,7 @@ pub fn createMinimalEvmWasm(
         .optimize = .ReleaseSmall,
         .single_threaded = true,
     });
-    wasm_crypto_mod.addImport("primitives", wasm_primitives_mod);
+    wasm_crypto_mod.addImport("voltaire", wasm_primitives_mod);
     wasm_crypto_mod.addImport("build_options", build_options_mod);
     wasm_primitives_mod.addImport("crypto", wasm_crypto_mod);
 
@@ -171,7 +171,7 @@ pub fn createMinimalEvmWasm(
         .optimize = .ReleaseSmall,
         .single_threaded = true,
     });
-    tracer_c_mod.addImport("primitives", wasm_primitives_mod);
+    tracer_c_mod.addImport("voltaire", wasm_primitives_mod);
     tracer_c_mod.addImport("crypto", wasm_crypto_mod);
 
     // Build the MinimalEvm WASM binary

@@ -62,7 +62,7 @@ pub fn build(b: *std.Build) void {
     };
 
     // Dependencies
-    const primitives_dep = b.dependency("primitives", .{ .target = target, .optimize = optimize });
+    const primitives_dep = b.dependency("voltaire", .{ .target = target, .optimize = optimize });
 
     // Use Rust build step for Guillotine-specific libraries
     const rust_build_step = lib_build.FoundryLib.createRustBuildStep(b, rust_target, optimize);
@@ -89,7 +89,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     shared_lib_mod.addImport("evm", modules.evm_mod);
-    shared_lib_mod.addImport("primitives", modules.primitives_mod);
+    shared_lib_mod.addImport("voltaire", modules.primitives_mod);
     shared_lib_mod.addImport("crypto", modules.crypto_mod);
     shared_lib_mod.addImport("build_options", options_mod);
 
@@ -201,7 +201,7 @@ pub fn build(b: *std.Build) void {
         .test_runner = .{ .path = b.path("test_runner.zig"), .mode = .simple },
     });
     integration_tests.root_module.addImport("evm", modules.evm_mod);
-    integration_tests.root_module.addImport("primitives", modules.primitives_mod);
+    integration_tests.root_module.addImport("voltaire", modules.primitives_mod);
     integration_tests.root_module.addImport("crypto", modules.crypto_mod);
     integration_tests.root_module.addImport("compilers", modules.compilers_mod);
     integration_tests.root_module.addImport("provider", modules.provider_mod);
@@ -236,7 +236,7 @@ pub fn build(b: *std.Build) void {
         .test_runner = .{ .path = b.path("test_runner.zig"), .mode = .simple },
     });
     fixture_tests.root_module.addImport("evm", modules.evm_mod);
-    fixture_tests.root_module.addImport("primitives", modules.primitives_mod);
+    fixture_tests.root_module.addImport("voltaire", modules.primitives_mod);
     if (bn254_lib) |bn254| fixture_tests.linkLibrary(bn254);
     if (foundry_lib) |foundry| {
         fixture_tests.linkLibrary(foundry);
@@ -272,7 +272,7 @@ pub fn build(b: *std.Build) void {
         .use_llvm = true,
     });
     erc20_gas_test.root_module.addImport("evm", modules.evm_mod);
-    erc20_gas_test.root_module.addImport("primitives", modules.primitives_mod);
+    erc20_gas_test.root_module.addImport("voltaire", modules.primitives_mod);
     erc20_gas_test.root_module.addImport("crypto", modules.crypto_mod);
     erc20_gas_test.root_module.addImport("build_options", options_mod);
     erc20_gas_test.root_module.addImport("log", b.createModule(.{
@@ -299,7 +299,7 @@ pub fn build(b: *std.Build) void {
         .use_llvm = true,
     });
     jump_table_test.root_module.addImport("evm", modules.evm_mod);
-    jump_table_test.root_module.addImport("primitives", modules.primitives_mod);
+    jump_table_test.root_module.addImport("voltaire", modules.primitives_mod);
     jump_table_test.root_module.addImport("crypto", modules.crypto_mod);
     jump_table_test.root_module.addImport("build_options", options_mod);
     jump_table_test.root_module.addImport("log", b.createModule(.{
@@ -326,7 +326,7 @@ pub fn build(b: *std.Build) void {
         .use_llvm = true,
     });
     erc20_deployment_test.root_module.addImport("evm", modules.evm_mod);
-    erc20_deployment_test.root_module.addImport("primitives", modules.primitives_mod);
+    erc20_deployment_test.root_module.addImport("voltaire", modules.primitives_mod);
     erc20_deployment_test.root_module.addImport("crypto", modules.crypto_mod);
     erc20_deployment_test.root_module.addImport("build_options", options_mod);
     erc20_deployment_test.root_module.addImport("log", b.createModule(.{
@@ -356,7 +356,7 @@ pub fn build(b: *std.Build) void {
         .use_llvm = true,
     });
     fixtures_differential_test.root_module.addImport("evm", modules.evm_mod);
-    fixtures_differential_test.root_module.addImport("primitives", modules.primitives_mod);
+    fixtures_differential_test.root_module.addImport("voltaire", modules.primitives_mod);
     fixtures_differential_test.root_module.addImport("crypto", modules.crypto_mod);
     fixtures_differential_test.root_module.addImport("build_options", options_mod);
     fixtures_differential_test.root_module.addImport("log", b.createModule(.{
@@ -386,7 +386,7 @@ pub fn build(b: *std.Build) void {
         .use_llvm = true,
     });
     gt_bug_test.root_module.addImport("evm", modules.evm_mod);
-    gt_bug_test.root_module.addImport("primitives", modules.primitives_mod);
+    gt_bug_test.root_module.addImport("voltaire", modules.primitives_mod);
     gt_bug_test.root_module.addImport("crypto", modules.crypto_mod);
     gt_bug_test.root_module.addImport("build_options", options_mod);
     gt_bug_test.root_module.addImport("log", b.createModule(.{
@@ -411,7 +411,7 @@ pub fn build(b: *std.Build) void {
         .use_llvm = true,
     });
     dev_test.root_module.addImport("evm", modules.evm_mod);
-    dev_test.root_module.addImport("primitives", modules.primitives_mod);
+    dev_test.root_module.addImport("voltaire", modules.primitives_mod);
     dev_test.root_module.addImport("crypto", modules.crypto_mod);
     dev_test.root_module.addImport("build_options", options_mod);
     if (bn254_lib) |bn254| dev_test.linkLibrary(bn254);
@@ -454,7 +454,7 @@ pub fn build(b: *std.Build) void {
             }
             // Inject module dependencies used by the differential harness
             t.root_module.addImport("evm", modules.evm_mod);
-            t.root_module.addImport("primitives", modules.primitives_mod);
+            t.root_module.addImport("voltaire", modules.primitives_mod);
             t.root_module.addImport("crypto", modules.crypto_mod);
             t.root_module.addImport("build_options", options_mod);
             t.root_module.addImport("log", b.createModule(.{
@@ -495,7 +495,7 @@ pub fn build(b: *std.Build) void {
 
         // Add all the required dependencies
         erc20_mint_test.root_module.addImport("evm", modules.evm_mod);
-        erc20_mint_test.root_module.addImport("primitives", modules.primitives_mod);
+        erc20_mint_test.root_module.addImport("voltaire", modules.primitives_mod);
         erc20_mint_test.root_module.addImport("crypto", modules.crypto_mod);
 
         // Using MinimalEvm for differential testing (REVM removed)
@@ -524,7 +524,7 @@ pub fn build(b: *std.Build) void {
         });
 
         erc20_transfer_test.root_module.addImport("evm", modules.evm_mod);
-        erc20_transfer_test.root_module.addImport("primitives", modules.primitives_mod);
+        erc20_transfer_test.root_module.addImport("voltaire", modules.primitives_mod);
         erc20_transfer_test.root_module.addImport("crypto", modules.crypto_mod);
         erc20_transfer_test.root_module.addImport("build_options", options_mod);
 
@@ -550,7 +550,7 @@ pub fn build(b: *std.Build) void {
     //     });
     //
     //     static_jumps_test.root_module.addImport("evm", modules.evm_mod);
-    //     static_jumps_test.root_module.addImport("primitives", modules.primitives_mod);
+    //     static_jumps_test.root_module.addImport("voltaire", modules.primitives_mod);
     //     static_jumps_test.root_module.addImport("crypto", modules.crypto_mod);
     //     static_jumps_test.root_module.addImport("build_options", options_mod);
     //
@@ -582,7 +582,7 @@ pub fn build(b: *std.Build) void {
         });
 
         codecopy_test.root_module.addImport("evm", modules.evm_mod);
-        codecopy_test.root_module.addImport("primitives", modules.primitives_mod);
+        codecopy_test.root_module.addImport("voltaire", modules.primitives_mod);
         codecopy_test.root_module.addImport("crypto", modules.crypto_mod);
         codecopy_test.root_module.addImport("build_options", options_mod);
 
@@ -606,7 +606,7 @@ pub fn build(b: *std.Build) void {
 
         // Add required imports
         official_state_test.root_module.addImport("evm", modules.evm_mod);
-        official_state_test.root_module.addImport("primitives", modules.primitives_mod);
+        official_state_test.root_module.addImport("voltaire", modules.primitives_mod);
         official_state_test.root_module.addImport("crypto", modules.crypto_mod);
         official_state_test.root_module.addImport("build_options", options_mod);
 
@@ -641,7 +641,7 @@ pub fn build(b: *std.Build) void {
         });
 
         official_chain_test.root_module.addImport("evm", modules.evm_mod);
-        official_chain_test.root_module.addImport("primitives", modules.primitives_mod);
+        official_chain_test.root_module.addImport("voltaire", modules.primitives_mod);
         official_chain_test.root_module.addImport("crypto", modules.crypto_mod);
         official_chain_test.root_module.addImport("build_options", options_mod);
 
@@ -673,7 +673,7 @@ pub fn build(b: *std.Build) void {
         });
 
         // Add module imports needed by the test
-        synthetic_test.root_module.addImport("primitives", modules.primitives_mod);
+        synthetic_test.root_module.addImport("voltaire", modules.primitives_mod);
         synthetic_test.root_module.addImport("crypto", modules.crypto_mod);
         synthetic_test.root_module.addImport("build_options", options_mod);
 
@@ -698,14 +698,14 @@ pub fn build(b: *std.Build) void {
         .test_runner = .{ .path = b.path("test_runner.zig"), .mode = .simple },
     });
     specs_test.root_module.addImport("evm", modules.evm_mod);
-    specs_test.root_module.addImport("primitives", modules.primitives_mod);
+    specs_test.root_module.addImport("voltaire", modules.primitives_mod);
     specs_test.root_module.addImport("crypto", modules.crypto_mod);
     specs_test.root_module.addImport("build_options", options_mod);
     const runner_module = b.createModule(.{
         .root_source_file = b.path("specs/runner.zig"),
     });
     runner_module.addImport("evm", modules.evm_mod);
-    runner_module.addImport("primitives", modules.primitives_mod);
+    runner_module.addImport("voltaire", modules.primitives_mod);
     specs_test.root_module.addImport("runner", runner_module);
     if (bn254_lib) |bn254| specs_test.linkLibrary(bn254);
     specs_test.linkLibC();
@@ -756,7 +756,7 @@ pub fn build(b: *std.Build) void {
         .test_runner = .{ .path = b.path("test_runner.zig"), .mode = .simple },
     });
     state_tests.root_module.addImport("evm", modules.evm_mod);
-    state_tests.root_module.addImport("primitives", modules.primitives_mod);
+    state_tests.root_module.addImport("voltaire", modules.primitives_mod);
     state_tests.root_module.addImport("crypto", modules.crypto_mod);
     state_tests.root_module.addImport("build_options", options_mod);
     state_tests.root_module.addImport("runner", runner_module); // Reuse runner_module from specs_test
@@ -827,7 +827,7 @@ pub fn build(b: *std.Build) void {
             .use_llvm = true,
         });
         fusions_basic.root_module.addImport("evm", modules.evm_mod);
-        fusions_basic.root_module.addImport("primitives", modules.primitives_mod);
+        fusions_basic.root_module.addImport("voltaire", modules.primitives_mod);
         fusions_basic.root_module.addImport("crypto", modules.crypto_mod);
         fusions_basic.root_module.addImport("build_options", options_mod);
         fusions_basic.root_module.addImport("log", b.createModule(.{ .root_source_file = b.path("src/log.zig"), .target = target, .optimize = .Debug }));
@@ -846,7 +846,7 @@ pub fn build(b: *std.Build) void {
             .use_llvm = true,
         });
         fusions_dispatch.root_module.addImport("evm", modules.evm_mod);
-        fusions_dispatch.root_module.addImport("primitives", modules.primitives_mod);
+        fusions_dispatch.root_module.addImport("voltaire", modules.primitives_mod);
         fusions_dispatch.root_module.addImport("crypto", modules.crypto_mod);
         fusions_dispatch.root_module.addImport("build_options", options_mod);
         fusions_dispatch.root_module.addImport("log", b.createModule(.{ .root_source_file = b.path("src/log.zig"), .target = target, .optimize = .Debug }));
@@ -865,7 +865,7 @@ pub fn build(b: *std.Build) void {
             .use_llvm = true,
         });
         fusions_diff_toggle.root_module.addImport("evm", modules.evm_mod);
-        fusions_diff_toggle.root_module.addImport("primitives", modules.primitives_mod);
+        fusions_diff_toggle.root_module.addImport("voltaire", modules.primitives_mod);
         fusions_diff_toggle.root_module.addImport("crypto", modules.crypto_mod);
         fusions_diff_toggle.root_module.addImport("build_options", options_mod);
         fusions_diff_toggle.root_module.addImport("log", b.createModule(.{ .root_source_file = b.path("src/log.zig"), .target = target, .optimize = .Debug }));

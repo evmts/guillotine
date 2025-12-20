@@ -30,7 +30,7 @@ pub fn createOfficialTests(
 
         // Add required imports
         official_state_test.root_module.addImport("evm", modules.evm_mod);
-        official_state_test.root_module.addImport("primitives", modules.primitives_mod);
+        official_state_test.root_module.addImport("voltaire", modules.primitives_mod);
         official_state_test.root_module.addImport("crypto", modules.crypto_mod);
         official_state_test.root_module.addImport("build_options", config_options_mod);
 
@@ -67,7 +67,7 @@ pub fn createOfficialTests(
         });
 
         official_chain_test.root_module.addImport("evm", modules.evm_mod);
-        official_chain_test.root_module.addImport("primitives", modules.primitives_mod);
+        official_chain_test.root_module.addImport("voltaire", modules.primitives_mod);
         official_chain_test.root_module.addImport("crypto", modules.crypto_mod);
         official_chain_test.root_module.addImport("build_options", config_options_mod);
 

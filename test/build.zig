@@ -116,7 +116,7 @@ pub fn createIntegrationTests(
     });
 
     integration_tests.root_module.addImport("evm", modules.evm_mod);
-    integration_tests.root_module.addImport("primitives", modules.primitives_mod);
+    integration_tests.root_module.addImport("voltaire", modules.primitives_mod);
     integration_tests.root_module.addImport("crypto", modules.crypto_mod);
     integration_tests.root_module.addImport("compilers", modules.compilers_mod);
     integration_tests.root_module.addImport("provider", modules.provider_mod);
@@ -154,7 +154,7 @@ fn createRootTests(
     });
 
     root_tests.root_module.addImport("evm", modules.evm_mod);
-    root_tests.root_module.addImport("primitives", modules.primitives_mod);
+    root_tests.root_module.addImport("voltaire", modules.primitives_mod);
     root_tests.root_module.addImport("crypto", modules.crypto_mod);
     root_tests.root_module.addImport("compilers", modules.compilers_mod);
     root_tests.root_module.addImport("provider", modules.provider_mod);
@@ -189,7 +189,7 @@ fn createCompilerTests(
     });
 
     compiler_tests.root_module.addImport("compilers", modules.compilers_mod);
-    compiler_tests.root_module.addImport("primitives", modules.primitives_mod);
+    compiler_tests.root_module.addImport("voltaire", modules.primitives_mod);
 
     if (foundry_lib) |foundry| {
         compiler_tests.linkLibrary(foundry);
@@ -227,7 +227,7 @@ fn createOpcodeTests(
     });
 
     all_opcodes_test.root_module.addImport("evm", modules.evm_mod);
-    all_opcodes_test.root_module.addImport("primitives", modules.primitives_mod);
+    all_opcodes_test.root_module.addImport("voltaire", modules.primitives_mod);
     all_opcodes_test.root_module.addImport("crypto", modules.crypto_mod);
     all_opcodes_test.root_module.addImport("build_options", config_options_mod);
     // log module is already part of evm module (evm.log)
@@ -332,7 +332,7 @@ fn createErc20Tests(
             .use_llvm = true,
         });
         test_exe.root_module.addImport("evm", modules.evm_mod);
-        test_exe.root_module.addImport("primitives", modules.primitives_mod);
+        test_exe.root_module.addImport("voltaire", modules.primitives_mod);
         test_exe.root_module.addImport("crypto", modules.crypto_mod);
         test_exe.linkLibrary(libs.c_kzg_lib);
         test_exe.linkLibrary(libs.blst_lib);
@@ -355,7 +355,7 @@ fn createErc20Tests(
             .use_llvm = true,
         });
         test_exe.root_module.addImport("evm", modules.evm_mod);
-        test_exe.root_module.addImport("primitives", modules.primitives_mod);
+        test_exe.root_module.addImport("voltaire", modules.primitives_mod);
         test_exe.root_module.addImport("crypto", modules.crypto_mod);
         test_exe.root_module.addImport("build_options", config_options_mod);
         test_exe.linkLibrary(libs.c_kzg_lib);
@@ -434,7 +434,7 @@ fn createCodecopyTest(
         .use_llvm = true,
     });
     test_exe.root_module.addImport("evm", modules.evm_mod);
-    test_exe.root_module.addImport("primitives", modules.primitives_mod);
+    test_exe.root_module.addImport("voltaire", modules.primitives_mod);
     test_exe.root_module.addImport("crypto", modules.crypto_mod);
     test_exe.root_module.addImport("build_options", config_options_mod);
 
@@ -555,7 +555,7 @@ fn createDebugTests(
             .use_llvm = true,
         });
         test_exe.root_module.addImport("evm", modules.evm_mod);
-        test_exe.root_module.addImport("primitives", modules.primitives_mod);
+        test_exe.root_module.addImport("voltaire", modules.primitives_mod);
         test_exe.root_module.addImport("crypto", modules.crypto_mod);
         test_exe.root_module.addImport("build_options", config_options_mod);
         test_exe.linkLibrary(libs.c_kzg_lib);
@@ -579,7 +579,7 @@ fn configureEvmTest(
     _: std.builtin.OptimizeMode,
 ) void {
     test_exe.root_module.addImport("evm", modules.evm_mod);
-    test_exe.root_module.addImport("primitives", modules.primitives_mod);
+    test_exe.root_module.addImport("voltaire", modules.primitives_mod);
     test_exe.root_module.addImport("crypto", modules.crypto_mod);
     test_exe.root_module.addImport("build_options", config_options_mod);
     // log module is already part of evm module (evm.log)

@@ -23,7 +23,7 @@ pub fn createEvmRunner(
     });
 
     exe.root_module.addImport("evm", evm_mod);
-    exe.root_module.addImport("primitives", primitives_mod);
+    exe.root_module.addImport("voltaire", primitives_mod);
     exe.root_module.addImport("clap", clap_dep.module("clap"));
     exe.linkLibrary(c_kzg_lib);
     exe.linkLibrary(blst_lib);
@@ -59,7 +59,7 @@ pub fn createDebugRunner(
     });
 
     exe.root_module.addImport("evm", evm_mod);
-    exe.root_module.addImport("primitives", primitives_mod);
+    exe.root_module.addImport("voltaire", primitives_mod);
 
     b.installArtifact(exe);
     return exe;
@@ -86,7 +86,7 @@ pub fn createCrashDebugger(
     });
 
     exe.root_module.addImport("evm", evm_mod);
-    exe.root_module.addImport("primitives", primitives_mod);
+    exe.root_module.addImport("voltaire", primitives_mod);
 
     b.installArtifact(exe);
     return exe;
@@ -115,7 +115,7 @@ pub fn createBytecodeRunner(
     });
 
     exe.root_module.addImport("evm", evm_mod);
-    exe.root_module.addImport("primitives", primitives_mod);
+    exe.root_module.addImport("voltaire", primitives_mod);
     exe.root_module.addImport("crypto", crypto_mod);
     exe.root_module.addImport("provider", provider_mod);
     exe.root_module.addImport("trie", trie_mod);
@@ -150,7 +150,7 @@ pub fn createSnailTracer(
     });
 
     exe.root_module.addImport("evm", evm_mod);
-    exe.root_module.addImport("primitives", primitives_mod);
+    exe.root_module.addImport("voltaire", primitives_mod);
     exe.root_module.addImport("crypto", crypto_mod);
     exe.root_module.addImport("provider", provider_mod);
     exe.root_module.addImport("trie", trie_mod);
