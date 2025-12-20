@@ -1,0 +1,10 @@
+/Users/williamcory/.cache/zig/p/guillotine_primitives-0.1.0-yOt5gY7ZqgCQ6TI2vbRbc9fMpBqrSzC9xAqVWga_Bhm5/target/release/deps/keccak_asm-c1f1f49b710d3267.d: /Users/williamcory/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keccak-asm-0.1.4/src/lib.rs /Users/williamcory/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keccak-asm-0.1.4/src/macros.rs /Users/williamcory/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keccak-asm-0.1.4/src/state.rs /Users/williamcory/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keccak-asm-0.1.4/src/../README.md
+
+/Users/williamcory/.cache/zig/p/guillotine_primitives-0.1.0-yOt5gY7ZqgCQ6TI2vbRbc9fMpBqrSzC9xAqVWga_Bhm5/target/release/deps/libkeccak_asm-c1f1f49b710d3267.rlib: /Users/williamcory/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keccak-asm-0.1.4/src/lib.rs /Users/williamcory/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keccak-asm-0.1.4/src/macros.rs /Users/williamcory/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keccak-asm-0.1.4/src/state.rs /Users/williamcory/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keccak-asm-0.1.4/src/../README.md
+
+/Users/williamcory/.cache/zig/p/guillotine_primitives-0.1.0-yOt5gY7ZqgCQ6TI2vbRbc9fMpBqrSzC9xAqVWga_Bhm5/target/release/deps/libkeccak_asm-c1f1f49b710d3267.rmeta: /Users/williamcory/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keccak-asm-0.1.4/src/lib.rs /Users/williamcory/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keccak-asm-0.1.4/src/macros.rs /Users/williamcory/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keccak-asm-0.1.4/src/state.rs /Users/williamcory/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keccak-asm-0.1.4/src/../README.md
+
+/Users/williamcory/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keccak-asm-0.1.4/src/lib.rs:
+/Users/williamcory/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keccak-asm-0.1.4/src/macros.rs:
+/Users/williamcory/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keccak-asm-0.1.4/src/state.rs:
+/Users/williamcory/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keccak-asm-0.1.4/src/../README.md:

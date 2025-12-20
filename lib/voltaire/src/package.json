@@ -1,0 +1,22 @@
+{
+	"name": "@tevm/primitives",
+	"version": "0.1.0",
+	"type": "module",
+	"private": true,
+	"scripts": {
+		"test": "bun test"
+	},
+	"devDependencies": {
+		"@types/bun": "latest",
+		"bun-types": "latest"
+	},
+	"peerDependencies": {
+		"typescript": "^5.0.0"
+	},
+	"dependencies": {
+		"@noble/hashes": "^2.0.1",
+		"@noble/curves": "^1.6.0",
+		"@scure/bip32": "^1.5.0",
+		"@scure/bip39": "^1.4.0"
+	}
+}

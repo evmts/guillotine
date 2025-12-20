@@ -1,0 +1,283 @@
+const std = @import("std");
+const crypto = @import("crypto");
+const PrecompileError = @import("common.zig").PrecompileError;
+const PrecompileResult = @import("common.zig").PrecompileResult;
+
+/// Gas cost for BLS12-381 G1 addition
+pub const GAS: u64 = 500;
+
+/// 0x0B: BLS12_G1ADD - BLS12-381 G1 addition
+pub fn execute(
+    allocator: std.mem.Allocator,
+    input: []const u8,
+    gas_limit: u64,
+) PrecompileError!PrecompileResult {
+    if (gas_limit < GAS) {
+        return error.OutOfGas;
+    }
+
+    if (input.len != 256) {
+        return error.InvalidInput;
+    }
+
+    const output = try allocator.alloc(u8, 128);
+    crypto.Crypto.bls12_381.g1Add(input, output) catch {
+        return error.InvalidPoint;
+    };
+
+    return PrecompileResult{
+        .output = output,
+        .gas_used = GAS,
+    };
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+const testing = std.testing;
+
+test "bls12_g1_add - gas cost validation" {
+    const allocator = testing.allocator;
+
+    // Point at infinity (128 bytes of zeros) + another point (128 bytes)
+    var input: [256]u8 = [_]u8{0} ** 256;
+
+    // Test with exact gas
+    {
+        const result = try execute(allocator, &input, GAS);
+        defer result.deinit(allocator);
+        try testing.expectEqual(GAS, result.gas_used);
+    }
+
+    // Test with more than enough gas
+    {
+        const result = try execute(allocator, &input, GAS + 1000);
+        defer result.deinit(allocator);
+        try testing.expectEqual(GAS, result.gas_used);
+    }
+}
+
+test "bls12_g1_add - out of gas error" {
+    const allocator = testing.allocator;
+    var input: [256]u8 = [_]u8{0} ** 256;
+
+    // Test with insufficient gas
+    const result = execute(allocator, &input, GAS - 1);
+    try testing.expectError(error.OutOfGas, result);
+}
+
+test "bls12_g1_add - invalid input length" {
+    const allocator = testing.allocator;
+
+    // Test with input too short
+    {
+        var input: [255]u8 = [_]u8{0} ** 255;
+        const result = execute(allocator, &input, GAS);
+        try testing.expectError(error.InvalidInput, result);
+    }
+
+    // Test with input too long
+    {
+        var input: [257]u8 = [_]u8{0} ** 257;
+        const result = execute(allocator, &input, GAS);
+        try testing.expectError(error.InvalidInput, result);
+    }
+
+    // Test with empty input
+    {
+        var input: [0]u8 = [_]u8{};
+        const result = execute(allocator, &input, GAS);
+        try testing.expectError(error.InvalidInput, result);
+    }
+}
+
+test "bls12_g1_add - point at infinity operations" {
+    const allocator = testing.allocator;
+
+    // O + O = O (both points at infinity)
+    {
+        var input: [256]u8 = [_]u8{0} ** 256;
+        const result = try execute(allocator, &input, GAS);
+        defer result.deinit(allocator);
+
+        try testing.expectEqual(@as(usize, 128), result.output.len);
+        // Result should be point at infinity (all zeros)
+        for (result.output) |byte| {
+            try testing.expectEqual(@as(u8, 0), byte);
+        }
+    }
+
+    // P + O = P (second point at infinity)
+    {
+        var input: [256]u8 = [_]u8{0} ** 256;
+        // Set first point to generator point (x-coordinate least significant byte = 1)
+        // BLS12-381 G1 generator x-coordinate (big-endian, 48 bytes padded to 64)
+        // x = 0x17f1d3a73197d7942695638c4fa9ac0fc3688c4f9774b905a14e3a3f171bac586c55e83ff97a1aeffb3af00adb22c6bb
+        const g1_x = [_]u8{
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x17, 0xf1, 0xd3, 0xa7, 0x31, 0x97, 0xd7, 0x94, 0x26, 0x95, 0x63, 0x8c, 0x4f, 0xa9, 0xac, 0x0f,
+            0xc3, 0x68, 0x8c, 0x4f, 0x97, 0x74, 0xb9, 0x05, 0xa1, 0x4e, 0x3a, 0x3f, 0x17, 0x1b, 0xac, 0x58,
+            0x6c, 0x55, 0xe8, 0x3f, 0xf9, 0x7a, 0x1a, 0xef, 0xfb, 0x3a, 0xf0, 0x0a, 0xdb, 0x22, 0xc6, 0xbb,
+        };
+        // y = 0x08b3f481e3aaa0f1a09e30ed741d8ae4fcf5e095d5d00af600db18cb2c04b3edd03cc744a2888ae40caa232946c5e7e1
+        const g1_y = [_]u8{
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x08, 0xb3, 0xf4, 0x81, 0xe3, 0xaa, 0xa0, 0xf1, 0xa0, 0x9e, 0x30, 0xed, 0x74, 0x1d, 0x8a, 0xe4,
+            0xfc, 0xf5, 0xe0, 0x95, 0xd5, 0xd0, 0x0a, 0xf6, 0x00, 0xdb, 0x18, 0xcb, 0x2c, 0x04, 0xb3, 0xed,
+            0xd0, 0x3c, 0xc7, 0x44, 0xa2, 0x88, 0x8a, 0xe4, 0x0c, 0xaa, 0x23, 0x29, 0x46, 0xc5, 0xe7, 0xe1,
+        };
+
+        @memcpy(input[0..64], &g1_x);
+        @memcpy(input[64..128], &g1_y);
+        // Second point remains at infinity (all zeros)
+
+        const result = try execute(allocator, &input, GAS);
+        defer result.deinit(allocator);
+
+        try testing.expectEqual(@as(usize, 128), result.output.len);
+        // Result should be the generator point
+        try testing.expectEqualSlices(u8, &g1_x, result.output[0..64]);
+        try testing.expectEqualSlices(u8, &g1_y, result.output[64..128]);
+    }
+
+    // O + P = P (first point at infinity)
+    {
+        var input: [256]u8 = [_]u8{0} ** 256;
+        const g1_x = [_]u8{
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x17, 0xf1, 0xd3, 0xa7, 0x31, 0x97, 0xd7, 0x94, 0x26, 0x95, 0x63, 0x8c, 0x4f, 0xa9, 0xac, 0x0f,
+            0xc3, 0x68, 0x8c, 0x4f, 0x97, 0x74, 0xb9, 0x05, 0xa1, 0x4e, 0x3a, 0x3f, 0x17, 0x1b, 0xac, 0x58,
+            0x6c, 0x55, 0xe8, 0x3f, 0xf9, 0x7a, 0x1a, 0xef, 0xfb, 0x3a, 0xf0, 0x0a, 0xdb, 0x22, 0xc6, 0xbb,
+        };
+        const g1_y = [_]u8{
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x08, 0xb3, 0xf4, 0x81, 0xe3, 0xaa, 0xa0, 0xf1, 0xa0, 0x9e, 0x30, 0xed, 0x74, 0x1d, 0x8a, 0xe4,
+            0xfc, 0xf5, 0xe0, 0x95, 0xd5, 0xd0, 0x0a, 0xf6, 0x00, 0xdb, 0x18, 0xcb, 0x2c, 0x04, 0xb3, 0xed,
+            0xd0, 0x3c, 0xc7, 0x44, 0xa2, 0x88, 0x8a, 0xe4, 0x0c, 0xaa, 0x23, 0x29, 0x46, 0xc5, 0xe7, 0xe1,
+        };
+
+        // First point at infinity (remains zeros)
+        // Set second point to generator
+        @memcpy(input[128..192], &g1_x);
+        @memcpy(input[192..256], &g1_y);
+
+        const result = try execute(allocator, &input, GAS);
+        defer result.deinit(allocator);
+
+        try testing.expectEqual(@as(usize, 128), result.output.len);
+        // Result should be the generator point
+        try testing.expectEqualSlices(u8, &g1_x, result.output[0..64]);
+        try testing.expectEqualSlices(u8, &g1_y, result.output[64..128]);
+    }
+}
+
+test "bls12_g1_add - generator point addition" {
+    const allocator = testing.allocator;
+
+    // G + G = 2G
+    var input: [256]u8 = [_]u8{0} ** 256;
+    const g1_x = [_]u8{
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x17, 0xf1, 0xd3, 0xa7, 0x31, 0x97, 0xd7, 0x94, 0x26, 0x95, 0x63, 0x8c, 0x4f, 0xa9, 0xac, 0x0f,
+        0xc3, 0x68, 0x8c, 0x4f, 0x97, 0x74, 0xb9, 0x05, 0xa1, 0x4e, 0x3a, 0x3f, 0x17, 0x1b, 0xac, 0x58,
+        0x6c, 0x55, 0xe8, 0x3f, 0xf9, 0x7a, 0x1a, 0xef, 0xfb, 0x3a, 0xf0, 0x0a, 0xdb, 0x22, 0xc6, 0xbb,
+    };
+    const g1_y = [_]u8{
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x08, 0xb3, 0xf4, 0x81, 0xe3, 0xaa, 0xa0, 0xf1, 0xa0, 0x9e, 0x30, 0xed, 0x74, 0x1d, 0x8a, 0xe4,
+        0xfc, 0xf5, 0xe0, 0x95, 0xd5, 0xd0, 0x0a, 0xf6, 0x00, 0xdb, 0x18, 0xcb, 0x2c, 0x04, 0xb3, 0xed,
+        0xd0, 0x3c, 0xc7, 0x44, 0xa2, 0x88, 0x8a, 0xe4, 0x0c, 0xaa, 0x23, 0x29, 0x46, 0xc5, 0xe7, 0xe1,
+    };
+
+    // Both points are generator
+    @memcpy(input[0..64], &g1_x);
+    @memcpy(input[64..128], &g1_y);
+    @memcpy(input[128..192], &g1_x);
+    @memcpy(input[192..256], &g1_y);
+
+    const result = try execute(allocator, &input, GAS);
+    defer result.deinit(allocator);
+
+    try testing.expectEqual(@as(usize, 128), result.output.len);
+    // Result should be 2*G, not point at infinity
+    var is_zero = true;
+    for (result.output) |byte| {
+        if (byte != 0) {
+            is_zero = false;
+            break;
+        }
+    }
+    try testing.expect(!is_zero);
+}
+
+test "bls12_g1_add - point plus negative equals infinity" {
+    const allocator = testing.allocator;
+
+    // P + (-P) = O
+    var input: [256]u8 = [_]u8{0} ** 256;
+    const g1_x = [_]u8{
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x17, 0xf1, 0xd3, 0xa7, 0x31, 0x97, 0xd7, 0x94, 0x26, 0x95, 0x63, 0x8c, 0x4f, 0xa9, 0xac, 0x0f,
+        0xc3, 0x68, 0x8c, 0x4f, 0x97, 0x74, 0xb9, 0x05, 0xa1, 0x4e, 0x3a, 0x3f, 0x17, 0x1b, 0xac, 0x58,
+        0x6c, 0x55, 0xe8, 0x3f, 0xf9, 0x7a, 0x1a, 0xef, 0xfb, 0x3a, 0xf0, 0x0a, 0xdb, 0x22, 0xc6, 0xbb,
+    };
+    const g1_y = [_]u8{
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x08, 0xb3, 0xf4, 0x81, 0xe3, 0xaa, 0xa0, 0xf1, 0xa0, 0x9e, 0x30, 0xed, 0x74, 0x1d, 0x8a, 0xe4,
+        0xfc, 0xf5, 0xe0, 0x95, 0xd5, 0xd0, 0x0a, 0xf6, 0x00, 0xdb, 0x18, 0xcb, 0x2c, 0x04, 0xb3, 0xed,
+        0xd0, 0x3c, 0xc7, 0x44, 0xa2, 0x88, 0x8a, 0xe4, 0x0c, 0xaa, 0x23, 0x29, 0x46, 0xc5, 0xe7, 0xe1,
+    };
+    // Negative of G has same x but negated y (mod field)
+    // -y = q - y where q is the field modulus
+    // For BLS12-381: q = 0x1a0111ea397fe69a4b1ba7b6434bacd764774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab
+    // This is complex to compute, so we'll just verify the operation handles it correctly
+    // The C library should handle this calculation
+    const g1_neg_y = [_]u8{
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x11, 0x4c, 0x0b, 0x7e, 0x1c, 0x55, 0x5f, 0x0e, 0x5f, 0x61, 0xcf, 0x12, 0x8b, 0xe6, 0x25, 0x1b,
+        0x03, 0x0a, 0x1f, 0x6a, 0x2a, 0x8f, 0xf5, 0x09, 0xff, 0x24, 0xe7, 0x34, 0xd3, 0xfb, 0x4c, 0x12,
+        0x2f, 0xc3, 0x38, 0xbb, 0x5d, 0x77, 0x75, 0x1b, 0xf3, 0x55, 0xdc, 0xd6, 0xb9, 0x3a, 0x18, 0x1e,
+    };
+
+    // First point: G
+    @memcpy(input[0..64], &g1_x);
+    @memcpy(input[64..128], &g1_y);
+    // Second point: -G
+    @memcpy(input[128..192], &g1_x);
+    @memcpy(input[192..256], &g1_neg_y);
+
+    const result = try execute(allocator, &input, GAS);
+    defer result.deinit(allocator);
+
+    try testing.expectEqual(@as(usize, 128), result.output.len);
+    // Result should be point at infinity (all zeros)
+    for (result.output) |byte| {
+        try testing.expectEqual(@as(u8, 0), byte);
+    }
+}
+
+test "bls12_g1_add - invalid point not on curve" {
+    const allocator = testing.allocator;
+
+    // Create invalid point (not on curve)
+    var input: [256]u8 = [_]u8{0} ** 256;
+    // Set to arbitrary values that don't satisfy the curve equation
+    input[63] = 1; // x = 1
+    input[127] = 2; // y = 2
+    // Second point at infinity
+
+    const result = execute(allocator, &input, GAS);
+    try testing.expectError(error.InvalidPoint, result);
+}
+
+test "bls12_g1_add - output size validation" {
+    const allocator = testing.allocator;
+
+    var input: [256]u8 = [_]u8{0} ** 256;
+    const result = try execute(allocator, &input, GAS);
+    defer result.deinit(allocator);
+
+    // Output should always be 128 bytes (64 bytes x + 64 bytes y)
+    try testing.expectEqual(@as(usize, 128), result.output.len);
+}

@@ -1,0 +1,42 @@
+[package]
+name = "primitives"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "crypto_wrappers"
+crate-type = ["staticlib"]
+path = "src/crypto/lib.rs"
+
+[dependencies]
+# Arkworks dependencies for elliptic curve operations
+ark-bn254 = "0.5.0"
+ark-ec = "0.5.0"
+ark-ff = "0.5.0"
+ark-serialize = "0.5.0"
+ark-bls12-381 = "0.5.0"
+# Keccak implementations - assembly-optimized for native, pure Rust for WASM
+keccak-asm = { version = "0.1.4", optional = true }
+tiny-keccak = { version = "2.0", features = ["keccak"], optional = true }
+
+[features]
+default = ["asm"]
+asm = ["keccak-asm"]
+portable = ["tiny-keccak"]
+
+[profile.dev]
+# Debug profile - disable unwinding to avoid libunwind dependency
+panic = "abort"
+
+[profile.release]
+# Optimize for size by default
+opt-level = "z"
+lto = false  # Disabled for faster compilation
+panic = "abort"
+
+[profile.release-fast]
+# Optimize for speed
+inherits = "release"
+opt-level = 3
+lto = false  # Disabled for faster compilation
+panic = "abort"
