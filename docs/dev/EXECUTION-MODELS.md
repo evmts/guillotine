@@ -1,8 +1,42 @@
 # Execution Models Comparison
 
-This document provides a detailed side-by-side comparison of the Mini and Performance EVM execution models.
+This document provides a detailed side-by-side comparison of the Mini and Performance EVM execution models with visual diagrams and state traces.
 
 ## Overview
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         EXECUTION MODEL COMPARISON                          │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   MINI EVM                                 PERFORMANCE EVM                  │
+│   ────────                                 ───────────────                  │
+│                                                                             │
+│   ┌─────────────────────┐                  ┌─────────────────────┐         │
+│   │     Bytecode        │                  │     Bytecode        │         │
+│   │  [60 05 60 03 01]   │                  │  [60 05 60 03 01]   │         │
+│   └──────────┬──────────┘                  └──────────┬──────────┘         │
+│              │                                        │                     │
+│              │ Direct                                 │ Preprocess          │
+│              │                                        ▼                     │
+│              │                             ┌─────────────────────┐         │
+│              │                             │  Dispatch Schedule  │         │
+│              │                             │  [gas][push][5]     │         │
+│              │                             │  [push][3][add]     │         │
+│              │                             └──────────┬──────────┘         │
+│              │                                        │                     │
+│              ▼                                        ▼                     │
+│   ┌─────────────────────┐                  ┌─────────────────────┐         │
+│   │   While Loop        │                  │   Tail-Call Chain   │         │
+│   │   + Switch(256)     │                  │   (No loop/switch)  │         │
+│   └─────────────────────┘                  └─────────────────────┘         │
+│                                                                             │
+│   Branch prediction: ~50%                  Branch prediction: ~100%         │
+│   Gas check: Per operation                 Gas check: Per block             │
+│   Validation: Every operation              Validation: Once (preprocess)    │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
 
 | Aspect | Mini EVM | Performance EVM |
 |--------|----------|-----------------|
@@ -14,6 +48,44 @@ This document provides a detailed side-by-side comparison of the Mini and Perfor
 ## Execution Loop
 
 ### Mini: Traditional While Loop
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          MINI EVM: WHILE LOOP                               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   PC = 0                                                                    │
+│   │                                                                         │
+│   ▼                                                                         │
+│   ┌─────────────────────────────────────────────────────────────────────┐  │
+│   │ while (!stopped && !reverted && pc < bytecode.len) {                │  │
+│   │     │                                                               │  │
+│   │     ▼                                                               │  │
+│   │     ┌───────────────────────────────────────────────────────────┐  │  │
+│   │     │ opcode = bytecode[pc]                                     │  │  │
+│   │     └───────────────────────────────────────────────────────────┘  │  │
+│   │     │                                                               │  │
+│   │     ▼                                                               │  │
+│   │     ┌───────────────────────────────────────────────────────────┐  │  │
+│   │     │ switch (opcode) {                                         │  │  │
+│   │     │     0x00 => stop(),          // 256 cases                 │  │  │
+│   │     │     0x01 => add(),           // CPU can't predict         │  │  │
+│   │     │     0x02 => mul(),           // which branch              │  │  │
+│   │     │     ...                                                   │  │  │
+│   │     │     0xFF => selfdestruct(),                               │  │  │
+│   │     │ }                                                         │  │  │
+│   │     └───────────────────────────────────────────────────────────┘  │  │
+│   │     │                                                               │  │
+│   │     ▼                                                               │  │
+│   │     handler returns, pc incremented                                 │  │
+│   │     │                                                               │  │
+│   │     └──────────────────────────────────────────────────────────────┘│  │
+│   │                              │                                       │  │
+│   │                              │ loop back                             │  │
+│   └──────────────────────────────┘                                      │  │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
 
 ```zig
 // mini/src/frame.zig:540-553
@@ -49,6 +121,57 @@ pub fn step(self: *Self) EvmError!void {
 
 ### Performance: Tail-Call Chain
 
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                     PERFORMANCE EVM: TAIL-CALL CHAIN                        │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   PHASE 1: PREPROCESSING (once)                                             │
+│   ─────────────────────────────                                             │
+│                                                                             │
+│   Bytecode → Analyze → Build Schedule                                       │
+│                                                                             │
+│   PHASE 2: EXECUTION (each invocation)                                      │
+│   ────────────────────────────────────                                      │
+│                                                                             │
+│   schedule[1].handler(frame, cursor)                                        │
+│        │                                                                    │
+│        │  ┌──────────────────────────────────────────────────────────────┐ │
+│        └─▶│ push_handler:                                                │ │
+│           │   value = cursor[1].push_inline.value                        │ │
+│           │   stack.push_unsafe(value)                                   │ │
+│           │   @call(.always_tail, cursor[2].handler, {frame, cursor+2})  │ │
+│           └──────────────────────────────────────────────────────────────┘ │
+│                │                                                            │
+│                │ TAIL CALL (no return, no stack frame)                     │
+│                ▼                                                            │
+│           ┌──────────────────────────────────────────────────────────────┐ │
+│           │ push_handler:                                                │ │
+│           │   value = cursor[1].push_inline.value                        │ │
+│           │   stack.push_unsafe(value)                                   │ │
+│           │   @call(.always_tail, cursor[2].handler, {frame, cursor+2})  │ │
+│           └──────────────────────────────────────────────────────────────┘ │
+│                │                                                            │
+│                │ TAIL CALL                                                  │
+│                ▼                                                            │
+│           ┌──────────────────────────────────────────────────────────────┐ │
+│           │ add_handler:                                                 │ │
+│           │   stack.binary_op_unsafe(add_fn)                             │ │
+│           │   @call(.always_tail, cursor[1].handler, {frame, cursor+1})  │ │
+│           └──────────────────────────────────────────────────────────────┘ │
+│                │                                                            │
+│                │ TAIL CALL                                                  │
+│                ▼                                                            │
+│           ┌──────────────────────────────────────────────────────────────┐ │
+│           │ stop_handler:                                                │ │
+│           │   return Error.Stop  ← Exit point (via error)                │ │
+│           └──────────────────────────────────────────────────────────────┘ │
+│                                                                             │
+│   NO LOOP! NO SWITCH! Linear function pointer chain.                        │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
 ```zig
 // src/frame/frame.zig:200-220
 pub fn interpret(
@@ -61,7 +184,7 @@ pub fn interpret(
     self.code = bytecode_raw;
     self.jump_table = jump_table;
 
-    // Validate first block gas
+    // Validate first block gas (once for entire block)
     const first_block = schedule[0].first_block_gas;
     if (self.gas_remaining < first_block.gas) {
         return Error.OutOfGas;
@@ -83,6 +206,59 @@ pub fn interpret(
 ## Handler Implementation
 
 ### Mini: Simple Returns
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         MINI HANDLER: ADD                                   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   ENTRY                                                                     │
+│   │                                                                         │
+│   ▼                                                                         │
+│   ┌─────────────────────────────────────────────────────────────────────┐  │
+│   │ 1. GAS CHECK                                                        │  │
+│   │    if (gas_remaining < 3) return OutOfGas                           │  │
+│   │    gas_remaining -= 3                                               │  │
+│   └─────────────────────────────────────────────────────────────────────┘  │
+│   │                                                                         │
+│   ▼                                                                         │
+│   ┌─────────────────────────────────────────────────────────────────────┐  │
+│   │ 2. POP A (with bounds check)                                        │  │
+│   │    if (stack.len == 0) return StackUnderflow                        │  │
+│   │    a = stack.pop()                                                  │  │
+│   └─────────────────────────────────────────────────────────────────────┘  │
+│   │                                                                         │
+│   ▼                                                                         │
+│   ┌─────────────────────────────────────────────────────────────────────┐  │
+│   │ 3. POP B (with bounds check)                                        │  │
+│   │    if (stack.len == 0) return StackUnderflow                        │  │
+│   │    b = stack.pop()                                                  │  │
+│   └─────────────────────────────────────────────────────────────────────┘  │
+│   │                                                                         │
+│   ▼                                                                         │
+│   ┌─────────────────────────────────────────────────────────────────────┐  │
+│   │ 4. COMPUTE                                                          │  │
+│   │    result = a +% b (wrapping add)                                   │  │
+│   └─────────────────────────────────────────────────────────────────────┘  │
+│   │                                                                         │
+│   ▼                                                                         │
+│   ┌─────────────────────────────────────────────────────────────────────┐  │
+│   │ 5. PUSH RESULT (with bounds check)                                  │  │
+│   │    if (stack.len >= 1024) return StackOverflow                      │  │
+│   │    stack.push(result)                                               │  │
+│   └─────────────────────────────────────────────────────────────────────┘  │
+│   │                                                                         │
+│   ▼                                                                         │
+│   ┌─────────────────────────────────────────────────────────────────────┐  │
+│   │ 6. ADVANCE PC                                                       │  │
+│   │    pc += 1                                                          │  │
+│   └─────────────────────────────────────────────────────────────────────┘  │
+│   │                                                                         │
+│   ▼                                                                         │
+│   RETURN (back to execute loop)                                             │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
 
 ```zig
 // mini/src/instructions/handlers_arithmetic.zig
@@ -109,6 +285,49 @@ pub fn add(frame: *FrameType) FrameType.EvmError!void {
 
 ### Performance: Tail-Call Pattern
 
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                      PERFORMANCE HANDLER: ADD                               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   ENTRY (from previous handler's tail call)                                 │
+│   │                                                                         │
+│   ▼                                                                         │
+│   ┌─────────────────────────────────────────────────────────────────────┐  │
+│   │ 1. TRACER SYNC (debug builds only)                                  │  │
+│   │    self.beforeInstruction(.ADD, cursor)                             │  │
+│   │    • Validates state matches reference implementation               │  │
+│   └─────────────────────────────────────────────────────────────────────┘  │
+│   │                                                                         │
+│   ▼                                                                         │
+│   ┌─────────────────────────────────────────────────────────────────────┐  │
+│   │ 2. EXECUTE (pre-validated, no checks needed)                        │  │
+│   │    stack.binary_op_unsafe(add_fn)                                   │  │
+│   │    • No bounds check (validated in preprocessing)                   │  │
+│   │    • No gas check (charged at block entry)                          │  │
+│   │    • In-place modification (no intermediate storage)                │  │
+│   └─────────────────────────────────────────────────────────────────────┘  │
+│   │                                                                         │
+│   ▼                                                                         │
+│   ┌─────────────────────────────────────────────────────────────────────┐  │
+│   │ 3. GET NEXT HANDLER                                                 │  │
+│   │    next = dispatch.getOpData(.ADD)                                  │  │
+│   │    • Contains function pointer + cursor offset                      │  │
+│   └─────────────────────────────────────────────────────────────────────┘  │
+│   │                                                                         │
+│   ▼                                                                         │
+│   ┌─────────────────────────────────────────────────────────────────────┐  │
+│   │ 4. TAIL-CALL NEXT (NEVER returns)                                   │  │
+│   │    return @call(.always_tail, next.handler, {self, next.cursor})    │  │
+│   │    • Reuses stack frame                                             │  │
+│   │    • No function call overhead                                      │  │
+│   └─────────────────────────────────────────────────────────────────────┘  │
+│                                                                             │
+│   No return! Control transfers directly to next handler.                    │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
 ```zig
 // src/instructions/handlers_arithmetic.zig
 pub fn add(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
@@ -130,9 +349,188 @@ pub fn add(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
 }
 ```
 
+## Execution Trace: PUSH1 5, PUSH1 3, ADD
+
+### Mini EVM Trace
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        MINI EVM EXECUTION TRACE                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   Bytecode: [0x60, 0x05, 0x60, 0x03, 0x01]                                  │
+│   Initial:  PC=0, Gas=100, Stack=[]                                         │
+│                                                                             │
+│   ─────────────────────────────────────────────────────────────────────────│
+│   STEP 1: PC=0, Opcode=0x60 (PUSH1)                                        │
+│   ─────────────────────────────────────────────────────────────────────────│
+│                                                                             │
+│   execute() loop iteration:                                                 │
+│   │                                                                         │
+│   ├─ Read bytecode[0] = 0x60 (PUSH1)                                       │
+│   ├─ switch(0x60) → push1 handler                                          │
+│   ├─ Gas: 100 - 3 = 97                                                     │
+│   ├─ Read bytecode[1] = 0x05                                               │
+│   ├─ Stack: [] → [5]                                                       │
+│   ├─ PC: 0 → 2                                                             │
+│   └─ Return to loop                                                         │
+│                                                                             │
+│   State: PC=2, Gas=97, Stack=[5]                                           │
+│                                                                             │
+│   ─────────────────────────────────────────────────────────────────────────│
+│   STEP 2: PC=2, Opcode=0x60 (PUSH1)                                        │
+│   ─────────────────────────────────────────────────────────────────────────│
+│                                                                             │
+│   execute() loop iteration:                                                 │
+│   │                                                                         │
+│   ├─ Read bytecode[2] = 0x60 (PUSH1)                                       │
+│   ├─ switch(0x60) → push1 handler                                          │
+│   ├─ Gas: 97 - 3 = 94                                                      │
+│   ├─ Read bytecode[3] = 0x03                                               │
+│   ├─ Stack: [5] → [3, 5]  (3 is top)                                       │
+│   ├─ PC: 2 → 4                                                             │
+│   └─ Return to loop                                                         │
+│                                                                             │
+│   State: PC=4, Gas=94, Stack=[3, 5]                                        │
+│                                                                             │
+│   ─────────────────────────────────────────────────────────────────────────│
+│   STEP 3: PC=4, Opcode=0x01 (ADD)                                          │
+│   ─────────────────────────────────────────────────────────────────────────│
+│                                                                             │
+│   execute() loop iteration:                                                 │
+│   │                                                                         │
+│   ├─ Read bytecode[4] = 0x01 (ADD)                                         │
+│   ├─ switch(0x01) → add handler                                            │
+│   ├─ Gas: 94 - 3 = 91                                                      │
+│   ├─ Pop: 3 (top)                                                          │
+│   ├─ Pop: 5 (second)                                                       │
+│   ├─ Compute: 3 + 5 = 8                                                    │
+│   ├─ Push: 8                                                               │
+│   ├─ Stack: [3, 5] → [8]                                                   │
+│   ├─ PC: 4 → 5                                                             │
+│   └─ Return to loop                                                         │
+│                                                                             │
+│   State: PC=5, Gas=91, Stack=[8]                                           │
+│                                                                             │
+│   ─────────────────────────────────────────────────────────────────────────│
+│   Loop exits: PC=5 >= bytecode.len=5                                       │
+│   ─────────────────────────────────────────────────────────────────────────│
+│                                                                             │
+│   Total: 3 loop iterations, 3 switch dispatches, 3 gas checks              │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Performance EVM Trace
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                     PERFORMANCE EVM EXECUTION TRACE                         │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   Bytecode: [0x60, 0x05, 0x60, 0x03, 0x01]                                  │
+│                                                                             │
+│   PREPROCESSING (once):                                                     │
+│   ─────────────────────────────────────────────────────────────────────────│
+│                                                                             │
+│   Schedule built:                                                           │
+│   [0] first_block_gas { gas: 9, min_stack: 0, max_stack: 2 }               │
+│   [1] &push_handler                                                         │
+│   [2] push_inline { value: 5 }                                             │
+│   [3] &push_handler                                                         │
+│   [4] push_inline { value: 3 }                                             │
+│   [5] &add_handler                                                          │
+│   [6] &implicit_stop_handler                                                │
+│                                                                             │
+│   EXECUTION:                                                                │
+│   ─────────────────────────────────────────────────────────────────────────│
+│                                                                             │
+│   Initial: Gas=100, Stack=[]                                               │
+│                                                                             │
+│   ─────────────────────────────────────────────────────────────────────────│
+│   interpret() entry:                                                        │
+│   ─────────────────────────────────────────────────────────────────────────│
+│   │                                                                         │
+│   ├─ Read schedule[0] = first_block_gas { gas: 9 }                         │
+│   ├─ Gas: 100 - 9 = 91  (ALL gas charged upfront!)                         │
+│   └─ tail-call schedule[1].handler(frame, &schedule[1])                    │
+│                                                                             │
+│   ─────────────────────────────────────────────────────────────────────────│
+│   push_handler (cursor @ schedule[1]):                                      │
+│   ─────────────────────────────────────────────────────────────────────────│
+│   │                                                                         │
+│   ├─ Read cursor[1] = push_inline { value: 5 }                             │
+│   ├─ stack.push_unsafe(5)                                                  │
+│   ├─ Stack: [] → [5]                                                       │
+│   └─ tail-call cursor[2].handler(frame, cursor+2)  // schedule[3]          │
+│                                                                             │
+│   ─────────────────────────────────────────────────────────────────────────│
+│   push_handler (cursor @ schedule[3]):                                      │
+│   ─────────────────────────────────────────────────────────────────────────│
+│   │                                                                         │
+│   ├─ Read cursor[1] = push_inline { value: 3 }                             │
+│   ├─ stack.push_unsafe(3)                                                  │
+│   ├─ Stack: [5] → [3, 5]                                                   │
+│   └─ tail-call cursor[2].handler(frame, cursor+2)  // schedule[5]          │
+│                                                                             │
+│   ─────────────────────────────────────────────────────────────────────────│
+│   add_handler (cursor @ schedule[5]):                                       │
+│   ─────────────────────────────────────────────────────────────────────────│
+│   │                                                                         │
+│   ├─ stack.binary_op_unsafe(add)                                           │
+│   │   ├─ Read data[stack_ptr] = 3                                          │
+│   │   ├─ stack_ptr += 1                                                    │
+│   │   ├─ data[stack_ptr] = 5 + 3 = 8                                       │
+│   │   └─ Stack: [3, 5] → [8]                                               │
+│   └─ tail-call cursor[1].handler(frame, cursor+1)  // schedule[6]          │
+│                                                                             │
+│   ─────────────────────────────────────────────────────────────────────────│
+│   implicit_stop_handler (cursor @ schedule[6]):                             │
+│   ─────────────────────────────────────────────────────────────────────────│
+│   │                                                                         │
+│   └─ return Error.Stop  (exit via error)                                   │
+│                                                                             │
+│   Final: Gas=91, Stack=[8]                                                 │
+│                                                                             │
+│   Total: 0 loop iterations, 0 switch dispatches, 1 gas check               │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
 ## Stack Operations
 
 ### Mini: Bounds-Checked ArrayList
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                      MINI STACK: ARRAYLIST                                  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   Structure:                                                                │
+│   ┌─────────────────────────────────────────────────────────────────────┐  │
+│   │ items: []u256  (dynamic array)                                      │  │
+│   │ len: usize                                                          │  │
+│   │ allocator: Allocator                                                │  │
+│   └─────────────────────────────────────────────────────────────────────┘  │
+│                                                                             │
+│   Push Operation:                                                           │
+│   ┌─────────────────────────────────────────────────────────────────────┐  │
+│   │ if (len >= 1024) return StackOverflow;  // Check every time         │  │
+│   │ items[len] = value;                                                 │  │
+│   │ len += 1;                                                           │  │
+│   └─────────────────────────────────────────────────────────────────────┘  │
+│                                                                             │
+│   Pop Operation:                                                            │
+│   ┌─────────────────────────────────────────────────────────────────────┐  │
+│   │ if (len == 0) return StackUnderflow;    // Check every time         │  │
+│   │ len -= 1;                                                           │  │
+│   │ return items[len];                                                  │  │
+│   └─────────────────────────────────────────────────────────────────────┘  │
+│                                                                             │
+│   Cost: 2 branches per operation                                            │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
 
 ```zig
 // mini/src/frame.zig:161-176
@@ -158,6 +556,41 @@ pub fn popStack(self: *Self) EvmError!u256 {
 
 ### Performance: Pre-Validated Unsafe Operations
 
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                   PERFORMANCE STACK: CACHE-ALIGNED ARRAY                    │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   Structure (64-byte aligned for cache line):                               │
+│   ┌─────────────────────────────────────────────────────────────────────┐  │
+│   │ data: [1024]u256 align(64)   (fixed array, preallocated)            │  │
+│   │ stack_ptr: usize             (points to next free slot)             │  │
+│   └─────────────────────────────────────────────────────────────────────┘  │
+│                                                                             │
+│   Memory Layout (downward growth):                                          │
+│                                                                             │
+│   Index 0    ─┐                                                            │
+│               │ ← Empty slots                                              │
+│   ...         │                                                            │
+│               │                                                            │
+│   Index N  ───┤ ← stack_ptr (next free)                                    │
+│               │                                                            │
+│   Index N+1 ──┤ ← Top of stack (most recent push)                          │
+│               │                                                            │
+│   Index N+2 ──┤ ← Second item                                              │
+│               │                                                            │
+│   ...         │                                                            │
+│               │                                                            │
+│   Index 1023 ─┘ ← Bottom of stack                                          │
+│                                                                             │
+│   Push: stack_ptr -= 1; data[stack_ptr] = value  (NO check)                │
+│   Pop:  value = data[stack_ptr]; stack_ptr += 1  (NO check)                │
+│                                                                             │
+│   Why safe? Preprocessing validated stack bounds for entire basic block.   │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
 ```zig
 // src/stack/stack.zig
 
@@ -172,7 +605,7 @@ pub inline fn push_unsafe(self: *Self, value: WordType) void {
     self.data[self.stack_ptr] = value;
 }
 
-// Optimized binary operation
+// Optimized binary operation (ADD, SUB, MUL, etc.)
 pub inline fn binary_op_unsafe(
     self: *Self,
     comptime op: fn (WordType, WordType) WordType,
@@ -188,43 +621,96 @@ pub inline fn binary_op_unsafe(
 
 ### Mini: Per-Operation
 
-```zig
-// mini/src/frame.zig
-pub fn consumeGas(self: *Self, amount: u64) EvmError!void {
-    if (self.gas_remaining < @intCast(amount)) {
-        return error.OutOfGas;
-    }
-    self.gas_remaining -= @intCast(amount);
-}
-
-// Each handler charges gas
-pub fn add(frame: *FrameType) EvmError!void {
-    try frame.consumeGas(3);  // Every ADD costs 3
-    // ...
-}
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                       MINI GAS: PER-OPERATION                               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   Bytecode: PUSH1 5, PUSH1 3, ADD                                          │
+│                                                                             │
+│   ┌──────────────┬──────────────┬──────────────┬──────────────┐            │
+│   │   PUSH1 5    │   PUSH1 3    │     ADD      │    Total     │            │
+│   ├──────────────┼──────────────┼──────────────┼──────────────┤            │
+│   │ Check: 100>3 │ Check: 97>3  │ Check: 94>3  │  3 checks    │            │
+│   │ Gas: 100→97  │ Gas: 97→94   │ Gas: 94→91   │              │            │
+│   └──────────────┴──────────────┴──────────────┴──────────────┘            │
+│                                                                             │
+│   Code:                                                                     │
+│   ┌─────────────────────────────────────────────────────────────────────┐  │
+│   │ pub fn consumeGas(self: *Self, amount: u64) EvmError!void {         │  │
+│   │     if (self.gas_remaining < amount) {  // Check every time         │  │
+│   │         return error.OutOfGas;                                      │  │
+│   │     }                                                               │  │
+│   │     self.gas_remaining -= amount;                                   │  │
+│   │ }                                                                   │  │
+│   └─────────────────────────────────────────────────────────────────────┘  │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Performance: Per-Basic-Block
 
-```zig
-// Gas calculated once per basic block
-// First schedule item contains total block gas
-first_block_gas: FirstBlockMetadata {
-    .gas: 15,        // Total for block (e.g., PUSH+PUSH+ADD = 3+3+3+3+3)
-    .min_stack: 0,   // Stack items needed
-    .max_stack: 2,   // Stack items produced
-}
-
-// Charged at block entry, not per instruction
-if (self.gas_remaining < first_block.gas) {
-    return Error.OutOfGas;
-}
-self.gas_remaining -= first_block.gas;
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    PERFORMANCE GAS: PER-BASIC-BLOCK                         │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   Basic Block: PUSH1 5, PUSH1 3, ADD (no jumps = one block)                │
+│                                                                             │
+│   Preprocessing calculates: 3 + 3 + 3 = 9 gas for entire block             │
+│                                                                             │
+│   ┌─────────────────────────────────────────────────────────────────────┐  │
+│   │   Block Entry                                                       │  │
+│   ├─────────────────────────────────────────────────────────────────────┤  │
+│   │ Check: 100 > 9? YES                                                 │  │
+│   │ Gas: 100 → 91  (single deduction)                                   │  │
+│   └─────────────────────────────────────────────────────────────────────┘  │
+│                                                                             │
+│   ┌──────────────┬──────────────┬──────────────┬──────────────┐            │
+│   │   PUSH1 5    │   PUSH1 3    │     ADD      │    Total     │            │
+│   ├──────────────┼──────────────┼──────────────┼──────────────┤            │
+│   │ No check     │ No check     │ No check     │  1 check     │            │
+│   │ (prepaid)    │ (prepaid)    │ (prepaid)    │  (at entry)  │            │
+│   └──────────────┴──────────────┴──────────────┴──────────────┘            │
+│                                                                             │
+│   Schedule:                                                                 │
+│   ┌─────────────────────────────────────────────────────────────────────┐  │
+│   │ [0] first_block_gas { gas: 9, min_stack: 0, max_stack: 2 }          │  │
+│   │     └─ 9 = PUSH1(3) + PUSH1(3) + ADD(3)                             │  │
+│   └─────────────────────────────────────────────────────────────────────┘  │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Memory Access
 
 ### Mini: Sparse HashMap
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                      MINI MEMORY: SPARSE HASHMAP                            │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   Structure: HashMap(u32 → u8)                                              │
+│                                                                             │
+│   MSTORE(offset=0x40, value=0x1234...5678)                                 │
+│                                                                             │
+│   Stores 32 individual entries:                                             │
+│   ┌───────────┬───────────┐                                                │
+│   │ Key       │ Value     │                                                │
+│   ├───────────┼───────────┤                                                │
+│   │ 0x40      │ 0x00      │                                                │
+│   │ 0x41      │ 0x00      │                                                │
+│   │ ...       │ ...       │                                                │
+│   │ 0x5E      │ 0x56      │                                                │
+│   │ 0x5F      │ 0x78      │                                                │
+│   └───────────┴───────────┘                                                │
+│                                                                             │
+│   Pros: Only stores non-zero bytes (sparse)                                 │
+│   Cons: 32 hash lookups per word read/write                                │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
 
 ```zig
 // mini/src/frame.zig
@@ -244,6 +730,39 @@ pub fn writeMemory(self: *Self, offset: u32, value: u8) !void {
 ```
 
 ### Performance: Word-Aligned Pages
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                   PERFORMANCE MEMORY: WORD-ALIGNED PAGES                    │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   Structure: Array of 4KB pages, each containing 128 words (32 bytes each) │
+│                                                                             │
+│   ┌─────────────────────────────────────────────────────────────────────┐  │
+│   │ Page 0 (0x0000-0x0FFF)                                              │  │
+│   │ ┌────────┬────────┬────────┬────────┬─────────────────────────────┐│  │
+│   │ │Word 0  │Word 1  │Word 2  │Word 3  │ ...                         ││  │
+│   │ │32 bytes│32 bytes│32 bytes│32 bytes│                             ││  │
+│   │ └────────┴────────┴────────┴────────┴─────────────────────────────┘│  │
+│   └─────────────────────────────────────────────────────────────────────┘  │
+│                                                                             │
+│   ┌─────────────────────────────────────────────────────────────────────┐  │
+│   │ Page 1 (0x1000-0x1FFF)                                              │  │
+│   │ ┌────────┬────────┬────────┬────────┬─────────────────────────────┐│  │
+│   │ │Word 0  │Word 1  │Word 2  │Word 3  │ ...                         ││  │
+│   │ └────────┴────────┴────────┴────────┴─────────────────────────────┘│  │
+│   └─────────────────────────────────────────────────────────────────────┘  │
+│                                                                             │
+│   MLOAD(offset=0x40):                                                       │
+│   page_idx = 0x40 / 4096 = 0                                               │
+│   word_idx = (0x40 % 4096) / 32 = 2                                        │
+│   return pages[0].words[2]  // Single array access!                        │
+│                                                                             │
+│   Pros: O(1) word access, cache-friendly                                   │
+│   Cons: Allocates full pages even for sparse access                        │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
 
 ```zig
 // src/memory/memory.zig
@@ -268,105 +787,46 @@ pub fn Memory(comptime config: MemoryConfig) type {
 }
 ```
 
-## Jump Handling
-
-### Mini: Binary Search
-
-```zig
-// mini/src/frame.zig
-pub fn jump(frame: *FrameType) EvmError!void {
-    const target = try frame.popStack();
-    const target_pc: u32 = @intCast(target);
-
-    // Validate jump destination
-    if (!frame.bytecode.isValidJumpDest(target_pc)) {
-        return error.InvalidJump;
-    }
-
-    frame.pc = target_pc;
-}
-```
-
-### Performance: Pre-Resolved Table
-
-```zig
-// src/preprocessor/dispatch_jump_table.zig
-pub const JumpTable = struct {
-    entries: []const JumpTableEntry,  // Sorted by PC
-
-    pub fn lookup(self: *JumpTable, target_pc: u32) ?usize {
-        // Binary search for schedule index
-        var left: usize = 0;
-        var right = self.entries.len;
-        while (left < right) {
-            const mid = (left + right) / 2;
-            if (self.entries[mid].pc == target_pc) {
-                return self.entries[mid].schedule_index;
-            }
-            if (self.entries[mid].pc < target_pc) {
-                left = mid + 1;
-            } else {
-                right = mid;
-            }
-        }
-        return null;
-    }
-};
-
-// Static jumps resolved at compile time - no search needed
-JUMP_TO_STATIC_LOCATION: jump_static { .target_cursor: [*]const Item }
-```
-
-## Synthetic Opcodes
-
-### Mini: None
-
-Every bytecode opcode maps to one handler.
-
-### Performance: 30+ Fusion Patterns
-
-```zig
-// src/opcodes/opcode_synthetic.zig
-pub const OpcodeSynthetic = enum(u8) {
-    PUSH_ADD_INLINE = 0xA5,     // PUSH + ADD
-    PUSH_MSTORE_INLINE = 0xB3,  // PUSH + MSTORE
-    FUNCTION_DISPATCH = 0xC8,   // PUSH4 + EQ + PUSH + JUMPI
-    // ... 30+ patterns
-};
-
-// Example fusion: PUSH_ADD_INLINE
-pub fn push_add_inline(self: *FrameType, cursor: [*]const Item) Error!noreturn {
-    const push_value = cursor[1].push_inline.value;
-    const top = self.stack.peek_unsafe();
-    self.stack.set_top_unsafe(top +% @as(WordType, push_value));
-    return @call(.always_tail, cursor[2].opcode_handler, .{self, cursor + 2});
-}
-```
-
-## Branch Prediction
-
-### Mini: Poor
+## Branch Prediction Impact
 
 ```
-switch (opcode) {      // 256-way branch
-    0x00 => stop(),    // CPU can't predict which case
-    0x01 => add(),
-    // ...
-}
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                      BRANCH PREDICTION COMPARISON                           │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   MINI EVM: 256-way switch                                                  │
+│   ──────────────────────────                                                │
+│                                                                             │
+│   switch (opcode) {          ← CPU: "Which of 256 branches?"               │
+│       0x00 => stop(),        ← Misprediction penalty: 15-20 cycles         │
+│       0x01 => add(),         ← ~50% misprediction rate typical             │
+│       ...                                                                   │
+│   }                                                                         │
+│                                                                             │
+│   For 1000 opcodes: ~500 mispredictions × 15 cycles = 7500 wasted cycles   │
+│                                                                             │
+│   ─────────────────────────────────────────────────────────────────────────│
+│                                                                             │
+│   PERFORMANCE EVM: Direct function calls                                    │
+│   ──────────────────────────────────────                                    │
+│                                                                             │
+│   handler = cursor.opcode_handler  ← CPU: "Always load from same offset"   │
+│   @call(.always_tail, handler, ..) ← Misprediction rate: ~0%               │
+│                                                                             │
+│   For 1000 opcodes: ~0 mispredictions × 15 cycles = 0 wasted cycles        │
+│                                                                             │
+│   ─────────────────────────────────────────────────────────────────────────│
+│                                                                             │
+│   Summary:                                                                  │
+│   ┌─────────────────────────┬───────────┬───────────────────────────────┐  │
+│   │ Model                   │ Branches  │ Prediction Success           │  │
+│   ├─────────────────────────┼───────────┼───────────────────────────────┤  │
+│   │ Mini (switch)           │ 256       │ ~50% (random)                 │  │
+│   │ Performance (dispatch)  │ 1         │ ~100% (always same pattern)   │  │
+│   └─────────────────────────┴───────────┴───────────────────────────────┘  │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
-
-- ~50% branch misprediction rate
-- Each misprediction: ~15-20 cycle penalty
-
-### Performance: Perfect
-
-```
-cursor[0].opcode_handler(frame, cursor);  // Always the same pattern
-return @call(.always_tail, next, ...);    // Linear execution
-```
-
-- 0% branch misprediction
-- Predictable linear execution
 
 ## Performance Comparison
 
@@ -376,13 +836,15 @@ return @call(.always_tail, next, ...);    // Linear execution
 | Storage operations | 1.0x | 3-5x faster | 3-5x |
 | Contract calls | 1.0x | 5-10x faster | 5-10x |
 | Memory usage | Higher | Lower | ~0.7x |
+| Branch mispredictions | ~50% | ~0% | - |
+| Gas checks per block | N | 1 | Nx |
 
 ## When to Use Each
 
 ### Use Mini When:
-- Learning EVM internals
-- Debugging execution issues
-- Need clear, auditable code
+- Learning EVM internals (code is self-documenting)
+- Debugging execution issues (clear step-by-step flow)
+- Need clear, auditable code (no magic)
 - Reference implementation for testing
 - Performance is not critical
 

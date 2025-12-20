@@ -2,123 +2,305 @@
 
 Deep dive documentation for understanding and contributing to Guillotine. These docs contain actual code excerpts, detailed architecture explanations, and step-by-step execution traces.
 
-## Purpose
+```
+                           GUILLOTINE EVM
+    ┌─────────────────────────────────────────────────────────┐
+    │                                                         │
+    │   ┌─────────────┐              ┌─────────────────────┐  │
+    │   │  Mini EVM   │              │  Performance EVM    │  │
+    │   │  (Clarity)  │              │  (Speed)            │  │
+    │   │             │              │                     │  │
+    │   │  PC-based   │              │  Dispatch-based     │  │
+    │   │  46 files   │              │  158 files          │  │
+    │   │  ~25KB      │              │  ~270KB             │  │
+    │   └─────────────┘              └─────────────────────┘  │
+    │          │                              │               │
+    │          └──────────────┬───────────────┘               │
+    │                         │                               │
+    │                    Shared Primitives                    │
+    │              (Address, U256, Gas, Hardfork)             │
+    └─────────────────────────────────────────────────────────┘
+```
 
-This documentation enables you to:
-- Understand the codebase architecture without reading all source files
-- Drive architectural changes with full context
-- Debug issues with knowledge of execution flow
-- Contribute with understanding of patterns and conventions
+## Quick Start for New Developers
+
+### 1. Understand the Two EVMs
+
+| Aspect | Mini EVM | Performance EVM |
+|--------|----------|-----------------|
+| **Location** | `mini/src/` | `src/` |
+| **Philosophy** | Clarity first | Speed first |
+| **Execution** | Sequential PC loop | Tail-call dispatch |
+| **Use case** | Learning, testing | Production |
+| **Start here** | `mini/src/frame.zig` | `src/frame/frame.zig` |
+
+### 2. Read in This Order
+
+```
+START HERE
+    │
+    ▼
+┌─────────────────────────────────┐
+│ 1. ARCHITECTURE.md              │  ← Understand the structure
+│    - Core components            │
+│    - How pieces fit together    │
+└─────────────────────────────────┘
+    │
+    ▼
+┌─────────────────────────────────┐
+│ 2. EXECUTION-MODELS.md          │  ← See both EVMs side-by-side
+│    - Mini: while loop           │
+│    - Performance: tail calls    │
+└─────────────────────────────────┘
+    │
+    ▼
+┌─────────────────────────────────┐
+│ 3. STATE-MANAGEMENT.md          │  ← How storage works
+│    - Storage, journal           │
+│    - Warm/cold access           │
+└─────────────────────────────────┘
+    │
+    ▼
+┌─────────────────────────────────┐
+│ 4. GAS-METERING.md              │  ← Gas calculation rules
+│    - Static/dynamic costs       │
+│    - SSTORE gas table           │
+└─────────────────────────────────┘
+    │
+    ▼
+┌─────────────────────────────────┐
+│ 5. CONTRIBUTING.md              │  ← Ready to contribute
+│    - Code patterns              │
+│    - Adding opcodes             │
+└─────────────────────────────────┘
+```
+
+### 3. Run Your First Test
+
+```bash
+# Build the project
+zig build
+
+# Run all tests (should pass with no output)
+zig build test
+
+# Run a specific opcode test
+zig build test-opcodes -Dtest-filter='ADD'
+
+# No output = success!
+```
 
 ## Documentation Index
 
-| Document | Description |
-|----------|-------------|
-| [ARCHITECTURE.md](./ARCHITECTURE.md) | Unified architecture of both EVMs with code excerpts |
-| [EXECUTION-MODELS.md](./EXECUTION-MODELS.md) | Side-by-side comparison of Mini vs Performance |
-| [STATE-MANAGEMENT.md](./STATE-MANAGEMENT.md) | Storage, journal, warm/cold tracking |
-| [GAS-METERING.md](./GAS-METERING.md) | Gas calculation patterns and costs |
-| [TESTING.md](./TESTING.md) | Test organization, running, and debugging |
-| [HARDFORKS.md](./HARDFORKS.md) | EIP support matrix and hardfork handling |
-| [CONTRIBUTING.md](./CONTRIBUTING.md) | Development workflow and conventions |
+| Document | Description | Read When... |
+|----------|-------------|--------------|
+| [ARCHITECTURE.md](./ARCHITECTURE.md) | Unified architecture with code excerpts | Understanding codebase structure |
+| [EXECUTION-MODELS.md](./EXECUTION-MODELS.md) | Side-by-side Mini vs Performance | Comparing implementations |
+| [STATE-MANAGEMENT.md](./STATE-MANAGEMENT.md) | Storage, journal, warm/cold tracking | Working with storage |
+| [GAS-METERING.md](./GAS-METERING.md) | Gas calculation patterns and costs | Debugging gas issues |
+| [TESTING.md](./TESTING.md) | Test organization and debugging | Running/writing tests |
+| [HARDFORKS.md](./HARDFORKS.md) | EIP support matrix and feature flags | Adding hardfork features |
+| [CONTRIBUTING.md](./CONTRIBUTING.md) | Development workflow and conventions | Making contributions |
 
 ## Quick Navigation by Topic
 
-### Execution
-- How does the EVM execute bytecode? → [EXECUTION-MODELS.md](./EXECUTION-MODELS.md)
-- What is dispatch-based execution? → [ARCHITECTURE.md#dispatch-system](./ARCHITECTURE.md#dispatch-system)
-- How do synthetic opcodes work? → [../performance/SYNTHETIC-OPCODES.md](../performance/SYNTHETIC-OPCODES.md)
+### "How does X work?"
 
-### State
-- How is storage managed? → [STATE-MANAGEMENT.md#storage](./STATE-MANAGEMENT.md#storage)
-- What is the journal system? → [STATE-MANAGEMENT.md#journal](./STATE-MANAGEMENT.md#journal)
-- How does warm/cold tracking work? → [STATE-MANAGEMENT.md#access-list](./STATE-MANAGEMENT.md#access-list)
+| Question | Document | Section |
+|----------|----------|---------|
+| How does the EVM execute bytecode? | [EXECUTION-MODELS.md](./EXECUTION-MODELS.md) | Execution Loop |
+| What is dispatch-based execution? | [ARCHITECTURE.md](./ARCHITECTURE.md#dispatch-system) | Dispatch System |
+| How do synthetic opcodes work? | [../performance/SYNTHETIC-OPCODES.md](../performance/SYNTHETIC-OPCODES.md) | All |
+| How is storage managed? | [STATE-MANAGEMENT.md](./STATE-MANAGEMENT.md#storage-architecture) | Storage Architecture |
+| What is the journal system? | [STATE-MANAGEMENT.md](./STATE-MANAGEMENT.md#journal-system-performance-only) | Journal System |
+| How does warm/cold tracking work? | [STATE-MANAGEMENT.md](./STATE-MANAGEMENT.md#access-list-eip-2929) | Access List |
+| How is gas calculated? | [GAS-METERING.md](./GAS-METERING.md) | All |
+| What are memory expansion costs? | [GAS-METERING.md](./GAS-METERING.md#memory-expansion) | Memory Expansion |
+| How do SSTORE refunds work? | [GAS-METERING.md](./GAS-METERING.md#sstore-gas-eip-22003529) | SSTORE Gas |
 
-### Gas
-- How is gas calculated? → [GAS-METERING.md](./GAS-METERING.md)
-- What are memory expansion costs? → [GAS-METERING.md#memory-expansion](./GAS-METERING.md#memory-expansion)
-- How do SSTORE refunds work? → [GAS-METERING.md#sstore-gas](./GAS-METERING.md#sstore-gas)
+### "How do I..."
 
-### Testing
-- How do I run tests? → [TESTING.md#running-tests](./TESTING.md#running-tests)
-- How do I debug a failing test? → [TESTING.md#debugging](./TESTING.md#debugging)
-- What are spec tests? → [TESTING.md#spec-tests](./TESTING.md#spec-tests)
+| Task | Document | Section |
+|------|----------|---------|
+| Run tests? | [TESTING.md](./TESTING.md#running-tests) | Running Tests |
+| Debug a failing test? | [TESTING.md](./TESTING.md#debugging-tests) | Debugging Tests |
+| Add a new opcode? | [CONTRIBUTING.md](./CONTRIBUTING.md#adding-a-new-opcode) | Adding a New Opcode |
+| Add hardfork support? | [HARDFORKS.md](./HARDFORKS.md#implementation-checklist) | Implementation Checklist |
+| Write a handler? | [CONTRIBUTING.md](./CONTRIBUTING.md#handler-patterns) | Handler Patterns |
 
-### Contributing
-- What are the coding conventions? → [CONTRIBUTING.md#conventions](./CONTRIBUTING.md#conventions)
-- How do I add an opcode? → [CONTRIBUTING.md#adding-opcodes](./CONTRIBUTING.md#adding-opcodes)
-- What patterns should I follow? → [CONTRIBUTING.md#patterns](./CONTRIBUTING.md#patterns)
+## Key File Map
 
-## Key File References
+```
+src/                              mini/src/
+├── evm.zig (270KB)               ├── evm.zig (94KB)
+│   └── Orchestrates execution    │   └── Complete EVM
+│                                 │
+├── frame/                        ├── frame.zig (25KB)
+│   └── frame.zig (50KB)          │   └── Execution loop
+│       └── Dispatch execution    │
+│                                 │
+├── instructions/                 ├── instructions/
+│   ├── handlers_arithmetic.zig   │   ├── handlers_arithmetic.zig
+│   ├── handlers_storage.zig      │   ├── handlers_storage.zig
+│   ├── handlers_system.zig       │   ├── handlers_system.zig
+│   └── handlers_*_synthetic.zig  │   └── (no synthetics)
+│                                 │
+├── preprocessor/                 └── (no preprocessor)
+│   └── dispatch.zig (20KB)
+│       └── Schedule builder
+│
+├── storage/
+│   ├── database.zig (88KB)
+│   ├── journal.zig (34KB)
+│   └── access_list.zig
+│
+└── tracer/
+    └── tracer.zig (50KB)
+```
 
-### Performance EVM Core
-| File | Size | Purpose |
-|------|------|---------|
-| `src/evm.zig` | 270KB | EVM orchestrator |
-| `src/frame/frame.zig` | ~50KB | Dispatch-based executor |
-| `src/preprocessor/dispatch.zig` | ~20KB | Schedule builder |
-| `src/bytecode/bytecode.zig` | 115KB | Analysis & schedule generation |
-| `src/storage/database.zig` | 88KB | World state |
-| `src/storage/journal.zig` | 34KB | Transaction isolation |
-| `src/tracer/tracer.zig` | ~50KB | Execution monitoring |
+## Core Concepts at a Glance
 
-### Mini EVM Core
-| File | Size | Purpose |
-|------|------|---------|
-| `mini/src/evm.zig` | 94KB | Complete orchestrator |
-| `mini/src/frame.zig` | 25KB | Traditional interpreter |
-| `mini/src/storage.zig` | 16KB | Simple storage model |
-| `mini/src/bytecode.zig` | 6KB | JUMPDEST analysis |
+### Execution Flow
 
-### Instruction Handlers
-| Category | Performance | Mini |
-|----------|-------------|------|
-| Arithmetic | `src/instructions/handlers_arithmetic.zig` | `mini/src/instructions/handlers_arithmetic.zig` |
-| Storage | `src/instructions/handlers_storage.zig` | `mini/src/instructions/handlers_storage.zig` |
-| System | `src/instructions/handlers_system.zig` | `mini/src/instructions/handlers_system.zig` |
-| Synthetic | `src/instructions/handlers_*_synthetic.zig` | N/A |
+```
+                    MINI EVM                           PERFORMANCE EVM
+                    ────────                           ───────────────
+                        │                                    │
+              ┌─────────▼──────────┐              ┌─────────▼──────────┐
+              │  Read bytecode[PC] │              │  Preprocess once   │
+              └─────────┬──────────┘              │  into schedule     │
+                        │                         └─────────┬──────────┘
+              ┌─────────▼──────────┐                        │
+              │  Switch on opcode  │              ┌─────────▼──────────┐
+              │  (256 cases)       │              │  schedule[0].gas   │
+              └─────────┬──────────┘              │  (block metadata)  │
+                        │                         └─────────┬──────────┘
+              ┌─────────▼──────────┐                        │
+              │  Execute handler   │              ┌─────────▼──────────┐
+              └─────────┬──────────┘              │  handler(cursor)   │
+                        │                         │  tail-call next    │
+              ┌─────────▼──────────┐              └─────────┬──────────┘
+              │  PC += 1           │                        │
+              │  Continue loop     │                        │
+              └─────────┬──────────┘              ┌─────────▼──────────┐
+                        │                         │  Never returns     │
+                   Loop back                      │  Error = exit      │
+                                                  └────────────────────┘
+```
 
-## Code Conventions
+### Stack Operations
 
-### Logging
+```
+LIFO Stack (both implementations)
+─────────────────────────────────
+
+   pushStack(5)  pushStack(3)  popStack()   Result
+        │              │            │
+        ▼              ▼            ▼
+   ┌─────────┐   ┌─────────┐   ┌─────────┐
+   │    5    │   │    3    │ ←─│ returns │   Stack now: [5]
+   ├─────────┤   ├─────────┤   │    3    │
+   │  empty  │   │    5    │   └─────────┘
+   └─────────┘   └─────────┘
+
+   First pop = top of stack (most recently pushed)
+```
+
+### Gas Metering
+
+```
+MINI: Per-operation                PERFORMANCE: Per-block
+─────────────────                  ────────────────────
+
+  ADD: check 3 gas                  Block entry:
+  SUB: check 3 gas                    check 9 gas (3+3+3)
+  MUL: check 5 gas
+                                    ADD: no check
+  Total: 3 checks                   SUB: no check
+                                    MUL: no check
+
+                                    Total: 1 check
+```
+
+## Code Conventions Quick Reference
+
+### Do This
+
 ```zig
-// Use log module, not std.debug.print
+// Logging
 const log = @import("log.zig");
-log.debug("Message: {}", .{value});
+log.debug("Op: {}", .{opcode});
+
+// Assertions
+self.getTracer().assert(cond, "message");
+
+// Error handling
+try operation();  // Always propagate
+
+// Memory
+const x = try alloc.create(T);
+defer alloc.destroy(x);
 ```
 
-### Assertions
+### Never Do This
+
 ```zig
-// Use tracer assertions, not std.debug.assert
-self.getTracer().assert(condition, "message");
-```
+// NEVER: std.debug.print
+std.debug.print("debug", .{});  // Use log module
 
-### Error Handling
-```zig
-// NEVER swallow errors
-// BAD:
-slots.append(allocator, key) catch {};
+// NEVER: std.debug.assert
+std.debug.assert(cond);  // Use tracer.assert
 
-// GOOD:
-try slots.append(allocator, key);
-```
+// NEVER: Swallow errors
+operation() catch {};  // Propagate or handle!
 
-### Memory Management
-```zig
-// Pattern 1: Same scope cleanup
-const thing = try allocator.create(Thing);
-defer allocator.destroy(thing);
-
-// Pattern 2: Ownership transfer
-const thing = try allocator.create(Thing);
-errdefer allocator.destroy(thing);
-thing.* = try Thing.init(allocator);
-return thing;
+// NEVER: Skip tests
+// test "broken" { }  // Fix it or delete it
 ```
 
 ## Related Documentation
 
-- [CLAUDE.md](../../CLAUDE.md) - Project-level instructions
-- [mini/CLAUDE.md](../../mini/CLAUDE.md) - Mini EVM instructions
-- [Performance EVM](../performance/) - Performance-specific docs
-- [Mini EVM](../mini/) - Mini-specific docs
+- **[CLAUDE.md](../../CLAUDE.md)** - Project-level instructions and rules
+- **[mini/CLAUDE.md](../../mini/CLAUDE.md)** - Mini EVM specific instructions
+- **[Performance EVM](../performance/)** - Performance-specific deep dives
+- **[Mini EVM](../mini/)** - Mini-specific documentation
+- **[TypeScript Port](../mini/typescript/)** - TypeScript implementation docs
+
+## Building Mental Models
+
+### The EVM is a Stack Machine
+
+```
+Bytecode: PUSH1 05  PUSH1 03  ADD
+          ─────────────────────────
+              │         │       │
+              ▼         ▼       ▼
+Stack:      [5]      [3,5]    [8]
+```
+
+### Storage is Address-Scoped
+
+```
+Contract A (0xAAA...)           Contract B (0xBBB...)
+├── slot[0] = 100               ├── slot[0] = 200
+├── slot[1] = 42                └── slot[1] = 0
+└── slot[2] = 0
+
+Same slot number, different values per contract
+```
+
+### Frames Create Isolation
+
+```
+CALL creates new frame
+──────────────────────
+
+Frame 1 (caller)              Frame 2 (callee)
+├── stack: [...]              ├── stack: []         ← Fresh
+├── memory: [...]             ├── memory: []        ← Fresh
+├── gas: 90000                ├── gas: 60000        ← Subset
+└── address: 0xAAA            └── address: 0xBBB    ← Different
+
+On RETURN: Frame 2 destroyed, Frame 1 continues
+On REVERT: Frame 2 state rolled back
+```
