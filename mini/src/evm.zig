@@ -601,7 +601,7 @@ pub fn Evm(comptime config: EvmConfig) type {
                         self.hardfork,
                     ) catch |err| {
                         // On error, return failure
-                        std.debug.print("Precompile execution error: {}\n", .{err});
+                        log.err("Precompile execution error: {}", .{err});
                         // Reverse value transfer on error
                         if (value > 0 and self.host != null) {
                             if (self.host) |h| {
@@ -649,14 +649,14 @@ pub fn Evm(comptime config: EvmConfig) type {
                             // using an arena allocator for transaction-scoped data. If OOM occurs during
                             // cleanup, it indicates a critical system issue that should be handled explicitly.
                             self.balances.put(addr, 0) catch |err| {
-                                std.debug.print("CRITICAL: Failed to clear balance for selfdestructed account {any}: {any}\n", .{ addr, err });
+                                log.err("CRITICAL: Failed to clear balance for selfdestructed account {any}: {any}", .{ addr, err });
                                 // Continue cleanup of other accounts even if this one fails
                             };
                             self.code.put(addr, &[_]u8{}) catch |err| {
-                                std.debug.print("CRITICAL: Failed to clear code for selfdestructed account {any}: {any}\n", .{ addr, err });
+                                log.err("CRITICAL: Failed to clear code for selfdestructed account {any}: {any}", .{ addr, err });
                             };
                             self.nonces.put(addr, 0) catch |err| {
-                                std.debug.print("CRITICAL: Failed to clear nonce for selfdestructed account {any}: {any}\n", .{ addr, err });
+                                log.err("CRITICAL: Failed to clear nonce for selfdestructed account {any}: {any}", .{ addr, err });
                             };
 
                             // Clear storage
@@ -1147,7 +1147,7 @@ pub fn Evm(comptime config: EvmConfig) type {
                         input,
                         gas,
                     ) catch |err| {
-                        std.debug.print("Custom precompile execution error: {}\n", .{err});
+                        log.err("Custom precompile execution error: {}", .{err});
                         return makeFailure(self.arena.allocator(), 0);
                     };
 
@@ -1169,7 +1169,7 @@ pub fn Evm(comptime config: EvmConfig) type {
                         self.hardfork,
                     ) catch |err| {
                         // On error, return failure
-                        std.debug.print("Precompile execution error: {}\n", .{err});
+                        log.err("Precompile execution error: {}", .{err});
                         return makeFailure(self.arena.allocator(), 0);
                     };
 
