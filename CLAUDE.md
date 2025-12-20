@@ -376,6 +376,22 @@ This is NOT a divergence issue - it's the designed synchronization mechanism.
 - Synthetic opcodes in Frame = multiple steps in MinimalEvm
 - The tracer's `executeMinimalEvmForOpcode()` handles fusion → sequential mapping correctly
 
+## Documentation
+
+Detailed documentation is available in `docs/`:
+
+- **[docs/README.md](docs/README.md)** - Documentation index
+- **[docs/dev/](docs/dev/)** - Developer deep dive with code excerpts
+  - [ARCHITECTURE.md](docs/dev/ARCHITECTURE.md) - Unified architecture overview
+  - [EXECUTION-MODELS.md](docs/dev/EXECUTION-MODELS.md) - Mini vs Performance comparison
+  - [STATE-MANAGEMENT.md](docs/dev/STATE-MANAGEMENT.md) - Storage, journal, snapshots
+  - [GAS-METERING.md](docs/dev/GAS-METERING.md) - Gas calculation patterns
+  - [TESTING.md](docs/dev/TESTING.md) - Test organization and debugging
+  - [HARDFORKS.md](docs/dev/HARDFORKS.md) - EIP support matrix
+  - [CONTRIBUTING.md](docs/dev/CONTRIBUTING.md) - Development workflow
+- **[docs/performance/](docs/performance/)** - Performance EVM specifics
+- **[docs/mini/](docs/mini/)** - Mini EVM specifics
+
 ## References
 
 - Zig docs: https://ziglang.org/documentation/0.15.1/
