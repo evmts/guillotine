@@ -540,11 +540,13 @@ pub fn Frame(comptime config: EvmConfig) type {
         /// Main execution loop
         pub fn execute(self: *Self) EvmError!void {
             var iteration_count: u64 = 0;
-            const max_iterations: u64 = 10_000_000; // Prevent infinite loops (reasonable limit ~10M ops)
             while (!self.stopped and !self.reverted and self.pc < self.bytecode.len()) {
                 iteration_count += 1;
-                if (iteration_count > max_iterations) {
-                    return error.ExecutionTimeout;
+                // Use configurable loop_quota if set, otherwise no limit
+                if (config.loop_quota) |max_iterations| {
+                    if (iteration_count > max_iterations) {
+                        return error.ExecutionTimeout;
+                    }
                 }
                 try self.step();
             }
