@@ -804,6 +804,24 @@ Tracks historical debugging insights:
 
 ---
 
+## Documentation
+
+Detailed documentation is available in the repository's `docs/` directory:
+
+- **[docs/mini/](../docs/mini/)** - Mini EVM specific documentation
+  - [README.md](../docs/mini/README.md) - Mini EVM overview
+  - [typescript/](../docs/mini/typescript/) - TypeScript port docs
+- **[docs/dev/](../docs/dev/)** - Developer deep dive (covers both Mini and Performance EVM)
+  - [ARCHITECTURE.md](../docs/dev/ARCHITECTURE.md) - Unified architecture
+  - [EXECUTION-MODELS.md](../docs/dev/EXECUTION-MODELS.md) - Mini vs Performance comparison
+  - [STATE-MANAGEMENT.md](../docs/dev/STATE-MANAGEMENT.md) - Storage, journal, snapshots
+  - [GAS-METERING.md](../docs/dev/GAS-METERING.md) - Gas calculation patterns
+  - [TESTING.md](../docs/dev/TESTING.md) - Test organization and debugging
+  - [HARDFORKS.md](../docs/dev/HARDFORKS.md) - EIP support matrix
+  - [CONTRIBUTING.md](../docs/dev/CONTRIBUTING.md) - Development workflow
+
+---
+
 ## Resources
 
 - **ethereum/tests**: https://github.com/ethereum/tests
