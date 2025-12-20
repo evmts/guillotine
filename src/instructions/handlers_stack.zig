@@ -9,14 +9,7 @@ pub fn Handlers(FrameType: type) type {
         pub const Error = FrameType.Error;
         pub const Dispatch = FrameType.Dispatch;
         pub const WordType = FrameType.WordType;
-        const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
-
-        /// Continue to next instruction with afterInstruction tracking
-        pub inline fn next_instruction(self: *FrameType, cursor: [*]const Dispatch.Item, comptime opcode: Dispatch.UnifiedOpcode) Error!noreturn {
-            const op_data = dispatch_opcode_data.getOpData(opcode, Dispatch, Dispatch.Item, cursor);
-            self.afterInstruction(opcode, op_data.next_handler, op_data.next_cursor.cursor);
-            return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-        }
+        const dispatch_next = @import("dispatch_next.zig");
 
         /// POP opcode (0x50) - Remove item from stack.
         pub fn pop(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
@@ -24,7 +17,7 @@ pub fn Handlers(FrameType: type) type {
             // Stack underflow validation handled by tracer.assert in stack.pop_unsafe()
             // The tracer checks: stack_ptr < stack_base before popping
             _ = self.stack.pop_unsafe();
-            return next_instruction(self, cursor, .POP);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .POP);
         }
 
         /// PUSH0 opcode (0x5f) - Push 0 onto stack.
@@ -33,7 +26,7 @@ pub fn Handlers(FrameType: type) type {
             // Stack overflow validation handled by tracer.assert in stack.push_unsafe()
             // The tracer checks: stack_ptr > stack_limit before pushing
             self.stack.push_unsafe(0);
-            return next_instruction(self, cursor, .PUSH0);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .PUSH0);
         }
 
         /// Generate a push handler for PUSH1-PUSH32

@@ -17,14 +17,8 @@ pub fn Handlers(FrameType: type) type {
         pub const Dispatch = FrameType.Dispatch;
         pub const WordType = FrameType.WordType;
         const config = FrameType.frame_config;
+        const dispatch_next = @import("dispatch_next.zig");
         const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
-
-        /// Continue to next instruction with afterInstruction tracking
-        pub inline fn next_instruction(self: *FrameType, cursor: [*]const Dispatch.Item, comptime opcode: Dispatch.UnifiedOpcode) Error!noreturn {
-            const op_data = dispatch_opcode_data.getOpData(opcode, Dispatch, Dispatch.Item, cursor);
-            self.afterInstruction(opcode, op_data.next_handler, op_data.next_cursor.cursor);
-            return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-        }
 
         /// Helper to convert Address to WordType
         fn to_u256(addr: Address) WordType {
@@ -56,7 +50,7 @@ pub fn Handlers(FrameType: type) type {
                 (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "ADDRESS requires stack space");
             }
             self.stack.push_unsafe(addr_u256);
-            return next_instruction(self, cursor, .ADDRESS);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .ADDRESS);
         }
 
         /// BALANCE opcode (0x31) - Get balance of the given account.
@@ -89,7 +83,7 @@ pub fn Handlers(FrameType: type) type {
             const bal = evm.get_balance(addr);
             const balance_word = @as(WordType, @truncate(bal));
             self.stack.set_top_unsafe(balance_word);
-            return next_instruction(self, cursor, .BALANCE);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .BALANCE);
         }
 
         /// ORIGIN opcode (0x32) - Get execution origination address.
@@ -102,7 +96,7 @@ pub fn Handlers(FrameType: type) type {
                 (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "ORIGIN requires stack space");
             }
             self.stack.push_unsafe(origin_u256);
-            return next_instruction(self, cursor, .ORIGIN);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .ORIGIN);
         }
 
         /// CALLER opcode (0x33) - Get caller address.
@@ -114,7 +108,7 @@ pub fn Handlers(FrameType: type) type {
                 (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "CALLER requires stack space");
             }
             self.stack.push_unsafe(caller_u256);
-            return next_instruction(self, cursor, .CALLER);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .CALLER);
         }
 
         /// CALLVALUE opcode (0x34) - Get deposited value by the instruction/transaction responsible for this execution.
@@ -126,7 +120,7 @@ pub fn Handlers(FrameType: type) type {
                 (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "CALLVALUE requires stack space");
             }
             self.stack.push_unsafe(value);
-            return next_instruction(self, cursor, .CALLVALUE);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .CALLVALUE);
         }
 
         /// CALLDATALOAD opcode (0x35) - Get input data of current environment.
@@ -338,7 +332,7 @@ pub fn Handlers(FrameType: type) type {
                 (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "GASPRICE requires stack space");
             }
             self.stack.push_unsafe(gas_price_truncated);
-            return next_instruction(self, cursor, .GASPRICE);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .GASPRICE);
         }
 
         /// EXTCODESIZE opcode (0x3B) - Get size of an account's code.
@@ -376,7 +370,7 @@ pub fn Handlers(FrameType: type) type {
             };
             const code_len = @as(WordType, @truncate(@as(u256, @intCast(code.len))));
             self.stack.set_top_unsafe(code_len);
-            return next_instruction(self, cursor, .EXTCODESIZE);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .EXTCODESIZE);
         }
 
         /// EXTCODECOPY opcode (0x3C) - Copy an account's code to memory.
@@ -423,7 +417,7 @@ pub fn Handlers(FrameType: type) type {
             const length_usize = @as(usize, @intCast(length));
 
             if (length_usize == 0) {
-                return next_instruction(self, cursor, .EXTCODECOPY);
+                return dispatch_next.nextInstruction(FrameType, self, cursor, .EXTCODECOPY);
             }
 
             // Calculate gas cost for memory expansion and copy operation
@@ -475,7 +469,7 @@ pub fn Handlers(FrameType: type) type {
                 };
             }
 
-            return next_instruction(self, cursor, .EXTCODECOPY);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .EXTCODECOPY);
         }
 
         /// EXTCODEHASH opcode (0x3F) - Get hash of account's code.
@@ -508,7 +502,7 @@ pub fn Handlers(FrameType: type) type {
             if (!evm.account_exists(addr)) {
                 // Non-existent account returns 0 per EIP-1052
                 self.stack.set_top_unsafe(0);
-                return next_instruction(self, cursor, .EXTCODEHASH);
+                return dispatch_next.nextInstruction(FrameType, self, cursor, .EXTCODEHASH);
             }
 
             const code = self.getEvm().get_code(addr) catch |err| switch (err) {
@@ -522,7 +516,7 @@ pub fn Handlers(FrameType: type) type {
                 const empty_hash_u256: u256 = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470;
                 const empty_hash_word = @as(WordType, @truncate(empty_hash_u256));
                 self.stack.set_top_unsafe(empty_hash_word);
-                return next_instruction(self, cursor, .EXTCODEHASH);
+                return dispatch_next.nextInstruction(FrameType, self, cursor, .EXTCODEHASH);
             }
 
             // Compute keccak256 hash of the code
@@ -540,7 +534,7 @@ pub fn Handlers(FrameType: type) type {
             const hash_word = @as(WordType, @truncate(hash_u256));
             self.stack.set_top_unsafe(hash_word);
 
-            return next_instruction(self, cursor, .EXTCODEHASH);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .EXTCODEHASH);
         }
 
         /// RETURNDATASIZE opcode (0x3D) - Get size of output data from the previous call.
@@ -554,7 +548,7 @@ pub fn Handlers(FrameType: type) type {
                 (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "RETURNDATASIZE requires stack space");
             }
             self.stack.push_unsafe(return_data_len);
-            return next_instruction(self, cursor, .RETURNDATASIZE);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .RETURNDATASIZE);
         }
 
         /// RETURNDATACOPY opcode (0x3E) - Copy output data from the previous call to memory.
@@ -597,7 +591,7 @@ pub fn Handlers(FrameType: type) type {
             }
 
             if (length_usize == 0) {
-                return next_instruction(self, cursor, .RETURNDATACOPY);
+                return dispatch_next.nextInstruction(FrameType, self, cursor, .RETURNDATACOPY);
             }
 
             // Calculate gas cost for memory expansion and copy operation
@@ -638,7 +632,7 @@ pub fn Handlers(FrameType: type) type {
                 return Error.OutOfBounds;
             };
 
-            return next_instruction(self, cursor, .RETURNDATACOPY);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .RETURNDATACOPY);
         }
 
         /// BLOCKHASH opcode (0x40) - Get the hash of one of the 256 most recent complete blocks.
@@ -713,7 +707,7 @@ pub fn Handlers(FrameType: type) type {
                 (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "TIMESTAMP requires stack space");
             }
             self.stack.push_unsafe(timestamp_word);
-            return next_instruction(self, cursor, .TIMESTAMP);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .TIMESTAMP);
         }
 
         /// NUMBER opcode (0x43) - Get the current block's number.
@@ -726,7 +720,7 @@ pub fn Handlers(FrameType: type) type {
                 (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "NUMBER requires stack space");
             }
             self.stack.push_unsafe(block_number_word);
-            return next_instruction(self, cursor, .NUMBER);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .NUMBER);
         }
 
         /// DIFFICULTY opcode (0x44) - Get the current block's difficulty.
@@ -739,7 +733,7 @@ pub fn Handlers(FrameType: type) type {
                 (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "DIFFICULTY requires stack space");
             }
             self.stack.push_unsafe(difficulty_word);
-            return next_instruction(self, cursor, .PREVRANDAO);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .PREVRANDAO);
         }
 
         /// PREVRANDAO opcode - Alias for DIFFICULTY post-merge.
@@ -759,7 +753,7 @@ pub fn Handlers(FrameType: type) type {
                 (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "GASLIMIT requires stack space");
             }
             self.stack.push_unsafe(gas_limit_word);
-            return next_instruction(self, cursor, .GASLIMIT);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .GASLIMIT);
         }
 
         /// CHAINID opcode (0x46) - Get the chain ID.
@@ -787,7 +781,7 @@ pub fn Handlers(FrameType: type) type {
                 (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "SELFBALANCE requires stack space");
             }
             self.stack.push_unsafe(balance_word);
-            return next_instruction(self, cursor, .SELFBALANCE);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .SELFBALANCE);
         }
 
         /// BASEFEE opcode (0x48) - Get the current block's base fee.
@@ -800,7 +794,7 @@ pub fn Handlers(FrameType: type) type {
                 (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "BASEFEE requires stack space");
             }
             self.stack.push_unsafe(base_fee_word);
-            return next_instruction(self, cursor, .BASEFEE);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .BASEFEE);
         }
 
         /// BLOBHASH opcode (0x49) - Get versioned hashes of blob transactions.
@@ -869,7 +863,7 @@ pub fn Handlers(FrameType: type) type {
                 (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "GAS requires stack space");
             }
             self.stack.push_unsafe(gas_value);
-            return next_instruction(self, cursor, .GAS);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .GAS);
         }
 
         /// PC opcode (0x58) - Get the value of the program counter prior to the increment.

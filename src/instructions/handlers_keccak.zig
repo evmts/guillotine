@@ -19,14 +19,7 @@ pub fn Handlers(FrameType: type) type {
         pub const Error = FrameType.Error;
         pub const Dispatch = FrameType.Dispatch;
         pub const WordType = FrameType.WordType;
-        const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
-
-        /// Continue to next instruction with afterInstruction tracking
-        pub inline fn next_instruction(self: *FrameType, cursor: [*]const Dispatch.Item, comptime opcode: Dispatch.UnifiedOpcode) Error!noreturn {
-            const op_data = dispatch_opcode_data.getOpData(opcode, Dispatch, Dispatch.Item, cursor);
-            self.afterInstruction(opcode, op_data.next_handler, op_data.next_cursor.cursor);
-            return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-        }
+        const dispatch_next = @import("dispatch_next.zig");
 
         /// KECCAK256 opcode (0x20) - Compute keccak hash
         /// Pops offset and size from stack, reads data from memory, and pushes hash.
@@ -83,7 +76,7 @@ pub fn Handlers(FrameType: type) type {
                     },
                 };
                 self.stack.push_unsafe(empty_hash);
-                return next_instruction(self, cursor, .KECCAK256);
+                return dispatch_next.nextInstruction(FrameType, self, cursor, .KECCAK256);
             }
 
             const offset_usize = @as(usize, @intCast(offset));
@@ -224,7 +217,7 @@ pub fn Handlers(FrameType: type) type {
 
             self.stack.push_unsafe(result_word);
 
-            return next_instruction(self, cursor, .KECCAK256);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .KECCAK256);
         }
     };
 }

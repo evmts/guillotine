@@ -10,14 +10,8 @@ pub fn Handlers(FrameType: type) type {
         pub const Dispatch = FrameType.Dispatch;
         pub const WordType = FrameType.WordType;
 
+        const dispatch_next = @import("dispatch_next.zig");
         const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
-
-        /// Continue to next instruction with afterInstruction tracking
-        pub inline fn next_instruction(self: *FrameType, cursor: [*]const Dispatch.Item, comptime opcode: Dispatch.UnifiedOpcode) Error!noreturn {
-            const op_data = dispatch_opcode_data.getOpData(opcode, Dispatch, Dispatch.Item, cursor);
-            self.afterInstruction(opcode, op_data.next_handler, op_data.next_cursor.cursor);
-            return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-        }
 
         /// Validate stack constraints
         pub inline fn validate_stack(self: *FrameType) void {
@@ -46,7 +40,7 @@ pub fn Handlers(FrameType: type) type {
                 validate_stack(self);
                 self.stack.set_top_unsafe(op_data.metadata.value +% self.stack.peek_unsafe());
             }
-            return next_instruction(self, cursor, .PUSH_ADD_INLINE);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .PUSH_ADD_INLINE);
         }
 
         /// PUSH_ADD_POINTER - Fused PUSH+ADD with pointer value (>8 bytes).
@@ -69,7 +63,7 @@ pub fn Handlers(FrameType: type) type {
                 self.stack.set_top_unsafe(op_data.metadata.value_ptr.* +% top);
             }
 
-            return next_instruction(self, cursor, .PUSH_ADD_POINTER);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .PUSH_ADD_POINTER);
         }
 
         /// PUSH_MUL_INLINE - Fused PUSH+MUL with inline value (≤8 bytes).
@@ -81,7 +75,7 @@ pub fn Handlers(FrameType: type) type {
             const top = self.stack.peek_unsafe();
             self.stack.set_top_unsafe(op_data.metadata.value *% top);
 
-            return next_instruction(self, cursor, .PUSH_MUL_INLINE);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .PUSH_MUL_INLINE);
         }
 
         /// PUSH_MUL_POINTER - Fused PUSH+MUL with pointer value (>8 bytes).
@@ -93,7 +87,7 @@ pub fn Handlers(FrameType: type) type {
             const top = self.stack.peek_unsafe();
             self.stack.set_top_unsafe(op_data.metadata.value_ptr.* *% top);
 
-            return next_instruction(self, cursor, .PUSH_MUL_POINTER);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .PUSH_MUL_POINTER);
         }
 
         /// PUSH_DIV_INLINE - Fused PUSH+DIV with inline value (≤8 bytes).
@@ -114,7 +108,7 @@ pub fn Handlers(FrameType: type) type {
 
             self.stack.set_top_unsafe(result);
 
-            return next_instruction(self, cursor, .PUSH_DIV_INLINE);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .PUSH_DIV_INLINE);
         }
 
         /// PUSH_DIV_POINTER - Fused PUSH+DIV with pointer value (>8 bytes).
@@ -139,7 +133,7 @@ pub fn Handlers(FrameType: type) type {
 
             self.stack.set_top_unsafe(result);
 
-            return next_instruction(self, cursor, .PUSH_DIV_POINTER);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .PUSH_DIV_POINTER);
         }
 
         /// PUSH_SUB_INLINE - Fused PUSH+SUB with inline value (≤8 bytes).
@@ -153,7 +147,7 @@ pub fn Handlers(FrameType: type) type {
             const top = self.stack.peek_unsafe();
             const result = push_value -% top;
             self.stack.set_top_unsafe(result);
-            return next_instruction(self, cursor, .PUSH_SUB_INLINE);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .PUSH_SUB_INLINE);
         }
 
         /// PUSH_SUB_POINTER - Fused PUSH+SUB with pointer value (>8 bytes).
@@ -166,7 +160,7 @@ pub fn Handlers(FrameType: type) type {
             const top = self.stack.peek_unsafe();
             const result = op_data.metadata.value_ptr.* -% top;
             self.stack.set_top_unsafe(result);
-            return next_instruction(self, cursor, .PUSH_SUB_POINTER);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .PUSH_SUB_POINTER);
         }
     };
 }

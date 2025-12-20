@@ -12,14 +12,7 @@ pub fn Handlers(FrameType: type) type {
         pub const Error = FrameType.Error;
         pub const Dispatch = FrameType.Dispatch;
         pub const WordType = FrameType.WordType;
-        const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
-
-        /// Continue to next instruction with afterInstruction tracking
-        pub inline fn next_instruction(self: *FrameType, cursor: [*]const Dispatch.Item, comptime opcode: Dispatch.UnifiedOpcode) Error!noreturn {
-            const op_data = dispatch_opcode_data.getOpData(opcode, Dispatch, Dispatch.Item, cursor);
-            self.afterInstruction(opcode, op_data.next_handler, op_data.next_cursor.cursor);
-            return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-        }
+        const dispatch_next = @import("dispatch_next.zig");
 
         /// Maximum memory size (24-bit limit)
         const MEMORY_LIMIT: usize = 0xFFFFFF;
@@ -87,7 +80,7 @@ pub fn Handlers(FrameType: type) type {
             const value = @as(WordType, @truncate(value_u256));
             self.stack.set_top_unsafe(value);
 
-            return next_instruction(self, cursor, .MLOAD);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .MLOAD);
         }
 
         /// MSTORE opcode (0x52) - Store word to memory.
@@ -141,7 +134,7 @@ pub fn Handlers(FrameType: type) type {
                 },
             };
 
-            return next_instruction(self, cursor, .MSTORE);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .MSTORE);
         }
 
         /// MSTORE8 opcode (0x53) - Store byte to memory.
@@ -193,7 +186,7 @@ pub fn Handlers(FrameType: type) type {
                 },
             };
 
-            return next_instruction(self, cursor, .MSTORE8);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .MSTORE8);
         }
 
         /// MSIZE opcode (0x59) - Get size of active memory.
@@ -204,7 +197,7 @@ pub fn Handlers(FrameType: type) type {
             const size = self.memory.size();
             self.stack.push_unsafe(@as(WordType, @intCast(size)));
 
-            return next_instruction(self, cursor, .MSIZE);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .MSIZE);
         }
 
         /// MCOPY opcode (0x5e) - Memory copy operation (EIP-5656).
@@ -229,7 +222,7 @@ pub fn Handlers(FrameType: type) type {
 
             if (size_u24 == 0) {
                 // No operation for zero size
-                return next_instruction(self, cursor, .MCOPY);
+                return dispatch_next.nextInstruction(FrameType, self, cursor, .MCOPY);
             }
 
             // Calculate dynamic gas cost (static gas handled by JUMPDEST)
@@ -279,7 +272,7 @@ pub fn Handlers(FrameType: type) type {
             // Free the temporary buffer before tail call
             self.getEvm().getCallArenaAllocator().free(temp_buffer);
 
-            return next_instruction(self, cursor, .MCOPY);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .MCOPY);
         }
     };
 }

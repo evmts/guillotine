@@ -9,14 +9,7 @@ pub fn Handlers(FrameType: type) type {
         pub const Error = FrameType.Error;
         pub const Dispatch = FrameType.Dispatch;
         pub const WordType = FrameType.WordType;
-        const dispatch = @import("../preprocessor/dispatch_opcode_data.zig");
-
-        /// Continue to next instruction with afterInstruction tracking
-        pub inline fn next_instruction(self: *FrameType, cursor: [*]const Dispatch.Item, comptime opcode: Dispatch.UnifiedOpcode) Error!noreturn {
-            const op_data = dispatch.getOpData(opcode, Dispatch, Dispatch.Item, cursor);
-            self.afterInstruction(opcode, op_data.next_handler, op_data.next_cursor.cursor);
-            return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-        }
+        const dispatch_next = @import("dispatch_next.zig");
 
         /// LT opcode (0x10) - Less than comparison.
         pub fn lt(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
@@ -27,7 +20,7 @@ pub fn Handlers(FrameType: type) type {
                     return @intFromBool(top < second);
                 }
             }.op);
-            return next_instruction(self, cursor, .LT);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .LT);
         }
 
         /// GT opcode (0x11) - Greater than comparison.
@@ -39,7 +32,7 @@ pub fn Handlers(FrameType: type) type {
                     return @intFromBool(top > second);
                 }
             }.op);
-            return next_instruction(self, cursor, .GT);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .GT);
         }
 
         /// SLT opcode (0x12) - Signed less than comparison.
@@ -52,7 +45,7 @@ pub fn Handlers(FrameType: type) type {
             // EVM: pops a (top), then b; pushes (a < b) with signed comparison
             const result: WordType = @intFromBool(a_signed < b_signed);
             self.stack.set_top_unsafe(result);
-            return next_instruction(self, cursor, .SLT);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .SLT);
         }
 
         /// SGT opcode (0x13) - Signed greater than comparison.
@@ -65,7 +58,7 @@ pub fn Handlers(FrameType: type) type {
             // EVM: pops a (top), then b; pushes (a > b) with signed comparison
             const result: WordType = @intFromBool(a_signed > b_signed);
             self.stack.set_top_unsafe(result);
-            return next_instruction(self, cursor, .SGT);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .SGT);
         }
 
         /// EQ opcode (0x14) - Equality comparison.
@@ -86,7 +79,7 @@ pub fn Handlers(FrameType: type) type {
             const result = self.stack.stack_ptr[0];  // Result is now at top
             log.debug("[EQ] 0x{x:0>16} == 0x{x:0>16} = {}", .{ value1, value2, result });
             
-            return next_instruction(self, cursor, .EQ);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .EQ);
         }
 
         /// ISZERO opcode (0x15) - Check if value is zero.
@@ -95,7 +88,7 @@ pub fn Handlers(FrameType: type) type {
             const value = self.stack.peek_unsafe();
             const result: WordType = @intFromBool(value == 0);
             self.stack.set_top_unsafe(result);
-            return next_instruction(self, cursor, .ISZERO);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .ISZERO);
         }
     };
 }

@@ -9,14 +9,7 @@ pub fn Handlers(FrameType: type) type {
         pub const Error = FrameType.Error;
         pub const Dispatch = FrameType.Dispatch;
         pub const WordType = FrameType.WordType;
-        const dispatch = @import("../preprocessor/dispatch_opcode_data.zig");
-
-        /// Continue to next instruction with afterInstruction tracking
-        pub inline fn next_instruction(self: *FrameType, cursor: [*]const Dispatch.Item, comptime opcode: Dispatch.UnifiedOpcode) Error!noreturn {
-            const op_data = dispatch.getOpData(opcode, Dispatch, Dispatch.Item, cursor);
-            self.afterInstruction(opcode, op_data.next_handler, op_data.next_cursor.cursor);
-            return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-        }
+        const dispatch_next = @import("dispatch_next.zig");
 
         /// AND opcode (0x16) - Bitwise AND operation.
         pub fn @"and"(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
@@ -35,7 +28,7 @@ pub fn Handlers(FrameType: type) type {
             const result = self.stack.stack_ptr[0];  // Result is now at top
             log.debug("[AND] 0x{x:0>64} & 0x{x:0>64} = 0x{x:0>64}", .{ value2, value1, result });
             
-            return next_instruction(self, cursor, .AND);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .AND);
         }
 
         /// OR opcode (0x17) - Bitwise OR operation.
@@ -46,7 +39,7 @@ pub fn Handlers(FrameType: type) type {
                     return top | second;
                 }
             }.op);
-            return next_instruction(self, cursor, .OR);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .OR);
         }
 
         /// XOR opcode (0x18) - Bitwise XOR operation.
@@ -57,7 +50,7 @@ pub fn Handlers(FrameType: type) type {
                     return top ^ second;
                 }
             }.op);
-            return next_instruction(self, cursor, .XOR);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .XOR);
         }
 
         /// NOT opcode (0x19) - Bitwise NOT operation.
@@ -65,7 +58,7 @@ pub fn Handlers(FrameType: type) type {
             self.beforeInstruction(.NOT, cursor);
             const value = self.stack.peek_unsafe();
             self.stack.set_top_unsafe(~value);
-            return next_instruction(self, cursor, .NOT);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .NOT);
         }
 
         /// BYTE opcode (0x1a) - Extract byte from word.
@@ -80,7 +73,7 @@ pub fn Handlers(FrameType: type) type {
                 break :blk (value >> @intCast(shift_amount)) & 0xFF;
             };
             self.stack.set_top_unsafe(result);
-            return next_instruction(self, cursor, .BYTE);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .BYTE);
         }
 
         /// SHL opcode (0x1b) - Shift left operation.
@@ -90,7 +83,7 @@ pub fn Handlers(FrameType: type) type {
             const value = self.stack.peek_unsafe(); // Second from top - value to shift
             const result = if (shift >= 256) 0 else value << @intCast(shift);
             self.stack.set_top_unsafe(result);
-            return next_instruction(self, cursor, .SHL);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .SHL);
         }
 
         /// SHR opcode (0x1c) - Logical shift right operation.
@@ -100,7 +93,7 @@ pub fn Handlers(FrameType: type) type {
             const value = self.stack.peek_unsafe(); // Second from top - value to shift
             const result = if (shift >= 256) 0 else value >> @intCast(shift);
             self.stack.set_top_unsafe(result);
-            return next_instruction(self, cursor, .SHR);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .SHR);
         }
 
         /// SAR opcode (0x1d) - Arithmetic shift right operation.
@@ -116,7 +109,7 @@ pub fn Handlers(FrameType: type) type {
                 break :blk @as(WordType, @bitCast(value_signed >> @intCast(shift)));
             };
             self.stack.set_top_unsafe(result);
-            return next_instruction(self, cursor, .SAR);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .SAR);
         }
     };
 }

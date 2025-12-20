@@ -11,14 +11,7 @@ pub fn Handlers(FrameType: type) type {
         pub const Dispatch = FrameType.Dispatch;
         pub const WordType = FrameType.WordType;
 
-        const dispatch = @import("../preprocessor/dispatch_opcode_data.zig");
-
-        /// Advance to the next opcode instruction with tracking
-        pub inline fn next_instruction(self: *FrameType, cursor: [*]const Dispatch.Item, comptime opcode: Dispatch.UnifiedOpcode) Error!noreturn {
-            const op_data = dispatch.getOpData(opcode, Dispatch, Dispatch.Item, cursor);
-            self.afterInstruction(opcode, op_data.next_handler, op_data.next_cursor.cursor);
-            return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-        }
+        const dispatch_next = @import("dispatch_next.zig");
 
         /// ADD opcode (0x01) - Addition with overflow wrapping.
         pub fn add(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
@@ -30,7 +23,7 @@ pub fn Handlers(FrameType: type) type {
                 }
             }.op);
 
-            return next_instruction(self, cursor, .ADD);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .ADD);
         }
 
         /// MUL opcode (0x02) - Multiplication with overflow wrapping.
@@ -43,7 +36,7 @@ pub fn Handlers(FrameType: type) type {
                 }
             }.op);
 
-            return next_instruction(self, cursor, .MUL);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .MUL);
         }
 
         /// SUB opcode (0x03) - Subtraction with underflow wrapping.
@@ -56,7 +49,7 @@ pub fn Handlers(FrameType: type) type {
                 }
             }.op);
 
-            return next_instruction(self, cursor, .SUB);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .SUB);
         }
 
         const from_native = FrameType.UintN.from_native;
@@ -78,7 +71,7 @@ pub fn Handlers(FrameType: type) type {
             const result = self.stack.stack_ptr[0];  // Result is now at top
             log.debug("[DIV] 0x{x:0>64} / 0x{x:0>64} = 0x{x:0>64}", .{ dividend, divisor, result });
 
-            return next_instruction(self, cursor, .DIV);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .DIV);
         }
 
         /// SDIV opcode (0x05) - Signed integer division.
@@ -93,11 +86,11 @@ pub fn Handlers(FrameType: type) type {
 
             if (second == 0) {
                 self.stack.set_top_unsafe(0);
-                return next_instruction(self, cursor, .SDIV);
+                return dispatch_next.nextInstruction(FrameType, self, cursor, .SDIV);
             }
             if (top == MIN_SIGNED and second == std.math.maxInt(u256)) {
                 self.stack.set_top_unsafe(MIN_SIGNED);
-                return next_instruction(self, cursor, .SDIV);
+                return dispatch_next.nextInstruction(FrameType, self, cursor, .SDIV);
             }
 
             // This section implements branchless two's complement arithmetic.
@@ -129,7 +122,7 @@ pub fn Handlers(FrameType: type) type {
             const result = (quotient ^ result_mask) -% result_mask;
 
             self.stack.set_top_unsafe(result);
-            return next_instruction(self, cursor, .SDIV);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .SDIV);
         }
 
         /// MOD opcode (0x06) - Modulo operation. Modulo by zero returns 0.
@@ -142,7 +135,7 @@ pub fn Handlers(FrameType: type) type {
                 }
             }.op);
 
-            return next_instruction(self, cursor, .MOD);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .MOD);
         }
 
         /// SMOD opcode (0x07) - Signed modulo operation.
@@ -157,11 +150,11 @@ pub fn Handlers(FrameType: type) type {
 
             if (second == 0) {
                 self.stack.set_top_unsafe(0);
-                return next_instruction(self, cursor, .SMOD);
+                return dispatch_next.nextInstruction(FrameType, self, cursor, .SMOD);
             }
             if (top == MIN_SIGNED and second == std.math.maxInt(u256)) { // -1 in two's complement
                 self.stack.set_top_unsafe(0);
-                return next_instruction(self, cursor, .SMOD);
+                return dispatch_next.nextInstruction(FrameType, self, cursor, .SMOD);
             }
 
             // This section implements branchless two's complement arithmetic.
@@ -184,7 +177,7 @@ pub fn Handlers(FrameType: type) type {
             const result = (remainder ^ top_mask) -% top_mask;
 
             self.stack.set_top_unsafe(result);
-            return next_instruction(self, cursor, .SMOD);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .SMOD);
         }
 
         /// ADDMOD opcode (0x08) - (a + b) % N. All intermediate calculations are performed with arbitrary precision.
@@ -215,7 +208,7 @@ pub fn Handlers(FrameType: type) type {
                 result = r;
             }
             self.stack.push_unsafe(result);
-            return next_instruction(self, cursor, .ADDMOD);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .ADDMOD);
         }
 
         /// MULMOD opcode (0x09) - (a * b) % N. All intermediate calculations are performed with arbitrary precision.
@@ -231,7 +224,7 @@ pub fn Handlers(FrameType: type) type {
                 result = mulmod_safe(factor1, factor2, modulus);
             }
             self.stack.push_unsafe(result);
-            return next_instruction(self, cursor, .MULMOD);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .MULMOD);
         }
 
         /// Safe modular multiplication using double-width arithmetic to prevent overflow.
@@ -328,7 +321,7 @@ pub fn Handlers(FrameType: type) type {
                 base_working *%= base_working;
             }
             self.stack.set_top_unsafe(result);
-            return next_instruction(self, cursor, .EXP);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .EXP);
         }
 
         /// SIGNEXTEND opcode (0x0b) - Sign extend operation.
@@ -362,7 +355,7 @@ pub fn Handlers(FrameType: type) type {
 
             self.stack.set_top_unsafe(result);
 
-            return next_instruction(self, cursor, .SIGNEXTEND);
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .SIGNEXTEND);
         }
     };
 }
