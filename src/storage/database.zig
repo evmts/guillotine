@@ -277,10 +277,8 @@ pub const Database = struct {
 
     /// Get account balance
     pub fn get_balance(self: *Database, address: [20]u8) Error!u256 {
-        if (self.accounts.get(address)) |account| {
-            return account.balance;
-        }
-        return 0; // Non-existent accounts have zero balance
+        const account = (try self.get_account(address)) orelse return 0;
+        return account.balance;
     }
 
     /// Set account balance
@@ -292,10 +290,8 @@ pub const Database = struct {
 
     /// Get account nonce
     pub fn get_nonce(self: *Database, address: [20]u8) Error!u64 {
-        if (self.accounts.get(address)) |account| {
-            return account.nonce;
-        }
-        return 0; // Non-existent accounts have zero nonce
+        const account = (try self.get_account(address)) orelse return 0;
+        return account.nonce;
     }
 
     /// Set account nonce
@@ -307,10 +303,8 @@ pub const Database = struct {
 
     /// Get account code hash
     pub fn get_code_hash(self: *Database, address: [20]u8) Error![32]u8 {
-        if (self.accounts.get(address)) |account| {
-            return account.code_hash;
-        }
-        return ZERO_CODE_HASH; // Non-existent accounts have zero code hash
+        const account = (try self.get_account(address)) orelse return ZERO_CODE_HASH;
+        return account.code_hash;
     }
 
     /// Check if account is empty (zero balance, nonce, and no code)
