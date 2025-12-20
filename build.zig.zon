@@ -52,6 +52,10 @@
             .url = "https://github.com/Hejsil/zig-clap/archive/refs/heads/master.tar.gz",
             .hash = "clap-0.11.0-oBajB-TnAQC7yPLnZRT5WzHZ_4Ly4dX2OILskli74b9H",
         },
+        .mini = .{
+            // Minimal EVM implementation (guillotine-mini)
+            .path = "mini",
+        },
     },
 
     // Specifies the set of files and directories that are included in this package.
@@ -67,6 +71,7 @@
         "build.zig.zon",
         "src",
         "lib",
+        "mini",
         "LICENSE",
         "README.md",
     },

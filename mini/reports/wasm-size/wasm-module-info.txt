@@ -1,0 +1,1066 @@
+
+guillotine_mini.wasm:	file format wasm 0x1
+
+Section Details:
+
+Type[43]:
+ - type[0] (i32, i32, i32, i32) -> i32
+ - type[1] (i32, i32, i32, i32, i32) -> nil
+ - type[2] (i32, i32, i32, i32, i32, i32) -> i32
+ - type[3] (i32) -> i32
+ - type[4] (i32, i32, i32) -> nil
+ - type[5] (i32, i32, i64, i64, i64, i64) -> nil
+ - type[6] (i32, i32, i32, i32) -> nil
+ - type[7] (i32, i32, i64) -> nil
+ - type[8] (i32, i32, i64, i64, i64, i64, i64, i64, i64, i64) -> nil
+ - type[9] (i32, i32) -> i64
+ - type[10] (i32, i32, i32, i64, i64, i64, i64) -> nil
+ - type[11] (i32, i32, i32, i32, i32, i64) -> nil
+ - type[12] (i32, i32) -> i32
+ - type[13] (i32, i64, i32, i32) -> i32
+ - type[14] (i32, i32, i32, i64, i32, i32, i32) -> i32
+ - type[15] (i32, i32, i32, i64, i32) -> i32
+ - type[16] (i32, i32, i32) -> i32
+ - type[17] (i32) -> nil
+ - type[18] (i32) -> i64
+ - type[19] (i32, i32, i32, i32, i32, i32, i32) -> i32
+ - type[20] (i32, i32) -> nil
+ - type[21] () -> nil
+ - type[22] (i32, i64) -> i32
+ - type[23] (i32, i64) -> nil
+ - type[24] (i32, i64, i32, i32, i32, i32, i32) -> i32
+ - type[25] (i32, i32, i64, i64, i32, i32, i32, i64, i32, i32) -> nil
+ - type[26] (i32, i32, i32, i32, i32, i64, i32) -> nil
+ - type[27] (i32, i32, i64, i64, i64, i64) -> i32
+ - type[28] (i32, i32, i64) -> i32
+ - type[29] (i32, i32, i32, i32, i64, i32, i32, i64, i64, i64, i64, i32, i32, i32, i32, i32) -> nil
+ - type[30] (i32, i64, i64, i64, i64) -> nil
+ - type[31] (i32, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64) -> nil
+ - type[32] (i32, i64, i64, i64, i64, i64, i64, i64, i64) -> nil
+ - type[33] (i32, i32, i32, i32, i32, i64, i64) -> nil
+ - type[34] (i32, i64, i64) -> nil
+ - type[35] (i32, i64, i64, i64, i64) -> i32
+ - type[36] (i32, i64) -> i64
+ - type[37] (i32, i32, i64, i64, i64, i64, i32, i32, i64, i32) -> nil
+ - type[38] (i32, i32, i32, i32, i32) -> i32
+ - type[39] (i32, i32, i32, i32, i32, i32, i32) -> nil
+ - type[40] (i32, i64, i64, i32) -> nil
+ - type[41] (i32, i64, i64, i64, i64, i32) -> nil
+ - type[42] (i64, i64, i64, i32) -> i64
+Import[13]:
+ - func[0] sig=0 <wasi_snapshot_preview1.fd_write> <- wasi_snapshot_preview1.fd_write
+ - func[1] sig=12 <wasi_snapshot_preview1.fd_filestat_get> <- wasi_snapshot_preview1.fd_filestat_get
+ - func[2] sig=0 <wasi_snapshot_preview1.fd_read> <- wasi_snapshot_preview1.fd_read
+ - func[3] sig=13 <wasi_snapshot_preview1.fd_seek> <- wasi_snapshot_preview1.fd_seek
+ - func[4] sig=0 <env.bls12_381_pairing> <- env.bls12_381_pairing
+ - func[5] sig=0 <env.bls12_381_g1_multiexp> <- env.bls12_381_g1_multiexp
+ - func[6] sig=0 <env.bls12_381_g1_mul> <- env.bls12_381_g1_mul
+ - func[7] sig=0 <env.bls12_381_g1_add> <- env.bls12_381_g1_add
+ - func[8] sig=0 <env.bn254_ecpairing> <- env.bn254_ecpairing
+ - func[9] sig=12 <env.js_opcode_callback> <- env.js_opcode_callback
+ - func[10] sig=14 <env.js_precompile_callback> <- env.js_precompile_callback
+ - func[11] sig=15 <wasi_snapshot_preview1.fd_pwrite> <- wasi_snapshot_preview1.fd_pwrite
+ - func[12] sig=15 <wasi_snapshot_preview1.fd_pread> <- wasi_snapshot_preview1.fd_pread
+Function[274]:
+ - func[13] sig=16 <evm_create>
+ - func[14] sig=17
+ - func[15] sig=0
+ - func[16] sig=0
+ - func[17] sig=4
+ - func[18] sig=4
+ - func[19] sig=18
+ - func[20] sig=4
+ - func[21] sig=2
+ - func[22] sig=19
+ - func[23] sig=4
+ - func[24] sig=20
+ - func[25] sig=2
+ - func[26] sig=1
+ - func[27] sig=21
+ - func[28] sig=20
+ - func[29] sig=12
+ - func[30] sig=21
+ - func[31] sig=3
+ - func[32] sig=16
+ - func[33] sig=9
+ - func[34] sig=20
+ - func[35] sig=3
+ - func[36] sig=22
+ - func[37] sig=23
+ - func[38] sig=22
+ - func[39] sig=6
+ - func[40] sig=17 <evm_destroy>
+ - func[41] sig=16 <evm_set_bytecode>
+ - func[42] sig=4
+ - func[43] sig=4
+ - func[44] sig=24 <evm_set_execution_context>
+ - func[45] sig=25 <evm_set_blockchain_context>
+ - func[46] sig=16 <evm_set_access_list_addresses>
+ - func[47] sig=0 <evm_set_access_list_storage_keys>
+ - func[48] sig=4
+ - func[49] sig=4
+ - func[50] sig=16 <evm_set_blob_hashes>
+ - func[51] sig=20
+ - func[52] sig=4
+ - func[53] sig=4
+ - func[54] sig=3 <evm_execute>
+ - func[55] sig=12
+ - func[56] sig=12
+ - func[57] sig=17
+ - func[58] sig=20
+ - func[59] sig=12
+ - func[60] sig=4
+ - func[61] sig=20
+ - func[62] sig=18
+ - func[63] sig=20
+ - func[64] sig=9
+ - func[65] sig=7
+ - func[66] sig=20
+ - func[67] sig=16
+ - func[68] sig=12
+ - func[69] sig=16
+ - func[70] sig=12
+ - func[71] sig=26
+ - func[72] sig=17
+ - func[73] sig=17
+ - func[74] sig=17
+ - func[75] sig=20
+ - func[76] sig=27
+ - func[77] sig=20
+ - func[78] sig=0
+ - func[79] sig=0
+ - func[80] sig=28
+ - func[81] sig=20
+ - func[82] sig=29
+ - func[83] sig=16
+ - func[84] sig=3
+ - func[85] sig=20
+ - func[86] sig=6
+ - func[87] sig=4
+ - func[88] sig=4
+ - func[89] sig=4
+ - func[90] sig=17
+ - func[91] sig=1
+ - func[92] sig=1
+ - func[93] sig=4
+ - func[94] sig=6
+ - func[95] sig=4
+ - func[96] sig=20
+ - func[97] sig=6
+ - func[98] sig=12
+ - func[99] sig=16
+ - func[100] sig=16
+ - func[101] sig=4
+ - func[102] sig=6
+ - func[103] sig=12
+ - func[104] sig=20
+ - func[105] sig=4
+ - func[106] sig=20
+ - func[107] sig=4
+ - func[108] sig=3
+ - func[109] sig=4
+ - func[110] sig=6
+ - func[111] sig=4
+ - func[112] sig=12
+ - func[113] sig=3
+ - func[114] sig=16
+ - func[115] sig=4
+ - func[116] sig=20
+ - func[117] sig=4
+ - func[118] sig=3
+ - func[119] sig=4
+ - func[120] sig=4
+ - func[121] sig=12
+ - func[122] sig=16
+ - func[123] sig=30
+ - func[124] sig=31
+ - func[125] sig=31
+ - func[126] sig=3
+ - func[127] sig=32
+ - func[128] sig=5
+ - func[129] sig=4
+ - func[130] sig=4
+ - func[131] sig=20
+ - func[132] sig=33
+ - func[133] sig=30
+ - func[134] sig=3
+ - func[135] sig=34
+ - func[136] sig=20
+ - func[137] sig=4
+ - func[138] sig=4
+ - func[139] sig=20
+ - func[140] sig=20
+ - func[141] sig=3
+ - func[142] sig=12
+ - func[143] sig=9
+ - func[144] sig=20
+ - func[145] sig=16
+ - func[146] sig=12
+ - func[147] sig=12
+ - func[148] sig=0
+ - func[149] sig=4
+ - func[150] sig=3
+ - func[151] sig=6
+ - func[152] sig=1
+ - func[153] sig=4
+ - func[154] sig=17
+ - func[155] sig=4
+ - func[156] sig=20
+ - func[157] sig=4
+ - func[158] sig=20
+ - func[159] sig=20
+ - func[160] sig=3
+ - func[161] sig=17
+ - func[162] sig=12
+ - func[163] sig=18
+ - func[164] sig=4
+ - func[165] sig=12
+ - func[166] sig=12
+ - func[167] sig=0
+ - func[168] sig=16
+ - func[169] sig=2
+ - func[170] sig=2
+ - func[171] sig=1
+ - func[172] sig=4
+ - func[173] sig=17
+ - func[174] sig=4
+ - func[175] sig=16
+ - func[176] sig=20
+ - func[177] sig=32
+ - func[178] sig=4
+ - func[179] sig=4
+ - func[180] sig=3
+ - func[181] sig=20
+ - func[182] sig=35
+ - func[183] sig=12
+ - func[184] sig=36
+ - func[185] sig=20
+ - func[186] sig=4
+ - func[187] sig=4
+ - func[188] sig=27
+ - func[189] sig=12
+ - func[190] sig=4
+ - func[191] sig=4
+ - func[192] sig=16
+ - func[193] sig=37
+ - func[194] sig=27
+ - func[195] sig=4
+ - func[196] sig=12
+ - func[197] sig=10
+ - func[198] sig=10
+ - func[199] sig=10
+ - func[200] sig=12
+ - func[201] sig=18
+ - func[202] sig=12
+ - func[203] sig=4
+ - func[204] sig=0
+ - func[205] sig=4
+ - func[206] sig=12
+ - func[207] sig=17
+ - func[208] sig=1
+ - func[209] sig=4
+ - func[210] sig=3
+ - func[211] sig=12
+ - func[212] sig=20
+ - func[213] sig=12
+ - func[214] sig=4
+ - func[215] sig=12
+ - func[216] sig=4
+ - func[217] sig=0
+ - func[218] sig=38
+ - func[219] sig=6
+ - func[220] sig=20
+ - func[221] sig=39
+ - func[222] sig=20
+ - func[223] sig=38
+ - func[224] sig=38
+ - func[225] sig=4
+ - func[226] sig=18
+ - func[227] sig=20
+ - func[228] sig=16
+ - func[229] sig=0
+ - func[230] sig=2
+ - func[231] sig=39
+ - func[232] sig=16
+ - func[233] sig=20
+ - func[234] sig=0
+ - func[235] sig=20
+ - func[236] sig=16
+ - func[237] sig=17
+ - func[238] sig=17
+ - func[239] sig=20
+ - func[240] sig=20
+ - func[241] sig=12
+ - func[242] sig=16
+ - func[243] sig=16
+ - func[244] sig=20
+ - func[245] sig=16
+ - func[246] sig=2
+ - func[247] sig=12
+ - func[248] sig=16
+ - func[249] sig=16
+ - func[250] sig=6
+ - func[251] sig=18 <evm_get_gas_remaining>
+ - func[252] sig=18 <evm_get_gas_used>
+ - func[253] sig=3 <evm_is_success>
+ - func[254] sig=3 <evm_get_output_len>
+ - func[255] sig=16 <evm_get_output>
+ - func[256] sig=0 <evm_set_storage>
+ - func[257] sig=0 <evm_get_storage>
+ - func[258] sig=16 <evm_set_balance>
+ - func[259] sig=0 <evm_set_code>
+ - func[260] sig=20
+ - func[261] sig=20
+ - func[262] sig=4
+ - func[263] sig=12 <evm_call_ffi>
+ - func[264] sig=4
+ - func[265] sig=38 <evm_continue_ffi>
+ - func[266] sig=16 <evm_get_state_changes>
+ - func[267] sig=3 <evm_enable_storage_injector>
+ - func[268] sig=0
+ - func[269] sig=3
+ - func[270] sig=2
+ - func[271] sig=2
+ - func[272] sig=1
+ - func[273] sig=6
+ - func[274] sig=1
+ - func[275] sig=1
+ - func[276] sig=12
+ - func[277] sig=22
+ - func[278] sig=1
+ - func[279] sig=6
+ - func[280] sig=3
+ - func[281] sig=16
+ - func[282] sig=40
+ - func[283] sig=30
+ - func[284] sig=41
+ - func[285] sig=42
+ - func[286] sig=30
+Table[1]:
+ - table[0] type=funcref initial=22 max=22
+Memory[1]:
+ - memory[0] pages: initial=257
+Global[1]:
+ - global[0] i32 mutable=1 - init i32=16777216
+Export[24]:
+ - memory[0] -> "memory"
+ - func[13] <evm_create> -> "evm_create"
+ - table[0] -> "__indirect_function_table"
+ - func[40] <evm_destroy> -> "evm_destroy"
+ - func[41] <evm_set_bytecode> -> "evm_set_bytecode"
+ - func[44] <evm_set_execution_context> -> "evm_set_execution_context"
+ - func[45] <evm_set_blockchain_context> -> "evm_set_blockchain_context"
+ - func[46] <evm_set_access_list_addresses> -> "evm_set_access_list_addresses"
+ - func[47] <evm_set_access_list_storage_keys> -> "evm_set_access_list_storage_keys"
+ - func[50] <evm_set_blob_hashes> -> "evm_set_blob_hashes"
+ - func[54] <evm_execute> -> "evm_execute"
+ - func[251] <evm_get_gas_remaining> -> "evm_get_gas_remaining"
+ - func[252] <evm_get_gas_used> -> "evm_get_gas_used"
+ - func[253] <evm_is_success> -> "evm_is_success"
+ - func[254] <evm_get_output_len> -> "evm_get_output_len"
+ - func[255] <evm_get_output> -> "evm_get_output"
+ - func[256] <evm_set_storage> -> "evm_set_storage"
+ - func[257] <evm_get_storage> -> "evm_get_storage"
+ - func[258] <evm_set_balance> -> "evm_set_balance"
+ - func[259] <evm_set_code> -> "evm_set_code"
+ - func[263] <evm_call_ffi> -> "evm_call_ffi"
+ - func[265] <evm_continue_ffi> -> "evm_continue_ffi"
+ - func[266] <evm_get_state_changes> -> "evm_get_state_changes"
+ - func[267] <evm_enable_storage_injector> -> "evm_enable_storage_injector"
+Elem[1]:
+ - segment[0] flags=0 table=0 count=21 - init i32=1
+  - elem[1] = ref.func:97
+  - elem[2] = ref.func:167
+  - elem[3] = ref.func:169
+  - elem[4] = ref.func:170
+  - elem[5] = ref.func:171
+  - elem[6] = ref.func:278
+  - elem[7] = ref.func:279
+  - elem[8] = ref.func:280
+  - elem[9] = ref.func:281
+  - elem[10] = ref.func:268
+  - elem[11] = ref.func:270
+  - elem[12] = ref.func:271
+  - elem[13] = ref.func:272
+  - elem[14] = ref.func:16
+  - elem[15] = ref.func:21
+  - elem[16] = ref.func:25
+  - elem[17] = ref.func:26
+  - elem[18] = ref.func:275
+  - elem[19] = ref.func:273
+  - elem[20] = ref.func:31
+  - elem[21] = ref.func:32
+Code[274]:
+ - func[13] size=1681 <evm_create>
+ - func[14] size=43
+ - func[15] size=117
+ - func[16] size=1189
+ - func[17] size=197
+ - func[18] size=203
+ - func[19] size=58
+ - func[20] size=436
+ - func[21] size=90
+ - func[22] size=308
+ - func[23] size=187
+ - func[24] size=41
+ - func[25] size=92
+ - func[26] size=477
+ - func[27] size=285
+ - func[28] size=140
+ - func[29] size=249
+ - func[30] size=112
+ - func[31] size=106
+ - func[32] size=221
+ - func[33] size=308
+ - func[34] size=320
+ - func[35] size=19
+ - func[36] size=801
+ - func[37] size=89
+ - func[38] size=125
+ - func[39] size=424
+ - func[40] size=152 <evm_destroy>
+ - func[41] size=180 <evm_set_bytecode>
+ - func[42] size=149
+ - func[43] size=121
+ - func[44] size=445 <evm_set_execution_context>
+ - func[45] size=746 <evm_set_blockchain_context>
+ - func[46] size=341 <evm_set_access_list_addresses>
+ - func[47] size=418 <evm_set_access_list_storage_keys>
+ - func[48] size=58
+ - func[49] size=153
+ - func[50] size=255 <evm_set_blob_hashes>
+ - func[51] size=66
+ - func[52] size=149
+ - func[53] size=154
+ - func[54] size=8224 <evm_execute>
+ - func[55] size=143
+ - func[56] size=340
+ - func[57] size=63
+ - func[58] size=290
+ - func[59] size=340
+ - func[60] size=58
+ - func[61] size=290
+ - func[62] size=71
+ - func[63] size=217
+ - func[64] size=117
+ - func[65] size=897
+ - func[66] size=64
+ - func[67] size=708
+ - func[68] size=484
+ - func[69] size=669
+ - func[70] size=259
+ - func[71] size=32087
+ - func[72] size=21
+ - func[73] size=92
+ - func[74] size=108
+ - func[75] size=213
+ - func[76] size=1361
+ - func[77] size=240
+ - func[78] size=131
+ - func[79] size=1322
+ - func[80] size=1308
+ - func[81] size=100
+ - func[82] size=3237
+ - func[83] size=86
+ - func[84] size=4112
+ - func[85] size=138
+ - func[86] size=123
+ - func[87] size=333
+ - func[88] size=209
+ - func[89] size=58
+ - func[90] size=63
+ - func[91] size=216
+ - func[92] size=216
+ - func[93] size=230
+ - func[94] size=99
+ - func[95] size=231
+ - func[96] size=156
+ - func[97] size=122
+ - func[98] size=68
+ - func[99] size=135
+ - func[100] size=431
+ - func[101] size=100
+ - func[102] size=2621
+ - func[103] size=54
+ - func[104] size=84
+ - func[105] size=145
+ - func[106] size=53
+ - func[107] size=569
+ - func[108] size=13
+ - func[109] size=100
+ - func[110] size=2982
+ - func[111] size=197
+ - func[112] size=135
+ - func[113] size=197
+ - func[114] size=367
+ - func[115] size=545
+ - func[116] size=105
+ - func[117] size=58
+ - func[118] size=59
+ - func[119] size=154
+ - func[120] size=157
+ - func[121] size=61
+ - func[122] size=28
+ - func[123] size=165
+ - func[124] size=651
+ - func[125] size=551
+ - func[126] size=321
+ - func[127] size=3859
+ - func[128] size=327
+ - func[129] size=929
+ - func[130] size=188
+ - func[131] size=262
+ - func[132] size=134
+ - func[133] size=1674
+ - func[134] size=608
+ - func[135] size=233
+ - func[136] size=2413
+ - func[137] size=3652
+ - func[138] size=3780
+ - func[139] size=1895
+ - func[140] size=1972
+ - func[141] size=104
+ - func[142] size=46
+ - func[143] size=50
+ - func[144] size=95
+ - func[145] size=1012
+ - func[146] size=371
+ - func[147] size=145
+ - func[148] size=2792
+ - func[149] size=149
+ - func[150] size=62
+ - func[151] size=258
+ - func[152] size=324
+ - func[153] size=58
+ - func[154] size=20
+ - func[155] size=133
+ - func[156] size=253
+ - func[157] size=600
+ - func[158] size=122
+ - func[159] size=457
+ - func[160] size=290
+ - func[161] size=197
+ - func[162] size=59
+ - func[163] size=12
+ - func[164] size=213
+ - func[165] size=98
+ - func[166] size=48338
+ - func[167] size=284
+ - func[168] size=99
+ - func[169] size=121
+ - func[170] size=28
+ - func[171] size=48
+ - func[172] size=151
+ - func[173] size=2237
+ - func[174] size=125
+ - func[175] size=97
+ - func[176] size=806
+ - func[177] size=449
+ - func[178] size=42
+ - func[179] size=714
+ - func[180] size=39
+ - func[181] size=110
+ - func[182] size=116
+ - func[183] size=61
+ - func[184] size=195
+ - func[185] size=218
+ - func[186] size=213
+ - func[187] size=122
+ - func[188] size=371
+ - func[189] size=1132
+ - func[190] size=149
+ - func[191] size=10413
+ - func[192] size=1142
+ - func[193] size=6929
+ - func[194] size=1299
+ - func[195] size=213
+ - func[196] size=62
+ - func[197] size=554
+ - func[198] size=368
+ - func[199] size=286
+ - func[200] size=59
+ - func[201] size=370
+ - func[202] size=85
+ - func[203] size=214
+ - func[204] size=89
+ - func[205] size=155
+ - func[206] size=179
+ - func[207] size=20
+ - func[208] size=187
+ - func[209] size=69
+ - func[210] size=89
+ - func[211] size=159
+ - func[212] size=149
+ - func[213] size=66
+ - func[214] size=51
+ - func[215] size=99
+ - func[216] size=73
+ - func[217] size=98
+ - func[218] size=271
+ - func[219] size=207
+ - func[220] size=78
+ - func[221] size=964
+ - func[222] size=20
+ - func[223] size=227
+ - func[224] size=242
+ - func[225] size=357
+ - func[226] size=548
+ - func[227] size=5851
+ - func[228] size=388
+ - func[229] size=153
+ - func[230] size=236
+ - func[231] size=964
+ - func[232] size=64
+ - func[233] size=52
+ - func[234] size=66
+ - func[235] size=386
+ - func[236] size=440
+ - func[237] size=94
+ - func[238] size=27
+ - func[239] size=100
+ - func[240] size=237
+ - func[241] size=243
+ - func[242] size=366
+ - func[243] size=77
+ - func[244] size=91
+ - func[245] size=593
+ - func[246] size=236
+ - func[247] size=61
+ - func[248] size=283
+ - func[249] size=96
+ - func[250] size=21
+ - func[251] size=34 <evm_get_gas_remaining>
+ - func[252] size=40 <evm_get_gas_used>
+ - func[253] size=27 <evm_is_success>
+ - func[254] size=34 <evm_get_output_len>
+ - func[255] size=60 <evm_get_output>
+ - func[256] size=370 <evm_set_storage>
+ - func[257] size=384 <evm_get_storage>
+ - func[258] size=242 <evm_set_balance>
+ - func[259] size=187 <evm_set_code>
+ - func[260] size=569
+ - func[261] size=950
+ - func[262] size=2995
+ - func[263] size=1690 <evm_call_ffi>
+ - func[264] size=918
+ - func[265] size=1422 <evm_continue_ffi>
+ - func[266] size=71 <evm_get_state_changes>
+ - func[267] size=408 <evm_enable_storage_injector>
+ - func[268] size=269
+ - func[269] size=96
+ - func[270] size=224
+ - func[271] size=28
+ - func[272] size=206
+ - func[273] size=164
+ - func[274] size=211
+ - func[275] size=1300
+ - func[276] size=79
+ - func[277] size=125
+ - func[278] size=516
+ - func[279] size=1132
+ - func[280] size=4
+ - func[281] size=322
+ - func[282] size=83
+ - func[283] size=117
+ - func[284] size=382
+ - func[285] size=278
+ - func[286] size=74
+Data[2]:
+ - segment[0] memory=0 size=6184 - init i32=16777216
+  - 1000000: 0100 0000 0000 0000 0000 0000 0000 0000  ................
+  - 1000010: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 1000020: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 1000030: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 1000040: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 1000050: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 1000060: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 1000070: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 1000080: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 1000090: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 10000a0: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 10000b0: 80c3 c901 0000 0000 0000 0000 0000 0000  ................
+  - 10000c0: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 10000d0: 7ce3 0000 6e78 0000 0a3e 0000 7e1f 0000  |...nx...>..~...
+  - 10000e0: df0f 0000 f707 0000 fd03 0000 fe01 0000  ................
+  - 10000f0: fe00 0000 7e00 0000 3e00 0000 1e00 0000  ....~...>.......
+  - 1000100: 0e00 0000 0600 0000 0200 0000 7b22 7374  ............{"st
+  - 1000110: 6f72 6167 6522 3a5b 5d2c 2262 616c 616e  orage":[],"balan
+  - 1000120: 6365 7322 3a5b 5d2c 226e 6f6e 6365 7322  ces":[],"nonces"
+  - 1000130: 3a5b 5d2c 2263 6f64 6573 223a 5b5d 2c22  :[],"codes":[],"
+  - 1000140: 7365 6c66 4465 7374 7275 6374 7322 3a5b  selfDestructs":[
+  - 1000150: 5d7d 0044 6576 6963 6542 7573 7900 4f75  ]}.DeviceBusy.Ou
+  - 1000160: 744f 664d 656d 6f72 7900 436f 6e73 7461  tOfMemory.Consta
+  - 1000170: 6e74 696e 6f70 6c65 4669 7800 5374 6163  ntinopleFix.Stac
+  - 1000180: 6b4f 7665 7266 6c6f 7700 5374 6163 6b55  kOverflow.StackU
+  - 1000190: 6e64 6572 666c 6f77 0049 6e70 7574 4f75  nderflow.InputOu
+  - 10001a0: 7470 7574 0049 6e76 616c 6964 496e 7075  tput.InvalidInpu
+  - 10001b0: 7400 4578 6563 7574 696f 6e54 696d 656f  t.ExecutionTimeo
+  - 10001c0: 7574 0043 6f6e 6e65 6374 696f 6e54 696d  ut.ConnectionTim
+  - 10001d0: 6564 4f75 7400 496e 7661 6c69 6450 6f69  edOut.InvalidPoi
+  - 10001e0: 6e74 0049 6e76 616c 6964 4172 6775 6d65  nt.InvalidArgume
+  - 10001f0: 6e74 0043 7265 6174 6543 6f6e 7472 6163  nt.CreateContrac
+  - 1000200: 7453 697a 654c 696d 6974 0043 7265 6174  tSizeLimit.Creat
+  - 1000210: 6549 6e69 7443 6f64 6553 697a 654c 696d  eInitCodeSizeLim
+  - 1000220: 6974 004e 6f53 7061 6365 4c65 6674 0049  it.NoSpaceLeft.I
+  - 1000230: 6e76 616c 6964 4172 6775 6d65 6e74 7300  nvalidArguments.
+  - 1000240: 5061 7269 7300 4261 6446 696c 6546 6c61  Paris.BadFileFla
+  - 1000250: 6773 0053 7973 7465 6d52 6573 6f75 7263  gs.SystemResourc
+  - 1000260: 6573 004f 7574 4f66 426f 756e 6473 004f  es.OutOfBounds.O
+  - 1000270: 7574 4f66 4761 7300 4d65 6d6f 7279 4572  utOfGas.MemoryEr
+  - 1000280: 726f 7200 4761 735a 6572 6f45 7272 6f72  ror.GasZeroError
+  - 1000290: 0045 7865 6375 7469 6f6e 4572 726f 7200  .ExecutionError.
+  - 10002a0: 416c 6c6f 6361 7469 6f6e 4572 726f 7200  AllocationError.
+  - 10002b0: 5072 6563 6f6d 7069 6c65 4572 726f 7200  PrecompileError.
+  - 10002c0: 5374 6f72 6167 6545 7272 6f72 0049 7344  StorageError.IsD
+  - 10002d0: 6972 0049 6e76 616c 6964 4368 6172 6163  ir.InvalidCharac
+  - 10002e0: 7465 7200 4672 6f6e 7469 6572 0047 7261  ter.Frontier.Gra
+  - 10002f0: 7947 6c61 6369 6572 0041 7272 6f77 476c  yGlacier.ArrowGl
+  - 1000300: 6163 6965 7200 4d75 6972 476c 6163 6965  acier.MuirGlacie
+  - 1000310: 7200 436f 6e6e 6563 7469 6f6e 5265 7365  r.ConnectionRese
+  - 1000320: 7442 7950 6565 7200 496e 7661 6c69 6453  tByPeer.InvalidS
+  - 1000330: 6361 6c61 7200 496e 7661 6c69 644a 756d  calar.InvalidJum
+  - 1000340: 7000 4469 7669 7369 6f6e 4279 5a65 726f  p.DivisionByZero
+  - 1000350: 0043 616e 6375 6e00 5265 7665 7274 4578  .Cancun.RevertEx
+  - 1000360: 6563 7574 696f 6e00 5772 6974 6550 726f  ecution.WritePro
+  - 1000370: 7465 6374 696f 6e00 556e 7375 7070 6f72  tection.Unsuppor
+  - 1000380: 7465 644f 7065 7261 7469 6f6e 0049 6e76  tedOperation.Inv
+  - 1000390: 616c 6964 4a75 6d70 4465 7374 696e 6174  alidJumpDestinat
+  - 10003a0: 696f 6e00 5374 6174 6963 4361 6c6c 5669  ion.StaticCallVi
+  - 10003b0: 6f6c 6174 696f 6e00 4c6f 636b 5669 6f6c  olation.LockViol
+  - 10003c0: 6174 696f 6e00 436f 6e74 7261 6374 436f  ation.ContractCo
+  - 10003d0: 6c6c 6973 696f 6e00 5370 7572 696f 7573  llision.Spurious
+  - 10003e0: 4472 6167 6f6e 004c 6f6e 646f 6e00 4265  Dragon.London.Be
+  - 10003f0: 726c 696e 0042 797a 616e 7469 756d 004e  rlin.Byzantium.N
+  - 1000400: 6f74 5361 6d65 4669 6c65 5379 7374 656d  otSameFileSystem
+  - 1000410: 0045 6e64 4f66 5374 7265 616d 0049 7374  .EndOfStream.Ist
+  - 1000420: 616e 6275 6c00 576f 756c 6442 6c6f 636b  anbul.WouldBlock
+  - 1000430: 0053 6861 6e67 6861 6900 496e 7661 6c69  .Shanghai.Invali
+  - 1000440: 6448 6173 684c 656e 6774 6800 496e 7661  dHashLength.Inva
+  - 1000450: 6c69 644c 656e 6774 6800 496e 7661 6c69  lidLength.Invali
+  - 1000460: 6450 7573 6800 5472 756e 6361 7465 6450  dPush.TruncatedP
+  - 1000470: 7573 6800 5065 7465 7273 6275 7267 004e  ush.Petersburg.N
+  - 1000480: 6f74 4f70 656e 466f 7257 7269 7469 6e67  otOpenForWriting
+  - 1000490: 0053 7472 6561 6d69 6e67 004e 6f74 4f70  .Streaming.NotOp
+  - 10004a0: 656e 466f 7252 6561 6469 6e67 0046 696c  enForReading.Fil
+  - 10004b0: 6554 6f6f 4269 6700 4d65 7373 6167 6554  eTooBig.MessageT
+  - 10004c0: 6f6f 4269 6700 496e 7661 6c69 6449 6e70  ooBig.InvalidInp
+  - 10004d0: 7574 5369 7a65 0049 6e76 616c 6964 496e  utSize.InvalidIn
+  - 10004e0: 6974 436f 6465 5369 7a65 0049 6e76 616c  itCodeSize.Inval
+  - 10004f0: 6964 5374 6174 6963 4361 6c6c 5661 6c75  idStaticCallValu
+  - 1000500: 6500 496e 7661 6c69 6443 7265 6174 6556  e.InvalidCreateV
+  - 1000510: 616c 7565 0050 7261 6775 6500 496e 7661  alue.Prague.Inva
+  - 1000520: 6c69 6441 7379 6e63 5374 6174 6500 496e  lidAsyncState.In
+  - 1000530: 7661 6c69 6442 6173 6500 496e 7661 6c69  validBase.Invali
+  - 1000540: 6453 6967 6e61 7475 7265 0055 6e73 7570  dSignature.Unsup
+  - 1000550: 706f 7274 6564 436f 6e74 696e 7565 5479  portedContinueTy
+  - 1000560: 7065 0042 726f 6b65 6e50 6970 6500 5461  pe.BrokenPipe.Ta
+  - 1000570: 6e67 6572 696e 6557 6869 7374 6c65 0043  ngerineWhistle.C
+  - 1000580: 6f6e 7374 616e 7469 6e6f 706c 6500 5377  onstantinople.Sw
+  - 1000590: 6170 4669 6c65 0055 6e73 6565 6b61 626c  apFile.Unseekabl
+  - 10005a0: 6500 4d65 7267 6500 496e 6974 636f 6465  e.Merge.Initcode
+  - 10005b0: 546f 6f4c 6172 6765 0042 7974 6563 6f64  TooLarge.Bytecod
+  - 10005c0: 6554 6f6f 4c61 7267 6500 496e 7661 6c69  eTooLarge.Invali
+  - 10005d0: 6420 6672 6565 0049 6e76 616c 6964 4f70  d free.InvalidOp
+  - 10005e0: 636f 6465 0049 6e76 616c 6964 4279 7465  code.InvalidByte
+  - 10005f0: 636f 6465 0049 6e73 7566 6669 6369 656e  code.Insufficien
+  - 1000600: 7442 616c 616e 6365 004e 6f44 6576 6963  tBalance.NoDevic
+  - 1000610: 6500 4163 636f 756e 744e 6f74 466f 756e  e.AccountNotFoun
+  - 1000620: 6400 436f 6e74 7261 6374 4e6f 7446 6f75  d.ContractNotFou
+  - 1000630: 6e64 0050 726f 6365 7373 4e6f 7446 6f75  nd.ProcessNotFou
+  - 1000640: 6e64 004f 7065 7261 7469 6f6e 4e6f 7453  nd.OperationNotS
+  - 1000650: 7570 706f 7274 6564 004f 7065 7261 7469  upported.Operati
+  - 1000660: 6f6e 4162 6f72 7465 6400 496e 7465 7272  onAborted.Interr
+  - 1000670: 7570 7465 6400 556e 696d 706c 656d 656e  upted.Unimplemen
+  - 1000680: 7465 6400 4e6f 7449 6d70 6c65 6d65 6e74  ted.NotImplement
+  - 1000690: 6564 0055 6e65 7870 6563 7465 6400 536f  ed.Unexpected.So
+  - 10006a0: 636b 6574 4e6f 7443 6f6e 6e65 6374 6564  cketNotConnected
+  - 10006b0: 0043 6f6d 7075 7461 7469 6f6e 4661 696c  .ComputationFail
+  - 10006c0: 6564 0041 6c6c 6f63 6174 696f 6e46 6169  ed.AllocationFai
+  - 10006d0: 6c65 6400 5772 6974 6546 6169 6c65 6400  led.WriteFailed.
+  - 10006e0: 5472 7573 7465 6453 6574 7570 4c6f 6164  TrustedSetupLoad
+  - 10006f0: 4661 696c 6564 0052 6561 6446 6169 6c65  Failed.ReadFaile
+  - 1000700: 6400 4361 6e63 656c 6564 0041 6363 6573  d.Canceled.Acces
+  - 1000710: 7344 656e 6965 6400 5065 726d 6973 7369  sDenied.Permissi
+  - 1000720: 6f6e 4465 6e69 6564 0043 616c 6c44 6570  onDenied.CallDep
+  - 1000730: 7468 4578 6365 6564 6564 0054 7275 7374  thExceeded.Trust
+  - 1000740: 6564 5365 7475 7041 6c72 6561 6479 4c6f  edSetupAlreadyLo
+  - 1000750: 6164 6564 0048 6f6d 6573 7465 6164 0049  aded.Homestead.I
+  - 1000760: 6e76 616c 6964 5265 636f 7665 7279 4964  nvalidRecoveryId
+  - 1000770: 0044 6973 6b51 756f 7461 004d 6973 7369  .DiskQuota.Missi
+  - 1000780: 6e67 4a75 6d70 4465 7374 4d65 7461 6461  ngJumpDestMetada
+  - 1000790: 7461 0043 6f72 7275 7074 6564 4461 7461  ta.CorruptedData
+  - 10007a0: 004e 6565 6441 7379 6e63 4461 7461 004f  .NeedAsyncData.O
+  - 10007b0: 7361 6b61 0044 4946 4649 4355 4c54 5900  saka.DIFFICULTY.
+  - 10007c0: 4d43 4f50 5900 4558 5443 4f44 4543 4f50  MCOPY.EXTCODECOP
+  - 10007d0: 5900 5245 5455 524e 4441 5441 434f 5059  Y.RETURNDATACOPY
+  - 10007e0: 0043 414c 4c44 4154 4143 4f50 5900 5344  .CALLDATACOPY.SD
+  - 10007f0: 4956 004a 554d 5044 4553 5400 5245 5645  IV.JUMPDEST.REVE
+  - 1000800: 5254 004e 4f54 0053 4c54 0047 4153 4c49  RT.NOT.SLT.GASLI
+  - 1000810: 4d49 5400 5347 5400 5345 4c46 4445 5354  MIT.SGT.SELFDEST
+  - 1000820: 5255 4354 0041 4444 5245 5353 0047 4153  RUCT.ADDRESS.GAS
+  - 1000830: 0058 4f52 0053 4852 0043 414c 4c45 5200  .XOR.SHR.CALLER.
+  - 1000840: 4e55 4d42 4552 0053 4152 0045 5100 4558  NUMBER.SAR.EQ.EX
+  - 1000850: 5000 5354 4f50 0050 4f50 004a 554d 5000  P.STOP.POP.JUMP.
+  - 1000860: 5449 4d45 5354 414d 5000 4953 5a45 524f  TIMESTAMP.ISZERO
+  - 1000870: 0044 414f 0055 4e4b 4e4f 574e 0052 4554  .DAO.UNKNOWN.RET
+  - 1000880: 5552 4e00 4f52 4947 494e 004d 554c 0044  URN.ORIGIN.MUL.D
+  - 1000890: 454c 4547 4154 4543 414c 4c00 5354 4154  ELEGATECALL.STAT
+  - 10008a0: 4943 4341 4c4c 0053 484c 004a 554d 5049  ICCALL.SHL.JUMPI
+  - 10008b0: 0042 4c4f 434b 4841 5348 0045 5854 434f  .BLOCKHASH.EXTCO
+  - 10008c0: 4445 4841 5348 0042 4c4f 4248 4153 4800  DEHASH.BLOBHASH.
+  - 10008d0: 3031 3233 3435 3637 3839 4142 4344 4546  0123456789ABCDEF
+  - 10008e0: 004d 5349 5a45 0045 5854 434f 4445 5349  .MSIZE.EXTCODESI
+  - 10008f0: 5a45 0052 4554 5552 4e44 4154 4153 495a  ZE.RETURNDATASIZ
+  - 1000900: 4500 4341 4c4c 4441 5441 5349 5a45 0043  E.CALLDATASIZE.C
+  - 1000910: 414c 4c56 414c 5545 0042 5954 4500 4352  ALLVALUE.BYTE.CR
+  - 1000920: 4541 5445 0043 4f49 4e42 4153 4500 5453  EATE.COINBASE.TS
+  - 1000930: 544f 5245 0053 5354 4f52 4500 4d53 544f  TORE.SSTORE.MSTO
+  - 1000940: 5245 0042 4c4f 4242 4153 4546 4545 0043  RE.BLOBBASEFEE.C
+  - 1000950: 414c 4c43 4f44 4500 5345 4c46 4241 4c41  ALLCODE.SELFBALA
+  - 1000960: 4e43 4500 4741 5350 5249 4345 0053 4d4f  NCE.GASPRICE.SMO
+  - 1000970: 4400 4d55 4c4d 4f44 0041 4444 4d4f 4400  D.MULMOD.ADDMOD.
+  - 1000980: 5349 474e 4558 5445 4e44 0041 4e44 0043  SIGNEXTEND.AND.C
+  - 1000990: 4841 494e 4944 0049 4e56 414c 4944 0041  HAINID.INVALID.A
+  - 10009a0: 4444 0054 4c4f 4144 0053 4c4f 4144 004d  DD.TLOAD.SLOAD.M
+  - 10009b0: 4c4f 4144 0043 414c 4c44 4154 414c 4f41  LOAD.CALLDATALOA
+  - 10009c0: 4400 5043 0053 5542 0044 5550 3900 5357  D.PC.SUB.DUP9.SW
+  - 10009d0: 4150 3900 5055 5348 3900 5055 5348 3239  AP9.PUSH9.PUSH29
+  - 10009e0: 0050 5553 4831 3900 4455 5038 0053 5741  .PUSH19.DUP8.SWA
+  - 10009f0: 5038 0050 5553 4838 004d 5354 4f52 4538  P8.PUSH8.MSTORE8
+  - 1000a00: 0050 5553 4832 3800 5055 5348 3138 0044  .PUSH28.PUSH18.D
+  - 1000a10: 5550 3700 5357 4150 3700 5055 5348 3700  UP7.SWAP7.PUSH7.
+  - 1000a20: 5055 5348 3237 0050 5553 4831 3700 4455  PUSH27.PUSH17.DU
+  - 1000a30: 5036 0053 5741 5036 0050 5553 4836 004b  P6.SWAP6.PUSH6.K
+  - 1000a40: 4543 4341 4b32 3536 0050 5553 4832 3600  ECCAK256.PUSH26.
+  - 1000a50: 4455 5031 3600 5357 4150 3136 0050 5553  DUP16.SWAP16.PUS
+  - 1000a60: 4831 3600 4455 5035 0053 5741 5035 0050  H16.DUP5.SWAP5.P
+  - 1000a70: 5553 4835 0050 5553 4832 3500 4455 5031  USH5.PUSH25.DUP1
+  - 1000a80: 3500 5357 4150 3135 0050 5553 4831 3500  5.SWAP15.PUSH15.
+  - 1000a90: 4455 5034 0053 5741 5034 0050 5553 4834  DUP4.SWAP4.PUSH4
+  - 1000aa0: 004c 4f47 3400 5055 5348 3234 0044 5550  .LOG4.PUSH24.DUP
+  - 1000ab0: 3134 0053 5741 5031 3400 5055 5348 3134  14.SWAP14.PUSH14
+  - 1000ac0: 0044 5550 3300 5357 4150 3300 5055 5348  .DUP3.SWAP3.PUSH
+  - 1000ad0: 3300 4c4f 4733 0050 5553 4832 3300 4455  3.LOG3.PUSH23.DU
+  - 1000ae0: 5031 3300 5357 4150 3133 0050 5553 4831  P13.SWAP13.PUSH1
+  - 1000af0: 3300 4455 5032 0053 5741 5032 0050 5553  3.DUP2.SWAP2.PUS
+  - 1000b00: 4832 004c 4f47 3200 4352 4541 5445 3200  H2.LOG2.CREATE2.
+  - 1000b10: 5055 5348 3332 0050 5553 4832 3200 4455  PUSH32.PUSH22.DU
+  - 1000b20: 5031 3200 5357 4150 3132 0050 5553 4831  P12.SWAP12.PUSH1
+  - 1000b30: 3200 4455 5031 0053 5741 5031 0050 5553  2.DUP1.SWAP1.PUS
+  - 1000b40: 4831 004c 4f47 3100 5055 5348 3331 0050  H1.LOG1.PUSH31.P
+  - 1000b50: 5553 4832 3100 4455 5031 3100 5357 4150  USH21.DUP11.SWAP
+  - 1000b60: 3131 0050 5553 4831 3100 5055 5348 3000  11.PUSH11.PUSH0.
+  - 1000b70: 4c4f 4730 0050 5553 4833 3000 5055 5348  LOG0.PUSH30.PUSH
+  - 1000b80: 3230 0044 5550 3130 0053 5741 5031 3000  20.DUP10.SWAP10.
+  - 1000b90: 5055 5348 3130 0065 7272 6f72 2e00 556e  PUSH10.error..Un
+  - 1000ba0: 6162 6c65 2074 6f20 6475 6d70 2073 7461  able to dump sta
+  - 1000bb0: 636b 2074 7261 6365 3a20 6e6f 7420 696d  ck trace: not im
+  - 1000bc0: 706c 656d 656e 7465 6420 666f 7220 5761  plemented for Wa
+  - 1000bd0: 736d 0a00 6162 6f72 7469 6e67 2064 7565  sm..aborting due
+  - 1000be0: 2074 6f20 7265 6375 7273 6976 6520 7061   to recursive pa
+  - 1000bf0: 6e69 630a 0000 0001 0101 0201 0301 0401  nic.............
+  - 1000c00: 0501 0601 0701 0801 0901 0a01 0b01 0c01  ................
+  - 1000c10: 0d01 0e01 0f01 1001 1101 1201 7061 6e69  ............pani
+  - 1000c20: 633a 200a f40b 0001 0000 0000 0000 0000  c: .............
+  - 1000c30: 0000 0000 0000 0000 1600 0000 0000 0000  ................
+  - 1000c40: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 1000c50: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 1000c60: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 1000c70: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 1000c80: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 1000c90: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 1000ca0: aaaa aaaa 0000 0000 0000 0000 aaaa aaaa  ................
+  - 1000cb0: 0000 0000 0000 0000 aaaa aaaa 0000 0000  ................
+  - 1000cc0: 0000 0000 0200 0000 0300 0000 0400 0000  ................
+  - 1000cd0: 0500 0000 0000 0000 0000 0000 0000 0000  ................
+  - 1000ce0: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 1000cf0: f401 0000 0000 0000 aaaa aaaa 0000 0000  ................
+  - 1000d00: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 1000d10: e02e 0000 0000 0000 aaaa aaaa 0000 0000  ................
+  - 1000d20: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 1000d30: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 1000d40: 0000 0000 0000 0000 4f00 0000 0000 0000  ........O.......
+  - 1000d50: 5072 6563 6f6d 7069 6c65 2065 7865 6375  Precompile execu
+  - 1000d60: 7469 6f6e 2065 7272 6f72 3a20 0000 0000  tion error: ....
+  - 1000d70: 9817 f816 5b81 f259 d928 ce2d dbfc 9b02  ....[..Y.(.-....
+  - 1000d80: 070b 87ce 9562 a055 acbb dcf9 7e66 be79  .....b.U....~f.y
+  - 1000d90: b8d4 10fb 8fd0 479c 1954 85a6 48b4 17fd  ......G..T..H...
+  - 1000da0: a808 110e fcfb a45d 65c4 a326 77da 3a48  .......]e..&w.:H
+  - 1000db0: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 1000dc0: 0123 4567 89ab cdef fedc ba98 7654 3210  .#Eg........vT2.
+  - 1000dd0: f0e1 d2c3 0000 0000 0000 0000 0000 0000  ................
+  - 1000de0: 89fa 8a53 5bfc 2cf3 fb01 45d4 1119 e7b5  ...S[.,...E.....
+  - 1000df0: f67f 410a ff1e ab47 1f35 b8ca 719f d806  ..A....G.5..q...
+  - 1000e00: df30 15da af6d cdb1 b63d 28a7 e610 f262  .0...m...=(....b
+  - 1000e10: fb0a da0a 0c0b 7fef 4425 592d 906e fd20  ........D%Y-.n. 
+  - 1000e20: 9d0d 8fc5 8d43 5dd3 3d0b c7f5 28eb 780a  .....C].=...(.x.
+  - 1000e30: 2c46 7978 6fa3 6e66 2fdf 079a c177 0a0e  ,Fyxo.nf/....w..
+  - 1000e40: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 1000e50: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 1000e60: 9d0d 8fc5 8d43 5dd3 3d0b c7f5 28eb 780a  .....C].=...(.x.
+  - 1000e70: 2c46 7978 6fa3 6e66 2fdf 079a c177 0a0e  ,Fyxo.nf/....w..
+  - 1000e80: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 1000e90: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 1000ea0: 0100 0000 0000 0000 8280 0000 0000 0000  ................
+  - 1000eb0: 8a80 0000 0000 0080 0080 0080 0000 0080  ................
+  - 1000ec0: 8b80 0000 0000 0000 0100 0080 0000 0000  ................
+  - 1000ed0: 8180 0080 0000 0080 0980 0000 0000 0080  ................
+  - 1000ee0: 8a00 0000 0000 0000 8800 0000 0000 0000  ................
+  - 1000ef0: 0980 0080 0000 0000 0a00 0080 0000 0000  ................
+  - 1000f00: 8b80 0080 0000 0000 8b00 0000 0000 0080  ................
+  - 1000f10: 8980 0000 0000 0080 0380 0000 0000 0080  ................
+  - 1000f20: 0280 0000 0000 0080 8000 0000 0000 0080  ................
+  - 1000f30: 0a80 0000 0000 0000 0a00 0080 0000 0080  ................
+  - 1000f40: 8180 0080 0000 0080 8080 0000 0000 0080  ................
+  - 1000f50: 0100 0080 0000 0000 0880 0080 0000 0080  ................
+  - 1000f60: 0000 0000 0100 0000 0200 0000 0400 0000  ................
+  - 1000f70: 0900 0000 1300 0000 2600 0000 4c00 0000  ........&...L...
+  - 1000f80: 9900 0000 3301 0000 6602 0000 cc04 0000  ....3...f.......
+  - 1000f90: 9909 0000 3313 0000 6626 0000 cc4c 0000  ....3...f&...L..
+  - 1000fa0: 9999 0000 3333 0100 6666 0200 cccc 0400  ....33..ff......
+  - 1000fb0: 9999 0900 3333 1300 6666 2600 cccc 4c00  ....33..ff&...L.
+  - 1000fc0: 9999 9900 3333 3301 6666 6602 cccc cc04  ....333.fff.....
+  - 1000fd0: ffff ff0f 0000 0000 0000 0000 0000 0000  ................
+  - 1000fe0: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 1000ff0: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 1001000: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 1001010: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 1001020: 0100 0000 0000 0000 0000 0000 0000 0000  ................
+  - 1001030: 0001 0203 0405 0607 0809 0a0b 0c0d 0e0f  ................
+  - 1001040: 0704 0d01 0a06 0f03 0c00 0905 020e 0b08  ................
+  - 1001050: 030a 0e04 090f 0801 0207 0006 0d0b 050c  ................
+  - 1001060: 0109 0b0a 0008 0c04 0d03 070f 0e05 0602  ................
+  - 1001070: 0400 0509 070c 020a 0e01 0308 0b06 0f0d  ................
+  - 1001080: 0b0e 0f0c 0508 0709 0b0d 0e0f 0607 0908  ................
+  - 1001090: 0706 080d 0b09 070f 070c 0f09 0b07 0d0c  ................
+  - 10010a0: 0b0d 0607 0e09 0d0f 0e08 0d06 050c 0705  ................
+  - 10010b0: 0b0c 0e0f 0e0f 0908 090e 0506 0806 050c  ................
+  - 10010c0: 090f 050b 0608 0d0c 050c 0d0e 0b08 0506  ................
+  - 10010d0: 0000 0000 9979 825a a1eb d96e dcbc 1b8f  .....y.Z...n....
+  - 10010e0: 4efd 53a9 050e 0700 0902 0b04 0d06 0f08  N.S.............
+  - 10010f0: 010a 030c 060b 0307 000d 050a 0e0f 080c  ................
+  - 1001100: 0409 0102 0f05 0103 070e 0609 0b08 0c02  ................
+  - 1001110: 0a00 040d 0806 0401 030b 0f00 050c 020d  ................
+  - 1001120: 0907 0a0e 0c0f 0a04 0105 0807 0602 0d0e  ................
+  - 1001130: 0003 090b 0809 090b 0d0f 0f05 0707 080b  ................
+  - 1001140: 0e0e 0c06 090d 0f07 0c08 090b 0707 0c07  ................
+  - 1001150: 060f 0d0b 0907 0f0b 0806 060e 0c0d 050e  ................
+  - 1001160: 0d0d 0705 0f05 080b 0e0e 060e 0609 0c09  ................
+  - 1001170: 0c05 0f08 0805 0c09 0c05 0e06 080d 0605  ................
+  - 1001180: 0f0d 0b0b e68b a250 24d1 4d5c f33e 706d  .......P$.M\.>pm
+  - 1001190: e976 6d7a 0000 0000 08c9 bcf3 67e6 096a  .vmz........g..j
+  - 10011a0: 3ba7 ca84 85ae 67bb 2bf8 94fe 72f3 6e3c  ;.....g.+...r.n<
+  - 10011b0: f136 1d5f 3af5 4fa5 d182 e6ad 7f52 0e51  .6._:.O......R.Q
+  - 10011c0: 1f6c 3e2b 8c68 059b 6bbd 41fb abd9 831f  .l>+.h..k.A.....
+  - 10011d0: 7921 7e13 19cd e05b 2003 0000 0000 0000  y!~....[ .......
+  - 10011e0: 0000 0000 0000 0000 c800 0000 0000 0000  ................
+  - 10011f0: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 1001200: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 1001210: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 1001220: 4a00 0000 0000 0000 0000 0000 0000 0000  J...............
+  - 1001230: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 1001240: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 1001250: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 1001260: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 1001270: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 1001280: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 1001290: 67e6 096a 85ae 67bb 72f3 6e3c 3af5 4fa5  g..j..g.r.n<:.O.
+  - 10012a0: 7f52 0e51 8c68 059b abd9 831f 19cd e05b  .R.Q.h.........[
+  - 10012b0: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 10012c0: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 10012d0: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 10012e0: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 10012f0: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 1001300: 0600 0000 0700 0000 0800 0000 0900 0000  ................
+  - 1001310: 0001 0203 0405 0607 0809 0a0b 0c0d 0e0f  ................
+  - 1001320: 0e0a 0408 090f 0d06 010c 0002 0b07 0503  ................
+  - 1001330: 0b08 0c00 0502 0f0d 0a0e 0306 0701 0904  ................
+  - 1001340: 0709 0301 0d0c 0b0e 0206 050a 0400 0f08  ................
+  - 1001350: 0900 0507 0204 0a0f 0e01 0b0c 0608 030d  ................
+  - 1001360: 020c 060a 000b 0803 040d 0705 0f0e 0109  ................
+  - 1001370: 0c05 010f 0e0d 040a 0007 0603 0902 080b  ................
+  - 1001380: 0d0b 070e 0c01 0309 0500 0f04 0806 020a  ................
+  - 1001390: 060f 0e09 0b03 0008 0c02 0d07 0104 0a05  ................
+  - 10013a0: 0a02 0804 0706 0105 0f0b 090e 030c 0d00  ................
+  - 10013b0: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 10013c0: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 10013d0: 3000 0000 0000 0000 0000 0000 0000 0000  0...............
+  - 10013e0: 0000 0000 4300 0000 0000 0000 0000 0000  ....C...........
+  - 10013f0: 0000 0000 0000 0000 0000 0000 aaaa aaaa  ................
+  - 1001400: 0000 0000 0000 0000 0100 0000 0000 0000  ................
+  - 1001410: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 1001420: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 1001430: 0000 0000 0000 0000 2f00 0000 0000 0000  ......../.......
+  - 1001440: aaaa aaaa 0000 0000 0000 0000 4375 7374  ............Cust
+  - 1001450: 6f6d 2070 7265 636f 6d70 696c 6520 6578  om precompile ex
+  - 1001460: 6563 7574 696f 6e20 6572 726f 723a 2000  ecution error: .
+  - 1001470: 0a00 0000 0b00 0000 0c00 0000 0d00 0000  ................
+  - 1001480: 0e00 0000 0f00 0000 1000 0000 1100 0000  ................
+  - 1001490: 1200 0000 1300 0000 1400 0000 1500 0000  ................
+  - 10014a0: 0000 0000 0000 0000 5e01 0001 0b00 0000  ........^.......
+  - 10014b0: d406 0001 0b00 0000 f706 0001 0a00 0000  ................
+  - 10014c0: 1104 0001 0b00 0000 7606 0001 0d00 0000  ........v.......
+  - 10014d0: 9901 0001 0b00 0000 5302 0001 0f00 0000  ........S.......
+  - 10014e0: cd02 0001 0500 0000 5906 0001 1000 0000  ........Y.......
+  - 10014f0: 6305 0001 0a00 0000 1203 0001 1500 0000  c...............
+  - 1001500: c301 0001 1200 0000 9b04 0001 1100 0000  ................
+  - 1001510: 9e06 0001 1200 0000 2604 0001 0a00 0000  ........&.......
+  - 1001520: 0207 0001 0800 0000 0b07 0001 0c00 0000  ................
+  - 1001530: 3306 0001 0f00 0000 b803 0001 0d00 0000  3...............
+  - 1001540: 9306 0001 0a00 0000 1807 0001 1000 0000  ................
+  - 1001550: 9104 0001 0900 0000 9705 0001 0a00 0000  ................
+  - 1001560: 7107 0001 0900 0000 ad04 0001 0a00 0000  q...............
+  - 1001570: 2302 0001 0b00 0000 5301 0001 0a00 0000  #.......S.......
+  - 1001580: e301 0001 0f00 0000 7f04 0001 1100 0000  ................
+  - 1001590: 0906 0001 0800 0000 b804 0001 0d00 0000  ................
+  - 10015a0: 7803 0001 1400 0000 4602 0001 0c00 0000  x.......F.......
+  - 10015b0: 6a06 0001 0b00 0000 2f02 0001 1000 0000  j......./.......
+  - 10015c0: 9307 0001 0d00 0000 4306 0001 1500 0000  ........C.......
+  - 10015d0: 8101 0001 0800 0000 8e05 0001 0800 0000  ................
+  - 10015e0: ff03 0001 1100 0000 8402 0001 0c00 0000  ................
+  - 10015f0: c604 0001 1000 0000 d704 0001 1300 0000  ................
+  - 1001600: 0205 0001 1200 0000 eb04 0001 1600 0000  ................
+  - 1001610: 3603 0001 0b00 0000 6f02 0001 0800 0000  6.......o.......
+  - 1001620: 8a01 0001 0e00 0000 7c01 0001 0d00 0000  ........|.......
+  - 1001630: 2206 0001 1000 0000 b002 0001 0f00 0000  "...............
+  - 1001640: 7802 0001 0b00 0000 c002 0001 0c00 0000  x...............
+  - 1001650: 2907 0001 1100 0000 f505 0001 1300 0000  )...............
+  - 1001660: c603 0001 1100 0000 e505 0001 0f00 0000  ................
+  - 1001670: a403 0001 1300 0000 d705 0001 0d00 0000  ................
+  - 1001680: 5803 0001 0f00 0000 a002 0001 0f00 0000  X...............
+  - 1001690: 1206 0001 0f00 0000 8d03 0001 1600 0000  ................
+  - 10016a0: 7b07 0001 1700 0000 a805 0001 1000 0000  {...............
+  - 10016b0: 6604 0001 0d00 0000 6302 0001 0b00 0000  f.......c.......
+  - 10016c0: 6803 0001 0f00 0000 b905 0001 1000 0000  h...............
+  - 10016d0: 5a04 0001 0b00 0000 0b02 0001 1700 0000  Z...............
+  - 10016e0: f301 0001 1700 0000 b201 0001 1000 0000  ................
+  - 10016f0: a107 0001 0d00 0000 a501 0001 0c00 0000  ................
+  - 1001700: 9102 0001 0e00 0000 4203 0001 0e00 0000  ........B.......
+  - 1001710: c306 0001 1000 0000 8406 0001 0e00 0000  ................
+  - 1001720: 2e05 0001 0b00 0000 d302 0001 1000 0000  ................
+  - 1001730: 4c04 0001 0d00 0000 3a04 0001 1100 0000  L.......:.......
+  - 1001740: 5f07 0001 1100 0000 3a05 0001 1000 0000  _.......:.......
+  - 1001750: 4c06 0001 0c00 0000 3b07 0001 1900 0000  L.......;.......
+  - 1001760: e006 0001 1600 0000 d601 0001 0c00 0000  ................
+  - 1001770: 2803 0001 0d00 0000 b106 0001 1100 0000  (...............
+  - 1001780: 1c05 0001 1100 0000 4b05 0001 1700 0000  ........K.......
+  - 1001790: 2800 0000 4800 0000 0000 0000 0000 0000  (...H...........
+  - 10017a0: 2800 0000 2800 0000 0800 0000 0800 0000  (...(...........
+  - 10017b0: 2c00 0000 4c00 0000 0000 0000 0000 0000  ,...L...........
+  - 10017c0: 2c00 0000 2c00 0000 0c00 0000 0c00 0000  ,...,...........
+  - 10017d0: 8000 0000 0000 1000 0000 1000 0000 1000  ................
+  - 10017e0: 0000 0100 0080 0000 0080 0000 0080 0000  ................
+  - 10017f0: d500 0000 c000 0000 0080 0000 0080 0000  ................
+  - 1001800: 0080 0000 0080 0000 0080 0000 0080 0000  ................
+  - 1001810: 0080 0000 0080 0000 0800 0000 0000 0000  ................
+  - 1001820: 0200 0000 0400 0000                      ........
+ - segment[1] memory=0 size=136 - init i32=16783400
+  - 1001828: 6018 0001 8014 0001 ffff ffff 0000 0000  `...............
+  - 1001838: 0000 0000 0000 0000 0200 0000 9014 0001  ................
+  - 1001848: aaaa aaaa 0000 0000 0000 0000 0000 0000  ................
+  - 1001858: 0000 0000 0000 0000 0000 0000 7014 0001  ............p...
+  - 1001868: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 1001878: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 1001888: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 1001898: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+  - 10018a8: 0000 0000 0000 0000                      ........

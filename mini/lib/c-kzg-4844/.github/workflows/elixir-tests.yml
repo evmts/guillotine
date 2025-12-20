@@ -1,0 +1,61 @@
+name: Elixir
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        variation:
+          - otp: "27.x"
+            elixir: "1.18"
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          submodules: recursive
+
+      - name: Set up Elixir
+        uses: erlef/setup-beam@75edbb82877ab10edeb12a99c3cf2f0909f3dc87 # v1.20.1
+        with:
+          otp-version: ${{matrix.variation.otp}}
+          elixir-version: ${{matrix.variation.elixir}}
+
+      - name: Restore dependencies cache
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: deps
+          key: ${{ runner.os }}-mix-${{ hashFiles('**/mix.lock') }}
+          restore-keys: ${{ runner.os }}-mix-
+
+      - name: Build BLST
+        run: |
+          cd src
+          make blst
+
+      - name: Build CKZG
+        run: |
+          cd src
+          make
+
+      - name: Install dependencies
+        run: mix deps.get
+
+      - name: Credo
+        run: mix credo --strict
+
+      - name: Dialyzer
+        run: mix dialyzer
+
+      - name: Test
+        run: mix test

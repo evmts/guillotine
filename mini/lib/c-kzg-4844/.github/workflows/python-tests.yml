@@ -1,0 +1,73 @@
+name: Python
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          submodules: recursive
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.10'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install build PyYAML
+      - name: Build BLST
+        run: |
+          cd src
+          make blst
+      - name: Build CKZG
+        run: |
+          cd src
+          make
+      - name: Build Python bindings
+        run: |
+          cd bindings/python
+          make install
+      - name: Test
+        run: |
+          cd bindings/python
+          make test
+
+  test-sdist:
+    runs-on: ${{matrix.os}}
+    strategy:
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          submodules: recursive
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.10'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install build PyYAML
+      - name: Build sdist
+        run: python -m build --sdist
+      - name: Set up Visual Studio shell
+        if: runner.os == 'Windows'
+        uses: egor-tensin/vs-shell@9a932a62d05192eae18ca370155cf877eecc2202 # v2.1
+      - name: Install via sdist
+        working-directory: dist
+        run: pip install ckzg-*.tar.gz
+      - name: Run tests
+        run: make -C bindings/python test

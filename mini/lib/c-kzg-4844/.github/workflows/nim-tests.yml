@@ -1,0 +1,58 @@
+name: Nim
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  tests:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+          - macOS-latest
+        nim-version:
+          - stable
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      with:
+        submodules: true
+
+    - name: Cache choosenim
+      id: cache-choosenim
+      uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+      with:
+        path: ~/.choosenim
+        key: ${{ runner.os }}-choosenim-${{ matrix.nim-version}}
+
+    - name: Cache nimble
+      id: cache-nimble
+      uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+      with:
+        path: ~/.nimble
+        key: ${{ runner.os }}-nimble-${{ matrix.nim-version}}-${{ hashFiles('bindings/nim/kzg_abi.nim') }}
+        restore-keys: |
+          ${{ runner.os }}-nimble-${{ matrix.nim-version }}
+
+    - name: Setup nim
+      uses: jiro4989/setup-nim-action@3a60cf06f20c1cf3a9becf76b30288c0361d5f1e # v2.2.2
+      with:
+        nim-version: ${{ matrix.nim-version }}
+
+    - name: Install Packages
+      run: |
+        nimble install -y stew
+        nimble install -y unittest2
+        nimble install -y yaml
+
+    - name: Test
+      run: |
+        cd bindings/nim
+        nim test

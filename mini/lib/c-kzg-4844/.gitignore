@@ -1,0 +1,33 @@
+src/.blst_hash
+src/tests
+src/tests_*
+coverage.html
+analysis-report/
+*.profraw
+*.profdata
+*.prof
+*.o
+*.s
+*.a
+*.out
+.vscode/
+.idea/
+*bindings/*/*.so
+*bindings/rust/target
+__pycache__
+.DS_Store
+
+# python build
+*dist/
+*ckzg.egg-info/
+
+# nimble build dir
+build/
+
+# ccls cache dir
+.ccls-cache/
+
+# zig
+.zig-cache/
+
+target

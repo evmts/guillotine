@@ -1,0 +1,15 @@
+
+guillotine_mini.wasm:	file format wasm 0x1
+
+Sections:
+
+     Type start=0x0000000b end=0x0000017e (size=0x00000173) count: 43
+   Import start=0x00000181 end=0x00000302 (size=0x00000181) count: 13
+ Function start=0x00000305 end=0x00000419 (size=0x00000114) count: 274
+    Table start=0x0000041b end=0x00000420 (size=0x00000005) count: 1
+   Memory start=0x00000422 end=0x00000426 (size=0x00000004) count: 1
+   Global start=0x00000428 end=0x00000431 (size=0x00000009) count: 1
+   Export start=0x00000434 end=0x00000634 (size=0x00000200) count: 24
+     Elem start=0x00000636 end=0x0000065f (size=0x00000029) count: 1
+     Code start=0x00000663 end=0x00036c7b (size=0x00036618) count: 274
+     Data start=0x00036c7e end=0x00038541 (size=0x000018c3) count: 2

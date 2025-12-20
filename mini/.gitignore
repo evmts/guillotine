@@ -1,0 +1,21 @@
+# Zig
+.zig-cache/
+zig-out/
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+
+# Rust/Cargo
+target/
+Cargo.lock
+
+# Bun
+node_modules/
+.bun/
+bun.lockb
+*.bun
+test/specs/generated/
+worktrees/

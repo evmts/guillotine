@@ -1,0 +1,6 @@
+build
+deps
+dist
+*.node
+node_modules
+test/__fixtures__/trusted_setup.*

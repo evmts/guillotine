@@ -1,0 +1,130 @@
+name: C#
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Binding version override"
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+env:
+  binding_build_number_based_version: 2.1.1.${{ github.run_number }}
+
+jobs:
+  build-ckzg:
+    name: Build ckzg
+    runs-on: ${{ matrix.target.host }}
+    strategy:
+      matrix:
+        target:
+          - arch: x86_64-linux-gnu
+            location: linux-x64
+            host: ubuntu-22.04
+            ext: .so
+            reqs:
+          - arch: aarch64-linux-gnu
+            location: linux-arm64
+            host: ubuntu-22.04
+            ext: .so
+            reqs: sudo apt update && sudo apt install -y clang binutils-aarch64-linux-gnu libc6-arm64-cross libc6-dev-arm64-cross crossbuild-essential-arm64
+          - arch: arm64-apple-macos11
+            location: osx-arm64
+            host: macos-latest
+            ext: .dylib
+            reqs:
+          - arch: x86_64-darwin
+            location: osx-x64
+            host: macos-latest
+            ext: .dylib
+            reqs:
+          - arch:
+            location: win-x64
+            host: windows-latest
+            ext: .dll
+            reqs:
+    steps:
+    - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      with:
+        submodules: recursive
+    - name: Install requirements
+      if: ${{ matrix.target.reqs }}
+      run: ${{ matrix.target.reqs }}
+    - name: Build native library for ${{ matrix.target.location }} using native capabilities
+      run: make ckzg -C bindings/csharp CC=clang EXTENSION=${{matrix.target.ext}} LOCATION=${{matrix.target.location}} ARCH=${{matrix.target.arch}}
+    - name: Upload artifacts
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: ckzg-library-wrapper-${{ matrix.target.location }}
+        path: bindings/csharp/Ckzg.Bindings/runtimes/${{ matrix.target.location }}/native
+
+  test-ckzg-dotnet:
+    name: Test .NET wrapper
+    runs-on: ${{ matrix.target.host }}
+    needs: build-ckzg
+    strategy:
+      matrix:
+        target:
+          - host: ubuntu-latest
+            location: linux-x64
+          - host: macos-latest
+            location: osx-arm64
+          - host: windows-latest
+            location: win-x64
+    steps:
+    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      with:
+        submodules: recursive
+    - name: Set up .NET
+      uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+    - name: Install dependencies
+      run: cd bindings/csharp && dotnet restore
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      with:
+        pattern: ckzg-library-wrapper-*
+        path: bindings/csharp/Ckzg.Bindings/runtimes
+    - name: Move artifacts
+      working-directory: bindings/csharp/Ckzg.Bindings/runtimes
+      run: |
+        mv ckzg-library-wrapper-linux-arm64/ckzg.so linux-arm64/native/ckzg.so
+        mv ckzg-library-wrapper-linux-x64/ckzg.so linux-x64/native/ckzg.so
+        mv ckzg-library-wrapper-osx-arm64/ckzg.dylib osx-arm64/native/ckzg.dylib
+        mv ckzg-library-wrapper-osx-x64/ckzg.dylib osx-x64/native/ckzg.dylib
+        mv ckzg-library-wrapper-win-x64/ckzg.dll win-x64/native/ckzg.dll
+    - name: Test
+      run: dotnet test -c release bindings/csharp/Ckzg.sln
+
+  build-ckzg-dotnet:
+    name: Build .NET wrapper
+    runs-on: ubuntu-latest
+    needs: test-ckzg-dotnet
+    steps:
+    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      with:
+        pattern: ckzg-library-wrapper-*
+        path: bindings/csharp/Ckzg.Bindings/runtimes
+    - name: Move artifacts
+      working-directory: bindings/csharp/Ckzg.Bindings/runtimes
+      run: |
+        mv -f ckzg-library-wrapper-linux-arm64/ckzg.so linux-arm64/native/ckzg.so
+        mv -f ckzg-library-wrapper-linux-x64/ckzg.so linux-x64/native/ckzg.so
+        mv -f ckzg-library-wrapper-osx-arm64/ckzg.dylib osx-arm64/native/ckzg.dylib
+        mv -f ckzg-library-wrapper-osx-x64/ckzg.dylib osx-x64/native/ckzg.dylib
+        mv -f ckzg-library-wrapper-win-x64/ckzg.dll win-x64/native/ckzg.dll
+    - name: Set up .NET
+      uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+    - name: Pack
+      working-directory: bindings/csharp
+      run: dotnet pack -c release -o nupkgs -p:Version=${{ inputs.version || env.binding_build_number_based_version }} -p:ContinuousIntegrationBuild=true
+    - name: Upload package
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: Ckzg.Bindings-${{ inputs.version || env.binding_build_number_based_version }}
+        path: bindings/csharp/nupkgs/Ckzg.Bindings.*.nupkg
+    - name: Publish package
+      if: github.ref == 'refs/heads/main'
+      run: dotnet nuget push bindings/csharp/nupkgs/*.nupkg -k ${{ secrets.CSHARP_NUGET_APIKEY }} -s https://api.nuget.org/v3/index.json

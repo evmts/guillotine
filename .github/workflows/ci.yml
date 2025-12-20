@@ -28,3 +28,6 @@ jobs:
         run: zig build
       - name: Test
         run: zig build test
+      # Mini has pre-existing test failures (452/513 pass) - enable once fixed
+      # - name: Test Mini
+      #   run: zig build test-mini

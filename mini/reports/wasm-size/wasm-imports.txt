@@ -1,0 +1,14 @@
+Import[13]:
+ - func[0] sig=0 <wasi_snapshot_preview1.fd_write> <- wasi_snapshot_preview1.fd_write
+ - func[1] sig=12 <wasi_snapshot_preview1.fd_filestat_get> <- wasi_snapshot_preview1.fd_filestat_get
+ - func[2] sig=0 <wasi_snapshot_preview1.fd_read> <- wasi_snapshot_preview1.fd_read
+ - func[3] sig=13 <wasi_snapshot_preview1.fd_seek> <- wasi_snapshot_preview1.fd_seek
+ - func[4] sig=0 <env.bls12_381_pairing> <- env.bls12_381_pairing
+ - func[5] sig=0 <env.bls12_381_g1_multiexp> <- env.bls12_381_g1_multiexp
+ - func[6] sig=0 <env.bls12_381_g1_mul> <- env.bls12_381_g1_mul
+ - func[7] sig=0 <env.bls12_381_g1_add> <- env.bls12_381_g1_add
+ - func[8] sig=0 <env.bn254_ecpairing> <- env.bn254_ecpairing
+ - func[9] sig=12 <env.js_opcode_callback> <- env.js_opcode_callback
+ - func[10] sig=14 <env.js_precompile_callback> <- env.js_precompile_callback
+ - func[11] sig=15 <wasi_snapshot_preview1.fd_pwrite> <- wasi_snapshot_preview1.fd_pwrite
+ - func[12] sig=15 <wasi_snapshot_preview1.fd_pread> <- wasi_snapshot_preview1.fd_pread

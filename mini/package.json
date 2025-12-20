@@ -1,0 +1,33 @@
+{
+  "name": "guillotine-mini",
+  "version": "0.1.0",
+  "description": "Minimal, correct, and well-tested Ethereum Virtual Machine (EVM) implementation in Zig",
+  "type": "module",
+  "scripts": {
+    "test:isolate": "bun scripts/isolate-test.ts",
+    "test:subset": "bun scripts/test-subset.ts",
+    "fix:specs": "bun scripts/fix-specs.ts"
+  },
+  "keywords": [
+    "ethereum",
+    "evm",
+    "virtual-machine",
+    "blockchain",
+    "zig"
+  ],
+  "author": "William Cory",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/evmts/guillotine-mini.git"
+  },
+  "homepage": "https://github.com/evmts/guillotine-mini#readme",
+  "bugs": {
+    "url": "https://github.com/evmts/guillotine-mini/issues"
+  },
+  "devDependencies": {
+    "@anthropic-ai/sdk": "^0.32.1",
+    "@types/bun": "latest",
+    "typescript": "^5.3.0"
+  }
+}

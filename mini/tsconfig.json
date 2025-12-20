@@ -1,0 +1,38 @@
+{
+  "compilerOptions": {
+    // Target modern JavaScript with BigInt support
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "moduleDetection": "force",
+
+    // Allow TypeScript extensions for Bun compatibility
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "noEmit": true,
+
+    // Strict type checking
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "skipLibCheck": true,
+
+    // Allow JavaScript files
+    "allowJs": true,
+    "checkJs": false,
+
+    // Resolution
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": [
+    "scripts/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "**/*.zig"
+  ]
+}

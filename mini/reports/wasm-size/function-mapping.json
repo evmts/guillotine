@@ -1,0 +1,2024 @@
+{
+  "generated": "2025-10-20T18:57:17.927Z",
+  "total_functions": 287,
+  "categories": {
+    "External": 35,
+    "State": 1,
+    "Small": 222,
+    "Normal": 24,
+    "Very Large": 2,
+    "Large": 1,
+    "Medium": 2
+  },
+  "functions": [
+    {
+      "index": 166,
+      "name": "likely_main_logic_or_matcher_func_166",
+      "size": 48337,
+      "source": "inferred",
+      "category": "Very Large"
+    },
+    {
+      "index": 71,
+      "name": "likely_main_logic_or_matcher_func_71",
+      "size": 32086,
+      "source": "inferred",
+      "category": "Very Large"
+    },
+    {
+      "index": 191,
+      "name": "complex_logic_func_191",
+      "size": 10412,
+      "source": "inferred",
+      "category": "Large"
+    },
+    {
+      "index": 54,
+      "name": "evm_execute",
+      "size": 8223,
+      "source": "import",
+      "category": "External"
+    },
+    {
+      "index": 193,
+      "name": "feature_impl_func_193",
+      "size": 6928,
+      "source": "inferred",
+      "category": "Medium"
+    },
+    {
+      "index": 227,
+      "name": "feature_impl_func_227",
+      "size": 5850,
+      "source": "inferred",
+      "category": "Medium"
+    },
+    {
+      "index": 84,
+      "name": "helper_func_84",
+      "size": 4111,
+      "source": "inferred",
+      "category": "Normal"
+    },
+    {
+      "index": 127,
+      "name": "helper_func_127",
+      "size": 3858,
+      "source": "inferred",
+      "category": "Normal"
+    },
+    {
+      "index": 138,
+      "name": "helper_func_138",
+      "size": 3779,
+      "source": "inferred",
+      "category": "Normal"
+    },
+    {
+      "index": 137,
+      "name": "helper_func_137",
+      "size": 3651,
+      "source": "inferred",
+      "category": "Normal"
+    },
+    {
+      "index": 82,
+      "name": "helper_func_82",
+      "size": 3236,
+      "source": "inferred",
+      "category": "Normal"
+    },
+    {
+      "index": 262,
+      "name": "helper_func_262",
+      "size": 2994,
+      "source": "inferred",
+      "category": "Normal"
+    },
+    {
+      "index": 110,
+      "name": "helper_func_110",
+      "size": 2981,
+      "source": "inferred",
+      "category": "Normal"
+    },
+    {
+      "index": 148,
+      "name": "helper_func_148",
+      "size": 2791,
+      "source": "inferred",
+      "category": "Normal"
+    },
+    {
+      "index": 102,
+      "name": "helper_func_102",
+      "size": 2620,
+      "source": "inferred",
+      "category": "Normal"
+    },
+    {
+      "index": 136,
+      "name": "helper_func_136",
+      "size": 2412,
+      "source": "inferred",
+      "category": "Normal"
+    },
+    {
+      "index": 173,
+      "name": "helper_func_173",
+      "size": 2236,
+      "source": "inferred",
+      "category": "Normal"
+    },
+    {
+      "index": 140,
+      "name": "helper_func_140",
+      "size": 1971,
+      "source": "inferred",
+      "category": "Normal"
+    },
+    {
+      "index": 139,
+      "name": "helper_func_139",
+      "size": 1894,
+      "source": "inferred",
+      "category": "Normal"
+    },
+    {
+      "index": 263,
+      "name": "evm_call_ffi",
+      "size": 1689,
+      "source": "import",
+      "category": "External"
+    },
+    {
+      "index": 13,
+      "name": "evm_create",
+      "size": 1680,
+      "source": "import",
+      "category": "External"
+    },
+    {
+      "index": 133,
+      "name": "helper_func_133",
+      "size": 1673,
+      "source": "inferred",
+      "category": "Normal"
+    },
+    {
+      "index": 265,
+      "name": "evm_continue_ffi",
+      "size": 1421,
+      "source": "import",
+      "category": "External"
+    },
+    {
+      "index": 76,
+      "name": "helper_func_76",
+      "size": 1360,
+      "source": "inferred",
+      "category": "Normal"
+    },
+    {
+      "index": 79,
+      "name": "helper_func_79",
+      "size": 1321,
+      "source": "inferred",
+      "category": "Normal"
+    },
+    {
+      "index": 80,
+      "name": "helper_func_80",
+      "size": 1307,
+      "source": "inferred",
+      "category": "Normal"
+    },
+    {
+      "index": 275,
+      "name": "helper_func_275",
+      "size": 1299,
+      "source": "inferred",
+      "category": "Normal"
+    },
+    {
+      "index": 194,
+      "name": "helper_func_194",
+      "size": 1298,
+      "source": "inferred",
+      "category": "Normal"
+    },
+    {
+      "index": 16,
+      "name": "helper_func_16",
+      "size": 1188,
+      "source": "inferred",
+      "category": "Normal"
+    },
+    {
+      "index": 192,
+      "name": "helper_func_192",
+      "size": 1141,
+      "source": "inferred",
+      "category": "Normal"
+    },
+    {
+      "index": 189,
+      "name": "helper_func_189",
+      "size": 1131,
+      "source": "inferred",
+      "category": "Normal"
+    },
+    {
+      "index": 279,
+      "name": "helper_func_279",
+      "size": 1131,
+      "source": "inferred",
+      "category": "Normal"
+    },
+    {
+      "index": 145,
+      "name": "helper_func_145",
+      "size": 1011,
+      "source": "inferred",
+      "category": "Normal"
+    },
+    {
+      "index": 221,
+      "name": "util_func_221",
+      "size": 963,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 231,
+      "name": "util_func_231",
+      "size": 963,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 261,
+      "name": "util_func_261",
+      "size": 949,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 129,
+      "name": "util_func_129",
+      "size": 928,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 264,
+      "name": "util_func_264",
+      "size": 917,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 65,
+      "name": "util_func_65",
+      "size": 896,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 176,
+      "name": "util_func_176",
+      "size": 805,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 36,
+      "name": "util_func_36",
+      "size": 800,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 45,
+      "name": "evm_set_blockchain_context",
+      "size": 745,
+      "source": "import",
+      "category": "External"
+    },
+    {
+      "index": 179,
+      "name": "util_func_179",
+      "size": 713,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 67,
+      "name": "util_func_67",
+      "size": 707,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 69,
+      "name": "util_func_69",
+      "size": 668,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 124,
+      "name": "util_func_124",
+      "size": 650,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 134,
+      "name": "util_func_134",
+      "size": 607,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 157,
+      "name": "util_func_157",
+      "size": 599,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 245,
+      "name": "util_func_245",
+      "size": 592,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 107,
+      "name": "util_func_107",
+      "size": 568,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 260,
+      "name": "util_func_260",
+      "size": 568,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 197,
+      "name": "util_func_197",
+      "size": 553,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 125,
+      "name": "util_func_125",
+      "size": 550,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 226,
+      "name": "util_func_226",
+      "size": 547,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 115,
+      "name": "util_func_115",
+      "size": 544,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 278,
+      "name": "util_func_278",
+      "size": 515,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 68,
+      "name": "util_func_68",
+      "size": 483,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 26,
+      "name": "util_func_26",
+      "size": 476,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 159,
+      "name": "util_func_159",
+      "size": 456,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 177,
+      "name": "util_func_177",
+      "size": 448,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 44,
+      "name": "evm_set_execution_context",
+      "size": 444,
+      "source": "import",
+      "category": "External"
+    },
+    {
+      "index": 236,
+      "name": "util_func_236",
+      "size": 439,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 20,
+      "name": "util_func_20",
+      "size": 435,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 100,
+      "name": "util_func_100",
+      "size": 430,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 39,
+      "name": "util_func_39",
+      "size": 423,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 47,
+      "name": "evm_set_access_list_storage_keys",
+      "size": 417,
+      "source": "import",
+      "category": "External"
+    },
+    {
+      "index": 267,
+      "name": "evm_enable_storage_injector",
+      "size": 407,
+      "source": "import",
+      "category": "External"
+    },
+    {
+      "index": 228,
+      "name": "util_func_228",
+      "size": 387,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 235,
+      "name": "util_func_235",
+      "size": 385,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 257,
+      "name": "evm_get_storage",
+      "size": 383,
+      "source": "import",
+      "category": "External"
+    },
+    {
+      "index": 284,
+      "name": "util_func_284",
+      "size": 381,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 146,
+      "name": "util_func_146",
+      "size": 370,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 188,
+      "name": "util_func_188",
+      "size": 370,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 256,
+      "name": "evm_set_storage",
+      "size": 369,
+      "source": "import",
+      "category": "External"
+    },
+    {
+      "index": 201,
+      "name": "util_func_201",
+      "size": 369,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 198,
+      "name": "util_func_198",
+      "size": 367,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 114,
+      "name": "util_func_114",
+      "size": 366,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 242,
+      "name": "util_func_242",
+      "size": 365,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 225,
+      "name": "util_func_225",
+      "size": 356,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 46,
+      "name": "evm_set_access_list_addresses",
+      "size": 340,
+      "source": "import",
+      "category": "External"
+    },
+    {
+      "index": 56,
+      "name": "util_func_56",
+      "size": 339,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 59,
+      "name": "util_func_59",
+      "size": 339,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 87,
+      "name": "util_func_87",
+      "size": 332,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 128,
+      "name": "util_func_128",
+      "size": 326,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 152,
+      "name": "util_func_152",
+      "size": 323,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 281,
+      "name": "util_func_281",
+      "size": 321,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 126,
+      "name": "util_func_126",
+      "size": 320,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 34,
+      "name": "state_getter_34",
+      "size": 319,
+      "source": "inferred",
+      "category": "State"
+    },
+    {
+      "index": 22,
+      "name": "util_func_22",
+      "size": 307,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 33,
+      "name": "util_func_33",
+      "size": 307,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 58,
+      "name": "util_func_58",
+      "size": 289,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 61,
+      "name": "util_func_61",
+      "size": 289,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 160,
+      "name": "util_func_160",
+      "size": 289,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 199,
+      "name": "util_func_199",
+      "size": 285,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 27,
+      "name": "util_func_27",
+      "size": 284,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 167,
+      "name": "util_func_167",
+      "size": 283,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 248,
+      "name": "util_func_248",
+      "size": 282,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 285,
+      "name": "util_func_285",
+      "size": 277,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 218,
+      "name": "util_func_218",
+      "size": 270,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 268,
+      "name": "util_func_268",
+      "size": 268,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 131,
+      "name": "util_func_131",
+      "size": 261,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 70,
+      "name": "util_func_70",
+      "size": 258,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 151,
+      "name": "util_func_151",
+      "size": 257,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 50,
+      "name": "evm_set_blob_hashes",
+      "size": 254,
+      "source": "import",
+      "category": "External"
+    },
+    {
+      "index": 156,
+      "name": "util_func_156",
+      "size": 252,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 29,
+      "name": "util_func_29",
+      "size": 248,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 241,
+      "name": "util_func_241",
+      "size": 242,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 258,
+      "name": "evm_set_balance",
+      "size": 241,
+      "source": "import",
+      "category": "External"
+    },
+    {
+      "index": 224,
+      "name": "util_func_224",
+      "size": 241,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 77,
+      "name": "util_func_77",
+      "size": 239,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 240,
+      "name": "util_func_240",
+      "size": 236,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 230,
+      "name": "util_func_230",
+      "size": 235,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 246,
+      "name": "util_func_246",
+      "size": 235,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 135,
+      "name": "util_func_135",
+      "size": 232,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 95,
+      "name": "util_func_95",
+      "size": 230,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 93,
+      "name": "util_func_93",
+      "size": 229,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 223,
+      "name": "util_func_223",
+      "size": 226,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 270,
+      "name": "util_func_270",
+      "size": 223,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 32,
+      "name": "util_func_32",
+      "size": 220,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 185,
+      "name": "util_func_185",
+      "size": 217,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 63,
+      "name": "util_func_63",
+      "size": 216,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 91,
+      "name": "util_func_91",
+      "size": 215,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 92,
+      "name": "util_func_92",
+      "size": 215,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 203,
+      "name": "util_func_203",
+      "size": 213,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 75,
+      "name": "util_func_75",
+      "size": 212,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 164,
+      "name": "util_func_164",
+      "size": 212,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 186,
+      "name": "util_func_186",
+      "size": 212,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 195,
+      "name": "util_func_195",
+      "size": 212,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 274,
+      "name": "util_func_274",
+      "size": 210,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 88,
+      "name": "util_func_88",
+      "size": 208,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 219,
+      "name": "util_func_219",
+      "size": 206,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 272,
+      "name": "util_func_272",
+      "size": 205,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 18,
+      "name": "util_func_18",
+      "size": 202,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 17,
+      "name": "util_func_17",
+      "size": 196,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 111,
+      "name": "util_func_111",
+      "size": 196,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 113,
+      "name": "util_func_113",
+      "size": 196,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 161,
+      "name": "util_func_161",
+      "size": 196,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 184,
+      "name": "util_func_184",
+      "size": 194,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 130,
+      "name": "util_func_130",
+      "size": 187,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 259,
+      "name": "evm_set_code",
+      "size": 186,
+      "source": "import",
+      "category": "External"
+    },
+    {
+      "index": 23,
+      "name": "util_func_23",
+      "size": 186,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 208,
+      "name": "util_func_208",
+      "size": 186,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 41,
+      "name": "evm_set_bytecode",
+      "size": 179,
+      "source": "import",
+      "category": "External"
+    },
+    {
+      "index": 206,
+      "name": "util_func_206",
+      "size": 178,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 123,
+      "name": "util_func_123",
+      "size": 164,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 273,
+      "name": "util_func_273",
+      "size": 163,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 211,
+      "name": "util_func_211",
+      "size": 158,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 120,
+      "name": "util_func_120",
+      "size": 156,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 96,
+      "name": "util_func_96",
+      "size": 155,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 205,
+      "name": "util_func_205",
+      "size": 154,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 53,
+      "name": "util_func_53",
+      "size": 153,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 119,
+      "name": "util_func_119",
+      "size": 153,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 49,
+      "name": "util_func_49",
+      "size": 152,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 229,
+      "name": "util_func_229",
+      "size": 152,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 40,
+      "name": "evm_destroy",
+      "size": 151,
+      "source": "import",
+      "category": "External"
+    },
+    {
+      "index": 172,
+      "name": "util_func_172",
+      "size": 150,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 42,
+      "name": "util_func_42",
+      "size": 148,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 52,
+      "name": "util_func_52",
+      "size": 148,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 149,
+      "name": "util_func_149",
+      "size": 148,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 190,
+      "name": "util_func_190",
+      "size": 148,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 212,
+      "name": "util_func_212",
+      "size": 148,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 105,
+      "name": "util_func_105",
+      "size": 144,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 147,
+      "name": "util_func_147",
+      "size": 144,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 55,
+      "name": "util_func_55",
+      "size": 142,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 28,
+      "name": "util_func_28",
+      "size": 139,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 85,
+      "name": "util_func_85",
+      "size": 137,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 99,
+      "name": "util_func_99",
+      "size": 134,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 112,
+      "name": "util_func_112",
+      "size": 134,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 132,
+      "name": "util_func_132",
+      "size": 133,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 155,
+      "name": "util_func_155",
+      "size": 132,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 78,
+      "name": "util_func_78",
+      "size": 130,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 38,
+      "name": "util_func_38",
+      "size": 124,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 174,
+      "name": "util_func_174",
+      "size": 124,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 277,
+      "name": "util_func_277",
+      "size": 124,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 86,
+      "name": "util_func_86",
+      "size": 122,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 97,
+      "name": "util_func_97",
+      "size": 121,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 158,
+      "name": "util_func_158",
+      "size": 121,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 187,
+      "name": "util_func_187",
+      "size": 121,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 43,
+      "name": "util_func_43",
+      "size": 120,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 169,
+      "name": "util_func_169",
+      "size": 120,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 15,
+      "name": "util_func_15",
+      "size": 116,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 64,
+      "name": "util_func_64",
+      "size": 116,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 283,
+      "name": "util_func_283",
+      "size": 116,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 182,
+      "name": "util_func_182",
+      "size": 115,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 30,
+      "name": "util_func_30",
+      "size": 111,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 181,
+      "name": "util_func_181",
+      "size": 109,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 74,
+      "name": "util_func_74",
+      "size": 107,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 31,
+      "name": "util_func_31",
+      "size": 105,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 116,
+      "name": "util_func_116",
+      "size": 104,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 141,
+      "name": "util_func_141",
+      "size": 103,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 81,
+      "name": "util_func_81",
+      "size": 99,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 101,
+      "name": "util_func_101",
+      "size": 99,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 109,
+      "name": "util_func_109",
+      "size": 99,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 239,
+      "name": "util_func_239",
+      "size": 99,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 94,
+      "name": "util_func_94",
+      "size": 98,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 168,
+      "name": "util_func_168",
+      "size": 98,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 215,
+      "name": "util_func_215",
+      "size": 98,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 165,
+      "name": "util_func_165",
+      "size": 97,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 217,
+      "name": "util_func_217",
+      "size": 97,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 175,
+      "name": "util_func_175",
+      "size": 96,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 249,
+      "name": "util_func_249",
+      "size": 95,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 269,
+      "name": "util_func_269",
+      "size": 95,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 144,
+      "name": "util_func_144",
+      "size": 94,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 237,
+      "name": "util_func_237",
+      "size": 93,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 25,
+      "name": "util_func_25",
+      "size": 91,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 73,
+      "name": "util_func_73",
+      "size": 91,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 244,
+      "name": "util_func_244",
+      "size": 90,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 21,
+      "name": "util_func_21",
+      "size": 89,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 37,
+      "name": "util_func_37",
+      "size": 88,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 204,
+      "name": "util_func_204",
+      "size": 88,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 210,
+      "name": "util_func_210",
+      "size": 88,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 83,
+      "name": "util_func_83",
+      "size": 85,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 202,
+      "name": "util_func_202",
+      "size": 84,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 104,
+      "name": "util_func_104",
+      "size": 83,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 282,
+      "name": "util_func_282",
+      "size": 82,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 276,
+      "name": "util_func_276",
+      "size": 78,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 220,
+      "name": "util_func_220",
+      "size": 77,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 243,
+      "name": "util_func_243",
+      "size": 76,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 286,
+      "name": "util_func_286",
+      "size": 73,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 216,
+      "name": "util_func_216",
+      "size": 72,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 266,
+      "name": "evm_get_state_changes",
+      "size": 70,
+      "source": "import",
+      "category": "External"
+    },
+    {
+      "index": 62,
+      "name": "util_func_62",
+      "size": 70,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 209,
+      "name": "util_func_209",
+      "size": 68,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 98,
+      "name": "util_func_98",
+      "size": 67,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 51,
+      "name": "util_func_51",
+      "size": 65,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 213,
+      "name": "util_func_213",
+      "size": 65,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 234,
+      "name": "util_func_234",
+      "size": 65,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 66,
+      "name": "util_func_66",
+      "size": 63,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 232,
+      "name": "util_func_232",
+      "size": 63,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 57,
+      "name": "util_func_57",
+      "size": 62,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 90,
+      "name": "util_func_90",
+      "size": 62,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 150,
+      "name": "util_func_150",
+      "size": 61,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 196,
+      "name": "util_func_196",
+      "size": 61,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 121,
+      "name": "util_func_121",
+      "size": 60,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 183,
+      "name": "util_func_183",
+      "size": 60,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 247,
+      "name": "util_func_247",
+      "size": 60,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 255,
+      "name": "evm_get_output",
+      "size": 59,
+      "source": "import",
+      "category": "External"
+    },
+    {
+      "index": 118,
+      "name": "util_func_118",
+      "size": 58,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 162,
+      "name": "util_func_162",
+      "size": 58,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 200,
+      "name": "util_func_200",
+      "size": 58,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 19,
+      "name": "util_func_19",
+      "size": 57,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 48,
+      "name": "util_func_48",
+      "size": 57,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 60,
+      "name": "util_func_60",
+      "size": 57,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 89,
+      "name": "util_func_89",
+      "size": 57,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 117,
+      "name": "util_func_117",
+      "size": 57,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 153,
+      "name": "util_func_153",
+      "size": 57,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 103,
+      "name": "util_func_103",
+      "size": 53,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 106,
+      "name": "util_func_106",
+      "size": 52,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 233,
+      "name": "util_func_233",
+      "size": 51,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 214,
+      "name": "util_func_214",
+      "size": 50,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 143,
+      "name": "util_func_143",
+      "size": 49,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 171,
+      "name": "util_func_171",
+      "size": 47,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 142,
+      "name": "util_func_142",
+      "size": 45,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 14,
+      "name": "util_func_14",
+      "size": 42,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 178,
+      "name": "util_func_178",
+      "size": 41,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 24,
+      "name": "util_func_24",
+      "size": 40,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 252,
+      "name": "evm_get_gas_used",
+      "size": 39,
+      "source": "import",
+      "category": "External"
+    },
+    {
+      "index": 180,
+      "name": "util_func_180",
+      "size": 38,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 251,
+      "name": "evm_get_gas_remaining",
+      "size": 33,
+      "source": "import",
+      "category": "External"
+    },
+    {
+      "index": 254,
+      "name": "evm_get_output_len",
+      "size": 33,
+      "source": "import",
+      "category": "External"
+    },
+    {
+      "index": 122,
+      "name": "util_func_122",
+      "size": 27,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 170,
+      "name": "util_func_170",
+      "size": 27,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 271,
+      "name": "util_func_271",
+      "size": 27,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 253,
+      "name": "evm_is_success",
+      "size": 26,
+      "source": "import",
+      "category": "External"
+    },
+    {
+      "index": 238,
+      "name": "util_func_238",
+      "size": 26,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 72,
+      "name": "util_func_72",
+      "size": 20,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 250,
+      "name": "util_func_250",
+      "size": 20,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 154,
+      "name": "util_func_154",
+      "size": 19,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 207,
+      "name": "util_func_207",
+      "size": 19,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 222,
+      "name": "util_func_222",
+      "size": 19,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 35,
+      "name": "util_func_35",
+      "size": 18,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 108,
+      "name": "util_func_108",
+      "size": 12,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 163,
+      "name": "util_func_163",
+      "size": 11,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 280,
+      "name": "util_func_280",
+      "size": 3,
+      "source": "inferred",
+      "category": "Small"
+    },
+    {
+      "index": 0,
+      "name": "wasi_snapshot_preview1.fd_write",
+      "size": 0,
+      "source": "import",
+      "category": "External"
+    },
+    {
+      "index": 1,
+      "name": "wasi_snapshot_preview1.fd_filestat_get",
+      "size": 0,
+      "source": "import",
+      "category": "External"
+    },
+    {
+      "index": 2,
+      "name": "wasi_snapshot_preview1.fd_read",
+      "size": 0,
+      "source": "import",
+      "category": "External"
+    },
+    {
+      "index": 3,
+      "name": "wasi_snapshot_preview1.fd_seek",
+      "size": 0,
+      "source": "import",
+      "category": "External"
+    },
+    {
+      "index": 4,
+      "name": "env.bls12_381_pairing",
+      "size": 0,
+      "source": "import",
+      "category": "External"
+    },
+    {
+      "index": 5,
+      "name": "env.bls12_381_g1_multiexp",
+      "size": 0,
+      "source": "import",
+      "category": "External"
+    },
+    {
+      "index": 6,
+      "name": "env.bls12_381_g1_mul",
+      "size": 0,
+      "source": "import",
+      "category": "External"
+    },
+    {
+      "index": 7,
+      "name": "env.bls12_381_g1_add",
+      "size": 0,
+      "source": "import",
+      "category": "External"
+    },
+    {
+      "index": 8,
+      "name": "env.bn254_ecpairing",
+      "size": 0,
+      "source": "import",
+      "category": "External"
+    },
+    {
+      "index": 9,
+      "name": "env.js_opcode_callback",
+      "size": 0,
+      "source": "import",
+      "category": "External"
+    },
+    {
+      "index": 10,
+      "name": "env.js_precompile_callback",
+      "size": 0,
+      "source": "import",
+      "category": "External"
+    },
+    {
+      "index": 11,
+      "name": "wasi_snapshot_preview1.fd_pwrite",
+      "size": 0,
+      "source": "import",
+      "category": "External"
+    },
+    {
+      "index": 12,
+      "name": "wasi_snapshot_preview1.fd_pread",
+      "size": 0,
+      "source": "import",
+      "category": "External"
+    }
+  ]
+}

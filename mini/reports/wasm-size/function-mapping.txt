@@ -1,0 +1,117 @@
+WASM Function Name Mapping
+Generated: 2025-10-20T18:57:17.927Z
+Total Functions: 287
+
+Categories:
+  - External: 35
+  - State: 1
+  - Small: 222
+  - Normal: 24
+  - Very Large: 2
+  - Large: 1
+  - Medium: 2
+
+Top 100 Functions by Size:
+
+Index    | Size       | Source     | Category        | Function Name
+-------- | ---------- | ---------- | --------------- | --------------------------------------------------
+166      | 48337      | inferred   | Very Large      | likely_main_logic_or_matcher_func_166
+71       | 32086      | inferred   | Very Large      | likely_main_logic_or_matcher_func_71
+191      | 10412      | inferred   | Large           | complex_logic_func_191
+54       | 8223       | import     | External        | evm_execute
+193      | 6928       | inferred   | Medium          | feature_impl_func_193
+227      | 5850       | inferred   | Medium          | feature_impl_func_227
+84       | 4111       | inferred   | Normal          | helper_func_84
+127      | 3858       | inferred   | Normal          | helper_func_127
+138      | 3779       | inferred   | Normal          | helper_func_138
+137      | 3651       | inferred   | Normal          | helper_func_137
+82       | 3236       | inferred   | Normal          | helper_func_82
+262      | 2994       | inferred   | Normal          | helper_func_262
+110      | 2981       | inferred   | Normal          | helper_func_110
+148      | 2791       | inferred   | Normal          | helper_func_148
+102      | 2620       | inferred   | Normal          | helper_func_102
+136      | 2412       | inferred   | Normal          | helper_func_136
+173      | 2236       | inferred   | Normal          | helper_func_173
+140      | 1971       | inferred   | Normal          | helper_func_140
+139      | 1894       | inferred   | Normal          | helper_func_139
+263      | 1689       | import     | External        | evm_call_ffi
+13       | 1680       | import     | External        | evm_create
+133      | 1673       | inferred   | Normal          | helper_func_133
+265      | 1421       | import     | External        | evm_continue_ffi
+76       | 1360       | inferred   | Normal          | helper_func_76
+79       | 1321       | inferred   | Normal          | helper_func_79
+80       | 1307       | inferred   | Normal          | helper_func_80
+275      | 1299       | inferred   | Normal          | helper_func_275
+194      | 1298       | inferred   | Normal          | helper_func_194
+16       | 1188       | inferred   | Normal          | helper_func_16
+192      | 1141       | inferred   | Normal          | helper_func_192
+189      | 1131       | inferred   | Normal          | helper_func_189
+279      | 1131       | inferred   | Normal          | helper_func_279
+145      | 1011       | inferred   | Normal          | helper_func_145
+221      | 963        | inferred   | Small           | util_func_221
+231      | 963        | inferred   | Small           | util_func_231
+261      | 949        | inferred   | Small           | util_func_261
+129      | 928        | inferred   | Small           | util_func_129
+264      | 917        | inferred   | Small           | util_func_264
+65       | 896        | inferred   | Small           | util_func_65
+176      | 805        | inferred   | Small           | util_func_176
+36       | 800        | inferred   | Small           | util_func_36
+45       | 745        | import     | External        | evm_set_blockchain_context
+179      | 713        | inferred   | Small           | util_func_179
+67       | 707        | inferred   | Small           | util_func_67
+69       | 668        | inferred   | Small           | util_func_69
+124      | 650        | inferred   | Small           | util_func_124
+134      | 607        | inferred   | Small           | util_func_134
+157      | 599        | inferred   | Small           | util_func_157
+245      | 592        | inferred   | Small           | util_func_245
+107      | 568        | inferred   | Small           | util_func_107
+260      | 568        | inferred   | Small           | util_func_260
+197      | 553        | inferred   | Small           | util_func_197
+125      | 550        | inferred   | Small           | util_func_125
+226      | 547        | inferred   | Small           | util_func_226
+115      | 544        | inferred   | Small           | util_func_115
+278      | 515        | inferred   | Small           | util_func_278
+68       | 483        | inferred   | Small           | util_func_68
+26       | 476        | inferred   | Small           | util_func_26
+159      | 456        | inferred   | Small           | util_func_159
+177      | 448        | inferred   | Small           | util_func_177
+44       | 444        | import     | External        | evm_set_execution_context
+236      | 439        | inferred   | Small           | util_func_236
+20       | 435        | inferred   | Small           | util_func_20
+100      | 430        | inferred   | Small           | util_func_100
+39       | 423        | inferred   | Small           | util_func_39
+47       | 417        | import     | External        | evm_set_access_list_storage_keys
+267      | 407        | import     | External        | evm_enable_storage_injector
+228      | 387        | inferred   | Small           | util_func_228
+235      | 385        | inferred   | Small           | util_func_235
+257      | 383        | import     | External        | evm_get_storage
+284      | 381        | inferred   | Small           | util_func_284
+146      | 370        | inferred   | Small           | util_func_146
+188      | 370        | inferred   | Small           | util_func_188
+256      | 369        | import     | External        | evm_set_storage
+201      | 369        | inferred   | Small           | util_func_201
+198      | 367        | inferred   | Small           | util_func_198
+114      | 366        | inferred   | Small           | util_func_114
+242      | 365        | inferred   | Small           | util_func_242
+225      | 356        | inferred   | Small           | util_func_225
+46       | 340        | import     | External        | evm_set_access_list_addresses
+56       | 339        | inferred   | Small           | util_func_56
+59       | 339        | inferred   | Small           | util_func_59
+87       | 332        | inferred   | Small           | util_func_87
+128      | 326        | inferred   | Small           | util_func_128
+152      | 323        | inferred   | Small           | util_func_152
+281      | 321        | inferred   | Small           | util_func_281
+126      | 320        | inferred   | Small           | util_func_126
+34       | 319        | inferred   | State           | state_getter_34
+22       | 307        | inferred   | Small           | util_func_22
+33       | 307        | inferred   | Small           | util_func_33
+58       | 289        | inferred   | Small           | util_func_58
+61       | 289        | inferred   | Small           | util_func_61
+160      | 289        | inferred   | Small           | util_func_160
+199      | 285        | inferred   | Small           | util_func_199
+27       | 284        | inferred   | Small           | util_func_27
+167      | 283        | inferred   | Small           | util_func_167
+248      | 282        | inferred   | Small           | util_func_248
+285      | 277        | inferred   | Small           | util_func_285
+218      | 270        | inferred   | Small           | util_func_218
+268      | 268        | inferred   | Small           | util_func_268

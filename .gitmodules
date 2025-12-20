@@ -1,3 +1,7 @@
 [submodule "specs/execution-specs"]
 	path = specs/execution-specs
 	url = https://github.com/ethereum/execution-specs
+
+[submodule "mini/execution-specs"]
+	path = mini/execution-specs
+	url = https://github.com/ethereum/execution-specs

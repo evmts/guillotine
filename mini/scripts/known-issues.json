@@ -1,0 +1,278 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "Known Issues Database",
+  "description": "Historical context and debugging hints for common test suite failures",
+  "issues": {
+    "cancun-tstore-reentrancy": {
+      "test_suite": "cancun-tstore-reentrancy",
+      "description": "Transient storage (EIP-1153) reentrancy test failures",
+      "common_causes": [
+        "Transient storage not cleared at transaction boundary (only, not call boundary)",
+        "Transient storage gas cost wrong (should be 100 gas, always warm)",
+        "TSTORE allowed in static context (should revert)",
+        "Transient storage not isolated per address"
+      ],
+      "relevant_files": [
+        "src/evm.zig:transient_storage (transaction-scoped map)",
+        "src/frame.zig:TLOAD/TSTORE opcodes",
+        "src/evm.zig:clear_transient_storage (called at tx boundary)"
+      ],
+      "python_ref": "execution-specs/src/ethereum/forks/cancun/vm/instructions/storage.py:tload/tstore",
+      "key_invariants": [
+        "Transient storage is always warm (100 gas)",
+        "Cleared after transaction, not after call",
+        "No refunds for transient storage",
+        "Must respect static context"
+      ],
+      "gas_costs": {
+        "TLOAD": 100,
+        "TSTORE": 100
+      }
+    },
+    "cancun-tstore-basic": {
+      "test_suite": "cancun-tstore-basic",
+      "description": "Basic transient storage operations",
+      "common_causes": [
+        "TLOAD/TSTORE opcodes not implemented",
+        "Gas cost incorrect (should be 100 gas flat)",
+        "Transient storage not isolated per contract address",
+        "Values not persisting across CALLs within same transaction"
+      ],
+      "relevant_files": [
+        "src/frame.zig:TLOAD/TSTORE implementation",
+        "src/evm.zig:transient_storage HashMap"
+      ],
+      "python_ref": "execution-specs/src/ethereum/forks/cancun/vm/instructions/storage.py",
+      "key_invariants": [
+        "Transient storage is transaction-scoped, not call-scoped",
+        "Each address has its own transient storage namespace",
+        "Gas is always 100 (warm), never cold"
+      ],
+      "gas_costs": {
+        "TLOAD": 100,
+        "TSTORE": 100
+      }
+    },
+    "shanghai-push0": {
+      "test_suite": "shanghai-push0",
+      "description": "PUSH0 opcode (EIP-3855) tests",
+      "common_causes": [
+        "PUSH0 opcode not implemented",
+        "PUSH0 gas cost wrong (should be 2 gas, same as PUSH1-PUSH32)",
+        "PUSH0 not guarded by Shanghai hardfork check",
+        "PUSH0 pushing wrong value (should push 0, not read from code)"
+      ],
+      "relevant_files": [
+        "src/frame.zig:PUSH0 opcode case",
+        "src/opcode.zig:PUSH0 constant definition"
+      ],
+      "python_ref": "execution-specs/src/ethereum/forks/shanghai/vm/instructions/stack.py:push0",
+      "key_invariants": [
+        "PUSH0 is opcode 0x5F",
+        "Gas cost is 2 (base)",
+        "Always pushes uint256(0)",
+        "Only available in Shanghai+"
+      ],
+      "gas_costs": {
+        "PUSH0": 2
+      }
+    },
+    "cancun-mcopy": {
+      "test_suite": "cancun-mcopy",
+      "description": "MCOPY opcode (EIP-5656) memory copy tests",
+      "common_causes": [
+        "MCOPY opcode not implemented",
+        "Gas calculation wrong (should be 3 + 3*words + memory_expansion)",
+        "Memory expansion not calculated correctly",
+        "Overlapping memory regions not handled (must support overlaps)",
+        "Source/dest order reversed"
+      ],
+      "relevant_files": [
+        "src/frame.zig:MCOPY opcode implementation",
+        "src/frame.zig:expandMemory function"
+      ],
+      "python_ref": "execution-specs/src/ethereum/forks/cancun/vm/instructions/memory.py:mcopy",
+      "key_invariants": [
+        "MCOPY is opcode 0x5E",
+        "Gas = 3 (base) + 3 * words + memory_expansion_cost",
+        "Must handle overlapping src/dst (use memmove semantics)",
+        "Stack order: dst, src, length"
+      ],
+      "gas_costs": {
+        "MCOPY_base": 3,
+        "MCOPY_per_word": 3
+      }
+    },
+    "cancun-selfdestruct": {
+      "test_suite": "cancun-selfdestruct",
+      "description": "SELFDESTRUCT behavior change (EIP-6780)",
+      "common_causes": [
+        "SELFDESTRUCT still deleting account in same transaction (should only send balance)",
+        "SELFDESTRUCT deleting account created in different transaction (wrong)",
+        "Gas refund still given for SELFDESTRUCT (removed in London)",
+        "SELFDESTRUCT in static context not reverting"
+      ],
+      "relevant_files": [
+        "src/evm.zig:SELFDESTRUCT handling",
+        "src/frame.zig:SELFDESTRUCT opcode"
+      ],
+      "python_ref": "execution-specs/src/ethereum/forks/cancun/vm/instructions/system.py:selfdestruct",
+      "key_invariants": [
+        "Post-Cancun: SELFDESTRUCT only deletes if contract created in same tx",
+        "Otherwise: just sends balance, doesn't delete account",
+        "No gas refund (removed in London)",
+        "Must check static context"
+      ],
+      "gas_costs": {
+        "SELFDESTRUCT": 5000
+      }
+    },
+    "berlin-acl": {
+      "test_suite": "berlin-acl",
+      "description": "Access list (EIP-2930) and warm/cold gas costs",
+      "common_causes": [
+        "Warm/cold tracking not implemented",
+        "Access list not pre-warming addresses/slots",
+        "Cold access cost wrong (should be 2600 for accounts, 2100 for storage)",
+        "Warm access cost wrong (should be 100)",
+        "Accessed sets not persisting across nested calls"
+      ],
+      "relevant_files": [
+        "src/evm.zig:warm_addresses HashMap",
+        "src/evm.zig:warm_storage_slots HashMap",
+        "src/evm.zig:accessAddress/accessStorageSlot"
+      ],
+      "python_ref": "execution-specs/src/ethereum/forks/berlin/vm/__init__.py:accessed_addresses/accessed_storage_keys",
+      "key_invariants": [
+        "First access to address = cold (2600 gas)",
+        "Subsequent accesses = warm (100 gas)",
+        "Access list in tx pre-warms addresses/slots",
+        "Warm/cold state persists across entire transaction"
+      ],
+      "gas_costs": {
+        "cold_account_access": 2600,
+        "cold_sload": 2100,
+        "warm_access": 100
+      }
+    },
+    "frontier-precompiles": {
+      "test_suite": "frontier-precompiles",
+      "description": "Precompiled contracts (ecrecover, sha256, ripemd160, identity)",
+      "common_causes": [
+        "Precompile address not recognized (0x01-0x04)",
+        "Gas calculation wrong for precompile",
+        "Precompile input/output not handled correctly",
+        "Identity precompile (0x04) not copying input to output",
+        "SHA256/RIPEMD160 wrong hash output"
+      ],
+      "relevant_files": [
+        "src/evm.zig:precompile handling",
+        "src/precompiles.zig (if exists)"
+      ],
+      "python_ref": "execution-specs/src/ethereum/forks/frontier/vm/precompiled_contracts/",
+      "key_invariants": [
+        "0x01 = ecrecover",
+        "0x02 = sha256",
+        "0x03 = ripemd160",
+        "0x04 = identity (datacopy)",
+        "Gas varies per precompile"
+      ],
+      "gas_costs": {
+        "ecrecover": 3000,
+        "sha256_base": 60,
+        "sha256_per_word": 12,
+        "ripemd160_base": 600,
+        "ripemd160_per_word": 120,
+        "identity_base": 15,
+        "identity_per_word": 3
+      }
+    },
+    "prague-bls": {
+      "test_suite": "prague-bls-*",
+      "description": "BLS12-381 precompiles (EIP-2537)",
+      "common_causes": [
+        "BLS precompiles not implemented (0x0A-0x12)",
+        "Gas costs incorrect",
+        "Point validation not matching spec",
+        "Pairing check logic incorrect"
+      ],
+      "relevant_files": [
+        "lib/c-kzg-4844 (may need BLS library integration)",
+        "src/evm.zig:precompile handling"
+      ],
+      "python_ref": "execution-specs/src/ethereum/forks/prague/vm/precompiled_contracts/bls12_381/",
+      "key_invariants": [
+        "0x0A = BLS12_G1ADD",
+        "0x0B = BLS12_G1MUL",
+        "0x0C = BLS12_G1MULTIEXP",
+        "0x0D = BLS12_G2ADD",
+        "0x0E = BLS12_G2MUL",
+        "0x0F = BLS12_G2MULTIEXP",
+        "0x10 = BLS12_PAIRING",
+        "0x11 = BLS12_MAP_FP_TO_G1",
+        "0x12 = BLS12_MAP_FP2_TO_G2"
+      ],
+      "gas_costs": {
+        "BLS12_G1ADD": 500,
+        "BLS12_G1MUL": 12000,
+        "BLS12_G2ADD": 800,
+        "BLS12_G2MUL": 45000,
+        "BLS12_PAIRING_base": 115000,
+        "BLS12_PAIRING_per_pair": 23000
+      }
+    },
+    "cancun-blob-tx": {
+      "test_suite": "cancun-blob-tx-*",
+      "description": "Blob transactions (EIP-4844)",
+      "common_causes": [
+        "BLOBHASH opcode not implemented",
+        "BLOBBASEFEE opcode not implemented",
+        "Blob gas calculation incorrect",
+        "Point evaluation precompile (0x0A) missing",
+        "Blob versioned hashes not accessible"
+      ],
+      "relevant_files": [
+        "src/frame.zig:BLOBHASH/BLOBBASEFEE opcodes",
+        "src/primitives/blob.zig",
+        "lib/c-kzg-4844 (KZG library integration)"
+      ],
+      "python_ref": "execution-specs/src/ethereum/forks/cancun/vm/instructions/system.py:blobhash/blobbasefee",
+      "key_invariants": [
+        "BLOBHASH opcode = 0x49, takes index, returns versioned hash",
+        "BLOBBASEFEE opcode = 0x4A, returns current blob base fee",
+        "Point evaluation precompile = 0x0A",
+        "Max 6 blobs per transaction"
+      ],
+      "gas_costs": {
+        "BLOBHASH": 3,
+        "BLOBBASEFEE": 2,
+        "POINT_EVALUATION_PRECOMPILE": 50000
+      }
+    },
+    "prague-setcode": {
+      "test_suite": "prague-setcode-*",
+      "description": "Set code transaction type (EIP-7702)",
+      "common_causes": [
+        "Set code transaction type not recognized",
+        "Authorization list not processed",
+        "Delegated code not executed correctly",
+        "Gas accounting for set code operations incorrect"
+      ],
+      "relevant_files": [
+        "src/primitives/transaction.zig",
+        "src/evm.zig:authorization handling"
+      ],
+      "python_ref": "execution-specs/src/ethereum/forks/prague/",
+      "key_invariants": [
+        "Transaction type 0x04 = set code",
+        "Authorization list specifies code delegation",
+        "Per-authorization gas cost",
+        "Code execution uses delegated code"
+      ],
+      "gas_costs": {
+        "PER_EMPTY_ACCOUNT_COST": 25000,
+        "PER_AUTH_BASE_COST": 2500
+      }
+    }
+  }
+}
