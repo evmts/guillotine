@@ -27,66 +27,71 @@ pub fn Handlers(FrameType: type) type {
         }
 
         /// SUB opcode (0x03) - Subtraction with underflow wrapping
+        /// Stack: [a, b] -> [a - b] where a is below b (b is top)
         pub fn sub(frame: *FrameType) FrameType.EvmError!void {
             try frame.consumeGas(GasConstants.GasFastestStep);
-            const top = try frame.popStack();
-            const second = try frame.popStack();
-            try frame.pushStack(top -% second);
+            const b = try frame.popStack(); // top of stack
+            const a = try frame.popStack(); // second from top
+            try frame.pushStack(a -% b);
             frame.pc += 1;
         }
 
         /// DIV opcode (0x04) - Integer division (division by zero returns 0)
+        /// Stack: [a, b] -> [a / b] where a is below b (b is top)
         pub fn div(frame: *FrameType) FrameType.EvmError!void {
             try frame.consumeGas(GasConstants.GasFastStep);
-            const top = try frame.popStack();
-            const second = try frame.popStack();
-            const result = if (second == 0) 0 else top / second;
+            const b = try frame.popStack(); // top of stack (divisor)
+            const a = try frame.popStack(); // second from top (dividend)
+            const result = if (b == 0) 0 else a / b;
             try frame.pushStack(result);
             frame.pc += 1;
         }
 
         /// SDIV opcode (0x05) - Signed integer division
+        /// Stack: [a, b] -> [a / b] where a is below b (b is top)
         pub fn sdiv(frame: *FrameType) FrameType.EvmError!void {
             try frame.consumeGas(GasConstants.GasFastStep);
-            const top = try frame.popStack();
-            const second = try frame.popStack();
-            const top_signed = @as(i256, @bitCast(top));
-            const second_signed = @as(i256, @bitCast(second));
+            const b = try frame.popStack(); // top of stack (divisor)
+            const a = try frame.popStack(); // second from top (dividend)
+            const a_signed = @as(i256, @bitCast(a));
+            const b_signed = @as(i256, @bitCast(b));
             const MIN_SIGNED = @as(u256, 1) << 255;
-            const result = if (second == 0)
+            const result = if (b == 0)
                 0
-            else if (top == MIN_SIGNED and second == std.math.maxInt(u256))
+            else if (a == MIN_SIGNED and b == std.math.maxInt(u256))
                 MIN_SIGNED
             else
-                @as(u256, @bitCast(@divTrunc(top_signed, second_signed)));
+                @as(u256, @bitCast(@divTrunc(a_signed, b_signed)));
             try frame.pushStack(result);
             frame.pc += 1;
         }
 
         /// MOD opcode (0x06) - Modulo operation (mod by zero returns 0)
+        /// Stack: [a, b] -> [a % b] where a is below b (b is top)
         pub fn mod(frame: *FrameType) FrameType.EvmError!void {
             try frame.consumeGas(GasConstants.GasFastStep);
-            const top = try frame.popStack();
-            const second = try frame.popStack();
-            const result = if (second == 0) 0 else top % second;
+            const b = try frame.popStack(); // top of stack (divisor)
+            const a = try frame.popStack(); // second from top (dividend)
+            const result = if (b == 0) 0 else a % b;
             try frame.pushStack(result);
             frame.pc += 1;
         }
 
         /// SMOD opcode (0x07) - Signed modulo operation
+        /// Stack: [a, b] -> [a % b] where a is below b (b is top)
         pub fn smod(frame: *FrameType) FrameType.EvmError!void {
             try frame.consumeGas(GasConstants.GasFastStep);
-            const top = try frame.popStack();
-            const second = try frame.popStack();
-            const top_signed = @as(i256, @bitCast(top));
-            const second_signed = @as(i256, @bitCast(second));
+            const b = try frame.popStack(); // top of stack (divisor)
+            const a = try frame.popStack(); // second from top (dividend)
+            const a_signed = @as(i256, @bitCast(a));
+            const b_signed = @as(i256, @bitCast(b));
             const MIN_SIGNED = @as(u256, 1) << 255;
-            const result = if (second == 0)
+            const result = if (b == 0)
                 0
-            else if (top == MIN_SIGNED and second == std.math.maxInt(u256))
+            else if (a == MIN_SIGNED and b == std.math.maxInt(u256))
                 0
             else
-                @as(u256, @bitCast(@rem(top_signed, second_signed)));
+                @as(u256, @bitCast(@rem(a_signed, b_signed)));
             try frame.pushStack(result);
             frame.pc += 1;
         }
