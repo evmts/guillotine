@@ -269,6 +269,9 @@ pub const Database = struct {
 
     /// Check if account exists in the database
     pub fn account_exists(self: *Database, address: [20]u8) bool {
+        if (self.overlay_active) {
+            if (self.overlay_accounts.contains(address)) return true;
+        }
         return self.accounts.contains(address);
     }
 
