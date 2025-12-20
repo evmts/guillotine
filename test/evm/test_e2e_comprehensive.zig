@@ -17,7 +17,7 @@
 
 const std = @import("std");
 const testing = std.testing;
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const Address = primitives.Address.Address;
 const GasConstants = primitives.GasConstants;
 const keccak256 = @import("crypto").keccak256;

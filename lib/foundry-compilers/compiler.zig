@@ -1,5 +1,5 @@
 const std = @import("std");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const Abi = primitives.Abi;
 const c = @cImport({
     @cInclude("foundry_wrapper.h");

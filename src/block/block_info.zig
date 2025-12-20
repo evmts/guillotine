@@ -9,7 +9,7 @@
 /// This data is accessed by environment opcodes like BLOCKHASH, TIMESTAMP,
 /// DIFFICULTY, GASLIMIT, COINBASE, etc.
 const std = @import("std");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const Address = primitives.Address.Address;
 const BlockInfoConfig = @import("../frame/block_info_config.zig").BlockInfoConfig;
 

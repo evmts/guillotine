@@ -5,7 +5,7 @@
 //! delegations, and manages gas costs.
 
 const std = @import("std");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const Address = primitives.Address.Address;
 const Authorization = primitives.Authorization.Authorization;
 const EMPTY_CODE_HASH = primitives.EMPTY_CODE_HASH;

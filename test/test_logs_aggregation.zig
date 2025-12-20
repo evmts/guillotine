@@ -1,7 +1,7 @@
 const std = @import("std");
 const testing = std.testing;
 const evm_module = @import("evm");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 
 test "logs are properly aggregated in CallResult" {
     const allocator = testing.allocator;

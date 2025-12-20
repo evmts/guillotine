@@ -1,7 +1,7 @@
 const std = @import("std");
 const testing = std.testing;
 const revm = @import("revm.zig");
-const Address = @import("primitives").Address;
+const Address = @import("voltaire").Address;
 
 test "REVM wrapper - basic initialization" {
     const allocator = testing.allocator;

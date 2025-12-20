@@ -3,7 +3,7 @@ const evm = @import("../root.zig");
 const frame_mod = evm;
 const tracer_mod = evm;
 const Host = evm.Host;
-const Address = @import("primitives").Address.Address;
+const Address = @import("voltaire").Address.Address;
 
 // ============================================================================
 // FRAME C API - EVM Frame operations exported to C

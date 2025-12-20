@@ -2,7 +2,7 @@ const std = @import("std");
 const evm = @import("root.zig");
 const Hardfork = @import("evm").Hardfork;
 const testing = std.testing;
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 
 test "EVM basic initialization" {
     const allocator = testing.allocator;

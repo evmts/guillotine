@@ -1,6 +1,6 @@
 const std = @import("std");
 const evm = @import("evm");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const testing = std.testing;
 
 test "High gas limit crash reproduction" {

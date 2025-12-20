@@ -83,7 +83,7 @@
 
 const std = @import("std");
 const log = @import("../log.zig");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 pub const Account = @import("database_interface_account.zig").Account;
 // Ephemeral overlay support for simulate() O(1) revert
 

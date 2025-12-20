@@ -6,7 +6,7 @@
 ///
 /// Validators or their withdrawal addresses can request exits through this contract.
 const std = @import("std");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const Address = primitives.Address.Address;
 const Database = @import("../storage/database.zig").Database;
 const BlockInfo = @import("../block/block_info.zig").BlockInfo(.{});

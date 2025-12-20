@@ -3,7 +3,7 @@
 
 const std = @import("std");
 const evm = @import("evm");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 
 // Minimal FFI interface for opcode testing
 export fn evm_opcode_test_version() u32 {

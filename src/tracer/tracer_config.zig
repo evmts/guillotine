@@ -1,6 +1,6 @@
 const std = @import("std");
 const log = @import("../log.zig");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const pc_tracker_mod = @import("pc_tracker.zig");
 pub const MinimalEvm = @import("minimal_evm.zig").MinimalEvm;
 const MinimalFrame = @import("minimal_frame.zig").MinimalFrame;

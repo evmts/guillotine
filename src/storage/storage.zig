@@ -5,7 +5,7 @@
 //! (in-memory access) while supporting different storage backends.
 
 const std = @import("std");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const Account = @import("database_interface_account.zig").Account;
 const Journal = @import("journal.zig").DefaultJournal;
 const cache_storage = @import("cache_storage.zig");

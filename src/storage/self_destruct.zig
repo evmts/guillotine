@@ -1,7 +1,7 @@
 /// SELFDESTRUCT opcode implementation for contract destruction
 /// Tracks contracts marked for destruction and handles deferred execution
 const std = @import("std");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const Address = primitives.Address;
 const CreatedContracts = @import("created_contracts.zig").CreatedContracts;
 const SelfDestructRecord = @import("../frame/call_result.zig").SelfDestructRecord;

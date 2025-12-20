@@ -1,7 +1,7 @@
 //! Transaction-level context for EVM execution.
 
 const std = @import("std");
-const Address = @import("primitives").Address.Address;
+const Address = @import("voltaire").Address.Address;
 
 /// Transaction execution context.
 ///

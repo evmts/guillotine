@@ -4,7 +4,7 @@
 //! Used by ForkedStorage to fetch state from remote blockchain.
 
 const std = @import("std");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const Account = @import("database_interface_account.zig").Account;
 
 /// JSON-RPC request structure

@@ -1,5 +1,5 @@
 const std = @import("std");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const Address = primitives.Address;
 const AccessListConfig = @import("access_list_config.zig").AccessListConfig;
 

@@ -1,6 +1,6 @@
 const std = @import("std");
 const evm = @import("evm");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const bytecode_mod = @import("../src/bytecode/bytecode.zig");
 const dispatch_mod = @import("../src/preprocessor/dispatch.zig");
 

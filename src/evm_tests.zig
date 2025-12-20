@@ -2,7 +2,7 @@
 
 const std = @import("std");
 const log = @import("log.zig");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const Evm = @import("evm.zig").Evm;
 const DefaultEvm = @import("evm.zig").DefaultEvm;
 const BlockInfo = @import("block/block_info.zig").BlockInfo(.{});

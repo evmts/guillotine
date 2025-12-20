@@ -1,7 +1,7 @@
 const std = @import("std");
 const zbench = @import("zbench");
 const evm = @import("evm");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const fixtures = @import("fixtures");
 
 const Address = primitives.Address.Address;

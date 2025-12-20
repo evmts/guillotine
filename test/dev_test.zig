@@ -1,7 +1,7 @@
 const std = @import("std");
 const testing = std.testing;
 const Evm = @import("evm");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const log = std.log.scoped(.dev_test);
 
 test "simple trace generation" {

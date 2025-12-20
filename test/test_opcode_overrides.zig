@@ -1,6 +1,6 @@
 const std = @import("std");
 const testing = std.testing;
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const EvmConfig = @import("../src/evm_config.zig").EvmConfig;
 const Evm = @import("../src/evm.zig").Evm;
 const Database = @import("../src/storage/database.zig").Database;

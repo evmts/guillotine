@@ -1,7 +1,7 @@
 const std = @import("std");
 const clap = @import("clap");
 const guillotine = @import("guillotine");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 
 // Test case structures matching the Ethereum spec format
 const TestCase = struct {

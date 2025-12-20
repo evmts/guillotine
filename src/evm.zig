@@ -1,6 +1,6 @@
 const std = @import("std");
 const log = @import("log.zig");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const eips = @import("eips_and_hardforks/eips.zig");
 const BlockInfo = @import("block/block_info.zig").BlockInfo(.{});
 const Database = @import("storage/database.zig").Database;

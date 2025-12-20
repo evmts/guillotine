@@ -1,7 +1,7 @@
 /// Minimal Frame implementation for tracing
 /// This mirrors the architecture of frame/frame.zig but simplified for validation
 const std = @import("std");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const minimal_evm_mod = @import("minimal_evm.zig");
 const GasConstants = primitives.GasConstants;
 const Address = primitives.Address.Address;

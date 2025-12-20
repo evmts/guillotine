@@ -1,5 +1,5 @@
 const std = @import("std");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const differential_testor = @import("differential_testor.zig");
 const guillotine_evm = @import("evm");
 

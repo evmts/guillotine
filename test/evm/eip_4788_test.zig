@@ -3,7 +3,7 @@
 const std = @import("std");
 const testing = std.testing;
 const evm = @import("evm");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 
 test "EIP-4788: beacon block root precompile at 0x0B" {
     const allocator = testing.allocator;

@@ -5,7 +5,7 @@ const log = std.log.scoped(.tracer);
 const MinimalEvm = @import("minimal_evm.zig").MinimalEvm;
 const UnifiedOpcode = @import("../opcodes/opcode.zig").UnifiedOpcode;
 const Opcode = @import("../opcodes/opcode.zig").Opcode;
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 
 /// Maximum steps allowed for each synthetic opcode type
 const SyntheticOpcodeSteps = struct {

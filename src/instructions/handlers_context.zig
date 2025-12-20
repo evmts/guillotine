@@ -1,7 +1,7 @@
 const std = @import("std");
 const FrameConfig = @import("../frame/frame_config.zig").FrameConfig;
 const log = @import("../log.zig");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const Address = primitives.Address;
 const GasConstants = primitives.GasConstants;
 // u256 is a built-in type in Zig 0.14+

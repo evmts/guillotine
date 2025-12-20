@@ -5,7 +5,7 @@ const log = evm.log;
 const frame_mod = evm.frame;
 const FrameConfig = evm.FrameConfig;
 const MemoryDatabase = evm.MemoryDatabase;
-const Address = @import("primitives").Address.Address;
+const Address = @import("voltaire").Address.Address;
 const Tracer = @import("evm").Tracer;
 const Evm = @import("evm").evm.Evm;
 

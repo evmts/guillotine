@@ -207,7 +207,7 @@ const Frame = @import("../frame/frame.zig").Frame;
 const dispatch_mod = @import("../preprocessor/dispatch.zig");
 const DefaultTracer = @import("../tracer/tracer.zig").DefaultTracer;
 const MemoryDatabase = @import("../storage/memory_database.zig").MemoryDatabase;
-const Address = @import("primitives").Address;
+const Address = @import("voltaire").Address;
 const bytecode_mod = @import("../bytecode/bytecode.zig");
 const BytecodeConfig = @import("../bytecode/bytecode_config.zig").BytecodeConfig;
 

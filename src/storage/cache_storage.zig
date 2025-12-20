@@ -6,7 +6,7 @@
 
 const std = @import("std");
 const testing = std.testing;
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const Account = @import("database_interface_account.zig").Account;
 const LruCache = @import("lru_cache.zig").LruCache;
 

@@ -7,7 +7,7 @@
 /// The deposit contract is deployed at a specific address and accumulates
 /// deposits that are then processed by the beacon chain.
 const std = @import("std");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const Address = primitives.Address.Address;
 const Database = @import("../storage/database.zig").Database;
 const BlockInfo = @import("../block/block_info.zig").BlockInfo(.{});

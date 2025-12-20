@@ -7,7 +7,7 @@
 /// The contract is deployed at 0x0b address and uses a ring buffer with
 /// HISTORY_BUFFER_LENGTH entries to store recent block hashes.
 const std = @import("std");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const Address = primitives.Address.Address;
 const Database = @import("../storage/database.zig").Database;
 const BlockInfo = @import("../block/block_info.zig").BlockInfo(.{});

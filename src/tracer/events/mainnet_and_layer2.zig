@@ -1,5 +1,5 @@
 const std = @import("std");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const Address = primitives.Address.Address;
 
 /// Beacon chain deposit (32 ETH staking)

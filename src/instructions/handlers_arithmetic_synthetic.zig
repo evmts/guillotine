@@ -104,7 +104,7 @@ pub fn Handlers(FrameType: type) type {
 
             const divisor = self.stack.peek_unsafe();
 
-            const Uint = @import("primitives").Uint;
+            const Uint = @import("voltaire").Uint;
             const U256 = Uint(256, 4);
             const dividend_u256 = U256.from_native(dividend);
             const divisor_u256 = U256.from_native(divisor);
@@ -129,7 +129,7 @@ pub fn Handlers(FrameType: type) type {
             const divisor = self.stack.peek_unsafe();
 
             // Convert to U256 for optimized division
-            const Uint = @import("primitives").Uint;
+            const Uint = @import("voltaire").Uint;
             const U256 = Uint(256, 4);
             const dividend_u256 = U256.from_native(dividend);
             const divisor_u256 = U256.from_native(divisor);
@@ -192,7 +192,7 @@ const test_config = FrameConfig{
 
 const TestFrame = Frame(test_config);
 const TestBytecode = bytecode_mod.Bytecode(.{ .max_bytecode_size = test_config.max_bytecode_size });
-const Address = @import("primitives").Address.Address;
+const Address = @import("voltaire").Address.Address;
 const MemoryDatabase = @import("../storage/memory_database.zig").MemoryDatabase;
 
 fn createTestFrame(allocator: std.mem.Allocator) !TestFrame {

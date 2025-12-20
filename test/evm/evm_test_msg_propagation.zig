@@ -2,7 +2,7 @@
 
 const std = @import("std");
 const testing = std.testing;
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const Address = primitives.Address.Address;
 const evm_mod = @import("evm");
 const Evm = evm_mod.Evm;

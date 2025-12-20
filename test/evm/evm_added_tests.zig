@@ -1,6 +1,6 @@
 const std = @import("std");
 const evm_mod = @import("evm");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const ZERO_ADDRESS = primitives.ZERO_ADDRESS;
 const Address = primitives.Address.Address;
 const DatabaseInterface = @import("evm").DatabaseInterface;

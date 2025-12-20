@@ -1,5 +1,5 @@
 const std = @import("std");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const evm_module = @import("evm");
 const MinimalEvm = evm_module.tracer.MinimalEvm;
 

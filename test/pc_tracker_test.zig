@@ -2,7 +2,7 @@
 const std = @import("std");
 const testing = std.testing;
 const evm = @import("evm");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const pc_tracker_mod = @import("../src/tracer/pc_tracker.zig");
 
 test "PC tracker validates correct bytecode execution" {

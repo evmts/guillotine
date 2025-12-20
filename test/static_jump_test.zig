@@ -8,7 +8,7 @@ const bytecode_builder = @import("../src/bytecode/bytecode_builder.zig");
 const opcode_data = @import("../src/opcodes/opcode_data.zig");
 const DefaultTracer = @import("../src/tracer/tracer.zig").DefaultTracer;
 const MemoryDatabase = @import("../src/storage/memory_database.zig").MemoryDatabase;
-const Address = @import("primitives").Address;
+const Address = @import("voltaire").Address;
 const frame_handlers = @import("../src/frame/frame_handlers.zig");
 
 // Test configuration

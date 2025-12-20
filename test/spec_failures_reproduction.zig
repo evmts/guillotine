@@ -1,6 +1,6 @@
 const std = @import("std");
 const evm = @import("evm");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 
 // Enable debug logging to see tracer output
 test {

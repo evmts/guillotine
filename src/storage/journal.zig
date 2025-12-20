@@ -5,7 +5,7 @@
 //! Uses a snapshot-based approach for nested call handling.
 
 const std = @import("std");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const Address = primitives.Address.Address;
 const JournalConfig = @import("journal_config.zig").JournalConfig;
 const journal_entry = @import("journal_entry.zig");

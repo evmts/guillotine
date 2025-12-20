@@ -2,7 +2,7 @@
 /// This is a simplified, unoptimized EVM that orchestrates execution.
 /// Architecture mirrors evm.zig - MinimalEvm orchestrates, MinimalFrame executes
 const std = @import("std");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const GasConstants = primitives.GasConstants;
 const MinimalFrame = @import("minimal_frame.zig").MinimalFrame;
 const Hardfork = @import("../eips_and_hardforks/eips.zig").Hardfork;

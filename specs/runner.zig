@@ -1,7 +1,7 @@
 const std = @import("std");
 const testing = std.testing;
 const evm = @import("evm");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const Address = primitives.Address;
 const assembler = @import("assembler.zig");
 

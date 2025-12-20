@@ -10,7 +10,7 @@ const std = @import("std");
 const evm = @import("evm");
 const Bytecode = evm.Bytecode(.{});
 const Opcode = evm.Opcode;
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const U256 = primitives.U256.U256;
 
 test "fuzz bytecode analysis with random bytecode" {

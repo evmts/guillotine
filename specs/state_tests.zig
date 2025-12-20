@@ -1,7 +1,7 @@
 const std = @import("std");
 const testing = std.testing;
 const evm = @import("evm");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const runner = @import("runner.zig");
 
 // Import the manifest at comptime if it exists

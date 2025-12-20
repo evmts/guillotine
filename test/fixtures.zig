@@ -1,6 +1,6 @@
 const std = @import("std");
 const evm = @import("evm");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const compilers = @import("compilers");
 
 // MinimalEvm is exported from the evm module

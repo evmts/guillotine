@@ -2,7 +2,7 @@ const std = @import("std");
 const log = @import("../log.zig");
 const zbench = @import("zbench");
 const evm_mod = @import("evm");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 // MinimalEvm is now used for differential testing instead of revm
 const crypto = @import("crypto");
 

@@ -4,7 +4,7 @@ const MemoryDatabase = @import("memory_database.zig").MemoryDatabase;
 const DatabaseInterface = @import("database_interface.zig").DatabaseInterface;
 const BlockInfo = @import("block_info.zig").BlockInfo;
 const hardfork = @import("evm").hardforks.hardfork;
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const Address = primitives.Address.Address;
 const TransactionContext = @import("transaction_context.zig").TransactionContext;
 

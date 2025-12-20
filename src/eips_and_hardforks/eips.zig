@@ -1,4 +1,4 @@
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const AccessList = @import("../storage/access_list.zig").AccessList;
 pub const Hardfork = primitives.Hardfork;
 

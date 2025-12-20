@@ -1,6 +1,6 @@
 const std = @import("std");
 const Provider = @import("provider.zig").Provider;
-const Address = @import("primitives").Address;
+const Address = @import("voltaire").Address;
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};

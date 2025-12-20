@@ -1,7 +1,7 @@
 const std = @import("std");
 const log = @import("../log.zig");
 const FrameConfig = @import("../frame/frame_config.zig").FrameConfig;
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const Address = primitives.Address;
 // Access to call params through the call params module
 const call_params_mod = @import("../frame/call_params.zig");

@@ -1,6 +1,6 @@
 const std = @import("std");
 const testing = std.testing;
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const guillotine = @import("evm");
 
 // Create EVM with tracing enabled for these tests

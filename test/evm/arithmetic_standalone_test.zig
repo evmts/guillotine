@@ -3,7 +3,7 @@ const std = @import("std");
 const testing = std.testing;
 const Evm = @import("evm").Evm;
 const Database = @import("evm").Database;
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 
 test "guillotine standalone: basic arithmetic operations" {
     const allocator = testing.allocator;

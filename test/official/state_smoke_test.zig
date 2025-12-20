@@ -1,6 +1,6 @@
 const std = @import("std");
 const evm = @import("evm");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 
 const DefaultEvm = evm.Evm(.{});
 const BlockInfo = evm.BlockInfo;
@@ -214,7 +214,7 @@ fn runSingleStateCase(allocator: std.mem.Allocator, json_path: []const u8) !void
     if (env.get("currentExcessBlobGas")) |excess_blob_gas_field| {
         const excess_blob_gas = try parseU64Hex(excess_blob_gas_field.string);
         // Calculate blob base fee from excess blob gas using EIP-4844 formula
-        const Blob = @import("primitives").Blob;
+        const Blob = @import("voltaire").Blob;
         blob_base_fee = Blob.calculate_blob_gas_price(excess_blob_gas);
     }
 

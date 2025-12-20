@@ -1,6 +1,6 @@
 const std = @import("std");
 const evm = @import("evm");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const testing = std.testing;
 
 fn hexDecode(allocator: std.mem.Allocator, hex_str: []const u8) ![]u8 {

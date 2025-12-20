@@ -4,7 +4,7 @@
 //! Uses a multi-tier cache system to minimize RPC calls and improve performance.
 
 const std = @import("std");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const Account = @import("database_interface_account.zig").Account;
 const RpcClient = @import("rpc_client.zig").RpcClient;
 const cache_storage = @import("cache_storage.zig");

@@ -1,7 +1,7 @@
 const std = @import("std");
 const testing = std.testing;
 const evm_mod = @import("evm");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const Hardfork = @import("evm").Hardfork;
 
 // Test EIP-3541: Reject new contract code starting with the 0xEF byte

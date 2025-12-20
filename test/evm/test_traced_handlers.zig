@@ -3,7 +3,7 @@ const testing = std.testing;
 const evm = @import("evm");
 const frame_mod = evm.frame;
 const MemoryDatabase = evm.MemoryDatabase;
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const Address = primitives.Address.Address;
 
 /// Simple test tracer that counts operations

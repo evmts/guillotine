@@ -1,7 +1,7 @@
 const std = @import("std");
 const FixtureContract = @import("evm").FixtureContract;
 const ContractName = @import("evm").ContractName;
-const Address = @import("primitives").Address.Address;
+const Address = @import("voltaire").Address.Address;
 
 test "FixtureContract enum-based get method" {
     // Test all valid contract enums

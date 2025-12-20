@@ -1,5 +1,5 @@
 const std = @import("std");
-const Address = @import("primitives").Address;
+const Address = @import("voltaire").Address;
 const validation = @import("validation.zig");
 
 pub const ProviderError = error{
@@ -421,4 +421,4 @@ pub const Block = struct {
     }
 };
 
-const primitives = @import("primitives");
+const primitives = @import("voltaire");

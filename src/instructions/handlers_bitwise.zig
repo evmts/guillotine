@@ -128,7 +128,7 @@ const Frame = @import("../frame/frame.zig").Frame;
 const dispatch_mod = @import("../preprocessor/dispatch.zig");
 const DefaultTracer = @import("../tracer/tracer.zig").DefaultTracer;
 const MemoryDatabase = @import("../storage/memory_database.zig").MemoryDatabase;
-const Address = @import("primitives").Address;
+const Address = @import("voltaire").Address;
 
 // Test configuration
 const test_config = FrameConfig{

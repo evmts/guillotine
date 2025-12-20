@@ -1,6 +1,6 @@
 const std = @import("std");
 const testing = std.testing;
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const evm_mod = @import("evm");
 const log = evm_mod.log;
 

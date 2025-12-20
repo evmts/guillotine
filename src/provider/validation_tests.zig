@@ -1,7 +1,7 @@
 const std = @import("std");
 const validation = @import("validation.zig");
 const Provider = @import("provider.zig").Provider;
-const Address = @import("primitives").Address;
+const Address = @import("voltaire").Address;
 
 test "provider - reject empty URL" {
     const allocator = std.testing.allocator;

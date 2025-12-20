@@ -1,6 +1,6 @@
 const std = @import("std");
 const evm = @import("evm");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const common = @import("common.zig");
 
 test "opcode 0x69 differential test" {

@@ -296,7 +296,7 @@ pub fn CallResult(config: anytype) type {
 }
 
 const std = @import("std");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const Address = primitives.Address;
 const ZERO_ADDRESS = primitives.ZERO_ADDRESS;
 

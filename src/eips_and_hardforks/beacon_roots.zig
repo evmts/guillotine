@@ -6,7 +6,7 @@
 /// The beacon roots are stored in a ring buffer with HISTORY_BUFFER_LENGTH entries.
 /// This allows accessing recent beacon block roots without unbounded storage growth.
 const std = @import("std");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const Address = primitives.Address.Address;
 const Database = @import("../storage/database.zig").Database;
 const BlockInfo = @import("../block/block_info.zig").BlockInfo(.{});

@@ -1,8 +1,8 @@
 const std = @import("std");
 const FrameConfig = @import("../frame/frame_config.zig").FrameConfig;
 const log = @import("../log.zig");
-const GasConstants = @import("primitives").GasConstants;
-const Address = @import("primitives").Address.Address;
+const GasConstants = @import("voltaire").GasConstants;
+const Address = @import("voltaire").Address.Address;
 const Opcode = @import("../opcodes/opcode_data.zig").Opcode;
 
 /// Storage operation handlers for the EVM stack frame.

@@ -8,7 +8,7 @@
 /// 
 /// This data drives the jump table dispatch system and bytecode validation.
 const std = @import("std");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const GasConstants = primitives.GasConstants;
 pub const Opcode = @import("opcode.zig").Opcode;
 

@@ -2,7 +2,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const trie = @import("trie.zig");
 const node_cache = @import("node_cache.zig");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const ArrayList = std.ArrayList;
 const keccak256 = std.crypto.hash.sha3.Keccak256;
 

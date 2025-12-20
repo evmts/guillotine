@@ -12,7 +12,7 @@
 //! - Sending value in nested calls
 
 const std = @import("std");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const Address = primitives.Address.Address;
 const Database = @import("../storage/database.zig").Database;
 const Account = @import("../storage/database.zig").Account;

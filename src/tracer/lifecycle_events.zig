@@ -1,6 +1,6 @@
 const std = @import("std");
 const log = @import("../log.zig");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 
 /// Lifecycle event handlers for the Tracer.
 /// These handle all EVM lifecycle events like frame starts, call operations, arena management, etc.

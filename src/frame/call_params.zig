@@ -1,4 +1,4 @@
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const Address = primitives.Address;
 
 pub fn CallParams(config: anytype) type {

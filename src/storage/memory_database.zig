@@ -8,7 +8,7 @@ const std = @import("std");
 const Database = @import("database.zig").Database;
 const Account = @import("database.zig").Account;
 const crypto = @import("crypto");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 
 /// In-memory database with snapshot and batch operation support.
 pub const MemoryDatabase = struct {

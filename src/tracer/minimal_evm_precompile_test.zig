@@ -1,5 +1,5 @@
 const std = @import("std");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const MinimalEvm = @import("minimal_evm.zig").MinimalEvm;
 const Hardfork = @import("../eips_and_hardforks/eips.zig").Hardfork;
 

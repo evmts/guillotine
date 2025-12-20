@@ -23,7 +23,7 @@ pub const std_options = std.Options{
 };
 
 const evm = @import("evm");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 
 // Import types from evm module
 const DefaultEvm = evm.DefaultEvm;

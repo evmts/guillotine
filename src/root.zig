@@ -112,7 +112,7 @@ pub const Hardfork = @import("eips_and_hardforks/eips.zig").Hardfork;
 pub const Eips = @import("eips_and_hardforks/eips.zig").Eips;
 pub const MemoryDatabase = @import("storage/memory_database.zig").MemoryDatabase;
 pub const SelfDestruct = @import("storage/self_destruct.zig").SelfDestruct;
-pub const Log = @import("primitives").logs.Log;
+pub const Log = @import("voltaire").logs.Log;
 pub const TransactionContext = @import("block/transaction_context.zig").TransactionContext;
 pub const AuthorizationProcessor = @import("eips_and_hardforks/authorization_processor.zig").AuthorizationProcessor;
 pub const AuthorizationError = @import("eips_and_hardforks/authorization_processor.zig").AuthorizationError;
@@ -120,7 +120,7 @@ pub const AuthorizationError = @import("eips_and_hardforks/authorization_process
 pub const kzg_setup = @import("crypto").kzg_setup;
 
 // Re-export from evm module for compatibility
-pub const Primitives = @import("primitives");
+pub const Primitives = @import("voltaire");
 pub const Provider = @import("provider");
 pub const dispatch_pretty_print = @import("preprocessor/dispatch_pretty_print.zig");
 

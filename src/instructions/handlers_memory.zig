@@ -2,7 +2,7 @@ const std = @import("std");
 const FrameConfig = @import("../frame/frame_config.zig").FrameConfig;
 const log = @import("../log.zig");
 const memory_mod = @import("../memory/memory.zig");
-const GasConstants = @import("primitives").GasConstants;
+const GasConstants = @import("voltaire").GasConstants;
 const Opcode = @import("../opcodes/opcode_data.zig").Opcode;
 
 /// Memory operation handlers for the EVM stack frame.
@@ -291,7 +291,7 @@ const Frame = @import("../frame/frame.zig").Frame;
 const dispatch_mod = @import("../preprocessor/dispatch.zig");
 const DefaultTracer = @import("../tracer/tracer.zig").DefaultTracer;
 const MemoryDatabase = @import("../storage/memory_database.zig").MemoryDatabase;
-const Address = @import("primitives").Address;
+const Address = @import("voltaire").Address;
 
 // Test configuration
 const test_config = FrameConfig{

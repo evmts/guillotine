@@ -6,14 +6,14 @@ const frame_mod = @import("evm");
 const Frame = frame_mod.Frame;
 const evm_mod = @import("evm");
 const Evm = evm_mod.Evm;
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const Address = primitives.Address.Address;
 const Host = @import("evm").Host;
 const CallParams = @import("call_params.zig").CallParams;
 const CallResult = @import("call_result.zig").CallResult;
 const Log = @import("logs.zig").Log;
 const BlockInfo = @import("evm").BlockInfo;
-const ZERO_ADDRESS = @import("primitives").ZERO_ADDRESS;
+const ZERO_ADDRESS = @import("voltaire").ZERO_ADDRESS;
 const Hardfork = @import("evm").Hardfork;
 
 // Enhanced MockHost that can simulate static context

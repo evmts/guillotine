@@ -1,7 +1,7 @@
 const std = @import("std");
 const evm = @import("evm");
 const testing = std.testing;
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const Address = primitives.Address;
 
 test "SELFDESTRUCT records should be tracked in CallResult" {

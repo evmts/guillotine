@@ -1,6 +1,6 @@
 const std = @import("std");
 const frame_interpreter_mod = @import("evm");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const Address = primitives.Address.Address;
 const address_utils = primitives.Address;
 const opcode_data = @import("opcode_data.zig");
@@ -10,7 +10,7 @@ const CallParams = @import("call_params.zig").CallParams;
 const CallResult = @import("call_result.zig").CallResult;
 const Log = @import("logs.zig").Log;
 const BlockInfo = @import("evm").BlockInfo;
-const ZERO_ADDRESS = @import("primitives").ZERO_ADDRESS;
+const ZERO_ADDRESS = @import("voltaire").ZERO_ADDRESS;
 const Hardfork = @import("evm").Hardfork;
 
 // Mock host implementation for testing

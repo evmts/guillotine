@@ -1,6 +1,6 @@
 /// Journal entry types for tracking EVM state changes
 const std = @import("std");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const Address = primitives.Address.Address;
 const address_mod = primitives.Address;
 const JournalConfig = @import("journal_config.zig").JournalConfig;

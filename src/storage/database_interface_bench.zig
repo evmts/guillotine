@@ -1,7 +1,7 @@
 const std = @import("std");
 const zbench = @import("zbench");
 const database_mod = @import("database.zig");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 
 const Database = database_mod.Database;
 const Address = primitives.Address.Address;

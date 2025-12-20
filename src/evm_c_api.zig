@@ -8,7 +8,7 @@ const evm = @import("evm");
 pub const std_options: std.Options = .{
     .log_level = .warn,
 };
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const bytecode_c = @import("bytecode/bytecode_c.zig");
 const log = std.log.scoped(.c_api);
 

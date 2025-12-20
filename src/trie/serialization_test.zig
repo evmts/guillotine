@@ -1,7 +1,7 @@
 const std = @import("std");
 const testing = std.testing;
 const trie = @import("trie.zig");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 
 const BranchNode = trie.BranchNode;
 const ExtensionNode = trie.ExtensionNode;

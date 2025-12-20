@@ -1,5 +1,5 @@
 const std = @import("std");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const evm = @import("evm");
 const log = std.log.scoped(.push32_test);
 

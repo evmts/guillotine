@@ -4,7 +4,7 @@
 const std = @import("std");
 const testing = std.testing;
 const evm = @import("evm");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 
 const Evm = evm.Evm;
 const Database = evm.Database;

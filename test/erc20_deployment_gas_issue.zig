@@ -1,7 +1,7 @@
 const std = @import("std");
 const testing = std.testing;
 const evm = @import("evm");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const log = evm.log;
 const OpcodeTracer = @import("opcode_tracer.zig").OpcodeTracer;
 

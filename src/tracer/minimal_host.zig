@@ -1,6 +1,6 @@
 /// Host interface and implementations for MinimalEvm
 const std = @import("std");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const Address = primitives.Address.Address;
 
 /// Host interface for system operations

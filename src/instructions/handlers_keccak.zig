@@ -4,7 +4,7 @@ const log = @import("../log.zig");
 const memory_mod = @import("../memory/memory.zig");
 const keccak_asm = @import("crypto").keccak_asm;
 const Opcode = @import("../opcodes/opcode_data.zig").Opcode;
-const GasConstants = @import("primitives").GasConstants;
+const GasConstants = @import("voltaire").GasConstants;
 
 /// Keccak hash opcode handler for the EVM stack frame.
 /// This is a generic struct that returns a static handler for a given FrameType.
@@ -236,7 +236,7 @@ const Frame = @import("../frame/frame.zig").Frame;
 const dispatch_mod = @import("../preprocessor/dispatch.zig");
 const DefaultTracer = @import("../tracer/tracer.zig").DefaultTracer;
 const MemoryDatabase = @import("../storage/memory_database.zig").MemoryDatabase;
-const Address = @import("primitives").Address;
+const Address = @import("voltaire").Address;
 
 // Test configurations for different word sizes
 const test_config_u256 = FrameConfig{

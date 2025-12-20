@@ -1,7 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const trie = @import("trie.zig");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 
 const TrieNode = trie.TrieNode;
 const HashValue = trie.HashValue;

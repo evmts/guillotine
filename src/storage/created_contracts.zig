@@ -1,7 +1,7 @@
 /// Tracks contracts created during transaction execution
 /// Used for EIP-6780 SELFDESTRUCT behavior in Cancun+
 const std = @import("std");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const Address = primitives.Address.Address;
 
 pub const CreatedContracts = struct {

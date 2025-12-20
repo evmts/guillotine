@@ -11,7 +11,7 @@ const Account = @import("../storage/database.zig").Account;
 const MemoryDatabase = @import("../storage/memory_database.zig").MemoryDatabase;
 const bytecode_mod = @import("../bytecode/bytecode.zig");
 const BytecodeConfig = @import("../bytecode/bytecode_config.zig").BytecodeConfig;
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const GasConstants = primitives.GasConstants;
 const Address = primitives.Address.Address;
 const to_u256 = primitives.Address.to_u256;
@@ -71,7 +71,7 @@ pub fn Frame(_config: FrameConfig) type {
         /// Generic Uint type based on WordType for optimized arithmetic operations
         /// Automatically determines the bit width and limb count from WordType
         pub const UintN = blk: {
-            const Uint = @import("primitives").Uint;
+            const Uint = @import("voltaire").Uint;
             const bits = @bitSizeOf(WordType);
             const limbs = if (bits <= 64) 1 else (bits + 63) / 64;
             break :blk Uint(bits, limbs);

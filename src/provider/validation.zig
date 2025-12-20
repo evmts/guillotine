@@ -1,5 +1,5 @@
 const std = @import("std");
-const Address = @import("primitives").Address;
+const Address = @import("voltaire").Address;
 
 pub const ValidationError = error{
     InvalidAddress,

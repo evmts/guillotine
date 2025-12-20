@@ -1,7 +1,7 @@
 const std = @import("std");
 const testing = std.testing;
 const evm_mod = @import("evm");
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 
 // Benchmark to measure performance improvement from fusion patterns
 

@@ -1,7 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const testing = std.testing;
-const primitives = @import("primitives");
+const primitives = @import("voltaire");
 const utils = @import("utils");
 
 /// Error type for trie operations

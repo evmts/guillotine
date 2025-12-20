@@ -856,7 +856,7 @@ pub fn Preprocessor(FrameType: type) type {
             fusion_type: FusionType,
         ) !void {
             // Import gas constants for static calculation
-            const GasConstants = @import("primitives").GasConstants;
+            const GasConstants = @import("voltaire").GasConstants;
 
             // Calculate static gas cost since we know the offset at compile time
             var static_gas_cost: u64 = GasConstants.GasFastestStep;
