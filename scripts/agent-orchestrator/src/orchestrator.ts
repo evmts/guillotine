@@ -22,6 +22,9 @@ const MINOR_ISSUES = [859];
 const BUG_ISSUES = [844, 842, 841, 838, 815];
 const PERF_ISSUES = [837, 832, 764, 635];
 
+// Issues that need continued work (HANDOFF from iteration 1)
+const HANDOFF_ISSUES = [851, 850, 858, 857, 854, 859, 844, 842, 841, 832, 764];
+
 const ALL_ISSUES = [
   ...CRITICAL_ISSUES,
   ...MEDIUM_ISSUES,
@@ -29,6 +32,10 @@ const ALL_ISSUES = [
   ...BUG_ISSUES,
   ...PERF_ISSUES,
 ];
+
+// Configuration
+const MAX_TURNS = 20; // Doubled from default ~10
+const TIMEOUT_MS = 1200000; // 20 minutes (doubled from 10)
 
 // Types
 interface GitHubIssue {
@@ -61,6 +68,41 @@ interface IterationReport {
 const REPO_ROOT = execSync('git rev-parse --show-toplevel').toString().trim();
 const REPORTS_DIR = path.join(REPO_ROOT, 'scripts/agent-orchestrator/reports');
 const REPO = 'anthropics/guillotine'; // Update this to actual repo
+
+/**
+ * Find previous reports for an issue
+ */
+function findPreviousReports(issueNumber: number): { path: string; content: string; iteration: number }[] {
+  const reports: { path: string; content: string; iteration: number }[] = [];
+
+  try {
+    const files = fs.readdirSync(REPORTS_DIR);
+    const issueReports = files
+      .filter(f => f.startsWith(`issue-${issueNumber}-iter-`) && f.endsWith('.md'))
+      .sort(); // Sort to get chronological order
+
+    for (const file of issueReports) {
+      const filePath = path.join(REPORTS_DIR, file);
+      const content = fs.readFileSync(filePath, 'utf-8');
+      const iterMatch = file.match(/iter-(\d+)/);
+      const iteration = iterMatch ? parseInt(iterMatch[1], 10) : 1;
+      reports.push({ path: filePath, content, iteration });
+    }
+  } catch {
+    // No reports found
+  }
+
+  return reports;
+}
+
+/**
+ * Get the next iteration number for an issue
+ */
+function getNextIteration(issueNumber: number): number {
+  const reports = findPreviousReports(issueNumber);
+  if (reports.length === 0) return 1;
+  return Math.max(...reports.map(r => r.iteration)) + 1;
+}
 
 /**
  * Fetch issue details from GitHub using gh CLI
@@ -156,22 +198,44 @@ function validateIssue(issue: GitHubIssue): ValidationResult {
 /**
  * Generate the work prompt for an issue
  */
-function generateWorkPrompt(issue: GitHubIssue): string {
+function generateWorkPrompt(issue: GitHubIssue, iteration: number): string {
   const priority = CRITICAL_ISSUES.includes(issue.number) ? 'CRITICAL' :
                    MEDIUM_ISSUES.includes(issue.number) ? 'MEDIUM' :
                    MINOR_ISSUES.includes(issue.number) ? 'MINOR' :
                    BUG_ISSUES.includes(issue.number) ? 'BUG' : 'PERFORMANCE';
 
-  return `## Issue #${issue.number} [${priority}]: ${issue.title}
+  // Get previous reports
+  const previousReports = findPreviousReports(issue.number);
+  let previousContext = '';
+
+  if (previousReports.length > 0) {
+    previousContext = `
+---
+
+### IMPORTANT: Previous Work Done (Iteration ${iteration - 1})
+
+**You MUST read the previous reports before starting work!**
+
+Previous report files:
+${previousReports.map(r => `- ${r.path}`).join('\n')}
+
+**Read these files first** to understand what was already tried and what progress was made.
+The previous iteration(s) made progress but did not fully resolve the issue.
+Continue from where they left off - do NOT repeat the same work.
+
+`;
+  }
+
+  return `## Issue #${issue.number} [${priority}]: ${issue.title} (Iteration ${iteration})
 
 ### Issue Description
 ${issue.body}
-
+${previousContext}
 ---
 
 ### Instructions
 
-1. **Understand First**: Read relevant code before making changes
+1. ${previousReports.length > 0 ? '**READ PREVIOUS REPORTS FIRST**: Use the Read tool to read the previous report files listed above' : '**Understand First**: Read relevant code before making changes'}
 2. **Minimal Changes**: Make focused, minimal changes to fix the issue
 3. **Test Thoroughly**: Run \`zig build && zig build test-opcodes\` after changes
 4. **Follow CLAUDE.md**: Zero tolerance for error swallowing, broken tests, etc.
@@ -205,19 +269,21 @@ If the issue is COMPLETE, say "ISSUE RESOLVED" clearly.
 /**
  * Run claude to work on an issue
  */
-function workOnIssue(issue: GitHubIssue): { output: string; handoffPrompt: string; resolved: boolean } {
-  const prompt = generateWorkPrompt(issue);
+function workOnIssue(issue: GitHubIssue, iteration: number): { output: string; handoffPrompt: string; resolved: boolean } {
+  const prompt = generateWorkPrompt(issue, iteration);
   const tempFile = '/tmp/claude-work-prompt.txt';
   fs.writeFileSync(tempFile, prompt);
 
+  console.log(`\n--- Starting Claude with max-turns=${MAX_TURNS}, timeout=${TIMEOUT_MS/1000}s ---\n`);
+
   try {
     const output = execSync(
-      `claude -p "$(cat ${tempFile})" --output-format text`,
+      `claude -p "$(cat ${tempFile})" --output-format text --max-turns ${MAX_TURNS}`,
       {
         cwd: REPO_ROOT,
         encoding: 'utf-8',
         maxBuffer: 10 * 1024 * 1024,
-        timeout: 600000, // 10 min
+        timeout: TIMEOUT_MS,
         env: { ...process.env, FORCE_COLOR: '0' }
       }
     );
@@ -328,21 +394,27 @@ Co-Authored-By: Claude <noreply@anthropic.com>`;
  * Main orchestration loop
  */
 async function main() {
-  console.log('=' .repeat(60));
-  console.log('Agent Orchestrator - Issue Queue Runner');
+  // Use HANDOFF_ISSUES for continuation run
+  const issuesToProcess = HANDOFF_ISSUES;
+
   console.log('='.repeat(60));
-  console.log(`\nProcessing ${ALL_ISSUES.length} issues\n`);
+  console.log('Agent Orchestrator - Issue Queue Runner (Iteration 2)');
+  console.log('='.repeat(60));
+  console.log(`\nProcessing ${issuesToProcess.length} HANDOFF issues`);
+  console.log(`Config: max-turns=${MAX_TURNS}, timeout=${TIMEOUT_MS/1000}s\n`);
 
   // Ensure reports dir exists
   if (!fs.existsSync(REPORTS_DIR)) {
     fs.mkdirSync(REPORTS_DIR, { recursive: true });
   }
 
-  const results: { issue: number; status: string; reason?: string }[] = [];
+  const results: { issue: number; status: string; iteration: number; reason?: string }[] = [];
 
-  for (const issueNum of ALL_ISSUES) {
+  for (const issueNum of issuesToProcess) {
+    const iteration = getNextIteration(issueNum);
+
     console.log('\n' + '='.repeat(60));
-    console.log(`Processing Issue #${issueNum}`);
+    console.log(`Processing Issue #${issueNum} (Iteration ${iteration})`);
     console.log('='.repeat(60));
 
     const startTime = new Date();
@@ -351,7 +423,7 @@ async function main() {
     const issue = fetchIssue(issueNum);
     if (!issue) {
       console.log(`Skipping #${issueNum} - could not fetch`);
-      results.push({ issue: issueNum, status: 'skipped', reason: 'Could not fetch' });
+      results.push({ issue: issueNum, status: 'skipped', iteration, reason: 'Could not fetch' });
       continue;
     }
 
@@ -361,7 +433,7 @@ async function main() {
     // Skip if closed
     if (issue.state === 'closed') {
       console.log(`Skipping #${issueNum} - already closed`);
-      results.push({ issue: issueNum, status: 'skipped', reason: 'Already closed' });
+      results.push({ issue: issueNum, status: 'skipped', iteration, reason: 'Already closed' });
       continue;
     }
 
@@ -383,13 +455,13 @@ This issue may need human review or clarification before automated work can proc
         commentOnIssue(issueNum, comment);
       }
 
-      results.push({ issue: issueNum, status: 'aborted', reason: validation.reason });
+      results.push({ issue: issueNum, status: 'aborted', iteration, reason: validation.reason });
       continue;
     }
 
     // Work on issue
-    console.log(`\nWorking on issue #${issueNum}...`);
-    const work = workOnIssue(issue);
+    console.log(`\nWorking on issue #${issueNum} (iteration ${iteration})...`);
+    const work = workOnIssue(issue, iteration);
 
     // Run tests
     const testsPassed = runTests();
@@ -397,7 +469,7 @@ This issue may need human review or clarification before automated work can proc
     // Save report
     const report: IterationReport = {
       issueNumber: issueNum,
-      iteration: 1,
+      iteration,
       startTime,
       endTime: new Date(),
       summary: work.resolved ? 'Issue resolved' : 'Iteration completed',
@@ -415,6 +487,7 @@ This issue may need human review or clarification before automated work can proc
 
     results.push({
       issue: issueNum,
+      iteration,
       status: work.resolved ? 'completed' : 'worked',
       reason: work.resolved ? 'Issue resolved' : 'Made progress'
     });
@@ -431,7 +504,7 @@ This issue may need human review or clarification before automated work can proc
   console.log('='.repeat(60));
   console.log('\nResults:');
   for (const r of results) {
-    console.log(`  #${r.issue}: ${r.status}${r.reason ? ` - ${r.reason}` : ''}`);
+    console.log(`  #${r.issue} (iter ${r.iteration}): ${r.status}${r.reason ? ` - ${r.reason}` : ''}`);
   }
 }
 
