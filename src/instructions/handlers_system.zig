@@ -258,10 +258,11 @@ pub fn Handlers(FrameType: type) type {
                 output_offset > std.math.maxInt(usize) or
                 output_size > std.math.maxInt(usize))
             {
-                // Offsets/sizes exceeding usize limit means accessing beyond memory limits
-                // This should cause OutOfGas, not just return 0
-                self.afterComplete(.CALLCODE);
-                return Error.OutOfGas;
+                (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "Stack must have space for push");
+                self.stack.push_unsafe(0);
+                const op_data = dispatch.getOpData(.CALLCODE);
+                self.afterInstruction(.CALLCODE, op_data.next_handler, op_data.next_cursor.cursor);
+                return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             }
 
             const input_offset_usize = @as(usize, @intCast(input_offset));
@@ -276,9 +277,11 @@ pub fn Handlers(FrameType: type) type {
             if (input_size_usize > 0) {
                 const overflow = @addWithOverflow(input_offset_usize, input_size_usize);
                 if (overflow[1] != 0) {
-                    // Overflow occurred - out of gas
-                    self.afterComplete(.CALLCODE);
-                    return Error.OutOfGas;
+                    // Overflow occurred - return failure
+                    self.stack.push_unsafe(0);
+                    const op_data = dispatch.getOpData(.CALLCODE);
+                    self.afterInstruction(.CALLCODE, op_data.next_handler, op_data.next_cursor.cursor);
+                    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
                 }
                 input_mem_end = overflow[0];
             }
@@ -286,9 +289,11 @@ pub fn Handlers(FrameType: type) type {
             if (output_size_usize > 0) {
                 const overflow = @addWithOverflow(output_offset_usize, output_size_usize);
                 if (overflow[1] != 0) {
-                    // Overflow occurred - out of gas
-                    self.afterComplete(.CALLCODE);
-                    return Error.OutOfGas;
+                    // Overflow occurred - return failure
+                    self.stack.push_unsafe(0);
+                    const op_data = dispatch.getOpData(.CALLCODE);
+                    self.afterInstruction(.CALLCODE, op_data.next_handler, op_data.next_cursor.cursor);
+                    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
                 }
                 output_mem_end = overflow[0];
             }
@@ -297,9 +302,11 @@ pub fn Handlers(FrameType: type) type {
 
             // Check if memory expansion exceeds u24 limit (16MB)
             if (max_mem_end > std.math.maxInt(u24)) {
-                // Memory expansion exceeds limit - out of gas
-                self.afterComplete(.CALLCODE);
-                return Error.OutOfGas;
+                // Memory expansion exceeds limit - return failure
+                self.stack.push_unsafe(0);
+                const op_data = dispatch.getOpData(.CALLCODE);
+                self.afterInstruction(.CALLCODE, op_data.next_handler, op_data.next_cursor.cursor);
+                return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             }
 
             // Calculate and charge memory expansion gas
@@ -315,14 +322,20 @@ pub fn Handlers(FrameType: type) type {
             if (input_size_usize > 0) {
                 const input_end = input_offset_usize + input_size_usize;
                 self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(input_end))) catch {
-                    return Error.AllocationError;
+                    self.stack.push_unsafe(0);
+                    const op_data = dispatch.getOpData(.CALLCODE);
+                    self.afterInstruction(.CALLCODE, op_data.next_handler, op_data.next_cursor.cursor);
+                    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
                 };
             }
 
             if (output_size_usize > 0) {
                 const output_end = output_offset_usize + output_size_usize;
                 self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(output_end))) catch {
-                    return Error.AllocationError;
+                    self.stack.push_unsafe(0);
+                    const op_data = dispatch.getOpData(.CALLCODE);
+                    self.afterInstruction(.CALLCODE, op_data.next_handler, op_data.next_cursor.cursor);
+                    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
                 };
             }
 
@@ -351,9 +364,11 @@ pub fn Handlers(FrameType: type) type {
 
             if (result.success and output_size_usize > 0 and result.output.len > 0) {
                 const copy_size = @min(output_size_usize, result.output.len);
-                self.memory.set_data(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(output_offset_usize)), result.output[0..copy_size]) catch |err| {
-                    log.err("Failed to copy call output to memory: {s}", .{@errorName(err)});
-                    return Error.AllocationError;
+                self.memory.set_data(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(output_offset_usize)), result.output[0..copy_size]) catch {
+                    self.stack.push_unsafe(0);
+                    const op_data = dispatch.getOpData(.CALLCODE);
+                    self.afterInstruction(.CALLCODE, op_data.next_handler, op_data.next_cursor.cursor);
+                    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
                 };
             }
 
