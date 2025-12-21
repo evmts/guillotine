@@ -62,6 +62,9 @@ interface IterationReport {
   testsPassed: boolean;
   status: 'completed' | 'handoff' | 'skipped' | 'aborted' | 'error';
   validationResult?: ValidationResult;
+  // New fields for visibility
+  claudeOutput: string;
+  handoffPrompt: string;
 }
 
 // Constants
@@ -209,19 +212,30 @@ function generateWorkPrompt(issue: GitHubIssue, iteration: number): string {
   let previousContext = '';
 
   if (previousReports.length > 0) {
+    // Get the most recent report's handoff context
+    const latestReport = previousReports[previousReports.length - 1];
+    const handoffMatch = latestReport.content.match(/## Handoff Context for Next Iteration\n([\s\S]*?)(?=\n## |$)/);
+    const handoffContext = handoffMatch ? handoffMatch[1].trim() : '';
+
     previousContext = `
 ---
 
-### IMPORTANT: Previous Work Done (Iteration ${iteration - 1})
+### IMPORTANT: Previous Work Done (${previousReports.length} previous iteration(s))
 
-**You MUST read the previous reports before starting work!**
+**Read the previous report to understand what was already done!**
 
-Previous report files:
-${previousReports.map(r => `- ${r.path}`).join('\n')}
+Latest report: ${latestReport.path}
 
-**Read these files first** to understand what was already tried and what progress was made.
-The previous iteration(s) made progress but did not fully resolve the issue.
-Continue from where they left off - do NOT repeat the same work.
+${handoffContext ? `**Previous iteration's handoff notes:**
+\`\`\`
+${handoffContext.substring(0, 2000)}${handoffContext.length > 2000 ? '\n...(truncated)' : ''}
+\`\`\`` : '**No handoff context found - read the full report file.**'}
+
+**Key instructions:**
+- Do NOT repeat work that was already done
+- Continue from where the previous iteration left off
+- If the previous iteration identified blockers, address them first
+- Read the "Full Claude Output" section in the report for complete context
 
 `;
   }
@@ -256,13 +270,26 @@ zig build test-integration -Dtest-filter='<pattern>'
 - All changes must pass tests
 
 ### When Done or Context Low
-Provide a handoff summary:
-\`\`\`
-## Handoff Prompt
-[Complete context for next iteration]
+**IMPORTANT**: Before finishing, you MUST provide a detailed handoff summary in this exact format:
+
+\`\`\`handoff
+## What I Investigated
+[List files read, code sections examined]
+
+## What I Found
+[Key findings, root cause analysis, relevant code locations]
+
+## What I Changed (if any)
+[List of modifications made]
+
+## What Still Needs To Be Done
+[Specific next steps for the next iteration]
+
+## Blockers or Questions
+[Any issues preventing completion]
 \`\`\`
 
-If the issue is COMPLETE, say "ISSUE RESOLVED" clearly.
+If the issue is COMPLETE, say "ISSUE RESOLVED" clearly at the end.
 `;
 }
 
@@ -294,11 +321,22 @@ function workOnIssue(issue: GitHubIssue, iteration: number): { output: string; h
     const resolved = output.toLowerCase().includes('issue resolved') ||
                      output.toLowerCase().includes('task complete');
 
-    // Extract handoff prompt
+    // Extract handoff prompt - try new format first, then old format
     let handoffPrompt = '';
-    const handoffMatch = output.match(/## Handoff Prompt[\s\S]*?```([\s\S]*?)```/);
-    if (handoffMatch) {
-      handoffPrompt = handoffMatch[1].trim();
+    const newHandoffMatch = output.match(/```handoff([\s\S]*?)```/);
+    const oldHandoffMatch = output.match(/## Handoff Prompt[\s\S]*?```([\s\S]*?)```/);
+
+    if (newHandoffMatch) {
+      handoffPrompt = newHandoffMatch[1].trim();
+    } else if (oldHandoffMatch) {
+      handoffPrompt = oldHandoffMatch[1].trim();
+    } else {
+      // Try to extract any structured summary at the end
+      const lines = output.split('\n');
+      const lastLines = lines.slice(-30).join('\n');
+      if (lastLines.includes('What I') || lastLines.includes('Next steps') || lastLines.includes('Summary')) {
+        handoffPrompt = lastLines;
+      }
     }
 
     return { output, handoffPrompt, resolved };
@@ -335,11 +373,42 @@ function runTests(): boolean {
 }
 
 /**
+ * Extract a summary from Claude's output (first meaningful paragraph or key findings)
+ */
+function extractSummary(output: string): string {
+  // Try to find key sections in the output
+  const lines = output.split('\n').filter(l => l.trim().length > 0);
+
+  // Look for conclusion/summary patterns
+  const summaryPatterns = [
+    /(?:summary|conclusion|findings?|result|analysis):/i,
+    /(?:the issue|the problem|the bug|the fix)/i,
+    /(?:i found|i discovered|investigation shows)/i,
+  ];
+
+  for (const pattern of summaryPatterns) {
+    const idx = lines.findIndex(l => pattern.test(l));
+    if (idx !== -1) {
+      // Return this line and the next few
+      return lines.slice(idx, idx + 5).join('\n');
+    }
+  }
+
+  // Fall back to last 10 lines (usually contains the conclusion)
+  return lines.slice(-10).join('\n');
+}
+
+/**
  * Save report to file
  */
 function saveReport(report: IterationReport): string {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const filename = path.join(REPORTS_DIR, `issue-${report.issueNumber}-iter-${report.iteration}-${timestamp}.md`);
+
+  // Extract a meaningful summary from Claude's output
+  const extractedSummary = report.claudeOutput
+    ? extractSummary(report.claudeOutput)
+    : report.summary;
 
   const content = `# Report: Issue #${report.issueNumber} - Iteration ${report.iteration}
 
@@ -362,6 +431,25 @@ ${report.filesModified.map(f => `- ${f}`).join('\n') || 'None'}
 
 ## Tests Passed
 ${report.testsPassed ? 'Yes' : 'No'}
+
+## Handoff Context for Next Iteration
+${report.handoffPrompt || 'No handoff prompt provided'}
+
+## Key Findings (extracted from output)
+${extractedSummary}
+
+---
+
+## Full Claude Output
+
+<details>
+<summary>Click to expand full output (${report.claudeOutput?.length || 0} chars)</summary>
+
+\`\`\`
+${report.claudeOutput || 'No output captured'}
+\`\`\`
+
+</details>
 `;
 
   fs.writeFileSync(filename, content);
@@ -394,13 +482,17 @@ Co-Authored-By: Claude <noreply@anthropic.com>`;
  * Main orchestration loop
  */
 async function main() {
-  // Use HANDOFF_ISSUES for continuation run
-  const issuesToProcess = HANDOFF_ISSUES;
+  // Parse command line args for single issue mode
+  const args = process.argv.slice(2);
+  const singleIssue = args.find(a => a.startsWith('--issue='));
+  const issuesToProcess = singleIssue
+    ? [parseInt(singleIssue.split('=')[1], 10)]
+    : HANDOFF_ISSUES;
 
   console.log('='.repeat(60));
-  console.log('Agent Orchestrator - Issue Queue Runner (Iteration 2)');
+  console.log('Agent Orchestrator - Issue Queue Runner');
   console.log('='.repeat(60));
-  console.log(`\nProcessing ${issuesToProcess.length} HANDOFF issues`);
+  console.log(`\nProcessing ${issuesToProcess.length} issue(s): ${issuesToProcess.join(', ')}`);
   console.log(`Config: max-turns=${MAX_TURNS}, timeout=${TIMEOUT_MS/1000}s\n`);
 
   // Ensure reports dir exists
@@ -466,7 +558,7 @@ This issue may need human review or clarification before automated work can proc
     // Run tests
     const testsPassed = runTests();
 
-    // Save report
+    // Save report with full Claude output
     const report: IterationReport = {
       issueNumber: issueNum,
       iteration,
@@ -477,6 +569,8 @@ This issue may need human review or clarification before automated work can proc
       testsPassed,
       status: work.resolved ? 'completed' : 'handoff',
       validationResult: validation,
+      claudeOutput: work.output,
+      handoffPrompt: work.handoffPrompt,
     };
     saveReport(report);
 
