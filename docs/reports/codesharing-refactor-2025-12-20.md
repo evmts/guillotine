@@ -2,7 +2,7 @@
 
 ## Summary
 
-Implemented **Phase 3** of the codesharing refactor plan. Phase 2 (Opcode Consolidation) was analyzed but determined to be BLOCKED due to architectural coupling.
+Implemented **Phase 3** and **address utilities extraction** of the codesharing refactor plan. Phase 2 (Opcode Consolidation) and Phase 4 (Shared Opcode Logic) were analyzed but determined to be BLOCKED or deferred due to architectural coupling and risk.
 
 ## Phase 3: Extract next_instruction Helper - COMPLETED
 
@@ -47,6 +47,31 @@ pub inline fn nextInstruction(
 - test-opcodes: 623/623 PASS
 - test-unit: 7/7 PASS
 
+## Address Utils Extraction - COMPLETED
+
+### Problem
+Duplicate `to_u256` and `from_u256` functions in:
+- handlers_context.zig
+- handlers_system.zig
+
+### Solution
+Created `src/instructions/address_utils.zig` with shared functions:
+- `toWord(WordType, Address) -> WordType`
+- `fromWord(WordType, value) -> Address`
+
+### Changes
+- Created: `src/instructions/address_utils.zig` (24 lines)
+- Modified: handlers_context.zig, handlers_system.zig
+- Net reduction: ~20 lines of duplicate code
+- Commit: `f85a80f4`
+
+### Validation
+- Build: PASS
+- test-opcodes: 623/623 PASS
+- test-unit: 7/7 PASS
+
+---
+
 ## Phase 2: Consolidate Opcode Enum - BLOCKED
 
 ### Analysis
@@ -86,34 +111,69 @@ Two opcode files exist:
 - Reward: Moderate (~250-400 lines of enum dedup)
 - Alternative: Document the intentional duplication and ensure both enums stay synchronized
 
+## Phase 4: Shared Opcode Logic Layer - CANCELED
+
+### Original Plan
+Extract pure opcode logic (ADD, SUB, MUL, DIV, etc.) to `lib/voltaire/src/evm_ops/` so both Performance EVM and Mini EVM could share implementations.
+
+### Why Canceled
+
+1. **Mission-critical code**: This is the core arithmetic/comparison logic for a financial system. Any bug = potential fund loss.
+
+2. **Minimal actual duplication**: The "duplicated" logic is mostly just wrapping built-in operators:
+   ```zig
+   // Performance EVM
+   return top +% second;
+
+   // Mini EVM
+   return a +% b;
+   ```
+   There's no complex algorithm to share - it's 1-2 lines per opcode.
+
+3. **Different execution models**: Performance EVM uses dispatch-based tail calls with unsafe stack operations. Mini EVM uses traditional PC-based interpretation with safe operations. Forcing a shared abstraction would complicate both.
+
+4. **Testing burden**: Shared code would need to be tested against both execution models, increasing complexity without proportional benefit.
+
+5. **Risk/reward**: The potential for introducing consensus bugs far outweighs the ~100-200 lines of "deduplication" (which are really just operator wrappers).
+
+---
+
 ## Phase 1: Eliminate Stale Tracer Copy - PREVIOUSLY BLOCKED
 
 From prior analysis: `src/tracer/minimal_frame.zig` is NOT a stale copy. It's architecturally required for execution synchronization between Performance EVM (dispatch-based) and MinimalFrame (PC-based reference). The tracer uses `beforeInstruction()` hooks to validate both implementations produce identical results.
+
+---
 
 ## Metrics
 
 | Metric | Before | After | Change |
 |--------|--------|-------|--------|
 | Duplicate `next_instruction` functions | 11 | 0 | -11 |
-| Lines in handlers (net) | ~160 | ~105 | -55 |
-| Files modified | 0 | 12 | +12 |
-| New files | 0 | 1 | +1 |
+| Duplicate `to_u256`/`from_u256` | 2 each | 0 | -4 |
+| Lines removed (net) | 0 | ~75 | -75 |
+| New shared modules | 0 | 2 | +2 |
+| Files modified | 0 | 14 | +14 |
 | Test results | 630/630 | 630/630 | No change |
 
-## Remaining Duplication (Documented)
+## Remaining Duplication (Documented & Intentional)
 
 1. **Opcode enum** (`src/opcodes/opcode.zig` vs `lib/voltaire/src/primitives/opcode.zig`):
-   - Status: Intentional (Performance EVM needs UnifiedOpcode extension)
-   - Mitigation: Keep synchronized manually
+   - Status: Intentional - Performance EVM needs `UnifiedOpcode` extension for synthetic opcodes
+   - Mitigation: Keep synchronized manually during EIP updates
 
 2. **MinimalFrame** (`src/tracer/minimal_frame.zig` vs `mini/src/`):
    - Status: Architecturally required for execution synchronization
    - Mitigation: This is a validation mechanism, not duplication
 
-3. **Address conversions** (`to_u256`/`from_u256` in handlers_context.zig and handlers_system.zig):
-   - Status: Could be extracted but very low impact (~10 lines)
-   - Recommendation: Extract in future if touching those files
-
 ## Conclusion
 
-Phase 3 successfully eliminated 55 lines of duplicate code across 11 handler files. Phases 1 and 2 are blocked due to architectural requirements of the tracer system and dispatch-based execution model. The remaining duplication is either intentional or carries unacceptable risk for consolidation.
+Successfully eliminated ~75 lines of duplicate code:
+- **Phase 3**: Extracted `next_instruction` helper to `dispatch_next.zig` (11 files updated)
+- **Address utils**: Extracted `toWord`/`fromWord` to `address_utils.zig` (2 files updated)
+
+Remaining phases were analyzed and appropriately deferred:
+- **Phase 1** (tracer copy): BLOCKED - architecturally required for differential testing
+- **Phase 2** (opcode enum): BLOCKED - `UnifiedOpcode` coupling makes consolidation risky
+- **Phase 4** (shared opcode logic): CANCELED - minimal actual duplication, high risk to mission-critical code
+
+The codesharing refactor is now **COMPLETE**. All feasible deduplication has been done while respecting the architectural boundaries and risk constraints of this mission-critical financial infrastructure.
