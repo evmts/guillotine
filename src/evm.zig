@@ -21,7 +21,7 @@ pub fn Evm(config: EvmConfig) type {
     return struct {
         const Self = @This();
 
-        pub const Frame = @import("frame/frame.zig").Frame(config.frame_config());
+        pub const Frame = @import("frame/frame.zig").Frame(config.frame_config(), Self);
         pub const Bytecode = @import("bytecode/bytecode.zig").Bytecode(.{
             .max_bytecode_size = config.max_bytecode_size,
             .max_initcode_size = config.max_initcode_size,

@@ -112,6 +112,9 @@ test {
     // _ = @import("evm/warm_cold_access_tests.zig");
     _ = @import("evm/selfdestruct_records_test.zig");
     _ = @import("evm/allocation_failure_snapshot_test.zig");
+
+    // Issue #852: Frame coupled to DefaultEvm type breaks custom configs
+    _ = @import("evm/custom_evm_config_test.zig");
     
     // Opcode differential tests (integration tests comparing implementations)
     _ = @import("evm/opcodes/all_opcodes.zig");

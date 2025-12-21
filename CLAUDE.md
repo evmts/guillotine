@@ -269,6 +269,32 @@ Execution: cursor[0].opcode_handler(frame, cursor) → tail calls
 4. Handler tables for O(1) dispatch
 5. Bytecode optimization via Dispatch
 
+### Understanding `_unsafe` Operations
+
+**DO NOT file bugs about `_unsafe` operations lacking runtime bounds checks - that's the entire point.**
+
+The `_unsafe` suffix is a deliberate naming convention indicating:
+- **Caller is responsible for validation** (like Rust's `unsafe` blocks)
+- **Bounds checks are skipped for performance** - this is intentional, not a bug
+- **Pre-validation happens elsewhere** - the dispatch system validates stack requirements at bytecode analysis time
+
+Pattern:
+```zig
+// Safe version - ALWAYS checks bounds, returns error
+pub fn push(self: *Self, value: WordType) Error!void {
+    if (overflow_condition) return Error.StackOverflow;
+    self.push_unsafe(value);
+}
+
+// Unsafe version - NO bounds check, caller must pre-validate
+pub fn push_unsafe(self: *Self, value: WordType) void {
+    self.stack_ptr -= 1;
+    self.stack_ptr[0] = value;
+}
+```
+
+The `tracer.assert()` calls in unsafe operations are **development aids for debugging**, not security mechanisms. When tracer is null (production), they're no-ops by design.
+
 ### Key Separations
 
 - **Frame**: Executes dispatch schedule (NOT bytecode)
@@ -410,6 +436,14 @@ Always disclose Claude AI assistant actions:
 "*Note: This action was performed by Claude AI assistant, not @roninjin10 or @fucory*"
 
 Required for: creating, commenting, closing, updating issues and all GitHub API operations.
+
+### Before Filing Issues
+
+**Understand the design before claiming something is a bug:**
+- `_unsafe` suffix = intentionally no bounds checks (see "Understanding `_unsafe` Operations")
+- Tracer assertions = development aids, not production security
+- Pre-validation patterns = security happens at a different layer
+- If something looks "wrong" but follows a naming convention, it's probably intentional
 
 ## Build Commands
 

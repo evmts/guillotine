@@ -1526,10 +1526,8 @@ export fn evm_dispatch_pretty_print(data: [*]const u8, data_len: usize, buffer: 
     // Bytecode doesn't need deinit as it's value-based now
 
     // Create Frame and Dispatch
-    const MemoryDatabase = @import("evm").MemoryDatabase;
-    const FrameType = evm.Frame(evm.FrameConfig{
-        .DatabaseType = MemoryDatabase,
-    });
+    // Use MainnetEvm as the EVM type since this C API function uses the default configuration
+    const FrameType = MainnetEvm.Frame;
     const DispatchType = FrameType.Dispatch;
     const handlers = &FrameType.opcode_handlers;
 

@@ -18,14 +18,18 @@ const to_u256 = primitives.Address.to_u256;
 const from_u256 = primitives.Address.from_u256;
 const frame_handlers = @import("frame_handlers.zig");
 const SelfDestruct = @import("../storage/self_destruct.zig").SelfDestruct;
-const DefaultEvm = @import("../evm.zig").Evm(.{});
 const call_params_mod = @import("call_params.zig");
 const call_result_mod = @import("call_result.zig");
 const dispatch_mod = @import("../preprocessor/dispatch.zig");
 
 /// The core most important datastructure of the entire EVM
 /// Holds the StackFrame state along with an `interpret` method for executing a stack frame
-pub fn Frame(_config: FrameConfig) type {
+///
+/// Parameters:
+/// - _config: The FrameConfig containing settings like stack_size, WordType, etc.
+/// - EvmType: The concrete EVM type that this Frame is associated with.
+///            This is passed from Evm(config) to ensure getEvm() returns the correct type.
+pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
     _config.validate();
 
     return struct {
@@ -33,6 +37,9 @@ pub fn Frame(_config: FrameConfig) type {
 
         /// The config passed into Frame(_config)
         pub const config = _config;
+
+        /// The EVM type that this Frame is associated with
+        pub const Evm = EvmType;
 
         pub const Error = error{
             StackOverflow,
@@ -181,7 +188,7 @@ pub fn Frame(_config: FrameConfig) type {
             var memory = Memory.init(allocator) catch return Error.AllocationError;
             errdefer memory.deinit(allocator);
             // Resolve the database pointer immediately from the provided EVM pointer
-            const evm = @as(*DefaultEvm, @ptrCast(@alignCast(evm_ptr)));
+            const evm = @as(*EvmType, @ptrCast(@alignCast(evm_ptr)));
 
             return Self{
                 .stack = stack,
@@ -362,15 +369,10 @@ pub fn Frame(_config: FrameConfig) type {
             self.gas_remaining -= amt;
         }
 
-        /// Get the EVM instance from the opaque pointer
-        /// FIXME: This currently assumes DefaultEvm type which is incorrect for non-default configurations.
-        /// The proper fix requires either:
-        /// 1. Adding EvmType to FrameConfig (circular dependency issue)
-        /// 2. Using comptime type resolution (complex)
-        /// 3. Keeping as anyopaque and having callers cast (requires refactoring all handlers)
-        /// For now, this works because all handlers only use common EVM methods that exist regardless of config.
-        pub inline fn getEvm(self: *const Self) *DefaultEvm {
-            return @as(*DefaultEvm, @ptrCast(@alignCast(self.evm_ptr)));
+        /// Get the EVM instance from the opaque pointer.
+        /// Returns a pointer to the correct EVM type that this Frame is associated with.
+        pub inline fn getEvm(self: *const Self) *EvmType {
+            return @as(*EvmType, @ptrCast(@alignCast(self.evm_ptr)));
         }
 
         /// Get the database directly (for hot path storage operations)

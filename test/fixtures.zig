@@ -364,8 +364,8 @@ fn testDispatchSnapshot(allocator: std.mem.Allocator, fixture_name: []const u8, 
     );
     defer test_evm.deinit();
     
-    // Use the Frame type directly from evm module with MainnetEvm's config
-    const FrameType = evm.Frame(evm.FrameConfig{ .DatabaseType = evm.Database });
+    // Use the Frame type from MainnetEvm (the EVM type this test is using)
+    const FrameType = evm.MainnetEvm.Frame;
     const opcode_handlers = FrameType.opcode_handlers;
     
     const Dispatch = evm.dispatch.Preprocessor(FrameType);
