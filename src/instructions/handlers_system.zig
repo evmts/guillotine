@@ -19,27 +19,7 @@ pub fn Handlers(FrameType: type) type {
 
         // Use default configuration for CallParams - this maintains backward compatibility
         const CallParams = call_params_mod.CallParams(.{});
-
-        /// Helper to convert WordType to Address
-        fn from_u256(value: WordType) Address {
-            // If WordType is smaller than u256, just zero-extend
-            const value_u256: u256 = if (@bitSizeOf(WordType) < 256) @as(u256, value) else value;
-            // Take the lower 160 bits (20 bytes)
-            const addr_value = @as(u160, @truncate(value_u256));
-            var addr_bytes: [20]u8 = undefined;
-            std.mem.writeInt(u160, &addr_bytes, addr_value, .big);
-            return Address{ .bytes = addr_bytes };
-        }
-
-        /// Helper to convert Address to WordType
-        fn to_u256(addr: Address) WordType {
-            const bytes = addr.bytes;
-            var value: u256 = 0;
-            for (bytes) |byte| {
-                value = std.math.shl(u256, value, 8) | @as(u256, byte);
-            }
-            return @as(WordType, @truncate(value));
-        }
+        const address_utils = @import("address_utils.zig");
 
         /// CALL opcode (0xf1) - Message-call into an account.
         /// Stack: [gas, address, value, input_offset, input_size, output_offset, output_size] → [success]
@@ -55,7 +35,7 @@ pub fn Handlers(FrameType: type) type {
             const output_offset = self.stack.pop_unsafe();
             const output_size = self.stack.pop_unsafe();
 
-            const addr = from_u256(address_u256);
+            const addr = address_utils.fromWord(WordType,address_u256);
 
             if (gas_param > std.math.maxInt(u64)) {
                 (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "Stack must have space for push");
@@ -259,7 +239,7 @@ pub fn Handlers(FrameType: type) type {
             const output_offset = self.stack.pop_unsafe();
             const output_size = self.stack.pop_unsafe();
 
-            const addr = from_u256(address_u256);
+            const addr = address_utils.fromWord(WordType,address_u256);
 
             if (gas_param > std.math.maxInt(u64)) {
                 (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "Stack must have space for push");
@@ -404,7 +384,7 @@ pub fn Handlers(FrameType: type) type {
             const output_offset = self.stack.pop_unsafe();
             const output_size = self.stack.pop_unsafe();
 
-            const addr = from_u256(address_u256);
+            const addr = address_utils.fromWord(WordType,address_u256);
 
             if (gas_param > std.math.maxInt(u64)) {
                 self.stack.push_unsafe(0);
@@ -561,7 +541,7 @@ pub fn Handlers(FrameType: type) type {
             const output_offset = self.stack.pop_unsafe();
             const output_size = self.stack.pop_unsafe();
 
-            const addr = from_u256(address_u256);
+            const addr = address_utils.fromWord(WordType,address_u256);
 
             if (gas_param > std.math.maxInt(u64)) {
                 self.stack.push_unsafe(0);
@@ -796,7 +776,7 @@ pub fn Handlers(FrameType: type) type {
                 {
                     (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "Stack must have space for push");
                 }
-                self.stack.push_unsafe(to_u256(result.created_address.?));
+                self.stack.push_unsafe(address_utils.toWord(WordType,result.created_address.?));
             } else {
                 {
                     (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "Stack must have space for push");
@@ -894,7 +874,7 @@ pub fn Handlers(FrameType: type) type {
                 {
                     (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "Stack must have space for push");
                 }
-                self.stack.push_unsafe(to_u256(result.created_address.?));
+                self.stack.push_unsafe(address_utils.toWord(WordType,result.created_address.?));
             } else {
                 {
                     (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "Stack must have space for push");
@@ -1036,7 +1016,7 @@ pub fn Handlers(FrameType: type) type {
                 (&self.getEvm().tracer).assert(self.stack.size() >= 1, "SELFDESTRUCT requires 1 stack item");
             }
             const recipient_u256 = self.stack.pop_unsafe();
-            const recipient = from_u256(recipient_u256);
+            const recipient = address_utils.fromWord(WordType,recipient_u256);
             self.getEvm().mark_for_destruction(self.contract_address, recipient) catch |err| switch (err) {
                 error.StaticCallViolation => return Error.WriteProtection,
                 else => {
@@ -1081,7 +1061,7 @@ pub fn Handlers(FrameType: type) type {
             const authority_u256 = self.stack.pop_unsafe();
 
             // Convert authority to address
-            const authority = from_u256(authority_u256);
+            const authority = address_utils.fromWord(WordType,authority_u256);
 
             // Validate signature components
             if (sig_v > 28 or sig_r == 0 or sig_s == 0) {
@@ -1189,7 +1169,7 @@ pub fn Handlers(FrameType: type) type {
             }
 
             // Convert to address
-            const to_addr = from_u256(to_address);
+            const to_addr = address_utils.fromWord(WordType,to_address);
 
             // Bounds checking for gas parameter
             if (gas_param > std.math.maxInt(u64)) {
@@ -1359,6 +1339,7 @@ const testing = std.testing;
 const Frame = @import("../frame/frame.zig").Frame;
 const dispatch_mod = @import("../preprocessor/dispatch.zig");
 const DefaultTracer = @import("../tracer/tracer.zig").DefaultTracer;
+const test_address_utils = @import("address_utils.zig");
 
 // Test configuration
 const test_config = FrameConfig{
@@ -1784,7 +1765,7 @@ test "SELFDESTRUCT opcode - to self" {
     defer frame.deinit(testing.allocator);
 
     // Self-destruct to self (edge case)
-    const self_addr = TestFrame.SystemHandlers.to_u256(frame.contract_address);
+    const self_addr = test_address_utils.toWord(u256, frame.contract_address);
     try frame.stack.push(self_addr);
 
     const dispatch = createMockDispatch();
@@ -1811,18 +1792,18 @@ test "SELFDESTRUCT opcode - to max address" {
 // Address conversion tests
 test "Address conversion - from_u256 edge cases" {
     // Test zero
-    const zero = TestFrame.SystemHandlers.from_u256(0);
+    const zero = test_address_utils.fromWord(u256, 0);
     try testing.expectEqual(primitives.ZERO_ADDRESS, zero);
 
     // Test max u160 (max valid address)
     const max_u160 = std.math.maxInt(u160);
-    const max_addr = TestFrame.SystemHandlers.from_u256(max_u160);
+    const max_addr = test_address_utils.fromWord(u256, max_u160);
     const expected_max = Address.fromBytes([_]u8{0xFF} ** 20) catch unreachable;
     try testing.expectEqual(expected_max, max_addr);
 
     // Test truncation from u256
     const large_value: u256 = std.math.shl(u256, 1, 200) | 0x1234567890ABCDEF1234567890ABCDEF12345678;
-    const truncated = TestFrame.SystemHandlers.from_u256(large_value);
+    const truncated = test_address_utils.fromWord(u256, large_value);
     // Should only keep lower 160 bits
     const expected_bytes = [_]u8{ 0x12, 0x34, 0x56, 0x78, 0x90, 0xAB, 0xCD, 0xEF, 0x12, 0x34, 0x56, 0x78, 0x90, 0xAB, 0xCD, 0xEF, 0x12, 0x34, 0x56, 0x78 };
     const expected = Address.fromBytes(expected_bytes) catch unreachable;
@@ -1832,19 +1813,19 @@ test "Address conversion - from_u256 edge cases" {
 test "Address conversion - to_u256 edge cases" {
     // Test zero
     const zero_addr = primitives.ZERO_ADDRESS;
-    const zero_u256 = TestFrame.SystemHandlers.to_u256(zero_addr);
+    const zero_u256 = test_address_utils.toWord(u256, zero_addr);
     try testing.expectEqual(@as(u256, 0), zero_u256);
 
     // Test max address
     const max_bytes = [_]u8{0xFF} ** 20;
     const max_addr = Address.fromBytes(max_bytes) catch unreachable;
-    const max_u256 = TestFrame.SystemHandlers.to_u256(max_addr);
+    const max_u256 = test_address_utils.toWord(u256, max_addr);
     try testing.expectEqual(@as(u256, std.math.maxInt(u160)), max_u256);
 
     // Test specific pattern
     const pattern_bytes = [_]u8{ 0x12, 0x34, 0x56, 0x78, 0x90, 0xAB, 0xCD, 0xEF, 0x12, 0x34, 0x56, 0x78, 0x90, 0xAB, 0xCD, 0xEF, 0x12, 0x34, 0x56, 0x78 };
     const pattern_addr = Address.fromBytes(pattern_bytes) catch unreachable;
-    const pattern_u256 = TestFrame.SystemHandlers.to_u256(pattern_addr);
+    const pattern_u256 = test_address_utils.toWord(u256, pattern_addr);
     const expected: u256 = 0x1234567890ABCDEF1234567890ABCDEF12345678;
     try testing.expectEqual(expected, pattern_u256);
 }

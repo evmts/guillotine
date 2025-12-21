@@ -19,33 +19,13 @@ pub fn Handlers(FrameType: type) type {
         const config = FrameType.frame_config;
         const dispatch_next = @import("dispatch_next.zig");
         const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
-
-        /// Helper to convert Address to WordType
-        fn to_u256(addr: Address) WordType {
-            const bytes = addr.bytes;
-            var value: u256 = 0;
-            for (bytes) |byte| {
-                value = (value << 8) | @as(u256, byte);
-            }
-            return @as(WordType, @truncate(value));
-        }
-
-        /// Helper to convert WordType to Address
-        fn from_u256(value: WordType) Address {
-            // If WordType is smaller than u256, just zero-extend
-            const value_u256: u256 = if (@bitSizeOf(WordType) < 256) @as(u256, value) else value;
-            // Take the lower 160 bits (20 bytes)
-            const addr_value = @as(u160, @truncate(value_u256));
-            var addr_bytes: [20]u8 = undefined;
-            std.mem.writeInt(u160, &addr_bytes, addr_value, .big);
-            return Address{ .bytes = addr_bytes };
-        }
+        const address_utils = @import("address_utils.zig");
 
         /// ADDRESS opcode (0x30) - Get address of currently executing account.
         /// Stack: [] → [address]
         pub fn address(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             self.beforeInstruction(.ADDRESS, cursor);
-            const addr_u256 = to_u256(self.contract_address);
+            const addr_u256 = address_utils.toWord(WordType, self.contract_address);
             {
                 (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "ADDRESS requires stack space");
             }
@@ -61,7 +41,7 @@ pub fn Handlers(FrameType: type) type {
                 (&self.getEvm().tracer).assert(self.stack.size() >= 1, "BALANCE requires 1 stack item");
             }
             const address_u256 = self.stack.peek_unsafe();
-            const addr = from_u256(address_u256);
+            const addr = address_utils.fromWord(WordType,address_u256);
 
             // Access the address for warm/cold accounting (EIP-2929)
             const evm = self.getEvm();
@@ -91,7 +71,7 @@ pub fn Handlers(FrameType: type) type {
         pub fn origin(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             self.beforeInstruction(.ORIGIN, cursor);
             const tx_origin = self.getEvm().get_tx_origin();
-            const origin_u256 = to_u256(tx_origin);
+            const origin_u256 = address_utils.toWord(WordType,tx_origin);
             {
                 (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "ORIGIN requires stack space");
             }
@@ -103,7 +83,7 @@ pub fn Handlers(FrameType: type) type {
         /// Stack: [] → [caller]
         pub fn caller(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             self.beforeInstruction(.CALLER, cursor);
-            const caller_u256 = to_u256(self.caller);
+            const caller_u256 = address_utils.toWord(WordType,self.caller);
             {
                 (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "CALLER requires stack space");
             }
@@ -343,7 +323,7 @@ pub fn Handlers(FrameType: type) type {
                 (&self.getEvm().tracer).assert(self.stack.size() >= 1, "EXTCODESIZE requires 1 stack item");
             }
             const address_u256 = self.stack.peek_unsafe();
-            const addr = from_u256(address_u256);
+            const addr = address_utils.fromWord(WordType,address_u256);
 
             // Access the address for warm/cold accounting (EIP-2929)
             const evm = self.getEvm();
@@ -394,7 +374,7 @@ pub fn Handlers(FrameType: type) type {
                 return Error.OutOfBounds;
             }
 
-            const addr = from_u256(address_u256);
+            const addr = address_utils.fromWord(WordType,address_u256);
 
             // Access the address for warm/cold accounting (EIP-2929)
             const evm = self.getEvm();
@@ -480,7 +460,7 @@ pub fn Handlers(FrameType: type) type {
                 (&self.getEvm().tracer).assert(self.stack.size() >= 1, "EXTCODEHASH requires 1 stack item");
             }
             const address_u256 = self.stack.peek_unsafe();
-            const addr = from_u256(address_u256);
+            const addr = address_utils.fromWord(WordType,address_u256);
 
             // Access the address for warm/cold accounting (EIP-2929)
             const evm = self.getEvm();
@@ -687,7 +667,7 @@ pub fn Handlers(FrameType: type) type {
 
             const dispatch = Dispatch{ .cursor = cursor };
             const block_info = self.getEvm().get_block_info();
-            const coinbase_u256 = to_u256(block_info.coinbase);
+            const coinbase_u256 = address_utils.toWord(WordType,block_info.coinbase);
             const coinbase_word = @as(WordType, @truncate(coinbase_u256));
             {
                 (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "COINBASE requires stack space");
@@ -894,6 +874,7 @@ const Frame = @import("../frame/frame.zig").Frame;
 const dispatch_mod = @import("../preprocessor/dispatch.zig");
 const DefaultTracer = @import("../tracer/tracer.zig").DefaultTracer;
 const block_info_mod = @import("../block/block_info.zig");
+const test_address_utils = @import("address_utils.zig");
 
 // Test configuration
 const test_config = FrameConfig{
@@ -1661,8 +1642,8 @@ test "Address conversion helpers - boundary values" {
     };
 
     for (test_addresses) |addr| {
-        const u256_val = TestFrame.ContextHandlers.to_u256(addr);
-        const addr_back = TestFrame.ContextHandlers.from_u256(u256_val);
+        const u256_val = test_address_utils.toWord(u256, addr);
+        const addr_back = test_address_utils.fromWord(u256, u256_val);
         try testing.expect(addr.eql(addr_back));
     }
 }
@@ -1690,7 +1671,7 @@ test "ADDRESS opcode - various contract addresses" {
         _ = try TestFrame.ContextHandlers.address(frame, dispatch);
 
         const result = try frame.stack.pop();
-        const expected = TestFrame.ContextHandlers.to_u256(test_addr);
+        const expected = test_address_utils.toWord(u256, test_addr);
         try testing.expectEqual(expected, result);
     }
 }
