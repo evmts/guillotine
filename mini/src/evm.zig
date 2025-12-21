@@ -128,17 +128,19 @@ pub fn Evm(comptime config: EvmConfig) type {
             const arena_alloc = arena.allocator();
 
             return Self{
-                .frames = undefined,
-                .storage = undefined,
-                .created_accounts = undefined,
-                .selfdestructed_accounts = undefined,
-                .touched_accounts = undefined,
+                // Initialize all ArrayList fields to empty (not undefined)
+                // These will be properly reset by initTransactionState before use
+                .frames = std.ArrayList(FrameType){},
+                .storage = Storage.init(arena_alloc, h, null),
+                .created_accounts = std.AutoHashMap(primitives.Address, void).init(arena_alloc),
+                .selfdestructed_accounts = std.AutoHashMap(primitives.Address, void).init(arena_alloc),
+                .touched_accounts = std.AutoHashMap(primitives.Address, void).init(arena_alloc),
                 .balances = std.AutoHashMap(primitives.Address, u256).init(arena_alloc),
                 .nonces = std.AutoHashMap(primitives.Address, u64).init(arena_alloc),
                 .code = std.AutoHashMap(primitives.Address, []const u8).init(arena_alloc),
-                .access_list_manager = undefined,
+                .access_list_manager = AccessListManager.init(arena_alloc),
                 .gas_refund = 0,
-                .balance_snapshot_stack = undefined,
+                .balance_snapshot_stack = std.ArrayList(*std.AutoHashMap(primitives.Address, u256)){},
                 .hardfork = hardfork orelse Hardfork.DEFAULT,
                 .block_context = block_context orelse .{
                     .chain_id = 1,
@@ -160,7 +162,7 @@ pub fn Evm(comptime config: EvmConfig) type {
                 .opcode_overrides = config.opcode_overrides,
                 .precompile_overrides = config.precompile_overrides,
                 .async_executor = null, // Initialized when needed
-                .logs = undefined,
+                .logs = std.ArrayList(call_result.Log){},
             };
         }
 
