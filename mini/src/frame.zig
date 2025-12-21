@@ -48,7 +48,7 @@ pub fn Frame(comptime config: EvmConfig) type {
         const SystemHandlers = handlers_system.Handlers(Self);
 
         stack: std.ArrayList(u256),
-        memory: std.AutoHashMap(u32, u8),
+        memory: std.ArrayList(u8),
         memory_size: u32,
         pc: u32,
         gas_remaining: i64,
@@ -105,8 +105,8 @@ pub fn Frame(comptime config: EvmConfig) type {
             try stack.ensureTotalCapacity(allocator, 1024);
             errdefer stack.deinit(allocator);
 
-            var memory_map = std.AutoHashMap(u32, u8).init(allocator);
-            errdefer memory_map.deinit();
+            var memory_list = std.ArrayList(u8){};
+            errdefer memory_list.deinit(allocator);
 
             // Analyze bytecode to identify valid jump destinations
             var bytecode = try Bytecode.init(allocator, bytecode_raw);
@@ -114,7 +114,7 @@ pub fn Frame(comptime config: EvmConfig) type {
 
             return Self{
                 .stack = stack,
-                .memory = memory_map,
+                .memory = memory_list,
                 .memory_size = 0,
                 .pc = 0,
                 .gas_remaining = gas,
@@ -141,7 +141,7 @@ pub fn Frame(comptime config: EvmConfig) type {
             // Note: When using arena allocator from Evm, this becomes a no-op
             // The arena will clean up all memory at once when Evm is destroyed
             self.stack.deinit(self.allocator);
-            self.memory.deinit();
+            self.memory.deinit(self.allocator);
             self.bytecode.deinit();
             // No need to free output or return_data when using arena
         }
@@ -195,7 +195,8 @@ pub fn Frame(comptime config: EvmConfig) type {
 
         /// Read byte from memory
         pub fn readMemory(self: *Self, offset: u32) u8 {
-            return self.memory.get(offset) orelse 0;
+            if (offset >= self.memory.items.len) return 0;
+            return self.memory.items[offset];
         }
 
         /// Safe add helper for u32 indices
@@ -205,7 +206,16 @@ pub fn Frame(comptime config: EvmConfig) type {
 
         /// Write byte to memory
         pub fn writeMemory(self: *Self, offset: u32, value: u8) EvmError!void {
-            try self.memory.put(offset, value);
+            // Expand memory if necessary
+            if (offset >= self.memory.items.len) {
+                const old_len = self.memory.items.len;
+                const new_len = offset + 1;
+                self.memory.ensureTotalCapacity(self.allocator, new_len) catch return error.OutOfMemory;
+                // Resize and zero-fill
+                self.memory.items.len = new_len;
+                @memset(self.memory.items[old_len..new_len], 0);
+            }
+            self.memory.items[offset] = value;
             // EVM memory expands to word-aligned (32-byte) boundaries
             const end_offset: u64 = @as(u64, offset) + 1;
             const word_aligned_size = wordAlignedSize(end_offset);
@@ -489,10 +499,14 @@ pub fn Frame(comptime config: EvmConfig) type {
         fn getMemorySlice(self: *Self, allocator: std.mem.Allocator) ![]u8 {
             if (self.memory_size == 0) return &[_]u8{};
 
+            // Allocate word-aligned slice for tracing
             const mem_slice = try allocator.alloc(u8, self.memory_size);
-            var i: u32 = 0;
-            while (i < self.memory_size) : (i += 1) {
-                mem_slice[i] = self.readMemory(i);
+            // Copy existing data directly
+            const copy_len = @min(self.memory.items.len, self.memory_size);
+            @memcpy(mem_slice[0..copy_len], self.memory.items[0..copy_len]);
+            // Zero-fill any remaining (for word alignment)
+            if (copy_len < self.memory_size) {
+                @memset(mem_slice[copy_len..], 0);
             }
             return mem_slice;
         }

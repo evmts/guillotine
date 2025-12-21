@@ -34,8 +34,8 @@ const ALL_ISSUES = [
 ];
 
 // Configuration
-const MAX_TURNS = 20; // Doubled from default ~10
-const TIMEOUT_MS = 1200000; // 20 minutes (doubled from 10)
+const MAX_TURNS = 60; // Tripled to allow build verification
+const TIMEOUT_MS = 1800000; // 30 minutes
 
 // Types
 interface GitHubIssue {
@@ -305,7 +305,7 @@ function workOnIssue(issue: GitHubIssue, iteration: number): { output: string; h
 
   try {
     const output = execSync(
-      `claude -p "$(cat ${tempFile})" --output-format text --max-turns ${MAX_TURNS}`,
+      `claude -p "$(cat ${tempFile})" --output-format text --max-turns ${MAX_TURNS} --dangerously-skip-permissions`,
       {
         cwd: REPO_ROOT,
         encoding: 'utf-8',
