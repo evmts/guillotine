@@ -8,6 +8,7 @@ const MinimalFrame = @import("minimal_frame.zig").MinimalFrame;
 const Hardfork = @import("../eips_and_hardforks/eips.zig").Hardfork;
 const minimal_host = @import("minimal_host.zig");
 const precompiles = @import("precompiles");
+const log = @import("../log.zig");
 
 const Address = primitives.Address.Address;
 
@@ -386,7 +387,9 @@ pub const MinimalEvm = struct {
         defer _ = self.frames.pop();
 
         // Execute the frame
-        frame.execute() catch {
+        frame.execute() catch |err| {
+            // Log the error for debugging - do not swallow silently
+            log.debug("MinimalEvm frame execution failed: {}", .{err});
             // Error case - return failure (arena will clean up)
             return CallResult{
                 .success = false,
@@ -444,7 +447,9 @@ pub const MinimalEvm = struct {
         input: []const u8,
         gas: u64,
     ) Error!CallResult {
-        const result = precompiles.execute(self.allocator, address, input, gas, self.hardfork) catch {
+        const result = precompiles.execute(self.allocator, address, input, gas, self.hardfork) catch |err| {
+            // Log the error for debugging - do not swallow silently
+            log.debug("MinimalEvm precompile execution failed: {}", .{err});
             // Precompile execution failed - return failure with no gas refund
             return CallResult{
                 .success = false,

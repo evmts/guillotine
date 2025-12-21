@@ -2000,18 +2000,36 @@ pub const MinimalFrame = struct {
 
             // SELFDESTRUCT
             0xff => {
-                const beneficiary = try self.popStack();
-                _ = beneficiary;
-                
+                const beneficiary_u256 = try self.popStack();
+
+                // Convert u256 to Address (take lower 160 bits)
+                var addr_bytes: [20]u8 = undefined;
+                var addr_i: u32 = 0;
+                while (addr_i < 20) : (addr_i += 1) {
+                    addr_bytes[19 - addr_i] = @as(u8, @truncate(beneficiary_u256 >> @intCast(addr_i * 8)));
+                }
+                const beneficiary = Address{ .bytes = addr_bytes };
+
                 const gas_cost = self.selfdestructGasCost();
                 try self.consumeGas(gas_cost);
-                
+
+                // Transfer contract balance to beneficiary (evm from outer scope)
+                const contract_balance = evm.get_balance(self.address);
+                if (contract_balance > 0) {
+                    const beneficiary_balance = evm.get_balance(beneficiary);
+                    // Set contract balance to 0
+                    evm.setBalance(self.address, 0) catch return error.StorageError;
+                    // Add to beneficiary balance (wrapping add for overflow safety)
+                    const new_balance = beneficiary_balance +% contract_balance;
+                    evm.setBalance(beneficiary, new_balance) catch return error.StorageError;
+                }
+
                 // Apply refund to EVM's gas_refund counter
                 const refund = self.selfdestructRefund();
                 if (refund > 0) {
-                    self.getEvm().gas_refund += refund;
+                    evm.gas_refund += refund;
                 }
-                
+
                 self.stopped = true;
             },
 

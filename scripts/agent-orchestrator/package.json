@@ -1,0 +1,21 @@
+{
+  "name": "agent-orchestrator",
+  "version": "1.0.0",
+  "description": "Automated agent loop orchestrator for Guillotine EVM development",
+  "type": "module",
+  "main": "dist/orchestrator.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/orchestrator.js",
+    "dev": "tsx src/orchestrator.ts",
+    "run-issue": "tsx src/orchestrator.ts --issue"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-code": "^0.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0"
+  }
+}
