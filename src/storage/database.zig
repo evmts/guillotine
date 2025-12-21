@@ -90,6 +90,70 @@ pub const Account = @import("database_interface_account.zig").Account;
 /// All-zero code hash for EOA detection
 const ZERO_CODE_HASH = [_]u8{0} ** 32;
 
+/// Transaction cache entry for buffered writes.
+/// Uses an arena allocator for O(1) revert performance.
+const TransactionCache = struct {
+    /// Arena allocator for this transaction's temporary allocations
+    arena: std.heap.ArenaAllocator,
+    /// Cached account changes (address -> account or null for deletion)
+    accounts: std.HashMap([20]u8, ?Account, ArrayHashContext, std.hash_map.default_max_load_percentage),
+    /// Cached storage changes
+    storage: std.HashMap(StorageKey, u256, StorageKeyContext, std.hash_map.default_max_load_percentage),
+    /// Cached code storage (code hash -> code bytes)
+    code: std.HashMap([32]u8, []const u8, ArrayHashContext, std.hash_map.default_max_load_percentage),
+    /// Snapshot ID associated with this transaction
+    snapshot_id: u64,
+
+    const StorageKey = struct {
+        address: [20]u8,
+        key: u256,
+    };
+
+    const ArrayHashContext = struct {
+        pub fn hash(self: @This(), s: anytype) u64 {
+            _ = self;
+            return std.hash_map.hashString(@as([]const u8, &s));
+        }
+        pub fn eql(self: @This(), a: anytype, b: anytype) bool {
+            _ = self;
+            return std.mem.eql(u8, &a, &b);
+        }
+    };
+
+    const StorageKeyContext = struct {
+        pub fn hash(self: @This(), key: StorageKey) u64 {
+            _ = self;
+            var hasher = std.hash.Wyhash.init(0);
+            hasher.update(&key.address);
+            hasher.update(std.mem.asBytes(&key.key));
+            return hasher.final();
+        }
+        pub fn eql(self: @This(), a: StorageKey, b: StorageKey) bool {
+            _ = self;
+            return std.mem.eql(u8, &a.address, &b.address) and a.key == b.key;
+        }
+    };
+
+    /// Initialize a new transaction cache
+    pub fn init(base_allocator: std.mem.Allocator, snapshot_id: u64) TransactionCache {
+        var arena = std.heap.ArenaAllocator.init(base_allocator);
+        const arena_alloc = arena.allocator();
+        return TransactionCache{
+            .arena = arena,
+            .accounts = std.HashMap([20]u8, ?Account, ArrayHashContext, std.hash_map.default_max_load_percentage).init(arena_alloc),
+            .storage = std.HashMap(StorageKey, u256, StorageKeyContext, std.hash_map.default_max_load_percentage).init(arena_alloc),
+            .code = std.HashMap([32]u8, []const u8, ArrayHashContext, std.hash_map.default_max_load_percentage).init(arena_alloc),
+            .snapshot_id = snapshot_id,
+        };
+    }
+
+    /// Deinitialize and free all memory (O(1) operation with arena)
+    pub fn deinit(self: *TransactionCache) void {
+        // Arena deinit handles all allocations at once - O(1) cleanup
+        self.arena.deinit();
+    }
+};
+
 /// High-performance in-memory database for EVM state
 pub const Database = struct {
     accounts: std.HashMap([20]u8, Account, ArrayHashContext, std.hash_map.default_max_load_percentage),
@@ -104,6 +168,8 @@ pub const Database = struct {
     overlay_accounts: std.HashMap([20]u8, Account, ArrayHashContext, std.hash_map.default_max_load_percentage),
     overlay_storage: std.HashMap(StorageKey, u256, StorageKeyContext, std.hash_map.default_max_load_percentage),
     overlay_code: std.HashMap([32]u8, []const u8, ArrayHashContext, std.hash_map.default_max_load_percentage),
+    // Transaction-level cache for O(1) revert performance (Issue #832)
+    tx_cache: ?*TransactionCache = null,
 
     /// Database operation errors
     pub const Error = error{
@@ -188,6 +254,7 @@ pub const Database = struct {
             .overlay_accounts = std.HashMap([20]u8, Account, ArrayHashContext, std.hash_map.default_max_load_percentage).init(allocator),
             .overlay_storage = std.HashMap(StorageKey, u256, StorageKeyContext, std.hash_map.default_max_load_percentage).init(allocator),
             .overlay_code = std.HashMap([32]u8, []const u8, ArrayHashContext, std.hash_map.default_max_load_percentage).init(allocator),
+            .tx_cache = null,
         };
     }
 
@@ -225,6 +292,13 @@ pub const Database = struct {
 
     /// Clean up database resources
     pub fn deinit(self: *Database) void {
+        // Clean up transaction cache if active
+        if (self.tx_cache) |cache| {
+            cache.deinit();
+            self.allocator.destroy(cache);
+            self.tx_cache = null;
+        }
+
         self.accounts.deinit();
         self.storage.deinit();
         self.transient_storage.deinit();
@@ -249,8 +323,15 @@ pub const Database = struct {
 
     /// Get account data for the given address
     pub fn get_account(self: *Database, address: [20]u8) Error!?Account {
+        // Check overlay first (simulate mode)
         if (self.overlay_active) {
             if (self.overlay_accounts.get(address)) |acc| return acc;
+        }
+        // Check transaction cache (buffered writes during tx execution)
+        if (self.tx_cache) |cache| {
+            if (cache.accounts.get(address)) |maybe_acc| {
+                return maybe_acc; // null means deleted
+            }
         }
         return self.accounts.get(address);
     }
@@ -259,6 +340,11 @@ pub const Database = struct {
     pub fn set_account(self: *Database, address: [20]u8, account: Account) Error!void {
         if (self.overlay_active) {
             try self.overlay_accounts.put(address, account);
+            return;
+        }
+        // Buffer write in transaction cache if active
+        if (self.tx_cache) |cache| {
+            try cache.accounts.put(address, account);
             return;
         }
         try self.accounts.put(address, account);
@@ -270,6 +356,11 @@ pub const Database = struct {
             _ = self.overlay_accounts.remove(address);
             return;
         }
+        // Mark as deleted in transaction cache if active
+        if (self.tx_cache) |cache| {
+            try cache.accounts.put(address, null);
+            return;
+        }
         _ = self.accounts.remove(address);
     }
 
@@ -277,6 +368,12 @@ pub const Database = struct {
     pub fn account_exists(self: *Database, address: [20]u8) bool {
         if (self.overlay_active) {
             if (self.overlay_accounts.contains(address)) return true;
+        }
+        // Check transaction cache
+        if (self.tx_cache) |cache| {
+            if (cache.accounts.get(address)) |maybe_acc| {
+                return maybe_acc != null;
+            }
         }
         return self.accounts.contains(address);
     }
@@ -329,6 +426,11 @@ pub const Database = struct {
         if (self.overlay_active) {
             if (self.overlay_storage.get(storage_key)) |v| return v;
         }
+        // Check transaction cache
+        if (self.tx_cache) |cache| {
+            const tx_storage_key = TransactionCache.StorageKey{ .address = address, .key = key };
+            if (cache.storage.get(tx_storage_key)) |v| return v;
+        }
         return self.storage.get(storage_key) orelse 0;
     }
 
@@ -337,6 +439,12 @@ pub const Database = struct {
         const storage_key = StorageKey{ .address = address, .key = key };
         if (self.overlay_active) {
             try self.overlay_storage.put(storage_key, value);
+            return;
+        }
+        // Buffer write in transaction cache if active
+        if (self.tx_cache) |cache| {
+            const tx_storage_key = TransactionCache.StorageKey{ .address = address, .key = key };
+            try cache.storage.put(tx_storage_key, value);
             return;
         }
         try self.storage.put(storage_key, value);
@@ -363,6 +471,10 @@ pub const Database = struct {
         if (self.overlay_active) {
             if (self.overlay_code.get(code_hash)) |buf| return buf;
         }
+        // Check transaction cache
+        if (self.tx_cache) |cache| {
+            if (cache.code.get(code_hash)) |buf| return buf;
+        }
         const code = self.code_storage.get(code_hash) orelse {
             // log.debug("get_code: Code not found for hash {x}", .{code_hash});
             return Error.CodeNotFound;
@@ -375,7 +487,8 @@ pub const Database = struct {
     pub fn get_code_by_address(self: *Database, address: [20]u8) Error![]const u8 {
         // log.debug("get_code_by_address: Looking for address {x}", .{address});
 
-        if (self.accounts.get(address)) |account| {
+        // Check all layers for account (uses get_account which already checks cache)
+        if (try self.get_account(address)) |account| {
             // EIP-7702: Check if this EOA has delegated code
             if (account.get_effective_code_address()) |delegated_addr| {
                 // log.debug("get_code_by_address: EOA has delegation to {x}", .{delegated_addr.bytes});
@@ -411,11 +524,25 @@ pub const Database = struct {
                 // Code already exists, no need to store again
                 return hash;
             }
-        } else {
-            if (self.code_storage.get(hash)) |_| {
-                // Code already exists, no need to store again
+        }
+        // Check transaction cache
+        if (self.tx_cache) |cache| {
+            if (cache.code.get(hash)) |_| {
                 return hash;
             }
+        }
+        if (self.code_storage.get(hash)) |_| {
+            // Code already exists, no need to store again
+            return hash;
+        }
+
+        // Buffer code in transaction cache if active
+        if (self.tx_cache) |cache| {
+            // Allocate from transaction arena
+            const code_copy = cache.arena.allocator().alloc(u8, code.len) catch return Error.OutOfMemory;
+            @memcpy(code_copy, code);
+            try cache.code.put(hash, code_copy);
+            return hash;
         }
 
         // Make a copy of the code to own it
@@ -708,23 +835,150 @@ pub const Database = struct {
         // In a real implementation, this would rollback all batched operations
     }
 
-    // Transaction operations (simple implementation using snapshots)
+    // Transaction operations with arena-based caching (Issue #832)
+    // Uses transaction cache for O(1) rollback performance
 
     /// Begin a transaction and return a transaction ID
-    /// Transactions use the snapshot mechanism for state isolation
+    /// Creates a snapshot and initializes transaction cache for buffered writes
     pub fn begin_transaction(self: *Database) Error!u32 {
         const snapshot_id = try self.create_snapshot();
+
+        // Initialize transaction cache if not already active
+        if (self.tx_cache == null) {
+            const cache = self.allocator.create(TransactionCache) catch return Error.OutOfMemory;
+            cache.* = TransactionCache.init(self.allocator, snapshot_id);
+            self.tx_cache = cache;
+        }
+
         return @intCast(snapshot_id);
     }
 
-    /// Commit a transaction by discarding its snapshot
+    /// Commit a transaction by flushing cache to permanent storage
+    /// Copies all buffered changes to main hashmaps, then discards snapshot
     pub fn commit_transaction(self: *Database, id: u32) Error!void {
+        // Flush transaction cache to permanent storage
+        if (self.tx_cache) |cache| {
+            // Apply account changes
+            var accounts_iter = cache.accounts.iterator();
+            while (accounts_iter.next()) |entry| {
+                if (entry.value_ptr.*) |account| {
+                    try self.accounts.put(entry.key_ptr.*, account);
+                } else {
+                    // Account was deleted
+                    _ = self.accounts.remove(entry.key_ptr.*);
+                }
+            }
+
+            // Apply storage changes
+            var storage_iter = cache.storage.iterator();
+            while (storage_iter.next()) |entry| {
+                const storage_key = StorageKey{
+                    .address = entry.key_ptr.address,
+                    .key = entry.key_ptr.key,
+                };
+                try self.storage.put(storage_key, entry.value_ptr.*);
+            }
+
+            // Apply code changes - need to copy from arena to main allocator
+            var code_iter = cache.code.iterator();
+            while (code_iter.next()) |entry| {
+                // Check if code already exists in main storage
+                if (self.code_storage.get(entry.key_ptr.*)) |_| {
+                    continue; // Already exists, skip
+                }
+                // Copy code from arena to main allocator for permanent storage
+                const code = entry.value_ptr.*;
+                const code_copy = self.allocator.alloc(u8, code.len) catch return Error.OutOfMemory;
+                @memcpy(code_copy, code);
+                try self.code_storage.put(entry.key_ptr.*, code_copy);
+            }
+
+            // Destroy the transaction cache (O(1) arena cleanup)
+            cache.deinit();
+            self.allocator.destroy(cache);
+            self.tx_cache = null;
+        }
+
+        // Commit the snapshot (discard it)
         try self.commit_snapshot(@intCast(id));
     }
 
-    /// Rollback a transaction by reverting to its snapshot
+    /// Rollback a transaction by discarding cache (O(1)) and reverting to snapshot
     pub fn rollback_transaction(self: *Database, id: u32) Error!void {
+        // Discard transaction cache - O(1) with arena allocator
+        if (self.tx_cache) |cache| {
+            cache.deinit();
+            self.allocator.destroy(cache);
+            self.tx_cache = null;
+        }
+
+        // Revert to snapshot
         try self.revert_to_snapshot(@intCast(id));
+    }
+
+    /// Start transaction-level caching without creating a snapshot
+    /// Useful for EVM execution where state changes should be buffered
+    pub fn begin_tx_cache(self: *Database) Error!void {
+        if (self.tx_cache != null) return; // Already active
+
+        const cache = self.allocator.create(TransactionCache) catch return Error.OutOfMemory;
+        cache.* = TransactionCache.init(self.allocator, 0);
+        self.tx_cache = cache;
+    }
+
+    /// Flush transaction cache to permanent storage without snapshot management
+    pub fn commit_tx_cache(self: *Database) Error!void {
+        if (self.tx_cache) |cache| {
+            // Apply account changes
+            var accounts_iter = cache.accounts.iterator();
+            while (accounts_iter.next()) |entry| {
+                if (entry.value_ptr.*) |account| {
+                    try self.accounts.put(entry.key_ptr.*, account);
+                } else {
+                    _ = self.accounts.remove(entry.key_ptr.*);
+                }
+            }
+
+            // Apply storage changes
+            var storage_iter = cache.storage.iterator();
+            while (storage_iter.next()) |entry| {
+                const storage_key = StorageKey{
+                    .address = entry.key_ptr.address,
+                    .key = entry.key_ptr.key,
+                };
+                try self.storage.put(storage_key, entry.value_ptr.*);
+            }
+
+            // Apply code changes
+            var code_iter = cache.code.iterator();
+            while (code_iter.next()) |entry| {
+                if (self.code_storage.get(entry.key_ptr.*)) |_| {
+                    continue;
+                }
+                const code = entry.value_ptr.*;
+                const code_copy = self.allocator.alloc(u8, code.len) catch return Error.OutOfMemory;
+                @memcpy(code_copy, code);
+                try self.code_storage.put(entry.key_ptr.*, code_copy);
+            }
+
+            cache.deinit();
+            self.allocator.destroy(cache);
+            self.tx_cache = null;
+        }
+    }
+
+    /// Discard transaction cache without applying changes (O(1) with arena)
+    pub fn rollback_tx_cache(self: *Database) void {
+        if (self.tx_cache) |cache| {
+            cache.deinit();
+            self.allocator.destroy(cache);
+            self.tx_cache = null;
+        }
+    }
+
+    /// Check if transaction cache is active
+    pub fn has_tx_cache(self: *const Database) bool {
+        return self.tx_cache != null;
     }
 };
 
@@ -2390,4 +2644,246 @@ test "Database transaction error handling - invalid snapshot" {
 
     // Try to rollback non-existent transaction
     try testing.expectError(Database.Error.SnapshotNotFound, db.rollback_transaction(999));
+}
+
+// =============================================================================
+// Transaction Cache Tests (Issue #832)
+// =============================================================================
+
+test "Transaction cache - basic account buffering" {
+    const allocator = testing.allocator;
+    var db = Database.init(allocator);
+    defer db.deinit();
+
+    const addr = [_]u8{0xCC} ++ [_]u8{0} ** 19;
+    const initial_account = Account{
+        .balance = 100,
+        .nonce = 1,
+        .code_hash = [_]u8{0} ** 32,
+        .storage_root = [_]u8{0} ** 32,
+    };
+
+    // Set initial state
+    try db.set_account(addr, initial_account);
+
+    // Begin transaction (activates cache)
+    const tx_id = try db.begin_transaction();
+    try testing.expect(db.has_tx_cache());
+
+    // Modify account (should be buffered in cache)
+    const modified_account = Account{
+        .balance = 200,
+        .nonce = 2,
+        .code_hash = [_]u8{0} ** 32,
+        .storage_root = [_]u8{0} ** 32,
+    };
+    try db.set_account(addr, modified_account);
+
+    // Should see modified value
+    const retrieved = (try db.get_account(addr)).?;
+    try testing.expectEqual(@as(u256, 200), retrieved.balance);
+
+    // Commit transaction (flush cache)
+    try db.commit_transaction(tx_id);
+    try testing.expect(!db.has_tx_cache());
+
+    // Value should persist after commit
+    const final = (try db.get_account(addr)).?;
+    try testing.expectEqual(@as(u256, 200), final.balance);
+}
+
+test "Transaction cache - rollback discards changes O(1)" {
+    const allocator = testing.allocator;
+    var db = Database.init(allocator);
+    defer db.deinit();
+
+    const addr = [_]u8{0xDD} ++ [_]u8{0} ** 19;
+    const initial_account = Account{
+        .balance = 1000,
+        .nonce = 5,
+        .code_hash = [_]u8{0} ** 32,
+        .storage_root = [_]u8{0} ** 32,
+    };
+
+    try db.set_account(addr, initial_account);
+
+    // Begin transaction
+    const tx_id = try db.begin_transaction();
+
+    // Make many changes (all buffered in arena)
+    for (0..100) |i| {
+        const account = Account{
+            .balance = @intCast(i * 100),
+            .nonce = @intCast(i),
+            .code_hash = [_]u8{0} ** 32,
+            .storage_root = [_]u8{0} ** 32,
+        };
+        try db.set_account(addr, account);
+        try db.set_storage(addr, @intCast(i), @intCast(i * 10));
+    }
+
+    // Rollback - should be O(1) with arena
+    try db.rollback_transaction(tx_id);
+    try testing.expect(!db.has_tx_cache());
+
+    // Original values should be restored
+    const restored = (try db.get_account(addr)).?;
+    try testing.expectEqual(@as(u256, 1000), restored.balance);
+    try testing.expectEqual(@as(u64, 5), restored.nonce);
+}
+
+test "Transaction cache - storage buffering" {
+    const allocator = testing.allocator;
+    var db = Database.init(allocator);
+    defer db.deinit();
+
+    const addr = [_]u8{0xEE} ++ [_]u8{0} ** 19;
+    const key: u256 = 0x12345;
+    const initial_value: u256 = 100;
+    const modified_value: u256 = 200;
+
+    // Set initial storage
+    try db.set_storage(addr, key, initial_value);
+
+    // Begin transaction
+    const tx_id = try db.begin_transaction();
+
+    // Modify storage (buffered in cache)
+    try db.set_storage(addr, key, modified_value);
+
+    // Should see modified value through cache
+    try testing.expectEqual(modified_value, try db.get_storage(addr, key));
+
+    // Commit
+    try db.commit_transaction(tx_id);
+
+    // Value should persist
+    try testing.expectEqual(modified_value, try db.get_storage(addr, key));
+}
+
+test "Transaction cache - code storage buffering" {
+    const allocator = testing.allocator;
+    var db = Database.init(allocator);
+    defer db.deinit();
+
+    const test_code = [_]u8{ 0x60, 0x80, 0x60, 0x40, 0x52 }; // Simple bytecode
+
+    // Begin transaction
+    const tx_id = try db.begin_transaction();
+
+    // Store code (buffered in arena)
+    const code_hash = try db.set_code(&test_code);
+
+    // Should retrieve from cache
+    const retrieved = try db.get_code(code_hash);
+    try testing.expectEqualSlices(u8, &test_code, retrieved);
+
+    // Commit
+    try db.commit_transaction(tx_id);
+
+    // Code should persist in main storage
+    const final = try db.get_code(code_hash);
+    try testing.expectEqualSlices(u8, &test_code, final);
+}
+
+test "Transaction cache standalone - begin_tx_cache/commit_tx_cache" {
+    const allocator = testing.allocator;
+    var db = Database.init(allocator);
+    defer db.deinit();
+
+    const addr = [_]u8{0xFF} ++ [_]u8{0} ** 19;
+
+    // Start cache without snapshot
+    try db.begin_tx_cache();
+    try testing.expect(db.has_tx_cache());
+
+    // Buffer changes
+    const account = Account{
+        .balance = 500,
+        .nonce = 10,
+        .code_hash = [_]u8{0} ** 32,
+        .storage_root = [_]u8{0} ** 32,
+    };
+    try db.set_account(addr, account);
+
+    // Commit cache
+    try db.commit_tx_cache();
+    try testing.expect(!db.has_tx_cache());
+
+    // Changes should persist
+    const final = (try db.get_account(addr)).?;
+    try testing.expectEqual(@as(u256, 500), final.balance);
+}
+
+test "Transaction cache standalone - rollback_tx_cache discards changes" {
+    const allocator = testing.allocator;
+    var db = Database.init(allocator);
+    defer db.deinit();
+
+    const addr = [_]u8{0xAA} ++ [_]u8{0} ** 19;
+
+    // Set initial state
+    const initial = Account{
+        .balance = 100,
+        .nonce = 1,
+        .code_hash = [_]u8{0} ** 32,
+        .storage_root = [_]u8{0} ** 32,
+    };
+    try db.set_account(addr, initial);
+
+    // Start cache
+    try db.begin_tx_cache();
+
+    // Buffer changes
+    const modified = Account{
+        .balance = 999,
+        .nonce = 99,
+        .code_hash = [_]u8{0} ** 32,
+        .storage_root = [_]u8{0} ** 32,
+    };
+    try db.set_account(addr, modified);
+
+    // Verify we see modified value through cache
+    const check = (try db.get_account(addr)).?;
+    try testing.expectEqual(@as(u256, 999), check.balance);
+
+    // Rollback cache (O(1))
+    db.rollback_tx_cache();
+    try testing.expect(!db.has_tx_cache());
+
+    // Should see original value (cache changes discarded)
+    const restored = (try db.get_account(addr)).?;
+    try testing.expectEqual(@as(u256, 100), restored.balance);
+}
+
+test "Transaction cache - account deletion buffering" {
+    const allocator = testing.allocator;
+    var db = Database.init(allocator);
+    defer db.deinit();
+
+    const addr = [_]u8{0xBB} ++ [_]u8{0} ** 19;
+
+    // Create initial account
+    const account = Account{
+        .balance = 100,
+        .nonce = 1,
+        .code_hash = [_]u8{0} ** 32,
+        .storage_root = [_]u8{0} ** 32,
+    };
+    try db.set_account(addr, account);
+
+    // Begin transaction
+    const tx_id = try db.begin_transaction();
+
+    // Delete account (buffered as null)
+    try db.delete_account(addr);
+
+    // Should not exist through cache
+    try testing.expect(!db.account_exists(addr));
+
+    // Commit
+    try db.commit_transaction(tx_id);
+
+    // Account should be deleted in main storage
+    try testing.expect(!db.account_exists(addr));
 }
