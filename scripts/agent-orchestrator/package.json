@@ -11,7 +11,7 @@
     "run-issue": "tsx src/orchestrator.ts --issue"
   },
   "dependencies": {
-    "@anthropic-ai/claude-code": "^0.2.0"
+    "@anthropic-ai/claude-code": "^2.0.75"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

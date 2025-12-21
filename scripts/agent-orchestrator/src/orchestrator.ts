@@ -164,27 +164,35 @@ NEEDS_CLARIFICATION: <what needs clarification>`;
     fs.writeFileSync(tempFile, validationPrompt);
 
     const output = execSync(
-      `claude -p "$(cat ${tempFile})" --output-format text --max-turns 1`,
+      `claude -p "$(cat ${tempFile})" --output-format text --max-turns 3`,
       {
         cwd: REPO_ROOT,
         encoding: 'utf-8',
-        timeout: 60000,
+        timeout: 120000,  // 2 min for validation
         env: { ...process.env, FORCE_COLOR: '0' }
       }
     );
 
     const response = output.trim();
-    console.log(`Validation response: ${response.substring(0, 100)}...`);
+    console.log(`Validation response: ${response.substring(0, 200)}...`);
 
-    if (response.startsWith('VALID:')) {
-      return { valid: true, reason: response.substring(6).trim(), shouldComment: false };
-    } else if (response.startsWith('INVALID:')) {
-      return { valid: false, reason: response.substring(8).trim(), shouldComment: true };
-    } else if (response.startsWith('NEEDS_CLARIFICATION:')) {
-      return { valid: false, reason: response.substring(20).trim(), shouldComment: true };
+    // Search for keywords anywhere in the response (claude may include reasoning before the verdict)
+    const validMatch = response.match(/VALID:\s*(.+?)(?:\n|$)/);
+    const invalidMatch = response.match(/INVALID:\s*(.+?)(?:\n|$)/);
+    const clarifyMatch = response.match(/NEEDS_CLARIFICATION:\s*(.+?)(?:\n|$)/);
+
+    if (validMatch && !invalidMatch && !clarifyMatch) {
+      return { valid: true, reason: validMatch[1].trim(), shouldComment: false };
+    } else if (invalidMatch) {
+      return { valid: false, reason: invalidMatch[1].trim(), shouldComment: true };
+    } else if (clarifyMatch) {
+      return { valid: false, reason: clarifyMatch[1].trim(), shouldComment: true };
+    } else if (response.toLowerCase().includes('valid') && !response.toLowerCase().includes('invalid')) {
+      // Fallback: if it says "valid" but not in exact format, assume valid
+      return { valid: true, reason: 'Issue appears valid based on analysis', shouldComment: false };
     } else {
-      // Default to needing clarification if response is unclear
-      return { valid: false, reason: 'Validation response unclear', shouldComment: false };
+      // Default to skipping but not commenting
+      return { valid: false, reason: 'Validation response unclear - needs human review', shouldComment: false };
     }
   } catch (error: any) {
     console.error('Validation failed:', error.message);
