@@ -176,53 +176,48 @@ Co-Authored-By: Claude <noreply@anthropic.com>`;
  * Run claude with a prompt and capture output
  */
 async function runClaudeAgent(prompt: string): Promise<{ output: string; handoffPrompt: string }> {
-  return new Promise((resolve, reject) => {
-    // Write prompt to temp file to handle multi-line prompts
-    const tempFile = '/tmp/claude-prompt.txt';
-    fs.writeFileSync(tempFile, prompt);
+  // Write prompt to temp file to avoid shell escaping issues
+  const tempFile = '/tmp/claude-orchestrator-prompt.txt';
+  fs.writeFileSync(tempFile, prompt);
 
-    // Run claude in print mode (non-interactive)
-    const claude = spawn('claude', ['--print', '-p', prompt], {
-      cwd: REPO_ROOT,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, FORCE_COLOR: '0' }
-    });
-
-    let stdout = '';
-    let stderr = '';
-
-    claude.stdout.on('data', (data) => {
-      const text = data.toString();
-      stdout += text;
-      process.stdout.write(text); // Stream output
-    });
-
-    claude.stderr.on('data', (data) => {
-      const text = data.toString();
-      stderr += text;
-      process.stderr.write(text);
-    });
-
-    claude.on('close', (code) => {
-      // Extract handoff prompt from output if present
-      let handoffPrompt = '';
-      const handoffMatch = stdout.match(/## Handoff Prompt[\s\S]*?```([\s\S]*?)```/);
-      if (handoffMatch) {
-        handoffPrompt = handoffMatch[1].trim();
+  try {
+    // Run claude in print mode using shell
+    const output = execSync(
+      `claude -p "$(cat ${tempFile})" --output-format text`,
+      {
+        cwd: REPO_ROOT,
+        encoding: 'utf-8',
+        maxBuffer: 10 * 1024 * 1024, // 10MB buffer
+        timeout: 600000, // 10 min timeout
+        env: { ...process.env, FORCE_COLOR: '0' }
       }
+    );
 
-      if (code === 0) {
-        resolve({ output: stdout, handoffPrompt });
-      } else {
-        // Even on non-zero exit, we may have useful output
-        resolve({ output: stdout + '\n' + stderr, handoffPrompt });
-      }
-    });
+    console.log(output);
 
-    claude.on('error', (error) => {
-      reject(error);
-    });
-  });
+    // Extract handoff prompt from output if present
+    let handoffPrompt = '';
+    const handoffMatch = output.match(/## Handoff Prompt[\s\S]*?```([\s\S]*?)```/);
+    if (handoffMatch) {
+      handoffPrompt = handoffMatch[1].trim();
+    }
+
+    return { output, handoffPrompt };
+  } catch (error: any) {
+    // execSync throws on non-zero exit, but we still want the output
+    const output = error.stdout?.toString() || '';
+    const stderr = error.stderr?.toString() || '';
+    console.log(output);
+    console.error(stderr);
+
+    let handoffPrompt = '';
+    const handoffMatch = output.match(/## Handoff Prompt[\s\S]*?```([\s\S]*?)```/);
+    if (handoffMatch) {
+      handoffPrompt = handoffMatch[1].trim();
+    }
+
+    return { output: output + '\n' + stderr, handoffPrompt };
+  }
 }
 
 /**
