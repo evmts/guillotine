@@ -40,6 +40,15 @@ pub fn DispatchMetadata(comptime FrameType: type) type {
         /// This avoids the binary search in findJumpTarget
         pub const JumpStaticMetadata = packed struct(usize) { dispatch: *const anyopaque };
 
+        /// Metadata for backward loop jumpi - contains two dispatch pointers for loop and exit targets
+        /// Used by BACKWARD_LOOP_JUMPI synthetic opcode for optimized loop execution
+        pub const BackwardLoopMetadata = struct {
+            /// Dispatch pointer for loop continuation (backward jump target)
+            loop_dispatch: *const anyopaque,
+            /// Dispatch pointer for loop exit (forward jump target)
+            exit_dispatch: *const anyopaque,
+        };
+
         /// Our instruction set does not match the actual bytecode 1 to 1 if we do fusions so we don't actually track pc during execution
         /// Thus we must provide as metadata to avoid the expensive process of mapping back our instruction index to what pc it came from
         pub const PcMetadata = packed struct { value: FrameType.PcType };

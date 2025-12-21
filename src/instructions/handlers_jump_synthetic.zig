@@ -218,6 +218,35 @@ pub fn Handlers(FrameType: type) type {
                 return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             }
         }
+        /// BACKWARD_LOOP_JUMPI - Optimized backward loop with branch prediction for loops.
+        /// Pattern: condition check with forward exit and backward loop continuation.
+        /// The cursor points to metadata: [0] = handler, [1] = loop_dispatch, [2] = exit_dispatch
+        /// When condition is 0 (continue loop): jump backward (likely path)
+        /// When condition is non-zero (exit loop): jump forward (unlikely path)
+        pub fn backward_loop_jumpi(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            @branchHint(.likely);
+
+            self.beforeInstruction(.BACKWARD_LOOP_JUMPI, cursor);
+
+            // Get the loop and exit dispatch pointers from metadata
+            const loop_dispatch_ptr = @as([*]const Dispatch.Item, @ptrCast(@alignCast(cursor[1].jump_static.dispatch)));
+            const exit_dispatch_ptr = @as([*]const Dispatch.Item, @ptrCast(@alignCast(cursor[2].jump_static.dispatch)));
+
+            {
+                (&self.getEvm().tracer).assert(self.stack.size() >= 1, "BACKWARD_LOOP_JUMPI requires condition on stack");
+            }
+            const condition = self.stack.pop_unsafe();
+
+            if (condition == 0) {
+                // Loop continuation - backward jump (this is the HOT path for loops)
+                self.afterInstruction(.BACKWARD_LOOP_JUMPI, loop_dispatch_ptr[0].opcode_handler, loop_dispatch_ptr);
+                return @call(FrameType.Dispatch.getTailCallModifier(), loop_dispatch_ptr[0].opcode_handler, .{ self, loop_dispatch_ptr });
+            }
+
+            // Loop exit - forward jump (COLD path for loops)
+            self.afterInstruction(.BACKWARD_LOOP_JUMPI, exit_dispatch_ptr[0].opcode_handler, exit_dispatch_ptr);
+            return @call(FrameType.Dispatch.getTailCallModifier(), exit_dispatch_ptr[0].opcode_handler, .{ self, exit_dispatch_ptr });
+        }
     };
 }
 
@@ -376,4 +405,92 @@ test "jump_to_static_location - performance comparison" {
 
     const result = TestFrame.JumpSyntheticHandlers.jump_to_static_location(&frame, &cursor);
     try testing.expectError(TestFrame.Error.STOP, result);
+}
+
+test "backward_loop_jumpi - continue loop (condition == 0)" {
+    var frame = try createTestFrame(testing.allocator);
+    defer frame.deinit(testing.allocator);
+
+    // Push condition 0 (continue loop)
+    try frame.stack.push(0);
+
+    // Create loop and exit dispatch locations
+    const loop_handler = struct {
+        fn handler(f: *TestFrame, cursor: [*]const TestFrame.Dispatch.Item) TestFrame.Error!noreturn {
+            _ = f;
+            _ = cursor;
+            return TestFrame.Error.STOP; // Use STOP as a marker for loop continuation
+        }
+    }.handler;
+
+    const exit_handler = struct {
+        fn handler(f: *TestFrame, cursor: [*]const TestFrame.Dispatch.Item) TestFrame.Error!noreturn {
+            _ = f;
+            _ = cursor;
+            return TestFrame.Error.InvalidJump; // Use a different error as marker for exit
+        }
+    }.handler;
+
+    var loop_cursor: [1]TestFrame.Dispatch.Item = undefined;
+    loop_cursor[0] = .{ .opcode_handler = &loop_handler };
+
+    var exit_cursor: [1]TestFrame.Dispatch.Item = undefined;
+    exit_cursor[0] = .{ .opcode_handler = &exit_handler };
+
+    // Create backward_loop_jumpi dispatch: [handler, loop_dispatch, exit_dispatch, next]
+    var cursor: [4]TestFrame.Dispatch.Item = undefined;
+    cursor[0] = .{ .opcode_handler = &TestFrame.JumpSyntheticHandlers.backward_loop_jumpi };
+    cursor[1] = .{ .jump_static = .{ .dispatch = @as(*const anyopaque, @ptrCast(&loop_cursor)) } };
+    cursor[2] = .{ .jump_static = .{ .dispatch = @as(*const anyopaque, @ptrCast(&exit_cursor)) } };
+    cursor[3] = .{ .opcode_handler = &exit_handler };
+
+    const result = TestFrame.JumpSyntheticHandlers.backward_loop_jumpi(&frame, &cursor);
+
+    // With condition 0, should go to loop target and return STOP
+    try testing.expectError(TestFrame.Error.STOP, result);
+    try testing.expectEqual(@as(usize, 0), frame.stack.len());
+}
+
+test "backward_loop_jumpi - exit loop (condition != 0)" {
+    var frame = try createTestFrame(testing.allocator);
+    defer frame.deinit(testing.allocator);
+
+    // Push non-zero condition (exit loop)
+    try frame.stack.push(1);
+
+    // Create loop and exit dispatch locations
+    const loop_handler = struct {
+        fn handler(f: *TestFrame, cursor: [*]const TestFrame.Dispatch.Item) TestFrame.Error!noreturn {
+            _ = f;
+            _ = cursor;
+            return TestFrame.Error.STOP; // Marker for loop continuation
+        }
+    }.handler;
+
+    const exit_handler = struct {
+        fn handler(f: *TestFrame, cursor: [*]const TestFrame.Dispatch.Item) TestFrame.Error!noreturn {
+            _ = f;
+            _ = cursor;
+            return TestFrame.Error.InvalidJump; // Marker for exit
+        }
+    }.handler;
+
+    var loop_cursor: [1]TestFrame.Dispatch.Item = undefined;
+    loop_cursor[0] = .{ .opcode_handler = &loop_handler };
+
+    var exit_cursor: [1]TestFrame.Dispatch.Item = undefined;
+    exit_cursor[0] = .{ .opcode_handler = &exit_handler };
+
+    // Create backward_loop_jumpi dispatch: [handler, loop_dispatch, exit_dispatch, next]
+    var cursor: [4]TestFrame.Dispatch.Item = undefined;
+    cursor[0] = .{ .opcode_handler = &TestFrame.JumpSyntheticHandlers.backward_loop_jumpi };
+    cursor[1] = .{ .jump_static = .{ .dispatch = @as(*const anyopaque, @ptrCast(&loop_cursor)) } };
+    cursor[2] = .{ .jump_static = .{ .dispatch = @as(*const anyopaque, @ptrCast(&exit_cursor)) } };
+    cursor[3] = .{ .opcode_handler = &exit_handler };
+
+    const result = TestFrame.JumpSyntheticHandlers.backward_loop_jumpi(&frame, &cursor);
+
+    // With non-zero condition, should go to exit target and return InvalidJump
+    try testing.expectError(TestFrame.Error.InvalidJump, result);
+    try testing.expectEqual(@as(usize, 0), frame.stack.len());
 }

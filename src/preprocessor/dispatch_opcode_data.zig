@@ -43,6 +43,8 @@ pub fn GetOpDataReturnType(
         .PUSH0_REVERT => struct { next_handler: OpcodeHandler, next_cursor: Self }, // No metadata
         .PUSH_ADD_DUP1 => struct { items: [*]const Item, next_handler: OpcodeHandler, next_cursor: Self }, // Push value item
         .MLOAD_SWAP1_DUP2 => struct { next_handler: OpcodeHandler, next_cursor: Self }, // No metadata
+        // Backward loop fusion: loop_dispatch (backward), exit_dispatch (forward)
+        .BACKWARD_LOOP_JUMPI => struct { items: [*]const Item, next_handler: OpcodeHandler, next_cursor: Self },
         // All standard opcodes without metadata
         .STOP, .ADD, .MUL, .SUB, .DIV, .SDIV, .MOD, .SMOD, .ADDMOD, .MULMOD, .EXP, .SIGNEXTEND, .LT, .GT, .SLT, .SGT, .EQ, .ISZERO, .AND, .OR, .XOR, .NOT, .BYTE, .SHL, .SHR, .SAR, .KECCAK256, .ADDRESS, .BALANCE, .ORIGIN, .CALLER, .CALLVALUE, .CALLDATALOAD, .CALLDATASIZE, .CALLDATACOPY, .CODESIZE, .CODECOPY, .GASPRICE, .EXTCODESIZE, .EXTCODECOPY, .RETURNDATASIZE, .RETURNDATACOPY, .EXTCODEHASH, .BLOCKHASH, .COINBASE, .TIMESTAMP, .NUMBER, .PREVRANDAO, .GASLIMIT, .CHAINID, .SELFBALANCE, .BASEFEE, .BLOBHASH, .BLOBBASEFEE, .POP, .MLOAD, .MSTORE, .MSTORE8, .SLOAD, .SSTORE, .JUMP, .JUMPI, .MSIZE, .GAS, .TLOAD, .TSTORE, .MCOPY, .PUSH0, .DUP1, .DUP2, .DUP3, .DUP4, .DUP5, .DUP6, .DUP7, .DUP8, .DUP9, .DUP10, .DUP11, .DUP12, .DUP13, .DUP14, .DUP15, .DUP16, .SWAP1, .SWAP2, .SWAP3, .SWAP4, .SWAP5, .SWAP6, .SWAP7, .SWAP8, .SWAP9, .SWAP10, .SWAP11, .SWAP12, .SWAP13, .SWAP14, .SWAP15, .SWAP16, .LOG0, .LOG1, .LOG2, .LOG3, .LOG4, .CREATE, .CALL, .CALLCODE, .RETURN, .DELEGATECALL, .CREATE2, .AUTH, .AUTHCALL, .STATICCALL, .REVERT, .INVALID, .SELFDESTRUCT => struct { next_handler: OpcodeHandler, next_cursor: Self },
     };
@@ -143,6 +145,12 @@ pub inline fn getOpData(
         },
         .FUNCTION_DISPATCH => .{
             .items = cursor + 1, // Points to selector and target items starting at cursor[1]
+            .next_handler = cursor[3].opcode_handler,
+            .next_cursor = Self{ .cursor = cursor + 3 },
+        },
+        // Backward loop: cursor[1] = loop_dispatch (jump_static), cursor[2] = exit_dispatch (jump_static)
+        .BACKWARD_LOOP_JUMPI => .{
+            .items = cursor + 1, // Points to the 2 jump_static items
             .next_handler = cursor[3].opcode_handler,
             .next_cursor = Self{ .cursor = cursor + 3 },
         },

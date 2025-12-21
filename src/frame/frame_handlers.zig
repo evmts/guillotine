@@ -225,6 +225,7 @@ pub fn getSyntheticHandler(FrameType: type, synthetic_opcode: u8) FrameType.Opco
         @intFromEnum(OpcodeSynthetic.PUSH0_REVERT) => &AdvancedSyntheticHandlers.push0_revert,
         @intFromEnum(OpcodeSynthetic.PUSH_ADD_DUP1) => &AdvancedSyntheticHandlers.push_add_dup1,
         @intFromEnum(OpcodeSynthetic.MLOAD_SWAP1_DUP2) => &AdvancedSyntheticHandlers.mload_swap1_dup2,
+        @intFromEnum(OpcodeSynthetic.BACKWARD_LOOP_JUMPI) => &JumpSyntheticHandlers.backward_loop_jumpi,
         else => unreachable, // Invalid synthetic opcode
     };
 }

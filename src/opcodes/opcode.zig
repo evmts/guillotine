@@ -742,6 +742,7 @@ pub const UnifiedOpcode = enum(u16) {
     PUSH0_REVERT = 0x100 + 0xCA,
     PUSH_ADD_DUP1 = 0x100 + 0xCB,
     MLOAD_SWAP1_DUP2 = 0x100 + 0xCC,
+    BACKWARD_LOOP_JUMPI = 0x100 + 0xCD,
 
     /// Convert from regular Opcode
     pub fn fromOpcode(opcode: Opcode) UnifiedOpcode {

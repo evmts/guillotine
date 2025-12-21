@@ -380,6 +380,10 @@ pub fn Preprocessor(FrameType: type) type {
                     tracerAssert(frame, frame.stack.size() >= 1, "Dispatch validation failed"); // MLOAD requires offset
                     tracerAssert(frame, frame.stack.size() < @TypeOf(frame.stack).stack_capacity, "Dispatch validation failed"); // DUP2 needs space
                 },
+                .BACKWARD_LOOP_JUMPI => {
+                    // Backward loop requires at least one stack item (the condition)
+                    tracerAssert(frame, frame.stack.size() >= 1, "BACKWARD_LOOP_JUMPI: stack underflow, requires condition");
+                },
 
                 // Opcodes that don't require special validation
                 .STOP, .INVALID, .AUTH, .AUTHCALL => {},

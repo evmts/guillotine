@@ -58,6 +58,7 @@ pub const OpcodeSynthetic = enum(u8) {
     PUSH0_REVERT = 0xCA,           // PUSH0 + PUSH0 + REVERT (error pattern)
     PUSH_ADD_DUP1 = 0xCB,          // PUSH + ADD + DUP1 (common in loops)
     MLOAD_SWAP1_DUP2 = 0xCC,       // MLOAD + SWAP1 + DUP2 (memory pattern)
+    BACKWARD_LOOP_JUMPI = 0xCD,   // Backward loop: PUSH+JUMPI(exit) + [body] + PUSH+JUMP(loop)
     
     /// Describe the fusion operation for tracing/debugging
     pub fn describe(self: OpcodeSynthetic) []const u8 {
@@ -88,6 +89,7 @@ pub const OpcodeSynthetic = enum(u8) {
             .PUSH0_REVERT => "Error pattern (PUSH0+PUSH0+REVERT)",
             .PUSH_ADD_DUP1 => "PUSH+ADD+DUP1 pattern",
             .MLOAD_SWAP1_DUP2 => "MLOAD+SWAP1+DUP2 pattern",
+            .BACKWARD_LOOP_JUMPI => "Backward loop (PUSH+JUMPI exit + PUSH+JUMP loop)",
         };
     }
 };
