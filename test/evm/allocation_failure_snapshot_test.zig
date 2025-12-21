@@ -151,8 +151,8 @@ test "snapshot should be reverted on allocation failure during self-destruct ext
         },
     };
 
-    const result = evm_instance.call(call_params);
-    defer if (result.selfdestructs.len > 0) base_allocator.free(result.selfdestructs);
+    var result = evm_instance.call(call_params);
+    defer result.deinit(base_allocator);
 
     // The call should fail due to allocation failure
     try testing.expect(!result.success);
@@ -275,8 +275,8 @@ test "snapshot should be reverted on allocation failure during log extraction" {
         },
     };
 
-    const result = evm_instance.call(call_params);
-    defer if (result.logs.len > 0) base_allocator.free(result.logs);
+    var result = evm_instance.call(call_params);
+    defer result.deinit(base_allocator);
 
     // The call should fail due to allocation failure
     try testing.expect(!result.success);

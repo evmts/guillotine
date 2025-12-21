@@ -118,11 +118,8 @@ test "ERC20 mint test" {
     std.debug.print("  Function selector: 0x{x}\n", .{calldata[0..4]});
     
     // Execute EVM call (call doesn't return an error union)
-    const result = evm_instance.call(call_params);
-    defer {
-        var mutable_result = result;
-        mutable_result.deinit(allocator);
-    }
+    var result = evm_instance.call(call_params);
+    defer result.deinit(allocator);
     
     std.debug.print("\n✅ EVM test passed!\n", .{});
     std.debug.print("  Success: {}\n", .{result.success});

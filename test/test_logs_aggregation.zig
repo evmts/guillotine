@@ -68,16 +68,12 @@ test "logs are properly aggregated in CallResult" {
         },
     };
     
-    const result = evm.call(call_params);
-    defer {
-        // Clean up the result's allocated memory
-        var mutable_result = result;
-        mutable_result.deinit(allocator);
-    }
-    
+    var result = evm.call(call_params);
+    defer result.deinit(allocator);
+
     // Verify the call succeeded
     try testing.expect(result.success);
-    
+
     // Verify we got exactly one log
     try testing.expectEqual(@as(usize, 1), result.logs.len);
     
@@ -199,16 +195,12 @@ test "nested call logs are properly aggregated" {
         },
     };
     
-    const result = evm.call(call_params);
-    defer {
-        // Clean up the result's allocated memory
-        var mutable_result = result;
-        mutable_result.deinit(allocator);
-    }
-    
+    var result = evm.call(call_params);
+    defer result.deinit(allocator);
+
     // Verify the call succeeded
     try testing.expect(result.success);
-    
+
     // We should have 2 logs total: one from A, one from B
     try testing.expectEqual(@as(usize, 2), result.logs.len);
     

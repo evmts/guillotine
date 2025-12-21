@@ -437,11 +437,8 @@ test "trace validation - snapshot test" {
         },
     };
     
-    const result = evm.call(params);
-    defer {
-        var mutable_result = result;
-        mutable_result.deinit(allocator);
-    }
+    var result = evm.call(params);
+    defer result.deinit(allocator);
     
     try testing.expect(result.success);
     

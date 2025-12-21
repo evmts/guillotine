@@ -80,9 +80,9 @@ test "High gas limit crash reproduction" {
     };
     
     std.log.info("Executing call...", .{});
-    const result = evm_instance.call(call_params);
-    _ = result;
-    
+    var result = evm_instance.call(call_params);
+    defer result.deinit(allocator);
+
     std.log.info("Test completed without crash", .{});
 }
 

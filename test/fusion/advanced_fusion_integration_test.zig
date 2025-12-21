@@ -67,18 +67,18 @@ test "integration: constant folding executes correctly" {
         },
     };
     
-    const result = evm.call(create_params);
-    defer if (result.output.len > 0) allocator.free(result.output);
-    
+    var result = evm.call(create_params);
+    defer result.deinit(allocator);
+
     // Verify the result is 8 (5 + 3)
     try testing.expect(result.success);
     try testing.expectEqual(@as(usize, 32), result.output.len);
-    
+
     // Check the returned value is 8
     var expected = [_]u8{0} ** 32;
     expected[31] = 8;
     try testing.expectEqualSlices(u8, &expected, result.output);
-    
+
     log.info("Constant folding integration test passed: 5 + 3 = 8", .{});
 }
 
@@ -140,17 +140,17 @@ test "integration: multi-PUSH executes correctly" {
         },
     };
     
-    const result = evm.call(create_params);
-    defer if (result.output.len > 0) allocator.free(result.output);
-    
+    var result = evm.call(create_params);
+    defer result.deinit(allocator);
+
     // Verify the result is 8 (5 + 3)
     try testing.expect(result.success);
     try testing.expectEqual(@as(usize, 32), result.output.len);
-    
+
     var expected = [_]u8{0} ** 32;
     expected[31] = 8;
     try testing.expectEqualSlices(u8, &expected, result.output);
-    
+
     log.info("Multi-PUSH integration test passed", .{});
 }
 
@@ -217,17 +217,17 @@ test "integration: multi-POP executes correctly" {
         },
     };
     
-    const result = evm.call(create_params);
-    defer if (result.output.len > 0) allocator.free(result.output);
-    
+    var result = evm.call(create_params);
+    defer result.deinit(allocator);
+
     // After popping 5 and 30, we have 20 and 10, so 20 + 10 = 30
     try testing.expect(result.success);
     try testing.expectEqual(@as(usize, 32), result.output.len);
-    
+
     var expected = [_]u8{0} ** 32;
     expected[31] = 30;
     try testing.expectEqualSlices(u8, &expected, result.output);
-    
+
     log.info("Multi-POP integration test passed", .{});
 }
 
@@ -303,17 +303,17 @@ test "integration: ISZERO-JUMPI fusion executes correctly" {
         },
     };
     
-    const result = evm.call(create_params);
-    defer if (result.output.len > 0) allocator.free(result.output);
-    
+    var result = evm.call(create_params);
+    defer result.deinit(allocator);
+
     // Should jump and return 42
     try testing.expect(result.success);
     try testing.expectEqual(@as(usize, 32), result.output.len);
-    
+
     var expected = [_]u8{0} ** 32;
     expected[31] = 42;
     try testing.expectEqualSlices(u8, &expected, result.output);
-    
+
     log.info("ISZERO-JUMPI fusion integration test passed", .{});
 }
 
@@ -375,17 +375,17 @@ test "integration: complex pattern with SHL executes correctly" {
         },
     };
     
-    const result = evm.call(create_params);
-    defer if (result.output.len > 0) allocator.free(result.output);
-    
+    var result = evm.call(create_params);
+    defer result.deinit(allocator);
+
     // 4 - 16 with wrapping = large positive number (2^256 - 12)
     try testing.expect(result.success);
     try testing.expectEqual(@as(usize, 32), result.output.len);
-    
+
     // The expected value is 2^256 - 12 in little-endian format
     var expected = [_]u8{0xFF} ** 32;
     expected[31] = 0xF4; // -12 in two's complement = 0xFFFFFFF...FF4
     try testing.expectEqualSlices(u8, &expected, result.output);
-    
+
     log.info("Complex SHL pattern integration test passed", .{});
 }

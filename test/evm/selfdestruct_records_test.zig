@@ -87,12 +87,12 @@ test "SELFDESTRUCT records should be tracked in CallResult" {
         },
     };
     
-    const result = evm_instance.call(call_params);
-    defer if (result.selfdestructs.len > 0) allocator.free(result.selfdestructs);
-    
+    var result = evm_instance.call(call_params);
+    defer result.deinit(allocator);
+
     // Verify the call succeeded
     try testing.expect(result.success);
-    
+
     // Verify SELFDESTRUCT records are properly tracked:
     try testing.expect(result.selfdestructs.len == 1);
     try testing.expect(std.mem.eql(u8, &result.selfdestructs[0].contract.bytes, &contract_addr.bytes));
@@ -189,7 +189,7 @@ test "SELFDESTRUCT multiple contracts in single call" {
     };
     
     var result1 = evm_instance.call(call_params1);
-    defer if (result1.selfdestructs.len > 0) allocator.free(result1.selfdestructs);
+    defer result1.deinit(allocator);
 
     // Execute second SELFDESTRUCT
     const call_params2 = evm.CallParams{
@@ -201,9 +201,9 @@ test "SELFDESTRUCT multiple contracts in single call" {
             .gas = 100_000,
         },
     };
-    
+
     var result2 = evm_instance.call(call_params2);
-    defer if (result2.selfdestructs.len > 0) allocator.free(result2.selfdestructs);
+    defer result2.deinit(allocator);
 
     // Both calls should succeed
     try testing.expect(result1.success);
@@ -298,12 +298,12 @@ test "EIP-6780: SELFDESTRUCT only destroys contracts created in same transaction
         },
     };
     
-    const result = evm_instance.call(call_params);
-    defer if (result.selfdestructs.len > 0) allocator.free(result.selfdestructs);
-    
+    var result = evm_instance.call(call_params);
+    defer result.deinit(allocator);
+
     // Verify the call succeeded
     try testing.expect(result.success);
-    
+
     // With EIP-6780 (CANCUN), pre-existing contracts are NOT marked for destruction
     // Only the balance is transferred
     try testing.expectEqual(@as(usize, 0), result.selfdestructs.len);

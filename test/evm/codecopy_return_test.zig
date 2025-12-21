@@ -105,11 +105,8 @@ test "CODECOPY and RETURN differential test" {
     
     std.debug.print("\nExecuting CODECOPY+RETURN...\n", .{});
     
-    const result = guillotine_evm.call(call_params);
-    defer {
-        var mutable_result = result;
-        mutable_result.deinit(allocator);
-    }
+    var result = guillotine_evm.call(call_params);
+    defer result.deinit(allocator);
     
     std.debug.print("Success: {}\n", .{result.success});
     std.debug.print("Gas left: {}\n", .{result.gas_left});

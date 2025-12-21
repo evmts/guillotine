@@ -75,8 +75,9 @@ test "self-transfer should not change balance" {
         },
     };
     
-    const result = evm_instance.call(call_params);
-    
+    var result = evm_instance.call(call_params);
+    defer result.deinit(allocator);
+
     // Check that the balance didn't change (self-transfer should be no-op)
     const final_account = (try database.get_account(caller_address.bytes)).?;
     
@@ -160,8 +161,9 @@ test "normal transfer between different accounts works correctly" {
         },
     };
     
-    const result = evm_instance.call(call_params);
-    
+    var result = evm_instance.call(call_params);
+    defer result.deinit(allocator);
+
     // Check that balances changed correctly
     const final_caller_account = (try database.get_account(caller_address.bytes)).?;
     const final_target_account = (try database.get_account(target_address.bytes)).?;
