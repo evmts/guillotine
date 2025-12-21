@@ -101,14 +101,14 @@ pub fn Handlers(FrameType: type) type {
                 return Error.OutOfBounds;
             };
 
-            // Check if end fits in u24 before ensuring memory capacity
-            if (end > std.math.maxInt(u24)) {
+            // Check if end fits in u32 before ensuring memory capacity
+            if (end > std.math.maxInt(u32)) {
                 self.afterComplete(.KECCAK256);
                 return Error.OutOfBounds;
             }
 
             // Ensure memory is available
-            self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u24, @intCast(end))) catch |err| switch (err) {
+            self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(end))) catch |err| switch (err) {
                 memory_mod.MemoryError.MemoryOverflow => {
                     self.afterComplete(.KECCAK256);
                     return Error.OutOfBounds;
@@ -120,7 +120,7 @@ pub fn Handlers(FrameType: type) type {
             };
 
             // Get data from memory
-            const data = self.memory.get_slice(@as(u24, @intCast(offset_usize)), @as(u24, @intCast(size_usize))) catch {
+            const data = self.memory.get_slice(@as(u32, @intCast(offset_usize)), @as(u32, @intCast(size_usize))) catch {
                 self.afterComplete(.KECCAK256);
                 return Error.OutOfBounds;
             };

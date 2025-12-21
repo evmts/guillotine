@@ -44,13 +44,13 @@ pub fn Handlers(FrameType: type) type {
             const offset_usize = @as(usize, @intCast(offset));
 
             // Calculate gas cost for memory expansion
-            // Check if offset + 32 would overflow u24
+            // Check if offset + 32 would overflow u32
             if (!checkMemoryBounds(offset_usize, 32)) {
                 self.afterComplete(.MLOAD);
                 return Error.OutOfBounds;
             }
             const end_offset = offset_usize + 32;
-            const memory_expansion_cost = self.memory.get_expansion_cost(@as(u24, @intCast(end_offset)));
+            const memory_expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(end_offset)));
             // Only check and consume dynamic gas (memory expansion), static gas is handled by JUMPDEST
             // Use negative gas pattern for single-branch out-of-gas detection
             self.gas_remaining -= @intCast(memory_expansion_cost);
@@ -61,7 +61,7 @@ pub fn Handlers(FrameType: type) type {
             }
 
             // Read 32 bytes from memory (EVM-compliant with automatic expansion)
-            const value_u256 = self.memory.get_u256_evm(self.getEvm().getCallArenaAllocator(), @as(u24, @intCast(offset_usize))) catch |err| switch (err) {
+            const value_u256 = self.memory.get_u256_evm(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(offset_usize))) catch |err| switch (err) {
                 memory_mod.MemoryError.OutOfBounds => {
                     self.afterComplete(.MLOAD);
                     return Error.OutOfBounds;
@@ -101,13 +101,13 @@ pub fn Handlers(FrameType: type) type {
             const offset_usize = @as(usize, @intCast(offset));
 
             // Calculate gas cost for memory expansion
-            // Check if offset + 32 would overflow u24
+            // Check if offset + 32 would overflow u32
             if (!checkMemoryBounds(offset_usize, 32)) {
                 self.afterComplete(.MSTORE);
                 return Error.OutOfBounds;
             }
             const end_offset = offset_usize + 32;
-            const memory_expansion_cost = self.memory.get_expansion_cost(@as(u24, @intCast(end_offset)));
+            const memory_expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(end_offset)));
             // Only check and consume dynamic gas (memory expansion), static gas is handled by JUMPDEST
             // Use negative gas pattern for single-branch out-of-gas detection
             self.gas_remaining -= @intCast(memory_expansion_cost);
@@ -119,7 +119,7 @@ pub fn Handlers(FrameType: type) type {
 
             // Convert to u256 if necessary and store
             const value_u256 = @as(u256, value);
-            self.memory.set_u256_evm(self.getEvm().getCallArenaAllocator(), @as(u24, @intCast(offset_usize)), value_u256) catch |err| switch (err) {
+            self.memory.set_u256_evm(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(offset_usize)), value_u256) catch |err| switch (err) {
                 memory_mod.MemoryError.OutOfBounds => {
                     self.afterComplete(.MSTORE);
                     return Error.OutOfBounds;
@@ -153,13 +153,13 @@ pub fn Handlers(FrameType: type) type {
             const offset_usize = @as(usize, @intCast(offset));
 
             // Calculate gas cost for memory expansion
-            // Check if offset + 1 would overflow u24
+            // Check if offset + 1 would overflow u32
             if (!checkMemoryBounds(offset_usize, 1)) {
                 self.afterComplete(.MSTORE8);
                 return Error.OutOfBounds;
             }
             const end_offset = offset_usize + 1;
-            const memory_expansion_cost = self.memory.get_expansion_cost(@as(u24, @intCast(end_offset)));
+            const memory_expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(end_offset)));
             // Only check and consume dynamic gas (memory expansion), static gas is handled by JUMPDEST
             // Use negative gas pattern for single-branch out-of-gas detection
             self.gas_remaining -= @intCast(memory_expansion_cost);
@@ -171,7 +171,7 @@ pub fn Handlers(FrameType: type) type {
 
             // Store the least significant byte
             const byte_value = @as(u8, @truncate(value));
-            self.memory.set_byte_evm(self.getEvm().getCallArenaAllocator(), @as(u24, @intCast(offset_usize)), byte_value) catch |err| switch (err) {
+            self.memory.set_byte_evm(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(offset_usize)), byte_value) catch |err| switch (err) {
                 memory_mod.MemoryError.OutOfBounds => {
                     self.afterComplete(.MSTORE8);
                     return Error.OutOfBounds;
@@ -210,15 +210,15 @@ pub fn Handlers(FrameType: type) type {
             const src_offset = self.stack.pop_unsafe(); // Second from top (src)
             const size = self.stack.pop_unsafe(); // Third from top (length)
 
-            // Check if offsets and size fit in u24 (memory limit)
+            // Check if offsets and size fit in u32 (memory limit)
             if (!checkMemoryLimit(dest_offset) or !checkMemoryLimit(src_offset) or !checkMemoryLimit(size)) {
                 self.afterComplete(.MCOPY);
                 return Error.OutOfBounds;
             }
 
-            const dest_u24 = @as(u24, @intCast(dest_offset));
-            const src_u24 = @as(u24, @intCast(src_offset));
-            const size_u24 = @as(u24, @intCast(size));
+            const dest_u32 = @as(u32, @intCast(dest_offset));
+            const src_u32 = @as(u32, @intCast(src_offset));
+            const size_u24 = @as(u32, @intCast(size));
 
             if (size_u24 == 0) {
                 // No operation for zero size
@@ -230,8 +230,8 @@ pub fn Handlers(FrameType: type) type {
             const copy_gas_cost = words * GasConstants.CopyGas; // Only dynamic copy cost
 
             // Calculate memory expansion cost for both source and destination
-            const src_end = src_u24 + size_u24;
-            const dest_end = dest_u24 + size_u24;
+            const src_end = src_u32 + size_u24;
+            const dest_end = dest_u32 + size_u24;
             if (!checkMemoryLimit(src_end) or !checkMemoryLimit(dest_end)) {
                 self.afterComplete(.MCOPY);
                 return Error.OutOfBounds;
@@ -249,7 +249,7 @@ pub fn Handlers(FrameType: type) type {
 
             // For overlapping memory regions, we need to copy via a temporary buffer
             // First, read the source data
-            const src_data = self.memory.get_slice(src_u24, size_u24) catch {
+            const src_data = self.memory.get_slice(src_u32, size_u24) catch {
                 self.afterComplete(.MCOPY);
                 return Error.OutOfBounds;
             };
@@ -263,7 +263,7 @@ pub fn Handlers(FrameType: type) type {
             @memcpy(temp_buffer, src_data);
 
             // Write to destination
-            self.memory.set_data_evm(self.getEvm().getCallArenaAllocator(), dest_u24, temp_buffer) catch {
+            self.memory.set_data_evm(self.getEvm().getCallArenaAllocator(), dest_u32, temp_buffer) catch {
                 self.getEvm().getCallArenaAllocator().free(temp_buffer);
                 self.afterComplete(.MCOPY);
                 return Error.AllocationError;
@@ -598,7 +598,7 @@ test "MLOAD opcode - cross-boundary reads" {
 
     // Set up memory with pattern
     for (0..64) |i| {
-        frame.memory.set_byte_evm(testing.allocator, @as(u24, @intCast(i)), @as(u8, @truncate(i))) catch unreachable;
+        frame.memory.set_byte_evm(testing.allocator, @as(u32, @intCast(i)), @as(u8, @truncate(i))) catch unreachable;
     }
 
     // Load from offset 5 (not aligned to word boundary)
@@ -748,7 +748,7 @@ test "MSTORE8 opcode - all byte values" {
             else => return err,
         };
 
-        const stored = frame.memory.get_byte(@as(u24, @intCast(i))) catch unreachable;
+        const stored = frame.memory.get_byte(@as(u32, @intCast(i))) catch unreachable;
         try testing.expectEqual(@as(u8, @truncate(i)), stored);
     }
 }
@@ -775,7 +775,7 @@ test "MSTORE8 opcode - truncation" {
             else => return err,
         };
 
-        const stored = frame.memory.get_byte(@as(u24, @intCast(i * 4))) catch unreachable;
+        const stored = frame.memory.get_byte(@as(u32, @intCast(i * 4))) catch unreachable;
         try testing.expectEqual(@as(u8, @truncate(value)), stored);
     }
 }
@@ -821,7 +821,7 @@ test "MSTORE8 opcode - consecutive writes" {
 
     // Read back and verify
     for (hello, 0..) |expected_char, i| {
-        const stored = frame.memory.get_byte(@as(u24, @intCast(i))) catch unreachable;
+        const stored = frame.memory.get_byte(@as(u32, @intCast(i))) catch unreachable;
         try testing.expectEqual(expected_char, stored);
     }
 }
@@ -912,7 +912,7 @@ test "MCOPY opcode - various sizes" {
     for (sizes) |size| {
         // Fill source with pattern
         for (0..size) |i| {
-            frame.memory.set_byte_evm(testing.allocator, @as(u24, @intCast(i)), @as(u8, @truncate(i & 0xFF))) catch unreachable;
+            frame.memory.set_byte_evm(testing.allocator, @as(u32, @intCast(i)), @as(u8, @truncate(i & 0xFF))) catch unreachable;
         }
 
         // Copy to destination at offset 2000
@@ -929,8 +929,8 @@ test "MCOPY opcode - various sizes" {
 
         // Verify all bytes copied correctly
         for (0..size) |i| {
-            const src_byte = frame.memory.get_byte(@as(u24, @intCast(i))) catch unreachable;
-            const dst_byte = frame.memory.get_byte(@as(u24, @intCast(2000 + i))) catch unreachable;
+            const src_byte = frame.memory.get_byte(@as(u32, @intCast(i))) catch unreachable;
+            const dst_byte = frame.memory.get_byte(@as(u32, @intCast(2000 + i))) catch unreachable;
             try testing.expectEqual(src_byte, dst_byte);
         }
     }
@@ -1031,7 +1031,7 @@ test "MCOPY opcode - large copy" {
     // Fill source with pattern
     for (0..size) |i| {
         const byte = @as(u8, @truncate((i * 7 + 3) % 256));
-        frame.memory.set_byte_evm(testing.allocator, @as(u24, @intCast(i)), byte) catch unreachable;
+        frame.memory.set_byte_evm(testing.allocator, @as(u32, @intCast(i)), byte) catch unreachable;
     }
 
     // Copy to high offset
@@ -1048,8 +1048,8 @@ test "MCOPY opcode - large copy" {
 
     // Verify first and last few bytes
     for ([_]usize{ 0, 1, 2, size - 3, size - 2, size - 1 }) |offset| {
-        const src = frame.memory.get_byte(@as(u24, @intCast(offset))) catch unreachable;
-        const dst = frame.memory.get_byte(@as(u24, @intCast(50000 + offset))) catch unreachable;
+        const src = frame.memory.get_byte(@as(u32, @intCast(offset))) catch unreachable;
+        const dst = frame.memory.get_byte(@as(u32, @intCast(50000 + offset))) catch unreachable;
         try testing.expectEqual(src, dst);
     }
 }
@@ -1277,7 +1277,7 @@ test "MCOPY opcode - single byte copies" {
 
     for (test_bytes, 0..) |test_byte, i| {
         // Store test byte
-        frame.memory.set_byte_evm(testing.allocator, @as(u24, @intCast(i)), test_byte) catch unreachable;
+        frame.memory.set_byte_evm(testing.allocator, @as(u32, @intCast(i)), test_byte) catch unreachable;
 
         // Copy single byte to destination
         // Stack order: [dest, src, length]
@@ -1289,7 +1289,7 @@ test "MCOPY opcode - single byte copies" {
         _ = try TestFrame.MemoryHandlers.mcopy(&frame, dispatch);
 
         // Verify copy
-        const copied = frame.memory.get_byte(@as(u24, @intCast(100 + i))) catch unreachable;
+        const copied = frame.memory.get_byte(@as(u32, @intCast(100 + i))) catch unreachable;
         try testing.expectEqual(test_byte, copied);
     }
 }

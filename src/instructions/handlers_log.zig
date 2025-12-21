@@ -73,7 +73,7 @@ pub fn Handlers(FrameType: type) type {
                             self.afterComplete(unified_opcode);
                             return Error.OutOfBounds;
                         }
-                        memory_expansion_cost = self.memory.get_expansion_cost(@as(u24, @intCast(end_offset)));
+                        memory_expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(end_offset)));
                     }
 
                     // Calculate dynamic gas cost: data gas + memory expansion
@@ -91,11 +91,11 @@ pub fn Handlers(FrameType: type) type {
                     // Ensure memory capacity
                     if (length_usize > 0) {
                         const memory_end = offset_usize + length_usize;
-                        if (memory_end > std.math.maxInt(u24)) {
+                        if (memory_end > std.math.maxInt(u32)) {
                             self.afterComplete(unified_opcode);
                             return Error.OutOfBounds;
                         }
-                        self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u24, @intCast(memory_end))) catch {
+                        self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(memory_end))) catch {
                             self.afterComplete(unified_opcode);
                             return Error.OutOfBounds;
                         };
@@ -103,7 +103,7 @@ pub fn Handlers(FrameType: type) type {
 
                     // Get data from memory
                     const data = if (length_usize > 0)
-                        self.memory.get_slice(@as(u24, @intCast(offset_usize)), @as(u24, @intCast(length_usize))) catch {
+                        self.memory.get_slice(@as(u32, @intCast(offset_usize)), @as(u32, @intCast(length_usize))) catch {
                             self.afterComplete(unified_opcode);
                             return Error.OutOfBounds;
                         }

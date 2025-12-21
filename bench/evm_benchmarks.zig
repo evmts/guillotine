@@ -7,6 +7,8 @@ const Address = primitives.Address.Address;
 const GasConstants = primitives.GasConstants;
 const MinimalEvm = evm.MinimalEvm;
 
+const stdout = std.io.getStdOut().writer();
+
 // Fixture data structure
 const Fixture = struct {
     name: []const u8,
@@ -230,12 +232,12 @@ fn registerFixtureBenchmarks(
     fixture_name: []const u8,
 ) !void {
     const fixture = loadFixture(allocator, fixture_name) catch |err| {
-        std.debug.print("Warning: Could not load fixture '{s}': {}\n", .{ fixture_name, err });
+        stdout.print("Warning: Could not load fixture '{s}': {}\n", .{ fixture_name, err }) catch {};
         return;
     };
 
     if (fixture.bytecode.len == 0) {
-        std.debug.print("Warning: No bytecode for fixture '{s}', skipping\n", .{fixture_name});
+        stdout.print("Warning: No bytecode for fixture '{s}', skipping\n", .{fixture_name}) catch {};
         allocator.free(fixture.name);
         allocator.free(fixture.bytecode);
         allocator.free(fixture.calldata);
@@ -258,7 +260,7 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    std.debug.print("\n=== EVM Fixture Benchmarks ===\n\n", .{});
+    try stdout.print("\n=== EVM Fixture Benchmarks ===\n\n", .{});
 
     // Create benchmark
     var bench = zbench.Benchmark.init(allocator, .{

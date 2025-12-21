@@ -5,6 +5,8 @@ const hash_builder_opt = @import("hash_builder_optimized.zig");
 const HashBuilder = hash_builder.HashBuilder;
 const HashBuilderOptimized = hash_builder_opt.HashBuilderOptimized;
 
+const stdout = std.io.getStdOut().writer();
+
 /// Benchmark result structure
 pub const BenchmarkResult = struct {
     name: []const u8,
@@ -14,11 +16,11 @@ pub const BenchmarkResult = struct {
     ns_per_op: f64,
 
     pub fn print(self: BenchmarkResult) void {
-        std.debug.print("Benchmark: {s}\n", .{self.name});
-        std.debug.print("  Operations: {d}\n", .{self.operations});
-        std.debug.print("  Duration: {d} ns\n", .{self.duration_ns});
-        std.debug.print("  Ops/sec: {d:.2}\n", .{self.ops_per_sec});
-        std.debug.print("  ns/op: {d:.2}\n", .{self.ns_per_op});
+        stdout.print("Benchmark: {s}\n", .{self.name}) catch {};
+        stdout.print("  Operations: {d}\n", .{self.operations}) catch {};
+        stdout.print("  Duration: {d} ns\n", .{self.duration_ns}) catch {};
+        stdout.print("  Ops/sec: {d:.2}\n", .{self.ops_per_sec}) catch {};
+        stdout.print("  ns/op: {d:.2}\n", .{self.ns_per_op}) catch {};
     }
 };
 
@@ -194,45 +196,45 @@ fn bench_lookup_optimized(allocator: Allocator, n: usize) !void {
 pub fn run_all_benchmarks(allocator: Allocator) !void {
     const iterations = 1000;
 
-    std.debug.print("\n=== Trie Performance Benchmarks ===\n\n", .{});
+    try stdout.print("\n=== Trie Performance Benchmarks ===\n\n", .{});
 
     const insert_result = try benchmark("Insert (1000 ops)", bench_insert, allocator, iterations);
     insert_result.print();
-    std.debug.print("\n", .{});
+    try stdout.print("\n", .{});
 
     const lookup_result = try benchmark("Lookup (1000 ops)", bench_lookup, allocator, iterations);
     lookup_result.print();
-    std.debug.print("\n", .{});
+    try stdout.print("\n", .{});
 
     const delete_result = try benchmark("Delete (1000 ops)", bench_delete, allocator, iterations);
     delete_result.print();
-    std.debug.print("\n", .{});
+    try stdout.print("\n", .{});
 
     const mixed_result = try benchmark("Mixed workload (1000 ops)", bench_mixed, allocator, iterations);
     mixed_result.print();
-    std.debug.print("\n", .{});
+    try stdout.print("\n", .{});
 
     const large_keys_result = try benchmark("Large keys (1000 ops)", bench_large_keys, allocator, iterations);
     large_keys_result.print();
-    std.debug.print("\n", .{});
+    try stdout.print("\n", .{});
 
-    std.debug.print("=== Optimized Builder Benchmarks ===\n\n", .{});
+    try stdout.print("=== Optimized Builder Benchmarks ===\n\n", .{});
 
     const insert_opt_result = try benchmark("Optimized Insert (1000 ops)", bench_insert_optimized, allocator, iterations);
     insert_opt_result.print();
-    std.debug.print("\n", .{});
+    try stdout.print("\n", .{});
 
     const lookup_opt_result = try benchmark("Optimized Lookup (1000 ops)", bench_lookup_optimized, allocator, iterations);
     lookup_opt_result.print();
-    std.debug.print("\n", .{});
+    try stdout.print("\n", .{});
 
     // Compute speedup
     const insert_speedup = insert_result.ns_per_op / insert_opt_result.ns_per_op;
     const lookup_speedup = lookup_result.ns_per_op / lookup_opt_result.ns_per_op;
 
-    std.debug.print("=== Performance Summary ===\n", .{});
-    std.debug.print("Insert speedup: {d:.2}x\n", .{insert_speedup});
-    std.debug.print("Lookup speedup: {d:.2}x\n", .{lookup_speedup});
+    try stdout.print("=== Performance Summary ===\n", .{});
+    try stdout.print("Insert speedup: {d:.2}x\n", .{insert_speedup});
+    try stdout.print("Lookup speedup: {d:.2}x\n", .{lookup_speedup});
 }
 
 // Tests
@@ -284,8 +286,9 @@ test "benchmark - optimized vs standard" {
     // Optimized should be at least as fast (or we have a regression)
     // Allow some variance due to timing noise
     const speedup = standard.ns_per_op / optimized.ns_per_op;
-    std.debug.print("Speedup: {d:.2}x\n", .{speedup});
+    // Speedup is informational - logged for debugging
+    _ = speedup;
 
     // This test is informational - no strict assertion
-    try testing.expect(speedup > 0);
+    try testing.expect(standard.ns_per_op > 0);
 }

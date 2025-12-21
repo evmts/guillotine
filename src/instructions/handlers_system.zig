@@ -107,7 +107,7 @@ pub fn Handlers(FrameType: type) type {
 
             // Calculate and charge memory expansion gas
             if (max_mem_end > 0) {
-                const expansion_cost = self.memory.get_expansion_cost(@as(u24, @intCast(max_mem_end)));
+                const expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(max_mem_end)));
                 const expansion_cost_i64 = @as(FrameType.GasType, @intCast(expansion_cost));
                 self.gas_remaining -= expansion_cost_i64;
                 if (self.gas_remaining < 0) {
@@ -161,7 +161,7 @@ pub fn Handlers(FrameType: type) type {
 
             if (input_size_usize > 0) {
                 const input_end = input_offset_usize + input_size_usize;
-                self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u24, @intCast(input_end))) catch {
+                self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(input_end))) catch {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.CALL);
                     self.afterInstruction(.CALL, op_data.next_handler, op_data.next_cursor.cursor);
@@ -171,7 +171,7 @@ pub fn Handlers(FrameType: type) type {
 
             if (output_size_usize > 0) {
                 const output_end = output_offset_usize + output_size_usize;
-                self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u24, @intCast(output_end))) catch {
+                self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(output_end))) catch {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.CALL);
                     self.afterInstruction(.CALL, op_data.next_handler, op_data.next_cursor.cursor);
@@ -181,7 +181,7 @@ pub fn Handlers(FrameType: type) type {
 
             var input_data: []const u8 = &.{};
             if (input_size_usize > 0) {
-                input_data = self.memory.get_slice(@as(u24, @intCast(input_offset_usize)), @as(u24, @intCast(input_size_usize))) catch {
+                input_data = self.memory.get_slice(@as(u32, @intCast(input_offset_usize)), @as(u32, @intCast(input_size_usize))) catch {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.CALL);
                     self.afterInstruction(.CALL, op_data.next_handler, op_data.next_cursor.cursor);
@@ -205,7 +205,7 @@ pub fn Handlers(FrameType: type) type {
 
             if (result.success and output_size_usize > 0 and result.output.len > 0) {
                 const copy_size = @min(output_size_usize, result.output.len);
-                self.memory.set_data(self.getEvm().getCallArenaAllocator(), @as(u24, @intCast(output_offset_usize)), result.output[0..copy_size]) catch {
+                self.memory.set_data(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(output_offset_usize)), result.output[0..copy_size]) catch {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.CALL);
                     self.afterInstruction(.CALL, op_data.next_handler, op_data.next_cursor.cursor);
@@ -304,7 +304,7 @@ pub fn Handlers(FrameType: type) type {
 
             // Calculate and charge memory expansion gas
             if (max_mem_end > 0) {
-                const expansion_cost = self.memory.get_expansion_cost(@as(u24, @intCast(max_mem_end)));
+                const expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(max_mem_end)));
                 const expansion_cost_i64 = @as(FrameType.GasType, @intCast(expansion_cost));
                 self.gas_remaining -= expansion_cost_i64;
                 if (self.gas_remaining < 0) {
@@ -314,21 +314,21 @@ pub fn Handlers(FrameType: type) type {
 
             if (input_size_usize > 0) {
                 const input_end = input_offset_usize + input_size_usize;
-                self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u24, @intCast(input_end))) catch {
+                self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(input_end))) catch {
                     return Error.AllocationError;
                 };
             }
 
             if (output_size_usize > 0) {
                 const output_end = output_offset_usize + output_size_usize;
-                self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u24, @intCast(output_end))) catch {
+                self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(output_end))) catch {
                     return Error.AllocationError;
                 };
             }
 
             var input_data: []const u8 = &.{};
             if (input_size_usize > 0) {
-                input_data = self.memory.get_slice(@as(u24, @intCast(input_offset_usize)), @as(u24, @intCast(input_size_usize))) catch {
+                input_data = self.memory.get_slice(@as(u32, @intCast(input_offset_usize)), @as(u32, @intCast(input_size_usize))) catch {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.CALLCODE);
                     self.afterInstruction(.CALLCODE, op_data.next_handler, op_data.next_cursor.cursor);
@@ -351,7 +351,7 @@ pub fn Handlers(FrameType: type) type {
 
             if (result.success and output_size_usize > 0 and result.output.len > 0) {
                 const copy_size = @min(output_size_usize, result.output.len);
-                self.memory.set_data(self.getEvm().getCallArenaAllocator(), @as(u24, @intCast(output_offset_usize)), result.output[0..copy_size]) catch |err| {
+                self.memory.set_data(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(output_offset_usize)), result.output[0..copy_size]) catch |err| {
                     log.err("Failed to copy call output to memory: {s}", .{@errorName(err)});
                     return Error.AllocationError;
                 };
@@ -454,7 +454,7 @@ pub fn Handlers(FrameType: type) type {
 
             // Calculate and charge memory expansion gas
             if (max_mem_end > 0) {
-                const expansion_cost = self.memory.get_expansion_cost(@as(u24, @intCast(max_mem_end)));
+                const expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(max_mem_end)));
                 const expansion_cost_i64 = @as(FrameType.GasType, @intCast(expansion_cost));
                 self.gas_remaining -= expansion_cost_i64;
                 if (self.gas_remaining < 0) {
@@ -464,7 +464,7 @@ pub fn Handlers(FrameType: type) type {
 
             if (input_size_usize > 0) {
                 const input_end = input_offset_usize + input_size_usize;
-                self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u24, @intCast(input_end))) catch {
+                self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(input_end))) catch {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.DELEGATECALL);
                     self.afterInstruction(.DELEGATECALL, op_data.next_handler, op_data.next_cursor.cursor);
@@ -474,7 +474,7 @@ pub fn Handlers(FrameType: type) type {
 
             if (output_size_usize > 0) {
                 const output_end = output_offset_usize + output_size_usize;
-                self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u24, @intCast(output_end))) catch {
+                self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(output_end))) catch {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.DELEGATECALL);
                     self.afterInstruction(.DELEGATECALL, op_data.next_handler, op_data.next_cursor.cursor);
@@ -484,7 +484,7 @@ pub fn Handlers(FrameType: type) type {
 
             var input_data: []const u8 = &.{};
             if (input_size_usize > 0) {
-                input_data = self.memory.get_slice(@as(u24, @intCast(input_offset_usize)), @as(u24, @intCast(input_size_usize))) catch {
+                input_data = self.memory.get_slice(@as(u32, @intCast(input_offset_usize)), @as(u32, @intCast(input_size_usize))) catch {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.DELEGATECALL);
                     self.afterInstruction(.DELEGATECALL, op_data.next_handler, op_data.next_cursor.cursor);
@@ -506,7 +506,7 @@ pub fn Handlers(FrameType: type) type {
 
             if (result.success and output_size_usize > 0 and result.output.len > 0) {
                 const copy_size = @min(output_size_usize, result.output.len);
-                self.memory.set_data(self.getEvm().getCallArenaAllocator(), @as(u24, @intCast(output_offset_usize)), result.output[0..copy_size]) catch {
+                self.memory.set_data(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(output_offset_usize)), result.output[0..copy_size]) catch {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.DELEGATECALL);
                     self.afterInstruction(.DELEGATECALL, op_data.next_handler, op_data.next_cursor.cursor);
@@ -611,7 +611,7 @@ pub fn Handlers(FrameType: type) type {
 
             // Calculate and charge memory expansion gas
             if (max_mem_end > 0) {
-                const expansion_cost = self.memory.get_expansion_cost(@as(u24, @intCast(max_mem_end)));
+                const expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(max_mem_end)));
                 const expansion_cost_i64 = @as(FrameType.GasType, @intCast(expansion_cost));
                 self.gas_remaining -= expansion_cost_i64;
                 if (self.gas_remaining < 0) {
@@ -622,7 +622,7 @@ pub fn Handlers(FrameType: type) type {
             // Ensure memory capacity for input
             if (input_size_usize > 0) {
                 const input_end = input_offset_usize + input_size_usize;
-                self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u24, @intCast(input_end))) catch {
+                self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(input_end))) catch {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.STATICCALL);
                     self.afterInstruction(.STATICCALL, op_data.next_handler, op_data.next_cursor.cursor);
@@ -633,7 +633,7 @@ pub fn Handlers(FrameType: type) type {
             // Ensure memory capacity for output
             if (output_size_usize > 0) {
                 const output_end = output_offset_usize + output_size_usize;
-                self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u24, @intCast(output_end))) catch {
+                self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(output_end))) catch {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.STATICCALL);
                     self.afterInstruction(.STATICCALL, op_data.next_handler, op_data.next_cursor.cursor);
@@ -644,7 +644,7 @@ pub fn Handlers(FrameType: type) type {
             // Extract input data
             var input_data: []const u8 = &.{};
             if (input_size_usize > 0) {
-                input_data = self.memory.get_slice(@as(u24, @intCast(input_offset_usize)), @as(u24, @intCast(input_size_usize))) catch {
+                input_data = self.memory.get_slice(@as(u32, @intCast(input_offset_usize)), @as(u32, @intCast(input_size_usize))) catch {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.STATICCALL);
                     self.afterInstruction(.STATICCALL, op_data.next_handler, op_data.next_cursor.cursor);
@@ -668,7 +668,7 @@ pub fn Handlers(FrameType: type) type {
             // Write return data to memory if successful and output size > 0
             if (result.success and output_size_usize > 0 and result.output.len > 0) {
                 const copy_size = @min(output_size_usize, result.output.len);
-                self.memory.set_data(self.getEvm().getCallArenaAllocator(), @as(u24, @intCast(output_offset_usize)), result.output[0..copy_size]) catch {
+                self.memory.set_data(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(output_offset_usize)), result.output[0..copy_size]) catch {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.STATICCALL);
                     self.afterInstruction(.STATICCALL, op_data.next_handler, op_data.next_cursor.cursor);
@@ -732,7 +732,7 @@ pub fn Handlers(FrameType: type) type {
                 self.afterInstruction(.CREATE, op_data.next_handler, op_data.next_cursor.cursor);
                 return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             }
-            self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u24, @intCast(memory_end))) catch {
+            self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(memory_end))) catch {
                 self.stack.push_unsafe(0);
                 const op_data = dispatch.getOpData(.CREATE);
                 self.afterInstruction(.CREATE, op_data.next_handler, op_data.next_cursor.cursor);
@@ -742,7 +742,7 @@ pub fn Handlers(FrameType: type) type {
             // Extract initialization code
             var init_code: []const u8 = &.{};
             if (size_usize > 0) {
-                init_code = self.memory.get_slice(@as(u24, @intCast(offset_usize)), @as(u24, @intCast(size_usize))) catch {
+                init_code = self.memory.get_slice(@as(u32, @intCast(offset_usize)), @as(u32, @intCast(size_usize))) catch {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.CREATE);
                     self.afterInstruction(.CREATE, op_data.next_handler, op_data.next_cursor.cursor);
@@ -826,7 +826,7 @@ pub fn Handlers(FrameType: type) type {
                 self.afterInstruction(.CREATE2, op_data.next_handler, op_data.next_cursor.cursor);
                 return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             }
-            self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u24, @intCast(memory_end))) catch {
+            self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(memory_end))) catch {
                 self.stack.push_unsafe(0);
                 const op_data = dispatch.getOpData(.CREATE2);
                 self.afterInstruction(.CREATE2, op_data.next_handler, op_data.next_cursor.cursor);
@@ -836,7 +836,7 @@ pub fn Handlers(FrameType: type) type {
             // Extract initialization code
             var init_code: []const u8 = &.{};
             if (size_usize > 0) {
-                init_code = self.memory.get_slice(@as(u24, @intCast(offset_usize)), @as(u24, @intCast(size_usize))) catch {
+                init_code = self.memory.get_slice(@as(u32, @intCast(offset_usize)), @as(u32, @intCast(size_usize))) catch {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.CREATE2);
                     self.afterInstruction(.CREATE2, op_data.next_handler, op_data.next_cursor.cursor);
@@ -917,7 +917,7 @@ pub fn Handlers(FrameType: type) type {
             if (offset_usize > std.math.maxInt(u24) or size_usize > std.math.maxInt(u24) or memory_end > std.math.maxInt(u24)) {
                 return Error.OutOfBounds;
             }
-            const memory_expansion_cost = self.memory.get_expansion_cost(@as(u24, @intCast(memory_end)));
+            const memory_expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(memory_end)));
             // Use negative gas pattern for single-branch out-of-gas detection
             self.gas_remaining -= @intCast(memory_expansion_cost);
             if (self.gas_remaining < 0) {
@@ -925,11 +925,11 @@ pub fn Handlers(FrameType: type) type {
             }
 
             // Ensure memory capacity (memory_end is guaranteed to fit in u24 from check above)
-            self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u24, @intCast(memory_end))) catch return Error.OutOfBounds;
+            self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(memory_end))) catch return Error.OutOfBounds;
 
             // Extract return data from memory and store it in thread-local storage
             if (size_usize > 0) {
-                const return_data = self.memory.get_slice(@as(u24, @intCast(offset_usize)), @as(u24, @intCast(size_usize))) catch {
+                const return_data = self.memory.get_slice(@as(u32, @intCast(offset_usize)), @as(u32, @intCast(size_usize))) catch {
                     return Error.OutOfBounds;
                 };
                 // Allocate and copy output to thread-local storage
@@ -974,7 +974,7 @@ pub fn Handlers(FrameType: type) type {
             if (offset_usize > std.math.maxInt(u24) or size_usize > std.math.maxInt(u24) or memory_end > std.math.maxInt(u24)) {
                 return Error.OutOfBounds;
             }
-            const memory_expansion_cost = self.memory.get_expansion_cost(@as(u24, @intCast(memory_end)));
+            const memory_expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(memory_end)));
             // Use negative gas pattern for single-branch out-of-gas detection
             self.gas_remaining -= @intCast(memory_expansion_cost);
             if (self.gas_remaining < 0) {
@@ -982,11 +982,11 @@ pub fn Handlers(FrameType: type) type {
             }
 
             // Ensure memory capacity (memory_end is guaranteed to fit in u24 from check above)
-            self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u24, @intCast(memory_end))) catch return Error.OutOfBounds;
+            self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(memory_end))) catch return Error.OutOfBounds;
 
             // Extract revert data from memory and store it in thread-local storage
             if (size_usize > 0) {
-                const revert_data = self.memory.get_slice(@as(u24, @intCast(offset_usize)), @as(u24, @intCast(size_usize))) catch {
+                const revert_data = self.memory.get_slice(@as(u32, @intCast(offset_usize)), @as(u32, @intCast(size_usize))) catch {
                     return Error.OutOfBounds;
                 };
                 // Allocate and copy output to thread-local storage
@@ -1242,7 +1242,7 @@ pub fn Handlers(FrameType: type) type {
 
             // Calculate and charge memory expansion gas
             if (max_mem_end > 0) {
-                const expansion_cost = self.memory.get_expansion_cost(@as(u24, @intCast(max_mem_end)));
+                const expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(max_mem_end)));
                 const expansion_cost_i64 = @as(FrameType.GasType, @intCast(expansion_cost));
                 self.gas_remaining -= expansion_cost_i64;
                 if (self.gas_remaining < 0) {
@@ -1254,7 +1254,7 @@ pub fn Handlers(FrameType: type) type {
             // Ensure memory capacity for input
             if (input_size_usize > 0) {
                 const input_end = input_offset_usize + input_size_usize;
-                self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u24, @intCast(input_end))) catch {
+                self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(input_end))) catch {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.AUTHCALL);
                     self.afterInstruction(.AUTHCALL, op_data.next_handler, op_data.next_cursor.cursor);
@@ -1265,7 +1265,7 @@ pub fn Handlers(FrameType: type) type {
             // Ensure memory capacity for output
             if (output_size_usize > 0) {
                 const output_end = output_offset_usize + output_size_usize;
-                self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u24, @intCast(output_end))) catch {
+                self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(output_end))) catch {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.AUTHCALL);
                     self.afterInstruction(.AUTHCALL, op_data.next_handler, op_data.next_cursor.cursor);
@@ -1276,7 +1276,7 @@ pub fn Handlers(FrameType: type) type {
             // Extract input data
             var input_data: []const u8 = &.{};
             if (input_size_usize > 0) {
-                input_data = self.memory.get_slice(@as(u24, @intCast(input_offset_usize)), @as(u24, @intCast(input_size_usize))) catch {
+                input_data = self.memory.get_slice(@as(u32, @intCast(input_offset_usize)), @as(u32, @intCast(input_size_usize))) catch {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.AUTHCALL);
                     self.afterInstruction(.AUTHCALL, op_data.next_handler, op_data.next_cursor.cursor);
@@ -1303,7 +1303,7 @@ pub fn Handlers(FrameType: type) type {
             // Write return data to memory if successful and output size > 0
             if (result.success and output_size_usize > 0 and result.output.len > 0) {
                 const copy_size = @min(output_size_usize, result.output.len);
-                self.memory.set_data(self.getEvm().getCallArenaAllocator(), @as(u24, @intCast(output_offset_usize)), result.output[0..copy_size]) catch {
+                self.memory.set_data(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(output_offset_usize)), result.output[0..copy_size]) catch {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.AUTHCALL);
                     self.afterInstruction(.AUTHCALL, op_data.next_handler, op_data.next_cursor.cursor);
@@ -1644,7 +1644,7 @@ test "RETURN opcode - offset at memory boundary" {
     // Write data at different offsets
     const test_data = [_]u8{ 0xAA, 0xBB, 0xCC, 0xDD };
     const offset = 100;
-    try frame.memory.set_data(testing.allocator, @as(u24, @intCast(offset)), &test_data);
+    try frame.memory.set_data(testing.allocator, @as(u32, @intCast(offset)), &test_data);
 
     try frame.stack.push(offset); // offset
     try frame.stack.push(test_data.len); // size

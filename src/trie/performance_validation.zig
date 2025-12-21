@@ -192,10 +192,10 @@ test "performance - insert speedup" {
 
     const result = try compare_performance(allocator, 500);
 
-    std.debug.print("\nPerformance comparison (500 inserts):\n", .{});
-    std.debug.print("  Standard: {d} ns\n", .{result.standard_ns});
-    std.debug.print("  Optimized: {d} ns\n", .{result.optimized_ns});
-    std.debug.print("  Speedup: {d:.2}x\n", .{result.speedup});
+    // Performance comparison results are informational
+    // Standard: result.standard_ns ns
+    // Optimized: result.optimized_ns ns
+    // Speedup: result.speedup x
 
     // Optimized should not be significantly slower (allow for timing variance)
     // We expect speedup >= 1.0, but allow some variance
@@ -238,7 +238,7 @@ test "cache - hash cache effectiveness" {
     }
 
     try testing.expectEqual(@as(usize, 100), hits);
-    std.debug.print("\nCache hit rate: {d}/100 (100%)\n", .{hits});
+    // Cache hit rate: 100/100 (100%) - verified by assertion above
 }
 
 test "cache - dirty flag propagation" {

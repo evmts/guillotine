@@ -189,7 +189,7 @@ pub fn Handlers(FrameType: type) type {
             if (new_size > std.math.maxInt(u24)) {
                 return Error.OutOfBounds;
             }
-            const memory_expansion_cost = self.memory.get_expansion_cost(@as(u24, @intCast(new_size)));
+            const memory_expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(new_size)));
 
             // Dynamic gas cost: 3 gas per word (32 bytes) copied
             const copy_cost = (length_usize + 31) / 32 * 3;
@@ -201,8 +201,8 @@ pub fn Handlers(FrameType: type) type {
                 return Error.OutOfGas;
             }
 
-            // Ensure memory capacity (new_size already validated to fit in u24)
-            self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u24, @intCast(new_size))) catch |err| switch (err) {
+            // Ensure memory capacity (new_size already validated to fit in u32)
+            self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(new_size))) catch |err| switch (err) {
                 memory_mod.MemoryError.MemoryOverflow => return Error.OutOfBounds,
                 else => return Error.AllocationError,
             };
@@ -214,7 +214,7 @@ pub fn Handlers(FrameType: type) type {
             while (i < length_usize) : (i += 1) {
                 const src_index = offset_usize + i;
                 const byte_val = if (src_index < calldata.len) calldata[src_index] else 0;
-                self.memory.set_byte(self.getEvm().getCallArenaAllocator(), @as(u24, @intCast(dest_offset_usize + i)), byte_val) catch return Error.OutOfBounds;
+                self.memory.set_byte(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(dest_offset_usize + i)), byte_val) catch return Error.OutOfBounds;
             }
 
             const op_data = dispatch.getOpData(.CALLDATACOPY); // Use op_data.next_handler and op_data.next_cursor directly
@@ -269,7 +269,7 @@ pub fn Handlers(FrameType: type) type {
             if (new_size > std.math.maxInt(u24)) {
                 return Error.OutOfBounds;
             }
-            const memory_expansion_cost = self.memory.get_expansion_cost(@as(u24, @intCast(new_size)));
+            const memory_expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(new_size)));
 
             // Dynamic gas cost: 3 gas per word (32 bytes) copied
             const copy_cost = (length_usize + 31) / 32 * 3;
@@ -281,8 +281,8 @@ pub fn Handlers(FrameType: type) type {
                 return Error.OutOfGas;
             }
 
-            // Ensure memory capacity (new_size already validated to fit in u24)
-            self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u24, @intCast(new_size))) catch |err| switch (err) {
+            // Ensure memory capacity (new_size already validated to fit in u32)
+            self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(new_size))) catch |err| switch (err) {
                 memory_mod.MemoryError.MemoryOverflow => return Error.OutOfBounds,
                 else => return Error.AllocationError,
             };
@@ -295,7 +295,7 @@ pub fn Handlers(FrameType: type) type {
             while (i < length_usize) : (i += 1) {
                 const src_index = offset_usize + i;
                 const byte_val = if (src_index < code_data.len) code_data[src_index] else 0;
-                self.memory.set_byte(self.getEvm().getCallArenaAllocator(), @as(u24, @intCast(dest_offset_usize + i)), byte_val) catch return Error.OutOfBounds;
+                self.memory.set_byte(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(dest_offset_usize + i)), byte_val) catch return Error.OutOfBounds;
             }
 
             const op_data = dispatch_opcode_data.getOpData(.CODECOPY, Dispatch, Dispatch.Item, cursor);
@@ -406,7 +406,7 @@ pub fn Handlers(FrameType: type) type {
                 self.afterComplete(.EXTCODECOPY);
                 return Error.OutOfBounds;
             }
-            const memory_expansion_cost = self.memory.get_expansion_cost(@as(u24, @intCast(new_size)));
+            const memory_expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(new_size)));
 
             // Dynamic gas cost: 3 gas per word (32 bytes) copied
             const copy_cost = (length_usize + 31) / 32 * 3;
@@ -419,8 +419,8 @@ pub fn Handlers(FrameType: type) type {
                 return Error.OutOfGas;
             }
 
-            // Ensure memory capacity (new_size already validated to fit in u24)
-            self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u24, @intCast(new_size))) catch |err| switch (err) {
+            // Ensure memory capacity (new_size already validated to fit in u32)
+            self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(new_size))) catch |err| switch (err) {
                 memory_mod.MemoryError.MemoryOverflow => {
                     self.afterComplete(.EXTCODECOPY);
                     return Error.OutOfBounds;
@@ -443,7 +443,7 @@ pub fn Handlers(FrameType: type) type {
             while (i < length_usize) : (i += 1) {
                 const src_index = offset_usize + i;
                 const byte_val = if (src_index < code.len) code[src_index] else 0;
-                self.memory.set_byte(self.getEvm().getCallArenaAllocator(), @as(u24, @intCast(dest_offset_usize + i)), byte_val) catch {
+                self.memory.set_byte(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(dest_offset_usize + i)), byte_val) catch {
                     self.afterComplete(.EXTCODECOPY);
                     return Error.OutOfBounds;
                 };
@@ -580,7 +580,7 @@ pub fn Handlers(FrameType: type) type {
                 self.afterComplete(.RETURNDATACOPY);
                 return Error.OutOfBounds;
             }
-            const memory_expansion_cost = self.memory.get_expansion_cost(@as(u24, @intCast(new_size)));
+            const memory_expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(new_size)));
 
             // Dynamic gas cost: 3 gas per word (32 bytes) copied
             const copy_cost = (length_usize + 31) / 32 * 3;
@@ -593,8 +593,8 @@ pub fn Handlers(FrameType: type) type {
                 return Error.OutOfGas;
             }
 
-            // Ensure memory capacity (new_size already validated to fit in u24)
-            self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u24, @intCast(new_size))) catch |err| switch (err) {
+            // Ensure memory capacity (new_size already validated to fit in u32)
+            self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(new_size))) catch |err| switch (err) {
                 memory_mod.MemoryError.MemoryOverflow => {
                     self.afterComplete(.RETURNDATACOPY);
                     return Error.OutOfBounds;
@@ -607,7 +607,7 @@ pub fn Handlers(FrameType: type) type {
 
             // Copy return data to memory (no zero-padding needed since bounds are checked)
             const src_slice = return_data[offset_usize..][0..length_usize];
-            self.memory.set_data(self.getEvm().getCallArenaAllocator(), @as(u24, @intCast(dest_offset_usize)), src_slice) catch {
+            self.memory.set_data(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(dest_offset_usize)), src_slice) catch {
                 self.afterComplete(.RETURNDATACOPY);
                 return Error.OutOfBounds;
             };
