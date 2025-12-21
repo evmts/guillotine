@@ -191,6 +191,18 @@ pub const Database = struct {
         };
     }
 
+    /// Free all allocated code slices in a code storage HashMap.
+    ///
+    /// Safety: Zig's HashMap iterator is stable during iteration because we're only
+    /// freeing the memory that the value *points to* (the code slice), not modifying
+    /// the HashMap entry itself. The HashMap structure remains unchanged.
+    fn freeAllCodeInMap(self: *Database, code_map: *std.HashMap([32]u8, []const u8, ArrayHashContext, std.hash_map.default_max_load_percentage)) void {
+        var it = code_map.iterator();
+        while (it.next()) |entry| {
+            self.allocator.free(entry.value_ptr.*);
+        }
+    }
+
     pub fn begin_ephemeral_view(self: *Database) void {
         if (self.overlay_active) return;
         self.overlay_active = true;
@@ -198,8 +210,7 @@ pub const Database = struct {
         self.overlay_accounts.clearRetainingCapacity();
         self.overlay_storage.clearRetainingCapacity();
         // Free overlay code buffers if any
-        var it = self.overlay_code.iterator();
-        while (it.next()) |entry| self.allocator.free(entry.value_ptr.*);
+        self.freeAllCodeInMap(&self.overlay_code);
         self.overlay_code.clearRetainingCapacity();
     }
 
@@ -208,8 +219,7 @@ pub const Database = struct {
         self.overlay_active = false;
         self.overlay_accounts.clearRetainingCapacity();
         self.overlay_storage.clearRetainingCapacity();
-        var it = self.overlay_code.iterator();
-        while (it.next()) |entry| self.allocator.free(entry.value_ptr.*);
+        self.freeAllCodeInMap(&self.overlay_code);
         self.overlay_code.clearRetainingCapacity();
     }
 
@@ -220,10 +230,7 @@ pub const Database = struct {
         self.transient_storage.deinit();
 
         // Free all allocated code before deinitializing the hashmap
-        var code_iter = self.code_storage.iterator();
-        while (code_iter.next()) |entry| {
-            self.allocator.free(entry.value_ptr.*);
-        }
+        self.freeAllCodeInMap(&self.code_storage);
         self.code_storage.deinit();
 
         for (self.snapshots.items) |*snapshot| {
@@ -232,8 +239,7 @@ pub const Database = struct {
         }
         self.snapshots.deinit(self.allocator);
         // Deinit overlay
-        var it = self.overlay_code.iterator();
-        while (it.next()) |entry| self.allocator.free(entry.value_ptr.*);
+        self.freeAllCodeInMap(&self.overlay_code);
         self.overlay_code.deinit();
         self.overlay_accounts.deinit();
         self.overlay_storage.deinit();
