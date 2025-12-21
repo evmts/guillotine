@@ -647,16 +647,15 @@ pub fn Evm(comptime config: EvmConfig) type {
                             // Clear all account state in EVM storage
                             // These put operations should never fail in normal circumstances since we're
                             // using an arena allocator for transaction-scoped data. If OOM occurs during
-                            // cleanup, it indicates a critical system issue that should be handled explicitly.
-                            self.balances.put(addr, 0) catch |err| {
-                                log.err("CRITICAL: Failed to clear balance for selfdestructed account {any}: {any}", .{ addr, err });
-                                // Continue cleanup of other accounts even if this one fails
+                            // cleanup, it indicates a critical system issue - fail the transaction.
+                            self.balances.put(addr, 0) catch {
+                                return makeFailure(self.arena.allocator(), 0);
                             };
-                            self.code.put(addr, &[_]u8{}) catch |err| {
-                                log.err("CRITICAL: Failed to clear code for selfdestructed account {any}: {any}", .{ addr, err });
+                            self.code.put(addr, &[_]u8{}) catch {
+                                return makeFailure(self.arena.allocator(), 0);
                             };
-                            self.nonces.put(addr, 0) catch |err| {
-                                log.err("CRITICAL: Failed to clear nonce for selfdestructed account {any}: {any}", .{ addr, err });
+                            self.nonces.put(addr, 0) catch {
+                                return makeFailure(self.arena.allocator(), 0);
                             };
 
                             // Clear storage
