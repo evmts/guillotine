@@ -41,23 +41,23 @@ pub fn Preprocessor(FrameType: type) type {
 
         fn processPushOpcode(
             schedule_items: anytype,
-            allocator: std.mem.Allocator,
+            schedule_allocator: std.mem.Allocator,
+            arena_allocator: std.mem.Allocator,
             opcode_handlers: *const [256]OpcodeHandler,
             data: anytype,
         ) !void {
             const push_opcode = 0x60 + data.size - 1;
 
-            try schedule_items.append(allocator, .{ .opcode_handler = opcode_handlers.*[push_opcode] });
+            try schedule_items.append(schedule_allocator, .{ .opcode_handler = opcode_handlers.*[push_opcode] });
 
             if (data.size <= 8 and data.value <= std.math.maxInt(u64)) {
                 const inline_value: u64 = @intCast(data.value);
-                try schedule_items.append(allocator, .{ .push_inline = .{ .value = inline_value } });
+                try schedule_items.append(schedule_allocator, .{ .push_inline = .{ .value = inline_value } });
             } else {
-                // Allocate individual u256 value on heap
-                const value_ptr = try allocator.create(FrameType.WordType);
-                errdefer allocator.destroy(value_ptr);
+                // Allocate u256 value from arena (single deallocation at schedule deinit)
+                const value_ptr = try arena_allocator.create(FrameType.WordType);
                 value_ptr.* = data.value;
-                try schedule_items.append(allocator, .{ .push_pointer = .{ .value_ptr = value_ptr } });
+                try schedule_items.append(schedule_allocator, .{ .push_pointer = .{ .value_ptr = value_ptr } });
             }
         }
 
@@ -559,6 +559,12 @@ pub fn Preprocessor(FrameType: type) type {
 
             if (tracer) |t| t.onScheduleBuildStart(bytecode.len());
 
+            // Create arena allocator for push pointer values (PUSH9-32)
+            // This reduces allocation pressure by batching all u256 allocations
+            var push_values_arena = std.heap.ArenaAllocator.init(allocator);
+            errdefer push_values_arena.deinit();
+            const arena_allocator = push_values_arena.allocator();
+
             const ScheduleList = ArrayList(Self.Item, null);
             var schedule_items = ScheduleList{};
             errdefer schedule_items.deinit(allocator);
@@ -603,7 +609,7 @@ pub fn Preprocessor(FrameType: type) type {
                         try schedule_items.append(allocator, .{ .opcode_handler = opcode_handlers.*[@intFromEnum(Opcode.JUMPI)] });
                     },
                     .push => |data| {
-                        try processPushOpcode(&schedule_items, allocator, opcode_handlers, data);
+                        try processPushOpcode(&schedule_items, allocator, arena_allocator, opcode_handlers, data);
                     },
                     .jumpdest => |data| {
                         // Record this JUMPDEST's location in schedule for single-pass resolution
@@ -624,25 +630,25 @@ pub fn Preprocessor(FrameType: type) type {
                     },
                     .push_add_fusion => |data| {
                         if (tracer) |t| t.onFusionDetected(@intCast(instr_pc), "push_add", 2);
-                        try Self.handleFusionOperation(&schedule_items, allocator, data.value, .push_add);
+                        try Self.handleFusionOperation(&schedule_items, allocator, arena_allocator, data.value, .push_add);
                     },
                     .push_mul_fusion => |data| {
-                        try Self.handleFusionOperation(&schedule_items, allocator, data.value, .push_mul);
+                        try Self.handleFusionOperation(&schedule_items, allocator, arena_allocator, data.value, .push_mul);
                     },
                     .push_sub_fusion => |data| {
-                        try Self.handleFusionOperation(&schedule_items, allocator, data.value, .push_sub);
+                        try Self.handleFusionOperation(&schedule_items, allocator, arena_allocator, data.value, .push_sub);
                     },
                     .push_div_fusion => |data| {
-                        try Self.handleFusionOperation(&schedule_items, allocator, data.value, .push_div);
+                        try Self.handleFusionOperation(&schedule_items, allocator, arena_allocator, data.value, .push_div);
                     },
                     .push_and_fusion => |data| {
-                        try Self.handleFusionOperation(&schedule_items, allocator, data.value, .push_and);
+                        try Self.handleFusionOperation(&schedule_items, allocator, arena_allocator, data.value, .push_and);
                     },
                     .push_or_fusion => |data| {
-                        try Self.handleFusionOperation(&schedule_items, allocator, data.value, .push_or);
+                        try Self.handleFusionOperation(&schedule_items, allocator, arena_allocator, data.value, .push_or);
                     },
                     .push_xor_fusion => |data| {
-                        try Self.handleFusionOperation(&schedule_items, allocator, data.value, .push_xor);
+                        try Self.handleFusionOperation(&schedule_items, allocator, arena_allocator, data.value, .push_xor);
                     },
                     .push_jump_fusion => |data| {
                         if (tracer) |t| t.onFusionDetected(@intCast(instr_pc), "push_jump", 2);
@@ -653,13 +659,13 @@ pub fn Preprocessor(FrameType: type) type {
                         try Self.handleStaticJumpFusion(&schedule_items, &unresolved_jumps, allocator, data.value, .push_jumpi, tracer, @intCast(instr_pc));
                     },
                     .push_mload_fusion => |data| {
-                        try Self.handleMemoryFusion(&schedule_items, allocator, data.value, .push_mload);
+                        try Self.handleMemoryFusion(&schedule_items, allocator, arena_allocator, data.value, .push_mload);
                     },
                     .push_mstore_fusion => |data| {
-                        try Self.handleMemoryFusion(&schedule_items, allocator, data.value, .push_mstore);
+                        try Self.handleMemoryFusion(&schedule_items, allocator, arena_allocator, data.value, .push_mstore);
                     },
                     .push_mstore8_fusion => |data| {
-                        try Self.handleMemoryFusion(&schedule_items, allocator, data.value, .push_mstore8);
+                        try Self.handleMemoryFusion(&schedule_items, allocator, arena_allocator, data.value, .push_mstore8);
                     },
                     .stop => {
                         try schedule_items.append(allocator, .{ .opcode_handler = opcode_handlers.*[@intFromEnum(Opcode.STOP)] });
@@ -682,9 +688,8 @@ pub fn Preprocessor(FrameType: type) type {
                             if (value <= std.math.maxInt(u64)) {
                                 try schedule_items.append(allocator, .{ .push_inline = .{ .value = @intCast(value) } });
                             } else {
-                                // Allocate individual u256 value on heap
-                                const value_ptr = try allocator.create(FrameType.WordType);
-                                errdefer allocator.destroy(value_ptr);
+                                // Allocate u256 value from arena (single deallocation at schedule deinit)
+                                const value_ptr = try arena_allocator.create(FrameType.WordType);
                                 value_ptr.* = value;
                                 try schedule_items.append(allocator, .{ .push_pointer = .{ .value_ptr = value_ptr } });
                             }
@@ -706,9 +711,8 @@ pub fn Preprocessor(FrameType: type) type {
                         if (ij.target <= std.math.maxInt(u64)) {
                             try schedule_items.append(allocator, .{ .push_inline = .{ .value = @intCast(ij.target) } });
                         } else {
-                            // Allocate individual u256 value on heap
-                            const value_ptr = try allocator.create(FrameType.WordType);
-                            errdefer allocator.destroy(value_ptr);
+                            // Allocate u256 value from arena (single deallocation at schedule deinit)
+                            const value_ptr = try arena_allocator.create(FrameType.WordType);
                             value_ptr.* = ij.target;
                             try schedule_items.append(allocator, .{ .push_pointer = .{ .value_ptr = value_ptr } });
                         }
@@ -721,9 +725,8 @@ pub fn Preprocessor(FrameType: type) type {
                         if (dmp.push_value <= std.math.maxInt(u64)) {
                             try schedule_items.append(allocator, .{ .push_inline = .{ .value = @intCast(dmp.push_value) } });
                         } else {
-                            // Allocate individual u256 value on heap
-                            const value_ptr = try allocator.create(FrameType.WordType);
-                            errdefer allocator.destroy(value_ptr);
+                            // Allocate u256 value from arena (single deallocation at schedule deinit)
+                            const value_ptr = try arena_allocator.create(FrameType.WordType);
                             value_ptr.* = dmp.push_value;
                             try schedule_items.append(allocator, .{ .push_pointer = .{ .value_ptr = value_ptr } });
                         }
@@ -746,9 +749,8 @@ pub fn Preprocessor(FrameType: type) type {
                         if (pda.value <= std.math.maxInt(u64)) {
                             try schedule_items.append(allocator, .{ .push_inline = .{ .value = @intCast(pda.value) } });
                         } else {
-                            // Allocate individual u256 value on heap
-                            const value_ptr = try allocator.create(FrameType.WordType);
-                            errdefer allocator.destroy(value_ptr);
+                            // Allocate u256 value from arena (single deallocation at schedule deinit)
+                            const value_ptr = try arena_allocator.create(FrameType.WordType);
                             value_ptr.* = pda.value;
                             try schedule_items.append(allocator, .{ .push_pointer = .{ .value_ptr = value_ptr } });
                         }
@@ -763,9 +765,8 @@ pub fn Preprocessor(FrameType: type) type {
                         if (fd.target <= std.math.maxInt(u64)) {
                             try schedule_items.append(allocator, .{ .push_inline = .{ .value = @intCast(fd.target) } });
                         } else {
-                            // Allocate individual u256 value on heap
-                            const value_ptr = try allocator.create(FrameType.WordType);
-                            errdefer allocator.destroy(value_ptr);
+                            // Allocate u256 value from arena (single deallocation at schedule deinit)
+                            const value_ptr = try arena_allocator.create(FrameType.WordType);
                             value_ptr.* = fd.target;
                             try schedule_items.append(allocator, .{ .push_pointer = .{ .value_ptr = value_ptr } });
                         }
@@ -789,9 +790,8 @@ pub fn Preprocessor(FrameType: type) type {
                         if (pad.value <= std.math.maxInt(u64)) {
                             try schedule_items.append(allocator, .{ .push_inline = .{ .value = @intCast(pad.value) } });
                         } else {
-                            // Allocate individual u256 value on heap
-                            const value_ptr = try allocator.create(FrameType.WordType);
-                            errdefer allocator.destroy(value_ptr);
+                            // Allocate u256 value from arena (single deallocation at schedule deinit)
+                            const value_ptr = try arena_allocator.create(FrameType.WordType);
                             value_ptr.* = pad.value;
                             try schedule_items.append(allocator, .{ .push_pointer = .{ .value_ptr = value_ptr } });
                         }
@@ -823,35 +823,37 @@ pub fn Preprocessor(FrameType: type) type {
             return DispatchSchedule{
                 .items = final_schedule,
                 .allocator = allocator,
+                .push_values_arena = push_values_arena,
             };
         }
 
         fn handleFusionOperation(
             schedule_items: anytype,
-            allocator: std.mem.Allocator,
+            schedule_allocator: std.mem.Allocator,
+            arena_allocator: std.mem.Allocator,
             value: FrameType.WordType,
             fusion_type: FusionType,
         ) !void {
             const synthetic_opcode = getSyntheticOpcode(fusion_type, value <= std.math.maxInt(u64));
             const frame_handlers = @import("../frame/frame_handlers.zig");
             const synthetic_handler = frame_handlers.getSyntheticHandler(FrameType, synthetic_opcode);
-            try schedule_items.append(allocator, .{ .opcode_handler = synthetic_handler });
+            try schedule_items.append(schedule_allocator, .{ .opcode_handler = synthetic_handler });
 
             if (value <= std.math.maxInt(u64)) {
                 const inline_val: u64 = @intCast(value);
-                try schedule_items.append(allocator, .{ .push_inline = .{ .value = inline_val } });
+                try schedule_items.append(schedule_allocator, .{ .push_inline = .{ .value = inline_val } });
             } else {
-                // Allocate individual u256 value on heap
-                const value_ptr = try allocator.create(FrameType.WordType);
-                errdefer allocator.destroy(value_ptr);
+                // Allocate u256 value from arena (single deallocation at schedule deinit)
+                const value_ptr = try arena_allocator.create(FrameType.WordType);
                 value_ptr.* = value;
-                try schedule_items.append(allocator, .{ .push_pointer = .{ .value_ptr = value_ptr } });
+                try schedule_items.append(schedule_allocator, .{ .push_pointer = .{ .value_ptr = value_ptr } });
             }
         }
 
         fn handleMemoryFusion(
             schedule_items: anytype,
-            allocator: std.mem.Allocator,
+            schedule_allocator: std.mem.Allocator,
+            arena_allocator: std.mem.Allocator,
             value: FrameType.WordType,
             fusion_type: FusionType,
         ) !void {
@@ -904,11 +906,11 @@ pub fn Preprocessor(FrameType: type) type {
             const frame_handlers = @import("../frame/frame_handlers.zig");
             const synthetic_handler = frame_handlers.getSyntheticHandler(FrameType, synthetic_opcode);
 
-            try schedule_items.append(allocator, .{ .opcode_handler = synthetic_handler });
+            try schedule_items.append(schedule_allocator, .{ .opcode_handler = synthetic_handler });
 
             if (value <= std.math.maxInt(u64)) {
                 const inline_val: u64 = @intCast(value);
-                try schedule_items.append(allocator, .{
+                try schedule_items.append(schedule_allocator, .{
                     .push_inline = .{
                         .value = inline_val,
                         // Store gas cost for use in jumpdest validation
@@ -916,11 +918,10 @@ pub fn Preprocessor(FrameType: type) type {
                     },
                 });
             } else {
-                // Allocate individual u256 value on heap
-                const value_ptr = try allocator.create(FrameType.WordType);
-                errdefer allocator.destroy(value_ptr);
+                // Allocate u256 value from arena (single deallocation at schedule deinit)
+                const value_ptr = try arena_allocator.create(FrameType.WordType);
                 value_ptr.* = value;
-                try schedule_items.append(allocator, .{ .push_pointer = .{ .value_ptr = value_ptr } });
+                try schedule_items.append(schedule_allocator, .{ .push_pointer = .{ .value_ptr = value_ptr } });
             }
         }
 
@@ -1156,21 +1157,18 @@ pub fn Preprocessor(FrameType: type) type {
         pub const DispatchSchedule = struct {
             items: []Item,
             allocator: std.mem.Allocator,
+            /// Arena allocator for push pointer values (PUSH9-32)
+            /// Uses a single allocation for all u256 values instead of individual heap allocations
+            push_values_arena: std.heap.ArenaAllocator,
 
             pub fn init(allocator: std.mem.Allocator, bytecode: anytype, opcode_handlers: *const [256]OpcodeHandler, tracer: anytype) !DispatchSchedule {
                 return try Self.init(allocator, bytecode, opcode_handlers, tracer);
             }
 
             pub fn deinit(self: *DispatchSchedule) void {
-                // Free individually allocated u256 values
-                for (self.items) |item| {
-                    switch (item) {
-                        .push_pointer => |push_data| {
-                            self.allocator.destroy(push_data.value_ptr);
-                        },
-                        else => {},
-                    }
-                }
+                // Free all u256 values in one operation via arena
+                self.push_values_arena.deinit();
+                // Free the schedule items array
                 self.allocator.free(self.items);
             }
 

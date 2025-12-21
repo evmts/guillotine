@@ -7,6 +7,8 @@ const fixtures = @import("fixtures");
 const Address = primitives.Address.Address;
 const MinimalEvm = evm.MinimalEvm;
 
+const stdout = std.io.getStdOut().writer();
+
 // Pre-compiled fixtures
 var compiled_fixtures: ?fixtures.Fixtures = null;
 
@@ -210,20 +212,20 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
-    
-    std.debug.print("\n=== EVM Fixture Benchmarks ===\n\n", .{});
-    std.debug.print("Compiling fixtures...\n", .{});
-    
+
+    try stdout.print("\n=== EVM Fixture Benchmarks ===\n\n", .{});
+    try stdout.print("Compiling fixtures...\n", .{});
+
     // Initialize and compile all fixtures
     var fx = try fixtures.Fixtures.init(allocator);
     defer fx.deinit();
-    
+
     try fx.compileAll();
     compiled_fixtures = fx;
-    
+
     // List available fixtures
     fx.listFixtures();
-    std.debug.print("\n", .{});
+    try stdout.print("\n", .{});
     
     // Create benchmark
     var bench = zbench.Benchmark.init(allocator, .{

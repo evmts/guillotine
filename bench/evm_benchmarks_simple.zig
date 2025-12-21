@@ -6,6 +6,8 @@ const primitives = @import("voltaire");
 const Address = primitives.Address.Address;
 const MinimalEvm = evm.MinimalEvm;
 
+const stdout = std.io.getStdOut().writer();
+
 // Fixture structure
 const Fixture = struct {
     name: []const u8,
@@ -38,7 +40,7 @@ fn loadBytecode(allocator: std.mem.Allocator, fixture_name: []const u8) ![]u8 {
     defer allocator.free(cache_path);
 
     const bytecode_hex = std.fs.cwd().readFileAlloc(allocator, cache_path, 1_000_000) catch |err| {
-        std.debug.print("Warning: Could not load bytecode for {s}: {}\n", .{ fixture_name, err });
+        stdout.print("Warning: Could not load bytecode for {s}: {}\n", .{ fixture_name, err }) catch {};
         return try allocator.alloc(u8, 0);
     };
     defer allocator.free(bytecode_hex);
@@ -72,12 +74,12 @@ fn loadFixtures(allocator: std.mem.Allocator) !void {
 
     for (fixture_configs) |config| {
         const bytecode = loadBytecode(allocator, config.name) catch |err| {
-            std.debug.print("Warning: Could not load {s}: {}\n", .{ config.name, err });
+            stdout.print("Warning: Could not load {s}: {}\n", .{ config.name, err }) catch {};
             continue;
         };
 
         if (bytecode.len == 0) {
-            std.debug.print("Warning: Empty bytecode for {s}\n", .{config.name});
+            stdout.print("Warning: Empty bytecode for {s}\n", .{config.name}) catch {};
             allocator.free(bytecode);
             continue;
         }
@@ -94,7 +96,7 @@ fn loadFixtures(allocator: std.mem.Allocator) !void {
             .gas_limit = config.gas_limit,
         });
 
-        std.debug.print("Loaded {s}: {} bytes\n", .{ config.name, bytecode.len });
+        stdout.print("Loaded {s}: {} bytes\n", .{ config.name, bytecode.len }) catch {};
     }
 }
 
@@ -230,8 +232,8 @@ pub fn main() !void {
     const allocator = gpa.allocator();
     allocator_g = allocator;
 
-    std.debug.print("\n=== EVM Fixture Benchmarks ===\n\n", .{});
-    std.debug.print("Loading bytecode fixtures...\n", .{});
+    try stdout.print("\n=== EVM Fixture Benchmarks ===\n\n", .{});
+    try stdout.print("Loading bytecode fixtures...\n", .{});
 
     // Load all fixtures
     try loadFixtures(allocator);
@@ -243,7 +245,7 @@ pub fn main() !void {
         fixtures.deinit(allocator);
     }
 
-    std.debug.print("\nLoaded {} fixtures successfully\n\n", .{fixtures.items.len});
+    try stdout.print("\nLoaded {} fixtures successfully\n\n", .{fixtures.items.len});
 
     // Create and run benchmarks
     var bench = zbench.Benchmark.init(allocator, .{
