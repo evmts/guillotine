@@ -73,14 +73,20 @@ pub fn Evm(comptime config: EvmConfig) type {
         pub const CallOrContinueInput = AsyncExecutorType.CallOrContinueInput;
         pub const CallOrContinueOutput = AsyncExecutorType.CallOrContinueOutput;
 
+        /// Unified account state for better cache locality
+        /// Single lookup for all account data, matches Ethereum state trie structure
+        pub const AccountState = struct {
+            balance: u256 = 0,
+            nonce: u64 = 0,
+            code: []const u8 = &[_]u8{},
+        };
+
         frames: std.ArrayList(FrameType),
         storage: Storage,
         created_accounts: std.AutoHashMap(primitives.Address, void),
         selfdestructed_accounts: std.AutoHashMap(primitives.Address, void), // EIP-6780: Track accounts marked for deletion
         touched_accounts: std.AutoHashMap(primitives.Address, void), // Pre-Paris: Track touched accounts for deletion if empty
-        balances: std.AutoHashMap(primitives.Address, u256),
-        nonces: std.AutoHashMap(primitives.Address, u64),
-        code: std.AutoHashMap(primitives.Address, []const u8),
+        accounts: std.AutoHashMap(primitives.Address, AccountState),
         access_list_manager: AccessListManager,
         gas_refund: u64,
         // Stack of balance snapshots for nested calls (for SELFDESTRUCT revert handling)
@@ -135,9 +141,7 @@ pub fn Evm(comptime config: EvmConfig) type {
                 .created_accounts = std.AutoHashMap(primitives.Address, void).init(arena_alloc),
                 .selfdestructed_accounts = std.AutoHashMap(primitives.Address, void).init(arena_alloc),
                 .touched_accounts = std.AutoHashMap(primitives.Address, void).init(arena_alloc),
-                .balances = std.AutoHashMap(primitives.Address, u256).init(arena_alloc),
-                .nonces = std.AutoHashMap(primitives.Address, u64).init(arena_alloc),
-                .code = std.AutoHashMap(primitives.Address, []const u8).init(arena_alloc),
+                .accounts = std.AutoHashMap(primitives.Address, AccountState).init(arena_alloc),
                 .access_list_manager = AccessListManager.init(arena_alloc),
                 .gas_refund = 0,
                 .balance_snapshot_stack = std.ArrayList(*std.AutoHashMap(primitives.Address, u256)){},
@@ -207,9 +211,7 @@ pub fn Evm(comptime config: EvmConfig) type {
             const arena_allocator = self.arena.allocator();
             self.storage = Storage.init(arena_allocator, self.host, self.pending_storage_injector);
             // Clear existing HashMaps instead of creating new ones (allows pre-state setup)
-            self.balances.clearRetainingCapacity();
-            self.nonces.clearRetainingCapacity();
-            self.code.clearRetainingCapacity();
+            self.accounts.clearRetainingCapacity();
             self.access_list_manager = AccessListManager.init(arena_allocator);
             self.frames = std.ArrayList(FrameType){};
             try self.frames.ensureTotalCapacity(arena_allocator, 16);
@@ -291,8 +293,10 @@ pub fn Evm(comptime config: EvmConfig) type {
                     // Snapshot the current balance before modifying
                     const current_balance = if (self.host) |h|
                         h.getBalance(addr)
+                    else if (self.accounts.get(addr)) |account|
+                        account.balance
                     else
-                        self.balances.get(addr) orelse 0;
+                        0;
                     try snapshot.put(addr, current_balance);
                 }
             }
@@ -301,7 +305,11 @@ pub fn Evm(comptime config: EvmConfig) type {
             if (self.host) |h| {
                 h.setBalance(addr, new_balance);
             } else {
-                try self.balances.put(addr, new_balance);
+                const gop = try self.accounts.getOrPut(addr);
+                if (!gop.found_existing) {
+                    gop.value_ptr.* = AccountState{};
+                }
+                gop.value_ptr.balance = new_balance;
             }
         }
 
@@ -317,7 +325,10 @@ pub fn Evm(comptime config: EvmConfig) type {
             if (self.host) |h| {
                 return h.getNonce(address);
             }
-            return self.nonces.get(address) orelse 0;
+            if (self.accounts.get(address)) |account| {
+                return account.nonce;
+            }
+            return 0;
         }
 
         /// Compute CREATE address: keccak256(rlp([sender, nonce]))[12:]
@@ -647,16 +658,10 @@ pub fn Evm(comptime config: EvmConfig) type {
                             }
                         } else {
                             // Clear all account state in EVM storage
-                            // These put operations should never fail in normal circumstances since we're
+                            // Put operation should never fail in normal circumstances since we're
                             // using an arena allocator for transaction-scoped data. If OOM occurs during
                             // cleanup, it indicates a critical system issue - fail the transaction.
-                            self.balances.put(addr, 0) catch {
-                                return makeFailure(self.arena.allocator(), 0);
-                            };
-                            self.code.put(addr, &[_]u8{}) catch {
-                                return makeFailure(self.arena.allocator(), 0);
-                            };
-                            self.nonces.put(addr, 0) catch {
+                            self.accounts.put(addr, AccountState{}) catch {
                                 return makeFailure(self.arena.allocator(), 0);
                             };
 
@@ -813,10 +818,8 @@ pub fn Evm(comptime config: EvmConfig) type {
                             _ = self.storage.original_storage.fetchRemove(key);
                         }
                     }
-                    // Clear account state by removing from maps
-                    _ = self.balances.fetchRemove(addr);
-                    _ = self.code.fetchRemove(addr);
-                    _ = self.nonces.fetchRemove(addr);
+                    // Clear account state by removing from unified accounts map
+                    _ = self.accounts.fetchRemove(addr);
                 }
             }
 
@@ -1097,7 +1100,7 @@ pub fn Evm(comptime config: EvmConfig) type {
 
             // Handle balance transfer if value > 0 (only for regular CALL)
             if (value > 0 and call_type == .Call) {
-                const caller_balance = if (self.host) |h| h.getBalance(frame_caller) else self.balances.get(frame_caller) orelse 0;
+                const caller_balance = if (self.host) |h| h.getBalance(frame_caller) else if (self.accounts.get(frame_caller)) |account| account.balance else 0;
                 if (caller_balance < value) {
                     // Insufficient balance - call fails
                     return makeFailure(self.arena.allocator(), gas);
@@ -1107,7 +1110,7 @@ pub fn Evm(comptime config: EvmConfig) type {
                 self.setBalanceWithSnapshot(frame_caller, caller_balance - value) catch {
                     return makeFailure(self.arena.allocator(), gas);
                 };
-                const callee_balance = if (self.host) |h| h.getBalance(address) else self.balances.get(address) orelse 0;
+                const callee_balance = if (self.host) |h| h.getBalance(address) else if (self.accounts.get(address)) |account| account.balance else 0;
                 self.setBalanceWithSnapshot(address, callee_balance + value) catch {
                     return makeFailure(self.arena.allocator(), gas);
                 };
@@ -1283,9 +1286,13 @@ pub fn Evm(comptime config: EvmConfig) type {
                     if (self.host) |h| {
                         h.setBalance(entry.key_ptr.*, entry.value_ptr.*);
                     } else {
-                        self.balances.put(entry.key_ptr.*, entry.value_ptr.*) catch {
+                        const gop = self.accounts.getOrPut(entry.key_ptr.*) catch {
                             return makeFailure(self.arena.allocator(), 0);
                         };
+                        if (!gop.found_existing) {
+                            gop.value_ptr.* = AccountState{};
+                        }
+                        gop.value_ptr.balance = entry.value_ptr.*;
                     }
                 }
 
@@ -1416,9 +1423,13 @@ pub fn Evm(comptime config: EvmConfig) type {
                     if (self.host) |h| {
                         h.setBalance(entry.key_ptr.*, entry.value_ptr.*);
                     } else {
-                        self.balances.put(entry.key_ptr.*, entry.value_ptr.*) catch {
+                        const gop = self.accounts.getOrPut(entry.key_ptr.*) catch {
                             return makeFailure(self.arena.allocator(), 0);
                         };
+                        if (!gop.found_existing) {
+                            gop.value_ptr.* = AccountState{};
+                        }
+                        gop.value_ptr.balance = entry.value_ptr.*;
                     }
                 }
             }
@@ -1459,8 +1470,10 @@ pub fn Evm(comptime config: EvmConfig) type {
             // Check sender's nonce for overflow (max nonce is 2^64 - 1)
             const sender_nonce = if (self.host) |h|
                 h.getNonce(caller)
+            else if (self.accounts.get(caller)) |account|
+                account.nonce
             else
-                self.nonces.get(caller) orelse 0;
+                0;
 
             if (sender_nonce == std.math.maxInt(u64)) {
                 // Nonce overflow - CREATE fails, return gas
@@ -1474,7 +1487,7 @@ pub fn Evm(comptime config: EvmConfig) type {
 
             // Handle balance transfer if value > 0
             if (value > 0) {
-                const caller_balance = if (self.host) |h| h.getBalance(caller) else self.balances.get(caller) orelse 0;
+                const caller_balance = if (self.host) |h| h.getBalance(caller) else if (self.accounts.get(caller)) |account| account.balance else 0;
                 if (caller_balance < value) {
                     // Insufficient balance - CREATE fails
                     return .{
@@ -1523,8 +1536,10 @@ pub fn Evm(comptime config: EvmConfig) type {
                 // Per Python reference (message.py:57): uses "nonce - 1" for transactions
                 var nonce = if (self.host) |h|
                     h.getNonce(caller)
+                else if (self.accounts.get(caller)) |account|
+                    account.nonce
                 else
-                    self.nonces.get(caller) orelse 0;
+                    0;
 
                 if (is_top_level_create) {
                     nonce -= 1; // Undo the increment that runner already did
@@ -1621,10 +1636,10 @@ pub fn Evm(comptime config: EvmConfig) type {
                     const has_code = h.getCode(new_address).len > 0;
                     const has_nonce = h.getNonce(new_address) > 0;
                     break :blk has_code or has_nonce;
+                } else if (self.accounts.get(new_address)) |account| {
+                    break :blk account.code.len > 0 or account.nonce > 0;
                 } else {
-                    const has_code = (self.code.get(new_address) orelse &[_]u8{}).len > 0;
-                    const has_nonce = (self.nonces.get(new_address) orelse 0) > 0;
-                    break :blk has_code or has_nonce;
+                    break :blk false;
                 }
             };
 
@@ -1635,13 +1650,19 @@ pub fn Evm(comptime config: EvmConfig) type {
                 if (!is_top_level_create) {
                     const caller_nonce = if (self.host) |h|
                         h.getNonce(caller)
+                    else if (self.accounts.get(caller)) |account|
+                        account.nonce
                     else
-                        self.nonces.get(caller) orelse 0;
+                        0;
 
                     if (self.host) |h| {
                         h.setNonce(caller, caller_nonce + 1);
                     } else {
-                        try self.nonces.put(caller, caller_nonce + 1);
+                        const gop = try self.accounts.getOrPut(caller);
+                        if (!gop.found_existing) {
+                            gop.value_ptr.* = AccountState{};
+                        }
+                        gop.value_ptr.nonce = caller_nonce + 1;
                     }
                 }
 
@@ -1665,13 +1686,19 @@ pub fn Evm(comptime config: EvmConfig) type {
             if (!is_top_level_create) {
                 const caller_nonce = if (self.host) |h|
                     h.getNonce(caller)
+                else if (self.accounts.get(caller)) |account|
+                    account.nonce
                 else
-                    self.nonces.get(caller) orelse 0;
+                    0;
 
                 if (self.host) |h| {
                     h.setNonce(caller, caller_nonce + 1);
                 } else {
-                    try self.nonces.put(caller, caller_nonce + 1);
+                    const gop = try self.accounts.getOrPut(caller);
+                    if (!gop.found_existing) {
+                        gop.value_ptr.* = AccountState{};
+                    }
+                    gop.value_ptr.nonce = caller_nonce + 1;
                 }
             }
 
@@ -1679,7 +1706,11 @@ pub fn Evm(comptime config: EvmConfig) type {
             if (self.host) |h| {
                 h.setNonce(new_address, 1);
             } else {
-                try self.nonces.put(new_address, 1);
+                const gop = try self.accounts.getOrPut(new_address);
+                if (!gop.found_existing) {
+                    gop.value_ptr.* = AccountState{};
+                }
+                gop.value_ptr.nonce = 1;
             }
 
             // EIP-6780 (Cancun): Mark account as created BEFORE execution
@@ -1709,9 +1740,9 @@ pub fn Evm(comptime config: EvmConfig) type {
 
             // Transfer balance if value > 0 using snapshot mechanism for proper revert handling
             if (value > 0) {
-                const caller_balance = if (self.host) |h| h.getBalance(caller) else self.balances.get(caller) orelse 0;
+                const caller_balance = if (self.host) |h| h.getBalance(caller) else if (self.accounts.get(caller)) |account| account.balance else 0;
                 try self.setBalanceWithSnapshot(caller, caller_balance - value);
-                const new_addr_balance = if (self.host) |h| h.getBalance(new_address) else self.balances.get(new_address) orelse 0;
+                const new_addr_balance = if (self.host) |h| h.getBalance(new_address) else if (self.accounts.get(new_address)) |account| account.balance else 0;
                 try self.setBalanceWithSnapshot(new_address, new_addr_balance + value);
             }
 
@@ -1747,8 +1778,8 @@ pub fn Evm(comptime config: EvmConfig) type {
                 // Revert nonce on execution error
                 if (self.host) |h| {
                     h.setNonce(new_address, 0);
-                } else {
-                    _ = self.nonces.remove(new_address);
+                } else if (self.accounts.getPtr(new_address)) |account| {
+                    account.nonce = 0;
                 }
 
                 // Restore gas refunds on failure
@@ -1764,7 +1795,11 @@ pub fn Evm(comptime config: EvmConfig) type {
                     if (self.host) |h| {
                         h.setBalance(entry.key_ptr.*, entry.value_ptr.*);
                     } else {
-                        try self.balances.put(entry.key_ptr.*, entry.value_ptr.*);
+                        const gop = try self.accounts.getOrPut(entry.key_ptr.*);
+                        if (!gop.found_existing) {
+                            gop.value_ptr.* = AccountState{};
+                        }
+                        gop.value_ptr.balance = entry.value_ptr.*;
                     }
                 }
 
@@ -1803,8 +1838,8 @@ pub fn Evm(comptime config: EvmConfig) type {
                         // Revert nonce on failure
                         if (self.host) |h| {
                             h.setNonce(new_address, 0);
-                        } else {
-                            _ = self.nonces.remove(new_address);
+                        } else if (self.accounts.getPtr(new_address)) |account| {
+                            account.nonce = 0;
                         }
 
                         // Restore gas refunds on failure
@@ -1820,7 +1855,11 @@ pub fn Evm(comptime config: EvmConfig) type {
                             if (self.host) |h| {
                                 h.setBalance(entry.key_ptr.*, entry.value_ptr.*);
                             } else {
-                                try self.balances.put(entry.key_ptr.*, entry.value_ptr.*);
+                                const gop = try self.accounts.getOrPut(entry.key_ptr.*);
+                                if (!gop.found_existing) {
+                                    gop.value_ptr.* = AccountState{};
+                                }
+                                gop.value_ptr.balance = entry.value_ptr.*;
                             }
                         }
 
@@ -1846,10 +1885,14 @@ pub fn Evm(comptime config: EvmConfig) type {
                         // When using a host, update host's code directly
                         h.setCode(new_address, frame_output);
                     } else {
-                        // When not using a host, store in EVM's code map
+                        // When not using a host, store in EVM's unified accounts map
                         const code_copy = try self.arena.allocator().alloc(u8, frame_output.len);
                         @memcpy(code_copy, frame_output);
-                        try self.code.put(new_address, code_copy);
+                        const gop = try self.accounts.getOrPut(new_address);
+                        if (!gop.found_existing) {
+                            gop.value_ptr.* = AccountState{};
+                        }
+                        gop.value_ptr.code = code_copy;
                     }
                     const deposit_cost = @as(u64, @intCast(frame_output.len)) * GasConstants.CreateDataGas;
                     gas_left -= deposit_cost;
@@ -1858,7 +1901,11 @@ pub fn Evm(comptime config: EvmConfig) type {
                     if (self.host) |h| {
                         h.setCode(new_address, &[_]u8{});
                     } else {
-                        try self.code.put(new_address, &[_]u8{});
+                        const gop = try self.accounts.getOrPut(new_address);
+                        if (!gop.found_existing) {
+                            gop.value_ptr.* = AccountState{};
+                        }
+                        gop.value_ptr.code = &[_]u8{};
                     }
                 }
             } else {
@@ -1866,8 +1913,8 @@ pub fn Evm(comptime config: EvmConfig) type {
                 // Revert nonce to 0
                 if (self.host) |h| {
                     h.setNonce(new_address, 0);
-                } else {
-                    _ = self.nonces.remove(new_address);
+                } else if (self.accounts.getPtr(new_address)) |account| {
+                    account.nonce = 0;
                 }
 
                 // Restore balances on revert (handles SELFDESTRUCT balance transfers and value transfers)
@@ -1876,7 +1923,11 @@ pub fn Evm(comptime config: EvmConfig) type {
                     if (self.host) |h| {
                         h.setBalance(entry.key_ptr.*, entry.value_ptr.*);
                     } else {
-                        try self.balances.put(entry.key_ptr.*, entry.value_ptr.*);
+                        const gop = try self.accounts.getOrPut(entry.key_ptr.*);
+                        if (!gop.found_existing) {
+                            gop.value_ptr.* = AccountState{};
+                        }
+                        gop.value_ptr.balance = entry.value_ptr.*;
                     }
                 }
 
@@ -1914,7 +1965,10 @@ pub fn Evm(comptime config: EvmConfig) type {
         /// Get balance of an address (called by frame)
         pub fn get_balance(self: *Self, address: primitives.Address) u256 {
             if (self.host) |h| return h.getBalance(address);
-            return self.balances.get(address) orelse 0;
+            if (self.accounts.get(address)) |account| {
+                return account.balance;
+            }
+            return 0;
         }
 
         /// Get code for an address
@@ -1922,8 +1976,10 @@ pub fn Evm(comptime config: EvmConfig) type {
         pub fn get_code(self: *Self, address: primitives.Address) []const u8 {
             const raw_code = if (self.host) |h|
                 h.getCode(address)
+            else if (self.accounts.get(address)) |account|
+                account.code
             else
-                self.code.get(address) orelse &[_]u8{};
+                &[_]u8{};
 
             // EIP-7702: Check for delegation designation (Prague+)
             if (self.hardfork.isAtLeast(.PRAGUE) and raw_code.len == 23 and
@@ -1938,8 +1994,10 @@ pub fn Evm(comptime config: EvmConfig) type {
                 // delegation designation, we return its delegation code as-is
                 const delegated_code = if (self.host) |h|
                     h.getCode(delegated_addr)
+                else if (self.accounts.get(delegated_addr)) |account|
+                    account.code
                 else
-                    self.code.get(delegated_addr) orelse &[_]u8{};
+                    &[_]u8{};
 
                 return delegated_code;
             }
