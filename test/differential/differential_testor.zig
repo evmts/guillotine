@@ -562,8 +562,6 @@ pub const DifferentialTestor = struct {
             },
         };
 
-        // std.debug.print("DIFFERENTIAL: About to call Guillotine with gas={}, to={x} (tracing={})\n", .{ gas_limit, to.bytes, enable_tracing });
-
         var result = if (enable_tracing) blk: {
             if (self.guillotine_instance_traced) |*evm_instance| {
                 break :blk evm_instance.call(params);
@@ -577,8 +575,6 @@ pub const DifferentialTestor = struct {
                 return error.NoTraceInstanceNotAvailable;
             }
         };
-
-        // std.debug.print("DIFFERENTIAL: Guillotine call complete, success={}, gas_left={} (tracing={})\n", .{ result.success, result.gas_left, enable_tracing });
 
         // Transfer ownership of trace from CallResult
         const trace = result.trace;
@@ -609,14 +605,15 @@ pub const DifferentialTestor = struct {
             }
         }
 
-        // Copy output before freeing result
+        // Copy values before freeing result (deinit sets fields to undefined)
+        const success = result.success;
         const output_copy = try self.allocator.dupe(u8, result.output);
 
         // Clean up CallResult allocated memory using the comprehensive deinit method
         result.deinit(self.allocator);
 
         return ExecutionResultWithTrace{
-            .success = result.success,
+            .success = success,
             .gas_used = gas_used,
             .output = output_copy,
             .trace = trace,
