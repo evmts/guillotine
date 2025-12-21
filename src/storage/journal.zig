@@ -55,12 +55,16 @@ pub fn Journal(comptime config: JournalConfig) type {
             self.entries.deinit(self.allocator);
         }
         
+        /// Error returned when snapshot IDs are exhausted
+        pub const Error = error{SnapshotIdExhausted};
+
         /// Create a new snapshot and return its ID
-        pub fn create_snapshot(self: *Self) SnapshotIdType {
+        pub fn create_snapshot(self: *Self) Error!SnapshotIdType {
+            if (self.next_snapshot_id == std.math.maxInt(SnapshotIdType)) {
+                return error.SnapshotIdExhausted;
+            }
             const id = self.next_snapshot_id;
-            // Use saturating addition to prevent overflow
-            // If we hit max snapshots, reuse the max ID (will still work for revert)
-            self.next_snapshot_id = @min(self.next_snapshot_id +| 1, std.math.maxInt(SnapshotIdType));
+            self.next_snapshot_id += 1;
             return id;
         }
         
@@ -170,15 +174,15 @@ test "Journal - basic operations" {
 
     var journal = try DefaultJournal.init(testing.allocator);
     defer journal.deinit();
-    
+
     try testing.expectEqual(@as(u32, 0), journal.next_snapshot_id);
     try testing.expectEqual(@as(usize, 0), journal.entry_count());
-    
+
     // Create snapshots
-    const snapshot1 = journal.create_snapshot();
-    const snapshot2 = journal.create_snapshot();
-    const snapshot3 = journal.create_snapshot();
-    
+    const snapshot1 = try journal.create_snapshot();
+    const snapshot2 = try journal.create_snapshot();
+    const snapshot3 = try journal.create_snapshot();
+
     try testing.expectEqual(@as(u32, 0), snapshot1);
     try testing.expectEqual(@as(u32, 1), snapshot2);
     try testing.expectEqual(@as(u32, 2), snapshot3);
@@ -188,11 +192,11 @@ test "Journal - basic operations" {
 test "Journal - storage change recording" {
     const testing = std.testing;
     const zero_addr: Address = .{ .bytes = [_]u8{0} ** 20 };
-    
+
     var journal = try DefaultJournal.init(testing.allocator);
     defer journal.deinit();
-    
-    const snapshot_id = journal.create_snapshot();
+
+    const snapshot_id = try journal.create_snapshot();
     const key = 42;
     const original_value = 100;
     
@@ -226,13 +230,13 @@ test "Journal - storage change recording" {
 test "Journal - revert to snapshot" {
     const testing = std.testing;
     const zero_addr: Address = .{ .bytes = [_]u8{0} ** 20 };
-    
+
     var journal = try DefaultJournal.init(testing.allocator);
     defer journal.deinit();
-    
-    const snapshot1 = journal.create_snapshot();
-    const snapshot2 = journal.create_snapshot();
-    const snapshot3 = journal.create_snapshot();
+
+    const snapshot1 = try journal.create_snapshot();
+    const snapshot2 = try journal.create_snapshot();
+    const snapshot3 = try journal.create_snapshot();
     
     // Add entries with different snapshot IDs
     try journal.record_storage_change(snapshot1, zero_addr, 1, 10);
@@ -257,11 +261,11 @@ test "Journal - all entry types" {
     const addr1: Address = .{ .bytes = [_]u8{1} ** 20 };
     const addr2: Address = .{ .bytes = [_]u8{2} ** 20 };
     const code_hash = [_]u8{0xAB} ** 32;
-    
+
     var journal = try DefaultJournal.init(testing.allocator);
     defer journal.deinit();
-    
-    const snapshot_id = journal.create_snapshot();
+
+    const snapshot_id = try journal.create_snapshot();
     
     // Record different types of changes
     try journal.record_storage_change(snapshot_id, addr1, 1, 100);
@@ -303,12 +307,12 @@ test "Journal - all entry types" {
 test "Journal - get_snapshot_entries" {
     const testing = std.testing;
     const addr: Address = .{ .bytes = [_]u8{0} ** 20 };
-    
+
     var journal = try DefaultJournal.init(testing.allocator);
     defer journal.deinit();
-    
-    const snapshot1 = journal.create_snapshot();
-    const snapshot2 = journal.create_snapshot();
+
+    const snapshot1 = try journal.create_snapshot();
+    const snapshot2 = try journal.create_snapshot();
     
     // Add entries for different snapshots
     try journal.record_storage_change(snapshot1, addr, 1, 10);
@@ -338,26 +342,26 @@ test "Journal - get_snapshot_entries" {
 test "Journal - clear operation" {
     const testing = std.testing;
     const addr: Address = .{ .bytes = [_]u8{0} ** 20 };
-    
+
     var journal = try DefaultJournal.init(testing.allocator);
     defer journal.deinit();
-    
+
     // Add some entries
-    const snapshot1 = journal.create_snapshot();
+    const snapshot1 = try journal.create_snapshot();
     try journal.record_storage_change(snapshot1, addr, 1, 100);
     try journal.record_balance_change(snapshot1, addr, 1000);
-    
+
     try testing.expectEqual(@as(usize, 2), journal.entry_count());
     try testing.expectEqual(@as(u32, 1), journal.next_snapshot_id);
-    
+
     // Clear the journal
     journal.clear();
-    
+
     try testing.expectEqual(@as(usize, 0), journal.entry_count());
     try testing.expectEqual(@as(u32, 0), journal.next_snapshot_id);
-    
+
     // Should be able to use it again
-    const snapshot2 = journal.create_snapshot();
+    const snapshot2 = try journal.create_snapshot();
     try testing.expectEqual(@as(u32, 0), snapshot2);
 }
 
@@ -369,35 +373,37 @@ test "Journal - minimal configuration" {
         .NonceType = u16,
         .initial_capacity = 8,
     });
-    
+
     var journal = try MinimalJournal.init(testing.allocator);
     defer journal.deinit();
-    
+
     const addr: Address = .{ .bytes = [_]u8{0} ** 20 };
-    
+
     // Test with minimal types
-    const snapshot: u8 = journal.create_snapshot();
+    const snapshot: u8 = try journal.create_snapshot();
     try journal.record_storage_change(snapshot, addr, std.math.maxInt(u64), 0);
     try journal.record_nonce_change(snapshot, addr, std.math.maxInt(u16));
-    
+
     try testing.expectEqual(@as(usize, 2), journal.entry_count());
-    
-    // Test snapshot ID overflow protection
-    journal.next_snapshot_id = 255;
-    const last_snapshot = journal.create_snapshot();
-    try testing.expectEqual(@as(u8, 255), last_snapshot);
-    // Next create_snapshot would overflow - in real usage this should be checked
+
+    // Test snapshot ID exhaustion - at 254, can still create snapshot
+    journal.next_snapshot_id = 254;
+    const snap_254 = try journal.create_snapshot();
+    try testing.expectEqual(@as(u8, 254), snap_254);
+
+    // At 255 (max), should error
+    try testing.expectError(error.SnapshotIdExhausted, journal.create_snapshot());
 }
 
 test "Journal - get_original_balance" {
     const testing = std.testing;
     const addr1: Address = .{ .bytes = [_]u8{1} ** 20 };
     const addr2: Address = .{ .bytes = [_]u8{2} ** 20 };
-    
+
     var journal = try DefaultJournal.init(testing.allocator);
     defer journal.deinit();
-    
-    const snapshot = journal.create_snapshot();
+
+    const snapshot = try journal.create_snapshot();
     
     // Record balance changes
     try journal.record_balance_change(snapshot, addr1, 1000);
@@ -420,17 +426,17 @@ test "Journal - get_original_balance" {
 
 test "Journal - memory efficiency" {
     const testing = std.testing;
-    
+
     // Test that capacity pre-allocation works
     var journal = try DefaultJournal.init(testing.allocator);
     defer journal.deinit();
-    
+
     const initial_capacity = journal.entries.capacity;
     try testing.expect(initial_capacity >= 128); // Default initial_capacity
-    
+
     // Add entries up to initial capacity
     const addr: Address = .{ .bytes = [_]u8{0} ** 20 };
-    const snapshot = journal.create_snapshot();
+    const snapshot = try journal.create_snapshot();
     
     var i: usize = 0;
     while (i < initial_capacity) : (i += 1) {
@@ -444,19 +450,19 @@ test "Journal - memory efficiency" {
 test "Journal - complex revert scenario" {
     const testing = std.testing;
     const addr: Address = .{ .bytes = [_]u8{0} ** 20 };
-    
+
     var journal = try DefaultJournal.init(testing.allocator);
     defer journal.deinit();
-    
+
     // Create nested snapshots simulating nested calls
-    const snapshot1 = journal.create_snapshot(); // Outer call
+    const snapshot1 = try journal.create_snapshot(); // Outer call
     try journal.record_storage_change(snapshot1, addr, 1, 100);
-    
-    const snapshot2 = journal.create_snapshot(); // Inner call 1
+
+    const snapshot2 = try journal.create_snapshot(); // Inner call 1
     try journal.record_storage_change(snapshot2, addr, 2, 200);
     try journal.record_balance_change(snapshot2, addr, 1000);
-    
-    const snapshot3 = journal.create_snapshot(); // Inner call 2
+
+    const snapshot3 = try journal.create_snapshot(); // Inner call 2
     try journal.record_storage_change(snapshot3, addr, 3, 300);
     try journal.record_nonce_change(snapshot3, addr, 5);
     
@@ -483,11 +489,11 @@ test "Journal - complex revert scenario" {
 test "Journal - duplicate storage changes" {
     const testing = std.testing;
     const addr: Address = .{ .bytes = [_]u8{0} ** 20 };
-    
+
     var journal = try DefaultJournal.init(testing.allocator);
     defer journal.deinit();
-    
-    const snapshot = journal.create_snapshot();
+
+    const snapshot = try journal.create_snapshot();
     const slot = 42;
     
     // Record multiple changes to same storage slot
@@ -508,11 +514,11 @@ test "Journal - multiple addresses same slot" {
     const addr1: Address = .{ .bytes = [_]u8{1} ** 20 };
     const addr2: Address = .{ .bytes = [_]u8{2} ** 20 };
     const addr3: Address = .{ .bytes = [_]u8{3} ** 20 };
-    
+
     var journal = try DefaultJournal.init(testing.allocator);
     defer journal.deinit();
-    
-    const snapshot = journal.create_snapshot();
+
+    const snapshot = try journal.create_snapshot();
     const slot = 1;
     
     // Same slot, different addresses
@@ -530,7 +536,7 @@ test "Journal - multiple addresses same slot" {
     try testing.expectEqual(@as(u256, 333), val3.?);
 }
 
-test "Journal - snapshot ID overflow behavior" {
+test "Journal - snapshot ID exhaustion returns error" {
     const testing = std.testing;
     const OverflowJournal = Journal(.{
         .SnapshotIdType = u8,
@@ -538,20 +544,39 @@ test "Journal - snapshot ID overflow behavior" {
         .NonceType = u64,
         .initial_capacity = 16,
     });
-    
+
     var journal = try OverflowJournal.init(testing.allocator);
     defer journal.deinit();
-    
-    // Set near overflow
-    journal.next_snapshot_id = 254;
-    
-    const snapshot1 = journal.create_snapshot(); // 254
-    const snapshot2 = journal.create_snapshot(); // 255
-    const snapshot3 = journal.create_snapshot(); // 255 (saturates, doesn't wrap)
 
+    // Set near max
+    journal.next_snapshot_id = 254;
+
+    const snapshot1 = try journal.create_snapshot(); // 254
     try testing.expectEqual(@as(u8, 254), snapshot1);
-    try testing.expectEqual(@as(u8, 255), snapshot2);
-    try testing.expectEqual(@as(u8, 255), snapshot3); // Saturates at max instead of wrapping
+
+    // At max, should return error instead of saturating
+    try testing.expectError(error.SnapshotIdExhausted, journal.create_snapshot());
+}
+
+test "Journal - snapshot ID uniqueness guaranteed" {
+    const testing = std.testing;
+
+    var journal = try DefaultJournal.init(testing.allocator);
+    defer journal.deinit();
+
+    // Set next_snapshot_id near max
+    journal.next_snapshot_id = std.math.maxInt(u32) - 2;
+
+    const snap1 = try journal.create_snapshot();
+    const snap2 = try journal.create_snapshot();
+
+    // Verify IDs are unique
+    try testing.expect(snap1 != snap2);
+    try testing.expectEqual(std.math.maxInt(u32) - 2, snap1);
+    try testing.expectEqual(std.math.maxInt(u32) - 1, snap2);
+
+    // At max, should return error
+    try testing.expectError(error.SnapshotIdExhausted, journal.create_snapshot());
 }
 
 test "Journal - empty journal operations" {
@@ -585,11 +610,11 @@ test "Journal - empty journal operations" {
 test "Journal - boundary value testing" {
     const testing = std.testing;
     const addr: Address = .{ .bytes = [_]u8{0xFF} ** 20 }; // Max address
-    
+
     var journal = try DefaultJournal.init(testing.allocator);
     defer journal.deinit();
-    
-    const snapshot = journal.create_snapshot();
+
+    const snapshot = try journal.create_snapshot();
     
     // Test boundary values
     const max_u256 = std.math.maxInt(u256);
@@ -619,11 +644,11 @@ test "Journal - account lifecycle tracking" {
     const _unused_addr: Address = .{ .bytes = [_]u8{2} ** 20 };
     _ = _unused_addr;
     const beneficiary: Address = .{ .bytes = [_]u8{0xBE} ++ [_]u8{0} ** 19 };
-    
+
     var journal = try DefaultJournal.init(testing.allocator);
     defer journal.deinit();
-    
-    const snapshot = journal.create_snapshot();
+
+    const snapshot = try journal.create_snapshot();
     
     // Complete account lifecycle
     try journal.record_account_created(snapshot, addr1);
@@ -651,14 +676,14 @@ test "Journal - account lifecycle tracking" {
 test "Journal - interleaved snapshots" {
     const testing = std.testing;
     const addr: Address = .{ .bytes = [_]u8{0} ** 20 };
-    
+
     var journal = try DefaultJournal.init(testing.allocator);
     defer journal.deinit();
-    
+
     // Create snapshots in interleaved pattern
-    const snap_a = journal.create_snapshot(); // 0
-    const snap_b = journal.create_snapshot(); // 1
-    const snap_c = journal.create_snapshot(); // 2
+    const snap_a = try journal.create_snapshot(); // 0
+    const snap_b = try journal.create_snapshot(); // 1
+    const snap_c = try journal.create_snapshot(); // 2
     
     // Add entries in mixed order
     try journal.record_storage_change(snap_c, addr, 3, 300);
@@ -682,16 +707,16 @@ test "Journal - interleaved snapshots" {
 
 test "Journal - large scale operations" {
     const testing = std.testing;
-    
+
     var journal = try DefaultJournal.init(testing.allocator);
     defer journal.deinit();
-    
+
     const num_addresses = 100;
     const num_storage_slots = 50;
-    
+
     // Create multiple snapshots
-    const snapshot1 = journal.create_snapshot();
-    const snapshot2 = journal.create_snapshot();
+    const snapshot1 = try journal.create_snapshot();
+    const snapshot2 = try journal.create_snapshot();
     
     // Record many changes
     for (0..num_addresses) |addr_idx| {
@@ -734,11 +759,11 @@ test "Journal - large scale operations" {
 test "Journal - zero value storage" {
     const testing = std.testing;
     const addr: Address = .{ .bytes = [_]u8{0} ** 20 };
-    
+
     var journal = try DefaultJournal.init(testing.allocator);
     defer journal.deinit();
-    
-    const snapshot = journal.create_snapshot();
+
+    const snapshot = try journal.create_snapshot();
     
     // Record storage changes with zero values
     try journal.record_storage_change(snapshot, addr, 1, 0);
@@ -758,11 +783,11 @@ test "Journal - zero value storage" {
 
 test "Journal - address comparison edge cases" {
     const testing = std.testing;
-    
+
     var journal = try DefaultJournal.init(testing.allocator);
     defer journal.deinit();
-    
-    const snapshot = journal.create_snapshot();
+
+    const snapshot = try journal.create_snapshot();
     
     // Very similar addresses
     var addr1: Address = .{ .bytes = [_]u8{0} ** 20 };
@@ -795,21 +820,21 @@ test "Journal - address comparison edge cases" {
 
 test "Journal - custom configuration comprehensive" {
     const testing = std.testing;
-    
+
     const CustomJournal = Journal(.{
         .SnapshotIdType = u16,
         .WordType = u128,
         .NonceType = u32,
         .initial_capacity = 64,
     });
-    
+
     var journal = try CustomJournal.init(testing.allocator);
     defer journal.deinit();
-    
+
     const addr: Address = .{ .bytes = [_]u8{0} ** 20 };
-    
+
     // Test custom types
-    const snapshot: u16 = journal.create_snapshot();
+    const snapshot: u16 = try journal.create_snapshot();
     try journal.record_storage_change(snapshot, addr, std.math.maxInt(u128), 0);
     try journal.record_nonce_change(snapshot, addr, std.math.maxInt(u32));
     try journal.record_balance_change(snapshot, addr, std.math.maxInt(u128));
@@ -827,20 +852,20 @@ test "Journal - custom configuration comprehensive" {
 
 test "Journal - memory management stress" {
     const testing = std.testing;
-    
+
     var journal = try DefaultJournal.init(testing.allocator);
     defer journal.deinit();
-    
+
     // Create many snapshots and entries, then revert
     const num_cycles = 10;
     const entries_per_cycle = 50;
-    
+
     var snapshots = std.array_list.AlignedManaged(u32, null).init(testing.allocator);
     defer snapshots.deinit();
-    
+
     // Create and populate snapshots
     for (0..num_cycles) |cycle| {
-        const snapshot = journal.create_snapshot();
+        const snapshot = try journal.create_snapshot();
         try snapshots.append(snapshot);
         
         var addr: Address = .{ .bytes = [_]u8{0} ** 20 };
@@ -870,12 +895,12 @@ test "Journal - memory management stress" {
 test "Journal - entry ordering preservation" {
     const testing = std.testing;
     const addr: Address = .{ .bytes = [_]u8{0} ** 20 };
-    
+
     var journal = try DefaultJournal.init(testing.allocator);
     defer journal.deinit();
-    
+
     // Create single snapshot but add entries over time
-    const snapshot = journal.create_snapshot();
+    const snapshot = try journal.create_snapshot();
     
     const operations = [_]struct { key: u256, value: u256 }{
         .{ .key = 1, .value = 100 },

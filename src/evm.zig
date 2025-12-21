@@ -879,7 +879,7 @@ pub fn Evm(config: EvmConfig) type {
             gas: u64,
         }) !CallResult {
             @branchHint(.likely);
-            const snapshot_id = self.journal.create_snapshot();
+            const snapshot_id = try self.journal.create_snapshot();
             const db_snapshot_id = try self.database.create_snapshot();
 
             if (params.value > 0) {
@@ -949,7 +949,7 @@ pub fn Evm(config: EvmConfig) type {
             input: []const u8,
             gas: u64,
         }) !CallResult {
-            const snapshot_id = self.journal.create_snapshot();
+            const snapshot_id = try self.journal.create_snapshot();
             const db_snapshot_id = try self.database.create_snapshot();
 
             if (params.value > 0) {
@@ -1010,7 +1010,7 @@ pub fn Evm(config: EvmConfig) type {
             input: []const u8,
             gas: u64,
         }) !CallResult {
-            const snapshot_id = self.journal.create_snapshot();
+            const snapshot_id = try self.journal.create_snapshot();
             const db_snapshot_id = try self.database.create_snapshot();
 
             const preflight = self.performCallPreflight(params.to, params.input, params.gas, false, snapshot_id) catch |err| {
@@ -1067,7 +1067,7 @@ pub fn Evm(config: EvmConfig) type {
             input: []const u8,
             gas: u64,
         }) !CallResult {
-            const snapshot_id = self.journal.create_snapshot();
+            const snapshot_id = try self.journal.create_snapshot();
             const db_snapshot_id = try self.database.create_snapshot();
 
             const preflight = self.performCallPreflight(params.to, params.input, params.gas, true, snapshot_id) catch |err| {
@@ -1122,7 +1122,7 @@ pub fn Evm(config: EvmConfig) type {
             init_code: []const u8,
             gas: u64,
         }) !CallResult {
-            const snapshot_id = self.journal.create_snapshot();
+            const snapshot_id = try self.journal.create_snapshot();
             const db_snapshot_id = try self.database.create_snapshot();
 
             var caller_account = self.database.get_account(params.caller.bytes) catch {
@@ -1198,7 +1198,7 @@ pub fn Evm(config: EvmConfig) type {
                 return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
             }
 
-            const snapshot_id = self.journal.create_snapshot();
+            const snapshot_id = try self.journal.create_snapshot();
             const db_snapshot_id = try self.database.create_snapshot();
 
             var caller_account = self.database.get_account(params.caller.bytes) catch {
@@ -1651,7 +1651,7 @@ pub fn Evm(config: EvmConfig) type {
         }
 
         /// Create a new journal snapshot
-        pub fn create_snapshot(self: *Self) Journal.SnapshotIdType {
+        pub fn create_snapshot(self: *Self) Journal.Error!Journal.SnapshotIdType {
             return self.journal.create_snapshot();
         }
 
@@ -2462,16 +2462,16 @@ test "Journal - snapshot creation and management" {
     const journal_mod = @import("storage/journal.zig");
     const JournalType = journal_mod.Journal(.{});
 
-    var journal = JournalType.init(std.testing.allocator);
+    var journal = try JournalType.init(std.testing.allocator);
     defer journal.deinit();
 
     try std.testing.expectEqual(@as(u32, 0), journal.next_snapshot_id);
     try std.testing.expectEqual(@as(usize, 0), journal.entry_count());
 
     // Create snapshots
-    const snapshot1 = journal.create_snapshot();
-    const snapshot2 = journal.create_snapshot();
-    const snapshot3 = journal.create_snapshot();
+    const snapshot1 = try journal.create_snapshot();
+    const snapshot2 = try journal.create_snapshot();
+    const snapshot3 = try journal.create_snapshot();
 
     try std.testing.expectEqual(@as(u32, 0), snapshot1);
     try std.testing.expectEqual(@as(u32, 1), snapshot2);
@@ -2483,10 +2483,10 @@ test "Journal - storage change recording" {
     const journal_mod = @import("storage/journal.zig");
     const JournalType = journal_mod.Journal(.{});
 
-    var journal = JournalType.init(std.testing.allocator);
+    var journal = try JournalType.init(std.testing.allocator);
     defer journal.deinit();
 
-    const snapshot_id = journal.create_snapshot();
+    const snapshot_id = try journal.create_snapshot();
     const address = primitives.ZERO_ADDRESS;
     const key = 42;
     const original_value = 100;
@@ -2518,12 +2518,12 @@ test "Journal - revert to snapshot" {
     const journal_mod = @import("storage/journal.zig");
     const JournalType = journal_mod.Journal(.{});
 
-    var journal = JournalType.init(std.testing.allocator);
+    var journal = try JournalType.init(std.testing.allocator);
     defer journal.deinit();
 
-    const snapshot1 = journal.create_snapshot();
-    const snapshot2 = journal.create_snapshot();
-    const snapshot3 = journal.create_snapshot();
+    const snapshot1 = try journal.create_snapshot();
+    const snapshot2 = try journal.create_snapshot();
+    const snapshot3 = try journal.create_snapshot();
 
     // Add entries with different snapshot IDs
     try journal.record_storage_change(snapshot1, primitives.ZERO_ADDRESS, 1, 10);
@@ -2547,10 +2547,10 @@ test "Journal - multiple entry types" {
     const journal_mod = @import("storage/journal.zig");
     const JournalType = journal_mod.Journal(.{});
 
-    var journal = JournalType.init(std.testing.allocator);
+    var journal = try JournalType.init(std.testing.allocator);
     defer journal.deinit();
 
-    const snapshot_id = journal.create_snapshot();
+    const snapshot_id = try journal.create_snapshot();
     const address = primitives.ZERO_ADDRESS;
     const code_hash = [_]u8{0xAB} ** 32;
 
@@ -2588,7 +2588,7 @@ test "Journal - empty revert" {
     const journal_mod = @import("storage/journal.zig");
     const JournalType = journal_mod.Journal(.{});
 
-    var journal = JournalType.init(std.testing.allocator);
+    var journal = try JournalType.init(std.testing.allocator);
     defer journal.deinit();
 
     // Revert with no entries should not crash
@@ -2596,7 +2596,7 @@ test "Journal - empty revert" {
     try std.testing.expectEqual(@as(usize, 0), journal.entry_count());
 
     // Create entries and revert to future snapshot
-    const snapshot = journal.create_snapshot();
+    const snapshot = try journal.create_snapshot();
     try journal.record_storage_change(snapshot, primitives.ZERO_ADDRESS, 1, 100);
 
     // Revert to future snapshot (should remove all entries)
@@ -4753,7 +4753,7 @@ test "journal state application - storage change rollback" {
     try evm.database.set_storage(test_address.bytes, storage_key, original_value);
 
     // Create snapshot
-    const snapshot_id = evm.create_snapshot();
+    const snapshot_id = try evm.create_snapshot();
 
     // Modify storage value and record in journal
     try evm.database.set_storage(test_address.bytes, storage_key, new_value);
@@ -4813,7 +4813,7 @@ test "journal state application - balance change rollback" {
     try evm.database.set_account(test_address.bytes, original_account);
 
     // Create snapshot
-    const snapshot_id = evm.create_snapshot();
+    const snapshot_id = try evm.create_snapshot();
 
     // Modify balance and record in journal
     var modified_account = original_account;
