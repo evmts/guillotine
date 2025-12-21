@@ -132,73 +132,25 @@ function validateIssue(issue: GitHubIssue): ValidationResult {
     }
   }
 
-  // Use claude to do deeper validation
-  const validationPrompt = `You are validating GitHub issue #${issue.number} before an automated agent works on it.
+  // Simple validation - most issues from our curated list are valid
+  // Only check for obvious blockers
+  const bodyLower = issue.body.toLowerCase();
+  const titleLower = issue.title.toLowerCase();
 
-## Issue Title
-${issue.title}
-
-## Issue Body
-${issue.body}
-
-## Task
-Analyze this issue and determine if it's:
-1. VALID - A real bug/feature that can be safely worked on
-2. INVALID - Should not be worked on (unclear, dangerous, out of scope)
-3. NEEDS_CLARIFICATION - Requires human input before proceeding
-
-Consider:
-- Is the issue clear and actionable?
-- Could fixing this introduce security vulnerabilities?
-- Is this within scope of the Guillotine EVM project?
-- Does this require architectural decisions that need human approval?
-- Could this break existing functionality?
-
-Respond with EXACTLY one of these formats:
-VALID: <brief reason>
-INVALID: <reason>
-NEEDS_CLARIFICATION: <what needs clarification>`;
-
-  try {
-    const tempFile = '/tmp/claude-validation-prompt.txt';
-    fs.writeFileSync(tempFile, validationPrompt);
-
-    const output = execSync(
-      `claude -p "$(cat ${tempFile})" --output-format text --max-turns 3`,
-      {
-        cwd: REPO_ROOT,
-        encoding: 'utf-8',
-        timeout: 120000,  // 2 min for validation
-        env: { ...process.env, FORCE_COLOR: '0' }
-      }
-    );
-
-    const response = output.trim();
-    console.log(`Validation response: ${response.substring(0, 200)}...`);
-
-    // Search for keywords anywhere in the response (claude may include reasoning before the verdict)
-    const validMatch = response.match(/VALID:\s*(.+?)(?:\n|$)/);
-    const invalidMatch = response.match(/INVALID:\s*(.+?)(?:\n|$)/);
-    const clarifyMatch = response.match(/NEEDS_CLARIFICATION:\s*(.+?)(?:\n|$)/);
-
-    if (validMatch && !invalidMatch && !clarifyMatch) {
-      return { valid: true, reason: validMatch[1].trim(), shouldComment: false };
-    } else if (invalidMatch) {
-      return { valid: false, reason: invalidMatch[1].trim(), shouldComment: true };
-    } else if (clarifyMatch) {
-      return { valid: false, reason: clarifyMatch[1].trim(), shouldComment: true };
-    } else if (response.toLowerCase().includes('valid') && !response.toLowerCase().includes('invalid')) {
-      // Fallback: if it says "valid" but not in exact format, assume valid
-      return { valid: true, reason: 'Issue appears valid based on analysis', shouldComment: false };
-    } else {
-      // Default to skipping but not commenting
-      return { valid: false, reason: 'Validation response unclear - needs human review', shouldComment: false };
-    }
-  } catch (error: any) {
-    console.error('Validation failed:', error.message);
-    // If validation fails, skip but don't comment
-    return { valid: false, reason: 'Validation process failed', shouldComment: false };
+  // Check for issues that need architectural decisions (skip for automation)
+  if (titleLower.includes('benchmark') || titleLower.includes('refactor') ||
+      bodyLower.includes('architectural') || bodyLower.includes('breaking change')) {
+    return { valid: false, reason: 'Requires architectural decision - needs human approval', shouldComment: false };
   }
+
+  // Check for build/platform issues we can't test locally
+  if (titleLower.includes('linux') || titleLower.includes('windows') ||
+      titleLower.includes('x86') || titleLower.includes('build fails')) {
+    return { valid: false, reason: 'Platform-specific issue - needs appropriate environment', shouldComment: false };
+  }
+
+  // Otherwise, assume issues from our curated list are valid
+  return { valid: true, reason: 'Issue from curated priority list', shouldComment: false };
 }
 
 /**
