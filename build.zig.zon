@@ -45,12 +45,14 @@
             .path = "lib/voltaire",
         },
         .zbench = .{
-            .url = "https://github.com/hendriknielaender/zBench/archive/refs/heads/main.tar.gz",
+            // Pin to commit hash to prevent hash mismatches when branch updates
+            .url = "https://github.com/hendriknielaender/zBench/archive/3268a23da82231f1bd2c064de7fdf6fb7056126f.tar.gz",
             .hash = "zbench-0.11.2-YTdc7zolAQDlBF9i0ywXIvDjafL3Kg27S-aFUq6dU5zy",
         },
         .clap = .{
-            .url = "https://github.com/Hejsil/zig-clap/archive/refs/heads/master.tar.gz",
-            .hash = "clap-0.11.0-oBajB-TnAQC7yPLnZRT5WzHZ_4Ly4dX2OILskli74b9H",
+            // Pin to commit hash to prevent hash mismatches when branch updates
+            .url = "https://github.com/Hejsil/zig-clap/archive/3ae92228409d82a2c906fafc228b7920d9ff046b.tar.gz",
+            .hash = "clap-0.11.0-oBajB03nAQAvaRnlqid3PwE7E_JqPypon6NQoMlm9ekb",
         },
         .mini = .{
             // Minimal EVM implementation (guillotine-mini)
