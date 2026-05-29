@@ -37,7 +37,9 @@ pub fn bytecodeAnalyze(
                     folded_value = @as(u256, value1) +% @as(u256, value2);
                 },
                 @intFromEnum(Opcode.SUB) => {
-                    folded_value = @as(u256, value1) -% @as(u256, value2);
+                    // EVM SUB computes top - second. For `PUSH1 value1; PUSH1 value2; SUB`,
+                    // value2 is on top, so the result is value2 - value1 (not value1 - value2).
+                    folded_value = @as(u256, value2) -% @as(u256, value1);
                 },
                 @intFromEnum(Opcode.MUL) => {
                     folded_value = @as(u256, value1) *% @as(u256, value2);

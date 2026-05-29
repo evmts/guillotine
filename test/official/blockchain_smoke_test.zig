@@ -37,7 +37,7 @@ fn parseHash32(s: []const u8) ![32]u8 {
     const hex = primitives.Hex;
     const t = std.mem.trim(u8, s, &std.ascii.whitespace);
     if (t.len == 0 or std.mem.eql(u8, t, "0x")) return [_]u8{0} ** 32;
-    return try hex.hexToBytes_fixed(32, t);
+    return try hex.hexToBytesFixed(32, t);
 }
 
 fn hfFromName(name: []const u8) Hardfork {

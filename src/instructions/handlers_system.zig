@@ -64,10 +64,11 @@ pub fn Handlers(FrameType: type) type {
                 self.afterInstruction(.CALL, op_data.next_handler, op_data.next_cursor.cursor);
                 return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             }
+            // EIP-150: the 63/64 forwardable cap must be computed on the gas remaining AFTER
+            // the call's own costs (access, value transfer, new account) are charged — see
+            // the cap computation just before inner_call below. Only the requested amount is
+            // captured here.
             const gas_u64_raw = @as(u64, @intCast(gas_param));
-            const caller_gas_available: u64 = @as(u64, @intCast(@max(self.gas_remaining, 0)));
-            const max_forwardable: u64 = caller_gas_available - (caller_gas_available / 64);
-            const gas_u64 = if (gas_u64_raw < max_forwardable) gas_u64_raw else max_forwardable;
 
             if (input_offset > std.math.maxInt(usize) or
                 input_size > std.math.maxInt(usize) or
@@ -209,13 +210,28 @@ pub fn Handlers(FrameType: type) type {
                 };
             }
 
+            // EIP-214: a CALL transferring value is forbidden in a static context and must
+            // fail the frame (exceptional halt). Matches execution-specs (system.py: call).
+            if (value != 0 and self.getEvm().is_static_context()) {
+                self.afterComplete(.CALL);
+                return Error.WriteProtection;
+            }
+
+            // EIP-150: compute the 63/64 forwardable cap on the gas remaining AFTER all call
+            // costs. EIP-150 value calls also grant the callee a 2300 gas stipend (free to the
+            // caller — unused stipend is refunded on return).
+            const avail_after_costs: u64 = @as(u64, @intCast(@max(self.gas_remaining, 0)));
+            const max_forwardable: u64 = avail_after_costs - (avail_after_costs / 64);
+            const forwarded: u64 = @min(gas_u64_raw, max_forwardable);
+            const callee_gas: u64 = forwarded + (if (has_value_transfer) primitives.GasConstants.CallStipend else 0);
+
             const params = CallParams{
                 .call = .{
                     .caller = self.contract_address,
                     .to = addr,
                     .value = value,
                     .input = input_data,
-                    .gas = gas_u64,
+                    .gas = callee_gas,
                 },
             };
 
@@ -233,11 +249,10 @@ pub fn Handlers(FrameType: type) type {
                 };
             }
 
-            const provided_gas_call: u64 = gas_u64;
-            const used_gas_call: u64 = if (result.gas_left > provided_gas_call) 0 else (provided_gas_call - result.gas_left);
-            const caller_gas_call: u64 = @as(u64, @intCast(@max(self.gas_remaining, 0)));
-            const new_gas_call: u64 = if (used_gas_call > caller_gas_call) 0 else caller_gas_call - used_gas_call;
-            self.gas_remaining = @as(FrameType.GasType, @intCast(new_gas_call));
+            // Caller pays the forwarded gas and is refunded the callee's leftover (which may
+            // include unused stipend): final = avail_after_costs - forwarded + leftover.
+            const reconciled_call: i128 = @as(i128, @intCast(@max(self.gas_remaining, 0))) - @as(i128, forwarded) + @as(i128, @intCast(result.gas_left));
+            self.gas_remaining = if (reconciled_call < 0) 0 else @as(FrameType.GasType, @intCast(reconciled_call));
             (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "Stack must have space for push");
             self.stack.push_unsafe(if (result.success) 1 else 0);
             const op_data = dispatch.getOpData(.CALL);
@@ -268,10 +283,8 @@ pub fn Handlers(FrameType: type) type {
                 self.afterInstruction(.CALLCODE, op_data.next_handler, op_data.next_cursor.cursor);
                 return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             }
+            // EIP-150: the 63/64 forwardable cap is computed after the call's costs (below).
             const gas_u64_raw = @as(u64, @intCast(gas_param));
-            const caller_gas_available_cc: u64 = @as(u64, @intCast(@max(self.gas_remaining, 0)));
-            const max_forwardable_cc: u64 = caller_gas_available_cc - (caller_gas_available_cc / 64);
-            const gas_u64 = if (gas_u64_raw < max_forwardable_cc) gas_u64_raw else max_forwardable_cc;
 
             if (input_offset > std.math.maxInt(usize) or
                 input_size > std.math.maxInt(usize) or
@@ -356,13 +369,18 @@ pub fn Handlers(FrameType: type) type {
                 };
             }
 
+            // EIP-150: 63/64 forwardable cap on the gas remaining after the call's costs;
+            // value-transferring callcode also grants the callee a 2300 gas stipend.
+            const avail_after_costs_cc: u64 = @as(u64, @intCast(@max(self.gas_remaining, 0)));
+            const forwarded_cc: u64 = @min(gas_u64_raw, avail_after_costs_cc - (avail_after_costs_cc / 64));
+            const callee_gas_cc: u64 = forwarded_cc + (if (value != 0) primitives.GasConstants.CallStipend else 0);
             const call_params = CallParams{
                 .callcode = .{
                     .caller = self.contract_address,
                     .to = addr,
                     .value = value,
                     .input = input_data,
-                    .gas = gas_u64,
+                    .gas = callee_gas_cc,
                 },
             };
 
@@ -377,11 +395,9 @@ pub fn Handlers(FrameType: type) type {
                 };
             }
 
-            const provided_gas_callcode: u64 = gas_u64;
-            const used_gas_callcode: u64 = if (result.gas_left > provided_gas_callcode) 0 else (provided_gas_callcode - result.gas_left);
-            const caller_gas_callcode: u64 = @as(u64, @intCast(@max(self.gas_remaining, 0)));
-            const new_gas_callcode: u64 = if (used_gas_callcode > caller_gas_callcode) 0 else caller_gas_callcode - used_gas_callcode;
-            self.gas_remaining = @as(FrameType.GasType, @intCast(new_gas_callcode));
+            // Refund the callee's unused gas (incl. unused stipend): final = avail_after_costs - forwarded + leftover.
+            const reconciled_cc: i128 = @as(i128, @intCast(@max(self.gas_remaining, 0))) - @as(i128, forwarded_cc) + @as(i128, @intCast(result.gas_left));
+            self.gas_remaining = if (reconciled_cc < 0) 0 else @as(FrameType.GasType, @intCast(reconciled_cc));
 
             (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "Stack must have space for push");
             self.stack.push_unsafe(if (result.success) 1 else 0);
@@ -412,10 +428,8 @@ pub fn Handlers(FrameType: type) type {
                 self.afterInstruction(.DELEGATECALL, op_data.next_handler, op_data.next_cursor.cursor);
                 return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             }
+            // EIP-150: the 63/64 forwardable cap is computed after the call's costs (below).
             const gas_u64_raw = @as(u64, @intCast(gas_param));
-            const caller_gas_available_dc: u64 = @as(u64, @intCast(@max(self.gas_remaining, 0)));
-            const max_forwardable_dc: u64 = caller_gas_available_dc - (caller_gas_available_dc / 64);
-            const gas_u64 = if (gas_u64_raw < max_forwardable_dc) gas_u64_raw else max_forwardable_dc;
 
             if (input_offset > std.math.maxInt(usize) or
                 input_size > std.math.maxInt(usize) or
@@ -512,12 +526,15 @@ pub fn Handlers(FrameType: type) type {
                 };
             }
 
+            // EIP-150: 63/64 forwardable cap on the gas remaining after the call's access cost.
+            const avail_after_costs_dc: u64 = @as(u64, @intCast(@max(self.gas_remaining, 0)));
+            const forwarded_dc: u64 = @min(gas_u64_raw, avail_after_costs_dc - (avail_after_costs_dc / 64));
             const params = CallParams{
                 .delegatecall = .{
                     .caller = self.caller,
                     .to = addr,
                     .input = input_data,
-                    .gas = gas_u64,
+                    .gas = forwarded_dc,
                 },
             };
             var result = self.getEvm().inner_call(params);
@@ -534,11 +551,9 @@ pub fn Handlers(FrameType: type) type {
                 };
             }
 
-            const provided_gas_delegate: u64 = gas_u64;
-            const used_gas_delegate: u64 = if (result.gas_left > provided_gas_delegate) 0 else (provided_gas_delegate - result.gas_left);
-            const caller_gas_delegate: u64 = @as(u64, @intCast(@max(self.gas_remaining, 0)));
-            const new_gas_delegate: u64 = if (used_gas_delegate > caller_gas_delegate) 0 else caller_gas_delegate - used_gas_delegate;
-            self.gas_remaining = @as(FrameType.GasType, @intCast(new_gas_delegate));
+            // Refund the callee's unused gas: final = avail_after_costs - forwarded + leftover.
+            const reconciled_dc: i128 = @as(i128, @intCast(@max(self.gas_remaining, 0))) - @as(i128, forwarded_dc) + @as(i128, @intCast(result.gas_left));
+            self.gas_remaining = if (reconciled_dc < 0) 0 else @as(FrameType.GasType, @intCast(reconciled_dc));
 
             (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "Stack must have space for push");
             self.stack.push_unsafe(if (result.success) 1 else 0);
@@ -569,10 +584,8 @@ pub fn Handlers(FrameType: type) type {
                 self.afterInstruction(.STATICCALL, op_data.next_handler, op_data.next_cursor.cursor);
                 return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             }
+            // EIP-150: the 63/64 forwardable cap is computed after the call's costs (below).
             const gas_u64_raw = @as(u64, @intCast(gas_param));
-            const caller_gas_available_sc: u64 = @as(u64, @intCast(@max(self.gas_remaining, 0)));
-            const max_forwardable_sc: u64 = caller_gas_available_sc - (caller_gas_available_sc / 64);
-            const gas_u64 = if (gas_u64_raw < max_forwardable_sc) gas_u64_raw else max_forwardable_sc;
 
             if (input_offset > std.math.maxInt(usize) or
                 input_size > std.math.maxInt(usize) or
@@ -672,13 +685,16 @@ pub fn Handlers(FrameType: type) type {
                 };
             }
 
+            // EIP-150: 63/64 forwardable cap on the gas remaining after the call's access cost.
+            const avail_after_costs_sc: u64 = @as(u64, @intCast(@max(self.gas_remaining, 0)));
+            const forwarded_sc: u64 = @min(gas_u64_raw, avail_after_costs_sc - (avail_after_costs_sc / 64));
             // Perform the static call through the host interface
             const params = CallParams{
                 .staticcall = .{
                     .caller = self.contract_address,
                     .to = addr,
                     .input = input_data,
-                    .gas = gas_u64,
+                    .gas = forwarded_sc,
                 },
             };
             var result = self.getEvm().inner_call(params);
@@ -700,11 +716,9 @@ pub fn Handlers(FrameType: type) type {
             // which is automatically updated after inner_call
 
             // Update caller gas: subtract only gas actually used by callee
-            const provided_gas_sc: u64 = gas_u64;
-            const used_gas_sc: u64 = if (result.gas_left > provided_gas_sc) 0 else (provided_gas_sc - result.gas_left);
-            const caller_gas_sc: u64 = @as(u64, @intCast(@max(self.gas_remaining, 0)));
-            const new_gas_sc: u64 = if (used_gas_sc > caller_gas_sc) 0 else caller_gas_sc - used_gas_sc;
-            self.gas_remaining = @as(FrameType.GasType, @intCast(new_gas_sc));
+            // Refund the callee's unused gas: final = avail_after_costs - forwarded + leftover.
+            const reconciled_sc: i128 = @as(i128, @intCast(@max(self.gas_remaining, 0))) - @as(i128, forwarded_sc) + @as(i128, @intCast(result.gas_left));
+            self.gas_remaining = if (reconciled_sc < 0) 0 else @as(FrameType.GasType, @intCast(reconciled_sc));
 
             // Push success status (1 for success, 0 for failure)
             {

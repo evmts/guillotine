@@ -95,6 +95,14 @@ pub fn Handlers(FrameType: type) type {
                         return Error.OutOfGas;
                     }
 
+                    // EIP-214: LOG is forbidden in a static context and must fail the call
+                    // (emit_log silently drops the log, so the check must live here). Matches
+                    // execution-specs (log.py): charge gas first, then raise on static.
+                    if (self.getEvm().is_static_context()) {
+                        self.afterComplete(unified_opcode);
+                        return Error.WriteProtection;
+                    }
+
                     // Ensure memory capacity
                     if (length_usize > 0) {
                         const memory_end = offset_usize + length_usize;

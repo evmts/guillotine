@@ -399,7 +399,30 @@ pub fn Evm(config: EvmConfig) type {
         /// This is the main entry point that routes to specific handlers based
         /// on the operation type (CALL, CREATE, etc). Manages transaction-level
         /// state including logs and ensures proper cleanup.
+        /// Public entry point. Runs the (recursive) interpreter on a worker thread with a large
+        /// native stack so a legitimately deep call chain (up to the 1024 EVM depth limit) does
+        /// not overflow the native stack and crash. There is no concurrency: the calling thread
+        /// blocks on join, so the EVM's allocators/state are accessed by only one thread at a time.
         pub fn call(self: *Self, params: CallParams) CallResult {
+            const Runner = struct {
+                evm: *Self,
+                params: CallParams,
+                result: CallResult = undefined,
+                fn run(ctx: *@This()) void {
+                    ctx.result = ctx.evm.callImpl(ctx.params);
+                }
+            };
+            var ctx = Runner{ .evm = self, .params = params };
+            const thread = std.Thread.spawn(.{ .stack_size = 64 * 1024 * 1024 }, Runner.run, .{&ctx}) catch {
+                // If a thread cannot be spawned, fall back to running inline (may crash on very
+                // deep recursion, but preserves behavior when threads are unavailable).
+                return self.callImpl(params);
+            };
+            thread.join();
+            return ctx.result;
+        }
+
+        fn callImpl(self: *Self, params: CallParams) CallResult {
             self.tracer.assert(self.depth == 0, "call() should only be called at top level");
 
             const to_address = params.get_to() orelse primitives.ZERO_ADDRESS;
@@ -726,9 +749,12 @@ pub fn Evm(config: EvmConfig) type {
                 if (params.getGas() == 0) return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
             }
 
-            self.depth += 1;
-            defer self.depth -= 1;
-
+            // depth is incremented solely by execute_frame (CALL variants) and the create paths;
+            // inner_call must NOT increment it again or every nesting level would advance depth
+            // by 2 (halving the 1024 limit) and leave a call_stack gap that corrupts parent
+            // caller/value/is_static lookups. The check uses the parent depth: a frame already
+            // at the limit cannot push another. (Deep recursion is safe — call() runs on a
+            // large-stack worker thread.)
             if (self.depth >= config.max_call_depth) return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
 
             const execution_gas = params.getGas();
@@ -891,7 +917,7 @@ pub fn Evm(config: EvmConfig) type {
                 };
             }
 
-            const preflight = self.performCallPreflight(params.to, params.input, params.gas, false, snapshot_id) catch |err| {
+            const preflight = self.performCallPreflight(params.to, params.input, params.gas, self.is_static_context(), snapshot_id) catch |err| {
                 self.tracer.onCallPreflight("CALL", @errorName(err));
                 self.journal.revert_to_snapshot(snapshot_id);
                 try self.database.revert_to_snapshot(db_snapshot_id);
@@ -920,7 +946,7 @@ pub fn Evm(config: EvmConfig) type {
                         params.to,
                         params.caller,
                         params.value,
-                        false,
+                        self.is_static_context(), // EIP-214: inherit parent static context
                         snapshot_id,
                     ) catch |err| {
                         log.debug("EXECUTE_CALL: execute_frame failed with error: {}", .{err});
@@ -984,7 +1010,7 @@ pub fn Evm(config: EvmConfig) type {
                 params.caller,
                 params.caller,
                 params.value,
-                false,
+                self.is_static_context(), // EIP-214: inherit parent static context (CALLCODE)
                 snapshot_id,
             ) catch {
                 @branchHint(.unlikely);
@@ -1013,7 +1039,7 @@ pub fn Evm(config: EvmConfig) type {
             const snapshot_id = self.journal.create_snapshot();
             const db_snapshot_id = try self.database.create_snapshot();
 
-            const preflight = self.performCallPreflight(params.to, params.input, params.gas, false, snapshot_id) catch |err| {
+            const preflight = self.performCallPreflight(params.to, params.input, params.gas, self.is_static_context(), snapshot_id) catch |err| {
                 @branchHint(.cold);
                 log.debug("Delegatecall preflight failed: {}", .{err});
                 self.journal.revert_to_snapshot(snapshot_id);
@@ -1039,7 +1065,7 @@ pub fn Evm(config: EvmConfig) type {
                         params.caller,
                         params.caller,
                         current_value,
-                        false,
+                        self.is_static_context(), // EIP-214: inherit parent static context (DELEGATECALL)
                         snapshot_id,
                     ) catch {
                         @branchHint(.cold);
@@ -1158,7 +1184,10 @@ pub fn Evm(config: EvmConfig) type {
                 }
             }
             const GasConstants = primitives.GasConstants;
-            const create_overhead = GasConstants.CreateGas;
+            // EIP-3860 (Shanghai+): init code costs 2 gas per 32-byte word, on top of CreateGas.
+            const init_words_c: u64 = (@as(u64, @intCast(params.init_code.len)) + 31) / 32;
+            const initcode_word_cost_c: u64 = if (config.eips.hardfork.isAtLeast(.SHANGHAI)) init_words_c * GasConstants.InitcodeWordGas else 0;
+            const create_overhead = GasConstants.CreateGas + initcode_word_cost_c;
             if (params.gas < create_overhead) {
                 self.journal.revert_to_snapshot(snapshot_id);
                 try self.database.revert_to_snapshot(db_snapshot_id);
@@ -1243,8 +1272,13 @@ pub fn Evm(config: EvmConfig) type {
             }
 
             const GasConstants = primitives.GasConstants;
-            const create_overhead = GasConstants.CreateGas;
-            const hash_cost = @as(u64, @intCast(params.init_code.len)) * GasConstants.Keccak256WordGas / 32;
+            // EIP-3860 (Shanghai+): init code costs 2 gas per 32-byte word.
+            const init_words_c2: u64 = (@as(u64, @intCast(params.init_code.len)) + 31) / 32;
+            const initcode_word_cost_c2: u64 = if (config.eips.hardfork.isAtLeast(.SHANGHAI)) init_words_c2 * GasConstants.InitcodeWordGas else 0;
+            const create_overhead = GasConstants.CreateGas + initcode_word_cost_c2;
+            // EIP-1014: CREATE2 hashes the init code at GAS_KECCAK256_WORD per 32-byte word,
+            // rounded UP (ceil(len/32)), not len*word_gas/32 which rounds down.
+            const hash_cost = init_words_c2 * GasConstants.Keccak256WordGas;
             const total_overhead = create_overhead + hash_cost;
             if (params.gas < total_overhead) {
                 log.debug("CREATE2: insufficient gas for overhead: need={}, have={}", .{ total_overhead, params.gas });
@@ -1291,7 +1325,7 @@ pub fn Evm(config: EvmConfig) type {
                     return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
                 };
             }
-            const result = self.execute_init_code(
+            var result = self.execute_init_code(
                 args.init_code,
                 args.gas_left,
                 args.contract_address,
@@ -1327,13 +1361,31 @@ pub fn Evm(config: EvmConfig) type {
                     try self.database.revert_to_snapshot(args.db_snapshot_id);
                     return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
                 }
-                const stored_hash = self.database.set_code(result.output) catch {
+                // EIP-170: reject deployed code exceeding the max code size (Spurious Dragon+;
+                // eip_170_max_code_size returns 0xFFFFFF on earlier forks => no limit).
+                if (result.output.len > config.eips.eip_170_max_code_size()) {
                     self.journal.revert_to_snapshot(args.snapshot_id);
                     try self.database.revert_to_snapshot(args.db_snapshot_id);
                     return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
-                };
-                try self.journal.record_code_change(args.snapshot_id, args.contract_address, contract_account.code_hash);
-                contract_account.code_hash = stored_hash;
+                }
+                // EIP-2: charge code-deposit gas (200 per byte of deployed code). When the
+                // remaining gas cannot cover it, Homestead+ fails the creation; Frontier
+                // instead deploys empty code (the account is still created) without charging.
+                const deposit_cost: u64 = @as(u64, @intCast(result.output.len)) * primitives.GasConstants.CreateDataGas;
+                if (result.gas_left >= deposit_cost) {
+                    result.gas_left -= deposit_cost;
+                    const stored_hash = self.database.set_code(result.output) catch {
+                        self.journal.revert_to_snapshot(args.snapshot_id);
+                        try self.database.revert_to_snapshot(args.db_snapshot_id);
+                        return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                    };
+                    try self.journal.record_code_change(args.snapshot_id, args.contract_address, contract_account.code_hash);
+                    contract_account.code_hash = stored_hash;
+                } else if (config.eips.hardfork.isAtLeast(.HOMESTEAD)) {
+                    self.journal.revert_to_snapshot(args.snapshot_id);
+                    try self.database.revert_to_snapshot(args.db_snapshot_id);
+                    return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                }
             }
             self.database.set_account(args.contract_address.bytes, contract_account) catch {
                 self.journal.revert_to_snapshot(args.snapshot_id);

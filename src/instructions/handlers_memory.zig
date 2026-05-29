@@ -26,8 +26,11 @@ pub fn Handlers(FrameType: type) type {
 
         /// Check if an offset plus size would exceed memory limit
         inline fn checkMemoryBounds(offset: usize, size: usize) bool {
-            const end = offset + size;
-            return end <= MEMORY_LIMIT;
+            // Overflow-safe: a near-usize-max offset+size must not panic; overflow means it
+            // exceeds the memory limit.
+            const end = @addWithOverflow(offset, size);
+            if (end[1] != 0) return false;
+            return end[0] <= MEMORY_LIMIT;
         }
 
         /// Check if a value fits within memory limit

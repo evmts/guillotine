@@ -80,6 +80,14 @@ pub fn Handlers(FrameType: type) type {
             const slot = self.stack.pop_unsafe(); // Pop key/slot first (top of stack)
             const value = self.stack.pop_unsafe(); // Pop value second
 
+            // EIP-2200: SSTORE must fail with OutOfGas when remaining gas <= the sentry
+            // stipend (2300). Checked after popping operands but before warming the slot or
+            // computing dynamic cost, matching execution-specs (storage.py: sstore).
+            if (self.gas_remaining <= @as(FrameType.GasType, @intCast(GasConstants.SstoreSentryGas))) {
+                self.afterComplete(.SSTORE);
+                return Error.OutOfGas;
+            }
+
             // Use the currently executing contract's address
             const contract_addr = self.contract_address;
 
@@ -146,9 +154,34 @@ pub fn Handlers(FrameType: type) type {
                 },
             };
 
-            // EIP-3529: Only clearing (non-zero -> zero) is eligible for refund
-            if (current_value != 0 and value == 0) {
-                evm.add_gas_refund(GasConstants.SstoreRefundGas);
+            // SSTORE gas refunds. London+ (EIP-2200 + EIP-3529) uses the full original/current/
+            // new logic; pre-London keeps the simpler clear-only refund to avoid disturbing the
+            // (differently-constanted) Istanbul/Berlin behavior.
+            if (evm.is_hardfork_at_least(.LONDON)) {
+                if (current_value != value) {
+                    if (original_value != 0 and current_value != 0 and value == 0) {
+                        // Storage cleared for the first time this tx.
+                        evm.add_gas_refund(GasConstants.SstoreRefundGas); // +4800
+                    }
+                    if (original_value != 0 and current_value == 0) {
+                        // Reverse a clear refund issued earlier this tx (counter holds it).
+                        evm.gas_refund_counter -|= GasConstants.SstoreRefundGas;
+                    }
+                    if (original_value == value) {
+                        if (original_value == 0) {
+                            // Slot was SET from empty earlier this tx, now restored to empty.
+                            evm.add_gas_refund(GasConstants.SstoreSetGas - GasConstants.WarmStorageReadCost); // +19900
+                        } else {
+                            // Slot was UPDATED earlier this tx, now restored to its original value.
+                            evm.add_gas_refund(GasConstants.SstoreResetGas - GasConstants.ColdSloadCost - GasConstants.WarmStorageReadCost); // +2800
+                        }
+                    }
+                }
+            } else {
+                // Pre-London: clearing (non-zero -> zero) is eligible for refund.
+                if (current_value != 0 and value == 0) {
+                    evm.add_gas_refund(GasConstants.SstoreRefundGas);
+                }
             }
 
             return next_instruction(self, cursor, .SSTORE);

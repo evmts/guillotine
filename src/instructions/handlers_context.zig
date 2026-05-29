@@ -150,7 +150,9 @@ pub fn Handlers(FrameType: type) type {
             // Load 32 bytes from calldata, zero-padding if needed
             var word: u256 = 0;
             for (0..32) |i| {
-                const byte_index = offset_usize + i;
+                // Saturating add: a near-usize-max offset must not overflow-panic; it lands
+                // past calldata.len and zero-pads.
+                const byte_index = offset_usize +| i;
                 if (byte_index < calldata.len) {
                     const byte_val = calldata[byte_index];
                     word = (word << 8) | @as(u256, byte_val);

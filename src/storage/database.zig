@@ -142,6 +142,8 @@ pub const Database = struct {
         id: u64,
         accounts: std.HashMap([20]u8, Account, ArrayHashContext, std.hash_map.default_max_load_percentage),
         storage: std.HashMap(StorageKey, u256, StorageKeyContext, std.hash_map.default_max_load_percentage),
+        // EIP-1153: transient storage is rolled back on revert, just like persistent storage.
+        transient_storage: std.HashMap(StorageKey, u256, StorageKeyContext, std.hash_map.default_max_load_percentage),
     };
 
     const ArrayHashContext = struct {
@@ -229,6 +231,7 @@ pub const Database = struct {
         for (self.snapshots.items) |*snapshot| {
             snapshot.accounts.deinit();
             snapshot.storage.deinit();
+            snapshot.transient_storage.deinit();
         }
         self.snapshots.deinit(self.allocator);
         // Deinit overlay
@@ -592,7 +595,11 @@ pub const Database = struct {
         var snapshot_storage = std.HashMap(StorageKey, u256, StorageKeyContext, std.hash_map.default_max_load_percentage).init(self.allocator);
         var storage_iter = self.storage.iterator();
         while (storage_iter.next()) |entry| try snapshot_storage.put(entry.key_ptr.*, entry.value_ptr.*);
-        try self.snapshots.append(self.allocator, Snapshot{ .id = snapshot_id, .accounts = snapshot_accounts, .storage = snapshot_storage });
+        // EIP-1153: snapshot transient storage so it can be rolled back on revert.
+        var snapshot_transient = std.HashMap(StorageKey, u256, StorageKeyContext, std.hash_map.default_max_load_percentage).init(self.allocator);
+        var transient_iter = self.transient_storage.iterator();
+        while (transient_iter.next()) |entry| try snapshot_transient.put(entry.key_ptr.*, entry.value_ptr.*);
+        try self.snapshots.append(self.allocator, Snapshot{ .id = snapshot_id, .accounts = snapshot_accounts, .storage = snapshot_storage, .transient_storage = snapshot_transient });
         return snapshot_id;
     }
 
@@ -609,15 +616,21 @@ pub const Database = struct {
         const snapshot = &self.snapshots.items[index];
         self.accounts.deinit();
         self.storage.deinit();
+        self.transient_storage.deinit();
         self.accounts = std.HashMap([20]u8, Account, ArrayHashContext, std.hash_map.default_max_load_percentage).init(self.allocator);
         self.storage = std.HashMap(StorageKey, u256, StorageKeyContext, std.hash_map.default_max_load_percentage).init(self.allocator);
+        self.transient_storage = std.HashMap(StorageKey, u256, StorageKeyContext, std.hash_map.default_max_load_percentage).init(self.allocator);
         var accounts_iter = snapshot.accounts.iterator();
         while (accounts_iter.next()) |entry| try self.accounts.put(entry.key_ptr.*, entry.value_ptr.*);
         var storage_iter = snapshot.storage.iterator();
         while (storage_iter.next()) |entry| try self.storage.put(entry.key_ptr.*, entry.value_ptr.*);
+        // EIP-1153: restore transient storage to the snapshotted state.
+        var transient_iter = snapshot.transient_storage.iterator();
+        while (transient_iter.next()) |entry| try self.transient_storage.put(entry.key_ptr.*, entry.value_ptr.*);
         for (self.snapshots.items[index..]) |*snap| {
             snap.accounts.deinit();
             snap.storage.deinit();
+            snap.transient_storage.deinit();
         }
         self.snapshots.shrinkRetainingCapacity(index);
     }
@@ -636,6 +649,7 @@ pub const Database = struct {
         // Free just this snapshot's memory
         self.snapshots.items[index].accounts.deinit();
         self.snapshots.items[index].storage.deinit();
+        self.snapshots.items[index].transient_storage.deinit();
 
         // Remove this snapshot from the list, keeping all others
         _ = self.snapshots.orderedRemove(index);
