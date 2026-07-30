@@ -1,0 +1,309 @@
+---
+title: Getting started
+description: Deploy bytecode into an in-memory database and execute it, end to end.
+---
+
+# Getting started
+
+This page walks through a complete, verified execution: put runtime bytecode in a
+database, construct an EVM, call the contract, and read the return data. Every
+line below was compiled and run against this repository — see [the output below](#running-it).
+
+## Add Guillotine to a Zig project
+
+```bash
+zig fetch --save git+https://github.com/evmts/guillotine
+```
+
+Then wire the modules in your `build.zig`:
+
+```zig
+const std = @import("std");
+
+pub fn build(b: *std.Build) void {
+    const target = b.standardTargetOptions(.{});
+    const optimize = b.standardOptimizeOption(.{});
+
+    const guillotine = b.dependency("Guillotine", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const exe = b.addExecutable(.{
+        .name = "my-app",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+
+    exe.root_module.addImport("evm", guillotine.module("evm"));
+    exe.root_module.addImport("voltaire", guillotine.module("voltaire"));
+    exe.linkLibC();
+
+    b.installArtifact(exe);
+}
+```
+
+Two modules matter: `evm` (the engine) and `voltaire` (primitives — `Address`,
+`Hash`, `U256`, RLP, ABI, crypto). The dependency key is `Guillotine`, matching
+`.name = .Guillotine` in `build.zig.zon`.
+
+:::warning
+The `zig fetch` route pulls the repository's own vendored C and Rust
+dependencies, which means your build also needs Cargo and a C compiler. See
+[Installation](/installation). While the project is in alpha, the
+better-trodden path is to build inside a checkout of the repository itself.
+:::
+
+## The four things you need
+
+Every execution needs exactly four objects:
+
+1. **A `Database`** — account, code, and storage state, plus the journal that
+   makes reverts possible.
+2. **A `BlockInfo`** — what `NUMBER`, `TIMESTAMP`, `COINBASE`, `BASEFEE`,
+   `PREVRANDAO`, `CHAINID`, and `GASLIMIT` return.
+3. **A `TransactionContext`** — transaction-level gas limit, coinbase, chain id.
+4. **An `Evm(config)` type** — the machine itself, specialised at comptime.
+
+## Execute a contract
+
+```zig
+const std = @import("std");
+const Evm = @import("evm").Evm;
+const Database = @import("evm").Database;
+const BlockInfo = @import("evm").BlockInfo;
+const TransactionContext = @import("evm").TransactionContext;
+const primitives = @import("voltaire");
+const Address = primitives.Address.Address;
+
+test "deploy runtime code and call it" {
+    const allocator = std.testing.allocator;
+
+    // Runtime code: PUSH1 0x2a, PUSH1 0x00, MSTORE, PUSH1 0x20, PUSH1 0x00, RETURN
+    // Returns the 32-byte big-endian encoding of 42.
+    const runtime_code = [_]u8{ 0x60, 0x2a, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3 };
+
+    var db = Database.init(allocator);
+    defer db.deinit();
+
+    const contract_address = Address{ .bytes = [_]u8{0xC0} ** 20 };
+    const code_hash = try db.set_code(&runtime_code);
+    try db.set_account(contract_address.bytes, .{
+        .balance = 0,
+        .nonce = 0,
+        .code_hash = code_hash,
+        .storage_root = [_]u8{0} ** 32,
+    });
+
+    const block_info = BlockInfo{
+        .chain_id = 1,
+        .number = 1,
+        .timestamp = 1_700_000_000,
+        .difficulty = 0,
+        .gas_limit = 30_000_000,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .base_fee = 0,
+        .prev_randao = [_]u8{0} ** 32,
+    };
+
+    const tx_context = TransactionContext{
+        .gas_limit = 1_000_000,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .chain_id = 1,
+    };
+
+    const MyEvm = Evm(.{});
+    var evm = try MyEvm.init(allocator, &db, block_info, tx_context, 0, primitives.ZERO_ADDRESS);
+    defer evm.deinit();
+
+    var result = evm.call(.{ .call = .{
+        .caller = primitives.ZERO_ADDRESS,
+        .to = contract_address,
+        .value = 0,
+        .input = &.{},
+        .gas = 100_000,
+    } });
+    defer result.deinit(allocator);
+
+    try std.testing.expect(result.success);
+    try std.testing.expectEqual(@as(usize, 32), result.output.len);
+    try std.testing.expectEqual(@as(u8, 42), result.output[31]);
+}
+```
+
+### Three details that will bite you
+
+These are not stylistic notes. Each one is a compile error or a leak if you get
+it wrong.
+
+**`Database` takes raw `[20]u8`, `CallParams` takes `Address`.** The storage
+layer is deliberately primitive-free, so you pass `contract_address.bytes` to
+`db.set_account` but `contract_address` to `.call`. `Address` is a struct with a
+single `bytes: [20]u8` field, so `Address{ .bytes = … }` is the constructor and
+`.bytes` is the way back out.
+
+**You own the `CallResult`.** `evm.call()` returns a result whose `output`,
+`logs`, and `accessed_addresses` are heap-allocated with *your* allocator.
+`defer result.deinit(allocator)` is mandatory; omit it and `std.testing.allocator`
+will fail the test with `memory leak detected`.
+
+**`evm.call()` does not return an error union for revert.** A revert is
+`result.success == false` with the revert data in `result.output` — not a Zig
+error. Errors are reserved for conditions that prevent execution from being
+attempted at all.
+
+## Handling reverts
+
+```zig
+test "revert is reported as failure, not a Zig error" {
+    const allocator = std.testing.allocator;
+
+    // PUSH1 0x00, PUSH1 0x00, REVERT
+    const runtime_code = [_]u8{ 0x60, 0x00, 0x60, 0x00, 0xfd };
+
+    var db = Database.init(allocator);
+    defer db.deinit();
+
+    const contract_address = Address{ .bytes = [_]u8{0xC1} ** 20 };
+    const code_hash = try db.set_code(&runtime_code);
+    try db.set_account(contract_address.bytes, .{
+        .balance = 0,
+        .nonce = 0,
+        .code_hash = code_hash,
+        .storage_root = [_]u8{0} ** 32,
+    });
+
+    const block_info = BlockInfo{
+        .chain_id = 1,
+        .number = 1,
+        .timestamp = 1_700_000_000,
+        .difficulty = 0,
+        .gas_limit = 30_000_000,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .base_fee = 0,
+        .prev_randao = [_]u8{0} ** 32,
+    };
+    const tx_context = TransactionContext{
+        .gas_limit = 1_000_000,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .chain_id = 1,
+    };
+
+    const MyEvm = Evm(.{});
+    var evm = try MyEvm.init(allocator, &db, block_info, tx_context, 0, primitives.ZERO_ADDRESS);
+    defer evm.deinit();
+
+    var result = evm.call(.{ .call = .{
+        .caller = primitives.ZERO_ADDRESS,
+        .to = contract_address,
+        .value = 0,
+        .input = &.{},
+        .gas = 100_000,
+    } });
+    defer result.deinit(allocator);
+
+    try std.testing.expect(!result.success);
+}
+```
+
+## Choosing a hardfork
+
+The hardfork is a comptime parameter, so a Berlin EVM and a Cancun EVM are
+different types:
+
+```zig
+test "hardfork is a comptime config knob" {
+    const allocator = std.testing.allocator;
+    const eips = @import("evm").Eips;
+
+    var db = Database.init(allocator);
+    defer db.deinit();
+
+    const block_info = BlockInfo{
+        .chain_id = 1,
+        .number = 1,
+        .timestamp = 1_700_000_000,
+        .difficulty = 0,
+        .gas_limit = 30_000_000,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .base_fee = 0,
+        .prev_randao = [_]u8{0} ** 32,
+    };
+    const tx_context = TransactionContext{
+        .gas_limit = 1_000_000,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .chain_id = 1,
+    };
+
+    const BerlinEvm = Evm(.{ .eips = eips{ .hardfork = .BERLIN } });
+    var evm = try BerlinEvm.init(allocator, &db, block_info, tx_context, 0, primitives.ZERO_ADDRESS);
+    defer evm.deinit();
+
+    try std.testing.expect(evm.depth == 0);
+}
+```
+
+## Inspecting bytecode without executing it
+
+`Bytecode(config)` is the analysis pass on its own. It is useful for tooling —
+jump-destination validation, statistics, pretty-printing a dispatch schedule:
+
+```zig
+test "bytecode analysis" {
+    const allocator = std.testing.allocator;
+    const Bytecode = @import("evm").Bytecode;
+
+    // PUSH1 0x01, PUSH1 0x02, ADD, STOP, JUMPDEST
+    const code = [_]u8{ 0x60, 0x01, 0x60, 0x02, 0x01, 0x00, 0x5b };
+
+    const Analyzed = Bytecode(.{});
+    var analyzed = try Analyzed.init(allocator, &code);
+    defer analyzed.deinit();
+
+    // Offset 6 is a JUMPDEST; offset 1 is PUSH1 data, never a valid target.
+    try std.testing.expect(analyzed.isValidJumpDest(6));
+    try std.testing.expect(!analyzed.isValidJumpDest(1));
+}
+```
+
+Note `Bytecode` is a *type constructor* — `Bytecode(.{})` — and `init` takes
+`(allocator, code)` with no config argument, because the config is already baked
+into the type.
+
+## Running it
+
+All four examples above were placed in `test/docs_examples_verify.zig`, imported
+from `test/root.zig`, and run:
+
+```
+$ zig build test-integration -Dtest-filter='docs example'
+
+ RUN  v0.15.1
+ ›~/guillotine
+
+ ✓ differential.debug_math_only (1) 946.00 μs
+ ✓ docs_examples_verify (4) 51.28 ms
+ ✓ evm.erc20_deployment_issue (1) 1.02 ms
+ ✓ evm.opcodes.14_test (1) 1.04 ms
+ ✓ evm.opcodes.all_opcodes (1) 994.00 μs
+ ✓ fixtures (1) 1.02 ms
+ ✓ root (1) 1.25 ms
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+ Test Files  1 passed (10)
+      Tests  10 passed (10)
+  Start at  15:27:32
+   Duration  58.74 ms
+```
+
+The verification file itself is not committed — it exists to prove these snippets
+compile and pass, not to add a permanent test. Copy them into your own project.
+
+## Next
+
+- [Concepts: Architecture](/concepts/architecture) — how the pieces fit
+- [Guides: Configuring the EVM](/guides/configuration) — every comptime knob
+- [Guides: Tracing and debugging](/guides/tracing) — the differential tracer
+- [Reference: `Evm`](/reference/evm) — the full public surface
