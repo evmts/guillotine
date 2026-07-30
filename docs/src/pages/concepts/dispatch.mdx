@@ -1,0 +1,178 @@
+---
+title: Dispatch
+description: Why Guillotine has no interpreter loop, and what the cursor actually points at.
+---
+
+# Dispatch
+
+Guillotine does not interpret bytecode. It compiles bytecode into a **dispatch
+schedule** and then executes the schedule as a chain of tail calls.
+
+If you read only one concept page before touching `src/frame/`, read this one.
+Almost every confusing bug report about Guillotine comes from assuming the frame
+has a program counter.
+
+## The traditional shape
+
+A conventional interpreter — including Guillotine's own `MinimalEvm` reference —
+looks like this:
+
+```zig
+while (self.pc < self.bytecode.len) {
+    const opcode = self.bytecode[self.pc];
+    switch (opcode) {
+        0x01 => { // ADD
+            const b = self.popStack();
+            const a = self.popStack();
+            self.pushStack(a +% b);
+            self.pc += 1;
+        },
+        // ... 255 more cases
+    }
+}
+```
+
+Every instruction pays for: an unpredictable 256-way indirect branch, a bytecode
+memory read, a bounds check, a gas check, and stack-depth validation.
+
+## The dispatch shape
+
+```zig
+// src/frame/frame.zig
+pub const OpcodeHandler = *const fn (frame: *Self, cursor: [*]const Item) Error!noreturn;
+```
+
+Note the return type: `Error!noreturn`. A handler never returns. It tail-calls the
+next handler, so the whole execution of a contract is one stack frame deep.
+
+```zig
+pub fn add(self: *Self, cursor: [*]const Dispatch.Item) Error!noreturn {
+    self.beforeInstruction(.ADD, cursor);
+    self.getTracer().assert(self.stack.size() >= 2, "ADD requires 2 stack items");
+
+    const b = self.stack.pop_unsafe();   // top of stack
+    const a = self.stack.peek_unsafe();  // second item
+    self.stack.set_top_unsafe(a +% b);
+
+    const op_data = dispatch.getOpData(.ADD);
+    self.afterInstruction(.ADD, op_data.next_handler, op_data.next_cursor.cursor);
+    return @call(Self.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+}
+```
+
+## The schedule
+
+A schedule is a flat array of `Item`, a tagged union of either a handler pointer
+or metadata for the handler that precedes it:
+
+```zig
+// src/preprocessor/dispatch.zig
+pub const Item = union(enum) {
+    opcode_handler: OpcodeHandler,
+    jump_dest: Metadata.JumpDestMetadata,
+    push_inline: Metadata.PushInlineMetadata,
+    push_pointer: Metadata.PushPointerMetadata,
+    pc: Metadata.PcMetadata,
+    jump_static: Metadata.JumpStaticMetadata,
+    first_block_gas: Metadata.FirstBlockMetadata,
+};
+```
+
+For the bytecode `PUSH1 0x01, PUSH1 0x02, ADD, STOP`:
+
+```
+Bytecode:  [0x60, 0x01, 0x60, 0x02, 0x01, 0x00]
+PC:           0     1     2     3     4     5
+
+Schedule:
+Index  Item                Payload
+─────  ──────────────────  ─────────────────────────────────────────
+[0]    first_block_gas     { gas: 9, min_stack: 0, max_stack: 2 }
+[1]    opcode_handler      → push1 handler
+[2]    push_inline         { value: 1 }
+[3]    opcode_handler      → push1 handler
+[4]    push_inline         { value: 2 }
+[5]    opcode_handler      → add handler
+[6]    opcode_handler      → stop handler
+```
+
+### Inline vs pointer pushes
+
+A `PUSH` of 8 bytes or fewer whose value fits in a `u64` is stored **inline** in
+the schedule as `push_inline`. Anything larger is written into the schedule's
+arena and referenced by `push_pointer`. Either way the push handler never reads
+the original bytecode:
+
+```zig
+if (data.size <= 8 and data.value <= std.math.maxInt(u64)) {
+    const inline_value: u64 = @intCast(data.value);
+    try schedule_items.append(schedule_allocator, .{ .push_inline = .{ .value = inline_value } });
+} else {
+    const value_ptr = try arena_allocator.create(FrameType.WordType);
+    value_ptr.* = data.value;
+    try schedule_items.append(schedule_allocator, .{ .push_pointer = .{ .value_ptr = value_ptr } });
+}
+```
+
+## Cursor ≠ PC
+
+**The cursor is an index into the schedule. It is not a program counter.**
+
+```
+Bytecode PC:      0   1   2   3   4   5
+Schedule index:   0   1   2   3   4   5   6
+                  ▲
+                  └── metadata, corresponds to no opcode at all
+```
+
+Consequences you must internalise:
+
+1. `schedule[0]` is usually `first_block_gas`, so the first *instruction* is at
+   index 1.
+2. A single synthetic item can stand for several bytecode operations, so schedule
+   indices drift further from PCs as you go.
+3. Jump targets stored in `jump_static` are **schedule indices**, resolved at
+   analysis time — a static `JUMP` costs no lookup at runtime.
+4. `PC` is still implementable because analysis stores the true bytecode offset in
+   a `pc` metadata item for exactly the opcodes that need it.
+
+## Gas is batched per basic block
+
+Analysis splits code at every `JUMPDEST` and every terminating or branching
+instruction. Each block gets a `FirstBlockMetadata` / `JumpDestMetadata` header
+carrying the block's total static gas cost and its stack-height requirements.
+
+The interpreter charges the whole block's gas and validates stack height **once,
+on entry to the block**. Inside the block, handlers use `_unsafe` stack
+operations and do no gas arithmetic at all, except for genuinely dynamic costs
+(memory expansion, `SSTORE` refunds, call gas forwarding, `EXP` exponent bytes,
+copy costs).
+
+This is the single biggest reason handlers look so short.
+
+## Static jump resolution
+
+```
+JUMP where the destination came from a PUSH the analyser can see
+    → resolved to a schedule index at analysis time (jump_static)
+    → runtime cost: set cursor, tail call
+
+JUMP where the destination is computed at runtime
+    → runtime lookup in the jump table, validated against the JUMPDEST bitmap
+```
+
+## Schedule caching
+
+Schedules are cached per contract in the EVM's dispatch cache, so a contract
+called repeatedly in a transaction (or across transactions on the same `Evm`) is
+analysed once. Analysis is the expensive part; execution is cheap.
+
+## What this means for you
+
+- **Writing a handler?** It must call `self.beforeInstruction(opcode, cursor)`
+  first, or the differential tracer desynchronises and tests fail with confusing
+  state mismatches. See [Tracing](/guides/tracing).
+- **Debugging?** Print the schedule, not the bytecode:
+  `bytecode.pretty_print(allocator)`.
+- **Benchmarking?** Make sure the schedule is warm. A cold first call includes
+  analysis.

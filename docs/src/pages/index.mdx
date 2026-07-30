@@ -1,0 +1,106 @@
+---
+title: Guillotine
+description: An ultrafast, deeply configurable Ethereum Virtual Machine written in Zig.
+---
+
+# Guillotine
+
+Guillotine is an Ethereum Virtual Machine written in Zig. It exists to make EVM
+execution **fast**, **configurable at compile time**, and **portable to every
+language and platform** — from a server process to a browser WASM bundle to an
+iOS app.
+
+:::warning[Alpha software]
+Guillotine is early alpha and is **not suitable for production use**. The
+Ethereum execution-spec suite does not fully pass yet. See
+[Project status](/status) for the real numbers, measured from this repository
+rather than aspirational ones.
+:::
+
+## Why another EVM?
+
+Most EVMs are one implementation with runtime configuration. Guillotine takes a
+different bet: the EVM is a **generic type parameterised by a comptime config
+struct**, so the machine you get is specialised to exactly the semantics you
+asked for, with the branches you don't need compiled away.
+
+```zig
+const Evm = @import("evm").Evm;
+
+// A Cancun EVM with gas metering, fusion, and precompiles — the defaults.
+const Mainnet = Evm(.{});
+
+// A Berlin EVM with gas checks disabled, for a fuzzer that only cares about
+// stack/memory semantics. The gas accounting code is not in the binary.
+const eips = @import("evm").Eips;
+const Fuzzing = Evm(.{
+    .eips = eips{ .hardfork = .BERLIN },
+    .disable_gas_checks = true,
+});
+```
+
+That single design decision drives most of what is distinctive about the
+codebase:
+
+- **Dispatch-based execution, not a switch loop.** Bytecode is analysed once
+  into a *dispatch schedule* of function pointers plus inline metadata, then
+  executed by tail calls. There is no `switch (opcode)` on the hot path and no
+  program counter in the frame — see [Dispatch](/concepts/dispatch).
+- **Gas batched per basic block.** Analysis computes the static gas cost of a
+  whole basic block, so the interpreter charges once per block instead of once
+  per instruction.
+- **Opcode fusion.** Common adjacent sequences (`PUSH1 n; MSTORE`, a Solidity
+  function-selector comparison, …) collapse into a single synthetic handler. See
+  [Synthetic opcodes](/concepts/synthetic-opcodes).
+- **A differential tracer built in.** Every handler can be validated in
+  lock-step against `MinimalEvm`, a plain, readable, switch-loop reference
+  interpreter that lives in the same repository. See [Tracing and
+  debugging](/guides/tracing).
+
+## Two EVMs, one repository
+
+| | Performance EVM (`src/`) | Mini EVM (`mini/`, `src/tracer/minimal_evm.zig`) |
+| --- | --- | --- |
+| Execution model | Dispatch schedule + tail calls | Sequential `switch` over bytecode |
+| Optimised for | Throughput | Readability and correctness |
+| Role | The product | Reference oracle for differential tests |
+| Size | Whole `src/` tree | One self-contained file |
+
+They are not competitors. `MinimalEvm` is the thing that lets you *trust* the
+fast one: the tracer steps both machines forward together and asserts they agree
+on stack, memory, gas, and storage after every instruction.
+
+## Where to go next
+
+:::steps
+
+### Install the toolchain
+
+[Installation](/installation) lists the actual verified prerequisites — Zig
+0.15.x, a Rust toolchain for the vendored crypto wrappers, and a C compiler.
+
+### Run your first execution
+
+[Getting started](/getting-started) walks through deploying runtime bytecode
+into an in-memory database and calling it, with a complete program you can copy
+verbatim.
+
+### Understand the machine
+
+[Architecture](/concepts/architecture) and [Dispatch](/concepts/dispatch)
+explain the execution model, which you will need if you plan to read or modify
+handlers.
+
+### Consume it from another language
+
+[Language bindings](/guides/bindings) covers the FFI surface and the state of
+each SDK, honestly labelled.
+
+:::
+
+## Relationship to the rest of the stack
+
+Guillotine is the execution engine at the bottom of the Tevm stack. If you are
+trying to work out whether you want this repository, Tevm, ZEVM, Voltaire, or
+guillotine-mini, read [The stack](/stack) first — it is a two-minute page that
+will save you an afternoon.

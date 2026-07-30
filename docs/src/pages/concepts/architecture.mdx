@@ -1,0 +1,170 @@
+---
+title: Architecture
+description: How Guillotine is put together, and which file to open when.
+---
+
+# Architecture
+
+Guillotine is two EVMs and a tracer that keeps them honest.
+
+```
+                    ┌──────────────────────────────┐
+                    │  Evm(config)   src/evm.zig   │
+                    │  call / create / journal     │
+                    └──────────────┬───────────────┘
+                                   │ per call frame
+                    ┌──────────────▼───────────────┐
+   bytecode ───────▶│  Bytecode(config)            │  analysis
+                    │  src/bytecode/               │
+                    └──────────────┬───────────────┘
+                                   │ dispatch schedule
+                    ┌──────────────▼───────────────┐
+                    │  Frame(config)               │  execution
+                    │  src/frame/                  │
+                    │  tail-call handler chain     │
+                    └──────────────┬───────────────┘
+                                   │ beforeInstruction()
+                    ┌──────────────▼───────────────┐
+                    │  Tracer  src/tracer/         │
+                    │  steps MinimalEvm in lockstep│
+                    └──────────────────────────────┘
+```
+
+## The comptime-config pattern
+
+Nearly every major type in the tree is a function from a config struct to a type:
+
+```zig
+const Evm = @import("evm").Evm;               // fn (EvmConfig) type
+const Frame = @import("evm").Frame;           // fn (FrameConfig) type
+const Bytecode = @import("evm").Bytecode;     // fn (BytecodeConfig) type
+const Stack = @import("evm").Stack;           // fn (StackConfig) type
+const Memory = @import("evm").Memory;         // fn (MemoryConfig) type
+
+const Cancun = Evm(.{});
+```
+
+This is the load-bearing idea. Because the hardfork, the stack size, the word
+type, gas-check on/off, fusion on/off, and the precompile set are all comptime
+values, the compiler specialises every handler and deletes the code paths your
+configuration does not use. There is no runtime `if (hardfork >= .LONDON)` in the
+hot loop.
+
+`src/root.zig` pre-instantiates a few useful ones so FFI callers have concrete
+types to hold:
+
+| Alias | What it is |
+| --- | --- |
+| `MainnetEvm` | `Evm(.{})` — Cancun, gas on, fusion on, tracer off |
+| `MainnetEvmWithTracer` | Cancun with validation, step capture, PC and gas tracking |
+| `TestEvm` | Cancun with tracing on and `disable_gas_checks = true` |
+| `BuildConfiguredEvm` / `DefaultEvm` | Whatever `-Devm-*` build flags selected |
+
+## Layers
+
+### `Evm` — the transaction machine (`src/evm.zig`)
+
+Owns everything that outlives a single frame: the `Database`, the journal, the
+access list (EIP-2929/2930), the log buffer, the self-destruct set, created
+contracts, the call stack, and the arena used for per-call scratch memory.
+
+`call(params)` is the top-level entry point and asserts `depth == 0`.
+`inner_call(params)` is the re-entrant version that handlers use for `CALL`,
+`DELEGATECALL`, `STATICCALL`, `CALLCODE`, `CREATE`, and `CREATE2`.
+
+### `Bytecode` — the analysis pass (`src/bytecode/`)
+
+Runs once per contract, then the result is cached. It validates the code,
+computes the jump-destination bitmap, splits the code into basic blocks with
+their static gas cost and stack-height requirements, detects fusable opcode
+sequences, and emits the dispatch schedule.
+
+### `Frame` — the interpreter (`src/frame/`)
+
+Executes a schedule, not bytecode. It holds the stack, the memory, the gas
+counter, and a cursor into the schedule. There is **no program counter** in the
+frame. Handlers live in `handlers_*.zig`, grouped by category:
+
+| File | Opcodes |
+| --- | --- |
+| `handlers_arithmetic.zig` | `ADD` `MUL` `SUB` `DIV` `SDIV` `MOD` `EXP` `SIGNEXTEND` … |
+| `handlers_bitwise.zig` | `AND` `OR` `XOR` `NOT` `BYTE` `SHL` `SHR` `SAR` |
+| `handlers_comparison.zig` | `LT` `GT` `SLT` `SGT` `EQ` `ISZERO` |
+| `handlers_memory.zig` | `MLOAD` `MSTORE` `MSTORE8` `MSIZE` `MCOPY` |
+| `handlers_storage.zig` | `SLOAD` `SSTORE` `TLOAD` `TSTORE` |
+| `handlers_jump.zig` | `JUMP` `JUMPI` `JUMPDEST` `PC` |
+| `handlers_system.zig` | `CALL` `CREATE` `RETURN` `REVERT` `SELFDESTRUCT` … |
+| `handlers_context.zig` | `ADDRESS` `CALLER` `NUMBER` `TIMESTAMP` `CHAINID` … |
+| `handlers_keccak.zig` | `KECCAK256` |
+| `handlers_log.zig` | `LOG0`–`LOG4` |
+| `handlers_stack.zig` | `PUSH*` `POP` `DUP*` `SWAP*` |
+| `handlers_*_synthetic.zig` | Fused sequences |
+
+### `MinimalEvm` — the reference (`src/tracer/minimal_evm.zig`)
+
+A single-file, sequential `switch`-loop interpreter. No dispatch schedule, no
+fusion, no tail calls. Its job is to be obviously correct and readable so it can
+serve as the oracle in differential tests, and small enough to ship as a
+standalone WASM bundle (`zig build wasm-minimal-evm`).
+
+## State
+
+`Database` (`src/storage/database.zig`) is the state interface: accounts, code
+keyed by keccak hash, and storage slots. `MemoryDatabase` is the in-memory
+implementation used by tests. Overlays and a transaction cache sit in front of
+the base store so snapshots and reverts are cheap.
+
+Around it:
+
+- `journal.zig` — the undo log. Snapshot ids, revert-to-snapshot.
+- `access_list.zig` — warm/cold tracking for EIP-2929 gas.
+- `created_contracts.zig` — EIP-6780 `SELFDESTRUCT` semantics.
+- `self_destruct.zig` — pending destructions for the end of the transaction.
+
+See [State and journaling](/guides/state).
+
+## `_unsafe` is a contract, not a bug
+
+You will see paired APIs throughout:
+
+```zig
+// Checks, returns an error.
+pub fn push(self: *Self, value: WordType) Error!void {
+    if (overflow_condition) return Error.StackOverflow;
+    self.push_unsafe(value);
+}
+
+// No check. The caller has already proven this is safe.
+pub fn push_unsafe(self: *Self, value: WordType) void {
+    self.stack_ptr -= 1;
+    self.stack_ptr[0] = value;
+}
+```
+
+Handlers call the `_unsafe` variants because bytecode analysis already proved the
+stack-height requirements for the whole basic block before the block started
+executing. The `tracer.assert()` calls inside them are development aids that
+compile to nothing when the tracer is disabled. Missing bounds checks in an
+`_unsafe` function are the design, not a defect.
+
+## Safety limits
+
+- **300M instruction cap.** `SafetyCounter` bounds total instructions executed so
+  a malicious loop terminates.
+- **`loop_quota`.** In Debug and ReleaseSafe builds, analysis loops carry a
+  1,000,000-iteration quota; `null` (off) in optimised builds.
+- **Depth 1024.** `max_call_depth` defaults to 1024, matching the EVM spec.
+- **Memory limit.** `memory_limit` defaults to `0xFFFFFF` (16 MiB) per frame.
+
+## Further reading in the repository
+
+The pre-existing developer notes remain the deepest source and go further than
+these pages in places:
+
+- `docs/dev/ARCHITECTURE.md`
+- `docs/dev/EXECUTION-MODELS.md`
+- `docs/dev/GAS-METERING.md`
+- `docs/dev/STATE-MANAGEMENT.md`
+- `docs/performance/DISPATCH.md`
+- `docs/performance/SYNTHETIC-OPCODES.md`
+- `docs/performance/TRACER.md`

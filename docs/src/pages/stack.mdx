@@ -1,0 +1,96 @@
+---
+title: The stack
+description: How Guillotine relates to Tevm, ZEVM, guillotine-mini, and Voltaire.
+---
+
+# Where Guillotine sits
+
+The Tevm family is several projects that are easy to confuse because they all
+execute EVM bytecode. This page is the map.
+
+```
+┌──────────────────────────────────────────────────────────┐
+│  Tevm            TypeScript node, in-browser & in-Node   │  app-facing
+│  tevm.sh         viem-compatible, bundler, CLI, tests    │
+└────────────────────────┬─────────────────────────────────┘
+                         │ executes with
+┌────────────────────────▼─────────────────────────────────┐
+│  Guillotine      the performance EVM, Zig                │  engine
+│  guillotine.tevm.sh   dispatch schedule, fusion, FFI     │
+├──────────────────────────────────────────────────────────┤
+│  guillotine-mini  the reference EVM, Zig                 │  oracle
+│  mini.tevm.sh    readable switch loop, small WASM        │
+├──────────────────────────────────────────────────────────┤
+│  ZEVM            Zig EVM experiments / alt engine        │
+│  zevm.tevm.sh                                            │
+└────────────────────────┬─────────────────────────────────┘
+                         │ built on
+┌────────────────────────▼─────────────────────────────────┐
+│  Voltaire        Ethereum primitives for Zig             │  foundation
+│  voltaire.tevm.sh  Address, U256, RLP, ABI, crypto,      │
+│                    precompiles, KZG                      │
+└──────────────────────────────────────────────────────────┘
+```
+
+## One paragraph each
+
+**Tevm** is the TypeScript Ethereum node that runs in a browser or in Node. It is
+what an application developer normally reaches for: viem-compatible clients,
+Solidity imports via the bundler, forking, and test tooling. Tevm is a *consumer*
+of an EVM engine.
+
+**Guillotine** — this repository — is the performance engine. Zig, comptime
+configuration, dispatch-schedule execution, opcode fusion, and a C ABI so any
+language can drive it. You want Guillotine when you are embedding an EVM and
+throughput or binary size matters.
+
+**guillotine-mini** is the readable EVM. In this repository it lives at `mini/`
+and as `src/tracer/minimal_evm.zig`; it is also published as its own project. It
+is a plain sequential interpreter with no schedule, no fusion, and no tail calls.
+Two jobs: be the oracle that differential tests compare Guillotine against, and
+be small enough to ship as a standalone WASM bundle
+(`zig build wasm-minimal-evm`). If you want to *read* an EVM, read this one.
+
+**ZEVM** is the sibling Zig EVM effort. Where Guillotine optimises for raw
+execution throughput of a specialised, comptime-configured machine, ZEVM explores
+a different set of tradeoffs. If you found this page because you cannot tell them
+apart: for embedding a fast, configurable EVM today, this repository is the one
+with the FFI surface and the differential test harness.
+
+**Voltaire** is the primitives library everything else stands on: `Address`,
+`Hash`, `U256`, RLP, ABI encoding, keccak, secp256k1, BN254, BLS12-381, KZG, and
+the precompile implementations. It is vendored here at `lib/voltaire` and imported
+as the `voltaire` module. When you write `@import("voltaire")` in Guillotine
+code, that is Voltaire.
+
+## Choosing
+
+| I want to… | Use |
+| --- | --- |
+| Run a testnet node or fork mainnet in TypeScript | **Tevm** |
+| Embed a fast EVM in a Zig, Go, Rust, or Swift program | **Guillotine** |
+| Ship the smallest possible EVM to a browser | **guillotine-mini** (WASM) |
+| Read and understand EVM semantics from source | **guillotine-mini** |
+| Know why my fast EVM disagrees with the spec | **Guillotine's tracer**, which runs mini in lockstep |
+| Use Ethereum types, RLP, ABI, or crypto in Zig | **Voltaire** |
+| Follow the alternative Zig EVM design | **ZEVM** |
+
+## Why two EVMs in one repository is the point
+
+Fast interpreters are hard to trust. Guillotine's answer is not "write careful
+code" — it is structural: keep a second, deliberately naive implementation in the
+tree and assert after **every instruction** that the two agree on stack, memory,
+gas, and storage.
+
+That is why `mini/` is not dead weight and why `beforeInstruction()` is mandatory
+in every handler. The optimisations (fusion, block-batched gas, static jump
+resolution, tail calls) are only safe to make because a reference machine is
+watching. See [Tracing and debugging](/guides/tracing).
+
+## Documentation for the family
+
+- Tevm — [tevm.sh](https://tevm.sh)
+- Guillotine — [guillotine.tevm.sh](https://guillotine.tevm.sh)
+- guillotine-mini — [mini.tevm.sh](https://mini.tevm.sh)
+- ZEVM — [zevm.tevm.sh](https://zevm.tevm.sh)
+- Voltaire — [voltaire.tevm.sh](https://voltaire.tevm.sh)
