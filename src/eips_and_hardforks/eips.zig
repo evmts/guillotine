@@ -1,5 +1,6 @@
 const primitives = @import("voltaire");
 const AccessList = @import("../storage/access_list.zig").AccessList;
+const GasConstants = primitives.GasConstants;
 pub const Hardfork = primitives.Hardfork;
 
 /// EIP Override entry - allows enabling/disabling specific EIPs
@@ -210,8 +211,8 @@ pub const Eips = struct {
             .MERGE => &[_]u16{ 2, 7, 8, 150, 155, 160, 161, 100, 140, 196, 197, 198, 211, 214, 649, 658, 145, 1014, 1052, 1283, 152, 1108, 1344, 1884, 2028, 2200, 2565, 2718, 2929, 2930, 1559, 3198, 3529, 3541, 4345, 5133, 3675, 4399 },
             .SHANGHAI => &[_]u16{ 2, 7, 8, 150, 155, 160, 161, 100, 140, 196, 197, 198, 211, 214, 649, 658, 145, 1014, 1052, 1283, 152, 1108, 1344, 1884, 2028, 2200, 2565, 2718, 2929, 2930, 1559, 3198, 3529, 3541, 4345, 5133, 3675, 4399, 3651, 3855, 3860, 4895 },
             .CANCUN => &[_]u16{ 2, 7, 8, 150, 155, 160, 161, 100, 140, 196, 197, 198, 211, 214, 649, 658, 145, 1014, 1052, 1283, 152, 1108, 1344, 1884, 2028, 2200, 2565, 2718, 2929, 2930, 1559, 3198, 3529, 3541, 4345, 5133, 3675, 4399, 3651, 3855, 3860, 4895, 1153, 4788, 4844, 5656, 6780, 7516 },
-            .PRAGUE => &[_]u16{ 2, 7, 8, 150, 155, 160, 161, 100, 140, 196, 197, 198, 211, 214, 649, 658, 145, 1014, 1052, 1283, 152, 1108, 1344, 1884, 2028, 2200, 2565, 2718, 2929, 2930, 1559, 3198, 3529, 3541, 4345, 5133, 3675, 4399, 3651, 3855, 3860, 4895, 1153, 4788, 4844, 5656, 6780, 7516, 2537, 2935, 3074, 6110, 7002, 7702 },
-            .OSAKA => &[_]u16{ 2, 7, 8, 150, 155, 160, 161, 100, 140, 196, 197, 198, 211, 214, 649, 658, 145, 1014, 1052, 1283, 152, 1108, 1344, 1884, 2028, 2200, 2565, 2718, 2929, 2930, 1559, 3198, 3529, 3541, 4345, 5133, 3675, 4399, 3651, 3855, 3860, 4895, 1153, 4788, 4844, 5656, 6780, 7516, 2537, 2935, 6110, 7002, 7702, 7883, 7823, 7825, 7934 },
+            .PRAGUE => &[_]u16{ 2, 7, 8, 150, 155, 160, 161, 100, 140, 196, 197, 198, 211, 214, 649, 658, 145, 1014, 1052, 1283, 152, 1108, 1344, 1884, 2028, 2200, 2565, 2718, 2929, 2930, 1559, 3198, 3529, 3541, 4345, 5133, 3675, 4399, 3651, 3855, 3860, 4895, 1153, 4788, 4844, 5656, 6780, 7516, 2537, 2935, 3074, 6110, 7002, 7623, 7702 },
+            .OSAKA => &[_]u16{ 2, 7, 8, 150, 155, 160, 161, 100, 140, 196, 197, 198, 211, 214, 649, 658, 145, 1014, 1052, 1283, 152, 1108, 1344, 1884, 2028, 2200, 2565, 2718, 2929, 2930, 1559, 3198, 3529, 3541, 4345, 5133, 3675, 4399, 3651, 3855, 3860, 4895, 1153, 4788, 4844, 5656, 6780, 7516, 2537, 2935, 6110, 7002, 7623, 7702, 7883, 7823, 7825, 7934 },
         };
     }
 
@@ -227,7 +228,6 @@ pub const Eips = struct {
         for (active_eips) |active_eip| if (active_eip == eip) return true;
         return false;
     }
-
 
     /// EIP-170: Get maximum contract code size based on hardfork
     pub fn eip_170_max_code_size(self: Self) u32 {
@@ -259,9 +259,15 @@ pub const Eips = struct {
 
     /// EIP-2028: Get calldata gas costs (reduced non-zero byte cost)
     pub fn eip_2028_calldata_gas_cost(self: Self, is_zero: bool) u64 {
-        if (is_zero) return 4;
-        if (!self.is_eip_active(2028)) return 68;
-        return 16; // Post-Istanbul
+        if (is_zero) return GasConstants.TxDataZeroGas;
+        if (!self.is_eip_active(2028)) return GasConstants.TxDataNonZeroGasPreIstanbul;
+        return GasConstants.TxDataNonZeroGas;
+    }
+
+    /// EIP-2028: Get calldata gas cost multiplier for non-zero bytes
+    pub fn eip_2028_calldata_gas_cost_multiplier(self: Self) u64 {
+        if (!self.is_eip_active(2028)) return GasConstants.TxDataNonZeroGasMultiplierPreIstanbul;
+        return GasConstants.TxDataNonZeroGasMultiplier;
     }
 
     /// EIP-1153: Check if transient storage is available
@@ -482,6 +488,50 @@ pub const Eips = struct {
         const gas_used = initial_gas - gas_left;
         const capped_refund = self.eip_3529_gas_refund_cap(gas_used, gas_refund_counter);
         return @min(initial_gas, gas_left + capped_refund);
+    }
+
+    /// Count calldata tokens using the byte prices active for this hardfork.
+    pub fn tokens_in_calldata(self: Self, input: []const u8) u64 {
+        const zero_bytes_count = std.mem.count(u8, input, "\x00");
+        const non_zero_bytes_count = input.len - zero_bytes_count;
+        return @as(u64, @intCast(zero_bytes_count)) + @as(u64, @intCast(non_zero_bytes_count)) * self.eip_2028_calldata_gas_cost_multiplier();
+    }
+
+    /// EIP-3860: Get initcode word cost.
+    pub fn eip_3860_initcode_word_cost(self: Self, input_len: usize) u64 {
+        if (!self.is_eip_active(3860)) return 0;
+        return GasConstants.wordCount(input_len) * GasConstants.InitcodeWordGas;
+    }
+
+    /// Get intrinsic gas cost for a transaction depending on whether it creates a contract.
+    pub fn intrinsic_gas_cost(_: Self, is_create: bool) u64 {
+        return if (is_create) GasConstants.TxGasContractCreation else GasConstants.TxGas;
+    }
+
+    /// Get calldata gas cost, including EIP-3860 initcode word metering for creation transactions.
+    pub fn calldata_gas_cost(self: Self, calldata_tokens: u64, is_create: bool, input_len: usize) u64 {
+        const initcode_cost = if (is_create) self.eip_3860_initcode_word_cost(input_len) else 0;
+        return calldata_tokens * GasConstants.TxDataZeroGas + initcode_cost;
+    }
+
+    /// Get the EIP-7623 floor gas a transaction is forced to consume.
+    pub fn floor_gas_cost(self: Self, calldata_tokens: u64) u64 {
+        if (!self.is_eip_active(7623)) return 0;
+        return GasConstants.TxGas + calldata_tokens * GasConstants.TxDataFloorTokenGas;
+    }
+
+    /// Calculate the effective gas price and miner tip for a transaction.
+    pub fn effective_gas_price(self: Self, base_fee_per_gas: u256, max_fee_per_gas: u256, max_priority_fee_per_gas: u256) struct { effective_gas_price: u256, miner_fee: u256 } {
+        if (!self.is_eip_active(1559)) {
+            return .{ .effective_gas_price = max_fee_per_gas, .miner_fee = max_fee_per_gas };
+        }
+
+        if (max_fee_per_gas < base_fee_per_gas) {
+            return .{ .effective_gas_price = max_fee_per_gas, .miner_fee = 0 };
+        }
+
+        const max_priority_fee = @min(max_priority_fee_per_gas, max_fee_per_gas - base_fee_per_gas);
+        return .{ .effective_gas_price = base_fee_per_gas + max_priority_fee, .miner_fee = max_priority_fee };
     }
 };
 
@@ -832,7 +882,6 @@ test "initcode_size_boundaries" {
     // Test that the limit doubled
     try std.testing.expectEqual(pre_shanghai.size_limit() * 2, post_shanghai.size_limit());
 }
-
 
 test "specific eip helper functions" {
     const frontier = Eips{ .hardfork = Hardfork.FRONTIER };
@@ -1285,4 +1334,217 @@ test "EIP overrides - no overrides" {
     try std.testing.expectEqual(cancun_default.is_eip_active(4844), cancun_no_overrides.is_eip_active(4844));
     try std.testing.expectEqual(cancun_default.eip_1559_is_enabled(), cancun_no_overrides.eip_1559_is_enabled());
     try std.testing.expectEqual(cancun_default.eip_3855_push0_enabled(), cancun_no_overrides.eip_3855_push0_enabled());
+}
+
+test "eip_2028_calldata_gas_cost pre and post Istanbul" {
+    const pre_istanbul = Eips{
+        .hardfork = .BERLIN,
+        .overrides = &.{.{ .eip = 2028, .enabled = false }},
+    };
+    const istanbul = Eips{ .hardfork = .ISTANBUL };
+
+    try std.testing.expectEqual(@as(u64, 4), pre_istanbul.eip_2028_calldata_gas_cost(true));
+    try std.testing.expectEqual(@as(u64, 68), pre_istanbul.eip_2028_calldata_gas_cost(false));
+    try std.testing.expectEqual(@as(u64, 16), istanbul.eip_2028_calldata_gas_cost(false));
+}
+
+test "eip_2028_calldata_gas_cost_multiplier" {
+    const pre_istanbul = Eips{
+        .hardfork = .BERLIN,
+        .overrides = &.{.{ .eip = 2028, .enabled = false }},
+    };
+
+    try std.testing.expectEqual(@as(u64, 17), pre_istanbul.eip_2028_calldata_gas_cost_multiplier());
+    try std.testing.expectEqual(@as(u64, 4), (Eips{ .hardfork = .ISTANBUL }).eip_2028_calldata_gas_cost_multiplier());
+    try std.testing.expectEqual(@as(u64, 4), (Eips{ .hardfork = .LONDON }).eip_2028_calldata_gas_cost_multiplier());
+    try std.testing.expectEqual(@as(u64, 4), (Eips{ .hardfork = .CANCUN }).eip_2028_calldata_gas_cost_multiplier());
+}
+
+test "tokens_in_calldata - empty" {
+    try std.testing.expectEqual(@as(u64, 0), (Eips{ .hardfork = .ISTANBUL }).tokens_in_calldata(&.{}));
+}
+
+test "tokens_in_calldata - all zeros" {
+    try std.testing.expectEqual(@as(u64, 10), (Eips{ .hardfork = .ISTANBUL }).tokens_in_calldata(&([_]u8{0x00} ** 10)));
+}
+
+test "tokens_in_calldata - all non-zeros" {
+    try std.testing.expectEqual(@as(u64, 40), (Eips{ .hardfork = .ISTANBUL }).tokens_in_calldata(&([_]u8{0xff} ** 10)));
+}
+
+test "tokens_in_calldata - mixed data" {
+    const input = [_]u8{ 0x00, 0xff, 0x00, 0x12, 0x00, 0x00, 0xab, 0xcd, 0x00, 0xef };
+    try std.testing.expectEqual(@as(u64, 25), (Eips{ .hardfork = .ISTANBUL }).tokens_in_calldata(&input));
+}
+
+test "tokens_in_calldata - pre vs post Istanbul" {
+    const pre_istanbul = Eips{
+        .hardfork = .BERLIN,
+        .overrides = &.{.{ .eip = 2028, .enabled = false }},
+    };
+    const input = [_]u8{ 0x00, 0x00, 0xff, 0xff, 0xff };
+
+    try std.testing.expectEqual(@as(u64, 53), pre_istanbul.tokens_in_calldata(&input));
+    try std.testing.expectEqual(@as(u64, 14), (Eips{ .hardfork = .ISTANBUL }).tokens_in_calldata(&input));
+}
+
+test "eip_3860_initcode_word_cost - pre-Shanghai" {
+    const london = Eips{ .hardfork = .LONDON };
+    for ([_]usize{ 0, 1, 32, 1000 }) |size| {
+        try std.testing.expectEqual(@as(u64, 0), london.eip_3860_initcode_word_cost(size));
+    }
+}
+
+test "eip_3860_initcode_word_cost - post-Shanghai" {
+    const shanghai = Eips{ .hardfork = .SHANGHAI };
+    const sizes = [_]usize{ 0, 1, 31, 32, 33, 64, 1024 };
+    const costs = [_]u64{ 0, 2, 2, 2, 4, 4, 64 };
+    for (sizes, costs) |size, cost| {
+        try std.testing.expectEqual(cost, shanghai.eip_3860_initcode_word_cost(size));
+    }
+}
+
+test "intrinsic_gas_cost" {
+    const cancun = Eips{ .hardfork = .CANCUN };
+    try std.testing.expectEqual(@as(u64, 21000), cancun.intrinsic_gas_cost(false));
+    try std.testing.expectEqual(@as(u64, 53000), cancun.intrinsic_gas_cost(true));
+}
+
+test "calldata_gas_cost - call with empty data" {
+    try std.testing.expectEqual(@as(u64, 0), (Eips{ .hardfork = .ISTANBUL }).calldata_gas_cost(0, false, 0));
+}
+
+test "calldata_gas_cost - call with data" {
+    try std.testing.expectEqual(@as(u64, 100), (Eips{ .hardfork = .ISTANBUL }).calldata_gas_cost(25, false, 10));
+}
+
+test "calldata_gas_cost - create pre-Shanghai" {
+    try std.testing.expectEqual(@as(u64, 40), (Eips{ .hardfork = .LONDON }).calldata_gas_cost(10, true, 100));
+}
+
+test "calldata_gas_cost - create post-Shanghai" {
+    const shanghai = Eips{ .hardfork = .SHANGHAI };
+    try std.testing.expectEqual(@as(u64, 40), shanghai.calldata_gas_cost(10, true, 0));
+    try std.testing.expectEqual(@as(u64, 42), shanghai.calldata_gas_cost(10, true, 32));
+    try std.testing.expectEqual(@as(u64, 44), shanghai.calldata_gas_cost(10, true, 33));
+    try std.testing.expectEqual(@as(u64, 44), shanghai.calldata_gas_cost(10, true, 64));
+}
+
+test "calldata_gas_cost - hardfork transitions" {
+    try std.testing.expectEqual(@as(u64, 100), (Eips{ .hardfork = .LONDON }).calldata_gas_cost(25, true, 1024));
+    try std.testing.expectEqual(@as(u64, 164), (Eips{ .hardfork = .SHANGHAI }).calldata_gas_cost(25, true, 1024));
+    try std.testing.expectEqual(@as(u64, 164), (Eips{ .hardfork = .CANCUN }).calldata_gas_cost(25, true, 1024));
+}
+
+test "floor_gas_cost - pre-Prague" {
+    const cancun = Eips{ .hardfork = .CANCUN };
+    try std.testing.expectEqual(@as(u64, 0), cancun.floor_gas_cost(0));
+    try std.testing.expectEqual(@as(u64, 0), cancun.floor_gas_cost(100));
+    try std.testing.expectEqual(@as(u64, 0), cancun.floor_gas_cost(10000));
+}
+
+test "floor_gas_cost - Prague" {
+    const prague = Eips{ .hardfork = .PRAGUE };
+    try std.testing.expectEqual(@as(u64, 21000), prague.floor_gas_cost(0));
+    try std.testing.expectEqual(@as(u64, 22000), prague.floor_gas_cost(100));
+    try std.testing.expectEqual(@as(u64, 31000), prague.floor_gas_cost(1000));
+    try std.testing.expectEqual(@as(u64, 121000), prague.floor_gas_cost(10000));
+}
+
+test "integration - full gas calculation flow" {
+    const shanghai = Eips{ .hardfork = .SHANGHAI };
+    const prague = Eips{ .hardfork = .PRAGUE };
+    const input = [_]u8{ 0x00, 0x00, 0xff, 0xff, 0xff, 0x00, 0xab, 0xcd };
+    const tokens = shanghai.tokens_in_calldata(&input);
+
+    try std.testing.expectEqual(@as(u64, 23), tokens);
+    try std.testing.expectEqual(@as(u64, 53000), shanghai.intrinsic_gas_cost(true));
+    try std.testing.expectEqual(@as(u64, 100), shanghai.calldata_gas_cost(tokens, true, 100));
+    try std.testing.expectEqual(@as(u64, 0), shanghai.floor_gas_cost(tokens));
+    try std.testing.expectEqual(@as(u64, 21230), prague.floor_gas_cost(tokens));
+}
+
+test "edge cases - word boundaries" {
+    const shanghai = Eips{ .hardfork = .SHANGHAI };
+    const sizes = [_]usize{ 0, 1, 31, 32, 33, 63, 64, 65, 95, 96, 97 };
+    const costs = [_]u64{ 0, 2, 2, 2, 4, 4, 4, 6, 6, 6, 8 };
+    for (sizes, costs) |size, cost| {
+        try std.testing.expectEqual(cost, shanghai.eip_3860_initcode_word_cost(size));
+    }
+}
+
+test "edge cases - large calldata" {
+    var input: [10000]u8 = undefined;
+    for (&input, 0..) |*byte, i| byte.* = if (i % 2 == 0) 0 else 0xff;
+
+    const prague = Eips{ .hardfork = .PRAGUE };
+    const tokens = prague.tokens_in_calldata(&input);
+    try std.testing.expectEqual(@as(u64, 25000), tokens);
+    try std.testing.expectEqual(@as(u64, 271000), prague.floor_gas_cost(tokens));
+}
+
+test "regression - hardfork ordering" {
+    const cases = [_]struct { hardfork: Hardfork, eip_2028: bool, eip_3860: bool, eip_7623: bool }{
+        .{ .hardfork = .FRONTIER, .eip_2028 = false, .eip_3860 = false, .eip_7623 = false },
+        .{ .hardfork = .ISTANBUL, .eip_2028 = true, .eip_3860 = false, .eip_7623 = false },
+        .{ .hardfork = .SHANGHAI, .eip_2028 = true, .eip_3860 = true, .eip_7623 = false },
+        .{ .hardfork = .CANCUN, .eip_2028 = true, .eip_3860 = true, .eip_7623 = false },
+        .{ .hardfork = .PRAGUE, .eip_2028 = true, .eip_3860 = true, .eip_7623 = true },
+        .{ .hardfork = .OSAKA, .eip_2028 = true, .eip_3860 = true, .eip_7623 = true },
+    };
+    for (cases) |case| {
+        const active = Eips{ .hardfork = case.hardfork };
+        try std.testing.expectEqual(case.eip_2028, active.is_eip_active(2028));
+        try std.testing.expectEqual(case.eip_3860, active.is_eip_active(3860));
+        try std.testing.expectEqual(case.eip_7623, active.is_eip_active(7623));
+    }
+}
+
+test "effective_gas_price - pre-EIP-1559" {
+    const result = (Eips{ .hardfork = .BERLIN }).effective_gas_price(0, 20_000_000_000, 0);
+    try std.testing.expectEqual(@as(u256, 20_000_000_000), result.effective_gas_price);
+    try std.testing.expectEqual(@as(u256, 20_000_000_000), result.miner_fee);
+}
+
+test "effective_gas_price - EIP-1559 normal case" {
+    const result = (Eips{ .hardfork = .LONDON }).effective_gas_price(1_000_000_000, 3_000_000_000, 500_000_000);
+    try std.testing.expectEqual(@as(u256, 1_500_000_000), result.effective_gas_price);
+    try std.testing.expectEqual(@as(u256, 500_000_000), result.miner_fee);
+}
+
+test "effective_gas_price - EIP-1559 capped priority fee" {
+    const result = (Eips{ .hardfork = .LONDON }).effective_gas_price(1_000_000_000, 1_200_000_000, 500_000_000);
+    try std.testing.expectEqual(@as(u256, 1_200_000_000), result.effective_gas_price);
+    try std.testing.expectEqual(@as(u256, 200_000_000), result.miner_fee);
+}
+
+test "effective_gas_price - EIP-1559 max fee below base fee" {
+    const result = (Eips{ .hardfork = .LONDON }).effective_gas_price(1_000_000_000, 800_000_000, 500_000_000);
+    try std.testing.expectEqual(@as(u256, 800_000_000), result.effective_gas_price);
+    try std.testing.expectEqual(@as(u256, 0), result.miner_fee);
+}
+
+test "effective_gas_price - EIP-1559 zero priority fee" {
+    const result = (Eips{ .hardfork = .LONDON }).effective_gas_price(1_000_000_000, 2_000_000_000, 0);
+    try std.testing.expectEqual(@as(u256, 1_000_000_000), result.effective_gas_price);
+    try std.testing.expectEqual(@as(u256, 0), result.miner_fee);
+}
+
+test "effective_gas_price - hardfork progression" {
+    const hardforks = [_]struct { hardfork: Hardfork, eip_1559: bool }{
+        .{ .hardfork = .FRONTIER, .eip_1559 = false },
+        .{ .hardfork = .HOMESTEAD, .eip_1559 = false },
+        .{ .hardfork = .BERLIN, .eip_1559 = false },
+        .{ .hardfork = .LONDON, .eip_1559 = true },
+        .{ .hardfork = .SHANGHAI, .eip_1559 = true },
+        .{ .hardfork = .CANCUN, .eip_1559 = true },
+        .{ .hardfork = .PRAGUE, .eip_1559 = true },
+    };
+    for (hardforks) |hardfork| {
+        const result = (Eips{ .hardfork = hardfork.hardfork }).effective_gas_price(1_000_000_000, 2_000_000_000, 500_000_000);
+        const expected_price: u256 = if (hardfork.eip_1559) 1_500_000_000 else 2_000_000_000;
+        const expected_miner_fee: u256 = if (hardfork.eip_1559) 500_000_000 else 2_000_000_000;
+        try std.testing.expectEqual(expected_price, result.effective_gas_price);
+        try std.testing.expectEqual(expected_miner_fee, result.miner_fee);
+    }
 }

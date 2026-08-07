@@ -140,7 +140,15 @@ pub fn Evm(config: EvmConfig) type {
         /// Sets up the execution environment with state storage, block context,
         /// and transaction parameters. The planner cache is initialized with
         /// a default size for bytecode optimization.
-        pub fn init(allocator: std.mem.Allocator, database: ?*Database, block_info: BlockInfo, context: TransactionContext, gas_price: u256, origin: primitives.Address) !Self {
+        /// If `gas_price` is null, the effective EIP-1559 gas price is derived
+        /// from the block base fee and transaction fee caps.
+        pub fn init(allocator: std.mem.Allocator, database: ?*Database, block_info: BlockInfo, context: TransactionContext, gas_price: ?u256, origin: primitives.Address) !Self {
+            const effective_gas_price = gas_price orelse config.eips.effective_gas_price(
+                block_info.base_fee,
+                context.max_fee_per_gas,
+                context.max_priority_fee_per_gas,
+            ).effective_gas_price;
+
             var access_list = AccessList.init(allocator);
             errdefer access_list.deinit();
 
@@ -165,7 +173,7 @@ pub fn Evm(config: EvmConfig) type {
                 .created_contracts = CreatedContracts.init(allocator),
                 .block_info = block_info,
                 .context = context,
-                .gas_price = gas_price,
+                .gas_price = effective_gas_price,
                 .origin = origin,
                 .call_arena = arena,
                 .self_destruct = SelfDestruct.init(allocator),
@@ -176,7 +184,7 @@ pub fn Evm(config: EvmConfig) type {
 
             self.call_arena.tracer = @as(*anyopaque, @ptrCast(&self.tracer));
             self.tracer.onArenaInit(config.arena_capacity_limit, config.arena_capacity_limit, config.arena_growth_factor);
-            self.tracer.onEvmInit(gas_price, origin, @tagName(config.eips.hardfork));
+            self.tracer.onEvmInit(effective_gas_price, origin, @tagName(config.eips.hardfork));
 
             // Process system contract updates based on configuration
             if (config.enable_beacon_roots) {
@@ -488,25 +496,24 @@ pub fn Evm(config: EvmConfig) type {
                 return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
             };
 
-            const call_gas = params.getGas();
-            if (!config.disable_gas_checks) {
-                if (call_gas == 0) return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+            const gas_limit = params.getGas();
+            if (comptime !config.disable_gas_checks) {
+                if (gas_limit == 0) return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
             }
 
-            const initial_gas = call_gas;
+            const input = params.getInput();
+            const calldata_tokens = config.eips.tokens_in_calldata(input);
+            const intrinsic_gas_cost = config.eips.intrinsic_gas_cost(params.isCreate());
+            const calldata_gas_cost = config.eips.calldata_gas_cost(calldata_tokens, params.isCreate(), input.len);
+            const floor_gas_cost = config.eips.floor_gas_cost(calldata_tokens);
+            const initial_gas_cost = intrinsic_gas_cost + calldata_gas_cost;
 
-            const execution_gas = blk: {
-                const GasConstants = primitives.GasConstants;
-                const intrinsic_gas = switch (params) {
-                    .create, .create2 => GasConstants.TxGasContractCreation, // 53000 for contract creation
-                    else => GasConstants.TxGas, // 21000 for regular calls
-                };
-
-                // Check if we have enough gas for intrinsic cost
-                if (params.getGas() < intrinsic_gas) return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
-
-                break :blk params.getGas() - intrinsic_gas;
-            };
+            if (comptime !config.disable_gas_checks) {
+                if (gas_limit < initial_gas_cost or gas_limit < floor_gas_cost) {
+                    return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                }
+            }
+            const execution_gas_limit = gas_limit - initial_gas_cost;
 
             // Increment origin nonce for top-level transactions (EIP-2718)
             // This must happen after gas deduction but before inner_call execution
@@ -529,7 +536,7 @@ pub fn Evm(config: EvmConfig) type {
             }
 
             var modified_params = params;
-            modified_params.setGas(@as(u64, @intCast(execution_gas)));
+            modified_params.setGas(execution_gas_limit);
 
             const arena_result = self.inner_call(modified_params);
             // Clone result to main allocator since we're at depth 0 (top-level call)
@@ -542,13 +549,20 @@ pub fn Evm(config: EvmConfig) type {
 
             // Apply EIP-3529 gas refund cap if transaction succeeded
             if (result.success) {
-                result.gas_left = config.eips.eip_3529_apply_gas_refund(initial_gas, result.gas_left, self.gas_refund_counter);
+                result.gas_left = config.eips.eip_3529_apply_gas_refund(gas_limit, result.gas_left, self.gas_refund_counter);
                 // Reset refund counter for next transaction
                 self.gas_refund_counter = 0;
             }
 
+            var gas_consumed = gas_limit - result.gas_left;
+            if (result.success and gas_consumed < floor_gas_cost) {
+                gas_consumed = floor_gas_cost;
+                if (comptime !config.disable_gas_checks) {
+                    result.gas_left = gas_limit - floor_gas_cost;
+                }
+            }
+
             // Deduct gas fees from sender's balance and pay coinbase
-            const gas_consumed = initial_gas - result.gas_left;
             if (gas_consumed > 0 and self.gas_price > 0) {
                 const gas_consumed_u256: u256 = @intCast(gas_consumed);
                 const total_gas_fee = self.gas_price * gas_consumed_u256;
@@ -2227,6 +2241,106 @@ test "Evm creation with custom config" {
     defer evm.deinit();
 
     try std.testing.expectEqual(@as(u9, 0), evm.depth);
+}
+
+test "Evm init derives effective gas price only when requested" {
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
+
+    const block_info = BlockInfo{
+        .number = 1,
+        .timestamp = 1000,
+        .difficulty = 0,
+        .gas_limit = 30_000_000,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .base_fee = 100,
+        .prev_randao = [_]u8{0} ** 32,
+    };
+    const context = TransactionContext{
+        .gas_limit = 100_000,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .chain_id = 1,
+        .max_fee_per_gas = 150,
+        .max_priority_fee_per_gas = 75,
+    };
+    const LondonEvm = Evm(.{ .eips = eips.Eips{ .hardfork = .LONDON } });
+
+    {
+        var derived = try LondonEvm.init(std.testing.allocator, &db, block_info, context, null, primitives.ZERO_ADDRESS);
+        defer derived.deinit();
+        try std.testing.expectEqual(@as(u256, 150), derived.gas_price);
+    }
+
+    {
+        var explicit_zero = try LondonEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
+        defer explicit_zero.deinit();
+        try std.testing.expectEqual(@as(u256, 0), explicit_zero.gas_price);
+    }
+}
+
+test "EIP-7623 clamps successful Prague transaction gas to calldata floor" {
+    const gas_limit: u64 = 21_011;
+    const input = [_]u8{0x00};
+    const sender = primitives.Address{ .bytes = [_]u8{0x02} ++ [_]u8{0x00} ** 19 };
+    const target = primitives.Address{ .bytes = [_]u8{0x01} ++ [_]u8{0x00} ** 19 };
+    const block_info = BlockInfo{
+        .number = 1,
+        .timestamp = 1000,
+        .difficulty = 0,
+        .gas_limit = 30_000_000,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .base_fee = 0,
+        .prev_randao = [_]u8{0} ** 32,
+    };
+    const context = TransactionContext{
+        .gas_limit = gas_limit,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .chain_id = 1,
+    };
+
+    {
+        var db = Database.init(std.testing.allocator);
+        defer db.deinit();
+        var sender_account = Account.zero();
+        sender_account.balance = 1_000_000_000;
+        try db.set_account(sender.bytes, sender_account);
+        const PragueEvm = Evm(.{ .eips = eips.Eips{ .hardfork = .PRAGUE } });
+        var evm = try PragueEvm.init(std.testing.allocator, &db, block_info, context, 10, sender);
+        defer evm.deinit();
+
+        var result = evm.call(.{ .call = .{
+            .caller = sender,
+            .to = target,
+            .value = 0,
+            .input = &input,
+            .gas = gas_limit,
+        } });
+        defer result.deinit(std.testing.allocator);
+
+        try std.testing.expect(result.success);
+        try std.testing.expectEqual(@as(u64, 21_010), gas_limit - result.gas_left);
+        try std.testing.expectEqual(@as(u256, 999_789_900), (try db.get_account(sender.bytes)).?.balance);
+    }
+
+    {
+        var db = Database.init(std.testing.allocator);
+        defer db.deinit();
+        const CancunEvm = Evm(.{ .eips = eips.Eips{ .hardfork = .CANCUN } });
+        var evm = try CancunEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
+        defer evm.deinit();
+
+        var result = evm.call(.{ .call = .{
+            .caller = primitives.ZERO_ADDRESS,
+            .to = target,
+            .value = 0,
+            .input = &input,
+            .gas = gas_limit,
+        } });
+        defer result.deinit(std.testing.allocator);
+
+        try std.testing.expect(result.success);
+        try std.testing.expectEqual(@as(u64, 21_004), gas_limit - result.gas_left);
+    }
 }
 
 test "Evm call depth limit" {
