@@ -25,9 +25,12 @@ pub const TransactionContext = struct {
     /// This remains distinct from blob_versioned_hashes so zero-blob type-3
     /// transactions can be rejected.
     is_blob_transaction: bool = false,
-    /// EIP-1559 fee cap used for the transaction's upfront balance check.
-    /// Null for legacy transactions, whose gas_price is already their fee cap.
+    /// EIP-1559 fee cap used for the effective gas price and the upfront
+    /// balance check. Null for legacy transactions, whose gas_price is
+    /// already their fee cap.
     max_fee_per_gas: ?u256 = null,
+    /// EIP-1559 priority fee cap (tip). Zero for legacy transactions.
+    max_priority_fee_per_gas: u256 = 0,
     /// EIP-4844 fee cap used for validation and the upfront balance check.
     max_fee_per_blob_gas: u256 = 0,
 };
@@ -47,6 +50,7 @@ test "TransactionContext creation and field access" {
     try std.testing.expectEqual(@as(usize, 0), tx_context.blob_versioned_hashes.len);
     try std.testing.expect(!tx_context.is_blob_transaction);
     try std.testing.expectEqual(@as(?u256, null), tx_context.max_fee_per_gas);
+    try std.testing.expectEqual(@as(u256, 0), tx_context.max_priority_fee_per_gas);
     try std.testing.expectEqual(@as(u256, 0), tx_context.max_fee_per_blob_gas);
 }
 

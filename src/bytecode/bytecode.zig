@@ -87,6 +87,8 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
         pub const Iterator = struct {
             bytecode: *const Self,
             pc: PcType,
+            /// Disable fusion when analyzing original gas and stack effects.
+            enable_fusion: bool = true,
 
             pub fn next(iterator: *Iterator) ?OpcodeData {
                 if (iterator.pc >= iterator.bytecode.len()) return null;
@@ -99,7 +101,7 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                 const packed_bits = iterator.bytecode.packed_bitmap[iterator.pc];
 
                 // Handle fusion opcodes first (only if fusions are enabled)
-                if (fusions_enabled and packed_bits.is_fusion_candidate) {
+                if (fusions_enabled and iterator.enable_fusion and packed_bits.is_fusion_candidate) {
                     const fusion_data = iterator.bytecode.getFusionData(iterator.pc);
                     // Advance PC properly for fusion opcodes
                     switch (fusion_data) {
@@ -1519,7 +1521,7 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                         .LT, .GT, .SLT, .SGT, .EQ, .ISZERO => {
                             try output.writer(allocator).print("{s}{s:<14}{s}", .{ InstructionColors.comparison, @tagName(opcode), Colors.reset });
                         },
-                        .AND, .OR, .XOR, .NOT, .BYTE, .SHL, .SHR, .SAR => {
+                        .AND, .OR, .XOR, .NOT, .BYTE, .SHL, .SHR, .SAR, .CLZ => {
                             try output.writer(allocator).print("{s}{s:<14}{s}", .{ InstructionColors.bitwise, @tagName(opcode), Colors.reset });
                         },
                         .MLOAD, .MSTORE, .MSTORE8, .MSIZE, .MCOPY => {

@@ -11,6 +11,22 @@ pub fn Handlers(FrameType: type) type {
         pub const WordType = FrameType.WordType;
         const dispatch_next = @import("dispatch_next.zig");
 
+        /// CLZ (0x1e), EIP-7939: replace one word with its leading-zero count.
+        /// Available from Osaka; zero produces 256. Dispatch charges five gas.
+        pub fn clz(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            if (FrameType.config.hardfork.isBefore(.OSAKA)) {
+                self.gas_remaining = 0;
+                return error.InvalidOpcode;
+            }
+            if (self.stack.size() < 1) {
+                self.gas_remaining = 0;
+                return error.StackUnderflow;
+            }
+            self.beforeInstruction(.CLZ, cursor);
+            self.stack.set_top_unsafe(@clz(self.stack.peek_unsafe()));
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .CLZ);
+        }
+
         /// AND opcode (0x16) - Bitwise AND operation.
         pub fn @"and"(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             self.beforeInstruction(.AND, cursor);

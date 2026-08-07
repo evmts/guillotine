@@ -209,3 +209,9 @@ test/execution-spec-tests/fixtures/
 # Solidity compilation artifacts
 data/fixtures/out/
 bubblesort_bytecode.txt
+
+# Astro build cache
+.astro/
+
+# Rust build output for the vendored voltaire crate
+lib/voltaire/target/

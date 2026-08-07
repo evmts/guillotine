@@ -167,6 +167,7 @@ pub const EvmConfig = struct {
     /// Computed frame configuration from the fields above
     pub fn frame_config(self: EvmConfig) FrameConfig {
         return .{
+            .hardfork = self.eips.hardfork,
             .stack_size = self.stack_size,
             .WordType = self.WordType,
             .max_bytecode_size = self.max_bytecode_size,

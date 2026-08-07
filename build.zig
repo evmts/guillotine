@@ -75,6 +75,29 @@ pub fn build(b: *std.Build) void {
     // Modules (zbench no longer needed for core evm_mod)
     const modules = Modules.createModules(b, target, optimize, options_mod, primitives_dep, bn254_lib, foundry_lib);
 
+    // Importing an external module's functions does not run its inline tests.
+    // Keep the synchronized ModExp implementation's arithmetic and precompile
+    // regressions reachable from this repository's validation surface.
+    const modexp_tests_step = b.step("test-modexp", "Run vendored ModExp arithmetic and precompile tests");
+    for ([_][]const u8{ "crypto", "precompiles" }) |area| {
+        const is_crypto = std.mem.eql(u8, area, "crypto");
+        const modexp_test = b.addTest(.{
+            .name = b.fmt("modexp-{s}", .{area}),
+            .root_module = if (is_crypto) modules.crypto_mod else b.createModule(.{
+                .root_source_file = b.path(b.fmt("lib/voltaire/src/{s}/modexp.zig", .{area})),
+                .target = target,
+                .optimize = .Debug,
+            }),
+            .use_llvm = true,
+        });
+        if (!is_crypto) {
+            modexp_test.root_module.addImport("voltaire", modules.primitives_mod);
+            modexp_test.root_module.addImport("crypto", modules.crypto_mod);
+        }
+        modexp_test.linkLibC();
+        modexp_tests_step.dependOn(&b.addRunArtifact(modexp_test).step);
+    }
+
     // Executables
     const guillotine_exe = GuillotineExe.createExecutable(b, modules.exe_mod);
     _ = GuillotineExe.createRunStep(b, guillotine_exe);
@@ -440,6 +463,31 @@ pub fn build(b: *std.Build) void {
     // Per-opcode differential tests discovered in test/evm/opcodes
     // We dynamically scan the directory and add a test target for each file matching *_test.zig
     const opcode_tests_step = b.step("test-opcodes", "Run all per-opcode differential tests");
+    opcode_tests_step.dependOn(modexp_tests_step);
+    // Compile the engine once for the complete gate. Linking a separate copy
+    // for every opcode consumes gigabytes of cache and repeats LLVM work.
+    const all_opcode_tests = b.addTest(.{
+        .name = "all-opcodes",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("test/evm/opcodes/all_opcodes.zig"),
+            .target = target,
+            .optimize = .Debug,
+        }),
+        .use_llvm = true,
+    });
+    if (test_filter) |filter| all_opcode_tests.filters = &.{filter};
+    all_opcode_tests.root_module.addImport("evm", modules.evm_mod);
+    all_opcode_tests.root_module.addImport("voltaire", modules.primitives_mod);
+    all_opcode_tests.root_module.addImport("crypto", modules.crypto_mod);
+    all_opcode_tests.root_module.addImport("build_options", options_mod);
+    all_opcode_tests.root_module.addImport("log", b.createModule(.{
+        .root_source_file = b.path("src/log.zig"),
+        .target = target,
+        .optimize = .Debug,
+    }));
+    if (bn254_lib) |bn254| all_opcode_tests.linkLibrary(bn254);
+    all_opcode_tests.linkLibC();
+    opcode_tests_step.dependOn(&b.addRunArtifact(all_opcode_tests).step);
     if (std.fs.cwd().openDir("test/evm/opcodes", .{ .iterate = true }) catch null) |op_dir_val| {
         var op_dir = op_dir_val; // make mutable for close()
         defer op_dir.close();
@@ -488,9 +536,6 @@ pub fn build(b: *std.Build) void {
             // Using MinimalEvm for differential testing (REVM removed)
 
             const run_t = b.addRunArtifact(t);
-
-            // Add to the "all opcodes" step
-            opcode_tests_step.dependOn(&run_t.step);
 
             // Create individual test step for this opcode
             const individual_step = b.step(individual_step_name, individual_step_desc);

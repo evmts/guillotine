@@ -352,3 +352,15 @@ MIT License. Free for all use. 🌍
 
 <a href="https://shazow.net/posts/permissive-vs-copyleft/"><img width="256" height="256" alt="image" src="https://github.com/user-attachments/assets/644c2d29-8e7f-44f4-a17f-285a1f4c20e7" /></a>
 
+
+## Osaka ModExp
+
+Configure `Evm(.{ .eips = .{ .hardfork = .OSAKA } })` to activate EIP-7823's
+1,024-byte per-operand limit and EIP-7883 pricing for ModExp (`0x05`). The minimum
+is 500 gas. Prague retains its prior pricing and operand acceptance. The full
+engine and reference interpreter share the synchronized vendored precompile.
+See [the precompile contract](lib/voltaire/src/precompiles/modexp.zig.md).
+
+Run `zig build test-modexp` for the vendored arithmetic and precompile tests,
+`zig build test-opcodes-0xfa` for ModExp STATICCALL regression checks, and
+`zig build test-opcodes` for the complete gate (including `test-modexp`).

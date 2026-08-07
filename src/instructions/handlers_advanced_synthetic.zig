@@ -148,6 +148,11 @@ pub fn Handlers(FrameType: type) type {
 
             // Jump if the value was zero
             if (should_jump) {
+                // Guard against an out-of-range destination before the cast (else @intCast panics).
+                if (target > std.math.maxInt(FrameType.PcType)) {
+                    self.afterComplete(.ISZERO_JUMPI);
+                    return Error.InvalidJump;
+                }
                 // Look up the jump destination in the jump table
                 const dest_pc: FrameType.PcType = @intCast(target);
                 if (self.jump_table.findJumpTarget(dest_pc)) |jump_dispatch| {

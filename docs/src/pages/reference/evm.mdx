@@ -1,0 +1,293 @@
+---
+title: Evm
+description: The Evm type — construction, execution, snapshots, and errors.
+---
+
+# `Evm`
+
+```zig
+const Evm = @import("evm").Evm;   // fn (EvmConfig) type
+```
+
+`Evm` is a type constructor. `Evm(config)` yields a concrete EVM specialised to
+that configuration. Everything below is verified against `src/evm.zig`.
+
+## Pre-instantiated types
+
+From `src/root.zig`, for when you do not want to name a config (and for FFI,
+which needs concrete types):
+
+```zig
+const MainnetEvm = @import("evm").MainnetEvm;                      // Evm(.{})
+const Traced     = @import("evm").MainnetEvmWithTracer;            // + step capture
+const TestEvm    = @import("evm").TestEvm;                         // + disable_gas_checks
+const Default    = @import("evm").DefaultEvm;                      // build-flag configured
+```
+
+## `init`
+
+```zig
+pub fn init(
+    allocator: std.mem.Allocator,
+    database: ?*Database,
+    block_info: BlockInfo,
+    context: TransactionContext,
+    gas_price: u256,
+    origin: primitives.Address,
+) !Self
+```
+
+| Parameter | Notes |
+| --- | --- |
+| `allocator` | Used for the journal, access list, logs, arena, and owned results. |
+| `database` | Optional pointer, but passing `null` returns `error.DatabaseRequired`. It is optional only so FFI can pass a null pointer and get an error rather than a crash. |
+| `block_info` | Block-scoped environment. See [`BlockInfo`](#blockinfo). |
+| `context` | Transaction-scoped environment. See [`TransactionContext`](#transactioncontext). |
+| `gas_price` | What `GASPRICE` returns. |
+| `origin` | What `ORIGIN` returns. |
+
+```zig
+var evm = try Evm(.{}).init(allocator, &db, block_info, tx_context, 0, primitives.ZERO_ADDRESS);
+defer evm.deinit();
+```
+
+`init` sets up the access list, the growing arena, the journal, the log buffer,
+the created-contracts set, the self-destruct set, touched-address and
+touched-storage maps, and the tracer.
+
+## `deinit`
+
+```zig
+pub fn deinit(self: *Self) void
+```
+
+Releases everything `init` allocated. It does **not** free `CallResult`s you are
+holding — those are yours. Always `defer evm.deinit()`.
+
+## `call`
+
+```zig
+pub fn call(self: *Self, params: CallParams) CallResult
+```
+
+The top-level entry point. Asserts `depth == 0`, so use it once per transaction,
+not for nested calls.
+
+Note the return type: a plain `CallResult`, not an error union. A revert, an
+out-of-gas, or an invalid opcode is a `CallResult` with `success == false`.
+
+```zig
+var result = evm.call(.{ .call = .{
+    .caller = primitives.ZERO_ADDRESS,
+    .to = contract_address,
+    .value = 0,
+    .input = &.{},
+    .gas = 100_000,
+} });
+defer result.deinit(allocator);
+```
+
+## `inner_call`
+
+```zig
+pub fn inner_call(self: *Self, params: CallParams) CallResult
+```
+
+The re-entrant version used by the `CALL`/`CREATE` handlers. It does not assert
+depth zero and does not perform transaction-level bookkeeping. You want `call`
+unless you are implementing a handler.
+
+## Snapshots
+
+```zig
+pub fn create_snapshot(self: *Self) Journal.Error!Journal.SnapshotIdType
+pub fn revert_to_snapshot(self: *Self, snapshot_id: Journal.SnapshotIdType) void
+```
+
+See [State and journaling](/guides/state).
+
+## `CallParams`
+
+A tagged union — `src/frame/call_params.zig`. Addresses here are
+`primitives.Address` (the struct), not raw bytes.
+
+```zig
+pub const CallParams = union(enum) {
+    call: struct {
+        caller: Address, to: Address, value: u256, input: []const u8, gas: u64,
+    },
+    callcode: struct {
+        caller: Address, to: Address, value: u256, input: []const u8, gas: u64,
+    },
+    delegatecall: struct {
+        caller: Address, to: Address, input: []const u8, gas: u64,
+    },
+    staticcall: struct {
+        caller: Address, to: Address, input: []const u8, gas: u64,
+    },
+    create: struct {
+        caller: Address, value: u256, init_code: []const u8, gas: u64,
+    },
+    create2: struct {
+        caller: Address, value: u256, init_code: []const u8, salt: u256, gas: u64,
+    },
+};
+```
+
+`delegatecall` and `staticcall` have no `value` field at all — the type makes
+EIP-214 and delegatecall semantics unrepresentable-if-wrong rather than
+runtime-checked.
+
+### `validate`
+
+```zig
+pub fn validate(self: @This()) ValidationError!void
+```
+
+```zig
+pub const ValidationError = error{
+    GasZeroError,
+    InvalidInputSize,
+    InvalidInitCodeSize,
+    InvalidCreateValue,
+    InvalidStaticCallValue,
+};
+```
+
+Checks non-zero gas, the EIP-3860 initcode cap (49152 bytes), and a 4 MiB
+practical input cap.
+
+## `CallResult`
+
+From `src/frame/call_result.zig`:
+
+```zig
+success: bool,
+gas_left: u64,
+output: []const u8,
+logs: []const Log = &.{},
+selfdestructs: []const SelfDestructRecord = &.{},
+accessed_addresses: []const Address = &.{},
+accessed_storage: []const StorageAccess = &.{},
+trace: ?ExecutionTrace = null,
+error_info: ?[]const u8 = null,
+created_address: ?Address = null,
+```
+
+| Field | Notes |
+| --- | --- |
+| `success` | `false` for revert, out-of-gas, invalid opcode, and every other execution failure. |
+| `gas_left` | Remaining gas. Gas used is your limit minus this. |
+| `output` | Return data, or revert data when `success == false`. Heap-allocated. |
+| `logs` | Emitted events. Each `Log` owns `topics` and `data`. |
+| `selfdestructs` | Accounts queued for destruction. |
+| `accessed_addresses` | EIP-2929 warm addresses touched. |
+| `accessed_storage` | Warm slots touched. |
+| `trace` | Present when the tracer captured steps. |
+| `error_info` | Human-readable failure detail when available. |
+| `created_address` | Set for `create` / `create2`. |
+
+### Cleanup
+
+```zig
+pub fn deinit(self: *Self, allocator: std.mem.Allocator) void
+pub fn deinitLogs(self: *Self, allocator: std.mem.Allocator) void
+pub fn deinitLogsSlice(logs: []const Log, allocator: std.mem.Allocator) void
+```
+
+`deinit` unconditionally frees output, logs (and each log's `topics`/`data`), and
+the accessed-address/storage slices. **Not calling it is a leak** — `zig build
+test-*` with `std.testing.allocator` will fail the test with `memory leak
+detected`, which is exactly what you want it to do.
+
+### Constructors
+
+Useful when implementing a custom precompile or handler:
+
+```zig
+pub fn success_with_output(allocator, gas_left, output) !Self
+pub fn success_empty(allocator, gas_left) !Self
+pub fn failure(allocator, gas_left) !Self
+pub fn failure_with_error(allocator, gas_left, error_info) !Self
+```
+
+## `BlockInfo`
+
+```zig
+const block_info = BlockInfo{
+    .chain_id = 1,
+    .number = 1,
+    .timestamp = 1_700_000_000,
+    .difficulty = 0,
+    .gas_limit = 30_000_000,
+    .coinbase = primitives.ZERO_ADDRESS,
+    .base_fee = 0,
+    .prev_randao = [_]u8{0} ** 32,
+};
+```
+
+Backs `CHAINID`, `NUMBER`, `TIMESTAMP`, `DIFFICULTY`/`PREVRANDAO`, `GASLIMIT`,
+`COINBASE`, and `BASEFEE`. `CompactBlockInfo` is the same data with narrower
+field types (`BlockInfo(.{ .use_compact_types = true })`) for memory-constrained
+targets.
+
+## `TransactionContext`
+
+```zig
+const tx_context = TransactionContext{
+    .gas_limit = 1_000_000,
+    .coinbase = primitives.ZERO_ADDRESS,
+    .chain_id = 1,
+};
+```
+
+## `Error`
+
+The full error set, from `src/evm.zig`:
+
+```zig
+pub const Error = error{
+    InvalidJump,            OutOfGas,               StackUnderflow,
+    StackOverflow,          ContractNotFound,       PrecompileError,
+    MemoryError,            StorageError,           CallDepthExceeded,
+    InsufficientBalance,    ContractCollision,      InvalidBytecode,
+    StaticCallViolation,    InvalidOpcode,          RevertExecution,
+    OutOfMemory,            AllocationError,        AccountNotFound,
+    InvalidJumpDestination, MissingJumpDestMetadata, InitcodeTooLarge,
+    TruncatedPush,          OutOfBounds,            WriteProtection,
+    BytecodeTooLarge,       DatabaseRequired,       ReturnDataNotAvailable,
+};
+```
+
+These surface from `init` and from the internals. They are not how `call`
+reports a reverted contract — that is `success == false`.
+
+## `Success`
+
+```zig
+pub const Success = enum { Stop, Return, SelfDestruct };
+```
+
+How a frame terminated successfully.
+
+## Other exports
+
+`src/root.zig` re-exports the rest of the engine:
+
+```zig
+const evm = @import("evm");
+
+evm.Frame          evm.FrameConfig      evm.FrameDispatch
+evm.Stack          evm.StackConfig
+evm.Memory         evm.MemoryConfig     evm.MemoryError
+evm.Bytecode       evm.BytecodeConfig   evm.BytecodeStats
+evm.Database       evm.MemoryDatabase   evm.Account
+evm.AccessList     evm.CreatedContracts evm.SelfDestruct
+evm.Opcode         evm.OpcodeData       evm.OpcodeSynthetic
+evm.Hardfork       evm.Eips
+evm.Tracer         evm.TracerConfig     evm.MinimalEvm    evm.JSONRPCTracer
+evm.BlockInfo      evm.CompactBlockInfo evm.TransactionContext
+evm.CallParams     evm.CallResult       evm.Log
+evm.AuthorizationProcessor  evm.AuthorizationError
+evm.precompiles    evm.kzg_setup        evm.log
+```

@@ -14,6 +14,10 @@ pub const sha256 = @import("sha256.zig");
 pub const ripemd160 = @import("ripemd160.zig");
 pub const identity = @import("identity.zig");
 pub const modexp = @import("modexp.zig");
+
+test {
+    _ = modexp;
+}
 pub const bn254_add = @import("bn254_add.zig");
 pub const bn254_mul = @import("bn254_mul.zig");
 pub const bn254_pairing = @import("bn254_pairing.zig");
@@ -57,14 +61,10 @@ pub const BLS12_MAP_FP2_TO_G2_ADDRESS: Address = Address.fromU256(0x13);
 pub fn isPrecompile(address: Address, hardfork: Hardfork) bool {
     const addr_int = address.toU256();
 
-    return switch (hardfork) {
-        .FRONTIER, .HOMESTEAD => addr_int >= 0x01 and addr_int <= 0x04,
-        .BYZANTIUM => addr_int >= 0x01 and addr_int <= 0x08,
-        .ISTANBUL => addr_int >= 0x01 and addr_int <= 0x09,
-        .CANCUN => addr_int >= 0x01 and addr_int <= 0x0A,
-        .PRAGUE => addr_int >= 0x01 and addr_int <= 0x13,
-        else => false,
-    };
+    // Precompiles remain available in successor forks. An exact-fork switch
+    // omitted Berlin, London and Osaka, turning their calls into empty accounts.
+    const last: u256 = if (hardfork.isAtLeast(.PRAGUE)) 0x13 else if (hardfork.isAtLeast(.CANCUN)) 0x0A else if (hardfork.isAtLeast(.ISTANBUL)) 0x09 else if (hardfork.isAtLeast(.BYZANTIUM)) 0x08 else 0x04;
+    return addr_int >= 0x01 and addr_int <= last;
 }
 
 /// Execute a precompile contract

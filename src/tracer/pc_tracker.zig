@@ -281,6 +281,7 @@ fn getOpcodeName(opcode: u8) []const u8 {
         0x1b => "SHL",
         0x1c => "SHR",
         0x1d => "SAR",
+        0x1e => "CLZ",
         0x20 => "KECCAK256",
         0x30 => "ADDRESS",
         0x31 => "BALANCE",

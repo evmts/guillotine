@@ -174,7 +174,7 @@ pub fn Preprocessor(FrameType: type) type {
                 .AND, .OR, .XOR => {
                     tracerAssert(frame, frame.stack.size() >= 2, "Binary op: stack underflow, requires 2 items");
                 },
-                .NOT => {
+                .NOT, .CLZ => {
                     tracerAssert(frame, frame.stack.size() >= 1, "Unary op: stack underflow, requires 1 item");
                 },
                 .BYTE, .SHL, .SHR, .SAR => {
@@ -430,6 +430,9 @@ pub fn Preprocessor(FrameType: type) type {
             else
                 bytecode;
             var iter = actual_bytecode.createIterator();
+            // Metadata must describe the original instruction stream. A fused
+            // MLOAD still pushes a word, and different fusions cost different gas.
+            iter.enable_fusion = false;
             const opcode_info = @import("../opcodes/opcode_data.zig").OPCODE_INFO;
 
             var op_count: u32 = 0;

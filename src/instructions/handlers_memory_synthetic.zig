@@ -13,9 +13,23 @@ pub fn Handlers(FrameType: type) type {
         pub const Dispatch = FrameType.Dispatch;
         pub const WordType = FrameType.WordType;
 
+        // Dispatch charges the original opcodes' static gas. Expansion depends
+        // on memory reached at runtime and must be charged before any access.
+        fn charge_memory_expansion(self: *FrameType, comptime opcode: Dispatch.UnifiedOpcode, offset: usize, size: u24) Error!void {
+            if (offset > std.math.maxInt(u24) - size) {
+                self.afterComplete(opcode);
+                return Error.OutOfBounds;
+            }
+            const cost = self.memory.get_expansion_cost(@intCast(offset + size));
+            self.consumeGasChecked(@intCast(cost)) catch |err| {
+                self.afterComplete(opcode);
+                return err;
+            };
+        }
+
         /// PUSH_MLOAD_INLINE - Fused PUSH+MLOAD with inline offset (≤8 bytes).
         /// Pushes an offset and immediately loads from that memory location.
-        /// Gas costs are pre-calculated statically in dispatch.
+        /// Dispatch charges static gas; the handler charges memory expansion.
         pub fn push_mload_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             self.beforeInstruction(.PUSH_MLOAD_INLINE, cursor);
             const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
@@ -32,7 +46,7 @@ pub fn Handlers(FrameType: type) type {
             }
             const offset_usize = @as(usize, @intCast(offset));
 
-            // Gas costs are handled statically by dispatch - no dynamic calculation needed
+            try charge_memory_expansion(self, .PUSH_MLOAD_INLINE, offset_usize, 32);
 
             // Read 32 bytes from memory
             // Use std.math.cast to safely convert to u24, returns null if out of bounds
@@ -66,7 +80,7 @@ pub fn Handlers(FrameType: type) type {
         }
 
         /// PUSH_MLOAD_POINTER - Fused PUSH+MLOAD with pointer offset (>8 bytes).
-        /// Gas costs are pre-calculated statically in dispatch.
+        /// Dispatch charges static gas; the handler charges memory expansion.
         pub fn push_mload_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             self.beforeInstruction(.PUSH_MLOAD_POINTER, cursor);
             const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
@@ -83,7 +97,7 @@ pub fn Handlers(FrameType: type) type {
             }
             const offset_usize = @as(usize, @intCast(offset));
 
-            // Gas costs are handled statically by dispatch - no dynamic calculation needed
+            try charge_memory_expansion(self, .PUSH_MLOAD_POINTER, offset_usize, 32);
 
             // Read 32 bytes from memory
             // Use std.math.cast to safely convert to u24, returns null if out of bounds
@@ -118,7 +132,7 @@ pub fn Handlers(FrameType: type) type {
 
         /// PUSH_MSTORE_INLINE - Fused PUSH+MSTORE with inline offset (≤8 bytes).
         /// Pushes an offset, then pops a value and stores it at that offset.
-        /// Gas costs are pre-calculated statically in dispatch.
+        /// Dispatch charges static gas; the handler charges memory expansion.
         pub fn push_mstore_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             self.beforeInstruction(.PUSH_MSTORE_INLINE, cursor);
             const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
@@ -141,7 +155,7 @@ pub fn Handlers(FrameType: type) type {
             }
             const offset_usize = @as(usize, @intCast(offset));
 
-            // Gas costs are handled statically by dispatch - no dynamic calculation needed
+            try charge_memory_expansion(self, .PUSH_MSTORE_INLINE, offset_usize, 32);
 
             // Store 32 bytes to memory
             const value_u256 = @as(u256, value);
@@ -170,7 +184,7 @@ pub fn Handlers(FrameType: type) type {
         }
 
         /// PUSH_MSTORE_POINTER - Fused PUSH+MSTORE with pointer offset (>8 bytes).
-        /// Gas costs are pre-calculated statically in dispatch.
+        /// Dispatch charges static gas; the handler charges memory expansion.
         pub fn push_mstore_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             self.beforeInstruction(.PUSH_MSTORE_POINTER, cursor);
             const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
@@ -193,7 +207,7 @@ pub fn Handlers(FrameType: type) type {
             }
             const offset_usize = @as(usize, @intCast(offset));
 
-            // Gas costs are handled statically by dispatch - no dynamic calculation needed
+            try charge_memory_expansion(self, .PUSH_MSTORE_POINTER, offset_usize, 32);
 
             // Store 32 bytes to memory
             const value_u256 = @as(u256, value);
@@ -223,7 +237,7 @@ pub fn Handlers(FrameType: type) type {
 
         /// PUSH_MSTORE8_INLINE - Fused PUSH+MSTORE8 with inline offset (≤8 bytes).
         /// Pushes an offset, then pops a value and stores the least significant byte.
-        /// Gas costs are pre-calculated statically in dispatch.
+        /// Dispatch charges static gas; the handler charges memory expansion.
         pub fn push_mstore8_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             self.beforeInstruction(.PUSH_MSTORE8_INLINE, cursor);
             const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
@@ -252,7 +266,7 @@ pub fn Handlers(FrameType: type) type {
                 return Error.OutOfBounds;
             }
 
-            // Gas costs are handled statically by dispatch - no dynamic calculation needed
+            try charge_memory_expansion(self, .PUSH_MSTORE8_INLINE, offset_usize, 1);
 
             // Store the least significant byte
             const byte_value = @as(u8, @truncate(value));
@@ -276,7 +290,7 @@ pub fn Handlers(FrameType: type) type {
         }
 
         /// PUSH_MSTORE8_POINTER - Fused PUSH+MSTORE8 with pointer offset (>8 bytes).
-        /// Gas costs are pre-calculated statically in dispatch.
+        /// Dispatch charges static gas; the handler charges memory expansion.
         pub fn push_mstore8_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             self.beforeInstruction(.PUSH_MSTORE8_POINTER, cursor);
             const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
@@ -305,7 +319,7 @@ pub fn Handlers(FrameType: type) type {
                 return Error.OutOfBounds;
             }
 
-            // Gas costs are handled statically by dispatch - no dynamic calculation needed
+            try charge_memory_expansion(self, .PUSH_MSTORE8_POINTER, offset_usize, 1);
 
             // Store the least significant byte
             const byte_value = @as(u8, @truncate(value));

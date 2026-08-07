@@ -74,6 +74,7 @@ pub fn before_instruction(frame: anytype, comptime opcode: @import("opcodes/opco
                 .SHL => "SHL",
                 .SHR => "SHR",
                 .SAR => "SAR",
+                .CLZ => "CLZ",
                 .KECCAK256 => "KECCAK256",
                 .ADDRESS => "ADDRESS",
                 .BALANCE => "BALANCE",
@@ -291,7 +292,7 @@ pub fn before_instruction(frame: anytype, comptime opcode: @import("opcodes/opco
                 },
 
                 // Unary operations - log top stack item
-                .ISZERO, .NOT, .POP => {
+                .ISZERO, .NOT, .CLZ, .POP => {
                     if (stack_size >= 1) {
                         const top = stack_ptr[0];
                         std.log.debug("[EVM2] EXEC: {s} | stack={d} gas={d} | value={x}", .{

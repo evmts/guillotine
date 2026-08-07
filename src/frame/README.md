@@ -342,3 +342,16 @@ typedef struct frame_c_api {
 ```
 
 For detailed C API usage, see `frame_c.zig` for the complete interface.
+
+## Parent specialization
+
+`Evm(config).Frame` sets `FrameConfig.EvmType` to its actual parent type.
+`getEvm()` recovers that concrete pointer, preserving hardfork selection and
+feature flags for nested calls. Casting every parent to `Evm(.{})` previously
+executed Osaka precompiles with default Cancun rules and could misread fields
+when configurations changed the parent layout.
+
+Standalone frame callers may leave `EvmType` null for the legacy default owner,
+or provide their concrete owner type. The opaque pointer passed to `init` must
+match that owner. The STATICCALL ModExp regression checks this type relationship
+and nested behavior for Prague/Osaka with fusion enabled and disabled.

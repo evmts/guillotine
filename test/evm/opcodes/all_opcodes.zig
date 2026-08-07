@@ -26,6 +26,7 @@ test {
     _ = @import("1b_test.zig");
     _ = @import("1c_test.zig");
     _ = @import("1d_test.zig");
+    _ = @import("1e_test.zig");
     _ = @import("20_test.zig");
     _ = @import("32_test.zig");
     _ = @import("33_test.zig");

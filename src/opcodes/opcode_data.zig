@@ -53,6 +53,8 @@ pub const OPCODE_INFO = blk: {
     info[0x1c] = .{ .gas_cost = GasConstants.GasFastestStep, .stack_inputs = 2, .stack_outputs = 1 }; // SHR
     info[0x1d] = .{ .gas_cost = GasConstants.GasFastestStep, .stack_inputs = 2, .stack_outputs = 1 }; // SAR
 
+    info[0x1e] = .{ .gas_cost = GasConstants.GasFastStep, .stack_inputs = 1, .stack_outputs = 1 }; // CLZ (Osaka)
+
     // 0x20s: Crypto
     info[0x20] = .{ .gas_cost = 30, .stack_inputs = 2, .stack_outputs = 1 }; // SHA3/KECCAK256 (dynamic, base cost)
 
@@ -148,6 +150,9 @@ pub const OPCODE_INFO = blk: {
 
 // Hardfork-specific opcode availability
 pub const HARDFORK_OPCODES = struct {
+    // EIP-7939: count leading zeros (Osaka)
+    pub const OSAKA_OPCODES = [_]u8{0x1e};
+
     // EIP-3855: PUSH0 opcode (Shanghai)
     pub const SHANGHAI_OPCODES = [_]u8{0x5f};
 

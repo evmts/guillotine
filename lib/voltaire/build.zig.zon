@@ -46,9 +46,10 @@
             .hash = "zbench-0.11.2-YTdc7zolAQDlBF9i0ywXIvDjafL3Kg27S-aFUq6dU5zy",
         },
         .clap = .{
-            // Pin to commit hash to prevent hash mismatches when branch updates
-            .url = "https://github.com/Hejsil/zig-clap/archive/3ae92228409d82a2c906fafc228b7920d9ff046b.tar.gz",
-            .hash = "clap-0.11.0-oBajB03nAQAvaRnlqid3PwE7E_JqPypon6NQoMlm9ekb",
+            // Pin the Zig 0.15.1-compatible release. Master now requires Zig 0.17;
+            // advance this revision together with the repository's Zig toolchain.
+            .url = "https://github.com/Hejsil/zig-clap/archive/5289e0753cd274d65344bef1c114284c633536ea.tar.gz",
+            .hash = "clap-0.11.0-oBajB-HnAQDPCKYzwF7rO3qDFwRcD39Q0DALlTSz5H7e",
         },
     },
 

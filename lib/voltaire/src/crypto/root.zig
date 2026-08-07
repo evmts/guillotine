@@ -31,6 +31,10 @@ pub const secp256k1 = @import("secp256k1.zig");
 const modexp_module = @import("modexp.zig");
 pub const ModExp = modexp_module.ModExp;
 
+test {
+    _ = modexp_module;
+}
+
 // Hash implementations
 pub const Hash = @import("hash.zig");
 pub const HashAlgorithms = @import("hash_algorithms.zig");
