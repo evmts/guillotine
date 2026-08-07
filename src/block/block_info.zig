@@ -47,10 +47,13 @@ pub fn BlockInfo(comptime config: BlockInfoConfig) type {
         /// Blob base fee for EIP-4844 (cold data)
         /// Set to 0 for non-Cancun hardforks
         blob_base_fee: BaseFeeType = 0,
-        /// Blob versioned hashes for EIP-4844 blob transactions (cold data)
-        /// Empty slice for non-blob transactions
-        /// TODO: this is a transaction-level setting (should be in TransactionContext)
+        /// Deprecated compatibility field. BLOBHASH reads versioned hashes from
+        /// TransactionContext; new callers must leave this empty.
         blob_versioned_hashes: []const [32]u8 = &.{},
+        /// Excess blob gas carried by the block header (EIP-4844).
+        excess_blob_gas: u64 = 0,
+        /// Blob gas consumed by all transactions in this block.
+        blob_gas_used: u64 = 0,
         /// Beacon block root for EIP-4788 (Dencun)
         /// Contains the parent beacon block root for trust-minimized access to consensus layer
         beacon_root: ?[32]u8 = null,
@@ -102,6 +105,8 @@ test "block info initialization" {
     try std.testing.expectEqual([_]u8{0} ** 32, block.prev_randao);
     try std.testing.expectEqual(@as(u256, 0), block.blob_base_fee);
     try std.testing.expectEqual(@as(usize, 0), block.blob_versioned_hashes.len);
+    try std.testing.expectEqual(@as(u64, 0), block.excess_blob_gas);
+    try std.testing.expectEqual(@as(u64, 0), block.blob_gas_used);
 }
 
 test "block info custom values" {
