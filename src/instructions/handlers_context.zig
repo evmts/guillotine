@@ -792,11 +792,8 @@ pub fn Handlers(FrameType: type) type {
                 const op_data = dispatch.getOpData(.BLOBHASH); // Use op_data.next_handler and op_data.next_cursor directly
                 return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             }
-            const index_usize = @as(usize, @intCast(index));
-            // Check if index is within bounds of versioned hashes
-            const block_info = self.getEvm().get_block_info();
-            if (index_usize < block_info.blob_versioned_hashes.len) {
-                const hash = block_info.blob_versioned_hashes[index_usize];
+            // Versioned hashes are transaction-level context, not block data.
+            if (self.getEvm().get_blob_hash(index)) |hash| {
                 // Convert [32]u8 to u256
                 var hash_value: u256 = 0;
                 for (hash) |byte| {
