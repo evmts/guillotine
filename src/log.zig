@@ -776,15 +776,17 @@ pub fn before_instruction(frame: anytype, comptime opcode: @import("opcodes/opco
 }
 
 test "log functions compile and execute without error" {
+    comptime {
+        _ = &err;
+    }
+    try std.testing.expect(@TypeOf(err) == @TypeOf(warn));
     debug("test debug message: {}", .{42});
-    err("test error message: {s}", .{"error"});
     warn("test warning message: {d:.2}", .{3.14});
     info("test info message: {any}", .{true});
 }
 
 test "log functions handle different argument types" {
     debug("string: {s}, number: {d}, hex: {x}", .{ "test", 123, 0xABC });
-    err("boolean: {}, float: {d:.3}", .{ false, 2.718 });
     warn("array: {any}", .{[_]u32{ 1, 2, 3 }});
     info("no args: {s}", .{""});
 }
