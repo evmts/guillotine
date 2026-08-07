@@ -8,6 +8,15 @@ pub const EipOverride = struct {
     enabled: bool,
 };
 
+pub const BlobValidationError = error{
+    BlobTransactionsDisabled,
+    NoBlobs,
+    TooManyBlobs,
+    MaxFeePerBlobGasTooLow,
+    InvalidVersionedHash,
+    BlobContractCreation,
+};
+
 // EIPs is a comptime known configuration of Eip and hardfork specific behavior
 // This struct consolidates all EIP-specific logic for the EVM
 pub const Eips = struct {
@@ -227,7 +236,6 @@ pub const Eips = struct {
         for (active_eips) |active_eip| if (active_eip == eip) return true;
         return false;
     }
-
 
     /// EIP-170: Get maximum contract code size based on hardfork
     pub fn eip_170_max_code_size(self: Self) u32 {
@@ -482,6 +490,91 @@ pub const Eips = struct {
         const gas_used = initial_gas - gas_left;
         const capped_refund = self.eip_3529_gas_refund_cap(gas_used, gas_refund_counter);
         return @min(initial_gas, gas_left + capped_refund);
+    }
+
+    /// Target blob gas per block for the configured hardfork.
+    pub fn target_blob_gas(self: Self) u64 {
+        if (!self.is_eip_active(4844)) return 0;
+        return if (self.hardfork.isAtLeast(.PRAGUE))
+            primitives.Blob.TARGET_BLOB_GAS_PER_BLOCK_PRAGUE
+        else
+            primitives.Blob.TARGET_BLOB_GAS_PER_BLOCK_CANCUN;
+    }
+
+    /// Maximum blob gas per block for the configured hardfork.
+    pub fn max_blob_gas(self: Self) u64 {
+        if (!self.is_eip_active(4844)) return 0;
+        return if (self.hardfork.isAtLeast(.PRAGUE))
+            primitives.Blob.MAX_BLOB_GAS_PER_BLOCK_PRAGUE
+        else
+            primitives.Blob.MAX_BLOB_GAS_PER_BLOCK_CANCUN;
+    }
+
+    /// Blob base-fee update fraction for the configured hardfork.
+    pub fn blob_base_fee_update_fraction(self: Self) u64 {
+        if (!self.is_eip_active(4844)) return 0;
+        return if (self.hardfork.isAtLeast(.PRAGUE))
+            primitives.Blob.BLOB_BASE_FEE_UPDATE_FRACTION_PRAGUE
+        else
+            primitives.Blob.BLOB_BASE_FEE_UPDATE_FRACTION_CANCUN;
+    }
+
+    /// Calculate the current blob gas price from excess blob gas.
+    pub fn blob_gas_price(self: Self, excess_gas: u64) u64 {
+        if (!self.is_eip_active(4844)) return 0;
+        return primitives.Blob.calculateBlobGasPriceWithFraction(
+            excess_gas,
+            self.blob_base_fee_update_fraction(),
+        );
+    }
+
+    /// Validate all EIP-4844 transaction-level constraints available to the EVM.
+    pub fn validate_blob_gas(
+        self: Self,
+        is_blob_transaction: bool,
+        blob_versioned_hashes: []const [32]u8,
+        max_fee_per_blob_gas: u256,
+        current_blob_base_fee: u256,
+        to: ?primitives.Address,
+    ) BlobValidationError!void {
+        if (!is_blob_transaction) return;
+        if (!self.is_eip_active(4844)) return BlobValidationError.BlobTransactionsDisabled;
+        if (to == null) return BlobValidationError.BlobContractCreation;
+        if (blob_versioned_hashes.len == 0) return BlobValidationError.NoBlobs;
+
+        const max_blobs = self.max_blob_gas() / primitives.Blob.BLOB_GAS_PER_BLOB;
+        if (blob_versioned_hashes.len > max_blobs) return BlobValidationError.TooManyBlobs;
+        if (max_fee_per_blob_gas < current_blob_base_fee) return BlobValidationError.MaxFeePerBlobGasTooLow;
+
+        for (blob_versioned_hashes) |hash| {
+            if (!primitives.Blob.isValidVersionedHash(.{ .bytes = hash })) {
+                return BlobValidationError.InvalidVersionedHash;
+            }
+        }
+    }
+
+    /// Actual burned blob fee for a transaction.
+    pub fn blob_gas_cost(self: Self, base_fee: u256, blob_count: usize) u256 {
+        if (!self.is_eip_active(4844)) return 0;
+        const blob_gas = @as(u256, blob_count) * primitives.Blob.BLOB_GAS_PER_BLOB;
+        return blob_gas *| base_fee;
+    }
+
+    /// Maximum blob cost used only for the upfront affordability check.
+    pub fn max_blob_gas_cost(self: Self, max_fee_per_blob_gas: u256, blob_count: usize) u256 {
+        if (!self.is_eip_active(4844)) return 0;
+        const blob_gas = @as(u256, blob_count) * primitives.Blob.BLOB_GAS_PER_BLOB;
+        return blob_gas *| max_fee_per_blob_gas;
+    }
+
+    /// Calculate excess blob gas for the next block.
+    pub fn excess_blob_gas(self: Self, parent_excess: u64, parent_blob_gas_used: u64) u64 {
+        if (!self.is_eip_active(4844)) return 0;
+        return primitives.Blob.calculateExcessBlobGasWithTarget(
+            parent_excess,
+            parent_blob_gas_used,
+            self.target_blob_gas(),
+        );
     }
 };
 
@@ -832,7 +925,6 @@ test "initcode_size_boundaries" {
     // Test that the limit doubled
     try std.testing.expectEqual(pre_shanghai.size_limit() * 2, post_shanghai.size_limit());
 }
-
 
 test "specific eip helper functions" {
     const frontier = Eips{ .hardfork = Hardfork.FRONTIER };

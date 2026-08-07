@@ -124,13 +124,12 @@ pub fn Evm(config: EvmConfig) type {
         /// Contracts marked for self-destruction (cold - only used in old hardforks)
         self_destruct: SelfDestruct,
 
-
         // State dump tracking - persists across calls
         /// Tracks all addresses that have been touched (for state dump)
         touched_addresses: std.AutoHashMap(primitives.Address, void),
         /// Tracks storage slots that have been modified (address -> list of storage keys)
         touched_storage: std.AutoHashMap(primitives.Address, std.ArrayList(u256)),
-        
+
         // Tracer - at the very bottom of memory layout for minimal impact on cache performance
         /// Tracer for debugging and logging - can be accessed via evm.tracer or frame.evm_ptr.tracer
         tracer: @import("tracer/tracer.zig").Tracer,
@@ -293,14 +292,14 @@ pub fn Evm(config: EvmConfig) type {
         /// State dump structure for post-state validation
         pub const StateDump = struct {
             accounts: std.StringHashMap(AccountState),
-            
+
             pub const AccountState = struct {
                 balance: u256,
                 nonce: u64,
                 code: []const u8,
                 storage: std.AutoHashMap(u256, u256),
             };
-            
+
             pub fn deinit(self: *StateDump, allocator: std.mem.Allocator) void {
                 var it = self.accounts.iterator();
                 while (it.next()) |entry| {
@@ -311,7 +310,7 @@ pub fn Evm(config: EvmConfig) type {
                 self.accounts.deinit();
             }
         };
-        
+
         /// Dump the current state of all touched accounts in the database.
         ///
         /// Creates a snapshot of all accounts that have been accessed or modified
@@ -346,13 +345,13 @@ pub fn Evm(config: EvmConfig) type {
                     log.debug("[DUMP] account not found in database", .{});
                     continue;
                 };
-                log.debug("[DUMP] found account: balance={d}, nonce={d}", .{account.balance, account.nonce});
-                
+                log.debug("[DUMP] found account: balance={d}, nonce={d}", .{ account.balance, account.nonce });
+
                 // Skip zero balance, zero nonce accounts with no code
                 if (account.balance == 0 and account.nonce == 0 and std.mem.eql(u8, &account.code_hash, &([_]u8{0} ** 32))) {
                     continue;
                 }
-                
+
                 // Convert address to hex string
                 var addr_hex: [42]u8 = undefined;
                 @memcpy(addr_hex[0..2], "0x");
@@ -362,17 +361,17 @@ pub fn Evm(config: EvmConfig) type {
                     addr_hex[2 + i * 2 + 1] = chars[byte & 0x0F];
                 }
                 const addr_str = try allocator.dupe(u8, &addr_hex);
-                
+
                 // Get code if present
                 var code: []u8 = &.{};
                 if (!std.mem.eql(u8, &account.code_hash, &([_]u8{0} ** 32))) {
                     const db_code = try self.database.get_code(account.code_hash);
                     code = try allocator.dupe(u8, db_code);
                 }
-                
+
                 // Get storage
                 var storage = std.AutoHashMap(u256, u256).init(allocator);
-                
+
                 // Get tracked storage slots for this address
                 if (self.touched_storage.get(addr)) |slots| {
                     for (slots.items) |slot| {
@@ -382,7 +381,7 @@ pub fn Evm(config: EvmConfig) type {
                         }
                     }
                 }
-                
+
                 try state_dump.accounts.put(addr_str, StateDump.AccountState{
                     .balance = account.balance,
                     .nonce = account.nonce,
@@ -390,7 +389,7 @@ pub fn Evm(config: EvmConfig) type {
                     .storage = storage,
                 });
             }
-            
+
             return state_dump;
         }
 
@@ -508,6 +507,47 @@ pub fn Evm(config: EvmConfig) type {
                 break :blk params.getGas() - intrinsic_gas;
             };
 
+            const blob_versioned_hashes = self.context.blob_versioned_hashes;
+            const blob_count = if (self.context.is_blob_transaction) blob_versioned_hashes.len else 0;
+            config.eips.validate_blob_gas(
+                self.context.is_blob_transaction,
+                blob_versioned_hashes,
+                self.context.max_fee_per_blob_gas,
+                self.block_info.blob_base_fee,
+                params.get_to(),
+            ) catch |err| {
+                log.err("Blob transaction validation failed: {s}", .{@errorName(err)});
+                return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+            };
+
+            const max_blob_gas_cost = config.eips.max_blob_gas_cost(
+                self.context.max_fee_per_blob_gas,
+                blob_count,
+            );
+
+            // Transaction validity is checked before nonce increment or execution.
+            // EIP-1559 reserves the fee cap, not the lower effective gas price.
+            if (!config.disable_balance_checks) {
+                const origin_account = self.database.get_account(self.origin.bytes) catch |err| {
+                    log.err("Failed to read origin account for upfront balance check: {s}", .{@errorName(err)});
+                    return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                };
+                const origin_balance = if (origin_account) |account| account.balance else 0;
+                const gas_fee_cap = self.context.max_fee_per_gas orelse self.gas_price;
+                const max_execution_cost = @mulWithOverflow(@as(u256, params.getGas()), gas_fee_cap);
+                if (max_execution_cost[1] != 0) {
+                    return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                }
+                const execution_and_value = @addWithOverflow(max_execution_cost[0], params.getValue());
+                if (execution_and_value[1] != 0) {
+                    return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                }
+                const required_balance = @addWithOverflow(execution_and_value[0], max_blob_gas_cost);
+                if (required_balance[1] != 0 or origin_balance < required_balance[0]) {
+                    return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                }
+            }
+
             // Increment origin nonce for top-level transactions (EIP-2718)
             // This must happen after gas deduction but before inner_call execution
             {
@@ -547,11 +587,16 @@ pub fn Evm(config: EvmConfig) type {
                 self.gas_refund_counter = 0;
             }
 
-            // Deduct gas fees from sender's balance and pay coinbase
+            // Blob fees are fully burned and are never credited to coinbase.
             const gas_consumed = initial_gas - result.gas_left;
-            if (gas_consumed > 0 and self.gas_price > 0) {
-                const gas_consumed_u256: u256 = @intCast(gas_consumed);
-                const total_gas_fee = self.gas_price * gas_consumed_u256;
+            const gas_consumed_u256: u256 = @intCast(gas_consumed);
+            const execution_gas_fee = self.gas_price * gas_consumed_u256;
+            const blob_gas_cost = config.eips.blob_gas_cost(
+                self.block_info.blob_base_fee,
+                blob_count,
+            );
+            const total_gas_fee = execution_gas_fee +| blob_gas_cost;
+            if (total_gas_fee > 0) {
 
                 // Get origin account
                 var origin_account = self.database.get_account(self.origin.bytes) catch |err| {
@@ -583,7 +628,7 @@ pub fn Evm(config: EvmConfig) type {
                 };
 
                 // Handle coinbase rewards (miner/validator payment)
-                if (config.eips.eip_1559_is_enabled()) {
+                if (config.eips.eip_1559_is_enabled() and execution_gas_fee > 0) {
                     // EIP-1559: Only priority fee goes to coinbase, base fee is burned
                     const base_fee = self.block_info.base_fee;
                     const priority_fee_per_gas = if (self.gas_price > base_fee)
@@ -611,8 +656,8 @@ pub fn Evm(config: EvmConfig) type {
                         };
                     }
                     // Base fee (total_gas_fee - coinbase_reward) is effectively burned
-                } else {
-                    // Pre-EIP-1559: All fees go to coinbase
+                } else if (execution_gas_fee > 0) {
+                    // Pre-EIP-1559: All execution fees go to coinbase.
                     var coinbase_account = self.database.get_account(self.block_info.coinbase.bytes) catch {
                         return result;
                     } orelse Account.zero();
@@ -621,7 +666,7 @@ pub fn Evm(config: EvmConfig) type {
                         return result;
                     };
 
-                    coinbase_account.balance += total_gas_fee;
+                    coinbase_account.balance += execution_gas_fee;
                     self.database.set_account(self.block_info.coinbase.bytes, coinbase_account) catch {
                         return result;
                     };

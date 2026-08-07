@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 members = ["lib/foundry-compilers", "lib/ark"]
-exclude = ["bench/evm-bench", "benchmarks"]
+exclude = ["bench/evm-bench", "benchmarks", "lib/voltaire"]
 
 [workspace.package]
 version = "0.1.0"

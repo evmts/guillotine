@@ -152,16 +152,21 @@ pub fn CallParams(config: anytype) type {
             };
         }
 
-        /// Check if this call operation transfers value
-        pub fn hasValue(self: @This()) bool {
+        /// Get the value transferred by this call operation.
+        pub fn getValue(self: @This()) u256 {
             return switch (self) {
-                .call => |params| params.value > 0,
-                .callcode => |params| params.value > 0,
-                .delegatecall => false, // DELEGATECALL preserves value from parent context
-                .staticcall => false, // STATICCALL cannot transfer value
-                .create => |params| params.value > 0,
-                .create2 => |params| params.value > 0,
+                .call => |params| params.value,
+                .callcode => |params| params.value,
+                .delegatecall => 0,
+                .staticcall => 0,
+                .create => |params| params.value,
+                .create2 => |params| params.value,
             };
+        }
+
+        /// Check if this call operation transfers value.
+        pub fn hasValue(self: @This()) bool {
+            return self.getValue() > 0;
         }
 
         /// Check if this is a read-only operation
