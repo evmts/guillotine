@@ -1,274 +1,334 @@
-//! Optimism-specific precompile modifications.
+//! OP Stack precompile changes by spec.
 //!
-//! This module provides precompile overrides for Optimism hardforks:
-//! - Fjord+: P256verify precompile for secp256r1 signature verification (RIP-7212)
-//! - Granite+: BN128 pairing precompile with input size limit
+//! Port of op-revm precompiles.rs:
+//! https://github.com/ethereum-optimism/optimism/blob/develop/rust/op-revm/src/precompiles.rs
 //!
-//! Based on the Rust implementation from op-revm:
-//! https://github.com/bluealloy/revm/blob/main/crates/op-revm/src/precompile.rs
+//! | Spec      | Change                                                                  |
+//! |-----------|-------------------------------------------------------------------------|
+//! | Fjord     | add P256VERIFY at 0x100 (RIP-7212, 3450 gas)                            |
+//! | Granite   | BN254 pairing (0x08) input <= 112,687 bytes                             |
+//! | Isthmus   | Prague BLS12-381 set; G1 MSM <= 513,760, G2 MSM <= 488,448,             |
+//! |           | pairing <= 235,008 bytes                                                |
+//! | Jovian    | BN254 pairing <= 81,984; G1 MSM <= 288,960; G2 MSM <= 278,784;          |
+//! |           | BLS pairing <= 156,672 bytes                                            |
+//!
+//! An input above a limit halts the call (op-revm `PrecompileHalt`): all gas is consumed.
+//! Here that is `error.InvalidInput` from the raw functions, and `success = false` with
+//! `gas_used = gas_limit` from the `overrides` adapters.
 
 const std = @import("std");
-const primitives = @import("primitives");
-const Address = primitives.Address.Address;
+const primitives = @import("voltaire");
+const Address = primitives.Address;
+const precompiles = @import("precompiles");
+const p256verify = precompiles.p256verify;
 const spec_mod = @import("spec.zig");
 const OpSpecId = spec_mod.OpSpecId;
 
-// Import precompile types from evm_config to avoid circular dependency
-const evm_config = @import("../../evm_config.zig");
-const PrecompileOverride = evm_config.PrecompileOverride;
-const PrecompileOutput = evm_config.PrecompileOutput;
+const PrecompileError = precompiles.PrecompileError;
+const PrecompileResult = precompiles.PrecompileResult;
 
-// P256verify constants (RIP-7212)
-// Address: 0x0000000000000000000000000000000000000100
-pub const P256_VERIFY_ADDRESS: Address = Address.fromU256(0x0000000000000000000000000000000000000100);
-pub const P256_VERIFY_GAS: u64 = 3450;
-pub const P256_INPUT_SIZE: usize = 160; // hash(32) + r(32) + s(32) + x(32) + y(32)
+pub const P256_VERIFY_ADDRESS: Address = p256verify.P256VERIFY_ADDRESS;
+pub const BN254_PAIRING_ADDRESS: Address = Address.fromU256(0x08);
+pub const BLS12_G1_MSM_ADDRESS: Address = Address.fromU256(0x0C);
+pub const BLS12_G2_MSM_ADDRESS: Address = Address.fromU256(0x0E);
+pub const BLS12_PAIRING_ADDRESS: Address = Address.fromU256(0x0F);
 
-// BN128 pairing constants for Granite
-// Address: 0x0000000000000000000000000000000000000008
-pub const BN128_PAIRING_ADDRESS: Address = Address.fromU256(0x0000000000000000000000000000000000000008);
-pub const BN128_MAX_PAIRS: usize = 64;
-pub const BN128_PAIR_SIZE: usize = 192; // 6 * 32 bytes per pair
-pub const BN128_MAX_INPUT: usize = BN128_MAX_PAIRS * BN128_PAIR_SIZE; // 12,288 bytes
+/// RIP-7212 gas on OP Stack Fjord through Jovian.
+pub const P256_VERIFY_GAS: u64 = p256verify.GAS_COST_RIP7212;
 
-/// P256verify precompile (RIP-7212).
-///
-/// Verifies a secp256r1 (P-256/NIST P-256) signature. This is used for
-/// WebAuthn/passkey support in smart contract wallets.
-///
-/// Input format (160 bytes):
-/// - bytes 0-31: message hash
-/// - bytes 32-63: signature r value
-/// - bytes 64-95: signature s value
-/// - bytes 96-127: public key x coordinate
-/// - bytes 128-159: public key y coordinate
-///
-/// Output:
-/// - 32 bytes containing 1 if signature is valid, empty otherwise
-///
-/// NOTE: This implementation is stubbed - actual P256 crypto not yet available
-/// in the primitives package. Returns invalid for all inputs until crypto is added.
-pub fn p256Verify(
-    allocator: std.mem.Allocator,
-    input: []const u8,
-    gas_limit: u64,
-) anyerror!PrecompileOutput {
-    // Check gas
-    if (gas_limit < P256_VERIFY_GAS) {
-        return PrecompileOutput{
-            .output = &.{},
-            .gas_used = gas_limit,
-            .success = false,
-        };
-    }
+pub const BN254_PAIRING_MAX_INPUT_GRANITE: usize = 112_687;
+pub const BN254_PAIRING_MAX_INPUT_JOVIAN: usize = 81_984;
+pub const BLS12_G1_MSM_MAX_INPUT_ISTHMUS: usize = 513_760;
+pub const BLS12_G1_MSM_MAX_INPUT_JOVIAN: usize = 288_960;
+pub const BLS12_G2_MSM_MAX_INPUT_ISTHMUS: usize = 488_448;
+pub const BLS12_G2_MSM_MAX_INPUT_JOVIAN: usize = 278_784;
+pub const BLS12_PAIRING_MAX_INPUT_ISTHMUS: usize = 235_008;
+pub const BLS12_PAIRING_MAX_INPUT_JOVIAN: usize = 156_672;
 
-    // Invalid input length returns empty (not an error)
-    if (input.len != P256_INPUT_SIZE) {
-        return PrecompileOutput{
-            .output = &.{},
-            .gas_used = P256_VERIFY_GAS,
-            .success = true,
-        };
-    }
+/// Raw precompile signature shared by voltaire precompiles.
+pub const RawFn = fn (std.mem.Allocator, []const u8, u64) PrecompileError!PrecompileResult;
 
-    // Parse input components
-    const hash = input[0..32];
-    const r = input[32..64];
-    const s = input[64..96];
-    const x = input[96..128];
-    const y = input[128..160];
-
-    // Verify secp256r1 signature
-    // TODO: Implement actual P256 verification when crypto library is available
-    // For now, stub returns false (invalid signature) for all inputs
-    const valid = verifyP256Signature(hash, r, s, x, y);
-
-    if (valid) {
-        // Return 32 bytes with value 1
-        var output = try allocator.alloc(u8, 32);
-        @memset(output[0..31], 0);
-        output[31] = 1;
-        return PrecompileOutput{
-            .output = output,
-            .gas_used = P256_VERIFY_GAS,
-            .success = true,
-        };
-    }
-
-    // Invalid signature returns empty output
-    return PrecompileOutput{
-        .output = &.{},
-        .gas_used = P256_VERIFY_GAS,
-        .success = true,
-    };
+/// P256VERIFY at RIP-7212 gas.
+pub fn p256Verify(allocator: std.mem.Allocator, input: []const u8, gas_limit: u64) PrecompileError!PrecompileResult {
+    return p256verify.execute(allocator, input, gas_limit, P256_VERIFY_GAS);
 }
 
-/// Stub for P256 signature verification.
-/// Returns false until actual crypto implementation is available.
-fn verifyP256Signature(
-    hash: *const [32]u8,
-    r: *const [32]u8,
-    s: *const [32]u8,
-    x: *const [32]u8,
-    y: *const [32]u8,
-) bool {
-    // Suppress unused parameter warnings
-    _ = hash;
-    _ = r;
-    _ = s;
-    _ = x;
-    _ = y;
-
-    // TODO: Implement actual secp256r1 verification
-    // Once primitives package has P256 support:
-    // return crypto.p256.verify(hash, r, s, x, y) catch false;
-    return false;
+fn limited(comptime max_input: usize, comptime inner: RawFn) RawFn {
+    return struct {
+        fn run(allocator: std.mem.Allocator, input: []const u8, gas_limit: u64) PrecompileError!PrecompileResult {
+            if (input.len > max_input) return error.InvalidInput;
+            return inner(allocator, input, gas_limit);
+        }
+    }.run;
 }
 
-/// BN128 pairing precompile with Granite input limit.
-///
-/// Granite hardfork limits the BN128 pairing precompile to a maximum of
-/// 64 pairs (12,288 bytes input). This prevents DoS attacks using excessive
-/// pairing operations.
-///
-/// This is a wrapper that enforces the limit then delegates to the standard
-/// BN128 pairing implementation.
-pub fn bn128PairingWithLimit(
-    allocator: std.mem.Allocator,
-    input: []const u8,
-    gas_limit: u64,
-) anyerror!PrecompileOutput {
-    // Granite enforces max 64 pairs
-    if (input.len > BN128_MAX_INPUT) {
-        // Return failure for inputs exceeding limit
-        return PrecompileOutput{
-            .output = &.{},
-            .gas_used = gas_limit,
-            .success = false,
-        };
-    }
+pub const bn254PairingGranite = limited(BN254_PAIRING_MAX_INPUT_GRANITE, precompiles.bn254_pairing.execute);
+pub const bn254PairingJovian = limited(BN254_PAIRING_MAX_INPUT_JOVIAN, precompiles.bn254_pairing.execute);
+pub const bls12G1MsmIsthmus = limited(BLS12_G1_MSM_MAX_INPUT_ISTHMUS, precompiles.bls12_g1_msm.execute);
+pub const bls12G1MsmJovian = limited(BLS12_G1_MSM_MAX_INPUT_JOVIAN, precompiles.bls12_g1_msm.execute);
+pub const bls12G2MsmIsthmus = limited(BLS12_G2_MSM_MAX_INPUT_ISTHMUS, precompiles.bls12_g2_msm.execute);
+pub const bls12G2MsmJovian = limited(BLS12_G2_MSM_MAX_INPUT_JOVIAN, precompiles.bls12_g2_msm.execute);
+pub const bls12PairingIsthmus = limited(BLS12_PAIRING_MAX_INPUT_ISTHMUS, precompiles.bls12_pairing.execute);
+pub const bls12PairingJovian = limited(BLS12_PAIRING_MAX_INPUT_JOVIAN, precompiles.bls12_pairing.execute);
 
-    // Delegate to standard BN128 pairing implementation
-    // Import from precompiles module
-    const precompiles = @import("precompiles");
-    return precompiles.bn128Pairing(allocator, input, gas_limit);
-}
+/// One OP-specific precompile entry for a spec.
+pub const Entry = struct {
+    address: Address,
+    execute: *const RawFn,
+};
 
-/// Get Optimism-specific precompile overrides based on hardfork spec.
-///
-/// This function returns precompile overrides that should be applied
-/// when running with the given OpSpecId:
-/// - Fjord+: Adds P256verify at address 0x100
-/// - Granite+: Overrides BN128 pairing at address 0x08 with input limit
-///
-/// Usage:
-/// ```zig
-/// const config = EvmConfig{
-///     .layer2_config = .{ .optimism = .{ .spec = .FJORD } },
-///     .precompile_overrides = getOptimismPrecompileOverrides(.FJORD),
-/// };
-/// ```
-pub fn getOptimismPrecompileOverrides(comptime spec: OpSpecId) []const PrecompileOverride {
-    comptime {
-        var count: usize = 0;
-
-        // Count overrides
-        if (spec.isAtLeast(.FJORD)) count += 1;
-        if (spec.isAtLeast(.GRANITE)) count += 1;
-
-        if (count == 0) return &.{};
-
-        var overrides: [count]PrecompileOverride = undefined;
-        var idx: usize = 0;
-
-        // Fjord+: Add P256verify
+/// OP-specific precompile entries for `spec`. Each entry adds or replaces the
+/// mainnet precompile at its address for the underlying Ethereum hardfork
+/// (`spec.toEthHardfork()`).
+pub fn entries(comptime spec: OpSpecId) []const Entry {
+    const table = comptime blk: {
+        var list: []const Entry = &.{};
         if (spec.isAtLeast(.FJORD)) {
-            overrides[idx] = .{
-                .address = P256_VERIFY_ADDRESS,
-                .execute = &p256Verify,
-            };
-            idx += 1;
+            list = list ++ [_]Entry{.{ .address = P256_VERIFY_ADDRESS, .execute = &p256Verify }};
         }
-
-        // Granite+: Override BN128 pairing with input limit
-        if (spec.isAtLeast(.GRANITE)) {
-            overrides[idx] = .{
-                .address = BN128_PAIRING_ADDRESS,
-                .execute = &bn128PairingWithLimit,
-            };
-            idx += 1;
+        if (spec.isAtLeast(.JOVIAN)) {
+            list = list ++ [_]Entry{.{ .address = BN254_PAIRING_ADDRESS, .execute = &bn254PairingJovian }};
+        } else if (spec.isAtLeast(.GRANITE)) {
+            list = list ++ [_]Entry{.{ .address = BN254_PAIRING_ADDRESS, .execute = &bn254PairingGranite }};
         }
-
-        return &overrides;
-    }
+        if (spec.isAtLeast(.JOVIAN)) {
+            list = list ++ [_]Entry{
+                .{ .address = BLS12_G1_MSM_ADDRESS, .execute = &bls12G1MsmJovian },
+                .{ .address = BLS12_G2_MSM_ADDRESS, .execute = &bls12G2MsmJovian },
+                .{ .address = BLS12_PAIRING_ADDRESS, .execute = &bls12PairingJovian },
+            };
+        } else if (spec.isAtLeast(.ISTHMUS)) {
+            list = list ++ [_]Entry{
+                .{ .address = BLS12_G1_MSM_ADDRESS, .execute = &bls12G1MsmIsthmus },
+                .{ .address = BLS12_G2_MSM_ADDRESS, .execute = &bls12G2MsmIsthmus },
+                .{ .address = BLS12_PAIRING_ADDRESS, .execute = &bls12PairingIsthmus },
+            };
+        }
+        break :blk list[0..list.len].*;
+    };
+    return &table;
 }
 
+/// True if `address` is P256VERIFY under `spec` (the only OP-added address).
+pub fn isOpPrecompile(address: Address, spec: OpSpecId) bool {
+    return spec.isAtLeast(.FJORD) and address.toU256() == P256_VERIFY_ADDRESS.toU256();
+}
+
+/// Build EVM precompile overrides for `spec`.
+///
+/// `Override` must have fields `address: Address` and
+/// `execute: *const fn (std.mem.Allocator, []const u8, u64) anyerror!Output`, where `Output`
+/// has fields `output: []const u8`, `gas_used: u64`, `success: bool`
+/// (this matches `PrecompileOverride` in src/evm_config.zig). Taking the type as a
+/// parameter keeps this module free of an import cycle with the EVM.
+///
+/// Adapter semantics:
+/// - success: `output` is allocated by the allocator passed in; the caller frees it.
+/// - precompile failure (out of gas, input limit, invalid input/point/pairing):
+///   `success = false`, `gas_used = gas_limit`, empty output.
+/// - `error.OutOfMemory` propagates.
+pub fn overrides(comptime Override: type, comptime spec: OpSpecId) []const Override {
+    const table = comptime blk: {
+        const list = entries(spec);
+        var out: [list.len]Override = undefined;
+        for (list, 0..) |entry, i| {
+            out[i] = .{ .address = entry.address, .execute = &adapt(Override, entry.execute.*) };
+        }
+        break :blk out;
+    };
+    return &table;
+}
+
+fn OutputOf(comptime Override: type) type {
+    const exec_ptr = @typeInfo(@FieldType(Override, "execute")).pointer.child;
+    const ret = @typeInfo(exec_ptr).@"fn".return_type.?;
+    return @typeInfo(ret).error_union.payload;
+}
+
+fn adapt(comptime Override: type, comptime raw: RawFn) fn (std.mem.Allocator, []const u8, u64) anyerror!OutputOf(Override) {
+    const Output = OutputOf(Override);
+    return struct {
+        fn run(allocator: std.mem.Allocator, input: []const u8, gas_limit: u64) anyerror!Output {
+            const result = raw(allocator, input, gas_limit) catch |err| switch (err) {
+                error.OutOfMemory => return error.OutOfMemory,
+                error.InvalidInput,
+                error.InvalidSignature,
+                error.InvalidPoint,
+                error.InvalidPairing,
+                error.OutOfGas,
+                error.NotImplemented,
+                error.ExecutionError,
+                error.StateError,
+                error.MemoryError,
+                error.InvalidOutputSize,
+                error.Unknown,
+                => return Output{ .output = &.{}, .gas_used = gas_limit, .success = false },
+            };
+            return Output{ .output = result.output, .gas_used = result.gas_used, .success = true };
+        }
+    }.run;
+}
+
+// ============================================================================
 // Tests
+// ============================================================================
 
-test "P256verify - insufficient gas" {
-    const result = try p256Verify(std.testing.allocator, &[_]u8{0} ** 160, 100);
-    try std.testing.expectEqual(@as(u64, 100), result.gas_used);
-    try std.testing.expect(!result.success);
-    try std.testing.expectEqual(@as(usize, 0), result.output.len);
+const testing = std.testing;
+
+/// Mirror of src/evm_config.zig PrecompileOverride/PrecompileOutput.
+const TestOutput = struct {
+    output: []const u8,
+    gas_used: u64,
+    success: bool,
+};
+const TestOverride = struct {
+    address: Address,
+    execute: *const fn (allocator: std.mem.Allocator, input: []const u8, gas_limit: u64) anyerror!TestOutput,
+};
+
+fn hexToBytes(comptime hex: []const u8) [hex.len / 2]u8 {
+    var out: [hex.len / 2]u8 = undefined;
+    _ = std.fmt.hexToBytes(&out, hex) catch unreachable;
+    return out;
 }
 
-test "P256verify - invalid input length" {
-    // Too short
-    const result_short = try p256Verify(std.testing.allocator, &[_]u8{0} ** 100, 5000);
-    try std.testing.expectEqual(@as(u64, P256_VERIFY_GAS), result_short.gas_used);
-    try std.testing.expect(result_short.success);
-    try std.testing.expectEqual(@as(usize, 0), result_short.output.len);
+const rip7212_reference = hexToBytes(
+    "4cee90eb86eaa050036147a12d49004b6b9c72bd725d39d4785011fe190f0b4d" ++
+        "a73bd4903f0ce3b639bbbf6e8e80d16931ff4bcf5993d58468e8fb19086e8cac" ++
+        "36dbcd03009df8c59286b162af3bd7fcc0450c9aa81be5d10d312af6c66b1d60" ++
+        "4aebd3099c618202fcfe16ae7770b0c49ab5eadf74b754204a3bb6060e44eff3" ++
+        "7618b065f9832de4ca6ca971a7a1adc826d0f7c00181a5fb2ddf79ae00b4e10e",
+);
 
-    // Too long
-    const result_long = try p256Verify(std.testing.allocator, &[_]u8{0} ** 200, 5000);
-    try std.testing.expectEqual(@as(u64, P256_VERIFY_GAS), result_long.gas_used);
-    try std.testing.expect(result_long.success);
-    try std.testing.expectEqual(@as(usize, 0), result_long.output.len);
+test "constants" {
+    try testing.expectEqual(@as(u256, 0x100), P256_VERIFY_ADDRESS.toU256());
+    try testing.expectEqual(@as(u64, 3450), P256_VERIFY_GAS);
+    try testing.expectEqual(@as(u256, 0x08), BN254_PAIRING_ADDRESS.toU256());
+    try testing.expectEqual(@as(usize, 112_687), BN254_PAIRING_MAX_INPUT_GRANITE);
+    try testing.expectEqual(@as(usize, 81_984), BN254_PAIRING_MAX_INPUT_JOVIAN);
+    // Jovian limits are whole pairs/points: 427*192, 1806*160, 968*288, 408*384 bytes.
+    try testing.expectEqual(@as(usize, 427 * 192), BN254_PAIRING_MAX_INPUT_JOVIAN);
+    try testing.expectEqual(@as(usize, 1806 * 160), BLS12_G1_MSM_MAX_INPUT_JOVIAN);
+    try testing.expectEqual(@as(usize, 968 * 288), BLS12_G2_MSM_MAX_INPUT_JOVIAN);
+    try testing.expectEqual(@as(usize, 408 * 384), BLS12_PAIRING_MAX_INPUT_JOVIAN);
 }
 
-test "P256verify - valid input length (stub returns invalid)" {
-    const result = try p256Verify(std.testing.allocator, &[_]u8{0} ** 160, 5000);
-    try std.testing.expectEqual(@as(u64, P256_VERIFY_GAS), result.gas_used);
-    try std.testing.expect(result.success);
-    // Stub always returns empty (invalid signature)
-    try std.testing.expectEqual(@as(usize, 0), result.output.len);
+test "p256Verify verifies the RIP-7212 reference vector at 3450 gas" {
+    const result = try p256Verify(testing.allocator, &rip7212_reference, 3450);
+    defer result.deinit(testing.allocator);
+    try testing.expectEqual(@as(u64, 3450), result.gas_used);
+    try testing.expectEqual(@as(usize, 32), result.output.len);
+    try testing.expectEqual(@as(u8, 1), result.output[31]);
+    try testing.expectError(error.OutOfGas, p256Verify(testing.allocator, &rip7212_reference, 3449));
 }
 
-test "BN128 pairing limit - input too large" {
-    // Create input larger than limit
-    var large_input: [BN128_MAX_INPUT + 192]u8 = undefined;
-    @memset(&large_input, 0);
+test "p256Verify matches all go-ethereum / Wycheproof vectors at RIP-7212 gas" {
+    const data = @embedFile("testdata/p256verify_vectors.txt");
+    var lines = std.mem.tokenizeScalar(u8, data, '\n');
+    var count: usize = 0;
+    var valid: usize = 0;
+    while (lines.next()) |line| {
+        if (line[0] == '#') continue;
+        var fields = std.mem.tokenizeScalar(u8, line, ' ');
+        const expected = fields.next().?;
+        _ = fields.next().?; // EIP-7951 gas (6900); RIP-7212 charges 3450 for the same result.
+        const hex = fields.next().?;
+        var input: [160]u8 = undefined;
+        try testing.expectEqual(@as(usize, 320), hex.len);
+        _ = try std.fmt.hexToBytes(&input, hex);
 
-    const result = try bn128PairingWithLimit(std.testing.allocator, &large_input, 100000);
-    try std.testing.expect(!result.success);
+        const result = try p256Verify(testing.allocator, &input, P256_VERIFY_GAS);
+        defer result.deinit(testing.allocator);
+        try testing.expectEqual(P256_VERIFY_GAS, result.gas_used);
+        if (expected[0] == '1') {
+            try testing.expectEqual(@as(usize, 32), result.output.len);
+            try testing.expectEqualSlices(u8, &([_]u8{0} ** 31 ++ [_]u8{1}), result.output);
+            valid += 1;
+        } else {
+            try testing.expectEqual(@as(usize, 0), result.output.len);
+        }
+        count += 1;
+    }
+    try testing.expectEqual(@as(usize, 782), count);
+    try testing.expectEqual(@as(usize, 567), valid);
 }
 
-test "constants - P256 address" {
-    try std.testing.expectEqual(@as(u256, 0x100), P256_VERIFY_ADDRESS.toU256());
+test "Granite BN254 pairing limit: 112,687 bytes allowed size, above rejected" {
+    // 112,687 is not a multiple of 192, so the largest well-formed input is 586 pairs.
+    var buf: [BN254_PAIRING_MAX_INPUT_GRANITE + 1]u8 = undefined;
+    @memset(&buf, 0);
+    try testing.expectError(error.InvalidInput, bn254PairingGranite(testing.allocator, &buf, std.math.maxInt(u64)));
+    // Inside the limit the call reaches the BN254 implementation (infinity pairs succeed).
+    const pairs = 586 * 192;
+    try testing.expect(pairs <= BN254_PAIRING_MAX_INPUT_GRANITE);
+    const ok = try bn254PairingGranite(testing.allocator, buf[0..pairs], std.math.maxInt(u64));
+    defer ok.deinit(testing.allocator);
+    try testing.expectEqual(@as(u64, 45_000 + 34_000 * 586), ok.gas_used);
 }
 
-test "constants - BN128 pairing address" {
-    try std.testing.expectEqual(@as(u256, 0x08), BN128_PAIRING_ADDRESS.toU256());
+test "Jovian BN254 pairing limit: 427 pairs allowed, 428 rejected" {
+    var buf: [428 * 192]u8 = undefined;
+    @memset(&buf, 0);
+    try testing.expectError(error.InvalidInput, bn254PairingJovian(testing.allocator, &buf, std.math.maxInt(u64)));
+    const ok = try bn254PairingJovian(testing.allocator, buf[0 .. 427 * 192], std.math.maxInt(u64));
+    defer ok.deinit(testing.allocator);
+    try testing.expectEqual(@as(u64, 45_000 + 34_000 * 427), ok.gas_used);
 }
 
-test "constants - BN128 max input" {
-    try std.testing.expectEqual(@as(usize, 12288), BN128_MAX_INPUT);
-    try std.testing.expectEqual(@as(usize, 64), BN128_MAX_PAIRS);
-    try std.testing.expectEqual(@as(usize, 192), BN128_PAIR_SIZE);
+test "entries per spec" {
+    try testing.expectEqual(@as(usize, 0), entries(.ECOTONE).len);
+    try testing.expectEqual(@as(usize, 1), entries(.FJORD).len);
+    try testing.expectEqual(@as(usize, 2), entries(.GRANITE).len);
+    try testing.expectEqual(@as(usize, 2), entries(.HOLOCENE).len);
+    try testing.expectEqual(@as(usize, 5), entries(.ISTHMUS).len);
+    try testing.expectEqual(@as(usize, 5), entries(.JOVIAN).len);
+    try testing.expect(entries(.GRANITE)[1].execute == &bn254PairingGranite);
+    try testing.expect(entries(.JOVIAN)[1].execute == &bn254PairingJovian);
+    try testing.expect(entries(.ISTHMUS)[2].execute == &bls12G1MsmIsthmus);
+    try testing.expect(entries(.JOVIAN)[2].execute == &bls12G1MsmJovian);
 }
 
-test "getOptimismPrecompileOverrides - pre-Fjord returns empty" {
-    const overrides = getOptimismPrecompileOverrides(.ECOTONE);
-    try std.testing.expectEqual(@as(usize, 0), overrides.len);
+test "isOpPrecompile gates 0x100 on Fjord" {
+    try testing.expect(!isOpPrecompile(P256_VERIFY_ADDRESS, .ECOTONE));
+    try testing.expect(isOpPrecompile(P256_VERIFY_ADDRESS, .FJORD));
+    try testing.expect(isOpPrecompile(P256_VERIFY_ADDRESS, .JOVIAN));
+    try testing.expect(!isOpPrecompile(BN254_PAIRING_ADDRESS, .JOVIAN));
 }
 
-test "getOptimismPrecompileOverrides - Fjord adds P256" {
-    const overrides = getOptimismPrecompileOverrides(.FJORD);
-    try std.testing.expectEqual(@as(usize, 1), overrides.len);
-    try std.testing.expectEqual(P256_VERIFY_ADDRESS.toU256(), overrides[0].address.toU256());
+test "overrides adapter: P256 success, out of gas, and limit failure" {
+    const list = overrides(TestOverride, .JOVIAN);
+    try testing.expectEqual(@as(usize, 5), list.len);
+    try testing.expectEqual(P256_VERIFY_ADDRESS.toU256(), list[0].address.toU256());
+
+    const ok = try list[0].execute(testing.allocator, &rip7212_reference, 10_000);
+    defer testing.allocator.free(ok.output);
+    try testing.expect(ok.success);
+    try testing.expectEqual(@as(u64, 3450), ok.gas_used);
+    try testing.expectEqual(@as(u8, 1), ok.output[31]);
+
+    const oog = try list[0].execute(testing.allocator, &rip7212_reference, 100);
+    try testing.expect(!oog.success);
+    try testing.expectEqual(@as(u64, 100), oog.gas_used);
+
+    var big: [BN254_PAIRING_MAX_INPUT_JOVIAN + 192]u8 = undefined;
+    @memset(&big, 0);
+    const too_big = try list[1].execute(testing.allocator, &big, 5_000_000);
+    try testing.expect(!too_big.success);
+    try testing.expectEqual(@as(u64, 5_000_000), too_big.gas_used);
 }
 
-test "getOptimismPrecompileOverrides - Granite adds both" {
-    const overrides = getOptimismPrecompileOverrides(.GRANITE);
-    try std.testing.expectEqual(@as(usize, 2), overrides.len);
+test "overrides adapter: invalid P256 signature succeeds with empty output" {
+    var input = rip7212_reference;
+    input[0] ^= 1;
+    const list = overrides(TestOverride, .FJORD);
+    const result = try list[0].execute(testing.allocator, &input, 10_000);
+    defer testing.allocator.free(result.output);
+    try testing.expect(result.success);
+    try testing.expectEqual(@as(usize, 0), result.output.len);
+    try testing.expectEqual(@as(u64, 3450), result.gas_used);
+}
+
+test "overrides pre-Fjord is empty" {
+    try testing.expectEqual(@as(usize, 0), overrides(TestOverride, .BEDROCK).len);
+    try testing.expectEqual(@as(usize, 0), overrides(TestOverride, .ECOTONE).len);
 }

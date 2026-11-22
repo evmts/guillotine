@@ -1,124 +1,111 @@
-/// Layer 2 configuration union type.
+/// Layer 2 configuration union.
 ///
-/// This type enables compile-time selection of L2-specific features.
-/// When set to .none (default), all L2 code is eliminated through
-/// dead code elimination, resulting in zero runtime overhead.
+/// Compile-time selection of L2 features. With `.none` (default) no L2 code is
+/// referenced, so it is eliminated from the binary.
 const std = @import("std");
 const OpSpecId = @import("optimism/spec.zig").OpSpecId;
+const base_config = @import("base/config.zig");
 
-/// Layer2Config is a comptime-friendly union that controls which L2
-/// features are compiled into the EVM.
-///
-/// Zero-cost abstraction: When layer2_config = .none, all L2 code
-/// paths are eliminated at compile time via comptime branching.
+pub const BaseConfig = base_config.BaseConfig;
+
 pub const Layer2Config = union(enum) {
-    /// No Layer 2 features (Ethereum mainnet).
-    /// This is the default and results in zero L2 overhead.
+    /// Ethereum L1 rules.
     none,
-
-    /// Optimism L2 configuration.
-    /// Includes all OP Stack chains: Base, Zora, OP Mainnet, etc.
+    /// A generic OP Stack chain (OP Mainnet, Zora, ...).
     optimism: OptimismConfig,
+    /// Base Mainnet or Base Sepolia (OP Stack rules with Base chain parameters).
+    base: BaseConfig,
 
-    /// Check if this config enables any L2 features.
     pub fn isL2(self: Layer2Config) bool {
         return switch (self) {
             .none => false,
-            .optimism => true,
+            .optimism, .base => true,
         };
     }
 
-    /// Get human-readable name for this L2 config.
+    /// True if OP Stack execution rules apply (deposits, L1 fee, OP precompiles).
+    pub fn isOpStack(self: Layer2Config) bool {
+        return switch (self) {
+            .none => false,
+            .optimism, .base => true,
+        };
+    }
+
+    /// OP Stack spec for OP Stack configs, null for `.none`.
+    pub fn opSpec(self: Layer2Config) ?OpSpecId {
+        return switch (self) {
+            .none => null,
+            .optimism => |cfg| cfg.spec,
+            .base => |cfg| cfg.spec,
+        };
+    }
+
     pub fn name(self: Layer2Config) []const u8 {
         return switch (self) {
             .none => "mainnet",
             .optimism => "optimism",
+            .base => |cfg| cfg.chain.name(),
         };
     }
 };
 
-/// Optimism-specific configuration.
-///
-/// This struct contains all parameters needed for Optimism L2 execution.
-/// It must be comptime-friendly (no pointers, no allocators).
+/// Generic OP Stack configuration.
 pub const OptimismConfig = struct {
-    /// Optimism hardfork specification.
-    /// Determines which L2 features are active.
     spec: OpSpecId,
 
-    /// Default Optimism configuration.
-    /// Uses the latest stable OpSpecId.
-    pub const DEFAULT = OptimismConfig{
-        .spec = OpSpecId.DEFAULT,
-    };
+    pub const DEFAULT = OptimismConfig{ .spec = OpSpecId.DEFAULT };
 };
 
-test "Layer2Config default is none" {
+test "Layer2Config none" {
     const cfg: Layer2Config = .none;
     try std.testing.expect(!cfg.isL2());
+    try std.testing.expect(!cfg.isOpStack());
+    try std.testing.expect(cfg.opSpec() == null);
     try std.testing.expectEqualStrings("mainnet", cfg.name());
 }
 
-test "Layer2Config optimism is L2" {
+test "Layer2Config optimism" {
     const cfg: Layer2Config = .{ .optimism = OptimismConfig.DEFAULT };
     try std.testing.expect(cfg.isL2());
+    try std.testing.expect(cfg.isOpStack());
+    try std.testing.expectEqual(OpSpecId.JOVIAN, cfg.opSpec().?);
     try std.testing.expectEqualStrings("optimism", cfg.name());
 }
 
-test "Layer2Config none has no runtime overhead" {
-    const cfg: Layer2Config = .none;
+test "Layer2Config base mainnet and sepolia" {
+    const mainnet: Layer2Config = .{ .base = BaseConfig.MAINNET };
+    try std.testing.expect(mainnet.isL2());
+    try std.testing.expect(mainnet.isOpStack());
+    try std.testing.expectEqual(OpSpecId.JOVIAN, mainnet.opSpec().?);
+    try std.testing.expectEqualStrings("base", mainnet.name());
+    try std.testing.expectEqual(@as(u64, 8453), mainnet.base.chainId());
 
-    // This entire block is eliminated at compile time
-    if (comptime cfg == .none) {
-        // Comptime branch - no runtime code generated
-        try std.testing.expect(true);
-    } else {
-        // This is never compiled when cfg = .none
-        try std.testing.expect(false);
-    }
-}
-
-test "OptimismConfig default uses default spec" {
-    const cfg = OptimismConfig.DEFAULT;
-    try std.testing.expectEqual(OpSpecId.DEFAULT, cfg.spec);
-}
-
-test "OptimismConfig can specify custom spec" {
-    const cfg = OptimismConfig{ .spec = .ECOTONE };
-    try std.testing.expectEqual(OpSpecId.ECOTONE, cfg.spec);
+    const sepolia: Layer2Config = .{ .base = .{ .chain = .sepolia, .spec = .FJORD } };
+    try std.testing.expectEqualStrings("base-sepolia", sepolia.name());
+    try std.testing.expectEqual(OpSpecId.FJORD, sepolia.opSpec().?);
+    try std.testing.expectEqual(@as(u64, 84532), sepolia.base.chainId());
 }
 
 test "Layer2Config is comptime friendly" {
     comptime {
-        const cfg: Layer2Config = .none;
-        _ = cfg.isL2();
-        _ = cfg.name();
-    }
-
-    comptime {
-        const cfg: Layer2Config = .{ .optimism = .{ .spec = .FJORD } };
-        _ = cfg.isL2();
-        _ = cfg.name();
+        const configs = [_]Layer2Config{
+            .none,
+            .{ .optimism = .{ .spec = .FJORD } },
+            .{ .base = BaseConfig.SEPOLIA },
+        };
+        for (configs) |cfg| {
+            _ = cfg.isL2();
+            _ = cfg.name();
+            _ = cfg.opSpec();
+        }
     }
 }
 
-test "Layer2Config all variants" {
-    const configs = [_]Layer2Config{
-        .none,
-        .{ .optimism = .{ .spec = .BEDROCK } },
-        .{ .optimism = .{ .spec = .REGOLITH } },
-        .{ .optimism = .{ .spec = .CANYON } },
-        .{ .optimism = .{ .spec = .ECOTONE } },
-        .{ .optimism = .{ .spec = .FJORD } },
-        .{ .optimism = .{ .spec = .GRANITE } },
-        .{ .optimism = .{ .spec = .HOLOCENE } },
-        .{ .optimism = .{ .spec = .ISTHMUS } },
-        .{ .optimism = .{ .spec = .INTEROP } },
-        .{ .optimism = .{ .spec = .OSAKA } },
-    };
-
-    for (configs) |cfg| {
-        _ = cfg.isL2();
-        _ = cfg.name();
+test "Layer2Config every spec for optimism and base" {
+    for (OpSpecId.ALL) |spec| {
+        const op: Layer2Config = .{ .optimism = .{ .spec = spec } };
+        try std.testing.expectEqual(spec, op.opSpec().?);
+        const base: Layer2Config = .{ .base = .{ .chain = .mainnet, .spec = spec } };
+        try std.testing.expectEqual(spec, base.opSpec().?);
     }
 }

@@ -1,215 +1,60 @@
-//! L1 Block Info and L1 fee calculation for Optimism.
+//! L1 block attributes and the OP Stack L1 data fee and operator fee.
 //!
-//! Based on the Rust implementation from op-revm:
-//! https://github.com/bluealloy/revm/blob/main/crates/op-revm/src/l1block.rs
+//! Port of op-revm l1block.rs:
+//! https://github.com/ethereum-optimism/optimism/blob/develop/rust/op-revm/src/l1block.rs
 //!
-//! The L1BlockInfo struct contains L1 block data that is used to calculate
-//! the L1 cost of a transaction on Optimism L2.
+//! Formulas (all integer arithmetic, u256, saturating like op-revm):
+//!
+//!   Bedrock/Regolith: (dataGas + overhead) * l1BaseFee * l1Scalar / 1e6
+//!   Ecotone:          dataGas * (l1BaseFee*16*baseFeeScalar + blobBaseFee*blobScalar) / 16e6
+//!   Fjord+:           estimatedSize * (l1BaseFee*16*baseFeeScalar + blobBaseFee*blobScalar) / 1e12
+//!   Isthmus operator: gas * operatorFeeScalar / 1e6 + operatorFeeConstant
+//!   Jovian operator:  gas * operatorFeeScalar * 100 + operatorFeeConstant
+//!
+//! dataGas pre-Fjord = 4 per zero byte + 16 per non-zero byte (+1088 before Regolith).
+//! dataGas Fjord+    = estimatedSize * 16 / 1e6.
+//! Deposits (first byte 0x7E) and empty input pay no L1 fee and no operator fee.
 
 const std = @import("std");
-const primitives = @import("primitives");
 const spec_mod = @import("spec.zig");
 const constants = @import("constants.zig");
 const fast_lz = @import("fast_lz.zig");
 
 const OpSpecId = spec_mod.OpSpecId;
 
-/// L1 block information used for L1 cost calculation.
-///
-/// We can extract L1 epoch data from each L2 block, by looking at the `setL1BlockValues`
-/// transaction data. This data is then used to calculate the L1 cost of a transaction.
+pub const OperatorFeeError = error{
+    /// Isthmus+ fee requested but operator_fee_scalar or operator_fee_constant is null.
+    /// `tryFetch` always populates both for Isthmus+; this only fires for hand-built values.
+    MissingOperatorFeeParams,
+};
+
+/// L1 attributes read from the L1Block predeploy for one L2 block.
 pub const L1BlockInfo = struct {
-    /// The L2 block number.
+    /// L2 block number these attributes were fetched for.
     l2_block: u256,
-    /// The base fee of the L1 origin block.
+    /// L1 origin base fee.
     l1_base_fee: u256,
-    /// The current L1 fee overhead (Bedrock/Regolith only).
+    /// Bedrock/Regolith overhead. Ecotone+: set only when the scalars are empty.
     l1_fee_overhead: ?u256,
-    /// The current L1 base fee scalar.
+    /// Bedrock/Regolith l1FeeScalar, or Ecotone+ baseFeeScalar.
     l1_base_fee_scalar: u256,
-    /// The current L1 blob base fee (Ecotone+).
+    /// Ecotone+ L1 blob base fee.
     l1_blob_base_fee: ?u256,
-    /// The current L1 blob base fee scalar (Ecotone+).
+    /// Ecotone+ blobBaseFeeScalar.
     l1_blob_base_fee_scalar: ?u256,
-    /// The current operator fee scalar (Isthmus+).
+    /// Isthmus+ operatorFeeScalar (u32).
     operator_fee_scalar: ?u256,
-    /// The current operator fee constant (Isthmus+).
+    /// Isthmus+ operatorFeeConstant (u64).
     operator_fee_constant: ?u256,
-    /// True if Ecotone is activated but scalars haven't been set yet.
+    /// Jovian+ daFootprintGasScalar (u16).
+    da_footprint_gas_scalar: ?u16,
+    /// Ecotone+ with all scalars zero (first Ecotone block): use the Bedrock formula.
     empty_ecotone_scalars: bool,
-    /// Cached L1 cost for this transaction.
+    /// L1 cost cached for the transaction currently executing. Clear between transactions.
     tx_l1_cost: ?u256,
 
-    /// Calculate the L1 cost of a transaction.
-    ///
-    /// This is the main entry point for L1 fee calculation. It:
-    /// 1. Checks if cost is already cached
-    /// 2. Handles deposit transactions (0x7E) which have zero L1 cost
-    /// 3. Routes to the correct calculation based on spec_id
-    pub fn calculateTxL1Cost(self: *L1BlockInfo, tx_data: []const u8, spec_id: OpSpecId) u256 {
-        // Return cached value if available
-        if (self.tx_l1_cost) |cost| {
-            return cost;
-        }
-
-        // Deposit transactions (0x7E) and empty data have zero L1 cost
-        if (tx_data.len == 0 or (tx_data.len > 0 and tx_data[0] == 0x7E)) {
-            return 0;
-        }
-
-        // Calculate cost based on hardfork
-        const cost = if (spec_id.isAtLeast(.FJORD))
-            self.calculateL1CostFjord(tx_data)
-        else if (spec_id.isAtLeast(.ECOTONE))
-            self.calculateL1CostEcotone(tx_data, spec_id)
-        else
-            self.calculateL1CostBedrock(tx_data, spec_id);
-
-        // Cache the result
-        self.tx_l1_cost = cost;
-        return cost;
-    }
-
-    /// Calculate L1 cost using Bedrock/Regolith formula.
-    ///
-    /// Formula: (data_gas + overhead) * l1_base_fee * l1_scalar / 1e6
-    ///
-    /// Pre-Regolith adds 68 * 16 gas for empty signature overhead.
-    pub fn calculateL1CostBedrock(self: L1BlockInfo, tx_data: []const u8, spec_id: OpSpecId) u256 {
-        const rollup_data_gas = self.dataGas(tx_data, spec_id);
-        const overhead = self.l1_fee_overhead orelse 0;
-
-        // (data_gas + overhead) * l1_base_fee * l1_scalar / 1e6
-        var result = rollup_data_gas + overhead;
-        result = saturatingMul(result, self.l1_base_fee);
-        result = saturatingMul(result, self.l1_base_fee_scalar);
-        return result / 1_000_000;
-    }
-
-    /// Calculate L1 cost using Ecotone formula.
-    ///
-    /// Formula: calldata_gas * (l1_base_fee * 16 * l1_base_fee_scalar + l1_blob_base_fee * l1_blob_base_fee_scalar) / (16 * 1e6)
-    ///
-    /// Edge case: If scalars are empty (first Ecotone block), fall back to Bedrock formula.
-    pub fn calculateL1CostEcotone(self: L1BlockInfo, tx_data: []const u8, spec_id: OpSpecId) u256 {
-        // Edge case: First Ecotone block uses Bedrock formula
-        if (self.empty_ecotone_scalars) {
-            return self.calculateL1CostBedrock(tx_data, spec_id);
-        }
-
-        const rollup_data_gas = self.dataGas(tx_data, spec_id);
-        const l1_fee_scaled = self.calculateL1FeeScaledEcotone();
-
-        // data_gas * l1_fee_scaled / (16 * 1e6)
-        const result = saturatingMul(l1_fee_scaled, rollup_data_gas);
-        return result / (1_000_000 * constants.NON_ZERO_BYTE_GAS);
-    }
-
-    /// Calculate L1 cost using Fjord formula.
-    ///
-    /// Formula: estimated_size * (base_fee_scalar * l1_base_fee * 16 + blob_scalar * l1_blob_base_fee) / 1e12
-    ///
-    /// Uses FastLZ compression estimation.
-    pub fn calculateL1CostFjord(self: L1BlockInfo, tx_data: []const u8) u256 {
-        const l1_fee_scaled = self.calculateL1FeeScaledEcotone();
-        const estimated_size = self.txEstimatedSizeFjord(tx_data);
-
-        // estimated_size * l1_fee_scaled / 1e12
-        const result = saturatingMul(estimated_size, l1_fee_scaled);
-        return result / 1_000_000_000_000;
-    }
-
-    /// Calculate operator fee (Isthmus+).
-    ///
-    /// Formula: (gas_limit * operator_fee_scalar / 1e6) + operator_fee_constant
-    ///
-    /// Deposit transactions (0x7E) have zero operator fee.
-    pub fn calculateOperatorFee(self: L1BlockInfo, tx_data: []const u8, gas_limit: u64) u256 {
-        // Deposit transactions have zero operator fee
-        if (tx_data.len > 0 and tx_data[0] == 0x7E) {
-            return 0;
-        }
-
-        return self.operatorFeeChargeInner(gas_limit);
-    }
-
-    /// Internal operator fee calculation.
-    fn operatorFeeChargeInner(self: L1BlockInfo, gas: u64) u256 {
-        const operator_fee_scalar = self.operator_fee_scalar orelse return 0;
-        const operator_fee_constant = self.operator_fee_constant orelse return 0;
-
-        // (gas * scalar / 1e6) + constant
-        const product = (gas * operator_fee_scalar) / constants.OPERATOR_FEE_SCALAR_DECIMAL;
-        return product + operator_fee_constant;
-    }
-
-    /// Calculate data gas for posting transaction on L1.
-    ///
-    /// - Fjord+: Uses FastLZ compression estimation, 16 gas per compressed byte
-    /// - Pre-Fjord: 16 gas per non-zero byte, 4 gas per zero byte
-    /// - Pre-Regolith: Add 68 * 16 gas for empty signature overhead
-    pub fn dataGas(self: L1BlockInfo, tx_data: []const u8, spec_id: OpSpecId) u256 {
-        _ = self;
-
-        if (spec_id.isAtLeast(.FJORD)) {
-            const estimated_size = txEstimatedSizeFjordInternal(tx_data);
-            return (estimated_size * constants.NON_ZERO_BYTE_GAS) / 1_000_000;
-        }
-
-        // Count gas: 16 per non-zero byte, 4 per zero byte
-        var gas: u64 = 0;
-        for (tx_data) |byte| {
-            if (byte == 0) {
-                gas += constants.ZERO_BYTE_GAS;
-            } else {
-                gas += constants.NON_ZERO_BYTE_GAS;
-            }
-        }
-
-        // Pre-Regolith: Add 68 * 16 gas for signature overhead
-        if (!spec_id.isAtLeast(.REGOLITH)) {
-            gas += 68 * constants.NON_ZERO_BYTE_GAS;
-        }
-
-        return gas;
-    }
-
-    /// Calculate estimated compressed transaction size for Fjord.
-    ///
-    /// Formula: max(min_size, fastlz_coef * fastlz_size - intercept)
-    ///
-    /// All values are scaled by 1e6 for precision.
-    fn txEstimatedSizeFjord(self: L1BlockInfo, tx_data: []const u8) u256 {
-        _ = self;
-        return txEstimatedSizeFjordInternal(tx_data);
-    }
-
-    /// Calculate l1_base_fee * 16 * l1_base_fee_scalar + l1_blob_base_fee * l1_blob_base_fee_scalar.
-    ///
-    /// This is the scaled L1 fee used in Ecotone and Fjord formulas.
-    fn calculateL1FeeScaledEcotone(self: L1BlockInfo) u256 {
-        const calldata_cost_per_byte = saturatingMul(
-            saturatingMul(self.l1_base_fee, constants.NON_ZERO_BYTE_GAS),
-            self.l1_base_fee_scalar,
-        );
-
-        const blob_cost_per_byte = saturatingMul(
-            self.l1_blob_base_fee orelse 0,
-            self.l1_blob_base_fee_scalar orelse 0,
-        );
-
-        return saturatingAdd(calldata_cost_per_byte, blob_cost_per_byte);
-    }
-
-    /// Clear cached L1 cost.
-    pub fn clearTxL1Cost(self: *L1BlockInfo) void {
-        self.tx_l1_cost = null;
-    }
-
-    /// Create L1BlockInfo with default/empty values.
-    /// Useful for testing or when L1 block info is not available.
     pub fn empty() L1BlockInfo {
-        return L1BlockInfo{
+        return .{
             .l2_block = 0,
             .l1_base_fee = 0,
             .l1_fee_overhead = null,
@@ -218,104 +63,171 @@ pub const L1BlockInfo = struct {
             .l1_blob_base_fee_scalar = null,
             .operator_fee_scalar = null,
             .operator_fee_constant = null,
+            .da_footprint_gas_scalar = null,
             .empty_ecotone_scalars = false,
             .tx_l1_cost = null,
         };
     }
 
-    /// Try to fetch L1BlockInfo from L2 state database.
+    /// Extract a big-endian unsigned integer of `len` bytes at byte `offset` of a slot value.
+    pub fn extractScalar(slot_value: u256, offset: usize, len: usize) u256 {
+        var bytes: [32]u8 = undefined;
+        std.mem.writeInt(u256, &bytes, slot_value, .big);
+        var value: u256 = 0;
+        for (bytes[offset .. offset + len]) |byte| value = (value << 8) | byte;
+        return value;
+    }
+
+    /// Read L1 attributes from the L1Block predeploy.
     ///
-    /// Database interface is duck-typed - must have get_storage(address: [20]u8, key: u256) method.
-    /// This reads the L1Block contract storage to populate the L1BlockInfo struct.
-    ///
-    /// The storage layout differs between hardforks:
-    /// - Bedrock/Regolith: overhead and scalar in separate slots (5, 6)
-    /// - Ecotone+: blob base fee (slot 7) and packed scalars (slot 3)
-    /// - Isthmus+: additional operator fee scalars (slot 8)
-    pub fn tryFetch(
-        comptime Database: type,
-        db: *Database,
-        l2_block: u256,
-        spec_id: OpSpecId,
-    ) !L1BlockInfo {
-        const l1_block_addr = constants.L1_BLOCK_ADDRESS.toBytes();
+    /// `Database` is duck-typed: `get_storage(self: *Database, address: [20]u8, slot: u256) !u256`.
+    pub fn tryFetch(comptime Database: type, db: *Database, l2_block: u256, spec_id: OpSpecId) !L1BlockInfo {
+        const addr = constants.L1_BLOCK_ADDRESS.bytes;
+        var info = L1BlockInfo.empty();
+        info.l2_block = l2_block;
+        info.l1_base_fee = try db.get_storage(addr, constants.L1_BASE_FEE_SLOT);
 
-        // Read L1 base fee (always present at slot 1)
-        const l1_base_fee = try db.get_storage(l1_block_addr, constants.L1_BASE_FEE_SLOT);
-
-        if (!spec_id.isAtLeast(.ECOTONE)) {
-            // Bedrock/Regolith format - use overhead and scalar slots
-            const l1_fee_overhead = try db.get_storage(l1_block_addr, constants.L1_OVERHEAD_SLOT);
-            const l1_fee_scalar = try db.get_storage(l1_block_addr, constants.L1_SCALAR_SLOT);
-
-            return L1BlockInfo{
-                .l2_block = l2_block,
-                .l1_base_fee = l1_base_fee,
-                .l1_fee_overhead = l1_fee_overhead,
-                .l1_base_fee_scalar = l1_fee_scalar,
-                .l1_blob_base_fee = null,
-                .l1_blob_base_fee_scalar = null,
-                .operator_fee_scalar = null,
-                .operator_fee_constant = null,
-                .empty_ecotone_scalars = false,
-                .tx_l1_cost = null,
-            };
+        if (spec_id.isBefore(.ECOTONE)) {
+            info.l1_base_fee_scalar = try db.get_storage(addr, constants.L1_SCALAR_SLOT);
+            info.l1_fee_overhead = try db.get_storage(addr, constants.L1_OVERHEAD_SLOT);
+            return info;
         }
 
-        // Ecotone+ format: read packed scalars from slot 3, blob base fee from slot 7
-        const l1_blob_base_fee = try db.get_storage(l1_block_addr, constants.ECOTONE_L1_BLOB_BASE_FEE_SLOT);
-        const fee_scalars = try db.get_storage(l1_block_addr, constants.ECOTONE_L1_FEE_SCALARS_SLOT);
+        // Ecotone
+        info.l1_blob_base_fee = try db.get_storage(addr, constants.ECOTONE_L1_BLOB_BASE_FEE_SLOT);
+        const fee_scalars = try db.get_storage(addr, constants.ECOTONE_L1_FEE_SCALARS_SLOT);
+        info.l1_base_fee_scalar = extractScalar(fee_scalars, constants.BASE_FEE_SCALAR_OFFSET, 4);
+        const blob_scalar = extractScalar(fee_scalars, constants.BLOB_BASE_FEE_SCALAR_OFFSET, 4);
+        info.l1_blob_base_fee_scalar = blob_scalar;
+        // op-revm: blob scalar is zero and bytes [16..24) are zero. The blob base fee is not
+        // part of the check.
+        info.empty_ecotone_scalars = blob_scalar == 0 and info.l1_base_fee_scalar == 0;
+        if (info.empty_ecotone_scalars) {
+            info.l1_fee_overhead = try db.get_storage(addr, constants.L1_OVERHEAD_SLOT);
+        }
 
-        // Extract packed scalars: base_fee_scalar at bytes 16-19, blob_scalar at bytes 20-23
-        // Inline extraction to avoid u256 function parameter issues in FFI builds
-        const base_fee_scalar = blk: {
-            const shift: u8 = @intCast((32 - constants.BASE_FEE_SCALAR_OFFSET - 4) * 8);
-            break :blk (fee_scalars >> shift) & 0xFFFFFFFF;
-        };
-        const blob_base_fee_scalar = blk: {
-            const shift: u8 = @intCast((32 - constants.BLOB_BASE_FEE_SCALAR_OFFSET - 4) * 8);
-            break :blk (fee_scalars >> shift) & 0xFFFFFFFF;
-        };
-
-        // Empty scalars edge case (first Ecotone block)
-        const empty_ecotone_scalars = (l1_blob_base_fee == 0 and base_fee_scalar == 0 and blob_base_fee_scalar == 0);
-
-        var info = L1BlockInfo{
-            .l2_block = l2_block,
-            .l1_base_fee = l1_base_fee,
-            .l1_fee_overhead = null,
-            .l1_base_fee_scalar = base_fee_scalar,
-            .l1_blob_base_fee = l1_blob_base_fee,
-            .l1_blob_base_fee_scalar = blob_base_fee_scalar,
-            .operator_fee_scalar = null,
-            .operator_fee_constant = null,
-            .empty_ecotone_scalars = empty_ecotone_scalars,
-            .tx_l1_cost = null,
-        };
-
-        // Isthmus+: read operator fee scalars from slot 8
         if (spec_id.isAtLeast(.ISTHMUS)) {
-            const op_fee_scalars = try db.get_storage(l1_block_addr, constants.OPERATOR_FEE_SCALARS_SLOT);
-            info.operator_fee_scalar = blk: {
-                const shift: u8 = @intCast((32 - constants.OPERATOR_FEE_SCALAR_OFFSET - 4) * 8);
-                break :blk (op_fee_scalars >> shift) & 0xFFFFFFFF;
-            };
-            info.operator_fee_constant = blk: {
-                const shift: u8 = @intCast((32 - constants.OPERATOR_FEE_CONSTANT_OFFSET - 4) * 8);
-                break :blk (op_fee_scalars >> shift) & 0xFFFFFFFF;
-            };
+            const operator = try db.get_storage(addr, constants.OPERATOR_FEE_SCALARS_SLOT);
+            info.operator_fee_scalar = extractScalar(operator, constants.OPERATOR_FEE_SCALAR_OFFSET, 4);
+            info.operator_fee_constant = extractScalar(operator, constants.OPERATOR_FEE_CONSTANT_OFFSET, 8);
+        }
+
+        if (spec_id.isAtLeast(.JOVIAN)) {
+            const da = try db.get_storage(addr, constants.DA_FOOTPRINT_GAS_SCALAR_SLOT);
+            info.da_footprint_gas_scalar = @intCast(extractScalar(da, constants.DA_FOOTPRINT_GAS_SCALAR_OFFSET, 2));
         }
 
         return info;
     }
+
+    /// L1 data fee plus (Isthmus+) operator fee charged up front on `gas_limit`
+    /// (op-revm `tx_cost`). The unused part of the operator fee is refunded by
+    /// `operatorFeeRefund` after execution.
+    pub fn txCost(self: *L1BlockInfo, enveloped_tx: []const u8, gas_limit: u64, spec_id: OpSpecId) OperatorFeeError!u256 {
+        const l1_cost = self.calculateTxL1Cost(enveloped_tx, spec_id);
+        const operator = try self.operatorFee(enveloped_tx, gas_limit, spec_id);
+        return l1_cost +| operator;
+    }
+
+    /// L1 data fee for an EIP-2718 encoded transaction. Cached in `tx_l1_cost`.
+    pub fn calculateTxL1Cost(self: *L1BlockInfo, enveloped_tx: []const u8, spec_id: OpSpecId) u256 {
+        if (self.tx_l1_cost) |cost| return cost;
+        if (enveloped_tx.len == 0 or enveloped_tx[0] == constants.DEPOSIT_TRANSACTION_TYPE) return 0;
+
+        const cost = if (spec_id.isAtLeast(.FJORD))
+            self.calculateL1CostFjord(enveloped_tx)
+        else if (spec_id.isAtLeast(.ECOTONE))
+            self.calculateL1CostEcotone(enveloped_tx, spec_id)
+        else
+            self.calculateL1CostBedrock(enveloped_tx, spec_id);
+
+        self.tx_l1_cost = cost;
+        return cost;
+    }
+
+    pub fn clearTxL1Cost(self: *L1BlockInfo) void {
+        self.tx_l1_cost = null;
+    }
+
+    /// (dataGas + overhead) * l1BaseFee * l1Scalar / 1e6
+    pub fn calculateL1CostBedrock(self: L1BlockInfo, tx: []const u8, spec_id: OpSpecId) u256 {
+        const data_gas = dataGas(tx, spec_id);
+        return ((data_gas +| (self.l1_fee_overhead orelse 0)) *| self.l1_base_fee *| self.l1_base_fee_scalar) / 1_000_000;
+    }
+
+    /// dataGas * l1FeeScaled / 16e6. Falls back to Bedrock when the scalars are empty.
+    pub fn calculateL1CostEcotone(self: L1BlockInfo, tx: []const u8, spec_id: OpSpecId) u256 {
+        if (self.empty_ecotone_scalars) return self.calculateL1CostBedrock(tx, spec_id);
+        const data_gas = dataGas(tx, spec_id);
+        return (self.l1FeeScaled() *| data_gas) / (1_000_000 * constants.NON_ZERO_BYTE_GAS);
+    }
+
+    /// estimatedSize * l1FeeScaled / 1e12
+    pub fn calculateL1CostFjord(self: L1BlockInfo, tx: []const u8) u256 {
+        const scaled = self.l1FeeScaled();
+        if (scaled == 0) return 0;
+        return (@as(u256, estimatedSizeFjord(tx)) *| scaled) / 1_000_000_000_000;
+    }
+
+    /// l1BaseFee * 16 * baseFeeScalar + blobBaseFee * blobBaseFeeScalar
+    pub fn l1FeeScaled(self: L1BlockInfo) u256 {
+        const calldata = self.l1_base_fee *| constants.NON_ZERO_BYTE_GAS *| self.l1_base_fee_scalar;
+        const blob = (self.l1_blob_base_fee orelse 0) *| (self.l1_blob_base_fee_scalar orelse 0);
+        return calldata +| blob;
+    }
+
+    /// Operator fee for `gas` (op-revm `operator_fee_charge`). Zero before Isthmus,
+    /// for deposits, and for empty input.
+    pub fn operatorFee(self: L1BlockInfo, enveloped_tx: []const u8, gas: u64, spec_id: OpSpecId) OperatorFeeError!u256 {
+        if (spec_id.isBefore(.ISTHMUS)) return 0;
+        if (enveloped_tx.len == 0 or enveloped_tx[0] == constants.DEPOSIT_TRANSACTION_TYPE) return 0;
+        return self.operatorFeeInner(gas, spec_id);
+    }
+
+    /// Operator fee refund after execution: fee(gas_limit) - fee(gas_used).
+    /// Net operator fee paid is therefore fee(gas_used). Callers skip deposits.
+    pub fn operatorFeeRefund(self: L1BlockInfo, gas_limit: u64, gas_used: u64, spec_id: OpSpecId) OperatorFeeError!u256 {
+        if (spec_id.isBefore(.ISTHMUS)) return 0;
+        const charged = try self.operatorFeeInner(gas_limit, spec_id);
+        const used = try self.operatorFeeInner(gas_used, spec_id);
+        return charged -| used;
+    }
+
+    fn operatorFeeInner(self: L1BlockInfo, gas: u64, spec_id: OpSpecId) OperatorFeeError!u256 {
+        const scalar = self.operator_fee_scalar orelse return error.MissingOperatorFeeParams;
+        const constant = self.operator_fee_constant orelse return error.MissingOperatorFeeParams;
+        const product = if (spec_id.isAtLeast(.JOVIAN))
+            @as(u256, gas) *| scalar *| constants.OPERATOR_FEE_JOVIAN_MULTIPLIER
+        else
+            (@as(u256, gas) *| scalar) / constants.OPERATOR_FEE_SCALAR_DECIMAL;
+        return product +| constant;
+    }
 };
 
-/// Mock database for testing L1BlockInfo.tryFetch().
-///
-/// Provides a simple in-memory storage implementation.
+/// Rollup data gas for an encoded transaction.
+pub fn dataGas(tx: []const u8, spec_id: OpSpecId) u256 {
+    if (spec_id.isAtLeast(.FJORD)) {
+        return (@as(u256, estimatedSizeFjord(tx)) * constants.NON_ZERO_BYTE_GAS) / 1_000_000;
+    }
+    var gas: u256 = 0;
+    for (tx) |byte| {
+        gas += if (byte == 0) constants.ZERO_BYTE_GAS else constants.NON_ZERO_BYTE_GAS;
+    }
+    if (spec_id.isBefore(.REGOLITH)) gas += constants.PRE_REGOLITH_SIGNATURE_OVERHEAD_GAS;
+    return gas;
+}
+
+/// Fjord compressed size estimate scaled by 1e6:
+/// max(100e6, fastlzSize * 836_500 - 42_585_600) (op-revm `estimate_tx_compressed_size`).
+pub fn estimatedSizeFjord(tx: []const u8) u64 {
+    const fastlz_size: u64 = fast_lz.flzCompressLen(tx);
+    const estimate = (fastlz_size *| constants.FJORD_FASTLZ_COEF) -| constants.FJORD_INTERCEPT;
+    return @max(constants.FJORD_MIN_TX_SIZE_SCALED, estimate);
+}
+
+/// In-memory storage for tests and tooling.
 pub const MockDatabase = struct {
     storage: std.AutoHashMap(StorageKey, u256),
-    allocator: std.mem.Allocator,
 
     const StorageKey = struct {
         address: [20]u8,
@@ -323,10 +235,7 @@ pub const MockDatabase = struct {
     };
 
     pub fn init(allocator: std.mem.Allocator) MockDatabase {
-        return MockDatabase{
-            .storage = std.AutoHashMap(StorageKey, u256).init(allocator),
-            .allocator = allocator,
-        };
+        return .{ .storage = std.AutoHashMap(StorageKey, u256).init(allocator) };
     }
 
     pub fn deinit(self: *MockDatabase) void {
@@ -342,428 +251,260 @@ pub const MockDatabase = struct {
     }
 };
 
-// Helper functions
+// ============================================================================
+// Tests. Expected values come from op-revm l1block.rs tests unless noted.
+// ============================================================================
 
-fn txEstimatedSizeFjordInternal(tx_data: []const u8) u256 {
-    const fastlz_size: u64 = fast_lz.flzCompressLen(tx_data);
+const testing = std.testing;
 
-    // estimated = fastlz_coef * fastlz_size - intercept (with saturating subtraction)
-    // Using saturating arithmetic to prevent underflow
-    const product = fastlz_size *| constants.FJORD_COMPRESSION_INTERCEPT;
-    const estimated = product -| constants.FJORD_MIN_TX_SIZE;
-
-    // Return max(min_size, estimated)
-    const min_size = constants.FJORD_MAX_TX_SIZE;
-    return @max(min_size, estimated);
+fn testInfo() L1BlockInfo {
+    var info = L1BlockInfo.empty();
+    info.l1_base_fee = 1_000;
+    info.l1_fee_overhead = 1_000;
+    info.l1_base_fee_scalar = 1_000;
+    return info;
 }
 
-fn saturatingAdd(a: u256, b: u256) u256 {
-    return a +| b;
+const FACADE = [_]u8{ 0xFA, 0xCA, 0xDE };
+const FA00CA00DE = [_]u8{ 0xFA, 0x00, 0xCA, 0x00, 0xDE };
+
+test "dataGas non-zero bytes (op-revm test_data_gas_non_zero_bytes)" {
+    try testing.expectEqual(@as(u256, 1136), dataGas(&FACADE, .BEDROCK));
+    try testing.expectEqual(@as(u256, 48), dataGas(&FACADE, .REGOLITH));
+    try testing.expectEqual(@as(u256, 1600), dataGas(&FACADE, .FJORD));
 }
 
-fn saturatingMul(a: u256, b: u256) u256 {
-    return a *| b;
+test "dataGas zero bytes (op-revm test_data_gas_zero_bytes)" {
+    try testing.expectEqual(@as(u256, 1144), dataGas(&FA00CA00DE, .BEDROCK));
+    try testing.expectEqual(@as(u256, 56), dataGas(&FA00CA00DE, .REGOLITH));
+    try testing.expectEqual(@as(u256, 1600), dataGas(&FA00CA00DE, .FJORD));
 }
 
-// Tests
-test "L1BlockInfo - Bedrock basic calculation" {
-    const info = L1BlockInfo{
-        .l2_block = 0,
-        .l1_base_fee = 1_000_000_000, // 1 gwei
-        .l1_fee_overhead = 2100,
-        .l1_base_fee_scalar = 1_000_000,
-        .l1_blob_base_fee = null,
-        .l1_blob_base_fee_scalar = null,
-        .operator_fee_scalar = null,
-        .operator_fee_constant = null,
-        .empty_ecotone_scalars = false,
-        .tx_l1_cost = null,
-    };
-
-    const tx = [_]u8{ 0x01, 0x02, 0x03 }; // 3 non-zero bytes = 48 gas
-    const cost = info.calculateL1CostBedrock(&tx, .REGOLITH);
-
-    // Expected: (48 + 2100) * 1e9 * 1e6 / 1e6 = 2148 * 1e9 = 2,148,000,000,000 wei
-    try std.testing.expectEqual(@as(u256, 2_148_000_000_000), cost);
-}
-
-test "L1BlockInfo - Bedrock with pre-Regolith overhead" {
-    const info = L1BlockInfo{
-        .l2_block = 0,
-        .l1_base_fee = 1_000,
-        .l1_fee_overhead = 1_000,
-        .l1_base_fee_scalar = 1_000_000,
-        .l1_blob_base_fee = null,
-        .l1_blob_base_fee_scalar = null,
-        .operator_fee_scalar = null,
-        .operator_fee_constant = null,
-        .empty_ecotone_scalars = false,
-        .tx_l1_cost = null,
-    };
-
-    const tx = [_]u8{ 0xFA, 0xCA, 0xDE }; // 3 non-zero bytes
-    const cost = info.calculateL1CostBedrock(&tx, .BEDROCK);
-
-    // Pre-Regolith adds 68 * 16 = 1088 gas
-    // data_gas = 48 + 1088 = 1136
-    // cost = (1136 + 1000) * 1000 * 1_000_000 / 1_000_000 = 2136 * 1000 = 2,136,000
-    try std.testing.expectEqual(@as(u256, 2_136_000), cost);
-}
-
-test "L1BlockInfo - Ecotone basic calculation" {
-    const info = L1BlockInfo{
-        .l2_block = 0,
-        .l1_base_fee = 1_000,
-        .l1_fee_overhead = null,
-        .l1_base_fee_scalar = 1_000,
-        .l1_blob_base_fee = 1_000,
-        .l1_blob_base_fee_scalar = 1_000,
-        .operator_fee_scalar = null,
-        .operator_fee_constant = null,
-        .empty_ecotone_scalars = false,
-        .tx_l1_cost = null,
-    };
-
-    const tx = [_]u8{ 0xFA, 0xCA, 0xDE }; // 3 non-zero bytes = 48 gas
-    const cost = info.calculateL1CostEcotone(&tx, .ECOTONE);
-
-    // calldata_cost = 1000 * 16 * 1000 = 16_000_000
-    // blob_cost = 1000 * 1000 = 1_000_000
-    // l1_fee_scaled = 17_000_000
-    // cost = 48 * 17_000_000 / (16 * 1_000_000) = 816_000_000 / 16_000_000 = 51
-    try std.testing.expectEqual(@as(u256, 51), cost);
-}
-
-test "L1BlockInfo - Ecotone with empty scalars falls back to Bedrock" {
-    var info = L1BlockInfo{
-        .l2_block = 0,
-        .l1_base_fee = 1_000,
-        .l1_fee_overhead = 1_000,
-        .l1_base_fee_scalar = 1_000_000,
-        .l1_blob_base_fee = 0,
-        .l1_blob_base_fee_scalar = 0,
-        .operator_fee_scalar = null,
-        .operator_fee_constant = null,
-        .empty_ecotone_scalars = true,
-        .tx_l1_cost = null,
-    };
-
-    const tx = [_]u8{ 0xFA, 0xCA, 0xDE };
-    const cost = info.calculateL1CostEcotone(&tx, .ECOTONE);
-
-    // Should use Bedrock formula: (48 + 1000) * 1000 * 1_000_000 / 1_000_000 = 1048 * 1000 = 1,048,000
-    try std.testing.expectEqual(@as(u256, 1_048_000), cost);
-}
-
-test "L1BlockInfo - Fjord basic calculation" {
-    const info = L1BlockInfo{
-        .l2_block = 0,
-        .l1_base_fee = 1_000,
-        .l1_fee_overhead = null,
-        .l1_base_fee_scalar = 1_000,
-        .l1_blob_base_fee = 1_000,
-        .l1_blob_base_fee_scalar = 1_000,
-        .operator_fee_scalar = null,
-        .operator_fee_constant = null,
-        .empty_ecotone_scalars = false,
-        .tx_l1_cost = null,
-    };
-
-    const tx = [_]u8{ 0xFA, 0xCA, 0xDE };
-    const cost = info.calculateL1CostFjord(&tx);
-
-    // fastlz_size = 4
-    // estimated = max(100e6, 836500 * 4 - 42585600) = max(100e6, 3346000 - 42585600)
-    // = max(100e6, -39239600) = 100e6
-    // l1_fee_scaled = 17_000_000
-    // cost = 100_000_000 * 17_000_000 / 1e12 = 1,700,000,000,000 / 1e12 = 1700
-    try std.testing.expectEqual(@as(u256, 1700), cost);
-}
-
-test "L1BlockInfo - deposit transaction has zero cost" {
-    var info = L1BlockInfo{
-        .l2_block = 0,
-        .l1_base_fee = 1_000_000_000,
-        .l1_fee_overhead = 2100,
-        .l1_base_fee_scalar = 1_000_000,
-        .l1_blob_base_fee = null,
-        .l1_blob_base_fee_scalar = null,
-        .operator_fee_scalar = null,
-        .operator_fee_constant = null,
-        .empty_ecotone_scalars = false,
-        .tx_l1_cost = null,
-    };
-
-    const deposit_tx = [_]u8{ 0x7E, 0xFA, 0xCA, 0xDE };
-    const cost = info.calculateTxL1Cost(&deposit_tx, .REGOLITH);
-
-    try std.testing.expectEqual(@as(u256, 0), cost);
-}
-
-test "L1BlockInfo - empty transaction has zero cost" {
-    var info = L1BlockInfo{
-        .l2_block = 0,
-        .l1_base_fee = 1_000_000_000,
-        .l1_fee_overhead = 2100,
-        .l1_base_fee_scalar = 1_000_000,
-        .l1_blob_base_fee = null,
-        .l1_blob_base_fee_scalar = null,
-        .operator_fee_scalar = null,
-        .operator_fee_constant = null,
-        .empty_ecotone_scalars = false,
-        .tx_l1_cost = null,
-    };
-
-    const empty_tx = [_]u8{};
-    const cost = info.calculateTxL1Cost(&empty_tx, .REGOLITH);
-
-    try std.testing.expectEqual(@as(u256, 0), cost);
-}
-
-test "L1BlockInfo - data gas calculation with zeros" {
-    const info = L1BlockInfo{
-        .l2_block = 0,
-        .l1_base_fee = 1_000_000,
-        .l1_fee_overhead = 0,
-        .l1_base_fee_scalar = 1_000_000,
-        .l1_blob_base_fee = null,
-        .l1_blob_base_fee_scalar = null,
-        .operator_fee_scalar = null,
-        .operator_fee_constant = null,
-        .empty_ecotone_scalars = false,
-        .tx_l1_cost = null,
-    };
-
-    // 0xFA00CA00DE = 3 non-zero, 2 zero = 3*16 + 2*4 = 56 gas
-    const tx = [_]u8{ 0xFA, 0x00, 0xCA, 0x00, 0xDE };
-    const gas = info.dataGas(&tx, .REGOLITH);
-
-    try std.testing.expectEqual(@as(u256, 56), gas);
-}
-
-test "L1BlockInfo - data gas pre-Regolith adds overhead" {
-    const info = L1BlockInfo{
-        .l2_block = 0,
-        .l1_base_fee = 1_000_000,
-        .l1_fee_overhead = 0,
-        .l1_base_fee_scalar = 1_000_000,
-        .l1_blob_base_fee = null,
-        .l1_blob_base_fee_scalar = null,
-        .operator_fee_scalar = null,
-        .operator_fee_constant = null,
-        .empty_ecotone_scalars = false,
-        .tx_l1_cost = null,
-    };
-
-    const tx = [_]u8{ 0xFA, 0xCA, 0xDE }; // 3 * 16 = 48
-    const gas = info.dataGas(&tx, .BEDROCK);
-
-    // Pre-Regolith adds 68 * 16 = 1088
-    // Total = 48 + 1088 = 1136
-    try std.testing.expectEqual(@as(u256, 1136), gas);
-}
-
-test "L1BlockInfo - operator fee calculation" {
-    const info = L1BlockInfo{
-        .l2_block = 0,
-        .l1_base_fee = 1_000_000,
-        .l1_fee_overhead = null,
-        .l1_base_fee_scalar = 1_000_000,
-        .l1_blob_base_fee = null,
-        .l1_blob_base_fee_scalar = null,
-        .operator_fee_scalar = 2_000,
-        .operator_fee_constant = 5,
-        .empty_ecotone_scalars = false,
-        .tx_l1_cost = null,
-    };
-
-    const tx = [_]u8{ 0x01 };
-    const fee = info.calculateOperatorFee(&tx, 50_000);
-
-    // (50_000 * 2_000 / 1_000_000) + 5 = (100_000_000 / 1_000_000) + 5 = 100 + 5 = 105
-    try std.testing.expectEqual(@as(u256, 105), fee);
-}
-
-test "L1BlockInfo - operator fee deposit is zero" {
-    const info = L1BlockInfo{
-        .l2_block = 0,
-        .l1_base_fee = 1_000_000,
-        .l1_fee_overhead = null,
-        .l1_base_fee_scalar = 1_000_000,
-        .l1_blob_base_fee = null,
-        .l1_blob_base_fee_scalar = null,
-        .operator_fee_scalar = 2_000,
-        .operator_fee_constant = 5,
-        .empty_ecotone_scalars = false,
-        .tx_l1_cost = null,
-    };
-
-    const deposit_tx = [_]u8{ 0x7E, 0x01 };
-    const fee = info.calculateOperatorFee(&deposit_tx, 50_000);
-
-    try std.testing.expectEqual(@as(u256, 0), fee);
-}
-
-test "L1BlockInfo - caching works correctly" {
-    var info = L1BlockInfo{
-        .l2_block = 0,
-        .l1_base_fee = 1_000,
-        .l1_fee_overhead = 1_000,
-        .l1_base_fee_scalar = 1_000_000,
-        .l1_blob_base_fee = null,
-        .l1_blob_base_fee_scalar = null,
-        .operator_fee_scalar = null,
-        .operator_fee_constant = null,
-        .empty_ecotone_scalars = false,
-        .tx_l1_cost = null,
-    };
-
-    const tx = [_]u8{ 0xFA, 0xCA, 0xDE };
-    const cost1 = info.calculateTxL1Cost(&tx, .REGOLITH);
-    const cost2 = info.calculateTxL1Cost(&tx, .REGOLITH); // Should return cached value
-
-    try std.testing.expectEqual(cost1, cost2);
-    try std.testing.expect(info.tx_l1_cost != null);
-
-    // Clear cache and recalculate
+test "Regolith L1 cost (op-revm test_calculate_tx_l1_cost)" {
+    var info = testInfo();
+    try testing.expectEqual(@as(u256, 1048), info.calculateTxL1Cost(&FACADE, .REGOLITH));
     info.clearTxL1Cost();
-    try std.testing.expect(info.tx_l1_cost == null);
-
-    const cost3 = info.calculateTxL1Cost(&tx, .REGOLITH);
-    try std.testing.expectEqual(cost1, cost3);
+    try testing.expectEqual(@as(u256, 0), info.calculateTxL1Cost(&[_]u8{}, .REGOLITH));
+    info.clearTxL1Cost();
+    try testing.expectEqual(@as(u256, 0), info.calculateTxL1Cost(&[_]u8{ 0x7E, 0xFA, 0xCA, 0xDE }, .REGOLITH));
 }
 
-test "L1BlockInfo - empty constructor" {
+test "Ecotone L1 cost (op-revm test_calculate_tx_l1_cost_ecotone)" {
+    var info = testInfo();
+    info.l1_blob_base_fee = 1_000;
+    info.l1_blob_base_fee_scalar = 1_000;
+    try testing.expectEqual(@as(u256, 51), info.calculateTxL1Cost(&FACADE, .ECOTONE));
+    info.clearTxL1Cost();
+    try testing.expectEqual(@as(u256, 0), info.calculateTxL1Cost(&[_]u8{}, .ECOTONE));
+    info.clearTxL1Cost();
+    try testing.expectEqual(@as(u256, 0), info.calculateTxL1Cost(&[_]u8{ 0x7E, 0xFA, 0xCA, 0xDE }, .ECOTONE));
+    info.clearTxL1Cost();
+    info.empty_ecotone_scalars = true;
+    try testing.expectEqual(@as(u256, 1048), info.calculateTxL1Cost(&FACADE, .ECOTONE));
+}
+
+const FJORD_FASTLZ_202_TX = "02f901550a758302df1483be21b88304743f94f80e51afb613d764fa61751affd3313c190a86bb870151bd62fd12adb8e41ef24f3f000000000000000000000000000000000000000000000000000000000000006e000000000000000000000000af88d065e77c8cc2239327c5edb3a432268e5831000000000000000000000000000000000000000000000000000000000003c1e5000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000000148c89ed219d02f1a5be012c689b4f5b731827bebe000000000000000000000000c001a033fd89cb37c31b2cba46b6466e040c61fc9b2a3675a7f5f493ebd5ad77c497f8a07cdf65680e238392693019b4092f610222e71b7cec06449cb922b93b6a12744e";
+
+test "Fjord L1 cost (op-revm test_calculate_tx_l1_cost_fjord)" {
+    var info = testInfo();
+    info.l1_blob_base_fee = 1_000;
+    info.l1_blob_base_fee_scalar = 1_000;
+    try testing.expectEqual(@as(u256, 1700), info.calculateTxL1Cost(&FACADE, .FJORD));
+    info.clearTxL1Cost();
+    // fastLzSize = 202: estimatedSize = 836500*202 - 42585600 = 126387400; cost = 126387400*17/1e6.
+    var tx202: [FJORD_FASTLZ_202_TX.len / 2]u8 = undefined;
+    _ = try std.fmt.hexToBytes(&tx202, FJORD_FASTLZ_202_TX);
+    try testing.expectEqual(@as(u64, 202), fast_lz.flzCompressLen(&tx202));
+    try testing.expectEqual(@as(u256, 2148), info.calculateTxL1Cost(&tx202, .FJORD));
+    info.clearTxL1Cost();
+    try testing.expectEqual(@as(u256, 0), info.calculateTxL1Cost(&[_]u8{}, .FJORD));
+    info.clearTxL1Cost();
+    try testing.expectEqual(@as(u256, 0), info.calculateTxL1Cost(&[_]u8{ 0x7E, 0xFA, 0xCA, 0xDE }, .FJORD));
+}
+
+// OP mainnet Ecotone block 118024092, tx 0xa75ef696bf67439b4d5b61da85de9f3ceaa2e145abe982212101b244b63749c2.
+const ECOTONE_MAINNET_TX = "02f8b30a832253fc8402d11f39842c8a46398301388094dc6ff44d5d932cbd77b52e5612ba0529dc6226f180b844a9059cbb000000000000000000000000d43e02db81f4d46cdf8521f623d21ea0ec7562a50000000000000000000000000000000000000000000000008ac7230489e80000c001a02947e24750723b48f886931562c55d9e07f856d8e06468e719755e18bbc3a570a0784da9ce59fd7754ea5be6e17a86b348e441348cd48ace59d174772465eadbd1";
+
+test "Ecotone L1 cost matches OP mainnet block 118024092" {
+    var tx: [ECOTONE_MAINNET_TX.len / 2]u8 = undefined;
+    _ = try std.fmt.hexToBytes(&tx, ECOTONE_MAINNET_TX);
+    var info = L1BlockInfo.empty();
+    info.l1_base_fee = 47_036_678_951;
+    info.l1_base_fee_scalar = 1368;
+    info.l1_blob_base_fee = 57_422_457_042;
+    info.l1_blob_base_fee_scalar = 810_949;
+    try testing.expectEqual(@as(u256, 2456), dataGas(&tx, .ECOTONE));
+    try testing.expectEqual(@as(u256, 7_306_020_222_001), info.calculateL1CostEcotone(&tx, .ECOTONE));
+}
+
+// OP mainnet Fjord block 124665056, tx 0x1059e8004daff32caa1f1b1ef97fe3a07a8cf40508f5b835b66d9420d87c4a4a.
+const FJORD_MAINNET_TX = "02f904940a8303fba78401d6d2798401db2b6d830493e0943e6f4f7866654c18f536170780344aa8772950b680b904246a761202000000000000000000000000087000a300de7200382b55d40045000000e5d60e0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000014000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003a0000000000000000000000000000000000000000000000000000000000000022482ad56cb0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000120000000000000000000000000dc6ff44d5d932cbd77b52e5612ba0529dc6226f1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000044095ea7b300000000000000000000000021c4928109acb0659a88ae5329b5374a3024694c0000000000000000000000000000000000000000000000049b9ca9a6943400000000000000000000000000000000000000000000000000000000000000000000000000000000000021c4928109acb0659a88ae5329b5374a3024694c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000024b6b55f250000000000000000000000000000000000000000000000049b9ca9a694340000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000415ec214a3950bea839a7e6fbb0ba1540ac2076acd50820e2d5ef83d0902cdffb24a47aff7de5190290769c4f0a9c6fabf63012986a0d590b1b571547a8c7050ea1b00000000000000000000000000000000000000000000000000000000000000c080a06db770e6e25a617fe9652f0958bd9bd6e49281a53036906386ed39ec48eadf63a07f47cf51a4a40b4494cf26efc686709a9b03939e20ee27e59682f5faa536667e";
+
+test "Fjord L1 cost matches OP mainnet block 124665056" {
+    var tx: [FJORD_MAINNET_TX.len / 2]u8 = undefined;
+    _ = try std.fmt.hexToBytes(&tx, FJORD_MAINNET_TX);
+    var info = L1BlockInfo.empty();
+    info.l1_base_fee = 1_055_991_687;
+    info.l1_base_fee_scalar = 5227;
+    info.l1_blob_base_fee = 1;
+    info.l1_blob_base_fee_scalar = 1_014_213;
+    try testing.expectEqual(@as(u256, 4471), dataGas(&tx, .FJORD));
+    try testing.expectEqual(@as(u256, 0x5bf1ab43d), info.calculateL1CostFjord(&tx));
+}
+
+test "Fjord L1 cost is zero when the scaled fee is zero" {
     const info = L1BlockInfo.empty();
-
-    try std.testing.expectEqual(@as(u256, 0), info.l2_block);
-    try std.testing.expectEqual(@as(u256, 0), info.l1_base_fee);
-    try std.testing.expect(info.l1_fee_overhead == null);
-    try std.testing.expectEqual(@as(u256, 0), info.l1_base_fee_scalar);
-    try std.testing.expect(info.l1_blob_base_fee == null);
-    try std.testing.expect(info.l1_blob_base_fee_scalar == null);
-    try std.testing.expect(info.operator_fee_scalar == null);
-    try std.testing.expect(info.operator_fee_constant == null);
-    try std.testing.expect(!info.empty_ecotone_scalars);
-    try std.testing.expect(info.tx_l1_cost == null);
+    try testing.expectEqual(@as(u256, 0), info.calculateL1CostFjord(&FACADE));
 }
 
-test "extractScalar - extracts 4 bytes at offset" {
-    // Packed u256 with known values at specific offsets
-    // Bytes 16-19: 0x00000558 (1368)
-    // Bytes 20-23: 0x000C5E75 (810,613)
-    // Full value: 0x00000000_00000000_00000000_00000000_00000558_000C5E75_00000000_00000000
-    const packed: u256 = 0x00000000_00000000_00000000_00000000_00000558_000C5E75_00000000_00000000;
-
-    const base_fee_scalar = L1BlockInfo.extractScalar(packed, 16);
-    const blob_base_fee_scalar = L1BlockInfo.extractScalar(packed, 20);
-
-    try std.testing.expectEqual(@as(u256, 1368), base_fee_scalar);
-    try std.testing.expectEqual(@as(u256, 810_613), blob_base_fee_scalar);
+test "operator fee formulas (op-revm test_operator_fee_charge_formulas)" {
+    var info = L1BlockInfo.empty();
+    info.operator_fee_scalar = 1_000;
+    info.operator_fee_constant = 10;
+    const input = [_]u8{0x01};
+    try testing.expectEqual(@as(u256, 0), try L1BlockInfo.empty().operatorFee(&input, 1_000, .FJORD));
+    try testing.expectEqual(@as(u256, 11), try info.operatorFee(&input, 1_000, .ISTHMUS));
+    try testing.expectEqual(@as(u256, 100_000_010), try info.operatorFee(&input, 1_000, .JOVIAN));
 }
 
-test "extractScalar - handles max u32 value" {
-    // Bytes 16-19: 0xFFFFFFFF
-    const packed: u256 = 0x00000000_00000000_00000000_00000000_FFFFFFFF_00000000_00000000_00000000;
-
-    const value = L1BlockInfo.extractScalar(packed, 16);
-    try std.testing.expectEqual(@as(u256, 0xFFFFFFFF), value);
+test "operator fee is zero for deposits and empty input" {
+    var info = L1BlockInfo.empty();
+    info.operator_fee_scalar = 1_000;
+    info.operator_fee_constant = 10;
+    try testing.expectEqual(@as(u256, 0), try info.operatorFee(&[_]u8{ 0x7E, 0x01 }, 1_000, .JOVIAN));
+    try testing.expectEqual(@as(u256, 0), try info.operatorFee(&[_]u8{}, 1_000, .JOVIAN));
 }
 
-test "extractScalar - handles zero" {
-    const packed: u256 = 0;
-    const value = L1BlockInfo.extractScalar(packed, 16);
-    try std.testing.expectEqual(@as(u256, 0), value);
+test "operator fee refund (op-revm test_operator_fee_refund)" {
+    // gas limit 100, 50 spent: fee(100) - fee(50) with scalar 2000, constant 5.
+    var info = L1BlockInfo.empty();
+    info.operator_fee_scalar = 2_000;
+    info.operator_fee_constant = 5;
+    // Isthmus: 100*2000/1e6 + 5 = 5; 50*2000/1e6 + 5 = 5. Refund 0.
+    try testing.expectEqual(@as(u256, 0), try info.operatorFeeRefund(100, 50, .ISTHMUS));
+    // Jovian: (100*2000*100 + 5) - (50*2000*100 + 5) = 10_000_000.
+    try testing.expectEqual(@as(u256, 10_000_000), try info.operatorFeeRefund(100, 50, .JOVIAN));
+    try testing.expectEqual(@as(u256, 0), try info.operatorFeeRefund(100, 50, .HOLOCENE));
 }
 
-test "L1BlockInfo.tryFetch - Bedrock format" {
-    var mock_db = MockDatabase.init(std.testing.allocator);
-    defer mock_db.deinit();
-
-    const l1_block_addr = constants.L1_BLOCK_ADDRESS.toBytes();
-    try mock_db.setStorage(l1_block_addr, constants.L1_BASE_FEE_SLOT, 1_000_000_000);
-    try mock_db.setStorage(l1_block_addr, constants.L1_OVERHEAD_SLOT, 2100);
-    try mock_db.setStorage(l1_block_addr, constants.L1_SCALAR_SLOT, 1_000_000);
-
-    const info = try L1BlockInfo.tryFetch(MockDatabase, &mock_db, 100, .BEDROCK);
-
-    try std.testing.expectEqual(@as(u256, 100), info.l2_block);
-    try std.testing.expectEqual(@as(u256, 1_000_000_000), info.l1_base_fee);
-    try std.testing.expectEqual(@as(u256, 2100), info.l1_fee_overhead.?);
-    try std.testing.expectEqual(@as(u256, 1_000_000), info.l1_base_fee_scalar);
-    try std.testing.expect(info.l1_blob_base_fee == null);
-    try std.testing.expect(info.l1_blob_base_fee_scalar == null);
-    try std.testing.expect(!info.empty_ecotone_scalars);
+test "operator fee without params is an error, not a crash" {
+    const info = L1BlockInfo.empty();
+    try testing.expectError(error.MissingOperatorFeeParams, info.operatorFee(&[_]u8{0x02}, 1, .ISTHMUS));
+    try testing.expectError(error.MissingOperatorFeeParams, info.operatorFeeRefund(2, 1, .JOVIAN));
 }
 
-test "L1BlockInfo.tryFetch - Ecotone format with packed scalars" {
-    var mock_db = MockDatabase.init(std.testing.allocator);
-    defer mock_db.deinit();
-
-    const l1_block_addr = constants.L1_BLOCK_ADDRESS.toBytes();
-
-    // L1 base fee
-    try mock_db.setStorage(l1_block_addr, constants.L1_BASE_FEE_SLOT, 47_036_678_951);
-
-    // Blob base fee
-    try mock_db.setStorage(l1_block_addr, constants.ECOTONE_L1_BLOB_BASE_FEE_SLOT, 57_422_457_042);
-
-    // Packed scalars: base_fee_scalar = 1368 at bytes 16-19, blob_scalar = 810949 at bytes 20-23
-    // 1368 = 0x558, 810949 = 0xC5E45
-    const packed_scalars: u256 = 0x00000000_00000000_00000000_00000000_00000558_000C5E45_00000000_00000000;
-    try mock_db.setStorage(l1_block_addr, constants.ECOTONE_L1_FEE_SCALARS_SLOT, packed_scalars);
-
-    const info = try L1BlockInfo.tryFetch(MockDatabase, &mock_db, 118024092, .ECOTONE);
-
-    try std.testing.expectEqual(@as(u256, 118024092), info.l2_block);
-    try std.testing.expectEqual(@as(u256, 47_036_678_951), info.l1_base_fee);
-    try std.testing.expect(info.l1_fee_overhead == null);
-    try std.testing.expectEqual(@as(u256, 1368), info.l1_base_fee_scalar);
-    try std.testing.expectEqual(@as(u256, 57_422_457_042), info.l1_blob_base_fee.?);
-    try std.testing.expectEqual(@as(u256, 810_949), info.l1_blob_base_fee_scalar.?);
-    try std.testing.expect(!info.empty_ecotone_scalars);
+test "Jovian operator fee maximum fits u256 (spec: 103 bits)" {
+    var info = L1BlockInfo.empty();
+    info.operator_fee_scalar = std.math.maxInt(u32);
+    info.operator_fee_constant = std.math.maxInt(u64);
+    const fee = try info.operatorFee(&[_]u8{0x02}, std.math.maxInt(u64), .JOVIAN);
+    const expected = @as(u256, std.math.maxInt(u64)) * std.math.maxInt(u32) * 100 + std.math.maxInt(u64);
+    try testing.expectEqual(expected, fee);
+    try testing.expect(fee < (@as(u256, 1) << 103));
 }
 
-test "L1BlockInfo.tryFetch - empty scalars edge case" {
-    var mock_db = MockDatabase.init(std.testing.allocator);
-    defer mock_db.deinit();
-
-    const l1_block_addr = constants.L1_BLOCK_ADDRESS.toBytes();
-
-    // L1 base fee present but all scalars zero (first Ecotone block)
-    try mock_db.setStorage(l1_block_addr, constants.L1_BASE_FEE_SLOT, 1_000_000_000);
-    try mock_db.setStorage(l1_block_addr, constants.ECOTONE_L1_BLOB_BASE_FEE_SLOT, 0);
-    try mock_db.setStorage(l1_block_addr, constants.ECOTONE_L1_FEE_SCALARS_SLOT, 0);
-
-    const info = try L1BlockInfo.tryFetch(MockDatabase, &mock_db, 100, .ECOTONE);
-
-    try std.testing.expect(info.empty_ecotone_scalars);
-    try std.testing.expectEqual(@as(u256, 0), info.l1_base_fee_scalar);
-    try std.testing.expectEqual(@as(u256, 0), info.l1_blob_base_fee.?);
-    try std.testing.expectEqual(@as(u256, 0), info.l1_blob_base_fee_scalar.?);
+test "txCost adds L1 fee and operator fee on gas limit" {
+    var info = testInfo();
+    info.l1_blob_base_fee = 1_000;
+    info.l1_blob_base_fee_scalar = 1_000;
+    info.operator_fee_scalar = 1_000;
+    info.operator_fee_constant = 10;
+    try testing.expectEqual(@as(u256, 1700 + 11), try info.txCost(&FACADE, 1_000, .ISTHMUS));
+    info.clearTxL1Cost();
+    try testing.expectEqual(@as(u256, 1700), try info.txCost(&FACADE, 1_000, .HOLOCENE));
 }
 
-test "L1BlockInfo.tryFetch - Isthmus with operator fees" {
-    var mock_db = MockDatabase.init(std.testing.allocator);
-    defer mock_db.deinit();
+test "L1 cost cache returns cached value until cleared" {
+    var info = testInfo();
+    const first = info.calculateTxL1Cost(&FACADE, .REGOLITH);
+    try testing.expectEqual(first, info.tx_l1_cost.?);
+    try testing.expectEqual(first, info.calculateTxL1Cost(&[_]u8{0x01}, .REGOLITH));
+    info.clearTxL1Cost();
+    try testing.expect(info.tx_l1_cost == null);
+}
 
-    const l1_block_addr = constants.L1_BLOCK_ADDRESS.toBytes();
+test "extractScalar reads big-endian fields" {
+    const packed_value: u256 = 0x00000000_00000000_00000000_00000000_00000558_000C5E75_00000000_00000000;
+    try testing.expectEqual(@as(u256, 1368), L1BlockInfo.extractScalar(packed_value, 16, 4));
+    try testing.expectEqual(@as(u256, 810_613), L1BlockInfo.extractScalar(packed_value, 20, 4));
+    try testing.expectEqual(@as(u256, 0xFFFFFFFF), L1BlockInfo.extractScalar(0xFFFFFFFF << 96, 16, 4));
+    try testing.expectEqual(@as(u256, 0), L1BlockInfo.extractScalar(0, 16, 4));
+    try testing.expectEqual(@as(u256, std.math.maxInt(u64)), L1BlockInfo.extractScalar(std.math.maxInt(u64), 24, 8));
+}
 
-    // Base fees
-    try mock_db.setStorage(l1_block_addr, constants.L1_BASE_FEE_SLOT, 1_000_000_000);
-    try mock_db.setStorage(l1_block_addr, constants.ECOTONE_L1_BLOB_BASE_FEE_SLOT, 1_000_000);
+test "tryFetch Bedrock reads overhead and scalar slots" {
+    var db = MockDatabase.init(testing.allocator);
+    defer db.deinit();
+    const addr = constants.L1_BLOCK_ADDRESS.bytes;
+    try db.setStorage(addr, constants.L1_BASE_FEE_SLOT, 1_000_000_000);
+    try db.setStorage(addr, constants.L1_OVERHEAD_SLOT, 2100);
+    try db.setStorage(addr, constants.L1_SCALAR_SLOT, 1_000_000);
 
-    // Packed fee scalars
-    const packed_scalars: u256 = 0x00000000_00000000_00000000_00000000_00001000_00002000_00000000_00000000;
-    try mock_db.setStorage(l1_block_addr, constants.ECOTONE_L1_FEE_SCALARS_SLOT, packed_scalars);
+    const info = try L1BlockInfo.tryFetch(MockDatabase, &db, 100, .BEDROCK);
+    try testing.expectEqual(@as(u256, 100), info.l2_block);
+    try testing.expectEqual(@as(u256, 1_000_000_000), info.l1_base_fee);
+    try testing.expectEqual(@as(u256, 2100), info.l1_fee_overhead.?);
+    try testing.expectEqual(@as(u256, 1_000_000), info.l1_base_fee_scalar);
+    try testing.expect(info.l1_blob_base_fee == null);
+    try testing.expect(!info.empty_ecotone_scalars);
+}
 
-    // Operator fee scalars: scalar = 5000 at bytes 20-23, constant = 100 at bytes 24-27
-    // 5000 = 0x1388, 100 = 0x64
-    const packed_op_scalars: u256 = 0x00000000_00000000_00000000_00000000_00000000_00001388_00000064_00000000;
-    try mock_db.setStorage(l1_block_addr, constants.OPERATOR_FEE_SCALARS_SLOT, packed_op_scalars);
+test "tryFetch Ecotone unpacks scalars" {
+    var db = MockDatabase.init(testing.allocator);
+    defer db.deinit();
+    const addr = constants.L1_BLOCK_ADDRESS.bytes;
+    try db.setStorage(addr, constants.L1_BASE_FEE_SLOT, 47_036_678_951);
+    try db.setStorage(addr, constants.ECOTONE_L1_BLOB_BASE_FEE_SLOT, 57_422_457_042);
+    try db.setStorage(addr, constants.ECOTONE_L1_FEE_SCALARS_SLOT, 0x00000000_00000000_00000000_00000000_00000558_000C5FC5_00000000_00000000);
+    try db.setStorage(addr, constants.L1_OVERHEAD_SLOT, 999);
 
-    const info = try L1BlockInfo.tryFetch(MockDatabase, &mock_db, 200, .ISTHMUS);
+    const info = try L1BlockInfo.tryFetch(MockDatabase, &db, 118024092, .ECOTONE);
+    try testing.expectEqual(@as(u256, 1368), info.l1_base_fee_scalar);
+    try testing.expectEqual(@as(u256, 810_949), info.l1_blob_base_fee_scalar.?);
+    try testing.expectEqual(@as(u256, 57_422_457_042), info.l1_blob_base_fee.?);
+    try testing.expect(!info.empty_ecotone_scalars);
+    // Overhead is only read when the scalars are empty.
+    try testing.expect(info.l1_fee_overhead == null);
+    try testing.expect(info.operator_fee_scalar == null);
+}
 
-    try std.testing.expectEqual(@as(u256, 5000), info.operator_fee_scalar.?);
-    try std.testing.expectEqual(@as(u256, 100), info.operator_fee_constant.?);
+test "tryFetch Ecotone empty scalars reads overhead" {
+    var db = MockDatabase.init(testing.allocator);
+    defer db.deinit();
+    const addr = constants.L1_BLOCK_ADDRESS.bytes;
+    try db.setStorage(addr, constants.L1_BASE_FEE_SLOT, 1_000_000_000);
+    // Non-zero blob base fee does not prevent the empty-scalars case.
+    try db.setStorage(addr, constants.ECOTONE_L1_BLOB_BASE_FEE_SLOT, 7);
+    try db.setStorage(addr, constants.L1_OVERHEAD_SLOT, 188);
+
+    const info = try L1BlockInfo.tryFetch(MockDatabase, &db, 1, .ECOTONE);
+    try testing.expect(info.empty_ecotone_scalars);
+    try testing.expectEqual(@as(u256, 188), info.l1_fee_overhead.?);
+}
+
+test "tryFetch Isthmus reads u32 scalar and u64 constant" {
+    var db = MockDatabase.init(testing.allocator);
+    defer db.deinit();
+    const addr = constants.L1_BLOCK_ADDRESS.bytes;
+    try db.setStorage(addr, constants.ECOTONE_L1_FEE_SCALARS_SLOT, 0x00000000_00000000_00000000_00000000_00001000_00002000_00000000_00000000);
+    // scalar 5000 at [20..24), constant 0x0102030405060708 at [24..32).
+    try db.setStorage(addr, constants.OPERATOR_FEE_SCALARS_SLOT, 0x00000000_00000000_00000000_00000000_00000000_00001388_01020304_05060708);
+
+    const info = try L1BlockInfo.tryFetch(MockDatabase, &db, 200, .ISTHMUS);
+    try testing.expectEqual(@as(u256, 5000), info.operator_fee_scalar.?);
+    try testing.expectEqual(@as(u256, 0x0102030405060708), info.operator_fee_constant.?);
+    try testing.expect(info.da_footprint_gas_scalar == null);
+}
+
+test "tryFetch Jovian reads DA footprint gas scalar from slot 8 offset 18" {
+    var db = MockDatabase.init(testing.allocator);
+    defer db.deinit();
+    const addr = constants.L1_BLOCK_ADDRESS.bytes;
+    // da scalar 400 (0x0190) at [18..20), operator scalar 7 at [20..24), constant 9 at [24..32).
+    try db.setStorage(addr, constants.OPERATOR_FEE_SCALARS_SLOT, 0x00000000_00000000_00000000_00000000_00000190_00000007_00000000_00000009);
+
+    const info = try L1BlockInfo.tryFetch(MockDatabase, &db, 300, .JOVIAN);
+    try testing.expectEqual(@as(u16, 400), info.da_footprint_gas_scalar.?);
+    try testing.expectEqual(@as(u256, 7), info.operator_fee_scalar.?);
+    try testing.expectEqual(@as(u256, 9), info.operator_fee_constant.?);
 }

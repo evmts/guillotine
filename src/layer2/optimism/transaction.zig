@@ -1,5 +1,4 @@
 const std = @import("std");
-const primitives = @import("primitives");
 
 /// Deposit transaction parts (EIP-2718 type 0x7E)
 ///

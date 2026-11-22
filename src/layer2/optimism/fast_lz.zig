@@ -1,7 +1,7 @@
 //! FastLZ compression size estimation for Optimism L1 fee calculation.
 //!
 //! Based on the Rust implementation from op-revm:
-//! https://github.com/bluealloy/revm/blob/main/crates/op-revm/src/fast_lz.rs
+//! https://github.com/ethereum-optimism/optimism/blob/develop/rust/op-revm/src/fast_lz.rs
 //!
 //! This is a direct port of the FastLZ compression algorithm used to estimate
 //! the compressed size of transaction data for L1 fee calculations in Optimism.
