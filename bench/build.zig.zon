@@ -1,0 +1,8 @@
+.{
+    .name = .guillotine_bench,
+    .version = "0.1.0",
+    .fingerprint = 0xbc167f7a3c1a74a,
+    .minimum_zig_version = "0.15.1",
+    .dependencies = .{ .guillotine = .{ .path = ".." } },
+    .paths = .{ "" },
+}
