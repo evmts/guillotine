@@ -213,6 +213,11 @@ pub fn Handlers(FrameType: type) type {
             const src_offset = self.stack.pop_unsafe(); // Second from top (src)
             const size = self.stack.pop_unsafe(); // Third from top (length)
 
+            // EIP-5656: a zero-size copy touches no memory, whatever the offsets.
+            if (size == 0) {
+                return dispatch_next.nextInstruction(FrameType, self, cursor, .MCOPY);
+            }
+
             // Check if offsets and size fit in u32 (memory limit)
             if (!checkMemoryLimit(dest_offset) or !checkMemoryLimit(src_offset) or !checkMemoryLimit(size)) {
                 self.afterComplete(.MCOPY);
@@ -222,11 +227,6 @@ pub fn Handlers(FrameType: type) type {
             const dest_u32 = @as(u32, @intCast(dest_offset));
             const src_u32 = @as(u32, @intCast(src_offset));
             const size_u24 = @as(u32, @intCast(size));
-
-            if (size_u24 == 0) {
-                // No operation for zero size
-                return dispatch_next.nextInstruction(FrameType, self, cursor, .MCOPY);
-            }
 
             // Calculate dynamic gas cost (static gas handled by JUMPDEST)
             const words = (size_u24 + 31) >> 5;
@@ -249,6 +249,13 @@ pub fn Handlers(FrameType: type) type {
                 return Error.OutOfGas;
             }
             self.gas_remaining -= @intCast(total_gas_cost);
+
+            // Memory expands over both ranges before the copy; source bytes beyond the old
+            // size read as zero.
+            self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @max(src_end, dest_end)) catch {
+                self.afterComplete(.MCOPY);
+                return Error.AllocationError;
+            };
 
             // For overlapping memory regions, we need to copy via a temporary buffer
             // First, read the source data

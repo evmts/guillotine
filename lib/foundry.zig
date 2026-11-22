@@ -31,13 +31,17 @@ pub fn createFoundryLibrary(
         .ReleaseSafe, .ReleaseSmall => "release",
         .ReleaseFast => "release-fast",
     };
+    // Cargo writes to CARGO_TARGET_DIR when set, so link from the same place.
+    const cargo_target_dir = b.graph.env_map.get("CARGO_TARGET_DIR");
+    const target_root = cargo_target_dir orelse "target";
     const rust_target_dir = if (rust_target) |target_triple|
-        b.fmt("target/{s}/{s}", .{ target_triple, profile_dir })
+        b.fmt("{s}/{s}/{s}", .{ target_root, target_triple, profile_dir })
     else
-        b.fmt("target/{s}", .{profile_dir});
+        b.fmt("{s}/{s}", .{ target_root, profile_dir });
 
     // Add the Rust static library
-    foundry_lib.addObjectFile(b.path(b.fmt("{s}/libfoundry_wrapper.a", .{rust_target_dir})));
+    const archive = b.fmt("{s}/libfoundry_wrapper.a", .{rust_target_dir});
+    foundry_lib.addObjectFile(if (cargo_target_dir != null) .{ .cwd_relative = archive } else b.path(archive));
     foundry_lib.addIncludePath(b.path("lib/foundry-compilers"));
 
     // Link necessary system libraries

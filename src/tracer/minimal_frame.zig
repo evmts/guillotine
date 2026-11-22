@@ -48,7 +48,6 @@ pub const MinimalFrame = struct {
     allocator: std.mem.Allocator,
 
     // EIP-3074 AUTH state
-    authorized: ?u256,
     call_depth: u32,
     
     // Active hardfork configuration for gas rules
@@ -117,7 +116,6 @@ pub const MinimalFrame = struct {
             .reverted = false,
             .evm_ptr = evm_ptr,
             .allocator = allocator,
-            .authorized = null,
             .call_depth = 0,
             .hardfork = hardfork,
         };
@@ -1261,13 +1259,23 @@ pub const MinimalFrame = struct {
                     _ = try self.popStack();
                 }
 
-                // Gas cost
+                // Gas cost: static + per-topic + per-byte, plus memory expansion over the
+                // data range (none for zero length, whatever the offset).
                 const length_u32 = std.math.cast(u32, length) orelse return error.OutOfBounds;
                 const log_cost = logGasCost(topic_count, length_u32);
-                try self.consumeGas(log_cost);
+                var end: u64 = 0;
+                if (length_u32 > 0) {
+                    const offset_u32 = std.math.cast(u32, offset) orelse return error.OutOfBounds;
+                    end = @as(u64, offset_u32) + @as(u64, length_u32);
+                }
+                const mem_cost = if (end > 0) self.memoryExpansionCost(end) else 0;
+                try self.consumeGas(log_cost + mem_cost);
+                if (end > 0) {
+                    const aligned_size = wordAlignedSize(end);
+                    if (aligned_size > self.memory_size) self.memory_size = aligned_size;
+                }
 
                 // In minimal implementation, we don't actually emit logs
-                _ = offset;
                 self.pc += 1;
             },
 
@@ -1278,13 +1286,24 @@ pub const MinimalFrame = struct {
                 const length = try self.popStack();
                 
                 const len = std.math.cast(u32, length) orelse return error.OutOfBounds;
+                // Init code is read from memory: charge expansion over [offset, offset+len)
+                // (nothing for zero length, whatever the offset).
+                var end: u64 = 0;
+                if (len > 0) {
+                    const offset_u32 = std.math.cast(u32, offset) orelse return error.OutOfBounds;
+                    end = @as(u64, offset_u32) + @as(u64, len);
+                }
+                const mem_cost = if (end > 0) self.memoryExpansionCost(end) else 0;
                 const gas_cost = self.createGasCost(len);
-                try self.consumeGas(gas_cost);
+                try self.consumeGas(gas_cost + mem_cost);
+                if (end > 0) {
+                    const aligned_size = wordAlignedSize(end);
+                    if (aligned_size > self.memory_size) self.memory_size = aligned_size;
+                }
 
                 // In minimal implementation, just return a dummy address
                 // TODO: Add contract code size validation after CREATE executes init code
                 _ = value;
-                _ = offset;
                 try self.pushStack(0); // Dummy created address
                 self.pc += 1;
             },
@@ -1308,10 +1327,19 @@ pub const MinimalFrame = struct {
                 }
                 const call_address = Address{ .bytes = addr_bytes };
 
-                // Base gas cost
-                var gas_cost: u64 = GasConstants.CallGas;
+                // EIP-2929 (Berlin+): the warm/cold access cost added below IS the base
+                // price; there is no separate CallGas on top of it.
+                var gas_cost: u64 = if (evm.hardfork.isAtLeast(.BERLIN)) 0 else GasConstants.CallGas;
                 if (value_arg > 0) {
                     gas_cost += GasConstants.CallValueTransferGas;
+                }
+                // Creating an account costs G_newaccount: since Spurious Dragon (EIP-161) only
+                // for a value transfer to a dead account; before it, for any call to an
+                // account that does not exist. MinimalEvm tracks no nonces, so balance and
+                // code decide liveness.
+                const target_dead = evm.get_balance(call_address) == 0 and evm.get_code(call_address).len == 0;
+                if (target_dead and (value_arg > 0 or evm.hardfork.isBefore(.SPURIOUS_DRAGON))) {
+                    gas_cost += GasConstants.CallNewAccountGas;
                 }
                 // EIP-2929: access target account (warm/cold)
                 const access_cost = try evm.access_address(call_address);
@@ -1404,8 +1432,9 @@ pub const MinimalFrame = struct {
                 }
                 const call_address = Address{ .bytes = addr_bytes };
 
-                // Base gas cost
-                var gas_cost: u64 = GasConstants.CallGas;
+                // EIP-2929 (Berlin+): the warm/cold access cost added below IS the base
+                // price; there is no separate CallGas on top of it.
+                var gas_cost: u64 = if (evm.hardfork.isAtLeast(.BERLIN)) 0 else GasConstants.CallGas;
                 if (value_arg > 0) {
                     gas_cost += GasConstants.CallValueTransferGas;
                 }
@@ -1525,8 +1554,11 @@ pub const MinimalFrame = struct {
                 }
                 const call_address = Address{ .bytes = addr_bytes };
 
-                // Base gas cost
-                var gas_cost: u64 = GasConstants.CallGas;
+                // EIP-2929 replaces the base with the warm/cold account-access price.
+                var gas_cost: u64 = if (evm.hardfork.isAtLeast(.BERLIN))
+                    try evm.access_address(call_address)
+                else
+                    GasConstants.CallGas;
 
                 // Memory expansion gas - charge for BOTH input and return regions
                 const in_offset_u64 = std.math.cast(u64, in_offset) orelse return error.OutOfBounds;
@@ -1606,12 +1638,23 @@ pub const MinimalFrame = struct {
                 const salt = try self.popStack();
                 
                 const len = std.math.cast(u32, length) orelse return error.OutOfBounds;
+                // Init code is read from memory: charge expansion over [offset, offset+len)
+                // (nothing for zero length, whatever the offset).
+                var end: u64 = 0;
+                if (len > 0) {
+                    const offset_u32 = std.math.cast(u32, offset) orelse return error.OutOfBounds;
+                    end = @as(u64, offset_u32) + @as(u64, len);
+                }
+                const mem_cost = if (end > 0) self.memoryExpansionCost(end) else 0;
                 const gas_cost = self.create2GasCost(len);
-                try self.consumeGas(gas_cost);
+                try self.consumeGas(gas_cost + mem_cost);
+                if (end > 0) {
+                    const aligned_size = wordAlignedSize(end);
+                    if (aligned_size > self.memory_size) self.memory_size = aligned_size;
+                }
 
                 // TODO: Add contract code size validation after CREATE2 executes init code
                 _ = value;
-                _ = offset;
                 _ = salt;
                 try self.pushStack(0); // Dummy created address
                 self.pc += 1;
@@ -1717,13 +1760,14 @@ pub const MinimalFrame = struct {
                 // EIP-5656: MCOPY was introduced in Cancun hardfork
                 if (evm.hardfork.isBefore(.CANCUN)) return error.InvalidOpcode;
 
-                // Stack order: [dest, src, len]
-                const len = try self.popStack();
-                const src = try self.popStack();
+                // EIP-5656: μs[0] = dest (top), μs[1] = src, μs[2] = length.
                 const dest = try self.popStack();
+                const src = try self.popStack();
+                const len = try self.popStack();
 
-                // Fast path: zero length does nothing
+                // Zero length touches no memory but still pays the static G_verylow.
                 if (len == 0) {
+                    try self.consumeGas(GasConstants.GasFastestStep);
                     self.pc += 1;
                     return;
                 }
@@ -1740,7 +1784,7 @@ pub const MinimalFrame = struct {
                 const mem_cost_dest = self.memoryExpansionCost(end_dest);
                 const mem_cost = @max(mem_cost_src, mem_cost_dest);
                 const copy_cost = copyGasCost(len_u32);
-                try self.consumeGas(mem_cost + copy_cost);
+                try self.consumeGas(GasConstants.GasFastestStep + mem_cost + copy_cost);
 
                 // Copy via temporary buffer to handle overlapping regions
                 const tmp = try self.allocator.alloc(u8, len_u32);
@@ -1863,142 +1907,11 @@ pub const MinimalFrame = struct {
                 self.pc += 1;
             },
 
-            // TODO: Figure out what we want to do with AUTH and AUTHCALL as they were removed
-            // from prague in favor of EIP-7702 (account abstraction) and currently not planned to be implemented
-            // AUTH (EIP-3074)
-            0xf6 => {
-                // AUTH opcode from EIP-3074
-                // Stack: [authority, commitment, sig_v, sig_r, sig_s] → [success]
-                // Stack order (top to bottom): sig_s, sig_r, sig_v, commitment, authority
-                try self.consumeGas(3100); // Base cost for AUTH
-
-                // Pop 5 values from stack in correct order (top first)
-                const sig_s = try self.popStack();
-                const sig_r = try self.popStack();
-                const sig_v = try self.popStack();
-                const commitment = try self.popStack();
-                const authority = try self.popStack();
-                _ = commitment; // Used for signature verification in real implementation
-
-                // Basic validation as per spec
-                // sig_v must be 27 or 28, sig_r and sig_s must be non-zero
-                if (sig_v != 27 and sig_v != 28) {
-                    // Invalid signature v value, push failure
-                    try self.pushStack(0);
-                    self.pc += 1;
-                    return;
-                }
-
-                if (sig_r == 0 or sig_s == 0) {
-                    // Invalid signature r/s values, push failure
-                    try self.pushStack(0);
-                    self.pc += 1;
-                    return;
-                }
-
-                // Check if r and s are within valid range (less than secp256k1 order)
-                const SECP256K1_N: u256 = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141;
-                if (sig_r >= SECP256K1_N or sig_s >= SECP256K1_N) {
-                    // Signature values out of range
-                    try self.pushStack(0);
-                    self.pc += 1;
-                    return;
-                }
-
-                // For MinimalFrame testing: simulate successful AUTH if authority is non-zero
-                // This allows testing the AUTH/AUTHCALL flow without actual crypto
-                if (authority != 0) {
-                    // Store the authorized address (lower 160 bits of authority)
-                    self.authorized = authority & (((@as(u256, 1) << 160) - 1));
-                    try self.pushStack(1); // Success
-                } else {
-                    // Zero authority always fails
-                    self.authorized = null;
-                    try self.pushStack(0); // Failure
-                }
-                self.pc += 1;
-            },
-
-            // AUTHCALL (EIP-3074)
-            0xf7 => {
-                // AUTHCALL opcode from EIP-3074
-                // Stack: [gas, to, value, in_offset, in_size, out_offset, out_size, auth] → [success]
-                try self.consumeGas(GasConstants.WarmStorageReadCost);
-
-                // Pop 8 values from stack (in reverse order, top first)
-                const auth_flag = try self.popStack();
-                const out_size = try self.popStack();
-                const out_offset = try self.popStack();
-                const in_size = try self.popStack();
-                const in_offset = try self.popStack();
-                const value = try self.popStack();
-                const to_addr = try self.popStack();
-                const gas_param = try self.popStack();
-                _ = to_addr; // Would be used in real implementation for target address
-
-                // Check if we have authorization (auth_flag must be 1 and authorized must be set)
-                if (auth_flag != 1 or self.authorized == null) {
-                    // No authorization, push failure
-                    try self.pushStack(0);
-                    self.pc += 1;
-                    return;
-                }
-
-                // Validate gas parameter
-                if (gas_param > std.math.maxInt(i64)) {
-                    try self.pushStack(0);
-                    self.pc += 1;
-                    return;
-                }
-
-                // Calculate memory expansion cost for input
-                if (in_size > 0) {
-                    const in_end = std.math.add(u256, in_offset, in_size) catch {
-                        try self.pushStack(0);
-                        self.pc += 1;
-                        return;
-                    };
-                    if (in_end > std.math.maxInt(u32)) {
-                        try self.pushStack(0);
-                        self.pc += 1;
-                        return;
-                    }
-                    const in_end_u32 = std.math.cast(u32, in_end) orelse return error.OutOfBounds;
-                    const mem_cost = self.memoryExpansionCost(in_end_u32);
-                    try self.consumeGas(mem_cost);
-                }
-
-                // Calculate memory expansion cost for output
-                if (out_size > 0) {
-                    const out_end = std.math.add(u256, out_offset, out_size) catch {
-                        try self.pushStack(0);
-                        self.pc += 1;
-                        return;
-                    };
-                    if (out_end > std.math.maxInt(u32)) {
-                        try self.pushStack(0);
-                        self.pc += 1;
-                        return;
-                    }
-                    const out_end_u32 = std.math.cast(u32, out_end) orelse return error.OutOfBounds;
-                    const mem_cost = self.memoryExpansionCost(out_end_u32);
-                    try self.consumeGas(mem_cost);
-                }
-
-                // Additional gas for value transfer
-                if (value != 0) {
-                    try self.consumeGas(9000); // CallValueTransferGas
-                }
-
-                // For MinimalFrame: simulate call success if authorized
-                // The call is made with the authorized address as the caller
-                // In a real implementation, this would make an actual call
-                self.call_depth += 1;
-                defer self.call_depth -= 1;
-
-                // Simulate successful authorized call
-                try self.pushStack(1); // Success
-                self.pc += 1;
+            // AUTH/AUTHCALL (0xF6/0xF7) belonged to EIP-3074, which was withdrawn in favor of
+            // EIP-7702 and never activated: they are undefined opcodes in every fork, as in Frame.
+            0xf6, 0xf7 => {
+                self.gas_remaining = 0;
+                return error.InvalidOpcode;
             },
 
             // INVALID

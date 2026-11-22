@@ -1,7 +1,7 @@
 # Review: root.zig
 
 ## Overview
-Entry point for the precompiles module. Provides a unified interface for executing all Ethereum precompile contracts (0x01-0x13), hardfork-aware address validation, and exports common types/utilities.
+Entry point for the precompiles module. Provides a unified interface for executing all Ethereum precompile contracts (0x01-0x11, final EIP-2537 layout), hardfork-aware address validation, and exports common types/utilities.
 
 ## Code Quality
 
@@ -20,7 +20,7 @@ Entry point for the precompiles module. Provides a unified interface for executi
 ## Completeness
 
 ### Complete
-- All precompile addresses (0x01-0x13) are defined
+- All precompile addresses (0x01-0x11, final EIP-2537 layout) are defined
 - All precompile modules are imported
 - Hardfork progression is complete (FRONTIER → PRAGUE)
 
@@ -41,7 +41,7 @@ Entry point for the precompiles module. Provides a unified interface for executi
 - No test for `error.NotImplemented` path (lines 79, 103)
 - No test for invalid/unknown hardfork handling
 - No test for addresses between 0x00 and 0x01
-- No test for addresses above 0x13
+- Tests cover draft-only 0x12/0x13 being rejected
 - Missing hardforks in tests: BERLIN, LONDON, SHANGHAI, etc.
 
 ## Gas Calculation

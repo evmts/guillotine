@@ -59,6 +59,8 @@ pub const OpcodeSynthetic = enum(u8) {
     PUSH_ADD_DUP1 = 0xCB,          // PUSH + ADD + DUP1 (common in loops)
     MLOAD_SWAP1_DUP2 = 0xCC,       // MLOAD + SWAP1 + DUP2 (memory pattern)
     BACKWARD_LOOP_JUMPI = 0xCD,   // Backward loop: PUSH+JUMPI(exit) + [body] + PUSH+JUMP(loop)
+    BLOCK_BEGIN = 0xCE,           // Basic block entered by falling through a non-taken JUMPI (charges block gas)
+    INVALID_JUMP_TARGET = 0xCF,   // Target of a static jump whose destination is not a JUMPDEST
     
     /// Describe the fusion operation for tracing/debugging
     pub fn describe(self: OpcodeSynthetic) []const u8 {
@@ -90,6 +92,8 @@ pub const OpcodeSynthetic = enum(u8) {
             .PUSH_ADD_DUP1 => "PUSH+ADD+DUP1 pattern",
             .MLOAD_SWAP1_DUP2 => "MLOAD+SWAP1+DUP2 pattern",
             .BACKWARD_LOOP_JUMPI => "Backward loop (PUSH+JUMPI exit + PUSH+JUMP loop)",
+            .BLOCK_BEGIN => "Fall-through basic block gas and stack check after JUMPI",
+            .INVALID_JUMP_TARGET => "Taken static jump to a non-JUMPDEST (raises InvalidJump)",
         };
     }
 };

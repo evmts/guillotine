@@ -95,23 +95,11 @@ pub const EvmConfig = struct {
         return config;
     }
 
-    /// Get the hardfork enum from a string
-    fn getHardforkFromString(hardfork_str: []const u8) Hardfork {
-        if (std.mem.eql(u8, hardfork_str, "FRONTIER")) return .FRONTIER;
-        if (std.mem.eql(u8, hardfork_str, "HOMESTEAD")) return .HOMESTEAD;
-        if (std.mem.eql(u8, hardfork_str, "TANGERINE")) return .TANGERINE;
-        if (std.mem.eql(u8, hardfork_str, "SPURIOUS")) return .SPURIOUS;
-        if (std.mem.eql(u8, hardfork_str, "BYZANTIUM")) return .BYZANTIUM;
-        if (std.mem.eql(u8, hardfork_str, "CONSTANTINOPLE")) return .CONSTANTINOPLE;
-        if (std.mem.eql(u8, hardfork_str, "ISTANBUL")) return .ISTANBUL;
-        if (std.mem.eql(u8, hardfork_str, "BERLIN")) return .BERLIN;
-        if (std.mem.eql(u8, hardfork_str, "LONDON")) return .LONDON;
-        if (std.mem.eql(u8, hardfork_str, "MERGE")) return .MERGE;
-        if (std.mem.eql(u8, hardfork_str, "SHANGHAI")) return .SHANGHAI;
-        if (std.mem.eql(u8, hardfork_str, "CANCUN")) return .CANCUN;
-        if (std.mem.eql(u8, hardfork_str, "PRAGUE")) return .PRAGUE;
-        // Default to CANCUN if unknown
-        return .CANCUN;
+    /// Get the hardfork enum from a `-Devm-hardfork` name such as "OSAKA".
+    /// An unknown name is a compile error rather than a silent fallback.
+    fn getHardforkFromString(comptime hardfork_str: []const u8) Hardfork {
+        return comptime std.meta.stringToEnum(Hardfork, hardfork_str) orelse
+            @compileError("unknown -Devm-hardfork value: " ++ hardfork_str);
     }
 };
 

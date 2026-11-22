@@ -1,7 +1,7 @@
 # BLS12-381 Map Fp2 to G2 Precompile Review
 
 ## Overview
-Implements EIP-2537 0x13: BLS12_MAP_FP2_TO_G2 precompile for mapping an Fp2 element (quadratic extension field) to a point on the BLS12-381 G2 curve. Takes a 128-byte Fp2 element (c0=64 bytes, c1=64 bytes) and returns a 256-byte G2 point. Uses hash-to-curve algorithm for G2.
+Implements EIP-2537 0x11: BLS12_MAP_FP2_TO_G2 precompile for mapping an Fp2 element (quadratic extension field) to a point on the BLS12-381 G2 curve. Takes a 128-byte Fp2 element (c0=64 bytes, c1=64 bytes) and returns a 256-byte G2 point. Uses hash-to-curve algorithm for G2.
 
 ## Code Quality
 

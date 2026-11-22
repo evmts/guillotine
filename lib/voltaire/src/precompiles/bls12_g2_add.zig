@@ -4,9 +4,9 @@ const PrecompileError = @import("common.zig").PrecompileError;
 const PrecompileResult = @import("common.zig").PrecompileResult;
 
 /// Gas cost for BLS12-381 G2 addition
-pub const GAS: u64 = 800;
+pub const GAS: u64 = 600;
 
-/// 0x0E: BLS12_G2ADD - BLS12-381 G2 addition
+/// 0x0D: BLS12_G2ADD - BLS12-381 G2 addition
 pub fn execute(
     allocator: std.mem.Allocator,
     input: []const u8,
@@ -21,6 +21,7 @@ pub fn execute(
     }
 
     const output = try allocator.alloc(u8, 256);
+    errdefer allocator.free(output);
     crypto.Crypto.bls12_381.g2Add(input, output) catch {
         return error.InvalidPoint;
     };

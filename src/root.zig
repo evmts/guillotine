@@ -33,7 +33,7 @@ pub const BuildConfiguredEvm = Evm(EvmConfig{});
 pub const MainnetEvm = Evm(.{});
 
 pub const MainnetEvmWithTracer = Evm(EvmConfig{
-    .eips = .{ .hardfork = @import("eips_and_hardforks/eips.zig").Hardfork.CANCUN },
+    .eips = .{ .hardfork = @import("eips_and_hardforks/eips.zig").Hardfork.DEFAULT },
     .tracer_config = @import("tracer/tracer.zig").TracerConfig{
         .enabled = true,
         .enable_validation = true, // Enable validation for step capture
@@ -110,6 +110,8 @@ pub const Account = @import("storage/database_interface_account.zig").Account;
 pub const AccessList = @import("storage/access_list.zig").AccessList;
 pub const Hardfork = @import("eips_and_hardforks/eips.zig").Hardfork;
 pub const Eips = @import("eips_and_hardforks/eips.zig").Eips;
+/// EIP constants and validators (EIP-7825, EIP-7934, EIP-7918, EIP-7892, EIP-7685).
+pub const eips = @import("eips_and_hardforks/eips.zig");
 pub const MemoryDatabase = @import("storage/memory_database.zig").MemoryDatabase;
 pub const SelfDestruct = @import("storage/self_destruct.zig").SelfDestruct;
 pub const Log = @import("voltaire").logs.Log;

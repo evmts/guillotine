@@ -328,6 +328,31 @@ pub fn Handlers(FrameType: type) type {
                 const expansion_cost_i64 = @as(FrameType.GasType, @intCast(expansion_cost));
                 self.gas_remaining -= expansion_cost_i64;
                 if (self.gas_remaining < 0) {
+                    self.afterComplete(.CALLCODE);
+                    return Error.OutOfGas;
+                }
+            }
+
+            // EIP-2929: the static 100 already paid covers a warm access; a cold one adds
+            // the difference. Value-bearing CALLCODE also pays G_callvalue (9000), which is
+            // what funds the 2300 stipend below. It never pays G_newaccount: the value goes
+            // to the caller's own account.
+            const evm_cc = self.getEvm();
+            const access_cost_cc = evm_cc.access_address(addr) catch {
+                self.afterComplete(.CALLCODE);
+                return Error.AllocationError;
+            };
+            if (access_cost_cc > 100) {
+                self.gas_remaining -= @intCast(access_cost_cc - 100);
+                if (self.gas_remaining < 0) {
+                    self.afterComplete(.CALLCODE);
+                    return Error.OutOfGas;
+                }
+            }
+            if (value != 0) {
+                self.gas_remaining -= @intCast(primitives.GasConstants.CALL_VALUE_TRANSFER_COST);
+                if (self.gas_remaining < 0) {
+                    self.afterComplete(.CALLCODE);
                     return Error.OutOfGas;
                 }
             }
@@ -741,41 +766,30 @@ pub fn Handlers(FrameType: type) type {
             const offset = self.stack.pop_unsafe();
             const size = self.stack.pop_unsafe();
 
-            // Bounds checking for memory offset and size
-            if (offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
-                self.stack.push_unsafe(0);
-                const op_data = dispatch.getOpData(.CREATE);
-                self.afterInstruction(.CREATE, op_data.next_handler, op_data.next_cursor.cursor);
-                return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-            }
-
-            const offset_usize = @as(usize, @intCast(offset));
-            const size_usize = @as(usize, @intCast(size));
-
-            // Ensure memory capacity
-            const memory_end = offset_usize + size_usize;
-            // Check if offset, size, and memory_end fit in u24 (memory limit)
-            if (offset_usize > std.math.maxInt(u24) or size_usize > std.math.maxInt(u24) or memory_end > std.math.maxInt(u24)) {
-                self.stack.push_unsafe(0);
-                const op_data = dispatch.getOpData(.CREATE);
-                self.afterInstruction(.CREATE, op_data.next_handler, op_data.next_cursor.cursor);
-                return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-            }
-            self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(memory_end))) catch {
-                self.stack.push_unsafe(0);
-                const op_data = dispatch.getOpData(.CREATE);
-                self.afterInstruction(.CREATE, op_data.next_handler, op_data.next_cursor.cursor);
-                return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-            };
-
-            // Extract initialization code
+            // Memory for the init code is charged like any other memory access: a range
+            // that cannot be paid for halts this frame out of gas (it does not push 0).
+            // A zero-size init code touches no memory, whatever the offset.
             var init_code: []const u8 = &.{};
-            if (size_usize > 0) {
-                init_code = self.memory.get_slice(@as(u32, @intCast(offset_usize)), @as(u32, @intCast(size_usize))) catch {
-                    self.stack.push_unsafe(0);
-                    const op_data = dispatch.getOpData(.CREATE);
-                    self.afterInstruction(.CREATE, op_data.next_handler, op_data.next_cursor.cursor);
-                    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+            if (size != 0) {
+                if (offset > std.math.maxInt(u24) or size > std.math.maxInt(u24) or offset + size > std.math.maxInt(u24)) {
+                    self.afterComplete(.CREATE);
+                    return Error.OutOfGas;
+                }
+                const offset_u32: u32 = @intCast(offset);
+                const size_u32: u32 = @intCast(size);
+                const memory_end: u32 = offset_u32 + size_u32;
+                self.gas_remaining -= @intCast(self.memory.get_expansion_cost(memory_end));
+                if (self.gas_remaining < 0) {
+                    self.afterComplete(.CREATE);
+                    return Error.OutOfGas;
+                }
+                self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), memory_end) catch {
+                    self.afterComplete(.CREATE);
+                    return Error.AllocationError;
+                };
+                init_code = self.memory.get_slice(offset_u32, size_u32) catch {
+                    self.afterComplete(.CREATE);
+                    return Error.OutOfBounds;
                 };
             }
 
@@ -835,41 +849,30 @@ pub fn Handlers(FrameType: type) type {
             const size = self.stack.pop_unsafe();
             const salt = self.stack.pop_unsafe();
 
-            // Bounds checking for memory offset and size
-            if (offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
-                self.stack.push_unsafe(0);
-                const op_data = dispatch.getOpData(.CREATE2);
-                self.afterInstruction(.CREATE2, op_data.next_handler, op_data.next_cursor.cursor);
-                return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-            }
-
-            const offset_usize = @as(usize, @intCast(offset));
-            const size_usize = @as(usize, @intCast(size));
-
-            // Ensure memory capacity
-            const memory_end = offset_usize + size_usize;
-            // Check if offset, size, and memory_end fit in u24 (memory limit)
-            if (offset_usize > std.math.maxInt(u24) or size_usize > std.math.maxInt(u24) or memory_end > std.math.maxInt(u24)) {
-                self.stack.push_unsafe(0);
-                const op_data = dispatch.getOpData(.CREATE2);
-                self.afterInstruction(.CREATE2, op_data.next_handler, op_data.next_cursor.cursor);
-                return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-            }
-            self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(memory_end))) catch {
-                self.stack.push_unsafe(0);
-                const op_data = dispatch.getOpData(.CREATE2);
-                self.afterInstruction(.CREATE2, op_data.next_handler, op_data.next_cursor.cursor);
-                return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-            };
-
-            // Extract initialization code
+            // Memory for the init code is charged like any other memory access: a range
+            // that cannot be paid for halts this frame out of gas (it does not push 0).
+            // A zero-size init code touches no memory, whatever the offset.
             var init_code: []const u8 = &.{};
-            if (size_usize > 0) {
-                init_code = self.memory.get_slice(@as(u32, @intCast(offset_usize)), @as(u32, @intCast(size_usize))) catch {
-                    self.stack.push_unsafe(0);
-                    const op_data = dispatch.getOpData(.CREATE2);
-                    self.afterInstruction(.CREATE2, op_data.next_handler, op_data.next_cursor.cursor);
-                    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+            if (size != 0) {
+                if (offset > std.math.maxInt(u24) or size > std.math.maxInt(u24) or offset + size > std.math.maxInt(u24)) {
+                    self.afterComplete(.CREATE2);
+                    return Error.OutOfGas;
+                }
+                const offset_u32: u32 = @intCast(offset);
+                const size_u32: u32 = @intCast(size);
+                const memory_end: u32 = offset_u32 + size_u32;
+                self.gas_remaining -= @intCast(self.memory.get_expansion_cost(memory_end));
+                if (self.gas_remaining < 0) {
+                    self.afterComplete(.CREATE2);
+                    return Error.OutOfGas;
+                }
+                self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), memory_end) catch {
+                    self.afterComplete(.CREATE2);
+                    return Error.AllocationError;
+                };
+                init_code = self.memory.get_slice(offset_u32, size_u32) catch {
+                    self.afterComplete(.CREATE2);
+                    return Error.OutOfBounds;
                 };
             }
 

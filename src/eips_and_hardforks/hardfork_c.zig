@@ -13,6 +13,7 @@ const Hardfork = @import("eips.zig").Hardfork;
 pub const CHardfork = enum(c_int) {
     FRONTIER = @intFromEnum(Hardfork.FRONTIER),
     HOMESTEAD = @intFromEnum(Hardfork.HOMESTEAD),
+    DAO = @intFromEnum(Hardfork.DAO),
     TANGERINE_WHISTLE = @intFromEnum(Hardfork.TANGERINE_WHISTLE),
     SPURIOUS_DRAGON = @intFromEnum(Hardfork.SPURIOUS_DRAGON),
     BYZANTIUM = @intFromEnum(Hardfork.BYZANTIUM),
@@ -27,6 +28,9 @@ pub const CHardfork = enum(c_int) {
     MERGE = @intFromEnum(Hardfork.MERGE),
     SHANGHAI = @intFromEnum(Hardfork.SHANGHAI),
     CANCUN = @intFromEnum(Hardfork.CANCUN),
+    PRAGUE = @intFromEnum(Hardfork.PRAGUE),
+    OSAKA = @intFromEnum(Hardfork.OSAKA),
+    AMSTERDAM = @intFromEnum(Hardfork.AMSTERDAM),
 };
 
 /// Convert C hardfork to native hardfork
@@ -50,6 +54,7 @@ pub export fn evm_hardfork_name(hardfork: CHardfork) [*:0]const u8 {
     return switch (hardfork) {
         .FRONTIER => "Frontier",
         .HOMESTEAD => "Homestead",
+        .DAO => "DAO",
         .TANGERINE_WHISTLE => "Tangerine Whistle",
         .SPURIOUS_DRAGON => "Spurious Dragon",
         .BYZANTIUM => "Byzantium",
@@ -64,6 +69,9 @@ pub export fn evm_hardfork_name(hardfork: CHardfork) [*:0]const u8 {
         .MERGE => "Merge",
         .SHANGHAI => "Shanghai",
         .CANCUN => "Cancun",
+        .PRAGUE => "Prague",
+        .OSAKA => "Osaka",
+        .AMSTERDAM => "Amsterdam",
     };
 }
 
@@ -74,6 +82,7 @@ pub export fn evm_hardfork_description(hardfork: CHardfork) [*:0]const u8 {
     return switch (hardfork) {
         .FRONTIER => "Original Ethereum launch (July 2015)",
         .HOMESTEAD => "First planned hardfork (March 2016)",
+        .DAO => "DAO hack recovery fork (July 2016)",
         .TANGERINE_WHISTLE => "Gas cost adjustments after DoS attacks (October 2016)",
         .SPURIOUS_DRAGON => "Additional security fixes (November 2016)",
         .BYZANTIUM => "Privacy and scalability improvements (October 2017)",
@@ -88,6 +97,9 @@ pub export fn evm_hardfork_description(hardfork: CHardfork) [*:0]const u8 {
         .MERGE => "Ethereum merge to proof-of-stake (September 2022)",
         .SHANGHAI => "Staking withdrawals and optimizations (April 2023)",
         .CANCUN => "Proto-danksharding and blob transactions (March 2024)",
+        .PRAGUE => "Pectra: EOA code delegation and BLS12-381 (May 2025)",
+        .OSAKA => "Fusaka: PeerDAS, CLZ, MODEXP repricing, tx gas cap (December 2025)",
+        .AMSTERDAM => "Glamsterdam (TBD, targeting early 2027)",
     };
 }
 
@@ -96,7 +108,7 @@ pub export fn evm_hardfork_description(hardfork: CHardfork) [*:0]const u8 {
 /// @return 1 if valid, 0 otherwise
 pub export fn evm_hardfork_is_valid(hardfork: c_int) c_int {
     return switch (hardfork) {
-        @intFromEnum(CHardfork.FRONTIER)...@intFromEnum(CHardfork.CANCUN) => 1,
+        @intFromEnum(CHardfork.FRONTIER)...@intFromEnum(CHardfork.AMSTERDAM) => 1,
         else => 0,
     };
 }
@@ -104,7 +116,7 @@ pub export fn evm_hardfork_is_valid(hardfork: c_int) c_int {
 /// Get the latest hardfork
 /// @return Latest hardfork enum value
 pub export fn evm_hardfork_latest() CHardfork {
-    return .CANCUN;
+    return native_to_c_hardfork(Hardfork.DEFAULT);
 }
 
 // ============================================================================
@@ -280,6 +292,11 @@ pub export fn evm_hardfork_get_info(hardfork: CHardfork, info_out: *CHardforkInf
             info_out.month = 3;
             info_out.major_features = "Difficulty adjustment, gas cost changes";
         },
+        .DAO => {
+            info_out.year = 2016;
+            info_out.month = 7;
+            info_out.major_features = "DAO fund recovery, no EVM changes";
+        },
         .TANGERINE_WHISTLE => {
             info_out.year = 2016;
             info_out.month = 10;
@@ -350,6 +367,21 @@ pub export fn evm_hardfork_get_info(hardfork: CHardfork, info_out: *CHardforkInf
             info_out.month = 3;
             info_out.major_features = "Blob transactions, transient storage";
         },
+        .PRAGUE => {
+            info_out.year = 2025;
+            info_out.month = 5;
+            info_out.major_features = "EIP-7702 delegation, BLS12-381, execution requests";
+        },
+        .OSAKA => {
+            info_out.year = 2025;
+            info_out.month = 12;
+            info_out.major_features = "PeerDAS, CLZ, P256VERIFY, tx gas cap, BPO forks";
+        },
+        .AMSTERDAM => {
+            info_out.year = 2027;
+            info_out.month = 0;
+            info_out.major_features = "Not yet scheduled";
+        },
     }
     
     return 1;
@@ -364,6 +396,7 @@ pub export fn evm_hardfork_get_all(hardforks_out: [*]CHardfork, max_count: u32, 
     const all_hardforks = [_]CHardfork{
         .FRONTIER,
         .HOMESTEAD,
+        .DAO,
         .TANGERINE_WHISTLE,
         .SPURIOUS_DRAGON,
         .BYZANTIUM,
@@ -378,6 +411,9 @@ pub export fn evm_hardfork_get_all(hardforks_out: [*]CHardfork, max_count: u32, 
         .MERGE,
         .SHANGHAI,
         .CANCUN,
+        .PRAGUE,
+        .OSAKA,
+        .AMSTERDAM,
     };
     
     const count = @min(all_hardforks.len, max_count);
@@ -439,6 +475,14 @@ pub export fn evm_hardfork_from_name(name: [*:0]const u8, hardfork_out: *CHardfo
         hardfork_out.* = .SHANGHAI;
     } else if (std.mem.eql(u8, lowercase_name, "cancun")) {
         hardfork_out.* = .CANCUN;
+    } else if (std.mem.eql(u8, lowercase_name, "dao")) {
+        hardfork_out.* = .DAO;
+    } else if (std.mem.eql(u8, lowercase_name, "prague")) {
+        hardfork_out.* = .PRAGUE;
+    } else if (std.mem.eql(u8, lowercase_name, "osaka")) {
+        hardfork_out.* = .OSAKA;
+    } else if (std.mem.eql(u8, lowercase_name, "amsterdam")) {
+        hardfork_out.* = .AMSTERDAM;
     } else {
         return 0; // Unknown hardfork
     }
@@ -494,4 +538,38 @@ pub export fn evm_hardfork_test_info() c_int {
 
 test "Hardfork C API compilation" {
     std.testing.refAllDecls(@This());
+}
+
+test "C hardfork enum covers every native hardfork" {
+    const native_fields = std.meta.fields(Hardfork);
+    try std.testing.expectEqual(native_fields.len, std.meta.fields(CHardfork).len);
+    inline for (native_fields) |field| {
+        const native: Hardfork = @enumFromInt(field.value);
+        const c_value = native_to_c_hardfork(native);
+        try std.testing.expectEqualStrings(field.name, @tagName(c_value));
+        try std.testing.expectEqual(native, c_to_native_hardfork(c_value));
+        try std.testing.expectEqual(@as(c_int, 1), evm_hardfork_is_valid(@intFromEnum(c_value)));
+    }
+    try std.testing.expectEqual(@as(c_int, 0), evm_hardfork_is_valid(native_fields.len));
+    try std.testing.expectEqual(CHardfork.OSAKA, evm_hardfork_latest());
+
+    var all: [32]CHardfork = undefined;
+    var count: u32 = 0;
+    try std.testing.expectEqual(@as(c_int, 1), evm_hardfork_get_all(&all, all.len, &count));
+    try std.testing.expectEqual(@as(u32, native_fields.len), count);
+
+    var parsed: CHardfork = undefined;
+    try std.testing.expectEqual(@as(c_int, 1), evm_hardfork_from_name("Osaka", &parsed));
+    try std.testing.expectEqual(CHardfork.OSAKA, parsed);
+    try std.testing.expectEqual(@as(c_int, 1), evm_hardfork_from_name("amsterdam", &parsed));
+    try std.testing.expectEqual(CHardfork.AMSTERDAM, parsed);
+    try std.testing.expectEqual(@as(c_int, 1), evm_hardfork_from_name("prague", &parsed));
+    try std.testing.expectEqual(CHardfork.PRAGUE, parsed);
+
+    var info: CHardforkInfo = undefined;
+    try std.testing.expectEqual(@as(c_int, 1), evm_hardfork_get_info(.OSAKA, &info));
+    try std.testing.expectEqual(@as(u16, 2025), info.year);
+    try std.testing.expectEqual(@as(u8, 12), info.month);
+    try std.testing.expectEqual(@as(c_int, 0), evm_hardfork_test_basic());
+    try std.testing.expectEqual(@as(c_int, 0), evm_hardfork_test_info());
 }

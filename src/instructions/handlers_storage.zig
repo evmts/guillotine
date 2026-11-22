@@ -4,6 +4,7 @@ const log = @import("../log.zig");
 const GasConstants = @import("voltaire").GasConstants;
 const Address = @import("voltaire").Address.Address;
 const Opcode = @import("../opcodes/opcode_data.zig").Opcode;
+const OPCODE_INFO = @import("../opcodes/opcode_data.zig").OPCODE_INFO;
 
 /// Storage operation handlers for the EVM stack frame.
 /// These are generic structs that return static handlers for a given FrameType.
@@ -36,7 +37,10 @@ pub fn Handlers(FrameType: type) type {
 
             // Charge gas for storage access
             // Use negative gas pattern for single-branch out-of-gas detection
-            self.gas_remaining -= @intCast(access_cost);
+            // The warm cost (100) is SLOAD's static gas, charged with the basic block;
+            // only the EIP-2929 cold surcharge (2100 - 100) is charged here.
+            const surcharge = access_cost -| OPCODE_INFO[@intFromEnum(Opcode.SLOAD)].gas_cost;
+            self.gas_remaining -= @intCast(surcharge);
             if (self.gas_remaining < 0) {
                 self.afterComplete(.SLOAD);
                 return Error.OutOfGas;
@@ -219,14 +223,7 @@ pub fn Handlers(FrameType: type) type {
             // Use the currently executing contract's address
             const contract_addr = self.contract_address;
 
-            // Transient storage has fixed gas cost
-            const gas_cost = GasConstants.WarmStorageReadCost; // 100 gas
-            // Use negative gas pattern for single-branch out-of-gas detection
-            self.gas_remaining -= @intCast(gas_cost);
-            if (self.gas_remaining < 0) {
-                self.afterComplete(.TSTORE);
-                return Error.OutOfGas;
-            }
+            // TSTORE's fixed 100 gas (EIP-1153) is static and charged with the basic block.
 
             // Store the value in transient storage through direct database pointer
             const database = self.getDatabase();

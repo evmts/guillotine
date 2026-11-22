@@ -44,13 +44,8 @@ pub fn Handlers(FrameType: type) type {
             // Handle empty data case
             if (size == 0) {
                 @branchHint(.unlikely);
-                // Gas cost for empty data: static only (30 gas)
-                // Note: JUMPDEST doesn't properly calculate block gas yet
-                self.gas_remaining -= @intCast(GasConstants.Keccak256Gas);
-                if (self.gas_remaining < 0) {
-                    self.afterComplete(.KECCAK256);
-                    return Error.OutOfGas;
-                }
+                // Empty input costs only the 30 gas base, which the basic block
+                // already charged (OPCODE_INFO[KECCAK256].gas_cost). No memory is touched.
 
                 // Hash of empty data depends on Keccak variant
                 const empty_hash = switch (@bitSizeOf(WordType)) {
@@ -82,18 +77,6 @@ pub fn Handlers(FrameType: type) type {
             const offset_usize = @as(usize, @intCast(offset));
             const size_usize = @as(usize, @intCast(size));
 
-            // Calculate gas cost: 30 + 6 * ((size + 31) / 32)
-            // Note: JUMPDEST doesn't properly calculate block gas yet, so we need to charge both static and dynamic
-            const words = (size_usize + 31) / 32;
-            const gas_cost = GasConstants.Keccak256Gas + words * GasConstants.Keccak256WordGas;
-
-            // Use negative gas pattern for single-branch out-of-gas detection
-            self.gas_remaining -= @intCast(gas_cost);
-            if (self.gas_remaining < 0) {
-                self.afterComplete(.KECCAK256);
-                return Error.OutOfGas;
-            }
-
             // Check for overflow
             const end = std.math.add(usize, offset_usize, size_usize) catch {
                 @branchHint(.unlikely);
@@ -105,6 +88,26 @@ pub fn Handlers(FrameType: type) type {
             if (end > std.math.maxInt(u32)) {
                 self.afterComplete(.KECCAK256);
                 return Error.OutOfBounds;
+            }
+
+            // KECCAK256 costs 30 + 6 * words + memory expansion. The 30 gas base is
+            // static and already charged with the basic block (OPCODE_INFO[KECCAK256].gas_cost);
+            // the handler charges only the dynamic part.
+            const words: u64 = (@as(u64, size_usize) + 31) / 32;
+            const memory_expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(end)));
+            // memory_expansion_cost saturates to maxInt(u64) for absurd sizes, so add saturating.
+            const gas_cost = (words * GasConstants.Keccak256WordGas) +| memory_expansion_cost;
+            const gas_charge = std.math.cast(FrameType.GasType, gas_cost) orelse {
+                @branchHint(.unlikely);
+                self.afterComplete(.KECCAK256);
+                return Error.OutOfGas;
+            };
+
+            // Use negative gas pattern for single-branch out-of-gas detection
+            self.gas_remaining -= gas_charge;
+            if (self.gas_remaining < 0) {
+                self.afterComplete(.KECCAK256);
+                return Error.OutOfGas;
             }
 
             // Ensure memory is available

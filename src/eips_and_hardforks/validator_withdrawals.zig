@@ -13,13 +13,13 @@ const BlockInfo = @import("../block/block_info.zig").BlockInfo(.{});
 const log = @import("../log.zig");
 const keccak_asm = @import("crypto").keccak_asm;
 
-/// EIP-7002 withdrawal request contract address
-/// Deployed at 0x00A3ca265EBcb825B45F985A16CEFB49958cE017
+/// EIP-7002 withdrawal request predeploy (WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS)
+/// 0x00000961Ef480Eb55e80D19ad83579A64c007002, per https://eips.ethereum.org/EIPS/eip-7002
 pub const WITHDRAWAL_REQUEST_ADDRESS = Address{
     .bytes = [_]u8{
-        0x00, 0xA3, 0xca, 0x26, 0x5E, 0xBc, 0xb8, 0x25,
-        0xB4, 0x5F, 0x98, 0x5A, 0x16, 0xCE, 0xFB, 0x49,
-        0x95, 0x8c, 0xE0, 0x17,
+        0x00, 0x00, 0x09, 0x61, 0xEf, 0x48, 0x0E, 0xb5,
+        0x5e, 0x80, 0xD1, 0x9a, 0xd8, 0x35, 0x79, 0xA6,
+        0x4c, 0x00, 0x70, 0x02,
     },
 };
 

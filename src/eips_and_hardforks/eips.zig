@@ -18,6 +18,212 @@ pub const BlobValidationError = error{
     BlobContractCreation,
 };
 
+// ============================================================================
+// EIP-7825 (Osaka): transaction gas limit cap
+// Source: https://eips.ethereum.org/EIPS/eip-7825
+// ============================================================================
+
+/// Maximum gas limit of a single transaction from Osaka, 2^24.
+/// A transaction with `gas_limit > TX_GAS_LIMIT_CAP` is invalid; equal is valid.
+pub const TX_GAS_LIMIT_CAP: u64 = 16_777_216;
+
+pub const TransactionValidationError = error{
+    /// EIP-7825: the transaction gas limit exceeds TX_GAS_LIMIT_CAP.
+    GasLimitExceedsCap,
+};
+
+/// EIP-7825: reject a transaction whose gas limit exceeds TX_GAS_LIMIT_CAP on Osaka+.
+pub fn validateTransactionGasLimit(hardfork: Hardfork, gas_limit: u64) TransactionValidationError!void {
+    return (Eips{ .hardfork = hardfork }).validate_transaction_gas_limit(gas_limit);
+}
+
+// ============================================================================
+// EIP-7934 (Osaka): RLP execution block size limit
+// Source: https://eips.ethereum.org/EIPS/eip-7934
+// ============================================================================
+
+/// Maximum block size in bytes (10 MiB).
+pub const MAX_BLOCK_SIZE: usize = 10_485_760;
+/// Margin reserved for the beacon block (2 MiB).
+pub const SAFETY_MARGIN: usize = 2_097_152;
+/// Maximum RLP-encoded execution block size: MAX_BLOCK_SIZE - SAFETY_MARGIN.
+pub const MAX_RLP_BLOCK_SIZE: usize = MAX_BLOCK_SIZE - SAFETY_MARGIN;
+
+pub const BlockValidationError = error{
+    /// EIP-7934: the RLP-encoded block is larger than MAX_RLP_BLOCK_SIZE.
+    RlpBlockSizeExceedsLimit,
+};
+
+/// EIP-7934: reject an RLP-encoded block longer than MAX_RLP_BLOCK_SIZE on Osaka+.
+pub fn validateRlpBlockSize(hardfork: Hardfork, rlp_block_size: usize) BlockValidationError!void {
+    return (Eips{ .hardfork = hardfork }).validate_rlp_block_size(rlp_block_size);
+}
+
+// ============================================================================
+// EIP-7918 (Osaka): blob base fee bounded by execution cost
+// Source: https://eips.ethereum.org/EIPS/eip-7918
+// ============================================================================
+
+/// Reserve price ratio numerator: BLOB_BASE_COST * base_fee_per_gas.
+pub const BLOB_BASE_COST: u64 = 8192;
+/// Blob gas per blob (2^17), defined by EIP-4844 and used by EIP-7918.
+pub const GAS_PER_BLOB: u64 = 131072;
+
+// ============================================================================
+// EIP-7892 (Osaka): blob parameter only (BPO) forks and the blob schedule
+// ============================================================================
+
+/// Per-fork blob parameters, counted in blobs, as in the EIP-7840 `blobSchedule`.
+///
+/// Sources:
+/// - Cancun 3/6/3338477: EIP-4844 and the EIP-7892 example schedule.
+/// - Prague 6/9/5007716: EIP-7691 (TARGET_BLOBS_PER_BLOCK_ELECTRA,
+///   MAX_BLOBS_PER_BLOCK_ELECTRA, BLOB_BASE_FEE_UPDATE_FRACTION_PRAGUE).
+/// - Osaka 6/9/5007716: Osaka keeps Prague's schedule (EIP-7892 example schedule).
+/// - BPO1 10/15/8346193 and BPO2 14/21/11684671: go-ethereum params/config.go
+///   DefaultBPO1BlobConfig and DefaultBPO2BlobConfig (mainnet).
+/// - BPO mainnet timestamps: EIP-7607 (BPO1 epoch 412672, BPO2 epoch 419072).
+pub const BlobScheduleParams = struct {
+    target: u64,
+    max: u64,
+    base_fee_update_fraction: u64,
+
+    pub const CANCUN = BlobScheduleParams{ .target = 3, .max = 6, .base_fee_update_fraction = 3338477 };
+    pub const PRAGUE = BlobScheduleParams{ .target = 6, .max = 9, .base_fee_update_fraction = 5007716 };
+    pub const OSAKA = BlobScheduleParams{ .target = 6, .max = 9, .base_fee_update_fraction = 5007716 };
+    pub const BPO1 = BlobScheduleParams{ .target = 10, .max = 15, .base_fee_update_fraction = 8346193 };
+    pub const BPO2 = BlobScheduleParams{ .target = 14, .max = 21, .base_fee_update_fraction = 11684671 };
+
+    /// Target blob gas per block.
+    pub fn target_blob_gas(self: BlobScheduleParams) u64 {
+        return self.target * GAS_PER_BLOB;
+    }
+
+    /// Maximum blob gas per block.
+    pub fn max_blob_gas(self: BlobScheduleParams) u64 {
+        return self.max * GAS_PER_BLOB;
+    }
+
+    /// Schedule a named hardfork starts with. Forks before Cancun return the
+    /// Cancun schedule, used only when EIP-4844 is enabled by override.
+    /// AMSTERDAM has no schedule of its own yet; per EIP-7892 a fork inherits
+    /// the latest schedule entry, which on mainnet is BPO2.
+    pub fn forHardfork(hardfork: Hardfork) BlobScheduleParams {
+        if (hardfork.isAtLeast(.AMSTERDAM)) return BPO2;
+        if (hardfork.isAtLeast(.OSAKA)) return OSAKA;
+        if (hardfork.isAtLeast(.PRAGUE)) return PRAGUE;
+        return CANCUN;
+    }
+};
+
+/// Every blob schedule entry, including the BPO forks that are not EVM hardforks.
+pub const BlobScheduleFork = enum {
+    CANCUN,
+    PRAGUE,
+    OSAKA,
+    BPO1,
+    BPO2,
+
+    pub fn params(self: BlobScheduleFork) BlobScheduleParams {
+        return switch (self) {
+            .CANCUN => BlobScheduleParams.CANCUN,
+            .PRAGUE => BlobScheduleParams.PRAGUE,
+            .OSAKA => BlobScheduleParams.OSAKA,
+            .BPO1 => BlobScheduleParams.BPO1,
+            .BPO2 => BlobScheduleParams.BPO2,
+        };
+    }
+
+    /// Mainnet activation timestamp of this schedule entry.
+    pub fn mainnetActivationTimestamp(self: BlobScheduleFork) u64 {
+        return switch (self) {
+            .CANCUN => 1710338135,
+            .PRAGUE => 1746612311,
+            .OSAKA => 1764798551,
+            .BPO1 => 1765290071,
+            .BPO2 => 1767747671,
+        };
+    }
+
+    /// Mainnet schedule entry active at `timestamp`, or null before Cancun.
+    pub fn mainnetAt(timestamp: u64) ?BlobScheduleFork {
+        const ordered = [_]BlobScheduleFork{ .BPO2, .BPO1, .OSAKA, .PRAGUE, .CANCUN };
+        for (ordered) |fork| {
+            if (timestamp >= fork.mainnetActivationTimestamp()) return fork;
+        }
+        return null;
+    }
+};
+
+// ============================================================================
+// EIP-7685 (Prague): general purpose execution layer requests
+// Sources: https://eips.ethereum.org/EIPS/eip-7685, EIP-6110, EIP-7002, EIP-7251
+// ============================================================================
+
+/// EIP-6110 mainnet deposit contract.
+pub const DEPOSIT_CONTRACT_ADDRESS = @import("validator_deposits.zig").DEPOSIT_CONTRACT_ADDRESS;
+/// EIP-7002 withdrawal request predeploy.
+pub const WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS = @import("validator_withdrawals.zig").WITHDRAWAL_REQUEST_ADDRESS;
+/// EIP-7251 consolidation request predeploy, 0x0000BBdDc7CE488642fb579F8B00f3a590007251.
+pub const CONSOLIDATION_REQUEST_PREDEPLOY_ADDRESS = primitives.Address.Address{
+    .bytes = [_]u8{
+        0x00, 0x00, 0xBB, 0xdD, 0xc7, 0xCE, 0x48, 0x86,
+        0x42, 0xfb, 0x57, 0x9F, 0x8B, 0x00, 0xf3, 0xa5,
+        0x90, 0x00, 0x72, 0x51,
+    },
+};
+
+/// EIP-7685 request types.
+pub const RequestType = enum(u8) {
+    /// EIP-6110 deposit requests.
+    deposit = 0x00,
+    /// EIP-7002 withdrawal requests.
+    withdrawal = 0x01,
+    /// EIP-7251 consolidation requests.
+    consolidation = 0x02,
+};
+
+pub const RequestsError = error{
+    /// A request has no request_type byte.
+    MissingRequestType,
+    /// Requests are not ordered by request_type ascending.
+    RequestTypesNotAscending,
+};
+
+/// sha256("") — the requests_hash of a block with no request data (EIP-7685 Rationale).
+pub const EMPTY_REQUESTS_HASH: [32]u8 = .{
+    0xe3, 0xb0, 0xc4, 0x42, 0x98, 0xfc, 0x1c, 0x14, 0x9a, 0xfb, 0xf4, 0xc8, 0x99, 0x6f, 0xb9, 0x24,
+    0x27, 0xae, 0x41, 0xe4, 0x64, 0x9b, 0x93, 0x4c, 0xa4, 0x95, 0x99, 0x1b, 0x78, 0x52, 0xb8, 0x55,
+};
+
+/// Encode a request as `request_type ++ request_data`. The caller owns the result.
+pub fn encodeRequest(allocator: std.mem.Allocator, request_type: RequestType, request_data: []const u8) std.mem.Allocator.Error![]u8 {
+    const encoded = try allocator.alloc(u8, request_data.len + 1);
+    encoded[0] = @intFromEnum(request_type);
+    @memcpy(encoded[1..], request_data);
+    return encoded;
+}
+
+/// EIP-7685 `compute_requests_hash`: sha256 over sha256(request) of every request
+/// longer than its type byte. Each request is `request_type ++ request_data`.
+pub fn computeRequestsHash(requests: []const []const u8) RequestsError![32]u8 {
+    const Sha256 = std.crypto.hash.sha2.Sha256;
+    var outer = Sha256.init(.{});
+    var previous_type: ?u8 = null;
+    for (requests) |request| {
+        if (request.len == 0) return RequestsError.MissingRequestType;
+        if (previous_type) |previous| {
+            if (request[0] < previous) return RequestsError.RequestTypesNotAscending;
+        }
+        previous_type = request[0];
+        if (request.len == 1) continue;
+        var inner: [Sha256.digest_length]u8 = undefined;
+        Sha256.hash(request, &inner, .{});
+        outer.update(&inner);
+    }
+    return outer.finalResult();
+}
+
 // EIPs is a comptime known configuration of Eip and hardfork specific behavior
 // This struct consolidates all EIP-specific logic for the EVM
 pub const Eips = struct {
@@ -28,6 +234,28 @@ pub const Eips = struct {
     /// Overrides for specific EIPs - applied on top of the base hardfork
     /// Use this to enable future EIPs or disable existing ones for testing
     overrides: []const EipOverride = &.{},
+
+    /// EIP-7892: blob schedule override, used to select a BPO fork
+    /// (for example `BlobScheduleParams.BPO2`). Null uses `BlobScheduleParams.forHardfork`.
+    blob_schedule_override: ?BlobScheduleParams = null,
+
+    /// EIP-7825: reject a gas limit above TX_GAS_LIMIT_CAP when EIP-7825 is active.
+    pub fn validate_transaction_gas_limit(self: Self, gas_limit: u64) TransactionValidationError!void {
+        if (!self.is_eip_active(7825)) return;
+        if (gas_limit > TX_GAS_LIMIT_CAP) return TransactionValidationError.GasLimitExceedsCap;
+    }
+
+    /// EIP-7934: reject an RLP-encoded block above MAX_RLP_BLOCK_SIZE when EIP-7934 is active.
+    pub fn validate_rlp_block_size(self: Self, rlp_block_size: usize) BlockValidationError!void {
+        if (!self.is_eip_active(7934)) return;
+        if (rlp_block_size > MAX_RLP_BLOCK_SIZE) return BlockValidationError.RlpBlockSizeExceedsLimit;
+    }
+
+    /// EIP-7892: active blob schedule, or null when EIP-4844 is inactive.
+    pub fn blob_schedule(self: Self) ?BlobScheduleParams {
+        if (!self.is_eip_active(4844)) return null;
+        return self.blob_schedule_override orelse BlobScheduleParams.forHardfork(self.hardfork);
+    }
 
     /// EIP-7702: Set EOA account code (Prague)
     /// Allows EOAs to temporarily execute smart contract code for one transaction
@@ -220,8 +448,10 @@ pub const Eips = struct {
             .MERGE => &[_]u16{ 2, 7, 8, 150, 155, 160, 161, 170, 100, 140, 196, 197, 198, 211, 214, 649, 658, 145, 1014, 1052, 1283, 152, 1108, 1344, 1884, 2028, 2200, 2565, 2718, 2929, 2930, 1559, 3198, 3529, 3541, 4345, 5133, 3675, 4399 },
             .SHANGHAI => &[_]u16{ 2, 7, 8, 150, 155, 160, 161, 170, 100, 140, 196, 197, 198, 211, 214, 649, 658, 145, 1014, 1052, 1283, 152, 1108, 1344, 1884, 2028, 2200, 2565, 2718, 2929, 2930, 1559, 3198, 3529, 3541, 4345, 5133, 3675, 4399, 3651, 3855, 3860, 4895 },
             .CANCUN => &[_]u16{ 2, 7, 8, 150, 155, 160, 161, 170, 100, 140, 196, 197, 198, 211, 214, 649, 658, 145, 1014, 1052, 1283, 152, 1108, 1344, 1884, 2028, 2200, 2565, 2718, 2929, 2930, 1559, 3198, 3529, 3541, 4345, 5133, 3675, 4399, 3651, 3855, 3860, 4895, 1153, 4788, 4844, 5656, 6780, 7516 },
-            .PRAGUE => &[_]u16{ 2, 7, 8, 150, 155, 160, 161, 170, 100, 140, 196, 197, 198, 211, 214, 649, 658, 145, 1014, 1052, 1283, 152, 1108, 1344, 1884, 2028, 2200, 2565, 2718, 2929, 2930, 1559, 3198, 3529, 3541, 4345, 5133, 3675, 4399, 3651, 3855, 3860, 4895, 1153, 4788, 4844, 5656, 6780, 7516, 2537, 2935, 3074, 6110, 7002, 7623, 7702 },
-            .OSAKA => &[_]u16{ 2, 7, 8, 150, 155, 160, 161, 170, 100, 140, 196, 197, 198, 211, 214, 649, 658, 145, 1014, 1052, 1283, 152, 1108, 1344, 1884, 2028, 2200, 2565, 2718, 2929, 2930, 1559, 3198, 3529, 3541, 4345, 5133, 3675, 4399, 3651, 3855, 3860, 4895, 1153, 4788, 4844, 5656, 6780, 7516, 2537, 2935, 6110, 7002, 7623, 7702, 7883, 7823, 7825, 7934, 7939 },
+            .PRAGUE => &[_]u16{ 2, 7, 8, 150, 155, 160, 161, 170, 100, 140, 196, 197, 198, 211, 214, 649, 658, 145, 1014, 1052, 1283, 152, 1108, 1344, 1884, 2028, 2200, 2565, 2718, 2929, 2930, 1559, 3198, 3529, 3541, 4345, 5133, 3675, 4399, 3651, 3855, 3860, 4895, 1153, 4788, 4844, 5656, 6780, 7516, 2537, 2935, 6110, 7002, 7251, 7623, 7685, 7691, 7702 },
+            .OSAKA => &[_]u16{ 2, 7, 8, 150, 155, 160, 161, 170, 100, 140, 196, 197, 198, 211, 214, 649, 658, 145, 1014, 1052, 1283, 152, 1108, 1344, 1884, 2028, 2200, 2565, 2718, 2929, 2930, 1559, 3198, 3529, 3541, 4345, 5133, 3675, 4399, 3651, 3855, 3860, 4895, 1153, 4788, 4844, 5656, 6780, 7516, 2537, 2935, 6110, 7002, 7251, 7623, 7685, 7691, 7702, 7594, 7823, 7825, 7883, 7892, 7918, 7934, 7939, 7951 },
+            // Glamsterdam has no scheduled EIPs yet; it keeps Osaka's set.
+            .AMSTERDAM => &[_]u16{ 2, 7, 8, 150, 155, 160, 161, 170, 100, 140, 196, 197, 198, 211, 214, 649, 658, 145, 1014, 1052, 1283, 152, 1108, 1344, 1884, 2028, 2200, 2565, 2718, 2929, 2930, 1559, 3198, 3529, 3541, 4345, 5133, 3675, 4399, 3651, 3855, 3860, 4895, 1153, 4788, 4844, 5656, 6780, 7516, 2537, 2935, 6110, 7002, 7251, 7623, 7685, 7691, 7702, 7594, 7823, 7825, 7883, 7892, 7918, 7934, 7939, 7951 },
         };
     }
 
@@ -499,31 +729,22 @@ pub const Eips = struct {
         return @min(initial_gas, gas_left + capped_refund);
     }
 
-    /// Target blob gas per block for the configured hardfork.
+    /// Target blob gas per block for the active blob schedule.
     pub fn target_blob_gas(self: Self) u64 {
-        if (!self.is_eip_active(4844)) return 0;
-        return if (self.hardfork.isAtLeast(.PRAGUE))
-            primitives.Blob.TARGET_BLOB_GAS_PER_BLOCK_PRAGUE
-        else
-            primitives.Blob.TARGET_BLOB_GAS_PER_BLOCK_CANCUN;
+        const schedule = self.blob_schedule() orelse return 0;
+        return schedule.target_blob_gas();
     }
 
-    /// Maximum blob gas per block for the configured hardfork.
+    /// Maximum blob gas per block for the active blob schedule.
     pub fn max_blob_gas(self: Self) u64 {
-        if (!self.is_eip_active(4844)) return 0;
-        return if (self.hardfork.isAtLeast(.PRAGUE))
-            primitives.Blob.MAX_BLOB_GAS_PER_BLOCK_PRAGUE
-        else
-            primitives.Blob.MAX_BLOB_GAS_PER_BLOCK_CANCUN;
+        const schedule = self.blob_schedule() orelse return 0;
+        return schedule.max_blob_gas();
     }
 
-    /// Blob base-fee update fraction for the configured hardfork.
+    /// Blob base-fee update fraction for the active blob schedule.
     pub fn blob_base_fee_update_fraction(self: Self) u64 {
-        if (!self.is_eip_active(4844)) return 0;
-        return if (self.hardfork.isAtLeast(.PRAGUE))
-            primitives.Blob.BLOB_BASE_FEE_UPDATE_FRACTION_PRAGUE
-        else
-            primitives.Blob.BLOB_BASE_FEE_UPDATE_FRACTION_CANCUN;
+        const schedule = self.blob_schedule() orelse return 0;
+        return schedule.base_fee_update_fraction;
     }
 
     /// Calculate the current blob gas price from excess blob gas.
@@ -574,14 +795,33 @@ pub const Eips = struct {
         return blob_gas *| max_fee_per_blob_gas;
     }
 
-    /// Calculate excess blob gas for the next block.
-    pub fn excess_blob_gas(self: Self, parent_excess: u64, parent_blob_gas_used: u64) u64 {
-        if (!self.is_eip_active(4844)) return 0;
-        return primitives.Blob.calculateExcessBlobGasWithTarget(
-            parent_excess,
-            parent_blob_gas_used,
-            self.target_blob_gas(),
-        );
+    /// `calc_excess_blob_gas`: excess blob gas of the next block from its parent header.
+    ///
+    /// EIP-7918 (Osaka): when the execution cost of blob gas
+    /// (`BLOB_BASE_COST * parent_base_fee_per_gas`) exceeds the parent blob fee
+    /// (`GAS_PER_BLOB * get_base_fee_per_blob_gas(parent)`), excess grows by
+    /// `parent_blob_gas_used * (max - target) / max` instead of falling.
+    /// The result saturates at maxInt(u64), the width of the header field.
+    pub fn excess_blob_gas(self: Self, parent_excess: u64, parent_blob_gas_used: u64, parent_base_fee_per_gas: u256) u64 {
+        const schedule = self.blob_schedule() orelse return 0;
+        const target_blob_gas_value: u128 = schedule.target_blob_gas();
+        const parent_total = @as(u128, parent_excess) + parent_blob_gas_used;
+        if (parent_total < target_blob_gas_value) return 0;
+
+        if (self.is_eip_active(7918)) {
+            const parent_blob_base_fee = primitives.Blob.calculateBlobGasPriceWithFractionU256(
+                parent_excess,
+                schedule.base_fee_update_fraction,
+            );
+            const execution_cost = std.math.mulWide(u256, BLOB_BASE_COST, parent_base_fee_per_gas);
+            const blob_cost = std.math.mulWide(u256, GAS_PER_BLOB, parent_blob_base_fee);
+            if (execution_cost > blob_cost) {
+                const growth = @as(u128, parent_blob_gas_used) * (schedule.max - schedule.target) / schedule.max;
+                return std.math.cast(u64, @as(u128, parent_excess) + growth) orelse std.math.maxInt(u64);
+            }
+        }
+
+        return std.math.cast(u64, parent_total - target_blob_gas_value) orelse std.math.maxInt(u64);
     }
 
     /// Count calldata tokens using the byte prices active for this hardfork.
@@ -1640,5 +1880,207 @@ test "effective_gas_price - hardfork progression" {
         const expected_miner_fee: u256 = if (hardfork.eip_1559) 500_000_000 else 2_000_000_000;
         try std.testing.expectEqual(expected_price, result.effective_gas_price);
         try std.testing.expectEqual(expected_miner_fee, result.miner_fee);
+    }
+}
+
+test "PRAGUE active EIPs drop 3074 and include the Pectra set" {
+    const prague = Eips{ .hardfork = .PRAGUE };
+    try std.testing.expect(!prague.is_eip_active(3074));
+    for ([_]u16{ 2537, 2935, 6110, 7002, 7251, 7623, 7685, 7691, 7702 }) |eip| {
+        try std.testing.expect(prague.is_eip_active(eip));
+    }
+    for ([_]u16{ 7594, 7823, 7825, 7883, 7892, 7918, 7934, 7939, 7951 }) |eip| {
+        try std.testing.expect(!prague.is_eip_active(eip));
+    }
+}
+
+test "OSAKA and AMSTERDAM active EIPs include the Fusaka set and every Prague EIP" {
+    for ([_]Hardfork{ .OSAKA, .AMSTERDAM }) |fork| {
+        const eips = Eips{ .hardfork = fork };
+        try std.testing.expect(!eips.is_eip_active(3074));
+        for ([_]u16{ 7594, 7823, 7825, 7883, 7892, 7918, 7934, 7939, 7951 }) |eip| {
+            try std.testing.expect(eips.is_eip_active(eip));
+        }
+        for ((Eips{ .hardfork = .PRAGUE }).get_active_eips()) |eip| {
+            try std.testing.expect(eips.is_eip_active(eip));
+        }
+    }
+}
+
+test "Cancun through Amsterdam keep every EIP of the previous fork" {
+    const forks = [_]Hardfork{ .CANCUN, .PRAGUE, .OSAKA, .AMSTERDAM };
+    for (forks[1..], forks[0 .. forks.len - 1]) |fork, previous| {
+        for ((Eips{ .hardfork = previous }).get_active_eips()) |eip| {
+            try std.testing.expect((Eips{ .hardfork = fork }).is_eip_active(eip));
+        }
+    }
+}
+
+test "EIP-7825 transaction gas limit cap" {
+    try std.testing.expectEqual(@as(u64, 1 << 24), TX_GAS_LIMIT_CAP);
+    try validateTransactionGasLimit(.OSAKA, TX_GAS_LIMIT_CAP);
+    try std.testing.expectError(error.GasLimitExceedsCap, validateTransactionGasLimit(.OSAKA, TX_GAS_LIMIT_CAP + 1));
+    try std.testing.expectError(error.GasLimitExceedsCap, validateTransactionGasLimit(.AMSTERDAM, std.math.maxInt(u64)));
+    try validateTransactionGasLimit(.PRAGUE, TX_GAS_LIMIT_CAP + 1);
+    try validateTransactionGasLimit(.CANCUN, std.math.maxInt(u64));
+
+    const disabled = Eips{ .hardfork = .OSAKA, .overrides = &.{.{ .eip = 7825, .enabled = false }} };
+    try disabled.validate_transaction_gas_limit(TX_GAS_LIMIT_CAP + 1);
+}
+
+test "EIP-7934 RLP block size limit" {
+    try std.testing.expectEqual(@as(usize, 8_388_608), MAX_RLP_BLOCK_SIZE);
+    try std.testing.expectEqual(MAX_BLOCK_SIZE - SAFETY_MARGIN, MAX_RLP_BLOCK_SIZE);
+    try validateRlpBlockSize(.OSAKA, MAX_RLP_BLOCK_SIZE);
+    try std.testing.expectError(error.RlpBlockSizeExceedsLimit, validateRlpBlockSize(.OSAKA, MAX_RLP_BLOCK_SIZE + 1));
+    try validateRlpBlockSize(.PRAGUE, MAX_RLP_BLOCK_SIZE + 1);
+}
+
+test "EIP-7892 blob schedule values and lookups" {
+    const cases = [_]struct { fork: BlobScheduleFork, target: u64, max: u64, fraction: u64 }{
+        .{ .fork = .CANCUN, .target = 3, .max = 6, .fraction = 3338477 },
+        .{ .fork = .PRAGUE, .target = 6, .max = 9, .fraction = 5007716 },
+        .{ .fork = .OSAKA, .target = 6, .max = 9, .fraction = 5007716 },
+        .{ .fork = .BPO1, .target = 10, .max = 15, .fraction = 8346193 },
+        .{ .fork = .BPO2, .target = 14, .max = 21, .fraction = 11684671 },
+    };
+    for (cases) |case| {
+        const params = case.fork.params();
+        try std.testing.expectEqual(case.target, params.target);
+        try std.testing.expectEqual(case.max, params.max);
+        try std.testing.expectEqual(case.fraction, params.base_fee_update_fraction);
+    }
+
+    // The schedule reproduces the EIP-4844 and EIP-7691 per-block constants.
+    try std.testing.expectEqual(GAS_PER_BLOB, primitives.Blob.BLOB_GAS_PER_BLOB);
+    try std.testing.expectEqual(@as(u64, primitives.Blob.TARGET_BLOB_GAS_PER_BLOCK_CANCUN), (Eips{ .hardfork = .CANCUN }).target_blob_gas());
+    try std.testing.expectEqual(@as(u64, primitives.Blob.MAX_BLOB_GAS_PER_BLOCK_CANCUN), (Eips{ .hardfork = .CANCUN }).max_blob_gas());
+    try std.testing.expectEqual(@as(u64, primitives.Blob.TARGET_BLOB_GAS_PER_BLOCK_PRAGUE), (Eips{ .hardfork = .PRAGUE }).target_blob_gas());
+    try std.testing.expectEqual(@as(u64, primitives.Blob.MAX_BLOB_GAS_PER_BLOCK_PRAGUE), (Eips{ .hardfork = .PRAGUE }).max_blob_gas());
+    try std.testing.expectEqual(@as(u64, primitives.Blob.BLOB_BASE_FEE_UPDATE_FRACTION_PRAGUE), (Eips{ .hardfork = .OSAKA }).blob_base_fee_update_fraction());
+
+    try std.testing.expectEqual(BlobScheduleParams.CANCUN, BlobScheduleParams.forHardfork(.CANCUN));
+    try std.testing.expectEqual(BlobScheduleParams.PRAGUE, BlobScheduleParams.forHardfork(.PRAGUE));
+    try std.testing.expectEqual(BlobScheduleParams.OSAKA, BlobScheduleParams.forHardfork(.OSAKA));
+    try std.testing.expectEqual(BlobScheduleParams.BPO2, BlobScheduleParams.forHardfork(.AMSTERDAM));
+    try std.testing.expectEqual(@as(?BlobScheduleParams, null), (Eips{ .hardfork = .SHANGHAI }).blob_schedule());
+
+    // BPO selection through the Eips override.
+    const bpo1 = Eips{ .hardfork = .OSAKA, .blob_schedule_override = BlobScheduleFork.BPO1.params() };
+    try std.testing.expectEqual(@as(u64, 10 * GAS_PER_BLOB), bpo1.target_blob_gas());
+    try std.testing.expectEqual(@as(u64, 15 * GAS_PER_BLOB), bpo1.max_blob_gas());
+    try std.testing.expectEqual(@as(u64, 8346193), bpo1.blob_base_fee_update_fraction());
+    const bpo2 = Eips{ .hardfork = .OSAKA, .blob_schedule_override = BlobScheduleParams.BPO2 };
+    try std.testing.expectEqual(@as(u64, 21 * GAS_PER_BLOB), bpo2.max_blob_gas());
+
+    // Mainnet selection by timestamp, at each activation boundary.
+    try std.testing.expectEqual(@as(?BlobScheduleFork, null), BlobScheduleFork.mainnetAt(1710338134));
+    try std.testing.expectEqual(@as(?BlobScheduleFork, .CANCUN), BlobScheduleFork.mainnetAt(1710338135));
+    try std.testing.expectEqual(@as(?BlobScheduleFork, .CANCUN), BlobScheduleFork.mainnetAt(1746612310));
+    try std.testing.expectEqual(@as(?BlobScheduleFork, .PRAGUE), BlobScheduleFork.mainnetAt(1746612311));
+    try std.testing.expectEqual(@as(?BlobScheduleFork, .OSAKA), BlobScheduleFork.mainnetAt(1764798551));
+    try std.testing.expectEqual(@as(?BlobScheduleFork, .OSAKA), BlobScheduleFork.mainnetAt(1765290070));
+    try std.testing.expectEqual(@as(?BlobScheduleFork, .BPO1), BlobScheduleFork.mainnetAt(1765290071));
+    try std.testing.expectEqual(@as(?BlobScheduleFork, .BPO1), BlobScheduleFork.mainnetAt(1767747670));
+    try std.testing.expectEqual(@as(?BlobScheduleFork, .BPO2), BlobScheduleFork.mainnetAt(1767747671));
+    try std.testing.expectEqual(@as(?BlobScheduleFork, .BPO2), BlobScheduleFork.mainnetAt(std.math.maxInt(u64)));
+    // Blob schedule timestamps agree with the hardfork activation table.
+    try std.testing.expectEqual(Hardfork.PRAGUE.mainnetActivationTimestamp().?, BlobScheduleFork.PRAGUE.mainnetActivationTimestamp());
+    try std.testing.expectEqual(Hardfork.OSAKA.mainnetActivationTimestamp().?, BlobScheduleFork.OSAKA.mainnetActivationTimestamp());
+    try std.testing.expectEqual(Hardfork.CANCUN.mainnetActivationTimestamp().?, BlobScheduleFork.CANCUN.mainnetActivationTimestamp());
+}
+
+test "EIP-7918 excess blob gas uses the reserve-price branch when execution cost dominates" {
+    try std.testing.expectEqual(@as(u64, 8192), BLOB_BASE_COST);
+    const osaka = Eips{ .hardfork = .OSAKA };
+    const target = osaka.target_blob_gas();
+    const max = osaka.max_blob_gas();
+    // Parent blob fee is 1 wei (excess 0 + target); execution base fee 1 gwei.
+    // 8192 * 1e9 > 131072 * 1, so excess grows by used * (9 - 6) / 9.
+    const parent_excess: u64 = 0;
+    const used = max;
+    const expected = parent_excess + used * (9 - 6) / 9;
+    try std.testing.expectEqual(expected, osaka.excess_blob_gas(parent_excess, used, 1_000_000_000));
+    // The normal rule would have given used - target; the reserve price differs.
+    try std.testing.expect(expected != used - target);
+
+    // Below target still returns zero, even with a high execution base fee.
+    try std.testing.expectEqual(@as(u64, 0), osaka.excess_blob_gas(0, target - 1, 1_000_000_000));
+
+    // Boundary: execution cost equal to blob cost is not "greater", so the normal rule applies.
+    // Parent blob fee at excess 0 is 1, so blob cost is 131072 = 8192 * 16.
+    try std.testing.expectEqual(used - target, osaka.excess_blob_gas(0, used, 16));
+    try std.testing.expectEqual(expected, osaka.excess_blob_gas(0, used, 17));
+
+    // BPO2 schedule: growth uses (21 - 14) / 21.
+    const bpo2 = Eips{ .hardfork = .OSAKA, .blob_schedule_override = BlobScheduleParams.BPO2 };
+    const bpo2_used = bpo2.max_blob_gas();
+    try std.testing.expectEqual(bpo2_used * 7 / 21, bpo2.excess_blob_gas(0, bpo2_used, 1_000_000_000));
+}
+
+test "EIP-7918 excess blob gas uses the normal rule when blob fee dominates" {
+    const osaka = Eips{ .hardfork = .OSAKA };
+    const target = osaka.target_blob_gas();
+    const max = osaka.max_blob_gas();
+    // Excess 104_000_000 gives a parent blob fee of 1_045_698_476 wei; blob cost
+    // 131072 * 1_045_698_476 exceeds 8192 * 1 gwei, so excess follows target.
+    const parent_excess: u64 = 104_000_000;
+    try std.testing.expectEqual(parent_excess + max - target, osaka.excess_blob_gas(parent_excess, max, 1_000_000_000));
+    try std.testing.expectEqual(parent_excess - target, osaka.excess_blob_gas(parent_excess, 0, 1_000_000_000));
+
+    // Prague ignores the reserve price even when execution cost dominates.
+    const prague = Eips{ .hardfork = .PRAGUE };
+    try std.testing.expectEqual(max - target, prague.excess_blob_gas(0, max, 1_000_000_000));
+    // Saturates instead of overflowing the u64 header field.
+    try std.testing.expectEqual(std.math.maxInt(u64), prague.excess_blob_gas(std.math.maxInt(u64), max, 0));
+}
+
+test "EIP-7685 requests hash and encoding" {
+    const allocator = std.testing.allocator;
+    const Sha256 = std.crypto.hash.sha2.Sha256;
+
+    var empty_digest: [32]u8 = undefined;
+    Sha256.hash("", &empty_digest, .{});
+    try std.testing.expectEqualSlices(u8, &empty_digest, &EMPTY_REQUESTS_HASH);
+    try std.testing.expectEqualSlices(u8, &EMPTY_REQUESTS_HASH, &(try computeRequestsHash(&.{})));
+
+    // Requests holding only a type byte are skipped.
+    const type_only = [_][]const u8{ &.{0x00}, &.{0x01}, &.{0x02} };
+    try std.testing.expectEqualSlices(u8, &EMPTY_REQUESTS_HASH, &(try computeRequestsHash(&type_only)));
+
+    try std.testing.expectEqual(@as(u8, 0x00), @intFromEnum(RequestType.deposit));
+    try std.testing.expectEqual(@as(u8, 0x01), @intFromEnum(RequestType.withdrawal));
+    try std.testing.expectEqual(@as(u8, 0x02), @intFromEnum(RequestType.consolidation));
+
+    const deposit = try encodeRequest(allocator, .deposit, &.{ 0xaa, 0xbb });
+    defer allocator.free(deposit);
+    try std.testing.expectEqualSlices(u8, &.{ 0x00, 0xaa, 0xbb }, deposit);
+    const consolidation = try encodeRequest(allocator, .consolidation, &.{0xcc});
+    defer allocator.free(consolidation);
+    try std.testing.expectEqualSlices(u8, &.{ 0x02, 0xcc }, consolidation);
+
+    // sha256(sha256(0x00aabb) ++ sha256(0x02cc)), with the empty withdrawal skipped.
+    var deposit_digest: [32]u8 = undefined;
+    Sha256.hash(deposit, &deposit_digest, .{});
+    var consolidation_digest: [32]u8 = undefined;
+    Sha256.hash(consolidation, &consolidation_digest, .{});
+    var expected: [32]u8 = undefined;
+    Sha256.hash(&(deposit_digest ++ consolidation_digest), &expected, .{});
+    const requests = [_][]const u8{ deposit, &.{0x01}, consolidation };
+    try std.testing.expectEqualSlices(u8, &expected, &(try computeRequestsHash(&requests)));
+
+    try std.testing.expectError(error.MissingRequestType, computeRequestsHash(&.{&.{}}));
+    try std.testing.expectError(error.RequestTypesNotAscending, computeRequestsHash(&.{ consolidation, deposit }));
+}
+
+test "Prague request predeploy and deposit contract addresses" {
+    const cases = [_]struct { actual: primitives.Address.Address, hex: []const u8 }{
+        .{ .actual = DEPOSIT_CONTRACT_ADDRESS, .hex = "0x00000000219ab540356cBB839Cbe05303d7705Fa" },
+        .{ .actual = WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, .hex = "0x00000961Ef480Eb55e80D19ad83579A64c007002" },
+        .{ .actual = CONSOLIDATION_REQUEST_PREDEPLOY_ADDRESS, .hex = "0x0000BBdDc7CE488642fb579F8B00f3a590007251" },
+    };
+    for (cases) |case| {
+        const expected = try primitives.Address.fromHex(case.hex);
+        try std.testing.expectEqualSlices(u8, &expected.bytes, &case.actual.bytes);
     }
 }

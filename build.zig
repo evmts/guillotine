@@ -26,7 +26,7 @@ pub fn build(b: *std.Build) void {
     const build_options = b.addOptions();
     build_options.addOption(bool, "enable_tracing", b.option(bool, "enable-tracing", "Enable EVM instruction tracing") orelse false);
     build_options.addOption(bool, "disable_tailcall_dispatch", b.option(bool, "disable-tailcall-dispatch", "Disable tailcall-based dispatch") orelse true);
-    build_options.addOption([]const u8, "hardfork", b.option([]const u8, "evm-hardfork", "EVM hardfork (default: CANCUN)") orelse "CANCUN");
+    build_options.addOption([]const u8, "hardfork", b.option([]const u8, "evm-hardfork", "EVM hardfork (default: OSAKA)") orelse "OSAKA");
     build_options.addOption(bool, "disable_gas_checks", b.option(bool, "evm-disable-gas", "Disable gas checks for testing") orelse false);
     build_options.addOption(bool, "enable_fusion", b.option(bool, "evm-enable-fusion", "Enable bytecode fusion") orelse true);
     build_options.addOption([]const u8, "optimize_strategy", b.option([]const u8, "evm-optimize", "EVM optimization strategy") orelse "safe");

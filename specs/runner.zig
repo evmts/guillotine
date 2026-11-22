@@ -887,6 +887,7 @@ fn parseHardfork(network: []const u8) evm.Hardfork {
     if (std.mem.eql(u8, network, "Cancun")) return .CANCUN;
     if (std.mem.eql(u8, network, "Prague")) return .PRAGUE;
     if (std.mem.eql(u8, network, "Osaka")) return .OSAKA;
+    if (std.mem.eql(u8, network, "Amsterdam")) return .AMSTERDAM;
     if (std.mem.eql(u8, network, "Paris")) return .SHANGHAI; // Map Paris to Shanghai
     if (std.mem.eql(u8, network, "London")) return .LONDON;
     if (std.mem.eql(u8, network, "Berlin")) return .BERLIN;

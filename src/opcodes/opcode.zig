@@ -749,6 +749,8 @@ pub const UnifiedOpcode = enum(u16) {
     PUSH_ADD_DUP1 = 0x100 + 0xCB,
     MLOAD_SWAP1_DUP2 = 0x100 + 0xCC,
     BACKWARD_LOOP_JUMPI = 0x100 + 0xCD,
+    BLOCK_BEGIN = 0x100 + 0xCE,
+    INVALID_JUMP_TARGET = 0x100 + 0xCF,
 
     /// Convert from regular Opcode
     pub fn fromOpcode(opcode: Opcode) UnifiedOpcode {

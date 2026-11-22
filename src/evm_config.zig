@@ -26,8 +26,8 @@ pub const PrecompileOutput = struct {
 
 pub const EvmConfig = struct {
     // Comptime known configuration of Eip and hardfork information
-    // Default to CANCUN as the stable latest hardfork (PRAGUE is upcoming)
-    eips: Eips = Eips{ .hardfork = Hardfork.CANCUN },
+    // Default to the latest mainnet hardfork, OSAKA (Fusaka, December 2025).
+    eips: Eips = Eips{ .hardfork = Hardfork.DEFAULT },
 
     /// EIP overrides to apply on top of the base hardfork
     /// Allows granular control over specific EIP features
@@ -207,7 +207,7 @@ const testing = std.testing;
 test "EvmConfig - default initialization" {
     const config = EvmConfig{};
 
-    try testing.expectEqual(Hardfork.CANCUN, config.eips.hardfork);
+    try testing.expectEqual(Hardfork.OSAKA, config.eips.hardfork);
     try testing.expectEqual(@as(usize, 0), config.eip_overrides.len);
     try testing.expectEqual(@as(u11, 1024), config.max_call_depth);
     try testing.expectEqual(@as(u18, 131072), config.max_input_size);

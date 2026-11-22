@@ -95,7 +95,9 @@ pub const OPCODE_INFO = blk: {
     info[0x52] = .{ .gas_cost = GasConstants.GasFastestStep, .stack_inputs = 2, .stack_outputs = 0 }; // MSTORE (dynamic)
     info[0x53] = .{ .gas_cost = GasConstants.GasFastestStep, .stack_inputs = 2, .stack_outputs = 0 }; // MSTORE8 (dynamic)
     info[0x54] = .{ .gas_cost = 100, .stack_inputs = 1, .stack_outputs = 1 }; // SLOAD (warm access)
-    info[0x55] = .{ .gas_cost = 100, .stack_inputs = 2, .stack_outputs = 0 }; // SSTORE (warm access, dynamic)
+    // SSTORE has no static part: the EIP-2200 sentry check must see the gas left before
+    // any SSTORE cost, so the handler charges the whole EIP-2200/2929 cost itself.
+    info[0x55] = .{ .gas_cost = 0, .stack_inputs = 2, .stack_outputs = 0 }; // SSTORE (fully dynamic)
     info[0x56] = .{ .gas_cost = GasConstants.GasMidStep, .stack_inputs = 1, .stack_outputs = 0 }; // JUMP
     info[0x57] = .{ .gas_cost = 10, .stack_inputs = 2, .stack_outputs = 0 }; // JUMPI
     info[0x58] = .{ .gas_cost = GasConstants.GasQuickStep, .stack_inputs = 0, .stack_outputs = 1 }; // PC
@@ -132,12 +134,14 @@ pub const OPCODE_INFO = blk: {
     }
 
     // 0xf0s: System operations
-    info[0xf0] = .{ .gas_cost = 32000, .stack_inputs = 3, .stack_outputs = 1 }; // CREATE
+    // CREATE/CREATE2: Evm.executeCreate/executeCreate2 charge CreateGas (32000) with the
+    // EIP-3860 and EIP-1014 word costs, so no part of the cost is static block gas.
+    info[0xf0] = .{ .gas_cost = 0, .stack_inputs = 3, .stack_outputs = 1 }; // CREATE
     info[0xf1] = .{ .gas_cost = 100, .stack_inputs = 7, .stack_outputs = 1 }; // CALL (warm access, dynamic)
     info[0xf2] = .{ .gas_cost = 100, .stack_inputs = 7, .stack_outputs = 1 }; // CALLCODE (warm access, dynamic)
     info[0xf3] = .{ .gas_cost = 0, .stack_inputs = 2, .stack_outputs = 0 }; // RETURN (dynamic)
     info[0xf4] = .{ .gas_cost = 100, .stack_inputs = 6, .stack_outputs = 1 }; // DELEGATECALL (warm access, dynamic)
-    info[0xf5] = .{ .gas_cost = 32000, .stack_inputs = 4, .stack_outputs = 1 }; // CREATE2
+    info[0xf5] = .{ .gas_cost = 0, .stack_inputs = 4, .stack_outputs = 1 }; // CREATE2
     info[0xf6] = .{ .gas_cost = 3100, .stack_inputs = 3, .stack_outputs = 1 }; // AUTH (EIP-3074)
     info[0xf7] = .{ .gas_cost = 100, .stack_inputs = 8, .stack_outputs = 1 }; // AUTHCALL (EIP-3074)
     info[0xfa] = .{ .gas_cost = 100, .stack_inputs = 6, .stack_outputs = 1 }; // STATICCALL (warm access, dynamic)

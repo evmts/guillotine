@@ -186,6 +186,9 @@ pub fn executeMinimalEvmForOpcode(
         return;
     }
 
+    // BLOCK_BEGIN maps to no bytecode instruction: MinimalEvm takes no step.
+    if (opcode == .BLOCK_BEGIN) return;
+
     // For synthetic opcodes, run MinimalEvm until it catches up
 
     var steps_executed: u32 = 0;

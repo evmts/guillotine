@@ -212,81 +212,98 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                 }
             }
 
+            pub const BlockInfo = struct { gas: u32, min_stack: i16, max_stack: i16 };
+
+            /// True for instructions after which execution can continue at the next
+            /// instruction in a new basic block (one that no JUMPDEST heads):
+            /// - JUMPI, when the jump is not taken.
+            /// - Instructions that observe the exact gas left: GAS, CALL, CALLCODE,
+            ///   DELEGATECALL, STATICCALL, CREATE, CREATE2 and SSTORE (EIP-2200 sentry).
+            ///   Block gas is charged up front, so later instructions' static gas must not
+            ///   be charged before these run.
+            pub fn endsBlockWithFallthrough(opcode: u8) bool {
+                return switch (opcode) {
+                    0x57, // JUMPI
+                    0x5A, // GAS
+                    0x55, // SSTORE
+                    0xF0, // CREATE
+                    0xF1, // CALL
+                    0xF2, // CALLCODE
+                    0xF4, // DELEGATECALL
+                    0xF5, // CREATE2
+                    0xFA, // STATICCALL
+                    => true,
+                    else => false,
+                };
+            }
+
             // Calculate gas cost and stack requirements for the block starting at current JUMPDEST
-            pub fn calculateBlockInfoAtJumpdest(iterator: *Iterator) struct { gas: u32, min_stack: i16, max_stack: i16 } {
+            pub fn calculateBlockInfoAtJumpdest(iterator: *Iterator) BlockInfo {
+                // JUMPDEST itself costs 1 gas and is part of its own block.
+                return calculateBlockInfo(iterator.bytecode, iterator.pc + 1, 1);
+            }
+
+            /// Static gas and stack bounds of the basic block whose first instruction is at `start_pc`.
+            ///
+            /// A basic block runs until the first JUMP, STOP, RETURN, REVERT, INVALID,
+            /// SELFDESTRUCT or `endsBlockWithFallthrough` instruction (inclusive: its static gas
+            /// and stack inputs belong to the block) or until the next JUMPDEST (exclusive: it
+            /// charges its own block).
+            /// `initial_gas` seeds the total, e.g. 1 for a JUMPDEST that heads the block.
+            pub fn calculateBlockInfo(bytecode: *const Self, start_pc: PcType, initial_gas: u32) BlockInfo {
                 const opcode_info = @import("../opcodes/opcode_data.zig").OPCODE_INFO;
-                var gas: u32 = 1; // JUMPDEST itself costs 1 gas
+                var gas: u32 = initial_gas;
                 var stack_effect: i32 = 0;
                 var min_stack: i32 = 0;
                 var max_stack: i32 = 0;
-                var pc = iterator.pc + 1; // Start after the JUMPDEST
+                var pc: usize = start_pc;
                 var loop_counter = cfg.createLoopSafetyCounter().init(cfg.loop_quota orelse 0);
 
-                while (pc < iterator.bytecode.len()) {
+                while (pc < bytecode.len()) {
                     loop_counter.inc();
-                    const opcode = iterator.bytecode.get_unsafe(pc);
+                    const opcode = bytecode.get_unsafe(@intCast(pc));
 
-                    // Check for block terminators
+                    if (opcode == 0x5B) break; // Next JUMPDEST starts a new block.
+
+                    // Saturating: an absurd total only makes the block run out of gas.
+                    gas +|= opcode_info[opcode].gas_cost;
+
                     switch (opcode) {
-                        0x5B, // Another JUMPDEST - end of block
+                        0x60...0x7F => { // PUSH1-PUSH32
+                            pc += 1 + @as(usize, opcode - 0x5F);
+                            stack_effect += 1;
+                            if (stack_effect > max_stack) max_stack = stack_effect;
+                            continue;
+                        },
+                        0x80...0x8F => { // DUP1-DUP16 need N items and push one
+                            const min_required = stack_effect - @as(i32, opcode - 0x80 + 1);
+                            if (min_required < min_stack) min_stack = min_required;
+                            stack_effect += 1;
+                            if (stack_effect > max_stack) max_stack = stack_effect;
+                        },
+                        0x90...0x9F => { // SWAP1-SWAP16 need N+1 items, size unchanged
+                            const min_required = stack_effect - @as(i32, opcode - 0x90 + 2);
+                            if (min_required < min_stack) min_stack = min_required;
+                        },
+                        else => {
+                            stack_effect -= opcode_info[opcode].stack_inputs;
+                            if (stack_effect < min_stack) min_stack = stack_effect;
+                            stack_effect += opcode_info[opcode].stack_outputs;
+                            if (stack_effect > max_stack) max_stack = stack_effect;
+                        },
+                    }
+                    pc += 1;
+
+                    if (endsBlockWithFallthrough(opcode)) break;
+                    switch (opcode) {
                         0x00, // STOP
                         0x56, // JUMP
-                        0x57, // JUMPI
                         0xF3, // RETURN
                         0xFD, // REVERT
                         0xFE, // INVALID
                         0xFF, // SELFDESTRUCT
-                        => {
-                            return .{
-                                .gas = gas,
-                                .min_stack = @intCast(@abs(min_stack)),
-                                .max_stack = @intCast(@max(0, max_stack)),
-                            };
-                        },
-                        0x60...0x7F => { // PUSH1-PUSH32
-                            gas += opcode_info[opcode].gas_cost;
-                            const push_size = opcode - 0x5F;
-                            pc += 1 + push_size;
-                            // PUSH operations: 0 inputs, 1 output
-                            stack_effect += 1;
-                            if (stack_effect > max_stack) max_stack = stack_effect;
-                        },
-                        // Special handling for DUP operations
-                        0x80...0x8f => { // DUP1-DUP16
-                            gas += opcode_info[opcode].gas_cost;
-                            const dup_n = @as(i32, opcode - 0x80 + 1);
-                            // DUP needs N items
-                            const min_required = stack_effect - dup_n;
-                            if (min_required < min_stack) {
-                                min_stack = min_required;
-                            }
-                            stack_effect += 1; // DUP pushes 1 item
-                            if (stack_effect > max_stack) max_stack = stack_effect;
-                            pc += 1;
-                        },
-                        // Special handling for SWAP operations
-                        0x90...0x9f => { // SWAP1-SWAP16
-                            gas += opcode_info[opcode].gas_cost;
-                            const swap_n = @as(i32, opcode - 0x90 + 2); // SWAP1 needs 2 items, SWAP2 needs 3, etc.
-                            // SWAP needs N+1 items
-                            const min_required = stack_effect - swap_n;
-                            if (min_required < min_stack) {
-                                min_stack = min_required;
-                            }
-                            // SWAP doesn't change stack size
-                            pc += 1;
-                        },
-                        else => {
-                            gas += opcode_info[opcode].gas_cost;
-                            // Regular opcodes - use opcode_info for stack effects
-                            if (opcode < opcode_info.len) {
-                                stack_effect -= opcode_info[opcode].stack_inputs;
-                                if (stack_effect < min_stack) min_stack = stack_effect;
-                                stack_effect += opcode_info[opcode].stack_outputs;
-                                if (stack_effect > max_stack) max_stack = stack_effect;
-                            }
-                            pc += 1;
-                        },
+                        => break,
+                        else => {},
                     }
                 }
 

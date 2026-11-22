@@ -1,7 +1,7 @@
 # BLS12-381 Map Field Element to G1 Precompile Review
 
 ## Overview
-Implements EIP-2537 0x12: BLS12_MAP_FP_TO_G1 precompile for mapping a field element (Fp) to a point on the BLS12-381 G1 curve. Takes a 64-byte field element and returns a 128-byte G1 point. Uses hash-to-curve algorithm.
+Implements EIP-2537 0x10: BLS12_MAP_FP_TO_G1 precompile for mapping a field element (Fp) to a point on the BLS12-381 G1 curve. Takes a 64-byte field element and returns a 128-byte G1 point. Uses hash-to-curve algorithm.
 
 ## Code Quality
 
