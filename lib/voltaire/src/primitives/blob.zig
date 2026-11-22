@@ -63,23 +63,43 @@ pub fn calculateBlobGasPrice(excess_blob_gas: u64) u64 {
 }
 
 /// Calculate the blob gas price using the hardfork-specific update fraction.
+/// Prices above `maxInt(u64)` saturate; use `calculateBlobGasPriceWithFractionU256`
+/// when the exact value matters.
 pub fn calculateBlobGasPriceWithFraction(excess_blob_gas: u64, update_fraction: u64) u64 {
+    const price = calculateBlobGasPriceWithFractionU256(excess_blob_gas, update_fraction);
+    return std.math.cast(u64, price) orelse std.math.maxInt(u64);
+}
+
+/// Exact blob gas price (`get_base_fee_per_blob_gas`) for the given update fraction.
+pub fn calculateBlobGasPriceWithFractionU256(excess_blob_gas: u64, update_fraction: u64) u256 {
     return fakeExponential(MIN_BLOB_BASE_FEE, excess_blob_gas, update_fraction);
 }
 
-// Fake exponential from EIP-4844
-fn fakeExponential(factor: u64, numerator: u64, denominator: u64) u64 {
-    var output: u64 = 0;
-    var numerator_accum = factor * denominator;
-    var i: u64 = 1;
+/// `fake_exponential` from EIP-4844, computed in u256.
+///
+/// The spec uses unbounded integers. Intermediate products exceed u64 at
+/// mainnet-realistic excess blob gas (about 1.04e8 with the Prague fraction),
+/// so u64 arithmetic overflows. This computes exactly whenever the result fits
+/// in u256 and returns `maxInt(u256)` when it does not.
+fn fakeExponential(factor: u256, numerator: u256, denominator: u256) u256 {
+    const saturated = std.math.maxInt(u256);
+    var output: u256 = 0;
+    const first = @mulWithOverflow(factor, denominator);
+    if (first[1] != 0) return saturated;
+    var numerator_accum = first[0];
+    var i: u256 = 1;
 
     while (numerator_accum > 0) {
-        output += numerator_accum;
-        numerator_accum = (numerator_accum * numerator) / (denominator * i);
+        const sum = @addWithOverflow(output, numerator_accum);
+        if (sum[1] != 0) return saturated;
+        output = sum[0];
+        const product = @mulWithOverflow(numerator_accum, numerator);
+        if (product[1] != 0) return saturated;
+        const divisor = @mulWithOverflow(denominator, i);
+        // A divisor beyond u256 exceeds every u256 product, so the next term is zero.
+        if (divisor[1] != 0) break;
+        numerator_accum = product[0] / divisor[0];
         i += 1;
-
-        // Prevent infinite loop
-        if (i > 256) break;
     }
 
     return output / denominator;
@@ -884,4 +904,30 @@ test "excess blob gas converges to zero with low usage" {
 
     // Should eventually reach zero
     try testing.expectEqual(@as(u64, 0), excess);
+}
+
+test "blob gas price stays exact past u64 intermediate products" {
+    // Excess 104_000_000 with the Prague fraction drives the EIP-4844 series
+    // above 2^64 (peak term about 4.8e22). Expected value from an
+    // arbitrary-precision evaluation of fake_exponential(1, 104000000, 5007716).
+    try std.testing.expectEqual(
+        @as(u256, 1045698476),
+        calculateBlobGasPriceWithFractionU256(104_000_000, BLOB_BASE_FEE_UPDATE_FRACTION_PRAGUE),
+    );
+    try std.testing.expectEqual(
+        @as(u64, 1045698476),
+        calculateBlobGasPriceWithFraction(104_000_000, BLOB_BASE_FEE_UPDATE_FRACTION_PRAGUE),
+    );
+    try std.testing.expectEqual(@as(u64, 1), calculateBlobGasPriceWithFraction(0, BLOB_BASE_FEE_UPDATE_FRACTION_PRAGUE));
+}
+
+test "blob gas price saturates instead of overflowing" {
+    try std.testing.expectEqual(
+        std.math.maxInt(u64),
+        calculateBlobGasPriceWithFraction(std.math.maxInt(u64), BLOB_BASE_FEE_UPDATE_FRACTION_CANCUN),
+    );
+    try std.testing.expectEqual(
+        std.math.maxInt(u256),
+        calculateBlobGasPriceWithFractionU256(std.math.maxInt(u64), BLOB_BASE_FEE_UPDATE_FRACTION_CANCUN),
+    );
 }

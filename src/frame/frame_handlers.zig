@@ -164,9 +164,10 @@ pub fn getOpcodeHandlers(
     h[@intFromEnum(Opcode.REVERT)] = &SystemHandlers.revert;
     h[@intFromEnum(Opcode.INVALID)] = &invalid;
     h[@intFromEnum(Opcode.SELFDESTRUCT)] = &SystemHandlers.selfdestruct;
-    // AUTH and AUTHCALL (EIP-3074) are activated in Prague hardfork
-    h[@intFromEnum(Opcode.AUTH)] = &SystemHandlers.auth;
-    h[@intFromEnum(Opcode.AUTHCALL)] = &SystemHandlers.authcall;
+    // 0xF6 and 0xF7 (AUTH/AUTHCALL) belonged to EIP-3074, which was withdrawn and never
+    // activated: EIP-7702 replaced it in Prague. Both are undefined on every mainnet fork.
+    h[@intFromEnum(Opcode.AUTH)] = &invalid;
+    h[@intFromEnum(Opcode.AUTHCALL)] = &invalid;
     // Note: Synthetic opcodes (0xa5-0xbc) are NOT mapped here because they should only be used
     // internally by the dispatch system during optimization. Raw bytecode containing these values
     // should be treated as invalid opcodes and use the default invalid handler.
@@ -227,6 +228,8 @@ pub fn getSyntheticHandler(FrameType: type, synthetic_opcode: u8) FrameType.Opco
         @intFromEnum(OpcodeSynthetic.PUSH_ADD_DUP1) => &AdvancedSyntheticHandlers.push_add_dup1,
         @intFromEnum(OpcodeSynthetic.MLOAD_SWAP1_DUP2) => &AdvancedSyntheticHandlers.mload_swap1_dup2,
         @intFromEnum(OpcodeSynthetic.BACKWARD_LOOP_JUMPI) => &JumpSyntheticHandlers.backward_loop_jumpi,
+        @intFromEnum(OpcodeSynthetic.BLOCK_BEGIN) => &JumpSyntheticHandlers.block_begin,
+        @intFromEnum(OpcodeSynthetic.INVALID_JUMP_TARGET) => &JumpSyntheticHandlers.invalid_jump_target,
         else => unreachable, // Invalid synthetic opcode
     };
 }

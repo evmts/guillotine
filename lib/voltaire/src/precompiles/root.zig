@@ -24,10 +24,8 @@ pub const bn254_pairing = @import("bn254_pairing.zig");
 pub const blake2f = @import("blake2f.zig");
 pub const point_evaluation = @import("point_evaluation.zig");
 pub const bls12_g1_add = @import("bls12_g1_add.zig");
-pub const bls12_g1_mul = @import("bls12_g1_mul.zig");
 pub const bls12_g1_msm = @import("bls12_g1_msm.zig");
 pub const bls12_g2_add = @import("bls12_g2_add.zig");
-pub const bls12_g2_mul = @import("bls12_g2_mul.zig");
 pub const bls12_g2_msm = @import("bls12_g2_msm.zig");
 pub const bls12_pairing = @import("bls12_pairing.zig");
 pub const bls12_map_fp_to_g1 = @import("bls12_map_fp_to_g1.zig");
@@ -36,7 +34,8 @@ pub const bls12_map_fp2_to_g2 = @import("bls12_map_fp2_to_g2.zig");
 // Utilities
 pub const utils = @import("utils.zig");
 
-/// Precompile contract addresses (0x01 through 0x13)
+/// Precompile contract addresses. Final EIP-2537 (Prague) has no G1MUL/G2MUL: MSM with
+/// one pair covers multiplication, and the BLS12-381 set occupies 0x0B through 0x11.
 pub const ECRECOVER_ADDRESS: Address = Address.fromU256(0x01);
 pub const SHA256_ADDRESS: Address = Address.fromU256(0x02);
 pub const RIPEMD160_ADDRESS: Address = Address.fromU256(0x03);
@@ -48,23 +47,30 @@ pub const ECPAIRING_ADDRESS: Address = Address.fromU256(0x08);
 pub const BLAKE2F_ADDRESS: Address = Address.fromU256(0x09);
 pub const POINT_EVALUATION_ADDRESS: Address = Address.fromU256(0x0A);
 pub const BLS12_G1ADD_ADDRESS: Address = Address.fromU256(0x0B);
-pub const BLS12_G1MUL_ADDRESS: Address = Address.fromU256(0x0C);
-pub const BLS12_G1MSM_ADDRESS: Address = Address.fromU256(0x0D);
-pub const BLS12_G2ADD_ADDRESS: Address = Address.fromU256(0x0E);
-pub const BLS12_G2MUL_ADDRESS: Address = Address.fromU256(0x0F);
-pub const BLS12_G2MSM_ADDRESS: Address = Address.fromU256(0x10);
-pub const BLS12_PAIRING_ADDRESS: Address = Address.fromU256(0x11);
-pub const BLS12_MAP_FP_TO_G1_ADDRESS: Address = Address.fromU256(0x12);
-pub const BLS12_MAP_FP2_TO_G2_ADDRESS: Address = Address.fromU256(0x13);
+pub const BLS12_G1MSM_ADDRESS: Address = Address.fromU256(0x0C);
+pub const BLS12_G2ADD_ADDRESS: Address = Address.fromU256(0x0D);
+pub const BLS12_G2MSM_ADDRESS: Address = Address.fromU256(0x0E);
+pub const BLS12_PAIRING_CHECK_ADDRESS: Address = Address.fromU256(0x0F);
+pub const BLS12_MAP_FP_TO_G1_ADDRESS: Address = Address.fromU256(0x10);
+pub const BLS12_MAP_FP2_TO_G2_ADDRESS: Address = Address.fromU256(0x11);
+/// EIP-7951 P256VERIFY (Osaka). Warm from Osaka on, but not dispatched until an
+/// implementation lands: `isPrecompile` returns false for it so far.
+pub const P256VERIFY_ADDRESS: Address = Address.fromU256(0x100);
+
+/// Highest contiguous precompile address (starting at 0x01) active in `hardfork`.
+pub fn lastContiguousPrecompile(hardfork: Hardfork) u8 {
+    // Precompiles remain available in successor forks.
+    if (hardfork.isAtLeast(.PRAGUE)) return 0x11;
+    if (hardfork.isAtLeast(.CANCUN)) return 0x0A;
+    if (hardfork.isAtLeast(.ISTANBUL)) return 0x09;
+    if (hardfork.isAtLeast(.BYZANTIUM)) return 0x08;
+    return 0x04;
+}
 
 /// Check if an address is a precompile
 pub fn isPrecompile(address: Address, hardfork: Hardfork) bool {
     const addr_int = address.toU256();
-
-    // Precompiles remain available in successor forks. An exact-fork switch
-    // omitted Berlin, London and Osaka, turning their calls into empty accounts.
-    const last: u256 = if (hardfork.isAtLeast(.PRAGUE)) 0x13 else if (hardfork.isAtLeast(.CANCUN)) 0x0A else if (hardfork.isAtLeast(.ISTANBUL)) 0x09 else if (hardfork.isAtLeast(.BYZANTIUM)) 0x08 else 0x04;
-    return addr_int >= 0x01 and addr_int <= last;
+    return addr_int >= 0x01 and addr_int <= lastContiguousPrecompile(hardfork);
 }
 
 /// Execute a precompile contract
@@ -92,14 +98,12 @@ pub fn execute(
         0x09 => blake2f.execute(allocator, input, gas_limit),
         0x0A => point_evaluation.execute(allocator, input, gas_limit),
         0x0B => bls12_g1_add.execute(allocator, input, gas_limit),
-        0x0C => bls12_g1_mul.execute(allocator, input, gas_limit),
-        0x0D => bls12_g1_msm.execute(allocator, input, gas_limit),
-        0x0E => bls12_g2_add.execute(allocator, input, gas_limit),
-        0x0F => bls12_g2_mul.execute(allocator, input, gas_limit),
-        0x10 => bls12_g2_msm.execute(allocator, input, gas_limit),
-        0x11 => bls12_pairing.execute(allocator, input, gas_limit),
-        0x12 => bls12_map_fp_to_g1.execute(allocator, input, gas_limit),
-        0x13 => bls12_map_fp2_to_g2.execute(allocator, input, gas_limit),
+        0x0C => bls12_g1_msm.execute(allocator, input, gas_limit),
+        0x0D => bls12_g2_add.execute(allocator, input, gas_limit),
+        0x0E => bls12_g2_msm.execute(allocator, input, gas_limit),
+        0x0F => bls12_pairing.execute(allocator, input, gas_limit),
+        0x10 => bls12_map_fp_to_g1.execute(allocator, input, gas_limit),
+        0x11 => bls12_map_fp2_to_g2.execute(allocator, input, gas_limit),
         else => error.NotImplemented,
     };
 }
@@ -138,8 +142,56 @@ test "isPrecompile - Prague" {
     const testing = std.testing;
 
     try testing.expect(isPrecompile(Address.fromU256(0x0B), .PRAGUE));
-    try testing.expect(isPrecompile(Address.fromU256(0x13), .PRAGUE));
-    try testing.expect(!isPrecompile(Address.fromU256(0x14), .PRAGUE));
+    try testing.expect(isPrecompile(Address.fromU256(0x11), .PRAGUE));
+    // Final EIP-2537 ends at 0x11; 0x12 and 0x13 were draft-only addresses.
+    try testing.expect(!isPrecompile(Address.fromU256(0x12), .PRAGUE));
+    try testing.expect(!isPrecompile(Address.fromU256(0x13), .PRAGUE));
+}
+
+test "isPrecompile - Osaka keeps the Prague set and does not dispatch 0x100 yet" {
+    const testing = std.testing;
+
+    try testing.expect(isPrecompile(Address.fromU256(0x11), .OSAKA));
+    try testing.expect(!isPrecompile(Address.fromU256(0x12), .OSAKA));
+    try testing.expect(!isPrecompile(P256VERIFY_ADDRESS, .OSAKA));
+}
+
+test "execute - final EIP-2537 address layout routes to the right precompile" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    // Each address gets an input of the length only its own precompile accepts, and
+    // exactly its final EIP-2537 cost: one unit less is OutOfGas, the cost itself gets
+    // past the gas check. Length + exact cost identify the precompile without depending
+    // on the curve arithmetic.
+    const Case = struct { address: Address, input_len: usize, cost: u64 };
+    const cases = [_]Case{
+        .{ .address = BLS12_G1ADD_ADDRESS, .input_len = 256, .cost = 375 },
+        .{ .address = BLS12_G1MSM_ADDRESS, .input_len = 160, .cost = 12000 },
+        .{ .address = BLS12_G2ADD_ADDRESS, .input_len = 512, .cost = 600 },
+        .{ .address = BLS12_G2MSM_ADDRESS, .input_len = 288, .cost = 22500 },
+        .{ .address = BLS12_PAIRING_CHECK_ADDRESS, .input_len = 384, .cost = 70300 },
+        .{ .address = BLS12_MAP_FP_TO_G1_ADDRESS, .input_len = 64, .cost = 5500 },
+        .{ .address = BLS12_MAP_FP2_TO_G2_ADDRESS, .input_len = 128, .cost = 23800 },
+    };
+    try testing.expectEqual(@as(u256, 0x0B), cases[0].address.toU256());
+    try testing.expectEqual(@as(u256, 0x11), cases[6].address.toU256());
+    var input: [512]u8 = [_]u8{0} ** 512;
+    for (cases) |case| {
+        const data = input[0..case.input_len];
+        try testing.expectError(error.OutOfGas, execute(allocator, case.address, data, case.cost - 1, .PRAGUE));
+        if (execute(allocator, case.address, data, case.cost, .PRAGUE)) |res| {
+            defer res.deinit(allocator);
+            try testing.expectEqual(case.cost, res.gas_used);
+        } else |err| {
+            try testing.expect(err != error.OutOfGas);
+            try testing.expect(err != error.NotImplemented);
+        }
+    }
+
+    try testing.expectError(error.NotImplemented, execute(allocator, Address.fromU256(0x12), &[_]u8{}, 100000, .PRAGUE));
+    try testing.expectError(error.NotImplemented, execute(allocator, Address.fromU256(0x13), &[_]u8{}, 100000, .PRAGUE));
+    try testing.expectError(error.NotImplemented, execute(allocator, BLS12_G1ADD_ADDRESS, input[0..256], 100000, .CANCUN));
 }
 
 test "precompile - out of gas" {

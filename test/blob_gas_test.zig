@@ -17,11 +17,11 @@ test "blob gas pricing and excess accumulation across hardforks" {
     try std.testing.expectEqual(prague.target_blob_gas(), osaka.target_blob_gas());
     try std.testing.expectEqual(prague.max_blob_gas(), osaka.max_blob_gas());
 
-    var excess = cancun.excess_blob_gas(0, cancun.target_blob_gas());
+    var excess = cancun.excess_blob_gas(0, cancun.target_blob_gas(), 1);
     try std.testing.expectEqual(@as(u64, 0), excess);
-    excess = cancun.excess_blob_gas(excess, cancun.target_blob_gas() + blob.BLOB_GAS_PER_BLOB);
+    excess = cancun.excess_blob_gas(excess, cancun.target_blob_gas() + blob.BLOB_GAS_PER_BLOB, 1);
     try std.testing.expectEqual(blob.BLOB_GAS_PER_BLOB, excess);
-    excess = cancun.excess_blob_gas(excess, cancun.target_blob_gas() - blob.BLOB_GAS_PER_BLOB);
+    excess = cancun.excess_blob_gas(excess, cancun.target_blob_gas() - blob.BLOB_GAS_PER_BLOB, 1);
     try std.testing.expectEqual(@as(u64, 0), excess);
 
     const max_blobs = cancun.max_blob_gas() / blob.BLOB_GAS_PER_BLOB;

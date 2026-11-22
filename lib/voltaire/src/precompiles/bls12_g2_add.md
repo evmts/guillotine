@@ -1,7 +1,7 @@
 # BLS12-381 G2 Addition Precompile Review
 
 ## Overview
-Implements EIP-2537 0x0E: BLS12_G2ADD precompile for BLS12-381 elliptic curve G2 point addition. Takes two G2 points as input (512 bytes total) and returns their sum (256 bytes). G2 points are represented in Fp2 (quadratic extension field).
+Implements EIP-2537 0x0D: BLS12_G2ADD precompile for BLS12-381 elliptic curve G2 point addition. Takes two G2 points as input (512 bytes total) and returns their sum (256 bytes). G2 points are represented in Fp2 (quadratic extension field).
 
 ## Code Quality
 

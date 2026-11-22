@@ -380,6 +380,11 @@ pub fn Preprocessor(FrameType: type) type {
                     tracerAssert(frame, frame.stack.size() >= 1, "Dispatch validation failed"); // MLOAD requires offset
                     tracerAssert(frame, frame.stack.size() < @TypeOf(frame.stack).stack_capacity, "Dispatch validation failed"); // DUP2 needs space
                 },
+                .BLOCK_BEGIN => {
+                    tracerAssert(frame, self.cursor[1] == .jump_dest, "BLOCK_BEGIN: expected .jump_dest metadata");
+                },
+                // Terminal: raises InvalidJump, reads no metadata or stack.
+                .INVALID_JUMP_TARGET => {},
                 .BACKWARD_LOOP_JUMPI => {
                     // Backward loop requires at least one stack item (the condition)
                     tracerAssert(frame, frame.stack.size() >= 1, "BACKWARD_LOOP_JUMPI: stack underflow, requires condition");
@@ -420,129 +425,38 @@ pub fn Preprocessor(FrameType: type) type {
         /// Calculate gas and stack requirements for the first basic block
         /// Returns metadata suitable for FirstBlockMetadata
         pub fn calculateFirstBlockInfo(bytecode: anytype) FirstBlockMetadata {
-            var gas: u64 = 0;
-            var stack_effect: i32 = 0;
-            var min_stack: i32 = 0;
-            var max_stack: i32 = 0;
-
             const actual_bytecode = if (@typeInfo(@TypeOf(bytecode)) == .error_union)
                 bytecode catch return .{ .gas = 0, .min_stack = 0, .max_stack = 0 }
             else
                 bytecode;
-            var iter = actual_bytecode.createIterator();
-            // Metadata must describe the original instruction stream. A fused
-            // MLOAD still pushes a word, and different fusions cost different gas.
-            iter.enable_fusion = false;
-            const opcode_info = @import("../opcodes/opcode_data.zig").OPCODE_INFO;
+            // Metadata must describe the original instruction stream, so scan raw
+            // bytecode rather than the (possibly fused) iterator output.
+            const iter = actual_bytecode.createIterator();
+            const info = @TypeOf(iter).calculateBlockInfo(iter.bytecode, 0, 0);
+            return .{ .gas = info.gas, .min_stack = info.min_stack, .max_stack = info.max_stack };
+        }
 
-            var op_count: u32 = 0;
-            var loop_counter = FrameType.config.createLoopSafetyCounter().init(FrameType.config.loop_quota orelse 0);
-
-            while (true) {
-                loop_counter.inc();
-                const maybe = iter.next();
-                if (maybe == null) break;
-                const op_data = maybe.?;
-                op_count += 1;
-
-                switch (op_data) {
-                    .regular => |data| {
-                        const gas_to_add = @as(u64, opcode_info[data.opcode].gas_cost);
-                        const new_gas = std.math.add(u64, gas, gas_to_add) catch gas;
-                        gas = new_gas;
-
-                        // Update stack effect for this opcode
-                        if (data.opcode < opcode_info.len) {
-                            // Special handling for DUP and SWAP operations
-                            // DUP1-DUP16 (0x80-0x8f) require N items on stack but don't consume them
-                            if (data.opcode >= 0x80 and data.opcode <= 0x8f) {
-                                const dup_n = @as(i32, data.opcode - 0x80 + 1);
-                                // DUP needs N items: we need stack_effect + N >= N, so stack_effect >= 0
-                                // If stack_effect < 0, we need abs(stack_effect) + N items minimum
-                                const min_required = stack_effect - dup_n;
-                                if (min_required < min_stack) {
-                                    min_stack = min_required;
-                                }
-                                stack_effect += 1; // DUP pushes 1 item
-                                if (stack_effect > max_stack) max_stack = stack_effect;
-                            }
-                            // SWAP1-SWAP16 (0x90-0x9f) require N+1 items on stack but don't change count
-                            else if (data.opcode >= 0x90 and data.opcode <= 0x9f) {
-                                const swap_n = @as(i32, data.opcode - 0x90 + 2); // SWAP1 needs 2 items, SWAP2 needs 3, etc.
-                                // SWAP needs N+1 items: similar calculation
-                                const min_required = stack_effect - swap_n;
-                                if (min_required < min_stack) {
-                                    min_stack = min_required;
-                                }
-                                // SWAP doesn't change stack size
-                            }
-                            // Regular opcodes
-                            else {
-                                stack_effect -= opcode_info[data.opcode].stack_inputs;
-                                if (stack_effect < min_stack) min_stack = stack_effect;
-                                stack_effect += opcode_info[data.opcode].stack_outputs;
-                                if (stack_effect > max_stack) max_stack = stack_effect;
-                            }
-                        }
-
-                        switch (data.opcode) {
-                            0x56, 0x57, 0x00, 0xf3, 0xfd, 0xfe, 0xff => {
-                                if (data.opcode == 0x57) {}
-                                return .{
-                                    .gas = @intCast(gas),
-                                    .min_stack = @intCast(@abs(min_stack)),
-                                    .max_stack = @intCast(@max(0, max_stack)),
-                                };
-                            },
-                            else => {},
-                        }
-                    },
-                    .push => |data| {
-                        const push_opcode = 0x60 + data.size - 1;
-                        const gas_to_add = @as(u64, opcode_info[push_opcode].gas_cost);
-                        const new_gas = std.math.add(u64, gas, gas_to_add) catch gas;
-                        gas = new_gas;
-
-                        // PUSH operations: 0 inputs, 1 output
-                        // stack_effect -= 0; (no inputs)
-                        stack_effect += 1; // 1 output
-                        if (stack_effect > max_stack) max_stack = stack_effect;
-                    },
-                    .jumpdest => {
-                        return .{
-                            .gas = @intCast(gas),
-                            .min_stack = @intCast(@abs(min_stack)),
-                            .max_stack = @intCast(@max(0, max_stack)),
-                        };
-                    },
-                    .stop, .invalid => {
-                        const gas_to_add = @as(u64, opcode_info[0x00].gas_cost);
-                        gas = std.math.add(u64, gas, gas_to_add) catch gas;
-                        return .{
-                            .gas = @intCast(gas),
-                            .min_stack = @intCast(@abs(min_stack)),
-                            .max_stack = @intCast(@max(0, max_stack)),
-                        };
-                    },
-                    else => {
-                        const new_gas = std.math.add(u64, gas, 6) catch gas;
-                        gas = new_gas;
-                        // For other instructions, assume minimal stack effect
-                        // This is conservative - real implementation would need detailed analysis
-                    },
+        /// Opcode of the last instruction in the raw bytecode range [start_pc, end_pc).
+        /// A schedule item (plain or fused) covers exactly such a range. A fused item must
+        /// never contain a block-ending instruction before its last one: the block after it
+        /// would never be charged, so that is rejected as a schedule-building error.
+        fn lastOpcodeInRange(bytecode: anytype, start_pc: usize, end_pc: usize) error{FusionSpansBasicBlocks}!?u8 {
+            var pc = start_pc;
+            var last: ?u8 = null;
+            while (pc < end_pc and pc < bytecode.len()) {
+                const opcode = bytecode.get_unsafe(@intCast(pc));
+                if (last) |previous| {
+                    if (@TypeOf(bytecode.*).Iterator.endsBlockWithFallthrough(previous)) return error.FusionSpansBasicBlocks;
                 }
+                last = opcode;
+                pc += if (opcode >= 0x60 and opcode <= 0x7F) @as(usize, opcode - 0x5F) + 1 else 1;
             }
-
-            return .{
-                .gas = @intCast(gas),
-                .min_stack = @intCast(@abs(min_stack)),
-                .max_stack = @intCast(@max(0, max_stack)),
-            };
+            return last;
         }
 
         const UnresolvedJump = struct {
             schedule_index: usize, // Index in schedule where jump_static metadata is
-            target_pc: FrameType.PcType, // PC of the jump destination
+            target_pc: ?FrameType.PcType, // PC of the jump destination; null when the pushed value exceeds PcType
         };
 
         const JumpDestEntry = struct {
@@ -809,6 +723,42 @@ pub fn Preprocessor(FrameType: type) type {
                         try schedule_items.append(allocator, .{ .opcode_handler = handler });
                     },
                 }
+
+                // A non-taken JUMPI, or a gas-observing instruction (GAS, CALL*, CREATE*,
+                // SSTORE), falls through into a new basic block that no JUMPDEST heads.
+                // Insert BLOCK_BEGIN so that block's static gas is charged and its stack
+                // bounds are validated, exactly as a JUMPDEST would. A JUMPDEST that
+                // directly follows already does this itself.
+                const next_pc: usize = iter.pc;
+                const last_opcode = try lastOpcodeInRange(iter.bytecode, instr_pc, next_pc);
+                if (last_opcode != null and @TypeOf(iter).endsBlockWithFallthrough(last_opcode.?) and
+                    next_pc < iter.bytecode.len() and
+                    iter.bytecode.get_unsafe(@intCast(next_pc)) != @intFromEnum(Opcode.JUMPDEST))
+                {
+                    const block_info = @TypeOf(iter).calculateBlockInfo(iter.bytecode, @intCast(next_pc), 0);
+                    const frame_handlers = @import("../frame/frame_handlers.zig");
+                    const handler = frame_handlers.getSyntheticHandler(FrameType, @intFromEnum(OpcodeSynthetic.BLOCK_BEGIN));
+                    try schedule_items.append(allocator, .{ .opcode_handler = handler });
+                    try schedule_items.append(allocator, .{ .jump_dest = .{
+                        .gas = block_info.gas,
+                        .min_stack = block_info.min_stack,
+                        .max_stack = block_info.max_stack,
+                    } });
+                }
+            }
+
+            // Code that runs off its end executes an implicit STOP.
+            try schedule_items.append(allocator, .{ .opcode_handler = opcode_handlers.*[@intFromEnum(Opcode.STOP)] });
+
+            // Static jumps whose target is not a JUMPDEST resolve to this item. Invalid
+            // targets in unreachable code are legal bytecode, so the error is raised only
+            // when such a jump is actually taken at runtime. The STOP above keeps
+            // fall-through away from it; the two STOPs below keep the schedule invariant
+            // that it ends with two STOP handlers.
+            const invalid_jump_index = schedule_items.items.len;
+            {
+                const frame_handlers = @import("../frame/frame_handlers.zig");
+                try schedule_items.append(allocator, .{ .opcode_handler = frame_handlers.getSyntheticHandler(FrameType, @intFromEnum(OpcodeSynthetic.INVALID_JUMP_TARGET)) });
             }
 
             try schedule_items.append(allocator, .{ .opcode_handler = opcode_handlers.*[@intFromEnum(Opcode.STOP)] });
@@ -817,7 +767,7 @@ pub fn Preprocessor(FrameType: type) type {
             const final_schedule = try schedule_items.toOwnedSlice(allocator);
             errdefer allocator.free(final_schedule);
 
-            try resolveStaticJumpsWithArray(final_schedule, &unresolved_jumps, jumpdest_entries.items, tracer);
+            resolveStaticJumpsWithArray(final_schedule, &unresolved_jumps, jumpdest_entries.items, invalid_jump_index, tracer);
 
             if (tracer) |t| {
                 t.onScheduleBuildComplete(final_schedule.len, 0); // No longer tracking u256 count
@@ -938,13 +888,13 @@ pub fn Preprocessor(FrameType: type) type {
             tracer: anytype,
             jump_pc: u32,
         ) !void {
-            if (value > std.math.maxInt(FrameType.PcType)) {
+            // A target beyond PcType can never be a JUMPDEST. It still gets a static jump
+            // item so JUMPI falls through on a zero condition; resolution points it at the
+            // invalid-jump item.
+            const dest_pc: ?FrameType.PcType = if (value > std.math.maxInt(FrameType.PcType)) blk: {
                 if (tracer) |t| t.onInvalidStaticJump(jump_pc, @intCast(value & 0xFFFFFFFF));
-                const opcode_handlers = @import("../frame/frame_handlers.zig").getOpcodeHandlers(FrameType, &.{});
-                try schedule_items.append(allocator, .{ .opcode_handler = opcode_handlers[@intFromEnum(@import("../opcodes/opcode.zig").Opcode.INVALID)] });
-                return;
-            }
-            const dest_pc: FrameType.PcType = @intCast(value);
+                break :blk null;
+            } else @intCast(value);
 
             const frame_handlers = @import("../frame/frame_handlers.zig");
             const static_opcode: u8 = switch (fusion_type) {
@@ -965,9 +915,16 @@ pub fn Preprocessor(FrameType: type) type {
             schedule: []Item,
             unresolved_jumps: *ArrayList(UnresolvedJump, null),
             jumpdest_array: []const JumpDestEntry,
+            invalid_jump_index: usize,
             tracer: anytype,
-        ) !void {
+        ) void {
             for (unresolved_jumps.items) |unresolved| {
+                const target_pc = unresolved.target_pc orelse {
+                    schedule[unresolved.schedule_index].jump_static = .{
+                        .dispatch = @as(*const anyopaque, @ptrCast(schedule.ptr + invalid_jump_index)),
+                    };
+                    continue;
+                };
                 var left: usize = 0;
                 var right: usize = jumpdest_array.len;
 
@@ -976,10 +933,10 @@ pub fn Preprocessor(FrameType: type) type {
                     const mid = left + (right - left) / 2;
                     const mid_pc = jumpdest_array[mid].pc;
 
-                    if (mid_pc == unresolved.target_pc) {
+                    if (mid_pc == target_pc) {
                         found = mid;
                         break;
-                    } else if (mid_pc < unresolved.target_pc) {
+                    } else if (mid_pc < target_pc) {
                         left = mid + 1;
                     } else {
                         right = mid;
@@ -992,12 +949,14 @@ pub fn Preprocessor(FrameType: type) type {
                         .dispatch = @as(*const anyopaque, @ptrCast(schedule.ptr + target_schedule_idx)),
                     };
                     if (tracer) |t| {
-                        t.onStaticJumpResolved(0, unresolved.target_pc);
+                        t.onStaticJumpResolved(0, target_pc);
                     }
                 } else {
                     @branchHint(.cold);
-                    if (tracer) |t| t.onInvalidStaticJump(0, unresolved.target_pc);
-                    return error.InvalidStaticJump;
+                    if (tracer) |t| t.onInvalidStaticJump(0, target_pc);
+                    schedule[unresolved.schedule_index].jump_static = .{
+                        .dispatch = @as(*const anyopaque, @ptrCast(schedule.ptr + invalid_jump_index)),
+                    };
                 }
             }
         }

@@ -1,7 +1,7 @@
 # BLS12-381 G1 Multi-Scalar Multiplication (MSM) Precompile Review
 
 ## Overview
-Implements EIP-2537 0x0D: BLS12_G1MSM precompile for BLS12-381 G1 multi-scalar multiplication. Takes k pairs of G1 points and scalars (160 bytes each pair) and returns a single G1 point (128 bytes). Includes discount scaling for batched operations.
+Implements EIP-2537 0x0C: BLS12_G1MSM precompile for BLS12-381 G1 multi-scalar multiplication. Takes k pairs of G1 points and scalars (160 bytes each pair) and returns a single G1 point (128 bytes). Includes discount scaling for batched operations.
 
 ## Code Quality
 
@@ -73,22 +73,14 @@ Implements EIP-2537 0x0D: BLS12_G1MSM precompile for BLS12-381 G1 multi-scalar m
 ## Gas Calculation
 
 ### Specification Compliance
-- Base gas: **12000** (line 8) - matches G1MUL base cost
+- Base gas: **12000** - the EIP-2537 G1 multiplication cost; discount table max 519
 - Multiplier: **50** (line 9) - specified in EIP-2537
 - Formula: `(BASE_GAS * k * discount) / 1000` (line 23)
 
-### Discount Tiers (from utils.zig)
-Verified in test (line 176-193):
-- k=1: 1000 (100%)
-- k=2-3: 820 (82%)
-- k=4-7: 580 (58%)
-- k=8-15: 430 (43%)
-- k=16-31: 320 (32%)
-- k=32-63: 250 (25%)
-- k=64-127: 200 (20%)
-- k=128+: 174 (17.4%)
-
-✅ **CORRECT** - Matches EIP-2537 specification
+### Discount Table (utils.zig)
+`utils.msmDiscountG1(k)` reads the final EIP-2537 G1 table (128 entries, k = 1..128).
+For k > 128 it stays at max_discount = 519. `utils.msmGas` computes
+`k * BASE_GAS * discount(k) // 1000` and saturates instead of overflowing.
 
 ### Potential Issues
 1. **Integer overflow risk**: `BASE_GAS * k * discount` could overflow for very large k

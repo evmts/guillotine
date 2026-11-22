@@ -247,6 +247,52 @@ pub fn Handlers(FrameType: type) type {
             self.afterInstruction(.BACKWARD_LOOP_JUMPI, exit_dispatch_ptr[0].opcode_handler, exit_dispatch_ptr);
             return @call(FrameType.Dispatch.getTailCallModifier(), exit_dispatch_ptr[0].opcode_handler, .{ self, exit_dispatch_ptr });
         }
+
+        /// INVALID_JUMP_TARGET - where a static jump to a non-JUMPDEST lands. Invalid
+        /// targets in unreachable code are legal, so preprocessing points such jumps here
+        /// and the error surfaces only when the jump is taken. It maps to no bytecode
+        /// instruction: the jump handler already stepped MinimalEvm through the failed JUMP.
+        pub fn invalid_jump_target(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            _ = cursor;
+            self.afterComplete(.INVALID_JUMP_TARGET);
+            return Error.InvalidJump;
+        }
+
+        /// BLOCK_BEGIN - start of a basic block reached by falling through a non-taken JUMPI.
+        /// It maps to no bytecode instruction. Like JUMPDEST it charges the block's static
+        /// gas and validates the block's stack bounds in one shot, but it charges no gas of its own.
+        /// The cursor points to: [0] = handler, [1] = jump_dest metadata for the block.
+        pub fn block_begin(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            self.beforeInstruction(.BLOCK_BEGIN, cursor);
+            const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
+            const op_data = dispatch_opcode_data.getOpData(.BLOCK_BEGIN, Dispatch, Dispatch.Item, cursor);
+            const gas_cost = op_data.metadata.gas;
+            const min_stack = op_data.metadata.min_stack;
+            const max_stack = op_data.metadata.max_stack;
+
+            self.gas_remaining -= @as(FrameType.GasType, @intCast(gas_cost));
+            if (self.gas_remaining < 0) {
+                self.afterComplete(.BLOCK_BEGIN);
+                return Error.OutOfGas;
+            }
+
+            const current_stack_size = self.stack.size();
+            if (min_stack > 0 and current_stack_size < @as(usize, @intCast(min_stack))) {
+                self.afterComplete(.BLOCK_BEGIN);
+                return Error.StackUnderflow;
+            }
+            if (max_stack > 0) {
+                const stack_capacity = @TypeOf(self.stack).stack_capacity;
+                const max_final_size = @as(isize, @intCast(current_stack_size)) + @as(isize, max_stack);
+                if (max_final_size > @as(isize, @intCast(stack_capacity))) {
+                    self.afterComplete(.BLOCK_BEGIN);
+                    return Error.StackOverflow;
+                }
+            }
+
+            self.afterInstruction(.BLOCK_BEGIN, op_data.next_handler, op_data.next_cursor.cursor);
+            return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+        }
     };
 }
 

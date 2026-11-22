@@ -292,8 +292,9 @@ pub fn Handlers(FrameType: type) type {
             const base = self.stack.pop_unsafe(); // Top of stack (base)
             const exponent = self.stack.peek_unsafe(); // Below top (exponent)
 
-            // EIP-160: Dynamic gas cost for EXP
-            // Gas cost = 10 + 50 * (number of non-zero bytes in exponent)
+            // EIP-160: EXP costs 10 + 50 * byte_len(exponent).
+            // The 10 gas base is static and already charged with the basic block
+            // (OPCODE_INFO[EXP].gas_cost); the handler charges only the dynamic part.
             var exp_bytes: u32 = 0;
             if (exponent > 0) {
                 var temp_exp = exponent;
@@ -302,7 +303,8 @@ pub fn Handlers(FrameType: type) type {
                 }
             }
 
-            const gas_cost = 10 + 50 * exp_bytes;
+            const exp_byte_gas: u32 = 50;
+            const gas_cost = exp_byte_gas * exp_bytes;
             // Use negative gas pattern for single-branch out-of-gas detection
             self.gas_remaining -= @intCast(gas_cost);
             if (self.gas_remaining < 0) {

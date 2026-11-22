@@ -8,6 +8,14 @@ const GasConstants = primitives.GasConstants;
 const keccak_asm = @import("crypto").keccak_asm;
 const memory_mod = @import("../memory/memory.zig");
 const Opcode = @import("../opcodes/opcode_data.zig").Opcode;
+const OPCODE_INFO = @import("../opcodes/opcode_data.zig").OPCODE_INFO;
+
+/// EIP-2929 account access gas still owed by a handler. The warm cost (100) is the
+/// opcode's static gas, already charged with its basic block, so the handler charges
+/// only the cold surcharge (2600 - 100) on first access.
+inline fn accessSurcharge(comptime opcode: Opcode, access_cost: u64) u64 {
+    return access_cost -| OPCODE_INFO[@intFromEnum(opcode)].gas_cost;
+}
 
 /// Context opcode handlers for the EVM stack frame.
 /// These handle execution context queries (caller, value, gas, etc).
@@ -54,7 +62,7 @@ pub fn Handlers(FrameType: type) type {
 
             // Charge gas for address access
             // Use negative gas pattern for single-branch out-of-gas detection
-            self.gas_remaining -= @intCast(access_cost);
+            self.gas_remaining -= @intCast(accessSurcharge(.BALANCE, access_cost));
             if (self.gas_remaining < 0) {
                 self.afterComplete(.BALANCE);
                 return Error.OutOfGas;
@@ -165,30 +173,36 @@ pub fn Handlers(FrameType: type) type {
             {
                 (&self.getEvm().tracer).assert(self.stack.size() >= 3, "CALLDATACOPY requires 3 stack items");
             }
-            const length = self.stack.pop_unsafe(); // Top of stack
+            // Yellow Paper: μs[0] = destOffset (top), μs[1] = offset, μs[2] = size.
+            const dest_offset = self.stack.pop_unsafe(); // Top of stack
             const offset = self.stack.pop_unsafe(); // Second from top
-            const dest_offset = self.stack.pop_unsafe(); // Third from top
+            const length = self.stack.pop_unsafe(); // Third from top
 
-            // Check for overflow
-            if (dest_offset > std.math.maxInt(usize) or
-                offset > std.math.maxInt(usize) or
-                length > std.math.maxInt(usize))
-            {
-                return Error.OutOfBounds;
-            }
-
-            const dest_offset_usize = @as(usize, @intCast(dest_offset));
-            const offset_usize = @as(usize, @intCast(offset));
-            const length_usize = @as(usize, @intCast(length));
-
-            if (length_usize == 0) {
+            // A zero-length copy touches no memory and charges no dynamic gas, whatever
+            // the offsets are.
+            if (length == 0) {
                 const op_data = dispatch.getOpData(.CALLDATACOPY); // Use op_data.next_handler and op_data.next_cursor directly
                 return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             }
 
+            // Memory cannot reach beyond usize: such a copy could never pay for expansion.
+            if (dest_offset > std.math.maxInt(usize) or length > std.math.maxInt(usize)) {
+                self.afterComplete(.CALLDATACOPY);
+                return Error.OutOfBounds;
+            }
+
+            const dest_offset_usize = @as(usize, @intCast(dest_offset));
+            const length_usize = @as(usize, @intCast(length));
+            // Any source offset is legal; bytes past the end of calldata read as zero.
+            const offset_usize: usize = std.math.cast(usize, offset) orelse std.math.maxInt(usize);
+
             // Calculate gas cost for memory expansion and copy operation
-            const new_size = dest_offset_usize + length_usize;
+            const new_size = std.math.add(usize, dest_offset_usize, length_usize) catch {
+                self.afterComplete(.CALLDATACOPY);
+                return Error.OutOfBounds;
+            };
             if (new_size > std.math.maxInt(u24)) {
+                self.afterComplete(.CALLDATACOPY);
                 return Error.OutOfBounds;
             }
             const memory_expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(new_size)));
@@ -214,7 +228,7 @@ pub fn Handlers(FrameType: type) type {
             // Copy calldata to memory with proper zero-padding
             var i: usize = 0;
             while (i < length_usize) : (i += 1) {
-                const src_index = offset_usize + i;
+                const src_index = offset_usize +| i;
                 const byte_val = if (src_index < calldata.len) calldata[src_index] else 0;
                 self.memory.set_byte(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(dest_offset_usize + i)), byte_val) catch return Error.OutOfBounds;
             }
@@ -338,7 +352,7 @@ pub fn Handlers(FrameType: type) type {
 
             // Charge gas for address access
             // Use negative gas pattern for single-branch out-of-gas detection
-            self.gas_remaining -= @intCast(access_cost);
+            self.gas_remaining -= @intCast(accessSurcharge(.EXTCODESIZE, access_cost));
             if (self.gas_remaining < 0) {
                 self.afterComplete(.EXTCODESIZE);
                 return Error.OutOfGas;
@@ -362,19 +376,11 @@ pub fn Handlers(FrameType: type) type {
             {
                 (&self.getEvm().tracer).assert(self.stack.size() >= 4, "EXTCODECOPY requires 4 stack items");
             }
-            const length = self.stack.pop_unsafe(); // Top of stack
-            const offset = self.stack.pop_unsafe(); // Second from top
-            const dest_offset = self.stack.pop_unsafe(); // Third from top
-            const address_u256 = self.stack.pop_unsafe(); // Fourth from top
-
-            // Check for overflow
-            if (dest_offset > std.math.maxInt(usize) or
-                offset > std.math.maxInt(usize) or
-                length > std.math.maxInt(usize))
-            {
-                self.afterComplete(.EXTCODECOPY);
-                return Error.OutOfBounds;
-            }
+            // Yellow Paper: μs[0] = address (top), μs[1] = destOffset, μs[2] = offset, μs[3] = size.
+            const address_u256 = self.stack.pop_unsafe(); // Top of stack
+            const dest_offset = self.stack.pop_unsafe(); // Second from top
+            const offset = self.stack.pop_unsafe(); // Third from top
+            const length = self.stack.pop_unsafe(); // Fourth from top
 
             const addr = address_utils.fromWord(WordType,address_u256);
 
@@ -389,21 +395,32 @@ pub fn Handlers(FrameType: type) type {
 
             // Charge gas for address access
             // Use negative gas pattern for single-branch out-of-gas detection
-            self.gas_remaining -= @intCast(access_cost);
+            self.gas_remaining -= @intCast(accessSurcharge(.EXTCODECOPY, access_cost));
             if (self.gas_remaining < 0) {
                 self.afterComplete(.EXTCODECOPY);
                 return Error.OutOfGas;
             }
-            const dest_offset_usize = @as(usize, @intCast(dest_offset));
-            const offset_usize = @as(usize, @intCast(offset));
-            const length_usize = @as(usize, @intCast(length));
-
-            if (length_usize == 0) {
+            // A zero-length copy still pays the account access cost above but touches no
+            // memory, whatever the offsets are.
+            if (length == 0) {
                 return dispatch_next.nextInstruction(FrameType, self, cursor, .EXTCODECOPY);
             }
 
+            // Memory cannot reach beyond usize: such a copy could never pay for expansion.
+            if (dest_offset > std.math.maxInt(usize) or length > std.math.maxInt(usize)) {
+                self.afterComplete(.EXTCODECOPY);
+                return Error.OutOfBounds;
+            }
+            const dest_offset_usize = @as(usize, @intCast(dest_offset));
+            const length_usize = @as(usize, @intCast(length));
+            // Any source offset is legal; bytes past the end of the code read as zero.
+            const offset_usize: usize = std.math.cast(usize, offset) orelse std.math.maxInt(usize);
+
             // Calculate gas cost for memory expansion and copy operation
-            const new_size = dest_offset_usize + length_usize;
+            const new_size = std.math.add(usize, dest_offset_usize, length_usize) catch {
+                self.afterComplete(.EXTCODECOPY);
+                return Error.OutOfBounds;
+            };
             if (new_size > std.math.maxInt(u24)) {
                 self.afterComplete(.EXTCODECOPY);
                 return Error.OutOfBounds;
@@ -443,7 +460,7 @@ pub fn Handlers(FrameType: type) type {
             // Copy external code to memory with proper zero-padding
             var i: usize = 0;
             while (i < length_usize) : (i += 1) {
-                const src_index = offset_usize + i;
+                const src_index = offset_usize +| i;
                 const byte_val = if (src_index < code.len) code[src_index] else 0;
                 self.memory.set_byte(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(dest_offset_usize + i)), byte_val) catch {
                     self.afterComplete(.EXTCODECOPY);
@@ -475,7 +492,7 @@ pub fn Handlers(FrameType: type) type {
 
             // Charge gas for address access
             // Use negative gas pattern for single-branch out-of-gas detection
-            self.gas_remaining -= @intCast(access_cost);
+            self.gas_remaining -= @intCast(accessSurcharge(.EXTCODEHASH, access_cost));
             if (self.gas_remaining < 0) {
                 self.afterComplete(.EXTCODEHASH);
                 return Error.OutOfGas;
@@ -545,39 +562,36 @@ pub fn Handlers(FrameType: type) type {
             const offset = self.stack.pop_unsafe();
             const length = self.stack.pop_unsafe();
 
-            // Check for overflow
-            if (dest_offset > std.math.maxInt(usize) or
-                offset > std.math.maxInt(usize) or
-                length > std.math.maxInt(usize))
-            {
+            // Before any call in this frame the return data buffer is empty, not absent.
+            const return_data = self.getEvm().get_return_data() orelse &[_]u8{};
+
+            // EIP-211: reading past the end of return data is an exceptional halt, even for
+            // a zero-length copy (offset + size > len). Compare in u256 so huge values cannot wrap.
+            const read_end = @as(u256, offset) + @as(u256, length);
+            if (@as(u256, offset) > return_data.len or read_end > return_data.len) {
                 self.afterComplete(.RETURNDATACOPY);
                 return Error.OutOfBounds;
             }
 
-            const dest_offset_usize = @as(usize, @intCast(dest_offset));
-            const offset_usize = @as(usize, @intCast(offset));
-            const length_usize = @as(usize, @intCast(length));
-
-            // Return data from the last call is stored in the EVM's return_data field
-            const return_data = self.getEvm().get_return_data() orelse {
-                self.afterComplete(.RETURNDATACOPY);
-                return Error.ReturnDataNotAvailable;
-            };
-
-            // Check if we're trying to read past the end of return data
-            if (offset_usize > return_data.len or
-                (length_usize > 0 and offset_usize + length_usize > return_data.len))
-            {
-                self.afterComplete(.RETURNDATACOPY);
-                return Error.OutOfBounds;
-            }
-
-            if (length_usize == 0) {
+            // A zero-length copy touches no memory, whatever the destination offset.
+            if (length == 0) {
                 return dispatch_next.nextInstruction(FrameType, self, cursor, .RETURNDATACOPY);
             }
 
+            if (dest_offset > std.math.maxInt(usize)) {
+                self.afterComplete(.RETURNDATACOPY);
+                return Error.OutOfBounds;
+            }
+            const dest_offset_usize = @as(usize, @intCast(dest_offset));
+            // Both fit in return_data.len now.
+            const offset_usize = @as(usize, @intCast(offset));
+            const length_usize = @as(usize, @intCast(length));
+
             // Calculate gas cost for memory expansion and copy operation
-            const new_size = dest_offset_usize + length_usize;
+            const new_size = std.math.add(usize, dest_offset_usize, length_usize) catch {
+                self.afterComplete(.RETURNDATACOPY);
+                return Error.OutOfBounds;
+            };
             if (new_size > std.math.maxInt(u24)) {
                 self.afterComplete(.RETURNDATACOPY);
                 return Error.OutOfBounds;
@@ -621,13 +635,7 @@ pub fn Handlers(FrameType: type) type {
         /// Stack: [block_number] → [hash]
         pub fn blockhash(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             self.beforeInstruction(.BLOCKHASH, cursor);
-            // BLOCKHASH costs 20 gas
-            const gas_cost = 20;
-            // Use negative gas pattern for single-branch out-of-gas detection
-            self.gas_remaining -= @intCast(gas_cost);
-            if (self.gas_remaining < 0) {
-                return Error.OutOfGas;
-            }
+            // BLOCKHASH's 20 gas is static and charged with the basic block.
 
             const dispatch = Dispatch{ .cursor = cursor };
             {
@@ -659,13 +667,7 @@ pub fn Handlers(FrameType: type) type {
         /// Stack: [] → [coinbase]
         pub fn coinbase(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             self.beforeInstruction(.COINBASE, cursor);
-            // COINBASE costs 2 gas
-            const gas_cost = GasConstants.GasQuickStep;
-            // Use negative gas pattern for single-branch out-of-gas detection
-            self.gas_remaining -= @intCast(gas_cost);
-            if (self.gas_remaining < 0) {
-                return Error.OutOfGas;
-            }
+            // COINBASE's 2 gas is static and charged with the basic block.
 
             const dispatch = Dispatch{ .cursor = cursor };
             const block_info = self.getEvm().get_block_info();
@@ -1195,9 +1197,9 @@ test "CALLDATACOPY opcode" {
     defer frame.deinit(testing.allocator);
 
     // Copy 4 bytes from offset 1 to memory offset 0
-    try frame.stack.push(0); // destOffset
-    try frame.stack.push(1); // offset
     try frame.stack.push(4); // length
+    try frame.stack.push(1); // offset
+    try frame.stack.push(0); // destOffset
 
     const dispatch = createMockDispatch();
     _ = try TestFrame.ContextHandlers.calldatacopy(frame, dispatch);
@@ -1305,10 +1307,10 @@ test "EXTCODECOPY opcode" {
     defer frame.deinit(testing.allocator);
 
     // Copy 4 bytes from offset 1 of external code to memory offset 0
-    try frame.stack.push(0x88); // address
-    try frame.stack.push(0); // destOffset
-    try frame.stack.push(1); // offset
     try frame.stack.push(4); // length
+    try frame.stack.push(1); // offset
+    try frame.stack.push(0); // destOffset
+    try frame.stack.push(0x88); // address
 
     const dispatch = createMockDispatch();
     _ = try TestFrame.ContextHandlers.extcodecopy(frame, dispatch);
@@ -1771,9 +1773,9 @@ test "CALLDATACOPY opcode - boundary conditions" {
         var frame = try createTestFrame(testing.allocator, host);
         defer frame.deinit(testing.allocator);
 
-        try frame.stack.push(0); // destOffset
-        try frame.stack.push(0); // offset
         try frame.stack.push(0); // length
+        try frame.stack.push(0); // offset
+        try frame.stack.push(0); // destOffset
 
         const dispatch = createMockDispatch();
         _ = try TestFrame.ContextHandlers.calldatacopy(frame, dispatch);
@@ -1787,9 +1789,9 @@ test "CALLDATACOPY opcode - boundary conditions" {
         var frame = try createTestFrame(testing.allocator, host);
         defer frame.deinit(testing.allocator);
 
-        try frame.stack.push(0); // destOffset
-        try frame.stack.push(3); // offset (start at 0xDD)
         try frame.stack.push(5); // length (need 3 bytes of padding)
+        try frame.stack.push(3); // offset (start at 0xDD)
+        try frame.stack.push(0); // destOffset
 
         const dispatch = createMockDispatch();
         _ = try TestFrame.ContextHandlers.calldatacopy(frame, dispatch);
@@ -1803,9 +1805,9 @@ test "CALLDATACOPY opcode - boundary conditions" {
         var frame = try createTestFrame(testing.allocator, host);
         defer frame.deinit(testing.allocator);
 
-        try frame.stack.push(std.math.maxInt(u256)); // destOffset (overflow)
-        try frame.stack.push(0); // offset
         try frame.stack.push(1); // length
+        try frame.stack.push(0); // offset
+        try frame.stack.push(std.math.maxInt(u256)); // destOffset (overflow)
 
         const dispatch = createMockDispatch();
         const result = TestFrame.ContextHandlers.calldatacopy(frame, dispatch);
@@ -1883,10 +1885,10 @@ test "EXTCODECOPY opcode - boundary conditions" {
         var frame = try createTestFrame(testing.allocator, host);
         defer frame.deinit(testing.allocator);
 
-        try frame.stack.push(0x99); // address
-        try frame.stack.push(0); // destOffset
-        try frame.stack.push(1); // offset
         try frame.stack.push(5); // length (need padding)
+        try frame.stack.push(1); // offset
+        try frame.stack.push(0); // destOffset
+        try frame.stack.push(0x99); // address
 
         const dispatch = createMockDispatch();
         _ = try TestFrame.ContextHandlers.extcodecopy(frame, dispatch);
@@ -1900,10 +1902,10 @@ test "EXTCODECOPY opcode - boundary conditions" {
         var frame = try createTestFrame(testing.allocator, host);
         defer frame.deinit(testing.allocator);
 
-        try frame.stack.push(0x77); // address with no code
-        try frame.stack.push(0); // destOffset
-        try frame.stack.push(0); // offset
         try frame.stack.push(4); // length
+        try frame.stack.push(0); // offset
+        try frame.stack.push(0); // destOffset
+        try frame.stack.push(0x77); // address with no code
 
         const dispatch = createMockDispatch();
         _ = try TestFrame.ContextHandlers.extcodecopy(frame, dispatch);
@@ -2312,9 +2314,9 @@ test "Memory copy operations - large offsets" {
 
     // Test memory limit with CALLDATACOPY
     const large_offset = @as(u256, test_config.memory_limit - 10);
-    try frame.stack.push(large_offset); // destOffset (near memory limit)
-    try frame.stack.push(0); // offset
     try frame.stack.push(32); // length (would exceed limit)
+    try frame.stack.push(0); // offset
+    try frame.stack.push(large_offset); // destOffset (near memory limit)
 
     const dispatch = createMockDispatch();
     const result = TestFrame.ContextHandlers.calldatacopy(frame, dispatch);

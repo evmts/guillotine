@@ -1,14 +1,14 @@
 const std = @import("std");
 const crypto = @import("crypto");
-const msmDiscount = @import("utils.zig").msmDiscount;
+const utils = @import("utils.zig");
 const PrecompileError = @import("common.zig").PrecompileError;
 const PrecompileResult = @import("common.zig").PrecompileResult;
 
 /// Gas costs for BLS12-381 G2 MSM
-pub const BASE_GAS: u64 = 45000;
-pub const MULTIPLIER: u64 = 55;
+/// EIP-2537 multiplication cost that MSM discounts apply to.
+pub const BASE_GAS: u64 = 22500;
 
-/// 0x10: BLS12_G2MSM - BLS12-381 G2 multi-scalar multiplication
+/// 0x0E: BLS12_G2MSM - BLS12-381 G2 multi-scalar multiplication
 pub fn execute(
     allocator: std.mem.Allocator,
     input: []const u8,
@@ -19,14 +19,14 @@ pub fn execute(
     }
 
     const k = input.len / 288;
-    const discount = msmDiscount(k);
-    const gas_cost = (BASE_GAS * k * discount) / 1000;
+    const gas_cost = utils.msmGas(k, BASE_GAS, utils.msmDiscountG2(k));
 
     if (gas_limit < gas_cost) {
         return error.OutOfGas;
     }
 
     const output = try allocator.alloc(u8, 256);
+    errdefer allocator.free(output);
     crypto.Crypto.bls12_381.g2Msm(input, output) catch {
         return error.InvalidPoint;
     };
@@ -63,7 +63,7 @@ test "bls12_g2_msm - single pair gas cost with discount" {
 
     const input = [_]u8{0} ** 288;
     const k = 1;
-    const discount = msmDiscount(k);
+    const discount = utils.msmDiscountG2(k);
     const expected_gas = (BASE_GAS * k * discount) / 1000;
 
     const result = execute(allocator, &input, 1000000);
@@ -84,10 +84,10 @@ test "bls12_g2_msm - two pairs discount tier" {
 
     const input = [_]u8{0} ** (288 * 2);
     const k = 2;
-    const discount = msmDiscount(k);
+    const discount = utils.msmDiscountG2(k);
     const expected_gas = (BASE_GAS * k * discount) / 1000;
 
-    try testing.expectEqual(@as(u64, 820), discount);
+    try testing.expectEqual(@as(u64, 1000), discount);
 
     const result = execute(allocator, &input, 1000000);
 
@@ -107,10 +107,10 @@ test "bls12_g2_msm - four pairs discount tier" {
 
     const input = [_]u8{0} ** (288 * 4);
     const k = 4;
-    const discount = msmDiscount(k);
+    const discount = utils.msmDiscountG2(k);
     const expected_gas = (BASE_GAS * k * discount) / 1000;
 
-    try testing.expectEqual(@as(u64, 580), discount);
+    try testing.expectEqual(@as(u64, 884), discount);
 
     const result = execute(allocator, &input, 1000000);
 
@@ -130,10 +130,10 @@ test "bls12_g2_msm - eight pairs discount tier" {
 
     const input = [_]u8{0} ** (288 * 8);
     const k = 8;
-    const discount = msmDiscount(k);
+    const discount = utils.msmDiscountG2(k);
     const expected_gas = (BASE_GAS * k * discount) / 1000;
 
-    try testing.expectEqual(@as(u64, 430), discount);
+    try testing.expectEqual(@as(u64, 796), discount);
 
     const result = execute(allocator, &input, 1000000);
 
@@ -153,10 +153,10 @@ test "bls12_g2_msm - sixteen pairs discount tier" {
 
     const input = [_]u8{0} ** (288 * 16);
     const k = 16;
-    const discount = msmDiscount(k);
+    const discount = utils.msmDiscountG2(k);
     const expected_gas = (BASE_GAS * k * discount) / 1000;
 
-    try testing.expectEqual(@as(u64, 320), discount);
+    try testing.expectEqual(@as(u64, 717), discount);
 
     const result = execute(allocator, &input, 1000000);
 
@@ -176,10 +176,10 @@ test "bls12_g2_msm - thirty-two pairs discount tier" {
 
     const input = [_]u8{0} ** (288 * 32);
     const k = 32;
-    const discount = msmDiscount(k);
+    const discount = utils.msmDiscountG2(k);
     const expected_gas = (BASE_GAS * k * discount) / 1000;
 
-    try testing.expectEqual(@as(u64, 250), discount);
+    try testing.expectEqual(@as(u64, 646), discount);
 
     const result = execute(allocator, &input, 1000000);
 
@@ -199,10 +199,10 @@ test "bls12_g2_msm - sixty-four pairs discount tier" {
 
     const input = [_]u8{0} ** (288 * 64);
     const k = 64;
-    const discount = msmDiscount(k);
+    const discount = utils.msmDiscountG2(k);
     const expected_gas = (BASE_GAS * k * discount) / 1000;
 
-    try testing.expectEqual(@as(u64, 200), discount);
+    try testing.expectEqual(@as(u64, 582), discount);
 
     const result = execute(allocator, &input, 1000000);
 
@@ -222,12 +222,15 @@ test "bls12_g2_msm - one hundred twenty-eight pairs discount tier" {
 
     const input = [_]u8{0} ** (288 * 128);
     const k = 128;
-    const discount = msmDiscount(k);
+    const discount = utils.msmDiscountG2(k);
     const expected_gas = (BASE_GAS * k * discount) / 1000;
 
-    try testing.expectEqual(@as(u64, 174), discount);
+    try testing.expectEqual(@as(u64, 524), discount);
+    // 128 * 22500 * 524 / 1000 = 1_509_120
+    try testing.expectEqual(@as(u64, 1_509_120), expected_gas);
+    try testing.expectError(error.OutOfGas, execute(allocator, &input, expected_gas - 1));
 
-    const result = execute(allocator, &input, 1000000);
+    const result = execute(allocator, &input, expected_gas);
 
     if (result) |res| {
         defer res.deinit(allocator);
@@ -245,7 +248,7 @@ test "bls12_g2_msm - out of gas" {
 
     const input = [_]u8{0} ** 288;
     const k = 1;
-    const discount = msmDiscount(k);
+    const discount = utils.msmDiscountG2(k);
     const gas_cost = (BASE_GAS * k * discount) / 1000;
 
     const result = execute(allocator, &input, gas_cost - 1);

@@ -138,4 +138,11 @@ test {
     _ = @import("fd_test.zig");
     _ = @import("fe_test.zig");
     _ = @import("ff_test.zig");
+    _ = @import("gas_accounting.zig");
+    _ = @import("eip7623_floor.zig");
+    _ = @import("gas_sweep.zig");
+    _ = @import("osaka_eips.zig");
+    _ = @import("static_jump_invalid.zig");
+    _ = @import("calldatacopy_e2e.zig");
+    _ = @import("create_nonce.zig");
 }

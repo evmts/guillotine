@@ -6,7 +6,7 @@ const PrecompileResult = @import("common.zig").PrecompileResult;
 /// Gas cost for BLS12-381 map field element to G1
 pub const GAS: u64 = 5500;
 
-/// 0x12: BLS12_MAP_FP_TO_G1 - BLS12-381 map field element to G1
+/// 0x10: BLS12_MAP_FP_TO_G1 - BLS12-381 map field element to G1
 pub fn execute(
     allocator: std.mem.Allocator,
     input: []const u8,
@@ -21,6 +21,7 @@ pub fn execute(
     }
 
     const output = try allocator.alloc(u8, 128);
+    errdefer allocator.free(output);
     crypto.Crypto.bls12_381.mapFpToG1(input, output) catch {
         return error.InvalidPoint;
     };

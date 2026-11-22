@@ -24,7 +24,7 @@ pub fn GetOpDataReturnType(
         .PC => struct { metadata: PcMetadata, next_handler: OpcodeHandler, next_cursor: Self },
         .PUSH1, .PUSH2, .PUSH3, .PUSH4, .PUSH5, .PUSH6, .PUSH7, .PUSH8 => struct { metadata: PushInlineMetadata, next_handler: OpcodeHandler, next_cursor: Self },
         .PUSH9, .PUSH10, .PUSH11, .PUSH12, .PUSH13, .PUSH14, .PUSH15, .PUSH16, .PUSH17, .PUSH18, .PUSH19, .PUSH20, .PUSH21, .PUSH22, .PUSH23, .PUSH24, .PUSH25, .PUSH26, .PUSH27, .PUSH28, .PUSH29, .PUSH30, .PUSH31, .PUSH32 => struct { metadata: PushPointerMetadata, next_handler: OpcodeHandler, next_cursor: Self },
-        .JUMPDEST => struct { metadata: JumpDestMetadata, next_handler: OpcodeHandler, next_cursor: Self },
+        .JUMPDEST, .BLOCK_BEGIN => struct { metadata: JumpDestMetadata, next_handler: OpcodeHandler, next_cursor: Self },
         .PUSH_ADD_INLINE, .PUSH_MUL_INLINE, .PUSH_DIV_INLINE, .PUSH_SUB_INLINE, .PUSH_AND_INLINE, .PUSH_OR_INLINE, .PUSH_XOR_INLINE, .PUSH_MLOAD_INLINE, .PUSH_MSTORE_INLINE, .PUSH_MSTORE8_INLINE => struct { metadata: PushInlineMetadata, next_handler: OpcodeHandler, next_cursor: Self },
         .JUMP_TO_STATIC_LOCATION, .JUMPI_TO_STATIC_LOCATION => struct { metadata: JumpStaticMetadata, next_handler: OpcodeHandler, next_cursor: Self },
         .PUSH_ADD_POINTER, .PUSH_MUL_POINTER, .PUSH_DIV_POINTER, .PUSH_SUB_POINTER, .PUSH_AND_POINTER, .PUSH_OR_POINTER, .PUSH_XOR_POINTER, .PUSH_MLOAD_POINTER, .PUSH_MSTORE_POINTER, .PUSH_MSTORE8_POINTER => struct { metadata: PushPointerMetadata, next_handler: OpcodeHandler, next_cursor: Self },
@@ -43,6 +43,7 @@ pub fn GetOpDataReturnType(
         .PUSH0_REVERT => struct { next_handler: OpcodeHandler, next_cursor: Self }, // No metadata
         .PUSH_ADD_DUP1 => struct { items: [*]const Item, next_handler: OpcodeHandler, next_cursor: Self }, // Push value item
         .MLOAD_SWAP1_DUP2 => struct { next_handler: OpcodeHandler, next_cursor: Self }, // No metadata
+        .INVALID_JUMP_TARGET => struct { next_handler: OpcodeHandler, next_cursor: Self }, // No metadata; terminal
         // Backward loop fusion: loop_dispatch (backward), exit_dispatch (forward)
         .BACKWARD_LOOP_JUMPI => struct { items: [*]const Item, next_handler: OpcodeHandler, next_cursor: Self },
         // All standard opcodes without metadata
@@ -88,7 +89,7 @@ pub inline fn getOpData(
             .next_handler = cursor[2].opcode_handler,
             .next_cursor = Self{ .cursor = cursor + 2 },
         },
-        .JUMPDEST => .{
+        .JUMPDEST, .BLOCK_BEGIN => .{
             .metadata = cursor[1].jump_dest,
             .next_handler = cursor[2].opcode_handler,
             .next_cursor = Self{ .cursor = cursor + 2 },
@@ -134,7 +135,7 @@ pub inline fn getOpData(
             .next_cursor = Self{ .cursor = cursor + 2 },
         },
         // New high-impact fusions
-        .DUP3_ADD_MSTORE, .SWAP1_DUP2_ADD, .CALLVALUE_CHECK, .PUSH0_REVERT, .MLOAD_SWAP1_DUP2 => .{
+        .DUP3_ADD_MSTORE, .SWAP1_DUP2_ADD, .CALLVALUE_CHECK, .PUSH0_REVERT, .MLOAD_SWAP1_DUP2, .INVALID_JUMP_TARGET => .{
             .next_handler = cursor[1].opcode_handler,
             .next_cursor = Self{ .cursor = cursor + 1 },
         },

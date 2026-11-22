@@ -1,7 +1,7 @@
 # BLS12-381 G2 Multi-Scalar Multiplication (MSM) Precompile Review
 
 ## Overview
-Implements EIP-2537 0x10: BLS12_G2MSM precompile for BLS12-381 G2 multi-scalar multiplication. Takes k pairs of G2 points and scalars (288 bytes each pair) and returns a single G2 point (256 bytes). Includes discount scaling for batched operations.
+Implements EIP-2537 0x0E: BLS12_G2MSM precompile for BLS12-381 G2 multi-scalar multiplication. Takes k pairs of G2 points and scalars (288 bytes each pair) and returns a single G2 point (256 bytes). Includes discount scaling for batched operations.
 
 ## Code Quality
 
@@ -73,14 +73,14 @@ Implements EIP-2537 0x10: BLS12_G2MSM precompile for BLS12-381 G2 multi-scalar m
 ## Gas Calculation
 
 ### Specification Compliance
-- Base gas: **45000** (line 8) - matches G2MUL base cost ✅
+- Base gas: **22500** - the EIP-2537 G2 multiplication cost; discount table max 524
 - Multiplier: **55** (line 9) - **UNUSED CONSTANT**
 - Formula: `(BASE_GAS * k * discount) / 1000` (line 23)
 
-### Discount Tiers
-Uses same msmDiscount function as G1_MSM:
-- Verified in tests (lines 90, 113, 136, 159, 182, 205, 228)
-- All discount values match EIP-2537 ✅
+### Discount Table (utils.zig)
+`utils.msmDiscountG2(k)` reads the final EIP-2537 G2 table (128 entries, k = 1..128).
+For k > 128 it stays at max_discount = 524. `utils.msmGas` computes
+`k * BASE_GAS * discount(k) // 1000` and saturates instead of overflowing.
 
 ### Issues
 1. **MULTIPLIER constant unused** (line 9): Should be 55 per EIP-2537 but never referenced

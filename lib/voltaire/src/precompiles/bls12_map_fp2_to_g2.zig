@@ -4,9 +4,9 @@ const PrecompileError = @import("common.zig").PrecompileError;
 const PrecompileResult = @import("common.zig").PrecompileResult;
 
 /// Gas cost for BLS12-381 map field element to G2
-pub const GAS: u64 = 75000;
+pub const GAS: u64 = 23800;
 
-/// 0x13: BLS12_MAP_FP2_TO_G2 - BLS12-381 map field element to G2
+/// 0x11: BLS12_MAP_FP2_TO_G2 - BLS12-381 map field element to G2
 pub fn execute(
     allocator: std.mem.Allocator,
     input: []const u8,
@@ -21,6 +21,7 @@ pub fn execute(
     }
 
     const output = try allocator.alloc(u8, 256);
+    errdefer allocator.free(output);
     crypto.Crypto.bls12_381.mapFp2ToG2(input, output) catch {
         return error.InvalidPoint;
     };
@@ -257,7 +258,7 @@ test "map fp2 to g2 - test vector 3" {
 
 test "map fp2 to g2 - gas cost validation" {
     // Verify the gas cost constant matches EIP-2537 specification
-    try std.testing.expectEqual(@as(u64, 75000), GAS);
+    try std.testing.expectEqual(@as(u64, 23800), GAS);
 }
 
 test "map fp2 to g2 - output size validation" {

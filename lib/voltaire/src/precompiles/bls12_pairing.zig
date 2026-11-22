@@ -4,16 +4,17 @@ const PrecompileError = @import("common.zig").PrecompileError;
 const PrecompileResult = @import("common.zig").PrecompileResult;
 
 /// Gas costs for BLS12-381 pairing
-pub const BASE_GAS: u64 = 65000;
-pub const PER_PAIR_GAS: u64 = 43000;
+pub const BASE_GAS: u64 = 37700;
+pub const PER_PAIR_GAS: u64 = 32600;
 
-/// 0x11: BLS12_PAIRING - BLS12-381 pairing check
+/// 0x0F: BLS12_PAIRING_CHECK - BLS12-381 pairing check
 pub fn execute(
     allocator: std.mem.Allocator,
     input: []const u8,
     gas_limit: u64,
 ) PrecompileError!PrecompileResult {
-    if (input.len % 384 != 0) {
+    // EIP-2537: empty input is an error.
+    if (input.len % 384 != 0 or input.len == 0) {
         return error.InvalidInput;
     }
 
@@ -25,6 +26,7 @@ pub fn execute(
     }
 
     const output = try allocator.alloc(u8, 32);
+    errdefer allocator.free(output);
     @memset(output, 0);
 
     const success = crypto.Crypto.bls12_381.pairingCheck(input) catch {
@@ -45,28 +47,11 @@ pub fn execute(
 // Tests
 // ============================================================================
 
-test "bls12_pairing - out of gas" {
-    // Empty input (0 pairs) requires BASE_GAS
+test "bls12_pairing - empty input is an error" {
+    // EIP-2537: "must return an error if the input is empty", whatever gas is supplied.
     const input = [_]u8{};
-    const result = execute(std.testing.allocator, &input, BASE_GAS - 1);
-    try std.testing.expectError(error.OutOfGas, result);
-}
-
-test "bls12_pairing - exact gas for zero pairs" {
-    // Empty input (0 pairs) - should succeed with pairing result of 1
-    const input = [_]u8{};
-    const result = execute(std.testing.allocator, &input, BASE_GAS);
-
-    // Currently returns error.InvalidPairing due to stub implementation
-    if (result) |res| {
-        defer std.testing.allocator.free(res.output);
-        try std.testing.expectEqual(BASE_GAS, res.gas_used);
-        try std.testing.expectEqual(@as(usize, 32), res.output.len);
-        // Empty input should return success (1)
-        try std.testing.expectEqual(@as(u8, 1), res.output[31]);
-    } else |err| {
-        try std.testing.expectEqual(error.InvalidPairing, err);
-    }
+    try std.testing.expectError(error.InvalidInput, execute(std.testing.allocator, &input, 1_000_000));
+    try std.testing.expectError(error.InvalidInput, execute(std.testing.allocator, &input, 0));
 }
 
 test "bls12_pairing - single pair exact gas" {
@@ -145,46 +130,28 @@ test "bls12_pairing - invalid input length 385" {
 
 test "bls12_pairing - gas cost constants validation" {
     // Verify gas cost constants match EIP-2537 specification
-    try std.testing.expectEqual(@as(u64, 65000), BASE_GAS);
-    try std.testing.expectEqual(@as(u64, 43000), PER_PAIR_GAS);
+    try std.testing.expectEqual(@as(u64, 37700), BASE_GAS);
+    try std.testing.expectEqual(@as(u64, 32600), PER_PAIR_GAS);
 }
 
 test "bls12_pairing - gas cost calculation" {
-    // Test gas cost formula: BASE_GAS + k * PER_PAIR_GAS
-    // where k is the number of pairs
-
-    // 0 pairs
-    try std.testing.expectEqual(@as(u64, 65000), BASE_GAS + 0 * PER_PAIR_GAS);
-
-    // 1 pair
-    try std.testing.expectEqual(@as(u64, 108000), BASE_GAS + 1 * PER_PAIR_GAS);
-
-    // 2 pairs
-    try std.testing.expectEqual(@as(u64, 151000), BASE_GAS + 2 * PER_PAIR_GAS);
-
-    // 5 pairs
-    try std.testing.expectEqual(@as(u64, 280000), BASE_GAS + 5 * PER_PAIR_GAS);
+    // EIP-2537: 32600 * k + 37700
+    try std.testing.expectEqual(@as(u64, 70300), BASE_GAS + 1 * PER_PAIR_GAS);
+    try std.testing.expectEqual(@as(u64, 102900), BASE_GAS + 2 * PER_PAIR_GAS);
+    try std.testing.expectEqual(@as(u64, 200700), BASE_GAS + 5 * PER_PAIR_GAS);
 }
 
 test "bls12_pairing - output format" {
-    // Output should be 32 bytes with result in last byte
-    const input = [_]u8{};
-    const result = execute(std.testing.allocator, &input, BASE_GAS);
-
-    if (result) |res| {
-        defer std.testing.allocator.free(res.output);
-        try std.testing.expectEqual(@as(usize, 32), res.output.len);
-
-        // First 31 bytes should be zero
-        for (res.output[0..31]) |byte| {
-            try std.testing.expectEqual(@as(u8, 0), byte);
-        }
-
-        // Last byte should be 0 or 1
-        try std.testing.expect(res.output[31] == 0 or res.output[31] == 1);
-    } else |_| {
-        // Stub implementation - test will pass once implemented
+    // One pair of points at infinity: e(O, O) = 1, so the check succeeds.
+    const input = [_]u8{0} ** 384;
+    const res = try execute(std.testing.allocator, &input, BASE_GAS + PER_PAIR_GAS);
+    defer std.testing.allocator.free(res.output);
+    try std.testing.expectEqual(BASE_GAS + PER_PAIR_GAS, res.gas_used);
+    try std.testing.expectEqual(@as(usize, 32), res.output.len);
+    for (res.output[0..31]) |byte| {
+        try std.testing.expectEqual(@as(u8, 0), byte);
     }
+    try std.testing.expectEqual(@as(u8, 1), res.output[31]);
 }
 
 test "bls12_pairing - large number of pairs gas calculation" {
@@ -226,7 +193,7 @@ test "bls12_pairing - bilinearity property structure" {
 
 test "bls12_pairing - output size consistency" {
     // Verify output is always 32 bytes regardless of input size
-    const test_sizes = [_]usize{ 0, 384, 768, 1152 };
+    const test_sizes = [_]usize{ 384, 768, 1152 };
 
     for (test_sizes) |size| {
         const input = try std.testing.allocator.alloc(u8, size);

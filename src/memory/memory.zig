@@ -99,7 +99,8 @@ pub fn Memory(config: MemoryConfig) type {
 
         pub inline fn ensure_capacity(self: *Self, allocator: std.mem.Allocator, new_size: u32) !void {
             const checkpoint_usize = @as(usize, self.checkpoint);
-            const new_size_usize = @as(usize, new_size);
+            // EVM memory only ever grows in whole 32-byte words (MSIZE is a multiple of 32).
+            const new_size_usize = (@as(usize, new_size) + 31) & ~@as(usize, 31);
             const required_total = checkpoint_usize + new_size_usize;
             if (required_total > MEMORY_LIMIT) {
                 @branchHint(.unlikely);

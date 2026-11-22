@@ -36,8 +36,9 @@
 //! - **MERGE** (September 2022): Proof of Stake transition
 //! - **SHANGHAI** (April 2023): Added PUSH0 opcode
 //! - **CANCUN** (March 2024): Proto-danksharding with blobs
-//! - **PRAGUE** (May 2025): BLS12-381 precompiles, EIP-7702
-//! - **OSAKA** (TBD): ModExp improvements
+//! - **PRAGUE** (May 2025): Pectra; BLS12-381 precompiles, EIP-7702
+//! - **OSAKA** (December 2025): Fusaka; PeerDAS, CLZ, MODEXP repricing, tx gas cap
+//! - **AMSTERDAM** (TBD, targeting early 2027): Glamsterdam
 
 /// Ethereum hardfork identifiers.
 ///
@@ -108,16 +109,24 @@ pub const Hardfork = enum {
     /// EIP-7251: Increase max effective balance.
     /// EIP-7002: Execution layer triggerable exits.
     PRAGUE,
-    /// Osaka fork (TBD).
-    /// EIP-7883: ModExp gas increase.
-    /// EIP-7823: ModExp upper bounds.
-    /// EIP-7825: Transaction gas limit cap.
-    /// EIP-7934: Block RLP limit.
+    /// Osaka execution-layer half of Fusaka (December 2025).
+    /// EIP-7594: PeerDAS data availability sampling.
+    /// EIP-7823: MODEXP 1024-byte operand bound.
+    /// EIP-7825: Transaction gas limit cap (2^24).
+    /// EIP-7883: MODEXP gas repricing.
+    /// EIP-7892: Blob-parameter-only (BPO) forks.
+    /// EIP-7918: Blob base fee bounded by execution cost.
+    /// EIP-7934: RLP execution block size limit.
+    /// EIP-7939: CLZ opcode.
+    /// EIP-7951: P256VERIFY precompile.
     OSAKA,
+    /// Amsterdam execution-layer half of Glamsterdam (TBD, targeting early 2027).
+    /// No EIPs are scheduled beyond Osaka's set yet.
+    AMSTERDAM,
 
-    /// Default hardfork for new chains.
-    /// Set to latest stable fork (currently PRAGUE).
-    pub const DEFAULT = Hardfork.PRAGUE;
+    /// Default hardfork for new chains: the latest fork live on mainnet.
+    /// Osaka (Fusaka) activated on mainnet on December 3, 2025.
+    pub const DEFAULT = Hardfork.OSAKA;
 
     /// Convert hardfork to its numeric representation for version comparisons
     pub fn toInt(self: Hardfork) u32 {
@@ -132,6 +141,49 @@ pub const Hardfork = enum {
     /// Check if this hardfork is before the specified version
     pub fn isBefore(self: Hardfork, target: Hardfork) bool {
         return self.toInt() < target.toInt();
+    }
+
+    /// Mainnet activation block number of this hardfork.
+    /// Returns null if the hardfork has not been scheduled on mainnet.
+    pub fn mainnetActivationBlock(self: Hardfork) ?u64 {
+        return switch (self) {
+            .FRONTIER => 0,
+            .HOMESTEAD => 1150000,
+            .DAO => 1920000,
+            .TANGERINE_WHISTLE => 2463000,
+            .SPURIOUS_DRAGON => 2675000,
+            .BYZANTIUM => 4370000,
+            .CONSTANTINOPLE => 7280000,
+            .PETERSBURG => 7280000,
+            .ISTANBUL => 9069000,
+            .MUIR_GLACIER => 9200000,
+            .BERLIN => 12244000,
+            .LONDON => 12965000,
+            .ARROW_GLACIER => 13773000,
+            .GRAY_GLACIER => 15050000,
+            .MERGE => 15537394,
+            .SHANGHAI => 17034870,
+            .CANCUN => 19426587,
+            .PRAGUE => 22431084,
+            .OSAKA => 23935694,
+            .AMSTERDAM => null,
+        };
+    }
+
+    /// Mainnet activation timestamp of a post-Merge hardfork.
+    /// Returns null for block-activated (pre-Merge) forks and unscheduled forks.
+    pub fn mainnetActivationTimestamp(self: Hardfork) ?u64 {
+        return switch (self) {
+            .FRONTIER, .HOMESTEAD, .DAO, .TANGERINE_WHISTLE, .SPURIOUS_DRAGON, .BYZANTIUM, .CONSTANTINOPLE, .PETERSBURG, .ISTANBUL, .MUIR_GLACIER, .BERLIN, .LONDON, .ARROW_GLACIER, .GRAY_GLACIER => null,
+            .MERGE => 1663224162,
+            .SHANGHAI => 1681338455,
+            .CANCUN => 1710338135,
+            // Pectra: beacon epoch 364032.
+            .PRAGUE => 1746612311,
+            // Fusaka: beacon epoch 411392.
+            .OSAKA => 1764798551,
+            .AMSTERDAM => null,
+        };
     }
 
     /// Parse hardfork from string name (case-insensitive)
@@ -169,6 +221,7 @@ pub const Hardfork = enum {
         if (std.ascii.eqlIgnoreCase(clean_name, "Cancun")) return .CANCUN;
         if (std.ascii.eqlIgnoreCase(clean_name, "Prague")) return .PRAGUE;
         if (std.ascii.eqlIgnoreCase(clean_name, "Osaka")) return .OSAKA;
+        if (std.ascii.eqlIgnoreCase(clean_name, "Amsterdam")) return .AMSTERDAM;
 
         return null;
     }
@@ -331,15 +384,15 @@ test "ForkTransition getActiveFork by timestamp" {
 }
 
 test "parseNumber" {
-    try testing.expectEqual(@as(?u64, 42), parseNumber("42"));
-    try testing.expectEqual(@as(?u64, 15000), parseNumber("15k"));
-    try testing.expectEqual(@as(?u64, 1000), parseNumber("1k"));
-    try testing.expectEqual(@as(?u64, null), parseNumber(""));
-    try testing.expectEqual(@as(?u64, null), parseNumber("invalid"));
+    try testing.expectEqual(@as(u64, 42), try parseNumber("42"));
+    try testing.expectEqual(@as(u64, 15000), try parseNumber("15k"));
+    try testing.expectEqual(@as(u64, 1000), try parseNumber("1k"));
+    try testing.expectError(ParseNumberError.EmptyString, parseNumber(""));
+    try testing.expectError(ParseNumberError.InvalidFormat, parseNumber("invalid"));
 }
 
 test "Hardfork DEFAULT constant" {
-    try testing.expectEqual(Hardfork.PRAGUE, Hardfork.DEFAULT);
+    try testing.expectEqual(Hardfork.OSAKA, Hardfork.DEFAULT);
 }
 
 test "all hardfork variants exist" {
@@ -384,6 +437,7 @@ test "all hardfork variants exist" {
     try testing.expectEqual(@as(u32, 16), cancun.toInt());
     try testing.expectEqual(@as(u32, 17), prague.toInt());
     try testing.expectEqual(@as(u32, 18), osaka.toInt());
+    try testing.expectEqual(@as(u32, 19), Hardfork.AMSTERDAM.toInt());
 }
 
 test "hardfork ordering is sequential" {
@@ -406,6 +460,7 @@ test "hardfork ordering is sequential" {
     try testing.expect(Hardfork.SHANGHAI.isBefore(.CANCUN));
     try testing.expect(Hardfork.CANCUN.isBefore(.PRAGUE));
     try testing.expect(Hardfork.PRAGUE.isBefore(.OSAKA));
+    try testing.expect(Hardfork.OSAKA.isBefore(.AMSTERDAM));
 }
 
 test "isAtLeast with same hardfork" {
@@ -480,6 +535,7 @@ test "fromString all hardforks" {
     try testing.expectEqual(Hardfork.CANCUN, Hardfork.fromString("Cancun").?);
     try testing.expectEqual(Hardfork.PRAGUE, Hardfork.fromString("Prague").?);
     try testing.expectEqual(Hardfork.OSAKA, Hardfork.fromString("Osaka").?);
+    try testing.expectEqual(Hardfork.AMSTERDAM, Hardfork.fromString("Amsterdam").?);
 }
 
 test "fromString aliases" {
@@ -693,6 +749,7 @@ test "hardfork comparison chain" {
         .CANCUN,
         .PRAGUE,
         .OSAKA,
+        .AMSTERDAM,
     };
 
     // Each fork should be before all later forks
@@ -733,4 +790,29 @@ test "toInt consistency" {
 
     // Verify ordering through toInt
     try testing.expect(frontier.toInt() < osaka.toInt());
+}
+
+test "mainnet activation of Prague, Osaka and Amsterdam" {
+    try testing.expectEqual(@as(?u64, 22431084), Hardfork.PRAGUE.mainnetActivationBlock());
+    try testing.expectEqual(@as(?u64, 1746612311), Hardfork.PRAGUE.mainnetActivationTimestamp());
+    try testing.expectEqual(@as(?u64, 23935694), Hardfork.OSAKA.mainnetActivationBlock());
+    try testing.expectEqual(@as(?u64, 1764798551), Hardfork.OSAKA.mainnetActivationTimestamp());
+    try testing.expectEqual(@as(?u64, null), Hardfork.AMSTERDAM.mainnetActivationBlock());
+    try testing.expectEqual(@as(?u64, null), Hardfork.AMSTERDAM.mainnetActivationTimestamp());
+}
+
+test "mainnet activations are monotonic for every scheduled fork" {
+    var previous_block: u64 = 0;
+    var previous_time: u64 = 0;
+    inline for (std.meta.fields(Hardfork)) |field| {
+        const fork: Hardfork = @enumFromInt(field.value);
+        if (fork.mainnetActivationBlock()) |block| {
+            try testing.expect(block >= previous_block);
+            previous_block = block;
+        }
+        if (fork.mainnetActivationTimestamp()) |time| {
+            try testing.expect(time > previous_time);
+            previous_time = time;
+        }
+    }
 }

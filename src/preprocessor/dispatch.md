@@ -236,10 +236,10 @@ if (min_required < min_stack) {
 - Stack effect validation
 - Jump destination validation
 - Gas overflow protection (saturating arithmetic)
+- Static jumps to a non-JUMPDEST (or beyond `PcType`) never abort preprocessing: they resolve to the `INVALID_JUMP_TARGET` item, which raises `InvalidJump` only if the jump is taken (`test/evm/opcodes/static_jump_invalid.zig`)
 
 **Gaps**:
 - No explicit validation of bytecode size before processing
-- Static jump resolution could fail with crafted bytecode (line 995: `return error.InvalidStaticJump`)
 - No rate limiting or timeout mechanism for preprocessing
 
 **Recommendation**:

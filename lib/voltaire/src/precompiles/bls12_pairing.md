@@ -1,7 +1,7 @@
 # BLS12-381 Pairing Check Precompile Review
 
 ## Overview
-Implements EIP-2537 0x11: BLS12_PAIRING precompile for BLS12-381 pairing check. Takes k pairs of (G1, G2) points (384 bytes per pair: 128 bytes G1 + 256 bytes G2) and returns a 32-byte result (1 for success, 0 for failure). Verifies e(P1, Q1) * e(P2, Q2) * ... * e(Pk, Qk) = 1.
+Implements EIP-2537 0x0F: BLS12_PAIRING_CHECK precompile for BLS12-381 pairing check. Takes k pairs of (G1, G2) points (384 bytes per pair: 128 bytes G1 + 256 bytes G2) and returns a 32-byte result (1 for success, 0 for failure). Verifies e(P1, Q1) * e(P2, Q2) * ... * e(Pk, Qk) = 1.
 
 ## Code Quality
 
@@ -47,7 +47,7 @@ Implements EIP-2537 0x11: BLS12_PAIRING precompile for BLS12-381 pairing check. 
    - Not multiple of 384 (383, 1, 385 bytes)
 
 3. **Gas cost validation tests** (3 tests)
-   - Gas constants match spec (65000, 43000)
+   - Gas constants match final spec (37700 base, 32600 per pair)
    - Gas calculation formula verification
    - Large number of pairs gas calculation
 
@@ -89,23 +89,23 @@ Implements EIP-2537 0x11: BLS12_PAIRING precompile for BLS12-381 pairing check. 
 ## Gas Calculation
 
 ### Specification Compliance
-- Base gas: **65000** (line 7)
-- Per-pair gas: **43000** (line 8)
+- Base gas: **37700** (line 7)
+- Per-pair gas: **32600** (line 8)
 - Formula: `BASE_GAS + PER_PAIR_GAS * k` (line 21)
 - Matches EIP-2537 specification: ✅ CORRECT
 
 ### Gas Scaling
 Test verification (lines 147-167):
-- 0 pairs: 65000
-- 1 pair: 108000 (65000 + 43000)
-- 2 pairs: 151000 (65000 + 2*43000)
-- 5 pairs: 280000 (65000 + 5*43000)
+- 0 pairs: error (empty input is invalid)
+- 1 pair: 70300 (37700 + 32600)
+- 2 pairs: 102900 (37700 + 2*32600)
+- 5 pairs: 200700 (37700 + 5*32600)
 
 ✅ All correct
 
 ### Issues
 1. **Integer overflow risk**: `PER_PAIR_GAS * k` could overflow for extremely large k
-   - For k > 2^64/43000 ≈ 4.3×10^14: would overflow
+   - For k > 2^64/32600 ≈ 4.3×10^14: would overflow
    - Gas limit prevents this in practice
    - Should add bounds check or use checked arithmetic
 

@@ -97,6 +97,10 @@ pub fn Evm(config: EvmConfig) type {
         access_list: AccessList, // ~40 bytes (2 hashmaps)
         /// Current snapshot ID for the active call frame
         current_snapshot_id: Journal.SnapshotIdType, // 1-2 bytes (u8 or u16)
+        /// Set by `call()` after it increments the transaction sender's nonce. A top-level
+        /// CREATE transaction must derive its address from the nonce before that increment
+        /// and must not increment it again; `beginCreate` consumes the flag.
+        tx_sender_nonce_incremented: bool,
         /// Gas refund counter for SSTORE operations
         gas_refund_counter: u64, // 8 bytes
 
@@ -190,6 +194,7 @@ pub fn Evm(config: EvmConfig) type {
                 .database = database orelse return error.DatabaseRequired,
                 .access_list = access_list,
                 .current_snapshot_id = 0,
+                .tx_sender_nonce_incremented = false,
                 .gas_refund_counter = 0,
                 .journal = try Journal.init(allocator),
                 .logs = std.ArrayList(@import("frame/call_result.zig").Log).empty,
@@ -513,6 +518,7 @@ pub fn Evm(config: EvmConfig) type {
                 }
                 // Reset snapshot ID
                 self.current_snapshot_id = 0;
+                self.tx_sender_nonce_incremented = false;
                 // Reset arena allocator but retain grown capacity
                 // This prevents memory buildup while keeping the grown capacity for better performance
                 // on subsequent transactions that need similar memory amounts
@@ -543,6 +549,26 @@ pub fn Evm(config: EvmConfig) type {
                 return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
             };
 
+            // EIP-2929 (Berlin+): exactly the precompiles active in this fork start warm.
+            // An address not yet active (e.g. 0x0A before Cancun, 0x100 before Osaka) stays
+            // cold. Final EIP-2537 ends at 0x11; 0x100 is Osaka's P256VERIFY (EIP-7951).
+            if (comptime config.eips.hardfork.isAtLeast(.BERLIN)) {
+                const last = comptime precompiles.lastContiguousPrecompile(config.eips.hardfork);
+                var precompile_index: u16 = 0x01;
+                while (precompile_index <= last) : (precompile_index += 1) {
+                    self.warmPrecompile(primitives.Address.fromU256(precompile_index)) catch |err| {
+                        log.err("Failed to pre-warm precompile: {s}", .{@errorName(err)});
+                        return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                    };
+                }
+                if (comptime config.eips.hardfork.isAtLeast(.OSAKA)) {
+                    self.warmPrecompile(precompiles.P256VERIFY_ADDRESS) catch |err| {
+                        log.err("Failed to pre-warm precompile: {s}", .{@errorName(err)});
+                        return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                    };
+                }
+            }
+
             const gas_limit = params.getGas();
             if (comptime !config.disable_gas_checks) {
                 if (gas_limit == 0) return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
@@ -559,6 +585,11 @@ pub fn Evm(config: EvmConfig) type {
                 if (gas_limit < initial_gas_cost or gas_limit < floor_gas_cost) {
                     return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
                 }
+                // EIP-7825: a transaction above TX_GAS_LIMIT_CAP is invalid; reject before nonce increment.
+                config.eips.validate_transaction_gas_limit(gas_limit) catch |err| {
+                    log.debug("Transaction rejected: {s}", .{@errorName(err)});
+                    return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                };
             }
             const execution_gas_limit = gas_limit - initial_gas_cost;
 
@@ -621,6 +652,7 @@ pub fn Evm(config: EvmConfig) type {
                 self.database.set_account(self.origin.bytes, origin_account) catch {
                     return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
                 };
+                self.tx_sender_nonce_incremented = true;
             }
 
             var modified_params = params;
@@ -642,9 +674,10 @@ pub fn Evm(config: EvmConfig) type {
                 self.gas_refund_counter = 0;
             }
 
-            // EIP-7623: charge at least the calldata floor gas.
+            // EIP-7623: gas_used = max(execution gas after refunds, floor gas).
+            // The floor applies to every included transaction: success, revert or exceptional halt.
             var gas_consumed = gas_limit - result.gas_left;
-            if (result.success and gas_consumed < floor_gas_cost) {
+            if (gas_consumed < floor_gas_cost) {
                 gas_consumed = floor_gas_cost;
                 if (comptime !config.disable_gas_checks) {
                     result.gas_left = gas_limit - floor_gas_cost;
@@ -965,7 +998,7 @@ pub fn Evm(config: EvmConfig) type {
 
             // Get contract code (from delegated address if applicable)
             // log.debug("Attempting to get code for address: {x}", .{code_address.bytes});
-            const code = self.database.get_code_by_address(code_address.bytes) catch |err| {
+            const code = self.codeAt(code_address) catch |err| {
                 // log.debug("Failed to get code for address {x}: {}", .{ code_address.bytes, err });
                 // Don't use error_info with string literals to avoid freeing them
                 // Just log the error and return a failure without error_info
@@ -1080,7 +1113,22 @@ pub fn Evm(config: EvmConfig) type {
                 }
             }
 
-            const code = try self.database.get_code_by_address(params.to.bytes);
+            // CALLCODE runs the code at `to` in the caller's context; when `to` is a
+            // precompile, that code is the precompile. A failed precompile consumes all of
+            // the gas it was given, exactly like CALL.
+            if (config.enable_precompiles and precompiles.isPrecompile(params.to, config.eips.hardfork)) {
+                const result = self.executePrecompileInline(params.to, params.input, params.gas, self.is_static_context(), snapshot_id) catch
+                    (CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable);
+                if (result.success) {
+                    try self.database.commit_snapshot(db_snapshot_id);
+                } else {
+                    self.journal.revert_to_snapshot(snapshot_id);
+                    try self.database.revert_to_snapshot(db_snapshot_id);
+                }
+                return result;
+            }
+
+            const code = try self.codeAt(params.to);
             if (code.len == 0) {
                 @branchHint(.unlikely);
                 // Empty code, commit snapshot
@@ -1226,6 +1274,38 @@ pub fn Evm(config: EvmConfig) type {
             }
         }
 
+        /// True for the transaction's own creation, whose sender nonce `call()` already
+        /// incremented and whose intrinsic gas already covered CreateGas and initcode words.
+        /// Consumes the flag, so only the first top-level creation qualifies.
+        fn takeTransactionCreate(self: *Self, caller: primitives.Address) bool {
+            const is_transaction = self.tx_sender_nonce_incremented and self.depth == 0 and
+                std.mem.eql(u8, &caller.bytes, &self.origin.bytes);
+            self.tx_sender_nonce_incremented = false;
+            return is_transaction;
+        }
+
+        /// Sender-side steps that precede the creation snapshot (execution-specs
+        /// `generic_create`). Returns the nonce that derives the CREATE address, or null
+        /// when the creation fails before touching state (insufficient balance, or nonce
+        /// at the EIP-2681 limit). The increment is recorded in the caller's snapshot, so
+        /// it survives a failed or colliding creation and is undone only if the caller
+        /// itself reverts. A creation transaction uses the nonce before `call()`'s
+        /// increment and is not incremented again.
+        fn beginCreate(self: *Self, caller: primitives.Address, value: u256, is_transaction: bool) !?u64 {
+            var account = (try self.database.get_account(caller.bytes)) orelse Account.zero();
+            if (is_transaction) {
+                if (account.nonce == 0) return error.TransactionNonceNotIncremented;
+                return account.nonce - 1;
+            }
+            if (account.balance < value) return null;
+            if (account.nonce == std.math.maxInt(u64)) return null;
+            try self.journal.record_nonce_change(self.current_snapshot_id, caller, account.nonce);
+            const creation_nonce = account.nonce;
+            account.nonce += 1;
+            try self.database.set_account(caller.bytes, account);
+            return creation_nonce;
+        }
+
         /// Execute CREATE operation (inlined)
         fn executeCreate(self: *Self, params: struct {
             caller: primitives.Address,
@@ -1233,57 +1313,47 @@ pub fn Evm(config: EvmConfig) type {
             init_code: []const u8,
             gas: u64,
         }) !CallResult {
-            const snapshot_id = try self.journal.create_snapshot();
-            const db_snapshot_id = try self.database.create_snapshot();
-
-            var caller_account = self.database.get_account(params.caller.bytes) catch {
-                self.journal.revert_to_snapshot(snapshot_id);
-                try self.database.revert_to_snapshot(db_snapshot_id);
-                return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
-            } orelse Account.zero();
-
-            if (caller_account.balance < params.value) {
-                self.journal.revert_to_snapshot(snapshot_id);
-                try self.database.revert_to_snapshot(db_snapshot_id);
-                return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
-            }
-
-            const contract_address = try primitives.Address.getContractAddress(self.getCallArenaAllocator(), params.caller, caller_account.nonce);
-
-            // Always increment nonce for CREATE operations
-            try self.journal.record_nonce_change(snapshot_id, params.caller, caller_account.nonce);
-            caller_account.nonce += 1;
-            self.database.set_account(params.caller.bytes, caller_account) catch {
-                self.journal.revert_to_snapshot(snapshot_id);
-                try self.database.revert_to_snapshot(db_snapshot_id);
-                return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
-            };
-
-            const existed_before = self.database.account_exists(contract_address.bytes);
-            if (existed_before) {
-                const existing = try self.database.get_account(contract_address.bytes);
-                if (existing != null and !std.mem.eql(u8, &existing.?.code_hash, &[_]u8{0} ** 32)) {
-                    self.journal.revert_to_snapshot(snapshot_id);
-                    try self.database.revert_to_snapshot(db_snapshot_id);
-                    return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
-                }
-            }
+            const is_transaction = self.takeTransactionCreate(params.caller);
             const GasConstants = primitives.GasConstants;
             // EIP-3860 (Shanghai+): init code costs 2 gas per 32-byte word, on top of CreateGas.
             const init_words_c: u64 = (@as(u64, @intCast(params.init_code.len)) + 31) / 32;
             const initcode_word_cost_c: u64 = if (config.eips.hardfork.isAtLeast(.SHANGHAI)) init_words_c * GasConstants.InitcodeWordGas else 0;
-            const create_overhead = GasConstants.CreateGas + initcode_word_cost_c;
+            // A CREATE transaction already paid CreateGas and initcode words as intrinsic gas.
+            // An opcode CREATE that cannot pay them fails before the sender nonce moves.
+            const create_overhead = if (is_transaction) 0 else GasConstants.CreateGas + initcode_word_cost_c;
             if (params.gas < create_overhead) {
-                self.journal.revert_to_snapshot(snapshot_id);
-                try self.database.revert_to_snapshot(db_snapshot_id);
                 return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
             }
             const remaining_gas: u64 = params.gas - create_overhead;
+            // EIP-150 (Tangerine Whistle+): an opcode creation forwards all but 1/64 of the
+            // remaining gas; the caller keeps the rest whatever the creation's outcome.
+            const retained: u64 = if (!is_transaction and config.eips.hardfork.isAtLeast(.TANGERINE_WHISTLE)) remaining_gas / 64 else 0;
+            const forwarded: u64 = remaining_gas - retained;
+
+            // execution-specs generic_create: a creation refused for balance or nonce limit
+            // returns the gas it would have forwarded; the CREATE charge stays spent.
+            const creation_nonce = (try self.beginCreate(params.caller, params.value, is_transaction)) orelse
+                return CallResult.failure(self.getCallArenaAllocator(), remaining_gas) catch unreachable;
+            const contract_address = try primitives.Address.getContractAddress(self.getCallArenaAllocator(), params.caller, creation_nonce);
+
+            const snapshot_id = try self.journal.create_snapshot();
+            const db_snapshot_id = try self.database.create_snapshot();
+
+            const existed_before = self.database.account_exists(contract_address.bytes);
+            if (existed_before) {
+                const existing = try self.database.get_account(contract_address.bytes);
+                // EIP-684: an address with code or a nonzero nonce cannot be created again.
+                if (existing != null and (existing.?.nonce != 0 or !std.mem.eql(u8, &existing.?.code_hash, &[_]u8{0} ** 32))) {
+                    self.journal.revert_to_snapshot(snapshot_id);
+                    try self.database.revert_to_snapshot(db_snapshot_id);
+                    return CallResult.failure(self.getCallArenaAllocator(), retained) catch unreachable;
+                }
+            }
             var result = self.executeCreateInternal(.{
                 .caller = params.caller,
                 .value = params.value,
                 .init_code = params.init_code,
-                .gas_left = remaining_gas,
+                .gas_left = forwarded,
                 .contract_address = contract_address,
                 .snapshot_id = snapshot_id,
                 .db_snapshot_id = db_snapshot_id,
@@ -1291,9 +1361,10 @@ pub fn Evm(config: EvmConfig) type {
             }) catch {
                 self.journal.revert_to_snapshot(snapshot_id);
                 try self.database.revert_to_snapshot(db_snapshot_id);
-                return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                return CallResult.failure(self.getCallArenaAllocator(), retained) catch unreachable;
             };
 
+            result.gas_left += retained;
             result.created_address = contract_address;
             return result;
         }
@@ -1312,31 +1383,37 @@ pub fn Evm(config: EvmConfig) type {
                 return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
             }
 
-            const snapshot_id = try self.journal.create_snapshot();
-            const db_snapshot_id = try self.database.create_snapshot();
-
-            var caller_account = self.database.get_account(params.caller.bytes) catch {
-                log.debug("CREATE2: get_account failed", .{});
-                self.journal.revert_to_snapshot(snapshot_id);
-                try self.database.revert_to_snapshot(db_snapshot_id);
-                return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
-            } orelse Account.zero();
-
-            if (caller_account.balance < params.value) {
-                log.debug("CREATE2: insufficient balance", .{});
-                self.journal.revert_to_snapshot(snapshot_id);
-                try self.database.revert_to_snapshot(db_snapshot_id);
+            const is_transaction = self.takeTransactionCreate(params.caller);
+            const GasConstants = primitives.GasConstants;
+            // EIP-3860 (Shanghai+): init code costs 2 gas per 32-byte word.
+            const init_words_c2: u64 = (@as(u64, @intCast(params.init_code.len)) + 31) / 32;
+            const initcode_word_cost_c2: u64 = if (config.eips.hardfork.isAtLeast(.SHANGHAI)) init_words_c2 * GasConstants.InitcodeWordGas else 0;
+            // A creation transaction already paid CreateGas and initcode words as intrinsic gas.
+            const create_overhead = if (is_transaction) 0 else GasConstants.CreateGas + initcode_word_cost_c2;
+            // EIP-1014: CREATE2 hashes the init code at GAS_KECCAK256_WORD per 32-byte word,
+            // rounded UP (ceil(len/32)), not len*word_gas/32 which rounds down.
+            const hash_cost = init_words_c2 * GasConstants.Keccak256WordGas;
+            const total_overhead = create_overhead + hash_cost;
+            // An opcode CREATE2 that cannot pay its charge fails before the sender nonce moves.
+            if (params.gas < total_overhead) {
+                log.debug("CREATE2: insufficient gas for overhead: need={}, have={}", .{ total_overhead, params.gas });
                 return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
             }
+            const remaining_gas: u64 = params.gas - total_overhead;
+            // EIP-150 (Tangerine Whistle+): an opcode creation forwards all but 1/64 of the
+            // remaining gas; the caller keeps the rest whatever the creation's outcome.
+            const retained: u64 = if (!is_transaction and config.eips.hardfork.isAtLeast(.TANGERINE_WHISTLE)) remaining_gas / 64 else 0;
+            const forwarded: u64 = remaining_gas - retained;
 
-            // Always increment nonce for CREATE operations
-            try self.journal.record_nonce_change(snapshot_id, params.caller, caller_account.nonce);
-            caller_account.nonce += 1;
-            self.database.set_account(params.caller.bytes, caller_account) catch {
-                self.journal.revert_to_snapshot(snapshot_id);
-                try self.database.revert_to_snapshot(db_snapshot_id);
-                return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
-            };
+            // execution-specs generic_create: a creation refused for balance or nonce limit
+            // returns the gas it would have forwarded; the CREATE2 charge stays spent.
+            if ((try self.beginCreate(params.caller, params.value, is_transaction)) == null) {
+                log.debug("CREATE2: insufficient balance or nonce at its limit", .{});
+                return CallResult.failure(self.getCallArenaAllocator(), remaining_gas) catch unreachable;
+            }
+
+            const snapshot_id = try self.journal.create_snapshot();
+            const db_snapshot_id = try self.database.create_snapshot();
 
             const keccak_asm = @import("crypto").keccak_asm;
             var init_code_hash_bytes: [32]u8 = undefined;
@@ -1348,36 +1425,20 @@ pub fn Evm(config: EvmConfig) type {
             const existed_before = self.database.account_exists(contract_address.bytes);
             if (existed_before) {
                 const existing = try self.database.get_account(contract_address.bytes);
-                if (existing != null and !std.mem.eql(u8, &existing.?.code_hash, &[_]u8{0} ** 32)) {
+                // EIP-684: an address with code or a nonzero nonce cannot be created again.
+                if (existing != null and (existing.?.nonce != 0 or !std.mem.eql(u8, &existing.?.code_hash, &[_]u8{0} ** 32))) {
                     log.debug("CREATE2: collision at address", .{});
                     self.journal.revert_to_snapshot(snapshot_id);
                     try self.database.revert_to_snapshot(db_snapshot_id);
-                    return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                    return CallResult.failure(self.getCallArenaAllocator(), retained) catch unreachable;
                 }
             }
-
-            const GasConstants = primitives.GasConstants;
-            // EIP-3860 (Shanghai+): init code costs 2 gas per 32-byte word.
-            const init_words_c2: u64 = (@as(u64, @intCast(params.init_code.len)) + 31) / 32;
-            const initcode_word_cost_c2: u64 = if (config.eips.hardfork.isAtLeast(.SHANGHAI)) init_words_c2 * GasConstants.InitcodeWordGas else 0;
-            const create_overhead = GasConstants.CreateGas + initcode_word_cost_c2;
-            // EIP-1014: CREATE2 hashes the init code at GAS_KECCAK256_WORD per 32-byte word,
-            // rounded UP (ceil(len/32)), not len*word_gas/32 which rounds down.
-            const hash_cost = init_words_c2 * GasConstants.Keccak256WordGas;
-            const total_overhead = create_overhead + hash_cost;
-            if (params.gas < total_overhead) {
-                log.debug("CREATE2: insufficient gas for overhead: need={}, have={}", .{ total_overhead, params.gas });
-                self.journal.revert_to_snapshot(snapshot_id);
-                try self.database.revert_to_snapshot(db_snapshot_id);
-                return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
-            }
-            const remaining_gas: u64 = params.gas - total_overhead;
 
             var result = self.executeCreateInternal(.{
                 .caller = params.caller,
                 .value = params.value,
                 .init_code = params.init_code,
-                .gas_left = remaining_gas,
+                .gas_left = forwarded,
                 .contract_address = contract_address,
                 .snapshot_id = snapshot_id,
                 .db_snapshot_id = db_snapshot_id,
@@ -1385,9 +1446,10 @@ pub fn Evm(config: EvmConfig) type {
             }) catch {
                 self.journal.revert_to_snapshot(snapshot_id);
                 try self.database.revert_to_snapshot(db_snapshot_id);
-                return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                return CallResult.failure(self.getCallArenaAllocator(), retained) catch unreachable;
             };
 
+            result.gas_left += retained;
             result.created_address = contract_address;
             return result;
         }
@@ -1750,7 +1812,7 @@ pub fn Evm(config: EvmConfig) type {
                     // Invalid bytecode and exhausted execution budgets are normal
                     // transaction outcomes, not failures of the client itself.
                     switch (err) {
-                        error.InvalidOpcode, error.OutOfGas, error.StackUnderflow, error.StackOverflow, error.ReturnDataNotAvailable =>
+                        error.InvalidOpcode, error.InvalidJump, error.OutOfGas, error.OutOfBounds, error.StackUnderflow, error.StackOverflow, error.ReturnDataNotAvailable =>
                             log.debug("Frame execution halted: {s} (code_len={}, gas={}, depth={})", .{ @errorName(err), code.len, gas, self.depth }),
                         else => log.err("Frame execution failed with error: {s} (code_len={}, gas={}, depth={})", .{ @errorName(err), code.len, gas, self.depth }),
                     }
@@ -1859,7 +1921,16 @@ pub fn Evm(config: EvmConfig) type {
 
         /// Get account code
         pub fn get_code(self: *Self, address: primitives.Address) ![]const u8 {
-            return try self.database.get_code_by_address(address.bytes);
+            return self.codeAt(address);
+        }
+
+        /// Code executed at `address` (following EIP-7702 delegation). An account that
+        /// does not exist has empty code: calling it succeeds and EXTCODE* see nothing.
+        fn codeAt(self: *Self, address: primitives.Address) ![]const u8 {
+            return self.database.get_code_by_address(address.bytes) catch |err| switch (err) {
+                error.AccountNotFound => &.{},
+                else => return err,
+            };
         }
 
         /// Get block information
@@ -2003,6 +2074,12 @@ pub fn Evm(config: EvmConfig) type {
         }
 
         /// Access an address and return the gas cost (EIP-2929)
+        /// Mark `address` warm if it is a precompile in the configured fork.
+        fn warmPrecompile(self: *Self, address: primitives.Address) !void {
+            if (!precompiles.isPrecompile(address, config.eips.hardfork)) return;
+            try self.access_list.pre_warm_addresses(&[_]primitives.Address{address});
+        }
+
         pub fn access_address(self: *Self, address: primitives.Address) !u64 {
             const cost = try self.access_list.access_address(address);
             // Track address for state dump
@@ -2581,6 +2658,131 @@ test "EIP-7623 clamps successful Prague transaction gas to calldata floor" {
         try std.testing.expect(result.success);
         try std.testing.expectEqual(@as(u64, 21_004), gas_limit - result.gas_left);
     }
+}
+
+test "EIP-7825 rejects Osaka transaction above the gas limit cap before nonce increment" {
+    const sender = primitives.Address{ .bytes = [_]u8{0x02} ++ [_]u8{0x00} ** 19 };
+    const target = primitives.Address{ .bytes = [_]u8{0x01} ++ [_]u8{0x00} ** 19 };
+    const block_info = BlockInfo{
+        .number = 1,
+        .timestamp = 1000,
+        .difficulty = 0,
+        .gas_limit = 60_000_000,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .base_fee = 0,
+        .prev_randao = [_]u8{0} ** 32,
+    };
+    const context = TransactionContext{
+        .gas_limit = eips.TX_GAS_LIMIT_CAP + 1,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .chain_id = 1,
+    };
+
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
+    var sender_account = Account.zero();
+    sender_account.balance = 1_000_000_000_000;
+    try db.set_account(sender.bytes, sender_account);
+    const OsakaEvm = Evm(.{ .eips = eips.Eips{ .hardfork = .OSAKA } });
+    var evm = try OsakaEvm.init(std.testing.allocator, &db, block_info, context, 1, sender);
+    defer evm.deinit();
+
+    var result = evm.call(.{ .call = .{
+        .caller = sender,
+        .to = target,
+        .value = 0,
+        .input = &.{},
+        .gas = eips.TX_GAS_LIMIT_CAP + 1,
+    } });
+    defer result.deinit(std.testing.allocator);
+
+    try std.testing.expect(!result.success);
+    try std.testing.expectEqual(@as(u64, 0), result.gas_left);
+    const after = (try db.get_account(sender.bytes)).?;
+    try std.testing.expectEqual(@as(u64, 0), after.nonce);
+    try std.testing.expectEqual(@as(u256, 1_000_000_000_000), after.balance);
+}
+
+test "EIP-7825 accepts Osaka transaction at exactly the gas limit cap" {
+    const sender = primitives.Address{ .bytes = [_]u8{0x02} ++ [_]u8{0x00} ** 19 };
+    const target = primitives.Address{ .bytes = [_]u8{0x01} ++ [_]u8{0x00} ** 19 };
+    const block_info = BlockInfo{
+        .number = 1,
+        .timestamp = 1000,
+        .difficulty = 0,
+        .gas_limit = 60_000_000,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .base_fee = 0,
+        .prev_randao = [_]u8{0} ** 32,
+    };
+    const context = TransactionContext{
+        .gas_limit = eips.TX_GAS_LIMIT_CAP,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .chain_id = 1,
+    };
+
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
+    var sender_account = Account.zero();
+    sender_account.balance = 1_000_000_000_000;
+    try db.set_account(sender.bytes, sender_account);
+    const OsakaEvm = Evm(.{ .eips = eips.Eips{ .hardfork = .OSAKA } });
+    var evm = try OsakaEvm.init(std.testing.allocator, &db, block_info, context, 1, sender);
+    defer evm.deinit();
+
+    var result = evm.call(.{ .call = .{
+        .caller = sender,
+        .to = target,
+        .value = 0,
+        .input = &.{},
+        .gas = eips.TX_GAS_LIMIT_CAP,
+    } });
+    defer result.deinit(std.testing.allocator);
+
+    try std.testing.expect(result.success);
+    try std.testing.expectEqual(@as(u64, eips.TX_GAS_LIMIT_CAP - 21_000), result.gas_left);
+    try std.testing.expectEqual(@as(u64, 1), (try db.get_account(sender.bytes)).?.nonce);
+}
+
+test "EIP-7825 does not cap Prague transaction gas" {
+    const sender = primitives.Address{ .bytes = [_]u8{0x02} ++ [_]u8{0x00} ** 19 };
+    const target = primitives.Address{ .bytes = [_]u8{0x01} ++ [_]u8{0x00} ** 19 };
+    const block_info = BlockInfo{
+        .number = 1,
+        .timestamp = 1000,
+        .difficulty = 0,
+        .gas_limit = 60_000_000,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .base_fee = 0,
+        .prev_randao = [_]u8{0} ** 32,
+    };
+    const context = TransactionContext{
+        .gas_limit = eips.TX_GAS_LIMIT_CAP + 1,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .chain_id = 1,
+    };
+
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
+    var sender_account = Account.zero();
+    sender_account.balance = 1_000_000_000_000;
+    try db.set_account(sender.bytes, sender_account);
+    const PragueEvm = Evm(.{ .eips = eips.Eips{ .hardfork = .PRAGUE } });
+    var evm = try PragueEvm.init(std.testing.allocator, &db, block_info, context, 1, sender);
+    defer evm.deinit();
+
+    var result = evm.call(.{ .call = .{
+        .caller = sender,
+        .to = target,
+        .value = 0,
+        .input = &.{},
+        .gas = eips.TX_GAS_LIMIT_CAP + 1,
+    } });
+    defer result.deinit(std.testing.allocator);
+
+    try std.testing.expect(result.success);
+    try std.testing.expectEqual(@as(u64, eips.TX_GAS_LIMIT_CAP + 1 - 21_000), result.gas_left);
+    try std.testing.expectEqual(@as(u64, 1), (try db.get_account(sender.bytes)).?.nonce);
 }
 
 test "Evm call depth limit" {
