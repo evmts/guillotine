@@ -1,0 +1,5 @@
+// Compatibility entry for tooling using the needlefish factory convention.
+// The current smthrs CLI discovers .smithers/WORKSPACE.ts and PACKAGE.ts;
+// it does not discover WORKSPACE.smithers. Keep one implementation of each.
+export { Workspace } from "./WORKSPACE.ts"
+export { Package } from "./PACKAGE.ts"

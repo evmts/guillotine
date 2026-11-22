@@ -1,0 +1,35 @@
+{
+  "blocks": [
+    {
+      "type": "text",
+      "title": "Guillotine EVM factory",
+      "text": "Consensus correctness and graceful errors are release gates. Incremental Zig and Cargo caches accelerate checks; benchmark timings are always fresh."
+    },
+    {
+      "type": "prompt",
+      "title": "Ask about Guillotine",
+      "placeholder": "Describe an EVM issue or change…"
+    },
+    {
+      "type": "flows",
+      "title": "Review and reproduce"
+    },
+    {
+      "type": "links",
+      "links": [
+        {
+          "label": "Repository",
+          "url": "https://github.com/evmts/guillotine"
+        },
+        {
+          "label": "CI",
+          "url": "https://github.com/evmts/guillotine/actions/workflows/ci.yml"
+        },
+        {
+          "label": "Architecture",
+          "url": "https://github.com/evmts/guillotine/blob/main/docs/dev/ARCHITECTURE.md"
+        }
+      ]
+    }
+  ]
+}

@@ -4,9 +4,21 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   build-test:
-    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    env:
+      ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.smithers/cache/tools/zig/global
+      ZIG_LOCAL_CACHE_DIR: ${{ github.workspace }}/.smithers/cache/tools/zig/local
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
     steps:
       - uses: actions/checkout@v4
         with:
@@ -15,19 +27,51 @@ jobs:
         uses: goto-bus-stop/setup-zig@v2
         with:
           version: 0.15.1
-      - name: Cache cargo
+      - name: Record toolchain and architecture
+        id: toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          zig version
+          rustc --version
+          cargo --version
+          uname -sm
+          if [[ "$RUNNER_OS" == Linux ]]; then test "$(uname -m)" = x86_64; fi
+          echo "rust=$(rustc --version | tr ' ' '-')" >> "$GITHUB_OUTPUT"
+      - name: Cache Zig
         uses: actions/cache@v4
         with:
           path: |
-            ~/.cargo/bin/
+            .smithers/cache/tools/zig/global
+            .smithers/cache/tools/zig/local
+          key: ${{ runner.os }}-${{ runner.arch }}-zig-0.15.1-${{ hashFiles('**/*.zig', '**/*.zig.zon', '**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-zig-0.15.1-
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+            .smithers/cache/cargo/voltaire
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ steps.toolchain.outputs.rust }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml', '**/*.rs') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-cargo-${{ steps.toolchain.outputs.rust }}-
+      - name: Foundry Linux archive regression (#815)
+        run: node --test .smithers/tests/foundry-link.test.mjs
+      - name: Build Voltaire Rust crypto archive
+        run: node .smithers/build-crypto.mjs
       - name: Build
         run: zig build
-      - name: Test
-        run: zig build test
-      # Mini has pre-existing test failures (452/513 pass) - enable once fixed
-      # - name: Test Mini
-      #   run: zig build test-mini
+      - name: Unit tests
+        if: ${{ !cancelled() }}
+        run: zig build test-unit
+      - name: Opcode differential tests
+        if: ${{ !cancelled() }}
+        run: zig build test-opcodes
+      - name: MODEXP arithmetic and gas tests
+        if: ${{ !cancelled() }}
+        # The root build has no test-modexp step; the supplemental build uses
+        # the repository's MODEXP implementation and tests without duplicating it.
+        run: zig build test-modexp --build-file .smithers/build.zig

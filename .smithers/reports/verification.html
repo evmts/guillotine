@@ -1,0 +1,200 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Guillotine CI and Smithers verification</title><style>body{font:16px/1.55 system-ui,sans-serif;color:#1d2835;background:#f5f7fa;margin:0}main{max-width:1100px;margin:40px auto;padding:32px;background:white;border:1px solid #dde3eb;border-radius:12px}h1{font-size:30px;line-height:1.2}h2{margin-top:36px}table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid #dce3eb;padding:12px;text-align:left;vertical-align:top}th{background:#eef3f8}.pass{color:#16704a;font-weight:700}.fail{color:#a72c2c;font-weight:700}pre{background:#101c2b;color:#e4edf8;padding:20px;overflow:auto;border-radius:8px;font:13px/1.5 ui-monospace,monospace}code{font-family:ui-monospace,monospace}a{color:#155db5}.note{padding:16px;background:#fff4d9;border-left:4px solid #c38916}li{margin:4px 0}</style><main>
+<h1>Guillotine CI and incremental build factory</h1><p>Verification from the isolated <code>ci-and-factory</code> jj workspace. The requested factory, CI matrix, manual-only auto-fix trigger, and Linux archive flag are implemented. The build succeeds; existing EVM and crypto test failures keep CI red.</p>
+<p class="note">Only the approved paths changed. No changes to <code>src/evm.zig</code>, <code>src/eips_and_hardforks/</code>, <code>src/frame/</code>, or <code>build.zig.zon</code>. No push, merge or main movement.</p>
+<h2>Archive diagnosis</h2><p><a href="https://github.com/evmts/guillotine/issues/815">Issue #815</a> shows a Rust archive stored as an archive member where LLD expects ELF objects or LLVM bitcode. In <code>lib/foundry.zig</code>, the Linux wrapper now sets <code>use_lld = false</code>, selecting Zig 0.15.1’s native ELF archiver, which merges object members. The legacy <code>lib/foundry-compilers/rust_build.zig</code> was inspected; the active root build uses <code>lib/foundry.zig</code>.</p>
+<h2>Workspace discovery and targets</h2><p>The needlefish reference was inspected. The requested <code>~/voltaire-factory/.smithers</code> directory was absent; the current local Smithers source and its own factory were used to verify formats. This CLI discovers <code>.smithers/WORKSPACE.ts</code> and <code>PACKAGE.ts</code>, not <code>WORKSPACE.smithers</code>. The latter is a compatibility re-export. A root-anchored Filegroup and a separate factory group are necessary because globs remain package-scoped even with a <code>//</code> prefix.</p><p>The root build has no <code>test-modexp</code> or benchmark step. Both are implemented in the supplemental <code>.smithers/build.zig</code>, without changing root build files. MODEXP uses all 43 existing repository tests, including failures. Benchmark compilation is cached; timing runs are fresh and validate their result. This workload measures MODEXP arithmetic, not overall EVM performance.</p>
+<h2>Verification</h2><table><thead><tr><th>Check</th><th>Result</th><th>Evidence and limits</th></tr></thead><tbody><tr><td>Guillotine build</td><td class="pass">PASS</td><td>zig build with Zig 0.15.1; Smithers build with the installed Zig 0.15.2 also passed.</td></tr><tr><td>Voltaire Rust archive</td><td class="pass">PASS</td><td>Staged standalone Cargo workspace builds with --locked. Only its ignored static archive is copied to the existing Zig lookup path.</td></tr><tr><td>Foundry #815 regression</td><td class="pass">PASS</td><td>Two tests: the real build helper selects native ELF archiving on Linux and keeps macOS unchanged; a nested-archive ELF link fails, while the flattened archive links. Cross-link tested on macOS; the CI test executes the ELF binary on x86_64 Linux.</td></tr><tr><td>Cache behavior</td><td class="pass">PASS</td><td>Root source group includes 7,595 files; factory group includes 17 files. A source addition changes the key and its removal restores it. Deleting the benchmark binary is repaired by a cache hit.</td></tr><tr><td>Factory flows / projections</td><td class="pass">PASS</td><td>Four flows discovered and planned. Factory/home projection checks pass. No model calls or remote publishing were executed.</td></tr><tr><td>CI configuration</td><td class="pass">PASS</td><td>YAML parses; both macos-latest and ubuntu-latest are present, with x86_64 asserted on Linux. Auto-fix has only workflow_dispatch. Native GitHub Actions jobs have not been run in this session.</td></tr><tr><td>Unit suite</td><td class="fail">FAIL</td><td>7/7 assertions pass, but two log.zig tests emit error-level messages, so Zig reports a failed command.</td></tr><tr><td>Opcode suite</td><td class="fail">FAIL</td><td>623/623 assertions pass; four error-level logs in 0xfe, 0xfa, 0x3e and 0xf2 make the command fail (InvalidOpcode, OutOfGas, ReturnDataNotAvailable).</td></tr><tr><td>MODEXP suite</td><td class="fail">FAIL</td><td>38/43 pass. Failures cover a large-number expected result, three InvalidLength paths in hex serialization, and zero-exponent gas (expected 200, actual 341).</td></tr><tr><td>Fusion suite</td><td class="fail">FAIL</td><td>Focused fusion tests report a failed ten-thousand-hashes assertion and a leak; another run also exposes an allocator-argument mismatch at test/fusions_dispatch.zig:23.</td></tr><tr><td>State tests</td><td class="fail">FAIL</td><td>2,244 failed and 7 passed (2,251 total). These consensus failures remain visible; source fixes are outside this lane.</td></tr></tbody></table>
+<h2>Build-cache replay</h2><p>The final build and Voltaire preparation both replayed from cache. This invocation took 112 seconds on the concurrently loaded Mac; cache correctness is verified, but no build-speed improvement is claimed from this observation.</p><pre>{
+  &quot;ok&quot;: true,
+  &quot;counts&quot;: {
+    &quot;hit&quot;: 2,
+    &quot;ran&quot;: 2,
+    &quot;failed&quot;: 0,
+    &quot;skipped&quot;: 0
+  },
+  &quot;results&quot;: [
+    {
+      &quot;label&quot;: &quot;//.smithers:build&quot;,
+      &quot;status&quot;: &quot;hit&quot;,
+      &quot;key&quot;: &quot;90be364ca81ecd46633369835e16eb604d5e7896c703b066a4f116f8f4061730&quot;,
+      &quot;durationMs&quot;: 94779.028541
+    },
+    {
+      &quot;label&quot;: &quot;//.smithers:build-crypto&quot;,
+      &quot;status&quot;: &quot;hit&quot;,
+      &quot;key&quot;: &quot;cba14a501cf22fe6f870bd1cebf9227faa8b59cd320fdf3dd0e14ef4c4bdc85c&quot;,
+      &quot;durationMs&quot;: 17482.288624999997
+    },
+    {
+      &quot;label&quot;: &quot;//.smithers:sources&quot;,
+      &quot;status&quot;: &quot;ran&quot;,
+      &quot;key&quot;: &quot;79abec420e252b733afe820a4d5139690ce68be18623ac47bc156dcdd2dba867&quot;,
+      &quot;durationMs&quot;: 0.18645900000046822
+    },
+    {
+      &quot;label&quot;: &quot;//.smithers:repository-sources&quot;,
+      &quot;status&quot;: &quot;ran&quot;,
+      &quot;key&quot;: &quot;3f34feaefbda01246c2b6b61344e44d9b415b84ed72d22e9de2a1de5edd06c66&quot;,
+      &quot;durationMs&quot;: 8.836249999996653
+    }
+  ],
+  &quot;version&quot;: 1
+}</pre>
+<h2>Benchmark observation</h2><p>One local Zig 0.15.1 ReleaseFast observation; no performance-regression claim is made from a single observation.</p><pre>{
+  &quot;benchmark&quot;: &quot;modexp-42-pow-65537&quot;,
+  &quot;iterations&quot;: 1000000,
+  &quot;elapsed_ns&quot;: 162901917,
+  &quot;ns_per_op&quot;: 162
+}</pre>
+<h2>Source invalidation evidence</h2><pre>{
+  &quot;before&quot;: &quot;737dc68a9b7a11c7f5313d55a35465cd7072728501cc0ef7e0528be3425c5d03&quot;,
+  &quot;changed&quot;: &quot;1caf81e6013bae3d6e88cd0a91d1377b10ca5164f77be834e0ea343fd14056f3&quot;,
+  &quot;restored&quot;: &quot;737dc68a9b7a11c7f5313d55a35465cd7072728501cc0ef7e0528be3425c5d03&quot;
+}</pre>
+<h2>Exact build plan</h2><p>The required bare <code>node ~/smithers/packages/smithers/bin/smithers.mjs build --plan</code> and <code>test --plan</code> commands were both executed. This CLI rejects them because it requires explicit patterns. The successful command adds <code>//.smithers:build</code>.</p><pre>code: VALIDATION_ERROR
+message: &quot;Invalid input: expected array, received undefined\n\nDetails: [\n  {\n    \&quot;expected\&quot;: \&quot;array\&quot;,\n    \&quot;code\&quot;: \&quot;invalid_type\&quot;,\n    \&quot;path\&quot;: [\n      \&quot;patterns\&quot;\n    ],\n    \&quot;message\&quot;: \&quot;Invalid input: expected array, received undefined\&quot;\n  }\n]&quot;
+fieldErrors[1]{code,missing,path,expected,received,message}:
+  invalid_type,true,patterns,array,&quot;&quot;,&quot;Invalid input: expected array, received undefined&quot;
+cta:
+  description: &quot;Skills are out of date:&quot;
+  commands[1]{command,description}:
+    smthrs skills add,sync outdated skills
+</pre><pre>verb: build
+pattern: &quot;//.smithers:build&quot;
+roots[1]: &quot;//.smithers:build&quot;
+targets[4]:
+  - label: &quot;//.smithers:build&quot;
+    rule: Shell.Build
+    mode: execute
+    key: 90be364ca81ecd46633369835e16eb604d5e7896c703b066a4f116f8f4061730
+    cacheable: true
+    dependencies[2]: &quot;//.smithers:sources&quot;,&quot;//.smithers:build-crypto&quot;
+    argv[2]: /Users/williamcory/.zvm/bin/zig,build
+    sandbox: none
+    sandboxEnforced: false
+  - label: &quot;//.smithers:build-crypto&quot;
+    rule: Shell.Build
+    mode: execute
+    key: cba14a501cf22fe6f870bd1cebf9227faa8b59cd320fdf3dd0e14ef4c4bdc85c
+    cacheable: true
+    dependencies[1]: &quot;//.smithers:sources&quot;
+    argv[2]: /Users/williamcory/.nvm/versions/node/v26.10.0/bin/node,.smithers/build-crypto.mjs
+    sandbox: none
+    sandboxEnforced: false
+  - label: &quot;//.smithers:sources&quot;
+    rule: Filegroup
+    mode: execute
+    key: 79abec420e252b733afe820a4d5139690ce68be18623ac47bc156dcdd2dba867
+    cacheable: true
+    dependencies[1]: &quot;//.smithers:repository-sources&quot;
+  - label: &quot;//.smithers:repository-sources&quot;
+    rule: Filegroup
+    mode: execute
+    key: 3f34feaefbda01246c2b6b61344e44d9b415b84ed72d22e9de2a1de5edd06c66
+    cacheable: true
+    dependencies: []
+cta:
+  description: &quot;Suggested commands:&quot;
+  commands[3]{command,description}:
+    smthrs targets --workspace &#x27;/Users/williamcory/guillotine-ws/ci-and-factory&#x27;,Discover available targets
+    smthrs cache status --workspace &#x27;/Users/williamcory/guillotine-ws/ci-and-factory&#x27;,Inspect local cache usage
+    smthrs skills add,sync outdated skills
+</pre>
+<h2>Exact test plan</h2><p>Successful selection: <code>node ~/smithers/packages/smithers/bin/smithers.mjs test //... --plan</code>.</p><pre>verb: test
+pattern: //...
+roots[6]: &quot;//.smithers:test-foundry-link&quot;,&quot;//.smithers:test-fusions&quot;,&quot;//.smithers:test-modexp&quot;,&quot;//.smithers:test-opcodes&quot;,&quot;//.smithers:test-specs&quot;,&quot;//.smithers:test-unit&quot;
+targets[10]:
+  - label: &quot;//.smithers:test-unit&quot;
+    rule: Shell.Test
+    mode: execute
+    key: 3831445bae9b3b42d2b87494bf17f75a7f3322ba41dfaad7b18cff117cb7a351
+    cacheable: true
+    dependencies[2]: &quot;//.smithers:sources&quot;,&quot;//.smithers:build&quot;
+    argv[3]: /Users/williamcory/.zvm/bin/zig,build,test-unit
+    sandbox: none
+    sandboxEnforced: false
+  - label: &quot;//.smithers:build&quot;
+    rule: Shell.Build
+    mode: execute
+    key: 90be364ca81ecd46633369835e16eb604d5e7896c703b066a4f116f8f4061730
+    cacheable: true
+    dependencies[2]: &quot;//.smithers:sources&quot;,&quot;//.smithers:build-crypto&quot;
+    argv[2]: /Users/williamcory/.zvm/bin/zig,build
+    sandbox: none
+    sandboxEnforced: false
+  - label: &quot;//.smithers:build-crypto&quot;
+    rule: Shell.Build
+    mode: execute
+    key: cba14a501cf22fe6f870bd1cebf9227faa8b59cd320fdf3dd0e14ef4c4bdc85c
+    cacheable: true
+    dependencies[1]: &quot;//.smithers:sources&quot;
+    argv[2]: /Users/williamcory/.nvm/versions/node/v26.10.0/bin/node,.smithers/build-crypto.mjs
+    sandbox: none
+    sandboxEnforced: false
+  - label: &quot;//.smithers:sources&quot;
+    rule: Filegroup
+    mode: execute
+    key: 79abec420e252b733afe820a4d5139690ce68be18623ac47bc156dcdd2dba867
+    cacheable: true
+    dependencies[1]: &quot;//.smithers:repository-sources&quot;
+  - label: &quot;//.smithers:repository-sources&quot;
+    rule: Filegroup
+    mode: execute
+    key: 3f34feaefbda01246c2b6b61344e44d9b415b84ed72d22e9de2a1de5edd06c66
+    cacheable: true
+    dependencies: []
+  - label: &quot;//.smithers:test-specs&quot;
+    rule: Shell.Test
+    mode: execute
+    key: 0ffb6d13c8008c0dcc002c71bc2635e8b33c25b6f86596f5293554d7e9fbe732
+    cacheable: true
+    dependencies[2]: &quot;//.smithers:sources&quot;,&quot;//.smithers:build&quot;
+    argv[3]: /Users/williamcory/.zvm/bin/zig,build,state-tests
+    sandbox: none
+    sandboxEnforced: false
+  - label: &quot;//.smithers:test-opcodes&quot;
+    rule: Shell.Test
+    mode: execute
+    key: 681b346c633e788c7a923f29496d9e3b14a4f27f973987fae84596bd42b3ee8d
+    cacheable: true
+    dependencies[2]: &quot;//.smithers:sources&quot;,&quot;//.smithers:build&quot;
+    argv[3]: /Users/williamcory/.zvm/bin/zig,build,test-opcodes
+    sandbox: none
+    sandboxEnforced: false
+  - label: &quot;//.smithers:test-modexp&quot;
+    rule: Shell.Test
+    mode: execute
+    key: 9839f6087fa84d264817f1ffee1c0b30a488e90bfb847a093134300718007019
+    cacheable: true
+    dependencies[2]: &quot;//.smithers:sources&quot;,&quot;//.smithers:build&quot;
+    argv[5]: /Users/williamcory/.zvm/bin/zig,build,test-modexp,&quot;--build-file&quot;,.smithers/build.zig
+    sandbox: none
+    sandboxEnforced: false
+  - label: &quot;//.smithers:test-fusions&quot;
+    rule: Shell.Test
+    mode: execute
+    key: 1ad39aa92792740d20486c78cfa07f5fb0ff038c672fdc1622e4c8ba1c415e0f
+    cacheable: true
+    dependencies[2]: &quot;//.smithers:sources&quot;,&quot;//.smithers:build&quot;
+    argv[3]: /Users/williamcory/.zvm/bin/zig,build,test-fusions
+    sandbox: none
+    sandboxEnforced: false
+  - label: &quot;//.smithers:test-foundry-link&quot;
+    rule: Shell.Test
+    mode: execute
+    key: 9ff3b5d61c031079d05ff9055f615f136343e7b08d3b30d1a7a2d5f37f599062
+    cacheable: true
+    dependencies[1]: &quot;//.smithers:sources&quot;
+    argv[3]: /Users/williamcory/.nvm/versions/node/v26.10.0/bin/node,&quot;--test&quot;,.smithers/tests/foundry-link.test.mjs
+    sandbox: none
+    sandboxEnforced: false
+cta:
+  description: &quot;Suggested commands:&quot;
+  commands[3]{command,description}:
+    smthrs targets --workspace &#x27;/Users/williamcory/guillotine-ws/ci-and-factory&#x27;,Discover available targets
+    smthrs cache status --workspace &#x27;/Users/williamcory/guillotine-ws/ci-and-factory&#x27;,Inspect local cache usage
+    smthrs skills add,sync outdated skills
+</pre>
+<h2>Exact changed files</h2><ul><li><code>.github/workflows/ci.yml</code></li><li><code>.github/workflows/claude-code-auto-fix.yml</code></li><li><code>.smithers/.gitignore</code></li><li><code>.smithers/FACTORY.ts</code></li><li><code>.smithers/PACKAGE.ts</code></li><li><code>.smithers/README.md</code></li><li><code>.smithers/WORKSPACE.smithers</code></li><li><code>.smithers/WORKSPACE.ts</code></li><li><code>.smithers/bench.zig</code></li><li><code>.smithers/build-crypto.mjs</code></li><li><code>.smithers/build.zig</code></li><li><code>.smithers/factory.json</code></li><li><code>.smithers/flows/checks/review/flow.mdx</code></li><li><code>.smithers/flows/issue/poc/flow.mdx</code></li><li><code>.smithers/flows/issue/repro/flow.mdx</code></li><li><code>.smithers/flows/pr-triage/flow.mdx</code></li><li><code>.smithers/home.json</code></li><li><code>.smithers/reports/build-plan.txt</code></li><li><code>.smithers/reports/test-plan.txt</code></li><li><code>.smithers/reports/verification.html</code></li><li><code>.smithers/tests/foundry-config.zig</code></li><li><code>.smithers/tests/foundry-link.test.mjs</code></li><li><code>lib/foundry.zig</code></li></ul>
+<h2>jj description</h2><pre>ci: add Smithers incremental build factory and macOS+Linux CI</pre>
+</main></html>
