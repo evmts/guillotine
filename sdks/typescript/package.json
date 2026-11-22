@@ -1,5 +1,5 @@
 {
-	"name": "@guillotine/sdk",
+	"name": "@tevm/guillotine",
 	"version": "0.0.1",
 	"private": false,
 	"description": "TypeScript SDK for Guillotine Evm",

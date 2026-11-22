@@ -57,6 +57,7 @@ zig build -Devm-hardfork=CANCUN
 | Understand gas calculation | [dev/GAS-METERING.md](./dev/GAS-METERING.md) |
 | Run or write tests | [dev/TESTING.md](./dev/TESTING.md) |
 | Check hardfork/opcode support | [dev/HARDFORKS.md](./dev/HARDFORKS.md) |
+| Build a custom language SDK | [building-custom-sdks.md](./building-custom-sdks.md) |
 | Contribute code | [dev/CONTRIBUTING.md](./dev/CONTRIBUTING.md) |
 | Deep dive into dispatch | [performance/DISPATCH.md](./performance/DISPATCH.md) |
 | Understand opcode fusion | [performance/SYNTHETIC-OPCODES.md](./performance/SYNTHETIC-OPCODES.md) |

@@ -1,37 +1,23 @@
-# Guillotine C SDK Tests
+# C SDK tests
 
-This directory contains tests for the Guillotine C SDK.
+Run from the repository root:
 
-## Test Files
-
-- `simple_test.c` - Basic compilation and header inclusion tests
-- `basic_test.c` - Full integration tests (requires crypto library linking)
-
-## Running Tests
-
-### Simple Compilation Test
-```bash
-make simple
+```sh
+make -f sdks/c/Makefile simple
+make -f sdks/c/Makefile basic
+make -f sdks/c/Makefile test
 ```
 
-This test verifies:
-- Header files compile correctly
-- Basic types are available
-- FFI binding structure is valid
+`simple_test.c` compiles the public header and checks inline array widths,
+byte-sized enum representations, and common 64-bit layouts. It does not load
+the library or prove native execution.
 
-### Full Integration Test (Advanced)
-```bash
-make basic
-```
+`basic_test.c` links the shared native library and exercises initialization,
+EVM creation/destruction, balances, contract execution, and deployment.
+`basic` builds `zig build shared` first; `test` runs both programs. Native
+crypto dependencies must be built for the selected target.
 
-This test requires proper linking with crypto libraries and verifies:
-- EVM initialization and cleanup
-- Balance operations
-- Contract deployment
-- Basic contract execution
-
-## Notes
-
-The simple test is sufficient to verify that the C SDK structure is correct and can be used for FFI bindings. The full integration test requires additional setup for crypto dependencies (BLS, KZG libraries).
-
-For production use, the C SDK primarily serves as a header file for other language bindings rather than direct C usage, though direct C usage is fully supported with proper linking.
+For other architectures, compare all struct sizes, alignment, and field offsets
+against the Zig `extern struct` declarations, not just the common 64-bit sizes.
+See [Building custom SDKs](../../../docs/building-custom-sdks.md) for the ABI,
+ownership rules, and the repository's required build/opcode checks.

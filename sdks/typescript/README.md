@@ -25,11 +25,11 @@ High-performance Ethereum Virtual Machine (Evm) implementation for TypeScript/Ja
 ## Installation
 
 ```bash
-npm install @evmts/guillotine
+npm install @tevm/guillotine
 # or
-yarn add @evmts/guillotine
+yarn add @tevm/guillotine
 # or
-bun add @evmts/guillotine
+bun add @tevm/guillotine
 ```
 
 ### WASM Module Setup
@@ -46,7 +46,7 @@ For browser usage, ensure the WASM file is served at `/wasm/guillotine-evm.wasm`
 ## Quick Start
 
 ```typescript
-import { GuillotineEvm, Address, U256, Bytes } from '@evmts/guillotine';
+import { GuillotineEvm, Address, U256, Bytes } from '@tevm/guillotine';
 
 // Create an Evm instance
 const evm = await GuillotineEvm.create();
@@ -250,7 +250,7 @@ class GuillotineError extends Error {
 ### Simple Bytecode Execution
 
 ```typescript
-import { GuillotineEvm, Address, U256, Bytes } from '@evmts/guillotine';
+import { GuillotineEvm, Address, U256, Bytes } from '@tevm/guillotine';
 
 const evm = await GuillotineEvm.create();
 
@@ -304,7 +304,7 @@ evm.close();
 ### Error Handling
 
 ```typescript
-import { GuillotineError } from '@evmts/guillotine';
+import { GuillotineError } from '@tevm/guillotine';
 
 try {
   const evm = await GuillotineEvm.create();
@@ -423,3 +423,25 @@ MIT License - see [LICENSE](../../LICENSE) for details.
 - [Guillotine Go](../go) - Go bindings
 - [Guillotine Python](../python) - Python bindings
 - [Guillotine Rust](../rust) - Rust bindings
+
+## Bun native FFI
+
+Bun can use `@tevm/guillotine` through the TypeScript/WASM API above. Direct
+native execution is also possible through `bun:ffi` and the C library built
+by `zig build shared` from the repository root; it is a custom binding rather
+than a second npm SDK or an exported backend of this package.
+
+The removed `sdks/bun` prototype had native balance/code/storage/nonce setters,
+call and simulation support, and state dumps. Those capabilities remain
+available through `src/evm_c_api.zig`; see the
+[Bun FFI template](../../docs/building-custom-sdks.md#bun-ffi) and
+[C header](../c/include/guillotine.h). Its handwritten struct offsets and
+call-type enum must not be reused: native arrays are inline, `CALLCODE` is 1,
+`DELEGATECALL` is 2, and `STATICCALL` is 3. Simulation currently accepts only
+`CALL` (0).
+
+Use `bigint` for `uint64_t` values, retain input buffers during calls, copy
+result buffers before `guillotine_free_result`, and destroy handles before
+library cleanup. Native structs use the target C ABI; the WASM loader's
+32-bit offsets do not apply to a native Bun process. A small compiled C bridge
+can expose accessors and construct structs without handwritten JS offsets.

@@ -107,20 +107,17 @@ zig build test-opcodes
 
 ## 🧰 SDKs (Experimental)
 
-All SDKs in this repo are vibecoded proof-of-concepts. APIs are unstable and may change without notice. We're actively seeking early users to try things out and tell us what APIs you want. Please open an issue or ping us on Telegram with feedback.
+Guillotine officially ships three integration surfaces:
 
-- [Go](sdks/go) — Go bindings with FFI to Zig EVM
-- [Bun](sdks/bun) — Native Bun bindings around the Zig EVM
-- [C](sdks/c) — C/C++ FFI surface for embedding
-- [Rust](sdks/rust) — Idiomatic Rust wrapper over FFI
-- [TypeScript](sdks/typescript) — WASM/TS APIs for Node, Bun, Browser
+- **Zig native bindings** — the repository's native EVM API in `src/root.zig`.
+- **[C FFI](sdks/c)** — native embedding and custom language bindings.
+- **[`@tevm/guillotine` TypeScript](sdks/typescript)** — WASM APIs for Node, Bun, and browsers, with build support in `sdks/wasm`.
 
-**Looking for Contributors:**
-- **Python** — Help us build Python bindings and primitives
-- **Swift** — Help us build Swift bindings for Apple platforms
-- **Kotlin** — Help us build Kotlin/JVM bindings
-
-See each SDK's README for install, quick start, and current API.
+The C and TypeScript APIs are experimental and may change. For Python, Go,
+Rust, Swift, Kotlin/JNI, or native Bun FFI, use the
+[custom SDK guide](docs/building-custom-sdks.md) and
+[SDK builder skill](.agents/skills/guillotine-sdk-builder/SKILL.md).
+See [sdks/README.md](sdks/README.md) for the maintained SDK scope and build commands.
 
 ---
 

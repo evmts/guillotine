@@ -4,8 +4,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-// Include the header - using wrapper from Rust SDK for now
-#include "../../../sdks/rust/wrapper.h"
+#include "guillotine.h"
 
 void test_init_cleanup() {
     printf("Testing initialization and cleanup...\n");
@@ -130,10 +129,11 @@ void test_basic_call() {
     bool set_success = guillotine_set_code(evm, contract_addr, bytecode, sizeof(bytecode));
     assert(set_success);
 
+    const uint8_t empty = 0;
     CallParams params = {
         .call_type = 0, // CALL
         .gas = 1000000,
-        .input = NULL,
+        .input = &empty,
         .input_len = 0
     };
     memcpy(params.caller, contract_addr, 20);
