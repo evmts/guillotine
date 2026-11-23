@@ -225,10 +225,9 @@ pub const HistoricalBlockHashesContract = struct {
         block_number: u64,
         current_block: u64,
     ) Database.Error!?[32]u8 {
-        // Standard BLOCKHASH rules first
-        // - Return null for current block and future blocks
-        // - Return null for block 0 (genesis)
-        if (block_number >= current_block or block_number == 0) {
+        // Only complete blocks have a hash. Block 0 (genesis) is a complete block, so it
+        // is served like any other when stored.
+        if (block_number >= current_block) {
             return null;
         }
 
@@ -648,7 +647,14 @@ test "historical block hashes getBlockHash validation" {
     const result4 = try HistoricalBlockHashesContract.getBlockHash(&database, 700, 600);
     try testing.expect(result4 == null);
 
-    // Should return null for genesis block
+    // Genesis is unknown until stored, then served like any other complete block
     const result5 = try HistoricalBlockHashesContract.getBlockHash(&database, 0, 100);
     try testing.expect(result5 == null);
+    const genesis_hash = [_]u8{0x0D} ** 32;
+    const genesis_slots = computeSlots(0);
+    try database.set_storage(HISTORY_CONTRACT_ADDRESS.bytes, genesis_slots.block_slot, @bitCast(genesis_hash));
+    try database.set_storage(HISTORY_CONTRACT_ADDRESS.bytes, genesis_slots.hash_slot, 0);
+    const result6 = try HistoricalBlockHashesContract.getBlockHash(&database, 0, 100);
+    try testing.expect(result6 != null);
+    try testing.expectEqualSlices(u8, &genesis_hash, &result6.?);
 }

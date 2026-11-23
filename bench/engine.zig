@@ -182,7 +182,7 @@ pub fn Runner(comptime evm: type, comptime fusion: bool) type {
             }
             // Curve operations must not silently take an infinity/empty-output path.
             switch (workload.source) {
-                .precompile => |address| if (address == 1 or address == 6 or address == 7 or address == 0x12) {
+                .precompile => |address| if (address == 1 or address == 6 or address == 7 or address == 0x10) {
                     var nonzero: u8 = 0;
                     for (result.output) |byte| nonzero |= byte;
                     if (nonzero == 0) return error.UnexpectedInfinity;

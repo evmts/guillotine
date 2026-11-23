@@ -437,19 +437,25 @@ fn testDispatchSnapshot(allocator: std.mem.Allocator, fixture_name: []const u8, 
         // Now log the dispatch schedule with handler names  
         // We can't import frame_handlers directly, so just print hex addresses
         
-        for (135..@min(145, schedule.items.len)) |idx| {
+        for (@min(135, schedule.item_kinds.len)..@min(145, schedule.item_kinds.len)) |idx| {
             const item = schedule.items[idx];
             try debug_output.writer(allocator).print("[{}]: ", .{idx});
-            switch (item) {
-                .opcode_handler => |handler| {
-                    try debug_output.writer(allocator).print("opcode_handler(@{x})\n", .{@intFromPtr(handler)});
+            switch (schedule.item_kinds[idx]) {
+                .opcode_handler => {
+                    try debug_output.writer(allocator).print("opcode_handler(@{x})\n", .{@intFromPtr(item.opcode_handler)});
                 },
-                .first_block_gas => |fbg| try debug_output.writer(allocator).print("first_block_gas(gas: {}, min_stack: {}, max_stack: {})\n", .{fbg.gas, fbg.min_stack, fbg.max_stack}),
-                .jump_dest => |jd| try debug_output.writer(allocator).print("jump_dest(gas: {}, min_stack: {}, max_stack: {})\n", .{jd.gas, jd.min_stack, jd.max_stack}),
-                .jump_static => |js| try debug_output.writer(allocator).print("jump_static(dispatch: @{x})\n", .{@intFromPtr(js.dispatch)}),
-                .push_inline => |push| try debug_output.writer(allocator).print("push_inline(value: 0x{x})\n", .{push.value}),
-                .push_pointer => |pp| try debug_output.writer(allocator).print("push_pointer(value: 0x{x})\n", .{pp.value_ptr.*}),
-                .pc => |pc_meta| try debug_output.writer(allocator).print("pc(value: {})\n", .{pc_meta.value}),
+                .first_block_gas => {
+                    const gas = item.first_block_gas;
+                    try debug_output.writer(allocator).print("first_block_gas(gas: {}, min_stack: {}, max_stack: {})\n", .{ gas.gas, gas.min_stack, gas.max_stack });
+                },
+                .jump_dest => {
+                    const dest = item.jump_dest;
+                    try debug_output.writer(allocator).print("jump_dest(gas: {}, min_stack: {}, max_stack: {})\n", .{ dest.gas, dest.min_stack, dest.max_stack });
+                },
+                .jump_static => try debug_output.writer(allocator).print("jump_static(dispatch: @{x})\n", .{@intFromPtr(item.jump_static.dispatch)}),
+                .push_inline => try debug_output.writer(allocator).print("push_inline(value: 0x{x})\n", .{item.push_inline.value}),
+                .push_pointer => try debug_output.writer(allocator).print("push_pointer(value: 0x{x})\n", .{item.push_pointer.value_ptr.*}),
+                .pc => try debug_output.writer(allocator).print("pc(value: {})\n", .{item.pc.value}),
             }
         }
         
@@ -459,7 +465,7 @@ fn testDispatchSnapshot(allocator: std.mem.Allocator, fixture_name: []const u8, 
     }
     
     // Generate pretty print output
-    const pretty_output = try Dispatch.pretty_print(allocator, schedule.items, bytecode_obj);
+    const pretty_output = try Dispatch.pretty_print(allocator, schedule, &bytecode_obj);
     defer allocator.free(pretty_output);
     
     // Create snapshots directory if it doesn't exist

@@ -495,149 +495,147 @@ test "fusion: Multiple fusions in sequence" {
     log.info("Detected {} fusions in sequence", .{fusion_count});
 }
 
-test "fusion: ten-thousand-hashes bytecode with PUSH+JUMP fusion" {
-    std.testing.log_level = .err;
-    log.info("Testing ten-thousand-hashes bytecode with fusion", .{});
+test "fusion: ten-thousand-hashes CREATE matches unfused initcode" {
     const allocator = testing.allocator;
-    
-    // The ten-thousand-hashes DEPLOYMENT bytecode from bench/official/cases/ten-thousand-hashes/bytecode.txt
-    const deployment_hex = "6080604052348015600e575f5ffd5b50609780601a5f395ff3fe6080604052348015600e575f5ffd5b50600436106026575f3560e01c806330627b7c14602a575b5f5ffd5b60306032565b005b5f5b614e20811015605e5760408051602081018390520160408051601f19818403019052526001016034565b5056fea26469706673582212202c247f39d615d7f66942cd6ed505d8ea34fbfcbe16ac875ed08c4a9c229325f364736f6c634300081e0033";
-    
-    // Convert hex to bytes
-    var deployment_buf: [512]u8 = undefined;
-    const deployment_len = deployment_hex.len / 2;
-    for (0..deployment_len) |i| {
-        const byte_str = deployment_hex[i*2..i*2+2];
-        deployment_buf[i] = std.fmt.parseInt(u8, byte_str, 16) catch unreachable;
+    const fixture = try std.fs.cwd().readFileAlloc(allocator, "fixtures/ten-thousand-hashes/bytecode.txt", 4096);
+    defer allocator.free(fixture);
+    const hex = std.mem.trim(u8, fixture, " \t\r\n");
+    const code = try allocator.alloc(u8, hex.len / 2);
+    defer allocator.free(code);
+    _ = try std.fmt.hexToBytes(code, hex);
+    try testing.expect(code.len > 0x1a);
+
+    var expected_gas: u64 = 0;
+    inline for (.{ false, true }) |enabled| {
+        const Engine = Evm(.{
+            .enable_fusion = enabled,
+            .tracer_config = .{ .enabled = true },
+        });
+        var db = evm_mod.Database.init(allocator);
+        defer db.deinit();
+        var engine = try Engine.init(allocator, &db, .{
+            .chain_id = 1,
+            .number = 1,
+            .timestamp = 1000,
+            .difficulty = 100,
+            .gas_limit = 30_000_000,
+            .coinbase = Address.ZERO,
+            .base_fee = 0,
+            .blob_base_fee = 0,
+            .prev_randao = @splat(0),
+            .blob_versioned_hashes = &.{},
+        }, .{ .gas_limit = 10_000_000, .coinbase = Address.ZERO, .chain_id = 1 }, 0, Address.ZERO);
+        defer engine.deinit();
+
+        var result = engine.call(.{ .create = .{
+            .caller = Address.ZERO,
+            .value = 0,
+            .init_code = code,
+            .gas = 1_000_000,
+        } });
+        defer result.deinit(allocator);
+        if (!result.success) {
+            log.err("CREATE with fusion={} failed: {s}; remaining gas {}", .{
+                enabled, result.error_info orelse "no error returned", result.gas_left,
+            });
+            for (engine.tracer.recent_opcodes.read()) |entry| {
+                log.err("CREATE schedule[{}] opcode={s} gas={}", .{ entry.schedule_index, entry.opcode_name, entry.gas_before });
+            }
+        }
+        try testing.expect(result.success);
+        try testing.expect(result.created_address != null);
+        try testing.expectEqualSlices(u8, code[0x1a..], result.output);
+        if (enabled) {
+            try testing.expectEqual(expected_gas, result.gas_left);
+        } else {
+            expected_gas = result.gas_left;
+        }
     }
-    const deployment_bytecode = deployment_buf[0..deployment_len];
-    
-    log.info("Deployment bytecode is {} bytes", .{deployment_bytecode.len});
-    
-    // Extract the runtime code (after position 0x1a)
-    // The init code at 0x13 does PUSH1 0x1a (position 26) for CODECOPY
-    const runtime_start = 0x1a;
-    const runtime_bytecode = deployment_bytecode[runtime_start..];
-    
-    log.info("Runtime bytecode starts at 0x{x}, is {} bytes", .{runtime_start, runtime_bytecode.len});
-    
-    // Analyze the RUNTIME bytecode for fusion detection
-    const Bytecode = evm_mod.Bytecode(.{
-        .max_bytecode_size = 1024,
-        .fusions_enabled = true,
-    });
-    
-    var bc = try Bytecode.init(allocator, runtime_bytecode);
-    defer bc.deinit();
-    
-    // Pretty print the runtime bytecode to verify correct PCs
-    const pretty = try bc.pretty_print(allocator);
-    defer allocator.free(pretty);
-    log.info("Runtime bytecode analysis (first 2000 chars):\n{s}", .{pretty[0..@min(pretty.len, 2000)]});
-    
-    // Count fusions detected
-    var iter = bc.createIterator();
-    var fusion_count: u32 = 0;
-    var push_jump_count: u32 = 0;
-    
-    while (iter.next()) |op_data| {
-        switch (op_data) {
-            .push_jump_fusion => |data| {
-                push_jump_count += 1;
-                log.info("Found PUSH_JUMP fusion with value 0x{x}", .{data.value});
-            },
-            .push_jumpi_fusion => |data| {
-                fusion_count += 1;
-                log.info("Found PUSH_JUMPI fusion with value 0x{x}", .{data.value});
-            },
-            .push_add_fusion, .push_sub_fusion, .push_mul_fusion, 
-            .push_div_fusion, .push_and_fusion, .push_or_fusion, 
-            .push_xor_fusion => {
-                fusion_count += 1;
-            },
+}
+
+test "fusion: ten-thousand-hashes bytecode with PUSH+JUMP fusion" {
+    const allocator = testing.allocator;
+    const fixture = try std.fs.cwd().readFileAlloc(allocator, "fixtures/ten-thousand-hashes/bytecode.txt", 4096);
+    defer allocator.free(fixture);
+    const hex = std.mem.trim(u8, fixture, " \t\r\n");
+    const code = try allocator.alloc(u8, hex.len / 2);
+    defer allocator.free(code);
+    _ = try std.fmt.hexToBytes(code, hex);
+    try testing.expect(code.len > 0x1a);
+
+    const Bytecode = evm_mod.Bytecode(.{ .max_bytecode_size = 1024 });
+    var bytecode = try Bytecode.init(allocator, code[0x1a..]);
+    defer bytecode.deinit();
+    var iter = bytecode.createIterator();
+    var jumps: usize = 0;
+    while (iter.next()) |op| {
+        switch (op) {
+            .push_jump_fusion, .push_jumpi_fusion => jumps += 1,
             else => {},
         }
     }
-    
-    // We expect to find some PUSH+JUMP fusions in this bytecode
-    log.info("Found {} PUSH_JUMP fusions and {} other fusions", .{push_jump_count, fusion_count});
-    try testing.expect(push_jump_count > 0 or fusion_count > 0);
-    
-    // Now test execution with proper deployment and call flow
-    const Database = evm_mod.Database;
-    var db = Database.init(allocator);
-    defer db.deinit();
-    
-    const BlockInfo = evm_mod.BlockInfo;
-    const TransactionContext = evm_mod.TransactionContext;
-    const DefaultEvm = evm_mod.DefaultEvm;
-    
-    const block_info = BlockInfo{
-        .chain_id = 1,
-        .number = 1,
-        .timestamp = 1000,
-        .difficulty = 100,
-        .gas_limit = 30000000,
-        .coinbase = Address.ZERO,
-        .base_fee = 0,
-        .blob_base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
-        .blob_versioned_hashes = &.{},
-    };
-    
-    const tx_context = TransactionContext{
-        .gas_limit = 10000000,
-        .coinbase = Address.ZERO,
-        .chain_id = 1,
-    };
-    
-    var evm = try DefaultEvm.init(allocator, &db, block_info, tx_context, 0, Address.ZERO);
-    defer evm.deinit();
-    
-    // Step 1: Deploy the contract using CREATE (deployment bytecode)
-    log.info("Deploying contract with deployment bytecode...", .{});
-    const create_params = DefaultEvm.CallParams{
-        .create = .{
+    try testing.expect(jumps > 0);
+
+    // The 20,000-iteration fixture grows memory on every iteration.
+    const gas_limit = evm_mod.eips.TX_GAS_LIMIT_CAP;
+    const calldata = [_]u8{ 0x30, 0x62, 0x7b, 0x7c };
+    var expected_gas: u64 = 0;
+    inline for (.{ false, true }) |enabled| {
+        const Engine = Evm(.{
+            .enable_fusion = enabled,
+            .tracer_config = .{ .enabled = true },
+        });
+        var db = evm_mod.Database.init(allocator);
+        defer db.deinit();
+        var engine = try Engine.init(allocator, &db, .{
+            .chain_id = 1,
+            .number = 1,
+            .timestamp = 1000,
+            .difficulty = 100,
+            .gas_limit = 30_000_000,
+            .coinbase = Address.ZERO,
+            .base_fee = 0,
+            .blob_base_fee = 0,
+            .prev_randao = @splat(0),
+            .blob_versioned_hashes = &.{},
+        }, .{ .gas_limit = gas_limit, .coinbase = Address.ZERO, .chain_id = 1 }, 0, Address.ZERO);
+        defer engine.deinit();
+
+        var deployment = engine.call(.{ .create = .{
             .caller = Address.ZERO,
             .value = 0,
-            .init_code = deployment_bytecode,  // Use the full deployment bytecode as bytes
-            .gas = 1000000,
-        },
-    };
-    
-    const deploy_result = evm.call(create_params);
-    defer if (deploy_result.output.len > 0) allocator.free(deploy_result.output);
-    
-    // Deployment should succeed
-    try testing.expect(deploy_result.success);
-    
-    // Prefer created_address if available; older path used output[0..20]
-    const contract_address = if (deploy_result.created_address) |addr| addr else blk: {
-        try testing.expect(deploy_result.output.len == 20);
-        break :blk Address{ .bytes = deploy_result.output[0..20].* };
-    };
-    log.info("Contract deployed successfully with gas_left: {}", .{deploy_result.gas_left});
-    log.info("Contract deployed successfully", .{});
-    
-    // Step 2: Call the deployed contract's function
-    log.info("Calling contract function 0x30627b7c...", .{});
-    const calldata = [_]u8{0x30, 0x62, 0x7b, 0x7c}; // Function selector as bytes
-    
-    const call_params = DefaultEvm.CallParams{
-        .call = .{
+            .init_code = code,
+            .gas = 1_000_000,
+        } });
+        defer deployment.deinit(allocator);
+        try testing.expect(deployment.success);
+        const address = deployment.created_address orelse return error.MissingContractAddress;
+
+        var result = engine.call(.{ .call = .{
             .caller = Address.ZERO,
-            .to = contract_address,
+            .to = address,
             .value = 0,
             .input = &calldata,
-            .gas = 5000000,
-        },
-    };
-    
-    const call_result = evm.call(call_params);
-    
-    // The function should execute successfully with fusions in the runtime code
-    try testing.expect(call_result.success);
-    log.info("Function executed successfully with fusions enabled! Gas left: {}", .{call_result.gas_left});
+            .gas = gas_limit,
+        } });
+        defer result.deinit(allocator);
+        if (!result.success) {
+            log.err("CALL with fusion={} failed: {s}; remaining gas {}", .{
+                enabled, result.error_info orelse "no error returned", result.gas_left,
+            });
+            for (engine.tracer.recent_opcodes.read()) |entry| {
+                log.err("CALL schedule[{}] opcode={s} gas={} memory={}", .{
+                    entry.schedule_index, entry.opcode_name, entry.gas_before, entry.memory_size,
+                });
+            }
+        }
+        try testing.expect(result.success);
+        if (enabled) {
+            try testing.expectEqual(expected_gas, result.gas_left);
+        } else {
+            expected_gas = result.gas_left;
+        }
+    }
 }
 
 test "fusion: No fusion when disabled" {

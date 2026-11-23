@@ -129,6 +129,7 @@ pub fn Handlers(FrameType: type) type {
             const offset_usize: usize = @truncate(offset);
             const end_offset = offset_usize + 1;
 
+            // Fast path: in-bounds access needs no gas and no expansion
             if (end_offset > self.memory.size()) {
                 @branchHint(.unlikely);
                 const memory_expansion_cost = self.memory.get_expansion_cost(@truncate(end_offset));
@@ -177,35 +178,34 @@ pub fn Handlers(FrameType: type) type {
             const src_offset = self.stack.pop_unsafe(); // Second from top (src)
             const size = self.stack.pop_unsafe(); // Third from top (length)
 
-            // EIP-5656: a zero-size copy touches no memory, whatever the offsets.
+            // EIP-5656: zero-length copy charges no dynamic gas and never expands
+            // memory, regardless of the offsets (which may be arbitrarily large).
             if (size == 0) {
                 return dispatch_next.nextInstruction(FrameType, self, cursor, .MCOPY);
             }
 
-            // Check if offsets and size fit in u32 (memory limit)
+            // Check if offsets and size fit within the memory limit
             if (!checkMemoryLimit(dest_offset) or !checkMemoryLimit(src_offset) or !checkMemoryLimit(size)) {
                 self.afterComplete(.MCOPY);
                 return Error.OutOfBounds;
             }
 
-            const dest_u32 = @as(u32, @intCast(dest_offset));
-            const src_u32 = @as(u32, @intCast(src_offset));
-            const size_u24 = @as(u32, @intCast(size));
+            const dst = @as(usize, @intCast(dest_offset));
+            const src = @as(usize, @intCast(src_offset));
+            const len = @as(usize, @intCast(size));
 
-            // Calculate dynamic gas cost (static gas handled by JUMPDEST)
-            const words = (size_u24 + 31) >> 5;
-            const copy_gas_cost = words * GasConstants.CopyGas; // Only dynamic copy cost
-
-            // Calculate memory expansion cost for both source and destination
-            const src_end = src_u32 + size_u24;
-            const dest_end = dest_u32 + size_u24;
-            if (!checkMemoryLimit(src_end) or !checkMemoryLimit(dest_end)) {
+            // Both ranges are covered by one expansion to the furthest end.
+            // Each term is <= MEMORY_LIMIT, so the sum cannot overflow usize.
+            const max_end = @max(dst, src) + len;
+            if (!checkMemoryLimit(max_end)) {
                 self.afterComplete(.MCOPY);
                 return Error.OutOfBounds;
             }
-            const src_expansion_cost = self.memory.get_expansion_cost(src_end);
-            const dest_expansion_cost = self.memory.get_expansion_cost(dest_end);
-            const memory_expansion_cost = @max(src_expansion_cost, dest_expansion_cost);
+
+            // Calculate dynamic gas cost (static gas handled by JUMPDEST)
+            const words: u64 = @intCast((len + 31) >> 5);
+            const copy_gas_cost = words * GasConstants.CopyGas;
+            const memory_expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(max_end)));
 
             const total_gas_cost = copy_gas_cost + memory_expansion_cost;
             if (self.gas_remaining < total_gas_cost) {
@@ -214,37 +214,23 @@ pub fn Handlers(FrameType: type) type {
             }
             self.gas_remaining -= @intCast(total_gas_cost);
 
-            // Memory expands over both ranges before the copy; source bytes beyond the old
-            // size read as zero.
-            self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @max(src_end, dest_end)) catch {
-                self.afterComplete(.MCOPY);
-                return Error.AllocationError;
-            };
+            if (max_end > self.memory.size()) {
+                // EVM memory always grows to a 32-byte word boundary
+                const word_aligned_end = (max_end + 31) & ~@as(usize, 31);
+                self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(word_aligned_end))) catch |err| switch (err) {
+                    error.MemoryOverflow, error.OutOfBounds => {
+                        self.afterComplete(.MCOPY);
+                        return Error.OutOfBounds;
+                    },
+                    error.OutOfMemory => {
+                        self.afterComplete(.MCOPY);
+                        return Error.AllocationError;
+                    },
+                };
+            }
 
-            // For overlapping memory regions, we need to copy via a temporary buffer
-            // First, read the source data
-            const src_data = self.memory.get_slice(src_u32, size_u24) catch {
-                self.afterComplete(.MCOPY);
-                return Error.OutOfBounds;
-            };
-
-            // Create a temporary buffer to handle overlapping regions correctly
-            const temp_buffer = self.getEvm().getCallArenaAllocator().alloc(u8, size_u24) catch {
-                self.afterComplete(.MCOPY);
-                return Error.AllocationError;
-            };
-
-            @memcpy(temp_buffer, src_data);
-
-            // Write to destination
-            self.memory.set_data_evm(self.getEvm().getCallArenaAllocator(), dest_u32, temp_buffer) catch {
-                self.getEvm().getCallArenaAllocator().free(temp_buffer);
-                self.afterComplete(.MCOPY);
-                return Error.AllocationError;
-            };
-
-            // Free the temporary buffer before tail call
-            self.getEvm().getCallArenaAllocator().free(temp_buffer);
+            // Overlap-safe in-place copy: no scratch allocation
+            self.memory.copy_within(dst, src, len);
 
             return dispatch_next.nextInstruction(FrameType, self, cursor, .MCOPY);
         }

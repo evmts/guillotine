@@ -6,39 +6,102 @@ const Address = primitives.Address.Address;
 
 pub const CreatedContracts = struct {
     created: std.AutoHashMap(Address, void),
+    /// Addresses in the order they were first marked since the last clear. Each one is
+    /// new to `created`, so truncating this list and removing the dropped addresses
+    /// restores `created` exactly (see `checkpoint` / `revertTo`).
+    insertions: std.ArrayList(Address),
     allocator: std.mem.Allocator,
+
+    /// Position in the insertion log; restore it with `revertTo`.
+    pub const Checkpoint = struct { len: usize };
 
     pub inline fn init(allocator: std.mem.Allocator) CreatedContracts {
         return CreatedContracts{
             .created = std.AutoHashMap(Address, void).init(allocator),
+            .insertions = std.ArrayList(Address){},
             .allocator = allocator,
         };
     }
 
     pub inline fn deinit(self: *CreatedContracts) void {
         self.created.deinit();
+        self.insertions.deinit(self.allocator);
     }
 
-    pub inline fn mark_created(self: *CreatedContracts, address: Address) !void {
-        try self.created.put(address, {});
+    pub fn mark_created(self: *CreatedContracts, address: Address) !void {
+        try self.insertions.ensureUnusedCapacity(self.allocator, 1);
+        const gop = try self.created.getOrPut(address);
+        if (gop.found_existing) return;
+        self.insertions.appendAssumeCapacity(address);
     }
 
     pub inline fn was_created_in_tx(self: *const CreatedContracts, address: Address) bool {
         return self.created.contains(address);
     }
-    
+
     pub inline fn count(self: *const CreatedContracts) u32 {
         return @intCast(self.created.count());
     }
-    
+
     pub inline fn clear(self: *CreatedContracts) void {
         self.created.clearAndFree();
+        self.insertions.clearRetainingCapacity();
     }
-    
+
     pub inline fn remove(self: *CreatedContracts, address: Address) bool {
         return self.created.remove(address);
     }
+
+    /// Capture the current set. O(1).
+    pub inline fn checkpoint(self: *const CreatedContracts) Checkpoint {
+        return .{ .len = self.insertions.items.len };
+    }
+
+    /// Unmark every address first marked after `cp`. O(k) in the addresses dropped.
+    pub fn revertTo(self: *CreatedContracts, cp: Checkpoint) void {
+        if (cp.len >= self.insertions.items.len) return;
+        for (self.insertions.items[cp.len..]) |address| {
+            _ = self.created.remove(address);
+        }
+        self.insertions.shrinkRetainingCapacity(cp.len);
+    }
 };
+
+test "created contracts revertTo unmarks only addresses first marked after the checkpoint" {
+    const allocator = std.testing.allocator;
+    var created = CreatedContracts.init(allocator);
+    defer created.deinit();
+
+    const before: Address = .{ .bytes = [_]u8{1} ++ [_]u8{0} ** 19 };
+    const after: Address = .{ .bytes = [_]u8{2} ++ [_]u8{0} ** 19 };
+    const inner: Address = .{ .bytes = [_]u8{3} ++ [_]u8{0} ** 19 };
+
+    try created.mark_created(before);
+    const outer_cp = created.checkpoint();
+    // Re-marking an address already present must not be undone by the revert.
+    try created.mark_created(before);
+    try created.mark_created(after);
+    const inner_cp = created.checkpoint();
+    try created.mark_created(inner);
+
+    created.revertTo(inner_cp);
+    try std.testing.expect(!created.was_created_in_tx(inner));
+    try std.testing.expect(created.was_created_in_tx(after));
+
+    created.revertTo(outer_cp);
+    try std.testing.expect(created.was_created_in_tx(before));
+    try std.testing.expect(!created.was_created_in_tx(after));
+    try std.testing.expectEqual(@as(u32, 1), created.count());
+
+    // Marking again after a revert records a fresh insertion that can itself be reverted.
+    try created.mark_created(after);
+    try std.testing.expect(created.was_created_in_tx(after));
+    created.revertTo(outer_cp);
+    try std.testing.expect(!created.was_created_in_tx(after));
+
+    created.clear();
+    try std.testing.expectEqual(@as(usize, 0), created.checkpoint().len);
+}
 
 test "created contracts initialization" {
     const allocator = std.testing.allocator;

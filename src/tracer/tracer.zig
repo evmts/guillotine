@@ -387,11 +387,11 @@ pub const Tracer = struct {
             last_step.memory_size_after = @intCast(frame.memory.size());
         }
 
-        if (next_cursor[0] != .opcode_handler or next_cursor[0].opcode_handler != next_handler) {
+        if (next_cursor[0].opcode_handler != next_handler) {
             self.panic("[SCHEDULE] Next handler mismatch at sched_idx={d}", .{self.schedule_index});
         }
 
-        if (next_cursor[0] == .opcode_handler) {
+        {
             const next_opcode_value = self.getOpcodeFromHandler(@TypeOf(frame.*), next_handler);
             if (next_opcode_value) |opcode_int| {
                 if (opcode_int <= 0xff) {

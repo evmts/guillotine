@@ -3,6 +3,60 @@ const FrameConfig = @import("../frame/frame_config.zig").FrameConfig;
 const GasConstants = @import("voltaire").GasConstants;
 const log = @import("../log.zig");
 
+/// (a + b) mod n with arbitrary-precision intermediate; n == 0 yields 0.
+pub fn addmodWord(comptime T: type, a: T, b: T, n: T) T {
+    if (n == 0) return 0;
+    if (a < n and b < n) {
+        @branchHint(.likely);
+        // a + b < 2n, so at most one subtraction of n is needed. When the add
+        // overflows, the true sum is 2^bits + sum[0] and the remainder is
+        // 2^bits + sum[0] - n, which equals sum[0] -% n in mod 2^bits arithmetic.
+        const sum = @addWithOverflow(a, b);
+        if (sum[1] == 1 or sum[0] >= n) return sum[0] -% n;
+        return sum[0];
+    }
+    const Wide = std.meta.Int(.unsigned, @bitSizeOf(T) + 1);
+    return @intCast((@as(Wide, a) + @as(Wide, b)) % @as(Wide, n));
+}
+
+/// (a * b) mod n with a double-width product; n == 0 yields 0.
+pub fn mulmodWord(comptime T: type, a: T, b: T, n: T) T {
+    if (n == 0) return 0;
+    if (a == 0 or b == 0) return 0;
+    const Wide = std.meta.Int(.unsigned, 2 * @bitSizeOf(T));
+    return @intCast((@as(Wide, a) * @as(Wide, b)) % @as(Wide, n));
+}
+
+/// base ** exponent mod 2^bits.
+pub fn expWord(comptime T: type, base: T, exponent: T) T {
+    const bits = @bitSizeOf(T);
+    if (exponent == 0) return 1;
+    if (exponent == 1) return base;
+    if (base == 0) return 0;
+    if (base == 1) return 1;
+    if ((base & 1) == 0) {
+        // base = 2^tz * odd, so base^e is a multiple of 2^(tz*e); tz >= 1 here.
+        if (exponent >= bits) return 0;
+        const tz: u32 = @ctz(base);
+        const shift = tz * @as(u32, @intCast(exponent));
+        if (shift >= bits) return 0;
+        if ((base & (base - 1)) == 0) {
+            // base is a power of two: base^e = 2^(tz*e)
+            return @as(T, 1) << @intCast(shift);
+        }
+    }
+    var result: T = 1;
+    var square = base;
+    var remaining = exponent;
+    while (true) {
+        if ((remaining & 1) == 1) result *%= square;
+        remaining >>= 1;
+        if (remaining == 0) break;
+        square *%= square;
+    }
+    return result;
+}
+
 /// Arithmetic opcode handlers for the EVM stack frame.
 /// These are generic structs that return static handlers for a given FrameType.
 pub fn Handlers(FrameType: type) type {
@@ -161,28 +215,7 @@ pub fn Handlers(FrameType: type) type {
             const addend1 = self.stack.pop_unsafe(); // Top of stack (a)
             const addend2 = self.stack.pop_unsafe(); // Second on stack (b)
             const modulus = self.stack.pop_unsafe(); // Third on stack (N)
-            var result: WordType = 0;
-            if (modulus == 0) {
-                result = 0;
-            } else {
-                // This implementation correctly handles modular addition with potential u256 overflow.
-                // It first reduces the addends modulo N, then performs a wrapping addition.
-                // The `if (sum[1] == 1 or r >= modulus)` check handles two cases:
-                // 1. `sum[1] == 1`: The addition of the reduced addends overflowed u256.
-                // 2. `r >= modulus`: The sum is valid but still needs to be wrapped by the modulus.
-                // In both cases, a single subtraction of the modulus yields the correct result.
-                const addend1_reduced = addend1 % modulus;
-                const addend2_reduced = addend2 % modulus;
-                const sum = @addWithOverflow(addend1_reduced, addend2_reduced);
-                var r = sum[0];
-                // If overflow occurred or r >= modulus, subtract once
-                if (sum[1] == 1 or r >= modulus) {
-                    @branchHint(.unlikely);
-                    r -%= modulus;
-                }
-                result = r;
-            }
-            self.stack.push_unsafe(result);
+            self.stack.push_unsafe(addmodWord(WordType, addend1, addend2, modulus));
             return dispatch_next.nextInstruction(FrameType, self, cursor, .ADDMOD);
         }
 
@@ -192,72 +225,18 @@ pub fn Handlers(FrameType: type) type {
             const factor1 = self.stack.pop_unsafe(); // Top of stack (a)
             const factor2 = self.stack.pop_unsafe(); // Second on stack (b)
             const modulus = self.stack.pop_unsafe(); // Third on stack (N)
-            var result: WordType = undefined;
-            if (modulus == 0) {
-                result = 0;
-            } else {
-                result = mulmod_safe(factor1, factor2, modulus);
-            }
-            self.stack.push_unsafe(result);
+            self.stack.push_unsafe(mulmodWord(WordType, factor1, factor2, modulus));
             return dispatch_next.nextInstruction(FrameType, self, cursor, .MULMOD);
         }
 
         /// Safe modular multiplication using double-width arithmetic to prevent overflow.
-        fn mulmod_safe(factor1: WordType, factor2: WordType, modulus: WordType) WordType {
-            if (modulus == 0) return 0;
-            if (factor1 == 0 or factor2 == 0) return 0;
-            if (modulus == 1) return 0;
-
-            // Reduce operands first
-            const factor1_mod = factor1 % modulus;
-            const factor2_mod = factor2 % modulus;
-
-            // Use double-width arithmetic to prevent overflow
-            if (WordType == u256) {
-                const wide_factor1 = @as(u512, factor1_mod);
-                const wide_factor2 = @as(u512, factor2_mod);
-                const wide_modulus = @as(u512, modulus);
-                const wide_product = (wide_factor1 * wide_factor2) % wide_modulus;
-                return @intCast(wide_product);
-            } else {
-                // For other word types, fall back to addition-based approach
-                return mulmod_by_addition(factor1_mod, factor2_mod, modulus);
-            }
-        }
-
-        /// Fallback modular multiplication using repeated addition for non-u256 types.
-        fn mulmod_by_addition(factor1: WordType, factor2: WordType, modulus: WordType) WordType {
-            var result: WordType = 0;
-            var base = factor1 % modulus;
-            var multiplier = factor2 % modulus;
-
-            while (multiplier > 0) {
-                if (multiplier & 1 == 1) {
-                    result = addmod_safe(result, base, modulus);
-                }
-                multiplier = std.math.shr(WordType, multiplier, 1);
-                if (multiplier > 0) {
-                    base = addmod_safe(base, base, modulus);
-                }
-            }
-
-            return result;
+        pub fn mulmod_safe(factor1: WordType, factor2: WordType, modulus: WordType) WordType {
+            return mulmodWord(WordType, factor1, factor2, modulus);
         }
 
         /// Safe modular addition that prevents overflow.
-        fn addmod_safe(addend1: WordType, addend2: WordType, modulus: WordType) WordType {
-            const addend1_mod = addend1 % modulus;
-            const addend2_mod = addend2 % modulus;
-
-            // Check if addition would overflow
-            if (addend1_mod > modulus - addend2_mod) {
-                @branchHint(.unlikely);
-                // Overflow case: (addend1 + addend2) = modulus + (addend1 + addend2 - modulus)
-                return (addend1_mod - (modulus - addend2_mod));
-            } else {
-                // No overflow case
-                return (addend1_mod + addend2_mod) % modulus;
-            }
+        pub fn addmod_safe(addend1: WordType, addend2: WordType, modulus: WordType) WordType {
+            return addmodWord(WordType, addend1, addend2, modulus);
         }
 
         /// EXP opcode (0x0a) - Exponential operation.
@@ -271,6 +250,7 @@ pub fn Handlers(FrameType: type) type {
             // The 10 gas base is static and already charged with the basic block
             // (OPCODE_INFO[EXP].gas_cost); the handler charges only the dynamic part.
             // Verified branchless `@clz` byte-length (replaces 32-iteration shift loop).
+            // Gas is charged before any fast path so every path pays the same.
             const verified_ops = @import("../verified_ops.zig");
             const exp_bytes: u32 = if (comptime WordType == u256)
                 verified_ops.expGasByteLenFast(exponent)
@@ -286,17 +266,7 @@ pub fn Handlers(FrameType: type) type {
                 return Error.OutOfGas;
             }
 
-            // Calculate base^exponent with wrapping multiplication (mod 2^256)
-            var result: WordType = 1;
-            var base_working = base;
-            var exponent_working = exponent;
-            while (exponent_working > 0) : (exponent_working = std.math.shr(WordType, exponent_working, 1)) {
-                if (exponent_working & 1 == 1) {
-                    result *%= base_working;
-                }
-                base_working *%= base_working;
-            }
-            self.stack.set_top_unsafe(result);
+            self.stack.set_top_unsafe(expWord(WordType, base, exponent));
             return dispatch_next.nextInstruction(FrameType, self, cursor, .EXP);
         }
 
@@ -1400,4 +1370,50 @@ test "SUB opcode - ERC20 bug reproduction (2^64 - 1)" {
     const expected: u256 = 0xffffffffffffffff; // 18446744073709551615
 
     try testing.expectEqual(expected, result);
+}
+
+test "addmodWord - overflow fast path at modulus boundaries" {
+    const max = std.math.maxInt(u256);
+    // n = 2^256 - 1: (n-1) + (n-1) = 2n - 2 ≡ n - 2 (mod n)
+    try testing.expectEqual(max - 2, addmodWord(u256, max - 1, max - 1, max));
+    // n = 2^255 + 1: (n-1) + (n-1) = 2n - 2 ≡ n - 2 (mod n)
+    const n: u256 = (@as(u256, 1) << 255) + 1;
+    try testing.expectEqual(n - 2, addmodWord(u256, n - 1, n - 1, n));
+    // Unreduced operands take the widened path
+    try testing.expectEqual(@as(u256, (max % 7 + max % 7) % 7), addmodWord(u256, max, max, 7));
+    try testing.expectEqual(@as(u256, 0), addmodWord(u256, 5, 6, 0));
+}
+
+test "mulmodWord - single 512-bit reduction" {
+    const max = std.math.maxInt(u256);
+    try testing.expectEqual(@as(u256, 0), mulmodWord(u256, max, max, 0));
+    try testing.expectEqual(@as(u256, 0), mulmodWord(u256, 0, max, 7));
+    // Full-width operands: compare against a direct u512 reference
+    const expected: u256 = @intCast((@as(u512, max) * @as(u512, max)) % 12);
+    try testing.expectEqual(expected, mulmodWord(u256, max, max, 12));
+    try testing.expectEqual(@as(u256, 4), mulmodWord(u256, 10, 20, 7));
+}
+
+test "expWord - closed-form fast paths" {
+    try testing.expectEqual(@as(u256, 1), expWord(u256, 0, 0));
+    try testing.expectEqual(@as(u256, 0), expWord(u256, 0, 5));
+    try testing.expectEqual(@as(u256, 1), expWord(u256, 1, std.math.maxInt(u256)));
+    try testing.expectEqual(@as(u256, 1) << 255, expWord(u256, 2, 255));
+    try testing.expectEqual(@as(u256, 0), expWord(u256, 2, 256));
+    try testing.expectEqual(@as(u256, 1) << 248, expWord(u256, 256, 31));
+    try testing.expectEqual(@as(u256, 0), expWord(u256, 256, 32));
+    // 6^200: tz * e = 200 < 256, so the loop runs; 6^256 must vanish
+    var reference: u256 = 1;
+    for (0..200) |_| reference *%= 6;
+    try testing.expectEqual(reference, expWord(u256, 6, 200));
+    try testing.expectEqual(@as(u256, 0), expWord(u256, 6, 256));
+    // Odd base with huge exponent: 3^(2^256 - 1) mod 2^256
+    var odd: u256 = 1;
+    var square: u256 = 3;
+    var remaining: u256 = std.math.maxInt(u256);
+    while (remaining > 0) : (remaining >>= 1) {
+        if (remaining & 1 == 1) odd *%= square;
+        square *%= square;
+    }
+    try testing.expectEqual(odd, expWord(u256, 3, std.math.maxInt(u256)));
 }

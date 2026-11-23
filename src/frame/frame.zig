@@ -2,9 +2,6 @@ const std = @import("std");
 const builtin = @import("builtin");
 const memory_mod = @import("../memory/memory.zig");
 const stack_mod = @import("../stack/stack.zig");
-const opcode_data = @import("../opcodes/opcode_data.zig");
-const Opcode = opcode_data.Opcode;
-const OpcodeSynthetic = @import("../opcodes/opcode_synthetic.zig").OpcodeSynthetic;
 pub const FrameConfig = @import("frame_config.zig").FrameConfig;
 const Database = @import("../storage/database.zig").Database;
 const Account = @import("../storage/database.zig").Account;
@@ -209,6 +206,47 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
             };
         }
 
+        /// Initialize a frame over caller-owned (pooled) stack and memory buffers.
+        ///
+        /// `stack_buf` must hold at least `Stack.stack_capacity` words. `mem_buf` is emptied
+        /// (capacity retained) and grows only through `pool_allocator`, which must own it.
+        /// Release with `deinitPooled`; the pool keeps ownership of both buffers.
+        pub fn initPooled(
+            stack_buf: [*]align(64) WordType,
+            mem_buf: *std.ArrayList(u8),
+            pool_allocator: std.mem.Allocator,
+            gas_remaining: GasType,
+            caller: Address,
+            value: WordType,
+            calldata_input: []const u8,
+            evm_ptr: *anyopaque,
+        ) Error!Self {
+            const evm = @as(*EvmType, @ptrCast(@alignCast(evm_ptr)));
+            return Self{
+                .stack = Stack.initBorrowed(stack_buf, null),
+                .gas_remaining = std.math.cast(GasType, @max(gas_remaining, 0)) orelse return Error.InvalidAmount,
+                .dispatch = Dispatch{ .cursor = undefined }, // Will be set during interpret
+                .memory = Memory.init_pooled(mem_buf, pool_allocator),
+                .evm_ptr = evm_ptr,
+                .database = @as(*anyopaque, @ptrCast(evm.database)),
+                .contract_address = Address.ZERO_ADDRESS,
+                .jump_table = &Dispatch.JumpTable{ .entries = &[_]Dispatch.JumpTable.JumpTableEntry{} },
+                .caller = caller,
+                .value = value,
+                .calldata_slice = calldata_input,
+                .code = &[_]u8{}, // Will be set during interpret
+                .authorized_address = null,
+                .instruction_counter = config.createLoopSafetyCounter().init(config.loop_quota orelse 0),
+                .output_data = &[_]u8{},
+            };
+        }
+
+        /// Release a frame created by `initPooled`. Empties the pooled memory buffer
+        /// (capacity retained) and frees nothing; the pool owns the stack and memory.
+        pub fn deinitPooled(self: *Self) void {
+            self.memory.reset_for_reuse();
+        }
+
         /// Clean up all frame resources.
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
             (&self.getEvm().tracer).debug("Frame.deinit: Starting cleanup", .{});
@@ -255,24 +293,20 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
             self.jump_table = jump_table;
             const schedule = dispatch_schedule.items;
 
-            var start_index: usize = 0;
-            var first_block_gas_amount: u32 = 0;
+            const start_index: usize = @intFromBool(dispatch_schedule.has_first_block_gas);
+            if (schedule.len <= start_index) return Error.InvalidOpcode;
 
-            (&self.getEvm().tracer).assert(schedule.len > 0, "Fatal unexpected error: the opcode execution schedule is length 0 which should be impossible");
-            const stop_handler = Self.opcode_handlers[@intFromEnum(Opcode.STOP)];
-            (&self.getEvm().tracer).assert(schedule.len >= 2 or schedule[schedule.len - 1].opcode_handler != stop_handler or schedule[schedule.len - 2].opcode_handler != stop_handler, "Frame.interpret: Bytecode stream does not end with 2 stop handlers");
-
-            // Validate the schedule structure (for better error reporting)
-            (&self.getEvm().tracer).assert(dispatch_schedule.validate(), "Frame.interpret: Invalid dispatch schedule structure");
-
-            // Check if schedule starts with first_block_gas (it may not if gas is 0)
-            if (schedule.len > 0 and schedule[0] == .first_block_gas) {
-                const meta = schedule[0].first_block_gas;
-                if (meta.gas > 0) {
-                    first_block_gas_amount = meta.gas;
-                    try self.consumeGasChecked(@intCast(meta.gas));
+            if (comptime builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
+                if (!dispatch_schedule.validate()) {
+                    (&evm.tracer).debug("Frame.interpret: Invalid dispatch schedule structure", .{});
+                    return Error.InvalidOpcode;
                 }
-                
+            }
+
+            if (dispatch_schedule.has_first_block_gas) {
+                const meta = schedule[0].first_block_gas;
+                if (meta.gas > 0) try self.consumeGasChecked(meta.gas);
+
                 // Validate stack requirements for the first block using verified single-compare guard
                 const verified_ops = @import("../verified_ops.zig");
                 const current_stack_size: u32 = @intCast(self.stack.size());
@@ -289,8 +323,6 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
                         return Error.StackOverflow;
                     },
                 }
-                
-                start_index = 1;
             }
 
             self.dispatch = Dispatch{
@@ -380,7 +412,7 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
             return @as(*Database, @ptrCast(@alignCast(self.database)));
         }
 
-        /// Validate that the current dispatch cursor points to the expected handler and metadata.
+        /// Validate the current handler pointer and opcode-specific stack requirements.
         /// This provides extra validation that cursor logic is working as expected.
         /// Only runs in Debug and ReleaseSafe modes, no-op in ReleaseSmall/ReleaseFast.
         pub inline fn validateOpcodeHandler(

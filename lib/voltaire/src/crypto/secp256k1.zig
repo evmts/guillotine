@@ -26,6 +26,84 @@ pub const SECP256K1_B: u256 = 7;
 pub const SECP256K1_GX: u256 = 0x79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798;
 pub const SECP256K1_GY: u256 = 0x483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8;
 
+const field_fold: u64 = 0x1000003D1;
+
+// Add and subtract canonical field elements.
+inline fn feAdd(a: u256, b: u256) u256 {
+    const sum = @addWithOverflow(a, b);
+    if (sum[1] != 0) return sum[0] +% field_fold;
+    return if (sum[0] >= SECP256K1_P) sum[0] -% SECP256K1_P else sum[0];
+}
+
+inline fn feSub(a: u256, b: u256) u256 {
+    const diff = @subWithOverflow(a, b);
+    return if (diff[1] != 0) diff[0] +% SECP256K1_P else diff[0];
+}
+
+fn feMul(a: u256, b: u256) u256 {
+    const product = @as(u512, a) *% @as(u512, b);
+
+    // Each high word represents a factor of 2^256, congruent to field_fold.
+    // After the first fold, at most 33 bits remain above bit 255.
+    const low: u256 = @truncate(product);
+    const high: u256 = @truncate(product >> 256);
+    const folded = @as(u320, high) *% field_fold +% low;
+    const carry: u64 = @truncate(folded >> 256);
+    const sum = @addWithOverflow(@as(u256, @truncate(folded)), @as(u128, carry) *% field_fold);
+
+    // A carry here leaves at most 66 low bits, so the final fold fits.
+    const reduced = if (sum[1] != 0) sum[0] +% field_fold else sum[0];
+    return if (reduced >= SECP256K1_P) reduced -% SECP256K1_P else reduced;
+}
+
+inline fn feSqr(a: u256) u256 {
+    return feMul(a, a);
+}
+
+fn feSqrN(a: u256, n: usize) u256 {
+    var result = a;
+    for (0..n) |_| result = feSqr(result);
+    return result;
+}
+
+// Build powers a^(2^k-1) and the common 246-bit exponent prefix of
+// p-2 and (p+1)/4 (223 one bits, a zero bit, then 22 one bits).
+fn fePowerPrefix(a: u256, x2: u256) u256 {
+    const x3 = feMul(feSqr(x2), a);
+    const x6 = feMul(feSqrN(x3, 3), x3);
+    const x9 = feMul(feSqrN(x6, 3), x3);
+    const x11 = feMul(feSqrN(x9, 2), x2);
+    const x22 = feMul(feSqrN(x11, 11), x11);
+    const x44 = feMul(feSqrN(x22, 22), x22);
+    const x88 = feMul(feSqrN(x44, 44), x44);
+    const x176 = feMul(feSqrN(x88, 88), x88);
+    const x220 = feMul(feSqrN(x176, 44), x44);
+    const x223 = feMul(feSqrN(x220, 3), x3);
+    return feMul(feSqrN(x223, 23), x22);
+}
+
+fn feInv(a: u256) u256 {
+    // a is nonzero. Fermat's theorem gives a^(p-2). Append 0000101101
+    // to the common prefix for 255 squarings and 15 multiplications.
+    const x2 = feMul(feSqr(a), a);
+    const prefix = fePowerPrefix(a, x2);
+    const t = feMul(feSqrN(prefix, 5), a);
+    const u = feMul(feSqrN(t, 3), x2);
+    return feMul(feSqrN(u, 2), a);
+}
+
+fn feSqrt(a: u256) ?u256 {
+    // p ≡ 3 mod 4. Append 00001100 for a^((p+1)/4).
+    const x2 = feMul(feSqr(a), a);
+    const prefix = fePowerPrefix(a, x2);
+    const root = feSqrN(feMul(feSqrN(prefix, 6), x2), 2);
+    return if (feSqr(root) == a) root else null;
+}
+
+fn curveY2(x: u256) u256 {
+    return feAdd(feMul(feSqr(x), x), SECP256K1_B);
+}
+
 /// Affine point on secp256k1 curve
 pub const AffinePoint = struct {
     x: u256,
@@ -44,13 +122,7 @@ pub const AffinePoint = struct {
 
     pub fn isOnCurve(self: Self) bool {
         if (self.infinity) return true;
-
-        // Check y² = x³ + 7 mod p
-        const y2 = unauditedMulmod(self.y, self.y, SECP256K1_P);
-        const x3 = unauditedMulmod(unauditedMulmod(self.x, self.x, SECP256K1_P), self.x, SECP256K1_P);
-        const right = unauditedAddmod(x3, SECP256K1_B, SECP256K1_P);
-
-        return y2 == right;
+        return feSqr(self.y) == curveY2(self.x);
     }
 
     pub fn negate(self: Self) Self {
@@ -107,7 +179,12 @@ pub const AffinePoint = struct {
 
     pub fn scalarMul(self: Self, scalar: u256) Self {
         if (scalar == 0 or self.infinity) return Self.zero();
+        if (self.x < SECP256K1_P and self.y < SECP256K1_P) {
+            return mulDoubleBase(scalar, self, 0, Self.zero()).toAffine();
+        }
 
+        // Public coordinates can be noncanonical. Preserve the affine API's
+        // raw-coordinate equality and infinity behavior in that case.
         var result = Self.zero();
         var addend = self;
         var k = scalar;
@@ -122,6 +199,117 @@ pub const AffinePoint = struct {
         return result;
     }
 };
+
+// (X/Z², Y/Z³) with Z=0 representing infinity.
+const JacobianPoint = struct {
+    x: u256,
+    y: u256,
+    z: u256,
+
+    const infinity: JacobianPoint = .{ .x = 0, .y = 0, .z = 0 };
+
+    fn fromAffine(point: AffinePoint) JacobianPoint {
+        if (point.infinity) return infinity;
+        return .{ .x = point.x, .y = point.y, .z = 1 };
+    }
+
+    fn double(self: JacobianPoint) JacobianPoint {
+        if (self.z == 0 or self.y == 0) return infinity;
+
+        // For a=0, the scaled slope is 3X² and Z' = 2YZ (3M + 4S).
+        const xx = feSqr(self.x);
+        const yy = feSqr(self.y);
+        const yyyy = feSqr(yy);
+        const xyy = feMul(self.x, yy);
+        const twice_xyy = feAdd(xyy, xyy);
+        const s = feAdd(twice_xyy, twice_xyy);
+        const m = feAdd(feAdd(xx, xx), xx);
+        const x = feSub(feSqr(m), feAdd(s, s));
+        const twice_yyyy = feAdd(yyyy, yyyy);
+        const four_yyyy = feAdd(twice_yyyy, twice_yyyy);
+        const eight_yyyy = feAdd(four_yyyy, four_yyyy);
+        return .{
+            .x = x,
+            .y = feSub(feMul(m, feSub(s, x)), eight_yyyy),
+            .z = feMul(feAdd(self.y, self.y), self.z),
+        };
+    }
+
+    fn addAffine(self: JacobianPoint, rhs: AffinePoint) JacobianPoint {
+        if (rhs.infinity) return self;
+        if (self.z == 0) return fromAffine(rhs);
+
+        const zz = feSqr(self.z);
+        const x2 = feMul(rhs.x, zz);
+        const s2 = feMul(feMul(rhs.y, zz), self.z);
+        return self.addScaled(self.x, self.y, x2, s2, self.z);
+    }
+
+    fn add(self: JacobianPoint, rhs: JacobianPoint) JacobianPoint {
+        if (self.z == 0) return rhs;
+        if (rhs.z == 0) return self;
+
+        const zz1 = feSqr(self.z);
+        const zz2 = feSqr(rhs.z);
+        const x1 = feMul(self.x, zz2);
+        const x2 = feMul(rhs.x, zz1);
+        const s1 = feMul(feMul(self.y, zz2), rhs.z);
+        const s2 = feMul(feMul(rhs.y, zz1), self.z);
+        return self.addScaled(x1, s1, x2, s2, feMul(self.z, rhs.z));
+    }
+
+    fn addScaled(self: JacobianPoint, x1: u256, s1: u256, x2: u256, s2: u256, z: u256) JacobianPoint {
+        const h = feSub(x2, x1);
+        const r = feSub(s2, s1);
+        if (h == 0) return if (r == 0) self.double() else infinity;
+
+        const hh = feSqr(h);
+        const hhh = feMul(h, hh);
+        const v = feMul(x1, hh);
+        const x = feSub(feSub(feSqr(r), hhh), feAdd(v, v));
+        return .{
+            .x = x,
+            .y = feSub(feMul(r, feSub(v, x)), feMul(s1, hhh)),
+            .z = feMul(z, h),
+        };
+    }
+
+    fn toAffine(self: JacobianPoint) AffinePoint {
+        if (self.z == 0) return AffinePoint.zero();
+        if (self.z == 1) return .{ .x = self.x, .y = self.y, .infinity = false };
+        const inv = feInv(self.z);
+        const inv2 = feSqr(inv);
+        return .{
+            .x = feMul(self.x, inv2),
+            .y = feMul(self.y, feMul(inv2, inv)),
+            .infinity = false,
+        };
+    }
+};
+
+fn mulDoubleBase(scalar1: u256, p1: AffinePoint, scalar2: u256, p2: AffinePoint) JacobianPoint {
+    // Precompute the mixed-add table for Shamir's trick. A joint digit
+    // of 3 is possible only where the scalars have a common set bit.
+    const p12 = if (scalar1 & scalar2 != 0)
+        JacobianPoint.fromAffine(p1).addAffine(p2).toAffine()
+    else
+        AffinePoint.zero();
+    const points = [_]AffinePoint{ AffinePoint.zero(), p1, p2, p12 };
+
+    var result = JacobianPoint.infinity;
+    var remaining = 256 - @clz(scalar1 | scalar2);
+    while (remaining > 0) {
+        remaining -= 1;
+        const shift: u8 = @intCast(remaining);
+        const low: u1 = @truncate(scalar1 >> shift);
+        const high: u1 = @truncate(scalar2 >> shift);
+        const digit = (@as(u2, high) << 1) | low;
+        result = result.double();
+        if (digit != 0) result = result.addAffine(points[digit]);
+    }
+
+    return result;
+}
 
 /// ⚠️ UNAUDITED - NOT SECURITY AUDITED ⚠️
 /// Validates ECDSA signature parameters for Ethereum
@@ -169,59 +357,7 @@ pub fn recoverPubkey(
         return error.InvalidRecoveryId;
     }
 
-    if (!unauditedValidateSignature(r_u256, s_u256)) return error.InvalidSignature;
-
-    // Step 1: Calculate point R from r and recoveryId
-    if (r_u256 >= SECP256K1_P) return error.InvalidSignature;
-
-    // Calculate y² = x³ + 7 mod p
-    const x3 = unauditedMulmod(unauditedMulmod(r_u256, r_u256, SECP256K1_P), r_u256, SECP256K1_P);
-    const y2 = unauditedAddmod(x3, SECP256K1_B, SECP256K1_P);
-
-    // Calculate y = y²^((p+1)/4) mod p (works because p ≡ 3 mod 4)
-    const y = unauditedPowmod(y2, (SECP256K1_P + 1) >> 2, SECP256K1_P);
-
-    // Verify y is correct
-    if (unauditedMulmod(y, y, SECP256K1_P) != y2) return error.InvalidSignature;
-
-    // Choose correct y based on recoveryId
-    const y_is_odd = (y & 1) == 1;
-    const y_final = if (y_is_odd == (recoveryId == 1)) y else SECP256K1_P - y;
-
-    const R = AffinePoint{ .x = r_u256, .y = y_final, .infinity = false };
-    if (!R.isOnCurve()) return error.InvalidSignature;
-
-    // Step 2: Calculate e from message hash
-    var hash_array: [32]u8 = undefined;
-    @memcpy(&hash_array, hash);
-    const e = std.mem.readInt(u256, &hash_array, .big);
-
-    // Step 3: Calculate public key Q = r⁻¹(sR - eG)
-    const r_inv = unauditedInvmod(r_u256, SECP256K1_N) orelse return error.InvalidSignature;
-
-    // Calculate sR
-    const sR = R.scalarMul(s_u256);
-
-    // Calculate eG
-    const eG = AffinePoint.generator().scalarMul(e);
-
-    // Calculate sR - eG
-    const diff = sR.add(eG.negate());
-
-    // Calculate Q = r⁻¹ * (sR - eG)
-    const Q = diff.scalarMul(r_inv);
-
-    if (!Q.isOnCurve() or Q.infinity) return error.InvalidSignature;
-
-    // Step 4: Verify the signature with recovered key
-    if (!verifySignature(hash_array, r_u256, s_u256, Q)) return error.InvalidSignature;
-
-    // Step 5: Return public key as 64 bytes (x || y)
-    var pub_key: [64]u8 = undefined;
-    std.mem.writeInt(u256, pub_key[0..32], Q.x, .big);
-    std.mem.writeInt(u256, pub_key[32..64], Q.y, .big);
-
-    return pub_key;
+    return recoverPublicKeyBytes(hash[0..32], r_u256, s_u256, recoveryId);
 }
 
 /// ⚠️ UNAUDITED - NOT SECURITY AUDITED ⚠️
@@ -237,68 +373,51 @@ pub fn unauditedRecoverAddress(
 ) !primitives.Address.Address {
     if (hash.len != 32) return error.InvalidHashLength;
     if (recoveryId > 1) return error.InvalidRecoveryId;
+
+    const pubkey = try recoverPublicKeyBytes(hash[0..32], r, s, recoveryId);
+    var hashed: [32]u8 = undefined;
+    crypto.hash.sha3.Keccak256.hash(&pubkey, &hashed, .{});
+    return .{ .bytes = hashed[12..32].* };
+}
+
+fn recoverPublicKeyBytes(hash: *const [32]u8, r: u256, s: u256, recovery_id: u8) error{InvalidSignature}![64]u8 {
     if (!unauditedValidateSignature(r, s)) return error.InvalidSignature;
 
-    // Step 1: Calculate point R from r and recoveryId
-    // x = r (we don't handle r >= p case as it's extremely rare)
+    // Recovery IDs 0 and 1 select the parity of the point with x = r.
     if (r >= SECP256K1_P) return error.InvalidSignature;
+    const y = feSqrt(curveY2(r)) orelse return error.InvalidSignature;
+    const parity = @as(u1, @truncate(y));
+    const point = AffinePoint{
+        .x = r,
+        .y = if (parity == recovery_id) y else feSub(0, y),
+        .infinity = false,
+    };
+    if (!point.isOnCurve()) return error.InvalidSignature;
 
-    // Calculate y² = x³ + 7 mod p
-    const x3 = unauditedMulmod(unauditedMulmod(r, r, SECP256K1_P), r, SECP256K1_P);
-    const y2 = unauditedAddmod(x3, SECP256K1_B, SECP256K1_P);
-
-    // Calculate y = y²^((p+1)/4) mod p (works because p ≡ 3 mod 4)
-    const y = unauditedPowmod(y2, (SECP256K1_P + 1) >> 2, SECP256K1_P);
-
-    // Verify y is correct
-    if (unauditedMulmod(y, y, SECP256K1_P) != y2) return error.InvalidSignature;
-
-    // Choose correct y based on recoveryId
-    const y_is_odd = (y & 1) == 1;
-    const y_final = if (y_is_odd == (recoveryId == 1)) y else SECP256K1_P - y;
-
-    const R = AffinePoint{ .x = r, .y = y_final, .infinity = false };
-    if (!R.isOnCurve()) return error.InvalidSignature;
-
-    // Step 2: Calculate e from message hash
-    var hash_array: [32]u8 = undefined;
-    @memcpy(&hash_array, hash);
-    const e = std.mem.readInt(u256, &hash_array, .big);
-
-    // Step 3: Calculate public key Q = r⁻¹(sR - eG)
+    const e = reduceScalar(std.mem.readInt(u256, hash, .big));
     const r_inv = unauditedInvmod(r, SECP256K1_N) orelse return error.InvalidSignature;
 
-    // Calculate sR
-    const sR = R.scalarMul(s);
+    // Distribute r⁻¹ over sR - eG. Both points have order n.
+    const neg_e = if (e == 0) 0 else SECP256K1_N - e;
+    const scalar_g = scalarMulmod(neg_e, r_inv);
+    const scalar_r = scalarMulmod(s, r_inv);
+    const key = mulDoubleBase(scalar_g, AffinePoint.generator(), scalar_r, point).toAffine();
+    if (key.infinity or !key.isOnCurve()) return error.InvalidSignature;
+    if (!verifySignature(hash.*, r, s, key)) return error.InvalidSignature;
 
-    // Calculate eG
-    const eG = AffinePoint.generator().scalarMul(e);
+    var pubkey: [64]u8 = undefined;
+    std.mem.writeInt(u256, pubkey[0..32], key.x, .big);
+    std.mem.writeInt(u256, pubkey[32..64], key.y, .big);
+    return pubkey;
+}
 
-    // Calculate sR - eG
-    const diff = sR.add(eG.negate());
+fn reduceScalar(value: u256) u256 {
+    // 2^256 < 2n, so one subtraction suffices for a 256-bit input.
+    return if (value >= SECP256K1_N) value - SECP256K1_N else value;
+}
 
-    // Calculate Q = r⁻¹ * (sR - eG)
-    const Q = diff.scalarMul(r_inv);
-
-    if (!Q.isOnCurve() or Q.infinity) return error.InvalidSignature;
-
-    // Step 4: Verify the signature with recovered key (optional but recommended)
-    if (!verifySignature(hash_array, r, s, Q)) return error.InvalidSignature;
-
-    // Step 5: Convert public key to Ethereum address
-    var pub_key_bytes: [64]u8 = undefined;
-    std.mem.writeInt(u256, pub_key_bytes[0..32], Q.x, .big);
-    std.mem.writeInt(u256, pub_key_bytes[32..64], Q.y, .big);
-
-    var keccak = crypto.hash.sha3.Keccak256.init(.{});
-    keccak.update(&pub_key_bytes);
-    var hash_out: [32]u8 = undefined;
-    keccak.final(&hash_out);
-
-    var address: primitives.Address = undefined;
-    @memcpy(&address.bytes, hash_out[12..32]);
-
-    return address;
+fn scalarMulmod(a: u256, b: u256) u256 {
+    return @intCast((@as(u512, a) *% @as(u512, b)) % SECP256K1_N);
 }
 
 /// Verify signature with public key (used internally for validation)
@@ -309,25 +428,12 @@ fn verifySignature(
     pub_key: AffinePoint,
 ) bool {
     const e = std.mem.readInt(u256, &hash, .big);
-
-    // Calculate s⁻¹
     const s_inv = unauditedInvmod(s, SECP256K1_N) orelse return false;
 
-    // u_1 = e * s⁻¹ mod n
-    const u_1 = unauditedMulmod(e, s_inv, SECP256K1_N);
-
-    // u_2 = r * s⁻¹ mod n
-    const u_2 = unauditedMulmod(r, s_inv, SECP256K1_N);
-
-    // R' = u_1*G + u_2*Q
-    const u1G = AffinePoint.generator().scalarMul(u_1);
-    const u2Q = pub_key.scalarMul(u_2);
-    const R_prime = u1G.add(u2Q);
-
-    if (R_prime.infinity) return false;
-
-    // Check r' ≡ r mod n
-    return (R_prime.x % SECP256K1_N) == r;
+    const scalar_g = scalarMulmod(e, s_inv);
+    const scalar_key = scalarMulmod(r, s_inv);
+    const point = mulDoubleBase(scalar_g, AffinePoint.generator(), scalar_key, pub_key).toAffine();
+    return !point.infinity and reduceScalar(point.x) == r;
 }
 
 // Field arithmetic helpers
@@ -455,6 +561,85 @@ pub fn unauditedInvmod(a: u256, m: u256) ?u256 {
 // Tests from signature_test.zig
 // ============================================================================
 
+test "specialized field operations match wide modular arithmetic" {
+    const p = SECP256K1_P;
+    const edge = [_]u256{ 0, 1, 2, p - 1, p, std.math.maxInt(u256) };
+    for (edge) |a| {
+        for (edge) |b| {
+            const product = @as(u512, a) * b;
+            try std.testing.expectEqual(@as(u256, @intCast(product % p)), feMul(a, b));
+        }
+    }
+    try std.testing.expectEqual(@as(u256, 0), feAdd(p - 1, 1));
+    try std.testing.expectEqual(p - 2, feAdd(p - 1, p - 1));
+    try std.testing.expectEqual(p - 1, feSub(0, 1));
+    try std.testing.expectEqual(@as(?u256, 0), feSqrt(0));
+    try std.testing.expectEqual(@as(?u256, null), feSqrt(p - 1));
+
+    var prng = std.Random.DefaultPrng.init(0x736563703235366b);
+    const random = prng.random();
+    for (0..64) |_| {
+        const a = random.int(u256) % p;
+        const b = random.int(u256) % p;
+        const product = @as(u512, a) * b;
+        try std.testing.expectEqual(@as(u256, @intCast(product % p)), feMul(a, b));
+        try std.testing.expectEqual(@as(u256, @intCast((@as(u512, a) + b) % p)), feAdd(a, b));
+        try std.testing.expectEqual(@as(u256, @intCast((@as(u512, a) + p - b) % p)), feSub(a, b));
+        if (a != 0) try std.testing.expectEqual(@as(u256, 1), feMul(a, feInv(a)));
+        const squared = feSqr(a);
+        const root = feSqrt(squared) orelse return error.TestUnexpectedResult;
+        try std.testing.expect(root == a or root == feSub(0, a));
+    }
+}
+
+test "Jacobian operations and joint multiplication agree with affine arithmetic" {
+    const g = AffinePoint.generator();
+    const twice = g.double();
+    const three = twice.add(g);
+    const four = twice.double();
+    const point = JacobianPoint.fromAffine(g);
+    const doubled = point.double();
+    const infinity = JacobianPoint.infinity;
+
+    try std.testing.expectEqual(twice, doubled.toAffine());
+    try std.testing.expectEqual(three, doubled.addAffine(g).toAffine());
+    try std.testing.expectEqual(twice, point.addAffine(g).toAffine());
+    try std.testing.expectEqual(infinity, point.addAffine(g.negate()));
+    try std.testing.expectEqual(g, infinity.addAffine(g).toAffine());
+    try std.testing.expectEqual(point, point.addAffine(AffinePoint.zero()));
+    try std.testing.expectEqual(point, infinity.add(point));
+    try std.testing.expectEqual(point, point.add(infinity));
+    try std.testing.expectEqual(infinity, infinity.double());
+
+    const z: u256 = 7;
+    const zz = feSqr(z);
+    const scaled = JacobianPoint{
+        .x = feMul(twice.x, zz),
+        .y = feMul(twice.y, feMul(zz, z)),
+        .z = z,
+    };
+    try std.testing.expectEqual(twice, scaled.toAffine());
+    try std.testing.expectEqual(three, scaled.add(point).toAffine());
+    try std.testing.expectEqual(four, scaled.add(doubled).toAffine());
+    try std.testing.expectEqual(infinity, scaled.add(.{
+        .x = doubled.x,
+        .y = feSub(0, doubled.y),
+        .z = doubled.z,
+    }));
+
+    try std.testing.expectEqual(g.add(twice).add(twice), mulDoubleBase(1, g, 2, twice).toAffine());
+    try std.testing.expectEqual(three, mulDoubleBase(1, g, 1, twice).toAffine());
+    try std.testing.expectEqual(g, mulDoubleBase(2, g, 1, g.negate()).toAffine());
+    try std.testing.expectEqual(infinity, mulDoubleBase(1, g, 1, g.negate()));
+    try std.testing.expectEqual(infinity, mulDoubleBase(0, g, 0, g));
+
+    // A caller can construct an affine value directly. With y ≡ 0
+    // its double is infinity, and odd multiples retain the original value.
+    const raw = AffinePoint{ .x = SECP256K1_P + 1, .y = SECP256K1_P, .infinity = false };
+    try std.testing.expectEqual(raw, raw.scalarMul(3));
+    try std.testing.expectEqual(AffinePoint.zero(), raw.scalarMul(2));
+}
+
 test "recover address from signature" {
     // Test vector from Ethereum
     const message = "Hello, Ethereum!";
@@ -481,7 +666,73 @@ test "recover address from signature" {
 
     // The recovered address should be valid
     const zero_address = [_]u8{0} ** 20;
-    try std.testing.expect(!std.mem.eql(u8, &recovered_address, &zero_address));
+    try std.testing.expect(!std.mem.eql(u8, &recovered_address.bytes, &zero_address));
+}
+
+test "recovery matches Ethereum transaction and precompile vectors" {
+    const vectors = [_]struct {
+        hash: []const u8,
+        r: u256,
+        s: u256,
+        address: []const u8,
+    }{
+        // EIP-155 example (v=37 encodes recovery ID 0).
+        .{
+            .hash = "daf5a779ae972f972197303d7b574746c7ef83eadac0f2791ad23db92e4c8e53",
+            .r = 0x28ef61340bd939bc2195fe537567866003e1a15d3c71ff63e1590620aa636276,
+            .s = 0x67cbe9d8997f761aecb703304b3800ccf555c9f3dc64214b297fb1966a3b6d83,
+            .address = "9d8a62f656a8d1615c1294fd71e9cfb3e4855a4f",
+        },
+        // Geth's ecRecover.json ValidKey with s replaced by n-s and parity flipped.
+        .{
+            .hash = "18c547e4f7b0f325ad1e56f57e26c745b09a3e503d86e00e5255ff7f715d3d1c",
+            .r = 0x73b1693892219d736caba55bdb67216e485557ea6b6af75f37096c9aa6a5a75f,
+            .s = 0x1146bf4e2fc4de1c94f1b81868960f68bc842490f1b6bc98387ba6b57599fbf8,
+            .address = "a94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+        },
+    };
+
+    for (vectors) |vector| {
+        var hash: [32]u8 = undefined;
+        var expected: [20]u8 = undefined;
+        var r: [32]u8 = undefined;
+        var s: [32]u8 = undefined;
+        _ = try std.fmt.hexToBytes(&hash, vector.hash);
+        _ = try std.fmt.hexToBytes(&expected, vector.address);
+        std.mem.writeInt(u256, &r, vector.r, .big);
+        std.mem.writeInt(u256, &s, vector.s, .big);
+
+        const pubkey = try recoverPubkey(&hash, &r, &s, 27);
+        var hashed: [32]u8 = undefined;
+        crypto.hash.sha3.Keccak256.hash(&pubkey, &hashed, .{});
+        try std.testing.expectEqualSlices(u8, &expected, hashed[12..]);
+        const address = try unauditedRecoverAddress(&hash, 0, vector.r, vector.s);
+        try std.testing.expectEqual(expected, address.bytes);
+    }
+}
+
+test "recovery reduces the hash modulo n and rejects the point at infinity" {
+    // R = -G and e = n-r-1, so sR-eG = rG for s=1.
+    var hash: [32]u8 = undefined;
+    var r: [32]u8 = undefined;
+    var s: [32]u8 = undefined;
+    std.mem.writeInt(u256, &hash, SECP256K1_N - SECP256K1_GX - 1, .big);
+    std.mem.writeInt(u256, &r, SECP256K1_GX, .big);
+    std.mem.writeInt(u256, &s, 1, .big);
+    const odd = try recoverPubkey(&hash, &r, &s, 28);
+    try std.testing.expectEqual(SECP256K1_GX, std.mem.readInt(u256, odd[0..32], .big));
+    try std.testing.expectEqual(SECP256K1_GY, std.mem.readInt(u256, odd[32..64], .big));
+
+    // R = G and s = r, so both e=0 and e=n recover G.
+    std.mem.writeInt(u256, &hash, SECP256K1_N, .big);
+    try std.testing.expectEqual(odd, try recoverPubkey(&hash, &r, &r, 0));
+    @memset(&hash, 0);
+    try std.testing.expectEqual(odd, try recoverPubkey(&hash, &r, &r, 27));
+
+    // R = G and s = e = 1, so the recovered point would be infinity.
+    std.mem.writeInt(u256, &hash, 1, .big);
+    try std.testing.expectError(error.InvalidSignature, recoverPubkey(&hash, &r, &s, 27));
+    try std.testing.expectError(error.InvalidSignature, unauditedRecoverAddress(&hash, 0, SECP256K1_GX, 1));
 }
 
 test "signature malleability check" {
@@ -651,7 +902,7 @@ test "Bitcoin Core test vectors - valid signatures" {
 
         // Verify we got a valid address (non-zero)
         const zero_address = [_]u8{0} ** 20;
-        try std.testing.expect(!std.mem.eql(u8, &result, &zero_address));
+        try std.testing.expect(!std.mem.eql(u8, &result.bytes, &zero_address));
 
         // Verify the signature was properly validated
         try std.testing.expect(unauditedValidateSignature(tv.r, tv.s));
@@ -675,11 +926,11 @@ test "Ethereum test vectors - signature recovery" {
             .r = 0x6c7ab2f961fd97b6064dfc604c8f291df6b0dcf24d062c724bac10f60ba394f3,
             .s = 0x26afe8922bb25e8a87cd0fca0f21e9e08b6fb8e4c50a7c7c069e69f6e2b5c5a2,
             .v = 27,
-            .expected_address = [_]u8{
+            .expected_address = .{ .bytes = .{
                 0xc4, 0xd8, 0x97, 0x15, 0xed, 0x6f, 0x65, 0xaa,
                 0x7b, 0x9b, 0x42, 0x4e, 0x71, 0x47, 0x48, 0xac,
                 0x60, 0x40, 0x16, 0x62,
-            },
+            } },
         },
     };
 
@@ -705,7 +956,7 @@ test "Ethereum test vectors - signature recovery" {
 
         // For now, just verify we got a non-zero address
         const zero_address = [_]u8{0} ** 20;
-        try std.testing.expect(!std.mem.eql(u8, &recovered, &zero_address));
+        try std.testing.expect(!std.mem.eql(u8, &recovered.bytes, &zero_address));
     }
 }
 
@@ -854,7 +1105,7 @@ test "Bitcoin signature test vectors - comprehensive" {
             };
             // Verify we got a valid address
             const zero_address = [_]u8{0} ** 20;
-            try std.testing.expect(!std.mem.eql(u8, &addr, &zero_address));
+            try std.testing.expect(!std.mem.eql(u8, &addr.bytes, &zero_address));
         }
     }
 }
@@ -882,8 +1133,8 @@ test "Public key recovery consistency" {
     const addr3 = try unauditedRecoverAddress(&hash, 0, r, s);
 
     // All recovered addresses should be identical
-    try std.testing.expectEqualSlices(u8, &addr1, &addr2);
-    try std.testing.expectEqualSlices(u8, &addr1, &addr3);
+    try std.testing.expectEqualSlices(u8, &addr1.bytes, &addr2.bytes);
+    try std.testing.expectEqualSlices(u8, &addr1.bytes, &addr3.bytes);
 }
 
 test "Field arithmetic edge cases" {
@@ -1300,7 +1551,7 @@ test "Signature verification - valid test vectors with known keys" {
         // If recovery succeeds, the address should be non-zero
         const recovered = try unauditedRecoverAddress(&hash, recoveryId, r, s);
         const zero_address = [_]u8{0} ** 20;
-        try std.testing.expect(!std.mem.eql(u8, &recovered, &zero_address));
+        try std.testing.expect(!std.mem.eql(u8, &recovered.bytes, &zero_address));
     }
 }
 
@@ -1520,9 +1771,9 @@ test "Signature recovery determinism" {
     const addr4 = try unauditedRecoverAddress(&hash, 0, r, s);
 
     // All should be identical
-    try std.testing.expectEqualSlices(u8, &addr1, &addr2);
-    try std.testing.expectEqualSlices(u8, &addr1, &addr3);
-    try std.testing.expectEqualSlices(u8, &addr1, &addr4);
+    try std.testing.expectEqualSlices(u8, &addr1.bytes, &addr2.bytes);
+    try std.testing.expectEqualSlices(u8, &addr1.bytes, &addr3.bytes);
+    try std.testing.expectEqualSlices(u8, &addr1.bytes, &addr4.bytes);
 }
 
 test "Point addition with same x coordinate but different y" {
@@ -1972,7 +2223,7 @@ test "Bitcoin Core signature test vectors - comprehensive suite" {
             // If recovery succeeds, verify non-zero address
             const recovered = try unauditedRecoverAddress(&tv.msg_hash, tv.recoveryId, tv.r, tv.s);
             const zero_address = [_]u8{0} ** 20;
-            try std.testing.expect(!std.mem.eql(u8, &recovered, &zero_address));
+            try std.testing.expect(!std.mem.eql(u8, &recovered.bytes, &zero_address));
         } else {
             // Should fail
             try std.testing.expectError(error.InvalidSignature, result);
@@ -2036,7 +2287,7 @@ test "Ethereum JSON-RPC test suite vectors" {
         // Verify non-zero address
         const recovered = try unauditedRecoverAddress(&message_hash, @intCast(recoveryId), tv.r, tv.s);
         const zero_address = [_]u8{0} ** 20;
-        try std.testing.expect(!std.mem.eql(u8, &recovered, &zero_address));
+        try std.testing.expect(!std.mem.eql(u8, &recovered.bytes, &zero_address));
     }
 }
 
@@ -2284,11 +2535,11 @@ test "Public key recovery with known message/signature pairs" {
             };
 
             const addr = try unauditedRecoverAddress(&tv.msg_hash, tv.recoveryId, tv.r, tv.s);
-            try std.testing.expectEqual(@as(usize, 20), addr.len);
+            try std.testing.expectEqual(@as(usize, 20), addr.bytes.len);
 
             // Verify address is non-zero
             const zero_addr = [_]u8{0} ** 20;
-            try std.testing.expect(!std.mem.eql(u8, &addr, &zero_addr));
+            try std.testing.expect(!std.mem.eql(u8, &addr.bytes, &zero_addr));
         }
     }
 }
@@ -2397,7 +2648,7 @@ test "Cross-validation - signature recovery determinism" {
         // All subsequent recoveries must match exactly
         for (0..9) |_| {
             const addr = try unauditedRecoverAddress(&tc.hash, tc.recoveryId, tc.r, tc.s);
-            try std.testing.expectEqualSlices(u8, &addr1, &addr);
+            try std.testing.expectEqualSlices(u8, &addr1.bytes, &addr.bytes);
         }
 
         // Recover public key 10 times

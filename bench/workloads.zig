@@ -368,7 +368,7 @@ fn precompiles(allocator: std.mem.Allocator, list: *std.ArrayList(Workload)) !vo
     const field = try allocator.alloc(u8, 64);
     @memset(field, 0);
     field[63] = 42;
-    try list.append(allocator, .{ .name = "precompile/BLS12-381-map-G1", .category = "precompile", .source = .{ .precompile = 0x12 }, .input = field, .output_len = 128 });
+    try list.append(allocator, .{ .name = "precompile/BLS12-381-map-G1", .category = "precompile", .source = .{ .precompile = 0x10 }, .input = field, .output_len = 128 });
     const scheme = std.crypto.sign.ecdsa.EcdsaP256Sha256;
     const key = try scheme.KeyPair.generateDeterministic([_]u8{42} ** scheme.KeyPair.seed_length);
     const text = "Guillotine P256 benchmark vector";

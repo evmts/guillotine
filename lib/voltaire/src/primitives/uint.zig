@@ -61,6 +61,28 @@ pub inline fn mul64x64(a: u64, b: u64) struct { low: u64, high: u64 } {
     }
 }
 
+// Divide (hi * 2^64 + lo) by divisor. The caller ensures hi < divisor,
+// which makes the quotient fit in one word and prevents a divq fault.
+inline fn div128by64(hi: u64, lo: u64, divisor: u64) struct { quotient: u64, remainder: u64 } {
+    if (builtin.cpu.arch == .x86_64 and !@inComptime()) {
+        var remainder: u64 = undefined;
+        const quotient = asm ("divq %[divisor]"
+            : [quotient] "={rax}" (-> u64),
+              [remainder] "={rdx}" (remainder),
+            : [lo] "{rax}" (lo),
+              [hi] "{rdx}" (hi),
+              [divisor] "r" (divisor),
+            : .{ .cc = true });
+        return .{ .quotient = quotient, .remainder = remainder };
+    }
+
+    const dividend = (@as(u128, hi) << 64) | lo;
+    const quotient: u64 = @truncate(dividend / divisor);
+    // The true remainder fits in one word. Subtract in the low word to
+    // avoid a second wide division.
+    return .{ .quotient = quotient, .remainder = lo -% (quotient *% divisor) };
+}
+
 pub fn Uint(comptime bits: usize, comptime limbs: usize) type {
     return struct {
         const Self = @This();
@@ -435,8 +457,9 @@ pub fn Uint(comptime bits: usize, comptime limbs: usize) type {
         }
 
         pub fn div_rem(self: Self, divisor: Self) DivRemResult {
-            if (bits == 0) return .{ .quotient = ZERO, .remainder = ZERO };
+            if (bits == 0 or limbs == 0) return .{ .quotient = ZERO, .remainder = ZERO };
             if (divisor.is_zero()) return .{ .quotient = ZERO, .remainder = ZERO };
+            if (divisor.eq(ONE)) return .{ .quotient = self, .remainder = ZERO };
 
             // Fast path: divisor is power of 2
             if (divisor.count_ones() == 1) {
@@ -447,95 +470,124 @@ pub fn Uint(comptime bits: usize, comptime limbs: usize) type {
                 };
             }
 
-            // Special case: divisor > dividend
-            if (self.lt(divisor)) {
-                return .{ .quotient = ZERO, .remainder = self };
-            }
+            if (self.lt(divisor)) return .{ .quotient = ZERO, .remainder = self };
 
-            // Special case: single limb division
             if (limbs == 1) {
+                const word = self.limbs[0];
+                const denom = divisor.limbs[0];
                 return .{
-                    .quotient = Self.from_u64(self.limbs[0] / divisor.limbs[0]),
-                    .remainder = Self.from_u64(self.limbs[0] % divisor.limbs[0]),
+                    .quotient = Self.from_u64(word / denom),
+                    .remainder = Self.from_u64(word % denom),
                 };
             }
 
-            // Fast path: single-word divisor
-            if (limbs > 1) {
-                var is_single_word = true;
-                for (1..limbs) |i| {
-                    if (divisor.limbs[i] != 0) {
-                        is_single_word = false;
-                        break;
-                    }
+            var n: usize = limbs;
+            while (divisor.limbs[n - 1] == 0) : (n -= 1) {}
+            if (n == 1) return self.divRemBy64(divisor.limbs[0]);
+
+            var len: usize = limbs;
+            while (len > n and self.limbs[len - 1] == 0) : (len -= 1) {}
+
+            // Knuth Algorithm D, in base 2^64. Normalize the top divisor
+            // word so each two-word estimate is at most two too large.
+            const shift: u6 = @intCast(@clz(divisor.limbs[n - 1]));
+            const unshift = 0 -% shift;
+            var v: [limbs]u64 = undefined;
+            var u: [limbs + 1]u64 = undefined;
+            if (shift == 0) {
+                @memcpy(v[0..n], divisor.limbs[0..n]);
+                @memcpy(u[0..len], self.limbs[0..len]);
+                u[len] = 0;
+            } else {
+                var carry: u64 = 0;
+                for (0..n) |i| {
+                    v[i] = (divisor.limbs[i] << shift) | carry;
+                    carry = divisor.limbs[i] >> unshift;
                 }
-                if (is_single_word) {
-                    return self.divRemBy64(divisor.limbs[0]);
+
+                carry = 0;
+                for (0..len) |i| {
+                    u[i] = (self.limbs[i] << shift) | carry;
+                    carry = self.limbs[i] >> unshift;
                 }
+                u[len] = carry;
             }
 
-            // Long division algorithm
+            const top = v[n - 1];
+            const next = v[n - 2];
             var quotient = ZERO;
-            var remainder = self;
-
-            // Find the highest set bit in divisor
-            var divisor_bits: usize = 0;
-            var i = limbs;
-            while (i > 0) {
-                i -= 1;
-                if (divisor.limbs[i] != 0) {
-                    divisor_bits = i * 64 + (64 - @clz(divisor.limbs[i]));
-                    break;
-                }
-            }
-
-            // Find the highest set bit in dividend
-            var dividend_bits: usize = 0;
-            i = limbs;
-            while (i > 0) {
-                i -= 1;
-                if (remainder.limbs[i] != 0) {
-                    dividend_bits = i * 64 + (64 - @clz(remainder.limbs[i]));
-                    break;
-                }
-            }
-
-            if (dividend_bits < divisor_bits) {
-                return .{ .quotient = ZERO, .remainder = self };
-            }
-
-            // Shift divisor left to align with dividend
-            var shift = dividend_bits - divisor_bits;
-            var shifted_divisor = divisor.wrapping_shl(@intCast(shift));
-
-            // Perform long division
-            while (true) {
-                if (!remainder.lt(shifted_divisor)) {
-                    remainder = remainder.wrapping_sub(shifted_divisor);
-                    quotient = quotient.set_bit(@intCast(shift), true);
+            var j = len - n + 1;
+            while (j > 0) {
+                j -= 1;
+                const hi = u[j + n];
+                const lo = u[j + n - 1];
+                var qhat: u64 = undefined;
+                var rhat: u128 = undefined;
+                if (hi >= top) {
+                    // The partial remainder invariant gives hi <= top.
+                    qhat = std.math.maxInt(u64);
+                    rhat = @as(u128, lo) + top;
+                } else {
+                    const estimate = div128by64(hi, lo, top);
+                    qhat = estimate.quotient;
+                    rhat = estimate.remainder;
                 }
 
-                if (shift == 0) break;
-                shift -= 1;
-                shifted_divisor = shifted_divisor.wrapping_shr(1);
+                while (rhat <= std.math.maxInt(u64) and
+                    @as(u128, qhat) * next > ((rhat << 64) | u[j + n - 2]))
+                {
+                    qhat -= 1;
+                    rhat += top;
+                }
+
+                var carry: u64 = 0;
+                for (0..n) |i| {
+                    const product = @as(u128, qhat) * v[i] + carry;
+                    const diff = @subWithOverflow(u[j + i], @as(u64, @truncate(product)));
+                    u[j + i] = diff[0];
+                    carry = @as(u64, @truncate(product >> 64)) + diff[1];
+                }
+                const diff = @subWithOverflow(hi, carry);
+                u[j + n] = diff[0];
+
+                // The estimate may still be one too large. Restore one
+                // divisor, discarding the carry that cancels the borrow.
+                if (diff[1] != 0) {
+                    qhat -= 1;
+                    var add_carry: u8 = 0;
+                    for (0..n) |i| {
+                        const sum = addWithCarry(u[j + i], v[i], add_carry);
+                        u[j + i] = sum.sum;
+                        add_carry = sum.carry;
+                    }
+                    u[j + n] +%= add_carry;
+                }
+
+                quotient.limbs[j] = qhat;
+            }
+
+            var remainder = ZERO;
+            if (shift == 0) {
+                @memcpy(remainder.limbs[0..n], u[0..n]);
+            } else {
+                for (0..n) |i| {
+                    remainder.limbs[i] = (u[i] >> shift) | (u[i + 1] << unshift);
+                }
             }
 
             return .{ .quotient = quotient, .remainder = remainder };
         }
 
-        // Optimized division by a single u64
         fn divRemBy64(self: Self, divisor: u64) DivRemResult {
-            if (divisor == 0) return .{ .quotient = Self.from_u64(0), .remainder = Self.from_u64(0) };
-
             var quotient = ZERO;
             var remainder: u64 = 0;
 
             var i = limbs;
             while (i > 0) {
                 i -= 1;
-                const dividend = (@as(u128, remainder) << 64) | @as(u128, self.limbs[i]);
-                quotient.limbs[i] = @truncate(dividend / divisor);
-                remainder = @truncate(dividend % divisor);
+                const digit = div128by64(remainder, self.limbs[i], divisor);
+                quotient.limbs[i] = digit.quotient;
+                remainder = digit.remainder;
             }
 
             return .{
@@ -2286,8 +2338,8 @@ test "Uint multi-limb division" {
     const a = U128.from_limbs(.{ 0, 1 }); // 2^64
     const b = U128.from_limbs(.{ 2, 0 });
     const div_result = a.wrapping_div(b);
-    try testing.expectEqual(@as(u64, 0), div_result.limbs[0]);
-    try testing.expectEqual(@as(u64, std.math.maxInt(u64) / 2 + 1), div_result.limbs[1]);
+    try testing.expectEqual(@as(u64, 1 << 63), div_result.limbs[0]);
+    try testing.expectEqual(@as(u64, 0), div_result.limbs[1]);
 
     // Division with remainder
     const c = U128.from_limbs(.{ 100, 0 });
@@ -2302,8 +2354,79 @@ test "Uint multi-limb division" {
     const e = U128.from_limbs(.{ 0, 1000 });
     const f = U128.from_limbs(.{ 0, 10 });
     const large_div = e.wrapping_div(f);
-    try testing.expectEqual(@as(u64, 0), large_div.limbs[0]);
-    try testing.expectEqual(@as(u64, 100), large_div.limbs[1]);
+    try testing.expectEqual(@as(u64, 100), large_div.limbs[0]);
+    try testing.expectEqual(@as(u64, 0), large_div.limbs[1]);
+}
+
+test "Knuth division quotient estimation and add-back" {
+    const U256 = Uint(256, 4);
+    const base: u256 = 1 << 64;
+    const half = base / 2;
+    const max = std.math.maxInt(u256);
+    const cases = [_]struct { dividend: u256, divisor: u256 }{
+        // The top two words estimate 2, then the next word corrects it to 1.
+        .{ .dividend = base * base, .divisor = half * base + base - 1 },
+        // The estimate starts two above the true quotient digit.
+        .{ .dividend = (half - 1) * base * base + half * base, .divisor = half * base + base - 1 },
+        // The next estimate has equal top words and must saturate to base-1.
+        .{ .dividend = half * base * base + base - 1, .divisor = half * base + 1 },
+        // The first estimate passes the two-word check but subtracts one too
+        // many copies of the divisor. The lowest word forces the add-back.
+        .{ .dividend = half * base * base * base + base - 1, .divisor = half * base * base + 1 },
+        .{ .dividend = max, .divisor = base - 1 },
+        .{ .dividend = max, .divisor = base + 1 },
+        .{ .dividend = max, .divisor = base * base - 1 },
+        .{ .dividend = max, .divisor = 1 << 255 },
+        .{ .dividend = max, .divisor = 1 },
+    };
+
+    for (cases) |case| {
+        const result = U256.from_u256(case.dividend).div_rem(U256.from_u256(case.divisor));
+        try testing.expectEqual(case.dividend / case.divisor, result.quotient.to_u256().?);
+        try testing.expectEqual(case.dividend % case.divisor, result.remainder.to_u256().?);
+    }
+
+    const exact = comptime U256.from_u256(base * base).div_rem(U256.from_u256(base - 1));
+    try testing.expectEqual(base + 1, exact.quotient.to_u256().?);
+    try testing.expectEqual(@as(u256, 1), exact.remainder.to_u256().?);
+}
+
+test "Knuth division agrees with native integers across limb counts" {
+    var prng = std.Random.DefaultPrng.init(0x4b6e75746844);
+    const random = prng.random();
+
+    inline for (.{ 65, 128, 197, 256, 512 }) |bits| {
+        const U = Uint(bits, nLimbs(bits));
+        const Native = std.meta.Int(.unsigned, bits);
+        const Wide = std.meta.Int(.unsigned, bits * 2);
+        for (0..4096) |i| {
+            const a = random.int(Native);
+            // Cycle through all divisor bit lengths, including single-word
+            // divisors and divisors with each possible normalization shift.
+            const shift: std.math.Log2Int(Native) = @intCast(i % bits);
+            const b = @max(random.int(Native) >> shift, 1);
+            var dividend: [U.LIMBS]u64 = undefined;
+            var divisor: [U.LIMBS]u64 = undefined;
+            for (0..U.LIMBS) |j| {
+                const offset: std.math.Log2Int(Native) = @intCast(j * 64);
+                dividend[j] = @truncate(a >> offset);
+                divisor[j] = @truncate(b >> offset);
+            }
+
+            const result = U.from_limbs(dividend).div_rem(U.from_limbs(divisor));
+            var q: Native = 0;
+            var r: Native = 0;
+            for (0..U.LIMBS) |j| {
+                const offset: std.math.Log2Int(Native) = @intCast(j * 64);
+                q |= @as(Native, result.quotient.limbs[j]) << offset;
+                r |= @as(Native, result.remainder.limbs[j]) << offset;
+            }
+            try testing.expectEqual(a / b, q);
+            try testing.expectEqual(a % b, r);
+            try testing.expectEqual(@as(Wide, a), @as(Wide, q) * b + r);
+            try testing.expect(r < b);
+        }
+    }
 }
 
 test "Uint shift operations" {
@@ -3341,15 +3464,15 @@ test "div_ceil" {
     // Test exact division
     const a = U64.from_u64(20);
     const b = U64.from_u64(5);
-    try testing.expectEqual(@as(u64, 4), a.div_ceil(b).to_u64() orelse unreachable);
+    try testing.expectEqual(@as(u64, 4), a.div_ceil(b).to_u64());
 
     // Test division with remainder
     const c = U64.from_u64(21);
     const d = U64.from_u64(5);
-    try testing.expectEqual(@as(u64, 5), c.div_ceil(d).to_u64() orelse unreachable); // ceil(21/5) = 5
+    try testing.expectEqual(@as(u64, 5), c.div_ceil(d).to_u64()); // ceil(21/5) = 5
 
     const e = U64.from_u64(19);
-    try testing.expectEqual(@as(u64, 4), e.div_ceil(d).to_u64() orelse unreachable); // ceil(19/5) = 4
+    try testing.expectEqual(@as(u64, 4), e.div_ceil(d).to_u64()); // ceil(19/5) = 4
 }
 
 test "power of two operations" {
@@ -3425,7 +3548,7 @@ test "wrapping division" {
     // Test wrapping_div
     const a = U64.from_u64(20);
     const b = U64.from_u64(5);
-    try testing.expectEqual(@as(u64, 4), a.wrapping_div(b).to_u64().?);
+    try testing.expectEqual(@as(u64, 4), a.wrapping_div(b).to_u64());
 
     // Division by zero returns zero
     try testing.expectEqual(U64.ZERO, a.wrapping_div(U64.ZERO));
@@ -3433,7 +3556,7 @@ test "wrapping division" {
     // Test wrapping_rem
     const c = U64.from_u64(23);
     const d = U64.from_u64(5);
-    try testing.expectEqual(@as(u64, 3), c.wrapping_rem(d).to_u64().?);
+    try testing.expectEqual(@as(u64, 3), c.wrapping_rem(d).to_u64());
 
     // Remainder by zero returns zero
     try testing.expectEqual(U64.ZERO, c.wrapping_rem(U64.ZERO));
@@ -3493,25 +3616,33 @@ test "division edge cases from intx" {
 
     const test_cases = [_]DivTestCase{
         // Basic cases
-        .{ .numerator = U512.from_int(2), .denominator = U512.from_int(1), .quotient = U512.from_int(2), .remainder = U512.ZERO },
+        .{ .numerator = U512.from_u64(2), .denominator = U512.from_u64(1), .quotient = U512.from_u64(2), .remainder = U512.ZERO },
 
         // Power of 2 division
-        .{ .numerator = U512.from_u256(0x10000000000000000), .denominator = U512.from_int(2), .quotient = U512.from_u256(0x8000000000000000), .remainder = U512.ZERO },
+        .{ .numerator = U512.from_u256(0x10000000000000000), .denominator = U512.from_u64(2), .quotient = U512.from_u256(0x8000000000000000), .remainder = U512.ZERO },
 
         // Equal values
-        .{ .numerator = U512.from_u256(0x8000000000000000), .denominator = U512.from_u256(0x8000000000000000), .quotient = U512.from_int(1), .remainder = U512.ZERO },
+        .{ .numerator = U512.from_u256(0x8000000000000000), .denominator = U512.from_u256(0x8000000000000000), .quotient = U512.from_u64(1), .remainder = U512.ZERO },
 
         // Numerator smaller than denominator
         .{ .numerator = U512.from_u256(0x7000000000000000), .denominator = U512.from_u256(0x8000000000000000), .quotient = U512.ZERO, .remainder = U512.from_u256(0x7000000000000000) },
 
         // Large division
-        .{ .numerator = U512.init(.{ 0x0000000009000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000009000000, 0x0000000000000000, 0x0000001e00000000 }), .denominator = U512.from_int(0xa), .quotient = U512.init(.{ 0xcccccccccccccccc, 0x6666666674cccccc, 0x6666666666666666, 0x6666666666666666, 0x6666666666666666, 0x666666666e666666, 0x0000000000000000, 0x0000000300000000 }), .remainder = U512.from_int(8) },
+        .{
+            .numerator = U512.from_limbs(.{ 0x9000000, 0, 0, 0, 0, 0x9000000, 0, 0x1e00000000 }),
+            .denominator = U512.from_u64(10),
+            .quotient = U512.from_limbs(.{
+                0x66666666674ccccc, 0x6666666666666666, 0x6666666666666666, 0x6666666666666666,
+                0x6666666666666666, 0x0000000000e66666, 0x0000000000000000, 0x0000000300000000,
+            }),
+            .remainder = U512.from_u64(8),
+        },
 
         // Very large numbers with all words used
-        .{ .numerator = U512.init(.{ 0xffffffffffffffee, 0x0000000000000200, 0x0000000001000000, 0x0000000000000000, 0xfffffffffffffffe, 0x0000000000000000, 0x0000000800000010, 0xffffffffffff0000 }), .denominator = U512.init(.{ 0x0000000000000000, 0xffffffff10000000, 0x0000000000000000, 0x0000000000000005, 0xffffffffffffff00, 0xffffffffffffffff, 0xfffffffffffffffb, 0xffffffffffffffff }), .quotient = U512.ZERO, .remainder = U512.init(.{ 0xffffffffffffffee, 0x0000000000000200, 0x0000000001000000, 0x0000000000000000, 0xfffffffffffffffe, 0x0000000000000000, 0x0000000800000010, 0xffffffffffff0000 }) },
+        .{ .numerator = U512.from_limbs(.{ 0xffffffffffffffee, 0x0000000000000200, 0x0000000001000000, 0x0000000000000000, 0xfffffffffffffffe, 0x0000000000000000, 0x0000000800000010, 0xffffffffffff0000 }), .denominator = U512.from_limbs(.{ 0x0000000000000000, 0xffffffff10000000, 0x0000000000000000, 0x0000000000000005, 0xffffffffffffff00, 0xffffffffffffffff, 0xfffffffffffffffb, 0xffffffffffffffff }), .quotient = U512.ZERO, .remainder = U512.from_limbs(.{ 0xffffffffffffffee, 0x0000000000000200, 0x0000000001000000, 0x0000000000000000, 0xfffffffffffffffe, 0x0000000000000000, 0x0000000800000010, 0xffffffffffff0000 }) },
 
         // Test case that triggers special reciprocal handling
-        .{ .numerator = U512.from_u256(0x8000000000018002_8000000000000001), .denominator = U512.from_u256(0x8000000000018002_8000000000000000), .quotient = U512.from_int(1), .remainder = U512.from_int(1) },
+        .{ .numerator = U512.from_u256(0x8000000000018002_8000000000000001), .denominator = U512.from_u256(0x8000000000018002_8000000000000000), .quotient = U512.from_u64(1), .remainder = U512.from_u64(1) },
     };
 
     for (test_cases) |tc| {
@@ -3753,17 +3884,17 @@ test "division special cases from intx" {
     }{
         // 2^128 / 2^64 = 2^64
         .{
-            .dividend = U256.ONE.shl(128),
-            .divisor = U256.ONE.shl(64),
-            .quot = U256.ONE.shl(64),
+            .dividend = U256.ONE.wrapping_shl(128),
+            .divisor = U256.ONE.wrapping_shl(64),
+            .quot = U256.ONE.wrapping_shl(64),
             .rem = U256.ZERO,
         },
         // (2^128 - 1) / 2^64 = 2^64 - 1, remainder 2^64 - 1
         .{
-            .dividend = U256.ONE.shl(128).wrapping_sub(U256.ONE),
-            .divisor = U256.ONE.shl(64),
-            .quot = U256.ONE.shl(64).wrapping_sub(U256.ONE),
-            .rem = U256.ONE.shl(64).wrapping_sub(U256.ONE),
+            .dividend = U256.ONE.wrapping_shl(128).wrapping_sub(U256.ONE),
+            .divisor = U256.ONE.wrapping_shl(64),
+            .quot = U256.ONE.wrapping_shl(64).wrapping_sub(U256.ONE),
+            .rem = U256.ONE.wrapping_shl(64).wrapping_sub(U256.ONE),
         },
     };
 
@@ -3781,12 +3912,12 @@ test "division special cases from intx" {
         // Divisor with leading bit set
         .{
             .n = U256.MAX,
-            .d = U256.ONE.shl(255),
+            .d = U256.ONE.wrapping_shl(255),
         },
         // Divisor with leading bit not set
         .{
-            .n = U256.MAX.shr(1),
-            .d = U256.ONE.shl(254),
+            .n = U256.MAX.wrapping_shr(1),
+            .d = U256.ONE.wrapping_shl(254),
         },
     };
 

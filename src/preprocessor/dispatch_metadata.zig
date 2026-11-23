@@ -12,7 +12,7 @@ pub fn DispatchMetadata(comptime FrameType: type) type {
         /// Add it in one shot when we land on a new jump destination. This turns N gas calculations into 1
         /// The stack validations allows us to use unsafe stack operations such as pop_unsafe that avoid bounds checking
         /// by prevalidating that the stack won't overflow or underflow on jump destination for all following opcodes
-        pub const JumpDestMetadata = packed struct(u64) {
+        pub const JumpDestMetadata = extern struct {
             // note: this could be smaller than u32 in future if we needed more space to fit more data
             /// Total gas cost for the entire basic block starting at this JUMPDEST
             gas: u32 = 0,
@@ -29,16 +29,15 @@ pub fn DispatchMetadata(comptime FrameType: type) type {
 
         /// Metadata for PUSH operations with values that fit in 64 bits.
         /// Stored inline in the dispatch array for cache efficiency.
-        pub const PushInlineMetadata = packed struct(u64) { value: u64 };
+        pub const PushInlineMetadata = extern struct { value: u64 };
 
         /// Metadata for PUSH operations with values larger than 64 bits.
         /// Contains a direct pointer to the u256 value for efficient access without indirection.
-        pub const PushPointerMetadata = packed struct(usize) { value_ptr: *const FrameType.WordType };
+        pub const PushPointerMetadata = extern struct { value_ptr: *const FrameType.WordType };
 
-        /// Metadata for PC opcode containing the program counter value.
         /// Metadata for static jump locations - contains a direct pointer to the jump destination dispatch
         /// This avoids the binary search in findJumpTarget
-        pub const JumpStaticMetadata = packed struct(usize) { dispatch: *const anyopaque };
+        pub const JumpStaticMetadata = extern struct { dispatch: *const anyopaque };
 
         /// Metadata for backward loop jumpi - contains two dispatch pointers for loop and exit targets
         /// Used by BACKWARD_LOOP_JUMPI synthetic opcode for optimized loop execution
@@ -51,7 +50,9 @@ pub fn DispatchMetadata(comptime FrameType: type) type {
 
         /// Our instruction set does not match the actual bytecode 1 to 1 if we do fusions so we don't actually track pc during execution
         /// Thus we must provide as metadata to avoid the expensive process of mapping back our instruction index to what pc it came from
-        pub const PcMetadata = packed struct { value: FrameType.PcType };
+        // Extern fields require an ABI integer width. In particular, a u12 PC uses u16 storage.
+        const PcStorage = std.meta.Int(.unsigned, @sizeOf(FrameType.PcType) * 8);
+        pub const PcMetadata = extern struct { value: PcStorage };
 
         /// Metadata for CODESIZE opcode containing the bytecode size.
         /// Only one opcode needs this data so it's better to store it as metadata for that opcode than store on frame
@@ -100,16 +101,16 @@ test "PushInlineMetadata stores u64 values" {
     try testing.expectEqual(@as(u64, 0xDEADBEEFCAFEBABE), metadata.value);
 }
 
-test "PushPointerMetadata stores index to u256 array" {
+test "PushPointerMetadata stores a pointer to a full word" {
     const Metadata = DispatchMetadata(TestFrame);
     
-    try testing.expectEqual(@as(usize, 4), @sizeOf(Metadata.PushPointerMetadata));
-    
-    const metadata = Metadata.PushPointerMetadata{
-        .index = 42,
-    };
-    
-    try testing.expectEqual(@as(u32, 42), metadata.index);
+    try testing.expectEqual(@sizeOf(*const TestFrame.WordType), @sizeOf(Metadata.PushPointerMetadata));
+
+    const value: TestFrame.WordType = 0x10000000000000000;
+    const metadata = Metadata.PushPointerMetadata{ .value_ptr = &value };
+
+    try testing.expectEqual(&value, metadata.value_ptr);
+    try testing.expectEqual(value, metadata.value_ptr.*);
 }
 
 test "PcMetadata stores program counter value" {
@@ -137,4 +138,16 @@ test "FirstBlockMetadata is same as JumpDestMetadata" {
     const Metadata = DispatchMetadata(TestFrame);
     
     try testing.expectEqual(@TypeOf(Metadata.JumpDestMetadata{}), @TypeOf(Metadata.FirstBlockMetadata{}));
+}
+
+test "PcMetadata supports a 12-bit PC with extern layout" {
+    const Metadata = DispatchMetadata(struct {
+        pub const WordType = u256;
+        pub const PcType = u12;
+    });
+
+    const pc: u12 = std.math.maxInt(u12);
+    const metadata = Metadata.PcMetadata{ .value = pc };
+    try testing.expectEqual(@as(usize, 2), @sizeOf(Metadata.PcMetadata));
+    try testing.expectEqual(@as(u16, pc), metadata.value);
 }

@@ -3,6 +3,71 @@ const primitives = @import("voltaire");
 const Address = primitives.Address;
 const AccessListConfig = @import("access_list_config.zig").AccessListConfig;
 
+/// Fast fold-hash primitives for fixed-size EVM keys.
+/// Unkeyed: a contract can craft colliding slots, so table cost under
+/// adversarial input is bounded by gas, the same as the previous seed-0 Wyhash.
+const fold = struct {
+    const k0: u64 = 0x9e3779b97f4a7c15;
+    const k1: u64 = 0xbf58476d1ce4e5b9;
+    const k2: u64 = 0x94d049bb133111eb;
+    const k3: u64 = 0x243f6a8885a308d3;
+
+    /// 64x64 -> 128 multiply folded back to 64 bits (foldhash/wyhash core).
+    inline fn mul(lhs: u64, rhs: u64) u64 {
+        const product = @as(u128, lhs) * @as(u128, rhs);
+        return @as(u64, @truncate(product)) ^ @as(u64, @truncate(product >> 64));
+    }
+
+    /// splitmix64 finalizer: bijective full avalanche.
+    inline fn avalanche(seed: u64) u64 {
+        var h = seed;
+        h ^= h >> 30;
+        h *%= k1;
+        h ^= h >> 27;
+        h *%= k2;
+        h ^= h >> 31;
+        return h;
+    }
+
+    /// Folds the 20 address bytes into one 64-bit state (not yet avalanched).
+    inline fn addressState(bytes: *const [20]u8) u64 {
+        const lo = std.mem.readInt(u64, bytes[0..8], .little);
+        const mid = std.mem.readInt(u64, bytes[8..16], .little);
+        const hi = std.mem.readInt(u32, bytes[16..20], .little);
+        return mul(lo ^ k0, mid ^ k3) +% hi;
+    }
+
+    inline fn address(bytes: *const [20]u8) u64 {
+        return avalanche(addressState(bytes));
+    }
+
+    /// Hashes an address plus an unsigned word of any width.
+    inline fn addressWord(comptime W: type, bytes: *const [20]u8, word: W) u64 {
+        const limb_count = comptime @max(1, (@bitSizeOf(W) + 63) / 64);
+        const pair_count = (limb_count + 1) / 2;
+        const Wide = std.meta.Int(.unsigned, pair_count * 128);
+        const wide: Wide = word;
+        var h = addressState(bytes);
+        inline for (0..pair_count) |i| {
+            const lo: u64 = @truncate(wide >> (128 * i));
+            const hi: u64 = @truncate(wide >> (128 * i + 64));
+            h = mul(h ^ lo ^ k2, hi ^ k1);
+        }
+        return avalanche(h);
+    }
+};
+
+/// ArrayHashMap context for addresses: fold-hash instead of Wyhash over 20 bytes.
+pub const AddressContext = struct {
+    pub fn hash(_: AddressContext, key: Address) u32 {
+        return @truncate(fold.address(&key.bytes));
+    }
+
+    pub fn eql(_: AddressContext, a: Address, b: Address, _: usize) bool {
+        return std.mem.eql(u8, &a.bytes, &b.bytes);
+    }
+};
+
 /// Create an AccessList type with the given configuration
 pub fn createAccessList(comptime config: AccessListConfig) type {
     comptime config.validate();
@@ -11,7 +76,7 @@ pub fn createAccessList(comptime config: AccessListConfig) type {
         const Self = @This();
         /// Warm addresses - addresses that have been accessed
         /// Using ArrayHashMap for better cache locality
-        addresses: std.array_hash_map.ArrayHashMap(Address, void, std.array_hash_map.AutoContext(Address), false),
+        addresses: std.array_hash_map.ArrayHashMap(Address, void, AddressContext, false),
         /// Warm storage slots - storage slots that have been accessed
         /// Using ArrayHashMap for better cache locality
         storage_slots: std.array_hash_map.ArrayHashMap(StorageKey, void, StorageKeyContext, false),
@@ -28,24 +93,19 @@ pub fn createAccessList(comptime config: AccessListConfig) type {
         };
 
         const StorageKeyContext = struct {
-            pub fn hash(self: @This(), key: StorageKey) u32 {
-                _ = self;
-                var hasher = std.hash.Wyhash.init(0);
-                hasher.update(&key.address.bytes);
-                hasher.update(std.mem.asBytes(&key.slot));
-                return @truncate(hasher.final());
+            pub fn hash(_: @This(), key: StorageKey) u32 {
+                return @truncate(fold.addressWord(config.SlotType, &key.address.bytes, key.slot));
             }
 
-            pub fn eql(self: @This(), a: StorageKey, b: StorageKey, b_index: usize) bool {
-                _ = self;
-                _ = b_index;
-                return std.mem.eql(u8, &a.address.bytes, &b.address.bytes) and a.slot == b.slot;
+            /// Slot first: within one contract, slots differ far more often than addresses.
+            pub fn eql(_: @This(), a: StorageKey, b: StorageKey, _: usize) bool {
+                return a.slot == b.slot and std.mem.eql(u8, &a.address.bytes, &b.address.bytes);
             }
         };
 
         pub fn init(allocator: std.mem.Allocator) Self {
             return Self{
-                .addresses = std.array_hash_map.ArrayHashMap(Address, void, std.array_hash_map.AutoContext(Address), false).init(allocator),
+                .addresses = std.array_hash_map.ArrayHashMap(Address, void, AddressContext, false).init(allocator),
                 .storage_slots = std.array_hash_map.ArrayHashMap(StorageKey, void, StorageKeyContext, false).init(allocator),
             };
         }
@@ -101,6 +161,26 @@ pub fn createAccessList(comptime config: AccessListConfig) type {
                 // Ensure the compiler doesn't optimize away the operation
                 std.mem.doNotOptimizeAway(&result);
             }
+        }
+
+        /// Warm-set sizes at a call-frame boundary. Both maps are insertion-ordered and
+        /// only grow until `clear`, so a size identifies exactly the entries warmed
+        /// before it.
+        pub const Checkpoint = struct {
+            addresses: usize,
+            storage_slots: usize,
+        };
+
+        /// Capture the warm sets. O(1).
+        pub fn checkpoint(self: *const Self) Checkpoint {
+            return .{ .addresses = self.addresses.count(), .storage_slots = self.storage_slots.count() };
+        }
+
+        /// Make cold again every address and slot first warmed after `cp` (EIP-2929:
+        /// a reverted frame's accesses do not stay warm). O(k) in the entries dropped.
+        pub fn revertTo(self: *Self, cp: Checkpoint) void {
+            if (cp.addresses < self.addresses.count()) self.addresses.shrinkRetainingCapacity(cp.addresses);
+            if (cp.storage_slots < self.storage_slots.count()) self.storage_slots.shrinkRetainingCapacity(cp.storage_slots);
         }
 
         /// Clone the access list
@@ -468,7 +548,7 @@ test "AccessList - memory stress test with many addresses" {
     // Test with many unique addresses to stress hash map
     var addresses: [1000]Address = undefined;
     for (0..1000) |i| {
-        addresses[i] = Address{ .bytes = std.mem.toBytes(@as(u160, @intCast(i + 1))) };
+        addresses[i] = Address{ .bytes = std.mem.toBytes(@as(u160, @intCast(i + 1)))[0..20].* };
         const cost = try access_list.access_address(addresses[i]);
         try testing.expectEqual(AccessList.COLD_ACCOUNT_ACCESS_COST, cost);
     }
@@ -605,19 +685,19 @@ test "AccessList - clear preserves capacity" {
 
     // Fill with many entries to grow internal capacity
     for (0..100) |i| {
-        const address = Address{ .bytes = std.mem.toBytes(@as(u160, @intCast(i + 1))) };
+        const address = Address{ .bytes = std.mem.toBytes(@as(u160, @intCast(i + 1)))[0..20].* };
         _ = try access_list.access_address(address);
         _ = try access_list.access_storage_slot(address, @intCast(i));
     }
 
     // Check that many entries are warm
-    try testing.expect(access_list.is_address_warm(Address{ .bytes = std.mem.toBytes(@as(u160, 50)) ++ [_]u8{0} ** 12 }));
+    try testing.expect(access_list.is_address_warm(Address{ .bytes = std.mem.toBytes(@as(u160, 50))[0..20].* }));
 
     // Clear should preserve capacity but remove entries
     access_list.clear();
 
     // All entries should be cold again
-    try testing.expect(!access_list.is_address_warm(Address{ .bytes = std.mem.toBytes(@as(u160, 50)) ++ [_]u8{0} ** 12 }));
+    try testing.expect(!access_list.is_address_warm(Address{ .bytes = std.mem.toBytes(@as(u160, 50))[0..20].* }));
 
     // But accessing new entries should still work efficiently
     const new_address = Address{ .bytes = [_]u8{0xFF} ** 20 };
@@ -972,4 +1052,150 @@ test "EIP-2929 - Storage slots with maximum values" {
     const adjacent_slot = max_slot - 1;
     const adjacent_cold = try evm.access_storage_slot(contract_address, adjacent_slot);
     try testing.expectEqual(GasConstants.ColdSloadCost, adjacent_cold);
+}
+
+test "AccessList - fold hash equality semantics and determinism" {
+    const Ctx = AccessList.StorageKeyContext;
+    const Key = AccessList.StorageKey;
+    const ctx = Ctx{};
+    const addr_a = Address{ .bytes = [_]u8{0xAB} ** 20 };
+    var addr_b = addr_a;
+    addr_b.bytes[19] ^= 1;
+
+    const k1 = Key{ .address = addr_a, .slot = 42 };
+    const k1_copy = Key{ .address = addr_a, .slot = 42 };
+    const k2 = Key{ .address = addr_a, .slot = 43 };
+    const k3 = Key{ .address = addr_b, .slot = 42 };
+
+    try testing.expect(ctx.eql(k1, k1_copy, 0));
+    try testing.expect(!ctx.eql(k1, k2, 0));
+    try testing.expect(!ctx.eql(k1, k3, 0));
+    try testing.expectEqual(ctx.hash(k1), ctx.hash(k1_copy));
+    try testing.expect(ctx.hash(k1) != ctx.hash(k2));
+    try testing.expect(ctx.hash(k1) != ctx.hash(k3));
+
+    // Every limb of the slot and every address chunk must affect the hash.
+    const base = Key{ .address = addr_a, .slot = 0 };
+    for (0..4) |limb| {
+        const k = Key{ .address = addr_a, .slot = @as(u256, 1) << @intCast(64 * limb) };
+        try testing.expect(ctx.hash(k) != ctx.hash(base));
+    }
+    for (0..20) |byte| {
+        var addr = addr_a;
+        addr.bytes[byte] ^= 0x80;
+        try testing.expect(ctx.hash(.{ .address = addr, .slot = 0 }) != ctx.hash(base));
+        try testing.expect(AddressContext.hash(.{}, addr) != AddressContext.hash(.{}, addr_a));
+    }
+
+    const actx = AddressContext{};
+    try testing.expect(actx.eql(addr_a, addr_a, 0));
+    try testing.expect(!actx.eql(addr_a, addr_b, 0));
+}
+
+test "AccessList - fold hash distribution over sequential slots and addresses" {
+    const Ctx = AccessList.StorageKeyContext;
+    const ctx = Ctx{};
+    const bucket_count = 1024;
+    const sample_count = bucket_count * 16;
+    const addr = Address{ .bytes = [_]u8{0x01} ** 20 };
+
+    // Sequential slots (the common Solidity layout) and slots varying only in
+    // the top limb (mapping-like) must both spread across low hash bits.
+    const patterns = [_]u8{ 0, 1 };
+    for (patterns) |pattern| {
+        var buckets = [_]u32{0} ** bucket_count;
+        for (0..sample_count) |i| {
+            const slot: u256 = if (pattern == 0) i else @as(u256, i) << 192;
+            const h = ctx.hash(.{ .address = addr, .slot = slot });
+            buckets[h % bucket_count] += 1;
+        }
+        var max_load: u32 = 0;
+        var empty: u32 = 0;
+        for (buckets) |n| {
+            max_load = @max(max_load, n);
+            if (n == 0) empty += 1;
+        }
+        // Mean load is 16; a uniform hash keeps the max well under 3x and leaves no bucket empty.
+        try testing.expect(max_load < 48);
+        try testing.expectEqual(@as(u32, 0), empty);
+    }
+
+    // Sequential addresses (last byte and first byte varying).
+    var buckets = [_]u32{0} ** bucket_count;
+    for (0..sample_count) |i| {
+        var a = Address{ .bytes = [_]u8{0} ** 20 };
+        a.bytes[19] = @truncate(i);
+        a.bytes[0] = @truncate(i >> 8);
+        a.bytes[10] = @truncate(i >> 12);
+        buckets[AddressContext.hash(.{}, a) % bucket_count] += 1;
+    }
+    var max_load: u32 = 0;
+    for (buckets) |n| max_load = @max(max_load, n);
+    try testing.expect(max_load < 48);
+}
+
+test "AccessList - fold hash map holds many distinct keys" {
+    var access_list = AccessList.init(testing.allocator);
+    defer access_list.deinit();
+
+    for (0..64) |a| {
+        var addr = Address{ .bytes = [_]u8{0} ** 20 };
+        addr.bytes[19] = @intCast(a);
+        try testing.expectEqual(AccessList.COLD_ACCOUNT_ACCESS_COST, try access_list.access_address(addr));
+        for (0..64) |s| {
+            const slot: u256 = (@as(u256, s) << 128) | s;
+            try testing.expectEqual(AccessList.COLD_SLOAD_COST, try access_list.access_storage_slot(addr, slot));
+        }
+    }
+    try testing.expectEqual(@as(usize, 64), access_list.addresses.count());
+    try testing.expectEqual(@as(usize, 64 * 64), access_list.storage_slots.count());
+    for (0..64) |a| {
+        var addr = Address{ .bytes = [_]u8{0} ** 20 };
+        addr.bytes[19] = @intCast(a);
+        try testing.expect(access_list.is_address_warm(addr));
+        for (0..64) |s| {
+            const slot: u256 = (@as(u256, s) << 128) | s;
+            try testing.expect(access_list.is_storage_slot_warm(addr, slot));
+            try testing.expect(!access_list.is_storage_slot_warm(addr, slot + 1 + (1 << 64)));
+        }
+    }
+}
+
+test "AccessList - revertTo cools only entries first warmed after the checkpoint" {
+    var access_list = AccessList.init(testing.allocator);
+    defer access_list.deinit();
+
+    const pre_warmed = Address{ .bytes = [_]u8{0xEE} ** 20 };
+    try access_list.pre_warm_addresses(&[_]Address{pre_warmed});
+    _ = try access_list.access_storage_slot(pre_warmed, 7);
+
+    const cp = access_list.checkpoint();
+    // Re-touching an entry warmed before the checkpoint must not cool it on revert.
+    try testing.expectEqual(AccessList.WARM_ACCOUNT_ACCESS_COST, try access_list.access_address(pre_warmed));
+    try testing.expectEqual(AccessList.WARM_SLOAD_COST, try access_list.access_storage_slot(pre_warmed, 7));
+    // More than 8 entries so the maps build their hash index and revert must repair it.
+    var i: u8 = 1;
+    while (i <= 40) : (i += 1) {
+        const addr = Address{ .bytes = [_]u8{i} ** 20 };
+        try testing.expectEqual(AccessList.COLD_ACCOUNT_ACCESS_COST, try access_list.access_address(addr));
+        try testing.expectEqual(AccessList.COLD_SLOAD_COST, try access_list.access_storage_slot(addr, i));
+    }
+
+    access_list.revertTo(cp);
+    try testing.expect(access_list.is_address_warm(pre_warmed));
+    try testing.expect(access_list.is_storage_slot_warm(pre_warmed, 7));
+    try testing.expectEqual(@as(usize, 1), access_list.addresses.count());
+    try testing.expectEqual(@as(usize, 1), access_list.storage_slots.count());
+    i = 1;
+    while (i <= 40) : (i += 1) {
+        const addr = Address{ .bytes = [_]u8{i} ** 20 };
+        try testing.expect(!access_list.is_address_warm(addr));
+        try testing.expect(!access_list.is_storage_slot_warm(addr, i));
+    }
+    // The index stays consistent: cooled entries are cold once, then warm.
+    const again = Address{ .bytes = [_]u8{0x05} ** 20 };
+    try testing.expectEqual(AccessList.COLD_ACCOUNT_ACCESS_COST, try access_list.access_address(again));
+    try testing.expectEqual(AccessList.WARM_ACCOUNT_ACCESS_COST, try access_list.access_address(again));
+    try testing.expectEqual(AccessList.COLD_SLOAD_COST, try access_list.access_storage_slot(again, 5));
+    try testing.expectEqual(AccessList.WARM_SLOAD_COST, try access_list.access_storage_slot(again, 5));
 }

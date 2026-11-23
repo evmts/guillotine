@@ -127,8 +127,8 @@ test "bn254Add - geth chfast1" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input_hex = "2bd3e6d0f3b142924f5ca7b49ce5b9d54c4703d7ae5648e61d02268b1a0a9fb721611ce0a6af85915e2f1d70300909ce2e49dfad4a4619c8390cae66cefdb20400000000000000000000000000000000000000000000000011138ce750fa15c2";
-    const expected_hex = "070a8d6a982153cae4be29d434e8faef8a47b274a053f5a4ee2a6c9c13c31e5c031b8ce914eba3a9ffb989f9cdd5b0f01943074bf4f0f315690ec3cec6981afc";
+    const input_hex = "18b18acfb4c2c30276db5411368e7185b311dd124691610c5d3b74034e093dc9063c909c4720840cb5134cb9f59fa749755796819658d32efc0d288198f3726607c2b7f58a84bd6145f00c9c2bc0bb1a187f20ff2c92963a88019e7c6a014eed06614e20c147e940f2d70da3f74c9a17df361706a4485c742bd6788478fa17d7";
+    const expected_hex = "2243525c5efd4b9c3d3c45ac0ca3fe4dd85e830a4ce6b65fa1eeaee202839703301d1d33be6da8e509df21cc35964723180eed7532537db9ae5e7d48f195c915";
 
     var input: [128]u8 = undefined;
     var expected: [64]u8 = undefined;
@@ -147,8 +147,8 @@ test "bn254Add - geth chfast2" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input_hex = "070a8d6a982153cae4be29d434e8faef8a47b274a053f5a4ee2a6c9c13c31e5c031b8ce914eba3a9ffb989f9cdd5b0f01943074bf4f0f315690ec3cec6981afc30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd46";
-    const expected_hex = "025a6f4181d2b4ea8b724290ffb40156eb0adb514c688556eb79cdea0752c2bb2eff3f31dea215f1eb86023a133a996eb6300b44da664d64251d05381bb8a02e";
+    const input_hex = "2243525c5efd4b9c3d3c45ac0ca3fe4dd85e830a4ce6b65fa1eeaee202839703301d1d33be6da8e509df21cc35964723180eed7532537db9ae5e7d48f195c91518b18acfb4c2c30276db5411368e7185b311dd124691610c5d3b74034e093dc9063c909c4720840cb5134cb9f59fa749755796819658d32efc0d288198f37266";
+    const expected_hex = "2bd3e6d0f3b142924f5ca7b49ce5b9d54c4703d7ae5648e61d02268b1a0a9fb721611ce0a6af85915e2f1d70300909ce2e49dfad4a4619c8390cae66cefdb204";
 
     var input: [128]u8 = undefined;
     var expected: [64]u8 = undefined;
@@ -163,7 +163,7 @@ test "bn254Add - geth chfast2" {
     try testing.expectEqualSlices(u8, &expected, result.output);
 }
 
-test "bn254Add - geth cdetrio1 empty input" {
+test "bn254Add - geth cdetrio4 empty input" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
@@ -177,14 +177,14 @@ test "bn254Add - geth cdetrio1 empty input" {
     try testing.expectEqualSlices(u8, &expected, result.output);
 }
 
-test "bn254Add - geth cdetrio2 single point" {
+test "bn254Add - geth cdetrio2" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input_hex = "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+    const input_hex = "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
     const expected_hex = "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
 
-    var input: [128]u8 = undefined;
+    var input: [64]u8 = undefined;
     var expected: [64]u8 = undefined;
 
     _ = try std.fmt.hexToBytes(&input, input_hex);
@@ -197,7 +197,7 @@ test "bn254Add - geth cdetrio2 single point" {
     try testing.expectEqualSlices(u8, &expected, result.output);
 }
 
-test "bn254Add - geth cdetrio3 partial input" {
+test "bn254Add - geth cdetrio8" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
@@ -217,11 +217,11 @@ test "bn254Add - geth cdetrio3 partial input" {
     try testing.expectEqualSlices(u8, &expected, result.output);
 }
 
-test "bn254Add - geth cdetrio4 invalid point not on curve" {
+test "bn254Add - invalid point not on curve" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input_hex = "0000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+    const input_hex = "0000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002";
 
     var input: [128]u8 = undefined;
     _ = try std.fmt.hexToBytes(&input, input_hex);
@@ -230,7 +230,7 @@ test "bn254Add - geth cdetrio4 invalid point not on curve" {
     try testing.expectError(error.InvalidPoint, result);
 }
 
-test "bn254Add - geth cdetrio5 generator point addition" {
+test "bn254Add - geth cdetrio11" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
@@ -250,7 +250,7 @@ test "bn254Add - geth cdetrio5 generator point addition" {
     try testing.expectEqualSlices(u8, &expected, result.output);
 }
 
-test "bn254Add - geth cdetrio6 large x coordinate" {
+test "bn254Add - geth cdetrio13" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
@@ -270,14 +270,14 @@ test "bn254Add - geth cdetrio6 large x coordinate" {
     try testing.expectEqualSlices(u8, &expected, result.output);
 }
 
-test "bn254Add - geth cdetrio7 another valid addition" {
+test "bn254Add - geth cdetrio14" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input_hex = "17c139df0efee0f766bc0204762b774362e4ded88953a39ce849a8a7fa163fa901e0559bacb160664764a357af8a9fe70baa9258e0b959273ffc5718c6d4cc7c17c139df0efee0f766bc0204762b774362e4ded88953a39ce849a8a7fa163fa92e83f8d734803fc370eba25ed1f6b8768bd6d83887b87165fc2434fe11a830cb0";
+    const input_hex = "17c139df0efee0f766bc0204762b774362e4ded88953a39ce849a8a7fa163fa901e0559bacb160664764a357af8a9fe70baa9258e0b959273ffc5718c6d4cc7c17c139df0efee0f766bc0204762b774362e4ded88953a39ce849a8a7fa163fa92e83f8d734803fc370eba25ed1f6b8768bd6d83887b87165fc2434fe11a830cb00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
     const expected_hex = "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
 
-    var input: [128]u8 = undefined;
+    var input: [192]u8 = undefined;
     var expected: [64]u8 = undefined;
 
     _ = try std.fmt.hexToBytes(&input, input_hex);
@@ -290,7 +290,7 @@ test "bn254Add - geth cdetrio7 another valid addition" {
     try testing.expectEqualSlices(u8, &expected, result.output);
 }
 
-test "bn254Add - geth cdetrio8 valid addition with large coordinates" {
+test "bn254Add - reversed geth cdetrio13 operands" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
@@ -310,12 +310,12 @@ test "bn254Add - geth cdetrio8 valid addition with large coordinates" {
     try testing.expectEqualSlices(u8, &expected, result.output);
 }
 
-test "bn254Add - geth cdetrio9 same point addition" {
+test "bn254Add - double a point with large coordinates" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
     const input_hex = "039730ea8dff1254c0fee9c0ea777d29a9c710b7e616683f194f18c43b43b869073a5ffcc6fc7a28c30723d6e58ce577356982d65b833a5a5c15bf9024b43d98039730ea8dff1254c0fee9c0ea777d29a9c710b7e616683f194f18c43b43b869073a5ffcc6fc7a28c30723d6e58ce577356982d65b833a5a5c15bf9024b43d98";
-    const expected_hex = "1d739bd53b93e2d05f48f9626e5c6803e8cf53e8afb48a62337e42e555e44fa30f13d0f0fbf2aa7969e5b86f27ca82e381bb0b495dc2be5e6ed7d28ce5efde77";
+    const expected_hex = "2dbc7ba68f840c758c76373cd37b2cd78d6b02bee047cf401e8db90d73ce56f7062800987ee0dae9f9f36e1f050eb2621cbb4aa7c50b1c168ecc319370889de2";
 
     var input: [128]u8 = undefined;
     var expected: [64]u8 = undefined;
@@ -330,14 +330,14 @@ test "bn254Add - geth cdetrio9 same point addition" {
     try testing.expectEqualSlices(u8, &expected, result.output);
 }
 
-test "bn254Add - geth cdetrio10 point doubling" {
+test "bn254Add - geth cdetrio12" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input_hex = "17c139df0efee0f766bc0204762b774362e4ded88953a39ce849a8a7fa163fa901e0559bacb160664764a357af8a9fe70baa9258e0b959273ffc5718c6d4cc7c17c139df0efee0f766bc0204762b774362e4ded88953a39ce849a8a7fa163fa901e0559bacb160664764a357af8a9fe70baa9258e0b959273ffc5718c6d4cc7c";
-    const expected_hex = "0b5e9eed0ad939a5c58c738d8efb0dcf0e4ce0e74c81d8f1e23e2f8e67ca91612aa51f92cdccb75a71fea08abf02ca867b5a03e86c40a36a2ec7c0baa8b57eef";
+    const input_hex = "000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+    const expected_hex = "030644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd315ed738c0e0a7c92e7845f96b2ae9c0a68a6a449e3538fc7ff3ebf7a5a18a2c4";
 
-    var input: [128]u8 = undefined;
+    var input: [192]u8 = undefined;
     var expected: [64]u8 = undefined;
 
     _ = try std.fmt.hexToBytes(&input, input_hex);
@@ -350,46 +350,46 @@ test "bn254Add - geth cdetrio10 point doubling" {
     try testing.expectEqualSlices(u8, &expected, result.output);
 }
 
-test "bn254Add - geth cdetrio11 invalid x larger than field modulus" {
+test "bn254Add - invalid x larger than field modulus" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input_hex = "30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd4700000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000200";
+    const input_hex = "30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd48000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002";
 
-    var input: [129]u8 = undefined;
+    var input: [128]u8 = undefined;
     _ = try std.fmt.hexToBytes(&input, input_hex);
 
     const result = execute(allocator, &input, 1000000);
     try testing.expectError(error.InvalidPoint, result);
 }
 
-test "bn254Add - geth cdetrio12 invalid y larger than field modulus" {
+test "bn254Add - invalid y larger than field modulus" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input_hex = "000000000000000000000000000000000000000000000000000000000000000130644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd470000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000200";
+    const input_hex = "000000000000000000000000000000000000000000000000000000000000000130644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd4800000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002";
 
-    var input: [129]u8 = undefined;
+    var input: [128]u8 = undefined;
     _ = try std.fmt.hexToBytes(&input, input_hex);
 
     const result = execute(allocator, &input, 1000000);
     try testing.expectError(error.InvalidPoint, result);
 }
 
-test "bn254Add - geth cdetrio13 coordinates at field modulus" {
+test "bn254Add - coordinates at field modulus" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input_hex = "30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd4730644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd470000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000200";
+    const input_hex = "30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd4730644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd4700000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002";
 
-    var input: [129]u8 = undefined;
+    var input: [128]u8 = undefined;
     _ = try std.fmt.hexToBytes(&input, input_hex);
 
     const result = execute(allocator, &input, 1000000);
     try testing.expectError(error.InvalidPoint, result);
 }
 
-test "bn254Add - geth cdetrio14 zero point with valid point" {
+test "bn254Add - zero point with valid point" {
     const testing = std.testing;
     const allocator = testing.allocator;
 

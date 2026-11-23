@@ -99,6 +99,32 @@ pub fn build(b: *std.Build) void {
         modexp_tests_step.dependOn(&b.addRunArtifact(modexp_test).step);
     }
 
+    const bn254_tests_step = b.step("test-bn254", "Run vendored BN254 add, mul, and field tests");
+    for ([_][]const u8{
+        "precompiles/bn254_add.zig",
+        "precompiles/bn254_mul.zig",
+        "crypto/bn254/curve_parameters.zig",
+        "crypto/bn254/Fp12Mont.zig",
+    }) |path| {
+        const precompile = std.mem.startsWith(u8, path, "precompiles/");
+        const name = std.fs.path.stem(path);
+        const bn254_test = b.addTest(.{
+            .name = name,
+            .root_module = b.createModule(.{
+                .root_source_file = b.path(b.fmt("lib/voltaire/src/{s}", .{path})),
+                .target = target,
+                .optimize = optimize,
+            }),
+            .filters = if (precompile) &.{} else if (std.mem.eql(u8, name, "Fp12Mont")) &.{"Fp12Mont"} else &.{"curve parameters"},
+            .use_llvm = true,
+        });
+        if (precompile) {
+            bn254_test.root_module.addImport("crypto", modules.crypto_mod);
+            bn254_test.linkLibC();
+        }
+        bn254_tests_step.dependOn(&b.addRunArtifact(bn254_test).step);
+    }
+
     // Executables
     const guillotine_exe = GuillotineExe.createExecutable(b, modules.exe_mod);
     _ = GuillotineExe.createRunStep(b, guillotine_exe);
@@ -737,7 +763,7 @@ pub fn build(b: *std.Build) void {
         const synthetic_test = b.addTest(.{
             .name = "synthetic_opcodes_test",
             .root_module = b.createModule(.{
-                .root_source_file = b.path("src/evm/test_synthetic_opcodes.zig"),
+                .root_source_file = b.path("test/test_synthetic_opcodes.zig"),
                 .target = target,
                 .optimize = optimize,
             }),
@@ -746,9 +772,7 @@ pub fn build(b: *std.Build) void {
         });
 
         // Add module imports needed by the test
-        synthetic_test.root_module.addImport("voltaire", modules.primitives_mod);
-        synthetic_test.root_module.addImport("crypto", modules.crypto_mod);
-        synthetic_test.root_module.addImport("build_options", options_mod);
+        synthetic_test.root_module.addImport("evm", modules.evm_mod);
 
         if (bn254_lib) |bn254| synthetic_test.linkLibrary(bn254);
         synthetic_test.linkLibC();
@@ -873,6 +897,8 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .evm = modules.evm_mod,
         .optimize = .ReleaseFast,
+        .hardfork = b.option([]const u8, "bench-hardfork", "Benchmark fork (default OSAKA)") orelse "OSAKA",
+        .gas_limit = b.option(u64, "bench-gas-limit", "Benchmark execution gas budget (Osaka+ <= 16777216)"),
     });
 
     // Bun specs runner (kept as alternative)
@@ -914,7 +940,7 @@ pub fn build(b: *std.Build) void {
             .root_module = b.createModule(.{
                 .root_source_file = b.path("test/fusions.zig"),
                 .target = target,
-                .optimize = .Debug,
+                .optimize = optimize,
             }),
             // Force LLVM backend: native Zig backend on Linux x86 doesn't support tail calls yet
             .use_llvm = true,
@@ -923,7 +949,7 @@ pub fn build(b: *std.Build) void {
         fusions_basic.root_module.addImport("voltaire", modules.primitives_mod);
         fusions_basic.root_module.addImport("crypto", modules.crypto_mod);
         fusions_basic.root_module.addImport("build_options", options_mod);
-        fusions_basic.root_module.addImport("log", b.createModule(.{ .root_source_file = b.path("src/log.zig"), .target = target, .optimize = .Debug }));
+        fusions_basic.root_module.addImport("log", b.createModule(.{ .root_source_file = b.path("src/log.zig"), .target = target, .optimize = optimize }));
         if (bn254_lib) |bn254| fusions_basic.linkLibrary(bn254);
         fusions_basic.linkLibC();
 
@@ -933,7 +959,7 @@ pub fn build(b: *std.Build) void {
             .root_module = b.createModule(.{
                 .root_source_file = b.path("test/fusions_dispatch.zig"),
                 .target = target,
-                .optimize = .Debug,
+                .optimize = optimize,
             }),
             // Force LLVM backend: native Zig backend on Linux x86 doesn't support tail calls yet
             .use_llvm = true,
@@ -942,7 +968,7 @@ pub fn build(b: *std.Build) void {
         fusions_dispatch.root_module.addImport("voltaire", modules.primitives_mod);
         fusions_dispatch.root_module.addImport("crypto", modules.crypto_mod);
         fusions_dispatch.root_module.addImport("build_options", options_mod);
-        fusions_dispatch.root_module.addImport("log", b.createModule(.{ .root_source_file = b.path("src/log.zig"), .target = target, .optimize = .Debug }));
+        fusions_dispatch.root_module.addImport("log", b.createModule(.{ .root_source_file = b.path("src/log.zig"), .target = target, .optimize = optimize }));
         if (bn254_lib) |bn254| fusions_dispatch.linkLibrary(bn254);
         fusions_dispatch.linkLibC();
 
@@ -952,7 +978,7 @@ pub fn build(b: *std.Build) void {
             .root_module = b.createModule(.{
                 .root_source_file = b.path("test/differential/synthetic_toggle_test.zig"),
                 .target = target,
-                .optimize = .Debug,
+                .optimize = optimize,
             }),
             // Force LLVM backend: native Zig backend on Linux x86 doesn't support tail calls yet
             .use_llvm = true,
@@ -961,7 +987,7 @@ pub fn build(b: *std.Build) void {
         fusions_diff_toggle.root_module.addImport("voltaire", modules.primitives_mod);
         fusions_diff_toggle.root_module.addImport("crypto", modules.crypto_mod);
         fusions_diff_toggle.root_module.addImport("build_options", options_mod);
-        fusions_diff_toggle.root_module.addImport("log", b.createModule(.{ .root_source_file = b.path("src/log.zig"), .target = target, .optimize = .Debug }));
+        fusions_diff_toggle.root_module.addImport("log", b.createModule(.{ .root_source_file = b.path("src/log.zig"), .target = target, .optimize = optimize }));
         // Using MinimalEvm for differential testing (REVM removed)
         if (bn254_lib) |bn254| fusions_diff_toggle.linkLibrary(bn254);
         fusions_diff_toggle.linkLibC();

@@ -30,18 +30,10 @@ pub fn Handlers(FrameType: type) type {
             const value2_item = op_data.items[1];
 
             // Push first value
-            if (value1_item == .push_inline) {
-                self.stack.push_unsafe(value1_item.push_inline.value);
-            } else if (value1_item == .push_pointer) {
-                self.stack.push_unsafe(value1_item.push_pointer.value_ptr.*);
-            }
+            self.stack.push_unsafe(value1_item.push_pointer.value_ptr.*);
 
             // Push second value
-            if (value2_item == .push_inline) {
-                self.stack.push_unsafe(value2_item.push_inline.value);
-            } else if (value2_item == .push_pointer) {
-                self.stack.push_unsafe(value2_item.push_pointer.value_ptr.*);
-            }
+            self.stack.push_unsafe(value2_item.push_pointer.value_ptr.*);
 
             // Use getOpData for next instruction
             self.afterInstruction(.MULTI_PUSH_2, op_data.next_handler, op_data.next_cursor.cursor);
@@ -63,23 +55,11 @@ pub fn Handlers(FrameType: type) type {
             const value3_item = op_data.items[2];
 
             // Push all three values
-            if (value1_item == .push_inline) {
-                self.stack.push_unsafe(value1_item.push_inline.value);
-            } else if (value1_item == .push_pointer) {
-                self.stack.push_unsafe(value1_item.push_pointer.value_ptr.*);
-            }
+            self.stack.push_unsafe(value1_item.push_pointer.value_ptr.*);
 
-            if (value2_item == .push_inline) {
-                self.stack.push_unsafe(value2_item.push_inline.value);
-            } else if (value2_item == .push_pointer) {
-                self.stack.push_unsafe(value2_item.push_pointer.value_ptr.*);
-            }
+            self.stack.push_unsafe(value2_item.push_pointer.value_ptr.*);
 
-            if (value3_item == .push_inline) {
-                self.stack.push_unsafe(value3_item.push_inline.value);
-            } else if (value3_item == .push_pointer) {
-                self.stack.push_unsafe(value3_item.push_pointer.value_ptr.*);
-            }
+            self.stack.push_unsafe(value3_item.push_pointer.value_ptr.*);
 
             // Use getOpData for next instruction
             self.afterInstruction(.MULTI_PUSH_3, op_data.next_handler, op_data.next_cursor.cursor);
@@ -135,12 +115,7 @@ pub fn Handlers(FrameType: type) type {
 
             // Get the jump target from items
             const target_item = op_data.items[0];
-            const target = if (target_item == .push_inline)
-                target_item.push_inline.value
-            else if (target_item == .push_pointer)
-                target_item.push_pointer.value_ptr.*
-            else
-                unreachable;
+            const target = target_item.push_pointer.value_ptr.*;
 
             // Pop value and check if zero
             const value = self.stack.pop_unsafe();
@@ -183,12 +158,7 @@ pub fn Handlers(FrameType: type) type {
 
             // Get the push value from items
             const push_item = op_data.items[0];
-            const push_value = if (push_item == .push_inline)
-                push_item.push_inline.value
-            else if (push_item == .push_pointer)
-                push_item.push_pointer.value_ptr.*
-            else
-                unreachable;
+            const push_value = push_item.push_pointer.value_ptr.*;
 
             // DUP2: Duplicate the second stack item
             // First pop two values to get to the second item
@@ -304,11 +274,7 @@ pub fn Handlers(FrameType: type) type {
 
             // PUSH: Add push value
             const push_item = op_data.items[0];
-            if (push_item == .push_inline) {
-                self.stack.push_unsafe(push_item.push_inline.value);
-            } else if (push_item == .push_pointer) {
-                self.stack.push_unsafe(push_item.push_pointer.value_ptr.*);
-            }
+            self.stack.push_unsafe(push_item.push_pointer.value_ptr.*);
 
             // DUP3: duplicate 3rd stack item
             self.stack.dup_n_unsafe(3);
@@ -336,10 +302,7 @@ pub fn Handlers(FrameType: type) type {
             // Extract selector and target from metadata
             const selector = @as(u32, @intCast(op_data.items[0].push_inline.value));
             const target_item = op_data.items[1];
-            const target = if (target_item == .push_inline)
-                target_item.push_inline.value
-            else
-                target_item.push_pointer.value_ptr.*;
+            const target = target_item.push_pointer.value_ptr.*;
 
             // PUSH4 selector
             self.stack.push_unsafe(selector);
@@ -432,10 +395,7 @@ pub fn Handlers(FrameType: type) type {
             (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "PUSH_ADD_DUP1: Stack overflow (need 1 free slot)");
 
             const push_item = op_data.items[0];
-            const push_value: WordType = if (push_item == .push_inline)
-                push_item.push_inline.value
-            else
-                push_item.push_pointer.value_ptr.*;
+            const push_value: WordType = push_item.push_pointer.value_ptr.*;
 
             const result = self.stack.peek_unsafe() +% push_value;
             self.stack.set_top_unsafe(result);

@@ -28,7 +28,7 @@ test "ERC20 deployment with standard EVM" {
     const allocator = std.testing.allocator;
 
     // Read the ERC20 transfer bytecode
-    const bytecode_file = try std.fs.cwd().openFile("src/evm/fixtures/erc20-transfer/bytecode.txt", .{});
+    const bytecode_file = try std.fs.cwd().openFile("fixtures/erc20-transfer/bytecode.txt", .{});
     defer bytecode_file.close();
     const bytecode_hex = try bytecode_file.readToEndAlloc(allocator, 16 * 1024 * 1024);
     defer allocator.free(bytecode_hex);
@@ -197,7 +197,7 @@ test "Snailtracer deployment comparison" {
     const allocator = std.testing.allocator;
     
     // Test with snailtracer which we know works
-    const bytecode_file = try std.fs.cwd().openFile("src/evm/fixtures/snailtracer/bytecode.txt", .{});
+    const bytecode_file = try std.fs.cwd().openFile("fixtures/snailtracer/bytecode.txt", .{});
     defer bytecode_file.close();
     const bytecode_hex = try bytecode_file.readToEndAlloc(allocator, 16 * 1024 * 1024);
     defer allocator.free(bytecode_hex);
@@ -248,12 +248,13 @@ test "Snailtracer deployment comparison" {
     );
     defer deploy_evm.deinit();
     
+    const deployment_gas = 16_777_216;
     const create_params = evm.CallParams{
         .create = .{
             .caller = caller_address,
             .value = 0,
             .init_code = init_code,
-            .gas = 500_000_000,
+            .gas = deployment_gas,
         },
     };
     
@@ -263,8 +264,9 @@ test "Snailtracer deployment comparison" {
     log.info("Snailtracer deployment: success={}, gas_left={}, gas_used={}", .{
         deploy_result.success,
         deploy_result.gas_left,
-        500_000_000 - deploy_result.gas_left,
+        deployment_gas - deploy_result.gas_left,
     });
     
     try std.testing.expect(deploy_result.success);
+    try std.testing.expect(deploy_result.output.len > 0);
 }

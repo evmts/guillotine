@@ -517,7 +517,7 @@ test "Fp12Mont.frobeniusMap basic operation" {
 test "Fp12Mont.powParamT basic operation" {
     const pairing = @import("pairing.zig");
     const a = fp12mont(2, 1, 1, 2, 3, 1, 1, 2, 3, 1, 2, 1);
-    const a_cycl = pairing.finalExponentiationEasyPart(&a);
+    const a_cycl = try pairing.finalExponentiationEasyPart(&a);
     const result = a_cycl.powParamT();
     // Verify it's equivalent to a.pow(curve_parameters.CURVE_PARAM_T)
     const expected = a_cycl.pow(curve_parameters.CURVE_PARAM_T);
@@ -537,7 +537,7 @@ test "Fp12Mont.squareCyclotomic basic operation" {
 
     // Test with a non-trivial element
     const a = fp12mont(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12);
-    const a_cycl = pairing.finalExponentiationEasyPart(&a);
+    const a_cycl = try pairing.finalExponentiationEasyPart(&a);
     const result = a_cycl.squareCyclotomic();
     const result2 = a_cycl.square();
 
