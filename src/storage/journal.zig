@@ -24,7 +24,32 @@ pub fn Journal(comptime config: JournalConfig) type {
         pub const NonceType = config.NonceType;
         pub const EntryType = Entry;
         
+        const OriginalStorageKey = struct {
+            address: Address,
+            slot: WordType,
+        };
+        const OriginalStorageContext = struct {
+            pub fn hash(_: @This(), key: OriginalStorageKey) u64 {
+                var hasher = std.hash.Wyhash.init(0);
+                hasher.update(&key.address.bytes);
+                hasher.update(std.mem.asBytes(&key.slot));
+                return hasher.final();
+            }
+            pub fn eql(_: @This(), a: OriginalStorageKey, b: OriginalStorageKey) bool {
+                return std.mem.eql(u8, &a.address.bytes, &b.address.bytes) and a.slot == b.slot;
+            }
+        };
+        const OriginalStorageEntry = struct {
+            value: WordType,
+            snapshot_id: SnapshotIdType,
+        };
+
         entries: std.ArrayList(Entry),
+        /// Lazily-populated index for O(1) `get_original_storage` on SSTORE-heavy transactions.
+        /// Recording changes never hashes or allocates unless `get_original_storage` is queried
+        /// with more than 32 entries.
+        original_storage: std.HashMap(OriginalStorageKey, OriginalStorageEntry, OriginalStorageContext, std.hash_map.default_max_load_percentage),
+        indexed_len: usize = 0,
         next_snapshot_id: SnapshotIdType,
         allocator: std.mem.Allocator,
         
@@ -36,6 +61,8 @@ pub fn Journal(comptime config: JournalConfig) type {
 
             return Self{
                 .entries = entries,
+                .original_storage = std.HashMap(OriginalStorageKey, OriginalStorageEntry, OriginalStorageContext, std.hash_map.default_max_load_percentage).init(allocator),
+                .indexed_len = 0,
                 .next_snapshot_id = 0,
                 .allocator = allocator,
             };
@@ -45,6 +72,8 @@ pub fn Journal(comptime config: JournalConfig) type {
         pub fn initEmpty(allocator: std.mem.Allocator) Self {
             return Self{
                 .entries = std.ArrayList(Entry){},
+                .original_storage = std.HashMap(OriginalStorageKey, OriginalStorageEntry, OriginalStorageContext, std.hash_map.default_max_load_percentage).init(allocator),
+                .indexed_len = 0,
                 .next_snapshot_id = 0,
                 .allocator = allocator,
             };
@@ -53,6 +82,7 @@ pub fn Journal(comptime config: JournalConfig) type {
         /// Deinitialize the journal
         pub fn deinit(self: *Self) void {
             self.entries.deinit(self.allocator);
+            self.original_storage.deinit();
         }
         
         /// Error returned when snapshot IDs are exhausted
@@ -73,18 +103,39 @@ pub fn Journal(comptime config: JournalConfig) type {
         pub fn revert_to_snapshot(self: *Self, snapshot_id: SnapshotIdType) void {
             // Remove entries by filtering out those with snapshot_id >= target
             var write_idx: usize = 0;
+            var storage_reverted = false;
             for (self.entries.items) |entry| {
                 if (entry.snapshot_id < snapshot_id) {
                     self.entries.items[write_idx] = entry;
                     write_idx += 1;
+                } else if (entry.data == .storage_change) {
+                    storage_reverted = true;
                 }
             }
             self.entries.shrinkRetainingCapacity(write_idx);
+
+            if (storage_reverted and self.indexed_len > 0) {
+                self.original_storage.clearRetainingCapacity();
+                self.indexed_len = 0;
+            } else if (self.indexed_len > write_idx) {
+                self.indexed_len = write_idx;
+            }
         }
         
         /// Record a storage change
         pub fn record_storage_change(self: *Self, snapshot_id: SnapshotIdType, address: Address, key: WordType, original_value: WordType) !void {
             try self.entries.append(self.allocator, Entry.storage_change(snapshot_id, address, key, original_value));
+            if (self.indexed_len > 0) {
+                const gop = self.original_storage.getOrPut(.{ .address = address, .slot = key }) catch {
+                    self.original_storage.clearRetainingCapacity();
+                    self.indexed_len = 0;
+                    return;
+                };
+                if (!gop.found_existing) {
+                    gop.value_ptr.* = .{ .value = original_value, .snapshot_id = snapshot_id };
+                }
+                self.indexed_len = self.entries.items.len;
+            }
         }
         
         /// Record a balance change
@@ -120,11 +171,48 @@ pub fn Journal(comptime config: JournalConfig) type {
         /// Clear all entries and reset snapshot counter
         pub fn clear(self: *Self) void {
             self.entries.clearRetainingCapacity();
+            if (self.indexed_len > 0) {
+                self.original_storage.clearRetainingCapacity();
+                self.indexed_len = 0;
+            }
             self.next_snapshot_id = 0;
         }
         
-        /// Get original storage value from journal (searches from oldest to newest)
+        /// Get original storage value from journal, lazily populating the O(1) index
+        /// once the journal grows beyond 32 entries so SSTORE-heavy transactions stay O(1).
+        pub fn get_original_storage_indexed(self: *Self, address: Address, slot: WordType) ?WordType {
+            if (self.entries.items.len <= 32) {
+                return self.get_original_storage(address, slot);
+            }
+            if (self.indexed_len < self.entries.items.len) {
+                for (self.entries.items[self.indexed_len..]) |entry| {
+                    if (entry.data == .storage_change) {
+                        const sc = entry.data.storage_change;
+                        const gop = self.original_storage.getOrPut(.{ .address = sc.address, .slot = sc.key }) catch {
+                            return self.get_original_storage(address, slot);
+                        };
+                        if (!gop.found_existing) {
+                            gop.value_ptr.* = .{ .value = sc.original_value, .snapshot_id = entry.snapshot_id };
+                        }
+                    }
+                }
+                self.indexed_len = self.entries.items.len;
+            }
+            if (self.original_storage.get(.{ .address = address, .slot = slot })) |entry| {
+                return entry.value;
+            }
+            return null;
+        }
+
+        /// Get original storage value from journal (fast linear scan for tiny journals,
+        /// uses O(1) index when already populated).
         pub fn get_original_storage(self: *const Self, address: Address, slot: WordType) ?WordType {
+            if (self.indexed_len == self.entries.items.len and self.indexed_len > 0) {
+                if (self.original_storage.get(.{ .address = address, .slot = slot })) |entry| {
+                    return entry.value;
+                }
+                return null;
+            }
             for (self.entries.items) |entry| {
                 switch (entry.data) {
                     .storage_change => |sc| {

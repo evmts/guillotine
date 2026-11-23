@@ -67,7 +67,7 @@ pub fn addBenchSteps(b: *std.Build, options: Options) Steps {
 // Copy the import graph with memoization (Voltaire/crypto have a cycle).
 // Keep include paths, native link objects and generated-file dependencies;
 // change optimization without mutating modules shared with tests or SDKs.
-fn optimized(b: *std.Build, source: *std.Build.Module, mode: std.builtin.OptimizeMode, archive: ?std.Build.LazyPath, copies: *std.AutoHashMap(*std.Build.Module, *std.Build.Module)) *std.Build.Module {
+pub fn optimized(b: *std.Build, source: *std.Build.Module, mode: std.builtin.OptimizeMode, archive: ?std.Build.LazyPath, copies: *std.AutoHashMap(*std.Build.Module, *std.Build.Module)) *std.Build.Module {
     if (copies.get(source)) |copy| return copy;
     const copy = b.allocator.create(std.Build.Module) catch @panic("out of memory creating benchmark module");
     copy.* = source.*;
@@ -94,7 +94,7 @@ fn optimized(b: *std.Build, source: *std.Build.Module, mode: std.builtin.Optimiz
 /// Own the crypto producer here so the three-line root integration does not
 /// inherit Voltaire's missing-archive dependency. A caller can instead supply
 /// an already-produced native_archive (including for cross compilation).
-fn nativeArchive(b: *std.Build, directory: std.Build.LazyPath, repository: std.Build.LazyPath, target: std.Build.ResolvedTarget) std.Build.LazyPath {
+pub fn nativeArchive(b: *std.Build, directory: std.Build.LazyPath, repository: std.Build.LazyPath, target: std.Build.ResolvedTarget) std.Build.LazyPath {
     if (!target.query.isNative()) @panic("supply a target-specific native_archive for cross-compiled benchmarks");
     const cargo = b.addSystemCommand(&.{ "cargo", "build", "--release", "--locked", "--manifest-path" });
     cargo.addFileArg(directory.path(b, "native/Cargo.toml"));

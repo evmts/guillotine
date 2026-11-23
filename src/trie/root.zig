@@ -1,1 +1,21 @@
-pub usingnamespace @import("module.zig");
+const module = @import("module.zig");
+
+pub const trie = module.trie;
+pub const merkle_trie = module.merkle_trie;
+pub const hash_builder = module.hash_builder;
+pub const hash_builder_optimized = module.hash_builder_optimized;
+pub const proof = module.proof;
+pub const optimized_branch = module.optimized_branch;
+pub const node_cache = module.node_cache;
+pub const MerkleTrie = module.MerkleTrie;
+pub const TrieNode = module.TrieNode;
+pub const HashBuilder = module.HashBuilder;
+pub const HashBuilderOptimized = module.HashBuilderOptimized;
+pub const ProofNodes = module.ProofNodes;
+pub const ProofRetainer = module.ProofRetainer;
+pub const CompactBranchNode = module.CompactBranchNode;
+pub const NodeCache = module.NodeCache;
+pub const TrieError = module.TrieError;
+pub const ProofError = module.ProofError;
+pub const key_to_nibbles = module.key_to_nibbles;
+pub const nibbles_to_key = module.nibbles_to_key;

@@ -958,4 +958,49 @@ pub fn build(b: *std.Build) void {
 
     // 4. Fourth: Run library tests (lib/**/*.zig)
     test_step.dependOn(&run_lib_tests.step);
+
+    // Self-contained ReleaseFast EVM & per-subsystem benchmark suites
+    const benches = @import("bench/bench_step.zig");
+    const bench_suites = @import("bench/suites_build.zig");
+    const bench_archive = benches.nativeArchive(b, b.path("bench"), b.path("."), target);
+    const bench_hardfork = b.option([]const u8, "bench-hardfork", "Benchmark hardfork (default OSAKA)") orelse "OSAKA";
+    const bench_gas_limit = b.option(u64, "bench-gas-limit", "Benchmark gas budget");
+    const bench_flags = b.addOptions();
+    bench_flags.addOption(bool, "enable_tracing", false);
+    bench_flags.addOption(bool, "disable_tailcall_dispatch", false);
+    bench_flags.addOption(bool, "disable_gas_checks", false);
+    bench_flags.addOption(bool, "enable_fusion", true);
+    bench_flags.addOption([]const u8, "hardfork", bench_hardfork);
+    const bench_flags_mod = bench_flags.createModule();
+    var bench_copies: std.AutoHashMap(*std.Build.Module, *std.Build.Module) = .init(b.allocator);
+    defer bench_copies.deinit();
+    const bench_evm_raw = b.createModule(.{
+        .root_source_file = b.path("src/root.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    bench_evm_raw.addImport("build_options", bench_flags_mod);
+    bench_evm_raw.addImport("voltaire", modules.primitives_mod);
+    bench_evm_raw.addImport("crypto", modules.crypto_mod);
+    bench_evm_raw.addImport("precompiles", modules.precompiles_mod);
+    bench_evm_raw.addImport("provider", modules.provider_mod);
+    _ = benches.addBenchSteps(b, .{
+        .target = target,
+        .evm = bench_evm_raw,
+        .native_archive = bench_archive,
+        .hardfork = bench_hardfork,
+        .gas_limit = bench_gas_limit,
+    });
+    bench_suites.addSuiteSteps(b, .{
+        .target = target,
+        .optimize = .ReleaseFast,
+        .directory = b.path("bench"),
+        .repository = b.path("."),
+        .evm = benches.optimized(b, bench_evm_raw, .ReleaseFast, bench_archive, &bench_copies),
+        .voltaire = benches.optimized(b, modules.primitives_mod, .ReleaseFast, bench_archive, &bench_copies),
+        .crypto = benches.optimized(b, modules.crypto_mod, .ReleaseFast, bench_archive, &bench_copies),
+        .precompiles = benches.optimized(b, modules.precompiles_mod, .ReleaseFast, bench_archive, &bench_copies),
+        .build_options = bench_flags_mod,
+        .native_archive = bench_archive,
+    });
 }

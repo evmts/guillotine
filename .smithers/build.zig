@@ -5,11 +5,17 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    const voltaire = b.createModule(.{
+        .root_source_file = .{ .cwd_relative = "lib/voltaire/src/primitives/root.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
     const modexp = b.createModule(.{
         .root_source_file = .{ .cwd_relative = "lib/voltaire/src/crypto/modexp.zig" },
         .target = target,
         .optimize = optimize,
     });
+    modexp.addImport("voltaire", voltaire);
     const tests = b.addTest(.{ .root_module = modexp, .use_llvm = true });
     const run = b.addRunArtifact(tests);
     const step = b.step("test-modexp", "Run repository MODEXP arithmetic and EIP-198 gas tests");

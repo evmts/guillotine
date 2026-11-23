@@ -124,3 +124,4 @@ pub const transport = struct {
 // Export utilities for testing
 pub const ConnectionPool = @import("connection_pool.zig").ConnectionPool;
 pub const RateLimiter = @import("rate_limiter.zig").RateLimiter;
+pub const validation = @import("validation.zig");

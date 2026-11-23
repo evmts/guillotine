@@ -197,3 +197,4 @@ zig-out/
 .baseline_*.txt
 profile_results/
 dist/
+bench/results/

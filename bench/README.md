@@ -134,6 +134,58 @@ by the standalone entry point.
 The former `evm_benchmarks*.zig` and `evm_fixture_benchmarks.zig` entry points
 forward to the new runner. The dead external-repository build paths are removed.
 
+## Subsystem microbenchmarks & incremental Smithers workflows
+
+In addition to the full-EVM `guillotine-bench` runner (`opcode/`, `contract/`, `precompile/`),
+every major Guillotine subsystem has a standalone ReleaseFast microbenchmark binary built
+on the zero-dependency harness in `bench/micro.zig` and wired into per-subsystem Smithers
+`PACKAGE.ts` targets:
+
+| Subsystem | Smithers Target | Zig Step | Suite Source |
+|:--|:--|:--|:--|
+| Stack | `//src/stack:bench` | `zig build bench-stack` | `bench/suites/stack_bench.zig` |
+| Memory | `//src/memory:bench` | `zig build bench-memory` | `bench/suites/memory_bench.zig` |
+| Bytecode analysis | `//src/bytecode:bench` | `zig build bench-bytecode` | `bench/suites/bytecode_bench.zig` |
+| Layer2 (OP Stack / Base FastLZ) | `//src/layer2:bench` | `zig build bench-layer2` | `bench/suites/layer2_bench.zig` |
+| Provider / JSON-RPC validation | `//src/provider:bench` | `zig build bench-provider` | `bench/suites/provider_bench.zig` |
+| Storage (Database, Journal, AccessList, LRU) | `//src/storage:bench` | `zig build bench-storage` | `bench/suites/storage_bench.zig` |
+| Merkle Patricia Trie & NodeCache | `//src/trie:bench` | `zig build bench-trie` | `bench/suites/trie_bench.zig` |
+| EIPs & Hardforks (EIP-7623, EIP-4844, EIP-1559) | `//src/eips_and_hardforks:bench` | `zig build bench-eips` | `bench/suites/eips_bench.zig` |
+| Tracer RingBuffer | `//src/tracer:bench` | `zig build bench-tracer` | `bench/suites/tracer_bench.zig` |
+| MinimalEvm reference interpreter | `//src/tracer:bench-minimal-evm` | `zig build bench-minimal-evm` | `bench/suites/minimal_evm_bench.zig` |
+| Preprocessor (Dispatch & JumpTable) | `//src/preprocessor:bench` | `zig build bench-preprocessor` | `bench/suites/preprocessor_bench.zig` |
+| Crypto primitives (Keccak, SHA256, ModExp, Secp256k1) | `//bench:bench-crypto` | `zig build bench-crypto` | `bench/suites/crypto_bench.zig` |
+| C ABI / FFI lifecycle & simulation | `//bench:bench-ffi` | `zig build bench-ffi` | `bench/suites/ffi_bench.zig` |
+| EVM Opcodes (40 opcodes, Osaka) | `//bench:bench-opcodes` | `zig build bench -- --filter opcode/` | `bench/workloads.zig` |
+| EVM Contracts (9 contracts incl. Snailtracer, Prague) | `//bench:bench-contracts` | `zig build bench -Dbench-hardfork=PRAGUE -- --filter contract/` | `bench/workloads.zig` |
+| EVM Precompiles (7 active + P256VERIFY check) | `//bench:bench-precompiles` | `zig build bench -- --filter precompile/ --allow-unavailable` | `bench/workloads.zig` |
+
+Each subsystem binary links only its minimal dependency closure (via `src/pure_exports.zig`
+and `src/voltaire_exports.zig`), compiles into its own prefix (`zig-out/bench-<suite>`), and
+caches its JSON report (`bench/results/<suite>.json`) in Smithers.
+
+```sh
+# Run ONLY benchmarks whose declared inputs changed in your diff:
+smthrs affected test //src/... //bench/... --include-exclusive
+
+# Run the unified report across all 16 suites (replays cached results for unchanged suites):
+smthrs test //bench:report --jobs 3
+
+# Run a single subsystem benchmark directly via Smithers or Zig:
+smthrs test //src/bytecode:bench
+zig build bench-bytecode -- --iterations 40 --warmup 8
+
+# Update the committed baseline after landing verified speedups:
+node bench/summary.mjs --results-dir bench/results --write-baseline --baseline bench/baseline.json
+
+# Run microbenchmark harness and EVM benchmark unit tests:
+zig build test-bench test-micro-bench
+```
+
+`//bench:report` invokes `bench/summary.mjs` to aggregate all `bench/results/*.json` files,
+compute `% faster / % slower` deltas against `bench/baseline.json`, and emit
+`bench/results/summary.md` and `bench/results/all.json`.
+
 ## Known limitations of the base revision
 
 The runner reports these conditions explicitly rather than producing misleading
@@ -141,15 +193,12 @@ performance numbers:
 
 - `src/preprocessor/dispatch.zig` ignores `disable_tailcall_dispatch`; supply a
   verified loop module after that core work lands.
-- CLZ and P256VERIFY are absent. Osaka precompile recognition is also absent;
-  an explicit Prague build exercises the implemented precompiles.
+- `P256VERIFY` is absent from the base checkout's precompile dispatch table and
+  is reported as `unavailable` until wired (pass `--allow-unavailable` to exit 0
+  while still failing on any broken benchmark).
 - Fused CREATE setup fails on the checked-in contract fixtures. The suite's
   constructor phase always uses the unfused EVM, separately from measured
   execution, so this does not silently alter a measured dispatch mode.
-- The vendored BN254 pairing parser reads Fp2 coordinates as real then
-  imaginary. EIP-197 input encodes imaginary then real. The non-infinity
-  generator vector therefore fails in this revision; its row remains failed.
-- Root `zig build` / `zig build test-opcodes` reference a missing
-  `lib/voltaire/target/release/libcrypto_wrappers.a`. The bench-owned build
-  provides its own generated archive, but cannot repair the root steps from
-  this lane.
+- Root `zig build` / `zig build test-opcodes` expect
+  `lib/voltaire/target/release/libcrypto_wrappers.a` (`cargo build --release --manifest-path lib/voltaire/Cargo.toml`).
+  The bench-owned build compiles its own generated archive automatically.

@@ -85,13 +85,22 @@ pub fn build(allocator: std.mem.Allocator) ![]Workload {
     const arithmetic = [_]struct { name: []const u8, opcode: u8, expected: u256 }{
         .{ .name = "ADD", .opcode = 0x01, .expected = 10 },
         .{ .name = "MUL", .opcode = 0x02, .expected = 21 },
+        .{ .name = "SUB", .opcode = 0x03, .expected = 4 },
         .{ .name = "DIV", .opcode = 0x04, .expected = 2 },
         .{ .name = "SDIV", .opcode = 0x05, .expected = 2 },
         .{ .name = "MOD", .opcode = 0x06, .expected = 1 },
+        .{ .name = "SMOD", .opcode = 0x07, .expected = 1 },
         .{ .name = "EXP", .opcode = 0x0a, .expected = 343 },
+        .{ .name = "SIGNEXTEND", .opcode = 0x0b, .expected = 3 },
+        .{ .name = "LT", .opcode = 0x10, .expected = 0 },
+        .{ .name = "GT", .opcode = 0x11, .expected = 1 },
+        .{ .name = "SLT", .opcode = 0x12, .expected = 0 },
+        .{ .name = "SGT", .opcode = 0x13, .expected = 1 },
+        .{ .name = "EQ", .opcode = 0x14, .expected = 0 },
         .{ .name = "AND", .opcode = 0x16, .expected = 3 },
         .{ .name = "OR", .opcode = 0x17, .expected = 7 },
         .{ .name = "XOR", .opcode = 0x18, .expected = 4 },
+        .{ .name = "BYTE", .opcode = 0x1a, .expected = 0 },
         .{ .name = "SHL", .opcode = 0x1b, .expected = 384 },
         .{ .name = "SHR", .opcode = 0x1c, .expected = 0 },
         .{ .name = "SAR", .opcode = 0x1d, .expected = 0 },
@@ -112,8 +121,34 @@ pub fn build(allocator: std.mem.Allocator) ![]Workload {
             .expected = item.expected,
         });
     }
+    const ternary = [_]struct { name: []const u8, opcode: u8, expected: u256 }{
+        .{ .name = "ADDMOD", .opcode = 0x08, .expected = 4 },
+        .{ .name = "MULMOD", .opcode = 0x09, .expected = 3 },
+    };
+    for (ternary) |item| {
+        var code = Assembler{ .allocator = allocator };
+        for (0..repetitions) |_| {
+            try code.push(6);
+            try code.push(3);
+            try code.push(7);
+            try code.op(item.opcode);
+            try code.store(0);
+        }
+        try list.append(allocator, .{
+            .name = try std.fmt.allocPrint(allocator, "opcode/{s}", .{item.name}),
+            .category = "opcode",
+            .source = .{ .bytecode = try code.finish(0) },
+            .operations = repetitions,
+            .expected = item.expected,
+        });
+    }
     try list.append(allocator, .{ .name = "opcode/CLZ", .category = "opcode", .source = .clz, .operations = repetitions, .expected = 253 });
-    const memory = [_][]const u8{ "MLOAD", "MSTORE", "MCOPY", "KECCAK256", "SLOAD-cold", "SLOAD-warm", "SSTORE-cold", "SSTORE-warm", "CALL", "STATICCALL" };
+    const memory = [_][]const u8{
+        "MLOAD",      "MSTORE",     "MCOPY",        "KECCAK256",
+        "SLOAD-cold", "SLOAD-warm", "SSTORE-cold",  "SSTORE-warm",
+        "CALL",       "STATICCALL", "DELEGATECALL", "MSTORE8",
+        "TLOAD",      "TSTORE",     "LOG0",
+    };
     for (memory, 0..) |name, kind| {
         var code = Assembler{ .allocator = allocator };
         try code.push(42);
@@ -122,6 +157,10 @@ pub fn build(allocator: std.mem.Allocator) ![]Workload {
             try code.push(0);
             try code.op(0x54);
             try code.op(0x50);
+        } else if (kind == 12) {
+            try code.push(42);
+            try code.push(0);
+            try code.op(0x5d);
         }
         for (0..repetitions) |index| {
             switch (kind) {
@@ -155,7 +194,7 @@ pub fn build(allocator: std.mem.Allocator) ![]Workload {
                     try code.push(if (kind == 6) index else 0);
                     try code.op(0x55);
                 },
-                8, 9 => {
+                8, 9, 10 => {
                     // Child at 0x2000 returns 42. Accumulate success flags;
                     // a failed nested call changes the checked result.
                     try code.push(0);
@@ -165,10 +204,30 @@ pub fn build(allocator: std.mem.Allocator) ![]Workload {
                     if (kind == 8) try code.push(0);
                     try code.push(0x2000);
                     try code.push(50_000);
-                    try code.op(if (kind == 8) 0xf1 else 0xfa);
+                    try code.op(if (kind == 8) 0xf1 else if (kind == 9) 0xfa else 0xf4);
                     try code.load(32);
                     try code.op(0x01);
                     try code.store(32);
+                },
+                11 => {
+                    try code.push(42);
+                    try code.push(63);
+                    try code.op(0x53);
+                },
+                12 => {
+                    try code.push(0);
+                    try code.op(0x5c);
+                    try code.store(32);
+                },
+                13 => {
+                    try code.push(42);
+                    try code.push(index);
+                    try code.op(0x5d);
+                },
+                14 => {
+                    try code.push(32);
+                    try code.push(0);
+                    try code.op(0xa0);
                 },
                 else => unreachable,
             }
@@ -176,6 +235,13 @@ pub fn build(allocator: std.mem.Allocator) ![]Workload {
         if (kind == 6 or kind == 7) {
             try code.push(if (kind == 6) repetitions - 1 else 0);
             try code.op(0x54);
+            try code.store(32);
+        } else if (kind == 13) {
+            try code.push(repetitions - 1);
+            try code.op(0x5c);
+            try code.store(32);
+        } else if (kind == 14) {
+            try code.load(0);
             try code.store(32);
         }
         var word = [_]u8{0} ** 32;
@@ -186,7 +252,7 @@ pub fn build(allocator: std.mem.Allocator) ![]Workload {
             3 => std.mem.readInt(u256, &hash, .big),
             4, 5 => 7,
             6, 7 => 9,
-            8, 9 => repetitions,
+            8, 9, 10 => repetitions,
             else => 42,
         };
         try list.append(allocator, .{

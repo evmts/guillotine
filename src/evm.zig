@@ -130,9 +130,32 @@ pub fn Evm(config: EvmConfig) type {
         /// Tracks storage slots that have been modified (address -> list of storage keys)
         touched_storage: std.AutoHashMap(primitives.Address, std.ArrayList(u256)),
 
+        /// Maximum call depth reached in the current root call (limits call_stack reset work)
+        max_depth_reached: u16 = 0,
+        /// Whether execution is already running on a 64MB worker thread for deep call chains
+        on_deep_stack: bool = false,
+        /// Per-EVM cache of compiled bytecode/dispatch schedules keyed by Wyhash(code)
+        dispatch_cache: std.AutoHashMap(u64, *CachedDispatch),
+
         // Tracer - at the very bottom of memory layout for minimal impact on cache performance
         /// Tracer for debugging and logging - can be accessed via evm.tracer or frame.evm_ptr.tracer
         tracer: @import("tracer/tracer.zig").Tracer,
+
+        const CachedDispatch = struct {
+            code: []u8,
+            bytecode: Bytecode,
+            schedule: Frame.Dispatch.DispatchSchedule,
+            jump_table: Frame.Dispatch.JumpTable,
+
+            fn deinit(self: *CachedDispatch, allocator: std.mem.Allocator) void {
+                if (self.jump_table.entries.len > 0) allocator.free(self.jump_table.entries);
+                self.schedule.deinit();
+                self.bytecode.deinit();
+                allocator.free(self.code);
+            }
+        };
+
+        const DISPATCH_CACHE_MAX_ENTRIES: usize = 256;
 
         /// Initialize a new EVM instance.
         ///
@@ -179,6 +202,9 @@ pub fn Evm(config: EvmConfig) type {
                 .self_destruct = SelfDestruct.init(allocator),
                 .touched_addresses = std.AutoHashMap(primitives.Address, void).init(allocator),
                 .touched_storage = std.AutoHashMap(primitives.Address, std.ArrayList(u256)).init(allocator),
+                .max_depth_reached = 0,
+                .on_deep_stack = false,
+                .dispatch_cache = std.AutoHashMap(u64, *CachedDispatch).init(allocator),
                 .tracer = @import("tracer/tracer.zig").Tracer.init(allocator, config.tracer_config),
             };
 
@@ -262,6 +288,12 @@ pub fn Evm(config: EvmConfig) type {
                 entry.value_ptr.deinit(self.allocator);
             }
             self.touched_storage.deinit();
+            var cache_it = self.dispatch_cache.valueIterator();
+            while (cache_it.next()) |entry_ptr| {
+                entry_ptr.*.deinit(self.allocator);
+                self.allocator.destroy(entry_ptr.*);
+            }
+            self.dispatch_cache.deinit();
             self.call_arena.deinit();
         }
 
@@ -407,27 +439,12 @@ pub fn Evm(config: EvmConfig) type {
         /// This is the main entry point that routes to specific handlers based
         /// on the operation type (CALL, CREATE, etc). Manages transaction-level
         /// state including logs and ensures proper cleanup.
-        /// Public entry point. Runs the (recursive) interpreter on a worker thread with a large
-        /// native stack so a legitimately deep call chain (up to the 1024 EVM depth limit) does
-        /// not overflow the native stack and crash. There is no concurrency: the calling thread
-        /// blocks on join, so the EVM's allocators/state are accessed by only one thread at a time.
+        /// Public entry point. Runs inline on the caller's stack for shallow call chains
+        /// (depth < 8) to avoid per-call OS thread creation overhead, and transparently
+        /// switches to a 64 MiB worker thread stack inside `execute_frame` if a deep call
+        /// chain reaches depth 8 (protecting all the way to the 1024 EVM depth limit).
         pub fn call(self: *Self, params: CallParams) CallResult {
-            const Runner = struct {
-                evm: *Self,
-                params: CallParams,
-                result: CallResult = undefined,
-                fn run(ctx: *@This()) void {
-                    ctx.result = ctx.evm.callImpl(ctx.params);
-                }
-            };
-            var ctx = Runner{ .evm = self, .params = params };
-            const thread = std.Thread.spawn(.{ .stack_size = 64 * 1024 * 1024 }, Runner.run, .{&ctx}) catch {
-                // If a thread cannot be spawned, fall back to running inline (may crash on very
-                // deep recursion, but preserves behavior when threads are unavailable).
-                return self.callImpl(params);
-            };
-            thread.join();
-            return ctx.result;
+            return self.callImpl(params);
         }
 
         fn callImpl(self: *Self, params: CallParams) CallResult {
@@ -484,9 +501,16 @@ pub fn Evm(config: EvmConfig) type {
                 // Transient storage MUST NOT persist between transactions
                 self.database.clear_transient_storage();
 
-                // Reset call stack to initial state
-                // This is critical when reusing EVM instances across multiple transactions
-                self.call_stack = [_]CallStackEntry{CallStackEntry{ .caller = primitives.Address.ZERO_ADDRESS, .value = 0, .is_static = false }} ** config.max_call_depth;
+                // Reset only the portion of call_stack touched during this transaction
+                if (self.max_depth_reached > 0) {
+                    const reset_len = @min(@as(usize, self.max_depth_reached), config.max_call_depth);
+                    @memset(self.call_stack[0..reset_len], CallStackEntry{
+                        .caller = primitives.Address.ZERO_ADDRESS,
+                        .value = 0,
+                        .is_static = false,
+                    });
+                    self.max_depth_reached = 0;
+                }
                 // Reset snapshot ID
                 self.current_snapshot_id = 0;
                 // Reset arena allocator but retain grown capacity
@@ -1510,8 +1534,117 @@ pub fn Evm(config: EvmConfig) type {
             };
         }
 
+        fn getOrCompileDispatch(self: *Self, code: []const u8) !?*CachedDispatch {
+            if (comptime config.tracer_config.enabled) return null;
+            if (code.len == 0) return null;
+            const code_key = std.hash.Wyhash.hash(0, code);
+            if (self.dispatch_cache.get(code_key)) |entry| {
+                if (std.mem.eql(u8, entry.code, code)) {
+                    return entry;
+                }
+                return null;
+            }
+            if (self.dispatch_cache.count() >= DISPATCH_CACHE_MAX_ENTRIES) return null;
+
+            const code_copy = self.allocator.dupe(u8, code) catch return error.AllocationError;
+            errdefer self.allocator.free(code_copy);
+
+            var bc = Bytecode.init(self.allocator, code_copy) catch |e| {
+                return switch (e) {
+                    error.InvalidOpcode => error.InvalidOpcode,
+                    error.InvalidJumpDestination => error.InvalidJumpDestination,
+                    error.TruncatedPush => error.InvalidOpcode,
+                    error.OutOfMemory => error.AllocationError,
+                    else => error.AllocationError,
+                };
+            };
+            errdefer bc.deinit();
+
+            const handlers = &Frame.opcode_handlers;
+            var schedule = Frame.Dispatch.DispatchSchedule.init(self.allocator, bc, handlers, null) catch {
+                return error.AllocationError;
+            };
+            errdefer schedule.deinit();
+
+            const jump_table = Frame.Dispatch.createJumpTable(self.allocator, schedule.items, bc) catch {
+                return error.AllocationError;
+            };
+            errdefer if (jump_table.entries.len > 0) self.allocator.free(jump_table.entries);
+
+            const entry = self.allocator.create(CachedDispatch) catch return error.AllocationError;
+            errdefer self.allocator.destroy(entry);
+            entry.* = .{
+                .code = code_copy,
+                .bytecode = bc,
+                .schedule = schedule,
+                .jump_table = jump_table,
+            };
+
+            self.dispatch_cache.put(code_key, entry) catch return error.AllocationError;
+            return entry;
+        }
+
         /// Execute a frame by delegating to Frame.interpret (dispatch-based execution)
         fn execute_frame(
+            self: *Self,
+            code: []const u8,
+            input: []const u8,
+            gas: u64,
+            address: primitives.Address,
+            caller: primitives.Address,
+            value: u256,
+            is_static: bool,
+            snapshot_id: Journal.SnapshotIdType,
+        ) !CallResult {
+            // Switch to a 64 MiB native stack once when a call chain reaches depth 8
+            // so deep recursion up to the 1024 EVM depth limit never overflows the stack.
+            if (self.depth == 8 and !self.on_deep_stack) {
+                const DeepRunner = struct {
+                    evm: *Self,
+                    code: []const u8,
+                    input: []const u8,
+                    gas: u64,
+                    address: primitives.Address,
+                    caller: primitives.Address,
+                    value: u256,
+                    is_static: bool,
+                    snapshot_id: Journal.SnapshotIdType,
+                    result: anyerror!CallResult = undefined,
+                    fn run(ctx: *@This()) void {
+                        ctx.evm.on_deep_stack = true;
+                        defer ctx.evm.on_deep_stack = false;
+                        ctx.result = ctx.evm.executeFrameImpl(
+                            ctx.code,
+                            ctx.input,
+                            ctx.gas,
+                            ctx.address,
+                            ctx.caller,
+                            ctx.value,
+                            ctx.is_static,
+                            ctx.snapshot_id,
+                        );
+                    }
+                };
+                var ctx = DeepRunner{
+                    .evm = self,
+                    .code = code,
+                    .input = input,
+                    .gas = gas,
+                    .address = address,
+                    .caller = caller,
+                    .value = value,
+                    .is_static = is_static,
+                    .snapshot_id = snapshot_id,
+                };
+                if (std.Thread.spawn(.{ .stack_size = 64 * 1024 * 1024 }, DeepRunner.run, .{&ctx})) |thread| {
+                    thread.join();
+                    return ctx.result;
+                } else |_| {}
+            }
+            return self.executeFrameImpl(code, input, gas, address, caller, value, is_static, snapshot_id);
+        }
+
+        fn executeFrameImpl(
             self: *Self,
             code: []const u8,
             input: []const u8,
@@ -1530,6 +1663,9 @@ pub fn Evm(config: EvmConfig) type {
             // Input is now stored on the frame directly
 
             self.depth += 1;
+            if (self.depth > self.max_depth_reached) {
+                self.max_depth_reached = @intCast(self.depth);
+            }
             defer if (self.depth > 0) {
                 self.depth -= 1;
             };
@@ -1549,57 +1685,50 @@ pub fn Evm(config: EvmConfig) type {
             // EIP-2929: Warm the contract address being executed
             try config.eips.warm_contract_for_execution(&self.access_list, address);
 
-            // Build dispatch schedule before frame execution
-            // Note: Size validation is done by caller (execute_init_code checks init code size,
-            // execute_call checks runtime code size via bytecode analysis)
-
-            // Always build dispatch schedule from scratch (no caching)
-            const tracer_ptr = @as(?@TypeOf(&self.tracer), &self.tracer);
-            const bytecode = if (tracer_ptr != null)
-                Bytecode.initWithTracer(arena_allocator, code, tracer_ptr) catch |e| {
-                    return switch (e) {
-                        error.InvalidOpcode => error.InvalidOpcode,
-                        error.InvalidJumpDestination => error.InvalidJumpDestination,
-                        error.TruncatedPush => error.InvalidOpcode,
-                        error.OutOfMemory => error.AllocationError,
-                        else => error.AllocationError,
-                    };
-                }
-            else
-                Bytecode.init(arena_allocator, code) catch |e| {
-                    return switch (e) {
-                        error.InvalidOpcode => error.InvalidOpcode,
-                        error.InvalidJumpDestination => error.InvalidJumpDestination,
-                        error.TruncatedPush => error.InvalidOpcode,
-                        error.OutOfMemory => error.AllocationError,
-                        else => error.AllocationError,
-                    };
-                };
-
-            const handlers = &Frame.opcode_handlers;
-
-            // Build dispatch schedule using arena allocator
-            var dispatch_schedule = Frame.Dispatch.DispatchSchedule.init(arena_allocator, bytecode, handlers, tracer_ptr) catch {
-                return error.AllocationError;
-            };
-            defer dispatch_schedule.deinit();
-
-            // Create jump table
-            const jump_table = Frame.Dispatch.createJumpTable(arena_allocator, dispatch_schedule.items, bytecode) catch {
-                return error.AllocationError;
-            };
-            defer if (jump_table.entries.len > 0) arena_allocator.free(jump_table.entries);
-
-            // Create heap-allocated wrapper for the jump table
-            const heap_jump_table = arena_allocator.create(Frame.Dispatch.JumpTable) catch return error.AllocationError;
-            defer arena_allocator.destroy(heap_jump_table);
-            heap_jump_table.* = jump_table;
-
             var execution_trace: ?@import("frame/call_result.zig").ExecutionTrace = null;
             const Termination = error{ Stop, Return, SelfDestruct };
             var termination_reason: ?Termination = null;
 
-            frame.interpret(&dispatch_schedule, heap_jump_table, code) catch |err| switch (err) {
+            const interpret_res = if (try self.getOrCompileDispatch(code)) |cached|
+                frame.interpret(&cached.schedule, &cached.jump_table, cached.code)
+            else blk: {
+                const tracer_ptr = if (comptime config.tracer_config.enabled) @as(?@TypeOf(&self.tracer), &self.tracer) else null;
+                const bytecode = if (comptime config.tracer_config.enabled)
+                    Bytecode.initWithTracer(arena_allocator, code, tracer_ptr) catch |e| {
+                        return switch (e) {
+                            error.InvalidOpcode => error.InvalidOpcode,
+                            error.InvalidJumpDestination => error.InvalidJumpDestination,
+                            error.TruncatedPush => error.InvalidOpcode,
+                            error.OutOfMemory => error.AllocationError,
+                            else => error.AllocationError,
+                        };
+                    }
+                else
+                    Bytecode.init(arena_allocator, code) catch |e| {
+                        return switch (e) {
+                            error.InvalidOpcode => error.InvalidOpcode,
+                            error.InvalidJumpDestination => error.InvalidJumpDestination,
+                            error.TruncatedPush => error.InvalidOpcode,
+                            error.OutOfMemory => error.AllocationError,
+                            else => error.AllocationError,
+                        };
+                    };
+
+                const handlers = &Frame.opcode_handlers;
+                var dispatch_schedule = Frame.Dispatch.DispatchSchedule.init(arena_allocator, bytecode, handlers, tracer_ptr) catch {
+                    return error.AllocationError;
+                };
+                defer dispatch_schedule.deinit();
+
+                const jump_table = Frame.Dispatch.createJumpTable(arena_allocator, dispatch_schedule.items, bytecode) catch {
+                    return error.AllocationError;
+                };
+                defer if (jump_table.entries.len > 0) arena_allocator.free(jump_table.entries);
+
+                break :blk frame.interpret(&dispatch_schedule, &jump_table, code);
+            };
+
+            interpret_res catch |err| switch (err) {
                 error.Stop => termination_reason = error.Stop,
                 error.Return => termination_reason = error.Return,
                 error.SelfDestruct => termination_reason = error.SelfDestruct,
@@ -1870,7 +1999,7 @@ pub fn Evm(config: EvmConfig) type {
 
         /// Get the original storage value from the journal
         pub fn get_original_storage(self: *Self, address: primitives.Address, slot: u256) ?u256 {
-            return self.journal.get_original_storage(address, slot);
+            return self.journal.get_original_storage_indexed(address, slot);
         }
 
         /// Access an address and return the gas cost (EIP-2929)

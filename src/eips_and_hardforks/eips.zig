@@ -227,15 +227,33 @@ pub const Eips = struct {
 
     /// Check if a specific EIP is active
     pub fn is_eip_active(self: Self, eip: u16) bool {
-        // First check overrides
-        for (self.overrides) |override| {
-            if (override.eip == eip) return override.enabled;
+        // First check overrides (almost always empty in production)
+        if (self.overrides.len > 0) {
+            for (self.overrides) |override| {
+                if (override.eip == eip) return override.enabled;
+            }
         }
 
-        // Then check base hardfork
-        const active_eips = self.get_active_eips();
-        for (active_eips) |active_eip| if (active_eip == eip) return true;
-        return false;
+        // O(1) hardfork lookup matching get_active_eips() exactly
+        return switch (eip) {
+            2, 7, 8 => self.hardfork.isAtLeast(.HOMESTEAD),
+            150 => self.hardfork.isAtLeast(.TANGERINE_WHISTLE),
+            155, 160, 161, 170 => self.hardfork.isAtLeast(.SPURIOUS_DRAGON),
+            100, 140, 196, 197, 198, 211, 214, 649, 658 => self.hardfork.isAtLeast(.BYZANTIUM),
+            145, 1014, 1052, 1283 => self.hardfork.isAtLeast(.CONSTANTINOPLE),
+            152, 1108, 1344, 1884, 2028, 2200 => self.hardfork.isAtLeast(.ISTANBUL),
+            2565, 2718, 2929, 2930 => self.hardfork.isAtLeast(.BERLIN),
+            1559, 3198, 3529, 3541 => self.hardfork.isAtLeast(.LONDON),
+            4345 => self.hardfork.isAtLeast(.ARROW_GLACIER),
+            5133 => self.hardfork.isAtLeast(.GRAY_GLACIER),
+            3675, 4399 => self.hardfork.isAtLeast(.MERGE),
+            3651, 3855, 3860, 4895 => self.hardfork.isAtLeast(.SHANGHAI),
+            1153, 4788, 4844, 5656, 6780, 7516 => self.hardfork.isAtLeast(.CANCUN),
+            2537, 2935, 6110, 7002, 7623, 7702 => self.hardfork.isAtLeast(.PRAGUE),
+            3074 => self.hardfork == .PRAGUE,
+            7883, 7823, 7825, 7934, 7939 => self.hardfork.isAtLeast(.OSAKA),
+            else => false,
+        };
     }
 
     /// EIP-170: Get maximum contract code size based on hardfork
@@ -584,9 +602,26 @@ pub const Eips = struct {
         );
     }
 
+    /// Count zero bytes using 32-byte SIMD chunks for high calldata throughput.
+    fn countZeroBytes(input: []const u8) usize {
+        var count: usize = 0;
+        var i: usize = 0;
+        const Vec = @Vector(32, u8);
+        const zeroes: Vec = @splat(0);
+        while (i + 32 <= input.len) : (i += 32) {
+            const chunk: Vec = input[i..][0..32].*;
+            const mask: u32 = @bitCast(chunk == zeroes);
+            count += @popCount(mask);
+        }
+        while (i < input.len) : (i += 1) {
+            count += @intFromBool(input[i] == 0);
+        }
+        return count;
+    }
+
     /// Count calldata tokens using the byte prices active for this hardfork.
     pub fn tokens_in_calldata(self: Self, input: []const u8) u64 {
-        const zero_bytes_count = std.mem.count(u8, input, "\x00");
+        const zero_bytes_count = countZeroBytes(input);
         const non_zero_bytes_count = input.len - zero_bytes_count;
         return @as(u64, @intCast(zero_bytes_count)) + @as(u64, @intCast(non_zero_bytes_count)) * self.eip_2028_calldata_gas_cost_multiplier();
     }

@@ -155,11 +155,9 @@ pub fn recoverPubkey(
     if (r.len != 32) return error.InvalidRLength;
     if (s.len != 32) return error.InvalidSLength;
 
-    // Parse r and s as u256 (big-endian)
     const r_u256 = std.mem.readInt(u256, r[0..32], .big);
     const s_u256 = std.mem.readInt(u256, s[0..32], .big);
 
-    // v in Ethereum is 27 or 28, we need recoveryId 0 or 1
     var recoveryId: u8 = undefined;
     if (v >= 27 and v <= 28) {
         recoveryId = v - 27;
@@ -170,58 +168,35 @@ pub fn recoverPubkey(
     }
 
     if (!unauditedValidateSignature(r_u256, s_u256)) return error.InvalidSignature;
-
-    // Step 1: Calculate point R from r and recoveryId
     if (r_u256 >= SECP256K1_P) return error.InvalidSignature;
 
-    // Calculate y² = x³ + 7 mod p
-    const x3 = unauditedMulmod(unauditedMulmod(r_u256, r_u256, SECP256K1_P), r_u256, SECP256K1_P);
-    const y2 = unauditedAddmod(x3, SECP256K1_B, SECP256K1_P);
+    const Secp = std.crypto.ecc.Secp256k1;
+    var sec1: [33]u8 = undefined;
+    sec1[0] = 0x02 + recoveryId;
+    @memcpy(sec1[1..33], r[0..32]);
+    const R = Secp.fromSec1(&sec1) catch return error.InvalidSignature;
 
-    // Calculate y = y²^((p+1)/4) mod p (works because p ≡ 3 mod 4)
-    const y = unauditedPowmod(y2, (SECP256K1_P + 1) >> 2, SECP256K1_P);
+    const r_sc = Secp.scalar.Scalar.fromBytes(r[0..32].*, .big) catch return error.InvalidSignature;
+    const s_sc = Secp.scalar.Scalar.fromBytes(s[0..32].*, .big) catch return error.InvalidSignature;
+    const e_val = std.mem.readInt(u256, hash[0..32], .big) % SECP256K1_N;
+    var e_bytes: [32]u8 = undefined;
+    std.mem.writeInt(u256, &e_bytes, e_val, .big);
+    const e_sc = Secp.scalar.Scalar.fromBytes(e_bytes, .big) catch return error.InvalidSignature;
 
-    // Verify y is correct
-    if (unauditedMulmod(y, y, SECP256K1_P) != y2) return error.InvalidSignature;
+    const r_inv = r_sc.invert();
+    const s1 = e_sc.neg().mul(r_inv);
+    const s2 = s_sc.mul(r_inv);
 
-    // Choose correct y based on recoveryId
-    const y_is_odd = (y & 1) == 1;
-    const y_final = if (y_is_odd == (recoveryId == 1)) y else SECP256K1_P - y;
+    const Q = Secp.mulDoubleBasePublic(
+        Secp.basePoint,
+        s1.toBytes(.big),
+        R,
+        s2.toBytes(.big),
+        .big,
+    ) catch return error.InvalidSignature;
 
-    const R = AffinePoint{ .x = r_u256, .y = y_final, .infinity = false };
-    if (!R.isOnCurve()) return error.InvalidSignature;
-
-    // Step 2: Calculate e from message hash
-    var hash_array: [32]u8 = undefined;
-    @memcpy(&hash_array, hash);
-    const e = std.mem.readInt(u256, &hash_array, .big);
-
-    // Step 3: Calculate public key Q = r⁻¹(sR - eG)
-    const r_inv = unauditedInvmod(r_u256, SECP256K1_N) orelse return error.InvalidSignature;
-
-    // Calculate sR
-    const sR = R.scalarMul(s_u256);
-
-    // Calculate eG
-    const eG = AffinePoint.generator().scalarMul(e);
-
-    // Calculate sR - eG
-    const diff = sR.add(eG.negate());
-
-    // Calculate Q = r⁻¹ * (sR - eG)
-    const Q = diff.scalarMul(r_inv);
-
-    if (!Q.isOnCurve() or Q.infinity) return error.InvalidSignature;
-
-    // Step 4: Verify the signature with recovered key
-    if (!verifySignature(hash_array, r_u256, s_u256, Q)) return error.InvalidSignature;
-
-    // Step 5: Return public key as 64 bytes (x || y)
-    var pub_key: [64]u8 = undefined;
-    std.mem.writeInt(u256, pub_key[0..32], Q.x, .big);
-    std.mem.writeInt(u256, pub_key[32..64], Q.y, .big);
-
-    return pub_key;
+    const uncompressed = Q.toUncompressedSec1();
+    return uncompressed[1..65].*;
 }
 
 /// ⚠️ UNAUDITED - NOT SECURITY AUDITED ⚠️
@@ -237,58 +212,13 @@ pub fn unauditedRecoverAddress(
 ) !primitives.Address.Address {
     if (hash.len != 32) return error.InvalidHashLength;
     if (recoveryId > 1) return error.InvalidRecoveryId;
-    if (!unauditedValidateSignature(r, s)) return error.InvalidSignature;
 
-    // Step 1: Calculate point R from r and recoveryId
-    // x = r (we don't handle r >= p case as it's extremely rare)
-    if (r >= SECP256K1_P) return error.InvalidSignature;
+    var r_bytes: [32]u8 = undefined;
+    var s_bytes: [32]u8 = undefined;
+    std.mem.writeInt(u256, &r_bytes, r, .big);
+    std.mem.writeInt(u256, &s_bytes, s, .big);
 
-    // Calculate y² = x³ + 7 mod p
-    const x3 = unauditedMulmod(unauditedMulmod(r, r, SECP256K1_P), r, SECP256K1_P);
-    const y2 = unauditedAddmod(x3, SECP256K1_B, SECP256K1_P);
-
-    // Calculate y = y²^((p+1)/4) mod p (works because p ≡ 3 mod 4)
-    const y = unauditedPowmod(y2, (SECP256K1_P + 1) >> 2, SECP256K1_P);
-
-    // Verify y is correct
-    if (unauditedMulmod(y, y, SECP256K1_P) != y2) return error.InvalidSignature;
-
-    // Choose correct y based on recoveryId
-    const y_is_odd = (y & 1) == 1;
-    const y_final = if (y_is_odd == (recoveryId == 1)) y else SECP256K1_P - y;
-
-    const R = AffinePoint{ .x = r, .y = y_final, .infinity = false };
-    if (!R.isOnCurve()) return error.InvalidSignature;
-
-    // Step 2: Calculate e from message hash
-    var hash_array: [32]u8 = undefined;
-    @memcpy(&hash_array, hash);
-    const e = std.mem.readInt(u256, &hash_array, .big);
-
-    // Step 3: Calculate public key Q = r⁻¹(sR - eG)
-    const r_inv = unauditedInvmod(r, SECP256K1_N) orelse return error.InvalidSignature;
-
-    // Calculate sR
-    const sR = R.scalarMul(s);
-
-    // Calculate eG
-    const eG = AffinePoint.generator().scalarMul(e);
-
-    // Calculate sR - eG
-    const diff = sR.add(eG.negate());
-
-    // Calculate Q = r⁻¹ * (sR - eG)
-    const Q = diff.scalarMul(r_inv);
-
-    if (!Q.isOnCurve() or Q.infinity) return error.InvalidSignature;
-
-    // Step 4: Verify the signature with recovered key (optional but recommended)
-    if (!verifySignature(hash_array, r, s, Q)) return error.InvalidSignature;
-
-    // Step 5: Convert public key to Ethereum address
-    var pub_key_bytes: [64]u8 = undefined;
-    std.mem.writeInt(u256, pub_key_bytes[0..32], Q.x, .big);
-    std.mem.writeInt(u256, pub_key_bytes[32..64], Q.y, .big);
+    const pub_key_bytes = try recoverPubkey(hash, &r_bytes, &s_bytes, recoveryId);
 
     var keccak = crypto.hash.sha3.Keccak256.init(.{});
     keccak.update(&pub_key_bytes);
@@ -338,29 +268,8 @@ fn verifySignature(
 pub fn unauditedMulmod(a: u256, b: u256, m: u256) u256 {
     if (m == 0) return 0;
     if (a == 0 or b == 0) return 0;
-
-    // Use built-in arithmetic with proper overflow handling
-    const a_mod = a % m;
-    const b_mod = b % m;
-
-    // For large multiplications, use the standard algorithm
-    var result: u256 = 0;
-    var multiplicand = a_mod;
-    var multiplier = b_mod;
-
-    while (multiplier > 0) {
-        if (multiplier & 1 == 1) {
-            // Add multiplicand to result (mod m)
-            result = unauditedAddmod(result, multiplicand, m);
-        }
-
-        // Double multiplicand (mod m)
-        multiplicand = unauditedAddmod(multiplicand, multiplicand, m);
-
-        multiplier >>= 1;
-    }
-
-    return result;
+    const prod = @as(u512, a % m) * @as(u512, b % m);
+    return @intCast(prod % @as(u512, m));
 }
 
 /// ⚠️ UNAUDITED - NOT SECURITY AUDITED ⚠️

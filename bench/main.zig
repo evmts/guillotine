@@ -70,7 +70,7 @@ fn run() !void {
         unavailable = unavailable or std.mem.eql(u8, row.status, "unavailable");
     }
     if (failed) return error.BenchmarkFailed;
-    if (unavailable) return error.BenchmarkUnavailable;
+    if (unavailable and !options.allow_unavailable) return error.BenchmarkUnavailable;
 }
 
 fn base(workload: workloads.Workload, fusion: bool, loop: bool) report.Row {

@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url"
 // and factory reports cannot invalidate targets or become cached source inputs.
 const repository = S.Filegroup({ cwd: "//", srcs: [S.glob("//**", { exclude: [
   "//.git/**", "//.jj/**", "//.flows/**", "//.smithers/cache/**", "//.smithers/reports/**",
-  "//.zig-cache/**", "//zig-out/**", "//target/**", "//node_modules/**",
+  "//.zig-cache/**", "//zig-out/**", "//target/**", "//node_modules/**", "//bench/results/**",
   "//**/.git/**", "//**/.zig-cache/**", "//**/zig-out/**", "//**/target/**"
 ] })] })
 // Globs are package scoped even with a // prefix. Anchor the repository group
