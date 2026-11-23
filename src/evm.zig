@@ -27,6 +27,8 @@ pub fn Evm(config: EvmConfig) type {
             }
         }
 
+        pub const tracing_enabled = config.tracer_config.enabled;
+
         pub const Frame = @import("frame/frame.zig").Frame(config.frame_config(), Self);
         pub const Bytecode = @import("bytecode/bytecode.zig").Bytecode(.{
             .max_bytecode_size = config.max_bytecode_size,
@@ -646,6 +648,12 @@ pub fn Evm(config: EvmConfig) type {
             modified_params.setGas(execution_gas_limit);
 
             const arena_result = self.inner_call(modified_params);
+            if (arena_result.success) {
+                self.finalizeDestructions() catch |err| {
+                    log.err("Failed to finalize selfdestructions: {s}", .{@errorName(err)});
+                    return CallResult.failed(0);
+                };
+            }
             // Clone result to main allocator since we're at depth 0 (top-level call)
             var result = arena_result.toOwnedResult(self.allocator) catch |err| {
                 log.err("Failed to clone call result: {s}", .{@errorName(err)});
@@ -866,6 +874,9 @@ pub fn Evm(config: EvmConfig) type {
             // here on gas alone.
 
             const refund_before = self.gas_refund_counter;
+            const logs_before = self.logs.items.len;
+            var destructions = self.self_destruct.destructions.clone() catch return CallResult.failed(0);
+            defer destructions.deinit();
 
             var result = switch (params) {
                 .call => |p| blk: {
@@ -912,7 +923,11 @@ pub fn Evm(config: EvmConfig) type {
             // Refunds earned inside a frame that did not succeed are discarded together
             // with its state changes (execution-specs: refund_counter is merged into the
             // parent only by incorporate_child_on_success).
-            if (!result.success) self.gas_refund_counter = refund_before;
+            if (!result.success) {
+                self.gas_refund_counter = refund_before;
+                self.logs.shrinkRetainingCapacity(logs_before);
+                std.mem.swap(@TypeOf(destructions), &destructions, &self.self_destruct.destructions);
+            }
 
             // EIP-211: the caller's return data buffer holds the output of the frame that
             // just ended: its RETURN or REVERT data for a call, only REVERT data for a
@@ -1409,7 +1424,7 @@ pub fn Evm(config: EvmConfig) type {
             };
 
             result.gas_left += retained;
-            result.created_address = contract_address;
+            result.created_address = if (result.success) contract_address else null;
             return result;
         }
 
@@ -1495,7 +1510,7 @@ pub fn Evm(config: EvmConfig) type {
             };
 
             result.gas_left += retained;
-            result.created_address = contract_address;
+            result.created_address = if (result.success) contract_address else null;
             return result;
         }
 
@@ -1521,6 +1536,8 @@ pub fn Evm(config: EvmConfig) type {
                 args.init_code,
                 args.gas_left,
                 args.contract_address,
+                args.caller,
+                args.value,
                 args.snapshot_id,
             ) catch |err| {
                 log.debug("execute_init_code failed with error: {}", .{err});
@@ -1805,6 +1822,8 @@ pub fn Evm(config: EvmConfig) type {
             code: []const u8,
             gas: u64,
             address: primitives.Address,
+            caller: primitives.Address,
+            value: u256,
             snapshot_id: Journal.SnapshotIdType,
         ) !CallResult {
             // EIP-3860 (Shanghai+) caps init code at 49152 bytes. An opcode creation over
@@ -1822,8 +1841,8 @@ pub fn Evm(config: EvmConfig) type {
                 &.{},
                 gas,
                 address,
-                address,
-                0,
+                caller,
+                value,
                 false,
                 snapshot_id,
             ) catch |err| {
@@ -2071,6 +2090,22 @@ pub fn Evm(config: EvmConfig) type {
             return cost;
         }
 
+        fn finalizeDestructions(self: *Self) !void {
+            var destructions = self.self_destruct.iterator();
+            while (destructions.next()) |entry| {
+                var keys: std.ArrayList(u256) = .empty;
+                defer keys.deinit(self.allocator);
+                var slots = self.database.storage.iterator();
+                while (slots.next()) |slot| {
+                    if (std.mem.eql(u8, &slot.key_ptr.address, &entry.key_ptr.bytes)) {
+                        try keys.append(self.allocator, slot.key_ptr.key);
+                    }
+                }
+                for (keys.items) |key| try self.database.set_storage(entry.key_ptr.bytes, key, 0);
+                try self.database.delete_account(entry.key_ptr.bytes);
+            }
+        }
+
         /// Mark a contract for destruction
         pub fn mark_for_destruction(self: *Self, contract_address: primitives.Address, recipient: primitives.Address) !void {
             // EIP-214: Prevent self-destruction in static context
@@ -2078,6 +2113,17 @@ pub fn Evm(config: EvmConfig) type {
 
             // EIP-6780: Handle SELFDESTRUCT based on creation in same transaction
             const created_in_tx = self.created_contracts.was_created_in_tx(contract_address);
+            if (created_in_tx or !config.eips.hardfork.isAtLeast(.CANCUN)) {
+                const balance = try self.database.get_balance(contract_address.bytes);
+                if (contract_address.equals(recipient)) {
+                    try self.journal.record_balance_change(self.current_snapshot_id, contract_address, balance);
+                    try self.database.set_balance(contract_address.bytes, 0);
+                } else if (balance > 0) {
+                    try self.transferWithBalanceChecks(contract_address, recipient, balance, self.current_snapshot_id);
+                }
+                try self.self_destruct.mark_for_destruction(contract_address, recipient);
+                return;
+            }
             try config.eips.handle_selfdestruct(
                 created_in_tx,
                 contract_address,
@@ -7755,7 +7801,7 @@ test "SSTORE gas - cold 0->1 via PUSH1 PUSH0 SSTORE costs exactly 22105" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
     const context = TransactionContext{
         .gas_limit = 1000000,
@@ -7767,13 +7813,13 @@ test "SSTORE gas - cold 0->1 via PUSH1 PUSH0 SSTORE costs exactly 22105" {
     defer evm.deinit();
 
     const code = [_]u8{ 0x60, 0x01, 0x5f, 0x55 };
-    const contract_address: primitives.Address = .{ .bytes = [_]u8{0x43} ++ [_]u8{0} ** 19 };
+    const contract_address: primitives.Address = .{ .bytes = [_]u8{0x43} ++ @as([19]u8, @splat(0)) };
     const code_hash = try db.set_code(&code);
     try db.set_account(contract_address.bytes, Account{
         .balance = 0,
         .nonce = 0,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     });
 
     const result = evm.inner_call(.{ .call = .{
@@ -7805,16 +7851,16 @@ const regression_block_info = BlockInfo{
     .gas_limit = 30000000,
     .coinbase = primitives.ZERO_ADDRESS,
     .base_fee = 0,
-    .prev_randao = [_]u8{0} ** 32,
+    .prev_randao = @as([32]u8, @splat(0)),
 };
 const regression_context = TransactionContext{
     .gas_limit = 1000000,
     .coinbase = primitives.ZERO_ADDRESS,
     .chain_id = 1,
 };
-const regression_contract: primitives.Address = .{ .bytes = [_]u8{0} ** 19 ++ [_]u8{0x43} };
-const regression_callee: primitives.Address = .{ .bytes = [_]u8{0} ** 19 ++ [_]u8{0x44} };
-const regression_sender: primitives.Address = .{ .bytes = [_]u8{0} ** 19 ++ [_]u8{0x10} };
+const regression_contract: primitives.Address = .{ .bytes = @as([19]u8, @splat(0)) ++ [_]u8{0x43} };
+const regression_callee: primitives.Address = .{ .bytes = @as([19]u8, @splat(0)) ++ [_]u8{0x44} };
+const regression_sender: primitives.Address = .{ .bytes = @as([19]u8, @splat(0)) ++ [_]u8{0x10} };
 
 test "SSTORE gas and refund - every transition on every metering scheme" {
     // One case: the slot's value at transaction start, the values written in order,
@@ -7903,7 +7949,7 @@ test "SSTORE gas and refund - every transition on every metering scheme" {
                 code_len += write.len;
             }
             const code_hash = try db.set_code(code[0..code_len]);
-            try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = code_hash, .storage_root = [_]u8{0} ** 32 });
+            try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = code_hash, .storage_root = @as([32]u8, @splat(0)) });
             if (case.original != 0) try db.set_storage(regression_contract.bytes, 0, case.original);
 
             const result = evm.inner_call(.{ .call = .{ .caller = regression_sender, .to = regression_contract, .value = 0, .input = &.{}, .gas = 100000 } });
@@ -7919,7 +7965,7 @@ test "SSTORE sentry - EIP-2200 sees the exact gas left, not gas minus later inst
     // PUSH1 0, PUSH1 0, SSTORE (0 -> 0 on a cold slot: 2200 gas), then ten
     // PUSH1/POP pairs (50 gas). The trailing 50 gas must not be charged before the
     // SSTORE, or the sentry would see less gas than is really left.
-    const code = [_]u8{ 0x60, 0x00, 0x60, 0x00, 0x55 } ++ [_]u8{ 0x60, 0x00, 0x50 } ** 10;
+    const code = [_]u8{ 0x60, 0x00, 0x60, 0x00, 0x55 } ++ @as([30]u8, @bitCast(@as([10][3]u8, @splat(.{ 0x60, 0x00, 0x50 }))));
     const Outcome = struct { gas: u64, success: bool, gas_used: u64 };
     const outcomes = [_]Outcome{
         // 2301 gas left at SSTORE: above the sentry.
@@ -7933,7 +7979,7 @@ test "SSTORE sentry - EIP-2200 sees the exact gas left, not gas minus later inst
         var evm = try Evm(.{ .eips = .{ .hardfork = .CANCUN } }).init(std.testing.allocator, &db, regression_block_info, regression_context, 0, regression_sender);
         defer evm.deinit();
         const code_hash = try db.set_code(&code);
-        try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = code_hash, .storage_root = [_]u8{0} ** 32 });
+        try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = code_hash, .storage_root = @as([32]u8, @splat(0)) });
 
         const result = evm.inner_call(.{ .call = .{ .caller = regression_sender, .to = regression_contract, .value = 0, .input = &.{}, .gas = outcome.gas } });
         try std.testing.expectEqual(outcome.success, result.success);
@@ -7955,10 +8001,10 @@ test "SSTORE and TSTORE in a static context halt the callee" {
         var evm = try Evm(.{ .eips = .{ .hardfork = .CANCUN } }).init(std.testing.allocator, &db, regression_block_info, regression_context, 0, regression_sender);
         defer evm.deinit();
         const caller_hash = try db.set_code(&caller_code);
-        try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = caller_hash, .storage_root = [_]u8{0} ** 32 });
+        try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = caller_hash, .storage_root = @as([32]u8, @splat(0)) });
         try db.set_storage(regression_contract.bytes, 1, 5);
         const callee_hash = try db.set_code(callee_code);
-        try db.set_account(regression_callee.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = callee_hash, .storage_root = [_]u8{0} ** 32 });
+        try db.set_account(regression_callee.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = callee_hash, .storage_root = @as([32]u8, @splat(0)) });
 
         const result = evm.inner_call(.{ .call = .{ .caller = regression_sender, .to = regression_contract, .value = 0, .input = &.{}, .gas = 200000 } });
         try std.testing.expect(result.success);
@@ -7993,7 +8039,7 @@ test "State-access opcodes use each fork's flat price before Berlin" {
             var evm = try E.init(std.testing.allocator, &db, regression_block_info, regression_context, 0, regression_sender);
             defer evm.deinit();
             const code_hash = try db.set_code(program.code);
-            try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = code_hash, .storage_root = [_]u8{0} ** 32 });
+            try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = code_hash, .storage_root = @as([32]u8, @splat(0)) });
 
             const result = evm.inner_call(.{ .call = .{ .caller = regression_sender, .to = regression_contract, .value = 0, .input = &.{}, .gas = 100000 } });
             try std.testing.expect(result.success);
@@ -8022,7 +8068,7 @@ test "Warm access is not charged on top of cold access" {
         var evm = try Evm(.{ .eips = .{ .hardfork = .CANCUN } }).init(std.testing.allocator, &db, regression_block_info, regression_context, 0, regression_sender);
         defer evm.deinit();
         const code_hash = try db.set_code(program.code);
-        try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = code_hash, .storage_root = [_]u8{0} ** 32 });
+        try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = code_hash, .storage_root = @as([32]u8, @splat(0)) });
 
         const result = evm.inner_call(.{ .call = .{ .caller = regression_sender, .to = regression_contract, .value = 0, .input = &.{}, .gas = 100000 } });
         try std.testing.expect(result.success);
@@ -8054,9 +8100,9 @@ test "CALL gas - cold and warm target, value transfer, stipend and refused calls
         const code = one_call ++ one_call;
         const code_slice: []const u8 = if (case.second_call) &code else &one_call;
         const caller_hash = try db.set_code(code_slice);
-        try db.set_account(regression_contract.bytes, Account{ .balance = case.caller_balance, .nonce = 1, .code_hash = caller_hash, .storage_root = [_]u8{0} ** 32 });
+        try db.set_account(regression_contract.bytes, Account{ .balance = case.caller_balance, .nonce = 1, .code_hash = caller_hash, .storage_root = @as([32]u8, @splat(0)) });
         const callee_hash = try db.set_code(&[_]u8{0x00});
-        try db.set_account(regression_callee.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = callee_hash, .storage_root = [_]u8{0} ** 32 });
+        try db.set_account(regression_callee.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = callee_hash, .storage_root = @as([32]u8, @splat(0)) });
 
         const result = evm.inner_call(.{ .call = .{ .caller = regression_sender, .to = regression_contract, .value = 0, .input = &.{}, .gas = 200000 } });
         try std.testing.expect(result.success);
@@ -8072,14 +8118,14 @@ test "CALL with zero gas to an account without code succeeds" {
     var evm = try Evm(.{ .eips = .{ .hardfork = .CANCUN } }).init(std.testing.allocator, &db, regression_block_info, regression_context, 0, regression_sender);
     defer evm.deinit();
     const code_hash = try db.set_code(&code);
-    try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = code_hash, .storage_root = [_]u8{0} ** 32 });
+    try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = code_hash, .storage_root = @as([32]u8, @splat(0)) });
 
     const result = evm.inner_call(.{ .call = .{ .caller = regression_sender, .to = regression_contract, .value = 0, .input = &.{}, .gas = 200000 } });
     try std.testing.expect(result.success);
     try std.testing.expectEqual(@as(u256, 1), try db.get_storage(regression_contract.bytes, 1));
 
     // The same holds for a zero-gas call made directly.
-    const direct = evm.inner_call(.{ .call = .{ .caller = regression_sender, .to = .{ .bytes = [_]u8{0} ** 19 ++ [_]u8{0x78} }, .value = 0, .input = &.{}, .gas = 0 } });
+    const direct = evm.inner_call(.{ .call = .{ .caller = regression_sender, .to = .{ .bytes = @as([19]u8, @splat(0)) ++ [_]u8{0x78} }, .value = 0, .input = &.{}, .gas = 0 } });
     try std.testing.expect(direct.success);
 }
 
@@ -8093,9 +8139,9 @@ test "CALL copies revert data to memory and to the return data buffer" {
     var evm = try Evm(.{ .eips = .{ .hardfork = .CANCUN } }).init(std.testing.allocator, &db, regression_block_info, regression_context, 0, regression_sender);
     defer evm.deinit();
     const caller_hash = try db.set_code(&caller_code);
-    try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = caller_hash, .storage_root = [_]u8{0} ** 32 });
+    try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = caller_hash, .storage_root = @as([32]u8, @splat(0)) });
     const callee_hash = try db.set_code(&callee_code);
-    try db.set_account(regression_callee.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = callee_hash, .storage_root = [_]u8{0} ** 32 });
+    try db.set_account(regression_callee.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = callee_hash, .storage_root = @as([32]u8, @splat(0)) });
 
     const result = evm.inner_call(.{ .call = .{ .caller = regression_sender, .to = regression_contract, .value = 0, .input = &.{}, .gas = 200000 } });
     try std.testing.expect(result.success);
@@ -8113,9 +8159,9 @@ test "DELEGATECALL runs the callee's code against the caller's storage" {
     var evm = try Evm(.{ .eips = .{ .hardfork = .CANCUN } }).init(std.testing.allocator, &db, regression_block_info, regression_context, 0, regression_sender);
     defer evm.deinit();
     const caller_hash = try db.set_code(&caller_code);
-    try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = caller_hash, .storage_root = [_]u8{0} ** 32 });
+    try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = caller_hash, .storage_root = @as([32]u8, @splat(0)) });
     const callee_hash = try db.set_code(&callee_code);
-    try db.set_account(regression_callee.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = callee_hash, .storage_root = [_]u8{0} ** 32 });
+    try db.set_account(regression_callee.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = callee_hash, .storage_root = @as([32]u8, @splat(0)) });
 
     const result = evm.inner_call(.{ .call = .{ .caller = regression_sender, .to = regression_contract, .value = 0, .input = &.{}, .gas = 200000 } });
     try std.testing.expect(result.success);
@@ -8137,9 +8183,9 @@ test "Refunds earned by a reverted callee are discarded" {
         var evm = try Evm(.{ .eips = .{ .hardfork = .CANCUN } }).init(std.testing.allocator, &db, regression_block_info, regression_context, 0, regression_sender);
         defer evm.deinit();
         const caller_hash = try db.set_code(&caller_code);
-        try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = caller_hash, .storage_root = [_]u8{0} ** 32 });
+        try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = caller_hash, .storage_root = @as([32]u8, @splat(0)) });
         const callee_hash = try db.set_code(callee.code);
-        try db.set_account(regression_callee.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = callee_hash, .storage_root = [_]u8{0} ** 32 });
+        try db.set_account(regression_callee.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = callee_hash, .storage_root = @as([32]u8, @splat(0)) });
         try db.set_storage(regression_callee.bytes, 0, 1);
 
         const result = evm.inner_call(.{ .call = .{ .caller = regression_sender, .to = regression_contract, .value = 0, .input = &.{}, .gas = 200000 } });
@@ -8157,7 +8203,7 @@ test "Call depth limit - frames run at depths 0 through max_call_depth" {
     var evm = try Evm(.{ .max_call_depth = 3, .eips = .{ .hardfork = .CANCUN } }).init(std.testing.allocator, &db, regression_block_info, regression_context, 0, regression_sender);
     defer evm.deinit();
     const code_hash = try db.set_code(&code);
-    try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = code_hash, .storage_root = [_]u8{0} ** 32 });
+    try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = code_hash, .storage_root = @as([32]u8, @splat(0)) });
 
     const result = evm.inner_call(.{ .call = .{ .caller = regression_sender, .to = regression_contract, .value = 0, .input = &.{}, .gas = 1000000 } });
     try std.testing.expect(result.success);
@@ -8177,7 +8223,7 @@ test "Truncated PUSH at the end of code executes as a zero-padded push" {
         var evm = try Evm(.{ .eips = .{ .hardfork = .CANCUN } }).init(std.testing.allocator, &db, regression_block_info, regression_context, 0, regression_sender);
         defer evm.deinit();
         const code_hash = try db.set_code(program.code);
-        try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = code_hash, .storage_root = [_]u8{0} ** 32 });
+        try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = code_hash, .storage_root = @as([32]u8, @splat(0)) });
 
         const result = evm.inner_call(.{ .call = .{ .caller = regression_sender, .to = regression_contract, .value = 0, .input = &.{}, .gas = 100000 } });
         try std.testing.expect(result.success);
@@ -8194,7 +8240,7 @@ test "Code that looks like trailing compiler metadata is executable" {
     var evm = try Evm(.{ .eips = .{ .hardfork = .CANCUN } }).init(std.testing.allocator, &db, regression_block_info, regression_context, 0, regression_sender);
     defer evm.deinit();
     const code_hash = try db.set_code(&code);
-    try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = code_hash, .storage_root = [_]u8{0} ** 32 });
+    try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = code_hash, .storage_root = @as([32]u8, @splat(0)) });
 
     const result = evm.inner_call(.{ .call = .{ .caller = regression_sender, .to = regression_contract, .value = 0, .input = &.{}, .gas = 100000 } });
     try std.testing.expect(result.success);
@@ -8227,7 +8273,7 @@ test "EIP-3860 - CREATE and CREATE2 with oversized init code halt the creating f
         const create2_code = [_]u8{ 0x60, 0x00, 0x62 } ++ size_bytes ++ [_]u8{ 0x60, 0x00, 0x60, 0x00, 0xf5, 0x60, 0x01, 0x60, 0x00, 0x55 };
         const code: []const u8 = if (case.create2) &create2_code else &create_code;
         const code_hash = try db.set_code(code);
-        try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = code_hash, .storage_root = [_]u8{0} ** 32 });
+        try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = code_hash, .storage_root = @as([32]u8, @splat(0)) });
 
         const result = evm.inner_call(.{ .call = .{ .caller = regression_sender, .to = regression_contract, .value = 0, .input = &.{}, .gas = 1000000 } });
         try std.testing.expectEqual(case.success, result.success);
@@ -8257,7 +8303,7 @@ test "CREATE that cannot pay its charge halts instead of pushing zero" {
         var evm = try Evm(.{ .eips = .{ .hardfork = .CANCUN } }).init(std.testing.allocator, &db, regression_block_info, regression_context, 0, regression_sender);
         defer evm.deinit();
         const code_hash = try db.set_code(&code);
-        try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = code_hash, .storage_root = [_]u8{0} ** 32 });
+        try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = code_hash, .storage_root = @as([32]u8, @splat(0)) });
 
         const result = evm.inner_call(.{ .call = .{ .caller = regression_sender, .to = regression_contract, .value = 0, .input = &.{}, .gas = outcome.gas } });
         try std.testing.expectEqual(outcome.success, result.success);
@@ -8274,10 +8320,10 @@ test "CREATE in a static context halts the callee" {
     var evm = try Evm(.{ .eips = .{ .hardfork = .CANCUN } }).init(std.testing.allocator, &db, regression_block_info, regression_context, 0, regression_sender);
     defer evm.deinit();
     const caller_hash = try db.set_code(&caller_code);
-    try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = caller_hash, .storage_root = [_]u8{0} ** 32 });
+    try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = caller_hash, .storage_root = @as([32]u8, @splat(0)) });
     try db.set_storage(regression_contract.bytes, 1, 5);
     const callee_hash = try db.set_code(&callee_code);
-    try db.set_account(regression_callee.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = callee_hash, .storage_root = [_]u8{0} ** 32 });
+    try db.set_account(regression_callee.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = callee_hash, .storage_root = @as([32]u8, @splat(0)) });
 
     const result = evm.inner_call(.{ .call = .{ .caller = regression_sender, .to = regression_contract, .value = 0, .input = &.{}, .gas = 500000 } });
     try std.testing.expect(result.success);
@@ -8294,7 +8340,7 @@ test "Gas segments - GAS observes exactly the gas left after its own cost" {
     var evm = try Evm(.{ .eips = .{ .hardfork = .CANCUN } }).init(std.testing.allocator, &db, regression_block_info, regression_context, 0, regression_sender);
     defer evm.deinit();
     const code_hash = try db.set_code(&code);
-    try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = code_hash, .storage_root = [_]u8{0} ** 32 });
+    try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = code_hash, .storage_root = @as([32]u8, @splat(0)) });
 
     const result = evm.inner_call(.{ .call = .{ .caller = regression_sender, .to = regression_contract, .value = 0, .input = &.{}, .gas = 100000 } });
     try std.testing.expect(result.success);
@@ -8317,7 +8363,7 @@ test "Gas segments - a JUMPI charges only the branch that runs" {
         var evm = try Evm(.{ .eips = .{ .hardfork = .CANCUN } }).init(std.testing.allocator, &db, regression_block_info, regression_context, 0, regression_sender);
         defer evm.deinit();
         const code_hash = try db.set_code(&code);
-        try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = code_hash, .storage_root = [_]u8{0} ** 32 });
+        try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = code_hash, .storage_root = @as([32]u8, @splat(0)) });
 
         const result = evm.inner_call(.{ .call = .{ .caller = regression_sender, .to = regression_contract, .value = 0, .input = branch.input, .gas = 100000 } });
         try std.testing.expect(result.success);
@@ -8330,7 +8376,7 @@ test "Gas segments - a JUMPI charges only the branch that runs" {
         var evm_exact = try Evm(.{ .eips = .{ .hardfork = .CANCUN } }).init(std.testing.allocator, &db_exact, regression_block_info, regression_context, 0, regression_sender);
         defer evm_exact.deinit();
         const exact_hash = try db_exact.set_code(&code);
-        try db_exact.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = exact_hash, .storage_root = [_]u8{0} ** 32 });
+        try db_exact.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = exact_hash, .storage_root = @as([32]u8, @splat(0)) });
         const exact = evm_exact.inner_call(.{ .call = .{ .caller = regression_sender, .to = regression_contract, .value = 0, .input = branch.input, .gas = branch.gas } });
         try std.testing.expect(exact.success);
         try std.testing.expectEqual(@as(u64, 0), exact.gas_left);
@@ -8356,7 +8402,7 @@ test "Gas segments - entry block and JUMPDEST block charge the same gas for the 
         var evm = try Evm(.{ .eips = .{ .hardfork = .CANCUN } }).init(std.testing.allocator, &db, regression_block_info, regression_context, 0, regression_sender);
         defer evm.deinit();
         const code_hash = try db.set_code(program.code);
-        try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = code_hash, .storage_root = [_]u8{0} ** 32 });
+        try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = code_hash, .storage_root = @as([32]u8, @splat(0)) });
 
         const result = evm.inner_call(.{ .call = .{ .caller = regression_sender, .to = regression_contract, .value = 0, .input = &.{}, .gas = 100000 } });
         try std.testing.expect(result.success);
@@ -8366,13 +8412,13 @@ test "Gas segments - entry block and JUMPDEST block charge the same gas for the 
 
 test "Fused PUSH+MSTORE with an unpayable offset halts instead of being skipped" {
     // PUSH1 1, PUSH32 0xff..ff, MSTORE, then SSTORE(0, 1) that must never run.
-    const code = [_]u8{ 0x60, 0x01, 0x7f } ++ [_]u8{0xff} ** 32 ++ [_]u8{ 0x52, 0x60, 0x01, 0x60, 0x00, 0x55 };
+    const code = [_]u8{ 0x60, 0x01, 0x7f } ++ @as([32]u8, @splat(0xff)) ++ [_]u8{ 0x52, 0x60, 0x01, 0x60, 0x00, 0x55 };
     var db = Database.init(std.testing.allocator);
     defer db.deinit();
     var evm = try Evm(.{ .eips = .{ .hardfork = .CANCUN } }).init(std.testing.allocator, &db, regression_block_info, regression_context, 0, regression_sender);
     defer evm.deinit();
     const code_hash = try db.set_code(&code);
-    try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = code_hash, .storage_root = [_]u8{0} ** 32 });
+    try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = code_hash, .storage_root = @as([32]u8, @splat(0)) });
 
     const result = evm.inner_call(.{ .call = .{ .caller = regression_sender, .to = regression_contract, .value = 0, .input = &.{}, .gas = 1000000 } });
     try std.testing.expect(!result.success);
@@ -8384,8 +8430,8 @@ test "Fused PUSH+ADD keeps the unfused stack-overflow check" {
     // n x PUSH1 0, then PUSH1 1, PUSH1 2, ADD. Unfused, the second PUSH needs n + 2
     // stack slots even though the fused PUSH+ADD would not grow the stack.
     const tail = [_]u8{ 0x60, 0x01, 0x60, 0x02, 0x01 };
-    const fits = [_]u8{ 0x60, 0x00 } ** 1022 ++ tail;
-    const overflows = [_]u8{ 0x60, 0x00 } ** 1023 ++ tail;
+    const fits = @as([2044]u8, @bitCast(@as([1022][2]u8, @splat(.{ 0x60, 0x00 })))) ++ tail;
+    const overflows = @as([2046]u8, @bitCast(@as([1023][2]u8, @splat(.{ 0x60, 0x00 })))) ++ tail;
     const programs = [_]struct { code: []const u8, success: bool }{
         .{ .code = &fits, .success = true },
         .{ .code = &overflows, .success = false },
@@ -8396,7 +8442,7 @@ test "Fused PUSH+ADD keeps the unfused stack-overflow check" {
         var evm = try Evm(.{ .eips = .{ .hardfork = .CANCUN } }).init(std.testing.allocator, &db, regression_block_info, regression_context, 0, regression_sender);
         defer evm.deinit();
         const code_hash = try db.set_code(program.code);
-        try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = code_hash, .storage_root = [_]u8{0} ** 32 });
+        try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = code_hash, .storage_root = @as([32]u8, @splat(0)) });
 
         const result = evm.inner_call(.{ .call = .{ .caller = regression_sender, .to = regression_contract, .value = 0, .input = &.{}, .gas = 1000000 } });
         try std.testing.expectEqual(program.success, result.success);

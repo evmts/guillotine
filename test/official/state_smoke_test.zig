@@ -267,8 +267,7 @@ fn runSingleStateCase(allocator: std.mem.Allocator, json_path: []const u8) !void
     var res = vm.call(if (is_create)
         DefaultEvm.CallParams{ .create = .{ .caller = sender, .value = value, .init_code = data_bytes, .gas = gas_lim } }
     else
-        DefaultEvm.CallParams{ .call = .{ .caller = sender, .to = to_addr, .value = value, .input = data_bytes, .gas = gas_lim } }
-    );
+        DefaultEvm.CallParams{ .call = .{ .caller = sender, .to = to_addr, .value = value, .input = data_bytes, .gas = gas_lim } });
     defer res.deinit(allocator);
 
     // Gas accounting and miner tip
@@ -291,4 +290,11 @@ test "official: state test smoke (create_opcode_initcode first case)" {
     } else |_| {
         try runSingleStateCase(alloc, default_path);
     }
+}
+
+test "official: fixed hash helper validates width and decodes current Hex API" {
+    const hash = try parseHash32("0x" ++ "12" ** 32);
+    try std.testing.expectEqualSlices(u8, &([_]u8{0x12} ** 32), &hash);
+    try std.testing.expectError(error.InvalidHexLength, parseHash32("0x12"));
+    try std.testing.expectEqual([_]u8{0} ** 32, try parseHash32("0x"));
 }

@@ -322,7 +322,7 @@ test "bn254Add - geth cdetrio14" {
 }
 
 test "EIP-196 ADD rejects noncanonical coordinates in either point" {
-    var input = [_]u8{0} ** 128;
+    var input = @as([128]u8, @splat(0));
     for (0..4) |slot| {
         std.mem.writeInt(u256, input[slot * 32 ..][0..32], bn254.FP_MOD, .big);
         try std.testing.expectError(error.InvalidPoint, execute(std.testing.allocator, &input, GAS));

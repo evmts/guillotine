@@ -133,9 +133,9 @@ pub fn build(b: *std.Build) void {
     precompiles_tests.root_module.link_libc = true;
 
     if (target.result.os.tag == .linux) {
-        primitives_tests.linkSystemLibrary("unwind");
-        crypto_tests.linkSystemLibrary("unwind");
-        precompiles_tests.linkSystemLibrary("unwind");
+        primitives_tests.root_module.linkSystemLibrary("unwind", .{});
+        crypto_tests.root_module.linkSystemLibrary("unwind", .{});
+        precompiles_tests.root_module.linkSystemLibrary("unwind", .{});
     }
 
     const run_primitives_tests = b.addRunArtifact(primitives_tests);

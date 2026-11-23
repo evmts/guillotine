@@ -17,3 +17,7 @@ comptime {
 test {
     @import("std").testing.refAllDecls(@import("mod.zig"));
 }
+
+comptime {
+    _ = @import("executor.zig");
+}

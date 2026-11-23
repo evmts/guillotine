@@ -148,9 +148,11 @@ pub fn loadTrustedSetupFromText(trusted_setup_text: []const u8, precompute: u64)
 /// Loads trusted setup from file path.
 pub fn loadTrustedSetupFile(file_path: []const u8, precompute: u64) KZGError!void {
     if (std.mem.indexOfScalar(u8, file_path, 0) != null) return KZGError.FileNotFound;
-    const file = std.fs.cwd().openFile(file_path, .{}) catch return KZGError.FileNotFound;
-    defer file.close();
-    const bytes = file.readToEndAlloc(std.heap.page_allocator, 1024 * 1024) catch return KZGError.InternalError;
+    const io = std.Io.Threaded.global_single_threaded.io();
+    const bytes = std.Io.Dir.cwd().readFileAlloc(io, file_path, std.heap.page_allocator, .limited(1024 * 1024)) catch |err| switch (err) {
+        error.FileNotFound => return KZGError.FileNotFound,
+        else => return KZGError.InternalError,
+    };
     defer std.heap.page_allocator.free(bytes);
     try loadTrustedSetupFromText(bytes, precompute);
 }

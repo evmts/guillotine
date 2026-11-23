@@ -197,3 +197,6 @@ zig-out/
 .baseline_*.txt
 profile_results/
 dist/
+
+# Zig dependency cache for the standalone Voltaire build
+/lib/voltaire/zig-pkg/

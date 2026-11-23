@@ -1,3 +1,6 @@
+import { keccak_256 } from '@noble/hashes/sha3';
+import { bytesToHex } from '@noble/hashes/utils';
+
 /**
  * Represents a 20-byte Ethereum address
  */
@@ -119,7 +122,7 @@ export class Address {
    */
   toChecksumHex(): string {
     const hex = this.toHex().slice(2).toLowerCase();
-    const hash = this.keccak256(hex);
+    const hash = bytesToHex(keccak_256(new TextEncoder().encode(hex)));
     
     let result = '0x';
     for (let i = 0; i < hex.length; i++) {
@@ -136,16 +139,6 @@ export class Address {
     }
     
     return result;
-  }
-
-  /**
-   * Simple keccak256 implementation for checksumming
-   * Note: In a real implementation, this would use a proper crypto library
-   */
-  private keccak256(input: string): string {
-    // This is a placeholder - in practice you'd use a real keccak256 implementation
-    // For now, we'll just return the input as lowercase hex
-    return input.padEnd(64, '0');
   }
 
   /**

@@ -886,10 +886,10 @@ test "BN254 EIP-196 - scalar validation" {
 }
 
 test "BN254 point serialization - point at infinity" {
-    var input = [_]u8{0} ** 128;
-    var output = [_]u8{0xa5} ** 64;
+    var input = @as([128]u8, @splat(0));
+    var output = @as([64]u8, @splat(0xa5));
     try bn254Add(&input, &output);
-    try std.testing.expectEqualSlices(u8, &([_]u8{0} ** 64), &output);
+    try std.testing.expectEqualSlices(u8, &(@as([64]u8, @splat(0))), &output);
 }
 
 test "BN254 point validation - generator has correct order" {

@@ -97,7 +97,7 @@ test "bls12_g2_add - output length" {
 }
 
 test "EIP-2537 g2_add rejects padding and noncanonical field elements without leaking" {
-    var input = [_]u8{0} ** 512;
+    var input = @as([512]u8, @splat(0));
     const modulus: u512 = 0x1a0111ea397fe69a4b1ba7b6434bacd764774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab;
     for (0..8) |slot| {
         const offset = slot * 64;

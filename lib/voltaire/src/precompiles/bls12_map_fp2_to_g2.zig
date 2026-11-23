@@ -235,7 +235,7 @@ test "map fp2 to g2 - output size validation" {
 }
 
 test "EIP-2537 map_fp2_to_g2 rejects padding and noncanonical field elements without leaking" {
-    var input = [_]u8{0} ** 128;
+    var input = @as([128]u8, @splat(0));
     const modulus: u512 = 0x1a0111ea397fe69a4b1ba7b6434bacd764774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab;
     for (0..2) |slot| {
         const offset = slot * 64;

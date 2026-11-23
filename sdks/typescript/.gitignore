@@ -1,3 +1,4 @@
 prebuilds/
 dist/
 *.tsbuildinfo
+!bun.lock

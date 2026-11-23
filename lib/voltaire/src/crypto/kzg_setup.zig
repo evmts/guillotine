@@ -333,8 +333,8 @@ test "KZG file loader rejects tampered trusted setup" {
     const bytes = try std.testing.allocator.dupe(u8, trusted_setup_data);
     defer std.testing.allocator.free(bytes);
     bytes[100] ^= 1;
-    try directory.dir.writeFile(.{ .sub_path = "trusted_setup.txt", .data = bytes });
-    const path = try directory.dir.realpathAlloc(std.testing.allocator, "trusted_setup.txt");
+    try directory.dir.writeFile(std.testing.io, .{ .sub_path = "trusted_setup.txt", .data = bytes });
+    const path = try directory.dir.realPathFileAlloc(std.testing.io, "trusted_setup.txt", std.testing.allocator);
     defer std.testing.allocator.free(path);
     try std.testing.expectError(error.IntegrityCheckFailed, c_kzg.loadTrustedSetupFile(path, 0));
 }

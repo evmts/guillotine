@@ -214,7 +214,7 @@ test "bls12_pairing - output size consistency" {
 }
 
 test "EIP-2537 pairing rejects padding and noncanonical field elements without leaking" {
-    var input = [_]u8{0} ** 384;
+    var input = @as([384]u8, @splat(0));
     const modulus: u512 = 0x1a0111ea397fe69a4b1ba7b6434bacd764774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab;
     for (0..6) |slot| {
         const offset = slot * 64;

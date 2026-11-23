@@ -414,7 +414,7 @@ test "bn254Pairing - exact gas for multiple sizes" {
 }
 
 test "EIP-197 rejects every noncanonical coordinate and off-curve points" {
-    var input = [_]u8{0} ** 192;
+    var input = @as([192]u8, @splat(0));
     for (0..6) |slot| {
         std.mem.writeInt(u256, input[slot * 32 ..][0..32], bn254.FP_MOD, .big);
         try std.testing.expectError(error.InvalidPairing, execute(std.testing.allocator, &input, 1_000_000));
@@ -437,7 +437,7 @@ test "EIP-197 rejects an on-curve G2 outside the subgroup with G1 infinity" {
     };
     try std.testing.expect(point.isOnCurve());
     try std.testing.expect(!point.isInSubgroup());
-    var input = [_]u8{0} ** 192;
+    var input = @as([192]u8, @splat(0));
     std.mem.writeInt(u256, input[64..96], point.x.u1.toStandardRepresentation(), .big);
     std.mem.writeInt(u256, input[96..128], point.x.u0.toStandardRepresentation(), .big);
     std.mem.writeInt(u256, input[128..160], point.y.u1.toStandardRepresentation(), .big);

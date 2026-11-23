@@ -1945,11 +1945,21 @@ pub const MinimalFrame = struct {
                 }
                 const beneficiary = Address{ .bytes = addr_bytes };
 
-                const gas_cost = self.selfdestructGasCost();
+                const contract_balance = evm.get_balance(self.address);
+                var gas_cost = self.selfdestructGasCost();
+                const access_cost = try evm.access_address(beneficiary);
+                if (fork_gas.hasAccessLists(self.hardfork) and access_cost > fork_gas.warm_access_cost) {
+                    gas_cost += fork_gas.cold_account_access_cost;
+                }
+                if (self.hardfork.isAtLeast(.TANGERINE_WHISTLE)) {
+                    const dead = evm.get_balance(beneficiary) == 0 and evm.get_code(beneficiary).len == 0;
+                    if (dead and (contract_balance > 0 or !fork_gas.newAccountNeedsValue(self.hardfork))) {
+                        gas_cost += fork_gas.new_account_gas;
+                    }
+                }
                 try self.consumeGas(gas_cost);
 
                 // Transfer contract balance to beneficiary (evm from outer scope)
-                const contract_balance = evm.get_balance(self.address);
                 if (contract_balance > 0) {
                     const beneficiary_balance = evm.get_balance(beneficiary);
                     // Set contract balance to 0
@@ -2435,8 +2445,8 @@ test "MinimalFrame SLOAD and SSTORE gas follow each fork's schedule" {
             allocator,
             case.code,
             100000,
-            Address{ .bytes = .{0} ** 20 },
-            Address{ .bytes = .{0} ** 20 },
+            Address{ .bytes = @as([20]u8, @splat(0)) },
+            Address{ .bytes = @as([20]u8, @splat(0)) },
             0,
             &.{},
             evm,
@@ -2459,7 +2469,7 @@ test "MinimalFrame SSTORE applies the EIP-2200 sentry and fork refunds" {
         defer evm.deinitPtr(allocator);
         evm.setHardfork(.CANCUN);
         const code = [_]u8{ 0x60, 0x00, 0x60, 0x00, 0x55 };
-        var frame = try MinimalFrame.init(allocator, &code, 6 + 2300, Address{ .bytes = .{0} ** 20 }, Address{ .bytes = .{0} ** 20 }, 0, &.{}, evm, .CANCUN);
+        var frame = try MinimalFrame.init(allocator, &code, 6 + 2300, Address{ .bytes = @as([20]u8, @splat(0)) }, Address{ .bytes = @as([20]u8, @splat(0)) }, 0, &.{}, evm, .CANCUN);
         defer frame.deinit();
         try testing.expectError(error.OutOfGas, frame.execute());
     }
@@ -2477,7 +2487,7 @@ test "MinimalFrame SSTORE applies the EIP-2200 sentry and fork refunds" {
         defer evm.deinitPtr(allocator);
         evm.setHardfork(case.hardfork);
         const code = [_]u8{ 0x60, 0x01, 0x60, 0x00, 0x55, 0x60, 0x00, 0x60, 0x00, 0x55 };
-        var frame = try MinimalFrame.init(allocator, &code, 100000, Address{ .bytes = .{0} ** 20 }, Address{ .bytes = .{0} ** 20 }, 0, &.{}, evm, case.hardfork);
+        var frame = try MinimalFrame.init(allocator, &code, 100000, Address{ .bytes = @as([20]u8, @splat(0)) }, Address{ .bytes = @as([20]u8, @splat(0)) }, 0, &.{}, evm, case.hardfork);
         defer frame.deinit();
         try frame.execute();
         try testing.expectEqual(case.refund, evm.gas_refund);

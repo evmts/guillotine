@@ -342,7 +342,7 @@ test "bn254Mul - geth cdetrio15" {
 }
 
 test "EIP-196 MUL validates noncanonical and off-curve points before zero scalar" {
-    var input = [_]u8{0} ** 96;
+    var input = @as([96]u8, @splat(0));
     for (0..2) |slot| {
         std.mem.writeInt(u256, input[slot * 32 ..][0..32], bn254.FP_MOD, .big);
         try std.testing.expectError(error.InvalidPoint, execute(std.testing.allocator, &input, GAS));
