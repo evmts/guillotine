@@ -5,6 +5,7 @@ const ArrayList = std.ArrayListAligned;
 const Opcode = @import("../opcodes/opcode.zig").Opcode;
 const bytecode_config = @import("bytecode_config.zig");
 const BytecodeConfig = bytecode_config.BytecodeConfig;
+const fork_gas = @import("../frame/fork_gas.zig");
 
 // NOTE: This implementation does not support EOF (Ethereum Object Format) EIPs including:
 // - EIP-3540: EOF - EVM Object Format v1
@@ -164,15 +165,10 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                 switch (opcode) {
                     0x60...0x7F => { // PUSH1-PUSH32
                         const push_size = opcode - 0x5F;
-                        var value: u256 = 0;
-
-                        // Read push value using proper endianness
-                        const end_pc = @min(iterator.pc + 1 + push_size, @as(PcType, @intCast(iterator.bytecode.len())));
-                        for (iterator.pc + 1..end_pc) |i| {
-                            value = std.math.shl(u256, value, 8) | iterator.bytecode.get_unsafe(@intCast(i));
-                        }
-
-                        iterator.pc = end_pc;
+                        // Immediate bytes past the end of the code read as zero.
+                        const value = iterator.bytecode.pushValuePadded(iterator.pc, push_size);
+                        const end_pc: usize = @min(@as(usize, iterator.pc) + 1 + push_size, iterator.bytecode.runtime_code.len);
+                        iterator.pc = @intCast(end_pc);
                         return OpcodeData{ .push = .{ .value = value, .size = push_size } };
                     },
                     0x5B => { // JUMPDEST
@@ -255,15 +251,16 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                 const verified_ops = @import("../core/verified_ops.zig");
                 var acc = verified_ops.BlockAccumulator{ .gas = initial_gas };
                 var pc: usize = start_pc;
-                var loop_counter = cfg.createLoopSafetyCounter().init(cfg.loop_quota orelse 0);
 
+                // `pc` strictly increases, so the loop ends after at most `len()` steps.
                 while (pc < bytecode.len()) {
-                    loop_counter.inc();
                     const opcode = bytecode.get_unsafe(@intCast(pc));
 
                     if (opcode == 0x5B) break; // Next JUMPDEST starts a new block.
 
-                    const cost: u64 = opcode_info[opcode].gas_cost;
+                    // The table holds the Berlin+ schedule; earlier forks price the
+                    // state-access opcodes differently.
+                    const cost: u64 = fork_gas.staticGas(cfg.hardfork, opcode, opcode_info[opcode].gas_cost);
                     switch (opcode) {
                         0x60...0x7F => { // PUSH1-PUSH32
                             pc += 1 + @as(usize, opcode - 0x5F);
@@ -363,42 +360,14 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
             // - execute_init_code checks against max_initcode_size (49KB)
             // - runtime code is checked against max_bytecode_size (24KB)
 
-            // Validate bytecode length fits in PcType (required for len() method)
-            if (tracer) |t| {
-                t.assert(code.len <= std.math.maxInt(PcType), "Bytecode length must fit in PcType");
-            }
+            // PcType indexes the code, and analysis looks up to one PUSH32 ahead. Code
+            // that cannot be indexed is rejected here instead of overflowing a cast.
+            if (code.len + MAX_PUSH_BYTES + 1 > std.math.maxInt(PcType)) return error.InitcodeTooLarge;
 
-            // Detect and strip Solidity metadata from the end of bytecode.
-            // Per the Solidity specification, metadata is appended to the bytecode.
-            // The last two bytes of the contract's raw bytecode form a big-endian
-            // integer that specifies the length of the CBOR-encoded metadata section.
-            // This allows for efficient O(1) retrieval of the metadata without scanning.
-            var runtime_code = code;
-            if (code.len >= 4) { // Minimal length for metadata to be present.
-                const metadata_len = std.mem.readInt(u16, code[code.len - 2 ..][0..2], .big);
-
-                if (metadata_len > 0 and @as(usize, metadata_len) + 2 <= code.len) {
-                    const metadata_start_idx = code.len - @as(usize, metadata_len) - 2;
-                    const metadata_slice = code[metadata_start_idx .. code.len - 2];
-
-                    // A valid metadata block is a CBOR map. We check for common Solidity patterns for robustness.
-                    if (metadata_slice.len > 6) {
-                        const ipfs_pattern = &.{ 0xa2, 0x64, 'i', 'p', 'f', 's' };
-                        const bzzr0_pattern = &.{ 0xa1, 0x65, 'b', 'z', 'z', 'r', '0' };
-                        const bzzr1_pattern = &.{ 0xa1, 0x65, 'b', 'z', 'z', 'r', '1' };
-
-                        if (std.mem.startsWith(u8, metadata_slice, ipfs_pattern) or
-                            std.mem.startsWith(u8, metadata_slice, bzzr0_pattern) or
-                            std.mem.startsWith(u8, metadata_slice, bzzr1_pattern))
-                        {
-                            runtime_code = code[0..metadata_start_idx];
-                            if (tracer) |t| {
-                                t.debug("Detected Solidity metadata, trimming bytecode from {} to {} bytes", .{ code.len, runtime_code.len });
-                            }
-                        }
-                    }
-                }
-            }
+            // Every byte of the code is executable. Trailing compiler metadata is not
+            // special to the EVM: it can hold JUMPDESTs and be jumped into, so it is
+            // analyzed like any other code.
+            const runtime_code = code;
 
             var self = Self{
                 .full_code = code,
@@ -462,10 +431,7 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
 
                 // Extract value
                 var value: u256 = 0;
-                const end = @min(current_pc + 1 + push_size, self.len());
-                for (current_pc + 1..end) |j| {
-                    value = std.math.shl(u256, value, 8) | self.get_unsafe(@intCast(j));
-                }
+                value = self.pushValuePadded(current_pc, push_size);
                 if (i < 3) values[i] = value;
 
                 current_pc += 1 + push_size;
@@ -512,10 +478,7 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
 
             // Extract target
             var target: u256 = 0;
-            const end = @min(push_pc + 1 + push_size, self.len());
-            for (push_pc + 1..end) |i| {
-                target = std.math.shl(u256, target, 8) | self.get_unsafe(@intCast(i));
-            }
+            target = self.pushValuePadded(push_pc, push_size);
 
             return OpcodeData{ .iszero_jumpi = .{ .target = target, .original_length = @intCast(jumpi_pc + 1 - pc) } };
         }
@@ -540,10 +503,7 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
 
             // Extract push value
             var value: u256 = 0;
-            const end = @min(push_pc + 1 + push_size, self.len());
-            for (push_pc + 1..end) |i| {
-                value = std.math.shl(u256, value, 8) | self.get_unsafe(@intCast(i));
-            }
+            value = self.pushValuePadded(push_pc, push_size);
 
             return OpcodeData{ .dup2_mstore_push = .{ .push_value = value, .original_length = @intCast(3 + push_size) } };
         }
@@ -588,10 +548,7 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
             // Extract push value
             var value: u256 = 0;
             if (push_op != 0x5F) { // Not PUSH0
-                const end = @min(pc + 1 + push_size, self.len());
-                for (pc + 1..end) |i| {
-                    value = std.math.shl(u256, value, 8) | self.get_unsafe(@intCast(i));
-                }
+                value = self.pushValuePadded(pc, push_size);
             }
 
             return OpcodeData{ .push_dup3_add = .{ .value = value, .original_length = @intCast(1 + push_size + 2) } };
@@ -620,10 +577,7 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
 
             // Extract jump target
             var target: u256 = 0;
-            const end = @min(push_pc + 1 + push_size, self.len());
-            for (push_pc + 1..end) |i| {
-                target = std.math.shl(u256, target, 8) | self.get_unsafe(@intCast(i));
-            }
+            target = self.pushValuePadded(push_pc, push_size);
 
             const jumpi_pc = push_pc + 1 + push_size;
             if (jumpi_pc >= self.len() or self.get_unsafe(jumpi_pc) != 0x57) return null; // JUMPI
@@ -670,10 +624,7 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
             // Extract push value
             var value: u256 = 0;
             if (push_op != 0x5F) { // Not PUSH0
-                const end = @min(pc + 1 + push_size, self.len());
-                for (pc + 1..end) |i| {
-                    value = std.math.shl(u256, value, 8) | self.get_unsafe(@intCast(i));
-                }
+                value = self.pushValuePadded(pc, push_size);
             }
 
             return OpcodeData{ .push_add_dup1 = .{ .value = value, .original_length = @intCast(1 + push_size + 2) } };
@@ -771,10 +722,7 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
             if (first_op >= 0x60 and first_op <= 0x7F) { // PUSH opcode
                 const push_size = first_op - 0x5F;
                 var value: u256 = 0;
-                const end_pc = @min(pc + 1 + push_size, self.len());
-                for (pc + 1..end_pc) |i| {
-                    value = std.math.shl(u256, value, 8) | self.get_unsafe(@intCast(i));
-                }
+                value = self.pushValuePadded(pc, push_size);
 
                 // The second opcode comes AFTER the push data
                 const second_op_pc = pc + 1 + push_size;
@@ -832,6 +780,21 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
         /// Get byte at index
         pub inline fn get_unsafe(self: Self, index: PcType) u8 {
             return self.runtime_code[index];
+        }
+
+        /// Value pushed by the PUSH instruction at `push_pc` that carries `size`
+        /// immediate bytes. Immediate bytes past the end of the code read as zero, so a
+        /// PUSH truncated by the end of the code is right-padded with zeros (Yellow
+        /// Paper, PUSH: "the bytes default to zero if they extend past the limits").
+        pub fn pushValuePadded(self: Self, push_pc: usize, size: usize) u256 {
+            var value: u256 = 0;
+            var i: usize = 0;
+            while (i < size) : (i += 1) {
+                const index = push_pc + 1 + i;
+                const byte: u8 = if (index < self.runtime_code.len) self.runtime_code[index] else 0;
+                value = (value << 8) | byte;
+            }
+            return value;
         }
 
         /// Get opcode at position (doesn't check if it's actually an opcode start)
@@ -1077,35 +1040,30 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                 {
                     const n: PcType = op - (@intFromEnum(Opcode.PUSH1) - 1);
 
-                    // We need to read n bytes after the opcode at position i
-                    // So we need positions i+1 through i+n to be valid
-                    // This means i+n must be less than the validation length
-                    // PUSH32 at position 0 needs to read bytes 1-32, so position 32 must be valid
-                    // Therefore i+1+n must be <= validate_up_to, or i+n < validate_up_to
-                    if (i + 1 + n > validate_up_to) {
+                    // A PUSH whose immediate bytes run past the end of the code is valid:
+                    // the missing bytes read as zero. Only the bytes that exist are marked
+                    // as push data, and analysis ends at the end of the code.
+                    const available: PcType = @intCast(@min(@as(usize, n), validate_up_to - @as(usize, i) - 1));
+                    if (available < n) {
                         if (tracer) |t| {
-                            t.onTruncatedPush(@intCast(i), @intCast(n), validate_up_to - i - 1);
+                            t.onTruncatedPush(@intCast(i), @intCast(n), available);
                         }
-                        return error.TruncatedPush;
                     }
 
-                    // Extract push value for immediate jump validation (only if fusions enabled)
+                    // Extract push value for fusion detection (only if fusions enabled)
                     var push_value: u256 = 0;
                     if (comptime fusions_enabled) {
-                        var byte_idx: PcType = 0;
-                        while (byte_idx < n) : (byte_idx += 1) {
-                            push_value = std.math.shl(u256, push_value, 8) | self.runtime_code[i + 1 + byte_idx];
-                        }
+                        push_value = self.pushValuePadded(i, n);
                     }
 
                     // Mark push data bytes
                     var j: PcType = 0;
-                    while (j < n) : (j += 1) {
+                    while (j < available) : (j += 1) {
                         const idx = i + 1 + j;
                         self.packed_bitmap[idx].is_push_data = true;
                     }
 
-                    const push_end = i + 1 + n;
+                    const push_end = i + 1 + available;
 
                     // ONLY check for immediate jump patterns if fusions are enabled
                     // This is for optimization purposes, not correctness validation
@@ -1904,17 +1862,80 @@ test "Bytecode validation - undefined opcode treated as INVALID" {
 test "Bytecode validation - truncated PUSH instruction" {
     const allocator = testing.allocator;
 
-    // PUSH1 without data byte
+    // PUSH1 without data byte: valid code, the missing byte reads as zero.
     const code = [_]u8{0x60};
-    try testing.expectError(BytecodeDefault.ValidationError.TruncatedPush, BytecodeDefault.init(allocator, &code));
+    var bytecode = try BytecodeDefault.init(allocator, &code);
+    defer bytecode.deinit();
+    try testing.expectEqual(@as(u256, 0), bytecode.pushValuePadded(0, 1));
+
+    var iter = bytecode.createIterator();
+    const first = iter.next().?;
+    try testing.expectEqual(@as(u256, 0), first.push.value);
+    try testing.expectEqual(@as(u8, 1), first.push.size);
+    try testing.expect(iter.next() == null);
 }
 
 test "Bytecode validation - truncated PUSH32" {
     const allocator = testing.allocator;
 
-    // PUSH32 with only 31 bytes of data (should have 32)
+    // PUSH32 with only 31 bytes of data: the 32nd byte reads as zero, so the
+    // value is the 31 bytes shifted left by one byte.
     var code = [_]u8{0x7F} ++ @as([31]u8, @splat(0xFF));
-    try testing.expectError(BytecodeDefault.ValidationError.TruncatedPush, BytecodeDefault.init(allocator, &code));
+    var bytecode = try BytecodeDefault.init(allocator, &code);
+    defer bytecode.deinit();
+    const expected: u256 = @as(u256, std.math.maxInt(u256)) << 8;
+    try testing.expectEqual(expected, bytecode.pushValuePadded(0, 32));
+
+    var iter = bytecode.createIterator();
+    const first = iter.next().?;
+    try testing.expectEqual(expected, first.push.value);
+    try testing.expect(iter.next() == null);
+}
+
+test "Bytecode validation - truncated PUSH is zero-padded for every PUSH size" {
+    const allocator = testing.allocator;
+
+    // PUSHn followed by k < n bytes of 0xAB, for every n and every k.
+    var n: usize = 1;
+    while (n <= 32) : (n += 1) {
+        var k: usize = 0;
+        while (k < n) : (k += 1) {
+            var code: [33]u8 = undefined;
+            code[0] = @intCast(0x5F + n);
+            @memset(code[1 .. 1 + k], 0xAB);
+            var bytecode = try BytecodeDefault.init(allocator, code[0 .. 1 + k]);
+            defer bytecode.deinit();
+
+            var expected: u256 = 0;
+            var b: usize = 0;
+            while (b < n) : (b += 1) {
+                expected = (expected << 8) | @as(u256, if (b < k) 0xAB else 0);
+            }
+
+            var iter = bytecode.createIterator();
+            iter.enable_fusion = false;
+            const first = iter.next().?;
+            try testing.expectEqual(expected, first.push.value);
+            try testing.expect(iter.next() == null);
+            // No byte of a truncated PUSH is a jump destination.
+            var pc: usize = 0;
+            while (pc < 1 + k) : (pc += 1) {
+                try testing.expect(!bytecode.isValidJumpDest(@intCast(pc)));
+            }
+        }
+    }
+}
+
+test "Bytecode validation - JUMPDEST byte inside a truncated PUSH is push data" {
+    const allocator = testing.allocator;
+
+    // JUMPDEST, PUSH2 0x5b (truncated): pc 0 is a jump destination, pc 2 is not.
+    const code = [_]u8{ 0x5b, 0x61, 0x5b };
+    var bytecode = try BytecodeDefault.init(allocator, &code);
+    defer bytecode.deinit();
+    try testing.expect(bytecode.isValidJumpDest(0));
+    try testing.expect(!bytecode.isValidJumpDest(2));
+    try testing.expectEqual(@as(u256, 0x5b00), bytecode.pushValuePadded(1, 2));
 }
 
 test "Jump destination validation - valid JUMPDEST" {
@@ -2378,11 +2399,13 @@ test "Minimal repro - deployment bytecode with apparent truncated PUSH" {
         0x5f, // PUSH0
         0xf3, // RETURN
         0xfe, // INVALID (start of runtime code)
-        0x60, // PUSH1 without data - this triggers TruncatedPush
+        0x60, // PUSH1 without data: valid, pushes zero if ever executed
     };
 
-    // This should fail with TruncatedPush because the last byte is PUSH1 without data
-    try testing.expectError(BytecodeDefault.ValidationError.TruncatedPush, BytecodeDefault.init(allocator, &code));
+    var bytecode = try BytecodeDefault.init(allocator, &code);
+    defer bytecode.deinit();
+    try testing.expectEqual(@as(usize, code.len), bytecode.len());
+    try testing.expectEqual(@as(u256, 0), bytecode.pushValuePadded(code.len - 1, 1));
 }
 
 test "Deployment bytecode - actual ten-thousand-hashes fixture" {
@@ -2399,8 +2422,10 @@ test "Deployment bytecode - actual ten-thousand-hashes fixture" {
         0x80, 0x15, 0x60, // This ends with 0x60 (PUSH1) without the data byte
     };
 
-    // This should fail because it ends with an incomplete PUSH1
-    try testing.expectError(BytecodeDefault.ValidationError.TruncatedPush, BytecodeDefault.init(allocator, &code));
+    // Code ending in an incomplete PUSH1 is valid EVM code.
+    var bytecode = try BytecodeDefault.init(allocator, &code);
+    defer bytecode.deinit();
+    try testing.expectEqual(@as(usize, code.len), bytecode.len());
 }
 
 test "Iterator should not read past truncated PUSH32" {
@@ -2410,8 +2435,14 @@ test "Iterator should not read past truncated PUSH32" {
     // Total: 1 byte opcode + 31 bytes data = 32 bytes (should be 33)
     var code = [_]u8{0x7F} ++ @as([31]u8, @splat(0x00)); // PUSH32 (truncated)
 
-    // This should fail validation
-    try testing.expectError(BytecodeDefault.ValidationError.TruncatedPush, BytecodeDefault.init(allocator, &code));
+    var bytecode = try BytecodeDefault.init(allocator, &code);
+    defer bytecode.deinit();
+    var iter = bytecode.createIterator();
+    const first = iter.next().?;
+    try testing.expectEqual(@as(u256, 0), first.push.value);
+    // The iterator stops exactly at the end of the code.
+    try testing.expectEqual(@as(usize, code.len), @as(usize, iter.pc));
+    try testing.expect(iter.next() == null);
 }
 
 test "Deployment vs Runtime bytecode handling" {
@@ -2471,10 +2502,9 @@ test "Bytecode with Solidity metadata - ipfs format" {
     var bytecode = try BytecodeDefault.init(allocator, &code_with_metadata);
     defer bytecode.deinit();
 
-    // Should detect metadata and trim to just the actual code
-    try testing.expectEqual(@as(usize, 6), bytecode.runtime_code.len);
-    try testing.expectEqual(@as(u8, 0x60), bytecode.runtime_code[0]);
-    try testing.expectEqual(@as(u8, 0x00), bytecode.runtime_code[5]);
+    // Metadata is ordinary code to the EVM: nothing is trimmed.
+    try testing.expectEqual(code_with_metadata.len, bytecode.runtime_code.len);
+    try testing.expectEqualSlices(u8, &code_with_metadata, bytecode.runtime_code);
 }
 
 test "Bytecode with Solidity metadata - bzzr format" {
@@ -2497,10 +2527,9 @@ test "Bytecode with Solidity metadata - bzzr format" {
     var bytecode = try BytecodeDefault.init(allocator, &code_with_metadata);
     defer bytecode.deinit();
 
-    // Should detect metadata and trim to just the actual code
-    try testing.expectEqual(@as(usize, 6), bytecode.runtime_code.len);
-    try testing.expectEqual(@as(u8, 0x60), bytecode.runtime_code[0]);
-    try testing.expectEqual(@as(u8, 0x00), bytecode.runtime_code[5]);
+    // Metadata is ordinary code to the EVM: nothing is trimmed.
+    try testing.expectEqual(code_with_metadata.len, bytecode.runtime_code.len);
+    try testing.expectEqualSlices(u8, &code_with_metadata, bytecode.runtime_code);
 }
 
 test "Bytecode without metadata should remain unchanged" {

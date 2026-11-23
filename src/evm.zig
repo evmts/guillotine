@@ -21,11 +21,18 @@ pub fn Evm(config: EvmConfig) type {
     return struct {
         const Self = @This();
 
+        comptime {
+            if (config.max_call_depth >= std.math.maxInt(u11)) {
+                @compileError("max_call_depth must be below 2047 so that depth (max_call_depth + 1 active frames) fits u11");
+            }
+        }
+
         pub const Frame = @import("frame/frame.zig").Frame(config.frame_config(), Self);
         pub const Bytecode = @import("bytecode/bytecode.zig").Bytecode(.{
             .max_bytecode_size = config.max_bytecode_size,
             .max_initcode_size = config.max_initcode_size,
             .fusions_enabled = config.enable_fusion,
+            .hardfork = config.eips.hardfork,
         });
 
         pub const CallResult = call_result_module.CallResult(config);
@@ -82,9 +89,13 @@ pub fn Evm(config: EvmConfig) type {
 
         // Cache line 1 - EXECUTION CONTROL: Accessed frequently during execution
         /// Current call depth (0 = root call) - tracks active stack depth
-        depth: u11, // Supports up to 2048 depth, more than EVM's 1024 limit
+        /// Number of active frames, 0..max_call_depth + 1.
+        depth: u11, // Supports up to 2047 active frames, more than the EVM's 1025
+
         /// Call stack - tracks caller and value for each call depth
-        call_stack: [config.max_call_depth]CallStackEntry,
+        /// One entry per active frame. Frames run at 0-based depths 0..max_call_depth
+        /// inclusive (execution-specs STACK_DEPTH_LIMIT), hence the extra slot.
+        call_stack: [config.max_call_depth + 1]CallStackEntry,
         /// Current return data from last call (null if no return data available)
         return_data: ?[]const u8, // 24 bytes (optional adds 8 bytes for tag)
         /// Allocator for dynamic memory
@@ -165,7 +176,7 @@ pub fn Evm(config: EvmConfig) type {
 
             var self = Self{
                 .depth = 0,
-                .call_stack = @as([config.max_call_depth]CallStackEntry, @splat(CallStackEntry{ .caller = primitives.Address.ZERO_ADDRESS, .value = 0, .is_static = false })),
+                .call_stack = @as([config.max_call_depth + 1]CallStackEntry, @splat(CallStackEntry{ .caller = primitives.Address.ZERO_ADDRESS, .value = 0, .is_static = false })),
                 .return_data = null,
                 .allocator = allocator,
                 .database = database orelse return error.DatabaseRequired,
@@ -452,18 +463,18 @@ pub fn Evm(config: EvmConfig) type {
             // Track origin and to addresses for state dump
             self.touched_addresses.put(self.origin, {}) catch |err| {
                 log.err("Failed to track origin address: {s}", .{@errorName(err)});
-                return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                return CallResult.failed(0);
             };
             if (!to_address.equals(primitives.ZERO_ADDRESS)) {
                 self.touched_addresses.put(to_address, {}) catch |err| {
                     log.err("Failed to track to address: {s}", .{@errorName(err)});
-                    return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                    return CallResult.failed(0);
                 };
             }
 
             params.validate() catch |err| {
                 log.err("CallParams validation failed: {s}", .{@errorName(err)});
-                return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                return CallResult.failed(0);
             };
 
             defer {
@@ -491,7 +502,7 @@ pub fn Evm(config: EvmConfig) type {
 
                 // Reset call stack to initial state
                 // This is critical when reusing EVM instances across multiple transactions
-                self.call_stack = @as([config.max_call_depth]CallStackEntry, @splat(CallStackEntry{ .caller = primitives.Address.ZERO_ADDRESS, .value = 0, .is_static = false }));
+                self.call_stack = @as([config.max_call_depth + 1]CallStackEntry, @splat(CallStackEntry{ .caller = primitives.Address.ZERO_ADDRESS, .value = 0, .is_static = false }));
                 // Reset snapshot ID
                 self.current_snapshot_id = 0;
                 self.tx_sender_nonce_incremented = false;
@@ -522,7 +533,7 @@ pub fn Evm(config: EvmConfig) type {
                 self.block_info.coinbase,
             ) catch |err| {
                 log.err("Failed to pre-warm addresses: {s}", .{@errorName(err)});
-                return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                return CallResult.failed(0);
             };
 
             // EIP-2929 (Berlin+): exactly the precompiles active in this fork start warm.
@@ -534,20 +545,20 @@ pub fn Evm(config: EvmConfig) type {
                 while (precompile_index <= last) : (precompile_index += 1) {
                     self.warmPrecompile(primitives.Address.fromU256(precompile_index)) catch |err| {
                         log.err("Failed to pre-warm precompile: {s}", .{@errorName(err)});
-                        return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                        return CallResult.failed(0);
                     };
                 }
                 if (comptime config.eips.hardfork.isAtLeast(.OSAKA)) {
                     self.warmPrecompile(precompiles.P256VERIFY_ADDRESS) catch |err| {
                         log.err("Failed to pre-warm precompile: {s}", .{@errorName(err)});
-                        return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                        return CallResult.failed(0);
                     };
                 }
             }
 
             const gas_limit = params.getGas();
             if (comptime !config.disable_gas_checks) {
-                if (gas_limit == 0) return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                if (gas_limit == 0) return CallResult.failed(0);
             }
 
             const input = params.getInput();
@@ -559,12 +570,12 @@ pub fn Evm(config: EvmConfig) type {
 
             if (comptime !config.disable_gas_checks) {
                 if (gas_limit < initial_gas_cost or gas_limit < floor_gas_cost) {
-                    return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                    return CallResult.failed(0);
                 }
                 // EIP-7825: a transaction above TX_GAS_LIMIT_CAP is invalid; reject before nonce increment.
                 config.eips.validate_transaction_gas_limit(gas_limit) catch |err| {
                     log.debug("Transaction rejected: {s}", .{@errorName(err)});
-                    return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                    return CallResult.failed(0);
                 };
             }
             const execution_gas_limit = gas_limit - initial_gas_cost;
@@ -579,7 +590,7 @@ pub fn Evm(config: EvmConfig) type {
                 params.get_to(),
             ) catch |err| {
                 log.err("Blob transaction validation failed: {s}", .{@errorName(err)});
-                return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                return CallResult.failed(0);
             };
 
             const max_blob_gas_cost = config.eips.max_blob_gas_cost(
@@ -592,21 +603,21 @@ pub fn Evm(config: EvmConfig) type {
             if (!config.disable_balance_checks) {
                 const origin_account = self.database.get_account(self.origin.bytes) catch |err| {
                     log.err("Failed to read origin account for upfront balance check: {s}", .{@errorName(err)});
-                    return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                    return CallResult.failed(0);
                 };
                 const origin_balance = if (origin_account) |account| account.balance else 0;
                 const gas_fee_cap = self.context.max_fee_per_gas orelse self.gas_price;
                 const max_execution_cost = @mulWithOverflow(@as(u256, params.getGas()), gas_fee_cap);
                 if (max_execution_cost[1] != 0) {
-                    return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                    return CallResult.failed(0);
                 }
                 const execution_and_value = @addWithOverflow(max_execution_cost[0], params.getValue());
                 if (execution_and_value[1] != 0) {
-                    return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                    return CallResult.failed(0);
                 }
                 const required_balance = @addWithOverflow(execution_and_value[0], max_blob_gas_cost);
                 if (required_balance[1] != 0 or origin_balance < required_balance[0]) {
-                    return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                    return CallResult.failed(0);
                 }
             }
 
@@ -614,19 +625,19 @@ pub fn Evm(config: EvmConfig) type {
             // This must happen after gas deduction but before inner_call execution
             {
                 var origin_account = self.database.get_account(self.origin.bytes) catch {
-                    return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                    return CallResult.failed(0);
                 } orelse Account.zero();
 
                 // Record the nonce change for potential revert
                 // Using current_snapshot_id (0 at transaction level)
                 self.journal.record_nonce_change(self.current_snapshot_id, self.origin, origin_account.nonce) catch {
-                    return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                    return CallResult.failed(0);
                 };
 
                 // Increment and persist the nonce
                 origin_account.nonce += 1;
                 self.database.set_account(self.origin.bytes, origin_account) catch {
-                    return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                    return CallResult.failed(0);
                 };
                 self.tx_sender_nonce_incremented = true;
             }
@@ -638,7 +649,7 @@ pub fn Evm(config: EvmConfig) type {
             // Clone result to main allocator since we're at depth 0 (top-level call)
             var result = arena_result.toOwnedResult(self.allocator) catch |err| {
                 log.err("Failed to clone call result: {s}", .{@errorName(err)});
-                return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                return CallResult.failed(0);
             };
 
             self.tracer.onCallComplete(result.success, @as(i64, @intCast(result.gas_left)), result.output.len);
@@ -814,14 +825,14 @@ pub fn Evm(config: EvmConfig) type {
             // Extract access list data before clearing
             result.accessed_addresses = self.allocator.dupe(primitives.Address, self.access_list.addresses.keys()) catch {
                 log.debug("Out of memory allocating accessed_addresses", .{});
-                return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                return CallResult.failed(0);
             };
 
             // Convert StorageKey to StorageAccess (same fields, different type)
             const storage_keys = self.access_list.storage_slots.keys();
             const storage_access = self.allocator.alloc(call_result_module.StorageAccess, storage_keys.len) catch {
                 log.debug("Out of memory allocating storage_access", .{});
-                return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                return CallResult.failed(0);
             };
             for (storage_keys, 0..) |key, i| {
                 storage_access[i] = .{ .address = key.address, .slot = key.slot };
@@ -835,42 +846,82 @@ pub fn Evm(config: EvmConfig) type {
         /// This handles nested calls and manages depth tracking.
         pub fn inner_call(self: *Self, params: CallParams) CallResult {
             @branchHint(.likely);
-            if ((@import("builtin").mode == .debug or @import("builtin").mode == .safe)) {
-                params.validate() catch return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
-            }
-
-            if (!config.disable_gas_checks) {
-                if (params.getGas() == 0) return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
-            }
+            const execution_gas = params.getGas();
 
             // depth is incremented solely by execute_frame (CALL variants) and the create paths;
             // inner_call must NOT increment it again or every nesting level would advance depth
-            // by 2 (halving the 1024 limit) and leave a call_stack gap that corrupts parent
-            // caller/value/is_static lookups. The check uses the parent depth: a frame already
-            // at the limit cannot push another. (Deep recursion is safe — call() runs on a
+            // by 2 (halving the limit) and leave a call_stack gap that corrupts parent
+            // caller/value/is_static lookups. (Deep recursion is safe: call() runs on a
             // large-stack worker thread.)
-            if (self.depth >= config.max_call_depth) return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+            //
+            // Depth limit, execution-specs `evm.message.depth + 1 > STACK_DEPTH_LIMIT`: `depth`
+            // counts active frames, so the frame at 0-based depth d runs with depth == d + 1
+            // and may call only while d < max_call_depth. A refused call hands back all the
+            // gas it was given. Creations apply the limit themselves, after deducting their
+            // own charge.
+            if (!params.isCreate() and self.depth > config.max_call_depth) return CallResult.failed(execution_gas);
 
-            const execution_gas = params.getGas();
+            // A call that carries no gas is still a call: it succeeds against an account
+            // without code and runs code whose first block is free. Nothing is rejected
+            // here on gas alone.
+
+            const refund_before = self.gas_refund_counter;
 
             var result = switch (params) {
                 .call => |p| blk: {
                     @branchHint(.likely);
-                    break :blk self.executeCall(.{ .caller = p.caller, .to = p.to, .value = p.value, .input = p.input, .gas = execution_gas }) catch {
-                        return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                    break :blk self.executeCall(.{ .caller = p.caller, .to = p.to, .value = p.value, .input = p.input, .gas = execution_gas }) catch |err| {
+                        log.debug("inner_call: CALL failed: {s}", .{@errorName(err)});
+                        break :blk CallResult.failed(0);
                     };
                 },
                 .staticcall => |p| blk: {
                     @branchHint(.likely);
-                    break :blk self.executeStaticcall(.{ .caller = p.caller, .to = p.to, .input = p.input, .gas = execution_gas }) catch (CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable);
+                    break :blk self.executeStaticcall(.{ .caller = p.caller, .to = p.to, .input = p.input, .gas = execution_gas }) catch |err| {
+                        log.debug("inner_call: STATICCALL failed: {s}", .{@errorName(err)});
+                        break :blk CallResult.failed(0);
+                    };
                 },
-                .delegatecall => |p| self.executeDelegatecall(.{ .caller = p.caller, .to = p.to, .input = p.input, .gas = execution_gas }) catch (CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable),
-                .create => |p| self.executeCreate(.{ .caller = p.caller, .value = p.value, .init_code = p.init_code, .gas = execution_gas }) catch (CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable),
-                .create2 => |p| self.executeCreate2(.{ .caller = p.caller, .value = p.value, .init_code = p.init_code, .salt = p.salt, .gas = execution_gas }) catch (CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable),
+                .delegatecall => |p| blk: {
+                    break :blk self.executeDelegatecall(.{ .caller = p.caller, .context_address = p.context_address orelse p.caller, .to = p.to, .input = p.input, .gas = execution_gas }) catch |err| {
+                        log.debug("inner_call: DELEGATECALL failed: {s}", .{@errorName(err)});
+                        break :blk CallResult.failed(0);
+                    };
+                },
+                .create => |p| blk: {
+                    break :blk self.executeCreate(.{ .caller = p.caller, .value = p.value, .init_code = p.init_code, .gas = execution_gas }) catch |err| {
+                        log.debug("inner_call: CREATE failed: {s}", .{@errorName(err)});
+                        break :blk CallResult.failed(0);
+                    };
+                },
+                .create2 => |p| blk: {
+                    break :blk self.executeCreate2(.{ .caller = p.caller, .value = p.value, .init_code = p.init_code, .salt = p.salt, .gas = execution_gas }) catch |err| {
+                        log.debug("inner_call: CREATE2 failed: {s}", .{@errorName(err)});
+                        break :blk CallResult.failed(0);
+                    };
+                },
                 .callcode => |p| blk: {
                     @branchHint(.cold);
-                    break :blk self.executeCallcode(.{ .caller = p.caller, .to = p.to, .value = p.value, .input = p.input, .gas = execution_gas }) catch (CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable);
+                    break :blk self.executeCallcode(.{ .caller = p.caller, .to = p.to, .value = p.value, .input = p.input, .gas = execution_gas }) catch |err| {
+                        log.debug("inner_call: CALLCODE failed: {s}", .{@errorName(err)});
+                        break :blk CallResult.failed(0);
+                    };
                 },
+            };
+
+            // Refunds earned inside a frame that did not succeed are discarded together
+            // with its state changes (execution-specs: refund_counter is merged into the
+            // parent only by incorporate_child_on_success).
+            if (!result.success) self.gas_refund_counter = refund_before;
+
+            // EIP-211: the caller's return data buffer holds the output of the frame that
+            // just ended: its RETURN or REVERT data for a call, only REVERT data for a
+            // creation, and nothing after an exceptional halt.
+            const return_data: []const u8 = if (params.isCreate() and result.success) &.{} else result.output;
+            self.set_return_data(return_data) catch |err| {
+                log.err("inner_call: failed to store return data: {s}", .{@errorName(err)});
+                self.clear_return_data();
+                result = CallResult.failed(0);
             };
 
             result.logs = &.{};
@@ -893,7 +944,7 @@ pub fn Evm(config: EvmConfig) type {
             if (config.enable_precompiles and precompiles.isPrecompile(to, config.eips.hardfork)) {
                 const result = self.executePrecompileInline(to, input, gas, is_static, snapshot_id) catch {
                     self.journal.revert_to_snapshot(snapshot_id);
-                    return PreflightResult{ .precompile_result = CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable };
+                    return PreflightResult{ .precompile_result = CallResult.failed(0) };
                 };
                 return PreflightResult{ .precompile_result = result };
             }
@@ -907,7 +958,7 @@ pub fn Evm(config: EvmConfig) type {
                 const result = contract.execute(caller, input, gas) catch |err| {
                     log.debug("Beacon roots contract failed: {}", .{err});
                     self.journal.revert_to_snapshot(snapshot_id);
-                    return PreflightResult{ .precompile_result = CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable };
+                    return PreflightResult{ .precompile_result = CallResult.failed(0) };
                 };
 
                 // Allocate output that persists beyond this function
@@ -915,12 +966,16 @@ pub fn Evm(config: EvmConfig) type {
                     // Handle allocation errors by reverting snapshot and returning failure
                     const out = self.getCallArenaAllocator().alloc(u8, result.output.len) catch {
                         self.journal.revert_to_snapshot(snapshot_id);
-                        return PreflightResult{ .precompile_result = CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable };
+                        return PreflightResult{ .precompile_result = CallResult.failed(0) };
                     };
                     @memcpy(out, result.output);
                     break :output out;
                 } else &[_]u8{};
 
+                if (result.gas_used > gas) {
+                    self.journal.revert_to_snapshot(snapshot_id);
+                    return PreflightResult{ .precompile_result = CallResult.failed(0) };
+                }
                 return PreflightResult{ .precompile_result = CallResult{
                     .success = true,
                     .gas_left = gas - result.gas_used,
@@ -937,7 +992,7 @@ pub fn Evm(config: EvmConfig) type {
                 const result = contract.execute(caller, input, gas) catch |err| {
                     log.debug("Historical block hashes contract failed: {}", .{err});
                     self.journal.revert_to_snapshot(snapshot_id);
-                    return PreflightResult{ .precompile_result = CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable };
+                    return PreflightResult{ .precompile_result = CallResult.failed(0) };
                 };
 
                 // Allocate output that persists beyond this function
@@ -945,12 +1000,16 @@ pub fn Evm(config: EvmConfig) type {
                     // Handle allocation errors by reverting snapshot and returning failure
                     const out = self.getCallArenaAllocator().alloc(u8, result.output.len) catch {
                         self.journal.revert_to_snapshot(snapshot_id);
-                        return PreflightResult{ .precompile_result = CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable };
+                        return PreflightResult{ .precompile_result = CallResult.failed(0) };
                     };
                     @memcpy(out, result.output);
                     break :output out;
                 } else &[_]u8{};
 
+                if (result.gas_used > gas) {
+                    self.journal.revert_to_snapshot(snapshot_id);
+                    return PreflightResult{ .precompile_result = CallResult.failed(0) };
+                }
                 return PreflightResult{ .precompile_result = CallResult{
                     .success = true,
                     .gas_left = gas - result.gas_used,
@@ -961,7 +1020,7 @@ pub fn Evm(config: EvmConfig) type {
             // Check for EIP-7702 delegation first
             const account = self.database.get_account(to.bytes) catch |err| {
                 log.debug("Failed to get account for address {x}: {}", .{ to.bytes, err });
-                return PreflightResult{ .precompile_result = (CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable) };
+                return PreflightResult{ .precompile_result = CallResult.failed(0) };
             };
 
             // Get the effective code address (handles delegation)
@@ -979,7 +1038,7 @@ pub fn Evm(config: EvmConfig) type {
                 // Don't use error_info with string literals to avoid freeing them
                 // Just log the error and return a failure without error_info
                 log.debug("Database error: {}", .{err});
-                return PreflightResult{ .precompile_result = (CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable) };
+                return PreflightResult{ .precompile_result = CallResult.failed(0) };
             };
 
             if (code.len == 0) {
@@ -1007,7 +1066,9 @@ pub fn Evm(config: EvmConfig) type {
                     log.debug("Call value transfer failed: {}", .{err});
                     self.journal.revert_to_snapshot(snapshot_id);
                     try self.database.revert_to_snapshot(db_snapshot_id);
-                    return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                    // execution-specs: a call the sender cannot fund never starts, so the
+                    // gas it was given returns to the caller.
+                    return CallResult.failed(if (err == error.InsufficientBalance) params.gas else 0);
                 };
             }
 
@@ -1015,7 +1076,7 @@ pub fn Evm(config: EvmConfig) type {
                 self.tracer.onCallPreflight("CALL", @errorName(err));
                 self.journal.revert_to_snapshot(snapshot_id);
                 try self.database.revert_to_snapshot(db_snapshot_id);
-                return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                return CallResult.failed(0);
             };
             self.tracer.onCallPreflight("CALL", @tagName(preflight));
 
@@ -1029,7 +1090,7 @@ pub fn Evm(config: EvmConfig) type {
                     self.tracer.onCodeRetrieval(params.to, 0, true);
                     // Empty account call succeeded, commit the snapshot
                     try self.database.commit_snapshot(db_snapshot_id);
-                    return CallResult.success_empty(self.getCallArenaAllocator(), gas) catch unreachable;
+                    return CallResult.succeeded_empty(gas);
                 },
                 .execute_with_code => |code| {
                     self.tracer.onCodeRetrieval(params.to, code.len, false);
@@ -1046,7 +1107,7 @@ pub fn Evm(config: EvmConfig) type {
                         log.debug("EXECUTE_CALL: execute_frame failed with error: {}", .{err});
                         self.journal.revert_to_snapshot(snapshot_id);
                         try self.database.revert_to_snapshot(db_snapshot_id);
-                        return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                        return CallResult.failed(0);
                     };
 
                     if (!result.success) {
@@ -1078,13 +1139,14 @@ pub fn Evm(config: EvmConfig) type {
                         @branchHint(.cold);
                         self.journal.revert_to_snapshot(snapshot_id);
                         try self.database.revert_to_snapshot(db_snapshot_id);
-                        return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                        return CallResult.failed(0);
                     };
                     if (caller_account == null or caller_account.?.balance < params.value) {
                         @branchHint(.cold);
                         self.journal.revert_to_snapshot(snapshot_id);
                         try self.database.revert_to_snapshot(db_snapshot_id);
-                        return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                        // A CALLCODE the sender cannot fund never starts: its gas returns.
+                        return CallResult.failed(params.gas);
                     }
                 }
             }
@@ -1094,7 +1156,7 @@ pub fn Evm(config: EvmConfig) type {
             // the gas it was given, exactly like CALL.
             if (config.enable_precompiles and precompiles.isPrecompile(params.to, config.eips.hardfork)) {
                 const result = self.executePrecompileInline(params.to, params.input, params.gas, self.is_static_context(), snapshot_id) catch
-                    (CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable);
+                    CallResult.failed(0);
                 if (result.success) {
                     try self.database.commit_snapshot(db_snapshot_id);
                 } else {
@@ -1109,7 +1171,7 @@ pub fn Evm(config: EvmConfig) type {
                 @branchHint(.unlikely);
                 // Empty code, commit snapshot
                 try self.database.commit_snapshot(db_snapshot_id);
-                return CallResult.success_empty(self.getCallArenaAllocator(), params.gas) catch unreachable;
+                return CallResult.succeeded_empty(params.gas);
             }
 
             const result = self.execute_frame(
@@ -1125,7 +1187,7 @@ pub fn Evm(config: EvmConfig) type {
                 @branchHint(.unlikely);
                 self.journal.revert_to_snapshot(snapshot_id);
                 try self.database.revert_to_snapshot(db_snapshot_id);
-                return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                return CallResult.failed(0);
             };
 
             if (!result.success) {
@@ -1141,6 +1203,8 @@ pub fn Evm(config: EvmConfig) type {
         /// Execute DELEGATECALL operation (inlined)
         fn executeDelegatecall(self: *Self, params: struct {
             caller: primitives.Address,
+            /// The delegating contract, whose address and storage the code runs with.
+            context_address: primitives.Address,
             to: primitives.Address,
             input: []const u8,
             gas: u64,
@@ -1153,7 +1217,7 @@ pub fn Evm(config: EvmConfig) type {
                 log.debug("Delegatecall preflight failed: {}", .{err});
                 self.journal.revert_to_snapshot(snapshot_id);
                 try self.database.revert_to_snapshot(db_snapshot_id);
-                return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                return CallResult.failed(0);
             };
 
             switch (preflight) {
@@ -1163,7 +1227,7 @@ pub fn Evm(config: EvmConfig) type {
                 },
                 .empty_account => |gas| {
                     try self.database.commit_snapshot(db_snapshot_id);
-                    return CallResult.success_empty(self.getCallArenaAllocator(), gas) catch unreachable;
+                    return CallResult.succeeded_empty(gas);
                 },
                 .execute_with_code => |code| {
                     const current_value = if (self.depth > 0) self.call_stack[self.depth - 1].value else 0;
@@ -1171,7 +1235,7 @@ pub fn Evm(config: EvmConfig) type {
                         code,
                         params.input,
                         params.gas,
-                        params.caller,
+                        params.context_address,
                         params.caller,
                         current_value,
                         self.is_static_context(), // EIP-214: inherit parent static context (DELEGATECALL)
@@ -1180,7 +1244,7 @@ pub fn Evm(config: EvmConfig) type {
                         @branchHint(.cold);
                         self.journal.revert_to_snapshot(snapshot_id);
                         try self.database.revert_to_snapshot(db_snapshot_id);
-                        return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                        return CallResult.failed(0);
                     };
 
                     if (!result.success) {
@@ -1210,7 +1274,7 @@ pub fn Evm(config: EvmConfig) type {
                 log.debug("Staticcall preflight failed: {}", .{err});
                 self.journal.revert_to_snapshot(snapshot_id);
                 try self.database.revert_to_snapshot(db_snapshot_id);
-                return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                return CallResult.failed(0);
             };
 
             switch (preflight) {
@@ -1220,7 +1284,7 @@ pub fn Evm(config: EvmConfig) type {
                 },
                 .empty_account => |gas| {
                     try self.database.commit_snapshot(db_snapshot_id);
-                    return CallResult.success_empty(self.getCallArenaAllocator(), gas) catch unreachable;
+                    return CallResult.succeeded_empty(gas);
                 },
                 .execute_with_code => |code| {
                     const result = self.execute_frame(
@@ -1236,7 +1300,7 @@ pub fn Evm(config: EvmConfig) type {
                         @branchHint(.cold);
                         self.journal.revert_to_snapshot(snapshot_id);
                         try self.database.revert_to_snapshot(db_snapshot_id);
-                        return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                        return CallResult.failed(0);
                     };
 
                     if (!result.success) {
@@ -1298,7 +1362,7 @@ pub fn Evm(config: EvmConfig) type {
             // An opcode CREATE that cannot pay them fails before the sender nonce moves.
             const create_overhead = if (is_transaction) 0 else GasConstants.CreateGas + initcode_word_cost_c;
             if (params.gas < create_overhead) {
-                return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                return CallResult.failed(0);
             }
             const remaining_gas: u64 = params.gas - create_overhead;
             // EIP-150 (Tangerine Whistle+): an opcode creation forwards all but 1/64 of the
@@ -1306,10 +1370,14 @@ pub fn Evm(config: EvmConfig) type {
             const retained: u64 = if (!is_transaction and config.eips.hardfork.isAtLeast(.TANGERINE_WHISTLE)) remaining_gas / 64 else 0;
             const forwarded: u64 = remaining_gas - retained;
 
-            // execution-specs generic_create: a creation refused for balance or nonce limit
-            // returns the gas it would have forwarded; the CREATE charge stays spent.
+            // execution-specs generic_create: a creation refused for the depth limit, balance
+            // or nonce limit returns the gas it would have forwarded; the CREATE charge
+            // stays spent.
+            if (!is_transaction and self.depth > config.max_call_depth) {
+                return CallResult.failed(remaining_gas);
+            }
             const creation_nonce = (try self.beginCreate(params.caller, params.value, is_transaction)) orelse
-                return CallResult.failure(self.getCallArenaAllocator(), remaining_gas) catch unreachable;
+                return CallResult.failed(remaining_gas);
             const contract_address = try primitives.Address.getContractAddress(self.getCallArenaAllocator(), params.caller, creation_nonce);
 
             const snapshot_id = try self.journal.create_snapshot();
@@ -1322,7 +1390,7 @@ pub fn Evm(config: EvmConfig) type {
                 if (existing != null and (existing.?.nonce != 0 or !std.mem.eql(u8, &existing.?.code_hash, &@as([32]u8, @splat(0))))) {
                     self.journal.revert_to_snapshot(snapshot_id);
                     try self.database.revert_to_snapshot(db_snapshot_id);
-                    return CallResult.failure(self.getCallArenaAllocator(), retained) catch unreachable;
+                    return CallResult.failed(retained);
                 }
             }
             var result = self.executeCreateInternal(.{
@@ -1337,7 +1405,7 @@ pub fn Evm(config: EvmConfig) type {
             }) catch {
                 self.journal.revert_to_snapshot(snapshot_id);
                 try self.database.revert_to_snapshot(db_snapshot_id);
-                return CallResult.failure(self.getCallArenaAllocator(), retained) catch unreachable;
+                return CallResult.failed(retained);
             };
 
             result.gas_left += retained;
@@ -1354,10 +1422,6 @@ pub fn Evm(config: EvmConfig) type {
             gas: u64,
         }) !CallResult {
             log.debug("CREATE2: gas={}, init_len={}, value={}", .{ params.gas, params.init_code.len, params.value });
-            if (self.depth >= config.max_call_depth) {
-                log.debug("CREATE2: depth exceeded", .{});
-                return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
-            }
 
             const is_transaction = self.takeTransactionCreate(params.caller);
             const GasConstants = primitives.GasConstants;
@@ -1373,7 +1437,7 @@ pub fn Evm(config: EvmConfig) type {
             // An opcode CREATE2 that cannot pay its charge fails before the sender nonce moves.
             if (params.gas < total_overhead) {
                 log.debug("CREATE2: insufficient gas for overhead: need={}, have={}", .{ total_overhead, params.gas });
-                return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                return CallResult.failed(0);
             }
             const remaining_gas: u64 = params.gas - total_overhead;
             // EIP-150 (Tangerine Whistle+): an opcode creation forwards all but 1/64 of the
@@ -1381,11 +1445,16 @@ pub fn Evm(config: EvmConfig) type {
             const retained: u64 = if (!is_transaction and config.eips.hardfork.isAtLeast(.TANGERINE_WHISTLE)) remaining_gas / 64 else 0;
             const forwarded: u64 = remaining_gas - retained;
 
-            // execution-specs generic_create: a creation refused for balance or nonce limit
-            // returns the gas it would have forwarded; the CREATE2 charge stays spent.
+            // execution-specs generic_create: a creation refused for the depth limit, balance
+            // or nonce limit returns the gas it would have forwarded; the CREATE2 charge
+            // stays spent.
+            if (!is_transaction and self.depth > config.max_call_depth) {
+                log.debug("CREATE2: depth exceeded", .{});
+                return CallResult.failed(remaining_gas);
+            }
             if ((try self.beginCreate(params.caller, params.value, is_transaction)) == null) {
                 log.debug("CREATE2: insufficient balance or nonce at its limit", .{});
-                return CallResult.failure(self.getCallArenaAllocator(), remaining_gas) catch unreachable;
+                return CallResult.failed(remaining_gas);
             }
 
             const snapshot_id = try self.journal.create_snapshot();
@@ -1406,7 +1475,7 @@ pub fn Evm(config: EvmConfig) type {
                     log.debug("CREATE2: collision at address", .{});
                     self.journal.revert_to_snapshot(snapshot_id);
                     try self.database.revert_to_snapshot(db_snapshot_id);
-                    return CallResult.failure(self.getCallArenaAllocator(), retained) catch unreachable;
+                    return CallResult.failed(retained);
                 }
             }
 
@@ -1422,7 +1491,7 @@ pub fn Evm(config: EvmConfig) type {
             }) catch {
                 self.journal.revert_to_snapshot(snapshot_id);
                 try self.database.revert_to_snapshot(db_snapshot_id);
-                return CallResult.failure(self.getCallArenaAllocator(), retained) catch unreachable;
+                return CallResult.failed(retained);
             };
 
             result.gas_left += retained;
@@ -1445,7 +1514,7 @@ pub fn Evm(config: EvmConfig) type {
                 self.transferWithBalanceChecks(args.caller, args.contract_address, args.value, args.snapshot_id) catch {
                     self.journal.revert_to_snapshot(args.snapshot_id);
                     try self.database.revert_to_snapshot(args.db_snapshot_id);
-                    return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                    return CallResult.failed(0);
                 };
             }
             var result = self.execute_init_code(
@@ -1457,7 +1526,7 @@ pub fn Evm(config: EvmConfig) type {
                 log.debug("execute_init_code failed with error: {}", .{err});
                 self.journal.revert_to_snapshot(args.snapshot_id);
                 try self.database.revert_to_snapshot(args.db_snapshot_id);
-                return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                return CallResult.failed(0);
             };
             if (!result.success) {
                 log.debug("Init code execution failed, success=false", .{});
@@ -1468,7 +1537,7 @@ pub fn Evm(config: EvmConfig) type {
             var contract_account = self.database.get_account(args.contract_address.bytes) catch {
                 self.journal.revert_to_snapshot(args.snapshot_id);
                 try self.database.revert_to_snapshot(args.db_snapshot_id);
-                return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                return CallResult.failed(0);
             } orelse Account.zero();
             if (!args.existed_before) {
                 try self.journal.record_account_created(args.snapshot_id, args.contract_address);
@@ -1482,14 +1551,14 @@ pub fn Evm(config: EvmConfig) type {
                 if (config.eips.eip_3541_should_reject_create_with_ef_bytecode(result.output)) {
                     self.journal.revert_to_snapshot(args.snapshot_id);
                     try self.database.revert_to_snapshot(args.db_snapshot_id);
-                    return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                    return CallResult.failed(0);
                 }
                 // EIP-170: reject deployed code exceeding the max code size (Spurious Dragon+;
                 // eip_170_max_code_size returns 0xFFFFFF on earlier forks => no limit).
                 if (result.output.len > config.eips.eip_170_max_code_size()) {
                     self.journal.revert_to_snapshot(args.snapshot_id);
                     try self.database.revert_to_snapshot(args.db_snapshot_id);
-                    return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                    return CallResult.failed(0);
                 }
                 // EIP-2: charge code-deposit gas (200 per byte of deployed code). When the
                 // remaining gas cannot cover it, Homestead+ fails the creation; Frontier
@@ -1500,29 +1569,29 @@ pub fn Evm(config: EvmConfig) type {
                     const stored_hash = self.database.set_code(result.output) catch {
                         self.journal.revert_to_snapshot(args.snapshot_id);
                         try self.database.revert_to_snapshot(args.db_snapshot_id);
-                        return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                        return CallResult.failed(0);
                     };
                     try self.journal.record_code_change(args.snapshot_id, args.contract_address, contract_account.code_hash);
                     contract_account.code_hash = stored_hash;
                 } else if (config.eips.hardfork.isAtLeast(.HOMESTEAD)) {
                     self.journal.revert_to_snapshot(args.snapshot_id);
                     try self.database.revert_to_snapshot(args.db_snapshot_id);
-                    return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                    return CallResult.failed(0);
                 }
             }
             self.database.set_account(args.contract_address.bytes, contract_account) catch {
                 self.journal.revert_to_snapshot(args.snapshot_id);
                 try self.database.revert_to_snapshot(args.db_snapshot_id);
-                return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                return CallResult.failed(0);
             };
 
             // CREATE succeeded, commit the snapshot
             try self.database.commit_snapshot(args.db_snapshot_id);
 
             var final_result = if (result.output.len > 0)
-                CallResult.success_with_output(self.getCallArenaAllocator(), result.gas_left, result.output) catch unreachable
+                try CallResult.success_with_output(self.getCallArenaAllocator(), result.gas_left, result.output)
             else
-                CallResult.success_empty(self.getCallArenaAllocator(), result.gas_left) catch unreachable;
+                CallResult.succeeded_empty(result.gas_left);
             final_result.trace = result.trace;
             return final_result;
         }
@@ -1597,6 +1666,9 @@ pub fn Evm(config: EvmConfig) type {
             };
 
             self.call_stack[self.depth - 1] = CallStackEntry{ .caller = caller, .value = value, .is_static = is_static };
+
+            // EIP-211: a frame starts with an empty return data buffer.
+            self.clear_return_data();
 
             const gas_after_base = gas;
 
@@ -1677,7 +1749,7 @@ pub fn Evm(config: EvmConfig) type {
                         @memcpy(buf, output_data);
                         break :blk buf;
                     } else &[_]u8{};
-                    var result = CallResult.revert_with_data(self.getCallArenaAllocator(), gas_left, out_copy) catch unreachable;
+                    var result = try CallResult.revert_with_data(self.getCallArenaAllocator(), gas_left, out_copy);
                     result.trace = execution_trace;
                     return result;
                 },
@@ -1685,7 +1757,7 @@ pub fn Evm(config: EvmConfig) type {
                     // Invalid bytecode and exhausted execution budgets are normal
                     // transaction outcomes, not failures of the client itself.
                     switch (err) {
-                        error.InvalidOpcode, error.InvalidJump, error.OutOfGas, error.OutOfBounds, error.StackUnderflow, error.StackOverflow, error.ReturnDataNotAvailable =>
+                        error.InvalidOpcode, error.InvalidJump, error.OutOfGas, error.OutOfBounds, error.StackUnderflow, error.StackOverflow, error.ReturnDataNotAvailable, error.WriteProtection =>
                             log.debug("Frame execution halted: {s} (code_len={}, gas={}, depth={})", .{ @errorName(err), code.len, gas, self.depth }),
                         else => log.err("Frame execution failed with error: {s} (code_len={}, gas={}, depth={})", .{ @errorName(err), code.len, gas, self.depth }),
                     }
@@ -1696,7 +1768,7 @@ pub fn Evm(config: EvmConfig) type {
                             .allocator = self.allocator,
                         };
                     };
-                    var failure = (CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable);
+                    var failure = CallResult.failed(0);
                     failure.trace = execution_trace;
                     return failure;
                 },
@@ -1708,24 +1780,21 @@ pub fn Evm(config: EvmConfig) type {
             // Get output from frame (set by RETURN/REVERT handlers)
             const output_data = frame.output_data;
 
-            // Set return data using the encapsulated method
-            try self.set_return_data(output_data);
-
             var result: CallResult = undefined;
             if (termination_reason) |reason| {
                 switch (reason) {
                     error.Stop => {
-                        result = CallResult.success_with_output(self.getCallArenaAllocator(), gas_left, &.{}) catch unreachable;
+                        result = try CallResult.success_with_output(self.getCallArenaAllocator(), gas_left, &.{});
                     },
                     error.Return => {
-                        result = CallResult.success_with_output(self.getCallArenaAllocator(), gas_left, output_data) catch unreachable;
+                        result = try CallResult.success_with_output(self.getCallArenaAllocator(), gas_left, output_data);
                     },
                     error.SelfDestruct => {
-                        result = CallResult.success_with_output(self.getCallArenaAllocator(), gas_left, &.{}) catch unreachable;
+                        result = try CallResult.success_with_output(self.getCallArenaAllocator(), gas_left, &.{});
                     },
                 }
             } else {
-                result = CallResult.success_with_output(self.getCallArenaAllocator(), gas_left, output_data) catch unreachable;
+                result = try CallResult.success_with_output(self.getCallArenaAllocator(), gas_left, output_data);
             }
             result.trace = execution_trace;
             return result;
@@ -1738,9 +1807,15 @@ pub fn Evm(config: EvmConfig) type {
             address: primitives.Address,
             snapshot_id: Journal.SnapshotIdType,
         ) !CallResult {
-            if (code.len > config.eips.size_limit()) {
-                log.debug("Init code too large: {} > 49152", .{code.len});
-                return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+            // EIP-3860 (Shanghai+) caps init code at 49152 bytes. An opcode creation over
+            // the cap halts its caller before reaching this point and an oversized
+            // creation transaction is invalid, so this is the last line of defense.
+            // Earlier forks have no init code limit.
+            if (comptime config.eips.hardfork.isAtLeast(.SHANGHAI)) {
+                if (code.len > primitives.GasConstants.MaxInitcodeSize) {
+                    log.debug("Init code too large: {} > {}", .{ code.len, primitives.GasConstants.MaxInitcodeSize });
+                    return CallResult.failed(0);
+                }
             }
             const result = self.execute_frame(
                 code,
@@ -1762,7 +1837,7 @@ pub fn Evm(config: EvmConfig) type {
         fn executePrecompileInline(self: *Self, address: primitives.Address, input: []const u8, gas: u64, is_static: bool, snapshot_id: Journal.SnapshotIdType) !CallResult {
             _ = snapshot_id;
             _ = is_static;
-            if (!precompiles.isPrecompile(address, config.eips.hardfork)) return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+            if (!precompiles.isPrecompile(address, config.eips.hardfork)) return CallResult.failed(0);
 
             const result = precompiles.execute(self.getCallArenaAllocator(), address, input, gas, config.eips.hardfork) catch {
                 return CallResult{
@@ -1771,6 +1846,9 @@ pub fn Evm(config: EvmConfig) type {
                     .output = &.{},
                 };
             };
+
+            // A precompile that reports using more gas than it was given has failed.
+            if (result.gas_used > gas) return CallResult.failed(0);
 
             // Convert PrecompileResult to CallResult
             // Success is indicated by execute() not returning an error
@@ -1957,6 +2035,10 @@ pub fn Evm(config: EvmConfig) type {
             const cost = try self.access_list.access_address(address);
             // Track address for state dump
             try self.touched_addresses.put(address, {});
+            // Before Berlin (EIP-2929) there is no cold surcharge: every access costs the
+            // opcode's flat static price. Reporting the warm cost makes callers charge
+            // no surcharge.
+            if (comptime !config.eips.hardfork.isAtLeast(.BERLIN)) return primitives.GasConstants.WarmStorageReadCost;
             return cost;
         }
 
@@ -1984,6 +2066,8 @@ pub fn Evm(config: EvmConfig) type {
                     try slots.?.append(self.allocator, slot);
                 }
             }
+            // Before Berlin (EIP-2929) there is no cold surcharge.
+            if (comptime !config.eips.hardfork.isAtLeast(.BERLIN)) return primitives.GasConstants.WarmStorageReadCost;
             return cost;
         }
 
@@ -2084,24 +2168,19 @@ pub fn Evm(config: EvmConfig) type {
             }
 
             if (self.return_data) |existing| {
-                if (existing.len >= data.len) {
-                    // Reuse existing buffer
-                    @memcpy(@constCast(existing[0..data.len]), data);
-                    // Shrink the slice to the actual data length
-                    self.return_data = existing[0..data.len];
-                } else {
-                    // Need a bigger buffer
-                    self.allocator.free(existing);
-                    const new_buf = self.allocator.alloc(u8, data.len) catch return error.AllocationError;
-                    @memcpy(new_buf, data);
-                    self.return_data = new_buf;
+                if (existing.ptr == data.ptr and existing.len == data.len) return;
+                if (existing.len == data.len) {
+                    // Same size: reuse the buffer. `data` may alias it, so move, not copy.
+                    std.mem.copyForwards(u8, @constCast(existing), data);
+                    return;
                 }
-            } else {
-                // No existing buffer, allocate new
-                const new_buf = self.allocator.alloc(u8, data.len) catch return error.AllocationError;
-                @memcpy(new_buf, data);
-                self.return_data = new_buf;
             }
+
+            // Copy first: `data` may point into the buffer being replaced.
+            const new_buf = self.allocator.alloc(u8, data.len) catch return error.AllocationError;
+            @memcpy(new_buf, data);
+            if (self.return_data) |existing| self.allocator.free(existing);
+            self.return_data = new_buf;
         }
 
         /// Clear return data buffer (for CREATE/CREATE2 per EIP-211)
@@ -2683,10 +2762,10 @@ test "Evm call depth limit" {
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
     defer evm.deinit();
 
-    // Set depth to max
-    evm.depth = 1024;
+    // `depth` counts active frames. With 1025 active frames the caller runs at
+    // 0-based depth 1024, the deepest allowed, and cannot call further.
+    evm.depth = 1025;
 
-    // Try to make a call - should fail due to depth limit
     const result = evm.inner_call(Evm(.{}).CallParams{
         .call = .{
             .caller = primitives.ZERO_ADDRESS,
@@ -2697,9 +2776,25 @@ test "Evm call depth limit" {
         },
     });
 
+    // A call refused for depth hands back all the gas it was given.
     try std.testing.expect(!result.success);
-    try std.testing.expectEqual(@as(u64, 0), result.gas_left);
+    try std.testing.expectEqual(@as(u64, 1000000), result.gas_left);
     try std.testing.expectEqual(@as(usize, 0), result.output.len);
+
+    // One level shallower the call is allowed (here: to an account without code).
+    evm.depth = 1024;
+    const allowed = evm.inner_call(Evm(.{}).CallParams{
+        .call = .{
+            .caller = primitives.ZERO_ADDRESS,
+            .to = primitives.ZERO_ADDRESS,
+            .value = 0,
+            .input = &.{},
+            .gas = 1000000,
+        },
+    });
+    try std.testing.expect(allowed.success);
+    try std.testing.expectEqual(@as(u64, 1000000), allowed.gas_left);
+    evm.depth = 0;
 }
 
 // TDD Tests for call method implementation
@@ -3592,7 +3687,7 @@ test "EVM CREATE2 operation - deterministic address creation" {
     var init_code_hash: [32]u8 = undefined;
     try keccak_asm.keccak256(&init_code, &init_code_hash);
     const salt_bytes = @as([32]u8, @bitCast(salt));
-    const expected_address = primitives.Address.get_create2_address(caller_address, salt_bytes, init_code_hash);
+    const expected_address = primitives.Address.getCreate2Address(caller_address, salt_bytes, init_code_hash);
 
     // Verify the address matches the expected CREATE2 address
     try std.testing.expectEqual(expected_address, contract_address);
@@ -3631,7 +3726,7 @@ test "EVM CREATE2 operation - same parameters produce same address" {
     var init_code_hash: [32]u8 = undefined;
     try keccak_asm.keccak256(&init_code, &init_code_hash);
     const salt_bytes = @as([32]u8, @bitCast(salt));
-    const expected_address = primitives.Address.get_create2_address(caller_address, salt_bytes, init_code_hash);
+    const expected_address = primitives.Address.getCreate2Address(caller_address, salt_bytes, init_code_hash);
 
     // Create caller account
     const caller_account = Account{
@@ -3688,7 +3783,7 @@ test "EVM CREATE operation - collision detection" {
     const caller_address: primitives.Address = .{ .bytes = [_]u8{0x01} ++ @as([19]u8, @splat(0)) };
 
     // Calculate what the contract address will be
-    const expected_address = primitives.Address.getContractAddress(caller_address, 0);
+    const expected_address = try primitives.Address.getContractAddress(std.testing.allocator, caller_address, 0);
 
     // Pre-create an account at that address with code
     const existing_code = [_]u8{ 0x60, 0x00 }; // PUSH1 0
@@ -3934,7 +4029,7 @@ test "EVM logs - emit_log functionality" {
     try std.testing.expectEqualStrings("test log data", event_log.data);
 
     // Test takeLogs
-    const taken_logs = evm.takeLogs();
+    const taken_logs = try evm.takeLogs();
     defer Evm(.{}).CallResult.deinitLogsSlice(taken_logs, evm.allocator);
     try std.testing.expectEqual(@as(usize, 1), taken_logs.len);
     try std.testing.expectEqual(@as(usize, 0), evm.logs.items.len); // Should be empty after taking
@@ -4067,7 +4162,7 @@ test "Host interface - access cost operations" {
         .chain_id = 1,
     };
 
-    var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .BERLIN);
+    var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
     defer evm.deinit();
 
     const address = primitives.ZERO_ADDRESS;
@@ -4209,17 +4304,21 @@ test "Error handling - nested call depth tracking" {
         },
     };
 
-    // Call should succeed when depth < max
-    evm.depth = 2;
-    const result1 = try evm.inner_call(call_params);
-    try std.testing.expect(result1.success);
-    try std.testing.expectEqual(@as(u2, 2), evm.depth); // Should restore depth
-
-    // Call should fail when depth >= max
+    // `depth` counts active frames: a frame at 0-based depth d runs with depth d + 1
+    // and may call while d < max_call_depth. With max_call_depth = 3, callers at
+    // depth 1, 2 and 3 may call.
     evm.depth = 3;
-    const result2 = try evm.inner_call(call_params);
+    const result1 = evm.inner_call(call_params);
+    try std.testing.expect(result1.success);
+    try std.testing.expectEqual(@as(u11, 3), evm.depth); // Should restore depth
+
+    // A caller already at 0-based depth 3 (4 active frames) may not, and gets the
+    // call's gas back.
+    evm.depth = 4;
+    const result2 = evm.inner_call(call_params);
     try std.testing.expect(!result2.success);
-    try std.testing.expectEqual(@as(u64, 0), result2.gas_left);
+    try std.testing.expectEqual(@as(u64, 100000), result2.gas_left);
+    evm.depth = 0;
 }
 
 test "Error handling - precompile execution" {
@@ -4291,7 +4390,7 @@ test "Error handling - REVERT should preserve data and error message in both tra
 
     // Test non-tracing mode first (this is where the critical bug is)
     {
-        var vm = try Evm(.{}).init(allocator, &db, block_info, tx_context, 0, primitives.Address.ZERO_ADDRESS, .BERLIN);
+        var vm = try Evm(.{}).init(allocator, &db, block_info, tx_context, 0, primitives.Address.ZERO_ADDRESS);
         defer vm.deinit();
 
         const contract_addr = primitives.Address{ .bytes = @as([20]u8, @splat(0x12)) };
@@ -4360,8 +4459,8 @@ test "Error handling - REVERT should preserve data and error message in both tra
 
     // Test tracing mode (this should work better but still has error_info issue)
     {
-        const TracingEvm = Evm(.{ .TracerType = @import("tracer/tracer.zig").JSONRPCTracer });
-        var vm = try TracingEvm.init(allocator, &db, block_info, tx_context, 0, primitives.Address.ZERO_ADDRESS, .BERLIN);
+        const TracingEvm = Evm(.{});
+        var vm = try TracingEvm.init(allocator, &db, block_info, tx_context, 0, primitives.Address.ZERO_ADDRESS);
         defer vm.deinit();
 
         const contract_addr = primitives.Address{ .bytes = @as([20]u8, @splat(0x13)) };
@@ -4455,7 +4554,7 @@ test "Error handling - REVERT with empty data should still have error message" {
         .chain_id = 1,
     };
 
-    var vm = try Evm(.{}).init(allocator, &db, block_info, tx_context, 0, primitives.Address.ZERO_ADDRESS, .BERLIN);
+    var vm = try Evm(.{}).init(allocator, &db, block_info, tx_context, 0, primitives.Address.ZERO_ADDRESS);
     defer vm.deinit();
 
     const contract_addr = primitives.Address{ .bytes = @as([20]u8, @splat(0x14)) };
@@ -4742,7 +4841,6 @@ test "Debug - Gas limit affects execution" {
 
     // Test 1: Very low gas limit - should fail quickly
     {
-        const start_time = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds;
         const result = evm.call(.{
             .call = .{
                 .caller = primitives.ZERO_ADDRESS,
@@ -4752,16 +4850,13 @@ test "Debug - Gas limit affects execution" {
                 .gas = 100, // Very low gas
             },
         });
-        const elapsed = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds - start_time;
 
         try std.testing.expect(!result.success); // Should fail
         try std.testing.expectEqual(@as(u64, 0), result.gas_left); // All gas consumed
-        evm.tracer.onPerformanceWarning("Low gas (100)", elapsed, 1_000_000);
     }
 
     // Test 2: Medium gas limit
     {
-        const start_time = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds;
         const result = evm.call(.{
             .call = .{
                 .caller = primitives.ZERO_ADDRESS,
@@ -4771,16 +4866,13 @@ test "Debug - Gas limit affects execution" {
                 .gas = 10000,
             },
         });
-        const elapsed = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds - start_time;
 
         try std.testing.expect(!result.success); // Should still fail (infinite loop)
         try std.testing.expectEqual(@as(u64, 0), result.gas_left);
-        evm.tracer.onPerformanceWarning("Medium gas (10k)", elapsed, 10_000_000);
     }
 
     // Test 3: High gas limit
     {
-        const start_time = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds;
         const result = evm.call(.{
             .call = .{
                 .caller = primitives.ZERO_ADDRESS,
@@ -4790,11 +4882,9 @@ test "Debug - Gas limit affects execution" {
                 .gas = 1000000,
             },
         });
-        const elapsed = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds - start_time;
 
         try std.testing.expect(!result.success); // Should fail after consuming all gas
         try std.testing.expectEqual(@as(u64, 0), result.gas_left);
-        evm.tracer.onPerformanceWarning("High gas (1M)", elapsed, 100_000_000);
     }
 }
 
@@ -4827,7 +4917,6 @@ test "Debug - Contract deployment and execution" {
     // Test 1: Call to non-existent contract
     {
         const empty_address: primitives.Address = .{ .bytes = @as([19]u8, @splat(0)) ++ [_]u8{99} };
-        const start_time = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds;
         const result = evm.call(.{
             .call = .{
                 .caller = primitives.ZERO_ADDRESS,
@@ -4837,11 +4926,9 @@ test "Debug - Contract deployment and execution" {
                 .gas = 100000,
             },
         });
-        const elapsed = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds - start_time;
 
         try std.testing.expect(result.success); // Empty contract succeeds immediately
         try std.testing.expectEqual(@as(u64, 100000), result.gas_left); // No gas consumed
-        evm.tracer.onPerformanceWarning("Empty contract", elapsed, 1_000_000);
     }
 
     // Test 2: Simple contract that returns immediately (STOP opcode)
@@ -4856,7 +4943,6 @@ test "Debug - Contract deployment and execution" {
             .storage_root = @as([32]u8, @splat(0)),
         });
 
-        const start_time = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds;
         const result = evm.call(.{
             .call = .{
                 .caller = primitives.ZERO_ADDRESS,
@@ -4866,13 +4952,11 @@ test "Debug - Contract deployment and execution" {
                 .gas = 100000,
             },
         });
-        const elapsed = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds - start_time;
 
         try std.testing.expect(result.success);
         // STOP should consume minimal gas
         const gas_used = 100000 - result.gas_left;
         try std.testing.expect(gas_used < 100); // Should use very little gas
-        evm.tracer.onPerformanceWarning("STOP contract", elapsed, 1_000_000);
     }
 
     // Test 3: Contract with some computation
@@ -4889,7 +4973,6 @@ test "Debug - Contract deployment and execution" {
             .storage_root = @as([32]u8, @splat(0)),
         });
 
-        const start_time = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds;
         const result = evm.call(.{
             .call = .{
                 .caller = primitives.ZERO_ADDRESS,
@@ -4899,13 +4982,11 @@ test "Debug - Contract deployment and execution" {
                 .gas = 100000,
             },
         });
-        const elapsed = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds - start_time;
 
         try std.testing.expect(result.success);
         const gas_used = 100000 - result.gas_left;
         try std.testing.expect(gas_used > 0); // Should use some gas
         try std.testing.expect(gas_used < 1000); // But not too much
-        evm.tracer.onPerformanceWarning("ADD contract", elapsed, 1_000_000);
     }
 }
 
@@ -4960,7 +5041,6 @@ test "Debug - Bytecode size affects execution time" {
     const gas_limits = [_]u64{ 10000, 50000, 100000, 500000 };
 
     for (gas_limits) |gas_limit| {
-        const start_time = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds;
         const result = evm.call(.{
             .call = .{
                 .caller = primitives.ZERO_ADDRESS,
@@ -4970,10 +5050,8 @@ test "Debug - Bytecode size affects execution time" {
                 .gas = gas_limit,
             },
         });
-        const elapsed = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds - start_time;
 
         _ = gas_limit - result.gas_left; // gas_used
-        evm.tracer.onPerformanceWarning("Large contract", elapsed, 1_000_000_000);
 
         // With low gas, should fail before completing
         if (gas_limit < 50000) {
@@ -5303,7 +5381,7 @@ test "journal state application - nonce change rollback" {
     try evm.database.set_account(test_address.bytes, original_account);
 
     // Create snapshot
-    const snapshot_id = evm.create_snapshot();
+    const snapshot_id = try evm.create_snapshot();
 
     // Modify nonce and record in journal
     var modified_account = original_account;
@@ -5364,7 +5442,7 @@ test "journal state application - code change rollback" {
     try evm.database.set_account(test_address.bytes, original_account);
 
     // Create snapshot
-    const snapshot_id = evm.create_snapshot();
+    const snapshot_id = try evm.create_snapshot();
 
     // Modify code hash and record in journal
     var modified_account = original_account;
@@ -5432,7 +5510,7 @@ test "journal state application - multiple changes rollback" {
     try evm.database.set_storage(test_address.bytes, storage_key, original_storage);
 
     // Create snapshot
-    const snapshot_id = evm.create_snapshot();
+    const snapshot_id = try evm.create_snapshot();
 
     // Make multiple changes and record in journal
     var modified_account = original_account;
@@ -5504,7 +5582,7 @@ test "journal state application - nested snapshots rollback" {
     try evm.database.set_account(test_address.bytes, account);
 
     // Create first snapshot
-    const snapshot1 = evm.create_snapshot();
+    const snapshot1 = try evm.create_snapshot();
 
     // First change
     account.balance = middle_balance;
@@ -5512,7 +5590,7 @@ test "journal state application - nested snapshots rollback" {
     try evm.journal.record_balance_change(snapshot1, test_address, original_balance);
 
     // Create second snapshot
-    const snapshot2 = evm.create_snapshot();
+    const snapshot2 = try evm.create_snapshot();
 
     // Second change
     account.balance = final_balance;
@@ -5560,7 +5638,7 @@ test "journal state application - empty journal rollback" {
     defer evm.deinit();
 
     // Create snapshot with no changes
-    const snapshot_id = evm.create_snapshot();
+    const snapshot_id = try evm.create_snapshot();
 
     // Revert to snapshot (should be no-op)
     evm.revert_to_snapshot(snapshot_id);
@@ -6088,7 +6166,6 @@ test "CREATE interaction - deployed contract can be called" {
         },
         20_000_000_000,
         .{ .bytes = @as([20]u8, @splat(0x01)) },
-        .CANCUN,
     );
     defer evm_instance.deinit();
 
@@ -6188,7 +6265,6 @@ test "CREATE interaction - factory creates and initializes child contracts" {
         },
         20_000_000_000,
         .{ .bytes = @as([20]u8, @splat(0x01)) },
-        .CANCUN,
     );
     defer evm_instance.deinit();
 
@@ -6344,7 +6420,6 @@ test "CREATE interaction - contract creates contract that creates contract" {
         },
         20_000_000_000,
         .{ .bytes = @as([20]u8, @splat(0x01)) },
-        .CANCUN,
     );
     defer evm_instance.deinit();
 
@@ -6537,7 +6612,6 @@ test "CREATE interaction - created contract modifies parent storage" {
         },
         20_000_000_000,
         primitives.Address{ .bytes = @as([20]u8, @splat(0x01)) },
-        .CANCUN,
     );
     defer evm_instance.deinit();
 
@@ -6841,7 +6915,7 @@ test "Arena allocator - precompile outputs use arena" {
     defer evm.deinit();
 
     // Call SHA256 precompile (address 0x02)
-    const precompile_addr = primitives.Address.from_u256(2);
+    const precompile_addr = primitives.Address.fromU256(2);
     const input = "Hello, World!";
 
     const result = evm.call(.{
@@ -7024,8 +7098,8 @@ test "Call context tracking - get_caller and get_call_value" {
     defer db.deinit();
     // Database is now used directly
 
-    const origin_addr = primitives.Address.from_hex("0x1111111111111111111111111111111111111111") catch unreachable;
-    const contract_a = primitives.Address.from_hex("0x2222222222222222222222222222222222222222") catch unreachable;
+    const origin_addr = try primitives.Address.fromHex("0x1111111111111111111111111111111111111111");
+    const contract_a = try primitives.Address.fromHex("0x2222222222222222222222222222222222222222");
 
     const block_info = BlockInfo.init();
     const tx_context = TransactionContext{
@@ -7040,7 +7114,6 @@ test "Call context tracking - get_caller and get_call_value" {
         tx_context,
         100,
         origin_addr,
-        .CANCUN,
     );
     defer evm.deinit();
 
@@ -7669,4 +7742,664 @@ test "Minimal ERC20 deployment reproduction - benchmark runner issue" {
     // For now, we expect this to fail (reproducing the issue)
     // Once fixed, change this to: try std.testing.expect(result.success);
     try std.testing.expect(!result.success);
+}
+
+test "SSTORE gas - cold 0->1 via PUSH1 PUSH0 SSTORE costs exactly 22105" {
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
+
+    const block_info = BlockInfo{
+        .number = 1,
+        .timestamp = 1000,
+        .difficulty = 100,
+        .gas_limit = 30000000,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .base_fee = 0,
+        .prev_randao = [_]u8{0} ** 32,
+    };
+    const context = TransactionContext{
+        .gas_limit = 1000000,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .chain_id = 1,
+    };
+
+    var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
+    defer evm.deinit();
+
+    const code = [_]u8{ 0x60, 0x01, 0x5f, 0x55 };
+    const contract_address: primitives.Address = .{ .bytes = [_]u8{0x43} ++ [_]u8{0} ** 19 };
+    const code_hash = try db.set_code(&code);
+    try db.set_account(contract_address.bytes, Account{
+        .balance = 0,
+        .nonce = 0,
+        .code_hash = code_hash,
+        .storage_root = [_]u8{0} ** 32,
+    });
+
+    const result = evm.inner_call(.{ .call = .{
+        .caller = primitives.ZERO_ADDRESS,
+        .to = contract_address,
+        .value = 0,
+        .input = &.{},
+        .gas = 100000,
+    } });
+
+    try std.testing.expect(result.success);
+    try std.testing.expectEqual(@as(u64, 22105), 100000 - result.gas_left);
+    try std.testing.expectEqual(@as(u64, 0), evm.gas_refund_counter);
+}
+
+// ============================================================================
+// Gas-schedule, call-semantics and analysis regression tests.
+//
+// Each test runs real bytecode through the Frame interpreter with
+// `Evm.inner_call` (the entry point the EEST state-test runner uses), so the
+// basic-block gas batching, the dispatch schedule and the handlers are all
+// exercised together.
+// ============================================================================
+
+const regression_block_info = BlockInfo{
+    .number = 1,
+    .timestamp = 1000,
+    .difficulty = 100,
+    .gas_limit = 30000000,
+    .coinbase = primitives.ZERO_ADDRESS,
+    .base_fee = 0,
+    .prev_randao = [_]u8{0} ** 32,
+};
+const regression_context = TransactionContext{
+    .gas_limit = 1000000,
+    .coinbase = primitives.ZERO_ADDRESS,
+    .chain_id = 1,
+};
+const regression_contract: primitives.Address = .{ .bytes = [_]u8{0} ** 19 ++ [_]u8{0x43} };
+const regression_callee: primitives.Address = .{ .bytes = [_]u8{0} ** 19 ++ [_]u8{0x44} };
+const regression_sender: primitives.Address = .{ .bytes = [_]u8{0} ** 19 ++ [_]u8{0x10} };
+
+test "SSTORE gas and refund - every transition on every metering scheme" {
+    // One case: the slot's value at transaction start, the values written in order,
+    // and the expected execution gas and refund counter. Each write is
+    // PUSH1 value, PUSH1 0, SSTORE (3 + 3 + SSTORE cost).
+    const Case = struct { original: u8, writes: []const u8, gas: u64, refund: u64 };
+    const Fork = struct { hardfork: Hardfork, cases: []const Case };
+    const forks = [_]Fork{
+        .{ .hardfork = .CANCUN, .cases = &.{
+            .{ .original = 0, .writes = &.{0}, .gas = 6 + 2200, .refund = 0 }, // 0 -> 0 cold
+            .{ .original = 0, .writes = &.{1}, .gas = 6 + 22100, .refund = 0 }, // 0 -> 1 cold
+            .{ .original = 1, .writes = &.{1}, .gas = 6 + 2200, .refund = 0 }, // 1 -> 1 cold
+            .{ .original = 1, .writes = &.{2}, .gas = 6 + 5000, .refund = 0 }, // 1 -> 2 cold
+            .{ .original = 1, .writes = &.{0}, .gas = 6 + 5000, .refund = 4800 }, // 1 -> 0 cold
+            .{ .original = 1, .writes = &.{ 1, 2 }, .gas = 6 + 2200 + 6 + 2900, .refund = 0 }, // warm reset
+            .{ .original = 1, .writes = &.{ 1, 0 }, .gas = 6 + 2200 + 6 + 2900, .refund = 4800 }, // warm clear
+            .{ .original = 0, .writes = &.{ 0, 1 }, .gas = 6 + 2200 + 6 + 20000, .refund = 0 }, // warm set
+            .{ .original = 0, .writes = &.{ 1, 2 }, .gas = 6 + 22100 + 6 + 100, .refund = 0 }, // dirty
+            .{ .original = 0, .writes = &.{ 1, 0 }, .gas = 6 + 22100 + 6 + 100, .refund = 19900 }, // dirty, restore 0
+            .{ .original = 1, .writes = &.{ 2, 1 }, .gas = 6 + 5000 + 6 + 100, .refund = 2800 }, // dirty, restore 1
+            .{ .original = 1, .writes = &.{ 2, 0 }, .gas = 6 + 5000 + 6 + 100, .refund = 4800 }, // dirty, clear
+            .{ .original = 1, .writes = &.{ 0, 2 }, .gas = 6 + 5000 + 6 + 100, .refund = 0 }, // clear undone
+            .{ .original = 1, .writes = &.{ 0, 1 }, .gas = 6 + 5000 + 6 + 100, .refund = 2800 }, // clear undone, restored
+            .{ .original = 1, .writes = &.{ 0, 2, 0 }, .gas = 6 + 5000 + 2 * (6 + 100), .refund = 4800 },
+        } },
+        .{ .hardfork = .LONDON, .cases = &.{
+            .{ .original = 0, .writes = &.{1}, .gas = 6 + 22100, .refund = 0 },
+            .{ .original = 1, .writes = &.{2}, .gas = 6 + 5000, .refund = 0 },
+            .{ .original = 1, .writes = &.{0}, .gas = 6 + 5000, .refund = 4800 },
+            .{ .original = 0, .writes = &.{ 1, 0 }, .gas = 6 + 22100 + 6 + 100, .refund = 19900 },
+            .{ .original = 1, .writes = &.{ 0, 1 }, .gas = 6 + 5000 + 6 + 100, .refund = 2800 },
+        } },
+        .{ .hardfork = .BERLIN, .cases = &.{
+            .{ .original = 0, .writes = &.{0}, .gas = 6 + 2200, .refund = 0 },
+            .{ .original = 0, .writes = &.{1}, .gas = 6 + 22100, .refund = 0 },
+            .{ .original = 1, .writes = &.{2}, .gas = 6 + 5000, .refund = 0 },
+            .{ .original = 1, .writes = &.{0}, .gas = 6 + 5000, .refund = 15000 },
+            .{ .original = 0, .writes = &.{ 1, 0 }, .gas = 6 + 22100 + 6 + 100, .refund = 19900 },
+            .{ .original = 1, .writes = &.{ 2, 1 }, .gas = 6 + 5000 + 6 + 100, .refund = 2800 },
+            .{ .original = 1, .writes = &.{ 2, 0 }, .gas = 6 + 5000 + 6 + 100, .refund = 15000 },
+            .{ .original = 1, .writes = &.{ 0, 2 }, .gas = 6 + 5000 + 6 + 100, .refund = 0 },
+            .{ .original = 1, .writes = &.{ 0, 1 }, .gas = 6 + 5000 + 6 + 100, .refund = 2800 },
+        } },
+        .{ .hardfork = .ISTANBUL, .cases = &.{
+            .{ .original = 0, .writes = &.{0}, .gas = 6 + 800, .refund = 0 },
+            .{ .original = 0, .writes = &.{1}, .gas = 6 + 20000, .refund = 0 },
+            .{ .original = 1, .writes = &.{1}, .gas = 6 + 800, .refund = 0 },
+            .{ .original = 1, .writes = &.{2}, .gas = 6 + 5000, .refund = 0 },
+            .{ .original = 1, .writes = &.{0}, .gas = 6 + 5000, .refund = 15000 },
+            .{ .original = 0, .writes = &.{ 1, 0 }, .gas = 6 + 20000 + 6 + 800, .refund = 19200 },
+            .{ .original = 1, .writes = &.{ 2, 1 }, .gas = 6 + 5000 + 6 + 800, .refund = 4200 },
+            .{ .original = 1, .writes = &.{ 0, 2 }, .gas = 6 + 5000 + 6 + 800, .refund = 0 },
+            .{ .original = 1, .writes = &.{ 0, 1 }, .gas = 6 + 5000 + 6 + 800, .refund = 4200 },
+        } },
+        .{ .hardfork = .PETERSBURG, .cases = &.{
+            .{ .original = 0, .writes = &.{0}, .gas = 6 + 5000, .refund = 0 },
+            .{ .original = 0, .writes = &.{1}, .gas = 6 + 20000, .refund = 0 },
+            .{ .original = 1, .writes = &.{1}, .gas = 6 + 5000, .refund = 0 },
+            .{ .original = 1, .writes = &.{2}, .gas = 6 + 5000, .refund = 0 },
+            .{ .original = 1, .writes = &.{0}, .gas = 6 + 5000, .refund = 15000 },
+            .{ .original = 0, .writes = &.{ 1, 0 }, .gas = 6 + 20000 + 6 + 5000, .refund = 15000 },
+            .{ .original = 1, .writes = &.{ 0, 1 }, .gas = 6 + 5000 + 6 + 20000, .refund = 15000 },
+        } },
+        .{ .hardfork = .FRONTIER, .cases = &.{
+            .{ .original = 0, .writes = &.{0}, .gas = 6 + 5000, .refund = 0 },
+            .{ .original = 0, .writes = &.{1}, .gas = 6 + 20000, .refund = 0 },
+            .{ .original = 1, .writes = &.{2}, .gas = 6 + 5000, .refund = 0 },
+            .{ .original = 1, .writes = &.{0}, .gas = 6 + 5000, .refund = 15000 },
+            .{ .original = 1, .writes = &.{ 2, 1 }, .gas = 2 * (6 + 5000), .refund = 0 },
+        } },
+    };
+
+    inline for (forks) |fork| {
+        const E = Evm(.{ .eips = .{ .hardfork = fork.hardfork } });
+        for (fork.cases) |case| {
+            var db = Database.init(std.testing.allocator);
+            defer db.deinit();
+            var evm = try E.init(std.testing.allocator, &db, regression_block_info, regression_context, 0, regression_sender);
+            defer evm.deinit();
+
+            var code: [5 * 4]u8 = undefined;
+            var code_len: usize = 0;
+            for (case.writes) |written| {
+                const write = [_]u8{ 0x60, written, 0x60, 0x00, 0x55 };
+                @memcpy(code[code_len .. code_len + write.len], &write);
+                code_len += write.len;
+            }
+            const code_hash = try db.set_code(code[0..code_len]);
+            try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = code_hash, .storage_root = [_]u8{0} ** 32 });
+            if (case.original != 0) try db.set_storage(regression_contract.bytes, 0, case.original);
+
+            const result = evm.inner_call(.{ .call = .{ .caller = regression_sender, .to = regression_contract, .value = 0, .input = &.{}, .gas = 100000 } });
+            try std.testing.expect(result.success);
+            try std.testing.expectEqual(case.gas, 100000 - result.gas_left);
+            try std.testing.expectEqual(case.refund, evm.gas_refund_counter);
+            try std.testing.expectEqual(@as(u256, case.writes[case.writes.len - 1]), try db.get_storage(regression_contract.bytes, 0));
+        }
+    }
+}
+
+test "SSTORE sentry - EIP-2200 sees the exact gas left, not gas minus later instructions" {
+    // PUSH1 0, PUSH1 0, SSTORE (0 -> 0 on a cold slot: 2200 gas), then ten
+    // PUSH1/POP pairs (50 gas). The trailing 50 gas must not be charged before the
+    // SSTORE, or the sentry would see less gas than is really left.
+    const code = [_]u8{ 0x60, 0x00, 0x60, 0x00, 0x55 } ++ [_]u8{ 0x60, 0x00, 0x50 } ** 10;
+    const Outcome = struct { gas: u64, success: bool, gas_used: u64 };
+    const outcomes = [_]Outcome{
+        // 2301 gas left at SSTORE: above the sentry.
+        .{ .gas = 6 + 2301, .success = true, .gas_used = 6 + 2200 + 50 },
+        // 2300 gas left at SSTORE: at the sentry, fails although 2200 would be enough.
+        .{ .gas = 6 + 2300, .success = false, .gas_used = 6 + 2300 },
+    };
+    for (outcomes) |outcome| {
+        var db = Database.init(std.testing.allocator);
+        defer db.deinit();
+        var evm = try Evm(.{ .eips = .{ .hardfork = .CANCUN } }).init(std.testing.allocator, &db, regression_block_info, regression_context, 0, regression_sender);
+        defer evm.deinit();
+        const code_hash = try db.set_code(&code);
+        try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = code_hash, .storage_root = [_]u8{0} ** 32 });
+
+        const result = evm.inner_call(.{ .call = .{ .caller = regression_sender, .to = regression_contract, .value = 0, .input = &.{}, .gas = outcome.gas } });
+        try std.testing.expectEqual(outcome.success, result.success);
+        try std.testing.expectEqual(outcome.gas_used, outcome.gas - result.gas_left);
+    }
+}
+
+test "SSTORE and TSTORE in a static context halt the callee" {
+    // Callee writes storage. Caller STATICCALLs it with 50000 gas and stores the
+    // success flag in slot 1.
+    const callees = [_][]const u8{
+        &.{ 0x60, 0x07, 0x60, 0x00, 0x55 }, // SSTORE
+        &.{ 0x60, 0x07, 0x60, 0x00, 0x5d }, // TSTORE
+    };
+    const caller_code = [_]u8{ 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x44, 0x61, 0xc3, 0x50, 0xfa, 0x60, 0x01, 0x55 };
+    for (callees) |callee_code| {
+        var db = Database.init(std.testing.allocator);
+        defer db.deinit();
+        var evm = try Evm(.{ .eips = .{ .hardfork = .CANCUN } }).init(std.testing.allocator, &db, regression_block_info, regression_context, 0, regression_sender);
+        defer evm.deinit();
+        const caller_hash = try db.set_code(&caller_code);
+        try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = caller_hash, .storage_root = [_]u8{0} ** 32 });
+        try db.set_storage(regression_contract.bytes, 1, 5);
+        const callee_hash = try db.set_code(callee_code);
+        try db.set_account(regression_callee.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = callee_hash, .storage_root = [_]u8{0} ** 32 });
+
+        const result = evm.inner_call(.{ .call = .{ .caller = regression_sender, .to = regression_contract, .value = 0, .input = &.{}, .gas = 200000 } });
+        try std.testing.expect(result.success);
+        // The static call failed, so the flag written to slot 1 is 0.
+        try std.testing.expectEqual(@as(u256, 0), try db.get_storage(regression_contract.bytes, 1));
+        try std.testing.expectEqual(@as(u256, 0), try db.get_storage(regression_callee.bytes, 0));
+    }
+}
+
+test "State-access opcodes use each fork's flat price before Berlin" {
+    // PUSH1 0, SLOAD and PUSH1 7, BALANCE against cold state.
+    const Expected = struct { hardfork: Hardfork, sload: u64, balance: u64 };
+    const expectations = [_]Expected{
+        .{ .hardfork = .FRONTIER, .sload = 3 + 50, .balance = 3 + 20 },
+        .{ .hardfork = .HOMESTEAD, .sload = 3 + 50, .balance = 3 + 20 },
+        .{ .hardfork = .TANGERINE_WHISTLE, .sload = 3 + 200, .balance = 3 + 400 },
+        .{ .hardfork = .BYZANTIUM, .sload = 3 + 200, .balance = 3 + 400 },
+        .{ .hardfork = .PETERSBURG, .sload = 3 + 200, .balance = 3 + 400 },
+        .{ .hardfork = .ISTANBUL, .sload = 3 + 800, .balance = 3 + 700 },
+        .{ .hardfork = .BERLIN, .sload = 3 + 2100, .balance = 3 + 2600 },
+        .{ .hardfork = .CANCUN, .sload = 3 + 2100, .balance = 3 + 2600 },
+    };
+    inline for (expectations) |expected| {
+        const E = Evm(.{ .eips = .{ .hardfork = expected.hardfork } });
+        const programs = [_]struct { code: []const u8, gas: u64 }{
+            .{ .code = &.{ 0x60, 0x00, 0x54 }, .gas = expected.sload },
+            .{ .code = &.{ 0x60, 0x07, 0x31 }, .gas = expected.balance },
+        };
+        for (programs) |program| {
+            var db = Database.init(std.testing.allocator);
+            defer db.deinit();
+            var evm = try E.init(std.testing.allocator, &db, regression_block_info, regression_context, 0, regression_sender);
+            defer evm.deinit();
+            const code_hash = try db.set_code(program.code);
+            try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = code_hash, .storage_root = [_]u8{0} ** 32 });
+
+            const result = evm.inner_call(.{ .call = .{ .caller = regression_sender, .to = regression_contract, .value = 0, .input = &.{}, .gas = 100000 } });
+            try std.testing.expect(result.success);
+            try std.testing.expectEqual(program.gas, 100000 - result.gas_left);
+        }
+    }
+}
+
+test "Warm access is not charged on top of cold access" {
+    // SLOAD twice and BALANCE twice on the same key: cold then warm, no double charge.
+    const programs = [_]struct { code: []const u8, gas: u64 }{
+        .{ .code = &.{ 0x60, 0x00, 0x54, 0x60, 0x00, 0x54 }, .gas = 3 + 2100 + 3 + 100 },
+        .{ .code = &.{ 0x60, 0x07, 0x31, 0x60, 0x07, 0x31 }, .gas = 3 + 2600 + 3 + 100 },
+        .{ .code = &.{ 0x60, 0x07, 0x3b, 0x60, 0x07, 0x3b }, .gas = 3 + 2600 + 3 + 100 }, // EXTCODESIZE
+        .{ .code = &.{ 0x60, 0x07, 0x3f, 0x60, 0x07, 0x3f }, .gas = 3 + 2600 + 3 + 100 }, // EXTCODEHASH
+        // SLOAD then SSTORE 0 -> 1 on the now-warm slot: no cold surcharge on the SSTORE.
+        .{ .code = &.{ 0x60, 0x00, 0x54, 0x60, 0x01, 0x60, 0x00, 0x55 }, .gas = 3 + 2100 + 6 + 20000 },
+        // SELFDESTRUCT to a cold, empty beneficiary with zero balance: 5000 + 2600.
+        .{ .code = &.{ 0x60, 0x99, 0xff }, .gas = 3 + 5000 + 2600 },
+        // SELFDESTRUCT to self (warm): 5000.
+        .{ .code = &.{ 0x30, 0xff }, .gas = 2 + 5000 },
+    };
+    for (programs) |program| {
+        var db = Database.init(std.testing.allocator);
+        defer db.deinit();
+        var evm = try Evm(.{ .eips = .{ .hardfork = .CANCUN } }).init(std.testing.allocator, &db, regression_block_info, regression_context, 0, regression_sender);
+        defer evm.deinit();
+        const code_hash = try db.set_code(program.code);
+        try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = code_hash, .storage_root = [_]u8{0} ** 32 });
+
+        const result = evm.inner_call(.{ .call = .{ .caller = regression_sender, .to = regression_contract, .value = 0, .input = &.{}, .gas = 100000 } });
+        try std.testing.expect(result.success);
+        try std.testing.expectEqual(program.gas, 100000 - result.gas_left);
+    }
+}
+
+test "CALL gas - cold and warm target, value transfer, stipend and refused calls" {
+    // Caller: PUSH1 0 x4 (ranges), PUSH1 value, PUSH1 0x44, PUSH2 0xc350 (50000 gas), CALL.
+    // 21 gas of pushes. Callee 0x44 is an existing account with code STOP.
+    const Case = struct { value: u8, caller_balance: u256, second_call: bool, gas: u64 };
+    const cases = [_]Case{
+        // Cold target, no value: 100 + 2500.
+        .{ .value = 0, .caller_balance = 0, .second_call = false, .gas = 21 + 2600 },
+        // Second call to the same target is warm: 100.
+        .{ .value = 0, .caller_balance = 0, .second_call = true, .gas = 21 + 2600 + 21 + 100 },
+        // Value transfer to an existing account: 9000, and the unused 2300 stipend returns.
+        .{ .value = 1, .caller_balance = 10, .second_call = false, .gas = 21 + 2600 + 9000 - 2300 },
+        // Caller cannot fund the value: the call is refused, all its gas (and stipend) returns.
+        .{ .value = 1, .caller_balance = 0, .second_call = false, .gas = 21 + 2600 + 9000 - 2300 },
+    };
+    for (cases) |case| {
+        var db = Database.init(std.testing.allocator);
+        defer db.deinit();
+        var evm = try Evm(.{ .eips = .{ .hardfork = .CANCUN } }).init(std.testing.allocator, &db, regression_block_info, regression_context, 0, regression_sender);
+        defer evm.deinit();
+
+        const one_call = [_]u8{ 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, case.value, 0x60, 0x44, 0x61, 0xc3, 0x50, 0xf1 };
+        const code = one_call ++ one_call;
+        const code_slice: []const u8 = if (case.second_call) &code else &one_call;
+        const caller_hash = try db.set_code(code_slice);
+        try db.set_account(regression_contract.bytes, Account{ .balance = case.caller_balance, .nonce = 1, .code_hash = caller_hash, .storage_root = [_]u8{0} ** 32 });
+        const callee_hash = try db.set_code(&[_]u8{0x00});
+        try db.set_account(regression_callee.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = callee_hash, .storage_root = [_]u8{0} ** 32 });
+
+        const result = evm.inner_call(.{ .call = .{ .caller = regression_sender, .to = regression_contract, .value = 0, .input = &.{}, .gas = 200000 } });
+        try std.testing.expect(result.success);
+        try std.testing.expectEqual(case.gas, 200000 - result.gas_left);
+    }
+}
+
+test "CALL with zero gas to an account without code succeeds" {
+    // CALL(gas=0, to=0x77) then store the success flag in slot 1.
+    const code = [_]u8{ 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x77, 0x60, 0x00, 0xf1, 0x60, 0x01, 0x55 };
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
+    var evm = try Evm(.{ .eips = .{ .hardfork = .CANCUN } }).init(std.testing.allocator, &db, regression_block_info, regression_context, 0, regression_sender);
+    defer evm.deinit();
+    const code_hash = try db.set_code(&code);
+    try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = code_hash, .storage_root = [_]u8{0} ** 32 });
+
+    const result = evm.inner_call(.{ .call = .{ .caller = regression_sender, .to = regression_contract, .value = 0, .input = &.{}, .gas = 200000 } });
+    try std.testing.expect(result.success);
+    try std.testing.expectEqual(@as(u256, 1), try db.get_storage(regression_contract.bytes, 1));
+
+    // The same holds for a zero-gas call made directly.
+    const direct = evm.inner_call(.{ .call = .{ .caller = regression_sender, .to = .{ .bytes = [_]u8{0} ** 19 ++ [_]u8{0x78} }, .value = 0, .input = &.{}, .gas = 0 } });
+    try std.testing.expect(direct.success);
+}
+
+test "CALL copies revert data to memory and to the return data buffer" {
+    // Callee: MSTORE(0, 0x2a); REVERT(0, 32).
+    const callee_code = [_]u8{ 0x60, 0x2a, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xfd };
+    // Caller: CALL(out = [0, 32)); POP; RETURNDATASIZE; PUSH1 0x20; MSTORE; RETURN(0, 64).
+    const caller_code = [_]u8{ 0x60, 0x20, 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x44, 0x5a, 0xf1, 0x50, 0x3d, 0x60, 0x20, 0x52, 0x60, 0x40, 0x60, 0x00, 0xf3 };
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
+    var evm = try Evm(.{ .eips = .{ .hardfork = .CANCUN } }).init(std.testing.allocator, &db, regression_block_info, regression_context, 0, regression_sender);
+    defer evm.deinit();
+    const caller_hash = try db.set_code(&caller_code);
+    try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = caller_hash, .storage_root = [_]u8{0} ** 32 });
+    const callee_hash = try db.set_code(&callee_code);
+    try db.set_account(regression_callee.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = callee_hash, .storage_root = [_]u8{0} ** 32 });
+
+    const result = evm.inner_call(.{ .call = .{ .caller = regression_sender, .to = regression_contract, .value = 0, .input = &.{}, .gas = 200000 } });
+    try std.testing.expect(result.success);
+    try std.testing.expectEqual(@as(usize, 64), result.output.len);
+    try std.testing.expectEqual(@as(u8, 0x2a), result.output[31]); // revert data in memory
+    try std.testing.expectEqual(@as(u8, 0x20), result.output[63]); // RETURNDATASIZE == 32
+}
+
+test "DELEGATECALL runs the callee's code against the caller's storage" {
+    // Callee: SSTORE(0, 7). Caller: DELEGATECALL(0x44).
+    const callee_code = [_]u8{ 0x60, 0x07, 0x60, 0x00, 0x55 };
+    const caller_code = [_]u8{ 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x44, 0x5a, 0xf4 };
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
+    var evm = try Evm(.{ .eips = .{ .hardfork = .CANCUN } }).init(std.testing.allocator, &db, regression_block_info, regression_context, 0, regression_sender);
+    defer evm.deinit();
+    const caller_hash = try db.set_code(&caller_code);
+    try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = caller_hash, .storage_root = [_]u8{0} ** 32 });
+    const callee_hash = try db.set_code(&callee_code);
+    try db.set_account(regression_callee.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = callee_hash, .storage_root = [_]u8{0} ** 32 });
+
+    const result = evm.inner_call(.{ .call = .{ .caller = regression_sender, .to = regression_contract, .value = 0, .input = &.{}, .gas = 200000 } });
+    try std.testing.expect(result.success);
+    try std.testing.expectEqual(@as(u256, 7), try db.get_storage(regression_contract.bytes, 0));
+    try std.testing.expectEqual(@as(u256, 0), try db.get_storage(regression_callee.bytes, 0));
+    try std.testing.expectEqual(@as(u256, 0), try db.get_storage(regression_sender.bytes, 0));
+}
+
+test "Refunds earned by a reverted callee are discarded" {
+    // Callee slot 0 holds 1. Callee: SSTORE(0, 0) (4800 refund), then REVERT or STOP.
+    const callees = [_]struct { code: []const u8, refund: u64, slot: u256 }{
+        .{ .code = &.{ 0x60, 0x00, 0x60, 0x00, 0x55, 0x60, 0x00, 0x60, 0x00, 0xfd }, .refund = 0, .slot = 1 },
+        .{ .code = &.{ 0x60, 0x00, 0x60, 0x00, 0x55, 0x00 }, .refund = 4800, .slot = 0 },
+    };
+    const caller_code = [_]u8{ 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x44, 0x5a, 0xf1 };
+    for (callees) |callee| {
+        var db = Database.init(std.testing.allocator);
+        defer db.deinit();
+        var evm = try Evm(.{ .eips = .{ .hardfork = .CANCUN } }).init(std.testing.allocator, &db, regression_block_info, regression_context, 0, regression_sender);
+        defer evm.deinit();
+        const caller_hash = try db.set_code(&caller_code);
+        try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = caller_hash, .storage_root = [_]u8{0} ** 32 });
+        const callee_hash = try db.set_code(callee.code);
+        try db.set_account(regression_callee.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = callee_hash, .storage_root = [_]u8{0} ** 32 });
+        try db.set_storage(regression_callee.bytes, 0, 1);
+
+        const result = evm.inner_call(.{ .call = .{ .caller = regression_sender, .to = regression_contract, .value = 0, .input = &.{}, .gas = 200000 } });
+        try std.testing.expect(result.success);
+        try std.testing.expectEqual(callee.refund, evm.gas_refund_counter);
+        try std.testing.expectEqual(callee.slot, try db.get_storage(regression_callee.bytes, 0));
+    }
+}
+
+test "Call depth limit - frames run at depths 0 through max_call_depth" {
+    // SSTORE(0, SLOAD(0) + 1); CALL(self). Slot 0 counts the frames that ran.
+    const code = [_]u8{ 0x60, 0x00, 0x54, 0x60, 0x01, 0x01, 0x60, 0x00, 0x55, 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x30, 0x5a, 0xf1 };
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
+    var evm = try Evm(.{ .max_call_depth = 3, .eips = .{ .hardfork = .CANCUN } }).init(std.testing.allocator, &db, regression_block_info, regression_context, 0, regression_sender);
+    defer evm.deinit();
+    const code_hash = try db.set_code(&code);
+    try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = code_hash, .storage_root = [_]u8{0} ** 32 });
+
+    const result = evm.inner_call(.{ .call = .{ .caller = regression_sender, .to = regression_contract, .value = 0, .input = &.{}, .gas = 1000000 } });
+    try std.testing.expect(result.success);
+    try std.testing.expectEqual(@as(u256, 4), try db.get_storage(regression_contract.bytes, 0));
+}
+
+test "Truncated PUSH at the end of code executes as a zero-padded push" {
+    const programs = [_]struct { code: []const u8, gas: u64 }{
+        .{ .code = &.{0x60}, .gas = 3 }, // PUSH1 with no data
+        .{ .code = &.{ 0x7f, 0xab, 0xcd }, .gas = 3 }, // PUSH32 with 2 of 32 bytes
+        .{ .code = &.{ 0x60, 0x01, 0x61, 0xff }, .gas = 6 }, // PUSH1 1, PUSH2 with 1 of 2 bytes
+        .{ .code = &.{ 0x60, 0x01, 0x60, 0x02, 0x01, 0x7f }, .gas = 12 }, // after a fused PUSH+ADD
+    };
+    for (programs) |program| {
+        var db = Database.init(std.testing.allocator);
+        defer db.deinit();
+        var evm = try Evm(.{ .eips = .{ .hardfork = .CANCUN } }).init(std.testing.allocator, &db, regression_block_info, regression_context, 0, regression_sender);
+        defer evm.deinit();
+        const code_hash = try db.set_code(program.code);
+        try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = code_hash, .storage_root = [_]u8{0} ** 32 });
+
+        const result = evm.inner_call(.{ .call = .{ .caller = regression_sender, .to = regression_contract, .value = 0, .input = &.{}, .gas = 100000 } });
+        try std.testing.expect(result.success);
+        try std.testing.expectEqual(program.gas, 100000 - result.gas_left);
+    }
+}
+
+test "Code that looks like trailing compiler metadata is executable" {
+    // PUSH1 0x0b, JUMP, then bytes shaped like Solidity CBOR metadata (a2 64 "ipfs" ...)
+    // that contain JUMPDEST, SSTORE(0, 1), STOP, then the 2-byte metadata length.
+    const code = [_]u8{ 0x60, 0x0b, 0x56, 0xa2, 0x64, 0x69, 0x70, 0x66, 0x73, 0x00, 0x00, 0x5b, 0x60, 0x01, 0x60, 0x00, 0x55, 0x00, 0x00, 0x0f };
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
+    var evm = try Evm(.{ .eips = .{ .hardfork = .CANCUN } }).init(std.testing.allocator, &db, regression_block_info, regression_context, 0, regression_sender);
+    defer evm.deinit();
+    const code_hash = try db.set_code(&code);
+    try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = code_hash, .storage_root = [_]u8{0} ** 32 });
+
+    const result = evm.inner_call(.{ .call = .{ .caller = regression_sender, .to = regression_contract, .value = 0, .input = &.{}, .gas = 100000 } });
+    try std.testing.expect(result.success);
+    try std.testing.expectEqual(@as(u256, 1), try db.get_storage(regression_contract.bytes, 0));
+}
+
+test "EIP-3860 - CREATE and CREATE2 with oversized init code halt the creating frame" {
+    // PUSH3 size, PUSH1 0 (offset), PUSH1 0 (value), CREATE; then SSTORE(0, 1).
+    // CREATE2 pushes a salt first. A halted frame never reaches the SSTORE.
+    const Case = struct { hardfork: Hardfork, create2: bool, size: u24, success: bool };
+    const cases = [_]Case{
+        .{ .hardfork = .SHANGHAI, .create2 = false, .size = 49152, .success = true },
+        .{ .hardfork = .SHANGHAI, .create2 = false, .size = 49153, .success = false },
+        .{ .hardfork = .CANCUN, .create2 = true, .size = 49152, .success = true },
+        .{ .hardfork = .CANCUN, .create2 = true, .size = 49153, .success = false },
+        .{ .hardfork = .OSAKA, .create2 = false, .size = 49153, .success = false },
+        // Before Shanghai there is no init code limit.
+        .{ .hardfork = .LONDON, .create2 = false, .size = 49153, .success = true },
+        .{ .hardfork = .LONDON, .create2 = true, .size = 49153, .success = true },
+    };
+    inline for (cases) |case| {
+        const E = Evm(.{ .eips = .{ .hardfork = case.hardfork } });
+        var db = Database.init(std.testing.allocator);
+        defer db.deinit();
+        var evm = try E.init(std.testing.allocator, &db, regression_block_info, regression_context, 0, regression_sender);
+        defer evm.deinit();
+
+        const size_bytes = [_]u8{ @intCast(case.size >> 16), @intCast((case.size >> 8) & 0xff), @intCast(case.size & 0xff) };
+        const create_code = [_]u8{0x62} ++ size_bytes ++ [_]u8{ 0x60, 0x00, 0x60, 0x00, 0xf0, 0x60, 0x01, 0x60, 0x00, 0x55 };
+        const create2_code = [_]u8{ 0x60, 0x00, 0x62 } ++ size_bytes ++ [_]u8{ 0x60, 0x00, 0x60, 0x00, 0xf5, 0x60, 0x01, 0x60, 0x00, 0x55 };
+        const code: []const u8 = if (case.create2) &create2_code else &create_code;
+        const code_hash = try db.set_code(code);
+        try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = code_hash, .storage_root = [_]u8{0} ** 32 });
+
+        const result = evm.inner_call(.{ .call = .{ .caller = regression_sender, .to = regression_contract, .value = 0, .input = &.{}, .gas = 1000000 } });
+        try std.testing.expectEqual(case.success, result.success);
+        const creator = (try db.get_account(regression_contract.bytes)).?;
+        if (case.success) {
+            try std.testing.expectEqual(@as(u256, 1), try db.get_storage(regression_contract.bytes, 0));
+            try std.testing.expectEqual(@as(u64, 2), creator.nonce);
+        } else {
+            // Exceptional halt: all gas consumed, no state change, nonce untouched.
+            try std.testing.expectEqual(@as(u64, 0), result.gas_left);
+            try std.testing.expectEqual(@as(u256, 0), try db.get_storage(regression_contract.bytes, 0));
+            try std.testing.expectEqual(@as(u64, 1), creator.nonce);
+        }
+    }
+}
+
+test "CREATE that cannot pay its charge halts instead of pushing zero" {
+    // PUSH1 0 x3, CREATE, STOP with 9 + 31999 gas: CREATE needs 32000.
+    const code = [_]u8{ 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0xf0, 0x00 };
+    const outcomes = [_]struct { gas: u64, success: bool }{
+        .{ .gas = 9 + 31999, .success = false },
+        .{ .gas = 9 + 32000, .success = true },
+    };
+    for (outcomes) |outcome| {
+        var db = Database.init(std.testing.allocator);
+        defer db.deinit();
+        var evm = try Evm(.{ .eips = .{ .hardfork = .CANCUN } }).init(std.testing.allocator, &db, regression_block_info, regression_context, 0, regression_sender);
+        defer evm.deinit();
+        const code_hash = try db.set_code(&code);
+        try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = code_hash, .storage_root = [_]u8{0} ** 32 });
+
+        const result = evm.inner_call(.{ .call = .{ .caller = regression_sender, .to = regression_contract, .value = 0, .input = &.{}, .gas = outcome.gas } });
+        try std.testing.expectEqual(outcome.success, result.success);
+        if (!outcome.success) try std.testing.expectEqual(@as(u64, 0), result.gas_left);
+    }
+}
+
+test "CREATE in a static context halts the callee" {
+    // Callee: CREATE with empty init code. Caller: STATICCALL it, store the flag in slot 1.
+    const callee_code = [_]u8{ 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0xf0, 0x00 };
+    const caller_code = [_]u8{ 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x44, 0x61, 0xc3, 0x50, 0xfa, 0x60, 0x01, 0x55 };
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
+    var evm = try Evm(.{ .eips = .{ .hardfork = .CANCUN } }).init(std.testing.allocator, &db, regression_block_info, regression_context, 0, regression_sender);
+    defer evm.deinit();
+    const caller_hash = try db.set_code(&caller_code);
+    try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = caller_hash, .storage_root = [_]u8{0} ** 32 });
+    try db.set_storage(regression_contract.bytes, 1, 5);
+    const callee_hash = try db.set_code(&callee_code);
+    try db.set_account(regression_callee.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = callee_hash, .storage_root = [_]u8{0} ** 32 });
+
+    const result = evm.inner_call(.{ .call = .{ .caller = regression_sender, .to = regression_contract, .value = 0, .input = &.{}, .gas = 500000 } });
+    try std.testing.expect(result.success);
+    try std.testing.expectEqual(@as(u256, 0), try db.get_storage(regression_contract.bytes, 1));
+    try std.testing.expectEqual(@as(u64, 1), (try db.get_account(regression_callee.bytes)).?.nonce);
+}
+
+test "Gas segments - GAS observes exactly the gas left after its own cost" {
+    // PUSH1 1 (3), GAS (2), then MSTORE and RETURN. The instructions after GAS must
+    // not be charged before GAS runs.
+    const code = [_]u8{ 0x60, 0x01, 0x5a, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3 };
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
+    var evm = try Evm(.{ .eips = .{ .hardfork = .CANCUN } }).init(std.testing.allocator, &db, regression_block_info, regression_context, 0, regression_sender);
+    defer evm.deinit();
+    const code_hash = try db.set_code(&code);
+    try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = code_hash, .storage_root = [_]u8{0} ** 32 });
+
+    const result = evm.inner_call(.{ .call = .{ .caller = regression_sender, .to = regression_contract, .value = 0, .input = &.{}, .gas = 100000 } });
+    try std.testing.expect(result.success);
+    try std.testing.expectEqual(@as(usize, 32), result.output.len);
+    var observed: u256 = 0;
+    for (result.output) |byte| observed = (observed << 8) | byte;
+    try std.testing.expectEqual(@as(u256, 100000 - 5), observed);
+}
+
+test "Gas segments - a JUMPI charges only the branch that runs" {
+    // CALLDATASIZE, PUSH1 8, JUMPI | PUSH1 1, POP, STOP | JUMPDEST, PUSH1 1, PUSH1 2, ADD, POP, STOP
+    const code = [_]u8{ 0x36, 0x60, 0x08, 0x57, 0x60, 0x01, 0x50, 0x00, 0x5b, 0x60, 0x01, 0x60, 0x02, 0x01, 0x50, 0x00 };
+    const branches = [_]struct { input: []const u8, gas: u64 }{
+        .{ .input = &.{}, .gas = 15 + 5 }, // not taken
+        .{ .input = &.{0x01}, .gas = 15 + 1 + 11 }, // taken
+    };
+    for (branches) |branch| {
+        var db = Database.init(std.testing.allocator);
+        defer db.deinit();
+        var evm = try Evm(.{ .eips = .{ .hardfork = .CANCUN } }).init(std.testing.allocator, &db, regression_block_info, regression_context, 0, regression_sender);
+        defer evm.deinit();
+        const code_hash = try db.set_code(&code);
+        try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = code_hash, .storage_root = [_]u8{0} ** 32 });
+
+        const result = evm.inner_call(.{ .call = .{ .caller = regression_sender, .to = regression_contract, .value = 0, .input = branch.input, .gas = 100000 } });
+        try std.testing.expect(result.success);
+        try std.testing.expectEqual(branch.gas, 100000 - result.gas_left);
+
+        // With exactly the gas of the branch that runs, execution succeeds: the other
+        // branch's gas is never required.
+        var db_exact = Database.init(std.testing.allocator);
+        defer db_exact.deinit();
+        var evm_exact = try Evm(.{ .eips = .{ .hardfork = .CANCUN } }).init(std.testing.allocator, &db_exact, regression_block_info, regression_context, 0, regression_sender);
+        defer evm_exact.deinit();
+        const exact_hash = try db_exact.set_code(&code);
+        try db_exact.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = exact_hash, .storage_root = [_]u8{0} ** 32 });
+        const exact = evm_exact.inner_call(.{ .call = .{ .caller = regression_sender, .to = regression_contract, .value = 0, .input = branch.input, .gas = branch.gas } });
+        try std.testing.expect(exact.success);
+        try std.testing.expectEqual(@as(u64, 0), exact.gas_left);
+        const short = evm_exact.inner_call(.{ .call = .{ .caller = regression_sender, .to = regression_contract, .value = 0, .input = branch.input, .gas = branch.gas - 1 } });
+        try std.testing.expect(!short.success);
+    }
+}
+
+test "Gas segments - entry block and JUMPDEST block charge the same gas for the same code" {
+    // The same instruction sequence costs the same whether it is the entry block or
+    // a block headed by a JUMPDEST (which adds only the JUMPDEST's 1 gas).
+    const body = [_]u8{ 0x60, 0x01, 0x60, 0x02, 0x01, 0x80, 0x02, 0x50, 0x5f, 0x54, 0x50 }; // 3+3+3+3+5+2+2+2100+2
+    const body_gas: u64 = 3 + 3 + 3 + 3 + 5 + 2 + 2 + 2100 + 2;
+    const entry_code = body;
+    const jumpdest_code = [_]u8{ 0x60, 0x03, 0x56, 0x5b } ++ body; // PUSH1 3, JUMP, JUMPDEST, body
+    const programs = [_]struct { code: []const u8, gas: u64 }{
+        .{ .code = &entry_code, .gas = body_gas },
+        .{ .code = &jumpdest_code, .gas = 3 + 8 + 1 + body_gas },
+    };
+    for (programs) |program| {
+        var db = Database.init(std.testing.allocator);
+        defer db.deinit();
+        var evm = try Evm(.{ .eips = .{ .hardfork = .CANCUN } }).init(std.testing.allocator, &db, regression_block_info, regression_context, 0, regression_sender);
+        defer evm.deinit();
+        const code_hash = try db.set_code(program.code);
+        try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = code_hash, .storage_root = [_]u8{0} ** 32 });
+
+        const result = evm.inner_call(.{ .call = .{ .caller = regression_sender, .to = regression_contract, .value = 0, .input = &.{}, .gas = 100000 } });
+        try std.testing.expect(result.success);
+        try std.testing.expectEqual(program.gas, 100000 - result.gas_left);
+    }
+}
+
+test "Fused PUSH+MSTORE with an unpayable offset halts instead of being skipped" {
+    // PUSH1 1, PUSH32 0xff..ff, MSTORE, then SSTORE(0, 1) that must never run.
+    const code = [_]u8{ 0x60, 0x01, 0x7f } ++ [_]u8{0xff} ** 32 ++ [_]u8{ 0x52, 0x60, 0x01, 0x60, 0x00, 0x55 };
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
+    var evm = try Evm(.{ .eips = .{ .hardfork = .CANCUN } }).init(std.testing.allocator, &db, regression_block_info, regression_context, 0, regression_sender);
+    defer evm.deinit();
+    const code_hash = try db.set_code(&code);
+    try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = code_hash, .storage_root = [_]u8{0} ** 32 });
+
+    const result = evm.inner_call(.{ .call = .{ .caller = regression_sender, .to = regression_contract, .value = 0, .input = &.{}, .gas = 1000000 } });
+    try std.testing.expect(!result.success);
+    try std.testing.expectEqual(@as(u64, 0), result.gas_left);
+    try std.testing.expectEqual(@as(u256, 0), try db.get_storage(regression_contract.bytes, 0));
+}
+
+test "Fused PUSH+ADD keeps the unfused stack-overflow check" {
+    // n x PUSH1 0, then PUSH1 1, PUSH1 2, ADD. Unfused, the second PUSH needs n + 2
+    // stack slots even though the fused PUSH+ADD would not grow the stack.
+    const tail = [_]u8{ 0x60, 0x01, 0x60, 0x02, 0x01 };
+    const fits = [_]u8{ 0x60, 0x00 } ** 1022 ++ tail;
+    const overflows = [_]u8{ 0x60, 0x00 } ** 1023 ++ tail;
+    const programs = [_]struct { code: []const u8, success: bool }{
+        .{ .code = &fits, .success = true },
+        .{ .code = &overflows, .success = false },
+    };
+    for (programs) |program| {
+        var db = Database.init(std.testing.allocator);
+        defer db.deinit();
+        var evm = try Evm(.{ .eips = .{ .hardfork = .CANCUN } }).init(std.testing.allocator, &db, regression_block_info, regression_context, 0, regression_sender);
+        defer evm.deinit();
+        const code_hash = try db.set_code(program.code);
+        try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = code_hash, .storage_root = [_]u8{0} ** 32 });
+
+        const result = evm.inner_call(.{ .call = .{ .caller = regression_sender, .to = regression_contract, .value = 0, .input = &.{}, .gas = 1000000 } });
+        try std.testing.expectEqual(program.success, result.success);
+        if (!program.success) try std.testing.expectEqual(@as(u64, 0), result.gas_left);
+    }
 }

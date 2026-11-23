@@ -10,6 +10,8 @@ pub const BytecodeConfig = struct {
     // whether to fuze multiple opcodes into a single instruction for performance
     // defaults to true
     fusions_enabled: bool = true,
+    /// Execution fork. Selects the static gas schedule used for basic-block gas.
+    hardfork: @import("../eips_and_hardforks/eips.zig").Hardfork = .CANCUN,
     /// The maximum amount of bytes allowed in contract code
     max_bytecode_size: u32 = 24576,
     /// The maximum amount of bytes allowed in initcode (EIP-3860)

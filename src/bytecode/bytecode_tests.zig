@@ -231,8 +231,10 @@ test "Bytecode validation - PUSH extends past end" {
     const allocator = std.testing.allocator;
     // PUSH2 but only 1 byte of data available
     const code = [_]u8{ 0x61, 0x42 }; // PUSH2 with only 1 byte
-    const result = BytecodeDefault.init(allocator, &code);
-    try std.testing.expectError(error.TruncatedPush, result);
+    // Valid code: the missing byte reads as zero, so the value is 0x4200.
+    var bytecode = try BytecodeDefault.init(allocator, &code);
+    defer bytecode.deinit();
+    try std.testing.expectEqual(@as(u256, 0x4200), bytecode.pushValuePadded(0, 2));
 }
 
 test "Bytecode validation - PUSH32 extends past end" {
@@ -243,8 +245,15 @@ test "Bytecode validation - PUSH32 extends past end" {
     for (1..32) |i| {
         code[i] = @intCast(i);
     }
-    const result = BytecodeDefault.init(allocator, &code); // Only 32 bytes, needs 33
-    try std.testing.expectError(error.TruncatedPush, result);
+    // Only 32 bytes where 33 are needed: valid, the last byte reads as zero.
+    var bytecode = try BytecodeDefault.init(allocator, &code);
+    defer bytecode.deinit();
+    var expected: u256 = 0;
+    for (1..32) |i| {
+        expected = (expected << 8) | @as(u256, i);
+    }
+    expected <<= 8;
+    try std.testing.expectEqual(expected, bytecode.pushValuePadded(0, 32));
 }
 
 
@@ -1701,8 +1710,15 @@ test "Bytecode edge cases - all PUSH opcodes at end" {
             code[i] = @intCast(i);
         }
 
-        // Should fail with TruncatedPush
-        try std.testing.expectError(error.TruncatedPush, BytecodeDefault.init(allocator, code));
+        // One byte short is valid code: the missing byte reads as zero.
+        var bytecode = try BytecodeDefault.init(allocator, code);
+        defer bytecode.deinit();
+        var expected: u256 = 0;
+        for (1..push_num) |i| {
+            expected = (expected << 8) | @as(u256, i);
+        }
+        expected <<= 8;
+        try std.testing.expectEqual(expected, bytecode.pushValuePadded(0, push_num));
     }
 }
 

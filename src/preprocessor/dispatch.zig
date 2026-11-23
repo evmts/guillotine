@@ -15,11 +15,18 @@ pub fn Preprocessor(FrameType: type) type {
     return struct {
         const Self = @This();
 
-        /// Returns the appropriate tail call modifier based on the target architecture.
+        /// Returns the appropriate tail call modifier based on the target architecture
+        /// and compiler backend.
         /// WebAssembly doesn't support tail calls by default, so we use .auto for wasm targets.
+        /// Zig's self-hosted x86_64 backend cannot lower guaranteed tail calls either; it gets
+        /// .auto so the handlers still compile there (each instruction then consumes native
+        /// stack, so that backend is for tests and debugging, not long-running execution).
+        /// Production builds force the LLVM backend, which always gets .always_tail.
         pub inline fn getTailCallModifier() std.builtin.CallModifier {
             const builtin = @import("builtin");
             return if (comptime builtin.target.cpu.arch == .wasm32 or builtin.target.cpu.arch == .wasm64)
+                .auto
+            else if (comptime builtin.zig_backend == .stage2_x86_64)
                 .auto
             else
                 .always_tail;
@@ -506,9 +513,9 @@ pub fn Preprocessor(FrameType: type) type {
             }
 
             var opcode_count: usize = 0;
-            var loop_counter = FrameType.config.createLoopSafetyCounter().init(FrameType.config.loop_quota orelse 0);
+            // Every iteration consumes at least one byte of code, so the loop ends after
+            // at most `bytecode.len()` steps.
             while (true) {
-                loop_counter.inc();
                 const instr_pc = iter.pc;
                 const maybe = iter.next();
                 if (maybe == null) break;
@@ -987,23 +994,14 @@ pub fn Preprocessor(FrameType: type) type {
             var jumpdest_pcs = ArrayList(FrameType.PcType, null).empty;
             defer jumpdest_pcs.deinit(allocator);
 
-            // First, collect all JUMPDEST PCs from bytecode
-            while (bytecode_iter.next()) |op_data| {
-                // The PC is already at the start of the next instruction, so we need to go back
-                const instr_len = switch (op_data) {
-                    .regular => 1,
-                    .jumpdest => 1,
-                    .push => |data| 1 + data.size,
-                    .jump, .jumpi => 1,
-                    .pc => 1,
-                    .stop, .invalid => 1,
-                    else => 1, // For other cases, assume 1 byte
-                };
-                const pc = bytecode_iter.pc - instr_len;
+            // First, collect all JUMPDEST PCs from bytecode. The PC is read before the
+            // iterator advances, so it is exact for every instruction, including a PUSH
+            // truncated by the end of the code.
+            while (true) {
+                const instr_pc = bytecode_iter.pc;
+                const op_data = bytecode_iter.next() orelse break;
                 if (op_data == .jumpdest) {
-                    // Cast to FrameType.PcType for storage
-                    const jumpdest_pc: FrameType.PcType = @intCast(pc);
-                    try jumpdest_pcs.append(allocator, jumpdest_pc);
+                    try jumpdest_pcs.append(allocator, @intCast(instr_pc));
                 }
             }
 
@@ -1065,10 +1063,12 @@ pub fn Preprocessor(FrameType: type) type {
                 }
             }
 
-            if (std.debug.runtime_safety and entries.len > 1) {
+            // The binary search over the table requires strictly increasing PCs.
+            if (entries.len > 1) {
                 for (entries[0..entries.len -| 1], entries[1..]) |current, next| {
                     if (current.pc >= next.pc) {
-                        std.debug.panic("JumpTable not properly sorted: PC {} >= {}", .{ current.pc, next.pc });
+                        log.err("JumpTable not properly sorted: PC {} >= {}", .{ current.pc, next.pc });
+                        return error.JumpTableNotSorted;
                     }
                 }
             }

@@ -54,6 +54,8 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
             GasOverflow,
             InvalidAmount,
             WriteProtection,
+            /// A safety counter reached its limit. Returned instead of aborting.
+            SafetyLimitExceeded,
             ReturnDataNotAvailable,
             // Success termination cases (not actually errors)
             // We treat every exit as errors in the low level interpreter while evm.zig catches them and returns them as success
@@ -113,6 +115,7 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
             .max_bytecode_size = config.max_bytecode_size,
             .max_initcode_size = config.max_initcode_size,
             .fusions_enabled = true,
+            .hardfork = config.hardfork,
         });
 
         /// A fixed size array of opcode handlers indexed by opcode number
@@ -321,8 +324,8 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
             errdefer new_memory.deinit(allocator);
             const mem_size = self.memory.size();
             if (mem_size > 0) {
-                const bytes = self.memory.get_slice(0, mem_size) catch unreachable;
-                try new_memory.set_data(0, bytes);
+                const bytes = self.memory.get_slice(0, @intCast(mem_size)) catch return Error.OutOfBounds;
+                new_memory.set_data(allocator, 0, bytes) catch return Error.AllocationError;
             }
 
             (&self.getEvm().tracer).debug("Frame.copy: Deep copy complete", .{});
@@ -352,9 +355,10 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
             // Skip gas checks if disabled in config
             if (comptime config.disable_gas_checks) return;
 
+            // An amount that does not fit GasType exceeds any gas the frame can hold.
             const amt = std.math.cast(GasType, amount) orelse {
-                (&self.getEvm().tracer).panic("Frame.consumeGasChecked: Gas overflow, amount={} doesn't fit in GasType", .{amount});
-                return Error.GasOverflow;
+                (&self.getEvm().tracer).debug("Frame.consumeGasChecked: Out of gas, amount={} doesn't fit in GasType", .{amount});
+                return Error.OutOfGas;
             };
 
             // Check if we have enough gas

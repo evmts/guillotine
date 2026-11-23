@@ -8,6 +8,7 @@ const Address = primitives.Address.Address;
 const MinimalEvm = minimal_evm_mod.MinimalEvm;
 const MinimalEvmError = MinimalEvm.Error;
 const Hardfork = @import("../eips_and_hardforks/eips.zig").Hardfork;
+const fork_gas = @import("../frame/fork_gas.zig");
 
 pub const MinimalFrame = struct {
     const Self = @This();
@@ -1068,10 +1069,14 @@ pub const MinimalFrame = struct {
             0x54 => {
                 const key = try self.popStack();
 
-                // EIP-2929: charge warm/cold storage access cost and warm the slot
+                // EIP-2929 (Berlin+): warm/cold storage access cost; the slot is warmed.
+                // Earlier forks charge SLOAD's flat price for that fork (50, 200 or 800).
                 const access_cost = try evm.access_storage_slot(self.address, key);
-                // Access cost already includes the full SLOAD gas cost (100 for warm, 2100 for cold)
-                try self.consumeGas(access_cost);
+                const sload_cost = if (fork_gas.hasAccessLists(self.hardfork))
+                    access_cost
+                else
+                    fork_gas.staticGas(self.hardfork, 0x54, fork_gas.warm_access_cost);
+                try self.consumeGas(sload_cost);
 
                 const value = evm.get_storage(self.address, key);
                 try self.pushStack(value);
@@ -1083,21 +1088,31 @@ pub const MinimalFrame = struct {
                 const key = try self.popStack();
                 const value = try self.popStack();
 
+                // EIP-2200 (Istanbul+): fail when gas left is at or below the stipend.
+                if (fork_gas.sstoreHasSentry(self.hardfork) and self.gas_remaining <= @as(i64, @intCast(fork_gas.sstore_sentry_gas))) {
+                    self.gas_remaining = 0;
+                    return error.OutOfGas;
+                }
+
                 // Get current and original values for gas calculation
                 const current_value = evm.get_storage(self.address, key);
                 const original_value = evm.get_original_storage(self.address, key);
 
                 // EIP-2929: Check if storage slot is cold and warm it
                 const access_cost = try evm.access_storage_slot(self.address, key);
-                const is_cold = access_cost == GasConstants.ColdSloadCost;
+                const is_cold = fork_gas.hasAccessLists(self.hardfork) and access_cost == GasConstants.ColdSloadCost;
 
-                // Calculate SSTORE gas cost using proper EIP-2200/EIP-3529 logic
-                const gas_cost = GasConstants.sstoreGasCost(current_value, original_value, value, is_cold);
-                try self.consumeGas(gas_cost);
+                // Same fork-aware metering as the Frame handler.
+                const cost = fork_gas.sstoreCost(self.hardfork, original_value, current_value, value, is_cold);
+                try self.consumeGas(cost.gas);
 
-                // EIP-3529: Only clearing (non-zero -> zero) is eligible for refund
-                if (current_value != 0 and value == 0) {
-                    evm.add_refund(GasConstants.SstoreRefundGas);
+                if (cost.refund > 0) {
+                    evm.add_refund(@intCast(cost.refund));
+                } else if (cost.refund < 0) {
+                    // Takes back a refund granted earlier in this transaction.
+                    const taken_back: u64 = @intCast(-cost.refund);
+                    if (taken_back > evm.gas_refund) return error.InvalidOpcode;
+                    evm.gas_refund -= taken_back;
                 }
 
                 try evm.set_storage(self.address, key, value);
@@ -2020,6 +2035,7 @@ test "MinimalFrame JUMP and JUMPI validation" {
             0,
             &.{},
             &evm,
+            evm.hardfork,
         );
         defer frame.deinit();
 
@@ -2048,6 +2064,7 @@ test "MinimalFrame JUMP and JUMPI validation" {
             0,
             &.{},
             &evm,
+            evm.hardfork,
         );
         defer frame.deinit();
 
@@ -2059,8 +2076,8 @@ test "MinimalFrame JUMP and JUMPI validation" {
     // Test 3: Valid JUMPI with true condition
     {
         const bytecode = [_]u8{
-            0x60, 0x06,  // PUSH1 6 - destination
             0x60, 0x01,  // PUSH1 1 - true condition
+            0x60, 0x06,  // PUSH1 6 - destination (top of stack)
             0x57,        // JUMPI (pc=4)
             0xFE,        // INVALID (pc=5) - should be skipped
             0x5b,        // JUMPDEST (pc=6) - valid destination
@@ -2076,6 +2093,7 @@ test "MinimalFrame JUMP and JUMPI validation" {
             0,
             &.{},
             &evm,
+            evm.hardfork,
         );
         defer frame.deinit();
 
@@ -2088,8 +2106,8 @@ test "MinimalFrame JUMP and JUMPI validation" {
     // Test 4: JUMPI with false condition (no jump)
     {
         const bytecode = [_]u8{
-            0x60, 0x06,  // PUSH1 6 - destination
             0x60, 0x00,  // PUSH1 0 - false condition
+            0x60, 0x06,  // PUSH1 6 - destination (top of stack)
             0x57,        // JUMPI (pc=4)
             0x00,        // STOP (pc=5) - should execute this
             0x5b,        // JUMPDEST (pc=6)
@@ -2104,6 +2122,7 @@ test "MinimalFrame JUMP and JUMPI validation" {
             0,
             &.{},
             &evm,
+            evm.hardfork,
         );
         defer frame.deinit();
 
@@ -2116,8 +2135,8 @@ test "MinimalFrame JUMP and JUMPI validation" {
     // Test 5: Invalid JUMPI to non-JUMPDEST
     {
         const bytecode = [_]u8{
-            0x60, 0x05,  // PUSH1 5 - invalid destination
             0x60, 0x01,  // PUSH1 1 - true condition
+            0x60, 0x05,  // PUSH1 5 - invalid destination (top of stack)
             0x57,        // JUMPI (pc=4)
             0xFE,        // INVALID (pc=5) - not a JUMPDEST
             0x5b,        // JUMPDEST (pc=6)
@@ -2132,6 +2151,7 @@ test "MinimalFrame JUMP and JUMPI validation" {
             0,
             &.{},
             &evm,
+            evm.hardfork,
         );
         defer frame.deinit();
 
@@ -2158,6 +2178,7 @@ test "MinimalFrame JUMP and JUMPI validation" {
             0,
             &.{},
             &evm,
+            evm.hardfork,
         );
         defer frame.deinit();
 
@@ -2381,5 +2402,84 @@ test "callMemoryExpansionCost - overflow protection" {
     {
         const result = frame.callMemoryExpansionCost(std.math.maxInt(u64) - 10, 20, std.math.maxInt(u64) - 10, 20);
         try testing.expectError(error.OutOfBounds, result);
+    }
+}
+
+test "MinimalFrame SLOAD and SSTORE gas follow each fork's schedule" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    const sload = [_]u8{ 0x60, 0x00, 0x54 }; // PUSH1 0, SLOAD
+    const sstore = [_]u8{ 0x60, 0x01, 0x60, 0x00, 0x55 }; // PUSH1 1, PUSH1 0, SSTORE (0 -> 1)
+    const Case = struct { hardfork: Hardfork, code: []const u8, gas: i64 };
+    const cases = [_]Case{
+        .{ .hardfork = .FRONTIER, .code = &sload, .gas = 3 + 50 },
+        .{ .hardfork = .TANGERINE_WHISTLE, .code = &sload, .gas = 3 + 200 },
+        .{ .hardfork = .PETERSBURG, .code = &sload, .gas = 3 + 200 },
+        .{ .hardfork = .ISTANBUL, .code = &sload, .gas = 3 + 800 },
+        .{ .hardfork = .BERLIN, .code = &sload, .gas = 3 + 2100 },
+        .{ .hardfork = .CANCUN, .code = &sload, .gas = 3 + 2100 },
+        .{ .hardfork = .FRONTIER, .code = &sstore, .gas = 6 + 20000 },
+        .{ .hardfork = .PETERSBURG, .code = &sstore, .gas = 6 + 20000 },
+        .{ .hardfork = .ISTANBUL, .code = &sstore, .gas = 6 + 20000 },
+        .{ .hardfork = .BERLIN, .code = &sstore, .gas = 6 + 22100 },
+        .{ .hardfork = .LONDON, .code = &sstore, .gas = 6 + 22100 },
+        .{ .hardfork = .CANCUN, .code = &sstore, .gas = 6 + 22100 },
+    };
+    for (cases) |case| {
+        const evm = try MinimalEvm.initPtr(allocator);
+        defer evm.deinitPtr(allocator);
+        evm.setHardfork(case.hardfork);
+
+        var frame = try MinimalFrame.init(
+            allocator,
+            case.code,
+            100000,
+            Address{ .bytes = .{0} ** 20 },
+            Address{ .bytes = .{0} ** 20 },
+            0,
+            &.{},
+            evm,
+            case.hardfork,
+        );
+        defer frame.deinit();
+
+        try frame.execute();
+        try testing.expectEqual(@as(i64, 100000) - case.gas, frame.gas_remaining);
+    }
+}
+
+test "MinimalFrame SSTORE applies the EIP-2200 sentry and fork refunds" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    // Sentry: PUSH1 0, PUSH1 0, SSTORE with exactly 2300 gas left at the SSTORE.
+    {
+        const evm = try MinimalEvm.initPtr(allocator);
+        defer evm.deinitPtr(allocator);
+        evm.setHardfork(.CANCUN);
+        const code = [_]u8{ 0x60, 0x00, 0x60, 0x00, 0x55 };
+        var frame = try MinimalFrame.init(allocator, &code, 6 + 2300, Address{ .bytes = .{0} ** 20 }, Address{ .bytes = .{0} ** 20 }, 0, &.{}, evm, .CANCUN);
+        defer frame.deinit();
+        try testing.expectError(error.OutOfGas, frame.execute());
+    }
+
+    // Refund: set 0 -> 1 then back to 0 restores the original zero.
+    const Case = struct { hardfork: Hardfork, refund: u64 };
+    const cases = [_]Case{
+        .{ .hardfork = .ISTANBUL, .refund = 19200 },
+        .{ .hardfork = .BERLIN, .refund = 19900 },
+        .{ .hardfork = .CANCUN, .refund = 19900 },
+        .{ .hardfork = .PETERSBURG, .refund = 15000 },
+    };
+    for (cases) |case| {
+        const evm = try MinimalEvm.initPtr(allocator);
+        defer evm.deinitPtr(allocator);
+        evm.setHardfork(case.hardfork);
+        const code = [_]u8{ 0x60, 0x01, 0x60, 0x00, 0x55, 0x60, 0x00, 0x60, 0x00, 0x55 };
+        var frame = try MinimalFrame.init(allocator, &code, 100000, Address{ .bytes = .{0} ** 20 }, Address{ .bytes = .{0} ** 20 }, 0, &.{}, evm, case.hardfork);
+        defer frame.deinit();
+        try frame.execute();
+        try testing.expectEqual(case.refund, evm.gas_refund);
     }
 }

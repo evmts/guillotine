@@ -29,6 +29,10 @@ pub fn CallParams(config: anytype) type {
             to: Address,
             input: []const u8,
             gas: u64,
+            /// The delegating contract: the address and storage the delegated code runs
+            /// with. Null means `caller`, for a top-level delegatecall that has no
+            /// delegating frame.
+            context_address: ?Address = null,
         },
         /// STATICCALL operation (read-only)
         staticcall: struct {
@@ -216,6 +220,7 @@ pub fn CallParams(config: anytype) type {
                         .to = params.to,
                         .input = cloned_input,
                         .gas = params.gas,
+                        .context_address = params.context_address,
                     } };
                 },
                 .staticcall => |params| blk: {

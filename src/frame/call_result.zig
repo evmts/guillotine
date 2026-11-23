@@ -28,6 +28,32 @@ pub fn CallResult(config: anytype) type {
             };
         }
 
+        /// Failed result with no output. Allocates nothing, so it cannot fail.
+        pub fn failed(gas_left: u64) Self {
+            return Self{
+                .success = false,
+                .gas_left = gas_left,
+                .output = &.{},
+                .logs = &.{},
+                .selfdestructs = &.{},
+                .accessed_addresses = &.{},
+                .accessed_storage = &.{},
+            };
+        }
+
+        /// Successful result with no output. Allocates nothing, so it cannot fail.
+        pub fn succeeded_empty(gas_left: u64) Self {
+            return Self{
+                .success = true,
+                .gas_left = gas_left,
+                .output = &.{},
+                .logs = &.{},
+                .selfdestructs = &.{},
+                .accessed_addresses = &.{},
+                .accessed_storage = &.{},
+            };
+        }
+
         pub fn success_empty(allocator: std.mem.Allocator, gas_left: u64) !Self {
             _ = allocator; // Unused when using compile-time empty slices
             return Self{
