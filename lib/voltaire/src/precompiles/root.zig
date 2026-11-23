@@ -205,3 +205,25 @@ test "precompile - out of gas" {
     const result = sha256.execute(allocator, &input, 10);
     try testing.expectError(error.OutOfGas, result);
 }
+
+test {
+    _ = bn254_add;
+    _ = bn254_mul;
+    _ = bn254_pairing;
+    _ = bls12_g1_add;
+    _ = bls12_g1_msm;
+    _ = bls12_g2_add;
+    _ = bls12_g2_msm;
+    _ = bls12_pairing;
+    _ = bls12_map_fp_to_g1;
+    _ = bls12_map_fp2_to_g2;
+    _ = p256verify;
+    _ = point_evaluation;
+    _ = blake2f;
+    _ = modexp;
+    _ = ecrecover;
+    _ = sha256;
+    _ = ripemd160;
+    _ = identity;
+}
+

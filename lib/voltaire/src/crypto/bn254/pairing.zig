@@ -282,8 +282,8 @@ test "pairing bilinearity and infinity montgomery" {
         i += 1;
         const p1 = try G1.GENERATOR.mulByInt(test_case.p1);
         const p2 = try G1.GENERATOR.mulByInt(test_case.p2);
-        const q1 = try G2.GENERATOR.mulByInt(test_case.q1);
-        const q2 = try G2.GENERATOR.mulByInt(test_case.q2);
+        const q1 = G2.GENERATOR.mulByInt(test_case.q1);
+        const q2 = G2.GENERATOR.mulByInt(test_case.q2);
 
         // Test bilinearity in first argument: e(P1 + P2, Q) = e(P1, Q) * e(P2, Q)
         const p1_plus_p2 = p1.add(&p2);

@@ -10,11 +10,11 @@ edition = "2021"
 [workspace.dependencies]
 alloy-primitives = "0.8"
 # Arkworks dependencies for elliptic curve operations
-ark-bn254 = "0.5.0"
-ark-ec = "0.5.0"
-ark-ff = "0.5.0"
-ark-serialize = "0.5.0"
-ark-bls12-381 = "0.5.0"
+ark-bn254 = "0.6.0"
+ark-ec = "0.6.0"
+ark-ff = "0.6.0"
+ark-serialize = "0.6.0"
+ark-bls12-381 = "0.6.0"
 
 [profile.release]
 # Optimize for size by default (smallest flag)

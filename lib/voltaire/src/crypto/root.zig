@@ -132,3 +132,11 @@ else
 
 // Export BLS12-381 from crypto.zig
 pub const bls12_381 = Crypto.bls12_381;
+
+test {
+    _ = bn254;
+    _ = bn254_arkworks;
+    _ = kzg_trusted_setup;
+    _ = kzg_setup;
+}
+

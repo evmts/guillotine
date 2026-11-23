@@ -124,43 +124,25 @@ test "bn254Add - output size validation" {
 // ============================================================================
 
 test "bn254Add - geth chfast1" {
-    const testing = std.testing;
-    const allocator = testing.allocator;
-
-    const input_hex = "2bd3e6d0f3b142924f5ca7b49ce5b9d54c4703d7ae5648e61d02268b1a0a9fb721611ce0a6af85915e2f1d70300909ce2e49dfad4a4619c8390cae66cefdb20400000000000000000000000000000000000000000000000011138ce750fa15c2";
-    const expected_hex = "070a8d6a982153cae4be29d434e8faef8a47b274a053f5a4ee2a6c9c13c31e5c031b8ce914eba3a9ffb989f9cdd5b0f01943074bf4f0f315690ec3cec6981afc";
-
-    var input: [128]u8 = undefined;
+    // go-ethereum core/vm/testdata/precompiles/bn256Add.json
+    var input_buf: [128]u8 = undefined;
+    const input = try std.fmt.hexToBytes(&input_buf, "18b18acfb4c2c30276db5411368e7185b311dd124691610c5d3b74034e093dc9063c909c4720840cb5134cb9f59fa749755796819658d32efc0d288198f3726607c2b7f58a84bd6145f00c9c2bc0bb1a187f20ff2c92963a88019e7c6a014eed06614e20c147e940f2d70da3f74c9a17df361706a4485c742bd6788478fa17d7");
     var expected: [64]u8 = undefined;
-
-    _ = try std.fmt.hexToBytes(&input, input_hex);
-    _ = try std.fmt.hexToBytes(&expected, expected_hex);
-
-    const result = try execute(allocator, &input, 1000000);
-    defer result.deinit(allocator);
-
-    try testing.expectEqual(@as(usize, 64), result.output.len);
-    try testing.expectEqualSlices(u8, &expected, result.output);
+    _ = try std.fmt.hexToBytes(&expected, "2243525c5efd4b9c3d3c45ac0ca3fe4dd85e830a4ce6b65fa1eeaee202839703301d1d33be6da8e509df21cc35964723180eed7532537db9ae5e7d48f195c915");
+    const result = try execute(std.testing.allocator, input, 1_000_000);
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expectEqualSlices(u8, &expected, result.output);
 }
 
 test "bn254Add - geth chfast2" {
-    const testing = std.testing;
-    const allocator = testing.allocator;
-
-    const input_hex = "070a8d6a982153cae4be29d434e8faef8a47b274a053f5a4ee2a6c9c13c31e5c031b8ce914eba3a9ffb989f9cdd5b0f01943074bf4f0f315690ec3cec6981afc30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd46";
-    const expected_hex = "025a6f4181d2b4ea8b724290ffb40156eb0adb514c688556eb79cdea0752c2bb2eff3f31dea215f1eb86023a133a996eb6300b44da664d64251d05381bb8a02e";
-
-    var input: [128]u8 = undefined;
+    // go-ethereum core/vm/testdata/precompiles/bn256Add.json
+    var input_buf: [128]u8 = undefined;
+    const input = try std.fmt.hexToBytes(&input_buf, "2243525c5efd4b9c3d3c45ac0ca3fe4dd85e830a4ce6b65fa1eeaee202839703301d1d33be6da8e509df21cc35964723180eed7532537db9ae5e7d48f195c91518b18acfb4c2c30276db5411368e7185b311dd124691610c5d3b74034e093dc9063c909c4720840cb5134cb9f59fa749755796819658d32efc0d288198f37266");
     var expected: [64]u8 = undefined;
-
-    _ = try std.fmt.hexToBytes(&input, input_hex);
-    _ = try std.fmt.hexToBytes(&expected, expected_hex);
-
-    const result = try execute(allocator, &input, 1000000);
-    defer result.deinit(allocator);
-
-    try testing.expectEqual(@as(usize, 64), result.output.len);
-    try testing.expectEqualSlices(u8, &expected, result.output);
+    _ = try std.fmt.hexToBytes(&expected, "2bd3e6d0f3b142924f5ca7b49ce5b9d54c4703d7ae5648e61d02268b1a0a9fb721611ce0a6af85915e2f1d70300909ce2e49dfad4a4619c8390cae66cefdb204");
+    const result = try execute(std.testing.allocator, input, 1_000_000);
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expectEqualSlices(u8, &expected, result.output);
 }
 
 test "bn254Add - geth cdetrio1 empty input" {
@@ -177,51 +159,44 @@ test "bn254Add - geth cdetrio1 empty input" {
     try testing.expectEqualSlices(u8, &expected, result.output);
 }
 
-test "bn254Add - geth cdetrio2 single point" {
-    const testing = std.testing;
-    const allocator = testing.allocator;
-
-    const input_hex = "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
-    const expected_hex = "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
-
-    var input: [128]u8 = undefined;
+test "bn254Add - geth cdetrio1" {
+    // go-ethereum core/vm/testdata/precompiles/bn256Add.json
+    var input_buf: [128]u8 = undefined;
+    const input = try std.fmt.hexToBytes(&input_buf, "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000");
     var expected: [64]u8 = undefined;
-
-    _ = try std.fmt.hexToBytes(&input, input_hex);
-    _ = try std.fmt.hexToBytes(&expected, expected_hex);
-
-    const result = try execute(allocator, &input, 1000000);
-    defer result.deinit(allocator);
-
-    try testing.expectEqual(@as(usize, 64), result.output.len);
-    try testing.expectEqualSlices(u8, &expected, result.output);
+    _ = try std.fmt.hexToBytes(&expected, "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000");
+    const result = try execute(std.testing.allocator, input, 1_000_000);
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expectEqualSlices(u8, &expected, result.output);
 }
 
-test "bn254Add - geth cdetrio3 partial input" {
-    const testing = std.testing;
-    const allocator = testing.allocator;
-
-    const input_hex = "00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002";
-    const expected_hex = "00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002";
-
-    var input: [64]u8 = undefined;
+test "bn254Add - geth cdetrio2" {
+    // go-ethereum core/vm/testdata/precompiles/bn256Add.json
+    var input_buf: [64]u8 = undefined;
+    const input = try std.fmt.hexToBytes(&input_buf, "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000");
     var expected: [64]u8 = undefined;
-
-    _ = try std.fmt.hexToBytes(&input, input_hex);
-    _ = try std.fmt.hexToBytes(&expected, expected_hex);
-
-    const result = try execute(allocator, &input, 1000000);
-    defer result.deinit(allocator);
-
-    try testing.expectEqual(@as(usize, 64), result.output.len);
-    try testing.expectEqualSlices(u8, &expected, result.output);
+    _ = try std.fmt.hexToBytes(&expected, "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000");
+    const result = try execute(std.testing.allocator, input, 1_000_000);
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expectEqualSlices(u8, &expected, result.output);
 }
 
-test "bn254Add - geth cdetrio4 invalid point not on curve" {
+test "bn254Add - geth cdetrio3" {
+    // go-ethereum core/vm/testdata/precompiles/bn256Add.json
+    var input_buf: [80]u8 = undefined;
+    const input = try std.fmt.hexToBytes(&input_buf, "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000");
+    var expected: [64]u8 = undefined;
+    _ = try std.fmt.hexToBytes(&expected, "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000");
+    const result = try execute(std.testing.allocator, input, 1_000_000);
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expectEqualSlices(u8, &expected, result.output);
+}
+
+test "bn254Add - regression cdetrio4 invalid point not on curve" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input_hex = "0000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+    const input_hex = "0000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
 
     var input: [128]u8 = undefined;
     _ = try std.fmt.hexToBytes(&input, input_hex);
@@ -230,127 +205,73 @@ test "bn254Add - geth cdetrio4 invalid point not on curve" {
     try testing.expectError(error.InvalidPoint, result);
 }
 
-test "bn254Add - geth cdetrio5 generator point addition" {
-    const testing = std.testing;
-    const allocator = testing.allocator;
-
-    const input_hex = "0000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002";
-    const expected_hex = "030644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd315ed738c0e0a7c92e7845f96b2ae9c0a68a6a449e3538fc7ff3ebf7a5a18a2c4";
-
-    var input: [128]u8 = undefined;
+test "bn254Add - geth cdetrio5" {
+    // go-ethereum core/vm/testdata/precompiles/bn256Add.json
+    var input_buf: [192]u8 = undefined;
+    const input = try std.fmt.hexToBytes(&input_buf, "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000");
     var expected: [64]u8 = undefined;
-
-    _ = try std.fmt.hexToBytes(&input, input_hex);
-    _ = try std.fmt.hexToBytes(&expected, expected_hex);
-
-    const result = try execute(allocator, &input, 1000000);
-    defer result.deinit(allocator);
-
-    try testing.expectEqual(@as(usize, 64), result.output.len);
-    try testing.expectEqualSlices(u8, &expected, result.output);
+    _ = try std.fmt.hexToBytes(&expected, "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000");
+    const result = try execute(std.testing.allocator, input, 1_000_000);
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expectEqualSlices(u8, &expected, result.output);
 }
 
-test "bn254Add - geth cdetrio6 large x coordinate" {
-    const testing = std.testing;
-    const allocator = testing.allocator;
-
-    const input_hex = "17c139df0efee0f766bc0204762b774362e4ded88953a39ce849a8a7fa163fa901e0559bacb160664764a357af8a9fe70baa9258e0b959273ffc5718c6d4cc7c039730ea8dff1254c0fee9c0ea777d29a9c710b7e616683f194f18c43b43b869073a5ffcc6fc7a28c30723d6e58ce577356982d65b833a5a5c15bf9024b43d98";
-    const expected_hex = "15bf2bb17880144b5d1cd2b1f46eff9d617bffd1ca57c37fb5a49bd84e53cf66049c797f9ce0d17083deb32b5e36f2ea2a212ee036598dd7624c168993d1355f";
-
-    var input: [128]u8 = undefined;
+test "bn254Add - geth cdetrio6" {
+    // go-ethereum core/vm/testdata/precompiles/bn256Add.json
+    var input_buf: [128]u8 = undefined;
+    const input = try std.fmt.hexToBytes(&input_buf, "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002");
     var expected: [64]u8 = undefined;
-
-    _ = try std.fmt.hexToBytes(&input, input_hex);
-    _ = try std.fmt.hexToBytes(&expected, expected_hex);
-
-    const result = try execute(allocator, &input, 1000000);
-    defer result.deinit(allocator);
-
-    try testing.expectEqual(@as(usize, 64), result.output.len);
-    try testing.expectEqualSlices(u8, &expected, result.output);
+    _ = try std.fmt.hexToBytes(&expected, "00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002");
+    const result = try execute(std.testing.allocator, input, 1_000_000);
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expectEqualSlices(u8, &expected, result.output);
 }
 
-test "bn254Add - geth cdetrio7 another valid addition" {
-    const testing = std.testing;
-    const allocator = testing.allocator;
-
-    const input_hex = "17c139df0efee0f766bc0204762b774362e4ded88953a39ce849a8a7fa163fa901e0559bacb160664764a357af8a9fe70baa9258e0b959273ffc5718c6d4cc7c17c139df0efee0f766bc0204762b774362e4ded88953a39ce849a8a7fa163fa92e83f8d734803fc370eba25ed1f6b8768bd6d83887b87165fc2434fe11a830cb0";
-    const expected_hex = "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
-
-    var input: [128]u8 = undefined;
+test "bn254Add - geth cdetrio7" {
+    // go-ethereum core/vm/testdata/precompiles/bn256Add.json
+    var input_buf: [192]u8 = undefined;
+    const input = try std.fmt.hexToBytes(&input_buf, "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000");
     var expected: [64]u8 = undefined;
-
-    _ = try std.fmt.hexToBytes(&input, input_hex);
-    _ = try std.fmt.hexToBytes(&expected, expected_hex);
-
-    const result = try execute(allocator, &input, 1000000);
-    defer result.deinit(allocator);
-
-    try testing.expectEqual(@as(usize, 64), result.output.len);
-    try testing.expectEqualSlices(u8, &expected, result.output);
+    _ = try std.fmt.hexToBytes(&expected, "00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002");
+    const result = try execute(std.testing.allocator, input, 1_000_000);
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expectEqualSlices(u8, &expected, result.output);
 }
 
-test "bn254Add - geth cdetrio8 valid addition with large coordinates" {
-    const testing = std.testing;
-    const allocator = testing.allocator;
-
-    const input_hex = "039730ea8dff1254c0fee9c0ea777d29a9c710b7e616683f194f18c43b43b869073a5ffcc6fc7a28c30723d6e58ce577356982d65b833a5a5c15bf9024b43d9817c139df0efee0f766bc0204762b774362e4ded88953a39ce849a8a7fa163fa901e0559bacb160664764a357af8a9fe70baa9258e0b959273ffc5718c6d4cc7c";
-    const expected_hex = "15bf2bb17880144b5d1cd2b1f46eff9d617bffd1ca57c37fb5a49bd84e53cf66049c797f9ce0d17083deb32b5e36f2ea2a212ee036598dd7624c168993d1355f";
-
-    var input: [128]u8 = undefined;
+test "bn254Add - geth cdetrio8" {
+    // go-ethereum core/vm/testdata/precompiles/bn256Add.json
+    var input_buf: [64]u8 = undefined;
+    const input = try std.fmt.hexToBytes(&input_buf, "00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002");
     var expected: [64]u8 = undefined;
-
-    _ = try std.fmt.hexToBytes(&input, input_hex);
-    _ = try std.fmt.hexToBytes(&expected, expected_hex);
-
-    const result = try execute(allocator, &input, 1000000);
-    defer result.deinit(allocator);
-
-    try testing.expectEqual(@as(usize, 64), result.output.len);
-    try testing.expectEqualSlices(u8, &expected, result.output);
+    _ = try std.fmt.hexToBytes(&expected, "00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002");
+    const result = try execute(std.testing.allocator, input, 1_000_000);
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expectEqualSlices(u8, &expected, result.output);
 }
 
-test "bn254Add - geth cdetrio9 same point addition" {
-    const testing = std.testing;
-    const allocator = testing.allocator;
-
-    const input_hex = "039730ea8dff1254c0fee9c0ea777d29a9c710b7e616683f194f18c43b43b869073a5ffcc6fc7a28c30723d6e58ce577356982d65b833a5a5c15bf9024b43d98039730ea8dff1254c0fee9c0ea777d29a9c710b7e616683f194f18c43b43b869073a5ffcc6fc7a28c30723d6e58ce577356982d65b833a5a5c15bf9024b43d98";
-    const expected_hex = "1d739bd53b93e2d05f48f9626e5c6803e8cf53e8afb48a62337e42e555e44fa30f13d0f0fbf2aa7969e5b86f27ca82e381bb0b495dc2be5e6ed7d28ce5efde77";
-
-    var input: [128]u8 = undefined;
+test "bn254Add - geth cdetrio9" {
+    // go-ethereum core/vm/testdata/precompiles/bn256Add.json
+    var input_buf: [128]u8 = undefined;
+    const input = try std.fmt.hexToBytes(&input_buf, "0000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000");
     var expected: [64]u8 = undefined;
-
-    _ = try std.fmt.hexToBytes(&input, input_hex);
-    _ = try std.fmt.hexToBytes(&expected, expected_hex);
-
-    const result = try execute(allocator, &input, 1000000);
-    defer result.deinit(allocator);
-
-    try testing.expectEqual(@as(usize, 64), result.output.len);
-    try testing.expectEqualSlices(u8, &expected, result.output);
+    _ = try std.fmt.hexToBytes(&expected, "00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002");
+    const result = try execute(std.testing.allocator, input, 1_000_000);
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expectEqualSlices(u8, &expected, result.output);
 }
 
-test "bn254Add - geth cdetrio10 point doubling" {
-    const testing = std.testing;
-    const allocator = testing.allocator;
-
-    const input_hex = "17c139df0efee0f766bc0204762b774362e4ded88953a39ce849a8a7fa163fa901e0559bacb160664764a357af8a9fe70baa9258e0b959273ffc5718c6d4cc7c17c139df0efee0f766bc0204762b774362e4ded88953a39ce849a8a7fa163fa901e0559bacb160664764a357af8a9fe70baa9258e0b959273ffc5718c6d4cc7c";
-    const expected_hex = "0b5e9eed0ad939a5c58c738d8efb0dcf0e4ce0e74c81d8f1e23e2f8e67ca91612aa51f92cdccb75a71fea08abf02ca867b5a03e86c40a36a2ec7c0baa8b57eef";
-
-    var input: [128]u8 = undefined;
+test "bn254Add - geth cdetrio10" {
+    // go-ethereum core/vm/testdata/precompiles/bn256Add.json
+    var input_buf: [192]u8 = undefined;
+    const input = try std.fmt.hexToBytes(&input_buf, "000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000");
     var expected: [64]u8 = undefined;
-
-    _ = try std.fmt.hexToBytes(&input, input_hex);
-    _ = try std.fmt.hexToBytes(&expected, expected_hex);
-
-    const result = try execute(allocator, &input, 1000000);
-    defer result.deinit(allocator);
-
-    try testing.expectEqual(@as(usize, 64), result.output.len);
-    try testing.expectEqualSlices(u8, &expected, result.output);
+    _ = try std.fmt.hexToBytes(&expected, "00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002");
+    const result = try execute(std.testing.allocator, input, 1_000_000);
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expectEqualSlices(u8, &expected, result.output);
 }
 
-test "bn254Add - geth cdetrio11 invalid x larger than field modulus" {
+test "bn254Add - regression cdetrio11 invalid x larger than field modulus" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
@@ -363,7 +284,7 @@ test "bn254Add - geth cdetrio11 invalid x larger than field modulus" {
     try testing.expectError(error.InvalidPoint, result);
 }
 
-test "bn254Add - geth cdetrio12 invalid y larger than field modulus" {
+test "bn254Add - regression cdetrio12 invalid y larger than field modulus" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
@@ -376,7 +297,7 @@ test "bn254Add - geth cdetrio12 invalid y larger than field modulus" {
     try testing.expectError(error.InvalidPoint, result);
 }
 
-test "bn254Add - geth cdetrio13 coordinates at field modulus" {
+test "bn254Add - regression cdetrio13 coordinates at field modulus" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
@@ -389,22 +310,24 @@ test "bn254Add - geth cdetrio13 coordinates at field modulus" {
     try testing.expectError(error.InvalidPoint, result);
 }
 
-test "bn254Add - geth cdetrio14 zero point with valid point" {
-    const testing = std.testing;
-    const allocator = testing.allocator;
-
-    const input_hex = "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000039730ea8dff1254c0fee9c0ea777d29a9c710b7e616683f194f18c43b43b869073a5ffcc6fc7a28c30723d6e58ce577356982d65b833a5a5c15bf9024b43d98";
-    const expected_hex = "039730ea8dff1254c0fee9c0ea777d29a9c710b7e616683f194f18c43b43b869073a5ffcc6fc7a28c30723d6e58ce577356982d65b833a5a5c15bf9024b43d98";
-
-    var input: [128]u8 = undefined;
+test "bn254Add - geth cdetrio14" {
+    // go-ethereum core/vm/testdata/precompiles/bn256Add.json
+    var input_buf: [192]u8 = undefined;
+    const input = try std.fmt.hexToBytes(&input_buf, "17c139df0efee0f766bc0204762b774362e4ded88953a39ce849a8a7fa163fa901e0559bacb160664764a357af8a9fe70baa9258e0b959273ffc5718c6d4cc7c17c139df0efee0f766bc0204762b774362e4ded88953a39ce849a8a7fa163fa92e83f8d734803fc370eba25ed1f6b8768bd6d83887b87165fc2434fe11a830cb00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000");
     var expected: [64]u8 = undefined;
+    _ = try std.fmt.hexToBytes(&expected, "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000");
+    const result = try execute(std.testing.allocator, input, 1_000_000);
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expectEqualSlices(u8, &expected, result.output);
+}
 
-    _ = try std.fmt.hexToBytes(&input, input_hex);
-    _ = try std.fmt.hexToBytes(&expected, expected_hex);
-
-    const result = try execute(allocator, &input, 1000000);
-    defer result.deinit(allocator);
-
-    try testing.expectEqual(@as(usize, 64), result.output.len);
-    try testing.expectEqualSlices(u8, &expected, result.output);
+test "EIP-196 ADD rejects noncanonical coordinates in either point" {
+    var input = [_]u8{0} ** 128;
+    for (0..4) |slot| {
+        std.mem.writeInt(u256, input[slot * 32 ..][0..32], bn254.FP_MOD, .big);
+        try std.testing.expectError(error.InvalidPoint, execute(std.testing.allocator, &input, GAS));
+        std.mem.writeInt(u256, input[slot * 32 ..][0..32], bn254.FP_MOD + 1, .big);
+        try std.testing.expectError(error.InvalidPoint, execute(std.testing.allocator, &input, GAS));
+        @memset(input[slot * 32 ..][0..32], 0);
+    }
 }

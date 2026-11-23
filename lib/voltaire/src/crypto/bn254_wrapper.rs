@@ -1,5 +1,5 @@
-use ark_bn254::{Bn254, G1Affine, G2Affine};
 use ark_bls12_381::{Bls12_381, G1Affine as BlsG1Affine, G2Affine as BlsG2Affine};
+use ark_bn254::{Bn254, G1Affine, G2Affine};
 use ark_ec::{pairing::Pairing, AffineRepr, CurveGroup};
 use ark_ff::{BigInteger, One, PrimeField, Zero};
 /// BN254 Wrapper Library for Zig Integration
@@ -10,6 +10,28 @@ use ark_ff::{BigInteger, One, PrimeField, Zero};
 ///
 /// Based on arkworks algebra library for production-grade BN254 operations.
 use std::os::raw::{c_int, c_uchar, c_uint};
+
+// Reject noncanonical field encodings before arkworks can reduce them.
+fn canonical<F: PrimeField>(bytes: &[u8]) -> Option<F> {
+    let modulus = F::MODULUS.to_bytes_be();
+    if bytes.len() < modulus.len() {
+        return None;
+    }
+    let padding = bytes.len() - modulus.len();
+    if bytes[..padding].iter().any(|byte| *byte != 0) || bytes[padding..] >= modulus[..] {
+        return None;
+    }
+    Some(F::from_be_bytes_mod_order(&bytes[padding..]))
+}
+
+macro_rules! field {
+    ($bytes:expr, $result:ident) => {
+        match canonical::<Fq>($bytes) {
+            Some(value) => value,
+            None => return $result::InvalidPoint as c_int,
+        }
+    };
+}
 
 /// Result codes for BN254 operations
 #[repr(C)]
@@ -84,19 +106,21 @@ pub unsafe extern "C" fn bn254_ecmul(
     // Convert bytes to field elements
     use ark_bn254::{Fq, Fr};
 
-    let x_coord = Fq::from_be_bytes_mod_order(x_bytes);
+    let x_coord = field!(x_bytes, Bn254Result);
 
-    let y_coord = Fq::from_be_bytes_mod_order(y_bytes);
+    let y_coord = field!(y_bytes, Bn254Result);
 
     let scalar = Fr::from_be_bytes_mod_order(scalar_bytes);
 
     // Create G1 point from coordinates
-    let point = match G1Affine::new_unchecked(x_coord, y_coord) {
-        p if p.is_on_curve() && p.is_in_correct_subgroup_assuming_on_curve() => p,
-        _ => {
-            // Invalid point, return point at infinity
-            output_slice[..64].fill(0);
-            return Bn254Result::Success as c_int;
+    let point = if x_coord.is_zero() && y_coord.is_zero() {
+        G1Affine::zero()
+    } else {
+        match G1Affine::new_unchecked(x_coord, y_coord) {
+            p if p.is_on_curve() && p.is_in_correct_subgroup_assuming_on_curve() => p,
+            _ => {
+                return Bn254Result::InvalidPoint as c_int;
+            }
         }
     };
 
@@ -111,17 +135,9 @@ pub unsafe extern "C" fn bn254_ecmul(
     }
 
     // Convert result to bytes (big-endian)
-    let x_result = result.x();
-    let y_result = result.y();
 
-    let x_bytes = x_result
-        .expect("x coordinate should exist")
-        .into_bigint()
-        .to_bytes_be();
-    let y_bytes = y_result
-        .expect("y coordinate should exist")
-        .into_bigint()
-        .to_bytes_be();
+    let x_bytes = result.x.into_bigint().to_bytes_be();
+    let y_bytes = result.y.into_bigint().to_bytes_be();
 
     // Pad to 32 bytes and copy to output
     let x_start = 32 - x_bytes.len();
@@ -199,8 +215,8 @@ pub unsafe extern "C" fn bn254_ecpairing(
         let g1_x_bytes = &input_slice[pair_start..pair_start + 32];
         let g1_y_bytes = &input_slice[pair_start + 32..pair_start + 64];
 
-        let g1_x = Fq::from_be_bytes_mod_order(g1_x_bytes);
-        let g1_y = Fq::from_be_bytes_mod_order(g1_y_bytes);
+        let g1_x = field!(g1_x_bytes, Bn254Result);
+        let g1_y = field!(g1_y_bytes, Bn254Result);
 
         // Check if this is the point at infinity (both coordinates are zero)
         if g1_x.is_zero() && g1_y.is_zero() {
@@ -209,25 +225,23 @@ pub unsafe extern "C" fn bn254_ecpairing(
             let g1_point = match G1Affine::new_unchecked(g1_x, g1_y) {
                 p if p.is_on_curve() && p.is_in_correct_subgroup_assuming_on_curve() => p,
                 _ => {
-                    // Invalid G1 point
-                    output_slice[..32].fill(0);
-                    return Bn254Result::Success as c_int;
+                    return Bn254Result::InvalidPoint as c_int;
                 }
             };
             g1_points.push(g1_point);
         }
 
         // Parse G2 point (128 bytes)
-        // G2 coordinates are in Fp2, represented as (a + b*i) where each component is 32 bytes
-        let g2_x_c0_bytes = &input_slice[pair_start + 64..pair_start + 96];
-        let g2_x_c1_bytes = &input_slice[pair_start + 96..pair_start + 128];
-        let g2_y_c0_bytes = &input_slice[pair_start + 128..pair_start + 160];
-        let g2_y_c1_bytes = &input_slice[pair_start + 160..pair_start + 192];
+        // EIP-197 encodes Fp2 as imaginary component first, then real (32 bytes each).
+        let g2_x_c0_bytes = &input_slice[pair_start + 96..pair_start + 128];
+        let g2_x_c1_bytes = &input_slice[pair_start + 64..pair_start + 96];
+        let g2_y_c0_bytes = &input_slice[pair_start + 160..pair_start + 192];
+        let g2_y_c1_bytes = &input_slice[pair_start + 128..pair_start + 160];
 
-        let g2_x_c0 = Fq::from_be_bytes_mod_order(g2_x_c0_bytes);
-        let g2_x_c1 = Fq::from_be_bytes_mod_order(g2_x_c1_bytes);
-        let g2_y_c0 = Fq::from_be_bytes_mod_order(g2_y_c0_bytes);
-        let g2_y_c1 = Fq::from_be_bytes_mod_order(g2_y_c1_bytes);
+        let g2_x_c0 = field!(g2_x_c0_bytes, Bn254Result);
+        let g2_x_c1 = field!(g2_x_c1_bytes, Bn254Result);
+        let g2_y_c0 = field!(g2_y_c0_bytes, Bn254Result);
+        let g2_y_c1 = field!(g2_y_c1_bytes, Bn254Result);
 
         let g2_x = Fq2::new(g2_x_c0, g2_x_c1);
         let g2_y = Fq2::new(g2_y_c0, g2_y_c1);
@@ -239,9 +253,7 @@ pub unsafe extern "C" fn bn254_ecpairing(
             let g2_point = match G2Affine::new_unchecked(g2_x, g2_y) {
                 p if p.is_on_curve() && p.is_in_correct_subgroup_assuming_on_curve() => p,
                 _ => {
-                    // Invalid G2 point
-                    output_slice[..32].fill(0);
-                    return Bn254Result::Success as c_int;
+                    return Bn254Result::InvalidPoint as c_int;
                 }
             };
             g2_points.push(g2_point);
@@ -320,23 +332,12 @@ pub enum Bls12381Result {
     ComputationFailed = 4,
 }
 
-/// Perform BLS12-381 G1 addition
-///
-/// Input format (128 bytes):
-/// - Bytes 0-47: first point x coordinate (big-endian)
-/// - Bytes 48-95: first point y coordinate (big-endian)
-/// - Bytes 96-143: second point x coordinate (big-endian)
-/// - Bytes 144-191: second point y coordinate (big-endian)
-///
-/// Output format (96 bytes):
-/// - Bytes 0-47: result x coordinate (big-endian)
-/// - Bytes 48-95: result y coordinate (big-endian)
+/// EIP-2537 encoding: each Fp is 16 zero bytes followed by 48 big-endian bytes.
+/// Fp2 components are c0, c1; scalars are 32 big-endian bytes.
+/// ADD requires curve membership; multiplication/MSM/pairing also require subgroup membership.
 ///
 /// # Safety
-///
-/// This function dereferences raw pointers and requires:
-/// - `input` must be valid for reads of `input_len` bytes
-/// - `output` must be valid for writes of `output_len` bytes
+/// Input and output must be valid, nonoverlapping buffers for the supplied lengths.
 #[no_mangle]
 pub unsafe extern "C" fn bls12_381_g1_add(
     input: *const c_uchar,
@@ -348,7 +349,7 @@ pub unsafe extern "C" fn bls12_381_g1_add(
         return Bls12381Result::InvalidInput as c_int;
     }
 
-    if input_len < 256 || output_len < 128 {
+    if input_len != 256 || output_len < 128 {
         return Bls12381Result::InvalidInput as c_int;
     }
 
@@ -356,30 +357,27 @@ pub unsafe extern "C" fn bls12_381_g1_add(
     let output_slice = std::slice::from_raw_parts_mut(output, output_len as usize);
 
     // Parse first G1 point (128 bytes)
-    let p1_x_bytes = &input_slice[0..48];
-    let p1_y_bytes = &input_slice[48..96];
-    
+    let p1_x_bytes = &input_slice[0..64];
+    let p1_y_bytes = &input_slice[64..128];
+
     // Parse second G1 point (128 bytes)
-    let p2_x_bytes = &input_slice[128..176];
-    let p2_y_bytes = &input_slice[176..224];
+    let p2_x_bytes = &input_slice[128..192];
+    let p2_y_bytes = &input_slice[192..256];
 
     use ark_bls12_381::Fq;
-    
-    let p1_x = Fq::from_be_bytes_mod_order(p1_x_bytes);
-    let p1_y = Fq::from_be_bytes_mod_order(p1_y_bytes);
-    let p2_x = Fq::from_be_bytes_mod_order(p2_x_bytes);
-    let p2_y = Fq::from_be_bytes_mod_order(p2_y_bytes);
+
+    let p1_x = field!(p1_x_bytes, Bls12381Result);
+    let p1_y = field!(p1_y_bytes, Bls12381Result);
+    let p2_x = field!(p2_x_bytes, Bls12381Result);
+    let p2_y = field!(p2_y_bytes, Bls12381Result);
 
     // Check for point at infinity
     let p1 = if p1_x.is_zero() && p1_y.is_zero() {
         BlsG1Affine::zero()
     } else {
         match BlsG1Affine::new_unchecked(p1_x, p1_y) {
-            p if p.is_on_curve() && p.is_in_correct_subgroup_assuming_on_curve() => p,
-            _ => {
-                output_slice[..128].fill(0);
-                return Bls12381Result::Success as c_int;
-            }
+            p if p.is_on_curve() => p,
+            _ => return Bls12381Result::InvalidPoint as c_int,
         }
     };
 
@@ -387,11 +385,8 @@ pub unsafe extern "C" fn bls12_381_g1_add(
         BlsG1Affine::zero()
     } else {
         match BlsG1Affine::new_unchecked(p2_x, p2_y) {
-            p if p.is_on_curve() && p.is_in_correct_subgroup_assuming_on_curve() => p,
-            _ => {
-                output_slice[..128].fill(0);
-                return Bls12381Result::Success as c_int;
-            }
+            p if p.is_on_curve() => p,
+            _ => return Bls12381Result::InvalidPoint as c_int,
         }
     };
 
@@ -405,36 +400,26 @@ pub unsafe extern "C" fn bls12_381_g1_add(
     }
 
     // Convert result to bytes
-    let x_result = result.x().expect("x coordinate should exist");
-    let y_result = result.y().expect("y coordinate should exist");
+    let x_result = result.x;
+    let y_result = result.y;
 
     let x_bytes = x_result.into_bigint().to_bytes_be();
     let y_bytes = y_result.into_bigint().to_bytes_be();
 
     // Pad and copy to output
     output_slice[..128].fill(0);
-    output_slice[48 - x_bytes.len()..48].copy_from_slice(&x_bytes);
-    output_slice[96 - y_bytes.len()..96].copy_from_slice(&y_bytes);
+    output_slice[64 - x_bytes.len()..64].copy_from_slice(&x_bytes);
+    output_slice[128 - y_bytes.len()..128].copy_from_slice(&y_bytes);
 
     Bls12381Result::Success as c_int
 }
 
-/// Perform BLS12-381 G1 scalar multiplication
-///
-/// Input format (144 bytes):
-/// - Bytes 0-47: x coordinate (big-endian)
-/// - Bytes 48-95: y coordinate (big-endian)
-/// - Bytes 96-127: scalar (big-endian)
-///
-/// Output format (128 bytes):
-/// - Bytes 0-47: result x coordinate (big-endian)
-/// - Bytes 48-95: result y coordinate (big-endian)
+/// EIP-2537 encoding: each Fp is 16 zero bytes followed by 48 big-endian bytes.
+/// Fp2 components are c0, c1; scalars are 32 big-endian bytes.
+/// ADD requires curve membership; multiplication/MSM/pairing also require subgroup membership.
 ///
 /// # Safety
-///
-/// This function dereferences raw pointers and requires:
-/// - `input` must be valid for reads of `input_len` bytes
-/// - `output` must be valid for writes of `output_len` bytes
+/// Input and output must be valid, nonoverlapping buffers for the supplied lengths.
 #[no_mangle]
 pub unsafe extern "C" fn bls12_381_g1_mul(
     input: *const c_uchar,
@@ -446,7 +431,7 @@ pub unsafe extern "C" fn bls12_381_g1_mul(
         return Bls12381Result::InvalidInput as c_int;
     }
 
-    if input_len < 160 || output_len < 128 {
+    if input_len != 160 || output_len < 128 {
         return Bls12381Result::InvalidInput as c_int;
     }
 
@@ -454,16 +439,16 @@ pub unsafe extern "C" fn bls12_381_g1_mul(
     let output_slice = std::slice::from_raw_parts_mut(output, output_len as usize);
 
     // Parse G1 point (128 bytes)
-    let x_bytes = &input_slice[0..48];
-    let y_bytes = &input_slice[48..96];
-    
+    let x_bytes = &input_slice[0..64];
+    let y_bytes = &input_slice[64..128];
+
     // Parse scalar (32 bytes)
     let scalar_bytes = &input_slice[128..160];
 
     use ark_bls12_381::{Fq, Fr};
-    
-    let x_coord = Fq::from_be_bytes_mod_order(x_bytes);
-    let y_coord = Fq::from_be_bytes_mod_order(y_bytes);
+
+    let x_coord = field!(x_bytes, Bls12381Result);
+    let y_coord = field!(y_bytes, Bls12381Result);
     let scalar = Fr::from_be_bytes_mod_order(scalar_bytes);
 
     // Check for point at infinity
@@ -472,10 +457,7 @@ pub unsafe extern "C" fn bls12_381_g1_mul(
     } else {
         match BlsG1Affine::new_unchecked(x_coord, y_coord) {
             p if p.is_on_curve() && p.is_in_correct_subgroup_assuming_on_curve() => p,
-            _ => {
-                output_slice[..128].fill(0);
-                return Bls12381Result::Success as c_int;
-            }
+            _ => return Bls12381Result::InvalidPoint as c_int,
         }
     };
 
@@ -489,38 +471,26 @@ pub unsafe extern "C" fn bls12_381_g1_mul(
     }
 
     // Convert result to bytes
-    let x_result = result.x().expect("x coordinate should exist");
-    let y_result = result.y().expect("y coordinate should exist");
+    let x_result = result.x;
+    let y_result = result.y;
 
     let x_bytes = x_result.into_bigint().to_bytes_be();
     let y_bytes = y_result.into_bigint().to_bytes_be();
 
     // Pad and copy to output
     output_slice[..128].fill(0);
-    output_slice[48 - x_bytes.len()..48].copy_from_slice(&x_bytes);
-    output_slice[96 - y_bytes.len()..96].copy_from_slice(&y_bytes);
+    output_slice[64 - x_bytes.len()..64].copy_from_slice(&x_bytes);
+    output_slice[128 - y_bytes.len()..128].copy_from_slice(&y_bytes);
 
     Bls12381Result::Success as c_int
 }
 
-/// Perform BLS12-381 G1 multi-scalar multiplication
-///
-/// Input format (variable, 160 * k bytes for k points):
-/// Each 160-byte group contains:
-/// - Bytes 0-47: x coordinate (big-endian)
-/// - Bytes 48-95: y coordinate (big-endian)
-/// - Bytes 96-127: scalar (big-endian)
-/// - Bytes 128-159: padding (ignored)
-///
-/// Output format (128 bytes):
-/// - Bytes 0-47: result x coordinate (big-endian)
-/// - Bytes 48-95: result y coordinate (big-endian)
+/// EIP-2537 encoding: each Fp is 16 zero bytes followed by 48 big-endian bytes.
+/// Fp2 components are c0, c1; scalars are 32 big-endian bytes.
+/// ADD requires curve membership; multiplication/MSM/pairing also require subgroup membership.
 ///
 /// # Safety
-///
-/// This function dereferences raw pointers and requires:
-/// - `input` must be valid for reads of `input_len` bytes
-/// - `output` must be valid for writes of `output_len` bytes
+/// Input and output must be valid, nonoverlapping buffers for the supplied lengths.
 #[no_mangle]
 pub unsafe extern "C" fn bls12_381_g1_multiexp(
     input: *const c_uchar,
@@ -532,7 +502,7 @@ pub unsafe extern "C" fn bls12_381_g1_multiexp(
         return Bls12381Result::InvalidInput as c_int;
     }
 
-    if input_len % 160 != 0 || output_len < 128 {
+    if input_len == 0 || input_len % 160 != 0 || output_len < 128 {
         return Bls12381Result::InvalidInput as c_int;
     }
 
@@ -541,19 +511,19 @@ pub unsafe extern "C" fn bls12_381_g1_multiexp(
 
     use ark_bls12_381::{Fq, Fr, G1Projective};
     use ark_ec::VariableBaseMSM;
-    
+
     let num_pairs = (input_len as usize) / 160;
     let mut points = Vec::with_capacity(num_pairs);
     let mut scalars = Vec::with_capacity(num_pairs);
 
     for i in 0..num_pairs {
         let offset = i * 160;
-        let x_bytes = &input_slice[offset..offset + 48];
-        let y_bytes = &input_slice[offset + 48..offset + 96];
+        let x_bytes = &input_slice[offset + 0..offset + 64];
+        let y_bytes = &input_slice[offset + 64..offset + 128];
         let scalar_bytes = &input_slice[offset + 128..offset + 160];
 
-        let x_coord = Fq::from_be_bytes_mod_order(x_bytes);
-        let y_coord = Fq::from_be_bytes_mod_order(y_bytes);
+        let x_coord = field!(x_bytes, Bls12381Result);
+        let y_coord = field!(y_bytes, Bls12381Result);
         let scalar = Fr::from_be_bytes_mod_order(scalar_bytes);
 
         // Skip point at infinity
@@ -563,7 +533,7 @@ pub unsafe extern "C" fn bls12_381_g1_multiexp(
 
         let point = match BlsG1Affine::new_unchecked(x_coord, y_coord) {
             p if p.is_on_curve() && p.is_in_correct_subgroup_assuming_on_curve() => p,
-            _ => continue,
+            _ => return Bls12381Result::InvalidPoint as c_int,
         };
 
         points.push(point);
@@ -574,7 +544,10 @@ pub unsafe extern "C" fn bls12_381_g1_multiexp(
     let result = if points.is_empty() {
         BlsG1Affine::zero()
     } else {
-        G1Projective::msm(&points, &scalars).unwrap().into_affine()
+        match G1Projective::msm(&points, &scalars) {
+            Ok(result) => result.into_affine(),
+            Err(_) => return Bls12381Result::ComputationFailed as c_int,
+        }
     };
 
     // Handle point at infinity
@@ -584,35 +557,26 @@ pub unsafe extern "C" fn bls12_381_g1_multiexp(
     }
 
     // Convert result to bytes
-    let x_result = result.x().expect("x coordinate should exist");
-    let y_result = result.y().expect("y coordinate should exist");
+    let x_result = result.x;
+    let y_result = result.y;
 
     let x_bytes = x_result.into_bigint().to_bytes_be();
     let y_bytes = y_result.into_bigint().to_bytes_be();
 
     // Pad and copy to output
     output_slice[..128].fill(0);
-    output_slice[48 - x_bytes.len()..48].copy_from_slice(&x_bytes);
-    output_slice[96 - y_bytes.len()..96].copy_from_slice(&y_bytes);
+    output_slice[64 - x_bytes.len()..64].copy_from_slice(&x_bytes);
+    output_slice[128 - y_bytes.len()..128].copy_from_slice(&y_bytes);
 
     Bls12381Result::Success as c_int
 }
 
-/// Perform BLS12-381 pairing check
-///
-/// Input format (variable, 384 * k bytes for k pairs):
-/// Each 384-byte group contains:
-/// - Bytes 0-127: G1 point (x, y coordinates, 48 bytes each + 32 bytes padding)
-/// - Bytes 128-383: G2 point (x and y in Fp2, 96 bytes each + 64 bytes padding)
-///
-/// Output format (32 bytes):
-/// - 32-byte boolean result (0x00...00 for false, 0x00...01 for true)
+/// EIP-2537 encoding: each Fp is 16 zero bytes followed by 48 big-endian bytes.
+/// Fp2 components are c0, c1; scalars are 32 big-endian bytes.
+/// ADD requires curve membership; multiplication/MSM/pairing also require subgroup membership.
 ///
 /// # Safety
-///
-/// This function dereferences raw pointers and requires:
-/// - `input` must be valid for reads of `input_len` bytes
-/// - `output` must be valid for writes of `output_len` bytes
+/// Input and output must be valid, nonoverlapping buffers for the supplied lengths.
 #[no_mangle]
 pub unsafe extern "C" fn bls12_381_pairing(
     input: *const c_uchar,
@@ -624,60 +588,50 @@ pub unsafe extern "C" fn bls12_381_pairing(
         return Bls12381Result::InvalidInput as c_int;
     }
 
-    if input_len % 384 != 0 || output_len < 32 {
+    if input_len == 0 || input_len % 384 != 0 || output_len < 32 {
         return Bls12381Result::InvalidInput as c_int;
     }
 
     let input_slice = std::slice::from_raw_parts(input, input_len as usize);
     let output_slice = std::slice::from_raw_parts_mut(output, output_len as usize);
 
-    use ark_bls12_381::{Fq, Fq2, Fq12};
-    
+    use ark_bls12_381::{Fq, Fq12, Fq2};
+
     let num_pairs = (input_len as usize) / 384;
     let mut g1_points = Vec::with_capacity(num_pairs);
     let mut g2_points = Vec::with_capacity(num_pairs);
 
-    // Handle empty input (should return true according to EIP-2537)
-    if input_len == 0 {
-        output_slice[..32].fill(0);
-        output_slice[31] = 1;
-        return Bls12381Result::Success as c_int;
-    }
-
     for i in 0..num_pairs {
         let offset = i * 384;
-        
-        // Parse G1 point (128 bytes)
-        let g1_x_bytes = &input_slice[offset..offset + 48];
-        let g1_y_bytes = &input_slice[offset + 48..offset + 96];
 
-        let g1_x = Fq::from_be_bytes_mod_order(g1_x_bytes);
-        let g1_y = Fq::from_be_bytes_mod_order(g1_y_bytes);
+        // Parse G1 point (128 bytes)
+        let g1_x_bytes = &input_slice[offset + 0..offset + 64];
+        let g1_y_bytes = &input_slice[offset + 64..offset + 128];
+
+        let g1_x = field!(g1_x_bytes, Bls12381Result);
+        let g1_y = field!(g1_y_bytes, Bls12381Result);
 
         let g1_point = if g1_x.is_zero() && g1_y.is_zero() {
             BlsG1Affine::zero()
         } else {
             match BlsG1Affine::new_unchecked(g1_x, g1_y) {
                 p if p.is_on_curve() && p.is_in_correct_subgroup_assuming_on_curve() => p,
-                _ => {
-                    output_slice[..32].fill(0);
-                    return Bls12381Result::Success as c_int;
-                }
+                _ => return Bls12381Result::InvalidPoint as c_int,
             }
         };
         g1_points.push(g1_point);
 
         // Parse G2 point (256 bytes)
         // G2 coordinates are in Fp2
-        let g2_x_c0_bytes = &input_slice[offset + 128..offset + 176];
-        let g2_x_c1_bytes = &input_slice[offset + 176..offset + 224];
-        let g2_y_c0_bytes = &input_slice[offset + 224..offset + 272];
-        let g2_y_c1_bytes = &input_slice[offset + 272..offset + 320];
+        let g2_x_c0_bytes = &input_slice[offset + 128..offset + 192];
+        let g2_x_c1_bytes = &input_slice[offset + 192..offset + 256];
+        let g2_y_c0_bytes = &input_slice[offset + 256..offset + 320];
+        let g2_y_c1_bytes = &input_slice[offset + 320..offset + 384];
 
-        let g2_x_c0 = Fq::from_be_bytes_mod_order(g2_x_c0_bytes);
-        let g2_x_c1 = Fq::from_be_bytes_mod_order(g2_x_c1_bytes);
-        let g2_y_c0 = Fq::from_be_bytes_mod_order(g2_y_c0_bytes);
-        let g2_y_c1 = Fq::from_be_bytes_mod_order(g2_y_c1_bytes);
+        let g2_x_c0 = field!(g2_x_c0_bytes, Bls12381Result);
+        let g2_x_c1 = field!(g2_x_c1_bytes, Bls12381Result);
+        let g2_y_c0 = field!(g2_y_c0_bytes, Bls12381Result);
+        let g2_y_c1 = field!(g2_y_c1_bytes, Bls12381Result);
 
         let g2_x = Fq2::new(g2_x_c0, g2_x_c1);
         let g2_y = Fq2::new(g2_y_c0, g2_y_c1);
@@ -687,10 +641,7 @@ pub unsafe extern "C" fn bls12_381_pairing(
         } else {
             match BlsG2Affine::new_unchecked(g2_x, g2_y) {
                 p if p.is_on_curve() && p.is_in_correct_subgroup_assuming_on_curve() => p,
-                _ => {
-                    output_slice[..32].fill(0);
-                    return Bls12381Result::Success as c_int;
-                }
+                _ => return Bls12381Result::InvalidPoint as c_int,
             }
         };
         g2_points.push(g2_point);
@@ -725,23 +676,12 @@ pub extern "C" fn bls12_381_pairing_output_size() -> c_uint {
     32
 }
 
-/// Perform BLS12-381 G2 addition
-///
-/// Input format (512 bytes):
-/// - Bytes 0-95: first point x coordinate (Fp2: c0 48 bytes + c1 48 bytes, big-endian)
-/// - Bytes 96-191: first point y coordinate (Fp2: c0 48 bytes + c1 48 bytes, big-endian)
-/// - Bytes 192-287: second point x coordinate (Fp2: c0 48 bytes + c1 48 bytes, big-endian)
-/// - Bytes 288-383: second point y coordinate (Fp2: c0 48 bytes + c1 48 bytes, big-endian)
-///
-/// Output format (256 bytes):
-/// - Bytes 0-95: result x coordinate (Fp2: c0 48 bytes + c1 48 bytes, big-endian)
-/// - Bytes 96-191: result y coordinate (Fp2: c0 48 bytes + c1 48 bytes, big-endian)
+/// EIP-2537 encoding: each Fp is 16 zero bytes followed by 48 big-endian bytes.
+/// Fp2 components are c0, c1; scalars are 32 big-endian bytes.
+/// ADD requires curve membership; multiplication/MSM/pairing also require subgroup membership.
 ///
 /// # Safety
-///
-/// This function dereferences raw pointers and requires:
-/// - `input` must be valid for reads of `input_len` bytes
-/// - `output` must be valid for writes of `output_len` bytes
+/// Input and output must be valid, nonoverlapping buffers for the supplied lengths.
 #[no_mangle]
 pub unsafe extern "C" fn bls12_381_g2_add(
     input: *const c_uchar,
@@ -753,7 +693,7 @@ pub unsafe extern "C" fn bls12_381_g2_add(
         return Bls12381Result::InvalidInput as c_int;
     }
 
-    if input_len < 512 || output_len < 256 {
+    if input_len != 512 || output_len < 256 {
         return Bls12381Result::InvalidInput as c_int;
     }
 
@@ -763,28 +703,28 @@ pub unsafe extern "C" fn bls12_381_g2_add(
     use ark_bls12_381::{Fq, Fq2};
 
     // Parse first G2 point (256 bytes)
-    let p1_x_c0_bytes = &input_slice[0..48];
-    let p1_x_c1_bytes = &input_slice[48..96];
-    let p1_y_c0_bytes = &input_slice[96..144];
-    let p1_y_c1_bytes = &input_slice[144..192];
+    let p1_x_c0_bytes = &input_slice[0..64];
+    let p1_x_c1_bytes = &input_slice[64..128];
+    let p1_y_c0_bytes = &input_slice[128..192];
+    let p1_y_c1_bytes = &input_slice[192..256];
 
     // Parse second G2 point (256 bytes)
-    let p2_x_c0_bytes = &input_slice[256..304];
-    let p2_x_c1_bytes = &input_slice[304..352];
-    let p2_y_c0_bytes = &input_slice[352..400];
-    let p2_y_c1_bytes = &input_slice[400..448];
+    let p2_x_c0_bytes = &input_slice[256..320];
+    let p2_x_c1_bytes = &input_slice[320..384];
+    let p2_y_c0_bytes = &input_slice[384..448];
+    let p2_y_c1_bytes = &input_slice[448..512];
 
-    let p1_x_c0 = Fq::from_be_bytes_mod_order(p1_x_c0_bytes);
-    let p1_x_c1 = Fq::from_be_bytes_mod_order(p1_x_c1_bytes);
-    let p1_y_c0 = Fq::from_be_bytes_mod_order(p1_y_c0_bytes);
-    let p1_y_c1 = Fq::from_be_bytes_mod_order(p1_y_c1_bytes);
+    let p1_x_c0 = field!(p1_x_c0_bytes, Bls12381Result);
+    let p1_x_c1 = field!(p1_x_c1_bytes, Bls12381Result);
+    let p1_y_c0 = field!(p1_y_c0_bytes, Bls12381Result);
+    let p1_y_c1 = field!(p1_y_c1_bytes, Bls12381Result);
     let p1_x = Fq2::new(p1_x_c0, p1_x_c1);
     let p1_y = Fq2::new(p1_y_c0, p1_y_c1);
 
-    let p2_x_c0 = Fq::from_be_bytes_mod_order(p2_x_c0_bytes);
-    let p2_x_c1 = Fq::from_be_bytes_mod_order(p2_x_c1_bytes);
-    let p2_y_c0 = Fq::from_be_bytes_mod_order(p2_y_c0_bytes);
-    let p2_y_c1 = Fq::from_be_bytes_mod_order(p2_y_c1_bytes);
+    let p2_x_c0 = field!(p2_x_c0_bytes, Bls12381Result);
+    let p2_x_c1 = field!(p2_x_c1_bytes, Bls12381Result);
+    let p2_y_c0 = field!(p2_y_c0_bytes, Bls12381Result);
+    let p2_y_c1 = field!(p2_y_c1_bytes, Bls12381Result);
     let p2_x = Fq2::new(p2_x_c0, p2_x_c1);
     let p2_y = Fq2::new(p2_y_c0, p2_y_c1);
 
@@ -793,11 +733,8 @@ pub unsafe extern "C" fn bls12_381_g2_add(
         BlsG2Affine::zero()
     } else {
         match BlsG2Affine::new_unchecked(p1_x, p1_y) {
-            p if p.is_on_curve() && p.is_in_correct_subgroup_assuming_on_curve() => p,
-            _ => {
-                output_slice[..256].fill(0);
-                return Bls12381Result::Success as c_int;
-            }
+            p if p.is_on_curve() => p,
+            _ => return Bls12381Result::InvalidPoint as c_int,
         }
     };
 
@@ -805,11 +742,8 @@ pub unsafe extern "C" fn bls12_381_g2_add(
         BlsG2Affine::zero()
     } else {
         match BlsG2Affine::new_unchecked(p2_x, p2_y) {
-            p if p.is_on_curve() && p.is_in_correct_subgroup_assuming_on_curve() => p,
-            _ => {
-                output_slice[..256].fill(0);
-                return Bls12381Result::Success as c_int;
-            }
+            p if p.is_on_curve() => p,
+            _ => return Bls12381Result::InvalidPoint as c_int,
         }
     };
 
@@ -823,8 +757,8 @@ pub unsafe extern "C" fn bls12_381_g2_add(
     }
 
     // Convert result to bytes
-    let x_result = result.x().expect("x coordinate should exist");
-    let y_result = result.y().expect("y coordinate should exist");
+    let x_result = result.x;
+    let y_result = result.y;
 
     let x_c0_bytes = x_result.c0.into_bigint().to_bytes_be();
     let x_c1_bytes = x_result.c1.into_bigint().to_bytes_be();
@@ -833,30 +767,20 @@ pub unsafe extern "C" fn bls12_381_g2_add(
 
     // Pad and copy to output
     output_slice[..256].fill(0);
-    output_slice[48 - x_c0_bytes.len()..48].copy_from_slice(&x_c0_bytes);
-    output_slice[96 - x_c1_bytes.len()..96].copy_from_slice(&x_c1_bytes);
-    output_slice[144 - y_c0_bytes.len()..144].copy_from_slice(&y_c0_bytes);
-    output_slice[192 - y_c1_bytes.len()..192].copy_from_slice(&y_c1_bytes);
+    output_slice[64 - x_c0_bytes.len()..64].copy_from_slice(&x_c0_bytes);
+    output_slice[128 - x_c1_bytes.len()..128].copy_from_slice(&x_c1_bytes);
+    output_slice[192 - y_c0_bytes.len()..192].copy_from_slice(&y_c0_bytes);
+    output_slice[256 - y_c1_bytes.len()..256].copy_from_slice(&y_c1_bytes);
 
     Bls12381Result::Success as c_int
 }
 
-/// Perform BLS12-381 G2 scalar multiplication
-///
-/// Input format (288 bytes):
-/// - Bytes 0-95: x coordinate (Fp2: c0 48 bytes + c1 48 bytes, big-endian)
-/// - Bytes 96-191: y coordinate (Fp2: c0 48 bytes + c1 48 bytes, big-endian)
-/// - Bytes 192-223: scalar (32 bytes, big-endian)
-///
-/// Output format (256 bytes):
-/// - Bytes 0-95: result x coordinate (Fp2: c0 48 bytes + c1 48 bytes, big-endian)
-/// - Bytes 96-191: result y coordinate (Fp2: c0 48 bytes + c1 48 bytes, big-endian)
+/// EIP-2537 encoding: each Fp is 16 zero bytes followed by 48 big-endian bytes.
+/// Fp2 components are c0, c1; scalars are 32 big-endian bytes.
+/// ADD requires curve membership; multiplication/MSM/pairing also require subgroup membership.
 ///
 /// # Safety
-///
-/// This function dereferences raw pointers and requires:
-/// - `input` must be valid for reads of `input_len` bytes
-/// - `output` must be valid for writes of `output_len` bytes
+/// Input and output must be valid, nonoverlapping buffers for the supplied lengths.
 #[no_mangle]
 pub unsafe extern "C" fn bls12_381_g2_mul(
     input: *const c_uchar,
@@ -868,7 +792,7 @@ pub unsafe extern "C" fn bls12_381_g2_mul(
         return Bls12381Result::InvalidInput as c_int;
     }
 
-    if input_len < 288 || output_len < 256 {
+    if input_len != 288 || output_len < 256 {
         return Bls12381Result::InvalidInput as c_int;
     }
 
@@ -878,18 +802,18 @@ pub unsafe extern "C" fn bls12_381_g2_mul(
     use ark_bls12_381::{Fq, Fq2, Fr};
 
     // Parse G2 point (256 bytes)
-    let x_c0_bytes = &input_slice[0..48];
-    let x_c1_bytes = &input_slice[48..96];
-    let y_c0_bytes = &input_slice[96..144];
-    let y_c1_bytes = &input_slice[144..192];
+    let x_c0_bytes = &input_slice[0..64];
+    let x_c1_bytes = &input_slice[64..128];
+    let y_c0_bytes = &input_slice[128..192];
+    let y_c1_bytes = &input_slice[192..256];
 
     // Parse scalar (32 bytes)
     let scalar_bytes = &input_slice[256..288];
 
-    let x_c0 = Fq::from_be_bytes_mod_order(x_c0_bytes);
-    let x_c1 = Fq::from_be_bytes_mod_order(x_c1_bytes);
-    let y_c0 = Fq::from_be_bytes_mod_order(y_c0_bytes);
-    let y_c1 = Fq::from_be_bytes_mod_order(y_c1_bytes);
+    let x_c0 = field!(x_c0_bytes, Bls12381Result);
+    let x_c1 = field!(x_c1_bytes, Bls12381Result);
+    let y_c0 = field!(y_c0_bytes, Bls12381Result);
+    let y_c1 = field!(y_c1_bytes, Bls12381Result);
     let x_coord = Fq2::new(x_c0, x_c1);
     let y_coord = Fq2::new(y_c0, y_c1);
     let scalar = Fr::from_be_bytes_mod_order(scalar_bytes);
@@ -900,10 +824,7 @@ pub unsafe extern "C" fn bls12_381_g2_mul(
     } else {
         match BlsG2Affine::new_unchecked(x_coord, y_coord) {
             p if p.is_on_curve() && p.is_in_correct_subgroup_assuming_on_curve() => p,
-            _ => {
-                output_slice[..256].fill(0);
-                return Bls12381Result::Success as c_int;
-            }
+            _ => return Bls12381Result::InvalidPoint as c_int,
         }
     };
 
@@ -917,8 +838,8 @@ pub unsafe extern "C" fn bls12_381_g2_mul(
     }
 
     // Convert result to bytes
-    let x_result = result.x().expect("x coordinate should exist");
-    let y_result = result.y().expect("y coordinate should exist");
+    let x_result = result.x;
+    let y_result = result.y;
 
     let x_c0_bytes = x_result.c0.into_bigint().to_bytes_be();
     let x_c1_bytes = x_result.c1.into_bigint().to_bytes_be();
@@ -927,32 +848,20 @@ pub unsafe extern "C" fn bls12_381_g2_mul(
 
     // Pad and copy to output
     output_slice[..256].fill(0);
-    output_slice[48 - x_c0_bytes.len()..48].copy_from_slice(&x_c0_bytes);
-    output_slice[96 - x_c1_bytes.len()..96].copy_from_slice(&x_c1_bytes);
-    output_slice[144 - y_c0_bytes.len()..144].copy_from_slice(&y_c0_bytes);
-    output_slice[192 - y_c1_bytes.len()..192].copy_from_slice(&y_c1_bytes);
+    output_slice[64 - x_c0_bytes.len()..64].copy_from_slice(&x_c0_bytes);
+    output_slice[128 - x_c1_bytes.len()..128].copy_from_slice(&x_c1_bytes);
+    output_slice[192 - y_c0_bytes.len()..192].copy_from_slice(&y_c0_bytes);
+    output_slice[256 - y_c1_bytes.len()..256].copy_from_slice(&y_c1_bytes);
 
     Bls12381Result::Success as c_int
 }
 
-/// Perform BLS12-381 G2 multi-scalar multiplication
-///
-/// Input format (variable, 320 * k bytes for k points):
-/// Each 320-byte group contains:
-/// - Bytes 0-95: x coordinate (Fp2: c0 48 bytes + c1 48 bytes, big-endian)
-/// - Bytes 96-191: y coordinate (Fp2: c0 48 bytes + c1 48 bytes, big-endian)
-/// - Bytes 192-223: scalar (32 bytes, big-endian)
-/// - Bytes 224-319: padding (ignored)
-///
-/// Output format (256 bytes):
-/// - Bytes 0-95: result x coordinate (Fp2: c0 48 bytes + c1 48 bytes, big-endian)
-/// - Bytes 96-191: result y coordinate (Fp2: c0 48 bytes + c1 48 bytes, big-endian)
+/// EIP-2537 encoding: each Fp is 16 zero bytes followed by 48 big-endian bytes.
+/// Fp2 components are c0, c1; scalars are 32 big-endian bytes.
+/// ADD requires curve membership; multiplication/MSM/pairing also require subgroup membership.
 ///
 /// # Safety
-///
-/// This function dereferences raw pointers and requires:
-/// - `input` must be valid for reads of `input_len` bytes
-/// - `output` must be valid for writes of `output_len` bytes
+/// Input and output must be valid, nonoverlapping buffers for the supplied lengths.
 #[no_mangle]
 pub unsafe extern "C" fn bls12_381_g2_multiexp(
     input: *const c_uchar,
@@ -964,7 +873,7 @@ pub unsafe extern "C" fn bls12_381_g2_multiexp(
         return Bls12381Result::InvalidInput as c_int;
     }
 
-    if input_len % 320 != 0 || output_len < 256 {
+    if input_len == 0 || input_len % 288 != 0 || output_len < 256 {
         return Bls12381Result::InvalidInput as c_int;
     }
 
@@ -974,22 +883,22 @@ pub unsafe extern "C" fn bls12_381_g2_multiexp(
     use ark_bls12_381::{Fq, Fq2, Fr, G2Projective};
     use ark_ec::VariableBaseMSM;
 
-    let num_pairs = (input_len as usize) / 320;
+    let num_pairs = (input_len as usize) / 288;
     let mut points = Vec::with_capacity(num_pairs);
     let mut scalars = Vec::with_capacity(num_pairs);
 
     for i in 0..num_pairs {
-        let offset = i * 320;
-        let x_c0_bytes = &input_slice[offset..offset + 48];
-        let x_c1_bytes = &input_slice[offset + 48..offset + 96];
-        let y_c0_bytes = &input_slice[offset + 96..offset + 144];
-        let y_c1_bytes = &input_slice[offset + 144..offset + 192];
+        let offset = i * 288;
+        let x_c0_bytes = &input_slice[offset + 0..offset + 64];
+        let x_c1_bytes = &input_slice[offset + 64..offset + 128];
+        let y_c0_bytes = &input_slice[offset + 128..offset + 192];
+        let y_c1_bytes = &input_slice[offset + 192..offset + 256];
         let scalar_bytes = &input_slice[offset + 256..offset + 288];
 
-        let x_c0 = Fq::from_be_bytes_mod_order(x_c0_bytes);
-        let x_c1 = Fq::from_be_bytes_mod_order(x_c1_bytes);
-        let y_c0 = Fq::from_be_bytes_mod_order(y_c0_bytes);
-        let y_c1 = Fq::from_be_bytes_mod_order(y_c1_bytes);
+        let x_c0 = field!(x_c0_bytes, Bls12381Result);
+        let x_c1 = field!(x_c1_bytes, Bls12381Result);
+        let y_c0 = field!(y_c0_bytes, Bls12381Result);
+        let y_c1 = field!(y_c1_bytes, Bls12381Result);
         let x_coord = Fq2::new(x_c0, x_c1);
         let y_coord = Fq2::new(y_c0, y_c1);
         let scalar = Fr::from_be_bytes_mod_order(scalar_bytes);
@@ -1001,7 +910,7 @@ pub unsafe extern "C" fn bls12_381_g2_multiexp(
 
         let point = match BlsG2Affine::new_unchecked(x_coord, y_coord) {
             p if p.is_on_curve() && p.is_in_correct_subgroup_assuming_on_curve() => p,
-            _ => continue,
+            _ => return Bls12381Result::InvalidPoint as c_int,
         };
 
         points.push(point);
@@ -1012,7 +921,10 @@ pub unsafe extern "C" fn bls12_381_g2_multiexp(
     let result = if points.is_empty() {
         BlsG2Affine::zero()
     } else {
-        G2Projective::msm(&points, &scalars).unwrap().into_affine()
+        match G2Projective::msm(&points, &scalars) {
+            Ok(result) => result.into_affine(),
+            Err(_) => return Bls12381Result::ComputationFailed as c_int,
+        }
     };
 
     // Handle point at infinity
@@ -1022,8 +934,8 @@ pub unsafe extern "C" fn bls12_381_g2_multiexp(
     }
 
     // Convert result to bytes
-    let x_result = result.x().expect("x coordinate should exist");
-    let y_result = result.y().expect("y coordinate should exist");
+    let x_result = result.x;
+    let y_result = result.y;
 
     let x_c0_bytes = x_result.c0.into_bigint().to_bytes_be();
     let x_c1_bytes = x_result.c1.into_bigint().to_bytes_be();
@@ -1032,10 +944,10 @@ pub unsafe extern "C" fn bls12_381_g2_multiexp(
 
     // Pad and copy to output
     output_slice[..256].fill(0);
-    output_slice[48 - x_c0_bytes.len()..48].copy_from_slice(&x_c0_bytes);
-    output_slice[96 - x_c1_bytes.len()..96].copy_from_slice(&x_c1_bytes);
-    output_slice[144 - y_c0_bytes.len()..144].copy_from_slice(&y_c0_bytes);
-    output_slice[192 - y_c1_bytes.len()..192].copy_from_slice(&y_c1_bytes);
+    output_slice[64 - x_c0_bytes.len()..64].copy_from_slice(&x_c0_bytes);
+    output_slice[128 - x_c1_bytes.len()..128].copy_from_slice(&x_c1_bytes);
+    output_slice[192 - y_c0_bytes.len()..192].copy_from_slice(&y_c0_bytes);
+    output_slice[256 - y_c1_bytes.len()..256].copy_from_slice(&y_c1_bytes);
 
     Bls12381Result::Success as c_int
 }
@@ -1100,5 +1012,295 @@ mod tests {
             bn254_ecpairing_validate_input(dummy_data.as_ptr(), 192),
             Bn254Result::Success as c_int
         );
+    }
+}
+
+#[cfg(test)]
+mod security_regressions {
+    use super::*;
+    use ark_ff::Field;
+
+    #[test]
+    fn bn254_rejects_noncanonical_and_off_curve_and_accepts_infinity() {
+        let mut input = [0u8; 96];
+        let mut output = [0xa5u8; 64];
+        input[95] = 1;
+        unsafe {
+            assert_eq!(bn254_ecmul(input.as_ptr(), 96, output.as_mut_ptr(), 64), 0);
+        }
+        assert_eq!(output, [0; 64]);
+        input[31] = 1;
+        input[63] = 3;
+        unsafe {
+            assert_eq!(bn254_ecmul(input.as_ptr(), 96, output.as_mut_ptr(), 64), 2);
+        }
+        input[..32].copy_from_slice(&ark_bn254::Fq::MODULUS.to_bytes_be());
+        input[63] = 2;
+        unsafe {
+            assert_eq!(bn254_ecmul(input.as_ptr(), 96, output.as_mut_ptr(), 64), 2);
+        }
+        input[..32].fill(0);
+        input[31] = 1;
+        unsafe {
+            assert_eq!(bn254_ecmul(input.as_ptr(), 96, output.as_mut_ptr(), 64), 0);
+        }
+        assert_eq!(output, input[..64]);
+    }
+
+    #[test]
+    fn bn254_pairing_validates_even_with_infinity_partner() {
+        let mut input = [0u8; 192];
+        let mut output = [0u8; 32];
+        unsafe {
+            assert_eq!(
+                bn254_ecpairing(input.as_ptr(), 192, output.as_mut_ptr(), 32),
+                0
+            );
+        }
+        assert_eq!(output[31], 1);
+        for slot in 0..6 {
+            input.fill(0);
+            input[slot * 32..(slot + 1) * 32]
+                .copy_from_slice(&ark_bn254::Fq::MODULUS.to_bytes_be());
+            unsafe {
+                assert_eq!(
+                    bn254_ecpairing(input.as_ptr(), 192, output.as_mut_ptr(), 32),
+                    2
+                );
+            }
+        }
+        input.fill(0);
+        input[31] = 1;
+        input[63] = 3;
+        unsafe {
+            assert_eq!(
+                bn254_ecpairing(input.as_ptr(), 192, output.as_mut_ptr(), 32),
+                2
+            );
+        }
+        // Deterministically find an on-curve twist point outside the prime subgroup.
+        let mut point = None;
+        for n in 0..1024u64 {
+            let x = ark_bn254::Fq2::new(n.into(), 1u64.into());
+            let rhs = x.square() * x
+                + <ark_bn254::g2::Config as ark_ec::short_weierstrass::SWCurveConfig>::COEFF_B;
+            if let Some(y) = rhs.sqrt() {
+                let candidate = G2Affine::new_unchecked(x, y);
+                if !candidate.is_in_correct_subgroup_assuming_on_curve() {
+                    point = Some(candidate);
+                    break;
+                }
+            }
+        }
+        let point = point.expect("bounded deterministic subgroup fixture");
+        assert!(point.is_on_curve());
+        input.fill(0);
+        for (slot, value) in [point.x.c1, point.x.c0, point.y.c1, point.y.c0]
+            .iter()
+            .enumerate()
+        {
+            input[64 + slot * 32..96 + slot * 32]
+                .copy_from_slice(&value.into_bigint().to_bytes_be());
+        }
+        unsafe {
+            assert_eq!(
+                bn254_ecpairing(input.as_ptr(), 192, output.as_mut_ptr(), 32),
+                2
+            );
+        }
+        // EIP-197 uses imaginary component first; generator is a valid pairing input.
+        let point = G2Affine::generator();
+        for (slot, value) in [point.x.c1, point.x.c0, point.y.c1, point.y.c0]
+            .iter()
+            .enumerate()
+        {
+            input[64 + slot * 32..96 + slot * 32]
+                .copy_from_slice(&value.into_bigint().to_bytes_be());
+        }
+        unsafe {
+            assert_eq!(
+                bn254_ecpairing(input.as_ptr(), 192, output.as_mut_ptr(), 32),
+                0
+            );
+        }
+        assert_eq!(output[31], 1);
+    }
+
+    #[test]
+    fn bls_g1_padded_encoding_and_error_paths() {
+        let mut input = [0u8; 256];
+        let mut output = [0xa5u8; 128];
+        let point = BlsG1Affine::generator();
+        input[16..64].copy_from_slice(&point.x.into_bigint().to_bytes_be());
+        input[80..128].copy_from_slice(&point.y.into_bigint().to_bytes_be());
+        unsafe {
+            assert_eq!(
+                bls12_381_g1_add(input.as_ptr(), 256, output.as_mut_ptr(), 128),
+                0
+            );
+        }
+        assert_eq!(output, input[..128]);
+        for slot in 0..4 {
+            let mut invalid = input;
+            invalid[slot * 64] = 1;
+            unsafe {
+                assert_eq!(
+                    bls12_381_g1_add(invalid.as_ptr(), 256, output.as_mut_ptr(), 128),
+                    2
+                );
+            }
+        }
+        input[..64].fill(0);
+        input[16..64].copy_from_slice(&ark_bls12_381::Fq::MODULUS.to_bytes_be());
+        unsafe {
+            assert_eq!(
+                bls12_381_g1_add(input.as_ptr(), 256, output.as_mut_ptr(), 128),
+                2
+            );
+        }
+        input.fill(0);
+        input[63] = 1;
+        input[127] = 1;
+        unsafe {
+            assert_eq!(
+                bls12_381_g1_add(input.as_ptr(), 256, output.as_mut_ptr(), 128),
+                2
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod bls_security_regressions {
+    use super::*;
+
+    #[test]
+    fn g1_msm_rejects_wrong_subgroup_and_invalid_coordinates_even_with_zero_scalar() {
+        let mut input = [0u8; 160];
+        let mut output = [0u8; 128];
+        // (0, 2) is on y^2 = x^3 + 4, but outside the prime-order subgroup.
+        input[127] = 2;
+        let point = BlsG1Affine::new_unchecked(0u64.into(), 2u64.into());
+        assert!(point.is_on_curve());
+        assert!(!point.is_in_correct_subgroup_assuming_on_curve());
+        unsafe {
+            assert_eq!(
+                bls12_381_g1_multiexp(input.as_ptr(), 160, output.as_mut_ptr(), 128),
+                2
+            );
+        }
+        let mut add = [0u8; 256];
+        add[..128].copy_from_slice(&input[..128]);
+        unsafe {
+            assert_eq!(
+                bls12_381_g1_add(add.as_ptr(), 256, output.as_mut_ptr(), 128),
+                0
+            );
+        }
+        assert_eq!(output, input[..128]);
+        input[63] = 1;
+        input[127] = 1;
+        unsafe {
+            assert_eq!(
+                bls12_381_g1_multiexp(input.as_ptr(), 160, output.as_mut_ptr(), 128),
+                2
+            );
+        }
+        input.fill(0);
+        input[16..64].copy_from_slice(&ark_bls12_381::Fq::MODULUS.to_bytes_be());
+        unsafe {
+            assert_eq!(
+                bls12_381_g1_multiexp(input.as_ptr(), 160, output.as_mut_ptr(), 128),
+                2
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod g2_security_regressions {
+    use super::*;
+    use ark_ff::Field;
+
+    #[test]
+    fn g2_padded_add_mul_msm_and_pairing() {
+        let point = BlsG2Affine::generator();
+        let mut input = [0u8; 512];
+        for (slot, value) in [point.x.c0, point.x.c1, point.y.c0, point.y.c1]
+            .iter()
+            .enumerate()
+        {
+            input[16 + slot * 64..64 + slot * 64]
+                .copy_from_slice(&value.into_bigint().to_bytes_be());
+        }
+        let mut output = [0xa5u8; 256];
+        unsafe {
+            assert_eq!(
+                bls12_381_g2_add(input.as_ptr(), 512, output.as_mut_ptr(), 256),
+                0
+            );
+        }
+        assert_eq!(output, input[..256]);
+        input[287] = 1;
+        unsafe {
+            assert_eq!(
+                bls12_381_g2_mul(input.as_ptr(), 288, output.as_mut_ptr(), 256),
+                0
+            );
+            assert_eq!(
+                bls12_381_g2_multiexp(input.as_ptr(), 288, output.as_mut_ptr(), 256),
+                0
+            );
+        }
+        assert_eq!(output, input[..256]);
+        for slot in 0..4 {
+            let mut invalid = input;
+            invalid[slot * 64] = 1;
+            unsafe {
+                assert_eq!(
+                    bls12_381_g2_multiexp(invalid.as_ptr(), 288, output.as_mut_ptr(), 256),
+                    2
+                );
+            }
+        }
+        // Validate a non-subgroup G2 even when its G1 pairing partner is infinity.
+        let mut candidate = None;
+        for n in 0..1024u64 {
+            let x = ark_bls12_381::Fq2::new(n.into(), 1u64.into());
+            let rhs = x.square() * x
+                + <ark_bls12_381::g2::Config as ark_ec::short_weierstrass::SWCurveConfig>::COEFF_B;
+            if let Some(y) = rhs.sqrt() {
+                let point = BlsG2Affine::new_unchecked(x, y);
+                if !point.is_in_correct_subgroup_assuming_on_curve() {
+                    candidate = Some(point);
+                    break;
+                }
+            }
+        }
+        let point = candidate.expect("bounded deterministic subgroup fixture");
+        assert!(point.is_on_curve());
+        let mut pair = [0u8; 384];
+        for (slot, value) in [point.x.c0, point.x.c1, point.y.c0, point.y.c1]
+            .iter()
+            .enumerate()
+        {
+            pair[144 + slot * 64..192 + slot * 64]
+                .copy_from_slice(&value.into_bigint().to_bytes_be());
+        }
+        let mut result = [0u8; 32];
+        unsafe {
+            assert_eq!(
+                bls12_381_pairing(pair.as_ptr(), 384, result.as_mut_ptr(), 32),
+                2
+            );
+        }
+        let mut msm = [0u8; 288];
+        msm[..256].copy_from_slice(&pair[128..]);
+        unsafe {
+            assert_eq!(
+                bls12_381_g2_multiexp(msm.as_ptr(), 288, output.as_mut_ptr(), 256),
+                2
+            );
+        }
     }
 }

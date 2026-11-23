@@ -158,7 +158,7 @@ test "curve parameters G2_INFINITY is infinity" {
 
 test "curve parameters G1_GENERATOR has correct z coordinate" {
     const gen = G1_GENERATOR;
-    const expected_z = FpMont.init(MONTGOMERY_R_MOD_P);
+    const expected_z = FpMont.ONE;
     try std.testing.expect(gen.z.equal(&expected_z));
 }
 
@@ -244,7 +244,7 @@ test "curve parameters G2 projection coefficients has correct size" {
 }
 
 test "curve parameters G1 equation verification on generator" {
-    const gen_affine = G1_GENERATOR.toAffine();
+    const gen_affine = try G1_GENERATOR.toAffine();
 
     const y_squared = gen_affine.y.mul(&gen_affine.y);
     const x_cubed = gen_affine.x.mul(&gen_affine.x).mul(&gen_affine.x);
@@ -257,7 +257,7 @@ test "curve parameters G1 equation verification on generator" {
 test "curve parameters G1 generator order is FR_MOD" {
     const Fr = @import("Fr.zig").Fr;
     const scalar = Fr{ .value = FR_MOD };
-    const result = G1_GENERATOR.mul(&scalar);
+    const result = try G1_GENERATOR.mul(&scalar);
     try std.testing.expect(result.isInfinity());
 }
 
@@ -278,26 +278,22 @@ test "curve parameters G2 generator doubled is on curve" {
     try std.testing.expect(doubled.isOnCurve());
 }
 
-test "curve parameters G1 cube root cubed equals one mod FR" {
+test "curve parameters G1 cube root cubed equals one mod FP" {
     const cube_root = G1_SCALAR.cube_root;
-    const Fr = @import("Fr.zig").Fr;
-
-    const cr_fr = Fr.init(cube_root);
+    const cr_fr = FpMont.init(cube_root);
     const cr_squared = cr_fr.mul(&cr_fr);
     const cr_cubed = cr_squared.mul(&cr_fr);
 
-    try std.testing.expect(cr_cubed.equal(&Fr.ONE));
+    try std.testing.expect(cr_cubed.equal(&FpMont.ONE));
 }
 
-test "curve parameters G2 cube root cubed equals one mod FR" {
+test "curve parameters G2 cube root cubed equals one mod FP" {
     const cube_root = G2_SCALAR.cube_root;
-    const Fr = @import("Fr.zig").Fr;
-
-    const cr_fr = Fr.init(cube_root);
+    const cr_fr = FpMont.init(cube_root);
     const cr_squared = cr_fr.mul(&cr_fr);
     const cr_cubed = cr_squared.mul(&cr_fr);
 
-    try std.testing.expect(cr_cubed.equal(&Fr.ONE));
+    try std.testing.expect(cr_cubed.equal(&FpMont.ONE));
 }
 
 test "curve parameters montgomery minus p inv is valid" {
@@ -316,7 +312,7 @@ test "curve parameters G1 small multiples are on curve" {
 
     for (scalars) |s| {
         const scalar = Fr.init(s);
-        const point = G1_GENERATOR.mul(&scalar);
+        const point = try G1_GENERATOR.mul(&scalar);
         try std.testing.expect(point.isOnCurve());
     }
 }
@@ -365,7 +361,7 @@ test "curve parameters field arithmetic in bounds" {
 }
 
 test "curve parameters G1 affine generator coordinates in field" {
-    const gen_affine = G1_GENERATOR.toAffine();
+    const gen_affine = try G1_GENERATOR.toAffine();
     try std.testing.expect(gen_affine.x.value < FP_MOD);
     try std.testing.expect(gen_affine.y.value < FP_MOD);
 }

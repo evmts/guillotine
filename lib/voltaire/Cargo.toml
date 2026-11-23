@@ -12,13 +12,13 @@ path = "src/crypto/lib.rs"
 
 [dependencies]
 # Arkworks dependencies for elliptic curve operations
-ark-bn254 = "0.5.0"
-ark-ec = "0.5.0"
-ark-ff = "0.5.0"
-ark-serialize = "0.5.0"
-ark-bls12-381 = "0.5.0"
+ark-bn254 = "0.6.0"
+ark-ec = "0.6.0"
+ark-ff = "0.6.0"
+ark-serialize = "0.6.0"
+ark-bls12-381 = "0.6.0"
 # Keccak implementations - assembly-optimized for native, pure Rust for WASM
-keccak-asm = { version = "0.1.4", optional = true }
+keccak-asm = { version = "0.1.9", optional = true }
 tiny-keccak = { version = "2.0", features = ["keccak"], optional = true }
 
 [features]

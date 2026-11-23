@@ -412,3 +412,43 @@ test "bn254Pairing - exact gas for multiple sizes" {
         } else |_| {}
     }
 }
+
+test "EIP-197 rejects every noncanonical coordinate and off-curve points" {
+    var input = [_]u8{0} ** 192;
+    for (0..6) |slot| {
+        std.mem.writeInt(u256, input[slot * 32 ..][0..32], bn254.FP_MOD, .big);
+        try std.testing.expectError(error.InvalidPairing, execute(std.testing.allocator, &input, 1_000_000));
+        @memset(input[slot * 32 ..][0..32], 0);
+    }
+    input[31] = 1;
+    input[63] = 3;
+    try std.testing.expectError(error.InvalidPairing, execute(std.testing.allocator, &input, 1_000_000));
+}
+
+test "EIP-197 rejects an on-curve G2 outside the subgroup with G1 infinity" {
+    // Montgomery coordinates from G2.isInSubgroup's non-subgroup fixture.
+    const point = bn254.G2{
+        .x = .{ .u0 = .{ .value = 122 }, .u1 = .{ .value = 3333 } },
+        .y = .{
+            .u0 = .{ .value = 4562906498667794019468448659772613644715180855375958127421599247974276735405 },
+            .u1 = .{ .value = 11306249705311604911826567979787687424320829738512421461876664403170710609448 },
+        },
+        .z = bn254.Fp2Mont.ONE,
+    };
+    try std.testing.expect(point.isOnCurve());
+    try std.testing.expect(!point.isInSubgroup());
+    var input = [_]u8{0} ** 192;
+    std.mem.writeInt(u256, input[64..96], point.x.u1.toStandardRepresentation(), .big);
+    std.mem.writeInt(u256, input[96..128], point.x.u0.toStandardRepresentation(), .big);
+    std.mem.writeInt(u256, input[128..160], point.y.u1.toStandardRepresentation(), .big);
+    std.mem.writeInt(u256, input[160..192], point.y.u0.toStandardRepresentation(), .big);
+    try std.testing.expectError(error.InvalidPairing, execute(std.testing.allocator, &input, 1_000_000));
+    const generator = bn254.G2.GENERATOR.toAffine();
+    std.mem.writeInt(u256, input[64..96], generator.x.u1.toStandardRepresentation(), .big);
+    std.mem.writeInt(u256, input[96..128], generator.x.u0.toStandardRepresentation(), .big);
+    std.mem.writeInt(u256, input[128..160], generator.y.u1.toStandardRepresentation(), .big);
+    std.mem.writeInt(u256, input[160..192], generator.y.u0.toStandardRepresentation(), .big);
+    const result = try execute(std.testing.allocator, &input, 1_000_000);
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(u8, 1), result.output[31]);
+}

@@ -326,3 +326,15 @@ test "KZG setup - initialization state transitions" {
     deinit(testing.allocator);
     try testing.expect(!isInitialized()); // Should be uninitialized after deinit
 }
+
+test "KZG file loader rejects tampered trusted setup" {
+    var directory = std.testing.tmpDir(.{});
+    defer directory.cleanup();
+    const bytes = try std.testing.allocator.dupe(u8, trusted_setup_data);
+    defer std.testing.allocator.free(bytes);
+    bytes[100] ^= 1;
+    try directory.dir.writeFile(.{ .sub_path = "trusted_setup.txt", .data = bytes });
+    const path = try directory.dir.realpathAlloc(std.testing.allocator, "trusted_setup.txt");
+    defer std.testing.allocator.free(path);
+    try std.testing.expectError(error.IntegrityCheckFailed, c_kzg.loadTrustedSetupFile(path, 0));
+}

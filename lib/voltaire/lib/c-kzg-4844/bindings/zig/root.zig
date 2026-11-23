@@ -25,6 +25,7 @@ pub const Cell = [BYTES_PER_CELL]u8;
 pub const KZGSettings = c.KZGSettings;
 
 pub const KZGError = error{
+    IntegrityCheckFailed,
     BadArgs,
     InternalError,
     MallocError,
@@ -81,6 +82,11 @@ pub fn loadTrustedSetup(
 
 /// Loads trusted setup from text data. Pass `embedded_trusted_setup` or custom text.
 pub fn loadTrustedSetupFromText(trusted_setup_text: []const u8, precompute: u64) KZGError!void {
+    const expected = [_]u8{ 0xd3, 0x9b, 0x9f, 0x2d, 0x04, 0x7c, 0xc9, 0xdc, 0xa2, 0xde, 0x58, 0xf2, 0x64, 0xb6, 0xa0, 0x94, 0x48, 0xcc, 0xd3, 0x4d, 0xb9, 0x67, 0x88, 0x1a, 0x67, 0x13, 0xea, 0xca, 0xcf, 0x0f, 0x26, 0xb7 };
+    var digest: [32]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(trusted_setup_text, &digest, .{});
+    if (!std.mem.eql(u8, &digest, &expected)) return KZGError.IntegrityCheckFailed;
+
     if (loaded) {
         return KZGError.TrustedSetupAlreadyLoaded;
     }
@@ -141,28 +147,12 @@ pub fn loadTrustedSetupFromText(trusted_setup_text: []const u8, precompute: u64)
 
 /// Loads trusted setup from file path.
 pub fn loadTrustedSetupFile(file_path: []const u8, precompute: u64) KZGError!void {
-    if (loaded) {
-        return KZGError.TrustedSetupAlreadyLoaded;
-    }
-
-    var path_buf: [256]u8 = undefined;
-    @memcpy(path_buf[0..file_path.len], file_path);
-    path_buf[file_path.len] = 0;
-
-    const file = std.c.fopen(@ptrCast(path_buf[0 .. file_path.len + 1]), "r");
-    if (file == null) {
-        return KZGError.FileNotFound;
-    }
-    defer _ = std.c.fclose(file.?);
-
-    const ret = c.load_trusted_setup_file(&settings, @ptrCast(@alignCast(file)), precompute);
-
-    if (ret == c.C_KZG_OK) {
-        loaded = true;
-        return;
-    }
-
-    return makeErrorFromRet(ret);
+    if (std.mem.indexOfScalar(u8, file_path, 0) != null) return KZGError.FileNotFound;
+    const file = std.fs.cwd().openFile(file_path, .{}) catch return KZGError.FileNotFound;
+    defer file.close();
+    const bytes = file.readToEndAlloc(std.heap.page_allocator, 1024 * 1024) catch return KZGError.InternalError;
+    defer std.heap.page_allocator.free(bytes);
+    try loadTrustedSetupFromText(bytes, precompute);
 }
 
 /// Frees the loaded trusted setup.
@@ -375,4 +365,11 @@ test "end to end KZG functionality with file" {
     wrong_proof[0] = wrong_proof[0] ^ 1;
     const should_fail = verifyBlobKZGProof(&test_blob, &commitment, &wrong_proof) catch false;
     try testing.expect(!should_fail);
+}
+
+test "trusted setup runtime loader rejects tampered bytes" {
+    const bytes = try std.testing.allocator.dupe(u8, embedded_trusted_setup);
+    defer std.testing.allocator.free(bytes);
+    bytes[100] ^= 1;
+    try std.testing.expectError(error.IntegrityCheckFailed, loadTrustedSetupFromText(bytes, 0));
 }

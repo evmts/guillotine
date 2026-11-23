@@ -132,6 +132,12 @@ pub fn build(b: *std.Build) void {
     precompiles_tests.step.dependOn(cargo_build_step);
     precompiles_tests.root_module.link_libc = true;
 
+    if (target.result.os.tag == .linux) {
+        primitives_tests.linkSystemLibrary("unwind");
+        crypto_tests.linkSystemLibrary("unwind");
+        precompiles_tests.linkSystemLibrary("unwind");
+    }
+
     const run_primitives_tests = b.addRunArtifact(primitives_tests);
     const run_crypto_tests = b.addRunArtifact(crypto_tests);
     const run_precompiles_tests = b.addRunArtifact(precompiles_tests);

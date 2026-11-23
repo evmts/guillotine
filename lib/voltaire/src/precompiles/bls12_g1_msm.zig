@@ -27,7 +27,6 @@ pub fn execute(
 
     const output = try allocator.alloc(u8, 128);
     errdefer allocator.free(output);
-    errdefer allocator.free(output);
     crypto.Crypto.bls12_381.g1Msm(input, output) catch {
         return error.InvalidPoint;
     };
@@ -396,4 +395,20 @@ test "bls12_g1_msm - gas discount effect" {
     try testing.expect(gas_per_pair_1 > gas_per_pair_2);
     try testing.expect(gas_per_pair_2 > gas_per_pair_4);
     try testing.expect(gas_per_pair_4 > gas_per_pair_8);
+}
+
+test "EIP-2537 g1_msm rejects padding and noncanonical field elements without leaking" {
+    var input = [_]u8{0} ** 160;
+    const modulus: u512 = 0x1a0111ea397fe69a4b1ba7b6434bacd764774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab;
+    for (0..2) |slot| {
+        const offset = slot * 64;
+        for (0..16) |padding| {
+            input[offset + padding] = 1;
+            try std.testing.expectError(error.InvalidPoint, execute(std.testing.allocator, &input, 1_000_000));
+            input[offset + padding] = 0;
+        }
+        std.mem.writeInt(u512, input[offset..][0..64], modulus, .big);
+        try std.testing.expectError(error.InvalidPoint, execute(std.testing.allocator, &input, 1_000_000));
+        @memset(input[offset..][0..64], 0);
+    }
 }
