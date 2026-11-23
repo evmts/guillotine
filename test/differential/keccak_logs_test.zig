@@ -8,7 +8,7 @@ test "differential: SHA3 over 32 bytes" {
     var testor = try DifferentialTestor.init(allocator);
     defer testor.deinit();
 
-    var bc = std.ArrayList(u8){};
+    var bc = std.ArrayList(u8).empty;
     defer bc.deinit(allocator);
 
     // Store 32-byte pattern at memory[0]
@@ -34,7 +34,7 @@ test "differential: LOG0 emits without topics" {
     var testor = try DifferentialTestor.init(allocator);
     defer testor.deinit();
 
-    var bc = std.ArrayList(u8){};
+    var bc = std.ArrayList(u8).empty;
     defer bc.deinit(allocator);
 
     // Write 4 bytes at memory[0]
@@ -57,7 +57,7 @@ test "differential: LOG1 emits with topic" {
     var testor = try DifferentialTestor.init(allocator);
     defer testor.deinit();
 
-    var bc = std.ArrayList(u8){};
+    var bc = std.ArrayList(u8).empty;
     defer bc.deinit(allocator);
 
     // Write 4 bytes at memory[0]
@@ -80,7 +80,7 @@ test "differential: LOG2 emits with two topics" {
     var testor = try DifferentialTestor.init(allocator);
     defer testor.deinit();
 
-    var bc = std.ArrayList(u8){};
+    var bc = std.ArrayList(u8).empty;
     defer bc.deinit(allocator);
 
     // Write 8 bytes at memory[0]
@@ -107,7 +107,7 @@ test "differential: LOG3 emits with three topics" {
     var testor = try DifferentialTestor.init(allocator);
     defer testor.deinit();
 
-    var bc = std.ArrayList(u8){};
+    var bc = std.ArrayList(u8).empty;
     defer bc.deinit(allocator);
 
     // Write 12 bytes at memory[0]
@@ -129,7 +129,7 @@ test "differential: LOG4 emits with four topics" {
     var testor = try DifferentialTestor.init(allocator);
     defer testor.deinit();
 
-    var bc = std.ArrayList(u8){};
+    var bc = std.ArrayList(u8).empty;
     defer bc.deinit(allocator);
 
     // Write 16 bytes at memory[0]
@@ -151,7 +151,7 @@ test "differential: LOG opcodes with zero-length data" {
     var testor = try DifferentialTestor.init(allocator);
     defer testor.deinit();
 
-    var bc = std.ArrayList(u8){};
+    var bc = std.ArrayList(u8).empty;
     defer bc.deinit(allocator);
 
     // LOG0 with zero-length data
@@ -178,7 +178,7 @@ test "differential: LOG opcodes with large data" {
     var testor = try DifferentialTestor.init(allocator);
     defer testor.deinit();
 
-    var bc = std.ArrayList(u8){};
+    var bc = std.ArrayList(u8).empty;
     defer bc.deinit(allocator);
 
     // Write 64 bytes of data to memory

@@ -1055,7 +1055,7 @@ fn runJsonTestImplWithOptionalFork(allocator: std.mem.Allocator, test_case: std.
     const has_engine_payloads = test_case.object.get("engineNewPayloads") != null;
 
     // Collect all transactions to process
-    var transactions_list = std.ArrayList(std.json.Value){};
+    var transactions_list = std.ArrayList(std.json.Value).empty;
     defer transactions_list.deinit(allocator);
 
     if (has_transactions) {
@@ -2369,7 +2369,7 @@ fn parseHexData(allocator: std.mem.Allocator, data: []const u8) ![]u8 {
 
     // Handle placeholders in :raw data
     if (std.mem.indexOf(u8, clean_data, "<") != null) {
-        var result = std.ArrayList(u8){};
+        var result = std.ArrayList(u8).empty;
         defer result.deinit(allocator);
 
         var hex_data = clean_data;

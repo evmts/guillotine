@@ -42,7 +42,7 @@ test "identity - gas calculation two words" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** 64; // 2 words
+    const input = @as([64]u8, @splat(0)); // 2 words
     const result = try execute(allocator, &input, 1000000);
     defer result.deinit(allocator);
 
@@ -67,7 +67,7 @@ test "identity - one word" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** 32;
+    const input = @as([32]u8, @splat(0));
     const result = try execute(allocator, &input, 1000000);
     defer result.deinit(allocator);
 
@@ -79,7 +79,7 @@ test "identity - partial word rounds up" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** 33; // 2 words (rounds up)
+    const input = @as([33]u8, @splat(0)); // 2 words (rounds up)
     const result = try execute(allocator, &input, 1000000);
     defer result.deinit(allocator);
 
@@ -91,7 +91,7 @@ test "identity - large input" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** 1000; // 32 words
+    const input = @as([1000]u8, @splat(0)); // 32 words
     const result = try execute(allocator, &input, 1000000);
     defer result.deinit(allocator);
 
@@ -104,7 +104,7 @@ test "identity - out of gas" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** 64;
+    const input = @as([64]u8, @splat(0));
     const expected_gas = BASE_GAS + PER_WORD_GAS * 2;
 
     const result = execute(allocator, &input, expected_gas - 1);
@@ -115,7 +115,7 @@ test "identity - exact gas" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** 64;
+    const input = @as([64]u8, @splat(0));
     const expected_gas = BASE_GAS + PER_WORD_GAS * 2;
 
     const result = try execute(allocator, &input, expected_gas);

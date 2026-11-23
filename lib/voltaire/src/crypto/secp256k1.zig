@@ -480,7 +480,7 @@ test "recover address from signature" {
     };
 
     // The recovered address should be valid
-    const zero_address = [_]u8{0} ** 20;
+    const zero_address = @as([20]u8, @splat(0));
     try std.testing.expect(!std.mem.eql(u8, &recovered_address, &zero_address));
 }
 
@@ -510,7 +510,7 @@ test "EIP-2 signature validation" {
 
 test "signature recovery edge cases" {
     // Test with zero hash
-    const zero_hash = [_]u8{0} ** 32;
+    const zero_hash = @as([32]u8, @splat(0));
     const r: u256 = 0x1234567890123456789012345678901234567890123456789012345678901234;
     const s: u256 = 0x3456789012345678901234567890123456789012345678901234567890123456;
 
@@ -650,7 +650,7 @@ test "Bitcoin Core test vectors - valid signatures" {
         };
 
         // Verify we got a valid address (non-zero)
-        const zero_address = [_]u8{0} ** 20;
+        const zero_address = @as([20]u8, @splat(0));
         try std.testing.expect(!std.mem.eql(u8, &result, &zero_address));
 
         // Verify the signature was properly validated
@@ -704,7 +704,7 @@ test "Ethereum test vectors - signature recovery" {
         };
 
         // For now, just verify we got a non-zero address
-        const zero_address = [_]u8{0} ** 20;
+        const zero_address = @as([20]u8, @splat(0));
         try std.testing.expect(!std.mem.eql(u8, &recovered, &zero_address));
     }
 }
@@ -757,7 +757,7 @@ test "Edge cases - invalid signatures" {
 
     // Test 7: Invalid hash length
     {
-        const short_hash = [_]u8{0x01} ** 31;
+        const short_hash = @as([31]u8, @splat(0x01));
         const result = unauditedRecoverAddress(&short_hash, 0, 0x123456, 0x789abc);
         try std.testing.expectError(error.InvalidHashLength, result);
     }
@@ -825,7 +825,7 @@ test "Bitcoin signature test vectors - comprehensive" {
         },
         // Edge case: r = 1, s = 1 (mathematically valid but unusual)
         .{
-            .hash = [_]u8{0} ** 32,
+            .hash = @as([32]u8, @splat(0)),
             .r = 1,
             .s = 1,
             .recoveryId = 0,
@@ -833,7 +833,7 @@ test "Bitcoin signature test vectors - comprehensive" {
         },
         // Edge case: Maximum valid r and s values
         .{
-            .hash = [_]u8{0xFF} ** 32,
+            .hash = @as([32]u8, @splat(0xFF)),
             .r = SECP256K1_N - 1,
             .s = (SECP256K1_N >> 1) - 1,
             .recoveryId = 1,
@@ -853,7 +853,7 @@ test "Bitcoin signature test vectors - comprehensive" {
                 continue;
             };
             // Verify we got a valid address
-            const zero_address = [_]u8{0} ** 20;
+            const zero_address = @as([20]u8, @splat(0));
             try std.testing.expect(!std.mem.eql(u8, &addr, &zero_address));
         }
     }
@@ -1299,7 +1299,7 @@ test "Signature verification - valid test vectors with known keys" {
 
         // If recovery succeeds, the address should be non-zero
         const recovered = try unauditedRecoverAddress(&hash, recoveryId, r, s);
-        const zero_address = [_]u8{0} ** 20;
+        const zero_address = @as([20]u8, @splat(0));
         try std.testing.expect(!std.mem.eql(u8, &recovered, &zero_address));
     }
 }
@@ -1468,14 +1468,14 @@ test "Invalid hash lengths for signature recovery" {
 
     // Test 1: Hash too short (31 bytes)
     {
-        const short_hash = [_]u8{0xaa} ** 31;
+        const short_hash = @as([31]u8, @splat(0xaa));
         const result = unauditedRecoverAddress(&short_hash, 0, r, s);
         try std.testing.expectError(error.InvalidHashLength, result);
     }
 
     // Test 2: Hash too long (33 bytes)
     {
-        const long_hash = [_]u8{0xaa} ** 33;
+        const long_hash = @as([33]u8, @splat(0xaa));
         const result = unauditedRecoverAddress(&long_hash, 0, r, s);
         try std.testing.expectError(error.InvalidHashLength, result);
     }
@@ -1489,7 +1489,7 @@ test "Invalid hash lengths for signature recovery" {
 
     // Test 4: Exactly 32 bytes should work (or fail for other reasons)
     {
-        const valid_hash = [_]u8{0xaa} ** 32;
+        const valid_hash = @as([32]u8, @splat(0xaa));
         const result = unauditedRecoverAddress(&valid_hash, 0, r, s);
         _ = result catch |err| {
             try std.testing.expect(err == error.InvalidSignature);
@@ -1614,7 +1614,7 @@ test "recoverPubkey - 64-byte public key recovery" {
 
         // Verify public key is 64 bytes and non-zero
         try std.testing.expectEqual(@as(usize, 64), pubkey.len);
-        const zero_pubkey = [_]u8{0} ** 64;
+        const zero_pubkey = @as([64]u8, @splat(0));
         try std.testing.expect(!std.mem.eql(u8, &pubkey, &zero_pubkey));
     }
 
@@ -1635,7 +1635,7 @@ test "recoverPubkey - 64-byte public key recovery" {
 test "recoverPubkey - v parameter variations" {
     // Test all valid v parameter values (27, 28 for Ethereum)
 
-    const hash = [_]u8{0xaa} ** 32;
+    const hash = @as([32]u8, @splat(0xaa));
     var r_bytes: [32]u8 = undefined;
     var s_bytes: [32]u8 = undefined;
 
@@ -1691,34 +1691,34 @@ test "recoverPubkey - v parameter variations" {
 }
 
 test "recoverPubkey - invalid input lengths" {
-    const hash = [_]u8{0xaa} ** 32;
-    var r_bytes: [32]u8 = [_]u8{0xbb} ** 32;
-    var s_bytes: [32]u8 = [_]u8{0xcc} ** 32;
+    const hash = @as([32]u8, @splat(0xaa));
+    var r_bytes: [32]u8 = @as([32]u8, @splat(0xbb));
+    var s_bytes: [32]u8 = @as([32]u8, @splat(0xcc));
 
     // Test with invalid hash length (31 bytes)
     {
-        const short_hash = [_]u8{0xaa} ** 31;
+        const short_hash = @as([31]u8, @splat(0xaa));
         const result = recoverPubkey(&short_hash, &r_bytes, &s_bytes, 27);
         try std.testing.expectError(error.InvalidHashLength, result);
     }
 
     // Test with invalid hash length (33 bytes)
     {
-        const long_hash = [_]u8{0xaa} ** 33;
+        const long_hash = @as([33]u8, @splat(0xaa));
         const result = recoverPubkey(&long_hash, &r_bytes, &s_bytes, 27);
         try std.testing.expectError(error.InvalidHashLength, result);
     }
 
     // Test with invalid r length (31 bytes)
     {
-        const short_r = [_]u8{0xbb} ** 31;
+        const short_r = @as([31]u8, @splat(0xbb));
         const result = recoverPubkey(&hash, &short_r, &s_bytes, 27);
         try std.testing.expectError(error.InvalidRLength, result);
     }
 
     // Test with invalid s length (31 bytes)
     {
-        const short_s = [_]u8{0xcc} ** 31;
+        const short_s = @as([31]u8, @splat(0xcc));
         const result = recoverPubkey(&hash, &r_bytes, &short_s, 27);
         try std.testing.expectError(error.InvalidSLength, result);
     }
@@ -1942,7 +1942,7 @@ test "Bitcoin Core signature test vectors - comprehensive suite" {
         // Vector 4: Signature with maximum valid r and s
         .{
             .name = "Maximum valid r and s",
-            .msg_hash = [_]u8{0xFF} ** 32,
+            .msg_hash = @as([32]u8, @splat(0xFF)),
             .r = SECP256K1_N - 1,
             .s = (SECP256K1_N >> 1) - 1,
             .recoveryId = 1,
@@ -1951,7 +1951,7 @@ test "Bitcoin Core signature test vectors - comprehensive suite" {
         // Vector 5: High S value (should fail EIP-2)
         .{
             .name = "High S value malleability",
-            .msg_hash = [_]u8{0xAA} ** 32,
+            .msg_hash = @as([32]u8, @splat(0xAA)),
             .r = 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef,
             .s = (SECP256K1_N >> 1) + 100, // s > n/2
             .recoveryId = 0,
@@ -1971,7 +1971,7 @@ test "Bitcoin Core signature test vectors - comprehensive suite" {
 
             // If recovery succeeds, verify non-zero address
             const recovered = try unauditedRecoverAddress(&tv.msg_hash, tv.recoveryId, tv.r, tv.s);
-            const zero_address = [_]u8{0} ** 20;
+            const zero_address = @as([20]u8, @splat(0));
             try std.testing.expect(!std.mem.eql(u8, &recovered, &zero_address));
         } else {
             // Should fail
@@ -2035,7 +2035,7 @@ test "Ethereum JSON-RPC test suite vectors" {
 
         // Verify non-zero address
         const recovered = try unauditedRecoverAddress(&message_hash, @intCast(recoveryId), tv.r, tv.s);
-        const zero_address = [_]u8{0} ** 20;
+        const zero_address = @as([20]u8, @splat(0));
         try std.testing.expect(!std.mem.eql(u8, &recovered, &zero_address));
     }
 }
@@ -2237,7 +2237,7 @@ test "Public key recovery with known message/signature pairs" {
         // Vector 3: Edge case with small values
         .{
             .name = "Small value signature",
-            .msg_hash = [_]u8{0x01} ** 32,
+            .msg_hash = @as([32]u8, @splat(0x01)),
             .r = 0x1234,
             .s = 0x5678,
             .recoveryId = 0,
@@ -2264,7 +2264,7 @@ test "Public key recovery with known message/signature pairs" {
             try std.testing.expectEqual(@as(usize, 64), pubkey.len);
 
             // Verify public key is non-zero
-            const zero_pubkey = [_]u8{0} ** 64;
+            const zero_pubkey = @as([64]u8, @splat(0));
             try std.testing.expect(!std.mem.eql(u8, &pubkey, &zero_pubkey));
 
             // Verify the recovered point is on the curve
@@ -2287,7 +2287,7 @@ test "Public key recovery with known message/signature pairs" {
             try std.testing.expectEqual(@as(usize, 20), addr.len);
 
             // Verify address is non-zero
-            const zero_addr = [_]u8{0} ** 20;
+            const zero_addr = @as([20]u8, @splat(0));
             try std.testing.expect(!std.mem.eql(u8, &addr, &zero_addr));
         }
     }
@@ -2380,7 +2380,7 @@ test "Cross-validation - signature recovery determinism" {
             .recoveryId = 0,
         },
         .{
-            .hash = [_]u8{0xAA} ** 32,
+            .hash = @as([32]u8, @splat(0xAA)),
             .r = 0x6c7ab2f961fd97b6064dfc604c8f291df6b0dcf24d062c724bac10f60ba394f3,
             .s = 0x26afe8922bb25e8a87cd0fca0f21e9e08b6fb8e4c50a7c7c069e69f6e2b5c5a2,
             .recoveryId = 1,

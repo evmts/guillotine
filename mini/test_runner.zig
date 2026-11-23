@@ -16,7 +16,7 @@ pub fn main() !void {
     defer stdout_buffer.deinit(allocator);
     const stdout = stdout_buffer.writer(allocator);
 
-    var results = std.ArrayListUnmanaged(TestResult){};
+    var results = std.ArrayListUnmanaged(TestResult).empty;
     defer {
         for (results.items) |*result| {
             if (result.error_msg) |msg| {
@@ -76,7 +76,7 @@ pub fn main() !void {
     }
 
     // Collect test indices to run
-    var test_indices = std.ArrayListUnmanaged(usize){};
+    var test_indices = std.ArrayListUnmanaged(usize).empty;
     defer test_indices.deinit(allocator);
 
     for (builtin.test_functions, 0..) |t, i| {

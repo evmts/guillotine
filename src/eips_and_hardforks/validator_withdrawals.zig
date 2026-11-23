@@ -85,7 +85,7 @@ pub const ValidatorWithdrawalsContract = struct {
         return .{
             .database = database,
             .allocator = allocator,
-            .pending_withdrawals = std.ArrayList(WithdrawalRequest){},
+            .pending_withdrawals = std.ArrayList(WithdrawalRequest).empty,
         };
     }
 
@@ -253,14 +253,14 @@ test "validator withdrawal request" {
     defer contract.deinit();
 
     // Create a valid withdrawal request
-    var input: [76]u8 = [_]u8{0} ** 76;
+    var input: [76]u8 = @as([76]u8, @splat(0));
 
     // Set source address (20 bytes)
     const source_address = try Address.from_hex("0x1234567890123456789012345678901234567890");
     @memcpy(input[0..20], &source_address.bytes);
 
     // Set validator pubkey (48 bytes)
-    input[20..68].* = [_]u8{0xAA} ** 48;
+    input[20..68].* = @as([48]u8, @splat(0xAA));
 
     // Set amount (0 for full withdrawal)
     const amount: u64 = 0;
@@ -298,14 +298,14 @@ test "withdrawal authorization check" {
     defer contract.deinit();
     
     // Create a withdrawal request
-    var input: [76]u8 = [_]u8{0} ** 76;
+    var input: [76]u8 = @as([76]u8, @splat(0));
     
     // Set source address
     const source_address = try Address.from_hex("0x1234567890123456789012345678901234567890");
     @memcpy(input[0..20], &source_address.bytes);
     
     // Set validator pubkey
-    input[20..68].* = [_]u8{0xAA} ** 48;
+    input[20..68].* = @as([48]u8, @splat(0xAA));
     
     // Try to execute with different caller (unauthorized)
     const unauthorized_caller = try Address.from_hex("0x9999999999999999999999999999999999999999");
@@ -336,16 +336,16 @@ test "max withdrawals per block" {
     // Fill up to max withdrawals
     var i: usize = 0;
     while (i < MAX_WITHDRAWAL_REQUESTS_PER_BLOCK) : (i += 1) {
-        var input: [76]u8 = [_]u8{0} ** 76;
+        var input: [76]u8 = @as([76]u8, @splat(0));
 
         // Use different addresses for each request
-        var addr_bytes: [20]u8 = [_]u8{0} ** 20;
+        var addr_bytes: [20]u8 = @as([20]u8, @splat(0));
         addr_bytes[19] = @intCast(i);
         const source_address = Address{ .bytes = addr_bytes };
         @memcpy(input[0..20], &source_address.bytes);
 
         // Set validator pubkey
-        input[20..68].* = [_]u8{@intCast(i)} ** 48;
+        input[20..68].* = @as([48]u8, @splat(@intCast(i)));
 
         const result = try contract.execute(source_address, &input, 100000);
         defer allocator.free(result.output);
@@ -356,7 +356,7 @@ test "max withdrawals per block" {
     try testing.expectEqual(MAX_WITHDRAWAL_REQUESTS_PER_BLOCK, contract.getPendingWithdrawals().len);
 
     // Try to add one more - should not be stored
-    var input: [76]u8 = [_]u8{0} ** 76;
+    var input: [76]u8 = @as([76]u8, @splat(0));
     const extra_address = try Address.from_hex("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF");
     @memcpy(input[0..20], &extra_address.bytes);
 
@@ -380,10 +380,10 @@ test "clearProcessedWithdrawals error propagation" {
     defer contract.deinit();
 
     // Add a withdrawal
-    var input: [76]u8 = [_]u8{0} ** 76;
+    var input: [76]u8 = @as([76]u8, @splat(0));
     const source_address = try Address.from_hex("0x1234567890123456789012345678901234567890");
     @memcpy(input[0..20], &source_address.bytes);
-    input[20..68].* = [_]u8{0xAA} ** 48;
+    input[20..68].* = @as([48]u8, @splat(0xAA));
 
     const result = try contract.execute(source_address, &input, 100000);
     defer allocator.free(result.output);
@@ -407,14 +407,14 @@ test "withdrawal hash calculation deterministic" {
 
     // Create two identical requests
     const request1 = WithdrawalRequest{
-        .source_address = Address{ .bytes = [_]u8{0x12} ** 20 },
-        .validator_pubkey = [_]u8{0xAB} ** 48,
+        .source_address = Address{ .bytes = @as([20]u8, @splat(0x12)) },
+        .validator_pubkey = @as([48]u8, @splat(0xAB)),
         .amount = 1000,
     };
 
     const request2 = WithdrawalRequest{
-        .source_address = Address{ .bytes = [_]u8{0x12} ** 20 },
-        .validator_pubkey = [_]u8{0xAB} ** 48,
+        .source_address = Address{ .bytes = @as([20]u8, @splat(0x12)) },
+        .validator_pubkey = @as([48]u8, @splat(0xAB)),
         .amount = 1000,
     };
 
@@ -429,14 +429,14 @@ test "withdrawal hash calculation collision resistance" {
 
     // Create different requests
     const request1 = WithdrawalRequest{
-        .source_address = Address{ .bytes = [_]u8{0x12} ** 20 },
-        .validator_pubkey = [_]u8{0xAB} ** 48,
+        .source_address = Address{ .bytes = @as([20]u8, @splat(0x12)) },
+        .validator_pubkey = @as([48]u8, @splat(0xAB)),
         .amount = 1000,
     };
 
     const request2 = WithdrawalRequest{
-        .source_address = Address{ .bytes = [_]u8{0x34} ** 20 },
-        .validator_pubkey = [_]u8{0xCD} ** 48,
+        .source_address = Address{ .bytes = @as([20]u8, @splat(0x34)) },
+        .validator_pubkey = @as([48]u8, @splat(0xCD)),
         .amount = 2000,
     };
 
@@ -450,8 +450,8 @@ test "withdrawal hash changes with any field modification" {
     const testing = std.testing;
 
     const base_request = WithdrawalRequest{
-        .source_address = Address{ .bytes = [_]u8{0x12} ** 20 },
-        .validator_pubkey = [_]u8{0xAB} ** 48,
+        .source_address = Address{ .bytes = @as([20]u8, @splat(0x12)) },
+        .validator_pubkey = @as([48]u8, @splat(0xAB)),
         .amount = 1000,
     };
 
@@ -489,12 +489,12 @@ test "processBlockWithdrawals validates withdrawal count" {
     // Add withdrawals up to max
     var i: usize = 0;
     while (i < MAX_WITHDRAWAL_REQUESTS_PER_BLOCK) : (i += 1) {
-        var input: [76]u8 = [_]u8{0} ** 76;
-        var addr_bytes: [20]u8 = [_]u8{0} ** 20;
+        var input: [76]u8 = @as([76]u8, @splat(0));
+        var addr_bytes: [20]u8 = @as([20]u8, @splat(0));
         addr_bytes[19] = @intCast(i);
         const source_address = Address{ .bytes = addr_bytes };
         @memcpy(input[0..20], &source_address.bytes);
-        input[20..68].* = [_]u8{@intCast(i)} ** 48;
+        input[20..68].* = @as([48]u8, @splat(@intCast(i)));
 
         const result = try contract.execute(source_address, &input, 100000);
         defer allocator.free(result.output);
@@ -506,9 +506,9 @@ test "processBlockWithdrawals validates withdrawal count" {
         .timestamp = 1234567890,
         .difficulty = 0,
         .gas_limit = 30000000,
-        .coinbase = Address{ .bytes = [_]u8{0} ** 20 },
+        .coinbase = Address{ .bytes = @as([20]u8, @splat(0)) },
         .base_fee_per_gas = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     try ValidatorWithdrawalsContract.processBlockWithdrawals(&database, &block_info);
@@ -533,9 +533,9 @@ test "processBlockWithdrawals rejects excessive withdrawals" {
         .timestamp = 1234567890,
         .difficulty = 0,
         .gas_limit = 30000000,
-        .coinbase = Address{ .bytes = [_]u8{0} ** 20 },
+        .coinbase = Address{ .bytes = @as([20]u8, @splat(0)) },
         .base_fee_per_gas = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     // Should return error for too many withdrawals
@@ -553,10 +553,10 @@ test "memory safety - output heap allocation" {
     var contract = ValidatorWithdrawalsContract.init(allocator, &database);
     defer contract.deinit();
 
-    var input: [76]u8 = [_]u8{0} ** 76;
+    var input: [76]u8 = @as([76]u8, @splat(0));
     const source_address = try Address.from_hex("0x1234567890123456789012345678901234567890");
     @memcpy(input[0..20], &source_address.bytes);
-    input[20..68].* = [_]u8{0xAA} ** 48;
+    input[20..68].* = @as([48]u8, @splat(0xAA));
 
     const result = try contract.execute(source_address, &input, 100000);
     defer allocator.free(result.output);
@@ -579,10 +579,10 @@ test "out of gas error handling" {
     var contract = ValidatorWithdrawalsContract.init(allocator, &database);
     defer contract.deinit();
 
-    var input: [76]u8 = [_]u8{0} ** 76;
+    var input: [76]u8 = @as([76]u8, @splat(0));
     const source_address = try Address.from_hex("0x1234567890123456789012345678901234567890");
     @memcpy(input[0..20], &source_address.bytes);
-    input[20..68].* = [_]u8{0xAA} ** 48;
+    input[20..68].* = @as([48]u8, @splat(0xAA));
 
     // Execute with insufficient gas
     const result = contract.execute(source_address, &input, WITHDRAWAL_REQUEST_GAS - 1);
@@ -600,7 +600,7 @@ test "invalid input length handling" {
     defer contract.deinit();
 
     // Try with wrong input length
-    var input: [50]u8 = [_]u8{0} ** 50;
+    var input: [50]u8 = @as([50]u8, @splat(0));
     const source_address = try Address.from_hex("0x1234567890123456789012345678901234567890");
 
     const result = try contract.execute(source_address, &input, 100000);
@@ -619,10 +619,10 @@ test "withdrawal request parsing - big endian amount" {
     var contract = ValidatorWithdrawalsContract.init(allocator, &database);
     defer contract.deinit();
 
-    var input: [76]u8 = [_]u8{0} ** 76;
+    var input: [76]u8 = @as([76]u8, @splat(0));
     const source_address = try Address.from_hex("0x1234567890123456789012345678901234567890");
     @memcpy(input[0..20], &source_address.bytes);
-    input[20..68].* = [_]u8{0xAA} ** 48;
+    input[20..68].* = @as([48]u8, @splat(0xAA));
 
     // Set amount as big-endian: 0x0000000000001234 = 4660
     const amount: u64 = 4660;
@@ -649,12 +649,12 @@ test "multiple withdrawals maintain correct order" {
     // Add three withdrawals with different amounts
     const amounts = [_]u64{ 1000, 2000, 3000 };
     for (amounts, 0..) |amount, i| {
-        var input: [76]u8 = [_]u8{0} ** 76;
-        var addr_bytes: [20]u8 = [_]u8{0} ** 20;
+        var input: [76]u8 = @as([76]u8, @splat(0));
+        var addr_bytes: [20]u8 = @as([20]u8, @splat(0));
         addr_bytes[19] = @intCast(i);
         const source_address = Address{ .bytes = addr_bytes };
         @memcpy(input[0..20], &source_address.bytes);
-        input[20..68].* = [_]u8{@intCast(i)} ** 48;
+        input[20..68].* = @as([48]u8, @splat(@intCast(i)));
         std.mem.writeInt(u64, input[68..76], amount, .big);
 
         const result = try contract.execute(source_address, &input, 100000);
@@ -679,10 +679,10 @@ test "storage hash correctly stored and retrievable" {
     var contract = ValidatorWithdrawalsContract.init(allocator, &database);
     defer contract.deinit();
 
-    var input: [76]u8 = [_]u8{0} ** 76;
+    var input: [76]u8 = @as([76]u8, @splat(0));
     const source_address = try Address.from_hex("0x1234567890123456789012345678901234567890");
     @memcpy(input[0..20], &source_address.bytes);
-    input[20..68].* = [_]u8{0xAA} ** 48;
+    input[20..68].* = @as([48]u8, @splat(0xAA));
     const amount: u64 = 1000;
     std.mem.writeInt(u64, input[68..76], amount, .big);
 

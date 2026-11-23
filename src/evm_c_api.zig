@@ -103,7 +103,7 @@ pub const BlockInfoFFI = extern struct {
 // Thread-local allocator for FFI
 threadlocal var ffi_allocator: ?std.mem.Allocator = null;
 threadlocal var last_error: [256]u8 = undefined;
-threadlocal var last_error_z: [257]u8 = [_]u8{0} ** 257;
+threadlocal var last_error_z: [257]u8 = @as([257]u8, @splat(0));
 const empty_error: [1]u8 = .{0};
 const empty_buffer: [0]u8 = .{};
 
@@ -145,7 +145,7 @@ const TestEvmInstance = struct {
 var instance_pool: ?std.ArrayList(*EvmInstance) = null;
 var tracing_instance_pool: ?std.ArrayList(*TracingEvmInstance) = null;
 var test_instance_pool: ?std.ArrayList(*TestEvmInstance) = null;
-var pool_mutex = std.Thread.Mutex{};
+var pool_mutex: std.Io.Mutex = .init;
 
 // Map handles to instances
 var handle_map: ?std.AutoHashMap(*EvmHandle, *EvmInstance) = null;
@@ -160,8 +160,8 @@ fn setError(comptime fmt: []const u8, args: anytype) void {
 
 // Initialize FFI allocator and instance pools
 export fn guillotine_init() void {
-    pool_mutex.lock();
-    defer pool_mutex.unlock();
+    std.Io.Threaded.mutexLockUncancelable(&pool_mutex);
+    defer std.Io.Threaded.mutexUnlock(&pool_mutex);
 
     if (ffi_allocator == null) {
         // Use c_allocator for FFI - required for C interop and WASM compatibility
@@ -183,8 +183,8 @@ export fn guillotine_init() void {
 
 // Cleanup FFI allocator and instance pools
 export fn guillotine_cleanup() void {
-    pool_mutex.lock();
-    defer pool_mutex.unlock();
+    std.Io.Threaded.mutexLockUncancelable(&pool_mutex);
+    defer std.Io.Threaded.mutexUnlock(&pool_mutex);
 
     if (ffi_allocator) |allocator| {
         // Clean up instance pools
@@ -264,8 +264,8 @@ export fn guillotine_evm_create_mainnet(block_info_ptr: *const BlockInfoFFI) ?*E
         return null;
     };
 
-    pool_mutex.lock();
-    defer pool_mutex.unlock();
+    std.Io.Threaded.mutexLockUncancelable(&pool_mutex);
+    defer std.Io.Threaded.mutexUnlock(&pool_mutex);
 
     // Try to find a free instance in the pool
     if (instance_pool) |*pool| {
@@ -468,8 +468,8 @@ export fn guillotine_evm_create_test(block_info_ptr: *const BlockInfoFFI) ?*EvmH
         return null;
     };
 
-    pool_mutex.lock();
-    defer pool_mutex.unlock();
+    std.Io.Threaded.mutexLockUncancelable(&pool_mutex);
+    defer std.Io.Threaded.mutexUnlock(&pool_mutex);
 
     // Try to find a free instance in the pool
     if (test_instance_pool) |*pool| {
@@ -604,8 +604,8 @@ export fn guillotine_evm_create_test(block_info_ptr: *const BlockInfoFFI) ?*EvmH
 
 // Destroy an EVM instance (actually returns it to the pool)
 export fn guillotine_evm_destroy(handle: *EvmHandle) void {
-    pool_mutex.lock();
-    defer pool_mutex.unlock();
+    std.Io.Threaded.mutexLockUncancelable(&pool_mutex);
+    defer std.Io.Threaded.mutexUnlock(&pool_mutex);
 
     // Try mainnet instances first
     if (handle_map) |*map| {

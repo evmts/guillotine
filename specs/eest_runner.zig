@@ -28,6 +28,10 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+
+/// Process-wide I/O and environment, set once at the start of `main`.
+var io: std.Io = undefined;
+var environ_map: *const std.process.Environ.Map = undefined;
 const evm = @import("evm");
 const crypto = @import("crypto");
 
@@ -73,8 +77,8 @@ pub const Fork = enum {
     };
 
     pub fn parse(name: []const u8) ?Fork {
-        inline for (@typeInfo(Fork).@"enum".fields) |f| {
-            if (std.ascii.eqlIgnoreCase(name, f.name)) return @enumFromInt(f.value);
+        for (std.meta.tags(Fork)) |fork| {
+            if (std.ascii.eqlIgnoreCase(name, @tagName(fork))) return fork;
         }
         for (aliases) |alias| {
             if (std.ascii.eqlIgnoreCase(name, alias.name)) return alias.fork;
@@ -135,7 +139,7 @@ fn hexDigits(text: []const u8) ![]const u8 {
 }
 
 fn parseU256(text: []const u8) !u256 {
-    const digits = std.mem.trimLeft(u8, try hexDigits(text), "0");
+    const digits = std.mem.trimStart(u8, try hexDigits(text), "0");
     if (digits.len == 0) return 0;
     if (digits.len > 64) return error.HexValueTooLarge;
     return std.fmt.parseInt(u256, digits, 16);
@@ -222,7 +226,7 @@ fn rlpAppendHeader(a: Allocator, out: *std.ArrayList(u8), short_base: u8, len: u
     }
     var be: [8]u8 = undefined;
     std.mem.writeInt(u64, &be, len, .big);
-    const digits = std.mem.trimLeft(u8, &be, &[_]u8{0});
+    const digits = std.mem.trimStart(u8, &be, &[_]u8{0});
     try out.append(a, short_base + 55 + @as(u8, @intCast(digits.len)));
     try out.appendSlice(a, digits);
 }
@@ -239,7 +243,7 @@ fn rlpAppendBytes(a: Allocator, out: *std.ArrayList(u8), bytes: []const u8) !voi
 fn rlpAppendUint(a: Allocator, out: *std.ArrayList(u8), value: u256) !void {
     var be: [32]u8 = undefined;
     std.mem.writeInt(u256, &be, value, .big);
-    try rlpAppendBytes(a, out, std.mem.trimLeft(u8, &be, &[_]u8{0}));
+    try rlpAppendBytes(a, out, std.mem.trimStart(u8, &be, &[_]u8{0}));
 }
 
 fn rlpWrapList(a: Allocator, payload: []const u8) ![]u8 {
@@ -381,7 +385,7 @@ fn trieRoot(a: Allocator, entries: []TrieEntry) Allocator.Error![32]u8 {
 // Account helpers on top of the Guillotine Database
 // ---------------------------------------------------------------------------
 
-const zero_hash = [_]u8{0} ** 32;
+const zero_hash = @as([32]u8, @splat(0));
 const delegation_prefix = [_]u8{ 0xef, 0x01, 0x00 };
 
 fn emptyCodeHash() [32]u8 {
@@ -1178,7 +1182,7 @@ fn precompileAddresses(fork: Fork) []const u16 {
 }
 
 fn precompileAddress(number: u16) [20]u8 {
-    var bytes = [_]u8{0} ** 20;
+    var bytes = @as([20]u8, @splat(0));
     std.mem.writeInt(u16, bytes[18..20], number, .big);
     return bytes;
 }
@@ -1231,7 +1235,7 @@ fn applyAuthorizations(
         if (account.nonce != authorization.nonce) continue;
 
         if (existing != null) refund += 25000 - 12500;
-        if (std.mem.eql(u8, &authorization.address, &([_]u8{0} ** 20))) {
+        if (std.mem.eql(u8, &authorization.address, &(@as([20]u8, @splat(0))))) {
             account.delegated_address = null;
         } else {
             account.delegated_address = .{ .bytes = authorization.address };
@@ -1699,7 +1703,7 @@ const Aggregator = struct {
         }
         if (self.verbose) {
             const line = try std.fmt.allocPrint(self.a, "FAIL [{s}] {s} {s}::{s} #{d}: {s}\n", .{ info.fork, category, info.file, info.name, info.post_index, detail });
-            try std.fs.File.stdout().writeAll(line);
+            try std.Io.File.stdout().writeStreamingAll(io, line);
         }
     }
 
@@ -1719,7 +1723,7 @@ const Aggregator = struct {
 const Sink = struct {
     target: union(enum) {
         direct: *Aggregator,
-        pipe: std.fs.File,
+        pipe: std.Io.File,
     },
     a: Allocator,
     line: std.ArrayList(u8) = .empty,
@@ -1736,9 +1740,9 @@ const Sink = struct {
         try self.appendField(try std.fmt.allocPrint(self.a, "{d}", .{value}));
     }
 
-    fn send(self: *Sink, file: std.fs.File) !void {
+    fn send(self: *Sink, file: std.Io.File) !void {
         try self.line.append(self.a, '\n');
-        try file.writeAll(self.line.items);
+        try file.writeStreamingAll(io, self.line.items);
         self.line.clearRetainingCapacity();
     }
 
@@ -1842,7 +1846,7 @@ const WorkerArgs = struct {
 const Config = struct {
     fixtures_dir: []const u8 = default_fixtures_dir,
     fork_text: ?[]const u8 = null,
-    forks: ForkSet = ForkSet.initFull(),
+    forks: ForkSet = ForkSet.full,
     filter: ?[]const u8 = null,
     report: ?[]const u8 = null,
     jobs: usize = 1,
@@ -1855,17 +1859,14 @@ const Config = struct {
 /// error when stderr itself fails.
 fn usage(a: Allocator, comptime format: []const u8, args: anytype) anyerror {
     const message = std.fmt.allocPrint(a, "eest-runner: " ++ format ++ "\n", args) catch |err| return err;
-    std.fs.File.stderr().writeAll(message) catch |err| return err;
+    std.Io.File.stderr().writeStreamingAll(io, message) catch |err| return err;
     return error.Usage;
 }
 
 fn envValue(a: Allocator, name: []const u8) !?[]const u8 {
-    const value = std.process.getEnvVarOwned(a, name) catch |err| switch (err) {
-        error.EnvironmentVariableNotFound => return null,
-        else => return err,
-    };
+    const value = environ_map.get(name) orelse return null;
     if (value.len == 0) return null;
-    return value;
+    return try a.dupe(u8, value);
 }
 
 fn flagValue(arg: []const u8, comptime name: []const u8) ?[]const u8 {
@@ -1881,7 +1882,7 @@ fn parseNumber(a: Allocator, comptime T: type, name: []const u8, text: []const u
 }
 
 fn parseForks(a: Allocator, text: []const u8) !ForkSet {
-    var set = ForkSet.initEmpty();
+    var set = ForkSet.empty;
     var it = std.mem.splitScalar(u8, text, ',');
     while (it.next()) |raw| {
         const name = std.mem.trim(u8, raw, " ");
@@ -1955,12 +1956,12 @@ fn stringLessThan(_: void, lhs: []const u8, rhs: []const u8) bool {
 
 /// Sorted paths, relative to `root`, of every `*.json` fixture below it.
 fn collectFiles(a: Allocator, root: []const u8) ![]const []const u8 {
-    var dir = try std.fs.cwd().openDir(root, .{ .iterate = true });
-    defer dir.close();
+    var dir = try std.Io.Dir.cwd().openDir(io, root, .{ .iterate = true });
+    defer dir.close(io);
     var walker = try dir.walk(a);
     defer walker.deinit();
     var files: std.ArrayList([]const u8) = .empty;
-    while (try walker.next()) |entry| {
+    while (try walker.next(io)) |entry| {
         if (entry.kind != .file) continue;
         if (!std.mem.endsWith(u8, entry.basename, ".json")) continue;
         // `.meta/index.json` describes the release; it is not a fixture.
@@ -1985,9 +1986,9 @@ fn suiteOf(path: []const u8) []const u8 {
 
 /// True when the raw fixture text names one of the selected forks as a key.
 fn mentionsSelectedFork(data: []const u8, forks: ForkSet) bool {
-    inline for (@typeInfo(Fork).@"enum".fields) |f| {
-        if (forks.contains(@enumFromInt(f.value))) {
-            if (std.mem.indexOf(u8, data, "\"" ++ f.name ++ "\"") != null) return true;
+    inline for (comptime std.meta.tags(Fork)) |fork| {
+        if (forks.contains(fork)) {
+            if (std.mem.indexOf(u8, data, "\"" ++ @tagName(fork) ++ "\"") != null) return true;
         }
     }
     inline for (Fork.aliases) |alias| {
@@ -2002,7 +2003,7 @@ const Worker = struct {
     gpa: Allocator,
     config: *const Config,
     sink: *Sink,
-    root: std.fs.Dir,
+    root: std.Io.Dir,
 
     fn run(self: *Worker, files: []const []const u8, args: WorkerArgs) !void {
         for (files, 0..) |path, index| {
@@ -2025,7 +2026,7 @@ const Worker = struct {
                 if (!std.mem.endsWith(u8, path, filter[0..separator]) and std.mem.indexOf(u8, path, filter[0..separator]) == null) return;
             }
         }
-        const data = try self.root.readFileAlloc(arena, path, max_fixture_bytes);
+        const data = try self.root.readFileAlloc(io, path, arena, .limited(max_fixture_bytes + 1));
         if (self.config.fork_text != null and !mentionsSelectedFork(data, self.config.forks)) return;
         // Skip the JSON parse when neither the path nor the text can match.
         if (self.config.filter) |filter| {
@@ -2148,11 +2149,11 @@ const WorkerThread = struct {
 
     fn body(self: *WorkerThread) !void {
         var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
-        const use_debug_allocator = builtin.mode == .Debug;
+        const use_debug_allocator = builtin.mode == .debug;
         const gpa = if (use_debug_allocator) debug_allocator.allocator() else std.heap.smp_allocator;
 
-        var root = try std.fs.cwd().openDir(self.config.fixtures_dir, .{});
-        defer root.close();
+        var root = try std.Io.Dir.cwd().openDir(io, self.config.fixtures_dir, .{});
+        defer root.close(io);
 
         // The KZG point-evaluation precompile needs the trusted setup.
         try evm.kzg_setup.init();
@@ -2224,12 +2225,12 @@ const Supervisor = struct {
         try argv.append(self.a, try std.fmt.allocPrint(self.a, "--fork={s}", .{self.config.fork_text orelse ""}));
         try argv.append(self.a, try std.fmt.allocPrint(self.a, "--filter={s}", .{self.config.filter orelse ""}));
 
-        var child = std.process.Child.init(argv.items, self.a);
-        child.stdin_behavior = .Ignore;
-        child.stdout_behavior = .Pipe;
-        child.stderr_behavior = if (self.config.verbose) .Inherit else .Ignore;
-        try child.spawn();
-        worker.child = child;
+        worker.child = try std.process.spawn(io, .{
+            .argv = argv.items,
+            .stdin = .ignore,
+            .stdout = .pipe,
+            .stderr = if (self.config.verbose) .inherit else .ignore,
+        });
         worker.open_file = null;
         worker.open_case = null;
         worker.timed_out = false;
@@ -2263,7 +2264,7 @@ const Supervisor = struct {
                 const name = try self.a.dupe(u8, try column(&fields));
                 const post_index = try std.fmt.parseInt(usize, try column(&fields), 10);
                 worker.open_case = .{ .ordinal = ordinal, .fork = fork, .suite = suite, .file = file, .name = name, .post_index = post_index };
-                worker.case_started_ms = std.time.milliTimestamp();
+                worker.case_started_ms = std.Io.Timestamp.now(io, .awake).toMilliseconds();
             },
             'P' => {
                 const info = worker.open_case orelse return error.MalformedWorkerLine;
@@ -2306,15 +2307,15 @@ const Supervisor = struct {
     /// The worker's stdout closed: reap it, record a lost case, restart.
     fn exited(self: *Supervisor, worker: *Supervised) !void {
         var child = worker.child orelse return error.WorkerNotRunning;
-        const term = try child.wait();
+        const term = try child.wait(io);
         worker.child = null;
         if (worker.finished) return;
 
         const how = switch (term) {
-            .Exited => |code| try std.fmt.allocPrint(self.a, "worker exited with code {d}", .{code}),
-            .Signal => |signal| try std.fmt.allocPrint(self.a, "worker killed by signal {d}", .{signal}),
-            .Stopped => |signal| try std.fmt.allocPrint(self.a, "worker stopped by signal {d}", .{signal}),
-            .Unknown => |status| try std.fmt.allocPrint(self.a, "worker ended with status {d}", .{status}),
+            .exited => |code| try std.fmt.allocPrint(self.a, "worker exited with code {d}", .{code}),
+            .signal => |signal| try std.fmt.allocPrint(self.a, "worker killed by signal {d}", .{@intFromEnum(signal)}),
+            .stopped => |signal| try std.fmt.allocPrint(self.a, "worker stopped by signal {d}", .{@intFromEnum(signal)}),
+            .unknown => |status| try std.fmt.allocPrint(self.a, "worker ended with status {d}", .{status}),
         };
         const category: []const u8 = if (worker.timed_out) "timeout" else "crash";
         const detail = if (worker.timed_out)
@@ -2351,7 +2352,7 @@ const Supervisor = struct {
         // Died outside any file. Restart where it stopped; `spawn` refuses a
         // restart that cannot make progress.
         const message = try std.fmt.allocPrint(self.a, "eest-runner: worker {d} failed outside a fixture: {s}\n", .{ worker.shard, how });
-        try std.fs.File.stderr().writeAll(message);
+        try std.Io.File.stderr().writeStreamingAll(io, message);
         try self.spawn(worker, worker.next_file, 0);
     }
 
@@ -2385,14 +2386,15 @@ const Supervisor = struct {
                 try self.drain(worker);
             }
 
-            const now = std.time.milliTimestamp();
+            const now = std.Io.Timestamp.now(io, .awake).toMilliseconds();
             const limit_ms: i64 = @intCast(self.config.timeout_secs * 1000);
             for (self.workers) |*worker| {
                 const child = worker.child orelse continue;
                 if (worker.open_case == null or worker.timed_out) continue;
                 if (now - worker.case_started_ms <= limit_ms) continue;
                 worker.timed_out = true;
-                std.posix.kill(child.id, std.posix.SIG.KILL) catch |err| switch (err) {
+                const pid = child.id orelse continue;
+                std.posix.kill(pid, std.posix.SIG.KILL) catch |err| switch (err) {
                     // Already gone: the closed pipe reports the exit.
                     error.ProcessNotFound => {},
                     else => return err,
@@ -2634,8 +2636,8 @@ fn renderSummary(a: Allocator, aggregator: *const Aggregator, info: RunInfo) ![]
 /// Reads the release tag that `scripts/fetch-eest-fixtures.sh` stamps beside
 /// the `fixtures` directory.
 fn readRelease(a: Allocator, fixtures_dir: []const u8) !?[]const u8 {
-    const path = try std.fs.path.join(a, &.{ fixtures_dir, "..", "..", "STAMP" });
-    const stamp = std.fs.cwd().readFileAlloc(a, path, 4096) catch |err| switch (err) {
+    const path = try std.Io.Dir.path.join(a, &.{ fixtures_dir, "..", "..", "STAMP" });
+    const stamp = std.Io.Dir.cwd().readFileAlloc(io, path, a, .limited(4096 + 1)) catch |err| switch (err) {
         // Fixtures fetched by other means carry no stamp.
         error.FileNotFound, error.NotDir => return null,
         else => return err,
@@ -2657,12 +2659,14 @@ fn exitUsage(err: anyerror) !u8 {
     return err;
 }
 
-pub fn main() !u8 {
+pub fn main(init: std.process.Init) !u8 {
+    io = init.io;
+    environ_map = init.environ_map;
     var arena_state = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena_state.deinit();
     const a = arena_state.allocator();
 
-    const args = try std.process.argsAlloc(a);
+    const args = try init.minimal.args.toSlice(a);
     const config = loadConfig(a, args) catch |err| return exitUsage(err);
 
     const files = collectFiles(a, config.fixtures_dir) catch |err| switch (err) {
@@ -2671,14 +2675,14 @@ pub fn main() !u8 {
     };
 
     if (config.worker) |worker_args| {
-        var sink = Sink{ .target = .{ .pipe = std.fs.File.stdout() }, .a = a };
+        var sink = Sink{ .target = .{ .pipe = std.Io.File.stdout() }, .a = a };
         try runWorkerThread(&config, &sink, files, worker_args);
         return 0;
     }
 
     if (files.len == 0) return exitUsage(usage(a, "no *.json fixtures below '{s}'", .{config.fixtures_dir}));
 
-    const started = std.time.milliTimestamp();
+    const started = std.Io.Timestamp.now(io, .awake).toMilliseconds();
     var aggregator = Aggregator{ .a = a, .verbose = config.verbose };
     if (config.jobs == 0) {
         var sink = Sink{ .target = .{ .direct = &aggregator }, .a = a };
@@ -2691,7 +2695,7 @@ pub fn main() !u8 {
             .a = a,
             .config = &config,
             .aggregator = &aggregator,
-            .exe_path = try std.fs.selfExePathAlloc(a),
+            .exe_path = try std.process.executablePathAlloc(io, a),
             .files = files,
             .workers = workers,
         };
@@ -2702,11 +2706,11 @@ pub fn main() !u8 {
         .config = &config,
         .release = try readRelease(a, config.fixtures_dir),
         .files = files.len,
-        .duration_ms = @intCast(std.time.milliTimestamp() - started),
+        .duration_ms = @intCast(std.Io.Timestamp.now(io, .awake).toMilliseconds() - started),
     };
-    try std.fs.File.stdout().writeAll(try renderSummary(a, &aggregator, info));
+    try std.Io.File.stdout().writeStreamingAll(io, try renderSummary(a, &aggregator, info));
     if (config.report) |path| {
-        try std.fs.cwd().writeFile(.{ .sub_path = path, .data = try renderReport(a, &aggregator, info) });
+        try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = path, .data = try renderReport(a, &aggregator, info) });
     }
 
     if (aggregator.passed + aggregator.failed == 0) {
@@ -2751,7 +2755,7 @@ test "RLP encodes scalars, strings and long lists" {
     try rlpAppendBytes(a, &out, "dog");
     try std.testing.expectEqualSlices(u8, &.{ 0x80, 0x7f, 0x81, 0x80, 0x82, 0x04, 0x00, 0x83, 'd', 'o', 'g' }, out.items);
 
-    const long = try rlpWrapList(a, &([_]u8{0x01} ** 60));
+    const long = try rlpWrapList(a, &(@as([60]u8, @splat(0x01))));
     try std.testing.expectEqual(@as(u8, 0xf8), long[0]);
     try std.testing.expectEqual(@as(u8, 60), long[1]);
     try std.testing.expectEqual(@as(usize, 62), long.len);
@@ -2834,7 +2838,7 @@ test "intrinsic gas follows each fork's schedule" {
         .max_priority_fee_per_gas = null,
         .max_fee_per_blob_gas = null,
         .to = null,
-        .sender = [_]u8{0} ** 20,
+        .sender = @as([20]u8, @splat(0)),
         .data = &.{},
         .gas_limit = &.{},
         .value = &.{},
@@ -2842,7 +2846,7 @@ test "intrinsic gas follows each fork's schedule" {
         .blob_hashes = null,
         .authorizations = null,
     };
-    const data = [_]u8{ 0x00, 0x01 } ++ [_]u8{0x02} ** 31;
+    const data = [_]u8{ 0x00, 0x01 } ++ @as([31]u8, @splat(0x02));
     const tx = Tx{ .template = &template, .data = &data, .gas_limit = 0, .value = 0, .access_list = &.{} };
 
     // Frontier: no creation surcharge, 68 gas per non-zero byte.
@@ -2879,7 +2883,7 @@ test "decodeSignature reads legacy and typed transactions" {
 
     var fields: std.ArrayList(u8) = .empty;
     for ([_]u256{ 0, 10, 21000 }) |value| try rlpAppendUint(a, &fields, value);
-    try rlpAppendBytes(a, &fields, &([_]u8{0xaa} ** 20));
+    try rlpAppendBytes(a, &fields, &(@as([20]u8, @splat(0xaa))));
     for ([_]u256{ 1, 0, 37, 0x1234, 0x5678 }) |value| try rlpAppendUint(a, &fields, value);
     const legacy = try rlpWrapList(a, fields.items);
 

@@ -51,7 +51,7 @@ pub fn Handlers(FrameType: type) type {
                     const length = self.stack.pop_unsafe();
 
                     // Pop topics in order (topic1 is deepest, topicN is shallowest)
-                    var topics: [4]WordType = [_]WordType{0} ** 4;
+                    var topics: [4]WordType = @as([4]WordType, @splat(0));
                     for (0..topic_count) |j| {
                         topics[j] = self.stack.pop_unsafe();
                     }
@@ -294,7 +294,7 @@ test "LOG0 opcode - empty data" {
     defer mock_evm.deinit();
 
     const evm = &mock_evm;
-    const test_address = Address.fromBytes(&([_]u8{0x12} ++ [_]u8{0} ** 19)) catch unreachable;
+    const test_address = Address.fromBytes(&([_]u8{0x12} ++ @as([19]u8, @splat(0)))) catch unreachable;
     var frame = try createTestFrame(testing.allocator, evm);
     defer frame.deinit(testing.allocator);
     frame.contract_address = test_address;
@@ -318,7 +318,7 @@ test "LOG0 opcode - with data" {
     defer mock_evm.deinit();
 
     const evm = &mock_evm;
-    const test_address = Address.fromBytes(&([_]u8{0x34} ++ [_]u8{0} ** 19)) catch unreachable;
+    const test_address = Address.fromBytes(&([_]u8{0x34} ++ @as([19]u8, @splat(0)))) catch unreachable;
     var frame = try createTestFrame(testing.allocator, evm);
     defer frame.deinit(testing.allocator);
     frame.contract_address = test_address;
@@ -781,8 +781,8 @@ test "LOG opcodes - contract address tracking" {
     // Test different contract addresses
     const addresses = [_]Address{
         Address.zero(),
-        Address.fromBytes(&([_]u8{0xFF} ** 20)) catch unreachable,
-        Address.fromBytes(&([_]u8{ 0x12, 0x34, 0x56 } ++ [_]u8{0} ** 17)) catch unreachable,
+        Address.fromBytes(&(@as([20]u8, @splat(0xFF)))) catch unreachable,
+        Address.fromBytes(&([_]u8{ 0x12, 0x34, 0x56 } ++ @as([17]u8, @splat(0)))) catch unreachable,
     };
 
     for (addresses) |addr| {

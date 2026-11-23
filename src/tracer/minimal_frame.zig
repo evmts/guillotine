@@ -25,7 +25,7 @@ pub const MinimalFrame = struct {
     bytecode: []const u8,
 
     // Valid jump destinations for JUMP/JUMPI
-    valid_jumpdests: std.AutoArrayHashMap(u32, void),
+    valid_jumpdests: std.array_hash_map.Auto(u32, void),
 
     // Call context
     caller: Address,
@@ -54,14 +54,14 @@ pub const MinimalFrame = struct {
     hardfork: Hardfork,
 
     /// Analyze bytecode to identify valid JUMPDEST locations
-    fn validateJumpDests(_: std.mem.Allocator, bytecode: []const u8, valid_jumpdests: *std.AutoArrayHashMap(u32, void)) !void {
+    fn validateJumpDests(allocator: std.mem.Allocator, bytecode: []const u8, valid_jumpdests: *std.array_hash_map.Auto(u32, void)) !void {
         var pc: u32 = 0;
         while (pc < bytecode.len) {
             const opcode = bytecode[pc];
 
             // Check if this is a JUMPDEST
             if (opcode == 0x5b) {
-                try valid_jumpdests.put(pc, {});
+                try valid_jumpdests.put(allocator, pc, {});
                 pc += 1;
             } else if (opcode >= 0x60 and opcode <= 0x7f) {
                 // PUSH1 through PUSH32
@@ -86,7 +86,7 @@ pub const MinimalFrame = struct {
         evm_ptr: *anyopaque,
         hardfork: Hardfork,
     ) !Self {
-        var stack = std.ArrayList(u256){};
+        var stack = std.ArrayList(u256).empty;
         try stack.ensureTotalCapacity(allocator, 1024);
         errdefer stack.deinit(allocator);
 
@@ -94,8 +94,8 @@ pub const MinimalFrame = struct {
         errdefer memory_map.deinit();
 
         // Analyze bytecode to identify valid jump destinations
-        var valid_jumpdests = std.AutoArrayHashMap(u32, void).init(allocator);
-        errdefer valid_jumpdests.deinit();
+        var valid_jumpdests: std.array_hash_map.Auto(u32, void) = .empty;
+        errdefer valid_jumpdests.deinit(allocator);
         try validateJumpDests(allocator, bytecode, &valid_jumpdests);
 
         return Self{
@@ -127,7 +127,7 @@ pub const MinimalFrame = struct {
         // The arena will clean up all memory at once when MinimalEvm is destroyed
         self.stack.deinit(self.allocator);
         self.memory.deinit();
-        self.valid_jumpdests.deinit();
+        self.valid_jumpdests.deinit(self.allocator);
         // No need to free output or return_data when using arena
     }
 
@@ -1991,13 +1991,13 @@ test "MinimalFrame JUMP and JUMPI validation" {
         1000, // block_timestamp
         1, // block_difficulty
         1, // block_prevrandao
-        Address{ .bytes = .{0} ** 20 }, // block_coinbase
+        Address{ .bytes = @splat(0) }, // block_coinbase
         30000000, // block_gas_limit
         1, // block_base_fee
         1, // blob_base_fee
     );
     evm.setTransactionContext(
-        Address{ .bytes = .{0} ** 20 }, // origin
+        Address{ .bytes = @splat(0) }, // origin
         1, // gas_price
     );
 
@@ -2015,8 +2015,8 @@ test "MinimalFrame JUMP and JUMPI validation" {
             allocator,
             &bytecode,
             10000,
-            Address{ .bytes = .{0} ** 20 },
-            Address{ .bytes = .{0} ** 20 },
+            Address{ .bytes = @splat(0) },
+            Address{ .bytes = @splat(0) },
             0,
             &.{},
             &evm,
@@ -2043,8 +2043,8 @@ test "MinimalFrame JUMP and JUMPI validation" {
             allocator,
             &bytecode,
             10000,
-            Address{ .bytes = .{0} ** 20 },
-            Address{ .bytes = .{0} ** 20 },
+            Address{ .bytes = @splat(0) },
+            Address{ .bytes = @splat(0) },
             0,
             &.{},
             &evm,
@@ -2071,8 +2071,8 @@ test "MinimalFrame JUMP and JUMPI validation" {
             allocator,
             &bytecode,
             10000,
-            Address{ .bytes = .{0} ** 20 },
-            Address{ .bytes = .{0} ** 20 },
+            Address{ .bytes = @splat(0) },
+            Address{ .bytes = @splat(0) },
             0,
             &.{},
             &evm,
@@ -2099,8 +2099,8 @@ test "MinimalFrame JUMP and JUMPI validation" {
             allocator,
             &bytecode,
             10000,
-            Address{ .bytes = .{0} ** 20 },
-            Address{ .bytes = .{0} ** 20 },
+            Address{ .bytes = @splat(0) },
+            Address{ .bytes = @splat(0) },
             0,
             &.{},
             &evm,
@@ -2127,8 +2127,8 @@ test "MinimalFrame JUMP and JUMPI validation" {
             allocator,
             &bytecode,
             10000,
-            Address{ .bytes = .{0} ** 20 },
-            Address{ .bytes = .{0} ** 20 },
+            Address{ .bytes = @splat(0) },
+            Address{ .bytes = @splat(0) },
             0,
             &.{},
             &evm,
@@ -2153,8 +2153,8 @@ test "MinimalFrame JUMP and JUMPI validation" {
             allocator,
             &bytecode,
             10000,
-            Address{ .bytes = .{0} ** 20 },
-            Address{ .bytes = .{0} ** 20 },
+            Address{ .bytes = @splat(0) },
+            Address{ .bytes = @splat(0) },
             0,
             &.{},
             &evm,
@@ -2176,18 +2176,18 @@ test "callMemoryExpansionCost - basic functionality" {
 
     evm.setBlockchainContext(
         1, 100, 1000, 1, 1,
-        Address{ .bytes = .{0} ** 20 },
+        Address{ .bytes = @splat(0) },
         30000000, 1, 1,
     );
-    evm.setTransactionContext(Address{ .bytes = .{0} ** 20 }, 1);
+    evm.setTransactionContext(Address{ .bytes = @splat(0) }, 1);
 
     const bytecode = [_]u8{0x00}; // STOP
     var frame = try MinimalFrame.init(
         allocator,
         &bytecode,
         1000000,
-        Address{ .bytes = .{0} ** 20 },
-        Address{ .bytes = .{0} ** 20 },
+        Address{ .bytes = @splat(0) },
+        Address{ .bytes = @splat(0) },
         0,
         &.{},
         &evm,
@@ -2346,18 +2346,18 @@ test "callMemoryExpansionCost - overflow protection" {
 
     evm.setBlockchainContext(
         1, 100, 1000, 1, 1,
-        Address{ .bytes = .{0} ** 20 },
+        Address{ .bytes = @splat(0) },
         30000000, 1, 1,
     );
-    evm.setTransactionContext(Address{ .bytes = .{0} ** 20 }, 1);
+    evm.setTransactionContext(Address{ .bytes = @splat(0) }, 1);
 
     const bytecode = [_]u8{0x00}; // STOP
     var frame = try MinimalFrame.init(
         allocator,
         &bytecode,
         1000000,
-        Address{ .bytes = .{0} ** 20 },
-        Address{ .bytes = .{0} ** 20 },
+        Address{ .bytes = @splat(0) },
+        Address{ .bytes = @splat(0) },
         0,
         &.{},
         &evm,

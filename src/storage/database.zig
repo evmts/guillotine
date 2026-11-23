@@ -88,7 +88,7 @@ pub const Account = @import("database_interface_account.zig").Account;
 // Ephemeral overlay support for simulate() O(1) revert
 
 /// All-zero code hash for EOA detection
-const ZERO_CODE_HASH = [_]u8{0} ** 32;
+const ZERO_CODE_HASH = @as([32]u8, @splat(0));
 
 /// Transaction cache entry for buffered writes.
 /// Uses an arena allocator for O(1) revert performance.
@@ -249,7 +249,7 @@ pub const Database = struct {
             .storage = std.HashMap(StorageKey, u256, StorageKeyContext, std.hash_map.default_max_load_percentage).init(allocator),
             .transient_storage = transient_map,
             .code_storage = std.HashMap([32]u8, []const u8, ArrayHashContext, std.hash_map.default_max_load_percentage).init(allocator),
-            .snapshots = .{ .items = &[_]Snapshot{}, .capacity = 0 },
+            .snapshots = .empty,
             .next_snapshot_id = 1,
             .allocator = allocator,
             .overlay_active = false,
@@ -1061,7 +1061,7 @@ test "Database operations work correctly" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const test_address = [_]u8{0x12} ++ [_]u8{0} ** 19;
+    const test_address = [_]u8{0x12} ++ @as([19]u8, @splat(0));
 
     // Test account operations
     try testing.expect(!db.account_exists(test_address));
@@ -1070,8 +1070,8 @@ test "Database operations work correctly" {
     var test_account = Account{
         .balance = 1000,
         .nonce = 5,
-        .code_hash = [_]u8{0xAB} ** 32,
-        .storage_root = [_]u8{0xCD} ** 32,
+        .code_hash = @as([32]u8, @splat(0xAB)),
+        .storage_root = @as([32]u8, @splat(0xCD)),
     };
 
     try db.set_account(test_address, test_account);
@@ -1091,7 +1091,7 @@ test "Database storage operations" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const test_address = [_]u8{0x34} ++ [_]u8{0} ** 19;
+    const test_address = [_]u8{0x34} ++ @as([19]u8, @splat(0));
     const storage_key: u256 = 0x123456789ABCDEF;
     const storage_value: u256 = 0xFEDCBA987654321;
 
@@ -1108,7 +1108,7 @@ test "Database transient storage operations" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const test_address = [_]u8{0x56} ++ [_]u8{0} ** 19;
+    const test_address = [_]u8{0x56} ++ @as([19]u8, @splat(0));
     const storage_key: u256 = 0x987654321;
     const storage_value: u256 = 0x123456789;
 
@@ -1138,12 +1138,12 @@ test "Database code operations" {
     try testing.expectEqualSlices(u8, test_bytes, retrieved_code);
 
     // Test with account having this code
-    const test_address = [_]u8{0x78} ++ [_]u8{0} ** 19;
+    const test_address = [_]u8{0x78} ++ @as([19]u8, @splat(0));
     const account = Account{
         .balance = 0,
         .nonce = 1,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     };
 
     try db.set_account(test_address, account);
@@ -1158,7 +1158,7 @@ test "Database code storage operations" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const test_address = [_]u8{0x78} ++ [_]u8{0} ** 19;
+    const test_address = [_]u8{0x78} ++ @as([19]u8, @splat(0));
     const test_code = [_]u8{ 0x60, 0x80, 0x60, 0x40, 0x52 }; // Simple bytecode
 
     // Test code storage
@@ -1174,7 +1174,7 @@ test "Database code storage operations" {
         .balance = 0,
         .nonce = 0,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     };
     try db.set_account(test_address, test_account);
 
@@ -1188,10 +1188,10 @@ test "Database code operations - missing code" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const invalid_hash = [_]u8{0xFF} ** 32;
+    const invalid_hash = @as([32]u8, @splat(0xFF));
     try testing.expectError(Database.Error.CodeNotFound, db.get_code(invalid_hash));
 
-    const test_address = [_]u8{0x99} ++ [_]u8{0} ** 19;
+    const test_address = [_]u8{0x99} ++ @as([19]u8, @splat(0));
     try testing.expectError(Database.Error.AccountNotFound, db.get_code_by_address(test_address));
 }
 
@@ -1200,12 +1200,12 @@ test "Database delete account operations" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const test_address = [_]u8{0x99} ++ [_]u8{0} ** 19;
+    const test_address = [_]u8{0x99} ++ @as([19]u8, @splat(0));
     const test_account = Account{
         .balance = 500,
         .nonce = 3,
-        .code_hash = [_]u8{0x11} ** 32,
-        .storage_root = [_]u8{0x22} ** 32,
+        .code_hash = @as([32]u8, @splat(0x11)),
+        .storage_root = @as([32]u8, @splat(0x22)),
     };
 
     // Create account
@@ -1224,8 +1224,8 @@ test "Database account operations" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const addr1 = [_]u8{0x01} ++ [_]u8{0} ** 19;
-    const addr2 = [_]u8{0x02} ++ [_]u8{0} ** 19;
+    const addr1 = [_]u8{0x01} ++ @as([19]u8, @splat(0));
+    const addr2 = [_]u8{0x02} ++ @as([19]u8, @splat(0));
 
     // Initially no accounts exist
     try testing.expect(!db.account_exists(addr1));
@@ -1236,8 +1236,8 @@ test "Database account operations" {
     const account1 = Account{
         .balance = 1000,
         .nonce = 5,
-        .code_hash = [_]u8{0xAA} ** 32,
-        .storage_root = [_]u8{0xBB} ** 32,
+        .code_hash = @as([32]u8, @splat(0xAA)),
+        .storage_root = @as([32]u8, @splat(0xBB)),
     };
 
     try db.set_account(addr1, account1);
@@ -1255,12 +1255,12 @@ test "Database snapshot operations" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const addr1 = [_]u8{0x01} ++ [_]u8{0} ** 19;
-    const addr2 = [_]u8{0x02} ++ [_]u8{0} ** 19;
+    const addr1 = [_]u8{0x01} ++ @as([19]u8, @splat(0));
+    const addr2 = [_]u8{0x02} ++ @as([19]u8, @splat(0));
     const storage_key: u256 = 42;
 
     // Initial state
-    const account1 = Account{ .balance = 100, .nonce = 1, .code_hash = [_]u8{0} ** 32, .storage_root = [_]u8{0} ** 32 };
+    const account1 = Account{ .balance = 100, .nonce = 1, .code_hash = @as([32]u8, @splat(0)), .storage_root = @as([32]u8, @splat(0)) };
     try db.set_account(addr1, account1);
     try db.set_storage(addr1, storage_key, 999);
 
@@ -1268,7 +1268,7 @@ test "Database snapshot operations" {
     const snapshot_id = try db.create_snapshot();
 
     // Make changes
-    const account2 = Account{ .balance = 200, .nonce = 2, .code_hash = [_]u8{1} ** 32, .storage_root = [_]u8{1} ** 32 };
+    const account2 = Account{ .balance = 200, .nonce = 2, .code_hash = @as([32]u8, @splat(1)), .storage_root = @as([32]u8, @splat(1)) };
     try db.set_account(addr1, account2);
     try db.set_account(addr2, account2);
     try db.set_storage(addr1, storage_key, 777);
@@ -1306,20 +1306,20 @@ test "Database multiple snapshots" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const addr = [_]u8{0x01} ++ [_]u8{0} ** 19;
+    const addr = [_]u8{0x01} ++ @as([19]u8, @splat(0));
 
     // Initial state
-    const initial_account = Account{ .balance = 100, .nonce = 0, .code_hash = [_]u8{0} ** 32, .storage_root = [_]u8{0} ** 32 };
+    const initial_account = Account{ .balance = 100, .nonce = 0, .code_hash = @as([32]u8, @splat(0)), .storage_root = @as([32]u8, @splat(0)) };
     try db.set_account(addr, initial_account);
 
     // First snapshot
     const snapshot1 = try db.create_snapshot();
-    const account1 = Account{ .balance = 200, .nonce = 1, .code_hash = [_]u8{0} ** 32, .storage_root = [_]u8{0} ** 32 };
+    const account1 = Account{ .balance = 200, .nonce = 1, .code_hash = @as([32]u8, @splat(0)), .storage_root = @as([32]u8, @splat(0)) };
     try db.set_account(addr, account1);
 
     // Second snapshot
     const snapshot2 = try db.create_snapshot();
-    const account2 = Account{ .balance = 300, .nonce = 2, .code_hash = [_]u8{0} ** 32, .storage_root = [_]u8{0} ** 32 };
+    const account2 = Account{ .balance = 300, .nonce = 2, .code_hash = @as([32]u8, @splat(0)), .storage_root = @as([32]u8, @splat(0)) };
     try db.set_account(addr, account2);
 
     // Verify final state
@@ -1339,15 +1339,15 @@ test "Database commit snapshot" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const addr = [_]u8{0x01} ++ [_]u8{0} ** 19;
+    const addr = [_]u8{0x01} ++ @as([19]u8, @splat(0));
 
     // Initial state
-    const account = Account{ .balance = 100, .nonce = 0, .code_hash = [_]u8{0} ** 32, .storage_root = [_]u8{0} ** 32 };
+    const account = Account{ .balance = 100, .nonce = 0, .code_hash = @as([32]u8, @splat(0)), .storage_root = @as([32]u8, @splat(0)) };
     try db.set_account(addr, account);
 
     // Create snapshot and make changes
     const snapshot_id = try db.create_snapshot();
-    const new_account = Account{ .balance = 200, .nonce = 1, .code_hash = [_]u8{0} ** 32, .storage_root = [_]u8{0} ** 32 };
+    const new_account = Account{ .balance = 200, .nonce = 1, .code_hash = @as([32]u8, @splat(0)), .storage_root = @as([32]u8, @splat(0)) };
     try db.set_account(addr, new_account);
 
     // Commit snapshot (discard it)
@@ -1387,12 +1387,12 @@ test "Database state root operations - single account" {
     defer db.deinit();
 
     // Add one account
-    const addr = [_]u8{0x01} ++ [_]u8{0} ** 19;
+    const addr = [_]u8{0x01} ++ @as([19]u8, @splat(0));
     const account = Account{
         .balance = 100,
         .nonce = 1,
-        .code_hash = [_]u8{0xAA} ** 32,
-        .storage_root = [_]u8{0xBB} ** 32,
+        .code_hash = @as([32]u8, @splat(0xAA)),
+        .storage_root = @as([32]u8, @splat(0xBB)),
     };
     try db.set_account(addr, account);
 
@@ -1413,13 +1413,13 @@ test "Database state root operations - multiple accounts" {
     defer db.deinit();
 
     // Add multiple accounts
-    const addr1 = [_]u8{0x01} ++ [_]u8{0} ** 19;
-    const addr2 = [_]u8{0x02} ++ [_]u8{0} ** 19;
-    const addr3 = [_]u8{0x03} ++ [_]u8{0} ** 19;
+    const addr1 = [_]u8{0x01} ++ @as([19]u8, @splat(0));
+    const addr2 = [_]u8{0x02} ++ @as([19]u8, @splat(0));
+    const addr3 = [_]u8{0x03} ++ @as([19]u8, @splat(0));
 
-    const account1 = Account{ .balance = 100, .nonce = 1, .code_hash = [_]u8{0xAA} ** 32, .storage_root = [_]u8{0xBB} ** 32 };
-    const account2 = Account{ .balance = 200, .nonce = 2, .code_hash = [_]u8{0xCC} ** 32, .storage_root = [_]u8{0xDD} ** 32 };
-    const account3 = Account{ .balance = 300, .nonce = 3, .code_hash = [_]u8{0xEE} ** 32, .storage_root = [_]u8{0xFF} ** 32 };
+    const account1 = Account{ .balance = 100, .nonce = 1, .code_hash = @as([32]u8, @splat(0xAA)), .storage_root = @as([32]u8, @splat(0xBB)) };
+    const account2 = Account{ .balance = 200, .nonce = 2, .code_hash = @as([32]u8, @splat(0xCC)), .storage_root = @as([32]u8, @splat(0xDD)) };
+    const account3 = Account{ .balance = 300, .nonce = 3, .code_hash = @as([32]u8, @splat(0xEE)), .storage_root = @as([32]u8, @splat(0xFF)) };
 
     try db.set_account(addr1, account1);
     try db.set_account(addr2, account2);
@@ -1439,10 +1439,10 @@ test "Database state root operations - deterministic" {
     defer db2.deinit();
 
     // Add same accounts in different order
-    const addr1 = [_]u8{0x01} ++ [_]u8{0} ** 19;
-    const addr2 = [_]u8{0x02} ++ [_]u8{0} ** 19;
-    const account1 = Account{ .balance = 100, .nonce = 1, .code_hash = [_]u8{0} ** 32, .storage_root = [_]u8{0} ** 32 };
-    const account2 = Account{ .balance = 200, .nonce = 2, .code_hash = [_]u8{0} ** 32, .storage_root = [_]u8{0} ** 32 };
+    const addr1 = [_]u8{0x01} ++ @as([19]u8, @splat(0));
+    const addr2 = [_]u8{0x02} ++ @as([19]u8, @splat(0));
+    const account1 = Account{ .balance = 100, .nonce = 1, .code_hash = @as([32]u8, @splat(0)), .storage_root = @as([32]u8, @splat(0)) };
+    const account2 = Account{ .balance = 200, .nonce = 2, .code_hash = @as([32]u8, @splat(0)), .storage_root = @as([32]u8, @splat(0)) };
 
     // DB1: Insert addr1, then addr2
     try db1.set_account(addr1, account1);
@@ -1463,15 +1463,15 @@ test "Database state root operations - state changes" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const addr = [_]u8{0x01} ++ [_]u8{0} ** 19;
-    const account1 = Account{ .balance = 100, .nonce = 1, .code_hash = [_]u8{0} ** 32, .storage_root = [_]u8{0} ** 32 };
+    const addr = [_]u8{0x01} ++ @as([19]u8, @splat(0));
+    const account1 = Account{ .balance = 100, .nonce = 1, .code_hash = @as([32]u8, @splat(0)), .storage_root = @as([32]u8, @splat(0)) };
 
     // Initial state
     try db.set_account(addr, account1);
     const root1 = try db.get_state_root();
 
     // Modify account
-    const account2 = Account{ .balance = 200, .nonce = 2, .code_hash = [_]u8{0} ** 32, .storage_root = [_]u8{0} ** 32 };
+    const account2 = Account{ .balance = 200, .nonce = 2, .code_hash = @as([32]u8, @splat(0)), .storage_root = @as([32]u8, @splat(0)) };
     try db.set_account(addr, account2);
     const root2 = try db.get_state_root();
 
@@ -1491,16 +1491,16 @@ test "Database state root - account with storage" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const addr = [_]u8{0x01} ++ [_]u8{0} ** 19;
-    const storage_root1 = [_]u8{0x11} ** 32;
-    const storage_root2 = [_]u8{0x22} ** 32;
+    const addr = [_]u8{0x01} ++ @as([19]u8, @splat(0));
+    const storage_root1 = @as([32]u8, @splat(0x11));
+    const storage_root2 = @as([32]u8, @splat(0x22));
 
-    const account1 = Account{ .balance = 100, .nonce = 1, .code_hash = [_]u8{0} ** 32, .storage_root = storage_root1 };
+    const account1 = Account{ .balance = 100, .nonce = 1, .code_hash = @as([32]u8, @splat(0)), .storage_root = storage_root1 };
     try db.set_account(addr, account1);
     const root1 = try db.get_state_root();
 
     // Change storage root
-    const account2 = Account{ .balance = 100, .nonce = 1, .code_hash = [_]u8{0} ** 32, .storage_root = storage_root2 };
+    const account2 = Account{ .balance = 100, .nonce = 1, .code_hash = @as([32]u8, @splat(0)), .storage_root = storage_root2 };
     try db.set_account(addr, account2);
     const root2 = try db.get_state_root();
 
@@ -1513,20 +1513,20 @@ test "Database state root - balance changes" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const addr = [_]u8{0x01} ++ [_]u8{0} ** 19;
+    const addr = [_]u8{0x01} ++ @as([19]u8, @splat(0));
 
     // Zero balance
-    const account1 = Account{ .balance = 0, .nonce = 0, .code_hash = [_]u8{0} ** 32, .storage_root = [_]u8{0} ** 32 };
+    const account1 = Account{ .balance = 0, .nonce = 0, .code_hash = @as([32]u8, @splat(0)), .storage_root = @as([32]u8, @splat(0)) };
     try db.set_account(addr, account1);
     const root1 = try db.get_state_root();
 
     // Small balance
-    const account2 = Account{ .balance = 1, .nonce = 0, .code_hash = [_]u8{0} ** 32, .storage_root = [_]u8{0} ** 32 };
+    const account2 = Account{ .balance = 1, .nonce = 0, .code_hash = @as([32]u8, @splat(0)), .storage_root = @as([32]u8, @splat(0)) };
     try db.set_account(addr, account2);
     const root2 = try db.get_state_root();
 
     // Large balance
-    const account3 = Account{ .balance = std.math.maxInt(u256), .nonce = 0, .code_hash = [_]u8{0} ** 32, .storage_root = [_]u8{0} ** 32 };
+    const account3 = Account{ .balance = std.math.maxInt(u256), .nonce = 0, .code_hash = @as([32]u8, @splat(0)), .storage_root = @as([32]u8, @splat(0)) };
     try db.set_account(addr, account3);
     const root3 = try db.get_state_root();
 
@@ -1541,20 +1541,20 @@ test "Database state root - nonce changes" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const addr = [_]u8{0x01} ++ [_]u8{0} ** 19;
+    const addr = [_]u8{0x01} ++ @as([19]u8, @splat(0));
 
     // Nonce 0
-    const account1 = Account{ .balance = 100, .nonce = 0, .code_hash = [_]u8{0} ** 32, .storage_root = [_]u8{0} ** 32 };
+    const account1 = Account{ .balance = 100, .nonce = 0, .code_hash = @as([32]u8, @splat(0)), .storage_root = @as([32]u8, @splat(0)) };
     try db.set_account(addr, account1);
     const root1 = try db.get_state_root();
 
     // Nonce 1
-    const account2 = Account{ .balance = 100, .nonce = 1, .code_hash = [_]u8{0} ** 32, .storage_root = [_]u8{0} ** 32 };
+    const account2 = Account{ .balance = 100, .nonce = 1, .code_hash = @as([32]u8, @splat(0)), .storage_root = @as([32]u8, @splat(0)) };
     try db.set_account(addr, account2);
     const root2 = try db.get_state_root();
 
     // Nonce max
-    const account3 = Account{ .balance = 100, .nonce = std.math.maxInt(u64), .code_hash = [_]u8{0} ** 32, .storage_root = [_]u8{0} ** 32 };
+    const account3 = Account{ .balance = 100, .nonce = std.math.maxInt(u64), .code_hash = @as([32]u8, @splat(0)), .storage_root = @as([32]u8, @splat(0)) };
     try db.set_account(addr, account3);
     const root3 = try db.get_state_root();
 
@@ -1569,20 +1569,20 @@ test "Database state root - code hash changes" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const addr = [_]u8{0x01} ++ [_]u8{0} ** 19;
+    const addr = [_]u8{0x01} ++ @as([19]u8, @splat(0));
 
     // Empty code hash
-    const account1 = Account{ .balance = 100, .nonce = 1, .code_hash = [_]u8{0} ** 32, .storage_root = [_]u8{0} ** 32 };
+    const account1 = Account{ .balance = 100, .nonce = 1, .code_hash = @as([32]u8, @splat(0)), .storage_root = @as([32]u8, @splat(0)) };
     try db.set_account(addr, account1);
     const root1 = try db.get_state_root();
 
     // Code hash 1
-    const account2 = Account{ .balance = 100, .nonce = 1, .code_hash = [_]u8{0xAA} ** 32, .storage_root = [_]u8{0} ** 32 };
+    const account2 = Account{ .balance = 100, .nonce = 1, .code_hash = @as([32]u8, @splat(0xAA)), .storage_root = @as([32]u8, @splat(0)) };
     try db.set_account(addr, account2);
     const root2 = try db.get_state_root();
 
     // Code hash 2
-    const account3 = Account{ .balance = 100, .nonce = 1, .code_hash = [_]u8{0xBB} ** 32, .storage_root = [_]u8{0} ** 32 };
+    const account3 = Account{ .balance = 100, .nonce = 1, .code_hash = @as([32]u8, @splat(0xBB)), .storage_root = @as([32]u8, @splat(0)) };
     try db.set_account(addr, account3);
     const root3 = try db.get_state_root();
 
@@ -1597,8 +1597,8 @@ test "Database state root - account deletion" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const addr = [_]u8{0x01} ++ [_]u8{0} ** 19;
-    const account = Account{ .balance = 100, .nonce = 1, .code_hash = [_]u8{0} ** 32, .storage_root = [_]u8{0} ** 32 };
+    const addr = [_]u8{0x01} ++ @as([19]u8, @splat(0));
+    const account = Account{ .balance = 100, .nonce = 1, .code_hash = @as([32]u8, @splat(0)), .storage_root = @as([32]u8, @splat(0)) };
 
     // Initial empty state
     const EMPTY_TRIE_ROOT = [_]u8{
@@ -1630,13 +1630,13 @@ test "Database state root - large number of accounts" {
 
     // Add 100 accounts
     for (0..100) |i| {
-        var addr: [20]u8 = [_]u8{0} ** 20;
+        var addr: [20]u8 = @as([20]u8, @splat(0));
         addr[19] = @intCast(i & 0xFF);
         const account = Account{
             .balance = @intCast(i * 1000),
             .nonce = @intCast(i),
-            .code_hash = [_]u8{0} ** 32,
-            .storage_root = [_]u8{0} ** 32,
+            .code_hash = @as([32]u8, @splat(0)),
+            .storage_root = @as([32]u8, @splat(0)),
         };
         try db.set_account(addr, account);
     }
@@ -1663,8 +1663,8 @@ test "Database state root - commit_changes" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const addr = [_]u8{0x01} ++ [_]u8{0} ** 19;
-    const account = Account{ .balance = 100, .nonce = 1, .code_hash = [_]u8{0} ** 32, .storage_root = [_]u8{0} ** 32 };
+    const addr = [_]u8{0x01} ++ @as([19]u8, @splat(0));
+    const account = Account{ .balance = 100, .nonce = 1, .code_hash = @as([32]u8, @splat(0)), .storage_root = @as([32]u8, @splat(0)) };
 
     try db.set_account(addr, account);
 
@@ -1680,10 +1680,10 @@ test "Database state root - address collision" {
     defer db.deinit();
 
     // Two accounts with similar addresses
-    const addr1 = [_]u8{0x01} ++ [_]u8{0} ** 19;
-    const addr2 = [_]u8{0x02} ++ [_]u8{0} ** 19;
+    const addr1 = [_]u8{0x01} ++ @as([19]u8, @splat(0));
+    const addr2 = [_]u8{0x02} ++ @as([19]u8, @splat(0));
 
-    const account = Account{ .balance = 100, .nonce = 1, .code_hash = [_]u8{0} ** 32, .storage_root = [_]u8{0} ** 32 };
+    const account = Account{ .balance = 100, .nonce = 1, .code_hash = @as([32]u8, @splat(0)), .storage_root = @as([32]u8, @splat(0)) };
 
     // Add both accounts
     try db.set_account(addr1, account);
@@ -1704,14 +1704,14 @@ test "Database state root - zero values" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const addr = [_]u8{0x01} ++ [_]u8{0} ** 19;
+    const addr = [_]u8{0x01} ++ @as([19]u8, @splat(0));
 
     // Account with all zero values
     const account = Account{
         .balance = 0,
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     };
 
     try db.set_account(addr, account);
@@ -1732,14 +1732,14 @@ test "Database snapshot operations - detailed" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const addr1 = [_]u8{0xA1} ++ [_]u8{0} ** 19;
-    const addr2 = [_]u8{0xA2} ++ [_]u8{0} ** 19;
+    const addr1 = [_]u8{0xA1} ++ @as([19]u8, @splat(0));
+    const addr2 = [_]u8{0xA2} ++ @as([19]u8, @splat(0));
 
     const account1 = Account{
         .balance = 100,
         .nonce = 1,
-        .code_hash = [_]u8{0x11} ** 32,
-        .storage_root = [_]u8{0x22} ** 32,
+        .code_hash = @as([32]u8, @splat(0x11)),
+        .storage_root = @as([32]u8, @splat(0x22)),
     };
 
     // Set initial state
@@ -1754,8 +1754,8 @@ test "Database snapshot operations - detailed" {
     const account2 = Account{
         .balance = 200,
         .nonce = 2,
-        .code_hash = [_]u8{0x33} ** 32,
-        .storage_root = [_]u8{0x44} ** 32,
+        .code_hash = @as([32]u8, @splat(0x33)),
+        .storage_root = @as([32]u8, @splat(0x44)),
     };
     try db.set_account(addr2, account2);
     try db.set_storage(addr1, 0x123, 0xDEF);
@@ -1779,12 +1779,12 @@ test "Database commit snapshot operations - detailed" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const addr1 = [_]u8{0xB1} ++ [_]u8{0} ** 19;
+    const addr1 = [_]u8{0xB1} ++ @as([19]u8, @splat(0));
     const account1 = Account{
         .balance = 300,
         .nonce = 5,
-        .code_hash = [_]u8{0x55} ** 32,
-        .storage_root = [_]u8{0x66} ** 32,
+        .code_hash = @as([32]u8, @splat(0x55)),
+        .storage_root = @as([32]u8, @splat(0x66)),
     };
 
     try db.set_account(addr1, account1);
@@ -1810,7 +1810,7 @@ test "Database multiple snapshots - detailed" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const addr1 = [_]u8{0xC1} ++ [_]u8{0} ** 19;
+    const addr1 = [_]u8{0xC1} ++ @as([19]u8, @splat(0));
 
     // Initial state
     try db.set_storage(addr1, 0x100, 0x200);
@@ -1854,8 +1854,8 @@ test "Database storage key collision handling" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const addr1 = [_]u8{0x01} ++ [_]u8{0} ** 19;
-    const addr2 = [_]u8{0x02} ++ [_]u8{0} ** 19;
+    const addr1 = [_]u8{0x01} ++ @as([19]u8, @splat(0));
+    const addr2 = [_]u8{0x02} ++ @as([19]u8, @splat(0));
     const key: u256 = 42;
 
     // Set storage for different addresses with same key
@@ -1879,13 +1879,13 @@ test "Database error cases" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const non_existent_hash = [_]u8{0xFF} ** 32;
+    const non_existent_hash = @as([32]u8, @splat(0xFF));
 
     // Code not found error
     try testing.expectError(Database.Error.CodeNotFound, db.get_code(non_existent_hash));
 
     // Account not found for code by address
-    const non_existent_addr = [_]u8{0xEE} ++ [_]u8{0} ** 19;
+    const non_existent_addr = [_]u8{0xEE} ++ @as([19]u8, @splat(0));
     try testing.expectError(Database.Error.AccountNotFound, db.get_code_by_address(non_existent_addr));
 
     // Snapshot not found
@@ -1898,12 +1898,12 @@ test "Database zero address handling" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const zero_address = [_]u8{0} ** 20;
+    const zero_address = @as([20]u8, @splat(0));
     const account = Account{
         .balance = 1000,
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     };
 
     // Should handle zero address like any other address
@@ -1921,7 +1921,7 @@ test "Database large values" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const addr = [_]u8{0xFF} ** 20;
+    const addr = @as([20]u8, @splat(0xFF));
     const large_value: u256 = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
     const large_key: u256 = 0x123456789ABCDEF123456789ABCDEF123456789ABCDEF123456789ABCDEF1234;
 
@@ -1929,8 +1929,8 @@ test "Database large values" {
     const account = Account{
         .balance = large_value,
         .nonce = std.math.maxInt(u64),
-        .code_hash = [_]u8{0xFF} ** 32,
-        .storage_root = [_]u8{0xFF} ** 32,
+        .code_hash = @as([32]u8, @splat(0xFF)),
+        .storage_root = @as([32]u8, @splat(0xFF)),
     };
 
     try db.set_account(addr, account);
@@ -1950,15 +1950,15 @@ test "Database max values" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const max_address = [_]u8{0xFF} ** 20;
+    const max_address = @as([20]u8, @splat(0xFF));
     const max_u256 = std.math.maxInt(u256);
     const max_nonce = std.math.maxInt(u64);
 
     const max_account = Account{
         .balance = max_u256,
         .nonce = max_nonce,
-        .code_hash = [_]u8{0xFF} ** 32,
-        .storage_root = [_]u8{0xFF} ** 32,
+        .code_hash = @as([32]u8, @splat(0xFF)),
+        .storage_root = @as([32]u8, @splat(0xFF)),
     };
 
     // Test maximum values
@@ -1982,7 +1982,7 @@ test "Database hash map stress test" {
     // Test many accounts
     const num_accounts = 1000;
     for (0..num_accounts) |i| {
-        var addr: [20]u8 = [_]u8{0} ** 20;
+        var addr: [20]u8 = @as([20]u8, @splat(0));
         addr[16] = @intCast(std.math.shr(usize, i, 24) & 0xFF);
         addr[17] = @intCast(std.math.shr(usize, i, 16) & 0xFF);
         addr[18] = @intCast(std.math.shr(usize, i, 8) & 0xFF);
@@ -1991,8 +1991,8 @@ test "Database hash map stress test" {
         const account = Account{
             .balance = @intCast(i),
             .nonce = @intCast(i % 1000),
-            .code_hash = [_]u8{@intCast(i & 0xFF)} ** 32,
-            .storage_root = [_]u8{@intCast((i + 1) & 0xFF)} ** 32,
+            .code_hash = @as([32]u8, @splat(@intCast(i & 0xFF))),
+            .storage_root = @as([32]u8, @splat(@intCast((i + 1) & 0xFF))),
         };
 
         try db.set_account(addr, account);
@@ -2000,7 +2000,7 @@ test "Database hash map stress test" {
 
     // Verify all accounts
     for (0..num_accounts) |i| {
-        var addr: [20]u8 = [_]u8{0} ** 20;
+        var addr: [20]u8 = @as([20]u8, @splat(0));
         addr[16] = @intCast(std.math.shr(usize, i, 24) & 0xFF);
         addr[17] = @intCast(std.math.shr(usize, i, 16) & 0xFF);
         addr[18] = @intCast(std.math.shr(usize, i, 8) & 0xFF);
@@ -2016,8 +2016,8 @@ test "Database storage isolation between addresses" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const addr1 = [_]u8{0x11} ++ [_]u8{0} ** 19;
-    const addr2 = [_]u8{0x22} ++ [_]u8{0} ** 19;
+    const addr1 = [_]u8{0x11} ++ @as([19]u8, @splat(0));
+    const addr2 = [_]u8{0x22} ++ @as([19]u8, @splat(0));
     const storage_key: u256 = 42;
 
     // Set same storage key for different addresses
@@ -2042,7 +2042,7 @@ test "Database storage key collision resistance" {
     defer db.deinit();
 
     // Test keys that might cause hash collisions
-    const addr = [_]u8{0x33} ++ [_]u8{0} ** 19;
+    const addr = [_]u8{0x33} ++ @as([19]u8, @splat(0));
     const keys = [_]u256{ 0, 1, 0x100, 0x10000, 0x100000000, std.math.maxInt(u256) };
 
     // Set different values for each key
@@ -2061,21 +2061,21 @@ test "Database overwrite operations" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const addr = [_]u8{0x44} ++ [_]u8{0} ** 19;
+    const addr = [_]u8{0x44} ++ @as([19]u8, @splat(0));
     const storage_key: u256 = 777;
 
     const account1 = Account{
         .balance = 100,
         .nonce = 1,
-        .code_hash = [_]u8{0x11} ** 32,
-        .storage_root = [_]u8{0x22} ** 32,
+        .code_hash = @as([32]u8, @splat(0x11)),
+        .storage_root = @as([32]u8, @splat(0x22)),
     };
 
     const account2 = Account{
         .balance = 200,
         .nonce = 2,
-        .code_hash = [_]u8{0x33} ** 32,
-        .storage_root = [_]u8{0x44} ** 32,
+        .code_hash = @as([32]u8, @splat(0x33)),
+        .storage_root = @as([32]u8, @splat(0x44)),
     };
 
     // Set initial account and storage
@@ -2161,8 +2161,8 @@ test "EIP-7702: Database delegation operations" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const eoa_address = [_]u8{0x01} ++ [_]u8{0} ** 19;
-    const contract_address = [_]u8{0x02} ++ [_]u8{0} ** 19;
+    const eoa_address = [_]u8{0x01} ++ @as([19]u8, @splat(0));
+    const contract_address = [_]u8{0x02} ++ @as([19]u8, @splat(0));
     const contract_code = [_]u8{ 0x60, 0x80, 0x60, 0x40, 0x52 }; // Simple bytecode
 
     // Store contract code
@@ -2171,7 +2171,7 @@ test "EIP-7702: Database delegation operations" {
         .balance = 0,
         .nonce = 0,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
         .delegated_address = null,
     };
     try db.set_account(contract_address, contract_account);
@@ -2199,8 +2199,8 @@ test "EIP-7702: Cannot set delegation on contract" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const contract_address = [_]u8{0x03} ++ [_]u8{0} ** 19;
-    const delegate_address = [_]u8{0x04} ++ [_]u8{0} ** 19;
+    const contract_address = [_]u8{0x03} ++ @as([19]u8, @splat(0));
+    const delegate_address = [_]u8{0x04} ++ @as([19]u8, @splat(0));
 
     // Create a contract account (has code)
     const code_hash = try db.set_code(&[_]u8{0x60});
@@ -2208,7 +2208,7 @@ test "EIP-7702: Cannot set delegation on contract" {
         .balance = 0,
         .nonce = 0,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
         .delegated_address = null,
     };
     try db.set_account(contract_address, contract_account);
@@ -2222,9 +2222,9 @@ test "EIP-7702: Delegation chain resolution" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const eoa1_address = [_]u8{0x05} ++ [_]u8{0} ** 19;
-    const eoa2_address = [_]u8{0x06} ++ [_]u8{0} ** 19;
-    const contract_address = [_]u8{0x07} ++ [_]u8{0} ** 19;
+    const eoa1_address = [_]u8{0x05} ++ @as([19]u8, @splat(0));
+    const eoa2_address = [_]u8{0x06} ++ @as([19]u8, @splat(0));
+    const contract_address = [_]u8{0x07} ++ @as([19]u8, @splat(0));
     const contract_code = [_]u8{ 0x60, 0xFF }; // PUSH1 0xFF
 
     // Store contract code
@@ -2233,7 +2233,7 @@ test "EIP-7702: Delegation chain resolution" {
         .balance = 0,
         .nonce = 0,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
         .delegated_address = null,
     };
     try db.set_account(contract_address, contract_account);
@@ -2259,8 +2259,8 @@ test "Database state persistence across operations" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const addr1 = [_]u8{0x55} ++ [_]u8{0} ** 19;
-    const addr2 = [_]u8{0x66} ++ [_]u8{0} ** 19;
+    const addr1 = [_]u8{0x55} ++ @as([19]u8, @splat(0));
+    const addr2 = [_]u8{0x66} ++ @as([19]u8, @splat(0));
 
     // Complex sequence of operations
     try db.set_storage(addr1, 1, 100);
@@ -2301,7 +2301,7 @@ test "Database get_balance and set_balance" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const addr = [_]u8{0xAA} ++ [_]u8{0} ** 19;
+    const addr = [_]u8{0xAA} ++ @as([19]u8, @splat(0));
 
     // Initially zero balance
     try testing.expectEqual(@as(u256, 0), try db.get_balance(addr));
@@ -2324,7 +2324,7 @@ test "Database get_nonce and set_nonce" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const addr = [_]u8{0xBB} ++ [_]u8{0} ** 19;
+    const addr = [_]u8{0xBB} ++ @as([19]u8, @splat(0));
 
     // Initially zero nonce
     try testing.expectEqual(@as(u64, 0), try db.get_nonce(addr));
@@ -2347,7 +2347,7 @@ test "Database get_code_hash" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const addr = [_]u8{0xCC} ++ [_]u8{0} ** 19;
+    const addr = [_]u8{0xCC} ++ @as([19]u8, @splat(0));
 
     // Non-existent account returns zero code hash
     const zero_hash = try db.get_code_hash(addr);
@@ -2360,7 +2360,7 @@ test "Database get_code_hash" {
         .balance = 0,
         .nonce = 0,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     };
     try db.set_account(addr, account);
 
@@ -2374,7 +2374,7 @@ test "Database is_empty" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const addr = [_]u8{0xDD} ++ [_]u8{0} ** 19;
+    const addr = [_]u8{0xDD} ++ @as([19]u8, @splat(0));
 
     // Non-existent account is considered empty
     try testing.expect(try db.is_empty(addr));
@@ -2410,7 +2410,7 @@ test "Database transaction management - begin and commit" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const addr = [_]u8{0xEE} ++ [_]u8{0} ** 19;
+    const addr = [_]u8{0xEE} ++ @as([19]u8, @splat(0));
 
     // Set initial state
     try db.set_balance(addr, 100);
@@ -2434,7 +2434,7 @@ test "Database transaction management - begin and rollback" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const addr = [_]u8{0xFF} ++ [_]u8{0} ** 19;
+    const addr = [_]u8{0xFF} ++ @as([19]u8, @splat(0));
 
     // Set initial state
     try db.set_balance(addr, 100);
@@ -2458,7 +2458,7 @@ test "Database transaction management - nested transactions" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const addr = [_]u8{0x11} ++ [_]u8{0} ** 19;
+    const addr = [_]u8{0x11} ++ @as([19]u8, @splat(0));
 
     // Initial state
     try db.set_balance(addr, 100);
@@ -2485,7 +2485,7 @@ test "Database set_balance preserves other account fields" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const addr = [_]u8{0x22} ++ [_]u8{0} ** 19;
+    const addr = [_]u8{0x22} ++ @as([19]u8, @splat(0));
 
     // Create account with nonce and code
     const code_hash = try db.set_code(&[_]u8{ 0x60, 0x01 });
@@ -2493,7 +2493,7 @@ test "Database set_balance preserves other account fields" {
         .balance = 1000,
         .nonce = 5,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0xAB} ** 32,
+        .storage_root = @as([32]u8, @splat(0xAB)),
     };
     try db.set_account(addr, account);
 
@@ -2505,7 +2505,7 @@ test "Database set_balance preserves other account fields" {
     try testing.expectEqual(@as(u256, 2000), retrieved.balance);
     try testing.expectEqual(@as(u64, 5), retrieved.nonce);
     try testing.expectEqualSlices(u8, &code_hash, &retrieved.code_hash);
-    try testing.expectEqualSlices(u8, &([_]u8{0xAB} ** 32), &retrieved.storage_root);
+    try testing.expectEqualSlices(u8, &(@as([32]u8, @splat(0xAB))), &retrieved.storage_root);
 }
 
 test "Database set_nonce preserves other account fields" {
@@ -2513,7 +2513,7 @@ test "Database set_nonce preserves other account fields" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const addr = [_]u8{0x33} ++ [_]u8{0} ** 19;
+    const addr = [_]u8{0x33} ++ @as([19]u8, @splat(0));
 
     // Create account with balance and code
     const code_hash = try db.set_code(&[_]u8{ 0x60, 0x02 });
@@ -2521,7 +2521,7 @@ test "Database set_nonce preserves other account fields" {
         .balance = 1000,
         .nonce = 5,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0xCD} ** 32,
+        .storage_root = @as([32]u8, @splat(0xCD)),
     };
     try db.set_account(addr, account);
 
@@ -2533,7 +2533,7 @@ test "Database set_nonce preserves other account fields" {
     try testing.expectEqual(@as(u256, 1000), retrieved.balance);
     try testing.expectEqual(@as(u64, 10), retrieved.nonce);
     try testing.expectEqualSlices(u8, &code_hash, &retrieved.code_hash);
-    try testing.expectEqualSlices(u8, &([_]u8{0xCD} ** 32), &retrieved.storage_root);
+    try testing.expectEqualSlices(u8, &(@as([32]u8, @splat(0xCD))), &retrieved.storage_root);
 }
 
 test "Database get_balance with overlay" {
@@ -2541,7 +2541,7 @@ test "Database get_balance with overlay" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const addr = [_]u8{0x44} ++ [_]u8{0} ** 19;
+    const addr = [_]u8{0x44} ++ @as([19]u8, @splat(0));
 
     // Set base balance
     try db.set_balance(addr, 100);
@@ -2565,7 +2565,7 @@ test "Database get_nonce with overlay" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const addr = [_]u8{0x55} ++ [_]u8{0} ** 19;
+    const addr = [_]u8{0x55} ++ @as([19]u8, @splat(0));
 
     // Set base nonce
     try db.set_nonce(addr, 5);
@@ -2589,7 +2589,7 @@ test "Database is_empty after deletion" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const addr = [_]u8{0x66} ++ [_]u8{0} ** 19;
+    const addr = [_]u8{0x66} ++ @as([19]u8, @splat(0));
 
     // Create non-empty account
     try db.set_balance(addr, 1000);
@@ -2607,7 +2607,7 @@ test "Database transaction with storage operations" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const addr = [_]u8{0x77} ++ [_]u8{0} ** 19;
+    const addr = [_]u8{0x77} ++ @as([19]u8, @splat(0));
     const key: u256 = 42;
 
     // Set initial storage
@@ -2632,14 +2632,14 @@ test "Database get_code_hash with zero code" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const addr = [_]u8{0x88} ++ [_]u8{0} ** 19;
+    const addr = [_]u8{0x88} ++ @as([19]u8, @splat(0));
 
     // Create account with explicit zero code hash
     const account = Account{
         .balance = 100,
         .nonce = 1,
         .code_hash = ZERO_CODE_HASH,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     };
     try db.set_account(addr, account);
 
@@ -2669,12 +2669,12 @@ test "Transaction cache - basic account buffering" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const addr = [_]u8{0xCC} ++ [_]u8{0} ** 19;
+    const addr = [_]u8{0xCC} ++ @as([19]u8, @splat(0));
     const initial_account = Account{
         .balance = 100,
         .nonce = 1,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     };
 
     // Set initial state
@@ -2688,8 +2688,8 @@ test "Transaction cache - basic account buffering" {
     const modified_account = Account{
         .balance = 200,
         .nonce = 2,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     };
     try db.set_account(addr, modified_account);
 
@@ -2711,12 +2711,12 @@ test "Transaction cache - rollback discards changes O(1)" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const addr = [_]u8{0xDD} ++ [_]u8{0} ** 19;
+    const addr = [_]u8{0xDD} ++ @as([19]u8, @splat(0));
     const initial_account = Account{
         .balance = 1000,
         .nonce = 5,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     };
 
     try db.set_account(addr, initial_account);
@@ -2729,8 +2729,8 @@ test "Transaction cache - rollback discards changes O(1)" {
         const account = Account{
             .balance = @intCast(i * 100),
             .nonce = @intCast(i),
-            .code_hash = [_]u8{0} ** 32,
-            .storage_root = [_]u8{0} ** 32,
+            .code_hash = @as([32]u8, @splat(0)),
+            .storage_root = @as([32]u8, @splat(0)),
         };
         try db.set_account(addr, account);
         try db.set_storage(addr, @intCast(i), @intCast(i * 10));
@@ -2751,7 +2751,7 @@ test "Transaction cache - storage buffering" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const addr = [_]u8{0xEE} ++ [_]u8{0} ** 19;
+    const addr = [_]u8{0xEE} ++ @as([19]u8, @splat(0));
     const key: u256 = 0x12345;
     const initial_value: u256 = 100;
     const modified_value: u256 = 200;
@@ -2805,7 +2805,7 @@ test "Transaction cache standalone - begin_tx_cache/commit_tx_cache" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const addr = [_]u8{0xFF} ++ [_]u8{0} ** 19;
+    const addr = [_]u8{0xFF} ++ @as([19]u8, @splat(0));
 
     // Start cache without snapshot
     try db.begin_tx_cache();
@@ -2815,8 +2815,8 @@ test "Transaction cache standalone - begin_tx_cache/commit_tx_cache" {
     const account = Account{
         .balance = 500,
         .nonce = 10,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     };
     try db.set_account(addr, account);
 
@@ -2834,14 +2834,14 @@ test "Transaction cache standalone - rollback_tx_cache discards changes" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const addr = [_]u8{0xAA} ++ [_]u8{0} ** 19;
+    const addr = [_]u8{0xAA} ++ @as([19]u8, @splat(0));
 
     // Set initial state
     const initial = Account{
         .balance = 100,
         .nonce = 1,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     };
     try db.set_account(addr, initial);
 
@@ -2852,8 +2852,8 @@ test "Transaction cache standalone - rollback_tx_cache discards changes" {
     const modified = Account{
         .balance = 999,
         .nonce = 99,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     };
     try db.set_account(addr, modified);
 
@@ -2875,14 +2875,14 @@ test "Transaction cache - account deletion buffering" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const addr = [_]u8{0xBB} ++ [_]u8{0} ** 19;
+    const addr = [_]u8{0xBB} ++ @as([19]u8, @splat(0));
 
     // Create initial account
     const account = Account{
         .balance = 100,
         .nonce = 1,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     };
     try db.set_account(addr, account);
 

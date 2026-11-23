@@ -5,7 +5,7 @@ pub const Options = struct {
     evm: *std.Build.Module,
     loop_evm: ?*std.Build.Module = null,
     native_archive: ?std.Build.LazyPath = null,
-    optimize: std.builtin.OptimizeMode = .ReleaseFast,
+    optimize: std.builtin.OptimizeMode = .fast,
     hardfork: []const u8 = "OSAKA",
     gas_limit: ?u64 = null,
     directory: ?std.Build.LazyPath = null,
@@ -33,7 +33,11 @@ pub fn addBenchSteps(b: *std.Build, options: Options) Steps {
     if (gas == 0 or (capped and gas > 16_777_216)) @panic("invalid benchmark gas budget (Osaka+ cap is 16777216)");
     config.addOption(u64, "gas_limit", gas);
     config.addOption(bool, "loop_available", options.loop_evm != null);
-    config.addOption([]const u8, "fixture_directory", repository.path(b, "fixtures").getPath(b));
+    config.addOption([]const u8, "fixture_directory", switch (repository) {
+        .src_path => |source| source.owner.root.joinString(b.allocator, b.pathJoin(&.{ source.sub_path, "fixtures" })) catch @panic("out of memory joining fixture path"),
+        .cwd_relative => |relative| b.pathJoin(&.{ relative, "fixtures" }),
+        else => @panic("benchmark repository must be a source or cwd-relative path"),
+    });
     const module = b.createModule(.{
         .root_source_file = directory.path(b, "main.zig"),
         .target = options.target,
@@ -46,18 +50,18 @@ pub fn addBenchSteps(b: *std.Build, options: Options) Steps {
     module.addImport("guillotine_loop", if (options.loop_evm) |loop| optimized(b, loop, options.optimize, archive, &copies) else evm);
     module.addImport("bench_options", config.createModule());
     const exe = b.addExecutable(.{ .name = "guillotine-bench", .root_module = module, .use_llvm = true });
-    exe.linkLibC();
-    if (options.target.result.os.tag == .linux) exe.linkSystemLibrary("unwind");
+    exe.root_module.link_libc = true;
+    if (options.target.result.os.tag == .linux) exe.root_module.linkSystemLibrary("unwind", .{});
     const run = b.addRunArtifact(exe);
     run.setCwd(repository);
     run.has_side_effects = true;
-    if (b.args) |args| run.addArgs(args);
+    run.addPassthruArgs();
     const bench = b.step("bench", "Run self-contained EVM benchmarks (ReleaseFast)");
     bench.dependOn(&run.step);
     const compile = b.step("bench-build", "Build the standalone EVM benchmark runner");
     compile.dependOn(&b.addInstallArtifact(exe, .{}).step);
     const tests = b.addTest(.{
-        .root_module = b.createModule(.{ .root_source_file = directory.path(b, "tests.zig"), .target = options.target, .optimize = .Debug }),
+        .root_module = b.createModule(.{ .root_source_file = directory.path(b, "tests.zig"), .target = options.target, .optimize = .debug }),
         .use_llvm = true,
     });
     const test_step = b.step("test-bench", "Check benchmark statistics, CLI, and workload construction");
@@ -77,7 +81,7 @@ fn optimized(b: *std.Build, source: *std.Build.Module, mode: std.builtin.Optimiz
         copy.link_objects = source.link_objects.clone(b.allocator) catch @panic("out of memory copying benchmark links");
         for (copy.link_objects.items) |*object| {
             switch (object.*) {
-                .static_path => |path| if (std.mem.endsWith(u8, path.getPath(b), "libcrypto_wrappers.a")) {
+                .static_path => |path| if (std.mem.endsWith(u8, subPath(path), "libcrypto_wrappers.a")) {
                     object.* = .{ .static_path = replacement };
                 },
                 else => {},
@@ -104,4 +108,14 @@ fn nativeArchive(b: *std.Build, directory: std.Build.LazyPath, repository: std.B
         cargo.addFileInput(repository.path(b, b.fmt("lib/voltaire/src/crypto/{s}", .{file})));
     const archive = cargo.addPrefixedOutputDirectoryArg("--target-dir=", "crypto");
     return archive.path(b, "release/libcrypto_wrappers.a");
+}
+
+fn subPath(path: std.Build.LazyPath) []const u8 {
+    return switch (path) {
+        .src_path => |source| source.sub_path,
+        .generated => |generated| generated.sub_path,
+        .cwd_relative => |relative| relative,
+        .dependency => |dependency| dependency.sub_path,
+        .relative => |relative| relative.sub_path,
+    };
 }

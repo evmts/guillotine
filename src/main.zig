@@ -3,7 +3,7 @@
 //! is to delete this file and start with root.zig instead.
 const std = @import("std");
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
     // Prints to log
     const log = @import("Guillotine_lib").log;
     log.info("All your {s} are belong to us.", .{"codebase"});
@@ -12,14 +12,14 @@ pub fn main() !void {
     // are implementing gzip, then only the compressed bytes should be sent to
     // stdout, not any debugging messages.
     var stdout_buffer: [4096]u8 = undefined;
-    var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
+    var stdout_writer = std.Io.File.stdout().writer(init.io, &stdout_buffer);
     const stdout = &stdout_writer.interface;
 
     try stdout.print("Run `zig build test` to run the tests.\n", .{});
 }
 
 test "simple test" {
-    var list = std.ArrayList(i32){};
+    var list = std.ArrayList(i32).empty;
     defer list.deinit(std.testing.allocator); // Try commenting this out and see if zig detects the memory leak!
     try list.append(std.testing.allocator, 42);
     try std.testing.expectEqual(@as(i32, 42), list.pop());

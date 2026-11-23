@@ -46,7 +46,7 @@ pub const TraceEntry = struct {
         try obj.put("memSize", .{ .integer = @intCast(self.memSize) });
 
         // Stack as array of hex strings
-        var stack_arr = std.ArrayList(std.json.Value){};
+        var stack_arr = std.ArrayList(std.json.Value).empty;
         for (self.stack) |val| {
             var val_buf: [66]u8 = undefined;
             const val_str = try std.fmt.bufPrint(&val_buf, "0x{x}", .{val});
@@ -87,7 +87,7 @@ pub const Tracer = struct {
 
     pub fn init(allocator: std.mem.Allocator) Tracer {
         return .{
-            .entries = std.ArrayList(TraceEntry){},
+            .entries = std.ArrayList(TraceEntry).empty,
             .allocator = allocator,
         };
     }
@@ -157,7 +157,7 @@ pub const Tracer = struct {
     }
 
     pub fn toJson(self: *const Tracer) !std.json.Value {
-        var arr = std.ArrayList(std.json.Value){};
+        var arr = std.ArrayList(std.json.Value).empty;
 
         for (self.entries.items) |*entry| {
             const entry_json = try entry.toJson(self.allocator);
@@ -171,7 +171,7 @@ pub const Tracer = struct {
         const file = try std.fs.cwd().createFile(path, .{});
         defer file.close();
 
-        var json = std.ArrayList(u8){};
+        var json = std.ArrayList(u8).empty;
         defer json.deinit(self.allocator);
 
         const writer = json.writer(self.allocator);

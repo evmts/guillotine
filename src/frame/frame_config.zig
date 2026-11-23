@@ -54,7 +54,7 @@ pub const FrameConfig = struct {
     /// Loop quota for safety counters to prevent infinite loops
     /// null = disabled (default for optimized builds)
     /// value = maximum iterations before panic (default for debug/safe builds)
-    loop_quota: ?u32 = if (builtin.mode == .Debug or builtin.mode == .ReleaseSafe) 1_000_000 else null,
+    loop_quota: ?u32 = if (builtin.mode == .debug or builtin.mode == .safe) 1_000_000 else null,
 
     /// Custom opcode handler overrides
     /// These will override the default handlers in frame_handlers.zig

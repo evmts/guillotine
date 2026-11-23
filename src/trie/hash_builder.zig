@@ -917,7 +917,7 @@ pub const HashBuilder = struct {
 
                                         return TrieNode{ .Extension = new_ext };
                                     },
-                                    .Branch => |_| {
+                                    .Branch => {
                                         // Create extension to the branch
                                         const path = try self.allocator.alloc(u8, 1);
                                         path[0] = child_index.?;
@@ -1062,7 +1062,7 @@ pub const HashBuilder = struct {
 
                                         return TrieNode{ .Extension = new_ext };
                                     },
-                                    .Branch => |_| {
+                                    .Branch => {
                                         // Create extension to the branch
                                         const path = try self.allocator.alloc(u8, 1);
                                         path[0] = child_index.?;

@@ -18,7 +18,7 @@ pub fn execute(
     }
 
     // Input: 128 bytes (two points, 64 bytes each)
-    var input_buf: [128]u8 = [_]u8{0} ** 128;
+    var input_buf: [128]u8 = @as([128]u8, @splat(0));
     @memcpy(input_buf[0..@min(input.len, 128)], input[0..@min(input.len, 128)]);
 
     const output = try allocator.alloc(u8, 64);
@@ -40,7 +40,7 @@ test "bn254Add - point at infinity" {
     const allocator = testing.allocator;
 
     // Adding point at infinity to itself
-    const input = [_]u8{0} ** 128;
+    const input = @as([128]u8, @splat(0));
     const result = try execute(allocator, &input, 1000000);
     defer result.deinit(allocator);
 
@@ -52,7 +52,7 @@ test "bn254Add - out of gas" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** 128;
+    const input = @as([128]u8, @splat(0));
     const result = execute(allocator, &input, GAS - 1);
     try testing.expectError(error.OutOfGas, result);
 }
@@ -61,7 +61,7 @@ test "bn254Add - exact gas" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** 128;
+    const input = @as([128]u8, @splat(0));
     const result = try execute(allocator, &input, GAS);
     defer result.deinit(allocator);
 
@@ -72,7 +72,7 @@ test "bn254Add - input too short" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** 127;
+    const input = @as([127]u8, @splat(0));
     const result = try execute(allocator, &input, 1000000);
     defer result.deinit(allocator);
 
@@ -83,7 +83,7 @@ test "bn254Add - input too long padded correctly" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** 200;
+    const input = @as([200]u8, @splat(0));
     const result = try execute(allocator, &input, 1000000);
     defer result.deinit(allocator);
 
@@ -111,7 +111,7 @@ test "bn254Add - output size validation" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** 128;
+    const input = @as([128]u8, @splat(0));
     const result = try execute(allocator, &input, 1000000);
     defer result.deinit(allocator);
 
@@ -168,7 +168,7 @@ test "bn254Add - geth cdetrio1 empty input" {
     const allocator = testing.allocator;
 
     const input = [_]u8{};
-    const expected = [_]u8{0} ** 64;
+    const expected = @as([64]u8, @splat(0));
 
     const result = try execute(allocator, &input, 1000000);
     defer result.deinit(allocator);

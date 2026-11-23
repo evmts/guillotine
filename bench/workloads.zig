@@ -178,7 +178,7 @@ pub fn build(allocator: std.mem.Allocator) ![]Workload {
             try code.op(0x54);
             try code.store(32);
         }
-        var word = [_]u8{0} ** 32;
+        var word = @as([32]u8, @splat(0));
         word[31] = 42;
         var hash: [32]u8 = undefined;
         std.crypto.hash.sha3.Keccak256.hash(&word, &hash, .{});
@@ -286,7 +286,7 @@ fn algorithm(allocator: std.mem.Allocator, kind: usize) !struct { code: []const 
             expected = 2432902008176640000;
         },
         3 => {
-            var word = [_]u8{0} ** 32;
+            var word = @as([32]u8, @splat(0));
             for (0..256) |_| {
                 try code.push(32);
                 try code.push(0);
@@ -370,7 +370,7 @@ fn precompiles(allocator: std.mem.Allocator, list: *std.ArrayList(Workload)) !vo
     field[63] = 42;
     try list.append(allocator, .{ .name = "precompile/BLS12-381-map-G1", .category = "precompile", .source = .{ .precompile = 0x12 }, .input = field, .output_len = 128 });
     const scheme = std.crypto.sign.ecdsa.EcdsaP256Sha256;
-    const key = try scheme.KeyPair.generateDeterministic([_]u8{42} ** scheme.KeyPair.seed_length);
+    const key = try scheme.KeyPair.generateDeterministic(@as([scheme.KeyPair.seed_length]u8, @splat(42)));
     const text = "Guillotine P256 benchmark vector";
     const signature256 = (try key.sign(text, null)).toBytes();
     const public = key.public_key.toUncompressedSec1();
@@ -426,7 +426,7 @@ test "ECRECOVER benchmark signature verifies independently with the standard lib
     for (suite) |workload| {
         if (!std.mem.eql(u8, workload.name, "precompile/ECRECOVER")) continue;
         const scheme = std.crypto.sign.ecdsa.EcdsaSecp256k1Sha256;
-        var secret = [_]u8{0} ** 32;
+        var secret = @as([32]u8, @splat(0));
         secret[31] = 1;
         const key = try scheme.KeyPair.fromSecretKey(try scheme.SecretKey.fromBytes(secret));
         const signature = scheme.Signature.fromBytes(workload.input[64..128].*);

@@ -1699,11 +1699,11 @@ test "tokens_in_calldata - empty" {
 }
 
 test "tokens_in_calldata - all zeros" {
-    try std.testing.expectEqual(@as(u64, 10), (Eips{ .hardfork = .ISTANBUL }).tokens_in_calldata(&([_]u8{0x00} ** 10)));
+    try std.testing.expectEqual(@as(u64, 10), (Eips{ .hardfork = .ISTANBUL }).tokens_in_calldata(&(@as([10]u8, @splat(0x00)))));
 }
 
 test "tokens_in_calldata - all non-zeros" {
-    try std.testing.expectEqual(@as(u64, 40), (Eips{ .hardfork = .ISTANBUL }).tokens_in_calldata(&([_]u8{0xff} ** 10)));
+    try std.testing.expectEqual(@as(u64, 40), (Eips{ .hardfork = .ISTANBUL }).tokens_in_calldata(&(@as([10]u8, @splat(0xff)))));
 }
 
 test "tokens_in_calldata - mixed data" {

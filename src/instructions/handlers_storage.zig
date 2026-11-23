@@ -406,7 +406,7 @@ test "SLOAD opcode - load existing value" {
     defer evm.deinit();
 
     // Pre-store a value
-    const contract_addr = Address{ .bytes = .{0} ** 20 };
+    const contract_addr = Address{ .bytes = @splat(0) };
     try evm.set_storage(contract_addr, 42, 0xDEADBEEF);
 
     var frame = try createTestFrame(testing.allocator, &evm);
@@ -465,7 +465,7 @@ test "TLOAD opcode - transient storage load" {
     defer evm.deinit();
 
     // Pre-store a transient value
-    const contract_addr = Address{ .bytes = .{0} ** 20 };
+    const contract_addr = Address{ .bytes = @splat(0) };
     try evm.set_transient_storage(contract_addr, 5, 0xABCD);
 
     var frame = try createTestFrame(testing.allocator, &evm);
@@ -842,8 +842,8 @@ test "storage operations - different addresses" {
     defer evm.deinit();
 
     // Create two frames with different contract addresses
-    const addr1 = Address{ .bytes = [_]u8{1} ** 20 };
-    const addr2 = Address{ .bytes = [_]u8{2} ** 20 };
+    const addr1 = Address{ .bytes = @as([20]u8, @splat(1)) };
+    const addr2 = Address{ .bytes = @as([20]u8, @splat(2)) };
 
     var frame1 = try createTestFrame(testing.allocator, &evm);
     defer frame1.deinit(testing.allocator);
@@ -1217,8 +1217,8 @@ test "EIP-1153 - different contracts have isolated transient storage" {
     var evm = MockEvm.init(testing.allocator);
     defer evm.deinit();
 
-    const addr1 = Address{ .bytes = [_]u8{1} ** 20 };
-    const addr2 = Address{ .bytes = [_]u8{2} ** 20 };
+    const addr1 = Address{ .bytes = @as([20]u8, @splat(1)) };
+    const addr2 = Address{ .bytes = @as([20]u8, @splat(2)) };
 
     var frame1 = try createTestFrame(testing.allocator, &evm);
     defer frame1.deinit(testing.allocator);
@@ -1278,7 +1278,7 @@ test "EIP-1153 - TLOAD works in static call" {
     defer evm.deinit();
 
     // Pre-populate transient storage (would happen before static call)
-    const contract_addr = Address{ .bytes = .{0} ** 20 };
+    const contract_addr = Address{ .bytes = @splat(0) };
     try evm.set_transient_storage(contract_addr, 5, 123);
 
     var frame = try createTestFrame(testing.allocator, &evm);

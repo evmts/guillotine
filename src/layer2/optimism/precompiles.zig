@@ -242,7 +242,7 @@ test "p256Verify matches all go-ethereum / Wycheproof vectors at RIP-7212 gas" {
         try testing.expectEqual(P256_VERIFY_GAS, result.gas_used);
         if (expected[0] == '1') {
             try testing.expectEqual(@as(usize, 32), result.output.len);
-            try testing.expectEqualSlices(u8, &([_]u8{0} ** 31 ++ [_]u8{1}), result.output);
+            try testing.expectEqualSlices(u8, &(@as([31]u8, @splat(0)) ++ [_]u8{1}), result.output);
             valid += 1;
         } else {
             try testing.expectEqual(@as(usize, 0), result.output.len);

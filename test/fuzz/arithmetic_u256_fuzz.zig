@@ -245,7 +245,7 @@ pub fn fuzzBinaryAndTernaryArithmetic(_: void, input: []const u8) !void {
     const b = decodeWord(input, if (input.len > 33) 33 else @min(2, input.len - 1));
     const c = decodeWord(input, if (input.len > 65) 65 else @min(3, input.len - 1));
 
-    var code = std.ArrayList(u8){};
+    var code = std.ArrayList(u8).empty;
     defer code.deinit(allocator);
 
     var expected: u256 = 0;

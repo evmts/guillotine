@@ -23,10 +23,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-      - name: Install Zig 0.15.1
+      - name: Install Zig 0.17.1
         uses: goto-bus-stop/setup-zig@v2
         with:
-          version: 0.15.1
+          version: 0.17.1
       - name: Record toolchain and architecture
         id: toolchain
         shell: bash
@@ -44,9 +44,9 @@ jobs:
           path: |
             .smithers/cache/tools/zig/global
             .smithers/cache/tools/zig/local
-          key: ${{ runner.os }}-${{ runner.arch }}-zig-0.15.1-${{ hashFiles('**/*.zig', '**/*.zig.zon', '**/Cargo.lock') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-zig-0.17.1-${{ hashFiles('**/*.zig', '**/*.zig.zon', '**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-zig-0.15.1-
+            ${{ runner.os }}-${{ runner.arch }}-zig-0.17.1-
       - name: Cache Cargo
         uses: actions/cache@v4
         with:
@@ -72,6 +72,13 @@ jobs:
         run: zig build test-opcodes
       - name: MODEXP arithmetic and gas tests
         if: ${{ !cancelled() }}
-        # The root build has no test-modexp step; the supplemental build uses
-        # the repository's MODEXP implementation and tests without duplicating it.
-        run: zig build test-modexp --build-file .smithers/build.zig
+        run: zig build test-modexp
+      - name: Layer 2 tests
+        if: ${{ !cancelled() }}
+        run: zig build test-layer2
+      - name: Benchmark harness tests
+        if: ${{ !cancelled() }}
+        run: zig build test-bench
+      - name: FFI libraries (ReleaseFast)
+        if: ${{ !cancelled() }}
+        run: zig build shared static -Doptimize=ReleaseFast

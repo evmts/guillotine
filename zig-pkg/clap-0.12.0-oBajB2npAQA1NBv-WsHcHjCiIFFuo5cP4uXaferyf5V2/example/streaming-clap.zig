@@ -1,6 +1,4 @@
-pub fn main() !void {
-    const allocator = std.heap.page_allocator;
-
+pub fn main(init: std.process.Init) !void {
     // First we specify what parameters our program can take.
     const params = [_]clap.Param(u8){
         .{
@@ -15,7 +13,7 @@ pub fn main() !void {
         .{ .id = 'f', .takes_value = .one },
     };
 
-    var iter = try std.process.ArgIterator.initWithAllocator(allocator);
+    var iter = try init.minimal.args.iterateAllocator(init.gpa);
     defer iter.deinit();
 
     // Skip exe argument.
@@ -25,7 +23,7 @@ pub fn main() !void {
     // This is optional. You can also leave the `diagnostic` field unset if you
     // don't care about the extra information `Diagnostic` provides.
     var diag = clap.Diagnostic{};
-    var parser = clap.streaming.Clap(u8, std.process.ArgIterator){
+    var parser = clap.streaming.Clap(u8, std.process.Args.Iterator){
         .params = &params,
         .iter = &iter,
         .diagnostic = &diag,
@@ -34,7 +32,7 @@ pub fn main() !void {
     // Because we use a streaming parser, we have to consume each argument parsed individually.
     while (parser.next() catch |err| {
         // Report useful error and exit.
-        try diag.reportToFile(.stderr(), err);
+        try diag.reportToFile(init.io, .stderr(), err);
         return err;
     }) |arg| {
         // arg.param will point to the parameter which matched the argument.

@@ -2,14 +2,10 @@ const std = @import("std");
 const testing = std.testing;
 const Random = std.Random;
 
-const c = @cImport({
-    @cInclude("ckzg.h");
-});
+const c = @import("ckzg_c");
 
 // Re-export blst functions for use in crypto module
-pub const blst = @cImport({
-    @cInclude("blst.h");
-});
+pub const blst = @import("blst_c");
 
 pub const BYTES_PER_BLOB = c.BYTES_PER_BLOB;
 pub const BYTES_PER_CELL = c.BYTES_PER_CELL;

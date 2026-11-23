@@ -13,7 +13,7 @@ const gas_limit: u64 = 1_000_000;
 const sender = primitives.Address{ .bytes = [_]u8{ 0x6a, 0xc7, 0xea, 0x33, 0xf8, 0x83, 0x1e, 0xa9, 0xdc, 0xc5, 0x33, 0x93, 0xaa, 0xa8, 0x8b, 0x25, 0xa7, 0x85, 0xdb, 0xf0 } };
 const first_contract = primitives.Address{ .bytes = [_]u8{ 0xcd, 0x23, 0x4a, 0x47, 0x1b, 0x72, 0xba, 0x2f, 0x1c, 0xcf, 0x0a, 0x70, 0xfc, 0xab, 0xa6, 0x48, 0xa5, 0xee, 0xcd, 0x8d } };
 const second_contract = primitives.Address{ .bytes = [_]u8{ 0x34, 0x3c, 0x43, 0xa3, 0x7d, 0x37, 0xdf, 0xf0, 0x8a, 0xe8, 0xc4, 0xa1, 0x15, 0x44, 0xc7, 0x18, 0xab, 0xb4, 0xfc, 0xf8 } };
-const factory = primitives.Address{ .bytes = [_]u8{0x42} ++ [_]u8{0} ** 19 };
+const factory = primitives.Address{ .bytes = [_]u8{0x42} ++ @as([19]u8, @splat(0)) };
 
 // Init code that deploys the 1-byte runtime 0x00:
 // PUSH1 0; PUSH1 0; MSTORE8; PUSH1 1; PUSH1 0; RETURN
@@ -31,7 +31,7 @@ const block_info = evm.BlockInfo{
     .gas_limit = 30_000_000,
     .coinbase = primitives.ZERO_ADDRESS,
     .base_fee = 0,
-    .prev_randao = [_]u8{0} ** 32,
+    .prev_randao = @as([32]u8, @splat(0)),
 };
 const context = evm.TransactionContext{
     .gas_limit = gas_limit,
@@ -44,8 +44,8 @@ fn fundSender(db: *evm.Database, nonce: u64) !void {
     try db.set_account(sender.bytes, evm.Account{
         .balance = 1_000_000_000_000_000_000,
         .nonce = nonce,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     });
 }
 
@@ -55,7 +55,7 @@ fn deployFactory(db: *evm.Database) !void {
         .balance = 0,
         .nonce = 1,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     });
 }
 
@@ -134,7 +134,7 @@ test "CREATE opcode: uses the creator's current nonce and increments it once" {
     defer result.deinit(allocator);
     try std.testing.expect(result.success);
     const expected = try primitives.Address.getContractAddress(allocator, factory, 1);
-    try std.testing.expectEqualSlices(u8, &([_]u8{0} ** 12 ++ expected.bytes), result.output);
+    try std.testing.expectEqualSlices(u8, &(@as([12]u8, @splat(0)) ++ expected.bytes), result.output);
     try std.testing.expectEqual(@as(u64, 2), (try db.get_account(factory.bytes)).?.nonce);
     try std.testing.expectEqual(@as(u64, 1), (try db.get_account(sender.bytes)).?.nonce);
 }
@@ -149,8 +149,8 @@ test "CREATE opcode: a colliding creation pushes 0 but keeps the nonce increment
     try db.set_account(occupied.bytes, evm.Account{
         .balance = 0,
         .nonce = 1,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     });
     var vm = try PragueEvm.init(allocator, &db, block_info, context, 0, sender);
     defer vm.deinit();
@@ -158,6 +158,6 @@ test "CREATE opcode: a colliding creation pushes 0 but keeps the nonce increment
     var result = vm.call(.{ .call = .{ .caller = sender, .to = factory, .value = 0, .input = &.{}, .gas = gas_limit } });
     defer result.deinit(allocator);
     try std.testing.expect(result.success);
-    try std.testing.expectEqualSlices(u8, &([_]u8{0} ** 32), result.output);
+    try std.testing.expectEqualSlices(u8, &(@as([32]u8, @splat(0))), result.output);
     try std.testing.expectEqual(@as(u64, 2), (try db.get_account(factory.bytes)).?.nonce);
 }

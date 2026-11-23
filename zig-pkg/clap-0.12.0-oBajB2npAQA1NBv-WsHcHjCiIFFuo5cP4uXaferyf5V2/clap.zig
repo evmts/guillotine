@@ -84,7 +84,7 @@ pub fn parseParams(allocator: std.mem.Allocator, str: []const u8) ![]Param(Help)
 /// Takes a string and parses it into many Param(Help). Returned is a newly allocated slice
 /// containing all the parsed params. The caller is responsible for freeing the slice.
 pub fn parseParamsEx(allocator: std.mem.Allocator, str: []const u8, end: *usize) ![]Param(Help) {
-    var list = std.ArrayList(Param(Help)){};
+    var list: std.ArrayList(Param(Help)) = .empty;
     errdefer list.deinit(allocator);
 
     try parseParamsIntoArrayListEx(allocator, &list, str, end);
@@ -116,7 +116,7 @@ fn countParams(str: []const u8) usize {
     var res: usize = 0;
     var it = std.mem.splitScalar(u8, str, '\n');
     while (it.next()) |line| {
-        const trimmed = std.mem.trimLeft(u8, line, " \t");
+        const trimmed = std.mem.trimStart(u8, line, " \t");
         if (std.mem.startsWith(u8, trimmed, "-") or
             std.mem.startsWith(u8, trimmed, "<"))
         {
@@ -131,13 +131,8 @@ fn countParams(str: []const u8) usize {
 /// is returned, containing all the parameters parsed. This function will fail if the input slice
 /// is to small.
 pub fn parseParamsIntoSlice(slice: []Param(Help), str: []const u8) ![]Param(Help) {
-    var list = std.ArrayList(Param(Help)){
-        .items = slice[0..0],
-        .capacity = slice.len,
-    };
-
-    try parseParamsIntoArrayList(&list, str);
-    return list.items;
+    var end: usize = undefined;
+    return parseParamsIntoSliceEx(slice, str, &end);
 }
 
 /// Takes a string and parses it into many Param(Help), which are written to `slice`. A subslice
@@ -148,6 +143,7 @@ pub fn parseParamsIntoSliceEx(slice: []Param(Help), str: []const u8, end: *usize
     var list = std.ArrayList(Param(Help)){
         .items = slice[0..0],
         .capacity = slice.len,
+        .pointer_stability = .{},
     };
 
     try parseParamsIntoArrayListEx(null_allocator.allocator(), &list, str, end);
@@ -155,9 +151,13 @@ pub fn parseParamsIntoSliceEx(slice: []Param(Help), str: []const u8, end: *usize
 }
 
 /// Takes a string and parses it into many Param(Help), which are appended onto `list`.
-pub fn parseParamsIntoArrayList(list: *std.ArrayList(Param(Help)), str: []const u8) !void {
+/// To append into an unmanaged `std.ArrayList`, use `parseParamsIntoArrayListEx` and pass the
+/// allocator explicitly.
+pub fn parseParamsIntoArrayList(list: *std.array_list.Managed(Param(Help)), str: []const u8) !void {
+    var unmanaged = list.moveToUnmanaged();
+    defer list.* = unmanaged.toManaged(list.allocator);
     var end: usize = undefined;
-    return parseParamsIntoArrayListEx(list, str, &end);
+    try parseParamsIntoArrayListEx(list.allocator, &unmanaged, str, &end);
 }
 
 /// Takes a string and parses it into many Param(Help), which are appended onto `list`.
@@ -562,9 +562,9 @@ pub const Diagnostic = struct {
     }
 
     /// Wrapper around `report`, which writes to a file in a buffered manner
-    pub fn reportToFile(diag: Diagnostic, file: std.fs.File, err: anyerror) !void {
+    pub fn reportToFile(diag: Diagnostic, io: std.Io, file: std.Io.File, err: anyerror) !void {
         var buf: [1024]u8 = undefined;
-        var writer = file.writer(&buf);
+        var writer = file.writer(io, &buf);
         try diag.report(&writer.interface, err);
         return writer.interface.flush();
     }
@@ -648,16 +648,17 @@ pub fn parse(
     comptime Id: type,
     comptime params: []const Param(Id),
     comptime value_parsers: anytype,
+    arguments: std.process.Args,
     opt: ParseOptions,
 ) !Result(Id, params, value_parsers) {
     var arena = std.heap.ArenaAllocator.init(opt.allocator);
     errdefer arena.deinit();
 
-    var iter = try std.process.ArgIterator.initWithAllocator(arena.allocator());
+    var iter = try arguments.iterateAllocator(arena.allocator());
     const exe_arg = iter.next();
 
     const result = try parseEx(Id, params, value_parsers, &iter, .{
-        // Let's reuse the arena from the `ArgIterator` since we already have it.
+        // Let's reuse the arena from the `Args.Iterator` since we already have it.
         .allocator = arena.allocator(),
         .diagnostic = opt.diagnostic,
         .assignment_separators = opt.assignment_separators,
@@ -831,13 +832,14 @@ pub fn parseEx(
     // We are done parsing, but our arguments are stored in lists, and not slices. Map the list
     // fields to slices and return that.
     var result_args = Arguments(Id, params, value_parsers, .slice){};
-    inline for (std.meta.fields(@TypeOf(arguments))) |field| {
-        switch (@typeInfo(field.type)) {
+    const info = @typeInfo(@TypeOf(arguments)).@"struct";
+    inline for (info.field_names, info.field_types) |field_name, field_type| {
+        switch (@typeInfo(field_type)) {
             .@"struct" => {
-                const slice = try @field(arguments, field.name).toOwnedSlice(allocator);
-                @field(result_args, field.name) = slice;
+                const slice = try @field(arguments, field_name).toOwnedSlice(allocator);
+                @field(result_args, field_name) = slice;
             },
-            else => @field(result_args, field.name) = @field(arguments, field.name),
+            else => @field(result_args, field_name) = @field(arguments, field_name),
         }
     }
 
@@ -891,12 +893,30 @@ fn Positionals(
         fields_len += 1;
     }
 
-    var fields: [fields_len]std.builtin.Type.StructField = undefined;
+    var field_types: [fields_len]type = undefined;
     var i: usize = 0;
     for (params) |param| {
         const longest = param.names.longest();
         if (longest.kind != .positional)
             continue;
+
+        if ((i + 1) != fields_len and param.takes_value == .many) {
+            @compileError(
+                \\Only the last positional is allowed to take multiple values
+                \\This works:
+                \\  <usize>
+                \\  <str>
+                \\  <str>...
+                \\
+                \\This doesn't:
+                \\  <usize>
+                \\  <str>...
+                \\  <str>
+                \\
+                \\See https://github.com/Hejsil/zig-clap/issues/153
+                \\
+            );
+        }
 
         const T = ParamType(Id, param, value_parsers);
         const FieldT = switch (param.takes_value) {
@@ -904,26 +924,15 @@ fn Positionals(
             .one => ?T,
             .many => switch (multi_arg_kind) {
                 .slice => []const T,
-                .list => std.ArrayListUnmanaged(T),
+                .list => std.ArrayList(T),
             },
         };
 
-        fields[i] = .{
-            .name = std.fmt.comptimePrint("{}", .{i}),
-            .type = FieldT,
-            .default_value_ptr = null,
-            .is_comptime = false,
-            .alignment = @alignOf(FieldT),
-        };
+        field_types[i] = FieldT;
         i += 1;
     }
 
-    return @Type(.{ .@"struct" = .{
-        .layout = .auto,
-        .fields = &fields,
-        .decls = &.{},
-        .is_tuple = true,
-    } });
+    return @Tuple(&field_types);
 }
 
 fn initPositionals(
@@ -946,7 +955,7 @@ fn initPositionals(
             .one => @as(?T, null),
             .many => switch (multi_arg_kind) {
                 .slice => @as([]const T, &[_]T{}),
-                .list => std.ArrayListUnmanaged(T){},
+                .list => std.ArrayList(T).empty,
             },
         };
         i += 1;
@@ -980,11 +989,12 @@ fn ParamType(comptime Id: type, comptime param: Param(Id), comptime value_parser
 /// Deinitializes a struct of type `Argument`. Since the `Argument` type is generated, and we
 /// cannot add the deinit declaration to it, we declare it here instead.
 fn deinitArgs(arguments: anytype, allocator: std.mem.Allocator) void {
-    inline for (@typeInfo(@TypeOf(arguments.*)).@"struct".fields) |field| {
-        switch (@typeInfo(field.type)) {
+    const info = @typeInfo(@TypeOf(arguments.*)).@"struct";
+    inline for (info.field_names, info.field_types) |field_name, field_type| {
+        switch (@typeInfo(field_type)) {
             .int, .optional => {},
-            .@"struct" => @field(arguments, field.name).deinit(allocator),
-            else => allocator.free(@field(arguments, field.name)),
+            .@"struct" => @field(arguments, field_name).deinit(allocator),
+            else => allocator.free(@field(arguments, field_name)),
         }
     }
 }
@@ -1008,7 +1018,9 @@ fn Arguments(
         fields_len += 1;
     }
 
-    var fields: [fields_len]std.builtin.Type.StructField = undefined;
+    var field_names: [fields_len][]const u8 = undefined;
+    var field_types: [fields_len]type = undefined;
+    var field_attrs: [fields_len]std.builtin.Type.Struct.FieldAttributes = undefined;
     var i: usize = 0;
     for (params) |param| {
         const longest = param.names.longest();
@@ -1021,27 +1033,28 @@ fn Arguments(
             .one => @as(?T, null),
             .many => switch (multi_arg_kind) {
                 .slice => @as([]const T, &[_]T{}),
-                .list => std.ArrayListUnmanaged(T){},
+                .list => std.ArrayList(T).empty,
             },
         };
 
         const name = longest.name[0..longest.name.len] ++ ""; // Adds null terminator
-        fields[i] = .{
-            .name = name,
-            .type = @TypeOf(default_value),
+        field_names[i] = name;
+        field_types[i] = @TypeOf(default_value);
+        field_attrs[i] = .{
+            .@"comptime" = false,
+            .@"align" = @alignOf(@TypeOf(default_value)),
             .default_value_ptr = @ptrCast(&default_value),
-            .is_comptime = false,
-            .alignment = @alignOf(@TypeOf(default_value)),
         };
         i += 1;
     }
 
-    return @Type(.{ .@"struct" = .{
-        .layout = .auto,
-        .fields = &fields,
-        .decls = &.{},
-        .is_tuple = false,
-    } });
+    return @Struct(
+        .auto,
+        null,
+        &field_names,
+        &field_types,
+        if (fields_len == 0) &@splat(.{}) else &field_attrs,
+    );
 }
 
 test "str and u64" {
@@ -1237,8 +1250,9 @@ test "overflow-safe" {
         \\-a, --aa
     );
 
+    const as: [300]u8 = @splat('a');
     var iter = args.SliceIterator{
-        .args = &(.{"-" ++ ("a" ** 300)}),
+        .args = &(.{"-" ++ as}),
     };
 
     // This just needs to not crash
@@ -1366,13 +1380,14 @@ pub const HelpOptions = struct {
 
 /// Wrapper around `help`, which writes to a file in a buffered manner
 pub fn helpToFile(
-    file: std.fs.File,
+    io: std.Io,
+    file: std.Io.File,
     comptime Id: type,
     params: []const Param(Id),
     opt: HelpOptions,
 ) !void {
     var buf: [1024]u8 = undefined;
-    var writer = file.writer(&buf);
+    var writer = file.writer(io, &buf);
     try help(&writer.interface, Id, params, opt);
     return writer.interface.flush();
 }
@@ -1434,7 +1449,7 @@ pub fn help(
             var res: usize = std.math.maxInt(usize);
             var it = std.mem.tokenizeScalar(u8, description, '\n');
             while (it.next()) |line| : (first_line = false) {
-                const trimmed = std.mem.trimLeft(u8, line, " ");
+                const trimmed = std.mem.trimStart(u8, line, " ");
                 const indent = line.len - trimmed.len;
 
                 // If the first line has no indentation, then we ignore the indentation of the
@@ -1468,7 +1483,7 @@ pub fn help(
             else
                 raw_line[@min(min_description_indent, raw_line.len)..];
 
-            const line = std.mem.trimLeft(u8, indented_line, " ");
+            const line = std.mem.trimStart(u8, indented_line, " ");
             if (line.len == 0) {
                 non_emitted_newlines += 1;
                 continue;
@@ -2025,9 +2040,9 @@ test "clap.help" {
 }
 
 /// Wrapper around `usage`, which writes to a file in a buffered manner
-pub fn usageToFile(file: std.fs.File, comptime Id: type, params: []const Param(Id)) !void {
+pub fn usageToFile(io: std.Io, file: std.Io.File, comptime Id: type, params: []const Param(Id)) !void {
     var buf: [1024]u8 = undefined;
-    var writer = file.writer(&buf);
+    var writer = file.writer(io, &buf);
     try usage(&writer.interface, Id, params);
     return writer.interface.flush();
 }

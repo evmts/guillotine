@@ -100,7 +100,7 @@ pub fn verify(
 
     // (0, 0) encodes infinity. P256.fromAffineCoordinates maps it to the identity
     // instead of rejecting it, so reject it explicitly first.
-    const zero = [_]u8{0} ** 32;
+    const zero = @as([32]u8, @splat(0));
     if (std.mem.eql(u8, x, &zero) and std.mem.eql(u8, y, &zero)) return false;
 
     // qx < p, qy < p (NonCanonical) and curve equation (InvalidEncoding).
@@ -108,7 +108,7 @@ pub fn verify(
     q.rejectIdentity() catch return false;
 
     // u1 = h * s^-1 mod n, u2 = r * s^-1 mod n. h is any 256-bit integer; reduce mod n.
-    var h_wide = [_]u8{0} ** 48;
+    var h_wide = @as([48]u8, @splat(0));
     @memcpy(h_wide[16..], hash);
     const h_scalar = Scalar.fromBytes48(h_wide, .big);
     const s_inv = s_scalar.invert();
@@ -120,7 +120,7 @@ pub fn verify(
 
     // R'.x is in [0, p); reduce mod n and compare with r.
     const rx = point.affineCoordinates().x.toBytes(.big);
-    var rx_wide = [_]u8{0} ** 48;
+    var rx_wide = @as([48]u8, @splat(0));
     @memcpy(rx_wide[16..], &rx);
     const rx_scalar = Scalar.fromBytes48(rx_wide, .big);
     return rx_scalar.equivalent(r_scalar);
@@ -172,7 +172,7 @@ test "P256VERIFY RIP-7212 reference vector verifies" {
     defer result.deinit(testing.allocator);
     try testing.expectEqual(GAS_COST_EIP7951, result.gas_used);
     try testing.expectEqual(@as(usize, 32), result.output.len);
-    try testing.expectEqualSlices(u8, &([_]u8{0} ** 31 ++ [_]u8{1}), result.output);
+    try testing.expectEqualSlices(u8, &(@as([31]u8, @splat(0)) ++ [_]u8{1}), result.output);
 }
 
 test "P256VERIFY RIP-7212 gas cost is parameterized" {
@@ -219,8 +219,8 @@ test "P256VERIFY wrong input length returns empty output and charges gas" {
 
 test "P256VERIFY rejects r = 0, s = 0, r = n, s = n, r > n" {
     const n_bytes = hexToBytes("ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551");
-    const zero = [_]u8{0} ** 32;
-    const max = [_]u8{0xff} ** 32;
+    const zero = @as([32]u8, @splat(0));
+    const max = @as([32]u8, @splat(0xff));
     const cases = [_]struct { offset: usize, value: [32]u8 }{
         .{ .offset = 32, .value = zero },
         .{ .offset = 64, .value = zero },
@@ -284,7 +284,7 @@ test "P256VERIFY accepts zero hash (std.crypto.ecdsa would reject it)" {
     // s = k^-1 * (h + r*d) = r*d mod n. Pick d = 1, so Q = G and s = r.
     const gx = hexToBytes("6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296");
     const gy = hexToBytes("4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5");
-    const h = [_]u8{0} ** 32;
+    const h = @as([32]u8, @splat(0));
     try testing.expect(verify(&h, &gx, &gx, &gx, &gy));
 
     // Same signature with h = n (≡ 0 mod n) must also verify: h is reduced, not bounded.
@@ -297,14 +297,14 @@ test "P256VERIFY rejects signature whose R' is infinity" {
     const gx = hexToBytes("6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296");
     const gy = hexToBytes("4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5");
     const h = hexToBytes("ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632550");
-    var one = [_]u8{0} ** 32;
+    var one = @as([32]u8, @splat(0));
     one[31] = 1;
     try testing.expect(!verify(&h, &one, &one, &gx, &gy));
 }
 
 test "P256VERIFY round trip with std.crypto ECDSA signer" {
     const Ecdsa = std.crypto.sign.ecdsa.EcdsaP256Sha256;
-    const seed = [_]u8{0x42} ** Ecdsa.KeyPair.seed_length;
+    const seed = @as([Ecdsa.KeyPair.seed_length]u8, @splat(0x42));
     const key_pair = try Ecdsa.KeyPair.generateDeterministic(seed);
     const msg = "guillotine p256verify";
     var h: [32]u8 = undefined;

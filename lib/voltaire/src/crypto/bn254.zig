@@ -791,7 +791,7 @@ test "BN254 EIP-197 ECPAIRING - empty input" {
 
 test "BN254 EIP-197 ECPAIRING - invalid input length" {
     // Input must be multiple of 192
-    const input = [_]u8{0} ** 100;
+    const input = @as([100]u8, @splat(0));
     try std.testing.expectError(error.InvalidInput, bn254Pairing(&input));
 }
 

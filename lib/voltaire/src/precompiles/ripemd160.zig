@@ -53,7 +53,7 @@ test "ripemd160 - gas calculation one word" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** 32;
+    const input = @as([32]u8, @splat(0));
     const result = try execute(allocator, &input, 1000000);
     defer result.deinit(allocator);
 
@@ -65,7 +65,7 @@ test "ripemd160 - gas calculation two words" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** 64;
+    const input = @as([64]u8, @splat(0));
     const result = try execute(allocator, &input, 1000000);
     defer result.deinit(allocator);
 
@@ -77,7 +77,7 @@ test "ripemd160 - partial word rounds up" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** 33;
+    const input = @as([33]u8, @splat(0));
     const result = try execute(allocator, &input, 1000000);
     defer result.deinit(allocator);
 
@@ -89,7 +89,7 @@ test "ripemd160 - out of gas" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** 32;
+    const input = @as([32]u8, @splat(0));
     const required_gas = BASE_GAS + PER_WORD_GAS * 1;
 
     const result = execute(allocator, &input, required_gas - 1);
@@ -100,7 +100,7 @@ test "ripemd160 - exact gas" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** 32;
+    const input = @as([32]u8, @splat(0));
     const required_gas = BASE_GAS + PER_WORD_GAS * 1;
 
     const result = try execute(allocator, &input, required_gas);
@@ -120,7 +120,7 @@ test "ripemd160 - output always 32 bytes" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** 100;
+    const input = @as([100]u8, @splat(0));
     const result = try execute(allocator, &input, 1000000);
     defer result.deinit(allocator);
 
@@ -145,7 +145,7 @@ test "ripemd160 - large input" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** 1000;
+    const input = @as([1000]u8, @splat(0));
     const result = try execute(allocator, &input, 1000000);
     defer result.deinit(allocator);
 

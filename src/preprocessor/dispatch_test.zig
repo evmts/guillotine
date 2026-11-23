@@ -905,7 +905,7 @@ test "Dispatch - calculateFirstBlockGas helper function" {
     // Test overflow handling
     {
         // Create bytecode that would overflow gas calculation
-        var large_bytecode = std.ArrayList(u8){};
+        var large_bytecode = std.ArrayList(u8).empty;
         defer large_bytecode.deinit(allocator);
 
         // Add many expensive operations that would overflow

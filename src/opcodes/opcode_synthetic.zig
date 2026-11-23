@@ -101,12 +101,12 @@ pub const OpcodeSynthetic = enum(u8) {
 // Compile-time check to ensure synthetic opcodes don't overlap with normal opcodes
 comptime {
     @setEvalBranchQuota(20000);
-    for (@typeInfo(OpcodeSynthetic).@"enum".fields) |syn_field| {
+    for (std.meta.tags(OpcodeSynthetic)) |synthetic| {
         // Try to convert the synthetic opcode value to a regular Opcode
-        if (std.meta.intToEnum(Opcode, syn_field.value) catch null) |conflicting_opcode| {
+        if (std.enums.fromInt(Opcode, @intFromEnum(synthetic))) |conflicting_opcode| {
             @compileError(std.fmt.comptimePrint(
                 "Synthetic opcode {s} (0x{X}) conflicts with normal opcode {s}",
-                .{ syn_field.name, syn_field.value, @tagName(conflicting_opcode) }
+                .{ @tagName(synthetic), @intFromEnum(synthetic), @tagName(conflicting_opcode) }
             ));
         } 
     }

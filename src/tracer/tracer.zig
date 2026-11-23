@@ -78,8 +78,8 @@ pub const Tracer = struct {
         if (!config.enabled) return .{
             .config = config,
             .allocator = allocator,
-            .steps = std.ArrayList(ExecutionStep){},
-            .advanced_steps = std.ArrayList(AdvancedStep){},
+            .steps = std.ArrayList(ExecutionStep).empty,
+            .advanced_steps = std.ArrayList(AdvancedStep).empty,
             .pc_tracker = null,
             .gas_tracker = null,
             .current_pc = 0,
@@ -97,8 +97,8 @@ pub const Tracer = struct {
         return .{
             .config = config,
             .allocator = allocator,
-            .steps = std.ArrayList(ExecutionStep){},
-            .advanced_steps = std.ArrayList(AdvancedStep){},
+            .steps = std.ArrayList(ExecutionStep).empty,
+            .advanced_steps = std.ArrayList(AdvancedStep).empty,
             .pc_tracker = null,
             .gas_tracker = null,
             .current_pc = 0,
@@ -502,7 +502,7 @@ pub const Tracer = struct {
 
         const fusion_info = if (is_synthetic) blk: {
             // Convert UnifiedOpcode to OpcodeSynthetic
-            const synthetic_opcode = std.meta.intToEnum(OpcodeSynthetic, opcode_value) catch {
+            const synthetic_opcode = std.enums.fromInt(OpcodeSynthetic, opcode_value) orelse {
                 break :blk null;
             };
             const desc = synthetic_opcode.describe();

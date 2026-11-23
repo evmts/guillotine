@@ -187,7 +187,7 @@ test "Host setBalance and getBalance" {
     var host = try Host.init(testing.allocator);
     defer host.deinit();
 
-    const addr = try Address.fromBytes(&[_]u8{1} ** 20);
+    const addr = try Address.fromBytes(&@as([20]u8, @splat(1)));
     try host.setBalance(addr, 12345);
 
     const iface = host.hostInterface();
@@ -200,7 +200,7 @@ test "Host getBalance returns zero for unknown address" {
     var host = try Host.init(testing.allocator);
     defer host.deinit();
 
-    const addr = try Address.fromBytes(&[_]u8{1} ** 20);
+    const addr = try Address.fromBytes(&@as([20]u8, @splat(1)));
     const iface = host.hostInterface();
     const balance = iface.getBalance(addr);
     try testing.expectEqual(@as(u256, 0), balance);
@@ -211,7 +211,7 @@ test "Host setCode and getCode" {
     var host = try Host.init(testing.allocator);
     defer host.deinit();
 
-    const addr = try Address.fromBytes(&[_]u8{2} ** 20);
+    const addr = try Address.fromBytes(&@as([20]u8, @splat(2)));
     const code = [_]u8{ 0x60, 0x01, 0x60, 0x02, 0x01 };
     try host.setCode(addr, &code);
 
@@ -225,7 +225,7 @@ test "Host getCode returns empty for unknown address" {
     var host = try Host.init(testing.allocator);
     defer host.deinit();
 
-    const addr = try Address.fromBytes(&[_]u8{2} ** 20);
+    const addr = try Address.fromBytes(&@as([20]u8, @splat(2)));
     const iface = host.hostInterface();
     const code = iface.getCode(addr);
     try testing.expectEqualSlices(u8, &[_]u8{}, code);
@@ -236,7 +236,7 @@ test "Host setStorage and getStorage" {
     var host = try Host.init(testing.allocator);
     defer host.deinit();
 
-    const addr = try Address.fromBytes(&[_]u8{3} ** 20);
+    const addr = try Address.fromBytes(&@as([20]u8, @splat(3)));
     const slot: u256 = 42;
     const value: u256 = 9876543210;
 
@@ -251,7 +251,7 @@ test "Host getStorage returns zero for unknown slot" {
     var host = try Host.init(testing.allocator);
     defer host.deinit();
 
-    const addr = try Address.fromBytes(&[_]u8{3} ** 20);
+    const addr = try Address.fromBytes(&@as([20]u8, @splat(3)));
     const slot: u256 = 42;
     const iface = host.hostInterface();
     const value = iface.getStorage(addr, slot);
@@ -263,8 +263,8 @@ test "Host storage isolation between addresses" {
     var host = try Host.init(testing.allocator);
     defer host.deinit();
 
-    const addr1 = try Address.fromBytes(&[_]u8{4} ** 20);
-    const addr2 = try Address.fromBytes(&[_]u8{5} ** 20);
+    const addr1 = try Address.fromBytes(&@as([20]u8, @splat(4)));
+    const addr2 = try Address.fromBytes(&@as([20]u8, @splat(5)));
     const slot: u256 = 1;
 
     const iface = host.hostInterface();
@@ -282,7 +282,7 @@ test "Host storage isolation between slots" {
     var host = try Host.init(testing.allocator);
     defer host.deinit();
 
-    const addr = try Address.fromBytes(&[_]u8{6} ** 20);
+    const addr = try Address.fromBytes(&@as([20]u8, @splat(6)));
     const slot1: u256 = 1;
     const slot2: u256 = 2;
 
@@ -301,7 +301,7 @@ test "Host storage can be updated" {
     var host = try Host.init(testing.allocator);
     defer host.deinit();
 
-    const addr = try Address.fromBytes(&[_]u8{7} ** 20);
+    const addr = try Address.fromBytes(&@as([20]u8, @splat(7)));
     const slot: u256 = 10;
 
     const iface = host.hostInterface();
@@ -317,7 +317,7 @@ test "Host balance can be updated" {
     var host = try Host.init(testing.allocator);
     defer host.deinit();
 
-    const addr = try Address.fromBytes(&[_]u8{8} ** 20);
+    const addr = try Address.fromBytes(&@as([20]u8, @splat(8)));
     try host.setBalance(addr, 1000);
     try host.setBalance(addr, 2000);
 
@@ -331,7 +331,7 @@ test "Host code can be updated" {
     var host = try Host.init(testing.allocator);
     defer host.deinit();
 
-    const addr = try Address.fromBytes(&[_]u8{9} ** 20);
+    const addr = try Address.fromBytes(&@as([20]u8, @splat(9)));
     const code1 = [_]u8{ 0x60, 0x01 };
     const code2 = [_]u8{ 0x60, 0x02, 0x60, 0x03 };
 
@@ -348,9 +348,9 @@ test "Host multiple addresses with different balances" {
     var host = try Host.init(testing.allocator);
     defer host.deinit();
 
-    const addr1 = try Address.fromBytes(&[_]u8{10} ** 20);
-    const addr2 = try Address.fromBytes(&[_]u8{11} ** 20);
-    const addr3 = try Address.fromBytes(&[_]u8{12} ** 20);
+    const addr1 = try Address.fromBytes(&@as([20]u8, @splat(10)));
+    const addr2 = try Address.fromBytes(&@as([20]u8, @splat(11)));
+    const addr3 = try Address.fromBytes(&@as([20]u8, @splat(12)));
 
     try host.setBalance(addr1, 100);
     try host.setBalance(addr2, 200);
@@ -367,8 +367,8 @@ test "Host multiple addresses with different code" {
     var host = try Host.init(testing.allocator);
     defer host.deinit();
 
-    const addr1 = try Address.fromBytes(&[_]u8{13} ** 20);
-    const addr2 = try Address.fromBytes(&[_]u8{14} ** 20);
+    const addr1 = try Address.fromBytes(&@as([20]u8, @splat(13)));
+    const addr2 = try Address.fromBytes(&@as([20]u8, @splat(14)));
     const code1 = [_]u8{ 0x60, 0x01 };
     const code2 = [_]u8{ 0x60, 0x02 };
 
@@ -387,7 +387,7 @@ test "Host innerCall returns success with empty output" {
     var host = try Host.init(testing.allocator);
     defer host.deinit();
 
-    const addr = try Address.fromBytes(&[_]u8{15} ** 20);
+    const addr = try Address.fromBytes(&@as([20]u8, @splat(15)));
     const input = [_]u8{ 0x01, 0x02, 0x03 };
     const gas: u64 = 1000;
 
@@ -403,7 +403,7 @@ test "Host large storage values" {
     var host = try Host.init(testing.allocator);
     defer host.deinit();
 
-    const addr = try Address.fromBytes(&[_]u8{16} ** 20);
+    const addr = try Address.fromBytes(&@as([20]u8, @splat(16)));
     const slot: u256 = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
     const value: u256 = 0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA;
 
@@ -418,7 +418,7 @@ test "Host empty code storage" {
     var host = try Host.init(testing.allocator);
     defer host.deinit();
 
-    const addr = try Address.fromBytes(&[_]u8{17} ** 20);
+    const addr = try Address.fromBytes(&@as([20]u8, @splat(17)));
     const empty_code = [_]u8{};
     try host.setCode(addr, &empty_code);
 

@@ -1,15 +1,10 @@
 const std = @import("std");
-const fs = std.fs;
 const mem = std.mem;
 const log = std.log.scoped(.zbench_platform_linux);
 
-pub fn getCpuName() ![128:0]u8 {
-    const file = try fs.cwd().openFile("/proc/cpuinfo", .{});
-    defer file.close();
-
+pub fn getCpuName(io: std.Io) ![128:0]u8 {
     var buf: [1024]u8 = undefined;
-    const bytes_read = try file.read(&buf);
-    const content = buf[0..bytes_read];
+    const content = try std.Io.Dir.readFile(std.Io.Dir.cwd(), io, "/proc/cpuinfo", &buf);
 
     const needle = "model name";
     const start = if (mem.indexOf(u8, content, needle)) |pos|
@@ -32,14 +27,10 @@ pub fn getCpuName() ![128:0]u8 {
     return result;
 }
 
-pub fn getCpuCores() !u32 {
-    const file = try fs.cwd().openFile("/proc/cpuinfo", .{});
-    defer file.close();
-
+pub fn getCpuCores(io: std.Io) !u32 {
     var buf: [1024]u8 = undefined;
-    _ = try file.read(&buf);
-
-    var token_iterator = std.mem.tokenizeSequence(u8, &buf, "\n");
+    const content = try std.Io.Dir.readFile(std.Io.Dir.cwd(), io, "/proc/cpuinfo", &buf);
+    var token_iterator = std.mem.tokenizeSequence(u8, content, "\n");
     while (token_iterator.next()) |line| {
         if (std.mem.startsWith(u8, line, "cpu cores")) {
             const start = if (mem.indexOf(u8, line, ":")) |pos| pos + 2 else 0;
@@ -54,14 +45,10 @@ pub fn getCpuCores() !u32 {
     return error.CouldNotFindNumCores;
 }
 
-pub fn getTotalMemory() !u64 {
-    const file = try std.fs.cwd().openFile("/proc/meminfo", .{});
-    defer file.close();
-
+pub fn getTotalMemory(io: std.Io) !u64 {
     var buf: [1024]u8 = undefined;
-    _ = try file.read(&buf);
-
-    var token_iterator = std.mem.tokenizeSequence(u8, &buf, "\n");
+    const content = try std.Io.Dir.readFile(std.Io.Dir.cwd(), io, "/proc/meminfo", &buf);
+    var token_iterator = std.mem.tokenizeSequence(u8, content, "\n");
     while (token_iterator.next()) |line| {
         if (std.mem.startsWith(u8, line, "MemTotal:")) {
             // Extract the numeric value from the line

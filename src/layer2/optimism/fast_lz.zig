@@ -28,7 +28,7 @@ pub fn flzCompressLen(input: []const u8) u32 {
 
     var anchor: u32 = 0;
     var size: u32 = 0;
-    var htab: [8192]u32 = [_]u32{0} ** 8192;
+    var htab: [8192]u32 = @as([8192]u32, @splat(0));
 
     while (idx < idx_limit) {
         var r: u32 = undefined;
@@ -139,14 +139,14 @@ test "flz_compress_len - short hex FACADE" {
 }
 
 test "flz_compress_len - thousand zeros" {
-    const input = [_]u8{0} ** 1000;
+    const input = @as([1000]u8, @splat(0));
     const result = flzCompressLen(&input);
     // Expected: 21 (from Rust test vectors)
     try std.testing.expectEqual(@as(u32, 21), result);
 }
 
 test "flz_compress_len - thousand forty twos" {
-    const input = [_]u8{42} ** 1000;
+    const input = @as([1000]u8, @splat(42));
     const result = flzCompressLen(&input);
     // Expected: 21 (from Rust test vectors)
     try std.testing.expectEqual(@as(u32, 21), result);
@@ -184,7 +184,7 @@ test "flz_compress_len - sample contract call" {
 }
 
 test "flz_compress_len - no repeats incremental" {
-    var input = std.ArrayList(u8){};
+    var input = std.ArrayList(u8).empty;
     defer input.deinit(std.testing.allocator);
 
     var prev_len: u32 = 0;
@@ -215,15 +215,15 @@ test "flz_compress_len - various sizes" {
 
 test "flz_compress_len - boundary cases" {
     // Test around the 13-byte boundary
-    const input_12 = [_]u8{0xAB} ** 12;
+    const input_12 = @as([12]u8, @splat(0xAB));
     const result_12 = flzCompressLen(&input_12);
     try std.testing.expectEqual(@as(u32, 13), result_12); // literals(12, 0) = 13
 
-    const input_13 = [_]u8{0xAB} ** 13;
+    const input_13 = @as([13]u8, @splat(0xAB));
     const result_13 = flzCompressLen(&input_13);
     try std.testing.expect(result_13 > 0);
 
-    const input_14 = [_]u8{0xAB} ** 14;
+    const input_14 = @as([14]u8, @splat(0xAB));
     const result_14 = flzCompressLen(&input_14);
     try std.testing.expect(result_14 > 0);
 }

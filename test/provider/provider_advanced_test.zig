@@ -119,7 +119,7 @@ test "provider handles large response" {
     var provider = MockProvider.init(allocator);
     defer provider.deinit();
 
-    var large_data = std.ArrayList(u8){};
+    var large_data = std.ArrayList(u8).empty;
     defer large_data.deinit(allocator);
 
     try large_data.appendSlice(allocator, "\"0x");

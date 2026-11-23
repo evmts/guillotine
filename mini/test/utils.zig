@@ -299,7 +299,7 @@ pub fn displayResults(writer: anytype, allocator: std.mem.Allocator, results: []
     var passed_count: u32 = 0;
     var failed_count: u32 = 0;
     var todo_count: u32 = 0;
-    var failed_tests = std.ArrayListUnmanaged(TestResult){};
+    var failed_tests = std.ArrayListUnmanaged(TestResult).empty;
     defer failed_tests.deinit(allocator);
 
     try std.fmt.format(writer, "\n{s}─────────────────────────────────────────{s}\n", .{ Color.dim, Color.reset });

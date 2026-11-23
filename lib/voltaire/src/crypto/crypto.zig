@@ -613,10 +613,10 @@ fn unaudited_rfc6979Nonce(hash: Hash.Hash, private_key: PrivateKey) u256 {
     // x = int2octets(private_key)
 
     // Step c: Initialize V to 0x01 repeated hlen times
-    var v: [hlen]u8 = [_]u8{0x01} ** hlen;
+    var v: [hlen]u8 = @as([hlen]u8, @splat(0x01));
 
     // Step d: Initialize K to 0x00 repeated hlen times
-    var k: [hlen]u8 = [_]u8{0x00} ** hlen;
+    var k: [hlen]u8 = @as([hlen]u8, @splat(0x00));
 
     // Step e: K = HMAC_K(V || 0x00 || int2octets(x) || bits2octets(h1))
     {
@@ -851,7 +851,7 @@ test "address derivation" {
     const address = public_key.toAddress();
 
     // Verify address is not zero
-    const zero_address = [_]u8{0} ** 20;
+    const zero_address = @as([20]u8, @splat(0));
     try testing.expect(!std.mem.eql(u8, &address, &zero_address));
 }
 
@@ -929,7 +929,7 @@ test "invalid signature rejection" {
     try testing.expect(!try unaudited_verifyMessage(wrong_message, signature, expected_address));
 
     // Test with wrong address
-    const wrong_address = [_]u8{0xFF} ** 20;
+    const wrong_address = @as([20]u8, @splat(0xFF));
     try testing.expect(!try unaudited_verifyMessage(message, signature, wrong_address));
 
     // Test with invalid signature
@@ -1045,7 +1045,7 @@ test "generate private key" {
     try testing.expectEqual(@as(usize, 32), key2.len);
 
     // Keys should not be zero
-    const zero_key = [_]u8{0} ** 32;
+    const zero_key = @as([32]u8, @splat(0));
     try testing.expect(!std.mem.eql(u8, &key1, &zero_key));
     try testing.expect(!std.mem.eql(u8, &key2, &zero_key));
 }

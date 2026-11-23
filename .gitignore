@@ -189,7 +189,7 @@ bubblesort_bytecode.txt
 *.a
 guillotine-cli
 target/
-lib/*/target/
+lib/*/target
 .astro/
 .flows/
 .zig-cache/

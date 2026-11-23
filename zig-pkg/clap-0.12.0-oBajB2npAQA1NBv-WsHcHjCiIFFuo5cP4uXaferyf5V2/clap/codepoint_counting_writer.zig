@@ -17,7 +17,7 @@ pub const CodepointCountingWriter = struct {
     }
 
     fn drain(w: *std.Io.Writer, data: []const []const u8, splat: usize) std.Io.Writer.Error!usize {
-        const self: *Self = @fieldParentPtr("interface", w);
+        const self: *Self = @alignCast(@fieldParentPtr("interface", w));
         var n_bytes_written: usize = 0;
         var i: usize = 0;
 
@@ -73,7 +73,7 @@ test CodepointCountingWriter {
     var discarding = std.Io.Writer.Discarding.init(&.{});
     var counting_stream = CodepointCountingWriter.init(&discarding.writer);
 
-    const utf8_text = "blåhaj" ** 100;
+    const utf8_text = "Jeg køber en blåhaj!";
     counting_stream.interface.writeAll(utf8_text) catch unreachable;
     const expected_count = try std.unicode.utf8CountCodepoints(utf8_text);
     try testing.expectEqual(expected_count, counting_stream.codepoints_written);

@@ -100,7 +100,7 @@ pub fn build(b: *std.Build) void {
         blst_lib.step.dependOn(&cmd.step);
     }
     
-    blst_lib.addCSourceFiles(.{
+    blst_lib.root_module.addCSourceFiles(.{
         .files = &[_][]const u8{
             "blst/src/server.c",
             "blst/src/vect.c",
@@ -113,14 +113,14 @@ pub fn build(b: *std.Build) void {
         },
     });
 
-    blst_lib.addIncludePath(b.path("blst/bindings"));
-    blst_lib.linkLibC();
+    blst_lib.root_module.addIncludePath(b.path("blst/bindings"));
+    blst_lib.root_module.link_libc = true;
     
     // Link with our built blst library
-    lib.linkLibrary(blst_lib);
+    lib.root_module.linkLibrary(blst_lib);
 
     // Add C-KZG source files
-    lib.addCSourceFile(.{
+    lib.root_module.addCSourceFile(.{
         .file = b.path("src/ckzg.c"),
         .flags = &[_][]const u8{
             "-std=c99",
@@ -130,9 +130,9 @@ pub fn build(b: *std.Build) void {
         },
     });
     
-    lib.addIncludePath(b.path("src"));
-    lib.addIncludePath(b.path("blst/bindings"));
-    lib.linkLibC();
+    lib.root_module.addIncludePath(b.path("src"));
+    lib.root_module.addIncludePath(b.path("blst/bindings"));
+    lib.root_module.link_libc = true;
 
     b.installArtifact(lib);
     

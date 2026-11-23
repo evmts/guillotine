@@ -2485,7 +2485,7 @@ test "Debug - Gas limit affects execution" {
 
     // Test 1: Very low gas limit - should fail quickly
     {
-        const start_time = std.time.nanoTimestamp();
+        const start_time = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds;
         const result = evm.call(.{
             .call = .{
                 .caller = primitives.ZERO_ADDRESS,
@@ -2495,7 +2495,7 @@ test "Debug - Gas limit affects execution" {
                 .gas = 100, // Very low gas
             },
         });
-        const elapsed = std.time.nanoTimestamp() - start_time;
+        const elapsed = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds - start_time;
 
         try std.testing.expect(!result.success); // Should fail
         try std.testing.expectEqual(@as(u64, 0), result.gas_left); // All gas consumed
@@ -2504,7 +2504,7 @@ test "Debug - Gas limit affects execution" {
 
     // Test 2: Medium gas limit
     {
-        const start_time = std.time.nanoTimestamp();
+        const start_time = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds;
         const result = evm.call(.{
             .call = .{
                 .caller = primitives.ZERO_ADDRESS,
@@ -2514,7 +2514,7 @@ test "Debug - Gas limit affects execution" {
                 .gas = 10000,
             },
         });
-        const elapsed = std.time.nanoTimestamp() - start_time;
+        const elapsed = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds - start_time;
 
         try std.testing.expect(!result.success); // Should still fail (infinite loop)
         try std.testing.expectEqual(@as(u64, 0), result.gas_left);
@@ -2523,7 +2523,7 @@ test "Debug - Gas limit affects execution" {
 
     // Test 3: High gas limit
     {
-        const start_time = std.time.nanoTimestamp();
+        const start_time = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds;
         const result = evm.call(.{
             .call = .{
                 .caller = primitives.ZERO_ADDRESS,
@@ -2533,7 +2533,7 @@ test "Debug - Gas limit affects execution" {
                 .gas = 1000000,
             },
         });
-        const elapsed = std.time.nanoTimestamp() - start_time;
+        const elapsed = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds - start_time;
 
         try std.testing.expect(!result.success); // Should fail after consuming all gas
         try std.testing.expectEqual(@as(u64, 0), result.gas_left);
@@ -2570,7 +2570,7 @@ test "Debug - Contract deployment and execution" {
     // Test 1: Call to non-existent contract
     {
         const empty_address: primitives.Address = .{ .bytes = [_]u8{0} ** 19 ++ [_]u8{99} };
-        const start_time = std.time.nanoTimestamp();
+        const start_time = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds;
         const result = evm.call(.{
             .call = .{
                 .caller = primitives.ZERO_ADDRESS,
@@ -2580,7 +2580,7 @@ test "Debug - Contract deployment and execution" {
                 .gas = 100000,
             },
         });
-        const elapsed = std.time.nanoTimestamp() - start_time;
+        const elapsed = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds - start_time;
 
         try std.testing.expect(result.success); // Empty contract succeeds immediately
         try std.testing.expectEqual(@as(u64, 100000), result.gas_left); // No gas consumed
@@ -2599,7 +2599,7 @@ test "Debug - Contract deployment and execution" {
             .storage_root = [_]u8{0} ** 32,
         });
 
-        const start_time = std.time.nanoTimestamp();
+        const start_time = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds;
         const result = evm.call(.{
             .call = .{
                 .caller = primitives.ZERO_ADDRESS,
@@ -2609,7 +2609,7 @@ test "Debug - Contract deployment and execution" {
                 .gas = 100000,
             },
         });
-        const elapsed = std.time.nanoTimestamp() - start_time;
+        const elapsed = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds - start_time;
 
         try std.testing.expect(result.success);
         // STOP should consume minimal gas
@@ -2632,7 +2632,7 @@ test "Debug - Contract deployment and execution" {
             .storage_root = [_]u8{0} ** 32,
         });
 
-        const start_time = std.time.nanoTimestamp();
+        const start_time = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds;
         const result = evm.call(.{
             .call = .{
                 .caller = primitives.ZERO_ADDRESS,
@@ -2642,7 +2642,7 @@ test "Debug - Contract deployment and execution" {
                 .gas = 100000,
             },
         });
-        const elapsed = std.time.nanoTimestamp() - start_time;
+        const elapsed = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds - start_time;
 
         try std.testing.expect(result.success);
         const gas_used = 100000 - result.gas_left;
@@ -2679,7 +2679,7 @@ test "Debug - Bytecode size affects execution time" {
     defer evm.deinit();
 
     // Create a large contract that does simple operations
-    var large_bytecode = std.ArrayList(u8){};
+    var large_bytecode = std.ArrayList(u8).empty;
     defer large_bytecode.deinit(std.testing.allocator);
 
     // Add many PUSH1/POP pairs (each costs gas but doesn't loop)
@@ -2703,7 +2703,7 @@ test "Debug - Bytecode size affects execution time" {
     const gas_limits = [_]u64{ 10000, 50000, 100000, 500000 };
 
     for (gas_limits) |gas_limit| {
-        const start_time = std.time.nanoTimestamp();
+        const start_time = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds;
         const result = evm.call(.{
             .call = .{
                 .caller = primitives.ZERO_ADDRESS,
@@ -2713,7 +2713,7 @@ test "Debug - Bytecode size affects execution time" {
                 .gas = gas_limit,
             },
         });
-        const elapsed = std.time.nanoTimestamp() - start_time;
+        const elapsed = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds - start_time;
 
         const gas_used = gas_limit - result.gas_left;
         log.warn("Large contract (gas_limit={}): elapsed = {} ns, gas_used = {}, success = {}", .{ gas_limit, elapsed, gas_used, result.success });

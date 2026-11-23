@@ -126,7 +126,7 @@ pub fn finalize(
 const testing = std.testing;
 
 fn sourceHash(byte: u8) [32]u8 {
-    return [_]u8{byte} ** 32;
+    return @as([32]u8, @splat(byte));
 }
 
 test "system transaction allowed in Bedrock, rejected from Regolith" {

@@ -421,7 +421,7 @@ pub fn evm_bytecode_free_analysis_with_allocator(alloc: std.mem.Allocator, analy
 /// @param opcode_value Opcode value (0-255)
 /// @return Opcode name, or "INVALID" if not recognized
 pub fn evm_bytecode_opcode_name(opcode_value: u8) callconv(.c) [*:0]const u8 {
-    const opcode = std.meta.intToEnum(Opcode, opcode_value) catch return "INVALID";
+    const opcode = std.enums.fromInt(Opcode, opcode_value) orelse return "INVALID";
     
     return switch (opcode) {
         .STOP => "STOP",
@@ -583,7 +583,7 @@ pub fn evm_bytecode_opcode_name(opcode_value: u8) callconv(.c) [*:0]const u8 {
 /// @param opcode_value Opcode value (0-255)
 /// @return 1 if valid opcode, 0 otherwise
 pub fn evm_bytecode_is_valid_opcode(opcode_value: u8) callconv(.c) c_int {
-    _ = std.meta.intToEnum(Opcode, opcode_value) catch return 0;
+    _ = std.enums.fromInt(Opcode, opcode_value) orelse return 0;
     return 1;
 }
 

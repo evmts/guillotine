@@ -388,7 +388,7 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
             comptime opcode: Dispatch.UnifiedOpcode,
             cursor: [*]const Dispatch.Item,
         ) void {
-            if (comptime (builtin.mode != .Debug and builtin.mode != .ReleaseSafe)) return;
+            if (comptime (builtin.mode != .debug and builtin.mode != .safe)) return;
             const dispatch = Dispatch{ .cursor = cursor };
             dispatch.validateOpcodeHandler(opcode, self);
         }
@@ -400,7 +400,7 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
             comptime opcode: Dispatch.UnifiedOpcode,
             cursor: [*]const Dispatch.Item,
         ) void {
-            if (comptime (builtin.mode != .Debug and builtin.mode != .ReleaseSafe)) return;
+            if (comptime (builtin.mode != .debug and builtin.mode != .safe)) return;
             (&self.getEvm().tracer).before_instruction(self, opcode, cursor);
             self.validateOpcodeHandler(opcode, cursor);
         }
@@ -413,7 +413,7 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
             next_handler: OpcodeHandler,
             next_cursor: [*]const Dispatch.Item,
         ) void {
-            if (comptime (builtin.mode != .Debug and builtin.mode != .ReleaseSafe)) return;
+            if (comptime (builtin.mode != .debug and builtin.mode != .safe)) return;
             (&self.getEvm().tracer).after_instruction(self, opcode, next_handler, next_cursor);
         }
 
@@ -423,7 +423,7 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
             self: *Self,
             comptime opcode: Dispatch.UnifiedOpcode,
         ) void {
-            if (comptime (builtin.mode != .Debug and builtin.mode != .ReleaseSafe)) return;
+            if (comptime (builtin.mode != .debug and builtin.mode != .safe)) return;
             (&self.getEvm().tracer).after_complete(self, opcode);
         }
 
@@ -443,8 +443,9 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
                 const white = "\x1b[37m";
             };
 
-            var output = std.ArrayList(u8).initCapacity(allocator, 4096) catch return Error.AllocationError;
-            const writer = output.writer(allocator);
+            var output = std.Io.Writer.Allocating.initCapacity(allocator, 4096) catch return Error.AllocationError;
+            defer output.deinit();
+            const writer = &output.writer;
 
             // Header
             try writer.print("{s}{s}╔══════════════════════════════════════════════════════════════╗{s}\n", .{ Colors.bold, Colors.cyan, Colors.reset });
@@ -544,7 +545,7 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
 
             try writer.print("\n{s}{s}════════════════════════════════════════════════════════════════{s}\n", .{ Colors.dim, Colors.cyan, Colors.reset });
 
-            return try output.toOwnedSlice(allocator);
+            return try output.toOwnedSlice();
         }
     };
 }

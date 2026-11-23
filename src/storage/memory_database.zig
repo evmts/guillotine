@@ -84,7 +84,7 @@ pub const MemoryDatabase = struct {
             .storage = std.hash_map.HashMap(StorageKey, u256, StorageKeyContext, 80).init(allocator),
             .transient_storage = std.hash_map.HashMap(StorageKey, u256, StorageKeyContext, 80).init(allocator),
             .codes = std.hash_map.HashMap([32]u8, []u8, CodeHashContext, 80).init(allocator),
-            .snapshots = std.ArrayList(Snapshot){},
+            .snapshots = std.ArrayList(Snapshot).empty,
             .next_snapshot_id = 0,
             .batch_in_progress = false,
             .batch_changes = null,
@@ -224,7 +224,7 @@ pub const MemoryDatabase = struct {
     pub fn get_code_by_address(self: *Self, address: [20]u8) Database.Error![]const u8 {
         const account = try self.get_account(address);
         if (account) |acc| {
-            if (std.mem.eql(u8, &acc.code_hash, &[_]u8{0} ** 32)) {
+            if (std.mem.eql(u8, &acc.code_hash, &@as([32]u8, @splat(0)))) {
                 return &[_]u8{};
             }
             return self.get_code(acc.code_hash);
@@ -251,7 +251,7 @@ pub const MemoryDatabase = struct {
     pub fn get_state_root(self: *Self) Database.Error![32]u8 {
         _ = self;
         // For in-memory database, return a dummy root
-        return [_]u8{0} ** 32;
+        return @as([32]u8, @splat(0));
     }
 
     pub fn commit_changes(self: *Self) Database.Error![32]u8 {
@@ -259,7 +259,7 @@ pub const MemoryDatabase = struct {
         self.clear_transient_storage();
 
         // Return dummy root
-        return [_]u8{0} ** 32;
+        return @as([32]u8, @splat(0));
     }
 
     /// Clear transient storage (called at transaction end per EIP-1153)
@@ -437,12 +437,12 @@ test "MemoryDatabase basic operations" {
     // Database is now used directly
     
     // Test account operations
-    const address = [_]u8{1} ** 20;
+    const address = @as([20]u8, @splat(1));
     const account = Account{
         .balance = 1000,
         .nonce = 5,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     };
     
     try db.set_account(address, account);
@@ -470,12 +470,12 @@ test "MemoryDatabase snapshot operations" {
     // Database is now used directly
     
     // Set initial state
-    const address = [_]u8{1} ** 20;
+    const address = @as([20]u8, @splat(1));
     const account1 = Account{
         .balance = 1000,
         .nonce = 1,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     };
     
     try db.set_account(address, account1);
@@ -487,8 +487,8 @@ test "MemoryDatabase snapshot operations" {
     const account2 = Account{
         .balance = 2000,
         .nonce = 2,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     };
     
     try db.set_account(address, account2);
@@ -510,7 +510,7 @@ test "MemoryDatabase snapshot operations" {
 // and can be retrieved after deployment
 
 fn to_address(n: u32) [20]u8 {
-    var addr = [_]u8{0} ** 20;
+    var addr = @as([20]u8, @splat(0));
     std.mem.writeInt(u32, addr[16..20], n, .big);
     return addr;
 }

@@ -101,7 +101,7 @@ test "point_evaluation - out of gas" {
     defer kzg_setup.deinit(testing.allocator);
 
     // Create valid 192-byte input
-    const input = [_]u8{0} ** 192;
+    const input = @as([192]u8, @splat(0));
 
     // Try to execute with insufficient gas
     const result = execute(testing.allocator, &input, GAS - 1);
@@ -116,7 +116,7 @@ test "point_evaluation - invalid input length too short" {
     defer kzg_setup.deinit(testing.allocator);
 
     // Input too short (191 bytes instead of 192)
-    const input = [_]u8{0} ** 191;
+    const input = @as([191]u8, @splat(0));
 
     const result = execute(testing.allocator, &input, GAS);
     try testing.expectError(error.InvalidInput, result);
@@ -130,7 +130,7 @@ test "point_evaluation - invalid input length too long" {
     defer kzg_setup.deinit(testing.allocator);
 
     // Input too long (193 bytes instead of 192)
-    const input = [_]u8{0} ** 193;
+    const input = @as([193]u8, @splat(0));
 
     const result = execute(testing.allocator, &input, GAS);
     try testing.expectError(error.InvalidInput, result);
@@ -157,7 +157,7 @@ test "point_evaluation - versioned hash mismatch" {
     defer kzg_setup.deinit(testing.allocator);
 
     // Create input with valid commitment but wrong versioned hash
-    var input = [_]u8{0} ** 192;
+    var input = @as([192]u8, @splat(0));
 
     // Set versioned hash to something that won't match
     input[0] = 0xFF;
@@ -182,7 +182,7 @@ test "point_evaluation - correct proof case 0 (point at infinity)" {
     // y: 0x0000000000000000000000000000000000000000000000000000000000000000
     // proof: 0xc00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 
-    var input = [_]u8{0} ** 192;
+    var input = @as([192]u8, @splat(0));
 
     // Commitment (48 bytes) - point at infinity
     input[96] = 0xc0;
@@ -231,7 +231,7 @@ test "point_evaluation - correct proof case 1" {
     const y_hex = "0000000000000000000000000000000000000000000000000000000000000002";
     const proof_hex = "c00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
 
-    var input = [_]u8{0} ** 192;
+    var input = @as([192]u8, @splat(0));
 
     // Parse commitment
     var i: usize = 0;
@@ -297,7 +297,7 @@ test "point_evaluation - incorrect proof returns zero output" {
     const y_hex = "0000000000000000000000000000000000000000000000000000000000000000";
     const proof_hex = "97f1d3a73197d7942695638c4fa9ac0fc3688c4f9774b905a14e3a3f171bac586c55e83ff97a1aeffb3af00adb22c6bb";
 
-    var input = [_]u8{0} ** 192;
+    var input = @as([192]u8, @splat(0));
 
     // Parse commitment
     var i: usize = 0;
@@ -366,7 +366,7 @@ test "point_evaluation - invalid commitment malformed" {
     const y_hex = "1824b159acc5056f998c4fefecbc4ff55884b7fa0003480200000001fffffffe";
     const proof_hex = "b0c829a8d2d3405304fecbea193e6c67f7c3912a6adc7c3737ad3f8a3b750425c1531a7426f03033a3994bc82a10609f";
 
-    var input = [_]u8{0} ** 192;
+    var input = @as([192]u8, @splat(0));
 
     // Parse commitment
     var i: usize = 0;
@@ -419,7 +419,7 @@ test "point_evaluation - all zero input" {
     try kzg_setup.init();
     defer kzg_setup.deinit(testing.allocator);
 
-    var input = [_]u8{0} ** 192;
+    var input = @as([192]u8, @splat(0));
 
     const result = execute(testing.allocator, &input, GAS);
     try testing.expectError(error.InvalidInput, result);
@@ -432,7 +432,7 @@ test "point_evaluation - all ones input" {
     try kzg_setup.init();
     defer kzg_setup.deinit(testing.allocator);
 
-    var input = [_]u8{0xFF} ** 192;
+    var input = @as([192]u8, @splat(0xFF));
 
     const result = execute(testing.allocator, &input, GAS);
     try testing.expectError(error.InvalidInput, result);
@@ -445,7 +445,7 @@ test "point_evaluation - versioned hash wrong version byte" {
     try kzg_setup.init();
     defer kzg_setup.deinit(testing.allocator);
 
-    var input = [_]u8{0} ** 192;
+    var input = @as([192]u8, @splat(0));
 
     // Set commitment to point at infinity
     input[96] = 0xc0;
@@ -474,7 +474,7 @@ test "point_evaluation - output format validation" {
     defer kzg_setup.deinit(testing.allocator);
 
     // Use valid test vector
-    var input = [_]u8{0} ** 192;
+    var input = @as([192]u8, @splat(0));
 
     // Commitment (48 bytes) - point at infinity
     input[96] = 0xc0;
@@ -523,7 +523,7 @@ test "point_evaluation - gas usage always constant" {
     defer kzg_setup.deinit(testing.allocator);
 
     // Test with valid proof
-    var input1 = [_]u8{0} ** 192;
+    var input1 = @as([192]u8, @splat(0));
     input1[96] = 0xc0;
     input1[144] = 0xc0;
     var hash1: [32]u8 = undefined;
@@ -540,7 +540,7 @@ test "point_evaluation - gas usage always constant" {
     const commitment_hex = "c00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
     const proof_hex = "97f1d3a73197d7942695638c4fa9ac0fc3688c4f9774b905a14e3a3f171bac586c55e83ff97a1aeffb3af00adb22c6bb";
 
-    var input2 = [_]u8{0} ** 192;
+    var input2 = @as([192]u8, @splat(0));
 
     var i: usize = 0;
     while (i < 48) : (i += 1) {
@@ -576,7 +576,7 @@ test "point_evaluation - exact gas limit allowed" {
     try kzg_setup.init();
     defer kzg_setup.deinit(testing.allocator);
 
-    var input = [_]u8{0} ** 192;
+    var input = @as([192]u8, @splat(0));
     input[96] = 0xc0;
     input[144] = 0xc0;
     var hash: [32]u8 = undefined;
@@ -598,7 +598,7 @@ test "point_evaluation - high gas limit accepted" {
     try kzg_setup.init();
     defer kzg_setup.deinit(testing.allocator);
 
-    var input = [_]u8{0} ** 192;
+    var input = @as([192]u8, @splat(0));
     input[96] = 0xc0;
     input[144] = 0xc0;
     var hash: [32]u8 = undefined;
@@ -621,7 +621,7 @@ test "point_evaluation - memory allocation success" {
     try kzg_setup.init();
     defer kzg_setup.deinit(testing.allocator);
 
-    var input = [_]u8{0} ** 192;
+    var input = @as([192]u8, @splat(0));
     input[96] = 0xc0;
     input[144] = 0xc0;
     var hash: [32]u8 = undefined;
@@ -646,7 +646,7 @@ test "point_evaluation - input components boundaries" {
     try kzg_setup.init();
     defer kzg_setup.deinit(testing.allocator);
 
-    var input = [_]u8{0} ** 192;
+    var input = @as([192]u8, @splat(0));
 
     // Set each component to distinct values to verify boundaries
     @memset(input[0..32], 0x01); // versioned_hash

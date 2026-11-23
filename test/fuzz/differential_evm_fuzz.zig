@@ -66,7 +66,7 @@ fn makeBlockInfo(seed_byte: u8) BlockInfo {
 
 /// Generates structure-aware EVM bytecode from raw fuzzer bytes.
 fn buildStructuredProgram(allocator: std.mem.Allocator, mode: u8, bytes: []const u8) ![]u8 {
-    var out = std.ArrayList(u8){};
+    var out = std.ArrayList(u8).empty;
     errdefer out.deinit(allocator);
 
     switch (mode) {

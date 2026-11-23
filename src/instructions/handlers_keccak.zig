@@ -508,7 +508,7 @@ test "KECCAK256 opcode - patterns" {
     defer frame.deinit(testing.allocator);
 
     // Test pattern: all zeros
-    const zeros = [_]u8{0} ** 64;
+    const zeros = @as([64]u8, @splat(0));
     try frame.memory.set_data_evm(testing.allocator, 0, &zeros);
 
     try frame.stack.push(0); // offset
@@ -520,7 +520,7 @@ test "KECCAK256 opcode - patterns" {
     const zeros_hash = try frame.stack.pop();
 
     // Test pattern: all ones
-    const ones = [_]u8{0xFF} ** 64;
+    const ones = @as([64]u8, @splat(0xFF));
     try frame.memory.set_data_evm(testing.allocator, 0, &ones);
 
     try frame.stack.push(0); // offset

@@ -9,7 +9,7 @@ test "differential: environmental opcodes coverage" {
     var testor = try DifferentialTestor.init(allocator);
     defer testor.deinit();
 
-    var bc = std.ArrayList(u8){};
+    var bc = std.ArrayList(u8).empty;
     defer bc.deinit(allocator);
 
     // small helper

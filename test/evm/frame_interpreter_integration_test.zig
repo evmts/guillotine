@@ -295,7 +295,7 @@ test "Frame interpreter CREATE integration - deploy simple contract" {
     // This would be done by previous opcodes in a real scenario
     
     const FrameInterpreterType = frame_interpreter.FrameInterpreter(.{});
-    var interpreter = try FrameInterpreterType.init(allocator, &bytecode, 500_000, void{}, null);
+    var interpreter = try FrameInterpreterType.init(allocator, &bytecode, 500_000, {}, null);
     defer interpreter.deinit(allocator);
     
     // Set the host
@@ -387,7 +387,7 @@ test "Frame interpreter CREATE integration - with value transfer" {
     };
     
     const FrameInterpreterType = frame_interpreter.FrameInterpreter(.{});
-    var interpreter = try FrameInterpreterType.init(allocator, &bytecode, 500_000, void{}, null);
+    var interpreter = try FrameInterpreterType.init(allocator, &bytecode, 500_000, {}, null);
     defer interpreter.deinit(allocator);
     
     interpreter.frame.host = test_host.to_host();

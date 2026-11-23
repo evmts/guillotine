@@ -69,7 +69,7 @@ pub const SiweMessage = struct {
 
         // Chain ID
         try result.appendSlice("Chain ID: ");
-        try result.writer().print("{d}", .{self.chain_id});
+        try result.print("{d}", .{self.chain_id});
         try result.appendSlice("\n");
 
         // Nonce
@@ -359,7 +359,7 @@ test "SIWE message signature verification" {
     const allocator = testing.allocator;
 
     const private_key = crypto.PrivateKey{
-        .bytes = [_]u8{0x42} ** 32,
+        .bytes = @as([32]u8, @splat(0x42)),
     };
 
     const signer_address = try crypto.get_address(allocator, private_key);

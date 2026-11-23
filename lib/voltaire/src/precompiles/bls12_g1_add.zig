@@ -43,7 +43,7 @@ test "bls12_g1_add - gas cost validation" {
     const allocator = testing.allocator;
 
     // Point at infinity (128 bytes of zeros) + another point (128 bytes)
-    var input: [256]u8 = [_]u8{0} ** 256;
+    var input: [256]u8 = @as([256]u8, @splat(0));
 
     // Test with exact gas
     {
@@ -62,7 +62,7 @@ test "bls12_g1_add - gas cost validation" {
 
 test "bls12_g1_add - out of gas error" {
     const allocator = testing.allocator;
-    var input: [256]u8 = [_]u8{0} ** 256;
+    var input: [256]u8 = @as([256]u8, @splat(0));
 
     // Test with insufficient gas
     const result = execute(allocator, &input, GAS - 1);
@@ -74,14 +74,14 @@ test "bls12_g1_add - invalid input length" {
 
     // Test with input too short
     {
-        var input: [255]u8 = [_]u8{0} ** 255;
+        var input: [255]u8 = @as([255]u8, @splat(0));
         const result = execute(allocator, &input, GAS);
         try testing.expectError(error.InvalidInput, result);
     }
 
     // Test with input too long
     {
-        var input: [257]u8 = [_]u8{0} ** 257;
+        var input: [257]u8 = @as([257]u8, @splat(0));
         const result = execute(allocator, &input, GAS);
         try testing.expectError(error.InvalidInput, result);
     }
@@ -99,7 +99,7 @@ test "bls12_g1_add - point at infinity operations" {
 
     // O + O = O (both points at infinity)
     {
-        var input: [256]u8 = [_]u8{0} ** 256;
+        var input: [256]u8 = @as([256]u8, @splat(0));
         const result = try execute(allocator, &input, GAS);
         defer result.deinit(allocator);
 
@@ -112,7 +112,7 @@ test "bls12_g1_add - point at infinity operations" {
 
     // P + O = P (second point at infinity)
     {
-        var input: [256]u8 = [_]u8{0} ** 256;
+        var input: [256]u8 = @as([256]u8, @splat(0));
         // Set first point to generator point (x-coordinate least significant byte = 1)
         // BLS12-381 G1 generator x-coordinate (big-endian, 48 bytes padded to 64)
         // x = 0x17f1d3a73197d7942695638c4fa9ac0fc3688c4f9774b905a14e3a3f171bac586c55e83ff97a1aeffb3af00adb22c6bb
@@ -145,7 +145,7 @@ test "bls12_g1_add - point at infinity operations" {
 
     // O + P = P (first point at infinity)
     {
-        var input: [256]u8 = [_]u8{0} ** 256;
+        var input: [256]u8 = @as([256]u8, @splat(0));
         const g1_x = [_]u8{
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x17, 0xf1, 0xd3, 0xa7, 0x31, 0x97, 0xd7, 0x94, 0x26, 0x95, 0x63, 0x8c, 0x4f, 0xa9, 0xac, 0x0f,
@@ -178,7 +178,7 @@ test "bls12_g1_add - generator point addition" {
     const allocator = testing.allocator;
 
     // G + G = 2G
-    var input: [256]u8 = [_]u8{0} ** 256;
+    var input: [256]u8 = @as([256]u8, @splat(0));
     const g1_x = [_]u8{
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         0x17, 0xf1, 0xd3, 0xa7, 0x31, 0x97, 0xd7, 0x94, 0x26, 0x95, 0x63, 0x8c, 0x4f, 0xa9, 0xac, 0x0f,
@@ -217,7 +217,7 @@ test "bls12_g1_add - point plus negative equals infinity" {
     const allocator = testing.allocator;
 
     // P + (-P) = O
-    var input: [256]u8 = [_]u8{0} ** 256;
+    var input: [256]u8 = @as([256]u8, @splat(0));
     const g1_x = [_]u8{
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         0x17, 0xf1, 0xd3, 0xa7, 0x31, 0x97, 0xd7, 0x94, 0x26, 0x95, 0x63, 0x8c, 0x4f, 0xa9, 0xac, 0x0f,
@@ -263,7 +263,7 @@ test "bls12_g1_add - invalid point not on curve" {
     const allocator = testing.allocator;
 
     // Create invalid point (not on curve)
-    var input: [256]u8 = [_]u8{0} ** 256;
+    var input: [256]u8 = @as([256]u8, @splat(0));
     // Set to arbitrary values that don't satisfy the curve equation
     input[63] = 1; // x = 1
     input[127] = 2; // y = 2
@@ -276,7 +276,7 @@ test "bls12_g1_add - invalid point not on curve" {
 test "bls12_g1_add - output size validation" {
     const allocator = testing.allocator;
 
-    var input: [256]u8 = [_]u8{0} ** 256;
+    var input: [256]u8 = @as([256]u8, @splat(0));
     const result = try execute(allocator, &input, GAS);
     defer result.deinit(allocator);
 

@@ -179,7 +179,7 @@ pub fn encodeBlobData(allocator: Allocator, data: []const u8) !Blob {
         return BlobError.DataTooLarge;
     }
 
-    var blob: Blob = [_]u8{0x00} ** BYTES_PER_BLOB;
+    var blob: Blob = @as([BYTES_PER_BLOB]u8, @splat(0x00));
 
     // Simple encoding: length prefix + data
     // In practice, this would use more sophisticated encoding
@@ -207,7 +207,7 @@ pub fn decodeBlobData(allocator: Allocator, blob: Blob) ![]u8 {
 // Tests
 
 test "commitment to versioned hash" {
-    const commitment: BlobCommitment = [_]u8{0x12} ** 48;
+    const commitment: BlobCommitment = @as([48]u8, @splat(0x12));
     const versioned_hash = commitmentToVersionedHash(commitment);
 
     // Should start with version byte
@@ -219,7 +219,7 @@ test "commitment to versioned hash" {
 
 test "invalid versioned hash" {
     var h: VersionedHash = undefined;
-    h.bytes = [_]u8{0x00} ** 32;
+    h.bytes = @as([32]u8, @splat(0x00));
     h.bytes[0] = 0x02; // Invalid version
 
     try testing.expect(!isValidVersionedHash(h));
@@ -280,8 +280,8 @@ test "hardfork-specific excess blob gas calculation" {
 }
 
 test "blob transaction validation" {
-    const hash1 = commitmentToVersionedHash([_]u8{0x01} ** 48);
-    const hash2 = commitmentToVersionedHash([_]u8{0x02} ** 48);
+    const hash1 = commitmentToVersionedHash(@as([48]u8, @splat(0x01)));
+    const hash2 = commitmentToVersionedHash(@as([48]u8, @splat(0x02)));
 
     const hashes = [_]VersionedHash{ hash1, hash2 };
 
@@ -309,7 +309,7 @@ test "blob transaction validation failures" {
     // Too many blobs
     var many_hashes: [MAX_BLOBS_PER_TRANSACTION + 1]VersionedHash = undefined;
     for (0..many_hashes.len) |i| {
-        many_hashes[i] = commitmentToVersionedHash([_]u8{@intCast(i)} ** 48);
+        many_hashes[i] = commitmentToVersionedHash(@as([48]u8, @splat(@intCast(i))));
     }
 
     tx = BlobTransaction{
@@ -320,7 +320,7 @@ test "blob transaction validation failures" {
 
     // Invalid versioned hash
     var invalid_hash: VersionedHash = undefined;
-    invalid_hash.bytes = [_]u8{0x00} ** 32;
+    invalid_hash.bytes = @as([32]u8, @splat(0x00));
     invalid_hash.bytes[0] = 0xFF; // Invalid version
 
     tx = BlobTransaction{
@@ -330,7 +330,7 @@ test "blob transaction validation failures" {
     try testing.expectError(BlobError.InvalidVersionedHash, tx.validate());
 
     // Zero max fee
-    const valid_hash = commitmentToVersionedHash([_]u8{0x01} ** 48);
+    const valid_hash = commitmentToVersionedHash(@as([48]u8, @splat(0x01)));
     tx = BlobTransaction{
         .max_fee_per_blob_gas = 0,
         .blob_versioned_hashes = &[_]VersionedHash{valid_hash},
@@ -340,9 +340,9 @@ test "blob transaction validation failures" {
 
 test "blob sidecar" {
     const sidecar = BlobSidecar{
-        .blob = [_]u8{0x00} ** BYTES_PER_BLOB,
-        .commitment = [_]u8{0x12} ** 48,
-        .proof = [_]u8{0x34} ** 48,
+        .blob = @as([BYTES_PER_BLOB]u8, @splat(0x00)),
+        .commitment = @as([48]u8, @splat(0x12)),
+        .proof = @as([48]u8, @splat(0x34)),
     };
 
     const h = sidecar.versionedHash();
@@ -400,7 +400,7 @@ test "blob data too large" {
 
 test "isValidVersionedHash with correct version" {
     var h: VersionedHash = undefined;
-    h.bytes = [_]u8{0x00} ** 32;
+    h.bytes = @as([32]u8, @splat(0x00));
     h.bytes[0] = BLOB_COMMITMENT_VERSION_KZG; // 0x01
 
     try testing.expect(isValidVersionedHash(h));
@@ -408,7 +408,7 @@ test "isValidVersionedHash with correct version" {
 
 test "isValidVersionedHash with version zero" {
     var h: VersionedHash = undefined;
-    h.bytes = [_]u8{0x00} ** 32;
+    h.bytes = @as([32]u8, @splat(0x00));
     h.bytes[0] = 0x00;
 
     try testing.expect(!isValidVersionedHash(h));
@@ -416,7 +416,7 @@ test "isValidVersionedHash with version zero" {
 
 test "isValidVersionedHash with version two" {
     var h: VersionedHash = undefined;
-    h.bytes = [_]u8{0x00} ** 32;
+    h.bytes = @as([32]u8, @splat(0x00));
     h.bytes[0] = 0x02;
 
     try testing.expect(!isValidVersionedHash(h));
@@ -424,7 +424,7 @@ test "isValidVersionedHash with version two" {
 
 test "isValidVersionedHash with max version byte" {
     var h: VersionedHash = undefined;
-    h.bytes = [_]u8{0xFF} ** 32;
+    h.bytes = @as([32]u8, @splat(0xFF));
     h.bytes[0] = 0xFF;
 
     try testing.expect(!isValidVersionedHash(h));
@@ -435,7 +435,7 @@ test "isValidVersionedHash with various invalid versions" {
 
     for (invalid_versions) |version| {
         var h: VersionedHash = undefined;
-        h.bytes = [_]u8{0x00} ** 32;
+        h.bytes = @as([32]u8, @splat(0x00));
         h.bytes[0] = version;
 
         try testing.expect(!isValidVersionedHash(h));
@@ -611,7 +611,7 @@ test "fakeExponential consistency with calculateBlobGasPrice" {
 // Comprehensive tests for BlobTransaction.validate
 
 test "BlobTransaction validate with single valid blob" {
-    const hash = commitmentToVersionedHash([_]u8{0x01} ** 48);
+    const hash = commitmentToVersionedHash(@as([48]u8, @splat(0x01)));
     const hashes = [_]VersionedHash{hash};
 
     const tx = BlobTransaction{
@@ -625,7 +625,7 @@ test "BlobTransaction validate with single valid blob" {
 test "BlobTransaction validate with max blobs exactly" {
     var hashes: [MAX_BLOBS_PER_TRANSACTION]VersionedHash = undefined;
     for (0..MAX_BLOBS_PER_TRANSACTION) |i| {
-        hashes[i] = commitmentToVersionedHash([_]u8{@intCast(i + 1)} ** 48);
+        hashes[i] = commitmentToVersionedHash(@as([48]u8, @splat(@intCast(i + 1))));
     }
 
     const tx = BlobTransaction{
@@ -648,7 +648,7 @@ test "BlobTransaction validate fails with zero blobs" {
 test "BlobTransaction validate fails with max blobs plus one" {
     var hashes: [MAX_BLOBS_PER_TRANSACTION + 1]VersionedHash = undefined;
     for (0..hashes.len) |i| {
-        hashes[i] = commitmentToVersionedHash([_]u8{@intCast(i + 1)} ** 48);
+        hashes[i] = commitmentToVersionedHash(@as([48]u8, @splat(@intCast(i + 1))));
     }
 
     const tx = BlobTransaction{
@@ -662,7 +662,7 @@ test "BlobTransaction validate fails with max blobs plus one" {
 test "BlobTransaction validate fails with many blobs" {
     var hashes: [100]VersionedHash = undefined;
     for (0..hashes.len) |i| {
-        hashes[i] = commitmentToVersionedHash([_]u8{@intCast((i % 255) + 1)} ** 48);
+        hashes[i] = commitmentToVersionedHash(@as([48]u8, @splat(@intCast((i % 255) + 1))));
     }
 
     const tx = BlobTransaction{
@@ -674,11 +674,11 @@ test "BlobTransaction validate fails with many blobs" {
 }
 
 test "BlobTransaction validate fails with invalid versioned hash in middle" {
-    const valid_hash1 = commitmentToVersionedHash([_]u8{0x01} ** 48);
+    const valid_hash1 = commitmentToVersionedHash(@as([48]u8, @splat(0x01)));
     var invalid_hash: VersionedHash = undefined;
-    invalid_hash.bytes = [_]u8{0x00} ** 32;
+    invalid_hash.bytes = @as([32]u8, @splat(0x00));
     invalid_hash.bytes[0] = 0x00; // Invalid version
-    const valid_hash2 = commitmentToVersionedHash([_]u8{0x02} ** 48);
+    const valid_hash2 = commitmentToVersionedHash(@as([48]u8, @splat(0x02)));
 
     const hashes = [_]VersionedHash{ valid_hash1, invalid_hash, valid_hash2 };
 
@@ -691,7 +691,7 @@ test "BlobTransaction validate fails with invalid versioned hash in middle" {
 }
 
 test "BlobTransaction validate fails with zero max fee" {
-    const hash = commitmentToVersionedHash([_]u8{0x01} ** 48);
+    const hash = commitmentToVersionedHash(@as([48]u8, @splat(0x01)));
     const hashes = [_]VersionedHash{hash};
 
     const tx = BlobTransaction{
@@ -703,7 +703,7 @@ test "BlobTransaction validate fails with zero max fee" {
 }
 
 test "BlobTransaction validate succeeds with minimal max fee" {
-    const hash = commitmentToVersionedHash([_]u8{0x01} ** 48);
+    const hash = commitmentToVersionedHash(@as([48]u8, @splat(0x01)));
     const hashes = [_]VersionedHash{hash};
 
     const tx = BlobTransaction{
@@ -715,7 +715,7 @@ test "BlobTransaction validate succeeds with minimal max fee" {
 }
 
 test "BlobTransaction validate succeeds with high max fee" {
-    const hash = commitmentToVersionedHash([_]u8{0x01} ** 48);
+    const hash = commitmentToVersionedHash(@as([48]u8, @splat(0x01)));
     const hashes = [_]VersionedHash{hash};
 
     const tx = BlobTransaction{
@@ -735,7 +735,7 @@ test "max blob count is six" {
 test "BlobTransaction with exactly max blobs is valid" {
     var hashes: [MAX_BLOBS_PER_TRANSACTION]VersionedHash = undefined;
     for (0..MAX_BLOBS_PER_TRANSACTION) |i| {
-        hashes[i] = commitmentToVersionedHash([_]u8{@intCast(i + 1)} ** 48);
+        hashes[i] = commitmentToVersionedHash(@as([48]u8, @splat(@intCast(i + 1))));
     }
 
     const tx = BlobTransaction{
@@ -750,7 +750,7 @@ test "BlobTransaction with exactly max blobs is valid" {
 test "BlobTransaction gas calculations with max blobs" {
     var hashes: [MAX_BLOBS_PER_TRANSACTION]VersionedHash = undefined;
     for (0..MAX_BLOBS_PER_TRANSACTION) |i| {
-        hashes[i] = commitmentToVersionedHash([_]u8{@intCast(i + 1)} ** 48);
+        hashes[i] = commitmentToVersionedHash(@as([48]u8, @splat(@intCast(i + 1))));
     }
 
     const tx = BlobTransaction{
@@ -769,7 +769,7 @@ test "BlobTransaction gas calculations with max blobs" {
 // Edge case tests near boundaries
 
 test "blob gas calculation boundary with one blob" {
-    const hash = commitmentToVersionedHash([_]u8{0x01} ** 48);
+    const hash = commitmentToVersionedHash(@as([48]u8, @splat(0x01)));
     const hashes = [_]VersionedHash{hash};
 
     const tx = BlobTransaction{
@@ -781,8 +781,8 @@ test "blob gas calculation boundary with one blob" {
 }
 
 test "blob gas calculation boundary with two blobs" {
-    const hash1 = commitmentToVersionedHash([_]u8{0x01} ** 48);
-    const hash2 = commitmentToVersionedHash([_]u8{0x02} ** 48);
+    const hash1 = commitmentToVersionedHash(@as([48]u8, @splat(0x01)));
+    const hash2 = commitmentToVersionedHash(@as([48]u8, @splat(0x02)));
     const hashes = [_]VersionedHash{ hash1, hash2 };
 
     const tx = BlobTransaction{
@@ -818,7 +818,7 @@ test "blob price at target boundary" {
 }
 
 test "blob gas cost calculation with zero base fee" {
-    const hash = commitmentToVersionedHash([_]u8{0x01} ** 48);
+    const hash = commitmentToVersionedHash(@as([48]u8, @splat(0x01)));
     const hashes = [_]VersionedHash{hash};
 
     const tx = BlobTransaction{
@@ -831,7 +831,7 @@ test "blob gas cost calculation with zero base fee" {
 }
 
 test "blob gas cost calculation with high base fee" {
-    const hash = commitmentToVersionedHash([_]u8{0x01} ** 48);
+    const hash = commitmentToVersionedHash(@as([48]u8, @splat(0x01)));
     const hashes = [_]VersionedHash{hash};
 
     const tx = BlobTransaction{
@@ -867,9 +867,9 @@ test "gas price progression with incremental excess" {
 }
 
 test "blob transaction cost realistic scenario" {
-    const hash1 = commitmentToVersionedHash([_]u8{0x01} ** 48);
-    const hash2 = commitmentToVersionedHash([_]u8{0x02} ** 48);
-    const hash3 = commitmentToVersionedHash([_]u8{0x03} ** 48);
+    const hash1 = commitmentToVersionedHash(@as([48]u8, @splat(0x01)));
+    const hash2 = commitmentToVersionedHash(@as([48]u8, @splat(0x02)));
+    const hash3 = commitmentToVersionedHash(@as([48]u8, @splat(0x03)));
     const hashes = [_]VersionedHash{ hash1, hash2, hash3 };
 
     const tx = BlobTransaction{

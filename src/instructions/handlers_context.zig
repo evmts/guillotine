@@ -970,7 +970,7 @@ const MockEvm = struct {
     pub fn account_exists(self: *const MockEvm, address: Address) bool {
         _ = self;
         // Mock: all addresses exist except 0xFFFF...
-        const all_f = Address.fromBytes([_]u8{0xFF} ** 20) catch unreachable;
+        const all_f = Address.fromBytes(@as([20]u8, @splat(0xFF))) catch unreachable;
         return !address.eql(all_f);
     }
 
@@ -1068,7 +1068,7 @@ test "ADDRESS opcode" {
     var evm = MockEvm.init(testing.allocator);
     defer evm.deinit();
 
-    const test_address = Address.fromBytes([_]u8{0x12} ++ [_]u8{0} ** 19) catch unreachable;
+    const test_address = Address.fromBytes([_]u8{0x12} ++ @as([19]u8, @splat(0))) catch unreachable;
     evm.contract_address = test_address;
 
     var frame = try createTestFrame(testing.allocator, &evm);
@@ -1102,7 +1102,7 @@ test "ORIGIN opcode" {
     var evm = MockEvm.init(testing.allocator);
     defer evm.deinit();
 
-    const origin = Address.fromBytes([_]u8{0xAB} ++ [_]u8{0} ** 19) catch unreachable;
+    const origin = Address.fromBytes([_]u8{0xAB} ++ @as([19]u8, @splat(0))) catch unreachable;
     evm.origin_address = origin;
 
     var frame = try createTestFrame(testing.allocator, &evm);
@@ -1119,7 +1119,7 @@ test "CALLER opcode" {
     var evm = MockEvm.init(testing.allocator);
     defer evm.deinit();
 
-    const caller = Address.fromBytes([_]u8{0xCD} ++ [_]u8{0} ** 19) catch unreachable;
+    const caller = Address.fromBytes([_]u8{0xCD} ++ @as([19]u8, @splat(0))) catch unreachable;
     evm.caller_address = caller;
 
     var frame = try createTestFrame(testing.allocator, &evm);
@@ -1151,7 +1151,7 @@ test "CALLDATALOAD opcode" {
     var evm = MockEvm.init(testing.allocator);
     defer evm.deinit();
 
-    const calldata = [_]u8{ 0xFF, 0xEE, 0xDD, 0xCC } ++ [_]u8{0} ** 28;
+    const calldata = [_]u8{ 0xFF, 0xEE, 0xDD, 0xCC } ++ @as([28]u8, @splat(0));
     evm.input_data = &calldata;
 
     var frame = try createTestFrame(testing.allocator, &evm);
@@ -1279,7 +1279,7 @@ test "EXTCODESIZE opcode" {
     defer evm.deinit();
 
     const test_code = [_]u8{ 0x60, 0x00, 0x60, 0x00, 0x50 };
-    const test_address = Address.fromBytes([_]u8{0x99} ++ [_]u8{0} ** 19) catch unreachable;
+    const test_address = Address.fromBytes([_]u8{0x99} ++ @as([19]u8, @splat(0))) catch unreachable;
     try evm.code_map.put(test_address, &test_code);
 
     var frame = try createTestFrame(testing.allocator, &evm);
@@ -1300,7 +1300,7 @@ test "EXTCODECOPY opcode" {
     defer evm.deinit();
 
     const test_code = [_]u8{ 0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE };
-    const test_address = Address.fromBytes([_]u8{0x88} ++ [_]u8{0} ** 19) catch unreachable;
+    const test_address = Address.fromBytes([_]u8{0x88} ++ @as([19]u8, @splat(0))) catch unreachable;
     try evm.code_map.put(test_address, &test_code);
 
     var frame = try createTestFrame(testing.allocator, &evm);
@@ -1325,7 +1325,7 @@ test "EXTCODEHASH opcode - existing account with code" {
     defer evm.deinit();
 
     const test_code = [_]u8{ 0x60, 0x00 }; // PUSH1 0x00
-    const test_address = Address.fromBytes([_]u8{0x77} ++ [_]u8{0} ** 19) catch unreachable;
+    const test_address = Address.fromBytes([_]u8{0x77} ++ @as([19]u8, @splat(0))) catch unreachable;
     try evm.code_map.put(test_address, &test_code);
 
     var frame = try createTestFrame(testing.allocator, &evm);
@@ -1454,7 +1454,7 @@ test "COINBASE opcode" {
     var evm = MockEvm.init(testing.allocator);
     defer evm.deinit();
 
-    const coinbase = Address.fromBytes([_]u8{0xF0} ++ [_]u8{0} ** 19) catch unreachable;
+    const coinbase = Address.fromBytes([_]u8{0xF0} ++ @as([19]u8, @splat(0))) catch unreachable;
     evm.block_info.coinbase = coinbase;
 
     var frame = try createTestFrame(testing.allocator, &evm);
@@ -1636,10 +1636,10 @@ test "Address conversion helpers - boundary values" {
     // Test to_u256 and from_u256 roundtrip
     const test_addresses = [_]Address{
         Address.zero(),
-        Address.fromBytes([_]u8{0xFF} ** 20) catch unreachable,
-        Address.fromBytes([_]u8{ 0x12, 0x34 } ++ [_]u8{0} ** 18) catch unreachable,
-        Address.fromBytes([_]u8{0} ** 19 ++ [_]u8{0xFF}) catch unreachable,
-        Address.fromBytes([_]u8{0x80} ++ [_]u8{0} ** 19) catch unreachable,
+        Address.fromBytes(@as([20]u8, @splat(0xFF))) catch unreachable,
+        Address.fromBytes([_]u8{ 0x12, 0x34 } ++ @as([18]u8, @splat(0))) catch unreachable,
+        Address.fromBytes(@as([19]u8, @splat(0)) ++ [_]u8{0xFF}) catch unreachable,
+        Address.fromBytes([_]u8{0x80} ++ @as([19]u8, @splat(0))) catch unreachable,
     };
 
     for (test_addresses) |addr| {
@@ -1655,9 +1655,9 @@ test "ADDRESS opcode - various contract addresses" {
 
     const test_cases = [_]Address{
         Address.zero(),
-        Address.fromBytes([_]u8{0xFF} ** 20) catch unreachable,
+        Address.fromBytes(@as([20]u8, @splat(0xFF))) catch unreachable,
         Address.fromBytes([_]u8{ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01 }) catch unreachable,
-        Address.fromBytes([_]u8{ 0xDE, 0xAD, 0xBE, 0xEF } ++ [_]u8{0} ** 16) catch unreachable,
+        Address.fromBytes([_]u8{ 0xDE, 0xAD, 0xBE, 0xEF } ++ @as([16]u8, @splat(0))) catch unreachable,
     };
 
     const host = evm.to_host();
@@ -1875,7 +1875,7 @@ test "EXTCODECOPY opcode - boundary conditions" {
     defer evm.deinit();
 
     const test_code = [_]u8{ 0x11, 0x22, 0x33 };
-    const test_address = Address.fromBytes([_]u8{0x99} ++ [_]u8{0} ** 19) catch unreachable;
+    const test_address = Address.fromBytes([_]u8{0x99} ++ @as([19]u8, @splat(0))) catch unreachable;
     try evm.code_map.put(test_address, &test_code);
 
     const host = evm.to_host();
@@ -2119,7 +2119,7 @@ test "Block info opcodes - various values" {
 
     // Set extreme values
     evm.block_info = .{
-        .coinbase = Address.fromBytes([_]u8{0xFF} ** 20) catch unreachable,
+        .coinbase = Address.fromBytes(@as([20]u8, @splat(0xFF))) catch unreachable,
         .timestamp = std.math.maxInt(u64),
         .number = std.math.maxInt(u64),
         .difficulty = std.math.maxInt(u256),

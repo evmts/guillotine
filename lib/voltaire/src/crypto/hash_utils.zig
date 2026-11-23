@@ -15,7 +15,7 @@ pub const Selector = [4]u8;
 const Keccak256 = crypto.hash.sha3.Keccak256;
 
 // Constants
-pub const ZERO_HASH: Hash = [_]u8{0} ** 32;
+pub const ZERO_HASH: Hash = @as([32]u8, @splat(0));
 pub const EMPTY_KECCAK256: Hash = [32]u8{
     0xc5, 0xd2, 0x46, 0x01, 0x86, 0xf7, 0x23, 0x3c,
     0x92, 0x7e, 0x7d, 0xb2, 0xdc, 0xc7, 0x03, 0xc0,
@@ -208,7 +208,7 @@ test "hash creation and conversion" {
     try testing.expect(isZero(zero_hash));
 
     // Test fromBytes
-    const test_bytes = [_]u8{ 0x12, 0x34 } ++ [_]u8{0} ** 30;
+    const test_bytes = [_]u8{ 0x12, 0x34 } ++ @as([30]u8, @splat(0));
     const hash_from_bytes = fromBytes(test_bytes);
     try testing.expectEqual(test_bytes, hash_from_bytes);
 
@@ -281,13 +281,13 @@ test "create zero hash" {
 }
 
 test "hash from bytes" {
-    const test_bytes = [_]u8{ 0x12, 0x34 } ++ [_]u8{0} ** 30;
+    const test_bytes = [_]u8{ 0x12, 0x34 } ++ @as([30]u8, @splat(0));
     const hash_from_bytes = fromBytes(test_bytes);
     try testing.expectEqual(test_bytes, hash_from_bytes);
 }
 
 test "hash from slice" {
-    const slice: []const u8 = &[_]u8{ 0xde, 0xad, 0xbe, 0xef } ++ [_]u8{0} ** 28;
+    const slice: []const u8 = &[_]u8{ 0xde, 0xad, 0xbe, 0xef } ++ @as([28]u8, @splat(0));
     const hash_from_slice = try fromSlice(slice);
     try testing.expectEqualSlices(u8, slice, &hash_from_slice);
 }

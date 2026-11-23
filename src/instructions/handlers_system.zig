@@ -1531,7 +1531,7 @@ test "RETURN opcode - 32 bytes with 0x42" {
     try testing.expectEqual(@as(usize, 32), frame.output.len);
 
     // Expected: 32 bytes with 0x42 in the last position (big-endian)
-    var expected = [_]u8{0} ** 32;
+    var expected = @as([32]u8, @splat(0));
     expected[31] = 0x42;
     try testing.expectEqualSlices(u8, &expected, frame.output);
 }
@@ -1830,7 +1830,7 @@ test "Address conversion - from_u256 edge cases" {
     // Test max u160 (max valid address)
     const max_u160 = std.math.maxInt(u160);
     const max_addr = test_address_utils.fromWord(u256, max_u160);
-    const expected_max = Address.fromBytes([_]u8{0xFF} ** 20) catch unreachable;
+    const expected_max = Address.fromBytes(@as([20]u8, @splat(0xFF))) catch unreachable;
     try testing.expectEqual(expected_max, max_addr);
 
     // Test truncation from u256
@@ -1849,7 +1849,7 @@ test "Address conversion - to_u256 edge cases" {
     try testing.expectEqual(@as(u256, 0), zero_u256);
 
     // Test max address
-    const max_bytes = [_]u8{0xFF} ** 20;
+    const max_bytes = @as([20]u8, @splat(0xFF));
     const max_addr = Address.fromBytes(max_bytes) catch unreachable;
     const max_u256 = test_address_utils.toWord(u256, max_addr);
     try testing.expectEqual(@as(u256, std.math.maxInt(u160)), max_u256);
@@ -2127,7 +2127,7 @@ test "STATICCALL opcode - enforces no value" {
 // CREATE tests
 test "CREATE opcode - empty init code" {
     var evm = MockEvm.init(testing.allocator);
-    evm.create_result.created_address = Address.fromBytes([_]u8{0x42} ** 20) catch unreachable;
+    evm.create_result.created_address = Address.fromBytes(@as([20]u8, @splat(0x42))) catch unreachable;
     var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
@@ -2145,7 +2145,7 @@ test "CREATE opcode - empty init code" {
 
 test "CREATE opcode - with init code" {
     var evm = MockEvm.init(testing.allocator);
-    evm.create_result.created_address = Address.fromBytes([_]u8{0x11} ** 20) catch unreachable;
+    evm.create_result.created_address = Address.fromBytes(@as([20]u8, @splat(0x11))) catch unreachable;
     var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
@@ -2201,7 +2201,7 @@ test "CREATE opcode - out of bounds" {
 // CREATE2 tests
 test "CREATE2 opcode - deterministic address" {
     var evm = MockEvm.init(testing.allocator);
-    evm.create_result.created_address = Address.fromBytes([_]u8{0x22} ** 20) catch unreachable;
+    evm.create_result.created_address = Address.fromBytes(@as([20]u8, @splat(0x22))) catch unreachable;
     var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
@@ -2227,7 +2227,7 @@ test "CREATE2 opcode - different salts" {
     const salts = [_]u256{ 0, 1, std.math.maxInt(u256), 0x123456789ABCDEF };
 
     for (salts) |salt| {
-        evm.create_result.created_address = Address.fromBytes([_]u8{@truncate(salt)} ** 20) catch unreachable;
+        evm.create_result.created_address = Address.fromBytes(@as([20]u8, @splat(@truncate(salt)))) catch unreachable;
 
         try frame.stack.push(0); // value
         try frame.stack.push(0); // offset

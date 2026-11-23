@@ -153,7 +153,7 @@ pub inline fn Handlers(comptime TracerType: type) type {
         /// Called when allocation fails
         pub inline fn onArenaAllocFailed(self: *TracerType, size: usize, current_capacity: usize, max_capacity: usize) void {
             if (!self.config.enabled) return;
-            if (comptime (builtin.mode == .Debug or builtin.mode == .ReleaseSafe)) {
+            if (comptime (builtin.mode == .debug or builtin.mode == .safe)) {
                 log.warn("[ARENA] Allocation failed: size={d}, current={d}, max={d}", .{ size, current_capacity, max_capacity });
             }
         }

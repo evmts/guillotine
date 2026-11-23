@@ -1,6 +1,6 @@
 const std = @import("std");
 
-pub const Color = std.Io.tty.Color;
+pub const Color = std.Io.Terminal.Color;
 
 fn FormatJSONArrayData(comptime T: type) type {
     return struct {

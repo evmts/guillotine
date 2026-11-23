@@ -62,7 +62,7 @@ test "bn254Pairing - invalid input not multiple of 192" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** 191;
+    const input = @as([191]u8, @splat(0));
     const result = execute(allocator, &input, 1000000);
     try testing.expectError(error.InvalidInput, result);
 }
@@ -71,7 +71,7 @@ test "bn254Pairing - single pair gas cost" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** 192;
+    const input = @as([192]u8, @splat(0));
     const expected_gas = BASE_GAS + PER_POINT_GAS * 1;
 
     const result = try execute(allocator, &input, 1000000);
@@ -84,7 +84,7 @@ test "bn254Pairing - two pairs gas cost" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** 384;
+    const input = @as([384]u8, @splat(0));
     const expected_gas = BASE_GAS + PER_POINT_GAS * 2;
 
     const result = try execute(allocator, &input, 1000000);
@@ -97,7 +97,7 @@ test "bn254Pairing - out of gas" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** 192;
+    const input = @as([192]u8, @splat(0));
     const required_gas = BASE_GAS + PER_POINT_GAS * 1;
 
     const result = execute(allocator, &input, required_gas - 1);
@@ -108,7 +108,7 @@ test "bn254Pairing - exact gas" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** 192;
+    const input = @as([192]u8, @splat(0));
     const required_gas = BASE_GAS + PER_POINT_GAS * 1;
 
     const result = try execute(allocator, &input, required_gas);
@@ -128,7 +128,7 @@ test "bn254Pairing - output size" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** 192;
+    const input = @as([192]u8, @splat(0));
     const result = try execute(allocator, &input, 1000000);
     defer result.deinit(allocator);
 
@@ -181,7 +181,7 @@ test "bn254Pairing - geth one_point invalid must fail" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** 128;
+    const input = @as([128]u8, @splat(0));
     const result = execute(allocator, &input, 1000000);
     try testing.expectError(error.InvalidInput, result);
 }
@@ -190,7 +190,7 @@ test "bn254Pairing - single valid pair gas calculation" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** 192;
+    const input = @as([192]u8, @splat(0));
     const expected_gas = BASE_GAS + PER_POINT_GAS;
 
     const result = execute(allocator, &input, expected_gas);
@@ -204,7 +204,7 @@ test "bn254Pairing - two pairs gas calculation" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** 384;
+    const input = @as([384]u8, @splat(0));
     const expected_gas = BASE_GAS + 2 * PER_POINT_GAS;
 
     const result = execute(allocator, &input, expected_gas);
@@ -218,7 +218,7 @@ test "bn254Pairing - three pairs gas calculation" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** 576;
+    const input = @as([576]u8, @splat(0));
     const expected_gas = BASE_GAS + 3 * PER_POINT_GAS;
 
     const result = execute(allocator, &input, expected_gas);
@@ -232,7 +232,7 @@ test "bn254Pairing - four pairs gas calculation" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** 768;
+    const input = @as([768]u8, @splat(0));
     const expected_gas = BASE_GAS + 4 * PER_POINT_GAS;
 
     const result = execute(allocator, &input, expected_gas);
@@ -246,7 +246,7 @@ test "bn254Pairing - five pairs gas calculation" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** 960;
+    const input = @as([960]u8, @splat(0));
     const expected_gas = BASE_GAS + 5 * PER_POINT_GAS;
 
     const result = execute(allocator, &input, expected_gas);
@@ -260,7 +260,7 @@ test "bn254Pairing - ten pairs gas calculation" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** 1920;
+    const input = @as([1920]u8, @splat(0));
     const expected_gas = BASE_GAS + 10 * PER_POINT_GAS;
 
     const result = execute(allocator, &input, expected_gas);
@@ -283,7 +283,7 @@ test "bn254Pairing - invalid length 191 bytes" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** 191;
+    const input = @as([191]u8, @splat(0));
     const result = execute(allocator, &input, 1000000);
     try testing.expectError(error.InvalidInput, result);
 }
@@ -292,7 +292,7 @@ test "bn254Pairing - invalid length 193 bytes" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** 193;
+    const input = @as([193]u8, @splat(0));
     const result = execute(allocator, &input, 1000000);
     try testing.expectError(error.InvalidInput, result);
 }
@@ -301,7 +301,7 @@ test "bn254Pairing - invalid length 383 bytes" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** 383;
+    const input = @as([383]u8, @splat(0));
     const result = execute(allocator, &input, 1000000);
     try testing.expectError(error.InvalidInput, result);
 }
@@ -310,7 +310,7 @@ test "bn254Pairing - invalid length 385 bytes" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** 385;
+    const input = @as([385]u8, @splat(0));
     const result = execute(allocator, &input, 1000000);
     try testing.expectError(error.InvalidInput, result);
 }
@@ -319,7 +319,7 @@ test "bn254Pairing - invalid length 575 bytes" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** 575;
+    const input = @as([575]u8, @splat(0));
     const result = execute(allocator, &input, 1000000);
     try testing.expectError(error.InvalidInput, result);
 }
@@ -328,7 +328,7 @@ test "bn254Pairing - invalid length 577 bytes" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** 577;
+    const input = @as([577]u8, @splat(0));
     const result = execute(allocator, &input, 1000000);
     try testing.expectError(error.InvalidInput, result);
 }
@@ -368,7 +368,7 @@ test "bn254Pairing - out of gas for single pair" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** 192;
+    const input = @as([192]u8, @splat(0));
     const required_gas = BASE_GAS + PER_POINT_GAS;
     const result = execute(allocator, &input, required_gas - 1);
     try testing.expectError(error.OutOfGas, result);
@@ -378,7 +378,7 @@ test "bn254Pairing - out of gas for two pairs" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** 384;
+    const input = @as([384]u8, @splat(0));
     const required_gas = BASE_GAS + 2 * PER_POINT_GAS;
     const result = execute(allocator, &input, required_gas - 1);
     try testing.expectError(error.OutOfGas, result);
@@ -388,7 +388,7 @@ test "bn254Pairing - out of gas for ten pairs" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** 1920;
+    const input = @as([1920]u8, @splat(0));
     const required_gas = BASE_GAS + 10 * PER_POINT_GAS;
     const result = execute(allocator, &input, required_gas - 1);
     try testing.expectError(error.OutOfGas, result);

@@ -179,7 +179,7 @@ test "execute - final EIP-2537 address layout routes to the right precompile" {
     };
     try testing.expectEqual(@as(u256, 0x0B), cases[0].address.toU256());
     try testing.expectEqual(@as(u256, 0x11), cases[6].address.toU256());
-    var input: [512]u8 = [_]u8{0} ** 512;
+    var input: [512]u8 = @as([512]u8, @splat(0));
     for (cases) |case| {
         const data = input[0..case.input_len];
         try testing.expectError(error.OutOfGas, execute(allocator, case.address, data, case.cost - 1, .PRAGUE));
@@ -201,7 +201,7 @@ test "precompile - out of gas" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** 32;
+    const input = @as([32]u8, @splat(0));
     const result = sha256.execute(allocator, &input, 10);
     try testing.expectError(error.OutOfGas, result);
 }

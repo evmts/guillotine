@@ -425,7 +425,7 @@ test "PcTracker simple execution" {
     // Mock frame with minimal stack implementation
     const MockFrame = struct {
         stack: struct {
-            data: [10]u256 = [_]u256{0} ** 10,
+            data: [10]u256 = @as([10]u256, @splat(0)),
             len: usize = 0,
 
             pub fn size(self: *const @This()) usize {
@@ -494,7 +494,7 @@ test "PcTracker JUMP handling" {
 
     const MockFrame = struct {
         stack: struct {
-            data: [10]u256 = [_]u256{0} ** 10,
+            data: [10]u256 = @as([10]u256, @splat(0)),
             len: usize = 0,
 
             pub fn size(self: *const @This()) usize {
@@ -537,7 +537,7 @@ test "PcTracker JUMPI conditional" {
 
     const MockFrame = struct {
         stack: struct {
-            data: [10]u256 = [_]u256{0} ** 10,
+            data: [10]u256 = @as([10]u256, @splat(0)),
             len: usize = 0,
 
             pub fn size(self: *const @This()) usize {

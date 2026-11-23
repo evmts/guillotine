@@ -1,7 +1,7 @@
 const std = @import("std");
 const log = std.log.scoped(.zbench_build);
 
-const version = std.SemanticVersion{ .major = 0, .minor = 11, .patch = 2 };
+const version = std.SemanticVersion{ .major = 0, .minor = 14, .patch = 1 };
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
@@ -21,14 +21,16 @@ pub fn build(b: *std.Build) void {
 }
 
 fn setupLibrary(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Step.Compile {
+    const zbench_mod = b.addModule("zbench", .{
+        .root_source_file = b.path("src/zbench.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
     const lib = b.addLibrary(.{
         .linkage = .static,
         .name = "zbench",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/zbench.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
+        .root_module = zbench_mod,
         .version = version,
     });
 
@@ -69,13 +71,14 @@ fn setupExamples(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.
         "bubble_sort_hooks",
         "hooks",
         "json",
-        "memory_tracking",
         "memory_comparison",
+        "memory_tracking",
         "parameterised",
         "progress",
         "shuffling_allocator",
         "sleep",
         "systeminfo",
+        "throughput",
     };
 
     for (example_names) |example_name| {
@@ -88,7 +91,7 @@ fn setupExamples(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.
             }),
         });
         const install_example = b.addInstallArtifact(example, .{});
-        const zbench_mod = b.addModule("zbench", .{
+        const zbench_mod = b.createModule(.{
             .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/zbench.zig" } },
         });
         example.root_module.addImport("zbench", zbench_mod);

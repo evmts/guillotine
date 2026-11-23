@@ -32,7 +32,7 @@ pub inline fn subWithBorrow(a: u64, b: u64, borrow: u8) struct { diff: u64, borr
 
 // Fast multiplication producing 128-bit result
 pub inline fn mul64x64(a: u64, b: u64) struct { low: u64, high: u64 } {
-    if (@sizeOf(u128) == 16 and builtin.mode != .Debug) {
+    if (@sizeOf(u128) == 16 and builtin.mode != .debug) {
         // Use native u128 multiplication when available
         const product = @as(u128, a) * @as(u128, b);
         return .{
@@ -71,11 +71,11 @@ pub fn Uint(comptime bits: usize, comptime limbs: usize) type {
         pub const LIMBS = limbs;
         pub const MASK = mask(bits);
 
-        pub const ZERO: Self = Self.from_limbs(.{0} ** limbs);
-        pub const ONE: Self = if (bits == 0) ZERO else if (limbs == 0) ZERO else Self.from_limbs(.{1} ++ .{0} ** (limbs - 1));
+        pub const ZERO: Self = Self.from_limbs(@splat(0));
+        pub const ONE: Self = if (bits == 0) ZERO else if (limbs == 0) ZERO else Self.from_limbs(.{1} ++ @as([limbs - 1]u64, @splat(0)));
         pub const MIN: Self = ZERO;
         pub const MAX: Self = blk: {
-            var max_limbs = .{std.math.maxInt(u64)} ** limbs;
+            var max_limbs: [limbs]u64 = @splat(std.math.maxInt(u64));
             if (limbs > 0 and MASK != std.math.maxInt(u64)) {
                 max_limbs[limbs - 1] = MASK;
             }
@@ -96,7 +96,7 @@ pub fn Uint(comptime bits: usize, comptime limbs: usize) type {
         pub fn from_u64(value: u64) Self {
             if (bits == 0) return ZERO;
             if (limbs == 0) return ZERO;
-            var limbs_arr: [limbs]u64 = .{0} ** limbs;
+            var limbs_arr: [limbs]u64 = @splat(0);
             limbs_arr[0] = value;
             return Self.from_limbs(limbs_arr).masked();
         }
@@ -113,7 +113,7 @@ pub fn Uint(comptime bits: usize, comptime limbs: usize) type {
                 @compileError("Value too large for Uint" ++ @typeName(Self));
             }
 
-            var limbs_arr: [limbs]u64 = .{0} ** limbs;
+            var limbs_arr: [limbs]u64 = @splat(0);
             var remaining = value;
             var i: usize = 0;
             while (i < limbs and remaining > 0) : (i += 1) {
@@ -3081,7 +3081,7 @@ test "byte conversion edge cases" {
     try testing.expectEqual(U64.from_u64(0x563412), from_partial);
 
     // From oversized slice - should only use what's needed
-    const big_bytes = [_]u8{0xFF} ** 20;
+    const big_bytes = @as([20]u8, @splat(0xFF));
     const from_big = U64.from_le_bytes(&big_bytes);
     try testing.expect(from_big.eq(U64.MAX));
 }

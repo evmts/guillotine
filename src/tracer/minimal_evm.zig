@@ -96,8 +96,8 @@ pub const MinimalEvm = struct {
     balances: std.AutoHashMap(Address, u256),
     code: std.AutoHashMap(Address, []const u8),
     // EIP-2929 warm/cold tracking (minimal)
-    warm_addresses: std.array_hash_map.ArrayHashMap(Address, void, AddressContext, false),
-    warm_storage_slots: std.array_hash_map.ArrayHashMap(StorageSlotKey, void, StorageSlotKeyContext, false),
+    warm_addresses: std.array_hash_map.Custom(Address, void, AddressContext, false),
+    warm_storage_slots: std.array_hash_map.Custom(StorageSlotKey, void, StorageSlotKeyContext, false),
 
     // Transaction-scoped gas refund counter
     gas_refund: u64,
@@ -129,9 +129,9 @@ pub const MinimalEvm = struct {
         const transient_storage_map = std.AutoHashMap(StorageSlotKey, u256).init(arena_allocator);
         const balances_map = std.AutoHashMap(Address, u256).init(arena_allocator);
         const code_map = std.AutoHashMap(Address, []const u8).init(arena_allocator);
-        const warm_addresses = std.array_hash_map.ArrayHashMap(Address, void, AddressContext, false).init(arena_allocator);
-        const warm_storage_slots = std.array_hash_map.ArrayHashMap(StorageSlotKey, void, StorageSlotKeyContext, false).init(arena_allocator);
-        var frames_list = std.ArrayList(*MinimalFrame){};
+        const warm_addresses: std.array_hash_map.Custom(Address, void, AddressContext, false) = .empty;
+        const warm_storage_slots: std.array_hash_map.Custom(StorageSlotKey, void, StorageSlotKeyContext, false) = .empty;
+        var frames_list = std.ArrayList(*MinimalFrame).empty;
         try frames_list.ensureTotalCapacity(arena_allocator, 16);
 
         const original_storage_map = std.AutoHashMap(StorageSlotKey, u256).init(arena_allocator);
@@ -175,14 +175,14 @@ pub const MinimalEvm = struct {
 
         const arena_allocator = self.arena.allocator();
 
-        self.frames = std.ArrayList(*MinimalFrame){}; // Unmanaged ArrayList, default init
+        self.frames = std.ArrayList(*MinimalFrame).empty; // Unmanaged ArrayList, default init
         self.storage = std.AutoHashMap(StorageSlotKey, u256).init(arena_allocator);
         self.transient_storage = std.AutoHashMap(StorageSlotKey, u256).init(arena_allocator);
         self.original_storage = std.AutoHashMap(StorageSlotKey, u256).init(arena_allocator);
         self.balances = std.AutoHashMap(Address, u256).init(arena_allocator);
         self.code = std.AutoHashMap(Address, []const u8).init(arena_allocator);
-        self.warm_addresses = std.array_hash_map.ArrayHashMap(Address, void, AddressContext, false).init(arena_allocator);
-        self.warm_storage_slots = std.array_hash_map.ArrayHashMap(StorageSlotKey, void, StorageSlotKeyContext, false).init(arena_allocator);
+        self.warm_addresses = .empty;
+        self.warm_storage_slots = .empty;
         self.gas_refund = 0;
         self.hardfork = Hardfork.DEFAULT;
         self.chain_id = 1;
@@ -271,7 +271,7 @@ pub const MinimalEvm = struct {
             return GasConstants.CallCodeCost;
         }
 
-        const entry = try self.warm_addresses.getOrPut(address);
+        const entry = try self.warm_addresses.getOrPut(self.allocator, address);
         return if (entry.found_existing)
             GasConstants.WarmStorageReadCost
         else
@@ -286,7 +286,7 @@ pub const MinimalEvm = struct {
         }
 
         const key = StorageSlotKey{ .address = contract_address, .slot = slot };
-        const entry = try self.warm_storage_slots.getOrPut(key);
+        const entry = try self.warm_storage_slots.getOrPut(self.allocator, key);
         return if (entry.found_existing)
             GasConstants.WarmStorageReadCost
         else
@@ -296,7 +296,7 @@ pub const MinimalEvm = struct {
     /// Pre-warm addresses for transaction initialization
     fn pre_warm_addresses(self: *Self, addresses: []const Address) !void {
         for (addresses) |address| {
-            _ = self.warm_addresses.getOrPut(address) catch {
+            _ = self.warm_addresses.getOrPut(self.allocator, address) catch {
                 return Error.StorageError;
             };
         }
@@ -334,7 +334,7 @@ pub const MinimalEvm = struct {
         // Check each potential precompile address and pre-warm if active
         var i: u8 = 1;
         while (i <= 10) : (i += 1) {
-            var addr_bytes: [20]u8 = [_]u8{0} ** 20;
+            var addr_bytes: [20]u8 = @as([20]u8, @splat(0));
             addr_bytes[19] = i;
             const addr = Address{ .bytes = addr_bytes };
             if (self.is_precompile(addr)) {

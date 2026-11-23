@@ -340,7 +340,7 @@ pub fn calculateCreateAddress(allocator: std.mem.Allocator, creator: Address, no
     const nonce_slice = if (nonce == 0) &[_]u8{} else nonce_bytes[nonce_start..];
 
     // Create a list for RLP encoding [creator_address, nonce]
-    var list = std.ArrayList([]const u8){};
+    var list = std.ArrayList([]const u8).empty;
     defer list.deinit(allocator);
 
     try list.append(allocator, &creator.bytes);
@@ -556,8 +556,8 @@ test "contract address generation - CREATE multiple nonces" {
 
 test "contract address generation - CREATE2" {
     const deployer = try fromHex("0x0000000000000000000000000000000000000000");
-    const salt = [_]u8{0} ** 32;
-    const init_code_hash = [_]u8{0} ** 32;
+    const salt = @as([32]u8, @splat(0));
+    const init_code_hash = @as([32]u8, @splat(0));
 
     const addr = getCreate2Address(deployer, salt, init_code_hash);
     const expected = try fromHex("0x4d1a2e2bb4f88f0250f26ffff098b0b30b26bf38");
@@ -566,8 +566,8 @@ test "contract address generation - CREATE2" {
 
 test "contract address generation - CREATE2 deterministic" {
     const deployer = try fromHex("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef");
-    const salt: [32]u8 = .{ 0x12, 0x34, 0x56, 0x78 } ++ .{0} ** 28;
-    const init_code_hash: [32]u8 = .{ 0xab, 0xcd, 0xef } ++ .{0} ** 29;
+    const salt: [32]u8 = .{ 0x12, 0x34, 0x56, 0x78 } ++ @as([28]u8, @splat(0));
+    const init_code_hash: [32]u8 = .{ 0xab, 0xcd, 0xef } ++ @as([29]u8, @splat(0));
 
     const addr = getCreate2Address(deployer, salt, init_code_hash);
 
@@ -879,11 +879,11 @@ test "calculate_create2_address with large init code" {
 }
 
 test "Address - fromBytes with invalid lengths" {
-    const too_short = [_]u8{0x01} ** 19;
+    const too_short = @as([19]u8, @splat(0x01));
     const result1 = fromBytes(&too_short);
     try std.testing.expectError(error.InvalidAddressLength, result1);
 
-    const too_long = [_]u8{0x01} ** 21;
+    const too_long = @as([21]u8, @splat(0x01));
     const result2 = fromBytes(&too_long);
     try std.testing.expectError(error.InvalidAddressLength, result2);
 
@@ -891,7 +891,7 @@ test "Address - fromBytes with invalid lengths" {
     const result3 = fromBytes(&empty);
     try std.testing.expectError(error.InvalidAddressLength, result3);
 
-    const valid = [_]u8{0x01} ** 20;
+    const valid = @as([20]u8, @splat(0x01));
     const result4 = try fromBytes(&valid);
     try std.testing.expectEqual(@as(usize, 20), result4.bytes.len);
 }
@@ -954,7 +954,7 @@ test "Address - fromHex error cases" {
     const result1 = fromHex(too_short);
     try std.testing.expectError(error.InvalidHexFormat, result1);
 
-    const too_long = "0x" ++ "a" ** 50;
+    const too_long = "0x" ++ &@as([50]u8, @splat('a'));
     const result2 = fromHex(too_long);
     try std.testing.expectError(error.InvalidHexFormat, result2);
 

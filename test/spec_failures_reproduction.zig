@@ -76,7 +76,7 @@ test "reproducing CALL opcode issue" {
     const allocator = std.testing.allocator;
 
     // Build the actual 0xf1 CALL bytecode as in common.zig
-    var buf = std.ArrayList(u8){};
+    var buf = std.ArrayList(u8).empty;
     defer buf.deinit(allocator);
 
     // CALL bytecode exactly as generated

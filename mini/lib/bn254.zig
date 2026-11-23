@@ -23,18 +23,18 @@ pub fn createBn254Library(
 
     // Map Zig optimize modes to Rust profile directories
     const profile_dir = switch (optimize) {
-        .Debug => "debug",
-        .ReleaseSafe, .ReleaseSmall => "release",
-        .ReleaseFast => "release-fast",
+        .debug => "debug",
+        .safe, .small => "release",
+        .fast => "release-fast",
     };
     const lib_path = if (rust_target) |target_triple|
         b.fmt("target/{s}/{s}/libbn254_wrapper.a", .{ target_triple, profile_dir })
     else
         b.fmt("target/{s}/libbn254_wrapper.a", .{profile_dir});
 
-    lib.addObjectFile(b.path(lib_path));
-    lib.linkLibC();
-    lib.addIncludePath(b.path("lib/ark"));
+    lib.root_module.addObjectFile(b.path(lib_path));
+    lib.root_module.link_libc = true;
+    lib.root_module.addIncludePath(b.path("lib/ark"));
 
     if (workspace_build_step) |build_step| {
         lib.step.dependOn(build_step);

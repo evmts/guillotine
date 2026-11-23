@@ -2,7 +2,7 @@ const std = @import("std");
 const ArrayList = std.ArrayList;
 
 pub fn build_bytecode(allocator: std.mem.Allocator, opcode: u8) ![]u8 {
-    var buf = ArrayList(u8){};
+    var buf = ArrayList(u8).empty;
     defer buf.deinit(allocator);
 
     // Helper functions as a struct namespace
@@ -39,7 +39,7 @@ pub fn build_bytecode(allocator: std.mem.Allocator, opcode: u8) ![]u8 {
 
         inline fn push_u256(alloc: std.mem.Allocator, b: *std.ArrayList(u8), v: u256) !void {
             if (v == 0) return push_u8(alloc, b, 0);
-            var tmp: [32]u8 = [_]u8{0} ** 32;
+            var tmp: [32]u8 = @as([32]u8, @splat(0));
             std.mem.writeInt(u256, &tmp, v, .big);
             const first_non_zero = std.mem.indexOfNonePos(u8, &tmp, 0, &[_]u8{0}) orelse 32;
             const slice = tmp[first_non_zero..];
@@ -104,7 +104,7 @@ pub fn build_bytecode(allocator: std.mem.Allocator, opcode: u8) ![]u8 {
             try helpers.ret_top32(allocator, &buf);
         },
         0x05 => { // SDIV: -10 / 3 = -3
-            var minus10: [32]u8 = [_]u8{0xff} ** 32;
+            var minus10: [32]u8 = @as([32]u8, @splat(0xff));
             minus10[31] = 0xf6; // two's complement -10
             try helpers.push_bytes(allocator, &buf, &minus10); // push a=-10
             try helpers.push_u8(allocator, &buf, 0x03); // push b=3 (top)
@@ -118,7 +118,7 @@ pub fn build_bytecode(allocator: std.mem.Allocator, opcode: u8) ![]u8 {
             try helpers.ret_top32(allocator, &buf);
         },
         0x07 => { // SMOD: -10 % 3 = -1
-            var minus10b: [32]u8 = [_]u8{0xff} ** 32;
+            var minus10b: [32]u8 = @as([32]u8, @splat(0xff));
             minus10b[31] = 0xf6; // -10
             try helpers.push_bytes(allocator, &buf, &minus10b); // push a=-10
             try helpers.push_u8(allocator, &buf, 0x03); // push b=3 (top)
@@ -167,14 +167,14 @@ pub fn build_bytecode(allocator: std.mem.Allocator, opcode: u8) ![]u8 {
         },
         0x12 => { // SLT
             try helpers.push_u8(allocator, &buf, 0x01);
-            var neg2: [32]u8 = [_]u8{0xff} ** 32;
+            var neg2: [32]u8 = @as([32]u8, @splat(0xff));
             neg2[31] = 0xfe; // -2
             try helpers.push_bytes(allocator, &buf, &neg2);
             try buf.append(allocator, 0x12);
             try helpers.ret_top32(allocator, &buf);
         },
         0x13 => { // SGT
-            var neg2b: [32]u8 = [_]u8{0xff} ** 32;
+            var neg2b: [32]u8 = @as([32]u8, @splat(0xff));
             neg2b[31] = 0xfe; // -2
             try helpers.push_bytes(allocator, &buf, &neg2b);
             try helpers.push_u8(allocator, &buf, 0x01);
@@ -234,7 +234,7 @@ pub fn build_bytecode(allocator: std.mem.Allocator, opcode: u8) ![]u8 {
             try helpers.ret_top32(allocator, &buf);
         },
         0x1d => { // SAR
-            var neg16: [32]u8 = [_]u8{0xff} ** 32;
+            var neg16: [32]u8 = @as([32]u8, @splat(0xff));
             neg16[31] = 0xf0; // -16
             try helpers.push_bytes(allocator, &buf, &neg16); // value to shift
             try helpers.push_u8(allocator, &buf, 0x03); // shift amount (top)

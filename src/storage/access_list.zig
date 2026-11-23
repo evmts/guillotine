@@ -11,10 +11,11 @@ pub fn createAccessList(comptime config: AccessListConfig) type {
         const Self = @This();
         /// Warm addresses - addresses that have been accessed
         /// Using ArrayHashMap for better cache locality
-        addresses: std.array_hash_map.ArrayHashMap(Address, void, std.array_hash_map.AutoContext(Address), false),
+        allocator: std.mem.Allocator,
+        addresses: std.array_hash_map.Auto(Address, void),
         /// Warm storage slots - storage slots that have been accessed
         /// Using ArrayHashMap for better cache locality
-        storage_slots: std.array_hash_map.ArrayHashMap(StorageKey, void, StorageKeyContext, false),
+        storage_slots: std.array_hash_map.Custom(StorageKey, void, StorageKeyContext, false),
 
         // Gas costs from configuration
         pub const COLD_ACCOUNT_ACCESS_COST: u64 = config.cold_account_access_cost;
@@ -45,14 +46,15 @@ pub fn createAccessList(comptime config: AccessListConfig) type {
 
         pub fn init(allocator: std.mem.Allocator) Self {
             return Self{
-                .addresses = std.array_hash_map.ArrayHashMap(Address, void, std.array_hash_map.AutoContext(Address), false).init(allocator),
-                .storage_slots = std.array_hash_map.ArrayHashMap(StorageKey, void, StorageKeyContext, false).init(allocator),
+                .allocator = allocator,
+                .addresses = .empty,
+                .storage_slots = .empty,
             };
         }
 
         pub fn deinit(self: *Self) void {
-            self.addresses.deinit();
-            self.storage_slots.deinit();
+            self.addresses.deinit(self.allocator);
+            self.storage_slots.deinit(self.allocator);
         }
 
         /// Clear all access lists for a new transaction
@@ -64,7 +66,7 @@ pub fn createAccessList(comptime config: AccessListConfig) type {
         /// Mark an address as accessed and return the gas cost
         /// Returns COLD_ACCOUNT_ACCESS_COST if first access, WARM_ACCOUNT_ACCESS_COST if already accessed
         pub fn access_address(self: *Self, address: Address) !u64 {
-            const result = try self.addresses.getOrPut(address);
+            const result = try self.addresses.getOrPut(self.allocator, address);
             if (result.found_existing) {
                 return WARM_ACCOUNT_ACCESS_COST;
             }
@@ -75,7 +77,7 @@ pub fn createAccessList(comptime config: AccessListConfig) type {
         /// Returns COLD_SLOAD_COST if first access, WARM_SLOAD_COST if already accessed
         pub fn access_storage_slot(self: *Self, address: Address, slot: config.SlotType) !u64 {
             const key = StorageKey{ .address = address, .slot = slot };
-            const result = try self.storage_slots.getOrPut(key);
+            const result = try self.storage_slots.getOrPut(self.allocator, key);
             if (result.found_existing) {
                 return WARM_SLOAD_COST;
             }
@@ -97,7 +99,7 @@ pub fn createAccessList(comptime config: AccessListConfig) type {
         /// This is used to warm the tx.origin, coinbase, and transaction target
         pub fn pre_warm_addresses(self: *Self, addresses: []const Address) !void {
             for (addresses) |address| {
-                const result = try self.addresses.getOrPut(address);
+                const result = try self.addresses.getOrPut(self.allocator, address);
                 // Ensure the compiler doesn't optimize away the operation
                 std.mem.doNotOptimizeAway(&result);
             }
@@ -105,7 +107,9 @@ pub fn createAccessList(comptime config: AccessListConfig) type {
 
         /// Clone the access list
         pub fn clone(self: *const Self) !Self {
-            return Self{ .addresses = try self.addresses.clone(), .storage_slots = try self.storage_slots.clone() };
+            var addresses = try self.addresses.clone(self.allocator);
+            errdefer addresses.deinit(self.allocator);
+            return Self{ .allocator = self.allocator, .addresses = addresses, .storage_slots = try self.storage_slots.clone(self.allocator) };
         }
     };
 }
@@ -124,7 +128,7 @@ test "AccessList - address access tracking" {
     var access_list = AccessList.init(testing.allocator);
     defer access_list.deinit();
 
-    const test_address = Address{ .bytes = [_]u8{1} ** 20 };
+    const test_address = Address{ .bytes = @as([20]u8, @splat(1)) };
 
     // First access should be cold
     const cost1 = try access_list.access_address(test_address);
@@ -137,7 +141,7 @@ test "AccessList - address access tracking" {
     // Check warmth
     try testing.expect(access_list.is_address_warm(test_address));
 
-    const cold_address = Address{ .bytes = [_]u8{2} ** 20 };
+    const cold_address = Address{ .bytes = @as([20]u8, @splat(2)) };
     try testing.expect(!access_list.is_address_warm(cold_address));
 }
 
@@ -145,7 +149,7 @@ test "AccessList - storage slot access tracking" {
     var access_list = AccessList.init(testing.allocator);
     defer access_list.deinit();
 
-    const test_address = Address{ .bytes = [_]u8{1} ** 20 };
+    const test_address = Address{ .bytes = @as([20]u8, @splat(1)) };
     const slot1: u256 = 42;
     const slot2: u256 = 100;
 
@@ -173,8 +177,8 @@ test "AccessList - pre-warming addresses" {
 
     const addresses = [_]Address{
         primitives.ZERO_ADDRESS,
-        Address{ .bytes = [_]u8{1} ** 20 },
-        Address{ .bytes = [_]u8{2} ** 20 },
+        Address{ .bytes = @as([20]u8, @splat(1)) },
+        Address{ .bytes = @as([20]u8, @splat(2)) },
     };
 
     try access_list.pre_warm_addresses(&addresses);
@@ -190,7 +194,7 @@ test "AccessList - clear functionality" {
     var access_list = AccessList.init(testing.allocator);
     defer access_list.deinit();
 
-    const test_address = Address{ .bytes = [_]u8{1} ** 20 };
+    const test_address = Address{ .bytes = @as([20]u8, @splat(1)) };
     const slot: u256 = 42;
 
     // Access address and storage slot
@@ -220,7 +224,7 @@ test "AccessList - custom configuration" {
     var access_list = CustomAccessList.init(testing.allocator);
     defer access_list.deinit();
 
-    const test_address = Address{ .bytes = [_]u8{1} ** 20 };
+    const test_address = Address{ .bytes = @as([20]u8, @splat(1)) };
     const slot: u128 = 42;
 
     // Test custom gas costs
@@ -232,10 +236,10 @@ test "AccessList - custom configuration" {
 }
 
 // Tests from access_list_test.zig
-const ZERO_ADDRESS = Address{ .bytes = [_]u8{0} ** 20 };
-const TEST_ADDRESS_1 = Address{ .bytes = [_]u8{1} ** 20 };
-const TEST_ADDRESS_2 = Address{ .bytes = [_]u8{2} ** 20 };
-const TEST_ADDRESS_3 = Address{ .bytes = [_]u8{3} ** 20 };
+const ZERO_ADDRESS = Address{ .bytes = @as([20]u8, @splat(0)) };
+const TEST_ADDRESS_1 = Address{ .bytes = @as([20]u8, @splat(1)) };
+const TEST_ADDRESS_2 = Address{ .bytes = @as([20]u8, @splat(2)) };
+const TEST_ADDRESS_3 = Address{ .bytes = @as([20]u8, @splat(3)) };
 
 test "EIP-2929: warm/cold access - BALANCE opcode gas costs" {
     const allocator = testing.allocator;
@@ -250,7 +254,7 @@ test "EIP-2929: warm/cold access - BALANCE opcode gas costs" {
         .gas_limit = 30_000_000,
         .base_fee = 10,
         .coinbase = ZERO_ADDRESS,
-        .prev_randao = [_]u8{1} ** 32,
+        .prev_randao = @as([32]u8, @splat(1)),
     };
 
     const tx_context = @import("../block/transaction_context.zig").TransactionContext{
@@ -268,8 +272,8 @@ test "EIP-2929: warm/cold access - BALANCE opcode gas costs" {
     const account1: @import("database_interface_account.zig").Account = .{
         .nonce = 0,
         .balance = 1000,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     };
     try db.set_account(TEST_ADDRESS_2.bytes, account1);
 
@@ -295,7 +299,7 @@ test "EIP-2929: warm/cold access - SLOAD opcode gas costs" {
         .gas_limit = 30_000_000,
         .base_fee = 10,
         .coinbase = ZERO_ADDRESS,
-        .prev_randao = [_]u8{1} ** 32,
+        .prev_randao = @as([32]u8, @splat(1)),
     };
 
     const tx_context = @import("../block/transaction_context.zig").TransactionContext{
@@ -333,7 +337,7 @@ test "EIP-2929: transaction pre-warming" {
         .gas_limit = 30_000_000,
         .base_fee = 10,
         .coinbase = TEST_ADDRESS_3,
-        .prev_randao = [_]u8{1} ** 32,
+        .prev_randao = @as([32]u8, @splat(1)),
     };
 
     const tx_context = @import("../block/transaction_context.zig").TransactionContext{
@@ -378,7 +382,7 @@ test "EIP-2929: SELFBALANCE always warm" {
         .gas_limit = 30_000_000,
         .base_fee = 10,
         .coinbase = ZERO_ADDRESS,
-        .prev_randao = [_]u8{1} ** 32,
+        .prev_randao = @as([32]u8, @splat(1)),
     };
 
     const tx_context = @import("../block/transaction_context.zig").TransactionContext{
@@ -401,7 +405,7 @@ test "EIP-2929: SELFBALANCE always warm" {
         .nonce = 0,
         .balance = 0,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     };
     try db.set_account(contract_address.bytes, acct);
 
@@ -426,7 +430,7 @@ test "EIP-2929: access list cleared between transactions" {
         .gas_limit = 30_000_000,
         .base_fee = 10,
         .coinbase = ZERO_ADDRESS,
-        .prev_randao = [_]u8{1} ** 32,
+        .prev_randao = @as([32]u8, @splat(1)),
     };
 
     const tx_context = @import("../block/transaction_context.zig").TransactionContext{
@@ -485,7 +489,7 @@ test "AccessList - memory stress test with many storage slots" {
     var access_list = AccessList.init(testing.allocator);
     defer access_list.deinit();
 
-    const test_address = Address{ .bytes = [_]u8{1} ** 20 };
+    const test_address = Address{ .bytes = @as([20]u8, @splat(1)) };
 
     // Test with many unique storage slots
     for (0..1000) |i| {
@@ -507,7 +511,7 @@ test "AccessList - boundary values for storage slots" {
     var access_list = AccessList.init(testing.allocator);
     defer access_list.deinit();
 
-    const test_address = Address{ .bytes = [_]u8{1} ** 20 };
+    const test_address = Address{ .bytes = @as([20]u8, @splat(1)) };
 
     // Test boundary values
     const boundary_slots = [_]u256{ 
@@ -539,8 +543,8 @@ test "AccessList - duplicate pre-warming should not affect behavior" {
     defer access_list.deinit();
 
     const addresses = [_]Address{
-        Address{ .bytes = [_]u8{1} ** 20 },
-        Address{ .bytes = [_]u8{2} ** 20 },
+        Address{ .bytes = @as([20]u8, @splat(1)) },
+        Address{ .bytes = @as([20]u8, @splat(2)) },
     };
 
     // Pre-warm once
@@ -553,22 +557,22 @@ test "AccessList - duplicate pre-warming should not affect behavior" {
 
     // Pre-warm again with overlapping addresses
     const overlapping_addresses = [_]Address{
-        Address{ .bytes = [_]u8{2} ** 20 },
-        Address{ .bytes = [_]u8{3} ** 20 },
+        Address{ .bytes = @as([20]u8, @splat(2)) },
+        Address{ .bytes = @as([20]u8, @splat(3)) },
     };
 
     try access_list.pre_warm_addresses(&overlapping_addresses);
 
     // Verify behavior is still correct
-    try testing.expect(access_list.is_address_warm(Address{ .bytes = [_]u8{1} ** 20 }));
-    try testing.expect(access_list.is_address_warm(Address{ .bytes = [_]u8{2} ** 20 }));
-    try testing.expect(access_list.is_address_warm(Address{ .bytes = [_]u8{3} ** 20 }));
+    try testing.expect(access_list.is_address_warm(Address{ .bytes = @as([20]u8, @splat(1)) }));
+    try testing.expect(access_list.is_address_warm(Address{ .bytes = @as([20]u8, @splat(2)) }));
+    try testing.expect(access_list.is_address_warm(Address{ .bytes = @as([20]u8, @splat(3)) }));
 
     // All should return warm access cost
     for ([_]Address{
-        Address{ .bytes = [_]u8{1} ** 20 },
-        Address{ .bytes = [_]u8{2} ** 20 },
-        Address{ .bytes = [_]u8{3} ** 20 },
+        Address{ .bytes = @as([20]u8, @splat(1)) },
+        Address{ .bytes = @as([20]u8, @splat(2)) },
+        Address{ .bytes = @as([20]u8, @splat(3)) },
     }) |address| {
         const cost = try access_list.access_address(address);
         try testing.expectEqual(AccessList.WARM_ACCOUNT_ACCESS_COST, cost);
@@ -579,8 +583,8 @@ test "AccessList - storage slot collision resistance" {
     var access_list = AccessList.init(testing.allocator);
     defer access_list.deinit();
 
-    const address1 = Address{ .bytes = [_]u8{1} ** 20 };
-    const address2 = Address{ .bytes = [_]u8{2} ** 20 };
+    const address1 = Address{ .bytes = @as([20]u8, @splat(1)) };
+    const address2 = Address{ .bytes = @as([20]u8, @splat(2)) };
     const slot: u256 = 42;
 
     // Access same slot on different addresses
@@ -611,16 +615,16 @@ test "AccessList - clear preserves capacity" {
     }
 
     // Check that many entries are warm
-    try testing.expect(access_list.is_address_warm(Address{ .bytes = std.mem.toBytes(@as(u160, 50)) ++ [_]u8{0} ** 12 }));
+    try testing.expect(access_list.is_address_warm(Address{ .bytes = std.mem.toBytes(@as(u160, 50)) ++ @as([12]u8, @splat(0)) }));
 
     // Clear should preserve capacity but remove entries
     access_list.clear();
 
     // All entries should be cold again
-    try testing.expect(!access_list.is_address_warm(Address{ .bytes = std.mem.toBytes(@as(u160, 50)) ++ [_]u8{0} ** 12 }));
+    try testing.expect(!access_list.is_address_warm(Address{ .bytes = std.mem.toBytes(@as(u160, 50)) ++ @as([12]u8, @splat(0)) }));
 
     // But accessing new entries should still work efficiently
-    const new_address = Address{ .bytes = [_]u8{0xFF} ** 20 };
+    const new_address = Address{ .bytes = @as([20]u8, @splat(0xFF)) };
     const cost = try access_list.access_address(new_address);
     try testing.expectEqual(AccessList.COLD_ACCOUNT_ACCESS_COST, cost);
 }
@@ -629,7 +633,7 @@ test "AccessList - zero address handling" {
     var access_list = AccessList.init(testing.allocator);
     defer access_list.deinit();
 
-    const zero_address = Address{ .bytes = [_]u8{0} ** 20 };
+    const zero_address = Address{ .bytes = @as([20]u8, @splat(0)) };
 
     // Zero address should behave like any other address
     const cost1 = try access_list.access_address(zero_address);
@@ -662,7 +666,7 @@ test "AccessList - custom config validation" {
     var access_list = AccessList64.init(testing.allocator);
     defer access_list.deinit();
 
-    const test_address = Address{ .bytes = [_]u8{1} ** 20 };
+    const test_address = Address{ .bytes = @as([20]u8, @splat(1)) };
     const slot: u64 = std.math.maxInt(u64);
 
     // Test with u64 slot type
@@ -683,7 +687,7 @@ test "AccessList - empty pre-warm list" {
     try access_list.pre_warm_addresses(empty_addresses);
 
     // State should remain unchanged
-    const test_address = Address{ .bytes = [_]u8{1} ** 20 };
+    const test_address = Address{ .bytes = @as([20]u8, @splat(1)) };
     try testing.expect(!access_list.is_address_warm(test_address));
     
     const cost = try access_list.access_address(test_address);
@@ -711,7 +715,7 @@ test "EIP-2929 - SLOAD multiple slots warm/cold pattern" {
         .gas_limit = 30_000_000,
         .base_fee = 10,
         .coinbase = ZERO_ADDRESS,
-        .prev_randao = [_]u8{1} ** 32,
+        .prev_randao = @as([32]u8, @splat(1)),
     };
 
     const tx_context = TransactionContext{
@@ -725,7 +729,7 @@ test "EIP-2929 - SLOAD multiple slots warm/cold pattern" {
     var evm = try Evm(.{}).init(allocator, &db, block_info, tx_context, 20, ZERO_ADDRESS, Hardfork.BERLIN);
     defer evm.deinit();
 
-    const contract_address = Address{ .bytes = [_]u8{0x12} ** 20 };
+    const contract_address = Address{ .bytes = @as([20]u8, @splat(0x12)) };
 
     // Test multiple slots
     const slots = [_]u256{ 0, 1, 100, 0xFFFF, std.math.maxInt(u256) };
@@ -760,7 +764,7 @@ test "EIP-2929 - SSTORE warm/cold access patterns" {
         .gas_limit = 30_000_000,
         .base_fee = 10,
         .coinbase = ZERO_ADDRESS,
-        .prev_randao = [_]u8{1} ** 32,
+        .prev_randao = @as([32]u8, @splat(1)),
     };
 
     const tx_context = TransactionContext{
@@ -774,7 +778,7 @@ test "EIP-2929 - SSTORE warm/cold access patterns" {
     var evm = try Evm(.{}).init(allocator, &db, block_info, tx_context, 20, ZERO_ADDRESS, Hardfork.BERLIN);
     defer evm.deinit();
 
-    const contract_address = Address{ .bytes = [_]u8{0x12} ** 20 };
+    const contract_address = Address{ .bytes = @as([20]u8, @splat(0x12)) };
     const slot: u256 = 42;
 
     // First SSTORE access to a slot - storage slot should become warm after access
@@ -810,7 +814,7 @@ test "EIP-2929 - Cross-opcode warm address sharing" {
     var evm = try Evm(.{}).init(allocator, &db, block_info, context, 0, ZERO_ADDRESS, Hardfork.BERLIN);
     defer evm.deinit();
 
-    const test_address = Address{ .bytes = [_]u8{0xAB} ** 20 };
+    const test_address = Address{ .bytes = @as([20]u8, @splat(0xAB)) };
 
     // BALANCE accesses the address - should be cold
     const balance_cost = try evm.access_address(test_address);
@@ -836,22 +840,22 @@ test "EIP-2929 - CALL warm/cold recipient costs" {
     defer db.deinit();
 
     // Set up accounts with balance for calls
-    const caller_address = Address{ .bytes = [_]u8{0x01} ** 20 };
-    const recipient1 = Address{ .bytes = [_]u8{0x02} ** 20 };
-    const recipient2 = Address{ .bytes = [_]u8{0x03} ** 20 };
+    const caller_address = Address{ .bytes = @as([20]u8, @splat(0x01)) };
+    const recipient1 = Address{ .bytes = @as([20]u8, @splat(0x02)) };
+    const recipient2 = Address{ .bytes = @as([20]u8, @splat(0x03)) };
 
     try db.set_account(caller_address.bytes, .{
         .nonce = 0,
         .balance = 1_000_000_000_000_000_000, // 1 ETH
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     });
 
     try db.set_account(recipient1.bytes, .{
         .nonce = 0,
         .balance = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     });
 
     const block_info = BlockInfo.init();
@@ -883,7 +887,7 @@ test "EIP-2929 - Self-referential operations (BALANCE on self)" {
     var db = Database.init(allocator);
     defer db.deinit();
 
-    const contract_address = Address{ .bytes = [_]u8{0x42} ** 20 };
+    const contract_address = Address{ .bytes = @as([20]u8, @splat(0x42)) };
     const block_info = BlockInfo.init();
     const context = TransactionContext{
         .gas_limit = 1_000_000,
@@ -921,15 +925,15 @@ test "EIP-2929 - Precompiled contract access costs" {
 
     // Precompiled contracts are at addresses 0x01 through 0x09
     const precompile_addresses = [_]Address{
-        Address{ .bytes = [_]u8{0} ** 19 ++ [_]u8{0x01} }, // ecrecover
-        Address{ .bytes = [_]u8{0} ** 19 ++ [_]u8{0x02} }, // sha256
-        Address{ .bytes = [_]u8{0} ** 19 ++ [_]u8{0x03} }, // ripemd160
-        Address{ .bytes = [_]u8{0} ** 19 ++ [_]u8{0x04} }, // identity
-        Address{ .bytes = [_]u8{0} ** 19 ++ [_]u8{0x05} }, // modexp
-        Address{ .bytes = [_]u8{0} ** 19 ++ [_]u8{0x06} }, // ecadd
-        Address{ .bytes = [_]u8{0} ** 19 ++ [_]u8{0x07} }, // ecmul
-        Address{ .bytes = [_]u8{0} ** 19 ++ [_]u8{0x08} }, // ecpairing
-        Address{ .bytes = [_]u8{0} ** 19 ++ [_]u8{0x09} }, // blake2f
+        Address{ .bytes = @as([19]u8, @splat(0)) ++ [_]u8{0x01} }, // ecrecover
+        Address{ .bytes = @as([19]u8, @splat(0)) ++ [_]u8{0x02} }, // sha256
+        Address{ .bytes = @as([19]u8, @splat(0)) ++ [_]u8{0x03} }, // ripemd160
+        Address{ .bytes = @as([19]u8, @splat(0)) ++ [_]u8{0x04} }, // identity
+        Address{ .bytes = @as([19]u8, @splat(0)) ++ [_]u8{0x05} }, // modexp
+        Address{ .bytes = @as([19]u8, @splat(0)) ++ [_]u8{0x06} }, // ecadd
+        Address{ .bytes = @as([19]u8, @splat(0)) ++ [_]u8{0x07} }, // ecmul
+        Address{ .bytes = @as([19]u8, @splat(0)) ++ [_]u8{0x08} }, // ecpairing
+        Address{ .bytes = @as([19]u8, @splat(0)) ++ [_]u8{0x09} }, // blake2f
     };
 
     // Precompiles should follow same warm/cold rules
@@ -958,7 +962,7 @@ test "EIP-2929 - Storage slots with maximum values" {
     var evm = try Evm(.{}).init(allocator, &db, block_info, context, 0, ZERO_ADDRESS, Hardfork.BERLIN);
     defer evm.deinit();
 
-    const contract_address = Address{ .bytes = [_]u8{0xEE} ** 20 };
+    const contract_address = Address{ .bytes = @as([20]u8, @splat(0xEE)) };
 
     // Test with maximum u256 slot
     const max_slot = std.math.maxInt(u256);

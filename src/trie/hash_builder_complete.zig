@@ -761,7 +761,7 @@ pub const HashBuilder = struct {
                     if (new_branch.children_mask.is_set(@intCast(key))) {
                         const child = new_branch.children[key].?;
                         switch (child) {
-                            .Raw => |_| {
+                            .Raw => {
                                 if (nibbles.len == 1) {
                                     // Delete this child
                                     new_branch.children[key].?.deinit(self.allocator);

@@ -165,7 +165,7 @@ pub fn fuzzModExpOracle(_: void, input: []const u8) !void {
     const exp_len: usize = input[1] % 17;
     const mod_len: usize = input[2] % 33;
 
-    var payload = std.ArrayList(u8){};
+    var payload = std.ArrayList(u8).empty;
     defer payload.deinit(allocator);
 
     // 96-byte length header

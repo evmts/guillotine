@@ -231,7 +231,7 @@ test "Frame handles gas at i32 max boundary correctly" {
     const bytecode = [_]u8{@intFromEnum(Opcode.STOP)};
     var noop_host = NoOpHost{};
     const host = Host.init(&noop_host);
-    var frame = try F.init(allocator, &bytecode, std.math.maxInt(i32), void{}, host);
+    var frame = try F.init(allocator, &bytecode, std.math.maxInt(i32), {}, host);
     defer frame.deinit(allocator);
     
     try std.testing.expectEqual(@as(i32, std.math.maxInt(i32)), frame.gas_remaining);
@@ -255,7 +255,7 @@ test "Frame handles gas at i64 boundary correctly" {
     const bytecode = [_]u8{@intFromEnum(Opcode.STOP)};
     var noop_host = NoOpHost{};
     const host = Host.init(&noop_host);
-    var frame = try F.init(allocator, &bytecode, @as(u64, std.math.maxInt(i32)) + 1000, void{}, host);
+    var frame = try F.init(allocator, &bytecode, @as(u64, std.math.maxInt(i32)) + 1000, {}, host);
     defer frame.deinit(allocator);
     
     try std.testing.expectEqual(@as(i64, @as(u64, std.math.maxInt(i32)) + 1000), frame.gas_remaining);
@@ -268,7 +268,7 @@ test "Gas consumption when near i32 min value" {
     const bytecode = [_]u8{@intFromEnum(Opcode.STOP)};
     var noop_host = NoOpHost{};
     const host = Host.init(&noop_host);
-    var frame = try F.init(allocator, &bytecode, 100, void{}, host);
+    var frame = try F.init(allocator, &bytecode, 100, {}, host);
     defer frame.deinit(allocator);
     
     // Consume gas to bring it near zero
@@ -294,7 +294,7 @@ test "Safe casting from u64 gas costs to GasType" {
     const bytecode = [_]u8{@intFromEnum(Opcode.STOP)};
     var noop_host = NoOpHost{};
     const host = Host.init(&noop_host);
-    var frame32 = try F32.init(allocator, &bytecode, 500_000, void{}, host);
+    var frame32 = try F32.init(allocator, &bytecode, 500_000, {}, host);
     defer frame32.deinit(allocator);
     
     // Test casting various gas costs
@@ -325,7 +325,7 @@ test "Memory expansion gas calculation doesn't overflow" {
     const bytecode = [_]u8{@intFromEnum(Opcode.STOP)};
     var noop_host = NoOpHost{};
     const host = Host.init(&noop_host);
-    var frame = try F.init(allocator, &bytecode, 1_000_000, void{}, host);
+    var frame = try F.init(allocator, &bytecode, 1_000_000, {}, host);
     defer frame.deinit(allocator);
     
     // Test memory expansion with large offsets
@@ -728,7 +728,7 @@ test "Gas refund handling with signed gas types" {
     const bytecode = [_]u8{@intFromEnum(Opcode.STOP)};
     var noop_host = NoOpHost{};
     const host = Host.init(&noop_host);
-    var frame = try F.init(allocator, &bytecode, 100000, void{}, host);
+    var frame = try F.init(allocator, &bytecode, 100000, {}, host);
     defer frame.deinit(allocator);
     
     // Consume some gas

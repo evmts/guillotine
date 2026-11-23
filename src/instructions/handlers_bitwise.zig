@@ -118,9 +118,9 @@ pub fn Handlers(FrameType: type) type {
             self.beforeInstruction(.SAR, cursor);
             const shift = self.stack.pop_unsafe(); // Top of stack - shift amount
             const value = self.stack.peek_unsafe(); // Second from top - value to shift
-            const value_signed = @as(std.meta.Int(.signed, @bitSizeOf(WordType)), @bitCast(value));
+            const value_signed = @as(@Int(.signed, @bitSizeOf(WordType)), @bitCast(value));
             const result = if (shift >= 256) blk: {
-                break :blk if (value_signed < 0) @as(WordType, @bitCast(@as(std.meta.Int(.signed, @bitSizeOf(WordType)), -1))) else 0;
+                break :blk if (value_signed < 0) @as(WordType, @bitCast(@as(@Int(.signed, @bitSizeOf(WordType)), -1))) else 0;
             } else blk: {
                 break :blk @as(WordType, @bitCast(value_signed >> @intCast(shift)));
             };

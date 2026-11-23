@@ -8,7 +8,7 @@ const LabelInfo = struct {
 
 // Replace <contract:...> and <eoa:...> placeholders with hex addresses
 fn replacePlaceholders(allocator: std.mem.Allocator, code: []const u8) ![]u8 {
-    var result = std.ArrayList(u8){};
+    var result = std.ArrayList(u8).empty;
     defer result.deinit(allocator);
 
     var i: usize = 0;
@@ -112,7 +112,7 @@ fn parseLllExpression(allocator: std.mem.Allocator, code: []const u8) !LllExpr {
     // Check if this is a list (starts with '(')
     if (code[pos] == '(') {
         pos += 1; // Skip '('
-        var items = std.ArrayList(LllExpr){};
+        var items = std.ArrayList(LllExpr).empty;
         errdefer {
             for (items.items) |*item| {
                 item.deinit(allocator);
@@ -151,7 +151,7 @@ fn parseLllExpressionAt(allocator: std.mem.Allocator, code: []const u8, pos: *us
     // Check if this is a list
     if (code[pos.*] == '(') {
         pos.* += 1; // Skip '('
-        var items = std.ArrayList(LllExpr){};
+        var items = std.ArrayList(LllExpr).empty;
         errdefer {
             for (items.items) |*item| {
                 item.deinit(allocator);
@@ -236,7 +236,7 @@ fn compileLllExpr(allocator: std.mem.Allocator, expr: LllExpr, labels: *std.Stri
     switch (expr) {
         .opcode => |name| {
             // Single opcode
-            var bytecode = std.ArrayList(u8){};
+            var bytecode = std.ArrayList(u8).empty;
             defer bytecode.deinit(allocator);
             const opcode = try getOpcode(name);
             try bytecode.append(allocator, opcode);
@@ -248,7 +248,7 @@ fn compileLllExpr(allocator: std.mem.Allocator, expr: LllExpr, labels: *std.Stri
         },
         .mload => |index| {
             // @x compiles to: PUSH index, MLOAD
-            var bytecode = std.ArrayList(u8){};
+            var bytecode = std.ArrayList(u8).empty;
             defer bytecode.deinit(allocator);
             const push_bytes = try compilePushValue(allocator, index);
             defer allocator.free(push_bytes);
@@ -266,7 +266,7 @@ fn compileLllExpr(allocator: std.mem.Allocator, expr: LllExpr, labels: *std.Stri
 
                 // Handle (seq ...) - sequential execution
                 if (std.mem.eql(u8, op_name, "seq")) {
-                    var bytecode = std.ArrayList(u8){};
+                    var bytecode = std.ArrayList(u8).empty;
                     defer bytecode.deinit(allocator);
 
                     // Compile each expression in sequence
@@ -303,7 +303,7 @@ fn compileLllExpr(allocator: std.mem.Allocator, expr: LllExpr, labels: *std.Stri
                     const inner_bytecode = try compileLllExpr(allocator, items[1], &labels_map, 0);
                     defer allocator.free(inner_bytecode);
 
-                    var bytecode = std.ArrayList(u8){};
+                    var bytecode = std.ArrayList(u8).empty;
                     defer bytecode.deinit(allocator);
 
                     // Push the bytecode length
@@ -340,7 +340,7 @@ fn compileLllExpr(allocator: std.mem.Allocator, expr: LllExpr, labels: *std.Stri
                 }
 
                 // Regular opcode with arguments - compile in REVERSE order
-                var bytecode = std.ArrayList(u8){};
+                var bytecode = std.ArrayList(u8).empty;
                 defer bytecode.deinit(allocator);
 
                 // Push arguments in reverse order (prefix -> postfix)
@@ -374,7 +374,7 @@ fn compileLllExpr(allocator: std.mem.Allocator, expr: LllExpr, labels: *std.Stri
 
 // Helper to compile a PUSH for a value
 fn compilePushValue(allocator: std.mem.Allocator, value: u256) ![]u8 {
-    var bytecode = std.ArrayList(u8){};
+    var bytecode = std.ArrayList(u8).empty;
     defer bytecode.deinit(allocator);
 
     // For addresses (20 bytes), use PUSH20
@@ -436,7 +436,7 @@ fn compileComplexExpression(allocator: std.mem.Allocator, code: []const u8) ![]u
         return compileSingleExpression(allocator, trimmed_code);
     }
 
-    var bytecode = std.ArrayList(u8){};
+    var bytecode = std.ArrayList(u8).empty;
     defer bytecode.deinit(allocator);
 
     var labels = std.StringHashMap(LabelInfo).init(allocator);
@@ -489,7 +489,7 @@ fn compileComplexExpression(allocator: std.mem.Allocator, code: []const u8) ![]u
                         if (!gop.found_existing) {
                             gop.value_ptr.* = LabelInfo{
                                 .position = bytecode.items.len,
-                                .references = std.ArrayList(usize){},
+                                .references = std.ArrayList(usize).empty,
                             };
                         } else {
                             gop.value_ptr.position = bytecode.items.len;
@@ -649,7 +649,7 @@ fn compileComplexExpression(allocator: std.mem.Allocator, code: []const u8) ![]u
 // Compile a single expression (no wrapper)
 fn compileSingleExpression(allocator: std.mem.Allocator, code: []const u8) ![]u8 {
     // Tokenize the assembly code
-    var tokens = std.ArrayList([]const u8){};
+    var tokens = std.ArrayList([]const u8).empty;
     defer tokens.deinit(allocator);
 
     var it = std.mem.tokenizeAny(u8, code, " \t\n\r()");
@@ -658,7 +658,7 @@ fn compileSingleExpression(allocator: std.mem.Allocator, code: []const u8) ![]u8
     }
 
     // Compile tokens to bytecode
-    var bytecode = std.ArrayList(u8){};
+    var bytecode = std.ArrayList(u8).empty;
     defer bytecode.deinit(allocator);
 
     var i: usize = 0;

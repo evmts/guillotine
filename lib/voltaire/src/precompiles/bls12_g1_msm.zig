@@ -48,7 +48,7 @@ test "bls12_g1_msm - gas cost with one pair" {
     const allocator = testing.allocator;
 
     // One point-scalar pair
-    var input: [160]u8 = [_]u8{0} ** 160;
+    var input: [160]u8 = @as([160]u8, @splat(0));
     const k: usize = 1;
     const discount = utils.msmDiscountG1(k);
     const expected_gas = (BASE_GAS * k * discount) / 1000;
@@ -64,7 +64,7 @@ test "bls12_g1_msm - gas cost with two pairs" {
     const allocator = testing.allocator;
 
     // Two point-scalar pairs
-    var input: [320]u8 = [_]u8{0} ** 320;
+    var input: [320]u8 = @as([320]u8, @splat(0));
     const k: usize = 2;
     const discount = utils.msmDiscountG1(k);
     const expected_gas = (BASE_GAS * k * discount) / 1000;
@@ -80,7 +80,7 @@ test "bls12_g1_msm - gas cost with four pairs" {
     const allocator = testing.allocator;
 
     // Four point-scalar pairs
-    var input: [640]u8 = [_]u8{0} ** 640;
+    var input: [640]u8 = @as([640]u8, @splat(0));
     const k: usize = 4;
     const discount = utils.msmDiscountG1(k);
     const expected_gas = (BASE_GAS * k * discount) / 1000;
@@ -96,7 +96,7 @@ test "bls12_g1_msm - gas cost with eight pairs" {
     const allocator = testing.allocator;
 
     // Eight point-scalar pairs
-    var input: [1280]u8 = [_]u8{0} ** 1280;
+    var input: [1280]u8 = @as([1280]u8, @splat(0));
     const k: usize = 8;
     const discount = utils.msmDiscountG1(k);
     const expected_gas = (BASE_GAS * k * discount) / 1000;
@@ -112,7 +112,7 @@ test "bls12_g1_msm - gas cost with sixteen pairs" {
     const allocator = testing.allocator;
 
     // Sixteen point-scalar pairs
-    var input: [2560]u8 = [_]u8{0} ** 2560;
+    var input: [2560]u8 = @as([2560]u8, @splat(0));
     const k: usize = 16;
     const discount = utils.msmDiscountG1(k);
     const expected_gas = (BASE_GAS * k * discount) / 1000;
@@ -128,7 +128,7 @@ test "bls12_g1_msm - gas cost with thirty-two pairs" {
     const allocator = testing.allocator;
 
     // Thirty-two point-scalar pairs
-    var input: [5120]u8 = [_]u8{0} ** 5120;
+    var input: [5120]u8 = @as([5120]u8, @splat(0));
     const k: usize = 32;
     const discount = utils.msmDiscountG1(k);
     const expected_gas = (BASE_GAS * k * discount) / 1000;
@@ -144,7 +144,7 @@ test "bls12_g1_msm - gas cost with sixty-four pairs" {
     const allocator = testing.allocator;
 
     // Sixty-four point-scalar pairs
-    var input: [10240]u8 = [_]u8{0} ** 10240;
+    var input: [10240]u8 = @as([10240]u8, @splat(0));
     const k: usize = 64;
     const discount = utils.msmDiscountG1(k);
     const expected_gas = (BASE_GAS * k * discount) / 1000;
@@ -160,7 +160,7 @@ test "bls12_g1_msm - gas cost with one hundred twenty-eight pairs" {
     const allocator = testing.allocator;
 
     // One hundred twenty-eight point-scalar pairs
-    var input: [20480]u8 = [_]u8{0} ** 20480;
+    var input: [20480]u8 = @as([20480]u8, @splat(0));
     const k: usize = 128;
     const discount = utils.msmDiscountG1(k);
     const expected_gas = (BASE_GAS * k * discount) / 1000;
@@ -196,7 +196,7 @@ test "bls12_g1_msm - discount calculation validation" {
 test "bls12_g1_msm - out of gas error" {
     const allocator = testing.allocator;
 
-    var input: [160]u8 = [_]u8{0} ** 160;
+    var input: [160]u8 = @as([160]u8, @splat(0));
     const k: usize = 1;
     const discount = utils.msmDiscountG1(k);
     const required_gas = (BASE_GAS * k * discount) / 1000;
@@ -218,19 +218,19 @@ test "bls12_g1_msm - invalid input length not multiple of 160" {
 
     // Test with various invalid lengths
     {
-        var input: [159]u8 = [_]u8{0} ** 159;
+        var input: [159]u8 = @as([159]u8, @splat(0));
         const result = execute(allocator, &input, 1000000);
         try testing.expectError(error.InvalidInput, result);
     }
 
     {
-        var input: [161]u8 = [_]u8{0} ** 161;
+        var input: [161]u8 = @as([161]u8, @splat(0));
         const result = execute(allocator, &input, 1000000);
         try testing.expectError(error.InvalidInput, result);
     }
 
     {
-        var input: [320 + 80]u8 = [_]u8{0} ** 400;
+        var input: [320 + 80]u8 = @as([400]u8, @splat(0));
         const result = execute(allocator, &input, 1000000);
         try testing.expectError(error.InvalidInput, result);
     }
@@ -253,7 +253,7 @@ test "bls12_g1_msm - single point times scalar" {
         0xd0, 0x3c, 0xc7, 0x44, 0xa2, 0x88, 0x8a, 0xe4, 0x0c, 0xaa, 0x23, 0x29, 0x46, 0xc5, 0xe7, 0xe1,
     };
 
-    var input: [160]u8 = [_]u8{0} ** 160;
+    var input: [160]u8 = @as([160]u8, @splat(0));
     @memcpy(input[0..64], &g1_x);
     @memcpy(input[64..128], &g1_y);
     input[159] = 5; // scalar = 5
@@ -282,7 +282,7 @@ test "bls12_g1_msm - multiple points all at infinity" {
     const allocator = testing.allocator;
 
     // Four point-scalar pairs, all points at infinity
-    var input: [640]u8 = [_]u8{0} ** 640;
+    var input: [640]u8 = @as([640]u8, @splat(0));
     const k: usize = 4;
     const discount = utils.msmDiscountG1(k);
     const expected_gas = (BASE_GAS * k * discount) / 1000;
@@ -315,7 +315,7 @@ test "bls12_g1_msm - multiple points with zero scalars" {
     };
 
     // Two point-scalar pairs, both with generator but zero scalars
-    var input: [320]u8 = [_]u8{0} ** 320;
+    var input: [320]u8 = @as([320]u8, @splat(0));
     @memcpy(input[0..64], &g1_x);
     @memcpy(input[64..128], &g1_y);
     // First scalar remains 0
@@ -340,7 +340,7 @@ test "bls12_g1_msm - multiple points with zero scalars" {
 test "bls12_g1_msm - invalid point not on curve" {
     const allocator = testing.allocator;
 
-    var input: [160]u8 = [_]u8{0} ** 160;
+    var input: [160]u8 = @as([160]u8, @splat(0));
     // Set to arbitrary values that don't satisfy the curve equation
     input[63] = 1; // x = 1
     input[127] = 2; // y = 2
@@ -359,21 +359,21 @@ test "bls12_g1_msm - output size validation" {
 
     // Test with various numbers of pairs
     {
-        var input: [160]u8 = [_]u8{0} ** 160;
+        var input: [160]u8 = @as([160]u8, @splat(0));
         const result = try execute(allocator, &input, 1000000);
         defer result.deinit(allocator);
         try testing.expectEqual(@as(usize, 128), result.output.len);
     }
 
     {
-        var input: [640]u8 = [_]u8{0} ** 640;
+        var input: [640]u8 = @as([640]u8, @splat(0));
         const result = try execute(allocator, &input, 1000000);
         defer result.deinit(allocator);
         try testing.expectEqual(@as(usize, 128), result.output.len);
     }
 
     {
-        var input: [2560]u8 = [_]u8{0} ** 2560;
+        var input: [2560]u8 = @as([2560]u8, @splat(0));
         const result = try execute(allocator, &input, 1000000);
         defer result.deinit(allocator);
         try testing.expectEqual(@as(usize, 128), result.output.len);

@@ -36,7 +36,7 @@ pub const TransactionContext = struct {
 };
 
 test "TransactionContext creation and field access" {
-    const coinbase_addr = Address{ .bytes = [_]u8{0x01} ++ [_]u8{0x00} ** 19 };
+    const coinbase_addr = Address{ .bytes = [_]u8{0x01} ++ @as([19]u8, @splat(0x00)) };
 
     const tx_context = TransactionContext{
         .gas_limit = 21000,
@@ -55,7 +55,7 @@ test "TransactionContext creation and field access" {
 }
 
 test "TransactionContext with maximum values" {
-    const max_addr = Address{ .bytes = [_]u8{0xFF} ** 20 };
+    const max_addr = Address{ .bytes = @as([20]u8, @splat(0xFF)) };
     const max_tx_context = TransactionContext{
         .gas_limit = std.math.maxInt(u64),
         .coinbase = max_addr,
@@ -72,7 +72,7 @@ test "TransactionContext with maximum values" {
 }
 
 test "TransactionContext with zero values" {
-    const zero_addr = Address{ .bytes = [_]u8{0} ** 20 };
+    const zero_addr = Address{ .bytes = @as([20]u8, @splat(0)) };
     const zero_tx_context = TransactionContext{
         .gas_limit = 0,
         .coinbase = zero_addr,
@@ -85,9 +85,9 @@ test "TransactionContext with zero values" {
 }
 
 test "TransactionContext with blob data (EIP-4844)" {
-    const coinbase_addr = Address{ .bytes = [_]u8{0x01} ++ [_]u8{0x00} ** 19 };
-    const blob_hash1 = [_]u8{0x01} ** 32;
-    const blob_hash2 = [_]u8{0x02} ** 32;
+    const coinbase_addr = Address{ .bytes = [_]u8{0x01} ++ @as([19]u8, @splat(0x00)) };
+    const blob_hash1 = @as([32]u8, @splat(0x01));
+    const blob_hash2 = @as([32]u8, @splat(0x02));
     const blob_hashes = [_][32]u8{ blob_hash1, blob_hash2 };
 
     const blob_tx_context = TransactionContext{

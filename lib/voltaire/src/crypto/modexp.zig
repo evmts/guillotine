@@ -383,7 +383,7 @@ pub const ModExp = struct {
 
 test "ModExp gas schedules match EIP-198, EIP-2565 and EIP-7883 boundaries" {
     const Hardfork = @import("voltaire").Hardfork;
-    const head = [_]u8{0xff} ** 32;
+    const head = @as([32]u8, @splat(0xff));
     try std.testing.expectEqual(@as(u64, 13056), ModExp.calculateGas(32, 32, 32, &head, Hardfork.BYZANTIUM));
     try std.testing.expectEqual(@as(u64, 1360), ModExp.calculateGas(32, 32, 32, &head, Hardfork.PRAGUE));
     try std.testing.expectEqual(@as(u64, 4080), ModExp.calculateGas(32, 32, 32, &head, Hardfork.OSAKA));
@@ -498,14 +498,14 @@ test "modexp: large numbers - 2^255 mod 2^128" {
     const exp = [_]u8{0xFF};
 
     // mod = 2^128 = 0x100000000000000000000000000000000
-    const mod = [_]u8{1} ++ ([_]u8{0} ** 16);
+    const mod = [_]u8{1} ++ (@as([16]u8, @splat(0)));
 
     var output: [17]u8 = undefined;
 
     try unauditedModexp(allocator, &base, &exp, &mod, &output);
 
     // 2^255 is an exact multiple of 2^128; the remainder is zero.
-    const expected: [17]u8 = .{0} ** 17;
+    const expected: [17]u8 = @splat(0);
 
     try std.testing.expectEqualSlices(u8, &expected, &output);
 }
@@ -514,13 +514,18 @@ test "modexp: large base and modulus" {
     const allocator = std.testing.allocator;
 
     // base = 0xDEADBEEFDEADBEEFDEADBEEFDEADBEEF (16 bytes)
-    const base = [_]u8{ 0xDE, 0xAD, 0xBE, 0xEF } ** 4;
+    const base = comptime repeat: {
+        const pattern = [_]u8{ 0xDE, 0xAD, 0xBE, 0xEF };
+        var out: [4 * 4]u8 = undefined;
+        for (&out, 0..) |*byte, i| byte.* = pattern[i % pattern.len];
+        break :repeat out;
+    };
 
     // exp = 3
     const exp = [_]u8{3};
 
     // mod = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF (16 bytes)
-    const mod = [_]u8{0xFF} ** 16;
+    const mod = @as([16]u8, @splat(0xFF));
 
     var output: [16]u8 = undefined;
 
@@ -542,7 +547,7 @@ test "modexp: very large exponent" {
     const base = [_]u8{3};
 
     // exp = 0x010000000000000000 (2^64)
-    const exp = [_]u8{1} ++ ([_]u8{0} ** 8);
+    const exp = [_]u8{1} ++ (@as([8]u8, @splat(0)));
 
     // mod = 1000000007 (large prime)
     const mod = [_]u8{ 0x3B, 0x9A, 0xCA, 0x07 };
@@ -711,7 +716,7 @@ test "calculateAdjustedExponentLength: maximum bit width single byte" {
 
 test "calculateAdjustedExponentLength: maximum bit width 32 bytes" {
     const exp_len: usize = 32;
-    const exp_bytes = [_]u8{0xFF} ** 32;
+    const exp_bytes = @as([32]u8, @splat(0xFF));
     const adj_len = unaudited_calculateAdjustedExponentLength(exp_len, &exp_bytes);
     // First non-zero byte is 0xFF at index 0, bit length = 8
     // adj_len = (32 - 0 - 1) * 8 + 8 = 31 * 8 + 8 = 256
@@ -843,9 +848,9 @@ test "modexp: boundary at GAS_QUADRATIC_THRESHOLD" {
     const allocator = std.testing.allocator;
 
     // Test with 64-byte values (GAS_QUADRATIC_THRESHOLD)
-    const base = [_]u8{2} ++ ([_]u8{0} ** 63);
+    const base = [_]u8{2} ++ (@as([63]u8, @splat(0)));
     const exp = [_]u8{3};
-    const mod = [_]u8{0xFF} ++ ([_]u8{0xFF} ** 63);
+    const mod = [_]u8{0xFF} ++ (@as([63]u8, @splat(0xFF)));
     var output: [64]u8 = undefined;
 
     try unauditedModexp(allocator, &base, &exp, &mod, &output);
@@ -1002,7 +1007,7 @@ test "modexp: gas calculation with zero exponent" {
     const mod_len = 32;
     const exp_bytes = [_]u8{0};
 
-    const gas = ModExp.calculateGas(base_len, exp_len, mod_len, &exp_bytes, void{});
+    const gas = ModExp.calculateGas(base_len, exp_len, mod_len, &exp_bytes, {});
     // Should return minimum gas cost
     try std.testing.expectEqual(@as(u64, 200), gas);
 }
@@ -1013,7 +1018,7 @@ test "modexp: gas calculation with small inputs" {
     const mod_len = 1;
     const exp_bytes = [_]u8{1};
 
-    const gas = ModExp.calculateGas(base_len, exp_len, mod_len, &exp_bytes, void{});
+    const gas = ModExp.calculateGas(base_len, exp_len, mod_len, &exp_bytes, {});
     // Minimum gas cost
     try std.testing.expectEqual(@as(u64, 200), gas);
 }

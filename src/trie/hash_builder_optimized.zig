@@ -42,7 +42,7 @@ pub const HashBuilderOptimized = struct {
             .nodes = std.StringHashMap(TrieNode).init(allocator),
             .root_hash = null,
             .cache = NodeCache.init(allocator),
-            .nibble_buffer = std.ArrayList(u8){},
+            .nibble_buffer = std.ArrayList(u8).empty,
         };
     }
 

@@ -18,7 +18,7 @@ pub fn JumpTableBuilder(comptime FrameType: type, comptime DispatchType: type) t
 
         pub fn init(allocator: std.mem.Allocator) @This() {
             return .{
-                .entries = ArrayList(BuilderEntry, null){},
+                .entries = ArrayList(BuilderEntry, null).empty,
                 .allocator = allocator,
             };
         }

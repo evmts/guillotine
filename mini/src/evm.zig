@@ -136,7 +136,7 @@ pub fn Evm(comptime config: EvmConfig) type {
             return Self{
                 // Initialize all ArrayList fields to empty (not undefined)
                 // These will be properly reset by initTransactionState before use
-                .frames = std.ArrayList(FrameType){},
+                .frames = std.ArrayList(FrameType).empty,
                 .storage = Storage.init(arena_alloc, h, null),
                 .created_accounts = std.AutoHashMap(primitives.Address, void).init(arena_alloc),
                 .selfdestructed_accounts = std.AutoHashMap(primitives.Address, void).init(arena_alloc),
@@ -144,7 +144,7 @@ pub fn Evm(comptime config: EvmConfig) type {
                 .accounts = std.AutoHashMap(primitives.Address, AccountState).init(arena_alloc),
                 .access_list_manager = AccessListManager.init(arena_alloc),
                 .gas_refund = 0,
-                .balance_snapshot_stack = std.ArrayList(*std.AutoHashMap(primitives.Address, u256)){},
+                .balance_snapshot_stack = std.ArrayList(*std.AutoHashMap(primitives.Address, u256)).empty,
                 .hardfork = hardfork orelse Hardfork.DEFAULT,
                 .block_context = block_context orelse .{
                     .chain_id = 1,
@@ -166,7 +166,7 @@ pub fn Evm(comptime config: EvmConfig) type {
                 .opcode_overrides = config.opcode_overrides,
                 .precompile_overrides = config.precompile_overrides,
                 .async_executor = null, // Initialized when needed
-                .logs = std.ArrayList(call_result.Log){},
+                .logs = std.ArrayList(call_result.Log).empty,
             };
         }
 
@@ -213,13 +213,13 @@ pub fn Evm(comptime config: EvmConfig) type {
             // Clear existing HashMaps instead of creating new ones (allows pre-state setup)
             self.accounts.clearRetainingCapacity();
             self.access_list_manager = AccessListManager.init(arena_allocator);
-            self.frames = std.ArrayList(FrameType){};
+            self.frames = std.ArrayList(FrameType).empty;
             try self.frames.ensureTotalCapacity(arena_allocator, 16);
-            self.logs = std.ArrayList(call_result.Log){};
+            self.logs = std.ArrayList(call_result.Log).empty;
             self.created_accounts = std.AutoHashMap(primitives.Address, void).init(arena_allocator);
             self.selfdestructed_accounts = std.AutoHashMap(primitives.Address, void).init(arena_allocator);
             self.touched_accounts = std.AutoHashMap(primitives.Address, void).init(arena_allocator);
-            self.balance_snapshot_stack = std.ArrayList(*std.AutoHashMap(primitives.Address, u256)){};
+            self.balance_snapshot_stack = std.ArrayList(*std.AutoHashMap(primitives.Address, u256)).empty;
 
             // Set blob versioned hashes for EIP-4844
             // CRITICAL: Must copy blob hashes into arena to ensure correct lifetime
@@ -1236,7 +1236,7 @@ pub fn Evm(comptime config: EvmConfig) type {
                 // Restore storage on failure
                 // IMPORTANT: Identify slots to delete BEFORE restoring original_storage
                 // First, identify slots that were added during the call (exist in original_storage but not in snapshot)
-                var added_slots = std.ArrayList(StorageKey){};
+                var added_slots = std.ArrayList(StorageKey).empty;
                 added_slots.ensureTotalCapacity(self.arena.allocator(), 10) catch {
                     return makeFailure(self.arena.allocator(), 0);
                 };
@@ -1348,7 +1348,7 @@ pub fn Evm(comptime config: EvmConfig) type {
             if (frame.reverted) {
                 // IMPORTANT: Identify slots to delete BEFORE restoring original_storage
                 // First, identify slots that were added during the call (exist in original_storage but not in snapshot)
-                var added_slots = std.ArrayList(StorageKey){};
+                var added_slots = std.ArrayList(StorageKey).empty;
                 added_slots.ensureTotalCapacity(self.arena.allocator(), 10) catch {
                     return makeFailure(self.arena.allocator(), 0);
                 };
@@ -1503,7 +1503,7 @@ pub fn Evm(comptime config: EvmConfig) type {
             // Calculate new contract address
             const new_address = if (salt) |s| blk: {
                 // CREATE2: keccak256(0xff ++ caller ++ salt ++ keccak256(init_code))[12:]
-                var hash_input = std.ArrayList(u8){};
+                var hash_input = std.ArrayList(u8).empty;
                 defer hash_input.deinit(self.arena.allocator());
 
                 try hash_input.append(self.arena.allocator(), 0xff);
@@ -1547,7 +1547,7 @@ pub fn Evm(comptime config: EvmConfig) type {
 
                 // Manually construct RLP encoding of [address_bytes, nonce]
                 // Address is 20 bytes, nonce is variable length
-                var rlp_data = std.ArrayList(u8){};
+                var rlp_data = std.ArrayList(u8).empty;
                 defer rlp_data.deinit(self.arena.allocator());
 
                 // Encode address (20 bytes, 0x80 + 20 = 0x94)
@@ -1587,7 +1587,7 @@ pub fn Evm(comptime config: EvmConfig) type {
 
                 // Wrap in list prefix
                 const total_len = rlp_data.items.len;
-                var final_rlp = std.ArrayList(u8){};
+                var final_rlp = std.ArrayList(u8).empty;
                 defer final_rlp.deinit(self.arena.allocator());
                 try final_rlp.append(self.arena.allocator(), @as(u8, @intCast(0xc0 + total_len))); // List with length
                 try final_rlp.appendSlice(self.arena.allocator(), rlp_data.items);

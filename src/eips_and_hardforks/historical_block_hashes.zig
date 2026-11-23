@@ -265,10 +265,10 @@ test "historical block hashes ring buffer storage" {
     // Test storing and retrieving block hashes
     const block_numbers = [_]u64{ 100, 200, 300, 8192000 };
     const hashes = [_][32]u8{
-        [_]u8{0x01} ** 32,
-        [_]u8{0x02} ** 32,
-        [_]u8{0x03} ** 32,
-        [_]u8{0x04} ** 32,
+        @as([32]u8, @splat(0x01)),
+        @as([32]u8, @splat(0x02)),
+        @as([32]u8, @splat(0x03)),
+        @as([32]u8, @splat(0x04)),
     };
 
     for (block_numbers, hashes) |block_number, hash| {
@@ -298,7 +298,7 @@ test "historical block hashes contract execution" {
 
     // Test system call to store block hash
     const block_number: u64 = 42;
-    const block_hash = [_]u8{0xAB} ** 32;
+    const block_hash = @as([32]u8, @splat(0xAB));
 
     var input: [64]u8 = undefined;
     std.mem.writeInt(u256, input[0..32], block_number, .big);
@@ -313,7 +313,7 @@ test "historical block hashes contract execution" {
     std.mem.writeInt(u256, &read_input, block_number, .big);
 
     // Use a non-system address for testing
-    const test_caller = Address{ .bytes = [_]u8{0x11} ** 20 };
+    const test_caller = Address{ .bytes = @as([20]u8, @splat(0x11)) };
     const read_result = try contract.execute(
         test_caller,
         &read_input,
@@ -336,13 +336,13 @@ test "historical block hashes error cases" {
     var contract = HistoricalBlockHashesContract{ .database = &database, .allocator = allocator };
 
     // Test invalid system call input length
-    const invalid_input = [_]u8{0x01} ** 63; // Should be 64 bytes
+    const invalid_input = @as([63]u8, @splat(0x01)); // Should be 64 bytes
     const result1 = contract.execute(SYSTEM_ADDRESS, &invalid_input, 100000);
     try testing.expectError(HistoricalBlockHashesError.InvalidSystemCallInput, result1);
 
     // Test invalid read input length
-    const invalid_read_input = [_]u8{0x01} ** 31; // Should be 32 bytes
-    const result2 = contract.execute(Address{ .bytes = [_]u8{0x11} ** 20 }, &invalid_read_input, 10000);
+    const invalid_read_input = @as([31]u8, @splat(0x01)); // Should be 32 bytes
+    const result2 = contract.execute(Address{ .bytes = @as([20]u8, @splat(0x11)) }, &invalid_read_input, 10000);
     try testing.expectError(HistoricalBlockHashesError.InvalidReadInput, result2);
 
     // Test insufficient gas for write
@@ -357,7 +357,7 @@ test "historical block hashes error cases" {
     var valid_read_input: [32]u8 = undefined;
     std.mem.writeInt(u256, &valid_read_input, 12345, .big);
 
-    const result4 = contract.execute(Address{ .bytes = [_]u8{0x11} ** 20 }, &valid_read_input, BLOCK_HASH_READ_GAS - 1);
+    const result4 = contract.execute(Address{ .bytes = @as([20]u8, @splat(0x11)) }, &valid_read_input, BLOCK_HASH_READ_GAS - 1);
     try testing.expectError(HistoricalBlockHashesError.OutOfGas, result4);
 }
 
@@ -374,7 +374,7 @@ test "historical block hashes block number not found" {
     var read_input: [32]u8 = undefined;
     std.mem.writeInt(u256, &read_input, 999999, .big);
 
-    const result = try contract.execute(Address{ .bytes = [_]u8{0x11} ** 20 }, &read_input, 10000);
+    const result = try contract.execute(Address{ .bytes = @as([20]u8, @splat(0x11)) }, &read_input, 10000);
     defer allocator.free(result.output);
 
     try testing.expectEqual(BLOCK_HASH_READ_GAS, result.gas_used);
@@ -394,8 +394,8 @@ test "historical block hashes ring buffer wrap around" {
     const block1: u64 = 1000;
     const block2: u64 = block1 + HISTORY_BUFFER_LENGTH; // Will map to same slot
 
-    const hash1 = [_]u8{0x11} ** 32;
-    const hash2 = [_]u8{0x22} ** 32;
+    const hash1 = @as([32]u8, @splat(0x11));
+    const hash2 = @as([32]u8, @splat(0x22));
 
     // Store first hash
     var input1: [64]u8 = undefined;
@@ -415,7 +415,7 @@ test "historical block hashes ring buffer wrap around" {
     var read_input1: [32]u8 = undefined;
     std.mem.writeInt(u256, &read_input1, block1, .big);
 
-    const result1 = try contract.execute(Address{ .bytes = [_]u8{0x11} ** 20 }, &read_input1, 10000);
+    const result1 = try contract.execute(Address{ .bytes = @as([20]u8, @splat(0x11)) }, &read_input1, 10000);
     defer allocator.free(result1.output);
 
     try testing.expectEqual(@as(usize, 0), result1.output.len);
@@ -424,7 +424,7 @@ test "historical block hashes ring buffer wrap around" {
     var read_input2: [32]u8 = undefined;
     std.mem.writeInt(u256, &read_input2, block2, .big);
 
-    const result2 = try contract.execute(Address{ .bytes = [_]u8{0x11} ** 20 }, &read_input2, 10000);
+    const result2 = try contract.execute(Address{ .bytes = @as([20]u8, @splat(0x11)) }, &read_input2, 10000);
     defer allocator.free(result2.output);
 
     try testing.expectEqual(@as(usize, 32), result2.output.len);
@@ -442,7 +442,7 @@ test "historical block hashes integer overflow protection" {
 
     // Test block number that exceeds u64 max
     const oversized_block_number: u256 = @as(u256, std.math.maxInt(u64)) + 1;
-    const hash = [_]u8{0xCC} ** 32;
+    const hash = @as([32]u8, @splat(0xCC));
 
     var input: [64]u8 = undefined;
     std.mem.writeInt(u256, input[0..32], oversized_block_number, .big);
@@ -455,7 +455,7 @@ test "historical block hashes integer overflow protection" {
     var read_input: [32]u8 = undefined;
     std.mem.writeInt(u256, &read_input, oversized_block_number, .big);
 
-    const read_result = contract.execute(Address{ .bytes = [_]u8{0x11} ** 20 }, &read_input, 10000);
+    const read_result = contract.execute(Address{ .bytes = @as([20]u8, @splat(0x11)) }, &read_input, 10000);
     try testing.expectError(HistoricalBlockHashesError.IntegerOverflow, read_result);
 }
 
@@ -470,7 +470,7 @@ test "historical block hashes use-after-free protection" {
 
     // Store a block hash
     const block_number: u64 = 12345;
-    const hash = [_]u8{0xDD} ** 32;
+    const hash = @as([32]u8, @splat(0xDD));
 
     var input: [64]u8 = undefined;
     std.mem.writeInt(u256, input[0..32], block_number, .big);
@@ -482,7 +482,7 @@ test "historical block hashes use-after-free protection" {
     var read_input: [32]u8 = undefined;
     std.mem.writeInt(u256, &read_input, block_number, .big);
 
-    const result = try contract.execute(Address{ .bytes = [_]u8{0x11} ** 20 }, &read_input, 10000);
+    const result = try contract.execute(Address{ .bytes = @as([20]u8, @splat(0x11)) }, &read_input, 10000);
     defer allocator.free(result.output); // This should work without use-after-free
 
     try testing.expectEqual(@as(usize, 32), result.output.len);
@@ -505,7 +505,7 @@ test "historical block hashes collision detection prevents spoofing" {
 
     // Store first block hash
     const block1: u64 = 100;
-    const hash1 = [_]u8{0xAA} ** 32;
+    const hash1 = @as([32]u8, @splat(0xAA));
 
     var input1: [64]u8 = undefined;
     std.mem.writeInt(u256, input1[0..32], block1, .big);
@@ -515,7 +515,7 @@ test "historical block hashes collision detection prevents spoofing" {
 
     // Attempt to store a different block at the same slot (collision)
     const block2: u64 = block1 + HISTORY_BUFFER_LENGTH; // Same slot
-    const hash2 = [_]u8{0xBB} ** 32;
+    const hash2 = @as([32]u8, @splat(0xBB));
 
     var input2: [64]u8 = undefined;
     std.mem.writeInt(u256, input2[0..32], block2, .big);
@@ -529,7 +529,7 @@ test "historical block hashes collision detection prevents spoofing" {
     var read_input: [32]u8 = undefined;
     std.mem.writeInt(u256, &read_input, block1, .big);
 
-    const read_result = try contract.execute(Address{ .bytes = [_]u8{0x11} ** 20 }, &read_input, 10000);
+    const read_result = try contract.execute(Address{ .bytes = @as([20]u8, @splat(0x11)) }, &read_input, 10000);
     defer allocator.free(read_result.output);
 
     try testing.expectEqual(@as(usize, 32), read_result.output.len);
@@ -547,7 +547,7 @@ test "historical block hashes allows same block rewrite" {
 
     // Store a block hash
     const block_number: u64 = 200;
-    const hash1 = [_]u8{0xCC} ** 32;
+    const hash1 = @as([32]u8, @splat(0xCC));
 
     var input1: [64]u8 = undefined;
     std.mem.writeInt(u256, input1[0..32], block_number, .big);
@@ -556,7 +556,7 @@ test "historical block hashes allows same block rewrite" {
     _ = try contract.execute(SYSTEM_ADDRESS, &input1, 100000);
 
     // Update the same block number with a new hash (should succeed)
-    const hash2 = [_]u8{0xDD} ** 32;
+    const hash2 = @as([32]u8, @splat(0xDD));
 
     var input2: [64]u8 = undefined;
     std.mem.writeInt(u256, input2[0..32], block_number, .big);
@@ -569,7 +569,7 @@ test "historical block hashes allows same block rewrite" {
     var read_input: [32]u8 = undefined;
     std.mem.writeInt(u256, &read_input, block_number, .big);
 
-    const read_result = try contract.execute(Address{ .bytes = [_]u8{0x11} ** 20 }, &read_input, 10000);
+    const read_result = try contract.execute(Address{ .bytes = @as([20]u8, @splat(0x11)) }, &read_input, 10000);
     defer allocator.free(read_result.output);
 
     try testing.expectEqualSlices(u8, &hash2, read_result.output);
@@ -586,7 +586,7 @@ test "historical block hashes reverse mapping validation" {
 
     // Store a block hash
     const block1: u64 = 300;
-    const hash1 = [_]u8{0xEE} ** 32;
+    const hash1 = @as([32]u8, @splat(0xEE));
 
     var input1: [64]u8 = undefined;
     std.mem.writeInt(u256, input1[0..32], block1, .big);
@@ -607,7 +607,7 @@ test "historical block hashes reverse mapping validation" {
     var read_input: [32]u8 = undefined;
     std.mem.writeInt(u256, &read_input, block1, .big);
 
-    const result = try contract.execute(Address{ .bytes = [_]u8{0x11} ** 20 }, &read_input, 10000);
+    const result = try contract.execute(Address{ .bytes = @as([20]u8, @splat(0x11)) }, &read_input, 10000);
     defer allocator.free(result.output);
 
     try testing.expectEqual(@as(usize, 0), result.output.len); // Should return empty
@@ -623,7 +623,7 @@ test "historical block hashes getBlockHash validation" {
     // Store blocks with proper reverse mapping
     const block1: u64 = 500;
     const block2: u64 = block1 + HISTORY_BUFFER_LENGTH; // Collides
-    const hash1 = [_]u8{0xFF} ** 32;
+    const hash1 = @as([32]u8, @splat(0xFF));
 
     const slots = computeSlots(block1);
 

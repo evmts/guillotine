@@ -9,12 +9,12 @@ const trusted_setup_data = kzg_trusted_setup.data;
 
 /// Global initialization state
 var initialized: std.atomic.Value(bool) = std.atomic.Value(bool).init(false);
-var init_mutex = std.Thread.Mutex{};
+var init_mutex: std.Io.Mutex = .init;
 
 /// Global mutex for KZG proof verification
 /// The C-KZG library is not thread-safe for concurrent verification operations,
 /// so we serialize all verify calls to ensure correctness
-var verify_mutex = std.Thread.Mutex{};
+var verify_mutex: std.Io.Mutex = .init;
 
 /// Initialize the KZG trusted setup from embedded data
 /// This should be called once during application startup
@@ -24,8 +24,8 @@ pub fn init() !void {
     if (initialized.load(.acquire)) return;
 
     // Slow path: acquire lock and initialize
-    init_mutex.lock();
-    defer init_mutex.unlock();
+    std.Io.Threaded.mutexLockUncancelable(&init_mutex);
+    defer std.Io.Threaded.mutexUnlock(&init_mutex);
 
     // Double-check after acquiring lock
     if (initialized.load(.acquire)) return;
@@ -51,8 +51,8 @@ pub fn initFromFile(_allocator: std.mem.Allocator, trusted_setup_path: []const u
     _ = _allocator;
 
     // Slow path: acquire lock and initialize
-    init_mutex.lock();
-    defer init_mutex.unlock();
+    std.Io.Threaded.mutexLockUncancelable(&init_mutex);
+    defer std.Io.Threaded.mutexUnlock(&init_mutex);
 
     // Double-check after acquiring lock
     if (initialized.load(.acquire)) return;
@@ -71,8 +71,8 @@ pub fn initFromFile(_allocator: std.mem.Allocator, trusted_setup_path: []const u
 
 /// Deinitialize the KZG trusted setup
 pub fn deinit(allocator: std.mem.Allocator) void {
-    init_mutex.lock();
-    defer init_mutex.unlock();
+    std.Io.Threaded.mutexLockUncancelable(&init_mutex);
+    defer std.Io.Threaded.mutexUnlock(&init_mutex);
 
     if (!initialized.load(.acquire)) return;
 
@@ -102,8 +102,8 @@ pub fn verifyKZGProofThreadSafe(
     y: *const c_kzg.Bytes32,
     proof: *const c_kzg.KZGProof,
 ) !bool {
-    verify_mutex.lock();
-    defer verify_mutex.unlock();
+    std.Io.Threaded.mutexLockUncancelable(&verify_mutex);
+    defer std.Io.Threaded.mutexUnlock(&verify_mutex);
     return try c_kzg.verifyKZGProof(commitment, z, y, proof);
 }
 
@@ -172,9 +172,9 @@ test "KZG setup - deinitialization without initialization" {
     const testing = std.testing;
 
     // Force deinitialization state (this is a bit hacky but necessary for isolated testing)
-    init_mutex.lock();
+    std.Io.Threaded.mutexLockUncancelable(&init_mutex);
     initialized.store(false, .release);
-    init_mutex.unlock();
+    std.Io.Threaded.mutexUnlock(&init_mutex);
 
     // Should not crash or error
     deinit(testing.allocator);

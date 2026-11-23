@@ -315,7 +315,7 @@ test "modexp precompile with test vectors" {
     
     for (test_cases) |tc| {
         // Build input: base_len(32) + exp_len(32) + mod_len(32) + base + exp + mod
-        var input = std.ArrayList(u8){};
+        var input = std.ArrayList(u8).empty;
         defer input.deinit(allocator);
         
         // Write lengths as 32-byte big-endian

@@ -163,10 +163,10 @@ pub fn bytecodeAnalyze(
         }
     }.check;
 
-    var push_list = std.ArrayList(PcType){};
+    var push_list = std.ArrayList(PcType).empty;
     defer push_list.deinit(allocator);
 
-    var jumpdest_list = std.ArrayList(PcType){};
+    var jumpdest_list = std.ArrayList(PcType).empty;
     defer jumpdest_list.deinit(allocator);
 
     var jump_fusions = std.AutoHashMap(PcType, PcType).init(allocator);
@@ -272,7 +272,7 @@ pub fn bytecodeAnalyze(
     errdefer allocator.free(jumpdests);
 
     var iter = jump_fusions.iterator();
-    var to_remove = std.ArrayList(PcType){};
+    var to_remove = std.ArrayList(PcType).empty;
     defer to_remove.deinit(allocator);
     while (iter.next()) |entry| {
         const target = entry.value_ptr.*;
@@ -284,7 +284,7 @@ pub fn bytecodeAnalyze(
     }
     for (to_remove.items) |key| { _ = jump_fusions.remove(key); }
 
-    var blocks = std.ArrayList(BasicBlock){};
+    var blocks = std.ArrayList(BasicBlock).empty;
     defer blocks.deinit(allocator);
     var block_start: PcType = 0;
     for (jumpdests) |jd| {

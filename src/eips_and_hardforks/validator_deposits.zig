@@ -94,7 +94,7 @@ pub const ValidatorDepositsContract = struct {
         return .{
             .database = database,
             .allocator = allocator,
-            .deposits = std.ArrayList(DepositRequest){},
+            .deposits = std.ArrayList(DepositRequest).empty,
         };
     }
 
@@ -211,7 +211,7 @@ pub const ValidatorDepositsContract = struct {
     
     /// Clear processed deposits (called after consensus layer processes them)
     pub fn clearProcessedDeposits(self: *Self, up_to_index: u64) !void {
-        var new_deposits = std.ArrayList(DepositRequest){};
+        var new_deposits = std.ArrayList(DepositRequest).empty;
         errdefer new_deposits.deinit(self.allocator);
         
         for (self.deposits.items) |deposit| {
@@ -279,20 +279,20 @@ test "validator deposit processing" {
     defer contract.deinit();
 
     // Create a valid deposit request
-    var input: [208]u8 = [_]u8{0} ** 208;
+    var input: [208]u8 = @as([208]u8, @splat(0));
 
     // Set validator pubkey (48 bytes)
-    input[0..48].* = [_]u8{0xAA} ** 48;
+    input[0..48].* = @as([48]u8, @splat(0xAA));
 
     // Set withdrawal credentials (32 bytes)
-    input[48..80].* = [_]u8{0xBB} ** 32;
+    input[48..80].* = @as([32]u8, @splat(0xBB));
 
     // Set amount (32 ETH = 32e9 Gwei)
     const amount: u64 = 32_000_000_000;
     std.mem.writeInt(u64, input[80..88], amount, .big);
 
     // Set signature (96 bytes)
-    input[88..184].* = [_]u8{0xCC} ** 96;
+    input[88..184].* = @as([96]u8, @splat(0xCC));
 
     // Set index
     const index: u64 = 0;
@@ -337,7 +337,7 @@ test "deposit validation" {
     defer contract.deinit();
 
     // Test with invalid input length
-    const bad_input = [_]u8{0} ** 100;
+    const bad_input = @as([100]u8, @splat(0));
     const result1 = try contract.execute(
         primitives.ZERO_ADDRESS,
         &bad_input,
@@ -347,7 +347,7 @@ test "deposit validation" {
     try testing.expectEqual(@as(u64, 0), result1.gas_used);
 
     // Test with insufficient gas
-    var input: [208]u8 = [_]u8{0} ** 208;
+    var input: [208]u8 = @as([208]u8, @splat(0));
     const result2 = contract.execute(
         primitives.ZERO_ADDRESS,
         &input,
@@ -377,20 +377,20 @@ test "multiple deposits with proper memory management" {
     const num_deposits = 3;
     var i: usize = 0;
     while (i < num_deposits) : (i += 1) {
-        var input: [208]u8 = [_]u8{0} ** 208;
+        var input: [208]u8 = @as([208]u8, @splat(0));
 
         // Unique pubkey for each deposit
-        input[0..48].* = [_]u8{@as(u8, @intCast(i)) + 0xA0} ** 48;
+        input[0..48].* = @as([48]u8, @splat(@as(u8, @intCast(i)) + 0xA0));
 
         // Set withdrawal credentials
-        input[48..80].* = [_]u8{0xBB} ** 32;
+        input[48..80].* = @as([32]u8, @splat(0xBB));
 
         // Set amount (32 ETH)
         const amount: u64 = 32_000_000_000;
         std.mem.writeInt(u64, input[80..88], amount, .big);
 
         // Set signature
-        input[88..184].* = [_]u8{@as(u8, @intCast(i)) + 0xC0} ** 96;
+        input[88..184].* = @as([96]u8, @splat(@as(u8, @intCast(i)) + 0xC0));
 
         // Set index
         std.mem.writeInt(u64, input[184..192], i, .big);
@@ -430,13 +430,13 @@ test "clear processed deposits" {
     // Add 5 deposits with indices 0-4
     var i: usize = 0;
     while (i < 5) : (i += 1) {
-        var input: [208]u8 = [_]u8{0} ** 208;
-        input[0..48].* = [_]u8{@as(u8, @intCast(i))} ** 48;
-        input[48..80].* = [_]u8{0xBB} ** 32;
+        var input: [208]u8 = @as([208]u8, @splat(0));
+        input[0..48].* = @as([48]u8, @splat(@as(u8, @intCast(i))));
+        input[48..80].* = @as([32]u8, @splat(0xBB));
 
         const amount: u64 = 32_000_000_000;
         std.mem.writeInt(u64, input[80..88], amount, .big);
-        input[88..184].* = [_]u8{0xCC} ** 96;
+        input[88..184].* = @as([96]u8, @splat(0xCC));
         std.mem.writeInt(u64, input[184..192], i, .big);
 
         const value: u256 = @as(u256, amount) * @as(u256, 1_000_000_000);
@@ -475,13 +475,13 @@ test "deposit index ordering" {
     // Add deposits with non-sequential indices
     const indices = [_]u64{ 10, 5, 15, 3 };
     for (indices) |index| {
-        var input: [208]u8 = [_]u8{0} ** 208;
-        input[0..48].* = [_]u8{@as(u8, @intCast(index))} ** 48;
-        input[48..80].* = [_]u8{0xBB} ** 32;
+        var input: [208]u8 = @as([208]u8, @splat(0));
+        input[0..48].* = @as([48]u8, @splat(@as(u8, @intCast(index))));
+        input[48..80].* = @as([32]u8, @splat(0xBB));
 
         const amount: u64 = 32_000_000_000;
         std.mem.writeInt(u64, input[80..88], amount, .big);
-        input[88..184].* = [_]u8{0xCC} ** 96;
+        input[88..184].* = @as([96]u8, @splat(0xCC));
         std.mem.writeInt(u64, input[184..192], index, .big);
 
         const value: u256 = @as(u256, amount) * @as(u256, 1_000_000_000);
@@ -513,13 +513,13 @@ test "value mismatch validation" {
     var contract = ValidatorDepositsContract.init(allocator, &database);
     defer contract.deinit();
 
-    var input: [208]u8 = [_]u8{0} ** 208;
-    input[0..48].* = [_]u8{0xAA} ** 48;
-    input[48..80].* = [_]u8{0xBB} ** 32;
+    var input: [208]u8 = @as([208]u8, @splat(0));
+    input[0..48].* = @as([48]u8, @splat(0xAA));
+    input[48..80].* = @as([32]u8, @splat(0xBB));
 
     const amount: u64 = 32_000_000_000;
     std.mem.writeInt(u64, input[80..88], amount, .big);
-    input[88..184].* = [_]u8{0xCC} ** 96;
+    input[88..184].* = @as([96]u8, @splat(0xCC));
     std.mem.writeInt(u64, input[184..192], 0, .big);
 
     // Pass incorrect value (1 Wei less than expected)
@@ -546,14 +546,14 @@ test "minimum deposit amount validation" {
     var contract = ValidatorDepositsContract.init(allocator, &database);
     defer contract.deinit();
 
-    var input: [208]u8 = [_]u8{0} ** 208;
-    input[0..48].* = [_]u8{0xAA} ** 48;
-    input[48..80].* = [_]u8{0xBB} ** 32;
+    var input: [208]u8 = @as([208]u8, @splat(0));
+    input[0..48].* = @as([48]u8, @splat(0xAA));
+    input[48..80].* = @as([32]u8, @splat(0xBB));
 
     // Amount too low (999,999,999 Gwei < 1 ETH minimum)
     const amount: u64 = 999_999_999;
     std.mem.writeInt(u64, input[80..88], amount, .big);
-    input[88..184].* = [_]u8{0xCC} ** 96;
+    input[88..184].* = @as([96]u8, @splat(0xCC));
     std.mem.writeInt(u64, input[184..192], 0, .big);
 
     const value: u256 = @as(u256, amount) * @as(u256, 1_000_000_000);
@@ -579,15 +579,15 @@ test "96-byte signature boundary conditions" {
     var contract = ValidatorDepositsContract.init(allocator, &database);
     defer contract.deinit();
 
-    var input: [208]u8 = [_]u8{0} ** 208;
-    input[0..48].* = [_]u8{0xAA} ** 48;
-    input[48..80].* = [_]u8{0xBB} ** 32;
+    var input: [208]u8 = @as([208]u8, @splat(0));
+    input[0..48].* = @as([48]u8, @splat(0xAA));
+    input[48..80].* = @as([32]u8, @splat(0xBB));
 
     const amount: u64 = 32_000_000_000;
     std.mem.writeInt(u64, input[80..88], amount, .big);
 
     // Test all-zeros signature (boundary)
-    input[88..184].* = [_]u8{0x00} ** 96;
+    input[88..184].* = @as([96]u8, @splat(0x00));
     std.mem.writeInt(u64, input[184..192], 0, .big);
 
     const value: u256 = @as(u256, amount) * @as(u256, 1_000_000_000);
@@ -602,10 +602,10 @@ test "96-byte signature boundary conditions" {
     try testing.expectEqual(DEPOSIT_GAS, result1.gas_used);
     const deposits1 = contract.getPendingDeposits();
     try testing.expectEqual(@as(usize, 1), deposits1.len);
-    try testing.expect(std.mem.eql(u8, &deposits1[0].signature, &([_]u8{0x00} ** 96)));
+    try testing.expect(std.mem.eql(u8, &deposits1[0].signature, &(@as([96]u8, @splat(0x00)))));
 
     // Test all-ones signature (boundary)
-    input[88..184].* = [_]u8{0xFF} ** 96;
+    input[88..184].* = @as([96]u8, @splat(0xFF));
     std.mem.writeInt(u64, input[184..192], 1, .big);
 
     const result2 = try contract.execute(
@@ -619,7 +619,7 @@ test "96-byte signature boundary conditions" {
     try testing.expectEqual(DEPOSIT_GAS, result2.gas_used);
     const deposits2 = contract.getPendingDeposits();
     try testing.expectEqual(@as(usize, 2), deposits2.len);
-    try testing.expect(std.mem.eql(u8, &deposits2[1].signature, &([_]u8{0xFF} ** 96)));
+    try testing.expect(std.mem.eql(u8, &deposits2[1].signature, &(@as([96]u8, @splat(0xFF)))));
 }
 
 test "deposit hash computation consistency" {
@@ -627,18 +627,18 @@ test "deposit hash computation consistency" {
 
     // Create two identical deposits
     const deposit1 = DepositRequest{
-        .pubkey = [_]u8{0xAA} ** 48,
-        .withdrawal_credentials = [_]u8{0xBB} ** 32,
+        .pubkey = @as([48]u8, @splat(0xAA)),
+        .withdrawal_credentials = @as([32]u8, @splat(0xBB)),
         .amount = 32_000_000_000,
-        .signature = [_]u8{0xCC} ** 96,
+        .signature = @as([96]u8, @splat(0xCC)),
         .index = 0,
     };
 
     const deposit2 = DepositRequest{
-        .pubkey = [_]u8{0xAA} ** 48,
-        .withdrawal_credentials = [_]u8{0xBB} ** 32,
+        .pubkey = @as([48]u8, @splat(0xAA)),
+        .withdrawal_credentials = @as([32]u8, @splat(0xBB)),
         .amount = 32_000_000_000,
-        .signature = [_]u8{0xCC} ** 96,
+        .signature = @as([96]u8, @splat(0xCC)),
         .index = 0,
     };
 
@@ -649,10 +649,10 @@ test "deposit hash computation consistency" {
 
     // Different deposit should have different hash
     const deposit3 = DepositRequest{
-        .pubkey = [_]u8{0xDD} ** 48, // Different pubkey
-        .withdrawal_credentials = [_]u8{0xBB} ** 32,
+        .pubkey = @as([48]u8, @splat(0xDD)), // Different pubkey
+        .withdrawal_credentials = @as([32]u8, @splat(0xBB)),
         .amount = 32_000_000_000,
-        .signature = [_]u8{0xCC} ** 96,
+        .signature = @as([96]u8, @splat(0xCC)),
         .index = 0,
     };
 
@@ -671,13 +671,13 @@ test "process block deposits" {
     defer contract.deinit();
 
     // Add a deposit
-    var input: [208]u8 = [_]u8{0} ** 208;
-    input[0..48].* = [_]u8{0xAA} ** 48;
-    input[48..80].* = [_]u8{0xBB} ** 32;
+    var input: [208]u8 = @as([208]u8, @splat(0));
+    input[0..48].* = @as([48]u8, @splat(0xAA));
+    input[48..80].* = @as([32]u8, @splat(0xBB));
 
     const amount: u64 = 32_000_000_000;
     std.mem.writeInt(u64, input[80..88], amount, .big);
-    input[88..184].* = [_]u8{0xCC} ** 96;
+    input[88..184].* = @as([96]u8, @splat(0xCC));
     std.mem.writeInt(u64, input[184..192], 0, .big);
 
     const value: u256 = @as(u256, amount) * @as(u256, 1_000_000_000);
@@ -734,13 +734,13 @@ test "memory leak detection" {
     // Create and execute many deposits to stress test memory management
     var i: usize = 0;
     while (i < 100) : (i += 1) {
-        var input: [208]u8 = [_]u8{0} ** 208;
-        input[0..48].* = [_]u8{@as(u8, @intCast(i % 256))} ** 48;
-        input[48..80].* = [_]u8{0xBB} ** 32;
+        var input: [208]u8 = @as([208]u8, @splat(0));
+        input[0..48].* = @as([48]u8, @splat(@as(u8, @intCast(i % 256))));
+        input[48..80].* = @as([32]u8, @splat(0xBB));
 
         const amount: u64 = 32_000_000_000;
         std.mem.writeInt(u64, input[80..88], amount, .big);
-        input[88..184].* = [_]u8{0xCC} ** 96;
+        input[88..184].* = @as([96]u8, @splat(0xCC));
         std.mem.writeInt(u64, input[184..192], i, .big);
 
         const value: u256 = @as(u256, amount) * @as(u256, 1_000_000_000);
@@ -773,13 +773,13 @@ test "output contains correct deposit index" {
 
     const test_index: u64 = 42;
 
-    var input: [208]u8 = [_]u8{0} ** 208;
-    input[0..48].* = [_]u8{0xAA} ** 48;
-    input[48..80].* = [_]u8{0xBB} ** 32;
+    var input: [208]u8 = @as([208]u8, @splat(0));
+    input[0..48].* = @as([48]u8, @splat(0xAA));
+    input[48..80].* = @as([32]u8, @splat(0xBB));
 
     const amount: u64 = 32_000_000_000;
     std.mem.writeInt(u64, input[80..88], amount, .big);
-    input[88..184].* = [_]u8{0xCC} ** 96;
+    input[88..184].* = @as([96]u8, @splat(0xCC));
     std.mem.writeInt(u64, input[184..192], test_index, .big);
 
     const value: u256 = @as(u256, amount) * @as(u256, 1_000_000_000);

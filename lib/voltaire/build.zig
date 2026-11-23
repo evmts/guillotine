@@ -13,7 +13,7 @@ pub fn build(b: *std.Build) void {
     lib_build.checkVendoredDeps(b);
 
     // STEP 2: Verify Cargo is installed for Rust dependencies
-    lib_build.checkCargoInstalled();
+    lib_build.checkCargoInstalled(b);
 
     // STEP 3: Build Rust crate (crypto_wrappers: bn254 + keccak FFI)
     const cargo_build_step = lib_build.createCargoBuildStep(b, optimize, target);
@@ -37,6 +37,21 @@ pub fn build(b: *std.Build) void {
     c_kzg_mod.linkLibrary(blst_lib);
     c_kzg_mod.addIncludePath(b.path("lib/c-kzg-4844/src"));
     c_kzg_mod.addIncludePath(b.path("lib/c-kzg-4844/blst/bindings"));
+    // Zig 0.17 removed @cImport; C headers are translated by the build system.
+    const ckzg_c = b.addTranslateC(.{
+        .root_source_file = b.path("lib/c-kzg-4844/src/ckzg.h"),
+        .target = target,
+        .optimize = optimize,
+    });
+    ckzg_c.addIncludePath(b.path("lib/c-kzg-4844/src"));
+    ckzg_c.addIncludePath(b.path("lib/c-kzg-4844/blst/bindings"));
+    c_kzg_mod.addImport("ckzg_c", ckzg_c.createModule());
+    const blst_c = b.addTranslateC(.{
+        .root_source_file = b.path("lib/c-kzg-4844/blst/bindings/blst.h"),
+        .target = target,
+        .optimize = optimize,
+    });
+    c_kzg_mod.addImport("blst_c", blst_c.createModule());
 
     // Crypto module - export for external packages
     const crypto_mod = b.addModule("crypto", .{
@@ -46,6 +61,18 @@ pub fn build(b: *std.Build) void {
     });
     crypto_mod.addImport("c_kzg", c_kzg_mod);
     crypto_mod.addIncludePath(b.path("lib")); // For keccak_wrapper.h
+    const bn254_wrapper_c = b.addTranslateC(.{
+        .root_source_file = b.path("lib/bn254_wrapper.h"),
+        .target = target,
+        .optimize = optimize,
+    });
+    crypto_mod.addImport("bn254_wrapper_c", bn254_wrapper_c.createModule());
+    const keccak_wrapper_c = b.addTranslateC(.{
+        .root_source_file = b.path("lib/keccak_wrapper.h"),
+        .target = target,
+        .optimize = optimize,
+    });
+    crypto_mod.addImport("keccak_wrapper_c", keccak_wrapper_c.createModule());
 
     // Voltaire module - export for external packages (includes Hardfork)
     const primitives_mod = b.addModule("voltaire", .{
@@ -63,24 +90,27 @@ pub fn build(b: *std.Build) void {
         .name = "primitives-tests",
         .root_module = primitives_mod,
     });
-    primitives_tests.linkLibrary(c_kzg_lib);
-    primitives_tests.linkLibrary(blst_lib);
-    primitives_tests.addObjectFile(rust_crypto_lib_path);
-    primitives_tests.addIncludePath(b.path("lib")); // For Rust FFI headers
+    primitives_tests.root_module.linkLibrary(c_kzg_lib);
+    primitives_tests.root_module.linkLibrary(blst_lib);
+    primitives_tests.root_module.addObjectFile(rust_crypto_lib_path);
+    // Rust std inside libcrypto_wrappers.a references the unwinder on Linux;
+    // every consumer of the shared voltaire module needs it on the link line.
+    if (target.result.os.tag == .linux) primitives_tests.root_module.linkSystemLibrary("unwind", .{});
+    primitives_tests.root_module.addIncludePath(b.path("lib")); // For Rust FFI headers
     primitives_tests.step.dependOn(cargo_build_step);
-    primitives_tests.linkLibC();
+    primitives_tests.root_module.link_libc = true;
 
     // Crypto tests
     const crypto_tests = b.addTest(.{
         .name = "crypto-tests",
         .root_module = crypto_mod,
     });
-    crypto_tests.linkLibrary(c_kzg_lib);
-    crypto_tests.linkLibrary(blst_lib);
-    crypto_tests.addObjectFile(rust_crypto_lib_path);
-    crypto_tests.addIncludePath(b.path("lib")); // For Rust FFI headers
+    crypto_tests.root_module.linkLibrary(c_kzg_lib);
+    crypto_tests.root_module.linkLibrary(blst_lib);
+    crypto_tests.root_module.addObjectFile(rust_crypto_lib_path);
+    crypto_tests.root_module.addIncludePath(b.path("lib")); // For Rust FFI headers
     crypto_tests.step.dependOn(cargo_build_step);
-    crypto_tests.linkLibC();
+    crypto_tests.root_module.link_libc = true;
 
     // Precompiles module - export for external packages
     const precompiles_mod = b.addModule("precompiles", .{
@@ -95,12 +125,12 @@ pub fn build(b: *std.Build) void {
         .name = "precompiles-tests",
         .root_module = precompiles_mod,
     });
-    precompiles_tests.linkLibrary(c_kzg_lib);
-    precompiles_tests.linkLibrary(blst_lib);
-    precompiles_tests.addObjectFile(rust_crypto_lib_path);
-    precompiles_tests.addIncludePath(b.path("lib")); // For Rust FFI headers
+    precompiles_tests.root_module.linkLibrary(c_kzg_lib);
+    precompiles_tests.root_module.linkLibrary(blst_lib);
+    precompiles_tests.root_module.addObjectFile(rust_crypto_lib_path);
+    precompiles_tests.root_module.addIncludePath(b.path("lib")); // For Rust FFI headers
     precompiles_tests.step.dependOn(cargo_build_step);
-    precompiles_tests.linkLibC();
+    precompiles_tests.root_module.link_libc = true;
 
     const run_primitives_tests = b.addRunArtifact(primitives_tests);
     const run_crypto_tests = b.addRunArtifact(crypto_tests);
@@ -138,12 +168,12 @@ pub fn build(b: *std.Build) void {
         .name = "keccak256_example",
         .root_module = keccak256_example_mod,
     });
-    keccak256_example.linkLibrary(c_kzg_lib);
-    keccak256_example.linkLibrary(blst_lib);
-    keccak256_example.addObjectFile(rust_crypto_lib_path);
-    keccak256_example.addIncludePath(b.path("lib")); // For Rust FFI headers
+    keccak256_example.root_module.linkLibrary(c_kzg_lib);
+    keccak256_example.root_module.linkLibrary(blst_lib);
+    keccak256_example.root_module.addObjectFile(rust_crypto_lib_path);
+    keccak256_example.root_module.addIncludePath(b.path("lib")); // For Rust FFI headers
     keccak256_example.step.dependOn(cargo_build_step);
-    keccak256_example.linkLibC();
+    keccak256_example.root_module.link_libc = true;
 
     const run_keccak256_example = b.addRunArtifact(keccak256_example);
     const example_keccak256_step = b.step("example-keccak256", "Run the Keccak-256 hashing example");
@@ -161,12 +191,12 @@ pub fn build(b: *std.Build) void {
         .name = "abi_example",
         .root_module = abi_example_mod,
     });
-    abi_example.linkLibrary(c_kzg_lib);
-    abi_example.linkLibrary(blst_lib);
-    abi_example.addObjectFile(rust_crypto_lib_path);
-    abi_example.addIncludePath(b.path("lib")); // For Rust FFI headers
+    abi_example.root_module.linkLibrary(c_kzg_lib);
+    abi_example.root_module.linkLibrary(blst_lib);
+    abi_example.root_module.addObjectFile(rust_crypto_lib_path);
+    abi_example.root_module.addIncludePath(b.path("lib")); // For Rust FFI headers
     abi_example.step.dependOn(cargo_build_step);
-    abi_example.linkLibC();
+    abi_example.root_module.link_libc = true;
 
     const run_abi_example = b.addRunArtifact(abi_example);
     const example_abi_step = b.step("example-abi", "Run the ABI encoding/decoding example");
@@ -185,12 +215,12 @@ pub fn build(b: *std.Build) void {
         .name = "secp256k1_example",
         .root_module = secp256k1_example_mod,
     });
-    secp256k1_example.linkLibrary(c_kzg_lib);
-    secp256k1_example.linkLibrary(blst_lib);
-    secp256k1_example.addObjectFile(rust_crypto_lib_path);
-    secp256k1_example.addIncludePath(b.path("lib")); // For Rust FFI headers
+    secp256k1_example.root_module.linkLibrary(c_kzg_lib);
+    secp256k1_example.root_module.linkLibrary(blst_lib);
+    secp256k1_example.root_module.addObjectFile(rust_crypto_lib_path);
+    secp256k1_example.root_module.addIncludePath(b.path("lib")); // For Rust FFI headers
     secp256k1_example.step.dependOn(cargo_build_step);
-    secp256k1_example.linkLibC();
+    secp256k1_example.root_module.link_libc = true;
 
     const run_secp256k1_example = b.addRunArtifact(secp256k1_example);
     const example_secp256k1_step = b.step("example-secp256k1", "Run the secp256k1 ECDSA signature operations example");
@@ -208,12 +238,12 @@ pub fn build(b: *std.Build) void {
         .name = "address_example",
         .root_module = address_example_mod,
     });
-    address_example.linkLibrary(c_kzg_lib);
-    address_example.linkLibrary(blst_lib);
-    address_example.addObjectFile(rust_crypto_lib_path);
-    address_example.addIncludePath(b.path("lib")); // For Rust FFI headers
+    address_example.root_module.linkLibrary(c_kzg_lib);
+    address_example.root_module.linkLibrary(blst_lib);
+    address_example.root_module.addObjectFile(rust_crypto_lib_path);
+    address_example.root_module.addIncludePath(b.path("lib")); // For Rust FFI headers
     address_example.step.dependOn(cargo_build_step);
-    address_example.linkLibC();
+    address_example.root_module.link_libc = true;
 
     const run_address_example = b.addRunArtifact(address_example);
     const example_address_step = b.step("example-address", "Run the Address primitive example");
@@ -231,12 +261,12 @@ pub fn build(b: *std.Build) void {
         .name = "hex_example",
         .root_module = hex_example_mod,
     });
-    hex_example.linkLibrary(c_kzg_lib);
-    hex_example.linkLibrary(blst_lib);
-    hex_example.addObjectFile(rust_crypto_lib_path);
-    hex_example.addIncludePath(b.path("lib")); // For Rust FFI headers
+    hex_example.root_module.linkLibrary(c_kzg_lib);
+    hex_example.root_module.linkLibrary(blst_lib);
+    hex_example.root_module.addObjectFile(rust_crypto_lib_path);
+    hex_example.root_module.addIncludePath(b.path("lib")); // For Rust FFI headers
     hex_example.step.dependOn(cargo_build_step);
-    hex_example.linkLibC();
+    hex_example.root_module.link_libc = true;
 
     const run_hex_example = b.addRunArtifact(hex_example);
     const example_hex_step = b.step("example-hex", "Run the Hex utilities example");
@@ -254,12 +284,12 @@ pub fn build(b: *std.Build) void {
         .name = "rlp_example",
         .root_module = rlp_example_mod,
     });
-    rlp_example.linkLibrary(c_kzg_lib);
-    rlp_example.linkLibrary(blst_lib);
-    rlp_example.addObjectFile(rust_crypto_lib_path);
-    rlp_example.addIncludePath(b.path("lib")); // For Rust FFI headers
+    rlp_example.root_module.linkLibrary(c_kzg_lib);
+    rlp_example.root_module.linkLibrary(blst_lib);
+    rlp_example.root_module.addObjectFile(rust_crypto_lib_path);
+    rlp_example.root_module.addIncludePath(b.path("lib")); // For Rust FFI headers
     rlp_example.step.dependOn(cargo_build_step);
-    rlp_example.linkLibC();
+    rlp_example.root_module.link_libc = true;
 
     const run_rlp_example = b.addRunArtifact(rlp_example);
     const example_rlp_step = b.step("example-rlp", "Run the RLP encoding/decoding example");
@@ -278,12 +308,12 @@ pub fn build(b: *std.Build) void {
         .name = "eip712_example",
         .root_module = eip712_example_mod,
     });
-    eip712_example.linkLibrary(c_kzg_lib);
-    eip712_example.linkLibrary(blst_lib);
-    eip712_example.addObjectFile(rust_crypto_lib_path);
-    eip712_example.addIncludePath(b.path("lib")); // For Rust FFI headers
+    eip712_example.root_module.linkLibrary(c_kzg_lib);
+    eip712_example.root_module.linkLibrary(blst_lib);
+    eip712_example.root_module.addObjectFile(rust_crypto_lib_path);
+    eip712_example.root_module.addIncludePath(b.path("lib")); // For Rust FFI headers
     eip712_example.step.dependOn(cargo_build_step);
-    eip712_example.linkLibC();
+    eip712_example.root_module.link_libc = true;
 
     const run_eip712_example = b.addRunArtifact(eip712_example);
     const example_eip712_step = b.step("example-eip712", "Run the EIP-712 typed data signing example");
@@ -302,12 +332,12 @@ pub fn build(b: *std.Build) void {
         .name = "transaction_example",
         .root_module = transaction_example_mod,
     });
-    transaction_example.linkLibrary(c_kzg_lib);
-    transaction_example.linkLibrary(blst_lib);
-    transaction_example.addObjectFile(rust_crypto_lib_path);
-    transaction_example.addIncludePath(b.path("lib")); // For Rust FFI headers
+    transaction_example.root_module.linkLibrary(c_kzg_lib);
+    transaction_example.root_module.linkLibrary(blst_lib);
+    transaction_example.root_module.addObjectFile(rust_crypto_lib_path);
+    transaction_example.root_module.addIncludePath(b.path("lib")); // For Rust FFI headers
     transaction_example.step.dependOn(cargo_build_step);
-    transaction_example.linkLibC();
+    transaction_example.root_module.link_libc = true;
 
     const run_transaction_example = b.addRunArtifact(transaction_example);
     const example_transaction_step = b.step("example-transaction", "Run the transaction operations example");
@@ -326,12 +356,12 @@ pub fn build(b: *std.Build) void {
         .name = "eip4844_example",
         .root_module = eip4844_example_mod,
     });
-    eip4844_example.linkLibrary(c_kzg_lib);
-    eip4844_example.linkLibrary(blst_lib);
-    eip4844_example.addObjectFile(rust_crypto_lib_path);
-    eip4844_example.addIncludePath(b.path("lib")); // For Rust FFI headers
+    eip4844_example.root_module.linkLibrary(c_kzg_lib);
+    eip4844_example.root_module.linkLibrary(blst_lib);
+    eip4844_example.root_module.addObjectFile(rust_crypto_lib_path);
+    eip4844_example.root_module.addIncludePath(b.path("lib")); // For Rust FFI headers
     eip4844_example.step.dependOn(cargo_build_step);
-    eip4844_example.linkLibC();
+    eip4844_example.root_module.link_libc = true;
 
     const run_eip4844_example = b.addRunArtifact(eip4844_example);
     const example_eip4844_step = b.step("example-eip4844", "Run the EIP-4844 blob transaction example");
@@ -350,12 +380,12 @@ pub fn build(b: *std.Build) void {
         .name = "eip7702_example",
         .root_module = eip7702_example_mod,
     });
-    eip7702_example.linkLibrary(c_kzg_lib);
-    eip7702_example.linkLibrary(blst_lib);
-    eip7702_example.addObjectFile(rust_crypto_lib_path);
-    eip7702_example.addIncludePath(b.path("lib")); // For Rust FFI headers
+    eip7702_example.root_module.linkLibrary(c_kzg_lib);
+    eip7702_example.root_module.linkLibrary(blst_lib);
+    eip7702_example.root_module.addObjectFile(rust_crypto_lib_path);
+    eip7702_example.root_module.addIncludePath(b.path("lib")); // For Rust FFI headers
     eip7702_example.step.dependOn(cargo_build_step);
-    eip7702_example.linkLibC();
+    eip7702_example.root_module.link_libc = true;
 
     const run_eip7702_example = b.addRunArtifact(eip7702_example);
     const example_eip7702_step = b.step("example-eip7702", "Run the EIP-7702 authorization transaction example");
@@ -374,12 +404,12 @@ pub fn build(b: *std.Build) void {
         .name = "abi_workflow_example",
         .root_module = abi_workflow_example_mod,
     });
-    abi_workflow_example.linkLibrary(c_kzg_lib);
-    abi_workflow_example.linkLibrary(blst_lib);
-    abi_workflow_example.addObjectFile(rust_crypto_lib_path);
-    abi_workflow_example.addIncludePath(b.path("lib")); // For Rust FFI headers
+    abi_workflow_example.root_module.linkLibrary(c_kzg_lib);
+    abi_workflow_example.root_module.linkLibrary(blst_lib);
+    abi_workflow_example.root_module.addObjectFile(rust_crypto_lib_path);
+    abi_workflow_example.root_module.addIncludePath(b.path("lib")); // For Rust FFI headers
     abi_workflow_example.step.dependOn(cargo_build_step);
-    abi_workflow_example.linkLibC();
+    abi_workflow_example.root_module.link_libc = true;
 
     const run_abi_workflow_example = b.addRunArtifact(abi_workflow_example);
     const example_abi_workflow_step = b.step("example-abi-workflow", "Run the comprehensive ABI workflow example");
@@ -398,12 +428,12 @@ pub fn build(b: *std.Build) void {
         .name = "signature_recovery_example",
         .root_module = sig_recovery_example_mod,
     });
-    sig_recovery_example.linkLibrary(c_kzg_lib);
-    sig_recovery_example.linkLibrary(blst_lib);
-    sig_recovery_example.addObjectFile(rust_crypto_lib_path);
-    sig_recovery_example.addIncludePath(b.path("lib")); // For Rust FFI headers
+    sig_recovery_example.root_module.linkLibrary(c_kzg_lib);
+    sig_recovery_example.root_module.linkLibrary(blst_lib);
+    sig_recovery_example.root_module.addObjectFile(rust_crypto_lib_path);
+    sig_recovery_example.root_module.addIncludePath(b.path("lib")); // For Rust FFI headers
     sig_recovery_example.step.dependOn(cargo_build_step);
-    sig_recovery_example.linkLibC();
+    sig_recovery_example.root_module.link_libc = true;
 
     const run_sig_recovery_example = b.addRunArtifact(sig_recovery_example);
     const example_sig_recovery_step = b.step("example-signature-recovery", "Run the signature recovery workflow example");
@@ -422,12 +452,12 @@ pub fn build(b: *std.Build) void {
         .name = "bls_operations_example",
         .root_module = bls_operations_example_mod,
     });
-    bls_operations_example.linkLibrary(c_kzg_lib);
-    bls_operations_example.linkLibrary(blst_lib);
-    bls_operations_example.addObjectFile(rust_crypto_lib_path);
-    bls_operations_example.addIncludePath(b.path("lib")); // For Rust FFI headers
+    bls_operations_example.root_module.linkLibrary(c_kzg_lib);
+    bls_operations_example.root_module.linkLibrary(blst_lib);
+    bls_operations_example.root_module.addObjectFile(rust_crypto_lib_path);
+    bls_operations_example.root_module.addIncludePath(b.path("lib")); // For Rust FFI headers
     bls_operations_example.step.dependOn(cargo_build_step);
-    bls_operations_example.linkLibC();
+    bls_operations_example.root_module.link_libc = true;
 
     const run_bls_operations_example = b.addRunArtifact(bls_operations_example);
     const example_bls_operations_step = b.step("example-bls", "Run the BLS12-381 operations example");
@@ -463,13 +493,13 @@ pub fn build(b: *std.Build) void {
         });
         c_api_lib.root_module.addImport("voltaire", primitives_mod);
         c_api_lib.root_module.addImport("crypto", crypto_mod);
-        c_api_lib.linkLibrary(c_kzg_lib);
-        c_api_lib.linkLibrary(blst_lib);
-        c_api_lib.addObjectFile(rust_crypto_lib_path);
-        c_api_lib.addIncludePath(b.path("lib")); // For Rust FFI headers
+        c_api_lib.root_module.linkLibrary(c_kzg_lib);
+        c_api_lib.root_module.linkLibrary(blst_lib);
+        c_api_lib.root_module.addObjectFile(rust_crypto_lib_path);
+        c_api_lib.root_module.addIncludePath(b.path("lib")); // For Rust FFI headers
         c_api_lib.step.dependOn(cargo_build_step);
         c_api_lib.step.dependOn(&run_generate_header.step); // Auto-generate header
-        c_api_lib.linkLibC();
+        c_api_lib.root_module.link_libc = true;
 
         b.installArtifact(c_api_lib);
 
@@ -485,13 +515,13 @@ pub fn build(b: *std.Build) void {
         });
         c_api_shared.root_module.addImport("voltaire", primitives_mod);
         c_api_shared.root_module.addImport("crypto", crypto_mod);
-        c_api_shared.linkLibrary(c_kzg_lib);
-        c_api_shared.linkLibrary(blst_lib);
-        c_api_shared.addObjectFile(rust_crypto_lib_path);
-        c_api_shared.addIncludePath(b.path("lib")); // For Rust FFI headers
+        c_api_shared.root_module.linkLibrary(c_kzg_lib);
+        c_api_shared.root_module.linkLibrary(blst_lib);
+        c_api_shared.root_module.addObjectFile(rust_crypto_lib_path);
+        c_api_shared.root_module.addIncludePath(b.path("lib")); // For Rust FFI headers
         c_api_shared.step.dependOn(cargo_build_step);
         c_api_shared.step.dependOn(&run_generate_header.step); // Auto-generate header
-        c_api_shared.linkLibC();
+        c_api_shared.root_module.link_libc = true;
 
         b.installArtifact(c_api_shared);
 
@@ -508,12 +538,12 @@ pub fn build(b: *std.Build) void {
                 .optimize = optimize,
             }),
         });
-        c_example.addCSourceFile(.{
+        c_example.root_module.addCSourceFile(.{
             .file = b.path("examples/c/basic_usage.c"),
         });
-        c_example.addIncludePath(b.path("src")); // For primitives.h
-        c_example.linkLibrary(c_api_lib);
-        c_example.linkLibC();
+        c_example.root_module.addIncludePath(b.path("src")); // For primitives.h
+        c_example.root_module.linkLibrary(c_api_lib);
+        c_example.root_module.link_libc = true;
 
         const install_c_example = b.addInstallArtifact(c_example, .{});
 
@@ -589,11 +619,16 @@ fn buildBenchmarks(
     cargo_build_step: *std.Build.Step,
 ) void {
     // Try to open bench directory
-    const bench_dir = std.fs.cwd().openDir("bench", .{ .iterate = true }) catch return;
-    var walker = bench_dir.walk(b.allocator) catch return;
+    const io = b.graph.io;
+    var bench_dir = b.root.openDir(io, "bench", .{ .iterate = true }) catch |err| switch (err) {
+        error.FileNotFound => return,
+        else => std.debug.panic("unable to open bench directory: {s}", .{@errorName(err)}),
+    };
+    defer bench_dir.close(io);
+    var walker = bench_dir.walk(b.allocator) catch @panic("OOM");
     defer walker.deinit();
 
-    while (walker.next() catch null) |entry| {
+    while (walker.next(io) catch |err| std.debug.panic("unable to walk directory: {s}", .{@errorName(err)})) |entry| {
         if (entry.kind != .file) continue;
         if (!std.mem.endsWith(u8, entry.basename, ".zig")) continue;
 
@@ -622,17 +657,17 @@ fn buildBenchmarks(
             .name = bench_name,
             .root_module = bench_mod,
         });
-        bench_exe.linkLibrary(c_kzg_lib);
-        bench_exe.linkLibrary(blst_lib);
-        bench_exe.addObjectFile(rust_crypto_lib_path);
-        bench_exe.addIncludePath(b.path("lib"));
+        bench_exe.root_module.linkLibrary(c_kzg_lib);
+        bench_exe.root_module.linkLibrary(blst_lib);
+        bench_exe.root_module.addObjectFile(rust_crypto_lib_path);
+        bench_exe.root_module.addIncludePath(b.path("lib"));
         bench_exe.step.dependOn(cargo_build_step);
-        bench_exe.linkLibC();
+        bench_exe.root_module.link_libc = true;
 
         // Link against libgcc_s for unwinding symbols required by Rust std library
         // Even with panic=abort, Rust std uses unwinding infrastructure
         if (target.result.os.tag == .linux) {
-            bench_exe.linkSystemLibrary("gcc_s");
+            bench_exe.root_module.linkSystemLibrary("gcc_s", .{});
         }
 
         b.installArtifact(bench_exe);
@@ -663,12 +698,17 @@ fn buildZBenchmarks(
     const bench_step = b.step("bench", "Run zbench performance benchmarks");
 
     // Recursively find all *.bench.zig files in src/
-    const src_dir = std.fs.cwd().openDir("src", .{ .iterate = true }) catch return;
-    var walker = src_dir.walk(b.allocator) catch return;
+    const io = b.graph.io;
+    var src_dir = b.root.openDir(io, "src", .{ .iterate = true }) catch |err| switch (err) {
+        error.FileNotFound => return,
+        else => std.debug.panic("unable to open src directory: {s}", .{@errorName(err)}),
+    };
+    defer src_dir.close(io);
+    var walker = src_dir.walk(b.allocator) catch @panic("OOM");
     defer walker.deinit();
 
     var bench_count: u32 = 0;
-    while (walker.next() catch null) |entry| {
+    while (walker.next(io) catch |err| std.debug.panic("unable to walk directory: {s}", .{@errorName(err)})) |entry| {
         if (entry.kind != .file) continue;
         if (!std.mem.endsWith(u8, entry.basename, ".bench.zig")) continue;
 
@@ -698,17 +738,17 @@ fn buildZBenchmarks(
             .name = bench_name,
             .root_module = bench_mod,
         });
-        bench_exe.linkLibrary(c_kzg_lib);
-        bench_exe.linkLibrary(blst_lib);
-        bench_exe.addObjectFile(rust_crypto_lib_path);
-        bench_exe.addIncludePath(b.path("lib"));
+        bench_exe.root_module.linkLibrary(c_kzg_lib);
+        bench_exe.root_module.linkLibrary(blst_lib);
+        bench_exe.root_module.addObjectFile(rust_crypto_lib_path);
+        bench_exe.root_module.addIncludePath(b.path("lib"));
         bench_exe.step.dependOn(cargo_build_step);
-        bench_exe.linkLibC();
+        bench_exe.root_module.link_libc = true;
 
         // Link against libgcc_s for unwinding symbols required by Rust std library
         // Even with panic=abort, Rust std uses unwinding infrastructure
         if (target.result.os.tag == .linux) {
-            bench_exe.linkSystemLibrary("gcc_s");
+            bench_exe.root_module.linkSystemLibrary("gcc_s", .{});
         }
 
         b.installArtifact(bench_exe);
@@ -748,17 +788,17 @@ fn addTypeScriptNativeBuild(
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/c_api.zig"),
             .target = ts_target,
-            .optimize = .ReleaseFast, // Maximum performance for native
+            .optimize = .fast, // Maximum performance for native
         }),
     });
     ts_native_lib.root_module.addImport("voltaire", primitives_mod);
     ts_native_lib.root_module.addImport("crypto", crypto_mod);
-    ts_native_lib.linkLibrary(c_kzg_lib);
-    ts_native_lib.linkLibrary(blst_lib);
-    ts_native_lib.addObjectFile(rust_crypto_lib_path);
-    ts_native_lib.addIncludePath(b.path("lib"));
+    ts_native_lib.root_module.linkLibrary(c_kzg_lib);
+    ts_native_lib.root_module.linkLibrary(blst_lib);
+    ts_native_lib.root_module.addObjectFile(rust_crypto_lib_path);
+    ts_native_lib.root_module.addIncludePath(b.path("lib"));
     ts_native_lib.step.dependOn(cargo_build_step);
-    ts_native_lib.linkLibC();
+    ts_native_lib.root_module.link_libc = true;
 
     // Install to native/ directory
     const install_native = b.addInstallArtifact(ts_native_lib, .{
@@ -786,15 +826,15 @@ fn addTypeScriptWasmBuild(
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/c_api.zig"),
             .target = wasm_target,
-            .optimize = .ReleaseSmall, // Minimal size for WASM
+            .optimize = .small, // Minimal size for WASM
         }),
     });
     ts_wasm_exe.root_module.addImport("voltaire", primitives_mod);
     ts_wasm_exe.root_module.addImport("crypto", crypto_mod);
-    ts_wasm_exe.linkLibrary(c_kzg_lib);
-    ts_wasm_exe.linkLibrary(blst_lib);
-    ts_wasm_exe.addObjectFile(rust_crypto_lib_path);
-    ts_wasm_exe.addIncludePath(b.path("lib"));
+    ts_wasm_exe.root_module.linkLibrary(c_kzg_lib);
+    ts_wasm_exe.root_module.linkLibrary(blst_lib);
+    ts_wasm_exe.root_module.addObjectFile(rust_crypto_lib_path);
+    ts_wasm_exe.root_module.addIncludePath(b.path("lib"));
     ts_wasm_exe.step.dependOn(cargo_build_step);
     ts_wasm_exe.rdynamic = true; // Export all symbols
     // Note: WASM reactor pattern - main() exists but not used

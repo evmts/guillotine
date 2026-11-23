@@ -44,13 +44,15 @@ pub const Report = struct {
 };
 
 /// Atomic replacement: preserve the previous report if writing is interrupted.
-pub fn writeJson(path: []const u8, data: Report) !void {
+pub fn writeJson(io: std.Io, path: []const u8, data: Report) !void {
     var buffer: [16384]u8 = undefined;
-    var file = try std.fs.cwd().atomicFile(path, .{ .write_buffer = &buffer, .make_path = true });
-    defer file.deinit();
-    try std.json.Stringify.value(data, .{ .whitespace = .indent_2 }, &file.file_writer.interface);
-    try file.file_writer.interface.writeByte('\n');
-    try file.finish();
+    var file = try std.Io.Dir.cwd().createFileAtomic(io, path, .{ .make_path = true, .replace = true });
+    defer file.deinit(io);
+    var file_writer = file.file.writer(io, &buffer);
+    try std.json.Stringify.value(data, .{ .whitespace = .indent_2 }, &file_writer.interface);
+    try file_writer.interface.writeByte('\n');
+    try file_writer.interface.flush();
+    try file.replace(io);
 }
 
 pub fn markdown(writer: *std.Io.Writer, rows: []const Row) !void {
@@ -109,13 +111,14 @@ test "Markdown carries measured rates and explicit unavailable reasons" {
 test "atomic JSON report is readable and can be replaced" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    const parent = try tmp.dir.realpathAlloc(std.testing.allocator, ".");
+    const io = std.testing.io;
+    const parent = try tmp.dir.realPathFileAlloc(io, ".", std.testing.allocator);
     defer std.testing.allocator.free(parent);
-    const path = try std.fs.path.join(std.testing.allocator, &.{ parent, "nested", "report.json" });
+    const path = try std.Io.Dir.path.join(std.testing.allocator, &.{ parent, "nested", "report.json" });
     defer std.testing.allocator.free(path);
-    try writeJson(path, .{ .timestamp_unix = 1, .iterations = 1, .warmup = 0, .results = &.{} });
-    try writeJson(path, .{ .timestamp_unix = 2, .iterations = 2, .warmup = 0, .results = &.{} });
-    const bytes = try std.fs.cwd().readFileAlloc(std.testing.allocator, path, 16384);
+    try writeJson(io, path, .{ .timestamp_unix = 1, .iterations = 1, .warmup = 0, .results = &.{} });
+    try writeJson(io, path, .{ .timestamp_unix = 2, .iterations = 2, .warmup = 0, .results = &.{} });
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, path, std.testing.allocator, .limited(16384));
     defer std.testing.allocator.free(bytes);
     const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, bytes, .{});
     defer parsed.deinit();

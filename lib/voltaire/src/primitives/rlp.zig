@@ -164,11 +164,11 @@ pub fn encode(allocator: Allocator, input: anytype) EncodeError![]u8 {
 
     // Handle lists
     if (info == .array or info == .pointer) {
-        var result = std.ArrayList(u8){};
+        var result = std.ArrayList(u8).empty;
         defer result.deinit(allocator);
 
         // First encode each element
-        var encoded_items = std.ArrayList([]u8){};
+        var encoded_items = std.ArrayList([]u8).empty;
         defer {
             for (encoded_items.items) |item| {
                 allocator.free(item);
@@ -217,7 +217,7 @@ pub fn encode(allocator: Allocator, input: anytype) EncodeError![]u8 {
             return result;
         }
 
-        var bytes = std.ArrayList(u8){};
+        var bytes = std.ArrayList(u8).empty;
         defer bytes.deinit(allocator);
 
         var value = input;
@@ -267,7 +267,7 @@ pub fn encodeBytes(allocator: Allocator, bytes: []const u8) ![]u8 {
 
 /// Encodes an integer length as bytes
 pub fn encodeLength(allocator: Allocator, length: usize) ![]u8 {
-    var len_bytes = std.ArrayList(u8){};
+    var len_bytes = std.ArrayList(u8).empty;
     defer len_bytes.deinit(allocator);
 
     var temp = length;
@@ -405,7 +405,7 @@ fn _decode(allocator: Allocator, input: []const u8, depth: u32) !Decoded {
             };
         }
 
-        var items = std.ArrayList(Data){};
+        var items = std.ArrayList(Data).empty;
         errdefer {
             // Clean up already allocated items on error
             for (items.items) |item| {
@@ -454,7 +454,7 @@ fn _decode(allocator: Allocator, input: []const u8, depth: u32) !Decoded {
             return RlpError.InputTooShort;
         }
 
-        var items = std.ArrayList(Data){};
+        var items = std.ArrayList(Data).empty;
         errdefer {
             // Clean up already allocated items on error
             for (items.items) |item| {
@@ -1362,7 +1362,7 @@ test "RLP boundary values - 55 byte string" {
     const allocator = testing.allocator;
 
     // Exactly 55 bytes - should use short form
-    const str_55 = "a" ** 55;
+    const str_55 = &@as([55]u8, @splat('a'));
     const encoded = try encode(allocator, str_55);
     defer allocator.free(encoded);
 
@@ -1383,7 +1383,7 @@ test "RLP boundary values - 56 byte string" {
     const allocator = testing.allocator;
 
     // Exactly 56 bytes - should use long form
-    const str_56 = "a" ** 56;
+    const str_56 = &@as([56]u8, @splat('a'));
     const encoded = try encode(allocator, str_56);
     defer allocator.free(encoded);
 
@@ -1404,7 +1404,7 @@ test "RLP list boundary - 55 byte total" {
     const allocator = testing.allocator;
 
     // Create list where total encoded size is exactly 55 bytes
-    const items = [_][]const u8{ "a" ** 17, "b" ** 17, "c" ** 17 };
+    const items = [_][]const u8{ &@as([17]u8, @splat('a')), &@as([17]u8, @splat('b')), &@as([17]u8, @splat('c')) };
     const encoded = try encode(allocator, items[0..]);
     defer allocator.free(encoded);
 

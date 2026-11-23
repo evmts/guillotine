@@ -24,14 +24,14 @@ test "SDIV: basic signed division (-10 / 2 = -5)" {
 
 fn run_sdiv_test(allocator: std.mem.Allocator, a: u256, b: u256) !void {
     // Build custom bytecode for SDIV test
-    var buf = std.ArrayList(u8){};
+    var buf = std.ArrayList(u8).empty;
     defer buf.deinit(allocator);
     
     // Push a (first operand)
     if (a == 0) {
         try buf.append(allocator, 0x5f); // PUSH0
     } else {
-        var tmp: [32]u8 = [_]u8{0} ** 32;
+        var tmp: [32]u8 = @as([32]u8, @splat(0));
         std.mem.writeInt(u256, &tmp, a, .big);
         const first_non_zero = std.mem.indexOfNonePos(u8, &tmp, 0, &[_]u8{0}) orelse 32;
         const slice = tmp[first_non_zero..];
@@ -46,7 +46,7 @@ fn run_sdiv_test(allocator: std.mem.Allocator, a: u256, b: u256) !void {
     if (b == 0) {
         try buf.append(allocator, 0x5f); // PUSH0
     } else {
-        var tmp: [32]u8 = [_]u8{0} ** 32;
+        var tmp: [32]u8 = @as([32]u8, @splat(0));
         std.mem.writeInt(u256, &tmp, b, .big);
         const first_non_zero = std.mem.indexOfNonePos(u8, &tmp, 0, &[_]u8{0}) orelse 32;
         const slice = tmp[first_non_zero..];
@@ -77,8 +77,8 @@ fn run_sdiv_test(allocator: std.mem.Allocator, a: u256, b: u256) !void {
     var database = evm.Database.init(allocator);
     defer database.deinit();
     
-    const caller_address = primitives.Address{ .bytes = [_]u8{0x10} ++ [_]u8{0} ** 18 ++ [_]u8{0x01} };
-    const contract_address = primitives.Address{ .bytes = [_]u8{0x20} ++ [_]u8{0} ** 18 ++ [_]u8{0x02} };
+    const caller_address = primitives.Address{ .bytes = [_]u8{0x10} ++ @as([18]u8, @splat(0)) ++ [_]u8{0x01} };
+    const contract_address = primitives.Address{ .bytes = [_]u8{0x20} ++ @as([18]u8, @splat(0)) ++ [_]u8{0x02} };
     
     const code_hash = try database.set_code(bytecode);
     
@@ -86,14 +86,14 @@ fn run_sdiv_test(allocator: std.mem.Allocator, a: u256, b: u256) !void {
         .balance = 0,
         .nonce = 0,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     });
     
     try database.set_account(caller_address.bytes, .{
         .balance = std.math.maxInt(u256),
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     });
     
     const block_info = evm.BlockInfo{
@@ -104,7 +104,7 @@ fn run_sdiv_test(allocator: std.mem.Allocator, a: u256, b: u256) !void {
         .gas_limit = 1_000_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 7,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
         .blob_base_fee = 1000000000,
         .blob_versioned_hashes = &.{},
     };
@@ -307,14 +307,14 @@ test "SDIV: very large numbers within signed range" {
 
 fn run_sdiv_test_with_jump(allocator: std.mem.Allocator, a: u256, b: u256) !void {
     // Build custom bytecode for SDIV test with jump to prevent fusion
-    var buf = std.ArrayList(u8){};
+    var buf = std.ArrayList(u8).empty;
     defer buf.deinit(allocator);
     
     // Push a (first operand)
     if (a == 0) {
         try buf.append(allocator, 0x5f); // PUSH0
     } else {
-        var tmp: [32]u8 = [_]u8{0} ** 32;
+        var tmp: [32]u8 = @as([32]u8, @splat(0));
         std.mem.writeInt(u256, &tmp, a, .big);
         const first_non_zero = std.mem.indexOfNonePos(u8, &tmp, 0, &[_]u8{0}) orelse 32;
         const slice = tmp[first_non_zero..];
@@ -329,7 +329,7 @@ fn run_sdiv_test_with_jump(allocator: std.mem.Allocator, a: u256, b: u256) !void
     if (b == 0) {
         try buf.append(allocator, 0x5f); // PUSH0
     } else {
-        var tmp: [32]u8 = [_]u8{0} ** 32;
+        var tmp: [32]u8 = @as([32]u8, @splat(0));
         std.mem.writeInt(u256, &tmp, b, .big);
         const first_non_zero = std.mem.indexOfNonePos(u8, &tmp, 0, &[_]u8{0}) orelse 32;
         const slice = tmp[first_non_zero..];
@@ -373,8 +373,8 @@ fn run_sdiv_test_with_jump(allocator: std.mem.Allocator, a: u256, b: u256) !void
     var database = evm.Database.init(allocator);
     defer database.deinit();
     
-    const caller_address = primitives.Address{ .bytes = [_]u8{0x10} ++ [_]u8{0} ** 18 ++ [_]u8{0x01} };
-    const contract_address = primitives.Address{ .bytes = [_]u8{0x20} ++ [_]u8{0} ** 18 ++ [_]u8{0x02} };
+    const caller_address = primitives.Address{ .bytes = [_]u8{0x10} ++ @as([18]u8, @splat(0)) ++ [_]u8{0x01} };
+    const contract_address = primitives.Address{ .bytes = [_]u8{0x20} ++ @as([18]u8, @splat(0)) ++ [_]u8{0x02} };
     
     const code_hash = try database.set_code(bytecode);
     
@@ -382,14 +382,14 @@ fn run_sdiv_test_with_jump(allocator: std.mem.Allocator, a: u256, b: u256) !void
         .balance = 0,
         .nonce = 0,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     });
     
     try database.set_account(caller_address.bytes, .{
         .balance = std.math.maxInt(u256),
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     });
     
     const block_info = evm.BlockInfo{
@@ -400,7 +400,7 @@ fn run_sdiv_test_with_jump(allocator: std.mem.Allocator, a: u256, b: u256) !void
         .gas_limit = 1_000_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 7,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
         .blob_base_fee = 1000000000,
         .blob_versioned_hashes = &.{},
     };

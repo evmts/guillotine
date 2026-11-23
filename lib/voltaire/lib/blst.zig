@@ -18,7 +18,7 @@ pub fn createBlstLibrary(
         }),
     });
 
-    lib.linkLibC();
+    lib.root_module.link_libc = true;
 
     // For native targets, build assembly and link it
     // For WASM, use portable C-only implementation
@@ -31,8 +31,13 @@ pub fn createBlstLibrary(
         blst_build_cmd.setCwd(b.path("lib/c-kzg-4844/blst"));
         lib.step.dependOn(&blst_build_cmd.step);
 
-        // Add assembly file for native platforms
-        lib.addAssemblyFile(b.path("lib/c-kzg-4844/blst/build/assembly.S"));
+        // Assemble with the same __BLST_PORTABLE__ define as server.c. On CPUs
+        // with ADX (native builds), assembly.S otherwise emits only the mulx
+        // variants while portable C dispatches to both mulq and mulx at runtime.
+        lib.root_module.addCSourceFile(.{
+            .file = b.path("lib/c-kzg-4844/blst/build/assembly.S"),
+            .flags = &.{"-D__BLST_PORTABLE__"},
+        });
     }
 
     // Add blst source files with portable flag
@@ -43,14 +48,14 @@ pub fn createBlstLibrary(
     else
         &[_][]const u8{ "-std=c99", "-D__BLST_PORTABLE__", "-fno-sanitize=undefined" };
 
-    lib.addCSourceFiles(.{
+    lib.root_module.addCSourceFiles(.{
         .files = &.{
             "lib/c-kzg-4844/blst/src/server.c",
         },
         .flags = c_flags,
     });
 
-    lib.addIncludePath(b.path("lib/c-kzg-4844/blst/bindings"));
+    lib.root_module.addIncludePath(b.path("lib/c-kzg-4844/blst/bindings"));
 
     return lib;
 }

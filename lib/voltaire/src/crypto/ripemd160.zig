@@ -238,7 +238,7 @@ fn transform(s: *[5]u32, chunk: *const [64]u8) void {
     var dr = dl;
     var er = el;
 
-    if (comptime builtin.mode == .ReleaseSmall) {
+    if (comptime builtin.mode == .small) {
         // Dynamic version for size optimization
         // Process both left and right lines in parallel
         var i: usize = 0;
@@ -613,7 +613,7 @@ test "RIPEMD160: million 'a' characters" {
     var h = RIPEMD160.init();
     var i: usize = 0;
     while (i < 1000000) : (i += 1000) {
-        h.update("a" ** 1000);
+        h.update(&@as([1000]u8, @splat('a')));
     }
     const result = h.final();
 
@@ -690,9 +690,9 @@ test "RIPEMD160: partial block updates" {
 
 test "RIPEMD160: update cycle across block boundary" {
     // Test updates that cross 64-byte block boundaries
-    const part1 = "a" ** 60; // 60 bytes
-    const part2 = "b" ** 10; // 10 bytes - total 70 bytes, crosses boundary
-    const part3 = "c" ** 30; // 30 bytes
+    const part1 = &@as([60]u8, @splat('a')); // 60 bytes
+    const part2 = &@as([10]u8, @splat('b')); // 10 bytes - total 70 bytes, crosses boundary
+    const part3 = &@as([30]u8, @splat('c')); // 30 bytes
 
     var h1 = RIPEMD160.init();
     h1.update(part1 ++ part2 ++ part3);
@@ -728,7 +728,7 @@ test "RIPEMD160: state machine - reset functionality" {
 
 test "RIPEMD160: exactly 64 bytes" {
     // Test message that is exactly one block (64 bytes)
-    const input = "a" ** 64;
+    const input = &@as([64]u8, @splat('a'));
 
     const expected = [_]u8{
         0x7f, 0x3b, 0x6d, 0xe9, 0xf7, 0x66, 0x0e, 0xda,
@@ -745,7 +745,7 @@ test "RIPEMD160: exactly 64 bytes" {
 
 test "RIPEMD160: exactly 128 bytes" {
     // Test message that is exactly two blocks (128 bytes)
-    const input = "a" ** 128;
+    const input = &@as([128]u8, @splat('a'));
 
     const expected = [_]u8{
         0xa3, 0x65, 0x7f, 0xd3, 0x00, 0xe8, 0x43, 0xc3,
@@ -804,7 +804,7 @@ test "RIPEMD160: incremental hashing vs single update" {
 test "RIPEMD160: boundary condition - 55 bytes" {
     // 55 bytes is critical: leaves exactly 9 bytes in block after padding byte
     // This is the maximum size that fits in one block with padding
-    const input = "a" ** 55;
+    const input = &@as([55]u8, @splat('a'));
 
     const expected = [_]u8{
         0xc6, 0x4c, 0xe1, 0x2b, 0x6e, 0x0c, 0x5d, 0x7f,
@@ -821,7 +821,7 @@ test "RIPEMD160: boundary condition - 55 bytes" {
 
 test "RIPEMD160: boundary condition - 56 bytes" {
     // 56 bytes forces padding into second block
-    const input = "a" ** 56;
+    const input = &@as([56]u8, @splat('a'));
 
     const expected = [_]u8{
         0x84, 0x98, 0x3e, 0x44, 0x1c, 0x3b, 0xd2, 0x6e,

@@ -118,7 +118,7 @@ pub const MerkleTrie = struct {
 
                 // Get the next node
                 switch (extension.next) {
-                    .Raw => |_| {
+                    .Raw => {
                         // Should not happen in a well-formed trie
                         return TrieError.InvalidNode;
                     },
@@ -154,7 +154,7 @@ pub const MerkleTrie = struct {
                 new_prefix[path_prefix.len] = next_nibble;
 
                 switch (child) {
-                    .Raw => |_| {
+                    .Raw => {
                         // Direct value, no further recursion
                         return true;
                     },

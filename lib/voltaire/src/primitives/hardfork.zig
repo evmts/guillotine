@@ -804,8 +804,7 @@ test "mainnet activation of Prague, Osaka and Amsterdam" {
 test "mainnet activations are monotonic for every scheduled fork" {
     var previous_block: u64 = 0;
     var previous_time: u64 = 0;
-    inline for (std.meta.fields(Hardfork)) |field| {
-        const fork: Hardfork = @enumFromInt(field.value);
+    for (std.meta.tags(Hardfork)) |fork| {
         if (fork.mainnetActivationBlock()) |block| {
             try testing.expect(block >= previous_block);
             previous_block = block;

@@ -47,7 +47,7 @@ pub fn Memory(config: MemoryConfig) type {
             if (is_owned) {
                 const buffer_ptr = try allocator.create(std.ArrayList(u8));
                 errdefer allocator.destroy(buffer_ptr);
-                buffer_ptr.* = std.ArrayList(u8){};
+                buffer_ptr.* = std.ArrayList(u8).empty;
                 errdefer buffer_ptr.deinit(allocator);
                 try buffer_ptr.ensureTotalCapacity(allocator, INITIAL_CAPACITY);
                 return Self{

@@ -4,7 +4,7 @@ pub fn main() !void {
     const allocator = std.heap.page_allocator;
 
     // Build the CALL bytecode exactly as in common.zig
-    var buf = std.ArrayList(u8){};
+    var buf = std.ArrayList(u8).empty;
     defer buf.deinit(allocator);
 
     // This is what 0xf1 (CALL) generates:

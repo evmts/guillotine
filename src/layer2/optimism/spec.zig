@@ -94,7 +94,7 @@ test "OpSpecId ALL is strictly increasing" {
         try std.testing.expect(next.isAtLeast(prev));
         try std.testing.expect(!prev.isAtLeast(next));
     }
-    try std.testing.expectEqual(@typeInfo(OpSpecId).@"enum".fields.len, OpSpecId.ALL.len);
+    try std.testing.expectEqual(@typeInfo(OpSpecId).@"enum".field_names.len, OpSpecId.ALL.len);
 }
 
 test "OpSpecId default is JOVIAN" {

@@ -165,7 +165,7 @@ pub fn Evm(config: EvmConfig) type {
 
             var self = Self{
                 .depth = 0,
-                .call_stack = [_]CallStackEntry{CallStackEntry{ .caller = primitives.Address.ZERO_ADDRESS, .value = 0, .is_static = false }} ** config.max_call_depth,
+                .call_stack = @as([config.max_call_depth]CallStackEntry, @splat(CallStackEntry{ .caller = primitives.Address.ZERO_ADDRESS, .value = 0, .is_static = false })),
                 .return_data = null,
                 .allocator = allocator,
                 .database = database orelse return error.DatabaseRequired,
@@ -362,7 +362,7 @@ pub fn Evm(config: EvmConfig) type {
                 log.debug("[DUMP] found account: balance={d}, nonce={d}", .{ account.balance, account.nonce });
 
                 // Skip zero balance, zero nonce accounts with no code
-                if (account.balance == 0 and account.nonce == 0 and std.mem.eql(u8, &account.code_hash, &([_]u8{0} ** 32))) {
+                if (account.balance == 0 and account.nonce == 0 and std.mem.eql(u8, &account.code_hash, &(@as([32]u8, @splat(0))))) {
                     continue;
                 }
 
@@ -378,7 +378,7 @@ pub fn Evm(config: EvmConfig) type {
 
                 // Get code if present
                 var code: []u8 = &.{};
-                if (!std.mem.eql(u8, &account.code_hash, &([_]u8{0} ** 32))) {
+                if (!std.mem.eql(u8, &account.code_hash, &(@as([32]u8, @splat(0))))) {
                     const db_code = try self.database.get_code(account.code_hash);
                     code = try allocator.dupe(u8, db_code);
                 }
@@ -491,7 +491,7 @@ pub fn Evm(config: EvmConfig) type {
 
                 // Reset call stack to initial state
                 // This is critical when reusing EVM instances across multiple transactions
-                self.call_stack = [_]CallStackEntry{CallStackEntry{ .caller = primitives.Address.ZERO_ADDRESS, .value = 0, .is_static = false }} ** config.max_call_depth;
+                self.call_stack = @as([config.max_call_depth]CallStackEntry, @splat(CallStackEntry{ .caller = primitives.Address.ZERO_ADDRESS, .value = 0, .is_static = false }));
                 // Reset snapshot ID
                 self.current_snapshot_id = 0;
                 self.tx_sender_nonce_incremented = false;
@@ -835,7 +835,7 @@ pub fn Evm(config: EvmConfig) type {
         /// This handles nested calls and manages depth tracking.
         pub fn inner_call(self: *Self, params: CallParams) CallResult {
             @branchHint(.likely);
-            if ((@import("builtin").mode == .Debug or @import("builtin").mode == .ReleaseSafe)) {
+            if ((@import("builtin").mode == .debug or @import("builtin").mode == .safe)) {
                 params.validate() catch return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
             }
 
@@ -1319,7 +1319,7 @@ pub fn Evm(config: EvmConfig) type {
             if (existed_before) {
                 const existing = try self.database.get_account(contract_address.bytes);
                 // EIP-684: an address with code or a nonzero nonce cannot be created again.
-                if (existing != null and (existing.?.nonce != 0 or !std.mem.eql(u8, &existing.?.code_hash, &[_]u8{0} ** 32))) {
+                if (existing != null and (existing.?.nonce != 0 or !std.mem.eql(u8, &existing.?.code_hash, &@as([32]u8, @splat(0))))) {
                     self.journal.revert_to_snapshot(snapshot_id);
                     try self.database.revert_to_snapshot(db_snapshot_id);
                     return CallResult.failure(self.getCallArenaAllocator(), retained) catch unreachable;
@@ -1402,7 +1402,7 @@ pub fn Evm(config: EvmConfig) type {
             if (existed_before) {
                 const existing = try self.database.get_account(contract_address.bytes);
                 // EIP-684: an address with code or a nonzero nonce cannot be created again.
-                if (existing != null and (existing.?.nonce != 0 or !std.mem.eql(u8, &existing.?.code_hash, &[_]u8{0} ** 32))) {
+                if (existing != null and (existing.?.nonce != 0 or !std.mem.eql(u8, &existing.?.code_hash, &@as([32]u8, @splat(0))))) {
                     log.debug("CREATE2: collision at address", .{});
                     self.journal.revert_to_snapshot(snapshot_id);
                     try self.database.revert_to_snapshot(db_snapshot_id);
@@ -1882,8 +1882,8 @@ pub fn Evm(config: EvmConfig) type {
                         const reverted_account = Account{
                             .balance = bc.original_balance,
                             .nonce = 0,
-                            .code_hash = [_]u8{0} ** 32,
-                            .storage_root = [_]u8{0} ** 32,
+                            .code_hash = @as([32]u8, @splat(0)),
+                            .storage_root = @as([32]u8, @splat(0)),
                         };
                         return self.database.set_account(bc.address.bytes, reverted_account);
                     };
@@ -1907,8 +1907,8 @@ pub fn Evm(config: EvmConfig) type {
                     const restored_account = Account{
                         .balance = ad.balance,
                         .nonce = 0,
-                        .code_hash = [_]u8{0} ** 32,
-                        .storage_root = [_]u8{0} ** 32,
+                        .code_hash = @as([32]u8, @splat(0)),
+                        .storage_root = @as([32]u8, @splat(0)),
                     };
                     try self.database.set_account(ad.address.bytes, restored_account);
                 },
@@ -2267,7 +2267,7 @@ test "EVM call() entry point method" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const tx_context = TransactionContext{
@@ -2321,7 +2321,7 @@ test "EVM call() method routes to different handlers" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const tx_context = TransactionContext{
@@ -2412,7 +2412,7 @@ test "Evm creation with custom config" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -2438,7 +2438,7 @@ test "Evm init derives effective gas price only when requested" {
         .gas_limit = 30_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 100,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
     const context = TransactionContext{
         .gas_limit = 100_000,
@@ -2471,8 +2471,8 @@ test "Evm init derives effective gas price only when requested" {
 test "EIP-7623 clamps successful Prague transaction gas to calldata floor" {
     const gas_limit: u64 = 21_011;
     const input = [_]u8{0x00};
-    const sender = primitives.Address{ .bytes = [_]u8{0x02} ++ [_]u8{0x00} ** 19 };
-    const target = primitives.Address{ .bytes = [_]u8{0x01} ++ [_]u8{0x00} ** 19 };
+    const sender = primitives.Address{ .bytes = [_]u8{0x02} ++ @as([19]u8, @splat(0x00)) };
+    const target = primitives.Address{ .bytes = [_]u8{0x01} ++ @as([19]u8, @splat(0x00)) };
     const block_info = BlockInfo{
         .number = 1,
         .timestamp = 1000,
@@ -2480,7 +2480,7 @@ test "EIP-7623 clamps successful Prague transaction gas to calldata floor" {
         .gas_limit = 30_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
     const context = TransactionContext{
         .gas_limit = gas_limit,
@@ -2534,8 +2534,8 @@ test "EIP-7623 clamps successful Prague transaction gas to calldata floor" {
 }
 
 test "EIP-7825 rejects Osaka transaction above the gas limit cap before nonce increment" {
-    const sender = primitives.Address{ .bytes = [_]u8{0x02} ++ [_]u8{0x00} ** 19 };
-    const target = primitives.Address{ .bytes = [_]u8{0x01} ++ [_]u8{0x00} ** 19 };
+    const sender = primitives.Address{ .bytes = [_]u8{0x02} ++ @as([19]u8, @splat(0x00)) };
+    const target = primitives.Address{ .bytes = [_]u8{0x01} ++ @as([19]u8, @splat(0x00)) };
     const block_info = BlockInfo{
         .number = 1,
         .timestamp = 1000,
@@ -2543,7 +2543,7 @@ test "EIP-7825 rejects Osaka transaction above the gas limit cap before nonce in
         .gas_limit = 60_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
     const context = TransactionContext{
         .gas_limit = eips.TX_GAS_LIMIT_CAP + 1,
@@ -2577,8 +2577,8 @@ test "EIP-7825 rejects Osaka transaction above the gas limit cap before nonce in
 }
 
 test "EIP-7825 accepts Osaka transaction at exactly the gas limit cap" {
-    const sender = primitives.Address{ .bytes = [_]u8{0x02} ++ [_]u8{0x00} ** 19 };
-    const target = primitives.Address{ .bytes = [_]u8{0x01} ++ [_]u8{0x00} ** 19 };
+    const sender = primitives.Address{ .bytes = [_]u8{0x02} ++ @as([19]u8, @splat(0x00)) };
+    const target = primitives.Address{ .bytes = [_]u8{0x01} ++ @as([19]u8, @splat(0x00)) };
     const block_info = BlockInfo{
         .number = 1,
         .timestamp = 1000,
@@ -2586,7 +2586,7 @@ test "EIP-7825 accepts Osaka transaction at exactly the gas limit cap" {
         .gas_limit = 60_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
     const context = TransactionContext{
         .gas_limit = eips.TX_GAS_LIMIT_CAP,
@@ -2618,8 +2618,8 @@ test "EIP-7825 accepts Osaka transaction at exactly the gas limit cap" {
 }
 
 test "EIP-7825 does not cap Prague transaction gas" {
-    const sender = primitives.Address{ .bytes = [_]u8{0x02} ++ [_]u8{0x00} ** 19 };
-    const target = primitives.Address{ .bytes = [_]u8{0x01} ++ [_]u8{0x00} ** 19 };
+    const sender = primitives.Address{ .bytes = [_]u8{0x02} ++ @as([19]u8, @splat(0x00)) };
+    const target = primitives.Address{ .bytes = [_]u8{0x01} ++ @as([19]u8, @splat(0x00)) };
     const block_info = BlockInfo{
         .number = 1,
         .timestamp = 1000,
@@ -2627,7 +2627,7 @@ test "EIP-7825 does not cap Prague transaction gas" {
         .gas_limit = 60_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
     const context = TransactionContext{
         .gas_limit = eips.TX_GAS_LIMIT_CAP + 1,
@@ -2671,7 +2671,7 @@ test "Evm call depth limit" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -2716,7 +2716,7 @@ test "call method basic functionality - simple STOP" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -2760,7 +2760,7 @@ test "call method loads contract code from state" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -2782,7 +2782,7 @@ test "call method loads contract code from state" {
         .balance = 0,
         .nonce = 0,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     };
     try db.set_account(contract_address.bytes, account);
 
@@ -2815,7 +2815,7 @@ test "call method handles CREATE operation" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -2858,7 +2858,7 @@ test "call method handles gas limit properly" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -2981,7 +2981,7 @@ test "Journal - multiple entry types" {
 
     const snapshot_id = try journal.create_snapshot();
     const address = primitives.ZERO_ADDRESS;
-    const code_hash = [_]u8{0xAB} ** 32;
+    const code_hash = @as([32]u8, @splat(0xAB));
 
     // Record different types of changes
     try journal.record_storage_change(snapshot_id, address, 1, 100);
@@ -3066,7 +3066,7 @@ test "EvmConfig - custom configurations" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -3105,7 +3105,7 @@ test "Evm initialization with all parameters" {
         .gas_limit = 15000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 25000000000, // 25 gwei
-        .prev_randao = [_]u8{0xAB} ** 32,
+        .prev_randao = @as([32]u8, @splat(0xAB)),
     };
 
     const context = TransactionContext{
@@ -3147,7 +3147,7 @@ test "Host interface - get_balance functionality" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -3166,15 +3166,15 @@ test "Host interface - get_balance functionality" {
     const account = @import("storage/database_interface_account.zig").Account{
         .balance = balance,
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     };
     try db.set_account(address.bytes, account);
 
     const retrieved_balance = evm.get_balance(address);
     try std.testing.expectEqual(balance, retrieved_balance);
 
-    const zero_address: primitives.Address = .{ .bytes = [_]u8{1} ++ [_]u8{0} ** 19 };
+    const zero_address: primitives.Address = .{ .bytes = [_]u8{1} ++ @as([19]u8, @splat(0)) };
     const zero_balance = evm.get_balance(zero_address);
     try std.testing.expectEqual(@as(u256, 0), zero_balance);
 }
@@ -3191,7 +3191,7 @@ test "Host interface - storage operations" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -3235,7 +3235,7 @@ test "Host interface - account_exists functionality" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -3251,15 +3251,15 @@ test "Host interface - account_exists functionality" {
     const account = @import("storage/database_interface_account.zig").Account{
         .balance = 1000,
         .nonce = 1,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     };
     try db.set_account(address.bytes, account);
 
     const exists = evm.account_exists(address);
     try std.testing.expect(exists);
 
-    const non_existing: primitives.Address = .{ .bytes = [_]u8{1} ++ [_]u8{0} ** 19 };
+    const non_existing: primitives.Address = .{ .bytes = [_]u8{1} ++ @as([19]u8, @splat(0)) };
     const does_not_exist = evm.account_exists(non_existing);
     try std.testing.expect(!does_not_exist);
 }
@@ -3276,7 +3276,7 @@ test "Host interface - call type differentiation" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -3340,7 +3340,7 @@ test "EVM CREATE operation - basic contract creation" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -3353,12 +3353,12 @@ test "EVM CREATE operation - basic contract creation" {
     defer evm.deinit();
 
     // Set up caller with balance
-    const caller_address: primitives.Address = .{ .bytes = [_]u8{0x01} ++ [_]u8{0} ** 19 };
+    const caller_address: primitives.Address = .{ .bytes = [_]u8{0x01} ++ @as([19]u8, @splat(0)) };
     const caller_account = Account{
         .balance = 1000000,
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     };
     try db.set_account(caller_address.bytes, caller_account);
 
@@ -3419,7 +3419,7 @@ test "EVM CREATE operation - with value transfer" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -3432,14 +3432,14 @@ test "EVM CREATE operation - with value transfer" {
     defer evm.deinit();
 
     // Set up caller with balance
-    const caller_address: primitives.Address = .{ .bytes = [_]u8{0x01} ++ [_]u8{0} ** 19 };
+    const caller_address: primitives.Address = .{ .bytes = [_]u8{0x01} ++ @as([19]u8, @splat(0)) };
     const initial_balance: u256 = 1000000;
     const transfer_value: u256 = 12345;
     const caller_account = Account{
         .balance = initial_balance,
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     };
     try db.set_account(caller_address.bytes, caller_account);
 
@@ -3483,7 +3483,7 @@ test "EVM CREATE operation - insufficient balance fails" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -3495,12 +3495,12 @@ test "EVM CREATE operation - insufficient balance fails" {
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
     defer evm.deinit();
 
-    const caller_address: primitives.Address = .{ .bytes = [_]u8{0x01} ++ [_]u8{0} ** 19 };
+    const caller_address: primitives.Address = .{ .bytes = [_]u8{0x01} ++ @as([19]u8, @splat(0)) };
     const caller_account = Account{
         .balance = 100,
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     };
     try db.set_account(caller_address.bytes, caller_account);
 
@@ -3532,7 +3532,7 @@ test "EVM CREATE2 operation - deterministic address creation" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -3544,12 +3544,12 @@ test "EVM CREATE2 operation - deterministic address creation" {
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
     defer evm.deinit();
 
-    const caller_address: primitives.Address = .{ .bytes = [_]u8{0x01} ++ [_]u8{0} ** 19 };
+    const caller_address: primitives.Address = .{ .bytes = [_]u8{0x01} ++ @as([19]u8, @splat(0)) };
     const caller_account = Account{
         .balance = 1000000,
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     };
     try db.set_account(caller_address.bytes, caller_account);
 
@@ -3610,7 +3610,7 @@ test "EVM CREATE2 operation - same parameters produce same address" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -3622,7 +3622,7 @@ test "EVM CREATE2 operation - same parameters produce same address" {
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
     defer evm.deinit();
 
-    const caller_address: primitives.Address = .{ .bytes = [_]u8{0x01} ++ [_]u8{0} ** 19 };
+    const caller_address: primitives.Address = .{ .bytes = [_]u8{0x01} ++ @as([19]u8, @splat(0)) };
     const init_code = [_]u8{ 0x00, 0x00, 0xF3 }; // STOP STOP RETURN
     const salt: u256 = 0xDEADBEEF;
 
@@ -3637,8 +3637,8 @@ test "EVM CREATE2 operation - same parameters produce same address" {
     const caller_account = Account{
         .balance = 1000000,
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     };
     try db.set_account(caller_address.bytes, caller_account);
 
@@ -3673,7 +3673,7 @@ test "EVM CREATE operation - collision detection" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -3685,7 +3685,7 @@ test "EVM CREATE operation - collision detection" {
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
     defer evm.deinit();
 
-    const caller_address: primitives.Address = .{ .bytes = [_]u8{0x01} ++ [_]u8{0} ** 19 };
+    const caller_address: primitives.Address = .{ .bytes = [_]u8{0x01} ++ @as([19]u8, @splat(0)) };
 
     // Calculate what the contract address will be
     const expected_address = primitives.Address.getContractAddress(caller_address, 0);
@@ -3697,7 +3697,7 @@ test "EVM CREATE operation - collision detection" {
         .balance = 0,
         .nonce = 1,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     };
     try db.set_account(expected_address.bytes, existing_account);
 
@@ -3705,8 +3705,8 @@ test "EVM CREATE operation - collision detection" {
     const caller_account = Account{
         .balance = 1000000,
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     };
     try db.set_account(caller_address.bytes, caller_account);
 
@@ -3738,7 +3738,7 @@ test "EVM CREATE operation - init code execution and storage" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -3750,12 +3750,12 @@ test "EVM CREATE operation - init code execution and storage" {
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
     defer evm.deinit();
 
-    const caller_address: primitives.Address = .{ .bytes = [_]u8{0x01} ++ [_]u8{0} ** 19 };
+    const caller_address: primitives.Address = .{ .bytes = [_]u8{0x01} ++ @as([19]u8, @splat(0)) };
     const caller_account = Account{
         .balance = 1000000,
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     };
     try db.set_account(caller_address.bytes, caller_account);
 
@@ -3819,7 +3819,7 @@ test "EVM CREATE/CREATE2 - nested contract creation" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -3850,21 +3850,21 @@ test "EVM CREATE/CREATE2 - nested contract creation" {
         0xF3, // RETURN
     };
 
-    const factory_address: primitives.Address = .{ .bytes = [_]u8{0x02} ++ [_]u8{0} ** 19 };
+    const factory_address: primitives.Address = .{ .bytes = [_]u8{0x02} ++ @as([19]u8, @splat(0)) };
     const code_hash = try db.set_code(&factory_bytecode);
     try db.set_account(factory_address.bytes, Account{
         .balance = 0,
         .nonce = 0,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     });
 
-    const caller_address: primitives.Address = .{ .bytes = [_]u8{0x01} ++ [_]u8{0} ** 19 };
+    const caller_address: primitives.Address = .{ .bytes = [_]u8{0x01} ++ @as([19]u8, @splat(0)) };
     try db.set_account(caller_address.bytes, Account{
         .balance = 1000000,
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     });
 
     // Call the factory to create a child contract
@@ -3904,7 +3904,7 @@ test "EVM logs - emit_log functionality" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -3952,7 +3952,7 @@ test "EVM logs - included in CallResult" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -3971,12 +3971,12 @@ test "EVM logs - included in CallResult" {
     const bytecode = [_]u8{ 0x60, 0x05, 0x60, 0x00, 0xA0, 0x00 }; // Last 0x00 is STOP
     const code_hash = try db.set_code(&bytecode);
 
-    const contract_address: primitives.Address = .{ .bytes = [_]u8{0x12} ++ [_]u8{0} ** 19 };
+    const contract_address: primitives.Address = .{ .bytes = [_]u8{0x12} ++ @as([19]u8, @splat(0)) };
     const account = Account{
         .balance = 0,
         .nonce = 0,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     };
     try db.set_account(contract_address.bytes, account);
 
@@ -4018,7 +4018,7 @@ test "Host interface - hardfork compatibility checks" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -4058,7 +4058,7 @@ test "Host interface - access cost operations" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -4094,7 +4094,7 @@ test "Host interface - input size validation" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -4140,7 +4140,7 @@ test "Call types - CREATE2 with salt" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -4185,7 +4185,7 @@ test "Error handling - nested call depth tracking" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -4234,7 +4234,7 @@ test "Error handling - precompile execution" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -4247,8 +4247,8 @@ test "Error handling - precompile execution" {
     defer evm.deinit();
 
     // Test calling ECRECOVER precompile (address 0x01)
-    const ecrecover_address = [_]u8{0} ** 19 ++ [_]u8{1}; // 0x0000...0001
-    const input_data = [_]u8{0} ** 128; // Invalid ECRECOVER input (all zeros)
+    const ecrecover_address = @as([19]u8, @splat(0)) ++ [_]u8{1}; // 0x0000...0001
+    const input_data = @as([128]u8, @splat(0)); // Invalid ECRECOVER input (all zeros)
 
     const call_params = Evm(.{}).CallParams{
         .call = .{
@@ -4280,7 +4280,7 @@ test "Error handling - REVERT should preserve data and error message in both tra
         .gas_limit = 30000000,
         .coinbase = primitives.Address.ZERO_ADDRESS,
         .base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const tx_context = TransactionContext{
@@ -4294,7 +4294,7 @@ test "Error handling - REVERT should preserve data and error message in both tra
         var vm = try Evm(.{}).init(allocator, &db, block_info, tx_context, 0, primitives.Address.ZERO_ADDRESS, .BERLIN);
         defer vm.deinit();
 
-        const contract_addr = primitives.Address{ .bytes = [_]u8{0x12} ** 20 };
+        const contract_addr = primitives.Address{ .bytes = @as([20]u8, @splat(0x12)) };
 
         // Bytecode: Store "FAIL" (0x4641494c) in memory and revert with it
         // PUSH4 0x4641494c (FAIL), PUSH1 0, MSTORE
@@ -4312,7 +4312,7 @@ test "Error handling - REVERT should preserve data and error message in both tra
         const account = Account{
             .balance = 0,
             .code_hash = code_hash,
-            .storage_root = [_]u8{0} ** 32,
+            .storage_root = @as([32]u8, @splat(0)),
             .nonce = 0,
             .delegated_address = null,
         };
@@ -4364,7 +4364,7 @@ test "Error handling - REVERT should preserve data and error message in both tra
         var vm = try TracingEvm.init(allocator, &db, block_info, tx_context, 0, primitives.Address.ZERO_ADDRESS, .BERLIN);
         defer vm.deinit();
 
-        const contract_addr = primitives.Address{ .bytes = [_]u8{0x13} ** 20 };
+        const contract_addr = primitives.Address{ .bytes = @as([20]u8, @splat(0x13)) };
 
         // Same bytecode as above
         const bytecode = [_]u8{
@@ -4380,7 +4380,7 @@ test "Error handling - REVERT should preserve data and error message in both tra
         const account = Account{
             .balance = 0,
             .code_hash = code_hash,
-            .storage_root = [_]u8{0} ** 32,
+            .storage_root = @as([32]u8, @splat(0)),
             .nonce = 0,
             .delegated_address = null,
         };
@@ -4446,7 +4446,7 @@ test "Error handling - REVERT with empty data should still have error message" {
         .gas_limit = 30000000,
         .coinbase = primitives.Address.ZERO_ADDRESS,
         .base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const tx_context = TransactionContext{
@@ -4458,7 +4458,7 @@ test "Error handling - REVERT with empty data should still have error message" {
     var vm = try Evm(.{}).init(allocator, &db, block_info, tx_context, 0, primitives.Address.ZERO_ADDRESS, .BERLIN);
     defer vm.deinit();
 
-    const contract_addr = primitives.Address{ .bytes = [_]u8{0x14} ** 20 };
+    const contract_addr = primitives.Address{ .bytes = @as([20]u8, @splat(0x14)) };
 
     // Bytecode: Simple REVERT with no data
     // PUSH1 0 (size), PUSH1 0 (offset), REVERT
@@ -4472,7 +4472,7 @@ test "Error handling - REVERT with empty data should still have error message" {
     const account = Account{
         .balance = 0,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
         .nonce = 0,
         .delegated_address = null,
     };
@@ -4522,7 +4522,7 @@ test "Precompiles - IDENTITY precompile (0x04)" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -4535,7 +4535,7 @@ test "Precompiles - IDENTITY precompile (0x04)" {
     defer evm.deinit();
 
     // Test IDENTITY precompile - should return input data unchanged
-    const identity_address = [_]u8{0} ** 19 ++ [_]u8{4}; // 0x0000...0004
+    const identity_address = @as([19]u8, @splat(0)) ++ [_]u8{4}; // 0x0000...0004
     const test_data = "Hello, World!";
 
     const call_params = Evm(.{}).CallParams{
@@ -4572,7 +4572,7 @@ test "Precompiles - SHA256 precompile (0x02)" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -4585,7 +4585,7 @@ test "Precompiles - SHA256 precompile (0x02)" {
     defer evm.deinit();
 
     // Test SHA256 precompile
-    const sha256_address = [_]u8{0} ** 19 ++ [_]u8{2}; // 0x0000...0002
+    const sha256_address = @as([19]u8, @splat(0)) ++ [_]u8{2}; // 0x0000...0002
     const test_input = "";
 
     const call_params = Evm(.{}).CallParams{
@@ -4621,7 +4621,7 @@ test "Precompiles - disabled configuration" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -4634,7 +4634,7 @@ test "Precompiles - disabled configuration" {
     defer evm.deinit();
 
     // Try to call IDENTITY precompile - should be treated as regular call
-    const identity_address = [_]u8{0} ** 19 ++ [_]u8{4}; // 0x0000...0004
+    const identity_address = @as([19]u8, @splat(0)) ++ [_]u8{4}; // 0x0000...0004
     const test_data = "Hello, World!";
 
     const call_params = NoPrecompileEvm.CallParams{
@@ -4666,7 +4666,7 @@ test "Precompiles - invalid precompile addresses" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -4679,7 +4679,7 @@ test "Precompiles - invalid precompile addresses" {
     defer evm.deinit();
 
     // Test invalid precompile address (0x0B - beyond supported range)
-    const invalid_address = [_]u8{0} ** 19 ++ [_]u8{11}; // 0x0000...000B
+    const invalid_address = @as([19]u8, @splat(0)) ++ [_]u8{11}; // 0x0000...000B
 
     const call_params = Evm(.{}).CallParams{
         .call = .{
@@ -4716,7 +4716,7 @@ test "Debug - Gas limit affects execution" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -4731,18 +4731,18 @@ test "Debug - Gas limit affects execution" {
     // Deploy a simple infinite loop contract
     // JUMPDEST (0x5b) PUSH1 0x00 (0x6000) JUMP (0x56)
     const loop_bytecode = [_]u8{ 0x5b, 0x60, 0x00, 0x56 };
-    const deploy_address: primitives.Address = .{ .bytes = [_]u8{0} ** 19 ++ [_]u8{1} };
+    const deploy_address: primitives.Address = .{ .bytes = @as([19]u8, @splat(0)) ++ [_]u8{1} };
     const code_hash = try db.set_code(&loop_bytecode);
     try db.set_account(deploy_address.bytes, Account{
         .nonce = 0,
         .balance = 0,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     });
 
     // Test 1: Very low gas limit - should fail quickly
     {
-        const start_time = std.time.nanoTimestamp();
+        const start_time = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds;
         const result = evm.call(.{
             .call = .{
                 .caller = primitives.ZERO_ADDRESS,
@@ -4752,7 +4752,7 @@ test "Debug - Gas limit affects execution" {
                 .gas = 100, // Very low gas
             },
         });
-        const elapsed = std.time.nanoTimestamp() - start_time;
+        const elapsed = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds - start_time;
 
         try std.testing.expect(!result.success); // Should fail
         try std.testing.expectEqual(@as(u64, 0), result.gas_left); // All gas consumed
@@ -4761,7 +4761,7 @@ test "Debug - Gas limit affects execution" {
 
     // Test 2: Medium gas limit
     {
-        const start_time = std.time.nanoTimestamp();
+        const start_time = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds;
         const result = evm.call(.{
             .call = .{
                 .caller = primitives.ZERO_ADDRESS,
@@ -4771,7 +4771,7 @@ test "Debug - Gas limit affects execution" {
                 .gas = 10000,
             },
         });
-        const elapsed = std.time.nanoTimestamp() - start_time;
+        const elapsed = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds - start_time;
 
         try std.testing.expect(!result.success); // Should still fail (infinite loop)
         try std.testing.expectEqual(@as(u64, 0), result.gas_left);
@@ -4780,7 +4780,7 @@ test "Debug - Gas limit affects execution" {
 
     // Test 3: High gas limit
     {
-        const start_time = std.time.nanoTimestamp();
+        const start_time = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds;
         const result = evm.call(.{
             .call = .{
                 .caller = primitives.ZERO_ADDRESS,
@@ -4790,7 +4790,7 @@ test "Debug - Gas limit affects execution" {
                 .gas = 1000000,
             },
         });
-        const elapsed = std.time.nanoTimestamp() - start_time;
+        const elapsed = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds - start_time;
 
         try std.testing.expect(!result.success); // Should fail after consuming all gas
         try std.testing.expectEqual(@as(u64, 0), result.gas_left);
@@ -4812,7 +4812,7 @@ test "Debug - Contract deployment and execution" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -4826,8 +4826,8 @@ test "Debug - Contract deployment and execution" {
 
     // Test 1: Call to non-existent contract
     {
-        const empty_address: primitives.Address = .{ .bytes = [_]u8{0} ** 19 ++ [_]u8{99} };
-        const start_time = std.time.nanoTimestamp();
+        const empty_address: primitives.Address = .{ .bytes = @as([19]u8, @splat(0)) ++ [_]u8{99} };
+        const start_time = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds;
         const result = evm.call(.{
             .call = .{
                 .caller = primitives.ZERO_ADDRESS,
@@ -4837,7 +4837,7 @@ test "Debug - Contract deployment and execution" {
                 .gas = 100000,
             },
         });
-        const elapsed = std.time.nanoTimestamp() - start_time;
+        const elapsed = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds - start_time;
 
         try std.testing.expect(result.success); // Empty contract succeeds immediately
         try std.testing.expectEqual(@as(u64, 100000), result.gas_left); // No gas consumed
@@ -4847,16 +4847,16 @@ test "Debug - Contract deployment and execution" {
     // Test 2: Simple contract that returns immediately (STOP opcode)
     {
         const stop_bytecode = [_]u8{0x00}; // STOP
-        const stop_address: primitives.Address = .{ .bytes = [_]u8{0} ** 19 ++ [_]u8{2} };
+        const stop_address: primitives.Address = .{ .bytes = @as([19]u8, @splat(0)) ++ [_]u8{2} };
         const code_hash = try db.set_code(&stop_bytecode);
         try db.set_account(stop_address.bytes, Account{
             .nonce = 0,
             .balance = 0,
             .code_hash = code_hash,
-            .storage_root = [_]u8{0} ** 32,
+            .storage_root = @as([32]u8, @splat(0)),
         });
 
-        const start_time = std.time.nanoTimestamp();
+        const start_time = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds;
         const result = evm.call(.{
             .call = .{
                 .caller = primitives.ZERO_ADDRESS,
@@ -4866,7 +4866,7 @@ test "Debug - Contract deployment and execution" {
                 .gas = 100000,
             },
         });
-        const elapsed = std.time.nanoTimestamp() - start_time;
+        const elapsed = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds - start_time;
 
         try std.testing.expect(result.success);
         // STOP should consume minimal gas
@@ -4880,16 +4880,16 @@ test "Debug - Contract deployment and execution" {
         // PUSH1 0x05, PUSH1 0x03, ADD, PUSH1 0x00, MSTORE, STOP
         // Adds 3 + 5 and stores in memory
         const add_bytecode = [_]u8{ 0x60, 0x05, 0x60, 0x03, 0x01, 0x60, 0x00, 0x52, 0x00 };
-        const add_address: primitives.Address = .{ .bytes = [_]u8{0} ** 19 ++ [_]u8{3} };
+        const add_address: primitives.Address = .{ .bytes = @as([19]u8, @splat(0)) ++ [_]u8{3} };
         const code_hash = try db.set_code(&add_bytecode);
         try db.set_account(add_address.bytes, Account{
             .nonce = 0,
             .balance = 0,
             .code_hash = code_hash,
-            .storage_root = [_]u8{0} ** 32,
+            .storage_root = @as([32]u8, @splat(0)),
         });
 
-        const start_time = std.time.nanoTimestamp();
+        const start_time = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds;
         const result = evm.call(.{
             .call = .{
                 .caller = primitives.ZERO_ADDRESS,
@@ -4899,7 +4899,7 @@ test "Debug - Contract deployment and execution" {
                 .gas = 100000,
             },
         });
-        const elapsed = std.time.nanoTimestamp() - start_time;
+        const elapsed = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds - start_time;
 
         try std.testing.expect(result.success);
         const gas_used = 100000 - result.gas_left;
@@ -4923,7 +4923,7 @@ test "Debug - Bytecode size affects execution time" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -4936,7 +4936,7 @@ test "Debug - Bytecode size affects execution time" {
     defer evm.deinit();
 
     // Create a large contract that does simple operations
-    var large_bytecode = std.ArrayList(u8){};
+    var large_bytecode = std.ArrayList(u8).empty;
     defer large_bytecode.deinit(std.testing.allocator);
 
     // Add many PUSH1/POP pairs (each costs gas but doesn't loop)
@@ -4947,20 +4947,20 @@ test "Debug - Bytecode size affects execution time" {
     }
     try large_bytecode.append(std.testing.allocator, 0x00); // STOP
 
-    const large_address: primitives.Address = .{ .bytes = [_]u8{0} ** 19 ++ [_]u8{4} };
+    const large_address: primitives.Address = .{ .bytes = @as([19]u8, @splat(0)) ++ [_]u8{4} };
     const code_hash = try db.set_code(large_bytecode.items);
     try db.set_account(large_address.bytes, Account{
         .nonce = 0,
         .balance = 0,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     });
 
     // Test with different gas limits
     const gas_limits = [_]u64{ 10000, 50000, 100000, 500000 };
 
     for (gas_limits) |gas_limit| {
-        const start_time = std.time.nanoTimestamp();
+        const start_time = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds;
         const result = evm.call(.{
             .call = .{
                 .caller = primitives.ZERO_ADDRESS,
@@ -4970,7 +4970,7 @@ test "Debug - Bytecode size affects execution time" {
                 .gas = gas_limit,
             },
         });
-        const elapsed = std.time.nanoTimestamp() - start_time;
+        const elapsed = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds - start_time;
 
         _ = gas_limit - result.gas_left; // gas_used
         evm.tracer.onPerformanceWarning("Large contract", elapsed, 1_000_000_000);
@@ -4999,7 +4999,7 @@ test "Security - bounds checking and edge cases" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -5026,7 +5026,7 @@ test "Security - bounds checking and edge cases" {
     try std.testing.expect(max_gas_result.gas_left <= std.math.maxInt(u64));
 
     // Test invalid address operations
-    const invalid_address: primitives.Address = .{ .bytes = [_]u8{0xFF} ** 20 };
+    const invalid_address: primitives.Address = .{ .bytes = @as([20]u8, @splat(0xFF)) };
     const balance = evm.get_balance(invalid_address);
     try std.testing.expectEqual(@as(u256, 0), balance);
 
@@ -5059,7 +5059,7 @@ test "EVM with minimal planner strategy" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -5110,7 +5110,7 @@ test "EVM with advanced planner strategy" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -5161,7 +5161,7 @@ test "journal state application - storage change rollback" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -5173,7 +5173,7 @@ test "journal state application - storage change rollback" {
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
     defer evm.deinit();
 
-    const test_address = primitives.Address{ .bytes = [_]u8{0x12} ++ [_]u8{0} ** 19 };
+    const test_address = primitives.Address{ .bytes = [_]u8{0x12} ++ @as([19]u8, @splat(0)) };
     const storage_key: u256 = 0x123;
     const original_value: u256 = 0x456;
     const new_value: u256 = 0x789;
@@ -5220,7 +5220,7 @@ test "journal state application - balance change rollback" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -5232,7 +5232,7 @@ test "journal state application - balance change rollback" {
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
     defer evm.deinit();
 
-    const test_address = primitives.Address{ .bytes = [_]u8{0x34} ++ [_]u8{0} ** 19 };
+    const test_address = primitives.Address{ .bytes = [_]u8{0x34} ++ @as([19]u8, @splat(0)) };
     const original_balance: u256 = 1000;
     const new_balance: u256 = 2000;
 
@@ -5281,7 +5281,7 @@ test "journal state application - nonce change rollback" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -5293,7 +5293,7 @@ test "journal state application - nonce change rollback" {
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
     defer evm.deinit();
 
-    const test_address = primitives.Address{ .bytes = [_]u8{0x56} ++ [_]u8{0} ** 19 };
+    const test_address = primitives.Address{ .bytes = [_]u8{0x56} ++ @as([19]u8, @splat(0)) };
     const original_nonce: u64 = 5;
     const new_nonce: u64 = 10;
 
@@ -5342,7 +5342,7 @@ test "journal state application - code change rollback" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -5354,9 +5354,9 @@ test "journal state application - code change rollback" {
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
     defer evm.deinit();
 
-    const test_address = primitives.Address{ .bytes = [_]u8{0x78} ++ [_]u8{0} ** 19 };
-    const original_code_hash = [_]u8{0xAA} ++ [_]u8{0} ** 31;
-    const new_code_hash = [_]u8{0xBB} ++ [_]u8{0} ** 31;
+    const test_address = primitives.Address{ .bytes = [_]u8{0x78} ++ @as([19]u8, @splat(0)) };
+    const original_code_hash = [_]u8{0xAA} ++ @as([31]u8, @splat(0));
+    const new_code_hash = [_]u8{0xBB} ++ @as([31]u8, @splat(0));
 
     // Set initial account code hash
     var original_account = Account.zero();
@@ -5396,7 +5396,7 @@ test "journal state application - multiple changes rollback" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -5408,20 +5408,20 @@ test "journal state application - multiple changes rollback" {
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
     defer evm.deinit();
 
-    const test_address: primitives.Address = .{ .bytes = [_]u8{0x9A} ++ [_]u8{0} ** 19 };
+    const test_address: primitives.Address = .{ .bytes = [_]u8{0x9A} ++ @as([19]u8, @splat(0)) };
     const storage_key: u256 = 0xABC;
 
     // Original state
     const original_balance: u256 = 500;
     const original_nonce: u64 = 3;
     const original_storage: u256 = 0x111;
-    const original_code_hash = [_]u8{0xCC} ++ [_]u8{0} ** 31;
+    const original_code_hash = [_]u8{0xCC} ++ @as([31]u8, @splat(0));
 
     // New state
     const new_balance: u256 = 1500;
     const new_nonce: u64 = 8;
     const new_storage: u256 = 0x999;
-    const new_code_hash = [_]u8{0xDD} ++ [_]u8{0} ** 31;
+    const new_code_hash = [_]u8{0xDD} ++ @as([31]u8, @splat(0));
 
     // Set initial state
     var original_account = Account.zero();
@@ -5481,7 +5481,7 @@ test "journal state application - nested snapshots rollback" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -5493,7 +5493,7 @@ test "journal state application - nested snapshots rollback" {
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
     defer evm.deinit();
 
-    const test_address: primitives.Address = .{ .bytes = [_]u8{0xBE} ++ [_]u8{0} ** 19 };
+    const test_address: primitives.Address = .{ .bytes = [_]u8{0xBE} ++ @as([19]u8, @splat(0)) };
     const original_balance: u256 = 100;
     const middle_balance: u256 = 200;
     const final_balance: u256 = 300;
@@ -5547,7 +5547,7 @@ test "journal state application - empty journal rollback" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -5582,7 +5582,7 @@ test "EVM contract execution - minimal benchmark reproduction" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -5606,7 +5606,7 @@ test "EVM contract execution - minimal benchmark reproduction" {
     };
 
     // Deploy the contract first
-    const deploy_address: primitives.Address = .{ .bytes = [_]u8{0} ** 19 ++ [_]u8{1} }; // Address 0x000...001
+    const deploy_address: primitives.Address = .{ .bytes = @as([19]u8, @splat(0)) ++ [_]u8{1} }; // Address 0x000...001
 
     // Store contract code in database
     const code_hash = try db.set_code(&test_bytecode);
@@ -5614,7 +5614,7 @@ test "EVM contract execution - minimal benchmark reproduction" {
         .nonce = 0,
         .balance = 0,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     });
 
     const call_params = Evm(.{}).CallParams{
@@ -5649,7 +5649,7 @@ test "Precompile - IDENTITY (0x04) basic functionality" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -5662,7 +5662,7 @@ test "Precompile - IDENTITY (0x04) basic functionality" {
     defer evm.deinit();
 
     // Test calling IDENTITY precompile (0x04) - should return input as-is
-    const precompile_address: primitives.Address = .{ .bytes = [_]u8{0} ** 19 ++ [_]u8{4} }; // Address 0x000...004
+    const precompile_address: primitives.Address = .{ .bytes = @as([19]u8, @splat(0)) ++ [_]u8{4} }; // Address 0x000...004
     const input_data = "Hello, World!";
 
     const call_params = Evm(.{}).CallParams{
@@ -5697,7 +5697,7 @@ test "Precompile - SHA256 (0x02) basic functionality" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -5710,7 +5710,7 @@ test "Precompile - SHA256 (0x02) basic functionality" {
     defer evm.deinit();
 
     // Test calling SHA256 precompile (0x02)
-    const precompile_address: primitives.Address = .{ .bytes = [_]u8{0} ** 19 ++ [_]u8{2} }; // Address 0x000...002
+    const precompile_address: primitives.Address = .{ .bytes = @as([19]u8, @splat(0)) ++ [_]u8{2} }; // Address 0x000...002
     const input_data = "abc";
 
     const call_params = Evm(.{}).CallParams{
@@ -5751,7 +5751,7 @@ test "Precompile diagnosis - ECRECOVER (0x01) placeholder implementation" {
         .gas_limit = 30_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1_000_000_000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -5764,8 +5764,8 @@ test "Precompile diagnosis - ECRECOVER (0x01) placeholder implementation" {
     defer evm.deinit();
 
     // Test ECRECOVER with invalid signature (all zeros)
-    const precompile_address: primitives.Address = .{ .bytes = [_]u8{0} ** 19 ++ [_]u8{1} };
-    const input_data = [_]u8{0} ** 128; // Invalid signature
+    const precompile_address: primitives.Address = .{ .bytes = @as([19]u8, @splat(0)) ++ [_]u8{1} };
+    const input_data = @as([128]u8, @splat(0)); // Invalid signature
 
     const call_params = Evm(.{}).CallParams{
         .call = .{
@@ -5800,7 +5800,7 @@ test "Precompile diagnosis - RIPEMD160 (0x03) unimplemented" {
         .gas_limit = 30_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1_000_000_000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -5812,7 +5812,7 @@ test "Precompile diagnosis - RIPEMD160 (0x03) unimplemented" {
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
     defer evm.deinit();
 
-    const precompile_address: primitives.Address = .{ .bytes = [_]u8{0} ** 19 ++ [_]u8{3} };
+    const precompile_address: primitives.Address = .{ .bytes = @as([19]u8, @splat(0)) ++ [_]u8{3} };
     const input_data = "test data";
 
     const call_params = Evm(.{}).CallParams{
@@ -5849,7 +5849,7 @@ test "Precompile diagnosis - MODEXP (0x05) basic case works" {
         .gas_limit = 30_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1_000_000_000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -5861,10 +5861,10 @@ test "Precompile diagnosis - MODEXP (0x05) basic case works" {
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
     defer evm.deinit();
 
-    const precompile_address: primitives.Address = .{ .bytes = [_]u8{0} ** 19 ++ [_]u8{5} };
+    const precompile_address: primitives.Address = .{ .bytes = @as([19]u8, @splat(0)) ++ [_]u8{5} };
 
     // 3^4 mod 5 = 81 mod 5 = 1
-    var input: [99]u8 = [_]u8{0} ** 99;
+    var input: [99]u8 = @as([99]u8, @splat(0));
     input[31] = 1; // base_len = 1
     input[63] = 1; // exp_len = 1
     input[95] = 1; // mod_len = 1
@@ -5901,7 +5901,7 @@ test "Precompile diagnosis - BN254 operations disabled" {
         .gas_limit = 30_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1_000_000_000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -5914,8 +5914,8 @@ test "Precompile diagnosis - BN254 operations disabled" {
     defer evm.deinit();
 
     // Test ECADD (0x06)
-    const ecadd_address: primitives.Address = .{ .bytes = [_]u8{0} ** 19 ++ [_]u8{6} };
-    const ecadd_input = [_]u8{0} ** 128; // Two zero points
+    const ecadd_address: primitives.Address = .{ .bytes = @as([19]u8, @splat(0)) ++ [_]u8{6} };
+    const ecadd_input = @as([128]u8, @splat(0)); // Two zero points
 
     const ecadd_params = Evm(.{}).CallParams{
         .call = .{
@@ -5956,7 +5956,7 @@ test "Precompile diagnosis - BLAKE2F (0x09) placeholder" {
         .gas_limit = 30_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1_000_000_000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -5968,8 +5968,8 @@ test "Precompile diagnosis - BLAKE2F (0x09) placeholder" {
     var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
     defer evm.deinit();
 
-    const precompile_address: primitives.Address = .{ .bytes = [_]u8{0} ** 19 ++ [_]u8{9} };
-    const input = [_]u8{0} ** 213; // Valid BLAKE2F input length
+    const precompile_address: primitives.Address = .{ .bytes = @as([19]u8, @splat(0)) ++ [_]u8{9} };
+    const input = @as([213]u8, @splat(0)); // Valid BLAKE2F input length
 
     const call_params = Evm(.{}).CallParams{
         .call = .{
@@ -6002,13 +6002,13 @@ test "EVM benchmark scenario - reproduces segfault" {
 
     // Deploy contract first (ERC20 approval bytecode snippet)
     const stop_bytecode = [_]u8{0x00}; // Simple STOP for now
-    const deploy_address: primitives.Address = .{ .bytes = [_]u8{0} ** 19 ++ [_]u8{1} };
+    const deploy_address: primitives.Address = .{ .bytes = @as([19]u8, @splat(0)) ++ [_]u8{1} };
     const code_hash = try db.set_code(&stop_bytecode);
     try db.set_account(deploy_address.bytes, Account{
         .nonce = 0,
         .balance = 0,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     });
 
     // Create EVM instance
@@ -6019,7 +6019,7 @@ test "EVM benchmark scenario - reproduces segfault" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -6079,7 +6079,7 @@ test "CREATE interaction - deployed contract can be called" {
             .gas_limit = 30_000_000,
             .coinbase = primitives.ZERO_ADDRESS,
             .base_fee = 1_000_000_000,
-            .prev_randao = [_]u8{0} ** 32,
+            .prev_randao = @as([32]u8, @splat(0)),
         },
         TransactionContext{
             .gas_limit = 10_000_000,
@@ -6087,7 +6087,7 @@ test "CREATE interaction - deployed contract can be called" {
             .chain_id = 1,
         },
         20_000_000_000,
-        .{ .bytes = [_]u8{0x01} ** 20 },
+        .{ .bytes = @as([20]u8, @splat(0x01)) },
         .CANCUN,
     );
     defer evm_instance.deinit();
@@ -6125,7 +6125,7 @@ test "CREATE interaction - deployed contract can be called" {
     // Deploy the contract
     const create_result = evm_instance.call(.{
         .create = .{
-            .caller = .{ .bytes = [_]u8{0x01} ** 20 },
+            .caller = .{ .bytes = @as([20]u8, @splat(0x01)) },
             .value = 0,
             .init_code = init_code.items,
             .gas = 1_000_000,
@@ -6143,7 +6143,7 @@ test "CREATE interaction - deployed contract can be called" {
     // Step 2: Call the deployed contract
     const call_result = evm_instance.call(.{
         .call = .{
-            .caller = .{ .bytes = [_]u8{0x01} ** 20 },
+            .caller = .{ .bytes = @as([20]u8, @splat(0x01)) },
             .to = contract_address,
             .value = 0,
             .input = &[_]u8{}, // No input data
@@ -6179,7 +6179,7 @@ test "CREATE interaction - factory creates and initializes child contracts" {
             .gas_limit = 30_000_000,
             .coinbase = primitives.ZERO_ADDRESS,
             .base_fee = 1_000_000_000,
-            .prev_randao = [_]u8{0} ** 32,
+            .prev_randao = @as([32]u8, @splat(0)),
         },
         TransactionContext{
             .gas_limit = 10_000_000,
@@ -6187,7 +6187,7 @@ test "CREATE interaction - factory creates and initializes child contracts" {
             .chain_id = 1,
         },
         20_000_000_000,
-        .{ .bytes = [_]u8{0x01} ** 20 },
+        .{ .bytes = @as([20]u8, @splat(0x01)) },
         .CANCUN,
     );
     defer evm_instance.deinit();
@@ -6277,12 +6277,12 @@ test "CREATE interaction - factory creates and initializes child contracts" {
     // Deploy factory with initialization value 123
     var deploy_data = std.array_list.AlignedManaged(u8, null).init(allocator);
     defer deploy_data.deinit();
-    const init_value = [_]u8{0} ** 31 ++ [_]u8{123}; // 123 as uint256
+    const init_value = @as([31]u8, @splat(0)) ++ [_]u8{123}; // 123 as uint256
     try deploy_data.appendSlice(&init_value);
 
     const factory_result = evm_instance.call(.{
         .create = .{
-            .caller = .{ .bytes = [_]u8{0x01} ** 20 },
+            .caller = .{ .bytes = @as([20]u8, @splat(0x01)) },
             .value = 0,
             .init_code = deploy_data.items,
             .gas = 5_000_000,
@@ -6299,7 +6299,7 @@ test "CREATE interaction - factory creates and initializes child contracts" {
     // Call child contract to verify initialization
     const verify_result = evm_instance.call(.{
         .call = .{
-            .caller = .{ .bytes = [_]u8{0x01} ** 20 },
+            .caller = .{ .bytes = @as([20]u8, @splat(0x01)) },
             .to = child_address,
             .value = 0,
             .input = &[_]u8{},
@@ -6335,7 +6335,7 @@ test "CREATE interaction - contract creates contract that creates contract" {
             .gas_limit = 30_000_000,
             .coinbase = primitives.ZERO_ADDRESS,
             .base_fee = 1_000_000_000,
-            .prev_randao = [_]u8{0} ** 32,
+            .prev_randao = @as([32]u8, @splat(0)),
         },
         TransactionContext{
             .gas_limit = 20_000_000,
@@ -6343,7 +6343,7 @@ test "CREATE interaction - contract creates contract that creates contract" {
             .chain_id = 1,
         },
         20_000_000_000,
-        .{ .bytes = [_]u8{0x01} ** 20 },
+        .{ .bytes = @as([20]u8, @splat(0x01)) },
         .CANCUN,
     );
     defer evm_instance.deinit();
@@ -6456,7 +6456,7 @@ test "CREATE interaction - contract creates contract that creates contract" {
     // Execute level 1
     const result1 = evm_instance.call(.{
         .create = .{
-            .caller = .{ .bytes = [_]u8{0x01} ** 20 },
+            .caller = .{ .bytes = @as([20]u8, @splat(0x01)) },
             .value = 0,
             .init_code = level1_code.items,
             .gas = 10_000_000,
@@ -6467,7 +6467,7 @@ test "CREATE interaction - contract creates contract that creates contract" {
     try std.testing.expect(result1.success);
 
     // Get level 2 address from storage
-    const level2_addr_u256 = evm_instance.get_storage(.{ .bytes = [_]u8{0x01} ** 20 }, 0);
+    const level2_addr_u256 = evm_instance.get_storage(.{ .bytes = @as([20]u8, @splat(0x01)) }, 0);
     var level2_addr: primitives.Address = undefined;
     const bytes = std.mem.toBytes(level2_addr_u256);
     @memcpy(&level2_addr.bytes, bytes[12..32]);
@@ -6475,7 +6475,7 @@ test "CREATE interaction - contract creates contract that creates contract" {
     // Call level 2 to get level 3 address
     const result2 = evm_instance.call(.{
         .call = .{
-            .caller = .{ .bytes = [_]u8{0x01} ** 20 },
+            .caller = .{ .bytes = @as([20]u8, @splat(0x01)) },
             .to = level2_addr,
             .value = 0,
             .input = &[_]u8{},
@@ -6493,7 +6493,7 @@ test "CREATE interaction - contract creates contract that creates contract" {
     // Call level 3 to verify it returns 99
     const result3 = evm_instance.call(.{
         .call = .{
-            .caller = .{ .bytes = [_]u8{0x01} ** 20 },
+            .caller = .{ .bytes = @as([20]u8, @splat(0x01)) },
             .to = level3_addr,
             .value = 0,
             .input = &[_]u8{},
@@ -6528,7 +6528,7 @@ test "CREATE interaction - created contract modifies parent storage" {
             .gas_limit = 30_000_000,
             .coinbase = primitives.ZERO_ADDRESS,
             .base_fee = 1_000_000_000,
-            .prev_randao = [_]u8{0} ** 32,
+            .prev_randao = @as([32]u8, @splat(0)),
         },
         TransactionContext{
             .gas_limit = 10_000_000,
@@ -6536,7 +6536,7 @@ test "CREATE interaction - created contract modifies parent storage" {
             .chain_id = 1,
         },
         20_000_000_000,
-        primitives.Address{ .bytes = [_]u8{0x01} ** 20 },
+        primitives.Address{ .bytes = @as([20]u8, @splat(0x01)) },
         .CANCUN,
     );
     defer evm_instance.deinit();
@@ -6628,7 +6628,7 @@ test "CREATE interaction - created contract modifies parent storage" {
     // Deploy parent contract
     const deploy_result = evm_instance.call(.{
         .create = .{
-            .caller = .{ .bytes = [_]u8{0x01} ** 20 },
+            .caller = .{ .bytes = @as([20]u8, @splat(0x01)) },
             .value = 0,
             .init_code = parent_code.items,
             .gas = 5_000_000,
@@ -6639,7 +6639,7 @@ test "CREATE interaction - created contract modifies parent storage" {
     try std.testing.expect(deploy_result.success);
 
     // Get parent address (deterministic based on sender nonce)
-    const parent_addr: primitives.Address = .{ .bytes = [_]u8{0x01} ** 20 }; // Simplified for test
+    const parent_addr: primitives.Address = .{ .bytes = @as([20]u8, @splat(0x01)) }; // Simplified for test
 
     // Get child address from parent's storage
     const child_addr_u256 = evm_instance.get_storage(parent_addr, 1);
@@ -6654,7 +6654,7 @@ test "CREATE interaction - created contract modifies parent storage" {
     // Call child contract, which should call back to parent
     const call_result = evm_instance.call(.{
         .call = .{
-            .caller = .{ .bytes = [_]u8{0x02} ** 20 },
+            .caller = .{ .bytes = @as([20]u8, @splat(0x02)) },
             .to = child_addr,
             .value = 0,
             .input = &[_]u8{},
@@ -6682,7 +6682,7 @@ test "Arena allocator - resets between calls" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -6697,13 +6697,13 @@ test "Arena allocator - resets between calls" {
     // Simple contract that emits a log
     // PUSH1 0x20 PUSH1 0x00 LOG0 STOP
     const bytecode = [_]u8{ 0x60, 0x20, 0x60, 0x00, 0xA0, 0x00 };
-    const contract_addr: primitives.Address = .{ .bytes = [_]u8{0x01} ** 20 };
+    const contract_addr: primitives.Address = .{ .bytes = @as([20]u8, @splat(0x01)) };
     const code_hash = try db.set_code(&bytecode);
     try db.set_account(contract_addr.bytes, .{
         .balance = 0,
         .nonce = 0,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     });
 
     // Track arena bytes allocated before first call
@@ -6760,7 +6760,7 @@ test "Arena allocator - handles multiple logs efficiently" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -6785,13 +6785,13 @@ test "Arena allocator - handles multiple logs efficiently" {
     }
     bytecode[500] = 0x00; // STOP
 
-    const contract_addr: primitives.Address = .{ .bytes = [_]u8{0x02} ** 20 };
+    const contract_addr: primitives.Address = .{ .bytes = @as([20]u8, @splat(0x02)) };
     const code_hash = try db.set_code(&bytecode);
     try db.set_account(contract_addr.bytes, .{
         .balance = 0,
         .nonce = 0,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     });
 
     // Execute contract
@@ -6828,7 +6828,7 @@ test "Arena allocator - precompile outputs use arena" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -6885,7 +6885,7 @@ test "Arena allocator - memory efficiency with nested calls" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -6900,7 +6900,7 @@ test "Arena allocator - memory efficiency with nested calls" {
     // Parent contract that calls child and emits log
     // PUSH20 <child_addr> PUSH1 0 PUSH1 0 PUSH1 0 PUSH1 0 PUSH1 0 PUSH2 <gas> CALL
     // PUSH1 0x20 PUSH1 0x00 LOG0 STOP
-    const child_addr = [_]u8{0x03} ** 20;
+    const child_addr = @as([20]u8, @splat(0x03));
     var parent_bytecode: [100]u8 = undefined;
     var idx: usize = 0;
 
@@ -6957,14 +6957,14 @@ test "Arena allocator - memory efficiency with nested calls" {
     parent_bytecode[idx] = 0x00;
     idx += 1;
 
-    const parent_addr = [_]u8{0x04} ** 20;
+    const parent_addr = @as([20]u8, @splat(0x04));
     const parent_address: primitives.Address = .{ .bytes = parent_addr };
     const parent_code_hash = try db.set_code(parent_bytecode[0..idx]);
     try db.set_account(parent_addr, .{
         .balance = 0,
         .nonce = 0,
         .code_hash = parent_code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     });
 
     // Child contract that also emits log
@@ -6974,7 +6974,7 @@ test "Arena allocator - memory efficiency with nested calls" {
         .balance = 0,
         .nonce = 0,
         .code_hash = child_code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     });
 
     // Track arena capacity before call
@@ -7088,7 +7088,7 @@ test "CREATE stores deployed code bytes" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const tx_context = TransactionContext{
@@ -7101,12 +7101,12 @@ test "CREATE stores deployed code bytes" {
     defer evm.deinit();
 
     // Give creator account some balance
-    const creator_address: primitives.Address = .{ .bytes = [_]u8{0x11} ++ [_]u8{0} ** 19 };
+    const creator_address: primitives.Address = .{ .bytes = [_]u8{0x11} ++ @as([19]u8, @splat(0)) };
     try db.set_account(creator_address.bytes, Account{
         .balance = 1_000_000,
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     });
 
     // Contract that uses CREATE to deploy a simple contract
@@ -7185,7 +7185,7 @@ test "CREATE stores deployed code bytes" {
         .balance = 1_000_000,
         .nonce = 0,
         .code_hash = creator_code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     });
 
     // Execute CREATE
@@ -7248,7 +7248,7 @@ test "CREATE2 stores deployed code bytes" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const tx_context = TransactionContext{
@@ -7261,12 +7261,12 @@ test "CREATE2 stores deployed code bytes" {
     defer evm.deinit();
 
     // Give creator account some balance
-    const creator_address: primitives.Address = .{ .bytes = [_]u8{0x22} ++ [_]u8{0} ** 19 };
+    const creator_address: primitives.Address = .{ .bytes = [_]u8{0x22} ++ @as([19]u8, @splat(0)) };
     try db.set_account(creator_address.bytes, Account{
         .balance = 1_000_000,
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     });
 
     // Contract that uses CREATE2 to deploy a simple contract
@@ -7348,7 +7348,7 @@ test "CREATE2 stores deployed code bytes" {
         .balance = 1_000_000,
         .nonce = 0,
         .code_hash = creator_code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     });
 
     // Execute CREATE2
@@ -7408,7 +7408,7 @@ test "EVM bytecode iterator execution - simple STOP" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -7424,13 +7424,13 @@ test "EVM bytecode iterator execution - simple STOP" {
     const stop_bytecode = [_]u8{0x00}; // STOP opcode
 
     // Add contract with STOP bytecode
-    const contract_address: primitives.Address = .{ .bytes = [_]u8{0x42} ++ [_]u8{0} ** 19 };
+    const contract_address: primitives.Address = .{ .bytes = [_]u8{0x42} ++ @as([19]u8, @splat(0)) };
     const code_hash = try db.set_code(&stop_bytecode);
     try db.set_account(contract_address.bytes, Account{
         .balance = 0,
         .nonce = 0,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     });
 
     // Call the contract using bytecode iterator execution
@@ -7462,7 +7462,7 @@ test "EVM bytecode iterator execution - PUSH and RETURN" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -7486,13 +7486,13 @@ test "EVM bytecode iterator execution - PUSH and RETURN" {
     };
 
     // Add contract
-    const contract_address: primitives.Address = .{ .bytes = [_]u8{0x43} ++ [_]u8{0} ** 19 };
+    const contract_address: primitives.Address = .{ .bytes = [_]u8{0x43} ++ @as([19]u8, @splat(0)) };
     const code_hash = try db.set_code(&return_bytecode);
     try db.set_account(contract_address.bytes, Account{
         .balance = 0,
         .nonce = 0,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     });
 
     // Call the contract
@@ -7530,7 +7530,7 @@ test "EVM bytecode iterator execution - handles jumps" {
         .gas_limit = 30000000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -7553,13 +7553,13 @@ test "EVM bytecode iterator execution - handles jumps" {
     };
 
     // Add contract
-    const contract_address: primitives.Address = .{ .bytes = [_]u8{0x44} ++ [_]u8{0} ** 19 };
+    const contract_address: primitives.Address = .{ .bytes = [_]u8{0x44} ++ @as([19]u8, @splat(0)) };
     const code_hash = try db.set_code(&jump_bytecode);
     try db.set_account(contract_address.bytes, Account{
         .balance = 0,
         .nonce = 0,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     });
 
     // Call the contract
@@ -7591,7 +7591,7 @@ test "Minimal ERC20 deployment reproduction - benchmark runner issue" {
         .gas_limit = 1_000_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 7,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
         .blob_base_fee = 1000000000,
         .blob_versioned_hashes = &.{},
     };
@@ -7606,18 +7606,16 @@ test "Minimal ERC20 deployment reproduction - benchmark runner issue" {
     defer evm.deinit();
 
     // Set up caller with large balance (same as benchmark runner)
-    const caller_address = primitives.Address{ .bytes = [_]u8{0x10} ++ [_]u8{0} ** 18 ++ [_]u8{0x01} };
+    const caller_address = primitives.Address{ .bytes = [_]u8{0x10} ++ @as([18]u8, @splat(0)) ++ [_]u8{0x01} };
     try db.set_account(caller_address.bytes, Account{
         .balance = std.math.maxInt(u256),
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     });
 
     // Read the actual ERC20 bytecode from file
-    const bytecode_file = try std.fs.cwd().openFile("src/evm/fixtures/erc20-transfer/bytecode.txt", .{});
-    defer bytecode_file.close();
-    const bytecode_hex = try bytecode_file.readToEndAlloc(std.testing.allocator, 16 * 1024 * 1024);
+    const bytecode_hex = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "src/evm/fixtures/erc20-transfer/bytecode.txt", std.testing.allocator, .limited(16 * 1024 * 1024));
     defer std.testing.allocator.free(bytecode_hex);
 
     // Hex decode helper

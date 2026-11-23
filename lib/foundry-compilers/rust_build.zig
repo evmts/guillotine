@@ -79,20 +79,20 @@ pub fn add_rust_integration(b: *std.Build, target: std.Build.ResolvedTarget, opt
     foundry_test.root_module.addImport("zabi", zabi_dep.module("zabi"));
 
     // Link frameworks for test executable
-    foundry_test.linkLibC();
-    foundry_test.addObjectFile(b.path(rust_lib_path));
-    foundry_test.addIncludePath(b.path("include"));
+    foundry_test.root_module.link_libc = true;
+    foundry_test.root_module.addObjectFile(b.path(rust_lib_path));
+    foundry_test.root_module.addIncludePath(b.path("include"));
 
     // Link unwinder libraries for Rust std
     if (target.result.os.tag == .linux) {
-        foundry_test.linkSystemLibrary("unwind");
-        foundry_test.linkSystemLibrary("gcc_s");
+        foundry_test.root_module.linkSystemLibrary("unwind", .{});
+        foundry_test.root_module.linkSystemLibrary("gcc_s", .{});
     }
 
     if (target.result.os.tag == .macos) {
-        foundry_test.linkFramework("Security");
-        foundry_test.linkFramework("SystemConfiguration");
-        foundry_test.linkFramework("CoreFoundation");
+        foundry_test.root_module.linkFramework("Security", .{});
+        foundry_test.root_module.linkFramework("SystemConfiguration", .{});
+        foundry_test.root_module.linkFramework("CoreFoundation", .{});
     }
     foundry_test.step.dependOn(&cbindgen_cmd.step);
 

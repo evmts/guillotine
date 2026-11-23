@@ -310,8 +310,8 @@ test "Authorization processor - basic delegation" {
         .address = try Address.from_hex("0x2222222222222222222222222222222222222222"),
         .nonce = 5, // Matches EOA nonce
         .v = 27,
-        .r = [_]u8{0x12} ** 32,
-        .s = [_]u8{0x34} ** 32,
+        .r = @as([32]u8, @splat(0x12)),
+        .s = @as([32]u8, @splat(0x34)),
     };
     
     // Process authorization
@@ -352,8 +352,8 @@ test "Authorization processor - wrong nonce rejected" {
         .address = try Address.from_hex("0x2222222222222222222222222222222222222222"),
         .nonce = 10, // Wrong nonce
         .v = 27,
-        .r = [_]u8{0x12} ** 32,
-        .s = [_]u8{0x34} ** 32,
+        .r = @as([32]u8, @splat(0x12)),
+        .s = @as([32]u8, @splat(0x34)),
     };
     
     var gas_remaining: i64 = 100_000;
@@ -408,8 +408,8 @@ test "Authorization processor - wrong chain ID rejected" {
         .address = try Address.from_hex("0x2222222222222222222222222222222222222222"),
         .nonce = 5,
         .v = 27,
-        .r = [_]u8{0x12} ** 32,
-        .s = [_]u8{0x34} ** 32,
+        .r = @as([32]u8, @splat(0x12)),
+        .s = @as([32]u8, @splat(0x34)),
     };
 
     var gas_remaining: i64 = 100_000;
@@ -435,7 +435,7 @@ test "Authorization processor - contract account rejected" {
     const contract_address = try Address.from_hex("0x1111111111111111111111111111111111111111");
     var contract_account = Account.zero();
     contract_account.nonce = 5;
-    contract_account.code_hash = [_]u8{0x42} ** 32; // Has code, not an EOA
+    contract_account.code_hash = @as([32]u8, @splat(0x42)); // Has code, not an EOA
     try db.set_account(contract_address.bytes, contract_account);
 
     const auth = Authorization{
@@ -443,8 +443,8 @@ test "Authorization processor - contract account rejected" {
         .address = try Address.from_hex("0x2222222222222222222222222222222222222222"),
         .nonce = 5,
         .v = 27,
-        .r = [_]u8{0x12} ** 32,
-        .s = [_]u8{0x34} ** 32,
+        .r = @as([32]u8, @splat(0x12)),
+        .s = @as([32]u8, @splat(0x34)),
     };
 
     var gas_remaining: i64 = 100_000;
@@ -484,8 +484,8 @@ test "Authorization processor - revocation with max nonce" {
         .address = try Address.from_hex("0x3333333333333333333333333333333333333333"),
         .nonce = std.math.maxInt(u64), // Max nonce for revocation
         .v = 27,
-        .r = [_]u8{0x12} ** 32,
-        .s = [_]u8{0x34} ** 32,
+        .r = @as([32]u8, @splat(0x12)),
+        .s = @as([32]u8, @splat(0x34)),
     };
 
     var gas_remaining: i64 = 100_000;
@@ -520,8 +520,8 @@ test "Authorization processor - account not found" {
         .address = try Address.from_hex("0x2222222222222222222222222222222222222222"),
         .nonce = 5,
         .v = 27,
-        .r = [_]u8{0x12} ** 32,
-        .s = [_]u8{0x34} ** 32,
+        .r = @as([32]u8, @splat(0x12)),
+        .s = @as([32]u8, @splat(0x34)),
     };
 
     var gas_remaining: i64 = 100_000;
@@ -555,8 +555,8 @@ test "Authorization processor - gas cost calculation for existing account" {
         .address = try Address.from_hex("0x2222222222222222222222222222222222222222"),
         .nonce = 5,
         .v = 27,
-        .r = [_]u8{0x12} ** 32,
-        .s = [_]u8{0x34} ** 32,
+        .r = @as([32]u8, @splat(0x12)),
+        .s = @as([32]u8, @splat(0x34)),
     };
 
     var gas_remaining: i64 = 100_000;
@@ -588,8 +588,8 @@ test "Authorization processor - gas cost calculation for empty account" {
         .address = try Address.from_hex("0x2222222222222222222222222222222222222222"),
         .nonce = 0,
         .v = 27,
-        .r = [_]u8{0x12} ** 32,
-        .s = [_]u8{0x34} ** 32,
+        .r = @as([32]u8, @splat(0x12)),
+        .s = @as([32]u8, @splat(0x34)),
     };
 
     var gas_remaining: i64 = 100_000;
@@ -625,8 +625,8 @@ test "Authorization processor - out of gas during list processing" {
         .address = try Address.from_hex("0x2222222222222222222222222222222222222222"),
         .nonce = 5,
         .v = 27,
-        .r = [_]u8{0x12} ** 32,
-        .s = [_]u8{0x34} ** 32,
+        .r = @as([32]u8, @splat(0x12)),
+        .s = @as([32]u8, @splat(0x34)),
     };
 
     const auth_list = [_]Authorization{auth};
@@ -673,16 +673,16 @@ test "Authorization processor - multiple authorizations in list" {
             .address = try Address.from_hex("0x2222222222222222222222222222222222222222"),
             .nonce = 5,
             .v = 27,
-            .r = [_]u8{0x12} ** 32,
-            .s = [_]u8{0x34} ** 32,
+            .r = @as([32]u8, @splat(0x12)),
+            .s = @as([32]u8, @splat(0x34)),
         },
         Authorization{
             .chain_id = 1,
             .address = try Address.from_hex("0x4444444444444444444444444444444444444444"),
             .nonce = 10,
             .v = 27,
-            .r = [_]u8{0x56} ** 32,
-            .s = [_]u8{0x78} ** 32,
+            .r = @as([32]u8, @splat(0x56)),
+            .s = @as([32]u8, @splat(0x78)),
         },
     };
 
@@ -717,7 +717,7 @@ test "Authorization processor - delegation designator parse invalid length" {
 test "Authorization processor - delegation designator parse invalid prefix" {
     const testing = std.testing;
 
-    const invalid_designator = [_]u8{0xff, 0x01, 0x00} ++ [_]u8{0x12} ** 20; // Wrong prefix
+    const invalid_designator = [_]u8{0xff, 0x01, 0x00} ++ @as([20]u8, @splat(0x12)); // Wrong prefix
     try testing.expectError(AuthorizationError.InvalidSignature, AuthorizationProcessor.parseDelegationDesignator(&invalid_designator));
 }
 
@@ -739,8 +739,8 @@ test "Authorization processor - nonce incremented after successful delegation" {
         .address = try Address.from_hex("0x2222222222222222222222222222222222222222"),
         .nonce = 0,
         .v = 27,
-        .r = [_]u8{0x12} ** 32,
-        .s = [_]u8{0x34} ** 32,
+        .r = @as([32]u8, @splat(0x12)),
+        .s = @as([32]u8, @splat(0x34)),
     };
 
     var gas_remaining: i64 = 100_000;
@@ -786,8 +786,8 @@ test "Authorization processor - multiple delegations update same account" {
         .address = try Address.from_hex("0x2222222222222222222222222222222222222222"),
         .nonce = 0,
         .v = 27,
-        .r = [_]u8{0x12} ** 32,
-        .s = [_]u8{0x34} ** 32,
+        .r = @as([32]u8, @splat(0x12)),
+        .s = @as([32]u8, @splat(0x34)),
     };
     try processor.processAuthorization(auth1, eoa_address);
 
@@ -797,8 +797,8 @@ test "Authorization processor - multiple delegations update same account" {
         .address = try Address.from_hex("0x3333333333333333333333333333333333333333"),
         .nonce = 1,
         .v = 27,
-        .r = [_]u8{0x56} ** 32,
-        .s = [_]u8{0x78} ** 32,
+        .r = @as([32]u8, @splat(0x56)),
+        .s = @as([32]u8, @splat(0x78)),
     };
     try processor.processAuthorization(auth2, eoa_address);
 
@@ -828,16 +828,16 @@ test "Authorization processor - processAuthorizationListWithResults detailed res
             .address = try Address.from_hex("0x2222222222222222222222222222222222222222"),
             .nonce = 5, // Valid
             .v = 27,
-            .r = [_]u8{0x12} ** 32,
-            .s = [_]u8{0x34} ** 32,
+            .r = @as([32]u8, @splat(0x12)),
+            .s = @as([32]u8, @splat(0x34)),
         },
         Authorization{
             .chain_id = 999, // Invalid chain ID
             .address = try Address.from_hex("0x3333333333333333333333333333333333333333"),
             .nonce = 6,
             .v = 27,
-            .r = [_]u8{0x56} ** 32,
-            .s = [_]u8{0x78} ** 32,
+            .r = @as([32]u8, @splat(0x56)),
+            .s = @as([32]u8, @splat(0x78)),
         },
     };
 

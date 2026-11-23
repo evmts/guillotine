@@ -6,8 +6,8 @@ const evm = @import("evm");
 const primitives = @import("voltaire");
 
 const gas_limit: u64 = 1_000_000;
-const contract = primitives.Address{ .bytes = [_]u8{0x42} ++ [_]u8{0} ** 19 };
-const caller = primitives.Address{ .bytes = [_]u8{0x10} ++ [_]u8{0} ** 19 };
+const contract = primitives.Address{ .bytes = [_]u8{0x42} ++ @as([19]u8, @splat(0)) };
+const caller = primitives.Address{ .bytes = [_]u8{0x10} ++ @as([19]u8, @splat(0)) };
 
 const Outcome = struct { success: bool, gas_used: u64 };
 
@@ -20,7 +20,7 @@ fn guillotineRun(code: []const u8) !Outcome {
         .balance = 1_000,
         .nonce = 1,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     });
     const block_info = evm.BlockInfo{
         .chain_id = 1,
@@ -30,7 +30,7 @@ fn guillotineRun(code: []const u8) !Outcome {
         .gas_limit = 30_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
     const context = evm.TransactionContext{
         .gas_limit = gas_limit,

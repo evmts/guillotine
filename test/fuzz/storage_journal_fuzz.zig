@@ -67,7 +67,7 @@ pub fn fuzzDatabaseSnapshotsAndViews(_: void, input: []const u8) !void {
 
     // Snapshot stack storing (snapshot_id, RefState copy)
     const SnapEntry = struct { id: u64, state: RefState };
-    var snaps = std.ArrayList(SnapEntry){};
+    var snaps = std.ArrayList(SnapEntry).empty;
     defer snaps.deinit(allocator);
 
     var i: usize = 0;
@@ -183,10 +183,10 @@ pub fn fuzzJournalOriginalStorageIndex(_: void, input: []const u8) !void {
 
     // Independent flat log of (snap_id, addr_idx, slot_idx, original_value)
     const LogEntry = struct { snap_id: u16, addr_idx: u8, slot_idx: u8, orig: u256 };
-    var ref_log = std.ArrayList(LogEntry){};
+    var ref_log = std.ArrayList(LogEntry).empty;
     defer ref_log.deinit(allocator);
 
-    var snaps = std.ArrayList(u16){};
+    var snaps = std.ArrayList(u16).empty;
     defer snaps.deinit(allocator);
 
     var current_snap: u16 = 0;

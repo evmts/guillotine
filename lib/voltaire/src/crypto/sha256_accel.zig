@@ -86,7 +86,7 @@ pub fn SHA256_Accel(comptime vector_size: comptime_int) type {
                 process_block_simd(&state, &last_block);
             } else {
                 // Empty message padding
-                var last_block = [_]u8{0} ** BLOCK_SIZE;
+                var last_block = @as([BLOCK_SIZE]u8, @splat(0));
                 last_block[0] = 0x80;
                 const bit_len: u64 = 0;
                 std.mem.writeInt(u64, last_block[56..64], bit_len, .big);
@@ -280,7 +280,7 @@ test "SHA256 edge cases with vector optimization" {
     const SHA256 = SHA256_Accel(4);
 
     // Test data exactly at block boundary (64 bytes)
-    const block_data = "a" ** 64;
+    const block_data = &@as([64]u8, @splat('a'));
     var output1: [32]u8 = undefined;
     var output2: [32]u8 = undefined;
 
@@ -289,13 +289,13 @@ test "SHA256 edge cases with vector optimization" {
     try std.testing.expectEqualSlices(u8, &output2, &output1);
 
     // Test data one byte over block boundary
-    const over_block = "a" ** 65;
+    const over_block = &@as([65]u8, @splat('a'));
     SHA256.hash(over_block, &output1);
     std.crypto.hash.sha2.Sha256.hash(over_block, &output2, .{});
     try std.testing.expectEqualSlices(u8, &output2, &output1);
 
     // Test large data (multiple blocks)
-    const large_data = "a" ** 1000;
+    const large_data = &@as([1000]u8, @splat('a'));
     SHA256.hash(large_data, &output1);
     std.crypto.hash.sha2.Sha256.hash(large_data, &output2, .{});
     try std.testing.expectEqualSlices(u8, &output2, &output1);
@@ -371,7 +371,7 @@ test "SHA256 scalar vs SIMD consistency" {
 test "SHA256 message schedule validation" {
     const SHA256 = SHA256_Accel(4);
 
-    const single_block = [_]u8{0x42} ** 55;
+    const single_block = @as([55]u8, @splat(0x42));
     var output1: [32]u8 = undefined;
     var output2: [32]u8 = undefined;
 

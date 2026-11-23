@@ -5,7 +5,7 @@ const steps = @import("bench_step.zig");
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
-    const optimize = b.option(std.builtin.OptimizeMode, "optimize", "Runner optimization (default ReleaseFast)") orelse .ReleaseFast;
+    const optimize = b.option(std.builtin.OptimizeMode, "optimize", "Runner optimization (default ReleaseFast)") orelse .fast;
     if (!target.query.isNative()) @panic("standalone benchmarks require a native target");
     const hardfork = b.option([]const u8, "bench-hardfork", "Benchmark fork (default OSAKA)") orelse "OSAKA";
     const root = b.dependency("guillotine", .{ .target = target, .optimize = optimize });

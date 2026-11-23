@@ -9,14 +9,14 @@ test "SIGNEXTEND: extend byte 0 of 0xFF" {
 
 fn run_signextend_test(allocator: std.mem.Allocator, byte_num: u256, value: u256) !void {
     // Build custom bytecode for SIGNEXTEND test
-    var buf = std.ArrayList(u8){};
+    var buf = std.ArrayList(u8).empty;
     defer buf.deinit(allocator);
     
     // Push byte_num (which byte to extend from)
     if (byte_num == 0) {
         try buf.append(allocator, 0x5f); // PUSH0
     } else {
-        var tmp: [32]u8 = [_]u8{0} ** 32;
+        var tmp: [32]u8 = @as([32]u8, @splat(0));
         std.mem.writeInt(u256, &tmp, byte_num, .big);
         const first_non_zero = std.mem.indexOfNonePos(u8, &tmp, 0, &[_]u8{0}) orelse 32;
         const slice = tmp[first_non_zero..];
@@ -31,7 +31,7 @@ fn run_signextend_test(allocator: std.mem.Allocator, byte_num: u256, value: u256
     if (value == 0) {
         try buf.append(allocator, 0x5f); // PUSH0
     } else {
-        var tmp: [32]u8 = [_]u8{0} ** 32;
+        var tmp: [32]u8 = @as([32]u8, @splat(0));
         std.mem.writeInt(u256, &tmp, value, .big);
         const first_non_zero = std.mem.indexOfNonePos(u8, &tmp, 0, &[_]u8{0}) orelse 32;
         const slice = tmp[first_non_zero..];
@@ -62,8 +62,8 @@ fn run_signextend_test(allocator: std.mem.Allocator, byte_num: u256, value: u256
     var database = evm.Database.init(allocator);
     defer database.deinit();
     
-    const caller_address = primitives.Address{ .bytes = [_]u8{0x10} ++ [_]u8{0} ** 18 ++ [_]u8{0x01} };
-    const contract_address = primitives.Address{ .bytes = [_]u8{0x20} ++ [_]u8{0} ** 18 ++ [_]u8{0x02} };
+    const caller_address = primitives.Address{ .bytes = [_]u8{0x10} ++ @as([18]u8, @splat(0)) ++ [_]u8{0x01} };
+    const contract_address = primitives.Address{ .bytes = [_]u8{0x20} ++ @as([18]u8, @splat(0)) ++ [_]u8{0x02} };
     
     const code_hash = try database.set_code(bytecode);
     
@@ -71,14 +71,14 @@ fn run_signextend_test(allocator: std.mem.Allocator, byte_num: u256, value: u256
         .balance = 0,
         .nonce = 0,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     });
     
     try database.set_account(caller_address.bytes, .{
         .balance = std.math.maxInt(u256),
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     });
     
     const block_info = evm.BlockInfo{
@@ -89,7 +89,7 @@ fn run_signextend_test(allocator: std.mem.Allocator, byte_num: u256, value: u256
         .gas_limit = 1_000_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 7,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
         .blob_base_fee = 1000000000,
         .blob_versioned_hashes = &.{},
     };
@@ -246,14 +246,14 @@ test "SIGNEXTEND: 256-bit value byte 31" {
 
 fn run_signextend_test_with_jump(allocator: std.mem.Allocator, byte_num: u256, value: u256) !void {
     // Build custom bytecode for SIGNEXTEND test with jump to prevent fusion
-    var buf = std.ArrayList(u8){};
+    var buf = std.ArrayList(u8).empty;
     defer buf.deinit(allocator);
     
     // Push byte_num (which byte to extend from)
     if (byte_num == 0) {
         try buf.append(allocator, 0x5f); // PUSH0
     } else {
-        var tmp: [32]u8 = [_]u8{0} ** 32;
+        var tmp: [32]u8 = @as([32]u8, @splat(0));
         std.mem.writeInt(u256, &tmp, byte_num, .big);
         const first_non_zero = std.mem.indexOfNonePos(u8, &tmp, 0, &[_]u8{0}) orelse 32;
         const slice = tmp[first_non_zero..];
@@ -268,7 +268,7 @@ fn run_signextend_test_with_jump(allocator: std.mem.Allocator, byte_num: u256, v
     if (value == 0) {
         try buf.append(allocator, 0x5f); // PUSH0
     } else {
-        var tmp: [32]u8 = [_]u8{0} ** 32;
+        var tmp: [32]u8 = @as([32]u8, @splat(0));
         std.mem.writeInt(u256, &tmp, value, .big);
         const first_non_zero = std.mem.indexOfNonePos(u8, &tmp, 0, &[_]u8{0}) orelse 32;
         const slice = tmp[first_non_zero..];
@@ -308,8 +308,8 @@ fn run_signextend_test_with_jump(allocator: std.mem.Allocator, byte_num: u256, v
     var database = evm.Database.init(allocator);
     defer database.deinit();
     
-    const caller_address = primitives.Address{ .bytes = [_]u8{0x10} ++ [_]u8{0} ** 18 ++ [_]u8{0x01} };
-    const contract_address = primitives.Address{ .bytes = [_]u8{0x20} ++ [_]u8{0} ** 18 ++ [_]u8{0x02} };
+    const caller_address = primitives.Address{ .bytes = [_]u8{0x10} ++ @as([18]u8, @splat(0)) ++ [_]u8{0x01} };
+    const contract_address = primitives.Address{ .bytes = [_]u8{0x20} ++ @as([18]u8, @splat(0)) ++ [_]u8{0x02} };
     
     const code_hash = try database.set_code(bytecode);
     
@@ -317,14 +317,14 @@ fn run_signextend_test_with_jump(allocator: std.mem.Allocator, byte_num: u256, v
         .balance = 0,
         .nonce = 0,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     });
     
     try database.set_account(caller_address.bytes, .{
         .balance = std.math.maxInt(u256),
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     });
     
     const block_info = evm.BlockInfo{
@@ -335,7 +335,7 @@ fn run_signextend_test_with_jump(allocator: std.mem.Allocator, byte_num: u256, v
         .gas_limit = 1_000_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 7,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
         .blob_base_fee = 1000000000,
         .blob_versioned_hashes = &.{},
     };

@@ -181,7 +181,7 @@ test "EMPTY_TRIE_ROOT is correct Keccak256 of RLP null" {
 }
 
 test "StorageKey equality with identical keys" {
-    const addr = [_]u8{0x01} ** 20;
+    const addr = @as([20]u8, @splat(0x01));
     const key1 = StorageKey{ .address = addr, .slot = 42 };
     const key2 = StorageKey{ .address = addr, .slot = 42 };
 
@@ -189,8 +189,8 @@ test "StorageKey equality with identical keys" {
 }
 
 test "StorageKey equality with different addresses" {
-    const addr1 = [_]u8{0x01} ** 20;
-    const addr2 = [_]u8{0x02} ** 20;
+    const addr1 = @as([20]u8, @splat(0x01));
+    const addr2 = @as([20]u8, @splat(0x02));
     const key1 = StorageKey{ .address = addr1, .slot = 42 };
     const key2 = StorageKey{ .address = addr2, .slot = 42 };
 
@@ -198,7 +198,7 @@ test "StorageKey equality with different addresses" {
 }
 
 test "StorageKey equality with different slots" {
-    const addr = [_]u8{0x01} ** 20;
+    const addr = @as([20]u8, @splat(0x01));
     const key1 = StorageKey{ .address = addr, .slot = 42 };
     const key2 = StorageKey{ .address = addr, .slot = 43 };
 
@@ -206,8 +206,8 @@ test "StorageKey equality with different slots" {
 }
 
 test "StorageKey equality with different addresses and slots" {
-    const addr1 = [_]u8{0x01} ** 20;
-    const addr2 = [_]u8{0x02} ** 20;
+    const addr1 = @as([20]u8, @splat(0x01));
+    const addr2 = @as([20]u8, @splat(0x02));
     const key1 = StorageKey{ .address = addr1, .slot = 42 };
     const key2 = StorageKey{ .address = addr2, .slot = 43 };
 
@@ -215,7 +215,7 @@ test "StorageKey equality with different addresses and slots" {
 }
 
 test "StorageKey with zero values" {
-    const addr = [_]u8{0x00} ** 20;
+    const addr = @as([20]u8, @splat(0x00));
     const key1 = StorageKey{ .address = addr, .slot = 0 };
     const key2 = StorageKey{ .address = addr, .slot = 0 };
 
@@ -223,7 +223,7 @@ test "StorageKey with zero values" {
 }
 
 test "StorageKey with maximum u256 slot value" {
-    const addr = [_]u8{0xFF} ** 20;
+    const addr = @as([20]u8, @splat(0xFF));
     const max_slot: u256 = std.math.maxInt(u256);
     const key1 = StorageKey{ .address = addr, .slot = max_slot };
     const key2 = StorageKey{ .address = addr, .slot = max_slot };
@@ -232,8 +232,8 @@ test "StorageKey with maximum u256 slot value" {
 }
 
 test "StorageKey hash produces different values for different addresses" {
-    const addr1 = [_]u8{0x01} ** 20;
-    const addr2 = [_]u8{0x02} ** 20;
+    const addr1 = @as([20]u8, @splat(0x01));
+    const addr2 = @as([20]u8, @splat(0x02));
     const key1 = StorageKey{ .address = addr1, .slot = 0 };
     const key2 = StorageKey{ .address = addr2, .slot = 0 };
 
@@ -250,7 +250,7 @@ test "StorageKey hash produces different values for different addresses" {
 }
 
 test "StorageKey hash produces different values for different slots" {
-    const addr = [_]u8{0x01} ** 20;
+    const addr = @as([20]u8, @splat(0x01));
     const key1 = StorageKey{ .address = addr, .slot = 0 };
     const key2 = StorageKey{ .address = addr, .slot = 1 };
 
@@ -267,7 +267,7 @@ test "StorageKey hash produces different values for different slots" {
 }
 
 test "StorageKey hash is consistent across multiple calls" {
-    const addr = [_]u8{0xAB} ** 20;
+    const addr = @as([20]u8, @splat(0xAB));
     const key = StorageKey{ .address = addr, .slot = 12345 };
 
     var hasher1 = std.hash.Wyhash.init(0);
@@ -283,7 +283,7 @@ test "StorageKey hash is consistent across multiple calls" {
 }
 
 test "StorageKey hash with maximum values" {
-    const addr = [_]u8{0xFF} ** 20;
+    const addr = @as([20]u8, @splat(0xFF));
     const max_slot: u256 = std.math.maxInt(u256);
     const key = StorageKey{ .address = addr, .slot = max_slot };
 
@@ -296,7 +296,7 @@ test "StorageKey hash with maximum values" {
 }
 
 test "StorageKey hash with minimum values" {
-    const addr = [_]u8{0x00} ** 20;
+    const addr = @as([20]u8, @splat(0x00));
     const key = StorageKey{ .address = addr, .slot = 0 };
 
     var hasher = std.hash.Wyhash.init(0);
@@ -311,7 +311,7 @@ test "StorageKey in AutoHashMap basic operations" {
     var map = std.AutoHashMap(StorageKey, u256).init(std.testing.allocator);
     defer map.deinit();
 
-    const addr = [_]u8{0x42} ** 20;
+    const addr = @as([20]u8, @splat(0x42));
     const key = StorageKey{ .address = addr, .slot = 100 };
     const value: u256 = 999;
 
@@ -326,9 +326,9 @@ test "StorageKey in AutoHashMap with multiple entries" {
     var map = std.AutoHashMap(StorageKey, u256).init(std.testing.allocator);
     defer map.deinit();
 
-    const addr1 = [_]u8{0x11} ** 20;
-    const addr2 = [_]u8{0x22} ** 20;
-    const addr3 = [_]u8{0x33} ** 20;
+    const addr1 = @as([20]u8, @splat(0x11));
+    const addr2 = @as([20]u8, @splat(0x22));
+    const addr3 = @as([20]u8, @splat(0x33));
 
     const key1 = StorageKey{ .address = addr1, .slot = 0 };
     const key2 = StorageKey{ .address = addr2, .slot = 1 };
@@ -347,7 +347,7 @@ test "StorageKey in AutoHashMap overwrites value for same key" {
     var map = std.AutoHashMap(StorageKey, u256).init(std.testing.allocator);
     defer map.deinit();
 
-    const addr = [_]u8{0x99} ** 20;
+    const addr = @as([20]u8, @splat(0x99));
     const key = StorageKey{ .address = addr, .slot = 5 };
 
     try map.put(key, 111);
@@ -361,7 +361,7 @@ test "StorageKey in AutoHashMap with same address different slots" {
     var map = std.AutoHashMap(StorageKey, u256).init(std.testing.allocator);
     defer map.deinit();
 
-    const addr = [_]u8{0xAA} ** 20;
+    const addr = @as([20]u8, @splat(0xAA));
 
     const key0 = StorageKey{ .address = addr, .slot = 0 };
     const key1 = StorageKey{ .address = addr, .slot = 1 };
@@ -380,7 +380,7 @@ test "StorageKey in AutoHashMap removal" {
     var map = std.AutoHashMap(StorageKey, u256).init(std.testing.allocator);
     defer map.deinit();
 
-    const addr = [_]u8{0xBB} ** 20;
+    const addr = @as([20]u8, @splat(0xBB));
     const key = StorageKey{ .address = addr, .slot = 77 };
 
     try map.put(key, 555);
@@ -394,7 +394,7 @@ test "StorageKey in AutoHashMap with large slot numbers" {
     var map = std.AutoHashMap(StorageKey, u256).init(std.testing.allocator);
     defer map.deinit();
 
-    const addr = [_]u8{0xCC} ** 20;
+    const addr = @as([20]u8, @splat(0xCC));
     const large_slot: u256 = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
     const key = StorageKey{ .address = addr, .slot = large_slot };
 
@@ -404,7 +404,7 @@ test "StorageKey in AutoHashMap with large slot numbers" {
 
 test "StorageKey memory layout is predictable" {
     const key = StorageKey{
-        .address = [_]u8{0x01} ** 20,
+        .address = @as([20]u8, @splat(0x01)),
         .slot = 42,
     };
 
@@ -418,8 +418,8 @@ test "StorageKey memory layout is predictable" {
 }
 
 test "StorageKey creation with various address patterns" {
-    const zero_addr = [_]u8{0x00} ** 20;
-    const max_addr = [_]u8{0xFF} ** 20;
+    const zero_addr = @as([20]u8, @splat(0x00));
+    const max_addr = @as([20]u8, @splat(0xFF));
     const pattern_addr = [20]u8{ 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10, 0x11, 0x12, 0x13, 0x14 };
 
     const key1 = StorageKey{ .address = zero_addr, .slot = 0 };
@@ -436,7 +436,7 @@ test "StorageKey creation with various address patterns" {
 }
 
 test "StorageKey slot ordering edge cases" {
-    const addr = [_]u8{0x55} ** 20;
+    const addr = @as([20]u8, @splat(0x55));
 
     const key_slot_0 = StorageKey{ .address = addr, .slot = 0 };
     const key_slot_1 = StorageKey{ .address = addr, .slot = 1 };
@@ -464,7 +464,7 @@ test "StorageKey address boundary differences" {
 }
 
 test "StorageKey hash endianness consistency for slot" {
-    const addr = [_]u8{0x77} ** 20;
+    const addr = @as([20]u8, @splat(0x77));
     const slot: u256 = 0x0102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F20;
     const key = StorageKey{ .address = addr, .slot = slot };
 

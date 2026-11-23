@@ -186,7 +186,7 @@ test "JournalEntry creation and field access" {
     }
     
     // Test code change
-    const code_hash = [_]u8{0xAB} ** 32;
+    const code_hash = @as([32]u8, @splat(0xAB));
     const code_entry = Entry.code_change(4, addr, code_hash);
     try testing.expectEqual(@as(u16, 4), code_entry.snapshot_id);
     switch (code_entry.data) {
@@ -230,7 +230,7 @@ test "JournalEntry with minimal config" {
     };
     const Entry = JournalEntry(config);
     
-    const addr: Address = .{ .bytes = [_]u8{0} ** 20 };
+    const addr: Address = .{ .bytes = @as([20]u8, @splat(0)) };
     
     // Test with minimal types
     const entry = Entry.storage_change(255, addr, std.math.maxInt(u64), 0);
@@ -253,7 +253,7 @@ test "JournalEntry - default configuration types" {
     try testing.expectEqual(u256, Entry.WordType);
     try testing.expectEqual(u64, Entry.NonceType);
     
-    const addr: Address = .{ .bytes = [_]u8{1} ** 20 };
+    const addr: Address = .{ .bytes = @as([20]u8, @splat(1)) };
     const entry = Entry.storage_change(100, addr, 42, 84);
     try testing.expectEqual(@as(u32, 100), entry.snapshot_id);
 }
@@ -266,7 +266,7 @@ test "JournalEntry - boundary values for snapshot IDs" {
         .NonceType = u32,
     };
     const Entry = JournalEntry(config);
-    const addr: Address = .{ .bytes = [_]u8{0xFF} ** 20 };
+    const addr: Address = .{ .bytes = @as([20]u8, @splat(0xFF)) };
     
     // Test boundary values for u8 snapshot IDs
     const min_entry = Entry.balance_change(0, addr, 1000);
@@ -284,7 +284,7 @@ test "JournalEntry - maximum value configurations" {
         .NonceType = u64,
     };
     const Entry = JournalEntry(config);
-    const addr: Address = .{ .bytes = [_]u8{0xAA} ** 20 };
+    const addr: Address = .{ .bytes = @as([20]u8, @splat(0xAA)) };
     
     // Test with maximum values
     const max_snapshot = std.math.maxInt(u64);
@@ -313,7 +313,7 @@ test "JournalEntry - maximum value configurations" {
 test "JournalEntry - zero values" {
     const testing = std.testing;
     const Entry = DefaultJournalEntry;
-    const zero_addr: Address = .{ .bytes = [_]u8{0} ** 20 };
+    const zero_addr: Address = .{ .bytes = @as([20]u8, @splat(0)) };
     
     // Test with all zero values
     const storage_entry = Entry.storage_change(0, zero_addr, 0, 0);
@@ -349,9 +349,14 @@ test "JournalEntry - address variations" {
     const Entry = DefaultJournalEntry;
     
     // Test with different address patterns
-    const zero_addr: Address = .{ .bytes = [_]u8{0} ** 20 };
-    const max_addr: Address = .{ .bytes = [_]u8{0xFF} ** 20 };
-    const pattern_addr: Address = .{ .bytes = [_]u8{0xAA, 0x55} ** 10 };
+    const zero_addr: Address = .{ .bytes = @as([20]u8, @splat(0)) };
+    const max_addr: Address = .{ .bytes = @as([20]u8, @splat(0xFF)) };
+    const pattern_addr: Address = .{ .bytes = comptime repeat: {
+        const pattern = [_]u8{ 0xAA, 0x55 };
+        var out: [2 * 10]u8 = undefined;
+        for (&out, 0..) |*byte, i| byte.* = pattern[i % pattern.len];
+        break :repeat out;
+    } };
     
     const entry1 = Entry.account_created(1, zero_addr);
     const entry2 = Entry.account_created(2, max_addr);
@@ -376,11 +381,11 @@ test "JournalEntry - address variations" {
 test "JournalEntry - code hash variations" {
     const testing = std.testing;
     const Entry = DefaultJournalEntry;
-    const addr: Address = .{ .bytes = [_]u8{0x11} ** 20 };
+    const addr: Address = .{ .bytes = @as([20]u8, @splat(0x11)) };
     
     // Test with different code hash patterns
-    const zero_hash = [_]u8{0} ** 32;
-    const max_hash = [_]u8{0xFF} ** 32;
+    const zero_hash = @as([32]u8, @splat(0));
+    const max_hash = @as([32]u8, @splat(0xFF));
     const keccak_empty_hash = [_]u8{
         0xc5, 0xd2, 0x46, 0x01, 0x86, 0xf7, 0x23, 0x3c,
         0x92, 0x7e, 0x7d, 0xb2, 0xdc, 0xc7, 0x03, 0xc0,
@@ -411,8 +416,8 @@ test "JournalEntry - code hash variations" {
 test "JournalEntry - account destroyed scenarios" {
     const testing = std.testing;
     const Entry = DefaultJournalEntry;
-    const contract_addr: Address = .{ .bytes = [_]u8{0xDE, 0xAD} ++ [_]u8{0} ** 18 };
-    const beneficiary_addr: Address = .{ .bytes = [_]u8{0xBE, 0xEF} ++ [_]u8{0} ** 18 };
+    const contract_addr: Address = .{ .bytes = [_]u8{0xDE, 0xAD} ++ @as([18]u8, @splat(0)) };
+    const beneficiary_addr: Address = .{ .bytes = [_]u8{0xBE, 0xEF} ++ @as([18]u8, @splat(0)) };
     
     // Test self-destruct scenarios
     const zero_balance_destroy = Entry.account_destroyed(10, contract_addr, beneficiary_addr, 0);
@@ -484,13 +489,13 @@ test "JournalEntry - mixed type sizes" {
 test "JournalEntry - data union discriminants" {
     const testing = std.testing;
     const Entry = DefaultJournalEntry;
-    const addr: Address = .{ .bytes = [_]u8{0x42} ** 20 };
+    const addr: Address = .{ .bytes = @as([20]u8, @splat(0x42)) };
     
     // Test that we can distinguish between different entry types
     const storage_entry = Entry.storage_change(1, addr, 1, 1);
     const balance_entry = Entry.balance_change(2, addr, 2);
     const nonce_entry = Entry.nonce_change(3, addr, 3);
-    const code_entry = Entry.code_change(4, addr, [_]u8{0x04} ** 32);
+    const code_entry = Entry.code_change(4, addr, @as([32]u8, @splat(0x04)));
     const created_entry = Entry.account_created(5, addr);
     const destroyed_entry = Entry.account_destroyed(6, addr, addr, 6);
     
@@ -531,17 +536,17 @@ test "JournalEntry - entry size and memory layout" {
     const Entry = DefaultJournalEntry;
     
     // Test that entries have reasonable size
-    const storage_entry = Entry.storage_change(1, Address{ .bytes = [_]u8{0} ** 20 }, 42, 84);
+    const storage_entry = Entry.storage_change(1, Address{ .bytes = @as([20]u8, @splat(0)) }, 42, 84);
     _ = storage_entry; // Use the entry to ensure it's created
     
     // Verify that all entry types can be created without issues
     const entries = [_]Entry{
-        Entry.storage_change(1, Address{ .bytes = [_]u8{0} ** 20 }, 1, 1),
-        Entry.balance_change(2, Address{ .bytes = [_]u8{0} ** 20 }, 2),
-        Entry.nonce_change(3, Address{ .bytes = [_]u8{0} ** 20 }, 3),
-        Entry.code_change(4, Address{ .bytes = [_]u8{0} ** 20 }, [_]u8{0} ** 32),
-        Entry.account_created(5, Address{ .bytes = [_]u8{0} ** 20 }),
-        Entry.account_destroyed(6, Address{ .bytes = [_]u8{0} ** 20 }, Address{ .bytes = [_]u8{1} ** 20 }, 6),
+        Entry.storage_change(1, Address{ .bytes = @as([20]u8, @splat(0)) }, 1, 1),
+        Entry.balance_change(2, Address{ .bytes = @as([20]u8, @splat(0)) }, 2),
+        Entry.nonce_change(3, Address{ .bytes = @as([20]u8, @splat(0)) }, 3),
+        Entry.code_change(4, Address{ .bytes = @as([20]u8, @splat(0)) }, @as([32]u8, @splat(0))),
+        Entry.account_created(5, Address{ .bytes = @as([20]u8, @splat(0)) }),
+        Entry.account_destroyed(6, Address{ .bytes = @as([20]u8, @splat(0)) }, Address{ .bytes = @as([20]u8, @splat(1)) }, 6),
     };
     
     // Verify all entries were created successfully
@@ -560,7 +565,7 @@ test "JournalEntry - large configuration stress test" {
         .initial_capacity = 1000,
     };
     const Entry = JournalEntry(config);
-    const addr: Address = .{ .bytes = [_]u8{0x99} ** 20 };
+    const addr: Address = .{ .bytes = @as([20]u8, @splat(0x99)) };
     
     // Create many entries with large values to stress test
     const large_snapshot = 1_000_000_000_000;

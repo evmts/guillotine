@@ -3,9 +3,7 @@ const std = @import("std");
 /// FFI bindings to the Rust BN254 (arkworks) implementation
 /// This provides production-grade, audited elliptic curve operations
 /// for Ethereum precompiles (ECADD, ECMUL, ECPAIRING)
-const c = @cImport({
-    @cInclude("bn254_wrapper.h");
-});
+const c = @import("bn254_wrapper_c");
 
 pub const BN254Error = error{
     InvalidInput,

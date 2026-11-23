@@ -367,7 +367,7 @@ pub fn build(b: *std.Build) void {
 
     // Initialize arrays for each fork
     for (sub_target_configs) |config| {
-        const steps = std.ArrayList(*std.Build.Step){};
+        const steps = std.ArrayList(*std.Build.Step).empty;
         fork_sub_steps_map.put(config.fork_name, steps) catch @panic("OOM");
     }
 
@@ -498,7 +498,7 @@ pub fn build(b: *std.Build) void {
     // Get WASM-specific voltaire modules from dependency
     const wasm_voltaire_dep = b.dependency("voltaire", .{
         .target = wasm_target,
-        .optimize = .ReleaseSmall,
+        .optimize = .small,
     });
 
     const wasm_primitives_mod = wasm_voltaire_dep.module("voltaire");
@@ -509,7 +509,7 @@ pub fn build(b: *std.Build) void {
     const wasm_mod = b.addModule("guillotine_mini_wasm", .{
         .root_source_file = b.path("src/root_c.zig"),
         .target = wasm_target,
-        .optimize = .ReleaseSmall,
+        .optimize = .small,
         .imports = &.{
             .{ .name = "primitives", .module = wasm_primitives_mod },
             .{ .name = "crypto", .module = wasm_crypto_mod },

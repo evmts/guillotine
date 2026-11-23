@@ -43,7 +43,7 @@ fn runStackModel(comptime StackT: type, input: []const u8) !void {
     var stack = try StackT.init(allocator, null);
     defer stack.deinit(allocator);
 
-    var model = std.ArrayList(u256){};
+    var model = std.ArrayList(u256).empty;
     defer model.deinit(allocator);
 
     var i: usize = 0;
@@ -169,7 +169,7 @@ pub fn fuzzBorrowedStack(_: void, input: []const u8) !void {
     var stack = try SmallStack.init(allocator, null);
     defer stack.deinit(allocator);
 
-    var model = std.ArrayList(u256){};
+    var model = std.ArrayList(u256).empty;
     defer model.deinit(allocator);
 
     for (input, 0..) |b, i| {

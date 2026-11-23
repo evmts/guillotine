@@ -83,7 +83,7 @@ fn runFixture(fixture_name: []const u8, calldata_hex: []const u8, gas_limit: u64
         defer file.close();
         
         // Build the output in memory first
-        var output = std.ArrayList(u8){};
+        var output = std.ArrayList(u8).empty;
         defer output.deinit(allocator);
         
         // Write hex representation
@@ -374,7 +374,7 @@ fn testDispatchSnapshot(allocator: std.mem.Allocator, fixture_name: []const u8, 
     
     // For bubblesort, analyze PC 0xa1-0xa3 bytecode and dispatch generation
     if (std.mem.eql(u8, fixture_name, "bubblesort")) {
-        var debug_output = std.ArrayList(u8){};
+        var debug_output = std.ArrayList(u8).empty;
         defer debug_output.deinit(allocator);
         
         // First, dump raw bytecode bytes around PC 0xa2

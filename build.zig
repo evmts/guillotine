@@ -12,7 +12,8 @@ pub fn build(b: *std.Build) void {
 
     // Download KZG trusted setup if it doesn't exist
     const kzg_path = "src/kzg/trusted_setup.txt";
-    std.fs.cwd().access(kzg_path, .{}) catch {
+    b.root.access(b.graph.io, kzg_path, .{}) catch |err| {
+        if (err != error.FileNotFound) std.debug.panic("unable to access {s}: {s}", .{ kzg_path, @errorName(err) });
         const download_kzg = b.addSystemCommand(&[_][]const u8{
             "curl",
             "-L",
@@ -87,7 +88,7 @@ pub fn build(b: *std.Build) void {
             .root_module = if (is_crypto) modules.crypto_mod else b.createModule(.{
                 .root_source_file = b.path(b.fmt("lib/voltaire/src/{s}/modexp.zig", .{area})),
                 .target = target,
-                .optimize = .Debug,
+                .optimize = .debug,
             }),
             .use_llvm = true,
         });
@@ -95,7 +96,7 @@ pub fn build(b: *std.Build) void {
             modexp_test.root_module.addImport("voltaire", modules.primitives_mod);
             modexp_test.root_module.addImport("crypto", modules.crypto_mod);
         }
-        modexp_test.linkLibC();
+        modexp_test.root_module.link_libc = true;
         modexp_tests_step.dependOn(&b.addRunArtifact(modexp_test).step);
     }
 
@@ -124,9 +125,9 @@ pub fn build(b: *std.Build) void {
         // Force LLVM backend: native Zig backend on Linux x86 doesn't support tail calls yet
         .use_llvm = true,
     });
-    if (bn254_lib) |bn254| shared_lib.linkLibrary(bn254);
-    shared_lib.linkLibC();
-    if (target.result.os.tag == .linux) shared_lib.linkSystemLibrary("unwind");
+    if (bn254_lib) |bn254| shared_lib.root_module.linkLibrary(bn254);
+    shared_lib.root_module.link_libc = true;
+    if (target.result.os.tag == .linux) shared_lib.root_module.linkSystemLibrary("unwind", .{});
     // Export all symbols for Linux to ensure BLS symbols are available
     shared_lib.rdynamic = true;
     b.installArtifact(shared_lib);
@@ -142,9 +143,9 @@ pub fn build(b: *std.Build) void {
         // Force LLVM backend: native Zig backend on Linux x86 doesn't support tail calls yet
         .use_llvm = true,
     });
-    if (bn254_lib) |bn254| static_lib.linkLibrary(bn254);
-    static_lib.linkLibC();
-    if (target.result.os.tag == .linux) static_lib.linkSystemLibrary("unwind");
+    if (bn254_lib) |bn254| static_lib.root_module.linkLibrary(bn254);
+    static_lib.root_module.link_libc = true;
+    if (target.result.os.tag == .linux) static_lib.root_module.linkSystemLibrary("unwind", .{});
     b.installArtifact(static_lib);
 
     const static_lib_step = b.step("static", "Build static library for FFI");
@@ -167,7 +168,7 @@ pub fn build(b: *std.Build) void {
         // .test_runner = .{ .path = b.path("test_runner.zig"), .mode = .simple },
     });
     if (test_filter) |filter| {
-        unit_tests.filters = &[_][]const u8{filter};
+        unit_tests.filters = b.dupeStrings(&.{filter});
     }
     const run_unit_tests = b.addRunArtifact(unit_tests);
     // Pass test configuration as environment variables for the custom runner
@@ -194,13 +195,13 @@ pub fn build(b: *std.Build) void {
         .test_runner = .{ .path = b.path("test_runner.zig"), .mode = .simple },
     });
     if (foundry_lib) |foundry| {
-        lib_tests.linkLibrary(foundry);
-        lib_tests.addIncludePath(b.path("lib/foundry-compilers"));
+        lib_tests.root_module.linkLibrary(foundry);
+        lib_tests.root_module.addIncludePath(b.path("lib/foundry-compilers"));
     }
-    if (bn254_lib) |bn254| lib_tests.linkLibrary(bn254);
-    lib_tests.linkLibC();
+    if (bn254_lib) |bn254| lib_tests.root_module.linkLibrary(bn254);
+    lib_tests.root_module.link_libc = true;
     if (test_filter) |filter| {
-        lib_tests.filters = &[_][]const u8{filter};
+        lib_tests.filters = b.dupeStrings(&.{filter});
     }
     const run_lib_tests = b.addRunArtifact(lib_tests);
     // Pass test configuration as environment variables for the custom runner
@@ -233,10 +234,10 @@ pub fn build(b: *std.Build) void {
     integration_tests.root_module.addImport("provider", modules.provider_mod);
     integration_tests.root_module.addImport("trie", modules.trie_mod);
     integration_tests.root_module.addImport("Guillotine_lib", modules.lib_mod);
-    if (bn254_lib) |bn254| integration_tests.linkLibrary(bn254);
-    integration_tests.linkLibC();
+    if (bn254_lib) |bn254| integration_tests.root_module.linkLibrary(bn254);
+    integration_tests.root_module.link_libc = true;
     if (test_filter) |filter| {
-        integration_tests.filters = &[_][]const u8{filter};
+        integration_tests.filters = b.dupeStrings(&.{filter});
     }
     const run_integration_tests = b.addRunArtifact(integration_tests);
     // Pass test configuration as environment variables for the custom runner
@@ -263,14 +264,14 @@ pub fn build(b: *std.Build) void {
     });
     fixture_tests.root_module.addImport("evm", modules.evm_mod);
     fixture_tests.root_module.addImport("voltaire", modules.primitives_mod);
-    if (bn254_lib) |bn254| fixture_tests.linkLibrary(bn254);
+    if (bn254_lib) |bn254| fixture_tests.root_module.linkLibrary(bn254);
     if (foundry_lib) |foundry| {
-        fixture_tests.linkLibrary(foundry);
-        fixture_tests.addIncludePath(b.path("lib/foundry-compilers"));
+        fixture_tests.root_module.linkLibrary(foundry);
+        fixture_tests.root_module.addIncludePath(b.path("lib/foundry-compilers"));
     }
-    fixture_tests.linkLibC();
+    fixture_tests.root_module.link_libc = true;
     if (test_filter) |filter| {
-        fixture_tests.filters = &[_][]const u8{filter};
+        fixture_tests.filters = b.dupeStrings(&.{filter});
     }
     const run_fixture_tests = b.addRunArtifact(fixture_tests);
     if (test_filter) |filter| {
@@ -316,7 +317,7 @@ pub fn build(b: *std.Build) void {
         .root_module = b.createModule(.{
             .root_source_file = b.path("test/erc20_deployment_gas_issue.zig"),
             .target = target,
-            .optimize = .Debug, // Debug for better logging
+            .optimize = .debug, // Debug for better logging
         }),
         // Force LLVM backend: native Zig backend on Linux x86 doesn't support tail calls yet
         .use_llvm = true,
@@ -328,10 +329,10 @@ pub fn build(b: *std.Build) void {
     erc20_gas_test.root_module.addImport("log", b.createModule(.{
         .root_source_file = b.path("src/log.zig"),
         .target = target,
-        .optimize = .Debug,
+        .optimize = .debug,
     }));
-    if (bn254_lib) |bn254| erc20_gas_test.linkLibrary(bn254);
-    erc20_gas_test.linkLibC();
+    if (bn254_lib) |bn254| erc20_gas_test.root_module.linkLibrary(bn254);
+    erc20_gas_test.root_module.link_libc = true;
 
     const run_erc20_gas_test = b.addRunArtifact(erc20_gas_test);
     const erc20_gas_test_step = b.step("test-erc20-gas", "Test ERC20 deployment gas issue");
@@ -343,7 +344,7 @@ pub fn build(b: *std.Build) void {
         .root_module = b.createModule(.{
             .root_source_file = b.path("test/jump_table_issue.zig"),
             .target = target,
-            .optimize = .Debug,
+            .optimize = .debug,
         }),
         // Force LLVM backend: native Zig backend on Linux x86 doesn't support tail calls yet
         .use_llvm = true,
@@ -355,10 +356,10 @@ pub fn build(b: *std.Build) void {
     jump_table_test.root_module.addImport("log", b.createModule(.{
         .root_source_file = b.path("src/log.zig"),
         .target = target,
-        .optimize = .Debug,
+        .optimize = .debug,
     }));
-    if (bn254_lib) |bn254| jump_table_test.linkLibrary(bn254);
-    jump_table_test.linkLibC();
+    if (bn254_lib) |bn254| jump_table_test.root_module.linkLibrary(bn254);
+    jump_table_test.root_module.link_libc = true;
 
     const run_jump_table_test = b.addRunArtifact(jump_table_test);
     const jump_table_test_step = b.step("test-jump-table", "Test jump table JUMPDEST recognition");
@@ -370,7 +371,7 @@ pub fn build(b: *std.Build) void {
         .root_module = b.createModule(.{
             .root_source_file = b.path("test/evm/erc20_deployment_issue.zig"),
             .target = target,
-            .optimize = .Debug,
+            .optimize = .debug,
         }),
         // Force LLVM backend: native Zig backend on Linux x86 doesn't support tail calls yet
         .use_llvm = true,
@@ -382,13 +383,13 @@ pub fn build(b: *std.Build) void {
     erc20_deployment_test.root_module.addImport("log", b.createModule(.{
         .root_source_file = b.path("src/log.zig"),
         .target = target,
-        .optimize = .Debug,
+        .optimize = .debug,
     }));
 
     // Using MinimalEvm for differential testing (REVM removed)
 
-    if (bn254_lib) |bn254| erc20_deployment_test.linkLibrary(bn254);
-    erc20_deployment_test.linkLibC();
+    if (bn254_lib) |bn254| erc20_deployment_test.root_module.linkLibrary(bn254);
+    erc20_deployment_test.root_module.link_libc = true;
 
     const run_erc20_deployment_test = b.addRunArtifact(erc20_deployment_test);
     const erc20_deployment_test_step = b.step("test-erc20-deployment", "Test ERC20 deployment issue");
@@ -400,7 +401,7 @@ pub fn build(b: *std.Build) void {
         .root_module = b.createModule(.{
             .root_source_file = b.path("test/differential/fixtures_comprehensive_differential_test.zig"),
             .target = target,
-            .optimize = .Debug,
+            .optimize = .debug,
         }),
         // Force LLVM backend: native Zig backend on Linux x86 doesn't support tail calls yet
         .use_llvm = true,
@@ -412,13 +413,13 @@ pub fn build(b: *std.Build) void {
     fixtures_differential_test.root_module.addImport("log", b.createModule(.{
         .root_source_file = b.path("src/log.zig"),
         .target = target,
-        .optimize = .Debug,
+        .optimize = .debug,
     }));
 
     // Using MinimalEvm for differential testing (REVM removed)
 
-    if (bn254_lib) |bn254| fixtures_differential_test.linkLibrary(bn254);
-    fixtures_differential_test.linkLibC();
+    if (bn254_lib) |bn254| fixtures_differential_test.root_module.linkLibrary(bn254);
+    fixtures_differential_test.root_module.link_libc = true;
 
     const run_fixtures_differential_test = b.addRunArtifact(fixtures_differential_test);
     const fixtures_differential_test_step = b.step("test-fixtures-differential", "Run differential tests for benchmark fixtures (ERC20, etc.)");
@@ -430,7 +431,7 @@ pub fn build(b: *std.Build) void {
         .root_module = b.createModule(.{
             .root_source_file = b.path("test_gt_exact.zig"),
             .target = target,
-            .optimize = .Debug,
+            .optimize = .debug,
         }),
         // Force LLVM backend: native Zig backend on Linux x86 doesn't support tail calls yet
         .use_llvm = true,
@@ -442,10 +443,10 @@ pub fn build(b: *std.Build) void {
     gt_bug_test.root_module.addImport("log", b.createModule(.{
         .root_source_file = b.path("src/log.zig"),
         .target = target,
-        .optimize = .Debug,
+        .optimize = .debug,
     }));
-    if (bn254_lib) |bn254| gt_bug_test.linkLibrary(bn254);
-    gt_bug_test.linkLibC();
+    if (bn254_lib) |bn254| gt_bug_test.root_module.linkLibrary(bn254);
+    gt_bug_test.root_module.link_libc = true;
     const test_gt_bug = b.step("test-gt-bug", "Test GT opcode bug");
     test_gt_bug.dependOn(&b.addRunArtifact(gt_bug_test).step);
 
@@ -455,7 +456,7 @@ pub fn build(b: *std.Build) void {
         .root_module = b.createModule(.{
             .root_source_file = b.path("test/dev_test.zig"),
             .target = target,
-            .optimize = .Debug,
+            .optimize = .debug,
         }),
         // Force LLVM backend: native Zig backend on Linux x86 doesn't support tail calls yet
         .use_llvm = true,
@@ -464,8 +465,8 @@ pub fn build(b: *std.Build) void {
     dev_test.root_module.addImport("voltaire", modules.primitives_mod);
     dev_test.root_module.addImport("crypto", modules.crypto_mod);
     dev_test.root_module.addImport("build_options", options_mod);
-    if (bn254_lib) |bn254| dev_test.linkLibrary(bn254);
-    dev_test.linkLibC();
+    if (bn254_lib) |bn254| dev_test.root_module.linkLibrary(bn254);
+    dev_test.root_module.link_libc = true;
     const test_dev = b.step("test-dev", "Run development test for debugging");
     test_dev.dependOn(&b.addRunArtifact(dev_test).step);
 
@@ -480,11 +481,11 @@ pub fn build(b: *std.Build) void {
         .root_module = b.createModule(.{
             .root_source_file = b.path("test/evm/opcodes/all_opcodes.zig"),
             .target = target,
-            .optimize = .Debug,
+            .optimize = .debug,
         }),
         .use_llvm = true,
     });
-    if (test_filter) |filter| all_opcode_tests.filters = &.{filter};
+    if (test_filter) |filter| all_opcode_tests.filters = b.dupeStrings(&.{filter});
     all_opcode_tests.root_module.addImport("evm", modules.evm_mod);
     all_opcode_tests.root_module.addImport("voltaire", modules.primitives_mod);
     all_opcode_tests.root_module.addImport("crypto", modules.crypto_mod);
@@ -492,17 +493,19 @@ pub fn build(b: *std.Build) void {
     all_opcode_tests.root_module.addImport("log", b.createModule(.{
         .root_source_file = b.path("src/log.zig"),
         .target = target,
-        .optimize = .Debug,
+        .optimize = .debug,
     }));
-    if (bn254_lib) |bn254| all_opcode_tests.linkLibrary(bn254);
-    all_opcode_tests.linkLibC();
-    if (target.result.os.tag == .linux) all_opcode_tests.linkSystemLibrary("unwind");
+    if (bn254_lib) |bn254| all_opcode_tests.root_module.linkLibrary(bn254);
+    all_opcode_tests.root_module.link_libc = true;
+    if (target.result.os.tag == .linux) all_opcode_tests.root_module.linkSystemLibrary("unwind", .{});
     opcode_tests_step.dependOn(&b.addRunArtifact(all_opcode_tests).step);
-    if (std.fs.cwd().openDir("test/evm/opcodes", .{ .iterate = true }) catch null) |op_dir_val| {
-        var op_dir = op_dir_val; // make mutable for close()
-        defer op_dir.close();
+    {
+        const io = b.graph.io;
+        var op_dir = b.root.openDir(io, "test/evm/opcodes", .{ .iterate = true }) catch |err|
+            std.debug.panic("unable to open test/evm/opcodes: {s}", .{@errorName(err)});
+        defer op_dir.close(io);
         var it = op_dir.iterate();
-        while (it.next() catch null) |entry| {
+        while (it.next(io) catch |err| std.debug.panic("unable to iterate test/evm/opcodes: {s}", .{@errorName(err)})) |entry| {
             if (entry.kind != .file) continue;
             if (!std.mem.endsWith(u8, entry.name, "_test.zig")) continue;
 
@@ -519,14 +522,14 @@ pub fn build(b: *std.Build) void {
                 .root_module = b.createModule(.{
                     .root_source_file = b.path(file_path),
                     .target = target,
-                    .optimize = .Debug,
+                    .optimize = .debug,
                 }),
                 // Force LLVM backend: native Zig backend on Linux x86 doesn't support tail calls yet
                 .use_llvm = true,
             });
             // Apply test filter if specified
             if (test_filter) |filter| {
-                t.filters = &[_][]const u8{filter};
+                t.filters = b.dupeStrings(&.{filter});
             }
             // Inject module dependencies used by the differential harness
             t.root_module.addImport("evm", modules.evm_mod);
@@ -536,12 +539,12 @@ pub fn build(b: *std.Build) void {
             t.root_module.addImport("log", b.createModule(.{
                 .root_source_file = b.path("src/log.zig"),
                 .target = target,
-                .optimize = .Debug,
+                .optimize = .debug,
             }));
 
             // Link external libs
-            if (bn254_lib) |bn254| t.linkLibrary(bn254);
-            t.linkLibC();
+            if (bn254_lib) |bn254| t.root_module.linkLibrary(bn254);
+            t.root_module.link_libc = true;
 
             // Using MinimalEvm for differential testing (REVM removed)
 
@@ -574,8 +577,8 @@ pub fn build(b: *std.Build) void {
         // Using MinimalEvm for differential testing (REVM removed)
 
         // Link other required libraries
-        if (bn254_lib) |bn254| erc20_mint_test.linkLibrary(bn254);
-        erc20_mint_test.linkLibC();
+        if (bn254_lib) |bn254| erc20_mint_test.root_module.linkLibrary(bn254);
+        erc20_mint_test.root_module.link_libc = true;
 
         const run_erc20_mint_test = b.addRunArtifact(erc20_mint_test);
 
@@ -602,8 +605,8 @@ pub fn build(b: *std.Build) void {
         erc20_transfer_test.root_module.addImport("build_options", options_mod);
 
         // Link required libraries
-        if (bn254_lib) |bn254| erc20_transfer_test.linkLibrary(bn254);
-        erc20_transfer_test.linkLibC();
+        if (bn254_lib) |bn254| erc20_transfer_test.root_module.linkLibrary(bn254);
+        erc20_transfer_test.root_module.link_libc = true;
 
         const run_erc20_transfer_test = b.addRunArtifact(erc20_transfer_test);
         const erc20_transfer_step = b.step("test-erc20-transfer", "Run ERC20 transfer test");
@@ -684,8 +687,8 @@ pub fn build(b: *std.Build) void {
         official_state_test.root_module.addImport("build_options", options_mod);
 
         // Link libraries used by EVM
-        if (bn254_lib) |bn254| official_state_test.linkLibrary(bn254);
-        official_state_test.linkLibC();
+        if (bn254_lib) |bn254| official_state_test.root_module.linkLibrary(bn254);
+        official_state_test.root_module.link_libc = true;
 
         const run_official_state_test = b.addRunArtifact(official_state_test);
         // Non-strict by default to avoid failing on WIP EVM differences
@@ -718,8 +721,8 @@ pub fn build(b: *std.Build) void {
         official_chain_test.root_module.addImport("crypto", modules.crypto_mod);
         official_chain_test.root_module.addImport("build_options", options_mod);
 
-        if (bn254_lib) |bn254| official_chain_test.linkLibrary(bn254);
-        official_chain_test.linkLibC();
+        if (bn254_lib) |bn254| official_chain_test.root_module.linkLibrary(bn254);
+        official_chain_test.root_module.link_libc = true;
 
         const run_official_chain_test = b.addRunArtifact(official_chain_test);
         run_official_chain_test.setEnvironmentVariable("OFFICIAL_STRICT", "0");
@@ -750,8 +753,8 @@ pub fn build(b: *std.Build) void {
         synthetic_test.root_module.addImport("crypto", modules.crypto_mod);
         synthetic_test.root_module.addImport("build_options", options_mod);
 
-        if (bn254_lib) |bn254| synthetic_test.linkLibrary(bn254);
-        synthetic_test.linkLibC();
+        if (bn254_lib) |bn254| synthetic_test.root_module.linkLibrary(bn254);
+        synthetic_test.root_module.link_libc = true;
 
         const run_synthetic_test = b.addRunArtifact(synthetic_test);
         const synthetic_step = b.step("test-synthetic", "Test synthetic opcodes");
@@ -764,7 +767,7 @@ pub fn build(b: *std.Build) void {
         .root_module = b.createModule(.{
             .root_source_file = b.path("specs/cases/root.zig"),
             .target = target,
-            .optimize = .Debug,
+            .optimize = .debug,
         }),
         // Force LLVM backend: native Zig backend on Linux x86 doesn't support tail calls yet
         .use_llvm = true,
@@ -780,12 +783,12 @@ pub fn build(b: *std.Build) void {
     runner_module.addImport("evm", modules.evm_mod);
     runner_module.addImport("voltaire", modules.primitives_mod);
     specs_test.root_module.addImport("runner", runner_module);
-    if (bn254_lib) |bn254| specs_test.linkLibrary(bn254);
-    specs_test.linkLibC();
+    if (bn254_lib) |bn254| specs_test.root_module.linkLibrary(bn254);
+    specs_test.root_module.link_libc = true;
 
     // Apply test filter if specified
     if (test_filter) |filter| {
-        specs_test.filters = &[_][]const u8{filter};
+        specs_test.filters = b.dupeStrings(&.{filter});
     }
 
     const run_specs_test = b.addRunArtifact(specs_test);
@@ -829,9 +832,9 @@ pub fn build(b: *std.Build) void {
         .root_module = eest_mod,
         .use_llvm = true,
     });
-    if (bn254_lib) |bn254| eest_exe.linkLibrary(bn254);
-    eest_exe.linkLibC();
-    if (target.result.os.tag == .linux) eest_exe.linkSystemLibrary("unwind");
+    if (bn254_lib) |bn254| eest_exe.root_module.linkLibrary(bn254);
+    eest_exe.root_module.link_libc = true;
+    if (target.result.os.tag == .linux) eest_exe.root_module.linkSystemLibrary("unwind", .{});
 
     const run_state_tests = b.addRunArtifact(eest_exe);
     if (b.option([]const u8, "spec-fork", "EEST fork(s) to run (comma-separated)")) |fork| {
@@ -844,7 +847,7 @@ pub fn build(b: *std.Build) void {
         run_state_tests.addArg(b.fmt("--report={s}", .{report_path}));
     }
     if (test_verbose) run_state_tests.addArg("--verbose");
-    if (b.args) |args| run_state_tests.addArgs(args);
+    run_state_tests.addPassthruArgs();
 
     const state_tests_step = b.step("state-tests", "Run official pre-filled EEST state tests (Frontier through Osaka)");
     state_tests_step.dependOn(&run_state_tests.step);
@@ -862,9 +865,9 @@ pub fn build(b: *std.Build) void {
     layer2_tests.root_module.addImport("voltaire", modules.primitives_mod);
     layer2_tests.root_module.addImport("crypto", modules.crypto_mod);
     layer2_tests.root_module.addImport("precompiles", modules.precompiles_mod);
-    if (bn254_lib) |bn254| layer2_tests.linkLibrary(bn254);
-    layer2_tests.linkLibC();
-    if (target.result.os.tag == .linux) layer2_tests.linkSystemLibrary("unwind");
+    if (bn254_lib) |bn254| layer2_tests.root_module.linkLibrary(bn254);
+    layer2_tests.root_module.link_libc = true;
+    if (target.result.os.tag == .linux) layer2_tests.root_module.linkSystemLibrary("unwind", .{});
     const layer2_tests_step = b.step("test-layer2", "Run Layer 2 (Base & OP Stack) unit tests");
     layer2_tests_step.dependOn(&b.addRunArtifact(layer2_tests).step);
 
@@ -872,7 +875,7 @@ pub fn build(b: *std.Build) void {
     _ = bench_step.addBenchSteps(b, .{
         .target = target,
         .evm = modules.evm_mod,
-        .optimize = .ReleaseFast,
+        .optimize = .fast,
     });
 
     // Bun specs runner (kept as alternative)
@@ -914,7 +917,7 @@ pub fn build(b: *std.Build) void {
             .root_module = b.createModule(.{
                 .root_source_file = b.path("test/fusions.zig"),
                 .target = target,
-                .optimize = .Debug,
+                .optimize = .debug,
             }),
             // Force LLVM backend: native Zig backend on Linux x86 doesn't support tail calls yet
             .use_llvm = true,
@@ -923,9 +926,9 @@ pub fn build(b: *std.Build) void {
         fusions_basic.root_module.addImport("voltaire", modules.primitives_mod);
         fusions_basic.root_module.addImport("crypto", modules.crypto_mod);
         fusions_basic.root_module.addImport("build_options", options_mod);
-        fusions_basic.root_module.addImport("log", b.createModule(.{ .root_source_file = b.path("src/log.zig"), .target = target, .optimize = .Debug }));
-        if (bn254_lib) |bn254| fusions_basic.linkLibrary(bn254);
-        fusions_basic.linkLibC();
+        fusions_basic.root_module.addImport("log", b.createModule(.{ .root_source_file = b.path("src/log.zig"), .target = target, .optimize = .debug }));
+        if (bn254_lib) |bn254| fusions_basic.root_module.linkLibrary(bn254);
+        fusions_basic.root_module.link_libc = true;
 
         // Dispatch-specific fusion tests (jump resolution, etc.)
         const fusions_dispatch = b.addTest(.{
@@ -933,7 +936,7 @@ pub fn build(b: *std.Build) void {
             .root_module = b.createModule(.{
                 .root_source_file = b.path("test/fusions_dispatch.zig"),
                 .target = target,
-                .optimize = .Debug,
+                .optimize = .debug,
             }),
             // Force LLVM backend: native Zig backend on Linux x86 doesn't support tail calls yet
             .use_llvm = true,
@@ -942,9 +945,9 @@ pub fn build(b: *std.Build) void {
         fusions_dispatch.root_module.addImport("voltaire", modules.primitives_mod);
         fusions_dispatch.root_module.addImport("crypto", modules.crypto_mod);
         fusions_dispatch.root_module.addImport("build_options", options_mod);
-        fusions_dispatch.root_module.addImport("log", b.createModule(.{ .root_source_file = b.path("src/log.zig"), .target = target, .optimize = .Debug }));
-        if (bn254_lib) |bn254| fusions_dispatch.linkLibrary(bn254);
-        fusions_dispatch.linkLibC();
+        fusions_dispatch.root_module.addImport("log", b.createModule(.{ .root_source_file = b.path("src/log.zig"), .target = target, .optimize = .debug }));
+        if (bn254_lib) |bn254| fusions_dispatch.root_module.linkLibrary(bn254);
+        fusions_dispatch.root_module.link_libc = true;
 
         // Differential harness: non-fuseable pattern sanity check
         const fusions_diff_toggle = b.addTest(.{
@@ -952,7 +955,7 @@ pub fn build(b: *std.Build) void {
             .root_module = b.createModule(.{
                 .root_source_file = b.path("test/differential/synthetic_toggle_test.zig"),
                 .target = target,
-                .optimize = .Debug,
+                .optimize = .debug,
             }),
             // Force LLVM backend: native Zig backend on Linux x86 doesn't support tail calls yet
             .use_llvm = true,
@@ -961,10 +964,10 @@ pub fn build(b: *std.Build) void {
         fusions_diff_toggle.root_module.addImport("voltaire", modules.primitives_mod);
         fusions_diff_toggle.root_module.addImport("crypto", modules.crypto_mod);
         fusions_diff_toggle.root_module.addImport("build_options", options_mod);
-        fusions_diff_toggle.root_module.addImport("log", b.createModule(.{ .root_source_file = b.path("src/log.zig"), .target = target, .optimize = .Debug }));
+        fusions_diff_toggle.root_module.addImport("log", b.createModule(.{ .root_source_file = b.path("src/log.zig"), .target = target, .optimize = .debug }));
         // Using MinimalEvm for differential testing (REVM removed)
-        if (bn254_lib) |bn254| fusions_diff_toggle.linkLibrary(bn254);
-        fusions_diff_toggle.linkLibC();
+        if (bn254_lib) |bn254| fusions_diff_toggle.root_module.linkLibrary(bn254);
+        fusions_diff_toggle.root_module.link_libc = true;
 
         const run_fusions_basic = b.addRunArtifact(fusions_basic);
         const run_fusions_dispatch = b.addRunArtifact(fusions_dispatch);
@@ -992,8 +995,8 @@ pub fn build(b: *std.Build) void {
         fuzz_tests.root_module.addImport("crypto", modules.crypto_mod);
         fuzz_tests.root_module.addImport("build_options", options_mod);
         fuzz_tests.root_module.addImport("evm_c_api", shared_lib_mod);
-        if (bn254_lib) |bn254| fuzz_tests.linkLibrary(bn254);
-        fuzz_tests.linkLibC();
+        if (bn254_lib) |bn254| fuzz_tests.root_module.linkLibrary(bn254);
+        fuzz_tests.root_module.link_libc = true;
         if (test_filter) |filter| {
             const filters = b.allocator.alloc([]const u8, 1) catch @panic("OOM");
             filters[0] = filter;
@@ -1009,7 +1012,7 @@ pub fn build(b: *std.Build) void {
             .root_module = b.createModule(.{
                 .root_source_file = b.path("test/fuzz/fuzz_campaign.zig"),
                 .target = target,
-                .optimize = if (optimize == .Debug) .ReleaseSafe else optimize,
+                .optimize = if (optimize == .debug) .safe else optimize,
             }),
             .use_llvm = true,
         });
@@ -1018,13 +1021,11 @@ pub fn build(b: *std.Build) void {
         fuzz_campaign_exe.root_module.addImport("crypto", modules.crypto_mod);
         fuzz_campaign_exe.root_module.addImport("build_options", options_mod);
         fuzz_campaign_exe.root_module.addImport("evm_c_api", shared_lib_mod);
-        if (bn254_lib) |bn254| fuzz_campaign_exe.linkLibrary(bn254);
-        fuzz_campaign_exe.linkLibC();
+        if (bn254_lib) |bn254| fuzz_campaign_exe.root_module.linkLibrary(bn254);
+        fuzz_campaign_exe.root_module.link_libc = true;
 
         const run_fuzz_campaign = b.addRunArtifact(fuzz_campaign_exe);
-        if (b.args) |args| {
-            run_fuzz_campaign.addArgs(args);
-        }
+        run_fuzz_campaign.addPassthruArgs();
         const fuzz_campaign_step = b.step("fuzz-campaign", "Run multi-threaded cross-platform fuzz campaign (pass -- --seconds=N --threads=M)");
         fuzz_campaign_step.dependOn(&run_fuzz_campaign.step);
     }
@@ -1034,12 +1035,12 @@ pub fn build(b: *std.Build) void {
         const verified_ops_mod = b.createModule(.{
             .root_source_file = b.path("src/core/verified_ops.zig"),
             .target = target,
-            .optimize = .ReleaseFast,
+            .optimize = .fast,
         });
         const verify_exports_mod = b.createModule(.{
             .root_source_file = b.path("verify/zig/verify_exports.zig"),
             .target = target,
-            .optimize = .ReleaseFast,
+            .optimize = .fast,
         });
         verify_exports_mod.addImport("verified_ops", verified_ops_mod);
         const verify_exports_obj = b.addObject(.{
@@ -1065,7 +1066,7 @@ pub fn build(b: *std.Build) void {
             .root_module = b.createModule(.{
                 .root_source_file = b.path("src/core/verified_ops.zig"),
                 .target = target,
-                .optimize = .ReleaseSafe,
+                .optimize = .safe,
             }),
             .use_llvm = true,
         });

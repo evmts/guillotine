@@ -41,7 +41,7 @@ test "blake2f - invalid input length too short" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** 100;
+    const input = @as([100]u8, @splat(0));
     const result = execute(allocator, &input, 1000000);
     try testing.expectError(error.InvalidInput, result);
 }
@@ -50,7 +50,7 @@ test "blake2f - invalid input length too long" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** 214;
+    const input = @as([214]u8, @splat(0));
     const result = execute(allocator, &input, 1000000);
     try testing.expectError(error.InvalidInput, result);
 }
@@ -68,7 +68,7 @@ test "blake2f - exact input length" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** 213;
+    const input = @as([213]u8, @splat(0));
     const result = try execute(allocator, &input, 1000000);
     defer result.deinit(allocator);
 
@@ -79,7 +79,7 @@ test "blake2f - gas cost calculation zero rounds" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    var input = [_]u8{0} ** 213;
+    var input = @as([213]u8, @splat(0));
     const rounds: u32 = 0;
     std.mem.writeInt(u32, input[0..4], rounds, .big);
 
@@ -95,7 +95,7 @@ test "blake2f - gas cost calculation one round" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    var input = [_]u8{0} ** 213;
+    var input = @as([213]u8, @splat(0));
     const rounds: u32 = 1;
     std.mem.writeInt(u32, input[0..4], rounds, .big);
 
@@ -111,7 +111,7 @@ test "blake2f - gas cost calculation twelve rounds" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    var input = [_]u8{0} ** 213;
+    var input = @as([213]u8, @splat(0));
     const rounds: u32 = 12;
     std.mem.writeInt(u32, input[0..4], rounds, .big);
 
@@ -127,7 +127,7 @@ test "blake2f - gas cost calculation large rounds" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    var input = [_]u8{0} ** 213;
+    var input = @as([213]u8, @splat(0));
     const rounds: u32 = 100000;
     std.mem.writeInt(u32, input[0..4], rounds, .big);
 
@@ -143,7 +143,7 @@ test "blake2f - out of gas zero rounds allowed" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    var input = [_]u8{0} ** 213;
+    var input = @as([213]u8, @splat(0));
     const rounds: u32 = 1;
     std.mem.writeInt(u32, input[0..4], rounds, .big);
 
@@ -155,7 +155,7 @@ test "blake2f - out of gas insufficient" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    var input = [_]u8{0} ** 213;
+    var input = @as([213]u8, @splat(0));
     const rounds: u32 = 100;
     std.mem.writeInt(u32, input[0..4], rounds, .big);
 
@@ -168,7 +168,7 @@ test "blake2f - exact gas limit" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    var input = [_]u8{0} ** 213;
+    var input = @as([213]u8, @splat(0));
     const rounds: u32 = 50;
     std.mem.writeInt(u32, input[0..4], rounds, .big);
 
@@ -183,7 +183,7 @@ test "blake2f - output length always 64 bytes" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    var input = [_]u8{0} ** 213;
+    var input = @as([213]u8, @splat(0));
     const result = try execute(allocator, &input, 1000000);
     defer result.deinit(allocator);
 
@@ -194,7 +194,7 @@ test "blake2f - maximum rounds" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    var input = [_]u8{0} ** 213;
+    var input = @as([213]u8, @splat(0));
     const rounds: u32 = std.math.maxInt(u32);
     std.mem.writeInt(u32, input[0..4], rounds, .big);
 

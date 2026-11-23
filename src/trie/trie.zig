@@ -102,7 +102,7 @@ pub const HashValue = union(enum) {
 
 /// Branch node in the trie with up to 16 children (one per nibble)
 pub const BranchNode = struct {
-    children: [16]?HashValue = [_]?HashValue{null} ** 16,
+    children: [16]?HashValue = @as([16]?HashValue, @splat(null)),
     value: ?HashValue = null,
     children_mask: TrieMask = TrieMask.init(),
 

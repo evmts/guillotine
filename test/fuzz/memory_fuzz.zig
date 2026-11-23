@@ -40,7 +40,7 @@ pub fn fuzzMemoryModel(_: void, input: []const u8) !void {
     var mem = try TestMemory.init(allocator);
     defer mem.deinit(allocator);
 
-    var model = std.ArrayList(u8){};
+    var model = std.ArrayList(u8).empty;
     defer model.deinit(allocator);
 
     var i: usize = 0;

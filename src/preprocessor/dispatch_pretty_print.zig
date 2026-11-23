@@ -163,33 +163,30 @@ pub fn pretty_print(
     var debug_info = try getDebugInfo(allocator, schedule, actual_bytecode, FrameType, ItemType);
     defer debug_info.deinit();
 
-    var output = std.ArrayList(u8){
-        .items = &.{},
-        .capacity = 0,
-    };
+    var output = std.ArrayList(u8).empty;
     defer output.deinit(allocator);
 
     // Header
-    try output.writer(allocator).print("{s}=== EVM Dispatch Instruction Stream ==={s}\n", .{ Colors.bold, Colors.reset });
-    try output.writer(allocator).print("{s}Original bytecode: {} bytes, Dispatch items: {}{s}\n\n", .{ Colors.dim, actual_bytecode.runtime_code.len, schedule.len, Colors.reset });
+    try output.print(allocator, "{s}=== EVM Dispatch Instruction Stream ==={s}\n", .{ Colors.bold, Colors.reset });
+    try output.print(allocator, "{s}Original bytecode: {} bytes, Dispatch items: {}{s}\n\n", .{ Colors.dim, actual_bytecode.runtime_code.len, schedule.len, Colors.reset });
     
     // Display validation errors if any
     if (debug_info.validation_errors.items.len > 0) {
-        try output.writer(allocator).print("{s}--- VALIDATION ERRORS ---{s}\n", .{ Colors.red, Colors.reset });
+        try output.print(allocator, "{s}--- VALIDATION ERRORS ---{s}\n", .{ Colors.red, Colors.reset });
         for (debug_info.validation_errors.items) |error_entry| {
-            try output.writer(allocator).print("{s}[ERROR]{s} ", .{ Colors.red, Colors.reset });
+            try output.print(allocator, "{s}[ERROR]{s} ", .{ Colors.red, Colors.reset });
             if (error_entry.pc) |pc| {
-                try output.writer(allocator).print("PC=0x{x:0>4} Schedule[{}]: ", .{ pc, error_entry.schedule_index });
+                try output.print(allocator, "PC=0x{x:0>4} Schedule[{}]: ", .{ pc, error_entry.schedule_index });
             } else {
-                try output.writer(allocator).print("PC=? Schedule[{}]: ", .{error_entry.schedule_index});
+                try output.print(allocator, "PC=? Schedule[{}]: ", .{error_entry.schedule_index});
             }
-            try output.writer(allocator).print("{s}\n", .{error_entry.message});
+            try output.print(allocator, "{s}\n", .{error_entry.message});
         }
-        try output.writer(allocator).print("\n", .{});
+        try output.print(allocator, "\n", .{});
     }
 
     // Section showing original bytecode
-    try output.writer(allocator).print("{s}--- Original Bytecode ---{s}\n", .{ Colors.bold, Colors.reset });
+    try output.print(allocator, "{s}--- Original Bytecode ---{s}\n", .{ Colors.bold, Colors.reset });
     if (actual_bytecode.runtime_code.len > 0) {
         const runtime_code = actual_bytecode.runtime_code;
         var bytecode_pc: FrameType.PcType = 0;
@@ -197,11 +194,11 @@ pub fn pretty_print(
             const opcode_byte = runtime_code[bytecode_pc];
 
             // Show PC and hex
-            try output.writer(allocator).print("{s}0x{x:0>4}:{s} {s}{x:0>2}{s}", .{ Colors.cyan, bytecode_pc, Colors.reset, Colors.dim, opcode_byte, Colors.reset });
+            try output.print(allocator, "{s}0x{x:0>4}:{s} {s}{x:0>2}{s}", .{ Colors.cyan, bytecode_pc, Colors.reset, Colors.dim, opcode_byte, Colors.reset });
 
             // Try to interpret the opcode
-            if (std.meta.intToEnum(Opcode, opcode_byte)) |opcode| {
-                try output.writer(allocator).print("  {s}{s}{s}", .{ Colors.white, @tagName(opcode), Colors.reset });
+            if (std.enums.fromInt(Opcode, opcode_byte)) |opcode| {
+                try output.print(allocator, "  {s}{s}{s}", .{ Colors.white, @tagName(opcode), Colors.reset });
 
                 // Handle PUSH instructions specially
                 switch (opcode) {
@@ -211,141 +208,141 @@ pub fn pretty_print(
                         const end_pc = @min(bytecode_pc + 1 + push_size, @as(FrameType.PcType, @intCast(runtime_code.len)));
 
                         // Collect push data
-                        try output.writer(allocator).print(" {s}", .{Colors.bright_magenta});
+                        try output.print(allocator, " {s}", .{Colors.bright_magenta});
                         for (bytecode_pc + 1..end_pc) |i| {
                             value = (value << 8) | runtime_code[i];
-                            try output.writer(allocator).print("{x:0>2}", .{runtime_code[i]});
+                            try output.print(allocator, "{x:0>2}", .{runtime_code[i]});
                         }
-                        try output.writer(allocator).print("{s} {s}(0x{x}){s}", .{ Colors.reset, Colors.dim, value, Colors.reset });
+                        try output.print(allocator, "{s} {s}(0x{x}){s}", .{ Colors.reset, Colors.dim, value, Colors.reset });
 
                         bytecode_pc = end_pc;
                         continue;
                     },
                     else => {},
                 }
-            } else |_| {
-                try output.writer(allocator).print("  {s}INVALID{s}", .{ Colors.bright_red, Colors.reset });
+            } else {
+                try output.print(allocator, "  {s}INVALID{s}", .{ Colors.bright_red, Colors.reset });
             }
 
-            try output.writer(allocator).print("\n", .{});
+            try output.print(allocator, "\n", .{});
             bytecode_pc += 1;
         }
     } else {
-        try output.writer(allocator).print("{s}(empty){s}\n", .{ Colors.dim, Colors.reset });
+        try output.print(allocator, "{s}(empty){s}\n", .{ Colors.dim, Colors.reset });
     }
 
     // Section showing dispatch instruction stream with debug info
-    try output.writer(allocator).print("\n{s}--- Dispatch Instruction Stream ---{s}\n", .{ Colors.bold, Colors.reset });
+    try output.print(allocator, "\n{s}--- Dispatch Instruction Stream ---{s}\n", .{ Colors.bold, Colors.reset });
 
     // Use debug info entries for enhanced display
     if (debug_info.schedule_entries.len > 0) {
         for (debug_info.schedule_entries) |entry| {
             // Item index
-            try output.writer(allocator).print("{s}[{d:3}]:{s} ", .{ Colors.dim, entry.schedule_index, Colors.reset });
+            try output.print(allocator, "{s}[{d:3}]:{s} ", .{ Colors.dim, entry.schedule_index, Colors.reset });
             
             // PC if available
             if (entry.pc) |pc| {
-                try output.writer(allocator).print("{s}PC=0x{x:0>4}{s} ", .{ Colors.cyan, pc, Colors.reset });
+                try output.print(allocator, "{s}PC=0x{x:0>4}{s} ", .{ Colors.cyan, pc, Colors.reset });
             } else {
-                try output.writer(allocator).print("{s}        {s} ", .{ Colors.dim, Colors.reset });
+                try output.print(allocator, "{s}        {s} ", .{ Colors.dim, Colors.reset });
             }
             
             // Item type and details
             switch (entry.item_type) {
                 .opcode_handler => {
                     if (entry.handler_name) |name| {
-                        try output.writer(allocator).print("{s}{s}{s}", .{ Colors.yellow, name, Colors.reset });
+                        try output.print(allocator, "{s}{s}{s}", .{ Colors.yellow, name, Colors.reset });
                     } else {
-                        try output.writer(allocator).print("{s}HANDLER{s}", .{ Colors.yellow, Colors.reset });
+                        try output.print(allocator, "{s}HANDLER{s}", .{ Colors.yellow, Colors.reset });
                     }
                 },
                 .first_block_gas => {
-                    try output.writer(allocator).print("{s}FIRST_BLOCK_GAS{s}", .{ Colors.bright_cyan, Colors.reset });
+                    try output.print(allocator, "{s}FIRST_BLOCK_GAS{s}", .{ Colors.bright_cyan, Colors.reset });
                     if (entry.metadata) |meta| {
                         if (meta == .first_block_gas) {
-                            try output.writer(allocator).print(" {s}gas={}{s}", .{ Colors.dim, meta.first_block_gas.gas, Colors.reset });
+                            try output.print(allocator, " {s}gas={}{s}", .{ Colors.dim, meta.first_block_gas.gas, Colors.reset });
                         }
                     }
                 },
                 .jump_dest => {
-                    try output.writer(allocator).print("{s}JUMP_DEST{s}", .{ Colors.bright_magenta, Colors.reset });
+                    try output.print(allocator, "{s}JUMP_DEST{s}", .{ Colors.bright_magenta, Colors.reset });
                     if (entry.metadata) |meta| {
                         if (meta == .jump_dest) {
                             const target_pc = meta.jump_dest.target_pc orelse 0;
                             if (target_pc > 0) {
                                 if (debug_info.pc_to_schedule_map.get(target_pc)) |target_idx| {
-                                    try output.writer(allocator).print(" {s}→ PC=0x{x:0>4} (Schedule[{}]){s}", .{ Colors.dim, target_pc, target_idx, Colors.reset });
+                                    try output.print(allocator, " {s}→ PC=0x{x:0>4} (Schedule[{}]){s}", .{ Colors.dim, target_pc, target_idx, Colors.reset });
                                 } else {
-                                    try output.writer(allocator).print(" {s}→ PC=0x{x:0>4}{s}", .{ Colors.dim, target_pc, Colors.reset });
+                                    try output.print(allocator, " {s}→ PC=0x{x:0>4}{s}", .{ Colors.dim, target_pc, Colors.reset });
                                 }
                             }
                         }
                     }
                 },
                 .push_inline => {
-                    try output.writer(allocator).print("{s}PUSH_INLINE{s}", .{ Colors.green, Colors.reset });
+                    try output.print(allocator, "{s}PUSH_INLINE{s}", .{ Colors.green, Colors.reset });
                     if (entry.metadata) |meta| {
                         if (meta == .push_inline) {
-                            try output.writer(allocator).print(" {s}value=0x{x}{s}", .{ Colors.dim, meta.push_inline.value, Colors.reset });
+                            try output.print(allocator, " {s}value=0x{x}{s}", .{ Colors.dim, meta.push_inline.value, Colors.reset });
                         }
                     }
                 },
                 .push_pointer => {
-                    try output.writer(allocator).print("{s}PUSH_POINTER{s}", .{ Colors.green, Colors.reset });
+                    try output.print(allocator, "{s}PUSH_POINTER{s}", .{ Colors.green, Colors.reset });
                     if (entry.metadata) |meta| {
                         if (meta == .push_pointer) {
-                            try output.writer(allocator).print(" {s}value=0x{x}{s}", .{ Colors.dim, meta.push_pointer.value, Colors.reset });
+                            try output.print(allocator, " {s}value=0x{x}{s}", .{ Colors.dim, meta.push_pointer.value, Colors.reset });
                         }
                     }
                 },
                 .pc => {
-                    try output.writer(allocator).print("{s}PC{s}", .{ Colors.blue, Colors.reset });
+                    try output.print(allocator, "{s}PC{s}", .{ Colors.blue, Colors.reset });
                     if (entry.pc) |pc_val| {
-                        try output.writer(allocator).print(" {s}0x{x:0>4}{s}", .{ Colors.dim, pc_val, Colors.reset });
+                        try output.print(allocator, " {s}0x{x:0>4}{s}", .{ Colors.dim, pc_val, Colors.reset });
                     }
                 },
                 .jump_static => {
-                    try output.writer(allocator).print("{s}JUMP_STATIC{s}", .{ Colors.magenta, Colors.reset });
+                    try output.print(allocator, "{s}JUMP_STATIC{s}", .{ Colors.magenta, Colors.reset });
                     if (entry.metadata) |meta| {
                         if (meta == .jump_static) {
                             const target_pc = meta.jump_static.target_pc orelse 0;
                             if (target_pc > 0) {
-                                try output.writer(allocator).print(" {s}→ PC=0x{x:0>4}{s}", .{ Colors.dim, target_pc, Colors.reset });
+                                try output.print(allocator, " {s}→ PC=0x{x:0>4}{s}", .{ Colors.dim, target_pc, Colors.reset });
                             }
                         }
                     }
                 },
                 .unexpected => {
-                    try output.writer(allocator).print("{s}UNKNOWN{s}", .{ Colors.red, Colors.reset });
+                    try output.print(allocator, "{s}UNKNOWN{s}", .{ Colors.red, Colors.reset });
                 },
             }
             
             // Show if it's a jumpdest location
             if (entry.pc) |pc| {
                 if (debug_info.jumpdest_map.contains(pc)) {
-                    try output.writer(allocator).print(" {s}[JUMPDEST]{s}", .{ Colors.bright_green, Colors.reset });
+                    try output.print(allocator, " {s}[JUMPDEST]{s}", .{ Colors.bright_green, Colors.reset });
                 }
             }
             
-            try output.writer(allocator).print("\n", .{});
+            try output.print(allocator, "\n", .{});
         }
     } else {
         // Fallback to simple display if no debug entries
         var i: usize = 0;
         while (i < schedule.len) {
-            try output.writer(allocator).print("{s}[{d:3}]:{s} {s}@{*}{s} ", .{ Colors.dim, i, Colors.reset, Colors.cyan, &schedule[i], Colors.reset });
-            try output.writer(allocator).print("{s}ITEM{s}\n", .{ Colors.blue, Colors.reset });
+            try output.print(allocator, "{s}[{d:3}]:{s} {s}@{*}{s} ", .{ Colors.dim, i, Colors.reset, Colors.cyan, &schedule[i], Colors.reset });
+            try output.print(allocator, "{s}ITEM{s}\n", .{ Colors.blue, Colors.reset });
             i += 1;
         }
     }
 
     // Summary section
-    try output.writer(allocator).print("\n{s}--- Summary ---{s}\n", .{ Colors.bold, Colors.reset });
+    try output.print(allocator, "\n{s}--- Summary ---{s}\n", .{ Colors.bold, Colors.reset });
 
     const total_items = schedule.len;
 
-    try output.writer(allocator).print("{s}Total dispatch items: {}{s}\n", .{ Colors.dim, total_items, Colors.reset });
-    try output.writer(allocator).print("{s}Compression ratio: {d:.2}x (bytecode:{} -> dispatch:{}){s}\n", .{ Colors.dim, if (schedule.len > 0) @as(f64, @floatFromInt(actual_bytecode.runtime_code.len)) / @as(f64, @floatFromInt(schedule.len)) else 0.0, actual_bytecode.runtime_code.len, schedule.len, Colors.reset });
+    try output.print(allocator, "{s}Total dispatch items: {}{s}\n", .{ Colors.dim, total_items, Colors.reset });
+    try output.print(allocator, "{s}Compression ratio: {d:.2}x (bytecode:{} -> dispatch:{}){s}\n", .{ Colors.dim, if (schedule.len > 0) @as(f64, @floatFromInt(actual_bytecode.runtime_code.len)) / @as(f64, @floatFromInt(schedule.len)) else 0.0, actual_bytecode.runtime_code.len, schedule.len, Colors.reset });
 
     return output.toOwnedSlice(allocator);
 }
@@ -373,7 +370,7 @@ pub fn getDebugInfo(
     var debug_info = DebugInfo{
         .handler_map = std.hash_map.HashMap(*const anyopaque, DebugInfo.OpcodeInfo, std.hash_map.AutoContext(*const anyopaque), 80).init(allocator),
         .schedule_entries = undefined,
-        .validation_errors = std.ArrayList(DebugInfo.ValidationError){},
+        .validation_errors = std.ArrayList(DebugInfo.ValidationError).empty,
         .pc_to_schedule_map = std.hash_map.HashMap(u32, usize, std.hash_map.AutoContext(u32), 80).init(allocator),
         .jumpdest_map = std.hash_map.HashMap(u32, usize, std.hash_map.AutoContext(u32), 80).init(allocator),
         .allocator = allocator,
@@ -387,31 +384,30 @@ pub fn getDebugInfo(
     // Map regular opcodes
     for (0..256) |i| {
         const handler_ptr = @as(*const anyopaque, @ptrCast(opcode_handlers[i]));
-        if (std.meta.intToEnum(Opcode, @as(u8, @intCast(i)))) |opcode| {
+        if (std.enums.fromInt(Opcode, @as(u8, @intCast(i)))) |opcode| {
             try debug_info.handler_map.put(handler_ptr, .{
                 .opcode = opcode,
                 .synthetic = null,
                 .name = @tagName(opcode),
                 .is_synthetic = false,
             });
-        } else |_| {}
+        }
     }
     
     // Map synthetic opcodes
-    inline for (std.meta.fields(OpcodeSynthetic)) |field| {
-        const synthetic_opcode = @field(OpcodeSynthetic, field.name);
+    inline for (comptime std.meta.tags(OpcodeSynthetic)) |synthetic_opcode| {
         const handler = frame_handlers.getSyntheticHandler(FrameType, @intFromEnum(synthetic_opcode));
         const handler_ptr = @as(*const anyopaque, @ptrCast(handler));
         try debug_info.handler_map.put(handler_ptr, .{
             .opcode = null,
             .synthetic = synthetic_opcode,
-            .name = field.name,
+            .name = @tagName(synthetic_opcode),
             .is_synthetic = true,
         });
     }
     
     // Allocate schedule entries
-    var entries = std.ArrayList(DebugInfo.ScheduleEntry){};
+    var entries = std.ArrayList(DebugInfo.ScheduleEntry).empty;
     defer entries.deinit(allocator);
     
     // Create bytecode iterator
@@ -477,7 +473,7 @@ pub fn getDebugInfo(
                 } else {
                     const handler_ptr = @as(*const anyopaque, @ptrCast(item.opcode_handler));
                     const handler_info = debug_info.handler_map.get(handler_ptr);
-                    const expected_opcode = std.meta.intToEnum(Opcode, data.opcode) catch unreachable;
+                    const expected_opcode = std.enums.fromInt(Opcode, data.opcode).?;
                     
                     var validation_status: DebugInfo.ValidationStatus = .valid;
                     if (handler_info) |info| {
@@ -506,7 +502,7 @@ pub fn getDebugInfo(
                 // If this opcode carries inline PC metadata in the schedule (PC opcode),
                 // consume and record the following .pc metadata item to keep schedule_idx
                 // synchronized with subsequent bytecode entries.
-                if (std.meta.intToEnum(Opcode, data.opcode) catch unreachable == .PC) {
+                if (std.enums.fromInt(Opcode, data.opcode).? == .PC) {
                     if (schedule_idx < schedule_items.len) {
                         const maybe_meta = schedule_items[schedule_idx];
                         if (maybe_meta == .pc) {

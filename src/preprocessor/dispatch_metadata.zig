@@ -33,12 +33,12 @@ pub fn DispatchMetadata(comptime FrameType: type) type {
 
         /// Metadata for PUSH operations with values larger than 64 bits.
         /// Contains a direct pointer to the u256 value for efficient access without indirection.
-        pub const PushPointerMetadata = packed struct(usize) { value_ptr: *const FrameType.WordType };
+        pub const PushPointerMetadata = extern struct { value_ptr: *const FrameType.WordType };
 
         /// Metadata for PC opcode containing the program counter value.
         /// Metadata for static jump locations - contains a direct pointer to the jump destination dispatch
         /// This avoids the binary search in findJumpTarget
-        pub const JumpStaticMetadata = packed struct(usize) { dispatch: *const anyopaque };
+        pub const JumpStaticMetadata = extern struct { dispatch: *const anyopaque };
 
         /// Metadata for backward loop jumpi - contains two dispatch pointers for loop and exit targets
         /// Used by BACKWARD_LOOP_JUMPI synthetic opcode for optimized loop execution

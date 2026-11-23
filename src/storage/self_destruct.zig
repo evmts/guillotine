@@ -56,7 +56,7 @@ pub const SelfDestruct = struct {
         }
 
         // Use ArrayList for efficient single-pass collection (idiomatic Zig pattern)
-        var list = std.ArrayList(SelfDestructRecord){};
+        var list = std.ArrayList(SelfDestructRecord).empty;
         errdefer list.deinit(allocator); // Clean up on error
         
         // Single iteration through HashMap
@@ -181,7 +181,7 @@ test "SelfDestruct - basic marking and checking" {
     defer self_destruct.deinit();
 
     const contract_addr = primitives.ZERO_ADDRESS;
-    const recipient_addr_bytes = [_]u8{0x01} ++ [_]u8{0} ** 19;
+    const recipient_addr_bytes = [_]u8{0x01} ++ @as([19]u8, @splat(0));
     const recipient_addr = Address{ .bytes = recipient_addr_bytes };
 
     // Initially not marked
@@ -207,11 +207,11 @@ test "SelfDestruct - multiple contracts" {
     defer self_destruct.deinit();
 
     const contract1 = primitives.ZERO_ADDRESS;
-    const contract2_bytes = [_]u8{0x02} ++ [_]u8{0} ** 19;
+    const contract2_bytes = [_]u8{0x02} ++ @as([19]u8, @splat(0));
     const contract2 = Address{ .bytes = contract2_bytes };
-    const recipient1_bytes = [_]u8{0x01} ++ [_]u8{0} ** 19;
+    const recipient1_bytes = [_]u8{0x01} ++ @as([19]u8, @splat(0));
     const recipient1 = Address{ .bytes = recipient1_bytes };
-    const recipient2_bytes = [_]u8{0x03} ++ [_]u8{0} ** 19;
+    const recipient2_bytes = [_]u8{0x03} ++ @as([19]u8, @splat(0));
     const recipient2 = Address{ .bytes = recipient2_bytes };
 
     // Mark multiple contracts
@@ -238,11 +238,11 @@ test "SelfDestruct - iterator functionality" {
     defer self_destruct.deinit();
 
     const contract1 = primitives.ZERO_ADDRESS;
-    const contract2_bytes = [_]u8{0x02} ++ [_]u8{0} ** 19;
+    const contract2_bytes = [_]u8{0x02} ++ @as([19]u8, @splat(0));
     const contract2 = Address{ .bytes = contract2_bytes };
-    const recipient1_bytes = [_]u8{0x01} ++ [_]u8{0} ** 19;
+    const recipient1_bytes = [_]u8{0x01} ++ @as([19]u8, @splat(0));
     const recipient1 = Address{ .bytes = recipient1_bytes };
-    const recipient2_bytes = [_]u8{0x03} ++ [_]u8{0} ** 19;
+    const recipient2_bytes = [_]u8{0x03} ++ @as([19]u8, @splat(0));
     const recipient2 = Address{ .bytes = recipient2_bytes };
 
     // Mark contracts
@@ -264,7 +264,7 @@ test "SelfDestruct - unmark and clear" {
     defer self_destruct.deinit();
 
     const contract_addr = primitives.ZERO_ADDRESS;
-    const recipient_addr_bytes = [_]u8{0x01} ++ [_]u8{0} ** 19;
+    const recipient_addr_bytes = [_]u8{0x01} ++ @as([19]u8, @splat(0));
     const recipient_addr = Address{ .bytes = recipient_addr_bytes };
 
     // Mark and verify

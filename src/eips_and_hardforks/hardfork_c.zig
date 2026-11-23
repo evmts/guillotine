@@ -541,12 +541,11 @@ test "Hardfork C API compilation" {
 }
 
 test "C hardfork enum covers every native hardfork" {
-    const native_fields = std.meta.fields(Hardfork);
-    try std.testing.expectEqual(native_fields.len, std.meta.fields(CHardfork).len);
-    inline for (native_fields) |field| {
-        const native: Hardfork = @enumFromInt(field.value);
+    const native_fields = std.meta.tags(Hardfork);
+    try std.testing.expectEqual(native_fields.len, std.meta.tags(CHardfork).len);
+    for (native_fields) |native| {
         const c_value = native_to_c_hardfork(native);
-        try std.testing.expectEqualStrings(field.name, @tagName(c_value));
+        try std.testing.expectEqualStrings(@tagName(native), @tagName(c_value));
         try std.testing.expectEqual(native, c_to_native_hardfork(c_value));
         try std.testing.expectEqual(@as(c_int, 1), evm_hardfork_is_valid(@intFromEnum(c_value)));
     }

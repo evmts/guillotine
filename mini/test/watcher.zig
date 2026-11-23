@@ -10,7 +10,7 @@ pub const FileWatcher = struct {
     pub fn init(allocator: std.mem.Allocator, poll_interval_ms: u64) FileWatcher {
         return .{
             .allocator = allocator,
-            .watched_paths = std.ArrayList([]const u8){},
+            .watched_paths = std.ArrayList([]const u8).empty,
             .last_check = std.time.nanoTimestamp(),
             .poll_interval_ms = poll_interval_ms,
         };

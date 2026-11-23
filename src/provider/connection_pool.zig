@@ -65,7 +65,7 @@ pub const ConnectionPool = struct {
     const Self = @This();
 
     pub fn init(allocator: Allocator, config: PoolConfig) Self {
-        var connections = std.ArrayList(PooledConnection){};
+        var connections = std.ArrayList(PooledConnection).empty;
         // Pre-allocate to prevent reallocation and pointer invalidation
         connections.ensureTotalCapacity(allocator, config.max_connections) catch |err| {
             log.warn("Failed to pre-allocate connection pool capacity ({d}): {s}. Pool will reallocate as needed.", .{ config.max_connections, @errorName(err) });
@@ -372,7 +372,7 @@ test "connection pool multiple acquire and release" {
     var pool = ConnectionPool.init(allocator, config);
     defer pool.deinit();
 
-    var clients = [_]*std.http.Client{undefined} ** 3;
+    var clients = @as([3]*std.http.Client, @splat(undefined));
 
     // Acquire all
     for (&clients) |*client| {

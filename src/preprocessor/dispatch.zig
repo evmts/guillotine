@@ -86,7 +86,7 @@ pub fn Preprocessor(FrameType: type) type {
             frame: *FrameType,
         ) void {
             const builtin_mode = @import("builtin").mode;
-            if (comptime (builtin_mode != .Debug and builtin_mode != .ReleaseSafe)) return;
+            if (comptime (builtin_mode != .debug and builtin_mode != .safe)) return;
 
             // Helper function for conditional tracing assertions
             const tracerAssert = struct {
@@ -487,13 +487,13 @@ pub fn Preprocessor(FrameType: type) type {
             const arena_allocator = push_values_arena.allocator();
 
             const ScheduleList = ArrayList(Self.Item, null);
-            var schedule_items = ScheduleList{};
+            var schedule_items = ScheduleList.empty;
             errdefer schedule_items.deinit(allocator);
 
-            var jumpdest_entries = ArrayList(JumpDestEntry, null){};
+            var jumpdest_entries = ArrayList(JumpDestEntry, null).empty;
             defer jumpdest_entries.deinit(allocator);
 
-            var unresolved_jumps = ArrayList(UnresolvedJump, null){};
+            var unresolved_jumps = ArrayList(UnresolvedJump, null).empty;
             defer unresolved_jumps.deinit(allocator);
 
             var iter = bytecode.createIterator();
@@ -965,7 +965,7 @@ pub fn Preprocessor(FrameType: type) type {
             else
                 bytecode;
 
-            var jumpdest_entries = ArrayList(JumpDestEntry, null){};
+            var jumpdest_entries = ArrayList(JumpDestEntry, null).empty;
             defer jumpdest_entries.deinit(allocator);
 
             // Create a mapping of JUMPDEST PCs to their schedule indices
@@ -984,7 +984,7 @@ pub fn Preprocessor(FrameType: type) type {
             const jumpdest_handler = frame_handlers.getOpcodeHandlers(FrameType, &.{})[@intFromEnum(Opcode.JUMPDEST)];
 
             // Walk through schedule and find all JUMPDEST handlers
-            var jumpdest_pcs = ArrayList(FrameType.PcType, null){};
+            var jumpdest_pcs = ArrayList(FrameType.PcType, null).empty;
             defer jumpdest_pcs.deinit(allocator);
 
             // First, collect all JUMPDEST PCs from bytecode

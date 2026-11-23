@@ -49,10 +49,7 @@ test "snailtracer bytecode JUMP to 0x2e0 validation" {
     const allocator = std.testing.allocator;
 
     // Read the snailtracer bytecode
-    const bytecode_file = try std.fs.cwd().openFile("src/_test_utils/fixtures/snailtracer/bytecode.txt", .{});
-    defer bytecode_file.close();
-
-    const bytecode_hex = try bytecode_file.readToEndAlloc(allocator, 1024 * 1024);
+    const bytecode_hex = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "src/_test_utils/fixtures/snailtracer/bytecode.txt", allocator, .limited(1024 * 1024));
     defer allocator.free(bytecode_hex);
 
     // Count valid hex characters
@@ -1789,7 +1786,7 @@ test "Bytecode edge cases - metadata parsing" {
 
     // Bytecode with Solidity metadata at the end
     // Format: <bytecode> 0xa2 0x64 "ipfs" <34 bytes hash> 0x64 "solc" <3 bytes version> 0x00 0x33
-    var code_with_metadata = std.ArrayList(u8){};
+    var code_with_metadata = std.ArrayList(u8).empty;
     defer code_with_metadata.deinit(allocator);
 
     // Add some regular bytecode

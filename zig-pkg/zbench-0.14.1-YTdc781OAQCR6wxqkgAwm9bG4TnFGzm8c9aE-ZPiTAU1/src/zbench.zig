@@ -1,7 +1,3 @@
-//!zig-autodoc-guide: ../docs/intro.md
-//!zig-autodoc-guide: ../docs/quickstart.md
-//!zig-autodoc-guide: ../docs/advanced.md
-
 const std = @import("std");
 
 // Export public API
@@ -22,13 +18,16 @@ const ShufflingAllocator = @import("allocators/shuffling_allocator.zig").Shuffli
 const Partial = @import("partial.zig").Partial;
 const partial = @import("partial.zig").partial;
 const platform = @import("platform/platform.zig");
-const Color = std.Io.tty.Color;
+
+// Maximum number of characters to allow for the benchmark name (pretty-printing):
+pub const NAME_LEN_LIMIT: usize = 96;
 
 /// Benchmark manager, add your benchmark functions and run measure them.
 pub const Benchmark = struct {
     allocator: std.mem.Allocator,
     common_config: Config,
-    benchmarks: std.ArrayListUnmanaged(Definition) = .{},
+    benchmarks: std.ArrayList(Definition) = .empty,
+    max_name_len: usize = 0, // for pretty-printing the results
 
     pub fn init(allocator: std.mem.Allocator, config: Config) Benchmark {
         return Benchmark{
@@ -53,9 +52,10 @@ pub const Benchmark = struct {
             .defn = .{ .simple = func },
             .config = partial(Config, config, self.common_config),
         });
+        self.max_name_len = if (name.len > self.max_name_len) name.len else self.max_name_len;
     }
 
-    /// Add a benchmark function to be timed with `run()`.
+    /// Add a parameterised benchmark function to be timed with `run()`.
     pub fn addParam(
         self: *Benchmark,
         name: []const u8,
@@ -64,7 +64,7 @@ pub const Benchmark = struct {
     ) !void {
         // Check the benchmark parameter is the proper type.
         const T: type = switch (@typeInfo(@TypeOf(benchmark))) {
-            .pointer => |ptr| if (ptr.is_const) ptr.child else @compileError(
+            .pointer => |ptr| if (ptr.attrs.@"const") ptr.child else @compileError(
                 "benchmark must be a const ptr to a struct with a 'run' method",
             ),
             else => @compileError(
@@ -72,8 +72,8 @@ pub const Benchmark = struct {
             ),
         };
 
-        // Check the benchmark parameter has a well typed run function.
-        _ = @as(fn (T, std.mem.Allocator) void, T.run);
+        // Check the benchmark parameter has a well-typed run function.
+        _ = @as(fn (*T, std.mem.Allocator) void, T.run);
 
         try self.benchmarks.append(self.allocator, Definition{
             .name = name,
@@ -83,6 +83,7 @@ pub const Benchmark = struct {
             } },
             .config = partial(Config, config, self.common_config),
         });
+        self.max_name_len = if (name.len > self.max_name_len) name.len else self.max_name_len;
     }
 
     /// An incremental API for getting progress updates on running benchmarks.
@@ -112,7 +113,7 @@ pub const Benchmark = struct {
         };
 
         /// Get the next response.
-        pub fn next(self: *Iterator) !?Step {
+        pub fn next(self: *Iterator, io: std.Io) !?Step {
             if (self.remaining.len == 0) return null;
 
             var runner: *Runner = if (self.runner) |*r| r else blk: {
@@ -130,7 +131,7 @@ pub const Benchmark = struct {
 
             const runner_step = blk: {
                 errdefer self.abort();
-                const reading = try self.remaining[0].run(self.allocator);
+                const reading = try self.remaining[0].run(io, self.allocator);
                 break :blk try runner.next(reading);
             };
             if (runner_step) |_| {
@@ -148,9 +149,12 @@ pub const Benchmark = struct {
                 defer self.runner = null;
                 defer self.remaining = self.remaining[1..];
                 if (self.remaining[0].config.hooks.after_all) |hook| hook();
+
                 return Step{ .result = Result.init(
                     self.remaining[0].name,
                     try runner.finish(),
+                    self.remaining[0].config.bytes_per_run,
+                    self.remaining[0].config.items_per_run,
                 ) };
             }
         }
@@ -176,47 +180,48 @@ pub const Benchmark = struct {
     }
 
     /// Run all benchmarks and collect timing information.
-    pub fn run(self: Benchmark, writer: *std.Io.Writer) !void {
-        // Most allocations for pretty printing will be the same size each time,
-        // so using an arena should reduce the allocation load.
-        var arena = std.heap.ArenaAllocator.init(self.allocator);
-        defer arena.deinit();
-
-        try prettyPrintHeader(writer);
-
-        // Detect TTY configuration for color output
-        const tty_config = std.Io.tty.Config.detect(std.fs.File.stdout());
-
+    pub fn run(self: Benchmark, io: std.Io, file: std.Io.File) !void {
+        try prettyPrintHeader(io, file, self.max_name_len);
         var iter = try self.iterator();
-        while (try iter.next()) |step| switch (step) {
-            .progress => |_| {},
+        while (try iter.next(io)) |step| switch (step) {
+            .progress => {},
             .result => |x| {
                 defer x.deinit();
-
-                try x.prettyPrint(arena.allocator(), writer, tty_config);
-                _ = arena.reset(.retain_capacity);
+                try x.prettyPrint(io, file, self.max_name_len);
             },
         };
     }
 };
 
 /// Write the prettyPrint() header to a writer.
-pub fn prettyPrintHeader(writer: *std.Io.Writer) !void {
+pub fn prettyPrintHeader(io: std.Io, file: std.Io.File, name_len: usize) !void {
+    const _name_len = if (name_len > NAME_LEN_LIMIT) NAME_LEN_LIMIT else name_len;
+    const header_fmt: []const u8 = "{s:<8} {s:<14} {s:<23} {s:<14} {s:<14} {s:<28} {s:<10} {s:<10} {s:<10}\n";
+    const dashes_repeat: usize = 139;
+
+    var w: std.Io.File.Writer = file.writerStreaming(io, &.{});
+    const writer: *std.Io.Writer = &w.interface;
+
+    // header starts with "benchmark", which needs to be padded depending on the
+    // longest benchmark name.
+    _ = try std.Io.Writer.alignBuffer(writer, "benchmark", _name_len + 3, .left, ' ');
     try writer.print(
-        "{s:<22} {s:<8} {s:<14} {s:<23} {s:<28} {s:<10} {s:<10} {s:<10}\n",
+        header_fmt,
         .{
-            "benchmark",
+            // "benchmark" is written by alignBuffer
             "runs",
             "total time",
             "time/run (avg ± σ)",
+            "bytes/sec",
+            "items/sec",
             "(min ... max)",
             "p75",
             "p99",
             "p995",
         },
     );
-    const dashes = "-------------------------";
-    try writer.print(dashes ++ dashes ++ dashes ++ dashes ++ dashes ++ "\n", .{});
+    try writer.splatByteAll('-', _name_len + dashes_repeat);
+    try writer.print("\n", .{});
 }
 
 /// Get a copy of the system information, cpu type, cores, memory, etc.

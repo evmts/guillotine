@@ -16,7 +16,7 @@ pub const MIN_GAS_OSAKA: u64 = 500;
 pub const MAX_INPUT_LENGTH_OSAKA: u64 = 1024;
 
 fn readPaddedU256(input: []const u8, start: usize) u256 {
-    var word: [32]u8 = [_]u8{0} ** 32;
+    var word: [32]u8 = @as([32]u8, @splat(0));
     if (start < input.len) {
         const copy_len = @min(word.len, input.len - start);
         @memcpy(word[0..copy_len], input[start .. start + copy_len]);
@@ -92,7 +92,7 @@ pub fn execute(
     const exp_start = std.math.add(usize, data_start, base_len_usize) catch return error.OutOfGas;
     const mod_start = std.math.add(usize, exp_start, exp_len_usize) catch return error.OutOfGas;
     const exp_head_len = @min(exp_len_usize, 32);
-    var exp_head_buf: [32]u8 = [_]u8{0} ** 32;
+    var exp_head_buf: [32]u8 = @as([32]u8, @splat(0));
     if (exp_start < input.len) {
         const copy_len = @min(exp_head_len, input.len - exp_start);
         @memcpy(exp_head_buf[0..copy_len], input[exp_start .. exp_start + copy_len]);
@@ -173,7 +173,7 @@ pub fn execute(
 test "modexp - Osaka bounds precede empty output and minimum gas shortcuts" {
     const allocator = std.testing.allocator;
     for ([_]usize{ 0, 32, 64 }) |offset| {
-        var input = [_]u8{0} ** 96;
+        var input = @as([96]u8, @splat(0));
         std.mem.writeInt(u256, input[offset..][0..32], 1025, .big);
         try std.testing.expectError(error.InvalidInput, execute(allocator, &input, 1_000_000, .OSAKA));
         const historical = try execute(allocator, &input, 1_000_000, .PRAGUE);
@@ -187,7 +187,7 @@ test "modexp - Osaka bounds precede empty output and minimum gas shortcuts" {
     const empty = try execute(allocator, &.{}, 500, .OSAKA);
     defer empty.deinit(allocator);
     try std.testing.expectEqual(@as(u64, 500), empty.gas_used);
-    var exponent_only = [_]u8{0} ** 96;
+    var exponent_only = @as([96]u8, @splat(0));
     std.mem.writeInt(u256, exponent_only[32..64], 1024, .big);
     const result = try execute(allocator, &exponent_only, 253952, .OSAKA);
     defer result.deinit(allocator);
@@ -201,7 +201,7 @@ test "modexp - simple case" {
     const allocator = testing.allocator;
 
     // 2^3 mod 5 = 3
-    var input: [99]u8 = [_]u8{0} ** 99;
+    var input: [99]u8 = @as([99]u8, @splat(0));
 
     // base_len = 1
     input[31] = 1;
@@ -228,7 +228,7 @@ test "modexp - short zero input is right padded" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input = [_]u8{0} ** 95;
+    const input = @as([95]u8, @splat(0));
     const result = try execute(allocator, &input, 1000000, .CANCUN);
     defer result.deinit(allocator);
     try testing.expectEqual(@as(usize, 0), result.output.len);
@@ -239,7 +239,7 @@ test "modexp - minimum gas" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    var input: [96]u8 = [_]u8{0} ** 96;
+    var input: [96]u8 = @as([96]u8, @splat(0));
     const result = try execute(allocator, &input, MIN_GAS, .CANCUN);
     defer result.deinit(allocator);
 
@@ -250,7 +250,7 @@ test "modexp - out of gas" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    var input: [99]u8 = [_]u8{0} ** 99;
+    var input: [99]u8 = @as([99]u8, @splat(0));
     input[31] = 1;
     input[63] = 1;
     input[95] = 1;
@@ -266,7 +266,7 @@ test "modexp - zero modulus" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    var input: [99]u8 = [_]u8{0} ** 99;
+    var input: [99]u8 = @as([99]u8, @splat(0));
     input[31] = 1;
     input[63] = 1;
     input[95] = 1;
@@ -299,7 +299,7 @@ test "modexp - geth eip_example1" {
 
     // base = 3, exp = 1, mod = 5
     // Expected: 3^1 mod 5 = 3
-    var input: [99]u8 = [_]u8{0} ** 99;
+    var input: [99]u8 = @as([99]u8, @splat(0));
 
     // base_len = 1
     input[31] = 1;
@@ -328,7 +328,7 @@ test "modexp - geth eip_example2 zero base" {
 
     // base = 0, exp = 1, mod = 5
     // Expected: 0^1 mod 5 = 0
-    var input: [99]u8 = [_]u8{0} ** 99;
+    var input: [99]u8 = @as([99]u8, @splat(0));
 
     // base_len = 1
     input[31] = 1;
@@ -356,7 +356,7 @@ test "modexp - geth nagydani-1-square small" {
     const allocator = testing.allocator;
 
     // Test a^2 mod m for small values
-    var input: [98]u8 = [_]u8{0} ** 98;
+    var input: [98]u8 = @as([98]u8, @splat(0));
 
     // base_len = 1
     input[31] = 1;
@@ -381,7 +381,7 @@ test "modexp - large exponent DoS resistance" {
     const allocator = testing.allocator;
 
     // Test with very large exponent length to ensure gas calculation prevents DoS
-    var input: [96]u8 = [_]u8{0} ** 96;
+    var input: [96]u8 = @as([96]u8, @splat(0));
 
     // base_len = 1
     input[31] = 1;
@@ -400,7 +400,7 @@ test "modexp - maximum modulus size" {
     const allocator = testing.allocator;
 
     // Test with 256-byte modulus
-    var input_data: [672]u8 = [_]u8{0} ** 672;
+    var input_data: [672]u8 = @as([672]u8, @splat(0));
 
     // base_len = 1
     input_data[31] = 1;
@@ -429,7 +429,7 @@ test "modexp - zero exponent" {
 
     // base = 5, exp = 0, mod = 7
     // Expected: 5^0 mod 7 = 1
-    var input: [99]u8 = [_]u8{0} ** 99;
+    var input: [99]u8 = @as([99]u8, @splat(0));
 
     // base_len = 1
     input[31] = 1;
@@ -458,7 +458,7 @@ test "modexp - modulus equals 1" {
 
     // base = 5, exp = 3, mod = 1
     // Expected: 5^3 mod 1 = 0
-    var input: [99]u8 = [_]u8{0} ** 99;
+    var input: [99]u8 = @as([99]u8, @splat(0));
 
     // base_len = 1
     input[31] = 1;
@@ -485,7 +485,7 @@ test "modexp - zero exponent output is reduced modulo one" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    var input: [99]u8 = [_]u8{0} ** 99;
+    var input: [99]u8 = @as([99]u8, @splat(0));
     input[31] = 1;
     input[63] = 1;
     input[95] = 1;
@@ -506,7 +506,7 @@ test "modexp - base larger than modulus" {
 
     // base = 10, exp = 2, mod = 7
     // Expected: 10^2 mod 7 = 100 mod 7 = 2
-    var input: [99]u8 = [_]u8{0} ** 99;
+    var input: [99]u8 = @as([99]u8, @splat(0));
 
     // base_len = 1
     input[31] = 1;
@@ -605,7 +605,7 @@ test "modexp - truncated input handling" {
     const allocator = testing.allocator;
 
     // Input declares lengths but doesn't provide enough data
-    var input: [97]u8 = [_]u8{0} ** 97;
+    var input: [97]u8 = @as([97]u8, @splat(0));
 
     // Declare we need 5 bytes for base but only provide 1
     input[31] = 5;
@@ -627,7 +627,7 @@ test "modexp - exponent larger than modulus" {
 
     // base = 2, exp = 100, mod = 13
     // Expected: 2^100 mod 13 (should compute correctly)
-    var input: [99]u8 = [_]u8{0} ** 99;
+    var input: [99]u8 = @as([99]u8, @splat(0));
 
     // base_len = 1
     input[31] = 1;
@@ -656,7 +656,7 @@ test "modexp - berlin vs cancun hardfork gas" {
     const allocator = testing.allocator;
 
     // Test that gas costs differ between hardforks
-    var input: [99]u8 = [_]u8{0} ** 99;
+    var input: [99]u8 = @as([99]u8, @splat(0));
 
     input[31] = 1;
     input[63] = 1;
@@ -683,7 +683,7 @@ test "modexp - all zero input" {
     const allocator = testing.allocator;
 
     // All zeros: base=0, exp=0, mod=0
-    var input: [99]u8 = [_]u8{0} ** 99;
+    var input: [99]u8 = @as([99]u8, @splat(0));
 
     input[31] = 1;
     input[63] = 1;
@@ -702,7 +702,7 @@ test "modexp - right pads short length header" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    var input: [64]u8 = [_]u8{0} ** 64;
+    var input: [64]u8 = @as([64]u8, @splat(0));
     input[60] = 0x04;
 
     const result = try execute(allocator, &input, 1000000, .BERLIN);
@@ -716,7 +716,7 @@ test "modexp - right pads partially supplied modulus bytes" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    var input: [99]u8 = [_]u8{0} ** 99;
+    var input: [99]u8 = @as([99]u8, @splat(0));
     input[31] = 1;
     input[63] = 1;
     input[95] = 32;

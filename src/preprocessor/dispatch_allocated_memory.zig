@@ -13,7 +13,7 @@ pub fn AllocatedMemory(comptime WordType: type) type {
 
         pub fn init() Self {
             return .{
-                .pointers = ArrayList(*WordType, null){},
+                .pointers = ArrayList(*WordType, null).empty,
             };
         }
 
