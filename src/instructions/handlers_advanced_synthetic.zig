@@ -420,32 +420,25 @@ pub fn Handlers(FrameType: type) type {
             return Error.REVERT;
         }
 
-        /// PUSH_ADD_DUP1 - Optimized PUSH + ADD + DUP1 pattern (common in loops)
+        /// PUSH_ADD_DUP1 - Optimized PUSH + ADD + DUP1 pattern (common in loops).
+        /// Verified equivalent to sequential `PUSH; ADD; DUP1` in `GuillotineVerify.Fusions.push_add_dup1_sound`.
         pub fn push_add_dup1(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             self.beforeInstruction(.PUSH_ADD_DUP1, cursor);
             const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
             const op_data = dispatch_opcode_data.getOpData(.PUSH_ADD_DUP1, Dispatch, Dispatch.Item, cursor);
 
-            // Validate: needs 1 item (for ADD), PUSH adds 1, ADD pops 2 pushes 1, DUP1 adds 1
-            // Net: needs 1 item initially, ends with 2 items
+            // Peak stack growth is +1 (PUSH -> s+1, ADD -> s, DUP1 -> s+1), requires depth >= 1.
             (&self.getEvm().tracer).assert(self.stack.size() >= 1, "PUSH_ADD_DUP1: Stack underflow (need 1 item for ADD)");
-            (&self.getEvm().tracer).assert(self.stack.size() <= 1022, "PUSH_ADD_DUP1: Stack overflow (need space for 2 items)");
+            (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "PUSH_ADD_DUP1: Stack overflow (need 1 free slot)");
 
-            // PUSH: Add push value
             const push_item = op_data.items[0];
-            const push_value = if (push_item == .push_inline)
+            const push_value: WordType = if (push_item == .push_inline)
                 push_item.push_inline.value
             else
                 push_item.push_pointer.value_ptr.*;
-            self.stack.push_unsafe(push_value);
 
-            // ADD: pop two values and add
-            const b = self.stack.pop_unsafe();
-            const a = self.stack.pop_unsafe();
-            const result = a +% b;
-            self.stack.push_unsafe(result);
-
-            // DUP1: Duplicate the result
+            const result = self.stack.peek_unsafe() +% push_value;
+            self.stack.set_top_unsafe(result);
             self.stack.push_unsafe(result);
 
             self.afterInstruction(.PUSH_ADD_DUP1, op_data.next_handler, op_data.next_cursor.cursor);

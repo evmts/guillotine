@@ -30,6 +30,7 @@ pub const bls12_g2_msm = @import("bls12_g2_msm.zig");
 pub const bls12_pairing = @import("bls12_pairing.zig");
 pub const bls12_map_fp_to_g1 = @import("bls12_map_fp_to_g1.zig");
 pub const bls12_map_fp2_to_g2 = @import("bls12_map_fp2_to_g2.zig");
+pub const p256verify = @import("p256verify.zig");
 
 // Utilities
 pub const utils = @import("utils.zig");
@@ -53,8 +54,7 @@ pub const BLS12_G2MSM_ADDRESS: Address = Address.fromU256(0x0E);
 pub const BLS12_PAIRING_CHECK_ADDRESS: Address = Address.fromU256(0x0F);
 pub const BLS12_MAP_FP_TO_G1_ADDRESS: Address = Address.fromU256(0x10);
 pub const BLS12_MAP_FP2_TO_G2_ADDRESS: Address = Address.fromU256(0x11);
-/// EIP-7951 P256VERIFY (Osaka). Warm from Osaka on, but not dispatched until an
-/// implementation lands: `isPrecompile` returns false for it so far.
+/// EIP-7951 P256VERIFY (Osaka, 0x100).
 pub const P256VERIFY_ADDRESS: Address = Address.fromU256(0x100);
 
 /// Highest contiguous precompile address (starting at 0x01) active in `hardfork`.
@@ -70,7 +70,8 @@ pub fn lastContiguousPrecompile(hardfork: Hardfork) u8 {
 /// Check if an address is a precompile
 pub fn isPrecompile(address: Address, hardfork: Hardfork) bool {
     const addr_int = address.toU256();
-    return addr_int >= 0x01 and addr_int <= lastContiguousPrecompile(hardfork);
+    if (addr_int >= 0x01 and addr_int <= lastContiguousPrecompile(hardfork)) return true;
+    return hardfork.isAtLeast(.OSAKA) and addr_int == 0x100;
 }
 
 /// Execute a precompile contract
@@ -104,6 +105,7 @@ pub fn execute(
         0x0F => bls12_pairing.execute(allocator, input, gas_limit),
         0x10 => bls12_map_fp_to_g1.execute(allocator, input, gas_limit),
         0x11 => bls12_map_fp2_to_g2.execute(allocator, input, gas_limit),
+        0x100 => p256verify.execute(allocator, input, gas_limit, p256verify.GAS_COST_EIP7951),
         else => error.NotImplemented,
     };
 }
@@ -148,12 +150,13 @@ test "isPrecompile - Prague" {
     try testing.expect(!isPrecompile(Address.fromU256(0x13), .PRAGUE));
 }
 
-test "isPrecompile - Osaka keeps the Prague set and does not dispatch 0x100 yet" {
+test "isPrecompile - Osaka dispatches P256VERIFY at 0x100" {
     const testing = std.testing;
 
     try testing.expect(isPrecompile(Address.fromU256(0x11), .OSAKA));
     try testing.expect(!isPrecompile(Address.fromU256(0x12), .OSAKA));
-    try testing.expect(!isPrecompile(P256VERIFY_ADDRESS, .OSAKA));
+    try testing.expect(!isPrecompile(P256VERIFY_ADDRESS, .PRAGUE));
+    try testing.expect(isPrecompile(P256VERIFY_ADDRESS, .OSAKA));
 }
 
 test "execute - final EIP-2537 address layout routes to the right precompile" {

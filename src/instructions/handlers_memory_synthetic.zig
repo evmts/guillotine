@@ -13,331 +13,119 @@ pub fn Handlers(FrameType: type) type {
         pub const Dispatch = FrameType.Dispatch;
         pub const WordType = FrameType.WordType;
 
-        // Dispatch charges the original opcodes' static gas. Expansion depends
-        // on memory reached at runtime and must be charged before any access.
-        fn charge_memory_expansion(self: *FrameType, comptime opcode: Dispatch.UnifiedOpcode, offset: usize, size: u24) Error!void {
-            if (offset > std.math.maxInt(u24) - size) {
+        const MEMORY_LIMIT: u64 = FrameType.Memory.MEMORY_LIMIT;
+
+        // Verified single-compare bounds check + fast in-bounds memory expansion helper.
+        inline fn prepare_memory_access(
+            self: *FrameType,
+            comptime opcode: Dispatch.UnifiedOpcode,
+            offset: u256,
+            comptime access_size: u64,
+        ) Error!usize {
+            const verified_ops = @import("../verified_ops.zig");
+            if (!verified_ops.checkMemoryBoundsFast(offset, access_size, MEMORY_LIMIT)) {
+                @branchHint(.unlikely);
                 self.afterComplete(opcode);
                 return Error.OutOfBounds;
             }
-            const cost = self.memory.get_expansion_cost(@intCast(offset + size));
-            self.consumeGasChecked(@intCast(cost)) catch |err| {
-                self.afterComplete(opcode);
-                return err;
-            };
+            const offset_usize: usize = @truncate(offset);
+            const end_offset = offset_usize + @as(usize, access_size);
+            if (end_offset > self.memory.size()) {
+                @branchHint(.unlikely);
+                const cost = self.memory.get_expansion_cost(@truncate(end_offset));
+                self.consumeGasChecked(@intCast(cost)) catch |err| {
+                    self.afterComplete(opcode);
+                    return err;
+                };
+                const word_aligned_end = verified_ops.alignUp32(@truncate(end_offset));
+                self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), word_aligned_end) catch |err| switch (err) {
+                    memory_mod.MemoryError.MemoryOverflow => {
+                        self.afterComplete(opcode);
+                        return Error.OutOfBounds;
+                    },
+                    else => {
+                        self.afterComplete(opcode);
+                        return Error.AllocationError;
+                    },
+                };
+            }
+            return offset_usize;
         }
 
         /// PUSH_MLOAD_INLINE - Fused PUSH+MLOAD with inline offset (≤8 bytes).
-        /// Pushes an offset and immediately loads from that memory location.
-        /// Dispatch charges static gas; the handler charges memory expansion.
         pub fn push_mload_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             self.beforeInstruction(.PUSH_MLOAD_INLINE, cursor);
             const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
             const op_data = dispatch_opcode_data.getOpData(.PUSH_MLOAD_INLINE, Dispatch, Dispatch.Item, cursor);
-
-            // Cursor now points to metadata
-            const offset = op_data.metadata.value;
-
-            // Check if offset fits in usize
-            if (offset > std.math.maxInt(usize)) {
-                @branchHint(.unlikely);
-                self.afterComplete(.PUSH_MLOAD_INLINE);
-                return Error.OutOfBounds;
-            }
-            const offset_usize = @as(usize, @intCast(offset));
-
-            try charge_memory_expansion(self, .PUSH_MLOAD_INLINE, offset_usize, 32);
-
-            // Read 32 bytes from memory
-            // Use std.math.cast to safely convert to u24, returns null if out of bounds
-            const offset_u24 = std.math.cast(u24, offset_usize) orelse {
-                self.afterComplete(.PUSH_MLOAD_INLINE);
-                return Error.OutOfBounds;
-            };
-            const value_u256 = self.memory.get_u256_evm(self.getEvm().getCallArenaAllocator(), offset_u24) catch |err| switch (err) {
-                memory_mod.MemoryError.OutOfBounds => {
-                    self.afterComplete(.PUSH_MLOAD_INLINE);
-                    return Error.OutOfBounds;
-                },
-                memory_mod.MemoryError.MemoryOverflow => {
-                    self.afterComplete(.PUSH_MLOAD_INLINE);
-                    return Error.OutOfBounds;
-                },
-                else => {
-                    self.afterComplete(.PUSH_MLOAD_INLINE);
-                    return Error.AllocationError;
-                },
-            };
-
-            const value = @as(WordType, @truncate(value_u256));
-            {
-                (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "PUSH_MLOAD requires stack space");
-            }
-            self.stack.push_unsafe(value);
-
+            const offset_usize = try prepare_memory_access(self, .PUSH_MLOAD_INLINE, @as(u256, op_data.metadata.value), 32);
+            const value_u256 = self.memory.get_u256_unchecked(offset_usize);
+            (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "PUSH_MLOAD requires stack space");
+            self.stack.push_unsafe(@as(WordType, @truncate(value_u256)));
             self.afterInstruction(.PUSH_MLOAD_INLINE, op_data.next_handler, op_data.next_cursor.cursor);
             return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// PUSH_MLOAD_POINTER - Fused PUSH+MLOAD with pointer offset (>8 bytes).
-        /// Dispatch charges static gas; the handler charges memory expansion.
         pub fn push_mload_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             self.beforeInstruction(.PUSH_MLOAD_POINTER, cursor);
             const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
             const op_data = dispatch_opcode_data.getOpData(.PUSH_MLOAD_POINTER, Dispatch, Dispatch.Item, cursor);
-
-            // Cursor now points to metadata
-            const offset = op_data.metadata.value_ptr.*;
-
-            // Check if offset fits in usize
-            if (offset > std.math.maxInt(usize)) {
-                @branchHint(.unlikely);
-                self.afterComplete(.PUSH_MLOAD_POINTER);
-                return Error.OutOfBounds;
-            }
-            const offset_usize = @as(usize, @intCast(offset));
-
-            try charge_memory_expansion(self, .PUSH_MLOAD_POINTER, offset_usize, 32);
-
-            // Read 32 bytes from memory
-            // Use std.math.cast to safely convert to u24, returns null if out of bounds
-            const offset_u24 = std.math.cast(u24, offset_usize) orelse {
-                self.afterComplete(.PUSH_MLOAD_POINTER);
-                return Error.OutOfBounds;
-            };
-            const value_u256 = self.memory.get_u256_evm(self.getEvm().getCallArenaAllocator(), offset_u24) catch |err| switch (err) {
-                memory_mod.MemoryError.OutOfBounds => {
-                    self.afterComplete(.PUSH_MLOAD_POINTER);
-                    return Error.OutOfBounds;
-                },
-                memory_mod.MemoryError.MemoryOverflow => {
-                    self.afterComplete(.PUSH_MLOAD_POINTER);
-                    return Error.OutOfBounds;
-                },
-                else => {
-                    self.afterComplete(.PUSH_MLOAD_POINTER);
-                    return Error.AllocationError;
-                },
-            };
-
-            const value = @as(WordType, @truncate(value_u256));
-            {
-                (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "PUSH_MLOAD requires stack space");
-            }
-            self.stack.push_unsafe(value);
-
+            const offset_usize = try prepare_memory_access(self, .PUSH_MLOAD_POINTER, @as(u256, op_data.metadata.value_ptr.*), 32);
+            const value_u256 = self.memory.get_u256_unchecked(offset_usize);
+            (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "PUSH_MLOAD requires stack space");
+            self.stack.push_unsafe(@as(WordType, @truncate(value_u256)));
             self.afterInstruction(.PUSH_MLOAD_POINTER, op_data.next_handler, op_data.next_cursor.cursor);
             return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// PUSH_MSTORE_INLINE - Fused PUSH+MSTORE with inline offset (≤8 bytes).
-        /// Pushes an offset, then pops a value and stores it at that offset.
-        /// Dispatch charges static gas; the handler charges memory expansion.
         pub fn push_mstore_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             self.beforeInstruction(.PUSH_MSTORE_INLINE, cursor);
             const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
             const op_data = dispatch_opcode_data.getOpData(.PUSH_MSTORE_INLINE, Dispatch, Dispatch.Item, cursor);
-
-            // Cursor now points to metadata
-            const offset = op_data.metadata.value;
-
-            // Pop the value to store
-            {
-                (&self.getEvm().tracer).assert(self.stack.size() >= 1, "PUSH_MSTORE requires 1 stack item");
-            }
+            (&self.getEvm().tracer).assert(self.stack.size() >= 1, "PUSH_MSTORE requires 1 stack item");
             const value = self.stack.pop_unsafe();
-
-            // Check if offset fits in usize
-            if (offset > std.math.maxInt(usize)) {
-                @branchHint(.unlikely);
-                self.afterComplete(.PUSH_MSTORE_INLINE);
-                return Error.OutOfBounds;
-            }
-            const offset_usize = @as(usize, @intCast(offset));
-
-            try charge_memory_expansion(self, .PUSH_MSTORE_INLINE, offset_usize, 32);
-
-            // Store 32 bytes to memory
-            const value_u256 = @as(u256, value);
-            // Use std.math.cast to safely convert to u24, returns null if out of bounds
-            const offset_u24 = std.math.cast(u24, offset_usize) orelse {
-                self.afterComplete(.PUSH_MSTORE_INLINE);
-                return Error.OutOfBounds;
-            };
-            self.memory.set_u256_evm(self.getEvm().getCallArenaAllocator(), offset_u24, value_u256) catch |err| switch (err) {
-                memory_mod.MemoryError.OutOfBounds => {
-                    self.afterComplete(.PUSH_MSTORE_INLINE);
-                    return Error.OutOfBounds;
-                },
-                memory_mod.MemoryError.MemoryOverflow => {
-                    self.afterComplete(.PUSH_MSTORE_INLINE);
-                    return Error.OutOfBounds;
-                },
-                else => {
-                    self.afterComplete(.PUSH_MSTORE_INLINE);
-                    return Error.AllocationError;
-                },
-            };
-
+            const offset_usize = try prepare_memory_access(self, .PUSH_MSTORE_INLINE, @as(u256, op_data.metadata.value), 32);
+            self.memory.set_u256_unchecked(offset_usize, @as(u256, value));
             self.afterInstruction(.PUSH_MSTORE_INLINE, op_data.next_handler, op_data.next_cursor.cursor);
             return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// PUSH_MSTORE_POINTER - Fused PUSH+MSTORE with pointer offset (>8 bytes).
-        /// Dispatch charges static gas; the handler charges memory expansion.
         pub fn push_mstore_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             self.beforeInstruction(.PUSH_MSTORE_POINTER, cursor);
             const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
             const op_data = dispatch_opcode_data.getOpData(.PUSH_MSTORE_POINTER, Dispatch, Dispatch.Item, cursor);
-
-            // Cursor now points to metadata
-            const offset = op_data.metadata.value_ptr.*;
-
-            // Pop the value to store
-            {
-                (&self.getEvm().tracer).assert(self.stack.size() >= 1, "PUSH_MSTORE requires 1 stack item");
-            }
+            (&self.getEvm().tracer).assert(self.stack.size() >= 1, "PUSH_MSTORE requires 1 stack item");
             const value = self.stack.pop_unsafe();
-
-            // Check if offset fits in usize
-            if (offset > std.math.maxInt(usize)) {
-                @branchHint(.unlikely);
-                self.afterComplete(.PUSH_MSTORE_POINTER);
-                return Error.OutOfBounds;
-            }
-            const offset_usize = @as(usize, @intCast(offset));
-
-            try charge_memory_expansion(self, .PUSH_MSTORE_POINTER, offset_usize, 32);
-
-            // Store 32 bytes to memory
-            const value_u256 = @as(u256, value);
-            // Use std.math.cast to safely convert to u24, returns null if out of bounds
-            const offset_u24 = std.math.cast(u24, offset_usize) orelse {
-                self.afterComplete(.PUSH_MSTORE_POINTER);
-                return Error.OutOfBounds;
-            };
-            self.memory.set_u256_evm(self.getEvm().getCallArenaAllocator(), offset_u24, value_u256) catch |err| switch (err) {
-                memory_mod.MemoryError.OutOfBounds => {
-                    self.afterComplete(.PUSH_MSTORE_POINTER);
-                    return Error.OutOfBounds;
-                },
-                memory_mod.MemoryError.MemoryOverflow => {
-                    self.afterComplete(.PUSH_MSTORE_POINTER);
-                    return Error.OutOfBounds;
-                },
-                else => {
-                    self.afterComplete(.PUSH_MSTORE_POINTER);
-                    return Error.AllocationError;
-                },
-            };
-
+            const offset_usize = try prepare_memory_access(self, .PUSH_MSTORE_POINTER, @as(u256, op_data.metadata.value_ptr.*), 32);
+            self.memory.set_u256_unchecked(offset_usize, @as(u256, value));
             self.afterInstruction(.PUSH_MSTORE_POINTER, op_data.next_handler, op_data.next_cursor.cursor);
             return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// PUSH_MSTORE8_INLINE - Fused PUSH+MSTORE8 with inline offset (≤8 bytes).
-        /// Pushes an offset, then pops a value and stores the least significant byte.
-        /// Dispatch charges static gas; the handler charges memory expansion.
         pub fn push_mstore8_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             self.beforeInstruction(.PUSH_MSTORE8_INLINE, cursor);
             const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
             const op_data = dispatch_opcode_data.getOpData(.PUSH_MSTORE8_INLINE, Dispatch, Dispatch.Item, cursor);
-
-            // Cursor now points to metadata
-            const offset = op_data.metadata.value;
-
-            // Pop the value to store
-            {
-                (&self.getEvm().tracer).assert(self.stack.size() >= 1, "PUSH_MSTORE8 requires 1 stack item");
-            }
+            (&self.getEvm().tracer).assert(self.stack.size() >= 1, "PUSH_MSTORE8 requires 1 stack item");
             const value = self.stack.pop_unsafe();
-
-            // Check if offset fits in usize
-            if (offset > std.math.maxInt(usize)) {
-                @branchHint(.unlikely);
-                self.afterComplete(.PUSH_MSTORE8_INLINE);
-                return Error.OutOfBounds;
-            }
-            const offset_usize = @as(usize, @intCast(offset));
-
-            // Check if offset fits in u24
-            if (offset_usize > std.math.maxInt(u24)) {
-                self.afterComplete(.PUSH_MSTORE8_INLINE);
-                return Error.OutOfBounds;
-            }
-
-            try charge_memory_expansion(self, .PUSH_MSTORE8_INLINE, offset_usize, 1);
-
-            // Store the least significant byte
-            const byte_value = @as(u8, @truncate(value));
-            self.memory.set_byte_evm(self.getEvm().getCallArenaAllocator(), @as(u24, @intCast(offset_usize)), byte_value) catch |err| switch (err) {
-                memory_mod.MemoryError.OutOfBounds => {
-                    self.afterComplete(.PUSH_MSTORE8_INLINE);
-                    return Error.OutOfBounds;
-                },
-                memory_mod.MemoryError.MemoryOverflow => {
-                    self.afterComplete(.PUSH_MSTORE8_INLINE);
-                    return Error.OutOfBounds;
-                },
-                else => {
-                    self.afterComplete(.PUSH_MSTORE8_INLINE);
-                    return Error.AllocationError;
-                },
-            };
-
+            const offset_usize = try prepare_memory_access(self, .PUSH_MSTORE8_INLINE, @as(u256, op_data.metadata.value), 1);
+            self.memory.set_byte_unchecked(offset_usize, @as(u8, @truncate(value)));
             self.afterInstruction(.PUSH_MSTORE8_INLINE, op_data.next_handler, op_data.next_cursor.cursor);
             return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }
 
         /// PUSH_MSTORE8_POINTER - Fused PUSH+MSTORE8 with pointer offset (>8 bytes).
-        /// Dispatch charges static gas; the handler charges memory expansion.
         pub fn push_mstore8_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             self.beforeInstruction(.PUSH_MSTORE8_POINTER, cursor);
             const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
             const op_data = dispatch_opcode_data.getOpData(.PUSH_MSTORE8_POINTER, Dispatch, Dispatch.Item, cursor);
-
-            // Cursor now points to metadata
-            const offset = op_data.metadata.value_ptr.*;
-
-            // Pop the value to store
-            {
-                (&self.getEvm().tracer).assert(self.stack.size() >= 1, "PUSH_MSTORE8 requires 1 stack item");
-            }
+            (&self.getEvm().tracer).assert(self.stack.size() >= 1, "PUSH_MSTORE8 requires 1 stack item");
             const value = self.stack.pop_unsafe();
-
-            // Check if offset fits in usize
-            if (offset > std.math.maxInt(usize)) {
-                @branchHint(.cold);
-                self.afterComplete(.PUSH_MSTORE8_POINTER);
-                return Error.OutOfBounds;
-            }
-            const offset_usize = @as(usize, @intCast(offset));
-
-            // Check if offset fits in u24
-            if (offset_usize > std.math.maxInt(u24)) {
-                self.afterComplete(.PUSH_MSTORE8_POINTER);
-                return Error.OutOfBounds;
-            }
-
-            try charge_memory_expansion(self, .PUSH_MSTORE8_POINTER, offset_usize, 1);
-
-            // Store the least significant byte
-            const byte_value = @as(u8, @truncate(value));
-            self.memory.set_byte_evm(self.getEvm().getCallArenaAllocator(), @as(u24, @intCast(offset_usize)), byte_value) catch |err| switch (err) {
-                memory_mod.MemoryError.OutOfBounds => {
-                    self.afterComplete(.PUSH_MSTORE8_POINTER);
-                    return Error.OutOfBounds;
-                },
-                memory_mod.MemoryError.MemoryOverflow => {
-                    self.afterComplete(.PUSH_MSTORE8_POINTER);
-                    return Error.OutOfBounds;
-                },
-                else => {
-                    self.afterComplete(.PUSH_MSTORE8_POINTER);
-                    return Error.AllocationError;
-                },
-            };
-
+            const offset_usize = try prepare_memory_access(self, .PUSH_MSTORE8_POINTER, @as(u256, op_data.metadata.value_ptr.*), 1);
+            self.memory.set_byte_unchecked(offset_usize, @as(u8, @truncate(value)));
             self.afterInstruction(.PUSH_MSTORE8_POINTER, op_data.next_handler, op_data.next_cursor.cursor);
             return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
         }

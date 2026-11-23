@@ -22,6 +22,7 @@ pub fn execute(
 
     const output = try allocator.alloc(u8, 256);
     errdefer allocator.free(output);
+    errdefer allocator.free(output);
     crypto.Crypto.bls12_381.g2Add(input, output) catch {
         return error.InvalidPoint;
     };

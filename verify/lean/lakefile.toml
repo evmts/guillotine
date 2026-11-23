@@ -1,0 +1,5 @@
+name = "GuillotineVerify"
+defaultTargets = ["GuillotineVerify"]
+
+[[lean_lib]]
+name = "GuillotineVerify"

@@ -276,18 +276,20 @@ pub fn Handlers(FrameType: type) type {
                 return Error.OutOfGas;
             }
 
-            const current_stack_size = self.stack.size();
-            if (min_stack > 0 and current_stack_size < @as(usize, @intCast(min_stack))) {
-                self.afterComplete(.BLOCK_BEGIN);
-                return Error.StackUnderflow;
-            }
-            if (max_stack > 0) {
-                const stack_capacity = @TypeOf(self.stack).stack_capacity;
-                const max_final_size = @as(isize, @intCast(current_stack_size)) + @as(isize, max_stack);
-                if (max_final_size > @as(isize, @intCast(stack_capacity))) {
+            const verified_ops = @import("../verified_ops.zig");
+            const current_stack_size: u32 = @intCast(self.stack.size());
+            const min_u16: u16 = if (min_stack > 0) @intCast(min_stack) else 0;
+            const max_u16: u16 = if (max_stack > 0) @intCast(max_stack) else 0;
+            switch (verified_ops.blockStackGuardFast(current_stack_size, min_u16, max_u16, @TypeOf(self.stack).stack_capacity)) {
+                .ok => {},
+                .underflow => {
+                    self.afterComplete(.BLOCK_BEGIN);
+                    return Error.StackUnderflow;
+                },
+                .overflow => {
                     self.afterComplete(.BLOCK_BEGIN);
                     return Error.StackOverflow;
-                }
+                },
             }
 
             self.afterInstruction(.BLOCK_BEGIN, op_data.next_handler, op_data.next_cursor.cursor);

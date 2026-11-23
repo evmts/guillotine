@@ -23,6 +23,7 @@ pub const MemoryError = @import("memory/memory.zig").MemoryError;
 // EVM main module and configuration
 pub const Evm = @import("evm.zig").Evm;
 pub const EvmConfig = @import("evm_config.zig").EvmConfig;
+pub const layer2 = @import("layer2/mod.zig");
 
 // Build-configured EVM
 pub const getBuildConfig = EvmConfig{};
@@ -118,6 +119,7 @@ pub const Log = @import("voltaire").logs.Log;
 pub const TransactionContext = @import("block/transaction_context.zig").TransactionContext;
 pub const AuthorizationProcessor = @import("eips_and_hardforks/authorization_processor.zig").AuthorizationProcessor;
 pub const AuthorizationError = @import("eips_and_hardforks/authorization_processor.zig").AuthorizationError;
+pub const trie = @import("trie/root.zig");
 // KZG setup from primitives package crypto module
 pub const kzg_setup = @import("crypto").kzg_setup;
 
@@ -125,6 +127,7 @@ pub const kzg_setup = @import("crypto").kzg_setup;
 pub const Primitives = @import("voltaire");
 pub const Provider = @import("provider");
 pub const dispatch_pretty_print = @import("preprocessor/dispatch_pretty_print.zig");
+pub const verified_ops = @import("verified_ops.zig");
 
 // Run tests
 test {
@@ -162,6 +165,7 @@ test {
 
     // Test internal modules
     _ = @import("internal/safety_counter.zig");
+    _ = @import("verified_ops.zig");
 
     // Tracer modules with tests
     // _ = @import("tracer/pc_tracker.zig");

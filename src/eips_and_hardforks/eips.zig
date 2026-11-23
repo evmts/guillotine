@@ -567,7 +567,7 @@ pub const Eips = struct {
 
         // EIP-1283/EIP-2200 (Constantinople/Istanbul+): Net gas metering
         var gas: u64 = 0;
-        var refund: u64 = 0;
+        var refund: i64 = 0;
 
         // EIP-2929 (Berlin+): Add cold access cost if applicable
         if (self.hardfork.isAtLeast(.BERLIN) and is_cold) {
@@ -602,8 +602,7 @@ pub const Eips = struct {
                 if (current == 0) {
                     // Previously cleared in this tx, now setting again
                     // Remove the refund we gave earlier
-                    const clear_refund = if (self.hardfork.isAtLeast(.LONDON)) @as(i64, -4800) else @as(i64, -15000);
-                    refund = @bitCast(@as(i64, @bitCast(refund)) + clear_refund);
+                    refund += if (self.hardfork.isAtLeast(.LONDON)) @as(i64, -4800) else @as(i64, -15000);
                 } else if (new == 0) {
                     // Clearing slot that was modified but not cleared before
                     refund += if (self.hardfork.isAtLeast(.LONDON)) 4800 else 15000;
@@ -622,7 +621,7 @@ pub const Eips = struct {
             }
         }
 
-        return .{ .gas = gas, .refund = refund };
+        return .{ .gas = gas, .refund = @bitCast(refund) };
     }
 
     pub const SstoreGasCost = struct {

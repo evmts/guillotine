@@ -20,9 +20,46 @@ pub fn JumpTable(comptime FrameType: type, comptime DispatchType: type) type {
         };
 
         entries: []const JumpTableEntry,
+        /// Optional O(1) dense lookup table: `dense_indices[pc]` stores `schedule_index + 1`
+        /// (0 means not a valid JUMPDEST). Proven equivalent to binary search over `entries`
+        /// in `verify/lean/GuillotineVerify/JumpTable.lean`.
+        dense_indices: []const u32 = &.{},
+        schedule_base: ?Self = null,
 
-        /// Find the dispatch for a given PC using binary search with interpolated starting point
+        pub fn deinit(self: @This(), allocator: std.mem.Allocator) void {
+            if (self.dense_indices.len > 0) allocator.free(self.dense_indices);
+            if (self.entries.len > 0) allocator.free(self.entries);
+        }
+
+        /// O(1) verified single-compare jump target lookup directly from a 256-bit stack operand.
+        /// Eliminates the `dest > maxInt(PcType)` + `target >= dense.len` double check via
+        /// `verified_ops.denseJumpInBoundsFast` (proven in Lean 4 + Bitwuzla + LLVM 20 IR).
+        pub inline fn findJumpTargetU256(self: *const @This(), dest: u256) ?Self {
+            const verified_ops = @import("../verified_ops.zig");
+            if (self.schedule_base) |base| {
+                @branchHint(.likely);
+                const dense_len: u32 = @intCast(self.dense_indices.len);
+                if (!verified_ops.denseJumpInBoundsFast(dest, dense_len)) return null;
+                const slot = self.dense_indices[@as(usize, @truncate(dest))];
+                if (slot == 0) return null;
+                return Self{ .cursor = base.cursor + (slot - 1) };
+            }
+            if (dest > std.math.maxInt(FrameType.PcType)) return null;
+            return self.findJumpTarget(@truncate(dest));
+        }
+
+        /// Find the dispatch for a given PC (O(1) dense fast path when built with `createDenseJumpTable`,
+        /// falling back to interpolated binary search on sparse `entries`).
         pub fn findJumpTarget(self: @This(), target_pc: FrameType.PcType) ?Self {
+            if (self.schedule_base) |base| {
+                @branchHint(.likely);
+                const idx: usize = @intCast(target_pc);
+                if (idx >= self.dense_indices.len) return null;
+                const slot = self.dense_indices[idx];
+                if (slot == 0) return null;
+                return Self{ .cursor = base.cursor + (slot - 1) };
+            }
+
             // Early return for empty table
             if (self.entries.len == 0) return null;
             

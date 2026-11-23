@@ -780,4 +780,167 @@ mod tests {
             Bn254Result::Success as c_int
         );
     }
+
+    struct SplitMix64(u64);
+    impl SplitMix64 {
+        fn next(&mut self) -> u64 {
+            self.0 = self.0.wrapping_add(0x9e3779b97f4a7c15);
+            let mut z = self.0;
+            z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94d049bb133111eb);
+            z ^ (z >> 31)
+        }
+        fn fill_bytes(&mut self, dst: &mut [u8]) {
+            for chunk in dst.chunks_mut(8) {
+                let v = self.next().to_le_bytes();
+                chunk.copy_from_slice(&v[..chunk.len()]);
+            }
+        }
+    }
+
+    #[test]
+    fn fuzz_bn254_ecmul_arbitrary_and_homomorphism() {
+        let mut rng = SplitMix64(0xfeed_face_cafe_babe);
+        let mut out = [0u8; 64];
+
+        // 1. Adversarial lengths & random bytes must NEVER panic or write out of bounds
+        for iter in 0..2000 {
+            let len = (rng.next() as usize) % 256;
+            let mut buf = vec![0u8; len];
+            rng.fill_bytes(&mut buf);
+            let out_len = if iter % 7 == 0 { (rng.next() as usize) % 64 } else { 64 };
+            let res = unsafe {
+                bn254_ecmul(
+                    if buf.is_empty() { std::ptr::null() } else { buf.as_ptr() },
+                    len as c_uint,
+                    out.as_mut_ptr(),
+                    out_len as c_uint,
+                )
+            };
+            if buf.is_empty() || len < 96 || out_len < 64 {
+                assert_eq!(res, Bn254Result::InvalidInput as c_int);
+            } else {
+                assert_eq!(res, Bn254Result::Success as c_int);
+            }
+        }
+
+        // 2. Scalar multiplication homomorphism & edge cases on G1 generator (1, 2):
+        //    0*G == O, 1*G == G, (k1*G)*k2 == (k1*k2)*G
+        let mut g_in = [0u8; 96];
+        g_in[31] = 1;
+        g_in[63] = 2;
+
+        // 0 * G == (0, 0)
+        let mut zero_out = [0xffu8; 64];
+        assert_eq!(
+            unsafe { bn254_ecmul(g_in.as_ptr(), 96, zero_out.as_mut_ptr(), 64) },
+            Bn254Result::Success as c_int
+        );
+        assert_eq!(zero_out, [0u8; 64]);
+
+        // 1 * G == (1, 2)
+        g_in[95] = 1;
+        let mut one_out = [0u8; 64];
+        assert_eq!(
+            unsafe { bn254_ecmul(g_in.as_ptr(), 96, one_out.as_mut_ptr(), 64) },
+            Bn254Result::Success as c_int
+        );
+        assert_eq!(&one_out[..32], &g_in[..32]);
+        assert_eq!(&one_out[32..64], &g_in[32..64]);
+
+        // Associativity: (k1 * G) * k2 == (k1 * k2) * G across 200 random scalar pairs
+        for _ in 0..200 {
+            let k1 = (rng.next() % 1_000_000) + 1;
+            let k2 = (rng.next() % 1_000_000) + 1;
+            let k12 = k1 * k2;
+
+            let mut in1 = [0u8; 96];
+            in1[31] = 1;
+            in1[63] = 2;
+            in1[88..96].copy_from_slice(&k1.to_be_bytes());
+            let mut p1 = [0u8; 64];
+            assert_eq!(
+                unsafe { bn254_ecmul(in1.as_ptr(), 96, p1.as_mut_ptr(), 64) },
+                Bn254Result::Success as c_int
+            );
+
+            let mut in2 = [0u8; 96];
+            in2[..64].copy_from_slice(&p1);
+            in2[88..96].copy_from_slice(&k2.to_be_bytes());
+            let mut p12_nested = [0u8; 64];
+            assert_eq!(
+                unsafe { bn254_ecmul(in2.as_ptr(), 96, p12_nested.as_mut_ptr(), 64) },
+                Bn254Result::Success as c_int
+            );
+
+            let mut in_direct = [0u8; 96];
+            in_direct[31] = 1;
+            in_direct[63] = 2;
+            in_direct[88..96].copy_from_slice(&k12.to_be_bytes());
+            let mut p12_direct = [0u8; 64];
+            assert_eq!(
+                unsafe { bn254_ecmul(in_direct.as_ptr(), 96, p12_direct.as_mut_ptr(), 64) },
+                Bn254Result::Success as c_int
+            );
+
+            assert_eq!(p12_nested, p12_direct);
+        }
+    }
+
+    #[test]
+    fn fuzz_bn254_ecpairing_adversarial_inputs() {
+        let mut rng = SplitMix64(0x1234_5678_9abc_def0);
+        let mut out = [0u8; 32];
+
+        // Empty pairing input must succeed and return 1
+        assert_eq!(
+            unsafe { bn254_ecpairing(out.as_ptr(), 0, out.as_mut_ptr(), 32) },
+            Bn254Result::Success as c_int
+        );
+        assert_eq!(out[31], 1);
+
+        // Random lengths (valid multiples of 192 and invalid non-multiples) must never panic
+        for iter in 0..500 {
+            let len = if iter % 3 == 0 {
+                ((rng.next() as usize) % 3) * 192
+            } else {
+                (rng.next() as usize) % 400
+            };
+            let mut buf = vec![0u8; len];
+            rng.fill_bytes(&mut buf);
+            let res = unsafe {
+                bn254_ecpairing(
+                    if buf.is_empty() { out.as_ptr() } else { buf.as_ptr() },
+                    len as c_uint,
+                    out.as_mut_ptr(),
+                    32,
+                )
+            };
+            if len % 192 != 0 {
+                assert_eq!(res, Bn254Result::InvalidInput as c_int);
+            } else if res == Bn254Result::Success as c_int {
+                assert!(out[31] == 0 || out[31] == 1);
+            }
+        }
+    }
+
+    #[test]
+    fn fuzz_bls12_381_ffi_adversarial_inputs() {
+        let mut rng = SplitMix64(0xdead_beef_1337_4242);
+        let mut g1_out = [0u8; 128];
+        let mut pair_out = [0u8; 32];
+
+        for _ in 0..500 {
+            let len = (rng.next() as usize) % 512;
+            let mut buf = vec![0u8; len];
+            rng.fill_bytes(&mut buf);
+            let ptr = if buf.is_empty() { g1_out.as_ptr() } else { buf.as_ptr() };
+
+            // None of the BLS12-381 FFI entrypoints may ever panic or cause UB on arbitrary bytes
+            let _ = unsafe { bls12_381_g1_add(ptr, len as c_uint, g1_out.as_mut_ptr(), 128) };
+            let _ = unsafe { bls12_381_g1_mul(ptr, len as c_uint, g1_out.as_mut_ptr(), 128) };
+            let _ = unsafe { bls12_381_g1_multiexp(ptr, len as c_uint, g1_out.as_mut_ptr(), 128) };
+            let _ = unsafe { bls12_381_pairing(ptr, len as c_uint, pair_out.as_mut_ptr(), 32) };
+        }
+    }
 }

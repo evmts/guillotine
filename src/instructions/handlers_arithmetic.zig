@@ -75,53 +75,37 @@ pub fn Handlers(FrameType: type) type {
         }
 
         /// SDIV opcode (0x05) - Signed integer division.
-        // Branchless implementation for consistent performance
+        /// Fully branchless implementation verified via Bitwuzla/Z3 + Lean 4 + LLVM 20 IR:
+        /// `UintN.wrapping_div(x, 0) == 0` and `(0 ^ m) -% m == 0` handles `second == 0`,
+        /// and `absTwoComp(MIN_SIGNED) == MIN_SIGNED`, `wrapping_div(MIN_SIGNED, 1) == MIN_SIGNED`,
+        /// `sign = 1 ^ 1 = 0` handles `MIN_SIGNED / -1 == MIN_SIGNED` with zero branches.
         pub fn sdiv(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             self.beforeInstruction(.SDIV, cursor);
+            const verified_ops = @import("../verified_ops.zig");
             const top = self.stack.pop_unsafe();
             const second = self.stack.peek_unsafe();
 
-            const SIGN_BIT = @as(u256, 1) << 255;
-            const MIN_SIGNED = SIGN_BIT;
-
-            if (second == 0) {
-                self.stack.set_top_unsafe(0);
-                return dispatch_next.nextInstruction(FrameType, self, cursor, .SDIV);
+            if (comptime WordType == u256) {
+                const top_abs = verified_ops.absTwoComp(top);
+                const second_abs = verified_ops.absTwoComp(second);
+                const quotient = FrameType.UintN.from_native(top_abs)
+                    .wrapping_div(FrameType.UintN.from_native(second_abs))
+                    .to_native();
+                const result = verified_ops.sdivFromUnsignedQuotient(top, second, quotient);
+                self.stack.set_top_unsafe(result);
+            } else {
+                const top_sign = top >> (@bitSizeOf(WordType) - 1);
+                const second_sign = second >> (@bitSizeOf(WordType) - 1);
+                const top_mask = @as(WordType, 0) -% top_sign;
+                const second_mask = @as(WordType, 0) -% second_sign;
+                const top_abs = (top ^ top_mask) -% top_mask;
+                const second_abs = (second ^ second_mask) -% second_mask;
+                const quotient = FrameType.UintN.from_native(top_abs)
+                    .wrapping_div(FrameType.UintN.from_native(second_abs))
+                    .to_native();
+                const result_mask = @as(WordType, 0) -% (top_sign ^ second_sign);
+                self.stack.set_top_unsafe((quotient ^ result_mask) -% result_mask);
             }
-            if (top == MIN_SIGNED and second == std.math.maxInt(u256)) {
-                self.stack.set_top_unsafe(MIN_SIGNED);
-                return dispatch_next.nextInstruction(FrameType, self, cursor, .SDIV);
-            }
-
-            // This section implements branchless two's complement arithmetic.
-            // 1. Extract sign bits (1 for negative, 0 for positive).
-            // 2. Create a mask that is all 1s for negative numbers and all 0s for positive.
-            // 3. Compute the absolute value by XORing with the mask and subtracting the mask.
-            //    - For negative `a`: `(a ^ 0xFF..FF) - 0xFF..FF` is equivalent to `~a + 1`, which is `-a`.
-            //    - For positive `a`: `(a ^ 0) - 0` is `a`.
-            // 4. Perform unsigned division on the absolute values.
-            // 5. Determine the result's sign by XORing the operand signs.
-            // 6. Conditionally negate the result using the same mask trick.
-            const top_sign = top >> 255;
-            const second_sign = second >> 255;
-
-            const top_mask = @as(u256, 0) -% top_sign;
-            const second_mask = @as(u256, 0) -% second_sign;
-
-            const top_abs = (top ^ top_mask) -% top_mask;
-            const second_abs = (second ^ second_mask) -% second_mask;
-
-            const top_abs_u256 = FrameType.UintN.from_native(top_abs);
-            const second_abs_u256 = FrameType.UintN.from_native(second_abs);
-            const quotient_u256 = top_abs_u256.wrapping_div(second_abs_u256);
-            const quotient = quotient_u256.to_native();
-
-            const result_sign = top_sign ^ second_sign;
-            const result_mask = @as(u256, 0) -% result_sign;
-
-            const result = (quotient ^ result_mask) -% result_mask;
-
-            self.stack.set_top_unsafe(result);
             return dispatch_next.nextInstruction(FrameType, self, cursor, .SDIV);
         }
 
@@ -139,44 +123,35 @@ pub fn Handlers(FrameType: type) type {
         }
 
         /// SMOD opcode (0x07) - Signed modulo operation.
-        // Branchless implementation for consistent performance
+        /// Fully branchless implementation verified via Bitwuzla/Z3 + Lean 4 + LLVM 20 IR:
+        /// `UintN.wrapping_rem(x, 0) == 0` and `wrapping_rem(MIN_SIGNED, 1) == 0` handle both
+        /// edge cases with zero branches.
         pub fn smod(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             self.beforeInstruction(.SMOD, cursor);
+            const verified_ops = @import("../verified_ops.zig");
             const top = self.stack.pop_unsafe();
             const second = self.stack.peek_unsafe();
 
-            const SIGN_BIT = @as(u256, 1) << 255;
-            const MIN_SIGNED = SIGN_BIT;
-
-            if (second == 0) {
-                self.stack.set_top_unsafe(0);
-                return dispatch_next.nextInstruction(FrameType, self, cursor, .SMOD);
+            if (comptime WordType == u256) {
+                const top_abs = verified_ops.absTwoComp(top);
+                const second_abs = verified_ops.absTwoComp(second);
+                const remainder = FrameType.UintN.from_native(top_abs)
+                    .wrapping_rem(FrameType.UintN.from_native(second_abs))
+                    .to_native();
+                const result = verified_ops.smodFromUnsignedRem(top, remainder);
+                self.stack.set_top_unsafe(result);
+            } else {
+                const top_sign = top >> (@bitSizeOf(WordType) - 1);
+                const second_sign = second >> (@bitSizeOf(WordType) - 1);
+                const top_mask = @as(WordType, 0) -% top_sign;
+                const second_mask = @as(WordType, 0) -% second_sign;
+                const top_abs = (top ^ top_mask) -% top_mask;
+                const second_abs = (second ^ second_mask) -% second_mask;
+                const remainder = FrameType.UintN.from_native(top_abs)
+                    .wrapping_rem(FrameType.UintN.from_native(second_abs))
+                    .to_native();
+                self.stack.set_top_unsafe((remainder ^ top_mask) -% top_mask);
             }
-            if (top == MIN_SIGNED and second == std.math.maxInt(u256)) { // -1 in two's complement
-                self.stack.set_top_unsafe(0);
-                return dispatch_next.nextInstruction(FrameType, self, cursor, .SMOD);
-            }
-
-            // This section implements branchless two's complement arithmetic.
-            // The result of a % n takes the sign of the dividend `a`.
-            const top_sign = top >> 255;
-            const second_sign = second >> 255;
-
-            const top_mask = @as(u256, 0) -% top_sign;
-            const second_mask = @as(u256, 0) -% second_sign;
-
-            const top_abs = (top ^ top_mask) -% top_mask;
-            const second_abs = (second ^ second_mask) -% second_mask;
-
-            const top_abs_u256 = FrameType.UintN.from_native(top_abs);
-            const second_abs_u256 = FrameType.UintN.from_native(second_abs);
-            const remainder_u256 = top_abs_u256.wrapping_rem(second_abs_u256);
-            const remainder = remainder_u256.to_native();
-
-            // Result takes sign of dividend (top_sign)
-            const result = (remainder ^ top_mask) -% top_mask;
-
-            self.stack.set_top_unsafe(result);
             return dispatch_next.nextInstruction(FrameType, self, cursor, .SMOD);
         }
 
@@ -295,13 +270,12 @@ pub fn Handlers(FrameType: type) type {
             // EIP-160: EXP costs 10 + 50 * byte_len(exponent).
             // The 10 gas base is static and already charged with the basic block
             // (OPCODE_INFO[EXP].gas_cost); the handler charges only the dynamic part.
-            var exp_bytes: u32 = 0;
-            if (exponent > 0) {
-                var temp_exp = exponent;
-                while (temp_exp > 0) : (temp_exp = std.math.shr(WordType, temp_exp, 8)) {
-                    exp_bytes += 1;
-                }
-            }
+            // Verified branchless `@clz` byte-length (replaces 32-iteration shift loop).
+            const verified_ops = @import("../verified_ops.zig");
+            const exp_bytes: u32 = if (comptime WordType == u256)
+                verified_ops.expGasByteLenFast(exponent)
+            else
+                (@as(u32, @bitSizeOf(WordType) + 7) - @as(u32, @clz(exponent))) >> 3;
 
             const exp_byte_gas: u32 = 50;
             const gas_cost = exp_byte_gas * exp_bytes;
@@ -327,33 +301,24 @@ pub fn Handlers(FrameType: type) type {
         }
 
         /// SIGNEXTEND opcode (0x0b) - Sign extend operation.
+        /// Verified branchless arithmetic-shift implementation (Bitwuzla + Lean 4 + LLVM 20 IR).
         pub fn signextend(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             self.beforeInstruction(.SIGNEXTEND, cursor);
+            const verified_ops = @import("../verified_ops.zig");
             const ext = self.stack.pop_unsafe(); // Extension byte index (top of stack)
             const value = self.stack.peek_unsafe(); // Value to extend (second element)
 
-            var result: WordType = undefined;
-
-            // If ext is too large to fit in usize or >= 32, return value unchanged
-            // SIGNEXTEND with byte position >= 32 means no sign extension needed
-            if (ext > std.math.maxInt(usize) or ext >= 32) {
-                result = value;
-            } else {
-                const ext_usize = @as(usize, @intCast(ext));
-                const bit_index = ext_usize * 8 + 7;
-
-                // Cast bit_index to the appropriate shift type
-                const shift_amount = @as(u8, @intCast(bit_index));
-
-                const mask = std.math.shl(WordType, @as(WordType, 1), shift_amount) - 1;
-                const sign_bit = std.math.shr(WordType, value, shift_amount) & 1;
-                if (sign_bit == 1) {
-                    @branchHint(.unlikely);
-                    result = value | ~mask;
-                } else {
-                    result = value & mask;
-                }
-            }
+            const result: WordType = if (comptime WordType == u256)
+                verified_ops.signextendFast(ext, value)
+            else blk: {
+                const max_bytes = @bitSizeOf(WordType) / 8;
+                if (ext >= max_bytes - 1) break :blk value;
+                const byte_index: u8 = @truncate(ext);
+                const shift: std.math.Log2Int(WordType) = @intCast((@bitSizeOf(WordType) - 8) - (@as(u16, byte_index) << 3));
+                const SignedWord = std.meta.Int(.signed, @bitSizeOf(WordType));
+                const shifted: SignedWord = @bitCast(value << shift);
+                break :blk @bitCast(shifted >> shift);
+            };
 
             self.stack.set_top_unsafe(result);
 

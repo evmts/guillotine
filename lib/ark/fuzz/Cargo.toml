@@ -1,0 +1,22 @@
+[package]
+name = "bn254-wrapper-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+members = ["."]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+bn254_wrapper = { path = ".." }
+
+[[bin]]
+name = "bn254_bls_ffi"
+path = "fuzz_targets/bn254_bls_ffi.rs"
+test = false
+doc = false
+bench = false

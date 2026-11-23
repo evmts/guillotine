@@ -814,51 +814,9 @@ pub fn Preprocessor(FrameType: type) type {
             value: FrameType.WordType,
             fusion_type: FusionType,
         ) !void {
-            // Import gas constants for static calculation
-            const GasConstants = @import("voltaire").GasConstants;
-
-            // Calculate static gas cost since we know the offset at compile time
-            var static_gas_cost: u64 = GasConstants.GasFastestStep;
-
-            // For memory operations with known offsets, we can calculate expansion cost statically
-            if (value <= std.math.maxInt(usize)) {
-                const offset_usize = @as(usize, @intCast(value));
-                // Check for overflow before addition
-                const add_amount: usize = switch (fusion_type) {
-                    .push_mload, .push_mstore => 32,
-                    .push_mstore8 => 1,
-                    else => unreachable,
-                };
-                if (offset_usize > std.math.maxInt(usize) - add_amount) {
-                    // Overflow would occur, skip fusion optimization
-                    return;
-                }
-                const size_needed = offset_usize + add_amount;
-
-                // Calculate memory expansion cost statically
-                // Memory cost = 3 * words + words^2 / 512
-                const new_words = (size_needed + 31) / 32;
-
-                // Compile-time safety check: Verify that u64 max is much larger than the configured
-                // block gas limit. This allows us to safely use saturating arithmetic - any memory
-                // access large enough to overflow u64 would cost far more gas than any block could provide.
-                comptime {
-                    if (std.math.maxInt(u64) <= FrameType.config.block_gas_limit) {
-                        @compileError("u64 max must be greater than block_gas_limit for saturating arithmetic to work correctly. " ++
-                            "u64 max: " ++ std.fmt.comptimePrint("{}", .{std.math.maxInt(u64)}) ++
-                            ", block_gas_limit: " ++ std.fmt.comptimePrint("{}", .{FrameType.config.block_gas_limit}) ++
-                            ". The saturating arithmetic assumption requires that any overflow results in costs exceeding block limits.");
-                    }
-                }
-
-                // Use saturating arithmetic to prevent overflow on large memory operations
-                // If this saturates, the gas cost will be astronomical (>18 quintillion),
-                // which will fail gas checks long before execution
-                const words_squared = @as(u64, new_words) *| @as(u64, new_words);
-                const memory_cost = 3 *| new_words +| (words_squared / 512);
-                static_gas_cost +|= memory_cost;
-            }
-
+            // Always emit the fused handler (never silently drop consumed opcodes when
+            // `value` is near maxInt(usize); the runtime handler checks memory bounds
+            // and returns Error.OutOfBounds).
             const synthetic_opcode = getSyntheticOpcode(fusion_type, value <= std.math.maxInt(u64));
             const frame_handlers = @import("../frame/frame_handlers.zig");
             const synthetic_handler = frame_handlers.getSyntheticHandler(FrameType, synthetic_opcode);
@@ -870,8 +828,6 @@ pub fn Preprocessor(FrameType: type) type {
                 try schedule_items.append(schedule_allocator, .{
                     .push_inline = .{
                         .value = inline_val,
-                        // Store gas cost for use in jumpdest validation
-                        // This will be added to jumpdest gas during preprocessing
                     },
                 });
             } else {
@@ -909,7 +865,10 @@ pub fn Preprocessor(FrameType: type) type {
             try schedule_items.append(allocator, .{ .opcode_handler = static_handler });
 
             const meta_index = schedule_items.items.len;
-            const placeholder: *const anyopaque = @as(*const anyopaque, @ptrFromInt(1));
+            const sentinel = struct {
+                const byte: u8 = 0;
+            };
+            const placeholder: *const anyopaque = @ptrCast(&sentinel.byte);
             try schedule_items.append(allocator, .{ .jump_static = .{ .dispatch = placeholder } });
             try unresolved_jumps.append(allocator, .{ .schedule_index = meta_index, .target_pc = dest_pc });
         }
@@ -1076,13 +1035,72 @@ pub fn Preprocessor(FrameType: type) type {
             defer allocator.free(jumpdest_array);
             std.sort.block(JumpDestEntry, jumpdest_array, {}, JumpDestEntry.lessThan);
 
-            return try createJumpTableFromArray(allocator, schedule, jumpdest_array);
+            return try createJumpTableFromArray(allocator, schedule, jumpdest_array, false);
+        }
+
+        /// Build a jump table with an O(1) dense lookup array (`dense_indices` + `schedule_base`)
+        /// in addition to `entries`. Caller must release with `jump_table.deinit(allocator)`.
+        pub fn createDenseJumpTable(
+            allocator: std.mem.Allocator,
+            schedule: []const Item,
+            bytecode: anytype,
+        ) !JumpTable {
+            const actual_bytecode = if (@typeInfo(@TypeOf(bytecode)) == .error_union)
+                try bytecode
+            else
+                bytecode;
+
+            var jumpdest_entries = ArrayList(JumpDestEntry, null){};
+            defer jumpdest_entries.deinit(allocator);
+
+            var bytecode_iter = actual_bytecode.createIterator();
+            const frame_handlers = @import("../frame/frame_handlers.zig");
+            const jumpdest_handler = frame_handlers.getOpcodeHandlers(FrameType, &.{})[@intFromEnum(Opcode.JUMPDEST)];
+
+            var jumpdest_pcs = ArrayList(FrameType.PcType, null){};
+            defer jumpdest_pcs.deinit(allocator);
+
+            while (bytecode_iter.next()) |op_data| {
+                const instr_len = switch (op_data) {
+                    .regular => 1,
+                    .jumpdest => 1,
+                    .push => |data| 1 + data.size,
+                    .jump, .jumpi => 1,
+                    .pc => 1,
+                    .stop, .invalid => 1,
+                    else => 1,
+                };
+                const pc = bytecode_iter.pc - instr_len;
+                if (op_data == .jumpdest) {
+                    try jumpdest_pcs.append(allocator, @intCast(pc));
+                }
+            }
+
+            var jumpdest_idx: usize = 0;
+            for (schedule, 0..) |item, index| {
+                if (item == .opcode_handler and item.opcode_handler == jumpdest_handler) {
+                    if (jumpdest_idx < jumpdest_pcs.items.len) {
+                        try jumpdest_entries.append(allocator, .{
+                            .pc = jumpdest_pcs.items[jumpdest_idx],
+                            .schedule_index = index,
+                        });
+                        jumpdest_idx += 1;
+                    }
+                }
+            }
+
+            const jumpdest_array = try jumpdest_entries.toOwnedSlice(allocator);
+            defer allocator.free(jumpdest_array);
+            std.sort.block(JumpDestEntry, jumpdest_array, {}, JumpDestEntry.lessThan);
+
+            return try createJumpTableFromArray(allocator, schedule, jumpdest_array, true);
         }
 
         fn createJumpTableFromArray(
             allocator: std.mem.Allocator,
             schedule: []const Item,
             jumpdest_array: []const JumpDestEntry,
+            comptime with_dense: bool,
         ) !JumpTable {
             const log = @import("../log.zig");
             const entries = try allocator.alloc(JumpTable.JumpTableEntry, jumpdest_array.len);
@@ -1099,14 +1117,6 @@ pub fn Preprocessor(FrameType: type) type {
                         .cursor = schedule.ptr + jumpdest.schedule_index,
                     },
                 };
-
-                // Debug log each jump table entry
-                if (jumpdest.pc == 0x304) {
-                    log.warn("Jump table entry: PC=0x304 -> schedule[{}]", .{jumpdest.schedule_index});
-                    if (jumpdest.schedule_index < schedule.len) {
-                        log.warn("  Schedule item at [{}]: {s}", .{ jumpdest.schedule_index, @tagName(schedule[jumpdest.schedule_index]) });
-                    }
-                }
             }
 
             if (std.debug.runtime_safety and entries.len > 1) {
@@ -1114,6 +1124,30 @@ pub fn Preprocessor(FrameType: type) type {
                     if (current.pc >= next.pc) {
                         std.debug.panic("JumpTable not properly sorted: PC {} >= {}", .{ current.pc, next.pc });
                     }
+                }
+            }
+
+            if (comptime with_dense) {
+                if (jumpdest_array.len == 0) {
+                    return JumpTable{
+                        .entries = entries,
+                        .dense_indices = &.{},
+                        .schedule_base = Self{ .cursor = schedule.ptr },
+                    };
+                }
+                const max_pc: usize = @intCast(jumpdest_array[jumpdest_array.len - 1].pc);
+                if (max_pc < 65536 and schedule.len < std.math.maxInt(u32)) {
+                    const dense = try allocator.alloc(u32, max_pc + 1);
+                    errdefer allocator.free(dense);
+                    @memset(dense, 0);
+                    for (jumpdest_array) |jd| {
+                        dense[@intCast(jd.pc)] = @intCast(jd.schedule_index + 1);
+                    }
+                    return JumpTable{
+                        .entries = entries,
+                        .dense_indices = dense,
+                        .schedule_base = Self{ .cursor = schedule.ptr },
+                    };
                 }
             }
 

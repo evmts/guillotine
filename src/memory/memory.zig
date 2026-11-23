@@ -192,6 +192,24 @@ pub fn Memory(config: MemoryConfig) type {
             }
         }
 
+        /// Reads a big-endian word at `offset` without bounds checks.
+        /// Caller must guarantee `offset + 32 <= self.size()`.
+        pub inline fn get_u256_unchecked(self: *const Self, offset: usize) u256 {
+            return std.mem.readInt(u256, (self.buffer_ptr.items.ptr + self.checkpoint + offset)[0..32], .big);
+        }
+
+        /// Writes a big-endian word at `offset` without bounds checks.
+        /// Caller must guarantee `offset + 32 <= self.size()`.
+        pub inline fn set_u256_unchecked(self: *Self, offset: usize, value: u256) void {
+            std.mem.writeInt(u256, (self.buffer_ptr.items.ptr + self.checkpoint + offset)[0..32], value, .big);
+        }
+
+        /// Writes one byte at `offset` without bounds checks.
+        /// Caller must guarantee `offset < self.size()`.
+        pub inline fn set_byte_unchecked(self: *Self, offset: usize, value: u8) void {
+            self.buffer_ptr.items.ptr[@as(usize, self.checkpoint) + offset] = value;
+        }
+
         // EVM-compliant memory operations that expand to word boundaries
         pub fn set_data_evm(self: *Self, allocator: std.mem.Allocator, offset: u32, data: []const u8) !void {
             const offset_usize = @as(usize, offset);

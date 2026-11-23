@@ -44,17 +44,17 @@ pub fn bytecodeAnalyze(
                 @intFromEnum(Opcode.MUL) => {
                     folded_value = @as(u256, value1) *% @as(u256, value2);
                 },
-                @intFromEnum(Opcode.SHL) => {
-                    if (position + 7 < bytecode.len and 
-                        bytecode[position + 4] == @intFromEnum(Opcode.PUSH1) and
+                @intFromEnum(Opcode.PUSH1) => {
+                    // PUSH1 value1; PUSH1 value2; PUSH1 shift; SHL; SUB
+                    // Stack before SHL: [value1, value2, shift (top)]. SHL computes value2 << shift.
+                    // Stack before SUB: [value1, shifted (top)]. EVM SUB computes top - second = shifted - value1.
+                    if (position + 7 < bytecode.len and
                         bytecode[position + 6] == @intFromEnum(Opcode.SHL) and
-                        bytecode[position + 7] == @intFromEnum(Opcode.SUB)) {
+                        bytecode[position + 7] == @intFromEnum(Opcode.SUB))
+                    {
                         const shift_amount = bytecode[position + 5];
-                        const shifted: u256 = if (shift_amount < 256)
-                            @as(u256, value2) << @as(u8, @intCast(shift_amount))
-                        else
-                            0;
-                        folded_value = @as(u256, value1) -% shifted;
+                        const shifted: u256 = @as(u256, value2) << shift_amount;
+                        folded_value = shifted -% @as(u256, value1);
                         sequence_length = 8;
                     } else {
                         return null;
