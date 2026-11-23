@@ -161,7 +161,7 @@ bun.lock
 **/bun.lock
 
 # TypeScript/JavaScript build artifacts
-**/src/core/
+sdks/typescript/src/core/
 **/src/test/
 
 # Compiled binaries without extensions (common in development)
