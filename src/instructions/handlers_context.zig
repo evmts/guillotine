@@ -68,7 +68,10 @@ pub fn Handlers(FrameType: type) type {
                 return Error.OutOfGas;
             }
 
-            const bal = evm.get_balance(addr);
+            const bal = evm.get_balance(addr) catch {
+                self.afterComplete(.BALANCE);
+                return Error.AllocationError;
+            };
             const balance_word = @as(WordType, @truncate(bal));
             self.stack.set_top_unsafe(balance_word);
             return dispatch_next.nextInstruction(FrameType, self, cursor, .BALANCE);
@@ -129,17 +132,17 @@ pub fn Handlers(FrameType: type) type {
             const offset_usize = @as(usize, @intCast(offset));
 
             const calldata = self.calldata_slice;
-            // Load 32 bytes from calldata, zero-padding if needed
+            // Load 32 bytes from calldata, zero-padding past the end
             var word: u256 = 0;
-            for (0..32) |i| {
-                // Saturating add: a near-usize-max offset must not overflow-panic; it lands
-                // past calldata.len and zero-pads.
-                const byte_index = offset_usize +| i;
-                if (byte_index < calldata.len) {
-                    const byte_val = calldata[byte_index];
-                    word = (word << 8) | @as(u256, byte_val);
+            if (offset_usize < calldata.len) {
+                const avail = calldata.len - offset_usize;
+                if (avail >= 32) {
+                    @branchHint(.likely);
+                    word = std.mem.readInt(u256, calldata[offset_usize..][0..32], .big);
                 } else {
-                    word = word << 8; // Zero padding
+                    var buf = [_]u8{0} ** 32;
+                    @memcpy(buf[0..avail], calldata[offset_usize..]);
+                    word = std.mem.readInt(u256, &buf, .big);
                 }
             }
             // Convert to WordType (truncate if necessary for smaller word types)
@@ -498,40 +501,58 @@ pub fn Handlers(FrameType: type) type {
                 return Error.OutOfGas;
             }
 
-            if (!evm.account_exists(addr)) {
+            // Read the stored code hash directly: no bytecode fetch, no rehash.
+            // Every writer of Account.code_hash stores keccak256(code) from Database.set_code.
+            const maybe_account = evm.database.get_account(addr.bytes) catch |err| switch (err) {
+                else => {
+                    self.afterComplete(.EXTCODEHASH);
+                    return Error.AllocationError;
+                },
+            };
+            const account = maybe_account orelse {
                 // Non-existent account returns 0 per EIP-1052
                 self.stack.set_top_unsafe(0);
                 return dispatch_next.nextInstruction(FrameType, self, cursor, .EXTCODEHASH);
+            };
+
+            const empty_hash_u256: u256 = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470;
+            const stored_hash = std.mem.readInt(u256, &account.code_hash, .big);
+            const has_code = stored_hash != 0 and stored_hash != empty_hash_u256;
+
+            if (has_code) {
+                @branchHint(.likely);
+                self.stack.set_top_unsafe(@as(WordType, @truncate(stored_hash)));
+                return dispatch_next.nextInstruction(FrameType, self, cursor, .EXTCODEHASH);
             }
 
-            const code = self.getEvm().get_code(addr) catch |err| switch (err) {
+            if (account.delegated_address == null) {
+                if (account.balance == 0 and account.nonce == 0) {
+                    // EIP-161 empty account (no balance, nonce, or code) returns 0 per EIP-1052
+                    self.stack.set_top_unsafe(0);
+                    return dispatch_next.nextInstruction(FrameType, self, cursor, .EXTCODEHASH);
+                }
+                // Existing non-empty account with empty code returns keccak256("")
+                self.stack.set_top_unsafe(@as(WordType, @truncate(empty_hash_u256)));
+                return dispatch_next.nextInstruction(FrameType, self, cursor, .EXTCODEHASH);
+            }
+
+            // EIP-7702 delegated EOA: resolve code through the delegation, as before.
+            const code = evm.get_code(addr) catch |err| switch (err) {
                 else => {
                     self.afterComplete(.EXTCODEHASH);
                     return Error.AllocationError;
                 },
             };
             if (code.len == 0) {
-                // Existing account with empty code returns keccak256("") constant
-                const empty_hash_u256: u256 = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470;
-                const empty_hash_word = @as(WordType, @truncate(empty_hash_u256));
-                self.stack.set_top_unsafe(empty_hash_word);
+                self.stack.set_top_unsafe(@as(WordType, @truncate(empty_hash_u256)));
                 return dispatch_next.nextInstruction(FrameType, self, cursor, .EXTCODEHASH);
             }
-
-            // Compute keccak256 hash of the code
             var hash: [32]u8 = undefined;
             keccak_asm.keccak256(code, &hash) catch {
                 self.afterComplete(.EXTCODEHASH);
                 return Error.OutOfBounds;
             };
-
-            // Convert hash to u256 (big-endian)
-            var hash_u256: u256 = 0;
-            for (hash) |b| {
-                hash_u256 = (hash_u256 << 8) | @as(u256, b);
-            }
-            const hash_word = @as(WordType, @truncate(hash_u256));
-            self.stack.set_top_unsafe(hash_word);
+            self.stack.set_top_unsafe(@as(WordType, @truncate(std.mem.readInt(u256, &hash, .big))));
 
             return dispatch_next.nextInstruction(FrameType, self, cursor, .EXTCODEHASH);
         }
@@ -642,9 +663,16 @@ pub fn Handlers(FrameType: type) type {
                 (&self.getEvm().tracer).assert(self.stack.size() >= 1, "BLOCKHASH requires 1 stack item");
             }
             const block_number = self.stack.peek_unsafe();
-            // Cast to u64 - EVM spec says only last 256 blocks are accessible
-            const block_number_u64 = @as(u64, @truncate(block_number));
-            const block_hash_opt = self.getEvm().get_block_hash(block_number_u64);
+            // A number above u64 max is never a recent block. Saturate instead of truncating
+            // so 2^64 + k cannot alias block k.
+            if (block_number > std.math.maxInt(u64)) {
+                self.stack.set_top_unsafe(0);
+                return dispatch_next.nextInstruction(FrameType, self, cursor, .BLOCKHASH);
+            }
+            const block_hash_opt = self.getEvm().get_block_hash(@as(u64, @intCast(block_number))) catch {
+                self.afterComplete(.BLOCKHASH);
+                return Error.AllocationError;
+            };
 
             // Push hash or zero if not available
             if (block_hash_opt) |hash| {
@@ -759,7 +787,10 @@ pub fn Handlers(FrameType: type) type {
         /// Stack: [] → [balance]
         pub fn selfbalance(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             self.beforeInstruction(.SELFBALANCE, cursor);
-            const bal = self.getEvm().get_balance(self.contract_address);
+            const bal = self.getEvm().get_balance(self.contract_address) catch {
+                self.afterComplete(.SELFBALANCE);
+                return Error.AllocationError;
+            };
             const balance_word = @as(WordType, @truncate(bal));
             {
                 (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "SELFBALANCE requires stack space");
@@ -952,7 +983,7 @@ const MockEvm = struct {
         return self.gas_price;
     }
 
-    pub fn get_balance(self: *const MockEvm, address: Address) u256 {
+    pub fn get_balance(self: *const MockEvm, address: Address) error{}!u256 {
         _ = self;
         _ = address;
         return 1_000_000_000_000_000_000; // 1 ETH
@@ -978,7 +1009,7 @@ const MockEvm = struct {
         return self.return_data;
     }
 
-    pub fn get_block_hash(self: *const MockEvm, block_number: u256) ?[32]u8 {
+    pub fn get_block_hash(self: *const MockEvm, block_number: u64) error{}!?[32]u8 {
         _ = self;
         // Mock: return a hash for blocks within 256 of current
         const current_block = 12345678;

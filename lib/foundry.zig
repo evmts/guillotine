@@ -53,6 +53,7 @@ pub fn createFoundryLibrary(
         foundry_lib.linkSystemLibrary("m");
         foundry_lib.linkSystemLibrary("pthread");
         foundry_lib.linkSystemLibrary("dl");
+        foundry_lib.linkSystemLibrary("unwind");
     } else if (target.result.os.tag == .macos) {
         foundry_lib.linkSystemLibrary("c++");
         foundry_lib.linkFramework("Security");

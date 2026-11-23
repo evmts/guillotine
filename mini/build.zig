@@ -590,6 +590,26 @@ pub fn build(b: *std.Build) void {
     const native_step = b.step("native", "Build native static library for FFI");
     native_step.dependOn(&native_install.step);
 
+    // Fuzz tests for guillotine-mini (supports --fuzz on Linux)
+    const mini_fuzz_mod = b.createModule(.{
+        .root_source_file = b.path("test/fuzz/mini_evm_fuzz.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "guillotine_mini", .module = mod },
+            .{ .name = "primitives", .module = primitives_mod },
+            .{ .name = "crypto", .module = crypto_mod },
+            .{ .name = "precompiles", .module = precompiles_mod },
+        },
+    });
+    const mini_fuzz_tests = b.addTest(.{
+        .name = "mini-fuzz-tests",
+        .root_module = mini_fuzz_mod,
+    });
+    const run_mini_fuzz = b.addRunArtifact(mini_fuzz_tests);
+    const mini_fuzz_step = b.step("test-fuzz", "Run guillotine-mini fuzz tests (pass --fuzz on Linux)");
+    mini_fuzz_step.dependOn(&run_mini_fuzz.step);
+
     // Just like flags, top level steps are also listed in the `--help` menu.
     //
     // The Zig build system is entirely implemented in userland, which means

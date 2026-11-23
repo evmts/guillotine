@@ -695,7 +695,7 @@ test "process block deposits" {
         .timestamp = 1000000,
         .gas_limit = 30_000_000,
         .difficulty = 0,
-        .base_fee_per_gas = 1_000_000_000,
+        .base_fee = 1_000_000_000,
     };
 
     // Process deposits
@@ -714,7 +714,7 @@ test "process block deposits with empty storage" {
         .timestamp = 1000000,
         .gas_limit = 30_000_000,
         .difficulty = 0,
-        .base_fee_per_gas = 1_000_000_000,
+        .base_fee = 1_000_000_000,
     };
 
     // Should not error with no deposits

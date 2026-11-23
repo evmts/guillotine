@@ -47,6 +47,7 @@ pub fn addBenchSteps(b: *std.Build, options: Options) Steps {
     module.addImport("bench_options", config.createModule());
     const exe = b.addExecutable(.{ .name = "guillotine-bench", .root_module = module, .use_llvm = true });
     exe.linkLibC();
+    if (options.target.result.os.tag == .linux) exe.linkSystemLibrary("unwind");
     const run = b.addRunArtifact(exe);
     run.setCwd(repository);
     run.has_side_effects = true;
@@ -95,7 +96,7 @@ pub fn optimized(b: *std.Build, source: *std.Build.Module, mode: std.builtin.Opt
 /// inherit Voltaire's missing-archive dependency. A caller can instead supply
 /// an already-produced native_archive (including for cross compilation).
 pub fn nativeArchive(b: *std.Build, directory: std.Build.LazyPath, repository: std.Build.LazyPath, target: std.Build.ResolvedTarget) std.Build.LazyPath {
-    if (!target.query.isNative()) @panic("supply a target-specific native_archive for cross-compiled benchmarks");
+    if (!target.query.isNativeOs() or !target.query.isNativeAbi()) @panic("supply a target-specific native_archive for cross-compiled benchmarks");
     const cargo = b.addSystemCommand(&.{ "cargo", "build", "--release", "--locked", "--manifest-path" });
     cargo.addFileArg(directory.path(b, "native/Cargo.toml"));
     cargo.addFileInput(directory.path(b, "native/Cargo.lock"));

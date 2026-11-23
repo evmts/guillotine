@@ -42,6 +42,9 @@ pub fn Runner(comptime evm: type, comptime fusion: bool) type {
         stage: []const u8 = "setup",
 
         pub fn available(workload: workloads.Workload) ?[]const u8 {
+            if (workload.min_gas > gas_limit) {
+                return "workload gas requirement exceeds the selected hardfork transaction gas cap (pass -Dbench-hardfork=PRAGUE)";
+            }
             return switch (workload.source) {
                 .clz => if (!hardfork.isAtLeast(.OSAKA)) "CLZ requires OSAKA or later" else if (@hasField(evm.Opcode, "CLZ")) null else "CLZ handler is absent from this checkout",
                 .precompile => |address| if (evm.precompiles.isPrecompile(Address.fromU256(address), precompile_hardfork)) null else "precompile is not enabled for the selected hardfork in this checkout",
@@ -182,7 +185,7 @@ pub fn Runner(comptime evm: type, comptime fusion: bool) type {
             }
             // Curve operations must not silently take an infinity/empty-output path.
             switch (workload.source) {
-                .precompile => |address| if (address == 1 or address == 6 or address == 7 or address == 0x12) {
+                .precompile => |address| if (address == 1 or address == 6 or address == 7 or address == 0x10) {
                     var nonzero: u8 = 0;
                     for (result.output) |byte| nonzero |= byte;
                     if (nonzero == 0) return error.UnexpectedInfinity;

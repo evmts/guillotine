@@ -115,10 +115,10 @@ pub const Tracer = struct {
         };
     }
 
-    pub fn deinit(self: *Tracer) void {
+    /// Free per-step heap allocations and reset step buffers while retaining capacity.
+    pub fn clearSteps(self: *Tracer) void {
         for (self.steps.items) |step| {
             // Only free if allocated (non-empty arrays were allocated, empty ones are static)
-            // We only allocate when stack has items, never for empty stacks  
             if (step.stack_before.len > 0) {
                 self.allocator.free(step.stack_before);
             }
@@ -126,11 +126,18 @@ pub const Tracer = struct {
                 self.allocator.free(step.stack_after);
             }
         }
-        self.steps.deinit(self.allocator);
+        self.steps.items.len = 0;
 
         for (self.advanced_steps.items) |step| {
             if (step.fusion_info) |fusion_desc| self.allocator.free(fusion_desc);
         }
+        self.advanced_steps.items.len = 0;
+        self.current_pc = 0;
+    }
+
+    pub fn deinit(self: *Tracer) void {
+        self.clearSteps();
+        self.steps.deinit(self.allocator);
         self.advanced_steps.deinit(self.allocator);
 
         if (self.minimal_evm) |evm| {
@@ -261,7 +268,11 @@ pub const Tracer = struct {
             if (frame.stack.size() > 0) {
                 const stack_slice = frame.stack.get_slice();
                 if (self.allocator.alloc(u256, stack_slice.len)) |stack| {
-                    @memcpy(stack, stack_slice);
+                    // Frame stack grows downward (index 0 = top); convert to standard
+                    // Ethereum trace order (index 0 = bottom, index len-1 = top).
+                    for (stack_slice, 0..) |val, i| {
+                        stack[stack_slice.len - 1 - i] = val;
+                    }
                     stack_before = stack;
                 } else |_| {
                     // Log allocation failure for debugging
@@ -387,11 +398,11 @@ pub const Tracer = struct {
             last_step.memory_size_after = @intCast(frame.memory.size());
         }
 
-        if (next_cursor[0] != .opcode_handler or next_cursor[0].opcode_handler != next_handler) {
+        if (next_cursor[0].opcode_handler != next_handler) {
             self.panic("[SCHEDULE] Next handler mismatch at sched_idx={d}", .{self.schedule_index});
         }
 
-        if (next_cursor[0] == .opcode_handler) {
+        {
             const next_opcode_value = self.getOpcodeFromHandler(@TypeOf(frame.*), next_handler);
             if (next_opcode_value) |opcode_int| {
                 if (opcode_int <= 0xff) {
@@ -414,7 +425,16 @@ pub const Tracer = struct {
         }
         self.validateMinimalEvmState(frame, opcode);
 
-        if (self.minimal_evm) |evm| self.current_pc = evm.getPC();
+        if (self.minimal_evm) |evm| {
+            self.current_pc = evm.getPC();
+        } else if (self.config.enable_pc_tracking) {
+            const op_val: u32 = @intFromEnum(opcode);
+            if (op_val >= 0x60 and op_val <= 0x7f) {
+                self.current_pc += 1 + (op_val - 0x5f);
+            } else if (op_val <= 0xff) {
+                self.current_pc += 1;
+            }
+        }
 
         self.debug("DONE[{d}]: {s} | PC={d}", .{
             self.instruction_count,

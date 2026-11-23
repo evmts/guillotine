@@ -17,6 +17,11 @@ pub fn execute(
         return error.InvalidInput;
     }
 
+    // EIP-152: final block indicator flag MUST be 0x00 or 0x01
+    if (input[212] != 0 and input[212] != 1) {
+        return error.InvalidInput;
+    }
+
     const rounds = std.mem.readInt(u32, input[0..4], .big);
     const gas_cost = PER_ROUND_GAS * rounds;
 
@@ -25,6 +30,7 @@ pub fn execute(
     }
 
     const output = try allocator.alloc(u8, 64);
+    errdefer allocator.free(output);
 
     Blake2.compress(input, output) catch {
         return error.InvalidInput;

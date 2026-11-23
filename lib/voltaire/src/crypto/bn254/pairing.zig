@@ -23,6 +23,99 @@ pub fn pairing(g1: *const G1, g2: *const G2) !Fp12Mont {
     return try finalExponentiation(&f);
 }
 
+/// One (G1, G2) input to a product of pairings.
+pub const Pair = struct {
+    g1: G1,
+    g2: G2,
+};
+
+/// Pairs evaluated per shared Miller loop. Working state lives on the stack;
+/// longer inputs run one shared loop per chunk and multiply the results.
+pub const MULTI_MILLER_CHUNK: usize = 16;
+
+/// Returns true when prod_i e(P_i, Q_i) == 1.
+/// Runs one shared Miller loop per chunk of `MULTI_MILLER_CHUNK` pairs and a
+/// single final exponentiation. Pairs with an infinity operand contribute 1.
+pub fn multiPairing(pairs: []const Pair) !bool {
+    var active: usize = 0;
+    for (pairs) |pair| {
+        if (!pair.g1.isInfinity() and !pair.g2.isInfinity()) active += 1;
+    }
+    if (active == 0) return true;
+    const f = try multiMillerLoop(pairs);
+    const result = try finalExponentiation(&f);
+    return result.equal(&Fp12Mont.ONE);
+}
+
+/// Product of the Miller loops of all pairs, before final exponentiation.
+/// Equals prod_i millerLoop(P_i, Q_i) but squares the accumulator once per
+/// loop bit per chunk instead of once per bit per pair.
+pub fn multiMillerLoop(pairs: []const Pair) !Fp12Mont {
+    var result = Fp12Mont.ONE;
+    var start: usize = 0;
+    while (start < pairs.len) {
+        const end = @min(start + MULTI_MILLER_CHUNK, pairs.len);
+        const chunk = try multiMillerLoopChunk(pairs[start..end]);
+        result.mulAssign(&chunk);
+        start = end;
+    }
+    return result;
+}
+
+fn multiMillerLoopChunk(pairs: []const Pair) !Fp12Mont {
+    if (pairs.len > MULTI_MILLER_CHUNK) return error.TooManyPairs;
+
+    var p_affine: [MULTI_MILLER_CHUNK]G1 = undefined;
+    var q_affine: [MULTI_MILLER_CHUNK]G2 = undefined;
+    var q_negated: [MULTI_MILLER_CHUNK]G2 = undefined;
+    var t: [MULTI_MILLER_CHUNK]G2 = undefined;
+    var n: usize = 0;
+    for (pairs) |pair| {
+        if (pair.g1.isInfinity() or pair.g2.isInfinity()) continue;
+        p_affine[n] = try pair.g1.toAffine();
+        q_affine[n] = pair.g2.toAffine();
+        q_negated[n] = q_affine[n].neg();
+        t[n] = q_affine[n];
+        n += 1;
+    }
+
+    var f = Fp12Mont.ONE;
+    if (n == 0) return f;
+
+    for (1..miller_loop_iterations + 1) |j| {
+        const i = miller_loop_iterations - j;
+        const signed_bit = miller_loop_constant_signed[i];
+        f.squareAssign();
+        for (0..n) |k| {
+            const double_point_line = pointDoubleLineEvaluation(&p_affine[k], &t[k]);
+            t[k] = double_point_line.point;
+            f.mulAssign(&double_point_line.line);
+
+            if (signed_bit == 1) {
+                const add_point_line = pointAddLineEvaluation(&p_affine[k], &q_affine[k], &t[k]);
+                t[k] = add_point_line.point;
+                f.mulAssign(&add_point_line.line);
+            } else if (signed_bit == -1) {
+                const add_point_line = pointAddLineEvaluation(&p_affine[k], &q_negated[k], &t[k]);
+                t[k] = add_point_line.point;
+                f.mulAssign(&add_point_line.line);
+            }
+        }
+    }
+
+    for (0..n) |k| {
+        const q1 = q_affine[k].frobenius();
+        const q1_point_line = pointAddLineEvaluation(&p_affine[k], &q1, &t[k]);
+        t[k] = q1_point_line.point;
+        f.mulAssign(&q1_point_line.line);
+
+        const q2 = q1.frobenius().neg();
+        const q2_point_line = pointAddLineEvaluation(&p_affine[k], &q2, &t[k]);
+        f.mulAssign(&q2_point_line.line);
+    }
+    return f;
+}
+
 pub fn millerLoop(p: *const G1, q: *const G2) !Fp12Mont {
     var result = Fp12Mont.ONE;
     if (p.isInfinity() or q.isInfinity()) {
@@ -60,7 +153,6 @@ pub fn millerLoop(p: *const G1, q: *const G2) !Fp12Mont {
 
     const q2 = q1.frobenius().neg();
     const q2_point_line = pointAddLineEvaluation(&p_affine, &q2, &t);
-    //t = q2_point_line.point;
     const q2_line: Fp12Mont = q2_point_line.line;
     result.mulAssign(&q2_line);
     return result;
@@ -190,7 +282,8 @@ pub fn pointDoubleLineEvaluation(p: *const G1, q: *const G2) MontgomeryPointLine
 }
 
 pub fn pointAddLineEvaluation(p: *const G1, q: *const G2, r: *const G2) MontgomeryPointLine {
-    const q_affine = q.toAffine();
+    // Miller-loop callers pass affine Q; skip the Fp2 inversion in that case.
+    const q_affine = if (q.z.equal(&Fp2Mont.ONE)) q.* else q.toAffine();
 
     var t0 = q_affine.x.mul(&r.z.square());
     var t1 = q_affine.y.add(&r.z).square();
@@ -282,8 +375,8 @@ test "pairing bilinearity and infinity montgomery" {
         i += 1;
         const p1 = try G1.GENERATOR.mulByInt(test_case.p1);
         const p2 = try G1.GENERATOR.mulByInt(test_case.p2);
-        const q1 = try G2.GENERATOR.mulByInt(test_case.q1);
-        const q2 = try G2.GENERATOR.mulByInt(test_case.q2);
+        const q1 = G2.GENERATOR.mulByInt(test_case.q1);
+        const q2 = G2.GENERATOR.mulByInt(test_case.q2);
 
         // Test bilinearity in first argument: e(P1 + P2, Q) = e(P1, Q) * e(P2, Q)
         const p1_plus_p2 = p1.add(&p2);
@@ -316,4 +409,79 @@ test "pairing bilinearity and infinity montgomery" {
 
     const result_both_inf = try pairing(&G1.INFINITY, &G2.INFINITY);
     try std.testing.expect(result_both_inf.equal(&Fp12Mont.ONE));
+}
+
+test "multiMillerLoop equals product of single Miller loops" {
+    const p1 = try G1.GENERATOR.mulByInt(3);
+    const p2 = try G1.GENERATOR.mulByInt(11);
+    const q1 = G2.GENERATOR.mulByInt(5);
+    const q2 = G2.GENERATOR.mulByInt(7);
+    const pairs = [_]Pair{
+        .{ .g1 = p1, .g2 = q1 },
+        .{ .g1 = G1.INFINITY, .g2 = q2 },
+        .{ .g1 = p2, .g2 = q2 },
+        .{ .g1 = p1, .g2 = G2.INFINITY },
+    };
+    const shared = try multiMillerLoop(&pairs);
+    const single1 = try millerLoop(&p1, &q1);
+    const single2 = try millerLoop(&p2, &q2);
+    const expected = single1.mul(&single2);
+    try std.testing.expect(shared.equal(&expected));
+}
+
+test "multiPairing e(P, Q) * e(-P, Q) == 1" {
+    const p = try G1.GENERATOR.mulByInt(9);
+    const q = G2.GENERATOR.mulByInt(4);
+    const pairs = [_]Pair{
+        .{ .g1 = p, .g2 = q },
+        .{ .g1 = p.neg(), .g2 = q },
+    };
+    try std.testing.expect(try multiPairing(&pairs));
+}
+
+test "multiPairing e(2P, Q) * e(-P, 2Q) == 1" {
+    const p = G1.GENERATOR;
+    const q = G2.GENERATOR;
+    const pairs = [_]Pair{
+        .{ .g1 = p.double(), .g2 = q },
+        .{ .g1 = p.neg(), .g2 = q.double() },
+    };
+    try std.testing.expect(try multiPairing(&pairs));
+}
+
+test "multiPairing single non-degenerate pair is not 1" {
+    const pairs = [_]Pair{.{ .g1 = G1.GENERATOR, .g2 = G2.GENERATOR }};
+    try std.testing.expect(!(try multiPairing(&pairs)));
+}
+
+test "multiPairing empty and all-infinity inputs are 1" {
+    const empty = [_]Pair{};
+    try std.testing.expect(try multiPairing(&empty));
+    const pairs = [_]Pair{
+        .{ .g1 = G1.INFINITY, .g2 = G2.GENERATOR },
+        .{ .g1 = G1.GENERATOR, .g2 = G2.INFINITY },
+    };
+    try std.testing.expect(try multiPairing(&pairs));
+}
+
+test "multiPairing crosses the chunk boundary" {
+    // 17 pairs with Q fixed: [G, 2G, -2G, 4G, -4G, ..., 14G, -14G, O, -G].
+    // The first 16 fill one chunk; the 17th (-G) cancels pair 0 from the
+    // second chunk, so the G1 scalars sum to 0 and the product is 1.
+    var pairs: [MULTI_MILLER_CHUNK + 1]Pair = undefined;
+    const q = G2.GENERATOR;
+    pairs[0] = .{ .g1 = G1.GENERATOR, .g2 = q };
+    for (1..MULTI_MILLER_CHUNK) |i| {
+        const p = try G1.GENERATOR.mulByInt(@intCast(i + 1));
+        pairs[i] = if (i % 2 == 1)
+            .{ .g1 = p, .g2 = q }
+        else
+            .{ .g1 = pairs[i - 1].g1.neg(), .g2 = q };
+    }
+    pairs[MULTI_MILLER_CHUNK - 1] = .{ .g1 = G1.INFINITY, .g2 = q };
+    pairs[MULTI_MILLER_CHUNK] = .{ .g1 = G1.GENERATOR.neg(), .g2 = q };
+    try std.testing.expect(try multiPairing(&pairs));
+
+    pairs[MULTI_MILLER_CHUNK] = .{ .g1 = G1.GENERATOR, .g2 = q };
+    try std.testing.expect(!(try multiPairing(&pairs)));
 }

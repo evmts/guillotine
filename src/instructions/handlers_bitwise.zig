@@ -12,18 +12,16 @@ pub fn Handlers(FrameType: type) type {
         const dispatch_next = @import("dispatch_next.zig");
 
         /// CLZ (0x1e), EIP-7939: replace one word with its leading-zero count.
-        /// Available from Osaka; zero produces 256. Dispatch charges five gas.
+        /// Available from Osaka; zero produces 256. Basic-block entry validation guarantees stack >= 1.
         pub fn clz(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            if (FrameType.config.hardfork.isBefore(.OSAKA)) {
+            if (comptime FrameType.config.hardfork.isBefore(.OSAKA)) {
                 self.gas_remaining = 0;
                 return error.InvalidOpcode;
             }
-            if (self.stack.size() < 1) {
-                self.gas_remaining = 0;
-                return error.StackUnderflow;
-            }
             self.beforeInstruction(.CLZ, cursor);
-            self.stack.set_top_unsafe(@clz(self.stack.peek_unsafe()));
+            const verified_ops = @import("../verified_ops.zig");
+            const top = self.stack.peek_unsafe();
+            self.stack.set_top_unsafe(if (comptime WordType == u256) verified_ops.clzFast(top) else @clz(top));
             return dispatch_next.nextInstruction(FrameType, self, cursor, .CLZ);
         }
 
@@ -79,12 +77,17 @@ pub fn Handlers(FrameType: type) type {
 
         /// BYTE opcode (0x1a) - Extract byte from word.
         /// Takes byte index from stack top, value from second position.
-        /// Returns the byte at that index or 0 if index >= 32.
+        /// Verified branchless-cast implementation (Bitwuzla + Lean 4 + LLVM 20 IR).
         pub fn byte(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             self.beforeInstruction(.BYTE, cursor);
+            const verified_ops = @import("../verified_ops.zig");
             const byte_index = self.stack.pop_unsafe(); // Top of stack - byte index
             const value = self.stack.peek_unsafe(); // Second from top - value to extract from
-            const result = if (byte_index >= 32) 0 else blk: {
+            const result = if (comptime WordType == u256)
+                verified_ops.byteFast(byte_index, value)
+            else if (byte_index >= 32)
+                0
+            else blk: {
                 const shift_amount = (31 - byte_index) * 8;
                 break :blk (value >> @intCast(shift_amount)) & 0xFF;
             };
@@ -113,16 +116,21 @@ pub fn Handlers(FrameType: type) type {
         }
 
         /// SAR opcode (0x1d) - Arithmetic shift right operation.
-        /// Preserves the sign bit during shift.
+        /// Verified branchless clamped-shift implementation (Bitwuzla + Lean 4 + LLVM 20 IR).
         pub fn sar(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             self.beforeInstruction(.SAR, cursor);
+            const verified_ops = @import("../verified_ops.zig");
             const shift = self.stack.pop_unsafe(); // Top of stack - shift amount
             const value = self.stack.peek_unsafe(); // Second from top - value to shift
-            const value_signed = @as(std.meta.Int(.signed, @bitSizeOf(WordType)), @bitCast(value));
-            const result = if (shift >= 256) blk: {
-                break :blk if (value_signed < 0) @as(WordType, @bitCast(@as(std.meta.Int(.signed, @bitSizeOf(WordType)), -1))) else 0;
-            } else blk: {
-                break :blk @as(WordType, @bitCast(value_signed >> @intCast(shift)));
+            const result: WordType = if (comptime WordType == u256)
+                verified_ops.sarFast(shift, value)
+            else blk: {
+                const SignedWord = std.meta.Int(.signed, @bitSizeOf(WordType));
+                const ShiftInt = std.math.Log2Int(WordType);
+                const max_shift = @bitSizeOf(WordType) - 1;
+                const value_signed: SignedWord = @bitCast(value);
+                const shift_amt: ShiftInt = if (shift >= max_shift) max_shift else @truncate(shift);
+                break :blk @bitCast(value_signed >> shift_amt);
             };
             self.stack.set_top_unsafe(result);
             return dispatch_next.nextInstruction(FrameType, self, cursor, .SAR);

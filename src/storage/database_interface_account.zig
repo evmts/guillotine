@@ -114,7 +114,7 @@ test "Account.is_empty detects empty accounts" {
     try testing.expect(!non_empty_account.is_empty());
 
     non_empty_account = Account.zero();
-    non_empty_account.delegated_address = Address.from_u256(0x1234);
+    non_empty_account.delegated_address = Address.fromU256(0x1234);
     try testing.expect(!non_empty_account.is_empty());
 }
 
@@ -126,7 +126,7 @@ test "EIP-7702: Account delegation" {
     try testing.expect(account.get_effective_code_address() == null);
     
     // Set delegation
-    const delegate_address = Address.from_u256(0x1234);
+    const delegate_address = Address.fromU256(0x1234);
     account.set_delegation(delegate_address);
     try testing.expect(account.has_delegation());
     try testing.expect(account.get_effective_code_address() != null);
@@ -145,7 +145,7 @@ test "EIP-7702: Delegation only works for EOAs" {
     account.code_hash = [_]u8{0x42} ** 32;
 
     // Try to set delegation - should not work for contracts
-    const delegate_address = Address.from_u256(0x1234);
+    const delegate_address = Address.fromU256(0x1234);
     account.set_delegation(delegate_address);
 
     // Delegation should not be set
@@ -219,7 +219,7 @@ test "Account.is_empty - code_hash only" {
 
 test "Account.is_empty - delegation only" {
     var account = Account.zero();
-    account.delegated_address = Address.from_u256(0x1234);
+    account.delegated_address = Address.fromU256(0x1234);
     try testing.expect(!account.is_empty());
 }
 
@@ -238,14 +238,14 @@ test "EIP-7702: has_delegation returns false for zero account" {
 
 test "EIP-7702: has_delegation returns true when delegation is set" {
     var account = Account.zero();
-    account.delegated_address = Address.from_u256(0x9999);
+    account.delegated_address = Address.fromU256(0x9999);
     try testing.expect(account.has_delegation());
 }
 
 test "EIP-7702: get_effective_code_address for EOA with EMPTY_CODE_HASH" {
     var account = Account.zero();
     account.code_hash = primitives.EMPTY_CODE_HASH;
-    const delegate = Address.from_u256(0xabcd);
+    const delegate = Address.fromU256(0xabcd);
     account.delegated_address = delegate;
 
     const effective = account.get_effective_code_address();
@@ -256,7 +256,7 @@ test "EIP-7702: get_effective_code_address for EOA with EMPTY_CODE_HASH" {
 test "EIP-7702: set_delegation with EMPTY_CODE_HASH" {
     var account = Account.zero();
     account.code_hash = primitives.EMPTY_CODE_HASH;
-    const delegate = Address.from_u256(0x5555);
+    const delegate = Address.fromU256(0x5555);
 
     account.set_delegation(delegate);
     try testing.expect(account.has_delegation());
@@ -265,7 +265,7 @@ test "EIP-7702: set_delegation with EMPTY_CODE_HASH" {
 
 test "EIP-7702: clear_delegation removes delegation" {
     var account = Account.zero();
-    const delegate = Address.from_u256(0x7777);
+    const delegate = Address.fromU256(0x7777);
     account.set_delegation(delegate);
     try testing.expect(account.has_delegation());
 
@@ -276,8 +276,8 @@ test "EIP-7702: clear_delegation removes delegation" {
 
 test "EIP-7702: delegation overwrite" {
     var account = Account.zero();
-    const first_delegate = Address.from_u256(0x1111);
-    const second_delegate = Address.from_u256(0x2222);
+    const first_delegate = Address.fromU256(0x1111);
+    const second_delegate = Address.fromU256(0x2222);
 
     account.set_delegation(first_delegate);
     try testing.expectEqual(first_delegate, account.delegated_address.?);
@@ -289,7 +289,7 @@ test "EIP-7702: delegation overwrite" {
 test "EIP-7702: contract account cannot get effective code address" {
     var account = Account.zero();
     account.code_hash = [_]u8{0xdd} ** 32;
-    account.delegated_address = Address.from_u256(0x8888);
+    account.delegated_address = Address.fromU256(0x8888);
 
     const effective = account.get_effective_code_address();
     try testing.expect(effective == null);
@@ -340,7 +340,7 @@ test "Account with max values" {
         .code_hash = [_]u8{0xff} ** 32,
         .storage_root = [_]u8{0xff} ** 32,
         .nonce = std.math.maxInt(u64),
-        .delegated_address = Address.from_u256(std.math.maxInt(u256)),
+        .delegated_address = Address.fromU256(std.math.maxInt(u256)),
     };
 
     try testing.expectEqual(std.math.maxInt(u256), account.balance);

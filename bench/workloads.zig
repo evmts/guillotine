@@ -19,6 +19,10 @@ pub const Workload = struct {
     output_len: ?usize = null,
     // Prepopulate independent storage slots for cold/warm SLOAD cases.
     storage: bool = false,
+    // Minimum transaction gas budget required to execute the workload.
+    // Workloads exceeding a hardfork's EIP-7825 tx gas cap report unavailable
+    // rather than failing preflight with OutOfGas.
+    min_gas: u64 = 0,
 };
 
 pub fn decodeHex(allocator: std.mem.Allocator, text: []const u8) ![]u8 {
@@ -282,14 +286,198 @@ pub fn build(allocator: std.mem.Allocator) ![]Workload {
         try list.append(allocator, .{ .name = "opcode/JUMP-JUMPI-loop", .category = "opcode", .source = .{ .bytecode = try code.finish(0) }, .operations = repetitions, .expected = 0 });
     }
     for ([_][]const u8{ "snailtracer", "erc20-mint", "erc20-transfer", "ten-thousand-hashes" }) |name| {
-        try list.append(allocator, .{ .name = try std.fmt.allocPrint(allocator, "contract/{s}", .{name}), .category = "contract", .source = .{ .fixture = name } });
+        const min_gas: u64 = if (std.mem.eql(u8, name, "snailtracer")) 240_000_000 else 0;
+        try list.append(allocator, .{
+            .name = try std.fmt.allocPrint(allocator, "contract/{s}", .{name}),
+            .category = "contract",
+            .source = .{ .fixture = name },
+            .min_gas = min_gas,
+        });
     }
     for ([_][]const u8{ "BubbleSort", "Fibonacci", "Factorial", "Keccak-loop", "Uniswap-like-swap" }, 0..) |name, kind| {
         const result = try algorithm(allocator, kind);
         try list.append(allocator, .{ .name = try std.fmt.allocPrint(allocator, "contract/{s}", .{name}), .category = "contract", .source = .{ .bytecode = result.code }, .expected = result.expected });
     }
+    try hotloops(allocator, &list);
     try precompiles(allocator, &list);
     return list.toOwnedSlice(allocator);
+}
+
+/// Tight multi-thousand-iteration interpreter loops that isolate EVM hot-path
+/// execution (branchless arithmetic/bitwise, warm memory, O(1) dense jumps,
+/// and basic-block guards) from per-call simulate()/dispatch setup overhead.
+fn hotloops(allocator: std.mem.Allocator, list: *std.ArrayList(Workload)) !void {
+    const iters: u32 = 2048;
+
+    // 1. Signed arithmetic hot loop: SDIV + SMOD on negative dividends.
+    {
+        var code = Assembler{ .allocator = allocator };
+        const neg_dividend: u256 = @bitCast(@as(i256, -1_000_003));
+        const q_expected: u256 = @bitCast(@as(i256, -142_857));
+        const r_expected: u256 = @bitCast(@as(i256, -4));
+        // Stack invariant at `loop_pc`: [acc, i] (top = i)
+        try code.push(0);
+        try code.push(iters);
+        const loop_pc = try code.label();
+        // Stack: [acc, i]
+        try code.push(7);
+        try code.push(neg_dividend);
+        try code.op(0x05); // [acc, i, q]
+        try code.push(7);
+        try code.push(neg_dividend);
+        try code.op(0x07); // [acc, i, q, r]
+        try code.op(0x01); // [acc, i, q+%r]
+        try code.op(0x90); // SWAP1 -> [acc, q+%r, i]
+        try code.op(0x91); // SWAP2 -> [i, q+%r, acc]
+        try code.op(0x01); // ADD   -> [i, acc']
+        try code.op(0x90); // SWAP1 -> [acc', i]
+        try code.push(1);
+        try code.op(0x90); // [acc', 1, i]
+        try code.op(0x03); // SUB   -> [acc', i-1]
+        try code.op(0x80); // DUP1  -> [acc', i-1, i-1]
+        try code.push(loop_pc);
+        try code.op(0x57); // JUMPI -> if i-1 != 0 goto loop_pc
+        try code.op(0x50); // POP 0 -> [acc']
+        try code.store(0);
+        const expected = @as(u256, iters) *% (q_expected +% r_expected);
+        try list.append(allocator, .{
+            .name = "hotloop/sdiv-smod",
+            .category = "hotloop",
+            .source = .{ .bytecode = try code.finish(0) },
+            .operations = iters * 2,
+            .expected = expected,
+        });
+    }
+
+    // 2. Branchless bitwise + EXP gas loop: SIGNEXTEND + SAR + BYTE + EXP.
+    {
+        var code = Assembler{ .allocator = allocator };
+        const neg_val: u256 = @bitCast(@as(i256, -1024));
+        const se_out: u256 = @bitCast(@as(i256, -128)); // SIGNEXTEND(0, 0x80)
+        const sar_out: u256 = @bitCast(@as(i256, -64)); // SAR(4, -1024)
+        const byte_out: u256 = 0x34; // BYTE(31, 0x1234)
+        const exp_out: u256 = 6561; // EXP(3, 8)
+        // Stack invariant at `loop_pc`: [acc, i] (top = i)
+        try code.push(0);
+        try code.push(iters);
+        const loop_pc = try code.label();
+        try code.push(0x80);
+        try code.push(0);
+        try code.op(0x0b); // SIGNEXTEND(0, 0x80) = -128
+        try code.push(neg_val);
+        try code.push(4);
+        try code.op(0x1d); // SAR(4, -1024) = -64
+        try code.op(0x01); // ADD
+        try code.push(0x1234);
+        try code.push(31);
+        try code.op(0x1a); // BYTE(31, 0x1234) = 0x34
+        try code.op(0x01); // ADD
+        try code.push(8);
+        try code.push(3);
+        try code.op(0x0a); // EXP(3, 8) = 6561
+        try code.op(0x01); // ADD -> [acc, i, delta]
+        try code.op(0x90); // [acc, delta, i]
+        try code.op(0x91); // [i, delta, acc]
+        try code.op(0x01); // [i, acc']
+        try code.op(0x90); // [acc', i]
+        try code.push(1);
+        try code.op(0x90);
+        try code.op(0x03);
+        try code.op(0x80);
+        try code.push(loop_pc);
+        try code.op(0x57);
+        try code.op(0x50);
+        try code.store(0);
+        const expected = @as(u256, iters) *% (se_out +% sar_out +% byte_out +% exp_out);
+        try list.append(allocator, .{
+            .name = "hotloop/signext-sar-byte-exp",
+            .category = "hotloop",
+            .source = .{ .bytecode = try code.finish(0) },
+            .operations = iters * 4,
+            .expected = expected,
+        });
+    }
+
+    // 3. Warm-memory hot loop: MLOAD + MSTORE + MSTORE8 (exercises checkMemoryBoundsFast + unchecked fast paths).
+    {
+        var code = Assembler{ .allocator = allocator };
+        // Pre-warm slots 0..96
+        try code.push(0);
+        try code.store(0);
+        try code.push(7);
+        try code.store(32);
+        try code.push(0x42);
+        try code.push(95);
+        try code.op(0x53); // MSTORE8(95, 0x42) -> word at 64 == 0x42
+        // Stack: [i]
+        try code.push(iters);
+        const loop_pc = try code.label();
+        try code.load(0);
+        try code.load(32);
+        try code.op(0x01);
+        try code.load(64);
+        try code.op(0x01);
+        try code.store(0);
+        try code.push(0x42);
+        try code.push(95);
+        try code.op(0x53);
+        try code.push(1);
+        try code.op(0x90);
+        try code.op(0x03);
+        try code.op(0x80);
+        try code.push(loop_pc);
+        try code.op(0x57);
+        try code.op(0x50);
+        try list.append(allocator, .{
+            .name = "hotloop/memory-warm",
+            .category = "hotloop",
+            .source = .{ .bytecode = try code.finish(0) },
+            .operations = iters * 5,
+            .expected = @as(u256, iters) * (7 + 0x42),
+        });
+    }
+
+    // 4. Dynamic JUMP dispatch hot loop with 32 JUMPDESTs (exercises O(1) denseJumpInBoundsFast + direct tail-call).
+    {
+        var code = Assembler{ .allocator = allocator };
+        // Jump over 31 decoy JUMPDESTs so the jump table has 33 entries.
+        const entry = try code.jump(0x56);
+        for (0..31) |_| {
+            _ = try code.label();
+            try code.op(0x00);
+        }
+        code.patch(entry, try code.label());
+        // Stack: [acc, i]
+        try code.push(0);
+        try code.push(iters);
+        const loop_pc = try code.label();
+        // Compute target dynamically: (loop_pc + 0) via ADD so it uses dynamic JUMP (not static fusion)
+        try code.push(1);
+        try code.op(0x90); // [acc, 1, i]
+        try code.op(0x03); // [acc, i-1]
+        try code.op(0x90); // [i-1, acc]
+        try code.push(3);
+        try code.op(0x01); // [i-1, acc+3]
+        try code.op(0x90); // [acc+3, i-1]
+        try code.op(0x80); // [acc+3, i-1, i-1]
+        try code.op(0x15); // [acc+3, i-1, i-1 == 0]
+        const done = try code.jump(0x57);
+        // Dynamic JUMP to `loop_pc`: push (loop_pc - 1), push 1, ADD, JUMP
+        try code.push(loop_pc - 1);
+        try code.push(1);
+        try code.op(0x01);
+        try code.op(0x56); // dynamic JUMP -> O(1) dense lookup
+        code.patch(done, try code.label());
+        try code.op(0x50); // POP 0
+        try code.store(0);
+        try list.append(allocator, .{
+            .name = "hotloop/dynamic-jump-dense",
+            .category = "hotloop",
+            .source = .{ .bytecode = try code.finish(0) },
+            .operations = iters,
+            .expected = @as(u256, iters) * 3,
+        });
+    }
 }
 
 fn algorithm(allocator: std.mem.Allocator, kind: usize) !struct { code: []const u8, expected: u256 } {
@@ -434,7 +622,7 @@ fn precompiles(allocator: std.mem.Allocator, list: *std.ArrayList(Workload)) !vo
     const field = try allocator.alloc(u8, 64);
     @memset(field, 0);
     field[63] = 42;
-    try list.append(allocator, .{ .name = "precompile/BLS12-381-map-G1", .category = "precompile", .source = .{ .precompile = 0x12 }, .input = field, .output_len = 128 });
+    try list.append(allocator, .{ .name = "precompile/BLS12-381-map-G1", .category = "precompile", .source = .{ .precompile = 0x10 }, .input = field, .output_len = 128 });
     const scheme = std.crypto.sign.ecdsa.EcdsaP256Sha256;
     const key = try scheme.KeyPair.generateDeterministic([_]u8{42} ** scheme.KeyPair.seed_length);
     const text = "Guillotine P256 benchmark vector";

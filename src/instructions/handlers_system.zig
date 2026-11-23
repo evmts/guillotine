@@ -112,6 +112,7 @@ pub fn Handlers(FrameType: type) type {
                 const expansion_cost_i64 = @as(FrameType.GasType, @intCast(expansion_cost));
                 self.gas_remaining -= expansion_cost_i64;
                 if (self.gas_remaining < 0) {
+                    self.afterComplete(.CALL);
                     return Error.OutOfGas;
                 }
             }
@@ -219,7 +220,9 @@ pub fn Handlers(FrameType: type) type {
             // Use main allocator for deinit since precompile outputs are allocated with it
             defer result.deinit(self.getEvm().allocator);
 
-            if (result.success and output_size_usize > 0 and result.output.len > 0) {
+            // EIP-140: copy return data into caller memory on both RETURN and REVERT
+            // (exceptional halts have empty output).
+            if (output_size_usize > 0 and result.output.len > 0) {
                 const copy_size = @min(output_size_usize, result.output.len);
                 self.memory.set_data(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(output_offset_usize)), result.output[0..copy_size]) catch {
                     self.stack.push_unsafe(0);
@@ -405,7 +408,8 @@ pub fn Handlers(FrameType: type) type {
             var result = self.getEvm().inner_call(call_params);
             defer result.deinit(self.getEvm().allocator);
 
-            if (result.success and output_size_usize > 0 and result.output.len > 0) {
+            // EIP-140: copy return data into caller memory on both RETURN and REVERT.
+            if (output_size_usize > 0 and result.output.len > 0) {
                 const copy_size = @min(output_size_usize, result.output.len);
                 self.memory.set_data(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(output_offset_usize)), result.output[0..copy_size]) catch {
                     self.stack.push_unsafe(0);
@@ -512,6 +516,22 @@ pub fn Handlers(FrameType: type) type {
                 const expansion_cost_i64 = @as(FrameType.GasType, @intCast(expansion_cost));
                 self.gas_remaining -= expansion_cost_i64;
                 if (self.gas_remaining < 0) {
+                    self.afterComplete(.DELEGATECALL);
+                    return Error.OutOfGas;
+                }
+            }
+
+            // EIP-2929: warm/cold target account access. Base 100 is charged by dispatch;
+            // cold access adds 2500 (2600 - 100).
+            const evm_dc = self.getEvm();
+            const access_cost_dc = evm_dc.access_address(addr) catch {
+                self.afterComplete(.DELEGATECALL);
+                return Error.AllocationError;
+            };
+            if (access_cost_dc > 100) {
+                self.gas_remaining -= @intCast(access_cost_dc - 100);
+                if (self.gas_remaining < 0) {
+                    self.afterComplete(.DELEGATECALL);
                     return Error.OutOfGas;
                 }
             }
@@ -561,7 +581,8 @@ pub fn Handlers(FrameType: type) type {
             // Use main allocator for deinit since precompile outputs are allocated with it
             defer result.deinit(self.getEvm().allocator);
 
-            if (result.success and output_size_usize > 0 and result.output.len > 0) {
+            // EIP-140: copy return data into caller memory on both RETURN and REVERT.
+            if (output_size_usize > 0 and result.output.len > 0) {
                 const copy_size = @min(output_size_usize, result.output.len);
                 self.memory.set_data(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(output_offset_usize)), result.output[0..copy_size]) catch {
                     self.stack.push_unsafe(0);
@@ -668,6 +689,22 @@ pub fn Handlers(FrameType: type) type {
                 const expansion_cost_i64 = @as(FrameType.GasType, @intCast(expansion_cost));
                 self.gas_remaining -= expansion_cost_i64;
                 if (self.gas_remaining < 0) {
+                    self.afterComplete(.STATICCALL);
+                    return Error.OutOfGas;
+                }
+            }
+
+            // EIP-2929: warm/cold target account access. Base 100 is charged by dispatch;
+            // cold access adds 2500 (2600 - 100).
+            const evm_sc = self.getEvm();
+            const access_cost_sc = evm_sc.access_address(addr) catch {
+                self.afterComplete(.STATICCALL);
+                return Error.AllocationError;
+            };
+            if (access_cost_sc > 100) {
+                self.gas_remaining -= @intCast(access_cost_sc - 100);
+                if (self.gas_remaining < 0) {
+                    self.afterComplete(.STATICCALL);
                     return Error.OutOfGas;
                 }
             }
@@ -721,8 +758,8 @@ pub fn Handlers(FrameType: type) type {
             // Use main allocator for deinit since precompile outputs are allocated with it
             defer result.deinit(self.getEvm().allocator);
 
-            // Write return data to memory if successful and output size > 0
-            if (result.success and output_size_usize > 0 and result.output.len > 0) {
+            // EIP-140: copy return data into caller memory on both RETURN and REVERT.
+            if (output_size_usize > 0 and result.output.len > 0) {
                 const copy_size = @min(output_size_usize, result.output.len);
                 self.memory.set_data(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(output_offset_usize)), result.output[0..copy_size]) catch {
                     self.stack.push_unsafe(0);

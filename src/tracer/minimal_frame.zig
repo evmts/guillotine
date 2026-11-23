@@ -40,6 +40,7 @@ pub const MinimalFrame = struct {
     // Execution status
     stopped: bool,
     reverted: bool,
+    is_static: bool,
 
     // Reference to MinimalEvm (like Frame has evm_ptr)
     evm_ptr: *anyopaque,
@@ -114,6 +115,7 @@ pub const MinimalFrame = struct {
             .return_data = &[_]u8{},
             .stopped = false,
             .reverted = false,
+            .is_static = false,
             .evm_ptr = evm_ptr,
             .allocator = allocator,
             .call_depth = 0,
@@ -1080,8 +1082,14 @@ pub const MinimalFrame = struct {
 
             // SSTORE
             0x55 => {
+                if (self.is_static) return error.WriteProtection;
                 const key = try self.popStack();
                 const value = try self.popStack();
+
+                // EIP-2200: SSTORE requires remaining gas > SstoreSentryGas (2300) on Istanbul+
+                if (evm.hardfork.isAtLeast(.ISTANBUL) and self.gas_remaining <= GasConstants.SstoreSentryGas) {
+                    return error.OutOfGas;
+                }
 
                 // Get current and original values for gas calculation
                 const current_value = evm.get_storage(self.address, key);
@@ -1091,13 +1099,56 @@ pub const MinimalFrame = struct {
                 const access_cost = try evm.access_storage_slot(self.address, key);
                 const is_cold = access_cost == GasConstants.ColdSloadCost;
 
-                // Calculate SSTORE gas cost using proper EIP-2200/EIP-3529 logic
-                const gas_cost = GasConstants.sstoreGasCost(current_value, original_value, value, is_cold);
+                // Calculate SSTORE gas cost (EIP-2200 + EIP-2929: Berlin+ reduces
+                // SSTORE_RESET_GAS from 5000 to 2900 because cold access adds 2100 separately).
+                const base_gas_cost: u64 = if (evm.hardfork.isAtLeast(.ISTANBUL)) blk: {
+                    const warm_cost: u64 = if (evm.hardfork.isAtLeast(.BERLIN))
+                        GasConstants.WarmStorageReadCost
+                    else
+                        800;
+                    if (current_value == value) {
+                        break :blk warm_cost;
+                    } else if (original_value == current_value) {
+                        if (original_value == 0) {
+                            break :blk GasConstants.SstoreSetGas;
+                        } else if (evm.hardfork.isAtLeast(.BERLIN)) {
+                            break :blk GasConstants.SstoreResetGas - GasConstants.ColdSloadCost;
+                        } else {
+                            break :blk GasConstants.SstoreResetGas;
+                        }
+                    } else {
+                        break :blk warm_cost;
+                    }
+                } else blk: {
+                    break :blk if (current_value == 0 and value != 0)
+                        GasConstants.SstoreSetGas
+                    else
+                        GasConstants.SstoreResetGas;
+                };
+                const gas_cost: u64 = base_gas_cost + (if (is_cold and evm.hardfork.isAtLeast(.BERLIN)) GasConstants.ColdSloadCost else 0);
                 try self.consumeGas(gas_cost);
 
-                // EIP-3529: Only clearing (non-zero -> zero) is eligible for refund
-                if (current_value != 0 and value == 0) {
-                    evm.add_refund(GasConstants.SstoreRefundGas);
+                // EIP-2200 / EIP-3529 refund accounting (matches handlers_storage.zig)
+                if (evm.hardfork.isAtLeast(.LONDON)) {
+                    if (current_value != value) {
+                        if (original_value != 0 and current_value != 0 and value == 0) {
+                            evm.add_refund(GasConstants.SstoreRefundGas); // +4800
+                        }
+                        if (original_value != 0 and current_value == 0) {
+                            evm.gas_refund -|= GasConstants.SstoreRefundGas;
+                        }
+                        if (original_value == value) {
+                            if (original_value == 0) {
+                                evm.add_refund(GasConstants.SstoreSetGas - GasConstants.WarmStorageReadCost); // +19900
+                            } else {
+                                evm.add_refund(GasConstants.SstoreResetGas - GasConstants.ColdSloadCost - GasConstants.WarmStorageReadCost); // +2800
+                            }
+                        }
+                    }
+                } else {
+                    if (current_value != 0 and value == 0) {
+                        evm.add_refund(GasConstants.SstoreRefundGas);
+                    }
                 }
 
                 try evm.set_storage(self.address, key, value);
@@ -1169,9 +1220,7 @@ pub const MinimalFrame = struct {
 
                 try self.consumeGas(GasConstants.WarmStorageReadCost);
                 const key = try self.popStack();
-                // For MinimalEvm tracer, we use regular storage for transient storage
-                // In a real implementation, this would be separate
-                const value = evm.get_storage(self.address, key);
+                const value = evm.get_transient_storage(self.address, key);
                 try self.pushStack(value);
                 self.pc += 1;
             },
@@ -1180,13 +1229,12 @@ pub const MinimalFrame = struct {
             0x5d => {
                 // EIP-1153: TSTORE was introduced in Cancun hardfork
                 if (evm.hardfork.isBefore(.CANCUN)) return error.InvalidOpcode;
+                if (self.is_static) return error.WriteProtection;
 
-                try self.consumeGas(GasConstants.WarmStorageReadCost); // Use same as TLOAD for now
+                try self.consumeGas(GasConstants.WarmStorageReadCost);
                 const key = try self.popStack();
                 const value = try self.popStack();
-                // For MinimalEvm tracer, we can just track transient storage in the EVM
-                // Transient storage behaves like regular storage but is cleared after tx
-                try evm.set_storage(self.address, key, value);
+                try evm.set_transient_storage(self.address, key, value);
                 self.pc += 1;
             },
 
@@ -1249,6 +1297,7 @@ pub const MinimalFrame = struct {
 
             // LOG0-LOG4
             0xa0...0xa4 => {
+                if (self.is_static) return error.WriteProtection;
                 const topic_count = opcode - 0xa0;
                 const offset = try self.popStack();
                 const length = try self.popStack();
@@ -1281,17 +1330,23 @@ pub const MinimalFrame = struct {
 
             // CREATE
             0xf0 => {
+                if (self.is_static) return error.WriteProtection;
                 const value = try self.popStack();
                 const offset = try self.popStack();
                 const length = try self.popStack();
-                
+
                 const len = std.math.cast(u32, length) orelse return error.OutOfBounds;
+                // EIP-3860 (Shanghai+): initcode exceeds max size (49152) -> OutOfGas
+                if (evm.hardfork.isAtLeast(.SHANGHAI) and len > 49152) {
+                    return error.OutOfGas;
+                }
                 // Init code is read from memory: charge expansion over [offset, offset+len)
                 // (nothing for zero length, whatever the offset).
                 var end: u64 = 0;
+                var off_u32: u32 = 0;
                 if (len > 0) {
-                    const offset_u32 = std.math.cast(u32, offset) orelse return error.OutOfBounds;
-                    end = @as(u64, offset_u32) + @as(u64, len);
+                    off_u32 = std.math.cast(u32, offset) orelse return error.OutOfBounds;
+                    end = @as(u64, off_u32) + @as(u64, len);
                 }
                 const mem_cost = if (end > 0) self.memoryExpansionCost(end) else 0;
                 const gas_cost = self.createGasCost(len);
@@ -1301,10 +1356,30 @@ pub const MinimalFrame = struct {
                     if (aligned_size > self.memory_size) self.memory_size = aligned_size;
                 }
 
-                // In minimal implementation, just return a dummy address
-                // TODO: Add contract code size validation after CREATE executes init code
-                _ = value;
-                try self.pushStack(0); // Dummy created address
+                var init_code: []const u8 = &.{};
+                if (len > 0) {
+                    const data = try self.allocator.alloc(u8, len);
+                    var j: u32 = 0;
+                    while (j < len) : (j += 1) {
+                        data[j] = self.readMemory(off_u32 + j);
+                    }
+                    init_code = data;
+                }
+
+                // EIP-150: forward 63/64 of remaining gas
+                const remaining_gas: u64 = @intCast(@max(self.gas_remaining, 0));
+                const retained: u64 = if (evm.hardfork.isAtLeast(.TANGERINE_WHISTLE)) remaining_gas / 64 else 0;
+                const forwarded: u64 = remaining_gas - retained;
+
+                const create_res = try evm.inner_create(self.address, value, init_code, null, forwarded);
+                self.gas_remaining = @intCast(retained + create_res.gas_left);
+                self.return_data = create_res.output;
+
+                if (create_res.success and create_res.created_address != null) {
+                    try self.pushStack(primitives.Address.toU256(create_res.created_address.?));
+                } else {
+                    try self.pushStack(0);
+                }
                 self.pc += 1;
             },
 
@@ -1377,14 +1452,18 @@ pub const MinimalFrame = struct {
                     input_data = data;
                 }
 
-                // Calculate available gas
+                // EIP-214: CALL with value is forbidden in a static context
+                if (self.is_static and value_arg > 0) return error.WriteProtection;
+
+                // Calculate available gas (+ 2300 stipend when transferring value)
                 const gas_limit = if (gas > std.math.maxInt(u64)) std.math.maxInt(u64) else @as(u64, @intCast(gas));
                 const remaining_gas = @as(u64, @intCast(@max(self.gas_remaining, 0)));
                 const max_gas = remaining_gas - (remaining_gas / 64);
                 const available_gas = @min(gas_limit, max_gas);
+                const callee_gas = available_gas + (if (value_arg > 0) GasConstants.CallStipend else 0);
 
                 // Perform the inner call
-                const result = try evm.inner_call(call_address, value_arg, input_data, available_gas);
+                const result = try evm.inner_call_ex(.call, call_address, call_address, self.address, value_arg, input_data, callee_gas, self.is_static);
 
                 // Write output to memory (memory expansion already charged above)
                 if (out_length > 0 and result.output.len > 0) {
@@ -1405,9 +1484,9 @@ pub const MinimalFrame = struct {
                 // Push success status
                 try self.pushStack(if (result.success) 1 else 0);
 
-                // Update gas
-                const gas_used = available_gas - result.gas_left;
-                self.gas_remaining -= @intCast(gas_used);
+                // Reconcile gas (unused stipend returns to caller)
+                const reconciled: i128 = @as(i128, @intCast(@max(self.gas_remaining, 0))) - @as(i128, available_gas) + @as(i128, result.gas_left);
+                self.gas_remaining = if (reconciled < 0) 0 else @as(i64, @intCast(reconciled));
 
                 self.pc += 1;
             },
@@ -1474,14 +1553,15 @@ pub const MinimalFrame = struct {
                     input_data = data;
                 }
 
-                // Calculate available gas
+                // Calculate available gas (+ 2300 stipend when transferring value)
                 const gas_limit = if (gas > std.math.maxInt(u64)) std.math.maxInt(u64) else @as(u64, @intCast(gas));
                 const remaining_gas = @as(u64, @intCast(@max(self.gas_remaining, 0)));
                 const max_gas = remaining_gas - (remaining_gas / 64);
                 const available_gas = @min(gas_limit, max_gas);
+                const callee_gas = available_gas + (if (value_arg > 0) GasConstants.CallStipend else 0);
 
-                // Perform the inner call
-                const result = try evm.inner_call(call_address, value_arg, input_data, available_gas);
+                // Perform the inner callcode: target's code executes in current contract's storage/address
+                const result = try evm.inner_call_ex(.callcode, call_address, self.address, self.address, value_arg, input_data, callee_gas, self.is_static);
 
                 // Write output to memory (memory expansion already charged above)
                 if (out_length > 0 and result.output.len > 0) {
@@ -1502,9 +1582,9 @@ pub const MinimalFrame = struct {
                 // Push success status
                 try self.pushStack(if (result.success) 1 else 0);
 
-                // Update gas
-                const gas_used = available_gas - result.gas_left;
-                self.gas_remaining -= @intCast(gas_used);
+                // Reconcile gas (unused stipend returns to caller)
+                const reconciled: i128 = @as(i128, @intCast(@max(self.gas_remaining, 0))) - @as(i128, available_gas) + @as(i128, result.gas_left);
+                self.gas_remaining = if (reconciled < 0) 0 else @as(i64, @intCast(reconciled));
 
                 self.pc += 1;
             },
@@ -1598,8 +1678,9 @@ pub const MinimalFrame = struct {
                 const max_gas = remaining_gas - (remaining_gas / 64);
                 const available_gas = @min(gas_limit, max_gas);
 
-                // Perform the inner call
-                const result = try evm.inner_call(call_address, self.value, input_data, available_gas);
+                // Perform the delegatecall: target's code in current contract's storage/address,
+                // preserving msg.sender (self.caller), msg.value (self.value), and is_static.
+                const result = try evm.inner_call_ex(.delegatecall, call_address, self.address, self.caller, self.value, input_data, available_gas, self.is_static);
 
                 // Write output to memory (memory expansion already charged above)
                 if (out_length > 0 and result.output.len > 0) {
@@ -1631,19 +1712,25 @@ pub const MinimalFrame = struct {
             0xf5 => {
                 // EIP-1014: CREATE2 opcode was introduced in Constantinople hardfork
                 if (evm.hardfork.isBefore(.CONSTANTINOPLE)) return error.InvalidOpcode;
+                if (self.is_static) return error.WriteProtection;
 
                 const value = try self.popStack();
                 const offset = try self.popStack();
                 const length = try self.popStack();
                 const salt = try self.popStack();
-                
+
                 const len = std.math.cast(u32, length) orelse return error.OutOfBounds;
+                // EIP-3860 (Shanghai+): initcode exceeds max size (49152) -> OutOfGas
+                if (evm.hardfork.isAtLeast(.SHANGHAI) and len > 49152) {
+                    return error.OutOfGas;
+                }
                 // Init code is read from memory: charge expansion over [offset, offset+len)
                 // (nothing for zero length, whatever the offset).
                 var end: u64 = 0;
+                var off_u32: u32 = 0;
                 if (len > 0) {
-                    const offset_u32 = std.math.cast(u32, offset) orelse return error.OutOfBounds;
-                    end = @as(u64, offset_u32) + @as(u64, len);
+                    off_u32 = std.math.cast(u32, offset) orelse return error.OutOfBounds;
+                    end = @as(u64, off_u32) + @as(u64, len);
                 }
                 const mem_cost = if (end > 0) self.memoryExpansionCost(end) else 0;
                 const gas_cost = self.create2GasCost(len);
@@ -1653,10 +1740,30 @@ pub const MinimalFrame = struct {
                     if (aligned_size > self.memory_size) self.memory_size = aligned_size;
                 }
 
-                // TODO: Add contract code size validation after CREATE2 executes init code
-                _ = value;
-                _ = salt;
-                try self.pushStack(0); // Dummy created address
+                var init_code: []const u8 = &.{};
+                if (len > 0) {
+                    const data = try self.allocator.alloc(u8, len);
+                    var j: u32 = 0;
+                    while (j < len) : (j += 1) {
+                        data[j] = self.readMemory(off_u32 + j);
+                    }
+                    init_code = data;
+                }
+
+                // EIP-150: forward 63/64 of remaining gas
+                const remaining_gas: u64 = @intCast(@max(self.gas_remaining, 0));
+                const retained: u64 = if (evm.hardfork.isAtLeast(.TANGERINE_WHISTLE)) remaining_gas / 64 else 0;
+                const forwarded: u64 = remaining_gas - retained;
+
+                const create_res = try evm.inner_create(self.address, value, init_code, salt, forwarded);
+                self.gas_remaining = @intCast(retained + create_res.gas_left);
+                self.return_data = create_res.output;
+
+                if (create_res.success and create_res.created_address != null) {
+                    try self.pushStack(primitives.Address.toU256(create_res.created_address.?));
+                } else {
+                    try self.pushStack(0);
+                }
                 self.pc += 1;
             },
 
@@ -1726,8 +1833,8 @@ pub const MinimalFrame = struct {
                 const max_gas = remaining_gas - (remaining_gas / 64);
                 const available_gas = @min(gas_limit, max_gas);
 
-                // Perform the inner call
-                const result = try evm.inner_call(call_address, 0, input_data, available_gas);
+                // Perform the static call (EIP-214: is_static = true, value = 0)
+                const result = try evm.inner_call_ex(.staticcall, call_address, call_address, self.address, 0, input_data, available_gas, true);
 
                 // Write output to memory (memory expansion already charged above)
                 if (out_length > 0 and result.output.len > 0) {
@@ -1842,9 +1949,8 @@ pub const MinimalFrame = struct {
                 const access_cost = try self.externalAccountGasCost(ext_addr);
                 try self.consumeGas(access_cost);
 
-                // For MinimalFrame, we don't have access to external code
-                // Just return 0 for now
-                try self.pushStack(0);
+                const ext_code = evm.get_code(ext_addr);
+                try self.pushStack(ext_code.len);
                 self.pc += 1;
             },
 
@@ -1872,12 +1978,18 @@ pub const MinimalFrame = struct {
                     const end = @as(u64, dest) + @as(u64, len);
                     const mem_cost = self.memoryExpansionCost(end);
                     try self.consumeGas(mem_cost);
+                    const aligned_size = wordAlignedSize(end);
+                    if (aligned_size > self.memory_size) self.memory_size = aligned_size;
 
-                    // For MinimalFrame, just write zeros to memory
-                    _ = offset;
+                    const ext_code = evm.get_code(ext_addr);
+                    const code_off_opt = std.math.cast(usize, offset);
                     var i: u32 = 0;
                     while (i < len) : (i += 1) {
-                        try self.writeMemory(dest + i, 0);
+                        const byte: u8 = if (code_off_opt) |code_off| blk: {
+                            const idx = code_off +| i;
+                            break :blk if (idx < ext_code.len) ext_code[idx] else 0;
+                        } else 0;
+                        try self.writeMemory(dest + i, byte);
                     }
                 } else {
                     // EIP-150/EIP-2929: charge account access cost even if size is zero
@@ -1900,10 +2012,16 @@ pub const MinimalFrame = struct {
                 const access_cost = try self.externalAccountGasCost(ext_addr);
                 try self.consumeGas(access_cost);
 
-                // For MinimalFrame, return empty code hash
-                // Empty code hash = keccak256("")
-                const empty_hash: u256 = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470;
-                try self.pushStack(empty_hash);
+                if (!evm.account_exists(ext_addr)) {
+                    // EIP-1052: non-existent / empty account returns 0
+                    try self.pushStack(0);
+                } else {
+                    const ext_code = evm.get_code(ext_addr);
+                    var hash_bytes: [32]u8 = undefined;
+                    std.crypto.hash.sha3.Keccak256.hash(ext_code, &hash_bytes, .{});
+                    const code_hash = std.mem.readInt(u256, &hash_bytes, .big);
+                    try self.pushStack(code_hash);
+                }
                 self.pc += 1;
             },
 
@@ -1924,6 +2042,7 @@ pub const MinimalFrame = struct {
 
             // SELFDESTRUCT
             0xff => {
+                if (self.is_static) return error.WriteProtection;
                 const beneficiary_u256 = try self.popStack();
 
                 // Convert u256 to Address (take lower 160 bits)
@@ -2024,6 +2143,7 @@ test "MinimalFrame JUMP and JUMPI validation" {
             0,
             &.{},
             &evm,
+            .CANCUN,
         );
         defer frame.deinit();
 
@@ -2052,6 +2172,7 @@ test "MinimalFrame JUMP and JUMPI validation" {
             0,
             &.{},
             &evm,
+            .CANCUN,
         );
         defer frame.deinit();
 
@@ -2080,6 +2201,7 @@ test "MinimalFrame JUMP and JUMPI validation" {
             0,
             &.{},
             &evm,
+            .CANCUN,
         );
         defer frame.deinit();
 
@@ -2108,6 +2230,7 @@ test "MinimalFrame JUMP and JUMPI validation" {
             0,
             &.{},
             &evm,
+            .CANCUN,
         );
         defer frame.deinit();
 
@@ -2136,6 +2259,7 @@ test "MinimalFrame JUMP and JUMPI validation" {
             0,
             &.{},
             &evm,
+            .CANCUN,
         );
         defer frame.deinit();
 
@@ -2162,6 +2286,7 @@ test "MinimalFrame JUMP and JUMPI validation" {
             0,
             &.{},
             &evm,
+            .CANCUN,
         );
         defer frame.deinit();
 

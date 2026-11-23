@@ -46,7 +46,7 @@ pub const PcTracker = struct {
 
         // Validate we're within bytecode bounds
         if (self.pc >= self.bytecode.len) {
-            log.err("PcTracker: PC out of bounds: pc={} len={}", .{ self.pc, self.bytecode.len });
+            log.warn("PcTracker: PC out of bounds: pc={} len={}", .{ self.pc, self.bytecode.len });
             self.valid = false;
             return;
         }
@@ -56,7 +56,7 @@ pub const PcTracker = struct {
 
         // Validate opcode matches
         if (expected_opcode != opcode) {
-            log.err("PcTracker: Opcode mismatch at PC {}: expected 0x{x:0>2} ({s}), got 0x{x:0>2} ({s})", .{
+            log.warn("PcTracker: Opcode mismatch at PC {}: expected 0x{x:0>2} ({s}), got 0x{x:0>2} ({s})", .{
                 self.pc,
                 expected_opcode,
                 getOpcodeName(expected_opcode),
@@ -89,7 +89,7 @@ pub const PcTracker = struct {
                 // Read destination from stack (top element)
                 const stack_size = frame.stack.size();
                 if (stack_size == 0) {
-                    log.err("PcTracker: JUMP with empty stack", .{});
+                    log.warn("PcTracker: JUMP with empty stack", .{});
                     self.valid = false;
                     return;
                 }
@@ -99,7 +99,7 @@ pub const PcTracker = struct {
 
                 // Validate destination is within bounds
                 if (dest > std.math.maxInt(u32)) {
-                    log.err("PcTracker: JUMP destination out of range: 0x{x}", .{dest});
+                    log.warn("PcTracker: JUMP destination out of range: 0x{x}", .{dest});
                     self.valid = false;
                     return;
                 }
@@ -108,7 +108,7 @@ pub const PcTracker = struct {
 
                 // Validate destination is a JUMPDEST
                 if (dest_pc >= self.bytecode.len or self.bytecode[dest_pc] != 0x5b) {
-                    log.err("PcTracker: JUMP to invalid destination PC={} (not JUMPDEST)", .{dest_pc});
+                    log.warn("PcTracker: JUMP to invalid destination PC={} (not JUMPDEST)", .{dest_pc});
                     self.valid = false;
                     return;
                 }
@@ -122,7 +122,7 @@ pub const PcTracker = struct {
                 // Read destination and condition from stack
                 const stack_size = frame.stack.size();
                 if (stack_size < 2) {
-                    log.err("PcTracker: JUMPI with insufficient stack", .{});
+                    log.warn("PcTracker: JUMPI with insufficient stack", .{});
                     self.valid = false;
                     return;
                 }
@@ -134,7 +134,7 @@ pub const PcTracker = struct {
                 if (condition != 0) {
                     // Jump taken
                     if (dest > std.math.maxInt(u32)) {
-                        log.err("PcTracker: JUMPI destination out of range: 0x{x}", .{dest});
+                        log.warn("PcTracker: JUMPI destination out of range: 0x{x}", .{dest});
                         self.valid = false;
                         return;
                     }
@@ -143,7 +143,7 @@ pub const PcTracker = struct {
 
                     // Validate destination is a JUMPDEST
                     if (dest_pc >= self.bytecode.len or self.bytecode[dest_pc] != 0x5b) {
-                        log.err("PcTracker: JUMPI to invalid destination PC={} (not JUMPDEST)", .{dest_pc});
+                        log.warn("PcTracker: JUMPI to invalid destination PC={} (not JUMPDEST)", .{dest_pc});
                         self.valid = false;
                         return;
                     }
@@ -164,7 +164,7 @@ pub const PcTracker = struct {
 
                 // Validate we have enough bytecode for the push data
                 if (new_pc > self.bytecode.len) {
-                    log.err("PcTracker: PUSH{} at PC={} exceeds bytecode length", .{ push_size, self.pc });
+                    log.warn("PcTracker: PUSH{} at PC={} exceeds bytecode length", .{ push_size, self.pc });
                     self.valid = false;
                     return;
                 }
@@ -209,7 +209,7 @@ pub const PcTracker = struct {
 
             // INVALID opcode
             0xfe => {
-                log.err("PcTracker: INVALID opcode at PC={}", .{self.pc});
+                log.warn("PcTracker: INVALID opcode at PC={}", .{self.pc});
                 self.valid = false;
             },
 
@@ -233,17 +233,17 @@ pub const PcTracker = struct {
     /// Validate a known static jump (for compile-time known jumps)
     pub fn validateStaticJump(self: *PcTracker, from_pc: u32, to_pc: u32) bool {
         if (self.pc != from_pc) {
-            log.err("PcTracker: Static jump validation failed - current PC {} != expected {}", .{ self.pc, from_pc });
+            log.warn("PcTracker: Static jump validation failed - current PC {} != expected {}", .{ self.pc, from_pc });
             return false;
         }
 
         if (to_pc >= self.bytecode.len) {
-            log.err("PcTracker: Static jump destination {} out of bounds", .{to_pc});
+            log.warn("PcTracker: Static jump destination {} out of bounds", .{to_pc});
             return false;
         }
 
         if (self.bytecode[to_pc] != 0x5b) {
-            log.err("PcTracker: Static jump destination {} is not JUMPDEST", .{to_pc});
+            log.warn("PcTracker: Static jump destination {} is not JUMPDEST", .{to_pc});
             return false;
         }
 

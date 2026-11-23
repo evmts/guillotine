@@ -30,6 +30,13 @@ pub fn createModules(
     const precompiles_mod = primitives_dep.module("precompiles");
     const c_kzg_mod = primitives_dep.module("c_kzg");
 
+    // Voltaire's Rust crypto static archive (libcrypto_wrappers.a) references
+    // libunwind symbols (_Unwind_Resume, _Unwind_Backtrace, etc.) on Linux.
+    // Attaching it here ensures every downstream executable/test links cleanly.
+    if (target.result.os.tag == .linux) {
+        crypto_mod.linkSystemLibrary("unwind", .{});
+    }
+
     // Trie module
     const trie_mod = b.createModule(.{
         .root_source_file = b.path("src/trie/root.zig"),

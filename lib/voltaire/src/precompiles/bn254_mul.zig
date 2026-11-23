@@ -22,6 +22,7 @@ pub fn execute(
     @memcpy(input_buf[0..@min(input.len, 96)], input[0..@min(input.len, 96)]);
 
     const output = try allocator.alloc(u8, 64);
+    errdefer allocator.free(output);
 
     // Perform multiplication using pure Zig implementation
     bn254.bn254Mul(&input_buf, output) catch {
@@ -182,7 +183,7 @@ test "bn254Mul - geth chfast3" {
     try testing.expectEqualSlices(u8, &expected, result.output);
 }
 
-test "bn254Mul - geth cdetrio1 empty input" {
+test "bn254Mul - empty input" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
@@ -196,7 +197,7 @@ test "bn254Mul - geth cdetrio1 empty input" {
     try testing.expectEqualSlices(u8, &expected, result.output);
 }
 
-test "bn254Mul - geth cdetrio2 zero scalar" {
+test "bn254Mul - geth zeroScalar" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
@@ -216,7 +217,7 @@ test "bn254Mul - geth cdetrio2 zero scalar" {
     try testing.expectEqualSlices(u8, &expected, result.output);
 }
 
-test "bn254Mul - geth cdetrio3 scalar 1" {
+test "bn254Mul - geth cdetrio15" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
@@ -236,12 +237,12 @@ test "bn254Mul - geth cdetrio3 scalar 1" {
     try testing.expectEqualSlices(u8, &expected, result.output);
 }
 
-test "bn254Mul - geth cdetrio4 scalar 2" {
+test "bn254Mul - scalar 2" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input_hex = "039730ea8dff1254c0fee9c0ea777d29a9c710b7e616683f194f18c43b43b869073a5ffcc6fc7a28c30723d6e58ce577356982d65b833a5a5c15bf9024b43d980000000000000000000000000000000000000000000000000000000000000002";
-    const expected_hex = "1d739bd53b93e2d05f48f9626e5c6803e8cf53e8afb48a62337e42e555e44fa30f13d0f0fbf2aa7969e5b86f27ca82e381bb0b495dc2be5e6ed7d28ce5efde77";
+    const input_hex = "000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000002";
+    const expected_hex = "030644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd315ed738c0e0a7c92e7845f96b2ae9c0a68a6a449e3538fc7ff3ebf7a5a18a2c4";
 
     var input: [96]u8 = undefined;
     var expected: [64]u8 = undefined;
@@ -256,24 +257,24 @@ test "bn254Mul - geth cdetrio4 scalar 2" {
     try testing.expectEqualSlices(u8, &expected, result.output);
 }
 
-test "bn254Mul - geth cdetrio5 invalid point not on curve" {
+test "bn254Mul - invalid point not on curve" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input_hex = "0000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000";
+    const input_hex = "000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000001";
 
-    var input: [95]u8 = undefined;
+    var input: [96]u8 = undefined;
     _ = try std.fmt.hexToBytes(&input, input_hex);
 
     const result = execute(allocator, &input, 1000000);
     try testing.expectError(error.InvalidPoint, result);
 }
 
-test "bn254Mul - geth cdetrio6 generator multiply by group order" {
+test "bn254Mul - generator multiply by group order" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input_hex = "00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141";
+    const input_hex = "0000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000230644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001";
     const expected_hex = "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
 
     var input: [96]u8 = undefined;
@@ -289,12 +290,12 @@ test "bn254Mul - geth cdetrio6 generator multiply by group order" {
     try testing.expectEqualSlices(u8, &expected, result.output);
 }
 
-test "bn254Mul - geth cdetrio7 large scalar" {
+test "bn254Mul - geth cdetrio1" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input_hex = "00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
-    const expected_hex = "00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002";
+    const input_hex = "1a87b0584ce92f4593d161480614f2989035225609f08058ccfa3d0f940febe31a2f3c951f6dadcc7ee9007dff81504b0fcd6d7cf59996efdc33d92bf7f9f8f6ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
+    const expected_hex = "2cde5879ba6f13c0b5aa4ef627f159a3347df9722efce88a9afbb20b763b4c411aa7e43076f6aee272755a7f9b84832e71559ba0d2e0b17d5f9f01755e5b0d11";
 
     var input: [96]u8 = undefined;
     var expected: [64]u8 = undefined;
@@ -309,27 +310,30 @@ test "bn254Mul - geth cdetrio7 large scalar" {
     try testing.expectEqualSlices(u8, &expected, result.output);
 }
 
-test "bn254Mul - geth cdetrio8 large x coordinate multiplication" {
+test "bn254Mul - geth cdetrio8" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input_hex = "17c139df0efee0f766bc0204762b774362e4ded88953a39ce849a8a7fa163fa901e0559bacb160664764a357af8a9fe70baa9258e0b959273ffc5718c6d4cc7c00000000000000000000000000000000000000000000000000000000000000";
+    const input_hex = "17c139df0efee0f766bc0204762b774362e4ded88953a39ce849a8a7fa163fa901e0559bacb160664764a357af8a9fe70baa9258e0b959273ffc5718c6d4cc7c0000000000000000000000000000000100000000000000000000000000000000";
+    const expected_hex = "221a3577763877920d0d14a91cd59b9479f83b87a653bb41f82a3f6f120cea7c2752c7f64cdd7f0e494bff7b60419f242210f2026ed2ec70f89f78a4c56a1f15";
 
-    var input: [95]u8 = undefined;
+    var input: [96]u8 = undefined;
+    var expected: [64]u8 = undefined;
     _ = try std.fmt.hexToBytes(&input, input_hex);
+    _ = try std.fmt.hexToBytes(&expected, expected_hex);
 
     const result = try execute(allocator, &input, 1000000);
     defer result.deinit(allocator);
 
-    try testing.expectEqual(@as(usize, 64), result.output.len);
+    try testing.expectEqualSlices(u8, &expected, result.output);
 }
 
-test "bn254Mul - geth cdetrio9 multiply by field order" {
+test "bn254Mul - multiply by field order" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
     const input_hex = "0000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000230644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd47";
-    const expected_hex = "00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002";
+    const expected_hex = "113aeccecdaf57cd8c0aace591774949dcdaf892555fa86726fa7e679b89c067246493eeceb7867dda07bb342fd7b460b44635e9f8db1f922a7541a9e93e63ce";
 
     var input: [96]u8 = undefined;
     var expected: [64]u8 = undefined;
@@ -344,7 +348,7 @@ test "bn254Mul - geth cdetrio9 multiply by field order" {
     try testing.expectEqualSlices(u8, &expected, result.output);
 }
 
-test "bn254Mul - geth cdetrio10 invalid coordinate at field modulus" {
+test "bn254Mul - invalid coordinate at field modulus" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
@@ -357,7 +361,7 @@ test "bn254Mul - geth cdetrio10 invalid coordinate at field modulus" {
     try testing.expectError(error.InvalidPoint, result);
 }
 
-test "bn254Mul - geth cdetrio11 invalid coordinate exceeds field modulus" {
+test "bn254Mul - invalid coordinate exceeds field modulus" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
@@ -370,12 +374,32 @@ test "bn254Mul - geth cdetrio11 invalid coordinate exceeds field modulus" {
     try testing.expectError(error.InvalidPoint, result);
 }
 
-test "bn254Mul - geth cdetrio12 partial input zero padded" {
+test "bn254Mul - geth cdetrio3 with a zero-padded scalar" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    const input_hex = "1a87b0584ce92f4593d161480614f2989035225609f08058ccfa3d0f940febe31a2f3c951f6dadcc7ee9007dff81504b0fcd6d7cf59996efdc33d92bf7f9f8f600000000000000000000000000000001";
+    const expected_hex = "1051acb0700ec6d42a88215852d582efbaef31529b6fcbc3277b5c1b300f5cf0135b2394bb45ab04b8bd7611bd2dfe1de6a4e6e2ccea1ea1955f577cd66af85b";
+
+    var input: [80]u8 = undefined;
+    var expected: [64]u8 = undefined;
+
+    _ = try std.fmt.hexToBytes(&input, input_hex);
+    _ = try std.fmt.hexToBytes(&expected, expected_hex);
+
+    const result = try execute(allocator, &input, 1000000);
+    defer result.deinit(allocator);
+
+    try testing.expectEqual(@as(usize, 64), result.output.len);
+    try testing.expectEqualSlices(u8, &expected, result.output);
+}
+
+test "bn254Mul - valid point with omitted scalar" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
     const input_hex = "00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002";
-    const expected_hex = "00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002";
+    const expected_hex = "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
 
     var input: [64]u8 = undefined;
     var expected: [64]u8 = undefined;
@@ -390,32 +414,12 @@ test "bn254Mul - geth cdetrio12 partial input zero padded" {
     try testing.expectEqualSlices(u8, &expected, result.output);
 }
 
-test "bn254Mul - geth cdetrio13 truncated valid point" {
-    const testing = std.testing;
-    const allocator = testing.allocator;
-
-    const input_hex = "00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002";
-    const expected_hex = "00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002";
-
-    var input: [64]u8 = undefined;
-    var expected: [64]u8 = undefined;
-
-    _ = try std.fmt.hexToBytes(&input, input_hex);
-    _ = try std.fmt.hexToBytes(&expected, expected_hex);
-
-    const result = try execute(allocator, &input, 1000000);
-    defer result.deinit(allocator);
-
-    try testing.expectEqual(@as(usize, 64), result.output.len);
-    try testing.expectEqualSlices(u8, &expected, result.output);
-}
-
-test "bn254Mul - geth cdetrio14 scalar between group and field order" {
+test "bn254Mul - scalar between group and field order" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
     const input_hex = "0000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000230644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd46";
-    const expected_hex = "2de8fce56ce70f01c8ff690e52bdfce39b24b0fa5bd98f1d29aa46631e55f8ba0dc04b9bee5afcbc73b3e4a3c84d1e90f5d9f1e93ba73d7ae914ffd9c48f43ed";
+    const expected_hex = "0ccbec17235f5b9cc5e42f3df6364a76ecdd0101ddda8fc5dc0ba0b59c0e562829c5588f6a70fe3f355665f3a1813dde5f24053278d75af5cfa62eea8f3e599a";
 
     var input: [96]u8 = undefined;
     var expected: [64]u8 = undefined;
@@ -430,12 +434,12 @@ test "bn254Mul - geth cdetrio14 scalar between group and field order" {
     try testing.expectEqualSlices(u8, &expected, result.output);
 }
 
-test "bn254Mul - geth cdetrio15 explicit zero scalar from geth" {
+test "bn254Mul - geth cdetrio14" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const input_hex = "039730ea8dff1254c0fee9c0ea777d29a9c710b7e616683f194f18c43b43b869073a5ffcc6fc7a28c30723d6e58ce577356982d65b833a5a5c15bf9024b43d980000000000000000000000000000000000000000000000000000000000000000";
-    const expected_hex = "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+    const input_hex = "039730ea8dff1254c0fee9c0ea777d29a9c710b7e616683f194f18c43b43b869073a5ffcc6fc7a28c30723d6e58ce577356982d65b833a5a5c15bf9024b43d980000000000000000000000000000000000000000000000000000000000000009";
+    const expected_hex = "19f75b9dd68c080a688774a6213f131e3052bd353a304a189d7a2ee367e3c2582612f545fb9fc89fde80fd81c68fc7dcb27fea5fc124eeda69433cf5c46d2d7f";
 
     var input: [96]u8 = undefined;
     var expected: [64]u8 = undefined;

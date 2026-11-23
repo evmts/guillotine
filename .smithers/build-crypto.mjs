@@ -9,8 +9,8 @@ mkdirSync(".smithers/cache", { recursive: true })
 const stage = mkdtempSync(resolve(".smithers/cache/voltaire-"))
 try {
   const manifest = readFileSync("lib/voltaire/Cargo.toml", "utf8")
-  const stagedManifest = /^\s*\[workspace\]/m.test(manifest) ? manifest : `${manifest}\n[workspace]\n`
-  writeFileSync(`${stage}/Cargo.toml`, stagedManifest)
+  const hasWorkspace = /^\s*\[workspace\]/m.test(manifest)
+  writeFileSync(`${stage}/Cargo.toml`, hasWorkspace ? manifest : `${manifest}\n[workspace]\n`)
   cpSync("lib/voltaire/Cargo.lock", `${stage}/Cargo.lock`)
   cpSync("lib/voltaire/src/crypto", `${stage}/src/crypto`, { recursive: true })
   const result = spawnSync("cargo", ["build", "--manifest-path", `${stage}/Cargo.toml`,

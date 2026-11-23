@@ -219,26 +219,17 @@ pub const ProofNodes = struct {
                     if (remaining_path.len == 0) {
                         // End of path, check value at position 16
                         switch (items[16]) {
-                            .String => |value_rlp| {
-                                // Branch value is RLP-encoded
-                                const value_decoded = try primitives.Rlp.decode(allocator, value_rlp, false);
-                                defer value_decoded.data.deinit(allocator);
-
-                                switch (value_decoded.data) {
-                                    .String => |value| {
-                                        if (value.len == 0) {
-                                            // No value
-                                            return expected_value == null;
-                                        } else {
-                                            // Has value
-                                            if (expected_value) |expected| {
-                                                return std.mem.eql(u8, value, expected);
-                                            } else {
-                                                return false; // Value exists but none expected
-                                            }
-                                        }
-                                    },
-                                    .List => return ProofError.CorruptedNode, // Invalid value format
+                            .String => |value| {
+                                if (value.len == 0) {
+                                    // No value
+                                    return expected_value == null;
+                                } else {
+                                    // Has value
+                                    if (expected_value) |expected| {
+                                        return std.mem.eql(u8, value, expected);
+                                    } else {
+                                        return false; // Value exists but none expected
+                                    }
                                 }
                             },
                             .List => return ProofError.CorruptedNode, // Invalid value format
@@ -252,48 +243,39 @@ pub const ProofNodes = struct {
 
                         // Check the branch at this position
                         switch (items[nibble]) {
-                            .String => |next_rlp| {
-                                // Branch children are RLP-encoded
-                                const next_decoded = try primitives.Rlp.decode(allocator, next_rlp, false);
-                                defer next_decoded.data.deinit(allocator);
+                            .String => |next| {
+                                if (next.len == 0) {
+                                    // No child at this position
+                                    return expected_value == null;
+                                } else if (next.len == 32) {
+                                    // Child is a hash reference
+                                    var hash_buf: [32]u8 = undefined;
+                                    @memcpy(&hash_buf, next);
 
-                                switch (next_decoded.data) {
-                                    .String => |next| {
-                                        if (next.len == 0) {
-                                            // No child at this position
-                                            return expected_value == null;
-                                        } else if (next.len == 32) {
-                                            // Child is a hash reference
-                                            var hash_buf: [32]u8 = undefined;
-                                            @memcpy(&hash_buf, next);
+                                    // Get the next node
+                                    const hash_str = try bytes_to_hex_string(allocator, &hash_buf);
+                                    defer allocator.free(hash_str);
 
-                                            // Get the next node
-                                            const hash_str = try bytes_to_hex_string(allocator, &hash_buf);
-                                            defer allocator.free(hash_str);
+                                    const next_node_data = self.nodes.get(hash_str) orelse {
+                                        return ProofError.MissingNode;
+                                    };
 
-                                            const next_node_data = self.nodes.get(hash_str) orelse {
-                                                return ProofError.MissingNode;
-                                            };
+                                    // Verify the next node hash
+                                    var next_hash_buf: [32]u8 = undefined;
+                                    std.crypto.hash.sha3.Keccak256.hash(next_node_data, &next_hash_buf, .{});
+                                    if (!std.mem.eql(u8, &next_hash_buf, &hash_buf)) {
+                                        return ProofError.InvalidProof;
+                                    }
 
-                                            // Verify the next node hash
-                                            var next_hash_buf: [32]u8 = undefined;
-                                            std.crypto.hash.sha3.Keccak256.hash(next_node_data, &next_hash_buf, .{});
-                                            if (!std.mem.eql(u8, &next_hash_buf, &hash_buf)) {
-                                                return ProofError.InvalidProof;
-                                            }
+                                    // Decode the next node
+                                    const next_node_decoded = try primitives.Rlp.decode(allocator, next_node_data, false);
+                                    defer next_node_decoded.data.deinit(allocator);
 
-                                            // Decode the next node
-                                            const next_node_decoded = try primitives.Rlp.decode(allocator, next_node_data, false);
-                                            defer next_node_decoded.data.deinit(allocator);
-
-                                            // Continue verification
-                                            return try self.verify_path(allocator, next_node_decoded.data, remaining_path[1..], expected_value);
-                                        } else {
-                                            // Direct value reference - shouldn't happen in well-formed trie
-                                            return ProofError.CorruptedNode;
-                                        }
-                                    },
-                                    .List => return ProofError.CorruptedNode, // Invalid child format
+                                    // Continue verification
+                                    return try self.verify_path(allocator, next_node_decoded.data, remaining_path[1..], expected_value);
+                                } else {
+                                    // Direct value reference - shouldn't happen in well-formed trie
+                                    return ProofError.CorruptedNode;
                                 }
                             },
                             .List => return ProofError.CorruptedNode, // Invalid child format

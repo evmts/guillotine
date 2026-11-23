@@ -805,8 +805,9 @@ pub const Blake2 = struct {
         const t1_bytes: *const [8]u8 = @ptrCast(input[204..212].ptr);
         t[1] = std.mem.readInt(u64, t1_bytes, .little);
 
-        // Parse f (1 byte, boolean)
-        const f = input[212] != 0;
+        // Parse f (1 byte, EIP-152 strictly requires 0x00 or 0x01)
+        if (input[212] != 0 and input[212] != 1) return error.InvalidInput;
+        const f = input[212] == 1;
 
         // Perform compression
         unauditedBlake2fCompress(&h, &m, t, f, rounds);

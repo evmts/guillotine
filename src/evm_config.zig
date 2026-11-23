@@ -49,6 +49,13 @@ pub const EvmConfig = struct {
     /// When enabled, common opcode patterns like PUSH+ADD are fused into single operations
     enable_fusion: bool = true,
 
+    /// Run hot, eligible pure-compute contracts through the native ARM64 JIT tier
+    /// (src/jit). Ineligible code, traced runs, initcode and non-aarch64 targets
+    /// always use the interpreter. Native faults replay in the interpreter.
+    /// Opt-in: on current benchmarks the bridge overhead outweighs native speed
+    /// for short calls, so the interpreter remains the default.
+    enable_native_jit: bool = false,
+
     /// Disable gas checks for testing/development (default: false)
     /// When enabled, gas consumption methods become no-ops
     disable_gas_checks: bool = false,

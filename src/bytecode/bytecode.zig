@@ -252,10 +252,8 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
             /// `initial_gas` seeds the total, e.g. 1 for a JUMPDEST that heads the block.
             pub fn calculateBlockInfo(bytecode: *const Self, start_pc: PcType, initial_gas: u32) BlockInfo {
                 const opcode_info = @import("../opcodes/opcode_data.zig").OPCODE_INFO;
-                var gas: u32 = initial_gas;
-                var stack_effect: i32 = 0;
-                var min_stack: i32 = 0;
-                var max_stack: i32 = 0;
+                const verified_ops = @import("../verified_ops.zig");
+                var acc = verified_ops.BlockAccumulator{ .gas = initial_gas };
                 var pc: usize = start_pc;
                 var loop_counter = cfg.createLoopSafetyCounter().init(cfg.loop_quota orelse 0);
 
@@ -265,31 +263,21 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
 
                     if (opcode == 0x5B) break; // Next JUMPDEST starts a new block.
 
-                    // Saturating: an absurd total only makes the block run out of gas.
-                    gas +|= opcode_info[opcode].gas_cost;
-
+                    const cost: u64 = opcode_info[opcode].gas_cost;
                     switch (opcode) {
                         0x60...0x7F => { // PUSH1-PUSH32
                             pc += 1 + @as(usize, opcode - 0x5F);
-                            stack_effect += 1;
-                            if (stack_effect > max_stack) max_stack = stack_effect;
+                            acc.stepPush(cost);
                             continue;
                         },
                         0x80...0x8F => { // DUP1-DUP16 need N items and push one
-                            const min_required = stack_effect - @as(i32, opcode - 0x80 + 1);
-                            if (min_required < min_stack) min_stack = min_required;
-                            stack_effect += 1;
-                            if (stack_effect > max_stack) max_stack = stack_effect;
+                            acc.stepDup(opcode - 0x80 + 1, cost);
                         },
                         0x90...0x9F => { // SWAP1-SWAP16 need N+1 items, size unchanged
-                            const min_required = stack_effect - @as(i32, opcode - 0x90 + 2);
-                            if (min_required < min_stack) min_stack = min_required;
+                            acc.stepSwap(opcode - 0x90 + 1, cost);
                         },
                         else => {
-                            stack_effect -= opcode_info[opcode].stack_inputs;
-                            if (stack_effect < min_stack) min_stack = stack_effect;
-                            stack_effect += opcode_info[opcode].stack_outputs;
-                            if (stack_effect > max_stack) max_stack = stack_effect;
+                            acc.stepRegular(opcode_info[opcode].stack_inputs, opcode_info[opcode].stack_outputs, cost);
                         },
                     }
                     pc += 1;
@@ -308,9 +296,9 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                 }
 
                 return .{
-                    .gas = gas,
-                    .min_stack = @intCast(@abs(min_stack)),
-                    .max_stack = @intCast(@max(0, max_stack)),
+                    .gas = acc.clampedGasU32(),
+                    .min_stack = acc.requiredMinStackI16(),
+                    .max_stack = acc.requiredMaxStackI16(),
                 };
             }
         };

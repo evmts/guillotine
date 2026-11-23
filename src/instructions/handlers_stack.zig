@@ -151,14 +151,8 @@ pub fn Handlers(FrameType: type) type {
                         else => unreachable,
                     };
                     self.beforeInstruction(opcode, cursor);
-                    // CRITICAL: Validate stack has enough items before unsafe operation
-                    // This prevents crashes from invalid bytecode
-                    if (self.stack.size() < dup_n) {
-                        self.afterComplete(opcode);
-                        return Error.StackUnderflow;
-                    }
-                    // Stack overflow validation handled by tracer.assert in stack.dup_n_unsafe()
-                    // The tracer checks: stack_ptr > stack_limit before duplicating
+                    // Basic-block entry validation (first_block_gas / JUMPDEST / BLOCK_BEGIN)
+                    // guarantees stack.size() >= dup_n and stack.size() < stack_capacity (proven by BLOCK-SOUND).
                     self.stack.dup_n_unsafe(dup_n);
                     const dispatch = Dispatch{ .cursor = cursor };
                     // DUP operations don't have metadata, just get next
@@ -212,12 +206,8 @@ pub fn Handlers(FrameType: type) type {
                         else => unreachable,
                     };
                     self.beforeInstruction(opcode, cursor);
-                    // CRITICAL: Validate stack has enough items before unsafe operation
-                    // SWAP needs n+1 items (swap top with n-th from top)
-                    if (self.stack.size() < swap_n + 1) {
-                        self.afterComplete(opcode);
-                        return Error.StackUnderflow;
-                    }
+                    // Basic-block entry validation (first_block_gas / JUMPDEST / BLOCK_BEGIN)
+                    // guarantees stack.size() >= swap_n + 1 (proven by BLOCK-SOUND).
                     self.stack.swap_n_unsafe(swap_n);
                     const dispatch = Dispatch{ .cursor = cursor };
                     // SWAP operations don't have metadata, just get next

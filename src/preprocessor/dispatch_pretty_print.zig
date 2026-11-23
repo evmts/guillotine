@@ -1,7 +1,6 @@
 const std = @import("std");
 const Opcode = @import("../opcodes/opcode_data.zig").Opcode;
 const OpcodeSynthetic = @import("../opcodes/opcode_synthetic.zig").OpcodeSynthetic;
-const log = @import("../log.zig");
 
 /// Pretty print functionality for the dispatch instruction stream.
 /// Provides human-readable visualization of both original bytecode and optimized dispatch arrays.
@@ -41,8 +40,8 @@ pub fn DispatchDebugInfo(comptime FrameType: type) type {
             push_pointer: struct { value_ptr: *const FrameType.WordType, value: FrameType.WordType },
             jump_dest: struct { 
                 gas: u32,
-                min_stack: u16,
-                max_stack: u16,
+                min_stack: i16,
+                max_stack: i16,
                 target_pc: ?u32,
                 target_idx: ?usize,
             },
@@ -162,6 +161,7 @@ pub fn pretty_print(
     // Get debug info first
     var debug_info = try getDebugInfo(allocator, schedule, actual_bytecode, FrameType, ItemType);
     defer debug_info.deinit();
+    const items = scheduleItems(ItemType, schedule);
 
     var output = std.ArrayList(u8){
         .items = &.{},
@@ -171,7 +171,7 @@ pub fn pretty_print(
 
     // Header
     try output.writer(allocator).print("{s}=== EVM Dispatch Instruction Stream ==={s}\n", .{ Colors.bold, Colors.reset });
-    try output.writer(allocator).print("{s}Original bytecode: {} bytes, Dispatch items: {}{s}\n\n", .{ Colors.dim, actual_bytecode.runtime_code.len, schedule.len, Colors.reset });
+    try output.writer(allocator).print("{s}Original bytecode: {} bytes, Dispatch items: {}{s}\n\n", .{ Colors.dim, actual_bytecode.runtime_code.len, items.len, Colors.reset });
     
     // Display validation errors if any
     if (debug_info.validation_errors.items.len > 0) {
@@ -271,14 +271,9 @@ pub fn pretty_print(
                     try output.writer(allocator).print("{s}JUMP_DEST{s}", .{ Colors.bright_magenta, Colors.reset });
                     if (entry.metadata) |meta| {
                         if (meta == .jump_dest) {
-                            const target_pc = meta.jump_dest.target_pc orelse 0;
-                            if (target_pc > 0) {
-                                if (debug_info.pc_to_schedule_map.get(target_pc)) |target_idx| {
-                                    try output.writer(allocator).print(" {s}→ PC=0x{x:0>4} (Schedule[{}]){s}", .{ Colors.dim, target_pc, target_idx, Colors.reset });
-                                } else {
-                                    try output.writer(allocator).print(" {s}→ PC=0x{x:0>4}{s}", .{ Colors.dim, target_pc, Colors.reset });
-                                }
-                            }
+                            try output.writer(allocator).print(" {s}gas={} min_stack={} max_stack={}{s}", .{
+                                Colors.dim, meta.jump_dest.gas, meta.jump_dest.min_stack, meta.jump_dest.max_stack, Colors.reset,
+                            });
                         }
                     }
                 },
@@ -308,8 +303,7 @@ pub fn pretty_print(
                     try output.writer(allocator).print("{s}JUMP_STATIC{s}", .{ Colors.magenta, Colors.reset });
                     if (entry.metadata) |meta| {
                         if (meta == .jump_static) {
-                            const target_pc = meta.jump_static.target_pc orelse 0;
-                            if (target_pc > 0) {
+                            if (meta.jump_static.target_pc) |target_pc| {
                                 try output.writer(allocator).print(" {s}→ PC=0x{x:0>4}{s}", .{ Colors.dim, target_pc, Colors.reset });
                             }
                         }
@@ -332,8 +326,8 @@ pub fn pretty_print(
     } else {
         // Fallback to simple display if no debug entries
         var i: usize = 0;
-        while (i < schedule.len) {
-            try output.writer(allocator).print("{s}[{d:3}]:{s} {s}@{*}{s} ", .{ Colors.dim, i, Colors.reset, Colors.cyan, &schedule[i], Colors.reset });
+        while (i < items.len) {
+            try output.writer(allocator).print("{s}[{d:3}]:{s} {s}@{*}{s} ", .{ Colors.dim, i, Colors.reset, Colors.cyan, &items[i], Colors.reset });
             try output.writer(allocator).print("{s}ITEM{s}\n", .{ Colors.blue, Colors.reset });
             i += 1;
         }
@@ -342,44 +336,43 @@ pub fn pretty_print(
     // Summary section
     try output.writer(allocator).print("\n{s}--- Summary ---{s}\n", .{ Colors.bold, Colors.reset });
 
-    const total_items = schedule.len;
+    const total_items = items.len;
 
     try output.writer(allocator).print("{s}Total dispatch items: {}{s}\n", .{ Colors.dim, total_items, Colors.reset });
-    try output.writer(allocator).print("{s}Compression ratio: {d:.2}x (bytecode:{} -> dispatch:{}){s}\n", .{ Colors.dim, if (schedule.len > 0) @as(f64, @floatFromInt(actual_bytecode.runtime_code.len)) / @as(f64, @floatFromInt(schedule.len)) else 0.0, actual_bytecode.runtime_code.len, schedule.len, Colors.reset });
+    try output.writer(allocator).print("{s}Compression ratio: {d:.2}x (bytecode:{} -> dispatch:{}){s}\n", .{ Colors.dim, if (items.len > 0) @as(f64, @floatFromInt(actual_bytecode.runtime_code.len)) / @as(f64, @floatFromInt(items.len)) else 0.0, actual_bytecode.runtime_code.len, items.len, Colors.reset });
 
     return output.toOwnedSlice(allocator);
 }
 
-/// Get comprehensive debug information about a dispatch schedule
-/// This includes validation against bytecode and reverse handler lookups
+fn scheduleItems(comptime Item: type, schedule: anytype) []const Item {
+    return if (@typeInfo(@TypeOf(schedule)) == .@"struct") schedule.items else schedule;
+}
+
+/// Inspect the schedule with its debug kinds when available. Raw slices and
+/// optimized schedules use the same layout replay as the legacy jump table.
 pub fn getDebugInfo(
     allocator: std.mem.Allocator,
-    dispatch_schedule: anytype, // DispatchSchedule type or raw schedule data
+    dispatch_schedule: anytype,
     bytecode: anytype,
     comptime FrameType: type,
     comptime Item: type,
 ) !DispatchDebugInfo(FrameType) {
-    // Get schedule items - handle both raw array and struct with items field
-    const schedule_items = if (@TypeOf(dispatch_schedule) == []const Item) 
-        dispatch_schedule
-    else if (@hasField(@TypeOf(dispatch_schedule), "items"))
-        dispatch_schedule.items
-    else
-        @as([]const Item, dispatch_schedule);
-    
-    log.debug("getDebugInfo: Starting analysis of schedule with {} items", .{schedule_items.len});
-    
+    const Dispatch = FrameType.Dispatch;
+    const schedule = scheduleItems(Item, dispatch_schedule);
+    const has_sidecar = @typeInfo(@TypeOf(dispatch_schedule)) == .@"struct";
+    const kinds: []const Dispatch.ItemKind = if (has_sidecar) dispatch_schedule.item_kinds else &.{};
+
     const DebugInfo = DispatchDebugInfo(FrameType);
     var debug_info = DebugInfo{
         .handler_map = std.hash_map.HashMap(*const anyopaque, DebugInfo.OpcodeInfo, std.hash_map.AutoContext(*const anyopaque), 80).init(allocator),
-        .schedule_entries = undefined,
-        .validation_errors = std.ArrayList(DebugInfo.ValidationError){},
+        .schedule_entries = &.{},
+        .validation_errors = .empty,
         .pc_to_schedule_map = std.hash_map.HashMap(u32, usize, std.hash_map.AutoContext(u32), 80).init(allocator),
         .jumpdest_map = std.hash_map.HashMap(u32, usize, std.hash_map.AutoContext(u32), 80).init(allocator),
         .allocator = allocator,
     };
     errdefer debug_info.deinit();
-    
+
     // Build reverse handler map from opcode handlers
     const frame_handlers = @import("../frame/frame_handlers.zig");
     const opcode_handlers = frame_handlers.getOpcodeHandlers(FrameType, &.{});
@@ -410,515 +403,218 @@ pub fn getDebugInfo(
         });
     }
     
-    // Allocate schedule entries
-    var entries = std.ArrayList(DebugInfo.ScheduleEntry){};
-    defer entries.deinit(allocator);
-    
-    // Create bytecode iterator
-    var bytecode_iter = bytecode.createIterator();
-    var schedule_idx: usize = 0;
-    
-    // Check for first_block_gas metadata
-    if (schedule_idx < schedule_items.len) {
-        if (schedule_items[schedule_idx] == .first_block_gas) {
-            const gas_value = schedule_items[schedule_idx].first_block_gas.gas;
-            try entries.append(allocator, .{
-                .schedule_index = schedule_idx,
-                .pc = null,
-                .item_type = .first_block_gas,
-                .handler_ptr = null,
-                .handler_name = null,
-                .metadata = .{ .first_block_gas = .{ .gas = gas_value } },
-                .expected_from_bytecode = null,
-                .validation_status = .valid,
-            });
-            schedule_idx += 1;
-        }
+    var iter = Dispatch.scheduleIterator(bytecode);
+    if (has_sidecar and dispatch_schedule.has_first_block_gas != iter.has_first_block_gas) {
+        try addValidationError(&debug_info, 0, null, "First block metadata mismatch", "bytecode layout", "schedule flag");
+        return debug_info;
     }
-    
-    // Iterate through bytecode and validate against schedule
-    while (true) {
-        const bytecode_pc = bytecode_iter.pc;
-        const maybe_op = bytecode_iter.next();
-        if (maybe_op == null) break;
-        const op_data = maybe_op.?;
-        
-        // Record PC to schedule mapping
-        try debug_info.pc_to_schedule_map.put(@intCast(bytecode_pc), schedule_idx);
-        
-        switch (op_data) {
-            .regular => |data| {
-                if (schedule_idx >= schedule_items.len) {
-                    try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Schedule underrun", "opcode handler", "end of schedule");
-                    break;
-                }
-                
-                const item = schedule_items[schedule_idx];
-                if (item != .opcode_handler) {
-                    try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Expected opcode handler", "opcode_handler", @tagName(item));
-                    try entries.append(allocator, .{
-                        .schedule_index = schedule_idx,
-                        .pc = @intCast(bytecode_pc),
-                        .item_type = switch (item) {
-                            .opcode_handler => .opcode_handler,
-                            .jump_dest => .jump_dest,
-                            .push_inline => .push_inline,
-                            .push_pointer => .push_pointer,
-                            .pc => .pc,
-                            .jump_static => .jump_static,
-                            .first_block_gas => .first_block_gas,
-                        },
-                        .handler_ptr = null,
-                        .handler_name = "UNEXPECTED",
-                        .metadata = null,
-                        .expected_from_bytecode = null,
-                        .validation_status = .unexpected_item,
-                    });
-                } else {
-                    const handler_ptr = @as(*const anyopaque, @ptrCast(item.opcode_handler));
-                    const handler_info = debug_info.handler_map.get(handler_ptr);
-                    const expected_opcode = std.meta.intToEnum(Opcode, data.opcode) catch unreachable;
-                    
-                    var validation_status: DebugInfo.ValidationStatus = .valid;
-                    if (handler_info) |info| {
-                        if (info.opcode != expected_opcode) {
-                            validation_status = .handler_mismatch;
-                            try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Handler mismatch", @tagName(expected_opcode), info.name);
-                        }
-                    }
-                    
-                    try entries.append(allocator, .{
-                        .schedule_index = schedule_idx,
-                        .pc = @intCast(bytecode_pc),
-                        .item_type = .opcode_handler,
-                        .handler_ptr = handler_ptr,
-                        .handler_name = if (handler_info) |info| info.name else "UNKNOWN",
-                        .metadata = null,
-                        .expected_from_bytecode = .{ .regular = .{
-                            .opcode = expected_opcode,
-                            .pc = @intCast(bytecode_pc),
-                        }},
-                        .validation_status = validation_status,
-                    });
-                }
-                schedule_idx += 1;
 
-                // If this opcode carries inline PC metadata in the schedule (PC opcode),
-                // consume and record the following .pc metadata item to keep schedule_idx
-                // synchronized with subsequent bytecode entries.
-                if (std.meta.intToEnum(Opcode, data.opcode) catch unreachable == .PC) {
-                    if (schedule_idx < schedule_items.len) {
-                        const maybe_meta = schedule_items[schedule_idx];
-                        if (maybe_meta == .pc) {
-                            const meta = maybe_meta.pc;
-                            try entries.append(allocator, .{
-                                .schedule_index = schedule_idx,
-                                .pc = @intCast(bytecode_pc),
-                                .item_type = .pc,
-                                .handler_ptr = null,
-                                .handler_name = null,
-                                .metadata = .{ .pc = .{ .value = meta.value } },
-                                .expected_from_bytecode = null,
-                                .validation_status = .valid,
-                            });
-                            schedule_idx += 1;
-                        }
-                    }
-                }
-            },
-            
-            .push => |data| {
-                if (schedule_idx >= schedule_items.len) {
-                    try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Schedule underrun", "push handler", "end of schedule");
-                    break;
-                }
-                
-                // Expect push handler
-                const handler_item = schedule_items[schedule_idx];
-                if (handler_item != .opcode_handler) {
-                    try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Expected push handler", "opcode_handler", @tagName(handler_item));
-                } else {
-                    const handler_ptr = @as(*const anyopaque, @ptrCast(handler_item.opcode_handler));
-                    const handler_info = debug_info.handler_map.get(handler_ptr);
-                    
-                    try entries.append(allocator, .{
-                        .schedule_index = schedule_idx,
-                        .pc = @intCast(bytecode_pc),
-                        .item_type = .opcode_handler,
-                        .handler_ptr = handler_ptr,
-                        .handler_name = if (handler_info) |info| info.name else "UNKNOWN",
-                        .metadata = null,
-                        .expected_from_bytecode = .{ .push = .{
-                            .opcode = @enumFromInt(0x60 + data.size - 1),
-                            .value = data.value,
-                            .size = data.size,
-                            .pc = @intCast(bytecode_pc),
-                        }},
-                        .validation_status = .valid,
-                    });
-                }
-                schedule_idx += 1;
-                
-                // Expect push metadata
-                if (schedule_idx >= schedule_items.len) {
-                    try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Schedule underrun", "push metadata", "end of schedule");
-                    break;
-                }
-                
-                const metadata_item = schedule_items[schedule_idx];
-                switch (metadata_item) {
-                    .push_inline => |meta| {
-                        try entries.append(allocator, .{
-                            .schedule_index = schedule_idx,
-                            .pc = @intCast(bytecode_pc),
-                            .item_type = .push_inline,
-                            .handler_ptr = null,
-                            .handler_name = null,
-                            .metadata = .{ .push_inline = .{ .value = meta.value } },
-                            .expected_from_bytecode = null,
-                            .validation_status = if (meta.value == @as(u64, @intCast(data.value))) .valid else .metadata_mismatch,
-                        });
-                        if (meta.value != @as(u64, @intCast(data.value))) {
-                            try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Push value mismatch", 
-                                try std.fmt.allocPrint(allocator, "0x{x}", .{data.value}),
-                                try std.fmt.allocPrint(allocator, "0x{x}", .{meta.value}));
-                        }
-                    },
-                    .push_pointer => |meta| {
-                        // Cannot validate u256 value without access to DispatchSchedule.u256_values
-                        try entries.append(allocator, .{
-                            .schedule_index = schedule_idx,
-                            .pc = @intCast(bytecode_pc),
-                            .item_type = .push_pointer,
-                            .handler_ptr = null,
-                            .handler_name = null,
-                            .metadata = .{ .push_pointer = .{ .value_ptr = meta.value_ptr, .value = data.value } }, // Use expected value
-                            .expected_from_bytecode = null,
-                            .validation_status = .valid, // Assume valid since we can't verify
-                        });
-                    },
-                    else => {
-                        try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Expected push metadata", "push_inline or push_pointer", @tagName(metadata_item));
-                    },
-                }
-                schedule_idx += 1;
-            },
-            
-            .jumpdest => |data| {
-                // Record jumpdest location
-                try debug_info.jumpdest_map.put(@intCast(bytecode_pc), schedule_idx);
-                
-                if (schedule_idx >= schedule_items.len) {
-                    try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Schedule underrun", "jumpdest handler", "end of schedule");
-                    break;
-                }
-                
-                // Expect jumpdest handler
-                const handler_item = schedule_items[schedule_idx];
-                if (handler_item != .opcode_handler) {
-                    try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Expected jumpdest handler", "opcode_handler", @tagName(handler_item));
-                } else {
-                    const handler_ptr = @as(*const anyopaque, @ptrCast(handler_item.opcode_handler));
-                    const handler_info = debug_info.handler_map.get(handler_ptr);
-                    
-                    try entries.append(allocator, .{
-                        .schedule_index = schedule_idx,
-                        .pc = @intCast(bytecode_pc),
-                        .item_type = .opcode_handler,
-                        .handler_ptr = handler_ptr,
-                        .handler_name = if (handler_info) |info| info.name else "UNKNOWN",
-                        .metadata = null,
-                        .expected_from_bytecode = .{ .jumpdest = .{
-                            .pc = @intCast(bytecode_pc),
-                            .gas = data.gas_cost,
-                        }},
-                        .validation_status = .valid,
-                    });
-                }
-                schedule_idx += 1;
-                
-                // Expect jump_dest metadata
-                if (schedule_idx >= schedule_items.len) {
-                    try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Schedule underrun", "jump_dest metadata", "end of schedule");
-                    break;
-                }
-                
-                const metadata_item = schedule_items[schedule_idx];
-                if (metadata_item != .jump_dest) {
-                    try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Expected jump_dest metadata", "jump_dest", @tagName(metadata_item));
-                } else {
-                    const meta = metadata_item.jump_dest;
-                    try entries.append(allocator, .{
-                        .schedule_index = schedule_idx,
-                        .pc = @intCast(bytecode_pc),
-                        .item_type = .jump_dest,
-                        .handler_ptr = null,
-                        .handler_name = null,
-                        .metadata = .{ .jump_dest = .{
-                            .gas = meta.gas,
-                            .min_stack = 0, // These fields aren't in the current metadata
-                            .max_stack = 0,
-                            .target_pc = null,
-                            .target_idx = null,
-                        }},
-                        .expected_from_bytecode = null,
-                        .validation_status = .valid,
-                    });
-                }
-                schedule_idx += 1;
-            },
-            
-            .push_jump_fusion, .push_jumpi_fusion => {
-                if (schedule_idx >= schedule_items.len) {
-                    try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Schedule underrun", "fusion handler", "end of schedule");
-                    break;
-                }
-                
-                const handler_item = schedule_items[schedule_idx];
-                if (handler_item != .opcode_handler) {
-                    try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Expected fusion handler", "opcode_handler", @tagName(handler_item));
-                } else {
-                    const handler_ptr = @as(*const anyopaque, @ptrCast(handler_item.opcode_handler));
-                    const handler_info = debug_info.handler_map.get(handler_ptr);
-                    
-                    const is_jumpi = op_data == .push_jumpi_fusion;
-                    const expected_synthetic = if (is_jumpi) OpcodeSynthetic.JUMPI_TO_STATIC_LOCATION else OpcodeSynthetic.JUMP_TO_STATIC_LOCATION;
-                    
-                    try entries.append(allocator, .{
-                        .schedule_index = schedule_idx,
-                        .pc = @intCast(bytecode_pc),
-                        .item_type = .opcode_handler,
-                        .handler_ptr = handler_ptr,
-                        .handler_name = if (handler_info) |info| info.name else "UNKNOWN",
-                        .metadata = null,
-                        .expected_from_bytecode = .{ .fusion = .{
-                            .opcodes = if (is_jumpi) &[_]Opcode{ .PUSH1, .SWAP1, .JUMPI } else &[_]Opcode{ .PUSH1, .JUMP },
-                            .synthetic = expected_synthetic,
-                            .pc = @intCast(bytecode_pc),
-                        }},
-                        .validation_status = .valid,
-                    });
-                }
-                schedule_idx += 1;
-                
-                // Expect jump_static metadata
-                if (schedule_idx >= schedule_items.len) {
-                    try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Schedule underrun", "jump_static metadata", "end of schedule");
-                    break;
-                }
-                
-                const metadata_item = schedule_items[schedule_idx];
-                if (metadata_item != .jump_static) {
-                    try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Expected jump_static metadata", "jump_static", @tagName(metadata_item));
-                } else {
-                    const meta = metadata_item.jump_static;
-                    // Try to find target schedule index from dispatch pointer
-                    var target_idx: ?usize = null;
-                    var target_pc: ?u32 = null;
-                    
-                    // Search for the target in schedule
-                    const target_ptr = @intFromPtr(meta.dispatch);
-                    const schedule_base = @intFromPtr(schedule_items.ptr);
-                    if (target_ptr >= schedule_base and target_ptr < schedule_base + schedule_items.len * @sizeOf(Item)) {
-                        target_idx = (target_ptr - schedule_base) / @sizeOf(Item);
-                        // Look up PC from our map (reverse lookup)
-                        var pc_iter = debug_info.pc_to_schedule_map.iterator();
-                        while (pc_iter.next()) |entry| {
-                            if (entry.value_ptr.* == target_idx.?) {
-                                target_pc = entry.key_ptr.*;
-                                break;
-                            }
-                        }
-                    }
-                    
-                    const expected_target = switch (op_data) {
-                        .push_jump_fusion => |fusion| @as(u32, @intCast(fusion.value)),
-                        .push_jumpi_fusion => |fusion| @as(u32, @intCast(fusion.value)),
+    var layout = iter;
+    while (try layout.next()) |entry| {
+        const pc: u32 = @intCast(entry.pc);
+        try debug_info.pc_to_schedule_map.put(pc, entry.schedule_index);
+        if (entry.op == .jumpdest) try debug_info.jumpdest_map.put(pc, entry.schedule_index);
+    }
+
+    const implicit_stop_index = layout.schedule_index;
+    const expected_len = implicit_stop_index + Dispatch.terminal_item_count;
+    if (schedule.len != expected_len or (kinds.len != 0 and kinds.len != schedule.len)) {
+        try addValidationError(&debug_info, @min(schedule.len, expected_len), null, "Schedule length mismatch", "bytecode layout", "schedule items or kinds");
+        if (kinds.len == 0 or kinds.len != schedule.len) return debug_info;
+    }
+
+    var entries: std.ArrayList(DebugInfo.ScheduleEntry) = .empty;
+    defer entries.deinit(allocator);
+
+    if (iter.has_first_block_gas and schedule.len != 0) {
+        try appendEntry(FrameType, &debug_info, &entries, schedule, kinds, 0, null, .first_block_gas, null);
+    }
+
+    while (try iter.next()) |entry| {
+        var index = entry.schedule_index;
+        if (index >= schedule.len) break;
+        const pc: u32 = @intCast(entry.pc);
+        const expected: ?DebugInfo.ExpectedOp = switch (entry.op) {
+            .push => |data| .{ .push = .{
+                .opcode = @enumFromInt(0x5f + data.size),
+                .value = @intCast(data.value),
+                .size = data.size,
+                .pc = pc,
+            } },
+            .jumpdest => |data| .{ .jumpdest = .{ .pc = pc, .gas = data.gas_cost } },
+            .stop => .{ .stop = {} },
+            .invalid => .{ .invalid = {} },
+            .push_jump_fusion => .{ .fusion = .{
+                .opcodes = &.{ .PUSH1, .JUMP },
+                .synthetic = .JUMP_TO_STATIC_LOCATION,
+                .pc = pc,
+            } },
+            .push_jumpi_fusion => .{ .fusion = .{
+                .opcodes = &.{ .PUSH1, .JUMPI },
+                .synthetic = .JUMPI_TO_STATIC_LOCATION,
+                .pc = pc,
+            } },
+            .regular, .pc, .jump, .jumpi => if (std.meta.intToEnum(Opcode, bytecode.runtime_code[pc])) |opcode|
+                .{ .regular = .{ .opcode = opcode, .pc = pc } }
+            else |_|
+                null,
+            else => null,
+        };
+        try appendEntry(FrameType, &debug_info, &entries, schedule, kinds, index, pc, .opcode_handler, expected);
+        index += 1;
+        for (entry.metadata) |maybe_kind| {
+            const kind = maybe_kind orelse break;
+            if (index >= schedule.len) break;
+            try appendEntry(FrameType, &debug_info, &entries, schedule, kinds, index, pc, kind, null);
+            const item = &entries.items[entries.items.len - 1];
+            if (item.metadata) |meta| switch (entry.op) {
+                .push => |data| {
+                    const actual = switch (meta) {
+                        .push_inline => |push| @as(FrameType.WordType, @intCast(push.value)),
+                        .push_pointer => |push| push.value,
                         else => unreachable,
                     };
-                    
-                    try entries.append(allocator, .{
-                        .schedule_index = schedule_idx,
-                        .pc = @intCast(bytecode_pc),
-                        .item_type = .jump_static,
-                        .handler_ptr = null,
-                        .handler_name = null,
-                        .metadata = .{ .jump_static = .{
-                            .dispatch_ptr = meta.dispatch,
-                            .target_pc = target_pc,
-                            .target_idx = target_idx,
-                        }},
-                        .expected_from_bytecode = null,
-                        .validation_status = if (target_pc == expected_target) .valid else .metadata_mismatch,
-                    });
-                    
-                    if (target_pc != expected_target) {
-                        try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Jump target mismatch",
-                            try std.fmt.allocPrint(allocator, "PC=0x{x}", .{expected_target}),
-                            try std.fmt.allocPrint(allocator, "PC=0x{x}", .{target_pc orelse 0}));
+                    if (actual != data.value) {
+                        item.validation_status = .metadata_mismatch;
+                        try addValidationError(&debug_info, index, pc, "Push value mismatch", "bytecode immediate", "schedule value");
                     }
-                }
-                schedule_idx += 1;
-            },
-            
-            // Handle other fusion types
-            .push_add_fusion, .push_mul_fusion, .push_sub_fusion, .push_div_fusion,
-            .push_and_fusion, .push_or_fusion, .push_xor_fusion,
-            .push_mload_fusion, .push_mstore_fusion, .push_mstore8_fusion => {
-                if (schedule_idx >= schedule_items.len) {
-                    try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Schedule underrun", "fusion handler", "end of schedule");
-                    break;
-                }
-                
-                const handler_item = schedule_items[schedule_idx];
-                if (handler_item != .opcode_handler) {
-                    try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Expected fusion handler", "opcode_handler", @tagName(handler_item));
-                    try entries.append(allocator, .{
-                        .schedule_index = schedule_idx,
-                        .pc = @intCast(bytecode_pc),
-                        .item_type = switch (handler_item) {
-                            .opcode_handler => .opcode_handler,
-                            .jump_dest => .jump_dest,
-                            .push_inline => .push_inline,
-                            .push_pointer => .push_pointer,
-                            .pc => .pc,
-                            .jump_static => .jump_static,
-                            .first_block_gas => .first_block_gas,
-                        },
-                        .handler_ptr = null,
-                        .handler_name = "UNEXPECTED",
-                        .metadata = null,
-                        .expected_from_bytecode = null,
-                        .validation_status = .unexpected_item,
-                    });
-                } else {
-                    const handler_ptr = @as(*const anyopaque, @ptrCast(handler_item.opcode_handler));
-                    const handler_info = debug_info.handler_map.get(handler_ptr);
-
-                    try entries.append(allocator, .{
-                        .schedule_index = schedule_idx,
-                        .pc = @intCast(bytecode_pc),
-                        .item_type = .opcode_handler,
-                        .handler_ptr = handler_ptr,
-                        .handler_name = if (handler_info) |info| info.name else "UNKNOWN",
-                        .metadata = null,
-                        .expected_from_bytecode = null,
-                        .validation_status = .valid,
-                    });
-                }
-                schedule_idx += 1;
-                
-                // Expect metadata for fusion value
-                if (schedule_idx < schedule_items.len) {
-                    const metadata_item = schedule_items[schedule_idx];
-                    switch (metadata_item) {
-                        .push_inline => |meta| {
-                            try entries.append(allocator, .{
-                                .schedule_index = schedule_idx,
-                                .pc = @intCast(bytecode_pc),
-                                .item_type = .push_inline,
-                                .handler_ptr = null,
-                                .handler_name = null,
-                                .metadata = .{ .push_inline = .{ .value = meta.value } },
-                                .expected_from_bytecode = null,
-                                .validation_status = .valid,
-                            });
-                        },
-                        .push_pointer => |meta| {
-                            // Cannot access u256 values without DispatchSchedule
-                            try entries.append(allocator, .{
-                                .schedule_index = schedule_idx,
-                                .pc = @intCast(bytecode_pc),
-                                .item_type = .push_pointer,
-                                .handler_ptr = null,
-                                .handler_name = null,
-                                .metadata = .{ .push_pointer = .{ .value_ptr = meta.value_ptr, .value = 0 } }, // Can't get actual value
-                                .expected_from_bytecode = null,
-                                .validation_status = .valid,
-                            });
-                        },
-                        else => {},
+                },
+                inline .push_jump_fusion, .push_jumpi_fusion => |data| {
+                    const expected_index = if (std.math.cast(u32, data.value)) |target|
+                        debug_info.jumpdest_map.get(target) orelse implicit_stop_index + 1
+                    else
+                        implicit_stop_index + 1;
+                    if (meta.jump_static.target_idx != expected_index) {
+                        item.validation_status = .metadata_mismatch;
+                        try addValidationError(&debug_info, index, pc, "Jump target mismatch", "bytecode jump target", "schedule target");
                     }
-                    schedule_idx += 1;
-                }
-            },
-            
-            .stop, .invalid => {
-                if (schedule_idx >= schedule_items.len) break;
-                
-                const handler_item = schedule_items[schedule_idx];
-                if (handler_item == .opcode_handler) {
-                    const handler_ptr = @as(*const anyopaque, @ptrCast(handler_item.opcode_handler));
-                    const handler_info = debug_info.handler_map.get(handler_ptr);
-                    
-                    try entries.append(allocator, .{
-                        .schedule_index = schedule_idx,
-                        .pc = @intCast(bytecode_pc),
-                        .item_type = .opcode_handler,
-                        .handler_ptr = handler_ptr,
-                        .handler_name = if (handler_info) |info| info.name else "UNKNOWN",
-                        .metadata = null,
-                        .expected_from_bytecode = if (op_data == .stop) .{ .stop = {} } else .{ .invalid = {} },
-                        .validation_status = .valid,
-                    });
-                }
-                schedule_idx += 1;
-            },
-            
-            else => {
-                // Skip other advanced fusion types for now
-                schedule_idx += 1;
-            },
+                },
+                else => {},
+            };
+            index += 1;
+        }
+        if (entry.has_fallthrough_block and index + 1 < schedule.len) {
+            try appendEntry(FrameType, &debug_info, &entries, schedule, kinds, index, null, .opcode_handler, null);
+            try appendEntry(FrameType, &debug_info, &entries, schedule, kinds, index + 1, null, .jump_dest, null);
         }
     }
-    
-    // Add any remaining schedule items
-    while (schedule_idx < schedule_items.len) {
-        const item = schedule_items[schedule_idx];
-        const entry = switch (item) {
-            .opcode_handler => |handler| blk: {
-                const handler_ptr = @as(*const anyopaque, @ptrCast(handler));
-                const handler_info = debug_info.handler_map.get(handler_ptr);
-                break :blk DebugInfo.ScheduleEntry{
-                    .schedule_index = schedule_idx,
-                    .pc = null,
-                    .item_type = .opcode_handler,
-                    .handler_ptr = handler_ptr,
-                    .handler_name = if (handler_info) |info| info.name else "UNKNOWN",
-                    .metadata = null,
-                    .expected_from_bytecode = null,
-                    .validation_status = .unexpected_item,
-                };
-            },
-            else => DebugInfo.ScheduleEntry{
-                .schedule_index = schedule_idx,
-                .pc = null,
-                .item_type = .unexpected,
-                .handler_ptr = null,
-                .handler_name = "UNEXPECTED",
-                .metadata = null,
-                .expected_from_bytecode = null,
-                .validation_status = .unexpected_item,
-            },
-        };
-        try entries.append(allocator, entry);
-        schedule_idx += 1;
+
+    for (implicit_stop_index..@max(implicit_stop_index, @min(expected_len, schedule.len))) |index| {
+        const expected: ?DebugInfo.ExpectedOp = if (index == implicit_stop_index + 1) null else .{ .stop = {} };
+        try appendEntry(FrameType, &debug_info, &entries, schedule, kinds, index, null, .opcode_handler, expected);
     }
-    
     debug_info.schedule_entries = try entries.toOwnedSlice(allocator);
-    
-    log.debug("getDebugInfo: Completed analysis. Found {} entries, {} errors", .{ 
-        debug_info.schedule_entries.len,
-        debug_info.validation_errors.items.len 
-    });
-    
     return debug_info;
 }
 
-fn addValidationError(debug_info: anytype, schedule_idx: usize, pc: anytype, message: []const u8, expected: []const u8, actual: []const u8) !void {
+fn appendEntry(
+    comptime FrameType: type,
+    debug_info: *DispatchDebugInfo(FrameType),
+    entries: *std.ArrayList(DispatchDebugInfo(FrameType).ScheduleEntry),
+    schedule: []const FrameType.Dispatch.Item,
+    kinds: []const FrameType.Dispatch.ItemKind,
+    index: usize,
+    pc: ?u32,
+    kind: FrameType.Dispatch.ItemKind,
+    expected: ?DispatchDebugInfo(FrameType).ExpectedOp,
+) !void {
+    const DebugInfo = DispatchDebugInfo(FrameType);
+    var entry: DebugInfo.ScheduleEntry = .{
+        .schedule_index = index,
+        .pc = pc,
+        .item_type = switch (kind) {
+            inline else => |value| @field(DebugInfo.ItemType, @tagName(value)),
+        },
+        .handler_ptr = null,
+        .handler_name = null,
+        .metadata = null,
+        .expected_from_bytecode = expected,
+        .validation_status = .valid,
+    };
+    if (kinds.len != 0 and kinds[index] != kind) {
+        entry.item_type = .unexpected;
+        entry.validation_status = .unexpected_item;
+        try addValidationError(debug_info, index, pc, "Unexpected schedule item", @tagName(kind), @tagName(kinds[index]));
+        try entries.append(debug_info.allocator, entry);
+        return;
+    }
+
+    const item = schedule[index];
+    entry.metadata = switch (kind) {
+        .opcode_handler => blk: {
+            const handler_ptr: *const anyopaque = @ptrCast(item.opcode_handler);
+            entry.handler_ptr = handler_ptr;
+            if (debug_info.handler_map.get(handler_ptr)) |info| entry.handler_name = info.name;
+            if (expected) |op| {
+                const opcode: ?Opcode = switch (op) {
+                    .regular => |data| data.opcode,
+                    .push => |data| data.opcode,
+                    .jumpdest => .JUMPDEST,
+                    .stop => .STOP,
+                    .invalid => .INVALID,
+                    .fusion => null,
+                };
+                if (opcode) |value| {
+                    if (item.opcode_handler != FrameType.opcode_handlers[@intFromEnum(value)]) {
+                        entry.validation_status = .handler_mismatch;
+                        try addValidationError(debug_info, index, pc, "Handler mismatch", @tagName(value), entry.handler_name orelse "UNKNOWN");
+                    }
+                } else if (op == .fusion) {
+                    const synthetic = op.fusion.synthetic;
+                    const actual = debug_info.handler_map.get(handler_ptr);
+                    if (actual == null or actual.?.synthetic != synthetic) {
+                        entry.validation_status = .handler_mismatch;
+                        try addValidationError(debug_info, index, pc, "Handler mismatch", @tagName(synthetic), entry.handler_name orelse "UNKNOWN");
+                    }
+                }
+            }
+            break :blk null;
+        },
+        .first_block_gas => .{ .first_block_gas = .{ .gas = item.first_block_gas.gas } },
+        .jump_dest => .{ .jump_dest = .{
+            .gas = item.jump_dest.gas,
+            .min_stack = item.jump_dest.min_stack,
+            .max_stack = item.jump_dest.max_stack,
+            .target_pc = null,
+            .target_idx = null,
+        } },
+        .push_inline => .{ .push_inline = .{ .value = item.push_inline.value } },
+        .push_pointer => .{ .push_pointer = .{ .value_ptr = item.push_pointer.value_ptr, .value = item.push_pointer.value_ptr.* } },
+        .pc => .{ .pc = .{ .value = item.pc.value } },
+        .jump_static => blk: {
+            const base = @intFromPtr(schedule.ptr);
+            const target = @intFromPtr(item.jump_static.dispatch);
+            var target_idx: ?usize = null;
+            var target_pc: ?u32 = null;
+            if (target >= base) {
+                const offset = target - base;
+                const item_size = @sizeOf(FrameType.Dispatch.Item);
+                const idx = offset / item_size;
+                if (offset % item_size == 0 and idx < schedule.len) {
+                    target_idx = idx;
+                    var jumpdests = debug_info.jumpdest_map.iterator();
+                    while (jumpdests.next()) |dest| {
+                        if (dest.value_ptr.* == idx) {
+                            target_pc = dest.key_ptr.*;
+                            break;
+                        }
+                    }
+                }
+            }
+            break :blk .{ .jump_static = .{
+                .dispatch_ptr = item.jump_static.dispatch,
+                .target_pc = target_pc,
+                .target_idx = target_idx,
+            } };
+        },
+    };
+    try entries.append(debug_info.allocator, entry);
+}
+
+fn addValidationError(debug_info: anytype, schedule_idx: usize, pc: ?u32, message: []const u8, expected: []const u8, actual: []const u8) !void {
     try debug_info.validation_errors.append(debug_info.allocator, .{
         .schedule_index = schedule_idx,
-        .pc = if (@TypeOf(pc) == u32) pc else @as(u32, @intCast(pc)),
+        .pc = pc,
         .message = message,
         .expected = expected,
         .actual = actual,

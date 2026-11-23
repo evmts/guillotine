@@ -1,14 +1,12 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const bytecode_mod = @import("../bytecode/bytecode.zig");
 const BytecodeConfig = @import("../bytecode/bytecode_config.zig").BytecodeConfig;
 const Opcode = @import("../opcodes/opcode_data.zig").Opcode;
 const OpcodeSynthetic = @import("../opcodes/opcode_synthetic.zig").OpcodeSynthetic;
 const testing = std.testing;
 
-// Use real Frame to satisfy preprocessor + handler expectations
-const MemoryDatabase = @import("../storage/memory_database.zig").MemoryDatabase;
-const FrameMod = @import("../frame/frame.zig");
-const TestFrame = FrameMod.Frame(.{ .DatabaseType = MemoryDatabase });
+const TestFrame = @import("../evm.zig").Evm(.{}).Frame;
 const TestDispatch = TestFrame.Dispatch;
 
 // Mock opcode handlers for schedule structure checks
@@ -53,7 +51,9 @@ fn createTestHandlers() [256]TestFrame.OpcodeHandler {
     for (&handlers) |*handler| handler.* = &mockInvalid;
     handlers[@intFromEnum(Opcode.STOP)] = &mockStop;
     handlers[@intFromEnum(Opcode.ADD)] = &mockAdd;
-    handlers[@intFromEnum(Opcode.PUSH1)] = &mockPush1;
+    for (@intFromEnum(Opcode.PUSH1)..@as(usize, @intFromEnum(Opcode.PUSH32)) + 1) |opcode| {
+        handlers[opcode] = &mockPush1;
+    }
     handlers[@intFromEnum(Opcode.JUMPDEST)] = &mockJumpdest;
     handlers[@intFromEnum(Opcode.PC)] = &mockPc;
     return handlers;
@@ -105,10 +105,10 @@ test "Dispatch - simple bytecode with ADD" {
     var dispatch_items = try TestDispatch.init(allocator, &bytecode, &handlers, null);
     defer dispatch_items.deinit();
 
-    // Should have ADD handler + 2 STOP handlers
-    const offset0: usize = if (dispatch_items.items.len > 0 and dispatch_items.items[0] == .first_block_gas) 1 else 0;
-    try testing.expect(dispatch_items.items.len == offset0 + 3);
-    try testing.expect(dispatch_items.items[0].opcode_handler == &mockAdd);
+    // Should have ADD handler + 4 terminal items
+    const offset0: usize = @intFromBool(dispatch_items.has_first_block_gas);
+    try testing.expect(dispatch_items.items.len == offset0 + 5);
+    try testing.expect(dispatch_items.items[offset0].opcode_handler == &mockAdd);
 }
 
 test "Dispatch - PUSH1 with inline metadata" {
@@ -128,11 +128,11 @@ test "Dispatch - PUSH1 with inline metadata" {
     var dispatch_items = try TestDispatch.init(allocator, &bytecode, &handlers, null);
     defer dispatch_items.deinit();
 
-    // Should have PUSH1 handler + metadata + 2 STOP handlers
-    const offset1: usize = if (dispatch_items.items.len > 0 and dispatch_items.items[0] == .first_block_gas) 1 else 0;
-    try testing.expect(dispatch_items.items.len == offset1 + 4);
-    try testing.expect(dispatch_items.items[0].opcode_handler == &mockPush1);
-    try testing.expect(dispatch_items.items[1].push_inline.value == 42);
+    // Should have PUSH1 handler + metadata + 4 terminal items
+    const offset1: usize = @intFromBool(dispatch_items.has_first_block_gas);
+    try testing.expect(dispatch_items.items.len == offset1 + 6);
+    try testing.expect(dispatch_items.items[offset1].opcode_handler == &mockPush1);
+    try testing.expect(dispatch_items.items[offset1 + 1].push_inline.value == 42);
 }
 
 test "Dispatch - PC opcode with metadata" {
@@ -152,11 +152,11 @@ test "Dispatch - PC opcode with metadata" {
     var dispatch_items = try TestDispatch.init(allocator, &bytecode, &handlers, null);
     defer dispatch_items.deinit();
 
-    // Should have PC handler + metadata + 2 STOP handlers
-    const offset2: usize = if (dispatch_items.items.len > 0 and dispatch_items.items[0] == .first_block_gas) 1 else 0;
-    try testing.expect(dispatch_items.items.len == offset2 + 4);
-    try testing.expect(dispatch_items.items[0].opcode_handler == &mockPc);
-    try testing.expect(dispatch_items.items[1].pc.value == 0);
+    // Should have PC handler + metadata + 4 terminal items
+    const offset2: usize = @intFromBool(dispatch_items.has_first_block_gas);
+    try testing.expect(dispatch_items.items.len == offset2 + 6);
+    try testing.expect(dispatch_items.items[offset2].opcode_handler == &mockPc);
+    try testing.expect(dispatch_items.items[offset2 + 1].pc.value == 0);
 }
 
 // Helper metadata accessor tests removed due to API changes; covered by getOpData checks below.
@@ -195,7 +195,7 @@ test "Dispatch - complex bytecode sequence" {
     const Bytecode = bytecode_mod.Bytecode(BytecodeConfig{
         .max_bytecode_size = TestFrame.config.max_bytecode_size,
         .max_initcode_size = TestFrame.config.max_initcode_size,
-        .fusions_enabled = true,
+        .fusions_enabled = false,
     });
     var bytecode = try Bytecode.init(allocator, &[_]u8{
         @intFromEnum(Opcode.PUSH1), 10,
@@ -208,9 +208,9 @@ test "Dispatch - complex bytecode sequence" {
     var dispatch_items = try TestDispatch.init(allocator, &bytecode, &handlers, null);
     defer dispatch_items.deinit();
 
-    // Verify structure: optional first_block_gas, then PUSH1, metadata, PUSH1, metadata, ADD, STOP, STOP, STOP
-    const start: usize = if (dispatch_items.items.len > 0 and dispatch_items.items[0] == .first_block_gas) 1 else 0;
-    try testing.expect(dispatch_items.items.len == start + 8);
+    // Six bytecode items followed by four terminal items.
+    const start: usize = @intFromBool(dispatch_items.has_first_block_gas);
+    try testing.expect(dispatch_items.items.len == start + 10);
 
     // First PUSH1
     try testing.expect(dispatch_items.items[start + 0].opcode_handler == &mockPush1);
@@ -223,17 +223,23 @@ test "Dispatch - complex bytecode sequence" {
     // ADD
     try testing.expect(dispatch_items.items[start + 4].opcode_handler == &mockAdd);
 
-    // Three STOPs (one from bytecode, two safety terminators)
+    // Explicit STOP, implicit STOP, invalid-jump handler, then STOP padding.
     try testing.expect(dispatch_items.items[start + 5].opcode_handler == &mockStop);
     try testing.expect(dispatch_items.items[start + 6].opcode_handler == &mockStop);
-    try testing.expect(dispatch_items.items[start + 7].opcode_handler == &mockStop);
+    try testing.expect(dispatch_items.items[start + 8].opcode_handler == &mockStop);
+    try testing.expect(dispatch_items.items[start + 9].opcode_handler == &mockStop);
 }
 
 test "Dispatch - metadata size constraints" {
+    try testing.expectEqual(@as(usize, 8), @sizeOf(TestDispatch.Item));
+    try testing.expect(@typeInfo(TestDispatch.Item).@"union".layout == .@"extern");
+    try testing.expect(@typeInfo(TestDispatch.Item).@"union".tag_type == null);
     // Ensure metadata structs fit in 64 bits
     try testing.expect(@sizeOf(TestDispatch.JumpDestMetadata) == 8);
     try testing.expect(@sizeOf(TestDispatch.PushInlineMetadata) == 8);
-    try testing.expect(@sizeOf(TestDispatch.PushPointerMetadata) == 8);
+    try testing.expect(@sizeOf(TestDispatch.PushPointerMetadata) <= 8);
+    try testing.expect(@sizeOf(TestDispatch.JumpStaticMetadata) <= 8);
+    try testing.expect(@sizeOf(TestDispatch.FirstBlockMetadata) == 8);
     try testing.expect(@sizeOf(TestDispatch.PcMetadata) <= 8);
 }
 
@@ -254,8 +260,8 @@ test "Dispatch - invalid bytecode handling" {
     var dispatch_items = try TestDispatch.init(allocator, &bytecode, &handlers, null);
     defer dispatch_items.deinit();
 
-    // Should have invalid handler + 2 STOP handlers
-    try testing.expect(dispatch_items.items.len == 3);
+    // Invalid handler plus four terminal items.
+    try testing.expect(dispatch_items.items.len == 5);
     try testing.expect(dispatch_items.items[0].opcode_handler == &mockInvalid);
 }
 
@@ -272,19 +278,15 @@ test "Dispatch - JUMPDEST with gas metadata" {
     var bytecode = try Bytecode.init(allocator, &[_]u8{@intFromEnum(Opcode.JUMPDEST)});
     defer bytecode.deinit();
 
-    // Note: In real usage, the bytecode analyzer would set gas costs
-    // For this test, we're checking the structure is created correctly
-
     // Create dispatch
     var dispatch_items = try TestDispatch.init(allocator, &bytecode, &handlers, null);
     defer dispatch_items.deinit();
 
-    // Should have JUMPDEST handler + metadata + 2 STOP handlers
-    const offset3: usize = if (dispatch_items.items.len > 0 and dispatch_items.items[0] == .first_block_gas) 1 else 0;
-    try testing.expect(dispatch_items.items.len == offset3 + 4);
-    try testing.expect(dispatch_items.items[0].opcode_handler == &mockJumpdest);
-    // Gas metadata would be set by bytecode analyzer
-    try testing.expect(dispatch_items.items[1].jump_dest.gas == 0); // Default value
+    // Should have JUMPDEST handler + metadata + 4 terminal items
+    const offset3: usize = @intFromBool(dispatch_items.has_first_block_gas);
+    try testing.expect(dispatch_items.items.len == offset3 + 6);
+    try testing.expect(dispatch_items.items[offset3].opcode_handler == &mockJumpdest);
+    try testing.expect(dispatch_items.items[offset3 + 1].jump_dest.gas == 1);
 }
 
 test "Dispatch - PUSH32 with pointer metadata" {
@@ -292,7 +294,7 @@ test "Dispatch - PUSH32 with pointer metadata" {
     const handlers = createTestHandlers();
 
     // Create bytecode with PUSH32 (large value requiring pointer storage)
-    var push32_data = [_]u8{@intFromEnum(Opcode.PUSH32)} ++ [_]u8{0xFF} ** 32;
+    const push32_data = [_]u8{@intFromEnum(Opcode.PUSH32)} ++ [_]u8{0xFF} ** 32;
     const Bytecode = bytecode_mod.Bytecode(BytecodeConfig{
         .max_bytecode_size = TestFrame.config.max_bytecode_size,
         .max_initcode_size = TestFrame.config.max_initcode_size,
@@ -305,13 +307,13 @@ test "Dispatch - PUSH32 with pointer metadata" {
     var dispatch_items = try TestDispatch.init(allocator, &bytecode, &handlers, null);
     defer dispatch_items.deinit();
 
-    // Should have PUSH32 handler + pointer metadata + 2 STOP handlers
-    try testing.expect(dispatch_items.items.len == 4);
-    try testing.expect(dispatch_items.items[0].opcode_handler == &mockPush1); // Using mockPush1 for all PUSH variants
+    const index: usize = @intFromBool(dispatch_items.has_first_block_gas);
+    try testing.expect(dispatch_items.items.len == index + 6);
+    try testing.expect(dispatch_items.items[index].opcode_handler == &mockPush1); // Using mockPush1 for all PUSH variants
 
     // Verify pointer metadata contains the correct large value
     const expected_value: u256 = std.math.maxInt(u256); // 0xFFFF...FFFF (32 bytes of 0xFF) - using maxInt for clarity
-    try testing.expect(dispatch_items.items[1].push_pointer.value_ptr.* == expected_value);
+    try testing.expect(dispatch_items.items[index + 1].push_pointer.value_ptr.* == expected_value);
 }
 
 test "Dispatch - PUSH9 boundary test (first pointer type)" {
@@ -319,7 +321,7 @@ test "Dispatch - PUSH9 boundary test (first pointer type)" {
     const handlers = createTestHandlers();
 
     // Create bytecode with PUSH9 (first PUSH that uses pointer storage)
-    var push9_data = [_]u8{@intFromEnum(Opcode.PUSH9)} ++ [_]u8{ 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0, 0x11 };
+    const push9_data = [_]u8{@intFromEnum(Opcode.PUSH9)} ++ [_]u8{ 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0, 0x11 };
     const Bytecode = bytecode_mod.Bytecode(BytecodeConfig{
         .max_bytecode_size = TestFrame.config.max_bytecode_size,
         .max_initcode_size = TestFrame.config.max_initcode_size,
@@ -332,13 +334,13 @@ test "Dispatch - PUSH9 boundary test (first pointer type)" {
     var dispatch_items = try TestDispatch.init(allocator, &bytecode, &handlers, null);
     defer dispatch_items.deinit();
 
-    // Should have PUSH9 handler + pointer metadata + 2 STOP handlers
-    try testing.expect(dispatch_items.items.len == 4);
-    try testing.expect(dispatch_items.items[0].opcode_handler == &mockPush1);
+    const index: usize = @intFromBool(dispatch_items.has_first_block_gas);
+    try testing.expect(dispatch_items.items.len == index + 6);
+    try testing.expect(dispatch_items.items[index].opcode_handler == &mockPush1);
 
     // Verify the 9-byte value is correctly stored
     const expected_value: u256 = 0x123456789ABCDEF011;
-    try testing.expect(dispatch_items.items[1].push_pointer.value_ptr.* == expected_value);
+    try testing.expect(dispatch_items.items[index + 1].push_pointer.value_ptr.* == expected_value);
 }
 
 test "Dispatch - PUSH8 boundary test (last inline type)" {
@@ -346,7 +348,7 @@ test "Dispatch - PUSH8 boundary test (last inline type)" {
     const handlers = createTestHandlers();
 
     // Create bytecode with PUSH8 (last PUSH that uses inline storage)
-    var push8_data = [_]u8{@intFromEnum(Opcode.PUSH8)} ++ [_]u8{ 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0 };
+    const push8_data = [_]u8{@intFromEnum(Opcode.PUSH8)} ++ [_]u8{ 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0 };
     const Bytecode = bytecode_mod.Bytecode(BytecodeConfig{
         .max_bytecode_size = TestFrame.config.max_bytecode_size,
         .max_initcode_size = TestFrame.config.max_initcode_size,
@@ -359,13 +361,13 @@ test "Dispatch - PUSH8 boundary test (last inline type)" {
     var dispatch_items = try TestDispatch.init(allocator, &bytecode, &handlers, null);
     defer dispatch_items.deinit();
 
-    // Should have PUSH8 handler + inline metadata + 2 STOP handlers
-    try testing.expect(dispatch_items.items.len == 4);
-    try testing.expect(dispatch_items.items[0].opcode_handler == &mockPush1);
+    const index: usize = @intFromBool(dispatch_items.has_first_block_gas);
+    try testing.expect(dispatch_items.items.len == index + 6);
+    try testing.expect(dispatch_items.items[index].opcode_handler == &mockPush1);
 
     // Verify the 8-byte value is stored inline
     const expected_value: u64 = 0x123456789ABCDEF0;
-    try testing.expect(dispatch_items.items[1].push_inline.value == expected_value);
+    try testing.expect(dispatch_items.items[index + 1].push_inline.value == expected_value);
 }
 
 test "Dispatch - large value no longer truncated" {
@@ -373,7 +375,7 @@ test "Dispatch - large value no longer truncated" {
     const handlers = createTestHandlers();
 
     // Test a PUSH4 with value that fits in u64 - should use inline storage
-    var push4_small_data = [_]u8{@intFromEnum(Opcode.PUSH4)} ++ [_]u8{ 0x00, 0x00, 0xFF, 0xFF };
+    const push4_small_data = [_]u8{@intFromEnum(Opcode.PUSH4)} ++ [_]u8{ 0x00, 0x00, 0xFF, 0xFF };
     const Bytecode = bytecode_mod.Bytecode(BytecodeConfig{
         .max_bytecode_size = TestFrame.config.max_bytecode_size,
         .max_initcode_size = TestFrame.config.max_initcode_size,
@@ -386,10 +388,10 @@ test "Dispatch - large value no longer truncated" {
     defer dispatch_items_small.deinit();
 
     // Should use inline storage for small value
-    try testing.expect(dispatch_items_small.items[1].push_inline.value == 0x0000FFFF);
+    try testing.expect(dispatch_items_small.items[@as(usize, @intFromBool(dispatch_items_small.has_first_block_gas)) + 1].push_inline.value == 0x0000FFFF);
 
     // Test a PUSH8 with maximum u64 value - should still use inline storage
-    var push8_max_data = [_]u8{@intFromEnum(Opcode.PUSH8)} ++ [_]u8{ 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+    const push8_max_data = [_]u8{@intFromEnum(Opcode.PUSH8)} ++ [_]u8{ 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
     var bytecode_max = try Bytecode.init(allocator, &push8_max_data);
     defer bytecode_max.deinit();
 
@@ -397,22 +399,31 @@ test "Dispatch - large value no longer truncated" {
     defer dispatch_items_max.deinit();
 
     // Should use inline storage for max u64 value
-    try testing.expect(dispatch_items_max.items[1].push_inline.value == std.math.maxInt(u64));
+    try testing.expect(dispatch_items_max.items[@as(usize, @intFromBool(dispatch_items_max.has_first_block_gas)) + 1].push_inline.value == std.math.maxInt(u64));
 }
 
-test "Dispatch - boundary case forces pointer storage" {
-    _ = testing.allocator;
-    _ = createTestHandlers();
+test "JumpTable - legacy builder skips PUSH payloads and fallthrough metadata" {
+    const allocator = testing.allocator;
+    const handlers = createTestHandlers();
+    const Bytecode = bytecode_mod.Bytecode(.{ .fusions_enabled = false });
+    var code = [_]u8{0x67} ++ [_]u8{0} ** 8 ++ [_]u8{ 0x5a, 0x50, 0x5b, 0x00 };
+    std.mem.writeInt(u64, code[1..9], @intFromPtr(&mockJumpdest), .big);
+    var bytecode = try Bytecode.init(allocator, &code);
+    defer bytecode.deinit();
 
-    // Test edge case: PUSH8 with value that exceeds u64 (this would be a bytecode analysis issue normally)
-    // But we test to ensure the fix works correctly
+    var analysis = try TestDispatch.initWithJumpTable(allocator, &bytecode, &handlers, null);
+    defer analysis.schedule.deinit();
+    defer analysis.jump_table.deinit(allocator);
 
-    // This test documents that values exceeding u64 max, even in small PUSH operations,
-    // now correctly use pointer storage instead of being truncated
+    const legacy = try TestDispatch.createJumpTable(allocator, analysis.schedule.items, &bytecode);
+    defer legacy.deinit(allocator);
 
-    // Since we can't easily create such bytecode from raw bytes (the bytecode analyzer
-    // would prevent this), this test serves as documentation of the fix.
-    try testing.expect(true); // Placeholder documenting the fix
+    try testing.expectEqual(@as(usize, 1), legacy.entries.len);
+    try testing.expect(legacy.find_jump_target(2) == null);
+    const target = legacy.find_jump_target(11) orelse return error.MissingJumpDestination;
+    const expected = analysis.jump_table.find_jump_target(11) orelse return error.MissingJumpDestination;
+    try testing.expectEqual(expected, target);
+    try testing.expectEqual(@as(TestFrame.OpcodeHandler, &mockJumpdest), target[0].opcode_handler);
 }
 
 test "JumpTable - empty jump table" {
@@ -561,107 +572,64 @@ test "JumpTable - large jump table performance" {
 
     // Test that binary search finds all valid targets efficiently
     for (0..1000) |i| {
-        const target_pc: u32 = @intCast(i * 10);
+        const target_pc: TestFrame.PcType = @intCast(i * 10);
         try testing.expect(jump_table.findJumpTarget(target_pc) != null);
     }
 
     // Test that binary search correctly rejects invalid targets
     for (0..1000) |i| {
-        const invalid_pc: u32 = @intCast(i * 10 + 5); // Between valid targets
+        const invalid_pc: TestFrame.PcType = @intCast(i * 10 + 5); // Between valid targets
         try testing.expect(jump_table.findJumpTarget(invalid_pc) == null);
     }
 }
 
-// Mock fusion handlers for testing
-fn mockPushAddFusion(frame: *TestFrame, cursor: [*]const TestDispatch.Item) TestFrame.Error!noreturn {
-    _ = frame;
-    _ = cursor;
-    return TestFrame.Error.Stop;
-}
-
-fn mockPushMulFusion(frame: *TestFrame, cursor: [*]const TestDispatch.Item) TestFrame.Error!noreturn {
-    _ = frame;
-    _ = cursor;
-    return TestFrame.Error.Stop;
-}
-
-// Create test opcode handler array with synthetic opcodes
-fn createTestHandlersWithSynthetic() [256]TestFrame.OpcodeHandler {
-    var handlers: [256]TestFrame.OpcodeHandler = undefined;
-
-    // Initialize all to invalid
-    for (&handlers) |*handler| {
-        handler.* = &mockInvalid;
-    }
-
-    // Set specific handlers
-    handlers[@intFromEnum(Opcode.STOP)] = &mockStop;
-    handlers[@intFromEnum(Opcode.ADD)] = &mockAdd;
-    handlers[@intFromEnum(Opcode.PUSH1)] = &mockPush1;
-    handlers[@intFromEnum(Opcode.JUMPDEST)] = &mockJumpdest;
-    handlers[@intFromEnum(Opcode.PC)] = &mockPc;
-
-    return handlers;
-}
-
-test "Dispatch - fusion operations now use correct synthetic handlers" {
-    // Test that fusion operations correctly map to synthetic opcode handlers
-
-    // Test getSyntheticOpcode function returns correct values
-    // Note: getSyntheticOpcode is not public, so we can't test it directly
-    // We would need to test this through the actual dispatch creation process
-
-    // Verify synthetic opcodes are in expected range (0xB0-0xC7)
-    try testing.expect(@intFromEnum(OpcodeSynthetic.PUSH_ADD_INLINE) == 0xB0);
-    try testing.expect(@intFromEnum(OpcodeSynthetic.PUSH_XOR_POINTER) == 0xC5);
-}
-
-test "Dispatch - memory cleanup for pointer metadata" {
+test "Dispatch - fusion emits the correct handler and debug kinds" {
     const allocator = testing.allocator;
-    const handlers = createTestHandlers();
-
-    // Create bytecode with large PUSH that requires pointer allocation
-    var push16_data = [_]u8{@intFromEnum(Opcode.PUSH16)} ++ [_]u8{0xFF} ** 16;
-    const Bytecode = bytecode_mod.Bytecode(BytecodeConfig{
-        .max_bytecode_size = TestFrame.config.max_bytecode_size,
-        .max_initcode_size = TestFrame.config.max_initcode_size,
-        .fusions_enabled = true,
-    });
-    var bytecode = try Bytecode.init(allocator, &push16_data);
+    const Bytecode = bytecode_mod.Bytecode(.{ .fusions_enabled = true });
+    var bytecode = try Bytecode.init(allocator, &.{ 0x60, 0x01, 0x01, 0x00 });
     defer bytecode.deinit();
 
-    // Create dispatch
-    var dispatch_items = try TestDispatch.init(allocator, &bytecode, &handlers, null);
+    var schedule = try TestDispatch.init(allocator, &bytecode, &TestFrame.opcode_handlers, null);
+    defer schedule.deinit();
 
-    // Track allocations for cleanup verification
-    var pointer_count: usize = 0;
-    var pointers_to_free: [10]*u256 = undefined;
+    try testing.expect(schedule.has_first_block_gas);
+    const frame_handlers = @import("../frame/frame_handlers.zig");
+    const handler = frame_handlers.getSyntheticHandler(TestFrame, @intFromEnum(OpcodeSynthetic.PUSH_ADD_INLINE));
+    try testing.expectEqual(handler, schedule.items[1].opcode_handler);
+    try testing.expectEqual(@as(u64, 1), schedule.items[2].push_inline.value);
+    try testing.expect(schedule.validate());
+    if (comptime builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
+        try testing.expectEqual(schedule.items.len, schedule.item_kinds.len);
+        try testing.expectEqualSlices(TestDispatch.ItemKind, &.{ .first_block_gas, .opcode_handler, .push_inline }, schedule.item_kinds[0..3]);
 
-    for (dispatch_items.items) |item| {
-        switch (item) {
-            .push_pointer => |ptr_meta| {
-                pointers_to_free[pointer_count] = @constCast(ptr_meta.value_ptr);
-                pointer_count += 1;
-            },
-            else => {},
-        }
+        var bad_schedule = schedule;
+        bad_schedule.has_first_block_gas = false;
+        try testing.expect(!bad_schedule.validate());
+    } else {
+        try testing.expectEqual(@as(usize, 0), schedule.item_kinds.len);
     }
+}
 
-    // Clean up - this is what user code must do
-    for (0..pointer_count) |i| {
-        allocator.destroy(pointers_to_free[i]);
-    }
-    dispatch_items.deinit();
+test "Dispatch - arena owns pointer metadata" {
+    const allocator = testing.allocator;
+    const code = [_]u8{@intFromEnum(Opcode.PUSH16)} ++ [_]u8{0xff} ** 16;
+    const Bytecode = bytecode_mod.Bytecode(.{});
+    var bytecode = try Bytecode.init(allocator, &code);
+    defer bytecode.deinit();
 
-    // Verify we found the expected pointer
-    try testing.expect(pointer_count == 1);
+    const handlers = createTestHandlers();
+    var schedule = try TestDispatch.init(allocator, &bytecode, &handlers, null);
+    defer schedule.deinit();
+
+    const index: usize = @intFromBool(schedule.has_first_block_gas);
+    try testing.expectEqual(@as(u256, std.math.maxInt(u128)), schedule.items[index + 1].push_pointer.value_ptr.*);
 }
 
 test "Dispatch - allocation failure handling" {
     // Test what happens when allocation fails during init
     // This exposes potential memory leaks in error paths
 
-    var failing_allocator = testing.FailingAllocator.init(testing.allocator, .{ .fail_index = 1 });
+    var failing_allocator = testing.FailingAllocator.init(testing.allocator, .{ .fail_index = 0 });
     const handlers = createTestHandlers();
 
     // Create simple bytecode
@@ -697,31 +665,30 @@ test "Dispatch - edge case empty bytecode safety" {
     var dispatch_items = try TestDispatch.init(allocator, &bytecode, &handlers, null);
     defer dispatch_items.deinit();
 
-    // Should have exactly 2 STOP handlers (the safety terminators)
-    try testing.expect(dispatch_items.items.len == 2);
+    try testing.expect(!dispatch_items.has_first_block_gas);
+    try testing.expect(dispatch_items.items.len == 4);
     try testing.expect(dispatch_items.items[0].opcode_handler == &mockStop);
-    try testing.expect(dispatch_items.items[1].opcode_handler == &mockStop);
+    try testing.expect(dispatch_items.items[2].opcode_handler == &mockStop);
+    try testing.expect(dispatch_items.items[3].opcode_handler == &mockStop);
 
     // Create dispatch wrapper and test safety
     const dispatch = TestDispatch{ .cursor = dispatch_items.items.ptr };
     const next = TestDispatch{ .cursor = dispatch.cursor + 1 };
 
-    // Should be able to access next safely (second STOP)
+    // Adjacent items are exactly one dispatch word apart.
     const ptr_diff = @intFromPtr(next.cursor) - @intFromPtr(dispatch.cursor);
     try testing.expect(ptr_diff == @sizeOf(TestDispatch.Item));
 }
 
 test "Dispatch - getOpData compilation and type safety" {
-    // This test ensures getOpData compiles correctly for all opcode types
-    // and returns the right types
-
+    const value: TestFrame.WordType = @as(u256, 1) << 128;
     const items = [_]TestDispatch.Item{
         .{ .opcode_handler = &mockPc },
         .{ .pc = .{ .value = 42 } },
         .{ .opcode_handler = &mockPush1 },
         .{ .push_inline = .{ .value = 123 } },
         .{ .opcode_handler = &mockPush1 },
-        .{ .push_pointer = .{ .value_ptr = undefined } },
+        .{ .push_pointer = .{ .value_ptr = &value } },
         .{ .opcode_handler = &mockJumpdest },
         .{ .jump_dest = .{ .gas = 100, .min_stack = 0, .max_stack = 0 } },
         .{ .opcode_handler = &mockStop },
@@ -743,6 +710,7 @@ test "Dispatch - getOpData compilation and type safety" {
     const push32_dispatch = TestDispatch{ .cursor = @ptrCast(&items[4]) };
     const push32_data = push32_dispatch.getOpData(.PUSH32);
     try testing.expect(@TypeOf(push32_data.metadata) == TestDispatch.PushPointerMetadata);
+    try testing.expectEqual(value, push32_data.metadata.value_ptr.*);
 
     // Test JUMPDEST
     const jd_dispatch = TestDispatch{ .cursor = @ptrCast(&items[6]) };
@@ -751,7 +719,8 @@ test "Dispatch - getOpData compilation and type safety" {
     try testing.expect(jd_data.metadata.gas == 100);
 
     // Test regular opcode (no metadata)
-    const add_dispatch = TestDispatch{ .cursor = @ptrCast(&items[1]) };
+    const add_items = [_]TestDispatch.Item{ .{ .opcode_handler = &mockAdd }, .{ .opcode_handler = &mockStop } };
+    const add_dispatch = TestDispatch{ .cursor = &add_items };
     const add_data = add_dispatch.getOpData(.ADD);
     try testing.expect(!@hasField(@TypeOf(add_data), "metadata"));
 }
@@ -844,8 +813,8 @@ test "Dispatch - calculateFirstBlockGas helper function" {
             .max_initcode_size = TestFrame.config.max_initcode_size,
             .fusions_enabled = true,
         });
-        const bytecode = try Bytecode.init(allocator, &[_]u8{});
-        // Bytecode doesn't need deinit as it's value-based now
+        var bytecode = try Bytecode.init(allocator, &[_]u8{});
+        defer bytecode.deinit();
 
         const gas = TestDispatch.calculateFirstBlockGas(&bytecode);
         try testing.expect(gas == 0);
@@ -858,8 +827,8 @@ test "Dispatch - calculateFirstBlockGas helper function" {
             .max_initcode_size = TestFrame.config.max_initcode_size,
             .fusions_enabled = true,
         });
-        const bytecode = try Bytecode.init(allocator, &[_]u8{@intFromEnum(Opcode.STOP)});
-        // Bytecode doesn't need deinit as it's value-based now
+        var bytecode = try Bytecode.init(allocator, &[_]u8{@intFromEnum(Opcode.STOP)});
+        defer bytecode.deinit();
 
         const gas = TestDispatch.calculateFirstBlockGas(&bytecode);
         try testing.expect(gas == 0); // STOP has 0 gas cost
@@ -872,12 +841,12 @@ test "Dispatch - calculateFirstBlockGas helper function" {
             .max_initcode_size = TestFrame.config.max_initcode_size,
             .fusions_enabled = true,
         });
-        const bytecode = try Bytecode.init(allocator, &[_]u8{
+        var bytecode = try Bytecode.init(allocator, &[_]u8{
             @intFromEnum(Opcode.PUSH1), 42, // 3 gas
             @intFromEnum(Opcode.ADD), // 3 gas
             @intFromEnum(Opcode.JUMPDEST), // 1 gas (but terminates block)
         });
-        // Bytecode doesn't need deinit as it's value-based now
+        defer bytecode.deinit();
 
         const gas = TestDispatch.calculateFirstBlockGas(&bytecode);
         try testing.expect(gas == 6); // PUSH1(3) + ADD(3), JUMPDEST not included
@@ -890,39 +859,30 @@ test "Dispatch - calculateFirstBlockGas helper function" {
             .max_initcode_size = TestFrame.config.max_initcode_size,
             .fusions_enabled = true,
         });
-        const bytecode = try Bytecode.init(allocator, &[_]u8{
+        var bytecode = try Bytecode.init(allocator, &[_]u8{
             @intFromEnum(Opcode.PUSH1), 10, // 3 gas
             @intFromEnum(Opcode.PUSH1), 20, // 3 gas
             @intFromEnum(Opcode.MUL), // 5 gas
             @intFromEnum(Opcode.JUMP), // 8 gas
         });
-        // Bytecode doesn't need deinit as it's value-based now
+        defer bytecode.deinit();
 
         const gas = TestDispatch.calculateFirstBlockGas(&bytecode);
         try testing.expect(gas == 19); // 3 + 3 + 5 + 8
     }
 
-    // Test overflow handling
+    // SSTORE has dynamic gas only, but the first block still needs a stack check.
     {
-        // Create bytecode that would overflow gas calculation
-        var large_bytecode = std.ArrayList(u8){};
-        defer large_bytecode.deinit(allocator);
+        const Bytecode = bytecode_mod.Bytecode(.{});
+        var bytecode = try Bytecode.init(allocator, &.{ @intFromEnum(Opcode.SSTORE), @intFromEnum(Opcode.STOP) });
+        defer bytecode.deinit();
 
-        // Add many expensive operations that would overflow
-        for (0..10000) |_| {
-            try large_bytecode.append(allocator, @intFromEnum(Opcode.SSTORE)); // Very expensive operation
-        }
+        var schedule = try TestDispatch.init(allocator, &bytecode, &TestFrame.opcode_handlers, null);
+        defer schedule.deinit();
 
-        const Bytecode = bytecode_mod.Bytecode(BytecodeConfig{
-            .max_bytecode_size = TestFrame.config.max_bytecode_size,
-            .max_initcode_size = TestFrame.config.max_initcode_size,
-            .fusions_enabled = true,
-        });
-        const bytecode = try Bytecode.init(allocator, large_bytecode.items);
-        // Bytecode doesn't need deinit as it's value-based now
-
-        const gas = TestDispatch.calculateFirstBlockGas(&bytecode);
-        try testing.expect(gas == std.math.maxInt(u64));
+        try testing.expect(schedule.has_first_block_gas);
+        try testing.expectEqual(@as(u32, 0), schedule.items[0].first_block_gas.gas);
+        try testing.expectEqual(@as(i16, 2), schedule.items[0].first_block_gas.min_stack);
     }
 }
 
@@ -940,22 +900,22 @@ test "JumpTable dispatch pointers reference provided schedule buffer" {
     defer bytecode.deinit();
 
     // Build initial schedule
-    const sched1 = try TestDispatch.init(allocator, &bytecode, &handlers, null);
-    defer allocator.free(sched1);
+    var sched1 = try TestDispatch.init(allocator, &bytecode, &handlers, null);
+    defer sched1.deinit();
 
     // Build jump table from schedule 1
-    const jt1 = try TestDispatch.createJumpTable(allocator, sched1, bytecode);
+    const jt1 = try TestDispatch.createJumpTable(allocator, sched1.items, &bytecode);
     defer allocator.free(jt1.entries);
     try testing.expect(jt1.entries.len == 1);
 
     // Expect the first entry to point into sched1 at index 0
-    const expected_ptr1 = sched1.ptr; // JUMPDEST is first (index 0)
+    const expected_ptr1 = sched1.items.ptr; // JUMPDEST is first (index 0)
     try testing.expect(@intFromPtr(jt1.entries[0].dispatch.cursor) == @intFromPtr(expected_ptr1));
 
     // Create a second schedule buffer at a (likely) different address
-    var sched2 = try allocator.alloc(TestDispatch.Item, sched1.len);
+    const sched2 = try allocator.alloc(TestDispatch.Item, sched1.items.len);
     defer allocator.free(sched2);
-    for (sched1, 0..) |it, i| sched2[i] = it; // Copy items
+    @memcpy(sched2, sched1.items);
 
     // Build jump table from schedule 2
     const jt2 = try TestDispatch.createJumpTable(allocator, sched2, bytecode);
@@ -1002,53 +962,16 @@ test "Dispatch - RAII DispatchSchedule for automatic cleanup" {
     const allocator = testing.allocator;
     const handlers = createTestHandlers();
 
-    // Test basic RAII with pointer cleanup
-    {
-        // Create bytecode with PUSH that requires pointer allocation
-        var push16_data = [_]u8{@intFromEnum(Opcode.PUSH16)} ++ [_]u8{0xFF} ** 16;
-        const Bytecode = bytecode_mod.Bytecode(BytecodeConfig{
-            .max_bytecode_size = TestFrame.config.max_bytecode_size,
-            .max_initcode_size = TestFrame.config.max_initcode_size,
-            .fusions_enabled = true,
-        });
-        const bytecode = try Bytecode.init(allocator, &push16_data);
-        // Bytecode doesn't need deinit as it's value-based now
-
-        // Create RAII dispatch schedule
-    var schedule = try TestDispatch.DispatchSchedule.init(allocator, bytecode, &handlers, null);
-    defer schedule.deinit();
-
-        // Verify schedule was created
-        try testing.expect(schedule.items.len >= 4); // Handler + metadata + 2 STOP handlers
-
-        // Verify pointer metadata exists
-        var found_pointer = false;
-        for (schedule.items) |item| {
-            switch (item) {
-                .push_pointer => |ptr_meta| {
-                    found_pointer = true;
-                    // Verify the pointer contains expected value
-                    const expected_value: u256 = std.math.shl(u256, 1, 128) - 1; // 16 bytes of 0xFF
-                    try testing.expect(ptr_meta.value_ptr.* == expected_value);
-                },
-                else => {},
-            }
-        }
-        try testing.expect(found_pointer);
-
-        // deinit will be called automatically, cleaning up pointers
-    }
-
     // Test error handling with proper cleanup
     {
-        var failing_allocator = testing.FailingAllocator.init(allocator, .{ .fail_index = 3 });
+        var failing_allocator = testing.FailingAllocator.init(allocator, .{ .fail_index = 1 });
 
         const Bytecode = bytecode_mod.Bytecode(BytecodeConfig{
             .max_bytecode_size = TestFrame.config.max_bytecode_size,
             .max_initcode_size = TestFrame.config.max_initcode_size,
             .fusions_enabled = true,
         });
-        const bytecode = try Bytecode.init(allocator, &[_]u8{
+        var bytecode = try Bytecode.init(allocator, &[_]u8{
             @intFromEnum(Opcode.PUSH32), 0xFF, 0xFF, 0xFF, 0xFF, // Will need pointer
             0xFF,                        0xFF, 0xFF, 0xFF, 0xFF,
             0xFF,                        0xFF, 0xFF, 0xFF, 0xFF,
@@ -1057,7 +980,7 @@ test "Dispatch - RAII DispatchSchedule for automatic cleanup" {
             0xFF,                        0xFF, 0xFF, 0xFF, 0xFF,
             0xFF,                        0xFF, 0xFF,
         });
-        // Bytecode doesn't need deinit as it's value-based now
+        defer bytecode.deinit();
 
         // Should fail during allocation and clean up properly
         const result = TestDispatch.DispatchSchedule.init(failing_allocator.allocator(), &bytecode, &handlers, null);
@@ -1071,7 +994,7 @@ test "Dispatch - RAII DispatchSchedule for automatic cleanup" {
             .max_initcode_size = TestFrame.config.max_initcode_size,
             .fusions_enabled = true,
         });
-        const bytecode = try Bytecode.init(allocator, &[_]u8{
+        var bytecode = try Bytecode.init(allocator, &[_]u8{
             @intFromEnum(Opcode.PUSH1), 42, // Inline
             @intFromEnum(Opcode.PUSH8), 1, 2, 3, 4, 5, 6, 7, 8, // Inline
             @intFromEnum(Opcode.PUSH16), 0xFF, 0xFF, 0xFF, 0xFF, // Pointer
@@ -1079,46 +1002,30 @@ test "Dispatch - RAII DispatchSchedule for automatic cleanup" {
             0xFF,                        0xFF, 0xFF, 0xFF, 0xFF,
             0xFF,                        0xFF,
         });
-        // Bytecode doesn't need deinit as it's value-based now
+        defer bytecode.deinit();
 
         var schedule = try TestDispatch.DispatchSchedule.init(allocator, bytecode, &handlers, null);
         defer schedule.deinit();
 
-        // Count inline and pointer metadata
-        var inline_count: usize = 0;
-        var pointer_count: usize = 0;
-        for (schedule.items) |item| {
-            switch (item) {
-                .push_inline => inline_count += 1,
-                .push_pointer => pointer_count += 1,
-                else => {},
-            }
+        if (comptime builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
+            try testing.expectEqual(@as(usize, 2), std.mem.count(TestDispatch.ItemKind, schedule.item_kinds, &.{.push_inline}));
+            try testing.expectEqual(@as(usize, 1), std.mem.count(TestDispatch.ItemKind, schedule.item_kinds, &.{.push_pointer}));
+        } else {
+            try testing.expectEqual(@as(usize, 0), schedule.item_kinds.len);
         }
-
-        try testing.expect(inline_count == 2);
-        try testing.expect(pointer_count == 1);
     }
 }
 
-// Removed: JumpTableBuilder iterator pattern (internal API changed)
-// Removed: JumpTableBuilder iterator pattern (internal API changed)
-// Removed: JumpTableBuilder iterator pattern (internal API changed)
-test "Dispatch - JumpTableBuilder iterator pattern" {
-    // Removed due to internal API changes; covered by createJumpTable tests
-    try std.testing.expect(true);
-}
-
-
 test "Dispatch - pretty_print basic functionality" {
     const allocator = testing.allocator;
-    const handlers = createTestHandlers();
+    const handlers = TestFrame.opcode_handlers;
 
     // Create simple bytecode: PUSH1 0x42, ADD, STOP
     const code = [_]u8{ @intFromEnum(Opcode.PUSH1), 0x42, @intFromEnum(Opcode.ADD), @intFromEnum(Opcode.STOP) };
     const Bytecode = bytecode_mod.Bytecode(BytecodeConfig{
         .max_bytecode_size = TestFrame.config.max_bytecode_size,
         .max_initcode_size = TestFrame.config.max_initcode_size,
-        .fusions_enabled = true,
+        .fusions_enabled = false,
     });
     var bytecode = try Bytecode.init(allocator, &code);
     defer bytecode.deinit();
@@ -1128,7 +1035,7 @@ test "Dispatch - pretty_print basic functionality" {
     defer dispatch_items.deinit();
 
     // Test pretty_print
-    const formatted = try TestDispatch.pretty_print(allocator, dispatch_items.items, &bytecode);
+    const formatted = try TestDispatch.pretty_print(allocator, dispatch_items, &bytecode);
     defer allocator.free(formatted);
 
     // Verify the output contains expected elements
@@ -1138,8 +1045,9 @@ test "Dispatch - pretty_print basic functionality" {
     try testing.expect(std.mem.indexOf(u8, formatted, "--- Summary ---") != null);
     try testing.expect(std.mem.indexOf(u8, formatted, "PUSH1") != null);
     try testing.expect(std.mem.indexOf(u8, formatted, "0x42") != null);
-    try testing.expect(std.mem.indexOf(u8, formatted, "HANDLER") != null);
+    try testing.expect(std.mem.indexOf(u8, formatted, "FIRST_BLOCK_GAS") != null);
 
-    // Verify it's a non-empty string
-    try testing.expect(formatted.len > 100);
+    const raw = try TestDispatch.pretty_print(allocator, dispatch_items.items, &bytecode);
+    defer allocator.free(raw);
+    try testing.expectEqualStrings(formatted, raw);
 }

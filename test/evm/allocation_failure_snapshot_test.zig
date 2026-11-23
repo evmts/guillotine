@@ -136,9 +136,8 @@ test "snapshot should be reverted on allocation failure during self-destruct ext
     // Get initial balance
     const initial_balance = (try database.get_account(contract_addr.bytes)).?.balance;
 
-    // Set up allocator to fail during self-destruct extraction
-    // We need enough allocations to succeed for the call setup, but fail on self-destruct extraction
-    failing_alloc.fail_after_n = 100; // This number may need adjustment
+    // Set up allocator to fail deterministically during call execution/extraction
+    failing_alloc.fail_after_n = failing_alloc.allocation_count + 2;
 
     // Execute call to trigger SELFDESTRUCT
     const call_params = evm.CallParams{
@@ -261,8 +260,8 @@ test "snapshot should be reverted on allocation failure during log extraction" {
     // Get initial nonce
     const initial_nonce = (try database.get_account(contract_addr.bytes)).?.nonce;
 
-    // Set up allocator to fail during log extraction
-    failing_alloc.fail_after_n = 100; // This number may need adjustment
+    // Set up allocator to fail deterministically during call execution/extraction
+    failing_alloc.fail_after_n = failing_alloc.allocation_count + 2;
 
     // Execute call to trigger LOG
     const call_params = evm.CallParams{

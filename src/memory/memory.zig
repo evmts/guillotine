@@ -18,7 +18,6 @@ pub const MemoryConfig = @import("memory_config.zig").MemoryConfig;
 const WORD_SIZE = 32;
 const WORD_SHIFT = 5; // log2(32)
 const WORD_MASK = 31; // 32 - 1
-const FAST_PATH_THRESHOLD = 32;
 
 pub const MemoryError = error{
     OutOfMemory,
@@ -42,6 +41,18 @@ pub fn Memory(config: MemoryConfig) type {
 
         checkpoint: u32,
         buffer_ptr: *std.ArrayList(u8),
+        /// Word count (ceil(size / 32)) whose quadratic gas cost is cached in `cached_cost`.
+        /// The cache is validated by word count on every lookup, so a stale entry
+        /// (e.g. after a child frame grows the shared buffer) is simply a miss.
+        cached_words: usize = 0,
+        /// Memory gas cost of `cached_words` words: 3 * words + words^2 / 512.
+        cached_cost: u64 = 0,
+        /// When true, `buffer_ptr` belongs to an external pool and `deinit` must not free it.
+        pooled: bool = false,
+        /// Allocator that owns a pooled buffer. When set, every buffer growth uses it instead
+        /// of the caller-supplied allocator, so a pool that outlives a per-call arena never
+        /// holds arena memory after the arena resets.
+        pool_allocator: ?std.mem.Allocator = null,
 
         pub fn init(allocator: std.mem.Allocator) !Self {
             if (is_owned) {
@@ -53,6 +64,9 @@ pub fn Memory(config: MemoryConfig) type {
                 return Self{
                     .checkpoint = 0,
                     .buffer_ptr = buffer_ptr,
+                    .cached_words = 0,
+                    .cached_cost = 0,
+                    .pooled = false,
                 };
             } else {
                 @compileError("Cannot call init() on borrowed memory type. Use init_borrowed() instead.");
@@ -64,15 +78,41 @@ pub fn Memory(config: MemoryConfig) type {
             return Self{
                 .checkpoint = checkpoint,
                 .buffer_ptr = buffer_ptr,
+                .cached_words = 0,
+                .cached_cost = 0,
+                .pooled = false,
             };
         }
 
+        /// Creates a memory view backed by a pooled buffer. The buffer is emptied
+        /// (capacity retained) and is never freed by `deinit`; the pool owns it.
+        /// `pool_allocator` must be the allocator that owns `buffer_ptr`; all growth uses it.
+        pub fn init_pooled(buffer_ptr: *std.ArrayList(u8), pool_allocator: std.mem.Allocator) Self {
+            buffer_ptr.items.len = 0;
+            return Self{
+                .checkpoint = 0,
+                .buffer_ptr = buffer_ptr,
+                .cached_words = 0,
+                .cached_cost = 0,
+                .pooled = true,
+                .pool_allocator = pool_allocator,
+            };
+        }
+
+        /// Empties the buffer (keeping its capacity) and resets checkpoint and gas cache.
+        pub fn reset_for_reuse(self: *Self) void {
+            self.buffer_ptr.items.len = 0;
+            self.checkpoint = 0;
+            self.cached_words = 0;
+            self.cached_cost = 0;
+        }
+
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
-            if (is_owned) {
+            if (is_owned and !self.pooled) {
                 self.buffer_ptr.deinit(allocator);
                 allocator.destroy(self.buffer_ptr);
             }
-            // No-op for borrowed memory
+            // No-op for borrowed or pooled memory
         }
 
         pub fn init_child(self: *Self) !Memory(.{ .initial_capacity = config.initial_capacity, .memory_limit = config.memory_limit, .owned = false }) {
@@ -81,6 +121,9 @@ pub fn Memory(config: MemoryConfig) type {
             return BorrowedMemType{
                 .checkpoint = @as(u32, @intCast(self.buffer_ptr.*.items.len)),
                 .buffer_ptr = self.buffer_ptr,
+                .cached_words = 0,
+                .cached_cost = 0,
+                .pooled = false,
             };
         }
 
@@ -91,9 +134,9 @@ pub fn Memory(config: MemoryConfig) type {
             if (total <= checkpoint_usize) return 0;
             return total - checkpoint_usize;
         }
-        
+
         // Common methods that work on the inner Self type
-        pub fn size(self: *Self) usize {
+        pub fn size(self: *const Self) usize {
             return self.size_internal();
         }
 
@@ -110,85 +153,50 @@ pub fn Memory(config: MemoryConfig) type {
             const current_len = self.buffer_ptr.*.items.len;
             if (required_total <= current_len) return;
 
-            // Fast path for small growth (common for single word operations)
-            const growth = required_total - current_len;
-            if (growth <= FAST_PATH_THRESHOLD) {
-                @branchHint(.likely);
-                // For small growth, try to use existing capacity first
-                if (required_total <= self.buffer_ptr.*.capacity) {
-                    @branchHint(.likely);
-                    // We have capacity, just extend length and zero
-                    const old_len = current_len;
-                    self.buffer_ptr.*.items.len = required_total;
-                    
-                    // Use SIMD for zeroing if vector_length > 1 and data is large enough
-                    if (config.vector_length > 1) {
-                        const slice = self.buffer_ptr.*.items[old_len..required_total];
-                        // Only use SIMD if we have enough data AND proper alignment
-                        const ptr_addr = @intFromPtr(slice.ptr);
-                        const alignment_ok = (ptr_addr % @alignOf(@Vector(config.vector_length, u8))) == 0;
-                        
-                        if (slice.len >= config.vector_length and alignment_ok and config.vector_length > 1) {
-                            const VectorType = @Vector(config.vector_length, u8);
-                            const zero_vec: VectorType = @splat(0);
-                            
-                            // SIMD-aligned chunks
-                            var i: usize = 0;
-                            while (i + config.vector_length <= slice.len) : (i += config.vector_length) {
-                                const ptr: *VectorType = @ptrCast(@alignCast(slice.ptr + i));
-                                ptr.* = zero_vec;
-                            }
-                            // Handle remainder
-                            if (i < slice.len) {
-                                @memset(slice[i..], 0);
-                            }
-                        } else {
-                            @memset(slice, 0);
-                        }
-                    } else {
-                        @memset(self.buffer_ptr.*.items[old_len..required_total], 0);
-                    }
-                    return;
-                }
+            if (required_total > self.buffer_ptr.*.capacity) {
+                @branchHint(.unlikely);
+                const alloc = self.pool_allocator orelse allocator;
+                try self.buffer_ptr.*.ensureTotalCapacity(alloc, required_total);
             }
-
-            // Standard path for larger growth
-            const old_len = current_len;
-            // Use ensureTotalCapacity + manual growth to control zeroing
-            try self.buffer_ptr.*.ensureTotalCapacity(allocator, required_total);
             self.buffer_ptr.*.items.len = required_total;
+            // LLVM lowers @memset to optimal vectorized zeroing.
+            @memset(self.buffer_ptr.*.items[current_len..required_total], 0);
 
-            // Zero only the new portion with SIMD if applicable
-            if (config.vector_length > 1) {
-                const slice = self.buffer_ptr.*.items[old_len..required_total];
-                if (slice.len >= config.vector_length * 4) { // Only use SIMD for larger buffers
-                    // Check alignment before attempting SIMD
-                    const ptr_addr = @intFromPtr(slice.ptr);
-                    const alignment_ok = (ptr_addr % @alignOf(@Vector(config.vector_length, u8))) == 0;
+            const words = (new_size_usize + WORD_MASK) >> WORD_SHIFT;
+            self.cached_words = words;
+            self.cached_cost = calculate_memory_cost(@as(u64, @intCast(words)));
+        }
 
-                    if (alignment_ok) {
-                        const VectorType = @Vector(config.vector_length, u8);
-                        const zero_vec: VectorType = @splat(0);
+        /// Reads a big-endian word at `offset` without bounds checks.
+        /// Caller must guarantee `offset + 32 <= self.size()`.
+        pub inline fn get_u256_unchecked(self: *const Self, offset: usize) u256 {
+            return std.mem.readInt(u256, (self.buffer_ptr.items.ptr + self.checkpoint + offset)[0..32], .big);
+        }
 
-                        // SIMD-aligned chunks
-                        var i: usize = 0;
-                        while (i + config.vector_length <= slice.len) : (i += config.vector_length) {
-                            const ptr: *VectorType = @ptrCast(@alignCast(slice.ptr + i));
-                            ptr.* = zero_vec;
-                        }
-                        // Handle remainder
-                        if (i < slice.len) {
-                            @memset(slice[i..], 0);
-                        }
-                    } else {
-                        // Fallback to scalar if not aligned
-                        @memset(slice, 0);
-                    }
-                } else {
-                    @memset(slice, 0);
-                }
+        /// Writes a big-endian word at `offset` without bounds checks.
+        /// Caller must guarantee `offset + 32 <= self.size()`.
+        pub inline fn set_u256_unchecked(self: *Self, offset: usize, value: u256) void {
+            std.mem.writeInt(u256, (self.buffer_ptr.items.ptr + self.checkpoint + offset)[0..32], value, .big);
+        }
+
+        /// Writes one byte at `offset` without bounds checks.
+        /// Caller must guarantee `offset < self.size()`.
+        pub inline fn set_byte_unchecked(self: *Self, offset: usize, value: u8) void {
+            self.buffer_ptr.items.ptr[@as(usize, self.checkpoint) + offset] = value;
+        }
+
+        /// Overlap-safe in-place copy of `len` bytes from `src_offset` to `dst_offset`.
+        /// Caller must have grown memory (via `ensure_capacity`) so both ranges are in bounds.
+        pub fn copy_within(self: *Self, dst_offset: usize, src_offset: usize, len: usize) void {
+            if (len == 0 or dst_offset == src_offset) return;
+            const base = @as(usize, self.checkpoint);
+            const items = self.buffer_ptr.items;
+            const dst = items[base + dst_offset ..][0..len];
+            const src = items[base + src_offset ..][0..len];
+            if (dst_offset < src_offset) {
+                std.mem.copyForwards(u8, dst, src);
             } else {
-                @memset(self.buffer_ptr.*.items[old_len..required_total], 0);
+                std.mem.copyBackwards(u8, dst, src);
             }
         }
 
@@ -278,6 +286,8 @@ pub fn Memory(config: MemoryConfig) type {
 
         /// Clears memory: resets owned memory to empty, sets checkpoint for borrowed memory
         pub fn clear(self: *Self) void {
+            self.cached_words = 0;
+            self.cached_cost = 0;
             if (is_owned) {
                 self.buffer_ptr.*.items.len = 0;
                 self.checkpoint = 0;
@@ -351,17 +361,22 @@ pub fn Memory(config: MemoryConfig) type {
             }
             return 3 * words + std.math.shr(u64, words * words, 9); // Using std.math.shr instead of / 512
         }
-        pub fn get_expansion_cost(self: *Self, new_size: u32) u64 {
+        pub fn get_expansion_cost(self: *const Self, new_size: u32) u64 {
             const new_size_u64 = @as(u64, new_size);
             const current_size = @as(u64, @intCast(self.size_internal()));
             if (new_size_u64 <= current_size) {
                 @branchHint(.likely);
                 return 0;
             }
-            const new_words = std.math.shr(u64, new_size_u64 + 31, 5); // Using std.math.shr instead of / 32
-            const current_words = std.math.shr(u64, current_size + 31, 5); // Using std.math.shr instead of / 32
+            const new_words = (new_size_u64 + WORD_MASK) >> WORD_SHIFT;
+            const current_words = (current_size + WORD_MASK) >> WORD_SHIFT;
             const new_cost = calculate_memory_cost(new_words);
-            const current_cost = calculate_memory_cost(current_words);
+            // The cache is keyed by word count, so it is only used when it describes
+            // exactly the current memory size; otherwise recompute.
+            const current_cost = if (current_words == self.cached_words)
+                self.cached_cost
+            else
+                calculate_memory_cost(current_words);
             return new_cost - current_cost;
         }
 
@@ -730,4 +745,98 @@ test "Memory struct size verification" {
     try std.testing.expect(@sizeOf(OwnedMem) >= 16);
 
     // Field offsets depend on struct padding and alignment
+}
+
+test "Memory expansion cost cache matches uncached formula" {
+    const allocator = std.testing.allocator;
+    const Mem = Memory(.{ .owned = true });
+    var memory = try Mem.init(allocator);
+    defer memory.deinit(allocator);
+    const sizes = [_]u32{ 1, 32, 33, 64, 1000, 4096, 4097, 100_000, 1_000_000 };
+    for (sizes) |s| {
+        const current: u64 = @intCast(memory.size());
+        const target: u64 = @max(current, s);
+        const new_words = (target + 31) / 32;
+        const old_words = (current + 31) / 32;
+        const expected = (3 * new_words + new_words * new_words / 512) - (3 * old_words + old_words * old_words / 512);
+        try std.testing.expectEqual(expected, memory.get_expansion_cost(s));
+        try memory.ensure_capacity(allocator, s);
+        try std.testing.expectEqual(@as(usize, (target + 31) / 32), memory.cached_words);
+    }
+}
+
+test "Memory expansion cost stays exact when a child grows the shared buffer" {
+    const allocator = std.testing.allocator;
+    const Mem = Memory(.{ .owned = true });
+    var parent = try Mem.init(allocator);
+    defer parent.deinit(allocator);
+    try parent.ensure_capacity(allocator, 64);
+    var child = try parent.init_child();
+    defer child.deinit(allocator);
+    try child.ensure_capacity(allocator, 96);
+    // Parent now sees 160 bytes (5 words) but its cache describes 2 words.
+    const expected: u64 = (3 * 6 + 36 / 512) - (3 * 5 + 25 / 512);
+    try std.testing.expectEqual(expected, parent.get_expansion_cost(192));
+}
+
+test "Memory pooled init and reset_for_reuse" {
+    const allocator = std.testing.allocator;
+    const Mem = Memory(.{ .owned = true });
+    var buffer = std.ArrayList(u8){};
+    defer buffer.deinit(allocator);
+    try buffer.appendSlice(allocator, &[_]u8{ 1, 2, 3 });
+    var memory = Mem.init_pooled(&buffer, allocator);
+    try std.testing.expectEqual(@as(usize, 0), memory.size());
+    try memory.ensure_capacity(allocator, 64);
+    try std.testing.expectEqual(@as(usize, 2), memory.cached_words);
+    memory.reset_for_reuse();
+    try std.testing.expectEqual(@as(usize, 0), memory.size());
+    try std.testing.expectEqual(@as(usize, 0), memory.cached_words);
+    try std.testing.expectEqual(@as(u64, 0), memory.cached_cost);
+    // deinit must not free the pool-owned buffer (testing allocator detects double free).
+    memory.deinit(allocator);
+    try buffer.append(allocator, 9);
+}
+
+test "Memory pooled growth uses pool allocator, not the caller allocator" {
+    const allocator = std.testing.allocator;
+    const Mem = Memory(.{ .owned = true });
+    var buffer = std.ArrayList(u8){};
+    defer buffer.deinit(allocator);
+    var memory = Mem.init_pooled(&buffer, allocator);
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    // Grow well past the empty buffer while passing a short-lived arena.
+    try memory.ensure_capacity(arena.allocator(), 4096);
+    arena.deinit();
+    // The buffer must still be valid and owned by the pool allocator.
+    try std.testing.expectEqual(@as(usize, 4096), memory.size());
+    try std.testing.expect(buffer.capacity >= 4096);
+    memory.set_u256_unchecked(4064, 0xdead);
+    try std.testing.expectEqual(@as(u256, 0xdead), memory.get_u256_unchecked(4064));
+}
+
+test "Memory unchecked word accessors respect checkpoint" {
+    const allocator = std.testing.allocator;
+    const Mem = Memory(.{ .owned = true });
+    var parent = try Mem.init(allocator);
+    defer parent.deinit(allocator);
+    try parent.ensure_capacity(allocator, 32);
+    var child = try parent.init_child();
+    try child.ensure_capacity(allocator, 64);
+    child.set_u256_unchecked(1, 0xDEADBEEF);
+    try std.testing.expectEqual(@as(u256, 0xDEADBEEF), child.get_u256_unchecked(1));
+    try std.testing.expectEqual(@as(u256, 0xDEADBEEF), try child.get_u256(1));
+    try std.testing.expectEqual(@as(u256, 0), try parent.get_u256(0));
+}
+
+test "Memory copy_within handles forward and backward overlap" {
+    const allocator = std.testing.allocator;
+    const Mem = Memory(.{ .owned = true });
+    var memory = try Mem.init(allocator);
+    defer memory.deinit(allocator);
+    try memory.set_data(allocator, 0, &[_]u8{ 1, 2, 3, 4, 5, 6, 7, 8 });
+    memory.copy_within(2, 0, 4);
+    try std.testing.expectEqualSlices(u8, &[_]u8{ 1, 2, 1, 2, 3, 4, 7, 8 }, try memory.get_slice(0, 8));
+    memory.copy_within(0, 3, 5);
+    try std.testing.expectEqualSlices(u8, &[_]u8{ 2, 3, 4, 7, 8, 4, 7, 8 }, try memory.get_slice(0, 8));
 }

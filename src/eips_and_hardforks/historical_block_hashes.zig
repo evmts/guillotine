@@ -13,10 +13,13 @@ const Database = @import("../storage/database.zig").Database;
 const BlockInfo = @import("../block/block_info.zig").BlockInfo(.{});
 const log = @import("../log.zig");
 
-/// EIP-2935 historical block hashes contract address
-/// Deployed at 0x0b
+/// EIP-2935 historical block hashes contract address (Prague mainnet):
+/// 0x0000F90827F1C53a10cb7A02335B175320002935
 pub const HISTORY_CONTRACT_ADDRESS = Address{
-    .bytes = [_]u8{0} ** 19 ++ [_]u8{0x0b},
+    .bytes = .{
+        0x00, 0x00, 0xf9, 0x08, 0x27, 0xf1, 0xc5, 0x3a, 0x10, 0xcb,
+        0x7a, 0x02, 0x33, 0x5b, 0x17, 0x53, 0x20, 0x00, 0x29, 0x35,
+    },
 };
 
 /// System address that can update block hashes
@@ -222,10 +225,9 @@ pub const HistoricalBlockHashesContract = struct {
         block_number: u64,
         current_block: u64,
     ) Database.Error!?[32]u8 {
-        // Standard BLOCKHASH rules first
-        // - Return null for current block and future blocks
-        // - Return null for block 0 (genesis)
-        if (block_number >= current_block or block_number == 0) {
+        // Only complete blocks have a hash. Block 0 (genesis) is a complete block, so it
+        // is served like any other when stored.
+        if (block_number >= current_block) {
             return null;
         }
 
@@ -645,7 +647,14 @@ test "historical block hashes getBlockHash validation" {
     const result4 = try HistoricalBlockHashesContract.getBlockHash(&database, 700, 600);
     try testing.expect(result4 == null);
 
-    // Should return null for genesis block
+    // Genesis is unknown until stored, then served like any other complete block
     const result5 = try HistoricalBlockHashesContract.getBlockHash(&database, 0, 100);
     try testing.expect(result5 == null);
+    const genesis_hash = [_]u8{0x0D} ** 32;
+    const genesis_slots = computeSlots(0);
+    try database.set_storage(HISTORY_CONTRACT_ADDRESS.bytes, genesis_slots.block_slot, @bitCast(genesis_hash));
+    try database.set_storage(HISTORY_CONTRACT_ADDRESS.bytes, genesis_slots.hash_slot, 0);
+    const result6 = try HistoricalBlockHashesContract.getBlockHash(&database, 0, 100);
+    try testing.expect(result6 != null);
+    try testing.expectEqualSlices(u8, &genesis_hash, &result6.?);
 }

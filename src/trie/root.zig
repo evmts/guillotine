@@ -1,21 +1,24 @@
-const module = @import("module.zig");
+//! Root module for Guillotine's Merkle Patricia Trie (MPT).
 
-pub const trie = module.trie;
-pub const merkle_trie = module.merkle_trie;
-pub const hash_builder = module.hash_builder;
-pub const hash_builder_optimized = module.hash_builder_optimized;
-pub const proof = module.proof;
-pub const optimized_branch = module.optimized_branch;
-pub const node_cache = module.node_cache;
-pub const MerkleTrie = module.MerkleTrie;
-pub const TrieNode = module.TrieNode;
-pub const HashBuilder = module.HashBuilder;
-pub const HashBuilderOptimized = module.HashBuilderOptimized;
-pub const ProofNodes = module.ProofNodes;
-pub const ProofRetainer = module.ProofRetainer;
-pub const CompactBranchNode = module.CompactBranchNode;
-pub const NodeCache = module.NodeCache;
-pub const TrieError = module.TrieError;
-pub const ProofError = module.ProofError;
-pub const key_to_nibbles = module.key_to_nibbles;
-pub const nibbles_to_key = module.nibbles_to_key;
+pub const trie = @import("trie.zig");
+pub const merkle_trie = @import("merkle_trie.zig");
+pub const hash_builder = @import("hash_builder_complete.zig");
+pub const hash_builder_optimized = @import("hash_builder_optimized.zig");
+pub const proof = @import("proof.zig");
+pub const optimized_branch = @import("optimized_branch.zig");
+pub const node_cache = @import("node_cache.zig");
+
+pub const MerkleTrie = merkle_trie.MerkleTrie;
+pub const TrieNode = trie.TrieNode;
+pub const HashBuilder = hash_builder.HashBuilder;
+pub const HashBuilderOptimized = hash_builder_optimized.HashBuilderOptimized;
+pub const ProofNodes = proof.ProofNodes;
+pub const ProofRetainer = proof.ProofRetainer;
+pub const CompactBranchNode = optimized_branch.CompactBranchNode;
+pub const NodeCache = node_cache.NodeCache;
+
+pub const TrieError = trie.TrieError;
+pub const ProofError = proof.ProofError;
+
+pub const key_to_nibbles = trie.key_to_nibbles;
+pub const nibbles_to_key = trie.nibbles_to_key;

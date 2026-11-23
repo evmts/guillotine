@@ -153,9 +153,8 @@ pub fn Handlers(FrameType: type) type {
                         .data = data_copy,
                     };
                     evm.logs.append(evm.allocator, log_entry) catch {
-                        // Clean up on failure
-                        if (topics_array.len > 0) evm.allocator.free(topics_array);
-                        if (data_copy.len > 0) evm.allocator.free(data_copy);
+                        // topics_array and data_copy belong to the call arena, which frees
+                        // them at transaction end; freeing them here would be invalid.
                         self.afterComplete(unified_opcode);
                         return Error.AllocationError;
                     };
