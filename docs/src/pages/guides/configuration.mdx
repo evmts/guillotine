@@ -1,0 +1,183 @@
+---
+title: Configuring the EVM
+description: Every comptime knob on EvmConfig, and when to reach for it.
+---
+
+# Configuring the EVM
+
+`Evm` is a function from an `EvmConfig` to a type. Configuration is therefore
+free at runtime: unused branches are not compiled, and the compiler can inline
+across what remains.
+
+```zig
+const Evm = @import("evm").Evm;
+const eips = @import("evm").Eips;
+
+const Cancun = Evm(.{});
+
+const Small = Evm(.{
+    .eips = eips{ .hardfork = .SHANGHAI },
+    .enable_precompiles = false,
+    .memory_limit = 1 << 20,
+});
+```
+
+## Every field
+
+Verified against `src/evm_config.zig`.
+
+### Semantics
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `eips` | `Eips{ .hardfork = .CANCUN }` | Which hardfork's rules to implement. |
+| `eip_overrides` | `&.{}` | Turn individual EIPs on or off independently of the hardfork. |
+| `max_call_depth` | `1024` | Call-stack depth limit (spec value). |
+| `max_bytecode_size` | `24576` | EIP-170 contract size cap. |
+| `max_initcode_size` | `49152` | EIP-3860 initcode cap. |
+| `max_input_size` | `131072` | 128 KiB calldata cap. |
+| `block_gas_limit` | `30_000_000` | Ceiling used for validation. |
+| `enable_beacon_roots` | `true` | EIP-4788 beacon-root system call. |
+| `enable_historical_block_hashes` | `true` | EIP-2935 historical hashes. |
+| `enable_validator_deposits` | `true` | Deposit-contract system processing. |
+| `enable_validator_withdrawals` | `true` | Withdrawal processing. |
+
+### Performance
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `enable_fusion` | `true` | Opcode fusion. See [Synthetic opcodes](/concepts/synthetic-opcodes). |
+| `enable_precompiles` | `true` | Compile in the precompile table at all. |
+| `vector_length` | `0` | SIMD width; `0` auto-detects for the target. |
+| `stack_size` | `1024` | Stack slots. Smaller stacks shrink the frame. |
+| `memory_initial_capacity` | `4096` | Bytes pre-allocated per frame's memory. |
+| `memory_limit` | `0xFFFFFF` | 16 MiB per-frame memory ceiling. |
+| `arena_capacity_limit` | `64 * 1024 * 1024` | Per-call scratch arena ceiling. |
+| `arena_growth_factor` | `150` | Arena growth, as a percentage. |
+| `loop_quota` | `1_000_000` in Debug/ReleaseSafe, `null` otherwise | Analysis-loop safety bound. |
+
+### Testing escape hatches
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `disable_gas_checks` | `false` | Execute without metering gas. |
+| `disable_balance_checks` | `false` | Skip balance sufficiency checks. |
+
+:::danger
+`disable_gas_checks` and `disable_balance_checks` produce a machine that is **not
+an EVM**. They exist for fuzzing and for isolating a stack/memory bug from a gas
+bug. Never ship them.
+:::
+
+### Extension points
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `opcode_overrides` | `&.{}` | Replace the handler for a specific opcode byte. |
+| `precompile_overrides` | `&.{}` | Replace or add a precompile at an address. |
+| `block_info_config` | `.{}` | Compact vs full block-info field widths. |
+| `tracer_config` | `TracerConfig.disabled` | See [Tracing](/guides/tracing). |
+
+## Recipes
+
+### A mainnet-accurate EVM
+
+```zig
+const Mainnet = @import("evm").Evm(.{});
+// Or use the pre-instantiated alias:
+const Mainnet2 = @import("evm").MainnetEvm;
+```
+
+### A minimal WASM build
+
+Small binaries come from dropping the precompile table (arkworks BN254, BLS12-381
+and KZG dominate the bundle) and shrinking the memory ceiling:
+
+```zig
+const Tiny = @import("evm").Evm(.{
+    .enable_precompiles = false,
+    .memory_limit = 1 << 18,
+    .memory_initial_capacity = 512,
+    .arena_capacity_limit = 1 << 20,
+});
+```
+
+```bash
+zig build wasm --release=small -Dno_precompiles=true
+```
+
+### A historical-fork EVM
+
+```zig
+const eips = @import("evm").Eips;
+const Frontier = @import("evm").Evm(.{ .eips = eips{ .hardfork = .FRONTIER } });
+const London   = @import("evm").Evm(.{ .eips = eips{ .hardfork = .LONDON } });
+```
+
+Available: `FRONTIER`, `HOMESTEAD`, `BYZANTIUM`, `BERLIN`, `LONDON`, `SHANGHAI`,
+`CANCUN`.
+
+### A fuzzing EVM
+
+```zig
+const Fuzz = @import("evm").Evm(.{
+    .disable_gas_checks = true,
+    .disable_balance_checks = true,
+    .enable_fusion = false,   // fewer variables while triaging
+});
+```
+
+### Overriding one opcode
+
+`opcode_overrides` lets you graft a custom handler onto a specific opcode byte —
+useful for chain-specific opcodes or for instrumenting a single instruction:
+
+```zig
+const Custom = @import("evm").Evm(.{
+    .opcode_overrides = &.{
+        .{ .opcode = 0x46, .handler = @ptrCast(&myBasefeeHandler) },
+    },
+});
+```
+
+The handler must have the signature described in
+[Dispatch](/concepts/dispatch) — `fn (*Frame, [*]const Item)
+Error!noreturn` — including the trailing tail call. Getting this wrong is a
+crash, not a compile error, so mirror an existing handler closely.
+
+### Overriding a precompile
+
+```zig
+const PrecompileOutput = struct {
+    output: []const u8,
+    gas_used: u64,
+    success: bool,
+};
+
+fn myIdentity(allocator: std.mem.Allocator, input: []const u8, gas_limit: u64) anyerror!PrecompileOutput {
+    _ = gas_limit;
+    return .{
+        .output = try allocator.dupe(u8, input),
+        .gas_used = 15 + 3 * ((input.len + 31) / 32),
+        .success = true,
+    };
+}
+```
+
+Register it via `precompile_overrides` with the target address.
+
+## Doing it from the build instead
+
+`build.zig` surfaces the most common knobs so you do not have to write a wrapper
+type:
+
+```bash
+zig build -Devm-hardfork=SHANGHAI
+zig build -Devm-enable-fusion=false
+zig build -Devm-disable-gas=true
+zig build -Devm-optimize=small     # fast | small | safe
+zig build -Dno_precompiles=true
+```
+
+These feed `BuildConfiguredEvm` (also exported as `DefaultEvm`), so
+`@import("evm").DefaultEvm` respects them.

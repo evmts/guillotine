@@ -1,4 +1,5 @@
 import { describe, it, expect, afterEach } from "bun:test";
+import { U256 } from "../primitives/u256.js";
 import { GuillotineEvm, type BlockInfo } from "./evm.js";
 import { Address } from "../primitives/address.js";
 import { Bytes } from "../primitives/bytes.js";
@@ -50,14 +51,14 @@ describe("GuillotineEvm - Basic Lifecycle", () => {
 		});
 
 		it("should create Evm with tracing enabled", async () => {
-			evm = await GuillotineEvm.create(undefined, true);
+			evm = await GuillotineEvm.create({}, { tracing: true });
 			expect(evm).toBeDefined();
 			expect(evm).toBeInstanceOf(GuillotineEvm);
 		});
 
 		it("should create Evm with tracing and custom block info", async () => {
 			const blockInfo = defaultBlockInfo();
-			evm = await GuillotineEvm.create(blockInfo, true);
+			evm = await GuillotineEvm.create(blockInfo, { tracing: true });
 			expect(evm).toBeDefined();
 			expect(evm).toBeInstanceOf(GuillotineEvm);
 		});
@@ -178,11 +179,10 @@ describe("GuillotineEvm - Basic Lifecycle", () => {
 	});
 
 	describe("Block Info Edge Cases", () => {
-		it("should handle empty prevRandao", async () => {
-			evm = await GuillotineEvm.create({
-				prevRandao: Bytes.empty(),
-			});
-			expect(evm).toBeDefined();
+		it("should reject a prevRandao that is not 32 bytes", async () => {
+			await expect(GuillotineEvm.create({ prevRandao: Bytes.empty() })).rejects.toMatchObject({ type: "InvalidValue" });
+			await expect(GuillotineEvm.create({ prevRandao: Bytes.zeros(33) })).rejects.toMatchObject({ type: "InvalidValue" });
+			evm = await GuillotineEvm.create();
 		});
 
 		it("should handle large prevRandao", async () => {
@@ -221,8 +221,8 @@ describe("GuillotineEvm - Basic Lifecycle", () => {
 
 			evm.close();
 
-			expect(evm.getBalance(addr)).rejects.toThrow("not initialized");
-			expect(evm.getCode(addr)).rejects.toThrow("not initialized");
+			await expect(evm.getBalance(addr)).rejects.toThrow("not initialized");
+			await expect(evm.getCode(addr)).rejects.toThrow("not initialized");
 
 			evm = null;
 		});
@@ -245,8 +245,8 @@ describe("GuillotineEvm - Basic Lifecycle", () => {
 
 	describe("Tracing Mode", () => {
 		it("should create separate instances with and without tracing", async () => {
-			const evmNoTrace = await GuillotineEvm.create(undefined, false);
-			const evmWithTrace = await GuillotineEvm.create(undefined, true);
+			const evmNoTrace = await GuillotineEvm.create({}, { tracing: false });
+			const evmWithTrace = await GuillotineEvm.create({}, { tracing: true });
 
 			expect(evmNoTrace).toBeDefined();
 			expect(evmWithTrace).toBeDefined();
@@ -268,12 +268,12 @@ describe("GuillotineEvm - Basic Lifecycle", () => {
 				prevRandao: Bytes.fromHex("0x" + "00".repeat(32)),
 			};
 
-			evm = await GuillotineEvm.create(blockInfo, true);
+			evm = await GuillotineEvm.create(blockInfo, { tracing: true });
 			expect(evm).toBeDefined();
 
-			// Should be able to perform operations
-			const balance = await evm.getBalance(testAddress(1));
-			expect(balance.toBigInt()).toBe(0n);
+			// Tracing handles support setters and calls, not state reads
+			await evm.setBalance(testAddress(1), U256.fromBigInt(5n));
+			await expect(evm.getBalance(testAddress(1))).rejects.toMatchObject({ type: "UnsupportedOperation" });
 		});
 	});
 });

@@ -1,0 +1,166 @@
+{
+  "summary": "Guillotine EVM: incremental Zig/Rust checks, consensus safety, state compliance and measured performance.",
+  "flows": [
+    {
+      "id": "checks/review",
+      "description": "Review a Guillotine change for EVM consensus, Zig memory safety, state compliance and benchmark regressions.",
+      "summary": "Review consensus, ownership, compliance and performance.",
+      "featured": true,
+      "kind": "mdx",
+      "path": ".smithers/flows/checks/review/flow.mdx",
+      "capabilities": [
+        "fs:read:**"
+      ],
+      "model": null,
+      "modelInvocable": true,
+      "inputSchema": {
+        "dialect": "draft-2020-12",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "args": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "args"
+          ],
+          "additionalProperties": true
+        },
+        "definitions": {}
+      },
+      "flows": [
+        "coding/ReviewCheck"
+      ]
+    },
+    {
+      "id": "issue/repro",
+      "description": "Reproduce a Guillotine EVM issue and preserve consensus and memory safety evidence before implementation.",
+      "summary": "Reproduce an EVM issue before planning a fix.",
+      "featured": true,
+      "kind": "mdx",
+      "path": ".smithers/flows/issue/repro/flow.mdx",
+      "capabilities": [
+        "fs:read:**",
+        "proc:spawn:rg *",
+        "proc:spawn:jj --no-pager *",
+        "proc:spawn:zig build *",
+        "proc:spawn:node *smithers.mjs *"
+      ],
+      "model": "sol",
+      "modelInvocable": true,
+      "inputSchema": {
+        "dialect": "draft-2020-12",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "args": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "args"
+          ],
+          "additionalProperties": true
+        },
+        "definitions": {}
+      },
+      "flows": [],
+      "budget": {
+        "tokens": 64000,
+        "milliseconds": 1800000
+      }
+    },
+    {
+      "id": "issue/poc",
+      "description": "Implement a bounded Guillotine issue proof of concept with regression, consensus and memory checks.",
+      "summary": "Prove a fix with focused regressions and consensus checks.",
+      "featured": true,
+      "kind": "mdx",
+      "path": ".smithers/flows/issue/poc/flow.mdx",
+      "capabilities": [
+        "fs:read:**",
+        "fs:write:**",
+        "proc:spawn:rg *",
+        "proc:spawn:jj --no-pager *",
+        "proc:spawn:zig build *",
+        "proc:spawn:node *smithers.mjs *"
+      ],
+      "model": "sol",
+      "modelInvocable": true,
+      "inputSchema": {
+        "dialect": "draft-2020-12",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "args": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "args"
+          ],
+          "additionalProperties": true
+        },
+        "definitions": {}
+      },
+      "flows": [],
+      "budget": {
+        "tokens": 100000,
+        "milliseconds": 3600000
+      }
+    },
+    {
+      "id": "pr-triage",
+      "description": "Triage a Guillotine pull request from supplied metadata and diff without executing its code.",
+      "summary": "Assess PR readiness from its diff and supplied CI evidence.",
+      "featured": true,
+      "kind": "mdx",
+      "path": ".smithers/flows/pr-triage/flow.mdx",
+      "capabilities": [
+        "fs:read:**",
+        "fs:write:.smithers/reports/pr-triage.json",
+        "proc:spawn:rg *"
+      ],
+      "model": "sol",
+      "modelInvocable": true,
+      "inputSchema": {
+        "dialect": "draft-2020-12",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "args": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "args"
+          ],
+          "additionalProperties": true
+        },
+        "definitions": {}
+      },
+      "flows": [],
+      "budget": {
+        "tokens": 64000,
+        "milliseconds": 600000
+      }
+    }
+  ],
+  "on": [],
+  "github": {
+    "mirror": "pull",
+    "issues": "read",
+    "changes": "send-upstream",
+    "protectedPaths": [
+      "src/evm.zig",
+      "src/eips_and_hardforks",
+      "src/frame",
+      "build.zig.zon"
+    ],
+    "maintainers": [
+      "roninjin10",
+      "fucory"
+    ]
+  }
+}

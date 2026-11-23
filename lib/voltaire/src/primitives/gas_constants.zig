@@ -228,6 +228,23 @@ pub const TxDataZeroGas: u64 = 4;
 /// Higher cost reflects increased storage and bandwidth requirements
 pub const TxDataNonZeroGas: u64 = 16;
 
+/// Gas cost per non-zero byte before EIP-2028 (Istanbul)
+pub const TxDataNonZeroGasPreIstanbul: u64 = 68;
+
+/// Token multiplier for a non-zero byte in transaction data
+pub const TxDataNonZeroGasMultiplier: u64 = TxDataNonZeroGas / TxDataZeroGas;
+pub const TxDataNonZeroGasMultiplierPreIstanbul: u64 = TxDataNonZeroGasPreIstanbul / TxDataZeroGas;
+
+/// Gas cost per calldata token for the EIP-7623 floor price
+pub const TxDataFloorTokenGas: u64 = 10;
+
+test "transaction data token multipliers preserve byte gas costs" {
+    try std.testing.expectEqual(@as(u64, 4), TxDataNonZeroGasMultiplier);
+    try std.testing.expectEqual(@as(u64, 17), TxDataNonZeroGasMultiplierPreIstanbul);
+    try std.testing.expectEqual(TxDataNonZeroGas, TxDataNonZeroGasMultiplier * TxDataZeroGas);
+    try std.testing.expectEqual(TxDataNonZeroGasPreIstanbul, TxDataNonZeroGasMultiplierPreIstanbul * TxDataZeroGas);
+}
+
 /// Gas cost per word for copy operations
 /// Applied to CODECOPY, EXTCODECOPY, RETURNDATACOPY, etc.
 pub const CopyGas: u64 = 3;

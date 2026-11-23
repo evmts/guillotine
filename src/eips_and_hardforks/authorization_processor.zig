@@ -65,9 +65,10 @@ pub const AuthorizationProcessor = struct {
         auth: Authorization,
         authority: Address,
     ) AuthorizationError!void {
-        // Validate chain ID
-        if (auth.chain_id != self.chain_id) {
-            log.debug("Authorization chain ID mismatch: expected {}, got {}", .{ self.chain_id, auth.chain_id });
+        // Validate chain ID. EIP-7702: chain_id == 0 means the authorization is valid on any
+        // chain; otherwise it must equal the current chain id.
+        if (auth.chain_id != 0 and auth.chain_id != self.chain_id) {
+            log.debug("Authorization chain ID mismatch: expected {} (or 0), got {}", .{ self.chain_id, auth.chain_id });
             return AuthorizationError.InvalidChainId;
         }
         
@@ -88,19 +89,10 @@ pub const AuthorizationProcessor = struct {
             return AuthorizationError.NotEOA;
         }
         
-        // Special case: revocation with max nonce
-        if (auth.nonce == std.math.maxInt(u64)) {
-            // Revoke delegation
-            var updated_account = account;
-            updated_account.clear_delegation();
-            self.db.set_account(authority.bytes, updated_account) catch |err| {
-                log.err("Failed to update account for revocation: {}", .{err});
-                return AuthorizationError.DatabaseError;
-            };
-            log.debug("Revoked delegation for EOA {x}", .{authority.bytes});
-            return;
-        }
-        
+        // (EIP-7702 has no "revoke via max nonce" mechanism — revocation is done by delegating
+        // to the zero address. The previous special case here was invented and is removed; a
+        // max-nonce authorization is validated normally by the nonce check below.)
+
         // Check nonce matches
         if (auth.nonce != account.nonce) {
             log.debug("Authorization nonce mismatch: expected {}, got {}", .{ account.nonce, auth.nonce });

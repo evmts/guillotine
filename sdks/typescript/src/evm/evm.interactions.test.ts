@@ -27,16 +27,11 @@ describe("GuillotineEvm - Complex Interactions", () => {
 	});
 
 	describe("Self-Destruct Operations", () => {
-		// TODO: Fix SELFDESTRUCT tracking in Zig implementation
-		it.todo("should handle SELFDESTRUCT", async () => {
+		it("should handle SELFDESTRUCT", async () => {
 			const contract = testAddress(100);
 			const beneficiary = testAddress(101);
 
-			// Fund the contract and beneficiary
 			await evm.setBalance(contract, U256.fromBigInt(1000n));
-			await evm.setBalance(beneficiary, U256.zero());
-
-			// Set self-destruct code
 			const code = selfDestructBytecode(beneficiary);
 			await evm.setCode(contract, code);
 
@@ -48,27 +43,53 @@ describe("GuillotineEvm - Complex Interactions", () => {
 
 			assertSuccess(result);
 
-			// Check self-destruct record
-			expect(result.selfdestructs).toHaveLength(1);
-			const record = first(result.selfdestructs, "self-destruct record");
-			expect(record.contract.toHex()).toBe(contract.toHex());
-			expect(record.beneficiary.toHex()).toBe(beneficiary.toHex());
+			// EIP-6780 (Cancun): a contract not created in this transaction only sends its
+			// balance; the account and its code survive, so nothing is destroyed
+			expect(result.selfdestructs).toEqual([]);
+			expect((await evm.getBalance(beneficiary)).toBigInt()).toBe(1000n);
+			expect((await evm.getBalance(contract)).toBigInt()).toBe(0n);
+			expect((await evm.getCode(contract)).toHex()).toBe(code.toHex());
 
-			// Funds should be transferred to beneficiary
-			const beneficiaryBalance = await evm.getBalance(beneficiary);
-			expect(beneficiaryBalance.toBigInt()).toBe(1000n);
-
-			// Contract balance should be zero
-			const contractBalance = await evm.getBalance(contract);
-			expect(contractBalance.toBigInt()).toBe(0n);
+			// PUSH20 3 + SELFDESTRUCT 5000 + cold beneficiary 2600 (EIP-2929)
+			// + 25000 for sending value to an empty account (EIP-161)
+			expect(result.gasLeft).toBe(1000000n - 21000n - 3n - 5000n - 2600n - 25000n);
 		});
 
-		// TODO: Fix SELFDESTRUCT tracking in Zig implementation
-		it.todo("should handle SELFDESTRUCT to self", async () => {
+		it("should destroy a contract that self-destructs in its creating transaction (EIP-6780)", async () => {
+			const deployer = testAddress(106);
+			const beneficiary = testAddress(107);
+			await evm.setBalance(deployer, U256.fromBigInt(1000n));
+
+			// Init code self-destructs immediately, sending its 300 wei endowment to beneficiary
+			const result = await evm.call({
+				caller: deployer,
+				to: Address.zero(),
+				value: U256.fromBigInt(300n),
+				input: selfDestructBytecode(beneficiary),
+				gas: 1000000n,
+				callType: CallType.CREATE,
+			});
+
+			assertSuccess(result);
+			const created = result.createdAddress;
+			if (created === null) throw new Error("CREATE returned no address");
+
+			expect(result.selfdestructs).toHaveLength(1);
+			const record = first(result.selfdestructs, "self-destruct record");
+			expect(record.contract.toHex()).toBe(created.toHex());
+			expect(record.beneficiary.toHex()).toBe(beneficiary.toHex());
+
+			expect((await evm.getBalance(beneficiary)).toBigInt()).toBe(300n);
+			expect((await evm.getBalance(created)).toBigInt()).toBe(0n);
+			expect((await evm.getCode(created)).isEmpty()).toBe(true);
+		});
+
+		it("should handle SELFDESTRUCT to self", async () => {
 			const contract = testAddress(102);
+			const code = selfDestructBytecode(contract);
 
 			await evm.setBalance(contract, U256.fromBigInt(500n));
-			await evm.setCode(contract, selfDestructBytecode(contract));
+			await evm.setCode(contract, code);
 
 			const result = await evm.call(
 				defaultExecutionParams({
@@ -78,19 +99,18 @@ describe("GuillotineEvm - Complex Interactions", () => {
 
 			assertSuccess(result);
 
-			// Self-destruct to self should burn the funds
-			expect(result.selfdestructs).toHaveLength(1);
-			const record = first(result.selfdestructs, "self-destruct record");
-			expect(record.contract.toHex()).toBe(contract.toHex());
-			expect(record.beneficiary.toHex()).toBe(contract.toHex());
+			// EIP-6780: a pre-existing contract that names itself as beneficiary keeps its
+			// balance and code; nothing is burned or destroyed
+			expect(result.selfdestructs).toEqual([]);
+			expect((await evm.getBalance(contract)).toBigInt()).toBe(500n);
+			expect((await evm.getCode(contract)).toHex()).toBe(code.toHex());
 
-			// Balance should be zero (burned)
-			const balance = await evm.getBalance(contract);
-			expect(balance.toBigInt()).toBe(0n);
+			// PUSH20 3 + SELFDESTRUCT 5000; the executing address is already warm
+			expect(result.gasLeft).toBe(1000000n - 21000n - 3n - 5000n);
 		});
 
 		// TODO: Fix SELFDESTRUCT tracking in Zig implementation
-		it.todo("should handle multiple SELFDESTRUCT in one transaction", async () => {
+		it("should handle multiple SELFDESTRUCT in one transaction", async () => {
 			const contractA = testAddress(103);
 			const contractB = testAddress(104);
 			const beneficiary = testAddress(105);
@@ -129,18 +149,21 @@ describe("GuillotineEvm - Complex Interactions", () => {
 
 			assertSuccess(result);
 
-			// Should have two self-destruct records
-			expect(result.selfdestructs).toHaveLength(2);
+			// EIP-6780: neither contract was created in this transaction, so neither is destroyed
+			expect(result.selfdestructs).toEqual([]);
+			expect((await evm.getCode(contractA)).toHex()).toBe(codeA.toHex());
+			expect((await evm.getCode(contractB)).isEmpty()).toBe(false);
 
-			// Beneficiary should receive funds from both
-			const beneficiaryBalance = await evm.getBalance(beneficiary);
-			expect(beneficiaryBalance.toBigInt()).toBe(1000n); // 300 + 700
+			// Beneficiary receives both balances
+			expect((await evm.getBalance(beneficiary)).toBigInt()).toBe(1000n); // 300 + 700
+			expect((await evm.getBalance(contractA)).toBigInt()).toBe(0n);
+			expect((await evm.getBalance(contractB)).toBigInt()).toBe(0n);
 		});
 	});
 
 	describe("Access Lists", () => {
 		// TODO: Fix access list tracking in Zig implementation
-		it.todo("should track accessed addresses", async () => {
+		it("should track accessed addresses", async () => {
 			const contractA = testAddress(200);
 			const contractB = testAddress(201);
 			const contractC = testAddress(202);
@@ -186,7 +209,7 @@ describe("GuillotineEvm - Complex Interactions", () => {
 		});
 
 		// TODO: Fix access list tracking in Zig implementation
-		it.todo("should track accessed storage slots", async () => {
+		it("should track accessed storage slots", async () => {
 			const contract = testAddress(203);
 
 			// Access multiple storage slots
@@ -231,7 +254,7 @@ describe("GuillotineEvm - Complex Interactions", () => {
 		});
 
 		// TODO: Fix access list tracking in Zig implementation
-		it.todo("should track warm/cold access patterns", async () => {
+		it("should track warm/cold access patterns", async () => {
 			const contract = testAddress(204);
 
 			// Access same slot multiple times
@@ -282,7 +305,7 @@ describe("GuillotineEvm - Complex Interactions", () => {
 
 	describe("Complex Call Chains", () => {
 		// TODO: Fix deep call stack handling in Zig implementation
-		it.todo("should handle deep call stack", async () => {
+		it("should handle deep call stack", async () => {
 			const depth = 5;
 			const contracts: Address[] = [];
 
@@ -311,9 +334,11 @@ describe("GuillotineEvm - Complex Interactions", () => {
 
 			assertSuccess(result);
 
-			// Should get value from deepest contract
-			const output = result.output.toBytes();
-			expect(output[31]).toBe(99);
+			// Each caller returns success || callee output: four success words, then 99
+			const expected = new Uint8Array(5 * 32);
+			for (let i = 0; i < 4; i++) expected[i * 32 + 31] = 1;
+			expected[4 * 32 + 31] = 99;
+			expect(result.output.toBytes()).toEqual(expected);
 
 			// All contracts should be in accessed addresses
 			const accessedHexes = result.accessedAddresses.map((a) => a.toHex());
@@ -322,70 +347,56 @@ describe("GuillotineEvm - Complex Interactions", () => {
 			});
 		});
 
-		// TODO: Fix reentrancy handling in Zig implementation
-		it.todo("should handle reentrancy", async () => {
+		it("should handle reentrancy", async () => {
 			const contractA = testAddress(310);
 			const contractB = testAddress(311);
 
-			// Contract A has a counter in storage
-			await evm.setStorage(contractA, U256.zero(), U256.fromBigInt(0n));
+			// Contract B calls back into A with all its gas
+			const codeB = Bytes.fromBytes(
+				new Uint8Array([
+					0x60, 0x00, // PUSH1 0 (retSize)
+					0x60, 0x00, // PUSH1 0 (retOffset)
+					0x60, 0x00, // PUSH1 0 (argsSize)
+					0x60, 0x00, // PUSH1 0 (argsOffset)
+					0x60, 0x00, // PUSH1 0 (value)
+					0x73, ...contractA.toBytes(), // PUSH20 contractA
+					0x5a, // GAS
+					0xf1, // CALL
+					0x00, // STOP
+				]),
+			);
+			await evm.setCode(contractB, codeB);
 
-			// Contract B calls back to A
-			const codeB: number[] = [];
-
-			// Call A's increment function (simplified - just store 2)
-			codeB.push(0x60, 0x00); // retSize
-			codeB.push(0x60, 0x00); // retOffset
-			codeB.push(0x60, 0x00); // argsSize
-			codeB.push(0x60, 0x00); // argsOffset
-			codeB.push(0x60, 0x00); // value
-			codeB.push(0x73); // PUSH20
-			codeB.push(...contractA.toBytes());
-			codeB.push(0x5a); // GAS
-			codeB.push(0xf1); // CALL
-
-			await evm.setCode(contractB, Bytes.fromBytes(new Uint8Array(codeB)));
-
-			// Contract A increments counter and calls B (if counter < 2)
-			const codeA: number[] = [];
-
-			// Load counter
-			codeA.push(0x60, 0x00); // PUSH1 0
-			codeA.push(0x54); // SLOAD
-
-			// Increment
-			codeA.push(0x60, 0x01); // PUSH1 1
-			codeA.push(0x01); // ADD
-
-			// Store back
-			codeA.push(0x80); // DUP1
-			codeA.push(0x60, 0x00); // PUSH1 0
-			codeA.push(0x55); // SSTORE
-
-			// Check if < 2
-			codeA.push(0x60, 0x02); // PUSH1 2
-			codeA.push(0x10); // LT
-
-			// Jump if >= 2
-			codeA.push(0x15); // ISZERO
-			codeA.push(0x60, codeA.length + 20); // PUSH1 jump dest
-			codeA.push(0x57); // JUMPI
-
-			// Call B (will cause reentrancy)
-			codeA.push(0x60, 0x00); // retSize
-			codeA.push(0x60, 0x00); // retOffset
-			codeA.push(0x60, 0x00); // argsSize
-			codeA.push(0x60, 0x00); // argsOffset
-			codeA.push(0x60, 0x00); // value
-			codeA.push(0x73); // PUSH20
-			codeA.push(...contractB.toBytes());
-			codeA.push(0x5a); // GAS
-			codeA.push(0xf1); // CALL
-			codeA.push(0x50); // POP
-
-			codeA.push(0x5b); // JUMPDEST
-
-			await evm.setCode(contractA, Bytes.fromBytes(new Uint8Array(codeA)));
+			// Contract A: counter = SLOAD(0) + 1; SSTORE(0, counter); if counter < 3, call B
+			const codeA = Bytes.fromBytes(
+				new Uint8Array([
+					0x60, 0x00, // 0: PUSH1 0
+					0x54, // 2: SLOAD
+					0x60, 0x01, // 3: PUSH1 1
+					0x01, // 5: ADD
+					0x80, // 6: DUP1
+					0x60, 0x00, // 7: PUSH1 0
+					0x55, // 9: SSTORE           stack: [counter]
+					0x60, 0x03, // 10: PUSH1 3
+					0x81, // 12: DUP2            stack: [counter, 3, counter]
+					0x10, // 13: LT              counter < 3
+					0x15, // 14: ISZERO
+					0x60, 0x34, // 15: PUSH1 52
+					0x57, // 17: JUMPI           counter >= 3: jump to end
+					0x60, 0x00, // 18: PUSH1 0 (retSize)
+					0x60, 0x00, // 20: PUSH1 0 (retOffset)
+					0x60, 0x00, // 22: PUSH1 0 (argsSize)
+					0x60, 0x00, // 24: PUSH1 0 (argsOffset)
+					0x60, 0x00, // 26: PUSH1 0 (value)
+					0x73, ...contractB.toBytes(), // 28: PUSH20 contractB
+					0x5a, // 49: GAS
+					0xf1, // 50: CALL (re-enters A through B)
+					0x50, // 51: POP
+					0x5b, // 52: JUMPDEST
+					0x00, // 53: STOP
+				]),
+			);
+			await evm.setCode(contractA, codeA);
 
 			const result = await evm.call(
 				defaultExecutionParams({
@@ -395,13 +406,12 @@ describe("GuillotineEvm - Complex Interactions", () => {
 
 			assertSuccess(result);
 
-			// Counter should be incremented
-			const counter = await evm.getStorage(contractA, U256.zero());
-			expect(counter.toBigInt()).toBeGreaterThan(0n);
+			// A runs three times: tx -> A(1) -> B -> A(2) -> B -> A(3)
+			expect((await evm.getStorage(contractA, U256.zero())).toBigInt()).toBe(3n);
 		});
 
 		// TODO: Fix value transfer in call chains in Zig implementation
-		it.todo("should handle call with value transfer in chain", async () => {
+		it("should handle call with value transfer in chain", async () => {
 			const contractA = testAddress(320);
 			const contractB = testAddress(321);
 			const contractC = testAddress(322);
@@ -415,17 +425,14 @@ describe("GuillotineEvm - Complex Interactions", () => {
 			// Contract B forwards half value to C
 			const codeB: number[] = [];
 
-			// Get call value and divide by 2
-			codeB.push(0x34); // CALLVALUE
-			codeB.push(0x60, 0x02); // PUSH1 2
-			codeB.push(0x04); // DIV
-
-			// Call C with half value
+			// Call C with value CALLVALUE / 2
 			codeB.push(0x60, 0x00); // retSize
 			codeB.push(0x60, 0x00); // retOffset
 			codeB.push(0x60, 0x00); // argsSize
 			codeB.push(0x60, 0x00); // argsOffset
-			// value already on stack
+			codeB.push(0x60, 0x02); // PUSH1 2 (divisor)
+			codeB.push(0x34); // CALLVALUE (dividend, top of stack)
+			codeB.push(0x04); // DIV: CALLVALUE / 2
 			codeB.push(0x73); // PUSH20
 			codeB.push(...contractC.toBytes());
 			codeB.push(0x5a); // GAS
@@ -455,6 +462,7 @@ describe("GuillotineEvm - Complex Interactions", () => {
 			);
 
 			assertSuccess(result);
+			expect(result.output.isEmpty()).toBe(true);
 
 			// Check final balances
 			const balanceA = await evm.getBalance(contractA);
@@ -468,46 +476,33 @@ describe("GuillotineEvm - Complex Interactions", () => {
 	});
 
 	describe("Gas Metering", () => {
-		// TODO: Fix gas handling in nested calls in Zig implementation
-		it.todo("should handle out of gas in nested call", async () => {
+		it("should handle out of gas in nested call", async () => {
 			const contractA = testAddress(400);
 			const contractB = testAddress(401);
 
-			// Contract B has infinite loop
-			const codeB = hex("0x5b6000565b"); // JUMPDEST PUSH1 0 JUMP JUMPDEST
-			await evm.setCode(contractB, codeB);
+			// Contract B loops forever: JUMPDEST PUSH1 0 JUMP
+			await evm.setCode(contractB, Bytes.fromBytes(new Uint8Array([0x5b, 0x60, 0x00, 0x56])));
 
-			// Contract A calls B with limited gas
-			const codeA: number[] = [];
-
-			codeA.push(0x60, 0x00); // retSize
-			codeA.push(0x60, 0x00); // retOffset
-			codeA.push(0x60, 0x00); // argsSize
-			codeA.push(0x60, 0x00); // argsOffset
-			codeA.push(0x60, 0x00); // value
-			codeA.push(0x73); // PUSH20
-			codeA.push(...contractB.toBytes());
-			codeA.push(0x61, 0x27, 0x10); // PUSH2 10000 (gas)
-			codeA.push(0xf1); // CALL
-
-			// Check if call failed (should be 0)
-			codeA.push(0x15); // ISZERO
-			codeA.push(0x60, codeA.length + 6); // PUSH1 jump dest
-			codeA.push(0x57); // JUMPI
-			// If call succeeded (shouldn't happen)
-			codeA.push(0x60, 0x01); // PUSH1 1
-			codeA.push(0x60, 0x00); // PUSH1 0
-			codeA.push(0xfd); // REVERT
-			codeA.push(0x5b); // JUMPDEST
-			// Return success
-			codeA.push(0x60, 0x01); // PUSH1 1
-			codeA.push(0x60, 0x00); // PUSH1 0
-			codeA.push(0x52); // MSTORE
-			codeA.push(0x60, 0x20); // PUSH1 32
-			codeA.push(0x60, 0x00); // PUSH1 0
-			codeA.push(0xf3); // RETURN
-
-			await evm.setCode(contractA, Bytes.fromBytes(new Uint8Array(codeA)));
+			// Contract A calls B with 10000 gas and returns ISZERO(success)
+			const codeA = Bytes.fromBytes(
+				new Uint8Array([
+					0x60, 0x00, // 0: PUSH1 0 (retSize)
+					0x60, 0x00, // 2: PUSH1 0 (retOffset)
+					0x60, 0x00, // 4: PUSH1 0 (argsSize)
+					0x60, 0x00, // 6: PUSH1 0 (argsOffset)
+					0x60, 0x00, // 8: PUSH1 0 (value)
+					0x73, ...contractB.toBytes(), // 10: PUSH20 contractB
+					0x61, 0x27, 0x10, // 31: PUSH2 10000 (gas)
+					0xf1, // 34: CALL
+					0x15, // 35: ISZERO
+					0x60, 0x00, // 36: PUSH1 0
+					0x52, // 38: MSTORE
+					0x60, 0x20, // 39: PUSH1 32
+					0x60, 0x00, // 41: PUSH1 0
+					0xf3, // 43: RETURN
+				]),
+			);
+			await evm.setCode(contractA, codeA);
 
 			const result = await evm.call(
 				defaultExecutionParams({
@@ -516,15 +511,17 @@ describe("GuillotineEvm - Complex Interactions", () => {
 				}),
 			);
 
+			// A succeeds and reports that B's call failed
 			assertSuccess(result);
+			expect(U256.fromBytes(result.output.toBytes()).toBigInt()).toBe(1n);
 
-			// A should succeed but return that B failed
-			const output = result.output.toBytes();
-			expect(output[31]).toBe(1); // Indicating B's call failed
+			// A: 5 x PUSH1 15 + PUSH20 3 + PUSH2 3 + CALL cold 2600 + ISZERO 3 + PUSH1 3 + MSTORE 3
+			//    + memory 3 + PUSH1 3 + PUSH1 3 = 2639; B consumes all 10000 forwarded gas
+			expect(result.gasLeft).toBe(100000n - 21000n - 2639n - 10000n);
 		});
 
 		// TODO: Fix gas stipend handling in Zig implementation
-		it.todo("should handle gas stipend for value transfers", async () => {
+		it("should handle gas stipend for value transfers", async () => {
 			const contractA = testAddress(410);
 			const contractB = testAddress(411);
 
@@ -573,7 +570,7 @@ describe("GuillotineEvm - Complex Interactions", () => {
 
 	describe("Memory and Stack Limits", () => {
 		// TODO: Fix memory expansion limits in Zig implementation
-		it.todo("should handle large memory expansion", async () => {
+		it("should handle large memory expansion", async () => {
 			const contract = testAddress(500);
 
 			// Write to increasingly high memory addresses
@@ -603,7 +600,7 @@ describe("GuillotineEvm - Complex Interactions", () => {
 		});
 
 		// TODO: Fix stack depth limit handling in Zig implementation
-		it.todo("should handle stack depth limits", async () => {
+		it("should handle stack depth limits", async () => {
 			const contract = testAddress(501);
 
 			// Push many values to stack
@@ -626,48 +623,42 @@ describe("GuillotineEvm - Complex Interactions", () => {
 				}),
 			);
 
-			// Should fail due to stack overflow
+			// Stack overflow is an exceptional halt: all gas consumed, no data, no reason string
 			assertFailure(result);
-			expect(result.errorMessage?.toLowerCase()).toContain("stack");
+			expect(result.errorMessage).toBeNull();
+			expect(result.output.isEmpty()).toBe(true);
+			expect(result.gasLeft).toBe(0n);
 		});
 	});
 
 	describe("Bytecode Analysis", () => {
-		// TODO: Fix jump handling in Zig implementation
-		it.todo("should handle contracts with jumps", async () => {
+		it("should handle contracts with jumps", async () => {
 			const contract = testAddress(600);
 
-			// Conditional jump based on input
-			const code: number[] = [];
+			// Return 2 if calldata is empty, else 1
+			const code = Bytes.fromBytes(
+				new Uint8Array([
+					0x36, // 0: CALLDATASIZE
+					0x15, // 1: ISZERO
+					0x60, 0x0d, // 2: PUSH1 13 (empty branch)
+					0x57, // 4: JUMPI
+					0x60, 0x01, // 5: PUSH1 1
+					0x60, 0x00, // 7: PUSH1 0
+					0x52, // 9: MSTORE
+					0x60, 0x13, // 10: PUSH1 19 (return)
+					0x56, // 12: JUMP
+					0x5b, // 13: JUMPDEST (empty branch)
+					0x60, 0x02, // 14: PUSH1 2
+					0x60, 0x00, // 16: PUSH1 0
+					0x52, // 18: MSTORE
+					0x5b, // 19: JUMPDEST (return)
+					0x60, 0x20, // 20: PUSH1 32
+					0x60, 0x00, // 22: PUSH1 0
+					0xf3, // 24: RETURN
+				]),
+			);
+			await evm.setCode(contract, code);
 
-			// Check if calldata is empty
-			code.push(0x36); // CALLDATASIZE
-			code.push(0x15); // ISZERO
-			code.push(0x60, 0x0a); // PUSH1 10 (jump dest if empty)
-			code.push(0x57); // JUMPI
-
-			// Not empty - return 1
-			code.push(0x60, 0x01); // PUSH1 1
-			code.push(0x60, 0x00); // PUSH1 0
-			code.push(0x52); // MSTORE
-			code.push(0x60, 0x0e); // PUSH1 14 (jump to return)
-			code.push(0x56); // JUMP
-
-			// Empty - return 2
-			code.push(0x5b); // JUMPDEST (offset 10)
-			code.push(0x60, 0x02); // PUSH1 2
-			code.push(0x60, 0x00); // PUSH1 0
-			code.push(0x52); // MSTORE
-
-			// Return
-			code.push(0x5b); // JUMPDEST (offset 14)
-			code.push(0x60, 0x20); // PUSH1 32
-			code.push(0x60, 0x00); // PUSH1 0
-			code.push(0xf3); // RETURN
-
-			await evm.setCode(contract, Bytes.fromBytes(new Uint8Array(code)));
-
-			// Call with no input
 			let result = await evm.call(
 				defaultExecutionParams({
 					to: contract,
@@ -676,9 +667,8 @@ describe("GuillotineEvm - Complex Interactions", () => {
 			);
 
 			assertSuccess(result);
-			expect(result.output.toBytes()[0]).toBe(2);
+			expect(U256.fromBytes(result.output.toBytes()).toBigInt()).toBe(2n);
 
-			// Call with input
 			result = await evm.call(
 				defaultExecutionParams({
 					to: contract,
@@ -687,73 +677,56 @@ describe("GuillotineEvm - Complex Interactions", () => {
 			);
 
 			assertSuccess(result);
-			expect(result.output.toBytes()[0]).toBe(1);
+			expect(U256.fromBytes(result.output.toBytes()).toBigInt()).toBe(1n);
 		});
 
-		// TODO: Fix loop handling in Zig implementation
-		it.todo("should handle contracts with loops", async () => {
+		it("should handle contracts with loops", async () => {
 			const contract = testAddress(601);
 
-			// Sum numbers from 1 to N (N from calldata)
-			const code: number[] = [];
+			// Return 1 + 2 + ... + N, where N is the first calldata byte (5 if calldata is empty)
+			const code = Bytes.fromBytes(
+				new Uint8Array([
+					0x36, // 0: CALLDATASIZE
+					0x15, // 1: ISZERO
+					0x60, 0x0e, // 2: PUSH1 14 (default)
+					0x57, // 4: JUMPI
+					0x60, 0x00, // 5: PUSH1 0
+					0x35, // 7: CALLDATALOAD
+					0x60, 0xf8, // 8: PUSH1 248
+					0x1c, // 10: SHR (first calldata byte)
+					0x60, 0x11, // 11: PUSH1 17 (init)
+					0x56, // 13: JUMP
+					0x5b, // 14: JUMPDEST (default)
+					0x60, 0x05, // 15: PUSH1 5
+					0x5b, // 17: JUMPDEST (init)      stack: [N]
+					0x60, 0x00, // 18: PUSH1 0 (sum)
+					0x60, 0x01, // 20: PUSH1 1 (i)    stack: [i, sum, N]
+					0x5b, // 22: JUMPDEST (loop)
+					0x82, // 23: DUP3                 [N, i, sum, N]
+					0x81, // 24: DUP2                 [i, N, i, sum, N]
+					0x11, // 25: GT                   i > N
+					0x60, 0x27, // 26: PUSH1 39 (exit)
+					0x57, // 28: JUMPI
+					0x80, // 29: DUP1                 [i, i, sum, N]
+					0x91, // 30: SWAP2                [sum, i, i, N]
+					0x01, // 31: ADD                  [sum + i, i, N]
+					0x90, // 32: SWAP1                [i, sum, N]
+					0x60, 0x01, // 33: PUSH1 1
+					0x01, // 35: ADD                  [i + 1, sum, N]
+					0x60, 0x16, // 36: PUSH1 22 (loop)
+					0x56, // 38: JUMP
+					0x5b, // 39: JUMPDEST (exit)      [i, sum, N]
+					0x50, // 40: POP                  [sum, N]
+					0x60, 0x00, // 41: PUSH1 0
+					0x52, // 43: MSTORE
+					0x60, 0x20, // 44: PUSH1 32
+					0x60, 0x00, // 46: PUSH1 0
+					0xf3, // 48: RETURN
+				]),
+			);
+			await evm.setCode(contract, code);
 
-			// Load N from calldata (default to 5 if no input)
-			code.push(0x36); // CALLDATASIZE
-			code.push(0x15); // ISZERO
-			code.push(0x60, 0x08); // PUSH1 8 (jump if empty)
-			code.push(0x57); // JUMPI
-
-			// Has input - load first byte
-			code.push(0x60, 0x00); // PUSH1 0
-			code.push(0x35); // CALLDATALOAD
-			code.push(0x60, 0x0a); // PUSH1 10 (skip default)
-			code.push(0x56); // JUMP
-
-			// No input - use 5
-			code.push(0x5b); // JUMPDEST
-			code.push(0x60, 0x05); // PUSH1 5
-
-			// Initialize sum = 0, i = 1
-			code.push(0x5b); // JUMPDEST
-			code.push(0x60, 0x00); // PUSH1 0 (sum)
-			code.push(0x60, 0x01); // PUSH1 1 (i)
-
-			// Loop start
-			code.push(0x5b); // JUMPDEST (loop)
-			code.push(0x81); // DUP2 (i)
-			code.push(0x83); // DUP4 (N)
-			code.push(0x11); // GT (i > N)
-			code.push(0x60, 0x1a); // PUSH1 26 (exit)
-			code.push(0x57); // JUMPI
-
-			// sum += i
-			code.push(0x81); // DUP2 (i)
-			code.push(0x01); // ADD
-			code.push(0x91); // SWAP2 (update sum)
-			code.push(0x50); // POP
-
-			// i++
-			code.push(0x60, 0x01); // PUSH1 1
-			code.push(0x01); // ADD
-
-			// Continue loop
-			code.push(0x60, 0x0f); // PUSH1 15 (loop start)
-			code.push(0x56); // JUMP
-
-			// Exit - return sum
-			code.push(0x5b); // JUMPDEST
-			code.push(0x91); // SWAP2
-			code.push(0x50); // POP
-			code.push(0x50); // POP
-			code.push(0x60, 0x00); // PUSH1 0
-			code.push(0x52); // MSTORE
-			code.push(0x60, 0x20); // PUSH1 32
-			code.push(0x60, 0x00); // PUSH1 0
-			code.push(0xf3); // RETURN
-
-			await evm.setCode(contract, Bytes.fromBytes(new Uint8Array(code)));
-
-			// Test with default (sum 1 to 5 = 15)
+			// Default N = 5: 15
 			let result = await evm.call(
 				defaultExecutionParams({
 					to: contract,
@@ -762,9 +735,9 @@ describe("GuillotineEvm - Complex Interactions", () => {
 			);
 
 			assertSuccess(result);
-			expect(result.output.toBytes()[0]).toBe(15);
+			expect(U256.fromBytes(result.output.toBytes()).toBigInt()).toBe(15n);
 
-			// Test with N=10 (sum 1 to 10 = 55)
+			// N = 10: 55
 			result = await evm.call(
 				defaultExecutionParams({
 					to: contract,
@@ -773,7 +746,7 @@ describe("GuillotineEvm - Complex Interactions", () => {
 			);
 
 			assertSuccess(result);
-			expect(result.output.toBytes()[0]).toBe(55);
+			expect(U256.fromBytes(result.output.toBytes()).toBigInt()).toBe(55n);
 		});
 	});
 

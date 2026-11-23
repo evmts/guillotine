@@ -2,7 +2,9 @@
 
 ## Overview
 
-This file implements the core bitwise opcode handlers for the Guillotine EVM. It provides handlers for seven bitwise operations: AND (0x16), OR (0x17), XOR (0x18), NOT (0x19), BYTE (0x1a), SHL (0x1b), SHR (0x1c), and SAR (0x1d). The implementation follows a dispatch-based execution model with tail-call optimization.
+This file implements the core bitwise opcode handlers for the Guillotine EVM. It provides handlers for nine bitwise operations: AND (0x16), OR (0x17), XOR (0x18), NOT (0x19), BYTE (0x1a), SHL (0x1b), SHR (0x1c), SAR (0x1d), and CLZ (0x1e, Osaka). The implementation follows a dispatch-based execution model with tail-call optimization.
+
+CLZ replaces the top stack word with its leading-zero count (zero returns 256). The dispatch metadata charges five gas. Its fork guard uses the frame configuration propagated from the engine, and both optimized execution and the reference tracer reject it before Osaka. Tests in `test/evm/opcodes/1e_test.zig` cover every leading-bit position, gas accounting, and fork rejection with fusion on and off.
 
 ## Code Quality: EXCELLENT
 

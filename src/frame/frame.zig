@@ -369,8 +369,9 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
             self.gas_remaining -= amt;
         }
 
-        /// Get the EVM instance from the opaque pointer.
-        /// Returns a pointer to the correct EVM type that this Frame is associated with.
+        /// Recover the concrete parent specialization. Evm(config) passes itself
+        /// as EvmType, so nested calls use the same fork and configuration as
+        /// the frame. The caller supplying evm_ptr to init must provide that type.
         pub inline fn getEvm(self: *const Self) *EvmType {
             return @as(*EvmType, @ptrCast(@alignCast(self.evm_ptr)));
         }

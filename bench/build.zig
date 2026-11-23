@@ -1,203 +1,62 @@
+//! Standalone entry point, invoked from the repository root:
+//! zig build --build-file bench/build.zig bench -- --filter ADD
 const std = @import("std");
+const steps = @import("bench_step.zig");
+const suites = @import("suites_build.zig");
 
-pub fn createEvmRunner(
-    b: *std.Build,
-    target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
-    evm_mod: *std.Build.Module,
-    primitives_mod: *std.Build.Module,
-    c_kzg_lib: *std.Build.Step.Compile,
-    blst_lib: *std.Build.Step.Compile,
-    bn254_lib: ?*std.Build.Step.Compile,
-    clap_dep: *std.Build.Dependency,
-) *std.Build.Step.Compile {
-    const exe = b.addExecutable(.{
-        .name = "evm-runner",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("bench/evms/zig/src/main.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
-        // Force LLVM backend: native Zig backend on Linux x86 doesn't support tail calls yet
-        .use_llvm = true,
+pub fn build(b: *std.Build) void {
+    const target = b.standardTargetOptions(.{});
+    const optimize = b.option(std.builtin.OptimizeMode, "optimize", "Runner optimization (default ReleaseFast)") orelse .ReleaseFast;
+    if (!target.query.isNative()) @panic("standalone benchmarks require a native target");
+    const hardfork = b.option([]const u8, "bench-hardfork", "Benchmark fork (default OSAKA)") orelse "OSAKA";
+    const root = b.dependency("guillotine", .{ .target = target, .optimize = optimize });
+    const voltaire = root.builder.dependency("voltaire", .{ .target = target, .optimize = optimize });
+    const flags = b.addOptions();
+    flags.addOption(bool, "enable_tracing", false);
+    flags.addOption(bool, "disable_tailcall_dispatch", false);
+    flags.addOption(bool, "disable_gas_checks", false);
+    flags.addOption(bool, "enable_fusion", true);
+    flags.addOption([]const u8, "hardfork", "OSAKA");
+    const flags_mod = flags.createModule();
+    const evm = b.createModule(.{
+        .root_source_file = root.path("src/root.zig"),
+        .target = target,
+        .optimize = optimize,
     });
-
-    exe.root_module.addImport("evm", evm_mod);
-    exe.root_module.addImport("voltaire", primitives_mod);
-    exe.root_module.addImport("clap", clap_dep.module("clap"));
-    exe.linkLibrary(c_kzg_lib);
-    exe.linkLibrary(blst_lib);
-    exe.linkLibC();
-
-    if (bn254_lib) |bn254| {
-        exe.linkLibrary(bn254);
-        exe.addIncludePath(b.path("lib/ark"));
-    }
-
-    b.installArtifact(exe);
-    return exe;
-}
-
-pub fn createDebugRunner(
-    b: *std.Build,
-    target: std.Build.ResolvedTarget,
-    evm_mod: *std.Build.Module,
-    primitives_mod: *std.Build.Module,
-) ?*std.Build.Step.Compile {
-    // Check if debug runner exists
-    std.fs.cwd().access("bench/evms/zig/src/debug.zig", .{}) catch return null;
-
-    const exe = b.addExecutable(.{
-        .name = "debug-runner",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("bench/evms/zig/src/debug.zig"),
-            .target = target,
-            .optimize = .Debug,
-        }),
-        // Force LLVM backend: native Zig backend on Linux x86 doesn't support tail calls yet
-        .use_llvm = true,
+    evm.addImport("build_options", flags_mod);
+    evm.addImport("voltaire", voltaire.module("voltaire"));
+    evm.addImport("crypto", voltaire.module("crypto"));
+    evm.addImport("precompiles", voltaire.module("precompiles"));
+    const provider = b.createModule(.{ .root_source_file = root.path("src/provider/root.zig"), .target = target, .optimize = optimize });
+    provider.addImport("voltaire", voltaire.module("voltaire"));
+    evm.addImport("provider", provider);
+    const archive = steps.nativeArchive(b, b.path("."), root.path("."), target);
+    _ = steps.addBenchSteps(b, .{
+        .target = target,
+        .evm = evm,
+        .native_archive = archive,
+        .directory = b.path("."),
+        .repository = root.path("."),
+        .optimize = optimize,
+        .hardfork = hardfork,
+        .gas_limit = b.option(u64, "bench-gas-limit", "Execution gas budget (Osaka+ <= 16777216)"),
     });
-
-    exe.root_module.addImport("evm", evm_mod);
-    exe.root_module.addImport("voltaire", primitives_mod);
-
-    b.installArtifact(exe);
-    return exe;
-}
-
-pub fn createCrashDebugger(
-    b: *std.Build,
-    target: std.Build.ResolvedTarget,
-    evm_mod: *std.Build.Module,
-    primitives_mod: *std.Build.Module,
-) ?*std.Build.Step.Compile {
-    // Check if crash debugger exists
-    std.fs.cwd().access("bench/evms/zig/src/crash_debugger.zig", .{}) catch return null;
-
-    const exe = b.addExecutable(.{
-        .name = "crash-debugger",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("bench/evms/zig/src/crash_debugger.zig"),
-            .target = target,
-            .optimize = .Debug,
-        }),
-        // Force LLVM backend: native Zig backend on Linux x86 doesn't support tail calls yet
-        .use_llvm = true,
+    var copies: std.AutoHashMap(*std.Build.Module, *std.Build.Module) = .init(b.allocator);
+    defer copies.deinit();
+    const opt_evm = steps.optimized(b, evm, optimize, archive, &copies);
+    const opt_voltaire = steps.optimized(b, voltaire.module("voltaire"), optimize, archive, &copies);
+    const opt_crypto = steps.optimized(b, voltaire.module("crypto"), optimize, archive, &copies);
+    const opt_precompiles = steps.optimized(b, voltaire.module("precompiles"), optimize, archive, &copies);
+    suites.addSuiteSteps(b, .{
+        .target = target,
+        .optimize = optimize,
+        .directory = b.path("."),
+        .repository = root.path("."),
+        .evm = opt_evm,
+        .voltaire = opt_voltaire,
+        .crypto = opt_crypto,
+        .precompiles = opt_precompiles,
+        .build_options = flags_mod,
+        .native_archive = archive,
     });
-
-    exe.root_module.addImport("evm", evm_mod);
-    exe.root_module.addImport("voltaire", primitives_mod);
-
-    b.installArtifact(exe);
-    return exe;
-}
-
-pub fn createBytecodeRunner(
-    b: *std.Build,
-    target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
-    evm_mod: *std.Build.Module,
-    primitives_mod: *std.Build.Module,
-    crypto_mod: *std.Build.Module,
-    provider_mod: *std.Build.Module,
-    trie_mod: *std.Build.Module,
-    build_options_mod: *std.Build.Module,
-) *std.Build.Step.Compile {
-    const exe = b.addExecutable(.{
-        .name = "bytecode-runner",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("bench/evms/zig/src/main.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
-        // Force LLVM backend: native Zig backend on Linux x86 doesn't support tail calls yet
-        .use_llvm = true,
-    });
-
-    exe.root_module.addImport("evm", evm_mod);
-    exe.root_module.addImport("voltaire", primitives_mod);
-    exe.root_module.addImport("crypto", crypto_mod);
-    exe.root_module.addImport("provider", provider_mod);
-    exe.root_module.addImport("trie", trie_mod);
-    exe.root_module.addImport("build_options", build_options_mod);
-
-    b.installArtifact(exe);
-    return exe;
-}
-
-pub fn createSnailTracer(
-    b: *std.Build,
-    target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
-    evm_mod: *std.Build.Module,
-    primitives_mod: *std.Build.Module,
-    provider_mod: *std.Build.Module,
-    crypto_mod: *std.Build.Module,
-    trie_mod: *std.Build.Module,
-) ?*std.Build.Step.Compile {
-    // Check if snail tracer exists
-    std.fs.cwd().access("bench/snailtracer/src/main.zig", .{}) catch return null;
-
-    const exe = b.addExecutable(.{
-        .name = "snailtracer",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("bench/snailtracer/src/main.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
-        // Force LLVM backend: native Zig backend on Linux x86 doesn't support tail calls yet
-        .use_llvm = true,
-    });
-
-    exe.root_module.addImport("evm", evm_mod);
-    exe.root_module.addImport("voltaire", primitives_mod);
-    exe.root_module.addImport("crypto", crypto_mod);
-    exe.root_module.addImport("provider", provider_mod);
-    exe.root_module.addImport("trie", trie_mod);
-
-    b.installArtifact(exe);
-    return exe;
-}
-
-pub fn createTestSteps(
-    b: *std.Build,
-    executables: struct {
-        crash_debugger: ?*std.Build.Step.Compile,
-        bytecode_runner: *std.Build.Step.Compile,
-        snailtracer: ?*std.Build.Step.Compile,
-    },
-) void {
-    // Create crash-debug step if available
-    if (executables.crash_debugger) |exe| {
-        const run_cmd = b.addRunArtifact(exe);
-        run_cmd.step.dependOn(b.getInstallStep());
-
-        if (b.args) |args| {
-            run_cmd.addArgs(args);
-        }
-
-        const run_step = b.step("crash-debug", "Debug a crash");
-        run_step.dependOn(&run_cmd.step);
-    }
-
-    // Create bytecode-runner step
-    {
-        const run_cmd = b.addRunArtifact(executables.bytecode_runner);
-        run_cmd.step.dependOn(b.getInstallStep());
-
-        if (b.args) |args| {
-            run_cmd.addArgs(args);
-        }
-
-        const run_step = b.step("bytecode-runner", "Run the bytecode runner");
-        run_step.dependOn(&run_cmd.step);
-    }
-
-    // Create test-snailtracer step if available
-    if (executables.snailtracer) |exe| {
-        const run = b.addRunArtifact(exe);
-        run.has_side_effects = true;
-        const test_step = b.step("test-snailtracer", "Run snailtracer differential test");
-        test_step.dependOn(&run.step);
-    }
 }

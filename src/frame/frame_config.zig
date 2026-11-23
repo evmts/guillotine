@@ -5,6 +5,9 @@ const Mode = @import("../internal/safety_counter.zig").Mode;
 
 pub const FrameConfig = struct {
     const Self = @This();
+    /// Execution fork for opcode activation. Propagated from EvmConfig so a
+    /// specialized frame never reads fork rules through a default-EVM cast.
+    hardfork: @import("../eips_and_hardforks/eips.zig").Hardfork = .CANCUN,
     /// The maximum stack size for the evm. Defaults to 1024
     stack_size: u12 = 1024,
 

@@ -174,7 +174,7 @@ pub fn Preprocessor(FrameType: type) type {
                 .AND, .OR, .XOR => {
                     tracerAssert(frame, frame.stack.size() >= 2, "Binary op: stack underflow, requires 2 items");
                 },
-                .NOT => {
+                .NOT, .CLZ => {
                     tracerAssert(frame, frame.stack.size() >= 1, "Unary op: stack underflow, requires 1 item");
                 },
                 .BYTE, .SHL, .SHR, .SAR => {
@@ -430,6 +430,9 @@ pub fn Preprocessor(FrameType: type) type {
             else
                 bytecode;
             var iter = actual_bytecode.createIterator();
+            // Metadata must describe the original instruction stream. A fused
+            // MLOAD still pushes a word, and different fusions cost different gas.
+            iter.enable_fusion = false;
             const opcode_info = @import("../opcodes/opcode_data.zig").OPCODE_INFO;
 
             var op_count: u32 = 0;
@@ -812,16 +815,13 @@ pub fn Preprocessor(FrameType: type) type {
             try schedule_items.append(allocator, .{ .opcode_handler = opcode_handlers.*[@intFromEnum(Opcode.STOP)] });
 
             const final_schedule = try schedule_items.toOwnedSlice(allocator);
+            errdefer allocator.free(final_schedule);
 
-            const jumpdest_array = try jumpdest_entries.toOwnedSlice(allocator);
-            defer allocator.free(jumpdest_array);
-            std.sort.block(JumpDestEntry, jumpdest_array, {}, JumpDestEntry.lessThan);
-
-            try resolveStaticJumpsWithArray(final_schedule, &unresolved_jumps, jumpdest_array, tracer);
+            try resolveStaticJumpsWithArray(final_schedule, &unresolved_jumps, jumpdest_entries.items, tracer);
 
             if (tracer) |t| {
                 t.onScheduleBuildComplete(final_schedule.len, 0); // No longer tracking u256 count
-                t.onJumpTableCreated(jumpdest_array.len);
+                t.onJumpTableCreated(jumpdest_entries.items.len);
             }
 
             return DispatchSchedule{
@@ -1039,122 +1039,46 @@ pub fn Preprocessor(FrameType: type) type {
             schedule: []const Item,
             bytecode: anytype,
         ) !JumpTable {
-            const log = @import("../log.zig");
-
-            // We need the bytecode to find JUMPDEST PCs
             const actual_bytecode = if (@typeInfo(@TypeOf(bytecode)) == .error_union)
                 try bytecode
             else
                 bytecode;
 
-            var jumpdest_entries = ArrayList(JumpDestEntry, null){};
-            defer jumpdest_entries.deinit(allocator);
-
-            // Create a mapping of JUMPDEST PCs to their schedule indices
-            // by walking through the schedule and bytecode in parallel
-
-            var bytecode_iter = actual_bytecode.createIterator();
-            var schedule_index: usize = 0;
-
-            // Skip first_block_gas if present
-            if (schedule.len > 0 and schedule[0] == .first_block_gas) {
-                schedule_index = 1;
-            }
-
-            // Get JUMPDEST handler for comparison
             const frame_handlers = @import("../frame/frame_handlers.zig");
             const jumpdest_handler = frame_handlers.getOpcodeHandlers(FrameType, &.{})[@intFromEnum(Opcode.JUMPDEST)];
 
-            // Walk through schedule and find all JUMPDEST handlers
-            var jumpdest_pcs = ArrayList(FrameType.PcType, null){};
-            defer jumpdest_pcs.deinit(allocator);
-
-            // First, collect all JUMPDEST PCs from bytecode
-            while (bytecode_iter.next()) |op_data| {
-                // The PC is already at the start of the next instruction, so we need to go back
-                const instr_len = switch (op_data) {
-                    .regular => 1,
-                    .jumpdest => 1,
-                    .push => |data| 1 + data.size,
-                    .jump, .jumpi => 1,
-                    .pc => 1,
-                    .stop, .invalid => 1,
-                    else => 1, // For other cases, assume 1 byte
-                };
-                const pc = bytecode_iter.pc - instr_len;
-                if (op_data == .jumpdest) {
-                    // Cast to FrameType.PcType for storage
-                    const jumpdest_pc: FrameType.PcType = @intCast(pc);
-                    try jumpdest_pcs.append(allocator, jumpdest_pc);
-                }
+            const bitmap = actual_bytecode.packed_bitmap;
+            var jumpdest_count: usize = 0;
+            for (bitmap) |bits| {
+                if (bits.is_jumpdest) jumpdest_count += 1;
+            }
+            if (jumpdest_count == 0) {
+                return JumpTable{ .entries = &.{} };
             }
 
-            // Now find each JUMPDEST in the schedule
-            var jumpdest_idx: usize = 0;
-            for (schedule, 0..) |item, index| {
-                if (item == .opcode_handler and item.opcode_handler == jumpdest_handler) {
-                    // This is a JUMPDEST handler
-                    if (jumpdest_idx < jumpdest_pcs.items.len) {
-                        const pc = jumpdest_pcs.items[jumpdest_idx];
-                        try jumpdest_entries.append(allocator, .{
-                            .pc = pc,
-                            .schedule_index = index,
-                        });
-
-                        if (pc == 0x304) {
-                            log.warn("Found PC=0x304 JUMPDEST at schedule[{}] (fixed approach)", .{index});
-                        }
-
-                        jumpdest_idx += 1;
-                    }
-                }
-            }
-
-            const jumpdest_array = try jumpdest_entries.toOwnedSlice(allocator);
-            defer allocator.free(jumpdest_array);
-            std.sort.block(JumpDestEntry, jumpdest_array, {}, JumpDestEntry.lessThan);
-
-            return try createJumpTableFromArray(allocator, schedule, jumpdest_array);
-        }
-
-        fn createJumpTableFromArray(
-            allocator: std.mem.Allocator,
-            schedule: []const Item,
-            jumpdest_array: []const JumpDestEntry,
-        ) !JumpTable {
-            const log = @import("../log.zig");
-            const entries = try allocator.alloc(JumpTable.JumpTableEntry, jumpdest_array.len);
+            const entries = try allocator.alloc(JumpTable.JumpTableEntry, jumpdest_count);
             errdefer allocator.free(entries);
 
-            // Debug logging for jump table construction
-            log.debug("=== Jump Table Construction ===", .{});
-            log.debug("Total JUMPDESTs: {}", .{jumpdest_array.len});
-
-            for (jumpdest_array, 0..) |jumpdest, i| {
-                entries[i] = .{
-                    .pc = jumpdest.pc,
-                    .dispatch = Self{
-                        .cursor = schedule.ptr + jumpdest.schedule_index,
-                    },
-                };
-
-                // Debug log each jump table entry
-                if (jumpdest.pc == 0x304) {
-                    log.warn("Jump table entry: PC=0x304 -> schedule[{}]", .{jumpdest.schedule_index});
-                    if (jumpdest.schedule_index < schedule.len) {
-                        log.warn("  Schedule item at [{}]: {s}", .{ jumpdest.schedule_index, @tagName(schedule[jumpdest.schedule_index]) });
-                    }
+            var entry_idx: usize = 0;
+            var pc: usize = 0;
+            const start_idx: usize = if (schedule.len > 0 and schedule[0] == .first_block_gas) 1 else 0;
+            for (schedule[start_idx..], start_idx..) |item, sched_idx| {
+                if (item == .opcode_handler and item.opcode_handler == jumpdest_handler) {
+                    while (pc < bitmap.len and !bitmap[pc].is_jumpdest) : (pc += 1) {}
+                    if (pc >= bitmap.len) break;
+                    entries[entry_idx] = .{
+                        .pc = @intCast(pc),
+                        .dispatch = Self{ .cursor = schedule.ptr + sched_idx },
+                    };
+                    entry_idx += 1;
+                    pc += 1;
                 }
             }
 
-            if (std.debug.runtime_safety and entries.len > 1) {
-                for (entries[0..entries.len -| 1], entries[1..]) |current, next| {
-                    if (current.pc >= next.pc) {
-                        std.debug.panic("JumpTable not properly sorted: PC {} >= {}", .{ current.pc, next.pc });
-                    }
-                }
+            if (entry_idx < jumpdest_count) {
+                const trimmed = try allocator.realloc(entries, entry_idx);
+                return JumpTable{ .entries = trimmed };
             }
-
             return JumpTable{ .entries = entries };
         }
 

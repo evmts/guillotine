@@ -496,6 +496,7 @@ pub fn bn254Pairing(input: []const u8) !bool {
         const g1_y_bytes = input[pair_start + 32 .. pair_start + 64];
         const g1_x_value = std.mem.readInt(u256, g1_x_bytes[0..32], .big);
         const g1_y_value = std.mem.readInt(u256, g1_y_bytes[0..32], .big);
+        if (g1_x_value >= FP_MOD or g1_y_value >= FP_MOD) return error.InvalidPoint;
 
         const g1_point = if (g1_x_value == 0 and g1_y_value == 0)
             G1.INFINITY
@@ -507,16 +508,18 @@ pub fn bn254Pairing(input: []const u8) !bool {
         };
 
         // Parse G2 point (bytes 64-191 of this pair)
-        // G2 coordinates are in Fp2: x = x_c0 + x_c1*i, y = y_c0 + y_c1*i
-        const g2_x_c0_bytes = input[pair_start + 64 .. pair_start + 96];
-        const g2_x_c1_bytes = input[pair_start + 96 .. pair_start + 128];
-        const g2_y_c0_bytes = input[pair_start + 128 .. pair_start + 160];
-        const g2_y_c1_bytes = input[pair_start + 160 .. pair_start + 192];
+        // Per EIP-197, Fp2 elements are encoded as (imaginary, real): (x_c1, x_c0, y_c1, y_c0).
+        const g2_x_c1_bytes = input[pair_start + 64 .. pair_start + 96];
+        const g2_x_c0_bytes = input[pair_start + 96 .. pair_start + 128];
+        const g2_y_c1_bytes = input[pair_start + 128 .. pair_start + 160];
+        const g2_y_c0_bytes = input[pair_start + 160 .. pair_start + 192];
 
-        const g2_x_c0_value = std.mem.readInt(u256, g2_x_c0_bytes[0..32], .big);
         const g2_x_c1_value = std.mem.readInt(u256, g2_x_c1_bytes[0..32], .big);
-        const g2_y_c0_value = std.mem.readInt(u256, g2_y_c0_bytes[0..32], .big);
+        const g2_x_c0_value = std.mem.readInt(u256, g2_x_c0_bytes[0..32], .big);
         const g2_y_c1_value = std.mem.readInt(u256, g2_y_c1_bytes[0..32], .big);
+        const g2_y_c0_value = std.mem.readInt(u256, g2_y_c0_bytes[0..32], .big);
+        if (g2_x_c0_value >= FP_MOD or g2_x_c1_value >= FP_MOD or
+            g2_y_c0_value >= FP_MOD or g2_y_c1_value >= FP_MOD) return error.InvalidPoint;
 
         const g2_point = if (g2_x_c0_value == 0 and g2_x_c1_value == 0 and
             g2_y_c0_value == 0 and g2_y_c1_value == 0)
@@ -801,14 +804,14 @@ test "BN254 EIP-197 ECPAIRING - single valid pairing" {
     @memset(&input, 0);
 
     // G1 point
-    std.mem.writeInt(u256, input[0..32], g1.x.value, .big);
-    std.mem.writeInt(u256, input[32..64], g1.y.value, .big);
+    std.mem.writeInt(u256, input[0..32], g1.x.toStandardRepresentation(), .big);
+    std.mem.writeInt(u256, input[32..64], g1.y.toStandardRepresentation(), .big);
 
-    // G2 point
-    std.mem.writeInt(u256, input[64..96], g2.x.u0.value, .big);
-    std.mem.writeInt(u256, input[96..128], g2.x.u1.value, .big);
-    std.mem.writeInt(u256, input[128..160], g2.y.u0.value, .big);
-    std.mem.writeInt(u256, input[160..192], g2.y.u1.value, .big);
+    // G2 point (EIP-197: imaginary u1 first, real u0 second)
+    std.mem.writeInt(u256, input[64..96], g2.x.u1.toStandardRepresentation(), .big);
+    std.mem.writeInt(u256, input[96..128], g2.x.u0.toStandardRepresentation(), .big);
+    std.mem.writeInt(u256, input[128..160], g2.y.u1.toStandardRepresentation(), .big);
+    std.mem.writeInt(u256, input[160..192], g2.y.u0.toStandardRepresentation(), .big);
 
     const result = try bn254Pairing(&input);
     try std.testing.expect(!result); // e(G1, G2) != 1
@@ -829,20 +832,20 @@ test "BN254 EIP-197 ECPAIRING - bilinearity check" {
     @memset(&input, 0);
 
     // First pair: (2G1, 3G2)
-    std.mem.writeInt(u256, input[0..32], p1.x.value, .big);
-    std.mem.writeInt(u256, input[32..64], p1.y.value, .big);
-    std.mem.writeInt(u256, input[64..96], p2.x.u0.value, .big);
-    std.mem.writeInt(u256, input[96..128], p2.x.u1.value, .big);
-    std.mem.writeInt(u256, input[128..160], p2.y.u0.value, .big);
-    std.mem.writeInt(u256, input[160..192], p2.y.u1.value, .big);
+    std.mem.writeInt(u256, input[0..32], p1.x.toStandardRepresentation(), .big);
+    std.mem.writeInt(u256, input[32..64], p1.y.toStandardRepresentation(), .big);
+    std.mem.writeInt(u256, input[64..96], p2.x.u1.toStandardRepresentation(), .big);
+    std.mem.writeInt(u256, input[96..128], p2.x.u0.toStandardRepresentation(), .big);
+    std.mem.writeInt(u256, input[128..160], p2.y.u1.toStandardRepresentation(), .big);
+    std.mem.writeInt(u256, input[160..192], p2.y.u0.toStandardRepresentation(), .big);
 
     // Second pair: (-6G1, G2)
-    std.mem.writeInt(u256, input[192..224], p3.x.value, .big);
-    std.mem.writeInt(u256, input[224..256], p3.y.value, .big);
-    std.mem.writeInt(u256, input[256..288], p4.x.u0.value, .big);
-    std.mem.writeInt(u256, input[288..320], p4.x.u1.value, .big);
-    std.mem.writeInt(u256, input[320..352], p4.y.u0.value, .big);
-    std.mem.writeInt(u256, input[352..384], p4.y.u1.value, .big);
+    std.mem.writeInt(u256, input[192..224], p3.x.toStandardRepresentation(), .big);
+    std.mem.writeInt(u256, input[224..256], p3.y.toStandardRepresentation(), .big);
+    std.mem.writeInt(u256, input[256..288], p4.x.u1.toStandardRepresentation(), .big);
+    std.mem.writeInt(u256, input[288..320], p4.x.u0.toStandardRepresentation(), .big);
+    std.mem.writeInt(u256, input[320..352], p4.y.u1.toStandardRepresentation(), .big);
+    std.mem.writeInt(u256, input[352..384], p4.y.u0.toStandardRepresentation(), .big);
 
     const result = try bn254Pairing(&input);
     try std.testing.expect(result); // Product should equal 1
@@ -858,10 +861,10 @@ test "BN254 EIP-197 ECPAIRING - with infinity points" {
     // G1 point is infinity (0,0) - already zeroed
 
     // G2 point
-    std.mem.writeInt(u256, input[64..96], g2.x.u0.value, .big);
-    std.mem.writeInt(u256, input[96..128], g2.x.u1.value, .big);
-    std.mem.writeInt(u256, input[128..160], g2.y.u0.value, .big);
-    std.mem.writeInt(u256, input[160..192], g2.y.u1.value, .big);
+    std.mem.writeInt(u256, input[64..96], g2.x.u1.toStandardRepresentation(), .big);
+    std.mem.writeInt(u256, input[96..128], g2.x.u0.toStandardRepresentation(), .big);
+    std.mem.writeInt(u256, input[128..160], g2.y.u1.toStandardRepresentation(), .big);
+    std.mem.writeInt(u256, input[160..192], g2.y.u0.toStandardRepresentation(), .big);
 
     const result = try bn254Pairing(&input);
     try std.testing.expect(result); // e(0, G2) = 1

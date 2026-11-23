@@ -43,6 +43,9 @@ pub fn createFoundryLibrary(
     // Link necessary system libraries
     foundry_lib.linkLibC();
     if (target.result.os.tag == .linux) {
+        // Zig 0.15.1's LLD archiver nests the Rust archive as a single member
+        // (#815). The native ELF archiver merges its object members instead.
+        foundry_lib.use_lld = false;
         foundry_lib.linkSystemLibrary("m");
         foundry_lib.linkSystemLibrary("pthread");
         foundry_lib.linkSystemLibrary("dl");

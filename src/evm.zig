@@ -124,23 +124,54 @@ pub fn Evm(config: EvmConfig) type {
         /// Contracts marked for self-destruction (cold - only used in old hardforks)
         self_destruct: SelfDestruct,
 
-
         // State dump tracking - persists across calls
         /// Tracks all addresses that have been touched (for state dump)
         touched_addresses: std.AutoHashMap(primitives.Address, void),
         /// Tracks storage slots that have been modified (address -> list of storage keys)
         touched_storage: std.AutoHashMap(primitives.Address, std.ArrayList(u256)),
-        
+
+        /// Maximum call depth reached in the current root call (limits call_stack reset work)
+        max_depth_reached: u16 = 0,
+        /// Whether execution is already running on a 64MB worker thread for deep call chains
+        on_deep_stack: bool = false,
+        /// Per-EVM cache of compiled bytecode/dispatch schedules keyed by Wyhash(code)
+        dispatch_cache: std.AutoHashMap(u64, *CachedDispatch),
+
         // Tracer - at the very bottom of memory layout for minimal impact on cache performance
         /// Tracer for debugging and logging - can be accessed via evm.tracer or frame.evm_ptr.tracer
         tracer: @import("tracer/tracer.zig").Tracer,
+
+        const CachedDispatch = struct {
+            code: []u8,
+            bytecode: Bytecode,
+            schedule: Frame.Dispatch.DispatchSchedule,
+            jump_table: Frame.Dispatch.JumpTable,
+
+            fn deinit(self: *CachedDispatch, allocator: std.mem.Allocator) void {
+                if (self.jump_table.entries.len > 0) allocator.free(self.jump_table.entries);
+                self.schedule.deinit();
+                self.bytecode.deinit();
+                allocator.free(self.code);
+            }
+        };
+
+        const DISPATCH_CACHE_MAX_ENTRIES: usize = 256;
 
         /// Initialize a new EVM instance.
         ///
         /// Sets up the execution environment with state storage, block context,
         /// and transaction parameters. The planner cache is initialized with
         /// a default size for bytecode optimization.
-        pub fn init(allocator: std.mem.Allocator, database: ?*Database, block_info: BlockInfo, context: TransactionContext, gas_price: u256, origin: primitives.Address) !Self {
+        /// If `gas_price` is null, the effective EIP-1559 gas price is derived
+        /// from the block base fee and transaction fee caps. Returns
+        /// error.GasPriceRequired when neither a gas price nor a fee cap exists.
+        pub fn init(allocator: std.mem.Allocator, database: ?*Database, block_info: BlockInfo, context: TransactionContext, gas_price: ?u256, origin: primitives.Address) !Self {
+            const effective_gas_price = gas_price orelse config.eips.effective_gas_price(
+                block_info.base_fee,
+                context.max_fee_per_gas orelse return error.GasPriceRequired,
+                context.max_priority_fee_per_gas,
+            ).effective_gas_price;
+
             var access_list = AccessList.init(allocator);
             errdefer access_list.deinit();
 
@@ -165,18 +196,21 @@ pub fn Evm(config: EvmConfig) type {
                 .created_contracts = CreatedContracts.init(allocator),
                 .block_info = block_info,
                 .context = context,
-                .gas_price = gas_price,
+                .gas_price = effective_gas_price,
                 .origin = origin,
                 .call_arena = arena,
                 .self_destruct = SelfDestruct.init(allocator),
                 .touched_addresses = std.AutoHashMap(primitives.Address, void).init(allocator),
                 .touched_storage = std.AutoHashMap(primitives.Address, std.ArrayList(u256)).init(allocator),
+                .max_depth_reached = 0,
+                .on_deep_stack = false,
+                .dispatch_cache = std.AutoHashMap(u64, *CachedDispatch).init(allocator),
                 .tracer = @import("tracer/tracer.zig").Tracer.init(allocator, config.tracer_config),
             };
 
             self.call_arena.tracer = @as(*anyopaque, @ptrCast(&self.tracer));
             self.tracer.onArenaInit(config.arena_capacity_limit, config.arena_capacity_limit, config.arena_growth_factor);
-            self.tracer.onEvmInit(gas_price, origin, @tagName(config.eips.hardfork));
+            self.tracer.onEvmInit(effective_gas_price, origin, @tagName(config.eips.hardfork));
 
             // Process system contract updates based on configuration
             if (config.enable_beacon_roots) {
@@ -254,6 +288,12 @@ pub fn Evm(config: EvmConfig) type {
                 entry.value_ptr.deinit(self.allocator);
             }
             self.touched_storage.deinit();
+            var cache_it = self.dispatch_cache.valueIterator();
+            while (cache_it.next()) |entry_ptr| {
+                entry_ptr.*.deinit(self.allocator);
+                self.allocator.destroy(entry_ptr.*);
+            }
+            self.dispatch_cache.deinit();
             self.call_arena.deinit();
         }
 
@@ -293,14 +333,14 @@ pub fn Evm(config: EvmConfig) type {
         /// State dump structure for post-state validation
         pub const StateDump = struct {
             accounts: std.StringHashMap(AccountState),
-            
+
             pub const AccountState = struct {
                 balance: u256,
                 nonce: u64,
                 code: []const u8,
                 storage: std.AutoHashMap(u256, u256),
             };
-            
+
             pub fn deinit(self: *StateDump, allocator: std.mem.Allocator) void {
                 var it = self.accounts.iterator();
                 while (it.next()) |entry| {
@@ -311,7 +351,7 @@ pub fn Evm(config: EvmConfig) type {
                 self.accounts.deinit();
             }
         };
-        
+
         /// Dump the current state of all touched accounts in the database.
         ///
         /// Creates a snapshot of all accounts that have been accessed or modified
@@ -346,13 +386,13 @@ pub fn Evm(config: EvmConfig) type {
                     log.debug("[DUMP] account not found in database", .{});
                     continue;
                 };
-                log.debug("[DUMP] found account: balance={d}, nonce={d}", .{account.balance, account.nonce});
-                
+                log.debug("[DUMP] found account: balance={d}, nonce={d}", .{ account.balance, account.nonce });
+
                 // Skip zero balance, zero nonce accounts with no code
                 if (account.balance == 0 and account.nonce == 0 and std.mem.eql(u8, &account.code_hash, &([_]u8{0} ** 32))) {
                     continue;
                 }
-                
+
                 // Convert address to hex string
                 var addr_hex: [42]u8 = undefined;
                 @memcpy(addr_hex[0..2], "0x");
@@ -362,17 +402,17 @@ pub fn Evm(config: EvmConfig) type {
                     addr_hex[2 + i * 2 + 1] = chars[byte & 0x0F];
                 }
                 const addr_str = try allocator.dupe(u8, &addr_hex);
-                
+
                 // Get code if present
                 var code: []u8 = &.{};
                 if (!std.mem.eql(u8, &account.code_hash, &([_]u8{0} ** 32))) {
                     const db_code = try self.database.get_code(account.code_hash);
                     code = try allocator.dupe(u8, db_code);
                 }
-                
+
                 // Get storage
                 var storage = std.AutoHashMap(u256, u256).init(allocator);
-                
+
                 // Get tracked storage slots for this address
                 if (self.touched_storage.get(addr)) |slots| {
                     for (slots.items) |slot| {
@@ -382,7 +422,7 @@ pub fn Evm(config: EvmConfig) type {
                         }
                     }
                 }
-                
+
                 try state_dump.accounts.put(addr_str, StateDump.AccountState{
                     .balance = account.balance,
                     .nonce = account.nonce,
@@ -390,7 +430,7 @@ pub fn Evm(config: EvmConfig) type {
                     .storage = storage,
                 });
             }
-            
+
             return state_dump;
         }
 
@@ -399,7 +439,15 @@ pub fn Evm(config: EvmConfig) type {
         /// This is the main entry point that routes to specific handlers based
         /// on the operation type (CALL, CREATE, etc). Manages transaction-level
         /// state including logs and ensures proper cleanup.
+        /// Public entry point. Runs inline on the caller's stack for shallow call chains
+        /// (depth < 8) to avoid per-call OS thread creation overhead, and transparently
+        /// switches to a 64 MiB worker thread stack inside `execute_frame` if a deep call
+        /// chain reaches depth 8 (protecting all the way to the 1024 EVM depth limit).
         pub fn call(self: *Self, params: CallParams) CallResult {
+            return self.callImpl(params);
+        }
+
+        fn callImpl(self: *Self, params: CallParams) CallResult {
             self.tracer.assert(self.depth == 0, "call() should only be called at top level");
 
             const to_address = params.get_to() orelse primitives.ZERO_ADDRESS;
@@ -453,9 +501,16 @@ pub fn Evm(config: EvmConfig) type {
                 // Transient storage MUST NOT persist between transactions
                 self.database.clear_transient_storage();
 
-                // Reset call stack to initial state
-                // This is critical when reusing EVM instances across multiple transactions
-                self.call_stack = [_]CallStackEntry{CallStackEntry{ .caller = primitives.Address.ZERO_ADDRESS, .value = 0, .is_static = false }} ** config.max_call_depth;
+                // Reset only the portion of call_stack touched during this transaction
+                if (self.max_depth_reached > 0) {
+                    const reset_len = @min(@as(usize, self.max_depth_reached), config.max_call_depth);
+                    @memset(self.call_stack[0..reset_len], CallStackEntry{
+                        .caller = primitives.Address.ZERO_ADDRESS,
+                        .value = 0,
+                        .is_static = false,
+                    });
+                    self.max_depth_reached = 0;
+                }
                 // Reset snapshot ID
                 self.current_snapshot_id = 0;
                 // Reset arena allocator but retain grown capacity
@@ -488,25 +543,65 @@ pub fn Evm(config: EvmConfig) type {
                 return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
             };
 
-            const call_gas = params.getGas();
-            if (!config.disable_gas_checks) {
-                if (call_gas == 0) return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+            const gas_limit = params.getGas();
+            if (comptime !config.disable_gas_checks) {
+                if (gas_limit == 0) return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
             }
 
-            const initial_gas = call_gas;
+            const input = params.getInput();
+            const calldata_tokens = config.eips.tokens_in_calldata(input);
+            const intrinsic_gas_cost = config.eips.intrinsic_gas_cost(params.isCreate());
+            const calldata_gas_cost = config.eips.calldata_gas_cost(calldata_tokens, params.isCreate(), input.len);
+            const floor_gas_cost = config.eips.floor_gas_cost(calldata_tokens);
+            const initial_gas_cost = intrinsic_gas_cost + calldata_gas_cost;
 
-            const execution_gas = blk: {
-                const GasConstants = primitives.GasConstants;
-                const intrinsic_gas = switch (params) {
-                    .create, .create2 => GasConstants.TxGasContractCreation, // 53000 for contract creation
-                    else => GasConstants.TxGas, // 21000 for regular calls
-                };
+            if (comptime !config.disable_gas_checks) {
+                if (gas_limit < initial_gas_cost or gas_limit < floor_gas_cost) {
+                    return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                }
+            }
+            const execution_gas_limit = gas_limit - initial_gas_cost;
 
-                // Check if we have enough gas for intrinsic cost
-                if (params.getGas() < intrinsic_gas) return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
-
-                break :blk params.getGas() - intrinsic_gas;
+            const blob_versioned_hashes = self.context.blob_versioned_hashes;
+            const blob_count = if (self.context.is_blob_transaction) blob_versioned_hashes.len else 0;
+            config.eips.validate_blob_gas(
+                self.context.is_blob_transaction,
+                blob_versioned_hashes,
+                self.context.max_fee_per_blob_gas,
+                self.block_info.blob_base_fee,
+                params.get_to(),
+            ) catch |err| {
+                log.err("Blob transaction validation failed: {s}", .{@errorName(err)});
+                return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
             };
+
+            const max_blob_gas_cost = config.eips.max_blob_gas_cost(
+                self.context.max_fee_per_blob_gas,
+                blob_count,
+            );
+
+            // Transaction validity is checked before nonce increment or execution.
+            // EIP-1559 reserves the fee cap, not the lower effective gas price.
+            if (!config.disable_balance_checks) {
+                const origin_account = self.database.get_account(self.origin.bytes) catch |err| {
+                    log.err("Failed to read origin account for upfront balance check: {s}", .{@errorName(err)});
+                    return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                };
+                const origin_balance = if (origin_account) |account| account.balance else 0;
+                const gas_fee_cap = self.context.max_fee_per_gas orelse self.gas_price;
+                const max_execution_cost = @mulWithOverflow(@as(u256, params.getGas()), gas_fee_cap);
+                if (max_execution_cost[1] != 0) {
+                    return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                }
+                const execution_and_value = @addWithOverflow(max_execution_cost[0], params.getValue());
+                if (execution_and_value[1] != 0) {
+                    return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                }
+                const required_balance = @addWithOverflow(execution_and_value[0], max_blob_gas_cost);
+                if (required_balance[1] != 0 or origin_balance < required_balance[0]) {
+                    return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                }
+            }
 
             // Increment origin nonce for top-level transactions (EIP-2718)
             // This must happen after gas deduction but before inner_call execution
@@ -529,7 +624,7 @@ pub fn Evm(config: EvmConfig) type {
             }
 
             var modified_params = params;
-            modified_params.setGas(@as(u64, @intCast(execution_gas)));
+            modified_params.setGas(execution_gas_limit);
 
             const arena_result = self.inner_call(modified_params);
             // Clone result to main allocator since we're at depth 0 (top-level call)
@@ -542,16 +637,29 @@ pub fn Evm(config: EvmConfig) type {
 
             // Apply EIP-3529 gas refund cap if transaction succeeded
             if (result.success) {
-                result.gas_left = config.eips.eip_3529_apply_gas_refund(initial_gas, result.gas_left, self.gas_refund_counter);
+                result.gas_left = config.eips.eip_3529_apply_gas_refund(gas_limit, result.gas_left, self.gas_refund_counter);
                 // Reset refund counter for next transaction
                 self.gas_refund_counter = 0;
             }
 
-            // Deduct gas fees from sender's balance and pay coinbase
-            const gas_consumed = initial_gas - result.gas_left;
-            if (gas_consumed > 0 and self.gas_price > 0) {
-                const gas_consumed_u256: u256 = @intCast(gas_consumed);
-                const total_gas_fee = self.gas_price * gas_consumed_u256;
+            // EIP-7623: charge at least the calldata floor gas.
+            var gas_consumed = gas_limit - result.gas_left;
+            if (result.success and gas_consumed < floor_gas_cost) {
+                gas_consumed = floor_gas_cost;
+                if (comptime !config.disable_gas_checks) {
+                    result.gas_left = gas_limit - floor_gas_cost;
+                }
+            }
+
+            // Blob fees are fully burned and are never credited to coinbase.
+            const gas_consumed_u256: u256 = @intCast(gas_consumed);
+            const execution_gas_fee = self.gas_price * gas_consumed_u256;
+            const blob_gas_cost = config.eips.blob_gas_cost(
+                self.block_info.blob_base_fee,
+                blob_count,
+            );
+            const total_gas_fee = execution_gas_fee +| blob_gas_cost;
+            if (total_gas_fee > 0) {
 
                 // Get origin account
                 var origin_account = self.database.get_account(self.origin.bytes) catch |err| {
@@ -583,7 +691,7 @@ pub fn Evm(config: EvmConfig) type {
                 };
 
                 // Handle coinbase rewards (miner/validator payment)
-                if (config.eips.eip_1559_is_enabled()) {
+                if (config.eips.eip_1559_is_enabled() and execution_gas_fee > 0) {
                     // EIP-1559: Only priority fee goes to coinbase, base fee is burned
                     const base_fee = self.block_info.base_fee;
                     const priority_fee_per_gas = if (self.gas_price > base_fee)
@@ -611,8 +719,8 @@ pub fn Evm(config: EvmConfig) type {
                         };
                     }
                     // Base fee (total_gas_fee - coinbase_reward) is effectively burned
-                } else {
-                    // Pre-EIP-1559: All fees go to coinbase
+                } else if (execution_gas_fee > 0) {
+                    // Pre-EIP-1559: All execution fees go to coinbase.
                     var coinbase_account = self.database.get_account(self.block_info.coinbase.bytes) catch {
                         return result;
                     } orelse Account.zero();
@@ -621,7 +729,7 @@ pub fn Evm(config: EvmConfig) type {
                         return result;
                     };
 
-                    coinbase_account.balance += total_gas_fee;
+                    coinbase_account.balance += execution_gas_fee;
                     self.database.set_account(self.block_info.coinbase.bytes, coinbase_account) catch {
                         return result;
                     };
@@ -726,9 +834,12 @@ pub fn Evm(config: EvmConfig) type {
                 if (params.getGas() == 0) return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
             }
 
-            self.depth += 1;
-            defer self.depth -= 1;
-
+            // depth is incremented solely by execute_frame (CALL variants) and the create paths;
+            // inner_call must NOT increment it again or every nesting level would advance depth
+            // by 2 (halving the 1024 limit) and leave a call_stack gap that corrupts parent
+            // caller/value/is_static lookups. The check uses the parent depth: a frame already
+            // at the limit cannot push another. (Deep recursion is safe — call() runs on a
+            // large-stack worker thread.)
             if (self.depth >= config.max_call_depth) return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
 
             const execution_gas = params.getGas();
@@ -891,7 +1002,7 @@ pub fn Evm(config: EvmConfig) type {
                 };
             }
 
-            const preflight = self.performCallPreflight(params.to, params.input, params.gas, false, snapshot_id) catch |err| {
+            const preflight = self.performCallPreflight(params.to, params.input, params.gas, self.is_static_context(), snapshot_id) catch |err| {
                 self.tracer.onCallPreflight("CALL", @errorName(err));
                 self.journal.revert_to_snapshot(snapshot_id);
                 try self.database.revert_to_snapshot(db_snapshot_id);
@@ -920,7 +1031,7 @@ pub fn Evm(config: EvmConfig) type {
                         params.to,
                         params.caller,
                         params.value,
-                        false,
+                        self.is_static_context(), // EIP-214: inherit parent static context
                         snapshot_id,
                     ) catch |err| {
                         log.debug("EXECUTE_CALL: execute_frame failed with error: {}", .{err});
@@ -984,7 +1095,7 @@ pub fn Evm(config: EvmConfig) type {
                 params.caller,
                 params.caller,
                 params.value,
-                false,
+                self.is_static_context(), // EIP-214: inherit parent static context (CALLCODE)
                 snapshot_id,
             ) catch {
                 @branchHint(.unlikely);
@@ -1013,7 +1124,7 @@ pub fn Evm(config: EvmConfig) type {
             const snapshot_id = try self.journal.create_snapshot();
             const db_snapshot_id = try self.database.create_snapshot();
 
-            const preflight = self.performCallPreflight(params.to, params.input, params.gas, false, snapshot_id) catch |err| {
+            const preflight = self.performCallPreflight(params.to, params.input, params.gas, self.is_static_context(), snapshot_id) catch |err| {
                 @branchHint(.cold);
                 log.debug("Delegatecall preflight failed: {}", .{err});
                 self.journal.revert_to_snapshot(snapshot_id);
@@ -1039,7 +1150,7 @@ pub fn Evm(config: EvmConfig) type {
                         params.caller,
                         params.caller,
                         current_value,
-                        false,
+                        self.is_static_context(), // EIP-214: inherit parent static context (DELEGATECALL)
                         snapshot_id,
                     ) catch {
                         @branchHint(.cold);
@@ -1158,7 +1269,10 @@ pub fn Evm(config: EvmConfig) type {
                 }
             }
             const GasConstants = primitives.GasConstants;
-            const create_overhead = GasConstants.CreateGas;
+            // EIP-3860 (Shanghai+): init code costs 2 gas per 32-byte word, on top of CreateGas.
+            const init_words_c: u64 = (@as(u64, @intCast(params.init_code.len)) + 31) / 32;
+            const initcode_word_cost_c: u64 = if (config.eips.hardfork.isAtLeast(.SHANGHAI)) init_words_c * GasConstants.InitcodeWordGas else 0;
+            const create_overhead = GasConstants.CreateGas + initcode_word_cost_c;
             if (params.gas < create_overhead) {
                 self.journal.revert_to_snapshot(snapshot_id);
                 try self.database.revert_to_snapshot(db_snapshot_id);
@@ -1243,8 +1357,13 @@ pub fn Evm(config: EvmConfig) type {
             }
 
             const GasConstants = primitives.GasConstants;
-            const create_overhead = GasConstants.CreateGas;
-            const hash_cost = @as(u64, @intCast(params.init_code.len)) * GasConstants.Keccak256WordGas / 32;
+            // EIP-3860 (Shanghai+): init code costs 2 gas per 32-byte word.
+            const init_words_c2: u64 = (@as(u64, @intCast(params.init_code.len)) + 31) / 32;
+            const initcode_word_cost_c2: u64 = if (config.eips.hardfork.isAtLeast(.SHANGHAI)) init_words_c2 * GasConstants.InitcodeWordGas else 0;
+            const create_overhead = GasConstants.CreateGas + initcode_word_cost_c2;
+            // EIP-1014: CREATE2 hashes the init code at GAS_KECCAK256_WORD per 32-byte word,
+            // rounded UP (ceil(len/32)), not len*word_gas/32 which rounds down.
+            const hash_cost = init_words_c2 * GasConstants.Keccak256WordGas;
             const total_overhead = create_overhead + hash_cost;
             if (params.gas < total_overhead) {
                 log.debug("CREATE2: insufficient gas for overhead: need={}, have={}", .{ total_overhead, params.gas });
@@ -1291,7 +1410,7 @@ pub fn Evm(config: EvmConfig) type {
                     return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
                 };
             }
-            const result = self.execute_init_code(
+            var result = self.execute_init_code(
                 args.init_code,
                 args.gas_left,
                 args.contract_address,
@@ -1327,13 +1446,31 @@ pub fn Evm(config: EvmConfig) type {
                     try self.database.revert_to_snapshot(args.db_snapshot_id);
                     return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
                 }
-                const stored_hash = self.database.set_code(result.output) catch {
+                // EIP-170: reject deployed code exceeding the max code size (Spurious Dragon+;
+                // eip_170_max_code_size returns 0xFFFFFF on earlier forks => no limit).
+                if (result.output.len > config.eips.eip_170_max_code_size()) {
                     self.journal.revert_to_snapshot(args.snapshot_id);
                     try self.database.revert_to_snapshot(args.db_snapshot_id);
                     return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
-                };
-                try self.journal.record_code_change(args.snapshot_id, args.contract_address, contract_account.code_hash);
-                contract_account.code_hash = stored_hash;
+                }
+                // EIP-2: charge code-deposit gas (200 per byte of deployed code). When the
+                // remaining gas cannot cover it, Homestead+ fails the creation; Frontier
+                // instead deploys empty code (the account is still created) without charging.
+                const deposit_cost: u64 = @as(u64, @intCast(result.output.len)) * primitives.GasConstants.CreateDataGas;
+                if (result.gas_left >= deposit_cost) {
+                    result.gas_left -= deposit_cost;
+                    const stored_hash = self.database.set_code(result.output) catch {
+                        self.journal.revert_to_snapshot(args.snapshot_id);
+                        try self.database.revert_to_snapshot(args.db_snapshot_id);
+                        return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                    };
+                    try self.journal.record_code_change(args.snapshot_id, args.contract_address, contract_account.code_hash);
+                    contract_account.code_hash = stored_hash;
+                } else if (config.eips.hardfork.isAtLeast(.HOMESTEAD)) {
+                    self.journal.revert_to_snapshot(args.snapshot_id);
+                    try self.database.revert_to_snapshot(args.db_snapshot_id);
+                    return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                }
             }
             self.database.set_account(args.contract_address.bytes, contract_account) catch {
                 self.journal.revert_to_snapshot(args.snapshot_id);
@@ -1397,8 +1534,117 @@ pub fn Evm(config: EvmConfig) type {
             };
         }
 
+        fn getOrCompileDispatch(self: *Self, code: []const u8) !?*CachedDispatch {
+            if (comptime config.tracer_config.enabled) return null;
+            if (code.len == 0) return null;
+            const code_key = std.hash.Wyhash.hash(0, code);
+            if (self.dispatch_cache.get(code_key)) |entry| {
+                if (std.mem.eql(u8, entry.code, code)) {
+                    return entry;
+                }
+                return null;
+            }
+            if (self.dispatch_cache.count() >= DISPATCH_CACHE_MAX_ENTRIES) return null;
+
+            const code_copy = self.allocator.dupe(u8, code) catch return error.AllocationError;
+            errdefer self.allocator.free(code_copy);
+
+            var bc = Bytecode.init(self.allocator, code_copy) catch |e| {
+                return switch (e) {
+                    error.InvalidOpcode => error.InvalidOpcode,
+                    error.InvalidJumpDestination => error.InvalidJumpDestination,
+                    error.TruncatedPush => error.InvalidOpcode,
+                    error.OutOfMemory => error.AllocationError,
+                    else => error.AllocationError,
+                };
+            };
+            errdefer bc.deinit();
+
+            const handlers = &Frame.opcode_handlers;
+            var schedule = Frame.Dispatch.DispatchSchedule.init(self.allocator, bc, handlers, null) catch {
+                return error.AllocationError;
+            };
+            errdefer schedule.deinit();
+
+            const jump_table = Frame.Dispatch.createJumpTable(self.allocator, schedule.items, bc) catch {
+                return error.AllocationError;
+            };
+            errdefer if (jump_table.entries.len > 0) self.allocator.free(jump_table.entries);
+
+            const entry = self.allocator.create(CachedDispatch) catch return error.AllocationError;
+            errdefer self.allocator.destroy(entry);
+            entry.* = .{
+                .code = code_copy,
+                .bytecode = bc,
+                .schedule = schedule,
+                .jump_table = jump_table,
+            };
+
+            self.dispatch_cache.put(code_key, entry) catch return error.AllocationError;
+            return entry;
+        }
+
         /// Execute a frame by delegating to Frame.interpret (dispatch-based execution)
         fn execute_frame(
+            self: *Self,
+            code: []const u8,
+            input: []const u8,
+            gas: u64,
+            address: primitives.Address,
+            caller: primitives.Address,
+            value: u256,
+            is_static: bool,
+            snapshot_id: Journal.SnapshotIdType,
+        ) !CallResult {
+            // Switch to a 64 MiB native stack once when a call chain reaches depth 8
+            // so deep recursion up to the 1024 EVM depth limit never overflows the stack.
+            if (self.depth == 8 and !self.on_deep_stack) {
+                const DeepRunner = struct {
+                    evm: *Self,
+                    code: []const u8,
+                    input: []const u8,
+                    gas: u64,
+                    address: primitives.Address,
+                    caller: primitives.Address,
+                    value: u256,
+                    is_static: bool,
+                    snapshot_id: Journal.SnapshotIdType,
+                    result: anyerror!CallResult = undefined,
+                    fn run(ctx: *@This()) void {
+                        ctx.evm.on_deep_stack = true;
+                        defer ctx.evm.on_deep_stack = false;
+                        ctx.result = ctx.evm.executeFrameImpl(
+                            ctx.code,
+                            ctx.input,
+                            ctx.gas,
+                            ctx.address,
+                            ctx.caller,
+                            ctx.value,
+                            ctx.is_static,
+                            ctx.snapshot_id,
+                        );
+                    }
+                };
+                var ctx = DeepRunner{
+                    .evm = self,
+                    .code = code,
+                    .input = input,
+                    .gas = gas,
+                    .address = address,
+                    .caller = caller,
+                    .value = value,
+                    .is_static = is_static,
+                    .snapshot_id = snapshot_id,
+                };
+                if (std.Thread.spawn(.{ .stack_size = 64 * 1024 * 1024 }, DeepRunner.run, .{&ctx})) |thread| {
+                    thread.join();
+                    return ctx.result;
+                } else |_| {}
+            }
+            return self.executeFrameImpl(code, input, gas, address, caller, value, is_static, snapshot_id);
+        }
+
+        fn executeFrameImpl(
             self: *Self,
             code: []const u8,
             input: []const u8,
@@ -1417,6 +1663,9 @@ pub fn Evm(config: EvmConfig) type {
             // Input is now stored on the frame directly
 
             self.depth += 1;
+            if (self.depth > self.max_depth_reached) {
+                self.max_depth_reached = @intCast(self.depth);
+            }
             defer if (self.depth > 0) {
                 self.depth -= 1;
             };
@@ -1436,57 +1685,50 @@ pub fn Evm(config: EvmConfig) type {
             // EIP-2929: Warm the contract address being executed
             try config.eips.warm_contract_for_execution(&self.access_list, address);
 
-            // Build dispatch schedule before frame execution
-            // Note: Size validation is done by caller (execute_init_code checks init code size,
-            // execute_call checks runtime code size via bytecode analysis)
-
-            // Always build dispatch schedule from scratch (no caching)
-            const tracer_ptr = @as(?@TypeOf(&self.tracer), &self.tracer);
-            const bytecode = if (tracer_ptr != null)
-                Bytecode.initWithTracer(arena_allocator, code, tracer_ptr) catch |e| {
-                    return switch (e) {
-                        error.InvalidOpcode => error.InvalidOpcode,
-                        error.InvalidJumpDestination => error.InvalidJumpDestination,
-                        error.TruncatedPush => error.InvalidOpcode,
-                        error.OutOfMemory => error.AllocationError,
-                        else => error.AllocationError,
-                    };
-                }
-            else
-                Bytecode.init(arena_allocator, code) catch |e| {
-                    return switch (e) {
-                        error.InvalidOpcode => error.InvalidOpcode,
-                        error.InvalidJumpDestination => error.InvalidJumpDestination,
-                        error.TruncatedPush => error.InvalidOpcode,
-                        error.OutOfMemory => error.AllocationError,
-                        else => error.AllocationError,
-                    };
-                };
-
-            const handlers = &Frame.opcode_handlers;
-
-            // Build dispatch schedule using arena allocator
-            var dispatch_schedule = Frame.Dispatch.DispatchSchedule.init(arena_allocator, bytecode, handlers, tracer_ptr) catch {
-                return error.AllocationError;
-            };
-            defer dispatch_schedule.deinit();
-
-            // Create jump table
-            const jump_table = Frame.Dispatch.createJumpTable(arena_allocator, dispatch_schedule.items, bytecode) catch {
-                return error.AllocationError;
-            };
-            defer if (jump_table.entries.len > 0) arena_allocator.free(jump_table.entries);
-
-            // Create heap-allocated wrapper for the jump table
-            const heap_jump_table = arena_allocator.create(Frame.Dispatch.JumpTable) catch return error.AllocationError;
-            defer arena_allocator.destroy(heap_jump_table);
-            heap_jump_table.* = jump_table;
-
             var execution_trace: ?@import("frame/call_result.zig").ExecutionTrace = null;
             const Termination = error{ Stop, Return, SelfDestruct };
             var termination_reason: ?Termination = null;
 
-            frame.interpret(&dispatch_schedule, heap_jump_table, code) catch |err| switch (err) {
+            const interpret_res = if (try self.getOrCompileDispatch(code)) |cached|
+                frame.interpret(&cached.schedule, &cached.jump_table, cached.code)
+            else blk: {
+                const tracer_ptr = if (comptime config.tracer_config.enabled) @as(?@TypeOf(&self.tracer), &self.tracer) else null;
+                const bytecode = if (comptime config.tracer_config.enabled)
+                    Bytecode.initWithTracer(arena_allocator, code, tracer_ptr) catch |e| {
+                        return switch (e) {
+                            error.InvalidOpcode => error.InvalidOpcode,
+                            error.InvalidJumpDestination => error.InvalidJumpDestination,
+                            error.TruncatedPush => error.InvalidOpcode,
+                            error.OutOfMemory => error.AllocationError,
+                            else => error.AllocationError,
+                        };
+                    }
+                else
+                    Bytecode.init(arena_allocator, code) catch |e| {
+                        return switch (e) {
+                            error.InvalidOpcode => error.InvalidOpcode,
+                            error.InvalidJumpDestination => error.InvalidJumpDestination,
+                            error.TruncatedPush => error.InvalidOpcode,
+                            error.OutOfMemory => error.AllocationError,
+                            else => error.AllocationError,
+                        };
+                    };
+
+                const handlers = &Frame.opcode_handlers;
+                var dispatch_schedule = Frame.Dispatch.DispatchSchedule.init(arena_allocator, bytecode, handlers, tracer_ptr) catch {
+                    return error.AllocationError;
+                };
+                defer dispatch_schedule.deinit();
+
+                const jump_table = Frame.Dispatch.createJumpTable(arena_allocator, dispatch_schedule.items, bytecode) catch {
+                    return error.AllocationError;
+                };
+                defer if (jump_table.entries.len > 0) arena_allocator.free(jump_table.entries);
+
+                break :blk frame.interpret(&dispatch_schedule, &jump_table, code);
+            };
+
+            interpret_res catch |err| switch (err) {
                 error.Stop => termination_reason = error.Stop,
                 error.Return => termination_reason = error.Return,
                 error.SelfDestruct => termination_reason = error.SelfDestruct,
@@ -1505,7 +1747,13 @@ pub fn Evm(config: EvmConfig) type {
                     return result;
                 },
                 else => {
-                    log.err("Frame execution failed with error: {s} (code_len={}, gas={}, depth={})", .{ @errorName(err), code.len, gas, self.depth });
+                    // Invalid bytecode and exhausted execution budgets are normal
+                    // transaction outcomes, not failures of the client itself.
+                    switch (err) {
+                        error.InvalidOpcode, error.OutOfGas, error.StackUnderflow, error.StackOverflow, error.ReturnDataNotAvailable =>
+                            log.debug("Frame execution halted: {s} (code_len={}, gas={}, depth={})", .{ @errorName(err), code.len, gas, self.depth }),
+                        else => log.err("Frame execution failed with error: {s} (code_len={}, gas={}, depth={})", .{ @errorName(err), code.len, gas, self.depth }),
+                    }
                     // Try to get partial trace even on error
                     execution_trace = convertTracerToExecutionTrace(self.allocator, &self.tracer) catch blk: {
                         break :blk @import("frame/call_result.zig").ExecutionTrace{
@@ -1751,7 +1999,7 @@ pub fn Evm(config: EvmConfig) type {
 
         /// Get the original storage value from the journal
         pub fn get_original_storage(self: *Self, address: primitives.Address, slot: u256) ?u256 {
-            return self.journal.get_original_storage(address, slot);
+            return self.journal.get_original_storage_indexed(address, slot);
         }
 
         /// Access an address and return the gas cost (EIP-2929)
@@ -2227,6 +2475,112 @@ test "Evm creation with custom config" {
     defer evm.deinit();
 
     try std.testing.expectEqual(@as(u9, 0), evm.depth);
+}
+
+test "Evm init derives effective gas price only when requested" {
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
+
+    const block_info = BlockInfo{
+        .number = 1,
+        .timestamp = 1000,
+        .difficulty = 0,
+        .gas_limit = 30_000_000,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .base_fee = 100,
+        .prev_randao = [_]u8{0} ** 32,
+    };
+    const context = TransactionContext{
+        .gas_limit = 100_000,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .chain_id = 1,
+        .max_fee_per_gas = 150,
+        .max_priority_fee_per_gas = 75,
+    };
+    const LondonEvm = Evm(.{ .eips = eips.Eips{ .hardfork = .LONDON } });
+
+    {
+        var derived = try LondonEvm.init(std.testing.allocator, &db, block_info, context, null, primitives.ZERO_ADDRESS);
+        defer derived.deinit();
+        try std.testing.expectEqual(@as(u256, 150), derived.gas_price);
+    }
+
+    {
+        var explicit_zero = try LondonEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
+        defer explicit_zero.deinit();
+        try std.testing.expectEqual(@as(u256, 0), explicit_zero.gas_price);
+    }
+
+    {
+        var legacy_context = context;
+        legacy_context.max_fee_per_gas = null;
+        try std.testing.expectError(error.GasPriceRequired, LondonEvm.init(std.testing.allocator, &db, block_info, legacy_context, null, primitives.ZERO_ADDRESS));
+    }
+}
+
+test "EIP-7623 clamps successful Prague transaction gas to calldata floor" {
+    const gas_limit: u64 = 21_011;
+    const input = [_]u8{0x00};
+    const sender = primitives.Address{ .bytes = [_]u8{0x02} ++ [_]u8{0x00} ** 19 };
+    const target = primitives.Address{ .bytes = [_]u8{0x01} ++ [_]u8{0x00} ** 19 };
+    const block_info = BlockInfo{
+        .number = 1,
+        .timestamp = 1000,
+        .difficulty = 0,
+        .gas_limit = 30_000_000,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .base_fee = 0,
+        .prev_randao = [_]u8{0} ** 32,
+    };
+    const context = TransactionContext{
+        .gas_limit = gas_limit,
+        .coinbase = primitives.ZERO_ADDRESS,
+        .chain_id = 1,
+    };
+
+    {
+        var db = Database.init(std.testing.allocator);
+        defer db.deinit();
+        var sender_account = Account.zero();
+        sender_account.balance = 1_000_000_000;
+        try db.set_account(sender.bytes, sender_account);
+        const PragueEvm = Evm(.{ .eips = eips.Eips{ .hardfork = .PRAGUE } });
+        var evm = try PragueEvm.init(std.testing.allocator, &db, block_info, context, 10, sender);
+        defer evm.deinit();
+
+        var result = evm.call(.{ .call = .{
+            .caller = sender,
+            .to = target,
+            .value = 0,
+            .input = &input,
+            .gas = gas_limit,
+        } });
+        defer result.deinit(std.testing.allocator);
+
+        try std.testing.expect(result.success);
+        try std.testing.expectEqual(@as(u64, 21_010), gas_limit - result.gas_left);
+        try std.testing.expectEqual(@as(u256, 999_789_900), (try db.get_account(sender.bytes)).?.balance);
+    }
+
+    {
+        var db = Database.init(std.testing.allocator);
+        defer db.deinit();
+        const CancunEvm = Evm(.{ .eips = eips.Eips{ .hardfork = .CANCUN } });
+        var evm = try CancunEvm.init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
+        defer evm.deinit();
+
+        var result = evm.call(.{ .call = .{
+            .caller = primitives.ZERO_ADDRESS,
+            .to = target,
+            .value = 0,
+            .input = &input,
+            .gas = gas_limit,
+        } });
+        defer result.deinit(std.testing.allocator);
+
+        try std.testing.expect(result.success);
+        try std.testing.expectEqual(@as(u64, 21_004), gas_limit - result.gas_left);
+    }
 }
 
 test "Evm call depth limit" {

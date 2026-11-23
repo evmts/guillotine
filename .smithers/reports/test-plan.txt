@@ -1,0 +1,94 @@
+verb: test
+pattern: //...
+roots[6]: "//.smithers:test-foundry-link","//.smithers:test-fusions","//.smithers:test-modexp","//.smithers:test-opcodes","//.smithers:test-specs","//.smithers:test-unit"
+targets[10]:
+  - label: "//.smithers:test-unit"
+    rule: Shell.Test
+    mode: execute
+    key: 3831445bae9b3b42d2b87494bf17f75a7f3322ba41dfaad7b18cff117cb7a351
+    cacheable: true
+    dependencies[2]: "//.smithers:sources","//.smithers:build"
+    argv[3]: /Users/williamcory/.zvm/bin/zig,build,test-unit
+    sandbox: none
+    sandboxEnforced: false
+  - label: "//.smithers:build"
+    rule: Shell.Build
+    mode: execute
+    key: 90be364ca81ecd46633369835e16eb604d5e7896c703b066a4f116f8f4061730
+    cacheable: true
+    dependencies[2]: "//.smithers:sources","//.smithers:build-crypto"
+    argv[2]: /Users/williamcory/.zvm/bin/zig,build
+    sandbox: none
+    sandboxEnforced: false
+  - label: "//.smithers:build-crypto"
+    rule: Shell.Build
+    mode: execute
+    key: cba14a501cf22fe6f870bd1cebf9227faa8b59cd320fdf3dd0e14ef4c4bdc85c
+    cacheable: true
+    dependencies[1]: "//.smithers:sources"
+    argv[2]: /Users/williamcory/.nvm/versions/node/v26.10.0/bin/node,.smithers/build-crypto.mjs
+    sandbox: none
+    sandboxEnforced: false
+  - label: "//.smithers:sources"
+    rule: Filegroup
+    mode: execute
+    key: 79abec420e252b733afe820a4d5139690ce68be18623ac47bc156dcdd2dba867
+    cacheable: true
+    dependencies[1]: "//.smithers:repository-sources"
+  - label: "//.smithers:repository-sources"
+    rule: Filegroup
+    mode: execute
+    key: 3f34feaefbda01246c2b6b61344e44d9b415b84ed72d22e9de2a1de5edd06c66
+    cacheable: true
+    dependencies: []
+  - label: "//.smithers:test-specs"
+    rule: Shell.Test
+    mode: execute
+    key: 0ffb6d13c8008c0dcc002c71bc2635e8b33c25b6f86596f5293554d7e9fbe732
+    cacheable: true
+    dependencies[2]: "//.smithers:sources","//.smithers:build"
+    argv[3]: /Users/williamcory/.zvm/bin/zig,build,state-tests
+    sandbox: none
+    sandboxEnforced: false
+  - label: "//.smithers:test-opcodes"
+    rule: Shell.Test
+    mode: execute
+    key: 681b346c633e788c7a923f29496d9e3b14a4f27f973987fae84596bd42b3ee8d
+    cacheable: true
+    dependencies[2]: "//.smithers:sources","//.smithers:build"
+    argv[3]: /Users/williamcory/.zvm/bin/zig,build,test-opcodes
+    sandbox: none
+    sandboxEnforced: false
+  - label: "//.smithers:test-modexp"
+    rule: Shell.Test
+    mode: execute
+    key: 9839f6087fa84d264817f1ffee1c0b30a488e90bfb847a093134300718007019
+    cacheable: true
+    dependencies[2]: "//.smithers:sources","//.smithers:build"
+    argv[5]: /Users/williamcory/.zvm/bin/zig,build,test-modexp,"--build-file",.smithers/build.zig
+    sandbox: none
+    sandboxEnforced: false
+  - label: "//.smithers:test-fusions"
+    rule: Shell.Test
+    mode: execute
+    key: 1ad39aa92792740d20486c78cfa07f5fb0ff038c672fdc1622e4c8ba1c415e0f
+    cacheable: true
+    dependencies[2]: "//.smithers:sources","//.smithers:build"
+    argv[3]: /Users/williamcory/.zvm/bin/zig,build,test-fusions
+    sandbox: none
+    sandboxEnforced: false
+  - label: "//.smithers:test-foundry-link"
+    rule: Shell.Test
+    mode: execute
+    key: 9ff3b5d61c031079d05ff9055f615f136343e7b08d3b30d1a7a2d5f37f599062
+    cacheable: true
+    dependencies[1]: "//.smithers:sources"
+    argv[3]: /Users/williamcory/.nvm/versions/node/v26.10.0/bin/node,"--test",.smithers/tests/foundry-link.test.mjs
+    sandbox: none
+    sandboxEnforced: false
+cta:
+  description: "Suggested commands:"
+  commands[3]{command,description}:
+    smthrs targets --workspace '/Users/williamcory/guillotine-ws/ci-and-factory',Discover available targets
+    smthrs cache status --workspace '/Users/williamcory/guillotine-ws/ci-and-factory',Inspect local cache usage
+    smthrs skills add,sync outdated skills

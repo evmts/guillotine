@@ -144,7 +144,7 @@ pub const HashBuilderOptimized = struct {
         // If we don't have a root yet, this becomes the root
         if (self.root_hash == null) {
             var hash: [32]u8 = undefined;
-            _ = try hex_string_to_bytes(hash_str, &hash);
+            hex_string_to_bytes(hash_str, &hash) catch return TrieOperationError.InvalidInput;
             self.root_hash = hash;
             return;
         }
@@ -168,7 +168,7 @@ pub const HashBuilderOptimized = struct {
         try self.store_node(updated_hash_str_copy, updated_node);
 
         // Update root hash
-        _ = try hex_string_to_bytes(updated_hash_str, &root_hash_buf);
+        hex_string_to_bytes(updated_hash_str, &root_hash_buf) catch return TrieOperationError.InvalidInput;
         self.root_hash = root_hash_buf;
 
         // Periodically reset hex arena to avoid unbounded growth
@@ -207,7 +207,7 @@ pub const HashBuilderOptimized = struct {
         if (result) |node| {
             const updated_hash_str = try self.compute_node_hash(node);
 
-            _ = try hex_string_to_bytes(updated_hash_str, &root_hash_buf);
+            hex_string_to_bytes(updated_hash_str, &root_hash_buf) catch return TrieOperationError.InvalidInput;
             self.root_hash = root_hash_buf;
 
             const hash_str_copy = try self.allocator.dupe(u8, updated_hash_str);

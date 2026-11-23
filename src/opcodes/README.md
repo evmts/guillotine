@@ -48,6 +48,7 @@ pub const Opcode = enum(u8) {
     SHL = 0x1b,
     SHR = 0x1c,
     SAR = 0x1d,
+    CLZ = 0x1e, // EIP-7939, Osaka
     
     // ... (continues for all EVM opcodes)
 };
@@ -267,6 +268,7 @@ Bitwise logic and bit manipulation:
 - `AND`, `OR`, `XOR`, `NOT` - Boolean logic
 - `BYTE` - Byte extraction
 - `SHL`, `SHR`, `SAR` - Bit shifting (logical/arithmetic)
+- `CLZ` - Count leading zero bits (Osaka): one stack input replaced by a count from 0 to 256, at five gas. Zero returns 256; earlier forks reject the opcode.
 
 ### Environment Operations (0x30-0x3F)
 Execution environment queries:

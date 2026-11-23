@@ -1,0 +1,40 @@
+verb: build
+pattern: "//.smithers:build"
+roots[1]: "//.smithers:build"
+targets[4]:
+  - label: "//.smithers:build"
+    rule: Shell.Build
+    mode: execute
+    key: 90be364ca81ecd46633369835e16eb604d5e7896c703b066a4f116f8f4061730
+    cacheable: true
+    dependencies[2]: "//.smithers:sources","//.smithers:build-crypto"
+    argv[2]: /Users/williamcory/.zvm/bin/zig,build
+    sandbox: none
+    sandboxEnforced: false
+  - label: "//.smithers:build-crypto"
+    rule: Shell.Build
+    mode: execute
+    key: cba14a501cf22fe6f870bd1cebf9227faa8b59cd320fdf3dd0e14ef4c4bdc85c
+    cacheable: true
+    dependencies[1]: "//.smithers:sources"
+    argv[2]: /Users/williamcory/.nvm/versions/node/v26.10.0/bin/node,.smithers/build-crypto.mjs
+    sandbox: none
+    sandboxEnforced: false
+  - label: "//.smithers:sources"
+    rule: Filegroup
+    mode: execute
+    key: 79abec420e252b733afe820a4d5139690ce68be18623ac47bc156dcdd2dba867
+    cacheable: true
+    dependencies[1]: "//.smithers:repository-sources"
+  - label: "//.smithers:repository-sources"
+    rule: Filegroup
+    mode: execute
+    key: 3f34feaefbda01246c2b6b61344e44d9b415b84ed72d22e9de2a1de5edd06c66
+    cacheable: true
+    dependencies: []
+cta:
+  description: "Suggested commands:"
+  commands[3]{command,description}:
+    smthrs targets --workspace '/Users/williamcory/guillotine-ws/ci-and-factory',Discover available targets
+    smthrs cache status --workspace '/Users/williamcory/guillotine-ws/ci-and-factory',Inspect local cache usage
+    smthrs skills add,sync outdated skills

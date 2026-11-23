@@ -17,11 +17,14 @@ export * from "./test-assertions.js";
  */
 
 /**
- * Create a test address from a number
+ * Create a test address from a number: n as a big-endian u32 in the last 4 bytes.
  */
 export function testAddress(n: number): Address {
+	if (!Number.isInteger(n) || n < 0 || n > 0xffffffff) {
+		throw new Error(`testAddress expects a u32, got ${n}`);
+	}
 	const bytes = new Uint8Array(20);
-	bytes[19] = n;
+	new DataView(bytes.buffer).setUint32(16, n);
 	return Address.fromBytes(bytes);
 }
 
@@ -210,13 +213,7 @@ export async function deployContract(
 	code: Bytes,
 	deployer: Address = testAddress(1),
 ): Promise<Address> {
-	// Simple init code that returns the runtime code
-	const initCode = Bytes.concat([
-		hex("0x60"), // PUSH1
-		Bytes.fromBytes(new Uint8Array([code.length()])),
-		hex("0x6000"), // PUSH1 0
-		hex("0xf3"), // RETURN
-	]);
+	const initCode = deployInitCode(code);
 
 	const result = await evm.call({
 		caller: deployer,
@@ -276,53 +273,75 @@ export function infiniteLoopBytecode(): Bytes {
 }
 
 /**
- * Create bytecode that calls another contract
+ * Create bytecode that calls another contract and returns
+ * `success (32-byte word) || returndata`.
+ *
+ * The CALL itself copies up to 256 bytes of return data to memory[32..288]; the contract then
+ * returns memory[0 .. 32 + RETURNDATASIZE]. Return data longer than 256 bytes is not supported.
+ *
+ * Forwarded gas comes from the GAS opcode unless `gas` is given.
  */
 export function callBytecode(
 	target: Address,
 	value: U256 = U256.zero(),
-	callType: "CALL" | "DELEGATECALL" | "STATICCALL" = "CALL",
+	callType: "CALL" | "CALLCODE" | "DELEGATECALL" | "STATICCALL" = "CALL",
+	gas?: number,
 ): Bytes {
-	const targetBytes = target.toBytes();
-	const valueBytes = value.toBytes();
 	const code: number[] = [];
 
-	// Arguments for CALL: gas, addr, value, argsOffset, argsSize, retOffset, retSize
-	code.push(0x60, 0x20); // PUSH1 32 (retSize)
-	code.push(0x60, 0x00); // PUSH1 0 (retOffset)
+	// CALL/CALLCODE pop: gas, addr, value, argsOffset, argsSize, retOffset, retSize
+	// DELEGATECALL/STATICCALL pop: gas, addr, argsOffset, argsSize, retOffset, retSize
+	code.push(0x61, 0x01, 0x00); // PUSH2 256 (retSize)
+	code.push(0x60, 0x20); // PUSH1 32 (retOffset)
 	code.push(0x60, 0x00); // PUSH1 0 (argsSize)
 	code.push(0x60, 0x00); // PUSH1 0 (argsOffset)
 
-	if (callType !== "DELEGATECALL" && callType !== "STATICCALL") {
-		// Push value for CALL
-		if (valueBytes.every((b) => b === 0)) {
-			code.push(0x60, 0x00); // PUSH1 0
-		} else {
-			code.push(0x7f); // PUSH32
-			code.push(...valueBytes);
+	if (callType === "CALL" || callType === "CALLCODE") {
+		code.push(0x7f, ...value.toBytes()); // PUSH32 value
+	}
+
+	code.push(0x73, ...target.toBytes()); // PUSH20 target
+
+	if (gas === undefined) {
+		code.push(0x5a); // GAS
+	} else {
+		if (!Number.isInteger(gas) || gas < 0 || gas > 0xffffffff) {
+			throw new Error(`callBytecode gas must be a u32, got ${gas}`);
 		}
+		code.push(0x63, (gas >>> 24) & 0xff, (gas >>> 16) & 0xff, (gas >>> 8) & 0xff, gas & 0xff); // PUSH4 gas
 	}
 
-	// Push address
-	code.push(0x73); // PUSH20
-	code.push(...targetBytes);
+	const opcodes = { CALL: 0xf1, CALLCODE: 0xf2, DELEGATECALL: 0xf4, STATICCALL: 0xfa } as const;
+	code.push(opcodes[callType]);
 
-	// Push gas
-	code.push(0x5a); // GAS
-
-	// Call opcode
-	if (callType === "CALL") {
-		code.push(0xf1); // CALL
-	} else if (callType === "DELEGATECALL") {
-		code.push(0xf4); // DELEGATECALL
-	} else if (callType === "STATICCALL") {
-		code.push(0xfa); // STATICCALL
-	}
-
-	// Return the result
-	code.push(0x60, 0x20); // PUSH1 32
 	code.push(0x60, 0x00); // PUSH1 0
+	code.push(0x52); // MSTORE (success flag at memory[0..32])
+	code.push(0x3d); // RETURNDATASIZE
+	code.push(0x60, 0x20); // PUSH1 32
+	code.push(0x01); // ADD (size = 32 + returndata size)
+	code.push(0x60, 0x00); // PUSH1 0 (offset)
 	code.push(0xf3); // RETURN
 
 	return Bytes.fromBytes(new Uint8Array(code));
+}
+
+/**
+ * Init code that copies `runtime` out of itself and returns it, so CREATE deploys exactly `runtime`.
+ * `prefix` runs first (it must leave the stack empty and not touch memory it relies on).
+ */
+export function deployInitCode(runtime: Bytes, prefix: Bytes = Bytes.empty()): Bytes {
+	const length = runtime.length();
+	if (length > 0xffff) throw new Error(`runtime code too long: ${length}`);
+	// PUSH2 len DUP1 PUSH2 start PUSH1 0 CODECOPY PUSH1 0 RETURN = 13 bytes
+	const start = prefix.length() + 13;
+	const copier = new Uint8Array([
+		0x61, length >> 8, length & 0xff, // PUSH2 len (size)
+		0x80, // DUP1 (kept for RETURN)
+		0x61, start >> 8, start & 0xff, // PUSH2 start (code offset)
+		0x60, 0x00, // PUSH1 0 (memory offset)
+		0x39, // CODECOPY
+		0x60, 0x00, // PUSH1 0 (offset)
+		0xf3, // RETURN (offset 0, size len)
+	]);
+	return Bytes.concat([prefix, Bytes.fromBytes(copier), runtime]);
 }

@@ -1,20 +1,53 @@
+//! Modular Exponentiation (ModExp)
+//!
+//! Computes base^exponent mod modulus for arbitrary-precision integers.
+//! Used in Ethereum precompile 0x05 and RSA-style cryptographic operations.
+//!
+//! WARNING: UNAUDITED - Custom cryptographic implementation that has NOT been security audited.
+//! This implementation is provided for educational/testing purposes only.
+//! DO NOT USE IN PRODUCTION without proper security audit and testing.
+//!
+//! ## Overview
+//! Modular exponentiation is a fundamental operation in public-key cryptography,
+//! computing (base^exponent) mod modulus efficiently for large numbers.
+//!
+//! ## Algorithm
+//! Uses square-and-multiply algorithm (binary exponentiation):
+//! - Time complexity: O(log(exponent) * cost_of_multiplication)
+//! - Space complexity: O(size_of_modulus)
+//! - Handles arbitrary-precision integers
+//!
+//! ## Usage
+//! ```zig
+//! const std = @import("std");
+//! const ModExp = @import("crypto").ModExp;
+//!
+//! pub fn main() !void {
+//!     const allocator = std.heap.page_allocator;
+//!     const result = try ModExp.modexp(allocator, &.{3}, &.{10}, &.{13});
+//!     defer allocator.free(result);
+//!     std.debug.assert(result[0] == 3); // 3^10 mod 13 = 3
+//! }
+//! ```
+//!
+//! ## Security Considerations
+//! - Unaudited custom implementation
+//! - Potential timing attacks in big integer operations
+//! - Unvalidated against side-channel vulnerabilities
+//! - Custom algorithms may have edge case bugs
+//! - Memory safety not guaranteed under all conditions
+//! - Use audited libraries (GMP, OpenSSL) in production
+//!
+//! ## Ethereum Context
+//! - Precompile 0x05: ModExp for RSA verification
+//! - EIP-198: Big integer modular exponentiation
+//! - Gas cost scales with input sizes
+//!
+//! ## References
+//! - [EIP-198](https://eips.ethereum.org/EIPS/eip-198) - ModExp precompile
+
 const std = @import("std");
 
-/// ⚠️ UNAUDITED CUSTOM CRYPTO IMPLEMENTATION - NOT SECURITY AUDITED ⚠️
-///
-/// This module contains CUSTOM modular exponentiation implementations
-/// that have NOT been security audited or verified against known attacks.
-/// These implementations are provided for educational/testing purposes only.
-/// DO NOT USE IN PRODUCTION without proper security audit and testing.
-///
-/// Known risks:
-/// - Potential timing attacks in big integer operations
-/// - Unvalidated against side-channel vulnerabilities
-/// - Custom algorithms may have edge case bugs
-/// - Memory safety not guaranteed under all conditions
-///
-/// Modular exponentiation implementation
-/// Computes base^exponent mod modulus for arbitrary-precision integers
 /// Error set for modular exponentiation operations
 pub const ModExpError = error{
     DivisionByZero,
@@ -43,21 +76,21 @@ pub fn unauditedModexp(allocator: std.mem.Allocator, base_bytes: []const u8, exp
     // Clear output first
     @memset(output, 0);
 
+    // Check for zero modulus
+    if (mod_bytes.len == 0 or unaudited_isZero(mod_bytes)) {
+        return ModExpError.DivisionByZero;
+    }
+
     // Handle special cases
     if (exp_bytes.len == 0 or unaudited_isZero(exp_bytes)) {
-        // exp = 0, result = 1
-        if (output.len > 0) output[output.len - 1] = 1;
+        // exp = 0, result = 1 mod modulus. For modulus == 1 this is 0.
+        if (output.len > 0 and !unaudited_isOne(mod_bytes)) output[output.len - 1] = 1;
         return;
     }
 
     if (base_bytes.len == 0 or unaudited_isZero(base_bytes)) {
         // base = 0, result = 0 (already cleared)
         return;
-    }
-
-    // Check for zero modulus
-    if (mod_bytes.len == 0 or unaudited_isZero(mod_bytes)) {
-        return ModExpError.DivisionByZero;
     }
 
     // For simplicity, handle small numbers directly
@@ -75,9 +108,9 @@ pub fn unauditedModexp(allocator: std.mem.Allocator, base_bytes: []const u8, exp
         // Square and multiply algorithm
         while (exp_remaining > 0) {
             if (exp_remaining & 1 == 1) {
-                result = (result * base_mod) % mod;
+                result = mulModU64(result, base_mod, mod);
             }
-            base_mod = (base_mod * base_mod) % mod;
+            base_mod = mulModU64(base_mod, base_mod, mod);
             exp_remaining >>= 1;
         }
 
@@ -155,6 +188,10 @@ pub fn unauditedModexp(allocator: std.mem.Allocator, base_bytes: []const u8, exp
     try writeBigEndian(&result, output);
 }
 
+fn mulModU64(lhs: u64, rhs: u64, modulus: u64) u64 {
+    return @intCast((@as(u128, lhs) * @as(u128, rhs)) % @as(u128, modulus));
+}
+
 /// ⚠️ UNAUDITED - NOT SECURITY AUDITED ⚠️
 /// Check if a byte array represents zero
 /// WARNING: May be vulnerable to timing attacks
@@ -163,6 +200,14 @@ pub fn unaudited_isZero(bytes: []const u8) bool {
         if (byte != 0) return false;
     }
     return true;
+}
+
+fn unaudited_isOne(bytes: []const u8) bool {
+    if (bytes.len == 0) return false;
+    for (bytes[0 .. bytes.len - 1]) |byte| {
+        if (byte != 0) return false;
+    }
+    return bytes[bytes.len - 1] == 1;
 }
 
 /// ⚠️ UNAUDITED - NOT SECURITY AUDITED ⚠️
@@ -192,21 +237,68 @@ pub fn unaudited_u64ToBytes(value: u64, output: []u8) void {
 pub const GAS_QUADRATIC_THRESHOLD: usize = 64;
 pub const GAS_LINEAR_THRESHOLD: usize = 1024;
 
+fn clampU128ToU64(value: u128) u64 {
+    const max_u64 = @as(u128, std.math.maxInt(u64));
+    return if (value > max_u64) std.math.maxInt(u64) else @intCast(value);
+}
+
+fn mulDivToU64(lhs: u64, rhs: u64, divisor: u64) u64 {
+    return clampU128ToU64((@as(u128, lhs) * @as(u128, rhs)) / @as(u128, divisor));
+}
+
 /// ⚠️ UNAUDITED - NOT SECURITY AUDITED ⚠️
 /// Calculates multiplication complexity for gas cost
 /// WARNING: Custom gas calculation logic not audited
 pub fn unaudited_calculateMultiplicationComplexity(x: usize) u64 {
-    const x64: u64 = @intCast(x);
+    const x128: u128 = @intCast(x);
 
     if (x <= GAS_QUADRATIC_THRESHOLD) {
-        return x64 * x64;
+        return clampU128ToU64(x128 * x128);
     } else if (x <= GAS_LINEAR_THRESHOLD) {
         // x^2/4 + 96*x - 3072
-        return (x64 * x64) / 4 + 96 * x64 - 3072;
+        return clampU128ToU64((x128 * x128) / 4 + 96 * x128 - 3072);
     } else {
         // x^2/16 + 480*x - 199680
-        return (x64 * x64) / 16 + 480 * x64 - 199680;
+        return clampU128ToU64((x128 * x128) / 16 + 480 * x128 - 199680);
     }
+}
+
+fn calculateEip2565MultiplicationComplexity(x: usize) u64 {
+    const words = (@as(u128, @intCast(x)) + 7) / 8;
+    return clampU128ToU64(words * words);
+}
+
+fn exponentHeadBitLength(exp_bytes: []const u8) u64 {
+    const head = exp_bytes[0..@min(exp_bytes.len, 32)];
+    var leading_zeros: usize = 0;
+    for (head) |byte| {
+        if (byte != 0) break;
+        leading_zeros += 1;
+    }
+    if (leading_zeros == head.len) return 0;
+
+    const first_non_zero = head[leading_zeros];
+    const first_byte_bits: u64 = 8 - @as(u64, @intCast(@clz(first_non_zero)));
+    return @as(u64, @intCast((head.len - leading_zeros - 1) * 8)) + first_byte_bits;
+}
+
+fn calculateModexpIterations(exp_len: usize, exp_bytes: []const u8, long_byte_cost: u64) u64 {
+    const head_bits = exponentHeadBitLength(exp_bytes);
+    const head_iterations = if (head_bits == 0) 0 else head_bits - 1;
+    const adjusted = if (exp_len <= 32)
+        head_iterations
+    else
+        clampU128ToU64(@as(u128, @intCast(exp_len - 32)) * long_byte_cost + head_iterations);
+    return @max(adjusted, 1);
+}
+
+fn gasForkAtLeast(hardfork: anytype, target: @import("voltaire").Hardfork) bool {
+    return switch (@typeInfo(@TypeOf(hardfork))) {
+        .@"enum" => hardfork.isAtLeast(target),
+        .enum_literal => @as(@import("voltaire").Hardfork, hardfork).isAtLeast(target),
+        // Preserve the legacy marker API's Berlin gas schedule.
+        else => @import("voltaire").Hardfork.BERLIN.isAtLeast(target),
+    };
 }
 
 /// ⚠️ UNAUDITED - NOT SECURITY AUDITED ⚠️
@@ -256,7 +348,10 @@ pub const ModExp = struct {
     }
 
     /// ⚠️ UNAUDITED - NOT SECURITY AUDITED ⚠️
-    /// Calculates gas cost for MODEXP operation (EIP-2565)
+    /// Calculates MODEXP gas using EIP-198 before Berlin, EIP-2565 from Berlin,
+    /// and EIP-7883 from Osaka. exp_bytes contains the right-padded exponent head
+    /// (at most 32 bytes); exp_len is the full declared exponent length.
+    /// Length bounds belong to the precompile. Costs saturate at maxInt(u64).
     /// WARNING: Custom gas calculation logic not audited
     pub fn calculateGas(
         base_len: usize,
@@ -265,21 +360,39 @@ pub const ModExp = struct {
         exp_bytes: []const u8,
         hardfork: anytype,
     ) u64 {
-        _ = hardfork; // Hardfork-specific logic would go here if needed
-
         // Calculate maximum length for multiplication complexity
         const max_len = @max(base_len, mod_len);
+        const osaka = gasForkAtLeast(hardfork, .OSAKA);
+        const iteration_count = calculateModexpIterations(exp_len, exp_bytes, if (osaka) 16 else 8);
+        if (osaka) {
+            const words = (@as(u128, @intCast(max_len)) + 7) / 8;
+            const complexity = if (max_len <= 32) 16 else clampU128ToU64(2 * words * words);
+            return @max(500, mulDivToU64(complexity, iteration_count, 1));
+        }
+
+        if (gasForkAtLeast(hardfork, .BERLIN)) {
+            const mult_complexity = calculateEip2565MultiplicationComplexity(max_len);
+            const gas_cost = mulDivToU64(mult_complexity, iteration_count, 3);
+            return @max(200, gas_cost);
+        }
+
         const mult_complexity = unaudited_calculateMultiplicationComplexity(max_len);
-
-        // Calculate iteration count based on exponent
-        const adj_exp_len = unaudited_calculateAdjustedExponentLength(exp_len, exp_bytes);
-        const iteration_count = @max(adj_exp_len, 1);
-
-        // Gas cost = max(200, floor(mult_complexity * iteration_count / 3))
-        const gas_cost = (mult_complexity * iteration_count) / 3;
-        return @max(200, gas_cost);
+        return mulDivToU64(mult_complexity, iteration_count, 20);
     }
 };
+
+test "ModExp gas schedules match EIP-198, EIP-2565 and EIP-7883 boundaries" {
+    const Hardfork = @import("voltaire").Hardfork;
+    const head = [_]u8{0xff} ** 32;
+    try std.testing.expectEqual(@as(u64, 13056), ModExp.calculateGas(32, 32, 32, &head, Hardfork.BYZANTIUM));
+    try std.testing.expectEqual(@as(u64, 1360), ModExp.calculateGas(32, 32, 32, &head, Hardfork.PRAGUE));
+    try std.testing.expectEqual(@as(u64, 4080), ModExp.calculateGas(32, 32, 32, &head, Hardfork.OSAKA));
+    try std.testing.expectEqual(@as(u64, 12750), ModExp.calculateGas(33, 32, 33, &head, Hardfork.OSAKA));
+    // EELS treats a zero exponent head's bit contribution as zero, including
+    // long exponents: 16 * (33 - 32) iterations, not a negative bit contribution.
+    try std.testing.expectEqual(@as(u64, 2048), ModExp.calculateGas(64, 33, 64, &.{0}, Hardfork.OSAKA));
+    try std.testing.expectEqual(@as(u64, 34688), ModExp.calculateGas(64, 33, 64, &head, Hardfork.OSAKA));
+}
 
 test "modexp: base^0 mod m = 1" {
     const allocator = std.testing.allocator;
@@ -355,10 +468,19 @@ fn writeBigEndian(big: *const std.math.big.int.Managed, output: []u8) !void {
     const hex_string = try big.toString(big.allocator, 16, .upper);
     defer big.allocator.free(hex_string);
 
-    // Parse hex string back to bytes
-    const hex_bytes = try big.allocator.alloc(u8, hex_string.len / 2);
+    // Parse hex string back to bytes. Big-int formatting omits a leading zero
+    // nibble, so pad odd-width values before hex decoding.
+    const padded_hex = if (hex_string.len % 2 == 0) hex_string else blk: {
+        const buf = try big.allocator.alloc(u8, hex_string.len + 1);
+        buf[0] = '0';
+        @memcpy(buf[1..], hex_string);
+        break :blk buf;
+    };
+    defer if (padded_hex.ptr != hex_string.ptr) big.allocator.free(padded_hex);
+
+    const hex_bytes = try big.allocator.alloc(u8, padded_hex.len / 2);
     defer big.allocator.free(hex_bytes);
-    _ = try std.fmt.hexToBytes(hex_bytes, hex_string);
+    _ = try std.fmt.hexToBytes(hex_bytes, padded_hex);
 
     // Copy to output buffer (right-aligned)
     const copy_len = @min(output.len, hex_bytes.len);
@@ -382,9 +504,8 @@ test "modexp: large numbers - 2^255 mod 2^128" {
 
     try unauditedModexp(allocator, &base, &exp, &mod, &output);
 
-    // 2^255 mod 2^128 = 2^127
-    var expected: [17]u8 = .{0} ** 17;
-    expected[9] = 0x80; // 2^127 in big-endian
+    // 2^255 is an exact multiple of 2^128; the remainder is zero.
+    const expected: [17]u8 = .{0} ** 17;
 
     try std.testing.expectEqualSlices(u8, &expected, &output);
 }
@@ -808,6 +929,18 @@ test "modexp: modulus of 1" {
     try std.testing.expectEqual(@as(u8, 0), output[0]);
 }
 
+test "modexp: zero exponent is reduced modulo one" {
+    const allocator = std.testing.allocator;
+
+    const base = [_]u8{0};
+    const exp = [_]u8{0};
+    const mod = [_]u8{1};
+    var output: [1]u8 = undefined;
+
+    try unauditedModexp(allocator, &base, &exp, &mod, &output);
+    try std.testing.expectEqual(@as(u8, 0), output[0]);
+}
+
 test "modexp: result fits exactly in output buffer" {
     const allocator = std.testing.allocator;
 
@@ -836,6 +969,20 @@ test "modexp: ModExp.modexp wrapper function" {
 
     try std.testing.expectEqual(@as(usize, 1), result.len);
     try std.testing.expectEqual(@as(u8, 3), result[0]);
+}
+
+test "modexp: odd-width hex result is padded before output" {
+    const allocator = std.testing.allocator;
+
+    const base = [_]u8{3};
+    const exp = [_]u8{3};
+    const mod = [_]u8{0x0d};
+
+    const result = try ModExp.modexp(allocator, &base, &exp, &mod);
+    defer allocator.free(result);
+
+    try std.testing.expectEqual(@as(usize, 1), result.len);
+    try std.testing.expectEqual(@as(u8, 1), result[0]);
 }
 
 test "modexp: ModExp.modexp with zero modulus" {

@@ -107,20 +107,17 @@ zig build test-opcodes
 
 ## 🧰 SDKs (Experimental)
 
-All SDKs in this repo are vibecoded proof-of-concepts. APIs are unstable and may change without notice. We're actively seeking early users to try things out and tell us what APIs you want. Please open an issue or ping us on Telegram with feedback.
+Guillotine officially ships three integration surfaces:
 
-- [Go](sdks/go) — Go bindings with FFI to Zig EVM
-- [Bun](sdks/bun) — Native Bun bindings around the Zig EVM
-- [C](sdks/c) — C/C++ FFI surface for embedding
-- [Rust](sdks/rust) — Idiomatic Rust wrapper over FFI
-- [TypeScript](sdks/typescript) — WASM/TS APIs for Node, Bun, Browser
+- **Zig native bindings** — the repository's native EVM API in `src/root.zig`.
+- **[C FFI](sdks/c)** — native embedding and custom language bindings.
+- **[`@tevm/guillotine` TypeScript](sdks/typescript)** — WASM APIs for Node, Bun, and browsers, with build support in `sdks/wasm`.
 
-**Looking for Contributors:**
-- **Python** — Help us build Python bindings and primitives
-- **Swift** — Help us build Swift bindings for Apple platforms
-- **Kotlin** — Help us build Kotlin/JVM bindings
-
-See each SDK's README for install, quick start, and current API.
+The C and TypeScript APIs are experimental and may change. For Python, Go,
+Rust, Swift, Kotlin/JNI, or native Bun FFI, use the
+[custom SDK guide](docs/building-custom-sdks.md) and
+[SDK builder skill](.agents/skills/guillotine-sdk-builder/SKILL.md).
+See [sdks/README.md](sdks/README.md) for the maintained SDK scope and build commands.
 
 ---
 
@@ -352,3 +349,15 @@ MIT License. Free for all use. 🌍
 
 <a href="https://shazow.net/posts/permissive-vs-copyleft/"><img width="256" height="256" alt="image" src="https://github.com/user-attachments/assets/644c2d29-8e7f-44f4-a17f-285a1f4c20e7" /></a>
 
+
+## Osaka ModExp
+
+Configure `Evm(.{ .eips = .{ .hardfork = .OSAKA } })` to activate EIP-7823's
+1,024-byte per-operand limit and EIP-7883 pricing for ModExp (`0x05`). The minimum
+is 500 gas. Prague retains its prior pricing and operand acceptance. The full
+engine and reference interpreter share the synchronized vendored precompile.
+See [the precompile contract](lib/voltaire/src/precompiles/modexp.zig.md).
+
+Run `zig build test-modexp` for the vendored arithmetic and precompile tests,
+`zig build test-opcodes-0xfa` for ModExp STATICCALL regression checks, and
+`zig build test-opcodes` for the complete gate (including `test-modexp`).

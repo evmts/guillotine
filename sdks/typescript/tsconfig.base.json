@@ -32,7 +32,7 @@
 		"moduleResolution": "bundler",
 		"module": "ESNext",
 		"target": "ES2022",
-		"lib": ["ES2022", "DOM"],
+		"lib": ["ES2022", "ESNext.Disposable"],
 		"types": ["@types/bun"],
 
 		// Skip type checking for node modules

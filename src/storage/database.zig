@@ -161,6 +161,7 @@ pub const Database = struct {
     transient_storage: std.HashMap(StorageKey, u256, StorageKeyContext, std.hash_map.default_max_load_percentage),
     code_storage: std.HashMap([32]u8, []const u8, ArrayHashContext, std.hash_map.default_max_load_percentage),
     snapshots: std.ArrayList(Snapshot),
+    undo_log: std.ArrayList(UndoEntry),
     next_snapshot_id: u64,
     allocator: std.mem.Allocator,
     // Ephemeral overlay state (active only during simulate)
@@ -204,10 +205,19 @@ pub const Database = struct {
         key: u256,
     };
 
+    const UndoEntry = union(enum) {
+        account: struct { address: [20]u8, prev: ?Account },
+        storage: struct { key: StorageKey, prev: ?u256 },
+        transient: struct { key: StorageKey, prev: ?u256 },
+        overlay_account: struct { address: [20]u8, prev: ?Account },
+        overlay_storage: struct { key: StorageKey, prev: ?u256 },
+        tx_account: struct { address: [20]u8, prev: ??Account },
+        tx_storage: struct { key: StorageKey, prev: ?u256 },
+    };
+
     const Snapshot = struct {
         id: u64,
-        accounts: std.HashMap([20]u8, Account, ArrayHashContext, std.hash_map.default_max_load_percentage),
-        storage: std.HashMap(StorageKey, u256, StorageKeyContext, std.hash_map.default_max_load_percentage),
+        undo_index: usize,
     };
 
     const ArrayHashContext = struct {
@@ -247,7 +257,8 @@ pub const Database = struct {
             .storage = std.HashMap(StorageKey, u256, StorageKeyContext, std.hash_map.default_max_load_percentage).init(allocator),
             .transient_storage = transient_map,
             .code_storage = std.HashMap([32]u8, []const u8, ArrayHashContext, std.hash_map.default_max_load_percentage).init(allocator),
-            .snapshots = .{ .items = &[_]Snapshot{}, .capacity = 0 },
+            .snapshots = std.ArrayList(Snapshot).empty,
+            .undo_log = std.ArrayList(UndoEntry).empty,
             .next_snapshot_id = 1,
             .allocator = allocator,
             .overlay_active = false,
@@ -307,11 +318,8 @@ pub const Database = struct {
         self.freeAllCodeInMap(&self.code_storage);
         self.code_storage.deinit();
 
-        for (self.snapshots.items) |*snapshot| {
-            snapshot.accounts.deinit();
-            snapshot.storage.deinit();
-        }
         self.snapshots.deinit(self.allocator);
+        self.undo_log.deinit(self.allocator);
         // Deinit overlay
         self.freeAllCodeInMap(&self.overlay_code);
         self.overlay_code.deinit();
@@ -339,12 +347,36 @@ pub const Database = struct {
     /// Set account data for the given address
     pub fn set_account(self: *Database, address: [20]u8, account: Account) Error!void {
         if (self.overlay_active) {
+            if (self.snapshots.items.len > 0) {
+                const prev = try self.overlay_accounts.fetchPut(address, account);
+                try self.undo_log.append(self.allocator, .{ .overlay_account = .{
+                    .address = address,
+                    .prev = if (prev) |entry| entry.value else null,
+                } });
+                return;
+            }
             try self.overlay_accounts.put(address, account);
             return;
         }
         // Buffer write in transaction cache if active
         if (self.tx_cache) |cache| {
+            if (self.snapshots.items.len > 0) {
+                const prev = try cache.accounts.fetchPut(address, account);
+                try self.undo_log.append(self.allocator, .{ .tx_account = .{
+                    .address = address,
+                    .prev = if (prev) |entry| entry.value else null,
+                } });
+                return;
+            }
             try cache.accounts.put(address, account);
+            return;
+        }
+        if (self.snapshots.items.len > 0) {
+            const prev = try self.accounts.fetchPut(address, account);
+            try self.undo_log.append(self.allocator, .{ .account = .{
+                .address = address,
+                .prev = if (prev) |entry| entry.value else null,
+            } });
             return;
         }
         try self.accounts.put(address, account);
@@ -353,12 +385,38 @@ pub const Database = struct {
     /// Delete account and all associated data
     pub fn delete_account(self: *Database, address: [20]u8) Error!void {
         if (self.overlay_active) {
+            if (self.snapshots.items.len > 0) {
+                if (self.overlay_accounts.fetchRemove(address)) |entry| {
+                    try self.undo_log.append(self.allocator, .{ .overlay_account = .{
+                        .address = address,
+                        .prev = entry.value,
+                    } });
+                }
+                return;
+            }
             _ = self.overlay_accounts.remove(address);
             return;
         }
         // Mark as deleted in transaction cache if active
         if (self.tx_cache) |cache| {
+            if (self.snapshots.items.len > 0) {
+                const prev = try cache.accounts.fetchPut(address, null);
+                try self.undo_log.append(self.allocator, .{ .tx_account = .{
+                    .address = address,
+                    .prev = if (prev) |entry| entry.value else null,
+                } });
+                return;
+            }
             try cache.accounts.put(address, null);
+            return;
+        }
+        if (self.snapshots.items.len > 0) {
+            if (self.accounts.fetchRemove(address)) |entry| {
+                try self.undo_log.append(self.allocator, .{ .account = .{
+                    .address = address,
+                    .prev = entry.value,
+                } });
+            }
             return;
         }
         _ = self.accounts.remove(address);
@@ -438,13 +496,37 @@ pub const Database = struct {
     pub fn set_storage(self: *Database, address: [20]u8, key: u256, value: u256) Error!void {
         const storage_key = StorageKey{ .address = address, .key = key };
         if (self.overlay_active) {
+            if (self.snapshots.items.len > 0) {
+                const prev = try self.overlay_storage.fetchPut(storage_key, value);
+                try self.undo_log.append(self.allocator, .{ .overlay_storage = .{
+                    .key = storage_key,
+                    .prev = if (prev) |entry| entry.value else null,
+                } });
+                return;
+            }
             try self.overlay_storage.put(storage_key, value);
             return;
         }
         // Buffer write in transaction cache if active
         if (self.tx_cache) |cache| {
             const tx_storage_key = TransactionCache.StorageKey{ .address = address, .key = key };
+            if (self.snapshots.items.len > 0) {
+                const prev = try cache.storage.fetchPut(tx_storage_key, value);
+                try self.undo_log.append(self.allocator, .{ .tx_storage = .{
+                    .key = storage_key,
+                    .prev = if (prev) |entry| entry.value else null,
+                } });
+                return;
+            }
             try cache.storage.put(tx_storage_key, value);
+            return;
+        }
+        if (self.snapshots.items.len > 0) {
+            const prev = try self.storage.fetchPut(storage_key, value);
+            try self.undo_log.append(self.allocator, .{ .storage = .{
+                .key = storage_key,
+                .prev = if (prev) |entry| entry.value else null,
+            } });
             return;
         }
         try self.storage.put(storage_key, value);
@@ -461,6 +543,14 @@ pub const Database = struct {
     /// Set transient storage value for the given address and key (EIP-1153)
     pub fn set_transient_storage(self: *Database, address: [20]u8, key: u256, value: u256) Error!void {
         const storage_key = StorageKey{ .address = address, .key = key };
+        if (self.snapshots.items.len > 0) {
+            const prev = try self.transient_storage.fetchPut(storage_key, value);
+            try self.undo_log.append(self.allocator, .{ .transient = .{
+                .key = storage_key,
+                .prev = if (prev) |entry| entry.value else null,
+            } });
+            return;
+        }
         try self.transient_storage.put(storage_key, value);
     }
 
@@ -715,21 +805,18 @@ pub const Database = struct {
 
     // Snapshot operations
 
-    /// Create a state snapshot and return its ID (legacy tests support)
+    /// Create a state snapshot in O(1) using the append-only undo journal.
     pub fn create_snapshot(self: *Database) Error!u64 {
         const snapshot_id = self.next_snapshot_id;
         self.next_snapshot_id += 1;
-        var snapshot_accounts = std.HashMap([20]u8, Account, ArrayHashContext, std.hash_map.default_max_load_percentage).init(self.allocator);
-        var accounts_iter = self.accounts.iterator();
-        while (accounts_iter.next()) |entry| try snapshot_accounts.put(entry.key_ptr.*, entry.value_ptr.*);
-        var snapshot_storage = std.HashMap(StorageKey, u256, StorageKeyContext, std.hash_map.default_max_load_percentage).init(self.allocator);
-        var storage_iter = self.storage.iterator();
-        while (storage_iter.next()) |entry| try snapshot_storage.put(entry.key_ptr.*, entry.value_ptr.*);
-        try self.snapshots.append(self.allocator, Snapshot{ .id = snapshot_id, .accounts = snapshot_accounts, .storage = snapshot_storage });
+        try self.snapshots.append(self.allocator, Snapshot{
+            .id = snapshot_id,
+            .undo_index = self.undo_log.items.len,
+        });
         return snapshot_id;
     }
 
-    /// Revert state to the given snapshot
+    /// Revert state to the given snapshot by unwinding only mutations since that checkpoint.
     pub fn revert_to_snapshot(self: *Database, snapshot_id: u64) Error!void {
         var snapshot_index: ?usize = null;
         for (self.snapshots.items, 0..) |snapshot, i| {
@@ -739,19 +826,72 @@ pub const Database = struct {
             }
         }
         const index = snapshot_index orelse return Error.SnapshotNotFound;
-        const snapshot = &self.snapshots.items[index];
-        self.accounts.deinit();
-        self.storage.deinit();
-        self.accounts = std.HashMap([20]u8, Account, ArrayHashContext, std.hash_map.default_max_load_percentage).init(self.allocator);
-        self.storage = std.HashMap(StorageKey, u256, StorageKeyContext, std.hash_map.default_max_load_percentage).init(self.allocator);
-        var accounts_iter = snapshot.accounts.iterator();
-        while (accounts_iter.next()) |entry| try self.accounts.put(entry.key_ptr.*, entry.value_ptr.*);
-        var storage_iter = snapshot.storage.iterator();
-        while (storage_iter.next()) |entry| try self.storage.put(entry.key_ptr.*, entry.value_ptr.*);
-        for (self.snapshots.items[index..]) |*snap| {
-            snap.accounts.deinit();
-            snap.storage.deinit();
+        const target_undo_len = self.snapshots.items[index].undo_index;
+
+        var i = self.undo_log.items.len;
+        while (i > target_undo_len) {
+            i -= 1;
+            switch (self.undo_log.items[i]) {
+                .account => |entry| {
+                    if (entry.prev) |acc| {
+                        try self.accounts.put(entry.address, acc);
+                    } else {
+                        _ = self.accounts.remove(entry.address);
+                    }
+                },
+                .storage => |entry| {
+                    if (entry.prev) |val| {
+                        try self.storage.put(entry.key, val);
+                    } else {
+                        _ = self.storage.remove(entry.key);
+                    }
+                },
+                .transient => |entry| {
+                    if (entry.prev) |val| {
+                        try self.transient_storage.put(entry.key, val);
+                    } else {
+                        _ = self.transient_storage.remove(entry.key);
+                    }
+                },
+                .overlay_account => |entry| {
+                    if (entry.prev) |acc| {
+                        try self.overlay_accounts.put(entry.address, acc);
+                    } else {
+                        _ = self.overlay_accounts.remove(entry.address);
+                    }
+                },
+                .overlay_storage => |entry| {
+                    if (entry.prev) |val| {
+                        try self.overlay_storage.put(entry.key, val);
+                    } else {
+                        _ = self.overlay_storage.remove(entry.key);
+                    }
+                },
+                .tx_account => |entry| {
+                    if (self.tx_cache) |cache| {
+                        if (entry.prev) |prev_opt| {
+                            try cache.accounts.put(entry.address, prev_opt);
+                        } else {
+                            _ = cache.accounts.remove(entry.address);
+                        }
+                    }
+                },
+                .tx_storage => |entry| {
+                    if (self.tx_cache) |cache| {
+                        const tx_key = TransactionCache.StorageKey{
+                            .address = entry.key.address,
+                            .key = entry.key.key,
+                        };
+                        if (entry.prev) |val| {
+                            try cache.storage.put(tx_key, val);
+                        } else {
+                            _ = cache.storage.remove(tx_key);
+                        }
+                    }
+                },
+            }
         }
+        self.undo_log.shrinkRetainingCapacity(target_undo_len);
         self.snapshots.shrinkRetainingCapacity(index);
     }
 
@@ -765,13 +905,10 @@ pub const Database = struct {
             }
         }
         const index = snapshot_index orelse return Error.SnapshotNotFound;
-
-        // Free just this snapshot's memory
-        self.snapshots.items[index].accounts.deinit();
-        self.snapshots.items[index].storage.deinit();
-
-        // Remove this snapshot from the list, keeping all others
         _ = self.snapshots.orderedRemove(index);
+        if (self.snapshots.items.len == 0) {
+            self.undo_log.clearRetainingCapacity();
+        }
     }
 
     // EIP-7702 Delegation operations
@@ -858,14 +995,32 @@ pub const Database = struct {
     pub fn commit_transaction(self: *Database, id: u32) Error!void {
         // Flush transaction cache to permanent storage
         if (self.tx_cache) |cache| {
+            const record_outer_undo = self.snapshots.items.len > 1;
             // Apply account changes
             var accounts_iter = cache.accounts.iterator();
             while (accounts_iter.next()) |entry| {
                 if (entry.value_ptr.*) |account| {
-                    try self.accounts.put(entry.key_ptr.*, account);
+                    if (record_outer_undo) {
+                        const prev = try self.accounts.fetchPut(entry.key_ptr.*, account);
+                        try self.undo_log.append(self.allocator, .{ .account = .{
+                            .address = entry.key_ptr.*,
+                            .prev = if (prev) |p| p.value else null,
+                        } });
+                    } else {
+                        try self.accounts.put(entry.key_ptr.*, account);
+                    }
                 } else {
                     // Account was deleted
-                    _ = self.accounts.remove(entry.key_ptr.*);
+                    if (record_outer_undo) {
+                        if (self.accounts.fetchRemove(entry.key_ptr.*)) |prev| {
+                            try self.undo_log.append(self.allocator, .{ .account = .{
+                                .address = entry.key_ptr.*,
+                                .prev = prev.value,
+                            } });
+                        }
+                    } else {
+                        _ = self.accounts.remove(entry.key_ptr.*);
+                    }
                 }
             }
 
@@ -876,7 +1031,15 @@ pub const Database = struct {
                     .address = entry.key_ptr.address,
                     .key = entry.key_ptr.key,
                 };
-                try self.storage.put(storage_key, entry.value_ptr.*);
+                if (record_outer_undo) {
+                    const prev = try self.storage.fetchPut(storage_key, entry.value_ptr.*);
+                    try self.undo_log.append(self.allocator, .{ .storage = .{
+                        .key = storage_key,
+                        .prev = if (prev) |p| p.value else null,
+                    } });
+                } else {
+                    try self.storage.put(storage_key, entry.value_ptr.*);
+                }
             }
 
             // Apply code changes - need to copy from arena to main allocator

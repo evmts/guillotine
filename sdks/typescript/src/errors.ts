@@ -4,8 +4,7 @@
 export type GuillotineErrorType =
   | 'InitializationFailed'
   | 'CleanupFailed'
-  | 'WasmLoadFailed'
-  | 'WasmNotLoaded'
+  | 'UnsupportedOperation'
   | 'VMCreationFailed'
   | 'VMNotInitialized'
   | 'ExecutionFailed'
@@ -53,17 +52,10 @@ export class GuillotineError extends Error {
   }
 
   /**
-   * Create a WASM load error
+   * Create an error for an operation the native handle type does not support
    */
-  static wasmLoadFailed(message: string, cause?: Error): GuillotineError {
-    return new GuillotineError('WasmLoadFailed', message, cause);
-  }
-
-  /**
-   * Create a WASM not loaded error
-   */
-  static wasmNotLoaded(message: string = 'WASM module not loaded'): GuillotineError {
-    return new GuillotineError('WasmNotLoaded', message);
+  static unsupportedOperation(message: string): GuillotineError {
+    return new GuillotineError('UnsupportedOperation', message);
   }
 
   /**
@@ -165,7 +157,7 @@ export class GuillotineError extends Error {
   }
 
   /**
-   * Convert from error code returned by WASM
+   * Convert from a numeric error code
    */
   static fromErrorCode(code: number, message?: string): GuillotineError {
     const msg = message || `Error code: ${code}`;

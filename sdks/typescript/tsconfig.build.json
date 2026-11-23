@@ -1,10 +1,10 @@
 {
-	// This file is used to compile the for cjs and esm (see package.json build scripts). It should exclude all test files.
+	// Build config used by tsup for declarations; excludes tests.
 	"extends": "./tsconfig.base.json",
 	"include": ["src"],
-	"exclude": ["src/**/*.test.ts", "src/**/*.test-d.ts"],
+	"exclude": ["src/**/*.test.ts"],
 	"compilerOptions": {
-		"sourceMap": true,
+		"incremental": false,
 		"rootDir": "./src"
 	}
 }

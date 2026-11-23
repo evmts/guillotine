@@ -75,6 +75,29 @@ pub fn build(b: *std.Build) void {
     // Modules (zbench no longer needed for core evm_mod)
     const modules = Modules.createModules(b, target, optimize, options_mod, primitives_dep, bn254_lib, foundry_lib);
 
+    // Importing an external module's functions does not run its inline tests.
+    // Keep the synchronized ModExp implementation's arithmetic and precompile
+    // regressions reachable from this repository's validation surface.
+    const modexp_tests_step = b.step("test-modexp", "Run vendored ModExp arithmetic and precompile tests");
+    for ([_][]const u8{ "crypto", "precompiles" }) |area| {
+        const is_crypto = std.mem.eql(u8, area, "crypto");
+        const modexp_test = b.addTest(.{
+            .name = b.fmt("modexp-{s}", .{area}),
+            .root_module = if (is_crypto) modules.crypto_mod else b.createModule(.{
+                .root_source_file = b.path(b.fmt("lib/voltaire/src/{s}/modexp.zig", .{area})),
+                .target = target,
+                .optimize = .Debug,
+            }),
+            .use_llvm = true,
+        });
+        if (!is_crypto) {
+            modexp_test.root_module.addImport("voltaire", modules.primitives_mod);
+            modexp_test.root_module.addImport("crypto", modules.crypto_mod);
+        }
+        modexp_test.linkLibC();
+        modexp_tests_step.dependOn(&b.addRunArtifact(modexp_test).step);
+    }
+
     // Executables
     const guillotine_exe = GuillotineExe.createExecutable(b, modules.exe_mod);
     _ = GuillotineExe.createRunStep(b, guillotine_exe);
@@ -440,6 +463,31 @@ pub fn build(b: *std.Build) void {
     // Per-opcode differential tests discovered in test/evm/opcodes
     // We dynamically scan the directory and add a test target for each file matching *_test.zig
     const opcode_tests_step = b.step("test-opcodes", "Run all per-opcode differential tests");
+    opcode_tests_step.dependOn(modexp_tests_step);
+    // Compile the engine once for the complete gate. Linking a separate copy
+    // for every opcode consumes gigabytes of cache and repeats LLVM work.
+    const all_opcode_tests = b.addTest(.{
+        .name = "all-opcodes",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("test/evm/opcodes/all_opcodes.zig"),
+            .target = target,
+            .optimize = .Debug,
+        }),
+        .use_llvm = true,
+    });
+    if (test_filter) |filter| all_opcode_tests.filters = &.{filter};
+    all_opcode_tests.root_module.addImport("evm", modules.evm_mod);
+    all_opcode_tests.root_module.addImport("voltaire", modules.primitives_mod);
+    all_opcode_tests.root_module.addImport("crypto", modules.crypto_mod);
+    all_opcode_tests.root_module.addImport("build_options", options_mod);
+    all_opcode_tests.root_module.addImport("log", b.createModule(.{
+        .root_source_file = b.path("src/log.zig"),
+        .target = target,
+        .optimize = .Debug,
+    }));
+    if (bn254_lib) |bn254| all_opcode_tests.linkLibrary(bn254);
+    all_opcode_tests.linkLibC();
+    opcode_tests_step.dependOn(&b.addRunArtifact(all_opcode_tests).step);
     if (std.fs.cwd().openDir("test/evm/opcodes", .{ .iterate = true }) catch null) |op_dir_val| {
         var op_dir = op_dir_val; // make mutable for close()
         defer op_dir.close();
@@ -488,9 +536,6 @@ pub fn build(b: *std.Build) void {
             // Using MinimalEvm for differential testing (REVM removed)
 
             const run_t = b.addRunArtifact(t);
-
-            // Add to the "all opcodes" step
-            opcode_tests_step.dependOn(&run_t.step);
 
             // Create individual test step for this opcode
             const individual_step = b.step(individual_step_name, individual_step_desc);
@@ -913,4 +958,49 @@ pub fn build(b: *std.Build) void {
 
     // 4. Fourth: Run library tests (lib/**/*.zig)
     test_step.dependOn(&run_lib_tests.step);
+
+    // Self-contained ReleaseFast EVM & per-subsystem benchmark suites
+    const benches = @import("bench/bench_step.zig");
+    const bench_suites = @import("bench/suites_build.zig");
+    const bench_archive = benches.nativeArchive(b, b.path("bench"), b.path("."), target);
+    const bench_hardfork = b.option([]const u8, "bench-hardfork", "Benchmark hardfork (default OSAKA)") orelse "OSAKA";
+    const bench_gas_limit = b.option(u64, "bench-gas-limit", "Benchmark gas budget");
+    const bench_flags = b.addOptions();
+    bench_flags.addOption(bool, "enable_tracing", false);
+    bench_flags.addOption(bool, "disable_tailcall_dispatch", false);
+    bench_flags.addOption(bool, "disable_gas_checks", false);
+    bench_flags.addOption(bool, "enable_fusion", true);
+    bench_flags.addOption([]const u8, "hardfork", bench_hardfork);
+    const bench_flags_mod = bench_flags.createModule();
+    var bench_copies: std.AutoHashMap(*std.Build.Module, *std.Build.Module) = .init(b.allocator);
+    defer bench_copies.deinit();
+    const bench_evm_raw = b.createModule(.{
+        .root_source_file = b.path("src/root.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    bench_evm_raw.addImport("build_options", bench_flags_mod);
+    bench_evm_raw.addImport("voltaire", modules.primitives_mod);
+    bench_evm_raw.addImport("crypto", modules.crypto_mod);
+    bench_evm_raw.addImport("precompiles", modules.precompiles_mod);
+    bench_evm_raw.addImport("provider", modules.provider_mod);
+    _ = benches.addBenchSteps(b, .{
+        .target = target,
+        .evm = bench_evm_raw,
+        .native_archive = bench_archive,
+        .hardfork = bench_hardfork,
+        .gas_limit = bench_gas_limit,
+    });
+    bench_suites.addSuiteSteps(b, .{
+        .target = target,
+        .optimize = .ReleaseFast,
+        .directory = b.path("bench"),
+        .repository = b.path("."),
+        .evm = benches.optimized(b, bench_evm_raw, .ReleaseFast, bench_archive, &bench_copies),
+        .voltaire = benches.optimized(b, modules.primitives_mod, .ReleaseFast, bench_archive, &bench_copies),
+        .crypto = benches.optimized(b, modules.crypto_mod, .ReleaseFast, bench_archive, &bench_copies),
+        .precompiles = benches.optimized(b, modules.precompiles_mod, .ReleaseFast, bench_archive, &bench_copies),
+        .build_options = bench_flags_mod,
+        .native_archive = bench_archive,
+    });
 }

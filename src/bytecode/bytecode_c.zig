@@ -450,6 +450,7 @@ pub fn evm_bytecode_opcode_name(opcode_value: u8) callconv(.c) [*:0]const u8 {
         .SHL => "SHL",
         .SHR => "SHR",
         .SAR => "SAR",
+        .CLZ => "CLZ",
         .KECCAK256 => "KECCAK256",
         .ADDRESS => "ADDRESS",
         .BALANCE => "BALANCE",

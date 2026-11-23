@@ -2249,10 +2249,16 @@ test {
     _ = @import("eest/prague/eip7002_el_triggerable_withdrawals/contract_deploy_tx_sender_test.zig");
 
     _ = @import("eest/prague/eip7623_increase_calldata_cost/test_full_gas_consumption.zig");
+    // Disabled: mixed type 3/4 cases require EIP-4844 blob fees and EIP-7702 authorization processing.
     // _ = @import("eest/prague/eip7623_increase_calldata_cost/test_gas_consumption_below_data_floor.zig");
+    // Disabled: authorization refund cases require EIP-7702 authorization-list intrinsic processing.
     // _ = @import("eest/prague/eip7623_increase_calldata_cost/test_gas_refunds_from_data_floor.zig");
+    // Disabled: grouped EOA cases expose unrelated top-level empty-code gas accounting failures.
     // _ = @import("eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_0.zig");
+    // Disabled: access-list cases require EIP-2930 intrinsic gas accounting.
     // _ = @import("eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_1_type_2.zig");
+    // Disabled: type 3 cases require EIP-4844 blob gas accounting from #830.
     // _ = @import("eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_3.zig");
+    // Disabled: type 4 cases require EIP-7702 authorization-list intrinsic processing.
     // _ = @import("eest/prague/eip7623_increase_calldata_cost/test_transaction_validity_type_4.zig");
 }

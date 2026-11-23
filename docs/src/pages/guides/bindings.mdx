@@ -1,0 +1,184 @@
+---
+title: Language bindings
+description: Consuming Guillotine from C, Go, Rust, Python, Swift, TypeScript, and WASM.
+---
+
+# Language bindings
+
+Guillotine's tagline is "the ultrafast EVM for every language and platform". The
+mechanism is a C ABI: `src/evm_c_api.zig` exports a flat, opaque-handle C
+interface, and every other SDK is a thin wrapper over it (or, for the browser, a
+WASM build).
+
+:::warning[Read the status column]
+Only the Go bindings are described as production-ready by the repository's own
+`sdks/README.md`. Everything else is an explicitly experimental
+proof-of-concept, and the engine itself is alpha. These statuses are copied from
+the repository rather than invented here.
+:::
+
+| SDK | Directory | Status (per `sdks/README.md`) | Mechanism |
+| --- | --- | --- | --- |
+| Go | `sdks/go/` | Production ready | cgo over the C ABI |
+| C | `sdks/c/` | Experimental PoC | The C ABI directly |
+| Rust | `sdks/rust/` | Experimental PoC | Safe wrapper, zero-copy FFI |
+| Python | `sdks/python/` | Experimental PoC | ctypes/cffi over the C ABI |
+| Swift | `sdks/swift/` | Experimental PoC | Native Swift over the C ABI |
+| TypeScript | `sdks/typescript/` | Experimental PoC | WebAssembly |
+| Bun | `sdks/bun/` | Experimental PoC | Bun FFI |
+
+Build them with the corresponding build steps:
+
+```bash
+zig build go
+zig build python
+zig build swift
+zig build ts
+zig build wasm
+zig build wasm-minimal-evm
+```
+
+## The C ABI
+
+Build a linkable library first:
+
+```bash
+zig build shared    # dynamic library for FFI
+zig build static    # static library for FFI
+```
+
+The surface is an opaque-handle lifecycle. Names verified from
+`src/evm_c_api.zig`:
+
+### Lifecycle
+
+```c
+void  guillotine_init(void);
+void  guillotine_cleanup(void);
+
+EvmHandle* guillotine_evm_create(const BlockInfoFFI* block_info);
+EvmHandle* guillotine_evm_create_mainnet(const BlockInfoFFI* block_info);
+EvmHandle* guillotine_evm_create_with_config(const BlockInfoFFI* block_info,
+                                             EvmConfiguration config);
+EvmHandle* guillotine_evm_create_tracing(const BlockInfoFFI* block_info);
+EvmHandle* guillotine_evm_create_test(const BlockInfoFFI* block_info);
+
+void guillotine_evm_destroy(EvmHandle* handle);
+void guillotine_evm_destroy_tracing(EvmHandle* handle);
+```
+
+The `_tracing` variants exist because a traced EVM is a *different Zig type*
+(comptime config), so it cannot share one handle representation with the untraced
+one. Pair `create_tracing` with `destroy_tracing` and `set_balance_tracing`, or
+you will free the wrong type.
+
+### State
+
+```c
+bool guillotine_set_balance(EvmHandle*, const uint8_t address[20], const uint8_t balance[32]);
+bool guillotine_set_nonce  (EvmHandle*, const uint8_t address[20], uint64_t nonce);
+bool guillotine_set_code   (EvmHandle*, const uint8_t address[20], const uint8_t* code, size_t code_len);
+bool guillotine_set_storage(EvmHandle*, const uint8_t address[20], const uint8_t key[32], const uint8_t value[32]);
+
+bool guillotine_get_balance(EvmHandle*, const uint8_t address[20], uint8_t balance_out[32]);
+bool guillotine_get_storage(EvmHandle*, const uint8_t address[20], const uint8_t key[32], uint8_t value_out[32]);
+bool guillotine_get_code   (EvmHandle*, const uint8_t address[20], uint8_t** code_out, size_t* len_out);
+```
+
+`u256` crosses the boundary as a 32-byte big-endian array. Addresses are 20 raw
+bytes. There are no bignum structs in the ABI.
+
+### Execution
+
+```c
+EvmResult* guillotine_call        (EvmHandle*, const CallParams* params);
+EvmResult* guillotine_call_tracing(EvmHandle*, const CallParams* params);
+```
+
+### Freeing
+
+Zig allocated it, so Zig must free it. Never call `free()` on anything the ABI
+returned:
+
+```c
+void guillotine_free_result(EvmResult* result);
+void guillotine_free_output(uint8_t* output, size_t len);
+void guillotine_free_code  (uint8_t* code,   size_t len);
+```
+
+### Errors
+
+```c
+const char* guillotine_get_last_error(void);
+```
+
+Functions returning `bool` report failure as `false`; call
+`guillotine_get_last_error()` for the message. Functions returning a pointer
+report failure as `NULL`.
+
+### Bytecode analysis without execution
+
+```c
+BytecodeHandle* evm_bytecode_create(const uint8_t* data, size_t data_len);
+void            evm_bytecode_destroy(BytecodeHandle* handle);
+size_t          evm_bytecode_get_length(const BytecodeHandle* handle);
+size_t          evm_bytecode_get_runtime_data(const BytecodeHandle* handle, uint8_t* buffer, size_t buffer_len);
+uint8_t         evm_bytecode_get_opcode_at(const BytecodeHandle* handle, size_t position);
+```
+
+## WASM and the browser
+
+Two WASM targets exist and they serve different purposes:
+
+```bash
+zig build wasm              # the full performance EVM, prints bundle size
+zig build wasm-minimal-evm  # MinimalEvm only — much smaller
+zig build wasm-debug        # unstripped, for analysis
+```
+
+`MinimalEvm` is the one to reach for in a browser. It is a single self-contained
+source file with a dedicated C FFI wrapper (`src/tracer/minimal_evm_c.zig`) whose
+API is a simple, imperative lifecycle:
+
+```c
+EvmHandle* evm_create(void);
+bool  evm_set_bytecode(EvmHandle*, const uint8_t* bytecode, size_t len);
+bool  evm_set_execution_context(/* caller, address, value, calldata, gas */);
+bool  evm_set_blockchain_context(/* number, timestamp, coinbase, ... */);
+bool  evm_execute(EvmHandle*);
+bool  evm_is_success(EvmHandle*);
+int64_t evm_get_gas_used(EvmHandle*);
+int64_t evm_get_gas_remaining(EvmHandle*);
+size_t  evm_get_output_len(EvmHandle*);
+size_t  evm_get_output(EvmHandle*, uint8_t* buffer, size_t buffer_len);
+bool  evm_set_balance(EvmHandle*, /* address, value */);
+bool  evm_set_code(EvmHandle*, /* address, code, len */);
+bool  evm_set_storage(EvmHandle*, /* address, key, value */);
+bool  evm_get_storage(EvmHandle*, /* address, key, out */);
+void  evm_destroy(EvmHandle*);
+bool  evm_cleanup_global(void);
+```
+
+For WASM, the Rust crypto crate is rebuilt with `--no-default-features --features
+portable`, swapping assembly keccak for `tiny-keccak` and keeping arkworks in
+pure Rust. If you also pass `-Dno_precompiles=true`, the arkworks and KZG code
+drops out entirely, which is the single largest win on bundle size.
+
+## npm packaging
+
+The TypeScript SDK is `@guillotine/sdk` (`sdks/typescript/package.json`). The
+unscoped name `guillotine` on npm belongs to an unrelated package, so the scope
+is not optional — any published JS artifact from this repository must be scoped.
+
+## Which should I use?
+
+- **Go** — the only binding the repository calls production-ready.
+- **C** — you are bridging another language, or you want maximum control.
+- **Rust** — you want a safe wrapper and zero-copy FFI, and you accept PoC status.
+- **Python** — analysis and prototyping.
+- **Swift** — iOS/macOS.
+- **TypeScript / Bun** — browser and JS runtimes. In the browser, prefer the
+  `MinimalEvm` build for size.
+
+If you are writing Zig, do not use a binding. Import the `evm` module directly —
+see [Getting started](/getting-started).

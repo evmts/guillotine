@@ -1,0 +1,135 @@
+---
+title: Project status
+description: What actually works today, measured rather than claimed.
+---
+
+# Project status
+
+Guillotine is **early alpha**. The repository's own words: *do not use in
+production*. Any use should be considered purely experimental.
+
+This page records what was actually run, on macOS 15 (arm64) with Zig 0.15.2, at
+the time these docs were written. Numbers here are pasted output, not summaries.
+
+## Ethereum spec compliance
+
+From the repository README, latest recorded run of `zig build specs`:
+
+- **2251** tests executed
+- **1165 passing** (~52%)
+- **1086 failing** (~48%)
+
+Most failures are concentrated in `ecmul` / BN254 elliptic-curve tests. Reaching
+100% spec compliance is the project's stated primary focus.
+
+:::danger
+A ~52% spec pass rate means Guillotine gets a large fraction of edge cases wrong
+today. Do not use it to compute anything you rely on — balances, gas estimates,
+state roots — without cross-checking against a mature implementation.
+:::
+
+## What was verified for these docs
+
+### `zig build` — passes
+
+```
+$ zig build ; echo "exit=$?"
++ cc -O2 -fno-builtin -fPIC -Wall -Wextra -Werror -c ./src/server.c
++ cc -O2 -fno-builtin -fPIC -Wall -Wextra -Werror -c ./build/assembly.S
++ ar rc libblst.a assembly.o server.o
++ ranlib libblst.a
+exit=0
+```
+
+### Documentation examples — pass
+
+Every code example in [Getting started](/getting-started) was compiled and run:
+
+```
+$ zig build test-integration -Dtest-filter='docs example'
+
+ RUN  v0.15.1
+ ›~/guillotine
+
+ ✓ differential.debug_math_only (1) 946.00 μs
+ ✓ docs_examples_verify (4) 51.28 ms
+ ✓ evm.erc20_deployment_issue (1) 1.02 ms
+ ✓ evm.opcodes.14_test (1) 1.04 ms
+ ✓ evm.opcodes.all_opcodes (1) 994.00 μs
+ ✓ fixtures (1) 1.02 ms
+ ✓ root (1) 1.25 ms
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+ Test Files  1 passed (10)
+      Tests  10 passed (10)
+```
+
+### `zig build test-opcodes` — fails (exit 1)
+
+All 623 assertions pass, but four test executables fail because the run logs
+errors, which the test runner treats as failure:
+
+```
+Build Summary: 276/281 steps succeeded; 4 failed; 623/623 tests passed
+```
+
+The four:
+
+| Opcode | Error logged |
+| --- | --- |
+| `0x3e` `RETURNDATACOPY` | `ReturnDataNotAvailable (code_len=7, gas=979000, depth=2)` |
+| `0xf2` `CALLCODE` | `OutOfGas (code_len=18, gas=79, depth=106)` |
+| `0xfa` `STATICCALL` | `OutOfGas (code_len=17, gas=24, depth=108)` |
+| `0xfe` `INVALID` | `InvalidOpcode (code_len=1, gas=979000, depth=2)` |
+
+Some of these may be tests that intentionally drive a failure path and log it too
+loudly rather than engine defects — `0xfe INVALID` raising `InvalidOpcode` and
+`RETURNDATACOPY` with no return data raising `ReturnDataNotAvailable` are both
+*correct* EVM behaviour. The deep-recursion `OutOfGas` cases at depth 106–108 are
+less obviously benign. Either way, **`zig build test-opcodes` does not currently
+exit 0**, which is what matters if you are wiring CI.
+
+### Not run for these docs
+
+Stated plainly so nothing here is mistaken for a broader claim:
+
+- `zig build test` (full suite: specs → integration → unit)
+- `zig build specs`
+- `zig build test-unit`, `test-lib`
+- `zig build wasm`, and every `sdks/` build
+- Any benchmark
+
+## Build blockers on a clean checkout
+
+**`lib/voltaire` is not a Cargo workspace member and not excluded.** Building the
+required `libcrypto_wrappers.a` fails outright:
+
+```
+$ cd lib/voltaire && cargo build --release
+error: current package believes it's in a workspace when it's not:
+current:   /…/guillotine/lib/voltaire/Cargo.toml
+workspace: /…/guillotine/Cargo.toml
+```
+
+Consequence: plain `zig build` succeeds (it does not link that archive), but
+`zig build test-integration` fails at link time with `libcrypto_wrappers.a: file
+not found`. Workaround in
+[Installation](/installation).
+
+## Feature support
+
+| Area | State |
+| --- | --- |
+| Ethereum mainnet | Only supported network |
+| OP Stack (Optimism, Base) | Planned for beta |
+| Arbitrum Nitro | Planned for beta |
+| Hardforks Frontier → Cancun | Implemented; Prague/Osaka EIP sets defined |
+| Precompiles `0x01`–`0x0A` | Implemented; BN254 is the weak spot |
+| Go bindings | Called production-ready by `sdks/README.md` |
+| C, Rust, Python, Swift, TypeScript, Bun bindings | Experimental proof-of-concept |
+| WASM | Working targets for both the full and mini EVMs |
+
+## Following along
+
+- Issues and beta roadmap — [github.com/evmts/guillotine/issues](https://github.com/evmts/guillotine/issues)
+- Telegram — [chat](https://t.me/+ANThR9bHDLAwMjUx)
+- Spec test instructions — `specs/README.md` in the repository

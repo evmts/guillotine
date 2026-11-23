@@ -9,10 +9,26 @@ import {
 	returnBytecode,
 	storeBytecode,
 	callBytecode,
+	deployInitCode,
 	hex,
 	assertSuccess,
 	assertFailure,
 } from "../../test/test-helpers.js";
+
+function word(n: bigint): Uint8Array {
+	return U256.fromBigInt(n).toBytes();
+}
+
+/** Left-pad an address to a 32-byte word, as CALLER/ADDRESS push it. */
+function addressWord(address: Address): Uint8Array {
+	const out = new Uint8Array(32);
+	out.set(address.toBytes(), 12);
+	return out;
+}
+
+function concat(...parts: Uint8Array[]): Uint8Array {
+	return Bytes.concat(parts.map((part) => Bytes.fromBytes(part))).toBytes();
+}
 
 describe("GuillotineEvm - Call Types", () => {
 	let evm: GuillotineEvm;
@@ -57,15 +73,14 @@ describe("GuillotineEvm - Call Types", () => {
 			expect(output[31]).toBe(42);
 		});
 
-		// TODO: Fix nested CALL execution in Zig
-		it.todo("should handle nested CALL", async () => {
-			const contractA = testAddress(10);
-			const contractB = testAddress(11);
+		it("should handle nested CALL", async () => {
+			const contractA = testAddress(110);
+			const contractB = testAddress(111);
 
 			// Contract B returns 99
 			await evm.setCode(contractB, returnBytecode(99));
 
-			// Contract A calls contract B
+			// Contract A calls contract B and returns success || returndata
 			await evm.setCode(contractA, callBytecode(contractB));
 
 			const result = await evm.call(
@@ -75,21 +90,25 @@ describe("GuillotineEvm - Call Types", () => {
 			);
 
 			assertSuccess(result);
-
-			// Should get return value from contract B
-			const output = result.output.toBytes();
-			expect(output[31]).toBe(99);
+			expect(result.output.toBytes()).toEqual(concat(word(1n), word(99n)));
 		});
 
-		// TODO: Fix msg.sender preservation in CALL in Zig
-		it.todo("should preserve msg.sender in CALL", async () => {
+		it("should preserve msg.sender in CALL", async () => {
 			const caller = testAddress(100);
 			const contractA = testAddress(101);
 			const contractB = testAddress(102);
 
-			// Contract B returns the caller address
-			// CALLER PUSH1 0 MSTORE PUSH1 20 PUSH1 12 RETURN
-			const codeB = hex("0x3360005260146012f3");
+			// Contract B returns CALLER as a 32-byte word
+			const codeB = Bytes.fromBytes(
+				new Uint8Array([
+					0x33, // CALLER
+					0x60, 0x00, // PUSH1 0
+					0x52, // MSTORE
+					0x60, 0x20, // PUSH1 32
+					0x60, 0x00, // PUSH1 0
+					0xf3, // RETURN
+				]),
+			);
 			await evm.setCode(contractB, codeB);
 
 			// Contract A calls contract B
@@ -103,12 +122,8 @@ describe("GuillotineEvm - Call Types", () => {
 			);
 
 			assertSuccess(result);
-
-			// Contract B should see contract A as the caller
-			const output = result.output.toBytes();
-			expect(output.length).toBe(20);
-			const returnedCaller = Address.fromBytes(output);
-			expect(returnedCaller.toHex()).toBe(contractA.toHex());
+			// Contract B sees contract A as msg.sender
+			expect(result.output.toBytes()).toEqual(concat(word(1n), addressWord(contractA)));
 		});
 
 		it("should handle CALL with insufficient balance", async () => {
@@ -136,13 +151,12 @@ describe("GuillotineEvm - Call Types", () => {
 	});
 
 	describe("DELEGATECALL", () => {
-		// TODO: Fix DELEGATECALL context preservation in Zig
-		it.todo("should execute DELEGATECALL preserving context", async () => {
+		it("should execute DELEGATECALL preserving context", async () => {
 			const caller = testAddress(200);
 			const contractA = testAddress(201);
 			const contractB = testAddress(202);
 
-			// Contract B stores value in slot 0
+			// Contract B stores 42 in slot 0
 			await evm.setCode(contractB, storeBytecode(0, 42));
 
 			// Contract A delegatecalls to B
@@ -159,25 +173,32 @@ describe("GuillotineEvm - Call Types", () => {
 			);
 
 			assertSuccess(result);
+			expect(result.output.toBytes()).toEqual(word(1n));
 
-			// Storage should be modified in contract A, not B
-			const storageA = await evm.getStorage(contractA, U256.zero());
-			const storageB = await evm.getStorage(contractB, U256.zero());
-
-			expect(storageA.toBigInt()).toBe(42n);
-			expect(storageB.toBigInt()).toBe(0n);
+			// Storage is written in contract A, not B
+			expect((await evm.getStorage(contractA, U256.zero())).toBigInt()).toBe(42n);
+			expect((await evm.getStorage(contractB, U256.zero())).toBigInt()).toBe(0n);
 		});
 
-		// TODO: Fix DELEGATECALL RuntimeError in Zig
-		it.todo("should preserve msg.sender and msg.value in DELEGATECALL", async () => {
+		it("should preserve msg.sender and msg.value in DELEGATECALL", async () => {
 			const originalCaller = testAddress(203);
 			const contractA = testAddress(204);
 			const contractB = testAddress(205);
-			const value = U256.fromBigInt(1000n);
 
-			// Contract B returns caller and value
-			// CALLER PUSH1 0 MSTORE CALLVALUE PUSH1 20 MSTORE PUSH1 64 PUSH1 0 RETURN
-			const codeB = hex("0x33600052346020526040600f3");
+			// Contract B returns CALLER || CALLVALUE as two words
+			const codeB = Bytes.fromBytes(
+				new Uint8Array([
+					0x33, // CALLER
+					0x60, 0x00, // PUSH1 0
+					0x52, // MSTORE
+					0x34, // CALLVALUE
+					0x60, 0x20, // PUSH1 32
+					0x52, // MSTORE
+					0x60, 0x40, // PUSH1 64
+					0x60, 0x00, // PUSH1 0
+					0xf3, // RETURN
+				]),
+			);
 			await evm.setCode(contractB, codeB);
 
 			// Contract A delegatecalls to B
@@ -193,41 +214,37 @@ describe("GuillotineEvm - Call Types", () => {
 				defaultExecutionParams({
 					caller: originalCaller,
 					to: contractA,
-					value: value,
+					value: U256.fromBigInt(1000n),
 				}),
 			);
 
 			assertSuccess(result);
-
-			// Should preserve original caller and value
-			const output = result.output.toBytes();
-			const returnedCaller = Address.fromBytes(output.slice(0, 20));
-			const returnedValue = U256.fromBytes(output.slice(20, 52));
-
-			expect(returnedCaller.toHex()).toBe(originalCaller.toHex());
-			expect(returnedValue.toBigInt()).toBe(1000n);
+			// DELEGATECALL keeps the original msg.sender and msg.value
+			expect(result.output.toBytes()).toEqual(
+				concat(word(1n), addressWord(originalCaller), word(1000n)),
+			);
 		});
 
-		// TODO: Fix DELEGATECALL storage context in Zig
-		it.todo("should use code from target but storage from caller in DELEGATECALL", async () => {
+		it("should use code from target but storage from caller in DELEGATECALL", async () => {
 			const contractA = testAddress(206);
 			const contractB = testAddress(207);
 
 			// Pre-set storage in both contracts
-			await evm.setStorage(
-				contractA,
-				U256.fromBigInt(1n),
-				U256.fromBigInt(100n),
-			);
-			await evm.setStorage(
-				contractB,
-				U256.fromBigInt(1n),
-				U256.fromBigInt(200n),
-			);
+			await evm.setStorage(contractA, U256.fromBigInt(1n), U256.fromBigInt(100n));
+			await evm.setStorage(contractB, U256.fromBigInt(1n), U256.fromBigInt(200n));
 
-			// Contract B loads from slot 1 and returns it
-			// PUSH1 1 SLOAD PUSH1 0 MSTORE PUSH1 32 PUSH1 0 RETURN
-			const codeB = hex("0x6001546000526020600f3");
+			// Contract B loads slot 1 and returns it
+			const codeB = Bytes.fromBytes(
+				new Uint8Array([
+					0x60, 0x01, // PUSH1 1
+					0x54, // SLOAD
+					0x60, 0x00, // PUSH1 0
+					0x52, // MSTORE
+					0x60, 0x20, // PUSH1 32
+					0x60, 0x00, // PUSH1 0
+					0xf3, // RETURN
+				]),
+			);
 			await evm.setCode(contractB, codeB);
 
 			// Contract A delegatecalls to B
@@ -243,24 +260,20 @@ describe("GuillotineEvm - Call Types", () => {
 			);
 
 			assertSuccess(result);
-
-			// Should load from contract A's storage (100), not B's (200)
-			const output = result.output.toBytes();
-			const value = U256.fromBytes(output);
-			expect(value.toBigInt()).toBe(100n);
+			// Loaded from contract A's storage (100), not B's (200)
+			expect(result.output.toBytes()).toEqual(concat(word(1n), word(100n)));
 		});
 	});
 
 	describe("STATICCALL", () => {
-		// TODO: Fix STATICCALL implementation in Zig
-		it.todo("should execute STATICCALL without state modifications", async () => {
+		it("should execute STATICCALL without state modifications", async () => {
 			const contractA = testAddress(300);
 			const contractB = testAddress(301);
 
-			// Contract B tries to store but also returns a value
+			// Contract B tries to store, then returns 99
 			const codeB = Bytes.concat([
-				storeBytecode(0, 42), // Try to store (should fail in static context)
-				returnBytecode(99), // Return 99
+				storeBytecode(0, 42), // SSTORE in a static context is an exceptional halt
+				returnBytecode(99),
 			]);
 			await evm.setCode(contractB, codeB);
 
@@ -276,25 +289,33 @@ describe("GuillotineEvm - Call Types", () => {
 				}),
 			);
 
-			// STATICCALL should fail if target tries to modify state
-			assertFailure(result);
+			// The outer call succeeds; STATICCALL pushes 0 and B returns no data
+			assertSuccess(result);
+			expect(result.output.toBytes()).toEqual(word(0n));
 
-			// Storage should not be modified
-			const storage = await evm.getStorage(contractB, U256.zero());
-			expect(storage.toBigInt()).toBe(0n);
+			// Storage is not modified
+			expect((await evm.getStorage(contractB, U256.zero())).toBigInt()).toBe(0n);
 		});
 
-		// TODO: Fix STATICCALL read-only operations in Zig
-		it.todo("should allow read-only operations in STATICCALL", async () => {
+		it("should allow read-only operations in STATICCALL", async () => {
 			const contractA = testAddress(302);
 			const contractB = testAddress(303);
 
 			// Pre-set storage in contract B
 			await evm.setStorage(contractB, U256.zero(), U256.fromBigInt(42n));
 
-			// Contract B only reads storage and returns it
-			// PUSH1 0 SLOAD PUSH1 0 MSTORE PUSH1 32 PUSH1 0 RETURN
-			const codeB = hex("0x6000546000526020600f3");
+			// Contract B reads slot 0 and returns it
+			const codeB = Bytes.fromBytes(
+				new Uint8Array([
+					0x60, 0x00, // PUSH1 0
+					0x54, // SLOAD
+					0x60, 0x00, // PUSH1 0
+					0x52, // MSTORE
+					0x60, 0x20, // PUSH1 32
+					0x60, 0x00, // PUSH1 0
+					0xf3, // RETURN
+				]),
+			);
 			await evm.setCode(contractB, codeB);
 
 			// Contract A staticcalls to B
@@ -310,15 +331,10 @@ describe("GuillotineEvm - Call Types", () => {
 			);
 
 			assertSuccess(result);
-
-			// Should return the value from storage
-			const output = result.output.toBytes();
-			const value = U256.fromBytes(output);
-			expect(value.toBigInt()).toBe(42n);
+			expect(result.output.toBytes()).toEqual(concat(word(1n), word(42n)));
 		});
 
-		// TODO: Fix STATICCALL context propagation in Zig
-		it.todo("should propagate static context to nested calls", async () => {
+		it("should propagate static context to nested calls", async () => {
 			const contractA = testAddress(304);
 			const contractB = testAddress(305);
 			const contractC = testAddress(306);
@@ -326,7 +342,7 @@ describe("GuillotineEvm - Call Types", () => {
 			// Contract C tries to store
 			await evm.setCode(contractC, storeBytecode(0, 42));
 
-			// Contract B calls contract C
+			// Contract B calls contract C (zero-value CALL is allowed in a static context)
 			await evm.setCode(contractB, callBytecode(contractC));
 
 			// Contract A staticcalls to B
@@ -341,8 +357,10 @@ describe("GuillotineEvm - Call Types", () => {
 				}),
 			);
 
-			// Should fail because C tries to modify state
-			assertFailure(result);
+			// C halts on SSTORE; B sees 0 and returns word(0); A sees B succeed
+			assertSuccess(result);
+			expect(result.output.toBytes()).toEqual(concat(word(1n), word(0n)));
+			expect((await evm.getStorage(contractC, U256.zero())).toBigInt()).toBe(0n);
 		});
 
 		it("should not allow value transfer in STATICCALL", async () => {
@@ -376,132 +394,99 @@ describe("GuillotineEvm - Call Types", () => {
 	});
 
 	describe("CALLCODE", () => {
-		// TODO: Fix CALLCODE implementation in Zig
-		it.todo("should execute CALLCODE with caller context", async () => {
+		it("should execute CALLCODE with caller context", async () => {
 			const caller = testAddress(400);
 			const contractA = testAddress(401);
 			const contractB = testAddress(402);
 
-			// Contract B stores value
+			// Contract B stores 55 in slot 0
 			await evm.setCode(contractB, storeBytecode(0, 55));
 
-			// Contract A uses CALLCODE to execute B's code
-			// Note: CALLCODE is deprecated in favor of DELEGATECALL but still supported
-			await evm.setCode(
-				contractA,
-				callBytecode(contractB, U256.zero(), "CALL"),
-			); // Using CALL for now
+			// Contract A runs B's code with CALLCODE
+			await evm.setCode(contractA, callBytecode(contractB, U256.zero(), "CALLCODE"));
 
-			const result = await evm.call({
-				caller: caller,
-				to: contractA,
-				value: U256.zero(),
-				input: Bytes.empty(),
-				gas: 1000000n,
-				callType: CallType.CALLCODE,
-			});
+			const result = await evm.call(
+				defaultExecutionParams({
+					caller: caller,
+					to: contractA,
+				}),
+			);
 
 			assertSuccess(result);
+			expect(result.output.toBytes()).toEqual(word(1n));
 
-			// CALLCODE executes target code in caller's context
-			// Storage should be in contract A
-			const storageA = await evm.getStorage(contractA, U256.zero());
-			expect(storageA.toBigInt()).toBe(55n);
+			// CALLCODE executes B's code against A's storage
+			expect((await evm.getStorage(contractA, U256.zero())).toBigInt()).toBe(55n);
+			expect((await evm.getStorage(contractB, U256.zero())).toBigInt()).toBe(0n);
 		});
 
-		// TODO: Fix CALLCODE msg.sender handling in Zig
-		it.todo("should handle msg.sender in CALLCODE", async () => {
+		it("should handle msg.sender in CALLCODE", async () => {
 			const originalCaller = testAddress(403);
 			const contractA = testAddress(404);
 			const contractB = testAddress(405);
 
-			// Contract B returns the caller
-			// CALLER PUSH1 0 MSTORE PUSH1 20 PUSH1 12 RETURN
-			const codeB = hex("0x3360005260146012f3");
+			// Contract B returns CALLER as a 32-byte word
+			const codeB = Bytes.fromBytes(
+				new Uint8Array([
+					0x33, // CALLER
+					0x60, 0x00, // PUSH1 0
+					0x52, // MSTORE
+					0x60, 0x20, // PUSH1 32
+					0x60, 0x00, // PUSH1 0
+					0xf3, // RETURN
+				]),
+			);
 			await evm.setCode(contractB, codeB);
+			await evm.setCode(contractA, callBytecode(contractB, U256.zero(), "CALLCODE"));
 
-			const result = await evm.call({
-				caller: originalCaller,
-				to: contractA,
-				value: U256.zero(),
-				input: Bytes.empty(),
-				gas: 1000000n,
-				callType: CallType.CALLCODE,
-			});
+			const result = await evm.call(
+				defaultExecutionParams({
+					caller: originalCaller,
+					to: contractA,
+				}),
+			);
 
-			// In CALLCODE, msg.sender should be the original caller
-			if (result.success) {
-				const output = result.output.toBytes();
-				const returnedCaller = Address.fromBytes(output.slice(0, 20));
-				expect(returnedCaller.toHex()).toBe(originalCaller.toHex());
-			}
+			assertSuccess(result);
+			// Unlike DELEGATECALL, CALLCODE sets msg.sender to the calling contract
+			expect(result.output.toBytes()).toEqual(concat(word(1n), addressWord(contractA)));
 		});
 	});
 
 	describe("CREATE", () => {
-		// TODO: Fix CREATE implementation in Zig
-		it.todo("should deploy contract with CREATE", async () => {
+		it("should deploy contract with CREATE", async () => {
 			const deployer = testAddress(500);
+			const runtimeCode = returnBytecode(42);
 
-			// Simple contract that stores 42 and returns it
-			const runtimeCode = Bytes.concat([
-				storeBytecode(0, 42),
-				returnBytecode(42),
-			]);
-
-			// Init code that returns the runtime code
-			const initCode = Bytes.concat([
-				hex("0x60"), // PUSH1
-				Bytes.fromBytes(new Uint8Array([runtimeCode.length()])),
-				hex("0x80"), // DUP1
-				hex("0x60"), // PUSH1
-				Bytes.fromBytes(new Uint8Array([12])), // offset in init code where runtime starts
-				hex("0x6000"), // PUSH1 0
-				hex("0x39"), // CODECOPY
-				hex("0x6000"), // PUSH1 0
-				hex("0xf3"), // RETURN
-				runtimeCode,
-			]);
+			// Init code stores 42 in slot 0, then returns runtimeCode
+			const initCode = deployInitCode(runtimeCode, storeBytecode(0, 42));
 
 			// Fund deployer
 			await evm.setBalance(deployer, U256.fromBigInt(10000n));
 
 			const result = await evm.call({
 				caller: deployer,
-				to: Address.zero(), // CREATE uses zero address
-				value: U256.fromBigInt(100n), // Send value to new contract
+				to: Address.zero(), // Ignored for CREATE
+				value: U256.fromBigInt(100n), // Endowment for the new contract
 				input: initCode,
 				gas: 1000000n,
 				callType: CallType.CREATE,
 			});
 
 			assertSuccess(result);
-			expect(result.createdAddress).toBeDefined();
+			const created = result.createdAddress;
+			if (created === null) throw new Error("CREATE returned no address");
 
-			if (result.createdAddress) {
-				// Check deployed contract has the code
-				const deployedCode = await evm.getCode(result.createdAddress);
-				expect(deployedCode.length()).toBeGreaterThan(0);
-
-				// Check deployed contract received the value
-				const balance = await evm.getBalance(result.createdAddress);
-				expect(balance.toBigInt()).toBe(100n);
-
-				// Check storage was set during init
-				const storage = await evm.getStorage(
-					result.createdAddress,
-					U256.zero(),
-				);
-				expect(storage.toBigInt()).toBe(42n);
-			}
+			expect((await evm.getCode(created)).toHex()).toBe(runtimeCode.toHex());
+			expect((await evm.getBalance(created)).toBigInt()).toBe(100n);
+			expect((await evm.getBalance(deployer)).toBigInt()).toBe(9900n);
+			expect((await evm.getStorage(created, U256.zero())).toBigInt()).toBe(42n);
 		});
 
-		// TODO: Fix CREATE failure handling in Zig
-		it.todo("should handle CREATE failure", async () => {
+		it("should handle CREATE failure", async () => {
 			const deployer = testAddress(501);
 
-			// Init code that reverts
-			const initCode = hex("0x600060fd"); // PUSH1 0 PUSH1 0 REVERT
+			// Init code: PUSH1 0 PUSH1 0 REVERT
+			const initCode = Bytes.fromBytes(new Uint8Array([0x60, 0x00, 0x60, 0x00, 0xfd]));
 
 			const result = await evm.call({
 				caller: deployer,
@@ -514,16 +499,15 @@ describe("GuillotineEvm - Call Types", () => {
 
 			assertFailure(result);
 			expect(result.createdAddress).toBeNull();
+			expect(result.output.isEmpty()).toBe(true);
 		});
 
-		// TODO: Fix CREATE address calculation in Zig
-		it.todo("should calculate CREATE address deterministically", async () => {
-			const deployer = testAddress(502);
+		it("should calculate CREATE address deterministically", async () => {
+			const deployer = testAddress(502); // 0x...01f6
 
-			// Simple init code
-			const initCode = hex("0x6000600f3"); // Returns empty
+			// Init code: PUSH1 0 PUSH1 0 RETURN (deploys empty code)
+			const initCode = Bytes.fromBytes(new Uint8Array([0x60, 0x00, 0x60, 0x00, 0xf3]));
 
-			// First deployment
 			const result1 = await evm.call({
 				caller: deployer,
 				to: Address.zero(),
@@ -532,11 +516,8 @@ describe("GuillotineEvm - Call Types", () => {
 				gas: 1000000n,
 				callType: CallType.CREATE,
 			});
-
 			assertSuccess(result1);
-			const addr1 = result1.createdAddress;
 
-			// Second deployment from same account
 			const result2 = await evm.call({
 				caller: deployer,
 				to: Address.zero(),
@@ -545,12 +526,15 @@ describe("GuillotineEvm - Call Types", () => {
 				gas: 1000000n,
 				callType: CallType.CREATE,
 			});
-
 			assertSuccess(result2);
-			const addr2 = result2.createdAddress;
 
-			// Addresses should be different (nonce incremented)
-			expect(addr1).not.toEqual(addr2);
+			// keccak256(rlp([sender, nonce]))[12:], from `cast compute-address <sender> --nonce N`
+			expect(result1.createdAddress?.toHex().toLowerCase()).toBe(
+				"0xa823dde758c8f751575880681e847e0cab8fd22b",
+			);
+			expect(result2.createdAddress?.toHex().toLowerCase()).toBe(
+				"0x7f7f5a5d908141f0f5b897ea66a3701137092a2f",
+			);
 		});
 	});
 
@@ -558,23 +542,8 @@ describe("GuillotineEvm - Call Types", () => {
 		it("should deploy contract with CREATE2", async () => {
 			const deployer = testAddress(600);
 			const salt = U256.fromBigInt(0x1234n);
-
-			// Simple runtime code
 			const runtimeCode = returnBytecode(99);
-
-			// Init code that returns the runtime code
-			const initCode = Bytes.concat([
-				hex("0x60"), // PUSH1
-				Bytes.fromBytes(new Uint8Array([runtimeCode.length()])),
-				hex("0x80"), // DUP1
-				hex("0x60"), // PUSH1
-				Bytes.fromBytes(new Uint8Array([12])), // offset
-				hex("0x6000"), // PUSH1 0
-				hex("0x39"), // CODECOPY
-				hex("0x6000"), // PUSH1 0
-				hex("0xf3"), // RETURN
-				runtimeCode,
-			]);
+			const initCode = deployInitCode(runtimeCode);
 
 			// Fund deployer
 			await evm.setBalance(deployer, U256.fromBigInt(10000n));
@@ -590,28 +559,20 @@ describe("GuillotineEvm - Call Types", () => {
 			});
 
 			assertSuccess(result);
-			expect(result.createdAddress).toBeDefined();
+			const created = result.createdAddress;
+			if (created === null) throw new Error("CREATE2 returned no address");
 
-			if (result.createdAddress) {
-				// Check deployed contract
-				const deployedCode = await evm.getCode(result.createdAddress);
-				expect(deployedCode.length()).toBeGreaterThan(0);
-
-				// Check balance
-				const balance = await evm.getBalance(result.createdAddress);
-				expect(balance.toBigInt()).toBe(200n);
-			}
+			expect((await evm.getCode(created)).toHex()).toBe(runtimeCode.toHex());
+			expect((await evm.getBalance(created)).toBigInt()).toBe(200n);
 		});
 
-		// TODO: Fix CREATE2 implementation in Zig
-		it.todo("should calculate CREATE2 address deterministically", async () => {
-			const deployer = testAddress(601);
+		it("should calculate CREATE2 address deterministically", async () => {
+			const deployer = testAddress(601); // 0x...0259
 			const salt = U256.fromBigInt(0xdeadbeefn);
 
-			// Same init code
-			const initCode = hex("0x60006000f3");
+			// Init code: PUSH1 0 PUSH1 0 RETURN
+			const initCode = Bytes.fromBytes(new Uint8Array([0x60, 0x00, 0x60, 0x00, 0xf3]));
 
-			// Deploy twice with same salt
 			const result1 = await evm.call({
 				caller: deployer,
 				to: Address.zero(),
@@ -623,9 +584,13 @@ describe("GuillotineEvm - Call Types", () => {
 			});
 
 			assertSuccess(result1);
-			expect(result1.createdAddress).toBeDefined();
+			// keccak256(0xff ++ deployer ++ salt ++ keccak256(initCode))[12:], from `cast create2`
+			expect(result1.createdAddress?.toHex().toLowerCase()).toBe(
+				"0x29358858cccc625fe1e21c0e061a7e1123b603a5",
+			);
 
-			// Second deployment with same salt should fail (address already exists)
+			// Same deployer, salt and init code: the address now has nonce 1 (EIP-161),
+			// so the second deployment collides (EIP-684) and fails
 			const result2 = await evm.call({
 				caller: deployer,
 				to: Address.zero(),
@@ -636,7 +601,8 @@ describe("GuillotineEvm - Call Types", () => {
 				salt: salt,
 			});
 
-			assertFailure(result2); // Should fail - address collision
+			assertFailure(result2);
+			expect(result2.createdAddress).toBeNull();
 		});
 
 		it("should create different addresses with different salts", async () => {
@@ -729,22 +695,24 @@ describe("GuillotineEvm - Call Types", () => {
 			assertSuccess(result);
 		});
 
-		// TODO: Fix CREATE rejection in STATICCALL context in Zig
-		it.todo("should reject CREATE in STATICCALL context", async () => {
+		it("should reject CREATE in STATICCALL context", async () => {
 			const contractA = testAddress(702);
 			const contractB = testAddress(703);
 
-			// Contract B tries to CREATE
-			const initCode = hex("0x60006000f3");
-			// Bytecode for CREATE: value, size, offset, CREATE
-			const createCode = Bytes.concat([
-				hex("0x60"),
-				Bytes.fromBytes(new Uint8Array([initCode.length()])), // PUSH1 size
-				hex("0x6000"), // PUSH1 0 (offset)
-				hex("0x6000"), // PUSH1 0 (value)
-				hex("0xf0"), // CREATE
-			]);
-
+			// Contract B runs CREATE(value=0, offset=0, size=5) then returns the created address
+			const createCode = Bytes.fromBytes(
+				new Uint8Array([
+					0x60, 0x05, // PUSH1 5 (size)
+					0x60, 0x00, // PUSH1 0 (offset)
+					0x60, 0x00, // PUSH1 0 (value)
+					0xf0, // CREATE: exceptional halt in a static context
+					0x60, 0x00, // PUSH1 0
+					0x52, // MSTORE
+					0x60, 0x20, // PUSH1 32
+					0x60, 0x00, // PUSH1 0
+					0xf3, // RETURN
+				]),
+			);
 			await evm.setCode(contractB, createCode);
 
 			// Contract A staticcalls to B
@@ -759,8 +727,73 @@ describe("GuillotineEvm - Call Types", () => {
 				}),
 			);
 
-			// Should fail - can't CREATE in static context
-			assertFailure(result);
+			// A succeeds; its STATICCALL pushed 0 and B returned no data
+			assertSuccess(result);
+			expect(result.output.toBytes()).toEqual(word(0n));
+		});
+	});
+
+	describe("Call gas (EIP-2929 cold account access)", () => {
+		// Each case: PUSH1 0 x4 (ret/args), [PUSH1 0 value], PUSH2 target, PUSH3 100000, <op>, STOP.
+		// The callee is STOP. The first access to the callee is cold: 2600.
+		const cases = [
+			{ name: "CALL", opcode: 0xf1, value: true },
+			{ name: "CALLCODE", opcode: 0xf2, value: true },
+			{ name: "DELEGATECALL", opcode: 0xf4, value: false },
+			{ name: "STATICCALL", opcode: 0xfa, value: false },
+		] as const;
+
+		for (const { name, opcode, value } of cases) {
+			it(`${name} to a cold address charges 2600`, async () => {
+				const contractA = testAddress(900);
+				const contractB = testAddress(901); // 0x...0385
+				await evm.setCode(contractB, Bytes.fromBytes(new Uint8Array([0x00])));
+				await evm.setCode(
+					contractA,
+					Bytes.fromBytes(
+						new Uint8Array([
+							0x60, 0x00, // PUSH1 0 (retSize)
+							0x60, 0x00, // PUSH1 0 (retOffset)
+							0x60, 0x00, // PUSH1 0 (argsSize)
+							0x60, 0x00, // PUSH1 0 (argsOffset)
+							...(value ? [0x60, 0x00] : []), // PUSH1 0 (value)
+							0x61, 0x03, 0x85, // PUSH2 contractB
+							0x62, 0x01, 0x86, 0xa0, // PUSH3 100000
+							opcode,
+							0x00, // STOP
+						]),
+					),
+				);
+
+				const result = await evm.call(defaultExecutionParams({ to: contractA, gas: 1000000n }));
+
+				assertSuccess(result);
+				// PUSH1 x4 = 12, [PUSH1 value = 3], PUSH2 3, PUSH3 3, cold access 2600, callee STOP 0
+				const used = 12n + (value ? 3n : 0n) + 3n + 3n + 2600n;
+				expect(result.gasLeft).toBe(1000000n - 21000n - used);
+			});
+		}
+	});
+
+	describe("Top-level CREATE gas", () => {
+		it("charges 21000 + 32000 + calldata + init code word cost once", async () => {
+			const deployer = testAddress(503);
+			// Init code: PUSH1 0 PUSH1 0 RETURN (deploys empty code)
+			const initCode = Bytes.fromBytes(new Uint8Array([0x60, 0x00, 0x60, 0x00, 0xf3]));
+
+			const result = await evm.call({
+				caller: deployer,
+				to: Address.zero(),
+				value: U256.zero(),
+				input: initCode,
+				gas: 1000000n,
+				callType: CallType.CREATE,
+			});
+
+			assertSuccess(result);
+			// Intrinsic: 21000 + 32000 (EIP-2) + calldata 3 nonzero * 16 + 2 zero * 4 = 56
+			// + EIP-3860 init code 2 per word * 1 = 2. Execution: PUSH1 3 + PUSH1 3 = 6. Deposit: 0.
+			expect(result.gasLeft).toBe(1000000n - 21000n - 32000n - 56n - 2n - 6n);
 		});
 	});
 });

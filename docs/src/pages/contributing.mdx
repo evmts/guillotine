@@ -1,0 +1,183 @@
+---
+title: Contributing
+description: The conventions this codebase actually enforces.
+---
+
+# Contributing
+
+Guillotine is mission-critical financial infrastructure: a bug here loses funds.
+The conventions below are not style preferences, they are the rules the
+maintainers apply in review. The authoritative sources are `CLAUDE.md`,
+`AGENTS.md`, and `docs/dev/CONTRIBUTING.md` in the repository.
+
+## The loop
+
+Run from the repository root. Always.
+
+```bash
+zig build && zig build test-opcodes
+```
+
+Every code change runs both. Markdown-only changes are the sole exception.
+
+Write the test first. TDD is the expected workflow here, and differential tests
+against `MinimalEvm` or revm are usually the right shape.
+
+## Hard rules
+
+These are rejections, not suggestions:
+
+- **No stub implementations.** No `error.NotImplemented`, no "coming soon", no
+  simplified output that pretends to work. If you cannot finish it, stop and ask.
+  A placeholder is worse than nothing because a reader cannot tell whether the
+  feature is unfinished, blocked, or broken.
+- **No swallowed errors.** `catch {}`, `catch null`, `catch &.{}` are banned.
+  Every error is handled explicitly or propagated. A silently ignored error in an
+  EVM is a silent wrong answer.
+- **No `std.debug.assert`.** Use `tracer.assert(cond, "message")`. A panic on
+  attacker-supplied bytecode is a security bug; the EVM must return an error.
+- **No `std.debug.print` in modules.** Use `src/log.zig` (`log.debug`,
+  `log.warn`).
+- **No commented-out code.** Git remembers.
+- **No skipped or commented-out tests.**
+- **No broken builds or failing tests.**
+
+## Crashes are security bugs
+
+A crash — from an assert, an out-of-bounds access, an integer overflow — means
+either memory unsafety or missing validation. When you find one:
+
+1. **First** fix the missing validation or error handling that let execution reach
+   that state.
+2. **Then** fix the underlying logic bug that triggered it.
+
+Doing only step 2 leaves the next malformed input free to crash you somewhere
+else.
+
+## Style
+
+Concise, direct Zig that matches the surrounding code:
+
+```zig
+// Minimal else. Early return instead.
+if (condition) return error.Something;
+
+// Short but descriptive names. `top`, `value1`, `operand` — not `a`, `b`.
+const top = self.stack.peek_unsafe();
+
+// Direct imports, no alias indirection.
+const address = @import("voltaire").Address;
+
+// Tests live in the source file they test.
+test "add wraps on overflow" { }
+```
+
+Memory: every allocation is immediately followed by its `defer` or `errdefer`.
+
+```zig
+const thing = try allocator.create(Thing);
+defer allocator.destroy(thing);
+```
+
+### ArrayList in Zig 0.15
+
+`std.ArrayList(T)` is **unmanaged** in 0.15. Every mutating operation takes the
+allocator. This trips up almost everyone:
+
+```zig
+// Correct
+var list = std.ArrayList(T){};
+defer list.deinit(allocator);
+try list.append(allocator, item);
+
+// Wrong — these do not exist in 0.15
+var list = std.ArrayList(T).init(allocator);
+list.deinit();
+try list.append(item);
+```
+
+## Testing philosophy
+
+- **No abstractions and no helpers.** Copy and paste the setup into each test.
+  A self-contained test that repeats twenty lines is easier to debug at 3am than
+  a clever one that shares a fixture.
+- Tests for `src/**` live in the source files; `src/root.zig` aggregates them.
+- Integration tests live in `test/**` and are aggregated by explicit `_ = @import(...)`
+  lines in `test/root.zig` — adding a file is not enough, you must register it.
+- Evidence-based debugging only. If the bug is not obvious, improve visibility
+  first (tracer, logging, `pretty_print`) instead of guessing.
+
+## Writing a handler
+
+Two things are mandatory and easy to forget:
+
+```zig
+pub fn add(self: *Self, cursor: [*]const Dispatch.Item) Error!noreturn {
+    self.beforeInstruction(.ADD, cursor);       // 1. sync the reference EVM
+    self.getTracer().assert(self.stack.size() >= 2, "ADD requires 2 stack items");
+
+    const b = self.stack.pop_unsafe();
+    const a = self.stack.peek_unsafe();
+    self.stack.set_top_unsafe(a +% b);
+
+    const op_data = dispatch.getOpData(.ADD);
+    self.afterInstruction(.ADD, op_data.next_handler, op_data.next_cursor.cursor);
+    return @call(Self.getTailCallModifier(), op_data.next_handler,   // 2. tail call
+                 .{ self, op_data.next_cursor.cursor });
+}
+```
+
+1. `beforeInstruction()` — without it the differential tracer desynchronises and
+   unrelated tests fail confusingly.
+2. The tail call — a handler returns `Error!noreturn` and must never fall off the
+   end.
+
+Stack semantics are LIFO: the first `pop` is the top of the stack.
+
+## Before filing a bug
+
+Two things look like bugs and are not:
+
+- **`_unsafe` functions have no bounds checks.** That is the naming convention's
+  entire meaning. Validation happened at bytecode-analysis time. See
+  [Architecture](/concepts/architecture).
+- **`tracer.assert()` compiles away in production.** It is a development aid, not
+  a security mechanism. Security lives in the analysis/validation layer.
+
+## Pull requests
+
+- Rebase rather than merge; keep history linear.
+- One logical change per commit.
+- Paste real command output in the description — the build you ran, the tests you
+  ran, what passed and what did not. Claiming a green suite you did not run is the
+  one unforgivable thing in a codebase this sensitive.
+- Note anything you could not verify.
+
+## Documentation
+
+These docs are a [vocs](https://vocs.dev) site under `docs/`:
+
+```bash
+cd docs
+npm install
+npm run dev      # local dev server
+npm run build    # production build — must pass
+```
+
+Pages are MDX under `docs/src/pages/` — note the `src/`, which vocs 2 requires
+(vocs 1 used `docs/pages/`). Add new pages to the `sidebar` in
+`docs/vocs.config.ts`, and import `defineConfig` from `vocs/config`, not from
+`vocs`: the package root re-exports React components that import vite-virtual
+modules, so importing it in the config file fails to resolve under Node.
+
+Deployment is Vercel, serving [guillotine.tevm.sh](https://guillotine.tevm.sh),
+with `docs/` as the project root directory. `vocs build` detects the `VERCEL`
+environment variable and switches to the Vercel adapter automatically, emitting
+Build Output API artifacts — so `docs/vercel.json` sets only the install and build
+commands and deliberately leaves `outputDirectory` unset. The deep developer notes in `docs/dev/`,
+`docs/performance/`, and `docs/mini/` remain as plain markdown and are the source
+of record for internals — improve them in place rather than duplicating them into
+MDX.
+
+If you document an API, verify it against the source or by compiling it. A wrong
+example costs a reader more than a missing one.

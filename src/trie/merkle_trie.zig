@@ -59,10 +59,7 @@ pub const MerkleTrie = struct {
         const root = self.builder.root_hash orelse return &[_][]const u8{};
 
         // Get the root node
-        const root_hash_str = try bytes_to_hex_string(self.allocator, &root);
-        defer self.allocator.free(root_hash_str);
-
-        const root_node = self.builder.nodes.get(root_hash_str) orelse return TrieError.NonExistentNode;
+        const root_node = self.builder.nodes.get(root) orelse return TrieError.NonExistentNode;
 
         // Generate the proof by collecting nodes along the path
         _ = try self.collect_proof_nodes(&retainer, root_node, &[_]u8{});
@@ -123,10 +120,7 @@ pub const MerkleTrie = struct {
                         return TrieError.InvalidNode;
                     },
                     .Hash => |hash| {
-                        const hash_str = try bytes_to_hex_string(self.allocator, &hash);
-                        defer self.allocator.free(hash_str);
-
-                        const next_node = self.builder.nodes.get(hash_str) orelse return TrieError.NonExistentNode;
+                        const next_node = self.builder.nodes.get(hash) orelse return TrieError.NonExistentNode;
                         return try self.collect_proof_nodes(retainer, next_node, new_prefix);
                     },
                 }
@@ -159,10 +153,7 @@ pub const MerkleTrie = struct {
                         return true;
                     },
                     .Hash => |hash| {
-                        const hash_str = try bytes_to_hex_string(self.allocator, &hash);
-                        defer self.allocator.free(hash_str);
-
-                        const next_node = self.builder.nodes.get(hash_str) orelse return TrieError.NonExistentNode;
+                        const next_node = self.builder.nodes.get(hash) orelse return TrieError.NonExistentNode;
                         return try self.collect_proof_nodes(retainer, next_node, new_prefix);
                     },
                 }

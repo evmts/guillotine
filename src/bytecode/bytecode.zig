@@ -87,6 +87,8 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
         pub const Iterator = struct {
             bytecode: *const Self,
             pc: PcType,
+            /// Disable fusion when analyzing original gas and stack effects.
+            enable_fusion: bool = true,
 
             pub fn next(iterator: *Iterator) ?OpcodeData {
                 if (iterator.pc >= iterator.bytecode.len()) return null;
@@ -99,7 +101,7 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                 const packed_bits = iterator.bytecode.packed_bitmap[iterator.pc];
 
                 // Handle fusion opcodes first (only if fusions are enabled)
-                if (fusions_enabled and packed_bits.is_fusion_candidate) {
+                if (fusions_enabled and iterator.enable_fusion and packed_bits.is_fusion_candidate) {
                     const fusion_data = iterator.bytecode.getFusionData(iterator.pc);
                     // Advance PC properly for fusion opcodes
                     switch (fusion_data) {
@@ -966,34 +968,77 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
             // NEW: Allocate packed bitmap (4 bits per byte, so N packed bits)
             self.packed_bitmap = self.allocator.alloc(PackedBits, N) catch return error.OutOfMemory;
             cleanup_state.packed_bitmap_allocated = true;
-            // Initialize all packed bits to false
-            for (self.packed_bitmap) |*packed_bits| {
-                packed_bits.* = PackedBits{ .is_push_data = false, .is_op_start = false, .is_jumpdest = false, .is_fusion_candidate = false };
+            const zero_bits = PackedBits{ .is_push_data = false, .is_op_start = false, .is_jumpdest = false, .is_fusion_candidate = false };
+            @memset(self.packed_bitmap, zero_bits);
+
+            const has_tracer = @TypeOf(tracer) != @TypeOf(null);
+            const code = self.runtime_code;
+            const bitmap = self.packed_bitmap;
+
+            // Fast path when no tracer is active: skip intToEnum, dead u256 push_value
+            // shifts, and per-byte prefetch overhead.
+            if (!has_tracer or tracer == null) {
+                const push_data_bits = PackedBits{ .is_push_data = true, .is_op_start = false, .is_jumpdest = false, .is_fusion_candidate = false };
+                var i: usize = 0;
+                while (i < validate_up_to) {
+                    const op = code[i];
+                    var bits = PackedBits{ .is_push_data = false, .is_op_start = true, .is_jumpdest = false, .is_fusion_candidate = false };
+
+                    if (op >= @intFromEnum(Opcode.PUSH1) and op <= @intFromEnum(Opcode.PUSH32)) {
+                        const n: usize = op - (@intFromEnum(Opcode.PUSH1) - 1);
+                        const push_end = i + 1 + n;
+                        if (push_end > validate_up_to) {
+                            return error.TruncatedPush;
+                        }
+                        if (comptime fusions_enabled) {
+                            if (push_end < validate_up_to) {
+                                const next_op = code[push_end];
+                                const is_fusable = switch (next_op) {
+                                    @intFromEnum(Opcode.ADD), @intFromEnum(Opcode.MUL), @intFromEnum(Opcode.SUB), @intFromEnum(Opcode.DIV), @intFromEnum(Opcode.AND), @intFromEnum(Opcode.OR), @intFromEnum(Opcode.XOR), @intFromEnum(Opcode.JUMP), @intFromEnum(Opcode.JUMPI), @intFromEnum(Opcode.MLOAD), @intFromEnum(Opcode.MSTORE), @intFromEnum(Opcode.MSTORE8) => true,
+                                    else => false,
+                                };
+                                if (is_fusable) bits.is_fusion_candidate = true;
+                            }
+                        }
+                        bitmap[i] = bits;
+                        @memset(bitmap[i + 1 .. push_end], push_data_bits);
+                        i = push_end;
+                        continue;
+                    }
+
+                    if (op == @intFromEnum(Opcode.JUMPDEST)) {
+                        bits.is_jumpdest = true;
+                    } else if (comptime fusions_enabled) {
+                        if (op == @intFromEnum(Opcode.ISZERO)) {
+                            const push_pc = i + 1;
+                            if (push_pc < validate_up_to) {
+                                const push_op = code[push_pc];
+                                if (push_op >= @intFromEnum(Opcode.PUSH1) and push_op <= @intFromEnum(Opcode.PUSH32)) {
+                                    const push_size: usize = push_op - (@intFromEnum(Opcode.PUSH1) - 1);
+                                    const jumpi_pc = push_pc + 1 + push_size;
+                                    if (jumpi_pc < validate_up_to and code[jumpi_pc] == @intFromEnum(Opcode.JUMPI)) {
+                                        bits.is_fusion_candidate = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    bitmap[i] = bits;
+                    i += 1;
+                }
+                return;
             }
 
-            // Single pass: validate opcodes, mark bitmaps, detect JUMPDEST and fusions
-            // Track state for immediate jump validation
+            // Traced path: emit full bytecode analysis tracer events.
             var last_push_value: ?u256 = null;
             var last_push_end: PcType = 0;
-
-            // Collect immediate jumps to validate after first pass
-            var immediate_jumps = std.ArrayList(PcType){};
-            defer immediate_jumps.deinit(self.allocator);
 
             var opcode_count: usize = 0;
             var jumpdest_count: usize = 0;
             var i: PcType = 0;
             while (i < validate_up_to) {
                 @branchHint(.likely);
-
-                // Prefetch ahead for better cache performance on large bytecode
-                if (@as(usize, i) + PREFETCH_DISTANCE < validate_up_to) {
-                    @prefetch(&self.runtime_code[@as(usize, i) + PREFETCH_DISTANCE], .{
-                        .rw = .read,
-                        .locality = 3, // Low temporal locality
-                        .cache = .data,
-                    });
-                }
 
                 // Mark operation start
                 self.packed_bitmap[i].is_op_start = true;
@@ -1002,8 +1047,6 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
 
                 // Validate opcode - undefined opcodes are valid but treated as INVALID
                 const opcode_enum = std.meta.intToEnum(Opcode, op) catch blk: {
-                    // Undefined opcodes are valid in EVM - they execute as INVALID operation
-                    // which consumes all gas and reverts. We'll treat them as INVALID (0xFE)
                     if (tracer) |t| {
                         t.onInvalidOpcode(@intCast(i), op);
                     }
@@ -1016,15 +1059,12 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                     self.packed_bitmap[i].is_jumpdest = true;
                     jumpdest_count += 1;
                     if (tracer) |t| {
-                        // Calculate gas cost for this JUMPDEST's basic block
-                        // (simplified for now - actual gas calculation happens during schedule build)
                         t.onJumpdestFound(@intCast(i), 1);
                     }
                 }
 
                 // Check for fusion candidates if enabled
                 if (comptime fusions_enabled) {
-                    // Check for ISZERO+PUSH+JUMPI pattern
                     if (op == @intFromEnum(Opcode.ISZERO)) {
                         const push_pc = i + 1;
                         if (push_pc < validate_up_to) {
@@ -1033,7 +1073,6 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                                 const push_size: PcType = push_op - (@intFromEnum(Opcode.PUSH1) - 1);
                                 const jumpi_pc = push_pc + 1 + push_size;
                                 if (jumpi_pc < validate_up_to and self.runtime_code[jumpi_pc] == @intFromEnum(Opcode.JUMPI)) {
-                                    // Mark ISZERO as fusion candidate for ISZERO+PUSH+JUMPI pattern
                                     self.packed_bitmap[i].is_fusion_candidate = true;
                                     if (tracer) |t| {
                                         t.debug("Marked ISZERO at PC {} as fusion candidate for ISZERO+PUSH+JUMPI pattern", .{i});
@@ -1042,16 +1081,13 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                             }
                         }
                     }
-                    
-                    // Check if this is a PUSH that could be part of a fusion
+
                     if (op >= @intFromEnum(Opcode.PUSH1) and op <= @intFromEnum(Opcode.PUSH32)) {
                         const push_size: PcType = op - (@intFromEnum(Opcode.PUSH1) - 1);
                         const next_op_idx = i + 1 + push_size;
 
-                        // Ensure we can read the next opcode
                         if (next_op_idx < validate_up_to) {
                             const next_op = self.runtime_code[next_op_idx];
-                            // Check for fusable patterns
                             const is_fusable = switch (next_op) {
                                 @intFromEnum(Opcode.ADD), @intFromEnum(Opcode.MUL), @intFromEnum(Opcode.SUB), @intFromEnum(Opcode.DIV), @intFromEnum(Opcode.AND), @intFromEnum(Opcode.OR), @intFromEnum(Opcode.XOR), @intFromEnum(Opcode.JUMP), @intFromEnum(Opcode.JUMPI), @intFromEnum(Opcode.MLOAD), @intFromEnum(Opcode.MSTORE), @intFromEnum(Opcode.MSTORE8) => true,
                                 else => false,
@@ -1070,11 +1106,6 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                 {
                     const n: PcType = op - (@intFromEnum(Opcode.PUSH1) - 1);
 
-                    // We need to read n bytes after the opcode at position i
-                    // So we need positions i+1 through i+n to be valid
-                    // This means i+n must be less than the validation length
-                    // PUSH32 at position 0 needs to read bytes 1-32, so position 32 must be valid
-                    // Therefore i+1+n must be <= validate_up_to, or i+n < validate_up_to
                     if (i + 1 + n > validate_up_to) {
                         if (tracer) |t| {
                             t.onTruncatedPush(@intCast(i), @intCast(n), validate_up_to - i - 1);
@@ -1082,7 +1113,6 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                         return error.TruncatedPush;
                     }
 
-                    // Extract push value for immediate jump validation (only if fusions enabled)
                     var push_value: u256 = 0;
                     if (comptime fusions_enabled) {
                         var byte_idx: PcType = 0;
@@ -1091,52 +1121,34 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                         }
                     }
 
-                    // Mark push data bytes
-                    var j: PcType = 0;
-                    while (j < n) : (j += 1) {
-                        const idx = i + 1 + j;
-                        self.packed_bitmap[idx].is_push_data = true;
-                    }
-
                     const push_end = i + 1 + n;
+                    @memset(self.packed_bitmap[i + 1 .. push_end], PackedBits{ .is_push_data = true, .is_op_start = false, .is_jumpdest = false, .is_fusion_candidate = false });
 
-                    // ONLY check for immediate jump patterns if fusions are enabled
-                    // This is for optimization purposes, not correctness validation
                     if (comptime fusions_enabled) {
                         if (push_end < validate_up_to) {
                             const next_op = self.runtime_code[push_end];
 
-                            // Case 1: PUSH + JUMP (for fusion optimization)
                             if (next_op == @intFromEnum(Opcode.JUMP)) {
                                 if (tracer) |t| {
                                     t.debug("Detected PUSH + JUMP fusion opportunity at pc={}, push_value={}, next_op={x}", .{ i, push_value, next_op });
                                 }
-                                // Note: We do NOT validate jump targets here - that happens at runtime
-                                // This is only for marking fusion opportunities
-                            }
-
-                            // Case 2: PUSH + JUMPI (check if previous was also a PUSH)
-                            else if (push_end < validate_up_to and next_op == @intFromEnum(Opcode.JUMPI) and
+                            } else if (push_end < validate_up_to and next_op == @intFromEnum(Opcode.JUMPI) and
                                 last_push_value != null and
                                 last_push_end == i)
                             {
-                                // We have PUSH(dest) + PUSH(cond) + JUMPI pattern
                                 const jump_dest = last_push_value.?;
                                 if (tracer) |t| {
                                     t.debug("Detected PUSH + PUSH + JUMPI fusion opportunity at pc={}, jump_dest={}, next_op={x}", .{ i, jump_dest, next_op });
                                 }
-                                // Note: We do NOT validate jump targets here - that happens at runtime
                             }
                         }
 
-                        // Update state for next iteration
                         last_push_value = push_value;
                         last_push_end = push_end;
                     }
 
                     i = push_end;
                 } else {
-                    // Reset state when we see non-PUSH opcodes (unless it's JUMPI)
                     if (op != @intFromEnum(Opcode.JUMPI) and op != @intFromEnum(Opcode.JUMP)) {
                         last_push_value = null;
                         last_push_end = 0;
@@ -1144,11 +1156,6 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                     i += 1;
                 }
             }
-            // Note: We do NOT validate immediate jumps during bytecode initialization because:
-            // 1. Not all PUSH+JUMP patterns in bytecode are actually executed (dead code, data sections)
-            // 2. The EVM spec requires jump validation at execution time, not initialization time
-            // 3. Validating jumps here would reject valid contracts that contain unreachable PUSH+JUMP patterns
-            // The immediate jump detection above is ONLY for fusion optimization, not correctness validation.
 
             // Notify tracer of analysis completion
             if (tracer) |t| {
@@ -1519,7 +1526,7 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                         .LT, .GT, .SLT, .SGT, .EQ, .ISZERO => {
                             try output.writer(allocator).print("{s}{s:<14}{s}", .{ InstructionColors.comparison, @tagName(opcode), Colors.reset });
                         },
-                        .AND, .OR, .XOR, .NOT, .BYTE, .SHL, .SHR, .SAR => {
+                        .AND, .OR, .XOR, .NOT, .BYTE, .SHL, .SHR, .SAR, .CLZ => {
                             try output.writer(allocator).print("{s}{s:<14}{s}", .{ InstructionColors.bitwise, @tagName(opcode), Colors.reset });
                         },
                         .MLOAD, .MSTORE, .MSTORE8, .MSIZE, .MCOPY => {

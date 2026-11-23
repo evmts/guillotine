@@ -38,7 +38,7 @@ fn parseHash32(s: []const u8) ![32]u8 {
     const hex = primitives.Hex;
     const t = std.mem.trim(u8, s, &std.ascii.whitespace);
     if (t.len == 0 or std.mem.eql(u8, t, "0x")) return [_]u8{0} ** 32;
-    return try hex.hexToBytes_fixed(32, t);
+    return try hex.hexToBytesFixed(32, t);
 }
 
 fn hfFromName(name: []const u8) Hardfork {
@@ -215,7 +215,7 @@ fn runSingleStateCase(allocator: std.mem.Allocator, json_path: []const u8) !void
         const excess_blob_gas = try parseU64Hex(excess_blob_gas_field.string);
         // Calculate blob base fee from excess blob gas using EIP-4844 formula
         const Blob = @import("voltaire").Blob;
-        blob_base_fee = Blob.calculate_blob_gas_price(excess_blob_gas);
+        blob_base_fee = Blob.calculateBlobGasPrice(excess_blob_gas);
     }
 
     // Transaction

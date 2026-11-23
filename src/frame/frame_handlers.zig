@@ -86,6 +86,7 @@ pub fn getOpcodeHandlers(
     h[@intFromEnum(Opcode.SHL)] = &BitwiseHandlers.shl;
     h[@intFromEnum(Opcode.SHR)] = &BitwiseHandlers.shr;
     h[@intFromEnum(Opcode.SAR)] = &BitwiseHandlers.sar;
+    h[@intFromEnum(Opcode.CLZ)] = &BitwiseHandlers.clz;
     h[@intFromEnum(Opcode.KECCAK256)] = &KeccakHandlers.keccak;
     h[@intFromEnum(Opcode.ADDRESS)] = &ContextHandlers.address;
     h[@intFromEnum(Opcode.BALANCE)] = &ContextHandlers.balance;

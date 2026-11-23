@@ -30,16 +30,10 @@ describe('GuillotineError', () => {
       expect(error.message).toBe('Init failed');
     });
 
-    it('should create WASM load error', () => {
-      const error = GuillotineError.wasmLoadFailed('WASM load failed');
-      expect(error.type).toBe('WasmLoadFailed');
-      expect(error.message).toBe('WASM load failed');
-    });
-
-    it('should create WASM not loaded error', () => {
-      const error = GuillotineError.wasmNotLoaded();
-      expect(error.type).toBe('WasmNotLoaded');
-      expect(error.message).toBe('WASM module not loaded');
+    it('should create unsupported operation error', () => {
+      const error = GuillotineError.unsupportedOperation('getStorage is not available on a tracing EVM');
+      expect(error.type).toBe('UnsupportedOperation');
+      expect(error.message).toBe('getStorage is not available on a tracing EVM');
     });
 
     it('should create VM creation error', () => {

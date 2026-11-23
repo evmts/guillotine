@@ -1,0 +1,140 @@
+---
+title: Synthetic opcodes
+description: Opcode fusion — collapsing common bytecode patterns into single handlers.
+---
+
+# Synthetic opcodes
+
+A synthetic opcode is a handler that performs the work of several real opcodes in
+one dispatch step. Solidity emits highly repetitive bytecode; fusing the common
+sequences removes dispatch overhead without changing semantics or gas.
+
+```
+Original:   PUSH1 0x20, MSTORE      2 handlers + 2 metadata items
+Fused:      PUSH_MSTORE_INLINE      1 handler  + 1 metadata item
+```
+
+Gas is unchanged — the fused handler charges what the constituent opcodes would
+have charged, and the basic-block gas header already accounts for them together.
+
+## The set
+
+Defined in `src/opcodes/opcode_synthetic.zig` as an `enum(u8)` occupying the
+`0xA5`–`0xCD` range (unused by real EVM opcodes). Verified against the source:
+
+### PUSH + arithmetic
+
+| Synthetic | Value | Fuses |
+| --- | --- | --- |
+| `PUSH_ADD_INLINE` | `0xA5` | `PUSH` (≤8 bytes) + `ADD` |
+| `PUSH_ADD_POINTER` | `0xA6` | `PUSH` (>8 bytes) + `ADD` |
+| `PUSH_MUL_INLINE` | `0xA7` | `PUSH` + `MUL` |
+| `PUSH_MUL_POINTER` | `0xA8` | `PUSH` + `MUL` |
+| `PUSH_DIV_INLINE` | `0xA9` | `PUSH` + `DIV` |
+| `PUSH_DIV_POINTER` | `0xAA` | `PUSH` + `DIV` |
+| `PUSH_SUB_INLINE` | `0xAF` | `PUSH` + `SUB` |
+| `PUSH_SUB_POINTER` | `0xB0` | `PUSH` + `SUB` |
+
+### PUSH + memory
+
+| Synthetic | Value | Fuses |
+| --- | --- | --- |
+| `PUSH_MLOAD_INLINE` | `0xB1` | `PUSH` offset + `MLOAD` |
+| `PUSH_MLOAD_POINTER` | `0xB2` | `PUSH` offset + `MLOAD` |
+| `PUSH_MSTORE_INLINE` | `0xB3` | `PUSH` offset + `MSTORE` |
+| `PUSH_MSTORE_POINTER` | `0xB4` | `PUSH` offset + `MSTORE` |
+| `PUSH_MSTORE8_INLINE` | `0xBB` | `PUSH` offset + `MSTORE8` |
+| `PUSH_MSTORE8_POINTER` | `0xBC` | `PUSH` offset + `MSTORE8` |
+
+### PUSH + bitwise
+
+| Synthetic | Value | Fuses |
+| --- | --- | --- |
+| `PUSH_AND_INLINE` / `PUSH_AND_POINTER` | `0xB5` / `0xB6` | `PUSH` + `AND` |
+| `PUSH_OR_INLINE` / `PUSH_OR_POINTER` | `0xB7` / `0xB8` | `PUSH` + `OR` |
+| `PUSH_XOR_INLINE` / `PUSH_XOR_POINTER` | `0xB9` / `0xBA` | `PUSH` + `XOR` |
+
+### Jumps
+
+| Synthetic | Value | Fuses |
+| --- | --- | --- |
+| `JUMP_TO_STATIC_LOCATION` | `0xBD` | Pre-resolved `JUMP` — no jump-table search |
+| `JUMPI_TO_STATIC_LOCATION` | `0xBE` | Pre-resolved `JUMPI` |
+| `BACKWARD_LOOP_JUMPI` | `0xCD` | `PUSH`+`JUMPI` (exit) … `PUSH`+`JUMP` (loop back) |
+
+### Repetition
+
+| Synthetic | Value | Fuses |
+| --- | --- | --- |
+| `MULTI_PUSH_2` | `0xBF` | Two consecutive `PUSH`es |
+| `MULTI_PUSH_3` | `0xC0` | Three consecutive `PUSH`es |
+| `MULTI_POP_2` | `0xC1` | Two consecutive `POP`s |
+| `MULTI_POP_3` | `0xC2` | Three consecutive `POP`s |
+
+### Solidity idioms
+
+| Synthetic | Value | Fuses |
+| --- | --- | --- |
+| `ISZERO_JUMPI` | `0xC3` | `ISZERO` + `PUSH` + `JUMPI` |
+| `DUP2_MSTORE_PUSH` | `0xC4` | `DUP2` + `MSTORE` + `PUSH` |
+| `DUP3_ADD_MSTORE` | `0xC5` | `DUP3` + `ADD` + `MSTORE` |
+| `SWAP1_DUP2_ADD` | `0xC6` | `SWAP1` + `DUP2` + `ADD` |
+| `PUSH_DUP3_ADD` | `0xC7` | `PUSH` + `DUP3` + `ADD` |
+| `FUNCTION_DISPATCH` | `0xC8` | `PUSH4` + `EQ` + `PUSH` + `JUMPI` — selector routing |
+| `CALLVALUE_CHECK` | `0xC9` | `CALLVALUE` + `DUP1` + `ISZERO` — the non-payable guard |
+| `PUSH0_REVERT` | `0xCA` | `PUSH0` + `PUSH0` + `REVERT` |
+| `PUSH_ADD_DUP1` | `0xCB` | `PUSH` + `ADD` + `DUP1` — loop increment |
+| `MLOAD_SWAP1_DUP2` | `0xCC` | `MLOAD` + `SWAP1` + `DUP2` |
+
+`FUNCTION_DISPATCH` and `CALLVALUE_CHECK` are the highest-value entries in
+practice: every external function on every Solidity contract begins with them.
+
+## Inline vs pointer
+
+The `_INLINE` / `_POINTER` split mirrors the schedule's push representation. A
+push value of 8 bytes or fewer that fits in a `u64` is embedded in the metadata
+item; larger values live in the schedule arena and are reached through a pointer.
+Two variants exist so the inline path never pays for an indirection.
+
+## Turning fusion off
+
+Fusion is on by default. It is a comptime flag, so you can compare:
+
+```zig
+const Fused   = @import("evm").Evm(.{ .enable_fusion = true });
+const Unfused = @import("evm").Evm(.{ .enable_fusion = false });
+```
+
+Or from the build:
+
+```bash
+zig build -Devm-enable-fusion=false
+```
+
+Turning it off is the first thing to try when a contract behaves differently from
+another EVM. If the difference disappears, you have found a fusion bug — please
+file it.
+
+## Fusion and the differential tracer
+
+This is where synthetic opcodes interact with testing. `Frame` executes one fused
+handler; `MinimalEvm` must execute *all* the underlying opcodes to stay in sync.
+The tracer knows the arity of each synthetic opcode and steps the reference
+machine the right number of times:
+
+| Frame executes | MinimalEvm steps |
+| --- | --- |
+| A real opcode | 1 |
+| `PUSH_MSTORE_INLINE` | 2 (`PUSH1`, `MSTORE`) |
+| `FUNCTION_DISPATCH` | 4 (`PUSH4`, `EQ`, `PUSH`, `JUMPI`) |
+
+That mapping lives in `executeMinimalEvmForOpcode()` in `src/tracer/tracer.zig`.
+A "divergence" that turns out to be an arity mismatch there is a tracer bug, not
+an EVM bug — check the arity before you suspect the handler.
+
+## Testing fusion
+
+```bash
+zig build test-fusions     # unit + dispatch + differential fusion tests
+zig build test-synthetic   # synthetic opcode handler tests
+```

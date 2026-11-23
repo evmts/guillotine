@@ -1,6 +1,5 @@
 .env
 .vercel
-dist/
 
 .crush/
 
@@ -10,16 +9,9 @@ worktrees/
 
 macos
 
-/target/
 **/*.rs.bk
 
 # Compiled object files and libraries (ensure comprehensive coverage)
-*.o
-*.o.o  
-*.a
-*.a.o
-*.so
-*.dylib
 *.dll
 *.rlib
 
@@ -64,9 +56,6 @@ node_modules
 /.sass-cache
 /connect.lock
 /coverage
-/libpeerconnection.log
-npm-debug.log
-testem.log
 /typings
 
 # System Files
@@ -75,7 +64,6 @@ Thumbs.db
 
 # My personal files
 .zshrc
-/target
 _
 .direnv
 
@@ -85,8 +73,6 @@ _
 **/*.pdb
 
 # zig
-.zig-cache/
-zig-out/
 zig-cache/
 bin/
 
@@ -94,11 +80,9 @@ bin/
 __pycache__/
 *.py[cod]
 *$py.class
-*.so
 .Python
 sdks/*/build/
 develop-eggs/
-dist/
 downloads/
 eggs/
 .eggs/
@@ -140,10 +124,7 @@ coverage.xml
 .dmypy.json
 dmypy.json
 
-TODO.md
-
 **/.claude/settings.local.json
-
 
 .cursor/rules/nx-rules.mdc
 .github/instructions/nx.instructions.md
@@ -159,22 +140,15 @@ diff_output/
 trace_*.json
 *_trace*.json
 
-# Log files
-*.log
-diff-trace.log
-
 # Coordination docs
 coordinate.md
 
 # Apple Instruments profiling results
 *_profile.trace/
 *_summary.txt
-profile_results/
 advanced_cpu_profiles/*.trace/
 advanced_cpu_profiles/*_summary.txt
 
-# Go binaries
-/guillotine-cli
 # Performance and comparison reports (generated files)
 EVM2_Performance_Report.md
 *-comparison.md
@@ -191,7 +165,6 @@ bun.lock
 **/src/test/
 
 # Compiled binaries without extensions (common in development)
-guillotine-cli
 test_hyperfine
 
 # KZG trusted setup file (large binary file)
@@ -201,7 +174,6 @@ src/kzg/trusted_setup.txt
 
 # Benchmarks directory (cloned on demand)
 benchmarks/
-sdks/python/guillotine_evm/_ffi.c
 
 # Test fixtures
 test/execution-spec-tests/fixtures/
@@ -209,3 +181,20 @@ test/execution-spec-tests/fixtures/
 # Solidity compilation artifacts
 data/fixtures/out/
 bubblesort_bytecode.txt
+# Generated libraries, executables, caches, and reports
+*.log
+*.o
+*.dylib
+*.so
+*.a
+guillotine-cli
+target/
+lib/*/target/
+.astro/
+.flows/
+.zig-cache/
+zig-out/
+.baseline_*.txt
+profile_results/
+dist/
+bench/results/

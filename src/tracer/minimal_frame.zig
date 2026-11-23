@@ -654,6 +654,15 @@ pub const MinimalFrame = struct {
                 self.pc += 1;
             },
 
+            // EIP-7939: count leading zero bits, including 256 for zero.
+            0x1e => {
+                if (evm.hardfork.isBefore(.OSAKA)) return error.InvalidOpcode;
+                const value = try self.popStack();
+                try self.consumeGas(GasConstants.GasFastStep);
+                try self.pushStack(@clz(value));
+                self.pc += 1;
+            },
+
             // SHA3/KECCAK256
             0x20 => {
                 const offset = try self.popStack();
@@ -1629,10 +1638,12 @@ pub const MinimalFrame = struct {
                 }
                 const call_address = Address{ .bytes = addr_bytes };
 
-                // Base gas cost + EIP-2929 account access
-                var call_gas_cost: u64 = GasConstants.CallGas;
-                const access_cost = try evm.access_address(call_address);
-                call_gas_cost += access_cost;
+                // EIP-2929 replaces the EIP-150 STATICCALL base with the
+                // warm/cold account-access price; it is not an added surcharge.
+                var call_gas_cost: u64 = if (evm.hardfork.isAtLeast(.BERLIN))
+                    try evm.access_address(call_address)
+                else
+                    GasConstants.StaticCallCost;
 
                 // Memory expansion gas - charge for BOTH input and return regions
                 const in_offset_u64 = std.math.cast(u64, in_offset) orelse return error.OutOfBounds;

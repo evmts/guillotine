@@ -1,0 +1,134 @@
+---
+title: Hardforks and EIPs
+description: The hardfork enum, the EIP set each fork activates, and the precompile table.
+---
+
+# Hardforks and EIPs
+
+The hardfork is a comptime parameter. `Eips` (`src/eips_and_hardforks/eips.zig`)
+turns a `Hardfork` into a concrete EIP set, and handlers query that set at
+comptime, so a Berlin build contains no London code.
+
+```zig
+const Evm = @import("evm").Evm;
+const eips = @import("evm").Eips;
+
+const London = Evm(.{ .eips = eips{ .hardfork = .LONDON } });
+```
+
+## The `Hardfork` enum
+
+Declared in `lib/voltaire/src/primitives/hardfork.zig` and re-exported as
+`@import("evm").Hardfork`:
+
+| Variant | Date | EVM-visible change |
+| --- | --- | --- |
+| `FRONTIER` | Jul 2015 | Base instruction set |
+| `HOMESTEAD` | Mar 2016 | `DELEGATECALL` (EIP-7), EIP-2, EIP-8 |
+| `DAO` | Jul 2016 | State-only; no EVM changes |
+| `TANGERINE_WHISTLE` | Oct 2016 | EIP-150 gas repricing for IO-heavy ops |
+| `SPURIOUS_DRAGON` | Nov 2016 | EIP-155/160/161 — replay protection, empty-account removal |
+| `BYZANTIUM` | Oct 2017 | `REVERT`, `RETURNDATASIZE`, `RETURNDATACOPY`, `STATICCALL`, BN254 precompiles |
+| `CONSTANTINOPLE` | Feb 2019 | `CREATE2`, `SHL`/`SHR`/`SAR`, `EXTCODEHASH`, EIP-1283 |
+| `PETERSBURG` | Feb 2019 | Reverts EIP-1283 (reentrancy risk) |
+| `ISTANBUL` | Dec 2019 | `CHAINID`, `SELFBALANCE`, EIP-2200, EIP-1108, EIP-152 |
+| `MUIR_GLACIER` | Jan 2020 | Difficulty bomb delay only |
+| `BERLIN` | Apr 2021 | EIP-2929 warm/cold gas, EIP-2930 access lists, EIP-2565 |
+| `LONDON` | Aug 2021 | EIP-1559 `BASEFEE`, EIP-3529 refund reduction, EIP-3541 |
+| `ARROW_GLACIER` | Dec 2021 | Difficulty bomb delay only |
+| `GRAY_GLACIER` | Jun 2022 | Difficulty bomb delay only |
+| `MERGE` | Sep 2022 | EIP-4399 `PREVRANDAO` replaces `DIFFICULTY` |
+| `SHANGHAI` | Apr 2023 | `PUSH0` (EIP-3855), EIP-3860 initcode cap, EIP-4895 withdrawals |
+| `CANCUN` | Mar 2024 | `TLOAD`/`TSTORE` (EIP-1153), `MCOPY` (EIP-5656), EIP-4844 blobs, EIP-6780, EIP-4788, EIP-7516 |
+| `PRAGUE` | — | EIP-7702 delegation, EIP-2537 BLS12-381, EIP-2935, EIP-6110, EIP-7002 |
+| `OSAKA` | — | EIP-7883, EIP-7823, EIP-7825, EIP-7934 |
+
+**`CANCUN` is the default.** `build.zig` accepts a subset of these via
+`-Devm-hardfork=`: `FRONTIER`, `HOMESTEAD`, `BYZANTIUM`, `BERLIN`, `LONDON`,
+`SHANGHAI`, `CANCUN`. The remaining variants are reachable from Zig by naming the
+config directly.
+
+## EIP sets
+
+`Eips.get_active_eips()` returns the exact list per fork. As of Cancun that is:
+
+```
+2, 7, 8, 100, 140, 145, 150, 152, 155, 160, 161, 196, 197, 198, 211, 214,
+649, 658, 1014, 1052, 1108, 1153, 1283, 1344, 1559, 1884, 2028, 2200, 2565,
+2718, 2929, 2930, 3198, 3529, 3541, 3651, 3675, 3855, 3860, 4345, 4399,
+4788, 4844, 4895, 5133, 5656, 6780, 7516
+```
+
+Prague adds `2537, 2935, 3074, 6110, 7002, 7702`. Osaka adds `7883, 7823, 7825,
+7934` (and drops 3074).
+
+Query it at comptime:
+
+```zig
+const eips = @import("evm").Eips;
+const cancun = eips{ .hardfork = .CANCUN };
+
+comptime {
+    // Fails to compile if EIP-1153 (TLOAD/TSTORE) is not active.
+    if (!cancun.is_eip_active(1153)) @compileError("expected TSTORE");
+}
+```
+
+### Overriding individual EIPs
+
+`eip_overrides` lets you activate or deactivate one EIP independently of the fork
+— useful for testnets, for L2s that diverge on a single EIP, and for bisecting a
+spec-test failure to a specific EIP:
+
+```zig
+const Custom = @import("evm").Evm(.{
+    .eips = eips{ .hardfork = .SHANGHAI },
+    .eip_overrides = &.{
+        .{ .eip = 1153, .enabled = true },   // TLOAD/TSTORE before Cancun
+    },
+});
+```
+
+## Precompiles
+
+Addresses are defined in `lib/voltaire/src/precompiles/root.zig`:
+
+| Address | Name | Since |
+| --- | --- | --- |
+| `0x01` | `ECRECOVER` | Frontier |
+| `0x02` | `SHA256` | Frontier |
+| `0x03` | `RIPEMD160` | Frontier |
+| `0x04` | `IDENTITY` | Frontier |
+| `0x05` | `MODEXP` | Byzantium (EIP-198) |
+| `0x06` | `ECADD` (BN254) | Byzantium (EIP-196) |
+| `0x07` | `ECMUL` (BN254) | Byzantium (EIP-197) |
+| `0x08` | `ECPAIRING` (BN254) | Byzantium |
+| `0x09` | `BLAKE2F` | Istanbul (EIP-152) |
+| `0x0A` | `POINT_EVALUATION` (KZG) | Cancun (EIP-4844) |
+
+The BN254 and BLS12-381 implementations come from the vendored arkworks Rust
+crate in `lib/voltaire`; KZG comes from `c-kzg-4844` and `blst`. That is why a
+build needs Cargo and a C compiler, and why dropping precompiles
+(`-Dno_precompiles=true`) is the biggest single lever on binary size.
+
+:::warning[Known weak spot]
+The repository's own README reports that most Ethereum spec-test failures are
+concentrated in the `ecmul`/BN254 tests. If your workload leans on `0x06`–`0x08`,
+verify against another implementation before trusting results. See
+[Project status](/status).
+:::
+
+### Replacing a precompile
+
+```zig
+const PrecompileOutput = struct { output: []const u8, gas_used: u64, success: bool };
+
+const Custom = @import("evm").Evm(.{
+    .precompile_overrides = &.{
+        .{ .address = my_address, .execute = &myPrecompile },
+    },
+});
+```
+
+The `execute` signature is
+`fn (allocator: std.mem.Allocator, input: []const u8, gas_limit: u64) anyerror!PrecompileOutput`.

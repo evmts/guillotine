@@ -1,56 +1,37 @@
-# C SDK Makefile
-CC = gcc
-CFLAGS = -Wall -Wextra -std=c99 -I../rust
-LDFLAGS = -L/Users/williamcory/guillotine/zig-out/lib -lguillotine_ffi_static -L/Users/williamcory/guillotine/target/release -lc_kzg -lblst
-TESTDIR = tests
-BUILDDIR = build
+# Invoke from the repository root: make -f sdks/c/Makefile test
+CC = cc
+CFLAGS ?= -Wall -Wextra -std=c99
+CPPFLAGS += -Isdks/c/include
+LDFLAGS += -Lzig-out/lib -Wl,-rpath,$(abspath zig-out/lib)
+LDLIBS += -lguillotine_ffi
+TESTDIR = sdks/c/tests
+BUILDDIR = sdks/c/build
 
-# Platform-specific adjustments
-UNAME_S := $(shell uname -s)
-ifeq ($(UNAME_S),Linux)
-    LDFLAGS += -lpthread -lm -ldl
-endif
-ifeq ($(UNAME_S),Darwin)
-    LDFLAGS += -framework Foundation
-endif
-
-.PHONY: all test clean build-core
-
+.PHONY: all test basic simple clean build-core help
 all: test
 
-# Build the Guillotine core first
 build-core:
-	@echo "Building Guillotine core library..."
-	cd /Users/williamcory/guillotine && zig build
+	zig build shared
 
-# Create build directory
 $(BUILDDIR):
 	mkdir -p $(BUILDDIR)
 
-# Build and run tests
-test: build-core $(BUILDDIR)
-	@echo "Compiling C SDK tests..."
-	$(CC) $(CFLAGS) $(TESTDIR)/basic_test.c -o $(BUILDDIR)/basic_test $(LDFLAGS)
-	@echo "Running C SDK tests..."
+$(BUILDDIR)/basic_test: $(TESTDIR)/basic_test.c sdks/c/include/guillotine.h build-core | $(BUILDDIR)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $< -o $@ $(LDFLAGS) $(LDLIBS)
+
+$(BUILDDIR)/simple_test: $(TESTDIR)/simple_test.c sdks/c/include/guillotine.h | $(BUILDDIR)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $< -o $@
+
+basic: $(BUILDDIR)/basic_test
 	./$(BUILDDIR)/basic_test
 
-# Individual test targets
-basic: build-core $(BUILDDIR)
-	$(CC) $(CFLAGS) $(TESTDIR)/basic_test.c -o $(BUILDDIR)/basic_test $(LDFLAGS)
-	./$(BUILDDIR)/basic_test
-
-simple: build-core $(BUILDDIR)
-	$(CC) $(CFLAGS) $(TESTDIR)/simple_test.c -o $(BUILDDIR)/simple_test
+simple: $(BUILDDIR)/simple_test
 	./$(BUILDDIR)/simple_test
 
-# Clean build artifacts
+test: simple basic
+
 clean:
 	rm -rf $(BUILDDIR)
 
-# Help
 help:
-	@echo "Available targets:"
-	@echo "  test      - Build core, compile tests, and run all tests"
-	@echo "  basic     - Run basic test only"
-	@echo "  clean     - Clean build artifacts"
-	@echo "  help      - Show this help message"
+	@echo "From the repository root: make -f sdks/c/Makefile [test|basic|simple|clean]"

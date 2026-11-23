@@ -1,0 +1,189 @@
+---
+title: State and journaling
+description: Accounts, code, storage, snapshots, reverts, and the access list.
+---
+
+# State and journaling
+
+State in Guillotine is three things layered on each other: a `Database` that
+stores accounts, code, and slots; a `Journal` that records every mutation so it
+can be undone; and an `AccessList` that tracks warm/cold status for EIP-2929 gas.
+
+## The Database
+
+`Database` (`src/storage/database.zig`) is the state store. It is deliberately
+primitive-free — it speaks in `[20]u8` and `[32]u8`, not in `Address` and `Hash`
+— so the storage layer does not depend on the primitives library.
+
+```zig
+const Database = @import("evm").Database;
+
+var db = Database.init(allocator);
+defer db.deinit();
+```
+
+### Accounts
+
+```zig
+const Account = @import("evm").Account;
+
+// Read. Returns null when the account does not exist.
+const maybe = try db.get_account(address_bytes);
+
+// Write.
+try db.set_account(address_bytes, Account{
+    .balance = 1_000_000_000_000_000_000, // 1 ETH in wei
+    .nonce = 0,
+    .code_hash = [_]u8{0} ** 32,
+    .storage_root = [_]u8{0} ** 32,
+});
+
+// Balance shortcut.
+try db.set_balance(address_bytes, 42);
+```
+
+`Account` fields, from `src/storage/database_interface_account.zig`:
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `balance` | `u256` | Wei. Ordered first for cache locality. |
+| `code_hash` | `[32]u8` | keccak256 of the code. |
+| `storage_root` | `[32]u8` | Merkle root of the account's storage trie. |
+| `nonce` | `u64` | |
+| `delegated_address` | `?Address` | EIP-7702 delegation target; `null` normally. |
+
+`Account.zero()` builds an empty account, and `is_empty()` reports whether
+balance, nonce, and code are all zero.
+
+### Code
+
+Code is content-addressed. `set_code` hashes it and returns the hash; you then
+point an account at that hash:
+
+```zig
+const runtime_code = [_]u8{ 0x60, 0x2a, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3 };
+
+const code_hash = try db.set_code(&runtime_code);
+try db.set_account(address_bytes, .{
+    .balance = 0,
+    .nonce = 0,
+    .code_hash = code_hash,
+    .storage_root = [_]u8{0} ** 32,
+});
+
+// Read it back either way:
+const by_hash = try db.get_code(code_hash);
+const by_addr = try db.get_code_by_address(address_bytes);
+```
+
+`set_code` is idempotent — storing identical code twice returns the same hash
+without duplicating the buffer, which matters because otherwise repeated
+deployments would leak.
+
+`get_code_by_address` returns `error.AccountNotFound` when there is no account.
+It does not silently return empty code, because "no account" and "account with no
+code" are different states with different gas consequences.
+
+### Storage
+
+```zig
+try db.set_storage(address_bytes, 0, 42);
+const value = try db.get_storage(address_bytes, 0);  // 42
+```
+
+Slots are `u256` keys to `u256` values. Missing slots read as `0`, per the spec.
+
+## Snapshots and reverts
+
+Every mutation goes through the journal, so a revert is a rewind rather than a
+copy. `Evm` exposes it directly:
+
+```zig
+const snapshot = try evm.create_snapshot();
+
+// ... mutate state, execute calls ...
+
+evm.revert_to_snapshot(snapshot);   // everything since `snapshot` is undone
+```
+
+This is exactly what the `CALL` family and `REVERT` use internally: take a
+snapshot on entry to a sub-call, discard it on success, rewind to it on failure.
+Because snapshot ids are integers into an undo log, nesting is cheap and depth
+1024 is not a problem.
+
+`revert_to_snapshot` does not return an error — rewinding an undo log cannot
+fail, and making it fallible would force meaningless error handling into every
+call site.
+
+## The access list
+
+`AccessList` (`src/storage/access_list.zig`) implements EIP-2929 warm/cold
+accounting and EIP-2930 pre-warming. It is why `SLOAD` costs 2100 the first time
+and 100 afterwards.
+
+You rarely touch it directly — handlers consult it — but the addresses and slots
+touched during a call come back on the result:
+
+```zig
+var result = evm.call(params);
+defer result.deinit(allocator);
+
+for (result.accessed_addresses) |addr| {
+    std.log.info("touched {x}", .{addr.bytes});
+}
+for (result.accessed_storage) |access| {
+    std.log.info("slot {d} on {x}", .{ access.slot, access.address.bytes });
+}
+```
+
+That is enough to build an EIP-2930 access list for a subsequent transaction, or
+to drive a state-diff view in a debugger.
+
+## Self-destruct and created contracts
+
+Two more structures carry cross-call state that cannot live in the journal alone:
+
+- `SelfDestruct` (`src/storage/self_destruct.zig`) queues destructions, which the
+  spec applies at the end of the transaction rather than immediately.
+- `CreatedContracts` (`src/storage/created_contracts.zig`) records contracts
+  created in the current transaction, because EIP-6780 only lets `SELFDESTRUCT`
+  actually delete an account created in the same transaction.
+
+Destructions appear on the result as `result.selfdestructs`.
+
+## Memory ownership rules
+
+Guillotine allocates explicitly and never hides an allocator. Two rules cover
+almost every case:
+
+```zig
+// Same scope: pair the allocation with a defer immediately.
+const thing = try allocator.create(Thing);
+defer allocator.destroy(thing);
+
+// Ownership transfer: errdefer, so a later failure does not leak.
+const thing = try allocator.create(Thing);
+errdefer allocator.destroy(thing);
+thing.* = try Thing.init(allocator);
+return thing;
+```
+
+For results specifically: **`CallResult` owns heap memory and you must free it.**
+
+```zig
+var result = evm.call(params);
+defer result.deinit(allocator);
+```
+
+`deinit` unconditionally frees `output`, every log's `topics` and `data`, the log
+slice itself, and the accessed-address and accessed-storage slices. If you only
+want the logs and intend to keep them past the result, use `takeLogs()` and free
+them later with `CallResult.deinitLogsSlice(logs, allocator)`.
+
+## Per-call arena
+
+Each call level gets scratch space from a growing arena (`arena_capacity_limit`,
+default 64 MiB; `arena_growth_factor`, default 150%). Intermediate allocations
+inside a call come from there and are released in one operation when the call
+unwinds. Data that must outlive the call is copied out by `toOwnedResult()`,
+which is where the memory you are responsible for comes from.

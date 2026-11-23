@@ -21,64 +21,26 @@ pub fn JumpTable(comptime FrameType: type, comptime DispatchType: type) type {
 
         entries: []const JumpTableEntry,
 
-        /// Find the dispatch for a given PC using binary search with interpolated starting point
+        /// Find the dispatch for a given PC using branchless-friendly binary search
+        /// without expensive integer division on the dynamic jump hot path.
         pub fn findJumpTarget(self: @This(), target_pc: FrameType.PcType) ?Self {
-            // Early return for empty table
-            if (self.entries.len == 0) return null;
-            
-            // Quick check: if target is outside bounds, return early
-            if (target_pc < self.entries[0].pc or target_pc > self.entries[self.entries.len - 1].pc) {
+            const entries = self.entries;
+            const len = entries.len;
+            if (len == 0) return null;
+            if (target_pc < entries[0].pc or target_pc > entries[len - 1].pc) {
                 return null;
             }
-            
+
             var left: usize = 0;
-            var right: usize = self.entries.len;
-            
-            // Interpolated search optimization: Start at the expected position
-            // Since JUMPDESTs are roughly evenly distributed through bytecode,
-            // we can estimate where the target_pc would be in our sorted array
-            const max_pc = self.entries[self.entries.len - 1].pc;
-            const min_pc = self.entries[0].pc;
-            
-            if (max_pc > min_pc) {
-                // Calculate interpolated starting position
-                const pc_range = max_pc - min_pc;
-                const target_offset = target_pc - min_pc;
-                const estimated_index = (target_offset * self.entries.len) / pc_range;
-                
-                // Start our search at the interpolated position
-                // We'll expand outward from this point
-                const start_idx = @min(estimated_index, self.entries.len - 1);
-                
-                // Check if we got lucky with our estimate
-                if (self.entries[start_idx].pc == target_pc) {
-                    return self.entries[start_idx].dispatch;
-                }
-                
-                // Determine which direction to search based on our estimate
-                if (self.entries[start_idx].pc < target_pc) {
-                    left = start_idx + 1;
-                } else {
-                    right = start_idx;
-                }
+            var size: usize = len;
+            while (size > 1) {
+                const half = size >> 1;
+                const mid = left + half;
+                left = if (entries[mid].pc <= target_pc) mid else left;
+                size -= half;
             }
-
-            // Standard binary search from the adjusted bounds
-            const has_frame_config = @hasField(FrameType, "frame_config");
-            var loop_counter = if (has_frame_config) FrameType.frame_config.createLoopSafetyCounter().init(FrameType.frame_config.loop_quota orelse 0) else {};
-            while (left < right) {
-                if (has_frame_config) loop_counter.inc();
-                const mid = left + (right - left) / 2;
-                const entry = self.entries[mid];
-
-                if (entry.pc == target_pc) return entry.dispatch;
-                if (entry.pc < target_pc) {
-                    left = mid + 1;
-                } else {
-                    right = mid;
-                }
-            }
-            return null;
+            const entry = entries[left];
+            return if (entry.pc == target_pc) entry.dispatch else null;
         }
 
         /// Find the PC for a given dispatch pointer
