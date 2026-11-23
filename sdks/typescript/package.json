@@ -1,21 +1,23 @@
 {
 	"name": "@tevm/guillotine",
-	"version": "0.0.1",
-	"private": false,
-	"description": "TypeScript SDK for Guillotine Evm",
+	"version": "0.1.0",
+	"description": "Guillotine EVM for TypeScript: Bun FFI bindings to the native libguillotine_ffi library",
 	"keywords": [
 		"evm",
 		"ethereum",
 		"guillotine",
 		"zig",
-		"wasm",
-		"typescript",
-		"web3",
-		"blockchain"
+		"ffi",
+		"bun",
+		"typescript"
 	],
+	"homepage": "https://github.com/evmts/guillotine/tree/main/sdks/typescript",
+	"bugs": {
+		"url": "https://github.com/evmts/guillotine/issues"
+	},
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/evmts/guillotine.git",
+		"url": "git+https://github.com/evmts/guillotine.git",
 		"directory": "sdks/typescript"
 	},
 	"license": "MIT",
@@ -26,55 +28,41 @@
 	"sideEffects": false,
 	"type": "module",
 	"exports": {
-		"./package.json": "./package.json",
 		".": {
-			"import": {
-				"types": "./dist/index.d.ts",
-				"default": "./dist/index.js"
-			},
-			"require": {
-				"types": "./dist/index.d.cts",
-				"default": "./dist/index.cjs"
-			}
-		}
+			"types": "./dist/index.d.ts",
+			"bun": "./dist/index.js",
+			"default": "./dist/index.js"
+		},
+		"./package.json": "./package.json"
 	},
-	"main": "dist/index.cjs",
-	"module": "dist/index.js",
-	"types": "dist/index.d.ts",
+	"types": "./dist/index.d.ts",
 	"files": [
 		"dist",
-		"src",
-		"!src/**/*.spec.ts",
-		"!src/**/*.test.ts"
+		"prebuilds",
+		"README.md"
 	],
+	"engines": {
+		"bun": ">=1.1.0"
+	},
 	"scripts": {
-		"all": "bun install && bun run build && bun lint && bun format && bun test:run && bun lint:deps && bun lint:package",
-		"build": "bun run build:dist && bun run build:types",
-		"build:dist": "tsup",
-		"build:types": "tsup --dts-only",
-		"clean": "rm -rf node_modules && rm -rf dist && rm -rf .turbo",
+		"build": "tsup",
+		"build:native": "cd ../.. && zig build shared -Doptimize=ReleaseFast && cd sdks/typescript && bun scripts/copy-native.ts",
+		"clean": "rm -rf dist prebuilds",
 		"format": "biome format . --write",
-		"format:check": "biome format .",
-		"generate:docs": "typedoc",
-		"lint": "biome check . --write --unsafe",
-		"lint:check": "biome check . --verbose",
-		"lint:deps": "bunx depcheck",
-		"lint:package": "bunx publint --strict && bunx @arethetypeswrong/cli --pack",
-		"package:up": "bun update --latest",
-		"test": "bun test --watch",
+		"lint": "biome check .",
+		"lint:package": "publint --strict && attw --pack --profile esm-only",
+		"prepublishOnly": "bun run build:native && bun run build && bun run typecheck && bun test && bun run lint:package",
+		"test": "bun test",
 		"test:coverage": "bun test --coverage",
-		"test:run": "bun test",
 		"typecheck": "tsc --noEmit"
 	},
 	"devDependencies": {
-		"@arethetypeswrong/cli": "^0.21.0",
-		"@biomejs/biome": "^2.2.3",
-		"@types/bun": "latest",
-		"depcheck": "^1.5.1",
-		"publint": "^0.5.0",
-		"tsup": "^8.5.0",
-		"typedoc": "^0.29.1",
-		"typescript": "^5.9.2"
+		"@arethetypeswrong/cli": "^0.18.5",
+		"@biomejs/biome": "^2.6.8",
+		"@types/bun": "^1.4.1",
+		"publint": "^0.3.25",
+		"tsup": "^8.5.1",
+		"typescript": "^5.9.3"
 	},
 	"publishConfig": {
 		"access": "public"

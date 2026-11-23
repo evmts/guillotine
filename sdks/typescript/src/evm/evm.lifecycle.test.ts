@@ -1,7 +1,8 @@
 import { describe, it, expect } from "bun:test";
 import { GuillotineEvm } from "./evm.js";
 import { U256 } from "../primitives/u256.js";
-import { testAddress } from "../../test/test-helpers.js";
+import { Bytes } from "../primitives/bytes.js";
+import { defaultExecutionParams, testAddress } from "../../test/test-helpers.js";
 
 describe("GuillotineEvm - Lifecycle Management", () => {
 	describe("Multiple Instance Coexistence", () => {
@@ -101,9 +102,9 @@ describe("GuillotineEvm - Lifecycle Management", () => {
 		});
 
 		it("should handle mixed tracing and non-tracing instances", async () => {
-			const evmNoTrace1 = await GuillotineEvm.create(undefined, false);
-			const evmWithTrace = await GuillotineEvm.create(undefined, true);
-			const evmNoTrace2 = await GuillotineEvm.create(undefined, false);
+			const evmNoTrace1 = await GuillotineEvm.create({}, { tracing: false });
+			const evmWithTrace = await GuillotineEvm.create({}, { tracing: true });
+			const evmNoTrace2 = await GuillotineEvm.create({}, { tracing: false });
 
 			const addr = testAddress(77);
 			
@@ -112,7 +113,11 @@ describe("GuillotineEvm - Lifecycle Management", () => {
 			await evmNoTrace2.setBalance(addr, U256.fromBigInt(300n));
 
 			expect((await evmNoTrace1.getBalance(addr)).toBigInt()).toBe(100n);
-			expect((await evmWithTrace.getBalance(addr)).toBigInt()).toBe(200n);
+			// Tracing handles have no native state reads; the SDK refuses instead of casting the handle.
+			await expect(evmWithTrace.getBalance(addr)).rejects.toMatchObject({ type: "UnsupportedOperation" });
+			await evmWithTrace.setCode(testAddress(78), Bytes.fromBytes(new Uint8Array([0x60, 0x01, 0x50, 0x00]))); // PUSH1 1 POP STOP
+			const traced = await evmWithTrace.call(defaultExecutionParams({ caller: addr, to: testAddress(78) }));
+			expect(traced.traceJson).not.toBeNull();
 			expect((await evmNoTrace2.getBalance(addr)).toBigInt()).toBe(300n);
 
 			evmNoTrace1.close();

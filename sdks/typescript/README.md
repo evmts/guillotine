@@ -1,447 +1,86 @@
-# Guillotine TypeScript
+# @tevm/guillotine
 
-> Experimental/PoC: This SDK is a vibecoded proof-of-concept. APIs are unstable and may change. We're looking for early users to try it and tell us what APIs you want — please open an issue or ping us on Telegram.
+TypeScript bindings for the [Guillotine](https://github.com/evmts/guillotine) EVM. The package calls the native `libguillotine_ffi` library through [Bun FFI](https://bun.sh/docs/api/ffi); the ABI is `sdks/c/include/guillotine.h`.
 
-📚 **[View Full Documentation](https://guillotine.dev/sdks/typescript)**
+| Runtime | Status |
+| --- | --- |
+| Bun ≥ 1.1 | Supported |
+| Node.js, browsers | Not supported. The WASM backend was removed because it ran a stale binary with a different ABI. |
 
-## Status
-
-- Maturity: Experimental proof‑of‑concept
-- API stability: Unstable; breaking changes expected
-- Feedback: https://github.com/evmts/Guillotine/issues or Telegram https://t.me/+ANThR9bHDLAwMjUx
-
-High-performance Ethereum Virtual Machine (Evm) implementation for TypeScript/JavaScript, powered by WebAssembly.
-
-## Features
-
-- 🚀 **High Performance**: WebAssembly-compiled Zig implementation
-- 🔒 **Type Safe**: Full TypeScript support with strict typing
-- 🧩 **Modular**: Separate modules for different Evm components
-- 🔄 **Async First**: Non-blocking operations with Promise-based API
-- 🧪 **Well Tested**: Comprehensive test suite with real Evm execution
-- 📦 **Zero Dependencies**: Only runtime dependency is the WASM module
-- 🌐 **Universal**: Works in Node.js, Bun, and browsers
-
-## Installation
+## Install
 
 ```bash
-npm install @tevm/guillotine
-# or
-yarn add @tevm/guillotine
-# or
 bun add @tevm/guillotine
 ```
 
-### WASM Module Setup
+The package loads the native library from, in order:
 
-The SDK requires a WebAssembly module compiled from the Zig implementation. The loader will automatically search for the WASM file in these locations:
+1. `GuillotineEvm.create(block, { libraryPath })`
+2. the `GUILLOTINE_LIB_PATH` environment variable
+3. `prebuilds/<platform>-<arch>/libguillotine_ffi.<dylib|so|dll>` inside the package
 
-1. Custom path if provided to `GuillotineEvm.create(wasmPath)`
-2. `../wasm/guillotine-evm.wasm` (relative to package)
-3. `../../../../zig-out/bin/guillotine-evm.wasm` (development)
-4. `zig-out/bin/guillotine-evm.wasm` (project root)
+## Use
 
-For browser usage, ensure the WASM file is served at `/wasm/guillotine-evm.wasm`.
+```ts
+import { Address, Bytes, GuillotineEvm, U256 } from '@tevm/guillotine';
 
-## Quick Start
+using evm = await GuillotineEvm.create({ chainId: 1n });
 
-```typescript
-import { GuillotineEvm, Address, U256, Bytes } from '@tevm/guillotine';
+const caller = Address.fromHex('0x00000000000000000000000000000000000000a1');
+const contract = Address.fromHex('0x00000000000000000000000000000000000000c0');
 
-// Create an Evm instance
-const evm = await GuillotineEvm.create();
+// PUSH1 2 PUSH1 3 ADD PUSH1 0 MSTORE PUSH1 32 PUSH1 0 RETURN
+await evm.setCode(contract, Bytes.fromHex('0x600260030160005260206000f3'));
 
-// Execute bytecode
-const result = await evm.execute({
-  bytecode: Bytes.from('0x6001600201'), // PUSH1 1, PUSH1 2, ADD
-  gasLimit: 100000n,
-  caller: Address.from('0x1234567890123456789012345678901234567890'),
-  value: U256.zero()
-});
+const gas = 1_000_000n;
+const result = await evm.call({ caller, to: contract, value: U256.zero(), input: Bytes.empty(), gas });
 
-if (result.success) {
-  console.log('Gas used:', result.gasUsed);
-  console.log('Return data:', result.returnData.toHex());
-} else {
-  console.log('Execution failed:', result.revertReason?.toString());
-}
-
-// Clean up
-evm.close();
+result.success; // true
+U256.fromBytes(result.output.toBytes()).toBigInt(); // 5n
+result.getGasUsed(gas); // includes the 21000 intrinsic gas
 ```
 
-## Core Concepts
+`using` releases the native handle at scope exit. Without it, call `evm.dispose()` (or `close()`); both are idempotent. Handles are not released by garbage collection.
 
-### Evm Instance
+## API
 
-The main entry point for executing Evm bytecode:
+| Method | Mainnet EVM | Tracing EVM |
+| --- | --- | --- |
+| `call(params)` | ✓ | ✓, returns `traceJson` |
+| `simulate(params)` (CALL only, no state commit) | ✓ | throws `UnsupportedOperation` |
+| `setBalance`, `setNonce`, `setCode` | ✓ | ✓ |
+| `setStorage`, `getStorage`, `getBalance`, `getCode` | ✓ | throws `UnsupportedOperation` |
 
-```typescript
-// Create Evm instance (no options currently supported)
-const evm = await GuillotineEvm.create();
+Create a tracing EVM with `GuillotineEvm.create(block, { tracing: true })`. The native library has no state readers for tracing handles, so the SDK refuses those calls instead of passing an incompatible handle.
 
-// Optionally specify custom WASM path
-const evm = await GuillotineEvm.create('/path/to/guillotine-evm.wasm');
-```
+`ExecutionResult` holds `success`, `gasLeft`, `output` (return or revert data), `logs`, `selfdestructs`, `accessedAddresses`, `accessedStorage`, `createdAddress`, and `traceJson`. A reverted call returns `success: false` with its revert data; it does not throw. `errorMessage` is `null` unless the native library reports a reason.
 
-### State Management
+Errors are `GuillotineError` instances with a `type`:
 
-Manage blockchain state with the built-in methods:
+| `type` | Cause |
+| --- | --- |
+| `InvalidValue` | Input outside its native range: u64 fields, `chainId` > 65535, `prevRandao` not 32 bytes, unknown call type |
+| `UnsupportedOperation` | Operation not available on this handle type |
+| `VMNotInitialized` | Handle already disposed |
+| `VMCreationFailed`, `ExecutionFailed`, `StateError` | Native failure; the message includes `guillotine_get_last_error()` |
+| `InitializationFailed` | Native library missing or not loadable |
 
-```typescript
-// Set account balance
-await evm.setBalance(
-  Address.from('0x742d35Cc6634C0532925a3b844Bc9e7595f7BBDc'),
-  U256.from('1000000000000000000') // 1 ETH
-);
+## Develop
 
-// Get account balance
-const balance = await evm.getBalance(address);
-
-// Set contract code
-await evm.setCode(contractAddress, contractBytecode);
-
-// Get contract code
-const code = await evm.getCode(contractAddress);
-
-// Set storage slot
-await evm.setStorage(contractAddress, key, value);
-
-// Get storage slot
-const value = await evm.getStorage(contractAddress, key);
-```
-
-### Transaction Execution
-
-Execute bytecode with execution parameters:
-
-```typescript
-const result = await evm.execute({
-  bytecode: Bytes.from('0x6001600101'), // PUSH1 1, PUSH1 1, ADD
-  caller: Address.from('0x742d35Cc6634C0532925a3b844Bc9e7595f7BBDc'),
-  to: Address.from('0x1234567890123456789012345678901234567890'),
-  value: U256.from('1000000000000000000'),
-  input: Bytes.from('0x'),
-  gasLimit: 100000n
-});
-
-// Check execution result
-if (result.isSuccess()) {
-  console.log('Success! Gas used:', result.gasUsed);
-  console.log('Return data:', result.returnData.toHex());
-} else {
-  console.log('Failed! Gas used:', result.gasUsed);
-  if (result.hasRevertReason()) {
-    console.log('Revert reason:', result.getRevertReasonString());
-  }
-}
-```
-
-## API Documentation
-
-### Main Classes
-
-- **GuillotineEvm**: Main execution engine with state management
-- **ExecutionResult**: Result of Evm execution with gas usage and output data
-- **ExecutionParams**: Parameters for Evm execution (bytecode, caller, etc.)
-
-### Primitive Types
-
-- **Address**: 20-byte Ethereum address with hex string and byte array conversion
-- **U256**: 256-bit unsigned integer with arithmetic and bitwise operations  
-- **Bytes**: Variable-length byte array with hex string conversion
-- **Hash**: 32-byte hash value with hex string conversion
-
-### Core API
-
-#### GuillotineEvm
-
-```typescript
-class GuillotineEvm {
-  // Create new Evm instance
-  static async create(wasmPath?: string): Promise<GuillotineEvm>
-  
-  // Execute bytecode
-  async execute(params: ExecutionParams): Promise<ExecutionResult>
-  
-  // State management
-  async setBalance(address: Address, balance: U256): Promise<void>
-  async getBalance(address: Address): Promise<U256>
-  async setCode(address: Address, code: Bytes): Promise<void>  
-  async getCode(address: Address): Promise<Bytes>
-  async setStorage(address: Address, key: U256, value: U256): Promise<void>
-  async getStorage(address: Address, key: U256): Promise<U256>
-  
-  // Utilities
-  getVersion(): string
-  close(): void
-}
-```
-
-#### ExecutionParams
-
-```typescript
-interface ExecutionParams {
-  bytecode: Bytes        // The bytecode to execute
-  caller?: Address       // Caller address (defaults to zero address)
-  to?: Address          // Target address (defaults to zero address) 
-  value?: U256          // Value to transfer (defaults to zero)
-  input?: Bytes         // Input data (defaults to empty)
-  gasLimit?: bigint     // Gas limit (defaults to 1,000,000)
-}
-```
-
-#### ExecutionResult
-
-```typescript
-class ExecutionResult {
-  readonly success: boolean
-  readonly gasUsed: bigint
-  readonly returnData: Bytes
-  readonly revertReason: Bytes
-  
-  // Helper methods
-  isSuccess(): boolean
-  isFailure(): boolean
-  hasReturnData(): boolean
-  hasRevertReason(): boolean
-  getRevertReasonString(): string | null
-  getReturnDataString(): string | null
-}
-```
-
-#### Error Handling
-
-```typescript
-// Error types
-type GuillotineErrorType = 
-  | 'InitializationFailed'
-  | 'WasmLoadFailed' 
-  | 'WasmNotLoaded'
-  | 'VMCreationFailed'
-  | 'VMNotInitialized'
-  | 'ExecutionFailed'
-  | 'InvalidBytecode'
-  | 'InvalidAddress'
-  | 'InvalidValue'
-  | 'OutOfGas'
-  | 'StackOverflow'
-  | 'StackUnderflow' 
-  | 'InvalidJump'
-  | 'InvalidOpcode'
-  | 'MemoryError'
-  | 'StateError'
-  | 'UnknownError';
-
-class GuillotineError extends Error {
-  readonly type: GuillotineErrorType;
-  readonly cause?: Error;
-  
-  // Static factory methods
-  static initializationFailed(message: string, cause?: Error): GuillotineError
-  static executionFailed(message: string, cause?: Error): GuillotineError
-  static invalidBytecode(message: string): GuillotineError
-  // ... other static methods
-}
-```
-
-## Examples
-
-### Simple Bytecode Execution
-
-```typescript
-import { GuillotineEvm, Address, U256, Bytes } from '@tevm/guillotine';
-
-const evm = await GuillotineEvm.create();
-
-// Execute simple arithmetic: PUSH1 5, PUSH1 3, ADD
-const result = await evm.execute({
-  bytecode: Bytes.from('0x6005600301'),
-  gasLimit: 100000n
-});
-
-console.log('Success:', result.isSuccess());
-console.log('Gas used:', result.gasUsed);
-console.log('Return data:', result.returnData.toHex());
-
-evm.close();
-```
-
-### Working with Account State
-
-```typescript
-const evm = await GuillotineEvm.create();
-
-const address = Address.from('0x742d35Cc6634C0532925a3b844Bc9e7595f7BBDc');
-
-// Set initial balance
-await evm.setBalance(address, U256.from('1000000000000000000')); // 1 ETH
-
-// Check balance
-const balance = await evm.getBalance(address);
-console.log('Balance:', balance.toString(), 'wei');
-
-// Set contract code
-const code = Bytes.from('0x6001600101'); // PUSH1 1, PUSH1 1, ADD
-await evm.setCode(address, code);
-
-// Get code back
-const retrievedCode = await evm.getCode(address);
-console.log('Code:', retrievedCode.toHex());
-
-// Set storage
-const key = U256.from(0);
-const value = U256.from(42);
-await evm.setStorage(address, key, value);
-
-// Get storage
-const retrievedValue = await evm.getStorage(address, key);
-console.log('Storage[0]:', retrievedValue.toString());
-
-evm.close();
-```
-
-### Error Handling
-
-```typescript
-import { GuillotineError } from '@tevm/guillotine';
-
-try {
-  const evm = await GuillotineEvm.create();
-  
-  const result = await evm.execute({
-    bytecode: Bytes.from('0xfd'), // REVERT opcode
-    gasLimit: 100000n
-  });
-  
-  if (result.isFailure()) {
-    console.log('Execution reverted');
-    if (result.hasRevertReason()) {
-      console.log('Revert reason:', result.getRevertReasonString());
-    }
-  }
-  
-  evm.close();
-} catch (error) {
-  if (error instanceof GuillotineError) {
-    console.log('Guillotine error:', error.type, error.message);
-  } else {
-    console.log('Unknown error:', error);
-  }
-}
-```
-
-## Performance
-
-Guillotine is designed for maximum performance:
-
-- **WebAssembly**: Core Evm implementation compiled from Zig to WASM
-- **Zero-copy operations**: Minimal data copying between JS and WASM
-- **Optimized bytecode**: Advanced bytecode analysis and optimization
-- **Memory pooling**: Efficient memory management in WASM
-
-Benchmarks show 2-10x performance improvements over pure JavaScript implementations for typical smart contract execution.
-
-## Development
+From the repository root, build the native library, then work in `sdks/typescript`:
 
 ```bash
-# Install dependencies
+zig build shared
+cd sdks/typescript
 bun install
-
-# Run tests
-bun test
-
-# Run specific test file
-bun test src/primitives/address.test.ts
-
-# Build TypeScript
-bun run build
-
-# Lint code
-bun run lint
-
-# Format code
-bun run format
+bun run build       # dist/ via tsup
+bun run typecheck
+bun test            # loads ../../zig-out/lib unless GUILLOTINE_LIB_PATH is set
+bun run lint:package  # publint + are-the-types-wrong on the packed tarball
 ```
 
-### Project Structure
-
-```
-src/
-├── evm/           # Evm execution engine
-├── primitives/    # Ethereum primitive types (Address, U256, Bytes, Hash)
-├── wasm/          # WebAssembly loading and bindings
-├── errors.ts      # Error types and handling
-└── index.ts       # Main exports
-```
-
-## Testing
-
-All code is developed using Test-Driven Development (TDD) with Bun test:
-
-```typescript
-import { describe, it, expect } from 'bun:test';
-import { Address } from './address';
-
-describe('Address', () => {
-  it('should create address from hex string', () => {
-    const addr = Address.fromHex('0x742d35Cc6634C0532925a3b844Bc9e7595f7BBDc');
-    expect(addr.toHex()).toBe('0x742d35cc6634c0532925a3b844bc9e7595f7bbdc');
-  });
-  
-  it('should detect zero address', () => {
-    const zero = Address.zero();
-    expect(zero.isZero()).toBe(true);
-  });
-});
-```
-
-Run tests with:
-
-```bash
-# Run all tests
-bun test
-
-# Run specific test file
-bun test src/primitives/address.test.ts
-
-# Run tests with coverage
-bun test --coverage
-```
-
-## Contributing
-
-Contributions are welcome! Please read our [Contributing Guide](../../CONTRIBUTING.md) for details.
+`bun run build:native` builds a ReleaseFast library and copies it into `prebuilds/<platform>-<arch>/`. `prepublishOnly` runs it, so a publish ships only the host platform's prebuild. Publishing for more platforms requires building each one into `prebuilds/` before `npm publish`.
 
 ## License
 
-MIT License - see [LICENSE](../../LICENSE) for details.
-
-## Related Projects
-
-- [Guillotine](https://github.com/evmts/guillotine) - The main Zig implementation
-- [Guillotine Go](../go) - Go bindings
-- [Guillotine Python](../python) - Python bindings
-- [Guillotine Rust](../rust) - Rust bindings
-
-## Bun native FFI
-
-Bun can use `@tevm/guillotine` through the TypeScript/WASM API above. Direct
-native execution is also possible through `bun:ffi` and the C library built
-by `zig build shared` from the repository root; it is a custom binding rather
-than a second npm SDK or an exported backend of this package.
-
-The removed `sdks/bun` prototype had native balance/code/storage/nonce setters,
-call and simulation support, and state dumps. Those capabilities remain
-available through `src/evm_c_api.zig`; see the
-[Bun FFI template](../../docs/building-custom-sdks.md#bun-ffi) and
-[C header](../c/include/guillotine.h). Its handwritten struct offsets and
-call-type enum must not be reused: native arrays are inline, `CALLCODE` is 1,
-`DELEGATECALL` is 2, and `STATICCALL` is 3. Simulation currently accepts only
-`CALL` (0).
-
-Use `bigint` for `uint64_t` values, retain input buffers during calls, copy
-result buffers before `guillotine_free_result`, and destroy handles before
-library cleanup. Native structs use the target C ABI; the WASM loader's
-32-bit offsets do not apply to a native Bun process. A small compiled C bridge
-can expose accessors and construct structs without handwritten JS offsets.
+MIT

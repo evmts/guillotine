@@ -13,7 +13,9 @@ byte-sized enum representations, and common 64-bit layouts. It does not load
 the library or prove native execution.
 
 `basic_test.c` links the shared native library and exercises initialization,
-EVM creation/destruction, balances, contract execution, and deployment.
+EVM creation/destruction, balances, contract execution, CREATE deployment
+with deployed-code readback, trace JSON (tracing handles only), and revert
+output with a bounded error string.
 `basic` builds `zig build shared` first; `test` runs both programs. Native
 crypto dependencies must be built for the selected target.
 

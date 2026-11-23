@@ -103,7 +103,7 @@ pub const BlockInfoFFI = extern struct {
 // Thread-local allocator for FFI
 threadlocal var ffi_allocator: ?std.mem.Allocator = null;
 threadlocal var last_error: [256]u8 = undefined;
-threadlocal var last_error_z: [257]u8 = undefined;
+threadlocal var last_error_z: [257]u8 = [_]u8{0} ** 257;
 const empty_error: [1]u8 = .{0};
 const empty_buffer: [0]u8 = .{};
 
@@ -806,7 +806,8 @@ export fn guillotine_set_code_tracing(handle: *EvmHandle, address: *const [20]u8
 }
 
 // Helper function to convert CallResult to EvmResult
-fn convertCallResultToEvmResult(result: anytype, allocator: std.mem.Allocator) ?*EvmResult {
+/// Copy a CallResult into an FFI-owned EvmResult. `include_trace` is true only for tracing handles.
+fn convertCallResultToEvmResult(result: anytype, allocator: std.mem.Allocator, include_trace: bool) ?*EvmResult {
     // Allocate result structure on heap
     const evm_result = allocator.create(EvmResult) catch {
         setError("Failed to allocate result", .{});
@@ -816,10 +817,11 @@ fn convertCallResultToEvmResult(result: anytype, allocator: std.mem.Allocator) ?
     // Set basic fields
     evm_result.success = result.success;
     evm_result.gas_left = result.gas_left;
+    // error_message aliases the thread-local error buffer; callers copy it before the next FFI call.
     evm_result.error_message = if (result.error_info) |info| blk: {
-        _ = std.fmt.bufPrintZ(&last_error_z, "{s}", .{info}) catch "Unknown error";
+        setError("{s}", .{info});
         break :blk @ptrCast(&last_error_z);
-    } else if (!result.success) @ptrCast(&last_error_z) else @as([*:0]const u8, @ptrCast(&empty_error));
+    } else @as([*:0]const u8, @ptrCast(&empty_error));
 
     // Copy output if present
     if (result.output.len > 0) {
@@ -1001,153 +1003,40 @@ fn convertCallResultToEvmResult(result: anytype, allocator: std.mem.Allocator) ?
         evm_result.has_created_address = false;
     }
 
-    // If we have an execution trace, serialize it to JSON in-memory
     evm_result.trace_json = @as([*]const u8, @ptrCast(&empty_error));
     evm_result.trace_json_len = 0;
-    if (result.trace) |*trace| {
-        // Use in-memory JSON serialization
-        // For extremely large traces (>100MB), consider streaming to file
-        // This would require async I/O or chunked response handling in the FFI layer
-        if (false) {
-            // Disabled file-based approach
-            const w = undefined;
-            w.writeAll("{\"structLogs\":[") catch {};
-            for (trace.steps, 0..) |step, i| {
-                if (i > 0) w.writeAll(",") catch {};
-                w.writeAll("{") catch {};
-                w.print("\"pc\":{d},", .{step.pc}) catch {};
-                w.print("\"op\":\"{s}\",", .{step.opcode_name}) catch {};
-                w.print("\"gas\":{d},", .{step.gas}) catch {};
-                w.print("\"gasCost\":{d},", .{step.gas_cost}) catch {};
-                w.print("\"depth\":{d},", .{step.depth}) catch {};
-                w.writeAll("\"stack\":[") catch {};
-                for (step.stack, 0..) |val, j| {
-                    if (j > 0) w.writeAll(",") catch {};
-                    w.print("\"0x{x}\"", .{val}) catch {};
-                }
-                w.writeAll("]") catch {};
-                w.print(",\"memSize\":{d}", .{step.mem_size}) catch {};
-                w.writeAll("}") catch {};
-            }
-            w.writeAll("]}") catch {};
-
-            // Store file path as the "trace" (prefixed with "file://")
-            const path_prefix = "file://";
-            const real_path = 0; // Disabled
-            _ = real_path;
-            const tmp_path = allocator.alloc(u8, 0) catch {
-                setError("Failed to get temp file path", .{});
-                allocator.destroy(evm_result);
+    if (include_trace) {
+        if (result.trace) |*trace| {
+            const json = writeTraceJson(allocator, trace) catch {
+                setError("Failed to serialize trace JSON", .{});
+                guillotine_free_result(evm_result);
                 return null;
             };
-            const full_path = allocator.alloc(u8, path_prefix.len + tmp_path.len) catch {
-                allocator.free(tmp_path);
-                setError("Failed to allocate path string", .{});
-                allocator.destroy(evm_result);
-                return null;
-            };
-            @memcpy(full_path[0..path_prefix.len], path_prefix);
-            @memcpy(full_path[path_prefix.len..], tmp_path);
-            allocator.free(tmp_path);
-
-            evm_result.trace_json = full_path.ptr;
-            evm_result.trace_json_len = full_path.len;
-        } else {
-            // For smaller traces, use in-memory approach
-            var buf = std.array_list.AlignedManaged(u8, null).init(allocator);
-            errdefer buf.deinit();
-            const w = buf.writer();
-            w.writeAll("{\"structLogs\":[") catch {
-                allocator.destroy(evm_result);
-                setError("Failed to write trace json", .{});
-                return null;
-            };
-            for (trace.steps, 0..) |step, i| {
-                if (i > 0) w.writeAll(",") catch {
-                    setError("Failed to write JSON separator", .{});
-                    allocator.destroy(evm_result);
-                    return null;
-                };
-                w.writeAll("{") catch {
-                    setError("Failed to write step start", .{});
-                    allocator.destroy(evm_result);
-                    return null;
-                };
-                w.print("\"pc\":{d},", .{step.pc}) catch {
-                    setError("Failed to write pc", .{});
-                    allocator.destroy(evm_result);
-                    return null;
-                };
-                w.print("\"op\":\"{s}\",", .{step.opcode_name}) catch {
-                    setError("Failed to write opcode", .{});
-                    allocator.destroy(evm_result);
-                    return null;
-                };
-                w.print("\"gas\":{d},", .{step.gas}) catch {
-                    setError("Failed to write gas", .{});
-                    allocator.destroy(evm_result);
-                    return null;
-                };
-                w.print("\"gasCost\":{d},", .{step.gas_cost}) catch {
-                    setError("Failed to write gas cost", .{});
-                    allocator.destroy(evm_result);
-                    return null;
-                };
-                w.print("\"depth\":{d},", .{step.depth}) catch {
-                    setError("Failed to write depth", .{});
-                    allocator.destroy(evm_result);
-                    return null;
-                };
-                w.writeAll("\"stack\":[") catch {
-                    setError("Failed to write stack start", .{});
-                    allocator.destroy(evm_result);
-                    return null;
-                };
-                for (step.stack, 0..) |val, j| {
-                    if (j > 0) w.writeAll(",") catch {
-                        setError("Failed to write stack separator", .{});
-                        allocator.destroy(evm_result);
-                        return null;
-                    };
-                    w.print("\"0x{x}\"", .{val}) catch {
-                        setError("Failed to write stack value", .{});
-                        allocator.destroy(evm_result);
-                        return null;
-                    };
-                }
-                w.writeAll("]") catch {
-                    setError("Failed to write stack end", .{});
-                    allocator.destroy(evm_result);
-                    return null;
-                };
-                w.print(",\"memSize\":{d}", .{step.mem_size}) catch {
-                    setError("Failed to write memory size", .{});
-                    allocator.destroy(evm_result);
-                    return null;
-                };
-                w.writeAll("}") catch {
-                    setError("Failed to write step end", .{});
-                    allocator.destroy(evm_result);
-                    return null;
-                };
-            }
-            w.writeAll("]}") catch {
-                setError("Failed to close trace JSON", .{});
-                allocator.destroy(evm_result);
-                return null;
-            };
-            // Duplicate into a stable allocation and then free the buffer
-            const bytes = allocator.dupe(u8, buf.items) catch {
-                setError("Failed to finalize trace json", .{});
-                allocator.destroy(evm_result);
-                return null;
-            };
-            evm_result.trace_json = bytes.ptr;
-            evm_result.trace_json_len = bytes.len;
+            evm_result.trace_json = json.ptr;
+            evm_result.trace_json_len = json.len;
         }
     }
 
     return evm_result;
+}
+
+/// Serialize an execution trace as `{"structLogs":[...]}`. Caller owns the returned slice.
+fn writeTraceJson(allocator: std.mem.Allocator, trace: anytype) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    errdefer out.deinit();
+    const w = &out.writer;
+    try w.writeAll("{\"structLogs\":[");
+    for (trace.steps, 0..) |step, i| {
+        if (i > 0) try w.writeAll(",");
+        try w.print("{{\"pc\":{d},\"op\":\"{s}\",\"gas\":{d},\"gasCost\":{d},\"depth\":{d},\"stack\":[", .{ step.pc, step.opcode_name, step.gas, step.gas_cost, step.depth });
+        for (step.stack, 0..) |val, j| {
+            if (j > 0) try w.writeAll(",");
+            try w.print("\"0x{x}\"", .{val});
+        }
+        try w.print("],\"memSize\":{d}}}", .{step.mem_size});
+    }
+    try w.writeAll("]}");
+    return out.toOwnedSlice();
 }
 
 // Execute a call
@@ -1231,7 +1120,7 @@ export fn guillotine_call(handle: *EvmHandle, params: *const CallParams) ?*EvmRe
     const result = evm_ptr.call(call_params);
 
     // Convert result to FFI format
-    return convertCallResultToEvmResult(result, allocator);
+    return convertCallResultToEvmResult(result, allocator, false);
 }
 
 // Execute a call (tracing)
@@ -1261,7 +1150,7 @@ export fn guillotine_call_tracing(handle: *EvmHandle, params: *const CallParams)
         },
     };
     const result = evm_ptr.call(call_params);
-    return convertCallResultToEvmResult(result, allocator);
+    return convertCallResultToEvmResult(result, allocator, true);
 }
 
 // Get account balance
@@ -1611,7 +1500,7 @@ export fn guillotine_simulate(handle: *EvmHandle, params: *const CallParams) ?*E
     const result = evm_ptr.simulate(call_params);
 
     // Convert result to FFI format
-    return convertCallResultToEvmResult(result, allocator);
+    return convertCallResultToEvmResult(result, allocator, false);
 }
 
 // ============================================================================

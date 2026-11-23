@@ -164,8 +164,10 @@ describe("GuillotineEvm - Execution", () => {
 				}),
 			);
 
+			// INVALID is an exceptional halt: all gas consumed, no return data.
 			assertFailure(result);
-			expect(result.errorMessage).toBeDefined();
+			expect(result.gasLeft).toBe(0n);
+			expect(result.output.isEmpty()).toBe(true);
 		});
 	});
 
@@ -249,7 +251,7 @@ describe("GuillotineEvm - Execution", () => {
 		});
 
 		// TODO: Fix self-transfer value accounting in Zig implementation
-		it.todo("should handle self-transfer", async () => {
+		it("should handle self-transfer", async () => {
 			const addr = testAddress(206);
 			await evm.setBalance(addr, U256.fromBigInt(1000n));
 			await evm.setCode(addr, Bytes.empty());
@@ -271,7 +273,7 @@ describe("GuillotineEvm - Execution", () => {
 
 	describe("Storage Operations", () => {
 		// TODO: Fix SSTORE persistence in Zig implementation
-		it.todo("should execute SSTORE and persist storage", async () => {
+		it("should execute SSTORE and persist storage", async () => {
 			const contractAddr = testAddress(300);
 			const code = storeBytecode(5, 42); // Store 42 at slot 5
 
@@ -293,10 +295,19 @@ describe("GuillotineEvm - Execution", () => {
 		});
 
 		// TODO: Fix SLOAD RuntimeError in Zig implementation
-		it.todo("should read storage with SLOAD", async () => {
+		it("should read storage with SLOAD", async () => {
 			const contractAddr = testAddress(301);
-			// PUSH1 0 SLOAD PUSH1 0 MSTORE PUSH1 32 PUSH1 0 RETURN
-			const code = hex("0x6000546000526020600f3");
+			const code = Bytes.fromBytes(
+				new Uint8Array([
+					0x60, 0x00, // PUSH1 0
+					0x54, // SLOAD
+					0x60, 0x00, // PUSH1 0
+					0x52, // MSTORE
+					0x60, 0x20, // PUSH1 32
+					0x60, 0x00, // PUSH1 0
+					0xf3, // RETURN
+				]),
+			);
 
 			// Ensure account exists, set code and storage
 			await evm.setBalance(contractAddr, U256.zero());
@@ -317,7 +328,7 @@ describe("GuillotineEvm - Execution", () => {
 		});
 
 		// TODO: Fix SSTORE persistence in Zig implementation
-		it.todo("should handle multiple storage operations", async () => {
+		it("should handle multiple storage operations", async () => {
 			const contractAddr = testAddress(302);
 			// Store multiple values
 			const code = Bytes.concat([
@@ -353,7 +364,7 @@ describe("GuillotineEvm - Execution", () => {
 
 	describe("Revert and Error Handling", () => {
 		// TODO: Fix REVERT error message propagation in Zig implementation
-		it.todo("should handle REVERT opcode", async () => {
+		it("should handle REVERT opcode", async () => {
 			const contractAddr = testAddress(400);
 			const code = revertBytecode();
 
@@ -367,16 +378,28 @@ describe("GuillotineEvm - Execution", () => {
 				}),
 			);
 
+			// REVERT(offset=0, size=4) of fresh memory: 4 zero bytes, unused gas refunded.
+			// Gas: PUSH1 3 + PUSH1 3 + memory expansion to 1 word 3 = 9.
 			assertFailure(result);
-			expect(result.errorMessage).toContain("revert");
+			expect(result.errorMessage).toBeNull();
+			expect(result.output.toBytes()).toEqual(new Uint8Array(4));
+			expect(result.gasLeft).toBe(1000000n - 21000n - 9n);
 		});
 
 		// TODO: Fix REVERT with data not returning data in Zig
-		it.todo("should revert with data", async () => {
+		it("should revert with data", async () => {
 			const contractAddr = testAddress(401);
 			// Store error message and revert with it
-			// PUSH4 "FAIL" PUSH1 0 MSTORE PUSH1 4 PUSH1 28 REVERT
-			const code = hex("0x634641494c60005260046001cfd");
+			const code = Bytes.fromBytes(
+				new Uint8Array([
+					0x63, 0x46, 0x41, 0x49, 0x4c, // PUSH4 "FAIL"
+					0x60, 0x00, // PUSH1 0
+					0x52, // MSTORE (word at 0, "FAIL" in bytes 28..31)
+					0x60, 0x04, // PUSH1 4 (size)
+					0x60, 0x1c, // PUSH1 28 (offset)
+					0xfd, // REVERT
+				]),
+			);
 
 			// Ensure account exists and set code
 			await evm.setBalance(contractAddr, U256.zero());
@@ -390,10 +413,12 @@ describe("GuillotineEvm - Execution", () => {
 
 			assertFailure(result);
 			expect(result.output.toBytes()).toEqual(new Uint8Array([70, 65, 73, 76])); // "FAIL"
+			// REVERT refunds unused gas: PUSH4 3 + PUSH1 3 + MSTORE 3 + memory 3 + PUSH1 3 + PUSH1 3 = 18
+			expect(result.gasLeft).toBe(1000000n - 21000n - 18n);
 		});
 
 		// TODO: Fix out of gas error message in Zig
-		it.todo("should handle out of gas", async () => {
+		it("should handle out of gas", async () => {
 			const contractAddr = testAddress(402);
 			const code = infiniteLoopBytecode();
 
@@ -409,12 +434,13 @@ describe("GuillotineEvm - Execution", () => {
 			);
 
 			assertFailure(result);
+			// Exceptional halt consumes all gas and returns no data.
 			expect(result.gasLeft).toBe(0n);
-			expect(result.errorMessage?.toLowerCase()).toContain("gas");
+			expect(result.output.isEmpty()).toBe(true);
 		});
 
 		// TODO: Fix stack underflow RuntimeError in Zig implementation
-		it.todo("should handle stack underflow", async () => {
+		it("should handle stack underflow", async () => {
 			const contractAddr = testAddress(403);
 			// POP without anything on stack
 			const code = hex("0x50");
@@ -429,12 +455,14 @@ describe("GuillotineEvm - Execution", () => {
 				}),
 			);
 
+			// Exceptional halt consumes all gas and returns no data.
 			assertFailure(result);
-			expect(result.errorMessage?.toLowerCase()).toContain("stack");
+			expect(result.gasLeft).toBe(0n);
+			expect(result.output.isEmpty()).toBe(true);
 		});
 
 		// TODO: Fix invalid jump RuntimeError in Zig implementation
-		it.todo("should handle invalid jump destination", async () => {
+		it("should handle invalid jump destination", async () => {
 			const contractAddr = testAddress(404);
 			// PUSH1 99 JUMP (jump to invalid location)
 			const code = hex("0x606356");
@@ -449,18 +477,28 @@ describe("GuillotineEvm - Execution", () => {
 				}),
 			);
 
+			// Exceptional halt consumes all gas and returns no data.
 			assertFailure(result);
-			expect(result.errorMessage?.toLowerCase()).toContain("jump");
+			expect(result.gasLeft).toBe(0n);
+			expect(result.output.isEmpty()).toBe(true);
 		});
 	});
 
 	describe("Context Information", () => {
 		// TODO: Fix CALLER opcode RuntimeError in Zig implementation
-		it.todo("should provide correct CALLER", async () => {
+		it("should provide correct CALLER", async () => {
 			const contractAddr = testAddress(500);
 			const caller = testAddress(999);
-			// CALLER PUSH1 0 MSTORE PUSH1 20 PUSH1 12 RETURN
-			const code = hex("0x33600052601460cf3");
+			const code = Bytes.fromBytes(
+				new Uint8Array([
+					0x33, // CALLER
+					0x60, 0x00, // PUSH1 0
+					0x52, // MSTORE (address in bytes 12..31)
+					0x60, 0x14, // PUSH1 20 (size)
+					0x60, 0x0c, // PUSH1 12 (offset)
+					0xf3, // RETURN
+				]),
+			);
 
 			// Ensure accounts exist and set code
 			await evm.setBalance(contractAddr, U256.zero());
@@ -478,15 +516,22 @@ describe("GuillotineEvm - Execution", () => {
 
 			const output = result.output.toBytes();
 			expect(output.length).toBe(20);
-			expect(output[19]).toBe(999 & 0xff);
-			expect(output[18]).toBe((999 >> 8) & 0xff);
+			expect(Address.fromBytes(output).toHex()).toBe(caller.toHex());
 		});
 
 		// TODO: Fix ADDRESS opcode RuntimeError in Zig implementation
-		it.todo("should provide correct ADDRESS", async () => {
+		it("should provide correct ADDRESS", async () => {
 			const contractAddr = testAddress(501);
-			// ADDRESS PUSH1 0 MSTORE PUSH1 20 PUSH1 12 RETURN
-			const code = hex("0x30600052601460cf3");
+			const code = Bytes.fromBytes(
+				new Uint8Array([
+					0x30, // ADDRESS
+					0x60, 0x00, // PUSH1 0
+					0x52, // MSTORE (address in bytes 12..31)
+					0x60, 0x14, // PUSH1 20 (size)
+					0x60, 0x0c, // PUSH1 12 (offset)
+					0xf3, // RETURN
+				]),
+			);
 
 			// Ensure account exists and set code
 			await evm.setBalance(contractAddr, U256.zero());
@@ -555,10 +600,19 @@ describe("GuillotineEvm - Execution", () => {
 		});
 
 		// TODO: Fix CALLDATACOPY returning empty data in Zig implementation
-		it.todo("should copy CALLDATA correctly", async () => {
+		it("should copy CALLDATA correctly", async () => {
 			const contractAddr = testAddress(504);
-			// PUSH1 32 PUSH1 0 PUSH1 0 CALLDATACOPY PUSH1 32 PUSH1 0 RETURN
-			const code = hex("0x60206000600037602060f3");
+			const code = Bytes.fromBytes(
+				new Uint8Array([
+					0x60, 0x20, // PUSH1 32 (size)
+					0x60, 0x00, // PUSH1 0 (calldata offset)
+					0x60, 0x00, // PUSH1 0 (memory offset)
+					0x37, // CALLDATACOPY
+					0x60, 0x20, // PUSH1 32 (size)
+					0x60, 0x00, // PUSH1 0 (offset)
+					0xf3, // RETURN
+				]),
+			);
 
 			// Ensure account exists and set code
 			await evm.setBalance(contractAddr, U256.zero());
@@ -581,7 +635,7 @@ describe("GuillotineEvm - Execution", () => {
 
 	describe("Simulate vs Call", () => {
 		// TODO: Fix storage persistence affecting simulate in Zig implementation
-		it.todo("should simulate without modifying state", async () => {
+		it("should simulate without modifying state", async () => {
 			const contractAddr = testAddress(600);
 			const code = storeBytecode(0, 99);
 
@@ -642,11 +696,16 @@ describe("GuillotineEvm - Execution", () => {
 		});
 
 		// TODO: Fix memory expansion RuntimeError in Zig implementation
-		it.todo("should handle memory expansion", async () => {
+		it("should handle memory expansion", async () => {
 			const contractAddr = testAddress(701);
 			// Write to high memory address
-			// PUSH1 42 PUSH2 0x1000 MSTORE
-			const code = hex("0x602a6110052");
+			const code = Bytes.fromBytes(
+				new Uint8Array([
+					0x60, 0x2a, // PUSH1 42
+					0x61, 0x10, 0x00, // PUSH2 0x1000
+					0x52, // MSTORE
+				]),
+			);
 
 			// Ensure account exists and set code
 			await evm.setBalance(contractAddr, U256.zero());
@@ -660,9 +719,9 @@ describe("GuillotineEvm - Execution", () => {
 			);
 
 			assertSuccess(result);
-			// Should consume more gas due to memory expansion
-			const gasUsed = 1000000n - result.gasLeft;
-			expect(gasUsed).toBeGreaterThan(3000n);
+			// Memory grows to 0x1020 bytes = 129 words: 129*3 + floor(129^2/512) = 419.
+			// Total: PUSH1 3 + PUSH2 3 + MSTORE 3 + 419 = 428, after 21000 intrinsic.
+			expect(result.gasLeft).toBe(1000000n - 21000n - 428n);
 		});
 
 		it("should handle conditional jumps", async () => {
@@ -683,6 +742,138 @@ describe("GuillotineEvm - Execution", () => {
 			assertSuccess(result);
 			const output = result.output.toBytes();
 			expect(output[31]).toBe(42);
+		});
+	});
+
+	describe("GAS opcode", () => {
+		// Yellow Paper: GAS pushes μ'g after GAS's own cost (2) is charged, not after later
+		// opcodes in the same basic block. Frame gas = params.gas - 21000 intrinsic.
+		it("GAS returns remaining gas after its own cost, not after later opcodes in the block", async () => {
+			const contractAddr = testAddress(800);
+			const code = Bytes.fromBytes(
+				new Uint8Array([
+					0x5a, // GAS
+					0x60, 0x00, // PUSH1 0
+					0x52, // MSTORE
+					0x60, 0x20, // PUSH1 32
+					0x60, 0x00, // PUSH1 0
+					0xf3, // RETURN
+				]),
+			);
+			await evm.setCode(contractAddr, code);
+
+			const result = await evm.call(defaultExecutionParams({ to: contractAddr, gas: 1000000n }));
+
+			assertSuccess(result);
+			expect(U256.fromBytes(result.output.toBytes()).toBigInt()).toBe(1000000n - 21000n - 2n);
+		});
+
+		it("GAS is not reduced by a cold SLOAD later in the same block", async () => {
+			const contractAddr = testAddress(801);
+			const code = Bytes.fromBytes(
+				new Uint8Array([
+					0x5a, // GAS
+					0x60, 0x00, // PUSH1 0
+					0x54, // SLOAD (cold)
+					0x50, // POP
+					0x60, 0x00, // PUSH1 0
+					0x52, // MSTORE
+					0x60, 0x20, // PUSH1 32
+					0x60, 0x00, // PUSH1 0
+					0xf3, // RETURN
+				]),
+			);
+			await evm.setCode(contractAddr, code);
+
+			const result = await evm.call(defaultExecutionParams({ to: contractAddr, gas: 1000000n }));
+
+			assertSuccess(result);
+			expect(U256.fromBytes(result.output.toBytes()).toBigInt()).toBe(1000000n - 21000n - 2n);
+		});
+	});
+
+	describe("SLOAD gas (EIP-2929)", () => {
+		it("charges 2100 for a cold SLOAD and 100 for a warm SLOAD", async () => {
+			const contractAddr = testAddress(802);
+			const code = Bytes.fromBytes(
+				new Uint8Array([
+					0x60, 0x00, // PUSH1 0
+					0x54, // SLOAD (cold: 2100)
+					0x60, 0x00, // PUSH1 0
+					0x54, // SLOAD (warm: 100)
+					0x00, // STOP
+				]),
+			);
+			await evm.setCode(contractAddr, code);
+
+			const result = await evm.call(defaultExecutionParams({ to: contractAddr, gas: 1000000n }));
+
+			assertSuccess(result);
+			// PUSH1 3 + SLOAD 2100 + PUSH1 3 + SLOAD 100 = 2206
+			expect(result.gasLeft).toBe(1000000n - 21000n - 2206n);
+		});
+	});
+
+	describe("JUMP and JUMPI gas", () => {
+		it("charges 8 for JUMP and 1 for JUMPDEST", async () => {
+			const contractAddr = testAddress(803);
+			const code = Bytes.fromBytes(
+				new Uint8Array([
+					0x60, 0x03, // 0: PUSH1 3
+					0x56, // 2: JUMP
+					0x5b, // 3: JUMPDEST
+					0x00, // 4: STOP
+				]),
+			);
+			await evm.setCode(contractAddr, code);
+
+			const result = await evm.call(defaultExecutionParams({ to: contractAddr, gas: 1000000n }));
+
+			assertSuccess(result);
+			// PUSH1 3 + JUMP 8 + JUMPDEST 1
+			expect(result.gasLeft).toBe(1000000n - 21000n - 12n);
+		});
+
+		it("charges 10 for a JUMPI that is not taken", async () => {
+			const contractAddr = testAddress(804);
+			const code = Bytes.fromBytes(
+				new Uint8Array([
+					0x60, 0x00, // 0: PUSH1 0 (condition)
+					0x60, 0x06, // 2: PUSH1 6 (destination)
+					0x57, // 4: JUMPI
+					0x00, // 5: STOP
+					0x5b, // 6: JUMPDEST
+					0x00, // 7: STOP
+				]),
+			);
+			await evm.setCode(contractAddr, code);
+
+			const result = await evm.call(defaultExecutionParams({ to: contractAddr, gas: 1000000n }));
+
+			assertSuccess(result);
+			// PUSH1 3 + PUSH1 3 + JUMPI 10
+			expect(result.gasLeft).toBe(1000000n - 21000n - 16n);
+		});
+
+		it("charges 10 for a taken JUMPI and 1 for JUMPDEST", async () => {
+			const contractAddr = testAddress(805);
+			const code = Bytes.fromBytes(
+				new Uint8Array([
+					0x60, 0x01, // 0: PUSH1 1 (condition)
+					0x60, 0x06, // 2: PUSH1 6 (destination)
+					0x57, // 4: JUMPI
+					0x00, // 5: STOP
+					0x5b, // 6: JUMPDEST
+					0x00, // 7: STOP
+				]),
+			);
+			await evm.setCode(contractAddr, code);
+
+			const result = await evm.call(defaultExecutionParams({ to: contractAddr, gas: 1000000n }));
+
+			assertSuccess(result);
+			// PUSH1 3 + PUSH1 3 + JUMPI 10 + JUMPDEST 1
+			expect(result.gasLeft).toBe(1000000n - 21000n - 17n);
 		});
 	});
 });

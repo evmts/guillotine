@@ -10,7 +10,16 @@ import {
 	storeBytecode,
 	hex,
 	assertFailure,
+	assertSuccess,
 } from "../../test/test-helpers.js";
+
+/** Exceptional halt (Yellow Paper Z): no reason string, no return data, all gas consumed. */
+function expectExceptionalHalt(result: { success: boolean; gasLeft: bigint; output: Bytes; errorMessage: string | null }): void {
+	expect(result.success).toBe(false);
+	expect(result.errorMessage).toBeNull();
+	expect(result.output.isEmpty()).toBe(true);
+	expect(result.gasLeft).toBe(0n);
+}
 
 describe("GuillotineEvm - Error Handling", () => {
 	let evm: GuillotineEvm;
@@ -78,14 +87,11 @@ describe("GuillotineEvm - Error Handling", () => {
 	});
 
 	describe("Execution Errors", () => {
-		// TODO: Fix invalid opcode error message propagation in Zig
-		it.todo("should handle invalid opcode", async () => {
+		it("should handle invalid opcode", async () => {
 			const contract = testAddress(100);
-			// 0xfe is INVALID opcode
-			const code = hex("0xfe");
+			// INVALID (0xfe)
+			const code = Bytes.fromBytes(new Uint8Array([0xfe]));
 
-			// Ensure account exists and set code
-			await evm.setBalance(contract, U256.zero());
 			await evm.setCode(contract, code);
 
 			const result = await evm.call(
@@ -94,19 +100,14 @@ describe("GuillotineEvm - Error Handling", () => {
 				}),
 			);
 
-			assertFailure(result);
-			expect(result.errorMessage).toBeDefined();
-			expect(result.errorMessage?.toLowerCase()).toContain("invalid");
+			expectExceptionalHalt(result);
 		});
 
-		// TODO: Fix stack underflow not returning error in Zig
-		it.todo("should handle stack underflow", async () => {
+		it("should handle stack underflow", async () => {
 			const contract = testAddress(101);
-			// ADD without enough values on stack
-			const code = hex("0x6001"); // PUSH1 1, ADD (missing second operand)
+			// PUSH1 1, ADD: ADD needs two operands
+			const code = Bytes.fromBytes(new Uint8Array([0x60, 0x01, 0x01]));
 
-			// Ensure account exists and set code
-			await evm.setBalance(contract, U256.zero());
 			await evm.setCode(contract, code);
 
 			const result = await evm.call(
@@ -115,15 +116,13 @@ describe("GuillotineEvm - Error Handling", () => {
 				}),
 			);
 
-			assertFailure(result);
-			expect(result.errorMessage?.toLowerCase()).toContain("stack");
+			expectExceptionalHalt(result);
 		});
 
-		// TODO: Fix stack overflow RuntimeError in Zig
-		it.todo("should handle stack overflow", async () => {
+		it("should handle stack overflow", async () => {
 			const contract = testAddress(102);
 
-			// Push 1025 values (stack limit is 1024)
+			// 1025 x PUSH1: the 1025th push exceeds the 1024-item stack limit
 			const code: number[] = [];
 			for (let i = 0; i < 1025; i++) {
 				code.push(0x60, i & 0xff); // PUSH1 value
@@ -138,40 +137,31 @@ describe("GuillotineEvm - Error Handling", () => {
 				}),
 			);
 
-			assertFailure(result);
-			expect(result.errorMessage?.toLowerCase()).toContain("stack");
+			expectExceptionalHalt(result);
 		});
 
-		// TODO: Fix out of gas error message in Zig
-		it.todo("should handle out of gas", async () => {
+		it("should handle out of gas", async () => {
 			const contract = testAddress(103);
-			// Infinite loop
-			const code = hex("0x5b6000565b"); // JUMPDEST PUSH1 0 JUMP JUMPDEST
+			// JUMPDEST PUSH1 0 JUMP: infinite loop
+			const code = Bytes.fromBytes(new Uint8Array([0x5b, 0x60, 0x00, 0x56]));
 
-			// Ensure account exists and set code
-			await evm.setBalance(contract, U256.zero());
 			await evm.setCode(contract, code);
 
 			const result = await evm.call(
 				defaultExecutionParams({
 					to: contract,
-					gas: 1000n, // Very low gas
+					gas: 30000n,
 				}),
 			);
 
-			assertFailure(result);
-			expect(result.gasLeft).toBe(0n);
-			expect(result.errorMessage?.toLowerCase()).toContain("gas");
+			expectExceptionalHalt(result);
 		});
 
-		// TODO: Fix invalid jump causing null table entry error in Zig
-		it.todo("should handle invalid jump destination", async () => {
+		it("should handle invalid jump destination", async () => {
 			const contract = testAddress(104);
-			// Jump to non-JUMPDEST
-			const code = hex("0x600556"); // PUSH1 5 JUMP (no JUMPDEST at 5)
+			// PUSH1 5 JUMP: offset 5 is past the end of the code, not a JUMPDEST
+			const code = Bytes.fromBytes(new Uint8Array([0x60, 0x05, 0x56]));
 
-			// Ensure account exists and set code
-			await evm.setBalance(contract, U256.zero());
 			await evm.setCode(contract, code);
 
 			const result = await evm.call(
@@ -180,12 +170,10 @@ describe("GuillotineEvm - Error Handling", () => {
 				}),
 			);
 
-			assertFailure(result);
-			expect(result.errorMessage?.toLowerCase()).toContain("jump");
+			expectExceptionalHalt(result);
 		});
 
-		// TODO: Fix insufficient balance error message in Zig
-		it.todo("should handle insufficient balance for value transfer", async () => {
+		it("should handle insufficient balance for value transfer", async () => {
 			const sender = testAddress(105);
 			const receiver = testAddress(106);
 
@@ -201,19 +189,19 @@ describe("GuillotineEvm - Error Handling", () => {
 			);
 
 			assertFailure(result);
-			expect(result.errorMessage?.toLowerCase()).toContain("balance");
+			expect(result.output.isEmpty()).toBe(true);
+			expect((await evm.getBalance(sender)).toBigInt()).toBe(50n);
+			expect((await evm.getBalance(receiver)).toBigInt()).toBe(0n);
 		});
 	});
 
 	describe("Static Call Violations", () => {
-		// TODO: Fix static context violations detection in Zig
-		it.todo("should error on state modification in static context", async () => {
+		it("should error on state modification in static context", async () => {
 			const contract = testAddress(200);
-			// Try to SSTORE in static call
+			// PUSH1 42 PUSH1 0 SSTORE
 			const code = storeBytecode(0, 42);
 
-			// Ensure account exists and set code
-			await evm.setBalance(contract, U256.zero());
+			await evm.setBalance(contract, U256.fromBigInt(1000n));
 			await evm.setCode(contract, code);
 
 			const result = await evm.call({
@@ -225,18 +213,17 @@ describe("GuillotineEvm - Error Handling", () => {
 				callType: CallType.STATICCALL,
 			});
 
-			assertFailure(result);
-			expect(result.errorMessage?.toLowerCase()).toContain("static");
+			// State modification in a static context is an exceptional halt (EIP-214)
+			expectExceptionalHalt(result);
+			expect((await evm.getStorage(contract, U256.zero())).toBigInt()).toBe(0n);
 		});
 
-		// TODO: Fix CREATE in static context detection in Zig
-		it.todo("should error on CREATE in static context", async () => {
+		it("should error on CREATE in static context", async () => {
 			const contract = testAddress(201);
-			// Try to CREATE in static call
-			const code = hex("0x60006000600f0"); // PUSH1 0 PUSH1 0 PUSH1 0 CREATE
+			// PUSH1 0 (size) PUSH1 0 (offset) PUSH1 0 (value) CREATE
+			const code = Bytes.fromBytes(new Uint8Array([0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0xf0]));
 
-			// Ensure account exists and set code
-			await evm.setBalance(contract, U256.zero());
+			await evm.setBalance(contract, U256.fromBigInt(1000n));
 			await evm.setCode(contract, code);
 
 			const result = await evm.call({
@@ -248,22 +235,18 @@ describe("GuillotineEvm - Error Handling", () => {
 				callType: CallType.STATICCALL,
 			});
 
-			assertFailure(result);
-			expect(result.errorMessage?.toLowerCase()).toContain("static");
+			// State modification in a static context is an exceptional halt (EIP-214)
+			expectExceptionalHalt(result);
+			expect(result.createdAddress).toBeNull();
+			expect((await evm.getBalance(contract)).toBigInt()).toBe(1000n);
 		});
 
-		// TODO: Fix SELFDESTRUCT in static context detection in Zig
-		it.todo("should error on SELFDESTRUCT in static context", async () => {
+		it("should error on SELFDESTRUCT in static context", async () => {
 			const contract = testAddress(202);
-			// Try to SELFDESTRUCT in static call
-			const code = Bytes.concat([
-				hex("0x73"),
-				Bytes.fromBytes(testAddress(999).toBytes()),
-				hex("0xff"),
-			]);
+			// PUSH20 beneficiary SELFDESTRUCT
+			const code = Bytes.fromBytes(new Uint8Array([0x73, ...testAddress(999).toBytes(), 0xff]));
 
-			// Ensure account exists and set code
-			await evm.setBalance(contract, U256.zero());
+			await evm.setBalance(contract, U256.fromBigInt(1000n));
 			await evm.setCode(contract, code);
 
 			const result = await evm.call({
@@ -275,18 +258,20 @@ describe("GuillotineEvm - Error Handling", () => {
 				callType: CallType.STATICCALL,
 			});
 
-			assertFailure(result);
-			expect(result.errorMessage?.toLowerCase()).toContain("static");
+			// State modification in a static context is an exceptional halt (EIP-214)
+			expectExceptionalHalt(result);
+			expect(result.selfdestructs).toEqual([]);
+			expect((await evm.getBalance(contract)).toBigInt()).toBe(1000n);
+			expect((await evm.getBalance(testAddress(999))).toBigInt()).toBe(0n);
+			expect((await evm.getCode(contract)).toHex()).toBe(code.toHex());
 		});
 
-		// TODO: Fix LOG in static context detection in Zig
-		it.todo("should error on LOG in static context", async () => {
+		it("should error on LOG in static context", async () => {
 			const contract = testAddress(203);
-			// Try to emit LOG0 in static call
-			const code = hex("0x60006000a0"); // PUSH1 0 PUSH1 0 LOG0
+			// PUSH1 0 (size) PUSH1 0 (offset) LOG0
+			const code = Bytes.fromBytes(new Uint8Array([0x60, 0x00, 0x60, 0x00, 0xa0]));
 
-			// Ensure account exists and set code
-			await evm.setBalance(contract, U256.zero());
+			await evm.setBalance(contract, U256.fromBigInt(1000n));
 			await evm.setCode(contract, code);
 
 			const result = await evm.call({
@@ -298,20 +283,18 @@ describe("GuillotineEvm - Error Handling", () => {
 				callType: CallType.STATICCALL,
 			});
 
-			assertFailure(result);
-			expect(result.errorMessage?.toLowerCase()).toContain("static");
+			// State modification in a static context is an exceptional halt (EIP-214)
+			expectExceptionalHalt(result);
+			expect(result.logs).toEqual([]);
 		});
 	});
 
 	describe("Revert Handling", () => {
-		// TODO: Fix REVERT with no data handling in Zig
-		it.todo("should handle REVERT with no data", async () => {
+		it("should handle REVERT with no data", async () => {
 			const contract = testAddress(300);
-			// PUSH1 0 PUSH1 0 REVERT
-			const code = hex("0x600060fd");
+			// PUSH1 0 (size) PUSH1 0 (offset) REVERT
+			const code = Bytes.fromBytes(new Uint8Array([0x60, 0x00, 0x60, 0x00, 0xfd]));
 
-			// Ensure account exists and set code
-			await evm.setBalance(contract, U256.zero());
 			await evm.setCode(contract, code);
 
 			const result = await evm.call(
@@ -321,12 +304,14 @@ describe("GuillotineEvm - Error Handling", () => {
 			);
 
 			assertFailure(result);
-			expect(result.errorMessage?.toLowerCase()).toContain("revert");
+			expect(result.errorMessage).toBeNull();
 			expect(result.output.isEmpty()).toBe(true);
+			// REVERT returns unused gas: PUSH1 3 + PUSH1 3 = 6
+			expect(result.gasLeft).toBe(1000000n - 21000n - 6n);
 		});
 
 		// TODO: Fix REVERT with error message handling in Zig
-		it.todo("should handle REVERT with error message", async () => {
+		it("should handle REVERT with error message", async () => {
 			const contract = testAddress(301);
 			// Store "ERROR" and revert with it
 			const errorMsg = "ERROR";
@@ -353,50 +338,41 @@ describe("GuillotineEvm - Error Handling", () => {
 			);
 
 			assertFailure(result);
-			expect(result.errorMessage?.toLowerCase()).toContain("revert");
-
-			// Check revert data
-			const revertData = result.output.toBytes();
-			const revertString = new TextDecoder().decode(revertData);
-			expect(revertString).toBe(errorMsg);
+			expect(result.errorMessage).toBeNull();
+			expect(new TextDecoder().decode(result.output.toBytes())).toBe(errorMsg);
+			// 5 x (PUSH1 3 + PUSH1 3 + MSTORE8 3) = 45, memory 1 word 3, PUSH1 3 + PUSH1 3 = 54
+			expect(result.gasLeft).toBe(1000000n - 21000n - 54n);
 		});
 
-		// TODO: Fix nested revert propagation in Zig
-		it.todo("should handle nested revert propagation", async () => {
+		it("should handle nested revert propagation", async () => {
 			const contractA = testAddress(302);
 			const contractB = testAddress(303);
 
-			// Contract B reverts
-			await evm.setCode(contractB, hex("0x600060fd"));
+			// Contract B: PUSH1 0 PUSH1 0 REVERT
+			await evm.setCode(contractB, Bytes.fromBytes(new Uint8Array([0x60, 0x00, 0x60, 0x00, 0xfd])));
 
-			// Contract A calls B
-			const codeA: number[] = [];
-			codeA.push(0x60, 0x00); // retSize
-			codeA.push(0x60, 0x00); // retOffset
-			codeA.push(0x60, 0x00); // argsSize
-			codeA.push(0x60, 0x00); // argsOffset
-			codeA.push(0x60, 0x00); // value
-			codeA.push(0x73); // PUSH20
-			codeA.push(...contractB.toBytes());
-			codeA.push(0x5a); // GAS
-			codeA.push(0xf1); // CALL
-
-			// Check if call succeeded
-			codeA.push(0x15); // ISZERO
-			codeA.push(0x60, codeA.length + 4); // PUSH1 jump dest
-			codeA.push(0x57); // JUMPI
-			// Success path (shouldn't reach)
-			codeA.push(0x60, 0x01); // PUSH1 1
-			codeA.push(0x60, codeA.length + 5); // PUSH1 jump dest
-			codeA.push(0x56); // JUMP
-			// Failure path - also revert
-			codeA.push(0x5b); // JUMPDEST
-			codeA.push(0x60, 0x00); // PUSH1 0
-			codeA.push(0x60, 0x00); // PUSH1 0
-			codeA.push(0xfd); // REVERT
-			codeA.push(0x5b); // JUMPDEST
-
-			await evm.setCode(contractA, Bytes.fromBytes(new Uint8Array(codeA)));
+			// Contract A calls B and reverts if the call failed
+			const codeA = Bytes.fromBytes(
+				new Uint8Array([
+					0x60, 0x00, // 0: PUSH1 0 (retSize)
+					0x60, 0x00, // 2: PUSH1 0 (retOffset)
+					0x60, 0x00, // 4: PUSH1 0 (argsSize)
+					0x60, 0x00, // 6: PUSH1 0 (argsOffset)
+					0x60, 0x00, // 8: PUSH1 0 (value)
+					0x73, ...contractB.toBytes(), // 10: PUSH20 contractB
+					0x5a, // 31: GAS
+					0xf1, // 32: CALL
+					0x15, // 33: ISZERO
+					0x60, 0x26, // 34: PUSH1 38
+					0x57, // 36: JUMPI
+					0x00, // 37: STOP (not reached)
+					0x5b, // 38: JUMPDEST
+					0x60, 0x00, // 39: PUSH1 0
+					0x60, 0x00, // 41: PUSH1 0
+					0xfd, // 43: REVERT
+				]),
+			);
+			await evm.setCode(contractA, codeA);
 
 			const result = await evm.call(
 				defaultExecutionParams({
@@ -405,15 +381,19 @@ describe("GuillotineEvm - Error Handling", () => {
 			);
 
 			assertFailure(result);
-			expect(result.errorMessage?.toLowerCase()).toContain("revert");
+			expect(result.errorMessage).toBeNull();
+			expect(result.output.isEmpty()).toBe(true);
+			// A: 5 x PUSH1 15 + PUSH20 3 + GAS 2 + CALL cold 2600 + ISZERO 3 + PUSH1 3 + JUMPI 10
+			//    + JUMPDEST 1 + PUSH1 3 + PUSH1 3 = 2643; B: 6 (unused forwarded gas is returned)
+			expect(result.gasLeft).toBe(1000000n - 21000n - 2643n - 6n);
 		});
 	});
 
 	describe("Memory Errors", () => {
 		it("should handle memory out of bounds read", async () => {
 			const contract = testAddress(400);
-			// Try to return huge amount of memory
-			const code = hex("0x7fffffffff6000f3"); // PUSH32 max_value PUSH1 0 RETURN
+			// PUSH32 2^256-1 (size) PUSH1 0 (offset) RETURN: memory expansion cost exceeds any gas
+			const code = Bytes.fromBytes(new Uint8Array([0x7f, ...new Uint8Array(32).fill(0xff), 0x60, 0x00, 0xf3]));
 
 			// Ensure account exists and set code
 			await evm.setBalance(contract, U256.zero());
@@ -426,13 +406,13 @@ describe("GuillotineEvm - Error Handling", () => {
 				}),
 			);
 
-			assertFailure(result);
+			expectExceptionalHalt(result);
 		});
 
 		it("should handle excessive memory expansion", async () => {
 			const contract = testAddress(401);
-			// Try to write at extremely high memory offset
-			const code = hex("0x60017fffffffff52"); // PUSH1 1 PUSH32 max_offset MSTORE
+			// PUSH1 1 (value) PUSH32 2^256-1 (offset) MSTORE
+			const code = Bytes.fromBytes(new Uint8Array([0x60, 0x01, 0x7f, ...new Uint8Array(32).fill(0xff), 0x52]));
 
 			// Ensure account exists and set code
 			await evm.setBalance(contract, U256.zero());
@@ -445,14 +425,13 @@ describe("GuillotineEvm - Error Handling", () => {
 				}),
 			);
 
-			assertFailure(result);
-			expect(result.gasLeft).toBe(0n); // Should run out of gas
+			expectExceptionalHalt(result);
 		});
 
 		it("should handle RETURNDATACOPY out of bounds", async () => {
 			const contract = testAddress(402);
-			// Try to copy more return data than available
-			const code = hex("0x6064600060003e"); // PUSH1 100 PUSH1 0 PUSH1 0 RETURNDATACOPY
+			// PUSH1 100 (size) PUSH1 0 (offset) PUSH1 0 (destOffset) RETURNDATACOPY with empty return data
+			const code = Bytes.fromBytes(new Uint8Array([0x60, 0x64, 0x60, 0x00, 0x60, 0x00, 0x3e]));
 
 			// Ensure account exists and set code
 			await evm.setBalance(contract, U256.zero());
@@ -464,7 +443,8 @@ describe("GuillotineEvm - Error Handling", () => {
 				}),
 			);
 
-			assertFailure(result);
+			// EIP-211: reading past the return data buffer is an exceptional halt
+			expectExceptionalHalt(result);
 		});
 	});
 
@@ -491,7 +471,7 @@ describe("GuillotineEvm - Error Handling", () => {
 		});
 
 		// TODO: Fix CREATE2 collision detection in Zig
-		it.todo("should handle CREATE2 collision", async () => {
+		it("should handle CREATE2 collision", async () => {
 			const deployer = testAddress(501);
 			const salt = U256.fromBigInt(0x1234n);
 			const initCode = hex("0x60006000f3");
@@ -525,11 +505,11 @@ describe("GuillotineEvm - Error Handling", () => {
 		});
 
 		// TODO: Fix CREATE init code failure detection in Zig
-		it.todo("should handle CREATE with init code failure", async () => {
+		it("should handle CREATE with init code failure", async () => {
 			const deployer = testAddress(502);
 
-			// Init code that reverts
-			const initCode = hex("0x600060fd"); // PUSH1 0 PUSH1 0 REVERT
+			// Init code: PUSH1 0 PUSH1 0 REVERT
+			const initCode = Bytes.fromBytes(new Uint8Array([0x60, 0x00, 0x60, 0x00, 0xfd]));
 
 			const result = await evm.call({
 				caller: deployer,
@@ -546,51 +526,46 @@ describe("GuillotineEvm - Error Handling", () => {
 	});
 
 	describe("Call Depth Errors", () => {
-		// TODO: Fix maximum call depth detection in Zig
-		it.todo("should handle maximum call depth", async () => {
-			// Create a chain of contracts that call each other
-			// Evm call depth limit is 1024
-
-			// This is a simplified test - in practice, reaching max depth
-			// requires careful gas management
+		it("should contain failures of deeply recursive calls", async () => {
+			// Since EIP-150 the 63/64 rule exhausts gas long before depth 1024, so the innermost
+			// call fails out of gas. A failed CALL only pushes 0; the caller continues and succeeds.
 			const contract = testAddress(600);
 
-			// Contract that calls itself recursively
-			const code: number[] = [];
-
-			// Call self
-			code.push(0x60, 0x00); // retSize
-			code.push(0x60, 0x00); // retOffset
-			code.push(0x60, 0x00); // argsSize
-			code.push(0x60, 0x00); // argsOffset
-			code.push(0x60, 0x00); // value
-			code.push(0x73); // PUSH20
-			code.push(...contract.toBytes()); // self address
-			code.push(0x61, 0x27, 0x10); // PUSH2 10000 (limited gas per call)
-			code.push(0xf1); // CALL
-
-			await evm.setCode(contract, Bytes.fromBytes(new Uint8Array(code)));
+			// Contract calls itself with all available gas, then stores the CALL result
+			const code = Bytes.fromBytes(
+				new Uint8Array([
+					0x60, 0x00, // PUSH1 0 (retSize)
+					0x60, 0x00, // PUSH1 0 (retOffset)
+					0x60, 0x00, // PUSH1 0 (argsSize)
+					0x60, 0x00, // PUSH1 0 (argsOffset)
+					0x60, 0x00, // PUSH1 0 (value)
+					0x73, ...contract.toBytes(), // PUSH20 self
+					0x5a, // GAS
+					0xf1, // CALL
+					0x00, // STOP
+				]),
+			);
+			await evm.setCode(contract, code);
 
 			const result = await evm.call(
 				defaultExecutionParams({
 					to: contract,
-					gas: 10000000n, // High initial gas
+					gas: 10000000n,
 				}),
 			);
 
-			// Should eventually fail due to depth or gas
-			assertFailure(result);
+			assertSuccess(result);
+			expect(result.output.isEmpty()).toBe(true);
 		});
 	});
 
 	describe("Invalid Bytecode", () => {
-		it("should handle truncated PUSH instruction", async () => {
+		it("should zero-pad a truncated PUSH instruction", async () => {
 			const contract = testAddress(700);
-			// PUSH2 with only 1 byte of data
-			const code = hex("0x6101"); // PUSH2 incomplete
+			// PUSH2 with one data byte: Yellow Paper pads code with zeros, so this pushes 0x0100
+			// and then executes the implicit STOP past the end of the code
+			const code = Bytes.fromBytes(new Uint8Array([0x61, 0x01]));
 
-			// Ensure account exists and set code
-			await evm.setBalance(contract, U256.zero());
 			await evm.setCode(contract, code);
 
 			const result = await evm.call(
@@ -599,16 +574,17 @@ describe("GuillotineEvm - Error Handling", () => {
 				}),
 			);
 
-			assertFailure(result);
+			assertSuccess(result);
+			expect(result.output.isEmpty()).toBe(true);
+			// PUSH2 3
+			expect(result.gasLeft).toBe(1000000n - 21000n - 3n);
 		});
 
-		it("should handle code ending with incomplete instruction", async () => {
+		it("should treat code ending with an incomplete PUSH as STOP", async () => {
 			const contract = testAddress(701);
-			// Code that ends mid-instruction
-			const code = hex("0x600160"); // PUSH1 1 PUSH1 (incomplete)
+			// PUSH1 1, PUSH1 with no data byte (pushes 0), then implicit STOP
+			const code = Bytes.fromBytes(new Uint8Array([0x60, 0x01, 0x60]));
 
-			// Ensure account exists and set code
-			await evm.setBalance(contract, U256.zero());
 			await evm.setCode(contract, code);
 
 			const result = await evm.call(
@@ -617,17 +593,17 @@ describe("GuillotineEvm - Error Handling", () => {
 				}),
 			);
 
-			assertFailure(result);
+			assertSuccess(result);
+			expect(result.output.isEmpty()).toBe(true);
+			// PUSH1 3 + PUSH1 3
+			expect(result.gasLeft).toBe(1000000n - 21000n - 6n);
 		});
 
-		// TODO: Fix jump to out of bounds causing null table entry in Zig
-		it.todo("should handle jump to out of bounds", async () => {
+		it("should handle jump to out of bounds", async () => {
 			const contract = testAddress(702);
-			// Jump beyond code size
-			const code = hex("0x61ffff56"); // PUSH2 0xFFFF JUMP
+			// PUSH2 0xffff JUMP: past the end of the code
+			const code = Bytes.fromBytes(new Uint8Array([0x61, 0xff, 0xff, 0x56]));
 
-			// Ensure account exists and set code
-			await evm.setBalance(contract, U256.zero());
 			await evm.setCode(contract, code);
 
 			const result = await evm.call(
@@ -636,14 +612,13 @@ describe("GuillotineEvm - Error Handling", () => {
 				}),
 			);
 
-			assertFailure(result);
-			expect(result.errorMessage?.toLowerCase()).toContain("jump");
+			expectExceptionalHalt(result);
 		});
 	});
 
 	describe("Error Recovery", () => {
 		// TODO: Fix state consistency after errors in Zig
-		it.todo("should maintain state consistency after error", async () => {
+		it("should maintain state consistency after error", async () => {
 			const contract = testAddress(800);
 
 			// Set initial state
@@ -686,52 +661,48 @@ describe("GuillotineEvm - Error Handling", () => {
 			const contractB = testAddress(802);
 			const contractC = testAddress(803);
 
-			// B succeeds, C fails
-			await evm.setCode(contractB, hex("0x6001600052602060f3")); // Return 1
-			await evm.setCode(contractC, hex("0x600060fd")); // Revert
+			// B returns the word 1: PUSH1 1 PUSH1 0 MSTORE PUSH1 32 PUSH1 0 RETURN
+			await evm.setCode(
+				contractB,
+				Bytes.fromBytes(new Uint8Array([0x60, 0x01, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3])),
+			);
+			// C reverts: PUSH1 0 PUSH1 0 REVERT
+			await evm.setCode(contractC, Bytes.fromBytes(new Uint8Array([0x60, 0x00, 0x60, 0x00, 0xfd])));
 
-			// A calls B then C
-			const codeA: number[] = [];
-
-			// Call B (succeeds)
-			codeA.push(0x60, 0x20); // retSize
-			codeA.push(0x60, 0x00); // retOffset
-			codeA.push(0x60, 0x00); // argsSize
-			codeA.push(0x60, 0x00); // argsOffset
-			codeA.push(0x60, 0x00); // value
-			codeA.push(0x73); // PUSH20
-			codeA.push(...contractB.toBytes());
-			codeA.push(0x5a); // GAS
-			codeA.push(0xf1); // CALL
-			codeA.push(0x50); // POP
-
-			// Store result from B
-			codeA.push(0x60, 0x00); // PUSH1 0
-			codeA.push(0x51); // MLOAD
-			codeA.push(0x60, 0x00); // PUSH1 0
-			codeA.push(0x55); // SSTORE
-
-			// Call C (fails)
-			codeA.push(0x60, 0x00); // retSize
-			codeA.push(0x60, 0x00); // retOffset
-			codeA.push(0x60, 0x00); // argsSize
-			codeA.push(0x60, 0x00); // argsOffset
-			codeA.push(0x60, 0x00); // value
-			codeA.push(0x73); // PUSH20
-			codeA.push(...contractC.toBytes());
-			codeA.push(0x5a); // GAS
-			codeA.push(0xf1); // CALL
-
-			// If C fails, revert
-			codeA.push(0x15); // ISZERO
-			codeA.push(0x60, codeA.length + 4); // PUSH1 jump dest
-			codeA.push(0x57); // JUMPI
-			codeA.push(0x60, 0x00); // PUSH1 0
-			codeA.push(0x60, 0x00); // PUSH1 0
-			codeA.push(0xfd); // REVERT
-			codeA.push(0x5b); // JUMPDEST
-
-			await evm.setCode(contractA, Bytes.fromBytes(new Uint8Array(codeA)));
+			// A calls B, stores B's word in slot 0, calls C, and reverts if C failed
+			const codeA = Bytes.fromBytes(
+				new Uint8Array([
+					0x60, 0x20, // 0: PUSH1 32 (retSize)
+					0x60, 0x00, // 2: PUSH1 0 (retOffset)
+					0x60, 0x00, // 4: PUSH1 0 (argsSize)
+					0x60, 0x00, // 6: PUSH1 0 (argsOffset)
+					0x60, 0x00, // 8: PUSH1 0 (value)
+					0x73, ...contractB.toBytes(), // 10: PUSH20 contractB
+					0x5a, // 31: GAS
+					0xf1, // 32: CALL
+					0x50, // 33: POP
+					0x60, 0x00, // 34: PUSH1 0
+					0x51, // 36: MLOAD
+					0x60, 0x00, // 37: PUSH1 0
+					0x55, // 39: SSTORE (slot 0 = 1)
+					0x60, 0x00, // 40: PUSH1 0 (retSize)
+					0x60, 0x00, // 42: PUSH1 0 (retOffset)
+					0x60, 0x00, // 44: PUSH1 0 (argsSize)
+					0x60, 0x00, // 46: PUSH1 0 (argsOffset)
+					0x60, 0x00, // 48: PUSH1 0 (value)
+					0x73, ...contractC.toBytes(), // 50: PUSH20 contractC
+					0x5a, // 71: GAS
+					0xf1, // 72: CALL
+					0x60, 0x51, // 73: PUSH1 81
+					0x57, // 75: JUMPI (jump if C succeeded)
+					0x60, 0x00, // 76: PUSH1 0
+					0x60, 0x00, // 78: PUSH1 0
+					0xfd, // 80: REVERT
+					0x5b, // 81: JUMPDEST
+					0x00, // 82: STOP
+				]),
+			);
+			await evm.setCode(contractA, codeA);
 
 			const result = await evm.call(
 				defaultExecutionParams({
@@ -740,56 +711,34 @@ describe("GuillotineEvm - Error Handling", () => {
 			);
 
 			assertFailure(result);
+			expect(result.output.isEmpty()).toBe(true);
 
-			// Storage should not be modified (transaction reverted)
-			const storage = await evm.getStorage(contractA, U256.zero());
-			expect(storage.toBigInt()).toBe(0n);
+			// A's REVERT undoes its SSTORE
+			expect((await evm.getStorage(contractA, U256.zero())).toBigInt()).toBe(0n);
 		});
 	});
 
 	describe("Error Messages", () => {
-		// TODO: Fix error message clarity with RuntimeError in Zig
-		it.todo("should provide clear error messages", async () => {
+		it("should report exceptional halts without a reason string", async () => {
 			const testCases = [
-				{
-					name: "Stack underflow",
-					code: hex("0x50"), // POP on empty stack
-					expectedError: "stack",
-				},
-				{
-					name: "Invalid opcode",
-					code: hex("0xfe"), // INVALID
-					expectedError: "invalid",
-				},
-				{
-					name: "Out of gas",
-					code: hex("0x5b6000565b"), // Infinite loop
-					expectedError: "gas",
-					gas: 1000n,
-				},
-				{
-					name: "Invalid jump",
-					code: hex("0x600a56"), // Jump to invalid destination
-					expectedError: "jump",
-				},
+				{ name: "Stack underflow", code: [0x50] }, // POP on empty stack
+				{ name: "Invalid opcode", code: [0xfe] }, // INVALID
+				{ name: "Out of gas", code: [0x5b, 0x60, 0x00, 0x56], gas: 30000n }, // infinite loop
+				{ name: "Invalid jump", code: [0x60, 0x0a, 0x56] }, // PUSH1 10 JUMP
 			];
 
-			for (const testCase of testCases) {
-				const contract = testAddress(900 + testCases.indexOf(testCase));
-				await evm.setCode(contract, testCase.code);
+			for (const [index, testCase] of testCases.entries()) {
+				const contract = testAddress(900 + index);
+				await evm.setCode(contract, Bytes.fromBytes(new Uint8Array(testCase.code)));
 
 				const result = await evm.call(
 					defaultExecutionParams({
 						to: contract,
-						gas: testCase.gas || 1000000n,
+						gas: testCase.gas ?? 1000000n,
 					}),
 				);
 
-				assertFailure(result);
-				expect(result.errorMessage).toBeDefined();
-				expect(result.errorMessage?.toLowerCase()).toContain(
-					testCase.expectedError,
-				);
+				expectExceptionalHalt(result);
 			}
 		});
 	});
