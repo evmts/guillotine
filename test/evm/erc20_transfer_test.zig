@@ -37,7 +37,7 @@ test "ERC20 transfer fixture test" {
     const allocator = testing.allocator;
     
     // Read bytecode from fixture
-    const bytecode_file = try std.fs.cwd().openFile("src/_test_utils/fixtures/erc20-transfer/bytecode.txt", .{});
+    const bytecode_file = try std.fs.cwd().openFile("fixtures/erc20-transfer/bytecode.txt", .{});
     defer bytecode_file.close();
     const bytecode_hex = try bytecode_file.readToEndAlloc(allocator, 1024 * 1024);
     defer allocator.free(bytecode_hex);
@@ -46,7 +46,7 @@ test "ERC20 transfer fixture test" {
     defer allocator.free(init_code);
 
     // Read calldata from fixture
-    const calldata_file = try std.fs.cwd().openFile("src/_test_utils/fixtures/erc20-transfer/calldata.txt", .{});
+    const calldata_file = try std.fs.cwd().openFile("fixtures/erc20-transfer/calldata.txt", .{});
     defer calldata_file.close();
     const calldata_hex = try calldata_file.readToEndAlloc(allocator, 1024 * 1024);
     defer allocator.free(calldata_hex);
@@ -110,7 +110,7 @@ test "ERC20 transfer fixture test" {
             .caller = caller_address, 
             .value = 0, 
             .init_code = init_code, 
-            .gas = 500_000_000 
+            .gas = 16_000_000 
         } 
     };
     
@@ -132,7 +132,8 @@ test "ERC20 transfer fixture test" {
     
     if (deploy_result.success) {
         // Get the created contract address
-        contract_address = primitives.Address.get_contract_address(caller_address, 0);
+        contract_address = deploy_result.created_address orelse
+            try primitives.Address.getContractAddress(allocator, caller_address, 0);
         const created_account = database.get_account(contract_address.bytes) catch null;
         
         if (created_account) |acc| {
@@ -195,7 +196,7 @@ test "ERC20 transfer fixture test" {
             .to = contract_address,
             .value = 0,
             .input = calldata,
-            .gas = 1_000_000_000,
+            .gas = 16_000_000,
         },
     };
     
@@ -223,7 +224,7 @@ test "ERC20 transfer fixture test" {
     // Check if execution was successful
     if (!result.success) {
         std.debug.print("\nEXECUTION FAILED!\n", .{});
-        std.debug.print("Gas consumed: {}\n", .{1_000_000_000 - result.gas_left});
+        std.debug.print("Gas consumed: {}\n", .{16_000_000 - result.gas_left});
         return error.ExecutionFailed;
     }
     

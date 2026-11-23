@@ -647,7 +647,7 @@ pub const Database = struct {
             offset += 1;
             var i: usize = len_bytes;
             while (i > 0) : (i -= 1) {
-                result[offset] = @intCast((total_size >> ((i - 1) * 8)) & 0xFF);
+                result[offset] = @intCast((total_size >> @as(u6, @intCast((i - 1) * 8))) & 0xFF);
                 offset += 1;
             }
         }

@@ -15,6 +15,10 @@ const Frame = evm.Frame;
 const Dispatch = evm.FrameDispatch;
 const Opcode = evm.Opcode;
 
+test {
+    _ = @import("jump_table_simple.zig");
+}
+
 test "Jump table should contain JUMPDEST at 0x0f in ERC20 bytecode" {
     const allocator = testing.allocator;
 
@@ -56,7 +60,7 @@ test "Jump table should contain JUMPDEST at 0x0f in ERC20 bytecode" {
         .memory_limit = 0xFFFFFF,
     };
 
-    const TestFrame = Frame(frame_config);
+    const TestFrame = Frame(frame_config, evm.DefaultEvm);
     const TestDispatch = TestFrame.Dispatch;
 
     // Get opcode handlers

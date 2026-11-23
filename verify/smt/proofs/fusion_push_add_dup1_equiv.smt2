@@ -8,7 +8,7 @@
 ;; Method  : assert hypotheses and NOT(claim). Expected `unsat`: no
 ;;           counterexample exists over the whole input space.
 ;; Modeled Zig source:
-;; --- src/instructions/handlers_advanced_synthetic.zig:425 (push_add_dup1)
+;; --- src/instructions/handlers_advanced_synthetic.zig:381 (push_add_dup1)
 ;;   |         pub fn push_add_dup1(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
 ;;   |             self.beforeInstruction(.PUSH_ADD_DUP1, cursor);
 ;;   |             const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
@@ -19,10 +19,7 @@
 ;;   |             (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "PUSH_ADD_DUP1: Stack overflow (need 1 free slot)");
 ;;   | 
 ;;   |             const push_item = op_data.items[0];
-;;   |             const push_value: WordType = if (push_item == .push_inline)
-;;   |                 push_item.push_inline.value
-;;   |             else
-;;   |                 push_item.push_pointer.value_ptr.*;
+;;   |             const push_value: WordType = push_item.push_pointer.value_ptr.*;
 ;;   | 
 ;;   |             const result = self.stack.peek_unsafe() +% push_value;
 ;;   |             self.stack.set_top_unsafe(result);

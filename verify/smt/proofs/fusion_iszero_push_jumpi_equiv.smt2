@@ -10,7 +10,7 @@
 ;; Method  : assert hypotheses and NOT(claim). Expected `unsat`: no
 ;;           counterexample exists over the whole input space.
 ;; Modeled Zig source:
-;; --- src/instructions/handlers_advanced_synthetic.zig:128 (iszero_jumpi)
+;; --- src/instructions/handlers_advanced_synthetic.zig:108 (iszero_jumpi)
 ;;   |         pub fn iszero_jumpi(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
 ;;   |             self.beforeInstruction(.ISZERO_JUMPI, cursor);
 ;;   |             const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
@@ -21,12 +21,7 @@
 ;;   | 
 ;;   |             // Get the jump target from items
 ;;   |             const target_item = op_data.items[0];
-;;   |             const target = if (target_item == .push_inline)
-;;   |                 target_item.push_inline.value
-;;   |             else if (target_item == .push_pointer)
-;;   |                 target_item.push_pointer.value_ptr.*
-;;   |             else
-;;   |                 unreachable;
+;;   |             const target = target_item.push_pointer.value_ptr.*;
 ;;   | 
 ;;   |             // Pop value and check if zero
 ;;   |             const value = self.stack.pop_unsafe();
@@ -34,14 +29,7 @@
 ;;   | 
 ;;   |             // Jump if the value was zero
 ;;   |             if (should_jump) {
-;;   |                 // Guard against an out-of-range destination before the cast (else @intCast panics).
-;;   |                 if (target > std.math.maxInt(FrameType.PcType)) {
-;;   |                     self.afterComplete(.ISZERO_JUMPI);
-;;   |                     return Error.InvalidJump;
-;;   |                 }
-;;   |                 // Look up the jump destination in the jump table
-;;   |                 const dest_pc: FrameType.PcType = @intCast(target);
-;;   |                 if (self.jump_table.findJumpTarget(dest_pc)) |jump_dispatch| {
+;;   |                 if (self.jump_table.findJumpTargetU256(target)) |jump_dispatch| {
 ;;   |                     self.afterInstruction(.ISZERO_JUMPI, jump_dispatch.cursor[0].opcode_handler, jump_dispatch.cursor);
 ;;   |                     return @call(FrameType.Dispatch.getTailCallModifier(), jump_dispatch.cursor[0].opcode_handler, .{ self, jump_dispatch.cursor });
 ;;   |                 } else {

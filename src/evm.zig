@@ -41,11 +41,17 @@ pub fn Evm(config: EvmConfig) type {
             .initial_capacity = 128,
         });
         const CallStackEntry = struct {
+            address: primitives.Address,
             caller: primitives.Address,
             value: config.WordType,
             is_static: bool, // EIP-214: Track static context per call level
         };
-        const empty_call_stack_entry = CallStackEntry{ .caller = primitives.Address.ZERO_ADDRESS, .value = 0, .is_static = false };
+        const empty_call_stack_entry = CallStackEntry{
+            .address = primitives.Address.ZERO_ADDRESS,
+            .caller = primitives.Address.ZERO_ADDRESS,
+            .value = 0,
+            .is_static = false,
+        };
 
         /// Dispatch schedule and jump table built once per deployed code hash and reused
         /// for the lifetime of the EVM. `code` is an owned copy compared byte-for-byte on
@@ -116,8 +122,8 @@ pub fn Evm(config: EvmConfig) type {
         depth: u11, // Supports up to 2048 depth, more than EVM's 1024 limit
         /// Call stack - tracks caller and value for each call depth
         call_stack: [config.max_call_depth]CallStackEntry,
-        /// Current return data from last call (null if no return data available)
-        return_data: ?[]const u8, // 24 bytes (optional adds 8 bytes for tag)
+        /// Current return data from last call (empty if no return data available)
+        return_data: std.ArrayList(u8),
         /// Allocator for dynamic memory
         allocator: std.mem.Allocator, // 16 bytes (vtable ptr + context ptr)
 
@@ -216,7 +222,7 @@ pub fn Evm(config: EvmConfig) type {
             var self = Self{
                 .depth = 0,
                 .call_stack = [_]CallStackEntry{empty_call_stack_entry} ** config.max_call_depth,
-                .return_data = null,
+                .return_data = .{},
                 .allocator = allocator,
                 .database = database orelse return error.DatabaseRequired,
                 .access_list = access_list,
@@ -296,10 +302,8 @@ pub fn Evm(config: EvmConfig) type {
         /// is invalid after calling deinit and must not be used.
         pub fn deinit(self: *Self) void {
             self.tracer.deinit();
-            // Free return_data if it exists
-            if (self.return_data) |data| {
-                self.allocator.free(data);
-            }
+            // Free return_data buffer
+            self.return_data.deinit(self.allocator);
             self.journal.deinit();
             self.created_contracts.deinit();
             self.self_destruct.deinit();
@@ -522,8 +526,8 @@ pub fn Evm(config: EvmConfig) type {
 
             defer {
                 self.depth = 0;
-                // Clear return_data for next transaction (it persists until next call overwrites it)
-                // Don't free here - it's freed in deinit or when set_return_data overwrites it
+                // Clear return_data so a previous transaction's return data never leaks
+                self.clear_return_data();
                 // Clear access list for new transaction (EIP-2929)
                 self.access_list.clear();
                 // Clear journal for new transaction
@@ -571,9 +575,8 @@ pub fn Evm(config: EvmConfig) type {
                 self.tracer.schedule_index = 0;
                 self.tracer.simple_instruction_count = 0;
                 self.tracer.fused_instruction_count = 0;
-                // Clear steps arrays but keep capacity
-                self.tracer.steps.items.len = 0;
-                self.tracer.advanced_steps.items.len = 0;
+                // Free per-step heap allocations and clear step buffers while keeping capacity
+                self.tracer.clearSteps();
             }
 
             // Pre-warm addresses for top-level calls (EIP-2929 & EIP-3651)
@@ -861,17 +864,12 @@ pub fn Evm(config: EvmConfig) type {
                 result.logs = logs_copy;
             }
 
-            // Extract self-destruct records if self-destruct is enabled
-            // EIP-6780 restricts SELFDESTRUCT behavior in Cancun+
-            if (config.eips.eip_6780_selfdestruct_same_transaction_only()) {
-                result.selfdestructs = self.self_destruct.toOwnedSlice(self.allocator) catch |err| {
-                    log.err("Failed to transfer selfdestructs: {s}", .{@errorName(err)});
-                    result.success = false;
-                    return result;
-                };
-            } else {
-                result.selfdestructs = &.{};
-            }
+            // Extract self-destruct records (handlers_system.selfdestruct already enforces EIP-6780 on Cancun+)
+            result.selfdestructs = self.self_destruct.toOwnedSlice(self.allocator) catch |err| {
+                log.err("Failed to transfer selfdestructs: {s}", .{@errorName(err)});
+                result.success = false;
+                return result;
+            };
 
             // Extract access list data before clearing
             result.accessed_addresses = self.allocator.dupe(primitives.Address, self.access_list.addresses.keys()) catch {
@@ -898,11 +896,17 @@ pub fn Evm(config: EvmConfig) type {
         pub fn inner_call(self: *Self, params: CallParams) CallResult {
             @branchHint(.likely);
             if ((@import("builtin").mode == .Debug or @import("builtin").mode == .ReleaseSafe)) {
-                params.validate() catch return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                params.validate() catch {
+                    self.clear_return_data();
+                    return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                };
             }
 
             if (!config.disable_gas_checks) {
-                if (params.getGas() == 0) return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                if (params.getGas() == 0) {
+                    self.clear_return_data();
+                    return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                }
             }
 
             // depth is incremented solely by execute_frame (CALL variants) and the create paths;
@@ -911,7 +915,10 @@ pub fn Evm(config: EvmConfig) type {
             // caller/value/is_static lookups. The check uses the parent depth: a frame already
             // at the limit cannot push another. (Deep recursion is safe: execute_frame hops
             // onto a large-stack worker thread at LARGE_STACK_DEPTH.)
-            if (self.depth >= config.max_call_depth) return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+            if (self.depth >= config.max_call_depth) {
+                self.clear_return_data();
+                return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+            }
 
             const execution_gas = params.getGas();
 
@@ -919,6 +926,7 @@ pub fn Evm(config: EvmConfig) type {
                 .call => |p| blk: {
                     @branchHint(.likely);
                     break :blk self.executeCall(.{ .caller = p.caller, .to = p.to, .value = p.value, .input = p.input, .gas = execution_gas }) catch {
+                        self.clear_return_data();
                         return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
                     };
                 },
@@ -934,6 +942,17 @@ pub fn Evm(config: EvmConfig) type {
                     break :blk self.executeCallcode(.{ .caller = p.caller, .to = p.to, .value = p.value, .input = p.input, .gas = execution_gas }) catch (CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable);
                 },
             };
+
+            // EIP-211: CALL/CALLCODE/DELEGATECALL/STATICCALL always update the caller's
+            // return_data buffer (including precompiles, empty accounts, and failures).
+            switch (params) {
+                .call, .staticcall, .delegatecall, .callcode => {
+                    self.set_return_data(result.output) catch {
+                        self.clear_return_data();
+                    };
+                },
+                .create, .create2 => {},
+            }
 
             result.logs = &.{};
             result.selfdestructs = &.{};
@@ -1287,12 +1306,15 @@ pub fn Evm(config: EvmConfig) type {
                     return CallResult.success_empty(self.getCallArenaAllocator(), gas) catch unreachable;
                 },
                 .execute_with_code => |exec| {
+                    // EIP-7: DELEGATECALL executes `params.to`'s code in the current contract's
+                    // storage/address context, preserving msg.sender (`params.caller`) and msg.value.
+                    const current_address = if (self.depth > 0) self.call_stack[self.depth - 1].address else params.to;
                     const current_value = if (self.depth > 0) self.call_stack[self.depth - 1].value else 0;
                     const result = self.execute_frame(
                         exec.code,
                         params.input,
                         params.gas,
-                        params.caller,
+                        current_address,
                         params.caller,
                         current_value,
                         self.is_static_context(), // EIP-214: inherit parent static context (DELEGATECALL)
@@ -1861,7 +1883,7 @@ pub fn Evm(config: EvmConfig) type {
                 self.depth -= 1;
             };
 
-            self.call_stack[self.depth - 1] = CallStackEntry{ .caller = caller, .value = value, .is_static = is_static };
+            self.call_stack[self.depth - 1] = CallStackEntry{ .address = address, .caller = caller, .value = value, .is_static = is_static };
             self.tx_max_depth = @max(self.tx_max_depth, @as(u16, self.depth));
 
             const gas_after_base = gas;
@@ -1952,7 +1974,7 @@ pub fn Evm(config: EvmConfig) type {
                 error.Return => termination_reason = error.Return,
                 error.SelfDestruct => termination_reason = error.SelfDestruct,
                 error.REVERT => {
-                    if (tracing) execution_trace = try convertTracerToExecutionTrace(self.allocator, &self.tracer);
+                    if (tracing) execution_trace = try convertTracerToExecutionTrace(self.getCallArenaAllocator(), &self.tracer);
                     const gas_left: u64 = @intCast(@max(frame.gas_remaining, 0));
                     // Get output from frame
                     const output_data = frame.output_data;
@@ -1975,10 +1997,10 @@ pub fn Evm(config: EvmConfig) type {
                     }
                     // Try to get partial trace even on error
                     if (tracing) {
-                        execution_trace = convertTracerToExecutionTrace(self.allocator, &self.tracer) catch blk: {
+                        execution_trace = convertTracerToExecutionTrace(self.getCallArenaAllocator(), &self.tracer) catch blk: {
                             break :blk @import("frame/call_result.zig").ExecutionTrace{
                                 .steps = &[_]@import("frame/call_result.zig").TraceStep{},
-                                .allocator = self.allocator,
+                                .allocator = self.getCallArenaAllocator(),
                             };
                         };
                     }
@@ -1988,7 +2010,7 @@ pub fn Evm(config: EvmConfig) type {
                 },
             };
 
-            if (tracing) execution_trace = try convertTracerToExecutionTrace(self.allocator, &self.tracer);
+            if (tracing) execution_trace = try convertTracerToExecutionTrace(self.getCallArenaAllocator(), &self.tracer);
 
             const gas_left: u64 = @intCast(@max(frame.gas_remaining, 0));
             // Get output from frame (set by RETURN/REVERT handlers)
@@ -2335,45 +2357,19 @@ pub fn Evm(config: EvmConfig) type {
 
         /// Get return data from last call (returns null if no return data available)
         pub fn get_return_data(self: *const Self) ?[]const u8 {
-            return self.return_data;
+            return if (self.return_data.items.len > 0) self.return_data.items else null;
         }
 
-        /// Set return data from a call, reusing buffer when possible
-        /// This takes ownership of the data and will free any existing return_data
+        /// Set return data from a call, reusing the backing buffer safely without slice-len shrink bugs.
         pub fn set_return_data(self: *Self, data: []const u8) !void {
-            if (data.len == 0) {
-                // For empty data, just clear
-                self.clear_return_data();
-                return;
-            }
-
-            if (self.return_data) |existing| {
-                if (existing.len >= data.len) {
-                    // Reuse existing buffer
-                    @memcpy(@constCast(existing[0..data.len]), data);
-                    // Shrink the slice to the actual data length
-                    self.return_data = existing[0..data.len];
-                } else {
-                    // Need a bigger buffer
-                    self.allocator.free(existing);
-                    const new_buf = self.allocator.alloc(u8, data.len) catch return error.AllocationError;
-                    @memcpy(new_buf, data);
-                    self.return_data = new_buf;
-                }
-            } else {
-                // No existing buffer, allocate new
-                const new_buf = self.allocator.alloc(u8, data.len) catch return error.AllocationError;
-                @memcpy(new_buf, data);
-                self.return_data = new_buf;
-            }
+            self.return_data.clearRetainingCapacity();
+            if (data.len == 0) return;
+            self.return_data.appendSlice(self.allocator, data) catch return error.AllocationError;
         }
 
         /// Clear return data buffer (for CREATE/CREATE2 per EIP-211)
         pub fn clear_return_data(self: *Self) void {
-            if (self.return_data) |data| {
-                self.allocator.free(data);
-            }
-            self.return_data = null;
+            self.return_data.clearRetainingCapacity();
         }
 
         /// Check if returndata should be cleared after CREATE/CREATE2 (EIP-211)

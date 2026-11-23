@@ -66,7 +66,7 @@ fn computeWithdrawalHash(request: *const WithdrawalRequest) !u256 {
 
     // Compute Keccak256 hash (32 bytes output)
     var hash: [32]u8 = undefined;
-    keccak_asm.keccak256(&hash, &input_buffer);
+    std.crypto.hash.sha3.Keccak256.hash(&input_buffer, &hash, .{});
 
     // Convert hash bytes to u256 (big-endian)
     return std.mem.readInt(u256, &hash, .big);
@@ -256,7 +256,7 @@ test "validator withdrawal request" {
     var input: [76]u8 = [_]u8{0} ** 76;
 
     // Set source address (20 bytes)
-    const source_address = try Address.from_hex("0x1234567890123456789012345678901234567890");
+    const source_address = try Address.fromHex("0x1234567890123456789012345678901234567890");
     @memcpy(input[0..20], &source_address.bytes);
 
     // Set validator pubkey (48 bytes)
@@ -301,14 +301,14 @@ test "withdrawal authorization check" {
     var input: [76]u8 = [_]u8{0} ** 76;
     
     // Set source address
-    const source_address = try Address.from_hex("0x1234567890123456789012345678901234567890");
+    const source_address = try Address.fromHex("0x1234567890123456789012345678901234567890");
     @memcpy(input[0..20], &source_address.bytes);
     
     // Set validator pubkey
     input[20..68].* = [_]u8{0xAA} ** 48;
     
     // Try to execute with different caller (unauthorized)
-    const unauthorized_caller = try Address.from_hex("0x9999999999999999999999999999999999999999");
+    const unauthorized_caller = try Address.fromHex("0x9999999999999999999999999999999999999999");
     const result = try contract.execute(
         unauthorized_caller,
         &input,
@@ -357,7 +357,7 @@ test "max withdrawals per block" {
 
     // Try to add one more - should not be stored
     var input: [76]u8 = [_]u8{0} ** 76;
-    const extra_address = try Address.from_hex("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF");
+    const extra_address = try Address.fromHex("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF");
     @memcpy(input[0..20], &extra_address.bytes);
 
     const result = try contract.execute(extra_address, &input, 100000);
@@ -381,7 +381,7 @@ test "clearProcessedWithdrawals error propagation" {
 
     // Add a withdrawal
     var input: [76]u8 = [_]u8{0} ** 76;
-    const source_address = try Address.from_hex("0x1234567890123456789012345678901234567890");
+    const source_address = try Address.fromHex("0x1234567890123456789012345678901234567890");
     @memcpy(input[0..20], &source_address.bytes);
     input[20..68].* = [_]u8{0xAA} ** 48;
 
@@ -501,13 +501,13 @@ test "processBlockWithdrawals validates withdrawal count" {
     }
 
     // Process block withdrawals should succeed
-    const block_info = BlockInfo(.{}){
+    const block_info = BlockInfo{
         .number = 1000,
         .timestamp = 1234567890,
         .difficulty = 0,
         .gas_limit = 30000000,
         .coinbase = Address{ .bytes = [_]u8{0} ** 20 },
-        .base_fee_per_gas = 1000000000,
+        .base_fee = 1000000000,
         .prev_randao = [_]u8{0} ** 32,
     };
 
@@ -528,13 +528,13 @@ test "processBlockWithdrawals rejects excessive withdrawals" {
         MAX_WITHDRAWAL_REQUESTS_PER_BLOCK + 5,
     );
 
-    const block_info = BlockInfo(.{}){
+    const block_info = BlockInfo{
         .number = 1000,
         .timestamp = 1234567890,
         .difficulty = 0,
         .gas_limit = 30000000,
         .coinbase = Address{ .bytes = [_]u8{0} ** 20 },
-        .base_fee_per_gas = 1000000000,
+        .base_fee = 1000000000,
         .prev_randao = [_]u8{0} ** 32,
     };
 
@@ -554,7 +554,7 @@ test "memory safety - output heap allocation" {
     defer contract.deinit();
 
     var input: [76]u8 = [_]u8{0} ** 76;
-    const source_address = try Address.from_hex("0x1234567890123456789012345678901234567890");
+    const source_address = try Address.fromHex("0x1234567890123456789012345678901234567890");
     @memcpy(input[0..20], &source_address.bytes);
     input[20..68].* = [_]u8{0xAA} ** 48;
 
@@ -580,7 +580,7 @@ test "out of gas error handling" {
     defer contract.deinit();
 
     var input: [76]u8 = [_]u8{0} ** 76;
-    const source_address = try Address.from_hex("0x1234567890123456789012345678901234567890");
+    const source_address = try Address.fromHex("0x1234567890123456789012345678901234567890");
     @memcpy(input[0..20], &source_address.bytes);
     input[20..68].* = [_]u8{0xAA} ** 48;
 
@@ -601,7 +601,7 @@ test "invalid input length handling" {
 
     // Try with wrong input length
     var input: [50]u8 = [_]u8{0} ** 50;
-    const source_address = try Address.from_hex("0x1234567890123456789012345678901234567890");
+    const source_address = try Address.fromHex("0x1234567890123456789012345678901234567890");
 
     const result = try contract.execute(source_address, &input, 100000);
     // Empty output for invalid input (no allocation)
@@ -620,7 +620,7 @@ test "withdrawal request parsing - big endian amount" {
     defer contract.deinit();
 
     var input: [76]u8 = [_]u8{0} ** 76;
-    const source_address = try Address.from_hex("0x1234567890123456789012345678901234567890");
+    const source_address = try Address.fromHex("0x1234567890123456789012345678901234567890");
     @memcpy(input[0..20], &source_address.bytes);
     input[20..68].* = [_]u8{0xAA} ** 48;
 
@@ -680,7 +680,7 @@ test "storage hash correctly stored and retrievable" {
     defer contract.deinit();
 
     var input: [76]u8 = [_]u8{0} ** 76;
-    const source_address = try Address.from_hex("0x1234567890123456789012345678901234567890");
+    const source_address = try Address.fromHex("0x1234567890123456789012345678901234567890");
     @memcpy(input[0..20], &source_address.bytes);
     input[20..68].* = [_]u8{0xAA} ** 48;
     const amount: u64 = 1000;

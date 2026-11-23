@@ -299,64 +299,16 @@ pub const DifferentialTestor = struct {
         // Select the appropriate database and EVM instance
         const db = if (enable_tracing) self.guillotine_db else self.guillotine_db_no_trace;
 
-        // Better heuristic: deployment bytecode usually contains CODECOPY (0x39) followed by RETURN (0xf3)
-        // This pattern is used to copy runtime code to memory and return it
-        var is_deployment_bytecode = false;
-        if (bytecode.len > 10) {
-            // Look for CODECOPY (0x39) followed eventually by RETURN (0xf3) in the bytecode
-            for (bytecode, 0..) |byte, i| {
-                if (byte == 0x39 and i + 1 < bytecode.len) { // Found CODECOPY
-                    // Look for RETURN within the next 10 bytes
-                    const search_end = @min(i + 10, bytecode.len);
-                    for (bytecode[i + 1 .. search_end]) |next_byte| {
-                        if (next_byte == 0xf3) { // Found RETURN after CODECOPY
-                            is_deployment_bytecode = true;
-                            break;
-                        }
-                    }
-                    if (is_deployment_bytecode) break;
-                }
-            }
-        }
-
         const log = std.log.scoped(.differential_testor);
 
-        if (is_deployment_bytecode) {
-            log.warn("Detected deployment bytecode (contains CODECOPY + RETURN pattern), attempting to deploy contract", .{});
-
-            // For Guillotine: Execute deployment bytecode to get runtime code
-            const runtime_code = try self.deployContractGuillotine(bytecode, enable_tracing);
-            defer self.allocator.free(runtime_code);
-
-            log.warn("Deployment returned {} bytes of runtime code", .{runtime_code.len});
-
-            // Set the runtime code
-            const code_hash = try db.set_code(runtime_code);
-            try db.set_account(self.contract.bytes, .{
-                .balance = 0,
-                .nonce = 1,
-                .code_hash = code_hash,
-                .storage_root = [_]u8{0} ** 32,
-            });
-
-            // For MinimalEvm: Also use runtime code for fair comparison
-            // MinimalEvm doesn't need setCode - it will use the bytecode passed during execution
-        } else {
-            // Not deployment bytecode, use as-is (original behavior)
-            // MinimalEvm doesn't need setCode - it will use the bytecode passed during execution
-
-            const code_hash = try db.set_code(bytecode);
-            // log.debug("Set code with hash: {x} (tracing={})", .{code_hash, enable_tracing});
-            // log.debug("Contract address is: {x}", .{self.contract.bytes});
-
-            try db.set_account(self.contract.bytes, .{
-                .balance = 0,
-                .nonce = 1,
-                .code_hash = code_hash,
-                .storage_root = [_]u8{0} ** 32,
-            });
-            // log.debug("Set account for address: {x}", .{self.contract.bytes});
-        }
+        // Install runtime bytecode directly at `self.contract` for both EVMs.
+        const code_hash = try db.set_code(bytecode);
+        try db.set_account(self.contract.bytes, .{
+            .balance = 0,
+            .nonce = 1,
+            .code_hash = code_hash,
+            .storage_root = [_]u8{0} ** 32,
+        });
 
         // Verify deployment
         const deployed_code = try db.get_code_by_address(self.contract.bytes);
@@ -374,7 +326,7 @@ pub const DifferentialTestor = struct {
         }
 
         // Execute on both EVMs separately to get the results for trace display
-        var minimal_result = try self.executeMinimalEvmWithTrace(self.caller, self.contract, 0, calldata, gas_limit, bytecode);
+        var minimal_result = try self.executeMinimalEvmWithTrace(self.caller, self.contract, 0, calldata, gas_limit, deployed_code);
         defer minimal_result.deinit();
 
         var guillotine_result = try self.executeGuillotineWithTraceMode(self.caller, self.contract, 0, calldata, gas_limit, enable_tracing);
@@ -468,10 +420,6 @@ pub const DifferentialTestor = struct {
         gas_limit: u64,
         bytecode: []const u8,
     ) !ExecutionResultWithTrace {
-        _ = caller;
-        _ = to;
-        _ = value;
-
         // Reset MinimalEvm for new execution
         // Instead of deinit + reinit which breaks arena pointers,
         // we'll reset the MinimalEvm state while keeping the arena intact
@@ -479,35 +427,43 @@ pub const DifferentialTestor = struct {
         // Clear the frames
         self.minimal_evm.frames.clearRetainingCapacity();
 
-        // Clear other state
+        // Clear all state maps and transaction-scoped counters
         self.minimal_evm.storage.clearRetainingCapacity();
+        self.minimal_evm.transient_storage.clearRetainingCapacity();
+        self.minimal_evm.original_storage.clearRetainingCapacity();
         self.minimal_evm.balances.clearRetainingCapacity();
         self.minimal_evm.code.clearRetainingCapacity();
+        self.minimal_evm.nonces.clearRetainingCapacity();
         self.minimal_evm.warm_addresses.clearRetainingCapacity();
         self.minimal_evm.warm_storage_slots.clearRetainingCapacity();
+        self.minimal_evm.gas_refund = 0;
 
-        // Reset blockchain context to defaults
+        // Match Guillotine's blockchain/tx context and initial account state identically
         self.minimal_evm.chain_id = 1;
-        self.minimal_evm.block_number = 0;
+        self.minimal_evm.block_number = 1;
         self.minimal_evm.block_timestamp = 0;
         self.minimal_evm.block_difficulty = 0;
         self.minimal_evm.block_prevrandao = 0;
         self.minimal_evm.block_coinbase = primitives.Address.ZERO_ADDRESS;
-        self.minimal_evm.block_gas_limit = 30_000_000;
+        self.minimal_evm.block_gas_limit = 100000;
         self.minimal_evm.block_base_fee = 0;
         self.minimal_evm.blob_base_fee = 0;
-        self.minimal_evm.origin = primitives.Address.ZERO_ADDRESS;
+        self.minimal_evm.origin = caller;
         self.minimal_evm.gas_price = 0;
         self.minimal_evm.host = null;
+
+        try self.minimal_evm.setBalance(caller, 10_000_000);
+        try self.minimal_evm.setCode(to, bytecode);
+        try self.minimal_evm.setNonce(to, 1);
 
         // Execute the bytecode with MinimalEvm
         const result = self.minimal_evm.execute(
             bytecode,
             @intCast(gas_limit),
-            primitives.Address.ZERO_ADDRESS, // caller
-            primitives.Address.ZERO_ADDRESS, // contract
-            0, // value
-            input
+            caller,
+            to,
+            value,
+            input,
         ) catch {
             // On error, create a failed result
             return ExecutionResultWithTrace{

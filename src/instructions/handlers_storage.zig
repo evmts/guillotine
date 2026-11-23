@@ -114,8 +114,34 @@ pub fn Handlers(FrameType: type) type {
             const original_opt = evm.get_original_storage(contract_addr, slot);
             const original_value: WordType = original_opt orelse current_value;
 
-            // Calculate SSTORE operation cost (includes cold access cost if applicable)
-            const total_gas_cost: u64 = GasConstants.sstoreGasCost(current_value, original_value, value, is_cold);
+            // Calculate SSTORE operation cost (EIP-2200 + EIP-2929: Berlin+ reduces
+            // SSTORE_RESET_GAS from 5000 to 2900 because cold access adds 2100 separately).
+            const base_gas_cost: u64 = if (evm.is_hardfork_at_least(.ISTANBUL)) blk: {
+                const warm_cost: u64 = if (evm.is_hardfork_at_least(.BERLIN))
+                    GasConstants.WarmStorageReadCost // 100
+                else
+                    800; // EIP-2200 Istanbul SLOAD_GAS
+                if (current_value == value) {
+                    break :blk warm_cost;
+                } else if (original_value == current_value) {
+                    if (original_value == 0) {
+                        break :blk GasConstants.SstoreSetGas; // 20000
+                    } else if (evm.is_hardfork_at_least(.BERLIN)) {
+                        break :blk GasConstants.SstoreResetGas - GasConstants.ColdSloadCost; // 2900
+                    } else {
+                        break :blk GasConstants.SstoreResetGas; // 5000
+                    }
+                } else {
+                    break :blk warm_cost;
+                }
+            } else blk: {
+                // Pre-Istanbul (Frontier..Petersburg)
+                break :blk if (current_value == 0 and value != 0)
+                    GasConstants.SstoreSetGas
+                else
+                    GasConstants.SstoreResetGas;
+            };
+            const total_gas_cost: u64 = base_gas_cost + (if (is_cold and evm.is_hardfork_at_least(.BERLIN)) GasConstants.ColdSloadCost else 0);
 
             log.debug(
                 "SSTORE metering: slot={}, original={}, current={}, new={}, is_cold={}, total={}",

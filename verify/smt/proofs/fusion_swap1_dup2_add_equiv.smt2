@@ -10,7 +10,7 @@
 ;; Method  : assert hypotheses and NOT(claim). Expected `unsat`: no
 ;;           counterexample exists over the whole input space.
 ;; Modeled Zig source:
-;; --- src/instructions/handlers_advanced_synthetic.zig:266 (swap1_dup2_add)
+;; --- src/instructions/handlers_advanced_synthetic.zig:229 (swap1_dup2_add)
 ;;   |         pub fn swap1_dup2_add(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
 ;;   |             self.beforeInstruction(.SWAP1_DUP2_ADD, cursor);
 ;;   |             const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
@@ -38,7 +38,7 @@
 ;;   |             self.afterInstruction(.SWAP1_DUP2_ADD, op_data.next_handler, op_data.next_cursor.cursor);
 ;;   |             return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
 ;;   |         }
-;; --- src/stack/stack.zig:174 (dup_n_unsafe)
+;; --- src/stack/stack.zig:182 (dup_n_unsafe)
 ;;   |         pub inline fn dup_n_unsafe(self: *Self, n: u8) void {
 ;;   |             self.assert(self.size_internal() >= n, "Insufficient stack items for dup_n_unsafe");
 ;;   |             self.assert(@intFromPtr(self.stack_ptr) > @intFromPtr(self.stack_limit()), "Stack overflow in dup_n_unsafe");

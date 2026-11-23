@@ -918,7 +918,7 @@ test "eip_3651_warm_coinbase_address" {
     var access_list = AccessList.init(allocator);
     defer access_list.deinit();
 
-    const coinbase = primitives.Address.from_hex("0x1234567890123456789012345678901234567890") catch unreachable;
+    const coinbase = primitives.Address.fromHex("0x1234567890123456789012345678901234567890") catch unreachable;
 
     // Pre-Shanghai: should not warm coinbase (no-op)
     try pre_shanghai.eip_3651_warm_coinbase_address(&access_list, coinbase);

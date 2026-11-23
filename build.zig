@@ -454,7 +454,7 @@ pub fn build(b: *std.Build) void {
     const gt_bug_test = b.addTest(.{
         .name = "gt-bug-test",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("test_gt_exact.zig"),
+            .root_source_file = b.path("test/evm/opcodes/11_test.zig"),
             .target = target,
             .optimize = .Debug,
         }),

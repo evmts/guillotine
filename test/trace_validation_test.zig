@@ -3,8 +3,9 @@ const testing = std.testing;
 const primitives = @import("voltaire");
 const guillotine = @import("evm");
 
-// Create EVM with tracing enabled for these tests
+// Create EVM with tracing enabled for these tests (fusion disabled for 1:1 opcode step assertions)
 const Evm = guillotine.Evm(.{
+    .enable_fusion = false,
     .tracer_config = guillotine.tracer.TracerConfig{
         .enabled = true,
         .enable_validation = false,
@@ -98,8 +99,8 @@ test "trace validation - basic trace population on successful call" {
         // Verify we have trace steps
         try testing.expect(trace.steps.len > 0);
         
-        // We expect at least 8 steps for our bytecode (including potential metadata)
-        try testing.expect(trace.steps.len >= 8);
+        // We expect all 6 opcodes from our bytecode (PUSH1, PUSH1, MSTORE, PUSH1, PUSH1, RETURN)
+        try testing.expect(trace.steps.len >= 6);
         
         // Verify first few opcodes match our bytecode
         for (trace.steps, 0..) |step, i| {
@@ -483,10 +484,11 @@ test "trace validation - snapshot test" {
         try testing.expectEqual(@as(usize, 1), trace.steps[3].stack.len); // After ADD
         try testing.expectEqual(@as(u256, 5), trace.steps[3].stack[0]); // 3 + 2 = 5
         
-        // Validate gas consumption
-        try testing.expect(trace.steps[0].gas > trace.steps[1].gas); // Gas decreases
-        try testing.expect(trace.steps[1].gas > trace.steps[2].gas);
-        try testing.expect(trace.steps[2].gas > trace.steps[3].gas);
+        // Validate non-increasing gas across steps (basic-block gas batching deducts static gas per block)
+        try testing.expect(trace.steps[0].gas >= trace.steps[1].gas);
+        try testing.expect(trace.steps[1].gas >= trace.steps[2].gas);
+        try testing.expect(trace.steps[2].gas >= trace.steps[3].gas);
+        try testing.expect(result.gas_left < 100_000);
     }
 }
 

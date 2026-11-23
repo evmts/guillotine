@@ -39,7 +39,7 @@ test "SELFDESTRUCT records should be tracked in CallResult" {
 
     
     // Create EVM instance with LONDON hardfork (pre-EIP-6780)
-    var evm_instance = try evm.Evm(.{}).init(
+    var evm_instance = try evm.Evm(.{ .eips = .{ .hardfork = .LONDON } }).init(
         allocator,
         &database,
         block_info,
@@ -133,7 +133,7 @@ test "SELFDESTRUCT multiple contracts in single call" {
     };
 
     // Create EVM instance with LONDON hardfork (pre-EIP-6780)
-    var evm_instance = try evm.Evm(.{}).init(
+    var evm_instance = try evm.Evm(.{ .eips = .{ .hardfork = .LONDON } }).init(
         allocator,
         &database,
         block_info,

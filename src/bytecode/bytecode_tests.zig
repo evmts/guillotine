@@ -49,7 +49,7 @@ test "snailtracer bytecode JUMP to 0x2e0 validation" {
     const allocator = std.testing.allocator;
 
     // Read the snailtracer bytecode
-    const bytecode_file = try std.fs.cwd().openFile("src/_test_utils/fixtures/snailtracer/bytecode.txt", .{});
+    const bytecode_file = try std.fs.cwd().openFile("fixtures/snailtracer/bytecode.txt", .{});
     defer bytecode_file.close();
 
     const bytecode_hex = try bytecode_file.readToEndAlloc(allocator, 1024 * 1024);

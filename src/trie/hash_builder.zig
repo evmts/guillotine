@@ -65,17 +65,18 @@ pub const HashBuilder = struct {
 
     /// Helper function to store a node in the HashMap with proper memory management
     fn store_node(self: *HashBuilder, hash_str: []const u8, node: TrieNode) HashBuilderError!void {
-        const allocator = self.allocator;
-        const node_bytes = node.encode(allocator) catch |err| {
-            std.log.debug("Failed to encode node for storage: {any}", .{err});
-            return err;
-        };
-        defer allocator.free(node_bytes);
-
-        self.nodes.put(hash_str, node) catch |err| {
+        const gop = self.nodes.getOrPut(hash_str) catch |err| {
             std.log.debug("Failed to store node with hash {s}: {any}", .{ hash_str, err });
             return err;
         };
+        if (gop.found_existing) {
+            // Identical content hash already stored: release duplicate key and node.
+            self.allocator.free(hash_str);
+            var dup_node = node;
+            dup_node.deinit(self.allocator);
+            return;
+        }
+        gop.value_ptr.* = node;
     }
 
     /// Add a key-value pair to the trie
@@ -86,30 +87,35 @@ pub const HashBuilder = struct {
         };
         defer self.allocator.free(nibbles);
 
-        // Store the key-value pair
-        const leaf = LeafNode.init(self.allocator, nibbles, HashValue{ .Raw = value }) catch |err| {
-            std.log.debug("Failed to create leaf node: {any}", .{err});
-            return switch (err) {
-                std.mem.Allocator.Error.OutOfMemory => std.mem.Allocator.Error.OutOfMemory,
-                error.InvalidInput => TrieOperationError.InvalidInput,
-            };
-        };
+        // Duplicate value so the trie owns its own heap allocation (safe to free in deinit).
+        const value_copy = try self.allocator.dupe(u8, value);
+        errdefer self.allocator.free(value_copy);
 
-        const node = TrieNode{ .Leaf = leaf };
-        const hash = node.hash(self.allocator) catch |err| {
-            std.log.debug("Failed to hash node: {any}", .{err});
-            return err;
-        };
-
-        const hash_str = bytes_to_hex_string(self.allocator, &hash) catch |err| {
-            std.log.debug("Failed to convert hash to hex string: {any}", .{err});
-            return err;
-        };
-
-        try self.store_node(hash_str, node);
-
-        // If we don't have a root yet, this becomes the root
+        // If we don't have a root yet, store a single leaf node as the root.
         if (self.root_hash == null) {
+            const nibbles_copy = try self.allocator.dupe(u8, nibbles);
+            errdefer self.allocator.free(nibbles_copy);
+
+            const leaf = LeafNode.init(self.allocator, nibbles_copy, HashValue{ .Raw = value_copy }) catch |err| {
+                std.log.debug("Failed to create leaf node: {any}", .{err});
+                return switch (err) {
+                    std.mem.Allocator.Error.OutOfMemory => std.mem.Allocator.Error.OutOfMemory,
+                    error.InvalidInput => TrieOperationError.InvalidInput,
+                };
+            };
+
+            const node = TrieNode{ .Leaf = leaf };
+            const hash = node.hash(self.allocator) catch |err| {
+                std.log.debug("Failed to hash node: {any}", .{err});
+                return err;
+            };
+
+            const hash_str = bytes_to_hex_string(self.allocator, &hash) catch |err| {
+                std.log.debug("Failed to convert hash to hex string: {any}", .{err});
+                return err;
+            };
+
+            try self.store_node(hash_str, node);
             self.root_hash = hash;
             return;
         }
@@ -126,8 +132,8 @@ pub const HashBuilder = struct {
             return TrieOperationError.NodeNotFound;
         };
 
-        // Update the trie
-        const updated_node = self.update(nibbles, value, root_node) catch |err| {
+        // Update the trie (transfers ownership of value_copy into the newly created node)
+        const updated_node = self.update(nibbles, value_copy, root_node) catch |err| {
             std.log.debug("Failed to update trie: {any}", .{err});
             return err;
         };

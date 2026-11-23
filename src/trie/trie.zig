@@ -160,53 +160,25 @@ pub const BranchNode = struct {
         return new_branch;
     }
 
-    pub fn encode(self: BranchNode, allocator: Allocator) ![]u8 {
-        var encoded_children = std.array_list.AlignedManaged([]u8, null).init(allocator);
-        defer {
-            for (encoded_children.items) |item| {
-                allocator.free(item);
-            }
-            encoded_children.deinit();
+    pub fn encode(self: *const BranchNode, allocator: Allocator) ![]u8 {
+        var items: [17][]const u8 = undefined;
+
+        // Each child is its raw payload (or empty slice for absent child);
+        // Rlp.encode(items) RLP-encodes each slice once as a list element.
+        // Borrow from `self` directly so Hash slices stay alive until Rlp.encode returns.
+        for (&self.children, 0..) |*child, idx| {
+            items[idx] = if (child.*) |*value| switch (value.*) {
+                .Raw => |data| data,
+                .Hash => |*hash| hash[0..],
+            } else "";
         }
 
-        // Encode each child or an empty string
-        for (self.children) |child| {
-            if (child) |value| {
-                switch (value) {
-                    .Raw => |data| {
-                        const encoded = try primitives.Rlp.encode(allocator, data);
-                        try encoded_children.append(encoded);
-                    },
-                    .Hash => |hash| {
-                        const encoded = try primitives.Rlp.encode(allocator, &hash);
-                        try encoded_children.append(encoded);
-                    },
-                }
-            } else {
-                const empty = try primitives.Rlp.encode(allocator, "");
-                try encoded_children.append(empty);
-            }
-        }
+        items[16] = if (self.value) |*value| switch (value.*) {
+            .Raw => |data| data,
+            .Hash => |*hash| hash[0..],
+        } else "";
 
-        // Encode value or empty string
-        if (self.value) |value| {
-            switch (value) {
-                .Raw => |data| {
-                    const encoded = try primitives.Rlp.encode(allocator, data);
-                    try encoded_children.append(encoded);
-                },
-                .Hash => |hash| {
-                    const encoded = try primitives.Rlp.encode(allocator, &hash);
-                    try encoded_children.append(encoded);
-                },
-            }
-        } else {
-            const empty = try primitives.Rlp.encode(allocator, "");
-            try encoded_children.append(empty);
-        }
-
-        // Encode the entire node as a list
-        return try primitives.Rlp.encode(allocator, encoded_children.items);
+        return try primitives.Rlp.encode(allocator, &items);
     }
 };
 
@@ -312,16 +284,16 @@ pub const TrieNode = union(NodeType) {
         }
     }
 
-    pub fn encode(self: TrieNode, allocator: Allocator) ![]u8 {
-        return switch (self) {
+    pub fn encode(self: *const TrieNode, allocator: Allocator) ![]u8 {
+        return switch (self.*) {
             .Empty => try primitives.Rlp.encode(allocator, ""),
-            .Branch => |branch| try branch.encode(allocator),
+            .Branch => |*branch| try branch.encode(allocator),
             .Extension => |extension| try extension.encode(allocator),
             .Leaf => |leaf| try leaf.encode(allocator),
         };
     }
 
-    pub fn hash(self: TrieNode, allocator: Allocator) ![32]u8 {
+    pub fn hash(self: *const TrieNode, allocator: Allocator) ![32]u8 {
         const encoded = try self.encode(allocator);
         defer allocator.free(encoded);
 
@@ -1415,8 +1387,8 @@ test "BranchNode - all children populated" {
     defer branch.deinit(allocator);
 
     // Populate all 16 children
-    var i: u4 = 0;
-    while (i < 16) : (i += 1) {
+    for (0..16) |idx| {
+        const i: u4 = @intCast(idx);
         var buf: [10]u8 = undefined;
         const data = std.fmt.bufPrint(&buf, "child{d}", .{i}) catch unreachable;
         const data_copy = try allocator.dupe(u8, data);
