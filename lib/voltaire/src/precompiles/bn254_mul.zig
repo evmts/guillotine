@@ -22,6 +22,7 @@ pub fn execute(
     @memcpy(input_buf[0..@min(input.len, 96)], input[0..@min(input.len, 96)]);
 
     const output = try allocator.alloc(u8, 64);
+    errdefer allocator.free(output);
 
     // Perform multiplication using pure Zig implementation
     bn254.bn254Mul(&input_buf, output) catch {

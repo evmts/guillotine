@@ -27,6 +27,7 @@ pub fn execute(
     }
 
     const output = try allocator.alloc(u8, 32);
+    errdefer allocator.free(output);
     @memset(output, 0);
 
     // Perform pairing check using pure Zig implementation

@@ -1,0 +1,115 @@
+name: Continuous Fuzzing
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Nightly deep fuzzing campaign at 03:00 UTC
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    inputs:
+      duration_seconds:
+        description: 'Fuzz campaign duration in seconds per phase'
+        required: false
+        default: '120'
+
+jobs:
+  zig-fuzz-ubuntu:
+    name: Zig Native --fuzz & Multi-Threaded Campaign (Ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Zig 0.15.2
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Voltaire Rust crypto wrappers
+        run: cargo build --manifest-path lib/voltaire/Cargo.toml --release
+
+      - name: Run Zig fuzz corpus & leak regression suite
+        run: |
+          zig build test-fuzz
+          zig build test-mini-fuzz
+
+      - name: Run multi-threaded cross-subsystem fuzz campaign
+        run: |
+          DURATION="${{ github.event.inputs.duration_seconds || (github.event_name == 'schedule' && '300' || '45') }}"
+          zig build fuzz-campaign -- --seconds="${DURATION}" --threads="$(nproc)"
+
+      - name: Run Zig LLVM coverage-guided --fuzz on differential EVM & precompiles
+        run: |
+          DURATION="${{ github.event.inputs.duration_seconds || (github.event_name == 'schedule' && '180' || '30') }}"
+          for TARGET in \
+            "fuzz differential EVM execution" \
+            "fuzz bytecode jumpdest reference oracle" \
+            "fuzz MODEXP precompile" \
+            "fuzz database nested snapshots"; do
+            echo "=== LLVM coverage-guided --fuzz: ${TARGET} (${DURATION}s) ==="
+            set +e
+            timeout --signal=INT "${DURATION}" zig build test-fuzz --fuzz -Dtest-filter="${TARGET}"
+            RC=$?
+            set -e
+            if [ "${RC}" -ne 0 ] && [ "${RC}" -ne 124 ] && [ "${RC}" -ne 130 ]; then
+              echo "Fuzz failure in ${TARGET} (exit ${RC})"
+              exit "${RC}"
+            fi
+          done
+
+      - name: Upload crash artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zig-fuzz-crashes
+          path: |
+            .fuzz-crashes/
+            .zig-cache/f/
+          if-no-files-found: ignore
+
+  rust-ark-fuzz:
+    name: Rust BN254 & BLS12-381 FFI Fuzz Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Run Rust BN254/BLS12-381 property & adversarial FFI fuzz tests
+        run: cargo test -p bn254_wrapper -- --nocapture
+
+  typescript-sdk-fuzz:
+    name: TypeScript SDK Feedback-Guided FFI Fuzz Suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Zig 0.15.2
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Build Voltaire Rust crypto wrappers
+        run: cargo build --manifest-path lib/voltaire/Cargo.toml --release
+
+      - name: Build native FFI shared library
+        run: zig build shared -Doptimize=ReleaseFast
+
+      - name: Run TypeScript feedback-guided fuzz tests & campaign
+        working-directory: sdks/typescript
+        run: |
+          GUILLOTINE_FUZZ_EXECS=1500 bun run test:fuzz
+          bun run fuzz -- --executions=2000

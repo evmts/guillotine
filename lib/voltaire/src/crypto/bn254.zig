@@ -393,6 +393,7 @@ pub fn bn254Add(input: *const [128]u8, output: []u8) !void {
     const p1 = if (x1_value == 0 and y1_value == 0)
         G1.INFINITY
     else blk: {
+        if (x1_value >= FpMont.FP_MOD or y1_value >= FpMont.FP_MOD) return error.InvalidPoint;
         const x1 = FpMont.init(x1_value);
         const y1 = FpMont.init(y1_value);
         const z1 = FpMont.ONE;
@@ -402,6 +403,7 @@ pub fn bn254Add(input: *const [128]u8, output: []u8) !void {
     const p2 = if (x2_value == 0 and y2_value == 0)
         G1.INFINITY
     else blk: {
+        if (x2_value >= FpMont.FP_MOD or y2_value >= FpMont.FP_MOD) return error.InvalidPoint;
         const x2 = FpMont.init(x2_value);
         const y2 = FpMont.init(y2_value);
         const z2 = FpMont.ONE;
@@ -417,8 +419,8 @@ pub fn bn254Add(input: *const [128]u8, output: []u8) !void {
     if (result_affine.isInfinity()) {
         @memset(output[0..64], 0);
     } else {
-        const x_result = result_affine.x.value;
-        const y_result = result_affine.y.value;
+        const x_result = result_affine.x.toStandardRepresentation();
+        const y_result = result_affine.y.toStandardRepresentation();
 
         // Write x coordinate (big-endian)
         std.mem.writeInt(u256, output[0..32], x_result, .big);
@@ -447,6 +449,7 @@ pub fn bn254Mul(input: *const [96]u8, output: []u8) !void {
     const point = if (x_value == 0 and y_value == 0)
         G1.INFINITY
     else blk: {
+        if (x_value >= FpMont.FP_MOD or y_value >= FpMont.FP_MOD) return error.InvalidPoint;
         const x = FpMont.init(x_value);
         const y = FpMont.init(y_value);
         const z = FpMont.ONE;
@@ -462,8 +465,8 @@ pub fn bn254Mul(input: *const [96]u8, output: []u8) !void {
     if (result_affine.isInfinity()) {
         @memset(output[0..64], 0);
     } else {
-        const x_result = result_affine.x.value;
-        const y_result = result_affine.y.value;
+        const x_result = result_affine.x.toStandardRepresentation();
+        const y_result = result_affine.y.toStandardRepresentation();
 
         // Write x coordinate (big-endian)
         std.mem.writeInt(u256, output[0..32], x_result, .big);

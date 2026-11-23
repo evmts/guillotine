@@ -22,6 +22,7 @@ pub fn execute(
 
     const output = try allocator.alloc(u8, 128);
     errdefer allocator.free(output);
+    errdefer allocator.free(output);
     crypto.Crypto.bls12_381.mapFpToG1(input, output) catch {
         return error.InvalidPoint;
     };

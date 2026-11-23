@@ -25,6 +25,7 @@ pub fn execute(
     }
 
     const output = try allocator.alloc(u8, 64);
+    errdefer allocator.free(output);
 
     Blake2.compress(input, output) catch {
         return error.InvalidInput;

@@ -54,6 +54,8 @@
 		"prepublishOnly": "bun run build:native && bun run build && bun run typecheck && bun test && bun run lint:package",
 		"test": "bun test",
 		"test:coverage": "bun test --coverage",
+		"test:fuzz": "bun test test/fuzz/",
+		"fuzz": "bun --preload ./test/setup.ts test/fuzz/campaign.ts",
 		"typecheck": "tsc --noEmit"
 	},
 	"devDependencies": {

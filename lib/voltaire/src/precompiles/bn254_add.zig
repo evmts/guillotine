@@ -22,6 +22,7 @@ pub fn execute(
     @memcpy(input_buf[0..@min(input.len, 128)], input[0..@min(input.len, 128)]);
 
     const output = try allocator.alloc(u8, 64);
+    errdefer allocator.free(output);
 
     // Perform addition using pure Zig implementation
     bn254.bn254Add(&input_buf, output) catch {

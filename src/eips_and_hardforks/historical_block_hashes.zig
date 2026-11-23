@@ -13,10 +13,13 @@ const Database = @import("../storage/database.zig").Database;
 const BlockInfo = @import("../block/block_info.zig").BlockInfo(.{});
 const log = @import("../log.zig");
 
-/// EIP-2935 historical block hashes contract address
-/// Deployed at 0x0b
+/// EIP-2935 historical block hashes contract address (Prague mainnet):
+/// 0x0000F90827F1C53a10cb7A02335B175320002935
 pub const HISTORY_CONTRACT_ADDRESS = Address{
-    .bytes = [_]u8{0} ** 19 ++ [_]u8{0x0b},
+    .bytes = .{
+        0x00, 0x00, 0xf9, 0x08, 0x27, 0xf1, 0xc5, 0x3a, 0x10, 0xcb,
+        0x7a, 0x02, 0x33, 0x5b, 0x17, 0x53, 0x20, 0x00, 0x29, 0x35,
+    },
 };
 
 /// System address that can update block hashes

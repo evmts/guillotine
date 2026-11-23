@@ -814,51 +814,9 @@ pub fn Preprocessor(FrameType: type) type {
             value: FrameType.WordType,
             fusion_type: FusionType,
         ) !void {
-            // Import gas constants for static calculation
-            const GasConstants = @import("voltaire").GasConstants;
-
-            // Calculate static gas cost since we know the offset at compile time
-            var static_gas_cost: u64 = GasConstants.GasFastestStep;
-
-            // For memory operations with known offsets, we can calculate expansion cost statically
-            if (value <= std.math.maxInt(usize)) {
-                const offset_usize = @as(usize, @intCast(value));
-                // Check for overflow before addition
-                const add_amount: usize = switch (fusion_type) {
-                    .push_mload, .push_mstore => 32,
-                    .push_mstore8 => 1,
-                    else => unreachable,
-                };
-                if (offset_usize > std.math.maxInt(usize) - add_amount) {
-                    // Overflow would occur, skip fusion optimization
-                    return;
-                }
-                const size_needed = offset_usize + add_amount;
-
-                // Calculate memory expansion cost statically
-                // Memory cost = 3 * words + words^2 / 512
-                const new_words = (size_needed + 31) / 32;
-
-                // Compile-time safety check: Verify that u64 max is much larger than the configured
-                // block gas limit. This allows us to safely use saturating arithmetic - any memory
-                // access large enough to overflow u64 would cost far more gas than any block could provide.
-                comptime {
-                    if (std.math.maxInt(u64) <= FrameType.config.block_gas_limit) {
-                        @compileError("u64 max must be greater than block_gas_limit for saturating arithmetic to work correctly. " ++
-                            "u64 max: " ++ std.fmt.comptimePrint("{}", .{std.math.maxInt(u64)}) ++
-                            ", block_gas_limit: " ++ std.fmt.comptimePrint("{}", .{FrameType.config.block_gas_limit}) ++
-                            ". The saturating arithmetic assumption requires that any overflow results in costs exceeding block limits.");
-                    }
-                }
-
-                // Use saturating arithmetic to prevent overflow on large memory operations
-                // If this saturates, the gas cost will be astronomical (>18 quintillion),
-                // which will fail gas checks long before execution
-                const words_squared = @as(u64, new_words) *| @as(u64, new_words);
-                const memory_cost = 3 *| new_words +| (words_squared / 512);
-                static_gas_cost +|= memory_cost;
-            }
-
+            // Always emit the fused handler (never silently drop consumed opcodes when
+            // `value` is near maxInt(usize); the runtime handler checks memory bounds
+            // and returns Error.OutOfBounds).
             const synthetic_opcode = getSyntheticOpcode(fusion_type, value <= std.math.maxInt(u64));
             const frame_handlers = @import("../frame/frame_handlers.zig");
             const synthetic_handler = frame_handlers.getSyntheticHandler(FrameType, synthetic_opcode);
@@ -870,8 +828,6 @@ pub fn Preprocessor(FrameType: type) type {
                 try schedule_items.append(schedule_allocator, .{
                     .push_inline = .{
                         .value = inline_val,
-                        // Store gas cost for use in jumpdest validation
-                        // This will be added to jumpdest gas during preprocessing
                     },
                 });
             } else {

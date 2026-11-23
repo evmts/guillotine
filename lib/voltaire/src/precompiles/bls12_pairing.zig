@@ -27,6 +27,7 @@ pub fn execute(
 
     const output = try allocator.alloc(u8, 32);
     errdefer allocator.free(output);
+    errdefer allocator.free(output);
     @memset(output, 0);
 
     const success = crypto.Crypto.bls12_381.pairingCheck(input) catch {

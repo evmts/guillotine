@@ -1641,13 +1641,15 @@ pub fn Evm(config: EvmConfig) type {
             const handlers = &Frame.opcode_handlers;
 
             // Build dispatch schedule using arena allocator
-            var dispatch_schedule = Frame.Dispatch.DispatchSchedule.init(arena_allocator, bytecode, handlers, tracer_ptr) catch {
+            var dispatch_schedule = Frame.Dispatch.DispatchSchedule.init(arena_allocator, bytecode, handlers, tracer_ptr) catch |err| {
+                log.err("DispatchSchedule.init failed: {s} (code_len={}, fusion={})", .{ @errorName(err), code.len, config.enable_fusion });
                 return error.AllocationError;
             };
             defer dispatch_schedule.deinit();
 
             // Create jump table
-            const jump_table = Frame.Dispatch.createJumpTable(arena_allocator, dispatch_schedule.items, bytecode) catch {
+            const jump_table = Frame.Dispatch.createJumpTable(arena_allocator, dispatch_schedule.items, bytecode) catch |err| {
+                log.err("createJumpTable failed: {s} (code_len={}, fusion={})", .{ @errorName(err), code.len, config.enable_fusion });
                 return error.AllocationError;
             };
             defer if (jump_table.entries.len > 0) arena_allocator.free(jump_table.entries);

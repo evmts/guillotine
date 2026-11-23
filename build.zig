@@ -2,6 +2,7 @@ const std = @import("std");
 const Modules = @import("src/modules.build.zig");
 const GuillotineExe = @import("src/build.zig");
 const lib_build = @import("lib/build.zig");
+const bench_step = @import("bench/bench_step.zig");
 // DevtoolExe removed - apps/ not included in package distribution
 
 pub fn build(b: *std.Build) void {
@@ -25,7 +26,7 @@ pub fn build(b: *std.Build) void {
     // Build configuration
     const build_options = b.addOptions();
     build_options.addOption(bool, "enable_tracing", b.option(bool, "enable-tracing", "Enable EVM instruction tracing") orelse false);
-    build_options.addOption(bool, "disable_tailcall_dispatch", b.option(bool, "disable-tailcall-dispatch", "Disable tailcall-based dispatch") orelse true);
+    build_options.addOption(bool, "disable_tailcall_dispatch", b.option(bool, "disable-tailcall-dispatch", "Disable tailcall-based dispatch") orelse false);
     build_options.addOption([]const u8, "hardfork", b.option([]const u8, "evm-hardfork", "EVM hardfork (default: OSAKA)") orelse "OSAKA");
     build_options.addOption(bool, "disable_gas_checks", b.option(bool, "evm-disable-gas", "Disable gas checks for testing") orelse false);
     build_options.addOption(bool, "enable_fusion", b.option(bool, "evm-enable-fusion", "Enable bytecode fusion") orelse true);
@@ -125,6 +126,7 @@ pub fn build(b: *std.Build) void {
     });
     if (bn254_lib) |bn254| shared_lib.linkLibrary(bn254);
     shared_lib.linkLibC();
+    if (target.result.os.tag == .linux) shared_lib.linkSystemLibrary("unwind");
     // Export all symbols for Linux to ensure BLS symbols are available
     shared_lib.rdynamic = true;
     b.installArtifact(shared_lib);
@@ -142,6 +144,7 @@ pub fn build(b: *std.Build) void {
     });
     if (bn254_lib) |bn254| static_lib.linkLibrary(bn254);
     static_lib.linkLibC();
+    if (target.result.os.tag == .linux) static_lib.linkSystemLibrary("unwind");
     b.installArtifact(static_lib);
 
     const static_lib_step = b.step("static", "Build static library for FFI");
@@ -300,6 +303,12 @@ pub fn build(b: *std.Build) void {
     mini_specs_cmd.setCwd(b.path("mini"));
     const mini_specs_step = b.step("test-mini-specs", "Run guillotine-mini spec tests");
     mini_specs_step.dependOn(&mini_specs_cmd.step);
+
+    // Mini EVM fuzz tests (uses current zig executable so custom zig paths work)
+    const mini_fuzz_cmd = b.addSystemCommand(&.{ b.graph.zig_exe, "build", "test-fuzz" });
+    mini_fuzz_cmd.setCwd(b.path("mini"));
+    const mini_fuzz_step = b.step("test-mini-fuzz", "Run guillotine-mini fuzz tests");
+    mini_fuzz_step.dependOn(&mini_fuzz_cmd.step);
 
     // ERC20 deployment gas issue test
     const erc20_gas_test = b.addTest(.{
@@ -487,6 +496,7 @@ pub fn build(b: *std.Build) void {
     }));
     if (bn254_lib) |bn254| all_opcode_tests.linkLibrary(bn254);
     all_opcode_tests.linkLibC();
+    if (target.result.os.tag == .linux) all_opcode_tests.linkSystemLibrary("unwind");
     opcode_tests_step.dependOn(&b.addRunArtifact(all_opcode_tests).step);
     if (std.fs.cwd().openDir("test/evm/opcodes", .{ .iterate = true }) catch null) |op_dir_val| {
         var op_dir = op_dir_val; // make mutable for close()
@@ -806,44 +816,64 @@ pub fn build(b: *std.Build) void {
     const specs_step = b.step("specs", "Run Ethereum execution spec tests (Zig version) - use -Dspec-max-files=N to limit, -Dtest-filter=pattern to filter");
     specs_step.dependOn(&run_specs_test.step);
 
-    // State tests runner using manifest
-    const state_tests = b.addTest(.{
-        .name = "state-tests",
+    // Official pre-filled EEST state tests runner (Frontier through Osaka)
+    const eest_mod = b.createModule(.{
+        .root_source_file = b.path("specs/eest_runner.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    eest_mod.addImport("evm", modules.evm_mod);
+    eest_mod.addImport("crypto", modules.crypto_mod);
+    const eest_exe = b.addExecutable(.{
+        .name = "eest-runner",
+        .root_module = eest_mod,
+        .use_llvm = true,
+    });
+    if (bn254_lib) |bn254| eest_exe.linkLibrary(bn254);
+    eest_exe.linkLibC();
+    if (target.result.os.tag == .linux) eest_exe.linkSystemLibrary("unwind");
+
+    const run_state_tests = b.addRunArtifact(eest_exe);
+    if (b.option([]const u8, "spec-fork", "EEST fork(s) to run (comma-separated)")) |fork| {
+        run_state_tests.addArg(b.fmt("--fork={s}", .{fork}));
+    }
+    if (test_filter) |filter| {
+        run_state_tests.addArg(b.fmt("--filter={s}", .{filter}));
+    }
+    if (b.option([]const u8, "spec-report", "Path to write EEST JSON summary report")) |report_path| {
+        run_state_tests.addArg(b.fmt("--report={s}", .{report_path}));
+    }
+    if (test_verbose) run_state_tests.addArg("--verbose");
+    if (b.args) |args| run_state_tests.addArgs(args);
+
+    const state_tests_step = b.step("state-tests", "Run official pre-filled EEST state tests (Frontier through Osaka)");
+    state_tests_step.dependOn(&run_state_tests.step);
+
+    // Layer 2 (Base + OP Stack) unit tests
+    const layer2_tests = b.addTest(.{
+        .name = "layer2-tests",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("specs/cases/root.zig"),
+            .root_source_file = b.path("src/layer2/test_root.zig"),
             .target = target,
             .optimize = optimize,
         }),
-        // Force LLVM backend: native Zig backend on Linux x86 doesn't support tail calls yet
         .use_llvm = true,
-        .test_runner = .{ .path = b.path("test_runner.zig"), .mode = .simple },
     });
-    state_tests.root_module.addImport("evm", modules.evm_mod);
-    state_tests.root_module.addImport("voltaire", modules.primitives_mod);
-    state_tests.root_module.addImport("crypto", modules.crypto_mod);
-    state_tests.root_module.addImport("build_options", options_mod);
-    state_tests.root_module.addImport("runner", runner_module); // Reuse runner_module from specs_test
-    if (bn254_lib) |bn254| state_tests.linkLibrary(bn254);
-    state_tests.linkLibC();
+    layer2_tests.root_module.addImport("voltaire", modules.primitives_mod);
+    layer2_tests.root_module.addImport("crypto", modules.crypto_mod);
+    layer2_tests.root_module.addImport("precompiles", modules.precompiles_mod);
+    if (bn254_lib) |bn254| layer2_tests.linkLibrary(bn254);
+    layer2_tests.linkLibC();
+    if (target.result.os.tag == .linux) layer2_tests.linkSystemLibrary("unwind");
+    const layer2_tests_step = b.step("test-layer2", "Run Layer 2 (Base & OP Stack) unit tests");
+    layer2_tests_step.dependOn(&b.addRunArtifact(layer2_tests).step);
 
-    // Apply test filter if specified
-    if (test_filter) |filter| {
-        state_tests.filters = &[_][]const u8{filter};
-    }
-
-    const run_state_tests = b.addRunArtifact(state_tests);
-
-    // Pass test configuration as environment variables
-    if (test_filter) |filter| {
-        run_state_tests.setEnvironmentVariable("TEST_FILTER", filter);
-    }
-    if (test_verbose) run_state_tests.setEnvironmentVariable("TEST_VERBOSE", "1");
-    if (test_fail_fast) run_state_tests.setEnvironmentVariable("TEST_FAIL_FAST", "1");
-    if (test_no_color) run_state_tests.setEnvironmentVariable("TEST_NO_COLOR", "1");
-    if (test_quiet) run_state_tests.setEnvironmentVariable("TEST_QUIET", "1");
-
-    const state_tests_step = b.step("state-tests", "Run Ethereum state tests from manifest - use -Dtest-filter=pattern to filter");
-    state_tests_step.dependOn(&run_state_tests.step);
+    // Self-contained in-repo benchmark steps (`bench`, `bench-build`, `test-bench`)
+    _ = bench_step.addBenchSteps(b, .{
+        .target = target,
+        .evm = modules.evm_mod,
+        .optimize = .ReleaseFast,
+    });
 
     // Bun specs runner (kept as alternative)
     const bun_check = b.addSystemCommand(&[_][]const u8{ "which", "bun" });
@@ -944,6 +974,108 @@ pub fn build(b: *std.Build) void {
         test_fusions_step.dependOn(&run_fusions_basic.step);
         test_fusions_step.dependOn(&run_fusions_dispatch.step);
         test_fusions_step.dependOn(&run_fusions_diff_toggle.step);
+    }
+
+    // Comprehensive Fuzz Testing Suite (Zig std.testing.fuzz + multi-threaded fuzz-campaign)
+    {
+        const fuzz_tests = b.addTest(.{
+            .name = "fuzz-tests",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("test/fuzz/root.zig"),
+                .target = target,
+                .optimize = optimize,
+            }),
+            .use_llvm = true,
+        });
+        fuzz_tests.root_module.addImport("evm", modules.evm_mod);
+        fuzz_tests.root_module.addImport("voltaire", modules.primitives_mod);
+        fuzz_tests.root_module.addImport("crypto", modules.crypto_mod);
+        fuzz_tests.root_module.addImport("build_options", options_mod);
+        fuzz_tests.root_module.addImport("evm_c_api", shared_lib_mod);
+        if (bn254_lib) |bn254| fuzz_tests.linkLibrary(bn254);
+        fuzz_tests.linkLibC();
+        if (test_filter) |filter| {
+            const filters = b.allocator.alloc([]const u8, 1) catch @panic("OOM");
+            filters[0] = filter;
+            fuzz_tests.filters = filters;
+        }
+        const run_fuzz_tests = b.addRunArtifact(fuzz_tests);
+        const fuzz_test_step = b.step("test-fuzz", "Run all Zig fuzz targets (pass --fuzz on Linux for LLVM coverage-guided fuzzing)");
+        fuzz_test_step.dependOn(&run_fuzz_tests.step);
+
+        // Standalone multi-threaded cross-platform fuzz campaign runner (macOS + Linux)
+        const fuzz_campaign_exe = b.addExecutable(.{
+            .name = "guillotine-fuzz-campaign",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("test/fuzz/fuzz_campaign.zig"),
+                .target = target,
+                .optimize = if (optimize == .Debug) .ReleaseSafe else optimize,
+            }),
+            .use_llvm = true,
+        });
+        fuzz_campaign_exe.root_module.addImport("evm", modules.evm_mod);
+        fuzz_campaign_exe.root_module.addImport("voltaire", modules.primitives_mod);
+        fuzz_campaign_exe.root_module.addImport("crypto", modules.crypto_mod);
+        fuzz_campaign_exe.root_module.addImport("build_options", options_mod);
+        fuzz_campaign_exe.root_module.addImport("evm_c_api", shared_lib_mod);
+        if (bn254_lib) |bn254| fuzz_campaign_exe.linkLibrary(bn254);
+        fuzz_campaign_exe.linkLibC();
+
+        const run_fuzz_campaign = b.addRunArtifact(fuzz_campaign_exe);
+        if (b.args) |args| {
+            run_fuzz_campaign.addArgs(args);
+        }
+        const fuzz_campaign_step = b.step("fuzz-campaign", "Run multi-threaded cross-platform fuzz campaign (pass -- --seconds=N --threads=M)");
+        fuzz_campaign_step.dependOn(&run_fuzz_campaign.step);
+    }
+
+    // Formal verification suite (LLVM 20 IR equivalence/UB, Bitwuzla/Z3 SMT, Lean 4 proofs)
+    {
+        const verified_ops_mod = b.createModule(.{
+            .root_source_file = b.path("src/core/verified_ops.zig"),
+            .target = target,
+            .optimize = .ReleaseFast,
+        });
+        const verify_exports_mod = b.createModule(.{
+            .root_source_file = b.path("verify/zig/verify_exports.zig"),
+            .target = target,
+            .optimize = .ReleaseFast,
+        });
+        verify_exports_mod.addImport("verified_ops", verified_ops_mod);
+        const verify_exports_obj = b.addObject(.{
+            .name = "guillotine_verify_exports",
+            .root_module = verify_exports_mod,
+            .use_llvm = true,
+        });
+        const run_verify_ir = b.addSystemCommand(&.{ "python3", "verify/llvm/llvm_ir_verify.py" });
+        run_verify_ir.addFileArg(verify_exports_obj.getEmittedLlvmIr());
+        const verify_ir_step = b.step("verify-ir", "Verify compiled Zig ReleaseFast LLVM 20 IR equivalence and UB-freedom via Bitwuzla/Z3");
+        verify_ir_step.dependOn(&run_verify_ir.step);
+
+        const run_verify_smt = b.addSystemCommand(&.{ "python3", "verify/smt/run_smt_suite.py", "--solver", "auto" });
+        const verify_smt_step = b.step("verify-smt", "Run Bitwuzla/Z3 SMT-LIB2 formal proofs for EVM arithmetic, memory, stack, and fusions");
+        verify_smt_step.dependOn(&run_verify_smt.step);
+
+        const run_verify_lean = b.addSystemCommand(&.{ "bash", "-c", "export PATH=\"$HOME/.elan/bin:$PATH\" && cd verify/lean && lake build" });
+        const verify_lean_step = b.step("verify-lean", "Build and kernel-check Lean 4 formal proofs in verify/lean/");
+        verify_lean_step.dependOn(&run_verify_lean.step);
+
+        const verified_ops_unit = b.addTest(.{
+            .name = "verified-ops-unit",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/core/verified_ops.zig"),
+                .target = target,
+                .optimize = .ReleaseSafe,
+            }),
+            .use_llvm = true,
+        });
+        const run_verified_ops_unit = b.addRunArtifact(verified_ops_unit);
+
+        const verify_all_step = b.step("verify", "Run full formal verification suite (LLVM 20 IR + SMT + Lean 4 + unit tests)");
+        verify_all_step.dependOn(&run_verified_ops_unit.step);
+        verify_all_step.dependOn(verify_ir_step);
+        verify_all_step.dependOn(verify_smt_step);
+        verify_all_step.dependOn(verify_lean_step);
     }
 
     // Configure main test step dependencies in priority order:

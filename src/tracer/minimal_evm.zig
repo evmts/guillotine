@@ -91,6 +91,7 @@ pub const MinimalEvm = struct {
 
     frames: std.ArrayList(*MinimalFrame),
     storage: std.AutoHashMap(StorageSlotKey, u256),
+    transient_storage: std.AutoHashMap(StorageSlotKey, u256),
     original_storage: std.AutoHashMap(StorageSlotKey, u256),
     balances: std.AutoHashMap(Address, u256),
     code: std.AutoHashMap(Address, []const u8),
@@ -125,6 +126,7 @@ pub const MinimalEvm = struct {
         errdefer arena.deinit();
         const arena_allocator = arena.allocator();
         const storage_map = std.AutoHashMap(StorageSlotKey, u256).init(arena_allocator);
+        const transient_storage_map = std.AutoHashMap(StorageSlotKey, u256).init(arena_allocator);
         const balances_map = std.AutoHashMap(Address, u256).init(arena_allocator);
         const code_map = std.AutoHashMap(Address, []const u8).init(arena_allocator);
         const warm_addresses = std.array_hash_map.ArrayHashMap(Address, void, AddressContext, false).init(arena_allocator);
@@ -137,6 +139,7 @@ pub const MinimalEvm = struct {
         return Self{
             .frames = frames_list,
             .storage = storage_map,
+            .transient_storage = transient_storage_map,
             .original_storage = original_storage_map,
             .balances = balances_map,
             .code = code_map,
@@ -174,6 +177,7 @@ pub const MinimalEvm = struct {
 
         self.frames = std.ArrayList(*MinimalFrame){}; // Unmanaged ArrayList, default init
         self.storage = std.AutoHashMap(StorageSlotKey, u256).init(arena_allocator);
+        self.transient_storage = std.AutoHashMap(StorageSlotKey, u256).init(arena_allocator);
         self.original_storage = std.AutoHashMap(StorageSlotKey, u256).init(arena_allocator);
         self.balances = std.AutoHashMap(Address, u256).init(arena_allocator);
         self.code = std.AutoHashMap(Address, []const u8).init(arena_allocator);
@@ -435,6 +439,7 @@ pub const MinimalEvm = struct {
         // Reset transaction-scoped caches
         self.warm_addresses.clearRetainingCapacity();
         self.warm_storage_slots.clearRetainingCapacity();
+        self.transient_storage.clearRetainingCapacity();
 
         // No cleanup needed - arena handles it
         return result;
@@ -575,6 +580,20 @@ pub const MinimalEvm = struct {
         }
         const key = StorageSlotKey{ .address = address, .slot = slot };
         return self.storage.get(key) orelse 0;
+    }
+
+    /// Get EIP-1153 transient storage value (separate from persistent storage)
+    pub fn get_transient_storage(self: *Self, address: Address, slot: u256) u256 {
+        const key = StorageSlotKey{ .address = address, .slot = slot };
+        return self.transient_storage.get(key) orelse 0;
+    }
+
+    /// Set EIP-1153 transient storage value (separate from persistent storage)
+    pub fn set_transient_storage(self: *Self, address: Address, slot: u256, value: u256) Error!void {
+        const key = StorageSlotKey{ .address = address, .slot = slot };
+        self.transient_storage.put(key, value) catch {
+            return Error.StorageError;
+        };
     }
 
     /// Set storage value (called by frame)

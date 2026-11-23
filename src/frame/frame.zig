@@ -273,24 +273,21 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
                     try self.consumeGasChecked(@intCast(meta.gas));
                 }
                 
-                // Validate stack requirements for the first block
-                const current_stack_size = self.stack.size();
-                const stack_capacity = @TypeOf(self.stack).stack_capacity;
-                
-                // Check minimum stack requirement (similar to JUMPDEST handler)
-                if (meta.min_stack > 0 and current_stack_size < @as(usize, @intCast(meta.min_stack))) {
-                    (&self.getEvm().tracer).debug("First block: Stack underflow - required min={}, current={}", .{ meta.min_stack, current_stack_size });
-                    return Error.StackUnderflow;
-                }
-                
-                // Check maximum stack requirement (stack overflow prevention)
-                if (meta.max_stack > 0) {
-                    // max_stack represents the net stack change during the block
-                    const max_final_size = @as(isize, @intCast(current_stack_size)) + @as(isize, meta.max_stack);
-                    if (max_final_size > @as(isize, @intCast(stack_capacity))) {
-                        (&self.getEvm().tracer).debug("First block: Stack overflow - current={}, max_change={}, capacity={}", .{ current_stack_size, meta.max_stack, stack_capacity });
+                // Validate stack requirements for the first block using verified single-compare guard
+                const verified_ops = @import("../core/verified_ops.zig");
+                const current_stack_size: u32 = @intCast(self.stack.size());
+                const min_u16: u16 = if (meta.min_stack > 0) @intCast(meta.min_stack) else 0;
+                const max_u16: u16 = if (meta.max_stack > 0) @intCast(meta.max_stack) else 0;
+                switch (verified_ops.blockStackGuardFast(current_stack_size, min_u16, max_u16, @TypeOf(self.stack).stack_capacity)) {
+                    .ok => {},
+                    .underflow => {
+                        (&self.getEvm().tracer).debug("First block: Stack underflow - required min={}, current={}", .{ meta.min_stack, current_stack_size });
+                        return Error.StackUnderflow;
+                    },
+                    .overflow => {
+                        (&self.getEvm().tracer).debug("First block: Stack overflow - current={}, max_change={}, capacity={}", .{ current_stack_size, meta.max_stack, @TypeOf(self.stack).stack_capacity });
                         return Error.StackOverflow;
-                    }
+                    },
                 }
                 
                 start_index = 1;
