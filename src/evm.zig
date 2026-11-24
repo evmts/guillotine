@@ -33,7 +33,6 @@ pub fn Evm(config: EvmConfig) type {
         pub const CallResult = call_result_module.CallResult(config);
         pub const CallParams = call_params_module.CallParams(config);
 
-        const StaticDatabase = @import("storage/static_wrappers.zig").StaticDatabase;
         pub const Journal: type = @import("storage/journal.zig").Journal(.{
             .SnapshotIdType = if (config.max_call_depth <= 255) u8 else u16,
             .WordType = config.WordType,

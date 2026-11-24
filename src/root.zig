@@ -107,6 +107,8 @@ pub const CallParams = @import("frame/call_params.zig").CallParams({});
 pub const CallResult = @import("frame/call_result.zig").CallResult({});
 pub const CreatedContracts = @import("storage/created_contracts.zig").CreatedContracts;
 pub const Database = @import("storage/database.zig").Database;
+pub const DatabaseProxy = @import("storage/database_proxy.zig").DatabaseProxy;
+pub const ProxyMode = @import("storage/database_proxy.zig").ProxyMode;
 pub const Account = @import("storage/database_interface_account.zig").Account;
 pub const AccessList = @import("storage/access_list.zig").AccessList;
 pub const Hardfork = @import("eips_and_hardforks/eips.zig").Hardfork;
@@ -138,6 +140,7 @@ test {
     _ = @import("bytecode/bytecode_bench_test.zig");
     _ = @import("internal/safety_counter.zig");
     _ = @import("verified_ops.zig");
+    _ = @import("storage/database_proxy.zig");
 
     // Tracer modules with tests
     _ = @import("tracer/pc_tracker.zig");

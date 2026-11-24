@@ -631,11 +631,14 @@ pub const Database = struct {
         var size: usize = 0;
 
         // Calculate size for nonce (u64)
-        const nonce_bytes = std.mem.asBytes(&account.nonce);
+        var nonce_bytes: [8]u8 = undefined;
+        std.mem.writeInt(u64, &nonce_bytes, account.nonce, .big);
         var nonce_len: usize = 8;
         // Trim leading zeros for canonical encoding
         while (nonce_len > 0 and nonce_bytes[8 - nonce_len] == 0) : (nonce_len -= 1) {}
-        size += if (nonce_len <= 1) 1 else 1 + nonce_len;
+        // RLP: a single byte below 0x80 is its own encoding; anything else gets a length prefix.
+        const nonce_single = nonce_len == 1 and nonce_bytes[7] < 0x80;
+        size += if (nonce_len == 0 or nonce_single) 1 else 1 + nonce_len;
 
         // Calculate size for balance (u256)
         var balance_bytes: [32]u8 = undefined;
@@ -643,7 +646,8 @@ pub const Database = struct {
         var balance_len: usize = 32;
         // Trim leading zeros
         while (balance_len > 0 and balance_bytes[32 - balance_len] == 0) : (balance_len -= 1) {}
-        size += if (balance_len <= 1) 1 else 1 + balance_len;
+        const balance_single = balance_len == 1 and balance_bytes[31] < 0x80;
+        size += if (balance_len == 0 or balance_single) 1 else 1 + balance_len;
 
         // storage_root and code_hash are always 32 bytes
         size += 1 + 32; // storage_root with length prefix
@@ -677,7 +681,7 @@ pub const Database = struct {
         if (nonce_len == 0) {
             result[offset] = 0x80;
             offset += 1;
-        } else if (nonce_len == 1 and nonce_bytes[7] < 0x80) {
+        } else if (nonce_single) {
             result[offset] = nonce_bytes[7];
             offset += 1;
         } else {
@@ -691,7 +695,7 @@ pub const Database = struct {
         if (balance_len == 0) {
             result[offset] = 0x80;
             offset += 1;
-        } else if (balance_len == 1 and balance_bytes[31] < 0x80) {
+        } else if (balance_single) {
             result[offset] = balance_bytes[31];
             offset += 1;
         } else {
@@ -1694,6 +1698,28 @@ test "Database state root operations - single account" {
     try testing.expect(!std.mem.eql(u8, &root, &EMPTY_TRIE_ROOT));
 }
 
+test "Database encode_account emits canonical RLP for single-byte values at or above 0x80" {
+    const allocator = testing.allocator;
+    const account = Account{ .balance = 200, .nonce = 1, .code_hash = [_]u8{0xAA} ** 32, .storage_root = [_]u8{0xBB} ** 32 };
+    const encoded = try Database.encode_account(allocator, account);
+    defer allocator.free(encoded);
+
+    // [0x01, 0x81 0xC8, 0xA0 ++ storage_root, 0xA0 ++ code_hash]: payload 69 bytes, header 0xF8 0x45.
+    const expected = [_]u8{ 0xF8, 0x45, 0x01, 0x81, 0xC8, 0xA0 } ++ [_]u8{0xBB} ** 32 ++ [_]u8{0xA0} ++ [_]u8{0xAA} ** 32;
+    try testing.expectEqualSlices(u8, &expected, encoded);
+}
+
+test "Database encode_account encodes nonce big-endian with a length prefix" {
+    const allocator = testing.allocator;
+    const account = Account{ .balance = 0, .nonce = 0x0102, .code_hash = [_]u8{0x11} ** 32, .storage_root = [_]u8{0x22} ** 32 };
+    const encoded = try Database.encode_account(allocator, account);
+    defer allocator.free(encoded);
+
+    // [0x82 0x01 0x02, 0x80, 0xA0 ++ storage_root, 0xA0 ++ code_hash]: payload 70 bytes, header 0xF8 0x46.
+    const expected = [_]u8{ 0xF8, 0x46, 0x82, 0x01, 0x02, 0x80, 0xA0 } ++ [_]u8{0x22} ** 32 ++ [_]u8{0xA0} ++ [_]u8{0x11} ** 32;
+    try testing.expectEqualSlices(u8, &expected, encoded);
+}
+
 test "Database state root operations - multiple accounts" {
     const allocator = testing.allocator;
     var db = Database.init(allocator);
@@ -2477,8 +2503,8 @@ test "EIP-7702: Database delegation operations" {
     try db.clear_delegation(eoa_address);
     try testing.expect(!(try db.has_delegation(eoa_address)));
 
-    // Now get_code_by_address should fail for EOA
-    try testing.expectError(Database.Error.AccountNotFound, db.get_code_by_address(eoa_address));
+    // The EOA still exists without delegation, so it has empty code
+    try testing.expectEqual(@as(usize, 0), (try db.get_code_by_address(eoa_address)).len);
 }
 
 test "EIP-7702: Cannot set delegation on contract" {
