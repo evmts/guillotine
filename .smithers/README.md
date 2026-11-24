@@ -48,13 +48,13 @@ an expected-result check and JSON timing output. It measures that workload
 only, and is not evidence for EVM dispatch/fusion performance. Timing runs are
 uncached even when compilation is replayed.
 
-Voltaire's Cargo crate is nested inside the root Cargo workspace without being
-a member or exclusion. `build-crypto.mjs` stages its unchanged Rust sources in
-a standalone workspace under `.smithers/cache`, builds with its lockfile, then
-copies only the required ignored static archive to the path its Zig module
-expects. This avoids changing manifests or the dependency checkout's tracked
-Cargo metadata. Foundry's legacy `rust_build.zig` points at `src/compilers` and
-is not used by the root build; the active integration is `lib/foundry.zig`.
+Voltaire's Cargo crate is its own workspace, excluded from the root one, and
+`zig build` runs its Cargo step before linking `libcrypto_wrappers.a`
+(`tests/voltaire-archive.test.mjs`, #862/#863). `build-crypto.mjs` is an
+optional cached prebuild: it builds the same sources with the lockfile under
+`.smithers/cache` and copies the archive to the path the Zig module links.
+Foundry's legacy `rust_build.zig` points at `src/compilers` and is not used by
+the root build; the active integration is `lib/foundry.zig`.
 
 Factory flows cover consensus, memory ownership, state compliance, differential
 evidence and benchmark regressions. PR triage consumes supplied diffs without

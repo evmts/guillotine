@@ -21,7 +21,7 @@ pub fn build(b: *std.Build) void {
     // Build crypto C/Rust libraries that primitives + crypto depend on
     const blst_lib = lib_build.BlstLib.createBlstLibrary(b, target, optimize);
     const c_kzg_lib = lib_build.CKzgLib.createCKzgLibrary(b, target, optimize, blst_lib);
-    const rust_crypto_lib_path = lib_build.Bn254Lib.getRustLibraryPath(b, target);
+    const rust_crypto_lib_path = lib_build.Bn254Lib.getRustLibraryPath(b, target, cargo_build_step);
 
     // Install crypto libraries
     b.installArtifact(blst_lib);

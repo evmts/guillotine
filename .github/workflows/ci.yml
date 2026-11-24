@@ -81,15 +81,18 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-            .smithers/cache/cargo/voltaire
           key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ steps.toolchain.outputs.rust }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml', '**/*.rs') }}
           restore-keys: |
             ${{ runner.os }}-${{ runner.arch }}-cargo-${{ steps.toolchain.outputs.rust }}-
       - name: Foundry Linux archive regression (#815)
         run: node --test .smithers/tests/foundry-link.test.mjs
-      - name: Build Voltaire Rust crypto archive
-        run: node .smithers/build-crypto.mjs
+      - name: Voltaire archive fresh-checkout regression (#862, #863)
+        if: ${{ !cancelled() }}
+        run: node --test .smithers/tests/voltaire-archive.test.mjs
+      # No prebuilt archive: lib/voltaire/target is uncached, so this is the
+      # fresh-clone `zig build` that #862 and #863 report.
       - name: Build
+        if: ${{ !cancelled() }}
         run: zig build
       - name: Unit tests
         if: ${{ !cancelled() }}

@@ -75,6 +75,10 @@ pub fn createCargoBuildStep(b: *std.Build, optimize: std.builtin.OptimizeMode, t
         cargo_build.addArg(rust_target);
     }
 
+    // getRustLibraryPath links from this package's target/. An inherited
+    // CARGO_TARGET_DIR would move the archive somewhere Zig never looks.
+    cargo_build.addArgs(&.{ "--target-dir", b.pathFromRoot("target") });
+
     // Set working directory to the primitives package root (where Cargo.toml lives)
     cargo_build.setCwd(b.path("."));
 

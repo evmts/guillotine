@@ -199,6 +199,6 @@ performance numbers:
 - Fused CREATE setup fails on the checked-in contract fixtures. The suite's
   constructor phase always uses the unfused EVM, separately from measured
   execution, so this does not silently alter a measured dispatch mode.
-- Root `zig build` / `zig build test-opcodes` expect
-  `lib/voltaire/target/release/libcrypto_wrappers.a` (`cargo build --release --manifest-path lib/voltaire/Cargo.toml`).
+- Root `zig build` / `zig build test-opcodes` build and link
+  `lib/voltaire/target/release/libcrypto_wrappers.a` through Voltaire's Cargo step.
   The bench-owned build compiles its own generated archive automatically.
