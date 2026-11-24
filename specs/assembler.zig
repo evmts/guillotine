@@ -1,4 +1,5 @@
 const std = @import("std");
+const lll = @import("lll.zig");
 
 // Label tracking for [[n]] syntax
 const LabelInfo = struct {
@@ -13,13 +14,13 @@ fn replacePlaceholders(allocator: std.mem.Allocator, code: []const u8) ![]u8 {
 
     var i: usize = 0;
     while (i < code.len) {
-        if (code[i] == '<') {
+        // Only "<contract:" and "<eoa:" start a placeholder; a bare '<' is the LLL
+        // less-than operator and must not swallow code up to the next '>'.
+        if (std.mem.startsWith(u8, code[i..], "<contract:") or std.mem.startsWith(u8, code[i..], "<eoa:")) {
             // Look for closing >
             if (std.mem.indexOfPos(u8, code, i, ">")) |end_idx| {
                 const placeholder = code[i..end_idx + 1];
-                // Check if it's a contract or eoa placeholder
-                if (std.mem.indexOf(u8, placeholder, "contract:") != null or
-                    std.mem.indexOf(u8, placeholder, "eoa:") != null) {
+                {
                     // Extract the hex address (last occurrence of 0x)
                     if (std.mem.lastIndexOf(u8, placeholder, "0x")) |addr_start| {
                         const addr = placeholder[addr_start..placeholder.len - 1]; // Remove trailing >
@@ -66,7 +67,12 @@ pub fn compileAssembly(allocator: std.mem.Allocator, asm_code: []const u8) ![]u8
     // Handle { ... } format (may contain multiple expressions)
     if (std.mem.startsWith(u8, code, "{") and std.mem.endsWith(u8, code, "}")) {
         code = std.mem.trim(u8, code[1..code.len-1], " \t\n\r");
-        return compileComplexExpression(allocator, code);
+        // LLL definitions and control flow (def, for, while, ...) are unknown to the
+        // legacy compiler; compile those programs with the LLL compiler instead.
+        return compileComplexExpression(allocator, code) catch |err| switch (err) {
+            error.UnknownOpcode => lll.compileProgram(allocator, code, getOpcode),
+            else => err,
+        };
     }
 
     // Remove (asm ... ) wrapper if present
@@ -1077,4 +1083,10 @@ test "compile { } format assembly" {
     // Expected: PUSH1 0x01=0x60 0x01, PUSH1 0x02=0x60 0x02, ADD=0x01
     const expected1 = [_]u8{ 0x60, 0x01, 0x60, 0x02, 0x01 };
     try std.testing.expectEqualSlices(u8, &expected1, bytecode1);
+}
+test "placeholders: LLL less-than before a contract placeholder survives" {
+    const allocator = std.testing.allocator;
+    const out = try replacePlaceholders(allocator, "(< @i 5) (CALL 1 <contract:0x1000000000000000000000000000000000000003> 0)");
+    defer allocator.free(out);
+    try std.testing.expectEqualStrings("(< @i 5) (CALL 1 0x1000000000000000000000000000000000000003 0)", out);
 }

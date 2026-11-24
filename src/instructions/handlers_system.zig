@@ -830,6 +830,13 @@ pub fn Handlers(FrameType: type) type {
                 };
             }
 
+            // execution-specs: the opcode charges GAS_CREATE and init code words with its
+            // memory expansion; a shortfall halts this frame (it does not push 0).
+            if (self.gas_remaining < @as(FrameType.GasType, @intCast(@TypeOf(self.getEvm().*).create_opcode_charge(init_code.len, false)))) {
+                self.afterComplete(.CREATE);
+                return Error.OutOfGas;
+            }
+
             // Perform the create through the host interface
             const params = CallParams{
                 .create = .{
@@ -911,6 +918,13 @@ pub fn Handlers(FrameType: type) type {
                     self.afterComplete(.CREATE2);
                     return Error.OutOfBounds;
                 };
+            }
+
+            // execution-specs: the opcode charges GAS_CREATE, init code words, and the init
+            // code hash words with its memory expansion; a shortfall halts this frame.
+            if (self.gas_remaining < @as(FrameType.GasType, @intCast(@TypeOf(self.getEvm().*).create_opcode_charge(init_code.len, true)))) {
+                self.afterComplete(.CREATE2);
+                return Error.OutOfGas;
             }
 
             // Convert salt to u256 if needed

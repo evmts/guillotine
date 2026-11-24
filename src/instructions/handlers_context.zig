@@ -587,9 +587,9 @@ pub fn Handlers(FrameType: type) type {
             const return_data = self.getEvm().get_return_data() orelse &[_]u8{};
 
             // EIP-211: reading past the end of return data is an exceptional halt, even for
-            // a zero-length copy (offset + size > len). Compare in u256 so huge values cannot wrap.
-            const read_end = @as(u256, offset) + @as(u256, length);
-            if (@as(u256, offset) > return_data.len or read_end > return_data.len) {
+            // a zero-length copy (offset + size > len). A sum that overflows u256 is out of bounds.
+            const read_end = @addWithOverflow(@as(u256, offset), @as(u256, length));
+            if (read_end[1] != 0 or read_end[0] > return_data.len) {
                 self.afterComplete(.RETURNDATACOPY);
                 return Error.OutOfBounds;
             }

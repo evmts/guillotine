@@ -917,7 +917,13 @@ pub fn Evm(config: EvmConfig) type {
             // onto a large-stack worker thread at LARGE_STACK_DEPTH.)
             if (self.depth >= config.max_call_depth) {
                 self.clear_return_data();
-                return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                // execution-specs `generic_call`: past the depth limit a message call returns
+                // its whole sub-call gas. Creations keep their existing accounting.
+                const refund: u64 = switch (params) {
+                    .call, .callcode, .delegatecall, .staticcall => params.getGas(),
+                    .create, .create2 => 0,
+                };
+                return CallResult.failure(self.getCallArenaAllocator(), refund) catch unreachable;
             }
 
             const execution_gas = params.getGas();
@@ -1142,7 +1148,10 @@ pub fn Evm(config: EvmConfig) type {
                 self.transferWithBalanceChecks(params.caller, params.to, params.value, snapshot_id) catch |err| {
                     log.debug("Call value transfer failed: {}", .{err});
                     try self.revertFrame(snapshot_id, db_snapshot_id, checkpoint);
-                    return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                    // execution-specs `call`: a sender that cannot afford `value` gets the
+                    // whole sub-call gas (forwarded gas plus stipend) back.
+                    const refund = if (err == error.InsufficientBalance) params.gas else 0;
+                    return CallResult.failure(self.getCallArenaAllocator(), refund) catch unreachable;
                 };
             }
 
@@ -1221,7 +1230,8 @@ pub fn Evm(config: EvmConfig) type {
                     if (caller_account == null or caller_account.?.balance < params.value) {
                         @branchHint(.cold);
                         try self.revertFrame(snapshot_id, db_snapshot_id, checkpoint);
-                        return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                        // execution-specs `callcode`: the whole sub-call gas comes back.
+                        return CallResult.failure(self.getCallArenaAllocator(), params.gas) catch unreachable;
                     }
                 }
             }
@@ -1434,6 +1444,17 @@ pub fn Evm(config: EvmConfig) type {
             admitted: bool,
         };
 
+        /// Gas an opcode CREATE or CREATE2 charges up front: CreateGas, EIP-3860 init code
+        /// words (Shanghai+), and for CREATE2 the EIP-1014 init code hash words.
+        /// The opcode handler halts out of gas when it cannot pay this.
+        pub fn create_opcode_charge(init_code_len: usize, is_create2: bool) u64 {
+            const GasConstants = primitives.GasConstants;
+            const words: u64 = (@as(u64, @intCast(init_code_len)) + 31) / 32;
+            const word_cost: u64 = if (config.eips.hardfork.isAtLeast(.SHANGHAI)) words * GasConstants.InitcodeWordGas else 0;
+            const hash_cost: u64 = if (is_create2) words * GasConstants.Keccak256WordGas else 0;
+            return GasConstants.CreateGas + word_cost + hash_cost;
+        }
+
         /// Execute CREATE operation (inlined)
         fn executeCreate(self: *Self, params: struct {
             caller: primitives.Address,
@@ -1442,13 +1463,9 @@ pub fn Evm(config: EvmConfig) type {
             gas: u64,
         }) !CallResult {
             const is_transaction = self.takeTransactionCreate(params.caller);
-            const GasConstants = primitives.GasConstants;
-            // EIP-3860 (Shanghai+): init code costs 2 gas per 32-byte word, on top of CreateGas.
-            const init_words_c: u64 = (@as(u64, @intCast(params.init_code.len)) + 31) / 32;
-            const initcode_word_cost_c: u64 = if (config.eips.hardfork.isAtLeast(.SHANGHAI)) init_words_c * GasConstants.InitcodeWordGas else 0;
             // A CREATE transaction already paid CreateGas and initcode words as intrinsic gas.
-            // An opcode CREATE that cannot pay them fails before the sender nonce moves.
-            const create_overhead = if (is_transaction) 0 else GasConstants.CreateGas + initcode_word_cost_c;
+            // The CREATE opcode handler halts out of gas before calling here when it cannot pay them.
+            const create_overhead = if (is_transaction) 0 else create_opcode_charge(params.init_code.len, false);
             if (params.gas < create_overhead) {
                 return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
             }
@@ -1475,8 +1492,9 @@ pub fn Evm(config: EvmConfig) type {
             const existed_before = self.database.account_exists(contract_address.bytes);
             if (existed_before) {
                 const existing = try self.database.get_account(contract_address.bytes);
-                // EIP-684: an address with code or a nonzero nonce cannot be created again.
-                if (existing != null and (existing.?.nonce != 0 or !std.mem.eql(u8, &existing.?.code_hash, &[_]u8{0} ** 32))) {
+                // EIP-684 + EIP-7610: an address with code, a nonzero nonce, or nonempty
+                // storage cannot be created again.
+                if (existing != null and (existing.?.nonce != 0 or !std.mem.eql(u8, &existing.?.code_hash, &[_]u8{0} ** 32) or try self.database.has_storage(contract_address.bytes))) {
                     try self.revertFrame(snapshot_id, db_snapshot_id, checkpoint);
                     return CallResult.failure(self.getCallArenaAllocator(), retained) catch unreachable;
                 }
@@ -1561,8 +1579,9 @@ pub fn Evm(config: EvmConfig) type {
             const existed_before = self.database.account_exists(contract_address.bytes);
             if (existed_before) {
                 const existing = try self.database.get_account(contract_address.bytes);
-                // EIP-684: an address with code or a nonzero nonce cannot be created again.
-                if (existing != null and (existing.?.nonce != 0 or !std.mem.eql(u8, &existing.?.code_hash, &[_]u8{0} ** 32))) {
+                // EIP-684 + EIP-7610: an address with code, a nonzero nonce, or nonempty
+                // storage cannot be created again.
+                if (existing != null and (existing.?.nonce != 0 or !std.mem.eql(u8, &existing.?.code_hash, &[_]u8{0} ** 32) or try self.database.has_storage(contract_address.bytes))) {
                     log.debug("CREATE2: collision at address", .{});
                     try self.revertFrame(snapshot_id, db_snapshot_id, checkpoint);
                     return CallResult.failure(self.getCallArenaAllocator(), retained) catch unreachable;
@@ -1988,10 +2007,10 @@ pub fn Evm(config: EvmConfig) type {
                     return result;
                 },
                 else => {
-                    // Invalid bytecode and exhausted execution budgets are normal
+                    // Invalid bytecode, static-context writes (EIP-214), and exhausted execution budgets are normal
                     // transaction outcomes, not failures of the client itself.
                     switch (err) {
-                        error.InvalidOpcode, error.InvalidJump, error.OutOfGas, error.OutOfBounds, error.StackUnderflow, error.StackOverflow, error.ReturnDataNotAvailable =>
+                        error.InvalidOpcode, error.InvalidJump, error.OutOfGas, error.OutOfBounds, error.StackUnderflow, error.StackOverflow, error.ReturnDataNotAvailable, error.WriteProtection =>
                             log.debug("Frame execution halted: {s} (code_len={}, gas={}, depth={})", .{ @errorName(err), code.len, gas, self.depth }),
                         else => log.err("Frame execution failed with error: {s} (code_len={}, gas={}, depth={})", .{ @errorName(err), code.len, gas, self.depth }),
                     }

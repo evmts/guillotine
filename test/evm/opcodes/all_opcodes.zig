@@ -139,6 +139,9 @@ test {
     _ = @import("fe_test.zig");
     _ = @import("ff_test.zig");
     _ = @import("gas_accounting.zig");
+    _ = @import("static_write_protection.zig");
+    _ = @import("returndatacopy_overflow.zig");
+    _ = @import("call_insufficient_balance.zig");
     _ = @import("eip7623_floor.zig");
     _ = @import("gas_sweep.zig");
     _ = @import("osaka_eips.zig");

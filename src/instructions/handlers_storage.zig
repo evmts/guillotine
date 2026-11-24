@@ -61,12 +61,10 @@ pub fn Handlers(FrameType: type) type {
 
         /// SSTORE opcode (0x55) - Store to storage.
         /// Stores value to storage slot. Subject to gas refunds and write protection checks.
-        /// EIP-214: Static calls use database that throws WriteProtection errors
+        /// EIP-214: halts with WriteProtection in a static context.
         pub fn sstore(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             self.beforeInstruction(.SSTORE, cursor);
             // SSTORE stores a value to storage
-
-            // EIP-214: WriteProtection is handled by database interface for static calls
 
             // SSTORE expects stack: [..., key, value] where key is at top
             // The bytecode PUSH1 0x42, PUSH1 0x00, SSTORE means:
@@ -83,6 +81,13 @@ pub fn Handlers(FrameType: type) type {
             if (self.gas_remaining <= @as(FrameType.GasType, @intCast(GasConstants.SstoreSentryGas))) {
                 self.afterComplete(.SSTORE);
                 return Error.OutOfGas;
+            }
+
+            // EIP-214: SSTORE in a static context halts exceptionally. The frame writes
+            // through the raw database, so the static check must happen here.
+            if (self.getEvm().is_static_context()) {
+                self.afterComplete(.SSTORE);
+                return Error.WriteProtection;
             }
 
             // Use the currently executing contract's address
@@ -239,8 +244,6 @@ pub fn Handlers(FrameType: type) type {
         pub fn tstore(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             self.beforeInstruction(.TSTORE, cursor);
 
-            // EIP-214: WriteProtection is handled by host interface for static calls
-
             // TSTORE expects stack: [..., key, value] where key is at top
             self.validateOpcodeHandler(.TSTORE, cursor);
             const slot = self.stack.pop_unsafe(); // Pop key/slot first (top of stack)
@@ -250,6 +253,12 @@ pub fn Handlers(FrameType: type) type {
             const contract_addr = self.contract_address;
 
             // TSTORE's fixed 100 gas (EIP-1153) is static and charged with the basic block.
+
+            // EIP-214: TSTORE in a static context halts exceptionally (EIP-1153).
+            if (self.getEvm().is_static_context()) {
+                self.afterComplete(.TSTORE);
+                return Error.WriteProtection;
+            }
 
             // Store the value in transient storage through direct database pointer
             const database = self.getDatabase();

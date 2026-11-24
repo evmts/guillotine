@@ -481,6 +481,27 @@ pub const Database = struct {
         return self.storage.get(storage_key) orelse 0;
     }
 
+    /// EIP-7610: whether any storage slot of `address` holds a nonzero value.
+    /// Scans every storage layer, so call it only for accounts that already exist.
+    pub fn has_storage(self: *Database, address: [20]u8) Error!bool {
+        if (self.overlay_active) {
+            if (try self.layer_has_storage(&self.overlay_storage, address)) return true;
+        }
+        if (self.tx_cache) |cache| {
+            if (try self.layer_has_storage(&cache.storage, address)) return true;
+        }
+        return self.layer_has_storage(&self.storage, address);
+    }
+
+    fn layer_has_storage(self: *Database, layer: anytype, address: [20]u8) Error!bool {
+        var it = layer.keyIterator();
+        while (it.next()) |key| {
+            if (!std.mem.eql(u8, &key.address, &address)) continue;
+            if (try self.get_storage(address, key.key) != 0) return true;
+        }
+        return false;
+    }
+
     /// Set storage value for the given address and key
     pub fn set_storage(self: *Database, address: [20]u8, key: u256, value: u256) Error!void {
         const storage_key = StorageKey{ .address = address, .key = key };
@@ -3166,4 +3187,18 @@ test "Transaction cache - account deletion buffering" {
 
     // Account should be deleted in main storage
     try testing.expect(!db.account_exists(addr));
+}
+
+test "Database has_storage sees only nonzero slots of the address" {
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
+    const a = [_]u8{0xaa} ** 20;
+    const b = [_]u8{0xbb} ** 20;
+    try std.testing.expect(!(try db.has_storage(a)));
+    try db.set_storage(b, 1, 5);
+    try std.testing.expect(!(try db.has_storage(a)));
+    try db.set_storage(a, 7, 1);
+    try std.testing.expect(try db.has_storage(a));
+    try db.set_storage(a, 7, 0);
+    try std.testing.expect(!(try db.has_storage(a)));
 }

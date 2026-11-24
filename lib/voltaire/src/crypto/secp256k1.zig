@@ -355,7 +355,17 @@ pub fn recoverPubkey(
         return error.InvalidRecoveryId;
     }
 
+    if (!unauditedValidateSignature(r_u256, s_u256)) return error.InvalidSignature;
     return recoverPublicKeyBytes(hash[0..32], r_u256, s_u256, recoveryId);
+}
+
+/// Recover a public key with ECRECOVER-precompile rules: r and s in [1, n-1],
+/// recovery id 0 or 1. Unlike transaction signatures, high s is valid here
+/// (EIP-2 restricts only transactions).
+pub fn recoverPubkeyAnyS(hash: *const [32]u8, r: u256, s: u256, recovery_id: u1) error{InvalidSignature}![64]u8 {
+    if (r == 0 or r >= SECP256K1_N) return error.InvalidSignature;
+    if (s == 0 or s >= SECP256K1_N) return error.InvalidSignature;
+    return recoverPublicKeyBytes(hash, r, s, recovery_id);
 }
 
 /// ⚠️ UNAUDITED - NOT SECURITY AUDITED ⚠️
@@ -371,6 +381,7 @@ pub fn unauditedRecoverAddress(
 ) !primitives.Address.Address {
     if (hash.len != 32) return error.InvalidHashLength;
     if (recoveryId > 1) return error.InvalidRecoveryId;
+    if (!unauditedValidateSignature(r, s)) return error.InvalidSignature;
 
     const pubkey = try recoverPublicKeyBytes(hash[0..32], r, s, recoveryId);
     var hashed: [32]u8 = undefined;
@@ -378,8 +389,9 @@ pub fn unauditedRecoverAddress(
     return .{ .bytes = hashed[12..32].* };
 }
 
+/// Callers validate r and s ranges; this rejects only values that make recovery impossible.
 fn recoverPublicKeyBytes(hash: *const [32]u8, r: u256, s: u256, recovery_id: u8) error{InvalidSignature}![64]u8 {
-    if (!unauditedValidateSignature(r, s)) return error.InvalidSignature;
+    if (r == 0 or r >= SECP256K1_N or s == 0 or s >= SECP256K1_N) return error.InvalidSignature;
 
     // Recovery IDs 0 and 1 select the parity of the point with x = r.
     if (r >= SECP256K1_P) return error.InvalidSignature;

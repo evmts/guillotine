@@ -5,6 +5,17 @@ const primitives = @import("voltaire");
 const Address = primitives.Address;
 const assembler = @import("assembler.zig");
 
+/// The runner validates `post.Prague` expectations, so it must execute Prague
+/// rules. `evm.DefaultEvm` follows the latest mainnet fork (Osaka), whose
+/// EIP-7825 gas cap rejects the large-gas transactions these fixtures send.
+/// As in eest_runner.zig, fixtures send gas limits far above 30M (frame gas is
+/// sized from block_gas_limit) and run long loops, so neither is capped.
+pub const SpecEvm = evm.Evm(.{
+    .eips = .{ .hardfork = .PRAGUE },
+    .block_gas_limit = std.math.maxInt(i64),
+    .loop_quota = null,
+});
+
 // Error type for tests that are not yet implemented
 pub const TestTodo = error.TestTodo;
 
@@ -305,7 +316,7 @@ pub fn runJsonTest(allocator: std.mem.Allocator, test_case: std.json.Value) !voi
                 .max_fee_per_blob_gas = max_fee_per_blob_gas,
             };
 
-            var evm_instance = try evm.DefaultEvm.init(
+            var evm_instance = try SpecEvm.init(
                 allocator,
                 &database,
                 block_info,
@@ -452,6 +463,9 @@ pub fn runJsonTest(allocator: std.mem.Allocator, test_case: std.json.Value) !voi
         // Handle expect format (alternative to post)
         if (expect_list == .array) {
             for (expect_list.array.items) |expectation| {
+                // The runner executes data[0], gasLimit[0], value[0] only; skip
+                // expectations written for other transaction variants.
+                if (!expectationAppliesToFirstVariant(expectation)) continue;
                 if (expectation.object.get("result")) |result| {
                     if (result == .object) {
                         var it = result.object.iterator();
@@ -506,6 +520,57 @@ pub fn runJsonTest(allocator: std.mem.Allocator, test_case: std.json.Value) !voi
                 }
             }
         }
+    }
+}
+
+/// Whether an `expect` entry's `indexes` select data/gas/value index 0.
+/// An index is -1 (all variants), an integer, a "lo-hi" range string, or an
+/// array of those. Label strings (":label x") cannot be resolved here, so they
+/// count as matching to keep the check rather than silently drop it.
+fn expectationAppliesToFirstVariant(expectation: std.json.Value) bool {
+    if (expectation != .object) return true;
+    const indexes = expectation.object.get("indexes") orelse return true;
+    if (indexes != .object) return true;
+    for ([_][]const u8{ "data", "gas", "value" }) |name| {
+        const selector = indexes.object.get(name) orelse continue;
+        if (!indexSelectorMatchesZero(selector)) return false;
+    }
+    return true;
+}
+
+fn indexSelectorMatchesZero(selector: std.json.Value) bool {
+    switch (selector) {
+        .integer => |n| return n == -1 or n == 0,
+        .array => |items| {
+            for (items.items) |item| {
+                if (indexSelectorMatchesZero(item)) return true;
+            }
+            return false;
+        },
+        .string => |text| {
+            const dash = std.mem.indexOfScalar(u8, text, '-') orelse return true;
+            const lo = std.fmt.parseInt(i64, text[0..dash], 10) catch return true;
+            return lo <= 0;
+        },
+        else => return true,
+    }
+}
+
+test "expect indexes select the first transaction variant" {
+    const allocator = std.testing.allocator;
+    const cases = [_]struct { json: []const u8, applies: bool }{
+        .{ .json = "{\"indexes\":{\"data\":-1,\"gas\":-1,\"value\":-1}}", .applies = true },
+        .{ .json = "{\"indexes\":{\"data\":-1,\"gas\":0,\"value\":-1}}", .applies = true },
+        .{ .json = "{\"indexes\":{\"data\":-1,\"gas\":1,\"value\":-1}}", .applies = false },
+        .{ .json = "{\"indexes\":{\"data\":[1,2],\"gas\":0,\"value\":-1}}", .applies = false },
+        .{ .json = "{\"indexes\":{\"data\":[2,0],\"gas\":0,\"value\":-1}}", .applies = true },
+        .{ .json = "{\"indexes\":{\"data\":\"1-3\",\"gas\":0,\"value\":0}}", .applies = false },
+        .{ .json = "{\"indexes\":{\"data\":\":label x\",\"gas\":0,\"value\":0}}", .applies = true },
+    };
+    for (cases) |case| {
+        const parsed = try std.json.parseFromSlice(std.json.Value, allocator, case.json, .{});
+        defer parsed.deinit();
+        try std.testing.expectEqual(case.applies, expectationAppliesToFirstVariant(parsed.value));
     }
 }
 
@@ -1033,7 +1098,7 @@ pub fn runTest(allocator: std.mem.Allocator, test_data: TestData) !void {
         .chain_id = 1,
     };
     
-    var evm_instance = try evm.DefaultEvm.init(
+    var evm_instance = try SpecEvm.init(
         allocator, 
         &database, 
         block_info, 

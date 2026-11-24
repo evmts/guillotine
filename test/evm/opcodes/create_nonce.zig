@@ -161,3 +161,48 @@ test "CREATE opcode: a colliding creation pushes 0 but keeps the nonce increment
     try std.testing.expectEqualSlices(u8, &([_]u8{0} ** 32), result.output);
     try std.testing.expectEqual(@as(u64, 2), (try db.get_account(factory.bytes)).?.nonce);
 }
+
+test "CREATE tx: target with only nonempty storage collides (EIP-7610)" {
+    const allocator = std.testing.allocator;
+    var db = evm.Database.init(allocator);
+    defer db.deinit();
+    try fundSender(&db, 0);
+    try db.set_account(first_contract.bytes, evm.Account{
+        .balance = 10,
+        .nonce = 0,
+        .code_hash = [_]u8{0} ** 32,
+        .storage_root = [_]u8{0} ** 32,
+    });
+    try db.set_storage(first_contract.bytes, 1, 1);
+    var vm = try PragueEvm.init(allocator, &db, block_info, context, 0, sender);
+    defer vm.deinit();
+
+    var result = vm.call(.{ .create = .{ .caller = sender, .value = 0, .init_code = &init_code, .gas = gas_limit } });
+    defer result.deinit(allocator);
+
+    try std.testing.expect(!result.success);
+    try std.testing.expectEqual(@as(u64, 1), (try db.get_account(sender.bytes)).?.nonce);
+    const target = (try db.get_account(first_contract.bytes)).?;
+    try std.testing.expectEqual(@as(u64, 0), target.nonce);
+    try std.testing.expectEqual(@as(u256, 10), target.balance);
+    try std.testing.expectEqual(@as(u256, 1), try db.get_storage(first_contract.bytes, 1));
+}
+
+test "CREATE opcode: unpayable CreateGas halts the frame out of gas" {
+    // execution-specs charges GAS_CREATE in the opcode, so the caller frame halts and the
+    // whole call reverts instead of CREATE pushing 0. Factory gets 10_000 gas < 32_000.
+    const allocator = std.testing.allocator;
+    var db = evm.Database.init(allocator);
+    defer db.deinit();
+    try fundSender(&db, 0);
+    try deployFactory(&db);
+    var vm = try PragueEvm.init(allocator, &db, block_info, context, 0, sender);
+    defer vm.deinit();
+
+    var result = vm.call(.{ .call = .{ .caller = sender, .to = factory, .value = 0, .input = &.{}, .gas = 31_000 } });
+    defer result.deinit(allocator);
+
+    try std.testing.expect(!result.success);
+    try std.testing.expectEqual(@as(u64, 0), result.gas_left);
+    try std.testing.expectEqual(@as(u64, 1), (try db.get_account(factory.bytes)).?.nonce);
+}

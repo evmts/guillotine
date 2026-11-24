@@ -98,6 +98,23 @@ pub fn build(b: *std.Build) void {
         modexp_tests_step.dependOn(&b.addRunArtifact(modexp_test).step);
     }
 
+    // ECRECOVER precompile regressions (empty output on failure, strict v, high s allowed).
+    const ecrecover_tests_step = b.step("test-ecrecover", "Run vendored ECRECOVER precompile tests");
+    {
+        const ecrecover_test = b.addTest(.{
+            .name = "ecrecover",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("lib/voltaire/src/precompiles/ecrecover.zig"),
+                .target = target,
+                .optimize = optimize,
+            }),
+            .use_llvm = true,
+        });
+        ecrecover_test.root_module.addImport("crypto", modules.crypto_mod);
+        ecrecover_test.linkLibC();
+        ecrecover_tests_step.dependOn(&b.addRunArtifact(ecrecover_test).step);
+    }
+
     const bn254_tests_step = b.step("test-bn254", "Run vendored BN254 add, mul, and field tests");
     for ([_][]const u8{
         "precompiles/bn254_add.zig",
@@ -498,6 +515,7 @@ pub fn build(b: *std.Build) void {
     // We dynamically scan the directory and add a test target for each file matching *_test.zig
     const opcode_tests_step = b.step("test-opcodes", "Run all per-opcode differential tests");
     opcode_tests_step.dependOn(modexp_tests_step);
+    opcode_tests_step.dependOn(ecrecover_tests_step);
     // Compile the engine once for the complete gate. Linking a separate copy
     // for every opcode consumes gigabytes of cache and repeats LLVM work.
     const all_opcode_tests = b.addTest(.{
@@ -805,6 +823,42 @@ pub fn build(b: *std.Build) void {
     specs_test.root_module.addImport("runner", runner_module);
     if (bn254_lib) |bn254| specs_test.linkLibrary(bn254);
     specs_test.linkLibC();
+
+    // Spec runner self-tests (expectation index selection). Generated case roots do
+    // not reach tests inside the runner module, so they run as part of test-opcodes.
+    const runner_unit = b.addTest(.{
+        .name = "spec-runner-unit",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("specs/runner.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+        .filters = &.{"expect indexes"},
+    });
+    runner_unit.root_module.addImport("evm", modules.evm_mod);
+    runner_unit.root_module.addImport("voltaire", modules.primitives_mod);
+    if (bn254_lib) |bn254| runner_unit.linkLibrary(bn254);
+    runner_unit.linkLibC();
+    opcode_tests_step.dependOn(&b.addRunArtifact(runner_unit).step);
+    const lll_unit = b.addTest(.{
+        .name = "spec-lll-unit",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("specs/lll.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    opcode_tests_step.dependOn(&b.addRunArtifact(lll_unit).step);
+    const assembler_unit = b.addTest(.{
+        .name = "spec-assembler-unit",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("specs/assembler.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+        .filters = &.{"placeholders"},
+    });
+    opcode_tests_step.dependOn(&b.addRunArtifact(assembler_unit).step);
 
     // Apply test filter if specified
     if (test_filter) |filter| {
