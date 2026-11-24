@@ -27,6 +27,33 @@ jobs:
         uses: goto-bus-stop/setup-zig@v2
         with:
           version: 0.15.2
+      - name: Select a macOS SDK that Zig 0.15.2 can link
+        if: runner.os == 'macOS'
+        shell: bash
+        # macOS SDK 26.4 and later list libSystem stubs for arm64e-macos but
+        # not arm64-macos. Zig 0.15.2 ignores arm64e stubs, so every native
+        # link fails with "undefined symbol: _abort" and friends. Keep the
+        # default Xcode while it links; otherwise use the newest one that does.
+        run: |
+          set -euo pipefail
+          probe="$RUNNER_TEMP/zig-sdk-probe"
+          mkdir -p "$probe"
+          printf 'pub fn main() void {}\n' > "$probe/main.zig"
+          for dev in "$(xcode-select -p)" $(printf "%s\n" /Applications/Xcode_*.app | sort -rV | sed 's|$|/Contents/Developer|'); do
+            # Without an SDK, Zig links against its bundled stubs, which proves nothing.
+            if ! sdk="$(DEVELOPER_DIR="$dev" xcrun --sdk macosx --show-sdk-path 2>/dev/null)"; then
+              echo "Skipping $dev: no macOS SDK"
+              continue
+            fi
+            if DEVELOPER_DIR="$dev" zig build-exe "$probe/main.zig" -femit-bin="$probe/main" > "$probe/log" 2>&1 && "$probe/main"; then
+              echo "Zig links against $sdk"
+              echo "DEVELOPER_DIR=$dev" >> "$GITHUB_ENV"
+              exit 0
+            fi
+            echo "Skipping $dev: $(grep -m1 error: "$probe/log" || tail -n1 "$probe/log")"
+          done
+          echo "::error::No installed Xcode has a macOS SDK that Zig 0.15.2 can link against." >&2
+          exit 1
       - name: Record toolchain and architecture
         id: toolchain
         shell: bash
