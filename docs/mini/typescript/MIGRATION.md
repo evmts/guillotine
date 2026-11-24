@@ -1,5 +1,7 @@
 # Zig to TypeScript Migration Guide
 
+> **Status:** This page describes a TypeScript port of guillotine-mini whose sources (`evm.ts`, `frame.ts`, `storage.ts`, `instructions/*.ts`) and npm package (`guillotine-mini-ts`) do not exist in this repository. `mini/` contains only TypeScript helpers (`mini/src/utils/*.ts`, `mini/src/precompiles/index.ts`) and WASM examples (`mini/examples/typescript/*.ts`). Treat the APIs and benchmarks below as a design sketch, not working code.
+
 Comprehensive guide for understanding the differences between the Zig and TypeScript EVM implementations.
 
 ## Table of Contents

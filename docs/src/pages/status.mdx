@@ -8,29 +8,48 @@ description: What actually works today, measured rather than claimed.
 Guillotine is **early alpha**. The repository's own words: *do not use in
 production*. Any use should be considered purely experimental.
 
-This page records what was actually run, on macOS 15 (arm64) with Zig 0.15.2, at
-the time these docs were written. Numbers here are pasted output, not summaries.
+This page records measured results. Each number names its source.
 
 ## Ethereum spec compliance
 
-From the repository README, latest recorded run of `zig build specs`:
+### EEST state tests
 
-- **2251** tests executed
-- **1165 passing** (~52%)
-- **1086 failing** (~48%)
+`zig build state-tests` runs the official pre-filled Ethereum Execution Spec
+Tests against the `src/` engine. Baseline from `specs/README.md` (2026-11-22,
+`tests@v21.0.3`, ReleaseFast):
 
-Most failures are concentrated in `ecmul` / BN254 elliptic-curve tests. Reaching
-100% spec compliance is the project's stated primary focus.
+- **66,652** cases executed, Frontier through Osaka
+- **12,500 passing** (18.75%)
+- **54,152 failing**
+- 16,907 Amsterdam posts skipped
+
+| Failure reason | Cases |
+| --- | ---: |
+| `gas_used_mismatch` | 40,684 |
+| `status_mismatch` | 13,046 |
+| `crash` | 266 |
+| `nonce_mismatch` | 125 |
+| `storage_mismatch` | 29 |
+| `balance_mismatch` | 2 |
+
+Per-fork pass rates run from 9.95% (Istanbul) to 24.35% (SpuriousDragon).
+`specs/README.md` has the per-fork table and how to fetch the fixtures.
+
+### Legacy filler specs
+
+`zig build specs` runs the legacy filler suite. Commit `7501b986` recorded 581
+failures (down from 1031) with no regressions. The repository README's figure of
+1165 passing out of 2251 predates that commit.
 
 :::danger
-A ~52% spec pass rate means Guillotine gets a large fraction of edge cases wrong
-today. Do not use it to compute anything you rely on — balances, gas estimates,
-state roots — without cross-checking against a mature implementation.
+An 18.75% pass rate on the official state tests means Guillotine gets most
+cases wrong today. Do not use it to compute anything you rely on (balances, gas
+estimates, state roots) without cross-checking against a mature implementation.
 :::
 
-## What was verified for these docs
+## Checks
 
-### `zig build` — passes
+### `zig build`: passes
 
 ```
 $ zig build ; echo "exit=$?"
@@ -41,92 +60,44 @@ $ zig build ; echo "exit=$?"
 exit=0
 ```
 
-### Documentation examples — pass
+### CI
 
-Every code example in [Getting started](/getting-started) was compiled and run:
+`.github/workflows/ci.yml` runs on `macos-latest` and `ubuntu-latest` with Zig
+0.15.2: `zig build`, `zig build test-unit`, `zig build test-opcodes`,
+`zig build test-modexp --build-file .smithers/build.zig`, and two Node tests
+under `.smithers/tests/`. `.github/workflows/fuzz.yml` runs continuous fuzzing.
 
-```
-$ zig build test-integration -Dtest-filter='docs example'
+### `zig build test-opcodes`
 
- RUN  v0.15.1
- ›~/guillotine
+Commit `815ab72f` recorded 756 of 756 per-opcode differential tests passing.
 
- ✓ differential.debug_math_only (1) 946.00 μs
- ✓ docs_examples_verify (4) 51.28 ms
- ✓ evm.erc20_deployment_issue (1) 1.02 ms
- ✓ evm.opcodes.14_test (1) 1.04 ms
- ✓ evm.opcodes.all_opcodes (1) 994.00 μs
- ✓ fixtures (1) 1.02 ms
- ✓ root (1) 1.25 ms
-⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
- Test Files  1 passed (10)
-      Tests  10 passed (10)
-```
+### Documentation examples
 
-### `zig build test-opcodes` — fails (exit 1)
-
-All 623 assertions pass, but four test executables fail because the run logs
-errors, which the test runner treats as failure:
-
-```
-Build Summary: 276/281 steps succeeded; 4 failed; 623/623 tests passed
-```
-
-The four:
-
-| Opcode | Error logged |
-| --- | --- |
-| `0x3e` `RETURNDATACOPY` | `ReturnDataNotAvailable (code_len=7, gas=979000, depth=2)` |
-| `0xf2` `CALLCODE` | `OutOfGas (code_len=18, gas=79, depth=106)` |
-| `0xfa` `STATICCALL` | `OutOfGas (code_len=17, gas=24, depth=108)` |
-| `0xfe` `INVALID` | `InvalidOpcode (code_len=1, gas=979000, depth=2)` |
-
-Some of these may be tests that intentionally drive a failure path and log it too
-loudly rather than engine defects — `0xfe INVALID` raising `InvalidOpcode` and
-`RETURNDATACOPY` with no return data raising `ReturnDataNotAvailable` are both
-*correct* EVM behaviour. The deep-recursion `OutOfGas` cases at depth 106–108 are
-less obviously benign. Either way, **`zig build test-opcodes` does not currently
-exit 0**, which is what matters if you are wiring CI.
+The examples in [Getting started](/getting-started) were compiled and run with
+`zig build test-integration` against an earlier tree. See
+[Running it](/getting-started#running-it).
 
 ### Not run for these docs
 
-Stated plainly so nothing here is mistaken for a broader claim:
-
-- `zig build test` (full suite: specs → integration → unit)
-- `zig build specs`
-- `zig build test-unit`, `test-lib`
-- `zig build wasm`, and every `sdks/` build
+- `zig build test` (specs, integration, unit, and lib tests)
+- `zig build specs` and `zig build state-tests`
+- `zig build test-lib`
+- Every `sdks/` build
 - Any benchmark
-
-## Build blockers on a clean checkout
-
-**`lib/voltaire` is not a Cargo workspace member and not excluded.** Building the
-required `libcrypto_wrappers.a` fails outright:
-
-```
-$ cd lib/voltaire && cargo build --release
-error: current package believes it's in a workspace when it's not:
-current:   /…/guillotine/lib/voltaire/Cargo.toml
-workspace: /…/guillotine/Cargo.toml
-```
-
-Consequence: plain `zig build` succeeds (it does not link that archive), but
-`zig build test-integration` fails at link time with `libcrypto_wrappers.a: file
-not found`. Workaround in
-[Installation](/installation).
 
 ## Feature support
 
 | Area | State |
 | --- | --- |
-| Ethereum mainnet | Only supported network |
-| OP Stack (Optimism, Base) | Planned for beta |
-| Arbitrum Nitro | Planned for beta |
-| Hardforks Frontier → Cancun | Implemented; Prague/Osaka EIP sets defined |
-| Precompiles `0x01`–`0x0A` | Implemented; BN254 is the weak spot |
-| Go bindings | Called production-ready by `sdks/README.md` |
-| C, Rust, Python, Swift, TypeScript, Bun bindings | Experimental proof-of-concept |
-| WASM | Working targets for both the full and mini EVMs |
+| Ethereum mainnet | The only network `Evm` executes |
+| OP Stack (Optimism, Base) | `src/layer2/` implements fee, deposit, and precompile rules as standalone helpers (`zig build test-layer2`). `EvmConfig` cannot select them yet. Planned for beta. |
+| Arbitrum Nitro | Not implemented. Planned for beta. |
+| Hardforks | `Hardfork` spans `FRONTIER` through `AMSTERDAM`; the default is `OSAKA`. `state-tests` covers Frontier through Osaka. |
+| Precompiles | `0x01`–`0x11` and `P256VERIFY` (`0x100`, Osaka) in `lib/voltaire/src/precompiles/` |
+| Native JIT | ARM64 tier in `src/jit/`, opt-in through `EvmConfig.enable_native_jit` (default `false`) |
+| C ABI | Experimental (`sdks/c/`, `src/evm_c_api.zig`) |
+| TypeScript (`@tevm/guillotine`) | Experimental; Bun only, over the native library |
+| WASM | No root build step for the `src/` engine. guillotine-mini builds with `cd mini && zig build wasm`. |
 
 ## Following along
 

@@ -20,7 +20,7 @@ have charged, and the basic-block gas header already accounts for them together.
 ## The set
 
 Defined in `src/opcodes/opcode_synthetic.zig` as an `enum(u8)` occupying the
-`0xA5`–`0xCD` range (unused by real EVM opcodes). Verified against the source:
+`0xA5`–`0xCF` range (unused by real EVM opcodes). Verified against the source:
 
 ### PUSH + arithmetic
 
@@ -86,6 +86,13 @@ Defined in `src/opcodes/opcode_synthetic.zig` as an `enum(u8)` occupying the
 | `PUSH_ADD_DUP1` | `0xCB` | `PUSH` + `ADD` + `DUP1` — loop increment |
 | `MLOAD_SWAP1_DUP2` | `0xCC` | `MLOAD` + `SWAP1` + `DUP2` |
 
+### Block markers
+
+| Synthetic | Value | Purpose |
+| --- | --- | --- |
+| `BLOCK_BEGIN` | `0xCE` | Basic block entered by falling through a non-taken `JUMPI`; charges the block's gas |
+| `INVALID_JUMP_TARGET` | `0xCF` | Target of a static jump whose destination is not a `JUMPDEST` |
+
 `FUNCTION_DISPATCH` and `CALLVALUE_CHECK` are the highest-value entries in
 practice: every external function on every Solidity contract begins with them.
 
@@ -98,18 +105,16 @@ Two variants exist so the inline path never pays for an indirection.
 
 ## Turning fusion off
 
-Fusion is on by default. It is a comptime flag, so you can compare:
+Fusion is on by default. It is the comptime `EvmConfig.enable_fusion` field, so
+you can compare:
 
 ```zig
 const Fused   = @import("evm").Evm(.{ .enable_fusion = true });
 const Unfused = @import("evm").Evm(.{ .enable_fusion = false });
 ```
 
-Or from the build:
-
-```bash
-zig build -Devm-enable-fusion=false
-```
+`build.zig` declares `-Devm-enable-fusion`, but nothing reads it, so the flag
+does not turn fusion off.
 
 Turning it off is the first thing to try when a contract behaves differently from
 another EVM. If the difference disappears, you have found a fusion bug — please
@@ -128,7 +133,8 @@ machine the right number of times:
 | `PUSH_MSTORE_INLINE` | 2 (`PUSH1`, `MSTORE`) |
 | `FUNCTION_DISPATCH` | 4 (`PUSH4`, `EQ`, `PUSH`, `JUMPI`) |
 
-That mapping lives in `executeMinimalEvmForOpcode()` in `src/tracer/tracer.zig`.
+That mapping lives in `executeMinimalEvmForOpcode()` in
+`src/tracer/minimal_evm_sync.zig`.
 A "divergence" that turns out to be an arity mismatch there is a tracer bug, not
 an EVM bug — check the arity before you suspect the handler.
 

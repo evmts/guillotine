@@ -7,7 +7,7 @@ Synthetic opcodes are fused operations that combine common bytecode patterns int
 During bytecode analysis, Guillotine detects common patterns and replaces them with synthetic handlers:
 
 ```
-Original:    PUSH1 0x20, MSTORE    (2 opcodes, 2 schedule items each)
+Original:    PUSH1 0x20, MSTORE    (2 opcodes, 3 schedule items: PUSH1 handler, push_inline, MSTORE handler)
 Fused:       PUSH_MSTORE_INLINE    (1 synthetic handler + 1 metadata)
 
 Result: Fewer dispatch items, same gas cost, identical behavior
@@ -18,7 +18,7 @@ Result: Fewer dispatch items, same gas cost, identical behavior
 All synthetic opcodes are defined in `src/opcodes/opcode_synthetic.zig`:
 
 ```zig
-// src/opcodes/opcode_synthetic.zig:17-60
+// src/opcodes/opcode_synthetic.zig:17-64
 pub const OpcodeSynthetic = enum(u8) {
     // Arithmetic fusions (PUSH + operation)
     PUSH_ADD_INLINE = 0xA5,      // PUSH small + ADD
@@ -69,6 +69,11 @@ pub const OpcodeSynthetic = enum(u8) {
     PUSH0_REVERT = 0xCA,         // PUSH0 + PUSH0 + REVERT (error pattern)
     PUSH_ADD_DUP1 = 0xCB,        // PUSH + ADD + DUP1 (loop pattern)
     MLOAD_SWAP1_DUP2 = 0xCC,     // MLOAD + SWAP1 + DUP2 (memory pattern)
+
+    // Control-flow helpers
+    BACKWARD_LOOP_JUMPI = 0xCD,  // PUSH+JUMPI (exit) + [body] + PUSH+JUMP (loop)
+    BLOCK_BEGIN = 0xCE,          // Block entered by falling through a non-taken JUMPI
+    INVALID_JUMP_TARGET = 0xCF,  // Taken static jump to a non-JUMPDEST
 };
 ```
 
@@ -92,7 +97,7 @@ Value heap-allocated, metadata contains pointer:
 
 ```zig
 // For PUSH9-PUSH32 values
-push_pointer: PushPointerMetadata { .value_ptr: *u256 }
+push_pointer: PushPointerMetadata { .value_ptr: *const WordType }
 
 // Handler dereferences pointer
 const value = cursor[1].push_pointer.value_ptr.*;
@@ -103,77 +108,89 @@ const value = cursor[1].push_pointer.value_ptr.*;
 ### Simple Fusion: PUSH_ADD_INLINE
 
 ```zig
-// src/instructions/handlers_arithmetic_synthetic.zig
+// src/instructions/handlers_arithmetic_synthetic.zig:26
 pub fn push_add_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+    @branchHint(.likely);
     // Tracer sync (executes PUSH + ADD in reference impl)
     self.beforeInstruction(.PUSH_ADD_INLINE, cursor);
+    validate_stack(self);
 
-    // Get push value from inline metadata
-    const push_value = cursor[1].push_inline.value;
+    // Push value from inline metadata (cursor[1].push_inline)
+    const op_data = dispatch_opcode_data.getOpData(.PUSH_ADD_INLINE, Dispatch, Dispatch.Item, cursor);
 
-    // Perform ADD: stack[top] = stack[top] + push_value
-    const top = self.stack.peek_unsafe();
-    self.stack.set_top_unsafe(top +% @as(WordType, push_value));
+    // Perform ADD: stack[top] = push_value + stack[top]
+    self.stack.set_top_unsafe(op_data.metadata.value +% self.stack.peek_unsafe());
 
-    // Tail-call next (skip past handler + metadata)
-    return @call(.always_tail, cursor[2].opcode_handler, .{self, cursor + 2});
+    // Tail-call next (cursor[2], past handler + metadata)
+    return dispatch_next.nextInstruction(FrameType, self, cursor, .PUSH_ADD_INLINE);
 }
 ```
 
 ### Complex Fusion: FUNCTION_DISPATCH
 
 ```zig
+// src/instructions/handlers_advanced_synthetic.zig:285 (condensed)
 // PUSH4 selector + EQ + PUSH target + JUMPI
 // Common Solidity function dispatch pattern
 pub fn function_dispatch(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
     self.beforeInstruction(.FUNCTION_DISPATCH, cursor);
+    const op_data = dispatch_opcode_data.getOpData(.FUNCTION_DISPATCH, Dispatch, Dispatch.Item, cursor);
 
-    // Get metadata
-    const metadata = cursor[1].function_dispatch;
+    // Metadata: cursor[1] holds the selector, cursor[2] the jump target
+    const selector = @as(u32, @intCast(op_data.items[0].push_inline.value));
+    const target = op_data.items[1].push_pointer.value_ptr.*;
 
-    // Pop calldata selector from stack
-    const calldata_selector = self.stack.pop_unsafe();
+    // PUSH4 selector, EQ against the calldata selector, PUSH target, JUMPI
+    // (the handler runs each step on the stack)
+    ...
 
-    // Compare with expected selector
-    const matches = calldata_selector == metadata.selector;
-
-    if (matches) {
-        // Jump to function body
-        return @call(.always_tail, metadata.target_handler, .{self, metadata.target_cursor});
-    } else {
-        // Continue to next dispatch check
-        return @call(.always_tail, cursor[2].opcode_handler, .{self, cursor + 2});
+    if (condition != 0) {
+        // Jump to function body through the jump table
+        const dest_pc: FrameType.PcType = @intCast(dest);
+        if (self.jump_table.findJumpTarget(dest_pc)) |jump_dispatch| {
+            self.afterInstruction(.FUNCTION_DISPATCH, jump_dispatch.cursor[0].opcode_handler, jump_dispatch.cursor);
+            return @call(FrameType.Dispatch.getTailCallModifier(), jump_dispatch.cursor[0].opcode_handler, .{ self, jump_dispatch.cursor });
+        }
+        self.afterComplete(.FUNCTION_DISPATCH);
+        return Error.InvalidJump;
     }
+
+    // Continue to next dispatch check (cursor[3])
+    self.afterInstruction(.FUNCTION_DISPATCH, op_data.next_handler, op_data.next_cursor.cursor);
+    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
 }
 ```
 
 ## Pattern Detection
 
-Patterns are detected during bytecode analysis:
+The bytecode iterator detects patterns while the schedule is built. For each
+fusion candidate it calls `Bytecode.getFusionData`, which tries the longest
+patterns first (FUNCTION_DISPATCH, ISZERO_JUMPI, the 3-opcode patterns,
+MULTI_PUSH/MULTI_POP) and falls back to the 2-opcode PUSH + op fusions:
 
 ```zig
-// src/bytecode/bytecode_analyze.zig
-fn detectFusionPatterns(bytecode: []const u8, pc: usize) ?FusionPattern {
-    // Check for PUSH + ADD pattern
-    if (isPushOpcode(bytecode[pc]) and
-        pc + pushSize(bytecode[pc]) + 1 < bytecode.len and
-        bytecode[pc + pushSize(bytecode[pc]) + 1] == 0x01) { // ADD
-        return .push_add;
-    }
+// src/bytecode/bytecode.zig:695 (condensed)
+pub fn getFusionData(self: *const Self, pc: PcType) OpcodeData {
+    // Check function dispatch pattern first (can be 8+ bytes)
+    if (self.checkFunctionDispatchPattern(pc)) |fusion| return fusion;
+    if (self.checkIszeroJumpiPattern(pc)) |fusion| return fusion;
+    // ... other 3-opcode, MULTI_PUSH and MULTI_POP checks ...
 
-    // Check for function dispatch pattern
-    if (bytecode[pc] == 0x63 and  // PUSH4
-        pc + 6 < bytecode.len and
-        bytecode[pc + 5] == 0x14 and  // EQ
-        isPushOpcode(bytecode[pc + 6])) {
-        // Verify JUMPI follows
-        // ...
-        return .function_dispatch;
+    // Existing 2-opcode fusions (PUSH + op): the second opcode follows the push data
+    const first_op = self.get_unsafe(pc);
+    if (first_op >= 0x60 and first_op <= 0x7F) {
+        const second_op_pc = pc + 1 + (first_op - 0x5F);
+        switch (self.get_unsafe(second_op_pc)) {
+            0x01 => return OpcodeData{ .push_add_fusion = .{ .value = value } },
+            // ... MUL, SUB, DIV, AND, OR, XOR, MLOAD, MSTORE, MSTORE8, JUMP, JUMPI
+        }
     }
-
-    return null;
+    // ...
 }
 ```
+
+`src/bytecode/bytecode_analyze.zig` holds a separate analyzer used only by
+the C bytecode API (`evm_bytecode_analyze`).
 
 ## Gas Accounting
 
@@ -190,20 +207,20 @@ Synthetic opcodes maintain exact gas semantics:
 The tracer must execute multiple reference steps for synthetic opcodes:
 
 ```zig
-// src/tracer/tracer.zig
-fn executeMinimalEvmForOpcode(opcode: UnifiedOpcode) void {
-    const steps = switch (opcode) {
-        .PUSH_ADD_INLINE, .PUSH_ADD_POINTER => 2,      // PUSH + ADD
-        .PUSH_MSTORE_INLINE => 2,                       // PUSH + MSTORE
-        .FUNCTION_DISPATCH => 4,                        // PUSH4 + EQ + PUSH + JUMPI
-        .MULTI_PUSH_3 => 3,                             // 3 PUSHes
-        else => 1,                                      // Regular opcodes
-    };
+// src/tracer/minimal_evm_sync.zig
+const SyntheticOpcodeSteps = struct {
+    const PUSH_ADD_INLINE = 2;      // PUSH + ADD
+    const PUSH_MSTORE_INLINE = 2;   // PUSH + MSTORE
+    const FUNCTION_DISPATCH = 4;    // PUSH4 + EQ + PUSH + JUMPI
+    const MULTI_PUSH_3 = 3;         // 3 PUSHes
+    // ...
+};
 
-    for (0..steps) |_| {
-        minimal_evm.step();
-    }
-}
+// getMaxStepsForOpcode maps each synthetic opcode to its step count
+// (regular opcodes => 1); executeMinimalEvmForOpcode runs that many
+// MinimalEvm steps.
+pub fn executeMinimalEvmForOpcode(tracer: anytype, evm: *MinimalEvm,
+    comptime opcode: UnifiedOpcode, frame: anytype, cursor: ...) void
 ```
 
 ## Compile-Time Validation
@@ -211,11 +228,15 @@ fn executeMinimalEvmForOpcode(opcode: UnifiedOpcode) void {
 Synthetic opcodes must not conflict with standard EVM opcodes:
 
 ```zig
-// src/opcodes/opcode_synthetic.zig:96-100
+// src/opcodes/opcode_synthetic.zig:101-112
 comptime {
+    @setEvalBranchQuota(20000);
     for (@typeInfo(OpcodeSynthetic).@"enum".fields) |syn_field| {
-        if (std.meta.intToEnum(Opcode, syn_field.value) catch null) |conflicting| {
-            @compileError("Synthetic opcode conflicts with: " ++ @tagName(conflicting));
+        if (std.meta.intToEnum(Opcode, syn_field.value) catch null) |conflicting_opcode| {
+            @compileError(std.fmt.comptimePrint(
+                "Synthetic opcode {s} (0x{X}) conflicts with normal opcode {s}",
+                .{ syn_field.name, syn_field.value, @tagName(conflicting_opcode) }
+            ));
         }
     }
 }
@@ -235,7 +256,7 @@ comptime {
 ## Descriptions for Debugging
 
 ```zig
-// src/opcodes/opcode_synthetic.zig:63-91
+// src/opcodes/opcode_synthetic.zig:66-97
 pub fn describe(self: OpcodeSynthetic) []const u8 {
     return switch (self) {
         .PUSH_ADD_INLINE, .PUSH_ADD_POINTER => "PUSH+ADD fusion",

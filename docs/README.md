@@ -40,12 +40,17 @@ zig build
 # Run all tests (no output = all passed)
 zig build test
 
-# Run Ethereum spec tests
+# Run the legacy filler spec tests
 zig build specs
 
-# Build with specific hardfork
-zig build -Devm-hardfork=CANCUN
+# Run the official EEST state tests (fetch fixtures first)
+scripts/fetch-eest-fixtures.sh
+zig build state-tests
 ```
+
+Select the hardfork, fusion, and limits in Zig through `EvmConfig`. The
+`-Devm-*` build flags are declared in `build.zig`, but the `src/` engine does not
+read them.
 
 ## Documentation Quick Navigation
 
@@ -131,26 +136,32 @@ An optimized implementation using dispatch-based execution with preprocessing.
 
 ## Hardfork Support
 
-Both implementations support Frontier through Prague:
+The performance EVM defines rules for Frontier through Osaka, and Osaka is the
+default (`Hardfork.DEFAULT`). The EEST pass rates below are the performance EVM's
+2026-11-22 baseline from `specs/README.md` (`zig build state-tests`,
+`tests@v21.0.3`):
 
-| Hardfork | Key Features | Status |
-|----------|--------------|--------|
-| Frontier | Base EVM opcodes | Complete |
-| Homestead | DELEGATECALL | Complete |
-| Byzantium | RETURNDATASIZE, STATICCALL, REVERT | Complete |
-| Constantinople | SHL/SHR/SAR, CREATE2, EXTCODEHASH | Complete |
-| Istanbul | CHAINID, SELFBALANCE | Complete |
-| Berlin | EIP-2929 (warm/cold access) | Complete |
-| London | BASEFEE, EIP-3529 (reduced refunds) | Complete |
-| Shanghai | PUSH0, EIP-3651 (warm coinbase) | Complete |
-| Cancun | TLOAD/TSTORE, MCOPY, BLOBHASH | Complete |
-| Prague | EIP-7702 (set code), BLS12-381 | Complete |
+| Hardfork | Key Features | EEST pass % |
+|----------|--------------|------------:|
+| Frontier | Base EVM opcodes | 23.86 |
+| Homestead | DELEGATECALL | 22.42 |
+| Byzantium | RETURNDATASIZE, STATICCALL, REVERT | 10.76 |
+| Constantinople (Fix) | SHL/SHR/SAR, CREATE2, EXTCODEHASH | 10.38 |
+| Istanbul | CHAINID, SELFBALANCE | 9.95 |
+| Berlin | EIP-2929 (warm/cold access) | 15.53 |
+| London | BASEFEE, EIP-3529 (reduced refunds) | 21.42 |
+| Shanghai | PUSH0, EIP-3651 (warm coinbase) | 21.14 |
+| Cancun | TLOAD/TSTORE, MCOPY, BLOBHASH | 19.02 |
+| Prague | EIP-7702 (set code), BLS12-381 | 20.17 |
+| Osaka | CLZ, P256VERIFY, EIP-7825 gas cap | 19.15 |
 
 ## Documentation Structure
 
 ```
 docs/
 ├── README.md              ← You are here
+├── src/pages/             ← Vocs site (guillotine.tevm.sh); sidebar in vocs.config.ts
+├── building-custom-sdks.md   Custom language SDKs over the C ABI
 │
 ├── dev/                   ← Developer deep dive documentation
 │   ├── README.md          Index with learning path
@@ -179,11 +190,12 @@ docs/
 | Command | Description |
 |---------|-------------|
 | `zig build` | Build the project |
-| `zig build test` | Run all tests |
-| `zig build specs` | Run Ethereum spec tests |
+| `zig build test` | Run specs, integration, unit, and lib tests |
+| `zig build specs` | Run the legacy filler spec tests |
+| `zig build state-tests` | Run the official EEST state tests |
 | `zig build test-unit` | Run unit tests |
 | `zig build test-opcodes` | Run opcode differential tests |
-| `zig build wasm` | Build WASM library |
+| `zig build shared` / `zig build static` | Build the C FFI library (`libguillotine_ffi`) |
 
 ## Project Conventions
 

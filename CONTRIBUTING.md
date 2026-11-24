@@ -1,8 +1,6 @@
 # Contributing to Guillotine
 
-Thank you so much for you interest in contributing to Guillotine!
-
-We welcome contributions to Guillotine! This document provides guidelines and instructions for contributing to the project.
+Thank you for your interest in contributing to Guillotine! This document provides guidelines and instructions for contributing to the project.
 
 ## AI-Assisted Contributions
 
@@ -16,7 +14,7 @@ We welcome contributions to Guillotine! This document provides guidelines and in
    - Link to any related issues
 4. **Review and understand** all AI-generated code before submitting
 5. **Take responsibility** for the correctness and quality of the code
-6. **Run all tests** including differential tests against revm/MinimalEvm
+6. **Run all tests**, at least `zig build test-unit` and `zig build test-opcodes` (what CI runs), plus the MinimalEvm differential tests for EVM behavior changes
 
 Example PR description:
 
@@ -33,7 +31,7 @@ This change adds proper error handling for malformed bytecode that was causing p
 
 ### Testing:
 - ✅ zig build test-opcodes passes
-- ✅ Differential tests against revm pass
+- ✅ Differential tests against MinimalEvm pass
 - ✅ No performance regression in benchmarks
 ```
 
@@ -61,7 +59,7 @@ If your contribution is large please open a discussion to chat about the change 
 ### Testing Requirements
 
 - **Every** code change must pass `zig build test-opcodes`
-- **Critical** changes require differential testing against revm
+- **Critical** changes require differential testing against MinimalEvm (`DifferentialTestor` in `test/differential`, run by `zig build test-integration`)
 - **Gas costs** must match Yellow Paper specification exactly
 - **Stack operations** must validate depth before execution
 
@@ -80,43 +78,43 @@ We are committed to providing a welcoming and inclusive environment. All contrib
 
 ```
 src/
-├── _test_utils/         # Testing utilities and fixtures
-├── block/               # Block data structures and validation
-├── bytecode/            # Bytecode analysis and optimization
-├── cli/                 # Command-line interface
-├── crypto/              # Cryptographic operations (Keccak, BN254, etc.)
-│   └── bn254/          # BN254 elliptic curve operations
-├── devtool/            # Development tools and web UI
-├── eips_and_hardforks/ # EIP implementations and hardfork configurations
-├── frame/              # Execution frame and context management
-├── instructions/       # EVM opcode implementations
-├── internal/           # Internal utilities (safety counters, etc.)
-├── kzg/                # KZG commitment scheme support
-├── memory/             # EVM memory management
-├── opcodes/            # Opcode definitions and tables
-├── precompiles/        # Precompiled contract implementations
-├── preprocessor/       # Bytecode preprocessing and optimization
-├── primitives/         # Core types (Address, U256, Bytes32, etc.)
-├── provider/           # RPC provider interfaces
-├── solidity/           # Solidity compiler integration
-├── stack/              # EVM stack implementation
-├── storage/            # State storage and database interfaces
-├── tracer/             # Transaction tracing and debugging
-│   ├── MinimalEvm.zig  # Standalone 65KB EVM for testing
-│   └── pc_tracker.zig  # Execution flow tracking
-└── trie/               # Merkle Patricia Trie implementation
+├── block/              # Block info and transaction context
+├── bytecode/           # Bytecode analysis, jump validation, stats
+├── eips_and_hardforks/ # Hardfork and EIP configuration, system contracts
+├── frame/              # Execution frame, call params and results
+├── instructions/       # Opcode handlers (handlers_*.zig, *_synthetic.zig)
+├── internal/           # Safety counter
+├── jit/                # Opt-in native JIT tier (EvmConfig.enable_native_jit)
+├── kzg/                # KZG build glue
+├── layer2/             # OP Stack and Base rules
+├── memory/             # EVM memory
+├── opcodes/            # Opcode and synthetic opcode definitions
+├── preprocessor/       # Dispatch schedule and jump table construction
+├── provider/           # RPC provider and connection pool
+├── solidity/           # Solidity test contracts and bytecode
+├── stack/              # EVM stack
+├── storage/            # Database, journal, access list
+├── tracer/             # Tracer and the MinimalEvm reference interpreter
+│   ├── minimal_evm.zig       # MinimalEvm, used for differential testing
+│   ├── minimal_evm_sync.zig  # Keeps MinimalEvm in step with Frame
+│   └── pc_tracker.zig        # Execution flow tracking
+└── trie/               # Merkle Patricia Trie
 ```
+
+Primitives, crypto and the L1 precompiles live in the vendored Voltaire
+library under `lib/voltaire/src/` (`primitives/`, `crypto/`, `precompiles/`).
 
 ### Build System
 
+There is no `build/` directory. The build is split across:
+
 ```
-build/
-├── bindings/           # Language bindings generation
-├── config.zig          # Build configuration
-├── executables/        # Executable targets
-├── libraries/          # Library dependencies (BN254, REVM)
-├── modules.zig         # Module definitions
-└── steps/              # Build step definitions
+build.zig                # Steps, options, test and spec runners
+src/modules.build.zig    # Module graph (evm, primitives, crypto, precompiles, ...)
+src/build.zig            # The `run` executable
+lib/build.zig            # Rust and C libraries (Foundry, BN254, ...)
+bench/bench_step.zig     # `bench`, `bench-build`, `test-bench`
+bench/suites_build.zig   # `bench-<suite>` steps
 ```
 
 ### Key Files
@@ -125,7 +123,7 @@ build/
 - `src/frame/frame.zig` - The most important datastructure in the evm
 - `src/instructions/*.zig` - Individual opcode handlers for the evm
 - `src/tracer/tracer.zig` - Execution tracing and debugging infrastructure
-- `src/tracer/MinimalEvm.zig` - Standalone EVM for differential testing
+- `src/tracer/minimal_evm.zig` - MinimalEvm, the reference interpreter for differential testing
 - `src/preprocessor/dispatch.zig` - Bytecode dispatch optimization
 - `src/root.zig` - Module root exports
 - `build.zig` - Main build configuration
@@ -134,7 +132,7 @@ build/
 
 ### Assertion and Error Handling
 
-- Use `tracer.assert()` with descriptive messages for runtime validation
+- Use the tracer's `assert()` with descriptive messages for runtime validation, for example `(&self.getEvm().tracer).assert(self.stack.size() >= 1, "PUSH_AND_INLINE requires 1 stack item")`
 - Provide clear error messages that help debugging
 - Handle all error cases explicitly - no silent failures
 - Use `errdefer` for cleanup on error paths
@@ -160,12 +158,12 @@ build/
 1. **Fork the repository** on GitHub
 2. **Clone your fork** locally:
    ```bash
-   git clone https://github.com/YOUR-USERNAME/Guillotine.git
-   cd Guillotine
+   git clone --recursive https://github.com/YOUR-USERNAME/guillotine.git
+   cd guillotine
    ```
 3. **Add upstream remote**:
    ```bash
-   git remote add upstream https://github.com/evmts/Guillotine.git
+   git remote add upstream https://github.com/evmts/guillotine.git
    ```
 4. **Create a feature branch**:
    ```bash
@@ -176,10 +174,10 @@ build/
 
 ### Prerequisites
 
-- **Zig 0.15.1** (exactly - newer versions like 0.16.x have breaking API changes)
+- **Zig 0.15.x**: CI uses 0.15.2; `build.zig.zon` requires at least 0.15.1. Zig 0.16 and later have breaking API changes.
 - Git
-- Rust toolchain 1.75+ (required for ark and foundry-compilers dependencies)
-- Golang and Node.js if working with the CLI and native app
+- Rust toolchain with Cargo (stable; `zig build` builds the ark, foundry-compilers and Voltaire crates)
+- Bun or Node.js if working on `sdks/typescript` or the docs site
 
 ### Building the Project
 
@@ -194,7 +192,7 @@ git submodule update --init --recursive
 # Build the project (Zig automatically runs cargo build for Rust dependencies)
 zig build
 
-# Run tests (use test-opcodes to avoid hanging issues)
+# Run the per-opcode tests (what CI runs after test-unit)
 zig build test-opcodes
 ```
 
@@ -206,7 +204,7 @@ zig build test-opcodes
 # Build the project
 zig build
 
-# Run all tests
+# Run all tests (specs -> integration -> unit; specs need the submodules)
 zig build test
 
 # Run specific opcode tests
@@ -223,9 +221,6 @@ zig build test -Dtest-filter='trace validation'
 
 # Run specific opcode tests
 zig build test-opcodes -Dtest-filter='ADD opcode'
-
-# Run multiple specific tests (repeat the flag)
-zig build test-opcodes -Dtest-filter='ADD' -Dtest-filter='SUB'
 
 # Run tests for a specific function
 zig build test -Dtest-filter='get_balance'
@@ -247,7 +242,7 @@ zig build test -Dtest-filter='get_balance'
 
    ```zig
    // Good - provides context on failure
-   self.getTracer().assert(condition, "descriptive message");
+   (&self.getEvm().tracer).assert(condition, "descriptive message");
 
    // Avoid - no context on failure
    std.debug.assert(condition);
@@ -255,7 +250,8 @@ zig build test -Dtest-filter='get_balance'
 
 4. **Test against MinimalEvm** for correctness verification:
    ```bash
-   zig build test-snailtracer  # Differential testing
+   zig build test-integration                         # includes the test/differential suites
+   zig build test-integration -Dtest-filter='differential'
    ```
 
 ## Troubleshooting
@@ -283,10 +279,10 @@ If you see errors about `writer` method not found on ArrayList, or other API err
 # Check your Zig version
 zig version
 
-# Must be exactly 0.15.1, NOT 0.16.x
-# Use zvm to manage versions:
-zvm install 0.15.1
-zvm use 0.15.1
+# Must be 0.15.x (CI uses 0.15.2), NOT 0.16.x
+# Use zvm (https://github.com/tristanisham/zvm) to manage versions:
+zvm install 0.15.2
+zvm use 0.15.2
 ```
 
 #### Submodule Not Initialized
@@ -302,8 +298,9 @@ git submodule update --init --recursive
 Ensure Rust toolchain is installed:
 
 ```bash
-# Check Rust version (1.75+ recommended)
+# Check that Rust and Cargo are installed
 rustc --version
+cargo --version
 
 # If not installed:
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
@@ -311,6 +308,6 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 ### Test Failures
 
-- **ecmul tests failing**: Known issue with BN254 elliptic curve implementation
+- **Spec failures**: `zig build specs` and `zig build state-tests` still report known failures. Compare with the baselines in [specs/README.md](specs/README.md) before assuming a regression.
 - **Memory leak detected**: Check that all allocations have corresponding `defer` cleanup
 - **No output from tests**: This is normal - Zig tests only output on failure

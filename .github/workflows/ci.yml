@@ -102,6 +102,6 @@ jobs:
         run: zig build test-opcodes
       - name: MODEXP arithmetic and gas tests
         if: ${{ !cancelled() }}
-        # The root build has no test-modexp step; the supplemental build uses
-        # the repository's MODEXP implementation and tests without duplicating it.
+        # The supplemental build runs only lib/voltaire/src/crypto/modexp.zig's
+        # tests. The root build's own test-modexp already runs inside test-opcodes.
         run: zig build test-modexp --build-file .smithers/build.zig

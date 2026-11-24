@@ -1,11 +1,14 @@
 # Bytecode Module Port: Zig → TypeScript
 
-**Status**: ✅ Complete
+**Status**: Historical report. `mini/src/bytecode.ts` and `mini/src/bytecode.test.ts`
+are not in this repository, so the TypeScript port and its 18 tests cannot be run.
+`mini/examples/bytecode-validation.ts` remains, but its `../src/bytecode` import
+fails until `bytecode.ts` exists. The Zig original is `mini/src/bytecode.zig`.
 
-**Files Created**:
-- `/Users/williamcory/guillotine-mini/src/bytecode.ts` (TypeScript implementation)
-- `/Users/williamcory/guillotine-mini/src/bytecode.test.ts` (18 comprehensive tests)
-- `/Users/williamcory/guillotine-mini/examples/bytecode-validation.ts` (5 demonstration examples)
+**Files the report describes** (paths relative to the repository root):
+- `mini/src/bytecode.ts` (TypeScript implementation; missing)
+- `mini/src/bytecode.test.ts` (18 tests; missing)
+- `mini/examples/bytecode-validation.ts` (5 demonstration examples)
 
 ## Implementation Summary
 

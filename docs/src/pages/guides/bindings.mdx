@@ -1,42 +1,23 @@
 ---
 title: Language bindings
-description: Consuming Guillotine from C, Go, Rust, Python, Swift, TypeScript, and WASM.
+description: Consuming Guillotine from Zig, C, and TypeScript through its C ABI.
 ---
 
 # Language bindings
 
-Guillotine's tagline is "the ultrafast EVM for every language and platform". The
-mechanism is a C ABI: `src/evm_c_api.zig` exports a flat, opaque-handle C
-interface, and every other SDK is a thin wrapper over it (or, for the browser, a
-WASM build).
+The cross-language surface is a C ABI: `src/evm_c_api.zig` exports a flat,
+opaque-handle C interface, declared in `sdks/c/include/guillotine.h`.
+`sdks/README.md` lists what the repository ships:
 
-:::warning[Read the status column]
-Only the Go bindings are described as production-ready by the repository's own
-`sdks/README.md`. Everything else is an explicitly experimental
-proof-of-concept, and the engine itself is alpha. These statuses are copied from
-the repository rather than invented here.
-:::
-
-| SDK | Directory | Status (per `sdks/README.md`) | Mechanism |
+| Surface | Directory | Status | Mechanism |
 | --- | --- | --- | --- |
-| Go | `sdks/go/` | Production ready | cgo over the C ABI |
-| C | `sdks/c/` | Experimental PoC | The C ABI directly |
-| Rust | `sdks/rust/` | Experimental PoC | Safe wrapper, zero-copy FFI |
-| Python | `sdks/python/` | Experimental PoC | ctypes/cffi over the C ABI |
-| Swift | `sdks/swift/` | Experimental PoC | Native Swift over the C ABI |
-| TypeScript | `sdks/typescript/` | Experimental PoC | WebAssembly |
-| Bun | `sdks/bun/` | Experimental PoC | Bun FFI |
+| Zig | `src/root.zig` | Alpha, like the engine | Import the `evm` module directly |
+| C | `sdks/c/` | Experimental | The C ABI directly |
+| TypeScript, `@tevm/guillotine` | `sdks/typescript/` | Experimental; Bun only | Bun FFI over `libguillotine_ffi` |
 
-Build them with the corresponding build steps:
-
-```bash
-zig build go
-zig build python
-zig build swift
-zig build ts
-zig build wasm
-zig build wasm-minimal-evm
-```
+Python, Go, Rust, Swift, Kotlin/JNI, and native Bun integrations are custom
+SDKs you build on the C ABI; the repository does not maintain them. Start with
+[Building custom SDKs](https://github.com/evmts/guillotine/blob/main/docs/building-custom-sdks.md).
 
 ## The C ABI
 
@@ -46,6 +27,11 @@ Build a linkable library first:
 zig build shared    # dynamic library for FFI
 zig build static    # static library for FFI
 ```
+
+Both install to `zig-out/lib/`: `libguillotine_ffi.dylib` on macOS or
+`libguillotine_ffi.so` on Linux, and `libguillotine_ffi_static.a`. The C SDK
+checks the header and runs native tests with `make -f sdks/c/Makefile simple`
+and `make -f sdks/c/Makefile test`.
 
 The surface is an opaque-handle lifecycle. Names verified from
 `src/evm_c_api.zig`:
@@ -69,8 +55,11 @@ void guillotine_evm_destroy_tracing(EvmHandle* handle);
 
 The `_tracing` variants exist because a traced EVM is a *different Zig type*
 (comptime config), so it cannot share one handle representation with the untraced
-one. Pair `create_tracing` with `destroy_tracing` and `set_balance_tracing`, or
-you will free the wrong type.
+one. Use only `_tracing` functions on a tracing handle:
+`guillotine_evm_destroy_tracing`, `guillotine_set_balance_tracing`,
+`guillotine_set_nonce_tracing`, `guillotine_set_code_tracing`, and
+`guillotine_call_tracing`. There are no state readers or `set_storage` for
+tracing handles.
 
 ### State
 
@@ -126,59 +115,36 @@ size_t          evm_bytecode_get_runtime_data(const BytecodeHandle* handle, uint
 uint8_t         evm_bytecode_get_opcode_at(const BytecodeHandle* handle, size_t position);
 ```
 
-## WASM and the browser
+## WASM
 
-Two WASM targets exist and they serve different purposes:
+The root build has no WASM step for the `src/` engine. `sdks/wasm/build.zig`
+defines `createWasmSteps` (`wasm`, `wasm-debug`, `wasm-minimal-evm`), but
+`build.zig` never calls it, and it still points at `src/primitives/` and
+`src/crypto/`, which no longer exist. The TypeScript SDK removed its WASM
+backend (`sdks/typescript/README.md`).
+
+guillotine-mini builds its own WASM module with its own C exports:
 
 ```bash
-zig build wasm              # the full performance EVM, prints bundle size
-zig build wasm-minimal-evm  # MinimalEvm only — much smaller
-zig build wasm-debug        # unstripped, for analysis
+cd mini && zig build wasm   # zig-out/bin/guillotine_mini.wasm
 ```
 
-`MinimalEvm` is the one to reach for in a browser. It is a single self-contained
-source file with a dedicated C FFI wrapper (`src/tracer/minimal_evm_c.zig`) whose
-API is a simple, imperative lifecycle:
-
-```c
-EvmHandle* evm_create(void);
-bool  evm_set_bytecode(EvmHandle*, const uint8_t* bytecode, size_t len);
-bool  evm_set_execution_context(/* caller, address, value, calldata, gas */);
-bool  evm_set_blockchain_context(/* number, timestamp, coinbase, ... */);
-bool  evm_execute(EvmHandle*);
-bool  evm_is_success(EvmHandle*);
-int64_t evm_get_gas_used(EvmHandle*);
-int64_t evm_get_gas_remaining(EvmHandle*);
-size_t  evm_get_output_len(EvmHandle*);
-size_t  evm_get_output(EvmHandle*, uint8_t* buffer, size_t buffer_len);
-bool  evm_set_balance(EvmHandle*, /* address, value */);
-bool  evm_set_code(EvmHandle*, /* address, code, len */);
-bool  evm_set_storage(EvmHandle*, /* address, key, value */);
-bool  evm_get_storage(EvmHandle*, /* address, key, out */);
-void  evm_destroy(EvmHandle*);
-bool  evm_cleanup_global(void);
-```
-
-For WASM, the Rust crypto crate is rebuilt with `--no-default-features --features
-portable`, swapping assembly keccak for `tiny-keccak` and keeping arkworks in
-pure Rust. If you also pass `-Dno_precompiles=true`, the arkworks and KZG code
-drops out entirely, which is the single largest win on bundle size.
+`src/tracer/minimal_evm_c.zig` holds a C wrapper for the tracer's `MinimalEvm`
+(`evm_create`, `evm_set_bytecode`, `evm_execute`, …), but no build step
+compiles it into a library.
 
 ## npm packaging
 
-The TypeScript SDK is `@guillotine/sdk` (`sdks/typescript/package.json`). The
-unscoped name `guillotine` on npm belongs to an unrelated package, so the scope
-is not optional — any published JS artifact from this repository must be scoped.
+The TypeScript SDK is `@tevm/guillotine` (`sdks/typescript/package.json`). It
+loads `libguillotine_ffi` through Bun FFI and does not run in Node.js or
+browsers. `bun run build:native` copies a ReleaseFast library into
+`prebuilds/<platform>-<arch>/`.
 
 ## Which should I use?
 
-- **Go** — the only binding the repository calls production-ready.
-- **C** — you are bridging another language, or you want maximum control.
-- **Rust** — you want a safe wrapper and zero-copy FFI, and you accept PoC status.
-- **Python** — analysis and prototyping.
-- **Swift** — iOS/macOS.
-- **TypeScript / Bun** — browser and JS runtimes. In the browser, prefer the
-  `MinimalEvm` build for size.
-
-If you are writing Zig, do not use a binding. Import the `evm` module directly —
-see [Getting started](/getting-started).
+- **Zig**: import the `evm` module directly. See
+  [Getting started](/getting-started).
+- **C, or a language with a C FFI**: link `libguillotine_ffi` and include
+  `sdks/c/include/guillotine.h`.
+- **TypeScript on Bun**: `@tevm/guillotine`.
+- **A browser**: guillotine-mini's WASM build. The `src/` engine has none.

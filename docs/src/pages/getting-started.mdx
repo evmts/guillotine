@@ -7,66 +7,40 @@ description: Deploy bytecode into an in-memory database and execute it, end to e
 
 This page walks through a complete, verified execution: put runtime bytecode in a
 database, construct an EVM, call the contract, and read the return data. Every
-line below was compiled and run against this repository — see [the output below](#running-it).
+example below was compiled and run. See [Running it](#running-it).
 
-## Add Guillotine to a Zig project
+## Where to put the code
 
-```bash
-zig fetch --save git+https://github.com/evmts/guillotine
-```
+Build inside a checkout of the repository. The root `build.zig` does not export
+any named module: it creates the `evm` module with `b.createModule`
+(`src/modules.build.zig`) and never calls `b.addModule`, so a project that
+adds Guillotine with `zig fetch --save` cannot call
+`dependency("Guillotine", .{}).module("evm")`.
 
-Then wire the modules in your `build.zig`:
+Inside the checkout, `zig build test-integration` compiles `test/root.zig` with
+the `evm` and `voltaire` imports already wired (`build.zig`). Put the examples
+below in a file under `test/` and register it in `test/root.zig`:
 
 ```zig
-const std = @import("std");
-
-pub fn build(b: *std.Build) void {
-    const target = b.standardTargetOptions(.{});
-    const optimize = b.standardOptimizeOption(.{});
-
-    const guillotine = b.dependency("Guillotine", .{
-        .target = target,
-        .optimize = optimize,
-    });
-
-    const exe = b.addExecutable(.{
-        .name = "my-app",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/main.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
-    });
-
-    exe.root_module.addImport("evm", guillotine.module("evm"));
-    exe.root_module.addImport("voltaire", guillotine.module("voltaire"));
-    exe.linkLibC();
-
-    b.installArtifact(exe);
+test {
+    _ = @import("my_example.zig");
 }
 ```
 
-Two modules matter: `evm` (the engine) and `voltaire` (primitives — `Address`,
-`Hash`, `U256`, RLP, ABI, crypto). The dependency key is `Guillotine`, matching
-`.name = .Guillotine` in `build.zig.zon`.
-
-:::warning
-The `zig fetch` route pulls the repository's own vendored C and Rust
-dependencies, which means your build also needs Cargo and a C compiler. See
-[Installation](/installation). While the project is in alpha, the
-better-trodden path is to build inside a checkout of the repository itself.
-:::
+`evm` is the engine (`src/root.zig`). `voltaire` is the primitives library:
+`Address`, `Hash`, `U256`, RLP, ABI, crypto. Building needs Cargo and a C
+compiler. See [Installation](/installation).
 
 ## The four things you need
 
 Every execution needs exactly four objects:
 
-1. **A `Database`** — account, code, and storage state, plus the journal that
+1. **A `Database`**: account, code, and storage state, plus the journal that
    makes reverts possible.
-2. **A `BlockInfo`** — what `NUMBER`, `TIMESTAMP`, `COINBASE`, `BASEFEE`,
+2. **A `BlockInfo`**: what `NUMBER`, `TIMESTAMP`, `COINBASE`, `BASEFEE`,
    `PREVRANDAO`, `CHAINID`, and `GASLIMIT` return.
-3. **A `TransactionContext`** — transaction-level gas limit, coinbase, chain id.
-4. **An `Evm(config)` type** — the machine itself, specialised at comptime.
+3. **A `TransactionContext`**: transaction-level gas limit, coinbase, chain id.
+4. **An `Evm(config)` type**: the machine itself, specialised at comptime.
 
 ## Execute a contract
 
@@ -211,8 +185,8 @@ test "revert is reported as failure, not a Zig error" {
 
 ## Choosing a hardfork
 
-The hardfork is a comptime parameter, so a Berlin EVM and a Cancun EVM are
-different types:
+The hardfork is a comptime parameter, so a Berlin EVM and an Osaka EVM are
+different types. `Evm(.{})` uses `Hardfork.DEFAULT`, which is `OSAKA`:
 
 ```zig
 test "hardfork is a comptime config knob" {
@@ -276,7 +250,8 @@ into the type.
 ## Running it
 
 All four examples above were placed in `test/docs_examples_verify.zig`, imported
-from `test/root.zig`, and run:
+from `test/root.zig`, and run against an earlier tree whose default hardfork was
+Cancun:
 
 ```
 $ zig build test-integration -Dtest-filter='docs example'
@@ -298,12 +273,12 @@ $ zig build test-integration -Dtest-filter='docs example'
    Duration  58.74 ms
 ```
 
-The verification file itself is not committed — it exists to prove these snippets
-compile and pass, not to add a permanent test. Copy them into your own project.
+The verification file is not committed. It proved these snippets compile and
+pass; it is not a permanent test.
 
 ## Next
 
-- [Concepts: Architecture](/concepts/architecture) — how the pieces fit
-- [Guides: Configuring the EVM](/guides/configuration) — every comptime knob
-- [Guides: Tracing and debugging](/guides/tracing) — the differential tracer
-- [Reference: `Evm`](/reference/evm) — the full public surface
+- [Concepts: Architecture](/concepts/architecture): how the pieces fit
+- [Guides: Configuring the EVM](/guides/configuration): every comptime knob
+- [Guides: Tracing and debugging](/guides/tracing): the differential tracer
+- [Reference: `Evm`](/reference/evm): the public surface

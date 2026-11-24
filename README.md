@@ -12,7 +12,7 @@
   </a>
 </p>
 
-<a href="docs/pages"><img width="833" height="444" alt="Guillotine Logo" src="https://github.com/user-attachments/assets/1effa677-d931-4453-8e98-2a70372efd91" /></a>
+<a href="https://guillotine.tevm.sh"><img width="833" height="444" alt="Guillotine Logo" src="https://github.com/user-attachments/assets/1effa677-d931-4453-8e98-2a70372efd91" /></a>
 
 **The ultrafast EVM for every language and platform**
 
@@ -30,21 +30,20 @@ Guillotine is not suitable for production use at this time. Any use of Guillotin
 
 ### 📊 Ethereum Specification Test Results
 
-**Latest Test Run**: 2251 tests executed
-- ✅ **1165 passing** (~52% pass rate)
-- ❌ **1086 failing** (~48% fail rate)
+Two spec suites run from the repository root:
 
-Most failures are in ecmul/BN254 elliptic curve tests. Run specs with: `zig build specs`
+- `zig build specs` runs the execution-spec filler tests from the `specs/execution-specs` submodule. Commit `7501b986` (2026-11-23) cut its failures from 1,031 to 581 with no regressions.
+- `zig build state-tests` runs the official pre-filled EEST state tests. The 2026-11-22 baseline in [specs/README.md](specs/README.md) passed 12,500 of 66,652 cases (`tests@v21.0.3`).
 
-See [specs/README.md](specs/README.md) for detailed instructions on running the test suite.
+See [specs/README.md](specs/README.md) for how to fetch fixtures, filter by fork, and read the failure report.
 
 **Current Development Focus**: Our primary goal is achieving 100% Ethereum specification compliance while ensuring complete safety, debuggability, and observability through our tracer system ([`src/tracer/tracer.zig`](src/tracer/tracer.zig)). The tracer provides comprehensive execution monitoring, differential testing against a reference implementation, and detailed error reporting for every opcode.
 
-For an in-depth understanding of Guillotine's design and implementation, see our comprehensive [Architecture Documentation](docs/pages/architecture.mdx). Follow the [issue tracker](https://github.com/evmts/Guillotine/issues) for features planned for Beta.
+For an in-depth understanding of Guillotine's design and implementation, see the [documentation site](https://guillotine.tevm.sh) ([architecture](docs/src/pages/concepts/architecture.mdx)) and the [developer deep dive](docs/dev/README.md). Follow the [issue tracker](https://github.com/evmts/guillotine/issues) for features planned for Beta.
 
-**Network Support**: Currently only **Ethereum Mainnet** is supported. Planned for Beta:
+**Network Support**: The EVM executes **Ethereum Mainnet** rules. [`src/layer2`](src/layer2) (exported as `layer2` from `src/root.zig`, tested by `zig build test-layer2`) implements OP Stack and Base fee, deposit and precompile rules as standalone helpers; `EvmConfig` does not select them yet. Planned for Beta:
 
-- **OP Stack** support (Optimism, Base, etc.)
+- **OP Stack** execution (Optimism, Base, etc.)
 - **Arbitrum Nitro** support
 
 ---
@@ -54,44 +53,38 @@ For an in-depth understanding of Guillotine's design and implementation, see our
 🚧 = Coming soon. Consider opening a discussion if you have any API recommendations or requested features.
 
 - ⚡ **Extreme speed**
-- 🌐 **Universal** - Planned and experimental support for many languages and platforms
-  - **Golang** - Available with FFI bindings
-  - **Zig**
-  - **C**
-  - **TypeScript** - Wasm or Bun
-  - **Rust**
-  - **Wasm**
-  - **🚧 Python** - Looking for contributors
-  - **🚧 Swift** - Looking for contributors
-  - **🚧 Kotlin** - Looking for contributors
+- 🌐 **Universal** - Planned and experimental support for many languages and platforms (see [SDKs](#-sdks-experimental))
+  - **Zig** - native API
+  - **C** - FFI library (`zig build shared` / `zig build static`)
+  - **TypeScript** - Bun FFI package over the native library
+  - **🚧 Go, Rust, Python, Swift, Kotlin** - build your own on the C ABI with the [custom SDK guide](docs/building-custom-sdks.md)
 - 📦 **Minimal bundle size**
   - Zig `comptime` configuration means you only pay for features you actually use
   - Skip precompiles or use specific hard forks without bundle size or runtime overhead
 - 📚 **Well documented**
 - 🎨 **Fun** - Guillotine is a fun way to dive into Zig and fun/easy to [contribute](./CONTRIBUTING.md) to
 - 🤖 **LLM-friendly**
-- 🧪 **Robust** - Guillotine takes testing and architecture very seriously with [full unit tests](./src) for all files, a robust [E2E test suite](./test/e2e), [fuzz testing](./test/fuzz), [differential testing](./test/differential) using MinimalEvm, and [benchmark testing](./test/benchmark)
-- ✨ **Useful** - 🚧 Coming soon 🚧 Guillotine is building a powerful [CLI](https://github.com/evmts/Guillotine/issues) and [native app](https://github.com/evmts/Guillotine/issues) that you can think of as a local-first, Tenderly-like tool
+- 🧪 **Robust** - Guillotine takes testing and architecture very seriously with [unit tests](./src) in source files, [integration tests](./test), [fuzz testing](./test/fuzz), [differential testing](./test/differential) using MinimalEvm, [formal verification](./verify), and [benchmarks](./bench)
+- ✨ **Useful** - 🚧 Coming soon 🚧 Guillotine is building a powerful [CLI](https://github.com/evmts/guillotine/issues) and [native app](https://github.com/evmts/guillotine/issues) that you can think of as a local-first, Tenderly-like tool
 
 ---
 
 ## 🔨 Building from Source
 
-**Currently Supported**: macOS
-**Planned**: Linux support
+CI builds and tests on macOS (arm64) and Linux (x86_64).
 
 ### Prerequisites
 
-- **Zig 0.15.1** (exactly - use [zvm](https://github.com/marler182/zvm) to manage versions)
-- **Rust toolchain** 1.75+ (for cryptographic dependencies)
+- **Zig 0.15.x**: CI uses 0.15.2; `build.zig.zon` requires at least 0.15.1. Zig 0.16 and later are not supported. Use [zvm](https://github.com/tristanisham/zvm) to manage versions.
+- **Rust toolchain** (stable, with Cargo): `zig build` runs Cargo for the cryptographic and Foundry dependencies.
 - **Git** (with submodule support)
 
 ### Build Steps
 
 ```bash
 # 1. Clone with submodules
-git clone --recursive https://github.com/evmts/Guillotine.git
-cd Guillotine
+git clone --recursive https://github.com/evmts/guillotine.git
+cd guillotine
 
 # Or if already cloned:
 git submodule update --init --recursive
@@ -111,10 +104,10 @@ Guillotine officially ships three integration surfaces:
 
 - **Zig native bindings** — the repository's native EVM API in `src/root.zig`.
 - **[C FFI](sdks/c)** — native embedding and custom language bindings.
-- **[`@tevm/guillotine` TypeScript](sdks/typescript)** — WASM APIs for Node, Bun, and browsers, with build support in `sdks/wasm`.
+- **[`@tevm/guillotine` TypeScript](sdks/typescript)** — Bun FFI bindings to the native `libguillotine_ffi` library (Bun ≥ 1.1; Node.js and browsers are not supported).
 
 The C and TypeScript APIs are experimental and may change. For Python, Go,
-Rust, Swift, Kotlin/JNI, or native Bun FFI, use the
+Rust, Swift, or Kotlin/JNI, use the
 [custom SDK guide](docs/building-custom-sdks.md) and
 [SDK builder skill](.agents/skills/guillotine-sdk-builder/SKILL.md).
 See [sdks/README.md](sdks/README.md) for the maintained SDK scope and build commands.

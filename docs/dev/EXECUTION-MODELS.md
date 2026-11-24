@@ -88,26 +88,30 @@ This document provides a detailed side-by-side comparison of the Mini and Perfor
 ```
 
 ```zig
-// mini/src/frame.zig:540-553
+// mini/src/frame.zig (simplified)
 pub fn execute(self: *Self) EvmError!void {
     // Simple while loop - easy to understand
     while (!self.stopped and !self.reverted and self.pc < self.bytecode.len()) {
+        // (optional config.loop_quota check omitted)
         try self.step();
     }
 }
 
 pub fn step(self: *Self) EvmError!void {
     // Read opcode from bytecode
-    const opcode = self.bytecode.getOpcode(self.pc) orelse {
-        return error.InvalidOpcode;
-    };
+    const opcode = self.getCurrentOpcode() orelse return;
+    // (tracer capture omitted)
+    try self.executeOpcode(opcode);
+}
 
-    // Dispatch via switch statement (256 cases)
+pub fn executeOpcode(self: *Self, opcode: u8) EvmError!void {
+    // (JavaScript and EvmConfig opcode overrides are checked first; omitted)
+    // Dispatch via switch statement
     switch (opcode) {
-        0x00 => try SystemHandlers.stop(self),
+        0x00 => try ControlFlowHandlers.stop(self),
         0x01 => try ArithmeticHandlers.add(self),
         0x02 => try ArithmeticHandlers.mul(self),
-        // ... all 256 opcodes
+        // ... every defined opcode
         else => return error.InvalidOpcode,
     }
 }
@@ -173,27 +177,30 @@ pub fn step(self: *Self) EvmError!void {
 ```
 
 ```zig
-// src/frame/frame.zig:200-220
+// src/frame/frame.zig (simplified: tracer hooks and debug validation omitted)
 pub fn interpret(
     self: *Self,
-    schedule: [*]const Dispatch.Item,
+    dispatch_schedule: *const Dispatch.DispatchSchedule,
     jump_table: *const Dispatch.JumpTable,
     bytecode_raw: []const u8,
 ) Error!void {
     // Store context
     self.code = bytecode_raw;
     self.jump_table = jump_table;
+    const schedule = dispatch_schedule.items;
+    const start_index: usize = @intFromBool(dispatch_schedule.has_first_block_gas);
 
-    // Validate first block gas (once for entire block)
-    const first_block = schedule[0].first_block_gas;
-    if (self.gas_remaining < first_block.gas) {
-        return Error.OutOfGas;
+    // Charge the first basic block's gas once and check its stack bounds
+    if (dispatch_schedule.has_first_block_gas) {
+        const meta = schedule[0].first_block_gas;
+        if (meta.gas > 0) try self.consumeGasChecked(meta.gas);
+        // ... min_stack / max_stack check against the current stack size
     }
-    self.gas_remaining -= first_block.gas;
 
-    // Start tail-call chain - NEVER returns normally
-    // Each handler tail-calls the next
-    return @call(.always_tail, schedule[1].opcode_handler, .{self, schedule + 1});
+    // Start the handler chain. Each handler tail-calls the next, so this
+    // call returns only through an error (Stop, Return, Revert, OutOfGas, ...)
+    self.dispatch = Dispatch{ .cursor = schedule.ptr + start_index };
+    try self.dispatch.cursor[0].opcode_handler(self, self.dispatch.cursor);
 }
 ```
 
@@ -294,7 +301,7 @@ pub fn add(frame: *FrameType) FrameType.EvmError!void {
 │   │                                                                         │
 │   ▼                                                                         │
 │   ┌─────────────────────────────────────────────────────────────────────┐  │
-│   │ 1. TRACER SYNC (debug builds only)                                  │  │
+│   │ 1. TRACER SYNC (Debug and ReleaseSafe builds only)                  │  │
 │   │    self.beforeInstruction(.ADD, cursor)                             │  │
 │   │    • Validates state matches reference implementation               │  │
 │   └─────────────────────────────────────────────────────────────────────┘  │
@@ -311,14 +318,14 @@ pub fn add(frame: *FrameType) FrameType.EvmError!void {
 │   ▼                                                                         │
 │   ┌─────────────────────────────────────────────────────────────────────┐  │
 │   │ 3. GET NEXT HANDLER                                                 │  │
-│   │    next = dispatch.getOpData(.ADD)                                  │  │
+│   │    nextInstruction(): getOpData(.ADD, ...) from dispatch metadata   │  │
 │   │    • Contains function pointer + cursor offset                      │  │
 │   └─────────────────────────────────────────────────────────────────────┘  │
 │   │                                                                         │
 │   ▼                                                                         │
 │   ┌─────────────────────────────────────────────────────────────────────┐  │
 │   │ 4. TAIL-CALL NEXT (NEVER returns)                                   │  │
-│   │    return @call(.always_tail, next.handler, {self, next.cursor})    │  │
+│   │    return @call(.always_tail, op_data.next_handler, ...)            │  │
 │   │    • Reuses stack frame                                             │  │
 │   │    • No function call overhead                                      │  │
 │   └─────────────────────────────────────────────────────────────────────┘  │
@@ -331,7 +338,7 @@ pub fn add(frame: *FrameType) FrameType.EvmError!void {
 ```zig
 // src/instructions/handlers_arithmetic.zig
 pub fn add(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-    // 1. Tracer sync (debug builds only)
+    // 1. Tracer sync (Debug and ReleaseSafe builds only)
     self.beforeInstruction(.ADD, cursor);
 
     // 2. Execute (pre-validated, use unsafe operations)
@@ -341,11 +348,21 @@ pub fn add(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
         }
     }.op);
 
-    // 3. Get next handler from dispatch metadata
-    const next = dispatch.getOpData(.ADD);
+    // 3-4. Look up the next handler and tail-call it (NEVER returns)
+    return dispatch_next.nextInstruction(FrameType, self, cursor, .ADD);
+}
 
-    // 4. Tail-call next handler (NEVER returns)
-    return @call(.always_tail, next.handler, .{self, next.cursor});
+// src/instructions/dispatch_next.zig
+pub inline fn nextInstruction(
+    comptime FrameType: type,
+    self: *FrameType,
+    cursor: [*]const FrameType.Dispatch.Item,
+    comptime opcode: FrameType.Dispatch.UnifiedOpcode,
+) FrameType.Error!noreturn {
+    const op_data = dispatch_opcode_data.getOpData(opcode, FrameType.Dispatch, FrameType.Dispatch.Item, cursor);
+    self.afterInstruction(opcode, op_data.next_handler, op_data.next_cursor.cursor);
+    // .always_tail on native targets, .auto on wasm32/wasm64
+    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
 }
 ```
 
@@ -433,14 +450,15 @@ pub fn add(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
 │   PREPROCESSING (once):                                                     │
 │   ─────────────────────────────────────────────────────────────────────────│
 │                                                                             │
-│   Schedule built:                                                           │
+│   Schedule built (with EvmConfig.enable_fusion = false; the default         │
+│   enable_fusion = true fuses these pushes into synthetic opcodes):          │
 │   [0] first_block_gas { gas: 9, min_stack: 0, max_stack: 2 }               │
 │   [1] &push_handler                                                         │
 │   [2] push_inline { value: 5 }                                             │
 │   [3] &push_handler                                                         │
 │   [4] push_inline { value: 3 }                                             │
 │   [5] &add_handler                                                          │
-│   [6] &implicit_stop_handler                                                │
+│   [6] &stop_handler  (implicit STOP appended after the last opcode)         │
 │                                                                             │
 │   EXECUTION:                                                                │
 │   ─────────────────────────────────────────────────────────────────────────│
@@ -453,7 +471,7 @@ pub fn add(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
 │   │                                                                         │
 │   ├─ Read schedule[0] = first_block_gas { gas: 9 }                         │
 │   ├─ Gas: 100 - 9 = 91  (ALL gas charged upfront!)                         │
-│   └─ tail-call schedule[1].handler(frame, &schedule[1])                    │
+│   └─ call schedule[1].handler(frame, &schedule[1])  (starts the chain)      │
 │                                                                             │
 │   ─────────────────────────────────────────────────────────────────────────│
 │   push_handler (cursor @ schedule[1]):                                      │
@@ -478,14 +496,14 @@ pub fn add(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
 │   ─────────────────────────────────────────────────────────────────────────│
 │   │                                                                         │
 │   ├─ stack.binary_op_unsafe(add)                                           │
-│   │   ├─ Read data[stack_ptr] = 3                                          │
-│   │   ├─ stack_ptr += 1                                                    │
-│   │   ├─ data[stack_ptr] = 5 + 3 = 8                                       │
+│   │   ├─ top = stack_ptr[0] = 3, second = stack_ptr[1] = 5                  │
+│   │   ├─ stack_ptr[1] = 3 + 5 = 8                                           │
+│   │   ├─ stack_ptr += 1                                                     │
 │   │   └─ Stack: [3, 5] → [8]                                               │
 │   └─ tail-call cursor[1].handler(frame, cursor+1)  // schedule[6]          │
 │                                                                             │
 │   ─────────────────────────────────────────────────────────────────────────│
-│   implicit_stop_handler (cursor @ schedule[6]):                             │
+│   stop_handler (cursor @ schedule[6]):                                      │
 │   ─────────────────────────────────────────────────────────────────────────│
 │   │                                                                         │
 │   └─ return Error.Stop  (exit via error)                                   │
@@ -508,9 +526,9 @@ pub fn add(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
 │                                                                             │
 │   Structure:                                                                │
 │   ┌─────────────────────────────────────────────────────────────────────┐  │
-│   │ items: []u256  (dynamic array)                                      │  │
-│   │ len: usize                                                          │  │
-│   │ allocator: Allocator                                                │  │
+│   │ std.ArrayList(u256):                                                │  │
+│   │   items: []u256      (len = items.len)                              │  │
+│   │   capacity: usize    (allocator is passed in: frame.allocator)      │  │
 │   └─────────────────────────────────────────────────────────────────────┘  │
 │                                                                             │
 │   Push Operation:                                                           │
@@ -561,30 +579,30 @@ pub fn popStack(self: *Self) EvmError!u256 {
 │                   PERFORMANCE STACK: CACHE-ALIGNED ARRAY                    │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
-│   Structure (64-byte aligned for cache line):                               │
+│   Structure (buffer 64-byte aligned for cache line):                        │
 │   ┌─────────────────────────────────────────────────────────────────────┐  │
-│   │ data: [1024]u256 align(64)   (fixed array, preallocated)            │  │
-│   │ stack_ptr: usize             (points to next free slot)             │  │
+│   │ buf_ptr: [*]align(64) u256   (stack_size words, default 1024)       │  │
+│   │ stack_ptr: [*]u256           (points at the top item)               │  │
 │   └─────────────────────────────────────────────────────────────────────┘  │
 │                                                                             │
 │   Memory Layout (downward growth):                                          │
 │                                                                             │
-│   Index 0    ─┐                                                            │
-│               │ ← Empty slots                                              │
-│   ...         │                                                            │
-│               │                                                            │
-│   Index N  ───┤ ← stack_ptr (next free)                                    │
-│               │                                                            │
-│   Index N+1 ──┤ ← Top of stack (most recent push)                          │
-│               │                                                            │
-│   Index N+2 ──┤ ← Second item                                              │
-│               │                                                            │
-│   ...         │                                                            │
-│               │                                                            │
-│   Index 1023 ─┘ ← Bottom of stack                                          │
+│   Index 0    ─┐ ← buf_ptr (stack limit)                                     │
+│               │ ← Empty slots                                               │
+│   ...         │                                                             │
+│               │                                                             │
+│   Index N  ───┤ ← stack_ptr: top of stack (most recent push)                │
+│               │                                                             │
+│   Index N+1 ──┤ ← Second item                                               │
+│               │                                                             │
+│   ...         │                                                             │
+│               │                                                             │
+│   Index 1023 ─┘ ← Bottom of stack                                           │
 │                                                                             │
-│   Push: stack_ptr -= 1; data[stack_ptr] = value  (NO check)                │
-│   Pop:  value = data[stack_ptr]; stack_ptr += 1  (NO check)                │
+│   Empty stack: stack_ptr = buf_ptr + 1024 (one past the buffer)             │
+│                                                                             │
+│   Push: stack_ptr -= 1; stack_ptr[0] = value  (asserted in Debug/ReleaseSafe)│
+│   Pop:  value = stack_ptr[0]; stack_ptr += 1  (asserted in Debug/ReleaseSafe)│
 │                                                                             │
 │   Why safe? Preprocessing validated stack bounds for entire basic block.   │
 │                                                                             │
@@ -592,28 +610,30 @@ pub fn popStack(self: *Self) EvmError!u256 {
 ```
 
 ```zig
-// src/stack/stack.zig
+// src/stack/stack.zig (Debug/ReleaseSafe tracer asserts omitted)
+buf_ptr: [*]align(64) WordType,
+// Points to the top item, or one past the buffer when empty.
+stack_ptr: [*]align(ptr_align) WordType,
 
 // Unsafe operations - caller must validate first
-pub inline fn pop_unsafe(self: *Self) WordType {
-    self.stack_ptr += 1;  // Downward growth
-    return self.data[self.stack_ptr - 1];
+pub inline fn push_unsafe(self: *Self, value: WordType) void {
+    self.stack_ptr -= 1;  // Downward growth
+    self.stack_ptr[0] = value;
 }
 
-pub inline fn push_unsafe(self: *Self, value: WordType) void {
-    self.stack_ptr -= 1;
-    self.data[self.stack_ptr] = value;
+pub inline fn pop_unsafe(self: *Self) WordType {
+    const value = self.stack_ptr[0];
+    self.stack_ptr += 1;
+    return value;
 }
 
 // Optimized binary operation (ADD, SUB, MUL, etc.)
-pub inline fn binary_op_unsafe(
-    self: *Self,
-    comptime op: fn (WordType, WordType) WordType,
-) void {
-    // No intermediate storage - in-place modification
-    const a = self.data[self.stack_ptr];
+pub inline fn binary_op_unsafe(self: *Self, comptime op: fn (a: WordType, b: WordType) WordType) void {
+    // In-place: the result overwrites the second item, then the top is dropped
+    const top = self.stack_ptr[0];
+    const second = self.stack_ptr[1];
+    self.stack_ptr[1] = op(top, second);
     self.stack_ptr += 1;
-    self.data[self.stack_ptr] = op(self.data[self.stack_ptr], a);
 }
 ```
 
@@ -684,104 +704,98 @@ pub inline fn binary_op_unsafe(
 
 ## Memory Access
 
-### Mini: Sparse HashMap
+### Mini: Contiguous Byte Array
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                      MINI MEMORY: SPARSE HASHMAP                            │
+│                      MINI MEMORY: CONTIGUOUS BYTE ARRAY                     │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
-│   Structure: HashMap(u32 → u8)                                              │
+│   Structure: std.ArrayList(u8) + memory_size (word-aligned EVM size)        │
 │                                                                             │
-│   MSTORE(offset=0x40, value=0x1234...5678)                                 │
+│   MSTORE(offset=0x40, value=0x1234...5678)                                  │
 │                                                                             │
-│   Stores 32 individual entries:                                             │
-│   ┌───────────┬───────────┐                                                │
-│   │ Key       │ Value     │                                                │
-│   ├───────────┼───────────┤                                                │
-│   │ 0x40      │ 0x00      │                                                │
-│   │ 0x41      │ 0x00      │                                                │
-│   │ ...       │ ...       │                                                │
-│   │ 0x5E      │ 0x56      │                                                │
-│   │ 0x5F      │ 0x78      │                                                │
-│   └───────────┴───────────┘                                                │
+│   1. Charge expansion: memoryExpansionCost(0x60)                            │
+│   2. writeMemory() each of the 32 bytes at 0x40..0x5F                       │
+│      (grows items and zero-fills new bytes on first write past the end)     │
+│   3. memory_size = 0x60 (rounded up to a 32-byte word)                      │
 │                                                                             │
-│   Pros: Only stores non-zero bytes (sparse)                                 │
-│   Cons: 32 hash lookups per word read/write                                │
+│   Reads past items.len return 0 without allocating.                         │
+│                                                                             │
+│   Pros: Simple, obviously correct                                           │
+│   Cons: Byte-at-a-time access for word operations                           │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ```zig
 // mini/src/frame.zig
-memory: std.AutoHashMap(u32, u8),  // Only non-zero bytes stored
+memory: std.ArrayList(u8),
+memory_size: u32,  // word-aligned size reported by MSIZE
 
 pub fn readMemory(self: *Self, offset: u32) u8 {
-    return self.memory.get(offset) orelse 0;  // Default to 0
+    if (offset >= self.memory.items.len) return 0;
+    return self.memory.items[offset];
 }
 
-pub fn writeMemory(self: *Self, offset: u32, value: u8) !void {
-    try self.memory.put(offset, value);
-    // Update memory_size for expansion tracking
-    if (offset >= self.memory_size) {
-        self.memory_size = wordAlignedSize(offset + 1);
+pub fn writeMemory(self: *Self, offset: u32, value: u8) EvmError!void {
+    // Grow and zero-fill when writing past the end
+    if (offset >= self.memory.items.len) {
+        const old_len = self.memory.items.len;
+        const new_len = offset + 1;
+        self.memory.ensureTotalCapacity(self.allocator, new_len) catch return error.OutOfMemory;
+        self.memory.items.len = new_len;
+        @memset(self.memory.items[old_len..new_len], 0);
     }
+    self.memory.items[offset] = value;
+    // EVM memory expands to word-aligned (32-byte) boundaries
+    const word_aligned_size = wordAlignedSize(@as(u64, offset) + 1);
+    if (word_aligned_size > self.memory_size) self.memory_size = word_aligned_size;
 }
 ```
 
-### Performance: Word-Aligned Pages
+### Performance: Pooled Byte Buffer
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                   PERFORMANCE MEMORY: WORD-ALIGNED PAGES                    │
+│                    PERFORMANCE MEMORY: POOLED BYTE BUFFER                   │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
-│   Structure: Array of 4KB pages, each containing 128 words (32 bytes each) │
+│   Structure: a contiguous std.ArrayList(u8) reached through buffer_ptr.     │
+│   Evm keeps one buffer per call depth (memory_pool[depth - 1]) and          │
+│   reuses it; Frame.initPooled() borrows it and deinitPooled() empties       │
+│   it, keeping its capacity.                                                 │
 │                                                                             │
-│   ┌─────────────────────────────────────────────────────────────────────┐  │
-│   │ Page 0 (0x0000-0x0FFF)                                              │  │
-│   │ ┌────────┬────────┬────────┬────────┬─────────────────────────────┐│  │
-│   │ │Word 0  │Word 1  │Word 2  │Word 3  │ ...                         ││  │
-│   │ │32 bytes│32 bytes│32 bytes│32 bytes│                             ││  │
-│   │ └────────┴────────┴────────┴────────┴─────────────────────────────┘│  │
-│   └─────────────────────────────────────────────────────────────────────┘  │
-│                                                                             │
-│   ┌─────────────────────────────────────────────────────────────────────┐  │
-│   │ Page 1 (0x1000-0x1FFF)                                              │  │
-│   │ ┌────────┬────────┬────────┬────────┬─────────────────────────────┐│  │
-│   │ │Word 0  │Word 1  │Word 2  │Word 3  │ ...                         ││  │
-│   │ └────────┴────────┴────────┴────────┴─────────────────────────────┘│  │
-│   └─────────────────────────────────────────────────────────────────────┘  │
+│   memory_pool: [ depth 1 buffer ] [ depth 2 buffer ] [ depth 3 ... ]        │
 │                                                                             │
 │   MLOAD(offset=0x40):                                                       │
-│   page_idx = 0x40 / 4096 = 0                                               │
-│   word_idx = (0x40 % 4096) / 32 = 2                                        │
-│   return pages[0].words[2]  // Single array access!                        │
+│   ensure_capacity(0x60)   grow in whole 32-byte words, zero-fill,           │
+│                           cache the 3n + n²/512 cost for n words            │
+│   readInt(u256, buffer[0x40..][0..32], .big)                                │
 │                                                                             │
-│   Pros: O(1) word access, cache-friendly                                   │
-│   Cons: Allocates full pages even for sparse access                        │
+│   Pros: One big-endian word load, no allocation after warm-up               │
+│   Cons: Pooled buffers keep their peak capacity between calls               │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ```zig
 // src/memory/memory.zig
-pub fn Memory(comptime config: MemoryConfig) type {
+pub fn Memory(config: MemoryConfig) type {
     return struct {
-        pages: []Page,  // Pre-allocated pages
-        size: usize,
+        checkpoint: u32,                  // start offset; 0 for frames the Evm creates
+        buffer_ptr: *std.ArrayList(u8),   // owned, or borrowed from the Evm's per-depth pool
+        cached_words: usize = 0,          // word count whose cost is cached
+        cached_cost: u64 = 0,             // 3 * words + words^2 / 512
+        // ...
 
-        pub fn load(self: *Self, offset: usize) WordType {
-            // Direct page lookup, word-aligned access
-            const page_idx = offset / PAGE_SIZE;
-            const page_offset = offset % PAGE_SIZE;
-            return self.pages[page_idx].words[page_offset / 32];
+        /// Caller must guarantee `offset + 32 <= self.size()`.
+        pub inline fn get_u256_unchecked(self: *const Self, offset: usize) u256 {
+            return std.mem.readInt(u256, (self.buffer_ptr.items.ptr + self.checkpoint + offset)[0..32], .big);
         }
 
-        pub fn store(self: *Self, offset: usize, value: WordType) void {
-            const page_idx = offset / PAGE_SIZE;
-            const page_offset = offset % PAGE_SIZE;
-            self.pages[page_idx].words[page_offset / 32] = value;
+        pub inline fn set_u256_unchecked(self: *Self, offset: usize, value: u256) void {
+            std.mem.writeInt(u256, (self.buffer_ptr.items.ptr + self.checkpoint + offset)[0..32], value, .big);
         }
     };
 }
@@ -830,6 +844,8 @@ pub fn Memory(comptime config: MemoryConfig) type {
 
 ## Performance Comparison
 
+The ratios below are design estimates. No benchmark in `bench/` runs the Mini EVM, so the repo does not measure them.
+
 | Metric | Mini | Performance | Ratio |
 |--------|------|-------------|-------|
 | Simple arithmetic | 1.0x | 2-3x faster | 2-3x |
@@ -857,11 +873,13 @@ pub fn Memory(comptime config: MemoryConfig) type {
 
 ## Code Size Comparison
 
-| Component | Mini | Performance |
+Measured with `wc -c`, `wc -l` and `find -name '*.zig' | wc -l`; sizes drift as the code changes.
+
+| Component | Mini (`mini/src/`) | Performance (`src/`) |
 |-----------|------|-------------|
-| EVM orchestrator | 94KB | 270KB |
-| Frame | 25KB | 50KB |
-| Handlers | ~18K lines | ~18K lines |
-| Storage | 16KB | 88KB + 34KB |
-| Preprocessor | N/A | ~50KB |
-| Total files | ~46 | ~158 |
+| EVM orchestrator (`evm.zig`) | ~97KB | ~340KB |
+| Frame (`frame.zig`, `frame/frame.zig`) | ~26KB | ~31KB |
+| Handlers (`instructions/handlers_*.zig`) | ~2.6K lines (~16.6K with `*_test.zig`) | ~18.1K lines (tests inline) |
+| Storage | ~16KB (`storage.zig`) | ~120KB `storage/database.zig` + ~53KB `storage/journal.zig` |
+| Preprocessor (`preprocessor/*.zig`) | N/A | ~179KB |
+| `.zig` files | 46 | 187 |

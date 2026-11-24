@@ -19,9 +19,9 @@ which needs concrete types):
 
 ```zig
 const MainnetEvm = @import("evm").MainnetEvm;                      // Evm(.{})
-const Traced     = @import("evm").MainnetEvmWithTracer;            // + step capture
-const TestEvm    = @import("evm").TestEvm;                         // + disable_gas_checks
-const Default    = @import("evm").DefaultEvm;                      // build-flag configured
+const Traced     = @import("evm").MainnetEvmWithTracer;            // + validation, step capture
+const TestEvm    = @import("evm").TestEvm;                         // Cancun, tracer on, disable_gas_checks
+const Default    = @import("evm").DefaultEvm;                      // Evm(EvmConfig{}); build flags do not change it
 ```
 
 ## `init`
@@ -32,7 +32,7 @@ pub fn init(
     database: ?*Database,
     block_info: BlockInfo,
     context: TransactionContext,
-    gas_price: u256,
+    gas_price: ?u256,
     origin: primitives.Address,
 ) !Self
 ```
@@ -43,7 +43,7 @@ pub fn init(
 | `database` | Optional pointer, but passing `null` returns `error.DatabaseRequired`. It is optional only so FFI can pass a null pointer and get an error rather than a crash. |
 | `block_info` | Block-scoped environment. See [`BlockInfo`](#blockinfo). |
 | `context` | Transaction-scoped environment. See [`TransactionContext`](#transactioncontext). |
-| `gas_price` | What `GASPRICE` returns. |
+| `gas_price` | What `GASPRICE` returns. `null` derives the EIP-1559 effective gas price from `block_info.base_fee` and `context.max_fee_per_gas`; if `max_fee_per_gas` is also `null`, `init` returns `error.GasPriceRequired`. |
 | `origin` | What `ORIGIN` returns. |
 
 ```zig
@@ -202,7 +202,7 @@ detected`, which is exactly what you want it to do.
 
 ### Constructors
 
-Useful when implementing a custom precompile or handler:
+Useful when implementing a handler:
 
 ```zig
 pub fn success_with_output(allocator, gas_left, output) !Self
@@ -285,9 +285,13 @@ evm.Database       evm.MemoryDatabase   evm.Account
 evm.AccessList     evm.CreatedContracts evm.SelfDestruct
 evm.Opcode         evm.OpcodeData       evm.OpcodeSynthetic
 evm.Hardfork       evm.Eips
-evm.Tracer         evm.TracerConfig     evm.MinimalEvm    evm.JSONRPCTracer
+evm.Tracer         evm.TracerConfig     evm.MinimalEvm
 evm.BlockInfo      evm.CompactBlockInfo evm.TransactionContext
 evm.CallParams     evm.CallResult       evm.Log
 evm.AuthorizationProcessor  evm.AuthorizationError
 evm.precompiles    evm.kzg_setup        evm.log
+evm.layer2         evm.trie             evm.dispatch_pretty_print
 ```
+
+`src/root.zig` also declares `evm.JSONRPCTracer`, but `src/tracer/tracer.zig`
+has no `JSONRPCTracer` declaration, so referencing it fails to compile.

@@ -11,8 +11,8 @@ Deep dive documentation for understanding and contributing to Guillotine. These 
     │   │  (Clarity)  │              │  (Speed)            │  │
     │   │             │              │                     │  │
     │   │  PC-based   │              │  Dispatch-based     │  │
-    │   │  46 files   │              │  158 files          │  │
-    │   │  ~25KB      │              │  ~270KB             │  │
+    │   │  46 files   │              │  187 files          │  │
+    │   │  (.zig)     │              │  (.zig)             │  │
     │   └─────────────┘              └─────────────────────┘  │
     │          │                              │               │
     │          └──────────────┬───────────────┘               │
@@ -81,14 +81,20 @@ START HERE
 # Build the project
 zig build
 
-# Run all tests (should pass with no output)
-zig build test
+# Run unit tests from src/ (CI runs this)
+zig build test-unit
 
-# Run a specific opcode test
+# Run the per-opcode differential tests (CI runs this)
+zig build test-opcodes
+
+# Run only tests whose names contain "ADD"
 zig build test-opcodes -Dtest-filter='ADD'
 
 # No output = success!
 ```
+
+`zig build test` also runs the legacy `specs` suite, which does not pass yet.
+Pass `-Dtest-filter` once; Zig rejects a repeated `-D` option.
 
 ## Documentation Index
 
@@ -122,8 +128,8 @@ zig build test-opcodes -Dtest-filter='ADD'
 
 | Task | Document | Section |
 |------|----------|---------|
-| Run tests? | [TESTING.md](./TESTING.md#running-tests) | Running Tests |
-| Debug a failing test? | [TESTING.md](./TESTING.md#debugging-tests) | Debugging Tests |
+| Run tests? | [TESTING.md](./TESTING.md#test-commands) | Test Commands |
+| Debug a failing test? | [TESTING.md](./TESTING.md#debugging-failures) | Debugging Failures |
 | Add a new opcode? | [CONTRIBUTING.md](./CONTRIBUTING.md#adding-a-new-opcode) | Adding a New Opcode |
 | Add hardfork support? | [HARDFORKS.md](./HARDFORKS.md#implementation-checklist) | Implementation Checklist |
 | Write a handler? | [CONTRIBUTING.md](./CONTRIBUTING.md#handler-patterns) | Handler Patterns |
@@ -132,11 +138,11 @@ zig build test-opcodes -Dtest-filter='ADD'
 
 ```
 src/                              mini/src/
-├── evm.zig (270KB)               ├── evm.zig (94KB)
+├── evm.zig (340KB)               ├── evm.zig (97KB)
 │   └── Orchestrates execution    │   └── Complete EVM
 │                                 │
-├── frame/                        ├── frame.zig (25KB)
-│   └── frame.zig (50KB)          │   └── Execution loop
+├── frame/                        ├── frame.zig (26KB)
+│   └── frame.zig (31KB)          │   └── Execution loop
 │       └── Dispatch execution    │
 │                                 │
 ├── instructions/                 ├── instructions/
@@ -146,16 +152,16 @@ src/                              mini/src/
 │   └── handlers_*_synthetic.zig  │   └── (no synthetics)
 │                                 │
 ├── preprocessor/                 └── (no preprocessor)
-│   └── dispatch.zig (20KB)
+│   └── dispatch.zig (63KB)
 │       └── Schedule builder
 │
 ├── storage/
-│   ├── database.zig (88KB)
-│   ├── journal.zig (34KB)
+│   ├── database.zig (120KB)
+│   ├── journal.zig (53KB)
 │   └── access_list.zig
 │
 └── tracer/
-    └── tracer.zig (50KB)
+    └── tracer.zig (42KB)
 ```
 
 ## Core Concepts at a Glance
@@ -231,8 +237,8 @@ MINI: Per-operation                PERFORMANCE: Per-block
 const log = @import("log.zig");
 log.debug("Op: {}", .{opcode});
 
-// Assertions
-self.getTracer().assert(cond, "message");
+// Assertions (in a handler)
+(&self.getEvm().tracer).assert(cond, "message");
 
 // Error handling
 try operation();  // Always propagate

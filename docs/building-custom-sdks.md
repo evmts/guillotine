@@ -12,7 +12,7 @@ below are patterns for custom bindings, not separately shipped SDKs.
 | --- | --- | --- |
 | Zig native | `src/root.zig`, `src/evm.zig`, `src/evm_config.zig` | EVM types, allocator ownership, compile-time configuration. Follow the repository module graph. |
 | Native C ABI | `src/evm_c_api.zig`, [guillotine.h](../sdks/c/include/guillotine.h) | Stateful EVM calls, account state, results, traces, bytecode analysis. Built by `shared` and `static`. |
-| Component C API | `src/root_c.zig` | Separate frame/component entry point; not the root of `shared` or `static`. |
+| Component C API | `src/root_c.zig` | Separate frame/component entry point; not the root of `shared` or `static`, and no root `zig build` step compiles it. |
 | TypeScript/WASM | `sdks/typescript`, `sdks/wasm`, `src/evm_c.zig` | Browser/runtime loader and WASM memory ABI. Native pointer offsets do not apply. |
 
 `src/root_c.zig` explicitly re-exports `evm_frame_create`,
@@ -23,12 +23,15 @@ below are patterns for custom bindings, not separately shipped SDKs.
 imports alone are not a promise that every function is exported. In particular,
 `evm_init` is not `guillotine_init`, and `evm_frame_create` is not a stateful
 `guillotine_evm_create`. Do not bind component functions against a library built
-from `src/evm_c_api.zig` without checking its symbol table.
+from `src/evm_c_api.zig` without checking its symbol table. Its test block
+also references `src/precompiles/precompiles_c.zig`, which does not exist in
+this revision.
 
 ## Build and link from the repository root
 
-Use the compiler version required by `build.zig.zon` (minimum 0.15.1 in this
-revision), Cargo, and the native C/crypto dependencies used by the root build.
+Use Zig 0.15.x (CI uses 0.15.2; `build.zig.zon` sets 0.15.1 as the minimum;
+Zig 0.16 and later are not supported), Cargo, and the native C/crypto
+dependencies used by the root build.
 
 ```sh
 zig build shared

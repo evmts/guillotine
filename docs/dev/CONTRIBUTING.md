@@ -7,13 +7,13 @@ This document covers development workflow, coding conventions, and patterns for 
 ### Prerequisites
 
 ```bash
-# Zig 0.15.1+
+# Zig 0.15.x (CI uses 0.15.2; build.zig.zon requires 0.15.1). Zig 0.16+ is not supported.
 zig version
 
-# Cargo (for BN254/ARK dependencies)
+# Cargo: zig build runs it for the Rust workspace (lib/ark, lib/foundry-compilers)
 cargo --version
 
-# Python 3.8+ with uv (for spec test generation)
+# Python 3.8+ with uv (for Mini spec test generation, zig build test-mini-full)
 python3 --version
 uv --version
 
@@ -27,35 +27,45 @@ bun --version
 # Build project
 zig build
 
-# Build with specific hardfork
-zig build -Devm-hardfork=CANCUN
-
 # Build optimized
 zig build --release=fast
 
-# Build WASM
-zig build wasm
+# Build the FFI libraries
+zig build shared
+zig build static
 ```
+
+The hardfork is a comptime field, `EvmConfig.eips.hardfork` (src/evm_config.zig,
+default `OSAKA`). `-Devm-hardfork` and the other `-Devm-*` options are declared
+in build.zig, but no code reads them. The root build has no WASM step; the WASM
+helper in sdks/wasm/build.zig is not wired into build.zig.
 
 ### Running Tests
 
 ```bash
-# All tests
-zig build test
+# The gate CLAUDE.md requires for every code change
+zig build && zig build test-opcodes
 
 # Specific categories
 zig build test-unit
 zig build test-integration
-zig build specs
+zig build specs          # legacy filler specs; not passing yet
+zig build state-tests    # official EEST state tests (see specs/README.md)
+
+# All tests (runs specs, so it fails until the spec suite passes)
+zig build test
 ```
 
 ## Coding Conventions
 
 ### Naming
 
+Function names mix two styles: src/ mostly uses snake_case (`create_snapshot`,
+`push_unsafe`) and mini/src/ uses camelCase (`pushStack`, `consumeGas`). Match
+the file you edit.
+
 ```zig
-// Functions and variables: snake_case
-pub fn get_storage(address: Address, slot: u256) u256 { }
+// Variables: snake_case
 const gas_remaining: u64 = 0;
 
 // Types: PascalCase
@@ -70,9 +80,9 @@ pub const MAX_STACK_SIZE: usize = 1024;
 
 ```zig
 // Prefer short, descriptive names
-const n = items.len;          // NOT: const number = items.len;
-const a = frame.popStack();   // OK for binary ops
-const top = frame.peekStack(0); // Descriptive when needed
+const n = items.len;                 // NOT: const number = items.len;
+const top = try frame.popStack();    // NOT: const a = ... (CLAUDE.md)
+const value = try frame.peekStack(0);
 ```
 
 ### Imports
@@ -136,7 +146,7 @@ std.debug.print("...", .{});  // BAD!
 
 ```zig
 // Use tracer assertions, NOT std.debug.assert
-self.getTracer().assert(condition, "message");
+(&self.getEvm().tracer).assert(condition, "message");
 
 // NEVER:
 std.debug.assert(condition);  // BAD - crashes are security bugs!
@@ -176,7 +186,7 @@ pub fn Handlers(FrameType: type) type {
 pub fn Handlers(FrameType: type) type {
     return struct {
         pub fn add(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            // 1. Tracer sync
+            // 1. Tracer sync (Debug and ReleaseSafe builds only)
             self.beforeInstruction(.ADD, cursor);
 
             // 2. Execute (pre-validated, use unsafe)
@@ -186,9 +196,8 @@ pub fn Handlers(FrameType: type) type {
                 }
             }.op);
 
-            // 3. Tail-call next (NEVER returns)
-            const next = dispatch.getOpData(.ADD);
-            return @call(.always_tail, next.handler, .{self, next.cursor});
+            // 3. Look up the next handler and tail-call it (NEVER returns)
+            return dispatch_next.nextInstruction(FrameType, self, cursor, .ADD);
         }
     };
 }
@@ -196,7 +205,9 @@ pub fn Handlers(FrameType: type) type {
 
 ## Adding a New Opcode
 
-### Step 1: Add to opcode enum
+CLZ (0x1e, EIP-7939, Osaka) is a complete recent example in the Performance EVM. Follow its trail through the files below.
+
+### Step 1: Add to the opcode enums
 
 ```zig
 // src/opcodes/opcode.zig
@@ -204,57 +215,59 @@ pub const Opcode = enum(u8) {
     // ... existing opcodes
     NEW_OP = 0xXX,
 };
+// Also add NEW_OP to UnifiedOpcode and the name tables in the same file.
 ```
 
-### Step 2: Add gas constant
+### Step 2: Add static gas and stack metadata
 
 ```zig
-// primitives gas_constants.zig or local constants
-pub const NEW_OP_GAS: u64 = X;
+// src/opcodes/opcode_data.zig - the preprocessor sums gas_cost per basic block
+info[0xXX] = .{ .gas_cost = GasConstants.GasFastStep, .stack_inputs = 1, .stack_outputs = 1 };
 ```
 
-### Step 3: Implement handler
+Shared gas constants live in lib/voltaire/src/primitives/gas_constants.zig (`GasConstants`).
+
+### Step 3: Implement the handler
 
 ```zig
-// src/instructions/handlers_*.zig
-pub fn new_op(frame: *FrameType) Error!void {
-    try frame.consumeGas(NEW_OP_GAS);
-    // Implementation
-    frame.pc += 1;  // Or appropriate advancement
+// src/instructions/handlers_*.zig (inside Handlers(FrameType))
+pub fn new_op(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+    // Hardfork guard (if needed): the fork is comptime in the Performance EVM
+    if (comptime FrameType.config.hardfork.isBefore(.HARDFORK_NAME)) {
+        self.gas_remaining = 0;
+        return error.InvalidOpcode;
+    }
+    self.beforeInstruction(.NEW_OP, cursor);
+    // Implementation (static gas and stack bounds were checked at block entry)
+    return dispatch_next.nextInstruction(FrameType, self, cursor, .NEW_OP);
 }
 ```
 
-### Step 4: Add to dispatch
+### Step 4: Register the handler
 
 ```zig
-// In opcode dispatch/switch
-0xXX => return Handlers.new_op(frame),
+// src/frame/frame_handlers.zig, in getOpcodeHandlers
+h[@intFromEnum(Opcode.NEW_OP)] = &BitwiseHandlers.new_op;
 ```
 
-### Step 5: Add hardfork guard (if needed)
+### Step 5: Add it to the reference EVMs
+
+- `src/tracer/minimal_frame.zig`: add a case to the MinimalEvm switch. The tests in `test/differential/` and `1e_test.zig` compare the Performance EVM against MinimalEvm.
+- `mini/src/frame.zig`: add a case to the `executeOpcode` switch and implement the handler in `mini/src/instructions/`. Mini checks the fork at runtime:
 
 ```zig
-if (!frame.hardfork.isAtLeast(.HARDFORK_NAME)) {
-    return error.InvalidOpcode;
-}
+// mini/src/instructions/handlers_*.zig
+const evm = frame.getEvm();
+if (evm.hardfork.isBefore(.HARDFORK_NAME)) return error.InvalidOpcode;
 ```
 
 ### Step 6: Add tests
 
-```zig
-test "NEW_OP correctly handles edge case" {
-    var frame = try TestFrame.init(testing.allocator);
-    defer frame.deinit();
+Add `test/evm/opcodes/XX_test.zig` and import it from `test/evm/opcodes/all_opcodes.zig`. Assert on output and gas, as `1e_test.zig` does; most older `NN_test.zig` files only run the bytecode. build.zig creates a `zig build test-opcodes-0xXX` step for each `XX_test.zig` file.
 
-    // Setup
-    try frame.pushStack(input);
-
-    // Execute
-    try Handlers.new_op(&frame);
-
-    // Verify
-    try testing.expectEqual(expected, frame.stack.items[0]);
-}
+```bash
+zig build test-opcodes-0xXX
+zig build test-opcodes
 ```
 
 ## Testing Guidelines
@@ -294,14 +307,14 @@ test "ADD with 5 and 3 returns 8" {
 ### Running Specific Tests
 
 ```bash
-# Filter by name
+# Filter by name (pass -Dtest-filter once; a repeated -D option fails)
 zig build test-unit -Dtest-filter='ADD'
 
-# Specific hardfork
-zig build specs -Devm-hardfork=CANCUN
+# Specific hardforks (EEST state tests)
+zig build state-tests -Dspec-fork=Cancun,Prague
 
-# Isolate failing test (Mini)
-bun scripts/isolate-test.ts "test_name"
+# Isolate failing test (Mini; the script lives in mini/scripts/)
+cd mini && bun scripts/isolate-test.ts "test_name"
 ```
 
 ## Pull Request Process
@@ -313,9 +326,10 @@ bun scripts/isolate-test.ts "test_name"
    zig build
    ```
 
-2. **All tests pass**
+2. **Tests pass**
    ```bash
-   zig build test
+   zig build test-opcodes   # required by CLAUDE.md for every code change
+   zig build test-unit      # also run by CI
    ```
 
 3. **Format code**
@@ -370,14 +384,14 @@ Fixes #123
 
 From CLAUDE.md - these will block PRs:
 
-- Broken builds/tests
-- Stub implementations (`error.NotImplemented`)
+- Broken builds/tests and test failures
+- Stub or fallback implementations (`error.NotImplemented`)
 - Commented code (use Git)
+- Invalid benchmarks
 - `std.debug.print` in modules
 - `std.debug.assert` (use tracer assertions)
 - Skipping/commenting tests
-- `catch {}` error swallowing
-- `.backup` files (use git)
+- Swallowing errors with `catch` (`catch {}`, `catch &.{}`, `catch null`)
 
 ## Getting Help
 
@@ -385,19 +399,22 @@ From CLAUDE.md - these will block PRs:
 
 - [CLAUDE.md](../../CLAUDE.md) - Project instructions
 - [docs/dev/](./README.md) - Developer documentation
+- [specs/README.md](../../specs/README.md) - Spec test runners and current pass rates
 - [execution-specs](https://github.com/ethereum/execution-specs) - Python reference
 
 ### Debugging
 
-```bash
-# Enable debug logging
+```zig
+// Enable debug logging inside a test
 std.testing.log_level = .debug;
+```
 
+```bash
 # Isolate test (Mini)
-bun scripts/isolate-test.ts "test_name"
+cd mini && bun scripts/isolate-test.ts "test_name"
 
-# Trace comparison
-TEST_FILTER="test_name" zig build specs
+# Run one legacy spec test by name
+zig build specs -Dtest-filter="test_name"
 ```
 
 ### Questions

@@ -13,7 +13,7 @@ across what remains.
 const Evm = @import("evm").Evm;
 const eips = @import("evm").Eips;
 
-const Cancun = Evm(.{});
+const Osaka = Evm(.{}); // the default hardfork
 
 const Small = Evm(.{
     .eips = eips{ .hardfork = .SHANGHAI },
@@ -30,12 +30,12 @@ Verified against `src/evm_config.zig`.
 
 | Field | Default | Meaning |
 | --- | --- | --- |
-| `eips` | `Eips{ .hardfork = .CANCUN }` | Which hardfork's rules to implement. |
-| `eip_overrides` | `&.{}` | Turn individual EIPs on or off independently of the hardfork. |
+| `eips` | `Eips{ .hardfork = Hardfork.DEFAULT }` (`OSAKA`) | Which hardfork's rules to implement. `Eips.overrides` turns individual EIPs on or off. |
+| `eip_overrides` | `&.{}` | Declared but not read outside `src/evm_config.zig`. Use `eips.overrides`. |
 | `max_call_depth` | `1024` | Call-stack depth limit (spec value). |
 | `max_bytecode_size` | `24576` | EIP-170 contract size cap. |
 | `max_initcode_size` | `49152` | EIP-3860 initcode cap. |
-| `max_input_size` | `131072` | 128 KiB calldata cap. |
+| `max_input_size` | `131072` | Declared but not read outside tests. `CallParams.validate` applies a fixed 4 MiB input cap. |
 | `block_gas_limit` | `30_000_000` | Ceiling used for validation. |
 | `enable_beacon_roots` | `true` | EIP-4788 beacon-root system call. |
 | `enable_historical_block_hashes` | `true` | EIP-2935 historical hashes. |
@@ -47,7 +47,8 @@ Verified against `src/evm_config.zig`.
 | Field | Default | Meaning |
 | --- | --- | --- |
 | `enable_fusion` | `true` | Opcode fusion. See [Synthetic opcodes](/concepts/synthetic-opcodes). |
-| `enable_precompiles` | `true` | Compile in the precompile table at all. |
+| `enable_native_jit` | `false` | Run hot, eligible pure-compute contracts through the ARM64 JIT tier in `src/jit/`. Other targets, traced runs, and initcode use the interpreter. |
+| `enable_precompiles` | `true` | When `false`, calls to precompile addresses skip the precompile path. |
 | `vector_length` | `0` | SIMD width; `0` auto-detects for the target. |
 | `stack_size` | `1024` | Stack slots. Smaller stacks shrink the frame. |
 | `memory_initial_capacity` | `4096` | Bytes pre-allocated per frame's memory. |
@@ -55,6 +56,7 @@ Verified against `src/evm_config.zig`.
 | `arena_capacity_limit` | `64 * 1024 * 1024` | Per-call scratch arena ceiling. |
 | `arena_growth_factor` | `150` | Arena growth, as a percentage. |
 | `loop_quota` | `1_000_000` in Debug/ReleaseSafe, `null` otherwise | Analysis-loop safety bound. |
+| `WordType` | `u256` | EVM word type. |
 
 ### Testing escape hatches
 
@@ -73,14 +75,15 @@ bug. Never ship them.
 
 | Field | Default | Meaning |
 | --- | --- | --- |
-| `opcode_overrides` | `&.{}` | Replace the handler for a specific opcode byte. |
-| `precompile_overrides` | `&.{}` | Replace or add a precompile at an address. |
-| `block_info_config` | `.{}` | Compact vs full block-info field widths. |
+| `DatabaseType` | `Database` (`src/storage/database.zig`) | State backend type. |
+| `opcode_overrides` | `&.{}` | Declared but not applied: `frame_config()` passes `&.{}` and `Frame` builds its handler table with `getOpcodeHandlers(Self, &.{})` (`src/frame/frame.zig`). |
+| `precompile_overrides` | `&.{}` | Declared but not read outside `src/evm_config.zig`. |
+| `block_info_config` | `.{ .DifficultyType = u64, .BaseFeeType = u64, .use_compact_types = false }` | Compact vs full block-info field widths. |
 | `tracer_config` | `TracerConfig.disabled` | See [Tracing](/guides/tracing). |
 
 ## Recipes
 
-### A mainnet-accurate EVM
+### The default mainnet EVM
 
 ```zig
 const Mainnet = @import("evm").Evm(.{});
@@ -88,10 +91,9 @@ const Mainnet = @import("evm").Evm(.{});
 const Mainnet2 = @import("evm").MainnetEvm;
 ```
 
-### A minimal WASM build
+### A small-footprint EVM
 
-Small binaries come from dropping the precompile table (arkworks BN254, BLS12-381
-and KZG dominate the bundle) and shrinking the memory ceiling:
+Turn off precompiles and shrink the memory ceilings:
 
 ```zig
 const Tiny = @import("evm").Evm(.{
@@ -102,9 +104,8 @@ const Tiny = @import("evm").Evm(.{
 });
 ```
 
-```bash
-zig build wasm --release=small -Dno_precompiles=true
-```
+The root build has no WASM step for the `src/` engine. See
+[Language bindings](/guides/bindings#wasm).
 
 ### A historical-fork EVM
 
@@ -114,8 +115,8 @@ const Frontier = @import("evm").Evm(.{ .eips = eips{ .hardfork = .FRONTIER } });
 const London   = @import("evm").Evm(.{ .eips = eips{ .hardfork = .LONDON } });
 ```
 
-Available: `FRONTIER`, `HOMESTEAD`, `BYZANTIUM`, `BERLIN`, `LONDON`, `SHANGHAI`,
-`CANCUN`.
+`Eips` accepts every `Hardfork` variant, `FRONTIER` through `AMSTERDAM`. See
+[Hardforks and EIPs](/reference/hardforks).
 
 ### A fuzzing EVM
 
@@ -127,57 +128,20 @@ const Fuzz = @import("evm").Evm(.{
 });
 ```
 
-### Overriding one opcode
+### Overriding an opcode or a precompile
 
-`opcode_overrides` lets you graft a custom handler onto a specific opcode byte —
-useful for chain-specific opcodes or for instrumenting a single instruction:
+`EvmConfig` declares `opcode_overrides` and `precompile_overrides`, but nothing
+applies them yet. `frame_config()` passes `&.{}` for opcode overrides,
+`Frame` builds its handler table with `getOpcodeHandlers(Self, &.{})`, and
+nothing outside `src/evm_config.zig` reads `precompile_overrides`. Setting
+either field compiles and changes nothing.
 
-```zig
-const Custom = @import("evm").Evm(.{
-    .opcode_overrides = &.{
-        .{ .opcode = 0x46, .handler = @ptrCast(&myBasefeeHandler) },
-    },
-});
-```
+## Build flags do not configure the engine
 
-The handler must have the signature described in
-[Dispatch](/concepts/dispatch) — `fn (*Frame, [*]const Item)
-Error!noreturn` — including the trailing tail call. Getting this wrong is a
-crash, not a compile error, so mirror an existing handler closely.
-
-### Overriding a precompile
-
-```zig
-const PrecompileOutput = struct {
-    output: []const u8,
-    gas_used: u64,
-    success: bool,
-};
-
-fn myIdentity(allocator: std.mem.Allocator, input: []const u8, gas_limit: u64) anyerror!PrecompileOutput {
-    _ = gas_limit;
-    return .{
-        .output = try allocator.dupe(u8, input),
-        .gas_used = 15 + 3 * ((input.len + 31) / 32),
-        .success = true,
-    };
-}
-```
-
-Register it via `precompile_overrides` with the target address.
-
-## Doing it from the build instead
-
-`build.zig` surfaces the most common knobs so you do not have to write a wrapper
-type:
-
-```bash
-zig build -Devm-hardfork=SHANGHAI
-zig build -Devm-enable-fusion=false
-zig build -Devm-disable-gas=true
-zig build -Devm-optimize=small     # fast | small | safe
-zig build -Dno_precompiles=true
-```
-
-These feed `BuildConfiguredEvm` (also exported as `DefaultEvm`), so
-`@import("evm").DefaultEvm` respects them.
+`build.zig` declares `-Devm-hardfork`, `-Devm-enable-fusion`,
+`-Devm-disable-gas`, `-Devm-optimize`, `-Dmax-call-depth`, and related flags
+(`zig build -h`). The `src/` engine reads only `enable_tracing` from the
+generated `build_options` module (`src/instructions/handlers_jump.zig`).
+`BuildConfiguredEvm` and `DefaultEvm` are `Evm(EvmConfig{})` (`src/root.zig`),
+so they use the defaults above whatever flags you pass. Set `EvmConfig` fields
+in Zig instead.

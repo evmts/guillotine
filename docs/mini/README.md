@@ -1,6 +1,6 @@
 # Mini EVM
 
-A minimal, correct, and well-tested Ethereum Virtual Machine implementation in Zig, prioritizing specification compliance, clarity, and hardfork support (Frontier through Prague).
+A minimal, correct, and well-tested Ethereum Virtual Machine implementation in Zig, prioritizing specification compliance, clarity, and hardfork support (Frontier through Osaka).
 
 ## Overview
 
@@ -27,7 +27,7 @@ Mini EVM uses a traditional sequential bytecode interpretation model. It's desig
 ┌─────────────────────────────────────────────────────────────┐
 │                      Frame (Bytecode Interpreter)            │
 │  - Stack operations (LIFO, max 1024 items)                  │
-│  - Memory management (sparse, word-aligned expansion)        │
+│  - Memory management (byte buffer, word-aligned expansion)   │
 │  - Program counter (PC) and gas tracking                     │
 │  - Opcode dispatch and execution                            │
 └─────────────────────────────────────────────────────────────┘
@@ -38,26 +38,28 @@ Mini EVM uses a traditional sequential bytecode interpretation model. It's desig
 Mini EVM uses traditional sequential interpretation:
 
 ```zig
-// mini/src/frame.zig:540
+// mini/src/frame.zig:555 (loop_quota check omitted)
 pub fn execute(self: *Self) EvmError!void {
     while (!self.stopped and !self.reverted and self.pc < self.bytecode.len()) {
         try self.step();
     }
 }
 
-// Each step reads opcode at PC, dispatches to handler, increments PC
+// mini/src/frame.zig:515 (tracer capture omitted)
+// Each step reads the opcode at PC and runs its handler; the handler advances PC
 pub fn step(self: *Self) EvmError!void {
-    const opcode = self.bytecode.getOpcode(self.pc) orelse return error.InvalidOpcode;
-    try self.dispatchOpcode(opcode);
+    if (self.stopped or self.reverted or self.pc >= self.bytecode.len()) return;
+    const opcode = self.getCurrentOpcode() orelse return;
+    try self.executeOpcode(opcode);
 }
 ```
 
 ### Key Data Structures
 
 ```zig
-// mini/src/frame.zig:50-70
+// mini/src/frame.zig:50-55
 stack: std.ArrayList(u256),           // Bounds-checked stack
-memory: std.AutoHashMap(u32, u8),     // Sparse memory map
+memory: std.ArrayList(u8),            // Contiguous byte buffer
 memory_size: u32,                      // Current memory size
 pc: u32,                               // Program counter
 gas_remaining: i64,                    // Gas tracking (signed for refunds)
@@ -145,13 +147,16 @@ zig build test
 # Run spec tests
 zig build specs
 
-# Run with specific hardfork
-zig build specs -Dhardfork=CANCUN
+# Run one hardfork's spec tests
+zig build specs-cancun
 ```
 
 ## TypeScript Port
 
-A TypeScript implementation is available for environments where Zig/WASM isn't suitable:
+The TypeScript docs below describe a full TypeScript port (`evm.ts`, `frame.ts`,
+`instructions/*.ts`). Those sources are not in this repository. `mini/` holds
+only TypeScript helpers (`mini/src/utils/*.ts`, `mini/src/precompiles/index.ts`)
+and WASM examples (`mini/examples/typescript/*.ts`).
 
 - [TypeScript README](./typescript/README.md)
 - [TypeScript Architecture](./typescript/ARCHITECTURE.md)
@@ -163,8 +168,8 @@ A TypeScript implementation is available for environments where Zig/WASM isn't s
 # Run all tests
 zig build test
 
-# Filter by test name
-zig build specs -Dtest-filter='transientStorage'
+# Filter by test name (mini reads TEST_FILTER; it has no -Dtest-filter option)
+TEST_FILTER='transientStorage' zig build specs
 
 # Run specific hardfork tests
 zig build specs-cancun-tstore-basic
@@ -181,7 +186,7 @@ bun scripts/isolate-test.ts "exact_test_name"
 | Execution | PC-based loop | Dispatch tail-calls |
 | Bytecode | Per-instruction reads | Preprocessed schedule |
 | Stack | `ArrayList(u256)` | Cache-aligned array |
-| Memory | `AutoHashMap(u32, u8)` | Word-aligned pages |
+| Memory | `ArrayList(u8)` per frame | `ArrayList(u8)` shared across frames via checkpoints |
 | Gas | Per-operation checks | Per-block batching |
 | Synthetic | None | 30+ fused patterns |
 | Complexity | Simple, clear | Optimized, complex |

@@ -45,11 +45,12 @@ language can drive it. You want Guillotine when you are embedding an EVM and
 throughput or binary size matters.
 
 **guillotine-mini** is the readable EVM. In this repository it lives at `mini/`
-and as `src/tracer/minimal_evm.zig`; it is also published as its own project. It
-is a plain sequential interpreter with no schedule, no fusion, and no tail calls.
+with its own `build.zig`, and the tracer's copy, `MinimalEvm`, lives in
+`src/tracer/minimal_evm.zig`; it is also published as its own project. It is a
+plain sequential interpreter with no schedule, no fusion, and no tail calls.
 Two jobs: be the oracle that differential tests compare Guillotine against, and
 be small enough to ship as a standalone WASM bundle
-(`zig build wasm-minimal-evm`). If you want to *read* an EVM, read this one.
+(`cd mini && zig build wasm`). If you want to *read* an EVM, read this one.
 
 **ZEVM** is the sibling Zig EVM effort. Where Guillotine optimises for raw
 execution throughput of a specialised, comptime-configured machine, ZEVM explores
@@ -71,7 +72,7 @@ code, that is Voltaire.
 | Embed a fast EVM in a Zig, Go, Rust, or Swift program | **Guillotine** |
 | Ship the smallest possible EVM to a browser | **guillotine-mini** (WASM) |
 | Read and understand EVM semantics from source | **guillotine-mini** |
-| Know why my fast EVM disagrees with the spec | **Guillotine's tracer**, which runs mini in lockstep |
+| Know why my fast EVM disagrees with the spec | **Guillotine's tracer**, which runs `MinimalEvm` in lockstep |
 | Use Ethereum types, RLP, ABI, or crypto in Zig | **Voltaire** |
 | Follow the alternative Zig EVM design | **ZEVM** |
 
@@ -82,8 +83,8 @@ code" — it is structural: keep a second, deliberately naive implementation in 
 tree and assert after **every instruction** that the two agree on stack, memory,
 gas, and storage.
 
-That is why `mini/` is not dead weight and why `beforeInstruction()` is mandatory
-in every handler. The optimisations (fusion, block-batched gas, static jump
+That is why `MinimalEvm` is not dead weight and why `beforeInstruction()` is
+mandatory in every handler. The optimisations (fusion, block-batched gas, static jump
 resolution, tail calls) are only safe to make because a reference machine is
 watching. See [Tracing and debugging](/guides/tracing).
 

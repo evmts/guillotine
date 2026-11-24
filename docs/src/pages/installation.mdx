@@ -6,8 +6,8 @@ description: Verified toolchain prerequisites and build commands for Guillotine.
 # Installation
 
 Guillotine is a Zig library with vendored C and Rust dependencies. There is no
-package to `npm install` for the core engine — you build it, or you consume one
-of the [language bindings](/guides/bindings).
+package to `npm install` for the core engine. Build it from a checkout, or use
+one of the [language bindings](/guides/bindings).
 
 ## Prerequisites
 
@@ -39,15 +39,18 @@ and `0.14` will not compile this tree.
 
 ## Platform support
 
-Verified on this machine: **macOS 15 (Darwin 25.2.0), arm64**.
+Verified on this machine: **macOS 26 (Darwin 25.2.0), arm64**.
+CI (`.github/workflows/ci.yml`) builds and tests on `macos-latest` (arm64) and
+`ubuntu-latest` (x86_64) with Zig 0.15.2.
 
 | Platform | Status |
 | --- | --- |
-| macOS arm64 | Verified — `zig build` succeeds |
-| macOS x86_64 | Expected to work; same code paths, not verified here |
-| Linux x86_64 / arm64 | Supported by the build graph and exercised in CI (`.github/workflows/ci.yml`); not verified on this machine |
-| Windows | `build.zig` forces the `*-pc-windows-gnu` Rust triple so Cargo emits `lib*.a` instead of MSVC `*.lib`. Treat as best-effort. |
-| `wasm32-freestanding` | First-class target: `zig build wasm` and `zig build wasm-minimal-evm`. The Rust crypto crate is rebuilt with `--no-default-features --features portable` (pure-Rust keccak) for WASM. |
+| macOS arm64 | Verified here and in CI |
+| macOS x86_64 | The build graph maps it to `x86_64-apple-darwin`; not in CI |
+| Linux x86_64 | Built and tested in CI |
+| Linux arm64 | The build graph maps it to `aarch64-unknown-linux-gnu`; not in CI |
+| Windows | Best-effort, not in CI. `lib/voltaire/lib/build.zig` builds Voltaire's crate for `*-pc-windows-gnu` so Cargo emits `lib*.a`; the root `build.zig` builds the root Cargo workspace for `x86_64-pc-windows-msvc`. |
+| `wasm32` | No root `zig build` step builds the engine for WASM. Voltaire's Cargo step builds `wasm32-unknown-unknown` with `--no-default-features --features portable` (pure-Rust keccak) when the target is WASM. guillotine-mini builds its own WASM with `cd mini && zig build wasm`. |
 
 ## Clone and build
 
@@ -69,14 +72,11 @@ $ zig build ; echo "exit=$?"
 exit=0
 ```
 
-The first build is slow — it compiles `blst`, `c-kzg-4844`, the arkworks Rust
+The first build is slow. It compiles `blst`, `c-kzg-4844`, the arkworks Rust
 crate, and the Foundry compiler wrapper. Expect several minutes. Subsequent
 builds hit the Zig and Cargo caches.
 
 ### Build options
-
-`build.zig` exposes the engine's comptime configuration as build flags, so you
-can specialise the binary without writing Zig:
 
 ```bash
 # Release modes
@@ -84,29 +84,32 @@ zig build --release=fast
 zig build --release=small
 zig build --release=safe
 
-# Target a specific hardfork (default: CANCUN)
-zig build -Devm-hardfork=SHANGHAI
-
-# Toggle engine features
-zig build -Devm-enable-fusion=false
-zig build -Devm-disable-gas=true      # testing only
-zig build -Dno_precompiles=true       # minimal build
-zig build -Devm-optimize=small        # fast | small | safe
+# Tracing hooks in the jump handlers
+zig build -Denable-tracing=true
 ```
 
-Accepted hardforks: `FRONTIER`, `HOMESTEAD`, `BYZANTIUM`, `BERLIN`, `LONDON`,
-`SHANGHAI`, `CANCUN`.
+`zig build -h` also lists `-Devm-hardfork` (default `OSAKA`),
+`-Devm-enable-fusion`, `-Devm-disable-gas`, `-Devm-optimize`,
+`-Dmax-call-depth`, `-Dstack-size`, `-Dmemory-limit`, and related flags.
+`build.zig` writes them into the `build_options` module, but the `src/` engine
+reads only `enable_tracing` from it (`src/instructions/handlers_jump.zig`), so
+the other flags do not change the engine. Select the hardfork, fusion, and
+limits on `EvmConfig` instead. See [Configuring the EVM](/guides/configuration).
 
 ## Running the tests
 
 ```bash
-zig build test              # specs -> integration -> unit
+zig build test              # specs, integration, unit, and lib tests
 zig build test-unit         # src/**/*.zig
 zig build test-integration  # test/**/*.zig
 zig build test-lib          # lib/**/*.zig
 zig build test-opcodes      # per-opcode differential tests vs MinimalEvm
-zig build specs             # Ethereum execution-spec tests
+zig build state-tests       # official EEST state tests (fetch fixtures first)
+zig build specs             # legacy filler specs
 ```
+
+`zig build state-tests` reads fixtures that `scripts/fetch-eest-fixtures.sh`
+downloads. `specs/README.md` documents both spec suites.
 
 Filter with `-Dtest-filter`:
 
@@ -122,7 +125,14 @@ success, not a hung run.
 
 ## Known build friction
 
-These are real, reproduced on a clean checkout — not hypotheticals.
+These are reproduced on a clean checkout.
+
+**macOS SDK 26.4 and later.** Those SDKs list `libSystem` stubs for
+`arm64e-macos` but not `arm64-macos`, and Zig 0.15.2 ignores arm64e stubs, so
+native links fail with `undefined symbol: _abort`. CI probes the installed
+Xcode versions and sets `DEVELOPER_DIR` to the newest one whose SDK links
+(`.github/workflows/ci.yml`). Do the same locally:
+`DEVELOPER_DIR=/Applications/Xcode_<version>.app/Contents/Developer zig build`.
 
 **Voltaire's Rust archive is built by `zig build`.** Every step that links the
 `voltaire` or `crypto` modules first runs `cargo build --release` in
@@ -140,5 +150,5 @@ package:   …/lib/foundry-compilers/Cargo.toml
 workspace: …/Cargo.toml
 ```
 
-Harmless — `lib/foundry-compilers` defines `[profile.*]` that only the workspace
-root may set.
+Harmless. `lib/foundry-compilers` defines a `[profile.release]` that only the
+workspace root may set.

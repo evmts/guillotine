@@ -15,15 +15,11 @@ zig build specs
 # Run with Bun/TypeScript runner (alternative)
 zig build specs-bun
 
-# Limit number of spec files
-zig build specs -Dspec-max-files=100
+# Limit number of spec files (Bun runner only; the Zig runner ignores it)
+zig build specs-bun -Dspec-max-files=100
 
 # Filter tests by pattern
 zig build specs -Dtest-filter='add'
-
-# Legacy options still supported
-zig build specs -- -Dspec-isolated=true
-zig build specs -- -Dspec-pattern='add*.json'
 ```
 
 ### Optimization Modes

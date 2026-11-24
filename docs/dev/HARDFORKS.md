@@ -10,39 +10,49 @@ This document covers hardfork handling, EIP support, opcode reference, and featu
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
 │   FRONTIER ──▶ HOMESTEAD ──▶ TANGERINE ──▶ SPURIOUS ──▶ BYZANTIUM          │
-│   (Genesis)    (1.15M)       (2.46M)       (2.67M)      (4.37M)             │
+│   (Genesis)    (1.15M)       WHISTLE       DRAGON       (4.37M)             │
+│                              (2.46M)       (2.67M)                          │
 │                                                                             │
-│   ──▶ CONSTANTINOPLE ──▶ ISTANBUL ──▶ BERLIN ──▶ LONDON ──▶ MERGE          │
-│       (7.28M)            (9.07M)      (12.24M)   (12.96M)   (15.54M)        │
+│   ──▶ CONSTANTINOPLE ──▶ PETERSBURG ──▶ ISTANBUL ──▶ BERLIN ──▶ LONDON     │
+│       (7.28M)            (7.28M)        (9.07M)      (12.24M)   (12.96M)    │
 │                                                                             │
-│   ──▶ SHANGHAI ──▶ CANCUN ──▶ PRAGUE (upcoming)                            │
-│       (17.03M)     (19.43M)                                                 │
+│   ──▶ MERGE ──▶ SHANGHAI ──▶ CANCUN ──▶ PRAGUE ──▶ OSAKA ──▶ AMSTERDAM     │
+│       (15.54M)  (17.03M)     (19.43M)   (22.43M)   (23.94M)  (unscheduled)  │
 │                                                                             │
-│   DEFAULT: CANCUN                                                           │
+│   DEFAULT: OSAKA                                                            │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Supported Hardforks
 
-```zig
-// From primitives/Hardfork
-pub const Hardfork = enum(u8) {
-    FRONTIER,       // Genesis
-    HOMESTEAD,      // Block 1,150,000
-    TANGERINE,      // Block 2,463,000 (EIP-150)
-    SPURIOUS,       // Block 2,675,000 (EIP-155, 158, 160, 161)
-    BYZANTIUM,      // Block 4,370,000
-    CONSTANTINOPLE, // Block 7,280,000
-    ISTANBUL,       // Block 9,069,000
-    BERLIN,         // Block 12,244,000
-    LONDON,         // Block 12,965,000
-    MERGE,          // Block 15,537,394 (Paris)
-    SHANGHAI,       // Block 17,034,870
-    CANCUN,         // Block 19,426,587
-    PRAGUE,         // Upcoming
+Both EVMs use one enum, defined in `lib/voltaire/src/primitives/hardfork.zig` and re-exported by `src/eips_and_hardforks/hardfork.zig`. Block numbers come from `Hardfork.mainnetActivationBlock()`.
 
-    pub const DEFAULT = Hardfork.CANCUN;
+```zig
+// lib/voltaire/src/primitives/hardfork.zig
+pub const Hardfork = enum {
+    FRONTIER,          // Block 0
+    HOMESTEAD,         // Block 1,150,000
+    DAO,               // Block 1,920,000 (no EVM changes)
+    TANGERINE_WHISTLE, // Block 2,463,000 (EIP-150)
+    SPURIOUS_DRAGON,   // Block 2,675,000 (EIP-155, 160, 161)
+    BYZANTIUM,         // Block 4,370,000
+    CONSTANTINOPLE,    // Block 7,280,000
+    PETERSBURG,        // Block 7,280,000 (removes EIP-1283)
+    ISTANBUL,          // Block 9,069,000
+    MUIR_GLACIER,      // Block 9,200,000 (no EVM changes)
+    BERLIN,            // Block 12,244,000
+    LONDON,            // Block 12,965,000
+    ARROW_GLACIER,     // Block 13,773,000 (no EVM changes)
+    GRAY_GLACIER,      // Block 15,050,000 (no EVM changes)
+    MERGE,             // Block 15,537,394 (Paris)
+    SHANGHAI,          // Block 17,034,870
+    CANCUN,            // Block 19,426,587
+    PRAGUE,            // Block 22,431,084
+    OSAKA,             // Block 23,935,694
+    AMSTERDAM,         // Not scheduled
+
+    pub const DEFAULT = Hardfork.OSAKA;
 };
 ```
 
@@ -65,7 +75,7 @@ pub const Hardfork = enum(u8) {
 | 0x0A | EXP | 2→1 | 10+50×B | Frontier | a^b (B=byte len of exp) |
 | 0x0B | SIGNEXTEND | 2→1 | 5 | Frontier | Sign extend |
 
-### Comparison & Bitwise (0x10-0x1D)
+### Comparison & Bitwise (0x10-0x1E)
 
 | Hex | Name | Stack | Gas | Fork | Description |
 |-----|------|-------|-----|------|-------------|
@@ -83,6 +93,7 @@ pub const Hardfork = enum(u8) {
 | 0x1B | SHL | 2→1 | 3 | Constantinople | Shift left |
 | 0x1C | SHR | 2→1 | 3 | Constantinople | Shift right |
 | 0x1D | SAR | 2→1 | 3 | Constantinople | Arithmetic shift right |
+| 0x1E | CLZ | 1→1 | 5 | Osaka | Count leading zeros (EIP-7939). Performance EVM only; Mini returns `InvalidOpcode` |
 
 ### Keccak (0x20)
 
@@ -119,7 +130,7 @@ pub const Hardfork = enum(u8) {
 | 0x41 | COINBASE | 0→1 | 2 | Frontier | Block coinbase |
 | 0x42 | TIMESTAMP | 0→1 | 2 | Frontier | Block timestamp |
 | 0x43 | NUMBER | 0→1 | 2 | Frontier | Block number |
-| 0x44 | PREVRANDAO | 0→1 | 2 | Merge | Previous RANDAO |
+| 0x44 | PREVRANDAO | 0→1 | 2 | Frontier | DIFFICULTY before Merge; previous RANDAO from Merge |
 | 0x45 | GASLIMIT | 0→1 | 2 | Frontier | Block gas limit |
 | 0x46 | CHAINID | 0→1 | 2 | Istanbul | Chain ID |
 | 0x47 | SELFBALANCE | 0→1 | 5 | Istanbul | Self balance |
@@ -222,12 +233,12 @@ pub const Hardfork = enum(u8) {
 │   Gas Cost Changes:                                                         │
 │   ─────────────────                                                         │
 │   ┌────────────────┬──────────────┬──────────────┐                         │
-│   │ Operation      │ Pre-Berlin   │ Berlin+      │                         │
+│   │ Operation      │ Istanbul     │ Berlin+      │                         │
 │   ├────────────────┼──────────────┼──────────────┤                         │
-│   │ SLOAD          │ 200          │ 100/2100     │                         │
-│   │ BALANCE        │ 400          │ 100/2600     │                         │
+│   │ SLOAD          │ 800          │ 100/2100     │                         │
+│   │ BALANCE        │ 700          │ 100/2600     │                         │
 │   │ EXTCODESIZE    │ 700          │ 100/2600     │                         │
-│   │ EXTCODEHASH    │ 400          │ 100/2600     │                         │
+│   │ EXTCODEHASH    │ 700          │ 100/2600     │                         │
 │   │ EXTCODECOPY    │ 700          │ 100/2600     │                         │
 │   │ CALL/etc       │ 700          │ 100/2600     │                         │
 │   └────────────────┴──────────────┴──────────────┘                         │
@@ -285,7 +296,7 @@ pub const Hardfork = enum(u8) {
 │   EIP-3860: Initcode size limit                                            │
 │   ─────────────────────────────                                             │
 │   Max initcode: 2 × MAX_CODE_SIZE = 49152 bytes                            │
-│   Intrinsic gas: 2 × INITCODE_WORD_COST × words                           │
+│   Initcode gas: INITCODE_WORD_COST (2) × words                             │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -302,7 +313,7 @@ pub const Hardfork = enum(u8) {
 │   TLOAD (0x5C): Load transient storage     Gas: 100 (always warm)          │
 │   TSTORE (0x5D): Store transient storage   Gas: 100 (always warm)          │
 │   • Cleared at transaction boundary                                         │
-│   • NOT cleared on revert                                                   │
+│   • Writes roll back when their call frame reverts                          │
 │   • Useful for reentrancy guards, flash loans                              │
 │                                                                             │
 │   EIP-4844: Shard Blob Transactions                                         │
@@ -325,7 +336,7 @@ pub const Hardfork = enum(u8) {
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Prague (Upcoming)
+### Prague (Block 22,431,084)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -339,129 +350,139 @@ pub const Hardfork = enum(u8) {
 │                                                                             │
 │   EIP-2537: BLS12-381 Precompiles                                          │
 │   ─────────────────────────────────                                         │
-│   Addresses 0x0B-0x12:                                                      │
+│   Addresses 0x0B-0x11:                                                      │
 │   • BLS12_G1ADD (0x0B)                                                      │
-│   • BLS12_G1MUL (0x0C)                                                      │
-│   • BLS12_G1MULTIEXP (0x0D)                                                │
-│   • BLS12_G2ADD (0x0E)                                                      │
-│   • BLS12_G2MUL (0x0F)                                                      │
-│   • BLS12_G2MULTIEXP (0x10)                                                │
-│   • BLS12_PAIRING (0x11)                                                   │
-│   • BLS12_MAP_FP_TO_G1 (0x12)                                              │
+│   • BLS12_G1MSM (0x0C)                                                      │
+│   • BLS12_G2ADD (0x0D)                                                      │
+│   • BLS12_G2MSM (0x0E)                                                      │
+│   • BLS12_PAIRING_CHECK (0x0F)                                              │
+│   • BLS12_MAP_FP_TO_G1 (0x10)                                               │
+│   • BLS12_MAP_FP2_TO_G2 (0x11)                                              │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Osaka (Block 23,935,694, default)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          OSAKA CHANGES                                      │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   EIP-7939: CLZ (0x1E)                                                      │
+│   Count leading zeros of the top word. Gas: 5                               │
+│                                                                             │
+│   EIP-7951: P256VERIFY precompile at 0x100. Gas: 6900                       │
+│                                                                             │
+│   EIP-7823 / EIP-7883: MODEXP 1024-byte operand bound and repricing         │
+│                                                                             │
+│   EIP-7825: Transaction gas limit cap of 2^24 (16,777,216)                  │
+│                                                                             │
+│   EIP-7934: RLP execution block size limit                                  │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Hardfork Detection
 
-### Compile-Time (Zig Pattern)
+### Compile-Time (Performance EVM)
+
+The Performance EVM fixes its fork at compile time in `EvmConfig.eips.hardfork` (`src/evm_config.zig`, default `Hardfork.DEFAULT`). Code branches on it with `comptime`:
 
 ```zig
-// Configuration at compile time
-pub fn Evm(comptime config: EvmConfig) type {
-    const hardfork = config.hardfork;
+// src/evm.zig, Evm(config).callImpl
+// EIP-2929 (Berlin+): exactly the precompiles active in this fork start warm.
+if (comptime config.eips.hardfork.isAtLeast(.BERLIN)) {
+    const last = comptime precompiles.lastContiguousPrecompile(config.eips.hardfork);
+    // warm 0x01..last
+}
 
-    return struct {
-        pub fn sstore(self: *Self, ...) !void {
-            if (comptime hardfork.isAtLeast(.BERLIN)) {
-                // Warm/cold access tracking
-            }
-            if (comptime hardfork.isAtLeast(.LONDON)) {
-                // Reduced refund cap
-            }
-        }
-    };
+// src/instructions/handlers_bitwise.zig (FrameConfig carries the same fork)
+if (comptime FrameType.config.hardfork.isBefore(.OSAKA)) {
+    return error.InvalidOpcode; // CLZ
 }
 ```
 
-### Runtime Checks
+Runtime code reads the same value through `evm.is_hardfork_at_least(.LONDON)` and `evm.get_hardfork()`.
+
+### Runtime Checks (Mini EVM)
+
+The Mini EVM stores the fork in the `hardfork` field of `Evm` (`mini/src/evm.zig`), set by `Evm.init`. Each handler checks it:
 
 ```zig
-// Runtime hardfork checks
-if (self.hardfork.isAtLeast(.CANCUN)) {
-    // TLOAD/TSTORE available
-}
+// mini/src/instructions/handlers_storage.zig
+if (evm.hardfork.isBefore(.CANCUN)) return error.InvalidOpcode; // TLOAD/TSTORE
 
-if (self.hardfork.isBefore(.SHANGHAI)) {
-    // PUSH0 not available
-    return error.InvalidOpcode;
+// mini/src/instructions/handlers_stack.zig
+if (evm.hardfork.isBefore(.SHANGHAI)) {
+    return error.InvalidOpcode; // PUSH0
 }
 ```
 
 ### Hardfork Methods
 
 ```zig
+// lib/voltaire/src/primitives/hardfork.zig
 pub fn isAtLeast(self: Hardfork, target: Hardfork) bool {
-    return @intFromEnum(self) >= @intFromEnum(target);
+    return self.toInt() >= target.toInt();
 }
 
 pub fn isBefore(self: Hardfork, target: Hardfork) bool {
-    return @intFromEnum(self) < @intFromEnum(target);
+    return self.toInt() < target.toInt();
 }
 
-pub fn fromString(name: []const u8) ?Hardfork {
-    return std.meta.stringToEnum(Hardfork, name);
-}
+/// Case-insensitive. Accepts execution-spec names ("Cancun", "TangerineWhistle"),
+/// the aliases "Paris" and "ConstantinopleFix", and a comparison prefix such as ">=".
+pub fn fromString(name: []const u8) ?Hardfork { ... }
 ```
+
+`Hardfork.mainnetActivationBlock()` and `Hardfork.mainnetActivationTimestamp()` return mainnet activation points. `ForkTransition.fromString("ShanghaiToCancunAtTime15000")` parses transition fixtures.
 
 ## Feature Guards
 
 ### Opcode Availability
 
+The Mini EVM dispatch switch (`Frame.executeOpcode` in `mini/src/frame.zig`) has no fork logic. The guard lives in each handler:
+
 ```zig
-fn dispatchOpcode(frame: *Frame, opcode: u8) EvmError!void {
-    switch (opcode) {
-        0x5F => {  // PUSH0
-            if (!frame.hardfork.isAtLeast(.SHANGHAI)) {
-                return error.InvalidOpcode;
-            }
-            return StackHandlers.push0(frame);
-        },
-        0x5C => {  // TLOAD
-            if (!frame.hardfork.isAtLeast(.CANCUN)) {
-                return error.InvalidOpcode;
-            }
-            return StorageHandlers.tload(frame);
-        },
-        0x5D => {  // TSTORE
-            if (!frame.hardfork.isAtLeast(.CANCUN)) {
-                return error.InvalidOpcode;
-            }
-            return StorageHandlers.tstore(frame);
-        },
-        0x5E => {  // MCOPY
-            if (!frame.hardfork.isAtLeast(.CANCUN)) {
-                return error.InvalidOpcode;
-            }
-            return MemoryHandlers.mcopy(frame);
-        },
-        // ...
-    }
+// mini/src/frame.zig
+switch (opcode) {
+    0x5c => try StorageHandlers.tload(self),   // guard: isBefore(.CANCUN)
+    0x5d => try StorageHandlers.tstore(self),  // guard: isBefore(.CANCUN)
+    0x5e => try MemoryHandlers.mcopy(self),    // guard: isBefore(.CANCUN)
+    0x5f...0x7f => try StackHandlers.push(self, opcode), // PUSH0 guard: isBefore(.SHANGHAI)
+    // ...
+    else => return error.InvalidOpcode,
 }
 ```
 
+`src/opcodes/opcode_data.zig` lists the opcodes each fork introduced in `HARDFORK_OPCODES`.
+
 ## Build Configuration
 
-```bash
-# Specify hardfork at build time
-zig build -Devm-hardfork=CANCUN
-zig build -Devm-hardfork=SHANGHAI
-zig build -Devm-hardfork=BERLIN
+`build.zig` defines `-Devm-hardfork=<ENUM_NAME>` (default `OSAKA`) and exports it as `build_options.hardfork`. No code in `src/` reads it, so it does not change the Performance EVM's fork; set `EvmConfig.eips` instead. Only `EvmConfig.fromBuildOptions()` in `mini/src/evm_config.zig` reads the option, and nothing calls that function.
 
-# Run tests for specific hardfork
-zig build specs -Devm-hardfork=CANCUN
+```bash
+# Benchmarks take their own fork option (default OSAKA)
+zig build bench -Dbench-hardfork=PRAGUE
+
+# Run official EEST state tests for selected forks (execution-spec names)
+zig build state-tests -Dspec-fork=Cancun,Prague
 ```
 
 ## Testing Hardfork-Specific Features
 
+The Mini EVM build (`mini/build.zig`) defines one `specs-<fork>` step per fork and finer `specs-<fork>-<feature>` sub-targets. Run them from `mini/`:
+
 ```bash
-# Mini EVM granular targets
-zig build specs-cancun-tstore-basic      # EIP-1153
-zig build specs-cancun-mcopy             # EIP-5656
-zig build specs-cancun-selfdestruct      # EIP-6780
-zig build specs-shanghai-push0           # EIP-3855
-zig build specs-shanghai-warmcoinbase    # EIP-3651
-zig build specs-berlin-acl               # EIP-2929/2930
+cd mini
+zig build specs-cancun                    # all cancun-* sub-targets
+zig build specs-cancun-tstore-basic       # EIP-1153
+zig build specs-cancun-mcopy              # EIP-5656
+zig build specs-cancun-selfdestruct-basic # EIP-6780
+zig build specs-shanghai-push0            # EIP-3855
+zig build specs-shanghai-warmcoinbase     # EIP-3651
+zig build specs-berlin-acl                # EIP-2929/2930
 ```
 
 ## Implementation Checklist
@@ -474,13 +495,15 @@ When adding new hardfork support:
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
 │   □ 1. Add hardfork enum value                                             │
-│       pub const Hardfork = enum(u8) {                                      │
+│       // In lib/voltaire/src/primitives/hardfork.zig                       │
+│       pub const Hardfork = enum {                                          │
 │           // ...existing...                                                 │
 │           NEW_FORK,                                                        │
 │       };                                                                    │
+│       // Also extend mainnetActivationBlock/Timestamp and fromString       │
 │                                                                             │
 │   □ 2. Add new opcodes (if any)                                            │
-│       // In opcode.zig                                                      │
+│       // In src/opcodes/opcode.zig and src/opcodes/opcode_data.zig         │
 │       NEW_OPCODE = 0xXX,                                                   │
 │                                                                             │
 │   □ 3. Implement handlers                                                   │
@@ -490,7 +513,7 @@ When adding new hardfork support:
 │       }                                                                     │
 │                                                                             │
 │   □ 4. Add gas constants                                                    │
-│       // In gas_constants.zig                                              │
+│       // In lib/voltaire/src/primitives/gas_constants.zig                  │
 │       pub const NEW_OPCODE_GAS = X;                                        │
 │                                                                             │
 │   □ 5. Add feature guards                                                   │
@@ -499,11 +522,14 @@ When adding new hardfork support:
 │       }                                                                     │
 │                                                                             │
 │   □ 6. Update dispatch                                                      │
-│       // In dispatch handling                                               │
-│       0xXX => return new_opcode(frame),                                    │
+│       // Performance: handler table in src/frame/frame_handlers.zig        │
+│       // Mini: executeOpcode switch in mini/src/frame.zig                  │
+│       0xXX => try NewHandlers.new_opcode(self),                            │
 │                                                                             │
 │   □ 7. Add tests                                                            │
-│       zig build specs-newfork-feature                                      │
+│       // Add a SubTarget to mini/build.zig, then:                          │
+│       cd mini && zig build specs-newfork-feature                           │
+│       zig build state-tests -Dspec-fork=NewFork                            │
 │                                                                             │
 │   □ 8. Update documentation                                                 │
 │       - Update HARDFORKS.md                                                │

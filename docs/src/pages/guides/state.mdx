@@ -175,10 +175,11 @@ var result = evm.call(params);
 defer result.deinit(allocator);
 ```
 
-`deinit` unconditionally frees `output`, every log's `topics` and `data`, the log
-slice itself, and the accessed-address and accessed-storage slices. If you only
-want the logs and intend to keep them past the result, use `takeLogs()` and free
-them later with `CallResult.deinitLogsSlice(logs, allocator)`.
+`deinit` frees `output`, every log's `topics` and `data`, the log slice, the
+self-destruct, accessed-address, and accessed-storage slices, the trace, and
+`error_info`. `evm.takeLogs()` (`src/evm.zig`) takes ownership of the
+EVM's accumulated log buffer; free that slice with
+`CallResult.deinitLogsSlice(logs, allocator)`.
 
 ## Per-call arena
 

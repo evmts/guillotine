@@ -233,76 +233,62 @@ are EVM behavior, not runner bookkeeping.
 The report also carries `fixtures_dir`, `fork_filter`, `test_filter`,
 `optimize`, `jobs` and `duration_ms`. Each reason keeps its first five examples.
 
-## Legacy filler specs
+## Legacy filler specs (`zig build specs`)
 
-## Test Results
+`zig build specs` compiles `specs/cases/root.zig`, a generated aggregator that
+imports 2,245 Zig test files under `specs/cases/eest/` (one per execution-spec
+filler), and runs them with `test_runner.zig`. Commit `7501b986` (2026-11-23)
+recorded 581 failures, down from 1,031, with no regressions.
 
-Current status: **2124 pass / 1043 fail** (3167 expect() calls total)
-
-## Running the Specs
-
-### Quick Start
+### Running the Specs
 
 ```bash
-# Run all specs (default: first 100 files)
+# Run every legacy spec test (Zig runner)
 zig build specs
 
-# Run with more files
-zig build specs -- -Dspec-max-files=500
+# Run tests whose name matches a pattern (compile-time test filter; pass it once)
+zig build specs -Dtest-filter='sstore'
 
-# Run all available spec files
-zig build specs -- -Dspec-max-files=10000
-
-# Run specs matching a specific pattern
-zig build specs -- -Dspec-pattern='add*.json'
-
-# Run in isolated mode (each test in separate process)
-zig build specs -- -Dspec-isolated=true
+# Run the Bun/TypeScript runner in specs/bun-runner (needs bun on PATH)
+zig build specs-bun
+zig build specs-bun -Dspec-max-files=500
 ```
 
 ### Build Options
 
-- `-Dspec-max-files=N` - Limit the number of spec files to run (default: 100)
-- `-Dspec-pattern='*.json'` - Pattern to match test files (default: '*.json')
-- `-Dspec-isolated=true` - Run each test in an isolated process (safer but slower)
-- `-Dspec-args` - Additional arguments to pass to the test runner
-
-### Test Modes
-
-1. **Normal Mode** (`ethereum-specs.test.ts`) - Default mode, runs tests in the same process
-2. **Isolated Mode** (`ethereum-specs-safe.test.ts`) - Each test runs in a separate worker process to prevent crashes from affecting other tests
+- `-Dtest-filter=PATTERN` - Run only tests whose name contains `PATTERN` (both runners).
+- `-Dspec-max-files=N` - Limit the number of spec files. Only the Bun runner reads it
+  (`MAX_SPEC_FILES`); the Zig runner ignores it even though the `specs` step description mentions it.
+- `-Dspec-skip-files=N` - Sets `SKIP_SPEC_FILES`, which no runner reads yet.
 
 ### Directory Structure
 
 ```
 specs/
-├── README.md                     # This file
-├── CLAUDE.md                     # AI assistant instructions
-├── test_report.md                # Detailed test results
-├── execution-specs/              # Git submodule with official Ethereum tests
-│   └── tests/                    # Test JSON files organized by category
-└── bun-runner/                   # Bun test runner implementation
-    ├── ethereum-specs.test.ts    # Main test runner
-    ├── ethereum-specs-safe.test.ts # Isolated test runner
-    ├── test-worker.js            # Worker script for isolated mode
-    ├── generate-specs.ts         # (unused) Test generator
-    └── package.json              # Bun dependencies
+├── README.md              # This file
+├── CLAUDE.md              # AI assistant instructions
+├── eest_runner.zig        # Official EEST state test runner (zig build state-tests)
+├── runner.zig             # Legacy filler runner: pre-state, execution, post/expect checks
+├── assembler.zig, lll.zig # Compile (asm ...)/:asm and LLL filler code
+├── cases/
+│   ├── root.zig           # Generated aggregator imported by zig build specs
+│   └── eest/              # One generated Zig test per filler
+├── bun-runner/            # Bun runner (zig build specs-bun)
+│   ├── ethereum-specs.test.ts
+│   └── post-state-validation.test.ts
+└── execution-specs/       # Git submodule: ethereum/execution-specs
 ```
 
 ## Implementation Details
 
-The test runner:
-1. Recursively finds all JSON test files in `execution-specs/tests/`
-2. Groups tests by category (directory name)
-3. For each test case:
-   - Sets up the blockchain environment (block info)
-   - Initializes pre-state (accounts, balances, code)
-   - Executes transaction(s)
-   - Validates the result didn't crash
-   - (Post-state validation not yet implemented)
+For each filler test case, `specs/runner.zig`:
+1. Sets up the block environment and pre-state (accounts, balances, code, storage)
+2. Compiles `(asm ...)`, `:asm` and LLL code with `assembler.zig` and `lll.zig`
+3. Executes the transaction under Prague with an uncapped block gas limit
+4. Checks balances, nonces, code and storage against `post`, or against the `expect`
+   entries whose `indexes` select data/gas/value 0
 
 ## Known Limitations
 
-- Assembly code tests are skipped (not supported)
-- Post-state validation not yet implemented
-- Some edge cases may cause crashes in normal mode (use isolated mode for safety)
+- `:yul` filler code is not compiled; those cases return `TestTodo`
+- Only the first transaction variant (data/gas/value index 0) is checked

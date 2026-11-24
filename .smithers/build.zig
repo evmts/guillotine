@@ -1,7 +1,9 @@
 const std = @import("std");
 
-// Supplemental targets live here because the repository build has no MODEXP
-// or benchmark step. All commands still run from the repository root.
+// Supplemental MODEXP test and benchmark targets used by CI and the Smithers
+// test-modexp/bench targets. They predate the root build's own test-modexp and
+// bench steps and cover only lib/voltaire/src/crypto/modexp.zig. All commands
+// still run from the repository root.
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});

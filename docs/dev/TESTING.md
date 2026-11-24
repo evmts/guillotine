@@ -8,15 +8,17 @@ Complete guide to running tests, debugging failures, and writing new tests for G
 # Build everything
 zig build
 
-# Run all tests (no output = all passed)
-zig build test
+# The gate CLAUDE.md requires for every code change (no output = all passed)
+zig build test-opcodes
 
-# Run a specific test by name
-zig build test-opcodes -Dtest-filter='ADD opcode'
-
-# Run with debug output
-zig build test-unit -Dtest-filter='stack'
+# Run tests whose names contain a string
+zig build test-opcodes -Dtest-filter='ADD:'
+zig build test-unit -Dtest-filter='Stack'
 ```
+
+`zig build test` runs every suite, including the legacy `specs` suite, which
+does not pass yet. CI runs `zig build`, `zig build test-unit` and
+`zig build test-opcodes` (.github/workflows/ci.yml).
 
 **CRITICAL**: Zig tests produce NO OUTPUT when passing. No output = success.
 
@@ -29,20 +31,22 @@ zig build test-unit -Dtest-filter='stack'
 │                                                                             │
 │   zig build test                                                            │
 │   │                                                                         │
-│   ├── specs           Ethereum execution spec tests (~5000 cases)          │
-│   │   └── test/specs/ethereum_specs_test.zig                               │
+│   ├── specs           Legacy execution spec tests (not passing yet)         │
+│   │   └── specs/cases/root.zig (generated test files)                       │
 │   │                                                                         │
 │   ├── test-integration  Integration tests                                   │
 │   │   └── test/**/*.zig (aggregated via test/root.zig)                     │
-│   │       ├── differential/   Compare with revm reference                   │
-│   │       ├── fixtures/       JSON test fixtures                            │
+│   │       ├── differential/   Compare with MinimalEvm                       │
+│   │       ├── fixtures.zig    Runs bytecode from fixtures/<name>/           │
 │   │       └── evm/            Cross-module tests                            │
 │   │                                                                         │
-│   └── test-unit        Unit tests in source files                           │
-│       └── src/**/*.zig (aggregated via src/root.zig)                       │
-│           ├── frame.zig        Frame tests                                  │
-│           ├── stack.zig        Stack tests                                  │
-│           └── handlers_*.zig   Opcode tests                                 │
+│   ├── test-unit        Unit tests in source files                           │
+│   │   └── src/**/*.zig (aggregated via src/root.zig)                       │
+│   │       ├── frame/frame.zig  Frame tests                                  │
+│   │       ├── stack/stack.zig  Stack tests                                  │
+│   │       └── instructions/handlers_*.zig   Opcode tests                    │
+│   │                                                                         │
+│   └── test-lib         Library tests in lib/                                │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -51,30 +55,36 @@ zig build test-unit -Dtest-filter='stack'
 
 | Command | What it runs | Use when |
 |---------|--------------|----------|
-| `zig build test` | All tests (specs → integration → unit) | CI, final check |
-| `zig build specs` | Ethereum execution spec tests | Spec compliance |
+| `zig build test` | All tests (specs → integration → unit → lib) | Final check (fails until `specs` passes) |
+| `zig build specs` | Legacy execution spec tests | Spec compliance |
+| `zig build state-tests` | Official EEST state tests ([specs/README.md](../../specs/README.md)) | Spec compliance |
 | `zig build test-integration` | Integration tests | Cross-module testing |
 | `zig build test-unit` | Unit tests in src/ | Quick iteration |
 | `zig build test-lib` | Library tests in lib/ | External wrappers |
-| `zig build test-opcodes` | Per-opcode differential tests | Opcode correctness |
+| `zig build test-opcodes` | Per-opcode tests (most assert only a successful run; see below) | CI gate (CLAUDE.md) |
+| `zig build test-opcodes-0xNN` | One opcode's tests (`test/evm/opcodes/NN_test.zig`) | Single opcode |
 | `zig build test-synthetic` | Synthetic opcode tests | Fusion testing |
 | `zig build test-fusions` | Fusion optimization tests | Optimization testing |
 
 ### Test Filtering
 
 ```bash
-# Run tests matching a pattern
-zig build test-opcodes -Dtest-filter='ADD opcode'
+# Run tests whose names contain a substring
+zig build test-opcodes -Dtest-filter='ADD:'
 
-# Multiple words (partial match)
-zig build test-unit -Dtest-filter='stack push'
+# Multiple words match as one substring
+zig build test-unit -Dtest-filter='Stack push'
 
-# Hardfork-specific
-zig build specs -Devm-hardfork='SHANGHAI'
+# Hardfork-specific (EEST state tests)
+zig build state-tests -Dspec-fork=Shanghai
 
-# Combine filters
-zig build test-integration -Dtest-filter='storage' -Devm-hardfork='CANCUN'
+# Combine a fork with a name filter
+zig build state-tests -Dspec-fork=Cancun -Dtest-filter='tstore'
 ```
+
+Pass `-Dtest-filter` once. Zig rejects a repeated `-D` option ("received a list").
+`-Devm-hardfork` is declared in build.zig but no code reads it; the hardfork is
+the comptime field `EvmConfig.eips.hardfork` (default `OSAKA`).
 
 ## Debugging Failures
 
@@ -171,7 +181,7 @@ zig build test-integration -Dtest-filter='storage' -Devm-hardfork='CANCUN'
 │                                                                             │
 │   Step 5: Find reference implementation                                     │
 │   ─────────────────────────────────────                                     │
-│   $ cd execution-specs/src/ethereum/                                       │
+│   $ cd specs/execution-specs/src/ethereum/forks/   (git submodule)         │
 │   $ grep -r "def tstore" cancun/vm/instructions/                           │
 │                                                                             │
 │   Step 6: Compare implementations                                           │
@@ -191,17 +201,19 @@ zig build test-integration -Dtest-filter='storage' -Devm-hardfork='CANCUN'
 
 ### Isolating Failures
 
+These Mini EVM scripts live in `mini/scripts/`; run them from `mini/`.
+
 ```bash
+cd mini
+
 # Run isolated test with maximum debug output
 bun scripts/isolate-test.ts "test_name"
 
-# Run subset by hardfork
-bun scripts/test-subset.ts --hardfork CANCUN
+# Run the spec tests whose names contain a string (one positional filter)
+bun scripts/test-subset.ts Cancun
+bun scripts/test-subset.ts transientStorage
 
-# Run subset by EIP
-bun scripts/test-subset.ts --eip 1153
-
-# Auto-fix spec tests
+# Automated fixer: runs a Claude Agent SDK pipeline and commits fixes
 bun scripts/fix-specs.ts
 ```
 
@@ -222,14 +234,12 @@ test "my test" {
 ### Adding Trace Points
 
 ```zig
-// In handler
+// src/instructions/handlers_arithmetic.zig already imports log:
+// const log = @import("../log.zig");
 pub fn add(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-    // Add tracing
-    const log = @import("log.zig");
-    log.debug("ADD: stack[0]={} stack[1]={}", .{
-        self.stack.peek_unsafe(0),
-        self.stack.peek_unsafe(1),
-    });
+    // Add tracing: get_slice()[0] is the top of the stack
+    const items = self.stack.get_slice();
+    log.debug("ADD: top={} second={}", .{ items[0], items[1] });
 
     // ... rest of handler
 }
@@ -372,60 +382,88 @@ Diagnosis checklist:
 ### Unit Test Pattern
 
 ```zig
-// In source file (src/module.zig)
-test "ADD correctly adds two values" {
+// In the source file under test (here src/stack/stack.zig)
+test "binary_op_unsafe adds the top two items" {
     const allocator = std.testing.allocator;
+    const StackType = Stack(.{});
 
-    var frame = try Frame.init(allocator, .{});
-    defer frame.deinit();
+    var stack = try StackType.init(allocator, null);
+    defer stack.deinit(allocator);
 
     // Push operands (3 is top, 5 is second)
-    try frame.stack.push(5);
-    try frame.stack.push(3);
+    try stack.push(5);
+    try stack.push(3);
 
     // Execute
-    try handlers.add(&frame);
+    stack.binary_op_unsafe(struct {
+        fn op(top: u256, second: u256) u256 {
+            return top +% second;
+        }
+    }.op);
 
     // Verify: 5 + 3 = 8
-    try std.testing.expectEqual(@as(u256, 8), frame.stack.peek(0));
-    try std.testing.expectEqual(@as(usize, 1), frame.stack.size());
+    try std.testing.expectEqual(@as(u256, 8), try stack.peek());
+    try std.testing.expectEqual(@as(usize, 1), stack.size());
 }
 ```
+
+Performance handlers tail-call the next handler and never return, so tests
+exercise them by running bytecode through `Evm.call` (see below), not by
+calling a handler directly.
 
 ### Integration Test Pattern
 
 ```zig
-// In test/**/*.zig
-test "ERC20 transfer executes correctly" {
+// In test/**/*.zig (condensed from test/evm/transfer_test.zig)
+const evm = @import("evm");
+const primitives = @import("voltaire");
+const DefaultEvm = evm.Evm(.{});
+
+test "value transfer succeeds" {
     const allocator = std.testing.allocator;
 
-    var evm = try Evm.init(allocator, .{});
-    defer evm.deinit();
-
-    // Set up contract
-    try evm.setCode(contract_address, erc20_bytecode);
-    try evm.setBalance(sender, 1000);
-
-    // Execute transfer
-    const result = try evm.call(.{
-        .caller = sender,
-        .address = contract_address,
-        .calldata = transfer_calldata,
-        .gas = 100000,
+    var database = evm.Database.init(allocator);
+    defer database.deinit();
+    try database.set_account(sender.bytes, .{
+        .balance = 1_000_000_000,
+        .nonce = 0,
+        .code_hash = [_]u8{0} ** 32,
+        .storage_root = [_]u8{0} ** 32,
     });
 
-    // Verify
+    var vm = try DefaultEvm.init(allocator, &database, block_info, tx_context, 0, sender);
+    defer vm.deinit();
+
+    var result = vm.call(.{ .call = .{
+        .caller = sender,
+        .to = recipient,
+        .input = &.{},
+        .value = 100,
+        .gas = 100_000,
+    } });
+    defer result.deinit(allocator);
+
     try std.testing.expect(result.success);
-    try std.testing.expectEqual(@as(u256, 100), try evm.balanceOf(recipient));
+    const account = (try database.get_account(recipient.bytes)).?;
+    try std.testing.expectEqual(@as(u256, 100), account.balance);
 }
 ```
 
 ### Differential Test Pattern
 
+`test/differential/` runs the same bytecode through the Performance EVM and
+MinimalEvm (`src/tracer/minimal_evm.zig`) and compares the results. revm is no
+longer used (src/modules.build.zig).
+
 ```zig
-// In test/differential/*.zig
-test "ADD matches revm implementation" {
+// In test/differential/*.zig (from stop_opcode_test.zig)
+const DifferentialTestor = @import("differential_testor.zig").DifferentialTestor;
+
+test "differential: PUSH1 5 PUSH1 3 ADD" {
     const allocator = std.testing.allocator;
+
+    var testor = try DifferentialTestor.init(allocator);
+    defer testor.deinit();
 
     const bytecode = [_]u8{
         0x60, 0x05,  // PUSH1 5
@@ -434,58 +472,66 @@ test "ADD matches revm implementation" {
         0x00,        // STOP
     };
 
-    // Execute in Guillotine
-    const guillotine_result = try runGuillotine(allocator, &bytecode);
-    defer allocator.free(guillotine_result.output);
-
-    // Execute in revm (via FFI)
-    const revm_result = try runRevm(allocator, &bytecode);
-    defer allocator.free(revm_result.output);
-
-    // Compare
-    try std.testing.expectEqual(guillotine_result.gas_used, revm_result.gas_used);
-    try std.testing.expectEqualSlices(u8, guillotine_result.output, revm_result.output);
+    // Fails the test if success, gas, output or trace differ
+    try testor.test_bytecode(&bytecode);
 }
 ```
 
+The per-opcode tests in `test/evm/opcodes/NN_test.zig` (`zig build test-opcodes`)
+run bytecode through `evm.Evm` in Debug. As of 2026-11-23, 127 of the 138 files
+contain no `expect` call, so they catch crashes, leaks and logged errors but not
+wrong results. The tracer's MinimalEvm validation is off by default
+(`TracerConfig.enable_validation = false`).
+
 ### Spec Test Format
 
-Ethereum execution spec tests use JSON fixtures:
+`zig build state-tests` reads official pre-filled EEST state test fixtures
+(fetch them with `scripts/fetch-eest-fixtures.sh`). Each case lists the
+expected post-state root and logs hash per fork:
 
 ```json
 {
-    "test_name": {
+    "<file>::<test name>": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
-            "currentGasLimit": "0x1000000",
-            "currentNumber": "0x1",
-            "currentTimestamp": "0x3e8"
+            "currentGasLimit": "0x05f5e100",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentBaseFee": "0x0a"
         },
         "pre": {
             "0x1000000000000000000000000000000000000001": {
-                "balance": "0x0",
-                "code": "0x6001600101",
-                "nonce": "0x0",
+                "balance": "0x00",
+                "code": "0x6001600101600055",
+                "nonce": "0x00",
                 "storage": {}
             }
         },
-        "exec": {
-            "address": "0x1000000000000000000000000000000000000001",
-            "caller": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
-            "gas": "0x100000",
-            "data": "0x",
-            "value": "0x0"
+        "transaction": {
+            "data": ["0x"],
+            "gasLimit": ["0x0186a0"],
+            "gasPrice": "0x0a",
+            "nonce": "0x00",
+            "to": "0x1000000000000000000000000000000000000001",
+            "value": ["0x00"],
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
         },
         "post": {
-            "0x1000000000000000000000000000000000000001": {
-                "storage": {
-                    "0x0": "0x2"
+            "Cancun": [
+                {
+                    "hash": "0x<post-state root>",
+                    "logs": "0x<RLP logs hash>",
+                    "indexes": { "data": 0, "gas": 0, "value": 0 }
                 }
-            }
+            ]
         }
     }
 }
 ```
+
+A case passes when the post-state root equals `hash` and the logs hash equals
+`logs`. See [specs/README.md](../../specs/README.md) for the runner, its flags
+and the current pass rate.
 
 ## Test Philosophy
 
@@ -525,20 +571,25 @@ test "add works" {
 // GOOD: Self-contained, explicit
 test "ADD: 5 + 3 = 8" {
     const allocator = std.testing.allocator;
+    const StackType = Stack(.{});
 
-    var frame = try Frame.init(allocator, .{});
-    defer frame.deinit();
+    var stack = try StackType.init(allocator, null);
+    defer stack.deinit(allocator);
 
     // Push operands (3 is top, 5 is second)
-    try frame.stack.push(5);
-    try frame.stack.push(3);
+    try stack.push(5);
+    try stack.push(3);
 
     // Execute ADD
-    try handlers.add(&frame);
+    stack.binary_op_unsafe(struct {
+        fn op(top: u256, second: u256) u256 {
+            return top +% second;
+        }
+    }.op);
 
     // Verify result
-    try std.testing.expectEqual(@as(u256, 8), frame.stack.peek(0));
-    try std.testing.expectEqual(@as(usize, 1), frame.stack.size());
+    try std.testing.expectEqual(@as(u256, 8), try stack.peek());
+    try std.testing.expectEqual(@as(usize, 1), stack.size());
 }
 ```
 
@@ -554,51 +605,67 @@ Benefits:
 
 ```
 test/
+├── root.zig                # Integration test root (zig build test-integration)
 ├── evm/                    # Full EVM execution tests
 │   ├── access_list_test.zig
-│   ├── erc20_deploy_test.zig
+│   ├── erc20_deployment_issue.zig
 │   ├── transfer_test.zig
-│   └── snailtracer_test.zig
-├── differential/           # Comparison with revm
-│   ├── math_ops_test.zig
-│   ├── stack_ops_test.zig
-│   ├── storage_ops_test.zig
+│   └── opcodes/            # Per-opcode tests (zig build test-opcodes)
+├── differential/           # Comparison with MinimalEvm
+│   ├── math_operations_test.zig
+│   ├── stack_operations_test.zig
+│   ├── storage_operations_test.zig
 │   └── precompiles_test.zig
 ├── fusion/                 # Opcode fusion tests
-├── fuzz/                   # Fuzz testing
-├── eips_and_hardforks/     # EIP-specific tests
-├── execution-spec-tests/   # Ethereum spec tests
-└── official/               # Official Ethereum tests
+├── fuzz/                   # Fuzz targets (zig build test-fuzz)
+├── eips_and_hardforks/     # EIP override tests
+├── provider/               # RPC provider tests
+└── official/               # Execution-spec fixture smoke tests (zig build test-official)
 ```
+
+Spec runners live in `specs/`, not `test/` (see [specs/README.md](../../specs/README.md)).
 
 ### Mini EVM Tests
 
 ```
 mini/test/
 ├── specs/
+│   ├── root.zig            # Spec test root
 │   ├── runner.zig          # Test runner infrastructure
 │   ├── test_host.zig       # Mock host implementation
 │   └── assembler.zig       # Bytecode assembly
+├── fuzz/                   # Fuzz tests (zig build test-mini-fuzz)
 └── unit_test_helpers.zig   # Test utilities
 ```
 
 ## Build Options
 
 ```bash
-# Hardfork selection
-zig build test -Devm-hardfork=CANCUN
-
 # Optimization level
-zig build test -Doptimize=ReleaseSafe
+zig build test-unit -Doptimize=ReleaseSafe
 
-# Disable gas checks (testing only)
-zig build test -Devm-disable-gas=true
+# Test filtering (pass once; a repeated -D option fails)
+zig build test-unit -Dtest-filter='storage'
 
-# Enable/disable fusion
-zig build test -Devm-enable-fusion=true
+# Fork selection for EEST state tests
+zig build state-tests -Dspec-fork=Cancun,Prague
 
-# Test filtering
-zig build test -Dtest-filter='storage'
+# Instruction tracing (the only -D EVM option code reads)
+zig build test-unit -Denable-tracing=true
+```
+
+build.zig also declares `-Devm-hardfork`, `-Devm-enable-fusion`,
+`-Devm-disable-gas`, `-Devm-optimize`, `-Ddisable-tailcall-dispatch`,
+`-Ddisable-balance-checks` and the size and limit options (`-Dstack-size`,
+`-Dmemory-limit`, ...), but no code reads them. Change behavior through the
+comptime `EvmConfig` fields in src/evm_config.zig instead:
+
+```zig
+const Engine = evm.Evm(.{
+    .eips = .{ .hardfork = .CANCUN },  // default OSAKA
+    .enable_fusion = false,            // default true
+    .disable_gas_checks = true,        // default false
+});
 ```
 
 ## Expected Output
@@ -610,12 +677,12 @@ zig build test -Dtest-filter='storage'
 │                                                                             │
 │   PASS: No output at all                                                    │
 │   ──────────────────────                                                    │
-│   $ zig build test                                                          │
+│   $ zig build test-opcodes                                                  │
 │   $                            ← Empty output = all passed                  │
 │                                                                             │
 │   FAIL: Error messages printed                                              │
 │   ────────────────────────────                                              │
-│   $ zig build test                                                          │
+│   $ zig build test-opcodes                                                  │
 │   Test [1/10] test.my_test... FAIL                                         │
 │   error: expected 8, found 5                                               │
 │                                                                             │
@@ -628,15 +695,14 @@ zig build test -Dtest-filter='storage'
 
 ### "Module not found" Error
 
-```
-error: module 'primitives' not found
-```
+`zig test` on a single source file fails to resolve imports such as
+`@import("voltaire")`, because only build.zig wires up those modules.
 
-**Solution**: Use `zig build test`, not `zig test src/file.zig`
+**Solution**: Use a `zig build` test step, not `zig test src/file.zig`
 
 ```bash
 # WRONG
-zig test src/frame.zig
+zig test src/frame/frame.zig
 
 # RIGHT
 zig build test-unit -Dtest-filter='frame'
@@ -649,7 +715,7 @@ Possible causes:
 
 1. Infinite loop in handler
    └── Check loop termination conditions
-   └── Safety counter should trigger after 300M iterations
+   └── In Debug and ReleaseSafe, the tracer's safety counter panics after 300M instructions
 
 2. Blocking on stdin
    └── Tests should not require input
@@ -664,7 +730,7 @@ Possible causes:
 
 ```bash
 # Run with leak detection (automatic with std.testing.allocator)
-zig build test -Doptimize=Debug
+zig build test-unit -Doptimize=Debug
 ```
 
 ```zig
@@ -701,33 +767,51 @@ Test sometimes passes, sometimes fails:
 
 ## Mini EVM Specific Commands
 
+Run these from `mini/` (mini has its own build.zig). From the repository root,
+`zig build test-mini`, `test-mini-specs`, `test-mini-full` and `test-mini-fuzz`
+wrap them.
+
 ```bash
-# Run all mini tests
-cd mini && zig build test
+cd mini
+
+# Run all mini tests (spec tests need Python and uv)
+zig build test
 
 # Cancun-specific tests
 zig build specs-cancun-tstore-basic
 zig build specs-cancun-mcopy
 
-# Hardfork specs
+# Hardfork specs (frontier, homestead, byzantium, constantinople, istanbul,
+# berlin, paris, shanghai, cancun, prague, osaka)
 zig build specs-berlin
-zig build specs-london
 zig build specs-shanghai
 zig build specs-cancun
+zig build specs-prague
 ```
 
 ## Safety Counter
 
-The EVM includes a safety counter to prevent infinite loops:
+Two counters stop runaway execution:
+
+- **Performance EVM**: the tracer's `instruction_safety` counter
+  (`SafetyCounter(u64, .enabled)` from src/internal/safety_counter.zig)
+  increments in `Tracer.before_instruction` and panics at 300,000,000
+  instructions. Handlers call it through `beforeInstruction`, which runs only in
+  Debug and ReleaseSafe builds.
+- **Mini EVM**: `Frame.execute` returns `error.ExecutionTimeout` after
+  `config.loop_quota` iterations (1,000,000 in Debug and ReleaseSafe, no limit
+  otherwise).
 
 ```zig
-const LOOP_QUOTA: u64 = 300_000_000;  // 300 million instructions
-
-// Checked in each handler
-if (self.instruction_counter >= LOOP_QUOTA) {
-    return Error.InfiniteLoop;
+// src/internal/safety_counter.zig
+pub fn inc(self: *Self) void {
+    if (mode == .disabled) return;
+    self.count += 1;
+    if (self.count >= self.limit) {
+        // logs the count and limit, then:
+        @panic("EVM instruction limit exceeded - possible infinite loop or excessive bytecode execution");
+    }
 }
-self.instruction_counter += 1;
 ```
 
-If tests hang, this will eventually trigger.
+If tests hang in a Debug build, the panic eventually fires.

@@ -1,5 +1,7 @@
 # Guillotine Mini - TypeScript EVM Implementation
 
+> **Status:** This page describes a TypeScript port of guillotine-mini whose sources (`evm.ts`, `frame.ts`, `storage.ts`, `instructions/*.ts`) and npm package (`guillotine-mini-ts`) do not exist in this repository. `mini/` contains only TypeScript helpers (`mini/src/utils/*.ts`, `mini/src/precompiles/index.ts`) and WASM examples (`mini/examples/typescript/*.ts`). Treat the APIs and benchmarks below as a design sketch, not working code.
+
 A minimal, correct, and well-tested Ethereum Virtual Machine (EVM) implementation in TypeScript, prioritizing specification compliance, clarity, and hardfork support (Frontier through Prague).
 
 ## Overview
