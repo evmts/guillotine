@@ -653,37 +653,6 @@ pub fn build(b: *std.Build) void {
         erc20_transfer_step.dependOn(&run_erc20_transfer_test.step);
     }
 
-    // Static jumps test - temporarily disabled as file was removed
-    // TODO: Re-enable when test/evm/static_jumps.zig is restored
-    // {
-    //     const static_jumps_test = b.addTest(.{
-    //         .name = "static_jumps_test",
-    //         .root_module = b.createModule(.{
-    //             .root_source_file = b.path("test/evm/static_jumps.zig"),
-    //             .target = target,
-    //             .optimize = optimize,
-    //         }),
-    //     });
-    //
-    //     static_jumps_test.root_module.addImport("evm", modules.evm_mod);
-    //     static_jumps_test.root_module.addImport("voltaire", modules.primitives_mod);
-    //     static_jumps_test.root_module.addImport("crypto", modules.crypto_mod);
-    //     static_jumps_test.root_module.addImport("build_options", options_mod);
-    //
-    //     // Link required libraries
-    //     static_jumps_test.linkLibrary(c_kzg_lib);
-    //     static_jumps_test.linkLibrary(blst_lib);
-    //     if (bn254_lib) |bn254| static_jumps_test.linkLibrary(bn254);
-    //     static_jumps_test.linkLibC();
-    //
-    //     const run_static_jumps_test = b.addRunArtifact(static_jumps_test);
-    //     const static_jumps_step = b.step("test-static-jumps", "Run static jumps test");
-    //     static_jumps_step.dependOn(&run_static_jumps_test.step);
-    //
-    //     // Add to main test step
-    //     test_step.dependOn(&run_static_jumps_test.step);
-    // }
-
     // CODECOPY+RETURN test
     {
         const codecopy_test = b.addTest(.{
@@ -967,14 +936,6 @@ pub fn build(b: *std.Build) void {
 
     const specs_bun_step = b.step("specs-bun", "Run Ethereum execution spec tests (Bun/TypeScript version) - use -Dspec-max-files=N to limit, -Dtest-filter=pattern to filter");
     specs_bun_step.dependOn(&run_specs_bun.step);
-
-    // Language bindings
-    // Language bindings - TODO: Re-enable when SDK build files are created
-    // _ = WasmBindings.createWasmSteps(b, optimize, options_mod);
-    // _ = PythonBindings.createPythonSteps(b);
-    // _ = SwiftBindings.createSwiftSteps(b);
-    // _ = GoBindings.createGoSteps(b);
-    // _ = TypeScriptBindings.createTypeScriptSteps(b);
 
     // Focused fusion tests aggregator
     {
