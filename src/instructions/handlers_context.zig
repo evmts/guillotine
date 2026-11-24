@@ -1,4 +1,5 @@
 const std = @import("std");
+const limits = @import("evm_limits");
 const FrameConfig = @import("../frame/frame_config.zig").FrameConfig;
 const log = @import("../log.zig");
 const primitives = @import("voltaire");
@@ -204,7 +205,7 @@ pub fn Handlers(FrameType: type) type {
                 self.afterComplete(.CALLDATACOPY);
                 return Error.OutOfBounds;
             };
-            if (new_size > std.math.maxInt(u24)) {
+            if (new_size > limits.max_memory_size) {
                 self.afterComplete(.CALLDATACOPY);
                 return Error.OutOfBounds;
             }
@@ -285,7 +286,7 @@ pub fn Handlers(FrameType: type) type {
 
             // Calculate gas cost for memory expansion and copy operation
             const new_size = dest_offset_usize + length_usize;
-            if (new_size > std.math.maxInt(u24)) {
+            if (new_size > limits.max_memory_size) {
                 return Error.OutOfBounds;
             }
             const memory_expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(new_size)));
@@ -424,7 +425,7 @@ pub fn Handlers(FrameType: type) type {
                 self.afterComplete(.EXTCODECOPY);
                 return Error.OutOfBounds;
             };
-            if (new_size > std.math.maxInt(u24)) {
+            if (new_size > limits.max_memory_size) {
                 self.afterComplete(.EXTCODECOPY);
                 return Error.OutOfBounds;
             }
@@ -613,7 +614,7 @@ pub fn Handlers(FrameType: type) type {
                 self.afterComplete(.RETURNDATACOPY);
                 return Error.OutOfBounds;
             };
-            if (new_size > std.math.maxInt(u24)) {
+            if (new_size > limits.max_memory_size) {
                 self.afterComplete(.RETURNDATACOPY);
                 return Error.OutOfBounds;
             }

@@ -1,4 +1,5 @@
 const std = @import("std");
+const limits = @import("evm_limits");
 const log = @import("../log.zig");
 const primitives = @import("voltaire");
 const pc_tracker_mod = @import("pc_tracker.zig");
@@ -75,25 +76,6 @@ pub const Tracer = struct {
     };
 
     pub fn init(allocator: std.mem.Allocator, config: TracerConfig) Tracer {
-        if (!config.enabled) return .{
-            .config = config,
-            .allocator = allocator,
-            .steps = std.ArrayList(ExecutionStep){},
-            .advanced_steps = std.ArrayList(AdvancedStep){},
-            .pc_tracker = null,
-            .gas_tracker = null,
-            .current_pc = 0,
-            .bytecode = &[_]u8{},
-            .minimal_evm = null,
-            .instruction_count = 0,
-            .schedule_index = 0,
-            .simple_instruction_count = 0,
-            .fused_instruction_count = 0,
-            // 300M instruction safety limit
-            .instruction_safety = SafetyCounter(u64, .enabled).init(300_000_000),
-            .recent_opcodes = RingBuffer.init(),
-        };
-
         return .{
             .config = config,
             .allocator = allocator,
@@ -108,9 +90,7 @@ pub const Tracer = struct {
             .schedule_index = 0,
             .simple_instruction_count = 0,
             .fused_instruction_count = 0,
-            // 300M instructions is ~10x the block gas limit
-            // Normal contracts execute far fewer instructions
-            .instruction_safety = SafetyCounter(u64, .enabled).init(300_000_000),
+            .instruction_safety = SafetyCounter(u64, .enabled).init(limits.max_instructions),
             .recent_opcodes = RingBuffer.init(),
         };
     }

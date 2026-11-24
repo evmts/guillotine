@@ -60,7 +60,7 @@ pub const OPCODE_INFO = blk: {
 
     // 0x30s: Environmental Information
     info[0x30] = .{ .gas_cost = GasConstants.GasQuickStep, .stack_inputs = 0, .stack_outputs = 1 }; // ADDRESS
-    info[0x31] = .{ .gas_cost = 100, .stack_inputs = 1, .stack_outputs = 1 }; // BALANCE (warm access)
+    info[0x31] = .{ .gas_cost = GasConstants.WarmStorageReadCost, .stack_inputs = 1, .stack_outputs = 1 }; // BALANCE (warm access)
     info[0x32] = .{ .gas_cost = GasConstants.GasQuickStep, .stack_inputs = 0, .stack_outputs = 1 }; // ORIGIN
     info[0x33] = .{ .gas_cost = GasConstants.GasQuickStep, .stack_inputs = 0, .stack_outputs = 1 }; // CALLER
     info[0x34] = .{ .gas_cost = GasConstants.GasQuickStep, .stack_inputs = 0, .stack_outputs = 1 }; // CALLVALUE
@@ -70,11 +70,11 @@ pub const OPCODE_INFO = blk: {
     info[0x38] = .{ .gas_cost = GasConstants.GasQuickStep, .stack_inputs = 0, .stack_outputs = 1 }; // CODESIZE
     info[0x39] = .{ .gas_cost = GasConstants.GasFastestStep, .stack_inputs = 3, .stack_outputs = 0 }; // CODECOPY (dynamic, base cost)
     info[0x3a] = .{ .gas_cost = GasConstants.GasQuickStep, .stack_inputs = 0, .stack_outputs = 1 }; // GASPRICE
-    info[0x3b] = .{ .gas_cost = 100, .stack_inputs = 1, .stack_outputs = 1 }; // EXTCODESIZE (warm access)
-    info[0x3c] = .{ .gas_cost = 100, .stack_inputs = 4, .stack_outputs = 0 }; // EXTCODECOPY (warm access, dynamic)
+    info[0x3b] = .{ .gas_cost = GasConstants.WarmStorageReadCost, .stack_inputs = 1, .stack_outputs = 1 }; // EXTCODESIZE (warm access)
+    info[0x3c] = .{ .gas_cost = GasConstants.WarmStorageReadCost, .stack_inputs = 4, .stack_outputs = 0 }; // EXTCODECOPY (warm access, dynamic)
     info[0x3d] = .{ .gas_cost = GasConstants.GasQuickStep, .stack_inputs = 0, .stack_outputs = 1 }; // RETURNDATASIZE
     info[0x3e] = .{ .gas_cost = GasConstants.GasFastestStep, .stack_inputs = 3, .stack_outputs = 0 }; // RETURNDATACOPY (dynamic, base cost)
-    info[0x3f] = .{ .gas_cost = 100, .stack_inputs = 1, .stack_outputs = 1 }; // EXTCODEHASH (warm access)
+    info[0x3f] = .{ .gas_cost = GasConstants.WarmStorageReadCost, .stack_inputs = 1, .stack_outputs = 1 }; // EXTCODEHASH (warm access)
 
     // 0x40s: Block Information
     info[0x40] = .{ .gas_cost = 20, .stack_inputs = 1, .stack_outputs = 1 }; // BLOCKHASH
@@ -94,7 +94,7 @@ pub const OPCODE_INFO = blk: {
     info[0x51] = .{ .gas_cost = GasConstants.GasFastestStep, .stack_inputs = 1, .stack_outputs = 1 }; // MLOAD (dynamic)
     info[0x52] = .{ .gas_cost = GasConstants.GasFastestStep, .stack_inputs = 2, .stack_outputs = 0 }; // MSTORE (dynamic)
     info[0x53] = .{ .gas_cost = GasConstants.GasFastestStep, .stack_inputs = 2, .stack_outputs = 0 }; // MSTORE8 (dynamic)
-    info[0x54] = .{ .gas_cost = 100, .stack_inputs = 1, .stack_outputs = 1 }; // SLOAD (warm access)
+    info[0x54] = .{ .gas_cost = GasConstants.WarmStorageReadCost, .stack_inputs = 1, .stack_outputs = 1 }; // SLOAD (warm access)
     // SSTORE has no static part: the EIP-2200 sentry check must see the gas left before
     // any SSTORE cost, so the handler charges the whole EIP-2200/2929 cost itself.
     info[0x55] = .{ .gas_cost = 0, .stack_inputs = 2, .stack_outputs = 0 }; // SSTORE (fully dynamic)
@@ -104,8 +104,8 @@ pub const OPCODE_INFO = blk: {
     info[0x59] = .{ .gas_cost = GasConstants.GasQuickStep, .stack_inputs = 0, .stack_outputs = 1 }; // MSIZE
     info[0x5a] = .{ .gas_cost = GasConstants.GasQuickStep, .stack_inputs = 0, .stack_outputs = 1 }; // GAS
     info[0x5b] = .{ .gas_cost = 1, .stack_inputs = 0, .stack_outputs = 0 }; // JUMPDEST
-    info[0x5c] = .{ .gas_cost = 100, .stack_inputs = 1, .stack_outputs = 1 }; // TLOAD (warm access)
-    info[0x5d] = .{ .gas_cost = 100, .stack_inputs = 2, .stack_outputs = 0 }; // TSTORE (warm access)
+    info[0x5c] = .{ .gas_cost = GasConstants.TLoadGas, .stack_inputs = 1, .stack_outputs = 1 }; // TLOAD (warm access)
+    info[0x5d] = .{ .gas_cost = GasConstants.TStoreGas, .stack_inputs = 2, .stack_outputs = 0 }; // TSTORE (warm access)
     info[0x5e] = .{ .gas_cost = GasConstants.GasFastestStep, .stack_inputs = 3, .stack_outputs = 0 }; // MCOPY (dynamic, base cost)
     info[@intFromEnum(Opcode.PUSH0)] = .{ .gas_cost = GasConstants.GasQuickStep, .stack_inputs = 0, .stack_outputs = 1 };
 
@@ -137,14 +137,14 @@ pub const OPCODE_INFO = blk: {
     // CREATE/CREATE2: Evm.executeCreate/executeCreate2 charge CreateGas (32000) with the
     // EIP-3860 and EIP-1014 word costs, so no part of the cost is static block gas.
     info[0xf0] = .{ .gas_cost = 0, .stack_inputs = 3, .stack_outputs = 1 }; // CREATE
-    info[0xf1] = .{ .gas_cost = 100, .stack_inputs = 7, .stack_outputs = 1 }; // CALL (warm access, dynamic)
-    info[0xf2] = .{ .gas_cost = 100, .stack_inputs = 7, .stack_outputs = 1 }; // CALLCODE (warm access, dynamic)
+    info[0xf1] = .{ .gas_cost = GasConstants.CALL_BASE_COST, .stack_inputs = 7, .stack_outputs = 1 }; // CALL (warm access, dynamic)
+    info[0xf2] = .{ .gas_cost = GasConstants.CALL_BASE_COST, .stack_inputs = 7, .stack_outputs = 1 }; // CALLCODE (warm access, dynamic)
     info[0xf3] = .{ .gas_cost = 0, .stack_inputs = 2, .stack_outputs = 0 }; // RETURN (dynamic)
-    info[0xf4] = .{ .gas_cost = 100, .stack_inputs = 6, .stack_outputs = 1 }; // DELEGATECALL (warm access, dynamic)
+    info[0xf4] = .{ .gas_cost = GasConstants.CALL_BASE_COST, .stack_inputs = 6, .stack_outputs = 1 }; // DELEGATECALL (warm access, dynamic)
     info[0xf5] = .{ .gas_cost = 0, .stack_inputs = 4, .stack_outputs = 1 }; // CREATE2
     info[0xf6] = .{ .gas_cost = 3100, .stack_inputs = 5, .stack_outputs = 1 }; // AUTH (EIP-3074: pops sig_s, sig_r, sig_v, commitment, authority)
-    info[0xf7] = .{ .gas_cost = 100, .stack_inputs = 8, .stack_outputs = 1 }; // AUTHCALL (EIP-3074)
-    info[0xfa] = .{ .gas_cost = 100, .stack_inputs = 6, .stack_outputs = 1 }; // STATICCALL (warm access, dynamic)
+    info[0xf7] = .{ .gas_cost = GasConstants.CALL_BASE_COST, .stack_inputs = 8, .stack_outputs = 1 }; // AUTHCALL (EIP-3074)
+    info[0xfa] = .{ .gas_cost = GasConstants.CALL_BASE_COST, .stack_inputs = 6, .stack_outputs = 1 }; // STATICCALL (warm access, dynamic)
     info[0xfd] = .{ .gas_cost = 0, .stack_inputs = 2, .stack_outputs = 0 }; // REVERT (dynamic)
     info[0xfe] = .{ .gas_cost = 0, .stack_inputs = 0, .stack_outputs = 0 }; // INVALID
     info[0xff] = .{ .gas_cost = 5000, .stack_inputs = 1, .stack_outputs = 0 }; // SELFDESTRUCT (dynamic)

@@ -22,6 +22,7 @@ pub const MemoryError = @import("memory/memory.zig").MemoryError;
 
 // EVM main module and configuration
 pub const Evm = @import("evm.zig").Evm;
+pub const limits = @import("evm_limits");
 pub const EvmConfig = @import("evm_config.zig").EvmConfig;
 pub const layer2 = @import("layer2/mod.zig");
 

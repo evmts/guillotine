@@ -29,6 +29,8 @@ pub fn createWasmSteps(
     wasm_crypto_mod.addImport("build_options", build_options_mod);
     wasm_primitives_mod.addImport("crypto", wasm_crypto_mod);
 
+    const limits = b.createModule(.{ .root_source_file = b.path("src/limits.zig") });
+
     // Build the EVM library module (needed by C API)
     const wasm_evm_mod = b.createModule(.{
         .root_source_file = b.path("src/root.zig"),
@@ -36,6 +38,7 @@ pub fn createWasmSteps(
         .optimize = wasm_optimize,
         .single_threaded = true,
     });
+    wasm_evm_mod.addImport("evm_limits", limits);
     wasm_evm_mod.addImport("voltaire", wasm_primitives_mod);
     wasm_evm_mod.addImport("crypto", wasm_crypto_mod);
     wasm_evm_mod.addImport("build_options", build_options_mod);
@@ -73,6 +76,7 @@ pub fn createWasmSteps(
         .optimize = .Debug,
         .single_threaded = true,
     });
+    wasm_evm_debug_mod.addImport("evm_limits", limits);
     wasm_evm_debug_mod.addImport("voltaire", wasm_primitives_mod);
     wasm_evm_debug_mod.addImport("crypto", wasm_crypto_mod);
     wasm_evm_debug_mod.addImport("build_options", build_options_mod);
@@ -171,6 +175,7 @@ pub fn createMinimalEvmWasm(
         .optimize = .ReleaseSmall,
         .single_threaded = true,
     });
+    tracer_c_mod.addAnonymousImport("evm_limits", .{ .root_source_file = b.path("src/limits.zig") });
     tracer_c_mod.addImport("voltaire", wasm_primitives_mod);
     tracer_c_mod.addImport("crypto", wasm_crypto_mod);
 

@@ -1,3 +1,4 @@
+const limits = @import("evm_limits");
 const primitives = @import("voltaire");
 const AccessList = @import("../storage/access_list.zig").AccessList;
 const GasConstants = primitives.GasConstants;
@@ -340,25 +341,25 @@ pub const Eips = struct {
     /// Berlin hardfork introduced access lists and changed gas costs
     pub fn eip_2929_cold_sload_cost(self: Self) u64 {
         if (!self.hardfork.isAtLeast(.BERLIN)) return 200;
-        return 2100;
+        return GasConstants.ColdSloadCost;
     }
 
     /// EIP-2929: Warm storage access cost
     pub fn eip_2929_warm_storage_read_cost(self: Self) u64 {
         if (!self.hardfork.isAtLeast(.BERLIN)) return 200;
-        return 100;
+        return GasConstants.WarmStorageReadCost;
     }
 
     /// EIP-2929: Cold account access cost
     pub fn eip_2929_cold_account_access_cost(self: Self) u64 {
         if (!self.hardfork.isAtLeast(.BERLIN)) return 700;
-        return 2600;
+        return GasConstants.ColdAccountAccessCost;
     }
 
     /// EIP-2929: Warm account access cost
     pub fn eip_2929_warm_account_access_cost(self: Self) u64 {
         if (!self.hardfork.isAtLeast(.BERLIN)) return 700;
-        return 100;
+        return GasConstants.WarmStorageReadCost;
     }
 
     /// EIP-1559: Fee market change for ETH 1.0 chain
@@ -402,8 +403,8 @@ pub const Eips = struct {
     // Pre-Shanghai: 24KB limit (EIP-170)
     // Post-Shanghai: 48KB limit
     pub fn size_limit(self: Self) u64 {
-        if (self.is_eip_active(3860)) return 0xC000;
-        return 0x6000;
+        if (self.is_eip_active(3860)) return limits.max_initcode_size;
+        return limits.max_code_size;
     }
 
     /// EIP-3860: Initcode gas cost per word
@@ -418,14 +419,14 @@ pub const Eips = struct {
     /// Prague hardfork introduced authorization lists
     pub fn eip_7702_per_auth_base_cost(self: Self) i64 {
         if (!self.hardfork.isAtLeast(.PRAGUE)) return 0;
-        return 12500;
+        return primitives.Authorization.PER_AUTH_BASE_COST;
     }
 
     /// EIP-7702: Additional gas cost for empty account
     /// Prague hardfork introduced authorization lists
     pub fn eip_7702_per_empty_account_cost(self: Self) i64 {
         if (!self.hardfork.isAtLeast(.PRAGUE)) return 0;
-        return 25000;
+        return primitives.Authorization.PER_EMPTY_ACCOUNT_COST;
     }
 
     /// Get all active EIPs for the current hardfork
@@ -490,7 +491,7 @@ pub const Eips = struct {
     pub fn eip_170_max_code_size(self: Self) u32 {
         // EIP-170: Contract code size limit (Spurious Dragon)
         if (!self.is_eip_active(170)) return 0xFFFFFF; // No limit
-        return 0x6000; // 24KB limit
+        return limits.max_code_size; // 24KB limit
     }
 
     /// EIP-3541: Check if bytecode starting with 0xEF should be rejected
@@ -589,13 +590,13 @@ pub const Eips = struct {
 
         // EIP-2929 (Berlin+): Add cold access cost if applicable
         if (self.hardfork.isAtLeast(.BERLIN) and is_cold) {
-            gas += 2100; // Cold SLOAD cost
+            gas += GasConstants.ColdSloadCost;
         }
 
         // EIP-1283/EIP-2200: Net gas metering based on state transitions
         if (current == new) {
             // No-op: storing same value
-            gas += if (self.hardfork.isAtLeast(.BERLIN)) 100 else 200;
+            gas += if (self.hardfork.isAtLeast(.BERLIN)) GasConstants.WarmStorageReadCost else 200;
         } else if (original == current) {
             // First time writing to this slot in the current transaction
             if (original == 0) {
@@ -613,7 +614,7 @@ pub const Eips = struct {
             }
         } else {
             // Slot was already modified in this transaction (dirty write)
-            gas += if (self.hardfork.isAtLeast(.BERLIN)) 100 else 200;
+            gas += if (self.hardfork.isAtLeast(.BERLIN)) GasConstants.WarmStorageReadCost else 200;
 
             // EIP-1283/EIP-2200: Complex refund logic for reverting changes
             if (original != 0) {

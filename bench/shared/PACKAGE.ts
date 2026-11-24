@@ -8,6 +8,7 @@ const buildScripts = S.Filegroup({
     S.file("//src/modules.build.zig"),
     S.file("//src/build.zig"),
     S.file("//src/pure_exports.zig"),
+    S.file("//src/limits.zig"),
     S.file("//src/voltaire_exports.zig"),
     S.file("//lib/build.zig"),
     S.file("//lib/foundry.zig"),

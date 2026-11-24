@@ -1,6 +1,7 @@
 /// Minimal Frame implementation for tracing
 /// This mirrors the architecture of frame/frame.zig but simplified for validation
 const std = @import("std");
+const limits = @import("evm_limits");
 const primitives = @import("voltaire");
 const minimal_evm_mod = @import("minimal_evm.zig");
 const GasConstants = primitives.GasConstants;
@@ -88,7 +89,7 @@ pub const MinimalFrame = struct {
         hardfork: Hardfork,
     ) !Self {
         var stack = std.ArrayList(u256){};
-        try stack.ensureTotalCapacity(allocator, 1024);
+        try stack.ensureTotalCapacity(allocator, limits.stack_capacity);
         errdefer stack.deinit(allocator);
 
         var memory_map = std.AutoHashMap(u32, u8).init(allocator);
@@ -140,7 +141,7 @@ pub const MinimalFrame = struct {
 
     /// Push value onto stack
     pub fn pushStack(self: *Self, value: u256) MinimalEvmError!void {
-        if (self.stack.items.len >= 1024) {
+        if (self.stack.items.len >= limits.stack_capacity) {
             return error.StackOverflow;
         }
         try self.stack.append(self.allocator, value);
@@ -1337,7 +1338,7 @@ pub const MinimalFrame = struct {
 
                 const len = std.math.cast(u32, length) orelse return error.OutOfBounds;
                 // EIP-3860 (Shanghai+): initcode exceeds max size (49152) -> OutOfGas
-                if (evm.hardfork.isAtLeast(.SHANGHAI) and len > 49152) {
+                if (evm.hardfork.isAtLeast(.SHANGHAI) and len > limits.max_initcode_size) {
                     return error.OutOfGas;
                 }
                 // Init code is read from memory: charge expansion over [offset, offset+len)
@@ -1721,7 +1722,7 @@ pub const MinimalFrame = struct {
 
                 const len = std.math.cast(u32, length) orelse return error.OutOfBounds;
                 // EIP-3860 (Shanghai+): initcode exceeds max size (49152) -> OutOfGas
-                if (evm.hardfork.isAtLeast(.SHANGHAI) and len > 49152) {
+                if (evm.hardfork.isAtLeast(.SHANGHAI) and len > limits.max_initcode_size) {
                     return error.OutOfGas;
                 }
                 // Init code is read from memory: charge expansion over [offset, offset+len)

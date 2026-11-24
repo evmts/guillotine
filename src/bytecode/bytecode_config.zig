@@ -1,4 +1,5 @@
 const std = @import("std");
+const limits = @import("evm_limits");
 const builtin = @import("builtin");
 const SafetyCounter = @import("../internal/safety_counter.zig").SafetyCounter;
 const Mode = @import("../internal/safety_counter.zig").Mode;
@@ -11,9 +12,9 @@ pub const BytecodeConfig = struct {
     // defaults to true
     fusions_enabled: bool = true,
     /// The maximum amount of bytes allowed in contract code
-    max_bytecode_size: u32 = 24576,
+    max_bytecode_size: u32 = limits.max_code_size,
     /// The maximum amount of bytes allowed in initcode (EIP-3860)
-    max_initcode_size: u32 = 49152,
+    max_initcode_size: u32 = limits.max_initcode_size,
     /// Loop quota for safety counters to prevent infinite loops
     /// null = disabled (default for optimized builds)
     /// value = maximum iterations before panic (default for debug/safe builds)

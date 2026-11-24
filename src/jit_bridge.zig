@@ -3,6 +3,7 @@
 //! independently of the frame's active memory.
 
 const std = @import("std");
+const limits = @import("evm_limits");
 const jit = @import("jit/root.zig");
 const log = @import("log.zig");
 
@@ -165,7 +166,7 @@ pub fn Bridge(comptime EvmType: type, comptime FrameType: type) type {
         fn returnData(ctx: *jit.JitContext, revert: u32) callconv(.c) u32 {
             const offset = ctx.stack_ptr[0];
             const size = ctx.stack_ptr[1];
-            const limit = std.math.maxInt(u24);
+            const limit = limits.max_memory_size;
             if (offset > limit or size > limit or offset + size > limit) {
                 return @intFromEnum(jit.ExitCode.out_of_bounds);
             }

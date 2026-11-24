@@ -1,4 +1,5 @@
 const std = @import("std");
+const limits = @import("evm_limits");
 const builtin = @import("builtin");
 const SafetyCounter = @import("../internal/safety_counter.zig").SafetyCounter;
 const Mode = @import("../internal/safety_counter.zig").Mode;
@@ -9,16 +10,16 @@ pub const FrameConfig = struct {
     /// specialized frame never reads fork rules through a default-EVM cast.
     hardfork: @import("../eips_and_hardforks/eips.zig").Hardfork = .CANCUN,
     /// The maximum stack size for the evm. Defaults to 1024
-    stack_size: u12 = 1024,
+    stack_size: u12 = limits.stack_capacity,
 
     /// The size of a single word in the EVM - Defaults to u256
     WordType: type = u256,
 
     /// The maximum amount of bytes allowed in contract code
-    max_bytecode_size: u32 = 24576,
+    max_bytecode_size: u32 = limits.max_code_size,
 
     /// The maximum amount of bytes allowed in contract deployment
-    max_initcode_size: u32 = 49152,
+    max_initcode_size: u32 = limits.max_initcode_size,
 
     /// The maximum gas limit for a block
     block_gas_limit: u64 = 30_000_000,
@@ -27,7 +28,7 @@ pub const FrameConfig = struct {
     memory_initial_capacity: usize = 4096,
 
     /// The limit on how much the EVM should be allowed to allocate. Default is 0xffffff. This should be plenty for most bytecode and gas limits
-    memory_limit: u64 = 0xFFFFFF,
+    memory_limit: u64 = limits.max_memory_size,
 
     /// Database implementation type for storage operations (always required).
     DatabaseType: type,

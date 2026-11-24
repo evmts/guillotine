@@ -6,6 +6,7 @@
 /// - ISZERO-JUMPI: Combined conditional jump
 /// - DUP2-MSTORE-PUSH: Optimized memory pattern
 const std = @import("std");
+const limits = @import("evm_limits");
 const FrameConfig = @import("../frame/frame_config.zig").FrameConfig;
 const log = @import("../log.zig");
 
@@ -168,7 +169,7 @@ pub fn Handlers(FrameType: type) type {
             const mem_value = self.stack.pop_unsafe();
 
             // Check for overflow before casting
-            if (offset > std.math.maxInt(u24)) {
+            if (offset > limits.max_memory_size) {
                 self.afterComplete(.DUP2_MSTORE_PUSH);
                 return Error.OutOfBounds;
             }
@@ -211,7 +212,7 @@ pub fn Handlers(FrameType: type) type {
             const data = self.stack.pop_unsafe();
 
             // Check for overflow before casting
-            if (offset > std.math.maxInt(u24)) {
+            if (offset > limits.max_memory_size) {
                 self.afterComplete(.DUP3_ADD_MSTORE);
                 return Error.OutOfBounds;
             }
@@ -413,7 +414,7 @@ pub fn Handlers(FrameType: type) type {
             const offset = self.stack.pop_unsafe();
 
             // Check for overflow before casting
-            if (offset > std.math.maxInt(u24)) {
+            if (offset > limits.max_memory_size) {
                 self.afterComplete(.MLOAD_SWAP1_DUP2);
                 return Error.OutOfBounds;
             }
@@ -702,7 +703,7 @@ test "mload_swap1_dup2 validates stack constraints" {
 test "dup2_mstore_push checks offset overflow" {
     const testing = std.testing;
     // Test that offset > maxInt(u24) is properly detected
-    const max_valid_offset: u256 = std.math.maxInt(u24);
+    const max_valid_offset: u256 = limits.max_memory_size;
     const invalid_offset: u256 = max_valid_offset + 1;
 
     try testing.expect(max_valid_offset == 0xFFFFFF);
@@ -712,7 +713,7 @@ test "dup2_mstore_push checks offset overflow" {
 test "dup3_add_mstore checks offset overflow" {
     const testing = std.testing;
     // Test that offset > maxInt(u24) is properly detected
-    const max_valid_offset: u256 = std.math.maxInt(u24);
+    const max_valid_offset: u256 = limits.max_memory_size;
     const invalid_offset: u256 = max_valid_offset + 1;
 
     try testing.expect(max_valid_offset == 0xFFFFFF);
@@ -722,7 +723,7 @@ test "dup3_add_mstore checks offset overflow" {
 test "mload_swap1_dup2 checks offset overflow" {
     const testing = std.testing;
     // Test that offset > maxInt(u24) is properly detected
-    const max_valid_offset: u256 = std.math.maxInt(u24);
+    const max_valid_offset: u256 = limits.max_memory_size;
     const invalid_offset: u256 = max_valid_offset + 1;
 
     try testing.expect(max_valid_offset == 0xFFFFFF);
@@ -784,12 +785,12 @@ test "intCast safety - all handlers check before casting" {
     const unsafe_offset: u256 = 0x1000000; // > maxInt(u24)
 
     // Safe pattern:
-    if (safe_offset > std.math.maxInt(u24)) {
+    if (safe_offset > limits.max_memory_size) {
         return error.Overflow;
     }
     const safe_cast = @as(u24, @intCast(safe_offset));
     try testing.expectEqual(@as(u24, 1000), safe_cast);
 
     // Unsafe pattern would fail:
-    try testing.expect(unsafe_offset > std.math.maxInt(u24));
+    try testing.expect(unsafe_offset > limits.max_memory_size);
 }

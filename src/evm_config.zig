@@ -1,4 +1,5 @@
 const std = @import("std");
+const limits = @import("evm_limits");
 const builtin = @import("builtin");
 const FrameConfig = @import("frame/frame_config.zig").FrameConfig;
 const BlockInfoConfig = @import("frame/block_info_config.zig").BlockInfoConfig;
@@ -35,7 +36,7 @@ pub const EvmConfig = struct {
 
     /// Maximum call depth allowed in the EVM (defaults to 1024 levels)
     /// This prevents infinite recursion and stack overflow attacks
-    max_call_depth: u11 = 1024,
+    max_call_depth: u11 = limits.max_call_depth,
 
     /// Maximum input size for interpreter operations (128 KB)
     /// This prevents excessive memory usage in single operations
@@ -71,16 +72,16 @@ pub const EvmConfig = struct {
 
     // Frame configuration fields (previously nested)
     /// The maximum stack size for the evm. Defaults to 1024
-    stack_size: u12 = 1024,
+    stack_size: u12 = limits.stack_capacity,
 
     /// The size of a single word in the EVM - Defaults to u256
     WordType: type = u256,
 
     /// The maximum amount of bytes allowed in contract code
-    max_bytecode_size: u32 = 24576,
+    max_bytecode_size: u32 = limits.max_code_size,
 
     /// The maximum amount of bytes allowed in contract deployment
-    max_initcode_size: u32 = 49152,
+    max_initcode_size: u32 = limits.max_initcode_size,
 
     /// The maximum gas limit for a block
     block_gas_limit: u64 = 30_000_000,
@@ -88,7 +89,7 @@ pub const EvmConfig = struct {
     /// Memory configuration
     memory_initial_capacity: usize = 4096,
 
-    memory_limit: u64 = 0xFFFFFF,
+    memory_limit: u64 = limits.max_memory_size,
 
     /// Arena allocator configuration
     /// Initial and maximum retained capacity for the arena allocator (in bytes)

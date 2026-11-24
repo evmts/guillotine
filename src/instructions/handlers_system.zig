@@ -1,8 +1,10 @@
 const std = @import("std");
+const limits = @import("evm_limits");
 const log = @import("../log.zig");
 const FrameConfig = @import("../frame/frame_config.zig").FrameConfig;
 const primitives = @import("voltaire");
 const Address = primitives.Address;
+const GasConstants = primitives.GasConstants;
 // Access to call params through the call params module
 const call_params_mod = @import("../frame/call_params.zig");
 const Opcode = @import("../opcodes/opcode_data.zig").Opcode;
@@ -97,8 +99,7 @@ pub fn Handlers(FrameType: type) type {
 
             const max_mem_end = @max(input_mem_end, output_mem_end);
 
-            // Check if memory expansion exceeds u24 limit (16MB)
-            if (max_mem_end > std.math.maxInt(u24)) {
+            if (max_mem_end > limits.max_memory_size) {
                 // Memory expansion exceeds limit - return failure
                 self.stack.push_unsafe(0);
                 const op_data = dispatch.getOpData(.CALL);
@@ -132,8 +133,8 @@ pub fn Handlers(FrameType: type) type {
 
             // Charge additional access cost beyond base (cold adds 2500, warm adds 0)
             // Base cost of 100 is already charged by dispatch, access_address returns 2600 for cold or 100 for warm
-            if (access_cost > 100) {
-                const additional_access_cost = access_cost - 100;
+            if (access_cost > GasConstants.CALL_BASE_COST) {
+                const additional_access_cost = access_cost - GasConstants.CALL_BASE_COST;
                 self.gas_remaining -= @intCast(additional_access_cost);
                 if (self.gas_remaining < 0) {
                     return Error.OutOfGas;
@@ -147,7 +148,7 @@ pub fn Handlers(FrameType: type) type {
 
             // Charge value transfer cost (9000 gas)
             if (has_value_transfer) {
-                self.gas_remaining -= @intCast(primitives.GasConstants.CALL_VALUE_TRANSFER_COST);
+                self.gas_remaining -= @intCast(GasConstants.CALL_VALUE_TRANSFER_COST);
                 if (self.gas_remaining < 0) {
                     return Error.OutOfGas;
                 }
@@ -155,7 +156,7 @@ pub fn Handlers(FrameType: type) type {
 
             // Charge new account creation cost (25000 gas)
             if (is_new_account) {
-                self.gas_remaining -= @intCast(primitives.GasConstants.CALL_NEW_ACCOUNT_COST);
+                self.gas_remaining -= @intCast(GasConstants.CALL_NEW_ACCOUNT_COST);
                 if (self.gas_remaining < 0) {
                     return Error.OutOfGas;
                 }
@@ -204,7 +205,7 @@ pub fn Handlers(FrameType: type) type {
             const avail_after_costs: u64 = @as(u64, @intCast(@max(self.gas_remaining, 0)));
             const max_forwardable: u64 = avail_after_costs - (avail_after_costs / 64);
             const forwarded: u64 = @min(gas_u64_raw, max_forwardable);
-            const callee_gas: u64 = forwarded + (if (has_value_transfer) primitives.GasConstants.CallStipend else 0);
+            const callee_gas: u64 = forwarded + (if (has_value_transfer) GasConstants.CallStipend else 0);
 
             const params = CallParams{
                 .call = .{
@@ -316,8 +317,7 @@ pub fn Handlers(FrameType: type) type {
 
             const max_mem_end = @max(input_mem_end, output_mem_end);
 
-            // Check if memory expansion exceeds u24 limit (16MB)
-            if (max_mem_end > std.math.maxInt(u24)) {
+            if (max_mem_end > limits.max_memory_size) {
                 // Memory expansion exceeds limit - return failure
                 self.stack.push_unsafe(0);
                 const op_data = dispatch.getOpData(.CALLCODE);
@@ -345,15 +345,15 @@ pub fn Handlers(FrameType: type) type {
                 self.afterComplete(.CALLCODE);
                 return Error.AllocationError;
             };
-            if (access_cost_cc > 100) {
-                self.gas_remaining -= @intCast(access_cost_cc - 100);
+            if (access_cost_cc > GasConstants.CALL_BASE_COST) {
+                self.gas_remaining -= @intCast(access_cost_cc - GasConstants.CALL_BASE_COST);
                 if (self.gas_remaining < 0) {
                     self.afterComplete(.CALLCODE);
                     return Error.OutOfGas;
                 }
             }
             if (value != 0) {
-                self.gas_remaining -= @intCast(primitives.GasConstants.CALL_VALUE_TRANSFER_COST);
+                self.gas_remaining -= @intCast(GasConstants.CALL_VALUE_TRANSFER_COST);
                 if (self.gas_remaining < 0) {
                     self.afterComplete(.CALLCODE);
                     return Error.OutOfGas;
@@ -394,7 +394,7 @@ pub fn Handlers(FrameType: type) type {
             // value-transferring callcode also grants the callee a 2300 gas stipend.
             const avail_after_costs_cc: u64 = @as(u64, @intCast(@max(self.gas_remaining, 0)));
             const forwarded_cc: u64 = @min(gas_u64_raw, avail_after_costs_cc - (avail_after_costs_cc / 64));
-            const callee_gas_cc: u64 = forwarded_cc + (if (value != 0) primitives.GasConstants.CallStipend else 0);
+            const callee_gas_cc: u64 = forwarded_cc + (if (value != 0) GasConstants.CallStipend else 0);
             const call_params = CallParams{
                 .callcode = .{
                     .caller = self.contract_address,
@@ -501,8 +501,7 @@ pub fn Handlers(FrameType: type) type {
 
             const max_mem_end = @max(input_mem_end, output_mem_end);
 
-            // Check if memory expansion exceeds u24 limit (16MB)
-            if (max_mem_end > std.math.maxInt(u24)) {
+            if (max_mem_end > limits.max_memory_size) {
                 // Memory expansion exceeds limit - return failure
                 self.stack.push_unsafe(0);
                 const op_data = dispatch.getOpData(.DELEGATECALL);
@@ -528,8 +527,8 @@ pub fn Handlers(FrameType: type) type {
                 self.afterComplete(.DELEGATECALL);
                 return Error.AllocationError;
             };
-            if (access_cost_dc > 100) {
-                self.gas_remaining -= @intCast(access_cost_dc - 100);
+            if (access_cost_dc > GasConstants.CALL_BASE_COST) {
+                self.gas_remaining -= @intCast(access_cost_dc - GasConstants.CALL_BASE_COST);
                 if (self.gas_remaining < 0) {
                     self.afterComplete(.DELEGATECALL);
                     return Error.OutOfGas;
@@ -674,8 +673,7 @@ pub fn Handlers(FrameType: type) type {
 
             const max_mem_end = @max(input_mem_end, output_mem_end);
 
-            // Check if memory expansion exceeds u24 limit (16MB)
-            if (max_mem_end > std.math.maxInt(u24)) {
+            if (max_mem_end > limits.max_memory_size) {
                 // Memory expansion exceeds limit - return failure
                 self.stack.push_unsafe(0);
                 const op_data = dispatch.getOpData(.STATICCALL);
@@ -701,8 +699,8 @@ pub fn Handlers(FrameType: type) type {
                 self.afterComplete(.STATICCALL);
                 return Error.AllocationError;
             };
-            if (access_cost_sc > 100) {
-                self.gas_remaining -= @intCast(access_cost_sc - 100);
+            if (access_cost_sc > GasConstants.CALL_BASE_COST) {
+                self.gas_remaining -= @intCast(access_cost_sc - GasConstants.CALL_BASE_COST);
                 if (self.gas_remaining < 0) {
                     self.afterComplete(.STATICCALL);
                     return Error.OutOfGas;
@@ -808,7 +806,10 @@ pub fn Handlers(FrameType: type) type {
             // A zero-size init code touches no memory, whatever the offset.
             var init_code: []const u8 = &.{};
             if (size != 0) {
-                if (offset > std.math.maxInt(u24) or size > std.math.maxInt(u24) or offset + size > std.math.maxInt(u24)) {
+                if (offset > limits.max_memory_size or
+                    size > limits.max_memory_size or
+                    offset + size > limits.max_memory_size)
+                {
                     self.afterComplete(.CREATE);
                     return Error.OutOfGas;
                 }
@@ -898,7 +899,10 @@ pub fn Handlers(FrameType: type) type {
             // A zero-size init code touches no memory, whatever the offset.
             var init_code: []const u8 = &.{};
             if (size != 0) {
-                if (offset > std.math.maxInt(u24) or size > std.math.maxInt(u24) or offset + size > std.math.maxInt(u24)) {
+                if (offset > limits.max_memory_size or
+                    size > limits.max_memory_size or
+                    offset + size > limits.max_memory_size)
+                {
                     self.afterComplete(.CREATE2);
                     return Error.OutOfGas;
                 }
@@ -996,8 +1000,10 @@ pub fn Handlers(FrameType: type) type {
 
             // Calculate gas cost for memory expansion
             const memory_end = offset_usize + size_usize;
-            // Check if values fit in u24 (memory limit)
-            if (offset_usize > std.math.maxInt(u24) or size_usize > std.math.maxInt(u24) or memory_end > std.math.maxInt(u24)) {
+            if (offset_usize > limits.max_memory_size or
+                size_usize > limits.max_memory_size or
+                memory_end > limits.max_memory_size)
+            {
                 return Error.OutOfBounds;
             }
             const memory_expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(memory_end)));
@@ -1053,8 +1059,10 @@ pub fn Handlers(FrameType: type) type {
 
             // Calculate gas cost for memory expansion
             const memory_end = offset_usize + size_usize;
-            // Check if values fit in u24 (memory limit)
-            if (offset_usize > std.math.maxInt(u24) or size_usize > std.math.maxInt(u24) or memory_end > std.math.maxInt(u24)) {
+            if (offset_usize > limits.max_memory_size or
+                size_usize > limits.max_memory_size or
+                memory_end > limits.max_memory_size)
+            {
                 return Error.OutOfBounds;
             }
             const memory_expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(memory_end)));
@@ -1314,8 +1322,7 @@ pub fn Handlers(FrameType: type) type {
 
             const max_mem_end = @max(input_mem_end, output_mem_end);
 
-            // Check if memory expansion exceeds u24 limit (16MB)
-            if (max_mem_end > std.math.maxInt(u24)) {
+            if (max_mem_end > limits.max_memory_size) {
                 // Memory expansion exceeds limit - return failure
                 self.stack.push_unsafe(0);
                 const op_data = dispatch.getOpData(.AUTHCALL);
@@ -2588,7 +2595,7 @@ test "CALLCODE handler - afterComplete on memory expansion error" {
     try frame.stack.push(100000); // gas
     try frame.stack.push(0x1234); // address
     try frame.stack.push(0); // value
-    try frame.stack.push(std.math.maxInt(u24) + 1); // input_offset (exceeds limit)
+    try frame.stack.push(limits.max_memory_size + 1); // input_offset (exceeds limit)
     try frame.stack.push(1); // input_size
     try frame.stack.push(0); // output_offset
     try frame.stack.push(0); // output_size
@@ -2778,7 +2785,7 @@ test "AUTHCALL handler - u24 memory limit check" {
     try frame.stack.push(100000); // gas
     try frame.stack.push(0x1234); // to
     try frame.stack.push(0); // value
-    try frame.stack.push(std.math.maxInt(u24) + 1); // input_offset (exceeds u24)
+    try frame.stack.push(limits.max_memory_size + 1); // input_offset (exceeds u24)
     try frame.stack.push(1); // input_size
     try frame.stack.push(0); // output_offset
     try frame.stack.push(0); // output_size

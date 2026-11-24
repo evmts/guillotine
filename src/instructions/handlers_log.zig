@@ -1,4 +1,5 @@
 const std = @import("std");
+const limits = @import("evm_limits");
 const FrameConfig = @import("../frame/frame_config.zig").FrameConfig;
 const log = @import("../log.zig");
 const primitives = @import("voltaire");
@@ -69,7 +70,7 @@ pub fn Handlers(FrameType: type) type {
                     var memory_expansion_cost: u64 = 0;
                     if (length_usize > 0) {
                         const end_offset = offset_usize + length_usize;
-                        if (end_offset > std.math.maxInt(u24)) {
+                        if (end_offset > limits.max_memory_size) {
                             self.afterComplete(unified_opcode);
                             return Error.OutOfBounds;
                         }

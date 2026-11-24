@@ -9,6 +9,7 @@ pub const SuiteOptions = struct {
     directory: std.Build.LazyPath,
     repository: std.Build.LazyPath,
     evm: *std.Build.Module,
+    limits: *std.Build.Module,
     voltaire: *std.Build.Module,
     crypto: *std.Build.Module,
     precompiles: *std.Build.Module,
@@ -63,11 +64,14 @@ pub fn addSuiteSteps(b: *std.Build, opts: SuiteOptions) void {
         .optimize = opts.optimize,
     });
 
+    pure_mod.addImport("evm_limits", opts.limits);
+
     const voltaire_exports = b.createModule(.{
         .root_source_file = opts.repository.path(b, "src/voltaire_exports.zig"),
         .target = opts.target,
         .optimize = opts.optimize,
     });
+    voltaire_exports.addImport("evm_limits", opts.limits);
     voltaire_exports.addImport("voltaire", opts.voltaire);
 
     // 1. Stack

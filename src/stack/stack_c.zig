@@ -10,10 +10,7 @@ const Stack = evm.Stack;
 const allocator = std.heap.c_allocator;
 
 // Default stack configuration (EVM standard)
-const DefaultStackConfig = StackConfig{
-    .stack_size = 1024,
-    .WordType = u256,
-};
+const DefaultStackConfig = StackConfig{};
 
 // ============================================================================
 // ERROR CODES

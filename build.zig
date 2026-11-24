@@ -1182,6 +1182,7 @@ pub fn build(b: *std.Build) void {
         .optimize = .ReleaseFast,
     });
     bench_evm_raw.addImport("build_options", bench_flags_mod);
+    bench_evm_raw.addImport("evm_limits", modules.limits_mod);
     bench_evm_raw.addImport("voltaire", modules.primitives_mod);
     bench_evm_raw.addImport("crypto", modules.crypto_mod);
     bench_evm_raw.addImport("precompiles", modules.precompiles_mod);
@@ -1194,6 +1195,7 @@ pub fn build(b: *std.Build) void {
         .gas_limit = bench_gas_limit,
     });
     bench_suites.addSuiteSteps(b, .{
+        .limits = modules.limits_mod,
         .target = target,
         .optimize = .ReleaseFast,
         .directory = b.path("bench"),

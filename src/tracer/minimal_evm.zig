@@ -2,6 +2,7 @@
 /// This is a simplified, unoptimized EVM that orchestrates execution.
 /// Architecture mirrors evm.zig - MinimalEvm orchestrates, MinimalFrame executes
 const std = @import("std");
+const limits = @import("evm_limits");
 const primitives = @import("voltaire");
 const GasConstants = primitives.GasConstants;
 const MinimalFrame = @import("minimal_frame.zig").MinimalFrame;
@@ -578,7 +579,7 @@ pub const MinimalEvm = struct {
         gas: u64,
         is_static: bool,
     ) Error!CallResult {
-        if (self.frames.items.len >= 1024) {
+        if (self.frames.items.len >= limits.max_call_depth) {
             return CallResult{
                 .success = false,
                 .gas_left = gas,
@@ -698,7 +699,7 @@ pub const MinimalEvm = struct {
         salt_opt: ?u256,
         available_gas: u64,
     ) Error!CreateResult {
-        if (self.frames.items.len >= 1024) {
+        if (self.frames.items.len >= limits.max_call_depth) {
             return CreateResult{
                 .success = false,
                 .gas_left = available_gas,
@@ -826,7 +827,7 @@ pub const MinimalEvm = struct {
             };
         }
         // EIP-170 (Spurious Dragon+): max deployed contract code size = 24576 bytes
-        if (self.hardfork.isAtLeast(.SPURIOUS_DRAGON) and deployed_code.len > 24576) {
+        if (self.hardfork.isAtLeast(.SPURIOUS_DRAGON) and deployed_code.len > limits.max_code_size) {
             self.revertSnapshot(snap);
             return CreateResult{
                 .success = false,

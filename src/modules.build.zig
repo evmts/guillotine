@@ -1,6 +1,7 @@
 const std = @import("std");
 
 pub const ModuleSet = struct {
+    limits_mod: *std.Build.Module,
     lib_mod: *std.Build.Module,
     primitives_mod: *std.Build.Module,
     crypto_mod: *std.Build.Module,
@@ -53,12 +54,15 @@ pub fn createModules(
     });
     provider_mod.addImport("voltaire", primitives_mod);
 
+    const limits = b.addModule("evm_limits", .{ .root_source_file = b.path("src/limits.zig") });
+
     // EVM module - unified src module
     const evm_mod = b.createModule(.{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
     });
+    evm_mod.addImport("evm_limits", limits);
     evm_mod.addImport("voltaire", primitives_mod);
     evm_mod.addImport("crypto", crypto_mod);
     evm_mod.addImport("precompiles", precompiles_mod);
@@ -96,6 +100,7 @@ pub fn createModules(
     });
     lib_mod.addIncludePath(b.path("lib/ark"));
     lib_mod.addImport("build_options", build_options_mod);
+    lib_mod.addImport("evm_limits", limits);
     lib_mod.addImport("voltaire", primitives_mod);
     lib_mod.addImport("crypto", crypto_mod);
     lib_mod.addImport("precompiles", precompiles_mod);
@@ -115,6 +120,7 @@ pub fn createModules(
     exe_mod.addImport("Guillotine_lib", lib_mod);
 
     return ModuleSet{
+        .limits_mod = limits,
         .lib_mod = lib_mod,
         .primitives_mod = primitives_mod,
         .crypto_mod = crypto_mod,

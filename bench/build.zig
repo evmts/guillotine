@@ -24,6 +24,8 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     evm.addImport("build_options", flags_mod);
+    const limits = root.module("evm_limits");
+    evm.addImport("evm_limits", limits);
     evm.addImport("voltaire", voltaire.module("voltaire"));
     evm.addImport("crypto", voltaire.module("crypto"));
     evm.addImport("precompiles", voltaire.module("precompiles"));
@@ -48,6 +50,7 @@ pub fn build(b: *std.Build) void {
     const opt_crypto = steps.optimized(b, voltaire.module("crypto"), optimize, archive, &copies);
     const opt_precompiles = steps.optimized(b, voltaire.module("precompiles"), optimize, archive, &copies);
     suites.addSuiteSteps(b, .{
+        .limits = limits,
         .target = target,
         .optimize = optimize,
         .directory = b.path("."),

@@ -68,8 +68,6 @@ pub fn CallParams(config: anytype) type {
             // Gas must be non-zero to execute any operation
             if (self.getGas() == 0) return ValidationError.GasZeroError;
 
-            // EIP-3860: Limit init code size to 49152 bytes (2 * max contract size)
-            const MAX_INITCODE_SIZE = 49152;
             const MAX_INPUT_SIZE = 1024 * 1024 * 4; // 4MB practical limit for input data
 
             switch (self) {
@@ -93,12 +91,12 @@ pub fn CallParams(config: anytype) type {
                 },
                 .create => |params| {
                     // Validate init code size (EIP-3860)
-                    if (params.init_code.len > MAX_INITCODE_SIZE) return ValidationError.InvalidInitCodeSize;
+                    if (params.init_code.len > limits.max_initcode_size) return ValidationError.InvalidInitCodeSize;
                     // CREATE can have any value, no special validation needed
                 },
                 .create2 => |params| {
                     // Validate init code size (EIP-3860)
-                    if (params.init_code.len > MAX_INITCODE_SIZE) return ValidationError.InvalidInitCodeSize;
+                    if (params.init_code.len > limits.max_initcode_size) return ValidationError.InvalidInitCodeSize;
                     // CREATE2 can have any value, no special validation needed
                 },
             }
@@ -276,6 +274,7 @@ pub fn CallParams(config: anytype) type {
 }
 
 const std = @import("std");
+const limits = @import("evm_limits");
 
 // Default configuration for backward compatibility and tests
 const default_config = struct {};
@@ -870,10 +869,9 @@ test "call params validation - input size limits" {
 
 test "call params validation - init code size limits" {
     const caller = primitives.ZERO_ADDRESS;
-    const MAX_INITCODE_SIZE = 49152; // EIP-3860 limit
 
     // Test with maximum allowed init code size
-    const max_init_code = try std.testing.allocator.alloc(u8, MAX_INITCODE_SIZE);
+    const max_init_code = try std.testing.allocator.alloc(u8, limits.max_initcode_size);
     defer std.testing.allocator.free(max_init_code);
     @memset(max_init_code, 0x60); // PUSH1
 
@@ -895,7 +893,7 @@ test "call params validation - init code size limits" {
     try create2_max.validate(); // Should pass
 
     // Test with oversized init code
-    const oversized_init_code = try std.testing.allocator.alloc(u8, MAX_INITCODE_SIZE + 1);
+    const oversized_init_code = try std.testing.allocator.alloc(u8, limits.max_initcode_size + 1);
     defer std.testing.allocator.free(oversized_init_code);
     @memset(oversized_init_code, 0x60);
 
