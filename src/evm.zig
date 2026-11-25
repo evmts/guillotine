@@ -263,15 +263,8 @@ pub fn Evm(config: EvmConfig) type {
             self.created_contracts.deinit();
             self.self_destruct.deinit();
             self.access_list.deinit();
-            // Free individual log entries before deinit
-            for (self.logs.items) |log_entry| {
-                if (log_entry.topics.len > 0) {
-                    self.allocator.free(log_entry.topics);
-                }
-                if (log_entry.data.len > 0) {
-                    self.allocator.free(log_entry.data);
-                }
-            }
+            // Log topics and data live in the call arena (LOGn and emit_log allocate them
+            // there); call_arena.deinit below frees them. Only the list itself is owned.
             self.logs.deinit(self.allocator);
             self.touched_addresses.deinit();
             // Clean up touched_storage
@@ -875,6 +868,7 @@ pub fn Evm(config: EvmConfig) type {
 
             const refund_before = self.gas_refund_counter;
             const logs_before = self.logs.items.len;
+            const access_mark = self.access_list.checkpoint();
             var destructions = self.self_destruct.destructions.clone() catch return CallResult.failed(0);
             defer destructions.deinit();
 
@@ -927,6 +921,10 @@ pub fn Evm(config: EvmConfig) type {
                 self.gas_refund_counter = refund_before;
                 self.logs.shrinkRetainingCapacity(logs_before);
                 std.mem.swap(@TypeOf(destructions), &destructions, &self.self_destruct.destructions);
+                // The failed frame's warm addresses and slots are discarded too. A
+                // creation keeps its new address warm (generic_create warms it in the
+                // parent), so executeCreate and executeCreate2 roll back themselves.
+                if (!params.isCreate()) self.access_list.revert(access_mark);
             }
 
             // EIP-211: the caller's return data buffer holds the output of the frame that
@@ -1097,8 +1095,13 @@ pub fn Evm(config: EvmConfig) type {
 
             switch (preflight) {
                 .precompile_result => |result| {
-                    // Precompiles succeeded, commit the snapshot
-                    try self.database.commit_snapshot(db_snapshot_id);
+                    // A failed precompile call undoes its value transfer, like any failed call.
+                    if (result.success) {
+                        try self.database.commit_snapshot(db_snapshot_id);
+                    } else {
+                        self.journal.revert_to_snapshot(snapshot_id);
+                        try self.database.revert_to_snapshot(db_snapshot_id);
+                    }
                     return result;
                 },
                 .empty_account => |gas| {
@@ -1181,7 +1184,7 @@ pub fn Evm(config: EvmConfig) type {
                 return result;
             }
 
-            const code = try self.codeAt(params.to);
+            const code = try self.executableCodeAt(params.to);
             if (code.len == 0) {
                 @branchHint(.unlikely);
                 // Empty code, commit snapshot
@@ -1385,15 +1388,25 @@ pub fn Evm(config: EvmConfig) type {
             const retained: u64 = if (!is_transaction and config.eips.hardfork.isAtLeast(.TANGERINE_WHISTLE)) remaining_gas / 64 else 0;
             const forwarded: u64 = remaining_gas - retained;
 
+            // The address derives from the creator's current nonce; a creation transaction's
+            // nonce was already incremented.
+            const creator = (try self.database.get_account(params.caller.bytes)) orelse Account.zero();
+            if (is_transaction and creator.nonce == 0) return error.TransactionNonceNotIncremented;
+            const creation_nonce = if (is_transaction) creator.nonce - 1 else creator.nonce;
+            const contract_address = try primitives.Address.getContractAddress(self.getCallArenaAllocator(), params.caller, creation_nonce);
             // execution-specs generic_create: a creation refused for the depth limit, balance
             // or nonce limit returns the gas it would have forwarded; the CREATE charge
             // stays spent.
             if (!is_transaction and self.depth > config.max_call_depth) {
                 return CallResult.failed(remaining_gas);
             }
-            const creation_nonce = (try self.beginCreate(params.caller, params.value, is_transaction)) orelse
+            if ((try self.beginCreate(params.caller, params.value, is_transaction)) == null) {
                 return CallResult.failed(remaining_gas);
-            const contract_address = try primitives.Address.getContractAddress(self.getCallArenaAllocator(), params.caller, creation_nonce);
+            }
+            // A creation that passes those checks warms its address in the creating frame
+            // before the collision check, so it stays warm whatever the outcome.
+            try self.access_list.pre_warm_addresses(&.{contract_address});
+            const access_mark = self.access_list.checkpoint();
 
             const snapshot_id = try self.journal.create_snapshot();
             const db_snapshot_id = try self.database.create_snapshot();
@@ -1420,8 +1433,10 @@ pub fn Evm(config: EvmConfig) type {
             }) catch {
                 self.journal.revert_to_snapshot(snapshot_id);
                 try self.database.revert_to_snapshot(db_snapshot_id);
+                self.access_list.revert(access_mark);
                 return CallResult.failed(retained);
             };
+            if (!result.success) self.access_list.revert(access_mark);
 
             result.gas_left += retained;
             result.created_address = if (result.success) contract_address else null;
@@ -1460,6 +1475,12 @@ pub fn Evm(config: EvmConfig) type {
             const retained: u64 = if (!is_transaction and config.eips.hardfork.isAtLeast(.TANGERINE_WHISTLE)) remaining_gas / 64 else 0;
             const forwarded: u64 = remaining_gas - retained;
 
+            const keccak_asm = @import("crypto").keccak_asm;
+            var init_code_hash_bytes: [32]u8 = undefined;
+            try keccak_asm.keccak256(params.init_code, &init_code_hash_bytes);
+            var salt_bytes: [32]u8 = undefined;
+            std.mem.writeInt(u256, &salt_bytes, params.salt, .big);
+            const contract_address = primitives.Address.getCreate2Address(params.caller, salt_bytes, init_code_hash_bytes);
             // execution-specs generic_create: a creation refused for the depth limit, balance
             // or nonce limit returns the gas it would have forwarded; the CREATE2 charge
             // stays spent.
@@ -1471,16 +1492,13 @@ pub fn Evm(config: EvmConfig) type {
                 log.debug("CREATE2: insufficient balance or nonce at its limit", .{});
                 return CallResult.failed(remaining_gas);
             }
+            // A creation that passes those checks warms its address in the creating frame
+            // before the collision check, so it stays warm whatever the outcome.
+            try self.access_list.pre_warm_addresses(&.{contract_address});
+            const access_mark = self.access_list.checkpoint();
 
             const snapshot_id = try self.journal.create_snapshot();
             const db_snapshot_id = try self.database.create_snapshot();
-
-            const keccak_asm = @import("crypto").keccak_asm;
-            var init_code_hash_bytes: [32]u8 = undefined;
-            try keccak_asm.keccak256(params.init_code, &init_code_hash_bytes);
-            var salt_bytes: [32]u8 = undefined;
-            std.mem.writeInt(u256, &salt_bytes, params.salt, .big);
-            const contract_address = primitives.Address.getCreate2Address(params.caller, salt_bytes, init_code_hash_bytes);
 
             const existed_before = self.database.account_exists(contract_address.bytes);
             if (existed_before) {
@@ -1506,8 +1524,10 @@ pub fn Evm(config: EvmConfig) type {
             }) catch {
                 self.journal.revert_to_snapshot(snapshot_id);
                 try self.database.revert_to_snapshot(db_snapshot_id);
+                self.access_list.revert(access_mark);
                 return CallResult.failed(retained);
             };
+            if (!result.success) self.access_list.revert(access_mark);
 
             result.gas_left += retained;
             result.created_address = if (result.success) contract_address else null;
@@ -1525,6 +1545,15 @@ pub fn Evm(config: EvmConfig) type {
             existed_before: bool,
         }) !CallResult {
             try self.created_contracts.mark_created(args.contract_address);
+            // execution-specs process_create_message: from Spurious Dragon (EIP-161) the new
+            // account's nonce becomes 1 before the value transfer and init code run, so a
+            // CREATE inside the init code derives its address from nonce 1 and leaves 2.
+            if (comptime config.eips.hardfork.isAtLeast(.SPURIOUS_DRAGON)) {
+                var created = (try self.database.get_account(args.contract_address.bytes)) orelse Account.zero();
+                try self.journal.record_nonce_change(args.snapshot_id, args.contract_address, created.nonce);
+                created.nonce += 1;
+                try self.database.set_account(args.contract_address.bytes, created);
+            }
             if (args.value > 0) {
                 self.transferWithBalanceChecks(args.caller, args.contract_address, args.value, args.snapshot_id) catch {
                     self.journal.revert_to_snapshot(args.snapshot_id);
@@ -1558,10 +1587,6 @@ pub fn Evm(config: EvmConfig) type {
             } orelse Account.zero();
             if (!args.existed_before) {
                 try self.journal.record_account_created(args.snapshot_id, args.contract_address);
-            }
-            if (contract_account.nonce != 1) {
-                try self.journal.record_nonce_change(args.snapshot_id, args.contract_address, contract_account.nonce);
-                contract_account.nonce = 1;
             }
             if (result.output.len > 0) {
                 // EIP-3541: Reject new contract code starting with the 0xEF byte
@@ -1889,18 +1914,37 @@ pub fn Evm(config: EvmConfig) type {
             return self.database.account_exists(address.bytes);
         }
 
-        /// Get account code
+        /// Get account code as EXTCODESIZE, EXTCODECOPY and EXTCODEHASH see it. A
+        /// delegated EOA (EIP-7702) reports its 23-byte delegation designator.
         pub fn get_code(self: *Self, address: primitives.Address) ![]const u8 {
             return self.codeAt(address);
         }
 
-        /// Code executed at `address` (following EIP-7702 delegation). An account that
-        /// does not exist has empty code: calling it succeeds and EXTCODE* see nothing.
+        /// The code stored at `address`, without following delegation. A delegated EOA
+        /// (EIP-7702) has the designator `0xef0100 || delegate` as its code. An account
+        /// that does not exist has empty code: calling it succeeds and EXTCODE* see nothing.
         fn codeAt(self: *Self, address: primitives.Address) ![]const u8 {
-            return self.database.get_code_by_address(address.bytes) catch |err| switch (err) {
-                error.AccountNotFound => &.{},
-                else => return err,
-            };
+            const account = (try self.database.get_account(address.bytes)) orelse return &.{};
+            if (account.get_effective_code_address()) |delegate| {
+                const designator = try self.getCallArenaAllocator().alloc(u8, eips.DELEGATION_DESIGNATOR_LENGTH);
+                @memcpy(designator[0..3], &eips.DELEGATION_PREFIX);
+                @memcpy(designator[3..], &delegate.bytes);
+                return designator;
+            }
+            if (std.mem.eql(u8, &account.code_hash, &@as([32]u8, @splat(0))) or
+                std.mem.eql(u8, &account.code_hash, &primitives.EMPTY_CODE_HASH))
+            {
+                return &.{};
+            }
+            return self.database.get_code(account.code_hash);
+        }
+
+        /// The code a call to `address` runs. EIP-7702 delegation is followed exactly
+        /// once: when the delegate is itself delegated, its designator is the code, and
+        /// executing it halts on the 0xEF byte.
+        fn executableCodeAt(self: *Self, address: primitives.Address) ![]const u8 {
+            const account = try self.database.get_account(address.bytes);
+            return self.codeAt(config.eips.eip_7702_get_effective_code_address(account, address));
         }
 
         /// Get block information
@@ -2113,6 +2157,13 @@ pub fn Evm(config: EvmConfig) type {
 
             // EIP-6780: Handle SELFDESTRUCT based on creation in same transaction
             const created_in_tx = self.created_contracts.was_created_in_tx(contract_address);
+            // Before EIP-161 (Spurious Dragon) crediting the beneficiary creates its account,
+            // even when there is nothing to credit; the empty account then persists.
+            if (comptime !config.eips.hardfork.isAtLeast(.SPURIOUS_DRAGON)) {
+                if ((try self.database.get_account(recipient.bytes)) == null) {
+                    try self.database.set_account(recipient.bytes, Account.zero());
+                }
+            }
             if (created_in_tx or !config.eips.hardfork.isAtLeast(.CANCUN)) {
                 const balance = try self.database.get_balance(contract_address.bytes);
                 if (contract_address.equals(recipient)) {
@@ -8448,4 +8499,85 @@ test "Fused PUSH+ADD keeps the unfused stack-overflow check" {
         try std.testing.expectEqual(program.success, result.success);
         if (!program.success) try std.testing.expectEqual(@as(u64, 0), result.gas_left);
     }
+}
+
+test "EIP-7702 - EXTCODESIZE sees the designator and a self-delegating EOA halts instead of recursing" {
+    // EXTCODESIZE(0x44) -> slot 0; CALL(gas 10000, 0x44) success flag -> slot 1. 0x44
+    // delegates to itself. The failing call burns only the 10000 it was given.
+    const code = [_]u8{ 0x60, 0x44, 0x3b, 0x60, 0x00, 0x55, 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x44, 0x61, 0x27, 0x10, 0xf1, 0x60, 0x01, 0x55, 0x00 };
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
+    var evm = try Evm(.{ .eips = .{ .hardfork = .PRAGUE } }).init(std.testing.allocator, &db, regression_block_info, regression_context, 0, regression_sender);
+    defer evm.deinit();
+    const code_hash = try db.set_code(&code);
+    try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = code_hash, .storage_root = @as([32]u8, @splat(0)) });
+    try db.set_account(regression_callee.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = @as([32]u8, @splat(0)), .storage_root = @as([32]u8, @splat(0)), .delegated_address = regression_callee });
+    try db.set_storage(regression_contract.bytes, 1, 7);
+
+    const result = evm.inner_call(.{ .call = .{ .caller = regression_sender, .to = regression_contract, .value = 0, .input = &.{}, .gas = 200000 } });
+    try std.testing.expect(result.success);
+    try std.testing.expectEqual(@as(u256, 23), try db.get_storage(regression_contract.bytes, 0));
+    // The designator's 0xEF byte is an invalid opcode, so the inner CALL fails.
+    try std.testing.expectEqual(@as(u256, 0), try db.get_storage(regression_contract.bytes, 1));
+}
+
+test "Created contract nonce starts at 1 before init code runs from Spurious Dragon" {
+    // Init code: CREATE(value 0, offset 0, size 0), STOP. The deployed account keeps the
+    // nonce its init code left: 1 (initial) + 1 (inner CREATE) from Spurious Dragon,
+    // 0 + 1 before it.
+    const init_code = [_]u8{ 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0xf0, 0x00 };
+    const cases = [_]struct { fork: primitives.Hardfork, nonce: u64 }{
+        .{ .fork = .HOMESTEAD, .nonce = 1 },
+        .{ .fork = .SPURIOUS_DRAGON, .nonce = 2 },
+        .{ .fork = .CANCUN, .nonce = 2 },
+    };
+    inline for (cases) |case| {
+        var db = Database.init(std.testing.allocator);
+        defer db.deinit();
+        var evm = try Evm(.{ .eips = .{ .hardfork = case.fork } }).init(std.testing.allocator, &db, regression_block_info, regression_context, 0, regression_sender);
+        defer evm.deinit();
+        try db.set_account(regression_sender.bytes, Account{ .balance = 1000000, .nonce = 0, .code_hash = @as([32]u8, @splat(0)), .storage_root = @as([32]u8, @splat(0)) });
+
+        const result = evm.inner_call(.{ .create = .{ .caller = regression_sender, .value = 0, .init_code = &init_code, .gas = 500000 } });
+        try std.testing.expect(result.success);
+        const created = result.created_address orelse return error.TestExpectedCreatedAddress;
+        const account = (try db.get_account(created.bytes)) orelse return error.TestExpectedCreatedAccount;
+        try std.testing.expectEqual(case.nonce, account.nonce);
+    }
+}
+
+test "Transaction creation does not pay CreateGas or EIP-3860 initcode words again" {
+    // 33 bytes of STOP: 2 initcode words. Intrinsic gas already covered CreateGas and the
+    // words, so a transaction-level creation hands all of its gas back.
+    const init_code = @as([33]u8, @splat(0x00));
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
+    var evm = try Evm(.{ .eips = .{ .hardfork = .SHANGHAI } }).init(std.testing.allocator, &db, regression_block_info, regression_context, 0, regression_sender);
+    defer evm.deinit();
+    // The transaction already incremented the sender nonce from 0 to 1.
+    try db.set_account(regression_sender.bytes, Account{ .balance = 1000000, .nonce = 1, .code_hash = @as([32]u8, @splat(0)), .storage_root = @as([32]u8, @splat(0)) });
+    evm.tx_sender_nonce_incremented = true;
+
+    const result = evm.inner_call(.{ .create = .{ .caller = regression_sender, .value = 0, .init_code = &init_code, .gas = 100000 } });
+    try std.testing.expect(result.success);
+    try std.testing.expectEqual(@as(u64, 100000), result.gas_left);
+    try std.testing.expectEqual(@as(u64, 1), (try db.get_account(regression_sender.bytes)).?.nonce);
+}
+
+test "Logs left by inner_call are arena-owned and freed once by deinit" {
+    // MSTORE(0, 0xff); LOG1(offset 0, size 32, topic 7); STOP. inner_call keeps the logs
+    // for the caller to read; deinit must not free their arena-owned topics and data.
+    const code = [_]u8{ 0x60, 0xff, 0x60, 0x00, 0x52, 0x60, 0x07, 0x60, 0x20, 0x60, 0x00, 0xa1, 0x00 };
+    var db = Database.init(std.testing.allocator);
+    defer db.deinit();
+    var evm = try Evm(.{ .eips = .{ .hardfork = .CANCUN } }).init(std.testing.allocator, &db, regression_block_info, regression_context, 0, regression_sender);
+    defer evm.deinit();
+    const code_hash = try db.set_code(&code);
+    try db.set_account(regression_contract.bytes, Account{ .balance = 0, .nonce = 1, .code_hash = code_hash, .storage_root = @as([32]u8, @splat(0)) });
+
+    const result = evm.inner_call(.{ .call = .{ .caller = regression_sender, .to = regression_contract, .value = 0, .input = &.{}, .gas = 100000 } });
+    try std.testing.expect(result.success);
+    try std.testing.expectEqual(@as(usize, 1), evm.logs.items.len);
+    try std.testing.expectEqualSlices(u256, &.{7}, evm.logs.items[0].topics);
+    try std.testing.expectEqual(@as(usize, 32), evm.logs.items[0].data.len);
 }

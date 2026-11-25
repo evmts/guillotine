@@ -1293,14 +1293,15 @@ fn applyTx(
     try touched.put(a, env.coinbase, {});
     if (template.to) |to| try touched.put(a, to, {});
 
-    // Buy gas. CREATE increments the creator nonce inside the EVM, so only a
-    // message call increments it here.
+    // Buy gas and increment the sender nonce. A creation transaction derives its
+    // address from the pre-increment nonce (`tx_nonce`).
     var sender = try accountOrZero(db, template.sender);
     sender.balance -= @as(u256, validated.gas_limit) * gas_price + validated.blob_fee;
-    if (template.to != null) sender.nonce = tx_nonce + 1;
+    sender.nonce = tx_nonce + 1;
     try db.set_account(template.sender, sender);
 
     const blob_hashes: []const [32]u8 = template.blob_hashes orelse &.{};
+    const prevrandao: [32]u8 = env.random orelse zero_hash;
     var vm = try Vm.init(
         gpa,
         db,
@@ -1308,11 +1309,13 @@ fn applyTx(
             .chain_id = test_case.chain_id,
             .number = env.number,
             .timestamp = env.timestamp,
-            .difficulty = if (fork.atLeast(.Paris)) 0 else env.difficulty,
+            // EIP-4399: from Paris the header's difficulty field carries prevrandao, and
+            // opcode 0x44 (PREVRANDAO) reads it.
+            .difficulty = if (fork.atLeast(.Paris)) std.mem.readInt(u256, &prevrandao, .big) else env.difficulty,
             .gas_limit = env.gas_limit,
             .coinbase = coinbase_address,
             .base_fee = env.base_fee orelse 0,
-            .prev_randao = env.random orelse zero_hash,
+            .prev_randao = prevrandao,
             .blob_base_fee = validated.blob_base_fee,
             .blob_versioned_hashes = blob_hashes,
         },
@@ -1392,12 +1395,16 @@ fn applyTx(
             gas_left = result.gas_left;
         }
     } else {
-        // `Evm.inner_call` charges the 32000 CREATE gas itself.
+        // Intrinsic gas already paid CreateGas and the EIP-3860 initcode words, and the
+        // sender nonce is already incremented. The flag makes the EVM run this as the
+        // transaction's own creation: no opcode CREATE charge, no 1/64 retention, and
+        // the address derived from the pre-increment nonce.
+        vm.tx_sender_nonce_incremented = true;
         const result = vm.inner_call(.{ .create = .{
             .caller = sender_address,
             .value = tx.value,
             .init_code = tx.data,
-            .gas = execution_gas + 32000,
+            .gas = execution_gas,
         } });
         success = result.success;
         gas_left = result.gas_left;
@@ -1412,9 +1419,10 @@ fn applyTx(
     gas_used -= @min(refund_counter, gas_used / refund_quotient);
     if (fork.atLeast(.Prague)) gas_used = @max(gas_used, validated.intrinsic.floor);
 
+    // The nonce was incremented when gas was bought; a self-sponsored EIP-7702
+    // authorization may have incremented it again, so it is not rewritten here.
     sender = try accountOrZero(db, template.sender);
     sender.balance += @as(u256, validated.gas_limit - gas_used) * gas_price;
-    sender.nonce = tx_nonce + 1;
     try db.set_account(template.sender, sender);
 
     // EIP-1559 burns the base fee; the coinbase receives the tip.
@@ -1426,8 +1434,10 @@ fn applyTx(
     const logs_hash = if (success) try logsHash(a, vm.logs.items) else try logsHash(a, vm.logs.items[0..0]);
 
     if (success) {
-        // The EVM records SELFDESTRUCT; the transaction applies it. From
-        // Cancun the record holds only contracts created in this transaction.
+        // The EVM records SELFDESTRUCT and moved the balance when the opcode ran; the
+        // transaction deletes the accounts. Ether an account received after its
+        // SELFDESTRUCT is burned with it. From Cancun the record holds only contracts
+        // created in this transaction.
         const Destruction = struct { contract: [20]u8, recipient: [20]u8 };
         var destructions: std.ArrayList(Destruction) = .empty;
         var destruct_it = vm.self_destruct.iterator();
@@ -1435,12 +1445,6 @@ fn applyTx(
             try destructions.append(a, .{ .contract = entry.key_ptr.bytes, .recipient = entry.value_ptr.bytes });
         }
         for (destructions.items) |destruction| {
-            const contract = (try db.get_account(destruction.contract)) orelse continue;
-            if (contract.balance > 0 and !std.mem.eql(u8, &destruction.contract, &destruction.recipient)) {
-                var recipient = try accountOrZero(db, destruction.recipient);
-                recipient.balance += contract.balance;
-                try db.set_account(destruction.recipient, recipient);
-            }
             try touched.put(a, destruction.recipient, {});
             try destroyAccount(a, db, destruction.contract);
         }
@@ -1567,23 +1571,28 @@ fn runPostFor(
     const logs_match = std.mem.eql(u8, &logs_hash, &post.logs);
     if (root_matches and logs_match) return .pass;
 
+    // The first account difference, appended to receipt mismatches so one line shows
+    // both the symptom and where the state went wrong.
+    const state_failure: ?Outcome.Failure = if (root_matches) null else if (post.state) |state| try diagnoseState(a, &db, state) else null;
+    const state_note: []const u8 = if (state_failure) |failure| try std.fmt.allocPrint(a, "; first state difference: {s}", .{failure.detail}) else "";
+
     if (executed) |result| {
         if (post.receipt) |receipt| {
             if (receipt.status) |status| {
                 if (status != result.success) {
-                    return Outcome.failure("status_mismatch", try std.fmt.allocPrint(a, "expected success={any}, got success={any}, gas used {d}", .{ status, result.success, result.gas_used }));
+                    return Outcome.failure("status_mismatch", try std.fmt.allocPrint(a, "expected success={any}, got success={any}, gas used {d}{s}", .{ status, result.success, result.gas_used, state_note }));
                 }
             }
             if (receipt.gas_used) |gas_used| {
                 if (gas_used != result.gas_used) {
-                    return Outcome.failure("gas_used_mismatch", try std.fmt.allocPrint(a, "expected gas used {d}, got {d}", .{ gas_used, result.gas_used }));
+                    return Outcome.failure("gas_used_mismatch", try std.fmt.allocPrint(a, "expected gas used {d}, got {d}{s}", .{ gas_used, result.gas_used, state_note }));
                 }
             }
         }
     }
     if (!root_matches) {
-        if (post.state) |state| {
-            if (try diagnoseState(a, &db, state)) |failure| return .{ .fail = failure };
+        if (post.state) |_| {
+            if (state_failure) |failure| return .{ .fail = failure };
             return Outcome.failure("state_root_mismatch_unexplained", try std.fmt.allocPrint(a, "accounts match the expected state, root expected {s} got {s}", .{ try hexAlloc(a, &post.hash), try hexAlloc(a, &root) }));
         }
         return Outcome.failure("state_root_mismatch", try std.fmt.allocPrint(a, "expected {s} got {s}", .{ try hexAlloc(a, &post.hash), try hexAlloc(a, &root) }));

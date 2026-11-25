@@ -486,19 +486,23 @@ pub const Database = struct {
         return code;
     }
 
-    /// Get contract code by address (supports EIP-7702 delegation)
+    /// Get contract code by address. An EIP-7702 delegation is followed exactly once:
+    /// a delegate that is itself delegated contributes its own stored code (empty), so a
+    /// delegation loop such as an EOA delegating to itself cannot recurse.
     pub fn get_code_by_address(self: *Database, address: [20]u8) Error![]const u8 {
-        // log.debug("get_code_by_address: Looking for address {x}", .{address});
-
-        // Check all layers for account (uses get_account which already checks cache)
         if (try self.get_account(address)) |account| {
-            // EIP-7702: Check if this EOA has delegated code
             if (account.get_effective_code_address()) |delegated_addr| {
-                // log.debug("get_code_by_address: EOA has delegation to {x}", .{delegated_addr.bytes});
-                // Recursively get code from delegated address
-                return self.get_code_by_address(delegated_addr.bytes);
+                return self.get_stored_code_by_address(delegated_addr.bytes);
             }
+            return self.get_stored_code_by_address(address);
+        }
+        return Error.AccountNotFound;
+    }
 
+    /// Code stored under `address`'s code hash, ignoring EIP-7702 delegation. An
+    /// account without code, or one that does not exist, has empty code.
+    fn get_stored_code_by_address(self: *Database, address: [20]u8) Error![]const u8 {
+        if (try self.get_account(address)) |account| {
             // Check if this is an EOA (all-zero code_hash or EMPTY_CODE_HASH)
             // EOAs don't have code stored, return empty code
             if (std.mem.eql(u8, &account.code_hash, &ZERO_CODE_HASH) or
@@ -507,12 +511,9 @@ pub const Database = struct {
                 return &.{};
             }
 
-            // log.debug("get_code_by_address: Found account with code_hash {x}", .{account.code_hash});
             return self.get_code(account.code_hash);
         }
-
-        // log.debug("get_code_by_address: Account not found for address {x}", .{address});
-        return Error.AccountNotFound;
+        return &.{};
     }
 
     /// Store contract code and return its hash

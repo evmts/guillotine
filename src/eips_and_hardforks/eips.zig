@@ -19,6 +19,16 @@ pub const BlobValidationError = error{
 };
 
 // ============================================================================
+// EIP-7702 (Prague): delegation designator
+// Source: https://eips.ethereum.org/EIPS/eip-7702
+// ============================================================================
+
+/// First three bytes of a delegated EOA's code; the delegate address follows.
+pub const DELEGATION_PREFIX = [3]u8{ 0xef, 0x01, 0x00 };
+/// Length of the code `0xef0100 || delegate` that EXTCODE* see on a delegated EOA.
+pub const DELEGATION_DESIGNATOR_LENGTH: usize = DELEGATION_PREFIX.len + 20;
+
+// ============================================================================
 // EIP-7825 (Osaka): transaction gas limit cap
 // Source: https://eips.ethereum.org/EIPS/eip-7825
 // ============================================================================

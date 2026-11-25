@@ -55,6 +55,13 @@ pub fn Handlers(FrameType: type) type {
             return true;
         }
 
+        /// The address a delegated EOA (EIP-7702) runs the code of, or null.
+        fn delegateOf(self: *FrameType, addr: Address) Error!?Address {
+            const account = self.getEvm().database.get_account(addr.bytes) catch return Error.AllocationError;
+            const existing = account orelse return null;
+            return existing.get_effective_code_address();
+        }
+
         /// CALL, CALLCODE, DELEGATECALL and STATICCALL (execution-specs
         /// `vm/instructions/system.py`). The flat price of the opcode (40, 700 or the
         /// warm access cost, by fork) is static gas already charged with the basic
@@ -103,6 +110,18 @@ pub fn Handlers(FrameType: type) type {
                 return Error.AllocationError;
             };
             var extra_gas: u64 = access_cost -| fork_gas.warm_access_cost;
+
+            // EIP-7702 (Prague+), execution-specs `access_delegation`: a call to a delegated
+            // EOA also pays the full warm or cold access cost of the delegate, which
+            // becomes warm.
+            if (comptime hardfork.isAtLeast(.PRAGUE)) {
+                if (try delegateOf(self, addr)) |delegate| {
+                    extra_gas += evm.access_address(delegate) catch {
+                        self.afterComplete(opcode);
+                        return Error.AllocationError;
+                    };
+                }
+            }
 
             if (value != 0) extra_gas += GasConstants.CallValueTransferGas;
 

@@ -33,7 +33,6 @@ pub const Tracer = struct {
     schedule_index: u64 = 0,
     simple_instruction_count: u64 = 0,
     fused_instruction_count: u64 = 0,
-    nested_depth: u16 = 0,
     instruction_safety: SafetyCounter(u64, .enabled),
     allocator: std.mem.Allocator,
 
@@ -152,8 +151,9 @@ pub const Tracer = struct {
         _ = gas_limit;
         if (!self.config.enable_validation and !self.config.enable_step_capture) return;
         if (self.config.enable_validation) {
-            const main_evm = frame.getEvm();
-            _ = main_evm.depth; // Currently unused but may be needed for inner frame handling
+            // The sidecar mirrors the top-level frame only. A nested frame must not replace
+            // it: the outer frame resumes after the call and is validated against it again.
+            if (frame.getEvm().depth > 1) return;
 
             // Clean up existing MinimalEvm if present
             if (self.minimal_evm) |evm| {
@@ -336,21 +336,25 @@ pub const Tracer = struct {
 
         self.instruction_safety.inc();
 
-        if (self.minimal_evm) |evm| {
-            if (evm.getCurrentFrame()) |mf| {
-                self.debug("Before executeMinimalEvmForOpcode {s}: MinimalEvm stack={d}, Frame stack={d}", .{
-                    opcode_name,
-                    mf.stack.items.len,
-                    frame.stack.size(),
-                });
-            }
-            minimal_evm_sync.executeMinimalEvmForOpcode(self, evm, opcode, frame, cursor);
-            if (evm.getCurrentFrame()) |mf| {
-                self.debug("After executeMinimalEvmForOpcode {s}: MinimalEvm stack={d}, Frame stack={d}", .{
-                    opcode_name,
-                    mf.stack.items.len,
-                    frame.stack.size(),
-                });
+        // Nested frames run inside the top-level CALL/CREATE step of the sidecar, so only
+        // top-level instructions advance it.
+        if (main_evm.depth == 1) {
+            if (self.minimal_evm) |evm| {
+                if (evm.getCurrentFrame()) |mf| {
+                    self.debug("Before executeMinimalEvmForOpcode {s}: MinimalEvm stack={d}, Frame stack={d}", .{
+                        opcode_name,
+                        mf.stack.items.len,
+                        frame.stack.size(),
+                    });
+                }
+                minimal_evm_sync.executeMinimalEvmForOpcode(self, evm, opcode, frame, cursor);
+                if (evm.getCurrentFrame()) |mf| {
+                    self.debug("After executeMinimalEvmForOpcode {s}: MinimalEvm stack={d}, Frame stack={d}", .{
+                        opcode_name,
+                        mf.stack.items.len,
+                        frame.stack.size(),
+                    });
+                }
             }
         }
 
@@ -549,8 +553,8 @@ pub const Tracer = struct {
     /// Validate MinimalEvm state against Frame state
     fn validateMinimalEvmState(self: *Tracer, frame: anytype, comptime opcode: UnifiedOpcode) void {
         if (self.minimal_evm) |evm| {
-            // Skip validation for nested calls
-            if (self.nested_depth > 0) return;
+            // The sidecar mirrors the top-level frame only.
+            if (frame.getEvm().depth > 1) return;
             const opcode_name = @tagName(opcode);
 
             // Compare stack sizes

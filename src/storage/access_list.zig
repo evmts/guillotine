@@ -105,6 +105,25 @@ pub fn createAccessList(comptime config: AccessListConfig) type {
             }
         }
 
+        /// Sizes of the warm sets at one point of execution. Entries are only ever
+        /// appended (or all cleared), so the sizes identify everything warmed later.
+        pub const Checkpoint = struct {
+            addresses: usize,
+            storage_slots: usize,
+        };
+
+        pub fn checkpoint(self: *const Self) Checkpoint {
+            return .{ .addresses = self.addresses.count(), .storage_slots = self.storage_slots.count() };
+        }
+
+        /// Forget every address and storage slot warmed since `mark`. execution-specs
+        /// merges a child frame's accessed addresses and storage keys into its parent
+        /// only when the child succeeds.
+        pub fn revert(self: *Self, mark: Checkpoint) void {
+            self.addresses.shrinkRetainingCapacity(mark.addresses);
+            self.storage_slots.shrinkRetainingCapacity(mark.storage_slots);
+        }
+
         /// Clone the access list
         pub fn clone(self: *const Self) !Self {
             var addresses = try self.addresses.clone(self.allocator);
@@ -976,4 +995,29 @@ test "EIP-2929 - Storage slots with maximum values" {
     const adjacent_slot = max_slot - 1;
     const adjacent_cold = try evm.access_storage_slot(contract_address, adjacent_slot);
     try testing.expectEqual(GasConstants.ColdSloadCost, adjacent_cold);
+}
+
+test "AccessList - revert forgets only what was warmed after the checkpoint" {
+    var access_list = AccessList.init(testing.allocator);
+    defer access_list.deinit();
+
+    const kept = Address{ .bytes = @as([20]u8, @splat(1)) };
+    const dropped = Address{ .bytes = @as([20]u8, @splat(2)) };
+    _ = try access_list.access_address(kept);
+    _ = try access_list.access_storage_slot(kept, 7);
+
+    const mark = access_list.checkpoint();
+    _ = try access_list.access_address(dropped);
+    _ = try access_list.access_storage_slot(kept, 8);
+    _ = try access_list.access_storage_slot(dropped, 7);
+    access_list.revert(mark);
+
+    try testing.expect(access_list.is_address_warm(kept));
+    try testing.expect(access_list.is_storage_slot_warm(kept, 7));
+    try testing.expect(!access_list.is_address_warm(dropped));
+    try testing.expect(!access_list.is_storage_slot_warm(kept, 8));
+    try testing.expect(!access_list.is_storage_slot_warm(dropped, 7));
+    // A reverted entry is cold again, and warming it again works.
+    try testing.expectEqual(AccessList.COLD_ACCOUNT_ACCESS_COST, try access_list.access_address(dropped));
+    try testing.expectEqual(AccessList.WARM_ACCOUNT_ACCESS_COST, try access_list.access_address(dropped));
 }
