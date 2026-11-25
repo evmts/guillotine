@@ -11,7 +11,6 @@ Implements Patricia trie nodes, RLP encoding, hashing (Keccak256), and proof too
 ### Core Implementation
 - **`trie.zig`** - Main trie data structure and core operations
 - **`merkle_trie.zig`** - Merkle tree functionality and root calculation
-- **`module.zig`** - Module exports and type definitions
 - **`root.zig`** - Module entry point and re-exports
 
 ### Hash Builders

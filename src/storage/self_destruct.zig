@@ -3,7 +3,6 @@
 const std = @import("std");
 const primitives = @import("voltaire");
 const Address = primitives.Address;
-const CreatedContracts = @import("created_contracts.zig").CreatedContracts;
 const SelfDestructRecord = @import("../frame/call_result.zig").SelfDestructRecord;
 
 /// Error type for SelfDestruct operations
@@ -137,68 +136,6 @@ pub const SelfDestruct = struct {
         self.replaced.clearRetainingCapacity();
     }
 
-    /// Apply all pending destructions to the given state interface
-    /// This is called at the end of transaction execution
-    /// 
-    /// ## Parameters
-    /// - `state`: The state interface supporting balance transfers and account deletion
-    /// - `created_contracts`: Optional tracker of contracts created in this transaction (for EIP-6780)
-    /// - `chain_rules`: Chain rules to determine if EIP-6780 is active
-    ///
-    /// ## EIP-6780 Behavior (Cancun+)
-    /// - If contract was created in same transaction: Full destruction (balance transfer + deletion)
-    /// - If contract existed before transaction: Only balance transfer, contract remains
-    ///
-    /// ## Pre-Cancun Behavior
-    /// - Always perform full destruction for all marked contracts
-    pub fn apply_destructions(
-        self: *SelfDestruct,
-        state: anytype,
-        created_contracts: ?*const CreatedContracts,
-        chain_rules: anytype,
-    ) !void {
-        const is_cancun = @hasField(@TypeOf(chain_rules), "is_cancun") and chain_rules.is_cancun;
-        
-        var iter = self.iterator();
-        while (iter.next()) |entry| {
-            const contract_addr = entry.key_ptr.*;
-            const recipient_addr = entry.value_ptr.*;
-            
-            // Get the contract's balance before any operations
-            const balance = try state.get_balance(contract_addr);
-            
-            // Transfer balance to recipient (always happens)
-            if (balance > 0) {
-                try state.transfer_balance(contract_addr, recipient_addr, balance);
-            }
-            
-            // Determine if we should fully destroy the contract
-            const should_destroy = if (is_cancun) blk: {
-                // EIP-6780: Only destroy if created in same transaction
-                if (created_contracts) |created| {
-                    break :blk created.was_created_in_tx(contract_addr);
-                }
-                // If no tracking available, assume pre-existing (don't destroy)
-                break :blk false;
-            } else true; // Pre-Cancun: always destroy
-            
-            // Perform full destruction if applicable
-            if (should_destroy) {
-                // Delete contract code
-                try state.set_code(contract_addr, &[_]u8{});
-                
-                // Delete all storage (this would typically iterate through storage keys)
-                try state.clear_storage(contract_addr);
-                
-                // Delete the account itself if it's now empty
-                // (no balance, no code, no storage, nonce = 0)
-                const nonce = try state.get_nonce(contract_addr);
-                if (nonce == 0) {
-                    try state.delete_account(contract_addr);
-                }
-            }
-        }
-    }
 };
 
 test "SelfDestruct - basic marking and checking" {

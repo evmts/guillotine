@@ -63,7 +63,6 @@ pub fn CallParams(config: anytype) type {
 
         pub const ValidationError = error{
             GasZeroError,
-            InvalidInputSize,
             InvalidInitCodeSize,
             InvalidCreateValue,
             InvalidStaticCallValue,
@@ -81,41 +80,20 @@ pub fn CallParams(config: anytype) type {
         /// `config.max_initcode_size`) applies only from Shanghai on; earlier forks
         /// accept init code of any size here.
         pub fn validateFor(self: @This(), hardfork: Hardfork, max_initcode_size: usize) ValidationError!void {
-            const initcode_limit_active = hardfork.isAtLeast(.SHANGHAI);
-            // BUG: we should be checking if gas checks are disabled or not
             // Gas must be non-zero to execute any operation
             if (self.getGas() == 0) return ValidationError.GasZeroError;
 
-            const MAX_INPUT_SIZE = 1024 * 1024 * 4; // 4MB practical limit for input data
-
+            // Input data has no size limit of its own: the gas the caller pays per
+            // calldata byte bounds it.
             switch (self) {
-                .call => |params| {
-                    // Validate input data size
-                    if (params.input.len > MAX_INPUT_SIZE) return ValidationError.InvalidInputSize;
-                },
-                .callcode => |params| {
-                    // Validate input data size
-                    if (params.input.len > MAX_INPUT_SIZE) return ValidationError.InvalidInputSize;
-                },
-                .delegatecall => |params| {
-                    // Validate input data size
-                    if (params.input.len > MAX_INPUT_SIZE) return ValidationError.InvalidInputSize;
-                    // DELEGATECALL doesn't transfer value, validation happens at protocol level
-                },
-                .staticcall => |params| {
-                    // Validate input data size
-                    if (params.input.len > MAX_INPUT_SIZE) return ValidationError.InvalidInputSize;
-                    // STATICCALL cannot have value (enforced by not having value field)
-                },
+                .call, .callcode, .delegatecall, .staticcall => {},
                 .create => |params| {
                     // Validate init code size (EIP-3860, Shanghai and later)
-                    if (initcode_limit_active and params.init_code.len > max_initcode_size) return ValidationError.InvalidInitCodeSize;
-                    // CREATE can have any value, no special validation needed
+                    if (hardfork.isAtLeast(.SHANGHAI) and params.init_code.len > max_initcode_size) return ValidationError.InvalidInitCodeSize;
                 },
                 .create2 => |params| {
                     // Validate init code size (EIP-3860, Shanghai and later)
-                    if (initcode_limit_active and params.init_code.len > max_initcode_size) return ValidationError.InvalidInitCodeSize;
-                    // CREATE2 can have any value, no special validation needed
+                    if (hardfork.isAtLeast(.SHANGHAI) and params.init_code.len > max_initcode_size) return ValidationError.InvalidInitCodeSize;
                 },
             }
         }
@@ -823,66 +801,20 @@ test "call params gas limit edge cases" {
     }
 }
 
-test "call params validation - input size limits" {
+test "call params validation - input data has no size limit" {
     const caller = primitives.ZERO_ADDRESS;
     const to: Address = .{ .bytes = [_]u8{1} ++ @as([19]u8, @splat(0)) };
-    const MAX_INPUT_SIZE = 1024 * 1024 * 4; // 4MB
 
-    // Test with maximum allowed input size
-    const max_input = try std.testing.allocator.alloc(u8, MAX_INPUT_SIZE);
-    defer std.testing.allocator.free(max_input);
-    @memset(max_input, 0xAA);
+    // Larger than the 4 MiB cap this validation once applied. Calldata is bounded
+    // by the gas it costs, not by a fixed size.
+    const input = try std.testing.allocator.alloc(u8, 4 * 1024 * 1024 + 1);
+    defer std.testing.allocator.free(input);
+    @memset(input, 0xBB);
 
-    const call_max = DefaultCallParams{ .call = .{
-        .caller = caller,
-        .to = to,
-        .value = 0,
-        .input = max_input,
-        .gas = 1000000,
-    } };
-    try call_max.validate(); // Should pass
-
-    // Test with oversized input
-    const oversized_input = try std.testing.allocator.alloc(u8, MAX_INPUT_SIZE + 1);
-    defer std.testing.allocator.free(oversized_input);
-    @memset(oversized_input, 0xBB);
-
-    const call_oversized = DefaultCallParams{ .call = .{
-        .caller = caller,
-        .to = to,
-        .value = 0,
-        .input = oversized_input,
-        .gas = 1000000,
-    } };
-    try std.testing.expectError(DefaultCallParams.ValidationError.InvalidInputSize, call_oversized.validate());
-
-    // Test DELEGATECALL with oversized input
-    const delegatecall_oversized = DefaultCallParams{ .delegatecall = .{
-        .caller = caller,
-        .to = to,
-        .input = oversized_input,
-        .gas = 1000000,
-    } };
-    try std.testing.expectError(DefaultCallParams.ValidationError.InvalidInputSize, delegatecall_oversized.validate());
-
-    // Test STATICCALL with oversized input
-    const staticcall_oversized = DefaultCallParams{ .staticcall = .{
-        .caller = caller,
-        .to = to,
-        .input = oversized_input,
-        .gas = 1000000,
-    } };
-    try std.testing.expectError(DefaultCallParams.ValidationError.InvalidInputSize, staticcall_oversized.validate());
-
-    // Test CALLCODE with oversized input
-    const callcode_oversized = DefaultCallParams{ .callcode = .{
-        .caller = caller,
-        .to = to,
-        .value = 0,
-        .input = oversized_input,
-        .gas = 1000000,
-    } };
-    try std.testing.expectError(DefaultCallParams.ValidationError.InvalidInputSize, callcode_oversized.validate());
+    try (DefaultCallParams{ .call = .{ .caller = caller, .to = to, .value = 0, .input = input, .gas = 1000000 } }).validate();
+    try (DefaultCallParams{ .callcode = .{ .caller = caller, .to = to, .value = 0, .input = input, .gas = 1000000 } }).validate();
+    try (DefaultCallParams{ .delegatecall = .{ .caller = caller, .to = to, .input = input, .gas = 1000000 } }).validate();
+    try (DefaultCallParams{ .staticcall = .{ .caller = caller, .to = to, .input = input, .gas = 1000000 } }).validate();
 }
 
 test "call params validation - init code size limits" {

@@ -21,9 +21,9 @@
 //! to the recorded length and restores each previous value, so its cost is the
 //! number of writes being undone, independent of the size of the state.
 //!
-//! The undo log covers every layer a write can land in: base state, the
-//! transaction cache, and the ephemeral overlay (accounts, deletions, persistent
-//! storage, transient storage and code).
+//! The undo log covers every layer a write can land in: base state and the
+//! ephemeral overlay (accounts, deletions, persistent storage, transient storage
+//! and code).
 //!
 //! Rollback never allocates and cannot fail once a snapshot exists. All fallible
 //! work (growing the undo log and the target map) happens when the write is
@@ -33,8 +33,22 @@
 //! entries are undone in LIFO order, so the map holds no more entries at that
 //! point than it did immediately after the removal.
 //!
-//! Base storage must be written through `set_storage`: it maintains the
-//! per-address count of non-zero slots that `has_storage` (EIP-7610) reads.
+//! ## Per-account storage
+//!
+//! Base and overlay storage are `SlotStore`s (`slot_store.zig`): a slot map plus
+//! a per-address index of the keys it holds. `clear_account_storage`,
+//! `delete_account` and `has_storage` (EIP-7610) use the index, so they cost
+//! O(slots of the account) in every layer. Storage must be written through
+//! `set_storage`, which keeps the index and the per-address count of non-zero
+//! base slots (`storage_slot_counts`) exact.
+//!
+//! ## EIP-7702 delegation designators
+//!
+//! A delegated EOA is stored as an account with `delegated_address` set and no
+//! code hash. `set_code` recognizes a designator (`0xef0100 || address`, 23
+//! bytes) and `set_account` normalizes an account whose code hash names one to
+//! that form, so a host that loads raw designator code gets the same account as
+//! `set_delegation`.
 //!
 //! ## Memory Management
 //!
@@ -70,75 +84,26 @@ const EMPTY_STORAGE_ROOT = [_]u8{
     0x01, 0x62, 0x2f, 0xb5, 0xe3, 0x63, 0xb4, 0x21,
 };
 
-/// Key of one storage slot: the owning address and the slot number.
-const SlotKey = struct {
-    address: [20]u8,
-    key: u256,
-};
+const slot_store = @import("slot_store.zig");
+const SlotKey = slot_store.SlotKey;
+pub const SlotStore = slot_store.SlotStore;
 
-/// Transaction cache entry for buffered writes.
-/// Uses an arena allocator for O(1) revert performance.
-const TransactionCache = struct {
-    /// Arena allocator for this transaction's temporary allocations
-    arena: std.heap.ArenaAllocator,
-    /// Cached account changes (address -> account or null for deletion)
-    accounts: std.HashMap([20]u8, ?Account, ArrayHashContext, std.hash_map.default_max_load_percentage),
-    /// Cached storage changes
-    storage: std.HashMap(StorageKey, u256, StorageKeyContext, std.hash_map.default_max_load_percentage),
-    /// Cached code storage (code hash -> code bytes)
-    code: std.HashMap([32]u8, []const u8, ArrayHashContext, std.hash_map.default_max_load_percentage),
-    /// Snapshot ID associated with this transaction
-    snapshot_id: u64,
+/// EIP-7702 delegation designator: `0xef0100 || address`.
+const DELEGATION_PREFIX = [_]u8{ 0xef, 0x01, 0x00 };
+const DELEGATION_DESIGNATOR_LENGTH = DELEGATION_PREFIX.len + 20;
 
-    const StorageKey = SlotKey;
-
-    const ArrayHashContext = struct {
-        pub fn hash(self: @This(), s: anytype) u64 {
-            _ = self;
-            return std.hash_map.hashString(@as([]const u8, &s));
-        }
-        pub fn eql(self: @This(), a: anytype, b: anytype) bool {
-            _ = self;
-            return std.mem.eql(u8, &a, &b);
-        }
-    };
-
-    const StorageKeyContext = struct {
-        pub fn hash(self: @This(), key: StorageKey) u64 {
-            _ = self;
-            var hasher = std.hash.Wyhash.init(0);
-            hasher.update(&key.address);
-            hasher.update(std.mem.asBytes(&key.key));
-            return hasher.final();
-        }
-        pub fn eql(self: @This(), a: StorageKey, b: StorageKey) bool {
-            _ = self;
-            return std.mem.eql(u8, &a.address, &b.address) and a.key == b.key;
-        }
-    };
-
-    /// Initialize a new transaction cache in place. The maps keep a pointer to the
-    /// arena, so the cache must already be at its final address.
-    pub fn init(self: *TransactionCache, base_allocator: std.mem.Allocator, snapshot_id: u64) void {
-        self.arena = std.heap.ArenaAllocator.init(base_allocator);
-        const arena_alloc = self.arena.allocator();
-        self.accounts = std.HashMap([20]u8, ?Account, ArrayHashContext, std.hash_map.default_max_load_percentage).init(arena_alloc);
-        self.storage = std.HashMap(StorageKey, u256, StorageKeyContext, std.hash_map.default_max_load_percentage).init(arena_alloc);
-        self.code = std.HashMap([32]u8, []const u8, ArrayHashContext, std.hash_map.default_max_load_percentage).init(arena_alloc);
-        self.snapshot_id = snapshot_id;
-    }
-
-    /// Deinitialize and free all memory (O(1) operation with arena)
-    pub fn deinit(self: *TransactionCache) void {
-        // Arena deinit handles all allocations at once - O(1) cleanup
-        self.arena.deinit();
-    }
-};
+/// The delegate a designator names, or null when `code` is not a designator.
+fn delegationTarget(code: []const u8) ?[20]u8 {
+    if (code.len != DELEGATION_DESIGNATOR_LENGTH) return null;
+    if (!std.mem.startsWith(u8, code, &DELEGATION_PREFIX)) return null;
+    return code[DELEGATION_PREFIX.len..][0..20].*;
+}
 
 /// High-performance in-memory database for EVM state
 pub const Database = struct {
     accounts: std.HashMap([20]u8, Account, ArrayHashContext, std.hash_map.default_max_load_percentage),
-    storage: std.HashMap(StorageKey, u256, StorageKeyContext, std.hash_map.default_max_load_percentage),
+    /// Persistent storage with its per-address index. Write it through `set_storage`.
+    storage: SlotStore,
     transient_storage: std.HashMap(StorageKey, u256, StorageKeyContext, std.hash_map.default_max_load_percentage),
     code_storage: std.HashMap([32]u8, []const u8, ArrayHashContext, std.hash_map.default_max_load_percentage),
     /// Open snapshots, oldest first. Each one is a position in `undo_log`.
@@ -148,17 +113,29 @@ pub const Database = struct {
     /// Number of non-zero slots each address holds in base `storage` (EIP-7610).
     /// An address keeps its entry once it has one, so undo never has to insert.
     storage_slot_counts: std.HashMap([20]u8, usize, ArrayHashContext, std.hash_map.default_max_load_percentage),
+    /// Delegate of every designator `set_code` has seen, by code hash. The mapping
+    /// is a property of the code's content, so entries are never undone or removed.
+    delegation_targets: std.HashMap([32]u8, [20]u8, ArrayHashContext, std.hash_map.default_max_load_percentage),
     next_snapshot_id: u64,
     allocator: std.mem.Allocator,
     // Ephemeral overlay state (active only during simulate)
     overlay_active: bool = false,
     /// Overlay accounts. A null value is a tombstone: the account is deleted in the view.
     overlay_accounts: std.HashMap([20]u8, ?Account, ArrayHashContext, std.hash_map.default_max_load_percentage),
-    overlay_storage: std.HashMap(StorageKey, u256, StorageKeyContext, std.hash_map.default_max_load_percentage),
+    /// Always null. The transaction cache it pointed to is deleted; no write is
+    /// buffered outside base state and the overlay. The field remains only because
+    /// `src/layer2/evm_host.zig` reads it to refuse a checkpoint. Remove it together
+    /// with that read.
+    tx_cache: ?*const anyopaque = null,
+    /// First allocation failure of a write or snapshot since the field was last
+    /// cleared. Callers that turn a failed write into something else (an EVM frame
+    /// halts on a failed SSTORE) cannot lose it: whoever runs the transaction reads
+    /// this field and aborts. The host clears it; `Evm.call` does at its start.
+    failure: ?Error = null,
+    /// Overlay storage. A zero value hides a non-zero base slot.
+    overlay_storage: SlotStore,
     overlay_transient: std.HashMap(StorageKey, u256, StorageKeyContext, std.hash_map.default_max_load_percentage),
     overlay_code: std.HashMap([32]u8, []const u8, ArrayHashContext, std.hash_map.default_max_load_percentage),
-    // Transaction-level cache for O(1) revert performance (Issue #832)
-    tx_cache: ?*TransactionCache = null,
 
     /// Database operation errors
     pub const Error = error{
@@ -197,13 +174,13 @@ pub const Database = struct {
     };
 
     /// The map a write landed in.
-    const Layer = enum(u2) { base, tx_cache, overlay };
+    const Layer = enum(u1) { base, overlay };
 
     /// What a layer held for an account before a write.
     const PreviousAccount = union(enum) {
         /// The layer had no entry for the address.
         absent,
-        /// The layer held a deletion tombstone (tx_cache and overlay only).
+        /// The layer held a deletion tombstone (overlay only).
         deleted,
         /// The layer held this account.
         present: Account,
@@ -248,20 +225,20 @@ pub const Database = struct {
     pub fn init(allocator: std.mem.Allocator) Database {
         return Database{
             .accounts = std.HashMap([20]u8, Account, ArrayHashContext, std.hash_map.default_max_load_percentage).init(allocator),
-            .storage = std.HashMap(StorageKey, u256, StorageKeyContext, std.hash_map.default_max_load_percentage).init(allocator),
+            .storage = SlotStore.init(allocator),
             .transient_storage = std.HashMap(StorageKey, u256, StorageKeyContext, std.hash_map.default_max_load_percentage).init(allocator),
             .code_storage = std.HashMap([32]u8, []const u8, ArrayHashContext, std.hash_map.default_max_load_percentage).init(allocator),
             .snapshots = .empty,
             .undo_log = .empty,
             .storage_slot_counts = std.HashMap([20]u8, usize, ArrayHashContext, std.hash_map.default_max_load_percentage).init(allocator),
+            .delegation_targets = std.HashMap([32]u8, [20]u8, ArrayHashContext, std.hash_map.default_max_load_percentage).init(allocator),
             .next_snapshot_id = 1,
             .allocator = allocator,
             .overlay_active = false,
             .overlay_accounts = std.HashMap([20]u8, ?Account, ArrayHashContext, std.hash_map.default_max_load_percentage).init(allocator),
-            .overlay_storage = std.HashMap(StorageKey, u256, StorageKeyContext, std.hash_map.default_max_load_percentage).init(allocator),
+            .overlay_storage = SlotStore.init(allocator),
             .overlay_transient = std.HashMap(StorageKey, u256, StorageKeyContext, std.hash_map.default_max_load_percentage).init(allocator),
             .overlay_code = std.HashMap([32]u8, []const u8, ArrayHashContext, std.hash_map.default_max_load_percentage).init(allocator),
-            .tx_cache = null,
         };
     }
 
@@ -299,23 +276,13 @@ pub const Database = struct {
         self.clearOverlay();
     }
 
-    /// Destroy the transaction cache and forget undo entries that point into it.
-    fn destroyTxCache(self: *Database) void {
-        const cache = self.tx_cache orelse return;
-        self.discardUndoEntriesFor(.tx_cache);
-        cache.deinit();
-        self.allocator.destroy(cache);
-        self.tx_cache = null;
-    }
-
     /// Clean up database resources
     pub fn deinit(self: *Database) void {
-        self.destroyTxCache();
-
         self.accounts.deinit();
         self.storage.deinit();
         self.transient_storage.deinit();
         self.storage_slot_counts.deinit();
+        self.delegation_targets.deinit();
 
         // Free all allocated code before deinitializing the hashmap
         self.freeAllCodeInMap(&self.code_storage);
@@ -329,6 +296,12 @@ pub const Database = struct {
         self.overlay_accounts.deinit();
         self.overlay_storage.deinit();
         self.overlay_transient.deinit();
+    }
+
+    /// Remember that a write or snapshot ran out of memory. See `failure`. Used by
+    /// the functions whose only possible error is an allocation failure.
+    fn noteAllocationFailure(self: *Database) void {
+        if (self.failure == null) self.failure = Error.OutOfMemory;
     }
 
     // Undo log
@@ -376,35 +349,37 @@ pub const Database = struct {
         slot.value_ptr.* = value;
     }
 
-    /// Write a slot into a tx_cache or overlay storage map and record what it replaces.
-    fn writeLayeredSlot(self: *Database, map: anytype, comptime kind: enum { storage, transient }, layer: Layer, key: StorageKey, value: u256) Error!void {
-        try self.reserveUndo();
-        const slot = try map.getOrPut(key);
-        const previous: ?u256 = if (slot.found_existing) slot.value_ptr.* else null;
-        self.recordUndo(switch (kind) {
-            .storage => .{ .storage = .{ .layer = layer, .key = key, .previous = previous } },
-            .transient => .{ .transient = .{ .layer = layer, .key = key, .previous = previous } },
-        });
-        slot.value_ptr.* = value;
-    }
-
-    /// Write a slot into base storage, keeping the per-address non-zero count exact.
-    fn writeBaseStorage(self: *Database, key: StorageKey, value: u256) Error!void {
+    /// Write a slot into a storage layer and record what it replaces. A base
+    /// write keeps the per-address non-zero count exact.
+    fn writeSlot(self: *Database, store: *SlotStore, layer: Layer, key: StorageKey, value: u256) Error!void {
         try self.reserveUndo();
         // The count entry is created before the slot, so a failure here changes nothing.
-        const count = try self.storage_slot_counts.getOrPut(key.address);
-        if (!count.found_existing) count.value_ptr.* = 0;
-        const slot = try self.storage.getOrPut(key);
-        const previous: ?u256 = if (slot.found_existing) slot.value_ptr.* else null;
-        self.recordUndo(.{ .storage = .{ .layer = .base, .key = key, .previous = previous } });
-        slot.value_ptr.* = value;
-        adjustSlotCount(count.value_ptr, previous orelse 0, value);
+        const count: ?*usize = switch (layer) {
+            .base => count: {
+                const entry = try self.storage_slot_counts.getOrPut(key.address);
+                if (!entry.found_existing) entry.value_ptr.* = 0;
+                break :count entry.value_ptr;
+            },
+            .overlay => null,
+        };
+        const previous = try store.put(key, value);
+        self.recordUndo(.{ .storage = .{ .layer = layer, .key = key, .previous = previous } });
+        if (count) |non_zero| adjustSlotCount(non_zero, previous orelse 0, value);
     }
 
     /// Update a non-zero slot count for one slot changing from `before` to `after`.
     fn adjustSlotCount(count: *usize, before: u256, after: u256) void {
         if (before == 0 and after != 0) count.* += 1;
         if (before != 0 and after == 0) count.* -= 1;
+    }
+
+    /// Write a transient slot and record what it replaces.
+    fn writeTransientSlot(self: *Database, map: anytype, layer: Layer, key: StorageKey, value: u256) Error!void {
+        try self.reserveUndo();
+        const slot = try map.getOrPut(key);
+        const previous: ?u256 = if (slot.found_existing) slot.value_ptr.* else null;
+        self.recordUndo(.{ .transient = .{ .layer = layer, .key = key, .previous = previous } });
+        slot.value_ptr.* = value;
     }
 
     /// Put back what `map` held for `key` before a write: overwrite the entry the
@@ -439,34 +414,26 @@ pub const Database = struct {
                     .absent, .deleted => _ = self.accounts.remove(e.address),
                     .present => |account| restoreEntry(&self.accounts, e.address, @as(?Account, account)),
                 },
-                .tx_cache => if (self.tx_cache) |cache| restoreLayeredAccount(&cache.accounts, e.address, e.previous),
                 .overlay => restoreLayeredAccount(&self.overlay_accounts, e.address, e.previous),
             },
             .storage => |e| switch (e.layer) {
                 .base => {
                     const current = self.storage.get(e.key) orelse 0;
-                    restoreEntry(&self.storage, e.key, e.previous);
+                    self.storage.restore(e.key, e.previous);
                     // The address got its count entry when the undone write ran.
                     if (self.storage_slot_counts.getPtr(e.key.address)) |count| {
                         adjustSlotCount(count, current, e.previous orelse 0);
                     }
                 },
-                .tx_cache => if (self.tx_cache) |cache| restoreEntry(&cache.storage, e.key, e.previous),
-                .overlay => restoreEntry(&self.overlay_storage, e.key, e.previous),
+                .overlay => self.overlay_storage.restore(e.key, e.previous),
             },
             .transient => |e| switch (e.layer) {
                 .base => restoreEntry(&self.transient_storage, e.key, e.previous),
                 .overlay => restoreEntry(&self.overlay_transient, e.key, e.previous),
-                // The transaction cache does not buffer transient storage.
-                .tx_cache => {},
             },
             .code => |e| switch (e.layer) {
                 .base => if (self.code_storage.fetchRemove(e.hash)) |removed| self.allocator.free(removed.value),
                 .overlay => if (self.overlay_code.fetchRemove(e.hash)) |removed| self.allocator.free(removed.value),
-                // Arena-owned: freed with the cache.
-                .tx_cache => if (self.tx_cache) |cache| {
-                    _ = cache.code.remove(e.hash);
-                },
             },
         }
     }
@@ -487,23 +454,31 @@ pub const Database = struct {
                 return maybe_acc; // null means deleted in the view
             }
         }
-        // Check transaction cache (buffered writes during tx execution)
-        if (self.tx_cache) |cache| {
-            if (cache.accounts.get(address)) |maybe_acc| {
-                return maybe_acc; // null means deleted
-            }
-        }
         return self.accounts.get(address);
     }
 
-    /// Set account data for the given address
-    pub fn set_account(self: *Database, address: [20]u8, account: Account) Error!void {
+    /// The stored form of `account`. An account whose code hash names an EIP-7702
+    /// designator becomes a delegated EOA (`delegated_address` set, no code hash);
+    /// an account with any other code carries no delegation.
+    fn normalizeDelegation(self: *const Database, account: Account) Account {
+        if (!Account.is_code_hash_present(account.code_hash)) return account;
+        var normalized = account;
+        if (self.delegation_targets.get(account.code_hash)) |target| {
+            normalized.code_hash = ZERO_CODE_HASH;
+            normalized.delegated_address = .{ .bytes = target };
+            return normalized;
+        }
+        normalized.delegated_address = null;
+        return normalized;
+    }
+
+    /// Set account data for the given address. The account is stored in its
+    /// normalized EIP-7702 form (see `normalizeDelegation`).
+    pub fn set_account(self: *Database, address: [20]u8, value: Account) Error!void {
+        errdefer self.noteAllocationFailure();
+        const account = self.normalizeDelegation(value);
         if (self.overlay_active) {
             return self.writeLayeredAccount(&self.overlay_accounts, .overlay, address, account);
-        }
-        // Buffer write in transaction cache if active
-        if (self.tx_cache) |cache| {
-            return self.writeLayeredAccount(&cache.accounts, .tx_cache, address, account);
         }
         try self.reserveUndo();
         const slot = try self.accounts.getOrPut(address);
@@ -515,15 +490,16 @@ pub const Database = struct {
         slot.value_ptr.* = account;
     }
 
-    /// Delete account and all associated data
+    /// Delete the account and its storage (execution-specs `destroy_account`).
+    /// Costs O(slots of the account). Every write is recorded in the undo log, so
+    /// an open snapshot restores the account and its storage on revert. Without an
+    /// open snapshot, an allocation failure can leave part of the storage cleared.
     pub fn delete_account(self: *Database, address: [20]u8) Error!void {
+        errdefer self.noteAllocationFailure();
+        try self.clear_account_storage(address);
         if (self.overlay_active) {
             // A tombstone hides the base account for the lifetime of the view.
             return self.writeLayeredAccount(&self.overlay_accounts, .overlay, address, null);
-        }
-        // Mark as deleted in transaction cache if active
-        if (self.tx_cache) |cache| {
-            return self.writeLayeredAccount(&cache.accounts, .tx_cache, address, null);
         }
         const existing = self.accounts.get(address) orelse return;
         try self.reserveUndo();
@@ -535,12 +511,6 @@ pub const Database = struct {
     pub fn account_exists(self: *Database, address: [20]u8) bool {
         if (self.overlay_active) {
             if (self.overlay_accounts.get(address)) |maybe_acc| {
-                return maybe_acc != null;
-            }
-        }
-        // Check transaction cache
-        if (self.tx_cache) |cache| {
-            if (cache.accounts.get(address)) |maybe_acc| {
                 return maybe_acc != null;
             }
         }
@@ -602,24 +572,47 @@ pub const Database = struct {
         if (self.overlay_active) {
             if (self.overlay_storage.get(storage_key)) |v| return v;
         }
-        // Check transaction cache
-        if (self.tx_cache) |cache| {
-            if (cache.storage.get(storage_key)) |v| return v;
-        }
         return self.storage.get(storage_key) orelse 0;
     }
 
     /// Set storage value for the given address and key
     pub fn set_storage(self: *Database, address: [20]u8, key: u256, value: u256) Error!void {
+        errdefer self.noteAllocationFailure();
         const storage_key = StorageKey{ .address = address, .key = key };
         if (self.overlay_active) {
-            return self.writeLayeredSlot(&self.overlay_storage, .storage, .overlay, storage_key, value);
+            return self.writeSlot(&self.overlay_storage, .overlay, storage_key, value);
         }
-        // Buffer write in transaction cache if active
-        if (self.tx_cache) |cache| {
-            return self.writeLayeredSlot(&cache.storage, .storage, .tx_cache, storage_key, value);
+        try self.writeSlot(&self.storage, .base, storage_key, value);
+    }
+
+    /// Set every storage slot of `address` to zero in the state a read sees.
+    /// Costs O(slots of the account). In an ephemeral view the zeros land in the
+    /// overlay and hide the base slots; base storage is not written. Every write
+    /// is recorded in the undo log.
+    pub fn clear_account_storage(self: *Database, address: [20]u8) Error!void {
+        errdefer self.noteAllocationFailure();
+        if (!self.overlay_active) return self.zeroSlots(&self.storage, .base, address);
+        try self.zeroSlots(&self.overlay_storage, .overlay, address);
+        // Hide every non-zero base slot the overlay does not already cover. The
+        // writes change only the overlay, so the base key slice stays valid.
+        for (self.storage.keysOf(address)) |key| {
+            const storage_key = StorageKey{ .address = address, .key = key };
+            if ((self.storage.get(storage_key) orelse 0) == 0) continue;
+            if (self.overlay_storage.get(storage_key) != null) continue;
+            try self.writeSlot(&self.overlay_storage, .overlay, storage_key, 0);
         }
-        try self.writeBaseStorage(storage_key, value);
+    }
+
+    /// Write zero over every non-zero slot `store` holds for `address`.
+    fn zeroSlots(self: *Database, store: *SlotStore, layer: Layer, address: [20]u8) Error!void {
+        // Overwriting an existing key never changes the key set, but the slice is
+        // fetched again each round so that this does not depend on it.
+        var index: usize = 0;
+        while (index < store.keysOf(address).len) : (index += 1) {
+            const storage_key = StorageKey{ .address = address, .key = store.keysOf(address)[index] };
+            if ((store.get(storage_key) orelse 0) == 0) continue;
+            try self.writeSlot(store, layer, storage_key, 0);
+        }
     }
 
     /// True when `address` holds storage: a non-empty storage root, or at least one
@@ -633,29 +626,18 @@ pub const Database = struct {
             }
         }
         const base_count = self.storage_slot_counts.get(address) orelse 0;
-        const layered = self.overlay_active or self.tx_cache != null;
-        if (!layered) return base_count != 0;
+        if (!self.overlay_active) return base_count != 0;
 
-        // A layer can add slots and can also zero every base slot, so the layered
-        // answer needs the effective value of each candidate slot.
-        if (self.overlay_active) {
-            var overlay_slots = self.overlay_storage.iterator();
-            while (overlay_slots.next()) |slot| {
-                if (slot.value_ptr.* != 0 and std.mem.eql(u8, &slot.key_ptr.address, &address)) return true;
-            }
-        }
-        if (self.tx_cache) |cache| {
-            var cached_slots = cache.storage.iterator();
-            while (cached_slots.next()) |slot| {
-                if (!std.mem.eql(u8, &slot.key_ptr.address, &address)) continue;
-                if ((try self.get_storage(address, slot.key_ptr.key)) != 0) return true;
-            }
+        // The overlay can add slots and can also zero base slots, so a base slot
+        // counts only when the overlay does not cover it.
+        for (self.overlay_storage.keysOf(address)) |key| {
+            if ((self.overlay_storage.get(.{ .address = address, .key = key }) orelse 0) != 0) return true;
         }
         if (base_count == 0) return false;
-        var base_slots = self.storage.iterator();
-        while (base_slots.next()) |slot| {
-            if (slot.value_ptr.* == 0 or !std.mem.eql(u8, &slot.key_ptr.address, &address)) continue;
-            if ((try self.get_storage(address, slot.key_ptr.key)) != 0) return true;
+        for (self.storage.keysOf(address)) |key| {
+            const storage_key = StorageKey{ .address = address, .key = key };
+            if ((self.storage.get(storage_key) orelse 0) == 0) continue;
+            if (self.overlay_storage.get(storage_key) == null) return true;
         }
         return false;
     }
@@ -673,11 +655,12 @@ pub const Database = struct {
 
     /// Set transient storage value for the given address and key (EIP-1153)
     pub fn set_transient_storage(self: *Database, address: [20]u8, key: u256, value: u256) Error!void {
+        errdefer self.noteAllocationFailure();
         const storage_key = StorageKey{ .address = address, .key = key };
         if (self.overlay_active) {
-            return self.writeLayeredSlot(&self.overlay_transient, .transient, .overlay, storage_key, value);
+            return self.writeTransientSlot(&self.overlay_transient, .overlay, storage_key, value);
         }
-        try self.writeLayeredSlot(&self.transient_storage, .transient, .base, storage_key, value);
+        try self.writeTransientSlot(&self.transient_storage, .base, storage_key, value);
     }
 
     // Code operations
@@ -686,10 +669,6 @@ pub const Database = struct {
     pub fn get_code(self: *Database, code_hash: [32]u8) Error![]const u8 {
         if (self.overlay_active) {
             if (self.overlay_code.get(code_hash)) |buf| return buf;
-        }
-        // Check transaction cache
-        if (self.tx_cache) |cache| {
-            if (cache.code.get(code_hash)) |buf| return buf;
         }
         const code = self.code_storage.get(code_hash) orelse {
             return Error.CodeNotFound;
@@ -725,31 +704,22 @@ pub const Database = struct {
         return &.{};
     }
 
-    /// Store contract code and return its hash
+    /// Store contract code and return its hash. Designator code (EIP-7702) is also
+    /// registered, so `set_account` stores an account that names it as a delegated EOA.
     pub fn set_code(self: *Database, code: []const u8) Error![32]u8 {
+        errdefer self.noteAllocationFailure();
         var hash: [32]u8 = undefined;
         std.crypto.hash.sha3.Keccak256.hash(code, &hash, .{});
+
+        if (delegationTarget(code)) |target| try self.delegation_targets.put(hash, target);
 
         // Code is content-addressed: a hash any visible layer holds needs no new copy.
         if (self.overlay_active) {
             if (self.overlay_code.contains(hash)) return hash;
         }
-        if (self.tx_cache) |cache| {
-            if (cache.code.contains(hash)) return hash;
-        }
         if (self.code_storage.contains(hash)) return hash;
 
         try self.reserveUndo();
-
-        // Buffer code in transaction cache if active
-        if (self.tx_cache) |cache| {
-            // Allocate from transaction arena
-            const code_copy = cache.arena.allocator().alloc(u8, code.len) catch return Error.OutOfMemory;
-            @memcpy(code_copy, code);
-            try cache.code.put(hash, code_copy);
-            self.recordUndo(.{ .code = .{ .layer = .tx_cache, .hash = hash } });
-            return hash;
-        }
 
         // Make a copy of the code to own it
         const code_copy = self.allocator.alloc(u8, code.len) catch return Error.OutOfMemory;
@@ -803,6 +773,7 @@ pub const Database = struct {
     /// Create a state snapshot and return its ID. O(1): the snapshot is the current
     /// length of the undo log.
     pub fn create_snapshot(self: *Database) Error!u64 {
+        errdefer self.noteAllocationFailure();
         const snapshot_id = self.next_snapshot_id;
         try self.snapshots.append(self.allocator, .{ .id = snapshot_id, .undo_len = self.undo_log.items.len });
         self.next_snapshot_id += 1;
@@ -836,6 +807,15 @@ pub const Database = struct {
             self.applyUndo(entry);
         }
         self.snapshots.shrinkRetainingCapacity(depth);
+    }
+
+    /// Commit and close every snapshot above `depth`: their writes stay, recorded
+    /// for the snapshots still open. Does nothing when no more than `depth`
+    /// snapshots are open. Never allocates and cannot fail.
+    pub fn commit_to_depth(self: *Database, depth: usize) void {
+        if (self.snapshots.items.len <= depth) return;
+        self.snapshots.shrinkRetainingCapacity(depth);
+        if (depth == 0) self.undo_log.clearRetainingCapacity();
     }
 
     /// Revert state to the given snapshot and close it together with every snapshot
@@ -895,116 +875,24 @@ pub const Database = struct {
         return false;
     }
 
-    // Transaction operations with arena-based caching (Issue #832)
+    // Transaction operations
 
-    /// Begin a transaction and return a transaction ID
-    /// Creates a snapshot and initializes transaction cache for buffered writes
+    /// Begin a transaction and return its ID. A transaction is a snapshot whose ID
+    /// fits `u32`.
     pub fn begin_transaction(self: *Database) Error!u32 {
         const id = std.math.cast(u32, self.next_snapshot_id) orelse return Error.InvalidSnapshot;
-        const snapshot_id = try self.create_snapshot();
-        errdefer self.revert_to_depth(self.snapshots.items.len - 1);
-
-        // Initialize transaction cache if not already active
-        if (self.tx_cache == null) {
-            const cache = self.allocator.create(TransactionCache) catch return Error.OutOfMemory;
-            cache.init(self.allocator, snapshot_id);
-            self.tx_cache = cache;
-        }
-
+        _ = try self.create_snapshot();
         return id;
     }
 
-    /// Move every buffered write of the transaction cache into base state, then
-    /// destroy the cache. The base writes are recorded like any other write, so an
-    /// enclosing snapshot can still undo them.
-    fn flushTxCache(self: *Database) Error!void {
-        const cache = self.tx_cache orelse return;
-        // Detach first so the writes below land in base state, and reattach on
-        // failure so the caller still owns a consistent cache.
-        self.tx_cache = null;
-        errdefer self.tx_cache = cache;
-        const overlay_was_active = self.overlay_active;
-        self.overlay_active = false;
-        defer self.overlay_active = overlay_was_active;
-
-        var accounts_iter = cache.accounts.iterator();
-        while (accounts_iter.next()) |entry| {
-            if (entry.value_ptr.*) |account| {
-                try self.set_account(entry.key_ptr.*, account);
-            } else {
-                try self.delete_account(entry.key_ptr.*);
-            }
-        }
-
-        var storage_iter = cache.storage.iterator();
-        while (storage_iter.next()) |entry| {
-            try self.writeBaseStorage(entry.key_ptr.*, entry.value_ptr.*);
-        }
-
-        // Code moves from the arena to the main allocator for permanent storage.
-        var code_iter = cache.code.iterator();
-        while (code_iter.next()) |entry| {
-            if (self.code_storage.contains(entry.key_ptr.*)) continue;
-            try self.reserveUndo();
-            const code_copy = self.allocator.dupe(u8, entry.value_ptr.*) catch return Error.OutOfMemory;
-            errdefer self.allocator.free(code_copy);
-            try self.code_storage.put(entry.key_ptr.*, code_copy);
-            self.recordUndo(.{ .code = .{ .layer = .base, .hash = entry.key_ptr.* } });
-        }
-
-        self.tx_cache = cache;
-        self.destroyTxCache();
-    }
-
-    /// Commit a transaction by flushing cache to permanent storage
-    /// Copies all buffered changes to main hashmaps, then discards snapshot
-    ///
-    /// Only the transaction that created the cache flushes it. A nested transaction
-    /// shares the outer one's cache, and its writes stay buffered there.
+    /// Commit a transaction: keep its writes. An enclosing snapshot can still undo them.
     pub fn commit_transaction(self: *Database, id: u32) Error!void {
-        if (self.snapshotIndex(id) == null) return Error.SnapshotNotFound;
-        if (self.ownsTxCache(id)) try self.flushTxCache();
         try self.commit_snapshot(id);
     }
 
-    /// Rollback a transaction: undo its writes and, when it created the cache,
-    /// discard the cache (O(1)). A nested transaction's rollback restores the
-    /// shared cache to its state at `begin_transaction` and keeps it.
+    /// Roll back a transaction: undo its writes. Never allocates.
     pub fn rollback_transaction(self: *Database, id: u32) Error!void {
-        if (self.snapshotIndex(id) == null) return Error.SnapshotNotFound;
-        if (self.ownsTxCache(id)) self.destroyTxCache();
         try self.revert_to_snapshot(id);
-    }
-
-    /// True when the transaction with snapshot `id` created the active cache.
-    fn ownsTxCache(self: *const Database, id: u32) bool {
-        const cache = self.tx_cache orelse return false;
-        return cache.snapshot_id == id;
-    }
-
-    /// Start transaction-level caching without creating a snapshot
-    /// Useful for EVM execution where state changes should be buffered
-    pub fn begin_tx_cache(self: *Database) Error!void {
-        if (self.tx_cache != null) return; // Already active
-
-        const cache = self.allocator.create(TransactionCache) catch return Error.OutOfMemory;
-        cache.init(self.allocator, 0);
-        self.tx_cache = cache;
-    }
-
-    /// Flush transaction cache to permanent storage without snapshot management
-    pub fn commit_tx_cache(self: *Database) Error!void {
-        try self.flushTxCache();
-    }
-
-    /// Discard transaction cache without applying changes (O(1) with arena)
-    pub fn rollback_tx_cache(self: *Database) void {
-        self.destroyTxCache();
-    }
-
-    /// Check if transaction cache is active
-    pub fn has_tx_cache(self: *const Database) bool {
-        return self.tx_cache != null;
     }
 };
 
@@ -1499,20 +1387,26 @@ test "Database state root - account with storage" {
     defer db.deinit();
 
     const addr = [_]u8{0x01} ++ @as([19]u8, @splat(0));
-    const storage_root1 = @as([32]u8, @splat(0x11));
-    const storage_root2 = @as([32]u8, @splat(0x22));
+    var account = Account{ .balance = 100, .nonce = 1, .code_hash = @as([32]u8, @splat(0)), .storage_root = @as([32]u8, @splat(0)) };
+    try db.set_account(addr, account);
+    const empty_storage = try db.get_state_root();
 
-    const account1 = Account{ .balance = 100, .nonce = 1, .code_hash = @as([32]u8, @splat(0)), .storage_root = storage_root1 };
-    try db.set_account(addr, account1);
-    const root1 = try db.get_state_root();
+    // The state root follows the account's slots.
+    try db.set_storage(addr, 1, 1);
+    const one_slot = try db.get_state_root();
+    try testing.expect(!std.mem.eql(u8, &empty_storage, &one_slot));
+    try db.set_storage(addr, 1, 2);
+    const changed_slot = try db.get_state_root();
+    try testing.expect(!std.mem.eql(u8, &one_slot, &changed_slot));
 
-    // Change storage root
-    const account2 = Account{ .balance = 100, .nonce = 1, .code_hash = @as([32]u8, @splat(0)), .storage_root = storage_root2 };
-    try db.set_account(addr, account2);
-    const root2 = try db.get_state_root();
+    // A zero slot is not in the storage trie.
+    try db.set_storage(addr, 1, 0);
+    try testing.expectEqualSlices(u8, &empty_storage, &(try db.get_state_root()));
 
-    // State root should change when storage root changes
-    try testing.expect(!std.mem.eql(u8, &root1, &root2));
+    // The storage root is computed from the slots; the cached field is ignored.
+    account.storage_root = @as([32]u8, @splat(0x22));
+    try db.set_account(addr, account);
+    try testing.expectEqualSlices(u8, &empty_storage, &(try db.get_state_root()));
 }
 
 test "Database state root - balance changes" {
@@ -2664,11 +2558,8 @@ test "Database transaction error handling - invalid snapshot" {
     try testing.expectError(Database.Error.SnapshotNotFound, db.rollback_transaction(999));
 }
 
-// =============================================================================
-// Transaction Cache Tests (Issue #832)
-// =============================================================================
 
-test "Transaction cache - basic account buffering" {
+test "Database transaction - account write commits" {
     const allocator = testing.allocator;
     var db = Database.init(allocator);
     defer db.deinit();
@@ -2684,11 +2575,10 @@ test "Transaction cache - basic account buffering" {
     // Set initial state
     try db.set_account(addr, initial_account);
 
-    // Begin transaction (activates cache)
+    // Begin transaction
     const tx_id = try db.begin_transaction();
-    try testing.expect(db.has_tx_cache());
 
-    // Modify account (should be buffered in cache)
+    // Modify account
     const modified_account = Account{
         .balance = 200,
         .nonce = 2,
@@ -2701,16 +2591,15 @@ test "Transaction cache - basic account buffering" {
     const retrieved = (try db.get_account(addr)).?;
     try testing.expectEqual(@as(u256, 200), retrieved.balance);
 
-    // Commit transaction (flush cache)
+    // Commit transaction
     try db.commit_transaction(tx_id);
-    try testing.expect(!db.has_tx_cache());
 
     // Value should persist after commit
     const final = (try db.get_account(addr)).?;
     try testing.expectEqual(@as(u256, 200), final.balance);
 }
 
-test "Transaction cache - rollback discards changes O(1)" {
+test "Database transaction - rollback discards many changes" {
     const allocator = testing.allocator;
     var db = Database.init(allocator);
     defer db.deinit();
@@ -2728,7 +2617,7 @@ test "Transaction cache - rollback discards changes O(1)" {
     // Begin transaction
     const tx_id = try db.begin_transaction();
 
-    // Make many changes (all buffered in arena)
+    // Make many changes
     for (0..100) |i| {
         const account = Account{
             .balance = @intCast(i * 100),
@@ -2740,9 +2629,8 @@ test "Transaction cache - rollback discards changes O(1)" {
         try db.set_storage(addr, @intCast(i), @intCast(i * 10));
     }
 
-    // Rollback - should be O(1) with arena
+    // Rollback
     try db.rollback_transaction(tx_id);
-    try testing.expect(!db.has_tx_cache());
 
     // Original values should be restored
     const restored = (try db.get_account(addr)).?;
@@ -2750,7 +2638,7 @@ test "Transaction cache - rollback discards changes O(1)" {
     try testing.expectEqual(@as(u64, 5), restored.nonce);
 }
 
-test "Transaction cache - storage buffering" {
+test "Database transaction - storage write commits" {
     const allocator = testing.allocator;
     var db = Database.init(allocator);
     defer db.deinit();
@@ -2766,10 +2654,10 @@ test "Transaction cache - storage buffering" {
     // Begin transaction
     const tx_id = try db.begin_transaction();
 
-    // Modify storage (buffered in cache)
+    // Modify storage
     try db.set_storage(addr, key, modified_value);
 
-    // Should see modified value through cache
+    // Should see modified value
     try testing.expectEqual(modified_value, try db.get_storage(addr, key));
 
     // Commit
@@ -2779,7 +2667,7 @@ test "Transaction cache - storage buffering" {
     try testing.expectEqual(modified_value, try db.get_storage(addr, key));
 }
 
-test "Transaction cache - code storage buffering" {
+test "Database transaction - code write commits" {
     const allocator = testing.allocator;
     var db = Database.init(allocator);
     defer db.deinit();
@@ -2789,92 +2677,22 @@ test "Transaction cache - code storage buffering" {
     // Begin transaction
     const tx_id = try db.begin_transaction();
 
-    // Store code (buffered in arena)
+    // Store code
     const code_hash = try db.set_code(&test_code);
 
-    // Should retrieve from cache
+    // Should retrieve it inside the transaction
     const retrieved = try db.get_code(code_hash);
     try testing.expectEqualSlices(u8, &test_code, retrieved);
 
     // Commit
     try db.commit_transaction(tx_id);
 
-    // Code should persist in main storage
+    // Code should persist
     const final = try db.get_code(code_hash);
     try testing.expectEqualSlices(u8, &test_code, final);
 }
 
-test "Transaction cache standalone - begin_tx_cache/commit_tx_cache" {
-    const allocator = testing.allocator;
-    var db = Database.init(allocator);
-    defer db.deinit();
-
-    const addr = [_]u8{0xFF} ++ @as([19]u8, @splat(0));
-
-    // Start cache without snapshot
-    try db.begin_tx_cache();
-    try testing.expect(db.has_tx_cache());
-
-    // Buffer changes
-    const account = Account{
-        .balance = 500,
-        .nonce = 10,
-        .code_hash = @as([32]u8, @splat(0)),
-        .storage_root = @as([32]u8, @splat(0)),
-    };
-    try db.set_account(addr, account);
-
-    // Commit cache
-    try db.commit_tx_cache();
-    try testing.expect(!db.has_tx_cache());
-
-    // Changes should persist
-    const final = (try db.get_account(addr)).?;
-    try testing.expectEqual(@as(u256, 500), final.balance);
-}
-
-test "Transaction cache standalone - rollback_tx_cache discards changes" {
-    const allocator = testing.allocator;
-    var db = Database.init(allocator);
-    defer db.deinit();
-
-    const addr = [_]u8{0xAA} ++ @as([19]u8, @splat(0));
-
-    // Set initial state
-    const initial = Account{
-        .balance = 100,
-        .nonce = 1,
-        .code_hash = @as([32]u8, @splat(0)),
-        .storage_root = @as([32]u8, @splat(0)),
-    };
-    try db.set_account(addr, initial);
-
-    // Start cache
-    try db.begin_tx_cache();
-
-    // Buffer changes
-    const modified = Account{
-        .balance = 999,
-        .nonce = 99,
-        .code_hash = @as([32]u8, @splat(0)),
-        .storage_root = @as([32]u8, @splat(0)),
-    };
-    try db.set_account(addr, modified);
-
-    // Verify we see modified value through cache
-    const check = (try db.get_account(addr)).?;
-    try testing.expectEqual(@as(u256, 999), check.balance);
-
-    // Rollback cache (O(1))
-    db.rollback_tx_cache();
-    try testing.expect(!db.has_tx_cache());
-
-    // Should see original value (cache changes discarded)
-    const restored = (try db.get_account(addr)).?;
-    try testing.expectEqual(@as(u256, 100), restored.balance);
-}
-
-test "Transaction cache - account deletion buffering" {
+test "Database transaction - account deletion commits" {
     const allocator = testing.allocator;
     var db = Database.init(allocator);
     defer db.deinit();
@@ -2893,16 +2711,16 @@ test "Transaction cache - account deletion buffering" {
     // Begin transaction
     const tx_id = try db.begin_transaction();
 
-    // Delete account (buffered as null)
+    // Delete account
     try db.delete_account(addr);
 
-    // Should not exist through cache
+    // Should not exist inside the transaction
     try testing.expect(!db.account_exists(addr));
 
     // Commit
     try db.commit_transaction(tx_id);
 
-    // Account should be deleted in main storage
+    // Account should stay deleted
     try testing.expect(!db.account_exists(addr));
 }
 
@@ -3022,9 +2840,12 @@ test "Database failed write under a snapshot leaves state and undo log unchanged
     const snapshot = try db.create_snapshot();
 
     failing.fail_index = failing.alloc_index;
+    try testing.expectEqual(@as(?Database.Error, null), db.failure);
     try testing.expectError(Database.Error.OutOfMemory, db.set_storage(address, 1, 2));
     try testing.expectEqual(@as(u256, 1), try db.get_storage(address, 1));
     try testing.expectEqual(@as(usize, 0), db.undo_log.items.len);
+    // The failure stays readable after the caller has handled the error.
+    try testing.expectEqual(@as(?Database.Error, Database.Error.OutOfMemory), db.failure);
 
     failing.fail_index = std.math.maxInt(usize);
     try db.revert_to_snapshot(snapshot);
@@ -3173,7 +2994,7 @@ test "Database has_storage: storage root, non-zero slots, and layers" {
     try testing.expect(!(try db.has_storage(empty)));
 }
 
-test "Database transaction cache: enclosing snapshot undoes a committed transaction" {
+test "Database transaction: enclosing snapshot undoes a committed transaction" {
     var db = Database.init(testing.allocator);
     defer db.deinit();
 
@@ -3193,4 +3014,230 @@ test "Database transaction cache: enclosing snapshot undoes a committed transact
     try db.revert_to_snapshot(outer);
     try testing.expectEqual(@as(u256, 1), try db.get_storage(address, 1));
     try testing.expect(!db.account_exists(address));
+}
+
+test {
+    _ = @import("slot_store.zig");
+    _ = @import("database_proxy.zig");
+}
+
+test "Database clear_account_storage zeroes only that account and is undone by revert" {
+    var db = Database.init(testing.allocator);
+    defer db.deinit();
+
+    const doomed = @as([20]u8, @splat(0x60));
+    const neighbour = @as([20]u8, @splat(0x61));
+    try db.set_storage(doomed, 1, 11);
+    try db.set_storage(doomed, 2, 22);
+    try db.set_storage(doomed, 3, 0);
+    try db.set_storage(neighbour, 1, 99);
+
+    const snapshot = try db.create_snapshot();
+    try db.clear_account_storage(doomed);
+    try testing.expectEqual(@as(u256, 0), try db.get_storage(doomed, 1));
+    try testing.expectEqual(@as(u256, 0), try db.get_storage(doomed, 2));
+    try testing.expect(!(try db.has_storage(doomed)));
+    try testing.expectEqual(@as(u256, 99), try db.get_storage(neighbour, 1));
+    // One undo entry per non-zero slot of the account: the cost does not depend
+    // on the rest of the database.
+    try testing.expectEqual(@as(usize, 2), db.undo_log.items.len);
+
+    try db.revert_to_snapshot(snapshot);
+    try testing.expectEqual(@as(u256, 11), try db.get_storage(doomed, 1));
+    try testing.expectEqual(@as(u256, 22), try db.get_storage(doomed, 2));
+    try testing.expect(try db.has_storage(doomed));
+}
+
+test "Database delete_account removes the account's storage and revert restores both" {
+    var failing = std.testing.FailingAllocator.init(testing.allocator, .{});
+    var db = Database.init(failing.allocator());
+    defer db.deinit();
+
+    const address = @as([20]u8, @splat(0x62));
+    var account = Account.zero();
+    account.nonce = 7;
+    try db.set_account(address, account);
+    try db.set_storage(address, 1, 11);
+    try db.set_storage(address, 2, 22);
+
+    const snapshot = try db.create_snapshot();
+    try db.delete_account(address);
+    try testing.expect(!db.account_exists(address));
+    try testing.expect(!(try db.has_storage(address)));
+    try testing.expectEqual(@as(u256, 0), try db.get_storage(address, 1));
+
+    // An account recreated at the address starts with empty storage.
+    try db.set_account(address, Account.zero());
+    try testing.expectEqual(@as(u256, 0), try db.get_storage(address, 2));
+
+    // The rollback restores account and storage without allocating.
+    failing.fail_index = failing.alloc_index;
+    try db.revert_to_snapshot(snapshot);
+    try testing.expectEqual(@as(u64, 7), (try db.get_account(address)).?.nonce);
+    try testing.expectEqual(@as(u256, 11), try db.get_storage(address, 1));
+    try testing.expectEqual(@as(u256, 22), try db.get_storage(address, 2));
+}
+
+test "Database delete_account without a snapshot leaves no slot behind" {
+    var db = Database.init(testing.allocator);
+    defer db.deinit();
+
+    const address = @as([20]u8, @splat(0x63));
+    try db.set_balance(address, 1);
+    var key: u256 = 0;
+    while (key < 100) : (key += 1) try db.set_storage(address, key, key + 1);
+
+    try db.delete_account(address);
+    try testing.expectEqual(@as(?usize, 0), db.storage_slot_counts.get(address));
+    var slots = db.storage.iterator();
+    while (slots.next()) |slot| try testing.expectEqual(@as(u256, 0), slot.value_ptr.*);
+}
+
+test "Database overlay: delete_account hides base storage and never writes it" {
+    var db = Database.init(testing.allocator);
+    defer db.deinit();
+
+    const address = @as([20]u8, @splat(0x64));
+    try db.set_balance(address, 5);
+    try db.set_storage(address, 1, 11);
+    try db.set_storage(address, 2, 22);
+
+    db.begin_ephemeral_view();
+    try db.set_storage(address, 2, 23);
+    try db.set_storage(address, 3, 33);
+
+    const snapshot = try db.create_snapshot();
+    try db.delete_account(address);
+    try testing.expect(!db.account_exists(address));
+    try testing.expect(!(try db.has_storage(address)));
+    try testing.expectEqual(@as(u256, 0), try db.get_storage(address, 1));
+    try testing.expectEqual(@as(u256, 0), try db.get_storage(address, 2));
+    try testing.expectEqual(@as(u256, 0), try db.get_storage(address, 3));
+
+    // Reverting inside the view brings back the view's own state.
+    try db.revert_to_snapshot(snapshot);
+    try testing.expectEqual(@as(u256, 11), try db.get_storage(address, 1));
+    try testing.expectEqual(@as(u256, 23), try db.get_storage(address, 2));
+    try testing.expectEqual(@as(u256, 33), try db.get_storage(address, 3));
+    try testing.expect(try db.has_storage(address));
+
+    try db.delete_account(address);
+    db.discard_ephemeral_view();
+    // Base state never changed.
+    try testing.expectEqual(@as(u256, 5), try db.get_balance(address));
+    try testing.expectEqual(@as(u256, 11), try db.get_storage(address, 1));
+    try testing.expectEqual(@as(u256, 22), try db.get_storage(address, 2));
+    try testing.expectEqual(@as(u256, 0), try db.get_storage(address, 3));
+}
+
+test "EIP-7702: set_account stores raw designator code as a delegation" {
+    var db = Database.init(testing.allocator);
+    defer db.deinit();
+
+    const eoa = @as([20]u8, @splat(0x70));
+    const delegate = @as([20]u8, @splat(0x71));
+    const designator = DELEGATION_PREFIX ++ delegate;
+
+    var account = Account.zero();
+    account.nonce = 1;
+    account.code_hash = try db.set_code(&designator);
+    try db.set_account(eoa, account);
+
+    const stored = (try db.get_account(eoa)).?;
+    try testing.expectEqualSlices(u8, &delegate, &stored.delegated_address.?.bytes);
+    try testing.expectEqualSlices(u8, &ZERO_CODE_HASH, &stored.code_hash);
+    try testing.expectEqual(@as(u64, 1), stored.nonce);
+    try testing.expect(try db.has_delegation(eoa));
+    try testing.expectEqualSlices(u8, &delegate, &stored.get_effective_code_address().?.bytes);
+
+    // The same account as `set_delegation` produces.
+    const other = @as([20]u8, @splat(0x72));
+    try db.set_delegation(other, delegate);
+    try testing.expectEqual((try db.get_account(other)).?.delegated_address, stored.delegated_address);
+}
+
+test "EIP-7702: set_account clears a delegation when non-designator code is set" {
+    var db = Database.init(testing.allocator);
+    defer db.deinit();
+
+    const address = @as([20]u8, @splat(0x73));
+    const delegate = @as([20]u8, @splat(0x74));
+    try db.set_delegation(address, delegate);
+
+    var account = (try db.get_account(address)).?;
+    account.code_hash = try db.set_code(&[_]u8{ 0x60, 0x00 });
+    try db.set_account(address, account);
+
+    const stored = (try db.get_account(address)).?;
+    try testing.expectEqual(@as(?primitives.Address.Address, null), stored.delegated_address);
+    try testing.expect(Account.is_code_hash_present(stored.code_hash));
+}
+
+test "EIP-7702: only exact designators are normalized" {
+    var db = Database.init(testing.allocator);
+    defer db.deinit();
+
+    const delegate = @as([20]u8, @splat(0x75));
+    const short = (DELEGATION_PREFIX ++ delegate)[0..22];
+    const long = DELEGATION_PREFIX ++ delegate ++ [_]u8{0x00};
+    const wrong_prefix = [_]u8{ 0xef, 0x01, 0x01 } ++ delegate;
+
+    for ([_][]const u8{ short, &long, &wrong_prefix }, 0..) |code, index| {
+        const address = @as([20]u8, @splat(@intCast(0x80 + index)));
+        var account = Account.zero();
+        account.code_hash = try db.set_code(code);
+        try db.set_account(address, account);
+        const stored = (try db.get_account(address)).?;
+        try testing.expectEqual(@as(?primitives.Address.Address, null), stored.delegated_address);
+        try testing.expectEqualSlices(u8, code, try db.get_code(stored.code_hash));
+    }
+}
+
+test "EIP-7702: designator normalization applies inside an ephemeral view" {
+    var db = Database.init(testing.allocator);
+    defer db.deinit();
+
+    const eoa = @as([20]u8, @splat(0x76));
+    const delegate = @as([20]u8, @splat(0x77));
+    const designator = DELEGATION_PREFIX ++ delegate;
+
+    db.begin_ephemeral_view();
+    var account = Account.zero();
+    account.code_hash = try db.set_code(&designator);
+    try db.set_account(eoa, account);
+    try testing.expectEqualSlices(u8, &delegate, &(try db.get_account(eoa)).?.delegated_address.?.bytes);
+    db.discard_ephemeral_view();
+    try testing.expectEqual(@as(?Account, null), try db.get_account(eoa));
+}
+
+test "Database commit_to_depth keeps writes and leaves them undoable by outer snapshots" {
+    var db = Database.init(testing.allocator);
+    defer db.deinit();
+
+    const address = @as([20]u8, @splat(0x78));
+    try db.set_storage(address, 1, 1);
+
+    const outer = try db.create_snapshot();
+    const depth = db.snapshot_depth();
+    _ = try db.create_snapshot();
+    try db.set_storage(address, 1, 2);
+    _ = try db.create_snapshot();
+    try db.set_storage(address, 1, 3);
+
+    db.commit_to_depth(depth);
+    try testing.expectEqual(depth, db.snapshot_depth());
+    try testing.expectEqual(@as(u256, 3), try db.get_storage(address, 1));
+    // Committing to a depth that is already reached changes nothing.
+    db.commit_to_depth(depth);
+    try testing.expectEqual(depth, db.snapshot_depth());
+
+    try db.revert_to_snapshot(outer);
+    try testing.expectEqual(@as(u256, 1), try db.get_storage(address, 1));
+
+    // With no snapshot left the undo log is empty.
+    _ = try db.create_snapshot();
+    try db.set_storage(address, 1, 4);
+    db.commit_to_depth(0);
+    try testing.expectEqual(@as(usize, 0), db.undo_log.items.len);
+    try testing.expectEqual(@as(u256, 4), try db.get_storage(address, 1));
 }

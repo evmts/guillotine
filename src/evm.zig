@@ -12,6 +12,7 @@ const CreatedContracts = @import("storage/created_contracts.zig").CreatedContrac
 const AccessList = @import("storage/access_list.zig").AccessList;
 const Hardfork = @import("eips_and_hardforks/eips.zig").Hardfork;
 const precompiles = @import("precompiles");
+const kzg_setup = @import("crypto").kzg_setup;
 const EvmConfig = @import("evm_config.zig").EvmConfig;
 const TransactionContext = @import("block/transaction_context.zig").TransactionContext;
 const GrowingArenaAllocator = @import("evm_arena_allocator.zig").GrowingArenaAllocator;
@@ -46,7 +47,6 @@ pub fn Evm(config: EvmConfig) type {
         pub const CallResult = call_result_module.CallResult(config);
         pub const CallParams = call_params_module.CallParams(config);
 
-        const StaticDatabase = @import("storage/static_wrappers.zig").StaticDatabase;
         pub const Journal: type = @import("storage/journal.zig").Journal(.{
             // One ID per call frame, never reused within a transaction. A 64-bit ID
             // cannot be exhausted: at one frame per nanosecond it lasts centuries.
@@ -150,6 +150,16 @@ pub fn Evm(config: EvmConfig) type {
         call_arena: GrowingArenaAllocator,
         /// Reusable backing buffers for frame memory, one per active call depth.
         frame_memory: FrameMemory,
+        /// Reusable frame stacks, one per active call depth. See `FrameStackPool`.
+        frame_stacks: FrameStackPool,
+        /// Set when the host, not the transaction, failed during the current call:
+        /// an allocation, the database, a thread or a missing KZG trusted setup. The
+        /// first failure is kept. Every call still running then fails, and `call`
+        /// undoes the whole transaction and returns a failed result whose
+        /// `error_info` starts with "host failure". The result is not a transaction
+        /// outcome: the host must not include the transaction on the strength of it.
+        /// The field keeps its value until the next `call` starts.
+        host_failure: ?anyerror = null,
         /// While a call runs on the caller's stack: the address below which a nested
         /// call must move to a large stack. Zero when no check applies.
         native_stack_limit: usize = 0,
@@ -162,13 +172,15 @@ pub fn Evm(config: EvmConfig) type {
         /// Contracts marked for self-destruction (cold - only used in old hardforks)
         self_destruct: SelfDestruct,
 
-        // State dump tracking - persists across calls
+        // State dump tracking. The sets accumulate over every call made on this
+        // EVM, so `dumpState` reports all the state the instance has touched. They
+        // grow until the host calls `resetTouched`.
         /// Tracks all addresses that have been touched (for state dump)
         touched_addresses: std.AutoHashMap(primitives.Address, void),
         /// Tracks storage slots that have been modified (address -> list of storage keys)
         touched_storage: std.AutoHashMap(primitives.Address, TouchedSlots),
-        /// Addresses the current transaction added to `touched_addresses`. They are
-        /// removed again when the next transaction starts.
+        /// Addresses that calls, not the host, added to `touched_addresses`.
+        /// `resetTouched` removes exactly these.
         transaction_touched: std.ArrayList(primitives.Address) = .empty,
 
         // Tracer - at the very bottom of memory layout for minimal impact on cache performance
@@ -183,8 +195,13 @@ pub fn Evm(config: EvmConfig) type {
         /// If `gas_price` is null, the effective EIP-1559 gas price is derived
         /// from the block base fee and transaction fee caps. Returns
         /// error.GasPriceRequired when neither a gas price nor a fee cap exists.
+        ///
+        /// From Cancun on, with precompiles enabled, `init` loads the process-wide KZG
+        /// trusted setup that the point evaluation precompile (0x0A) needs. The load
+        /// runs once per process and is thread-safe; a failure is returned.
         pub fn init(allocator: std.mem.Allocator, database: ?*Database, block_info: BlockInfo, context: TransactionContext, gas_price: ?u256, origin: primitives.Address) !Self {
             const db = database orelse return error.DatabaseRequired;
+            if (comptime kzg_required) try kzg_setup.init();
             const effective_gas_price = gas_price orelse config.eips.effective_gas_price(
                 block_info.base_fee,
                 context.max_fee_per_gas orelse return error.GasPriceRequired,
@@ -227,6 +244,7 @@ pub fn Evm(config: EvmConfig) type {
                 .origin = origin,
                 .call_arena = arena,
                 .frame_memory = FrameMemory.init(allocator),
+                .frame_stacks = FrameStackPool.init(allocator),
                 .self_destruct = SelfDestruct.init(allocator),
                 .dispatch_cache = DispatchCache.init(allocator),
                 .touched_addresses = std.AutoHashMap(primitives.Address, void).init(allocator),
@@ -245,11 +263,142 @@ pub fn Evm(config: EvmConfig) type {
         /// the grown capacity is kept for later calls.
         const initial_call_arena_capacity = 64 * 1024;
 
-        /// Run the block-level system updates enabled in the configuration: the
-        /// EIP-4788 beacon root, the EIP-2935 parent block hash, and validator
-        /// deposits and withdrawals. Call it once per block, before the block's first
-        /// transaction. `init` does not run it: creating an EVM must not write state,
-        /// and a failed update is an error the host has to see.
+        /// True when this EVM has the point evaluation precompile (EIP-4844) and the
+        /// target can load its trusted setup. The KZG library is not built for
+        /// wasm32; there a call to 0x0A is reported as a host failure.
+        const kzg_required = config.enable_precompiles and
+            config.eips.hardfork.isAtLeast(.CANCUN) and
+            builtin.target.cpu.arch != .wasm32;
+
+        /// Frame stacks that outlive their frames.
+        ///
+        /// A frame's stack is 32 KiB. Allocated from the call arena it could not be
+        /// freed when the frame ended, because the frame's result is allocated after
+        /// it, so every returning call kept 32 KiB until the transaction ended:
+        /// gigabytes for a transaction that makes a hundred thousand calls. The pool
+        /// hands the same buffers to one frame after another instead. Frames end in
+        /// the reverse order they start, so `stacks[0..in_use]` are the live ones.
+        const FrameStackPool = struct {
+            const Buffer = []align(alignment.toByteUnits()) u8;
+            const size = @as(usize, Frame.Stack.stack_capacity) * @sizeOf(Frame.WordType);
+            const alignment: std.mem.Alignment = .@"64";
+            /// Free stacks kept after a transaction (512 KiB). A deeper call chain
+            /// frees the rest when its transaction ends.
+            const max_retained = 16;
+
+            allocator: std.mem.Allocator,
+            stacks: std.ArrayList(Buffer) = .empty,
+            in_use: usize = 0,
+
+            fn init(allocator: std.mem.Allocator) FrameStackPool {
+                return .{ .allocator = allocator };
+            }
+
+            fn deinit(self: *FrameStackPool) void {
+                for (self.stacks.items) |buffer| self.allocator.free(buffer);
+                self.stacks.deinit(self.allocator);
+                self.in_use = 0;
+            }
+
+            /// True for the one allocation shape the pool serves: a frame stack.
+            fn serves(len: usize, requested: std.mem.Alignment) bool {
+                return len == size and requested == alignment;
+            }
+
+            fn acquire(self: *FrameStackPool) ?[*]u8 {
+                if (self.in_use == self.stacks.items.len) {
+                    self.stacks.ensureUnusedCapacity(self.allocator, 1) catch return null;
+                    const buffer = self.allocator.alignedAlloc(u8, alignment, size) catch return null;
+                    self.stacks.appendAssumeCapacity(buffer);
+                }
+                const buffer = self.stacks.items[self.in_use];
+                self.in_use += 1;
+                return buffer.ptr;
+            }
+
+            /// Return a stack to the pool. False when `pointer` is not a live stack
+            /// of this pool.
+            fn release(self: *FrameStackPool, pointer: [*]u8) bool {
+                var index = self.in_use;
+                while (index > 0) {
+                    index -= 1;
+                    if (self.stacks.items[index].ptr != pointer) continue;
+                    self.in_use -= 1;
+                    std.mem.swap(Buffer, &self.stacks.items[index], &self.stacks.items[self.in_use]);
+                    return true;
+                }
+                return false;
+            }
+
+            /// Free the stacks beyond `max_retained` that no frame uses.
+            fn trim(self: *FrameStackPool) void {
+                while (self.stacks.items.len > @max(self.in_use, max_retained)) {
+                    const buffer = self.stacks.items[self.stacks.items.len - 1];
+                    self.stacks.items.len -= 1;
+                    self.allocator.free(buffer);
+                }
+            }
+        };
+
+        /// Allocator for `Frame.init` and `Frame.deinit`: the frame's stack comes
+        /// from `frame_stacks`, anything else from the call arena.
+        fn frameAllocator(self: *Self) std.mem.Allocator {
+            return .{ .ptr = self, .vtable = &frame_allocator_vtable };
+        }
+
+        const frame_allocator_vtable = std.mem.Allocator.VTable{
+            .alloc = frameAlloc,
+            .resize = frameResize,
+            .remap = frameRemap,
+            .free = frameFree,
+        };
+
+        fn frameAlloc(context: *anyopaque, len: usize, alignment: std.mem.Alignment, return_address: usize) ?[*]u8 {
+            const self: *Self = @ptrCast(@alignCast(context));
+            if (FrameStackPool.serves(len, alignment)) {
+                return self.frame_stacks.acquire() orelse {
+                    self.failHost(error.OutOfMemory);
+                    return null;
+                };
+            }
+            return callAlloc(context, len, alignment, return_address);
+        }
+
+        fn frameResize(context: *anyopaque, memory: []u8, alignment: std.mem.Alignment, new_len: usize, return_address: usize) bool {
+            const self: *Self = @ptrCast(@alignCast(context));
+            // A stack has one size. Refusing also keeps every other block from
+            // growing into the shape that `frameFree` hands to the pool.
+            if (FrameStackPool.serves(memory.len, alignment) or FrameStackPool.serves(new_len, alignment)) return false;
+            return self.call_arena.allocator().rawResize(memory, alignment, new_len, return_address);
+        }
+
+        fn frameRemap(context: *anyopaque, memory: []u8, alignment: std.mem.Alignment, new_len: usize, return_address: usize) ?[*]u8 {
+            const self: *Self = @ptrCast(@alignCast(context));
+            if (FrameStackPool.serves(memory.len, alignment) or FrameStackPool.serves(new_len, alignment)) return null;
+            return self.call_arena.allocator().rawRemap(memory, alignment, new_len, return_address);
+        }
+
+        fn frameFree(context: *anyopaque, memory: []u8, alignment: std.mem.Alignment, return_address: usize) void {
+            const self: *Self = @ptrCast(@alignCast(context));
+            if (FrameStackPool.serves(memory.len, alignment)) {
+                if (self.frame_stacks.release(memory.ptr)) return;
+                log.err("Frame stack {*} is not a live stack of the pool", .{memory.ptr});
+                return;
+            }
+            self.call_arena.allocator().rawFree(memory, alignment, return_address);
+        }
+
+        /// Run the block-start system updates enabled in the configuration: the
+        /// EIP-4788 beacon root and the EIP-2935 parent block hash. Call it once per
+        /// block, before the block's first transaction. `init` does not run it:
+        /// creating an EVM must not write state, and a failed update is an error the
+        /// host has to see.
+        ///
+        /// EIP-6110 deposits and EIP-7002 withdrawals have no block-start step and
+        /// are not processed here. Both are collected at the end of a block, by the
+        /// host: deposits from the receipts' logs (`validator_deposits.zig` parses
+        /// them) and withdrawal requests by a system call to the predeploy
+        /// (`validator_withdrawals.zig` has the constants).
         pub fn beginBlock(self: *Self) !void {
             // Each update applies only from its fork on. The system contracts can be
             // in state earlier (on mainnet both were deployed before activation), and
@@ -269,24 +418,45 @@ pub fn Evm(config: EvmConfig) type {
                 };
                 self.tracer.onHistoricalBlockHashUpdate(true, null);
             }
-
-            // EIP-6110 deposits and EIP-7002 withdrawals have no block-start step:
-            // their helpers change nothing and cannot fail.
-            if (config.enable_validator_deposits) {
-                try @import("eips_and_hardforks/validator_deposits.zig").ValidatorDepositsContract.processBlockDeposits(self.database, &self.block_info);
-                self.tracer.onValidatorDeposits(true, null);
-            }
-
-            if (config.enable_validator_withdrawals) {
-                try @import("eips_and_hardforks/validator_withdrawals.zig").ValidatorWithdrawalsContract.processBlockWithdrawals(self.database, &self.block_info);
-                self.tracer.onValidatorWithdrawals(true, null);
-            }
         }
 
         /// Get the arena allocator for temporary allocations during the current call.
-        /// This allocator is reset after each root call completes.
+        /// This allocator is reset after each root call completes. A failed
+        /// allocation is recorded as a host failure, so code that turns it into a
+        /// frame halt (an opcode handler) cannot hide it from `call`.
         pub fn getCallArenaAllocator(self: *Self) std.mem.Allocator {
-            return self.call_arena.allocator();
+            return .{ .ptr = self, .vtable = &call_allocator_vtable };
+        }
+
+        const call_allocator_vtable = std.mem.Allocator.VTable{
+            .alloc = callAlloc,
+            .resize = callResize,
+            .remap = callRemap,
+            .free = callFree,
+        };
+
+        fn callAlloc(context: *anyopaque, len: usize, alignment: std.mem.Alignment, return_address: usize) ?[*]u8 {
+            const self: *Self = @ptrCast(@alignCast(context));
+            return self.call_arena.allocator().rawAlloc(len, alignment, return_address) orelse {
+                self.failHost(error.OutOfMemory);
+                return null;
+            };
+        }
+
+        // A refused resize or remap is not a failure: the caller allocates instead.
+        fn callResize(context: *anyopaque, memory: []u8, alignment: std.mem.Alignment, new_len: usize, return_address: usize) bool {
+            const self: *Self = @ptrCast(@alignCast(context));
+            return self.call_arena.allocator().rawResize(memory, alignment, new_len, return_address);
+        }
+
+        fn callRemap(context: *anyopaque, memory: []u8, alignment: std.mem.Alignment, new_len: usize, return_address: usize) ?[*]u8 {
+            const self: *Self = @ptrCast(@alignCast(context));
+            return self.call_arena.allocator().rawRemap(memory, alignment, new_len, return_address);
+        }
+
+        fn callFree(context: *anyopaque, memory: []u8, alignment: std.mem.Alignment, return_address: usize) void {
+            const self: *Self = @ptrCast(@alignCast(context));
+            self.call_arena.allocator().rawFree(memory, alignment, return_address);
         }
 
         /// Clean up all EVM resources and free allocated memory.
@@ -327,6 +497,7 @@ pub fn Evm(config: EvmConfig) type {
             self.clearTouchedStorage();
             self.touched_storage.deinit();
             self.frame_memory.deinit();
+            self.frame_stacks.deinit();
             self.call_arena.deinit();
         }
 
@@ -479,7 +650,14 @@ pub fn Evm(config: EvmConfig) type {
         /// moves to the large-stack worker. When the bounds are unknown or too small, the
         /// whole call runs on the worker. There is no concurrency: the calling thread
         /// blocks until the worker finishes, so one thread at a time uses the EVM.
+        ///
+        /// A failed result with `error_info` set did not run to a transaction
+        /// outcome: the transaction was invalid, or the host failed (`host_failure`
+        /// is then set and `error_info` starts with "host failure"). State is
+        /// unchanged in both cases.
         pub fn call(self: *Self, params: CallParams) CallResult {
+            self.host_failure = null;
+            self.database.failure = null;
             if (comptime native_stack.supported) {
                 if (native_stack.lowAddress()) |low| {
                     const here = @frameAddress();
@@ -506,9 +684,10 @@ pub fn Evm(config: EvmConfig) type {
             var job = Job{ .evm = self, .params = params, .result = CallResult.failed(0) };
             self.runOnLargeStack(&job, Job.run) catch |err| {
                 // Running a call of unknown depth on a stack of unknown size could
-                // overflow it. Report the failure to the host instead.
-                log.err("Cannot run the call on a large stack: {s}", .{@errorName(err)});
-                return CallResult.failed(0);
+                // overflow it. Report the failure to the host instead. Nothing ran,
+                // so there is no state to undo.
+                log.warn("Cannot run the call on a large stack: {s}", .{@errorName(err)});
+                return self.hostFailureResult(err);
             };
             return job.result;
         }
@@ -562,9 +741,11 @@ pub fn Evm(config: EvmConfig) type {
 
             var job = Job{ .evm = self, .params = params, .result = CallResult.failed(0) };
             self.runOnLargeStack(&job, Job.run) catch |err| {
-                // Continuing on the nearly exhausted stack could overflow it. Fail the
-                // nested call instead, like any other resource failure.
-                log.err("Cannot run a deep call on a large stack: {s}", .{@errorName(err)});
+                // Continuing on the nearly exhausted stack could overflow it. Whether
+                // a thread can be created is not a property of the transaction, so
+                // the whole transaction is aborted, not just this call.
+                log.warn("Cannot run a deep call on a large stack: {s}", .{@errorName(err)});
+                self.failHost(err);
                 return CallResult.failed(0);
             };
             return job.result;
@@ -576,10 +757,83 @@ pub fn Evm(config: EvmConfig) type {
 
         /// Undo every state change of the current transaction after a host failure
         /// (allocation or database error) and report the failure. A host failure is
-        /// not a transaction outcome, so no partial state may remain.
-        fn abortTransaction(self: *Self, tx_snapshot_depth: usize) CallResult {
+        /// not a transaction outcome, so no partial state may remain. Logs, refunds
+        /// and destruction records are dropped when `callImpl` returns.
+        fn abortTransaction(self: *Self, tx_snapshot_depth: usize, err: anyerror) CallResult {
             self.database.revert_to_depth(tx_snapshot_depth);
-            return CallResult.failed(0);
+            return self.hostFailureResult(err);
+        }
+
+        /// Record that the host failed. The first failure of a call is kept.
+        fn failHost(self: *Self, err: anyerror) void {
+            if (self.host_failure == null) self.host_failure = err;
+        }
+
+        /// Record a host failure when `err` is one. Errors a transaction can cause
+        /// (a failed precompile, an invalid jump, a missing balance) are not.
+        fn noteHostFailure(self: *Self, err: anyerror) void {
+            if (isHostFailure(err)) self.failHost(err);
+        }
+
+        /// Pass `result` through and record its error when it is a host failure.
+        /// The functions opcode handlers call go through this: a handler turns any
+        /// error into a frame halt, which would otherwise hide a host failure.
+        inline fn noting(self: *Self, result: anytype) @TypeOf(result) {
+            if (result) |_| {} else |err| self.noteHostFailure(err);
+            return result;
+        }
+
+        /// True for errors that come from the host's resources or state store. A
+        /// transaction cannot cause them, so they must not decide its outcome.
+        fn isHostFailure(err: anyerror) bool {
+            return switch (err) {
+                // Memory. `AllocationError` here is never a frame's own memory limit:
+                // errors raised while a frame interprets code end that frame as a
+                // normal halt and do not reach this function.
+                error.OutOfMemory,
+                error.AllocationError,
+                // The point evaluation precompile cannot run without its setup.
+                error.TrustedSetupNotLoaded,
+                // The database lost or refused data it must have.
+                error.CodeNotFound,
+                error.StorageNotFound,
+                error.SnapshotNotFound,
+                error.InvalidSnapshot,
+                error.DatabaseCorrupted,
+                error.NetworkError,
+                error.PermissionDenied,
+                // Broken invariants of the call machinery.
+                error.GasExceedsFrameCapacity,
+                error.TransactionNonceNotIncremented,
+                => true,
+                else => false,
+            };
+        }
+
+        /// The failed result of a call the host could not run: records `err` and
+        /// describes the first host failure in `error_info`. A host failure reaches
+        /// the caller through the result and `host_failure`, so the code that
+        /// detects one logs a warning, not an error.
+        fn hostFailureResult(self: *Self, err: anyerror) CallResult {
+            self.failHost(err);
+            var result = CallResult.failed(0);
+            result.error_info = std.fmt.allocPrint(self.allocator, "host failure: {s}", .{@errorName(self.host_failure.?)}) catch |format_err| {
+                // `host_failure` already reports the failure; only the text is lost.
+                log.warn("Cannot describe the host failure: {s}", .{@errorName(format_err)});
+                return result;
+            };
+            return result;
+        }
+
+        /// The failed result of a transaction that is invalid and changed no state.
+        fn rejectTransaction(self: *Self, comptime reason: []const u8) CallResult {
+            log.debug("Transaction rejected: " ++ reason, .{});
+            var result = CallResult.failed(0);
+            result.error_info = self.allocator.dupe(u8, "invalid transaction: " ++ reason) catch |err| {
+                self.failHost(err);
+                return result;
+            };
+            return result;
         }
 
         /// Copy the transaction's logs out of the call arena into `self.allocator`.
@@ -618,7 +872,7 @@ pub fn Evm(config: EvmConfig) type {
             const gas_limit = params.getGas();
             if (gas_limit > max_frame_gas) {
                 log.warn("Call gas {d} exceeds the configured frame gas capacity {d} (raise EvmConfig.block_gas_limit)", .{ gas_limit, max_frame_gas });
-                return CallResult.failed(0);
+                return self.rejectTransaction("gas limit exceeds the configured frame gas capacity");
             }
 
             const to_address = params.get_to() orelse primitives.ZERO_ADDRESS;
@@ -632,24 +886,27 @@ pub fn Evm(config: EvmConfig) type {
             };
             self.tracer.onCallStart(@tagName(params), @as(i64, @intCast(gas_limit)), to_address, value);
 
-            // The touched sets describe one transaction: start this one empty.
-            self.resetTouched();
-
-            // Track origin and to addresses for state dump
+            // Track origin and to addresses for state dump. The touched sets are
+            // cumulative: they are cleared only by `resetTouched`.
             self.touchAddress(self.origin) catch |err| {
-                log.err("Failed to track origin address: {s}", .{@errorName(err)});
-                return CallResult.failed(0);
+                log.warn("Failed to track origin address: {s}", .{@errorName(err)});
+                return self.hostFailureResult(err);
             };
             if (!to_address.equals(primitives.ZERO_ADDRESS)) {
                 self.touchAddress(to_address) catch |err| {
-                    log.err("Failed to track to address: {s}", .{@errorName(err)});
-                    return CallResult.failed(0);
+                    log.warn("Failed to track to address: {s}", .{@errorName(err)});
+                    return self.hostFailureResult(err);
                 };
             }
 
             params.validateFor(config.eips.hardfork, config.max_initcode_size) catch |err| {
-                log.err("CallParams validation failed: {s}", .{@errorName(err)});
-                return CallResult.failed(0);
+                log.debug("CallParams validation failed: {s}", .{@errorName(err)});
+                return switch (err) {
+                    error.GasZeroError => self.rejectTransaction("gas limit is zero"),
+                    error.InvalidInitCodeSize => self.rejectTransaction("init code exceeds the EIP-3860 size limit"),
+                    error.InvalidCreateValue => self.rejectTransaction("creation value is invalid"),
+                    error.InvalidStaticCallValue => self.rejectTransaction("a static call cannot carry value"),
+                };
             };
 
             defer {
@@ -683,6 +940,7 @@ pub fn Evm(config: EvmConfig) type {
                 self.tx_sender_nonce_incremented = false;
                 // Return frame memory that only an unusually large transaction needed.
                 self.frame_memory.trim();
+                self.frame_stacks.trim();
                 // Reset arena allocator but retain grown capacity
                 // This prevents memory buildup while keeping the grown capacity for better performance
                 // on subsequent transactions that need similar memory amounts
@@ -708,8 +966,13 @@ pub fn Evm(config: EvmConfig) type {
                 params.get_to(),
                 self.block_info.coinbase,
             ) catch |err| {
-                log.err("Failed to pre-warm addresses: {s}", .{@errorName(err)});
-                return CallResult.failed(0);
+                log.warn("Failed to pre-warm addresses: {s}", .{@errorName(err)});
+                return self.hostFailureResult(err);
+            };
+            // EIP-7702: the delegate of a delegated transaction target starts warm.
+            self.warmDelegatedTarget(params.get_to()) catch |err| {
+                log.warn("Failed to pre-warm the delegate of the target: {s}", .{@errorName(err)});
+                return self.hostFailureResult(err);
             };
 
             // EIP-2929 (Berlin+): exactly the precompiles active in this fork start warm.
@@ -720,29 +983,25 @@ pub fn Evm(config: EvmConfig) type {
                 var precompile_index: u16 = 0x01;
                 while (precompile_index <= last) : (precompile_index += 1) {
                     self.warmPrecompile(primitives.Address.fromU256(precompile_index)) catch |err| {
-                        log.err("Failed to pre-warm precompile: {s}", .{@errorName(err)});
-                        return CallResult.failed(0);
+                        log.warn("Failed to pre-warm precompile: {s}", .{@errorName(err)});
+                        return self.hostFailureResult(err);
                     };
                 }
                 if (comptime config.eips.hardfork.isAtLeast(.OSAKA)) {
                     self.warmPrecompile(precompiles.P256VERIFY_ADDRESS) catch |err| {
-                        log.err("Failed to pre-warm precompile: {s}", .{@errorName(err)});
-                        return CallResult.failed(0);
+                        log.warn("Failed to pre-warm precompile: {s}", .{@errorName(err)});
+                        return self.hostFailureResult(err);
                     };
                 }
                 // Configured precompiles (e.g. an L2's) are precompiles of this chain.
                 if (comptime config.enable_precompiles) {
                     inline for (config.precompile_overrides) |override| {
                         self.access_list.pre_warm_addresses(&[_]primitives.Address{override.address}) catch |err| {
-                            log.err("Failed to pre-warm precompile: {s}", .{@errorName(err)});
-                            return CallResult.failed(0);
+                            log.warn("Failed to pre-warm precompile: {s}", .{@errorName(err)});
+                            return self.hostFailureResult(err);
                         };
                     }
                 }
-            }
-
-            if (comptime !config.disable_gas_checks) {
-                if (gas_limit == 0) return CallResult.failed(0);
             }
 
             const input = params.getInput();
@@ -752,14 +1011,19 @@ pub fn Evm(config: EvmConfig) type {
             const floor_gas_cost = config.eips.floor_gas_cost(calldata_tokens);
             const initial_gas_cost = intrinsic_gas_cost + calldata_gas_cost;
 
+            // A budget below the intrinsic cost leaves no execution gas to compute,
+            // so this check applies even when gas checks are disabled.
+            if (gas_limit < initial_gas_cost) {
+                return self.rejectTransaction("gas limit is below the intrinsic gas cost");
+            }
             if (comptime !config.disable_gas_checks) {
-                if (gas_limit < initial_gas_cost or gas_limit < floor_gas_cost) {
-                    return CallResult.failed(0);
+                if (gas_limit < floor_gas_cost) {
+                    return self.rejectTransaction("gas limit is below the EIP-7623 calldata floor");
                 }
                 // EIP-7825: a transaction above TX_GAS_LIMIT_CAP is invalid; reject before nonce increment.
                 config.eips.validate_transaction_gas_limit(gas_limit) catch |err| {
-                    log.debug("Transaction rejected: {s}", .{@errorName(err)});
-                    return CallResult.failed(0);
+                    log.debug("Transaction gas limit refused: {s}", .{@errorName(err)});
+                    return self.rejectTransaction("gas limit exceeds the EIP-7825 transaction gas cap");
                 };
             }
             const execution_gas_limit = gas_limit - initial_gas_cost;
@@ -773,8 +1037,8 @@ pub fn Evm(config: EvmConfig) type {
                 self.block_info.blob_base_fee,
                 params.get_to(),
             ) catch |err| {
-                log.err("Blob transaction validation failed: {s}", .{@errorName(err)});
-                return CallResult.failed(0);
+                log.debug("Blob transaction validation failed: {s}", .{@errorName(err)});
+                return self.rejectTransaction("blob transaction fields are invalid (EIP-4844)");
             };
 
             const max_blob_gas_cost = config.eips.max_blob_gas_cost(
@@ -792,12 +1056,12 @@ pub fn Evm(config: EvmConfig) type {
             const gas_cost = @mulWithOverflow(@as(u256, gas_limit), self.gas_price);
             const upfront_cost = @addWithOverflow(gas_cost[0], blob_gas_cost);
             if (gas_cost[1] != 0 or upfront_cost[1] != 0) {
-                return CallResult.failed(0);
+                return self.rejectTransaction("gas limit times gas price overflows");
             }
 
             const origin_before = self.database.get_account(self.origin.bytes) catch |err| {
-                log.err("Failed to read origin account for upfront balance check: {s}", .{@errorName(err)});
-                return CallResult.failed(0);
+                log.warn("Failed to read origin account for upfront balance check: {s}", .{@errorName(err)});
+                return self.hostFailureResult(err);
             } orelse Account.zero();
 
             // Transaction validity is checked before nonce increment or execution.
@@ -806,31 +1070,31 @@ pub fn Evm(config: EvmConfig) type {
                 const gas_fee_cap = self.context.max_fee_per_gas orelse self.gas_price;
                 const max_execution_cost = @mulWithOverflow(@as(u256, gas_limit), gas_fee_cap);
                 if (max_execution_cost[1] != 0) {
-                    return CallResult.failed(0);
+                    return self.rejectTransaction("gas limit times max fee per gas overflows");
                 }
                 const execution_and_value = @addWithOverflow(max_execution_cost[0], params.getValue());
                 if (execution_and_value[1] != 0) {
-                    return CallResult.failed(0);
+                    return self.rejectTransaction("gas cost plus value overflows");
                 }
                 const required_balance = @addWithOverflow(execution_and_value[0], max_blob_gas_cost);
                 if (required_balance[1] != 0 or origin_before.balance < required_balance[0]) {
-                    return CallResult.failed(0);
+                    return self.rejectTransaction("sender balance is below gas limit times max fee per gas plus value");
                 }
                 if (origin_before.balance < upfront_cost[0]) {
-                    return CallResult.failed(0);
+                    return self.rejectTransaction("sender balance is below the up-front gas cost");
                 }
             }
             // EIP-2681: a sender whose nonce is at the limit cannot send a transaction.
             if (origin_before.nonce == std.math.maxInt(u64)) {
-                return CallResult.failed(0);
+                return self.rejectTransaction("sender nonce is at the EIP-2681 limit");
             }
 
             // From here on the transaction changes state. The snapshot lets a host
             // failure undo all of it, including the gas purchase and nonce increment.
             const tx_snapshot_depth = self.database.snapshot_depth();
             const tx_snapshot = self.database.create_snapshot() catch |err| {
-                log.err("Failed to open the transaction snapshot: {s}", .{@errorName(err)});
-                return CallResult.failed(0);
+                log.warn("Failed to open the transaction snapshot: {s}", .{@errorName(err)});
+                return self.hostFailureResult(err);
             };
 
             // Buy gas and increment the origin nonce (EIP-2718) in one account write,
@@ -840,18 +1104,18 @@ pub fn Evm(config: EvmConfig) type {
             {
                 var origin_account = origin_before;
                 self.journal.record_nonce_change(self.current_snapshot_id, self.origin, origin_account.nonce) catch |err| {
-                    log.err("Failed to journal the origin nonce: {s}", .{@errorName(err)});
-                    return self.abortTransaction(tx_snapshot_depth);
+                    log.warn("Failed to journal the origin nonce: {s}", .{@errorName(err)});
+                    return self.abortTransaction(tx_snapshot_depth, err);
                 };
                 self.journal.record_balance_change(self.current_snapshot_id, self.origin, origin_account.balance) catch |err| {
-                    log.err("Failed to journal the gas purchase: {s}", .{@errorName(err)});
-                    return self.abortTransaction(tx_snapshot_depth);
+                    log.warn("Failed to journal the gas purchase: {s}", .{@errorName(err)});
+                    return self.abortTransaction(tx_snapshot_depth, err);
                 };
                 origin_account.nonce += 1;
                 origin_account.balance -= charged;
                 self.database.set_account(self.origin.bytes, origin_account) catch |err| {
-                    log.err("Failed to buy gas for the transaction: {s}", .{@errorName(err)});
-                    return self.abortTransaction(tx_snapshot_depth);
+                    log.warn("Failed to buy gas for the transaction: {s}", .{@errorName(err)});
+                    return self.abortTransaction(tx_snapshot_depth, err);
                 };
                 self.tx_sender_nonce_incremented = true;
             }
@@ -863,16 +1127,22 @@ pub fn Evm(config: EvmConfig) type {
             // The trace is allocated with `self.allocator`, not the call arena;
             // `toOwnedResult` deep-copies it, so the original is freed here.
             defer if (arena_result.trace) |*trace| trace.deinit();
+            if (self.host_failure) |err| {
+                // The host failed somewhere in the call tree. Whatever the frames
+                // made of it is not the transaction's outcome.
+                log.warn("Transaction aborted by a host failure: {s}", .{@errorName(err)});
+                return self.abortTransaction(tx_snapshot_depth, err);
+            }
             if (arena_result.success) {
                 self.finalizeDestructions() catch |err| {
-                    log.err("Failed to finalize selfdestructions: {s}", .{@errorName(err)});
-                    return self.abortTransaction(tx_snapshot_depth);
+                    log.warn("Failed to finalize selfdestructions: {s}", .{@errorName(err)});
+                    return self.abortTransaction(tx_snapshot_depth, err);
                 };
             }
             // Clone result to main allocator since we're at depth 0 (top-level call)
             var result = arena_result.toOwnedResult(self.allocator) catch |err| {
-                log.err("Failed to clone call result: {s}", .{@errorName(err)});
-                return self.abortTransaction(tx_snapshot_depth);
+                log.warn("Failed to clone call result: {s}", .{@errorName(err)});
+                return self.abortTransaction(tx_snapshot_depth, err);
             };
 
             self.tracer.onCallComplete(result.success, @as(i64, @intCast(result.gas_left)), result.output.len);
@@ -901,21 +1171,21 @@ pub fn Evm(config: EvmConfig) type {
             const refund: u256 = @min(unused_gas * self.gas_price, charged);
             if (refund > 0) {
                 var origin_account = self.database.get_account(self.origin.bytes) catch |err| {
-                    log.err("Failed to read the origin account for the gas refund: {s}", .{@errorName(err)});
+                    log.warn("Failed to read the origin account for the gas refund: {s}", .{@errorName(err)});
                     result.deinit(self.allocator);
-                    return self.abortTransaction(tx_snapshot_depth);
+                    return self.abortTransaction(tx_snapshot_depth, err);
                 } orelse Account.zero();
                 const refunded_balance = @addWithOverflow(origin_account.balance, refund);
                 if (refunded_balance[1] != 0) {
-                    log.err("Origin balance overflows on the gas refund", .{});
+                    log.warn("Origin balance overflows on the gas refund", .{});
                     result.deinit(self.allocator);
-                    return self.abortTransaction(tx_snapshot_depth);
+                    return self.abortTransaction(tx_snapshot_depth, error.BalanceOverflow);
                 }
                 origin_account.balance = refunded_balance[0];
                 self.database.set_account(self.origin.bytes, origin_account) catch |err| {
-                    log.err("Failed to refund unused gas: {s}", .{@errorName(err)});
+                    log.warn("Failed to refund unused gas: {s}", .{@errorName(err)});
                     result.deinit(self.allocator);
-                    return self.abortTransaction(tx_snapshot_depth);
+                    return self.abortTransaction(tx_snapshot_depth, err);
                 };
             }
 
@@ -928,26 +1198,26 @@ pub fn Evm(config: EvmConfig) type {
             const coinbase_reward = reward_per_gas * gas_consumed_u256;
             if (coinbase_reward > 0) {
                 var coinbase_account = self.database.get_account(self.block_info.coinbase.bytes) catch |err| {
-                    log.err("Failed to read the coinbase account: {s}", .{@errorName(err)});
+                    log.warn("Failed to read the coinbase account: {s}", .{@errorName(err)});
                     result.deinit(self.allocator);
-                    return self.abortTransaction(tx_snapshot_depth);
+                    return self.abortTransaction(tx_snapshot_depth, err);
                 } orelse Account.zero();
                 const rewarded_balance = @addWithOverflow(coinbase_account.balance, coinbase_reward);
                 if (rewarded_balance[1] != 0) {
-                    log.err("Coinbase balance overflows on the block reward", .{});
+                    log.warn("Coinbase balance overflows on the block reward", .{});
                     result.deinit(self.allocator);
-                    return self.abortTransaction(tx_snapshot_depth);
+                    return self.abortTransaction(tx_snapshot_depth, error.BalanceOverflow);
                 }
                 self.journal.record_balance_change(0, self.block_info.coinbase, coinbase_account.balance) catch |err| {
-                    log.err("Failed to journal the coinbase reward: {s}", .{@errorName(err)});
+                    log.warn("Failed to journal the coinbase reward: {s}", .{@errorName(err)});
                     result.deinit(self.allocator);
-                    return self.abortTransaction(tx_snapshot_depth);
+                    return self.abortTransaction(tx_snapshot_depth, err);
                 };
                 coinbase_account.balance = rewarded_balance[0];
                 self.database.set_account(self.block_info.coinbase.bytes, coinbase_account) catch |err| {
-                    log.err("Failed to pay the coinbase reward: {s}", .{@errorName(err)});
+                    log.warn("Failed to pay the coinbase reward: {s}", .{@errorName(err)});
                     result.deinit(self.allocator);
-                    return self.abortTransaction(tx_snapshot_depth);
+                    return self.abortTransaction(tx_snapshot_depth, err);
                 };
             }
 
@@ -956,21 +1226,21 @@ pub fn Evm(config: EvmConfig) type {
             // pointing at freed memory.
             if (self.logs.items.len > 0) {
                 const owned_logs = self.copyLogs() catch |err| {
-                    log.err("Failed to copy result logs: {s}", .{@errorName(err)});
+                    log.warn("Failed to copy result logs: {s}", .{@errorName(err)});
                     result.deinit(self.allocator);
-                    return self.abortTransaction(tx_snapshot_depth);
+                    return self.abortTransaction(tx_snapshot_depth, err);
                 };
                 self.allocator.free(result.logs);
                 result.logs = owned_logs;
             }
 
-            // Extract self-destruct records if self-destruct is enabled
-            // EIP-6780 restricts SELFDESTRUCT behavior in Cancun+
-            if (config.eips.eip_6780_selfdestruct_same_transaction_only()) {
+            // Report the accounts the transaction destroyed, on every fork. From
+            // Cancun (EIP-6780) these are only contracts created in the transaction.
+            {
                 const records = self.self_destruct.toOwnedSlice(self.allocator) catch |err| {
-                    log.err("Failed to transfer selfdestructs: {s}", .{@errorName(err)});
+                    log.warn("Failed to transfer selfdestructs: {s}", .{@errorName(err)});
                     result.deinit(self.allocator);
-                    return self.abortTransaction(tx_snapshot_depth);
+                    return self.abortTransaction(tx_snapshot_depth, err);
                 };
                 self.allocator.free(result.selfdestructs);
                 result.selfdestructs = records;
@@ -978,9 +1248,9 @@ pub fn Evm(config: EvmConfig) type {
 
             // Extract access list data before clearing
             const accessed_addresses = self.allocator.dupe(primitives.Address, self.access_list.addresses.keys()) catch |err| {
-                log.err("Failed to copy accessed addresses: {s}", .{@errorName(err)});
+                log.warn("Failed to copy accessed addresses: {s}", .{@errorName(err)});
                 result.deinit(self.allocator);
-                return self.abortTransaction(tx_snapshot_depth);
+                return self.abortTransaction(tx_snapshot_depth, err);
             };
             self.allocator.free(result.accessed_addresses);
             result.accessed_addresses = accessed_addresses;
@@ -988,9 +1258,9 @@ pub fn Evm(config: EvmConfig) type {
             // Convert StorageKey to StorageAccess (same fields, different type)
             const storage_keys = self.access_list.storage_slots.keys();
             const storage_access = self.allocator.alloc(call_result_module.StorageAccess, storage_keys.len) catch |err| {
-                log.err("Failed to copy accessed storage: {s}", .{@errorName(err)});
+                log.warn("Failed to copy accessed storage: {s}", .{@errorName(err)});
                 result.deinit(self.allocator);
-                return self.abortTransaction(tx_snapshot_depth);
+                return self.abortTransaction(tx_snapshot_depth, err);
             };
             for (storage_keys, 0..) |key, i| {
                 storage_access[i] = .{ .address = key.address, .slot = key.slot };
@@ -999,9 +1269,9 @@ pub fn Evm(config: EvmConfig) type {
             result.accessed_storage = storage_access;
 
             self.database.commit_snapshot(tx_snapshot) catch |err| {
-                log.err("Failed to close the transaction snapshot: {s}", .{@errorName(err)});
+                log.warn("Failed to close the transaction snapshot: {s}", .{@errorName(err)});
                 result.deinit(self.allocator);
-                return self.abortTransaction(tx_snapshot_depth);
+                return self.abortTransaction(tx_snapshot_depth, err);
             };
 
             return result;
@@ -1016,6 +1286,13 @@ pub fn Evm(config: EvmConfig) type {
                 return self.innerCallOnLargeStack(params);
             }
             const execution_gas = params.getGas();
+
+            // After a host failure the transaction is aborted. Nothing a frame does
+            // from here on is kept, so no further call runs.
+            if (self.host_failure != null) {
+                @branchHint(.cold);
+                return CallResult.failed(0);
+            }
 
             // depth is incremented solely by execute_frame (CALL variants) and the create paths;
             // inner_call must NOT increment it again or every nesting level would advance depth
@@ -1038,9 +1315,10 @@ pub fn Evm(config: EvmConfig) type {
             const logs_before = self.logs.items.len;
             const access_mark = self.access_list.checkpoint();
             const destructions_mark = self.self_destruct.checkpoint();
-            // Every call opens one journal snapshot and one database snapshot and closes
-            // both. These marks let a call that returned an error before closing them
-            // be rolled back here.
+            // Every call opens one journal snapshot and one database snapshot. A call
+            // that fails reverts its own; a call that succeeds leaves the database
+            // snapshot open, and it is committed below only once the caller's copy of
+            // the return data exists. These marks let any other ending be rolled back.
             const journal_mark = self.journal.next_snapshot_id;
             const database_depth = self.database.snapshot_depth();
 
@@ -1049,6 +1327,7 @@ pub fn Evm(config: EvmConfig) type {
                     @branchHint(.likely);
                     break :blk self.executeCall(.{ .caller = p.caller, .to = p.to, .value = p.value, .input = p.input, .gas = execution_gas }) catch |err| {
                         log.debug("inner_call: CALL failed: {s}", .{@errorName(err)});
+                        self.noteHostFailure(err);
                         break :blk CallResult.failed(0);
                     };
                 },
@@ -1056,24 +1335,28 @@ pub fn Evm(config: EvmConfig) type {
                     @branchHint(.likely);
                     break :blk self.executeStaticcall(.{ .caller = p.caller, .to = p.to, .input = p.input, .gas = execution_gas }) catch |err| {
                         log.debug("inner_call: STATICCALL failed: {s}", .{@errorName(err)});
+                        self.noteHostFailure(err);
                         break :blk CallResult.failed(0);
                     };
                 },
                 .delegatecall => |p| blk: {
                     break :blk self.executeDelegatecall(.{ .caller = p.caller, .context_address = p.context_address orelse p.caller, .to = p.to, .input = p.input, .gas = execution_gas }) catch |err| {
                         log.debug("inner_call: DELEGATECALL failed: {s}", .{@errorName(err)});
+                        self.noteHostFailure(err);
                         break :blk CallResult.failed(0);
                     };
                 },
                 .create => |p| blk: {
                     break :blk self.executeCreate(.{ .caller = p.caller, .value = p.value, .init_code = p.init_code, .gas = execution_gas }) catch |err| {
                         log.debug("inner_call: CREATE failed: {s}", .{@errorName(err)});
+                        self.noteHostFailure(err);
                         break :blk CallResult.failed(0);
                     };
                 },
                 .create2 => |p| blk: {
                     break :blk self.executeCreate2(.{ .caller = p.caller, .value = p.value, .init_code = p.init_code, .salt = p.salt, .gas = execution_gas }) catch |err| {
                         log.debug("inner_call: CREATE2 failed: {s}", .{@errorName(err)});
+                        self.noteHostFailure(err);
                         break :blk CallResult.failed(0);
                     };
                 },
@@ -1081,23 +1364,44 @@ pub fn Evm(config: EvmConfig) type {
                     @branchHint(.cold);
                     break :blk self.executeCallcode(.{ .caller = p.caller, .to = p.to, .value = p.value, .input = p.input, .gas = execution_gas }) catch |err| {
                         log.debug("inner_call: CALLCODE failed: {s}", .{@errorName(err)});
+                        self.noteHostFailure(err);
                         break :blk CallResult.failed(0);
                     };
                 },
             };
 
-            // Refunds earned inside a frame that did not succeed are discarded together
-            // with its state changes (execution-specs: refund_counter is merged into the
-            // parent only by incorporate_child_on_success).
-            if (self.database.snapshot_depth() > database_depth) {
-                // The call returned an error with its snapshots still open, so its state
-                // changes were not rolled back yet. A call that fails changes nothing.
-                self.journal.revert_to_snapshot(journal_mark);
-                self.database.revert_to_depth(database_depth);
+            // A database write that ran out of memory inside the frame halted the
+            // frame like any failed opcode. The database remembers it.
+            if (self.database.failure) |err| self.failHost(err);
+
+            // EIP-211: the caller's return data buffer holds the output of the frame that
+            // just ended: its RETURN or REVERT data for a call, only REVERT data for a
+            // creation, and nothing after an exceptional halt. The copy is made while
+            // the call's snapshot is still open, so a failure here undoes the call.
+            const return_data: []const u8 = if (params.isCreate() and result.success) &.{} else result.output;
+            self.set_return_data(return_data) catch |err| {
+                log.warn("inner_call: failed to store return data: {s}", .{@errorName(err)});
+                self.failHost(err);
+                self.clear_return_data();
+            };
+            if (self.host_failure != null) {
+                // The call's outcome is void. Its trace stays with the result: the
+                // top-level caller owns and frees it.
+                const trace = result.trace;
                 result = CallResult.failed(0);
+                result.trace = trace;
             }
 
-            if (!result.success) {
+            if (result.success) {
+                self.database.commit_to_depth(database_depth);
+            } else {
+                // A call that fails changes nothing. This also closes the snapshots of
+                // a call that returned an error with them still open.
+                self.journal.revert_to_snapshot(journal_mark);
+                self.database.revert_to_depth(database_depth);
+                // Refunds earned inside a frame that did not succeed are discarded
+                // together with its state changes (execution-specs: refund_counter is
+                // merged into the parent only by incorporate_child_on_success).
                 self.gas_refund_counter = refund_before;
                 self.logs.shrinkRetainingCapacity(logs_before);
                 self.self_destruct.revert(destructions_mark);
@@ -1106,16 +1410,6 @@ pub fn Evm(config: EvmConfig) type {
                 // parent), so executeCreate and executeCreate2 roll back themselves.
                 if (!params.isCreate()) self.access_list.revert(access_mark);
             }
-
-            // EIP-211: the caller's return data buffer holds the output of the frame that
-            // just ended: its RETURN or REVERT data for a call, only REVERT data for a
-            // creation, and nothing after an exceptional halt.
-            const return_data: []const u8 = if (params.isCreate() and result.success) &.{} else result.output;
-            self.set_return_data(return_data) catch |err| {
-                log.err("inner_call: failed to store return data: {s}", .{@errorName(err)});
-                self.clear_return_data();
-                result = CallResult.failed(0);
-            };
 
             result.logs = &.{};
             result.selfdestructs = &.{};
@@ -1149,6 +1443,7 @@ pub fn Evm(config: EvmConfig) type {
                 if (address.equals(override.address)) {
                     const output = override.execute(self.getCallArenaAllocator(), input, gas) catch |err| {
                         log.debug("Precompile override at {x} failed: {s}", .{ address.bytes, @errorName(err) });
+                        self.noteHostFailure(err);
                         return CallResult.failed(0);
                     };
                     // A failed precompile, or one that reports using more gas than it
@@ -1175,6 +1470,7 @@ pub fn Evm(config: EvmConfig) type {
             if (!precompiles.isPrecompile(code_address, config.eips.hardfork)) return null;
             return self.executePrecompileInline(code_address, input, gas, is_static, snapshot_id) catch |err| {
                 log.debug("Precompile at {x} failed: {s}", .{ code_address.bytes, @errorName(err) });
+                self.noteHostFailure(err);
                 return CallResult.failed(0);
             };
         }
@@ -1220,6 +1516,7 @@ pub fn Evm(config: EvmConfig) type {
             if (params.value > 0) {
                 self.transferWithBalanceChecks(params.caller, params.to, params.value, snapshot_id) catch |err| {
                     log.debug("Call value transfer failed: {}", .{err});
+                    self.noteHostFailure(err);
                     self.journal.revert_to_snapshot(snapshot_id);
                     try self.database.revert_to_snapshot(db_snapshot_id);
                     // execution-specs: a call the sender cannot fund never starts, so the
@@ -1241,6 +1538,7 @@ pub fn Evm(config: EvmConfig) type {
 
             const preflight = self.performCallPreflight(params.to, params.input, params.gas, self.is_static_context(), snapshot_id) catch |err| {
                 self.tracer.onCallPreflight("CALL", @errorName(err));
+                self.noteHostFailure(err);
                 self.journal.revert_to_snapshot(snapshot_id);
                 try self.database.revert_to_snapshot(db_snapshot_id);
                 return CallResult.failed(0);
@@ -1250,9 +1548,7 @@ pub fn Evm(config: EvmConfig) type {
             switch (preflight) {
                 .precompile_result => |result| {
                     // A failed precompile call undoes its value transfer, like any failed call.
-                    if (result.success) {
-                        try self.database.commit_snapshot(db_snapshot_id);
-                    } else {
+                    if (!result.success) {
                         self.journal.revert_to_snapshot(snapshot_id);
                         try self.database.revert_to_snapshot(db_snapshot_id);
                     }
@@ -1260,8 +1556,6 @@ pub fn Evm(config: EvmConfig) type {
                 },
                 .empty_account => |gas| {
                     self.tracer.onCodeRetrieval(params.to, 0, true);
-                    // Empty account call succeeded, commit the snapshot
-                    try self.database.commit_snapshot(db_snapshot_id);
                     return CallResult.succeeded_empty(gas);
                 },
                 .execute_with_code => |code| {
@@ -1277,6 +1571,7 @@ pub fn Evm(config: EvmConfig) type {
                         snapshot_id,
                     ) catch |err| {
                         log.debug("EXECUTE_CALL: execute_frame failed with error: {}", .{err});
+                        self.noteHostFailure(err);
                         self.journal.revert_to_snapshot(snapshot_id);
                         try self.database.revert_to_snapshot(db_snapshot_id);
                         return CallResult.failed(0);
@@ -1285,9 +1580,6 @@ pub fn Evm(config: EvmConfig) type {
                     if (!result.success) {
                         self.journal.revert_to_snapshot(snapshot_id);
                         try self.database.revert_to_snapshot(db_snapshot_id);
-                    } else {
-                        // Call succeeded, commit the snapshot
-                        try self.database.commit_snapshot(db_snapshot_id);
                     }
                     return result;
                 },
@@ -1307,8 +1599,9 @@ pub fn Evm(config: EvmConfig) type {
 
             if (params.value > 0) {
                 if (!config.disable_balance_checks) {
-                    const caller_account = self.database.get_account(params.caller.bytes) catch {
+                    const caller_account = self.database.get_account(params.caller.bytes) catch |err| {
                         @branchHint(.cold);
+                        self.noteHostFailure(err);
                         self.journal.revert_to_snapshot(snapshot_id);
                         try self.database.revert_to_snapshot(db_snapshot_id);
                         return CallResult.failed(0);
@@ -1331,9 +1624,7 @@ pub fn Evm(config: EvmConfig) type {
             const code_address = config.eips.eip_7702_get_effective_code_address(target, params.to);
             const delegated = !code_address.equals(params.to);
             if (self.executePrecompileAt(code_address, delegated, params.input, params.gas, self.is_static_context(), snapshot_id)) |result| {
-                if (result.success) {
-                    try self.database.commit_snapshot(db_snapshot_id);
-                } else {
+                if (!result.success) {
                     self.journal.revert_to_snapshot(snapshot_id);
                     try self.database.revert_to_snapshot(db_snapshot_id);
                 }
@@ -1343,8 +1634,6 @@ pub fn Evm(config: EvmConfig) type {
             const code = try self.codeAt(code_address);
             if (code.bytes.len == 0) {
                 @branchHint(.unlikely);
-                // Empty code, commit snapshot
-                try self.database.commit_snapshot(db_snapshot_id);
                 return CallResult.succeeded_empty(params.gas);
             }
 
@@ -1357,8 +1646,9 @@ pub fn Evm(config: EvmConfig) type {
                 params.value,
                 self.is_static_context(), // EIP-214: inherit parent static context (CALLCODE)
                 snapshot_id,
-            ) catch {
+            ) catch |err| {
                 @branchHint(.unlikely);
+                self.noteHostFailure(err);
                 self.journal.revert_to_snapshot(snapshot_id);
                 try self.database.revert_to_snapshot(db_snapshot_id);
                 return CallResult.failed(0);
@@ -1368,9 +1658,6 @@ pub fn Evm(config: EvmConfig) type {
                 @branchHint(.unlikely);
                 self.journal.revert_to_snapshot(snapshot_id);
                 try self.database.revert_to_snapshot(db_snapshot_id);
-            } else {
-                // Call succeeded, commit snapshot
-                try self.database.commit_snapshot(db_snapshot_id);
             }
             return result;
         }
@@ -1389,6 +1676,7 @@ pub fn Evm(config: EvmConfig) type {
             const preflight = self.performCallPreflight(params.to, params.input, params.gas, self.is_static_context(), snapshot_id) catch |err| {
                 @branchHint(.cold);
                 log.debug("Delegatecall preflight failed: {}", .{err});
+                self.noteHostFailure(err);
                 self.journal.revert_to_snapshot(snapshot_id);
                 try self.database.revert_to_snapshot(db_snapshot_id);
                 return CallResult.failed(0);
@@ -1397,16 +1685,13 @@ pub fn Evm(config: EvmConfig) type {
             switch (preflight) {
                 .precompile_result => |result| {
                     // A failed precompile call is a failed call: its snapshots revert.
-                    if (result.success) {
-                        try self.database.commit_snapshot(db_snapshot_id);
-                    } else {
+                    if (!result.success) {
                         self.journal.revert_to_snapshot(snapshot_id);
                         try self.database.revert_to_snapshot(db_snapshot_id);
                     }
                     return result;
                 },
                 .empty_account => |gas| {
-                    try self.database.commit_snapshot(db_snapshot_id);
                     return CallResult.succeeded_empty(gas);
                 },
                 .execute_with_code => |code| {
@@ -1420,8 +1705,9 @@ pub fn Evm(config: EvmConfig) type {
                         current_value,
                         self.is_static_context(), // EIP-214: inherit parent static context (DELEGATECALL)
                         snapshot_id,
-                    ) catch {
+                    ) catch |err| {
                         @branchHint(.cold);
+                        self.noteHostFailure(err);
                         self.journal.revert_to_snapshot(snapshot_id);
                         try self.database.revert_to_snapshot(db_snapshot_id);
                         return CallResult.failed(0);
@@ -1431,8 +1717,6 @@ pub fn Evm(config: EvmConfig) type {
                         @branchHint(.unlikely);
                         self.journal.revert_to_snapshot(snapshot_id);
                         try self.database.revert_to_snapshot(db_snapshot_id);
-                    } else {
-                        try self.database.commit_snapshot(db_snapshot_id);
                     }
                     return result;
                 },
@@ -1452,6 +1736,7 @@ pub fn Evm(config: EvmConfig) type {
             const preflight = self.performCallPreflight(params.to, params.input, params.gas, true, snapshot_id) catch |err| {
                 @branchHint(.cold);
                 log.debug("Staticcall preflight failed: {}", .{err});
+                self.noteHostFailure(err);
                 self.journal.revert_to_snapshot(snapshot_id);
                 try self.database.revert_to_snapshot(db_snapshot_id);
                 return CallResult.failed(0);
@@ -1460,16 +1745,13 @@ pub fn Evm(config: EvmConfig) type {
             switch (preflight) {
                 .precompile_result => |result| {
                     // A failed precompile call is a failed call: its snapshots revert.
-                    if (result.success) {
-                        try self.database.commit_snapshot(db_snapshot_id);
-                    } else {
+                    if (!result.success) {
                         self.journal.revert_to_snapshot(snapshot_id);
                         try self.database.revert_to_snapshot(db_snapshot_id);
                     }
                     return result;
                 },
                 .empty_account => |gas| {
-                    try self.database.commit_snapshot(db_snapshot_id);
                     return CallResult.succeeded_empty(gas);
                 },
                 .execute_with_code => |code| {
@@ -1482,8 +1764,9 @@ pub fn Evm(config: EvmConfig) type {
                         0,
                         true,
                         snapshot_id,
-                    ) catch {
+                    ) catch |err| {
                         @branchHint(.cold);
+                        self.noteHostFailure(err);
                         self.journal.revert_to_snapshot(snapshot_id);
                         try self.database.revert_to_snapshot(db_snapshot_id);
                         return CallResult.failed(0);
@@ -1492,8 +1775,6 @@ pub fn Evm(config: EvmConfig) type {
                     if (!result.success) {
                         self.journal.revert_to_snapshot(snapshot_id);
                         try self.database.revert_to_snapshot(db_snapshot_id);
-                    } else {
-                        try self.database.commit_snapshot(db_snapshot_id);
                     }
                     return result;
                 },
@@ -1603,7 +1884,8 @@ pub fn Evm(config: EvmConfig) type {
                 .snapshot_id = snapshot_id,
                 .db_snapshot_id = db_snapshot_id,
                 .existed_before = existed_before,
-            }) catch {
+            }) catch |err| {
+                self.noteHostFailure(err);
                 self.journal.revert_to_snapshot(snapshot_id);
                 try self.database.revert_to_snapshot(db_snapshot_id);
                 self.access_list.revert(access_mark);
@@ -1689,7 +1971,8 @@ pub fn Evm(config: EvmConfig) type {
                 .snapshot_id = snapshot_id,
                 .db_snapshot_id = db_snapshot_id,
                 .existed_before = existed_before,
-            }) catch {
+            }) catch |err| {
+                self.noteHostFailure(err);
                 self.journal.revert_to_snapshot(snapshot_id);
                 try self.database.revert_to_snapshot(db_snapshot_id);
                 self.access_list.revert(access_mark);
@@ -1723,7 +2006,8 @@ pub fn Evm(config: EvmConfig) type {
                 try self.database.set_account(args.contract_address.bytes, created);
             }
             if (args.value > 0) {
-                self.transferWithBalanceChecks(args.caller, args.contract_address, args.value, args.snapshot_id) catch {
+                self.transferWithBalanceChecks(args.caller, args.contract_address, args.value, args.snapshot_id) catch |err| {
+                    self.noteHostFailure(err);
                     self.journal.revert_to_snapshot(args.snapshot_id);
                     try self.database.revert_to_snapshot(args.db_snapshot_id);
                     return CallResult.failed(0);
@@ -1738,6 +2022,7 @@ pub fn Evm(config: EvmConfig) type {
                 args.snapshot_id,
             ) catch |err| {
                 log.debug("execute_init_code failed with error: {}", .{err});
+                self.noteHostFailure(err);
                 self.journal.revert_to_snapshot(args.snapshot_id);
                 try self.database.revert_to_snapshot(args.db_snapshot_id);
                 return CallResult.failed(0);
@@ -1748,7 +2033,8 @@ pub fn Evm(config: EvmConfig) type {
                 try self.database.revert_to_snapshot(args.db_snapshot_id);
                 return result;
             }
-            var contract_account = self.database.get_account(args.contract_address.bytes) catch {
+            var contract_account = self.database.get_account(args.contract_address.bytes) catch |err| {
+                self.noteHostFailure(err);
                 self.journal.revert_to_snapshot(args.snapshot_id);
                 try self.database.revert_to_snapshot(args.db_snapshot_id);
                 return CallResult.failed(0);
@@ -1776,7 +2062,8 @@ pub fn Evm(config: EvmConfig) type {
                 const deposit_cost: u64 = @as(u64, @intCast(result.output.len)) * primitives.GasConstants.CreateDataGas;
                 if (result.gas_left >= deposit_cost) {
                     result.gas_left -= deposit_cost;
-                    const stored_hash = self.database.set_code(result.output) catch {
+                    const stored_hash = self.database.set_code(result.output) catch |err| {
+                        self.noteHostFailure(err);
                         self.journal.revert_to_snapshot(args.snapshot_id);
                         try self.database.revert_to_snapshot(args.db_snapshot_id);
                         return CallResult.failed(0);
@@ -1789,15 +2076,16 @@ pub fn Evm(config: EvmConfig) type {
                     return CallResult.failed(0);
                 }
             }
-            self.database.set_account(args.contract_address.bytes, contract_account) catch {
+            self.database.set_account(args.contract_address.bytes, contract_account) catch |err| {
+                self.noteHostFailure(err);
                 self.journal.revert_to_snapshot(args.snapshot_id);
                 try self.database.revert_to_snapshot(args.db_snapshot_id);
                 return CallResult.failed(0);
             };
 
-            // CREATE succeeded, commit the snapshot
-            try self.database.commit_snapshot(args.db_snapshot_id);
-
+            // The creation's snapshot stays open: `inner_call` commits it once the
+            // result below exists and the caller's return data is stored, so a
+            // failure after this point still undoes the deployment.
             var final_result = if (result.output.len > 0)
                 try CallResult.success_with_output(self.getCallArenaAllocator(), result.gas_left, result.output)
             else
@@ -1862,7 +2150,7 @@ pub fn Evm(config: EvmConfig) type {
         /// Result of analyzing code once: validated bytecode, its dispatch schedule and
         /// the jump table into that schedule. Built in the call arena for one frame, or
         /// owned by the `DispatchCache` and shared by every frame that runs the code.
-        const AnalysisError = error{ InvalidOpcode, InvalidJumpDestination, AllocationError };
+        const AnalysisError = error{ InvalidOpcode, InvalidJumpDestination, CodeTooLarge, AllocationError };
 
         const Analysis = struct {
             bytecode: Bytecode,
@@ -1877,20 +2165,22 @@ pub fn Evm(config: EvmConfig) type {
                         error.InvalidOpcode => error.InvalidOpcode,
                         error.InvalidJumpDestination => error.InvalidJumpDestination,
                         error.TruncatedPush => error.InvalidOpcode,
+                        // Code too long for the configured program counter fails
+                        // its call; it is not a failure of the host.
+                        error.InitcodeTooLarge => error.CodeTooLarge,
                         error.OutOfMemory => error.AllocationError,
-                        else => error.AllocationError,
                     };
                 };
                 errdefer bytecode.deinit();
 
                 var schedule = Frame.Dispatch.DispatchSchedule.init(allocator, bytecode, &Frame.opcode_handlers, tracer) catch |err| {
-                    log.err("DispatchSchedule.init failed: {s} (code_len={}, fusion={})", .{ @errorName(err), code.len, config.enable_fusion });
+                    log.warn("DispatchSchedule.init failed: {s} (code_len={}, fusion={})", .{ @errorName(err), code.len, config.enable_fusion });
                     return error.AllocationError;
                 };
                 errdefer schedule.deinit();
 
                 const jump_table = Frame.Dispatch.createJumpTable(allocator, &schedule) catch |err| {
-                    log.err("createJumpTable failed: {s} (code_len={}, fusion={})", .{ @errorName(err), code.len, config.enable_fusion });
+                    log.warn("createJumpTable failed: {s} (code_len={}, fusion={})", .{ @errorName(err), code.len, config.enable_fusion });
                     return error.AllocationError;
                 };
 
@@ -2039,10 +2329,13 @@ pub fn Evm(config: EvmConfig) type {
             // more gas than its parent holds, so this cast only fails on a broken invariant.
             const gas_cast = std.math.cast(Frame.GasType, gas) orelse return error.GasExceedsFrameCapacity;
 
-            const arena_allocator = self.call_arena.allocator();
-            var frame = try Frame.init(arena_allocator, gas_cast, caller, value, input, @as(*anyopaque, @ptrCast(self)));
+            const arena_allocator = self.getCallArenaAllocator();
+            // The frame's stack comes from the stack pool, not the arena: see
+            // `FrameStackPool`.
+            const frame_allocator = self.frameAllocator();
+            var frame = try Frame.init(frame_allocator, gas_cast, caller, value, input, @as(*anyopaque, @ptrCast(self)));
             frame.contract_address = address;
-            defer frame.deinit(arena_allocator);
+            defer frame.deinit(frame_allocator);
 
             // EIP-2929: Warm the contract address being executed
             try config.eips.warm_contract_for_execution(&self.access_list, address);
@@ -2097,7 +2390,7 @@ pub fn Evm(config: EvmConfig) type {
                     switch (err) {
                         error.InvalidOpcode, error.InvalidJump, error.OutOfGas, error.OutOfBounds, error.StackUnderflow, error.StackOverflow, error.ReturnDataNotAvailable, error.WriteProtection =>
                             log.debug("Frame execution halted: {s} (code_len={}, gas={}, depth={})", .{ @errorName(err), code_bytes.len, gas, self.depth }),
-                        else => log.err("Frame execution failed with error: {s} (code_len={}, gas={}, depth={})", .{ @errorName(err), code_bytes.len, gas, self.depth }),
+                        else => log.warn("Frame execution failed with error: {s} (code_len={}, gas={}, depth={})", .{ @errorName(err), code_bytes.len, gas, self.depth }),
                     }
                     // A halted frame still reports the trace up to the halt.
                     execution_trace = try self.topLevelTrace();
@@ -2174,12 +2467,22 @@ pub fn Evm(config: EvmConfig) type {
             _ = is_static;
             if (!precompiles.isPrecompile(address, config.eips.hardfork)) return CallResult.failed(0);
 
-            const result = precompiles.execute(self.getCallArenaAllocator(), address, input, gas, config.eips.hardfork) catch {
-                return CallResult{
-                    .success = false,
-                    .gas_left = 0,
-                    .output = &.{},
-                };
+            // Without the trusted setup the point evaluation precompile cannot tell a
+            // valid proof from an invalid one. That is the host's failure, never an
+            // invalid input: `init` loads the setup, so it is missing only when the
+            // host unloaded it or the target cannot load it.
+            if (comptime config.eips.hardfork.isAtLeast(.CANCUN)) {
+                if (address.equals(precompiles.POINT_EVALUATION_ADDRESS) and !kzg_setup.isInitialized()) {
+                    return error.TrustedSetupNotLoaded;
+                }
+            }
+
+            const result = precompiles.execute(self.getCallArenaAllocator(), address, input, gas, config.eips.hardfork) catch |err| switch (err) {
+                // The host ran out of memory; the input was not judged.
+                error.OutOfMemory => return err,
+                // Every other error is the precompile rejecting its input or its
+                // gas: the call fails and consumes all of its gas.
+                else => return CallResult.failed(0),
             };
 
             // A precompile that reports using more gas than it was given has failed.
@@ -2236,6 +2539,10 @@ pub fn Evm(config: EvmConfig) type {
 
         /// Emit log event
         pub fn emit_log(self: *Self, contract_address: primitives.Address, topics: []const u256, data: []const u8) error{OutOfMemory}!void {
+            return self.noting(self.emitLogUnnoted(contract_address, topics, data));
+        }
+
+        fn emitLogUnnoted(self: *Self, contract_address: primitives.Address, topics: []const u256, data: []const u8) error{OutOfMemory}!void {
             // EIP-214: Prevent log emission in static context
             if (!eips.Eips.is_log_emission_allowed(self.is_static_context())) return;
 
@@ -2257,6 +2564,10 @@ pub fn Evm(config: EvmConfig) type {
 
         /// Register a contract as created in the current transaction
         pub fn register_created_contract(self: *Self, address: primitives.Address) !void {
+            return self.noting(self.registerCreatedContractUnnoted(address));
+        }
+
+        fn registerCreatedContractUnnoted(self: *Self, address: primitives.Address) !void {
             try self.created_contracts.mark_created(address);
         }
 
@@ -2270,75 +2581,7 @@ pub fn Evm(config: EvmConfig) type {
             return self.journal.create_snapshot();
         }
 
-        /// Revert state changes to a previous snapshot
-        ///
-        /// Optimized to avoid allocations: iterate journal entries in reverse
-        /// before truncating, applying all reverts in-place.
-        pub fn revert_to_snapshot(self: *Self, snapshot_id: Journal.SnapshotIdType) void {
-            var start_index: ?usize = null;
-            for (self.journal.entries.items, 0..) |entry, i| {
-                if (entry.snapshot_id >= snapshot_id) {
-                    start_index = i;
-                    break;
-                }
-            }
-            if (start_index) |start| {
-                var i = self.journal.entries.items.len;
-                while (i > start) : (i -= 1) {
-                    const entry = self.journal.entries.items[i - 1];
-                    self.apply_journal_entry_revert(entry) catch |err| {
-                        log.err("Failed to revert journal entry: {any}", .{err});
-                    };
-                }
-            }
-            self.journal.revert_to_snapshot(snapshot_id);
-        }
-
-        /// Apply a single journal entry to revert database state
-        fn apply_journal_entry_revert(self: *Self, entry: Journal.EntryType) !void {
-            switch (entry.data) {
-                .storage_change => |sc| {
-                    try self.database.set_storage(sc.address.bytes, sc.key, sc.original_value);
-                },
-                .balance_change => |bc| {
-                    var account = (try self.database.get_account(bc.address.bytes)) orelse {
-                        const reverted_account = Account{
-                            .balance = bc.original_balance,
-                            .nonce = 0,
-                            .code_hash = @as([32]u8, @splat(0)),
-                            .storage_root = @as([32]u8, @splat(0)),
-                        };
-                        return self.database.set_account(bc.address.bytes, reverted_account);
-                    };
-                    account.balance = bc.original_balance;
-                    try self.database.set_account(bc.address.bytes, account);
-                },
-                .nonce_change => |nc| {
-                    var account = (try self.database.get_account(nc.address.bytes)) orelse return;
-                    account.nonce = nc.original_nonce;
-                    try self.database.set_account(nc.address.bytes, account);
-                },
-                .code_change => |cc| {
-                    var account = (try self.database.get_account(cc.address.bytes)) orelse return;
-                    account.code_hash = cc.original_code_hash;
-                    try self.database.set_account(cc.address.bytes, account);
-                },
-                .account_created => |ac| {
-                    try self.database.delete_account(ac.address.bytes);
-                },
-                .account_destroyed => |ad| {
-                    const restored_account = Account{
-                        .balance = ad.balance,
-                        .nonce = 0,
-                        .code_hash = @as([32]u8, @splat(0)),
-                        .storage_root = @as([32]u8, @splat(0)),
-                    };
-                    try self.database.set_account(ad.address.bytes, restored_account);
-                },
-            }
-        }
-
-        /// Record `address` as touched by the current transaction, for the state dump.
+        /// Record `address` as touched by a call, for the state dump.
         fn touchAddress(self: *Self, address: primitives.Address) !void {
             const entry = try self.touched_addresses.getOrPut(address);
             if (entry.found_existing) return;
@@ -2348,16 +2591,18 @@ pub fn Evm(config: EvmConfig) type {
             };
         }
 
-        /// Record `slot` of `address` as touched by the current transaction.
+        /// Record `slot` of `address` as touched by a call.
         fn touchStorageSlot(self: *Self, address: primitives.Address, slot: u256) !void {
             const entry = try self.touched_storage.getOrPut(address);
             if (!entry.found_existing) entry.value_ptr.* = .empty;
             try entry.value_ptr.put(self.allocator, slot, {});
         }
 
-        /// Forget what the previous transaction touched. Addresses a host added to
-        /// `touched_addresses` itself (the C API does, for state it sets up) are kept.
-        fn resetTouched(self: *Self) void {
+        /// Forget every address and storage slot that calls have touched so far.
+        /// Addresses a host added to `touched_addresses` itself (the C API does, for
+        /// state it sets up) are kept. No call does this on its own: the touched sets
+        /// accumulate so that `dumpState` covers everything run on this EVM.
+        pub fn resetTouched(self: *Self) void {
             for (self.transaction_touched.items) |address| _ = self.touched_addresses.remove(address);
             self.transaction_touched.clearRetainingCapacity();
             self.clearTouchedStorage();
@@ -2372,6 +2617,10 @@ pub fn Evm(config: EvmConfig) type {
 
         /// Record a storage change in the journal
         pub fn record_storage_change(self: *Self, address: primitives.Address, slot: u256, original_value: u256) !void {
+            return self.noting(self.recordStorageChangeUnnoted(address, slot, original_value));
+        }
+
+        fn recordStorageChangeUnnoted(self: *Self, address: primitives.Address, slot: u256, original_value: u256) !void {
             try self.journal.record_storage_change(self.current_snapshot_id, address, slot, original_value);
             // Track address and slot for state dump
             try self.touchAddress(address);
@@ -2383,14 +2632,30 @@ pub fn Evm(config: EvmConfig) type {
             return self.journal.get_original_storage(address, slot);
         }
 
-        /// Access an address and return the gas cost (EIP-2929)
         /// Mark `address` warm if it is a precompile in the configured fork.
         fn warmPrecompile(self: *Self, address: primitives.Address) !void {
             if (!precompiles.isPrecompile(address, config.eips.hardfork)) return;
             try self.access_list.pre_warm_addresses(&[_]primitives.Address{address});
         }
 
+        /// EIP-7702 (Prague+): when the transaction's target is a delegated EOA, its
+        /// delegate starts the transaction warm. `call` does this itself. A host
+        /// that drives `inner_call` directly calls it after applying the
+        /// transaction's authorization list, which can change the delegation.
+        pub fn warmDelegatedTarget(self: *Self, target: ?primitives.Address) !void {
+            if (comptime !config.eips.hardfork.isAtLeast(.PRAGUE)) return;
+            const address = target orelse return;
+            const account = (try self.database.get_account(address.bytes)) orelse return;
+            const delegate = account.get_effective_code_address() orelse return;
+            try self.access_list.pre_warm_addresses(&[_]primitives.Address{delegate});
+        }
+
+        /// Access an address and return the gas cost (EIP-2929)
         pub fn access_address(self: *Self, address: primitives.Address) !u64 {
+            return self.noting(self.accessAddressUnnoted(address));
+        }
+
+        fn accessAddressUnnoted(self: *Self, address: primitives.Address) !u64 {
             const cost = try self.access_list.access_address(address);
             // Track address for state dump
             try self.touchAddress(address);
@@ -2403,6 +2668,10 @@ pub fn Evm(config: EvmConfig) type {
 
         /// Access a storage slot and return the gas cost (EIP-2929)
         pub fn access_storage_slot(self: *Self, contract_address: primitives.Address, slot: u256) !u64 {
+            return self.noting(self.accessStorageSlotUnnoted(contract_address, slot));
+        }
+
+        fn accessStorageSlotUnnoted(self: *Self, contract_address: primitives.Address, slot: u256) !u64 {
             const cost = try self.access_list.access_storage_slot(contract_address, slot);
             // Track address and slot for state dump
             try self.touchAddress(contract_address);
@@ -2412,24 +2681,19 @@ pub fn Evm(config: EvmConfig) type {
             return cost;
         }
 
+        /// Delete every account the transaction destroyed, with its storage. The
+        /// cost is the number of slots those accounts hold, not the size of the state.
         fn finalizeDestructions(self: *Self) !void {
             var destructions = self.self_destruct.iterator();
-            while (destructions.next()) |entry| {
-                var keys: std.ArrayList(u256) = .empty;
-                defer keys.deinit(self.allocator);
-                var slots = self.database.storage.iterator();
-                while (slots.next()) |slot| {
-                    if (std.mem.eql(u8, &slot.key_ptr.address, &entry.key_ptr.bytes)) {
-                        try keys.append(self.allocator, slot.key_ptr.key);
-                    }
-                }
-                for (keys.items) |key| try self.database.set_storage(entry.key_ptr.bytes, key, 0);
-                try self.database.delete_account(entry.key_ptr.bytes);
-            }
+            while (destructions.next()) |entry| try self.database.delete_account(entry.key_ptr.bytes);
         }
 
         /// Mark a contract for destruction
         pub fn mark_for_destruction(self: *Self, contract_address: primitives.Address, recipient: primitives.Address) !void {
+            return self.noting(self.markForDestructionUnnoted(contract_address, recipient));
+        }
+
+        fn markForDestructionUnnoted(self: *Self, contract_address: primitives.Address, recipient: primitives.Address) !void {
             // EIP-214: Prevent self-destruction in static context
             if (self.is_static_context()) return error.StaticCallViolation;
 
@@ -2515,6 +2779,10 @@ pub fn Evm(config: EvmConfig) type {
 
         /// Set storage value
         pub fn set_storage(self: *Self, address: primitives.Address, slot: u256, value: u256) !void {
+            return self.noting(self.setStorageUnnoted(address, slot, value));
+        }
+
+        fn setStorageUnnoted(self: *Self, address: primitives.Address, slot: u256, value: u256) !void {
             // In static context, storage writes are not allowed per EIP-214
             // This check is critical for security and cannot be removed
             if (self.is_static_context()) return error.StaticCallViolation;
@@ -2536,6 +2804,10 @@ pub fn Evm(config: EvmConfig) type {
         /// Set return data from a call, reusing buffer when possible
         /// This takes ownership of the data and will free any existing return_data
         pub fn set_return_data(self: *Self, data: []const u8) !void {
+            return self.noting(self.setReturnDataUnnoted(data));
+        }
+
+        fn setReturnDataUnnoted(self: *Self, data: []const u8) !void {
             if (data.len == 0) {
                 // For empty data, just clear
                 self.clear_return_data();
@@ -5531,431 +5803,6 @@ test "EVM with advanced planner strategy" {
 
     const result = evm.call(call_params);
     try std.testing.expect(result.success);
-}
-
-// =============================================================================
-// Journal State Application Rollback Tests
-// =============================================================================
-
-test "journal state application - storage change rollback" {
-    // Create test database
-    var db = Database.init(std.testing.allocator);
-    defer db.deinit();
-    // Database is now used directly
-
-    const block_info = BlockInfo{
-        .number = 1,
-        .timestamp = 1000,
-        .difficulty = 100,
-        .gas_limit = 30000000,
-        .coinbase = primitives.ZERO_ADDRESS,
-        .base_fee = 1000000000,
-        .prev_randao = @as([32]u8, @splat(0)),
-    };
-
-    const context = TransactionContext{
-        .gas_limit = 1000000,
-        .coinbase = primitives.ZERO_ADDRESS,
-        .chain_id = 1,
-    };
-
-    var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
-    defer evm.deinit();
-
-    const test_address = primitives.Address{ .bytes = [_]u8{0x12} ++ @as([19]u8, @splat(0)) };
-    const storage_key: u256 = 0x123;
-    const original_value: u256 = 0x456;
-    const new_value: u256 = 0x789;
-
-    // Set initial storage value
-    try evm.database.set_storage(test_address.bytes, storage_key, original_value);
-
-    // Create snapshot
-    const snapshot_id = try evm.create_snapshot();
-
-    // Modify storage value and record in journal
-    try evm.database.set_storage(test_address.bytes, storage_key, new_value);
-    try evm.journal.entries.append(evm.allocator, .{
-        .snapshot_id = snapshot_id,
-        .data = .{ .storage_change = .{
-            .address = test_address,
-            .key = storage_key,
-            .original_value = original_value,
-        } },
-    });
-
-    // Verify new value is set
-    const current_value = try evm.database.get_storage(test_address.bytes, storage_key);
-    try std.testing.expectEqual(new_value, current_value);
-
-    // Revert to snapshot
-    evm.revert_to_snapshot(snapshot_id);
-
-    // Verify storage value was reverted
-    const reverted_value = try evm.database.get_storage(test_address.bytes, storage_key);
-    try std.testing.expectEqual(original_value, reverted_value);
-}
-
-test "journal state application - balance change rollback" {
-    // Create test database
-    var db = Database.init(std.testing.allocator);
-    defer db.deinit();
-    // Database is now used directly
-
-    const block_info = BlockInfo{
-        .number = 1,
-        .timestamp = 1000,
-        .difficulty = 100,
-        .gas_limit = 30000000,
-        .coinbase = primitives.ZERO_ADDRESS,
-        .base_fee = 1000000000,
-        .prev_randao = @as([32]u8, @splat(0)),
-    };
-
-    const context = TransactionContext{
-        .gas_limit = 1000000,
-        .coinbase = primitives.ZERO_ADDRESS,
-        .chain_id = 1,
-    };
-
-    var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
-    defer evm.deinit();
-
-    const test_address = primitives.Address{ .bytes = [_]u8{0x34} ++ @as([19]u8, @splat(0)) };
-    const original_balance: u256 = 1000;
-    const new_balance: u256 = 2000;
-
-    // Set initial account balance
-    var original_account = Account.zero();
-    original_account.balance = original_balance;
-    try evm.database.set_account(test_address.bytes, original_account);
-
-    // Create snapshot
-    const snapshot_id = try evm.create_snapshot();
-
-    // Modify balance and record in journal
-    var modified_account = original_account;
-    modified_account.balance = new_balance;
-    try evm.database.set_account(test_address.bytes, modified_account);
-    try evm.journal.entries.append(evm.allocator, .{
-        .snapshot_id = snapshot_id,
-        .data = .{ .balance_change = .{
-            .address = test_address,
-            .original_balance = original_balance,
-        } },
-    });
-
-    // Verify new balance is set
-    const current_account = (try evm.database.get_account(test_address.bytes)).?;
-    try std.testing.expectEqual(new_balance, current_account.balance);
-
-    // Revert to snapshot
-    evm.revert_to_snapshot(snapshot_id);
-
-    // Verify balance was reverted
-    const reverted_account = (try evm.database.get_account(test_address.bytes)).?;
-    try std.testing.expectEqual(original_balance, reverted_account.balance);
-}
-
-test "journal state application - nonce change rollback" {
-    // Create test database
-    var db = Database.init(std.testing.allocator);
-    defer db.deinit();
-    // Database is now used directly
-
-    const block_info = BlockInfo{
-        .number = 1,
-        .timestamp = 1000,
-        .difficulty = 100,
-        .gas_limit = 30000000,
-        .coinbase = primitives.ZERO_ADDRESS,
-        .base_fee = 1000000000,
-        .prev_randao = @as([32]u8, @splat(0)),
-    };
-
-    const context = TransactionContext{
-        .gas_limit = 1000000,
-        .coinbase = primitives.ZERO_ADDRESS,
-        .chain_id = 1,
-    };
-
-    var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
-    defer evm.deinit();
-
-    const test_address = primitives.Address{ .bytes = [_]u8{0x56} ++ @as([19]u8, @splat(0)) };
-    const original_nonce: u64 = 5;
-    const new_nonce: u64 = 10;
-
-    // Set initial account nonce
-    var original_account = Account.zero();
-    original_account.nonce = original_nonce;
-    try evm.database.set_account(test_address.bytes, original_account);
-
-    // Create snapshot
-    const snapshot_id = try evm.create_snapshot();
-
-    // Modify nonce and record in journal
-    var modified_account = original_account;
-    modified_account.nonce = new_nonce;
-    try evm.database.set_account(test_address.bytes, modified_account);
-    try evm.journal.entries.append(evm.allocator, .{
-        .snapshot_id = snapshot_id,
-        .data = .{ .nonce_change = .{
-            .address = test_address,
-            .original_nonce = original_nonce,
-        } },
-    });
-
-    // Verify new nonce is set
-    const current_account = (try evm.database.get_account(test_address.bytes)).?;
-    try std.testing.expectEqual(new_nonce, current_account.nonce);
-
-    // Revert to snapshot
-    evm.revert_to_snapshot(snapshot_id);
-
-    // Verify nonce was reverted
-    const reverted_account = (try evm.database.get_account(test_address.bytes)).?;
-    try std.testing.expectEqual(original_nonce, reverted_account.nonce);
-}
-
-test "journal state application - code change rollback" {
-    // Create test database
-    var db = Database.init(std.testing.allocator);
-    defer db.deinit();
-    // Database is now used directly
-
-    const block_info = BlockInfo{
-        .number = 1,
-        .timestamp = 1000,
-        .difficulty = 100,
-        .gas_limit = 30000000,
-        .coinbase = primitives.ZERO_ADDRESS,
-        .base_fee = 1000000000,
-        .prev_randao = @as([32]u8, @splat(0)),
-    };
-
-    const context = TransactionContext{
-        .gas_limit = 1000000,
-        .coinbase = primitives.ZERO_ADDRESS,
-        .chain_id = 1,
-    };
-
-    var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
-    defer evm.deinit();
-
-    const test_address = primitives.Address{ .bytes = [_]u8{0x78} ++ @as([19]u8, @splat(0)) };
-    const original_code_hash = [_]u8{0xAA} ++ @as([31]u8, @splat(0));
-    const new_code_hash = [_]u8{0xBB} ++ @as([31]u8, @splat(0));
-
-    // Set initial account code hash
-    var original_account = Account.zero();
-    original_account.code_hash = original_code_hash;
-    try evm.database.set_account(test_address.bytes, original_account);
-
-    // Create snapshot
-    const snapshot_id = try evm.create_snapshot();
-
-    // Modify code hash and record in journal
-    var modified_account = original_account;
-    modified_account.code_hash = new_code_hash;
-    try evm.database.set_account(test_address.bytes, modified_account);
-    try evm.journal.record_code_change(snapshot_id, test_address, original_code_hash);
-
-    // Verify new code hash is set
-    const current_account = (try evm.database.get_account(test_address.bytes)).?;
-    try std.testing.expectEqualSlices(u8, &new_code_hash, &current_account.code_hash);
-
-    // Revert to snapshot
-    evm.revert_to_snapshot(snapshot_id);
-
-    // Verify code hash was reverted
-    const reverted_account = (try evm.database.get_account(test_address.bytes)).?;
-    try std.testing.expectEqualSlices(u8, &original_code_hash, &reverted_account.code_hash);
-}
-test "journal state application - multiple changes rollback" {
-    // Create test database
-    var db = Database.init(std.testing.allocator);
-    defer db.deinit();
-    // Database is now used directly
-
-    const block_info = BlockInfo{
-        .number = 1,
-        .timestamp = 1000,
-        .difficulty = 100,
-        .gas_limit = 30000000,
-        .coinbase = primitives.ZERO_ADDRESS,
-        .base_fee = 1000000000,
-        .prev_randao = @as([32]u8, @splat(0)),
-    };
-
-    const context = TransactionContext{
-        .gas_limit = 1000000,
-        .coinbase = primitives.ZERO_ADDRESS,
-        .chain_id = 1,
-    };
-
-    var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
-    defer evm.deinit();
-
-    const test_address: primitives.Address = .{ .bytes = [_]u8{0x9A} ++ @as([19]u8, @splat(0)) };
-    const storage_key: u256 = 0xABC;
-
-    // Original state
-    const original_balance: u256 = 500;
-    const original_nonce: u64 = 3;
-    const original_storage: u256 = 0x111;
-    const original_code_hash = [_]u8{0xCC} ++ @as([31]u8, @splat(0));
-
-    // New state
-    const new_balance: u256 = 1500;
-    const new_nonce: u64 = 8;
-    const new_storage: u256 = 0x999;
-    const new_code_hash = [_]u8{0xDD} ++ @as([31]u8, @splat(0));
-
-    // Set initial state
-    var original_account = Account.zero();
-    original_account.balance = original_balance;
-    original_account.nonce = original_nonce;
-    original_account.code_hash = original_code_hash;
-    try evm.database.set_account(test_address.bytes, original_account);
-    try evm.database.set_storage(test_address.bytes, storage_key, original_storage);
-
-    // Create snapshot
-    const snapshot_id = try evm.create_snapshot();
-
-    // Make multiple changes and record in journal
-    var modified_account = original_account;
-    modified_account.balance = new_balance;
-    modified_account.nonce = new_nonce;
-    modified_account.code_hash = new_code_hash;
-    try evm.database.set_account(test_address.bytes, modified_account);
-    try evm.database.set_storage(test_address.bytes, storage_key, new_storage);
-
-    // Add journal entries for all changes
-    try evm.journal.record_balance_change(snapshot_id, test_address, original_balance);
-    try evm.journal.record_nonce_change(snapshot_id, test_address, original_nonce);
-    try evm.journal.record_code_change(snapshot_id, test_address, original_code_hash);
-    try evm.journal.record_storage_change(snapshot_id, test_address, storage_key, original_storage);
-
-    // Verify all new values are set
-    const current_account = (try evm.database.get_account(test_address.bytes)).?;
-    try std.testing.expectEqual(new_balance, current_account.balance);
-    try std.testing.expectEqual(new_nonce, current_account.nonce);
-    try std.testing.expectEqualSlices(u8, &new_code_hash, &current_account.code_hash);
-    const current_storage = try evm.database.get_storage(test_address.bytes, storage_key);
-    try std.testing.expectEqual(new_storage, current_storage);
-
-    // Revert to snapshot
-    evm.revert_to_snapshot(snapshot_id);
-
-    // Verify all values were reverted
-    const reverted_account = (try evm.database.get_account(test_address.bytes)).?;
-    try std.testing.expectEqual(original_balance, reverted_account.balance);
-    try std.testing.expectEqual(original_nonce, reverted_account.nonce);
-    try std.testing.expectEqualSlices(u8, &original_code_hash, &reverted_account.code_hash);
-    const reverted_storage = try evm.database.get_storage(test_address.bytes, storage_key);
-    try std.testing.expectEqual(original_storage, reverted_storage);
-}
-
-test "journal state application - nested snapshots rollback" {
-    // Create test database
-    var db = Database.init(std.testing.allocator);
-    defer db.deinit();
-    // Database is now used directly
-
-    const block_info = BlockInfo{
-        .number = 1,
-        .timestamp = 1000,
-        .difficulty = 100,
-        .gas_limit = 30000000,
-        .coinbase = primitives.ZERO_ADDRESS,
-        .base_fee = 1000000000,
-        .prev_randao = @as([32]u8, @splat(0)),
-    };
-
-    const context = TransactionContext{
-        .gas_limit = 1000000,
-        .coinbase = primitives.ZERO_ADDRESS,
-        .chain_id = 1,
-    };
-
-    var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
-    defer evm.deinit();
-
-    const test_address: primitives.Address = .{ .bytes = [_]u8{0xBE} ++ @as([19]u8, @splat(0)) };
-    const original_balance: u256 = 100;
-    const middle_balance: u256 = 200;
-    const final_balance: u256 = 300;
-
-    // Set initial state
-    var account = Account.zero();
-    account.balance = original_balance;
-    try evm.database.set_account(test_address.bytes, account);
-
-    // Create first snapshot
-    const snapshot1 = try evm.create_snapshot();
-
-    // First change
-    account.balance = middle_balance;
-    try evm.database.set_account(test_address.bytes, account);
-    try evm.journal.record_balance_change(snapshot1, test_address, original_balance);
-
-    // Create second snapshot
-    const snapshot2 = try evm.create_snapshot();
-
-    // Second change
-    account.balance = final_balance;
-    try evm.database.set_account(test_address.bytes, account);
-    try evm.journal.record_balance_change(snapshot2, test_address, middle_balance);
-
-    // Verify final state
-    var current_account = (try evm.database.get_account(test_address.bytes)).?;
-    try std.testing.expectEqual(final_balance, current_account.balance);
-
-    // Revert to second snapshot (should restore middle state)
-    evm.revert_to_snapshot(snapshot2);
-    current_account = (try evm.database.get_account(test_address.bytes)).?;
-    try std.testing.expectEqual(middle_balance, current_account.balance);
-
-    // Revert to first snapshot (should restore original state)
-    evm.revert_to_snapshot(snapshot1);
-    current_account = (try evm.database.get_account(test_address.bytes)).?;
-    try std.testing.expectEqual(original_balance, current_account.balance);
-}
-
-test "journal state application - empty journal rollback" {
-    // Create test database
-    var db = Database.init(std.testing.allocator);
-    defer db.deinit();
-    // Database is now used directly
-
-    const block_info = BlockInfo{
-        .number = 1,
-        .timestamp = 1000,
-        .difficulty = 100,
-        .gas_limit = 30000000,
-        .coinbase = primitives.ZERO_ADDRESS,
-        .base_fee = 1000000000,
-        .prev_randao = @as([32]u8, @splat(0)),
-    };
-
-    const context = TransactionContext{
-        .gas_limit = 1000000,
-        .coinbase = primitives.ZERO_ADDRESS,
-        .chain_id = 1,
-    };
-
-    var evm = try Evm(.{}).init(std.testing.allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS);
-    defer evm.deinit();
-
-    // Create snapshot with no changes
-    const snapshot_id = try evm.create_snapshot();
-
-    // Revert to snapshot (should be no-op)
-    evm.revert_to_snapshot(snapshot_id);
-
-    // Test passes if no error is thrown
-    try std.testing.expect(true);
 }
 
 test "EVM contract execution - minimal benchmark reproduction" {

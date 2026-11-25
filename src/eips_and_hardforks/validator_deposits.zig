@@ -7,12 +7,14 @@
 /// 192-byte records, prefixed with DEPOSIT_REQUEST_TYPE, form the block's deposit
 /// request (when non-empty). The deposit contract itself is ordinary deployed bytecode
 /// and executes from state like any other contract.
+///
+/// Scope of this module: the constants, `isDepositLog` and `extractDepositData`. It
+/// does not walk a block's receipts or build the request; a host that assembles
+/// blocks does that with these helpers. The EVM has no block-start step for
+/// deposits, so `Evm.beginBlock` does nothing for EIP-6110.
 const std = @import("std");
 const primitives = @import("voltaire");
 const Address = primitives.Address.Address;
-const Database = @import("../storage/database.zig").Database;
-const BlockInfo = @import("../block/block_info.zig").BlockInfo(.{});
-const log = @import("../log.zig");
 
 /// Mainnet deposit contract, 0x00000000219ab540356cBB839Cbe05303d7705Fa
 pub const DEPOSIT_CONTRACT_ADDRESS = Address{
@@ -104,21 +106,6 @@ pub fn extractDepositData(data: []const u8) DepositLogError![DEPOSIT_REQUEST_LEN
     return out;
 }
 
-/// Validator deposits contract implementation
-pub const ValidatorDepositsContract = struct {
-    /// Block prologue for EIP-6110: none. Prague `apply_body` performs no deposit
-    /// processing before transactions; deposits are read from the block's receipts
-    /// afterwards (see `isDepositLog` / `extractDepositData`). Always succeeds and
-    /// touches no state. Callers should drop this call from block-start processing.
-    pub fn processBlockDeposits(
-        database: *Database,
-        block_info: *const BlockInfo,
-    ) error{}!void {
-        _ = database;
-        _ = block_info;
-    }
-};
-
 // Tests
 
 test "deposit event signature hash is keccak of the event signature" {
@@ -202,20 +189,4 @@ test "isDepositLog matches address and first topic only" {
     try testing.expect(!isDepositLog(DEPOSIT_CONTRACT_ADDRESS, &[_]u256{}));
     try testing.expect(!isDepositLog(DEPOSIT_CONTRACT_ADDRESS, &[_]u256{ 1, topic }));
     try testing.expect(!isDepositLog(Address{ .bytes = @as([20]u8, @splat(0x11)) }, &[_]u256{topic}));
-}
-
-test "processBlockDeposits touches no state" {
-    const testing = std.testing;
-    var database = Database.init(testing.allocator);
-    defer database.deinit();
-
-    // The real deposit contract keeps a Merkle branch in slot 0; a nonzero value there
-    // must not be read as a deposit count (the old helper looped over it).
-    try database.set_storage(DEPOSIT_CONTRACT_ADDRESS.bytes, 0, std.math.maxInt(u256));
-
-    var block_info = BlockInfo.init();
-    block_info.number = 100;
-    try ValidatorDepositsContract.processBlockDeposits(&database, &block_info);
-    try testing.expectEqual(@as(u256, std.math.maxInt(u256)), try database.get_storage(DEPOSIT_CONTRACT_ADDRESS.bytes, 0));
-    try testing.expectEqual(@as(u256, 0), try database.get_storage(DEPOSIT_CONTRACT_ADDRESS.bytes, 1));
 }

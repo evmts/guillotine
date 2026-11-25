@@ -348,19 +348,6 @@ fn accountOrZero(db: *Database, address: [20]u8) !Account {
     return (try db.get_account(address)) orelse Account.zero();
 }
 
-/// Removes an account and every storage slot it owns.
-fn destroyAccount(a: Allocator, db: *Database, address: [20]u8) !void {
-    var keys: std.ArrayList(u256) = .empty;
-    var it = db.storage.iterator();
-    while (it.next()) |entry| {
-        if (std.mem.eql(u8, &entry.key_ptr.address, &address)) try keys.append(a, entry.key_ptr.key);
-    }
-    // Writing zero through the Database keeps its own bookkeeping consistent;
-    // zero slots are excluded from the storage trie.
-    for (keys.items) |key| try db.set_storage(address, key, 0);
-    try db.delete_account(address);
-}
-
 // ---------------------------------------------------------------------------
 // Fixture model
 // ---------------------------------------------------------------------------
@@ -986,9 +973,11 @@ fn validateTx(
     };
     if (sender.balance < total) return Validated.reject(.INSUFFICIENT_ACCOUNT_FUNDS);
 
-    // EIP-3607. A Prague delegation designator is stored as a delegation, not
-    // as code, so a delegated sender passes.
+    // EIP-3607. The database stores a delegation designator as a delegation, not
+    // as code. From Prague a delegated sender passes; before Prague the same 23
+    // bytes are ordinary code.
     if (!hasNoCode(sender)) return Validated.reject(.SENDER_NOT_EOA);
+    if (!fork.atLeast(.Prague) and sender.delegated_address != null) return Validated.reject(.SENDER_NOT_EOA);
 
     return .{
         .gas_limit = gas_limit,
@@ -1017,17 +1006,13 @@ const Outcome = union(enum) {
     }
 };
 
-fn loadPre(fork: Fork, db: *Database, pre: []const PreAccount) !void {
+fn loadPre(db: *Database, pre: []const PreAccount) !void {
     for (pre) |entry| {
         var account = Account.zero();
         account.nonce = entry.nonce;
         account.balance = entry.balance;
-        const is_delegation = fork.atLeast(.Prague) and entry.code.len == 23 and std.mem.startsWith(u8, entry.code, &delegation_prefix);
-        if (is_delegation) {
-            account.delegated_address = .{ .bytes = entry.code[3..23].* };
-        } else if (entry.code.len > 0) {
-            account.code_hash = try db.set_code(entry.code);
-        }
+        // `Database.set_account` stores an EIP-7702 designator as a delegation.
+        if (entry.code.len > 0) account.code_hash = try db.set_code(entry.code);
         try db.set_account(entry.address, account);
         for (entry.storage) |slot| {
             if (slot.value != 0) try db.set_storage(entry.address, slot.key, slot.value);
@@ -1048,13 +1033,6 @@ fn precompileAddress(number: u16) [20]u8 {
     var bytes = @as([20]u8, @splat(0));
     std.mem.writeInt(u16, bytes[18..20], number, .big);
     return bytes;
-}
-
-fn isPrecompile(fork: Fork, address: [20]u8) bool {
-    for (precompileAddresses(fork)) |number| {
-        if (std.mem.eql(u8, &precompileAddress(number), &address)) return true;
-    }
-    return false;
 }
 
 fn createAddress(a: Allocator, sender: [20]u8, nonce: u64) ![20]u8 {
@@ -1220,43 +1198,24 @@ fn applyTx(
         if (template.authorizations) |authorizations| {
             authorization_refund = try applyAuthorizations(a, db, &vm.access_list, test_case.chain_id, authorizations, &touched);
         }
-        if (template.to) |to| {
-            if (try db.get_account(to)) |target| {
-                if (target.delegated_address) |delegate| try vm.access_list.pre_warm_addresses(&.{delegate});
-            }
-        }
+        // The authorization list can change the target's delegation, so the
+        // delegate is warmed after it is applied.
+        if (template.to) |to| try vm.warmDelegatedTarget(.{ .bytes = to });
     }
 
     const execution_gas = validated.gas_limit - validated.intrinsic.gas;
     var success = false;
     var gas_left: u64 = 0;
     if (template.to) |to| {
-        const target = try db.get_account(to);
-        const has_code = if (target) |account| !hasNoCode(account) or account.delegated_address != null else false;
-        if (execution_gas == 0 and !has_code and !isPrecompile(fork, to)) {
-            // `Evm.inner_call` rejects a call that carries no gas. A plain
-            // transfer that spends exactly its intrinsic gas executes no code,
-            // so the runner applies it.
-            success = true;
-            if (tx.value > 0 and !std.mem.eql(u8, &to, &template.sender)) {
-                var from = try accountOrZero(db, template.sender);
-                var recipient = try accountOrZero(db, to);
-                from.balance -= tx.value;
-                recipient.balance += tx.value;
-                try db.set_account(template.sender, from);
-                try db.set_account(to, recipient);
-            }
-        } else {
-            const result = vm.inner_call(.{ .call = .{
-                .caller = sender_address,
-                .to = .{ .bytes = to },
-                .value = tx.value,
-                .input = tx.data,
-                .gas = execution_gas,
-            } });
-            success = result.success;
-            gas_left = result.gas_left;
-        }
+        const result = vm.inner_call(.{ .call = .{
+            .caller = sender_address,
+            .to = .{ .bytes = to },
+            .value = tx.value,
+            .input = tx.data,
+            .gas = execution_gas,
+        } });
+        success = result.success;
+        gas_left = result.gas_left;
     } else {
         // Intrinsic gas already paid CreateGas and the EIP-3860 initcode words, and the
         // sender nonce is already incremented. The flag makes the EVM run this as the
@@ -1272,6 +1231,9 @@ fn applyTx(
         success = result.success;
         gas_left = result.gas_left;
     }
+    // A host failure (allocation, database, missing KZG setup) is not a
+    // transaction outcome: the test errors instead of comparing a state root.
+    if (vm.host_failure) |err| return err;
     if (gas_left > execution_gas) return error.EvmReturnedMoreGasThanSupplied;
 
     // Refunds (EIP-3529 cap from London) and the EIP-7623 floor.
@@ -1309,7 +1271,7 @@ fn applyTx(
         }
         for (destructions.items) |destruction| {
             try touched.put(a, destruction.recipient, {});
-            try destroyAccount(a, db, destruction.contract);
+            try db.delete_account(destruction.contract);
         }
         // Before EIP-161 a successful call creates its target account.
         if (!fork.atLeast(.SpuriousDragon)) {
@@ -1332,7 +1294,7 @@ fn applyTx(
             // touched, by this transaction.
             if (touched.contains(address) or !existed.contains(address)) try doomed.append(a, address);
         }
-        for (doomed.items) |address| try destroyAccount(a, db, address);
+        for (doomed.items) |address| try db.delete_account(address);
     }
 
     return .{ .success = success, .gas_used = gas_used, .logs_hash = logs_hash };
@@ -1408,7 +1370,7 @@ fn runPostFor(
 ) !Outcome {
     var db = Database.init(gpa);
     defer db.deinit();
-    try loadPre(fork, &db, test_case.pre);
+    try loadPre(&db, test_case.pre);
 
     const tx = try selectTx(&test_case.tx, post);
     const sender = try accountOrZero(&db, test_case.tx.sender);
@@ -2027,14 +1989,12 @@ const WorkerThread = struct {
         var root = try std.Io.Dir.cwd().openDir(io, self.config.fixtures_dir, .{});
         defer root.close(io);
 
-        // The KZG point-evaluation precompile needs the trusted setup.
-        try evm.kzg_setup.init();
-
         var worker = Worker{ .gpa = gpa, .config = self.config, .sink = self.sink, .root = root };
         try worker.run(self.files, self.args);
 
         var leak_check = LeakCheck.not_run;
         if (use_debug_allocator) {
+            // `Evm.init` loaded the KZG trusted setup for the Cancun+ forks.
             evm.kzg_setup.deinit(gpa);
             leak_check = if (debug_allocator.deinit() == .leak) .leaked else .clean;
         }
