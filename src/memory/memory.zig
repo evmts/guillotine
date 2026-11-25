@@ -98,7 +98,7 @@ pub fn Memory(config: MemoryConfig) type {
             // Children are always borrowed memory types
             const BorrowedMemType = Memory(.{ .initial_capacity = config.initial_capacity, .memory_limit = config.memory_limit, .owned = false });
             return BorrowedMemType{
-                .checkpoint = @as(u32, @intCast(self.buffer_ptr.*.items.len)),
+                .checkpoint = std.math.cast(u32, self.buffer_ptr.*.items.len) orelse return MemoryError.MemoryOverflow,
                 .buffer_ptr = self.buffer_ptr,
             };
         }
@@ -116,12 +116,20 @@ pub fn Memory(config: MemoryConfig) type {
             return self.size_internal();
         }
 
-        pub inline fn ensure_capacity(self: *Self, allocator: std.mem.Allocator, new_size: u32) !void {
+        /// Grow memory to at least `new_size` bytes past the checkpoint, rounded up to a
+        /// whole 32-byte word. Any size whose rounded end overflows `usize` or exceeds
+        /// `MEMORY_LIMIT` returns `MemoryOverflow` and leaves memory unchanged.
+        pub inline fn ensure_capacity(self: *Self, allocator: std.mem.Allocator, new_size: usize) !void {
             const checkpoint_usize = @as(usize, self.checkpoint);
             // EVM memory only ever grows in whole 32-byte words (MSIZE is a multiple of 32).
-            const new_size_usize = (@as(usize, new_size) + 31) & ~@as(usize, 31);
-            const required_total = checkpoint_usize + new_size_usize;
-            if (required_total > MEMORY_LIMIT) {
+            const rounded, const round_overflow = @addWithOverflow(new_size, 31);
+            if (round_overflow != 0) {
+                @branchHint(.unlikely);
+                return MemoryError.MemoryOverflow;
+            }
+            const new_size_usize = rounded & ~@as(usize, 31);
+            const required_total, const total_overflow = @addWithOverflow(checkpoint_usize, new_size_usize);
+            if (total_overflow != 0 or required_total > MEMORY_LIMIT) {
                 @branchHint(.unlikely);
                 return MemoryError.MemoryOverflow;
             }
@@ -212,12 +220,16 @@ pub fn Memory(config: MemoryConfig) type {
         }
 
         // EVM-compliant memory operations that expand to word boundaries
-        pub fn set_data_evm(self: *Self, allocator: std.mem.Allocator, offset: u32, data: []const u8) !void {
-            const offset_usize = @as(usize, offset);
-            const end = offset_usize + data.len;
-            // Round up to next 32-byte word boundary for EVM compliance
-            const word_aligned_end = std.math.shl(usize, std.math.shr(usize, end + 31, 5), 5);
-            try self.ensure_capacity(allocator, @as(u32, @intCast(word_aligned_end)));
+        pub fn set_data_evm(self: *Self, allocator: std.mem.Allocator, offset: usize, data: []const u8) !void {
+            const offset_usize = offset;
+            const end, const end_overflow = @addWithOverflow(offset_usize, data.len);
+            if (end_overflow != 0) {
+                @branchHint(.unlikely);
+                return MemoryError.MemoryOverflow;
+            }
+            // ensure_capacity rounds up to the next 32-byte word boundary for EVM compliance
+            // and bounds checkpoint + end by MEMORY_LIMIT, so the indexing below is in range.
+            try self.ensure_capacity(allocator, end);
             const checkpoint_usize = @as(usize, self.checkpoint);
             const start_idx = checkpoint_usize + offset_usize;
             
@@ -257,7 +269,7 @@ pub fn Memory(config: MemoryConfig) type {
             }
         }
 
-        pub fn set_byte_evm(self: *Self, allocator: std.mem.Allocator, offset: u32, value: u8) !void {
+        pub fn set_byte_evm(self: *Self, allocator: std.mem.Allocator, offset: usize, value: u8) !void {
             const bytes = [_]u8{value};
             try self.set_data_evm(allocator, offset, &bytes);
         }
@@ -290,16 +302,16 @@ pub fn Memory(config: MemoryConfig) type {
             return &items.ptr[checkpoint_usize + offset_usize];
         }
 
-        pub fn set_u256_evm(self: *Self, allocator: std.mem.Allocator, offset: u32, value: u256) !void {
+        pub fn set_u256_evm(self: *Self, allocator: std.mem.Allocator, offset: usize, value: u256) !void {
             const bytes = u256_to_bytes(value);
             try self.set_data_evm(allocator, offset, &bytes);
         }
 
-        pub fn get_slice(self: *Self, offset: u32, len: u32) MemoryError![]const u8 {
-            const offset_usize = @as(usize, offset);
-            const len_usize = @as(usize, len);
-            const end = offset_usize + len_usize;
-            if (end > self.size_internal()) {
+        pub fn get_slice(self: *Self, offset: usize, len: usize) MemoryError![]const u8 {
+            const offset_usize = offset;
+            const len_usize = len;
+            const end, const end_overflow = @addWithOverflow(offset_usize, len_usize);
+            if (end_overflow != 0 or end > self.size_internal()) {
                 @branchHint(.unlikely);
                 return MemoryError.OutOfBounds;
             }
@@ -308,10 +320,14 @@ pub fn Memory(config: MemoryConfig) type {
             return self.buffer_ptr.*.items[start_idx .. start_idx + len_usize];
         }
 
-        pub fn set_data(self: *Self, allocator: std.mem.Allocator, offset: u32, data: []const u8) !void {
-            const offset_usize = @as(usize, offset);
-            const end = offset_usize + data.len;
-            try self.ensure_capacity(allocator, @as(u32, @intCast(end)));
+        pub fn set_data(self: *Self, allocator: std.mem.Allocator, offset: usize, data: []const u8) !void {
+            const offset_usize = offset;
+            const end, const end_overflow = @addWithOverflow(offset_usize, data.len);
+            if (end_overflow != 0) {
+                @branchHint(.unlikely);
+                return MemoryError.MemoryOverflow;
+            }
+            try self.ensure_capacity(allocator, end);
             const checkpoint_usize = @as(usize, self.checkpoint);
             const start_idx = checkpoint_usize + offset_usize;
             @memcpy(self.buffer_ptr.*.items[start_idx .. start_idx + data.len], data);
@@ -323,6 +339,8 @@ pub fn Memory(config: MemoryConfig) type {
                 self.buffer_ptr.*.items.len = 0;
                 self.checkpoint = 0;
             } else {
+                // items.len never exceeds MEMORY_LIMIT (ensure_capacity is the only way
+                // memory grows) and `validate` bounds MEMORY_LIMIT by maxInt(u32).
                 self.checkpoint = @as(u32, @intCast(self.buffer_ptr.*.items.len));
             }
         }
@@ -337,26 +355,29 @@ pub fn Memory(config: MemoryConfig) type {
             return loadWordBigEndian(bytes[0..WORD_SIZE]);
         }
 
-        pub fn get_u256(self: *Self, offset: u32) !u256 {
+        pub fn get_u256(self: *Self, offset: usize) !u256 {
             const slice = try self.get_slice(offset, 32);
             return bytes_to_u256(slice);
         }
 
         // EVM-compliant read that expands memory if needed
-        pub fn get_u256_evm(self: *Self, allocator: std.mem.Allocator, offset: u32) !u256 {
-            const offset_usize = @as(usize, offset);
-            const word_aligned_end = std.math.shl(usize, std.math.shr(usize, offset_usize + 32 + 31, 5), 5);
-            try self.ensure_capacity(allocator, @as(u32, @intCast(word_aligned_end)));
+        pub fn get_u256_evm(self: *Self, allocator: std.mem.Allocator, offset: usize) !u256 {
+            const end, const end_overflow = @addWithOverflow(offset, @as(usize, WORD_SIZE));
+            if (end_overflow != 0) {
+                @branchHint(.unlikely);
+                return MemoryError.MemoryOverflow;
+            }
+            try self.ensure_capacity(allocator, end);
             const slice = try self.get_slice_internal(offset, 32);
             return bytes_to_u256(slice);
         }
         
         // Internal get_slice without locking
-        inline fn get_slice_internal(self: *const Self, offset: u32, len: u32) MemoryError![]const u8 {
-            const offset_usize = @as(usize, offset);
-            const len_usize = @as(usize, len);
-            const end = offset_usize + len_usize;
-            if (end > self.size_internal()) {
+        inline fn get_slice_internal(self: *const Self, offset: usize, len: usize) MemoryError![]const u8 {
+            const offset_usize = offset;
+            const len_usize = len;
+            const end, const end_overflow = @addWithOverflow(offset_usize, len_usize);
+            if (end_overflow != 0 or end > self.size_internal()) {
                 @branchHint(.unlikely);
                 return MemoryError.OutOfBounds;
             }
@@ -365,17 +386,17 @@ pub fn Memory(config: MemoryConfig) type {
             return self.buffer_ptr.*.items[start_idx .. start_idx + len_usize];
         }
 
-        pub fn set_u256(self: *Self, allocator: std.mem.Allocator, offset: u32, value: u256) !void {
+        pub fn set_u256(self: *Self, allocator: std.mem.Allocator, offset: usize, value: u256) !void {
             const bytes = u256_to_bytes(value);
             try self.set_data(allocator, offset, &bytes);
         }
 
-        pub fn get_byte(self: *Self, offset: u32) !u8 {
+        pub fn get_byte(self: *Self, offset: usize) !u8 {
             const slice = try self.get_slice(offset, 1);
             return slice[0];
         }
 
-        pub fn set_byte(self: *Self, allocator: std.mem.Allocator, offset: u32, value: u8) !void {
+        pub fn set_byte(self: *Self, allocator: std.mem.Allocator, offset: usize, value: u8) !void {
             const bytes = [_]u8{value};
             try self.set_data(allocator, offset, &bytes);
         }
@@ -383,7 +404,7 @@ pub fn Memory(config: MemoryConfig) type {
         fn calculate_memory_cost(words: u64) u64 {
             // Prevent overflow for very large word counts
             // Memory limit is configurable (default 16MB = 0xFFFFFF bytes = 524287 words)
-            // With u32 size parameters, max possible is ~4GB = 134217727 words
+            // Sizes past the 4 GiB memory limit bound (134217727 words) are unpayable
             // We guard against overflow in the quadratic term (words * words)
             if (words > 134217727) {
                 @branchHint(.unlikely);
@@ -392,14 +413,21 @@ pub fn Memory(config: MemoryConfig) type {
             }
             return 3 * words + std.math.shr(u64, words * words, 9); // Using std.math.shr instead of / 512
         }
-        pub fn get_expansion_cost(self: *Self, new_size: u32) u64 {
+        /// Gas to grow memory to `new_size` bytes. Sizes whose word count overflows
+        /// cost `maxInt(u64)`, which no gas limit can pay.
+        pub fn get_expansion_cost(self: *Self, new_size: usize) u64 {
             const new_size_u64 = @as(u64, new_size);
-            const current_size = @as(u64, @intCast(self.size_internal()));
+            const current_size = @as(u64, self.size_internal());
             if (new_size_u64 <= current_size) {
                 @branchHint(.likely);
                 return 0;
             }
-            const new_words = std.math.shr(u64, new_size_u64 + 31, 5); // Using std.math.shr instead of / 32
+            const new_size_rounded, const round_overflow = @addWithOverflow(new_size_u64, 31);
+            if (round_overflow != 0) {
+                @branchHint(.unlikely);
+                return std.math.maxInt(u64);
+            }
+            const new_words = std.math.shr(u64, new_size_rounded, 5); // Using std.math.shr instead of / 32
             const current_words = std.math.shr(u64, current_size + 31, 5); // Using std.math.shr instead of / 32
             const new_cost = calculate_memory_cost(new_words);
             const current_cost = calculate_memory_cost(current_words);
@@ -454,7 +482,8 @@ test "Memory owner basic operations" {
     try std.testing.expectEqual(@as(usize, 0), memory.size());
     const data = [_]u8{ 0x01, 0x02, 0x03, 0x04 };
     try memory.set_data(allocator, 0, &data);
-    try std.testing.expectEqual(@as(usize, 4), memory.size());
+    // Memory grows in whole 32-byte words.
+    try std.testing.expectEqual(@as(usize, 32), memory.size());
     const slice = try memory.get_slice(0, 4);
     try std.testing.expectEqualSlices(u8, &data, slice);
     memory.clear();
@@ -475,22 +504,26 @@ test "Memory borrowed operations" {
     try std.testing.expectEqual(@as(usize, 0), borrowed.size());
     const data2 = [_]u8{ 0xDD, 0xEE, 0xFF };
     try borrowed.set_data(allocator, 0, &data2);
-    try std.testing.expectEqual(@as(usize, 3), borrowed.size());
-    try std.testing.expectEqual(@as(usize, 6), owner.buffer_ptr.*.items.len);
+    // The owner grew to one word (checkpoint 32); the borrowed view adds one more.
+    try std.testing.expectEqual(@as(u32, 32), checkpoint);
+    try std.testing.expectEqual(@as(usize, 32), borrowed.size());
+    try std.testing.expectEqual(@as(usize, 64), owner.buffer_ptr.*.items.len);
     try std.testing.expectEqualSlices(u8, &data1, owner.buffer_ptr.*.items[0..3]);
-    try std.testing.expectEqualSlices(u8, &data2, owner.buffer_ptr.*.items[3..6]);
+    try std.testing.expectEqualSlices(u8, &data2, owner.buffer_ptr.*.items[32..35]);
 }
 
 test "Memory capacity limits" {
     const allocator = std.testing.allocator;
-    const Mem = Memory(.{ .initial_capacity = 50, .memory_limit = 100, .owned = true });
+    const Mem = Memory(.{ .initial_capacity = 50, .memory_limit = 96, .owned = true });
     var memory = try Mem.init(allocator);
     defer memory.deinit(allocator);
     try memory.ensure_capacity(allocator, 50);
-    try std.testing.expectEqual(@as(usize, 50), memory.buffer_ptr.*.items.len);
-    try memory.ensure_capacity(allocator, 100);
-    try std.testing.expectEqual(@as(usize, 100), memory.buffer_ptr.*.items.len);
-    try std.testing.expectError(MemoryError.MemoryOverflow, memory.ensure_capacity(allocator, 101));
+    try std.testing.expectEqual(@as(usize, 64), memory.buffer_ptr.*.items.len);
+    try memory.ensure_capacity(allocator, 96);
+    try std.testing.expectEqual(@as(usize, 96), memory.buffer_ptr.*.items.len);
+    // 97 bytes round up to 128, past the limit.
+    try std.testing.expectError(MemoryError.MemoryOverflow, memory.ensure_capacity(allocator, 97));
+    try std.testing.expectEqual(@as(usize, 96), memory.buffer_ptr.*.items.len);
 }
 
 test "Memory child creation" {
@@ -500,18 +533,18 @@ test "Memory child creation" {
     defer parent.deinit(allocator);
     const data1 = [_]u8{ 0x11, 0x22, 0x33 };
     try parent.set_data(allocator, 0, &data1);
-    try std.testing.expectEqual(@as(usize, 3), parent.size());
+    try std.testing.expectEqual(@as(usize, 32), parent.size());
     var child = try parent.init_child();
     defer child.deinit(allocator);
     try std.testing.expectEqual(@as(usize, 0), child.size());
     const data2 = [_]u8{ 0x44, 0x55 };
     try child.set_data(allocator, 0, &data2);
     try std.testing.expectEqual(@as(usize, 0), parent.checkpoint);
-    try std.testing.expectEqual(@as(u32, 3), child.checkpoint);
-    try std.testing.expectEqual(@as(usize, 5), parent.buffer_ptr.*.items.len);
-    try std.testing.expectEqual(@as(usize, 5), parent.size());
-    try std.testing.expectEqual(@as(usize, 2), child.size());
-    try std.testing.expectEqual(@as(usize, 5), parent.buffer_ptr.*.items.len);
+    try std.testing.expectEqual(@as(u32, 32), child.checkpoint);
+    try std.testing.expectEqual(@as(usize, 64), parent.buffer_ptr.*.items.len);
+    try std.testing.expectEqual(@as(usize, 64), parent.size());
+    try std.testing.expectEqual(@as(usize, 32), child.size());
+    try std.testing.expectEqualSlices(u8, &data2, try child.get_slice(0, 2));
 }
 
 test "Memory zero initialization on expansion" {
@@ -534,8 +567,10 @@ test "Memory out of bounds access" {
     const data = [_]u8{ 0x01, 0x02, 0x03 };
     try memory.set_data(allocator, 0, &data);
     _ = try memory.get_slice(0, 3);
-    try std.testing.expectError(MemoryError.OutOfBounds, memory.get_slice(0, 4));
-    try std.testing.expectError(MemoryError.OutOfBounds, memory.get_slice(2, 2));
+    // The write grew memory to one 32-byte word.
+    _ = try memory.get_slice(0, 32);
+    try std.testing.expectError(MemoryError.OutOfBounds, memory.get_slice(0, 33));
+    try std.testing.expectError(MemoryError.OutOfBounds, memory.get_slice(31, 2));
 }
 
 test "Memory configuration validation" {
@@ -649,47 +684,47 @@ test "Memory sequential child memories" {
     // Add data to parent
     const parent_data = [_]u8{ 0x01, 0x02, 0x03 };
     try parent.set_data(allocator, 0, &parent_data);
-    try std.testing.expectEqual(@as(usize, 3), parent.size());
+    try std.testing.expectEqual(@as(usize, 32), parent.size());
 
     // Create first child memory and add data
     var child1 = try parent.init_child();
     defer child1.deinit(allocator);
 
     try std.testing.expectEqual(@as(usize, 0), child1.size());
-    try std.testing.expectEqual(@as(usize, 3), child1.checkpoint);
+    try std.testing.expectEqual(@as(usize, 32), child1.checkpoint);
 
     const child1_data = [_]u8{ 0x11, 0x22 };
     try child1.set_data(allocator, 0, &child1_data);
-    try std.testing.expectEqual(@as(usize, 2), child1.size());
+    try std.testing.expectEqual(@as(usize, 32), child1.size());
 
-    // Create second child from updated parent (checkpoint now at 5)
+    // Create second child from updated parent (checkpoint now at 64)
     var child2 = try parent.init_child();
     defer child2.deinit(allocator);
 
     try std.testing.expectEqual(@as(usize, 0), child2.size());
-    try std.testing.expectEqual(@as(u32, 5), child2.checkpoint);
+    try std.testing.expectEqual(@as(u32, 64), child2.checkpoint);
 
     // Add data to second child
     const child2_data = [_]u8{ 0x33, 0x44, 0x55, 0x66 };
     try child2.set_data(allocator, 0, &child2_data);
 
     // After child2 writes, both children see the full buffer size from their checkpoint
-    // child1: total(9) - checkpoint(3) = 6
-    // child2: total(9) - checkpoint(5) = 4
-    try std.testing.expectEqual(@as(usize, 6), child1.size());
-    try std.testing.expectEqual(@as(usize, 4), child2.size());
+    // child1: total(96) - checkpoint(32) = 64
+    // child2: total(96) - checkpoint(64) = 32
+    try std.testing.expectEqual(@as(usize, 64), child1.size());
+    try std.testing.expectEqual(@as(usize, 32), child2.size());
 
     // Verify data is correctly positioned
-    const read1 = try child1.get_slice(0, 2); // child1's data at buffer[3:5]
-    const read2 = try child2.get_slice(0, 4); // child2's data at buffer[5:9]
+    const read1 = try child1.get_slice(0, 2); // child1's data at buffer[32:34]
+    const read2 = try child2.get_slice(0, 4); // child2's data at buffer[64:68]
     try std.testing.expectEqualSlices(u8, &child1_data, read1);
     try std.testing.expectEqualSlices(u8, &child2_data, read2);
 
-    // Verify underlying buffer layout
-    try std.testing.expectEqual(@as(usize, 9), parent.buffer_ptr.*.items.len); // 3 + 2 + 4
+    // Verify underlying buffer layout: three whole words
+    try std.testing.expectEqual(@as(usize, 96), parent.buffer_ptr.*.items.len);
 
     // Parent should see all data in buffer
-    try std.testing.expectEqual(@as(usize, 9), parent.size());
+    try std.testing.expectEqual(@as(usize, 96), parent.size());
     const parent_view = try parent.get_slice(0, 3);
     try std.testing.expectEqualSlices(u8, &parent_data, parent_view);
 }
@@ -730,11 +765,11 @@ test "Memory growth beyond fast-path threshold" {
 
     // Start with small size
     try memory.ensure_capacity(allocator, 16);
-    try std.testing.expectEqual(@as(usize, 16), memory.buffer_ptr.*.items.len);
+    try std.testing.expectEqual(@as(usize, 32), memory.buffer_ptr.*.items.len);
 
     // Growth larger than 32 bytes should use standard path
     try memory.ensure_capacity(allocator, 100);
-    try std.testing.expectEqual(@as(usize, 100), memory.buffer_ptr.*.items.len);
+    try std.testing.expectEqual(@as(usize, 128), memory.buffer_ptr.*.items.len);
 
     // Verify zero initialization
     const slice = try memory.get_slice(0, 100);
@@ -755,7 +790,7 @@ test "Memory fast-path with insufficient capacity" {
 
     // Small growth should still work but will need allocation
     try memory.ensure_capacity(allocator, 20);
-    try std.testing.expectEqual(@as(usize, 20), memory.buffer_ptr.*.items.len);
+    try std.testing.expectEqual(@as(usize, 32), memory.buffer_ptr.*.items.len);
     try std.testing.expect(memory.buffer_ptr.*.capacity >= 20);
 
     // Verify zero initialization
@@ -783,7 +818,7 @@ test "Memory fast-path edge case at 32 bytes" {
     // Growth of 33 bytes from empty should use standard path
     memory.clear();
     try memory.ensure_capacity(allocator, 33);
-    try std.testing.expectEqual(@as(usize, 33), memory.buffer_ptr.*.items.len);
+    try std.testing.expectEqual(@as(usize, 64), memory.buffer_ptr.*.items.len);
 
     // Verify zero initialization
     const slice = try memory.get_slice(0, 33);
@@ -804,4 +839,92 @@ test "Memory struct size verification" {
     try std.testing.expect(@sizeOf(OwnedMem) >= 16);
 
     // Field offsets depend on struct padding and alignment
+}
+
+test "Memory offsets near maxInt(u32) return MemoryOverflow instead of trapping" {
+    const allocator = std.testing.allocator;
+    const Mem = Memory(.{ .owned = true });
+    var memory = try Mem.init(allocator);
+    defer memory.deinit(allocator);
+    const max32: usize = std.math.maxInt(u32);
+    const word: [32]u8 = @splat(0xAB);
+
+    // Each of these rounds to a word end at or past 2^32, which the old
+    // `@intCast` to u32 trapped on.
+    try std.testing.expectError(MemoryError.MemoryOverflow, memory.ensure_capacity(allocator, max32));
+    try std.testing.expectError(MemoryError.MemoryOverflow, memory.set_data_evm(allocator, max32, &word));
+    try std.testing.expectError(MemoryError.MemoryOverflow, memory.set_data_evm(allocator, max32 - 31, &word));
+    try std.testing.expectError(MemoryError.MemoryOverflow, memory.set_byte_evm(allocator, max32, 1));
+    try std.testing.expectError(MemoryError.MemoryOverflow, memory.set_u256_evm(allocator, max32 - 31, 7));
+    try std.testing.expectError(MemoryError.MemoryOverflow, memory.get_u256_evm(allocator, max32 - 31));
+    try std.testing.expectError(MemoryError.MemoryOverflow, memory.get_u256_evm(allocator, max32));
+    try std.testing.expectError(MemoryError.MemoryOverflow, memory.set_data(allocator, max32, &word));
+    try std.testing.expectError(MemoryError.MemoryOverflow, memory.set_u256(allocator, max32, 7));
+    try std.testing.expectError(MemoryError.MemoryOverflow, memory.set_byte(allocator, max32, 1));
+    try std.testing.expectError(MemoryError.OutOfBounds, memory.get_slice(max32, 32));
+    try std.testing.expectError(MemoryError.OutOfBounds, memory.get_u256(max32));
+    try std.testing.expectError(MemoryError.OutOfBounds, memory.get_byte(max32));
+    try std.testing.expectEqual(@as(usize, 0), memory.size());
+
+    // A memory limit of exactly maxInt(u32) rejects the rounded end 2^32 before allocating.
+    const Huge = Memory(.{ .initial_capacity = 0, .memory_limit = std.math.maxInt(u32), .owned = true });
+    var huge = try Huge.init(allocator);
+    defer huge.deinit(allocator);
+    try std.testing.expectError(MemoryError.MemoryOverflow, huge.ensure_capacity(allocator, max32));
+    try std.testing.expectEqual(@as(usize, 0), huge.size());
+}
+
+test "Memory offsets near maxInt(usize) return errors instead of overflowing" {
+    const allocator = std.testing.allocator;
+    const Mem = Memory(.{ .owned = true });
+    var memory = try Mem.init(allocator);
+    defer memory.deinit(allocator);
+    const max: usize = std.math.maxInt(usize);
+    const word: [32]u8 = @splat(0xCD);
+
+    try memory.set_u256_evm(allocator, 0, 0x1234);
+    try std.testing.expectEqual(@as(usize, 32), memory.size());
+
+    // Rounding up to a word overflows usize.
+    try std.testing.expectError(MemoryError.MemoryOverflow, memory.ensure_capacity(allocator, max));
+    // Rounding fits, but the size is past the limit.
+    try std.testing.expectError(MemoryError.MemoryOverflow, memory.ensure_capacity(allocator, max - 31));
+    // offset + len overflows usize.
+    try std.testing.expectError(MemoryError.MemoryOverflow, memory.set_data_evm(allocator, max, &word));
+    try std.testing.expectError(MemoryError.MemoryOverflow, memory.set_data_evm(allocator, max - 16, &word));
+    try std.testing.expectError(MemoryError.MemoryOverflow, memory.set_byte_evm(allocator, max, 1));
+    try std.testing.expectError(MemoryError.MemoryOverflow, memory.set_u256_evm(allocator, max, 1));
+    try std.testing.expectError(MemoryError.MemoryOverflow, memory.get_u256_evm(allocator, max));
+    try std.testing.expectError(MemoryError.MemoryOverflow, memory.get_u256_evm(allocator, max - 31));
+    try std.testing.expectError(MemoryError.MemoryOverflow, memory.set_data(allocator, max, &word));
+    try std.testing.expectError(MemoryError.MemoryOverflow, memory.set_u256(allocator, max, 1));
+    try std.testing.expectError(MemoryError.MemoryOverflow, memory.set_byte(allocator, max, 1));
+    try std.testing.expectError(MemoryError.OutOfBounds, memory.get_slice(max, 2));
+    try std.testing.expectError(MemoryError.OutOfBounds, memory.get_slice(1, max));
+    try std.testing.expectError(MemoryError.OutOfBounds, memory.get_u256(max));
+    try std.testing.expectError(MemoryError.OutOfBounds, memory.get_byte(max));
+    try std.testing.expectEqual(std.math.maxInt(u64), memory.get_expansion_cost(max));
+
+    // A child at a non-zero checkpoint overflows checkpoint + size.
+    var child = try memory.init_child();
+    defer child.deinit(allocator);
+    try std.testing.expectEqual(@as(u32, 32), child.checkpoint);
+    try std.testing.expectError(MemoryError.MemoryOverflow, child.ensure_capacity(allocator, max - 40));
+    try std.testing.expectError(MemoryError.MemoryOverflow, child.set_data_evm(allocator, max - 40, &word));
+
+    // Failed operations left memory and its contents unchanged.
+    try std.testing.expectEqual(@as(usize, 32), memory.size());
+    try std.testing.expectEqual(@as(u256, 0x1234), try memory.get_u256(0));
+}
+
+test "Memory accepts usize offsets up to the limit" {
+    const allocator = std.testing.allocator;
+    const Mem = Memory(.{ .initial_capacity = 0, .memory_limit = 1024, .owned = true });
+    var memory = try Mem.init(allocator);
+    defer memory.deinit(allocator);
+    const offset: usize = 1024 - 32;
+    try memory.set_u256_evm(allocator, offset, 0xBEEF);
+    try std.testing.expectEqual(@as(usize, 1024), memory.size());
+    try std.testing.expectEqual(@as(u256, 0xBEEF), try memory.get_u256_evm(allocator, offset));
+    try std.testing.expectError(MemoryError.MemoryOverflow, memory.set_byte_evm(allocator, 1024, 1));
 }

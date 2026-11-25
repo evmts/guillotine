@@ -40,12 +40,25 @@ pub const Account = struct {
         };
     }
 
+    /// True when `code_hash` names non-empty code. An account without code carries
+    /// either the all-zero hash (never initialized) or `EMPTY_CODE_HASH`
+    /// (keccak256 of the empty string); both mean "no code".
+    pub fn is_code_hash_present(code_hash: [32]u8) bool {
+        return !std.mem.eql(u8, &code_hash, &@as([32]u8, @splat(0))) and
+            !std.mem.eql(u8, &code_hash, &primitives.EMPTY_CODE_HASH);
+    }
+
+    /// True when the account has code: stored contract code, or an EIP-7702
+    /// delegation designator (`0xef0100 || address`), which is 23 bytes of code.
+    pub fn has_code(self: Account) bool {
+        return self.delegated_address != null or is_code_hash_present(self.code_hash);
+    }
+
     /// Checks if account is empty (zero balance, nonce, and no code)
     pub fn is_empty(self: Account) bool {
         return self.balance == 0 and
             self.nonce == 0 and
-            std.mem.eql(u8, &self.code_hash, &@as([32]u8, @splat(0))) and
-            self.delegated_address == null;
+            !self.has_code();
     }
 
     /// EIP-7702: Check if this is an EOA with delegated code
@@ -58,8 +71,7 @@ pub const Account = struct {
     pub fn get_effective_code_address(self: Account) ?Address {
         // Only EOAs can have delegations
         // EOAs have either zero code_hash or EMPTY_CODE_HASH
-        const is_eoa = std.mem.eql(u8, &self.code_hash, &@as([32]u8, @splat(0))) or
-                       std.mem.eql(u8, &self.code_hash, &primitives.EMPTY_CODE_HASH);
+        const is_eoa = !is_code_hash_present(self.code_hash);
         if (!is_eoa) {
             return null;
         }
@@ -70,8 +82,7 @@ pub const Account = struct {
     pub fn set_delegation(self: *Account, address: Address) void {
         // Only EOAs can have delegations
         // EOAs have either zero code_hash or EMPTY_CODE_HASH
-        const is_eoa = std.mem.eql(u8, &self.code_hash, &@as([32]u8, @splat(0))) or
-                       std.mem.eql(u8, &self.code_hash, &primitives.EMPTY_CODE_HASH);
+        const is_eoa = !is_code_hash_present(self.code_hash);
         if (is_eoa) {
             self.delegated_address = address;
         }
@@ -114,7 +125,7 @@ test "Account.is_empty detects empty accounts" {
     try testing.expect(!non_empty_account.is_empty());
 
     non_empty_account = Account.zero();
-    non_empty_account.delegated_address = Address.from_u256(0x1234);
+    non_empty_account.delegated_address = Address.fromU256(0x1234);
     try testing.expect(!non_empty_account.is_empty());
 }
 
@@ -126,7 +137,7 @@ test "EIP-7702: Account delegation" {
     try testing.expect(account.get_effective_code_address() == null);
     
     // Set delegation
-    const delegate_address = Address.from_u256(0x1234);
+    const delegate_address = Address.fromU256(0x1234);
     account.set_delegation(delegate_address);
     try testing.expect(account.has_delegation());
     try testing.expect(account.get_effective_code_address() != null);
@@ -145,7 +156,7 @@ test "EIP-7702: Delegation only works for EOAs" {
     account.code_hash = @as([32]u8, @splat(0x42));
 
     // Try to set delegation - should not work for contracts
-    const delegate_address = Address.from_u256(0x1234);
+    const delegate_address = Address.fromU256(0x1234);
     account.set_delegation(delegate_address);
 
     // Delegation should not be set
@@ -219,7 +230,7 @@ test "Account.is_empty - code_hash only" {
 
 test "Account.is_empty - delegation only" {
     var account = Account.zero();
-    account.delegated_address = Address.from_u256(0x1234);
+    account.delegated_address = Address.fromU256(0x1234);
     try testing.expect(!account.is_empty());
 }
 
@@ -238,14 +249,14 @@ test "EIP-7702: has_delegation returns false for zero account" {
 
 test "EIP-7702: has_delegation returns true when delegation is set" {
     var account = Account.zero();
-    account.delegated_address = Address.from_u256(0x9999);
+    account.delegated_address = Address.fromU256(0x9999);
     try testing.expect(account.has_delegation());
 }
 
 test "EIP-7702: get_effective_code_address for EOA with EMPTY_CODE_HASH" {
     var account = Account.zero();
     account.code_hash = primitives.EMPTY_CODE_HASH;
-    const delegate = Address.from_u256(0xabcd);
+    const delegate = Address.fromU256(0xabcd);
     account.delegated_address = delegate;
 
     const effective = account.get_effective_code_address();
@@ -256,7 +267,7 @@ test "EIP-7702: get_effective_code_address for EOA with EMPTY_CODE_HASH" {
 test "EIP-7702: set_delegation with EMPTY_CODE_HASH" {
     var account = Account.zero();
     account.code_hash = primitives.EMPTY_CODE_HASH;
-    const delegate = Address.from_u256(0x5555);
+    const delegate = Address.fromU256(0x5555);
 
     account.set_delegation(delegate);
     try testing.expect(account.has_delegation());
@@ -265,7 +276,7 @@ test "EIP-7702: set_delegation with EMPTY_CODE_HASH" {
 
 test "EIP-7702: clear_delegation removes delegation" {
     var account = Account.zero();
-    const delegate = Address.from_u256(0x7777);
+    const delegate = Address.fromU256(0x7777);
     account.set_delegation(delegate);
     try testing.expect(account.has_delegation());
 
@@ -276,8 +287,8 @@ test "EIP-7702: clear_delegation removes delegation" {
 
 test "EIP-7702: delegation overwrite" {
     var account = Account.zero();
-    const first_delegate = Address.from_u256(0x1111);
-    const second_delegate = Address.from_u256(0x2222);
+    const first_delegate = Address.fromU256(0x1111);
+    const second_delegate = Address.fromU256(0x2222);
 
     account.set_delegation(first_delegate);
     try testing.expectEqual(first_delegate, account.delegated_address.?);
@@ -289,7 +300,7 @@ test "EIP-7702: delegation overwrite" {
 test "EIP-7702: contract account cannot get effective code address" {
     var account = Account.zero();
     account.code_hash = @as([32]u8, @splat(0xdd));
-    account.delegated_address = Address.from_u256(0x8888);
+    account.delegated_address = Address.fromU256(0x8888);
 
     const effective = account.get_effective_code_address();
     try testing.expect(effective == null);
@@ -340,10 +351,31 @@ test "Account with max values" {
         .code_hash = @as([32]u8, @splat(0xff)),
         .storage_root = @as([32]u8, @splat(0xff)),
         .nonce = std.math.maxInt(u64),
-        .delegated_address = Address.from_u256(std.math.maxInt(u256)),
+        .delegated_address = Address.fromU256(std.math.maxInt(u256)),
     };
 
     try testing.expectEqual(std.math.maxInt(u256), account.balance);
     try testing.expectEqual(std.math.maxInt(u64), account.nonce);
     try testing.expect(account.has_delegation());
+}
+
+test "Account.has_code treats the zero hash and EMPTY_CODE_HASH as no code" {
+    var account = Account.zero();
+    try testing.expect(!account.has_code());
+    try testing.expect(account.is_empty());
+
+    account.code_hash = primitives.EMPTY_CODE_HASH;
+    try testing.expect(!account.has_code());
+    try testing.expect(account.is_empty());
+    try testing.expect(!Account.is_code_hash_present(account.code_hash));
+
+    account.code_hash = @as([32]u8, @splat(0xAB));
+    try testing.expect(account.has_code());
+    try testing.expect(!account.is_empty());
+
+    var delegated = Account.zero();
+    delegated.code_hash = primitives.EMPTY_CODE_HASH;
+    delegated.set_delegation(Address.fromU256(0x1234));
+    try testing.expect(delegated.has_code());
+    try testing.expectEqual(Address.fromU256(0x1234), delegated.get_effective_code_address().?);
 }

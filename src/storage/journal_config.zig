@@ -2,8 +2,9 @@
 const std = @import("std");
 
 pub const JournalConfig = struct {
-    /// Type used for snapshot IDs
-    SnapshotIdType: type = u32,
+    /// Type used for snapshot IDs. One ID is consumed per call frame and IDs are not
+    /// reused within a transaction, so the default is wide enough never to exhaust.
+    SnapshotIdType: type = u64,
     
     /// Type used for word-sized values (balances, storage values, etc.)
     WordType: type = u256,
@@ -93,7 +94,7 @@ test "JournalConfig validation" {
 test "JournalConfig - default configuration values" {
     const testing = std.testing;
     
-    try testing.expectEqual(u32, default_config.SnapshotIdType);
+    try testing.expectEqual(u64, default_config.SnapshotIdType);
     try testing.expectEqual(u256, default_config.WordType);
     try testing.expectEqual(u64, default_config.NonceType);
     try testing.expectEqual(@as(usize, 128), default_config.initial_capacity);

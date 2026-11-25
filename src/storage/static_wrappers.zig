@@ -156,19 +156,6 @@ pub const StaticDatabase = struct {
         return Database.Error.PermissionDenied;
     }
 
-    pub fn begin_batch(self: *StaticDatabase) Database.Error!void {
-        return self.inner.begin_batch();
-    }
-
-    pub fn commit_batch(self: *StaticDatabase) Database.Error!void {
-        _ = self;
-        return Database.Error.PermissionDenied;
-    }
-
-    pub fn rollback_batch(self: *StaticDatabase) Database.Error!void {
-        return self.inner.rollback_batch();
-    }
-
     // Transaction tracking - not relevant but required by interface
     pub fn begin_transaction(self: *StaticDatabase) Database.Error!u32 {
         return self.inner.begin_transaction();
@@ -318,15 +305,18 @@ pub fn StaticHost(comptime HostType: type) type {
 
         // Write operations - all throw WriteProtection errors per EIP-214
 
-        /// EIP-214: STATICCALL cannot emit logs
+        /// EIP-214: STATICCALL cannot emit logs.
+        ///
+        /// The host interface returns `void` from `emit_log`, so this wrapper cannot
+        /// report an error. The LOG0-LOG4 handlers check `get_is_static()` (always true
+        /// here) and fail the frame with `WriteProtection` before they reach the host.
+        /// A call that still arrives here is dropped: the log is never forwarded to the
+        /// inner host, so a static context can never emit one and the process never crashes.
         pub fn emit_log(self: *Self, contract_address: Address, topics: []const u256, data: []const u8) void {
             _ = self;
             _ = contract_address;
             _ = topics;
             _ = data;
-            // Note: This should ideally return an error, but Host interface defines emit_log as void
-            // The LOG handlers check get_is_static() before calling emit_log, so this is a backup
-            @panic("WriteProtection: STATICCALL cannot emit logs (EIP-214)");
         }
 
         /// EIP-214: STATICCALL cannot modify storage
@@ -381,4 +371,21 @@ test "StaticDatabase blocks write operations" {
     try std.testing.expectError(Database.Error.PermissionDenied, static_interface.set_balance(Address.ZERO_ADDRESS.bytes, 100));
 
     try std.testing.expectError(Database.Error.PermissionDenied, static_interface.set_storage(Address.ZERO_ADDRESS.bytes, 0, 42));
+}
+
+test "StaticHost drops logs instead of crashing or forwarding them" {
+    const RecordingHost = struct {
+        logs_emitted: usize = 0,
+        pub fn emit_log(self: *@This(), contract_address: Address, topics: []const u256, data: []const u8) void {
+            _ = contract_address;
+            _ = topics;
+            _ = data;
+            self.logs_emitted += 1;
+        }
+    };
+    var static_host = StaticHost(RecordingHost).init(.{});
+    const topics = [_]u256{ 1, 2 };
+    static_host.emit_log(Address.ZERO_ADDRESS, &topics, "data");
+    try std.testing.expectEqual(@as(usize, 0), static_host.inner.logs_emitted);
+    try std.testing.expect(static_host.get_is_static());
 }

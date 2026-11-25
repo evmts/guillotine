@@ -7,6 +7,9 @@ const std = @import("std");
 const testing = std.testing;
 
 pub fn LruCache(comptime K: type, comptime V: type, comptime config: LruConfig) type {
+    // A zero-capacity cache could never hold an entry; reject it at compile time so
+    // every runtime cache has at least one node to evict or allocate.
+    if (config.capacity == 0) @compileError("LruCache capacity must be at least 1");
     return struct {
         const Self = @This();
         
@@ -89,25 +92,34 @@ pub fn LruCache(comptime K: type, comptime V: type, comptime config: LruConfig) 
             return null;
         }
         
+        pub const Error = std.mem.Allocator.Error || error{
+            /// The node list and free list disagree: no free node and no entry to
+            /// evict. Unreachable while the cache invariants hold.
+            LruCacheCorrupted,
+        };
+
         /// Put key-value pair, returning evicted item if capacity exceeded
-        pub fn put(self: *Self, key: K, value: V) !?EvictedItem {
+        pub fn put(self: *Self, key: K, value: V) Error!?EvictedItem {
             // Update existing entry
             if (self.map.get(key)) |idx| {
                 self.nodes[idx].value = value;
                 self.moveToFront(idx);
                 return null;
             }
-            
+
+            // The map holds at most `capacity` keys and was sized for them in `init`, so
+            // this never allocates; it only guarantees the insert below has a slot
+            // before the cache is modified.
+            try self.map.ensureTotalCapacity(@intCast(config.capacity));
+
             // Need to add new entry
             var evicted: ?EvictedItem = null;
-            
-            // Evict LRU if at capacity
-            if (self.size >= config.capacity) {
-                evicted = self.evictLru();
-            }
-            
-            // Allocate new node
-            const idx = self.allocateNode();
+
+            // Take a free node, evicting the least recently used entry when none is free.
+            const idx = self.allocateNode() orelse blk: {
+                evicted = self.evictLru() orelse return Error.LruCacheCorrupted;
+                break :blk self.allocateNode() orelse return Error.LruCacheCorrupted;
+            };
             self.nodes[idx] = .{
                 .key = key,
                 .value = value,
@@ -129,8 +141,8 @@ pub fn LruCache(comptime K: type, comptime V: type, comptime config: LruConfig) 
                 self.tail = idx;
             }
             
-            // Add to map
-            try self.map.put(key, idx);
+            // Add to map; capacity was reserved above.
+            self.map.putAssumeCapacityNoClobber(key, idx);
             self.size += 1;
             
             return evicted;
@@ -239,10 +251,9 @@ pub fn LruCache(comptime K: type, comptime V: type, comptime config: LruConfig) 
             self.head = idx;
         }
         
-        fn evictLru(self: *Self) EvictedItem {
-            if (self.tail == INVALID_INDEX) {
-                @panic("LRU cache eviction called with empty cache");
-            }
+        /// Evict the least recently used entry. Returns null when the cache is empty.
+        fn evictLru(self: *Self) ?EvictedItem {
+            if (self.tail == INVALID_INDEX) return null;
 
             const idx = self.tail;
             const node = self.nodes[idx];
@@ -268,10 +279,9 @@ pub fn LruCache(comptime K: type, comptime V: type, comptime config: LruConfig) 
             return .{ .key = node.key, .value = node.value };
         }
         
-        fn allocateNode(self: *Self) usize {
-            if (self.free_head == INVALID_INDEX) {
-                @panic("LRU cache allocation called with no free nodes");
-            }
+        /// Take a node from the free list. Returns null when every node is in use.
+        fn allocateNode(self: *Self) ?usize {
+            if (self.free_head == INVALID_INDEX) return null;
 
             const idx = self.free_head;
             const node = &self.nodes[idx];
@@ -563,9 +573,53 @@ test "LruCache - with custom types" {
     defer cache.deinit();
     
     const key1 = Key{ .id = 1 };
-    const value1 = Value{ .data = [_]u8{1} ** 20 };
+    const value1 = Value{ .data = @splat(1) };
     
     _ = try cache.put(key1, value1);
     const retrieved = cache.get(key1).?;
     try testing.expectEqualSlices(u8, &value1.data, &retrieved.data);
+}
+
+test "LruCache - evictLru on an empty cache returns null" {
+    const Cache = LruCache(u32, u32, .{ .capacity = 2 });
+    var cache = try Cache.init(testing.allocator);
+    defer cache.deinit();
+
+    try testing.expectEqual(@as(?Cache.EvictedItem, null), cache.evictLru());
+    _ = try cache.put(1, 10);
+    try testing.expectEqual(@as(u32, 1), cache.evictLru().?.key);
+    try testing.expectEqual(@as(?Cache.EvictedItem, null), cache.evictLru());
+    try testing.expectEqual(@as(usize, 0), cache.getSize());
+
+    cache.clear();
+    try testing.expectEqual(@as(?Cache.EvictedItem, null), cache.evictLru());
+}
+
+test "LruCache - allocateNode with no free node returns null and put still evicts" {
+    const Cache = LruCache(u32, u32, .{ .capacity = 2 });
+    var cache = try Cache.init(testing.allocator);
+    defer cache.deinit();
+
+    _ = try cache.put(1, 10);
+    _ = try cache.put(2, 20);
+    try testing.expectEqual(@as(?usize, null), cache.allocateNode());
+
+    const evicted = (try cache.put(3, 30)).?;
+    try testing.expectEqual(@as(u32, 1), evicted.key);
+    try testing.expectEqual(@as(u32, 10), evicted.value);
+    try testing.expectEqual(@as(usize, 2), cache.getSize());
+    try testing.expectEqual(@as(?u32, 30), cache.get(3));
+    try testing.expectEqual(@as(?u32, 20), cache.get(2));
+}
+
+test "LruCache - put reports corruption instead of crashing when no node can be found" {
+    const Cache = LruCache(u32, u32, .{ .capacity = 1 });
+    var cache = try Cache.init(testing.allocator);
+    defer cache.deinit();
+
+    // Simulate broken invariants: no free node and nothing to evict.
+    cache.free_head = std.math.maxInt(usize);
+    try testing.expectError(Cache.Error.LruCacheCorrupted, cache.put(1, 10));
+    try testing.expectEqual(@as(usize, 0), cache.getSize());
+    try testing.expect(!cache.contains(1));
 }

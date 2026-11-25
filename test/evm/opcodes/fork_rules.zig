@@ -206,7 +206,7 @@ test "BLOCKHASH reads BlockInfo.block_hashes within the 256-block window only" {
 }
 
 test "A call whose gas exceeds the frame gas type is refused, not truncated" {
-    // The default block_gas_limit (30M) gives an i32 frame gas type.
+    // On 64-bit targets the frame gas type is i64 whatever the block_gas_limit.
     var db = evm.Database.init(std.testing.allocator);
     defer db.deinit();
     var vm = try evm.Evm(.{}).init(std.testing.allocator, &db, regression_block_info, regression_context, 0, regression_sender);
@@ -216,7 +216,7 @@ test "A call whose gas exceeds the frame gas type is refused, not truncated" {
     const code_hash = try db.set_code(&code);
     try db.set_account(regression_contract.bytes, evm.Account{ .balance = 0, .nonce = 0, .code_hash = code_hash, .storage_root = @as([32]u8, @splat(0)) });
 
-    const too_much: u64 = @as(u64, std.math.maxInt(i32)) + 1;
+    const too_much: u64 = @as(u64, std.math.maxInt(i64)) + 1;
     const refused_inner = vm.inner_call(.{ .call = .{ .caller = regression_sender, .to = regression_contract, .value = 0, .input = &.{}, .gas = too_much } });
     try std.testing.expect(!refused_inner.success);
     var refused_call = vm.call(.{ .call = .{ .caller = regression_sender, .to = regression_contract, .value = 0, .input = &.{}, .gas = too_much } });

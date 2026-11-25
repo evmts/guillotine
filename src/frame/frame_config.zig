@@ -128,9 +128,12 @@ pub const FrameConfig = struct {
         else
             @compileError("FrameConfig stack_size is too large! It must fit in a u12 bytes");
     }
-    /// GasType: minimal signed integer type to track gas remaining
+    /// GasType: signed integer type to track gas remaining.
+    /// 64-bit targets always use i64: it is the native word, and a transaction gas
+    /// limit is a u64 that can exceed i32 even when the configured block limit fits.
+    /// 32-bit targets keep i32 when `block_gas_limit` fits in it.
     pub fn GasType(self: Self) type {
-        return if (self.block_gas_limit <= std.math.maxInt(i32))
+        return if (@sizeOf(usize) < 8 and self.block_gas_limit <= std.math.maxInt(i32))
             i32
         else
             i64;
@@ -162,3 +165,15 @@ pub const FrameConfig = struct {
         return Counter;
     }
 };
+
+test "GasType is i64 on 64-bit targets and i32 only for small limits on 32-bit targets" {
+    const Db = struct {};
+    const small = FrameConfig{ .DatabaseType = Db, .block_gas_limit = 30_000_000 };
+    const large = FrameConfig{ .DatabaseType = Db, .block_gas_limit = @as(u64, std.math.maxInt(i32)) + 1 };
+    try std.testing.expectEqual(i64, large.GasType());
+    if (@sizeOf(usize) >= 8) {
+        try std.testing.expectEqual(i64, small.GasType());
+    } else {
+        try std.testing.expectEqual(i32, small.GasType());
+    }
+}

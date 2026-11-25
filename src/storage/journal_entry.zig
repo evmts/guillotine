@@ -249,7 +249,7 @@ test "JournalEntry - default configuration types" {
     const Entry = DefaultJournalEntry;
     
     // Verify default types
-    try testing.expectEqual(u32, Entry.SnapshotIdType);
+    try testing.expectEqual(u64, Entry.SnapshotIdType);
     try testing.expectEqual(u256, Entry.WordType);
     try testing.expectEqual(u64, Entry.NonceType);
     

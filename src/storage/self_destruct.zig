@@ -12,39 +12,57 @@ pub const StateError = error{OutOfMemory};
 /// SelfDestruct tracks contracts marked for destruction via SELFDESTRUCT opcode
 /// Destruction is deferred until end of transaction to maintain proper state semantics
 pub const SelfDestruct = struct {
-    /// HashMap mapping contract address to recipient address
-    /// Key: address of contract to destroy
-    /// Value: address to receive remaining balance
-    destructions: std.HashMap(Address, Address, AddressContext, std.hash_map.default_max_load_percentage),
-    /// Allocator for HashMap operations
+    /// Contract address -> recipient of its balance, in the order the contracts
+    /// were first marked. Insertion order makes a checkpoint a pair of lengths.
+    destructions: Map,
+    /// Recipients replaced by a repeated SELFDESTRUCT of an already marked
+    /// contract, oldest first, so that `revert` can put them back.
+    replaced: std.ArrayList(Replaced),
+    /// Allocator for the map and the replacement log
     allocator: std.mem.Allocator,
 
-    /// Context for Address HashMap
-    const AddressContext = struct {
-        pub fn hash(self: @This(), address: Address) u64 {
-            _ = self;
-            var hasher = std.hash.Wyhash.init(0);
-            hasher.update(&address.bytes);
-            return hasher.final();
-        }
+    const Map = std.array_hash_map.Auto(Address, Address);
 
-        pub fn eql(self: @This(), a: Address, b: Address) bool {
-            _ = self;
-            return std.mem.eql(u8, &a.bytes, &b.bytes);
-        }
+    const Replaced = struct {
+        index: usize,
+        recipient: Address,
+    };
+
+    /// A point in the destruction list to return to with `revert`. O(1) to take.
+    pub const Checkpoint = struct {
+        count: usize,
+        replaced: usize,
     };
 
     /// Initialize new SelfDestruct tracker with given allocator
     pub fn init(allocator: std.mem.Allocator) SelfDestruct {
         return SelfDestruct{
-            .destructions = std.HashMap(Address, Address, AddressContext, std.hash_map.default_max_load_percentage).init(allocator),
+            .destructions = .empty,
+            .replaced = .empty,
             .allocator = allocator,
         };
     }
 
     /// Clean up resources
     pub fn deinit(self: *SelfDestruct) void {
-        self.destructions.deinit();
+        self.destructions.deinit(self.allocator);
+        self.replaced.deinit(self.allocator);
+    }
+
+    /// Mark the current state of the list. Costs O(1) and allocates nothing.
+    pub fn checkpoint(self: *const SelfDestruct) Checkpoint {
+        return .{ .count = self.destructions.count(), .replaced = self.replaced.items.len };
+    }
+
+    /// Undo every mark made since `mark` was taken: restore replaced recipients,
+    /// newest first, then drop the contracts marked after it. Never allocates.
+    pub fn revert(self: *SelfDestruct, mark: Checkpoint) void {
+        while (self.replaced.items.len > mark.replaced) {
+            const entry = self.replaced.items[self.replaced.items.len - 1];
+            self.replaced.items.len -= 1;
+            if (entry.index < mark.count) self.destructions.values()[entry.index] = entry.recipient;
+        }
+        self.destructions.shrinkRetainingCapacity(mark.count);
     }
 
     /// Convert the internal HashMap to an owned slice of SelfDestructRecord for CallResult
@@ -76,7 +94,12 @@ pub const SelfDestruct = struct {
     /// contract_addr: Address of the contract calling SELFDESTRUCT
     /// recipient: Address that will receive the contract's remaining balance
     pub fn mark_for_destruction(self: *SelfDestruct, contract_addr: Address, recipient: Address) StateError!void {
-        try self.destructions.put(contract_addr, recipient);
+        try self.replaced.ensureUnusedCapacity(self.allocator, 1);
+        const slot = try self.destructions.getOrPut(self.allocator, contract_addr);
+        if (slot.found_existing) {
+            self.replaced.appendAssumeCapacity(.{ .index = slot.index, .recipient = slot.value_ptr.* });
+        }
+        slot.value_ptr.* = recipient;
     }
 
     /// Check if a contract is marked for destruction
@@ -92,7 +115,7 @@ pub const SelfDestruct = struct {
 
     /// Get iterator over all contracts marked for destruction
     /// Returns iterator yielding (contract_address, recipient_address) pairs
-    pub fn iterator(self: *SelfDestruct) std.HashMap(Address, Address, AddressContext, std.hash_map.default_max_load_percentage).Iterator {
+    pub fn iterator(self: *SelfDestruct) Map.Iterator {
         return self.destructions.iterator();
     }
 
@@ -102,13 +125,16 @@ pub const SelfDestruct = struct {
     }
 
     /// Remove a contract from the destruction list (used for testing/cleanup)
+    /// Checkpoints taken before the call no longer describe the list.
     pub fn unmark(self: *SelfDestruct, contract_addr: Address) bool {
-        return self.destructions.remove(contract_addr);
+        self.replaced.clearRetainingCapacity();
+        return self.destructions.orderedRemove(contract_addr);
     }
 
     /// Clear all marked contracts (used for testing/cleanup)
     pub fn clear(self: *SelfDestruct) void {
         self.destructions.clearRetainingCapacity();
+        self.replaced.clearRetainingCapacity();
     }
 
     /// Apply all pending destructions to the given state interface
@@ -285,4 +311,32 @@ test "SelfDestruct - unmark and clear" {
     self_destruct.clear();
     try std.testing.expectEqual(@as(u32, 0), self_destruct.count());
     try std.testing.expect(!self_destruct.is_marked_for_destruction(contract_addr));
+}
+test "SelfDestruct checkpoint and revert restore the list without cloning it" {
+    const testing = std.testing;
+    var self_destruct = SelfDestruct.init(testing.allocator);
+    defer self_destruct.deinit();
+
+    const contract_a = Address{ .bytes = @as([20]u8, @splat(0xA)) };
+    const contract_b = Address{ .bytes = @as([20]u8, @splat(0xB)) };
+    const first = Address{ .bytes = @as([20]u8, @splat(0x1)) };
+    const second = Address{ .bytes = @as([20]u8, @splat(0x2)) };
+
+    try self_destruct.mark_for_destruction(contract_a, first);
+    const mark = self_destruct.checkpoint();
+
+    // A nested frame re-marks A with another recipient and marks B, then fails.
+    try self_destruct.mark_for_destruction(contract_a, second);
+    try self_destruct.mark_for_destruction(contract_b, second);
+    try testing.expectEqual(@as(u32, 2), self_destruct.count());
+    try testing.expectEqual(second, self_destruct.get_recipient(contract_a).?);
+
+    self_destruct.revert(mark);
+    try testing.expectEqual(@as(u32, 1), self_destruct.count());
+    try testing.expectEqual(first, self_destruct.get_recipient(contract_a).?);
+    try testing.expect(!self_destruct.is_marked_for_destruction(contract_b));
+
+    // Reverting to the same mark again changes nothing.
+    self_destruct.revert(mark);
+    try testing.expectEqual(@as(u32, 1), self_destruct.count());
 }

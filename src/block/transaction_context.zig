@@ -12,9 +12,10 @@ pub const TransactionContext = struct {
     gas_limit: u64,
     /// Coinbase address (miner/validator)
     coinbase: Address,
-    /// Chain ID - supports chain IDs up to 65535
+    /// Chain ID (EIP-155). Real chain IDs exceed 16 bits (for example
+    /// 11155111 for Sepolia), so the full u64 range is supported.
     /// NOTE: chain_id is used by the CHAINID opcode
-    chain_id: u16,
+    chain_id: u64,
     /// Blob versioned hashes for EIP-4844 blob transactions
     /// Empty slice for non-blob transactions
     blob_versioned_hashes: []const [32]u8 = &.{},
@@ -46,7 +47,7 @@ test "TransactionContext creation and field access" {
 
     try std.testing.expectEqual(@as(u64, 21000), tx_context.gas_limit);
     try std.testing.expectEqual(coinbase_addr, tx_context.coinbase);
-    try std.testing.expectEqual(@as(u16, 1), tx_context.chain_id);
+    try std.testing.expectEqual(@as(u64, 1), tx_context.chain_id);
     try std.testing.expectEqual(@as(usize, 0), tx_context.blob_versioned_hashes.len);
     try std.testing.expect(!tx_context.is_blob_transaction);
     try std.testing.expectEqual(@as(?u256, null), tx_context.max_fee_per_gas);
@@ -59,14 +60,14 @@ test "TransactionContext with maximum values" {
     const max_tx_context = TransactionContext{
         .gas_limit = std.math.maxInt(u64),
         .coinbase = max_addr,
-        .chain_id = std.math.maxInt(u16),
+        .chain_id = std.math.maxInt(u64),
         .max_fee_per_gas = std.math.maxInt(u256),
         .max_fee_per_blob_gas = std.math.maxInt(u256),
     };
 
     try std.testing.expectEqual(std.math.maxInt(u64), max_tx_context.gas_limit);
     try std.testing.expectEqual(max_addr, max_tx_context.coinbase);
-    try std.testing.expectEqual(std.math.maxInt(u16), max_tx_context.chain_id);
+    try std.testing.expectEqual(std.math.maxInt(u64), max_tx_context.chain_id);
     try std.testing.expectEqual(std.math.maxInt(u256), max_tx_context.max_fee_per_gas.?);
     try std.testing.expectEqual(std.math.maxInt(u256), max_tx_context.max_fee_per_blob_gas);
 }
@@ -81,7 +82,7 @@ test "TransactionContext with zero values" {
 
     try std.testing.expectEqual(@as(u64, 0), zero_tx_context.gas_limit);
     try std.testing.expectEqual(zero_addr, zero_tx_context.coinbase);
-    try std.testing.expectEqual(@as(u16, 0), zero_tx_context.chain_id);
+    try std.testing.expectEqual(@as(u64, 0), zero_tx_context.chain_id);
 }
 
 test "TransactionContext with blob data (EIP-4844)" {
@@ -101,10 +102,20 @@ test "TransactionContext with blob data (EIP-4844)" {
 
     try std.testing.expectEqual(@as(u64, 30_000_000), blob_tx_context.gas_limit);
     try std.testing.expectEqual(coinbase_addr, blob_tx_context.coinbase);
-    try std.testing.expectEqual(@as(u16, 1), blob_tx_context.chain_id);
+    try std.testing.expectEqual(@as(u64, 1), blob_tx_context.chain_id);
     try std.testing.expectEqual(@as(usize, 2), blob_tx_context.blob_versioned_hashes.len);
     try std.testing.expectEqual(blob_hash1, blob_tx_context.blob_versioned_hashes[0]);
     try std.testing.expectEqual(blob_hash2, blob_tx_context.blob_versioned_hashes[1]);
     try std.testing.expect(blob_tx_context.is_blob_transaction);
     try std.testing.expectEqual(@as(u256, 1_000_000_000), blob_tx_context.max_fee_per_blob_gas);
+}
+
+test "TransactionContext holds chain IDs wider than 16 bits" {
+    const sepolia = TransactionContext{
+        .gas_limit = 21000,
+        .coinbase = Address{ .bytes = @as([20]u8, @splat(0)) },
+        .chain_id = 11155111,
+    };
+    try std.testing.expectEqual(@as(u64, 11155111), sepolia.chain_id);
+    try std.testing.expectEqual(u64, @TypeOf(sepolia.chain_id));
 }

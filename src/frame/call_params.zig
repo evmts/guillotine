@@ -1,9 +1,13 @@
 const primitives = @import("voltaire");
 const Address = primitives.Address;
+const Hardfork = primitives.Hardfork;
 
 pub fn CallParams(config: anytype) type {
-    // We can add config-specific customizations here in the future
-    _ = config; // Currently unused but reserved for future enhancements
+    // The union must not capture anything derived from `config`: a type that captures
+    // nothing is the same type for every config, and frames build `CallParams(.{})`
+    // values that they pass to `Evm(config).inner_call`. Fork rules are therefore
+    // parameters of `validateFor`, not captured constants.
+    _ = config;
 
     return union(enum) {
         /// Regular CALL operation
@@ -65,15 +69,23 @@ pub fn CallParams(config: anytype) type {
             InvalidStaticCallValue,
         };
 
-        /// Validate call parameters to ensure they meet EVM requirements.
-        /// Checks gas limits and other critical constraints.
+        /// Validate call parameters under the default (post-Shanghai) fork rules: the EIP-3860 init code
+        /// limit applies with the protocol default size. Prefer `validateFor`, which
+        /// takes the configured fork.
         pub fn validate(self: @This()) ValidationError!void {
+            return self.validateFor(Hardfork.DEFAULT, primitives.GasConstants.MaxInitcodeSize);
+        }
+
+        /// Validate call parameters to ensure they meet EVM requirements under
+        /// `hardfork`. The EIP-3860 init code limit (`max_initcode_size`, normally
+        /// `config.max_initcode_size`) applies only from Shanghai on; earlier forks
+        /// accept init code of any size here.
+        pub fn validateFor(self: @This(), hardfork: Hardfork, max_initcode_size: usize) ValidationError!void {
+            const initcode_limit_active = hardfork.isAtLeast(.SHANGHAI);
             // BUG: we should be checking if gas checks are disabled or not
             // Gas must be non-zero to execute any operation
             if (self.getGas() == 0) return ValidationError.GasZeroError;
 
-            // EIP-3860: Limit init code size to 49152 bytes (2 * max contract size)
-            const MAX_INITCODE_SIZE = 49152;
             const MAX_INPUT_SIZE = 1024 * 1024 * 4; // 4MB practical limit for input data
 
             switch (self) {
@@ -96,13 +108,13 @@ pub fn CallParams(config: anytype) type {
                     // STATICCALL cannot have value (enforced by not having value field)
                 },
                 .create => |params| {
-                    // Validate init code size (EIP-3860)
-                    if (params.init_code.len > MAX_INITCODE_SIZE) return ValidationError.InvalidInitCodeSize;
+                    // Validate init code size (EIP-3860, Shanghai and later)
+                    if (initcode_limit_active and params.init_code.len > max_initcode_size) return ValidationError.InvalidInitCodeSize;
                     // CREATE can have any value, no special validation needed
                 },
                 .create2 => |params| {
-                    // Validate init code size (EIP-3860)
-                    if (params.init_code.len > MAX_INITCODE_SIZE) return ValidationError.InvalidInitCodeSize;
+                    // Validate init code size (EIP-3860, Shanghai and later)
+                    if (initcode_limit_active and params.init_code.len > max_initcode_size) return ValidationError.InvalidInitCodeSize;
                     // CREATE2 can have any value, no special validation needed
                 },
             }
@@ -875,7 +887,7 @@ test "call params validation - input size limits" {
 
 test "call params validation - init code size limits" {
     const caller = primitives.ZERO_ADDRESS;
-    const MAX_INITCODE_SIZE = 49152; // EIP-3860 limit
+    const MAX_INITCODE_SIZE = primitives.GasConstants.MaxInitcodeSize; // EIP-3860 limit
 
     // Test with maximum allowed init code size
     const max_init_code = try std.testing.allocator.alloc(u8, MAX_INITCODE_SIZE);
@@ -1435,4 +1447,45 @@ test "call params setGas edge cases" {
         call_op.setGas(1500);
         try std.testing.expectEqual(@as(u64, 1500), call_op.getGas());
     }
+}
+
+test "call params validation - EIP-3860 init code limit applies only from Shanghai" {
+    const caller = primitives.ZERO_ADDRESS;
+    const limit = primitives.GasConstants.MaxInitcodeSize;
+
+    const oversized = try std.testing.allocator.alloc(u8, limit + 1);
+    defer std.testing.allocator.free(oversized);
+    @memset(oversized, 0x60);
+    const at_limit = oversized[0..limit];
+
+    const create_oversized = DefaultCallParams{ .create = .{ .caller = caller, .value = 0, .init_code = oversized, .gas = 1000000 } };
+    const create2_oversized = DefaultCallParams{ .create2 = .{ .caller = caller, .value = 0, .init_code = oversized, .salt = 1, .gas = 1000000 } };
+    const create_at_limit = DefaultCallParams{ .create = .{ .caller = caller, .value = 0, .init_code = at_limit, .gas = 1000000 } };
+
+    // Before Shanghai there is no init code limit.
+    try create_oversized.validateFor(.LONDON, limit);
+    try create2_oversized.validateFor(.LONDON, limit);
+    try create_oversized.validateFor(.FRONTIER, limit);
+
+    // From Shanghai on, init code above the limit is rejected.
+    try create_at_limit.validateFor(.SHANGHAI, limit);
+    try std.testing.expectError(DefaultCallParams.ValidationError.InvalidInitCodeSize, create_oversized.validateFor(.SHANGHAI, limit));
+    try std.testing.expectError(DefaultCallParams.ValidationError.InvalidInitCodeSize, create2_oversized.validateFor(.SHANGHAI, limit));
+    try std.testing.expectError(DefaultCallParams.ValidationError.InvalidInitCodeSize, create_oversized.validateFor(.CANCUN, limit));
+
+    // A configured limit replaces the protocol default.
+    const small_ok = DefaultCallParams{ .create = .{ .caller = caller, .value = 0, .init_code = oversized[0..16], .gas = 1000000 } };
+    const small_over = DefaultCallParams{ .create = .{ .caller = caller, .value = 0, .init_code = oversized[0..17], .gas = 1000000 } };
+    try small_ok.validateFor(.CANCUN, 16);
+    try std.testing.expectError(DefaultCallParams.ValidationError.InvalidInitCodeSize, small_over.validateFor(.CANCUN, 16));
+    try small_over.validateFor(.BERLIN, 16);
+
+    // `validate` keeps the default (post-Shanghai) rule.
+    try std.testing.expectError(DefaultCallParams.ValidationError.InvalidInitCodeSize, create_oversized.validate());
+}
+
+test "call params type is shared across configs" {
+    const Eips = @import("../eips_and_hardforks/eips.zig").Eips;
+    // Frames build CallParams(.{}) values and pass them to Evm(config).inner_call.
+    try std.testing.expect(CallParams(.{}) == CallParams(.{ .eips = Eips{ .hardfork = .LONDON }, .max_initcode_size = @as(u32, 1) }));
 }
