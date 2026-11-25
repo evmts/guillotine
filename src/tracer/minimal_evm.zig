@@ -9,8 +9,24 @@ const Hardfork = @import("../eips_and_hardforks/eips.zig").Hardfork;
 const minimal_host = @import("minimal_host.zig");
 const precompiles = @import("precompiles");
 const log = @import("../log.zig");
+const native_stack = @import("../native_stack.zig");
 
 const Address = primitives.Address.Address;
+
+/// Native stack kept free below a nested call. MinimalEvm recurses on the native stack
+/// once per EVM call depth, and one level (a MinimalFrame's interpreter loop plus the
+/// deepest precompile or hash it can reach) must fit in this much.
+const native_stack_reserve = 512 * 1024;
+
+/// True when the calling thread's stack bounds are known and less than
+/// `native_stack_reserve` of it is left. A nested call must not start then: 1024 EVM
+/// call depths do not fit on a small thread stack (a 2 MiB pthread overflows long
+/// before the depth limit).
+fn nativeStackExhausted() bool {
+    if (comptime !native_stack.supported) return false;
+    const low = native_stack.lowAddress() orelse return false;
+    return @frameAddress() < low +| native_stack_reserve;
+}
 
 // Re-export host types for compatibility
 pub const HostInterface = minimal_host.HostInterface;
@@ -568,6 +584,17 @@ pub const MinimalEvm = struct {
                 .output = &[_]u8{},
             };
         }
+        // Out of native stack: fail the call, as at the depth limit, instead of
+        // overflowing the thread's stack.
+        if (nativeStackExhausted()) {
+            @branchHint(.cold);
+            log.debug("MinimalEvm: nested call at depth {d} refused, native stack exhausted", .{self.frames.items.len});
+            return CallResult{
+                .success = false,
+                .gas_left = 0,
+                .output = &[_]u8{},
+            };
+        }
 
         // Check if this is a precompile call
         if (self.is_precompile(address)) {
@@ -753,3 +780,37 @@ pub const MinimalEvm = struct {
         }
     }
 };
+
+test "MinimalEvm: unbounded recursion on a 2 MiB thread fails the call instead of overflowing the stack" {
+    const Job = struct {
+        success: bool = false,
+        failure: ?anyerror = null,
+
+        fn run(job: *@This()) void {
+            job.execute() catch |err| {
+                job.failure = err;
+            };
+        }
+
+        fn execute(job: *@This()) !void {
+            var evm = try MinimalEvm.init(std.testing.allocator);
+            defer evm.deinit();
+            // PUSH1 0 x5, ADDRESS, GAS, CALL, STOP: the contract calls itself until gas
+            // or the call depth runs out.
+            const code = [_]u8{ 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x30, 0x5a, 0xf1, 0x00 };
+            var contract = Address{ .bytes = @splat(0) };
+            contract.bytes[19] = 0xc3;
+            var caller = Address{ .bytes = @splat(0) };
+            caller.bytes[19] = 0xa1;
+            try evm.setCode(contract, &code);
+            const result = try evm.execute(&code, 16_000_000, caller, contract, 0, &.{});
+            job.success = result.success;
+        }
+    };
+    var job = Job{};
+    const thread = try std.Thread.spawn(.{ .stack_size = 2 * 1024 * 1024 }, Job.run, .{&job});
+    thread.join();
+    if (job.failure) |err| return err;
+    // The outermost frame completes: a refused nested call only pushes 0.
+    try std.testing.expect(job.success);
+}

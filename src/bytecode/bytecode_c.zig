@@ -257,6 +257,9 @@ pub fn evm_bytecode_analyze(handle: ?*const CBytecodeHandle, analysis_out: *CByt
 }
 
 pub fn evm_bytecode_analyze_with_allocator(alloc: std.mem.Allocator, handle: ?*const CBytecodeHandle, analysis_out: *CBytecodeAnalysis) c_int {
+    // Zero the output first: on every failure path the caller holds an empty analysis
+    // that evm_bytecode_free_analysis accepts, never uninitialized pointers and counts.
+    analysis_out.* = std.mem.zeroes(CBytecodeAnalysis);
     const h = handle orelse return EVM_BYTECODE_ERROR_NULL_POINTER;
     
     // Call the Zig analyzer with correct types

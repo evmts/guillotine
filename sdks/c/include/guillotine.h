@@ -5,13 +5,24 @@
  * then optionally guillotine_cleanup(), which destroys any handles still alive.
  *
  * Handles: each guillotine_evm_create* call allocates a fresh EVM and state
- * database; no state is shared or reused between handles. Every function
- * checks the handle against the library's live-handle registry, so NULL,
- * foreign, destroyed, or cleaned-up handles return NULL/false with an error
- * instead of being dereferenced. Destroying NULL is a no-op; destroying a
- * handle twice is reported and ignored. Any handle works with every function:
- * the *_tracing and *_test variants are aliases kept for existing callers.
- * A tracing handle (GUILLOTINE_MAINNET_WITH_TRACER) fills trace_json.
+ * database; no state is shared or reused between handles. An EvmHandle * is
+ * an opaque token, not an address: the Nth handle the process creates has the
+ * value N and a value is never issued twice, so a destroyed handle can never
+ * alias a newer one. Never dereference it. Every function looks the token up
+ * in the library's live-handle registry, so NULL, foreign, destroyed, or
+ * cleaned-up handles return NULL/false with an error. Destroying NULL is a
+ * no-op; destroying a handle twice is reported and ignored. Any handle works
+ * with every function: the *_tracing and *_test variants are aliases kept for
+ * existing callers.
+ *
+ * Tracing: a tracing handle (GUILLOTINE_MAINNET_WITH_TRACER) fills trace_json
+ * with {"structLogs":[...]}: one entry per executed bytecode instruction at
+ * every call depth, read from the executing EVM. "stack" lists the stack
+ * before the instruction, top first; "gas" and "gasCost" are per instruction.
+ *
+ * Stack: handle creation runs on a library thread with its own stack, and
+ * deep call chains move to a large-stack worker, so callers may run on small
+ * thread stacks. The library installs no alternate signal stack.
  *
  * Errors: functions return NULL or false and record a message readable with
  * guillotine_get_last_error(). That buffer is thread-local and is overwritten
@@ -123,11 +134,9 @@ typedef struct StateDumpFFI {
 
 typedef struct CBasicBlock { uint32_t start; uint32_t end; } CBasicBlock;
 typedef uint8_t CFusionType;
+/* Mirrors CFusionType in src/bytecode/bytecode_c.zig: the analyzer reports these two. */
 #define GUILLOTINE_FUSION_CONSTANT_FOLD 0
-#define GUILLOTINE_FUSION_MULTI_PUSH 1
-#define GUILLOTINE_FUSION_MULTI_POP 2
 #define GUILLOTINE_FUSION_ISZERO_JUMPI 3
-#define GUILLOTINE_FUSION_DUP2_MSTORE_PUSH 4
 typedef struct CFusionInfo {
     CFusionType fusion_type;
     uint32_t original_length;

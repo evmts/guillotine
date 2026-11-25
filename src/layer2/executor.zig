@@ -3,7 +3,8 @@
 //! and ordinary transaction/CREATE nonce handling, but MUST NOT charge fees.
 //! CALL deposit nonce increments are performed here and must not be repeated. It returns EVM failures as Outcome;
 //! infrastructure errors propagate. An invalid user transaction (e.g. below intrinsic
-//! gas) must be an error; an invalid deposit is a halt (failed deposit). The frame's
+//! gas) must be an error; an invalid deposit is `Result.invalid` (a failed deposit
+//! on every spec, Bedrock included, where a frame halt is not). The frame's
 //! GASPRICE is `gasPrice(tx)`. configure installs ALL nested-call precompile
 //! overrides from optimism/precompiles.zig, not merely top-level input checks.
 const std = @import("std");
@@ -63,7 +64,15 @@ pub const Transaction = struct {
     is_call: bool = true,
     deposit: ?transaction.DepositTransactionParts = null,
 };
-pub const Result = struct { outcome: deposits.Outcome, gas_used: u64 };
+pub const Result = struct {
+    outcome: deposits.Outcome,
+    gas_used: u64,
+    /// Deposits only: the deposit failed transaction validation (intrinsic gas, init
+    /// code size, value above balance) and did not execute. op-revm
+    /// `catch_error_failed_deposit` includes it as a failed deposit on every spec;
+    /// before Regolith that differs from a halt, which keeps the frame's nonce and gas.
+    invalid: bool = false,
+};
 
 /// Price per gas the frame observes (GASPRICE) and pays: zero for deposits.
 pub fn gasPrice(tx: Transaction) !u256 {
@@ -114,7 +123,10 @@ pub fn execute(host: anytype, info: fees.L1BlockInfo, spec: OpSpecId, tx: Transa
         try host.setCaller(tx.sender, deposits.preExecution(before, parts, tx.is_call));
         const result = try host.executeFrame(tx);
         if (result.gas_used > tx.gas_limit) return error.GasUsedExceedsGasLimit;
-        const final = deposits.finalize(spec, parts, result.outcome, tx.gas_limit, result.gas_used);
+        const final: deposits.DepositResult = if (result.invalid)
+            .{ .gas_used = deposits.failedDepositGasUsed(spec, parts, tx.gas_limit), .failed = true }
+        else
+            deposits.finalize(spec, parts, result.outcome, tx.gas_limit, result.gas_used);
         if (final.failed) {
             host.rollback(checkpoint);
             active = false;
@@ -145,6 +157,8 @@ pub fn execute(host: anytype, info: fees.L1BlockInfo, spec: OpSpecId, tx: Transa
     caller.balance -= @intCast(prepaid);
     try host.setCaller(tx.sender, caller);
     const result = try host.executeFrame(tx);
+    // An invalid user transaction must be an error from the host, never a result.
+    if (result.invalid) return error.InvalidUserTransactionResult;
     const settlement = try fees.settle(&attributes, spec, tx.envelope, tx.gas_limit, result.gas_used, tx.base_fee, price);
     try host.credit(tx.sender, settlement.caller_refund);
     try host.credit(coinbase, settlement.sequencer_fee_vault);
@@ -313,6 +327,33 @@ test "executor includes a post-Regolith system deposit as a failed deposit" {
     const result = try execute(&bedrock, fees.L1BlockInfo.empty(), .BEDROCK, tx, constants.SEQUENCER_FEE_VAULT_ADDRESS);
     try std.testing.expectEqual(deposits.Outcome.success, result.outcome);
     try std.testing.expectEqual(@as(u64, 0), result.gas_used);
+}
+
+test "executor includes a deposit the host reports invalid as a failed deposit on every spec" {
+    for (OpSpecId.ALL) |spec| {
+        for ([_]bool{ false, true }) |system| {
+            // Regolith+ system deposits never reach the host (DepositSystemTxPostRegolith).
+            if (system and spec.isAtLeast(.REGOLITH)) continue;
+            var host = TestHost{};
+            host.result = .{ .outcome = .halt, .gas_used = 1_000, .invalid = true };
+            const parts = transaction.DepositTransactionParts.deposit(@as([32]u8, @splat(4)), 50, system);
+            const tx = Transaction{ .sender = Address.fromU256(1), .envelope = &.{0x7e}, .gas_limit = 1_000, .base_fee = 2, .is_call = false, .deposit = parts };
+            const result = try execute(&host, fees.L1BlockInfo.empty(), spec, tx, constants.SEQUENCER_FEE_VAULT_ADDRESS);
+            try std.testing.expectEqual(deposits.Outcome.halt, result.outcome);
+            // A Bedrock system deposit that fails is free; any other uses its gas limit.
+            try std.testing.expectEqual(@as(u64, if (system) 0 else 1_000), result.gas_used);
+            try std.testing.expectEqual(@as(u256, 1_000_050), host.state.balance);
+            try std.testing.expectEqual(@as(u64, 1), host.state.nonce);
+            try std.testing.expectEqual(@as(u256, 0), host.vaults);
+        }
+    }
+    // A host must report an invalid user transaction as an error.
+    var host = TestHost{};
+    host.result = .{ .outcome = .halt, .gas_used = 21, .invalid = true };
+    const user = Transaction{ .sender = Address.fromU256(1), .envelope = &.{1}, .gas_limit = 100, .fee = .{ .legacy = 3 }, .base_fee = 2, .to = Address.fromU256(2) };
+    try std.testing.expectError(error.InvalidUserTransactionResult, execute(&host, fees.L1BlockInfo.empty(), .FJORD, user, constants.SEQUENCER_FEE_VAULT_ADDRESS));
+    try std.testing.expectEqual(@as(u256, 1_000_000), host.state.balance);
+    try std.testing.expectEqual(@as(u64, 0), host.state.nonce);
 }
 
 test "executor requires a call target exactly for calls" {

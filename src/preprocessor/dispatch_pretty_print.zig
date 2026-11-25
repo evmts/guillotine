@@ -104,11 +104,19 @@ pub fn DispatchDebugInfo(comptime FrameType: type) type {
             message: []const u8,
             expected: []const u8,
             actual: []const u8,
+            /// True when `expected` and `actual` were formatted for this error and are
+            /// freed with it; false when they are static strings.
+            owns_text: bool = false,
         };
         
         pub fn deinit(self: *Self) void {
             self.handler_map.deinit();
             self.allocator.free(self.schedule_entries);
+            for (self.validation_errors.items) |validation_error| {
+                if (!validation_error.owns_text) continue;
+                self.allocator.free(validation_error.expected);
+                self.allocator.free(validation_error.actual);
+            }
             self.validation_errors.deinit(self.allocator);
             self.pc_to_schedule_map.deinit();
             self.jumpdest_map.deinit();
@@ -508,7 +516,8 @@ pub fn getDebugInfo(
                 } else {
                     const handler_ptr = @as(*const anyopaque, @ptrCast(item.opcode_handler));
                     const handler_info = debug_info.handler_map.get(handler_ptr);
-                    const expected_opcode = std.enums.fromInt(Opcode, data.opcode).?;
+                    // Undefined opcode bytes run the INVALID handler.
+                    const expected_opcode = std.enums.fromInt(Opcode, data.opcode) orelse Opcode.INVALID;
                     
                     var validation_status: DebugInfo.ValidationStatus = .valid;
                     if (handler_info) |info| {
@@ -537,7 +546,7 @@ pub fn getDebugInfo(
                 // If this opcode carries inline PC metadata in the schedule (PC opcode),
                 // consume and record the following .pc metadata item to keep schedule_idx
                 // synchronized with subsequent bytecode entries.
-                if (std.enums.fromInt(Opcode, data.opcode).? == .PC) {
+                if ((std.enums.fromInt(Opcode, data.opcode) orelse Opcode.INVALID) == .PC) {
                     if (schedule_idx < schedule_items.len) {
                         const maybe_meta = schedule_items[schedule_idx];
                         if (kindOf(Item, maybe_meta, .pc) == .pc) {
@@ -618,9 +627,7 @@ pub fn getDebugInfo(
                             .validation_status = if (meta.value == expected_limb) .valid else .metadata_mismatch,
                         });
                         if (meta.value != expected_limb) {
-                            try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Push value mismatch", 
-                                try std.fmt.allocPrint(allocator, "0x{x}", .{expected_limb}),
-                                try std.fmt.allocPrint(allocator, "0x{x}", .{meta.value}));
+                            try addFormattedValidationError(&debug_info, schedule_idx, bytecode_pc, "Push value mismatch", "0x{x}", expected_limb, meta.value);
                         }
                     }
                     schedule_idx += 1;
@@ -754,11 +761,14 @@ pub fn getDebugInfo(
                         }
                     }
                     
-                    const expected_target = switch (op_data) {
-                        .push_jump_fusion => |fusion| @as(u32, @intCast(fusion.value)),
-                        .push_jumpi_fusion => |fusion| @as(u32, @intCast(fusion.value)),
+                    // A pushed target wider than 32 bits is no JUMPDEST: it has no PC,
+                    // exactly like a schedule target that is not in the PC map.
+                    const pushed_target = switch (op_data) {
+                        .push_jump_fusion => |fusion| fusion.value,
+                        .push_jumpi_fusion => |fusion| fusion.value,
                         else => unreachable,
                     };
+                    const expected_target: ?u32 = std.math.cast(u32, pushed_target);
                     
                     try entries.append(allocator, .{
                         .schedule_index = schedule_idx,
@@ -776,9 +786,7 @@ pub fn getDebugInfo(
                     });
                     
                     if (target_pc != expected_target) {
-                        try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Jump target mismatch",
-                            try std.fmt.allocPrint(allocator, "PC=0x{x}", .{expected_target}),
-                            try std.fmt.allocPrint(allocator, "PC=0x{x}", .{target_pc orelse 0}));
+                        try addFormattedValidationError(&debug_info, schedule_idx, bytecode_pc, "Jump target mismatch", "PC=0x{x}", pushed_target, target_pc orelse 0);
                     }
                 }
                 schedule_idx += 1;
@@ -979,6 +987,24 @@ pub fn getDebugInfo(
     });
     
     return debug_info;
+}
+
+/// Record a validation error whose `expected` and `actual` texts are formatted here
+/// with `fmt` and owned by `debug_info` (freed in `DebugInfo.deinit`).
+fn addFormattedValidationError(debug_info: anytype, schedule_idx: usize, pc: anytype, message: []const u8, comptime fmt: []const u8, expected: anytype, actual: anytype) !void {
+    const allocator = debug_info.allocator;
+    const expected_text = try std.fmt.allocPrint(allocator, fmt, .{expected});
+    errdefer allocator.free(expected_text);
+    const actual_text = try std.fmt.allocPrint(allocator, fmt, .{actual});
+    errdefer allocator.free(actual_text);
+    try debug_info.validation_errors.append(allocator, .{
+        .schedule_index = schedule_idx,
+        .pc = if (@TypeOf(pc) == u32) pc else @as(u32, @intCast(pc)),
+        .message = message,
+        .expected = expected_text,
+        .actual = actual_text,
+        .owns_text = true,
+    });
 }
 
 fn addValidationError(debug_info: anytype, schedule_idx: usize, pc: anytype, message: []const u8, expected: []const u8, actual: []const u8) !void {

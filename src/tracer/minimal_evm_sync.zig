@@ -72,52 +72,6 @@ fn isSyntheticOpcode(opcode: UnifiedOpcode) bool {
     return @intFromEnum(opcode) > 0xFF;
 }
 
-/// Execute one MinimalEvm instruction in `mf` and, when step capture is on, record
-/// it in `tracer.steps`. The sidecar is the only recorder of top-level steps, so every
-/// bytecode instruction appears exactly once, fused or not.
-fn stepAndRecord(tracer: anytype, evm: *MinimalEvm, mf: anytype) anyerror!void {
-    if (!tracer.config.enable_step_capture or mf.pc >= mf.bytecode.len) return evm.step();
-
-    var step = tracer.captureStep(mf, mf.bytecode[mf.pc]) catch |err| {
-        tracer.debug("Failed to capture step: {any}", .{err});
-        return evm.step();
-    };
-    evm.step() catch |e| {
-        step.error_occurred = true;
-        step.error_msg = @errorName(e);
-        step.gas_after = @intCast(mf.gas_remaining);
-        step.gas_cost = @intCast(@as(i64, step.gas_before) - @as(i64, step.gas_after));
-        step.memory_size_after = mf.memory_size;
-        appendStep(tracer, step);
-        return e;
-    };
-    step.gas_after = @intCast(mf.gas_remaining);
-    step.gas_cost = @intCast(@as(i64, step.gas_before) - @as(i64, step.gas_after));
-    step.memory_size_after = mf.memory_size;
-    if (mf.stack.items.len > 0) {
-        if (tracer.allocator.alloc(u256, mf.stack.items.len)) |stack_after| {
-            for (mf.stack.items, 0..) |val, i| stack_after[mf.stack.items.len - 1 - i] = val; // LIFO order
-            step.stack_after = stack_after;
-        } else |err| {
-            tracer.debug("Failed to copy stack after step: {any}", .{err});
-        }
-    }
-    appendStep(tracer, step);
-}
-
-fn stepCurrentAndRecord(tracer: anytype, evm: *MinimalEvm) anyerror!void {
-    const mf = evm.getCurrentFrame() orelse return evm.step();
-    return stepAndRecord(tracer, evm, mf);
-}
-
-fn appendStep(tracer: anytype, step: anytype) void {
-    tracer.steps.append(tracer.allocator, step) catch |err| {
-        tracer.debug("Failed to append step: {any}", .{err});
-        if (step.stack_before.len > 0) tracer.allocator.free(step.stack_before);
-        if (step.stack_after.len > 0) tracer.allocator.free(step.stack_after);
-    };
-}
-
 pub fn executeMinimalEvmForOpcode(
     tracer: anytype,
     evm: *MinimalEvm,
@@ -125,8 +79,7 @@ pub fn executeMinimalEvmForOpcode(
     frame: anytype,
     cursor: [*]const @TypeOf(frame.*).Dispatch.Item,
 ) void {
-    // frame parameter may be used for JUMPDEST special handling
-    
+    _ = cursor;
     const max_steps = getMaxStepsForOpcode(opcode);
     _ = evm.getPC(); // initial_pc for debugging
     
@@ -134,23 +87,11 @@ pub fn executeMinimalEvmForOpcode(
 
     // For regular opcodes (< 0x100), execute exactly once
     if (!isSyntheticOpcode(opcode)) {
-        const opcode_value = @intFromEnum(opcode);
         if (evm.getCurrentFrame()) |mf| {
-            // Special handling: JUMPDEST in Frame pre-charges entire basic-block gas.
-            // MinimalEvm's JUMPDEST charges only JumpdestGas, so we reconcile here.
-            if (opcode_value == 0x5b) { // JUMPDEST
-                if (@TypeOf(frame) != void) {
-                    const DispatchType = @TypeOf(frame.*).Dispatch;
-                    const dispatch = DispatchType{ .cursor = cursor };
-                    const op_data = dispatch.getOpData(.JUMPDEST);
-                    const block_gas: u64 = op_data.metadata.gas;
-                    const jumpdest_gas: u64 = primitives.GasConstants.JumpdestGas;
-                    const extra: i64 = @as(i64, @intCast(block_gas)) - @as(i64, @intCast(jumpdest_gas));
-                    mf.gas_remaining -= extra;
-                }
-            }
-
-            stepAndRecord(tracer, evm, mf) catch |e| {
+            // MinimalEvm charges each instruction as it runs it, JUMPDEST included.
+            // Frame charges a whole basic block at its JUMPDEST; the two agree again at
+            // the end of the block, where the tracer compares gas.
+            evm.step() catch |e| {
                 // Don't panic on any errors - just log and continue
                 var actual_opcode: u8 = 0;
                 if (mf.pc < mf.bytecode.len) actual_opcode = mf.bytecode[mf.pc];
@@ -181,8 +122,7 @@ pub fn executeMinimalEvmForOpcode(
         // Get current state before step
         _ = evm.getPC(); // Get PC before step for debugging
         
-        // Each instruction a fusion covers is one recorded step.
-        stepCurrentAndRecord(tracer, evm) catch |e| {
+        evm.step() catch |e| {
             // Log the error but don't panic - this is expected for some cases
             last_error = e;
             

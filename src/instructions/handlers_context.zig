@@ -30,6 +30,24 @@ pub fn Handlers(FrameType: type) type {
         const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
         const address_utils = @import("address_utils.zig");
 
+        /// Write `length` bytes of `source`, starting at `offset`, to memory at `dest`.
+        /// Bytes past the end of `source` read as zero, including every byte when
+        /// `offset` lies beyond it. The caller has charged gas and grown memory over
+        /// `[dest, dest + length)`. False when that range is not inside memory.
+        fn copyPadded(self: *FrameType, dest: usize, source: []const u8, offset: usize, length: usize) bool {
+            const base: usize = self.memory.checkpoint;
+            const bytes = self.memory.get_buffer_ref().items;
+            const start = std.math.add(usize, base, dest) catch return false;
+            const end = std.math.add(usize, start, length) catch return false;
+            if (end > bytes.len) return false;
+            const target = bytes[start..end];
+            const copied = if (offset < source.len) @min(source.len - offset, length) else 0;
+            // @memmove, like MCOPY: correct even if `source` were a view of this buffer.
+            if (copied != 0) @memmove(target[0..copied], source[offset..][0..copied]);
+            @memset(target[copied..], 0);
+            return true;
+        }
+
         /// ADDRESS opcode (0x30) - Get address of currently executing account.
         /// Stack: [] → [address]
         pub fn address(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
@@ -202,7 +220,7 @@ pub fn Handlers(FrameType: type) type {
                 self.afterComplete(.CALLDATACOPY);
                 return Error.OutOfBounds;
             };
-            if (new_size > std.math.maxInt(u24)) {
+            if (new_size > FrameType.Memory.MEMORY_LIMIT) {
                 self.afterComplete(.CALLDATACOPY);
                 return Error.OutOfBounds;
             }
@@ -224,14 +242,8 @@ pub fn Handlers(FrameType: type) type {
                 else => return Error.AllocationError,
             };
 
-            const calldata = self.calldata_slice;
-
-            // Copy calldata to memory with proper zero-padding
-            var i: usize = 0;
-            while (i < length_usize) : (i += 1) {
-                const src_index = offset_usize +| i;
-                const byte_val = if (src_index < calldata.len) calldata[src_index] else 0;
-                self.memory.set_byte(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(dest_offset_usize + i)), byte_val) catch return Error.OutOfBounds;
+            if (!copyPadded(self, dest_offset_usize, self.calldata_slice, offset_usize, length_usize)) {
+                return Error.OutOfBounds;
             }
 
             const op_data = dispatch.getOpData(.CALLDATACOPY); // Use op_data.next_handler and op_data.next_cursor directly
@@ -287,7 +299,7 @@ pub fn Handlers(FrameType: type) type {
                 self.afterComplete(.CODECOPY);
                 return Error.OutOfBounds;
             };
-            if (new_size > std.math.maxInt(u24)) {
+            if (new_size > FrameType.Memory.MEMORY_LIMIT) {
                 self.afterComplete(.CODECOPY);
                 return Error.OutOfBounds;
             }
@@ -309,15 +321,8 @@ pub fn Handlers(FrameType: type) type {
                 else => return Error.AllocationError,
             };
 
-            // Get bytecode from frame
-            const code_data = self.code;
-
-            // Copy code to memory with proper zero-padding
-            var i: usize = 0;
-            while (i < length_usize) : (i += 1) {
-                const src_index = offset_usize +| i;
-                const byte_val = if (src_index < code_data.len) code_data[src_index] else 0;
-                self.memory.set_byte(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(dest_offset_usize + i)), byte_val) catch return Error.OutOfBounds;
+            if (!copyPadded(self, dest_offset_usize, self.code, offset_usize, length_usize)) {
+                return Error.OutOfBounds;
             }
 
             const op_data = dispatch_opcode_data.getOpData(.CODECOPY, Dispatch, Dispatch.Item, cursor);
@@ -427,7 +432,7 @@ pub fn Handlers(FrameType: type) type {
                 self.afterComplete(.EXTCODECOPY);
                 return Error.OutOfBounds;
             };
-            if (new_size > std.math.maxInt(u24)) {
+            if (new_size > FrameType.Memory.MEMORY_LIMIT) {
                 self.afterComplete(.EXTCODECOPY);
                 return Error.OutOfBounds;
             }
@@ -463,15 +468,9 @@ pub fn Handlers(FrameType: type) type {
                 },
             };
 
-            // Copy external code to memory with proper zero-padding
-            var i: usize = 0;
-            while (i < length_usize) : (i += 1) {
-                const src_index = offset_usize +| i;
-                const byte_val = if (src_index < code.len) code[src_index] else 0;
-                self.memory.set_byte(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(dest_offset_usize + i)), byte_val) catch {
-                    self.afterComplete(.EXTCODECOPY);
-                    return Error.OutOfBounds;
-                };
+            if (!copyPadded(self, dest_offset_usize, code, offset_usize, length_usize)) {
+                self.afterComplete(.EXTCODECOPY);
+                return Error.OutOfBounds;
             }
 
             return dispatch_next.nextInstruction(FrameType, self, cursor, .EXTCODECOPY);
@@ -607,7 +606,7 @@ pub fn Handlers(FrameType: type) type {
                 self.afterComplete(.RETURNDATACOPY);
                 return Error.OutOfBounds;
             };
-            if (new_size > std.math.maxInt(u24)) {
+            if (new_size > FrameType.Memory.MEMORY_LIMIT) {
                 self.afterComplete(.RETURNDATACOPY);
                 return Error.OutOfBounds;
             }

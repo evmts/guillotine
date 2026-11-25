@@ -30,6 +30,7 @@ of this ABI and no other C entry point.
 
 ## 2. Build and link
 
+- [ ] Build with Zig 0.17.1 (`minimum_zig_version` in `build.zig.zon`).
 - [ ] `zig build shared` produces `zig-out/lib/libguillotine_ffi.dylib`
       (macOS) or `libguillotine_ffi.so` (Linux). `zig build static` produces
       `libguillotine_ffi_static.a`. Prefer the shared library.
@@ -53,9 +54,9 @@ of this ABI and no other C entry point.
       4 CREATE, 5 CREATE2. `guillotine_simulate` accepts CALL only and does
       not commit state. Both `guillotine_call` and `guillotine_simulate` set
       ORIGIN to `caller`.
-- [ ] Pass `chain_id` as the full u64. Creation returns NULL with
-      `exceeds the supported maximum` when the value does not fit the EVM's
-      CHAINID type; surface that error instead of hard-coding a cap.
+- [ ] Pass `chain_id` as the full u64. The EVM's CHAINID type is u64, so
+      every value is accepted and returned unchanged by CHAINID. Never
+      hard-code a smaller cap.
 - [ ] There is no nonce getter. Read nonces through `guillotine_dump_state`.
 
 ## 4. Handles
@@ -67,9 +68,17 @@ of this ABI and no other C entry point.
       other bytes return NULL. Only config 1 fills `trace_json`.
 - [ ] Any handle works with every function. The `*_tracing` and `*_test`
       functions are aliases; bind the unsuffixed names.
-- [ ] The live-handle registry rejects NULL, foreign, destroyed, and
-      cleaned-up handles with an error. It cannot detect a stale handle whose
-      address was reused, so clear references after `guillotine_evm_destroy`.
+- [ ] An `EvmHandle *` is an opaque token, not an address: the Nth handle the
+      process creates has the value N, and a value is never issued twice. The
+      live-handle registry rejects NULL, foreign, destroyed, and cleaned-up
+      handles with an error, and a destroyed handle can never alias a newer
+      one. Never dereference a handle or do pointer arithmetic on it.
+- [ ] Handle creation runs on a library thread with its own stack, and deep
+      call chains move to a large-stack worker, so callers may use small
+      thread stacks (the C suite uses 512 KiB and 2 MiB threads).
+- [ ] A tracing handle reports one `structLogs` step per executed bytecode
+      instruction at every call depth, read from the executing EVM: real
+      storage, `stack` top first, and per-instruction `gas` and `gasCost`.
 - [ ] `guillotine_cleanup()` destroys every live handle. Call it only at
       shutdown, when no thread is inside a library call.
 - [ ] `BytecodeHandle` is not registry-checked. Destroy it exactly once.
@@ -121,8 +130,13 @@ of this ABI and no other C entry point.
       invalid config, double destroy, cleanup with live handles, isolated
       state per handle, ORIGIN parity between call and simulate, test-mode and
       tracing handles through unsuffixed functions, no memory growth over
-      repeated calls and invalid bytecode, and chain ids 1, 8453, 84532, and
-      11155111.
+      repeated calls and invalid bytecode, exact CHAINID round-trips for
+      chain ids 1, 8453, 84532, 11155111, and `UINT64_MAX`, exact trace steps
+      for preset storage and a JUMPDEST + GAS loop, self-recursion on a 2 MiB
+      thread, handle creation on a 512 KiB thread, test-mode calls with gas
+      100 and 21000, handle tokens that are never reused, hostile inputs to
+      `evm_dispatch_pretty_print`, zeroed analysis output, stored code of a
+      delegated account, and the KZG precompile at `0x0a`.
 - [ ] Add a contract that returns a known 32-byte word, a REVERT with data,
       empty and non-empty buffers, u256 boundaries, and an invalid call type.
 - [ ] Deploy test code at a non-precompile address (for example

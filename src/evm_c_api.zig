@@ -4,9 +4,13 @@
 //! Handle model:
 //! - Every `guillotine_evm_create*` call allocates a fresh `Database` and EVM inside a
 //!   tagged `HandleBox`. Nothing is pooled, so no state crosses handles.
-//! - Live handles are kept in a registry. Every entry point looks the handle up before
-//!   touching it, so NULL, foreign, or destroyed handles fail with an error instead of
-//!   being dereferenced. Destroying a handle twice is reported, not a double free.
+//! - A handle is an opaque token, not an address: the Nth handle created by the process
+//!   is the value N (1, 2, 3, ...) and a value is never issued twice, so a destroyed
+//!   handle can never alias a newer one even when the allocator reuses its memory.
+//! - Live handles are kept in a registry keyed by token. Every entry point looks the
+//!   token up before touching anything, so NULL, foreign, or destroyed handles fail with
+//!   an error instead of being dereferenced. Destroying a handle twice is reported, not
+//!   a double free.
 //! - Entry points dispatch on the box tag, so any handle works with any function
 //!   (the `*_tracing` variants are kept as aliases for existing callers).
 //! - All memory handed to the caller comes from `std.heap.c_allocator` and may be freed
@@ -18,12 +22,22 @@
 //! the same thread). `EvmResult.error_message` is an owned copy freed with the result.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const evm = @import("evm");
 
-// Global log configuration - suppress debug logs
 pub const std_options: std.Options = .{
+    // Suppress debug logs.
     .log_level = .warn,
+    // No per-thread alternate signal stack. The default reserves 262 KiB of
+    // thread-local storage in every thread of the host process, which no longer fits
+    // in a 256 KiB pthread stack.
+    .signal_stack_size = null,
 };
+
+/// Read by src/tracer/tracer.zig: this library runs inside a host process, so a failed
+/// tracer check is logged and counted, never a process abort, and no MinimalEvm sidecar
+/// runs beside the EVM.
+pub const guillotine_embedded = true;
 const primitives = @import("voltaire");
 const bytecode_c = @import("bytecode/bytecode_c.zig");
 const log = std.log.scoped(.c_api);
@@ -45,7 +59,8 @@ const ffi_allocator = std.heap.c_allocator;
 // ABI TYPES
 // ============================================================================
 
-/// Opaque handle for an EVM instance. Points at a `HandleBox`.
+/// Opaque handle for an EVM instance. Its value is a registry token (see the handle
+/// model above), never a dereferenceable address.
 pub const EvmHandle = opaque {};
 
 /// Log entry for FFI
@@ -200,8 +215,11 @@ const HandleBox = union(EvmConfiguration) {
 
 var registry_mutex: std.Io.Mutex = .init;
 var initialized: bool = false;
-/// Keys are the opaque handles given to callers; lookups never dereference them.
-var live_handles: std.AutoHashMapUnmanaged(*EvmHandle, *HandleBox) = .empty;
+/// Live handles by token. Lookups never dereference a caller-supplied value.
+var handle_registry: std.AutoHashMapUnmanaged(usize, *HandleBox) = .empty;
+/// Token of the next handle. Starts at 1 (0 is NULL) and only ever grows, across
+/// `guillotine_cleanup` and `guillotine_init` too.
+var next_handle_id: usize = 1;
 
 fn lockRegistry() void {
     std.Io.Threaded.mutexLockUncancelable(&registry_mutex);
@@ -219,7 +237,7 @@ fn resolve(handle: ?*EvmHandle) ?*HandleBox {
     };
     lockRegistry();
     defer unlockRegistry();
-    return live_handles.get(h) orelse {
+    return handle_registry.get(@intFromPtr(h)) orelse {
         setError("Invalid or destroyed EVM handle", .{});
         return null;
     };
@@ -253,6 +271,10 @@ fn createBox(comptime tag: EvmConfiguration, info: *const BlockInfoFFI) !*Handle
     const E = EvmOf(tag);
     const chain_id = std.math.cast(ChainId, info.chain_id) orelse return error.ChainIdOutOfRange;
 
+    // The KZG point evaluation precompile (0x0A) needs the trusted setup. Loading it is
+    // idempotent and thread-safe.
+    try evm.kzg_setup.init();
+
     const db = try ffi_allocator.create(Database);
     errdefer ffi_allocator.destroy(db);
     db.* = Database.init(ffi_allocator);
@@ -271,10 +293,37 @@ fn createBox(comptime tag: EvmConfiguration, info: *const BlockInfoFFI) !*Handle
     // `Evm.init` returns by value, so the arena's tracer pointer still refers to init's
     // stack frame. Point it at the heap copy before the arena can call back into it.
     instance.call_arena.tracer = @ptrCast(&instance.tracer);
+    // Also set at run time, for builds whose root file is not this one (tests).
+    instance.tracer.embedded = true;
 
     const box = try ffi_allocator.create(HandleBox);
     box.* = @unionInit(HandleBox, @tagName(tag), instance);
     return box;
+}
+
+/// Native stack for building an EVM. `Evm.init` returns the EVM by value, and loading
+/// the KZG trusted setup is deep, so creation needs far more stack than a host thread
+/// may have (a 512 KiB pthread overflows in Debug builds).
+const create_stack_size = 16 * 1024 * 1024;
+
+/// Run `createBox` on a thread with `create_stack_size` of stack and wait for it, so
+/// handle creation works from any caller stack. The EVM is built directly in heap
+/// memory by that thread; only a pointer comes back.
+fn createBoxOnLargeStack(comptime tag: EvmConfiguration, info: *const BlockInfoFFI) !*HandleBox {
+    // A target without threads has no other stack to move to.
+    if (comptime builtin.single_threaded or builtin.target.cpu.arch.isWasm()) return createBox(tag, info);
+
+    const Job = struct {
+        info: *const BlockInfoFFI,
+        result: anyerror!*HandleBox = error.CreateDidNotRun,
+        fn run(job: *@This()) void {
+            job.result = createBox(tag, job.info);
+        }
+    };
+    var job = Job{ .info = info };
+    const thread = try std.Thread.spawn(.{ .stack_size = create_stack_size }, Job.run, .{&job});
+    thread.join();
+    return job.result;
 }
 
 fn destroyBox(box: *HandleBox) void {
@@ -296,7 +345,7 @@ fn createHandle(block_info: ?*const BlockInfoFFI, config: EvmConfiguration) ?*Ev
         return null;
     };
     const box = switch (config) {
-        inline else => |tag| createBox(tag, info),
+        inline else => |tag| createBoxOnLargeStack(tag, info),
     } catch |err| {
         switch (err) {
             error.ChainIdOutOfRange => setError("chain_id {d} exceeds the supported maximum {d}", .{ info.chain_id, std.math.maxInt(ChainId) }),
@@ -312,13 +361,19 @@ fn createHandle(block_info: ?*const BlockInfoFFI, config: EvmConfiguration) ?*Ev
         setError("FFI not initialized. Call guillotine_init() first", .{});
         return null;
     }
-    const handle: *EvmHandle = @ptrCast(box);
-    live_handles.put(ffi_allocator, handle, box) catch |err| {
+    const id = next_handle_id;
+    if (id == std.math.maxInt(usize)) {
+        destroyBox(box);
+        setError("EVM handle tokens are exhausted", .{});
+        return null;
+    }
+    handle_registry.put(ffi_allocator, id, box) catch |err| {
         destroyBox(box);
         setError("Failed to register handle: {s}", .{@errorName(err)});
         return null;
     };
-    return handle;
+    next_handle_id = id + 1;
+    return @ptrFromInt(id);
 }
 
 // ============================================================================
@@ -337,10 +392,10 @@ export fn guillotine_init() void {
 export fn guillotine_cleanup() void {
     lockRegistry();
     defer unlockRegistry();
-    var it = live_handles.valueIterator();
+    var it = handle_registry.valueIterator();
     while (it.next()) |box| destroyBox(box.*);
-    live_handles.deinit(ffi_allocator);
-    live_handles = .empty;
+    handle_registry.deinit(ffi_allocator);
+    handle_registry = .empty;
     initialized = false;
 }
 
@@ -376,7 +431,7 @@ export fn guillotine_evm_destroy(handle: ?*EvmHandle) void {
     const box = blk: {
         lockRegistry();
         defer unlockRegistry();
-        const entry = live_handles.fetchRemove(h) orelse {
+        const entry = handle_registry.fetchRemove(@intFromPtr(h)) orelse {
             setError("guillotine_evm_destroy: invalid or already destroyed handle", .{});
             return;
         };
@@ -476,7 +531,17 @@ export fn guillotine_get_balance(handle: ?*EvmHandle, address: ?*const [20]u8, b
     return true;
 }
 
-/// Copy an account's code. Free a non-empty result with `guillotine_free_code`.
+/// Code stored under `address` itself: for an EIP-7702 delegated account that is the
+/// 23-byte delegation designator, not the delegate's code. Accounts that do not exist
+/// or have no code have empty code.
+fn storedCode(instance: anytype, address: [20]u8) Database.Error![]const u8 {
+    const account = try instance.database.get_account(address) orelse return &.{};
+    if (!Account.is_code_hash_present(account.code_hash)) return &.{};
+    return instance.database.get_code(account.code_hash);
+}
+
+/// Copy the code stored under an account (what EXTCODECOPY reads; see `storedCode`).
+/// Free a non-empty result with `guillotine_free_code`.
 export fn guillotine_get_code(handle: ?*EvmHandle, address: ?*const [20]u8, code_out: ?*[*]u8, len_out: ?*usize) bool {
     const box = resolve(handle) orelse return false;
     const addr = address orelse {
@@ -492,14 +557,10 @@ export fn guillotine_get_code(handle: ?*EvmHandle, address: ?*const [20]u8, code
         return false;
     };
     const code: []const u8 = switch (box.*) {
-        inline else => |instance| instance.database.get_code_by_address(addr.*),
-    } catch |err| switch (err) {
-        // Missing accounts and accounts without code have empty code.
-        Database.Error.AccountNotFound, Database.Error.CodeNotFound => &.{},
-        else => {
-            setError("Failed to get code: {s}", .{@errorName(err)});
-            return false;
-        },
+        inline else => |instance| storedCode(instance, addr.*),
+    } catch |err| {
+        setError("Failed to get code: {s}", .{@errorName(err)});
+        return false;
     };
     if (code.len == 0) {
         out.* = &empty_code;
@@ -587,6 +648,20 @@ const ExecMode = enum { call, simulate };
 fn execute(instance: anytype, p: *const CallParams, input: []const u8, mode: ExecMode, include_trace: bool) ?*EvmResult {
     const E = @TypeOf(instance.*);
     const call_params = buildCallParams(E, p, input) orelse return null;
+    // `Evm.call` subtracts the intrinsic cost from the gas limit. An EVM built with gas
+    // checks disabled (test mode) skips the comparison that makes the subtraction safe,
+    // so a limit below the intrinsic cost is rejected here, with the result every other
+    // configuration returns for it: failure with no gas left.
+    const is_create = call_params.isCreate();
+    const eips = evm.Eips{ .hardfork = instance.get_hardfork() };
+    const initial_gas = eips.intrinsic_gas_cost(is_create) + eips.calldata_gas_cost(eips.tokens_in_calldata(input), is_create, input.len);
+    if (p.gas < initial_gas) {
+        var rejected = E.CallResult.failed(0);
+        return convertCallResult(&rejected, false) catch |err| {
+            setError("Failed to copy call result: {s}", .{@errorName(err)});
+            return null;
+        };
+    }
     // The caller is the transaction origin for top-level calls and simulations alike
     // (ORIGIN opcode, nonce increment, fee accounting).
     instance.origin = Address{ .bytes = p.caller };

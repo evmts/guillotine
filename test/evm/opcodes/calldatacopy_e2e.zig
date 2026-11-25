@@ -168,3 +168,68 @@ test "CALL: value-free call to a nonexistent account succeeds" {
     try std.testing.expect(result.success);
     try std.testing.expectEqual(gas_limit - 21_000, result.gas_left);
 }
+
+// ---- Bulk copy semantics: CALLDATACOPY, CODECOPY and EXTCODECOPY copy the bytes the
+// source has and zero-fill the rest of the range, without touching bytes around it.
+
+const ff32 = @as([32]u8, @splat(0xff));
+// PUSH32 ff..ff PUSH0 MSTORE: memory[0..32] = 0xff, so a missing zero-fill is visible.
+const dirty = [_]u8{0x7f} ++ ff32 ++ [_]u8{ 0x5f, 0x52 };
+
+/// Deploy `code` at `outer` (and `echo` at `inner`), call it with `input`, and expect
+/// success with `expected` as output.
+fn expectOutput(code: []const u8, input: []const u8, expected: []const u8) !void {
+    const allocator = std.testing.allocator;
+    var db = evm.Database.init(allocator);
+    defer db.deinit();
+    try deploy(&db, inner, &echo);
+    try deploy(&db, outer, code);
+    var vm = try PragueEvm.init(allocator, &db, block_info, context, 0, caller);
+    defer vm.deinit();
+    var result = vm.call(.{ .call = .{ .caller = caller, .to = outer, .value = 0, .input = input, .gas = gas_limit } });
+    defer result.deinit(allocator);
+    try std.testing.expect(result.success);
+    try std.testing.expectEqualSlices(u8, expected, result.output);
+}
+
+test "CALLDATACOPY partial tail zero-fills over dirty memory" {
+    const code = dirty ++ [_]u8{ 0x60, 0x08, 0x60, 0x02, 0x60, 0x01, 0x37, 0x60, 0x0a, 0x5f, 0xf3 };
+    try expectOutput(&code, &[_]u8{ 1, 2, 3, 4 }, &[_]u8{ 0xff, 3, 4, 0, 0, 0, 0, 0, 0, 0xff });
+}
+
+test "CALLDATACOPY multi-word partial copy" {
+    const code = dirty ++ [_]u8{0x7f} ++ ff32 ++ [_]u8{ 0x60, 0x60, 0x52, 0x60, 100, 0x5f, 0x5f, 0x37, 0x60, 0x80, 0x5f, 0xf3 };
+    var input: [64]u8 = undefined;
+    for (&input, 0..) |*b, i| b.* = @intCast(i + 1);
+    try expectOutput(&code, &input, &(input ++ @as([36]u8, @splat(0)) ++ @as([28]u8, @splat(0xff))));
+}
+
+test "CODECOPY full copy" {
+    const code = [_]u8{ 0x38, 0x5f, 0x5f, 0x39, 0x38, 0x5f, 0xf3 };
+    try expectOutput(&code, &.{}, &code);
+}
+
+test "CODECOPY partial tail zero-fills over dirty memory" {
+    const code = dirty ++ [_]u8{ 0x60, 0x08, 0x60, 0x02, 0x38, 0x03, 0x60, 0x01, 0x39, 0x60, 0x0a, 0x5f, 0xf3 };
+    try expectOutput(&code, &.{}, &[_]u8{ 0xff, 0x5f, 0xf3, 0, 0, 0, 0, 0, 0, 0xff });
+}
+
+test "CODECOPY offset beyond usize copies zeros over dirty memory" {
+    const code = dirty ++ [_]u8{ 0x60, 0x04, 0x7f } ++ ff32 ++ [_]u8{ 0x60, 0x01, 0x39, 0x60, 0x06, 0x5f, 0xf3 };
+    try expectOutput(&code, &.{}, &[_]u8{ 0xff, 0, 0, 0, 0, 0xff });
+}
+
+test "EXTCODECOPY partial tail zero-fills over dirty memory" {
+    const code = dirty ++ [_]u8{ 0x60, 0x08, 0x60, 0x05, 0x60, 0x01, 0x73 } ++ inner.bytes ++ [_]u8{ 0x3c, 0x60, 0x0a, 0x5f, 0xf3 };
+    try expectOutput(&code, &.{}, &[_]u8{ 0xff, 0x5f, 0xf3, 0, 0, 0, 0, 0, 0, 0xff });
+}
+
+test "EXTCODECOPY offset beyond usize copies zeros over dirty memory" {
+    const code = dirty ++ [_]u8{ 0x60, 0x04, 0x7f } ++ ff32 ++ [_]u8{ 0x60, 0x01, 0x73 } ++ inner.bytes ++ [_]u8{ 0x3c, 0x60, 0x06, 0x5f, 0xf3 };
+    try expectOutput(&code, &.{}, &[_]u8{ 0xff, 0, 0, 0, 0, 0xff });
+}
+
+test "EXTCODECOPY zero length with huge offsets leaves memory empty" {
+    const code = [_]u8{ 0x5f, 0x7f } ++ ff32 ++ [_]u8{0x7f} ++ ff32 ++ [_]u8{0x73} ++ inner.bytes ++ [_]u8{ 0x3c, 0x59, 0x5f, 0x52, 0x60, 0x20, 0x5f, 0xf3 };
+    try expectOutput(&code, &.{}, &@as([32]u8, @splat(0)));
+}

@@ -1,6 +1,8 @@
 # Invoke from the repository root: make -f sdks/c/Makefile test
 CC = cc
 CFLAGS ?= -Wall -Wextra -std=c99
+# safety_test.c runs the library on small pthread stacks.
+CFLAGS += -pthread
 CPPFLAGS += -Isdks/c/include
 LDFLAGS += -Lzig-out/lib -Wl,-rpath,$(abspath zig-out/lib)
 LDLIBS += -lguillotine_ffi
