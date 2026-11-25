@@ -205,10 +205,7 @@ pub const CFusionInfo = extern struct {
 /// Fusion type enum for C
 pub const CFusionType = enum(u8) {
     constant_fold = 0,
-    multi_push = 1,
-    multi_pop = 2,
     iszero_jumpi = 3,
-    dup2_mstore_push = 4,
 };
 
 /// C structure for jump fusion entry
@@ -262,7 +259,7 @@ pub fn evm_bytecode_analyze_with_allocator(alloc: std.mem.Allocator, handle: ?*c
         end: BytecodeType.PcType,
     };
     const FusionInfo = struct {
-        fusion_type: enum { constant_fold, multi_push, multi_pop, iszero_jumpi, dup2_mstore_push },
+        fusion_type: enum { constant_fold, iszero_jumpi },
         original_length: BytecodeType.PcType,
         folded_value: u256 = 0,
         count: u8 = 0,
@@ -351,10 +348,7 @@ pub fn evm_bytecode_analyze_with_allocator(alloc: std.mem.Allocator, handle: ?*c
                 .info = .{
                     .fusion_type = switch (fusion.fusion_type) {
                         .constant_fold => CFusionType.constant_fold,
-                        .multi_push => CFusionType.multi_push,
-                        .multi_pop => CFusionType.multi_pop,
                         .iszero_jumpi => CFusionType.iszero_jumpi,
-                        .dup2_mstore_push => CFusionType.dup2_mstore_push,
                     },
                     .original_length = @intCast(fusion.original_length),
                     .folded_value_low = @truncate(fusion.folded_value),

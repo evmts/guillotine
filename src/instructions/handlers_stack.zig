@@ -38,15 +38,15 @@ pub fn Handlers(FrameType: type) type {
                 pub fn pushHandler(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
                     N.before(self, opcode, cursor, sp, gas);
                     var s = N.StackView{ .sp = sp };
-                    const dispatch = Dispatch{ .cursor = cursor };
-                    // PUSH1-PUSH8 carry push_inline metadata with a u64 value.
-                    // PUSH9-PUSH32 carry push_pointer metadata with a *u256 value.
-                    const op_data = dispatch.getOpData(opcode);
-                    if (comptime push_n <= 8) {
-                        s.push_unsafe(op_data.metadata.value);
-                    } else {
-                        s.push_unsafe(op_data.metadata.value_ptr.*);
+                    // PUSH1-PUSH8 carry one inline 64-bit limb. PUSH9-PUSH32 carry two,
+                    // three or four, least significant first, so the value is read from
+                    // the schedule itself and never through a pointer.
+                    const limbs = comptime Dispatch.pushLimbCount(push_n);
+                    var value: u256 = cursor[1].push_inline.value;
+                    inline for (1..@as(usize, limbs)) |limb| {
+                        value |= @as(u256, cursor[1 + limb].push_inline.value) << (64 * limb);
                     }
+                    s.push_unsafe(@as(WordType, @truncate(value)));
                     return N.next(self, opcode, cursor, s.sp, gas);
                 }
             }.pushHandler;

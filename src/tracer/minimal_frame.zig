@@ -43,6 +43,10 @@ pub const MinimalFrame = struct {
     stopped: bool,
     reverted: bool,
 
+    /// True when the frame runs in a static context (EIP-214): it was entered by
+    /// STATICCALL, or by a call from a frame that was. State changes are forbidden.
+    is_static: bool,
+
     // Reference to MinimalEvm (like Frame has evm_ptr)
     evm_ptr: *anyopaque,
 
@@ -116,6 +120,7 @@ pub const MinimalFrame = struct {
             .return_data = &[_]u8{},
             .stopped = false,
             .reverted = false,
+            .is_static = false,
             .evm_ptr = evm_ptr,
             .allocator = allocator,
             .call_depth = 0,
@@ -1732,7 +1737,7 @@ pub const MinimalFrame = struct {
                 const available_gas = @min(gas_limit, max_gas);
 
                 // Perform the inner call
-                const result = try evm.inner_call(call_address, 0, input_data, available_gas);
+                const result = try evm.inner_static_call(call_address, input_data, available_gas);
 
                 // Write output to memory (memory expansion already charged above)
                 if (out_length > 0 and result.output.len > 0) {
@@ -1946,26 +1951,45 @@ pub const MinimalFrame = struct {
                     gas_cost += fork_gas.cold_account_access_cost;
                 }
                 if (self.hardfork.isAtLeast(.TANGERINE_WHISTLE)) {
-                    const dead = evm.get_balance(beneficiary) == 0 and evm.get_code(beneficiary).len == 0;
+                    // Dead in the EIP-161 sense: no nonce, no balance, no code.
+                    const dead = evm.get_nonce(beneficiary) == 0 and
+                        evm.get_balance(beneficiary) == 0 and
+                        evm.get_code(beneficiary).len == 0;
                     if (dead and (contract_balance > 0 or !fork_gas.newAccountNeedsValue(self.hardfork))) {
                         gas_cost += fork_gas.new_account_gas;
                     }
                 }
                 try self.consumeGas(gas_cost);
 
-                // Transfer contract balance to beneficiary (evm from outer scope)
-                if (contract_balance > 0) {
-                    const beneficiary_balance = evm.get_balance(beneficiary);
-                    // Set contract balance to 0
-                    evm.setBalance(self.address, 0) catch return error.StorageError;
-                    // Add to beneficiary balance (wrapping add for overflow safety)
-                    const new_balance = beneficiary_balance +% contract_balance;
-                    evm.setBalance(beneficiary, new_balance) catch return error.StorageError;
-                }
+                // EIP-214: SELFDESTRUCT changes state, so it fails in a static context.
+                // The gas is charged first, as in execution-specs.
+                if (self.is_static) return error.WriteProtection;
 
-                // Apply refund to EVM's gas_refund counter
+                // EIP-6780 (Cancun): the account is deleted only when it was created in
+                // this transaction. Before Cancun it is always deleted.
+                const deletes_account = self.hardfork.isBefore(.CANCUN) or evm.wasCreatedInTransaction(self.address);
+
+                if (!beneficiary.equals(self.address)) {
+                    // Move the whole balance to the beneficiary.
+                    if (contract_balance > 0) {
+                        const beneficiary_balance = evm.get_balance(beneficiary);
+                        evm.setBalance(self.address, 0) catch return error.StorageError;
+                        // Wrapping add for overflow safety
+                        evm.setBalance(beneficiary, beneficiary_balance +% contract_balance) catch return error.StorageError;
+                    }
+                } else if (deletes_account) {
+                    // The beneficiary is the contract itself and the contract is
+                    // deleted: its balance is burned.
+                    evm.setBalance(self.address, 0) catch return error.StorageError;
+                }
+                // Otherwise the beneficiary is the contract itself and it survives
+                // (EIP-6780): the balance stays where it is.
+
+                // The refund (removed by EIP-3529 in London) is granted once per
+                // contract per transaction, however often it self-destructs.
+                const first_destruction = evm.markSelfdestructed(self.address) catch return error.StorageError;
                 const refund = self.selfdestructRefund();
-                if (refund > 0) {
+                if (refund > 0 and first_destruction) {
                     evm.gas_refund += refund;
                 }
 
@@ -2485,5 +2509,123 @@ test "MinimalFrame SSTORE applies the EIP-2200 sentry and fork refunds" {
         defer frame.deinit();
         try frame.execute();
         try testing.expectEqual(case.refund, evm.gas_refund);
+    }
+}
+
+test "MinimalFrame SELFDESTRUCT: self beneficiary, deadness, static context, EIP-6780, single refund" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    const contract = Address{ .bytes = @as([20]u8, @splat(0xAA)) };
+    const other = Address{ .bytes = @as([20]u8, @splat(0xBB)) };
+    const caller = Address{ .bytes = @as([20]u8, @splat(0x01)) };
+
+    // ADDRESS, SELFDESTRUCT: the contract names itself as beneficiary.
+    const destroy_to_self = [_]u8{ 0x30, 0xff };
+    // PUSH20 other, SELFDESTRUCT
+    const destroy_to_other = [_]u8{0x73} ++ @as([20]u8, @splat(0xBB)) ++ [_]u8{0xff};
+
+    // Cancun, not created in this transaction: the contract survives and a
+    // self-beneficiary leaves its balance untouched (it is neither doubled nor burned).
+    {
+        const evm = try MinimalEvm.initPtr(allocator);
+        defer evm.deinitPtr(allocator);
+        evm.setHardfork(.CANCUN);
+        try evm.setBalance(contract, 1000);
+        var frame = try MinimalFrame.init(allocator, &destroy_to_self, 100_000, caller, contract, 0, &.{}, evm, .CANCUN);
+        defer frame.deinit();
+        try frame.execute();
+        try testing.expect(frame.stopped);
+        try testing.expectEqual(@as(u256, 1000), evm.get_balance(contract));
+    }
+
+    // Cancun, created in this transaction: the contract is deleted and a
+    // self-beneficiary burns the balance.
+    {
+        const evm = try MinimalEvm.initPtr(allocator);
+        defer evm.deinitPtr(allocator);
+        evm.setHardfork(.CANCUN);
+        try evm.setBalance(contract, 1000);
+        try evm.markCreated(contract);
+        var frame = try MinimalFrame.init(allocator, &destroy_to_self, 100_000, caller, contract, 0, &.{}, evm, .CANCUN);
+        defer frame.deinit();
+        try frame.execute();
+        try testing.expectEqual(@as(u256, 0), evm.get_balance(contract));
+    }
+
+    // Before Cancun the contract is always deleted: a self-beneficiary burns the balance.
+    {
+        const evm = try MinimalEvm.initPtr(allocator);
+        defer evm.deinitPtr(allocator);
+        evm.setHardfork(.SHANGHAI);
+        try evm.setBalance(contract, 1000);
+        var frame = try MinimalFrame.init(allocator, &destroy_to_self, 100_000, caller, contract, 0, &.{}, evm, .SHANGHAI);
+        defer frame.deinit();
+        try frame.execute();
+        try testing.expectEqual(@as(u256, 0), evm.get_balance(contract));
+    }
+
+    // A different beneficiary receives the whole balance.
+    {
+        const evm = try MinimalEvm.initPtr(allocator);
+        defer evm.deinitPtr(allocator);
+        evm.setHardfork(.CANCUN);
+        try evm.setBalance(contract, 1000);
+        try evm.setBalance(other, 5);
+        var frame = try MinimalFrame.init(allocator, &destroy_to_other, 100_000, caller, contract, 0, &.{}, evm, .CANCUN);
+        defer frame.deinit();
+        try frame.execute();
+        try testing.expectEqual(@as(u256, 0), evm.get_balance(contract));
+        try testing.expectEqual(@as(u256, 1005), evm.get_balance(other));
+    }
+
+    // Deadness includes the nonce. A beneficiary with a nonce but no balance and no code
+    // is not dead, so no new-account gas is charged: PUSH20 (3) + SELFDESTRUCT (5000)
+    // + cold access (2600). The same beneficiary without a nonce costs 25000 more.
+    {
+        const Case = struct { nonce: u64, gas: i64 };
+        const cases = [_]Case{
+            .{ .nonce = 1, .gas = 3 + 5000 + 2600 },
+            .{ .nonce = 0, .gas = 3 + 5000 + 2600 + 25000 },
+        };
+        for (cases) |case| {
+            const evm = try MinimalEvm.initPtr(allocator);
+            defer evm.deinitPtr(allocator);
+            evm.setHardfork(.CANCUN);
+            try evm.setBalance(contract, 1000);
+            try evm.setNonce(other, case.nonce);
+            var frame = try MinimalFrame.init(allocator, &destroy_to_other, 100_000, caller, contract, 0, &.{}, evm, .CANCUN);
+            defer frame.deinit();
+            try frame.execute();
+            try testing.expectEqual(@as(i64, 100_000) - case.gas, frame.gas_remaining);
+        }
+    }
+
+    // A static context forbids SELFDESTRUCT and moves no balance.
+    {
+        const evm = try MinimalEvm.initPtr(allocator);
+        defer evm.deinitPtr(allocator);
+        evm.setHardfork(.CANCUN);
+        try evm.setBalance(contract, 1000);
+        try evm.setBalance(other, 5);
+        var frame = try MinimalFrame.init(allocator, &destroy_to_other, 100_000, caller, contract, 0, &.{}, evm, .CANCUN);
+        defer frame.deinit();
+        frame.is_static = true;
+        try testing.expectError(error.WriteProtection, frame.execute());
+        try testing.expectEqual(@as(u256, 1000), evm.get_balance(contract));
+        try testing.expectEqual(@as(u256, 5), evm.get_balance(other));
+    }
+
+    // Before London the 24000 refund is granted once per contract per transaction.
+    {
+        const evm = try MinimalEvm.initPtr(allocator);
+        defer evm.deinitPtr(allocator);
+        evm.setHardfork(.BERLIN);
+        for (0..2) |_| {
+            var frame = try MinimalFrame.init(allocator, &destroy_to_other, 100_000, caller, contract, 0, &.{}, evm, .BERLIN);
+            defer frame.deinit();
+            try frame.execute();
+        }
+        try testing.expectEqual(@as(u64, 24000), evm.gas_refund);
     }
 }

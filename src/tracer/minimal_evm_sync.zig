@@ -31,20 +31,8 @@ const SyntheticOpcodeSteps = struct {
     const PUSH_MLOAD_POINTER = 2;
     const JUMP_TO_STATIC_LOCATION = 2;
     const JUMPI_TO_STATIC_LOCATION = 2;
-    const FUNCTION_DISPATCH = 4;
-    const MULTI_PUSH_2 = 2;
-    const MULTI_PUSH_3 = 3;
-    const MULTI_POP_2 = 2;
-    const MULTI_POP_3 = 3;
     const ISZERO_JUMPI = 3; // ISZERO + PUSH + JUMPI = 3 steps
-    const DUP2_MSTORE_PUSH = 3;
-    const DUP3_ADD_MSTORE = 3;
-    const SWAP1_DUP2_ADD = 3;
-    const PUSH_DUP3_ADD = 3;
     const PUSH_ADD_DUP1 = 3;
-    const CALLVALUE_CHECK = 2;
-    const MLOAD_SWAP1_DUP2 = 3;
-    const PUSH0_REVERT = 2;
     const DEFAULT_MAX = 10;
 };
 
@@ -73,20 +61,8 @@ fn getMaxStepsForOpcode(opcode: UnifiedOpcode) u32 {
         .PUSH_MLOAD_POINTER => SyntheticOpcodeSteps.PUSH_MLOAD_POINTER,
         .JUMP_TO_STATIC_LOCATION => SyntheticOpcodeSteps.JUMP_TO_STATIC_LOCATION,
         .JUMPI_TO_STATIC_LOCATION => SyntheticOpcodeSteps.JUMPI_TO_STATIC_LOCATION,
-        .FUNCTION_DISPATCH => SyntheticOpcodeSteps.FUNCTION_DISPATCH,
-        .MULTI_PUSH_2 => SyntheticOpcodeSteps.MULTI_PUSH_2,
-        .MULTI_PUSH_3 => SyntheticOpcodeSteps.MULTI_PUSH_3,
-        .MULTI_POP_2 => SyntheticOpcodeSteps.MULTI_POP_2,
-        .MULTI_POP_3 => SyntheticOpcodeSteps.MULTI_POP_3,
         .ISZERO_JUMPI => SyntheticOpcodeSteps.ISZERO_JUMPI,
-        .DUP2_MSTORE_PUSH => SyntheticOpcodeSteps.DUP2_MSTORE_PUSH,
-        .DUP3_ADD_MSTORE => SyntheticOpcodeSteps.DUP3_ADD_MSTORE,
-        .SWAP1_DUP2_ADD => SyntheticOpcodeSteps.SWAP1_DUP2_ADD,
-        .PUSH_DUP3_ADD => SyntheticOpcodeSteps.PUSH_DUP3_ADD,
-        .PUSH_ADD_DUP1 => SyntheticOpcodeSteps.PUSH_ADD_DUP1,
-        .CALLVALUE_CHECK => SyntheticOpcodeSteps.CALLVALUE_CHECK,
-        .MLOAD_SWAP1_DUP2 => SyntheticOpcodeSteps.MLOAD_SWAP1_DUP2,
-        .PUSH0_REVERT => SyntheticOpcodeSteps.PUSH0_REVERT,
+        .PUSH_ADD_DUP1_INLINE, .PUSH_ADD_DUP1_POINTER => SyntheticOpcodeSteps.PUSH_ADD_DUP1,
         else => 1, // Regular opcodes execute once
     };
 }
@@ -253,5 +229,3 @@ pub fn executeMinimalEvmForOpcode(
     }
 }
 
-// Delete old switch statement implementation
-const _deleted_old_implementation = 0;

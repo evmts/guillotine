@@ -88,8 +88,13 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
         };
         /// The type used to measure gas. Unsigned integer for perf reasons
         pub const GasType = config.GasType();
-        /// The type used to index into bytecode or instructions. Determined by config.max_bytecode_size
-        pub const PcType = config.PcType();
+        /// The type used to index into bytecode or instructions. It is the bytecode
+        /// analyzer's program counter type, sized for the larger of max_bytecode_size and
+        /// max_initcode_size, so frame and analyzer always agree and initcode PCs never truncate.
+        pub const PcType = (BytecodeConfig{
+            .max_bytecode_size = config.max_bytecode_size,
+            .max_initcode_size = config.max_initcode_size,
+        }).PcType();
 
         // Compile-time check: PcType must be at least u8 for dispatch cache optimization
         comptime {
@@ -275,23 +280,25 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
             const schedule = dispatch_schedule.items;
 
             var start_index: usize = 0;
-            var first_block_gas_amount: u32 = 0;
 
-            (&self.getEvm().tracer).assert(schedule.len > 0, "Fatal unexpected error: the opcode execution schedule is length 0 which should be impossible");
-            const stop_handler = Self.opcode_handlers[@intFromEnum(Opcode.STOP)];
-            (&self.getEvm().tracer).assert(schedule.len >= 2 or schedule[schedule.len - 1].opcode_handler != stop_handler or schedule[schedule.len - 2].opcode_handler != stop_handler, "Frame.interpret: Bytecode stream does not end with 2 stop handlers");
+            // Every schedule ends with two STOP handlers, so running off the end of
+            // the code stops the frame. The check is constant time.
+            (&self.getEvm().tracer).assert(dispatch_schedule.endsWithStops(), "Frame.interpret: Bytecode stream does not end with 2 stop handlers");
 
-            // Validate the schedule structure (for better error reporting)
-            (&self.getEvm().tracer).assert(dispatch_schedule.validate(), "Frame.interpret: Invalid dispatch schedule structure");
+            // The full structural walk is O(schedule length) and reads item tags, so it
+            // runs only in Debug and ReleaseSafe builds, never per frame in ReleaseFast.
+            if (comptime (builtin.mode == .debug or builtin.mode == .safe)) {
+                (&self.getEvm().tracer).assert(dispatch_schedule.validate(), "Frame.interpret: Invalid dispatch schedule structure");
+            }
 
-            // Check if schedule starts with first_block_gas (it may not if gas is 0)
-            if (schedule.len > 0 and schedule[0] == .first_block_gas) {
+            // The schedule starts with first-block metadata unless the first block
+            // charges no gas and has no stack requirements.
+            if (dispatch_schedule.has_first_block) {
                 const meta = schedule[0].first_block_gas;
                 if (meta.gas > 0) {
-                    first_block_gas_amount = meta.gas;
                     try self.consumeGasChecked(@intCast(meta.gas));
                 }
-                
+
                 // Validate stack requirements for the first block using verified single-compare guard
                 const verified_ops = @import("../core/verified_ops.zig");
                 const current_stack_size: u32 = @intCast(self.stack.size());

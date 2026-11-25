@@ -89,12 +89,8 @@ fn executeMinimalEvmForOpcode(self: *Tracer, opcode: UnifiedOpcode) void {
         .PUSH_MLOAD_INLINE, .PUSH_MLOAD_POINTER => 2,
 
         // 3-operation fusions
-        .MULTI_PUSH_3, .MULTI_POP_3,
-        .DUP3_ADD_MSTORE, .SWAP1_DUP2_ADD,
-        .ISZERO_JUMPI => 3,
-
-        // 4-operation fusions
-        .FUNCTION_DISPATCH => 4,  // PUSH4 + EQ + PUSH + JUMPI
+        .ISZERO_JUMPI,
+        .PUSH_ADD_DUP1_INLINE, .PUSH_ADD_DUP1_POINTER => 3,
 
         // Regular opcodes
         else => 1,

@@ -57,8 +57,18 @@ pub fn Handlers(FrameType: type) type {
             return @call(handler_abi.tail_mod, mstore8_general_handler, .{ self, cursor, sp, gas });
         }
 
-        /// Maximum memory size (24-bit limit)
-        const MEMORY_LIMIT: usize = 0xFFFFFF;
+        /// Memory never grows past this many bytes: the frame's configured memory limit,
+        /// capped at what the 32-bit offsets of the memory API can address.
+        const MEMORY_LIMIT: u64 = @min(FrameType.Memory.MEMORY_LIMIT, std.math.maxInt(u32));
+
+        /// Charge `cost` of dynamic gas. Returns false, and charges nothing, when the
+        /// frame cannot pay. The comparison is made in u64 before the subtraction, so a
+        /// cost wider than GasType can neither wrap nor trap.
+        inline fn chargeGas(self: *FrameType, cost: u64) bool {
+            if (self.gas_remaining < 0 or cost > @as(u64, @intCast(self.gas_remaining))) return false;
+            self.gas_remaining -= @intCast(cost);
+            return true;
+        }
 
         /// Check if an offset plus size would exceed memory limit
         inline fn checkMemoryBounds(offset: usize, size: usize) bool {
@@ -98,9 +108,7 @@ pub fn Handlers(FrameType: type) type {
             const end_offset = offset_usize + 32;
             const memory_expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(end_offset)));
             // Only check and consume dynamic gas (memory expansion), static gas is handled by JUMPDEST
-            // Use negative gas pattern for single-branch out-of-gas detection
-            self.gas_remaining -= @intCast(memory_expansion_cost);
-            if (self.gas_remaining < 0) {
+            if (!chargeGas(self, memory_expansion_cost)) {
                 @branchHint(.unlikely);
                 self.afterComplete(.MLOAD);
                 return Error.OutOfGas;
@@ -154,9 +162,7 @@ pub fn Handlers(FrameType: type) type {
             const end_offset = offset_usize + 32;
             const memory_expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(end_offset)));
             // Only check and consume dynamic gas (memory expansion), static gas is handled by JUMPDEST
-            // Use negative gas pattern for single-branch out-of-gas detection
-            self.gas_remaining -= @intCast(memory_expansion_cost);
-            if (self.gas_remaining < 0) {
+            if (!chargeGas(self, memory_expansion_cost)) {
                 @branchHint(.unlikely);
                 self.afterComplete(.MSTORE);
                 return Error.OutOfGas;
@@ -206,9 +212,7 @@ pub fn Handlers(FrameType: type) type {
             const end_offset = offset_usize + 1;
             const memory_expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(end_offset)));
             // Only check and consume dynamic gas (memory expansion), static gas is handled by JUMPDEST
-            // Use negative gas pattern for single-branch out-of-gas detection
-            self.gas_remaining -= @intCast(memory_expansion_cost);
-            if (self.gas_remaining < 0) {
+            if (!chargeGas(self, memory_expansion_cost)) {
                 @branchHint(.unlikely);
                 self.afterComplete(.MSTORE8);
                 return Error.OutOfGas;
@@ -258,69 +262,53 @@ pub fn Handlers(FrameType: type) type {
                 return dispatch_next.nextInstruction(FrameType, self, cursor, .MCOPY);
             }
 
-            // Check if offsets and size fit in u32 (memory limit)
+            // Both ranges must lie inside addressable memory. Bounding each operand
+            // first keeps the sums below from wrapping.
             if (!checkMemoryLimit(dest_offset) or !checkMemoryLimit(src_offset) or !checkMemoryLimit(size)) {
                 self.afterComplete(.MCOPY);
                 return Error.OutOfBounds;
             }
 
-            const dest_u32 = @as(u32, @intCast(dest_offset));
-            const src_u32 = @as(u32, @intCast(src_offset));
-            const size_u24 = @as(u32, @intCast(size));
-
-            // Calculate dynamic gas cost (static gas handled by JUMPDEST)
-            const words = (size_u24 + 31) >> 5;
-            const copy_gas_cost = words * GasConstants.CopyGas; // Only dynamic copy cost
-
-            // Calculate memory expansion cost for both source and destination
-            const src_end = src_u32 + size_u24;
-            const dest_end = dest_u32 + size_u24;
+            const dest: u64 = @intCast(dest_offset);
+            const src: u64 = @intCast(src_offset);
+            const len: u64 = @intCast(size);
+            const src_end = src + len;
+            const dest_end = dest + len;
             if (!checkMemoryLimit(src_end) or !checkMemoryLimit(dest_end)) {
                 self.afterComplete(.MCOPY);
                 return Error.OutOfBounds;
             }
-            const src_expansion_cost = self.memory.get_expansion_cost(src_end);
-            const dest_expansion_cost = self.memory.get_expansion_cost(dest_end);
-            const memory_expansion_cost = @max(src_expansion_cost, dest_expansion_cost);
 
-            const total_gas_cost = copy_gas_cost + memory_expansion_cost;
-            if (self.gas_remaining < total_gas_cost) {
+            // Dynamic gas (static gas is charged at block entry): 3 per word copied,
+            // plus expansion to cover the further of the two ranges.
+            const words = (len + 31) >> 5;
+            const copy_gas_cost = words * GasConstants.CopyGas;
+            const memory_end: u32 = @intCast(@max(src_end, dest_end));
+            const memory_expansion_cost = self.memory.get_expansion_cost(memory_end);
+            if (!chargeGas(self, copy_gas_cost + memory_expansion_cost)) {
                 self.afterComplete(.MCOPY);
                 return Error.OutOfGas;
             }
-            self.gas_remaining -= @intCast(total_gas_cost);
 
             // Memory expands over both ranges before the copy; source bytes beyond the old
             // size read as zero.
-            self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @max(src_end, dest_end)) catch {
+            self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), memory_end) catch {
                 self.afterComplete(.MCOPY);
                 return Error.AllocationError;
             };
 
-            // For overlapping memory regions, we need to copy via a temporary buffer
-            // First, read the source data
-            const src_data = self.memory.get_slice(src_u32, size_u24) catch {
+            // Copy in place. The ranges may overlap, which @memmove handles; no
+            // temporary buffer is needed.
+            const base: usize = self.memory.checkpoint;
+            const bytes = self.memory.get_buffer_ref().items;
+            const src_start = base + @as(usize, @intCast(src));
+            const dest_start = base + @as(usize, @intCast(dest));
+            const count: usize = @intCast(len);
+            if (src_start + count > bytes.len or dest_start + count > bytes.len) {
                 self.afterComplete(.MCOPY);
                 return Error.OutOfBounds;
-            };
-
-            // Create a temporary buffer to handle overlapping regions correctly
-            const temp_buffer = self.getEvm().getCallArenaAllocator().alloc(u8, size_u24) catch {
-                self.afterComplete(.MCOPY);
-                return Error.AllocationError;
-            };
-
-            @memcpy(temp_buffer, src_data);
-
-            // Write to destination
-            self.memory.set_data_evm(self.getEvm().getCallArenaAllocator(), dest_u32, temp_buffer) catch {
-                self.getEvm().getCallArenaAllocator().free(temp_buffer);
-                self.afterComplete(.MCOPY);
-                return Error.AllocationError;
-            };
-
-            // Free the temporary buffer before tail call
-            self.getEvm().getCallArenaAllocator().free(temp_buffer);
+            }
+            @memmove(bytes[dest_start..][0..count], bytes[src_start..][0..count]);
 
             return dispatch_next.nextInstruction(FrameType, self, cursor, .MCOPY);
         }

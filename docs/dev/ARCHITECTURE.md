@@ -463,8 +463,8 @@ pub fn interpret(
 pub const Item = union(enum) {
     opcode_handler: OpcodeHandler,      // Function pointer
     jump_dest: JumpDestMetadata,        // Block gas/stack info
-    push_inline: PushInlineMetadata,    // Small values (≤8 bytes)
-    push_pointer: PushPointerMetadata,  // Large values (>8 bytes)
+    push_inline: PushInlineMetadata,    // One 64-bit limb of a PUSH value (PUSH9-32 use 2-4)
+    push_pointer: PushPointerMetadata,  // Fused PUSH+op operand wider than 64 bits
     pc: PcMetadata,
     jump_static: JumpStaticMetadata,    // Pre-resolved jumps
     first_block_gas: FirstBlockMetadata,
@@ -815,11 +815,10 @@ fn analyzeJumpDests(code: []const u8) JumpDestSet {
 │   │                 │ (next)               │                             │ │
 │   └─────────────────┴──────────────────────┴─────────────────────────────┘ │
 │                                                                             │
-│   Function dispatch pattern (Solidity ABI):                                 │
+│   Conditional branch pattern (require, loops):                              │
 │   ┌─────────────────┬──────────────────────┬─────────────────────────────┐ │
-│   │ PUSH4 selector  │ 8 ops                │ FUNCTION_DISPATCH           │ │
-│   │ EQ              │                      │ { selector, jump_target }   │ │
-│   │ PUSH2 target    │                      │                             │ │
+│   │ ISZERO          │ 4 items              │ ISZERO_JUMPI                │ │
+│   │ PUSH2 target    │                      │ { jump_target }             │ │
 │   │ JUMPI           │                      │                             │ │
 │   └─────────────────┴──────────────────────┴─────────────────────────────┘ │
 │                                                                             │

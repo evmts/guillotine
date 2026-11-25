@@ -70,8 +70,8 @@ pub fn add(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
 pub const Item = union(enum) {
     opcode_handler: OpcodeHandler,          // Function pointer
     jump_dest: JumpDestMetadata,            // Gas cost, stack requirements
-    push_inline: PushInlineMetadata,        // Values ≤8 bytes (embedded)
-    push_pointer: PushPointerMetadata,      // Values >8 bytes (heap pointer)
+    push_inline: PushInlineMetadata,        // One 64-bit limb of a PUSH value (PUSH9-32 use 2-4)
+    push_pointer: PushPointerMetadata,      // Fused PUSH+op operand wider than 64 bits
     pc: PcMetadata,                         // PC opcode metadata
     jump_static: JumpStaticMetadata,        // Pre-resolved jump destination
     first_block_gas: FirstBlockMetadata,    // Basic block gas requirement
@@ -137,9 +137,9 @@ pub const OpcodeSynthetic = enum(u8) {
     PUSH_ADD_INLINE = 0xA5,           // PUSH + ADD
     PUSH_MUL_INLINE = 0xA7,           // PUSH + MUL
     PUSH_MSTORE_INLINE = 0xB3,        // PUSH + MSTORE
-    FUNCTION_DISPATCH = 0xC8,         // PUSH4 + EQ + PUSH + JUMPI
-    CALLVALUE_CHECK = 0xC9,           // CALLVALUE + DUP1 + ISZERO
-    // ... 30+ fusion patterns
+    ISZERO_JUMPI = 0xC3,              // ISZERO + PUSH + JUMPI
+    PUSH_ADD_DUP1_INLINE = 0xCB,      // PUSH + ADD + DUP1
+    // ... every listed fusion is emitted by the schedule builder
 };
 ```
 
@@ -159,11 +159,11 @@ return @call(Self.getTailCallModifier(), next_handler, .{self, cursor});
 Push values embedded directly in schedule:
 
 ```zig
-// Small values (≤8 bytes) inline
+// PUSH values are stored inline as 64-bit limbs: 1 for PUSH1-8, up to 4 for PUSH25-32
 push_inline: PushInlineMetadata { .value: u64 }
 
-// Large values (>8 bytes) heap-allocated
-push_pointer: PushPointerMetadata { .value_ptr: *u256 }
+// Only a fused PUSH+op whose operand is wider than 64 bits points into the arena
+push_pointer: PushPointerMetadata { .value_ptr: *const u256 }
 ```
 
 ### 4. Gas Batching

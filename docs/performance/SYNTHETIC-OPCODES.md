@@ -50,53 +50,68 @@ pub const OpcodeSynthetic = enum(u8) {
     JUMP_TO_STATIC_LOCATION = 0xBD,   // Pre-resolved JUMP
     JUMPI_TO_STATIC_LOCATION = 0xBE,  // Pre-resolved JUMPI
 
-    // Multi-operation fusions
-    MULTI_PUSH_2 = 0xBF,         // Two consecutive PUSHes
-    MULTI_PUSH_3 = 0xC0,         // Three consecutive PUSHes
-    MULTI_POP_2 = 0xC1,          // Two consecutive POPs
-    MULTI_POP_3 = 0xC2,          // Three consecutive POPs
+    // Three-opcode fusions
+    ISZERO_JUMPI = 0xC3,           // ISZERO + PUSH + JUMPI, target resolved at build time
+    PUSH_ADD_DUP1_INLINE = 0xCB,   // PUSH + ADD + DUP1, operand fits 64 bits
+    PUSH_ADD_DUP1_POINTER = 0xCC,  // PUSH + ADD + DUP1, wider operand
 
-    // Pattern fusions (3+ opcodes)
-    ISZERO_JUMPI = 0xC3,         // ISZERO + PUSH + JUMPI
-    DUP2_MSTORE_PUSH = 0xC4,     // DUP2 + MSTORE + PUSH
-    DUP3_ADD_MSTORE = 0xC5,      // DUP3 + ADD + MSTORE
-    SWAP1_DUP2_ADD = 0xC6,       // SWAP1 + DUP2 + ADD
-    PUSH_DUP3_ADD = 0xC7,        // PUSH + DUP3 + ADD
-
-    // High-level pattern fusions
-    FUNCTION_DISPATCH = 0xC8,    // PUSH4 + EQ + PUSH + JUMPI (selector routing)
-    CALLVALUE_CHECK = 0xC9,      // CALLVALUE + DUP1 + ISZERO (payable check)
-    PUSH0_REVERT = 0xCA,         // PUSH0 + PUSH0 + REVERT (error pattern)
-    PUSH_ADD_DUP1 = 0xCB,        // PUSH + ADD + DUP1 (loop pattern)
-    MLOAD_SWAP1_DUP2 = 0xCC,     // MLOAD + SWAP1 + DUP2 (memory pattern)
+    // Schedule-only items (no bytecode instruction)
+    BLOCK_BEGIN = 0xCE,            // Charges a fall-through basic block's gas, checks its stack
+    INVALID_JUMP_TARGET = 0xCF,    // Where a static jump to a non-JUMPDEST lands
 };
 ```
 
+Every opcode in this list is emitted by the schedule builder. A fusion that the
+builder never emits has no handler: an unreachable handler is unverified code.
+
 ## Inline vs Pointer
 
-Synthetic opcodes come in two variants based on push value size:
+A fused `PUSH + op` handler comes in two variants, chosen by the width of the pushed
+value. The handler knows its variant at compile time, so it never checks at run time.
 
-### Inline (≤8 bytes)
-Value embedded directly in metadata - no indirection:
+### Inline (value fits 64 bits)
+Value embedded directly in the schedule:
 
 ```zig
-// For PUSH1-PUSH8 values
 push_inline: PushInlineMetadata { .value: u64 }
 
-// Handler reads value directly
 const value = cursor[1].push_inline.value;
 ```
 
-### Pointer (>8 bytes)
-Value heap-allocated, metadata contains pointer:
+### Pointer (wider value)
+Value stored in the schedule's arena; the metadata item points at it:
 
 ```zig
-// For PUSH9-PUSH32 values
-push_pointer: PushPointerMetadata { .value_ptr: *u256 }
+push_pointer: PushPointerMetadata { .value_ptr: *const u256 }
 
-// Handler dereferences pointer
 const value = cursor[1].push_pointer.value_ptr.*;
 ```
+
+### Plain PUSH9-PUSH32: inline limbs
+
+A PUSH that is not fused never uses a pointer. Its value is stored in the schedule as
+64-bit limbs, least significant first:
+
+| Opcodes | Items after the handler |
+|---------|-------------------------|
+| PUSH1-PUSH8 | 1 limb |
+| PUSH9-PUSH16 | 2 limbs |
+| PUSH17-PUSH24 | 3 limbs |
+| PUSH25-PUSH32 | 4 limbs |
+
+```zig
+// PUSH20: cursor[1..4] hold the value
+var value: u256 = cursor[1].push_inline.value;
+value |= @as(u256, cursor[2].push_inline.value) << 64;
+value |= @as(u256, cursor[3].push_inline.value) << 128;
+```
+
+## Schedule item size
+
+A schedule item is an untagged 8-byte `extern union` in untraced ReleaseFast and
+ReleaseSmall builds. Debug and ReleaseSafe builds, and builds with the tracer enabled,
+use a tagged union instead, so `validateOpcodeHandler`, `DispatchSchedule.validate`
+and the tracer can check each item's kind. `Dispatch.item_tagged` tells which is in use.
 
 ## Handler Implementation
 
@@ -120,60 +135,31 @@ pub fn push_add_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!n
 }
 ```
 
-### Complex Fusion: FUNCTION_DISPATCH
+### Three-opcode fusion: ISZERO_JUMPI
 
 ```zig
-// PUSH4 selector + EQ + PUSH target + JUMPI
-// Common Solidity function dispatch pattern
-pub fn function_dispatch(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-    self.beforeInstruction(.FUNCTION_DISPATCH, cursor);
-
-    // Get metadata
-    const metadata = cursor[1].function_dispatch;
-
-    // Pop calldata selector from stack
-    const calldata_selector = self.stack.pop_unsafe();
-
-    // Compare with expected selector
-    const matches = calldata_selector == metadata.selector;
-
-    if (matches) {
-        // Jump to function body
-        return @call(.always_tail, metadata.target_handler, .{self, metadata.target_cursor});
-    } else {
-        // Continue to next dispatch check
-        return @call(.always_tail, cursor[2].opcode_handler, .{self, cursor + 2});
-    }
+// src/instructions/handlers_advanced_synthetic.zig
+// ISZERO + PUSH target + JUMPI. cursor[1] holds the statically resolved target.
+pub fn iszero_jumpi(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: GasType) callconv(handler_cc) ExitCode {
+    N.before(self, .ISZERO_JUMPI, cursor, sp, gas);
+    var s = N.StackView{ .sp = sp };
+    const value = s.pop_unsafe();
+    if (value != 0) return N.next(self, .ISZERO_JUMPI, cursor, s.sp, gas);
+    const target: [*]const Dispatch.Item = @ptrCast(@alignCast(cursor[1].jump_static.dispatch));
+    return N.jump(self, .ISZERO_JUMPI, target, s.sp, gas);
 }
 ```
 
 ## Pattern Detection
 
-Patterns are detected during bytecode analysis:
+Bytecode analysis (`src/bytecode/bytecode.zig`) marks fusion candidates in its packed
+bitmap: a PUSH followed by ADD, MUL, SUB, DIV, AND, OR, XOR, MLOAD, MSTORE, MSTORE8,
+JUMP or JUMPI, and an ISZERO followed by PUSH and JUMPI. `getFusionData` then picks the
+fusion for a candidate, three-opcode patterns first:
 
-```zig
-// src/bytecode/bytecode_analyze.zig
-fn detectFusionPatterns(bytecode: []const u8, pc: usize) ?FusionPattern {
-    // Check for PUSH + ADD pattern
-    if (isPushOpcode(bytecode[pc]) and
-        pc + pushSize(bytecode[pc]) + 1 < bytecode.len and
-        bytecode[pc + pushSize(bytecode[pc]) + 1] == 0x01) { // ADD
-        return .push_add;
-    }
-
-    // Check for function dispatch pattern
-    if (bytecode[pc] == 0x63 and  // PUSH4
-        pc + 6 < bytecode.len and
-        bytecode[pc + 5] == 0x14 and  // EQ
-        isPushOpcode(bytecode[pc + 6])) {
-        // Verify JUMPI follows
-        // ...
-        return .function_dispatch;
-    }
-
-    return null;
-}
-```
+1. `ISZERO; PUSH; JUMPI` becomes ISZERO_JUMPI.
+2. `PUSH; ADD; DUP1` becomes PUSH_ADD_DUP1.
+3. `PUSH; op` becomes the matching PUSH+op fusion.
 
 ## Gas Accounting
 
@@ -182,7 +168,7 @@ Synthetic opcodes maintain exact gas semantics:
 ```zig
 // Gas cost = sum of fused operations
 // PUSH_ADD_INLINE: 3 (PUSH) + 3 (ADD) = 6 gas
-// FUNCTION_DISPATCH: 3 (PUSH4) + 3 (EQ) + 3 (PUSH) + 10 (JUMPI) = 19 gas
+// ISZERO_JUMPI: 3 (ISZERO) + 3 (PUSH) + 10 (JUMPI) = 16 gas
 ```
 
 ## Tracer Synchronization
@@ -195,8 +181,8 @@ fn executeMinimalEvmForOpcode(opcode: UnifiedOpcode) void {
     const steps = switch (opcode) {
         .PUSH_ADD_INLINE, .PUSH_ADD_POINTER => 2,      // PUSH + ADD
         .PUSH_MSTORE_INLINE => 2,                       // PUSH + MSTORE
-        .FUNCTION_DISPATCH => 4,                        // PUSH4 + EQ + PUSH + JUMPI
-        .MULTI_PUSH_3 => 3,                             // 3 PUSHes
+        .ISZERO_JUMPI => 3,                             // ISZERO + PUSH + JUMPI
+        .PUSH_ADD_DUP1_INLINE, .PUSH_ADD_DUP1_POINTER => 3, // PUSH + ADD + DUP1
         else => 1,                                      // Regular opcodes
     };
 
@@ -227,8 +213,8 @@ comptime {
 |---------|--------------|---------|
 | PUSH + ADD | Very common | 50% fewer dispatch items |
 | PUSH + MSTORE | Very common | 50% fewer dispatch items |
-| FUNCTION_DISPATCH | 1 per function | 75% fewer dispatch items |
-| MULTI_PUSH_3 | Common | 67% fewer dispatch items |
+| ISZERO + PUSH + JUMPI | Common (`require`, loops) | 3 handlers become 1 |
+| PUSH + ADD + DUP1 | Common in loops | 3 handlers become 1 |
 
 *Based on analysis of typical Solidity contracts
 
@@ -240,8 +226,8 @@ pub fn describe(self: OpcodeSynthetic) []const u8 {
     return switch (self) {
         .PUSH_ADD_INLINE, .PUSH_ADD_POINTER => "PUSH+ADD fusion",
         .PUSH_MSTORE_INLINE, .PUSH_MSTORE_POINTER => "PUSH+MSTORE fusion",
-        .FUNCTION_DISPATCH => "Function selector dispatch (PUSH4+EQ+PUSH+JUMPI)",
-        .CALLVALUE_CHECK => "Payable check (CALLVALUE+DUP1+ISZERO)",
+        .ISZERO_JUMPI => "ISZERO+JUMPI pattern",
+        .PUSH_ADD_DUP1_INLINE, .PUSH_ADD_DUP1_POINTER => "PUSH+ADD+DUP1 pattern",
         // ...
     };
 }

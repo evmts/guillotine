@@ -384,7 +384,7 @@ pub fn some_opcode(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noret
 The tracer automatically handles synthetic opcodes in `executeMinimalEvmForOpcode()`:
 - **Regular opcodes**: Execute exactly 1 MinimalEvm step
 - **PUSH_MSTORE_INLINE**: Execute 2 steps (PUSH1 + MSTORE)
-- **FUNCTION_DISPATCH**: Execute 4 steps (PUSH4 + EQ + PUSH + JUMPI)
+- **ISZERO_JUMPI**: Execute 3 steps (ISZERO + PUSH + JUMPI)
 - **etc.**
 
 This is NOT a divergence issue - it's the designed synchronization mechanism.

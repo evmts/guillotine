@@ -7,6 +7,7 @@ const GasConstants = primitives.GasConstants;
 // u256 is a built-in type in Zig 0.14+
 const keccak_asm = @import("crypto").keccak_asm;
 const memory_mod = @import("../memory/memory.zig");
+const eips = @import("../eips_and_hardforks/eips.zig");
 const Opcode = @import("../opcodes/opcode_data.zig").Opcode;
 const OPCODE_INFO = @import("../opcodes/opcode_data.zig").OPCODE_INFO;
 
@@ -509,42 +510,38 @@ pub fn Handlers(FrameType: type) type {
                     return Error.AllocationError;
                 },
             };
-            const code = self.getEvm().get_code(addr) catch |err| switch (err) {
-                else => {
-                    self.afterComplete(.EXTCODEHASH);
-                    return Error.AllocationError;
-                },
-            };
-            // EIP-1052: the hash is 0 for an account that does not exist or is empty in
-            // the EIP-161 sense (no nonce, no balance, no code).
-            const is_empty = if (account) |existing|
-                existing.nonce == 0 and existing.balance == 0 and code.len == 0
-            else
-                true;
-            if (is_empty) {
-                self.stack.set_top_unsafe(0);
-                return dispatch_next.nextInstruction(FrameType, self, cursor, .EXTCODEHASH);
-            }
-            if (code.len == 0) {
-                // Existing account with empty code returns keccak256("") constant
-                const empty_hash_u256: u256 = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470;
-                const empty_hash_word = @as(WordType, @truncate(empty_hash_u256));
-                self.stack.set_top_unsafe(empty_hash_word);
-                return dispatch_next.nextInstruction(FrameType, self, cursor, .EXTCODEHASH);
-            }
+            // The account record already stores keccak256(code): `Database.set_code`
+            // derives the hash when the code is written. Reading it is O(1). Rehashing
+            // the code here would cost up to 24 KB of keccak for a 100-gas warm access.
+            const hash_u256: u256 = blk: {
+                // EIP-1052: the hash is 0 for an account that does not exist.
+                const existing = account orelse break :blk 0;
 
-            // Compute keccak256 hash of the code
-            var hash: [32]u8 = undefined;
-            keccak_asm.keccak256(code, &hash) catch {
-                self.afterComplete(.EXTCODEHASH);
-                return Error.OutOfBounds;
-            };
+                // EIP-7702: a delegated EOA's code is the 23-byte designator
+                // `0xef0100 || delegate`. It is not stored as code, so hash it here.
+                if (existing.get_effective_code_address()) |delegate| {
+                    var designator: [eips.DELEGATION_DESIGNATOR_LENGTH]u8 = undefined;
+                    @memcpy(designator[0..3], &eips.DELEGATION_PREFIX);
+                    @memcpy(designator[3..], &delegate.bytes);
+                    var hash: [32]u8 = undefined;
+                    keccak_asm.keccak256(&designator, &hash) catch {
+                        self.afterComplete(.EXTCODEHASH);
+                        return Error.OutOfBounds;
+                    };
+                    break :blk std.mem.readInt(u256, &hash, .big);
+                }
 
-            // Convert hash to u256 (big-endian)
-            var hash_u256: u256 = 0;
-            for (hash) |b| {
-                hash_u256 = (hash_u256 << 8) | @as(u256, b);
-            }
+                // An unset (all-zero) code hash means the account has no code.
+                const has_code = !std.mem.eql(u8, &existing.code_hash, &@as([32]u8, @splat(0))) and
+                    !std.mem.eql(u8, &existing.code_hash, &primitives.EMPTY_CODE_HASH);
+                if (!has_code) {
+                    // Empty in the EIP-161 sense (no nonce, no balance, no code): 0.
+                    // Otherwise the account exists with empty code: keccak256("").
+                    if (existing.nonce == 0 and existing.balance == 0) break :blk 0;
+                    break :blk std.mem.readInt(u256, &primitives.EMPTY_CODE_HASH, .big);
+                }
+                break :blk std.mem.readInt(u256, &existing.code_hash, .big);
+            };
             const hash_word = @as(WordType, @truncate(hash_u256));
             self.stack.set_top_unsafe(hash_word);
 

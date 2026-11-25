@@ -61,21 +61,8 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                 value: u256,
                 original_length: PcType,
             },
-            multi_push: struct {
-                values: [3]u256,
-                count: u8,
-                original_length: PcType,
-            },
-            multi_pop: struct {
-                count: u8,
-                original_length: PcType,
-            },
             iszero_jumpi: struct {
                 target: u256,
-                original_length: PcType,
-            },
-            dup2_mstore_push: struct {
-                push_value: u256,
                 original_length: PcType,
             },
         };
@@ -112,43 +99,12 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                             const push_size = opcode - 0x5F;
                             iterator.pc += 1 + push_size + 1;
                         },
-                        // Advanced fusion patterns
-                        .multi_push => |mp| {
-                            iterator.pc += mp.original_length;
-                        },
-                        .multi_pop => |mp| {
-                            iterator.pc += mp.original_length;
-                        },
+                        // Three-opcode fusion patterns
                         .iszero_jumpi => |ij| {
                             iterator.pc += ij.original_length;
                         },
-                        .dup2_mstore_push => |dmp| {
-                            iterator.pc += dmp.original_length;
-                        },
-                        // New high-impact fusions
-                        .dup3_add_mstore => |dam| {
-                            iterator.pc += dam.original_length;
-                        },
-                        .swap1_dup2_add => |sda| {
-                            iterator.pc += sda.original_length;
-                        },
-                        .push_dup3_add => |pda| {
-                            iterator.pc += pda.original_length;
-                        },
-                        .function_dispatch => |fd| {
-                            iterator.pc += fd.original_length;
-                        },
-                        .callvalue_check => |cc| {
-                            iterator.pc += cc.original_length;
-                        },
-                        .push0_revert => |pr| {
-                            iterator.pc += pr.original_length;
-                        },
                         .push_add_dup1 => |pad| {
                             iterator.pc += pad.original_length;
-                        },
-                        .mload_swap1_dup2 => |msd| {
-                            iterator.pc += msd.original_length;
                         },
                         .push => |push_data| {
                             iterator.pc += 1 + push_data.size;
@@ -327,20 +283,9 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
             push_mload_fusion: struct { value: u256 },
             push_mstore_fusion: struct { value: u256 },
             push_mstore8_fusion: struct { value: u256 },
-            // Advanced fusion patterns
-            multi_push: struct { count: u8, original_length: u8, values: [3]u256 },
-            multi_pop: struct { count: u8, original_length: u8 },
+            // Three-opcode fusion patterns
             iszero_jumpi: struct { target: u256, original_length: u8 },
-            dup2_mstore_push: struct { push_value: u256, original_length: u8 },
-            // New high-impact fusions
-            dup3_add_mstore: struct { original_length: u8 },
-            swap1_dup2_add: struct { original_length: u8 },
-            push_dup3_add: struct { value: u256, original_length: u8 },
-            function_dispatch: struct { selector: u32, target: u256, original_length: u8 },
-            callvalue_check: struct { original_length: u8 },
-            push0_revert: struct { original_length: u8 },
             push_add_dup1: struct { value: u256, original_length: u8 },
-            mload_swap1_dup2: struct { original_length: u8 },
             stop: void,
             invalid: void,
         };
@@ -417,50 +362,7 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
             };
         }
 
-        // Advanced pattern detection functions
-
-        fn checkMultiPushPattern(self: *const Self, pc: PcType, n: u8) ?OpcodeData {
-            if (pc + n > self.len()) return null;
-
-            var current_pc = pc;
-            var total_length: PcType = 0;
-            var values: [3]u256 = .{ 0, 0, 0 };
-
-            // Check for n consecutive PUSH instructions
-            var i: u8 = 0;
-            while (i < n) : (i += 1) {
-                if (current_pc >= self.len()) return null;
-                const op = self.get_unsafe(current_pc);
-                if (op < 0x60 or op > 0x7F) { // Not a PUSH opcode
-                    return null;
-                }
-                const push_size = op - 0x5F;
-
-                // Extract value
-                var value: u256 = 0;
-                value = self.pushValuePadded(current_pc, push_size);
-                if (i < 3) values[i] = value;
-
-                current_pc += 1 + push_size;
-                total_length += 1 + push_size;
-            }
-
-            return OpcodeData{ .multi_push = .{ .count = n, .original_length = @intCast(total_length), .values = values } };
-        }
-
-        fn checkMultiPopPattern(self: *const Self, pc: PcType, n: u8) ?OpcodeData {
-            if (pc + n > self.len()) return null;
-
-            // Check if we have n consecutive POP instructions
-            var i: u8 = 0;
-            while (i < n) : (i += 1) {
-                if (self.get_unsafe(pc + i) != 0x50) { // POP opcode
-                    return null;
-                }
-            }
-
-            return OpcodeData{ .multi_pop = .{ .count = n, .original_length = n } };
-        }
+        // Three-opcode fusion pattern detection
 
         fn checkIszeroJumpiPattern(self: *const Self, pc: PcType) ?OpcodeData {
             if (pc + 2 >= self.len()) return null;
@@ -490,130 +392,6 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
             return OpcodeData{ .iszero_jumpi = .{ .target = target, .original_length = @intCast(jumpi_pc + 1 - pc) } };
         }
 
-        fn checkDup2MstorePushPattern(self: *const Self, pc: PcType) ?OpcodeData {
-            if (pc + 3 >= self.len()) return null;
-
-            // Check for DUP2
-            if (self.get_unsafe(pc) != 0x81) return null;
-
-            // Check for MSTORE
-            if (self.get_unsafe(pc + 1) != 0x52) return null;
-
-            // Check for PUSH after MSTORE
-            const push_pc = pc + 2;
-            const push_op = self.get_unsafe(push_pc);
-            if (push_op < 0x60 or push_op > 0x7F) {
-                return null;
-            }
-
-            const push_size = push_op - 0x5F;
-
-            // Extract push value
-            var value: u256 = 0;
-            value = self.pushValuePadded(push_pc, push_size);
-
-            return OpcodeData{ .dup2_mstore_push = .{ .push_value = value, .original_length = @intCast(3 + push_size) } };
-        }
-
-        // New high-impact pattern detection functions
-        fn checkDup3AddMstorePattern(self: *const Self, pc: PcType) ?OpcodeData {
-            if (pc + 3 > self.len()) return null;
-
-            // Check for DUP3 + ADD + MSTORE
-            if (self.get_unsafe(pc) != 0x82) return null; // DUP3
-            if (self.get_unsafe(pc + 1) != 0x01) return null; // ADD
-            if (self.get_unsafe(pc + 2) != 0x52) return null; // MSTORE
-
-            return OpcodeData{ .dup3_add_mstore = .{ .original_length = 3 } };
-        }
-
-        fn checkSwap1Dup2AddPattern(self: *const Self, pc: PcType) ?OpcodeData {
-            if (pc + 3 > self.len()) return null;
-
-            // Check for SWAP1 + DUP2 + ADD
-            if (self.get_unsafe(pc) != 0x90) return null; // SWAP1
-            if (self.get_unsafe(pc + 1) != 0x81) return null; // DUP2
-            if (self.get_unsafe(pc + 2) != 0x01) return null; // ADD
-
-            return OpcodeData{ .swap1_dup2_add = .{ .original_length = 3 } };
-        }
-
-        fn checkPushDup3AddPattern(self: *const Self, pc: PcType) ?OpcodeData {
-            if (pc + 3 >= self.len()) return null;
-
-            // Check for PUSH + DUP3 + ADD
-            const push_op = self.get_unsafe(pc);
-            if (push_op < 0x5F or push_op > 0x7F) return null; // PUSH0-PUSH32
-
-            const push_size = if (push_op == 0x5F) 0 else push_op - 0x5F;
-            const dup3_pc = pc + 1 + push_size;
-
-            if (dup3_pc + 2 > self.len()) return null;
-            if (self.get_unsafe(dup3_pc) != 0x82) return null; // DUP3
-            if (self.get_unsafe(dup3_pc + 1) != 0x01) return null; // ADD
-
-            // Extract push value
-            var value: u256 = 0;
-            if (push_op != 0x5F) { // Not PUSH0
-                value = self.pushValuePadded(pc, push_size);
-            }
-
-            return OpcodeData{ .push_dup3_add = .{ .value = value, .original_length = @intCast(1 + push_size + 2) } };
-        }
-
-        fn checkFunctionDispatchPattern(self: *const Self, pc: PcType) ?OpcodeData {
-            if (pc + 8 >= self.len()) return null;
-
-            // Check for PUSH4 + EQ + PUSH + JUMPI (function selector pattern)
-            if (self.get_unsafe(pc) != 0x63) return null; // PUSH4
-
-            // Extract selector (4 bytes)
-            var selector: u32 = 0;
-            for (pc + 1..pc + 5) |i| {
-                selector = std.math.shl(u32, selector, 8) | @as(u32, self.get_unsafe(@intCast(i)));
-            }
-
-            if (self.get_unsafe(pc + 5) != 0x14) return null; // EQ
-
-            // Check for PUSH after EQ
-            const push_pc = pc + 6;
-            const push_op = self.get_unsafe(push_pc);
-            if (push_op < 0x60 or push_op > 0x62) return null; // PUSH1 or PUSH2 typically
-
-            const push_size = push_op - 0x5F;
-
-            // Extract jump target
-            var target: u256 = 0;
-            target = self.pushValuePadded(push_pc, push_size);
-
-            const jumpi_pc = push_pc + 1 + push_size;
-            if (jumpi_pc >= self.len() or self.get_unsafe(jumpi_pc) != 0x57) return null; // JUMPI
-
-            return OpcodeData{ .function_dispatch = .{ .selector = selector, .target = target, .original_length = @intCast(8 + push_size) } };
-        }
-
-        fn checkCallvalueCheckPattern(self: *const Self, pc: PcType) ?OpcodeData {
-            if (pc + 3 > self.len()) return null;
-
-            // Check for CALLVALUE + DUP1 + ISZERO
-            if (self.get_unsafe(pc) != 0x34) return null; // CALLVALUE
-            if (self.get_unsafe(pc + 1) != 0x80) return null; // DUP1
-            if (self.get_unsafe(pc + 2) != 0x15) return null; // ISZERO
-
-            return OpcodeData{ .callvalue_check = .{ .original_length = 3 } };
-        }
-
-        fn checkPush0RevertPattern(self: *const Self, pc: PcType) ?OpcodeData {
-            if (pc + 3 > self.len()) return null;
-
-            // Check for PUSH0 + PUSH0 + REVERT
-            if (self.get_unsafe(pc) != 0x5F) return null; // PUSH0
-            if (self.get_unsafe(pc + 1) != 0x5F) return null; // PUSH0
-            if (self.get_unsafe(pc + 2) != 0xFD) return null; // REVERT
-
-            return OpcodeData{ .push0_revert = .{ .original_length = 3 } };
-        }
-
         fn checkPushAddDup1Pattern(self: *const Self, pc: PcType) ?OpcodeData {
             if (pc + 3 >= self.len()) return null;
 
@@ -637,17 +415,6 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
             return OpcodeData{ .push_add_dup1 = .{ .value = value, .original_length = @intCast(1 + push_size + 2) } };
         }
 
-        fn checkMloadSwap1Dup2Pattern(self: *const Self, pc: PcType) ?OpcodeData {
-            if (pc + 3 > self.len()) return null;
-
-            // Check for MLOAD + SWAP1 + DUP2
-            if (self.get_unsafe(pc) != 0x51) return null; // MLOAD
-            if (self.get_unsafe(pc + 1) != 0x90) return null; // SWAP1
-            if (self.get_unsafe(pc + 2) != 0x81) return null; // DUP2
-
-            return OpcodeData{ .mload_swap1_dup2 = .{ .original_length = 3 } };
-        }
-
         /// True when every instruction starting in `[start, end)` is defined on the
         /// configured fork.
         fn opcodesDefined(self: *const Self, start: PcType, end: PcType) bool {
@@ -661,83 +428,24 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
         }
 
         /// Get fusion data for a bytecode position marked as fusion candidate
-        /// This method checks for advanced patterns first (in priority order)
+        /// The three-opcode patterns are checked before the two-opcode ones.
         pub fn getFusionData(self: *const Self, pc: PcType) OpcodeData {
             if (pc >= self.len()) {
                 return OpcodeData{ .regular = .{ .opcode = 0x00 } }; // STOP fallback
             }
 
-            // Check advanced fusion patterns in priority order (longest first)
-
-            // Check function dispatch pattern first (can be 8+ bytes)
-            if (self.checkFunctionDispatchPattern(pc)) |fusion| {
-                return fusion;
-            }
-
-            // 1. Check for ISZERO-JUMPI pattern (highest priority) (variable length)
+            // Three-opcode patterns take priority over the two-opcode PUSH + op fusions.
             if (self.checkIszeroJumpiPattern(pc)) |fusion| {
                 return fusion;
             }
 
-            // Check PUSH + DUP3 + ADD pattern
-            if (self.checkPushDup3AddPattern(pc)) |fusion| {
-                return fusion;
-            }
-
-            // Check PUSH + ADD + DUP1 pattern
             if (self.checkPushAddDup1Pattern(pc)) |fusion| {
-                return fusion;
-            }
-
-            // 3. Check for DUP2-MSTORE-PUSH pattern (variable length)
-            if (self.checkDup2MstorePushPattern(pc)) |fusion| {
-                return fusion;
-            }
-
-            // Check new 3-opcode patterns
-            if (self.checkDup3AddMstorePattern(pc)) |fusion| {
-                return fusion;
-            }
-
-            if (self.checkSwap1Dup2AddPattern(pc)) |fusion| {
-                return fusion;
-            }
-
-            if (self.checkCallvalueCheckPattern(pc)) |fusion| {
-                return fusion;
-            }
-
-            if (self.checkPush0RevertPattern(pc)) |fusion| {
-                return fusion;
-            }
-
-            if (self.checkMloadSwap1Dup2Pattern(pc)) |fusion| {
-                return fusion;
-            }
-
-            // 4. Check for 3-PUSH fusion
-            if (self.checkMultiPushPattern(pc, 3)) |fusion| {
-                return fusion;
-            }
-
-            // 5. Check for 3-POP fusion
-            if (self.checkMultiPopPattern(pc, 3)) |fusion| {
-                return fusion;
-            }
-
-            // 6. Check for 2-PUSH fusion
-            if (self.checkMultiPushPattern(pc, 2)) |fusion| {
-                return fusion;
-            }
-
-            // 7. Check for 2-POP fusion
-            if (self.checkMultiPopPattern(pc, 2)) |fusion| {
                 return fusion;
             }
 
             const first_op = self.get_unsafe(pc);
 
-            // Check for existing 2-opcode fusions (PUSH + op)
+            // Check for 2-opcode fusions (PUSH + op)
             if (first_op >= 0x60 and first_op <= 0x7F) { // PUSH opcode
                 const push_size = first_op - 0x5F;
                 var value: u256 = 0;
@@ -1631,18 +1339,8 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                         .push_or_fusion => try output.print(allocator, " {s}⚡ PUSH+OR{s}", .{ Colors.bright_green, Colors.reset }),
                         .push_xor_fusion => try output.print(allocator, " {s}⚡ PUSH+XOR{s}", .{ Colors.bright_green, Colors.reset }),
                         .push_div_fusion => try output.print(allocator, " {s}⚡ PUSH+DIV{s}", .{ Colors.bright_green, Colors.reset }),
-                        .push_dup3_add => try output.print(allocator, " {s}⚡ PUSH+DUP3+ADD{s}", .{ Colors.bright_green, Colors.reset }),
                         .push_add_dup1 => try output.print(allocator, " {s}⚡ PUSH+ADD+DUP1{s}", .{ Colors.bright_green, Colors.reset }),
-                        .multi_push => |mp| try output.print(allocator, " {s}⚡ {}xPUSH{s}", .{ Colors.bright_green, mp.count, Colors.reset }),
-                        .multi_pop => |mp| try output.print(allocator, " {s}⚡ {}xPOP{s}", .{ Colors.bright_green, mp.count, Colors.reset }),
                         .iszero_jumpi => try output.print(allocator, " {s}⚡ ISZERO+JUMPI{s}", .{ Colors.bright_green, Colors.reset }),
-                        .dup2_mstore_push => try output.print(allocator, " {s}⚡ DUP2+MSTORE+PUSH{s}", .{ Colors.bright_green, Colors.reset }),
-                        .function_dispatch => try output.print(allocator, " {s}⚡ FUNCTION_DISPATCH{s}", .{ Colors.bright_green, Colors.reset }),
-                        .dup3_add_mstore => try output.print(allocator, " {s}⚡ DUP3+ADD+MSTORE{s}", .{ Colors.bright_green, Colors.reset }),
-                        .swap1_dup2_add => try output.print(allocator, " {s}⚡ SWAP1+DUP2+ADD{s}", .{ Colors.bright_green, Colors.reset }),
-                        .callvalue_check => try output.print(allocator, " {s}⚡ CALLVALUE_CHECK{s}", .{ Colors.bright_green, Colors.reset }),
-                        .push0_revert => try output.print(allocator, " {s}⚡ PUSH0+REVERT{s}", .{ Colors.bright_green, Colors.reset }),
-                        .mload_swap1_dup2 => try output.print(allocator, " {s}⚡ MLOAD+SWAP1+DUP2{s}", .{ Colors.bright_green, Colors.reset }),
                         else => {},
                     }
                 }

@@ -938,33 +938,6 @@ fusion_theorem(
 )
 
 
-def _evm_swap1_dup2_add(s: EvmStack, v: str) -> None:
-    s.swap(1)
-    s.dup(2)
-    s.binop("bvadd")
-
-
-def _fused_swap1_dup2_add(s: ZigStack, v: str) -> None:
-    top = s.pop_unsafe()
-    second = s.pop_unsafe()
-    s.push_unsafe(top)
-    s.push_unsafe(second)
-    s.dup_n_unsafe(2)
-    b = s.pop_unsafe()
-    a = s.pop_unsafe()
-    s.push_unsafe(f"(bvadd {a} {b})")
-
-
-fusion_theorem(
-    "fusion_swap1_dup2_add_equiv",
-    "SWAP1; DUP2; ADD",
-    2,
-    _evm_swap1_dup2_add,
-    _fused_swap1_dup2_add,
-    src(ADV_SYN, "swap1_dup2_add") + src(STACK, "dup_n_unsafe"),
-    notes="The push value v is unused by this fusion; it is declared for a uniform interface.",
-)
-
 # ISZERO; PUSH target; JUMPI  -> ISZERO_JUMPI
 _decls, _items = stack_vars(3)
 _e = EvmStack(_items)

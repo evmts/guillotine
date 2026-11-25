@@ -1,6 +1,7 @@
 const std = @import("std");
 const FrameConfig = @import("../frame/frame_config.zig").FrameConfig;
 const log = @import("../log.zig");
+const verified_ops = @import("../core/verified_ops.zig");
 
 /// Bitwise opcode handlers for the EVM stack frame.
 /// These are generic structs that return static handlers for a given FrameType.
@@ -25,7 +26,8 @@ pub fn Handlers(FrameType: type) type {
                 return error.StackUnderflow;
             }
             self.beforeInstruction(.CLZ, cursor);
-            self.stack.set_top_unsafe(@clz(self.stack.peek_unsafe()));
+            // `verified_ops.clzFast` is the form the proofs cover (`clz_fast_equiv`): 256 for zero.
+            self.stack.set_top_unsafe(verified_ops.clzFast(self.stack.peek_unsafe()));
             return dispatch_next.nextInstruction(FrameType, self, cursor, .CLZ);
         }
 
@@ -84,11 +86,8 @@ pub fn Handlers(FrameType: type) type {
             N.before(self, .BYTE, cursor, s.sp, gas);
             const byte_index = s.pop_unsafe(); // Top of stack - byte index
             const value = s.peek_unsafe(); // Second from top - value to extract from
-            const result = if (byte_index >= 32) 0 else blk: {
-                const shift_amount = (31 - byte_index) * 8;
-                break :blk (value >> @intCast(shift_amount)) & 0xFF;
-            };
-            s.set_top_unsafe(result);
+            // `verified_ops.byteFast` is the form the proofs cover (`byte_fast_equiv`).
+            s.set_top_unsafe(verified_ops.byteFast(byte_index, value));
             return N.next(self, .BYTE, cursor, s.sp, gas);
         }
 
@@ -121,13 +120,9 @@ pub fn Handlers(FrameType: type) type {
             N.before(self, .SAR, cursor, s.sp, gas);
             const shift = s.pop_unsafe(); // Top of stack - shift amount
             const value = s.peek_unsafe(); // Second from top - value to shift
-            const value_signed = @as(@Int(.signed, @bitSizeOf(WordType)), @bitCast(value));
-            const result = if (shift >= 256) blk: {
-                break :blk if (value_signed < 0) @as(WordType, @bitCast(@as(@Int(.signed, @bitSizeOf(WordType)), -1))) else 0;
-            } else blk: {
-                break :blk @as(WordType, @bitCast(value_signed >> @intCast(shift)));
-            };
-            s.set_top_unsafe(result);
+            // `verified_ops.sarFast` is the branchless form the proofs cover (`sar_branchless_equiv`):
+            // clamping the shift to 255 yields all sign bits for any shift >= 256.
+            s.set_top_unsafe(verified_ops.sarFast(shift, value));
             return N.next(self, .SAR, cursor, s.sp, gas);
         }
     };

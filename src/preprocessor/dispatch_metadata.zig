@@ -27,35 +27,27 @@ pub fn DispatchMetadata(comptime FrameType: type) type {
         /// This is the same validation JumpDestinations do
         pub const FirstBlockMetadata = JumpDestMetadata;
 
-        /// Metadata for PUSH operations with values that fit in 64 bits.
-        /// Stored inline in the dispatch array for cache efficiency.
+        /// One 64-bit word of a PUSH value, stored inline in the dispatch array.
+        /// PUSH1-8 and inline fusions use one; PUSH9-32 use two to four, least
+        /// significant limb first.
         pub const PushInlineMetadata = packed struct(u64) { value: u64 };
 
-        /// Metadata for PUSH operations with values larger than 64 bits.
-        /// Contains a direct pointer to the u256 value for efficient access without indirection.
+        /// Metadata for fused PUSH+op handlers whose operand is wider than 64 bits.
+        /// Points at the value in the schedule's arena. Plain PUSH9-32 do not use it:
+        /// they store their value as inline `PushInlineMetadata` limbs.
         pub const PushPointerMetadata = extern struct { value_ptr: *const FrameType.WordType };
 
-        /// Metadata for PC opcode containing the program counter value.
         /// Metadata for static jump locations - contains a direct pointer to the jump destination dispatch
         /// This avoids the binary search in findJumpTarget
         pub const JumpStaticMetadata = extern struct { dispatch: *const anyopaque };
 
-        /// Metadata for backward loop jumpi - contains two dispatch pointers for loop and exit targets
-        /// Used by BACKWARD_LOOP_JUMPI synthetic opcode for optimized loop execution
-        pub const BackwardLoopMetadata = struct {
-            /// Dispatch pointer for loop continuation (backward jump target)
-            loop_dispatch: *const anyopaque,
-            /// Dispatch pointer for loop exit (forward jump target)
-            exit_dispatch: *const anyopaque,
-        };
-
         /// Our instruction set does not match the actual bytecode 1 to 1 if we do fusions so we don't actually track pc during execution
         /// Thus we must provide as metadata to avoid the expensive process of mapping back our instruction index to what pc it came from
-        pub const PcMetadata = packed struct { value: FrameType.PcType };
-
-        /// Metadata for CODESIZE opcode containing the bytecode size.
-        /// Only one opcode needs this data so it's better to store it as metadata for that opcode than store on frame
-        pub const CodesizeMetadata = packed struct { size: u32 };
+        /// Padded to exactly 64 bits so it fits an untagged 8-byte schedule item for every `PcType`.
+        pub const PcMetadata = packed struct(u64) {
+            value: FrameType.PcType,
+            _padding: @Int(.unsigned, 64 - @bitSizeOf(FrameType.PcType)) = 0,
+        };
 
     };
 }
@@ -100,16 +92,15 @@ test "PushInlineMetadata stores u64 values" {
     try testing.expectEqual(@as(u64, 0xDEADBEEFCAFEBABE), metadata.value);
 }
 
-test "PushPointerMetadata stores index to u256 array" {
+test "PushPointerMetadata is one pointer to the value" {
     const Metadata = DispatchMetadata(TestFrame);
-    
-    try testing.expectEqual(@as(usize, 4), @sizeOf(Metadata.PushPointerMetadata));
-    
-    const metadata = Metadata.PushPointerMetadata{
-        .index = 42,
-    };
-    
-    try testing.expectEqual(@as(u32, 42), metadata.index);
+
+    try testing.expectEqual(@sizeOf(usize), @sizeOf(Metadata.PushPointerMetadata));
+
+    const value: u256 = 42;
+    const metadata = Metadata.PushPointerMetadata{ .value_ptr = &value };
+
+    try testing.expectEqual(@as(u256, 42), metadata.value_ptr.*);
 }
 
 test "PcMetadata stores program counter value" {
@@ -122,16 +113,15 @@ test "PcMetadata stores program counter value" {
     try testing.expectEqual(@as(u32, 12345), metadata.value);
 }
 
-test "CodesizeMetadata stores bytecode size" {
+test "every metadata type fits one 8-byte schedule item" {
     const Metadata = DispatchMetadata(TestFrame);
-    
-    const metadata = Metadata.CodesizeMetadata{
-        .size = 65536,
-    };
-    
-    try testing.expectEqual(@as(u32, 65536), metadata.size);
-}
 
+    try testing.expectEqual(@as(usize, 8), @sizeOf(Metadata.JumpDestMetadata));
+    try testing.expectEqual(@as(usize, 8), @sizeOf(Metadata.PushInlineMetadata));
+    try testing.expectEqual(@as(usize, 8), @sizeOf(Metadata.PcMetadata));
+    try testing.expect(@sizeOf(Metadata.PushPointerMetadata) <= 8);
+    try testing.expect(@sizeOf(Metadata.JumpStaticMetadata) <= 8);
+}
 
 test "FirstBlockMetadata is same as JumpDestMetadata" {
     const Metadata = DispatchMetadata(TestFrame);

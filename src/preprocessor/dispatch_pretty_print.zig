@@ -347,6 +347,46 @@ pub fn pretty_print(
     return output.toOwnedSlice(allocator);
 }
 
+/// What a schedule item holds.
+const ItemKind = enum {
+    opcode_handler,
+    jump_dest,
+    push_inline,
+    push_pointer,
+    pc,
+    jump_static,
+    first_block_gas,
+};
+
+/// The kind of `item`. Builds that tag schedule items read the item's own tag, so a
+/// schedule that disagrees with the bytecode is reported. Builds with untagged 8-byte
+/// items have nothing to read: there the layout the bytecode walk expects is returned.
+fn kindOf(comptime Item: type, item: Item, expected: ItemKind) ItemKind {
+    if (comptime @typeInfo(Item).@"union".tag_type == null) return expected;
+    return switch (item) {
+        .opcode_handler => .opcode_handler,
+        .jump_dest => .jump_dest,
+        .push_inline => .push_inline,
+        .push_pointer => .push_pointer,
+        .pc => .pc,
+        .jump_static => .jump_static,
+        .first_block_gas => .first_block_gas,
+    };
+}
+
+/// The debug-info item type for a schedule item kind.
+fn itemTypeOf(comptime DebugInfo: type, kind: ItemKind) DebugInfo.ItemType {
+    return switch (kind) {
+        .opcode_handler => .opcode_handler,
+        .jump_dest => .jump_dest,
+        .push_inline => .push_inline,
+        .push_pointer => .push_pointer,
+        .pc => .pc,
+        .jump_static => .jump_static,
+        .first_block_gas => .first_block_gas,
+    };
+}
+
 /// Get comprehensive debug information about a dispatch schedule
 /// This includes validation against bytecode and reverse handler lookups
 pub fn getDebugInfo(
@@ -414,9 +454,12 @@ pub fn getDebugInfo(
     var bytecode_iter = bytecode.createIterator();
     var schedule_idx: usize = 0;
     
-    // Check for first_block_gas metadata
+    // The schedule starts with first_block_gas metadata exactly when the first basic
+    // block charges gas or has stack requirements (the rule Dispatch.init applies).
+    const first_block = FrameType.Dispatch.calculateFirstBlockInfo(bytecode);
+    const expects_first_block = first_block.gas > 0 or first_block.min_stack > 0 or first_block.max_stack > 0;
     if (schedule_idx < schedule_items.len) {
-        if (schedule_items[schedule_idx] == .first_block_gas) {
+        if (kindOf(Item, schedule_items[schedule_idx], if (expects_first_block) .first_block_gas else .opcode_handler) == .first_block_gas) {
             const gas_value = schedule_items[schedule_idx].first_block_gas.gas;
             try entries.append(allocator, .{
                 .schedule_index = schedule_idx,
@@ -450,20 +493,12 @@ pub fn getDebugInfo(
                 }
                 
                 const item = schedule_items[schedule_idx];
-                if (item != .opcode_handler) {
-                    try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Expected opcode handler", "opcode_handler", @tagName(item));
+                if (kindOf(Item, item, .opcode_handler) != .opcode_handler) {
+                    try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Expected opcode handler", "opcode_handler", @tagName(kindOf(Item, item, .opcode_handler)));
                     try entries.append(allocator, .{
                         .schedule_index = schedule_idx,
                         .pc = @intCast(bytecode_pc),
-                        .item_type = switch (item) {
-                            .opcode_handler => .opcode_handler,
-                            .jump_dest => .jump_dest,
-                            .push_inline => .push_inline,
-                            .push_pointer => .push_pointer,
-                            .pc => .pc,
-                            .jump_static => .jump_static,
-                            .first_block_gas => .first_block_gas,
-                        },
+                        .item_type = itemTypeOf(DebugInfo, kindOf(Item, item, .opcode_handler)),
                         .handler_ptr = null,
                         .handler_name = "UNEXPECTED",
                         .metadata = null,
@@ -505,7 +540,7 @@ pub fn getDebugInfo(
                 if (std.enums.fromInt(Opcode, data.opcode).? == .PC) {
                     if (schedule_idx < schedule_items.len) {
                         const maybe_meta = schedule_items[schedule_idx];
-                        if (maybe_meta == .pc) {
+                        if (kindOf(Item, maybe_meta, .pc) == .pc) {
                             const meta = maybe_meta.pc;
                             try entries.append(allocator, .{
                                 .schedule_index = schedule_idx,
@@ -531,8 +566,8 @@ pub fn getDebugInfo(
                 
                 // Expect push handler
                 const handler_item = schedule_items[schedule_idx];
-                if (handler_item != .opcode_handler) {
-                    try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Expected push handler", "opcode_handler", @tagName(handler_item));
+                if (kindOf(Item, handler_item, .opcode_handler) != .opcode_handler) {
+                    try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Expected push handler", "opcode_handler", @tagName(kindOf(Item, handler_item, .opcode_handler)));
                 } else {
                     const handler_ptr = @as(*const anyopaque, @ptrCast(handler_item.opcode_handler));
                     const handler_info = debug_info.handler_map.get(handler_ptr);
@@ -555,15 +590,23 @@ pub fn getDebugInfo(
                 }
                 schedule_idx += 1;
                 
-                // Expect push metadata
-                if (schedule_idx >= schedule_items.len) {
-                    try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Schedule underrun", "push metadata", "end of schedule");
-                    break;
-                }
-                
-                const metadata_item = schedule_items[schedule_idx];
-                switch (metadata_item) {
-                    .push_inline => |meta| {
+                // Expect the push value as inline 64-bit limbs, least significant first.
+                const limbs = FrameType.Dispatch.pushLimbCount(data.size);
+                var limb: u8 = 0;
+                while (limb < limbs) : (limb += 1) {
+                    if (schedule_idx >= schedule_items.len) {
+                        try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Schedule underrun", "push metadata", "end of schedule");
+                        break;
+                    }
+
+                    const metadata_item = schedule_items[schedule_idx];
+                    const kind = kindOf(Item, metadata_item, .push_inline);
+                    if (kind != .push_inline) {
+                        try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Expected push metadata", "push_inline", @tagName(kind));
+                    } else {
+                        const meta = metadata_item.push_inline;
+                        const shift: u8 = @intCast(@as(u16, limb) * 64);
+                        const expected_limb: u64 = @truncate(@as(u256, data.value) >> shift);
                         try entries.append(allocator, .{
                             .schedule_index = schedule_idx,
                             .pc = @intCast(bytecode_pc),
@@ -572,32 +615,16 @@ pub fn getDebugInfo(
                             .handler_name = null,
                             .metadata = .{ .push_inline = .{ .value = meta.value } },
                             .expected_from_bytecode = null,
-                            .validation_status = if (meta.value == @as(u64, @intCast(data.value))) .valid else .metadata_mismatch,
+                            .validation_status = if (meta.value == expected_limb) .valid else .metadata_mismatch,
                         });
-                        if (meta.value != @as(u64, @intCast(data.value))) {
+                        if (meta.value != expected_limb) {
                             try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Push value mismatch", 
-                                try std.fmt.allocPrint(allocator, "0x{x}", .{data.value}),
+                                try std.fmt.allocPrint(allocator, "0x{x}", .{expected_limb}),
                                 try std.fmt.allocPrint(allocator, "0x{x}", .{meta.value}));
                         }
-                    },
-                    .push_pointer => |meta| {
-                        // Cannot validate u256 value without access to DispatchSchedule.u256_values
-                        try entries.append(allocator, .{
-                            .schedule_index = schedule_idx,
-                            .pc = @intCast(bytecode_pc),
-                            .item_type = .push_pointer,
-                            .handler_ptr = null,
-                            .handler_name = null,
-                            .metadata = .{ .push_pointer = .{ .value_ptr = meta.value_ptr, .value = data.value } }, // Use expected value
-                            .expected_from_bytecode = null,
-                            .validation_status = .valid, // Assume valid since we can't verify
-                        });
-                    },
-                    else => {
-                        try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Expected push metadata", "push_inline or push_pointer", @tagName(metadata_item));
-                    },
+                    }
+                    schedule_idx += 1;
                 }
-                schedule_idx += 1;
             },
             
             .jumpdest => |data| {
@@ -611,8 +638,8 @@ pub fn getDebugInfo(
                 
                 // Expect jumpdest handler
                 const handler_item = schedule_items[schedule_idx];
-                if (handler_item != .opcode_handler) {
-                    try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Expected jumpdest handler", "opcode_handler", @tagName(handler_item));
+                if (kindOf(Item, handler_item, .opcode_handler) != .opcode_handler) {
+                    try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Expected jumpdest handler", "opcode_handler", @tagName(kindOf(Item, handler_item, .opcode_handler)));
                 } else {
                     const handler_ptr = @as(*const anyopaque, @ptrCast(handler_item.opcode_handler));
                     const handler_info = debug_info.handler_map.get(handler_ptr);
@@ -640,8 +667,8 @@ pub fn getDebugInfo(
                 }
                 
                 const metadata_item = schedule_items[schedule_idx];
-                if (metadata_item != .jump_dest) {
-                    try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Expected jump_dest metadata", "jump_dest", @tagName(metadata_item));
+                if (kindOf(Item, metadata_item, .jump_dest) != .jump_dest) {
+                    try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Expected jump_dest metadata", "jump_dest", @tagName(kindOf(Item, metadata_item, .jump_dest)));
                 } else {
                     const meta = metadata_item.jump_dest;
                     try entries.append(allocator, .{
@@ -671,8 +698,8 @@ pub fn getDebugInfo(
                 }
                 
                 const handler_item = schedule_items[schedule_idx];
-                if (handler_item != .opcode_handler) {
-                    try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Expected fusion handler", "opcode_handler", @tagName(handler_item));
+                if (kindOf(Item, handler_item, .opcode_handler) != .opcode_handler) {
+                    try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Expected fusion handler", "opcode_handler", @tagName(kindOf(Item, handler_item, .opcode_handler)));
                 } else {
                     const handler_ptr = @as(*const anyopaque, @ptrCast(handler_item.opcode_handler));
                     const handler_info = debug_info.handler_map.get(handler_ptr);
@@ -704,8 +731,8 @@ pub fn getDebugInfo(
                 }
                 
                 const metadata_item = schedule_items[schedule_idx];
-                if (metadata_item != .jump_static) {
-                    try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Expected jump_static metadata", "jump_static", @tagName(metadata_item));
+                if (kindOf(Item, metadata_item, .jump_static) != .jump_static) {
+                    try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Expected jump_static metadata", "jump_static", @tagName(kindOf(Item, metadata_item, .jump_static)));
                 } else {
                     const meta = metadata_item.jump_static;
                     // Try to find target schedule index from dispatch pointer
@@ -760,27 +787,19 @@ pub fn getDebugInfo(
             // Handle other fusion types
             .push_add_fusion, .push_mul_fusion, .push_sub_fusion, .push_div_fusion,
             .push_and_fusion, .push_or_fusion, .push_xor_fusion,
-            .push_mload_fusion, .push_mstore_fusion, .push_mstore8_fusion => {
+            .push_mload_fusion, .push_mstore_fusion, .push_mstore8_fusion, .push_add_dup1 => {
                 if (schedule_idx >= schedule_items.len) {
                     try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Schedule underrun", "fusion handler", "end of schedule");
                     break;
                 }
                 
                 const handler_item = schedule_items[schedule_idx];
-                if (handler_item != .opcode_handler) {
-                    try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Expected fusion handler", "opcode_handler", @tagName(handler_item));
+                if (kindOf(Item, handler_item, .opcode_handler) != .opcode_handler) {
+                    try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Expected fusion handler", "opcode_handler", @tagName(kindOf(Item, handler_item, .opcode_handler)));
                     try entries.append(allocator, .{
                         .schedule_index = schedule_idx,
                         .pc = @intCast(bytecode_pc),
-                        .item_type = switch (handler_item) {
-                            .opcode_handler => .opcode_handler,
-                            .jump_dest => .jump_dest,
-                            .push_inline => .push_inline,
-                            .push_pointer => .push_pointer,
-                            .pc => .pc,
-                            .jump_static => .jump_static,
-                            .first_block_gas => .first_block_gas,
-                        },
+                        .item_type = itemTypeOf(DebugInfo, kindOf(Item, handler_item, .opcode_handler)),
                         .handler_ptr = null,
                         .handler_name = "UNEXPECTED",
                         .metadata = null,
@@ -804,11 +823,17 @@ pub fn getDebugInfo(
                 }
                 schedule_idx += 1;
                 
-                // Expect metadata for fusion value
+                // Expect the fused push value: inline when it fits 64 bits, otherwise a
+                // pointer into the schedule's value arena.
                 if (schedule_idx < schedule_items.len) {
+                    const fused_value: u256 = switch (op_data) {
+                        inline .push_add_fusion, .push_mul_fusion, .push_sub_fusion, .push_div_fusion, .push_and_fusion, .push_or_fusion, .push_xor_fusion, .push_mload_fusion, .push_mstore_fusion, .push_mstore8_fusion, .push_add_dup1 => |fusion| fusion.value,
+                        else => unreachable,
+                    };
                     const metadata_item = schedule_items[schedule_idx];
-                    switch (metadata_item) {
-                        .push_inline => |meta| {
+                    switch (kindOf(Item, metadata_item, if (fused_value <= std.math.maxInt(u64)) .push_inline else .push_pointer)) {
+                        .push_inline => {
+                            const meta = metadata_item.push_inline;
                             try entries.append(allocator, .{
                                 .schedule_index = schedule_idx,
                                 .pc = @intCast(bytecode_pc),
@@ -820,20 +845,22 @@ pub fn getDebugInfo(
                                 .validation_status = .valid,
                             });
                         },
-                        .push_pointer => |meta| {
-                            // Cannot access u256 values without DispatchSchedule
+                        .push_pointer => {
+                            const meta = metadata_item.push_pointer;
                             try entries.append(allocator, .{
                                 .schedule_index = schedule_idx,
                                 .pc = @intCast(bytecode_pc),
                                 .item_type = .push_pointer,
                                 .handler_ptr = null,
                                 .handler_name = null,
-                                .metadata = .{ .push_pointer = .{ .value_ptr = meta.value_ptr, .value = 0 } }, // Can't get actual value
+                                .metadata = .{ .push_pointer = .{ .value_ptr = meta.value_ptr, .value = @truncate(fused_value) } }, // Value expected from the bytecode
                                 .expected_from_bytecode = null,
                                 .validation_status = .valid,
                             });
                         },
-                        else => {},
+                        else => |kind| {
+                            try addValidationError(&debug_info, schedule_idx, bytecode_pc, "Expected fusion value metadata", "push_inline or push_pointer", @tagName(kind));
+                        },
                     }
                     schedule_idx += 1;
                 }
@@ -843,7 +870,7 @@ pub fn getDebugInfo(
                 if (schedule_idx >= schedule_items.len) break;
                 
                 const handler_item = schedule_items[schedule_idx];
-                if (handler_item == .opcode_handler) {
+                if (kindOf(Item, handler_item, .opcode_handler) == .opcode_handler) {
                     const handler_ptr = @as(*const anyopaque, @ptrCast(handler_item.opcode_handler));
                     const handler_info = debug_info.handler_map.get(handler_ptr);
                     
@@ -861,19 +888,62 @@ pub fn getDebugInfo(
                 schedule_idx += 1;
             },
             
-            else => {
-                // Skip other advanced fusion types for now
-                schedule_idx += 1;
-            },
+            // PC and ISZERO_JUMPI occupy a handler and one metadata item.
+            .pc, .iszero_jumpi => schedule_idx += 2,
+
+            // Dynamic JUMP and JUMPI are a bare handler.
+            .jump, .jumpi => schedule_idx += 1,
+        }
+
+        // The builder inserts BLOCK_BEGIN and its jump_dest metadata after an
+        // instruction that ends a basic block by falling through.
+        if (try FrameType.Dispatch.blockBeginFollows(bytecode_iter.bytecode, bytecode_pc, bytecode_iter.pc)) {
+            if (schedule_idx + 1 < schedule_items.len) {
+                const handler_item = schedule_items[schedule_idx];
+                if (kindOf(Item, handler_item, .opcode_handler) == .opcode_handler) {
+                    const handler_ptr = @as(*const anyopaque, @ptrCast(handler_item.opcode_handler));
+                    const handler_info = debug_info.handler_map.get(handler_ptr);
+                    try entries.append(allocator, .{
+                        .schedule_index = schedule_idx,
+                        .pc = null,
+                        .item_type = .opcode_handler,
+                        .handler_ptr = handler_ptr,
+                        .handler_name = if (handler_info) |info| info.name else "UNKNOWN",
+                        .metadata = null,
+                        .expected_from_bytecode = null,
+                        .validation_status = .valid,
+                    });
+                }
+                const metadata_item = schedule_items[schedule_idx + 1];
+                if (kindOf(Item, metadata_item, .jump_dest) == .jump_dest) {
+                    try entries.append(allocator, .{
+                        .schedule_index = schedule_idx + 1,
+                        .pc = null,
+                        .item_type = .jump_dest,
+                        .handler_ptr = null,
+                        .handler_name = null,
+                        .metadata = .{ .jump_dest = .{
+                            .gas = metadata_item.jump_dest.gas,
+                            .min_stack = 0,
+                            .max_stack = 0,
+                            .target_pc = null,
+                            .target_idx = null,
+                        } },
+                        .expected_from_bytecode = null,
+                        .validation_status = .valid,
+                    });
+                }
+            }
+            schedule_idx += 2;
         }
     }
     
     // Add any remaining schedule items
     while (schedule_idx < schedule_items.len) {
         const item = schedule_items[schedule_idx];
-        const entry = switch (item) {
-            .opcode_handler => |handler| blk: {
-                const handler_ptr = @as(*const anyopaque, @ptrCast(handler));
+        const entry = switch (kindOf(Item, item, .opcode_handler)) {
+            .opcode_handler => blk: {
+                const handler_ptr = @as(*const anyopaque, @ptrCast(item.opcode_handler));
                 const handler_info = debug_info.handler_map.get(handler_ptr);
                 break :blk DebugInfo.ScheduleEntry{
                     .schedule_index = schedule_idx,

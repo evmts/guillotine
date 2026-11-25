@@ -1100,14 +1100,6 @@ test "Dispatch - RAII DispatchSchedule for automatic cleanup" {
     }
 }
 
-// Removed: JumpTableBuilder iterator pattern (internal API changed)
-// Removed: JumpTableBuilder iterator pattern (internal API changed)
-// Removed: JumpTableBuilder iterator pattern (internal API changed)
-test "Dispatch - JumpTableBuilder iterator pattern" {
-    // Removed due to internal API changes; covered by createJumpTable tests
-    try std.testing.expect(true);
-}
-
 
 test "Dispatch - pretty_print basic functionality" {
     const allocator = testing.allocator;

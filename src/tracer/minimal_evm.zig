@@ -94,7 +94,15 @@ pub const MinimalEvm = struct {
     transient_storage: std.AutoHashMap(StorageSlotKey, u256),
     original_storage: std.AutoHashMap(StorageSlotKey, u256),
     balances: std.AutoHashMap(Address, u256),
+    /// Account nonces. An account without an entry has nonce 0.
+    nonces: std.AutoHashMap(Address, u64),
     code: std.AutoHashMap(Address, []const u8),
+    /// Accounts created during the current transaction. EIP-6780 (Cancun) lets
+    /// SELFDESTRUCT delete an account only when it is in this set.
+    created_accounts: std.AutoHashMap(Address, void),
+    /// Contracts that already ran SELFDESTRUCT in the current transaction. The
+    /// pre-London refund is granted once per contract.
+    selfdestructed_accounts: std.AutoHashMap(Address, void),
     // EIP-2929 warm/cold tracking (minimal)
     warm_addresses: std.array_hash_map.Custom(Address, void, AddressContext, false),
     warm_storage_slots: std.array_hash_map.Custom(StorageSlotKey, void, StorageSlotKeyContext, false),
@@ -130,6 +138,9 @@ pub const MinimalEvm = struct {
         const storage_map = std.AutoHashMap(StorageSlotKey, u256).init(arena_allocator);
         const transient_storage_map = std.AutoHashMap(StorageSlotKey, u256).init(arena_allocator);
         const balances_map = std.AutoHashMap(Address, u256).init(arena_allocator);
+        const nonces_map = std.AutoHashMap(Address, u64).init(arena_allocator);
+        const created_accounts_map = std.AutoHashMap(Address, void).init(arena_allocator);
+        const selfdestructed_accounts_map = std.AutoHashMap(Address, void).init(arena_allocator);
         const code_map = std.AutoHashMap(Address, []const u8).init(arena_allocator);
         const warm_addresses: std.array_hash_map.Custom(Address, void, AddressContext, false) = .empty;
         const warm_storage_slots: std.array_hash_map.Custom(StorageSlotKey, void, StorageSlotKeyContext, false) = .empty;
@@ -144,7 +155,10 @@ pub const MinimalEvm = struct {
             .transient_storage = transient_storage_map,
             .original_storage = original_storage_map,
             .balances = balances_map,
+            .nonces = nonces_map,
             .code = code_map,
+            .created_accounts = created_accounts_map,
+            .selfdestructed_accounts = selfdestructed_accounts_map,
             .warm_addresses = warm_addresses,
             .warm_storage_slots = warm_storage_slots,
             .gas_refund = 0,
@@ -182,7 +196,10 @@ pub const MinimalEvm = struct {
         self.transient_storage = std.AutoHashMap(StorageSlotKey, u256).init(arena_allocator);
         self.original_storage = std.AutoHashMap(StorageSlotKey, u256).init(arena_allocator);
         self.balances = std.AutoHashMap(Address, u256).init(arena_allocator);
+        self.nonces = std.AutoHashMap(Address, u64).init(arena_allocator);
         self.code = std.AutoHashMap(Address, []const u8).init(arena_allocator);
+        self.created_accounts = std.AutoHashMap(Address, void).init(arena_allocator);
+        self.selfdestructed_accounts = std.AutoHashMap(Address, void).init(arena_allocator);
         self.warm_addresses = .empty;
         self.warm_storage_slots = .empty;
         self.gas_refund = 0;
@@ -272,6 +289,33 @@ pub const MinimalEvm = struct {
 
     pub fn setBalance(self: *Self, address: Address, balance: u256) !void {
         try self.balances.put(address, balance);
+    }
+
+    /// Set an account's nonce.
+    pub fn setNonce(self: *Self, address: Address, nonce: u64) !void {
+        try self.nonces.put(address, nonce);
+    }
+
+    /// Nonce of an account; 0 when none was set.
+    pub fn get_nonce(self: *Self, address: Address) u64 {
+        return self.nonces.get(address) orelse 0;
+    }
+
+    /// Record that `address` was created in the current transaction (EIP-6780).
+    pub fn markCreated(self: *Self, address: Address) !void {
+        try self.created_accounts.put(address, {});
+    }
+
+    /// True when `address` was created in the current transaction.
+    pub fn wasCreatedInTransaction(self: *Self, address: Address) bool {
+        return self.created_accounts.contains(address);
+    }
+
+    /// Record that `address` ran SELFDESTRUCT in the current transaction. Returns true
+    /// the first time, false when it had already done so.
+    pub fn markSelfdestructed(self: *Self, address: Address) !bool {
+        const entry = try self.selfdestructed_accounts.getOrPut(address);
+        return !entry.found_existing;
     }
 
     pub fn access_address(self: *Self, address: Address) !u64 {
@@ -449,6 +493,8 @@ pub const MinimalEvm = struct {
         self.warm_addresses.clearRetainingCapacity();
         self.warm_storage_slots.clearRetainingCapacity();
         self.transient_storage.clearRetainingCapacity();
+        self.created_accounts.clearRetainingCapacity();
+        self.selfdestructed_accounts.clearRetainingCapacity();
 
         // No cleanup needed - arena handles it
         return result;
@@ -484,13 +530,36 @@ pub const MinimalEvm = struct {
         };
     }
 
-    /// Handle inner call from frame (like evm.inner_call)
+    /// Handle inner call from frame (like evm.inner_call). The callee runs in a static
+    /// context when the calling frame does.
     pub fn inner_call(
         self: *Self,
         address: Address,
         value: u256,
         input: []const u8,
         gas: u64,
+    ) Error!CallResult {
+        return self.innerCallInContext(address, value, input, gas, false);
+    }
+
+    /// Handle a STATICCALL from a frame: the callee, and every frame below it, runs in a
+    /// static context (EIP-214) where state-changing instructions fail.
+    pub fn inner_static_call(
+        self: *Self,
+        address: Address,
+        input: []const u8,
+        gas: u64,
+    ) Error!CallResult {
+        return self.innerCallInContext(address, 0, input, gas, true);
+    }
+
+    fn innerCallInContext(
+        self: *Self,
+        address: Address,
+        value: u256,
+        input: []const u8,
+        gas: u64,
+        force_static: bool,
     ) Error!CallResult {
         if (self.frames.items.len >= 1024) {
             return CallResult{
@@ -516,8 +585,10 @@ pub const MinimalEvm = struct {
             };
         }
 
-        // Get caller from current frame
-        const caller = if (self.getCurrentFrame()) |frame| frame.address else self.origin;
+        // Get caller from current frame. A static context is inherited from it.
+        const parent = self.getCurrentFrame();
+        const caller = if (parent) |frame| frame.address else self.origin;
+        const is_static = force_static or (if (parent) |frame| frame.is_static else false);
 
         // Create a new frame for the inner call
         const frame = try self.allocator.create(MinimalFrame);
@@ -532,6 +603,8 @@ pub const MinimalEvm = struct {
             @as(*anyopaque, @ptrCast(self)),
             self.hardfork,
         );
+
+        frame.is_static = is_static;
 
         try self.frames.append(self.allocator, frame);
         errdefer _ = self.frames.pop();

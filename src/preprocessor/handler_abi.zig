@@ -130,6 +130,13 @@ pub fn wrap(comptime FrameType: type, comptime step: anytype) FrameType.OpcodeHa
     }.handler;
 }
 
+/// True when instruction hooks (tracer synchronization and schedule validation) are
+/// compiled in for `FrameType`: Debug and ReleaseSafe builds, and any build whose EVM has
+/// the tracer enabled. The same builds keep the runtime tag on dispatch schedule items.
+pub fn hooksEnabled(comptime FrameType: type) bool {
+    return builtin.mode == .debug or builtin.mode == .safe or FrameType.Evm.tracing_enabled;
+}
+
 /// Helpers for handlers written natively against the register ABI.
 ///
 /// A native handler receives the live stack pointer and gas counter as arguments, works
@@ -145,7 +152,7 @@ pub fn Native(comptime FrameType: type) type {
 
         /// True when instruction hooks (tracer synchronization and schedule validation)
         /// are compiled in. Matches the condition in `Frame.beforeInstruction`.
-        pub const traced = builtin.mode == .debug or builtin.mode == .safe or FrameType.Evm.tracing_enabled;
+        pub const traced = hooksEnabled(FrameType);
 
         /// The EVM stack as seen through the stack pointer register. It grows downward:
         /// `sp[0]` is the top item. Bounds are validated once per basic block, so these
@@ -244,6 +251,16 @@ pub fn Native(comptime FrameType: type) type {
 /// saving callee-saved registers: once per frame, not once per instruction.
 pub fn enter(comptime FrameType: type, frame: *FrameType, cursor: [*]const FrameType.Dispatch.Item) ExitCode {
     return @call(.never_inline, cursor[0].opcode_handler, .{ frame, cursor, frame.stack.stack_ptr, frame.gas_remaining });
+}
+
+test {
+    // `src/root.zig` runs this file's tests, and with them the tests of every file
+    // imported here. Only files whose whole import closure has passing tests can be
+    // listed. `dispatch_layout_test.zig`, `../bytecode/bytecode_config.zig` and
+    // `../tracer/minimal_frame.zig` are not: they import files (eips.zig, evm.zig and
+    // what those import) whose own tests no longer compile. Run them with
+    // `zig build test-unit -Dtest-filter='<test name>'` after adding their import here.
+    _ = @import("dispatch_metadata.zig");
 }
 
 test "exit codes round-trip through frame errors" {

@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const log = @import("../log.zig");
 const primitives = @import("voltaire");
 const pc_tracker_mod = @import("pc_tracker.zig");
@@ -17,6 +18,14 @@ pub const TracerConfig = @import("tracer_config.zig").TracerConfig;
 const RingBuffer = @import("ring_buffer.zig").RingBuffer;
 const lifecycle_events = @import("lifecycle_events.zig");
 
+/// True when a failed tracer check (`Tracer.assert`, a handler or schedule mismatch, a
+/// divergence from the MinimalEvm sidecar) aborts the process.
+///
+/// Debug and ReleaseSafe builds abort, so a broken invariant stops where it is found.
+/// ReleaseFast and ReleaseSmall builds never abort: the EVM must not crash a host
+/// process. There the failure is logged and counted in `Tracer.failed_checks`.
+pub const aborts_on_failed_check = builtin.mode == .debug or builtin.mode == .safe;
+
 /// Tracer for EVM execution monitoring and debugging
 /// Tracks execution steps, gas usage, and validates optimized execution
 pub const Tracer = struct {
@@ -34,6 +43,9 @@ pub const Tracer = struct {
     simple_instruction_count: u64 = 0,
     fused_instruction_count: u64 = 0,
     instruction_safety: SafetyCounter(u64, .enabled),
+    /// Number of tracer checks that failed. Stays zero in a healthy run. Builds that do
+    /// not abort on a failed check (see `aborts_on_failed_check`) record failures here.
+    failed_checks: u64 = 0,
     allocator: std.mem.Allocator,
 
     // Internal representation of an execution step
@@ -188,6 +200,16 @@ pub const Tracer = struct {
                     };
                 }
 
+                // EIP-6780: SELFDESTRUCT deletes an account only when it was created
+                // in this transaction, so the sidecar must know that about the frame
+                // it mirrors.
+                if (@hasDecl(@TypeOf(evm_instance.*), "was_created_in_tx") and evm_instance.was_created_in_tx(address)) {
+                    evm.markCreated(address) catch |err| {
+                        log.err("Failed to record created account in MinimalEvm: {}", .{err});
+                        return;
+                    };
+                }
+
                 const frame_gas_remaining = frame.gas_remaining;
 
                 const minimal_frame = evm.allocator.create(MinimalFrame) catch return;
@@ -312,7 +334,7 @@ pub const Tracer = struct {
             const expected_handler = @TypeOf(frame.*).opcode_handlers[opcode_value];
             const actual_handler = cursor[0].opcode_handler;
             if (actual_handler != expected_handler) {
-                self.panic("[HANDLER] Handler mismatch for {s}: expected={*}, actual={*}", .{ opcode_name, expected_handler, actual_handler });
+                self.fail("[HANDLER] Handler mismatch for {s}: expected={*}, actual={*}", .{ opcode_name, expected_handler, actual_handler });
             }
         }
 
@@ -399,7 +421,7 @@ pub const Tracer = struct {
         }
 
         if (next_cursor[0] != .opcode_handler or next_cursor[0].opcode_handler != next_handler) {
-            self.panic("[SCHEDULE] Next handler mismatch at sched_idx={d}", .{self.schedule_index});
+            self.fail("[SCHEDULE] Next handler mismatch at sched_idx={d}", .{self.schedule_index});
         }
 
         if (next_cursor[0] == .opcode_handler) {
@@ -408,7 +430,7 @@ pub const Tracer = struct {
                 if (opcode_int <= 0xff) {
                     const expected_next_handler = @TypeOf(frame.*).opcode_handlers[opcode_int];
                     if (next_handler != expected_next_handler) {
-                        self.panic("[HANDLER] Next handler mismatch: opcode=0x{x:0>2}, expected={*}, actual={*}", .{ opcode_int, expected_next_handler, next_handler });
+                        self.fail("[HANDLER] Next handler mismatch: opcode=0x{x:0>2}, expected={*}, actual={*}", .{ opcode_int, expected_next_handler, next_handler });
                     }
                 }
             }
@@ -557,105 +579,105 @@ pub const Tracer = struct {
         return null;
     }
 
-    /// Validate MinimalEvm state against Frame state
+    /// Validate MinimalEvm state against Frame state.
+    ///
+    /// Runs only when validation is enabled in the tracer config. A tracer that merely
+    /// captures steps (the FFI configuration) also owns a MinimalEvm sidecar, but it did
+    /// not ask for the two interpreters to be compared, so a difference between them is
+    /// not reported there.
     fn validateMinimalEvmState(self: *Tracer, frame: anytype, comptime opcode: UnifiedOpcode) void {
-        if (self.minimal_evm) |evm| {
-            // The sidecar mirrors the top-level frame only.
-            if (frame.getEvm().depth > 1) return;
-            const opcode_name = @tagName(opcode);
+        if (!self.config.enable_validation) return;
+        const evm = self.minimal_evm orelse return;
+        // The sidecar mirrors the top-level frame only.
+        if (frame.getEvm().depth > 1) return;
+        const mf = evm.getCurrentFrame() orelse return;
+        const opcode_name = @tagName(opcode);
 
-            // Compare stack sizes
-            const frame_stack_size = frame.stack.size();
-            const evm_stack_size = (evm.getCurrentFrame() orelse unreachable).stack.items.len;
+        // Compare stack sizes
+        const frame_stack_size = frame.stack.size();
+        const evm_stack_size = mf.stack.items.len;
 
-            if (evm_stack_size != frame_stack_size) {
-                // Allow call-like opcodes a grace period: their host-dependent behavior
-                // can differ under the MinimalEvm stub host. We still log but avoid
-                // aborting on pure size diffs here to keep differential tests focused
-                // on Frame correctness. Content is validated when sizes match.
-                const is_call_like = switch (opcode) {
-                    .CALL, .CALLCODE, .DELEGATECALL, .STATICCALL => true,
-                    else => false,
-                };
-                if (is_call_like) {
-                    self.debug("[EVM2] [DIVERGENCE] (call-like) Stack size mismatch after {s}: MinimalEvm={d} Frame={d}", .{ opcode_name, evm_stack_size, frame_stack_size });
-                    return;
-                }
-                log.err("[EVM2] [DIVERGENCE] Stack size mismatch after {s}:", .{opcode_name});
-                log.err("[EVM2]   MinimalEvm: {d}, Frame: {d}", .{ evm_stack_size, frame_stack_size });
-                // Show top elements for debugging
-                if (evm_stack_size > 0) {
-                    self.panic("  MinimalEvm top: 0x{x}", .{(evm.getCurrentFrame() orelse unreachable).stack.items[evm_stack_size - 1]});
-                }
-                if (frame_stack_size > 0) {
-                    self.panic("  Frame top: 0x{x}", .{frame.stack.peek_unsafe()});
-                }
-                @panic("Stack divergence");
-            } else if (evm_stack_size > 0) {
-                // Compare stack contents
-                const frame_stack = frame.stack.get_slice();
-                for (0..evm_stack_size) |i| {
-                    const evm_val = (evm.getCurrentFrame() orelse unreachable).stack.items[evm_stack_size - 1 - i];
-                    const frame_val = frame_stack[i];
-                    if (evm_val != frame_val) {
-                        log.err("[EVM2] [DIVERGENCE] Stack content mismatch at position {d}:", .{i});
-                        log.err("[EVM2]   MinimalEvm: 0x{x}, Frame: 0x{x}", .{ evm_val, frame_val });
-                        log.err("[EVM2]   Opcode: {s}, MinimalEvm PC: {d}", .{ opcode_name, if (evm.getCurrentFrame()) |f| f.pc else 0 });
-                        // Print full stack contents
-                        log.err("[EVM2]   MinimalEvm stack (top first):", .{});
-                        if (evm.getCurrentFrame()) |f| {
-                            for (0..@min(10, f.stack.items.len)) |j| {
-                                log.err("[EVM2]     [{d}]: 0x{x}", .{ j, f.stack.items[f.stack.items.len - 1 - j] });
-                            }
-                        }
-                        log.err("[EVM2]   Frame stack (top first):", .{});
-                        for (0..@min(10, frame_stack.len)) |j| {
-                            log.err("[EVM2]     [{d}]: 0x{x}", .{ j, frame_stack[j] });
-                        }
-                        @panic("Stack content divergence");
-                    }
-                }
-            }
-
-            // Compare memory sizes
-            const frame_memory_size = if (@hasField(@TypeOf(frame.*), "memory"))
-                frame.memory.size()
-            else
-                0;
-            const evm_memory_size = (evm.getCurrentFrame() orelse unreachable).memory_size;
-
-            if (evm_memory_size != frame_memory_size) {
-                // Memory size mismatch is not critical, just debug log
-                self.debug("[EVM2] [DIVERGENCE] Memory size mismatch:", .{});
-                self.debug("[EVM2]   MinimalEvm: {d}, Frame: {d}", .{ evm_memory_size, frame_memory_size });
-            }
-
-            // Gas validation - different rules for different opcode types
-            const frame_gas_remaining = frame.gas_remaining;
-            const evm_gas_remaining = (evm.getCurrentFrame() orelse unreachable).gas_remaining;
-
-            // Check if this is a jump/terminal opcode that should have exact gas match
-            const is_terminal_opcode = switch (opcode) {
-                .JUMP, .JUMPI, .STOP, .RETURN, .REVERT, .SELFDESTRUCT => true,
+        if (evm_stack_size != frame_stack_size) {
+            // Allow call-like opcodes a grace period: their host-dependent behavior
+            // can differ under the MinimalEvm stub host. We still log but avoid
+            // aborting on pure size diffs here to keep differential tests focused
+            // on Frame correctness. Content is validated when sizes match.
+            const is_call_like = switch (opcode) {
+                .CALL, .CALLCODE, .DELEGATECALL, .STATICCALL => true,
                 else => false,
             };
-
-            if (is_terminal_opcode) {
-                // For jump/terminal opcodes, gas should match exactly
-                // because both EVMs should have consumed the same amount
-                if (frame_gas_remaining != evm_gas_remaining) {
-                    // Gas divergence at terminal state, debug log only
-                    self.debug("[EVM2] [GAS DIVERGENCE] Exact gas mismatch at terminal opcode {s}:", .{opcode_name});
-                    self.debug("[EVM2]   Frame gas_remaining: {d}", .{frame_gas_remaining});
-                    self.debug("[EVM2]   MinimalEvm gas_remaining: {d}", .{evm_gas_remaining});
-                    self.debug("[EVM2]   Difference: {d}", .{@as(i64, frame_gas_remaining) - @as(i64, evm_gas_remaining)});
-                }
-            } else {
-                // For regular opcodes, we don't validate gas due to different charging strategies:
-                // Frame pre-charges gas in blocks while MinimalEvm charges per-opcode.
-                // This causes legitimate divergences during execution that don't indicate bugs.
-                // Gas validation is only meaningful at terminal opcodes where both should be synchronized.
+            if (is_call_like) {
+                self.debug("[EVM2] [DIVERGENCE] (call-like) Stack size mismatch after {s}: MinimalEvm={d} Frame={d}", .{ opcode_name, evm_stack_size, frame_stack_size });
+                return;
             }
+            log.err("[EVM2] [DIVERGENCE] Stack size mismatch after {s}:", .{opcode_name});
+            log.err("[EVM2]   MinimalEvm: {d}, Frame: {d}", .{ evm_stack_size, frame_stack_size });
+            // Show top elements for debugging
+            if (evm_stack_size > 0) {
+                log.err("[EVM2]   MinimalEvm top: 0x{x}", .{mf.stack.items[evm_stack_size - 1]});
+            }
+            if (frame_stack_size > 0) {
+                log.err("[EVM2]   Frame top: 0x{x}", .{frame.stack.peek_unsafe()});
+            }
+            self.fail("[EVM2] Stack divergence after {s}", .{opcode_name});
+            return;
+        }
+
+        // Compare stack contents
+        if (evm_stack_size > 0) {
+            const frame_stack = frame.stack.get_slice();
+            for (0..evm_stack_size) |i| {
+                const evm_val = mf.stack.items[evm_stack_size - 1 - i];
+                const frame_val = frame_stack[i];
+                if (evm_val != frame_val) {
+                    log.err("[EVM2] [DIVERGENCE] Stack content mismatch at position {d}:", .{i});
+                    log.err("[EVM2]   MinimalEvm: 0x{x}, Frame: 0x{x}", .{ evm_val, frame_val });
+                    log.err("[EVM2]   Opcode: {s}, MinimalEvm PC: {d}", .{ opcode_name, mf.pc });
+                    // Print full stack contents
+                    log.err("[EVM2]   MinimalEvm stack (top first):", .{});
+                    for (0..@min(10, mf.stack.items.len)) |j| {
+                        log.err("[EVM2]     [{d}]: 0x{x}", .{ j, mf.stack.items[mf.stack.items.len - 1 - j] });
+                    }
+                    log.err("[EVM2]   Frame stack (top first):", .{});
+                    for (0..@min(10, frame_stack.len)) |j| {
+                        log.err("[EVM2]     [{d}]: 0x{x}", .{ j, frame_stack[j] });
+                    }
+                    self.fail("[EVM2] Stack content divergence after {s}", .{opcode_name});
+                    return;
+                }
+            }
+        }
+
+        // Compare memory sizes
+        const frame_memory_size = if (@hasField(@TypeOf(frame.*), "memory"))
+            frame.memory.size()
+        else
+            0;
+        const evm_memory_size = mf.memory_size;
+
+        if (evm_memory_size != frame_memory_size) {
+            // Memory size mismatch is not critical, just debug log
+            self.debug("[EVM2] [DIVERGENCE] Memory size mismatch:", .{});
+            self.debug("[EVM2]   MinimalEvm: {d}, Frame: {d}", .{ evm_memory_size, frame_memory_size });
+        }
+
+        // Gas is compared only at jump and terminal opcodes. Frame charges static gas
+        // per basic block and MinimalEvm per opcode, so the two legitimately differ
+        // inside a block and agree again where a block ends.
+        const is_terminal_opcode = switch (opcode) {
+            .JUMP, .JUMPI, .STOP, .RETURN, .REVERT, .SELFDESTRUCT => true,
+            else => false,
+        };
+        if (!is_terminal_opcode) return;
+
+        const frame_gas_remaining = frame.gas_remaining;
+        const evm_gas_remaining = mf.gas_remaining;
+        if (frame_gas_remaining != evm_gas_remaining) {
+            // Gas divergence at terminal state, debug log only
+            self.debug("[EVM2] [GAS DIVERGENCE] Exact gas mismatch at terminal opcode {s}:", .{opcode_name});
+            self.debug("[EVM2]   Frame gas_remaining: {d}", .{frame_gas_remaining});
+            self.debug("[EVM2]   MinimalEvm gas_remaining: {d}", .{evm_gas_remaining});
+            self.debug("[EVM2]   Difference: {d}", .{@as(i64, frame_gas_remaining) - @as(i64, evm_gas_remaining)});
         }
     }
 
@@ -669,26 +691,40 @@ pub const Tracer = struct {
         log.debug(format, args);
     }
 
-    pub fn panic(self: *Tracer, comptime format: []const u8, args: anytype) noreturn {
-        const builtin = @import("builtin");
+    /// Report a failed consistency check: a handler or schedule mismatch, or a
+    /// divergence from the MinimalEvm sidecar.
+    ///
+    /// The failure is logged with the recent-instruction ring buffer and counted in
+    /// `failed_checks`. Debug and ReleaseSafe builds then abort. ReleaseFast and
+    /// ReleaseSmall builds return, so the EVM never crashes its host.
+    pub fn fail(self: *Tracer, comptime format: []const u8, args: anytype) void {
+        @branchHint(.cold);
+        self.failed_checks += 1;
         log.err(format, args);
+        self.logRecentOpcodes();
+        abortOnFailedCheck("EVM tracer check failed");
+    }
 
-        // Pretty print the ring buffer on error for debugging
-        if (self.config.enabled) {
-            if (self.recent_opcodes.prettyPrint(self.allocator)) |output| {
-                defer self.allocator.free(output);
-                log.err("{s}", .{output});
-            } else |_| {
-                // If pretty print fails, at least show the count
-                log.err("Ring buffer has {} recent instructions", .{self.recent_opcodes.count});
-            }
+    /// Log the ring buffer of recently executed instructions, for failure reports.
+    fn logRecentOpcodes(self: *Tracer) void {
+        if (!self.config.enabled) return;
+        if (self.recent_opcodes.prettyPrint(self.allocator)) |output| {
+            defer self.allocator.free(output);
+            log.err("{s}", .{output});
+        } else |err| {
+            log.err("Ring buffer has {} recent instructions (could not print them: {})", .{ self.recent_opcodes.count, err });
         }
+    }
 
+    /// Abort the process in builds where a failed tracer check is fatal. Compiles to
+    /// nothing in ReleaseFast and ReleaseSmall.
+    inline fn abortOnFailedCheck(comptime message: []const u8) void {
+        if (comptime !aborts_on_failed_check) return;
         if (builtin.target.cpu.arch == .wasm32 and builtin.target.os.tag == .freestanding) {
-            @panic("EVM execution error");
-        } else {
+            // Safety-checked in the only builds that reach this line: it traps.
             unreachable;
         }
+        @panic(message);
     }
 
     pub fn warn(self: *Tracer, comptime format: []const u8, args: anytype) void {
@@ -701,26 +737,19 @@ pub const Tracer = struct {
         log.info(format, args);
     }
 
-    /// Assert with error message - replaces std.debug.assert
+    /// Assert with error message - replaces std.debug.assert.
+    ///
+    /// A development aid, not a security mechanism: validation that guards memory
+    /// safety happens before the code that asserts. A failed assertion is logged and
+    /// counted. Debug and ReleaseSafe builds then abort; ReleaseFast and ReleaseSmall
+    /// builds continue, so the EVM never crashes its host.
     pub fn assert(self: *Tracer, condition: bool, comptime message: []const u8) void {
         if (!condition) {
+            @branchHint(.cold);
+            self.failed_checks += 1;
             log.err("ASSERTION FAILED: {s}", .{message});
-            if (self.config.enabled) {
-                if (self.recent_opcodes.prettyPrint(self.allocator)) |output| {
-                    defer self.allocator.free(output);
-                    log.err("{s}", .{output});
-                } else |_| {
-                    // If pretty print fails, at least show the count
-                    log.err("Ring buffer has {} recent instructions", .{self.recent_opcodes.count});
-                }
-            }
-
-            const builtin = @import("builtin");
-            if (builtin.target.cpu.arch == .wasm32 and builtin.target.os.tag == .freestanding) {
-                unreachable;
-            } else {
-                @panic(message);
-            }
+            self.logRecentOpcodes();
+            abortOnFailedCheck(message);
         }
     }
 

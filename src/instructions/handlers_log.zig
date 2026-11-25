@@ -17,6 +17,10 @@ pub fn Handlers(FrameType: type) type {
         const dispatch_next = @import("dispatch_next.zig");
         const handler_abi = @import("../preprocessor/handler_abi.zig");
 
+        /// Memory never grows past this many bytes: the frame's configured memory limit,
+        /// capped at what the 32-bit offsets of the memory API can address.
+        const MEMORY_LIMIT: u64 = @min(FrameType.Memory.MEMORY_LIMIT, std.math.maxInt(u32));
+
         /// Generate a log handler for LOG0-LOG4
         pub fn generateLogHandler(topic_count: u8) FrameType.OpcodeHandler {
             if (topic_count > 4) @compileError("Only LOG0 to LOG4 is supported");
@@ -59,38 +63,35 @@ pub fn Handlers(FrameType: type) type {
 
                     // A log without data touches no memory, so its offset is never
                     // inspected. A log with data must fit in addressable memory: a region
-                    // past the 24-bit memory limit can never be paid for. Bounding both
+                    // past the frame's memory limit can never be paid for. Bounding both
                     // operands first keeps their sum from wrapping.
                     var offset_usize: usize = 0;
                     var length_usize: usize = 0;
                     var memory_expansion_cost: u64 = 0;
                     if (length != 0) {
-                        const memory_limit = std.math.maxInt(u24);
-                        if (offset > memory_limit or length > memory_limit) {
+                        if (offset > MEMORY_LIMIT or length > MEMORY_LIMIT) {
                             self.afterComplete(unified_opcode);
                             return Error.OutOfBounds;
                         }
                         offset_usize = @intCast(offset);
                         length_usize = @intCast(length);
-                        const end_offset = offset_usize + length_usize;
-                        if (end_offset > memory_limit) {
+                        const end_offset = @as(u64, offset_usize) + @as(u64, length_usize);
+                        if (end_offset > MEMORY_LIMIT) {
                             self.afterComplete(unified_opcode);
                             return Error.OutOfBounds;
                         }
                         memory_expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(end_offset)));
                     }
 
-                    // Calculate dynamic gas cost: data gas + memory expansion
+                    // Dynamic gas cost: data gas + memory expansion. The comparison is made
+                    // in u64 before the subtraction, so the cost can neither wrap nor trap.
                     const data_gas_cost = @as(u64, length_usize) * GasConstants.LogDataGas;
                     const total_dynamic_gas = data_gas_cost + memory_expansion_cost;
-
-                    // Check gas and consume dynamic gas
-                    // Use negative gas pattern for single-branch out-of-gas detection
-                    self.gas_remaining -= @intCast(total_dynamic_gas);
-                    if (self.gas_remaining < 0) {
+                    if (self.gas_remaining < 0 or total_dynamic_gas > @as(u64, @intCast(self.gas_remaining))) {
                         self.afterComplete(unified_opcode);
                         return Error.OutOfGas;
                     }
+                    self.gas_remaining -= @intCast(total_dynamic_gas);
 
                     // EIP-214: LOG is forbidden in a static context and must fail the call
                     // (emit_log silently drops the log, so the check must live here). Matches

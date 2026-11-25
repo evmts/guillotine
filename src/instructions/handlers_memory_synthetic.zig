@@ -55,18 +55,32 @@ pub fn Handlers(FrameType: type) type {
             return @call(handler_abi.tail_mod, push_mstore8_inline_general_handler, .{ self, cursor, sp, gas });
         }
 
+        /// Memory never grows past this many bytes: the frame's configured memory limit,
+        /// capped at what the 32-bit offsets of the memory API can address.
+        const MEMORY_LIMIT: u64 = @min(FrameType.Memory.MEMORY_LIMIT, std.math.maxInt(u32));
+
+        /// Charge `cost` of dynamic gas. Returns false, and charges nothing, when the
+        /// frame cannot pay. The comparison is made in u64 before the subtraction, so a
+        /// cost wider than GasType can neither wrap nor trap.
+        inline fn chargeGas(self: *FrameType, cost: u64) bool {
+            if (self.gas_remaining < 0 or cost > @as(u64, @intCast(self.gas_remaining))) return false;
+            self.gas_remaining -= @intCast(cost);
+            return true;
+        }
+
         // Dispatch charges the original opcodes' static gas. Expansion depends
         // on memory reached at runtime and must be charged before any access.
-        fn charge_memory_expansion(self: *FrameType, comptime opcode: Dispatch.UnifiedOpcode, offset: usize, size: u24) Error!void {
-            if (offset > std.math.maxInt(u24) - size) {
+        fn charge_memory_expansion(self: *FrameType, comptime opcode: Dispatch.UnifiedOpcode, offset: usize, size: u8) Error!void {
+            if (offset > MEMORY_LIMIT - size) {
                 self.afterComplete(opcode);
                 return Error.OutOfBounds;
             }
+            if (comptime FrameType.config.disable_gas_checks) return;
             const cost = self.memory.get_expansion_cost(@intCast(offset + size));
-            self.consumeGasChecked(@intCast(cost)) catch |err| {
+            if (!chargeGas(self, cost)) {
                 self.afterComplete(opcode);
-                return err;
-            };
+                return Error.OutOfGas;
+            }
         }
 
         /// PUSH_MLOAD_INLINE - Fused PUSH+MLOAD with inline offset (≤8 bytes).
@@ -91,12 +105,12 @@ pub fn Handlers(FrameType: type) type {
             try charge_memory_expansion(self, .PUSH_MLOAD_INLINE, offset_usize, 32);
 
             // Read 32 bytes from memory
-            // Use std.math.cast to safely convert to u24, returns null if out of bounds
-            const offset_u24 = std.math.cast(u24, offset_usize) orelse {
+            // The expansion charge above bounds the offset by MEMORY_LIMIT, which fits u32.
+            const offset_u32 = std.math.cast(u32, offset_usize) orelse {
                 self.afterComplete(.PUSH_MLOAD_INLINE);
                 return Error.OutOfBounds;
             };
-            const value_u256 = self.memory.get_u256_evm(self.getEvm().getCallArenaAllocator(), offset_u24) catch |err| switch (err) {
+            const value_u256 = self.memory.get_u256_evm(self.getEvm().getCallArenaAllocator(), offset_u32) catch |err| switch (err) {
                 memory_mod.MemoryError.OutOfBounds => {
                     self.afterComplete(.PUSH_MLOAD_INLINE);
                     return Error.OutOfBounds;
@@ -142,12 +156,12 @@ pub fn Handlers(FrameType: type) type {
             try charge_memory_expansion(self, .PUSH_MLOAD_POINTER, offset_usize, 32);
 
             // Read 32 bytes from memory
-            // Use std.math.cast to safely convert to u24, returns null if out of bounds
-            const offset_u24 = std.math.cast(u24, offset_usize) orelse {
+            // The expansion charge above bounds the offset by MEMORY_LIMIT, which fits u32.
+            const offset_u32 = std.math.cast(u32, offset_usize) orelse {
                 self.afterComplete(.PUSH_MLOAD_POINTER);
                 return Error.OutOfBounds;
             };
-            const value_u256 = self.memory.get_u256_evm(self.getEvm().getCallArenaAllocator(), offset_u24) catch |err| switch (err) {
+            const value_u256 = self.memory.get_u256_evm(self.getEvm().getCallArenaAllocator(), offset_u32) catch |err| switch (err) {
                 memory_mod.MemoryError.OutOfBounds => {
                     self.afterComplete(.PUSH_MLOAD_POINTER);
                     return Error.OutOfBounds;
@@ -201,12 +215,12 @@ pub fn Handlers(FrameType: type) type {
 
             // Store 32 bytes to memory
             const value_u256 = @as(u256, value);
-            // Use std.math.cast to safely convert to u24, returns null if out of bounds
-            const offset_u24 = std.math.cast(u24, offset_usize) orelse {
+            // The expansion charge above bounds the offset by MEMORY_LIMIT, which fits u32.
+            const offset_u32 = std.math.cast(u32, offset_usize) orelse {
                 self.afterComplete(.PUSH_MSTORE_INLINE);
                 return Error.OutOfBounds;
             };
-            self.memory.set_u256_evm(self.getEvm().getCallArenaAllocator(), offset_u24, value_u256) catch |err| switch (err) {
+            self.memory.set_u256_evm(self.getEvm().getCallArenaAllocator(), offset_u32, value_u256) catch |err| switch (err) {
                 memory_mod.MemoryError.OutOfBounds => {
                     self.afterComplete(.PUSH_MSTORE_INLINE);
                     return Error.OutOfBounds;
@@ -253,12 +267,12 @@ pub fn Handlers(FrameType: type) type {
 
             // Store 32 bytes to memory
             const value_u256 = @as(u256, value);
-            // Use std.math.cast to safely convert to u24, returns null if out of bounds
-            const offset_u24 = std.math.cast(u24, offset_usize) orelse {
+            // The expansion charge above bounds the offset by MEMORY_LIMIT, which fits u32.
+            const offset_u32 = std.math.cast(u32, offset_usize) orelse {
                 self.afterComplete(.PUSH_MSTORE_POINTER);
                 return Error.OutOfBounds;
             };
-            self.memory.set_u256_evm(self.getEvm().getCallArenaAllocator(), offset_u24, value_u256) catch |err| switch (err) {
+            self.memory.set_u256_evm(self.getEvm().getCallArenaAllocator(), offset_u32, value_u256) catch |err| switch (err) {
                 memory_mod.MemoryError.OutOfBounds => {
                     self.afterComplete(.PUSH_MSTORE_POINTER);
                     return Error.OutOfBounds;
@@ -302,8 +316,8 @@ pub fn Handlers(FrameType: type) type {
             }
             const offset_usize = @as(usize, @intCast(offset));
 
-            // Check if offset fits in u24
-            if (offset_usize > std.math.maxInt(u24)) {
+            // Check that the offset lies inside addressable memory
+            if (offset_usize > MEMORY_LIMIT) {
                 self.afterComplete(.PUSH_MSTORE8_INLINE);
                 return Error.OutOfBounds;
             }
@@ -312,7 +326,7 @@ pub fn Handlers(FrameType: type) type {
 
             // Store the least significant byte
             const byte_value = @as(u8, @truncate(value));
-            self.memory.set_byte_evm(self.getEvm().getCallArenaAllocator(), @as(u24, @intCast(offset_usize)), byte_value) catch |err| switch (err) {
+            self.memory.set_byte_evm(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(offset_usize)), byte_value) catch |err| switch (err) {
                 memory_mod.MemoryError.OutOfBounds => {
                     self.afterComplete(.PUSH_MSTORE8_INLINE);
                     return Error.OutOfBounds;
@@ -355,8 +369,8 @@ pub fn Handlers(FrameType: type) type {
             }
             const offset_usize = @as(usize, @intCast(offset));
 
-            // Check if offset fits in u24
-            if (offset_usize > std.math.maxInt(u24)) {
+            // Check that the offset lies inside addressable memory
+            if (offset_usize > MEMORY_LIMIT) {
                 self.afterComplete(.PUSH_MSTORE8_POINTER);
                 return Error.OutOfBounds;
             }
@@ -365,7 +379,7 @@ pub fn Handlers(FrameType: type) type {
 
             // Store the least significant byte
             const byte_value = @as(u8, @truncate(value));
-            self.memory.set_byte_evm(self.getEvm().getCallArenaAllocator(), @as(u24, @intCast(offset_usize)), byte_value) catch |err| switch (err) {
+            self.memory.set_byte_evm(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(offset_usize)), byte_value) catch |err| switch (err) {
                 memory_mod.MemoryError.OutOfBounds => {
                     self.afterComplete(.PUSH_MSTORE8_POINTER);
                     return Error.OutOfBounds;

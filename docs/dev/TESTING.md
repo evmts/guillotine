@@ -359,7 +359,7 @@ Diagnosis checklist:
 
 □ Synthetic opcode step count correct?
   └── PUSH_ADD_INLINE = 2 MinimalEvm steps
-  └── FUNCTION_DISPATCH = 4 MinimalEvm steps
+  └── ISZERO_JUMPI = 3 MinimalEvm steps
 
 □ Cursor vs PC confusion?
   └── Frame uses cursor (schedule index)

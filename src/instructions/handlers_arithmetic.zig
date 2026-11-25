@@ -3,6 +3,7 @@ const FrameConfig = @import("../frame/frame_config.zig").FrameConfig;
 const GasConstants = @import("voltaire").GasConstants;
 const log = @import("../log.zig");
 const eips = @import("../eips_and_hardforks/eips.zig");
+const verified_ops = @import("../core/verified_ops.zig");
 
 /// Arithmetic opcode handlers for the EVM stack frame.
 /// These are generic structs that return static handlers for a given FrameType.
@@ -75,54 +76,23 @@ pub fn Handlers(FrameType: type) type {
         }
 
         /// SDIV opcode (0x05) - Signed integer division.
-        // Branchless implementation for consistent performance
+        ///
+        /// Branchless: unsigned division of the operands' magnitudes, then the sign is
+        /// re-applied by `verified_ops.sdivFromUnsignedQuotient`. That function is the
+        /// one the SMT and Lean proofs cover (`sdiv_branchless_equiv`); with
+        /// `wrapping_div(x, 0) == 0` it yields 0 for a zero divisor and `MIN_SIGNED` for
+        /// `MIN_SIGNED / -1` without a special case.
         pub fn sdiv(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             var s = N.StackView{ .sp = sp };
             N.before(self, .SDIV, cursor, s.sp, gas);
             const top = s.pop_unsafe();
             const second = s.peek_unsafe();
 
-            const SIGN_BIT = @as(u256, 1) << 255;
-            const MIN_SIGNED = SIGN_BIT;
+            const top_abs = FrameType.UintN.from_native(verified_ops.absTwoComp(top));
+            const second_abs = FrameType.UintN.from_native(verified_ops.absTwoComp(second));
+            const quotient = top_abs.wrapping_div(second_abs).to_native();
 
-            if (second == 0) {
-                s.set_top_unsafe(0);
-                return N.next(self, .SDIV, cursor, s.sp, gas);
-            }
-            if (top == MIN_SIGNED and second == std.math.maxInt(u256)) {
-                s.set_top_unsafe(MIN_SIGNED);
-                return N.next(self, .SDIV, cursor, s.sp, gas);
-            }
-
-            // This section implements branchless two's complement arithmetic.
-            // 1. Extract sign bits (1 for negative, 0 for positive).
-            // 2. Create a mask that is all 1s for negative numbers and all 0s for positive.
-            // 3. Compute the absolute value by XORing with the mask and subtracting the mask.
-            //    - For negative `a`: `(a ^ 0xFF..FF) - 0xFF..FF` is equivalent to `~a + 1`, which is `-a`.
-            //    - For positive `a`: `(a ^ 0) - 0` is `a`.
-            // 4. Perform unsigned division on the absolute values.
-            // 5. Determine the result's sign by XORing the operand signs.
-            // 6. Conditionally negate the result using the same mask trick.
-            const top_sign = top >> 255;
-            const second_sign = second >> 255;
-
-            const top_mask = @as(u256, 0) -% top_sign;
-            const second_mask = @as(u256, 0) -% second_sign;
-
-            const top_abs = (top ^ top_mask) -% top_mask;
-            const second_abs = (second ^ second_mask) -% second_mask;
-
-            const top_abs_u256 = FrameType.UintN.from_native(top_abs);
-            const second_abs_u256 = FrameType.UintN.from_native(second_abs);
-            const quotient_u256 = top_abs_u256.wrapping_div(second_abs_u256);
-            const quotient = quotient_u256.to_native();
-
-            const result_sign = top_sign ^ second_sign;
-            const result_mask = @as(u256, 0) -% result_sign;
-
-            const result = (quotient ^ result_mask) -% result_mask;
-
-            s.set_top_unsafe(result);
+            s.set_top_unsafe(verified_ops.sdivFromUnsignedQuotient(top, second, quotient));
             return N.next(self, .SDIV, cursor, s.sp, gas);
         }
 
@@ -141,45 +111,22 @@ pub fn Handlers(FrameType: type) type {
         }
 
         /// SMOD opcode (0x07) - Signed modulo operation.
-        // Branchless implementation for consistent performance
+        ///
+        /// Branchless: unsigned remainder of the operands' magnitudes, then the dividend's
+        /// sign is re-applied by `verified_ops.smodFromUnsignedRem`, the function the SMT
+        /// and Lean proofs cover (`smod_branchless_equiv`). With `wrapping_rem(x, 0) == 0`
+        /// it yields 0 for a zero divisor and for `MIN_SIGNED % -1` without a special case.
         pub fn smod(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             var s = N.StackView{ .sp = sp };
             N.before(self, .SMOD, cursor, s.sp, gas);
             const top = s.pop_unsafe();
             const second = s.peek_unsafe();
 
-            const SIGN_BIT = @as(u256, 1) << 255;
-            const MIN_SIGNED = SIGN_BIT;
+            const top_abs = FrameType.UintN.from_native(verified_ops.absTwoComp(top));
+            const second_abs = FrameType.UintN.from_native(verified_ops.absTwoComp(second));
+            const remainder = top_abs.wrapping_rem(second_abs).to_native();
 
-            if (second == 0) {
-                s.set_top_unsafe(0);
-                return N.next(self, .SMOD, cursor, s.sp, gas);
-            }
-            if (top == MIN_SIGNED and second == std.math.maxInt(u256)) { // -1 in two's complement
-                s.set_top_unsafe(0);
-                return N.next(self, .SMOD, cursor, s.sp, gas);
-            }
-
-            // This section implements branchless two's complement arithmetic.
-            // The result of a % n takes the sign of the dividend `a`.
-            const top_sign = top >> 255;
-            const second_sign = second >> 255;
-
-            const top_mask = @as(u256, 0) -% top_sign;
-            const second_mask = @as(u256, 0) -% second_sign;
-
-            const top_abs = (top ^ top_mask) -% top_mask;
-            const second_abs = (second ^ second_mask) -% second_mask;
-
-            const top_abs_u256 = FrameType.UintN.from_native(top_abs);
-            const second_abs_u256 = FrameType.UintN.from_native(second_abs);
-            const remainder_u256 = top_abs_u256.wrapping_rem(second_abs_u256);
-            const remainder = remainder_u256.to_native();
-
-            // Result takes sign of dividend (top_sign)
-            const result = (remainder ^ top_mask) -% top_mask;
-
-            s.set_top_unsafe(result);
+            s.set_top_unsafe(verified_ops.smodFromUnsignedRem(top, remainder));
             return N.next(self, .SMOD, cursor, s.sp, gas);
         }
 
@@ -301,22 +248,17 @@ pub fn Handlers(FrameType: type) type {
             // EIP-160 (Spurious Dragon) and 50 from then on. The 10 gas base is static and
             // already charged with the basic block (OPCODE_INFO[EXP].gas_cost); the handler
             // charges only the dynamic part.
-            var exp_bytes: u32 = 0;
-            if (exponent > 0) {
-                var temp_exp = exponent;
-                while (temp_exp > 0) : (temp_exp = std.math.shr(WordType, temp_exp, 8)) {
-                    exp_bytes += 1;
-                }
-            }
+            // Byte length of the exponent, from the verified branchless form
+            // (`exp_gas_bytes_equiv`).
+            const exp_bytes: u64 = verified_ops.expGasByteLenFast(exponent);
 
-            const exp_byte_gas: u32 = comptime @intCast((eips.Eips{ .hardfork = FrameType.config.hardfork }).eip_160_exp_byte_gas_cost());
+            const exp_byte_gas: u64 = comptime @intCast((eips.Eips{ .hardfork = FrameType.config.hardfork }).eip_160_exp_byte_gas_cost());
             const gas_cost = exp_byte_gas * exp_bytes;
-            // Use negative gas pattern for single-branch out-of-gas detection
-            self.gas_remaining -= @intCast(gas_cost);
-            if (self.gas_remaining < 0) {
+            if (self.gas_remaining < 0 or gas_cost > @as(u64, @intCast(self.gas_remaining))) {
                 self.afterComplete(.EXP);
                 return Error.OutOfGas;
             }
+            self.gas_remaining -= @intCast(gas_cost);
 
             // Calculate base^exponent with wrapping multiplication (mod 2^256)
             var result: WordType = 1;
@@ -333,37 +275,14 @@ pub fn Handlers(FrameType: type) type {
         }
 
         /// SIGNEXTEND opcode (0x0b) - Sign extend operation.
+        /// Uses `verified_ops.signextendFast`, the branchless form the SMT and Lean
+        /// proofs show equal to the Yellow Paper definition (`signextend_branchless_equiv`).
         pub fn signextend(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             var s = N.StackView{ .sp = sp };
             N.before(self, .SIGNEXTEND, cursor, s.sp, gas);
             const ext = s.pop_unsafe(); // Extension byte index (top of stack)
             const value = s.peek_unsafe(); // Value to extend (second element)
-
-            var result: WordType = undefined;
-
-            // If ext is too large to fit in usize or >= 32, return value unchanged
-            // SIGNEXTEND with byte position >= 32 means no sign extension needed
-            if (ext > std.math.maxInt(usize) or ext >= 32) {
-                result = value;
-            } else {
-                const ext_usize = @as(usize, @intCast(ext));
-                const bit_index = ext_usize * 8 + 7;
-
-                // Cast bit_index to the appropriate shift type
-                const shift_amount = @as(u8, @intCast(bit_index));
-
-                const mask = std.math.shl(WordType, @as(WordType, 1), shift_amount) - 1;
-                const sign_bit = std.math.shr(WordType, value, shift_amount) & 1;
-                if (sign_bit == 1) {
-                    @branchHint(.unlikely);
-                    result = value | ~mask;
-                } else {
-                    result = value & mask;
-                }
-            }
-
-            s.set_top_unsafe(result);
-
+            s.set_top_unsafe(verified_ops.signextendFast(ext, value));
             return N.next(self, .SIGNEXTEND, cursor, s.sp, gas);
         }
     };
