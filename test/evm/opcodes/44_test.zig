@@ -80,3 +80,45 @@ test "opcode 0x44 differential test" {
     var guillotine_result = guillotine_evm.call(call_params);
     defer guillotine_result.deinit(allocator);
 }
+
+test "PREVRANDAO fork transition with distinct difficulty and traced randomness" {
+    const allocator = std.testing.allocator;
+    const randao = [32]u8{ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32 };
+    inline for (.{ .LONDON, .MERGE, .CANCUN }) |fork| {
+        var database = evm.Database.init(allocator);
+        defer database.deinit();
+        const caller = primitives.Address{ .bytes = @splat(0x10) };
+        const contract = primitives.Address{ .bytes = @splat(0x20) };
+        const hash = try database.set_code(&.{ 0x44, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3 });
+        try database.set_account(contract.bytes, .{
+            .balance = 0,
+            .nonce = 1,
+            .code_hash = hash,
+            .storage_root = @splat(0),
+        });
+        var vm = try evm.Evm(.{
+            .eips = .{ .hardfork = fork },
+            .enable_fusion = false,
+            .tracer_config = .{ .enabled = true, .enable_validation = true },
+        }).init(allocator, &database, .{
+            .gas_limit = 30_000_000,
+            .coinbase = primitives.ZERO_ADDRESS,
+            .number = 1,
+            .timestamp = 1,
+            .difficulty = 0x20000,
+            .base_fee = 0,
+            .prev_randao = randao,
+        }, .{ .gas_limit = 1_000_000, .coinbase = primitives.ZERO_ADDRESS, .chain_id = 1 }, 0, caller);
+        defer vm.deinit();
+        var result = vm.call(.{ .call = .{ .caller = caller, .to = contract, .value = 0, .input = &.{}, .gas = 1_000_000 } });
+        defer result.deinit(allocator);
+        try std.testing.expect(result.success);
+        try std.testing.expect(vm.tracer.minimal_evm != null);
+        var expected = randao;
+        if (fork == .LONDON) {
+            expected = @splat(0);
+            expected[29] = 2;
+        }
+        try std.testing.expectEqualSlices(u8, &expected, result.output);
+    }
+}

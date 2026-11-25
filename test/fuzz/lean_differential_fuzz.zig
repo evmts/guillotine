@@ -1165,7 +1165,7 @@ fn sstoreHelperJob(job: SstoreHelperJob, a: Allocator) anyerror![]const u8 {
     const cost = job.eips.sstore_gas_cost(job.current, job.new, job.original, job.cold);
     var answer = Line.init(a);
     try answer.num(cost.gas);
-    try answer.signed(@as(i64, @bitCast(cost.refund)));
+    try answer.signed(cost.refund);
     return answer.str();
 }
 

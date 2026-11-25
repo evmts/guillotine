@@ -415,7 +415,7 @@ pub fn Handlers(FrameType: type) type {
             const size_usize = @as(usize, @intCast(size));
 
             // Calculate gas cost for memory expansion
-            const memory_end = offset_usize + size_usize;
+            const memory_end = std.math.add(usize, offset_usize, size_usize) catch return Error.OutOfBounds;
             // Check if values fit in u24 (memory limit)
             if (offset_usize > std.math.maxInt(u24) or size_usize > std.math.maxInt(u24) or memory_end > std.math.maxInt(u24)) {
                 return Error.OutOfBounds;
@@ -475,7 +475,7 @@ pub fn Handlers(FrameType: type) type {
             const size_usize = @as(usize, @intCast(size));
 
             // Calculate gas cost for memory expansion
-            const memory_end = offset_usize + size_usize;
+            const memory_end = std.math.add(usize, offset_usize, size_usize) catch return Error.OutOfBounds;
             // Check if values fit in u24 (memory limit)
             if (offset_usize > std.math.maxInt(u24) or size_usize > std.math.maxInt(u24) or memory_end > std.math.maxInt(u24)) {
                 return Error.OutOfBounds;

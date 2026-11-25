@@ -1325,13 +1325,11 @@ fn applyTx(
             .chain_id = test_case.chain_id,
             .number = env.number,
             .timestamp = env.timestamp,
-            // EIP-4399: from Paris the header's difficulty field carries prevrandao, and
-            // opcode 0x44 (PREVRANDAO) reads it.
-            .difficulty = if (fork.atLeast(.Paris)) std.mem.readInt(u256, &prevrandao, .big) else env.difficulty,
+            .difficulty = env.difficulty,
             .gas_limit = env.gas_limit,
             .coinbase = coinbase_address,
             .base_fee = env.base_fee orelse 0,
-            .prev_randao = prevrandao,
+            .prev_randao = if (fork.atLeast(.Paris)) prevrandao else zero_hash,
             .blob_base_fee = validated.blob_base_fee,
             .blob_versioned_hashes = blob_hashes,
             .block_hashes = ancestor_hashes,

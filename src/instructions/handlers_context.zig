@@ -581,8 +581,11 @@ pub fn Handlers(FrameType: type) type {
             const return_data = self.getEvm().get_return_data() orelse &[_]u8{};
 
             // EIP-211: reading past the end of return data is an exceptional halt, even for
-            // a zero-length copy (offset + size > len). Compare in u256 so huge values cannot wrap.
-            const read_end = @as(u256, offset) + @as(u256, length);
+            // a zero-length copy (offset + size > len). Reject overflowing operands too.
+            const read_end = std.math.add(u256, offset, length) catch {
+                self.afterComplete(.RETURNDATACOPY);
+                return Error.OutOfBounds;
+            };
             if (@as(u256, offset) > return_data.len or read_end > return_data.len) {
                 self.afterComplete(.RETURNDATACOPY);
                 return Error.OutOfBounds;
@@ -725,12 +728,16 @@ pub fn Handlers(FrameType: type) type {
             return dispatch_next.nextInstruction(FrameType, self, cursor, .NUMBER);
         }
 
-        /// DIFFICULTY opcode (0x44) - Get the current block's difficulty.
+        /// DIFFICULTY/PREVRANDAO opcode (0x44) - Get difficulty before Merge, randomness after.
         /// Stack: [] → [difficulty]
         pub fn difficulty(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             self.beforeInstruction(.PREVRANDAO, cursor);
             const block_info = self.getEvm().get_block_info();
-            const difficulty_word = @as(WordType, @truncate(block_info.difficulty));
+            const value = if (comptime FrameType.config.hardfork.isAtLeast(.MERGE))
+                std.mem.readInt(u256, &block_info.prev_randao, .big)
+            else
+                block_info.difficulty;
+            const difficulty_word = @as(WordType, @truncate(value));
             {
                 (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "DIFFICULTY requires stack space");
             }

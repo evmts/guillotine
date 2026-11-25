@@ -80,3 +80,18 @@ test "opcode 0x55 differential test" {
     var guillotine_result = guillotine_evm.call(call_params);
     defer guillotine_result.deinit(allocator);
 }
+
+test "sstore helper regression - fork pricing and signed refunds" {
+    const cases = [_]struct { fork: evm.Hardfork, current: u256, new: u256, original: u256, gas: u64, refund: i64 }{
+        .{ .fork = .PETERSBURG, .current = 0, .new = 0, .original = 0, .gas = 5000, .refund = 0 },
+        .{ .fork = .ISTANBUL, .current = 0, .new = 0, .original = 0, .gas = 800, .refund = 0 },
+        .{ .fork = .BERLIN, .current = 1, .new = 0, .original = 1, .gas = 2900, .refund = 15000 },
+        .{ .fork = .BERLIN, .current = 0, .new = 1, .original = 1, .gas = 100, .refund = -12200 },
+        .{ .fork = .LONDON, .current = 0, .new = 1, .original = 1, .gas = 100, .refund = -2000 },
+    };
+    for (cases) |case| {
+        const cost = (evm.Eips{ .hardfork = case.fork }).sstore_gas_cost(case.current, case.new, case.original, false);
+        try std.testing.expectEqual(case.gas, cost.gas);
+        try std.testing.expectEqual(case.refund, cost.refund);
+    }
+}

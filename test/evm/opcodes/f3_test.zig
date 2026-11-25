@@ -80,3 +80,41 @@ test "opcode 0xf3 differential test" {
     var guillotine_result = guillotine_evm.call(call_params);
     defer guillotine_result.deinit(allocator);
 }
+
+test "memory range overflow returns a graceful exceptional halt" {
+    const allocator = std.testing.allocator;
+    const programs = [_][]const u8{
+        &.{ 0x67, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x60, 0x40, 0xf3 },
+        &.{ 0x67, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x60, 0x40, 0xfd },
+        // RETURNDATACOPY: size=max(u256), source=1, destination=0.
+        &([_]u8{0x7f} ++ @as([32]u8, @splat(0xff)) ++ [_]u8{ 0x60, 0x01, 0x60, 0x00, 0x3e }),
+    };
+    for (programs) |program| {
+        var database = evm.Database.init(allocator);
+        defer database.deinit();
+        const caller = primitives.Address{ .bytes = @splat(0x10) };
+        const contract = primitives.Address{ .bytes = @splat(0x20) };
+        const hash = try database.set_code(program);
+        try database.set_account(contract.bytes, .{
+            .balance = 0,
+            .nonce = 1,
+            .code_hash = hash,
+            .storage_root = @splat(0),
+        });
+        var vm = try evm.Evm(.{}).init(allocator, &database, .{
+            .gas_limit = 30_000_000,
+            .coinbase = primitives.ZERO_ADDRESS,
+            .number = 1,
+            .timestamp = 1,
+            .difficulty = 0,
+            .base_fee = 0,
+            .prev_randao = @splat(0),
+        }, .{ .gas_limit = 1_000_000, .coinbase = primitives.ZERO_ADDRESS, .chain_id = 1 }, 0, caller);
+        defer vm.deinit();
+        var result = vm.call(.{ .call = .{ .caller = caller, .to = contract, .value = 0, .input = &.{}, .gas = 1_000_000 } });
+        defer result.deinit(allocator);
+        try std.testing.expect(!result.success);
+        try std.testing.expectEqual(@as(u64, 0), result.gas_left);
+        try std.testing.expectEqual(@as(usize, 0), result.output.len);
+    }
+}
