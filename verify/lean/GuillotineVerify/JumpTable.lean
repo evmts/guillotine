@@ -16,7 +16,7 @@ def bsearchRange (entries : List (Entry α)) (pc lo hi : Nat) (bound : hi ≤ en
     else bsearchRange entries pc lo mid (by dsimp [mid]; omega)
   else none
 termination_by hi - lo
-decreasing_by all_goals dsimp [mid]; omega
+decreasing_by all_goals (first | omega | (dsimp [mid]; omega))
 
 private theorem bsearchRange_spec (entries : List (Entry α)) (pc lo hi : Nat)
     (bound : hi ≤ entries.length) (sorted : entries.Pairwise (fun a b => a.1 < b.1)) :
@@ -24,66 +24,62 @@ private theorem bsearchRange_spec (entries : List (Entry α)) (pc lo hi : Nat)
       ∀ (i : Nat) (il : i < entries.length), lo ≤ i → i < hi → (entries[i]'il).1 ≠ pc) ∧
     (∀ e, bsearchRange entries pc lo hi bound = some e →
       ∃ (i : Nat) (il : i < entries.length), lo ≤ i ∧ i < hi ∧ entries[i]'il = e ∧ e.1 = pc) := by
-  have ordered := List.pairwise_iff_getElem.mp sorted
+  have ordered : ∀ (i j : Nat) (il : i < entries.length) (jl : j < entries.length), i < j →
+      (entries[i]'il).1 < (entries[j]'jl).1 := fun i j il jl lt =>
+    List.pairwise_iff_getElem.mp sorted i j il jl lt
   rw [bsearchRange]
   split
   · rename_i active
     dsimp only
-    let mid := lo + (hi - lo) / 2
-    have ml : lo ≤ mid := by dsimp [mid]; omega
-    have mh : mid < hi := by dsimp [mid]; omega
-    have mb : mid < entries.length := by omega
-    let e := entries[mid]'mb
-    change ( (if e.1 = pc then some e else if e.1 < pc then
-          bsearchRange entries pc (mid + 1) hi bound else
-          bsearchRange entries pc lo mid (by omega)) = none ↔ _) ∧ _
-    by_cases eq : e.1 = pc
-    · simp only [if_pos eq, reduceCtorEq, false_iff, Option.some.injEq]
-      constructor
-      · exact fun h => h mid mb ml mh eq
-      · rintro _ rfl
-        exact ⟨mid, mb, ml, mh, rfl, eq⟩
-    · by_cases left : e.1 < pc
-      · simp only [if_neg eq, if_pos left]
-        have smaller := bsearchRange_spec entries pc (mid + 1) hi bound sorted
+    have ml : lo ≤ lo + (hi - lo) / 2 := by omega
+    have mh : lo + (hi - lo) / 2 < hi := by omega
+    have mb : lo + (hi - lo) / 2 < entries.length := by omega
+    by_cases eq : (entries[lo + (hi - lo) / 2]'mb).1 = pc
+    · rw [if_pos eq]
+      refine ⟨⟨fun h => (by cases h), fun h => absurd eq (h _ mb ml mh)⟩, ?_⟩
+      intro found he
+      cases he
+      exact ⟨_, mb, ml, mh, rfl, eq⟩
+    · rw [if_neg eq]
+      by_cases left : (entries[lo + (hi - lo) / 2]'mb).1 < pc
+      · rw [if_pos left]
+        have smaller := bsearchRange_spec entries pc (lo + (hi - lo) / 2 + 1) hi bound sorted
         constructor
         · rw [smaller.1]
           constructor
           · intro no i il low high hp
-            by_cases right : mid < i
+            by_cases right : lo + (hi - lo) / 2 < i
             · exact no i il (by omega) high hp
-            · have le : (entries[i]'il).1 ≤ e.1 := by
-                by_cases same : i = mid
-                · subst i; exact Nat.le_refl _
-                · exact Nat.le_of_lt (ordered il mb (by omega))
+            · have le : (entries[i]'il).1 ≤ (entries[lo + (hi - lo) / 2]'mb).1 := by
+                by_cases same : i = lo + (hi - lo) / 2
+                · subst same; exact Nat.le_refl _
+                · exact Nat.le_of_lt (ordered i _ il mb (by omega))
               omega
           · intro no i il low high
             exact no i il (by omega) high
-        · intro e found
-          obtain ⟨i, il, low, high, hv, hp⟩ := smaller.2 e found
+        · intro found he
+          obtain ⟨i, il, low, high, hv, hp⟩ := smaller.2 found he
           exact ⟨i, il, by omega, high, hv, hp⟩
-      · simp only [if_neg eq, if_neg left]
-        have smaller := bsearchRange_spec entries pc lo mid (by omega) sorted
+      · rw [if_neg left]
+        have smaller := bsearchRange_spec entries pc lo (lo + (hi - lo) / 2) (by omega) sorted
         constructor
         · rw [smaller.1]
           constructor
           · intro no i il low high hp
-            by_cases first : i < mid
+            by_cases first : i < lo + (hi - lo) / 2
             · exact no i il low first hp
-            · have le : e.1 ≤ (entries[i]'il).1 := by
-                by_cases same : i = mid
-                · subst i; exact Nat.le_refl _
-                · exact Nat.le_of_lt (ordered mb il (by omega))
+            · have le : (entries[lo + (hi - lo) / 2]'mb).1 ≤ (entries[i]'il).1 := by
+                by_cases same : i = lo + (hi - lo) / 2
+                · subst same; exact Nat.le_refl _
+                · exact Nat.le_of_lt (ordered _ i mb il (by omega))
               omega
           · intro no i il low high
             exact no i il low (by omega)
-        · intro e found
-          obtain ⟨i, il, low, high, hv, hp⟩ := smaller.2 e found
+        · intro found he
+          obtain ⟨i, il, low, high, hv, hp⟩ := smaller.2 found he
           exact ⟨i, il, low, by omega, hv, hp⟩
   · rename_i inactive
-    simp only [reduceCtorEq, true_iff, false_implies, implies_true, and_true]
-    intro i _ low high
-    omega
+    refine ⟨⟨fun _ i _ low high => (by omega), fun _ => rfl⟩, fun found he => (by cases he)⟩
 termination_by hi - lo
 decreasing_by all_goals omega
 
@@ -106,10 +102,10 @@ theorem denseLookup_eq_bsearch (entries : List (Entry α)) (len pc : Nat)
       (same : (entries[i]'il).1 = (entries[j]'jl).1) : i = j := by
     have ord := List.pairwise_iff_getElem.mp sorted
     by_cases left : i < j
-    · have := ord il jl left
+    · have := ord i j il jl left
       omega
     · by_cases right : j < i
-      · have := ord jl il right
+      · have := ord j i jl il right
         omega
       · omega
   unfold denseLookup buildDense bsearch

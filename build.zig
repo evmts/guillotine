@@ -1030,6 +1030,34 @@ pub fn build(b: *std.Build) void {
         fuzz_campaign_step.dependOn(&run_fuzz_campaign.step);
     }
 
+    // Zig-vs-Lean differential fuzz suite: Guillotine against the executable Lean 4
+    // reference specification in verify/lean/GuillotineSpec (FUZZ_SEED / FUZZ_ITERS).
+    {
+        const lean_diff_exe = b.addExecutable(.{
+            .name = "guillotine-lean-diff",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("test/fuzz/lean_differential_fuzz.zig"),
+                .target = target,
+                .optimize = optimize,
+            }),
+            .use_llvm = true,
+        });
+        lean_diff_exe.root_module.addImport("evm", modules.evm_mod);
+        lean_diff_exe.root_module.addImport("voltaire", modules.primitives_mod);
+        lean_diff_exe.root_module.addImport("crypto", modules.crypto_mod);
+        lean_diff_exe.root_module.addImport("build_options", options_mod);
+        if (bn254_lib) |bn254| lean_diff_exe.root_module.linkLibrary(bn254);
+        lean_diff_exe.root_module.link_libc = true;
+        if (target.result.os.tag == .linux) lean_diff_exe.root_module.linkSystemLibrary("unwind", .{});
+
+        const build_lean_ref = b.addSystemCommand(&.{ "bash", "-c", "export PATH=\"$HOME/.elan/bin:$PATH\" && cd verify/lean && lake build guillotine-lean-ref" });
+        const run_lean_diff = b.addRunArtifact(lean_diff_exe);
+        run_lean_diff.step.dependOn(&build_lean_ref.step);
+        run_lean_diff.has_side_effects = true;
+        const lean_diff_step = b.step("test-lean-diff", "Differential fuzz Guillotine against the Lean 4 reference specification (FUZZ_SEED, FUZZ_ITERS)");
+        lean_diff_step.dependOn(&run_lean_diff.step);
+    }
+
     // Formal verification suite (LLVM 20 IR equivalence/UB, Bitwuzla/Z3 SMT, Lean 4 proofs)
     {
         const verified_ops_mod = b.createModule(.{

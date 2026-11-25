@@ -166,20 +166,8 @@ theorem blockStackGuardFast_eq_ref (size : BitVec 32) (mn mx : BitVec 16) (cap :
         Nat.add_mod_right, Nat.mod_eq_of_lt (by omega)]
     · exact Nat.mod_eq_of_lt (by omega)
   rw [hw]
-  by_cases hsize : mn.toNat ≤ size.toNat
-  · rw [if_pos hsize, if_neg (show ¬ size.toNat < mn.toNat by omega)]
-    by_cases hcap : size.toNat + mx.toNat ≤ cap.toNat
-    · rw [if_pos (show mn.toNat + mx.toNat ≤ cap.toNat ∧
-          size.toNat - mn.toNat ≤ cap.toNat - (mn.toNat + mx.toNat) by omega),
-        if_neg (show ¬ size.toNat + mx.toNat > cap.toNat by omega)]
-    · rw [if_neg (show ¬ (mn.toNat + mx.toNat ≤ cap.toNat ∧
-          size.toNat - mn.toNat ≤ cap.toNat - (mn.toNat + mx.toNat)) by
-          rintro ⟨_, _⟩; omega), if_pos (show size.toNat + mx.toNat > cap.toNat by omega),
-        if_neg (show ¬ size.toNat < mn.toNat by omega)]
-  · have under : size.toNat < mn.toNat := by omega
-    rw [if_neg hsize, if_pos under, if_neg (show ¬ (mn.toNat + mx.toNat ≤ cap.toNat ∧
-        2^32 - mn.toNat + size.toNat ≤ cap.toNat - (mn.toNat + mx.toNat)) by
-        rintro ⟨_, _⟩; omega), if_pos under]
+  repeat' split
+  all_goals first | rfl | omega
 
 /-- Either signed or unsigned metadata clamp safely rejects an impossible bound,
     provided the representation can hold at least one more than the capacity. -/

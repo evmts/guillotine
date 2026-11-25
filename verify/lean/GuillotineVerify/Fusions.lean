@@ -110,11 +110,17 @@ theorem execFused_eq_execSeq (f : Fusion) (s : State) :
     cases stack with
     | nil => rfl
     | cons a tail =>
-      by_cases z : a = 0 <;>
-        simp [Fusion.ops, execFused, execSeq, step, push, z] <;> split <;> rfl
+      by_cases full : cap ≤ tail.length + 1
+      · simp [Fusion.ops, execFused, execSeq, step, push, full]
+      · by_cases z : a = 0#256 <;> by_cases ok : valid dest = true <;>
+          simp [Fusion.ops, execFused, execSeq, step, push, jump, full, z, ok]
   | pushAddDup1 v =>
-    cases stack <;> simp [Fusion.ops, execFused, execSeq, step, push] <;>
-      split <;> simp_all [step, execSeq, push, Bin.eval]
+    cases stack with
+    | nil =>
+      by_cases full : cap ≤ 0 <;> simp [Fusion.ops, execFused, execSeq, step, push, full]
+    | cons a tail =>
+      by_cases full : cap ≤ tail.length + 1 <;>
+        simp [Fusion.ops, execFused, execSeq, step, push, full, Bin.eval]
   | swap1Dup2Add =>
     cases stack with
     | nil => rfl
@@ -125,15 +131,11 @@ theorem execFused_eq_execSeq (f : Fusion) (s : State) :
         simp [Fusion.ops, execFused, execSeq, step, push]
         split <;> rfl
   | constFold a b op =>
-    simp [Fusion.ops, execFused, execSeq, step, push]
-    split
-    · rename_i h
-      split
-      · rfl
-      · simp [step, push, h]
-    · rename_i h
-      have first : ¬ cap ≤ stack.length := by omega
-      simp [first, h, step, push, execSeq]
+    by_cases first : cap ≤ stack.length
+    · have second : cap ≤ stack.length + 1 := by omega
+      simp [Fusion.ops, execFused, execSeq, step, push, first, second]
+    · by_cases second : cap ≤ stack.length + 1 <;>
+        simp [Fusion.ops, execFused, execSeq, step, push, first, second]
 
 theorem push_add_sound (v : Word) (s : State) :
     execFused (.pushBin v .add) s = execSeq [.push v, .bin .add] s :=

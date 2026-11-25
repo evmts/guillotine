@@ -94,10 +94,16 @@ theorem memoryGasCostU64_eq (w : BitVec 64) (h : w.toNat ≤ 524288) :
   have square : w.toNat * w.toNat < 2^64 :=
     Nat.lt_of_le_of_lt (Nat.mul_le_mul h h) (by decide)
   have total := memoryGasCost_no_overflow w.toNat h
-  simp only [memoryGasCostU64, BitVec.toNat_add, BitVec.toNat_mul, BitVec.toNat_ushiftRight,
-    Nat.shiftRight_eq_div_pow, Nat.mod_eq_of_lt square]
-  rw [show (3 : BitVec 64).toNat = 3 by decide, Nat.mod_eq_of_lt linear]
-  change memoryGasCost w.toNat % 2^64 = _
-  exact Nat.mod_eq_of_lt (by omega)
+  unfold memoryGasCost at total
+  -- Stated for any multiplier whose value is 3, so the proof does not depend on how
+  -- the literal in `memoryGasCostU64` elaborates.
+  have key : ∀ c : BitVec 64, c.toNat = 3 →
+      (w * c + (w * w) >>> 9).toNat = w.toNat * 3 + w.toNat * w.toNat / 512 := by
+    intro c hc
+    rw [BitVec.toNat_add, BitVec.toNat_mul, hc, Nat.mod_eq_of_lt linear, BitVec.toNat_ushiftRight,
+      BitVec.toNat_mul, Nat.mod_eq_of_lt square, Nat.shiftRight_eq_div_pow]
+    omega
+  unfold memoryGasCostU64 memoryGasCost
+  exact key _ (by decide)
 
 end GuillotineVerify.Memory
