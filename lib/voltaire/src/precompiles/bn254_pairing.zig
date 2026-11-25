@@ -3,16 +3,30 @@ const crypto = @import("crypto");
 const bn254 = crypto.bn254;
 const PrecompileError = @import("common.zig").PrecompileError;
 const PrecompileResult = @import("common.zig").PrecompileResult;
+const Hardfork = @import("voltaire").Hardfork;
 
-/// Gas costs for BN254 pairing
+/// Gas costs for BN254 pairing from Istanbul (EIP-1108)
 pub const BASE_GAS: u64 = 45000;
 pub const PER_POINT_GAS: u64 = 34000;
+/// Gas costs for BN254 pairing in Byzantium through Petersburg (EIP-197)
+pub const BASE_GAS_BYZANTIUM: u64 = 100000;
+pub const PER_POINT_GAS_BYZANTIUM: u64 = 80000;
 
-/// 0x08: BN254PAIRING - BN254 elliptic curve pairing check
+/// 0x08: BN254PAIRING at Istanbul+ pricing (EIP-1108).
 pub fn execute(
     allocator: std.mem.Allocator,
     input: []const u8,
     gas_limit: u64,
+) PrecompileError!PrecompileResult {
+    return executeAtFork(allocator, input, gas_limit, .ISTANBUL);
+}
+
+/// 0x08: BN254PAIRING - BN254 elliptic curve pairing check, priced for `hardfork`.
+pub fn executeAtFork(
+    allocator: std.mem.Allocator,
+    input: []const u8,
+    gas_limit: u64,
+    hardfork: Hardfork,
 ) PrecompileError!PrecompileResult {
     // Input must be multiple of 192 bytes (each pair is 192 bytes)
     if (input.len % 192 != 0) {
@@ -20,7 +34,10 @@ pub fn execute(
     }
 
     const num_pairs = input.len / 192;
-    const gas_cost = BASE_GAS + PER_POINT_GAS * num_pairs;
+    const istanbul = hardfork.isAtLeast(.ISTANBUL);
+    const base: u64 = if (istanbul) BASE_GAS else BASE_GAS_BYZANTIUM;
+    const per_pair: u64 = if (istanbul) PER_POINT_GAS else PER_POINT_GAS_BYZANTIUM;
+    const gas_cost = base + per_pair * num_pairs;
 
     if (gas_limit < gas_cost) {
         return error.OutOfGas;
@@ -451,4 +468,58 @@ test "EIP-197 rejects an on-curve G2 outside the subgroup with G1 infinity" {
     const result = try execute(std.testing.allocator, &input, 1_000_000);
     defer result.deinit(std.testing.allocator);
     try std.testing.expectEqual(@as(u8, 1), result.output[31]);
+}
+
+test "bn254Pairing - Byzantium charges 100000 + 80000 per pair" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    const empty = try executeAtFork(allocator, &.{}, 100000, .BYZANTIUM);
+    defer empty.deinit(allocator);
+    try testing.expectEqual(@as(u64, 100000), empty.gas_used);
+    try testing.expectError(error.OutOfGas, executeAtFork(allocator, &.{}, 99999, .PETERSBURG));
+
+    const input = @as([192]u8, @splat(0));
+    try testing.expectError(error.OutOfGas, executeAtFork(allocator, &input, 179999, .BYZANTIUM));
+    const one = try executeAtFork(allocator, &input, 180000, .BYZANTIUM);
+    defer one.deinit(allocator);
+    try testing.expectEqual(@as(u64, 180000), one.gas_used);
+    const ist = try executeAtFork(allocator, &input, 180000, .ISTANBUL);
+    defer ist.deinit(allocator);
+    try testing.expectEqual(@as(u64, 79000), ist.gas_used);
+}
+
+// EIP-197 generators: G1 = (1, 2); G2 encoded as x_im || x_re || y_im || y_re.
+const g1_hex = "0000000000000000000000000000000000000000000000000000000000000001" ++
+    "0000000000000000000000000000000000000000000000000000000000000002";
+const g1_neg_hex = "0000000000000000000000000000000000000000000000000000000000000001" ++
+    "30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd45";
+const g2_hex = "198e9393920d483a7260bfb731fb5d25f1aa493335a9e71297e485b7aef312c2" ++
+    "1800deef121f1e76426a00665e5c4479674322d4f75edadd46debd5cd992f6ed" ++
+    "090689d0585ff075ec9e99ad690c3395bc4b313370b38ef355acdadcd122975b" ++
+    "12c85ea5db8c6deb4aab71808dcb408fe3d1e7690c43d37b4ce6cc0166fa7daa";
+
+test "bn254Pairing - e(G1, G2) is not one" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+    var input: [192]u8 = undefined;
+    _ = try std.fmt.hexToBytes(&input, g1_hex ++ g2_hex);
+
+    const result = try execute(allocator, &input, 79000);
+    defer result.deinit(allocator);
+    try testing.expectEqualSlices(u8, &@as([32]u8, @splat(0)), result.output);
+    try testing.expectEqual(@as(u64, 79000), result.gas_used);
+}
+
+test "bn254Pairing - e(G1, G2) * e(-G1, G2) is one" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+    var input: [384]u8 = undefined;
+    _ = try std.fmt.hexToBytes(&input, g1_hex ++ g2_hex ++ g1_neg_hex ++ g2_hex);
+
+    const result = try execute(allocator, &input, 113000);
+    defer result.deinit(allocator);
+    var expected = @as([32]u8, @splat(0));
+    expected[31] = 1;
+    try testing.expectEqualSlices(u8, &expected, result.output);
 }

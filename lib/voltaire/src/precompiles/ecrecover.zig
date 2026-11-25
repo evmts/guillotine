@@ -9,13 +9,12 @@ pub const GAS: u64 = 3000;
 
 /// 0x01: ECRECOVER - Elliptic curve signature recovery
 ///
-/// SECURITY: This precompile implements EIP-2 signature malleability protection.
-/// The underlying secp256k1.recoverPubkey function validates:
-/// 1. r must be in range [1, secp256k1_n - 1]
-/// 2. s must be in range [1, secp256k1_n / 2] (EIP-2 protection)
-/// 3. v must be 27 or 28 (or 0/1 for raw recovery ID)
-///
-/// Invalid signatures return zero output (address 0x0) per Ethereum specification.
+/// Input is right-padded with zeros to 128 bytes: hash32 || v32 || r32 || s32.
+/// The call always succeeds and charges `GAS`. Output is the 32-byte left-padded
+/// address, or EMPTY when the signature is invalid:
+/// - v must be exactly 27 or 28 as a 32-byte big-endian word (high 31 bytes zero)
+/// - r and s must be in [1, n-1]; EIP-2 low-s applies to transactions only, not here
+/// - recovery must yield a valid public key
 pub fn execute(
     allocator: std.mem.Allocator,
     input: []const u8,
@@ -25,39 +24,20 @@ pub fn execute(
         return error.OutOfGas;
     }
 
-    // Input: 128 bytes (hash32, v32, r32, s32)
     var input_buf: [128]u8 = @as([128]u8, @splat(0));
-    @memcpy(input_buf[0..@min(input.len, 128)], input[0..@min(input.len, 128)]);
+    const n = @min(input.len, 128);
+    @memcpy(input_buf[0..n], input[0..n]);
 
-    const hash = input_buf[0..32];
-    const v_bytes = input_buf[32..64];
-    const r = input_buf[64..96];
-    const s = input_buf[96..128];
-
-    // Extract v from the padded 32-byte value
-    const v = v_bytes[31];
-
-    // Recover public key with full validation (r, s, v ranges and EIP-2 protection)
-    // recoverPubkey validates:
-    // - r in [1, n-1]
-    // - s in [1, n/2] (EIP-2: prevents signature malleability)
-    // - v is 27, 28, 0, or 1
-    const pubkey = secp256k1.recoverPubkey(hash, r, s, v) catch {
-        // Invalid signature - return empty output (address 0x0)
-        const output = try allocator.alloc(u8, 32);
-        @memset(output, 0);
-        return PrecompileResult{
-            .output = output,
-            .gas_used = GAS,
-        };
+    const pubkey = recover(&input_buf) orelse return PrecompileResult{
+        .output = try allocator.alloc(u8, 0),
+        .gas_used = GAS,
     };
 
-    // Derive address from public key (last 20 bytes of keccak256(pubkey))
     var hash_output: [32]u8 = undefined;
     try crypto.keccak_asm.keccak256(&pubkey, &hash_output);
 
     const output = try allocator.alloc(u8, 32);
-    @memset(output[0..12], 0); // Left-pad with zeros
+    @memset(output[0..12], 0);
     @memcpy(output[12..32], hash_output[12..32]);
 
     return PrecompileResult{
@@ -66,321 +46,107 @@ pub fn execute(
     };
 }
 
-test "ecRecover - valid signature" {
+/// Public key for a padded ECRECOVER input, or null when the signature is invalid.
+fn recover(input: *const [128]u8) ?[64]u8 {
+    for (input[32..63]) |byte| {
+        if (byte != 0) return null;
+    }
+    const v = input[63];
+    if (v != 27 and v != 28) return null;
+    const r = std.mem.readInt(u256, input[64..96], .big);
+    const s = std.mem.readInt(u256, input[96..128], .big);
+    return secp256k1.recoverPubkeyPrecompile(input[0..32], r, s, @intCast(v - 27)) catch |err| switch (err) {
+        error.InvalidSignature => null,
+    };
+}
+
+// geth core/vm/contracts_test.go "ValidKey": hash, v=28, r, s. Its s is above n/2, so
+// it also proves EIP-2 low-s is not enforced by the precompile.
+const valid_input_hex = "18c547e4f7b0f325ad1e56f57e26c745b09a3e503d86e00e5255ff7f715d3d1c" ++
+    "000000000000000000000000000000000000000000000000000000000000001c" ++
+    "73b1693892219d736caba55bdb67216e485557ea6b6af75f37096c9aa6a5a75f" ++
+    "eeb940b1d03b21e36b0e47e79769f095fe2ab855bd91e3a38756b7d75a9c4549";
+const valid_output_hex = "000000000000000000000000a94f5374fce5edbc8e2a8697c15331677e6ebf0b";
+const secp256k1_n: u256 = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141;
+
+test "ecRecover - recovers geth ValidKey vector with high s" {
     const testing = std.testing;
-    const allocator = testing.allocator;
-
-    // Example from Ethereum yellow paper
-    const hash = @as([32]u8, @splat(0x47));
-    const v = @as([31]u8, @splat(0)) ++ [_]u8{28};
-    const r = @as([32]u8, @splat(0x69));
-    const s = @as([32]u8, @splat(0x7a));
-
     var input: [128]u8 = undefined;
-    @memcpy(input[0..32], &hash);
-    @memcpy(input[32..64], &v);
-    @memcpy(input[64..96], &r);
-    @memcpy(input[96..128], &s);
+    _ = try std.fmt.hexToBytes(&input, valid_input_hex);
+    var expected: [32]u8 = undefined;
+    _ = try std.fmt.hexToBytes(&expected, valid_output_hex);
+    try testing.expect(std.mem.readInt(u256, input[96..128], .big) > secp256k1_n / 2);
 
-    const result = try execute(allocator, &input, 1000000);
-    defer result.deinit(allocator);
-
-    try testing.expectEqual(@as(usize, 32), result.output.len);
+    const result = try execute(testing.allocator, &input, GAS);
+    defer result.deinit(testing.allocator);
+    try testing.expectEqualSlices(u8, &expected, result.output);
     try testing.expectEqual(GAS, result.gas_used);
+}
+
+test "ecRecover - malleated low-s twin recovers the same address" {
+    const testing = std.testing;
+    var input: [128]u8 = undefined;
+    _ = try std.fmt.hexToBytes(&input, valid_input_hex);
+    const s = std.mem.readInt(u256, input[96..128], .big);
+    std.mem.writeInt(u256, input[96..128], secp256k1_n - s, .big);
+    input[63] = 27;
+    var expected: [32]u8 = undefined;
+    _ = try std.fmt.hexToBytes(&expected, valid_output_hex);
+
+    const result = try execute(testing.allocator, &input, GAS);
+    defer result.deinit(testing.allocator);
+    try testing.expectEqualSlices(u8, &expected, result.output);
 }
 
 test "ecRecover - out of gas" {
     const testing = std.testing;
-    const allocator = testing.allocator;
-
-    var input = @as([128]u8, @splat(0));
-    const result = execute(allocator, &input, GAS - 1);
-    try testing.expectError(error.OutOfGas, result);
+    const input = @as([128]u8, @splat(0));
+    try testing.expectError(error.OutOfGas, execute(testing.allocator, &input, GAS - 1));
 }
 
-test "ecRecover - exact gas" {
+test "ecRecover - invalid inputs return empty output and charge full gas" {
     const testing = std.testing;
-    const allocator = testing.allocator;
+    var base: [128]u8 = undefined;
+    _ = try std.fmt.hexToBytes(&base, valid_input_hex);
 
-    var input = @as([128]u8, @splat(0));
-    const result = try execute(allocator, &input, GAS);
-    defer result.deinit(allocator);
-
-    try testing.expectEqual(GAS, result.gas_used);
-}
-
-test "ecRecover - input too short padded" {
-    const testing = std.testing;
-    const allocator = testing.allocator;
-
-    var input = @as([100]u8, @splat(0));
-    const result = try execute(allocator, &input, GAS);
-    defer result.deinit(allocator);
-
-    try testing.expectEqual(@as(usize, 32), result.output.len);
-}
-
-test "ecRecover - input too long truncated" {
-    const testing = std.testing;
-    const allocator = testing.allocator;
-
-    var input = @as([200]u8, @splat(0));
-    const result = try execute(allocator, &input, GAS);
-    defer result.deinit(allocator);
-
-    try testing.expectEqual(@as(usize, 32), result.output.len);
-}
-
-test "ecRecover - empty input" {
-    const testing = std.testing;
-    const allocator = testing.allocator;
-
-    var input = [_]u8{};
-    const result = try execute(allocator, &input, GAS);
-    defer result.deinit(allocator);
-
-    try testing.expectEqual(@as(usize, 32), result.output.len);
-}
-
-test "ecRecover - v value 27" {
-    const testing = std.testing;
-    const allocator = testing.allocator;
-
-    var input = @as([128]u8, @splat(0));
-    input[63] = 27;
-
-    const result = try execute(allocator, &input, GAS);
-    defer result.deinit(allocator);
-
-    try testing.expectEqual(@as(usize, 32), result.output.len);
-}
-
-test "ecRecover - v value 28" {
-    const testing = std.testing;
-    const allocator = testing.allocator;
-
-    var input = @as([128]u8, @splat(0));
-    input[63] = 28;
-
-    const result = try execute(allocator, &input, GAS);
-    defer result.deinit(allocator);
-
-    try testing.expectEqual(@as(usize, 32), result.output.len);
-}
-
-test "ecRecover - invalid v value returns zero" {
-    const testing = std.testing;
-    const allocator = testing.allocator;
-
-    var input = @as([128]u8, @splat(0));
-    input[63] = 29;
-
-    const result = try execute(allocator, &input, GAS);
-    defer result.deinit(allocator);
-
-    try testing.expectEqual(@as(usize, 32), result.output.len);
-}
-
-test "ecRecover - all zero input returns zero" {
-    const testing = std.testing;
-    const allocator = testing.allocator;
-
-    var input = @as([128]u8, @splat(0));
-    const result = try execute(allocator, &input, GAS);
-    defer result.deinit(allocator);
-
-    try testing.expectEqual(@as(usize, 32), result.output.len);
-    for (result.output) |byte| {
-        try testing.expectEqual(@as(u8, 0), byte);
+    const Mutation = enum { v_zero, v_one, v_29, v_high_byte, r_zero, s_zero, r_n, s_n, all_zero };
+    for (std.enums.values(Mutation)) |mutation| {
+        var input = base;
+        switch (mutation) {
+            .v_zero => input[63] = 0,
+            .v_one => input[63] = 1,
+            .v_29 => input[63] = 29,
+            .v_high_byte => input[32] = 1,
+            .r_zero => @memset(input[64..96], 0),
+            .s_zero => @memset(input[96..128], 0),
+            .r_n => std.mem.writeInt(u256, input[64..96], secp256k1_n, .big),
+            .s_n => std.mem.writeInt(u256, input[96..128], secp256k1_n, .big),
+            .all_zero => @memset(&input, 0),
+        }
+        const result = try execute(testing.allocator, &input, GAS);
+        defer result.deinit(testing.allocator);
+        try testing.expectEqual(@as(usize, 0), result.output.len);
+        try testing.expectEqual(GAS, result.gas_used);
     }
 }
 
-test "ecRecover - gas cost constant" {
+test "ecRecover - short input is right-padded, long input is truncated" {
     const testing = std.testing;
+    var long: [160]u8 = @as([160]u8, @splat(0xff));
+    _ = try std.fmt.hexToBytes(long[0..128], valid_input_hex);
+    var expected: [32]u8 = undefined;
+    _ = try std.fmt.hexToBytes(&expected, valid_output_hex);
 
-    try testing.expectEqual(@as(u64, 3000), GAS);
-}
+    const long_result = try execute(testing.allocator, &long, GAS);
+    defer long_result.deinit(testing.allocator);
+    try testing.expectEqualSlices(u8, &expected, long_result.output);
 
-test "ecRecover - output always 32 bytes" {
-    const testing = std.testing;
-    const allocator = testing.allocator;
+    // Dropping the last byte of s pads it with zero: a different (invalid or other) key.
+    const short_result = try execute(testing.allocator, long[0..127], GAS);
+    defer short_result.deinit(testing.allocator);
+    try testing.expect(!std.mem.eql(u8, &expected, short_result.output));
 
-    var input = @as([128]u8, @splat(0));
-    const result = try execute(allocator, &input, GAS);
-    defer result.deinit(allocator);
-
-    try testing.expectEqual(@as(usize, 32), result.output.len);
-}
-
-test "ecRecover - invalid signature graceful failure" {
-    const testing = std.testing;
-    const allocator = testing.allocator;
-
-    var input = @as([128]u8, @splat(0xFF));
-    const result = try execute(allocator, &input, GAS);
-    defer result.deinit(allocator);
-
-    try testing.expectEqual(@as(usize, 32), result.output.len);
-    try testing.expectEqual(GAS, result.gas_used);
-}
-
-test "ecRecover - EIP-2 malleability: reject high s value" {
-    const testing = std.testing;
-    const allocator = testing.allocator;
-
-    // Test that s > secp256k1_n / 2 is rejected (EIP-2 protection)
-    // secp256k1_n = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
-    // secp256k1_n / 2 = 0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0
-
-    var input: [128]u8 = undefined;
-    const hash = @as([32]u8, @splat(0x47));
-    const v = @as([31]u8, @splat(0)) ++ [_]u8{28};
-    const r = @as([32]u8, @splat(0x69));
-
-    // Set s to a high value > n/2 (should be rejected per EIP-2)
-    // Using 0x8000...0000 which is definitely > n/2
-    const s_high = [_]u8{0x80} ++ @as([31]u8, @splat(0x00));
-
-    @memcpy(input[0..32], &hash);
-    @memcpy(input[32..64], &v);
-    @memcpy(input[64..96], &r);
-    @memcpy(input[96..128], &s_high);
-
-    const result = try execute(allocator, &input, GAS);
-    defer result.deinit(allocator);
-
-    // Should return zero address (invalid signature)
-    try testing.expectEqual(@as(usize, 32), result.output.len);
-    for (result.output) |byte| {
-        try testing.expectEqual(@as(u8, 0), byte);
-    }
-}
-
-test "ecRecover - reject r = 0" {
-    const testing = std.testing;
-    const allocator = testing.allocator;
-
-    var input: [128]u8 = undefined;
-    const hash = @as([32]u8, @splat(0x47));
-    const v = @as([31]u8, @splat(0)) ++ [_]u8{28};
-    const r_zero = @as([32]u8, @splat(0)); // r = 0 should be rejected
-    const s = @as([32]u8, @splat(0x7a));
-
-    @memcpy(input[0..32], &hash);
-    @memcpy(input[32..64], &v);
-    @memcpy(input[64..96], &r_zero);
-    @memcpy(input[96..128], &s);
-
-    const result = try execute(allocator, &input, GAS);
-    defer result.deinit(allocator);
-
-    // Should return zero address (invalid signature)
-    try testing.expectEqual(@as(usize, 32), result.output.len);
-    for (result.output) |byte| {
-        try testing.expectEqual(@as(u8, 0), byte);
-    }
-}
-
-test "ecRecover - reject s = 0" {
-    const testing = std.testing;
-    const allocator = testing.allocator;
-
-    var input: [128]u8 = undefined;
-    const hash = @as([32]u8, @splat(0x47));
-    const v = @as([31]u8, @splat(0)) ++ [_]u8{28};
-    const r = @as([32]u8, @splat(0x69));
-    const s_zero = @as([32]u8, @splat(0)); // s = 0 should be rejected
-
-    @memcpy(input[0..32], &hash);
-    @memcpy(input[32..64], &v);
-    @memcpy(input[64..96], &r);
-    @memcpy(input[96..128], &s_zero);
-
-    const result = try execute(allocator, &input, GAS);
-    defer result.deinit(allocator);
-
-    // Should return zero address (invalid signature)
-    try testing.expectEqual(@as(usize, 32), result.output.len);
-    for (result.output) |byte| {
-        try testing.expectEqual(@as(u8, 0), byte);
-    }
-}
-
-test "ecRecover - reject r >= curve_order" {
-    const testing = std.testing;
-    const allocator = testing.allocator;
-
-    var input: [128]u8 = undefined;
-    const hash = @as([32]u8, @splat(0x47));
-    const v = @as([31]u8, @splat(0)) ++ [_]u8{28};
-    const s = @as([32]u8, @splat(0x7a));
-
-    // Set r to all 0xFF (definitely >= curve_order)
-    const r_invalid = @as([32]u8, @splat(0xFF));
-
-    @memcpy(input[0..32], &hash);
-    @memcpy(input[32..64], &v);
-    @memcpy(input[64..96], &r_invalid);
-    @memcpy(input[96..128], &s);
-
-    const result = try execute(allocator, &input, GAS);
-    defer result.deinit(allocator);
-
-    // Should return zero address (invalid signature)
-    try testing.expectEqual(@as(usize, 32), result.output.len);
-    for (result.output) |byte| {
-        try testing.expectEqual(@as(u8, 0), byte);
-    }
-}
-
-test "ecRecover - reject s >= curve_order" {
-    const testing = std.testing;
-    const allocator = testing.allocator;
-
-    var input: [128]u8 = undefined;
-    const hash = @as([32]u8, @splat(0x47));
-    const v = @as([31]u8, @splat(0)) ++ [_]u8{28};
-    const r = @as([32]u8, @splat(0x69));
-
-    // Set s to all 0xFF (definitely >= curve_order)
-    const s_invalid = @as([32]u8, @splat(0xFF));
-
-    @memcpy(input[0..32], &hash);
-    @memcpy(input[32..64], &v);
-    @memcpy(input[64..96], &r);
-    @memcpy(input[96..128], &s_invalid);
-
-    const result = try execute(allocator, &input, GAS);
-    defer result.deinit(allocator);
-
-    // Should return zero address (invalid signature)
-    try testing.expectEqual(@as(usize, 32), result.output.len);
-    for (result.output) |byte| {
-        try testing.expectEqual(@as(u8, 0), byte);
-    }
-}
-
-test "ecRecover - reject invalid v value beyond 29" {
-    const testing = std.testing;
-    const allocator = testing.allocator;
-
-    var input: [128]u8 = undefined;
-    const hash = @as([32]u8, @splat(0x47));
-    const v_invalid = @as([31]u8, @splat(0)) ++ [_]u8{100}; // v = 100 (invalid)
-    const r = @as([32]u8, @splat(0x69));
-    const s = @as([32]u8, @splat(0x7a));
-
-    @memcpy(input[0..32], &hash);
-    @memcpy(input[32..64], &v_invalid);
-    @memcpy(input[64..96], &r);
-    @memcpy(input[96..128], &s);
-
-    const result = try execute(allocator, &input, GAS);
-    defer result.deinit(allocator);
-
-    // Should return zero address (invalid signature)
-    try testing.expectEqual(@as(usize, 32), result.output.len);
-    for (result.output) |byte| {
-        try testing.expectEqual(@as(u8, 0), byte);
-    }
+    const empty_result = try execute(testing.allocator, &.{}, GAS);
+    defer empty_result.deinit(testing.allocator);
+    try testing.expectEqual(@as(usize, 0), empty_result.output.len);
 }

@@ -3,17 +3,36 @@ const crypto = @import("crypto");
 const bn254 = crypto.bn254;
 const PrecompileError = @import("common.zig").PrecompileError;
 const PrecompileResult = @import("common.zig").PrecompileResult;
+const Hardfork = @import("voltaire").Hardfork;
 
-/// Gas cost for BN254 addition
+/// Gas cost for BN254 addition from Istanbul (EIP-1108)
 pub const GAS: u64 = 150;
+/// Gas cost for BN254 addition in Byzantium through Petersburg (EIP-196)
+pub const GAS_BYZANTIUM: u64 = 500;
 
-/// 0x06: BN254ADD - BN254 elliptic curve addition
+/// Gas cost of BN254ADD in `hardfork`.
+pub fn gasCost(hardfork: Hardfork) u64 {
+    return if (hardfork.isAtLeast(.ISTANBUL)) GAS else GAS_BYZANTIUM;
+}
+
+/// 0x06: BN254ADD at Istanbul+ pricing (EIP-1108).
 pub fn execute(
     allocator: std.mem.Allocator,
     input: []const u8,
     gas_limit: u64,
 ) PrecompileError!PrecompileResult {
-    if (gas_limit < GAS) {
+    return executeAtFork(allocator, input, gas_limit, .ISTANBUL);
+}
+
+/// 0x06: BN254ADD - BN254 elliptic curve addition, priced for `hardfork`.
+pub fn executeAtFork(
+    allocator: std.mem.Allocator,
+    input: []const u8,
+    gas_limit: u64,
+    hardfork: Hardfork,
+) PrecompileError!PrecompileResult {
+    const cost = gasCost(hardfork);
+    if (gas_limit < cost) {
         return error.OutOfGas;
     }
 
@@ -31,7 +50,7 @@ pub fn execute(
 
     return PrecompileResult{
         .output = output,
-        .gas_used = GAS,
+        .gas_used = cost,
     };
 }
 
@@ -330,4 +349,19 @@ test "EIP-196 ADD rejects noncanonical coordinates in either point" {
         try std.testing.expectError(error.InvalidPoint, execute(std.testing.allocator, &input, GAS));
         @memset(input[slot * 32 ..][0..32], 0);
     }
+}
+
+test "bn254Add - Byzantium charges 500, Istanbul charges 150" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+    const input = @as([128]u8, @splat(0));
+
+    try testing.expectError(error.OutOfGas, executeAtFork(allocator, &input, 499, .BYZANTIUM));
+    try testing.expectError(error.OutOfGas, executeAtFork(allocator, &input, 499, .PETERSBURG));
+    const byz = try executeAtFork(allocator, &input, 500, .BYZANTIUM);
+    defer byz.deinit(allocator);
+    try testing.expectEqual(@as(u64, 500), byz.gas_used);
+    const ist = try executeAtFork(allocator, &input, 500, .ISTANBUL);
+    defer ist.deinit(allocator);
+    try testing.expectEqual(@as(u64, 150), ist.gas_used);
 }

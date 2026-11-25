@@ -364,11 +364,12 @@ fn precompiles(allocator: std.mem.Allocator, list: *std.ArrayList(Workload)) !vo
         "12c85ea5db8c6deb4aab71808dcb408fe3d1e7690c43d37b4ce6cc0166fa7daa");
     try list.append(allocator, .{ .name = "precompile/BN254-pairing", .category = "precompile", .source = .{ .precompile = 8 }, .input = pairing, .expected = 0 });
     // BLS map-to-curve performs real field/curve work and avoids the infinity
-    // shortcuts common in all-zero point-addition benchmark inputs.
+    // shortcuts common in all-zero point-addition benchmark inputs. Final
+    // EIP-2537 places MAP_FP_TO_G1 at 0x10 (0x12 was a withdrawn draft address).
     const field = try allocator.alloc(u8, 64);
     @memset(field, 0);
     field[63] = 42;
-    try list.append(allocator, .{ .name = "precompile/BLS12-381-map-G1", .category = "precompile", .source = .{ .precompile = 0x12 }, .input = field, .output_len = 128 });
+    try list.append(allocator, .{ .name = "precompile/BLS12-381-map-G1", .category = "precompile", .source = .{ .precompile = 0x10 }, .input = field, .output_len = 128 });
     const scheme = std.crypto.sign.ecdsa.EcdsaP256Sha256;
     const key = try scheme.KeyPair.generateDeterministic(@as([scheme.KeyPair.seed_length]u8, @splat(42)));
     const text = "Guillotine P256 benchmark vector";

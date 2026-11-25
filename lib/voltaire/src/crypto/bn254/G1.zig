@@ -201,6 +201,9 @@ pub fn addAssign(self: *G1, other: *const G1) void {
 
 // This is a easy to compute morphism, G -> λG, where λ is a fixed field element, it can be found in curve_parameters.zig
 pub fn glsEndomorphism(self: *const G1) !G1 {
+    // The endomorphism fixes infinity. Without this guard, the affine form of infinity
+    // (x = 0, z = 0) would be rebuilt with z = 1 as the off-curve point (0, y).
+    if (self.isInfinity()) return INFINITY;
     const cube_root = FpMont.init(curve_parameters.G1_SCALAR.cube_root);
     const point_aff = try self.toAffine();
     return G1{

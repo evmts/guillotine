@@ -171,6 +171,22 @@ pub fn recoverPubkey(
 
     if (!unauditedValidateSignature(r_u256, s_u256)) return error.InvalidSignature;
 
+    return recoverFromScalars(hash[0..32], r_u256, s_u256, @intCast(recoveryId));
+}
+
+/// Recovers the 64-byte public key (x || y) for the ECRECOVER precompile (0x01).
+///
+/// Unlike `recoverPubkey`, this does not enforce the EIP-2 low-s rule: EIP-2 restricts
+/// transaction signatures only, and the precompile accepts any `s` in [1, n-1]
+/// (geth `ValidateSignatureValues(v, r, s, homestead=false)`).
+pub fn recoverPubkeyPrecompile(hash: *const [32]u8, r: u256, s: u256, recovery_id: u1) ![64]u8 {
+    if (r == 0 or r >= SECP256K1_N) return error.InvalidSignature;
+    if (s == 0 or s >= SECP256K1_N) return error.InvalidSignature;
+    return recoverFromScalars(hash, r, s, recovery_id);
+}
+
+/// Public key recovery for scalars already range-checked by the caller (r, s in [1, n-1]).
+fn recoverFromScalars(hash: *const [32]u8, r_u256: u256, s_u256: u256, recoveryId: u1) ![64]u8 {
     // Step 1: Calculate point R from r and recoveryId
     if (r_u256 >= SECP256K1_P) return error.InvalidSignature;
 
@@ -192,8 +208,7 @@ pub fn recoverPubkey(
     if (!R.isOnCurve()) return error.InvalidSignature;
 
     // Step 2: Calculate e from message hash
-    var hash_array: [32]u8 = undefined;
-    @memcpy(&hash_array, hash);
+    const hash_array: [32]u8 = hash.*;
     const e = std.mem.readInt(u256, &hash_array, .big);
 
     // Step 3: Calculate public key Q = r⁻¹(sR - eG)

@@ -3,17 +3,36 @@ const crypto = @import("crypto");
 const bn254 = crypto.bn254;
 const PrecompileError = @import("common.zig").PrecompileError;
 const PrecompileResult = @import("common.zig").PrecompileResult;
+const Hardfork = @import("voltaire").Hardfork;
 
-/// Gas cost for BN254 multiplication
+/// Gas cost for BN254 multiplication from Istanbul (EIP-1108)
 pub const GAS: u64 = 6000;
+/// Gas cost for BN254 multiplication in Byzantium through Petersburg (EIP-196)
+pub const GAS_BYZANTIUM: u64 = 40000;
 
-/// 0x07: BN254MUL - BN254 elliptic curve scalar multiplication
+/// Gas cost of BN254MUL in `hardfork`.
+pub fn gasCost(hardfork: Hardfork) u64 {
+    return if (hardfork.isAtLeast(.ISTANBUL)) GAS else GAS_BYZANTIUM;
+}
+
+/// 0x07: BN254MUL at Istanbul+ pricing (EIP-1108).
 pub fn execute(
     allocator: std.mem.Allocator,
     input: []const u8,
     gas_limit: u64,
 ) PrecompileError!PrecompileResult {
-    if (gas_limit < GAS) {
+    return executeAtFork(allocator, input, gas_limit, .ISTANBUL);
+}
+
+/// 0x07: BN254MUL - BN254 elliptic curve scalar multiplication, priced for `hardfork`.
+pub fn executeAtFork(
+    allocator: std.mem.Allocator,
+    input: []const u8,
+    gas_limit: u64,
+    hardfork: Hardfork,
+) PrecompileError!PrecompileResult {
+    const cost = gasCost(hardfork);
+    if (gas_limit < cost) {
         return error.OutOfGas;
     }
 
@@ -31,7 +50,7 @@ pub fn execute(
 
     return PrecompileResult{
         .output = output,
-        .gas_used = GAS,
+        .gas_used = cost,
     };
 }
 
@@ -351,4 +370,33 @@ test "EIP-196 MUL validates noncanonical and off-curve points before zero scalar
     input[31] = 1;
     input[63] = 3;
     try std.testing.expectError(error.InvalidPoint, execute(std.testing.allocator, &input, GAS));
+}
+
+test "bn254Mul - Byzantium charges 40000, Istanbul charges 6000" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+    const input = @as([96]u8, @splat(0));
+
+    try testing.expectError(error.OutOfGas, executeAtFork(allocator, &input, 39999, .BYZANTIUM));
+    const byz = try executeAtFork(allocator, &input, 40000, .CONSTANTINOPLE);
+    defer byz.deinit(allocator);
+    try testing.expectEqual(@as(u64, 40000), byz.gas_used);
+    const ist = try executeAtFork(allocator, &input, 40000, .ISTANBUL);
+    defer ist.deinit(allocator);
+    try testing.expectEqual(@as(u64, 6000), ist.gas_used);
+}
+
+test "bn254Mul - infinity times any scalar is infinity" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+    // Scalars from EEST test_ecmul inf_times_*: 2^128, r - 1, r - 2, 2^256 - 1, 1.
+    const r: u256 = 0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001;
+    const scalars = [_]u256{ @as(u256, 1) << 128, r - 1, r - 2, std.math.maxInt(u256), 1, 2, 9 };
+    for (scalars) |scalar| {
+        var input = @as([96]u8, @splat(0));
+        std.mem.writeInt(u256, input[64..96], scalar, .big);
+        const result = try execute(allocator, &input, GAS);
+        defer result.deinit(allocator);
+        try testing.expectEqualSlices(u8, &@as([64]u8, @splat(0)), result.output);
+    }
 }

@@ -42,7 +42,10 @@ pub fn unauditedBlake2bG(v: *[16]u64, a: usize, b: usize, c: usize, d: usize, x:
 /// This function implements BLAKE2b compression rounds without security review.
 /// Use at your own risk in production systems.
 pub fn unauditedBlake2bRound(v: *[16]u64, message: *const [16]u64, round: u32) void {
-    const s = &BLAKE2B_SIGMA[round % 12];
+    // BLAKE2b has 10 distinct permutations; EIP-152 allows any round count, so round r
+    // uses sigma[r mod 10]. Rows 10 and 11 of the table repeat rows 0 and 1 for the
+    // standard 12-round hash and are never indexed here.
+    const s = &BLAKE2B_SIGMA[round % 10];
 
     // Column mixing
     unauditedBlake2bG(v, 0, 4, 8, 12, message[s[0]], message[s[1]]);
@@ -805,8 +808,9 @@ pub const Blake2 = struct {
         const t1_bytes: *const [8]u8 = @ptrCast(input[204..212].ptr);
         t[1] = std.mem.readInt(u64, t1_bytes, .little);
 
-        // Parse f (1 byte, boolean)
-        const f = input[212] != 0;
+        // Parse f: EIP-152 accepts only 0 or 1; any other byte is invalid input.
+        if (input[212] > 1) return error.InvalidInput;
+        const f = input[212] == 1;
 
         // Perform compression
         unauditedBlake2fCompress(&h, &m, t, f, rounds);
