@@ -1,7 +1,33 @@
-/* Native ABI of src/evm_c_api.zig. Keep field order and natural C alignment.
- * Arrays and u256 words are inline; words are big-endian. See the SDK guide
- * for ownership, threading, and mainnet/tracing handle restrictions.
- * This header does not describe src/root_c.zig or the WASM ABI.
+/* Native ABI of src/evm_c_api.zig (libguillotine_ffi). Keep field order and
+ * natural C alignment. Arrays and u256 words are inline; words are big-endian.
+ *
+ * Lifecycle: call guillotine_init() once, create handles, destroy each handle,
+ * then optionally guillotine_cleanup(), which destroys any handles still alive.
+ *
+ * Handles: each guillotine_evm_create* call allocates a fresh EVM and state
+ * database; no state is shared or reused between handles. Every function
+ * checks the handle against the library's live-handle registry, so NULL,
+ * foreign, destroyed, or cleaned-up handles return NULL/false with an error
+ * instead of being dereferenced. Destroying NULL is a no-op; destroying a
+ * handle twice is reported and ignored. Any handle works with every function:
+ * the *_tracing and *_test variants are aliases kept for existing callers.
+ * A tracing handle (GUILLOTINE_MAINNET_WITH_TRACER) fills trace_json.
+ *
+ * Errors: functions return NULL or false and record a message readable with
+ * guillotine_get_last_error(). That buffer is thread-local and is overwritten
+ * by the next failing call on the same thread. EvmResult.error_message is an
+ * owned copy that lives until guillotine_free_result.
+ *
+ * Memory: every buffer the library returns comes from the C allocator and is
+ * released with the matching guillotine_free_* or evm_bytecode_* function,
+ * from any thread. Zero-length arrays use non-NULL placeholder pointers; never
+ * free them yourself.
+ *
+ * Threads: different handles may be used from different threads at once. A
+ * single handle must not be used by two threads at the same time.
+ *
+ * Pointer arguments: a NULL pointer with a non-zero length (input, code, data)
+ * is rejected. A NULL pointer with length 0 is accepted as empty.
  */
 #ifndef GUILLOTINE_H
 #define GUILLOTINE_H
@@ -140,6 +166,9 @@ typedef struct COpcodeInfo {
 
 void guillotine_init(void);
 void guillotine_cleanup(void);
+/* config is GUILLOTINE_MAINNET, GUILLOTINE_MAINNET_WITH_TRACER, or
+ * GUILLOTINE_TEST_MODE; any other byte returns NULL. A chain_id wider than the
+ * EVM's CHAINID type returns NULL instead of being truncated. */
 EvmHandle * guillotine_evm_create_with_config(const BlockInfoFFI * block_info_ptr, EvmConfiguration config);
 EvmHandle * guillotine_evm_create(const BlockInfoFFI * block_info_ptr);
 EvmHandle * guillotine_evm_create_mainnet(const BlockInfoFFI * block_info_ptr);
@@ -153,9 +182,13 @@ bool guillotine_set_nonce(EvmHandle * handle, const uint8_t address[20], uint64_
 bool guillotine_set_nonce_tracing(EvmHandle * handle, const uint8_t address[20], uint64_t nonce);
 bool guillotine_set_code(EvmHandle * handle, const uint8_t address[20], const uint8_t * code, size_t code_len);
 bool guillotine_set_code_tracing(EvmHandle * handle, const uint8_t address[20], const uint8_t * code, size_t code_len);
+/* Execute a call and commit its state. The caller is the transaction origin.
+ * Free the result with guillotine_free_result. */
 EvmResult * guillotine_call(EvmHandle * handle, const CallParams * params);
 EvmResult * guillotine_call_tracing(EvmHandle * handle, const CallParams * params);
 bool guillotine_get_balance(EvmHandle * handle, const uint8_t address[20], uint8_t balance_out[32]);
+/* On success *code_out holds a copy; free it with guillotine_free_code when
+ * *len_out > 0. Missing accounts have empty code. */
 bool guillotine_get_code(EvmHandle * handle, const uint8_t address[20], uint8_t ** code_out, size_t * len_out);
 void guillotine_free_code(uint8_t * code, size_t len);
 bool guillotine_set_storage(EvmHandle * handle, const uint8_t address[20], const uint8_t key[32], const uint8_t value[32]);
@@ -163,6 +196,7 @@ bool guillotine_get_storage(EvmHandle * handle, const uint8_t address[20], const
 void guillotine_free_output(uint8_t * output, size_t len);
 void guillotine_free_result(EvmResult * result);
 const char * guillotine_get_last_error(void);
+/* Returns NULL for invalid bytecode (reason in guillotine_get_last_error). */
 BytecodeHandle * evm_bytecode_create(const uint8_t * data, size_t data_len);
 void evm_bytecode_destroy(BytecodeHandle * handle);
 size_t evm_bytecode_get_length(const BytecodeHandle * handle);
@@ -176,7 +210,10 @@ int evm_bytecode_is_valid_opcode(uint8_t opcode_value);
 const char * evm_bytecode_error_string(int error_code);
 size_t evm_bytecode_pretty_print(const uint8_t * data, size_t data_len, uint8_t * buffer, size_t buffer_len);
 size_t evm_dispatch_pretty_print(const uint8_t * data, size_t data_len, uint8_t * buffer, size_t buffer_len);
+/* Execute a CALL (call_type 0 only) without committing database changes.
+ * ORIGIN is params->caller, exactly as in guillotine_call. */
 EvmResult * guillotine_simulate(EvmHandle * handle, const CallParams * params);
+/* Every account touched through this handle that is not empty. */
 StateDumpFFI * guillotine_dump_state(EvmHandle * handle);
 void guillotine_free_state_dump(StateDumpFFI * dump);
 StateDumpFFI * guillotine_dump_state_test(EvmHandle * handle);

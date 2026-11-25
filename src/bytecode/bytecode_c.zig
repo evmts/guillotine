@@ -11,6 +11,7 @@ const bytecodeAnalyze = @import("bytecode_analyze.zig").bytecodeAnalyze;
 const opcode_data = evm.OpcodeData;
 
 const allocator = std.heap.c_allocator;
+const log = std.log.scoped(.bytecode_c);
 
 // ============================================================================
 // ERROR CODES
@@ -47,21 +48,25 @@ pub fn evm_bytecode_create(data: [*]const u8, data_len: usize) callconv(.c) ?*CB
 }
 
 pub fn evm_bytecode_create_with_allocator(alloc: std.mem.Allocator, data: [*]const u8, data_len: usize) ?*CBytecodeHandle {
-    const handle = alloc.create(CBytecodeHandle) catch return null;
+    // `errdefer` does not run on `return null`, so the fallible work lives in
+    // `createHandle`, whose errdefers free the handle and the copied input.
+    return createHandle(alloc, data[0..data_len]) catch |err| {
+        log.debug("evm_bytecode_create rejected {d} bytes: {s}", .{ data_len, @errorName(err) });
+        return null;
+    };
+}
+
+/// Copy `data`, validate it, and return an owned handle. On error nothing leaks.
+pub fn createHandle(alloc: std.mem.Allocator, data: []const u8) !*CBytecodeHandle {
+    const handle = try alloc.create(CBytecodeHandle);
     errdefer alloc.destroy(handle);
 
     // Copy input (may include Solidity metadata suffix)
-    const owned_data = alloc.dupe(u8, data[0..data_len]) catch {
-        alloc.destroy(handle);
-        return null;
-    };
+    const owned_data = try alloc.dupe(u8, data);
     errdefer alloc.free(owned_data);
 
     // Validate and build bitmaps against runtime portion
-    var bytecode = BytecodeType.init(alloc, owned_data) catch {
-        return null;
-    };
-    errdefer bytecode.deinit();
+    const bytecode = try BytecodeType.init(alloc, owned_data);
 
     handle.* = .{
         .allocator = alloc,
@@ -70,6 +75,7 @@ pub fn evm_bytecode_create_with_allocator(alloc: std.mem.Allocator, data: [*]con
     };
     return handle;
 }
+
 
 /// Destroy bytecode and free memory
 /// @param handle Bytecode handle

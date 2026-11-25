@@ -111,7 +111,7 @@ Guillotine officially ships three integration surfaces:
 
 - **Zig native bindings** — the repository's native EVM API in `src/root.zig`.
 - **[C FFI](sdks/c)** — native embedding and custom language bindings.
-- **[`@tevm/guillotine` TypeScript](sdks/typescript)** — WASM APIs for Node, Bun, and browsers, with build support in `sdks/wasm`.
+- **[`@tevm/guillotine` TypeScript](sdks/typescript)** — Bun native FFI (`bun:ffi`) bindings to `libguillotine_ffi`, the library built from `src/evm_c_api.zig`.
 
 The C and TypeScript APIs are experimental and may change. For Python, Go,
 Rust, Swift, Kotlin/JNI, or native Bun FFI, use the

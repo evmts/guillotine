@@ -237,7 +237,7 @@ describe('TypeScript SDK GuillotineEvm Live FFI Fuzz Suite', () => {
 			'FFI validation boundaries',
 			(tape, rng) => ({
 				badGas: tape.bool(rng) ? -BigInt(tape.int(1, 1000, rng)) : U64_MAX + BigInt(tape.int(1, 1000, rng)),
-				badChainId: 0x10000n + BigInt(tape.nat(100_000, rng)),
+				badChainId: U64_MAX + 1n + BigInt(tape.nat(100_000, rng)),
 				badRandaoLen: tape.pick([0, 1, 16, 31, 33, 64], rng),
 			}),
 			async ({ badGas, badChainId, badRandaoLen }, ctx) => {

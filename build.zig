@@ -870,6 +870,23 @@ pub fn build(b: *std.Build) void {
     if (target.result.os.tag == .linux) layer2_tests.root_module.linkSystemLibrary("unwind", .{});
     const layer2_tests_step = b.step("test-layer2", "Run Layer 2 (Base & OP Stack) unit tests");
     layer2_tests_step.dependOn(&b.addRunArtifact(layer2_tests).step);
+    // Layer 2 host adapter over the real EVM. Separate artifact: the `evm` module already
+    // owns src/layer2/mod.zig, so evm_host.zig reaches layer 2 code through `evm.layer2`.
+    const layer2_host_tests = b.addTest(.{
+        .name = "layer2-evm-host-tests",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/layer2/evm_host.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+        .use_llvm = true,
+    });
+    layer2_host_tests.root_module.addImport("evm", modules.evm_mod);
+    layer2_host_tests.root_module.addImport("voltaire", modules.primitives_mod);
+    if (bn254_lib) |bn254| layer2_host_tests.root_module.linkLibrary(bn254);
+    layer2_host_tests.root_module.link_libc = true;
+    if (target.result.os.tag == .linux) layer2_host_tests.root_module.linkSystemLibrary("unwind", .{});
+    layer2_tests_step.dependOn(&b.addRunArtifact(layer2_host_tests).step);
 
     // Self-contained in-repo benchmark steps (`bench`, `bench-build`, `test-bench`)
     _ = bench_step.addBenchSteps(b, .{

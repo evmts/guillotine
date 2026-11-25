@@ -385,7 +385,7 @@ describe('resource lifecycle', () => {
 
 describe('input validation', () => {
 	it('rejects out-of-range block fields before native code', async () => {
-		await expect(GuillotineEvm.create({ chainId: 65_536n })).rejects.toMatchObject({ type: 'InvalidValue' })
+		await expect(GuillotineEvm.create({ chainId: 1n << 64n })).rejects.toMatchObject({ type: 'InvalidValue' })
 		await expect(GuillotineEvm.create({ number: -1n })).rejects.toMatchObject({ type: 'InvalidValue' })
 		await expect(GuillotineEvm.create({ gasLimit: 1n << 64n })).rejects.toMatchObject({ type: 'InvalidValue' })
 	})

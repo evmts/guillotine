@@ -11,6 +11,7 @@ export type GuillotineErrorType =
   | 'InvalidBytecode'
   | 'InvalidAddress'
   | 'InvalidValue'
+  | 'InvalidUtf8'
   | 'OutOfGas'
   | 'StackOverflow'
   | 'StackUnderflow'
@@ -98,6 +99,13 @@ export class GuillotineError extends Error {
    */
   static invalidValue(message: string): GuillotineError {
     return new GuillotineError('InvalidValue', message);
+  }
+
+  /**
+   * Create an error for bytes that are not valid UTF-8 (the decoder's TypeError is the cause)
+   */
+  static invalidUtf8(message: string, cause?: Error): GuillotineError {
+    return new GuillotineError('InvalidUtf8', message, cause);
   }
 
   /**

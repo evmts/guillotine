@@ -6,6 +6,7 @@ pub const fast_lz = @import("fast_lz.zig");
 pub const transaction = @import("transaction.zig");
 pub const deposit = @import("deposit.zig");
 pub const da_footprint = @import("da_footprint.zig");
+pub const eip1559 = @import("eip1559.zig");
 pub const precompiles = @import("precompiles.zig");
 
 pub const OpSpecId = spec.OpSpecId;
