@@ -83,7 +83,7 @@ test "snapshot should be reverted on allocation failure during self-destruct ext
         .gas_limit = 30_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1_000_000_000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
         .chain_id = 1,
         .blob_base_fee = 0,
         .blob_versioned_hashes = &.{},
@@ -115,15 +115,15 @@ test "snapshot should be reverted on allocation failure during self-destruct ext
         .balance = 1000,
         .nonce = 0,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     });
 
     // Create caller account with balance
     const caller_account = evm.Account{
         .balance = 1_000_000_000,
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
         .delegated_address = null,
     };
     try database.set_account(caller_address.bytes, caller_account);
@@ -192,7 +192,7 @@ test "snapshot should be reverted on allocation failure during log extraction" {
         .gas_limit = 30_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1_000_000_000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
         .chain_id = 1,
         .blob_base_fee = 0,
         .blob_versioned_hashes = &.{},
@@ -239,15 +239,15 @@ test "snapshot should be reverted on allocation failure during log extraction" {
         .balance = 1000,
         .nonce = 0,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     });
 
     // Create caller account with balance
     const caller_account = evm.Account{
         .balance = 1_000_000_000,
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
         .delegated_address = null,
     };
     try database.set_account(caller_address.bytes, caller_account);

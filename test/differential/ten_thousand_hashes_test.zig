@@ -80,7 +80,7 @@ fn deployContract(testor: *differential_testor.DifferentialTestor, init_code: []
         .balance = 0,
         .nonce = 1,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     });
     
     // Use Guillotine EVM for deployment since we don't have revm_instance anymore
@@ -126,7 +126,7 @@ fn deployContract(testor: *differential_testor.DifferentialTestor, init_code: []
         .balance = 0,
         .nonce = 1,
         .code_hash = runtime_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     });
     
     const runtime_hash_no_trace = try testor.guillotine_db_no_trace.set_code(runtime_code);
@@ -134,7 +134,7 @@ fn deployContract(testor: *differential_testor.DifferentialTestor, init_code: []
         .balance = 0,
         .nonce = 1,
         .code_hash = runtime_hash_no_trace,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     });
 
     return DeploymentResult{
@@ -153,9 +153,7 @@ test "differential: ten-thousand-hashes runtime execution" {
     // For this test, we'll extract the runtime code manually from the deployment bytecode
     // and test it directly without going through deployment
     
-    const bytecode_file = try std.fs.cwd().openFile("src/evm/fixtures/ten-thousand-hashes/bytecode.txt", .{});
-    defer bytecode_file.close();
-    const bytecode_hex = try bytecode_file.readToEndAlloc(allocator, 16 * 1024 * 1024);
+    const bytecode_hex = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "fixtures/ten-thousand-hashes/bytecode.txt", allocator, .limited(16 * 1024 * 1024));
     defer allocator.free(bytecode_hex);
     
     const deployment_code = try hex_decode(allocator, bytecode_hex);
@@ -191,9 +189,7 @@ test "differential: ten-thousand-hashes runtime execution" {
     log.info("Extracted runtime code: {} bytes", .{deploy_result.runtime_code.len});
     
     // Read the calldata
-    const calldata_file = try std.fs.cwd().openFile("src/evm/fixtures/ten-thousand-hashes/calldata.txt", .{});
-    defer calldata_file.close();
-    const calldata_hex = try calldata_file.readToEndAlloc(allocator, 1024);
+    const calldata_hex = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "fixtures/ten-thousand-hashes/calldata.txt", allocator, .limited(1024));
     defer allocator.free(calldata_hex);
     
     const calldata = try hex_decode(allocator, calldata_hex);

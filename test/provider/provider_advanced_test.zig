@@ -144,7 +144,7 @@ test "provider handles multiple large responses" {
     var provider = MockProvider.init(allocator);
     defer provider.deinit();
 
-    const large_response = "\"0x" ++ "00" ** 5000 ++ "\"";
+    const large_response = "\"0x" ++ &@as([10000]u8, @splat('0')) ++ "\"";
     try provider.setResponse("eth_getCode", MockResponse.success(large_response));
 
     var i: u32 = 0;

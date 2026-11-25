@@ -21,7 +21,7 @@ test "CREATE uses IR interpreter for init code" {
         .gas_limit = 30000000,
         .coinbase = ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -34,12 +34,12 @@ test "CREATE uses IR interpreter for init code" {
     defer evm.deinit();
 
     // Set up caller
-    const caller_address: Address = [_]u8{0x01} ++ [_]u8{0} ** 19;
+    const caller_address: Address = [_]u8{0x01} ++ @as([19]u8, @splat(0));
     try memory_db.set_account(caller_address, Account{
         .balance = 1000000,
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     });
 
     // Init code that uses storage operations (which IR interpreter now supports)
@@ -92,7 +92,7 @@ test "CREATE2 uses IR interpreter for init code" {
         .gas_limit = 30000000,
         .coinbase = ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -104,12 +104,12 @@ test "CREATE2 uses IR interpreter for init code" {
     var evm = try evm_mod.DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
-    const caller_address: Address = [_]u8{0x01} ++ [_]u8{0} ** 19;
+    const caller_address: Address = [_]u8{0x01} ++ @as([19]u8, @splat(0));
     try memory_db.set_account(caller_address, Account{
         .balance = 1000000,
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     });
 
     // Init code with arithmetic operations (which IR interpreter now supports)
@@ -163,7 +163,7 @@ test "IR interpreter handles complex init code with jumps" {
         .gas_limit = 30000000,
         .coinbase = ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -175,12 +175,12 @@ test "IR interpreter handles complex init code with jumps" {
     var evm = try evm_mod.DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
-    const caller_address: Address = [_]u8{0x01} ++ [_]u8{0} ** 19;
+    const caller_address: Address = [_]u8{0x01} ++ @as([19]u8, @splat(0));
     try memory_db.set_account(caller_address, Account{
         .balance = 1000000,
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     });
 
     // Init code with conditional jump

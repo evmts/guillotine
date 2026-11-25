@@ -43,16 +43,16 @@ const RegressionJournal = Journal(.{
 });
 
 // Test data
-const test_address = [_]u8{0xAB} ** 20;
+const test_address = @as([20]u8, @splat(0xAB));
 const benchmark_addresses = [_][20]u8{
-    [_]u8{0x01} ** 20,
-    [_]u8{0x02} ** 20,
-    [_]u8{0x03} ** 20,
-    [_]u8{0x04} ** 20,
-    [_]u8{0x05} ** 20,
-    [_]u8{0x06} ** 20,
-    [_]u8{0x07} ** 20,
-    [_]u8{0x08} ** 20,
+    @as([20]u8, @splat(0x01)),
+    @as([20]u8, @splat(0x02)),
+    @as([20]u8, @splat(0x03)),
+    @as([20]u8, @splat(0x04)),
+    @as([20]u8, @splat(0x05)),
+    @as([20]u8, @splat(0x06)),
+    @as([20]u8, @splat(0x07)),
+    @as([20]u8, @splat(0x08)),
 };
 
 // =============================================================================

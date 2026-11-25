@@ -16,12 +16,12 @@ fn benchmarkDirectAccess(allocator: std.mem.Allocator) !u64 {
     var storage = MemoryStorage.init(allocator);
     defer storage.deinit();
     
-    const addr = [_]u8{0x12} ** 20;
+    const addr = @as([20]u8, @splat(0x12));
     const account = Account{
         .balance = 1000,
         .nonce = 5,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     };
     
     var timer = try std.time.Timer.start();
@@ -41,12 +41,12 @@ fn benchmarkUnionAccess(allocator: std.mem.Allocator) !u64 {
     var storage = Storage{ .memory = MemoryStorage.init(allocator) };
     defer storage.deinit();
     
-    const addr = [_]u8{0x12} ** 20;
+    const addr = @as([20]u8, @splat(0x12));
     const account = Account{
         .balance = 1000,
         .nonce = 5,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     };
     
     var timer = try std.time.Timer.start();
@@ -117,7 +117,7 @@ test "HotStorage vs HashMap direct comparison" {
     var hot = cache_storage.HotStorage.init(allocator);
     defer hot.deinit();
     
-    const addr = [_]u8{0x34} ** 20;
+    const addr = @as([20]u8, @splat(0x34));
     const account = Account.zero();
     
     var timer = try std.time.Timer.start();

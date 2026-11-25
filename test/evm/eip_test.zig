@@ -61,7 +61,7 @@ test "EIP-2929 - BALANCE/EXTCODESIZE/EXTCODECOPY/EXTCODEHASH warm/cold access co
     var evm = try Evm(.{}).init(allocator, db_interface, block_info, context, 0, ZERO_ADDRESS, Hardfork.BERLIN);
     defer evm.deinit();
     
-    const test_address = [_]u8{0x42} ** 20;
+    const test_address = @as([20]u8, @splat(0x42));
     
     // Test cold access (first access)
     const cold_cost = try evm.access_address(test_address);
@@ -91,8 +91,8 @@ test "EIP-2929 - Pre-Berlin hardfork should not use warm/cold distinction" {
     defer evm.deinit();
     
     // Pre-Berlin should always return warm costs
-    const first_access = try evm.access_address([_]u8{0x42} ** 20);
-    const second_access = try evm.access_address([_]u8{0x42} ** 20);
+    const first_access = try evm.access_address(@as([20]u8, @splat(0x42)));
+    const second_access = try evm.access_address(@as([20]u8, @splat(0x42)));
     
     // Both should be the same (no cold/warm distinction)
     try testing.expectEqual(first_access, second_access);
@@ -108,7 +108,7 @@ test "EIP-3651 - Coinbase address should be warm at transaction start" {
     const db_interface = memory_db.to_database_interface();
     
     const block_info = BlockInfo.init();
-    const coinbase_address = [_]u8{0xC0} ** 20;
+    const coinbase_address = @as([20]u8, @splat(0xC0));
     const context = TransactionContext{
         .gas_limit = 1_000_000,
         .coinbase = coinbase_address,
@@ -144,8 +144,8 @@ test "EIP-4844 - BLOBHASH opcode functionality" {
     const block_info = BlockInfo.init();
     
     // Create blob hashes for testing
-    const blob_hash1 = [_]u8{0x01} ** 32;
-    const blob_hash2 = [_]u8{0x02} ** 32;
+    const blob_hash1 = @as([32]u8, @splat(0x01));
+    const blob_hash2 = @as([32]u8, @splat(0x02));
     const blob_hashes = [_][32]u8{ blob_hash1, blob_hash2 };
     
     const context = TransactionContext{
@@ -212,11 +212,11 @@ test "Integration - All EIPs working together" {
     defer memory_db.deinit();
     
     // Add an account with storage
-    const test_account_address = [_]u8{0xAA} ** 20;
+    const test_account_address = @as([20]u8, @splat(0xAA));
     const test_account = DatabaseInterface.Account{
         .nonce = 5,
         .balance = 1_000_000_000_000_000_000, // 1 ETH
-        .code_hash = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
     };
     try memory_db.set_account(test_account_address, test_account);
     try memory_db.set_storage(test_account_address, 0x100, 0x42);
@@ -224,10 +224,10 @@ test "Integration - All EIPs working together" {
     const db_interface = memory_db.to_database_interface();
     
     const block_info = BlockInfo.init();
-    const coinbase_address = [_]u8{0xC0} ** 20;
+    const coinbase_address = @as([20]u8, @splat(0xC0));
     
     // Create blob hashes
-    const blob_hash = [_]u8{0xBB} ** 32;
+    const blob_hash = @as([32]u8, @splat(0xBB));
     const blob_hashes = [_][32]u8{blob_hash};
     
     const context = TransactionContext{
@@ -287,7 +287,7 @@ test "Access list clearing between transactions" {
     var evm = try Evm(.{}).init(allocator, db_interface, block_info, context, 0, ZERO_ADDRESS, Hardfork.BERLIN);
     defer evm.deinit();
     
-    const test_address = [_]u8{0x42} ** 20;
+    const test_address = @as([20]u8, @splat(0x42));
     
     // First access should be cold
     const first_cost = try evm.access_address(test_address);

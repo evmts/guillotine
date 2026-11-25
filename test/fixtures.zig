@@ -155,8 +155,8 @@ fn runFixture(fixture_name: []const u8, calldata_hex: []const u8, gas_limit: u64
     }
     
     // Setup common addresses
-    const sender = try Address.fromBytes(&([_]u8{0} ** 19 ++ [_]u8{0x01}));
-    const contract = try Address.fromBytes(&([_]u8{0} ** 19 ++ [_]u8{0x42}));
+    const sender = try Address.fromBytes(&(@as([19]u8, @splat(0)) ++ [_]u8{0x01}));
+    const contract = try Address.fromBytes(&(@as([19]u8, @splat(0)) ++ [_]u8{0x42}));
     
     // Parse calldata
     const calldata = try hexToBytes(allocator, calldata_hex);
@@ -176,8 +176,8 @@ fn runFixture(fixture_name: []const u8, calldata_hex: []const u8, gas_limit: u64
         
         try database.set_account(sender.bytes, .{
             .balance = 100_000_000_000_000_000_000,
-            .code_hash = [_]u8{0} ** 32,
-            .storage_root = [_]u8{0} ** 32,
+            .code_hash = @as([32]u8, @splat(0)),
+            .storage_root = @as([32]u8, @splat(0)),
             .nonce = 0,
             .delegated_address = null,
         });
@@ -186,7 +186,7 @@ fn runFixture(fixture_name: []const u8, calldata_hex: []const u8, gas_limit: u64
         try database.set_account(contract.bytes, .{
             .balance = 0,
             .code_hash = code_hash,
-            .storage_root = [_]u8{0} ** 32,
+            .storage_root = @as([32]u8, @splat(0)),
             .nonce = 0,
             .delegated_address = null,
         });
@@ -202,7 +202,7 @@ fn runFixture(fixture_name: []const u8, calldata_hex: []const u8, gas_limit: u64
                 .base_fee = 1_000_000_000, 
                 .chain_id = 1, 
                 .difficulty = 0, 
-                .prev_randao = [_]u8{0} ** 32, 
+                .prev_randao = @as([32]u8, @splat(0)), 
                 .blob_base_fee = 0, 
                 .blob_versioned_hashes = &.{} 
             },
@@ -352,12 +352,12 @@ fn testDispatchSnapshot(allocator: std.mem.Allocator, fixture_name: []const u8, 
     var database = evm.Database.init(allocator);
     defer database.deinit();
     
-    const sender = try primitives.Address.Address.fromBytes(&([_]u8{0} ** 19 ++ [_]u8{0x01}));
+    const sender = try primitives.Address.Address.fromBytes(&(@as([19]u8, @splat(0)) ++ [_]u8{0x01}));
     
     var test_evm = try evm.MainnetEvm.init(
         allocator,
         &database,
-        .{ .number = 1, .timestamp = 1000000, .gas_limit = 30_000_000, .coinbase = primitives.ZERO_ADDRESS, .base_fee = 1_000_000_000, .chain_id = 1, .difficulty = 0, .prev_randao = [_]u8{0} ** 32, .blob_base_fee = 0, .blob_versioned_hashes = &.{} },
+        .{ .number = 1, .timestamp = 1000000, .gas_limit = 30_000_000, .coinbase = primitives.ZERO_ADDRESS, .base_fee = 1_000_000_000, .chain_id = 1, .difficulty = 0, .prev_randao = @as([32]u8, @splat(0)), .blob_base_fee = 0, .blob_versioned_hashes = &.{} },
         .{ .gas_limit = 1000000, .coinbase = primitives.ZERO_ADDRESS, .chain_id = 1, .blob_versioned_hashes = &.{}, .blob_base_fee = 0 },
         1_000_000_000,
         sender,

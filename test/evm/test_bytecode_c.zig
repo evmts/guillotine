@@ -148,7 +148,7 @@ test "Bytecode C API: Error handling" {
     const empty_handle = bytecode_c.evm_bytecode_create(&[_]u8{}, 0);
     try testing.expect(empty_handle == null);
     
-    const too_large = [_]u8{0x00} ** 25000; // Larger than max allowed
+    const too_large = @as([25000]u8, @splat(0x00)); // Larger than max allowed
     const large_handle = bytecode_c.evm_bytecode_create(&too_large, too_large.len);
     try testing.expect(large_handle == null);
     

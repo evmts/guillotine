@@ -176,7 +176,7 @@ build/
 
 ### Prerequisites
 
-- **Zig 0.15.1** (exactly - newer versions like 0.16.x have breaking API changes)
+- **Zig 0.17.1** (exactly; 0.15.x and 0.16.x fail to parse or build this tree)
 - Git
 - Rust toolchain 1.75+ (required for ark and foundry-compilers dependencies)
 - Golang and Node.js if working with the CLI and native app
@@ -277,16 +277,16 @@ zig build
 
 #### Zig Version Mismatch
 
-If you see errors about `writer` method not found on ArrayList, or other API errors:
+If you see parse errors (for example `**` array repetition) or other std API errors:
 
 ```bash
 # Check your Zig version
 zig version
 
-# Must be exactly 0.15.1, NOT 0.16.x
+# Must be exactly 0.17.1
 # Use zvm to manage versions:
-zvm install 0.15.1
-zvm use 0.15.1
+zvm install 0.17.1
+zvm use 0.17.1
 ```
 
 #### Submodule Not Initialized

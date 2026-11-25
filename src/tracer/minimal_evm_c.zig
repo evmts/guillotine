@@ -431,7 +431,7 @@ test "minimal_evm_c: calldata allocation and cleanup" {
 
     const caller = ZERO_ADDRESS;
     const address = ZERO_ADDRESS;
-    const value = [_]u8{0} ** 32;
+    const value = @as([32]u8, @splat(0));
     const calldata = [_]u8{ 0xAA, 0xBB, 0xCC, 0xDD };
 
     const success = evm_set_execution_context(
@@ -453,7 +453,7 @@ test "minimal_evm_c: multiple calldata sets" {
 
     const caller = ZERO_ADDRESS;
     const address = ZERO_ADDRESS;
-    const value = [_]u8{0} ** 32;
+    const value = @as([32]u8, @splat(0));
 
     // Set calldata multiple times
     const calldata1 = [_]u8{ 0xAA, 0xBB };
@@ -500,7 +500,7 @@ test "minimal_evm_c: empty calldata handling" {
 
     const caller = ZERO_ADDRESS;
     const address = ZERO_ADDRESS;
-    const value = [_]u8{0} ** 32;
+    const value = @as([32]u8, @splat(0));
 
     // Set empty calldata
     const success = evm_set_execution_context(
@@ -537,7 +537,7 @@ test "minimal_evm_c: large calldata allocation" {
 
     const caller = ZERO_ADDRESS;
     const address = ZERO_ADDRESS;
-    const value = [_]u8{0} ** 32;
+    const value = @as([32]u8, @splat(0));
 
     // Allocate 10KB calldata
     var large_calldata: [10000]u8 = undefined;
@@ -570,7 +570,7 @@ test "minimal_evm_c: full execution cycle with memory cleanup" {
     // Set execution context
     const caller = ZERO_ADDRESS;
     const address = ZERO_ADDRESS;
-    const value = [_]u8{0} ** 32;
+    const value = @as([32]u8, @splat(0));
     const calldata = [_]u8{};
     success = evm_set_execution_context(
         handle,
@@ -657,7 +657,7 @@ test "minimal_evm_c: interleaved operations stress test" {
 
     const caller = ZERO_ADDRESS;
     const address = ZERO_ADDRESS;
-    const value = [_]u8{0} ** 32;
+    const value = @as([32]u8, @splat(0));
 
     success = evm_set_execution_context(
         handle1,

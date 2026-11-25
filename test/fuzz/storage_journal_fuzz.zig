@@ -18,7 +18,7 @@ const NUM_ACCOUNTS = 6;
 const NUM_SLOTS = 6;
 
 fn makeAddr(idx: u8) [20]u8 {
-    var bytes = [_]u8{0} ** 20;
+    var bytes = @as([20]u8, @splat(0));
     bytes[19] = (idx % NUM_ACCOUNTS) + 1;
     return bytes;
 }
@@ -27,13 +27,13 @@ const RefAccount = struct {
     exists: bool = false,
     balance: u256 = 0,
     nonce: u64 = 0,
-    code_hash: [32]u8 = [_]u8{0} ** 32,
+    code_hash: [32]u8 = @as([32]u8, @splat(0)),
 };
 
 const RefState = struct {
-    accounts: [NUM_ACCOUNTS]RefAccount = [_]RefAccount{.{}} ** NUM_ACCOUNTS,
-    storage: [NUM_ACCOUNTS][NUM_SLOTS]u256 = [_][NUM_SLOTS]u256{[_]u256{0} ** NUM_SLOTS} ** NUM_ACCOUNTS,
-    transient: [NUM_ACCOUNTS][NUM_SLOTS]u256 = [_][NUM_SLOTS]u256{[_]u256{0} ** NUM_SLOTS} ** NUM_ACCOUNTS,
+    accounts: [NUM_ACCOUNTS]RefAccount = @as([NUM_ACCOUNTS]RefAccount, @splat(.{})),
+    storage: [NUM_ACCOUNTS][NUM_SLOTS]u256 = @as([NUM_ACCOUNTS][NUM_SLOTS]u256, @splat(@as([NUM_SLOTS]u256, @splat(0)))),
+    transient: [NUM_ACCOUNTS][NUM_SLOTS]u256 = @as([NUM_ACCOUNTS][NUM_SLOTS]u256, @splat(@as([NUM_SLOTS]u256, @splat(0)))),
 };
 
 fn verifyDbMatchesRef(db: *Database, ref: *const RefState) !void {
@@ -83,8 +83,8 @@ pub fn fuzzDatabaseSnapshotsAndViews(_: void, input: []const u8) !void {
                 const acc = Account{
                     .balance = @as(u256, val_byte) * 1000,
                     .nonce = val_byte,
-                    .code_hash = [_]u8{0} ** 32,
-                    .storage_root = [_]u8{0} ** 32,
+                    .code_hash = @as([32]u8, @splat(0)),
+                    .storage_root = @as([32]u8, @splat(0)),
                 };
                 try db.set_account(addr, acc);
                 ref.accounts[a_idx] = .{
@@ -256,8 +256,8 @@ pub fn fuzzAccessListWarmCold(_: void, input: []const u8) !void {
     var al = AccessList.init(allocator);
     defer al.deinit();
 
-    var ref_addrs = [_]bool{false} ** NUM_ACCOUNTS;
-    var ref_slots = [_][NUM_SLOTS]bool{[_]bool{false} ** NUM_SLOTS} ** NUM_ACCOUNTS;
+    var ref_addrs = @as([NUM_ACCOUNTS]bool, @splat(false));
+    var ref_slots = @as([NUM_ACCOUNTS][NUM_SLOTS]bool, @splat(@as([NUM_SLOTS]bool, @splat(false))));
 
     var i: usize = 0;
     while (i + 2 <= input.len) : (i += 2) {
@@ -295,8 +295,8 @@ pub fn fuzzAccessListWarmCold(_: void, input: []const u8) !void {
             else => { // clear
                 if (input[i + 1] < 16) {
                     al.clear();
-                    ref_addrs = [_]bool{false} ** NUM_ACCOUNTS;
-                    ref_slots = [_][NUM_SLOTS]bool{[_]bool{false} ** NUM_SLOTS} ** NUM_ACCOUNTS;
+                    ref_addrs = @as([NUM_ACCOUNTS]bool, @splat(false));
+                    ref_slots = @as([NUM_ACCOUNTS][NUM_SLOTS]bool, @splat(@as([NUM_SLOTS]bool, @splat(false))));
                 }
             },
         }
@@ -312,13 +312,13 @@ const seed_corpus: []const []const u8 = &.{
 };
 
 test "fuzz database nested snapshots, ephemeral views, and storage model" {
-    try std.testing.fuzz({}, fuzzDatabaseSnapshotsAndViews, .{ .corpus = seed_corpus });
+    try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzDatabaseSnapshotsAndViews), .{ .corpus = seed_corpus });
 }
 
 test "fuzz journal O(1) original storage index vs brute-force log under nested reverts" {
-    try std.testing.fuzz({}, fuzzJournalOriginalStorageIndex, .{ .corpus = seed_corpus });
+    try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzJournalOriginalStorageIndex), .{ .corpus = seed_corpus });
 }
 
 test "fuzz EIP-2929 access list warm/cold gas accounting and cloning" {
-    try std.testing.fuzz({}, fuzzAccessListWarmCold, .{ .corpus = seed_corpus });
+    try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzAccessListWarmCold), .{ .corpus = seed_corpus });
 }

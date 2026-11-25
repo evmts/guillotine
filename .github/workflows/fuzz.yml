@@ -24,16 +24,16 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Setup Zig 0.15.2
+      - name: Setup Zig 0.17.1
         uses: mlugg/setup-zig@v2
         with:
-          version: 0.15.2
+          version: 0.17.1
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build Voltaire Rust crypto wrappers
-        run: cargo build --manifest-path lib/voltaire/Cargo.toml --release
+        run: cargo build --manifest-path lib/voltaire/Cargo.toml --release --locked
 
       - name: Run Zig fuzz corpus & leak regression suite
         run: |
@@ -91,10 +91,10 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Setup Zig 0.15.2
+      - name: Setup Zig 0.17.1
         uses: mlugg/setup-zig@v2
         with:
-          version: 0.15.2
+          version: 0.17.1
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -103,7 +103,7 @@ jobs:
         uses: oven-sh/setup-bun@v2
 
       - name: Build Voltaire Rust crypto wrappers
-        run: cargo build --manifest-path lib/voltaire/Cargo.toml --release
+        run: cargo build --manifest-path lib/voltaire/Cargo.toml --release --locked
 
       - name: Build native FFI shared library
         run: zig build shared -Doptimize=ReleaseFast

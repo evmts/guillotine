@@ -175,7 +175,7 @@ test "Plan C API: Error handling" {
     const empty_plan = plan_c.evm_plan_create(&[_]u8{}, 0);
     try testing.expect(empty_plan == null);
     
-    const too_large = [_]u8{0x00} ** 25000; // Larger than max allowed
+    const too_large = @as([25000]u8, @splat(0x00)); // Larger than max allowed
     const large_plan = plan_c.evm_plan_create(&too_large, too_large.len);
     try testing.expect(large_plan == null);
     
@@ -206,7 +206,7 @@ test "Plan C API: Edge cases" {
     try testing.expectEqual(@as(u32, 0), plan_c.evm_plan_get_constant_count(stop_handle)); // No PUSH instructions
     
     // Test plan with maximum PUSH32
-    const push32_bytecode = [_]u8{0x7F} ++ [_]u8{0xFF} ** 32 ++ [_]u8{0x00}; // PUSH32 (all 0xFF) + STOP
+    const push32_bytecode = [_]u8{0x7F} ++ @as([32]u8, @splat(0xFF)) ++ [_]u8{0x00}; // PUSH32 (all 0xFF) + STOP
     const push32_handle = plan_c.evm_plan_create(&push32_bytecode, push32_bytecode.len);
     try testing.expect(push32_handle != null);
     defer plan_c.evm_plan_destroy(push32_handle);
@@ -217,5 +217,5 @@ test "Plan C API: Edge cases" {
     var constant_buffer: [32]u8 = undefined;
     const result = plan_c.evm_plan_get_constant(push32_handle, 0, &constant_buffer);
     try testing.expectEqual(plan_c.EVM_PLAN_SUCCESS, result);
-    try testing.expect(std.mem.eql(u8, &constant_buffer, &([_]u8{0xFF} ** 32)));
+    try testing.expect(std.mem.eql(u8, &constant_buffer, &(@as([32]u8, @splat(0xFF)))));
 }

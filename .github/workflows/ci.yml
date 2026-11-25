@@ -8,6 +8,25 @@ permissions:
   contents: read
 
 jobs:
+  ast-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Zig 0.17.1
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.17.1
+      - name: Every tracked Zig file parses (zig ast-check)
+        shell: bash
+        run: |
+          set -euo pipefail
+          failed=0
+          while IFS= read -r file; do
+            if ! zig ast-check "$file"; then failed=1; fi
+          done < <(git ls-files 'src/*.zig' 'test/*.zig' 'bench/*.zig' 'specs/*.zig' 'verify/*.zig' '.smithers/*.zig' 'build.zig')
+          exit "$failed"
+
   build-test:
     strategy:
       fail-fast: false
@@ -62,6 +81,8 @@ jobs:
         run: node --test .smithers/tests/foundry-link.test.mjs
       - name: Build Voltaire Rust crypto archive
         run: node .smithers/build-crypto.mjs
+      - name: Rust workspace tests
+        run: cargo test --locked
       - name: Build
         run: zig build
       - name: Unit tests
@@ -79,6 +100,56 @@ jobs:
       - name: Benchmark harness tests
         if: ${{ !cancelled() }}
         run: zig build test-bench
+      - name: Fusion tests
+        if: ${{ !cancelled() }}
+        run: zig build test-fusions
       - name: FFI libraries (ReleaseFast)
         if: ${{ !cancelled() }}
         run: zig build shared static -Doptimize=ReleaseFast
+      - name: C SDK tests
+        if: ${{ !cancelled() }}
+        run: make -f sdks/c/Makefile -o build-core test
+      - name: Setup Bun
+        if: ${{ !cancelled() }}
+        uses: oven-sh/setup-bun@v2
+      - name: TypeScript SDK tests
+        if: ${{ !cancelled() }}
+        working-directory: sdks/typescript
+        run: |
+          bun install --frozen-lockfile
+          bun test
+
+  state-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.smithers/cache/tools/zig/global
+      ZIG_LOCAL_CACHE_DIR: ${{ github.workspace }}/.smithers/cache/tools/zig/local
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install Zig 0.17.1
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.17.1
+      - name: Cache EEST fixtures
+        uses: actions/cache@v4
+        with:
+          path: .cache/eest-fixtures
+          key: eest-fixtures-${{ hashFiles('scripts/fetch-eest-fixtures.sh') }}
+      - name: Fetch official EEST state fixtures
+        run: scripts/fetch-eest-fixtures.sh
+      - name: Build Voltaire Rust crypto archive
+        run: node .smithers/build-crypto.mjs
+      - name: Official EEST state tests
+        run: zig build state-tests -Doptimize=ReleaseSafe -- --report=eest-report.json
+      - name: Upload EEST report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: eest-report
+          path: eest-report.json
+          if-no-files-found: ignore

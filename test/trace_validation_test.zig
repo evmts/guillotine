@@ -38,7 +38,7 @@ test "trace validation - basic trace population on successful call" {
         .gas_limit = 30_000_000,
         .coinbase = Address.ZERO_ADDRESS,
         .base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
     
     const tx_context = TransactionContext{
@@ -62,13 +62,13 @@ test "trace validation - basic trace population on successful call" {
         0xf3,        // RETURN
     };
     
-    const contract_addr = Address{ .bytes = [_]u8{0x01} ** 20 };
+    const contract_addr = Address{ .bytes = @as([20]u8, @splat(0x01)) };
     const code_hash = try db.set_code(&bytecode);
     const account = Account{
         .balance = 0,
         .nonce = 0,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     };
     try db.set_account(contract_addr.bytes, account);
     
@@ -126,7 +126,7 @@ test "trace validation - trace step details are correct" {
         .gas_limit = 30_000_000,
         .coinbase = Address.ZERO_ADDRESS,
         .base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
     
     const tx_context = TransactionContext{
@@ -146,13 +146,13 @@ test "trace validation - trace step details are correct" {
         0x00,        // STOP
     };
     
-    const contract_addr = Address{ .bytes = [_]u8{0x02} ** 20 };
+    const contract_addr = Address{ .bytes = @as([20]u8, @splat(0x02)) };
     const code_hash = try db.set_code(&bytecode);
     const account = Account{
         .balance = 0,
         .nonce = 0,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     };
     try db.set_account(contract_addr.bytes, account);
     
@@ -223,7 +223,7 @@ test "trace validation - REVERT produces trace" {
         .gas_limit = 30_000_000,
         .coinbase = Address.ZERO_ADDRESS,
         .base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
     
     const tx_context = TransactionContext{
@@ -246,13 +246,13 @@ test "trace validation - REVERT produces trace" {
         0xfd,                            // REVERT
     };
     
-    const contract_addr = Address{ .bytes = [_]u8{0x03} ** 20 };
+    const contract_addr = Address{ .bytes = @as([20]u8, @splat(0x03)) };
     const code_hash = try db.set_code(&bytecode);
     const account = Account{
         .balance = 0,
         .nonce = 0,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     };
     try db.set_account(contract_addr.bytes, account);
     
@@ -309,7 +309,7 @@ test "trace validation - gas consumption tracking" {
         .gas_limit = 30_000_000,
         .coinbase = Address.ZERO_ADDRESS,
         .base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
     
     const tx_context = TransactionContext{
@@ -330,13 +330,13 @@ test "trace validation - gas consumption tracking" {
         0x00,        // STOP (gas cost: 0)
     };
     
-    const contract_addr = Address{ .bytes = [_]u8{0x04} ** 20 };
+    const contract_addr = Address{ .bytes = @as([20]u8, @splat(0x04)) };
     const code_hash = try db.set_code(&bytecode);
     const account = Account{
         .balance = 0,
         .nonce = 0,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     };
     try db.set_account(contract_addr.bytes, account);
     
@@ -397,7 +397,7 @@ test "trace validation - snapshot test" {
         .gas_limit = 30_000_000,
         .coinbase = Address.ZERO_ADDRESS,
         .base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
     
     const tx_context = TransactionContext{
@@ -417,13 +417,13 @@ test "trace validation - snapshot test" {
         0x00,        // STOP
     };
     
-    const contract_addr = Address{ .bytes = [_]u8{0x99} ** 20 };
+    const contract_addr = Address{ .bytes = @as([20]u8, @splat(0x99)) };
     const code_hash = try db.set_code(&bytecode);
     const account = Account{
         .balance = 0,
         .nonce = 0,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     };
     try db.set_account(contract_addr.bytes, account);
     
@@ -504,7 +504,7 @@ test "trace validation - CREATE operation produces trace" {
         .gas_limit = 30_000_000,
         .coinbase = Address.ZERO_ADDRESS,
         .base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
     
     const tx_context = TransactionContext{

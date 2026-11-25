@@ -49,7 +49,7 @@ const NoOpHost = struct {
             .coinbase = ZERO_ADDRESS,
             .difficulty = 0,
             .base_fee = 0,
-            .prev_randao = [_]u8{0} ** 32,
+            .prev_randao = @as([32]u8, @splat(0)),
         };
     }
     
@@ -418,7 +418,7 @@ const MockHost = struct {
             .coinbase = ZERO_ADDRESS,
             .difficulty = 0,
             .base_fee = 0,
-            .prev_randao = [_]u8{0} ** 32,
+            .prev_randao = @as([32]u8, @splat(0)),
         };
     }
     

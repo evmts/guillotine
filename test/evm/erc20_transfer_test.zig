@@ -69,14 +69,14 @@ test "ERC20 transfer fixture test" {
     
     // Caller address with large balance
     const caller_address = primitives.Address{ 
-        .bytes = [_]u8{0x10} ++ [_]u8{0} ** 18 ++ [_]u8{0x01}
+        .bytes = [_]u8{0x10} ++ @as([18]u8, @splat(0)) ++ [_]u8{0x01}
     };
     
     try database.set_account(caller_address.bytes, .{
         .balance = std.math.maxInt(u256),
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     });
     
     // Setup block info
@@ -88,7 +88,7 @@ test "ERC20 transfer fixture test" {
         .gas_limit = 2_100_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 7,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
         .blob_base_fee = 1000000000,
         .blob_versioned_hashes = &.{},
     };
@@ -163,13 +163,13 @@ test "ERC20 transfer fixture test" {
         // Fallback: install bytecode directly as runtime code
         std.debug.print("\nCREATE failed, installing bytecode as runtime code fallback\n", .{});
         
-        contract_address = primitives.Address{ .bytes = [_]u8{0x42} ++ [_]u8{0} ** 19 };
+        contract_address = primitives.Address{ .bytes = [_]u8{0x42} ++ @as([19]u8, @splat(0)) };
         const code_hash = try database.set_code(init_code);
         try database.set_account(contract_address.bytes, .{
             .balance = 0,
             .nonce = 1,
             .code_hash = code_hash,
-            .storage_root = [_]u8{0} ** 32,
+            .storage_root = @as([32]u8, @splat(0)),
         });
         runtime_code = try database.get_code(code_hash);
     }

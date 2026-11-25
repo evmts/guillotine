@@ -19,7 +19,8 @@ Replay any proof by hand:
 
 Model drift guard: the Zig source text of every modeled function is hashed and
 compared with `verify/smt/model_pins.json`. A changed function fails the suite
-until a human re-reviews the SMT model and runs `--update-pins`.
+until a human re-reviews the SMT model and runs `--update-pins`. A missing
+pin file also fails; only `--update-pins` creates it.
 
 Dependencies: Python 3 standard library, `bitwuzla` and/or `z3` on PATH.
 """
@@ -194,6 +195,8 @@ class Theorem:
     sources: List[SourceRef]
     notes: str = ""
     structural_error: str = ""  # set when Python-level structure (e.g. stack shape) mismatches
+    # Minimum per-query solver budget in seconds; --timeout applies when larger.
+    timeout: int = 0
 
     def render(self, vacuity: bool) -> str:
         status = "sat" if vacuity else "unsat"
@@ -699,6 +702,9 @@ theorem(
      (=> (bvule w1 w2) (bvule (memoryGasCost w1) (memoryGasCost w2))))""",
         sources=src(VERIFIED_OPS, "memoryGasCost"),
         notes="538443776 = 0x20180000 = 3*2^19 + 2^29.",
+        # The 64-bit words*words product is hard for bit-blasting: Bitwuzla 0.11.0
+        # needs ~540 s on nyc-01 and Z3 5.3.3 exceeds 60 s.
+        timeout=1800,
     )
 )
 
@@ -1038,6 +1044,7 @@ class Job:
     kind: str  # "proof" or "vacuity"
     path: Path
     expected: str
+    timeout: int = 0
 
 
 @dataclasses.dataclass
@@ -1302,9 +1309,13 @@ def all_sources() -> List[SourceRef]:
 
 def check_pins(update: bool) -> List[str]:
     current = {f"{r.path}::{r.fn}": fn_hash(r) for r in all_sources()}
-    if update or not PINS_FILE.exists():
+    if update:
         PINS_FILE.write_text(json.dumps(current, indent=2, sort_keys=True) + "\n")
         return []
+    # Fail closed: a missing pin file must never be regenerated silently, or
+    # unreviewed source drift would pass as "proved".
+    if not PINS_FILE.exists():
+        return [f"{PINS_FILE.relative_to(REPO)} is missing; review the SMT models and run --update-pins"]
     pinned = json.loads(PINS_FILE.read_text())
     errs = []
     for key, h in current.items():
@@ -1342,8 +1353,13 @@ def main() -> int:
     t_start = time.monotonic()
     failures: List[str] = []
 
+    fallback: Optional[str] = None
     if args.solver == "auto":
         solvers = ["bitwuzla"] if shutil.which("bitwuzla") else ["z3"] if shutil.which("z3") else []
+        # Neither solver dominates (Bitwuzla: memory gas in minutes; Z3: SDIV/SMOD
+        # in seconds). Retry only non-definitive answers with the other solver.
+        if solvers == ["bitwuzla"] and shutil.which("z3"):
+            fallback = "z3"
     elif args.solver == "both":
         solvers = ["bitwuzla", "z3"]
     else:
@@ -1365,11 +1381,11 @@ def main() -> int:
             failures.append(f"{t.name}: {t.structural_error}")
         p = PROOFS / f"{t.name}.smt2"
         p.write_text(t.render(vacuity=False))
-        jobs.append(Job(t.name, "proof", p, "unsat"))
+        jobs.append(Job(t.name, "proof", p, "unsat", t.timeout))
         if t.hyps and not args.no_vacuity:
             v = PROOFS / "vacuity" / f"{t.name}.smt2"
             v.write_text(t.render(vacuity=True))
-            jobs.append(Job(t.name, "vacuity", v, "sat"))
+            jobs.append(Job(t.name, "vacuity", v, "sat", t.timeout))
 
     pin_errors = check_pins(args.update_pins)
     failures.extend(f"model pin: {e}" for e in pin_errors)
@@ -1382,9 +1398,14 @@ def main() -> int:
     outcomes: List[Outcome] = []
     workers = args.jobs or max(2, (os_cpu() or 4))
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
-        futs = [pool.submit(run_solver, s, j, args.timeout) for j in jobs for s in solvers]
+        futs = [pool.submit(run_solver, s, j, max(args.timeout, j.timeout)) for j in jobs for s in solvers]
         for fut in futs:
             outcomes.append(fut.result())
+        if fallback:
+            retry = [i for i, o in enumerate(outcomes) if o.answer not in ("sat", "unsat")]
+            retried = [pool.submit(run_solver, fallback, outcomes[i].job, max(args.timeout, outcomes[i].job.timeout)) for i in retry]
+            for i, fut in zip(retry, retried):
+                outcomes[i] = fut.result()
 
     by_theorem: Dict[str, List[Outcome]] = {}
     for o in outcomes:

@@ -15,7 +15,7 @@ test "ecPairing uses real BN254 implementation - not stub" {
     // Test with valid pairing input that should return true (1)
     // This is the simplest valid case: e(P, Q) * e(-P, Q) = 1
     // Where P is the generator point and Q is a specific point
-    var input = [_]u8{0} ** 384; // Two pairs of (G1, G2) points
+    var input = @as([384]u8, @splat(0)); // Two pairs of (G1, G2) points
     
     // First pair: generator point G1 and a valid G2 point
     // G1 generator (in Montgomery form):
@@ -71,7 +71,7 @@ test "KZG point evaluation fails gracefully when uninitialized" {
     const allocator = testing.allocator;
     
     // Well-formed 192-byte input for point evaluation but with dummy values
-    var input = [_]u8{0} ** 192;
+    var input = @as([192]u8, @splat(0));
     // Set a KZG version byte in the versioned hash position to look structurally valid
     input[0] = 0x01;
     
@@ -113,7 +113,7 @@ test "ecRecover handles invalid signatures gracefully" {
     const allocator = testing.allocator;
     
     // Invalid signature (all zeros)
-    const input = [_]u8{0} ** 128;
+    const input = @as([128]u8, @splat(0));
     
     const result = try precompiles.execute_ecrecover(allocator, &input, 10_000);
     defer allocator.free(result.output);
@@ -159,7 +159,7 @@ test "modexp handles basic exponentiation" {
     const allocator = testing.allocator;
     
     // Test 3^4 mod 5 = 81 mod 5 = 1
-    var input: [128]u8 = [_]u8{0} ** 128;
+    var input: [128]u8 = @as([128]u8, @splat(0));
     
     // base_len = 1
     input[31] = 1;
@@ -186,7 +186,7 @@ test "Blake2F compression function validates input length" {
     const allocator = testing.allocator;
     
     // Invalid input length (should be exactly 213 bytes)
-    const invalid_input = [_]u8{0} ** 100;
+    const invalid_input = @as([100]u8, @splat(0));
     
     const result = try precompiles.execute_blake2f(allocator, &invalid_input, 10_000);
     

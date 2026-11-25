@@ -86,9 +86,9 @@ thing.* = try Thing.init(allocator);
 return thing;
 ```
 
-### ArrayList API (Zig 0.15.1)
+### ArrayList API (Zig 0.17.1)
 
-**CRITICAL**: In Zig 0.15.1, `std.ArrayList(T)` returns an UNMANAGED type that requires allocator for all operations!
+**CRITICAL**: In Zig 0.17.1, `std.ArrayList(T)` returns an UNMANAGED type that requires allocator for all operations!
 
 ```zig
 // CORRECT: std.ArrayList is UNMANAGED (no internal allocator)
@@ -108,7 +108,7 @@ _ = list.pop();  // No allocator needed for pop
 list.items[0] = value;
 list.items.len = 0;
 
-// WRONG - This does NOT work in Zig 0.15.1:
+// WRONG - This does NOT work in Zig 0.17.1:
 var list = std.ArrayList(T).init(allocator);  // ❌ No init() method!
 list.deinit();  // ❌ Missing required allocator
 try list.append(item);  // ❌ Missing required allocator
@@ -211,9 +211,18 @@ zig build test-unit -Dtest-filter='stack'
 ```
 
 ### Other Test Commands
-- `zig build test-snailtracer` - Snailtracer differential test
-- `zig build test-synthetic` - Synthetic opcode tests
-- `zig build test-fusions` - Fusion optimization tests
+- `zig build test-fusions` - Fusion optimization tests (unit + dispatch + differential)
+- `zig build test-modexp` - Vendored ModExp arithmetic and precompile tests
+- `zig build test-precompiles` - Precompile integration vectors, including KZG point evaluation
+- `zig build test-layer2` - Layer 2 (Base & OP Stack) unit tests
+- `zig build test-bench` - Benchmark statistics, CLI and workload construction
+- `zig build test-fuzz` - Zig fuzz targets (corpus replay; add `--fuzz` on Linux)
+- `zig build state-tests` - Official EEST state fixtures (`scripts/fetch-eest-fixtures.sh` first)
+- `zig build verify-smt` - Bitwuzla/Z3 SMT proofs (`model_pins.json` must exist; refresh with `--update-pins` after review)
+
+Tests use the Zig standard test runner. `zig build test-unit` only runs the
+inline tests that `src/root.zig` imports; Evm-level behavior tests belong in
+`test/evm/opcodes/` (run by `zig build test-opcodes`).
 
 ## EVM Architecture
 
@@ -303,16 +312,22 @@ The `tracer.assert()` calls in unsafe operations are **development aids for debu
 
 ### Opcode Pattern
 
+Handlers use the register-passing tail-call ABI in
+`src/preprocessor/handler_abi.zig`: `fn (frame, cursor, sp, gas)
+callconv(handler_cc) ExitCode`. On LLVM x86_64/aarch64 `handler_cc` is
+`preserve_none`, which cannot return an error union or take `u256` by value, so
+handlers return an `ExitCode` and the caller maps it back with `errorFromExit`.
+
 ```zig
-pub fn add(self: *Self, cursor: [*]const Dispatch.Item) Error!noreturn {
-    self.beforeInstruction(.ADD, cursor);
-    self.getTracer().assert(self.stack.size() >= 2, "ADD requires 2 stack items");
-    const b = self.stack.pop_unsafe();  // Top of stack
-    const a = self.stack.peek_unsafe(); // Second item
-    self.stack.set_top_unsafe(a +% b);
-    const op_data = dispatch.getOpData(.ADD);
-    self.afterInstruction(.ADD, op_data.next_handler, op_data.next_cursor.cursor);
-    return @call(Self.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+pub fn add(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+    var s = N.StackView{ .sp = sp };
+    N.before(self, .ADD, cursor, s.sp, gas);
+    s.binary_op_unsafe(struct {
+        fn op(top: WordType, second: WordType) WordType {
+            return top +% second;
+        }
+    }.op);
+    return N.next(self, .ADD, cursor, s.sp, gas);
 }
 ```
 
@@ -370,14 +385,12 @@ The tracer system in `@src/tracer/tracer.zig` provides sophisticated execution s
 
 ### Instruction Handler Pattern
 ```zig
-pub fn some_opcode(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-    self.beforeInstruction(.SOME_OPCODE, cursor);  // ← REQUIRED!
+pub fn some_opcode(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+    N.before(self, .SOME_OPCODE, cursor, sp, gas);  // ← REQUIRED! (calls beforeInstruction)
     // ... opcode implementation ...
-    return next_instruction(self, cursor, .SOME_OPCODE);
+    return N.next(self, .SOME_OPCODE, cursor, sp, gas);
 }
 ```
-
-**CRITICAL**: Missing `beforeInstruction()` calls cause test failures because MinimalEvm gets out of sync.
 
 ### Synthetic Opcode Handling
 
@@ -420,7 +433,7 @@ Detailed documentation is available in `docs/`:
 
 ## References
 
-- Zig docs: https://ziglang.org/documentation/0.15.1/
+- Zig docs: https://ziglang.org/documentation/0.17.1/
 - revm/: Reference Rust implementation
 - Yellow Paper: Ethereum spec
 - EIPs: Ethereum Improvement Proposals
@@ -447,33 +460,40 @@ Required for: creating, commenting, closing, updating issues and all GitHub API 
 
 ## Build Commands
 
-Usage: `zig build [steps] [options]`
+Toolchain: Zig 0.17.1 (`zig version`), Rust/Cargo for `lib/voltaire` and
+`lib/ark`. Build the Voltaire crypto archive first with
+`node .smithers/build-crypto.mjs` on a fresh clone.
+
+Usage: `zig build [steps] [options]` (`zig build -l` lists every step)
 
 Key Steps:
-  test                         Run all tests (specs -> integration -> unit)
+  test                         Run all tests (specs -> integration -> unit -> lib)
   specs                        Run Ethereum execution spec tests
-  test-integration             Run integration tests from test/**/*.zig
-  test-unit                    Run unit tests from src/**/*.zig
-  test-lib                     Run library tests from lib/**/*.zig
-  test-opcodes                 Run all per-opcode differential tests
-  test-snailtracer             Run snailtracer differential test
-  test-synthetic               Test synthetic opcodes
-  test-fixtures-differential   Run differential tests
+  state-tests                  Run official pre-filled EEST state tests (Frontier through Osaka)
+  test-integration             Run integration tests from test/root.zig
+  test-unit                    Run unit tests imported by src/root.zig
+  test-lib                     Run library tests from lib/root.zig
+  test-opcodes                 Run all per-opcode differential tests (+ test-modexp)
+  test-modexp                  Run vendored ModExp arithmetic and precompile tests
+  test-precompiles             Run precompile integration tests (SHA256..KZG point evaluation)
   test-fusions                 Run focused fusion tests (unit + dispatch + differential)
-  wasm                         Build WASM library and show bundle size
-  wasm-minimal-evm             Build MinimalEvm WASM and show bundle size
-  wasm-debug                   Build debug WASM for analysis
-  python                       Build Python bindings
-  swift                        Build Swift bindings
-  go                           Build Go bindings
-  ts                           Build TypeScript bindings
+  test-layer2                  Run Layer 2 (Base & OP Stack) unit tests
+  test-fuzz                    Run all Zig fuzz targets (--fuzz on Linux for coverage-guided fuzzing)
+  fuzz-campaign                Run the multi-threaded fuzz campaign (-- --seconds=N --threads=M)
+  test-lean-diff               Differential fuzz against the Lean 4 reference specification
+  test-fixtures-differential   Run differential tests for benchmark fixtures (ERC20, etc.)
+  bench / bench-build          Run / build the self-contained ReleaseFast benchmark runner
+  test-bench                   Check benchmark statistics, CLI, and workload construction
+  shared / static              Build the C FFI shared / static library
+  verify / verify-smt / verify-ir / verify-lean   Formal verification suite
 
 Options:
   --release[=mode]             Release mode: fast, safe, small
   -Doptimize=[enum]            Debug, ReleaseSafe, ReleaseFast, ReleaseSmall
   -Dtest-filter=[string]       Filter tests by pattern (e.g., -Dtest-filter='ADD opcode')
-  -Devm-hardfork=[string]      FRONTIER, HOMESTEAD, BYZANTIUM, BERLIN, LONDON, SHANGHAI, CANCUN (default: CANCUN)
+  -Devm-hardfork=[string]      Enum tag (FRONTIER .. OSAKA, AMSTERDAM) or EEST name (Cancun); default OSAKA.
+                               Invalid names are a compile error. Selects `DefaultEvm` via `getBuildConfig()`.
   -Devm-disable-gas=[bool]     Disable gas checks (testing only)
   -Devm-enable-fusion=[bool]   Enable bytecode fusion (default: true)
-  -Devm-optimize=[string]      EVM optimization strategy: fast, small, or safe (default: safe)
-  -Dno_precompiles=[bool]      Disable all EVM precompiles for minimal build
+  -Devm-optimize=[string]      fast, small or safe (default: safe); validated, exported as `optimize_strategy`
+  -Denable-tracing=[bool]      Build DefaultEvm with the debug tracer

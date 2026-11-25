@@ -11,24 +11,31 @@ an explicit label or pattern; bare `build --plan` and `test --plan` are invalid.
 
 | Target | Command / behavior |
 | --- | --- |
+| `build-crypto` | `cargo build --release --locked --manifest-path lib/voltaire/Cargo.toml` |
 | `build` | Prepare Voltaire crypto, then `zig build` |
 | `test-unit` | `zig build test-unit` |
 | `test-opcodes` | `zig build test-opcodes` |
-| `test-modexp` | `zig build test-modexp --build-file .smithers/build.zig` |
+| `test-modexp` | `zig build test-modexp` |
 | `test-fusions` | `zig build test-fusions` |
-| `test-specs` | `zig build state-tests` (the root build also exposes `specs`) |
-| `bench-build` | Build the MODEXP benchmark with ReleaseFast; cache its binary |
-| `bench` | Run that binary with a fresh timing measurement |
+| `test-layer2` | `zig build test-layer2` |
+| `test-bench` | `zig build test-bench` |
+| `state-tests` | `zig build state-tests` (official EEST state fixtures) |
+| `test-lean-diff` | `zig build test-lean-diff` (manual; needs the Lean 4 toolchain) |
+| `bench-build` | `zig build bench-build --prefix zig-out/smithers`; caches the binary |
+| `bench` | Run `zig-out/smithers/bin/guillotine-bench` with a fresh timing measurement |
 | `test-foundry-link` | Verify the real Foundry configuration and Linux archive flattening/linking |
 | `factory-check` | Validate factory/home projections against their declarations and discovered flows |
 | `factory-write` | Regenerate factory/home projections through the target verb with `--write` |
+
+Every Zig target runs a step of the root `build.zig`; there is no
+supplemental build file.
 
 For example, the build plan is selected with `smthrs build //.smithers:build
 --plan`; the complete test plan is selected with `smthrs test //...
 --plan`. Each EVM suite depends on the build rather than other suites. Use one
 job when compiling the full suite on a memory-constrained host.
 
-All commands run from the repository root. The toolchain is Zig 0.15.1 and
+All commands run from the repository root. The toolchain is Zig 0.17.1 and
 Cargo/Rust; the CI matrix covers macOS and x86_64 Linux. Host tool identities,
 source files, fixtures, manifests, lockfiles and dependency edges contribute to
 target keys. A root-anchored Filegroup plus a separate factory Filegroup are required
@@ -40,21 +47,11 @@ Build output, engine state and report directories are excluded from source keys.
 Cache paths use absolute URLs derived from PACKAGE.ts because the installed CLI
 does not expand the older `{smthrs:cache-directory}` environment token.
 
-The root build lacks a MODEXP step and benchmark runners. The supplemental
-build runs all existing MODEXP arithmetic/gas tests, including known failures;
-it never filters or downgrades them. The benchmark measures the in-repository
-MODEXP implementation with opaque runtime inputs, a bounded iteration count,
-an expected-result check and JSON timing output. It measures that workload
-only, and is not evidence for EVM dispatch/fusion performance. Timing runs are
-uncached even when compilation is replayed.
-
-Voltaire's Cargo crate is nested inside the root Cargo workspace without being
-a member or exclusion. `build-crypto.mjs` stages its unchanged Rust sources in
-a standalone workspace under `.smithers/cache`, builds with its lockfile, then
-copies only the required ignored static archive to the path its Zig module
-expects. This avoids changing manifests or the dependency checkout's tracked
-Cargo metadata. Foundry's legacy `rust_build.zig` points at `src/compilers` and
-is not used by the root build; the active integration is `lib/foundry.zig`.
+`lib/voltaire/Cargo.toml` declares its own `[workspace]`, so
+`build-crypto.mjs` builds it in place with its lockfile. The Zig build links the
+resulting `lib/voltaire/target/release/libcrypto_wrappers.a`. Foundry's legacy
+`rust_build.zig` points at `src/compilers` and is not used by the root build;
+the active integration is `lib/foundry.zig`.
 
 Factory flows cover consensus, memory ownership, state compliance, differential
 evidence and benchmark regressions. PR triage consumes supplied diffs without

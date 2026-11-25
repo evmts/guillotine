@@ -313,7 +313,7 @@ twiggy diff baseline.wasm zig-out/bin/guillotine_mini.wasm
 - `function-sizes.txt` - All functions sorted by size with categories
 - `function-mapping.json` - Machine-readable function database
 - `wasm-sections.txt` - Section-level size breakdown
-- `wasm-disassembly.txt` - Full WASM disassembly
+- `wasm-disassembly.txt` - Full WASM disassembly (not committed; regenerate with `mini/scripts/analyze-wasm-size.ts`)
 - `top.txt`, `dominators.txt`, `garbage.txt` - Twiggy analyses
 
 ## 🎓 Lessons Learned

@@ -3,26 +3,10 @@ const Modules = @import("src/modules.build.zig");
 const GuillotineExe = @import("src/build.zig");
 const lib_build = @import("lib/build.zig");
 const bench_step = @import("bench/bench_step.zig");
-// DevtoolExe removed - apps/ not included in package distribution
 
 pub fn build(b: *std.Build) void {
-
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-
-    // Download KZG trusted setup if it doesn't exist
-    const kzg_path = "src/kzg/trusted_setup.txt";
-    b.root.access(b.graph.io, kzg_path, .{}) catch |err| {
-        if (err != error.FileNotFound) std.debug.panic("unable to access {s}: {s}", .{ kzg_path, @errorName(err) });
-        const download_kzg = b.addSystemCommand(&[_][]const u8{
-            "curl",
-            "-L",
-            "-o",
-            kzg_path,
-            "https://github.com/ethereum/c-kzg-4844/raw/main/src/trusted_setup.txt",
-        });
-        b.getInstallStep().dependOn(&download_kzg.step);
-    };
 
     // Build configuration
     const build_options = b.addOptions();
@@ -153,10 +137,7 @@ pub fn build(b: *std.Build) void {
 
     // Test configuration options
     const test_filter = b.option([]const u8, "test-filter", "Filter tests by pattern (applies to all test types)");
-    const test_verbose = b.option(bool, "test-verbose", "Enable verbose test output") orelse false;
-    const test_fail_fast = b.option(bool, "test-fail-fast", "Stop on first test failure") orelse false;
-    const test_no_color = b.option(bool, "test-no-color", "Disable colored output") orelse false;
-    const test_quiet = b.option(bool, "test-quiet", "Minimal output (dots only)") orelse false;
+    const test_verbose = b.option(bool, "test-verbose", "Print every EEST state-test failure (state-tests)") orelse false;
 
     // Unit tests from src/root.zig (same as evm_mod, just run its tests)
     const unit_tests = b.addTest(.{
@@ -164,21 +145,11 @@ pub fn build(b: *std.Build) void {
         .root_module = modules.evm_mod,
         // Force LLVM backend: native Zig backend on Linux x86 doesn't support tail calls yet
         .use_llvm = true,
-        // Temporarily disable custom test runner to debug
-        // .test_runner = .{ .path = b.path("test_runner.zig"), .mode = .simple },
     });
     if (test_filter) |filter| {
         unit_tests.filters = b.dupeStrings(&.{filter});
     }
     const run_unit_tests = b.addRunArtifact(unit_tests);
-    // Pass test configuration as environment variables for the custom runner
-    if (test_filter) |filter| {
-        run_unit_tests.setEnvironmentVariable("TEST_FILTER", filter);
-    }
-    if (test_verbose) run_unit_tests.setEnvironmentVariable("TEST_VERBOSE", "1");
-    if (test_fail_fast) run_unit_tests.setEnvironmentVariable("TEST_FAIL_FAST", "1");
-    if (test_no_color) run_unit_tests.setEnvironmentVariable("TEST_NO_COLOR", "1");
-    if (test_quiet) run_unit_tests.setEnvironmentVariable("TEST_QUIET", "1");
     const unit_test_step = b.step("test-unit", "Run unit tests from src/**/*.zig");
     unit_test_step.dependOn(&run_unit_tests.step);
 
@@ -192,7 +163,6 @@ pub fn build(b: *std.Build) void {
         }),
         // Force LLVM backend: native Zig backend on Linux x86 doesn't support tail calls yet
         .use_llvm = true,
-        .test_runner = .{ .path = b.path("test_runner.zig"), .mode = .simple },
     });
     if (foundry_lib) |foundry| {
         lib_tests.root_module.linkLibrary(foundry);
@@ -204,14 +174,6 @@ pub fn build(b: *std.Build) void {
         lib_tests.filters = b.dupeStrings(&.{filter});
     }
     const run_lib_tests = b.addRunArtifact(lib_tests);
-    // Pass test configuration as environment variables for the custom runner
-    if (test_filter) |filter| {
-        run_lib_tests.setEnvironmentVariable("TEST_FILTER", filter);
-    }
-    if (test_verbose) run_lib_tests.setEnvironmentVariable("TEST_VERBOSE", "1");
-    if (test_fail_fast) run_lib_tests.setEnvironmentVariable("TEST_FAIL_FAST", "1");
-    if (test_no_color) run_lib_tests.setEnvironmentVariable("TEST_NO_COLOR", "1");
-    if (test_quiet) run_lib_tests.setEnvironmentVariable("TEST_QUIET", "1");
     const lib_test_step = b.step("test-lib", "Run library tests from lib/**/*.zig");
     lib_test_step.dependOn(&run_lib_tests.step);
 
@@ -225,7 +187,6 @@ pub fn build(b: *std.Build) void {
         }),
         // Force LLVM backend: native Zig backend on Linux x86 doesn't support tail calls yet
         .use_llvm = true,
-        .test_runner = .{ .path = b.path("test_runner.zig"), .mode = .simple },
     });
     integration_tests.root_module.addImport("evm", modules.evm_mod);
     integration_tests.root_module.addImport("voltaire", modules.primitives_mod);
@@ -234,20 +195,13 @@ pub fn build(b: *std.Build) void {
     integration_tests.root_module.addImport("provider", modules.provider_mod);
     integration_tests.root_module.addImport("trie", modules.trie_mod);
     integration_tests.root_module.addImport("Guillotine_lib", modules.lib_mod);
+    integration_tests.root_module.addImport("build_options", options_mod);
     if (bn254_lib) |bn254| integration_tests.root_module.linkLibrary(bn254);
     integration_tests.root_module.link_libc = true;
     if (test_filter) |filter| {
         integration_tests.filters = b.dupeStrings(&.{filter});
     }
     const run_integration_tests = b.addRunArtifact(integration_tests);
-    // Pass test configuration as environment variables for the custom runner
-    if (test_filter) |filter| {
-        run_integration_tests.setEnvironmentVariable("TEST_FILTER", filter);
-    }
-    if (test_verbose) run_integration_tests.setEnvironmentVariable("TEST_VERBOSE", "1");
-    if (test_fail_fast) run_integration_tests.setEnvironmentVariable("TEST_FAIL_FAST", "1");
-    if (test_no_color) run_integration_tests.setEnvironmentVariable("TEST_NO_COLOR", "1");
-    if (test_quiet) run_integration_tests.setEnvironmentVariable("TEST_QUIET", "1");
     const integration_test_step = b.step("test-integration", "Run integration tests from test/**/*.zig");
     integration_test_step.dependOn(&run_integration_tests.step);
 
@@ -260,7 +214,6 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
         .use_llvm = true,
-        .test_runner = .{ .path = b.path("test_runner.zig"), .mode = .simple },
     });
     fixture_tests.root_module.addImport("evm", modules.evm_mod);
     fixture_tests.root_module.addImport("voltaire", modules.primitives_mod);
@@ -274,13 +227,6 @@ pub fn build(b: *std.Build) void {
         fixture_tests.filters = b.dupeStrings(&.{filter});
     }
     const run_fixture_tests = b.addRunArtifact(fixture_tests);
-    if (test_filter) |filter| {
-        run_fixture_tests.setEnvironmentVariable("TEST_FILTER", filter);
-    }
-    if (test_verbose) run_fixture_tests.setEnvironmentVariable("TEST_VERBOSE", "1");
-    if (test_fail_fast) run_fixture_tests.setEnvironmentVariable("TEST_FAIL_FAST", "1");
-    if (test_no_color) run_fixture_tests.setEnvironmentVariable("TEST_NO_COLOR", "1");
-    if (test_quiet) run_fixture_tests.setEnvironmentVariable("TEST_QUIET", "1");
     const fixture_test_step = b.step("test-fixtures", "Run fixture tests comparing MainEvm and MinimalEvm");
     fixture_test_step.dependOn(&run_fixture_tests.step);
 
@@ -288,19 +234,19 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run all tests (specs -> integration -> unit)");
 
     // Mini EVM unit tests (guillotine-mini)
-    const mini_test_cmd = b.addSystemCommand(&.{ "zig", "build", "unit" });
+    const mini_test_cmd = b.addSystemCommand(&.{ b.graph.zig_exe, "build", "unit" });
     mini_test_cmd.setCwd(b.path("mini"));
     const mini_test_step = b.step("test-mini", "Run guillotine-mini unit tests");
     mini_test_step.dependOn(&mini_test_cmd.step);
 
     // Mini EVM full tests (requires Python dependencies for spec tests)
-    const mini_full_test_cmd = b.addSystemCommand(&.{ "zig", "build", "test" });
+    const mini_full_test_cmd = b.addSystemCommand(&.{ b.graph.zig_exe, "build", "test" });
     mini_full_test_cmd.setCwd(b.path("mini"));
     const mini_full_test_step = b.step("test-mini-full", "Run all guillotine-mini tests (requires Python)");
     mini_full_test_step.dependOn(&mini_full_test_cmd.step);
 
     // Mini EVM specs tests
-    const mini_specs_cmd = b.addSystemCommand(&.{ "zig", "build", "specs" });
+    const mini_specs_cmd = b.addSystemCommand(&.{ b.graph.zig_exe, "build", "specs" });
     mini_specs_cmd.setCwd(b.path("mini"));
     const mini_specs_step = b.step("test-mini-specs", "Run guillotine-mini spec tests");
     mini_specs_step.dependOn(&mini_specs_cmd.step);
@@ -425,31 +371,6 @@ pub fn build(b: *std.Build) void {
     const fixtures_differential_test_step = b.step("test-fixtures-differential", "Run differential tests for benchmark fixtures (ERC20, etc.)");
     fixtures_differential_test_step.dependOn(&run_fixtures_differential_test.step);
 
-    // GT opcode bug test
-    const gt_bug_test = b.addTest(.{
-        .name = "gt-bug-test",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("test_gt_exact.zig"),
-            .target = target,
-            .optimize = .debug,
-        }),
-        // Force LLVM backend: native Zig backend on Linux x86 doesn't support tail calls yet
-        .use_llvm = true,
-    });
-    gt_bug_test.root_module.addImport("evm", modules.evm_mod);
-    gt_bug_test.root_module.addImport("voltaire", modules.primitives_mod);
-    gt_bug_test.root_module.addImport("crypto", modules.crypto_mod);
-    gt_bug_test.root_module.addImport("build_options", options_mod);
-    gt_bug_test.root_module.addImport("log", b.createModule(.{
-        .root_source_file = b.path("src/log.zig"),
-        .target = target,
-        .optimize = .debug,
-    }));
-    if (bn254_lib) |bn254| gt_bug_test.root_module.linkLibrary(bn254);
-    gt_bug_test.root_module.link_libc = true;
-    const test_gt_bug = b.step("test-gt-bug", "Test GT opcode bug");
-    test_gt_bug.dependOn(&b.addRunArtifact(gt_bug_test).step);
-
     // Development test for quick debugging
     const dev_test = b.addTest(.{
         .name = "dev-test",
@@ -499,10 +420,11 @@ pub fn build(b: *std.Build) void {
     all_opcode_tests.root_module.link_libc = true;
     if (target.result.os.tag == .linux) all_opcode_tests.root_module.linkSystemLibrary("unwind", .{});
     opcode_tests_step.dependOn(&b.addRunArtifact(all_opcode_tests).step);
-    {
-        const io = b.graph.io;
-        var op_dir = b.root.openDir(io, "test/evm/opcodes", .{ .iterate = true }) catch |err|
-            std.debug.panic("unable to open test/evm/opcodes: {s}", .{@errorName(err)});
+    // test/ is not in build.zig.zon .paths, so package consumers have no
+    // opcode directory; they get no per-opcode steps instead of a panic.
+    const io = b.graph.io;
+    if (b.root.openDir(io, "test/evm/opcodes", .{ .iterate = true })) |opened| {
+        var op_dir = opened;
         defer op_dir.close(io);
         var it = op_dir.iterate();
         while (it.next(io) catch |err| std.debug.panic("unable to iterate test/evm/opcodes: {s}", .{@errorName(err)})) |entry| {
@@ -554,6 +476,32 @@ pub fn build(b: *std.Build) void {
             const individual_step = b.step(individual_step_name, individual_step_desc);
             individual_step.dependOn(&run_t.step);
         }
+    } else |err| switch (err) {
+        error.FileNotFound => {},
+        else => std.debug.panic("unable to open test/evm/opcodes: {s}", .{@errorName(err)}),
+    }
+
+    // Precompile integration tests with known vectors, including EIP-4844
+    // point evaluation against the embedded mainnet KZG trusted setup.
+    {
+        const precompile_tests = b.addTest(.{
+            .name = "precompile-tests",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("test/evm/precompiles_test.zig"),
+                .target = target,
+                .optimize = optimize,
+            }),
+            .use_llvm = true,
+        });
+        if (test_filter) |filter| precompile_tests.filters = b.dupeStrings(&.{filter});
+        precompile_tests.root_module.addImport("evm", modules.evm_mod);
+        precompile_tests.root_module.addImport("voltaire", modules.primitives_mod);
+        precompile_tests.root_module.addImport("crypto", modules.crypto_mod);
+        if (bn254_lib) |bn254| precompile_tests.root_module.linkLibrary(bn254);
+        precompile_tests.root_module.link_libc = true;
+        if (target.result.os.tag == .linux) precompile_tests.root_module.linkSystemLibrary("unwind", .{});
+        const precompile_tests_step = b.step("test-precompiles", "Run precompile integration tests (SHA256..KZG point evaluation)");
+        precompile_tests_step.dependOn(&b.addRunArtifact(precompile_tests).step);
     }
 
     // ERC20 mint differential test
@@ -612,37 +560,6 @@ pub fn build(b: *std.Build) void {
         const erc20_transfer_step = b.step("test-erc20-transfer", "Run ERC20 transfer test");
         erc20_transfer_step.dependOn(&run_erc20_transfer_test.step);
     }
-
-    // Static jumps test - temporarily disabled as file was removed
-    // TODO: Re-enable when test/evm/static_jumps.zig is restored
-    // {
-    //     const static_jumps_test = b.addTest(.{
-    //         .name = "static_jumps_test",
-    //         .root_module = b.createModule(.{
-    //             .root_source_file = b.path("test/evm/static_jumps.zig"),
-    //             .target = target,
-    //             .optimize = optimize,
-    //         }),
-    //     });
-    //
-    //     static_jumps_test.root_module.addImport("evm", modules.evm_mod);
-    //     static_jumps_test.root_module.addImport("voltaire", modules.primitives_mod);
-    //     static_jumps_test.root_module.addImport("crypto", modules.crypto_mod);
-    //     static_jumps_test.root_module.addImport("build_options", options_mod);
-    //
-    //     // Link required libraries
-    //     static_jumps_test.linkLibrary(c_kzg_lib);
-    //     static_jumps_test.linkLibrary(blst_lib);
-    //     if (bn254_lib) |bn254| static_jumps_test.linkLibrary(bn254);
-    //     static_jumps_test.linkLibC();
-    //
-    //     const run_static_jumps_test = b.addRunArtifact(static_jumps_test);
-    //     const static_jumps_step = b.step("test-static-jumps", "Run static jumps test");
-    //     static_jumps_step.dependOn(&run_static_jumps_test.step);
-    //
-    //     // Add to main test step
-    //     test_step.dependOn(&run_static_jumps_test.step);
-    // }
 
     // CODECOPY+RETURN test
     {
@@ -735,32 +652,6 @@ pub fn build(b: *std.Build) void {
         official_chain_strict_step.dependOn(&run_official_chain_test_strict.step);
     }
 
-    // Synthetic opcodes tests
-    {
-        const synthetic_test = b.addTest(.{
-            .name = "synthetic_opcodes_test",
-            .root_module = b.createModule(.{
-                .root_source_file = b.path("src/evm/test_synthetic_opcodes.zig"),
-                .target = target,
-                .optimize = optimize,
-            }),
-            // Force LLVM backend: native Zig backend on Linux x86 doesn't support tail calls yet
-            .use_llvm = true,
-        });
-
-        // Add module imports needed by the test
-        synthetic_test.root_module.addImport("voltaire", modules.primitives_mod);
-        synthetic_test.root_module.addImport("crypto", modules.crypto_mod);
-        synthetic_test.root_module.addImport("build_options", options_mod);
-
-        if (bn254_lib) |bn254| synthetic_test.root_module.linkLibrary(bn254);
-        synthetic_test.root_module.link_libc = true;
-
-        const run_synthetic_test = b.addRunArtifact(synthetic_test);
-        const synthetic_step = b.step("test-synthetic", "Test synthetic opcodes");
-        synthetic_step.dependOn(&run_synthetic_test.step);
-    }
-
     // Zig specs runner (new default)
     const specs_test = b.addTest(.{
         .name = "ethereum-specs-test",
@@ -771,7 +662,6 @@ pub fn build(b: *std.Build) void {
         }),
         // Force LLVM backend: native Zig backend on Linux x86 doesn't support tail calls yet
         .use_llvm = true,
-        .test_runner = .{ .path = b.path("test_runner.zig"), .mode = .simple },
     });
     specs_test.root_module.addImport("evm", modules.evm_mod);
     specs_test.root_module.addImport("voltaire", modules.primitives_mod);
@@ -793,14 +683,6 @@ pub fn build(b: *std.Build) void {
 
     const run_specs_test = b.addRunArtifact(specs_test);
 
-    // Pass test configuration as environment variables for the custom runner
-    if (test_filter) |filter| {
-        run_specs_test.setEnvironmentVariable("TEST_FILTER", filter);
-    }
-    if (test_verbose) run_specs_test.setEnvironmentVariable("TEST_VERBOSE", "1");
-    if (test_fail_fast) run_specs_test.setEnvironmentVariable("TEST_FAIL_FAST", "1");
-    if (test_no_color) run_specs_test.setEnvironmentVariable("TEST_NO_COLOR", "1");
-    if (test_quiet) run_specs_test.setEnvironmentVariable("TEST_QUIET", "1");
 
     // Set MAX_SPEC_FILES environment variable
     const spec_max_files = b.option([]const u8, "spec-max-files", "Maximum number of spec files to run (default: all)");
@@ -911,20 +793,9 @@ pub fn build(b: *std.Build) void {
     }
 
     // Pass test filter to bun tests if specified
-    if (test_filter) |filter| {
-        run_specs_bun.setEnvironmentVariable("TEST_FILTER", filter);
-    }
 
     const specs_bun_step = b.step("specs-bun", "Run Ethereum execution spec tests (Bun/TypeScript version) - use -Dspec-max-files=N to limit, -Dtest-filter=pattern to filter");
     specs_bun_step.dependOn(&run_specs_bun.step);
-
-    // Language bindings
-    // Language bindings - TODO: Re-enable when SDK build files are created
-    // _ = WasmBindings.createWasmSteps(b, optimize, options_mod);
-    // _ = PythonBindings.createPythonSteps(b);
-    // _ = SwiftBindings.createSwiftSteps(b);
-    // _ = GoBindings.createGoSteps(b);
-    // _ = TypeScriptBindings.createTypeScriptSteps(b);
 
     // Focused fusion tests aggregator
     {

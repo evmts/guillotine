@@ -9,7 +9,6 @@ const ForkedStorage = @import("../src/storage/forked_storage.zig").ForkedStorage
 const Account = @import("../src/storage/database_interface_account.zig").Account;
 
 test "ForkedStorage - cache layer functionality" {
-    const allocator = testing.allocator;
     
     // Note: This test would normally connect to an RPC endpoint
     // For offline testing, we're just verifying the structure compiles

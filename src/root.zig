@@ -25,9 +25,54 @@ pub const Evm = @import("evm.zig").Evm;
 pub const EvmConfig = @import("evm_config.zig").EvmConfig;
 pub const layer2 = @import("layer2/mod.zig");
 
-// Build-configured EVM
-pub const getBuildConfig = EvmConfig{};
-pub const BuildConfiguredEvm = Evm(EvmConfig{});
+// Build-configured EVM: `zig build -Devm-hardfork=... -Devm-enable-fusion=...`
+// select the configuration of DefaultEvm. Modules created without these
+// options (for example by external build files) get the EvmConfig defaults.
+const build_options = @import("build_options");
+
+/// Value of `-Devm-optimize`. EvmConfig has no strategy field yet, so the
+/// value is validated and exported for callers that select code by strategy.
+pub const OptimizeStrategy = enum { fast, small, safe };
+pub const optimize_strategy: OptimizeStrategy = parseOptimizeStrategy(buildOption([]const u8, "optimize_strategy", "safe"));
+
+fn buildOption(comptime T: type, comptime name: []const u8, comptime default: T) T {
+    return if (@hasDecl(build_options, name)) @field(build_options, name) else default;
+}
+
+/// Accept enum tag names (`OSAKA`, `TANGERINE_WHISTLE`) and EEST fork names
+/// (`Osaka`, `TangerineWhistle`). An unknown name is a compile error.
+pub fn parseHardfork(comptime name: []const u8) Hardfork {
+    @setEvalBranchQuota(10_000);
+    if (std.meta.stringToEnum(Hardfork, name)) |fork| return fork;
+    if (Hardfork.fromString(name)) |fork| return fork;
+    @compileError("invalid -Devm-hardfork value: " ++ name);
+}
+
+fn parseOptimizeStrategy(comptime name: []const u8) OptimizeStrategy {
+    return std.meta.stringToEnum(OptimizeStrategy, name) orelse
+        @compileError("invalid -Devm-optimize value (expected fast, small or safe): " ++ name);
+}
+
+pub fn getBuildConfig() EvmConfig {
+    const defaults = EvmConfig{};
+    return EvmConfig{
+        .eips = .{ .hardfork = if (@hasDecl(build_options, "hardfork")) parseHardfork(build_options.hardfork) else defaults.eips.hardfork },
+        .enable_fusion = buildOption(bool, "enable_fusion", defaults.enable_fusion),
+        .disable_gas_checks = buildOption(bool, "disable_gas_checks", defaults.disable_gas_checks),
+        .disable_balance_checks = buildOption(bool, "disable_balance_checks", defaults.disable_balance_checks),
+        .max_call_depth = buildOption(u11, "max_call_depth", defaults.max_call_depth),
+        .stack_size = buildOption(u12, "stack_size", defaults.stack_size),
+        .max_bytecode_size = buildOption(u32, "max_bytecode_size", defaults.max_bytecode_size),
+        .max_initcode_size = buildOption(u32, "max_initcode_size", defaults.max_initcode_size),
+        .block_gas_limit = buildOption(u64, "block_gas_limit", defaults.block_gas_limit),
+        .memory_initial_capacity = buildOption(usize, "memory_initial_capacity", defaults.memory_initial_capacity),
+        .memory_limit = buildOption(u64, "memory_limit", defaults.memory_limit),
+        .arena_capacity_limit = buildOption(usize, "arena_capacity_limit", defaults.arena_capacity_limit),
+        .tracer_config = if (buildOption(bool, "enable_tracing", false)) TracerConfig.debug else defaults.tracer_config,
+    };
+}
+
+pub const BuildConfiguredEvm = Evm(getBuildConfig());
 
 // Pre-configured EVM types for FFI
 // These are concrete types that can be stored at runtime
@@ -58,12 +103,7 @@ pub const TestEvm = Evm(EvmConfig{
     .disable_gas_checks = true,
 });
 
-// Fixtures for testing - not included in package distribution
-// Only available when building from git repository with fixtures/ directory
-// pub const FixtureContract = @import("fixtures").FixtureContract;
-// pub const ContractName = @import("fixtures").ContractName;
-
-// Default EVM types - now uses build configuration
+// Default EVM type: the build-configured EVM (OSAKA unless -Devm-hardfork is set)
 pub const DefaultEvm = BuildConfiguredEvm;
 
 // Tracer modules
@@ -129,66 +169,26 @@ pub const Provider = @import("provider");
 pub const dispatch_pretty_print = @import("preprocessor/dispatch_pretty_print.zig");
 pub const verified_ops = @import("core/verified_ops.zig");
 
-// Run tests
+// Unit tests: every src module whose inline tests compile and pass on Zig 0.17.1.
+//
+// Not imported yet, because their inline tests use pre-0.17 APIs (for example
+// `address.from_hex`, `BlockInfo.base_fee_per_gas`, `AccessList` without a
+// config, `Frame` with one argument) and fail to compile: evm_tests.zig,
+// evm_config.zig, preprocessor/dispatch_test.zig, every other
+// instructions/handlers_*.zig, bytecode/bytecode_tests.zig,
+// bytecode/bytecode_jump_validation_test{,s}.zig, tracer/minimal_frame.zig,
+// tracer/minimal_evm_precompile_test.zig, trie/trie_test.zig and root_c.zig.
+// These compile but fail: tracer/pc_tracker.zig (logs an error),
+// tracer/events/{events,lifecycle}.zig (1 failure each), and
+// trie/{test_simple_update,known_roots_test}.zig (3 failures and 1 crash).
+// Repair a file's tests before importing it here.
 test {
-    // Test EVM modules - CAUSES COMPILER CRASH (SIGSEGV)
-    // _ = @import("evm_tests.zig");
-    // _ = @import("evm_config.zig");
-
-    // Preprocessor tests - INVESTIGATING
-    // _ = @import("preprocessor/dispatch.zig");
-    // _ = @import("preprocessor/dispatch_test.zig");
-
-    // Instruction handler tests - INVESTIGATING
-    // _ = @import("instructions/handlers_arithmetic.zig");
-    // _ = @import("instructions/handlers_arithmetic_synthetic.zig");
-    // _ = @import("instructions/handlers_bitwise.zig");
-    // _ = @import("instructions/handlers_bitwise_synthetic.zig");
-    // _ = @import("instructions/handlers_comparison.zig");
-    // _ = @import("instructions/handlers_context.zig");
-    // _ = @import("instructions/handlers_jump.zig");
-    // _ = @import("instructions/handlers_jump_synthetic.zig");
-    // _ = @import("instructions/handlers_keccak.zig");
-    // _ = @import("instructions/handlers_log.zig");
-    // _ = @import("instructions/handlers_memory.zig");
-    // _ = @import("instructions/handlers_memory_synthetic.zig");
-    // _ = @import("instructions/handlers_stack.zig");
-    // _ = @import("instructions/handlers_storage.zig");
-    // _ = @import("instructions/handlers_system.zig");
-    // _ = @import("instructions/handlers_advanced_synthetic.zig");
-
+    _ = @import("preprocessor/dispatch.zig");
     _ = @import("preprocessor/handler_abi.zig");
+    _ = @import("instructions/handlers_advanced_synthetic.zig");
+    _ = @import("bytecode/bytecode_bench_test.zig");
     _ = @import("memory/frame_memory_pool.zig");
     _ = @import("native_stack.zig");
-
-    // Test bytecode modules
-    // _ = @import("bytecode/bytecode_tests.zig");
-    // _ = @import("bytecode/bytecode_jump_validation_test.zig");
-    // _ = @import("bytecode/bytecode_jump_validation_tests.zig");
-    // _ = @import("bytecode/bytecode_bench_test.zig");
-
-    // Test internal modules
     _ = @import("internal/safety_counter.zig");
     _ = @import("core/verified_ops.zig");
-
-    // Tracer modules with tests
-    // _ = @import("tracer/pc_tracker.zig");
-    // _ = @import("tracer/events/events.zig");
-    // _ = @import("tracer/events/lifecycle.zig");
-    // _ = @import("tracer/minimal_frame.zig");
-    // _ = @import("tracer/minimal_evm_precompile_test.zig");
-
-    // Crypto modules with tests are handled by crypto module
-    // These are already imported through the crypto module to avoid conflicts
-
-    // Trie tests
-    // _ = @import("trie/trie_test.zig");
-    // _ = @import("trie/test_simple_update.zig");
-    // _ = @import("trie/known_roots_test.zig");
-
-    // Provider tests - removed to avoid module conflict
-    // Provider module handles its own tests
-
-    // C API modules are not compiled in tests in this configuration
-    // _ = @import("root_c.zig");
 }

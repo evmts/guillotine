@@ -74,6 +74,7 @@
         "build.zig.zon",
         "src",
         "lib",
+        "bench",
         "mini",
         "LICENSE",
         "README.md",

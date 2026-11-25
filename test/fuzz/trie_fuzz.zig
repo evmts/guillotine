@@ -138,5 +138,5 @@ const seed_corpus: []const []const u8 = &.{
 };
 
 test "fuzz Merkle Patricia Trie stateful model and cryptographic order-independence" {
-    try std.testing.fuzz({}, fuzzMerkleTrieModelAndOrderIndependence, .{ .corpus = seed_corpus });
+    try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzMerkleTrieModelAndOrderIndependence), .{ .corpus = seed_corpus });
 }

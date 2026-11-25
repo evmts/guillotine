@@ -52,7 +52,7 @@ test "Planner C API: Invalid bytecode handling" {
     try testing.expect(empty_plan == null);
     
     // Test oversized bytecode
-    const oversized = [_]u8{0x00} ** 25000;
+    const oversized = @as([25000]u8, @splat(0x00));
     const oversized_plan = planner_c.evm_planner_plan_bytecode(planner_handle, &oversized, oversized.len);
     try testing.expect(oversized_plan == null);
     
@@ -197,7 +197,7 @@ test "Planner C API: Edge case bytecode" {
     try testing.expectEqual(@as(u32, 0), planner_c.evm_planner_plan_get_constant_count(stop_plan));
     
     // Test with maximum size PUSH32
-    const push32_data = [_]u8{0xFF} ** 32;
+    const push32_data = @as([32]u8, @splat(0xFF));
     const push32_bytecode = [_]u8{0x7F} ++ push32_data ++ [_]u8{0x00}; // PUSH32 + data + STOP
     
     const push32_plan = planner_c.evm_planner_plan_bytecode(planner_handle, &push32_bytecode, push32_bytecode.len);

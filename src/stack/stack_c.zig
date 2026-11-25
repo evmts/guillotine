@@ -382,7 +382,7 @@ pub export fn evm_stack_test_u256() c_int {
     defer evm_stack_destroy(handle);
 
     // Test with max u256 value
-    const max_value = [_]u8{0xFF} ** 32;
+    const max_value = @as([32]u8, @splat(0xFF));
     if (evm_stack_push_bytes(handle, &max_value) != EVM_STACK_SUCCESS) return -2;
 
     var out_value: [32]u8 = undefined;
@@ -630,10 +630,10 @@ pub export fn evm_stack_test_large_values() c_int {
 
     // Test with various large values
     const test_values = [_][32]u8{
-        [_]u8{0xFF} ** 32,  // Max value
-        [_]u8{0x00} ** 32,  // Zero
-        [_]u8{0x01} ++ ([_]u8{0x00} ** 31),  // Large number
-        [_]u8{0x00} ** 31 ++ [_]u8{0xFF},  // Small number
+        @as([32]u8, @splat(0xFF)),  // Max value
+        @as([32]u8, @splat(0x00)),  // Zero
+        [_]u8{0x01} ++ (@as([31]u8, @splat(0x00))),  // Large number
+        @as([31]u8, @splat(0x00)) ++ [_]u8{0xFF},  // Small number
     };
 
     for (test_values) |test_val| {

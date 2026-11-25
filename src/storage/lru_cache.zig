@@ -573,7 +573,7 @@ test "LruCache - with custom types" {
     defer cache.deinit();
     
     const key1 = Key{ .id = 1 };
-    const value1 = Value{ .data = @splat(1) };
+    const value1 = Value{ .data = @as([20]u8, @splat(1)) };
     
     _ = try cache.put(key1, value1);
     const retrieved = cache.get(key1).?;

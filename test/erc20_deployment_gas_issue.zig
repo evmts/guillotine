@@ -32,7 +32,7 @@ test "ERC20 deployment gas consumption issue" {
         .gas_limit = 30_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1_000_000_000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
         .chain_id = 1,
         .blob_base_fee = 0,
         .blob_versioned_hashes = &.{},
@@ -48,8 +48,8 @@ test "ERC20 deployment gas consumption issue" {
     const caller_account = evm.Account{
         .balance = 1_000_000_000,
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
         .delegated_address = null,
     };
     try database.set_account(caller_address.bytes, caller_account);
@@ -140,7 +140,7 @@ test "ERC20 deployment gas consumption issue" {
             const contract_address = primitives.Address.get_contract_address(caller_address, 0);
             const account = try test_db.get_account(contract_address.bytes);
             if (account) |acc| {
-                const has_code = !std.mem.eql(u8, &acc.code_hash, &([_]u8{0} ** 32));
+                const has_code = !std.mem.eql(u8, &acc.code_hash, &(@as([32]u8, @splat(0))));
                 log.info("  Contract deployed: {}, has_code: {}", .{ account != null, has_code });
                 
                 if (has_code) {

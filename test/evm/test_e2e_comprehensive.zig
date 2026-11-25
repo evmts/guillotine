@@ -75,14 +75,14 @@ fn createE2ETestSetup(allocator: std.mem.Allocator) !struct {
         .timestamp = 1690000000,
         .difficulty = 0,
         .gas_limit = 30_000_000,
-        .coinbase = [_]u8{0xFE} ** 20,
+        .coinbase = @as([20]u8, @splat(0xFE)),
         .base_fee = 20_000_000_000, // 20 gwei
-        .prevrandao = [_]u8{0x42} ** 32,
+        .prevrandao = @as([32]u8, @splat(0x42)),
         .chain_id = 1, // Ethereum mainnet
     };
     
     const tx_context = TransactionContext{
-        .origin = [_]u8{0x11} ** 20,
+        .origin = @as([20]u8, @splat(0x11)),
         .gas_price = 21_000_000_000, // 21 gwei
         .access_list = &access_list,
         .hardfork = Hardfork.shanghai,
@@ -136,8 +136,8 @@ test "E2E: EIP-2929 cold vs warm account access" {
     var setup = try createE2ETestSetup(allocator);
     defer setup.deinit();
     
-    const target_address = [_]u8{0x22} ** 20;
-    const caller_address = [_]u8{0x11} ** 20;
+    const target_address = @as([20]u8, @splat(0x22));
+    const caller_address = @as([20]u8, @splat(0x11));
     
     // Pre-warm target address in access list
     try setup.access_list.access_account(target_address);
@@ -181,8 +181,8 @@ test "E2E: EIP-2929 SLOAD/SSTORE warm vs cold access" {
     var setup = try createE2ETestSetup(allocator);
     defer setup.deinit();
     
-    const contract_address = [_]u8{0x33} ** 20;
-    const caller_address = [_]u8{0x11} ** 20;
+    const contract_address = @as([20]u8, @splat(0x33));
+    const caller_address = @as([20]u8, @splat(0x11));
     
     // Bytecode: PUSH1 0x01 PUSH1 0x00 SSTORE (store 1 at slot 0)
     //           PUSH1 0x00 SLOAD (cold access)
@@ -218,8 +218,8 @@ test "E2E: EIP-2200 SSTORE gas cost tiers and refunds" {
     var setup = try createE2ETestSetup(allocator);
     defer setup.deinit();
     
-    const contract_address = [_]u8{0x44} ** 20;
-    const caller_address = [_]u8{0x11} ** 20;
+    const contract_address = @as([20]u8, @splat(0x44));
+    const caller_address = @as([20]u8, @splat(0x11));
     
     // Set up initial storage state
     try setup.db_interface.set_storage(contract_address, 0, 100);
@@ -276,8 +276,8 @@ test "E2E: EIP-150 gas forwarding with deep call stack" {
     var setup = try createE2ETestSetup(allocator);
     defer setup.deinit();
     
-    const caller_address = [_]u8{0x11} ** 20;
-    const callee_address = [_]u8{0x22} ** 20;
+    const caller_address = @as([20]u8, @splat(0x11));
+    const callee_address = @as([20]u8, @splat(0x22));
     
     // Deploy a simple contract that just returns success
     const callee_code = [_]u8{
@@ -329,7 +329,7 @@ test "E2E: EIP-3860 initcode size limit enforcement" {
     var setup = try createE2ETestSetup(allocator);
     defer setup.deinit();
     
-    const caller_address = [_]u8{0x11} ** 20;
+    const caller_address = @as([20]u8, @splat(0x11));
     
     // Create initcode that exceeds the limit (49152 bytes)
     var large_initcode = try allocator.alloc(u8, 49153);
@@ -378,10 +378,10 @@ test "E2E: Arithmetic operations at u256 boundaries" {
     var setup = try createE2ETestSetup(allocator);
     defer setup.deinit();
     
-    const caller_address = [_]u8{0x11} ** 20;
+    const caller_address = @as([20]u8, @splat(0x11));
     
     // Test arithmetic at maximum u256 value (2^256 - 1)
-    const max_u256_bytes = [_]u8{ 0xFF } ** 32;
+    const max_u256_bytes = @as([32]u8, @splat(0xFF));
     
     // Bytecode: PUSH32 max_u256 PUSH1 1 ADD (should overflow to 0)
     const overflow_bytecode = [_]u8{
@@ -407,7 +407,7 @@ test "E2E: Arithmetic operations at u256 boundaries" {
     // Verify overflow result is 0
     try testing.expectEqual(@as(usize, 32), result.output.len);
     
-    var expected_zero = [_]u8{0x00} ** 32;
+    var expected_zero = @as([32]u8, @splat(0x00));
     try testing.expectEqualSlices(u8, &expected_zero, result.output);
 }
 
@@ -417,7 +417,7 @@ test "E2E: Division by zero handling in contract execution" {
     var setup = try createE2ETestSetup(allocator);
     defer setup.deinit();
     
-    const caller_address = [_]u8{0x11} ** 20;
+    const caller_address = @as([20]u8, @splat(0x11));
     
     // Bytecode: PUSH1 42 PUSH1 0 DIV (42 / 0 should return 0 per EVM spec)
     const div_zero_bytecode = [_]u8{
@@ -440,7 +440,7 @@ test "E2E: Division by zero handling in contract execution" {
     try testing.expect(result.is_success());
     
     // Verify division by zero returns 0
-    var expected_zero = [_]u8{0x00} ** 32;
+    var expected_zero = @as([32]u8, @splat(0x00));
     try testing.expectEqualSlices(u8, &expected_zero, result.output);
 }
 
@@ -450,11 +450,11 @@ test "E2E: Signed arithmetic edge cases" {
     var setup = try createE2ETestSetup(allocator);
     defer setup.deinit();
     
-    const caller_address = [_]u8{0x11} ** 20;
+    const caller_address = @as([20]u8, @splat(0x11));
     
     // Test most negative value (-2^255) divided by -1 (should overflow to itself)
-    const most_negative = [_]u8{ 0x80 } ++ [_]u8{ 0x00 } ** 31;
-    const negative_one = [_]u8{ 0xFF } ** 32;
+    const most_negative = [_]u8{ 0x80 } ++ @as([31]u8, @splat(0x00));
+    const negative_one = @as([32]u8, @splat(0xFF));
     
     // Bytecode: PUSH32 most_negative PUSH32 negative_one SDIV
     const signed_div_bytecode = [_]u8{
@@ -488,7 +488,7 @@ test "E2E: Modular arithmetic with zero modulus" {
     var setup = try createE2ETestSetup(allocator);
     defer setup.deinit();
     
-    const caller_address = [_]u8{0x11} ** 20;
+    const caller_address = @as([20]u8, @splat(0x11));
     
     // Test ADDMOD and MULMOD with zero modulus
     const bytecode = [_]u8{
@@ -523,7 +523,7 @@ test "E2E: Modular arithmetic with zero modulus" {
     try testing.expectEqual(@as(usize, 64), result.output.len);
     
     // Both results should be zero
-    var expected = [_]u8{0x00} ** 64;
+    var expected = @as([64]u8, @splat(0x00));
     try testing.expectEqualSlices(u8, &expected, result.output);
 }
 
@@ -539,7 +539,7 @@ test "E2E: Stack operations at maximum depth" {
     var setup = try createE2ETestSetup(allocator);
     defer setup.deinit();
     
-    const caller_address = [_]u8{0x11} ** 20;
+    const caller_address = @as([20]u8, @splat(0x11));
     
     // Generate bytecode to fill stack to exactly 1024 items
     var bytecode = std.ArrayList(u8).init(allocator);
@@ -580,7 +580,7 @@ test "E2E: Stack overflow protection" {
     var setup = try createE2ETestSetup(allocator);
     defer setup.deinit();
     
-    const caller_address = [_]u8{0x11} ** 20;
+    const caller_address = @as([20]u8, @splat(0x11));
     
     // Generate bytecode that tries to push 1025 items (should fail)
     var bytecode = std.ArrayList(u8).init(allocator);
@@ -610,7 +610,7 @@ test "E2E: Memory expansion to maximum limit" {
     var setup = try createE2ETestSetup(allocator);
     defer setup.deinit();
     
-    const caller_address = [_]u8{0x11} ** 20;
+    const caller_address = @as([20]u8, @splat(0x11));
     
     // Test memory access at the limit (16MB - 32 bytes)
     const max_offset: u32 = 0xFFFFFF - 32; // 16MB - 32 bytes
@@ -639,7 +639,7 @@ test "E2E: Memory expansion to maximum limit" {
     try testing.expect(result.is_success());
     
     // Should return zero (uninitialized memory)
-    var expected_zero = [_]u8{0x00} ** 32;
+    var expected_zero = @as([32]u8, @splat(0x00));
     try testing.expectEqualSlices(u8, &expected_zero, result.output);
 }
 
@@ -649,7 +649,7 @@ test "E2E: Memory expansion beyond limit should fail" {
     var setup = try createE2ETestSetup(allocator);
     defer setup.deinit();
     
-    const caller_address = [_]u8{0x11} ** 20;
+    const caller_address = @as([20]u8, @splat(0x11));
     
     // Test memory access beyond the limit
     const over_limit_offset: u32 = 0xFFFFFF; // Exactly at 16MB limit
@@ -681,7 +681,7 @@ test "E2E: Large memory copy operations" {
     var setup = try createE2ETestSetup(allocator);
     defer setup.deinit();
     
-    const caller_address = [_]u8{0x11} ** 20;
+    const caller_address = @as([20]u8, @splat(0x11));
     
     // Test MCOPY with large memory regions (1MB copy)
     const copy_size: u32 = 1024 * 1024; // 1MB
@@ -740,7 +740,7 @@ test "E2E: Large memory copy operations" {
     try testing.expect(result.is_success());
     
     // Verify the copied value
-    var expected = [_]u8{0x00} ** 31 ++ [_]u8{0x42};
+    var expected = @as([31]u8, @splat(0x00)) ++ [_]u8{0x42};
     try testing.expectEqualSlices(u8, &expected, result.output);
 }
 
@@ -756,8 +756,8 @@ test "E2E: Deep call stack to maximum depth" {
     var setup = try createE2ETestSetup(allocator);
     defer setup.deinit();
     
-    const caller_address = [_]u8{0x11} ** 20;
-    const recursive_contract = [_]u8{0x22} ** 20;
+    const caller_address = @as([20]u8, @splat(0x11));
+    const recursive_contract = @as([20]u8, @splat(0x22));
     
     // Recursive contract: decrements counter and calls itself
     const recursive_code = [_]u8{
@@ -802,7 +802,7 @@ test "E2E: Deep call stack to maximum depth" {
     };
     
     // Deploy recursive contract
-    var recursive_account = setup.db_interface.Account{
+    const recursive_account = setup.db_interface.Account{
         .balance = 0,
         .nonce = 0, 
         .code = &recursive_code,
@@ -852,12 +852,12 @@ test "E2E: Value transfers with exact balance amounts" {
     var setup = try createE2ETestSetup(allocator);
     defer setup.deinit();
     
-    const sender_address = [_]u8{0x11} ** 20;
-    const receiver_address = [_]u8{0x22} ** 20;
+    const sender_address = @as([20]u8, @splat(0x11));
+    const receiver_address = @as([20]u8, @splat(0x22));
     const exact_balance: u256 = 1000000000000000000; // 1 ETH
     
     // Set sender balance to exactly 1 ETH
-    var sender_account = setup.db_interface.Account{
+    const sender_account = setup.db_interface.Account{
         .balance = exact_balance,
         .nonce = 0,
         .code = &[_]u8{},
@@ -876,7 +876,7 @@ test "E2E: Value transfers with exact balance amounts" {
         0xF3,       // RETURN
     };
     
-    var receiver_account = setup.db_interface.Account{
+    const receiver_account = setup.db_interface.Account{
         .balance = 0,
         .nonce = 0,
         .code = &receiver_code,
@@ -936,7 +936,7 @@ test "E2E: CREATE2 contract deployment with salt" {
     var setup = try createE2ETestSetup(allocator);
     defer setup.deinit();
     
-    const creator_address = [_]u8{0x11} ** 20;
+    const creator_address = @as([20]u8, @splat(0x11));
     const salt: u256 = 0x1234567890ABCDEF;
     
     // Simple contract bytecode to deploy
@@ -1034,9 +1034,9 @@ test "E2E: SELFDESTRUCT with balance transfer" {
     var setup = try createE2ETestSetup(allocator);
     defer setup.deinit();
     
-    const caller_address = [_]u8{0x11} ** 20;
-    const contract_address = [_]u8{0x22} ** 20; 
-    const beneficiary_address = [_]u8{0x33} ** 20;
+    const caller_address = @as([20]u8, @splat(0x11));
+    const contract_address = @as([20]u8, @splat(0x22)); 
+    const beneficiary_address = @as([20]u8, @splat(0x33));
     const contract_balance: u256 = 500000000000000000; // 0.5 ETH
     
     // Contract that self-destructs
@@ -1047,7 +1047,7 @@ test "E2E: SELFDESTRUCT with balance transfer" {
     };
     
     // Set up contract with balance
-    var contract_account = setup.db_interface.Account{
+    const contract_account = setup.db_interface.Account{
         .balance = contract_balance,
         .nonce = 0,
         .code = &selfdestruct_code,
@@ -1057,7 +1057,7 @@ test "E2E: SELFDESTRUCT with balance transfer" {
     try setup.db_interface.set_account(contract_address, contract_account);
     
     // Set up beneficiary with initial balance
-    var beneficiary_account = setup.db_interface.Account{
+    const beneficiary_account = setup.db_interface.Account{
         .balance = 100000000000000000, // 0.1 ETH initial
         .nonce = 0,
         .code = &[_]u8{},
@@ -1118,10 +1118,10 @@ test "E2E: Complex multi-level revert scenarios" {
     var setup = try createE2ETestSetup(allocator);
     defer setup.deinit();
     
-    const caller_address = [_]u8{0x11} ** 20;
-    const contract_a = [_]u8{0x22} ** 20;
-    const contract_b = [_]u8{0x33} ** 20;
-    const contract_c = [_]u8{0x44} ** 20;
+    const caller_address = @as([20]u8, @splat(0x11));
+    const contract_a = @as([20]u8, @splat(0x22));
+    const contract_b = @as([20]u8, @splat(0x33));
+    const contract_c = @as([20]u8, @splat(0x44));
     
     // Contract C: modifies storage then reverts
     const contract_c_code = [_]u8{
@@ -1197,15 +1197,15 @@ test "E2E: Complex multi-level revert scenarios" {
     };
     
     // Deploy contracts
-    var account_a = setup.db_interface.Account{
+    const account_a = setup.db_interface.Account{
         .balance = 0, .nonce = 0, .code = &contract_a_code,
         .storage = std.HashMap([32]u8, u256, std.hash_map.AutoContext([32]u8), 80).init(allocator),
     };
-    var account_b = setup.db_interface.Account{
+    const account_b = setup.db_interface.Account{
         .balance = 0, .nonce = 0, .code = &contract_b_code,
         .storage = std.HashMap([32]u8, u256, std.hash_map.AutoContext([32]u8), 80).init(allocator),
     };
-    var account_c = setup.db_interface.Account{
+    const account_c = setup.db_interface.Account{
         .balance = 0, .nonce = 0, .code = &contract_c_code,
         .storage = std.HashMap([32]u8, u256, std.hash_map.AutoContext([32]u8), 80).init(allocator),
     };
@@ -1265,9 +1265,9 @@ test "E2E: Cross-contract storage interactions with DELEGATECALL" {
     var setup = try createE2ETestSetup(allocator);
     defer setup.deinit();
     
-    const caller_address = [_]u8{0x11} ** 20;
-    const proxy_contract = [_]u8{0x22} ** 20;
-    const logic_contract = [_]u8{0x33} ** 20;
+    const caller_address = @as([20]u8, @splat(0x11));
+    const proxy_contract = @as([20]u8, @splat(0x22));
+    const logic_contract = @as([20]u8, @splat(0x33));
     
     // Logic contract: sets storage slot 0 to 42 and slot 1 to msg.sender
     const logic_code = [_]u8{
@@ -1310,11 +1310,11 @@ test "E2E: Cross-contract storage interactions with DELEGATECALL" {
     };
     
     // Deploy contracts
-    var logic_account = setup.db_interface.Account{
+    const logic_account = setup.db_interface.Account{
         .balance = 0, .nonce = 0, .code = &logic_code,
         .storage = std.HashMap([32]u8, u256, std.hash_map.AutoContext([32]u8), 80).init(allocator),
     };
-    var proxy_account = setup.db_interface.Account{
+    const proxy_account = setup.db_interface.Account{
         .balance = 0, .nonce = 0, .code = &proxy_code,
         .storage = std.HashMap([32]u8, u256, std.hash_map.AutoContext([32]u8), 80).init(allocator),
     };
@@ -1377,7 +1377,7 @@ test "E2E: Transaction consuming exactly the gas limit" {
     var setup = try createE2ETestSetup(allocator);
     defer setup.deinit();
     
-    const caller_address = [_]u8{0x11} ** 20;
+    const caller_address = @as([20]u8, @splat(0x11));
     const precise_gas_limit: u64 = 50000;
     
     // Calculate bytecode that consumes exactly the gas limit
@@ -1429,7 +1429,7 @@ test "E2E: Out of gas at precise operation boundaries" {
     var setup = try createE2ETestSetup(allocator);
     defer setup.deinit();
     
-    const caller_address = [_]u8{0x11} ** 20;
+    const caller_address = @as([20]u8, @splat(0x11));
     
     // Memory expansion has quadratic cost growth - test at boundary
     const gas_limit: u64 = 30000;
@@ -1458,8 +1458,8 @@ test "E2E: Gas refund calculations with storage operations" {
     var setup = try createE2ETestSetup(allocator);
     defer setup.deinit();
     
-    const caller_address = [_]u8{0x11} ** 20;
-    const contract_address = [_]u8{0x22} ** 20;
+    const caller_address = @as([20]u8, @splat(0x11));
+    const contract_address = @as([20]u8, @splat(0x22));
     
     // Set up initial storage state
     try setup.db_interface.set_storage(contract_address, 0, 100);
@@ -1518,7 +1518,7 @@ test "E2E: Jump destination validation with PUSH data" {
     var setup = try createE2ETestSetup(allocator);
     defer setup.deinit();
     
-    const caller_address = [_]u8{0x11} ** 20;
+    const caller_address = @as([20]u8, @splat(0x11));
     
     // Bytecode with JUMPDEST hidden inside PUSH data (should be invalid)
     const tricky_bytecode = [_]u8{
@@ -1549,7 +1549,7 @@ test "E2E: Invalid jump to PUSH data should fail" {
     var setup = try createE2ETestSetup(allocator);
     defer setup.deinit();
     
-    const caller_address = [_]u8{0x11} ** 20;
+    const caller_address = @as([20]u8, @splat(0x11));
     
     // Bytecode that tries to jump to an offset inside PUSH data
     const invalid_jump_bytecode = [_]u8{
@@ -1578,7 +1578,7 @@ test "E2E: Complex conditional jump patterns" {
     var setup = try createE2ETestSetup(allocator);
     defer setup.deinit();
     
-    const caller_address = [_]u8{0x11} ** 20;
+    const caller_address = @as([20]u8, @splat(0x11));
     
     // Bytecode implementing a simple loop with conditional jump
     const loop_bytecode = [_]u8{
@@ -1620,7 +1620,7 @@ test "E2E: Complex conditional jump patterns" {
     try testing.expect(result.is_success());
     
     // Verify loop executed correctly
-    var expected = [_]u8{0x00} ** 31 ++ [_]u8{0x42};
+    var expected = @as([31]u8, @splat(0x00)) ++ [_]u8{0x42};
     try testing.expectEqualSlices(u8, &expected, result.output);
 }
 
@@ -1636,7 +1636,7 @@ test "E2E: IDENTITY precompile with various input sizes" {
     var setup = try createE2ETestSetup(allocator);
     defer setup.deinit();
     
-    const caller_address = [_]u8{0x11} ** 20;
+    const caller_address = @as([20]u8, @splat(0x11));
     const identity_address = [_]u8{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04};
     
     const test_data = "Hello, Ethereum Virtual Machine!";
@@ -1695,7 +1695,7 @@ test "E2E: Invalid precompile address handling" {
     var setup = try createE2ETestSetup(allocator);
     defer setup.deinit();
     
-    const caller_address = [_]u8{0x11} ** 20;
+    const caller_address = @as([20]u8, @splat(0x11));
     const invalid_precompile = [_]u8{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF}; // Address 0xFF
     
     // Bytecode that tries to call non-existent precompile
@@ -1727,7 +1727,7 @@ test "E2E: Invalid precompile address handling" {
     try testing.expect(result.is_success());
     
     // Call should succeed but return 0 (call failed)
-    var expected_zero = [_]u8{0x00} ** 32;
+    var expected_zero = @as([32]u8, @splat(0x00));
     try testing.expectEqualSlices(u8, &expected_zero, result.output);
 }
 
@@ -1743,9 +1743,9 @@ test "E2E: ERC20 token transfer simulation" {
     var setup = try createE2ETestSetup(allocator);
     defer setup.deinit();
     
-    const caller_address = [_]u8{0x11} ** 20;
-    const token_contract = [_]u8{0x22} ** 20;
-    const recipient_address = [_]u8{0x33} ** 20;
+    const caller_address = @as([20]u8, @splat(0x11));
+    const token_contract = @as([20]u8, @splat(0x22));
+    const recipient_address = @as([20]u8, @splat(0x33));
     const transfer_amount: u256 = 1000;
     const sender_balance: u256 = 5000;
     
@@ -1799,7 +1799,7 @@ test "E2E: ERC20 token transfer simulation" {
     };
     
     // Deploy token contract with initial state
-    var token_account = setup.db_interface.Account{
+    const token_account = setup.db_interface.Account{
         .balance = 0, .nonce = 0, .code = &erc20_code,
         .storage = std.HashMap([32]u8, u256, std.hash_map.AutoContext([32]u8), 80).init(allocator),
     };
@@ -1807,14 +1807,14 @@ test "E2E: ERC20 token transfer simulation" {
     try setup.db_interface.set_account(token_contract, token_account);
     
     // Set sender's token balance
-    const sender_balance_slot = keccak256(&(caller_address ++ [_]u8{0x00} ** 32));
+    const sender_balance_slot = keccak256(&(caller_address ++ @as([32]u8, @splat(0x00))));
     try setup.db_interface.set_storage(token_contract, std.mem.readIntBig(u256, &sender_balance_slot), sender_balance);
     
     // Prepare transfer call data: transfer(recipient, amount)
     var calldata = [_]u8{
         0xa9, 0x05, 0x9c, 0xbb, // transfer function selector
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // padding
-    } ++ recipient_address ++ std.mem.asBytes(&transfer_amount)[24..32] ++ [_]u8{0x00} ** 24;
+    } ++ recipient_address ++ std.mem.asBytes(&transfer_amount)[24..32] ++ @as([24]u8, @splat(0x00));
     
     const result = try executeE2ETransaction(
         allocator, setup, caller_address, token_contract, 0,
@@ -1825,7 +1825,7 @@ test "E2E: ERC20 token transfer simulation" {
     try testing.expect(result.is_success());
     
     // Verify transfer returned success
-    var expected_success = [_]u8{0x00} ** 31 ++ [_]u8{0x01};
+    var expected_success = @as([31]u8, @splat(0x00)) ++ [_]u8{0x01};
     try testing.expectEqualSlices(u8, &expected_success, result.output);
 }
 
@@ -1835,10 +1835,8 @@ test "E2E: Complex DeFi swap simulation" {
     var setup = try createE2ETestSetup(allocator);
     defer setup.deinit();
     
-    const caller_address = [_]u8{0x11} ** 20;
-    const dex_contract = [_]u8{0x22} ** 20;
-    const token_a_contract = [_]u8{0x33} ** 20;
-    const token_b_contract = [_]u8{0x44} ** 20;
+    const caller_address = @as([20]u8, @splat(0x11));
+    const dex_contract = @as([20]u8, @splat(0x22));
     
     // Simplified DEX contract that performs A->B swap
     const dex_code = [_]u8{
@@ -1868,7 +1866,7 @@ test "E2E: Complex DeFi swap simulation" {
     };
     
     // Deploy DEX contract
-    var dex_account = setup.db_interface.Account{
+    const dex_account = setup.db_interface.Account{
         .balance = 0, .nonce = 0, .code = &dex_code,
         .storage = std.HashMap([32]u8, u256, std.hash_map.AutoContext([32]u8), 80).init(allocator),
     };

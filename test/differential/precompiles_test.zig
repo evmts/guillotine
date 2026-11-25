@@ -48,13 +48,13 @@ test "differential: precompile-ecrecover" {
     var testor = try DifferentialTestor.init(allocator);
     defer testor.deinit();
 
-    var cwd = std.fs.cwd();
-    const bc_path = "src/evm/fixtures/precompile-ecrecover/bytecode.txt";
-    const cd_path = "src/evm/fixtures/precompile-ecrecover/calldata.txt";
+    const cwd = std.Io.Dir.cwd();
+    const bc_path = "fixtures/precompile-ecrecover/bytecode.txt";
+    const cd_path = "fixtures/precompile-ecrecover/calldata.txt";
 
-    const bc_text = try cwd.readFileAlloc(allocator, bc_path, 1024 * 1024);
+    const bc_text = try cwd.readFileAlloc(std.testing.io, bc_path, allocator, .limited(1024 * 1024));
     defer allocator.free(bc_text);
-    const cd_text = try cwd.readFileAlloc(allocator, cd_path, 1024 * 1024);
+    const cd_text = try cwd.readFileAlloc(std.testing.io, cd_path, allocator, .limited(1024 * 1024));
     defer allocator.free(cd_text);
 
     const bc_bytes = try parse_hex_alloc(allocator, bc_text);
@@ -74,13 +74,13 @@ test "differential: precompile-sha256" {
     var testor = try DifferentialTestor.init(allocator);
     defer testor.deinit();
 
-    var cwd = std.fs.cwd();
-    const bc_path = "src/evm/fixtures/precompile-sha256/bytecode.txt";
-    const cd_path = "src/evm/fixtures/precompile-sha256/calldata.txt";
+    const cwd = std.Io.Dir.cwd();
+    const bc_path = "fixtures/precompile-sha256/bytecode.txt";
+    const cd_path = "fixtures/precompile-sha256/calldata.txt";
 
-    const bc_text = try cwd.readFileAlloc(allocator, bc_path, 1024 * 1024);
+    const bc_text = try cwd.readFileAlloc(std.testing.io, bc_path, allocator, .limited(1024 * 1024));
     defer allocator.free(bc_text);
-    const cd_text = try cwd.readFileAlloc(allocator, cd_path, 1024 * 1024);
+    const cd_text = try cwd.readFileAlloc(std.testing.io, cd_path, allocator, .limited(1024 * 1024));
     defer allocator.free(cd_text);
 
     const bc_bytes = try parse_hex_alloc(allocator, bc_text);
@@ -100,13 +100,13 @@ test "differential: precompile-ripemd160" {
     var testor = try DifferentialTestor.init(allocator);
     defer testor.deinit();
 
-    var cwd = std.fs.cwd();
-    const bc_path = "src/evm/fixtures/precompile-ripemd160/bytecode.txt";
-    const cd_path = "src/evm/fixtures/precompile-ripemd160/calldata.txt";
+    const cwd = std.Io.Dir.cwd();
+    const bc_path = "fixtures/precompile-ripemd160/bytecode.txt";
+    const cd_path = "fixtures/precompile-ripemd160/calldata.txt";
 
-    const bc_text = try cwd.readFileAlloc(allocator, bc_path, 1024 * 1024);
+    const bc_text = try cwd.readFileAlloc(std.testing.io, bc_path, allocator, .limited(1024 * 1024));
     defer allocator.free(bc_text);
-    const cd_text = try cwd.readFileAlloc(allocator, cd_path, 1024 * 1024);
+    const cd_text = try cwd.readFileAlloc(std.testing.io, cd_path, allocator, .limited(1024 * 1024));
     defer allocator.free(cd_text);
 
     const bc_bytes = try parse_hex_alloc(allocator, bc_text);
@@ -126,13 +126,13 @@ test "differential: precompile-identity" {
     var testor = try DifferentialTestor.init(allocator);
     defer testor.deinit();
 
-    var cwd = std.fs.cwd();
-    const bc_path = "src/evm/fixtures/precompile-identity/bytecode.txt";
-    const cd_path = "src/evm/fixtures/precompile-identity/calldata.txt";
+    const cwd = std.Io.Dir.cwd();
+    const bc_path = "fixtures/precompile-identity/bytecode.txt";
+    const cd_path = "fixtures/precompile-identity/calldata.txt";
 
-    const bc_text = try cwd.readFileAlloc(allocator, bc_path, 1024 * 1024);
+    const bc_text = try cwd.readFileAlloc(std.testing.io, bc_path, allocator, .limited(1024 * 1024));
     defer allocator.free(bc_text);
-    const cd_text = try cwd.readFileAlloc(allocator, cd_path, 1024 * 1024);
+    const cd_text = try cwd.readFileAlloc(std.testing.io, cd_path, allocator, .limited(1024 * 1024));
     defer allocator.free(cd_text);
 
     const bc_bytes = try parse_hex_alloc(allocator, bc_text);
@@ -152,13 +152,13 @@ test "differential: precompile-modexp" {
     var testor = try DifferentialTestor.init(allocator);
     defer testor.deinit();
 
-    var cwd = std.fs.cwd();
-    const bc_path = "src/evm/fixtures/precompile-modexp/bytecode.txt";
-    const cd_path = "src/evm/fixtures/precompile-modexp/calldata.txt";
+    const cwd = std.Io.Dir.cwd();
+    const bc_path = "fixtures/precompile-modexp/bytecode.txt";
+    const cd_path = "fixtures/precompile-modexp/calldata.txt";
 
-    const bc_text = try cwd.readFileAlloc(allocator, bc_path, 1024 * 1024);
+    const bc_text = try cwd.readFileAlloc(std.testing.io, bc_path, allocator, .limited(1024 * 1024));
     defer allocator.free(bc_text);
-    const cd_text = try cwd.readFileAlloc(allocator, cd_path, 1024 * 1024);
+    const cd_text = try cwd.readFileAlloc(std.testing.io, cd_path, allocator, .limited(1024 * 1024));
     defer allocator.free(cd_text);
 
     const bc_bytes = try parse_hex_alloc(allocator, bc_text);
@@ -178,13 +178,13 @@ test "differential: precompile-bn256add" {
     var testor = try DifferentialTestor.init(allocator);
     defer testor.deinit();
 
-    var cwd = std.fs.cwd();
-    const bc_path = "src/evm/fixtures/precompile-bn256add/bytecode.txt";
-    const cd_path = "src/evm/fixtures/precompile-bn256add/calldata.txt";
+    const cwd = std.Io.Dir.cwd();
+    const bc_path = "fixtures/precompile-bn256add/bytecode.txt";
+    const cd_path = "fixtures/precompile-bn256add/calldata.txt";
 
-    const bc_text = try cwd.readFileAlloc(allocator, bc_path, 1024 * 1024);
+    const bc_text = try cwd.readFileAlloc(std.testing.io, bc_path, allocator, .limited(1024 * 1024));
     defer allocator.free(bc_text);
-    const cd_text = try cwd.readFileAlloc(allocator, cd_path, 1024 * 1024);
+    const cd_text = try cwd.readFileAlloc(std.testing.io, cd_path, allocator, .limited(1024 * 1024));
     defer allocator.free(cd_text);
 
     const bc_bytes = try parse_hex_alloc(allocator, bc_text);
@@ -204,13 +204,13 @@ test "differential: precompile-bn256mul" {
     var testor = try DifferentialTestor.init(allocator);
     defer testor.deinit();
 
-    var cwd = std.fs.cwd();
-    const bc_path = "src/evm/fixtures/precompile-bn256mul/bytecode.txt";
-    const cd_path = "src/evm/fixtures/precompile-bn256mul/calldata.txt";
+    const cwd = std.Io.Dir.cwd();
+    const bc_path = "fixtures/precompile-bn256mul/bytecode.txt";
+    const cd_path = "fixtures/precompile-bn256mul/calldata.txt";
 
-    const bc_text = try cwd.readFileAlloc(allocator, bc_path, 1024 * 1024);
+    const bc_text = try cwd.readFileAlloc(std.testing.io, bc_path, allocator, .limited(1024 * 1024));
     defer allocator.free(bc_text);
-    const cd_text = try cwd.readFileAlloc(allocator, cd_path, 1024 * 1024);
+    const cd_text = try cwd.readFileAlloc(std.testing.io, cd_path, allocator, .limited(1024 * 1024));
     defer allocator.free(cd_text);
 
     const bc_bytes = try parse_hex_alloc(allocator, bc_text);
@@ -230,13 +230,13 @@ test "differential: precompile-bn256pairing" {
     var testor = try DifferentialTestor.init(allocator);
     defer testor.deinit();
 
-    var cwd = std.fs.cwd();
-    const bc_path = "src/evm/fixtures/precompile-bn256pairing/bytecode.txt";
-    const cd_path = "src/evm/fixtures/precompile-bn256pairing/calldata.txt";
+    const cwd = std.Io.Dir.cwd();
+    const bc_path = "fixtures/precompile-bn256pairing/bytecode.txt";
+    const cd_path = "fixtures/precompile-bn256pairing/calldata.txt";
 
-    const bc_text = try cwd.readFileAlloc(allocator, bc_path, 1024 * 1024);
+    const bc_text = try cwd.readFileAlloc(std.testing.io, bc_path, allocator, .limited(1024 * 1024));
     defer allocator.free(bc_text);
-    const cd_text = try cwd.readFileAlloc(allocator, cd_path, 1024 * 1024);
+    const cd_text = try cwd.readFileAlloc(std.testing.io, cd_path, allocator, .limited(1024 * 1024));
     defer allocator.free(cd_text);
 
     const bc_bytes = try parse_hex_alloc(allocator, bc_text);
@@ -256,13 +256,13 @@ test "differential: precompile-blake2f" {
     var testor = try DifferentialTestor.init(allocator);
     defer testor.deinit();
 
-    var cwd = std.fs.cwd();
-    const bc_path = "src/evm/fixtures/precompile-blake2f/bytecode.txt";
-    const cd_path = "src/evm/fixtures/precompile-blake2f/calldata.txt";
+    const cwd = std.Io.Dir.cwd();
+    const bc_path = "fixtures/precompile-blake2f/bytecode.txt";
+    const cd_path = "fixtures/precompile-blake2f/calldata.txt";
 
-    const bc_text = try cwd.readFileAlloc(allocator, bc_path, 1024 * 1024);
+    const bc_text = try cwd.readFileAlloc(std.testing.io, bc_path, allocator, .limited(1024 * 1024));
     defer allocator.free(bc_text);
-    const cd_text = try cwd.readFileAlloc(allocator, cd_path, 1024 * 1024);
+    const cd_text = try cwd.readFileAlloc(std.testing.io, cd_path, allocator, .limited(1024 * 1024));
     defer allocator.free(cd_text);
 
     const bc_bytes = try parse_hex_alloc(allocator, bc_text);
@@ -282,13 +282,13 @@ test "differential: precompile-pointevaluation" {
     var testor = try DifferentialTestor.init(allocator);
     defer testor.deinit();
 
-    var cwd = std.fs.cwd();
-    const bc_path = "src/evm/fixtures/precompile-pointevaluation/bytecode.txt";
-    const cd_path = "src/evm/fixtures/precompile-pointevaluation/calldata.txt";
+    const cwd = std.Io.Dir.cwd();
+    const bc_path = "fixtures/precompile-pointevaluation/bytecode.txt";
+    const cd_path = "fixtures/precompile-pointevaluation/calldata.txt";
 
-    const bc_text = try cwd.readFileAlloc(allocator, bc_path, 1024 * 1024);
+    const bc_text = try cwd.readFileAlloc(std.testing.io, bc_path, allocator, .limited(1024 * 1024));
     defer allocator.free(bc_text);
-    const cd_text = try cwd.readFileAlloc(allocator, cd_path, 1024 * 1024);
+    const cd_text = try cwd.readFileAlloc(std.testing.io, cd_path, allocator, .limited(1024 * 1024));
     defer allocator.free(cd_text);
 
     const bc_bytes = try parse_hex_alloc(allocator, bc_text);

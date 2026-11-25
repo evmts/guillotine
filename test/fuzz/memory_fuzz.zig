@@ -156,9 +156,9 @@ pub fn fuzzMemoryModel(_: void, input: []const u8) !void {
                 const over_limit: u32 = @intCast(TestMemory.MEMORY_LIMIT + 32);
                 try std.testing.expectError(evm.MemoryError.MemoryOverflow, mem.ensure_capacity(allocator, over_limit));
             },
-            else => { // reset_for_reuse (occasional)
+            else => { // clear for reuse (occasional)
                 if (param < 12) {
-                    mem.reset_for_reuse();
+                    mem.clear();
                     model.clearRetainingCapacity();
                 }
             },
@@ -205,9 +205,9 @@ const seed_corpus: []const []const u8 = &.{
 };
 
 test "fuzz memory stateful model checker and child checkpoints" {
-    try std.testing.fuzz({}, fuzzMemoryModel, .{ .corpus = seed_corpus });
+    try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzMemoryModel), .{ .corpus = seed_corpus });
 }
 
 test "fuzz memory quadratic gas expansion exactness and monotonicity" {
-    try std.testing.fuzz({}, fuzzMemoryGasFormula, .{ .corpus = seed_corpus });
+    try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzMemoryGasFormula), .{ .corpus = seed_corpus });
 }

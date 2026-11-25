@@ -110,7 +110,7 @@ test "EIP-6780: SELFDESTRUCT restrictions after Cancun" {
         try evm.database.set_account(contract_addr.bytes, .{
             .balance = 1000,
             .nonce = 1,
-            .code_hash = [_]u8{0} ** 32,
+            .code_hash = @as([32]u8, @splat(0)),
         });
         
         // SELFDESTRUCT bytecode
@@ -156,7 +156,7 @@ test "EIP-6780: SELFDESTRUCT restrictions after Cancun" {
         try evm.database.set_account(contract_addr.bytes, .{
             .balance = 1000,
             .nonce = 1,
-            .code_hash = [_]u8{0} ** 32,
+            .code_hash = @as([32]u8, @splat(0)),
         });
         
         // SELFDESTRUCT bytecode
@@ -181,7 +181,7 @@ test "EIP-6780: SELFDESTRUCT restrictions after Cancun" {
         const post_account = try evm.database.get_account(contract_addr.bytes);
         try testing.expect(post_account != null);
         try testing.expectEqual(@as(u256, 0), post_account.?.balance); // Balance transferred
-        try testing.expect(!std.mem.eql(u8, &post_account.?.code_hash, &([_]u8{0} ** 32))); // Code remains
+        try testing.expect(!std.mem.eql(u8, &post_account.?.code_hash, &(@as([32]u8, @splat(0))))); // Code remains
         
         // Beneficiary should still receive balance
         const beneficiary_account = try evm.database.get_account(beneficiary.bytes);

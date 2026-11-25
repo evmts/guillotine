@@ -20,13 +20,13 @@ test "logs are properly aggregated in CallResult" {
         0x00,       // STOP
     };
     
-    const contract_address = primitives.Address{ .bytes = [_]u8{0x42} ++ [_]u8{0} ** 19 };
+    const contract_address = primitives.Address{ .bytes = [_]u8{0x42} ++ @as([19]u8, @splat(0)) };
     const code_hash = try db.set_code(&log_bytecode);
     try db.set_account(contract_address.bytes, evm_module.Account{
         .balance = 0,
         .nonce = 0,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     });
     
     // Create EVM instance
@@ -37,7 +37,7 @@ test "logs are properly aggregated in CallResult" {
         .gas_limit = 30000000,
         .coinbase = primitives.Address.ZERO_ADDRESS,
         .base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
     
     const tx_context = evm_module.TransactionContext{
@@ -100,8 +100,8 @@ test "nested call logs are properly aggregated" {
     // PUSH1 0x00 PUSH1 0x00 LOG0  // Emit log from A
     // PUSH1 0x00 PUSH1 0x00 PUSH1 0x00 PUSH1 0x00 PUSH1 0x00 PUSH20 <address_b> PUSH2 0x1000 CALL
     // STOP
-    const contract_a_address = primitives.Address{ .bytes = [_]u8{0xAA} ++ [_]u8{0} ** 19 };
-    const contract_b_address = primitives.Address{ .bytes = [_]u8{0xBB} ++ [_]u8{0} ** 19 };
+    const contract_a_address = primitives.Address{ .bytes = [_]u8{0xAA} ++ @as([19]u8, @splat(0)) };
+    const contract_b_address = primitives.Address{ .bytes = [_]u8{0xBB} ++ @as([19]u8, @splat(0)) };
     
     var contract_a_bytecode = std.ArrayList(u8).init(allocator);
     defer contract_a_bytecode.deinit();
@@ -145,7 +145,7 @@ test "nested call logs are properly aggregated" {
         .balance = 0,
         .nonce = 0,
         .code_hash = code_hash_a,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     });
     
     const code_hash_b = try db.set_code(&contract_b_bytecode);
@@ -153,7 +153,7 @@ test "nested call logs are properly aggregated" {
         .balance = 0,
         .nonce = 0,
         .code_hash = code_hash_b,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     });
     
     // Create EVM instance
@@ -164,7 +164,7 @@ test "nested call logs are properly aggregated" {
         .gas_limit = 30000000,
         .coinbase = primitives.Address.ZERO_ADDRESS,
         .base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
     
     const tx_context = evm_module.TransactionContext{

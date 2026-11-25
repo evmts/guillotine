@@ -21,8 +21,8 @@ test "simple PUSH32 execution" {
     db.* = guillotine_evm.Database.init(allocator);
     defer db.deinit();
     
-    const address = [_]u8{0} ** 20;
-    const caller_address = [_]u8{1} ** 20;
+    const address = @as([20]u8, @splat(0));
+    const caller_address = @as([20]u8, @splat(1));
     
     const tx_context = guillotine_evm.TransactionContext{
         .gas_limit = 1_000_000,
@@ -31,7 +31,7 @@ test "simple PUSH32 execution" {
         .block_info = .{
             .basefee = 0,
             .coinbase = address,
-            .prevrandao = [_]u8{0} ** 32,
+            .prevrandao = @as([32]u8, @splat(0)),
             .gas_limit = 30_000_000,
             .number = 0,
             .timestamp = 0,
@@ -104,8 +104,8 @@ test "PUSH32 + PUSH1 + SDIV execution" {
     db.* = guillotine_evm.Database.init(allocator);
     defer db.deinit();
     
-    const address = [_]u8{0} ** 20;
-    const caller_address = [_]u8{1} ** 20;
+    const address = @as([20]u8, @splat(0));
+    const caller_address = @as([20]u8, @splat(1));
     
     const tx_context = guillotine_evm.TransactionContext{
         .gas_limit = 1_000_000,
@@ -114,7 +114,7 @@ test "PUSH32 + PUSH1 + SDIV execution" {
         .block_info = .{
             .basefee = 0,
             .coinbase = address,
-            .prevrandao = [_]u8{0} ** 32,
+            .prevrandao = @as([32]u8, @splat(0)),
             .gas_limit = 30_000_000,
             .number = 0,
             .timestamp = 0,

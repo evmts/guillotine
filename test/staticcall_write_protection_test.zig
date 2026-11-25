@@ -32,7 +32,7 @@ test "STATICCALL should fail when attempting state modifications" {
         .gas_limit = 30000000,
         .coinbase = primitives.Address.ZERO_ADDRESS,
         .base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
     
     const tx_context = evm.TransactionContext{
@@ -45,21 +45,21 @@ test "STATICCALL should fail when attempting state modifications" {
     defer vm.deinit();
     
     // Create two addresses: caller and target
-    const caller_addr = primitives.Address{ .bytes = [_]u8{0x07} ** 20 };
-    const target_addr = primitives.Address{ .bytes = [_]u8{0x08} ** 20 };
+    const caller_addr = primitives.Address{ .bytes = @as([20]u8, @splat(0x07)) };
+    const target_addr = primitives.Address{ .bytes = @as([20]u8, @splat(0x08)) };
     
     // Set up initial state
     try db.set_account(caller_addr.bytes, evm.Account{
         .balance = 1_000_000,
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     });
     try db.set_account(target_addr.bytes, evm.Account{
         .balance = 1_000_000,
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     });
     
     // Target's code that attempts to write to storage:
@@ -73,7 +73,7 @@ test "STATICCALL should fail when attempting state modifications" {
         .balance = 1_000_000,
         .nonce = 0,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     });
     
     // Execute STATICCALL from caller to target
@@ -117,7 +117,7 @@ test "STATICCALL should succeed for read-only operations" {
         .gas_limit = 30000000,
         .coinbase = primitives.Address.ZERO_ADDRESS,
         .base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
     
     const tx_context = evm.TransactionContext{
@@ -129,20 +129,20 @@ test "STATICCALL should succeed for read-only operations" {
     var vm = try evm.Evm(.{}).init(allocator, &db, block_info, tx_context, 0, primitives.Address.ZERO_ADDRESS);
     defer vm.deinit();
     
-    const caller_addr = primitives.Address{ .bytes = [_]u8{0x09} ** 20 };
-    const target_addr = primitives.Address{ .bytes = [_]u8{0x0A} ** 20 };
+    const caller_addr = primitives.Address{ .bytes = @as([20]u8, @splat(0x09)) };
+    const target_addr = primitives.Address{ .bytes = @as([20]u8, @splat(0x0A)) };
     
     try db.set_account(caller_addr.bytes, evm.Account{
         .balance = 1_000_000,
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     });
     try db.set_account(target_addr.bytes, evm.Account{
         .balance = 1_000_000,
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     });
     
     // Set some storage value to read
@@ -167,7 +167,7 @@ test "STATICCALL should succeed for read-only operations" {
         .balance = 1_000_000,
         .nonce = 0,
         .code_hash = read_code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     });
     
     // Execute STATICCALL

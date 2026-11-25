@@ -69,7 +69,7 @@ const CApiHost = struct {
     pub fn get_code_hash(self: *Self, address: Address) [32]u8 {
         _ = self;
         _ = address;
-        return [_]u8{0} ** 32;
+        return @as([32]u8, @splat(0));
     }
 
     pub fn get_account(self: *Self, address: Address) error{AccountNotFound}!evm.Account {
@@ -174,12 +174,12 @@ const CApiHost = struct {
 
     pub fn get_tx_origin(self: *Self) Address {
         _ = self;
-        return [_]u8{0} ** 20;
+        return @as([20]u8, @splat(0));
     }
 
     pub fn get_caller(self: *Self) Address {
         _ = self;
-        return [_]u8{0} ** 20;
+        return @as([20]u8, @splat(0));
     }
 
     pub fn get_call_value(self: *Self) u256 {

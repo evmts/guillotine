@@ -147,4 +147,5 @@ test {
     _ = @import("create_nonce.zig");
     _ = @import("handler_bounds_regression.zig");
     _ = @import("fork_rules.zig");
+    _ = @import("build_config.zig");
 }

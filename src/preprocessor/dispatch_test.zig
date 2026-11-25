@@ -292,7 +292,7 @@ test "Dispatch - PUSH32 with pointer metadata" {
     const handlers = createTestHandlers();
 
     // Create bytecode with PUSH32 (large value requiring pointer storage)
-    var push32_data = [_]u8{@intFromEnum(Opcode.PUSH32)} ++ [_]u8{0xFF} ** 32;
+    var push32_data = [_]u8{@intFromEnum(Opcode.PUSH32)} ++ @as([32]u8, @splat(0xFF));
     const Bytecode = bytecode_mod.Bytecode(BytecodeConfig{
         .max_bytecode_size = TestFrame.config.max_bytecode_size,
         .max_initcode_size = TestFrame.config.max_initcode_size,
@@ -621,7 +621,7 @@ test "Dispatch - memory cleanup for pointer metadata" {
     const handlers = createTestHandlers();
 
     // Create bytecode with large PUSH that requires pointer allocation
-    var push16_data = [_]u8{@intFromEnum(Opcode.PUSH16)} ++ [_]u8{0xFF} ** 16;
+    var push16_data = [_]u8{@intFromEnum(Opcode.PUSH16)} ++ @as([16]u8, @splat(0xFF));
     const Bytecode = bytecode_mod.Bytecode(BytecodeConfig{
         .max_bytecode_size = TestFrame.config.max_bytecode_size,
         .max_initcode_size = TestFrame.config.max_initcode_size,
@@ -1005,7 +1005,7 @@ test "Dispatch - RAII DispatchSchedule for automatic cleanup" {
     // Test basic RAII with pointer cleanup
     {
         // Create bytecode with PUSH that requires pointer allocation
-        var push16_data = [_]u8{@intFromEnum(Opcode.PUSH16)} ++ [_]u8{0xFF} ** 16;
+        var push16_data = [_]u8{@intFromEnum(Opcode.PUSH16)} ++ @as([16]u8, @splat(0xFF));
         const Bytecode = bytecode_mod.Bytecode(BytecodeConfig{
             .max_bytecode_size = TestFrame.config.max_bytecode_size,
             .max_initcode_size = TestFrame.config.max_initcode_size,

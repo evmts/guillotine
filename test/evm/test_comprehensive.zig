@@ -9,9 +9,9 @@ const Address = primitives.Address.Address;
 const TransactionContext = @import("transaction_context.zig").TransactionContext;
 
 // Test constants
-const ZERO_ADDRESS = [_]u8{0} ** 20;
-const TEST_ADDRESS_1 = [_]u8{1} ++ [_]u8{0} ** 19;
-const TEST_ADDRESS_2 = [_]u8{2} ++ [_]u8{0} ** 19;
+const ZERO_ADDRESS = @as([20]u8, @splat(0));
+const TEST_ADDRESS_1 = [_]u8{1} ++ @as([19]u8, @splat(0));
+const TEST_ADDRESS_2 = [_]u8{2} ++ @as([19]u8, @splat(0));
 
 fn setup_test_evm(allocator: std.mem.Allocator) !struct {
     evm: evm.DefaultEvm,
@@ -27,7 +27,7 @@ fn setup_test_evm(allocator: std.mem.Allocator) !struct {
         .gas_limit = 30000000,
         .coinbase = ZERO_ADDRESS,
         .base_fee = 25000000000, // 25 gwei
-        .prev_randao = [_]u8{0xAB} ** 32,
+        .prev_randao = @as([32]u8, @splat(0xAB)),
     };
     
     const context = TransactionContext{
@@ -36,7 +36,7 @@ fn setup_test_evm(allocator: std.mem.Allocator) !struct {
         .chain_id = 1, // Ethereum mainnet
     };
     
-    var evm_instance = try evm.DefaultEvm.init(
+    const evm_instance = try evm.DefaultEvm.init(
         allocator,
         db_interface,
         block_info,
@@ -94,7 +94,7 @@ test "EVM2 Comprehensive - Precompile Tests" {
     // Test IDENTITY precompile (0x04)
     {
         std.debug.print("Testing IDENTITY precompile (0x04)...\n", .{});
-        const identity_address = [_]u8{0} ** 19 ++ [_]u8{4};
+        const identity_address = @as([19]u8, @splat(0)) ++ [_]u8{4};
         const test_data = "Hello, EVM2!";
         
         const call_params = evm.DefaultEvm.CallParams{
@@ -120,7 +120,7 @@ test "EVM2 Comprehensive - Precompile Tests" {
     // Test SHA256 precompile (0x02)
     {
         std.debug.print("Testing SHA256 precompile (0x02)...\n", .{});
-        const sha256_address = [_]u8{0} ** 19 ++ [_]u8{2};
+        const sha256_address = @as([19]u8, @splat(0)) ++ [_]u8{2};
         const test_data = "test";
         
         const call_params = evm.DefaultEvm.CallParams{
@@ -239,8 +239,8 @@ test "EVM2 Comprehensive - State Management" {
         const account = @import("database_interface_account.zig").Account{
             .balance = balance,
             .nonce = 1,
-            .code_hash = [_]u8{0} ** 32,
-            .storage_root = [_]u8{0} ** 32,
+            .code_hash = @as([32]u8, @splat(0)),
+            .storage_root = @as([32]u8, @splat(0)),
         };
         try test_setup.memory_db.set_account(test_address, account);
         
@@ -347,7 +347,7 @@ test "EVM2 Comprehensive - Error Handling" {
     {
         std.debug.print("Testing invalid precompile handling...\n", .{});
         
-        const invalid_address = [_]u8{0} ** 19 ++ [_]u8{15}; // 0x0F - beyond range
+        const invalid_address = @as([19]u8, @splat(0)) ++ [_]u8{15}; // 0x0F - beyond range
         
         const call_params = evm.DefaultEvm.CallParams{
             .call = .{
@@ -417,7 +417,7 @@ test "EVM2 Comprehensive - Hardfork Support" {
             .gas_limit = 30000000,
             .coinbase = ZERO_ADDRESS,
             .base_fee = 1000000000,
-            .prev_randao = [_]u8{0} ** 32,
+            .prev_randao = @as([32]u8, @splat(0)),
         };
         
         const context = TransactionContext{

@@ -3,25 +3,11 @@ const testing = std.testing;
 const evm = @import("evm");
 const log = evm.log;
 const frame_mod = evm.frame;
-const FrameConfig = evm.FrameConfig;
-const MemoryDatabase = evm.MemoryDatabase;
-const Address = @import("voltaire").Address.Address;
 const Tracer = @import("evm").Tracer;
-const Evm = @import("evm").evm.Evm;
 
-// Test configuration for frame
-const test_config = FrameConfig{
-    .stack_size = 1024,
-    .WordType = u256,
-    .max_bytecode_size = 1024,
-    .block_gas_limit = 30_000_000,
-    .DatabaseType = MemoryDatabase,
-    .memory_initial_capacity = 4096,
-    .memory_limit = 0xFFFFFF,
-};
-
-const TestFrame = frame_mod.Frame(test_config);
-const TestBytecode = evm.Bytecode(.{ .max_bytecode_size = test_config.max_bytecode_size });
+// The frame type the default EVM executes, with its bytecode analyzer.
+const TestFrame = evm.DefaultEvm.Frame;
+const TestBytecode = evm.Bytecode(.{ .max_bytecode_size = TestFrame.config.max_bytecode_size });
 const TestDispatch = evm.FrameDispatch(TestFrame);
 
 test "fusion dispatch: verify jump resolution for ten-thousand-hashes" {
@@ -86,7 +72,7 @@ test "fusion dispatch: simple PUSH+JUMPI resolution" {
     // PC: 6: INVALID
     // PC: 7: JUMPDEST
     // PC: 8: STOP
-    const bytecode_hex = "60016007576EFEFE5B00";
+    const bytecode_hex = "6001600757FEFE5B00";
 
     std.log.info("Testing simple PUSH+JUMPI dispatch resolution", .{});
 

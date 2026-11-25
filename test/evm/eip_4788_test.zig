@@ -13,7 +13,7 @@ test "EIP-4788: beacon block root precompile at 0x0B" {
     defer database.deinit();
     
     // EIP-4788 specifies precompile at address 0x0B
-    const beacon_root_precompile = primitives.Address{ .bytes = [_]u8{0} ** 19 ++ [_]u8{0x0B} };
+    const beacon_root_precompile = primitives.Address{ .bytes = @as([19]u8, @splat(0)) ++ [_]u8{0x0B} };
     
     // Set up block info with beacon root
     const expected_beacon_root = [32]u8{
@@ -31,7 +31,7 @@ test "EIP-4788: beacon block root precompile at 0x0B" {
         .gas_limit = 30_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
         .blob_base_fee = 1,
         .blob_versioned_hashes = &.{},
         .beacon_root = expected_beacon_root,
@@ -82,16 +82,16 @@ test "EIP-4788: beacon roots ring buffer storage" {
     
     // EIP-4788 uses a ring buffer in storage with HISTORY_BUFFER_LENGTH = 8191
     const HISTORY_BUFFER_LENGTH = 8191;
-    const beacon_roots_address = primitives.Address{ .bytes = [_]u8{0} ** 19 ++ [_]u8{0x0B} };
+    const beacon_roots_address = primitives.Address{ .bytes = @as([19]u8, @splat(0)) ++ [_]u8{0x0B} };
     
     // Simulate storing beacon roots for multiple blocks
     const timestamps = [_]u64{ 1000, 2000, 3000, 8192000, 8193000 };
     const beacon_roots = [_][32]u8{
-        [_]u8{0x01} ** 32,
-        [_]u8{0x02} ** 32,
-        [_]u8{0x03} ** 32,
-        [_]u8{0x04} ** 32,
-        [_]u8{0x05} ** 32,
+        @as([32]u8, @splat(0x01)),
+        @as([32]u8, @splat(0x02)),
+        @as([32]u8, @splat(0x03)),
+        @as([32]u8, @splat(0x04)),
+        @as([32]u8, @splat(0x05)),
     };
     
     // Store beacon roots in ring buffer
@@ -101,7 +101,7 @@ test "EIP-4788: beacon roots ring buffer storage" {
         
         // Store timestamp -> root mapping
         const timestamp_key = std.mem.asBytes(&timestamp_slot);
-        var key: [32]u8 = [_]u8{0} ** 32;
+        var key: [32]u8 = @as([32]u8, @splat(0));
         @memcpy(key[24..32], timestamp_key);
         
         try database.set_storage(beacon_roots_address.bytes, @bitCast(key), @bitCast(root));
@@ -109,7 +109,7 @@ test "EIP-4788: beacon roots ring buffer storage" {
         // Store root -> timestamp mapping (at slot + HISTORY_BUFFER_LENGTH)
         const root_slot = timestamp_slot + HISTORY_BUFFER_LENGTH;
         const root_key_bytes = std.mem.asBytes(&root_slot);
-        var root_key: [32]u8 = [_]u8{0} ** 32;
+        var root_key: [32]u8 = @as([32]u8, @splat(0));
         @memcpy(root_key[24..32], root_key_bytes);
         
         const timestamp_value: u256 = timestamp;
@@ -120,7 +120,7 @@ test "EIP-4788: beacon roots ring buffer storage" {
     for (timestamps, beacon_roots) |timestamp, expected_root| {
         const timestamp_slot = timestamp % HISTORY_BUFFER_LENGTH;
         const timestamp_key = std.mem.asBytes(&timestamp_slot);
-        var key: [32]u8 = [_]u8{0} ** 32;
+        var key: [32]u8 = @as([32]u8, @splat(0));
         @memcpy(key[24..32], timestamp_key);
         
         const stored_root = try database.get_storage(beacon_roots_address.bytes, @bitCast(key));
@@ -141,10 +141,10 @@ test "EIP-4788: system call updates beacon root" {
     var database = evm.Database.init(allocator);
     defer database.deinit();
     
-    const beacon_roots_address = primitives.Address{ .bytes = [_]u8{0} ** 19 ++ [_]u8{0x0B} };
-    const system_address = primitives.Address{ .bytes = [_]u8{0xff} ** 20 }; // 0xffffff...
+    const beacon_roots_address = primitives.Address{ .bytes = @as([19]u8, @splat(0)) ++ [_]u8{0x0B} };
+    const system_address = primitives.Address{ .bytes = @as([20]u8, @splat(0xff)) }; // 0xffffff...
     
-    const parent_beacon_root = [32]u8{0xAA} ** 32;
+    const parent_beacon_root = @as([32]u8, @splat(0xAA));
     
     const block_info = evm.BlockInfo{
         .chain_id = 1,
@@ -154,7 +154,7 @@ test "EIP-4788: system call updates beacon root" {
         .gas_limit = 30_000_000,
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
         .blob_base_fee = 1,
         .blob_versioned_hashes = &.{},
         .beacon_root = parent_beacon_root,
@@ -199,7 +199,7 @@ test "EIP-4788: system call updates beacon root" {
     const HISTORY_BUFFER_LENGTH = 8191;
     const timestamp_slot = block_info.timestamp % HISTORY_BUFFER_LENGTH;
     const timestamp_key = std.mem.asBytes(&timestamp_slot);
-    var key: [32]u8 = [_]u8{0} ** 32;
+    var key: [32]u8 = @as([32]u8, @splat(0));
     @memcpy(key[24..32], timestamp_key);
     
     const stored_root = try database.get_storage(beacon_roots_address.bytes, @bitCast(key));

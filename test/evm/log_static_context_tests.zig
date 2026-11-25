@@ -51,12 +51,12 @@ const MockHostWithStaticContext = struct {
     
     pub fn get_tx_origin(self: *MockHostWithStaticContext) Address {
         _ = self;
-        return [_]u8{0} ** 19 ++ [_]u8{0xde};
+        return @as([19]u8, @splat(0)) ++ [_]u8{0xde};
     }
     
     pub fn get_caller(self: *MockHostWithStaticContext) Address {
         _ = self;
-        return [_]u8{0} ** 19 ++ [_]u8{0xca};
+        return @as([19]u8, @splat(0)) ++ [_]u8{0xca};
     }
     
     pub fn get_call_value(self: *MockHostWithStaticContext) u256 {
@@ -376,7 +376,7 @@ test "LOG operations succeed in non-static context" {
     var frame = try F.init(allocator, &bytecode, 1000000, {}, host);
     defer frame.deinit(allocator);
     
-    const contract_address = [_]u8{0x12} ++ [_]u8{0} ** 19;
+    const contract_address = [_]u8{0x12} ++ @as([19]u8, @splat(0));
     frame.contract_address = contract_address;
     
     // Test LOG0 succeeds

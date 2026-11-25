@@ -37,7 +37,7 @@ fn parseBytesHex(allocator: std.mem.Allocator, s: []const u8) ![]u8 {
 fn parseHash32(s: []const u8) ![32]u8 {
     const hex = primitives.Hex;
     const t = std.mem.trim(u8, s, &std.ascii.whitespace);
-    if (t.len == 0 or std.mem.eql(u8, t, "0x")) return [_]u8{0} ** 32;
+    if (t.len == 0 or std.mem.eql(u8, t, "0x")) return @as([32]u8, @splat(0));
     return try hex.hexToBytesFixed(32, t);
 }
 
@@ -77,7 +77,7 @@ fn setPreState(allocator: std.mem.Allocator, db: *Database, pre_obj: std.json.Va
             .balance = balance,
             .nonce = nonce,
             .code_hash = code_hash,
-            .storage_root = [_]u8{0} ** 32,
+            .storage_root = @as([32]u8, @splat(0)),
         };
 
         // Storage
@@ -293,8 +293,8 @@ test "official: state test smoke (create_opcode_initcode first case)" {
 }
 
 test "official: fixed hash helper validates width and decodes current Hex API" {
-    const hash = try parseHash32("0x" ++ "12" ** 32);
-    try std.testing.expectEqualSlices(u8, &([_]u8{0x12} ** 32), &hash);
+    const hash = try parseHash32("0x" ++ &@as([64]u8, @bitCast(@as([32][2]u8, @splat("12".*)))));
+    try std.testing.expectEqualSlices(u8, &(@as([32]u8, @splat(0x12))), &hash);
     try std.testing.expectError(error.InvalidHexLength, parseHash32("0x12"));
-    try std.testing.expectEqual([_]u8{0} ** 32, try parseHash32("0x"));
+    try std.testing.expectEqual(@as([32]u8, @splat(0)), try parseHash32("0x"));
 }

@@ -66,14 +66,14 @@ pub const ComprehensiveContractTest = struct {
 
     /// Helper to create address parameter (32 bytes, zero-padded)
     fn createAddressParam(address: [20]u8) [32]u8 {
-        var param = [_]u8{0} ** 32;
+        var param = @as([32]u8, @splat(0));
         @memcpy(param[12..32], &address);
         return param;
     }
 
     /// Helper to create uint256 parameter
     fn createUint256Param(value: u256) [32]u8 {
-        var param = [_]u8{0} ** 32;
+        var param = @as([32]u8, @splat(0));
         std.mem.writeInt(u256, &param, value, .big);
         return param;
     }
@@ -120,7 +120,7 @@ pub const ComprehensiveContractTest = struct {
 
         // Test getUserAccountData(address user) - Read method
         // getUserAccountData(address) -> (uint256,uint256,uint256,uint256,uint256,uint256)
-        const user_address = createAddressParam([_]u8{0x12} ++ [_]u8{0} ** 19);
+        const user_address = createAddressParam([_]u8{0x12} ++ @as([19]u8, @splat(0)));
         try self.testMethod("AAVE V3 Pool", "getUserAccountData", .{0xbf, 0x92, 0x95, 0x7c}, &user_address, 0, 1_000_000);
 
         // Test getReserveData(address asset) - Read method  
@@ -132,7 +132,7 @@ pub const ComprehensiveContractTest = struct {
         var supply_params: [128]u8 = undefined;
         @memcpy(supply_params[0..32], &asset_address); // asset
         @memcpy(supply_params[32..64], &createUint256Param(1000000)); // amount
-        @memcpy(supply_params[64..96], &createAddressParam([_]u8{0x12} ++ [_]u8{0} ** 19)); // onBehalfOf
+        @memcpy(supply_params[64..96], &createAddressParam([_]u8{0x12} ++ @as([19]u8, @splat(0)))); // onBehalfOf
         @memcpy(supply_params[96..128], &createUint256Param(0)); // referralCode (as uint256 for simplicity)
         try self.testMethod("AAVE V3 Pool", "supply", .{0x61, 0x7b, 0xa0, 0x37}, supply_params[0..128], 0, 2_000_000);
     }
@@ -159,7 +159,7 @@ pub const ComprehensiveContractTest = struct {
 
         // Test balanceOf(address) - Read method
         // balanceOf(address) -> uint256
-        const account_address = createAddressParam([_]u8{0x12} ++ [_]u8{0} ** 19);
+        const account_address = createAddressParam([_]u8{0x12} ++ @as([19]u8, @splat(0)));
         try self.testMethod("Compound cUSDC", "balanceOf", .{0x70, 0xa0, 0x82, 0x31}, &account_address, 0, 200_000);
 
         // Test mint(uint256) - Write method  
@@ -254,13 +254,13 @@ pub const ComprehensiveContractTest = struct {
         try self.testMethod("USDC Proxy", "decimals", .{0x31, 0x3c, 0xe5, 0x67}, &.{}, 0, 100_000);
 
         // balanceOf(address) -> uint256
-        const account_address = createAddressParam([_]u8{0x12} ++ [_]u8{0} ** 19);
+        const account_address = createAddressParam([_]u8{0x12} ++ @as([19]u8, @splat(0)));
         try self.testMethod("USDC Proxy", "balanceOf", .{0x70, 0xa0, 0x82, 0x31}, &account_address, 0, 200_000);
 
         // allowance(address,address) -> uint256
         var allowance_params: [64]u8 = undefined;
         @memcpy(allowance_params[0..32], &account_address); // owner
-        @memcpy(allowance_params[32..64], &createAddressParam([_]u8{0x34} ++ [_]u8{0} ** 19)); // spender
+        @memcpy(allowance_params[32..64], &createAddressParam([_]u8{0x34} ++ @as([19]u8, @splat(0)))); // spender
         try self.testMethod("USDC Proxy", "allowance", .{0xdd, 0x62, 0xed, 0x3e}, allowance_params[0..64], 0, 200_000);
 
         // Enhanced proxy-specific Read methods
@@ -285,13 +285,13 @@ pub const ComprehensiveContractTest = struct {
         // Basic Write methods (these will likely fail due to permissions, but good to test)
         // transfer(address,uint256) -> bool
         var transfer_params: [64]u8 = undefined;
-        @memcpy(transfer_params[0..32], &createAddressParam([_]u8{0x56} ++ [_]u8{0} ** 19)); // to
+        @memcpy(transfer_params[0..32], &createAddressParam([_]u8{0x56} ++ @as([19]u8, @splat(0)))); // to
         @memcpy(transfer_params[32..64], &createUint256Param(1000)); // amount
         try self.testMethod("USDC Proxy", "transfer", .{0xa9, 0x05, 0x9c, 0xbb}, transfer_params[0..64], 0, 500_000);
 
         // approve(address,uint256) -> bool
         var approve_params: [64]u8 = undefined;
-        @memcpy(approve_params[0..32], &createAddressParam([_]u8{0x78} ++ [_]u8{0} ** 19)); // spender  
+        @memcpy(approve_params[0..32], &createAddressParam([_]u8{0x78} ++ @as([19]u8, @splat(0)))); // spender  
         @memcpy(approve_params[32..64], &createUint256Param(5000)); // amount
         try self.testMethod("USDC Proxy", "approve", .{0x09, 0x5e, 0xa7, 0xb3}, approve_params[0..64], 0, 500_000);
     }
@@ -312,13 +312,13 @@ pub const ComprehensiveContractTest = struct {
         try self.testMethod("WETH Mainnet", "totalSupply", .{0x18, 0x16, 0x0d, 0xdd}, &.{}, 0, 200_000);
 
         // balanceOf(address) -> uint256
-        const account_address = createAddressParam([_]u8{0x12} ++ [_]u8{0} ** 19);
+        const account_address = createAddressParam([_]u8{0x12} ++ @as([19]u8, @splat(0)));
         try self.testMethod("WETH Mainnet", "balanceOf", .{0x70, 0xa0, 0x82, 0x31}, &account_address, 0, 200_000);
 
         // allowance(address,address) -> uint256
         var allowance_params: [64]u8 = undefined;
         @memcpy(allowance_params[0..32], &account_address); // owner
-        @memcpy(allowance_params[32..64], &createAddressParam([_]u8{0x34} ++ [_]u8{0} ** 19)); // spender
+        @memcpy(allowance_params[32..64], &createAddressParam([_]u8{0x34} ++ @as([19]u8, @splat(0)))); // spender
         try self.testMethod("WETH Mainnet", "allowance", .{0xdd, 0x62, 0xed, 0x3e}, allowance_params[0..64], 0, 200_000);
 
         // Write methods
@@ -331,13 +331,13 @@ pub const ComprehensiveContractTest = struct {
 
         // transfer(address,uint256) -> bool
         var transfer_params: [64]u8 = undefined;
-        @memcpy(transfer_params[0..32], &createAddressParam([_]u8{0x56} ++ [_]u8{0} ** 19)); // to
+        @memcpy(transfer_params[0..32], &createAddressParam([_]u8{0x56} ++ @as([19]u8, @splat(0)))); // to
         @memcpy(transfer_params[32..64], &createUint256Param(100000000000000000)); // 0.1 ETH
         try self.testMethod("WETH Mainnet", "transfer", .{0xa9, 0x05, 0x9c, 0xbb}, transfer_params[0..64], 0, 300_000);
 
         // approve(address,uint256) -> bool  
         var approve_params: [64]u8 = undefined;
-        @memcpy(approve_params[0..32], &createAddressParam([_]u8{0x78} ++ [_]u8{0} ** 19)); // spender
+        @memcpy(approve_params[0..32], &createAddressParam([_]u8{0x78} ++ @as([19]u8, @splat(0)))); // spender
         @memcpy(approve_params[32..64], &createUint256Param(1000000000000000000)); // 1 ETH
         try self.testMethod("WETH Mainnet", "approve", .{0x09, 0x5e, 0xa7, 0xb3}, approve_params[0..64], 0, 300_000);
     }

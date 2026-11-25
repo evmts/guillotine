@@ -23,8 +23,7 @@ credentials or customer payloads.
 
 Use `zig build test-opcodes -Dtest-filter=...`, `zig build test-unit
 -Dtest-filter=...` or `zig build state-tests -Dtest-filter=...` as applicable.
-MODEXP arithmetic and EIP-198 gas tests run with `zig build test-modexp
---build-file .smithers/build.zig`. Compare against revm in test/differential when
+MODEXP arithmetic and EIP-198 gas tests run with `zig build test-modexp`. Compare against revm in test/differential when
 available; state honestly when differential evidence is unavailable. For #815,
 use the archive regression in `.smithers/tests/foundry-link.test.mjs` and record
 archive members rather than inferring from linker warning text alone.

@@ -126,15 +126,15 @@ pub const DifferentialTestor = struct {
         try db.set_account(caller.bytes, .{
             .balance = 10_000_000,
             .nonce = 0,
-            .code_hash = [_]u8{0} ** 32,
-            .storage_root = [_]u8{0} ** 32,
+            .code_hash = @as([32]u8, @splat(0)),
+            .storage_root = @as([32]u8, @splat(0)),
         });
 
         try db_no_trace.set_account(caller.bytes, .{
             .balance = 10_000_000,
             .nonce = 0,
-            .code_hash = [_]u8{0} ** 32,
-            .storage_root = [_]u8{0} ** 32,
+            .code_hash = @as([32]u8, @splat(0)),
+            .storage_root = @as([32]u8, @splat(0)),
         });
 
         const block_info = guillotine_evm.BlockInfo{
@@ -145,7 +145,7 @@ pub const DifferentialTestor = struct {
             .coinbase = primitives.Address.ZERO_ADDRESS,
             .difficulty = 0,
             .base_fee = 0,
-            .prev_randao = [_]u8{0} ** 32,
+            .prev_randao = @as([32]u8, @splat(0)),
             .blob_base_fee = 0,
             .blob_versioned_hashes = &.{},
         };
@@ -336,7 +336,7 @@ pub const DifferentialTestor = struct {
                 .balance = 0,
                 .nonce = 1,
                 .code_hash = code_hash,
-                .storage_root = [_]u8{0} ** 32,
+                .storage_root = @as([32]u8, @splat(0)),
             });
 
             // For MinimalEvm: Also use runtime code for fair comparison
@@ -353,7 +353,7 @@ pub const DifferentialTestor = struct {
                 .balance = 0,
                 .nonce = 1,
                 .code_hash = code_hash,
-                .storage_root = [_]u8{0} ** 32,
+                .storage_root = @as([32]u8, @splat(0)),
             });
             // log.debug("Set account for address: {x}", .{self.contract.bytes});
         }

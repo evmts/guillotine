@@ -22,8 +22,8 @@ const MockHost = struct {
     inner_call_calls: u32 = 0,
     
     test_balance: u256 = 1000,
-    test_origin: Address = [_]u8{0} ** 19 ++ [_]u8{0xde},
-    test_caller: Address = [_]u8{0} ** 19 ++ [_]u8{0xca},
+    test_origin: Address = @as([19]u8, @splat(0)) ++ [_]u8{0xde},
+    test_caller: Address = @as([19]u8, @splat(0)) ++ [_]u8{0xca},
     test_callvalue: u256 = 42,
     
     pub fn get_balance(self: *MockHost, address: Address) u256 {
@@ -209,7 +209,7 @@ test "BALANCE opcode with host - successful execution" {
     const allocator = std.testing.allocator;
     
     // Bytecode: PUSH20 address, BALANCE
-    const test_address = [_]u8{0} ** 12 ++ [_]u8{0x12, 0x34, 0x56, 0x78, 0x90, 0xab, 0xcd, 0xef};
+    const test_address = @as([12]u8, @splat(0)) ++ [_]u8{0x12, 0x34, 0x56, 0x78, 0x90, 0xab, 0xcd, 0xef};
     var bytecode = std.array_list.AlignedManaged(u8, null).init(allocator);
     defer bytecode.deinit();
     

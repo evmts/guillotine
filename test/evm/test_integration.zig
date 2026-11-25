@@ -47,9 +47,9 @@ fn create_test_block_info() BlockInfo {
         .timestamp = 1640995200, // 2022-01-01
         .difficulty = 15000000000000000,
         .gas_limit = 15000000,
-        .coinbase = [_]u8{0xAB} ** 20,
+        .coinbase = @as([20]u8, @splat(0xAB)),
         .base_fee = 25000000000, // 25 gwei
-        .prev_randao = [_]u8{0xCD} ** 32,
+        .prev_randao = @as([32]u8, @splat(0xCD)),
     };
 }
 
@@ -77,11 +77,11 @@ test "Integration: Frame stack operations with memory expansion" {
     const block_info = create_test_block_info();
     const context = TransactionContext{
         .gas_limit = 100000,
-        .coinbase = [_]u8{0} ** 20,
+        .coinbase = @as([20]u8, @splat(0)),
         .chain_id = 1,
     };
     
-    var evm = try TestEvm.init(allocator, db_interface, block_info, context, 0, [_]u8{0} ** 20, .CANCUN);
+    var evm = try TestEvm.init(allocator, db_interface, block_info, context, 0, @as([20]u8, @splat(0)), .CANCUN);
     defer evm.deinit();
     
     const host = create_test_host(&evm);
@@ -125,18 +125,18 @@ test "Integration: Frame with database operations (SLOAD/SSTORE)" {
     const block_info = create_test_block_info();
     const context = TransactionContext{
         .gas_limit = 100000,
-        .coinbase = [_]u8{0} ** 20,
+        .coinbase = @as([20]u8, @splat(0)),
         .chain_id = 1,
     };
     
-    var evm = try TestEvm.init(allocator, db_interface, block_info, context, 0, [_]u8{0} ** 20, .CANCUN);
+    var evm = try TestEvm.init(allocator, db_interface, block_info, context, 0, @as([20]u8, @splat(0)), .CANCUN);
     defer evm.deinit();
     
     const host = create_test_host(&evm);
     var frame = try TestFrame.init(allocator, &bytecode, 100000, db_interface, host);
     defer frame.deinit(allocator);
     
-    const test_address = [_]u8{0x12} ++ [_]u8{0} ** 19;
+    const test_address = [_]u8{0x12} ++ @as([19]u8, @splat(0));
     frame.contract_address = test_address;
     
     // Test storage operations
@@ -172,18 +172,18 @@ test "Integration: Frame LOG operations with memory data" {
     const block_info = create_test_block_info();
     const context = TransactionContext{
         .gas_limit = 100000,
-        .coinbase = [_]u8{0} ** 20,
+        .coinbase = @as([20]u8, @splat(0)),
         .chain_id = 1,
     };
     
-    var evm = try TestEvm.init(allocator, db_interface, block_info, context, 0, [_]u8{0} ** 20, .CANCUN);
+    var evm = try TestEvm.init(allocator, db_interface, block_info, context, 0, @as([20]u8, @splat(0)), .CANCUN);
     defer evm.deinit();
     
     const host = create_test_host(&evm);
     var frame = try TestFrame.init(allocator, &bytecode, 100000, db_interface, host);
     defer frame.deinit(allocator);
     
-    const test_address = [_]u8{0x34} ++ [_]u8{0} ** 19;
+    const test_address = [_]u8{0x34} ++ @as([19]u8, @splat(0));
     frame.contract_address = test_address;
     
     // Write test data to memory
@@ -224,15 +224,15 @@ test "Integration: EVM to Frame execution - simple arithmetic" {
     const block_info = create_test_block_info();
     const context = TransactionContext{
         .gas_limit = 100000,
-        .coinbase = [_]u8{0} ** 20,
+        .coinbase = @as([20]u8, @splat(0)),
         .chain_id = 1,
     };
     
-    var evm = try TestEvm.init(allocator, db_interface, block_info, context, 0, [_]u8{0} ** 20, .CANCUN);
+    var evm = try TestEvm.init(allocator, db_interface, block_info, context, 0, @as([20]u8, @splat(0)), .CANCUN);
     defer evm.deinit();
     
     // Set up simple contract with arithmetic
-    const contract_address = [_]u8{0x56} ++ [_]u8{0} ** 19;
+    const contract_address = [_]u8{0x56} ++ @as([19]u8, @splat(0));
     const bytecode = [_]u8{
         0x60, 0x0A, // PUSH1 10
         0x60, 0x14, // PUSH1 20  
@@ -248,7 +248,7 @@ test "Integration: EVM to Frame execution - simple arithmetic" {
     
     const call_params = TestEvm.CallParams{
         .call = .{
-            .caller = [_]u8{0} ** 20,
+            .caller = @as([20]u8, @splat(0)),
             .to = contract_address,
             .value = 0,
             .input = &.{},
@@ -276,11 +276,11 @@ test "Integration: Memory expansion with gas calculation" {
     const block_info = create_test_block_info();
     const context = TransactionContext{
         .gas_limit = 100000,
-        .coinbase = [_]u8{0} ** 20,
+        .coinbase = @as([20]u8, @splat(0)),
         .chain_id = 1,
     };
     
-    var evm = try TestEvm.init(allocator, db_interface, block_info, context, 0, [_]u8{0} ** 20, .CANCUN);
+    var evm = try TestEvm.init(allocator, db_interface, block_info, context, 0, @as([20]u8, @splat(0)), .CANCUN);
     defer evm.deinit();
     
     const host = create_test_host(&evm);
@@ -325,11 +325,11 @@ test "Integration: Stack and Memory boundary conditions" {
     const block_info = create_test_block_info();
     const context = TransactionContext{
         .gas_limit = 100000,
-        .coinbase = [_]u8{0} ** 20,
+        .coinbase = @as([20]u8, @splat(0)),
         .chain_id = 1,
     };
     
-    var evm = try TestEvm.init(allocator, db_interface, block_info, context, 0, [_]u8{0} ** 20, .CANCUN);
+    var evm = try TestEvm.init(allocator, db_interface, block_info, context, 0, @as([20]u8, @splat(0)), .CANCUN);
     defer evm.deinit();
     
     const host = create_test_host(&evm);
@@ -376,16 +376,16 @@ test "Integration: Database interface with different account states" {
     const db_interface = memory_db.to_database_interface();
     
     const test_addresses = [_]Address{
-        [_]u8{0x11} ++ [_]u8{0} ** 19,
-        [_]u8{0x22} ++ [_]u8{0} ** 19,
-        [_]u8{0x33} ++ [_]u8{0} ** 19,
+        [_]u8{0x11} ++ @as([19]u8, @splat(0)),
+        [_]u8{0x22} ++ @as([19]u8, @splat(0)),
+        [_]u8{0x33} ++ @as([19]u8, @splat(0)),
     };
     
     // Create accounts with different states
     const accounts = [_]@import("database_interface_account.zig").Account{
-        .{ .balance = 1000, .nonce = 0, .code_hash = [_]u8{0} ** 32, .storage_root = [_]u8{0} ** 32 },
-        .{ .balance = 2000, .nonce = 5, .code_hash = [_]u8{0x11} ** 32, .storage_root = [_]u8{0x22} ** 32 },
-        .{ .balance = 0, .nonce = 100, .code_hash = [_]u8{0x33} ** 32, .storage_root = [_]u8{0} ** 32 },
+        .{ .balance = 1000, .nonce = 0, .code_hash = @as([32]u8, @splat(0)), .storage_root = @as([32]u8, @splat(0)) },
+        .{ .balance = 2000, .nonce = 5, .code_hash = @as([32]u8, @splat(0x11)), .storage_root = @as([32]u8, @splat(0x22)) },
+        .{ .balance = 0, .nonce = 100, .code_hash = @as([32]u8, @splat(0x33)), .storage_root = @as([32]u8, @splat(0)) },
     };
     
     // Set up accounts
@@ -414,7 +414,7 @@ test "Integration: Database interface with different account states" {
     }
     
     // Test non-existent account
-    const fake_address = [_]u8{0xFF} ** 20;
+    const fake_address = @as([20]u8, @splat(0xFF));
     const fake_account = try db_interface.get_account(fake_address);
     try testing.expect(fake_account == null);
     
@@ -437,11 +437,11 @@ test "Integration: Gas consumption across operations" {
     const block_info = create_test_block_info();
     const context = TransactionContext{
         .gas_limit = 100000,
-        .coinbase = [_]u8{0} ** 20,
+        .coinbase = @as([20]u8, @splat(0)),
         .chain_id = 1,
     };
     
-    var evm = try TestEvm.init(allocator, db_interface, block_info, context, 0, [_]u8{0} ** 20, .CANCUN);
+    var evm = try TestEvm.init(allocator, db_interface, block_info, context, 0, @as([20]u8, @splat(0)), .CANCUN);
     defer evm.deinit();
     
     const host = create_test_host(&evm);
@@ -491,11 +491,11 @@ test "Integration: Error propagation between components" {
     const block_info = create_test_block_info();
     const context = TransactionContext{
         .gas_limit = 100000,
-        .coinbase = [_]u8{0} ** 20,
+        .coinbase = @as([20]u8, @splat(0)),
         .chain_id = 1,
     };
     
-    var evm = try TestEvm.init(allocator, db_interface, block_info, context, 0, [_]u8{0} ** 20, .CANCUN);
+    var evm = try TestEvm.init(allocator, db_interface, block_info, context, 0, @as([20]u8, @splat(0)), .CANCUN);
     defer evm.deinit();
     
     const host = create_test_host(&evm);
@@ -538,18 +538,18 @@ test "Integration: Transient storage operations (EIP-1153)" {
     const block_info = create_test_block_info();
     const context = TransactionContext{
         .gas_limit = 100000,
-        .coinbase = [_]u8{0} ** 20,
+        .coinbase = @as([20]u8, @splat(0)),
         .chain_id = 1,
     };
     
-    var evm = try TestEvm.init(allocator, db_interface, block_info, context, 0, [_]u8{0} ** 20, .CANCUN);
+    var evm = try TestEvm.init(allocator, db_interface, block_info, context, 0, @as([20]u8, @splat(0)), .CANCUN);
     defer evm.deinit();
     
     const host = create_test_host(&evm);
     var frame = try TestFrame.init(allocator, &bytecode, 100000, db_interface, host);
     defer frame.deinit(allocator);
     
-    const test_address = [_]u8{0x78} ++ [_]u8{0} ** 19;
+    const test_address = [_]u8{0x78} ++ @as([19]u8, @splat(0));
     frame.contract_address = test_address;
     
     // Test TSTORE/TLOAD operations

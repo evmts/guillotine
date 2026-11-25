@@ -1,12 +1,12 @@
 const std = @import("std");
 
-/// Comprehensive test suite for bit operations equivalence between manual and std library implementations.
-/// This ensures that replacing manual bit operations with std library functions maintains identical behavior.
-///
-/// These tests verify that std.math functions produce identical results to manual bit operations
-/// across all edge cases and boundary conditions used throughout the EVM codebase.
+// Comprehensive test suite for bit operations equivalence between manual and std library implementations.
+// This ensures that replacing manual bit operations with std library functions maintains identical behavior.
+//
+// These tests verify that std.math functions produce identical results to manual bit operations
+// across all edge cases and boundary conditions used throughout the EVM codebase.
 
-/// Test that std.math.shl produces identical results to manual left shift
+// Test that std.math.shl produces identical results to manual left shift
 test "shl operations match manual implementation" {
     const test_cases = [_]struct { value: u256, shift: u8, expected: u256 }{
         // Basic cases
@@ -40,7 +40,7 @@ test "shl operations match manual implementation" {
     }
 }
 
-/// Test that std.math.shr produces identical results to manual right shift
+// Test that std.math.shr produces identical results to manual right shift
 test "shr operations match manual implementation" {
     const test_cases = [_]struct { value: u256, shift: u8, expected: u256 }{
         // Basic cases
@@ -74,7 +74,7 @@ test "shr operations match manual implementation" {
     }
 }
 
-/// Test byte extraction pattern used in BYTE opcode (handlers_bitwise.zig:58)
+// Test byte extraction pattern used in BYTE opcode (handlers_bitwise.zig:58)
 test "byte extraction operations match manual implementation" {
     const test_value: u256 = 0x123456789abcdef0fedcba9876543210;
     
@@ -100,7 +100,7 @@ test "byte extraction operations match manual implementation" {
     }
 }
 
-/// Test mask creation patterns found throughout the codebase
+// Test mask creation patterns found throughout the codebase
 test "mask creation operations match manual implementation" {
     const test_cases = [_]struct { bits: u8, expected: u256 }{
         .{ .bits = 0, .expected = 0 },
@@ -126,7 +126,7 @@ test "mask creation operations match manual implementation" {
     }
 }
 
-/// Test byte packing patterns found in bytecode operations
+// Test byte packing patterns found in bytecode operations
 test "byte packing operations match manual implementation" {
     const test_cases = [_]struct { initial: u256, byte_val: u8, expected: u256 }{
         .{ .initial = 0x1234, .byte_val = 0xAB, .expected = 0x1234AB },
@@ -148,7 +148,7 @@ test "byte packing operations match manual implementation" {
     }
 }
 
-/// Test address byte extraction patterns found in database operations
+// Test address byte extraction patterns found in database operations
 test "address byte extraction matches manual implementation" {
     const test_addr: u256 = 0x1234567890abcdef1234567890abcdef12345678;
     
@@ -165,7 +165,7 @@ test "address byte extraction matches manual implementation" {
     }
 }
 
-/// Test edge cases for all bit operations
+// Test edge cases for all bit operations
 test "bit operations edge cases" {
     // Test with zero
     try std.testing.expectEqual(@as(u256, 0), std.math.shl(u256, 0, 8));
@@ -186,7 +186,7 @@ test "bit operations edge cases" {
     try std.testing.expectEqual(@as(u256, 0), std.math.shr(u256, test_val, 256));
 }
 
-/// Test that all operations maintain EVM 256-bit word semantics
+// Test that all operations maintain EVM 256-bit word semantics
 test "evm word semantics preserved" {
     // EVM uses 256-bit words, ensure operations respect this
     const evm_word: u256 = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff;

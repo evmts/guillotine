@@ -169,7 +169,7 @@ pub fn fuzzModExpOracle(_: void, input: []const u8) !void {
     defer payload.deinit(allocator);
 
     // 96-byte length header
-    var hdr = [_]u8{0} ** 96;
+    var hdr = @as([96]u8, @splat(0));
     std.mem.writeInt(u64, hdr[24..32], base_len, .big);
     std.mem.writeInt(u64, hdr[56..64], exp_len, .big);
     std.mem.writeInt(u64, hdr[88..96], mod_len, .big);
@@ -234,7 +234,7 @@ pub fn fuzzBn254GroupAxiomsAndAdversarial(_: void, input: []const u8) !void {
         const k_sum: u64 = k1 + k2;
 
         // Compute P1 = k1 * G
-        var mul1_in = [_]u8{0} ** 96;
+        var mul1_in = @as([96]u8, @splat(0));
         mul1_in[31] = 1;
         mul1_in[63] = 2;
         std.mem.writeInt(u64, mul1_in[88..96], k1, .big);
@@ -242,7 +242,7 @@ pub fn fuzzBn254GroupAxiomsAndAdversarial(_: void, input: []const u8) !void {
         defer p1.deinit(allocator);
 
         // Compute P2 = k2 * G
-        var mul2_in = [_]u8{0} ** 96;
+        var mul2_in = @as([96]u8, @splat(0));
         mul2_in[31] = 1;
         mul2_in[63] = 2;
         std.mem.writeInt(u64, mul2_in[88..96], k2, .big);
@@ -250,7 +250,7 @@ pub fn fuzzBn254GroupAxiomsAndAdversarial(_: void, input: []const u8) !void {
         defer p2.deinit(allocator);
 
         // Compute P_sum = (k1 + k2) * G
-        var muls_in = [_]u8{0} ** 96;
+        var muls_in = @as([96]u8, @splat(0));
         muls_in[31] = 1;
         muls_in[63] = 2;
         std.mem.writeInt(u64, muls_in[88..96], k_sum, .big);
@@ -258,7 +258,7 @@ pub fn fuzzBn254GroupAxiomsAndAdversarial(_: void, input: []const u8) !void {
         defer p_sum.deinit(allocator);
 
         // Compute P1 + P2 via ECADD
-        var add_in = [_]u8{0} ** 128;
+        var add_in = @as([128]u8, @splat(0));
         @memcpy(add_in[0..64], p1.output);
         @memcpy(add_in[64..128], p2.output);
         var p_add = try precompiles.bn254_add.execute(allocator, &add_in, 100_000);
@@ -268,7 +268,7 @@ pub fn fuzzBn254GroupAxiomsAndAdversarial(_: void, input: []const u8) !void {
         try std.testing.expectEqualSlices(u8, p_sum.output, p_add.output);
 
         // Commutativity invariant: P2 + P1 == P1 + P2!
-        var add_rev_in = [_]u8{0} ** 128;
+        var add_rev_in = @as([128]u8, @splat(0));
         @memcpy(add_rev_in[0..64], p2.output);
         @memcpy(add_rev_in[64..128], p1.output);
         var p_add_rev = try precompiles.bn254_add.execute(allocator, &add_rev_in, 100_000);
@@ -299,7 +299,7 @@ pub fn fuzzBlake2fAndEcrecoverAndBls(_: void, input: []const u8) !void {
     }
     // Structured 213-byte input: verify gas == rounds and f not in {0,1} rejected
     if (input.len >= 6) {
-        var b2_in = [_]u8{0} ** 213;
+        var b2_in = @as([213]u8, @splat(0));
         const rounds: u32 = @as(u32, input[0]) % 20;
         std.mem.writeInt(u32, b2_in[0..4], rounds, .big);
         for (4..212) |k| {
@@ -345,17 +345,17 @@ const seed_corpus: []const []const u8 = &.{
 };
 
 test "fuzz SHA256, IDENTITY, and RIPEMD160 precompiles vs reference oracles" {
-    try std.testing.fuzz({}, fuzzSha256AndIdentityAndRipemd, .{ .corpus = seed_corpus });
+    try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzSha256AndIdentityAndRipemd), .{ .corpus = seed_corpus });
 }
 
 test "fuzz MODEXP precompile vs arbitrary-precision BigInt oracle across hardforks" {
-    try std.testing.fuzz({}, fuzzModExpOracle, .{ .corpus = seed_corpus });
+    try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzModExpOracle), .{ .corpus = seed_corpus });
 }
 
 test "fuzz BN254 ECADD, ECMUL, ECPAIRING group homomorphism and adversarial FFI inputs" {
-    try std.testing.fuzz({}, fuzzBn254GroupAxiomsAndAdversarial, .{ .corpus = seed_corpus });
+    try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzBn254GroupAxiomsAndAdversarial), .{ .corpus = seed_corpus });
 }
 
 test "fuzz ECRECOVER, BLAKE2F, and all 9 EIP-2537 BLS12-381 precompiles" {
-    try std.testing.fuzz({}, fuzzBlake2fAndEcrecoverAndBls, .{ .corpus = seed_corpus });
+    try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzBlake2fAndEcrecoverAndBls), .{ .corpus = seed_corpus });
 }

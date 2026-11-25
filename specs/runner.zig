@@ -104,7 +104,7 @@ pub fn runJsonTest(allocator: std.mem.Allocator, test_case: std.json.Value) !voi
                 defer allocator.free(bytes);
                 break :blk std.mem.bytesAsValue([32]u8, bytes).*;
             };
-            break :blk [_]u8{0} ** 32;
+            break :blk @as([32]u8, @splat(0));
         },
     };
     
@@ -962,7 +962,7 @@ pub fn runTest(allocator: std.mem.Allocator, test_data: TestData) !void {
             try std.fmt.parseInt(u256, env.?.currentBaseFee.?, 0)
         else 10,
         
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
     
     // Setup pre-state

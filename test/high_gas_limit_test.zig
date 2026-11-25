@@ -15,13 +15,13 @@ test "High gas limit crash reproduction" {
     const block_info = evm.BlockInfo{
         .chain_id = 1,
         .number = 1,
-        .parent_hash = [_]u8{0} ** 32,
+        .parent_hash = @as([32]u8, @splat(0)),
         .timestamp = 1000,
         .difficulty = 0x020000,
         .gas_limit = HIGH_GAS_LIMIT, // This is causing the crash
-        .coinbase = primitives.Address.fromBytes(&([_]u8{0x2a} ++ [_]u8{0xdc} ** 19)) catch unreachable,
+        .coinbase = primitives.Address.fromBytes(&([_]u8{0x2a} ++ @as([19]u8, @splat(0xdc)))) catch unreachable,
         .base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
         .blob_base_fee = 0,
         .blob_versioned_hashes = &.{},
     };
@@ -31,18 +31,18 @@ test "High gas limit crash reproduction" {
     defer database.deinit();
     
     // Create sender account with balance
-    const sender = primitives.Address.fromBytes(&([_]u8{0xa9} ++ [_]u8{0x4f} ** 19)) catch unreachable;
+    const sender = primitives.Address.fromBytes(&([_]u8{0xa9} ++ @as([19]u8, @splat(0x4f)))) catch unreachable;
     const sender_account = evm.Account{
         .balance = 1_000_000,
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
         .delegated_address = null,
     };
     try database.set_account(sender.bytes, sender_account);
     
     // Create recipient account
-    const recipient = primitives.Address.fromBytes(&([_]u8{0xb9} ++ [_]u8{0x4f} ** 19)) catch unreachable;
+    const recipient = primitives.Address.fromBytes(&([_]u8{0xb9} ++ @as([19]u8, @splat(0x4f)))) catch unreachable;
     
     // Transaction context
     const tx_context = evm.TransactionContext{
@@ -98,13 +98,13 @@ test "High gas limit with smaller value" {
     const block_info = evm.BlockInfo{
         .chain_id = 1,
         .number = 1,
-        .parent_hash = [_]u8{0} ** 32,
+        .parent_hash = @as([32]u8, @splat(0)),
         .timestamp = 1000,
         .difficulty = 0x020000,
         .gas_limit = NORMAL_GAS_LIMIT,
-        .coinbase = primitives.Address.fromBytes(&([_]u8{0x2a} ++ [_]u8{0xdc} ** 19)) catch unreachable,
+        .coinbase = primitives.Address.fromBytes(&([_]u8{0x2a} ++ @as([19]u8, @splat(0xdc)))) catch unreachable,
         .base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
         .blob_base_fee = 0,
         .blob_versioned_hashes = &.{},
     };
@@ -114,12 +114,12 @@ test "High gas limit with smaller value" {
     defer database.deinit();
     
     // Create sender account
-    const sender = primitives.Address.fromBytes(&([_]u8{0xa9} ++ [_]u8{0x4f} ** 19)) catch unreachable;
+    const sender = primitives.Address.fromBytes(&([_]u8{0xa9} ++ @as([19]u8, @splat(0x4f)))) catch unreachable;
     const sender_account = evm.Account{
         .balance = 1_000_000,
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
         .delegated_address = null,
     };
     try database.set_account(sender.bytes, sender_account);

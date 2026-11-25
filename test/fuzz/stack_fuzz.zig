@@ -216,13 +216,13 @@ const seed_corpus: []const []const u8 = &.{
 };
 
 test "fuzz default 1024-slot stack model checker" {
-    try std.testing.fuzz({}, fuzzDefaultStack, .{ .corpus = seed_corpus });
+    try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzDefaultStack), .{ .corpus = seed_corpus });
 }
 
 test "fuzz 32-slot stack overflow and boundary model checker" {
-    try std.testing.fuzz({}, fuzzSmallStackOverflow, .{ .corpus = seed_corpus });
+    try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzSmallStackOverflow), .{ .corpus = seed_corpus });
 }
 
 test "fuzz borrowed stack buffer alignment and reset" {
-    try std.testing.fuzz({}, fuzzBorrowedStack, .{ .corpus = seed_corpus });
+    try std.testing.fuzz({}, fuzz_alloc.bytes(fuzzBorrowedStack), .{ .corpus = seed_corpus });
 }

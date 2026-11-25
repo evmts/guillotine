@@ -33,7 +33,7 @@ fn runBothInterpreters(
         .gas_limit = 30000000,
         .coinbase = ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -45,7 +45,7 @@ fn runBothInterpreters(
     var evm = try DefaultEvm.init(allocator, database, block_info, context, 0, ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
-    const test_address: Address = [_]u8{0x42} ++ [_]u8{0} ** 19;
+    const test_address: Address = [_]u8{0x42} ++ @as([19]u8, @splat(0));
 
     // Run with frame interpreter
     const frame_result = try evm.execute_frame(
@@ -177,7 +177,7 @@ test "IR interpreter - CREATE operation" {
         .gas_limit = 30000000,
         .coinbase = ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -190,12 +190,12 @@ test "IR interpreter - CREATE operation" {
     defer evm.deinit();
 
     // Set up caller with balance
-    const caller_address: Address = [_]u8{0x01} ++ [_]u8{0} ** 19;
+    const caller_address: Address = [_]u8{0x01} ++ @as([19]u8, @splat(0));
     const caller_account = Account{
         .balance = 1000000,
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     };
     try memory_db.set_account(caller_address, caller_account);
 
@@ -246,7 +246,7 @@ test "IR interpreter - CREATE2 operation" {
         .gas_limit = 30000000,
         .coinbase = ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -258,12 +258,12 @@ test "IR interpreter - CREATE2 operation" {
     var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
-    const caller_address: Address = [_]u8{0x01} ++ [_]u8{0} ** 19;
+    const caller_address: Address = [_]u8{0x01} ++ @as([19]u8, @splat(0));
     const caller_account = Account{
         .balance = 1000000,
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     };
     try memory_db.set_account(caller_address, caller_account);
 
@@ -415,7 +415,7 @@ test "IR interpreter - Complex init code with loops" {
         .gas_limit = 30000000,
         .coinbase = ZERO_ADDRESS,
         .base_fee = 1000000000,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
 
     const context = TransactionContext{
@@ -427,12 +427,12 @@ test "IR interpreter - Complex init code with loops" {
     var evm = try DefaultEvm.init(std.testing.allocator, db_interface, block_info, context, 0, ZERO_ADDRESS, .CANCUN);
     defer evm.deinit();
 
-    const caller_address: Address = [_]u8{0x01} ++ [_]u8{0} ** 19;
+    const caller_address: Address = [_]u8{0x01} ++ @as([19]u8, @splat(0));
     const caller_account = Account{
         .balance = 1000000,
         .nonce = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     };
     try memory_db.set_account(caller_address, caller_account);
 

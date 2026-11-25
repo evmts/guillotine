@@ -44,10 +44,10 @@ fn createTestEvm(allocator: std.mem.Allocator) !TestEvm {
     const gas_price: u256 = 0;
     const origin = ZERO_ADDRESS;
     const hardfork = Hardfork.CANCUN;
-    const evm = try allocator.create(EvmType);
-    evm.* = try EvmType.init(allocator, db_interface, block_info, tx_context, gas_price, origin, hardfork);
+    const evm_ptr = try allocator.create(EvmType);
+    evm_ptr.* = try EvmType.init(allocator, db_interface, block_info, tx_context, gas_price, origin, hardfork);
     
-    return TestEvm{ .evm = evm, .memory_db = memory_db };
+    return TestEvm{ .evm = evm_ptr, .memory_db = memory_db };
 }
 
 // Contract that stores a value and then calls another contract

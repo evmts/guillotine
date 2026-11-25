@@ -17,8 +17,6 @@ Implements Patricia trie nodes, RLP encoding, hashing (Keccak256), and proof too
 ### Hash Builders
 - **`hash_builder.zig`** - Generic hash building interface
 - **`hash_builder_complete.zig`** - Full-featured hash builder with advanced optimizations
-- **`hash_builder_fixed.zig`** - Fixed-size hash builder for constrained environments  
-- **`hash_builder_simple.zig`** - Lightweight hash builder for basic operations
 
 ### Optimization Components
 - **`optimized_branch.zig`** - Compact branch node representation

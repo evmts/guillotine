@@ -73,7 +73,7 @@ test "fusion: PUSH+ADD fusion detection and execution" {
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 0,
         .blob_base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
         .blob_versioned_hashes = &.{},
     };
     
@@ -581,7 +581,7 @@ test "fusion: ten-thousand-hashes bytecode with PUSH+JUMP fusion" {
         .coinbase = Address.ZERO,
         .base_fee = 0,
         .blob_base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
         .blob_versioned_hashes = &.{},
     };
     
@@ -605,8 +605,8 @@ test "fusion: ten-thousand-hashes bytecode with PUSH+JUMP fusion" {
         },
     };
     
-    const deploy_result = evm.call(create_params);
-    defer if (deploy_result.output.len > 0) allocator.free(deploy_result.output);
+    var deploy_result = evm.call(create_params);
+    defer deploy_result.deinit(allocator);
     
     // Deployment should succeed
     try testing.expect(deploy_result.success);
@@ -616,11 +616,10 @@ test "fusion: ten-thousand-hashes bytecode with PUSH+JUMP fusion" {
         try testing.expect(deploy_result.output.len == 20);
         break :blk Address{ .bytes = deploy_result.output[0..20].* };
     };
-    log.info("Contract deployed successfully with gas_left: {}", .{deploy_result.gas_left});
-    log.info("Contract deployed successfully", .{});
     
-    // Step 2: Call the deployed contract's function
-    log.info("Calling contract function 0x30627b7c...", .{});
+    // Step 2: Call the deployed contract function. 20,000 iterations of
+    // keccak256(abi.encodePacked(i)) grow memory by 64 bytes each, so the call
+    // needs about 5.45M gas (quadratic memory expansion); 5M runs out of gas.
     const calldata = [_]u8{0x30, 0x62, 0x7b, 0x7c}; // Function selector as bytes
     
     const call_params = DefaultEvm.CallParams{
@@ -629,15 +628,49 @@ test "fusion: ten-thousand-hashes bytecode with PUSH+JUMP fusion" {
             .to = contract_address,
             .value = 0,
             .input = &calldata,
-            .gas = 5000000,
+            .gas = 6000000,
         },
     };
     
-    const call_result = evm.call(call_params);
-    
-    // The function should execute successfully with fusions in the runtime code
+    var call_result = evm.call(call_params);
+    defer call_result.deinit(allocator);
     try testing.expect(call_result.success);
-    log.info("Function executed successfully with fusions enabled! Gas left: {}", .{call_result.gas_left});
+    try testing.expect(call_result.gas_left < 1000000);
+    
+    // Differential: the same deployment and call without fusion must succeed
+    // with identical remaining gas. Fusion must never change gas accounting.
+    const UnfusedEvm = evm_mod.Evm(.{ .enable_fusion = false });
+    var unfused_db = Database.init(allocator);
+    defer unfused_db.deinit();
+    var unfused_evm = try UnfusedEvm.init(allocator, &unfused_db, block_info, tx_context, 0, Address.ZERO);
+    defer unfused_evm.deinit();
+    
+    var unfused_deploy = unfused_evm.call(UnfusedEvm.CallParams{
+        .create = .{
+            .caller = Address.ZERO,
+            .value = 0,
+            .init_code = deployment_bytecode,
+            .gas = 1000000,
+        },
+    });
+    defer unfused_deploy.deinit(allocator);
+    try testing.expect(unfused_deploy.success);
+    try testing.expectEqual(deploy_result.gas_left, unfused_deploy.gas_left);
+    try testing.expect(unfused_deploy.created_address != null);
+    try testing.expectEqual(contract_address, unfused_deploy.created_address.?);
+    
+    var unfused_call = unfused_evm.call(UnfusedEvm.CallParams{
+        .call = .{
+            .caller = Address.ZERO,
+            .to = contract_address,
+            .value = 0,
+            .input = &calldata,
+            .gas = 6000000,
+        },
+    });
+    defer unfused_call.deinit(allocator);
+    try testing.expect(unfused_call.success);
+    try testing.expectEqual(call_result.gas_left, unfused_call.gas_left);
 }
 
 test "fusion: No fusion when disabled" {

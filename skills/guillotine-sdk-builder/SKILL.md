@@ -30,6 +30,7 @@ of this ABI and no other C entry point.
 
 ## 2. Build and link
 
+- [ ] Build with Zig 0.17.1 (`minimum_zig_version` in `build.zig.zon`).
 - [ ] `zig build shared` produces `zig-out/lib/libguillotine_ffi.dylib`
       (macOS) or `libguillotine_ffi.so` (Linux). `zig build static` produces
       `libguillotine_ffi_static.a`. Prefer the shared library.

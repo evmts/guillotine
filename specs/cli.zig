@@ -45,7 +45,7 @@ fn parseAddress(allocator: std.mem.Allocator, addr_str: []const u8) !primitives.
     }
     
     // Pad with zeros if necessary
-    var hex_bytes = [_]u8{0} ** 40;
+    var hex_bytes = @as([40]u8, @splat(0));
     if (addr.len <= 40) {
         @memcpy(hex_bytes[40 - addr.len..], addr);
     } else {
@@ -282,7 +282,7 @@ fn executeTestCase(allocator: std.mem.Allocator, test_name: []const u8, test_dat
         .base_fee = block_base_fee,
         .chain_id = 1,
         .difficulty = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
         .blob_base_fee = 0,
         .blob_versioned_hashes = &.{},
     };
@@ -303,7 +303,7 @@ fn executeTestCase(allocator: std.mem.Allocator, test_name: []const u8, test_dat
         
         var balance: u256 = 0;
         var nonce: u64 = 0;
-        var code_hash = [_]u8{0} ** 32;
+        var code_hash = @as([32]u8, @splat(0));
         
         if (account_data.object.get("balance")) |bal| {
             if (bal.string.len > 0) {
@@ -332,7 +332,7 @@ fn executeTestCase(allocator: std.mem.Allocator, test_name: []const u8, test_dat
         const account = guillotine.Account{
             .balance = balance,
             .code_hash = code_hash,
-            .storage_root = [_]u8{0} ** 32,
+            .storage_root = @as([32]u8, @splat(0)),
             .nonce = nonce,
             .delegated_address = null,
         };
@@ -425,7 +425,7 @@ fn executeTestCase(allocator: std.mem.Allocator, test_name: []const u8, test_dat
         }
         
         // Determine sender
-        var sender = primitives.Address.fromBytes(&([_]u8{0xa9} ** 20)) catch unreachable;
+        var sender = primitives.Address.fromBytes(&(@as([20]u8, @splat(0xa9)))) catch unreachable;
         if (tx.object.get("sender")) |s| {
             sender = try parseAddress(allocator, s.string);
         } else if (tx.object.get("secretKey")) |sk| {

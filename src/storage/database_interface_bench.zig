@@ -13,12 +13,12 @@ fn benchDatabaseGetAccount(allocator: std.mem.Allocator) void {
     // Pre-populate with some accounts
     var i: u8 = 0;
     while (i < 100) : (i += 1) {
-        const addr = [_]u8{i} ++ [_]u8{0} ** 19;
+        const addr = [_]u8{i} ++ @as([19]u8, @splat(0));
         const account = database_mod.Account{
             .balance = @as(u256, i) * 1000000000000000000, // i ETH in wei
             .nonce = i,
-            .code_hash = [_]u8{0} ** 32,
-            .storage_root = [_]u8{0} ** 32,
+            .code_hash = @as([32]u8, @splat(0)),
+            .storage_root = @as([32]u8, @splat(0)),
         };
         db.set_account(addr, account) catch break;
     }
@@ -26,7 +26,7 @@ fn benchDatabaseGetAccount(allocator: std.mem.Allocator) void {
     // Benchmark account retrieval
     i = 0;
     while (i < 1000) : (i += 1) {
-        const addr = [_]u8{i % 100} ++ [_]u8{0} ** 19;
+        const addr = [_]u8{i % 100} ++ @as([19]u8, @splat(0));
         _ = db.get_account(addr) catch break;
     }
 }
@@ -37,12 +37,12 @@ fn benchDatabaseSetAccount(allocator: std.mem.Allocator) void {
     
     var i: u8 = 0;
     while (i < 200) : (i += 1) {
-        const addr = [_]u8{i} ++ [_]u8{0} ** 19;
+        const addr = [_]u8{i} ++ @as([19]u8, @splat(0));
         const account = database_mod.Account{
             .balance = @as(u256, i) * 1000000000000000000,
             .nonce = i,
-            .code_hash = [_]u8{0} ** 32,
-            .storage_root = [_]u8{0} ** 32,
+            .code_hash = @as([32]u8, @splat(0)),
+            .storage_root = @as([32]u8, @splat(0)),
         };
         db.set_account(addr, account) catch break;
     }
@@ -52,7 +52,7 @@ fn benchDatabaseStorage(allocator: std.mem.Allocator) void {
     var db = Database.init(allocator);
     defer db.deinit();
     
-    const addr = [_]u8{0x42} ++ [_]u8{0} ** 19;
+    const addr = [_]u8{0x42} ++ @as([19]u8, @splat(0));
     
     // Set storage values
     var i: u32 = 0;
@@ -74,7 +74,7 @@ fn benchDatabaseTransientStorage(allocator: std.mem.Allocator) void {
     var db = Database.init(allocator);
     defer db.deinit();
     
-    const addr = [_]u8{0x43} ++ [_]u8{0} ** 19;
+    const addr = [_]u8{0x43} ++ @as([19]u8, @splat(0));
     
     // Set and get transient storage values
     var i: u32 = 0;
@@ -91,7 +91,6 @@ fn benchDatabaseCodeOperations(allocator: std.mem.Allocator) void {
     var db = Database.init(allocator);
     defer db.deinit();
     
-    const addr = [_]u8{0x44} ++ [_]u8{0} ** 19;
     
     // Sample contract bytecode
     const bytecode = [_]u8{
@@ -104,7 +103,7 @@ fn benchDatabaseCodeOperations(allocator: std.mem.Allocator) void {
     // Set and get code multiple times
     var i: u32 = 0;
     while (i < 50) : (i += 1) {
-        const test_addr = [_]u8{@as(u8, @intCast(i % 256))} ++ [_]u8{0} ** 19;
+        const test_addr = [_]u8{@as(u8, @intCast(i % 256))} ++ @as([19]u8, @splat(0));
         
         _ = db.set_code(&bytecode) catch break;
         _ = db.get_code(test_addr) catch break;
@@ -119,14 +118,14 @@ fn benchDatabaseMixedOperations(allocator: std.mem.Allocator) void {
     
     var i: u32 = 0;
     while (i < 100) : (i += 1) {
-        const addr = [_]u8{@as(u8, @intCast(i % 256))} ++ [_]u8{0} ** 19;
+        const addr = [_]u8{@as(u8, @intCast(i % 256))} ++ @as([19]u8, @splat(0));
         
         // Mix of operations simulating real EVM usage
         const account = database_mod.Account{
             .balance = @as(u256, i) * 1000000000000000000,
             .nonce = @as(u64, @intCast(i)),
-            .code_hash = [_]u8{0} ** 32,
-            .storage_root = [_]u8{0} ** 32,
+            .code_hash = @as([32]u8, @splat(0)),
+            .storage_root = @as([32]u8, @splat(0)),
         };
         
         db.set_account(addr, account) catch break;

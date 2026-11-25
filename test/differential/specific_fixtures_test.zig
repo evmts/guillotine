@@ -167,7 +167,7 @@ fn run_single_test_with_timing(allocator: std.mem.Allocator, testor: *Differenti
         .balance = 0,
         .nonce = 1,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     });
     
     // Time REVM execution
@@ -231,7 +231,7 @@ fn run_single_test(allocator: std.mem.Allocator, testor: *DifferentialTestor, te
         .balance = 0,
         .nonce = 1,
         .code_hash = code_hash,
-        .storage_root = [_]u8{0} ** 32,
+        .storage_root = @as([32]u8, @splat(0)),
     });
     
     // Execute with calldata on both EVMs and compare results

@@ -3,7 +3,6 @@ const std = @import("std");
 // Assembly to EVM bytecode compiler for test specs
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
     defer _ = gpa.deinit();
 
     // Compile the stack limit test assembly codes

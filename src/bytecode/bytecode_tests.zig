@@ -1262,7 +1262,7 @@ test "Bytecode malformed metadata - boundary conditions" {
     const allocator = std.testing.allocator;
 
     // Test exactly minimum size but malformed
-    var code_min_size = [_]u8{0} ** 45;
+    var code_min_size = @as([45]u8, @splat(0));
     // Set zero metadata length; still too small to be valid
     code_min_size[43] = 0x00;
     code_min_size[44] = 0x00;

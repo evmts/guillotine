@@ -192,7 +192,7 @@ fn workerMain(cfg: WorkerConfig) void {
 
     // Small per-worker evolving corpus ring (16 slots x 512 bytes)
     var corpus: [16][512]u8 = undefined;
-    var corpus_lens = [_]usize{0} ** 16;
+    var corpus_lens = @as([16]usize, @splat(0));
     for (0..16) |s| {
         const l = rng.uintLessThan(usize, 64) + 4;
         rng.bytes(corpus[s][0..l]);

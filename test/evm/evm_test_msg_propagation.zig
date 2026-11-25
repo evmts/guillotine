@@ -33,12 +33,12 @@ test "EVM msg.sender propagation in CALL" {
         0x60, 0x00,  // PUSH1 0
         0xF3,        // RETURN - return 32 bytes from memory[0]
     };
-    const contract_address: Address = [_]u8{0x42} ++ [_]u8{0} ** 19;
+    const contract_address: Address = [_]u8{0x42} ++ @as([19]u8, @splat(0));
     var account = Account{
         .nonce = 0,
         .balance = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     };
     account.set_code(&contract_code);
     try memory_db.set_account(contract_address, account);
@@ -51,10 +51,10 @@ test "EVM msg.sender propagation in CALL" {
         .difficulty = 1,
         .coinbase = ZERO_ADDRESS,
         .base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
     
-    const original_caller: Address = [_]u8{0xAA} ++ [_]u8{0} ** 19;
+    const original_caller: Address = [_]u8{0xAA} ++ @as([19]u8, @splat(0));
     const tx_context = TransactionContext{
         .gas_limit = 1000000,
         .coinbase = ZERO_ADDRESS,
@@ -65,7 +65,7 @@ test "EVM msg.sender propagation in CALL" {
     defer evm.deinit();
     
     // Test CALL - new msg.sender should be the calling contract
-    const calling_contract: Address = [_]u8{0xBB} ++ [_]u8{0} ** 19;
+    const calling_contract: Address = [_]u8{0xBB} ++ @as([19]u8, @splat(0));
     const call_params = DefaultEvm.CallParams{
         .call = .{
             .caller = calling_contract, // This becomes msg.sender in the called contract
@@ -106,12 +106,12 @@ test "EVM msg.sender preservation in DELEGATECALL" {
         0x60, 0x00,  // PUSH1 0
         0xF3,        // RETURN - return 32 bytes from memory[0]
     };
-    const contract_address: Address = [_]u8{0x42} ++ [_]u8{0} ** 19;
+    const contract_address: Address = [_]u8{0x42} ++ @as([19]u8, @splat(0));
     var account = Account{
         .nonce = 0,
         .balance = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     };
     account.set_code(&contract_code);
     try memory_db.set_account(contract_address, account);
@@ -124,10 +124,10 @@ test "EVM msg.sender preservation in DELEGATECALL" {
         .difficulty = 1,
         .coinbase = ZERO_ADDRESS,
         .base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
     
-    const original_caller: Address = [_]u8{0xAA} ++ [_]u8{0} ** 19;
+    const original_caller: Address = [_]u8{0xAA} ++ @as([19]u8, @splat(0));
     const tx_context = TransactionContext{
         .gas_limit = 1000000,
         .coinbase = ZERO_ADDRESS,
@@ -177,23 +177,23 @@ test "EVM msg.value propagation" {
         0x60, 0x00,  // PUSH1 0
         0xF3,        // RETURN - return 32 bytes from memory[0]
     };
-    const contract_address: Address = [_]u8{0x42} ++ [_]u8{0} ** 19;
+    const contract_address: Address = [_]u8{0x42} ++ @as([19]u8, @splat(0));
     var account = Account{
         .nonce = 0,
         .balance = 0,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     };
     account.set_code(&contract_code);
     try memory_db.set_account(contract_address, account);
     
     // Give caller some balance to send value
-    const caller_address: Address = [_]u8{0xAA} ++ [_]u8{0} ** 19;
+    const caller_address: Address = [_]u8{0xAA} ++ @as([19]u8, @splat(0));
     var caller_account = Account{
         .nonce = 0,
         .balance = 1000000,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     };
     caller_account.set_code_empty();
     try memory_db.set_account(caller_address, caller_account);
@@ -206,7 +206,7 @@ test "EVM msg.value propagation" {
         .difficulty = 1,
         .coinbase = ZERO_ADDRESS,
         .base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
     };
     
     const tx_context = TransactionContext{

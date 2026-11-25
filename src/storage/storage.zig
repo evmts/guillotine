@@ -120,7 +120,7 @@ pub const TestStorage = struct {
     
     pub fn get_code_by_address(self: *TestStorage, address: [20]u8) ![]const u8 {
         if (self.accounts.get(address)) |account| {
-            if (std.mem.eql(u8, &account.code_hash, &([_]u8{0} ** 32))) {
+            if (std.mem.eql(u8, &account.code_hash, &(@as([32]u8, @splat(0))))) {
                 return &.{};
             }
             return self.get_code(account.code_hash);
@@ -139,7 +139,7 @@ pub const TestStorage = struct {
     
     pub fn get_state_root(self: *TestStorage) ![32]u8 {
         _ = self;
-        return [_]u8{0xDE, 0xAD} ** 16;  // Test deterministic root
+        return @as([32]u8, @bitCast(@as([16][2]u8, @splat([_]u8{0xDE, 0xAD}))));  // Test deterministic root
     }
     
     pub fn commit_changes(self: *TestStorage) ![32]u8 {
@@ -240,17 +240,17 @@ pub const TestStorage = struct {
     pub fn seedWithTestData(self: *TestStorage) !void {
         // Add some predefined test accounts
         const test_accounts = [_]struct { addr: [20]u8, balance: u256, nonce: u64 }{
-            .{ .addr = [_]u8{0x01} ** 20, .balance = 1_000_000, .nonce = 0 },
-            .{ .addr = [_]u8{0x02} ** 20, .balance = 2_000_000, .nonce = 5 },
-            .{ .addr = [_]u8{0x03} ** 20, .balance = 3_000_000, .nonce = 10 },
+            .{ .addr = @as([20]u8, @splat(0x01)), .balance = 1_000_000, .nonce = 0 },
+            .{ .addr = @as([20]u8, @splat(0x02)), .balance = 2_000_000, .nonce = 5 },
+            .{ .addr = @as([20]u8, @splat(0x03)), .balance = 3_000_000, .nonce = 10 },
         };
         
         for (test_accounts) |test_account| {
             try self.set_account(test_account.addr, Account{
                 .balance = test_account.balance,
                 .nonce = test_account.nonce,
-                .code_hash = [_]u8{0} ** 32,
-                .storage_root = [_]u8{0} ** 32,
+                .code_hash = @as([32]u8, @splat(0)),
+                .storage_root = @as([32]u8, @splat(0)),
             });
         }
         
@@ -292,7 +292,7 @@ pub const DiskStorage = struct {
 /// Union-based storage - zero overhead for memory case
 pub const Storage = union(enum) {
     memory: MemoryStorage,
-    test: TestStorage,
+    @"test": TestStorage,
     forked: ForkedStorage,
     // disk: DiskStorage,      // Future
     
@@ -303,7 +303,7 @@ pub const Storage = union(enum) {
     pub inline fn get_account(self: *Self, address: [20]u8) !?Account {
         return switch (self.*) {
             .memory => |*s| s.get_account(address),
-            .test => |*s| s.get_account(address),
+            .@"test" => |*s| s.get_account(address),
             .forked => |*s| s.get_account(address),
         };
     }
@@ -311,7 +311,7 @@ pub const Storage = union(enum) {
     pub inline fn set_account(self: *Self, address: [20]u8, account: Account) !void {
         return switch (self.*) {
             .memory => |*s| s.set_account(address, account),
-            .test => |*s| s.set_account(address, account),
+            .@"test" => |*s| s.set_account(address, account),
             .forked => |*s| s.set_account(address, account),
         };
     }
@@ -319,7 +319,7 @@ pub const Storage = union(enum) {
     pub inline fn delete_account(self: *Self, address: [20]u8) !void {
         return switch (self.*) {
             .memory => |*s| s.delete_account(address),
-            .test => |*s| s.delete_account(address),
+            .@"test" => |*s| s.delete_account(address),
             .forked => |*s| s.delete_account(address),
         };
     }
@@ -327,7 +327,7 @@ pub const Storage = union(enum) {
     pub inline fn account_exists(self: *Self, address: [20]u8) bool {
         return switch (self.*) {
             .memory => |*s| s.account_exists(address),
-            .test => |*s| s.account_exists(address),
+            .@"test" => |*s| s.account_exists(address),
             .forked => |*s| s.account_exists(address),
         };
     }
@@ -335,7 +335,7 @@ pub const Storage = union(enum) {
     pub inline fn get_balance(self: *Self, address: [20]u8) !u256 {
         return switch (self.*) {
             .memory => |*s| s.get_balance(address),
-            .test => |*s| s.get_balance(address),
+            .@"test" => |*s| s.get_balance(address),
             .forked => |*s| s.get_balance(address),
         };
     }
@@ -343,7 +343,7 @@ pub const Storage = union(enum) {
     pub inline fn get_storage(self: *Self, address: [20]u8, key: u256) !u256 {
         return switch (self.*) {
             .memory => |*s| s.get_storage(address, key),
-            .test => |*s| s.get_storage(address, key),
+            .@"test" => |*s| s.get_storage(address, key),
             .forked => |*s| s.get_storage(address, key),
         };
     }
@@ -351,7 +351,7 @@ pub const Storage = union(enum) {
     pub inline fn set_storage(self: *Self, address: [20]u8, key: u256, value: u256) !void {
         return switch (self.*) {
             .memory => |*s| s.set_storage(address, key, value),
-            .test => |*s| s.set_storage(address, key, value),
+            .@"test" => |*s| s.set_storage(address, key, value),
             .forked => |*s| s.set_storage(address, key, value),
         };
     }
@@ -359,7 +359,7 @@ pub const Storage = union(enum) {
     pub inline fn get_transient_storage(self: *Self, address: [20]u8, key: u256) !u256 {
         return switch (self.*) {
             .memory => |*s| s.get_transient_storage(address, key),
-            .test => |*s| s.get_transient_storage(address, key),
+            .@"test" => |*s| s.get_transient_storage(address, key),
             .forked => |*s| s.get_transient_storage(address, key),
         };
     }
@@ -367,7 +367,7 @@ pub const Storage = union(enum) {
     pub inline fn set_transient_storage(self: *Self, address: [20]u8, key: u256, value: u256) !void {
         return switch (self.*) {
             .memory => |*s| s.set_transient_storage(address, key, value),
-            .test => |*s| s.set_transient_storage(address, key, value),
+            .@"test" => |*s| s.set_transient_storage(address, key, value),
             .forked => |*s| s.set_transient_storage(address, key, value),
         };
     }
@@ -375,7 +375,7 @@ pub const Storage = union(enum) {
     pub inline fn get_code(self: *Self, code_hash: [32]u8) ![]const u8 {
         return switch (self.*) {
             .memory => |*s| s.get_code(code_hash),
-            .test => |*s| s.get_code(code_hash),
+            .@"test" => |*s| s.get_code(code_hash),
             .forked => |*s| s.get_code(code_hash),
         };
     }
@@ -383,7 +383,7 @@ pub const Storage = union(enum) {
     pub inline fn get_code_by_address(self: *Self, address: [20]u8) ![]const u8 {
         return switch (self.*) {
             .memory => |*s| s.get_code_by_address(address),
-            .test => |*s| s.get_code_by_address(address),
+            .@"test" => |*s| s.get_code_by_address(address),
             .forked => |*s| s.get_code_by_address(address),
         };
     }
@@ -391,7 +391,7 @@ pub const Storage = union(enum) {
     pub inline fn set_code(self: *Self, code: []const u8) ![32]u8 {
         return switch (self.*) {
             .memory => |*s| s.set_code(code),
-            .test => |*s| s.set_code(code),
+            .@"test" => |*s| s.set_code(code),
             .forked => |*s| s.set_code(code),
         };
     }
@@ -399,7 +399,7 @@ pub const Storage = union(enum) {
     pub inline fn get_state_root(self: *Self) ![32]u8 {
         return switch (self.*) {
             .memory => |*s| s.get_state_root(),
-            .test => |*s| s.get_state_root(),
+            .@"test" => |*s| s.get_state_root(),
             .forked => |*s| s.get_state_root(),
         };
     }
@@ -407,7 +407,7 @@ pub const Storage = union(enum) {
     pub inline fn commit_changes(self: *Self) ![32]u8 {
         return switch (self.*) {
             .memory => |*s| s.commit_changes(),
-            .test => |*s| s.commit_changes(),
+            .@"test" => |*s| s.commit_changes(),
             .forked => |*s| s.commit_changes(),
         };
     }
@@ -415,7 +415,7 @@ pub const Storage = union(enum) {
     pub inline fn create_snapshot(self: *Self) !u64 {
         return switch (self.*) {
             .memory => |*s| s.create_snapshot(),
-            .test => |*s| s.create_snapshot(),
+            .@"test" => |*s| s.create_snapshot(),
             .forked => |*s| s.create_snapshot(),
         };
     }
@@ -423,7 +423,7 @@ pub const Storage = union(enum) {
     pub inline fn revert_to_snapshot(self: *Self, snapshot_id: u64) !void {
         return switch (self.*) {
             .memory => |*s| s.revert_to_snapshot(snapshot_id),
-            .test => |*s| s.revert_to_snapshot(snapshot_id),
+            .@"test" => |*s| s.revert_to_snapshot(snapshot_id),
             .forked => |*s| s.revert_to_snapshot(snapshot_id),
         };
     }
@@ -431,7 +431,7 @@ pub const Storage = union(enum) {
     pub inline fn commit_snapshot(self: *Self, snapshot_id: u64) !void {
         return switch (self.*) {
             .memory => |*s| s.commit_snapshot(snapshot_id),
-            .test => |*s| s.commit_snapshot(snapshot_id),
+            .@"test" => |*s| s.commit_snapshot(snapshot_id),
             .forked => |*s| s.commit_snapshot(snapshot_id),
         };
     }
@@ -439,7 +439,7 @@ pub const Storage = union(enum) {
     pub inline fn begin_batch(self: *Self) !void {
         return switch (self.*) {
             .memory => |*s| s.begin_batch(),
-            .test => |*s| s.begin_batch(),
+            .@"test" => |*s| s.begin_batch(),
             .forked => |*s| s.begin_batch(),
         };
     }
@@ -447,7 +447,7 @@ pub const Storage = union(enum) {
     pub inline fn commit_batch(self: *Self) !void {
         return switch (self.*) {
             .memory => |*s| s.commit_batch(),
-            .test => |*s| s.commit_batch(),
+            .@"test" => |*s| s.commit_batch(),
             .forked => |*s| s.commit_batch(),
         };
     }
@@ -455,7 +455,7 @@ pub const Storage = union(enum) {
     pub inline fn rollback_batch(self: *Self) !void {
         return switch (self.*) {
             .memory => |*s| s.rollback_batch(),
-            .test => |*s| s.rollback_batch(),
+            .@"test" => |*s| s.rollback_batch(),
             .forked => |*s| s.rollback_batch(),
         };
     }
@@ -463,7 +463,7 @@ pub const Storage = union(enum) {
     pub fn deinit(self: *Self) void {
         switch (self.*) {
             .memory => |*s| s.deinit(),
-            .test => |*s| s.deinit(),
+            .@"test" => |*s| s.deinit(),
             .forked => |*s| s.deinit(),
         }
     }
@@ -475,9 +475,9 @@ pub fn createMemoryStorage(allocator: std.mem.Allocator) Storage {
 }
 
 pub fn createTestStorage(allocator: std.mem.Allocator) !Storage {
-    var test = TestStorage.init(allocator);
-    try test.seedWithTestData();
-    return .{ .test = test };
+    var test_storage = TestStorage.init(allocator);
+    try test_storage.seedWithTestData();
+    return .{ .@"test" = test_storage };
 }
 
 pub fn createForkedStorage(allocator: std.mem.Allocator, rpc_endpoint: []const u8, fork_block: ?u64) !Storage {
@@ -495,12 +495,12 @@ test "Storage union - memory variant" {
     var storage = createMemoryStorage(allocator);
     defer storage.deinit();
     
-    const addr = [_]u8{0x12} ** 20;
+    const addr = @as([20]u8, @splat(0x12));
     const account = Account{
         .balance = 1000,
         .nonce = 5,
-        .code_hash = [_]u8{0} ** 32,
-        .storage_root = [_]u8{0} ** 32,
+        .code_hash = @as([32]u8, @splat(0)),
+        .storage_root = @as([32]u8, @splat(0)),
     };
     
     // Test account operations through union
@@ -531,7 +531,7 @@ test "Storage union - test variant" {
     defer storage.deinit();
     
     // Test storage should have seeded data
-    const test_addr = [_]u8{0x01} ** 20;
+    const test_addr = @as([20]u8, @splat(0x01));
     try testing.expect(storage.account_exists(test_addr));
     try testing.expectEqual(@as(u256, 1_000_000), try storage.get_balance(test_addr));
     
@@ -541,7 +541,7 @@ test "Storage union - test variant" {
     
     // Test deterministic state root
     const root = try storage.get_state_root();
-    try testing.expectEqual([_]u8{0xDE, 0xAD} ** 16, root);
+    try testing.expectEqual(@as([32]u8, @bitCast(@as([16][2]u8, @splat([_]u8{0xDE, 0xAD})))), root);
 }
 
 test "TestStorage - operations" {
@@ -552,9 +552,9 @@ test "TestStorage - operations" {
     try test_storage.seedWithTestData();
     
     // Verify seeded accounts
-    const addr1 = [_]u8{0x01} ** 20;
-    const addr2 = [_]u8{0x02} ** 20;
-    const addr3 = [_]u8{0x03} ** 20;
+    const addr1 = @as([20]u8, @splat(0x01));
+    const addr2 = @as([20]u8, @splat(0x02));
+    const addr3 = @as([20]u8, @splat(0x03));
     
     try testing.expectEqual(@as(u256, 1_000_000), try test_storage.get_balance(addr1));
     try testing.expectEqual(@as(u256, 2_000_000), try test_storage.get_balance(addr2));
@@ -584,12 +584,12 @@ test "Storage polymorphism - same API" {
     for (&storages) |*storage| {
         defer storage.deinit();
         
-        const addr = [_]u8{0xFF} ** 20;
+        const addr = @as([20]u8, @splat(0xFF));
         const account = Account{
             .balance = 5000,
             .nonce = 10,
-            .code_hash = [_]u8{0} ** 32,
-            .storage_root = [_]u8{0} ** 32,
+            .code_hash = @as([32]u8, @splat(0)),
+            .storage_root = @as([32]u8, @splat(0)),
         };
         
         // All variants support the same operations

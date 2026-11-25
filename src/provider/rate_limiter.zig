@@ -23,7 +23,7 @@ pub const RateLimiter = struct {
     last_refill: i128,
 
     /// Mutex for thread-safe access
-    mutex: std.Thread.Mutex,
+    mutex: std.Io.Mutex,
 
     /// Configuration for rate limiter
     pub const Config = struct {
@@ -53,15 +53,15 @@ pub const RateLimiter = struct {
             .tokens_per_second = config.tokens_per_second,
             .current_tokens = config.max_tokens,
             .last_refill = std.time.nanoTimestamp(),
-            .mutex = std.Thread.Mutex{},
+            .mutex = .init,
         };
     }
 
     /// Try to acquire a token without blocking
     /// Returns true if token was acquired, false if rate limit would be exceeded
     pub fn tryAcquire(self: *RateLimiter) bool {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        std.Io.Threaded.mutexLockUncancelable(&self.mutex);
+        defer std.Io.Threaded.mutexUnlock(&self.mutex);
 
         self.refillTokens();
 
@@ -117,8 +117,8 @@ pub const RateLimiter = struct {
 
     /// Reset the rate limiter to full capacity
     pub fn reset(self: *RateLimiter) void {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        std.Io.Threaded.mutexLockUncancelable(&self.mutex);
+        defer std.Io.Threaded.mutexUnlock(&self.mutex);
 
         self.current_tokens = self.max_tokens;
         self.last_refill = std.time.nanoTimestamp();
@@ -126,8 +126,8 @@ pub const RateLimiter = struct {
 
     /// Get current available tokens (for testing/monitoring)
     pub fn getAvailableTokens(self: *RateLimiter) u64 {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        std.Io.Threaded.mutexLockUncancelable(&self.mutex);
+        defer std.Io.Threaded.mutexUnlock(&self.mutex);
 
         self.refillTokens();
         return self.current_tokens;

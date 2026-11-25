@@ -187,7 +187,7 @@ test "Precompiles C API: ModExp (0x05)" {
 
 test "Precompiles C API: ECAdd (0x06)" {
     // Test point addition on elliptic curve (simplified test with zero points)
-    const input_data = [_]u8{0} ** 128; // Two zero points (64 bytes each)
+    const input_data = @as([128]u8, @splat(0)); // Two zero points (64 bytes each)
     
     var output: [64]u8 = undefined;
     var output_len: u32 = 0;
@@ -205,7 +205,7 @@ test "Precompiles C API: ECAdd (0x06)" {
 
 test "Precompiles C API: ECMul (0x07)" {
     // Test point multiplication (simplified test with zero point)
-    const input_data = [_]u8{0} ** 96; // Zero point (64 bytes) + scalar (32 bytes)
+    const input_data = @as([96]u8, @splat(0)); // Zero point (64 bytes) + scalar (32 bytes)
     
     var output: [64]u8 = undefined;
     var output_len: u32 = 0;
@@ -274,7 +274,7 @@ test "Precompiles C API: Blake2f (0x09)" {
 
 test "Precompiles C API: Point Evaluation (0x0A)" {
     // Test KZG point evaluation (simplified test)
-    const input_data = [_]u8{0} ** 192; // 192 bytes of zero data
+    const input_data = @as([192]u8, @splat(0)); // 192 bytes of zero data
     
     var output: [64]u8 = undefined;
     var output_len: u32 = 0;
@@ -387,7 +387,7 @@ test "Precompiles C API: Edge cases" {
     try testing.expect(gas_cost > 0);
     
     // Test large input for SHA256
-    const large_input = [_]u8{0xAB} ** 1000;
+    const large_input = @as([1000]u8, @splat(0xAB));
     const sha256_result = precompiles_c.evm_precompiles_sha256(
         &large_input, large_input.len, &output, output.len, &output_len, &gas_cost
     );

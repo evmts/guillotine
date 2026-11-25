@@ -43,7 +43,7 @@ test "integration: constant folding executes correctly" {
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 0,
         .blob_base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
         .blob_versioned_hashes = &.{},
     };
     
@@ -75,7 +75,7 @@ test "integration: constant folding executes correctly" {
     try testing.expectEqual(@as(usize, 32), result.output.len);
 
     // Check the returned value is 8
-    var expected = [_]u8{0} ** 32;
+    var expected = @as([32]u8, @splat(0));
     expected[31] = 8;
     try testing.expectEqualSlices(u8, &expected, result.output);
 
@@ -118,7 +118,7 @@ test "integration: multi-PUSH executes correctly" {
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 0,
         .blob_base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
         .blob_versioned_hashes = &.{},
     };
     
@@ -147,7 +147,7 @@ test "integration: multi-PUSH executes correctly" {
     try testing.expect(result.success);
     try testing.expectEqual(@as(usize, 32), result.output.len);
 
-    var expected = [_]u8{0} ** 32;
+    var expected = @as([32]u8, @splat(0));
     expected[31] = 8;
     try testing.expectEqualSlices(u8, &expected, result.output);
 
@@ -195,7 +195,7 @@ test "integration: multi-POP executes correctly" {
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 0,
         .blob_base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
         .blob_versioned_hashes = &.{},
     };
     
@@ -224,7 +224,7 @@ test "integration: multi-POP executes correctly" {
     try testing.expect(result.success);
     try testing.expectEqual(@as(usize, 32), result.output.len);
 
-    var expected = [_]u8{0} ** 32;
+    var expected = @as([32]u8, @splat(0));
     expected[31] = 30;
     try testing.expectEqualSlices(u8, &expected, result.output);
 
@@ -281,7 +281,7 @@ test "integration: ISZERO-JUMPI fusion executes correctly" {
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 0,
         .blob_base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
         .blob_versioned_hashes = &.{},
     };
     
@@ -310,7 +310,7 @@ test "integration: ISZERO-JUMPI fusion executes correctly" {
     try testing.expect(result.success);
     try testing.expectEqual(@as(usize, 32), result.output.len);
 
-    var expected = [_]u8{0} ** 32;
+    var expected = @as([32]u8, @splat(0));
     expected[31] = 42;
     try testing.expectEqualSlices(u8, &expected, result.output);
 
@@ -353,7 +353,7 @@ test "integration: complex pattern with SHL executes correctly" {
         .coinbase = primitives.ZERO_ADDRESS,
         .base_fee = 0,
         .blob_base_fee = 0,
-        .prev_randao = [_]u8{0} ** 32,
+        .prev_randao = @as([32]u8, @splat(0)),
         .blob_versioned_hashes = &.{},
     };
     
@@ -383,7 +383,7 @@ test "integration: complex pattern with SHL executes correctly" {
     try testing.expectEqual(@as(usize, 32), result.output.len);
 
     // The expected value is 2^256 - 12 in little-endian format
-    var expected = [_]u8{0xFF} ** 32;
+    var expected = @as([32]u8, @splat(0xFF));
     expected[31] = 0xF4; // -12 in two's complement = 0xFFFFFFF...FF4
     try testing.expectEqualSlices(u8, &expected, result.output);
 

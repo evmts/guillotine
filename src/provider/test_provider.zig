@@ -39,7 +39,6 @@ test "parse hex numbers" {
 }
 
 test "getCode - empty code returns empty array" {
-    const allocator = std.testing.allocator;
 
     const mockResponse = "\"0x\"";
     const trimmed = std.mem.trim(u8, mockResponse, "\"");
@@ -198,7 +197,7 @@ test "getBlockNumber - parsing" {
 test "address - hex formatting" {
     const allocator = std.testing.allocator;
 
-    var addr = Address{ .bytes = [_]u8{0} ** 20 };
+    var addr = Address{ .bytes = @as([20]u8, @splat(0)) };
     addr.bytes[19] = 0x42;
 
     const addrHex = try std.fmt.allocPrint(allocator, "0x{s}", .{std.fmt.fmtSliceHexLower(&addr.bytes)});

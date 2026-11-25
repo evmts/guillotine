@@ -49,7 +49,7 @@ test "SnailShellBenchmark EVM execution" {
         0, // value
         10000000, // gas
         bytecode, // code
-        [_]u8{0} ** 32, // code_hash
+        @as([32]u8, @splat(0)), // code_hash
         &.{}, // input
         false, // is_static
     );

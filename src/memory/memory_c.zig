@@ -543,7 +543,7 @@ pub export fn evm_memory_test_basic() c_int {
     if (byte != 0x42) return -4;
     
     // Test u256 write/read
-    const test_value = [_]u8{0xFF} ** 32;
+    const test_value = @as([32]u8, @splat(0xFF));
     if (evm_memory_write_u256(handle, 200, &test_value) != EVM_MEMORY_SUCCESS) return -5;
     
     var read_value: [32]u8 = undefined;

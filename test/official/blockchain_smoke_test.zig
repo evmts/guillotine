@@ -36,7 +36,7 @@ fn parseBytesHex(allocator: std.mem.Allocator, s: []const u8) ![]u8 {
 fn parseHash32(s: []const u8) ![32]u8 {
     const hex = primitives.Hex;
     const t = std.mem.trim(u8, s, &std.ascii.whitespace);
-    if (t.len == 0 or std.mem.eql(u8, t, "0x")) return [_]u8{0} ** 32;
+    if (t.len == 0 or std.mem.eql(u8, t, "0x")) return @as([32]u8, @splat(0));
     return try hex.hexToBytesFixed(32, t);
 }
 
@@ -75,7 +75,7 @@ fn setPreState(allocator: std.mem.Allocator, db: *Database, pre_obj: std.json.Va
             .balance = balance,
             .nonce = nonce,
             .code_hash = code_hash,
-            .storage_root = [_]u8{0} ** 32,
+            .storage_root = @as([32]u8, @splat(0)),
         };
 
         if (acc.get("storage")) |storage_val| {
@@ -214,7 +214,7 @@ fn runBlockchainCase(allocator: std.mem.Allocator, json_path: []const u8) !void 
             .gas_limit = b_gas_limit,
             .coinbase = b_coinbase,
             .base_fee = b_base_fee,
-            .prev_randao = [_]u8{0} ** 32,
+            .prev_randao = @as([32]u8, @splat(0)),
             .blob_base_fee = 0,
             .blob_versioned_hashes = &.{},
         };

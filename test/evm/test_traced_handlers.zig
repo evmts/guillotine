@@ -52,7 +52,7 @@ test "traced handlers are called" {
             .gas_limit = 30_000_000,
             .coinbase = Address.ZERO,
             .base_fee = 0,
-            .prev_randao = [_]u8{0} ** 32,
+            .prev_randao = @as([32]u8, @splat(0)),
             .blob_base_fee = 0,
             .blob_versioned_hashes = &.{},
         }, // block_info
@@ -107,7 +107,7 @@ test "non-traced handlers work without tracer" {
             .gas_limit = 30_000_000,
             .coinbase = Address.ZERO,
             .base_fee = 0,
-            .prev_randao = [_]u8{0} ** 32,
+            .prev_randao = @as([32]u8, @splat(0)),
             .blob_base_fee = 0,
             .blob_versioned_hashes = &.{},
         }, // block_info
