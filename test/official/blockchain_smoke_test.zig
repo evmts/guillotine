@@ -149,15 +149,17 @@ fn expectPostState(db: *Database, post_state_obj: std.json.Value) !void {
     }
 }
 
-fn isStrict() bool {
-    const env = std.process.getEnvVarOwned(std.testing.allocator, "OFFICIAL_STRICT") catch return false;
+fn isStrict() !bool {
+    const env = std.testing.environ.getAlloc(std.testing.allocator, "OFFICIAL_STRICT") catch |err| switch (err) {
+        error.EnvironmentVariableMissing => return false,
+        else => return err,
+    };
     defer std.testing.allocator.free(env);
     return std.mem.eql(u8, env, "1") or std.mem.eql(u8, env, "true") or std.mem.eql(u8, env, "TRUE");
 }
 
 fn runBlockchainCase(allocator: std.mem.Allocator, json_path: []const u8) !void {
-    var cwd = std.fs.cwd();
-    const data = try cwd.readFileAlloc(allocator, json_path, 64 * 1024 * 1024);
+    const data = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, json_path, allocator, .limited(64 * 1024 * 1024));
     defer allocator.free(data);
 
     var parsed = try std.json.parseFromSlice(std.json.Value, allocator, data, .{ .ignore_unknown_fields = true });
@@ -254,7 +256,7 @@ fn runBlockchainCase(allocator: std.mem.Allocator, json_path: []const u8) !void 
         }
     }
 
-    if (isStrict()) {
+    if (try isStrict()) {
         try expectPostState(&db, tc.get("postState").?);
     }
 }
@@ -262,10 +264,10 @@ fn runBlockchainCase(allocator: std.mem.Allocator, json_path: []const u8) !void 
 test "official: blockchain test smoke (self_destructing_initcode single)" {
     const alloc = std.testing.allocator;
     const default_path = "test/official/fixtures/blockchain_tests/cancun/eip6780_selfdestruct/selfdestruct/self_destructing_initcode.json";
-    if (std.process.getEnvVarOwned(alloc, "OFFICIAL_JSON")) |p| {
-        defer alloc.free(p);
-        try runBlockchainCase(alloc, p);
-    } else |_| {
-        try runBlockchainCase(alloc, default_path);
-    }
+    const override = std.testing.environ.getAlloc(alloc, "OFFICIAL_JSON") catch |err| switch (err) {
+        error.EnvironmentVariableMissing => null,
+        else => return err,
+    };
+    defer if (override) |path| alloc.free(path);
+    try runBlockchainCase(alloc, override orelse default_path);
 }

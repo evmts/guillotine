@@ -460,7 +460,12 @@ fn editAccount(instance: anytype, address: [20]u8, edit: AccountEdit) !void {
     switch (edit) {
         .balance => |b| account.balance = b,
         .nonce => |n| account.nonce = n,
-        .code => |c| account.code_hash = try instance.database.set_code(c),
+        .code => |c| {
+            // New code replaces any EIP-7702 delegation. `set_account` restores one
+            // when `c` is itself a designator.
+            account.delegated_address = null;
+            account.code_hash = try instance.database.set_code(c);
+        },
     }
     try instance.database.set_account(address, account);
     // Track the address so guillotine_dump_state reports it.
@@ -533,9 +538,15 @@ export fn guillotine_get_balance(handle: ?*EvmHandle, address: ?*const [20]u8, b
 
 /// Code stored under `address` itself: for an EIP-7702 delegated account that is the
 /// 23-byte delegation designator, not the delegate's code. Accounts that do not exist
-/// or have no code have empty code.
-fn storedCode(instance: anytype, address: [20]u8) Database.Error![]const u8 {
+/// or have no code have empty code. The database stores a delegated account as
+/// `delegated_address` without a code hash, so the designator is rebuilt in
+/// `designator`, which the result then points into.
+fn storedCode(instance: anytype, address: [20]u8, designator: *[evm.eips.DELEGATION_DESIGNATOR_LENGTH]u8) Database.Error![]const u8 {
     const account = try instance.database.get_account(address) orelse return &.{};
+    if (account.get_effective_code_address()) |delegate| {
+        designator.* = evm.eips.DELEGATION_PREFIX ++ delegate.bytes;
+        return designator;
+    }
     if (!Account.is_code_hash_present(account.code_hash)) return &.{};
     return instance.database.get_code(account.code_hash);
 }
@@ -556,8 +567,9 @@ export fn guillotine_get_code(handle: ?*EvmHandle, address: ?*const [20]u8, code
         setError("len_out is NULL", .{});
         return false;
     };
+    var designator: [evm.eips.DELEGATION_DESIGNATOR_LENGTH]u8 = undefined;
     const code: []const u8 = switch (box.*) {
-        inline else => |instance| storedCode(instance, addr.*),
+        inline else => |instance| storedCode(instance, addr.*, &designator),
     } catch |err| {
         setError("Failed to get code: {s}", .{@errorName(err)});
         return false;

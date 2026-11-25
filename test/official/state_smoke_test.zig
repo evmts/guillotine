@@ -154,15 +154,17 @@ fn expectPostState(db: *Database, post_state_obj: std.json.Value) !void {
     }
 }
 
-fn isStrict() bool {
-    const env = std.process.getEnvVarOwned(std.testing.allocator, "OFFICIAL_STRICT") catch return false;
+fn isStrict() !bool {
+    const env = std.testing.environ.getAlloc(std.testing.allocator, "OFFICIAL_STRICT") catch |err| switch (err) {
+        error.EnvironmentVariableMissing => return false,
+        else => return err,
+    };
     defer std.testing.allocator.free(env);
     return std.mem.eql(u8, env, "1") or std.mem.eql(u8, env, "true") or std.mem.eql(u8, env, "TRUE");
 }
 
 fn runSingleStateCase(allocator: std.mem.Allocator, json_path: []const u8) !void {
-    var cwd = std.fs.cwd();
-    const data = try cwd.readFileAlloc(allocator, json_path, 20 * 1024 * 1024);
+    const data = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, json_path, allocator, .limited(20 * 1024 * 1024));
     defer allocator.free(data);
 
     var parsed = try std.json.parseFromSlice(std.json.Value, allocator, data, .{ .ignore_unknown_fields = true });
@@ -275,7 +277,7 @@ fn runSingleStateCase(allocator: std.mem.Allocator, json_path: []const u8) !void
     try applyGasAccounting(&db, sender, coinbase, gas_used, gas_price, base_fee);
 
     // Verify post state (strict mode only). By default we only execute successfully.
-    if (isStrict()) {
+    if (try isStrict()) {
         try expectPostState(&db, post_entry.get("state").?);
     }
 }
@@ -284,12 +286,12 @@ test "official: state test smoke (create_opcode_initcode first case)" {
     const alloc = std.testing.allocator;
     // Allow overriding the JSON path via OFFICIAL_JSON (for local experimentation)
     const default_path = "test/official/fixtures/state_tests/shanghai/eip3860_initcode/initcode/create_opcode_initcode.json";
-    if (std.process.getEnvVarOwned(alloc, "OFFICIAL_JSON")) |p| {
-        defer alloc.free(p);
-        try runSingleStateCase(alloc, p);
-    } else |_| {
-        try runSingleStateCase(alloc, default_path);
-    }
+    const override = std.testing.environ.getAlloc(alloc, "OFFICIAL_JSON") catch |err| switch (err) {
+        error.EnvironmentVariableMissing => null,
+        else => return err,
+    };
+    defer if (override) |path| alloc.free(path);
+    try runSingleStateCase(alloc, override orelse default_path);
 }
 
 test "official: fixed hash helper validates width and decodes current Hex API" {

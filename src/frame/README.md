@@ -52,7 +52,6 @@ pub fn Frame(comptime config: FrameConfig) type {
         output: []u8,                           // 16B - Output data slice
         code: []const u8,                       // 16B - Contract code
         u256_constants: []const WordType,       // 16B - Dispatch constants
-        authorized_address: ?Address,           // 21B - EIP-3074 auth
         jump_table: *const JumpTable,           // 8B - Jump validation
     };
 }

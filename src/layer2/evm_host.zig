@@ -117,11 +117,11 @@ pub const Host = struct {
     }
 
     /// Open a database snapshot: O(1), no copy of state. Refused while any snapshot
-    /// other than this host's own is open, or a transaction cache or ephemeral view
-    /// is active: a rollback here would undo, or be undone by, that work.
+    /// other than this host's own is open, or an ephemeral view is active: a
+    /// rollback here would undo, or be undone by, that work.
     pub fn checkpoint(self: *Host) !Token {
         const db = self.database;
-        if (db.tx_cache != null or db.overlay_active or !self.ownsSnapshots()) return error.DatabaseBusy;
+        if (db.overlay_active or !self.ownsSnapshots()) return error.DatabaseBusy;
         try self.saved.ensureUnusedCapacity(self.allocator, 1);
         const id = try db.create_snapshot();
         self.saved.appendAssumeCapacity(id);

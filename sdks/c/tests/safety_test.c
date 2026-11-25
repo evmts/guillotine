@@ -950,6 +950,11 @@ static void test_get_code_returns_stored_code(void) {
     CHECK(guillotine_get_code(evm, CALLER_B, &code, &len));
     CHECK(len == sizeof designator && code != NULL && memcmp(code, designator, len) == 0);
     guillotine_free_code(code, len);
+    /* Empty code clears the delegation. */
+    CHECK(guillotine_set_code(evm, CALLER_B, NULL, 0));
+    CHECK(guillotine_get_code(evm, CALLER_B, &code, &len));
+    CHECK(len == 0);
+    guillotine_free_code(code, len);
     CHECK(guillotine_get_code(evm, CALLER_A, &code, &len));
     CHECK(len == 0);
     guillotine_free_code(code, len);

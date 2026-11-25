@@ -162,7 +162,6 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
         calldata_slice: []const u8, // 16B - Only for CALLDATALOAD/COPY (per-call, cannot cache)
         // TODO: We should be able to remove this in favor of storing pointer as metadata
         code: []const u8 = &[_]u8{}, // 16B - Only for CODESIZE/CODECOPY
-        authorized_address: ?Address = null, // 21B - EIP-3074 (per-call auth, cannot cache)
         // TODO: We should be able to remove this in favor of storing pointer as metadata
         jump_table: *const Dispatch.JumpTable, // 8B - Jump table for JUMP/JUMPI
         dispatch: Dispatch, // 16B
@@ -215,7 +214,6 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
                 .value = value,
                 .calldata_slice = calldata_input,
                 .code = &[_]u8{}, // Will be set during interpret
-                .authorized_address = null,
                 .instruction_counter = config.createLoopSafetyCounter().init(config.loop_quota orelse 0),
                 .output_data = &[_]u8{},
             };
@@ -366,7 +364,6 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
                 .value = self.value,
                 .calldata_slice = self.calldata_slice,
                 .code = self.code,
-                .authorized_address = self.authorized_address,
                 .instruction_counter = self.instruction_counter,
                 .output_data = self.output_data,
             };

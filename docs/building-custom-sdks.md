@@ -245,9 +245,10 @@ guillotine_cleanup()                      optional; destroys handles still alive
   handle up before using it and never dereferences an unknown pointer, so NULL,
   foreign, destroyed, and cleaned-up handles return NULL or false with an
   error.
-- The registry detects a stale handle only until the allocator reuses its
-  address for a new handle. Clear your reference after destroy and never
-  destroy a handle you do not own.
+- A handle is a registry token, not an address. Tokens start at 1, only grow,
+  and are never reissued, even across `guillotine_cleanup` and
+  `guillotine_init`, so a destroyed handle never aliases a newer one and every
+  later call with it fails. Destroy only handles you own.
 - Any handle works with every function. The `*_tracing` and `*_test` functions
   are aliases kept for existing callers; the handle's configuration decides
   tracing, not the function name.

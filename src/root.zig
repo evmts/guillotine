@@ -228,7 +228,10 @@ test {
     _ = @import("opcodes/opcode.zig");
     _ = @import("opcodes/opcode_data.zig");
     _ = @import("opcodes/opcode_synthetic.zig");
+    _ = @import("storage/database.zig");
     _ = @import("storage/journal.zig");
+    _ = @import("eips_and_hardforks/validator_deposits.zig");
+    _ = @import("eips_and_hardforks/validator_withdrawals.zig");
     _ = @import("storage/self_destruct.zig");
     _ = @import("storage/state_root.zig");
     _ = @import("storage/access_list_config.zig");

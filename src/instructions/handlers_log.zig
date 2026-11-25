@@ -123,42 +123,14 @@ pub fn Handlers(FrameType: type) type {
                     else
                         &[_]u8{};
 
-                    // Write log directly to EVM using arena allocator
-                    // The log data will be copied to main allocator only at transaction end
-                    const evm = self.getEvm();
-
-                    // Use arena allocator for log data (will be copied to main allocator at transaction end)
-                    const data_copy = if (data.len > 0)
-                        evm.getCallArenaAllocator().dupe(u8, data) catch {
-                            self.afterComplete(unified_opcode);
-                            return Error.AllocationError;
-                        }
-                    else
-                        &[_]u8{};
-
-                    const topics_array = if (topic_count > 0) blk: {
-                        const arr = evm.getCallArenaAllocator().alloc(u256, topic_count) catch {
-                            // No need to free data_copy - arena allocated
-                            self.afterComplete(unified_opcode);
-                            return Error.AllocationError;
-                        };
-                        for (0..topic_count) |j| {
-                            arr[j] = @as(u256, topics[j]);
-                        }
-                        break :blk arr;
-                    } else evm.getCallArenaAllocator().alloc(u256, 0) catch {
-                        // No need to free data_copy - arena allocated
-                        self.afterComplete(unified_opcode);
-                        return Error.AllocationError;
-                    };
-
-                    const log_entry = Log{
-                        .address = self.contract_address,
-                        .topics = topics_array,
-                        .data = data_copy,
-                    };
-                    evm.logs.append(evm.allocator, log_entry) catch {
-                        // topics_array and data_copy are arena-owned: nothing to free here
+                    // `emit_log` copies the topics and data into the call arena and
+                    // records an allocation failure in `host_failure`: the host ran out
+                    // of memory, so the failure must not decide the transaction.
+                    var topic_words: [4]u256 = @as([4]u256, @splat(0));
+                    for (0..topic_count) |j| {
+                        topic_words[j] = @as(u256, topics[j]);
+                    }
+                    self.getEvm().emit_log(self.contract_address, topic_words[0..topic_count], data) catch {
                         self.afterComplete(unified_opcode);
                         return Error.AllocationError;
                     };

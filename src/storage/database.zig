@@ -122,11 +122,6 @@ pub const Database = struct {
     overlay_active: bool = false,
     /// Overlay accounts. A null value is a tombstone: the account is deleted in the view.
     overlay_accounts: std.HashMap([20]u8, ?Account, ArrayHashContext, std.hash_map.default_max_load_percentage),
-    /// Always null. The transaction cache it pointed to is deleted; no write is
-    /// buffered outside base state and the overlay. The field remains only because
-    /// `src/layer2/evm_host.zig` reads it to refuse a checkpoint. Remove it together
-    /// with that read.
-    tx_cache: ?*const anyopaque = null,
     /// First allocation failure of a write or snapshot since the field was last
     /// cleared. Callers that turn a failed write into something else (an EVM frame
     /// halts on a failed SSTORE) cannot lose it: whoever runs the transaction reads
