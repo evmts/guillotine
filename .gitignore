@@ -194,6 +194,7 @@ lib/*/target/
 .flows/
 .zig-cache/
 zig-out/
+zig-pkg/
 .baseline_*.txt
 profile_results/
 dist/

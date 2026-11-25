@@ -310,8 +310,6 @@ test "EIP-7702: Authorization with wrong chain_id is rejected" {
 // ============================================================================
 
 test "EIP-7702: EOA with delegation executes delegated contract code" {
-    // TODO: Fix execution with delegated code
-    // return error.SkipZigTest; // Temporarily skip to test others
     const allocator = testing.allocator;
     
     var db = evm.Database.init(allocator);
@@ -397,8 +395,6 @@ test "EIP-7702: EOA with delegation executes delegated contract code" {
 }
 
 test "EIP-7702: ADDRESS opcode returns EOA address, not delegated address" {
-    // TODO: Fix ADDRESS opcode behavior
-    // return error.SkipZigTest; // Temporarily skip to test others
     const allocator = testing.allocator;
     
     var db = evm.Database.init(allocator);
@@ -665,8 +661,6 @@ test "EIP-7702: Authorization revocation (nonce = 2^64 - 1)" {
 // ============================================================================
 
 test "EIP-7702: Full transaction execution with authorization list" {
-    // TODO: Full integration test
-    // return error.SkipZigTest; // Temporarily skip to test others
     const allocator = testing.allocator;
     
     // Setup database

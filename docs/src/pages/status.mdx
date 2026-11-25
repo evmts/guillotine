@@ -15,8 +15,11 @@ This page records measured results. Each number names its source.
 ### EEST state tests
 
 `zig build state-tests` runs the official pre-filled Ethereum Execution Spec
-Tests against the `src/` engine. Baseline from `specs/README.md` (2026-11-22,
-`tests@v21.0.3`, ReleaseFast):
+Tests against the `src/` engine.
+
+{/* EEST_RESULTS_START — update this block when new EEST runs land */}
+
+Baseline from `specs/README.md` (2026-11-22, `tests@v21.0.3`, ReleaseFast):
 
 - **66,652** cases executed, Frontier through Osaka
 - **12,500 passing** (18.75%)
@@ -35,17 +38,26 @@ Tests against the `src/` engine. Baseline from `specs/README.md` (2026-11-22,
 Per-fork pass rates run from 9.95% (Istanbul) to 24.35% (SpuriousDragon).
 `specs/README.md` has the per-fork table and how to fetch the fixtures.
 
-### Legacy filler specs
-
-`zig build specs` runs the legacy filler suite. Commit `7501b986` recorded 581
-failures (down from 1031) with no regressions. The repository README's figure of
-1165 passing out of 2251 predates that commit.
-
 :::danger
 An 18.75% pass rate on the official state tests means Guillotine gets most
 cases wrong today. Do not use it to compute anything you rely on (balances, gas
 estimates, state roots) without cross-checking against a mature implementation.
 :::
+
+{/* EEST_RESULTS_END */}
+
+### Legacy filler & Prague specs
+
+`zig build specs` runs the legacy filler suite plus the checked-in Prague EEST cases:
+
+- **2,213 / 2,251 passing (98.31%)**, **38 failing** (down from 1,031 failures → 581 → 38)
+- **100% of checked-in `eest/prague` cases passing** (0 failures)
+- The remaining 38 failures are legacy filler-format limitations in `specs/runner.zig` / `specs/lll.zig` (`:yul` compiler not integrated, `lllc`-specific `CREATE2` initcode hashes, and extended LLL macros) rather than core EVM failures.
+
+### TypeScript SDK (`@tevm/guillotine`)
+
+- **321 / 321 passing** (`bun test`, 30,165 assertions across 15 files including live Bun FFI fuzzing)
+- `bun run build`, `bun run typecheck`, `publint --strict`, and `attw --pack --profile esm-only` all pass.
 
 ## Checks
 
@@ -69,7 +81,18 @@ under `.smithers/tests/`. `.github/workflows/fuzz.yml` runs continuous fuzzing.
 
 ### `zig build test-opcodes`
 
-Commit `815ab72f` recorded 756 of 756 per-opcode differential tests passing.
+Commit `815ab72f` recorded 756 of 756 `zig build test-opcodes` tests passing
+(per-opcode tests plus ModExp, ECRECOVER, and spec-runner unit tests;
+`MinimalEvm` differential tests live in `test/differential/` and run via
+`zig build test-integration`).
+
+### Benchmarks
+
+Commit `815ab72f` and `78dbd431` verified the 16-suite benchmark harness
+(`zig build bench` and `smthrs test //bench:report`), including 42.95 ms
+(5.48 Ggas/s) on `snailtracer` under Prague and 4.63x–7.46x geomean speedups
+across the Osaka suite. See [Benchmarks and native JIT](/guides/benchmarks-and-jit)
+for the full breakdown and methodology.
 
 ### Documentation examples
 
@@ -77,13 +100,11 @@ The examples in [Getting started](/getting-started) were compiled and run with
 `zig build test-integration` against an earlier tree. See
 [Running it](/getting-started#running-it).
 
-### Not run for these docs
+### Not re-run during doc builds
 
-- `zig build test` (specs, integration, unit, and lib tests)
-- `zig build specs` and `zig build state-tests`
+- `zig build test` (full specs + integration + unit + lib sweep)
+- `zig build state-tests` (official 66k EEST fixtures require fetching the ~900 MB archive via `scripts/fetch-eest-fixtures.sh`)
 - `zig build test-lib`
-- Every `sdks/` build
-- Any benchmark
 
 ## Feature support
 
@@ -94,13 +115,16 @@ The examples in [Getting started](/getting-started) were compiled and run with
 | Arbitrum Nitro | Not implemented. Planned for beta. |
 | Hardforks | `Hardfork` spans `FRONTIER` through `AMSTERDAM`; the default is `OSAKA`. `state-tests` covers Frontier through Osaka. |
 | Precompiles | `0x01`–`0x11` and `P256VERIFY` (`0x100`, Osaka) in `lib/voltaire/src/precompiles/` |
-| Native JIT | ARM64 tier in `src/jit/`, opt-in through `EvmConfig.enable_native_jit` (default `false`) |
+| Native JIT | ARM64 tier in `src/jit/`, opt-in through `EvmConfig.enable_native_jit` (default `false`). See [Benchmarks and native JIT](/guides/benchmarks-and-jit#native-arm64-jit). |
+| Benchmarks | 16 ReleaseFast suites (`zig build bench`, `smthrs test //bench:report`) with committed baseline in `bench/baseline.json` |
+| Formal verification | `zig build verify`: LLVM 20 IR equivalence + Bitwuzla/Z3 SMT + Lean 4 proofs (`verify/`) |
 | C ABI | Experimental (`sdks/c/`, `src/evm_c_api.zig`) |
-| TypeScript (`@tevm/guillotine`) | Experimental; Bun only, over the native library |
-| WASM | No root build step for the `src/` engine. guillotine-mini builds with `cd mini && zig build wasm`. |
+| TypeScript (`@tevm/guillotine`) | Experimental; Bun ≥ 1.1 only, Bun FFI over `libguillotine_ffi` |
+| WASM | No root build step for the `src/` engine. For a browser WASM build, use [guillotine-mini](https://github.com/evmts/guillotine-mini). |
 
 ## Following along
 
+- Changelog — [Changelog](/changelog)
 - Issues and beta roadmap — [github.com/evmts/guillotine/issues](https://github.com/evmts/guillotine/issues)
 - Telegram — [chat](https://t.me/+ANThR9bHDLAwMjUx)
 - Spec test instructions — `specs/README.md` in the repository

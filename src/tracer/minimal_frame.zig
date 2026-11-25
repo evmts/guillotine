@@ -2054,11 +2054,26 @@ pub const MinimalFrame = struct {
                 }
                 const beneficiary = Address{ .bytes = addr_bytes };
 
-                const gas_cost = self.selfdestructGasCost();
+                var gas_cost = self.selfdestructGasCost();
+                if (self.hardfork.isAtLeast(.BERLIN)) {
+                    const access_cost = try evm.access_address(beneficiary);
+                    if (access_cost > GasConstants.WarmStorageReadCost) {
+                        gas_cost += access_cost;
+                    }
+                }
+                const contract_balance = evm.get_balance(self.address);
+                if (self.hardfork.isAtLeast(.TANGERINE_WHISTLE)) {
+                    const beneficiary_balance = evm.get_balance(beneficiary);
+                    const beneficiary_nonce = evm.get_nonce(beneficiary);
+                    const beneficiary_code = evm.get_code(beneficiary);
+                    const beneficiary_empty = beneficiary_balance == 0 and beneficiary_nonce == 0 and beneficiary_code.len == 0;
+                    if (beneficiary_empty and (contract_balance > 0 or !self.hardfork.isAtLeast(.SPURIOUS_DRAGON))) {
+                        gas_cost += GasConstants.CALL_NEW_ACCOUNT_COST;
+                    }
+                }
                 try self.consumeGas(gas_cost);
 
                 // Transfer contract balance to beneficiary (evm from outer scope)
-                const contract_balance = evm.get_balance(self.address);
                 if (contract_balance > 0) {
                     const beneficiary_balance = evm.get_balance(beneficiary);
                     // Set contract balance to 0

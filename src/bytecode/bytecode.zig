@@ -166,13 +166,18 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                         const push_size = opcode - 0x5F;
                         var value: u256 = 0;
 
-                        // Read push value using proper endianness
-                        const end_pc = @min(iterator.pc + 1 + push_size, @as(PcType, @intCast(iterator.bytecode.len())));
-                        for (iterator.pc + 1..end_pc) |i| {
+                        // Read push value using proper big-endianness; Yellow Paper pads missing
+                        // trailing immediate bytes past EOF with zero bytes on the right.
+                        const avail_end = @min(iterator.pc + 1 + push_size, @as(PcType, @intCast(iterator.bytecode.len())));
+                        const avail_count = avail_end - (iterator.pc + 1);
+                        for (iterator.pc + 1..avail_end) |i| {
                             value = std.math.shl(u256, value, 8) | iterator.bytecode.get_unsafe(@intCast(i));
                         }
+                        if (avail_count < push_size) {
+                            value = std.math.shl(u256, value, @as(u9, @intCast((push_size - avail_count) * 8)));
+                        }
 
-                        iterator.pc = end_pc;
+                        iterator.pc = avail_end;
                         return OpcodeData{ .push = .{ .value = value, .size = push_size } };
                     },
                     0x5B => { // JUMPDEST
@@ -991,12 +996,9 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
 
                     if (op >= @intFromEnum(Opcode.PUSH1) and op <= @intFromEnum(Opcode.PUSH32)) {
                         const n: usize = op - (@intFromEnum(Opcode.PUSH1) - 1);
-                        const push_end = i + 1 + n;
-                        if (push_end > validate_up_to) {
-                            return error.TruncatedPush;
-                        }
+                        const push_end = @min(i + 1 + n, validate_up_to);
                         if (comptime fusions_enabled) {
-                            if (push_end < validate_up_to) {
+                            if (i + 1 + n < validate_up_to) {
                                 const next_op = code[push_end];
                                 const is_fusable = switch (next_op) {
                                     @intFromEnum(Opcode.ADD), @intFromEnum(Opcode.MUL), @intFromEnum(Opcode.SUB), @intFromEnum(Opcode.DIV), @intFromEnum(Opcode.AND), @intFromEnum(Opcode.OR), @intFromEnum(Opcode.XOR), @intFromEnum(Opcode.JUMP), @intFromEnum(Opcode.JUMPI), @intFromEnum(Opcode.MLOAD), @intFromEnum(Opcode.MSTORE), @intFromEnum(Opcode.MSTORE8) => true,
@@ -1110,23 +1112,26 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                     @intFromEnum(opcode_enum) <= @intFromEnum(Opcode.PUSH32))
                 {
                     const n: PcType = op - (@intFromEnum(Opcode.PUSH1) - 1);
+                    const push_end = @min(i + 1 + n, validate_up_to);
+                    const avail_n = push_end - (i + 1);
 
-                    if (i + 1 + n > validate_up_to) {
+                    if (avail_n < n) {
                         if (tracer) |t| {
-                            t.onTruncatedPush(@intCast(i), @intCast(n), validate_up_to - i - 1);
+                            t.onTruncatedPush(@intCast(i), @intCast(n), avail_n);
                         }
-                        return error.TruncatedPush;
                     }
 
                     var push_value: u256 = 0;
                     if (comptime fusions_enabled) {
                         var byte_idx: PcType = 0;
-                        while (byte_idx < n) : (byte_idx += 1) {
+                        while (byte_idx < avail_n) : (byte_idx += 1) {
                             push_value = std.math.shl(u256, push_value, 8) | self.runtime_code[i + 1 + byte_idx];
+                        }
+                        if (avail_n < n) {
+                            push_value = std.math.shl(u256, push_value, @as(u9, @intCast((n - avail_n) * 8)));
                         }
                     }
 
-                    const push_end = i + 1 + n;
                     @memset(self.packed_bitmap[i + 1 .. push_end], PackedBits{ .is_push_data = true, .is_op_start = false, .is_jumpdest = false, .is_fusion_candidate = false });
 
                     if (comptime fusions_enabled) {
@@ -2386,37 +2391,41 @@ test "Minimal repro - deployment bytecode with apparent truncated PUSH" {
         0x60, // PUSH1 without data - this triggers TruncatedPush
     };
 
-    // This should fail with TruncatedPush because the last byte is PUSH1 without data
-    try testing.expectError(BytecodeDefault.ValidationError.TruncatedPush, BytecodeDefault.init(allocator, &code));
+    // Per Yellow Paper, a truncated PUSH at EOF zero-pads missing trailing bytes.
+    var bc = try BytecodeDefault.init(allocator, &code);
+    defer bc.deinit();
+    try testing.expectEqual(code.len, bc.len());
 }
 
 test "Deployment bytecode - actual ten-thousand-hashes fixture" {
     const allocator = testing.allocator;
 
-    // First 32 bytes of the actual ten-thousand-hashes bytecode that's failing
-    // This is deployment bytecode that ends with what looks like a truncated PUSH
+    // First 32 bytes of the actual ten-thousand-hashes bytecode that ends with a truncated PUSH1
     const code = [_]u8{
         0x60, 0x80, 0x60, 0x40, 0x52, 0x34, 0x80, 0x15,
         0x60, 0x0e, 0x57, 0x5f, 0x5f, 0xfd, 0x5b, 0x50,
         0x60, 0x97, 0x80, 0x60, 0x1a, 0x5f, 0x39, 0x5f,
         0xf3, 0xfe, // RETURN opcode followed by INVALID
         0x60, 0x80, 0x60, 0x40, 0x52, 0x34, // Start of runtime bytecode
-        0x80, 0x15, 0x60, // This ends with 0x60 (PUSH1) without the data byte
+        0x80, 0x15, 0x60, // Ends with 0x60 (PUSH1) — zero-padded to 0x00 per Yellow Paper
     };
 
-    // This should fail because it ends with an incomplete PUSH1
-    try testing.expectError(BytecodeDefault.ValidationError.TruncatedPush, BytecodeDefault.init(allocator, &code));
+    var bc = try BytecodeDefault.init(allocator, &code);
+    defer bc.deinit();
+    try testing.expectEqual(code.len, bc.len());
 }
 
-test "Iterator should not read past truncated PUSH32" {
+test "Iterator should zero-pad truncated PUSH32 without reading out of bounds" {
     const allocator = testing.allocator;
 
-    // PUSH32 with only 31 bytes of data (malformed)
-    // Total: 1 byte opcode + 31 bytes data = 32 bytes (should be 33)
-    var code = [_]u8{0x7F} ++ [_]u8{0x00} ** 31; // PUSH32 (truncated)
-
-    // This should fail validation
-    try testing.expectError(BytecodeDefault.ValidationError.TruncatedPush, BytecodeDefault.init(allocator, &code));
+    // PUSH32 with only 31 bytes of data: Yellow Paper pads the missing final byte with 0x00
+    var code = [_]u8{0x7F} ++ [_]u8{0x00} ** 30 ++ [_]u8{0x01};
+    var bc = try BytecodeDefault.init(allocator, &code);
+    defer bc.deinit();
+    var iter = bc.createIterator();
+    const op = iter.next().?;
+    try testing.expectEqual(@as(u256, 0x0100), op.push.value);
+    try testing.expect(iter.next() == null);
 }
 
 test "Deployment vs Runtime bytecode handling" {

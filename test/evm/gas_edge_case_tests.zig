@@ -328,11 +328,20 @@ test "Memory expansion gas calculation doesn't overflow" {
     var frame = try F.init(allocator, &bytecode, 1_000_000, void{}, host);
     defer frame.deinit(allocator);
     
-    // Test memory expansion with large offsets
-    // memory.expansion_cost no longer public; skip this specific check pending migration
-    return error.SkipZigTest;
-    
-    // pending migration checks removed to avoid unreachable code
+    // Test memory expansion cost across growing offsets without overflow
+    const cost_32 = frame.memory.get_expansion_cost(32);
+    try std.testing.expectEqual(@as(u64, 3), cost_32);
+
+    const cost_1024 = frame.memory.get_expansion_cost(1024);
+    // 32 words: 3*32 + (32*32)/512 = 96 + 2 = 98
+    try std.testing.expectEqual(@as(u64, 98), cost_1024);
+
+    // Near u24/16MB limit: 524288 words -> 3*524288 + (524288^2)/512 = 1_572_864 + 536_870_912 = 538_443_776
+    const cost_16mb = frame.memory.get_expansion_cost(16 * 1024 * 1024);
+    try std.testing.expectEqual(@as(u64, 538_443_776), cost_16mb);
+
+    // Zero or already-covered size costs 0
+    try std.testing.expectEqual(@as(u64, 0), frame.memory.get_expansion_cost(0));
 }
 
 // ============================================================================

@@ -34,14 +34,7 @@ pub fn Handlers(FrameType: type) type {
             const offset = self.stack.pop_unsafe(); // Top of stack is offset
             const size = self.stack.pop_unsafe(); // Second is size
 
-            // Check bounds
-            if (offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
-                @branchHint(.unlikely);
-                self.afterComplete(.KECCAK256);
-                return Error.OutOfBounds;
-            }
-
-            // Handle empty data case
+            // Handle empty data case first: EVM ignores offset when size == 0.
             if (size == 0) {
                 @branchHint(.unlikely);
                 // Empty input costs only the 30 gas base, which the basic block
@@ -72,6 +65,13 @@ pub fn Handlers(FrameType: type) type {
                 };
                 self.stack.push_unsafe(empty_hash);
                 return dispatch_next.nextInstruction(FrameType, self, cursor, .KECCAK256);
+            }
+
+            // Check bounds (only for non-zero size)
+            if (offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
+                @branchHint(.unlikely);
+                self.afterComplete(.KECCAK256);
+                return Error.OutOfBounds;
             }
 
             const offset_usize = @as(usize, @intCast(offset));

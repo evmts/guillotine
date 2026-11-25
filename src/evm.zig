@@ -119,8 +119,8 @@ pub fn Evm(config: EvmConfig) type {
         // Cache line 1 - EXECUTION CONTROL: Accessed frequently during execution
         /// Current call depth (0 = root call) - tracks active stack depth
         depth: u11, // Supports up to 2048 depth, more than EVM's 1024 limit
-        /// Call stack - tracks caller and value for each call depth
-        call_stack: [config.max_call_depth]CallStackEntry,
+        /// Call stack - tracks caller and value for each call depth (depths 0..max_call_depth inclusive)
+        call_stack: [config.max_call_depth + 1]CallStackEntry,
         /// Current return data from last call (empty if no return data available)
         return_data: std.ArrayList(u8),
         /// Allocator for dynamic memory
@@ -220,7 +220,7 @@ pub fn Evm(config: EvmConfig) type {
 
             var self = Self{
                 .depth = 0,
-                .call_stack = [_]CallStackEntry{empty_call_stack_entry} ** config.max_call_depth,
+                .call_stack = [_]CallStackEntry{empty_call_stack_entry} ** (config.max_call_depth + 1),
                 .return_data = .{},
                 .allocator = allocator,
                 .database = database orelse return error.DatabaseRequired,
@@ -870,6 +870,21 @@ pub fn Evm(config: EvmConfig) type {
                 return result;
             };
 
+            // Finalize end-of-transaction account destructions (storage + account deletion).
+            // Balance transfers already happened immediately inside SELFDESTRUCT.
+            for (result.selfdestructs) |sd| {
+                self.database.clear_account_storage(sd.contract.bytes) catch |err| {
+                    log.err("Failed to clear selfdestructed storage: {s}", .{@errorName(err)});
+                    result.success = false;
+                    return result;
+                };
+                self.database.delete_account(sd.contract.bytes) catch |err| {
+                    log.err("Failed to delete selfdestructed account: {s}", .{@errorName(err)});
+                    result.success = false;
+                    return result;
+                };
+            }
+
             // Extract access list data before clearing
             result.accessed_addresses = self.allocator.dupe(primitives.Address, self.access_list.addresses.keys()) catch {
                 log.debug("Out of memory allocating accessed_addresses", .{});
@@ -901,26 +916,22 @@ pub fn Evm(config: EvmConfig) type {
                 };
             }
 
-            if (!config.disable_gas_checks) {
-                if (params.getGas() == 0) {
-                    self.clear_return_data();
-                    return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
-                }
-            }
+            // Note: calling an empty account / EOA / STOP-only contract with 0 gas is valid in EVM
+            // and succeeds; non-empty code that needs gas fails naturally with OutOfGas inside execute_frame.
 
-            // depth is incremented solely by execute_frame (CALL variants) and the create paths;
-            // inner_call must NOT increment it again or every nesting level would advance depth
-            // by 2 (halving the 1024 limit) and leave a call_stack gap that corrupts parent
-            // caller/value/is_static lookups. The check uses the parent depth: a frame already
-            // at the limit cannot push another. (Deep recursion is safe: execute_frame hops
-            // onto a large-stack worker thread at LARGE_STACK_DEPTH.)
-            if (self.depth >= config.max_call_depth) {
+            // depth is 1-based inside execute_frame_impl (1 = Yellow Paper depth 0,
+            // 1024 = Yellow Paper depth 1023, 1025 = Yellow Paper depth 1024).
+            // Per Yellow Paper / execution-specs (`evm.message.depth + 1 > 1024`), a frame
+            // at depth 1023 (`self.depth == 1024`) may still invoke a child at depth 1024
+            // (`self.depth == 1025`); only a frame already at depth 1024 (`self.depth > 1024`)
+            // is refused. On depth refusal, calls return all forwarded gas and creations
+            // keep only the upfront CREATE/CREATE2 charge spent and return the rest.
+            if (self.depth > config.max_call_depth) {
                 self.clear_return_data();
-                // execution-specs `generic_call`: past the depth limit a message call returns
-                // its whole sub-call gas. Creations keep their existing accounting.
                 const refund: u64 = switch (params) {
                     .call, .callcode, .delegatecall, .staticcall => params.getGas(),
-                    .create, .create2 => 0,
+                    .create => |p| params.getGas() -| create_opcode_charge(p.init_code.len, false),
+                    .create2 => |p| params.getGas() -| create_opcode_charge(p.init_code.len, true),
                 };
                 return CallResult.failure(self.getCallArenaAllocator(), refund) catch unreachable;
             }
@@ -1514,7 +1525,7 @@ pub fn Evm(config: EvmConfig) type {
             };
 
             result.gas_left += retained;
-            result.created_address = contract_address;
+            result.created_address = if (result.success) contract_address else null;
             return result;
         }
 
@@ -1527,9 +1538,10 @@ pub fn Evm(config: EvmConfig) type {
             gas: u64,
         }) !CallResult {
             log.debug("CREATE2: gas={}, init_len={}, value={}", .{ params.gas, params.init_code.len, params.value });
-            if (self.depth >= config.max_call_depth) {
+            if (self.depth > config.max_call_depth) {
                 log.debug("CREATE2: depth exceeded", .{});
-                return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+                const refund = params.gas -| create_opcode_charge(params.init_code.len, true);
+                return CallResult.failure(self.getCallArenaAllocator(), refund) catch unreachable;
             }
 
             const is_transaction = self.takeTransactionCreate(params.caller);
@@ -1603,7 +1615,7 @@ pub fn Evm(config: EvmConfig) type {
             };
 
             result.gas_left += retained;
-            result.created_address = contract_address;
+            result.created_address = if (result.success) contract_address else null;
             return result;
         }
 
@@ -1619,6 +1631,24 @@ pub fn Evm(config: EvmConfig) type {
             existed_before: bool,
         }) !CallResult {
             try self.created_contracts.mark_created(args.contract_address);
+            // EIP-161 (Spurious Dragon+): initialize new contract nonce to 1 BEFORE
+            // executing initcode so nested CREATEs start at nonce 1; pre-Spurious Dragon
+            // contracts start at nonce 0.
+            var initial_account = self.database.get_account(args.contract_address.bytes) catch {
+                try self.revertFrame(args.snapshot_id, args.db_snapshot_id, args.checkpoint);
+                return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+            } orelse Account.zero();
+            if (!args.existed_before) {
+                try self.journal.record_account_created(args.snapshot_id, args.contract_address);
+            }
+            if (config.eips.hardfork.isAtLeast(.SPURIOUS_DRAGON) and initial_account.nonce == 0) {
+                try self.journal.record_nonce_change(args.snapshot_id, args.contract_address, initial_account.nonce);
+                initial_account.nonce = 1;
+            }
+            self.database.set_account(args.contract_address.bytes, initial_account) catch {
+                try self.revertFrame(args.snapshot_id, args.db_snapshot_id, args.checkpoint);
+                return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
+            };
             if (args.value > 0) {
                 self.transferWithBalanceChecks(args.caller, args.contract_address, args.value, args.snapshot_id) catch {
                     try self.revertFrame(args.snapshot_id, args.db_snapshot_id, args.checkpoint);
@@ -1629,6 +1659,8 @@ pub fn Evm(config: EvmConfig) type {
                 args.init_code,
                 args.gas_left,
                 args.contract_address,
+                args.caller,
+                args.value,
                 args.snapshot_id,
             ) catch |err| {
                 log.debug("execute_init_code failed with error: {}", .{err});
@@ -1644,13 +1676,6 @@ pub fn Evm(config: EvmConfig) type {
                 try self.revertFrame(args.snapshot_id, args.db_snapshot_id, args.checkpoint);
                 return CallResult.failure(self.getCallArenaAllocator(), 0) catch unreachable;
             } orelse Account.zero();
-            if (!args.existed_before) {
-                try self.journal.record_account_created(args.snapshot_id, args.contract_address);
-            }
-            if (contract_account.nonce != 1) {
-                try self.journal.record_nonce_change(args.snapshot_id, args.contract_address, contract_account.nonce);
-                contract_account.nonce = 1;
-            }
             if (result.output.len > 0) {
                 // EIP-3541: Reject new contract code starting with the 0xEF byte
                 if (config.eips.eip_3541_should_reject_create_with_ef_bytecode(result.output)) {
@@ -2062,6 +2087,8 @@ pub fn Evm(config: EvmConfig) type {
             code: []const u8,
             gas: u64,
             address: primitives.Address,
+            caller: primitives.Address,
+            value: u256,
             snapshot_id: Journal.SnapshotIdType,
         ) !CallResult {
             if (code.len > config.eips.size_limit()) {
@@ -2073,8 +2100,8 @@ pub fn Evm(config: EvmConfig) type {
                 &.{},
                 gas,
                 address,
-                address,
-                0,
+                caller,
+                value,
                 false,
                 snapshot_id,
                 null, // initcode is never cached

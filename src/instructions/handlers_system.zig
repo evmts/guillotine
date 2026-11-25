@@ -39,60 +39,47 @@ pub fn Handlers(FrameType: type) type {
 
             const addr = address_utils.fromWord(WordType,address_u256);
 
-            if (gas_param > std.math.maxInt(u64)) {
-                (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "Stack must have space for push");
-                self.stack.push_unsafe(0);
-                const op_data = dispatch.getOpData(.CALL);
-                self.afterInstruction(.CALL, op_data.next_handler, op_data.next_cursor.cursor);
-                return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-            }
-            // EIP-150: the 63/64 forwardable cap must be computed on the gas remaining AFTER
-            // the call's own costs (access, value transfer, new account) are charged — see
-            // the cap computation just before inner_call below. Only the requested amount is
-            // captured here.
-            const gas_u64_raw = @as(u64, @intCast(gas_param));
+            // EIP-150: gas_param > maxInt(u64) is capped to 63/64 of remaining gas below,
+            // never treated as call failure.
+            const gas_u64_raw: u64 = if (gas_param > std.math.maxInt(u64))
+                std.math.maxInt(u64)
+            else
+                @as(u64, @intCast(gas_param));
 
-            if (input_offset > std.math.maxInt(usize) or
-                input_size > std.math.maxInt(usize) or
-                output_offset > std.math.maxInt(usize) or
-                output_size > std.math.maxInt(usize))
-            {
-                (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "Stack must have space for push");
-                self.stack.push_unsafe(0);
-                const op_data = dispatch.getOpData(.CALL);
-                self.afterInstruction(.CALL, op_data.next_handler, op_data.next_cursor.cursor);
-                return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-            }
-
-            const input_offset_usize = @as(usize, @intCast(input_offset));
-            const input_size_usize = @as(usize, @intCast(input_size));
-            const output_offset_usize = @as(usize, @intCast(output_offset));
-            const output_size_usize = @as(usize, @intCast(output_size));
-
-            // Calculate memory bounds with overflow checking
+            // Calculate memory bounds only for non-zero ranges (EVM ignores offset when size == 0).
+            // Oversized or overflowing memory bounds cost infinite expansion gas -> Error.OutOfGas.
+            var input_offset_usize: usize = 0;
+            var input_size_usize: usize = 0;
             var input_mem_end: usize = 0;
-            var output_mem_end: usize = 0;
-
-            if (input_size_usize > 0) {
+            if (input_size > 0) {
+                if (input_offset > std.math.maxInt(usize) or input_size > std.math.maxInt(usize)) {
+                    self.afterComplete(.CALL);
+                    return Error.OutOfGas;
+                }
+                input_offset_usize = @as(usize, @intCast(input_offset));
+                input_size_usize = @as(usize, @intCast(input_size));
                 const overflow = @addWithOverflow(input_offset_usize, input_size_usize);
                 if (overflow[1] != 0) {
-                    // Overflow occurred - return failure
-                    self.stack.push_unsafe(0);
-                    const op_data = dispatch.getOpData(.CALL);
-                    self.afterInstruction(.CALL, op_data.next_handler, op_data.next_cursor.cursor);
-                    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+                    self.afterComplete(.CALL);
+                    return Error.OutOfGas;
                 }
                 input_mem_end = overflow[0];
             }
 
-            if (output_size_usize > 0) {
+            var output_offset_usize: usize = 0;
+            var output_size_usize: usize = 0;
+            var output_mem_end: usize = 0;
+            if (output_size > 0) {
+                if (output_offset > std.math.maxInt(usize) or output_size > std.math.maxInt(usize)) {
+                    self.afterComplete(.CALL);
+                    return Error.OutOfGas;
+                }
+                output_offset_usize = @as(usize, @intCast(output_offset));
+                output_size_usize = @as(usize, @intCast(output_size));
                 const overflow = @addWithOverflow(output_offset_usize, output_size_usize);
                 if (overflow[1] != 0) {
-                    // Overflow occurred - return failure
-                    self.stack.push_unsafe(0);
-                    const op_data = dispatch.getOpData(.CALL);
-                    self.afterInstruction(.CALL, op_data.next_handler, op_data.next_cursor.cursor);
-                    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+                    self.afterComplete(.CALL);
+                    return Error.OutOfGas;
                 }
                 output_mem_end = overflow[0];
             }
@@ -100,11 +87,8 @@ pub fn Handlers(FrameType: type) type {
             const max_mem_end = @max(input_mem_end, output_mem_end);
 
             if (max_mem_end > limits.max_memory_size) {
-                // Memory expansion exceeds limit - return failure
-                self.stack.push_unsafe(0);
-                const op_data = dispatch.getOpData(.CALL);
-                self.afterInstruction(.CALL, op_data.next_handler, op_data.next_cursor.cursor);
-                return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+                self.afterComplete(.CALL);
+                return Error.OutOfGas;
             }
 
             // Calculate and charge memory expansion gas
@@ -260,57 +244,45 @@ pub fn Handlers(FrameType: type) type {
 
             const addr = address_utils.fromWord(WordType,address_u256);
 
-            if (gas_param > std.math.maxInt(u64)) {
-                (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "Stack must have space for push");
-                self.stack.push_unsafe(0);
-                const op_data = dispatch.getOpData(.CALLCODE);
-                self.afterInstruction(.CALLCODE, op_data.next_handler, op_data.next_cursor.cursor);
-                return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-            }
-            // EIP-150: the 63/64 forwardable cap is computed after the call's costs (below).
-            const gas_u64_raw = @as(u64, @intCast(gas_param));
+            // EIP-150: gas_param > maxInt(u64) is capped to 63/64 of remaining gas below.
+            const gas_u64_raw: u64 = if (gas_param > std.math.maxInt(u64))
+                std.math.maxInt(u64)
+            else
+                @as(u64, @intCast(gas_param));
 
-            if (input_offset > std.math.maxInt(usize) or
-                input_size > std.math.maxInt(usize) or
-                output_offset > std.math.maxInt(usize) or
-                output_size > std.math.maxInt(usize))
-            {
-                (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "Stack must have space for push");
-                self.stack.push_unsafe(0);
-                const op_data = dispatch.getOpData(.CALLCODE);
-                self.afterInstruction(.CALLCODE, op_data.next_handler, op_data.next_cursor.cursor);
-                return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-            }
-
-            const input_offset_usize = @as(usize, @intCast(input_offset));
-            const input_size_usize = @as(usize, @intCast(input_size));
-            const output_offset_usize = @as(usize, @intCast(output_offset));
-            const output_size_usize = @as(usize, @intCast(output_size));
-
-            // Calculate memory bounds with overflow checking
+            // Calculate memory bounds only for non-zero ranges (EVM ignores offset when size == 0).
+            var input_offset_usize: usize = 0;
+            var input_size_usize: usize = 0;
             var input_mem_end: usize = 0;
-            var output_mem_end: usize = 0;
-
-            if (input_size_usize > 0) {
+            if (input_size > 0) {
+                if (input_offset > std.math.maxInt(usize) or input_size > std.math.maxInt(usize)) {
+                    self.afterComplete(.CALLCODE);
+                    return Error.OutOfGas;
+                }
+                input_offset_usize = @as(usize, @intCast(input_offset));
+                input_size_usize = @as(usize, @intCast(input_size));
                 const overflow = @addWithOverflow(input_offset_usize, input_size_usize);
                 if (overflow[1] != 0) {
-                    // Overflow occurred - return failure
-                    self.stack.push_unsafe(0);
-                    const op_data = dispatch.getOpData(.CALLCODE);
-                    self.afterInstruction(.CALLCODE, op_data.next_handler, op_data.next_cursor.cursor);
-                    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+                    self.afterComplete(.CALLCODE);
+                    return Error.OutOfGas;
                 }
                 input_mem_end = overflow[0];
             }
 
-            if (output_size_usize > 0) {
+            var output_offset_usize: usize = 0;
+            var output_size_usize: usize = 0;
+            var output_mem_end: usize = 0;
+            if (output_size > 0) {
+                if (output_offset > std.math.maxInt(usize) or output_size > std.math.maxInt(usize)) {
+                    self.afterComplete(.CALLCODE);
+                    return Error.OutOfGas;
+                }
+                output_offset_usize = @as(usize, @intCast(output_offset));
+                output_size_usize = @as(usize, @intCast(output_size));
                 const overflow = @addWithOverflow(output_offset_usize, output_size_usize);
                 if (overflow[1] != 0) {
-                    // Overflow occurred - return failure
-                    self.stack.push_unsafe(0);
-                    const op_data = dispatch.getOpData(.CALLCODE);
-                    self.afterInstruction(.CALLCODE, op_data.next_handler, op_data.next_cursor.cursor);
-                    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+                    self.afterComplete(.CALLCODE);
+                    return Error.OutOfGas;
                 }
                 output_mem_end = overflow[0];
             }
@@ -318,11 +290,8 @@ pub fn Handlers(FrameType: type) type {
             const max_mem_end = @max(input_mem_end, output_mem_end);
 
             if (max_mem_end > limits.max_memory_size) {
-                // Memory expansion exceeds limit - return failure
-                self.stack.push_unsafe(0);
-                const op_data = dispatch.getOpData(.CALLCODE);
-                self.afterInstruction(.CALLCODE, op_data.next_handler, op_data.next_cursor.cursor);
-                return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+                self.afterComplete(.CALLCODE);
+                return Error.OutOfGas;
             }
 
             // Calculate and charge memory expansion gas
@@ -446,55 +415,45 @@ pub fn Handlers(FrameType: type) type {
 
             const addr = address_utils.fromWord(WordType,address_u256);
 
-            if (gas_param > std.math.maxInt(u64)) {
-                self.stack.push_unsafe(0);
-                const op_data = dispatch.getOpData(.DELEGATECALL);
-                self.afterInstruction(.DELEGATECALL, op_data.next_handler, op_data.next_cursor.cursor);
-                return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-            }
-            // EIP-150: the 63/64 forwardable cap is computed after the call's costs (below).
-            const gas_u64_raw = @as(u64, @intCast(gas_param));
+            // EIP-150: gas_param > maxInt(u64) is capped to 63/64 of remaining gas below.
+            const gas_u64_raw: u64 = if (gas_param > std.math.maxInt(u64))
+                std.math.maxInt(u64)
+            else
+                @as(u64, @intCast(gas_param));
 
-            if (input_offset > std.math.maxInt(usize) or
-                input_size > std.math.maxInt(usize) or
-                output_offset > std.math.maxInt(usize) or
-                output_size > std.math.maxInt(usize))
-            {
-                self.stack.push_unsafe(0);
-                const op_data = dispatch.getOpData(.DELEGATECALL);
-                self.afterInstruction(.DELEGATECALL, op_data.next_handler, op_data.next_cursor.cursor);
-                return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-            }
-
-            const input_offset_usize = @as(usize, @intCast(input_offset));
-            const input_size_usize = @as(usize, @intCast(input_size));
-            const output_offset_usize = @as(usize, @intCast(output_offset));
-            const output_size_usize = @as(usize, @intCast(output_size));
-
-            // Calculate memory bounds with overflow checking
+            // Calculate memory bounds only for non-zero ranges (EVM ignores offset when size == 0).
+            var input_offset_usize: usize = 0;
+            var input_size_usize: usize = 0;
             var input_mem_end: usize = 0;
-            var output_mem_end: usize = 0;
-
-            if (input_size_usize > 0) {
+            if (input_size > 0) {
+                if (input_offset > std.math.maxInt(usize) or input_size > std.math.maxInt(usize)) {
+                    self.afterComplete(.DELEGATECALL);
+                    return Error.OutOfGas;
+                }
+                input_offset_usize = @as(usize, @intCast(input_offset));
+                input_size_usize = @as(usize, @intCast(input_size));
                 const overflow = @addWithOverflow(input_offset_usize, input_size_usize);
                 if (overflow[1] != 0) {
-                    // Overflow occurred - return failure
-                    self.stack.push_unsafe(0);
-                    const op_data = dispatch.getOpData(.DELEGATECALL);
-                    self.afterInstruction(.DELEGATECALL, op_data.next_handler, op_data.next_cursor.cursor);
-                    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+                    self.afterComplete(.DELEGATECALL);
+                    return Error.OutOfGas;
                 }
                 input_mem_end = overflow[0];
             }
 
-            if (output_size_usize > 0) {
+            var output_offset_usize: usize = 0;
+            var output_size_usize: usize = 0;
+            var output_mem_end: usize = 0;
+            if (output_size > 0) {
+                if (output_offset > std.math.maxInt(usize) or output_size > std.math.maxInt(usize)) {
+                    self.afterComplete(.DELEGATECALL);
+                    return Error.OutOfGas;
+                }
+                output_offset_usize = @as(usize, @intCast(output_offset));
+                output_size_usize = @as(usize, @intCast(output_size));
                 const overflow = @addWithOverflow(output_offset_usize, output_size_usize);
                 if (overflow[1] != 0) {
-                    // Overflow occurred - return failure
-                    self.stack.push_unsafe(0);
-                    const op_data = dispatch.getOpData(.DELEGATECALL);
-                    self.afterInstruction(.DELEGATECALL, op_data.next_handler, op_data.next_cursor.cursor);
-                    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+                    self.afterComplete(.DELEGATECALL);
+                    return Error.OutOfGas;
                 }
                 output_mem_end = overflow[0];
             }
@@ -502,11 +461,8 @@ pub fn Handlers(FrameType: type) type {
             const max_mem_end = @max(input_mem_end, output_mem_end);
 
             if (max_mem_end > limits.max_memory_size) {
-                // Memory expansion exceeds limit - return failure
-                self.stack.push_unsafe(0);
-                const op_data = dispatch.getOpData(.DELEGATECALL);
-                self.afterInstruction(.DELEGATECALL, op_data.next_handler, op_data.next_cursor.cursor);
-                return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+                self.afterComplete(.DELEGATECALL);
+                return Error.OutOfGas;
             }
 
             // Calculate and charge memory expansion gas
@@ -618,55 +574,45 @@ pub fn Handlers(FrameType: type) type {
 
             const addr = address_utils.fromWord(WordType,address_u256);
 
-            if (gas_param > std.math.maxInt(u64)) {
-                self.stack.push_unsafe(0);
-                const op_data = dispatch.getOpData(.STATICCALL);
-                self.afterInstruction(.STATICCALL, op_data.next_handler, op_data.next_cursor.cursor);
-                return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-            }
-            // EIP-150: the 63/64 forwardable cap is computed after the call's costs (below).
-            const gas_u64_raw = @as(u64, @intCast(gas_param));
+            // EIP-150: gas_param > maxInt(u64) is capped to 63/64 of remaining gas below.
+            const gas_u64_raw: u64 = if (gas_param > std.math.maxInt(u64))
+                std.math.maxInt(u64)
+            else
+                @as(u64, @intCast(gas_param));
 
-            if (input_offset > std.math.maxInt(usize) or
-                input_size > std.math.maxInt(usize) or
-                output_offset > std.math.maxInt(usize) or
-                output_size > std.math.maxInt(usize))
-            {
-                self.stack.push_unsafe(0);
-                const op_data = dispatch.getOpData(.STATICCALL);
-                self.afterInstruction(.STATICCALL, op_data.next_handler, op_data.next_cursor.cursor);
-                return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-            }
-
-            const input_offset_usize = @as(usize, @intCast(input_offset));
-            const input_size_usize = @as(usize, @intCast(input_size));
-            const output_offset_usize = @as(usize, @intCast(output_offset));
-            const output_size_usize = @as(usize, @intCast(output_size));
-
-            // Calculate memory bounds with overflow checking
+            // Calculate memory bounds only for non-zero ranges (EVM ignores offset when size == 0).
+            var input_offset_usize: usize = 0;
+            var input_size_usize: usize = 0;
             var input_mem_end: usize = 0;
-            var output_mem_end: usize = 0;
-
-            if (input_size_usize > 0) {
+            if (input_size > 0) {
+                if (input_offset > std.math.maxInt(usize) or input_size > std.math.maxInt(usize)) {
+                    self.afterComplete(.STATICCALL);
+                    return Error.OutOfGas;
+                }
+                input_offset_usize = @as(usize, @intCast(input_offset));
+                input_size_usize = @as(usize, @intCast(input_size));
                 const overflow = @addWithOverflow(input_offset_usize, input_size_usize);
                 if (overflow[1] != 0) {
-                    // Overflow occurred - return failure
-                    self.stack.push_unsafe(0);
-                    const op_data = dispatch.getOpData(.STATICCALL);
-                    self.afterInstruction(.STATICCALL, op_data.next_handler, op_data.next_cursor.cursor);
-                    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+                    self.afterComplete(.STATICCALL);
+                    return Error.OutOfGas;
                 }
                 input_mem_end = overflow[0];
             }
 
-            if (output_size_usize > 0) {
+            var output_offset_usize: usize = 0;
+            var output_size_usize: usize = 0;
+            var output_mem_end: usize = 0;
+            if (output_size > 0) {
+                if (output_offset > std.math.maxInt(usize) or output_size > std.math.maxInt(usize)) {
+                    self.afterComplete(.STATICCALL);
+                    return Error.OutOfGas;
+                }
+                output_offset_usize = @as(usize, @intCast(output_offset));
+                output_size_usize = @as(usize, @intCast(output_size));
                 const overflow = @addWithOverflow(output_offset_usize, output_size_usize);
                 if (overflow[1] != 0) {
-                    // Overflow occurred - return failure
-                    self.stack.push_unsafe(0);
-                    const op_data = dispatch.getOpData(.STATICCALL);
-                    self.afterInstruction(.STATICCALL, op_data.next_handler, op_data.next_cursor.cursor);
-                    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+                    self.afterComplete(.STATICCALL);
+                    return Error.OutOfGas;
                 }
                 output_mem_end = overflow[0];
             }
@@ -674,11 +620,8 @@ pub fn Handlers(FrameType: type) type {
             const max_mem_end = @max(input_mem_end, output_mem_end);
 
             if (max_mem_end > limits.max_memory_size) {
-                // Memory expansion exceeds limit - return failure
-                self.stack.push_unsafe(0);
-                const op_data = dispatch.getOpData(.STATICCALL);
-                self.afterInstruction(.STATICCALL, op_data.next_handler, op_data.next_cursor.cursor);
-                return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+                self.afterComplete(.STATICCALL);
+                return Error.OutOfGas;
             }
 
             // Calculate and charge memory expansion gas
@@ -792,7 +735,12 @@ pub fn Handlers(FrameType: type) type {
         pub fn create(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             self.beforeInstruction(.CREATE, cursor);
             const dispatch = Dispatch{ .cursor = cursor };
-            // EIP-214: Static constraint encoded in host - will throw WriteProtection
+
+            // EIP-214: CREATE is forbidden in a static context and must halt the frame.
+            if (self.getEvm().is_static_context()) {
+                self.afterComplete(.CREATE);
+                return Error.WriteProtection;
+            }
 
             {
                 (&self.getEvm().tracer).assert(self.stack.size() >= 3, "CREATE requires 3 stack items");
@@ -851,9 +799,16 @@ pub fn Handlers(FrameType: type) type {
             // Use main allocator for deinit since precompile outputs are allocated with it
             defer result.deinit(self.getEvm().allocator);
 
-            // EIP-211: Clear return data buffer after CREATE (Byzantium+)
+            // EIP-211 / EIP-140: After CREATE (Byzantium+), clear return data on success or
+            // exceptional failure, and preserve revert output when initcode executes REVERT.
             if (self.getEvm().should_clear_returndata_on_create()) {
-                self.getEvm().clear_return_data();
+                if (!result.success and result.output.len > 0) {
+                    self.getEvm().set_return_data(result.output) catch {
+                        self.getEvm().clear_return_data();
+                    };
+                } else {
+                    self.getEvm().clear_return_data();
+                }
             }
 
             // Update gas remaining
@@ -883,7 +838,12 @@ pub fn Handlers(FrameType: type) type {
         pub fn create2(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
             self.beforeInstruction(.CREATE2, cursor);
             const dispatch = Dispatch{ .cursor = cursor };
-            // EIP-214: Static constraint encoded in host - will throw WriteProtection
+
+            // EIP-214: CREATE2 is forbidden in a static context and must halt the frame.
+            if (self.getEvm().is_static_context()) {
+                self.afterComplete(.CREATE2);
+                return Error.WriteProtection;
+            }
 
             // EVM pop order: value, offset, size, salt (top first)
             {
@@ -948,9 +908,16 @@ pub fn Handlers(FrameType: type) type {
             // Use main allocator for deinit since precompile outputs are allocated with it
             defer result.deinit(self.getEvm().allocator);
 
-            // EIP-211/EIP-1014: Clear return data buffer after CREATE2 (Byzantium+)
+            // EIP-211 / EIP-140 / EIP-1014: After CREATE2 (Byzantium+), clear return data on
+            // success or exceptional failure, and preserve revert output when initcode REVERTs.
             if (self.getEvm().should_clear_returndata_on_create()) {
-                self.getEvm().clear_return_data();
+                if (!result.success and result.output.len > 0) {
+                    self.getEvm().set_return_data(result.output) catch {
+                        self.getEvm().clear_return_data();
+                    };
+                } else {
+                    self.getEvm().clear_return_data();
+                }
             }
 
             // Update gas remaining
@@ -990,21 +957,27 @@ pub fn Handlers(FrameType: type) type {
             const offset = self.stack.pop_unsafe(); // Top of stack
             const size = self.stack.pop_unsafe(); // Second from top
 
+            // Zero-length RETURN touches no memory and ignores offset completely.
+            if (size == 0) {
+                self.output_data = &.{};
+                self.afterComplete(.RETURN);
+                return Error.Return;
+            }
+
             // Bounds checking for memory offset and size
             if (offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
-                return Error.OutOfBounds;
+                return Error.OutOfGas;
             }
 
             const offset_usize = @as(usize, @intCast(offset));
             const size_usize = @as(usize, @intCast(size));
 
-            // Calculate gas cost for memory expansion
-            const memory_end = offset_usize + size_usize;
-            if (offset_usize > limits.max_memory_size or
-                size_usize > limits.max_memory_size or
-                memory_end > limits.max_memory_size)
-            {
-                return Error.OutOfBounds;
+            // Calculate gas cost for memory expansion (overflow-safe)
+            const memory_end = std.math.add(usize, offset_usize, size_usize) catch {
+                return Error.OutOfGas;
+            };
+            if (memory_end > limits.max_memory_size) {
+                return Error.OutOfGas;
             }
             const memory_expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(memory_end)));
             // Use negative gas pattern for single-branch out-of-gas detection
@@ -1049,21 +1022,27 @@ pub fn Handlers(FrameType: type) type {
             const offset = self.stack.pop_unsafe(); // Top of stack
             const size = self.stack.pop_unsafe(); // Second from top
 
+            // Zero-length REVERT touches no memory and ignores offset completely.
+            if (size == 0) {
+                self.output_data = &[_]u8{};
+                self.afterComplete(.REVERT);
+                return Error.REVERT;
+            }
+
             // Bounds checking for memory offset and size
             if (offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
-                return Error.OutOfBounds;
+                return Error.OutOfGas;
             }
 
             const offset_usize = @as(usize, @intCast(offset));
             const size_usize = @as(usize, @intCast(size));
 
-            // Calculate gas cost for memory expansion
-            const memory_end = offset_usize + size_usize;
-            if (offset_usize > limits.max_memory_size or
-                size_usize > limits.max_memory_size or
-                memory_end > limits.max_memory_size)
-            {
-                return Error.OutOfBounds;
+            // Calculate gas cost for memory expansion (overflow-safe)
+            const memory_end = std.math.add(usize, offset_usize, size_usize) catch {
+                return Error.OutOfGas;
+            };
+            if (memory_end > limits.max_memory_size) {
+                return Error.OutOfGas;
             }
             const memory_expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(memory_end)));
             // Use negative gas pattern for single-branch out-of-gas detection
@@ -1107,17 +1086,58 @@ pub fn Handlers(FrameType: type) type {
                 (&self.getEvm().tracer).assert(self.stack.size() >= 1, "SELFDESTRUCT requires 1 stack item");
             }
             const recipient_u256 = self.stack.pop_unsafe();
-            const recipient = address_utils.fromWord(WordType,recipient_u256);
-            self.getEvm().mark_for_destruction(self.contract_address, recipient) catch |err| switch (err) {
+            const recipient = address_utils.fromWord(WordType, recipient_u256);
+            const evm = self.getEvm();
+
+            // EIP-214: SELFDESTRUCT is forbidden in a static context.
+            if (evm.is_static_context()) {
+                self.afterComplete(.SELFDESTRUCT);
+                return Error.WriteProtection;
+            }
+
+            // EIP-2929: Cold beneficiary access adds 2600 gas on Berlin+ (static 5000 is already
+            // charged by the basic block; warm beneficiary adds 0 dynamic gas).
+            var dynamic_gas: u64 = 0;
+            const access_cost = evm.access_address(recipient) catch {
+                self.afterComplete(.SELFDESTRUCT);
+                return Error.AllocationError;
+            };
+            if (evm.is_hardfork_at_least(.BERLIN) and access_cost > GasConstants.WarmStorageReadCost) {
+                dynamic_gas += access_cost;
+            }
+
+            // EIP-150 / EIP-161: Creating a new beneficiary account via SELFDESTRUCT costs 25000 gas.
+            if (evm.is_hardfork_at_least(.TANGERINE_WHISTLE)) {
+                const self_balance = evm.database.get_balance(self.contract_address.bytes) catch {
+                    self.afterComplete(.SELFDESTRUCT);
+                    return Error.AllocationError;
+                };
+                const recipient_dead = if (evm.is_hardfork_at_least(.SPURIOUS_DRAGON))
+                    (evm.database.is_empty(recipient.bytes) catch {
+                        self.afterComplete(.SELFDESTRUCT);
+                        return Error.AllocationError;
+                    })
+                else
+                    !evm.database.account_exists(recipient.bytes);
+                if (recipient_dead and (self_balance > 0 or !evm.is_hardfork_at_least(.SPURIOUS_DRAGON))) {
+                    dynamic_gas += GasConstants.CALL_NEW_ACCOUNT_COST;
+                }
+            }
+
+            self.gas_remaining -= @intCast(dynamic_gas);
+            if (self.gas_remaining < 0) {
+                self.afterComplete(.SELFDESTRUCT);
+                return Error.OutOfGas;
+            }
+
+            evm.mark_for_destruction(self.contract_address, recipient) catch |err| switch (err) {
                 error.StaticCallViolation => return Error.WriteProtection,
                 else => {
                     @branchHint(.unlikely);
                     log.debug("SELFDESTRUCT failed with error: {}", .{err});
-                    return Error.OutOfGas;
+                    return Error.AllocationError;
                 },
             };
-            // According to EIP-6780 (Cancun hardfork), SELFDESTRUCT only actually destroys
-            // the contract if it was created in the same transaction. This is handled by the host.
             // SELFDESTRUCT always stops execution
             self.afterComplete(.SELFDESTRUCT);
             return Error.SelfDestruct;

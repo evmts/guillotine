@@ -47,7 +47,7 @@ Verified against `src/evm_config.zig`.
 | Field | Default | Meaning |
 | --- | --- | --- |
 | `enable_fusion` | `true` | Opcode fusion. See [Synthetic opcodes](/concepts/synthetic-opcodes). |
-| `enable_native_jit` | `false` | Run hot, eligible pure-compute contracts through the ARM64 JIT tier in `src/jit/`. Other targets, traced runs, and initcode use the interpreter. |
+| `enable_native_jit` | `false` | Run hot, eligible pure-compute contracts through the ARM64 JIT tier in `src/jit/`. Other targets, traced runs, and initcode use the interpreter. See [Benchmarks and native JIT](/guides/benchmarks-and-jit#native-arm64-jit). |
 | `enable_precompiles` | `true` | When `false`, calls to precompile addresses skip the precompile path. |
 | `vector_length` | `0` | SIMD width; `0` auto-detects for the target. |
 | `stack_size` | `1024` | Stack slots. Smaller stacks shrink the frame. |

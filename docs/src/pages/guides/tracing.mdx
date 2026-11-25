@@ -203,4 +203,4 @@ A passing Zig test prints nothing regardless of log level. Silence is success.
 `MinimalEvm` is small: `src/tracer/minimal_evm.zig` is about 35 KB, plus
 `minimal_frame.zig` and `minimal_host.zig`. `src/tracer/minimal_evm_c.zig`
 wraps it in an opaque-handle C API, but no build step compiles that wrapper.
-For a browser build, use guillotine-mini: `cd mini && zig build wasm`.
+For a standalone browser WASM build, use [evmts/guillotine-mini](https://github.com/evmts/guillotine-mini).

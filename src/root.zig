@@ -36,9 +36,10 @@ pub const MainnetEvm = Evm(.{});
 
 pub const MainnetEvmWithTracer = Evm(EvmConfig{
     .eips = .{ .hardfork = @import("eips_and_hardforks/eips.zig").Hardfork.DEFAULT },
+    .enable_fusion = false,
     .tracer_config = @import("tracer/tracer.zig").TracerConfig{
         .enabled = true,
-        .enable_validation = true, // Enable validation for step capture
+        .enable_validation = false,
         .enable_step_capture = true, // Enable step capture for JSON-RPC trace
         .enable_pc_tracking = true,
         .enable_gas_tracking = true,

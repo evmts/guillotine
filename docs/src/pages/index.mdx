@@ -55,15 +55,19 @@ codebase:
   lock-step against `MinimalEvm`, a plain, readable, switch-loop reference
   interpreter that lives in the same repository. See [Tracing and
   debugging](/guides/tracing).
+- **Self-contained benchmarks & opt-in ARM64 JIT.** Sixteen ReleaseFast
+  benchmark suites track regressions across every subsystem, alongside an opt-in
+  zero-dependency ARM64 JIT tier (`src/jit/`). See
+  [Benchmarks and native JIT](/guides/benchmarks-and-jit).
 
 ## Two EVMs, one repository
 
-| | Performance EVM (`src/`) | `MinimalEvm` (`src/tracer/`) and guillotine-mini (`mini/`) |
+| | Performance EVM (`src/`) | Reference EVM (`MinimalEvm` in `src/tracer/`) |
 | --- | --- | --- |
 | Execution model | Dispatch schedule + tail calls | Sequential `switch` over bytecode |
 | Optimised for | Throughput | Readability and correctness |
 | Role | The product | Reference oracle for differential tests |
-| Size | Whole `src/` tree | `minimal_evm.zig`, `minimal_frame.zig`, `minimal_host.zig`; `mini/` has its own `build.zig` |
+| Size | Whole `src/` tree | `minimal_evm.zig`, `minimal_frame.zig`, `minimal_host.zig` |
 
 They are not competitors. `MinimalEvm` is the thing that lets you *trust* the
 fast one: the tracer steps both machines forward together and asserts they agree

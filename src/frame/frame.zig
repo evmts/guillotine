@@ -432,7 +432,7 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
             comptime opcode: Dispatch.UnifiedOpcode,
             cursor: [*]const Dispatch.Item,
         ) void {
-            if (comptime (builtin.mode != .Debug and builtin.mode != .ReleaseSafe)) return;
+            if (comptime (!config.enable_tracer and builtin.mode != .Debug and builtin.mode != .ReleaseSafe)) return;
             (&self.getEvm().tracer).before_instruction(self, opcode, cursor);
             self.validateOpcodeHandler(opcode, cursor);
         }
@@ -445,7 +445,7 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
             next_handler: OpcodeHandler,
             next_cursor: [*]const Dispatch.Item,
         ) void {
-            if (comptime (builtin.mode != .Debug and builtin.mode != .ReleaseSafe)) return;
+            if (comptime (!config.enable_tracer and builtin.mode != .Debug and builtin.mode != .ReleaseSafe)) return;
             (&self.getEvm().tracer).after_instruction(self, opcode, next_handler, next_cursor);
         }
 
@@ -455,7 +455,7 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
             self: *Self,
             comptime opcode: Dispatch.UnifiedOpcode,
         ) void {
-            if (comptime (builtin.mode != .Debug and builtin.mode != .ReleaseSafe)) return;
+            if (comptime (!config.enable_tracer and builtin.mode != .Debug and builtin.mode != .ReleaseSafe)) return;
             (&self.getEvm().tracer).after_complete(self, opcode);
         }
 

@@ -1,0 +1,446 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version without leading v (e.g. 0.1.0-alpha.1); defaults to sdks/typescript/package.json version'
+        required: false
+        type: string
+        default: ''
+      dry_run:
+        description: 'Build, verify, and dry-run pack without publishing to npm or creating a GitHub Release'
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-native:
+    name: Build native FFI (${{ matrix.target_name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target_name: darwin-arm64
+            lib_ext: dylib
+            expected_arch: arm64
+          - os: ubuntu-latest
+            target_name: linux-x64
+            lib_ext: so
+            expected_arch: x86_64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    env:
+      ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.smithers/cache/tools/zig/global
+      ZIG_LOCAL_CACHE_DIR: ${{ github.workspace }}/.smithers/cache/tools/zig/local
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Zig 0.15.2
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.15.2
+
+      - name: Select a macOS SDK that Zig 0.15.2 can link
+        if: runner.os == 'macOS'
+        shell: bash
+        # macOS SDK 26.4 and later list libSystem stubs for arm64e-macos but
+        # not arm64-macos. Zig 0.15.2 ignores arm64e stubs, so every native
+        # link fails with "undefined symbol: _abort" and friends. Keep the
+        # default Xcode while it links; otherwise use the newest one that does.
+        run: |
+          set -euo pipefail
+          probe="$RUNNER_TEMP/zig-sdk-probe"
+          mkdir -p "$probe"
+          printf 'pub fn main() void {}\n' > "$probe/main.zig"
+          for dev in "$(xcode-select -p)" $(printf "%s\n" /Applications/Xcode_*.app | sort -rV | sed 's|$|/Contents/Developer|'); do
+            if ! sdk="$(DEVELOPER_DIR="$dev" xcrun --sdk macosx --show-sdk-path 2>/dev/null)"; then
+              echo "Skipping $dev: no macOS SDK"
+              continue
+            fi
+            if DEVELOPER_DIR="$dev" zig build-exe "$probe/main.zig" -femit-bin="$probe/main" > "$probe/log" 2>&1 && "$probe/main"; then
+              echo "Zig links against $sdk"
+              echo "DEVELOPER_DIR=$dev" >> "$GITHUB_ENV"
+              exit 0
+            fi
+            echo "Skipping $dev: $(grep -m1 error: "$probe/log" || tail -n1 "$probe/log")"
+          done
+          echo "::error::No installed Xcode has a macOS SDK that Zig 0.15.2 can link against." >&2
+          exit 1
+
+      - name: Record toolchain and architecture
+        id: toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          zig version
+          rustc --version
+          cargo --version
+          uname -sm
+          actual_arch="$(uname -m)"
+          if [[ "$actual_arch" != "${{ matrix.expected_arch }}" ]]; then
+            echo "::error::Expected architecture ${{ matrix.expected_arch }}, got $actual_arch" >&2
+            exit 1
+          fi
+          echo "rust=$(rustc --version | tr ' ' '-')" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Zig
+        uses: actions/cache@v4
+        with:
+          path: |
+            .smithers/cache/tools/zig/global
+            .smithers/cache/tools/zig/local
+          key: ${{ runner.os }}-${{ runner.arch }}-zig-0.15.2-${{ hashFiles('**/*.zig', '**/*.zig.zon', '**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-zig-0.15.2-
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ steps.toolchain.outputs.rust }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml', '**/*.rs') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-cargo-${{ steps.toolchain.outputs.rust }}-
+
+      - name: Build shared and static FFI libraries (ReleaseFast)
+        shell: bash
+        run: |
+          set -euo pipefail
+          zig build shared -Doptimize=ReleaseFast
+          zig build static -Doptimize=ReleaseFast
+          ls -lh zig-out/lib
+
+      - name: Package C FFI tarball and TypeScript SDK prebuild
+        shell: bash
+        run: |
+          set -euo pipefail
+          target="${{ matrix.target_name }}"
+          ext="${{ matrix.lib_ext }}"
+          shared_lib="zig-out/lib/libguillotine_ffi.${ext}"
+          static_lib="zig-out/lib/libguillotine_ffi_static.a"
+          header="sdks/c/include/guillotine.h"
+
+          test -f "$shared_lib"
+          test -f "$static_lib"
+          test -f "$header"
+
+          stage="$RUNNER_TEMP/guillotine-ffi-${target}"
+          rm -rf "$stage"
+          mkdir -p "$stage/lib" "$stage/include" "release-out/tarballs" "release-out/prebuilds/${target}"
+
+          cp "$shared_lib" "$stage/lib/libguillotine_ffi.${ext}"
+          cp "$static_lib" "$stage/lib/libguillotine_ffi_static.a"
+          cp "$header" "$stage/include/guillotine.h"
+          if [[ -f LICENSE ]]; then
+            cp LICENSE "$stage/LICENSE"
+          fi
+
+          tar -czf "release-out/tarballs/guillotine-ffi-${target}.tar.gz" -C "$stage" .
+          cp "$shared_lib" "release-out/prebuilds/${target}/libguillotine_ffi.${ext}"
+
+          ls -lh \
+            "release-out/tarballs/guillotine-ffi-${target}.tar.gz" \
+            "release-out/prebuilds/${target}/libguillotine_ffi.${ext}"
+
+      - name: Upload C FFI tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: c-ffi-${{ matrix.target_name }}
+          path: release-out/tarballs/guillotine-ffi-${{ matrix.target_name }}.tar.gz
+          if-no-files-found: error
+
+      - name: Upload TypeScript SDK prebuild
+        uses: actions/upload-artifact@v4
+        with:
+          name: prebuild-${{ matrix.target_name }}
+          path: release-out/prebuilds/${{ matrix.target_name }}/libguillotine_ffi.${{ matrix.lib_ext }}
+          if-no-files-found: error
+
+  publish-npm:
+    name: Publish @tevm/guillotine to npm
+    needs: build-native
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      GUILLOTINE_SKIP_NATIVE_BUILD: '1'
+      GUILLOTINE_LIB_PATH: ${{ github.workspace }}/sdks/typescript/prebuilds/linux-x64/libguillotine_ffi.so
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download darwin-arm64 prebuild
+        uses: actions/download-artifact@v4
+        with:
+          name: prebuild-darwin-arm64
+          path: sdks/typescript/prebuilds/darwin-arm64
+
+      - name: Download linux-x64 prebuild
+        uses: actions/download-artifact@v4
+        with:
+          name: prebuild-linux-x64
+          path: sdks/typescript/prebuilds/linux-x64
+
+      - name: Verify assembled prebuilds
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f sdks/typescript/prebuilds/darwin-arm64/libguillotine_ffi.dylib
+          test -f sdks/typescript/prebuilds/linux-x64/libguillotine_ffi.so
+          chmod +x \
+            sdks/typescript/prebuilds/darwin-arm64/libguillotine_ffi.dylib \
+            sdks/typescript/prebuilds/linux-x64/libguillotine_ffi.so
+          ls -lh \
+            sdks/typescript/prebuilds/darwin-arm64/libguillotine_ffi.dylib \
+            sdks/typescript/prebuilds/linux-x64/libguillotine_ffi.so
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Resolve and validate package version
+        id: meta
+        shell: bash
+        working-directory: sdks/typescript
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          pkg_version="$(node -p "require('./package.json').version")"
+          echo "pkg_version=$pkg_version" >> "$GITHUB_OUTPUT"
+
+          expected=""
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            expected="${GITHUB_REF_NAME#v}"
+          elif [[ -n "${INPUT_VERSION:-}" ]]; then
+            expected="${INPUT_VERSION#v}"
+          fi
+
+          if [[ -n "$expected" && "$pkg_version" != "$expected" ]]; then
+            if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" && "$INPUT_DRY_RUN" != "false" ]]; then
+              echo "::warning::sdks/typescript/package.json version ($pkg_version) differs from requested version ($expected); continuing because dry_run=true."
+            else
+              echo "::error::sdks/typescript/package.json version ($pkg_version) does not match release version ($expected). Run scripts/release.sh first." >&2
+              exit 1
+            fi
+          fi
+
+          if [[ "$pkg_version" == *-* ]]; then
+            prerelease_part="${pkg_version#*-}"
+            channel="${prerelease_part%%.*}"
+            if [[ ! "$channel" =~ ^[a-zA-Z][a-zA-Z0-9-]*$ ]]; then
+              channel="next"
+            fi
+            echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "npm_tag=$channel" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "npm_tag=latest" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install, build, typecheck, test, and lint package
+        shell: bash
+        working-directory: sdks/typescript
+        run: |
+          set -euo pipefail
+          bun install --frozen-lockfile || bun install
+          bun run build
+          bun run typecheck
+          bun test
+          bun run lint:package
+
+      - name: Dry-run npm pack
+        if: github.event_name == 'workflow_dispatch' && inputs.dry_run != false
+        shell: bash
+        working-directory: sdks/typescript
+        run: |
+          set -euo pipefail
+          npm pack --dry-run
+
+      - name: Publish @tevm/guillotine to npm
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.dry_run == false)
+        shell: bash
+        working-directory: sdks/typescript
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${NODE_AUTH_TOKEN:-}" ]]; then
+            echo "::error::NPM_TOKEN secret is not set." >&2
+            exit 1
+          fi
+          if [[ "${{ steps.meta.outputs.is_prerelease }}" == "true" ]]; then
+            npm publish --provenance --access public --tag "${{ steps.meta.outputs.npm_tag }}"
+          else
+            npm publish --provenance --access public
+          fi
+
+  github-release:
+    name: Create GitHub Release
+    needs: build-native
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download C FFI tarballs
+        uses: actions/download-artifact@v4
+        with:
+          pattern: c-ffi-*
+          merge-multiple: true
+          path: release-assets
+
+      - name: Stage C header and generate SHA256SUMS.txt
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp sdks/c/include/guillotine.h release-assets/guillotine.h
+          test -f release-assets/guillotine-ffi-darwin-arm64.tar.gz
+          test -f release-assets/guillotine-ffi-linux-x64.tar.gz
+          (
+            cd release-assets
+            sha256sum \
+              guillotine-ffi-darwin-arm64.tar.gz \
+              guillotine-ffi-linux-x64.tar.gz \
+              guillotine.h > SHA256SUMS.txt
+          )
+          cat release-assets/SHA256SUMS.txt
+
+      - name: Extract release metadata and CHANGELOG notes
+        id: release
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            tag="$GITHUB_REF_NAME"
+          elif [[ -n "${INPUT_VERSION:-}" ]]; then
+            tag="v${INPUT_VERSION#v}"
+          else
+            pkg_version="$(node -p "require('./sdks/typescript/package.json').version")"
+            tag="v${pkg_version#v}"
+          fi
+          version="${tag#v}"
+
+          if [[ "$tag" == *-* ]]; then
+            is_prerelease="true"
+          else
+            is_prerelease="false"
+          fi
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "is_prerelease=$is_prerelease" >> "$GITHUB_OUTPUT"
+
+          python3 - "$version" CHANGELOG.md release-assets/release-notes.md <<'PY'
+          import re
+          import sys
+          from pathlib import Path
+
+          version, changelog_path, out_path = sys.argv[1], Path(sys.argv[2]), Path(sys.argv[3])
+          if not changelog_path.is_file():
+              out_path.write_text("", encoding="utf-8")
+              sys.exit(0)
+
+          text = changelog_path.read_text(encoding="utf-8")
+          heading_re = re.compile(
+              rf"^##\s+(?:\[{re.escape(version)}\]|{re.escape(version)})(?:\s+-\s+.*)?\s*$",
+              re.MULTILINE,
+          )
+          match = heading_re.search(text)
+          if not match:
+              out_path.write_text("", encoding="utf-8")
+              sys.exit(0)
+
+          body = text[match.end():]
+          next_heading = re.search(r"^##\s+", body, re.MULTILINE)
+          if next_heading:
+              body = body[:next_heading.start()]
+
+          # Drop trailing markdown link reference definitions from the bottom of CHANGELOG.md.
+          lines = body.strip().splitlines()
+          while lines and re.match(r"^\[[^\]]+\]:\s+\S+", lines[-1]):
+              lines.pop()
+
+          out_path.write_text("\n".join(lines).strip() + "\n" if lines else "", encoding="utf-8")
+          PY
+
+          if [[ -s release-assets/release-notes.md ]]; then
+            echo "has_notes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_notes=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Dry-run GitHub Release summary
+        if: github.event_name == 'workflow_dispatch' && inputs.dry_run != false
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Dry run enabled — skipping GitHub Release creation."
+          echo "Tag: ${{ steps.release.outputs.tag }}"
+          echo "Prerelease: ${{ steps.release.outputs.is_prerelease }}"
+          echo "Changelog notes found: ${{ steps.release.outputs.has_notes }}"
+          echo "--- Assets ---"
+          ls -lh release-assets/
+          echo "--- SHA256SUMS.txt ---"
+          cat release-assets/SHA256SUMS.txt
+          if [[ "${{ steps.release.outputs.has_notes }}" == "true" ]]; then
+            echo "--- Extracted Release Notes ---"
+            cat release-assets/release-notes.md
+          fi
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.dry_run == false)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${{ steps.release.outputs.tag }}"
+          args=(
+            release create "$tag"
+            --title "Guillotine ${tag}"
+          )
+          if [[ "${{ steps.release.outputs.is_prerelease }}" == "true" ]]; then
+            args+=(--prerelease)
+          fi
+          if [[ "${{ steps.release.outputs.has_notes }}" == "true" ]]; then
+            args+=(--notes-file release-assets/release-notes.md)
+          else
+            args+=(--generate-notes)
+          fi
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            args+=(--target "$GITHUB_SHA")
+          fi
+          gh "${args[@]}" \
+            release-assets/guillotine-ffi-darwin-arm64.tar.gz \
+            release-assets/guillotine-ffi-linux-x64.tar.gz \
+            release-assets/guillotine.h \
+            release-assets/SHA256SUMS.txt

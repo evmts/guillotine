@@ -16,7 +16,7 @@ one of the [language bindings](/guides/bindings).
 | [Zig](https://ziglang.org/download/) | `0.15.2` | The whole engine. `build.zig.zon` declares `minimum_zig_version = "0.15.1"`. |
 | [Rust / Cargo](https://rustup.rs) | stable | `lib/voltaire` builds a `crypto_wrappers` staticlib (arkworks BN254/BLS12-381 + keccak) that the Zig build links. |
 | A C/C++ toolchain | Apple Clang 17 (Xcode CLT) | `blst`, `c-kzg-4844` and `libc++` linkage. |
-| Python 3 | 3.11+ | Only for `zig build test-mini-full` and some spec-fixture tooling. Not needed for a normal build. |
+| Python 3 | 3.11+ | Only for optional spec-fixture tooling. Not needed for a normal build. |
 
 Check what you have:
 
@@ -50,7 +50,7 @@ CI (`.github/workflows/ci.yml`) builds and tests on `macos-latest` (arm64) and
 | Linux x86_64 | Built and tested in CI |
 | Linux arm64 | The build graph maps it to `aarch64-unknown-linux-gnu`; not in CI |
 | Windows | Best-effort, not in CI. `lib/voltaire/lib/build.zig` builds Voltaire's crate for `*-pc-windows-gnu` so Cargo emits `lib*.a`; the root `build.zig` builds the root Cargo workspace for `x86_64-pc-windows-msvc`. |
-| `wasm32` | No root `zig build` step builds the engine for WASM. Voltaire's Cargo step builds `wasm32-unknown-unknown` with `--no-default-features --features portable` (pure-Rust keccak) when the target is WASM. guillotine-mini builds its own WASM with `cd mini && zig build wasm`. |
+| `wasm32` | No root `zig build` step builds the engine for WASM. Voltaire's Cargo step builds `wasm32-unknown-unknown` with `--no-default-features --features portable` (pure-Rust keccak) when the target is WASM. For a browser WASM EVM, use [guillotine-mini](https://github.com/evmts/guillotine-mini). |
 
 ## Clone and build
 
@@ -101,15 +101,22 @@ limits on `EvmConfig` instead. See [Configuring the EVM](/guides/configuration).
 ```bash
 zig build test              # specs, integration, unit, and lib tests
 zig build test-unit         # src/**/*.zig
-zig build test-integration  # test/**/*.zig
+zig build test-integration  # test/**/*.zig (includes MinimalEvm differential tests)
 zig build test-lib          # lib/**/*.zig
-zig build test-opcodes      # per-opcode differential tests vs MinimalEvm
+zig build test-opcodes      # per-opcode tests + ModExp, ECRECOVER & spec-runner unit tests (CI gate)
 zig build state-tests       # official EEST state tests (fetch fixtures first)
 zig build specs             # legacy filler specs
+zig build bench             # self-contained EVM benchmark runner (ReleaseFast)
+zig build verify            # formal verification suite (LLVM 20 IR + SMT + Lean 4)
 ```
 
 `zig build state-tests` reads fixtures that `scripts/fetch-eest-fixtures.sh`
-downloads. `specs/README.md` documents both spec suites.
+downloads. `specs/README.md` documents both spec suites. Note that
+`zig build test-opcodes` is not a differential check — 127 of its 138
+per-opcode files assert only a successful run and the tracer's `MinimalEvm`
+validation is off by default; differential tests live in `test/differential/`
+and run under `zig build test-integration`. For benchmarks, see
+[Benchmarks and native JIT](/guides/benchmarks-and-jit).
 
 Filter with `-Dtest-filter`:
 

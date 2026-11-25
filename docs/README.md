@@ -66,13 +66,12 @@ read them.
 | Contribute code | [dev/CONTRIBUTING.md](./dev/CONTRIBUTING.md) |
 | Deep dive into dispatch | [performance/DISPATCH.md](./performance/DISPATCH.md) |
 | Understand opcode fusion | [performance/SYNTHETIC-OPCODES.md](./performance/SYNTHETIC-OPCODES.md) |
-| Learn Mini EVM specifics | [mini/README.md](./mini/README.md) |
 
 ## Two EVM Implementations
 
-### Mini EVM (`mini/`)
+### Reference Interpreter (`src/tracer/minimal_evm.zig` & `evmts/guillotine-mini`)
 
-A minimal, correct implementation using traditional sequential bytecode interpretation.
+A minimal, correct implementation using traditional sequential bytecode interpretation (the standalone version lives in [evmts/guillotine-mini](https://github.com/evmts/guillotine-mini); Guillotine embeds `MinimalEvm` under `src/tracer/` for differential validation).
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -93,7 +92,7 @@ A minimal, correct implementation using traditional sequential bytecode interpre
 - **Execution**: PC-based, reads bytecode per instruction
 - **Use Cases**: Testing, validation, learning EVM internals
 - **Trade-off**: Clarity over raw performance
-- **Start here**: `mini/src/frame.zig`
+- **Start here**: `src/tracer/minimal_evm.zig`
 
 ### Performance EVM (`src/`)
 
@@ -173,16 +172,11 @@ docs/
 │   ├── HARDFORKS.md       Complete opcode reference
 │   └── CONTRIBUTING.md    Development workflow
 │
-├── performance/           ← Performance EVM specifics
-│   ├── README.md          Performance overview
-│   ├── DISPATCH.md        Dispatch execution model
-│   ├── SYNTHETIC-OPCODES.md   Opcode fusion patterns
-│   └── TRACER.md          Execution synchronization
-│
-└── mini/                  ← Mini EVM specifics
-    ├── README.md          Mini overview
-    ├── typescript/        TypeScript port docs
-    └── bytecode-port-report.md
+└── performance/           ← Performance EVM specifics
+    ├── README.md          Performance overview
+    ├── DISPATCH.md        Dispatch execution model
+    ├── SYNTHETIC-OPCODES.md   Opcode fusion patterns
+    └── TRACER.md          Execution synchronization
 ```
 
 ## Build Commands
@@ -210,7 +204,7 @@ See [CLAUDE.md](../CLAUDE.md) for complete project instructions.
 ## Links
 
 - [CLAUDE.md](../CLAUDE.md) - Project instructions and conventions
-- [mini/CLAUDE.md](../mini/CLAUDE.md) - Mini EVM specific instructions
 - [GitHub Repository](https://github.com/evmts/guillotine)
+- [Guillotine Mini Repository](https://github.com/evmts/guillotine-mini)
 - [Ethereum Yellow Paper](https://ethereum.github.io/yellowpaper/paper.pdf)
 - [EVM.codes](https://www.evm.codes/)

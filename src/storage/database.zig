@@ -412,6 +412,34 @@ pub const Database = struct {
         try self.write_entry(&self.accounts, address, null, .account);
     }
 
+    /// Delete all persistent storage slots belonging to `address` (used on SELFDESTRUCT finalization).
+    pub fn clear_account_storage(self: *Database, address: [20]u8) Error!void {
+        var keys_to_remove = std.ArrayList(StorageKey){};
+        defer keys_to_remove.deinit(self.allocator);
+
+        var it = self.storage.iterator();
+        while (it.next()) |entry| {
+            if (std.mem.eql(u8, &entry.key_ptr.address, &address)) {
+                try keys_to_remove.append(self.allocator, entry.key_ptr.*);
+            }
+        }
+        for (keys_to_remove.items) |k| {
+            try self.write_entry(&self.storage, k, null, .storage);
+        }
+        if (self.tx_cache) |cache| {
+            keys_to_remove.clearRetainingCapacity();
+            var cit = cache.storage.iterator();
+            while (cit.next()) |entry| {
+                if (std.mem.eql(u8, &entry.key_ptr.address, &address)) {
+                    try keys_to_remove.append(self.allocator, entry.key_ptr.*);
+                }
+            }
+            for (keys_to_remove.items) |k| {
+                try self.write_entry(&cache.storage, k, null, .cached_storage);
+            }
+        }
+    }
+
     /// Check if account exists in the database
     pub fn account_exists(self: *Database, address: [20]u8) bool {
         if (self.overlay_active) {

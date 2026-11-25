@@ -328,30 +328,6 @@ pub fn build(b: *std.Build) void {
     // Main test step runs tests in priority order: specs -> integration -> unit
     const test_step = b.step("test", "Run all tests (specs -> integration -> unit)");
 
-    // Mini EVM unit tests (guillotine-mini)
-    const mini_test_cmd = b.addSystemCommand(&.{ "zig", "build", "unit" });
-    mini_test_cmd.setCwd(b.path("mini"));
-    const mini_test_step = b.step("test-mini", "Run guillotine-mini unit tests");
-    mini_test_step.dependOn(&mini_test_cmd.step);
-
-    // Mini EVM full tests (requires Python dependencies for spec tests)
-    const mini_full_test_cmd = b.addSystemCommand(&.{ "zig", "build", "test" });
-    mini_full_test_cmd.setCwd(b.path("mini"));
-    const mini_full_test_step = b.step("test-mini-full", "Run all guillotine-mini tests (requires Python)");
-    mini_full_test_step.dependOn(&mini_full_test_cmd.step);
-
-    // Mini EVM specs tests
-    const mini_specs_cmd = b.addSystemCommand(&.{ "zig", "build", "specs" });
-    mini_specs_cmd.setCwd(b.path("mini"));
-    const mini_specs_step = b.step("test-mini-specs", "Run guillotine-mini spec tests");
-    mini_specs_step.dependOn(&mini_specs_cmd.step);
-
-    // Mini EVM fuzz tests (uses current zig executable so custom zig paths work)
-    const mini_fuzz_cmd = b.addSystemCommand(&.{ b.graph.zig_exe, "build", "test-fuzz" });
-    mini_fuzz_cmd.setCwd(b.path("mini"));
-    const mini_fuzz_step = b.step("test-mini-fuzz", "Run guillotine-mini fuzz tests");
-    mini_fuzz_step.dependOn(&mini_fuzz_cmd.step);
-
     // ERC20 deployment gas issue test
     const erc20_gas_test = b.addTest(.{
         .name = "test-erc20-gas",

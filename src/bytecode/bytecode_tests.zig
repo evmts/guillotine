@@ -230,24 +230,31 @@ test "Bytecode validation - invalid opcode" {
     try std.testing.expectEqual(@as(usize, 3), bytecode.len());
 }
 
-test "Bytecode validation - PUSH extends past end" {
+test "Bytecode validation - PUSH extends past end zero-pads per Yellow Paper" {
     const allocator = std.testing.allocator;
-    // PUSH2 but only 1 byte of data available
-    const code = [_]u8{ 0x61, 0x42 }; // PUSH2 with only 1 byte
-    const result = BytecodeDefault.init(allocator, &code);
-    try std.testing.expectError(error.TruncatedPush, result);
+    // PUSH2 with only 1 byte of data available: pads trailing byte with 0 -> 0x4200
+    const code = [_]u8{ 0x61, 0x42 };
+    var bc = try BytecodeDefault.init(allocator, &code);
+    defer bc.deinit();
+    var iter = bc.createIterator();
+    const op = iter.next().?;
+    try std.testing.expectEqual(@as(u256, 0x4200), op.push.value);
+    try std.testing.expect(iter.next() == null);
 }
 
-test "Bytecode validation - PUSH32 extends past end" {
+test "Bytecode validation - PUSH32 extends past end zero-pads per Yellow Paper" {
     const allocator = std.testing.allocator;
-    // PUSH32 but not enough data
     var code: [32]u8 = undefined;
     code[0] = 0x7f; // PUSH32
     for (1..32) |i| {
         code[i] = @intCast(i);
     }
-    const result = BytecodeDefault.init(allocator, &code); // Only 32 bytes, needs 33
-    try std.testing.expectError(error.TruncatedPush, result);
+    var bc = try BytecodeDefault.init(allocator, &code); // 32 bytes, missing last immediate byte
+    defer bc.deinit();
+    var iter = bc.createIterator();
+    const op = iter.next().?;
+    try std.testing.expectEqual(@as(u8, 0), @as(u8, @truncate(op.push.value)));
+    try std.testing.expect(iter.next() == null);
 }
 
 
@@ -1704,8 +1711,13 @@ test "Bytecode edge cases - all PUSH opcodes at end" {
             code[i] = @intCast(i);
         }
 
-        // Should fail with TruncatedPush
-        try std.testing.expectError(error.TruncatedPush, BytecodeDefault.init(allocator, code));
+        // Yellow Paper: truncated PUSH zero-pads missing trailing byte on the right
+        var bc = try BytecodeDefault.init(allocator, code);
+        defer bc.deinit();
+        var iter = bc.createIterator();
+        const op = iter.next().?;
+        try std.testing.expectEqual(@as(u8, 0), @as(u8, @truncate(op.push.value)));
+        try std.testing.expect(iter.next() == null);
     }
 }
 

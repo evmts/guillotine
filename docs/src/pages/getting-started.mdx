@@ -12,10 +12,12 @@ example below was compiled and run. See [Running it](#running-it).
 ## Where to put the code
 
 Build inside a checkout of the repository. The root `build.zig` does not export
-any named module: it creates the `evm` module with `b.createModule`
-(`src/modules.build.zig`) and never calls `b.addModule`, so a project that
-adds Guillotine with `zig fetch --save` cannot call
-`dependency("Guillotine", .{}).module("evm")`.
+`evm` as a public named module: `src/modules.build.zig` calls `b.addModule`
+only for `evm_limits` and creates `evm_mod` with `b.createModule`, so a project
+that adds Guillotine with `zig fetch --save` cannot yet call
+`dependency("Guillotine", .{}).module("evm")`. See
+[Publishing and releases](/guides/publishing#zig-package) for Zig package
+consumption status.
 
 Inside the checkout, `zig build test-integration` compiles `test/root.zig` with
 the `evm` and `voltaire` imports already wired (`build.zig`). Put the examples
@@ -281,4 +283,5 @@ pass; it is not a permanent test.
 - [Concepts: Architecture](/concepts/architecture): how the pieces fit
 - [Guides: Configuring the EVM](/guides/configuration): every comptime knob
 - [Guides: Tracing and debugging](/guides/tracing): the differential tracer
+- [Guides: Benchmarks and native JIT](/guides/benchmarks-and-jit): benchmark suite and opt-in ARM64 JIT
 - [Reference: `Evm`](/reference/evm): the public surface

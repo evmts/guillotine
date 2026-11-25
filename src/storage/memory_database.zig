@@ -583,11 +583,81 @@ const CONSTRUCTOR_CONTRACT = [_]u8{
 };
 
 test "CREATE stores code and retrieves via get_code_by_address" {
-    return error.SkipZigTest; // TODO: Update to use new architecture
+    const allocator = std.testing.allocator;
+
+    const result = try createTestEvm(allocator);
+    var evm = result.evm;
+    var memory_db = result.memory_db;
+    defer {
+        evm.deinit();
+        allocator.destroy(evm);
+        memory_db.deinit();
+        allocator.destroy(memory_db);
+    }
+
+    const deployer_bytes = to_address(0x1000);
+    const deployer = primitives.Address{ .bytes = deployer_bytes };
+    var deployer_account = Account.zero();
+    deployer_account.balance = 1_000_000_000_000_000_000;
+    try evm.database.set_account(deployer_bytes, deployer_account);
+
+    const call_result = evm.call(.{
+        .create = .{
+            .caller = deployer,
+            .value = 0,
+            .init_code = &CONSTRUCTOR_CONTRACT,
+            .gas = 500_000,
+        },
+    });
+    defer call_result.deinit(allocator);
+
+    try std.testing.expect(call_result.success);
+    const created_addr = call_result.created_address orelse return error.TestUnexpectedResult;
+    const stored_code = try evm.database.get_code_by_address(created_addr.bytes);
+    const expected_runtime = CONSTRUCTOR_CONTRACT[12..];
+    try std.testing.expectEqualSlices(u8, expected_runtime, stored_code);
 }
 
 test "CREATE2 stores code with deterministic address" {
-    return error.SkipZigTest; // TODO: Update to use new architecture
+    const allocator = std.testing.allocator;
+
+    const result = try createTestEvm(allocator);
+    var evm = result.evm;
+    var memory_db = result.memory_db;
+    defer {
+        evm.deinit();
+        allocator.destroy(evm);
+        memory_db.deinit();
+        allocator.destroy(memory_db);
+    }
+
+    const deployer_bytes = to_address(0x2000);
+    const deployer = primitives.Address{ .bytes = deployer_bytes };
+    var deployer_account = Account.zero();
+    deployer_account.balance = 1_000_000_000_000_000_000;
+    try evm.database.set_account(deployer_bytes, deployer_account);
+
+    const salt: u256 = 0x12345678;
+    const expected_addr = try calculateCreate2Address(deployer_bytes, salt, &CONSTRUCTOR_CONTRACT);
+
+    const call_result = evm.call(.{
+        .create2 = .{
+            .caller = deployer,
+            .value = 0,
+            .init_code = &CONSTRUCTOR_CONTRACT,
+            .salt = salt,
+            .gas = 500_000,
+        },
+    });
+    defer call_result.deinit(allocator);
+
+    try std.testing.expect(call_result.success);
+    const created_addr = call_result.created_address orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqualSlices(u8, &expected_addr, &created_addr.bytes);
+
+    const stored_code = try evm.database.get_code_by_address(expected_addr);
+    const expected_runtime = CONSTRUCTOR_CONTRACT[12..];
+    try std.testing.expectEqualSlices(u8, expected_runtime, stored_code);
 }
 
 test "get_code_by_address returns empty for non-existent contracts" {

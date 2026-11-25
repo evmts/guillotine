@@ -45,7 +45,7 @@ pub fn compileAssembly(allocator: std.mem.Allocator, asm_code: []const u8) ![]u8
     const code_with_addresses = try replacePlaceholders(allocator, asm_code);
     defer allocator.free(code_with_addresses);
 
-    var code: []const u8 = code_with_addresses;
+    var code: []const u8 = std.mem.trim(u8, code_with_addresses, " \t\n\r");
 
     // Handle :asm prefix - simple assembly format
     if (std.mem.startsWith(u8, code, ":asm ")) {
@@ -67,12 +67,24 @@ pub fn compileAssembly(allocator: std.mem.Allocator, asm_code: []const u8) ![]u8
     // Handle { ... } format (may contain multiple expressions)
     if (std.mem.startsWith(u8, code, "{") and std.mem.endsWith(u8, code, "}")) {
         code = std.mem.trim(u8, code[1..code.len-1], " \t\n\r");
-        // LLL definitions and control flow (def, for, while, ...) are unknown to the
-        // legacy compiler; compile those programs with the LLL compiler instead.
-        return compileComplexExpression(allocator, code) catch |err| switch (err) {
-            error.UnknownOpcode => lll.compileProgram(allocator, code, getOpcode),
-            else => err,
-        };
+        // Keep `{ (asm ...) }` on the raw-assembly path.
+        if (!std.mem.startsWith(u8, code, "(asm ")) {
+            // Compile LLL programs with the LLL compiler first (proper statement POPs,
+            // minimal PUSH sizes, `(lll ...)` meta-compilation, and trailing STOP `0x00`
+            // matching `lllc`); fall back to the legacy assembler for raw-opcode blocks
+            // or label syntax such as `{ (PUSH1 0x01) (PUSH1 0x02) (ADD) }`.
+            if (lll.compileProgram(allocator, code, getOpcode)) |compiled| {
+                defer allocator.free(compiled);
+                var with_stop = try allocator.alloc(u8, compiled.len + 1);
+                @memcpy(with_stop[0..compiled.len], compiled);
+                with_stop[compiled.len] = 0x00; // STOP
+                return with_stop;
+            } else |err| switch (err) {
+                error.UnknownOpcode, error.InvalidFormat => {},
+                else => return err,
+            }
+        }
+        return compileComplexExpression(allocator, code);
     }
 
     // Remove (asm ... ) wrapper if present
@@ -942,6 +954,8 @@ fn getOpcode(name: []const u8) !u8 {
     if (std.mem.eql(u8, name, "CHAINID")) return 0x46;
     if (std.mem.eql(u8, name, "SELFBALANCE")) return 0x47;
     if (std.mem.eql(u8, name, "BASEFEE")) return 0x48;
+    if (std.mem.eql(u8, name, "BLOBHASH")) return 0x49;
+    if (std.mem.eql(u8, name, "BLOBBASEFEE")) return 0x4a;
 
     // Memory
     if (std.mem.eql(u8, name, "POP")) return 0x50;
@@ -956,6 +970,9 @@ fn getOpcode(name: []const u8) !u8 {
     if (std.mem.eql(u8, name, "MSIZE")) return 0x59;
     if (std.mem.eql(u8, name, "GAS")) return 0x5a;
     if (std.mem.eql(u8, name, "JUMPDEST")) return 0x5b;
+    if (std.mem.eql(u8, name, "TLOAD")) return 0x5c;
+    if (std.mem.eql(u8, name, "TSTORE")) return 0x5d;
+    if (std.mem.eql(u8, name, "MCOPY")) return 0x5e;
 
     // Push operations
     if (std.mem.eql(u8, name, "PUSH0")) return 0x5f;
@@ -1045,7 +1062,7 @@ fn getOpcode(name: []const u8) !u8 {
     if (std.mem.eql(u8, name, "STATICCALL")) return 0xfa;
     if (std.mem.eql(u8, name, "REVERT")) return 0xfd;
     if (std.mem.eql(u8, name, "INVALID")) return 0xfe;
-    if (std.mem.eql(u8, name, "SELFDESTRUCT")) return 0xff;
+    if (std.mem.eql(u8, name, "SELFDESTRUCT") or std.mem.eql(u8, name, "SUICIDE")) return 0xff;
 
     return error.UnknownOpcode;
 }

@@ -48,6 +48,9 @@ pub const FrameConfig = struct {
     /// When enabled, bytecode fusion handlers are not registered
     disable_fusion: bool = false,
 
+    /// Enable tracer callbacks in all build modes (including ReleaseFast) when EvmConfig.tracer_config.enabled is true.
+    enable_tracer: bool = false,
+
     /// SIMD vector length for optimized operations
     /// Value of 1 means scalar operations (no SIMD)
     vector_length: comptime_int = 1,

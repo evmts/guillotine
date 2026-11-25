@@ -246,10 +246,10 @@ test "BALANCE opcode with host - successful execution" {
     try std.testing.expectEqual(mock_host.test_balance, balance);
 }
 
-test "BALANCE opcode without host - test skipped" {
-    // Host is now required, so frames cannot be created without a host
-    // This makes the test invalid since we can't test the null host case
-    return error.SkipZigTest;
+test "Host parameter is required and non-nullable by type" {
+    var mock_host = MockHost{};
+    const host = Host.init(&mock_host);
+    try std.testing.expect(@typeInfo(@TypeOf(host)) != .optional);
 }
 
 test "ORIGIN opcode with host - successful execution" {
@@ -286,12 +286,6 @@ test "ORIGIN opcode with host - successful execution" {
     try std.testing.expectEqual(@as(usize, 1), interpreter.frame.stack.size());
     const origin = try interpreter.frame.stack.pop();
     try std.testing.expectEqual(address_utils.to_u256(mock_host.test_origin), origin);
-}
-
-test "ORIGIN opcode without host - test skipped" {
-    // Host is now required, so frames cannot be created without a host
-    // This makes the test invalid since we can't test the null host case
-    return error.SkipZigTest;
 }
 
 test "CALLER opcode with host - successful execution" {
@@ -401,18 +395,6 @@ test "CREATE opcode with host - successful execution" {
     
     // Verify result is on stack (0 for our mock)
     try std.testing.expectEqual(@as(usize, 1), interpreter.frame.stack.size());
-}
-
-test "CREATE opcode without host - test skipped" {
-    // Host is now required, so frames cannot be created without a host
-    // This makes the test invalid since we can't test the null host case
-    return error.SkipZigTest;
-}
-
-test "Host operations don't modify state before null check - test skipped" {
-    // Host is now required, so frames cannot be created without a host
-    // This makes the test invalid since we can't test the null host case
-    return error.SkipZigTest;
 }
 
 test "Multiple host operations in sequence" {

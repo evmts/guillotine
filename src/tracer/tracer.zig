@@ -240,8 +240,8 @@ pub const Tracer = struct {
             .is_synthetic = opcode_value > 0xFF,
         });
 
-        // Capture execution steps if enabled
-        if (self.config.enable_step_capture) {
+        // Capture execution steps if enabled (skip internal dispatch markers like BLOCK_BEGIN)
+        if (self.config.enable_step_capture and opcode != .BLOCK_BEGIN) {
             const pc = self.current_pc;
 
             var stack_before: []u256 = &[_]u256{};

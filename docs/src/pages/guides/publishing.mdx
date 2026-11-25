@@ -1,0 +1,164 @@
+---
+title: Publishing and releases
+description: How Guillotine builds cross-platform native binaries, publishes @tevm/guillotine to npm with provenance, tags Zig releases, and deploys docs.
+---
+
+# Publishing and releases
+
+Guillotine publishes artifacts across four surfaces from a single semver tag:
+
+| Surface | Artifact | Trigger |
+| --- | --- | --- |
+| GitHub Releases | `guillotine-ffi-<platform>-<arch>.tar.gz`, `guillotine.h`, `SHA256SUMS.txt` | Push tag `v*` (or `workflow_dispatch`) |
+| npm (`@tevm/guillotine`) | ESM package + bundled `darwin-arm64` and `linux-x64` native prebuilds, signed with npm provenance | Push tag `v*` (or `workflow_dispatch` with `dry_run: false`) |
+| Zig package (`build.zig.zon`) | Source archive at `refs/tags/v<version>.tar.gz` for `zig fetch --save` | Git tag `v*` |
+| Docs (`guillotine.tevm.sh`) | Static/Build Output API site from `docs/` | Automatic Vercel deployment on push to `main` |
+
+## Cutting a release (`scripts/release.sh`)
+
+Maintainers start from a clean repository root using `scripts/release.sh`:
+
+```bash
+# Preview checks without mutating version files
+./scripts/release.sh 0.1.0-alpha.1 --dry-run
+
+# Sync versions, verify CHANGELOG.md, and run local preflight checks
+./scripts/release.sh 0.1.0-alpha.1
+```
+
+`scripts/release.sh` performs four steps:
+
+1. **Validates semver and toolchain** (`X.Y.Z` or prerelease such as
+   `X.Y.Z-alpha.N`, without a leading `v`, plus Zig `0.15.x`, `bun`, and
+   `python3`).
+2. **Verifies `CHANGELOG.md`** contains a `## [<version>]` section heading so
+   release notes are never missing.
+3. **Synchronizes versions** across `build.zig.zon` (`.version`) and
+   `sdks/typescript/package.json` (`"version"`) — previewed without modifying
+   files in `--dry-run` mode.
+4. **Runs local preflight checks** from the repository root:
+   - `zig build`
+   - `zig build shared -Doptimize=ReleaseFast`
+   - In `sdks/typescript`: `bun install`, `bun run build:native`,
+     `bun run build`, `bun run typecheck`, `bun test`, and `bun run lint:package`
+     (`publint --strict` and `attw --pack --profile esm-only`)
+
+When preflight passes, the script prints the exact `jj` and `gh` commands to
+commit the version bump, push the `v<version>` tag, and watch or trigger the
+release workflow.
+
+## Release workflow (`.github/workflows/release.yml`)
+
+The GitHub Actions workflow triggers on `push: tags: ['v*']` and on manual
+`workflow_dispatch` (accepting `version` and `dry_run`, which defaults to
+`true`). It runs three coordinated jobs:
+
+### 1. `build-native` (matrix)
+
+Builds `ReleaseFast` native libraries on both supported CI platforms with Zig
+`0.15.2`, recursive submodules, and Cargo/Zig caches:
+
+| Runner | Target key | Shared lib | Static lib |
+| --- | --- | --- | --- |
+| `macos-latest` (arm64) | `darwin-arm64` | `libguillotine_ffi.dylib` | `libguillotine_ffi_static.a` |
+| `ubuntu-latest` (x86_64) | `linux-x64` | `libguillotine_ffi.so` | `libguillotine_ffi_static.a` |
+
+On macOS runners, the workflow runs the same Xcode SDK probe as
+`.github/workflows/ci.yml` so Zig 0.15.2 links cleanly on `macos-26` runners
+whose default SDK omits `arm64-macos` `libSystem` stubs.
+
+Each matrix leg runs:
+
+```bash
+zig build shared -Doptimize=ReleaseFast
+zig build static -Doptimize=ReleaseFast
+```
+
+It then packages two artifacts:
+
+- **C FFI tarball** (`guillotine-ffi-<platform>-<arch>.tar.gz`) containing the
+  shared library, static library, and `sdks/c/include/guillotine.h`.
+- **TypeScript SDK prebuild** (`prebuilds/<platform>-<arch>/libguillotine_ffi.<ext>`).
+
+### 2. `publish-npm` (`@tevm/guillotine`)
+
+Depends on `build-native` and requests `permissions: { contents: read, id-token: write }`
+for [npm provenance](https://docs.npmjs.com/generating-provenance-statements):
+
+1. Downloads both `darwin-arm64` and `linux-x64` prebuilds into
+   `sdks/typescript/prebuilds/`.
+2. Installs dependencies with Bun and runs `bun run build`, `bun run typecheck`,
+   `bun test`, and `bun run lint:package`.
+3. Sets `GUILLOTINE_SKIP_NATIVE_BUILD=1` so `sdks/typescript/package.json`'s
+   `prepublishOnly` script preserves the multi-platform `prebuilds/` directory
+   instead of rebuilding only the host platform binary. (A local `npm publish`
+   without that environment variable still runs `bun run build:native`.)
+4. Publishes with `npm publish --provenance --access public` using
+   `secrets.NPM_TOKEN` on `v*` tag pushes (or `workflow_dispatch` with
+   `dry_run: false`). Prerelease versions automatically publish under their
+   prerelease dist-tag (e.g. `--tag alpha` for `0.1.0-alpha.1`) rather than
+   `latest`. On dry runs, it validates the tarball with `npm pack --dry-run`.
+
+### 3. `github-release`
+
+Depends on `build-native` (`permissions: { contents: write }`):
+
+1. Downloads all `guillotine-ffi-*.tar.gz` tarballs and generates
+   `SHA256SUMS.txt`.
+2. Extracts the matching version section from `CHANGELOG.md` (falling back to
+   GitHub auto-generated release notes if not found).
+3. Creates the GitHub Release attaching the platform tarballs,
+   `sdks/c/include/guillotine.h`, and `SHA256SUMS.txt`. Tags containing a `-`
+   (such as `v0.1.0-alpha.1`) are automatically marked as prereleases.
+
+## Zig package
+
+Every `v*` tag makes a versioned source archive available for the Zig package
+manager (`build.zig.zon`, requiring `minimum_zig_version = "0.15.1"`) via
+`zig fetch --save`:
+
+```bash
+zig fetch --save https://github.com/evmts/guillotine/archive/refs/tags/v0.1.0-alpha.1.tar.gz
+```
+
+`build.zig.zon` declares the package `.paths` (`build.zig`, `build.zig.zon`,
+`src`, `lib`, `LICENSE`, `README.md`) and pins external Zig
+dependencies (`zbench`, `clap`) to exact commit hashes alongside vendored
+`lib/voltaire`.
+
+:::info[Module export status]
+`src/modules.build.zig` currently registers `evm_mod` with `b.createModule`
+rather than `b.addModule` (only `evm_limits` uses `b.addModule`). Until `evm`
+is exported as a public named module in `build.zig`, downstream Zig projects
+cannot call `b.dependency("Guillotine", .{}).module("evm")` directly — build
+inside a checkout or link the C FFI release tarball.
+:::
+
+## Documentation site (`guillotine.tevm.sh`)
+
+The documentation site lives under `docs/` and is built with Vocs 2 and
+auto-deployed by Vercel whenever changes land on `main`.
+
+`docs/vercel.json`:
+
+```json
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "installCommand": "npm install",
+  "buildCommand": "npm run build",
+  "cleanUrls": true,
+  "trailingSlash": false
+}
+```
+
+Vercel configures `docs/` as the project root directory and leaves
+`outputDirectory` unset because `vocs build` automatically detects the `VERCEL`
+environment variable and emits Build Output API artifacts. Always verify docs
+locally before pushing:
+
+```bash
+cd docs
+npm install
+npm run build
+```

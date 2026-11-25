@@ -175,10 +175,11 @@ Deployment is Vercel, serving [guillotine.tevm.sh](https://guillotine.tevm.sh),
 with `docs/` as the project root directory. `vocs build` detects the `VERCEL`
 environment variable and switches to the Vercel adapter automatically, emitting
 Build Output API artifacts. `docs/vercel.json` therefore sets the install and
-build commands and leaves `outputDirectory` unset. The deep developer notes in `docs/dev/`,
-`docs/performance/`, and `docs/mini/` remain as plain markdown and are the source
-of record for internals — improve them in place rather than duplicating them into
-MDX.
+build commands and leaves `outputDirectory` unset. For cutting releases and
+publishing packages, see [Publishing and releases](/guides/publishing). The deep
+developer notes in `docs/dev/` and `docs/performance/` remain as
+plain markdown and are the source of record for internals — improve them in
+place rather than duplicating them into MDX.
 
 If you document an API, verify it against the source or by compiling it. A wrong
 example costs a reader more than a missing one.

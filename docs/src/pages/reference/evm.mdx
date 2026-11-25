@@ -97,6 +97,17 @@ The re-entrant version used by the `CALL`/`CREATE` handlers. It does not assert
 depth zero and does not perform transaction-level bookkeeping. You want `call`
 unless you are implementing a handler.
 
+## `simulate`
+
+```zig
+pub fn simulate(self: *Self, params: CallParams) CallResult
+```
+
+Executes `call(params)` inside an ephemeral database overlay
+(`database.begin_ephemeral_view()` / `discard_ephemeral_view()`), returning the
+full `CallResult` while leaving the underlying `Database` unmodified. Free the
+returned result with `defer result.deinit(allocator)`.
+
 ## Snapshots
 
 ```zig
@@ -281,16 +292,19 @@ evm.Frame          evm.FrameConfig      evm.FrameDispatch
 evm.Stack          evm.StackConfig
 evm.Memory         evm.MemoryConfig     evm.MemoryError
 evm.Bytecode       evm.BytecodeConfig   evm.BytecodeStats
-evm.Database       evm.MemoryDatabase   evm.Account
-evm.AccessList     evm.CreatedContracts evm.SelfDestruct
+evm.Database       evm.DatabaseProxy    evm.ProxyMode
+evm.MemoryDatabase evm.Account          evm.AccessList
+evm.CreatedContracts  evm.SelfDestruct
 evm.Opcode         evm.OpcodeData       evm.OpcodeSynthetic
-evm.Hardfork       evm.Eips
+evm.Hardfork       evm.Eips             evm.eips
+evm.limits         evm.verified_ops
 evm.Tracer         evm.TracerConfig     evm.MinimalEvm
 evm.BlockInfo      evm.CompactBlockInfo evm.TransactionContext
 evm.CallParams     evm.CallResult       evm.Log
 evm.AuthorizationProcessor  evm.AuthorizationError
 evm.precompiles    evm.kzg_setup        evm.log
 evm.layer2         evm.trie             evm.dispatch_pretty_print
+evm.Primitives     evm.Provider
 ```
 
 `src/root.zig` also declares `evm.JSONRPCTracer`, but `src/tracer/tracer.zig`

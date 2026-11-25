@@ -427,20 +427,19 @@ Detailed documentation is available in `docs/`:
   - [HARDFORKS.md](docs/dev/HARDFORKS.md) - EIP support matrix
   - [CONTRIBUTING.md](docs/dev/CONTRIBUTING.md) - Development workflow
 - **[docs/performance/](docs/performance/)** - Performance EVM specifics
-- **[docs/mini/](docs/mini/)** - Mini EVM specifics
 
 ## References
 
 - Zig docs: https://ziglang.org/documentation/0.15.2/ (CI uses Zig 0.15.2; `build.zig.zon` requires at least 0.15.1)
-- `mini/`: guillotine-mini, the reference interpreter used for differential tests
+- `evmts/guillotine-mini`: standalone readable reference EVM (separate repository, https://github.com/evmts/guillotine-mini)
 - `specs/execution-specs` (git submodule): Python execution specs and test fillers
 - Yellow Paper: Ethereum spec
 - EIPs: Ethereum Improvement Proposals
 
-## Collaboration
+## Collaboration & Ownership
 
-- Present proposals, wait for approval
-- Plan fails: STOP, explain, wait for guidance
+- Act as the maintainer and owner of the codebase: finish tasks end-to-end, push verified changes to `main`, merge PRs, close resolved issues, and run CI/release workflows without asking for permission on routine maintainer actions.
+- Only stop to ask when there is a genuine blocker (missing credentials/secrets, ambiguous product direction, or a hard security boundary).
 
 ## GitHub Issue Management
 
@@ -476,7 +475,6 @@ Key Steps:
   test-fusions                 Run focused fusion tests (unit + dispatch + differential)
   test-modexp                  Run vendored ModExp arithmetic and precompile tests
   test-layer2                  Run Layer 2 (Base & OP Stack) unit tests
-  test-mini                    Run guillotine-mini unit tests
   test-fuzz                    Run all Zig fuzz targets
   shared / static              Build the shared or static library for FFI
   bench                        Run self-contained EVM benchmarks (ReleaseFast)

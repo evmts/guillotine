@@ -696,7 +696,10 @@ pub const Eips = struct {
         return !is_static;
     }
 
-    /// EIP-6780: Handle SELFDESTRUCT based on creation in same transaction
+    /// EIP-6780: Handle SELFDESTRUCT based on creation in same transaction.
+    /// Balance is always transferred immediately during execution (both pre-Cancun
+    /// and Cancun+). When destroying (pre-Cancun or created in same tx), sending to
+    /// self burns the balance to 0 and schedules account deletion at end of tx.
     pub fn handle_selfdestruct(
         self: Self,
         created_in_tx: bool,
@@ -707,36 +710,37 @@ pub const Eips = struct {
         journal: anytype,
         snapshot_id: anytype,
     ) !void {
-        if (!self.hardfork.isAtLeast(.CANCUN)) {
-            // Pre-Cancun: always mark for full destruction
-            try self_destruct.mark_for_destruction(contract_address, recipient);
-            return;
-        }
+        const will_destroy = !self.hardfork.isAtLeast(.CANCUN) or created_in_tx;
+        const Account = @import("../storage/database_interface_account.zig").Account;
+        const same_address = std.mem.eql(u8, &contract_address.bytes, &recipient.bytes);
 
-        // EIP-6780: Only destroy if created in same transaction
-        if (created_in_tx) {
-            // Full destruction: transfer balance and mark for deletion
-            try self_destruct.mark_for_destruction(contract_address, recipient);
-        } else {
-            // Only transfer balance, don't destroy the contract
-            const contract_account = try database.get_account(contract_address.bytes);
-            if (contract_account) |account| {
-                if (account.balance > 0) {
-                    // Transfer balance to recipient
+        if (try database.get_account(contract_address.bytes)) |account| {
+            if (account.balance > 0) {
+                if (!same_address) {
+                    const existing_recipient = try database.get_account(recipient.bytes);
+                    const prev_recipient_balance: u256 = if (existing_recipient) |r| r.balance else 0;
                     try journal.record_balance_change(snapshot_id, contract_address, account.balance);
-                    try journal.record_balance_change(snapshot_id, recipient, 0);
+                    try journal.record_balance_change(snapshot_id, recipient, prev_recipient_balance);
 
-                    // Update balances
                     var sender_account = account;
                     sender_account.balance = 0;
                     try database.set_account(contract_address.bytes, sender_account);
 
-                    const Account = @import("../storage/database_interface_account.zig").Account;
-                    var recipient_account = (try database.get_account(recipient.bytes)) orelse Account.zero();
+                    var recipient_account = existing_recipient orelse Account.zero();
                     recipient_account.balance +%= account.balance;
                     try database.set_account(recipient.bytes, recipient_account);
+                } else if (will_destroy) {
+                    // Self-destructing to self when the contract will be destroyed burns its balance.
+                    try journal.record_balance_change(snapshot_id, contract_address, account.balance);
+                    var sender_account = account;
+                    sender_account.balance = 0;
+                    try database.set_account(contract_address.bytes, sender_account);
                 }
             }
+        }
+
+        if (will_destroy) {
+            try self_destruct.mark_for_destruction(contract_address, recipient);
         }
     }
 

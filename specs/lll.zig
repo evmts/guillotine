@@ -106,12 +106,14 @@ const Parser = struct {
     }
 };
 
+const CODECOPY = 0x39;
 const JUMPDEST = 0x5b;
 const JUMP = 0x56;
 const JUMPI = 0x57;
 const ISZERO = 0x15;
 const POP = 0x50;
 const PUSH2 = 0x61;
+const DUP1 = 0x80;
 
 fn Compiler(comptime opcodeOf: fn ([]const u8) anyerror!u8) type {
     return struct {
@@ -224,6 +226,30 @@ fn Compiler(comptime opcodeOf: fn ([]const u8) anyerror!u8) type {
                         self.patch(end, try self.label());
                         return then_depth;
                     }
+                    if (std.mem.eql(u8, head, "lll")) {
+                        if (args.len != 2) return error.InvalidFormat;
+                        var sub = Self{ .allocator = self.allocator, .defs = self.defs };
+                        errdefer sub.code.deinit(self.allocator);
+                        try sub.statement(args[0]);
+                        const inner = try sub.code.toOwnedSlice(self.allocator);
+                        defer self.allocator.free(inner);
+
+                        // Copy inner bytecode into memory at `offset` and leave `inner.len` on the stack:
+                        // PUSH len; DUP1; PUSH2 data_start; <offset>; CODECOPY; PUSH2 after; JUMP; <inner>; JUMPDEST
+                        try self.pushValue(inner.len);
+                        try self.emit(DUP1);
+                        const data_patch = try self.pushTarget();
+                        try self.value(args[1]);
+                        try self.emit(CODECOPY);
+                        const after_patch = try self.pushTarget();
+                        try self.emit(JUMP);
+                        const data_start = std.math.cast(u16, self.code.items.len) orelse return error.InvalidFormat;
+                        try self.code.appendSlice(self.allocator, inner);
+                        const after_data = try self.label();
+                        self.patch(data_patch, data_start);
+                        self.patch(after_patch, after_data);
+                        return 1;
+                    }
                     return self.opcode(alias(head), args);
                 },
             }
@@ -247,6 +273,14 @@ fn Compiler(comptime opcodeOf: fn ([]const u8) anyerror!u8) type {
             var upper: [32]u8 = undefined;
             if (name.len > upper.len) return error.UnknownOpcode;
             const op = try opcodeOf(std.ascii.upperString(upper[0..name.len], name));
+            // Raw PUSH1..PUSH32 instructions with immediate arguments belong to raw
+            // assembly syntax (e.g. `(PUSH1 0x01)`), not LLL s-expressions.
+            if (op >= 0x60 and op <= 0x7f) return error.InvalidFormat;
+            // Bare stack-manipulating ops without LLL arguments (e.g. `(ADD)` after raw pushes)
+            // cannot be safely popped as LLL statements; hand off to raw assembler.
+            if (args.len == 0 and (op == 0x01 or op == 0x02 or op == 0x03 or op == 0x52 or op == 0x55 or (op >= 0x80 and op <= 0x9f))) {
+                return error.InvalidFormat;
+            }
             var i = args.len;
             while (i > 0) {
                 i -= 1;

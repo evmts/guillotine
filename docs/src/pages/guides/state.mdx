@@ -115,6 +115,23 @@ Because snapshot ids are integers into an undo log, nesting is cheap and depth
 fail, and making it fallible would force meaningless error handling into every
 call site.
 
+## Read-only simulation and `DatabaseProxy`
+
+For dry-run execution (such as `eth_call`) that must leave base state untouched,
+use `evm.simulate(params)`. It wraps `call(params)` in an ephemeral database
+overlay (`database.begin_ephemeral_view()` / `discard_ephemeral_view()`), so all
+mutations stay in the overlay and are discarded when the call returns.
+
+`DatabaseProxy(mode, DatabaseType)` (`src/storage/database_proxy.zig`, exported
+with `ProxyMode` from `src/root.zig`) wraps a `*DatabaseType` pointer with
+comptime-selected access semantics:
+
+| `ProxyMode` | Behavior |
+| --- | --- |
+| `.pass_through` | Forwards every read and write directly to the inner database. |
+| `.static` | Forwards reads; rejects writes with `error.PermissionDenied` (EIP-214 `STATICCALL`). |
+| `.lru` | Buffers persistent account, storage, and code writes until `flush()` applies them atomically inside an inner snapshot; transient storage (EIP-1153) forwards directly. |
+
 ## The access list
 
 `AccessList` (`src/storage/access_list.zig`) implements EIP-2929 warm/cold

@@ -188,6 +188,7 @@ pub const EvmConfig = struct {
             .disable_gas_checks = self.disable_gas_checks,
             .disable_balance_checks = self.disable_balance_checks,
             .disable_fusion = !self.enable_fusion,
+            .enable_tracer = self.tracer_config.enabled,
             .vector_length = self.getVectorLength(),
             .loop_quota = self.loop_quota,
             .opcode_overrides = &.{}, // Pass empty overrides - custom overrides should be handled differently

@@ -1,0 +1,201 @@
+---
+title: Benchmarks and native JIT
+description: Self-contained ReleaseFast benchmarks, incremental Smithers DAG, verified numbers on main, and the opt-in ARM64 JIT tier.
+---
+
+# Benchmarks and native JIT
+
+Guillotine ships a self-contained, native ReleaseFast benchmark suite under
+`bench/` — no external `evmts/evm-benchmarks` checkout, `zbench` dependency, or
+RPC endpoint is required — alongside an opt-in, zero-dependency ARM64 direct
+JIT tier in `src/jit/`.
+
+## Running the benchmark suite
+
+Run all commands from the repository root with Zig 0.15.x. The runner compiles
+the EVM and its dependencies in `ReleaseFast` and refuses timing runs in any
+other optimization mode.
+
+### Full-EVM runner (`zig build bench`)
+
+```bash
+# Run the full EVM benchmark suite (defaults to Osaka, ReleaseFast)
+zig build bench
+
+# Filter to specific workloads with custom sample/warmup counts
+zig build bench -- --filter opcode/ADD --iterations 1000 --warmup 100
+
+# Run contract fixtures (including Snailtracer) under Prague's historical gas budget
+zig build bench -Dbench-hardfork=PRAGUE -- --filter contract/
+
+# Write machine-readable JSON output (defaults to bench/results/latest.json)
+zig build bench -- --json bench/results/latest.json
+
+# Compare dispatch modes (tailcall+fusions vs tailcall-no-fusions)
+zig build bench -- --compare --filter opcode
+
+# Standalone build file (if invoking bench/build.zig directly)
+zig build --build-file bench/build.zig test-bench
+```
+
+`zig build bench-build` installs the binary at `zig-out/bin/guillotine-bench`
+(or `bench/zig-out/bin/guillotine-bench` when built via `bench/build.zig`).
+
+:::info[Hardfork and gas budget]
+Benchmarks default to **Osaka** with EIP-7825's `16,777,216` transaction gas
+cap. Historical contract fixtures such as Snailtracer consume more than 200M
+gas, so contract runs pass `-Dbench-hardfork=PRAGUE` (1B off-chain budget).
+`CLZ` and `P256VERIFY` require Osaka and are reported as unavailable on Prague.
+:::
+
+### Incremental Smithers benchmark DAG
+
+Every major subsystem also has a standalone `ReleaseFast` microbenchmark binary
+built on `bench/micro.zig` and wired into per-subsystem Smithers `PACKAGE.ts`
+targets (`bench/PACKAGE.ts` + 10 `src/*/PACKAGE.ts` files). Unchanged suites
+replay from cache:
+
+```bash
+# Run ONLY suites whose declared source inputs changed in your diff
+smthrs affected test //src/... //bench/... --include-exclusive
+
+# Run the unified report across all 16 suites and diff against bench/baseline.json
+smthrs test //bench:report --jobs 3
+
+# Run a single subsystem suite via Smithers or Zig
+smthrs test //src/bytecode:bench
+zig build bench-bytecode -- --iterations 40 --warmup 8
+
+# Update the committed baseline after landing verified speedups
+node bench/summary.mjs --results-dir bench/results --write-baseline --baseline bench/baseline.json
+
+# Run benchmark harness unit tests
+zig build test-bench test-micro-bench
+```
+
+`//bench:report` runs `bench/summary.mjs` to aggregate `bench/results/*.json`,
+compute `% faster / % slower` deltas against `bench/baseline.json`, and emit
+`bench/results/summary.md` and `bench/results/all.json`.
+
+## Verified numbers on `main`
+
+Measured on `main` in commits `78dbd431` and `815ab72f` (ReleaseFast, Apple
+Silicon arm64, gas accounting enabled, tracing disabled, 0 gas mismatches
+against the prior unified branch):
+
+| Benchmark / metric | Measured result | What drove it |
+| --- | --- | --- |
+| `contract/snailtracer` (Prague) | **42.95 ms** (**5.48 Ggas/s**) | Up from 206.8 ms / 1.15 Ggas/s in `bench/baseline.json`; tail-call dispatch, fusions, per-EVM dispatch cache, inline shallow calls, and Knuth D 256-bit division |
+| Osaka benchmark suite (geomean) | **4.63x** vs `maint/unified-v2` (**7.46x** vs original baseline) | End-to-end interpreter, dispatch, state, and crypto optimizations across all workloads |
+| `precompile/ECRECOVER` / `secp256k1-ecrecover` | **90.85x** (precompile) / **153.66x** (`secp256k1-ecrecover`) | `std.crypto.ecc.Secp256k1` (`mulDoubleBasePublic`), `u512` `unauditedMulmod`, plus pseudo-Mersenne + Jacobian + Shamir (~130x vs maint / ~200x vs orig) |
+| `db-snapshot-revert` | **6.92x** faster | O(1) append-only undo-log snapshots and lazy O(1) `get_original_storage_indexed` (`src/storage/database.zig`, `journal.zig`) |
+| `tokens_in_calldata` (EIP-7623) | **31.78x** faster | 32-byte SIMD calldata scan (`src/eips_and_hardforks/eips.zig`) |
+| `is_eip_active` | **36.01x** faster | O(1) hardfork switch replacing linear scan (`src/eips_and_hardforks/eips.zig`) |
+| Bytecode analysis (4 KB–16 KB) | **4.5x–8.76x** faster | Fast untraced analysis path (`src/bytecode/bytecode.zig`) |
+| Jump table lookup | **2.14x** faster | Single-pass `packed_bitmap` + branchless binary search (`src/preprocessor/`) |
+| OP Stack FastLZ (68 B) | **5.78x** faster | Sparse-reset TLS for `< 512 B`, stack `htab`, `u64` word comparison (`src/layer2/optimism/fast_lz.zig`) |
+
+### Methodology and caveats
+
+- **What a sample measures.** Each EVM sample times `evm.simulate()`: the
+  ephemeral database overlay, dispatch lookup/analysis, execution, and owned
+  result copying. Setup/deployment (unfused constructors), preflight validation,
+  warmups, and result cleanup are outside the timed window.
+- **Strict validation.** Every sample must succeed and match preflight gas and
+  output. Curve precompiles validate output sizes and never accept empty or
+  point-at-infinity shortcuts. Failed or unavailable benchmarks never receive
+  synthetic timing numbers.
+- **Known caveats.** `src/preprocessor/dispatch.zig` currently ignores
+  `disable_tailcall_dispatch`, so `--compare` reports the loop-dispatch row as
+  `unavailable`. Precompile suites pass `--allow-unavailable` where needed for
+  fork-gated checks. See `bench/README.md` for the full schema specification.
+
+## The 16 benchmark suites
+
+| Subsystem | Smithers target | Zig step | Source |
+| --- | --- | --- | --- |
+| Stack | `//src/stack:bench` | `zig build bench-stack` | `bench/suites/stack_bench.zig` |
+| Memory | `//src/memory:bench` | `zig build bench-memory` | `bench/suites/memory_bench.zig` |
+| Bytecode analysis | `//src/bytecode:bench` | `zig build bench-bytecode` | `bench/suites/bytecode_bench.zig` |
+| Layer 2 (OP Stack / FastLZ) | `//src/layer2:bench` | `zig build bench-layer2` | `bench/suites/layer2_bench.zig` |
+| Provider / JSON-RPC validation | `//src/provider:bench` | `zig build bench-provider` | `bench/suites/provider_bench.zig` |
+| Storage (Database, Journal, AccessList) | `//src/storage:bench` | `zig build bench-storage` | `bench/suites/storage_bench.zig` |
+| Merkle Patricia Trie & NodeCache | `//src/trie:bench` | `zig build bench-trie` | `bench/suites/trie_bench.zig` |
+| EIPs & Hardforks | `//src/eips_and_hardforks:bench` | `zig build bench-eips` | `bench/suites/eips_bench.zig` |
+| Tracer RingBuffer | `//src/tracer:bench` | `zig build bench-tracer` | `bench/suites/tracer_bench.zig` |
+| MinimalEvm reference interpreter | `//src/tracer:bench-minimal-evm` | `zig build bench-minimal-evm` | `bench/suites/minimal_evm_bench.zig` |
+| Preprocessor (Dispatch & JumpTable) | `//src/preprocessor:bench` | `zig build bench-preprocessor` | `bench/suites/preprocessor_bench.zig` |
+| Crypto primitives | `//bench:bench-crypto` | `zig build bench-crypto` | `bench/suites/crypto_bench.zig` |
+| C ABI / FFI lifecycle | `//bench:bench-ffi` | `zig build bench-ffi` | `bench/suites/ffi_bench.zig` |
+| EVM Opcodes (40 opcodes, Osaka) | `//bench:bench-opcodes` | `zig build bench -- --filter opcode/` | `bench/workloads.zig` |
+| EVM Contracts (9 contracts, Prague) | `//bench:bench-contracts` | `zig build bench -Dbench-hardfork=PRAGUE -- --filter contract/` | `bench/workloads.zig` |
+| EVM Precompiles (7 active + P256 check) | `//bench:bench-precompiles` | `zig build bench -- --filter precompile/ --allow-unavailable` | `bench/workloads.zig` |
+
+## Native ARM64 JIT
+
+Guillotine includes a zero-dependency native JIT tier under `src/jit/` that
+compiles hot, side-effect-free EVM bytecode directly to AArch64 machine code.
+The `src/jit/` directory depends only on Zig `std` and `builtin` (no LLVM or
+external assembler at runtime) and is wired into `Evm` through
+`src/jit_bridge.zig`.
+
+### Opting in
+
+The native JIT is **opt-in and off by default** (`enable_native_jit = false` in
+`src/evm_config.zig`). On current benchmarks, bridge setup overhead outweighs
+native execution speed for short calls, so the dispatch-schedule interpreter
+remains the default. Enable it at comptime when benchmarking or targeting
+long-running pure-compute contracts on `aarch64`:
+
+```zig
+const Evm = @import("evm").Evm;
+
+const JitEvm = Evm(.{
+    .enable_native_jit = true,
+});
+```
+
+### Architecture and compilation pipeline
+
+| File | Role |
+| --- | --- |
+| `src/jit/root.zig` | Public types (`JitContext`, `ExitCode`, `RuntimeHelpers`) and helper implementations |
+| `src/jit/compiler.zig` | EVM-to-AArch64 compiler (`Program`, `Options`, `compile`) |
+| `src/jit/arm64_emitter.zig` | Direct AArch64 instruction encoder |
+| `src/jit/x86_64_emitter.zig` | x86_64 instruction encoder (backend compiler currently gates on `builtin.cpu.arch == .aarch64`) |
+| `src/jit/jit_mem.zig` | Executable page mapping (`W^X` / `pthread_jit_write_protect_np` on macOS) |
+| `src/jit/jit_cache.zig` | Bounded LRU cache (`capacity = 64`, `hot_threshold = 2`, byte-checked code-hash hits) |
+| `src/jit_bridge.zig` | Per-`Evm` adapter bridging `JitCache` to pooled `Frame` stack and memory buffers |
+
+Compilation runs in five stages (`src/jit/compiler.zig`):
+
+1. **Decode** bytecode and check opcode eligibility against fork flags
+   (`shifts`, `revert`, `push0`, `mcopy`, `clz`, `keccak256`).
+2. **Split** live code into basic blocks and cut each block into gas segments
+   at `GAS` and dynamic-gas opcodes (`EXP`, `MLOAD`, `MSTORE`, `MSTORE8`,
+   `MCOPY`, `KECCAK256`, `RETURN`, `REVERT`).
+3. **Emit** native AArch64 instructions with fixed callee-saved state registers
+   (`x19` context, `x20` stack top, `x21` remaining gas, `x22` stack base,
+   `x23` stack limit, `x24` runtime helpers table) and once-per-block stack
+   bounds and safety-counter (`300,000,000` instruction budget) checks.
+4. **Patch** intra-contract branch targets and jump table entries.
+5. **Map** the code buffer into executable memory and cache the resulting
+   `Program` in `JitCache`.
+
+### Eligibility and fallback guarantees
+
+The JIT only executes contracts that cannot produce external side effects:
+
+- **Supported opcodes:** pure arithmetic/bitwise/comparison/stack ops, memory
+  (`MLOAD`, `MSTORE`, `MSTORE8`, `MSIZE`, `MCOPY`), calldata reads, control flow
+  (`JUMP`, `JUMPI`, `JUMPDEST`, `PC`, `GAS`), `KECCAK256`, `STOP`, `RETURN`,
+  and `REVERT`.
+- **Always interpreted:** contracts using storage (`SLOAD`/`SSTORE`/`TLOAD`/`TSTORE`),
+  logs, external calls, or `CREATE`/`CREATE2`; initcode; traced runs;
+  `disable_gas_checks = true`; non-`u256` word types or non-1024 stack sizes;
+  and non-`aarch64` targets.
+- **Exact replay on faults:** `src/jit_bridge.zig` compiles with
+  `replay_exceptional_halts = true`. Because a JIT run has no external side
+  effects, any exceptional halt or `ExitCode.fallback` restores the frame's
+  entry stack/memory snapshot and replays the entire call in the interpreter so
+  gas accounting and error semantics match the interpreter byte-for-byte.

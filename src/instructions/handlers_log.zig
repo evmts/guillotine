@@ -57,33 +57,43 @@ pub fn Handlers(FrameType: type) type {
                         topics[j] = self.stack.pop_unsafe();
                     }
 
-                    // Check bounds
-                    if (offset > std.math.maxInt(usize) or length > std.math.maxInt(usize)) {
-                        self.afterComplete(unified_opcode);
-                        return Error.OutOfBounds;
-                    }
-
-                    const offset_usize = @as(usize, @intCast(offset));
-                    const length_usize = @as(usize, @intCast(length));
-
-                    // Calculate memory expansion cost if reading data
+                    // Check bounds and compute memory expansion only when length > 0.
+                    // When length == 0, EVM ignores offset completely (even if > usize).
+                    var offset_usize: usize = 0;
+                    var length_usize: usize = 0;
                     var memory_expansion_cost: u64 = 0;
-                    if (length_usize > 0) {
-                        const end_offset = offset_usize + length_usize;
+                    if (length > 0) {
+                        if (offset > std.math.maxInt(usize) or length > std.math.maxInt(usize)) {
+                            self.afterComplete(unified_opcode);
+                            return Error.OutOfGas;
+                        }
+                        offset_usize = @as(usize, @intCast(offset));
+                        length_usize = @as(usize, @intCast(length));
+                        const end_offset = std.math.add(usize, offset_usize, length_usize) catch {
+                            self.afterComplete(unified_opcode);
+                            return Error.OutOfGas;
+                        };
                         if (end_offset > limits.max_memory_size) {
                             self.afterComplete(unified_opcode);
-                            return Error.OutOfBounds;
+                            return Error.OutOfGas;
                         }
                         memory_expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(end_offset)));
                     }
 
-                    // Calculate dynamic gas cost: data gas + memory expansion
-                    const data_gas_cost = @as(u64, length_usize) * GasConstants.LogDataGas;
-                    const total_dynamic_gas = data_gas_cost + memory_expansion_cost;
+                    // Calculate dynamic gas cost: data gas + memory expansion (overflow-safe)
+                    const data_gas_cost = std.math.mul(u64, @as(u64, length_usize), GasConstants.LogDataGas) catch {
+                        self.afterComplete(unified_opcode);
+                        return Error.OutOfGas;
+                    };
+                    const total_dynamic_gas = data_gas_cost +| memory_expansion_cost;
+                    const gas_charge = std.math.cast(FrameType.GasType, total_dynamic_gas) orelse {
+                        self.afterComplete(unified_opcode);
+                        return Error.OutOfGas;
+                    };
 
                     // Check gas and consume dynamic gas
                     // Use negative gas pattern for single-branch out-of-gas detection
-                    self.gas_remaining -= @intCast(total_dynamic_gas);
+                    self.gas_remaining -= gas_charge;
                     if (self.gas_remaining < 0) {
                         self.afterComplete(unified_opcode);
                         return Error.OutOfGas;

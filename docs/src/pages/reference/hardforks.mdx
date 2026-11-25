@@ -130,10 +130,9 @@ build needs Cargo and a C compiler. `EvmConfig.enable_precompiles = false`
 turns the precompile path off.
 
 :::warning[Known weak spot]
-The EEST baseline in `specs/README.md` fails 54,152 of 66,652 state-test cases,
-40,684 of them on gas used. `ecpairing` is among the `status_mismatch`
-examples. Verify results against another implementation before trusting them.
-See [Project status](/status).
+Guillotine does not yet pass the full official EEST state-test suite. Verify
+precompile and gas results against another implementation before trusting them.
+See [Project status](/status) for the current EEST pass rate and failure breakdown.
 :::
 
 ### Replacing a precompile

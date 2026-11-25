@@ -105,24 +105,28 @@ frame. Handlers live in `src/instructions/handlers_*.zig`, grouped by category:
 A sequential `switch`-loop interpreter in `minimal_evm.zig`, `minimal_frame.zig`,
 and `minimal_host.zig`. No dispatch schedule, no fusion, no tail calls. Its job
 is to be obviously correct and readable so it can serve as the oracle in
-differential tests. guillotine-mini (`mini/`) is the standalone version with its
-own WASM build (`cd mini && zig build wasm`).
+differential tests. For a standalone readable EVM with its own WASM build, see
+[evmts/guillotine-mini](https://github.com/evmts/guillotine-mini).
 
 ## State
 
 `Database` (`src/storage/database.zig`) is the state interface: accounts, code
 keyed by keccak hash, and storage slots. `MemoryDatabase` is the in-memory
-implementation used by tests. Overlays and a transaction cache sit in front of
-the base store so snapshots and reverts are cheap.
+implementation used by tests. Overlays (`begin_ephemeral_view` for `simulate()`)
+and `DatabaseProxy` (`src/storage/database_proxy.zig`, comptime modes
+`.pass_through`, `.static`, and `.lru`) sit in front of the base store so
+snapshots, reverts, EIP-214 write protection, and dry-run calls are cheap.
 
 Around it:
 
-- `journal.zig` — the undo log. Snapshot ids, revert-to-snapshot.
+- `journal.zig` — the O(1) append-only undo log. Snapshot ids, revert-to-snapshot.
 - `access_list.zig` — warm/cold tracking for EIP-2929 gas.
 - `created_contracts.zig` — EIP-6780 `SELFDESTRUCT` semantics.
 - `self_destruct.zig` — pending destructions for the end of the transaction.
 
-See [State and journaling](/guides/state).
+See [State and journaling](/guides/state). For the optional native ARM64 JIT
+tier (`src/jit/` + `src/jit_bridge.zig`), see
+[Benchmarks and native JIT](/guides/benchmarks-and-jit#native-arm64-jit).
 
 ## `_unsafe` is a contract, not a bug
 
