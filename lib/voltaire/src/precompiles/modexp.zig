@@ -149,7 +149,7 @@ pub fn execute(
         error.AllocationFailed => return error.OutOfMemory,
         error.OutOfMemory => return error.OutOfMemory,
         error.NoSpaceLeft => return error.OutOfMemory,
-        error.NotImplemented => return error.NotImplemented,
+        error.UnsupportedPrecompile => return error.UnsupportedPrecompile,
     };
     defer allocator.free(result);
 

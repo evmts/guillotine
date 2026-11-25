@@ -27,15 +27,24 @@ pub fn checkCargoInstalled(b: *std.Build) void {
     };
 }
 
-pub fn createCargoBuildStep(b: *std.Build, optimize: std.builtin.OptimizeMode, target: std.Build.ResolvedTarget) *std.Build.Step {
+pub fn createCargoBuildStep(b: *std.Build, optimize: std.builtin.OptimizeMode, target: std.Build.ResolvedTarget) *std.Build.Step.Run {
     const cargo_build = b.addSystemCommand(&[_][]const u8{"cargo"});
     cargo_build.addArg("build");
+    // Track all crate inputs so Zig cannot reuse an archive after Rust edits.
+    for ([_][]const u8{
+        "Cargo.toml",
+        "Cargo.lock",
+        "src/crypto/lib.rs",
+        "src/crypto/bn254_wrapper.rs",
+        "src/crypto/keccak_wrapper.rs",
+    }) |path| cargo_build.addFileInput(b.path(path));
 
     // Always build Rust in release mode for FFI libraries
     // Rust debug mode doesn't provide significant benefits when called from Zig,
     // and release mode works correctly across all platforms
     _ = optimize;
     cargo_build.addArg("--release");
+    cargo_build.addArg("--locked");
 
     // Handle WASM targets - use portable pure Rust implementation
     const is_wasm = target.result.cpu.arch == .wasm32 or target.result.cpu.arch == .wasm64;
@@ -53,7 +62,10 @@ pub fn createCargoBuildStep(b: *std.Build, optimize: std.builtin.OptimizeMode, t
             .x86_64 => "x86_64-pc-windows-gnu",
             .x86 => "i686-pc-windows-gnu",
             .aarch64 => "aarch64-pc-windows-gnu",
-            else => @panic("Unsupported Windows architecture for Rust build"),
+            else => {
+                std.log.err("unsupported Windows architecture for Rust build: {s}", .{@tagName(target.result.cpu.arch)});
+                std.process.exit(1);
+            },
         };
         cargo_build.addArg("--target");
         cargo_build.addArg(rust_target);
@@ -62,7 +74,7 @@ pub fn createCargoBuildStep(b: *std.Build, optimize: std.builtin.OptimizeMode, t
     // Set working directory to the primitives package root (where Cargo.toml lives)
     cargo_build.setCwd(b.path("."));
 
-    return &cargo_build.step;
+    return cargo_build;
 }
 
 pub fn checkVendoredDeps(b: *std.Build) void {

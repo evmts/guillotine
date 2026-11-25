@@ -25,8 +25,8 @@ pub const SecureRandomGenerator = struct {
     pub fn init() SecureRandomGenerator {
         var seed: u64 = undefined;
         std.posix.getrandom(std.mem.asBytes(&seed)) catch |err| {
-            std.debug.print("getrandom failed: {}\n", .{err});
-            @panic("getrandom failed");
+            std.log.err("benchmark random seeding failed: {s}", .{@errorName(err)});
+            std.process.exit(1);
         };
 
         return SecureRandomGenerator{

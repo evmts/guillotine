@@ -26,7 +26,7 @@
 //!     const allocator = std.heap.page_allocator;
 //!     const result = try ModExp.modexp(allocator, &.{3}, &.{10}, &.{13});
 //!     defer allocator.free(result);
-//!     std.debug.assert(result[0] == 3); // 3^10 mod 13 = 3
+//!     try std.testing.expect(result[0] == 3); // 3^10 mod 13 = 3
 //! }
 //! ```
 //!
@@ -53,7 +53,7 @@ pub const ModExpError = error{
     DivisionByZero,
     InvalidInput,
     AllocationFailed,
-    NotImplemented,
+    UnsupportedPrecompile,
     OutOfMemory,
     InvalidBase,
     InvalidCharacter,

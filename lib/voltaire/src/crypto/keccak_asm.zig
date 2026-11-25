@@ -29,6 +29,7 @@ fn keccakResultToError(result: c_uint) KeccakError!void {
         c.KECCAK_SUCCESS => {},
         c.KECCAK_INVALID_INPUT => KeccakError.InvalidInput,
         c.KECCAK_INVALID_OUTPUT_SIZE => KeccakError.InvalidOutputSize,
+        c.KECCAK_COMPUTATION_FAILED => KeccakError.ExecutionError,
         else => KeccakError.Unknown,
     };
 }

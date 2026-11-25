@@ -122,7 +122,7 @@ pub const CryptoError = error{
     SigningFailed,
     RecoveryFailed,
     OutOfMemory,
-    NotImplemented,
+    UnsupportedOperation,
 };
 
 // Type definitions

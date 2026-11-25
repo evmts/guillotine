@@ -1627,8 +1627,8 @@ pub fn Uint(comptime bits: usize, comptime limbs: usize) type {
 
         pub fn widening_mul(self: Self, comptime bits_rhs: usize, comptime limbs_rhs: usize, comptime bits_res: usize, comptime limbs_res: usize, rhs: Uint(bits_rhs, limbs_rhs)) Uint(bits_res, limbs_res) {
             comptime {
-                std.debug.assert(bits_res == bits + bits_rhs);
-                std.debug.assert(limbs_res == nLimbs(bits_res));
+                if (bits_res != bits + bits_rhs) @compileError("widening_mul result bits must equal operand bits sum");
+                if (limbs_res != nLimbs(bits_res)) @compileError("widening_mul result limbs must match result bits");
             }
 
             const Result = Uint(bits_res, limbs_res);

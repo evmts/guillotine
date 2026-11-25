@@ -17,11 +17,11 @@ ark-serialize = "0.6.0"
 ark-bls12-381 = "0.6.0"
 
 [profile.release]
-# Optimize for size by default (smallest flag)
-opt-level = "z"
+# Match the crypto and benchmark crates for native performance
+opt-level = 3
 lto = false  # Disabled for faster compilation
 # codegen-units = 1  # Allow multiple units for parallel compilation
-panic = "abort"
+panic = "unwind"
 
 [profile.release-fast]
 # Optimize for speed when fastest flag is used
@@ -29,4 +29,7 @@ inherits = "release"
 opt-level = 3
 lto = false  # Disabled for faster compilation
 # codegen-units = 1  # Allow multiple units for parallel compilation
-panic = "abort"
+panic = "unwind"
+
+[profile.dev]
+panic = "unwind"

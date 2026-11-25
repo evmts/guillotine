@@ -16,12 +16,15 @@ pub fn build(b: *std.Build) void {
     lib_build.checkCargoInstalled(b);
 
     // STEP 3: Build Rust crate (crypto_wrappers: bn254 + keccak FFI)
-    const cargo_build_step = lib_build.createCargoBuildStep(b, optimize, target);
+    const cargo = lib_build.createCargoBuildStep(b, optimize, target);
+    cargo.addArg("--target-dir");
+    const cargo_output = cargo.addOutputDirectoryArg("rust-target");
+    const cargo_build_step = &cargo.step;
 
     // Build crypto C/Rust libraries that primitives + crypto depend on
     const blst_lib = lib_build.BlstLib.createBlstLibrary(b, target, optimize);
     const c_kzg_lib = lib_build.CKzgLib.createCKzgLibrary(b, target, optimize, blst_lib);
-    const rust_crypto_lib_path = lib_build.Bn254Lib.getRustLibraryPath(b, target);
+    const rust_crypto_lib_path = cargo_output.path(b, lib_build.Bn254Lib.getRustLibraryRelativePath(b, target));
 
     // Install crypto libraries
     b.installArtifact(blst_lib);
@@ -631,7 +634,10 @@ fn buildBenchmarks(
         else => std.debug.panic("unable to open bench directory: {s}", .{@errorName(err)}),
     };
     defer bench_dir.close(io);
-    var walker = bench_dir.walk(b.allocator) catch @panic("OOM");
+    var walker = bench_dir.walk(b.allocator) catch |err| {
+        std.log.err("unable to allocate benchmark directory walker: {s}", .{@errorName(err)});
+        std.process.exit(1);
+    };
     defer walker.deinit();
 
     while (walker.next(io) catch |err| std.debug.panic("unable to walk directory: {s}", .{@errorName(err)})) |entry| {
@@ -710,7 +716,10 @@ fn buildZBenchmarks(
         else => std.debug.panic("unable to open src directory: {s}", .{@errorName(err)}),
     };
     defer src_dir.close(io);
-    var walker = src_dir.walk(b.allocator) catch @panic("OOM");
+    var walker = src_dir.walk(b.allocator) catch |err| {
+        std.log.err("unable to allocate benchmark directory walker: {s}", .{@errorName(err)});
+        std.process.exit(1);
+    };
     defer walker.deinit();
 
     var bench_count: u32 = 0;

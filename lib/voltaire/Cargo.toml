@@ -27,18 +27,18 @@ asm = ["keccak-asm"]
 portable = ["tiny-keccak"]
 
 [profile.dev]
-# Debug profile - disable unwinding to avoid libunwind dependency
-panic = "abort"
+# Unwind within Rust so FFI guards can return computation errors
+panic = "unwind"
 
 [profile.release]
-# Optimize for size by default
-opt-level = "z"
+# Optimize cryptographic operations for speed
+opt-level = 3
 lto = false  # Disabled for faster compilation
-panic = "abort"
+panic = "unwind"
 
 [profile.release-fast]
 # Optimize for speed
 inherits = "release"
 opt-level = 3
 lto = false  # Disabled for faster compilation
-panic = "abort"
+panic = "unwind"

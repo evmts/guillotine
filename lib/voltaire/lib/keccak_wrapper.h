@@ -19,6 +19,7 @@ typedef enum {
     KECCAK_SUCCESS = 0,
     KECCAK_INVALID_INPUT = 1,
     KECCAK_INVALID_OUTPUT_SIZE = 2,
+    KECCAK_COMPUTATION_FAILED = 3,
 } KeccakResult;
 
 /**

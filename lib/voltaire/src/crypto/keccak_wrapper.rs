@@ -11,6 +11,7 @@ pub enum KeccakResult {
     Success = 0,
     InvalidInput = 1,
     InvalidOutputSize = 2,
+    ComputationFailed = 3,
 }
 
 /// Compute Keccak-256 hash of input data
@@ -28,33 +29,50 @@ pub unsafe extern "C" fn keccak256(
     output: *mut u8,
     output_len: usize,
 ) -> KeccakResult {
-    if input.is_null() || output.is_null() {
-        return KeccakResult::InvalidInput;
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        #[cfg(test)]
+        INJECT_PANIC.with(|flag| {
+            if flag.replace(false) {
+                panic!("injected FFI panic");
+            }
+        });
+
+        if input.is_null() || output.is_null() {
+            return KeccakResult::InvalidInput;
+        }
+
+        if output_len < 32 {
+            return KeccakResult::InvalidOutputSize;
+        }
+
+        let input_slice = std::slice::from_raw_parts(input, input_len);
+        let output_slice = std::slice::from_raw_parts_mut(output, 32);
+
+        #[cfg(feature = "asm")]
+        {
+            let mut hasher = Keccak256::new();
+            hasher.update(input_slice);
+            let result = hasher.finalize();
+            output_slice.copy_from_slice(&result);
+        }
+
+        #[cfg(feature = "portable")]
+        {
+            let mut hasher = Keccak::v256();
+            hasher.update(input_slice);
+            hasher.finalize(output_slice);
+        }
+
+        KeccakResult::Success
+    })) {
+        Ok(result) => result,
+        Err(payload) => {
+            // A user panic payload can itself panic on Drop. Retain it rather
+            // than risk a second unwind crossing the C boundary.
+            std::mem::forget(payload);
+            KeccakResult::ComputationFailed
+        }
     }
-
-    if output_len < 32 {
-        return KeccakResult::InvalidOutputSize;
-    }
-
-    let input_slice = std::slice::from_raw_parts(input, input_len);
-    let output_slice = std::slice::from_raw_parts_mut(output, 32);
-
-    #[cfg(feature = "asm")]
-    {
-        let mut hasher = Keccak256::new();
-        hasher.update(input_slice);
-        let result = hasher.finalize();
-        output_slice.copy_from_slice(&result);
-    }
-
-    #[cfg(feature = "portable")]
-    {
-        let mut hasher = Keccak::v256();
-        hasher.update(input_slice);
-        hasher.finalize(output_slice);
-    }
-
-    KeccakResult::Success
 }
 
 /// Batch compute Keccak-256 for multiple inputs
@@ -74,43 +92,98 @@ pub unsafe extern "C" fn keccak256_batch(
     outputs: *mut *mut u8,
     count: usize,
 ) -> KeccakResult {
-    if inputs.is_null() || input_lens.is_null() || outputs.is_null() {
-        return KeccakResult::InvalidInput;
-    }
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        #[cfg(test)]
+        INJECT_PANIC.with(|flag| {
+            if flag.replace(false) {
+                panic!("injected FFI panic");
+            }
+        });
 
-    let inputs_slice = std::slice::from_raw_parts(inputs, count);
-    let lens_slice = std::slice::from_raw_parts(input_lens, count);
-    let outputs_slice = std::slice::from_raw_parts_mut(outputs, count);
-
-    for i in 0..count {
-        if inputs_slice[i].is_null() || outputs_slice[i].is_null() {
+        if inputs.is_null() || input_lens.is_null() || outputs.is_null() {
             return KeccakResult::InvalidInput;
         }
 
-        let input = std::slice::from_raw_parts(inputs_slice[i], lens_slice[i]);
-        let output = std::slice::from_raw_parts_mut(outputs_slice[i], 32);
+        let inputs_slice = std::slice::from_raw_parts(inputs, count);
+        let lens_slice = std::slice::from_raw_parts(input_lens, count);
+        let outputs_slice = std::slice::from_raw_parts_mut(outputs, count);
 
-        #[cfg(feature = "asm")]
-        {
-            let mut hasher = Keccak256::new();
-            hasher.update(input);
-            let result = hasher.finalize();
-            output.copy_from_slice(&result);
+        for i in 0..count {
+            if inputs_slice[i].is_null() || outputs_slice[i].is_null() {
+                return KeccakResult::InvalidInput;
+            }
+
+            let input = std::slice::from_raw_parts(inputs_slice[i], lens_slice[i]);
+            let output = std::slice::from_raw_parts_mut(outputs_slice[i], 32);
+
+            #[cfg(feature = "asm")]
+            {
+                let mut hasher = Keccak256::new();
+                hasher.update(input);
+                let result = hasher.finalize();
+                output.copy_from_slice(&result);
+            }
+
+            #[cfg(feature = "portable")]
+            {
+                let mut hasher = Keccak::v256();
+                hasher.update(input);
+                hasher.finalize(output);
+            }
         }
 
-        #[cfg(feature = "portable")]
-        {
-            let mut hasher = Keccak::v256();
-            hasher.update(input);
-            hasher.finalize(output);
+        KeccakResult::Success
+    })) {
+        Ok(result) => result,
+        Err(payload) => {
+            // A user panic payload can itself panic on Drop. Retain it rather
+            // than risk a second unwind crossing the C boundary.
+            std::mem::forget(payload);
+            KeccakResult::ComputationFailed
         }
     }
-
-    KeccakResult::Success
 }
 
 /// Get the output size for Keccak-256 (always 32 bytes)
 #[no_mangle]
 pub extern "C" fn keccak256_output_size() -> usize {
-    32
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        #[cfg(test)]
+        INJECT_PANIC.with(|flag| {
+            if flag.replace(false) {
+                panic!("injected FFI panic");
+            }
+        });
+
+        32
+    })) {
+        Ok(result) => result,
+        Err(payload) => {
+            // A user panic payload can itself panic on Drop. Retain it rather
+            // than risk a second unwind crossing the C boundary.
+            std::mem::forget(payload);
+            0
+        }
+    }
+}
+
+#[cfg(test)]
+std::thread_local! { static INJECT_PANIC: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
+
+#[cfg(test)]
+#[test]
+fn every_export_contains_panics() {
+    INJECT_PANIC.with(|flag| flag.set(true));
+    assert_eq!(
+        unsafe { keccak256(std::ptr::null(), 0, std::ptr::null_mut(), 0) } as usize,
+        KeccakResult::ComputationFailed as usize
+    );
+    INJECT_PANIC.with(|flag| flag.set(true));
+    assert_eq!(
+        unsafe { keccak256_batch(std::ptr::null(), std::ptr::null(), std::ptr::null_mut(), 0) }
+            as usize,
+        KeccakResult::ComputationFailed as usize
+    );
+    INJECT_PANIC.with(|flag| flag.set(true));
+    assert_eq!(keccak256_output_size() as usize, 0);
 }

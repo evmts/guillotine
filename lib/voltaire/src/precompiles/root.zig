@@ -83,7 +83,7 @@ pub fn execute(
     hardfork: Hardfork,
 ) PrecompileError!PrecompileResult {
     if (!isPrecompile(address, hardfork)) {
-        return error.NotImplemented;
+        return error.UnsupportedPrecompile;
     }
 
     const addr_int = address.toU256();
@@ -106,7 +106,7 @@ pub fn execute(
         0x10 => bls12_map_fp_to_g1.execute(allocator, input, gas_limit),
         0x11 => bls12_map_fp2_to_g2.execute(allocator, input, gas_limit),
         0x100 => p256verify.execute(allocator, input, gas_limit, p256verify.GAS_COST_EIP7951),
-        else => error.NotImplemented,
+        else => error.UnsupportedPrecompile,
     };
 }
 
@@ -188,13 +188,13 @@ test "execute - final EIP-2537 address layout routes to the right precompile" {
             try testing.expectEqual(case.cost, res.gas_used);
         } else |err| {
             try testing.expect(err != error.OutOfGas);
-            try testing.expect(err != error.NotImplemented);
+            try testing.expect(err != error.UnsupportedPrecompile);
         }
     }
 
-    try testing.expectError(error.NotImplemented, execute(allocator, Address.fromU256(0x12), &[_]u8{}, 100000, .PRAGUE));
-    try testing.expectError(error.NotImplemented, execute(allocator, Address.fromU256(0x13), &[_]u8{}, 100000, .PRAGUE));
-    try testing.expectError(error.NotImplemented, execute(allocator, BLS12_G1ADD_ADDRESS, input[0..256], 100000, .CANCUN));
+    try testing.expectError(error.UnsupportedPrecompile, execute(allocator, Address.fromU256(0x12), &[_]u8{}, 100000, .PRAGUE));
+    try testing.expectError(error.UnsupportedPrecompile, execute(allocator, Address.fromU256(0x13), &[_]u8{}, 100000, .PRAGUE));
+    try testing.expectError(error.UnsupportedPrecompile, execute(allocator, BLS12_G1ADD_ADDRESS, input[0..256], 100000, .CANCUN));
 }
 
 test "precompile - out of gas" {
@@ -226,4 +226,3 @@ test {
     _ = ripemd160;
     _ = identity;
 }
-

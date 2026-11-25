@@ -17,7 +17,7 @@ pub const PrecompileError = error{
     InvalidPoint,
     InvalidPairing,
     OutOfGas,
-    NotImplemented,
+    UnsupportedPrecompile,
     // Keccak errors (from keccak_asm)
     ExecutionError,
     StateError,

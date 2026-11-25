@@ -217,7 +217,7 @@ pub fn verifyKZGProof(
     proof_bytes: *const Bytes48,
 ) KZGError!bool {
     if (!loaded) {
-        @panic("trusted setup isn't loaded");
+        return error.TrustedSetupNotLoaded;
     }
 
     var result: bool = undefined;
@@ -240,7 +240,7 @@ pub fn verifyKZGProof(
 /// Computes a KZG proof for a blob given its commitment.
 pub fn computeBlobKZGProof(blob: *const Blob, commitment_bytes: *const Bytes48) KZGError!KZGProof {
     if (!loaded) {
-        @panic("trusted setup isn't loaded");
+        return error.TrustedSetupNotLoaded;
     }
 
     var proof: KZGProof = undefined;
@@ -265,7 +265,7 @@ pub fn verifyBlobKZGProof(
     proof_bytes: *const Bytes48,
 ) KZGError!bool {
     if (!loaded) {
-        @panic("trusted setup isn't loaded");
+        return error.TrustedSetupNotLoaded;
     }
 
     var result: bool = undefined;

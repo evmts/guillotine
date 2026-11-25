@@ -11,9 +11,37 @@ use ark_ff::{BigInteger, One, PrimeField, Zero};
 /// Based on arkworks algebra library for production-grade BN254 operations.
 use std::os::raw::{c_int, c_uchar, c_uint};
 
+// The caller owns the returned Vec; a failed second allocation drops the first.
+fn reserved<T>(count: usize) -> Result<Vec<T>, std::collections::TryReserveError> {
+    let mut values = Vec::new();
+    values.try_reserve_exact(count)?;
+    Ok(values)
+}
+
+// Arkworks fields used here fit in six limbs. Encode without heap allocation.
+fn field_bytes<const N: usize>(value: impl BigInteger) -> [u8; N] {
+    let mut bytes = [0u8; N];
+    for (index, limb) in value.as_ref().iter().enumerate() {
+        let end = N - index * 8;
+        bytes[end - 8..end].copy_from_slice(&limb.to_be_bytes());
+    }
+    bytes
+}
+
+// Arkworks' big-endian decoder copies into a Vec. Reverse these bounded
+// encodings on the stack and use its allocation-free little-endian decoder.
+fn field_from_be<F: PrimeField>(bytes: &[u8]) -> F {
+    let mut buffer = [0u8; 48];
+    let value = &mut buffer[..bytes.len()];
+    value.copy_from_slice(bytes);
+    value.reverse();
+    F::from_le_bytes_mod_order(value)
+}
+
 // Reject noncanonical field encodings before arkworks can reduce them.
 fn canonical<F: PrimeField>(bytes: &[u8]) -> Option<F> {
-    let modulus = F::MODULUS.to_bytes_be();
+    let encoded = field_bytes::<48>(F::MODULUS);
+    let modulus = &encoded[48 - F::BigInt::NUM_LIMBS * 8..];
     if bytes.len() < modulus.len() {
         return None;
     }
@@ -21,7 +49,7 @@ fn canonical<F: PrimeField>(bytes: &[u8]) -> Option<F> {
     if bytes[..padding].iter().any(|byte| *byte != 0) || bytes[padding..] >= modulus[..] {
         return None;
     }
-    Some(F::from_be_bytes_mod_order(&bytes[padding..]))
+    Some(field_from_be::<F>(&bytes[padding..]))
 }
 
 macro_rules! field {
@@ -47,8 +75,25 @@ pub enum Bn254Result {
 /// This function can be called multiple times safely
 #[no_mangle]
 pub extern "C" fn bn254_init() -> c_int {
-    // ethereum-bn128 doesn't require explicit initialization
-    Bn254Result::Success as c_int
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        #[cfg(test)]
+        INJECT_PANIC.with(|flag| {
+            if flag.replace(false) {
+                panic!("injected FFI panic");
+            }
+        });
+
+        // ethereum-bn128 doesn't require explicit initialization
+        Bn254Result::Success as c_int
+    })) {
+        Ok(result) => result,
+        Err(payload) => {
+            // A user panic payload can itself panic on Drop. Retain it rather
+            // than risk a second unwind crossing the C boundary.
+            std::mem::forget(payload);
+            Bn254Result::ComputationFailed as c_int
+        }
+    }
 }
 
 /// Perform elliptic curve scalar multiplication (ECMUL)
@@ -78,76 +123,93 @@ pub unsafe extern "C" fn bn254_ecmul(
     output: *mut c_uchar,
     output_len: c_uint,
 ) -> c_int {
-    // Validate input parameters
-    if input.is_null() || output.is_null() {
-        return Bn254Result::InvalidInput as c_int;
-    }
-
-    if input_len < 96 || output_len < 64 {
-        return Bn254Result::InvalidInput as c_int;
-    }
-
-    // Convert pointers to slices
-    let input_slice = std::slice::from_raw_parts(input, input_len as usize);
-    let output_slice = std::slice::from_raw_parts_mut(output, output_len as usize);
-
-    // Ensure we have exactly 96 bytes of input
-    let mut padded_input = [0u8; 96];
-    let copy_len = std::cmp::min(input_slice.len(), 96);
-    padded_input[..copy_len].copy_from_slice(&input_slice[..copy_len]);
-
-    // Parse the G1 point coordinates (64 bytes)
-    let x_bytes = &padded_input[0..32];
-    let y_bytes = &padded_input[32..64];
-
-    // Parse the scalar (32 bytes)
-    let scalar_bytes = &padded_input[64..96];
-
-    // Convert bytes to field elements
-    use ark_bn254::{Fq, Fr};
-
-    let x_coord = field!(x_bytes, Bn254Result);
-
-    let y_coord = field!(y_bytes, Bn254Result);
-
-    let scalar = Fr::from_be_bytes_mod_order(scalar_bytes);
-
-    // Create G1 point from coordinates
-    let point = if x_coord.is_zero() && y_coord.is_zero() {
-        G1Affine::zero()
-    } else {
-        match G1Affine::new_unchecked(x_coord, y_coord) {
-            p if p.is_on_curve() && p.is_in_correct_subgroup_assuming_on_curve() => p,
-            _ => {
-                return Bn254Result::InvalidPoint as c_int;
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        #[cfg(test)]
+        INJECT_PANIC.with(|flag| {
+            if flag.replace(false) {
+                panic!("injected FFI panic");
             }
+        });
+
+        // Validate input parameters
+        if input.is_null() || output.is_null() {
+            return Bn254Result::InvalidInput as c_int;
         }
-    };
 
-    // Perform scalar multiplication
-    let result_proj = point * scalar;
-    let result = result_proj.into_affine();
+        if input_len < 96 || output_len < 64 {
+            return Bn254Result::InvalidInput as c_int;
+        }
 
-    // Handle point at infinity
-    if result.is_zero() {
-        output_slice[..64].fill(0);
-        return Bn254Result::Success as c_int;
+        // Convert pointers to slices
+        let input_slice = std::slice::from_raw_parts(input, input_len as usize);
+        let output_slice = std::slice::from_raw_parts_mut(output, output_len as usize);
+
+        // Ensure we have exactly 96 bytes of input
+        let mut padded_input = [0u8; 96];
+        let copy_len = std::cmp::min(input_slice.len(), 96);
+        padded_input[..copy_len].copy_from_slice(&input_slice[..copy_len]);
+
+        // Parse the G1 point coordinates (64 bytes)
+        let x_bytes = &padded_input[0..32];
+        let y_bytes = &padded_input[32..64];
+
+        // Parse the scalar (32 bytes)
+        let scalar_bytes = &padded_input[64..96];
+
+        // Convert bytes to field elements
+        use ark_bn254::{Fq, Fr};
+
+        let x_coord = field!(x_bytes, Bn254Result);
+
+        let y_coord = field!(y_bytes, Bn254Result);
+
+        let scalar = field_from_be::<Fr>(scalar_bytes);
+
+        // Create G1 point from coordinates
+        let point = if x_coord.is_zero() && y_coord.is_zero() {
+            G1Affine::zero()
+        } else {
+            match G1Affine::new_unchecked(x_coord, y_coord) {
+                p if p.is_on_curve() && p.is_in_correct_subgroup_assuming_on_curve() => p,
+                _ => {
+                    return Bn254Result::InvalidPoint as c_int;
+                }
+            }
+        };
+
+        // Perform scalar multiplication
+        let result_proj = point * scalar;
+        let result = result_proj.into_affine();
+
+        // Handle point at infinity
+        if result.is_zero() {
+            output_slice[..64].fill(0);
+            return Bn254Result::Success as c_int;
+        }
+
+        // Convert result to bytes (big-endian)
+
+        let x_bytes = field_bytes::<32>(result.x.into_bigint());
+        let y_bytes = field_bytes::<32>(result.y.into_bigint());
+
+        // Pad to 32 bytes and copy to output
+        let x_start = 32 - x_bytes.len();
+
+        output_slice[..32].fill(0);
+        output_slice[32..64].fill(0);
+        output_slice[x_start..32].copy_from_slice(&x_bytes);
+        output_slice[32 + (32 - y_bytes.len())..64].copy_from_slice(&y_bytes);
+
+        Bn254Result::Success as c_int
+    })) {
+        Ok(result) => result,
+        Err(payload) => {
+            // A user panic payload can itself panic on Drop. Retain it rather
+            // than risk a second unwind crossing the C boundary.
+            std::mem::forget(payload);
+            Bn254Result::ComputationFailed as c_int
+        }
     }
-
-    // Convert result to bytes (big-endian)
-
-    let x_bytes = result.x.into_bigint().to_bytes_be();
-    let y_bytes = result.y.into_bigint().to_bytes_be();
-
-    // Pad to 32 bytes and copy to output
-    let x_start = 32 - x_bytes.len();
-
-    output_slice[..32].fill(0);
-    output_slice[32..64].fill(0);
-    output_slice[x_start..32].copy_from_slice(&x_bytes);
-    output_slice[32 + (32 - y_bytes.len())..64].copy_from_slice(&y_bytes);
-
-    Bn254Result::Success as c_int
 }
 
 /// Perform elliptic curve pairing check (ECPAIRING)
@@ -176,133 +238,207 @@ pub unsafe extern "C" fn bn254_ecpairing(
     output: *mut c_uchar,
     output_len: c_uint,
 ) -> c_int {
-    // Validate input parameters
-    if input.is_null() || output.is_null() {
-        return Bn254Result::InvalidInput as c_int;
-    }
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        #[cfg(test)]
+        INJECT_PANIC.with(|flag| {
+            if flag.replace(false) {
+                panic!("injected FFI panic");
+            }
+        });
 
-    if output_len < 32 {
-        return Bn254Result::InvalidInput as c_int;
-    }
+        // Validate input parameters
+        if input.is_null() || output.is_null() {
+            return Bn254Result::InvalidInput as c_int;
+        }
 
-    // Input must be a multiple of 192 bytes
-    if input_len % 192 != 0 {
-        return Bn254Result::InvalidInput as c_int;
-    }
+        if output_len < 32 {
+            return Bn254Result::InvalidInput as c_int;
+        }
 
-    // Convert pointers to slices
-    let input_slice = std::slice::from_raw_parts(input, input_len as usize);
-    let output_slice = std::slice::from_raw_parts_mut(output, output_len as usize);
+        // Input must be a multiple of 192 bytes
+        if input_len % 192 != 0 {
+            return Bn254Result::InvalidInput as c_int;
+        }
 
-    use ark_bn254::{Fq, Fq2};
+        // Convert pointers to slices
+        let input_slice = std::slice::from_raw_parts(input, input_len as usize);
+        let output_slice = std::slice::from_raw_parts_mut(output, output_len as usize);
 
-    // Handle empty input (should return true according to EIP-197)
-    if input_len == 0 {
+        use ark_bn254::{Fq, Fq2};
+
+        // Handle empty input (should return true according to EIP-197)
+        if input_len == 0 {
+            output_slice[..32].fill(0);
+            output_slice[31] = 1; // Return true for empty input
+            return Bn254Result::Success as c_int;
+        }
+
+        let num_pairs = (input_len as usize) / 192;
+        let mut g1_points = match reserved(num_pairs) {
+            Ok(values) => values,
+            Err(_) => return Bn254Result::ComputationFailed as c_int,
+        };
+        let mut g2_points = match reserved(num_pairs) {
+            Ok(values) => values,
+            Err(_) => return Bn254Result::ComputationFailed as c_int,
+        };
+
+        // Parse input pairs
+        for i in 0..num_pairs {
+            let pair_start = i * 192;
+
+            // Parse G1 point (64 bytes)
+            let g1_x_bytes = &input_slice[pair_start..pair_start + 32];
+            let g1_y_bytes = &input_slice[pair_start + 32..pair_start + 64];
+
+            let g1_x = field!(g1_x_bytes, Bn254Result);
+            let g1_y = field!(g1_y_bytes, Bn254Result);
+
+            // Check if this is the point at infinity (both coordinates are zero)
+            if g1_x.is_zero() && g1_y.is_zero() {
+                g1_points.push(G1Affine::zero());
+            } else {
+                let g1_point = match G1Affine::new_unchecked(g1_x, g1_y) {
+                    p if p.is_on_curve() && p.is_in_correct_subgroup_assuming_on_curve() => p,
+                    _ => {
+                        return Bn254Result::InvalidPoint as c_int;
+                    }
+                };
+                g1_points.push(g1_point);
+            }
+
+            // Parse G2 point (128 bytes)
+            // EIP-197 encodes Fp2 as imaginary component first, then real (32 bytes each).
+            let g2_x_c0_bytes = &input_slice[pair_start + 96..pair_start + 128];
+            let g2_x_c1_bytes = &input_slice[pair_start + 64..pair_start + 96];
+            let g2_y_c0_bytes = &input_slice[pair_start + 160..pair_start + 192];
+            let g2_y_c1_bytes = &input_slice[pair_start + 128..pair_start + 160];
+
+            let g2_x_c0 = field!(g2_x_c0_bytes, Bn254Result);
+            let g2_x_c1 = field!(g2_x_c1_bytes, Bn254Result);
+            let g2_y_c0 = field!(g2_y_c0_bytes, Bn254Result);
+            let g2_y_c1 = field!(g2_y_c1_bytes, Bn254Result);
+
+            let g2_x = Fq2::new(g2_x_c0, g2_x_c1);
+            let g2_y = Fq2::new(g2_y_c0, g2_y_c1);
+
+            // Check if this is the point at infinity (both coordinates are zero)
+            if g2_x.is_zero() && g2_y.is_zero() {
+                g2_points.push(G2Affine::zero());
+            } else {
+                let g2_point = match G2Affine::new_unchecked(g2_x, g2_y) {
+                    p if p.is_on_curve() && p.is_in_correct_subgroup_assuming_on_curve() => p,
+                    _ => {
+                        return Bn254Result::InvalidPoint as c_int;
+                    }
+                };
+                g2_points.push(g2_point);
+            }
+        }
+
+        // Compute multi-pairing
+        let pairing_result = Bn254::multi_pairing(&g1_points, &g2_points);
+
+        // Check if result equals 1 (identity element in GT)
+        // For the pairing check, we need to see if the result equals the identity element
+        // The identity element in GT for BN254 is represented as 1, not 0
+        use ark_ec::pairing::PairingOutput;
+        let identity = PairingOutput::<Bn254>(ark_bn254::Fq12::one());
+        let is_one = pairing_result == identity;
+
+        // Set output
         output_slice[..32].fill(0);
-        output_slice[31] = 1; // Return true for empty input
-        return Bn254Result::Success as c_int;
-    }
-
-    let num_pairs = (input_len as usize) / 192;
-    let mut g1_points = Vec::with_capacity(num_pairs);
-    let mut g2_points = Vec::with_capacity(num_pairs);
-
-    // Parse input pairs
-    for i in 0..num_pairs {
-        let pair_start = i * 192;
-
-        // Parse G1 point (64 bytes)
-        let g1_x_bytes = &input_slice[pair_start..pair_start + 32];
-        let g1_y_bytes = &input_slice[pair_start + 32..pair_start + 64];
-
-        let g1_x = field!(g1_x_bytes, Bn254Result);
-        let g1_y = field!(g1_y_bytes, Bn254Result);
-
-        // Check if this is the point at infinity (both coordinates are zero)
-        if g1_x.is_zero() && g1_y.is_zero() {
-            g1_points.push(G1Affine::zero());
-        } else {
-            let g1_point = match G1Affine::new_unchecked(g1_x, g1_y) {
-                p if p.is_on_curve() && p.is_in_correct_subgroup_assuming_on_curve() => p,
-                _ => {
-                    return Bn254Result::InvalidPoint as c_int;
-                }
-            };
-            g1_points.push(g1_point);
+        if is_one {
+            output_slice[31] = 1;
         }
 
-        // Parse G2 point (128 bytes)
-        // EIP-197 encodes Fp2 as imaginary component first, then real (32 bytes each).
-        let g2_x_c0_bytes = &input_slice[pair_start + 96..pair_start + 128];
-        let g2_x_c1_bytes = &input_slice[pair_start + 64..pair_start + 96];
-        let g2_y_c0_bytes = &input_slice[pair_start + 160..pair_start + 192];
-        let g2_y_c1_bytes = &input_slice[pair_start + 128..pair_start + 160];
-
-        let g2_x_c0 = field!(g2_x_c0_bytes, Bn254Result);
-        let g2_x_c1 = field!(g2_x_c1_bytes, Bn254Result);
-        let g2_y_c0 = field!(g2_y_c0_bytes, Bn254Result);
-        let g2_y_c1 = field!(g2_y_c1_bytes, Bn254Result);
-
-        let g2_x = Fq2::new(g2_x_c0, g2_x_c1);
-        let g2_y = Fq2::new(g2_y_c0, g2_y_c1);
-
-        // Check if this is the point at infinity (both coordinates are zero)
-        if g2_x.is_zero() && g2_y.is_zero() {
-            g2_points.push(G2Affine::zero());
-        } else {
-            let g2_point = match G2Affine::new_unchecked(g2_x, g2_y) {
-                p if p.is_on_curve() && p.is_in_correct_subgroup_assuming_on_curve() => p,
-                _ => {
-                    return Bn254Result::InvalidPoint as c_int;
-                }
-            };
-            g2_points.push(g2_point);
+        Bn254Result::Success as c_int
+    })) {
+        Ok(result) => result,
+        Err(payload) => {
+            // A user panic payload can itself panic on Drop. Retain it rather
+            // than risk a second unwind crossing the C boundary.
+            std::mem::forget(payload);
+            Bn254Result::ComputationFailed as c_int
         }
     }
-
-    // Compute multi-pairing
-    let pairing_result = Bn254::multi_pairing(&g1_points, &g2_points);
-
-    // Check if result equals 1 (identity element in GT)
-    // For the pairing check, we need to see if the result equals the identity element
-    // The identity element in GT for BN254 is represented as 1, not 0
-    use ark_ec::pairing::PairingOutput;
-    let identity = PairingOutput::<Bn254>(ark_bn254::Fq12::one());
-    let is_one = pairing_result == identity;
-
-    // Set output
-    output_slice[..32].fill(0);
-    if is_one {
-        output_slice[31] = 1;
-    }
-
-    Bn254Result::Success as c_int
 }
 
 /// Get the expected output size for ECMUL
 #[no_mangle]
 pub extern "C" fn bn254_ecmul_output_size() -> c_uint {
-    64
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        #[cfg(test)]
+        INJECT_PANIC.with(|flag| {
+            if flag.replace(false) {
+                panic!("injected FFI panic");
+            }
+        });
+
+        64
+    })) {
+        Ok(result) => result,
+        Err(payload) => {
+            // A user panic payload can itself panic on Drop. Retain it rather
+            // than risk a second unwind crossing the C boundary.
+            std::mem::forget(payload);
+            0
+        }
+    }
 }
 
 /// Get the expected output size for ECPAIRING  
 #[no_mangle]
 pub extern "C" fn bn254_ecpairing_output_size() -> c_uint {
-    32
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        #[cfg(test)]
+        INJECT_PANIC.with(|flag| {
+            if flag.replace(false) {
+                panic!("injected FFI panic");
+            }
+        });
+
+        32
+    })) {
+        Ok(result) => result,
+        Err(payload) => {
+            // A user panic payload can itself panic on Drop. Retain it rather
+            // than risk a second unwind crossing the C boundary.
+            std::mem::forget(payload);
+            0
+        }
+    }
 }
 
 /// Validate ECMUL input format
 #[no_mangle]
 pub extern "C" fn bn254_ecmul_validate_input(input: *const c_uchar, input_len: c_uint) -> c_int {
-    if input.is_null() {
-        return Bn254Result::InvalidInput as c_int;
-    }
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        #[cfg(test)]
+        INJECT_PANIC.with(|flag| {
+            if flag.replace(false) {
+                panic!("injected FFI panic");
+            }
+        });
 
-    if input_len < 96 {
-        return Bn254Result::InvalidInput as c_int;
-    }
+        if input.is_null() {
+            return Bn254Result::InvalidInput as c_int;
+        }
 
-    Bn254Result::Success as c_int
+        if input_len < 96 {
+            return Bn254Result::InvalidInput as c_int;
+        }
+
+        Bn254Result::Success as c_int
+    })) {
+        Ok(result) => result,
+        Err(payload) => {
+            // A user panic payload can itself panic on Drop. Retain it rather
+            // than risk a second unwind crossing the C boundary.
+            std::mem::forget(payload);
+            Bn254Result::ComputationFailed as c_int
+        }
+    }
 }
 
 /// Validate ECPAIRING input format
@@ -311,15 +447,32 @@ pub extern "C" fn bn254_ecpairing_validate_input(
     input: *const c_uchar,
     input_len: c_uint,
 ) -> c_int {
-    if input.is_null() {
-        return Bn254Result::InvalidInput as c_int;
-    }
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        #[cfg(test)]
+        INJECT_PANIC.with(|flag| {
+            if flag.replace(false) {
+                panic!("injected FFI panic");
+            }
+        });
 
-    if input_len % 192 != 0 {
-        return Bn254Result::InvalidInput as c_int;
-    }
+        if input.is_null() {
+            return Bn254Result::InvalidInput as c_int;
+        }
 
-    Bn254Result::Success as c_int
+        if input_len % 192 != 0 {
+            return Bn254Result::InvalidInput as c_int;
+        }
+
+        Bn254Result::Success as c_int
+    })) {
+        Ok(result) => result,
+        Err(payload) => {
+            // A user panic payload can itself panic on Drop. Retain it rather
+            // than risk a second unwind crossing the C boundary.
+            std::mem::forget(payload);
+            Bn254Result::ComputationFailed as c_int
+        }
+    }
 }
 
 /// Result codes for BLS12-381 operations
@@ -345,73 +498,90 @@ pub unsafe extern "C" fn bls12_381_g1_add(
     output: *mut c_uchar,
     output_len: c_uint,
 ) -> c_int {
-    if input.is_null() || output.is_null() {
-        return Bls12381Result::InvalidInput as c_int;
-    }
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        #[cfg(test)]
+        INJECT_PANIC.with(|flag| {
+            if flag.replace(false) {
+                panic!("injected FFI panic");
+            }
+        });
 
-    if input_len != 256 || output_len < 128 {
-        return Bls12381Result::InvalidInput as c_int;
-    }
-
-    let input_slice = std::slice::from_raw_parts(input, input_len as usize);
-    let output_slice = std::slice::from_raw_parts_mut(output, output_len as usize);
-
-    // Parse first G1 point (128 bytes)
-    let p1_x_bytes = &input_slice[0..64];
-    let p1_y_bytes = &input_slice[64..128];
-
-    // Parse second G1 point (128 bytes)
-    let p2_x_bytes = &input_slice[128..192];
-    let p2_y_bytes = &input_slice[192..256];
-
-    use ark_bls12_381::Fq;
-
-    let p1_x = field!(p1_x_bytes, Bls12381Result);
-    let p1_y = field!(p1_y_bytes, Bls12381Result);
-    let p2_x = field!(p2_x_bytes, Bls12381Result);
-    let p2_y = field!(p2_y_bytes, Bls12381Result);
-
-    // Check for point at infinity
-    let p1 = if p1_x.is_zero() && p1_y.is_zero() {
-        BlsG1Affine::zero()
-    } else {
-        match BlsG1Affine::new_unchecked(p1_x, p1_y) {
-            p if p.is_on_curve() => p,
-            _ => return Bls12381Result::InvalidPoint as c_int,
+        if input.is_null() || output.is_null() {
+            return Bls12381Result::InvalidInput as c_int;
         }
-    };
 
-    let p2 = if p2_x.is_zero() && p2_y.is_zero() {
-        BlsG1Affine::zero()
-    } else {
-        match BlsG1Affine::new_unchecked(p2_x, p2_y) {
-            p if p.is_on_curve() => p,
-            _ => return Bls12381Result::InvalidPoint as c_int,
+        if input_len != 256 || output_len < 128 {
+            return Bls12381Result::InvalidInput as c_int;
         }
-    };
 
-    // Perform addition
-    let result = (p1 + p2).into_affine();
+        let input_slice = std::slice::from_raw_parts(input, input_len as usize);
+        let output_slice = std::slice::from_raw_parts_mut(output, output_len as usize);
 
-    // Handle point at infinity
-    if result.is_zero() {
+        // Parse first G1 point (128 bytes)
+        let p1_x_bytes = &input_slice[0..64];
+        let p1_y_bytes = &input_slice[64..128];
+
+        // Parse second G1 point (128 bytes)
+        let p2_x_bytes = &input_slice[128..192];
+        let p2_y_bytes = &input_slice[192..256];
+
+        use ark_bls12_381::Fq;
+
+        let p1_x = field!(p1_x_bytes, Bls12381Result);
+        let p1_y = field!(p1_y_bytes, Bls12381Result);
+        let p2_x = field!(p2_x_bytes, Bls12381Result);
+        let p2_y = field!(p2_y_bytes, Bls12381Result);
+
+        // Check for point at infinity
+        let p1 = if p1_x.is_zero() && p1_y.is_zero() {
+            BlsG1Affine::zero()
+        } else {
+            match BlsG1Affine::new_unchecked(p1_x, p1_y) {
+                p if p.is_on_curve() => p,
+                _ => return Bls12381Result::InvalidPoint as c_int,
+            }
+        };
+
+        let p2 = if p2_x.is_zero() && p2_y.is_zero() {
+            BlsG1Affine::zero()
+        } else {
+            match BlsG1Affine::new_unchecked(p2_x, p2_y) {
+                p if p.is_on_curve() => p,
+                _ => return Bls12381Result::InvalidPoint as c_int,
+            }
+        };
+
+        // Perform addition
+        let result = (p1 + p2).into_affine();
+
+        // Handle point at infinity
+        if result.is_zero() {
+            output_slice[..128].fill(0);
+            return Bls12381Result::Success as c_int;
+        }
+
+        // Convert result to bytes
+        let x_result = result.x;
+        let y_result = result.y;
+
+        let x_bytes = field_bytes::<48>(x_result.into_bigint());
+        let y_bytes = field_bytes::<48>(y_result.into_bigint());
+
+        // Pad and copy to output
         output_slice[..128].fill(0);
-        return Bls12381Result::Success as c_int;
+        output_slice[64 - x_bytes.len()..64].copy_from_slice(&x_bytes);
+        output_slice[128 - y_bytes.len()..128].copy_from_slice(&y_bytes);
+
+        Bls12381Result::Success as c_int
+    })) {
+        Ok(result) => result,
+        Err(payload) => {
+            // A user panic payload can itself panic on Drop. Retain it rather
+            // than risk a second unwind crossing the C boundary.
+            std::mem::forget(payload);
+            Bls12381Result::ComputationFailed as c_int
+        }
     }
-
-    // Convert result to bytes
-    let x_result = result.x;
-    let y_result = result.y;
-
-    let x_bytes = x_result.into_bigint().to_bytes_be();
-    let y_bytes = y_result.into_bigint().to_bytes_be();
-
-    // Pad and copy to output
-    output_slice[..128].fill(0);
-    output_slice[64 - x_bytes.len()..64].copy_from_slice(&x_bytes);
-    output_slice[128 - y_bytes.len()..128].copy_from_slice(&y_bytes);
-
-    Bls12381Result::Success as c_int
 }
 
 /// EIP-2537 encoding: each Fp is 16 zero bytes followed by 48 big-endian bytes.
@@ -427,62 +597,79 @@ pub unsafe extern "C" fn bls12_381_g1_mul(
     output: *mut c_uchar,
     output_len: c_uint,
 ) -> c_int {
-    if input.is_null() || output.is_null() {
-        return Bls12381Result::InvalidInput as c_int;
-    }
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        #[cfg(test)]
+        INJECT_PANIC.with(|flag| {
+            if flag.replace(false) {
+                panic!("injected FFI panic");
+            }
+        });
 
-    if input_len != 160 || output_len < 128 {
-        return Bls12381Result::InvalidInput as c_int;
-    }
-
-    let input_slice = std::slice::from_raw_parts(input, input_len as usize);
-    let output_slice = std::slice::from_raw_parts_mut(output, output_len as usize);
-
-    // Parse G1 point (128 bytes)
-    let x_bytes = &input_slice[0..64];
-    let y_bytes = &input_slice[64..128];
-
-    // Parse scalar (32 bytes)
-    let scalar_bytes = &input_slice[128..160];
-
-    use ark_bls12_381::{Fq, Fr};
-
-    let x_coord = field!(x_bytes, Bls12381Result);
-    let y_coord = field!(y_bytes, Bls12381Result);
-    let scalar = Fr::from_be_bytes_mod_order(scalar_bytes);
-
-    // Check for point at infinity
-    let point = if x_coord.is_zero() && y_coord.is_zero() {
-        BlsG1Affine::zero()
-    } else {
-        match BlsG1Affine::new_unchecked(x_coord, y_coord) {
-            p if p.is_on_curve() && p.is_in_correct_subgroup_assuming_on_curve() => p,
-            _ => return Bls12381Result::InvalidPoint as c_int,
+        if input.is_null() || output.is_null() {
+            return Bls12381Result::InvalidInput as c_int;
         }
-    };
 
-    // Perform scalar multiplication
-    let result = (point * scalar).into_affine();
+        if input_len != 160 || output_len < 128 {
+            return Bls12381Result::InvalidInput as c_int;
+        }
 
-    // Handle point at infinity
-    if result.is_zero() {
+        let input_slice = std::slice::from_raw_parts(input, input_len as usize);
+        let output_slice = std::slice::from_raw_parts_mut(output, output_len as usize);
+
+        // Parse G1 point (128 bytes)
+        let x_bytes = &input_slice[0..64];
+        let y_bytes = &input_slice[64..128];
+
+        // Parse scalar (32 bytes)
+        let scalar_bytes = &input_slice[128..160];
+
+        use ark_bls12_381::{Fq, Fr};
+
+        let x_coord = field!(x_bytes, Bls12381Result);
+        let y_coord = field!(y_bytes, Bls12381Result);
+        let scalar = field_from_be::<Fr>(scalar_bytes);
+
+        // Check for point at infinity
+        let point = if x_coord.is_zero() && y_coord.is_zero() {
+            BlsG1Affine::zero()
+        } else {
+            match BlsG1Affine::new_unchecked(x_coord, y_coord) {
+                p if p.is_on_curve() && p.is_in_correct_subgroup_assuming_on_curve() => p,
+                _ => return Bls12381Result::InvalidPoint as c_int,
+            }
+        };
+
+        // Perform scalar multiplication
+        let result = (point * scalar).into_affine();
+
+        // Handle point at infinity
+        if result.is_zero() {
+            output_slice[..128].fill(0);
+            return Bls12381Result::Success as c_int;
+        }
+
+        // Convert result to bytes
+        let x_result = result.x;
+        let y_result = result.y;
+
+        let x_bytes = field_bytes::<48>(x_result.into_bigint());
+        let y_bytes = field_bytes::<48>(y_result.into_bigint());
+
+        // Pad and copy to output
         output_slice[..128].fill(0);
-        return Bls12381Result::Success as c_int;
+        output_slice[64 - x_bytes.len()..64].copy_from_slice(&x_bytes);
+        output_slice[128 - y_bytes.len()..128].copy_from_slice(&y_bytes);
+
+        Bls12381Result::Success as c_int
+    })) {
+        Ok(result) => result,
+        Err(payload) => {
+            // A user panic payload can itself panic on Drop. Retain it rather
+            // than risk a second unwind crossing the C boundary.
+            std::mem::forget(payload);
+            Bls12381Result::ComputationFailed as c_int
+        }
     }
-
-    // Convert result to bytes
-    let x_result = result.x;
-    let y_result = result.y;
-
-    let x_bytes = x_result.into_bigint().to_bytes_be();
-    let y_bytes = y_result.into_bigint().to_bytes_be();
-
-    // Pad and copy to output
-    output_slice[..128].fill(0);
-    output_slice[64 - x_bytes.len()..64].copy_from_slice(&x_bytes);
-    output_slice[128 - y_bytes.len()..128].copy_from_slice(&y_bytes);
-
-    Bls12381Result::Success as c_int
 }
 
 /// EIP-2537 encoding: each Fp is 16 zero bytes followed by 48 big-endian bytes.
@@ -498,77 +685,100 @@ pub unsafe extern "C" fn bls12_381_g1_multiexp(
     output: *mut c_uchar,
     output_len: c_uint,
 ) -> c_int {
-    if input.is_null() || output.is_null() {
-        return Bls12381Result::InvalidInput as c_int;
-    }
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        #[cfg(test)]
+        INJECT_PANIC.with(|flag| {
+            if flag.replace(false) {
+                panic!("injected FFI panic");
+            }
+        });
 
-    if input_len == 0 || input_len % 160 != 0 || output_len < 128 {
-        return Bls12381Result::InvalidInput as c_int;
-    }
-
-    let input_slice = std::slice::from_raw_parts(input, input_len as usize);
-    let output_slice = std::slice::from_raw_parts_mut(output, output_len as usize);
-
-    use ark_bls12_381::{Fq, Fr, G1Projective};
-    use ark_ec::VariableBaseMSM;
-
-    let num_pairs = (input_len as usize) / 160;
-    let mut points = Vec::with_capacity(num_pairs);
-    let mut scalars = Vec::with_capacity(num_pairs);
-
-    for i in 0..num_pairs {
-        let offset = i * 160;
-        let x_bytes = &input_slice[offset + 0..offset + 64];
-        let y_bytes = &input_slice[offset + 64..offset + 128];
-        let scalar_bytes = &input_slice[offset + 128..offset + 160];
-
-        let x_coord = field!(x_bytes, Bls12381Result);
-        let y_coord = field!(y_bytes, Bls12381Result);
-        let scalar = Fr::from_be_bytes_mod_order(scalar_bytes);
-
-        // Skip point at infinity
-        if x_coord.is_zero() && y_coord.is_zero() {
-            continue;
+        if input.is_null() || output.is_null() {
+            return Bls12381Result::InvalidInput as c_int;
         }
 
-        let point = match BlsG1Affine::new_unchecked(x_coord, y_coord) {
-            p if p.is_on_curve() && p.is_in_correct_subgroup_assuming_on_curve() => p,
-            _ => return Bls12381Result::InvalidPoint as c_int,
+        if input_len == 0 || input_len % 160 != 0 || output_len < 128 {
+            return Bls12381Result::InvalidInput as c_int;
+        }
+
+        let input_slice = std::slice::from_raw_parts(input, input_len as usize);
+        let output_slice = std::slice::from_raw_parts_mut(output, output_len as usize);
+
+        use ark_bls12_381::{Fq, Fr, G1Projective};
+        use ark_ec::VariableBaseMSM;
+
+        let num_pairs = (input_len as usize) / 160;
+        let mut points = match reserved(num_pairs) {
+            Ok(values) => values,
+            Err(_) => return Bls12381Result::ComputationFailed as c_int,
+        };
+        let mut scalars = match reserved(num_pairs) {
+            Ok(values) => values,
+            Err(_) => return Bls12381Result::ComputationFailed as c_int,
         };
 
-        points.push(point);
-        scalars.push(scalar);
-    }
+        for i in 0..num_pairs {
+            let offset = i * 160;
+            let x_bytes = &input_slice[offset + 0..offset + 64];
+            let y_bytes = &input_slice[offset + 64..offset + 128];
+            let scalar_bytes = &input_slice[offset + 128..offset + 160];
 
-    // Perform multi-scalar multiplication
-    let result = if points.is_empty() {
-        BlsG1Affine::zero()
-    } else {
-        match G1Projective::msm(&points, &scalars) {
-            Ok(result) => result.into_affine(),
-            Err(_) => return Bls12381Result::ComputationFailed as c_int,
+            let x_coord = field!(x_bytes, Bls12381Result);
+            let y_coord = field!(y_bytes, Bls12381Result);
+            let scalar = field_from_be::<Fr>(scalar_bytes);
+
+            // Skip point at infinity
+            if x_coord.is_zero() && y_coord.is_zero() {
+                continue;
+            }
+
+            let point = match BlsG1Affine::new_unchecked(x_coord, y_coord) {
+                p if p.is_on_curve() && p.is_in_correct_subgroup_assuming_on_curve() => p,
+                _ => return Bls12381Result::InvalidPoint as c_int,
+            };
+
+            points.push(point);
+            scalars.push(scalar);
         }
-    };
 
-    // Handle point at infinity
-    if result.is_zero() {
+        // Perform multi-scalar multiplication
+        let result = if points.is_empty() {
+            BlsG1Affine::zero()
+        } else {
+            match G1Projective::msm(&points, &scalars) {
+                Ok(result) => result.into_affine(),
+                Err(_) => return Bls12381Result::ComputationFailed as c_int,
+            }
+        };
+
+        // Handle point at infinity
+        if result.is_zero() {
+            output_slice[..128].fill(0);
+            return Bls12381Result::Success as c_int;
+        }
+
+        // Convert result to bytes
+        let x_result = result.x;
+        let y_result = result.y;
+
+        let x_bytes = field_bytes::<48>(x_result.into_bigint());
+        let y_bytes = field_bytes::<48>(y_result.into_bigint());
+
+        // Pad and copy to output
         output_slice[..128].fill(0);
-        return Bls12381Result::Success as c_int;
+        output_slice[64 - x_bytes.len()..64].copy_from_slice(&x_bytes);
+        output_slice[128 - y_bytes.len()..128].copy_from_slice(&y_bytes);
+
+        Bls12381Result::Success as c_int
+    })) {
+        Ok(result) => result,
+        Err(payload) => {
+            // A user panic payload can itself panic on Drop. Retain it rather
+            // than risk a second unwind crossing the C boundary.
+            std::mem::forget(payload);
+            Bls12381Result::ComputationFailed as c_int
+        }
     }
-
-    // Convert result to bytes
-    let x_result = result.x;
-    let y_result = result.y;
-
-    let x_bytes = x_result.into_bigint().to_bytes_be();
-    let y_bytes = y_result.into_bigint().to_bytes_be();
-
-    // Pad and copy to output
-    output_slice[..128].fill(0);
-    output_slice[64 - x_bytes.len()..64].copy_from_slice(&x_bytes);
-    output_slice[128 - y_bytes.len()..128].copy_from_slice(&y_bytes);
-
-    Bls12381Result::Success as c_int
 }
 
 /// EIP-2537 encoding: each Fp is 16 zero bytes followed by 48 big-endian bytes.
@@ -584,96 +794,153 @@ pub unsafe extern "C" fn bls12_381_pairing(
     output: *mut c_uchar,
     output_len: c_uint,
 ) -> c_int {
-    if input.is_null() || output.is_null() {
-        return Bls12381Result::InvalidInput as c_int;
-    }
-
-    if input_len == 0 || input_len % 384 != 0 || output_len < 32 {
-        return Bls12381Result::InvalidInput as c_int;
-    }
-
-    let input_slice = std::slice::from_raw_parts(input, input_len as usize);
-    let output_slice = std::slice::from_raw_parts_mut(output, output_len as usize);
-
-    use ark_bls12_381::{Fq, Fq12, Fq2};
-
-    let num_pairs = (input_len as usize) / 384;
-    let mut g1_points = Vec::with_capacity(num_pairs);
-    let mut g2_points = Vec::with_capacity(num_pairs);
-
-    for i in 0..num_pairs {
-        let offset = i * 384;
-
-        // Parse G1 point (128 bytes)
-        let g1_x_bytes = &input_slice[offset + 0..offset + 64];
-        let g1_y_bytes = &input_slice[offset + 64..offset + 128];
-
-        let g1_x = field!(g1_x_bytes, Bls12381Result);
-        let g1_y = field!(g1_y_bytes, Bls12381Result);
-
-        let g1_point = if g1_x.is_zero() && g1_y.is_zero() {
-            BlsG1Affine::zero()
-        } else {
-            match BlsG1Affine::new_unchecked(g1_x, g1_y) {
-                p if p.is_on_curve() && p.is_in_correct_subgroup_assuming_on_curve() => p,
-                _ => return Bls12381Result::InvalidPoint as c_int,
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        #[cfg(test)]
+        INJECT_PANIC.with(|flag| {
+            if flag.replace(false) {
+                panic!("injected FFI panic");
             }
+        });
+
+        if input.is_null() || output.is_null() {
+            return Bls12381Result::InvalidInput as c_int;
+        }
+
+        if input_len == 0 || input_len % 384 != 0 || output_len < 32 {
+            return Bls12381Result::InvalidInput as c_int;
+        }
+
+        let input_slice = std::slice::from_raw_parts(input, input_len as usize);
+        let output_slice = std::slice::from_raw_parts_mut(output, output_len as usize);
+
+        use ark_bls12_381::{Fq, Fq12, Fq2};
+
+        let num_pairs = (input_len as usize) / 384;
+        let mut g1_points = match reserved(num_pairs) {
+            Ok(values) => values,
+            Err(_) => return Bls12381Result::ComputationFailed as c_int,
         };
-        g1_points.push(g1_point);
-
-        // Parse G2 point (256 bytes)
-        // G2 coordinates are in Fp2
-        let g2_x_c0_bytes = &input_slice[offset + 128..offset + 192];
-        let g2_x_c1_bytes = &input_slice[offset + 192..offset + 256];
-        let g2_y_c0_bytes = &input_slice[offset + 256..offset + 320];
-        let g2_y_c1_bytes = &input_slice[offset + 320..offset + 384];
-
-        let g2_x_c0 = field!(g2_x_c0_bytes, Bls12381Result);
-        let g2_x_c1 = field!(g2_x_c1_bytes, Bls12381Result);
-        let g2_y_c0 = field!(g2_y_c0_bytes, Bls12381Result);
-        let g2_y_c1 = field!(g2_y_c1_bytes, Bls12381Result);
-
-        let g2_x = Fq2::new(g2_x_c0, g2_x_c1);
-        let g2_y = Fq2::new(g2_y_c0, g2_y_c1);
-
-        let g2_point = if g2_x.is_zero() && g2_y.is_zero() {
-            BlsG2Affine::zero()
-        } else {
-            match BlsG2Affine::new_unchecked(g2_x, g2_y) {
-                p if p.is_on_curve() && p.is_in_correct_subgroup_assuming_on_curve() => p,
-                _ => return Bls12381Result::InvalidPoint as c_int,
-            }
+        let mut g2_points = match reserved(num_pairs) {
+            Ok(values) => values,
+            Err(_) => return Bls12381Result::ComputationFailed as c_int,
         };
-        g2_points.push(g2_point);
+
+        for i in 0..num_pairs {
+            let offset = i * 384;
+
+            // Parse G1 point (128 bytes)
+            let g1_x_bytes = &input_slice[offset + 0..offset + 64];
+            let g1_y_bytes = &input_slice[offset + 64..offset + 128];
+
+            let g1_x = field!(g1_x_bytes, Bls12381Result);
+            let g1_y = field!(g1_y_bytes, Bls12381Result);
+
+            let g1_point = if g1_x.is_zero() && g1_y.is_zero() {
+                BlsG1Affine::zero()
+            } else {
+                match BlsG1Affine::new_unchecked(g1_x, g1_y) {
+                    p if p.is_on_curve() && p.is_in_correct_subgroup_assuming_on_curve() => p,
+                    _ => return Bls12381Result::InvalidPoint as c_int,
+                }
+            };
+            g1_points.push(g1_point);
+
+            // Parse G2 point (256 bytes)
+            // G2 coordinates are in Fp2
+            let g2_x_c0_bytes = &input_slice[offset + 128..offset + 192];
+            let g2_x_c1_bytes = &input_slice[offset + 192..offset + 256];
+            let g2_y_c0_bytes = &input_slice[offset + 256..offset + 320];
+            let g2_y_c1_bytes = &input_slice[offset + 320..offset + 384];
+
+            let g2_x_c0 = field!(g2_x_c0_bytes, Bls12381Result);
+            let g2_x_c1 = field!(g2_x_c1_bytes, Bls12381Result);
+            let g2_y_c0 = field!(g2_y_c0_bytes, Bls12381Result);
+            let g2_y_c1 = field!(g2_y_c1_bytes, Bls12381Result);
+
+            let g2_x = Fq2::new(g2_x_c0, g2_x_c1);
+            let g2_y = Fq2::new(g2_y_c0, g2_y_c1);
+
+            let g2_point = if g2_x.is_zero() && g2_y.is_zero() {
+                BlsG2Affine::zero()
+            } else {
+                match BlsG2Affine::new_unchecked(g2_x, g2_y) {
+                    p if p.is_on_curve() && p.is_in_correct_subgroup_assuming_on_curve() => p,
+                    _ => return Bls12381Result::InvalidPoint as c_int,
+                }
+            };
+            g2_points.push(g2_point);
+        }
+
+        // Compute multi-pairing
+        let pairing_result = Bls12_381::multi_pairing(&g1_points, &g2_points);
+
+        // Check if result equals 1 (identity element in GT)
+        use ark_ec::pairing::PairingOutput;
+        let identity = PairingOutput::<Bls12_381>(Fq12::one());
+        let is_one = pairing_result == identity;
+
+        // Set output
+        output_slice[..32].fill(0);
+        if is_one {
+            output_slice[31] = 1;
+        }
+
+        Bls12381Result::Success as c_int
+    })) {
+        Ok(result) => result,
+        Err(payload) => {
+            // A user panic payload can itself panic on Drop. Retain it rather
+            // than risk a second unwind crossing the C boundary.
+            std::mem::forget(payload);
+            Bls12381Result::ComputationFailed as c_int
+        }
     }
-
-    // Compute multi-pairing
-    let pairing_result = Bls12_381::multi_pairing(&g1_points, &g2_points);
-
-    // Check if result equals 1 (identity element in GT)
-    use ark_ec::pairing::PairingOutput;
-    let identity = PairingOutput::<Bls12_381>(Fq12::one());
-    let is_one = pairing_result == identity;
-
-    // Set output
-    output_slice[..32].fill(0);
-    if is_one {
-        output_slice[31] = 1;
-    }
-
-    Bls12381Result::Success as c_int
 }
 
 /// Get the expected output size for BLS12-381 G1 operations
 #[no_mangle]
 pub extern "C" fn bls12_381_g1_output_size() -> c_uint {
-    128
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        #[cfg(test)]
+        INJECT_PANIC.with(|flag| {
+            if flag.replace(false) {
+                panic!("injected FFI panic");
+            }
+        });
+
+        128
+    })) {
+        Ok(result) => result,
+        Err(payload) => {
+            // A user panic payload can itself panic on Drop. Retain it rather
+            // than risk a second unwind crossing the C boundary.
+            std::mem::forget(payload);
+            0
+        }
+    }
 }
 
 /// Get the expected output size for BLS12-381 pairing
 #[no_mangle]
 pub extern "C" fn bls12_381_pairing_output_size() -> c_uint {
-    32
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        #[cfg(test)]
+        INJECT_PANIC.with(|flag| {
+            if flag.replace(false) {
+                panic!("injected FFI panic");
+            }
+        });
+
+        32
+    })) {
+        Ok(result) => result,
+        Err(payload) => {
+            // A user panic payload can itself panic on Drop. Retain it rather
+            // than risk a second unwind crossing the C boundary.
+            std::mem::forget(payload);
+            0
+        }
+    }
 }
 
 /// EIP-2537 encoding: each Fp is 16 zero bytes followed by 48 big-endian bytes.
@@ -689,90 +956,107 @@ pub unsafe extern "C" fn bls12_381_g2_add(
     output: *mut c_uchar,
     output_len: c_uint,
 ) -> c_int {
-    if input.is_null() || output.is_null() {
-        return Bls12381Result::InvalidInput as c_int;
-    }
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        #[cfg(test)]
+        INJECT_PANIC.with(|flag| {
+            if flag.replace(false) {
+                panic!("injected FFI panic");
+            }
+        });
 
-    if input_len != 512 || output_len < 256 {
-        return Bls12381Result::InvalidInput as c_int;
-    }
-
-    let input_slice = std::slice::from_raw_parts(input, input_len as usize);
-    let output_slice = std::slice::from_raw_parts_mut(output, output_len as usize);
-
-    use ark_bls12_381::{Fq, Fq2};
-
-    // Parse first G2 point (256 bytes)
-    let p1_x_c0_bytes = &input_slice[0..64];
-    let p1_x_c1_bytes = &input_slice[64..128];
-    let p1_y_c0_bytes = &input_slice[128..192];
-    let p1_y_c1_bytes = &input_slice[192..256];
-
-    // Parse second G2 point (256 bytes)
-    let p2_x_c0_bytes = &input_slice[256..320];
-    let p2_x_c1_bytes = &input_slice[320..384];
-    let p2_y_c0_bytes = &input_slice[384..448];
-    let p2_y_c1_bytes = &input_slice[448..512];
-
-    let p1_x_c0 = field!(p1_x_c0_bytes, Bls12381Result);
-    let p1_x_c1 = field!(p1_x_c1_bytes, Bls12381Result);
-    let p1_y_c0 = field!(p1_y_c0_bytes, Bls12381Result);
-    let p1_y_c1 = field!(p1_y_c1_bytes, Bls12381Result);
-    let p1_x = Fq2::new(p1_x_c0, p1_x_c1);
-    let p1_y = Fq2::new(p1_y_c0, p1_y_c1);
-
-    let p2_x_c0 = field!(p2_x_c0_bytes, Bls12381Result);
-    let p2_x_c1 = field!(p2_x_c1_bytes, Bls12381Result);
-    let p2_y_c0 = field!(p2_y_c0_bytes, Bls12381Result);
-    let p2_y_c1 = field!(p2_y_c1_bytes, Bls12381Result);
-    let p2_x = Fq2::new(p2_x_c0, p2_x_c1);
-    let p2_y = Fq2::new(p2_y_c0, p2_y_c1);
-
-    // Check for point at infinity
-    let p1 = if p1_x.is_zero() && p1_y.is_zero() {
-        BlsG2Affine::zero()
-    } else {
-        match BlsG2Affine::new_unchecked(p1_x, p1_y) {
-            p if p.is_on_curve() => p,
-            _ => return Bls12381Result::InvalidPoint as c_int,
+        if input.is_null() || output.is_null() {
+            return Bls12381Result::InvalidInput as c_int;
         }
-    };
 
-    let p2 = if p2_x.is_zero() && p2_y.is_zero() {
-        BlsG2Affine::zero()
-    } else {
-        match BlsG2Affine::new_unchecked(p2_x, p2_y) {
-            p if p.is_on_curve() => p,
-            _ => return Bls12381Result::InvalidPoint as c_int,
+        if input_len != 512 || output_len < 256 {
+            return Bls12381Result::InvalidInput as c_int;
         }
-    };
 
-    // Perform addition
-    let result = (p1 + p2).into_affine();
+        let input_slice = std::slice::from_raw_parts(input, input_len as usize);
+        let output_slice = std::slice::from_raw_parts_mut(output, output_len as usize);
 
-    // Handle point at infinity
-    if result.is_zero() {
+        use ark_bls12_381::{Fq, Fq2};
+
+        // Parse first G2 point (256 bytes)
+        let p1_x_c0_bytes = &input_slice[0..64];
+        let p1_x_c1_bytes = &input_slice[64..128];
+        let p1_y_c0_bytes = &input_slice[128..192];
+        let p1_y_c1_bytes = &input_slice[192..256];
+
+        // Parse second G2 point (256 bytes)
+        let p2_x_c0_bytes = &input_slice[256..320];
+        let p2_x_c1_bytes = &input_slice[320..384];
+        let p2_y_c0_bytes = &input_slice[384..448];
+        let p2_y_c1_bytes = &input_slice[448..512];
+
+        let p1_x_c0 = field!(p1_x_c0_bytes, Bls12381Result);
+        let p1_x_c1 = field!(p1_x_c1_bytes, Bls12381Result);
+        let p1_y_c0 = field!(p1_y_c0_bytes, Bls12381Result);
+        let p1_y_c1 = field!(p1_y_c1_bytes, Bls12381Result);
+        let p1_x = Fq2::new(p1_x_c0, p1_x_c1);
+        let p1_y = Fq2::new(p1_y_c0, p1_y_c1);
+
+        let p2_x_c0 = field!(p2_x_c0_bytes, Bls12381Result);
+        let p2_x_c1 = field!(p2_x_c1_bytes, Bls12381Result);
+        let p2_y_c0 = field!(p2_y_c0_bytes, Bls12381Result);
+        let p2_y_c1 = field!(p2_y_c1_bytes, Bls12381Result);
+        let p2_x = Fq2::new(p2_x_c0, p2_x_c1);
+        let p2_y = Fq2::new(p2_y_c0, p2_y_c1);
+
+        // Check for point at infinity
+        let p1 = if p1_x.is_zero() && p1_y.is_zero() {
+            BlsG2Affine::zero()
+        } else {
+            match BlsG2Affine::new_unchecked(p1_x, p1_y) {
+                p if p.is_on_curve() => p,
+                _ => return Bls12381Result::InvalidPoint as c_int,
+            }
+        };
+
+        let p2 = if p2_x.is_zero() && p2_y.is_zero() {
+            BlsG2Affine::zero()
+        } else {
+            match BlsG2Affine::new_unchecked(p2_x, p2_y) {
+                p if p.is_on_curve() => p,
+                _ => return Bls12381Result::InvalidPoint as c_int,
+            }
+        };
+
+        // Perform addition
+        let result = (p1 + p2).into_affine();
+
+        // Handle point at infinity
+        if result.is_zero() {
+            output_slice[..256].fill(0);
+            return Bls12381Result::Success as c_int;
+        }
+
+        // Convert result to bytes
+        let x_result = result.x;
+        let y_result = result.y;
+
+        let x_c0_bytes = field_bytes::<48>(x_result.c0.into_bigint());
+        let x_c1_bytes = field_bytes::<48>(x_result.c1.into_bigint());
+        let y_c0_bytes = field_bytes::<48>(y_result.c0.into_bigint());
+        let y_c1_bytes = field_bytes::<48>(y_result.c1.into_bigint());
+
+        // Pad and copy to output
         output_slice[..256].fill(0);
-        return Bls12381Result::Success as c_int;
+        output_slice[64 - x_c0_bytes.len()..64].copy_from_slice(&x_c0_bytes);
+        output_slice[128 - x_c1_bytes.len()..128].copy_from_slice(&x_c1_bytes);
+        output_slice[192 - y_c0_bytes.len()..192].copy_from_slice(&y_c0_bytes);
+        output_slice[256 - y_c1_bytes.len()..256].copy_from_slice(&y_c1_bytes);
+
+        Bls12381Result::Success as c_int
+    })) {
+        Ok(result) => result,
+        Err(payload) => {
+            // A user panic payload can itself panic on Drop. Retain it rather
+            // than risk a second unwind crossing the C boundary.
+            std::mem::forget(payload);
+            Bls12381Result::ComputationFailed as c_int
+        }
     }
-
-    // Convert result to bytes
-    let x_result = result.x;
-    let y_result = result.y;
-
-    let x_c0_bytes = x_result.c0.into_bigint().to_bytes_be();
-    let x_c1_bytes = x_result.c1.into_bigint().to_bytes_be();
-    let y_c0_bytes = y_result.c0.into_bigint().to_bytes_be();
-    let y_c1_bytes = y_result.c1.into_bigint().to_bytes_be();
-
-    // Pad and copy to output
-    output_slice[..256].fill(0);
-    output_slice[64 - x_c0_bytes.len()..64].copy_from_slice(&x_c0_bytes);
-    output_slice[128 - x_c1_bytes.len()..128].copy_from_slice(&x_c1_bytes);
-    output_slice[192 - y_c0_bytes.len()..192].copy_from_slice(&y_c0_bytes);
-    output_slice[256 - y_c1_bytes.len()..256].copy_from_slice(&y_c1_bytes);
-
-    Bls12381Result::Success as c_int
 }
 
 /// EIP-2537 encoding: each Fp is 16 zero bytes followed by 48 big-endian bytes.
@@ -788,72 +1072,89 @@ pub unsafe extern "C" fn bls12_381_g2_mul(
     output: *mut c_uchar,
     output_len: c_uint,
 ) -> c_int {
-    if input.is_null() || output.is_null() {
-        return Bls12381Result::InvalidInput as c_int;
-    }
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        #[cfg(test)]
+        INJECT_PANIC.with(|flag| {
+            if flag.replace(false) {
+                panic!("injected FFI panic");
+            }
+        });
 
-    if input_len != 288 || output_len < 256 {
-        return Bls12381Result::InvalidInput as c_int;
-    }
-
-    let input_slice = std::slice::from_raw_parts(input, input_len as usize);
-    let output_slice = std::slice::from_raw_parts_mut(output, output_len as usize);
-
-    use ark_bls12_381::{Fq, Fq2, Fr};
-
-    // Parse G2 point (256 bytes)
-    let x_c0_bytes = &input_slice[0..64];
-    let x_c1_bytes = &input_slice[64..128];
-    let y_c0_bytes = &input_slice[128..192];
-    let y_c1_bytes = &input_slice[192..256];
-
-    // Parse scalar (32 bytes)
-    let scalar_bytes = &input_slice[256..288];
-
-    let x_c0 = field!(x_c0_bytes, Bls12381Result);
-    let x_c1 = field!(x_c1_bytes, Bls12381Result);
-    let y_c0 = field!(y_c0_bytes, Bls12381Result);
-    let y_c1 = field!(y_c1_bytes, Bls12381Result);
-    let x_coord = Fq2::new(x_c0, x_c1);
-    let y_coord = Fq2::new(y_c0, y_c1);
-    let scalar = Fr::from_be_bytes_mod_order(scalar_bytes);
-
-    // Check for point at infinity
-    let point = if x_coord.is_zero() && y_coord.is_zero() {
-        BlsG2Affine::zero()
-    } else {
-        match BlsG2Affine::new_unchecked(x_coord, y_coord) {
-            p if p.is_on_curve() && p.is_in_correct_subgroup_assuming_on_curve() => p,
-            _ => return Bls12381Result::InvalidPoint as c_int,
+        if input.is_null() || output.is_null() {
+            return Bls12381Result::InvalidInput as c_int;
         }
-    };
 
-    // Perform scalar multiplication
-    let result = (point * scalar).into_affine();
+        if input_len != 288 || output_len < 256 {
+            return Bls12381Result::InvalidInput as c_int;
+        }
 
-    // Handle point at infinity
-    if result.is_zero() {
+        let input_slice = std::slice::from_raw_parts(input, input_len as usize);
+        let output_slice = std::slice::from_raw_parts_mut(output, output_len as usize);
+
+        use ark_bls12_381::{Fq, Fq2, Fr};
+
+        // Parse G2 point (256 bytes)
+        let x_c0_bytes = &input_slice[0..64];
+        let x_c1_bytes = &input_slice[64..128];
+        let y_c0_bytes = &input_slice[128..192];
+        let y_c1_bytes = &input_slice[192..256];
+
+        // Parse scalar (32 bytes)
+        let scalar_bytes = &input_slice[256..288];
+
+        let x_c0 = field!(x_c0_bytes, Bls12381Result);
+        let x_c1 = field!(x_c1_bytes, Bls12381Result);
+        let y_c0 = field!(y_c0_bytes, Bls12381Result);
+        let y_c1 = field!(y_c1_bytes, Bls12381Result);
+        let x_coord = Fq2::new(x_c0, x_c1);
+        let y_coord = Fq2::new(y_c0, y_c1);
+        let scalar = field_from_be::<Fr>(scalar_bytes);
+
+        // Check for point at infinity
+        let point = if x_coord.is_zero() && y_coord.is_zero() {
+            BlsG2Affine::zero()
+        } else {
+            match BlsG2Affine::new_unchecked(x_coord, y_coord) {
+                p if p.is_on_curve() && p.is_in_correct_subgroup_assuming_on_curve() => p,
+                _ => return Bls12381Result::InvalidPoint as c_int,
+            }
+        };
+
+        // Perform scalar multiplication
+        let result = (point * scalar).into_affine();
+
+        // Handle point at infinity
+        if result.is_zero() {
+            output_slice[..256].fill(0);
+            return Bls12381Result::Success as c_int;
+        }
+
+        // Convert result to bytes
+        let x_result = result.x;
+        let y_result = result.y;
+
+        let x_c0_bytes = field_bytes::<48>(x_result.c0.into_bigint());
+        let x_c1_bytes = field_bytes::<48>(x_result.c1.into_bigint());
+        let y_c0_bytes = field_bytes::<48>(y_result.c0.into_bigint());
+        let y_c1_bytes = field_bytes::<48>(y_result.c1.into_bigint());
+
+        // Pad and copy to output
         output_slice[..256].fill(0);
-        return Bls12381Result::Success as c_int;
+        output_slice[64 - x_c0_bytes.len()..64].copy_from_slice(&x_c0_bytes);
+        output_slice[128 - x_c1_bytes.len()..128].copy_from_slice(&x_c1_bytes);
+        output_slice[192 - y_c0_bytes.len()..192].copy_from_slice(&y_c0_bytes);
+        output_slice[256 - y_c1_bytes.len()..256].copy_from_slice(&y_c1_bytes);
+
+        Bls12381Result::Success as c_int
+    })) {
+        Ok(result) => result,
+        Err(payload) => {
+            // A user panic payload can itself panic on Drop. Retain it rather
+            // than risk a second unwind crossing the C boundary.
+            std::mem::forget(payload);
+            Bls12381Result::ComputationFailed as c_int
+        }
     }
-
-    // Convert result to bytes
-    let x_result = result.x;
-    let y_result = result.y;
-
-    let x_c0_bytes = x_result.c0.into_bigint().to_bytes_be();
-    let x_c1_bytes = x_result.c1.into_bigint().to_bytes_be();
-    let y_c0_bytes = y_result.c0.into_bigint().to_bytes_be();
-    let y_c1_bytes = y_result.c1.into_bigint().to_bytes_be();
-
-    // Pad and copy to output
-    output_slice[..256].fill(0);
-    output_slice[64 - x_c0_bytes.len()..64].copy_from_slice(&x_c0_bytes);
-    output_slice[128 - x_c1_bytes.len()..128].copy_from_slice(&x_c1_bytes);
-    output_slice[192 - y_c0_bytes.len()..192].copy_from_slice(&y_c0_bytes);
-    output_slice[256 - y_c1_bytes.len()..256].copy_from_slice(&y_c1_bytes);
-
-    Bls12381Result::Success as c_int
 }
 
 /// EIP-2537 encoding: each Fp is 16 zero bytes followed by 48 big-endian bytes.
@@ -869,93 +1170,133 @@ pub unsafe extern "C" fn bls12_381_g2_multiexp(
     output: *mut c_uchar,
     output_len: c_uint,
 ) -> c_int {
-    if input.is_null() || output.is_null() {
-        return Bls12381Result::InvalidInput as c_int;
-    }
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        #[cfg(test)]
+        INJECT_PANIC.with(|flag| {
+            if flag.replace(false) {
+                panic!("injected FFI panic");
+            }
+        });
 
-    if input_len == 0 || input_len % 288 != 0 || output_len < 256 {
-        return Bls12381Result::InvalidInput as c_int;
-    }
-
-    let input_slice = std::slice::from_raw_parts(input, input_len as usize);
-    let output_slice = std::slice::from_raw_parts_mut(output, output_len as usize);
-
-    use ark_bls12_381::{Fq, Fq2, Fr, G2Projective};
-    use ark_ec::VariableBaseMSM;
-
-    let num_pairs = (input_len as usize) / 288;
-    let mut points = Vec::with_capacity(num_pairs);
-    let mut scalars = Vec::with_capacity(num_pairs);
-
-    for i in 0..num_pairs {
-        let offset = i * 288;
-        let x_c0_bytes = &input_slice[offset + 0..offset + 64];
-        let x_c1_bytes = &input_slice[offset + 64..offset + 128];
-        let y_c0_bytes = &input_slice[offset + 128..offset + 192];
-        let y_c1_bytes = &input_slice[offset + 192..offset + 256];
-        let scalar_bytes = &input_slice[offset + 256..offset + 288];
-
-        let x_c0 = field!(x_c0_bytes, Bls12381Result);
-        let x_c1 = field!(x_c1_bytes, Bls12381Result);
-        let y_c0 = field!(y_c0_bytes, Bls12381Result);
-        let y_c1 = field!(y_c1_bytes, Bls12381Result);
-        let x_coord = Fq2::new(x_c0, x_c1);
-        let y_coord = Fq2::new(y_c0, y_c1);
-        let scalar = Fr::from_be_bytes_mod_order(scalar_bytes);
-
-        // Skip point at infinity
-        if x_coord.is_zero() && y_coord.is_zero() {
-            continue;
+        if input.is_null() || output.is_null() {
+            return Bls12381Result::InvalidInput as c_int;
         }
 
-        let point = match BlsG2Affine::new_unchecked(x_coord, y_coord) {
-            p if p.is_on_curve() && p.is_in_correct_subgroup_assuming_on_curve() => p,
-            _ => return Bls12381Result::InvalidPoint as c_int,
+        if input_len == 0 || input_len % 288 != 0 || output_len < 256 {
+            return Bls12381Result::InvalidInput as c_int;
+        }
+
+        let input_slice = std::slice::from_raw_parts(input, input_len as usize);
+        let output_slice = std::slice::from_raw_parts_mut(output, output_len as usize);
+
+        use ark_bls12_381::{Fq, Fq2, Fr, G2Projective};
+        use ark_ec::VariableBaseMSM;
+
+        let num_pairs = (input_len as usize) / 288;
+        let mut points = match reserved(num_pairs) {
+            Ok(values) => values,
+            Err(_) => return Bls12381Result::ComputationFailed as c_int,
+        };
+        let mut scalars = match reserved(num_pairs) {
+            Ok(values) => values,
+            Err(_) => return Bls12381Result::ComputationFailed as c_int,
         };
 
-        points.push(point);
-        scalars.push(scalar);
-    }
+        for i in 0..num_pairs {
+            let offset = i * 288;
+            let x_c0_bytes = &input_slice[offset + 0..offset + 64];
+            let x_c1_bytes = &input_slice[offset + 64..offset + 128];
+            let y_c0_bytes = &input_slice[offset + 128..offset + 192];
+            let y_c1_bytes = &input_slice[offset + 192..offset + 256];
+            let scalar_bytes = &input_slice[offset + 256..offset + 288];
 
-    // Perform multi-scalar multiplication
-    let result = if points.is_empty() {
-        BlsG2Affine::zero()
-    } else {
-        match G2Projective::msm(&points, &scalars) {
-            Ok(result) => result.into_affine(),
-            Err(_) => return Bls12381Result::ComputationFailed as c_int,
+            let x_c0 = field!(x_c0_bytes, Bls12381Result);
+            let x_c1 = field!(x_c1_bytes, Bls12381Result);
+            let y_c0 = field!(y_c0_bytes, Bls12381Result);
+            let y_c1 = field!(y_c1_bytes, Bls12381Result);
+            let x_coord = Fq2::new(x_c0, x_c1);
+            let y_coord = Fq2::new(y_c0, y_c1);
+            let scalar = field_from_be::<Fr>(scalar_bytes);
+
+            // Skip point at infinity
+            if x_coord.is_zero() && y_coord.is_zero() {
+                continue;
+            }
+
+            let point = match BlsG2Affine::new_unchecked(x_coord, y_coord) {
+                p if p.is_on_curve() && p.is_in_correct_subgroup_assuming_on_curve() => p,
+                _ => return Bls12381Result::InvalidPoint as c_int,
+            };
+
+            points.push(point);
+            scalars.push(scalar);
         }
-    };
 
-    // Handle point at infinity
-    if result.is_zero() {
+        // Perform multi-scalar multiplication
+        let result = if points.is_empty() {
+            BlsG2Affine::zero()
+        } else {
+            match G2Projective::msm(&points, &scalars) {
+                Ok(result) => result.into_affine(),
+                Err(_) => return Bls12381Result::ComputationFailed as c_int,
+            }
+        };
+
+        // Handle point at infinity
+        if result.is_zero() {
+            output_slice[..256].fill(0);
+            return Bls12381Result::Success as c_int;
+        }
+
+        // Convert result to bytes
+        let x_result = result.x;
+        let y_result = result.y;
+
+        let x_c0_bytes = field_bytes::<48>(x_result.c0.into_bigint());
+        let x_c1_bytes = field_bytes::<48>(x_result.c1.into_bigint());
+        let y_c0_bytes = field_bytes::<48>(y_result.c0.into_bigint());
+        let y_c1_bytes = field_bytes::<48>(y_result.c1.into_bigint());
+
+        // Pad and copy to output
         output_slice[..256].fill(0);
-        return Bls12381Result::Success as c_int;
+        output_slice[64 - x_c0_bytes.len()..64].copy_from_slice(&x_c0_bytes);
+        output_slice[128 - x_c1_bytes.len()..128].copy_from_slice(&x_c1_bytes);
+        output_slice[192 - y_c0_bytes.len()..192].copy_from_slice(&y_c0_bytes);
+        output_slice[256 - y_c1_bytes.len()..256].copy_from_slice(&y_c1_bytes);
+
+        Bls12381Result::Success as c_int
+    })) {
+        Ok(result) => result,
+        Err(payload) => {
+            // A user panic payload can itself panic on Drop. Retain it rather
+            // than risk a second unwind crossing the C boundary.
+            std::mem::forget(payload);
+            Bls12381Result::ComputationFailed as c_int
+        }
     }
-
-    // Convert result to bytes
-    let x_result = result.x;
-    let y_result = result.y;
-
-    let x_c0_bytes = x_result.c0.into_bigint().to_bytes_be();
-    let x_c1_bytes = x_result.c1.into_bigint().to_bytes_be();
-    let y_c0_bytes = y_result.c0.into_bigint().to_bytes_be();
-    let y_c1_bytes = y_result.c1.into_bigint().to_bytes_be();
-
-    // Pad and copy to output
-    output_slice[..256].fill(0);
-    output_slice[64 - x_c0_bytes.len()..64].copy_from_slice(&x_c0_bytes);
-    output_slice[128 - x_c1_bytes.len()..128].copy_from_slice(&x_c1_bytes);
-    output_slice[192 - y_c0_bytes.len()..192].copy_from_slice(&y_c0_bytes);
-    output_slice[256 - y_c1_bytes.len()..256].copy_from_slice(&y_c1_bytes);
-
-    Bls12381Result::Success as c_int
 }
 
 /// Get the expected output size for BLS12-381 G2 operations
 #[no_mangle]
 pub extern "C" fn bls12_381_g2_output_size() -> c_uint {
-    256
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        #[cfg(test)]
+        INJECT_PANIC.with(|flag| {
+            if flag.replace(false) {
+                panic!("injected FFI panic");
+            }
+        });
+
+        256
+    })) {
+        Ok(result) => result,
+        Err(payload) => {
+            // A user panic payload can itself panic on Drop. Retain it rather
+            // than risk a second unwind crossing the C boundary.
+            std::mem::forget(payload);
+            0
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1303,4 +1644,84 @@ mod g2_security_regressions {
             );
         }
     }
+}
+
+#[cfg(test)]
+std::thread_local! { static INJECT_PANIC: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
+
+#[cfg(test)]
+#[test]
+fn every_export_contains_panics() {
+    INJECT_PANIC.with(|flag| flag.set(true));
+    assert_eq!(bn254_init() as usize, 4);
+    INJECT_PANIC.with(|flag| flag.set(true));
+    assert_eq!(
+        unsafe { bn254_ecmul(std::ptr::null(), 0, std::ptr::null_mut(), 0) } as usize,
+        4
+    );
+    INJECT_PANIC.with(|flag| flag.set(true));
+    assert_eq!(
+        unsafe { bn254_ecpairing(std::ptr::null(), 0, std::ptr::null_mut(), 0) } as usize,
+        4
+    );
+    INJECT_PANIC.with(|flag| flag.set(true));
+    assert_eq!(bn254_ecmul_output_size() as usize, 0);
+    INJECT_PANIC.with(|flag| flag.set(true));
+    assert_eq!(bn254_ecpairing_output_size() as usize, 0);
+    INJECT_PANIC.with(|flag| flag.set(true));
+    assert_eq!(bn254_ecmul_validate_input(std::ptr::null(), 0) as usize, 4);
+    INJECT_PANIC.with(|flag| flag.set(true));
+    assert_eq!(
+        bn254_ecpairing_validate_input(std::ptr::null(), 0) as usize,
+        4
+    );
+    INJECT_PANIC.with(|flag| flag.set(true));
+    assert_eq!(
+        unsafe { bls12_381_g1_add(std::ptr::null(), 0, std::ptr::null_mut(), 0) } as usize,
+        4
+    );
+    INJECT_PANIC.with(|flag| flag.set(true));
+    assert_eq!(
+        unsafe { bls12_381_g1_mul(std::ptr::null(), 0, std::ptr::null_mut(), 0) } as usize,
+        4
+    );
+    INJECT_PANIC.with(|flag| flag.set(true));
+    assert_eq!(
+        unsafe { bls12_381_g1_multiexp(std::ptr::null(), 0, std::ptr::null_mut(), 0) } as usize,
+        4
+    );
+    INJECT_PANIC.with(|flag| flag.set(true));
+    assert_eq!(
+        unsafe { bls12_381_pairing(std::ptr::null(), 0, std::ptr::null_mut(), 0) } as usize,
+        4
+    );
+    INJECT_PANIC.with(|flag| flag.set(true));
+    assert_eq!(bls12_381_g1_output_size() as usize, 0);
+    INJECT_PANIC.with(|flag| flag.set(true));
+    assert_eq!(bls12_381_pairing_output_size() as usize, 0);
+    INJECT_PANIC.with(|flag| flag.set(true));
+    assert_eq!(
+        unsafe { bls12_381_g2_add(std::ptr::null(), 0, std::ptr::null_mut(), 0) } as usize,
+        4
+    );
+    INJECT_PANIC.with(|flag| flag.set(true));
+    assert_eq!(
+        unsafe { bls12_381_g2_mul(std::ptr::null(), 0, std::ptr::null_mut(), 0) } as usize,
+        4
+    );
+    INJECT_PANIC.with(|flag| flag.set(true));
+    assert_eq!(
+        unsafe { bls12_381_g2_multiexp(std::ptr::null(), 0, std::ptr::null_mut(), 0) } as usize,
+        4
+    );
+    INJECT_PANIC.with(|flag| flag.set(true));
+    assert_eq!(bls12_381_g2_output_size() as usize, 0);
+}
+
+#[test]
+fn fallible_reservation_rejects_capacity_overflow() {
+    assert!(reserved::<u8>(usize::MAX).is_err());
+    assert!(reserved::<G1Affine>(usize::MAX).is_err());
+    assert!(reserved::<BlsG2Affine>(usize::MAX).is_err());
+    assert!(reserved::<u8>(0).unwrap().is_empty());
 }

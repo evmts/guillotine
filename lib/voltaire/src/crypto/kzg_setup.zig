@@ -82,7 +82,8 @@ pub fn deinit(allocator: std.mem.Allocator) void {
         // Only acceptable error is TrustedSetupNotLoaded (already freed or never loaded)
         // Any other error should be reported
         if (err != error.TrustedSetupNotLoaded) {
-            @panic("Unexpected error during KZG trusted setup cleanup");
+            std.log.err("KZG trusted setup cleanup failed: {s}", .{@errorName(err)});
+            return;
         }
     };
 
