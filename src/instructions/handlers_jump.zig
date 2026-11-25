@@ -2,193 +2,90 @@ const std = @import("std");
 const builtin = @import("builtin");
 const FrameConfig = @import("../frame/frame_config.zig").FrameConfig;
 const log = @import("../log.zig");
+const verified_ops = @import("../core/verified_ops.zig");
 
 /// Jump operation handlers for the EVM stack frame.
-/// These handle control flow operations including JUMP, JUMPI, JUMPDEST, and PC.
+/// These handle control flow operations including JUMP, JUMPI, and JUMPDEST.
 pub fn Handlers(FrameType: type) type {
     return struct {
         pub const Error = FrameType.Error;
         pub const Dispatch = FrameType.Dispatch;
         pub const WordType = FrameType.WordType;
-        const dispatch_next = @import("dispatch_next.zig");
+        const handler_abi = @import("../preprocessor/handler_abi.zig");
+        const N = handler_abi.Native(FrameType);
+
+        /// Resolve a dynamic jump destination to the schedule cursor of its JUMPDEST.
+        /// Returns null when the destination is not a JUMPDEST.
+        inline fn resolve(self: *FrameType, dest: WordType) ?[*]const Dispatch.Item {
+            if (dest > std.math.maxInt(FrameType.PcType)) return null;
+            const dest_pc: FrameType.PcType = @intCast(dest);
+            const target = self.jump_table.findJumpTarget(dest_pc) orelse return null;
+            return target.cursor;
+        }
 
         /// JUMP opcode (0x56) - Unconditional jump.
         /// Pops destination from stack and transfers control to that location.
         /// The destination must be a valid JUMPDEST.
-        pub fn jump(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.JUMP, cursor);
-            // Get jump table from frame
-            const jump_table = self.jump_table;
-
-            // Check stack has at least 1 item for JUMP
-            if (self.stack.size() < 1) {
-                self.afterComplete(.JUMP);
-                return Error.StackUnderflow;
-            }
-
-            const dest = self.stack.pop_unsafe();
-
-            // Validate jump destination range
-            if (dest > std.math.maxInt(u32)) {
-                self.afterComplete(.JUMP);
-                return Error.InvalidJump;
-            }
-
-            const dest_pc: FrameType.PcType = @intCast(dest);
-
-            // Use binary search to find valid jump destination
-            if (jump_table.findJumpTarget(dest_pc)) |jump_dispatch| {
-                // Found valid JUMPDEST - update thread-local PC for tracing (only when tracing is enabled)
-                const build_options = @import("build_options");
-                if (comptime build_options.enable_tracing) {
-                    const frame_handlers = @import("../frame/frame_handlers.zig");
-                    frame_handlers.setCurrentPc(dest_pc);
-                }
-
-                // Debug logging to file
-                if (dest_pc == 0x304) {
-                }
-
-
-                // The cursor might point to different types of items depending on the jump target
-                // Check what kind of item we have at the cursor
-                const next_handler = switch (jump_dispatch.cursor[0]) {
-                    .opcode_handler => |handler| handler,
-                    .jump_dest => jump_dispatch.cursor[1].opcode_handler, // Metadata followed by handler
-                    .jump_static => |meta| blk: {
-                        // Static jump points directly to the target
-                        const target_dispatch = @as(*const FrameType.Dispatch, @ptrCast(@alignCast(meta.dispatch)));
-                        break :blk target_dispatch.cursor[0].opcode_handler;
-                    },
-                    else => {
-                        self.afterComplete(.JUMP);
-                        return Error.InvalidJump;
-                    },
-                };
-                const next_cursor = switch (jump_dispatch.cursor[0]) {
-                    .opcode_handler => jump_dispatch.cursor,
-                    .jump_dest => jump_dispatch.cursor + 1,
-                    .jump_static => |meta| @as(*const FrameType.Dispatch, @ptrCast(@alignCast(meta.dispatch))).cursor,
-                    else => unreachable,
-                };
-                self.afterInstruction(.JUMP, next_handler, next_cursor);
-                return @call(FrameType.Dispatch.getTailCallModifier(), next_handler, .{ self, next_cursor });
-            } else {
-                // Not a valid JUMPDEST
-                self.afterComplete(.JUMP);
-                return Error.InvalidJump;
-            }
+        pub fn jump(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            N.before(self, .JUMP, cursor, sp, gas);
+            var s = N.StackView{ .sp = sp };
+            if (s.size(self) < 1) return N.exit(self, .JUMP, s.sp, gas, .stack_underflow);
+            const dest = s.pop_unsafe();
+            const target = resolve(self, dest) orelse return N.exit(self, .JUMP, s.sp, gas, .invalid_jump);
+            return N.jump(self, .JUMP, target, s.sp, gas);
         }
 
         /// JUMPI opcode (0x57) - Conditional jump.
         /// Pops destination and condition from stack.
         /// Jumps to destination if condition is non-zero, otherwise continues to next instruction.
-        pub fn jumpi(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.JUMPI, cursor);
-            const jump_table = self.jump_table;
+        pub fn jumpi(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            N.before(self, .JUMPI, cursor, sp, gas);
+            var s = N.StackView{ .sp = sp };
+            if (s.size(self) < 2) return N.exit(self, .JUMPI, s.sp, gas, .stack_underflow);
+            const dest = s.pop_unsafe();
+            const condition = s.pop_unsafe();
+            if (condition == 0) return N.next(self, .JUMPI, cursor, s.sp, gas);
+            const target = resolve(self, dest) orelse return N.exit(self, .JUMPI, s.sp, gas, .invalid_jump);
+            return N.jump(self, .JUMPI, target, s.sp, gas);
+        }
 
-            // Check stack has at least 2 items for JUMPI
-            if (self.stack.size() < 2) {
-                self.afterComplete(.JUMPI);
-                return Error.StackUnderflow;
+        /// Enter a basic block: charge its static gas and validate its stack bounds in one
+        /// shot. Every instruction in the block then runs without gas or bounds checks.
+        /// Shared by JUMPDEST and BLOCK_BEGIN. The cursor points to: [0] = handler,
+        /// [1] = jump_dest metadata for the block.
+        pub inline fn enterBlock(self: *FrameType, comptime opcode: Dispatch.UnifiedOpcode, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas_before: FrameType.GasType) handler_abi.ExitCode {
+            N.before(self, opcode, cursor, sp, gas_before);
+            const meta = cursor[1].jump_dest;
+
+            // Negative gas pattern: a single branch detects out of gas.
+            const gas = gas_before - @as(FrameType.GasType, @intCast(meta.gas));
+            if (gas < 0) {
+                @branchHint(.unlikely);
+                return N.exit(self, opcode, sp, gas, .out_of_gas);
             }
 
-            const dest = self.stack.pop_unsafe();
-            const condition = self.stack.pop_unsafe();
-
-            if (condition != 0) {
-                if (dest > std.math.maxInt(u32)) {
-                    self.afterComplete(.JUMPI);
-                    return Error.InvalidJump;
-                }
-
-                const dest_pc: FrameType.PcType = @intCast(dest);
-
-                if (jump_table.findJumpTarget(dest_pc)) |jump_dispatch| {
-                    const build_options = @import("build_options");
-                    if (comptime build_options.enable_tracing) {
-                        const frame_handlers = @import("../frame/frame_handlers.zig");
-                        frame_handlers.setCurrentPc(dest_pc);
-                    }
-
-                    // The cursor might point to different types of items depending on the jump target
-                    // Check what kind of item we have at the cursor
-                    const next_handler = switch (jump_dispatch.cursor[0]) {
-                        .opcode_handler => |handler| handler,
-                        .jump_dest => jump_dispatch.cursor[1].opcode_handler, // Metadata followed by handler
-                        .jump_static => |meta| blk: {
-                            // Static jump points directly to the target
-                            const target_dispatch = @as(*const FrameType.Dispatch, @ptrCast(@alignCast(meta.dispatch)));
-                            break :blk target_dispatch.cursor[0].opcode_handler;
-                        },
-                        else => {
-                            self.afterComplete(.JUMPI);
-                            return Error.InvalidJump;
-                        },
-                    };
-                    const next_cursor = switch (jump_dispatch.cursor[0]) {
-                        .opcode_handler => jump_dispatch.cursor,
-                        .jump_dest => jump_dispatch.cursor + 1,
-                        .jump_static => |meta| @as(*const FrameType.Dispatch, @ptrCast(@alignCast(meta.dispatch))).cursor,
-                        else => unreachable,
-                    };
-                    self.afterInstruction(.JUMPI, next_handler, next_cursor);
-                    return @call(FrameType.Dispatch.getTailCallModifier(), next_handler, .{ self, next_cursor });
-                } else {
-                    // Not a valid JUMPDEST
-                    self.afterComplete(.JUMPI);
-                    return Error.InvalidJump;
-                }
-            } else {
-                @branchHint(.likely);
-                return dispatch_next.nextInstruction(FrameType, self, cursor, .JUMPI);
+            var s = N.StackView{ .sp = sp };
+            const size: u32 = @intCast(s.size(self));
+            const min_stack: u16 = if (meta.min_stack > 0) @intCast(meta.min_stack) else 0;
+            const max_stack: u16 = if (meta.max_stack > 0) @intCast(meta.max_stack) else 0;
+            switch (verified_ops.blockStackGuardFast(size, min_stack, max_stack, FrameType.Stack.stack_capacity)) {
+                .ok => {},
+                .underflow => {
+                    @branchHint(.unlikely);
+                    return N.exit(self, opcode, sp, gas, .stack_underflow);
+                },
+                .overflow => {
+                    @branchHint(.unlikely);
+                    return N.exit(self, opcode, sp, gas, .stack_overflow);
+                },
             }
+            return N.next(self, opcode, cursor, sp, gas);
         }
 
         /// JUMPDEST opcode (0x5b) - Mark valid jump destination.
-        /// This opcode marks a valid destination for JUMP and JUMPI operations.
-        /// It also serves as a gas consumption point and stack validation point for the entire basic block.
-        pub fn jumpdest(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.JUMPDEST, cursor);
-            // Jump table not needed for JUMPDEST itself
-            const dispatch = Dispatch{ .cursor = cursor };
-            // JUMPDEST consumes gas for the entire basic block (static + dynamic)
-            const op_data = dispatch.getOpData(.JUMPDEST);
-            const gas_cost = op_data.metadata.gas;
-            const min_stack = op_data.metadata.min_stack;
-            const max_stack = op_data.metadata.max_stack;
-
-            // Check and consume gas for the entire basic block
-            // Use negative gas pattern for single-branch out-of-gas detection
-            self.gas_remaining -= @as(FrameType.GasType, @intCast(gas_cost));
-            if (self.gas_remaining < 0) {
-                self.afterComplete(.JUMPDEST);
-                return Error.OutOfGas;
-            }
-
-            // Check stack requirements for the entire basic block
-            const current_stack_size = self.stack.size();
-
-            // Check minimum stack requirement (won't underflow)
-            if (min_stack > 0 and current_stack_size < @as(usize, @intCast(min_stack))) {
-                self.afterComplete(.JUMPDEST);
-                return Error.StackUnderflow;
-            }
-
-            // Check maximum stack requirement (won't overflow)
-            // max_stack represents the net stack change, so we need to ensure
-            // current_stack_size + max_stack <= stack_capacity
-            if (max_stack > 0) {
-                const stack_capacity = @TypeOf(self.stack).stack_capacity;
-                const max_final_size = @as(isize, @intCast(current_stack_size)) + @as(isize, max_stack);
-                if (max_final_size > @as(isize, @intCast(stack_capacity))) {
-                    self.afterComplete(.JUMPDEST);
-                    return Error.StackOverflow;
-                }
-            }
-
-            self.afterInstruction(.JUMPDEST, op_data.next_handler, op_data.next_cursor.cursor);
-            return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+        /// It is also the gas consumption and stack validation point for its basic block.
+        pub fn jumpdest(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            return enterBlock(self, .JUMPDEST, cursor, sp, gas);
         }
     };
 }

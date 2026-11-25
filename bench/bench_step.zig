@@ -77,6 +77,7 @@ fn optimized(b: *std.Build, source: *std.Build.Module, mode: std.builtin.Optimiz
     const copy = b.allocator.create(std.Build.Module) catch @panic("out of memory creating benchmark module");
     copy.* = source.*;
     copy.optimize = mode;
+    if (mode == .fast or mode == .small) copy.omit_frame_pointer = true;
     if (archive) |replacement| {
         copy.link_objects = source.link_objects.clone(b.allocator) catch @panic("out of memory copying benchmark links");
         for (copy.link_objects.items) |*object| {

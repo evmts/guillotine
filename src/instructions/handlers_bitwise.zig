@@ -10,10 +10,12 @@ pub fn Handlers(FrameType: type) type {
         pub const Dispatch = FrameType.Dispatch;
         pub const WordType = FrameType.WordType;
         const dispatch_next = @import("dispatch_next.zig");
+        const handler_abi = @import("../preprocessor/handler_abi.zig");
+        const N = handler_abi.Native(FrameType);
 
         /// CLZ (0x1e), EIP-7939: replace one word with its leading-zero count.
         /// Available from Osaka; zero produces 256. Dispatch charges five gas.
-        pub fn clz(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn clz(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             if (FrameType.config.hardfork.isBefore(.OSAKA)) {
                 self.gas_remaining = 0;
                 return error.InvalidOpcode;
@@ -28,104 +30,105 @@ pub fn Handlers(FrameType: type) type {
         }
 
         /// AND opcode (0x16) - Bitwise AND operation.
-        pub fn @"and"(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.AND, cursor);
-            
-            // Get values before the operation for logging
-            const value1 = self.stack.stack_ptr[0];  // Top of stack
-            const value2 = self.stack.stack_ptr[1];  // Second on stack
-            
-            self.stack.binary_op_unsafe(struct {
+        pub fn @"and"(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView{ .sp = sp };
+            N.before(self, .AND, cursor, s.sp, gas);
+
+            s.binary_op_unsafe(struct {
                 fn op(top: WordType, second: WordType) WordType {
                     return top & second;
                 }
             }.op);
-            
-            const result = self.stack.stack_ptr[0];  // Result is now at top
-            log.debug("[AND] 0x{x:0>64} & 0x{x:0>64} = 0x{x:0>64}", .{ value2, value1, result });
-            
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .AND);
+
+            return N.next(self, .AND, cursor, s.sp, gas);
         }
 
         /// OR opcode (0x17) - Bitwise OR operation.
-        pub fn @"or"(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.OR, cursor);
-            self.stack.binary_op_unsafe(struct {
+        pub fn @"or"(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView{ .sp = sp };
+            N.before(self, .OR, cursor, s.sp, gas);
+            s.binary_op_unsafe(struct {
                 fn op(top: WordType, second: WordType) WordType {
                     return top | second;
                 }
             }.op);
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .OR);
+            return N.next(self, .OR, cursor, s.sp, gas);
         }
 
         /// XOR opcode (0x18) - Bitwise XOR operation.
-        pub fn xor(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.XOR, cursor);
-            self.stack.binary_op_unsafe(struct {
+        pub fn xor(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView{ .sp = sp };
+            N.before(self, .XOR, cursor, s.sp, gas);
+            s.binary_op_unsafe(struct {
                 fn op(top: WordType, second: WordType) WordType {
                     return top ^ second;
                 }
             }.op);
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .XOR);
+            return N.next(self, .XOR, cursor, s.sp, gas);
         }
 
         /// NOT opcode (0x19) - Bitwise NOT operation.
-        pub fn not(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.NOT, cursor);
-            const value = self.stack.peek_unsafe();
-            self.stack.set_top_unsafe(~value);
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .NOT);
+        pub fn not(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView{ .sp = sp };
+            N.before(self, .NOT, cursor, s.sp, gas);
+            const value = s.peek_unsafe();
+            s.set_top_unsafe(~value);
+            return N.next(self, .NOT, cursor, s.sp, gas);
         }
 
         /// BYTE opcode (0x1a) - Extract byte from word.
         /// Takes byte index from stack top, value from second position.
         /// Returns the byte at that index or 0 if index >= 32.
-        pub fn byte(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.BYTE, cursor);
-            const byte_index = self.stack.pop_unsafe(); // Top of stack - byte index
-            const value = self.stack.peek_unsafe(); // Second from top - value to extract from
+        pub fn byte(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView{ .sp = sp };
+            N.before(self, .BYTE, cursor, s.sp, gas);
+            const byte_index = s.pop_unsafe(); // Top of stack - byte index
+            const value = s.peek_unsafe(); // Second from top - value to extract from
             const result = if (byte_index >= 32) 0 else blk: {
                 const shift_amount = (31 - byte_index) * 8;
                 break :blk (value >> @intCast(shift_amount)) & 0xFF;
             };
-            self.stack.set_top_unsafe(result);
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .BYTE);
+            s.set_top_unsafe(result);
+            return N.next(self, .BYTE, cursor, s.sp, gas);
         }
 
         /// SHL opcode (0x1b) - Shift left operation.
-        pub fn shl(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.SHL, cursor);
-            const shift = self.stack.pop_unsafe(); // Top of stack - shift amount
-            const value = self.stack.peek_unsafe(); // Second from top - value to shift
+        pub fn shl(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView{ .sp = sp };
+            N.before(self, .SHL, cursor, s.sp, gas);
+            const shift = s.pop_unsafe(); // Top of stack - shift amount
+            const value = s.peek_unsafe(); // Second from top - value to shift
             const result = if (shift >= 256) 0 else value << @intCast(shift);
-            self.stack.set_top_unsafe(result);
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .SHL);
+            s.set_top_unsafe(result);
+            return N.next(self, .SHL, cursor, s.sp, gas);
         }
 
         /// SHR opcode (0x1c) - Logical shift right operation.
-        pub fn shr(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.SHR, cursor);
-            const shift = self.stack.pop_unsafe(); // Top of stack - shift amount
-            const value = self.stack.peek_unsafe(); // Second from top - value to shift
+        pub fn shr(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView{ .sp = sp };
+            N.before(self, .SHR, cursor, s.sp, gas);
+            const shift = s.pop_unsafe(); // Top of stack - shift amount
+            const value = s.peek_unsafe(); // Second from top - value to shift
             const result = if (shift >= 256) 0 else value >> @intCast(shift);
-            self.stack.set_top_unsafe(result);
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .SHR);
+            s.set_top_unsafe(result);
+            return N.next(self, .SHR, cursor, s.sp, gas);
         }
 
         /// SAR opcode (0x1d) - Arithmetic shift right operation.
         /// Preserves the sign bit during shift.
-        pub fn sar(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.SAR, cursor);
-            const shift = self.stack.pop_unsafe(); // Top of stack - shift amount
-            const value = self.stack.peek_unsafe(); // Second from top - value to shift
+        pub fn sar(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView{ .sp = sp };
+            N.before(self, .SAR, cursor, s.sp, gas);
+            const shift = s.pop_unsafe(); // Top of stack - shift amount
+            const value = s.peek_unsafe(); // Second from top - value to shift
             const value_signed = @as(@Int(.signed, @bitSizeOf(WordType)), @bitCast(value));
             const result = if (shift >= 256) blk: {
                 break :blk if (value_signed < 0) @as(WordType, @bitCast(@as(@Int(.signed, @bitSizeOf(WordType)), -1))) else 0;
             } else blk: {
                 break :blk @as(WordType, @bitCast(value_signed >> @intCast(shift)));
             };
-            self.stack.set_top_unsafe(result);
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .SAR);
+            s.set_top_unsafe(result);
+            return N.next(self, .SAR, cursor, s.sp, gas);
         }
     };
 }

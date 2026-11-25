@@ -2,6 +2,7 @@ const std = @import("std");
 const FrameConfig = @import("../frame/frame_config.zig").FrameConfig;
 const log = @import("../log.zig");
 const OpcodeSynthetic = @import("../opcodes/opcode_synthetic.zig").OpcodeSynthetic;
+const jump_handlers = @import("handlers_jump.zig");
 
 /// Synthetic jump opcode handlers for the EVM stack frame.
 /// These handle statically optimized jump operations.
@@ -10,290 +11,60 @@ pub fn Handlers(FrameType: type) type {
         pub const Error = FrameType.Error;
         pub const Dispatch = FrameType.Dispatch;
         pub const WordType = FrameType.WordType;
+        const handler_abi = @import("../preprocessor/handler_abi.zig");
+        const N = handler_abi.Native(FrameType);
 
-        /// Jump directly to a statically known location without binary search.
-        /// The cursor now points to metadata containing the jump destination dispatch.
-        pub fn jump_to_static_location(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            @branchHint(.likely);
-            self.beforeInstruction(.JUMP_TO_STATIC_LOCATION, cursor);
-            const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
-            const op_data = dispatch_opcode_data.getOpData(.JUMP_TO_STATIC_LOCATION, Dispatch, Dispatch.Item, cursor);
-
-            // The dispatch pointer already points to the JUMPDEST handler location
-            const jump_dispatch_ptr = @as([*]const Dispatch.Item, @ptrCast(@alignCast(op_data.metadata.dispatch)));
-            
-            
-            // Call the handler at that location, passing cursor pointing to the handler itself
-            self.afterInstruction(.JUMP_TO_STATIC_LOCATION, jump_dispatch_ptr[0].opcode_handler, jump_dispatch_ptr);
-            return @call(FrameType.Dispatch.getTailCallModifier(), jump_dispatch_ptr[0].opcode_handler, .{ self, jump_dispatch_ptr });
+        /// The schedule cursor stored in a jump_static metadata item.
+        inline fn staticTarget(item: Dispatch.Item) [*]const Dispatch.Item {
+            return @ptrCast(@alignCast(item.jump_static.dispatch));
         }
 
-        /// Conditionally jump to a statically known location without binary search.
-        /// The cursor now points to metadata containing the jump destination dispatch.
-        pub fn jumpi_to_static_location(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            @branchHint(.likely);
-            
-            self.beforeInstruction(.JUMPI_TO_STATIC_LOCATION, cursor);
-            const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
-            const op_data = dispatch_opcode_data.getOpData(.JUMPI_TO_STATIC_LOCATION, Dispatch, Dispatch.Item, cursor);
-            
-            // The dispatch pointer already points to the JUMPDEST handler location
-            const jump_dispatch_ptr = @as([*]const Dispatch.Item, @ptrCast(@alignCast(op_data.metadata.dispatch)));
-            
-            {
-                (&self.getEvm().tracer).assert(self.stack.size() >= 1, "JUMPI requires condition on stack");
-            }
-            const condition = self.stack.pop_unsafe();
-            
-            if (condition != 0) {
-                @branchHint(.unlikely);
-                // Call the handler at that location, passing cursor pointing to that slot
-                self.afterInstruction(.JUMPI_TO_STATIC_LOCATION, jump_dispatch_ptr[0].opcode_handler, jump_dispatch_ptr);
-                return @call(FrameType.Dispatch.getTailCallModifier(), jump_dispatch_ptr[0].opcode_handler, .{ self, jump_dispatch_ptr });
-            }
-            
-            // Continue to next instruction - use the pre-computed next_handler and next_cursor from op_data
-            
-            self.afterInstruction(.JUMPI_TO_STATIC_LOCATION, op_data.next_handler, op_data.next_cursor.cursor);
-            return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+        /// Jump directly to a statically known location without a jump table lookup.
+        /// The cursor points to: [0] = handler, [1] = jump_static metadata.
+        pub fn jump_to_static_location(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            N.before(self, .JUMP_TO_STATIC_LOCATION, cursor, sp, gas);
+            return N.jump(self, .JUMP_TO_STATIC_LOCATION, staticTarget(cursor[1]), sp, gas);
         }
 
-        /// PUSH_JUMP_INLINE - Fused PUSH+JUMP with inline destination (≤8 bytes).
-        /// Pushes a destination and immediately jumps to it.
-        /// @deprecated Use jump_to_static_location for better performance
-        pub fn push_jump_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            @branchHint(.likely);
-            self.beforeInstruction(.PUSH_JUMP_INLINE, cursor);
-            const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
-            const op_data = dispatch_opcode_data.getOpData(.PUSH_JUMP_INLINE, Dispatch, Dispatch.Item, cursor);
-
-            // Cursor now points to metadata
-            const dest = op_data.metadata.value;
-
-            // Validate jump destination range
-            if (dest > std.math.maxInt(FrameType.PcType)) {
-                @branchHint(.unlikely);
-                self.afterComplete(.PUSH_JUMP_INLINE);
-                return Error.InvalidJump;
-            }
-
-            const dest_pc: FrameType.PcType = @intCast(dest);
-
-            const jump_table = self.jump_table;
-            if (jump_table.findJumpTarget(dest_pc)) |jump_dispatch| {
-                @branchHint(.likely);
-                // Found valid JUMPDEST - tail call to the jump destination
-                self.afterInstruction(.PUSH_JUMP_INLINE, jump_dispatch.cursor[0].opcode_handler, jump_dispatch.cursor + 1);
-                return @call(FrameType.Dispatch.getTailCallModifier(), jump_dispatch.cursor[0].opcode_handler, .{ self, jump_dispatch.cursor + 1 });
-            } else {
-                // Not a valid JUMPDEST
-                self.afterComplete(.PUSH_JUMP_INLINE);
-                return Error.InvalidJump;
-            }
+        /// Conditionally jump to a statically known location without a jump table lookup.
+        /// The cursor points to: [0] = handler, [1] = jump_static metadata.
+        pub fn jumpi_to_static_location(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            N.before(self, .JUMPI_TO_STATIC_LOCATION, cursor, sp, gas);
+            var s = N.StackView{ .sp = sp };
+            const condition = s.pop_unsafe();
+            if (condition != 0) return N.jump(self, .JUMPI_TO_STATIC_LOCATION, staticTarget(cursor[1]), s.sp, gas);
+            return N.next(self, .JUMPI_TO_STATIC_LOCATION, cursor, s.sp, gas);
         }
 
-        /// PUSH_JUMP_POINTER - Fused PUSH+JUMP with pointer destination (>8 bytes).
-        /// @deprecated Use jump_to_static_location for better performance
-        pub fn push_jump_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            @branchHint(.likely);
-            self.beforeInstruction(.PUSH_JUMP_POINTER, cursor);
-            const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
-            const op_data = dispatch_opcode_data.getOpData(.PUSH_JUMP_POINTER, Dispatch, Dispatch.Item, cursor);
-
-            // Cursor now points to metadata
-            const dest = op_data.metadata.value.*;
-
-            // Validate jump destination range
-            if (dest > std.math.maxInt(FrameType.PcType)) {
-                @branchHint(.unlikely);
-                self.afterComplete(.PUSH_JUMP_POINTER);
-                return Error.InvalidJump;
-            }
-
-            const dest_pc: FrameType.PcType = @intCast(dest);
-
-            // Look up the destination in the jump table
-            const jump_table = self.jump_table;
-            if (jump_table.findJumpTarget(dest_pc)) |jump_dispatch| {
-                @branchHint(.likely);
-                // Found valid JUMPDEST - tail call to the jump destination
-                self.afterInstruction(.PUSH_JUMP_POINTER, jump_dispatch.cursor[0].opcode_handler, jump_dispatch.cursor + 1);
-                return @call(FrameType.Dispatch.getTailCallModifier(), jump_dispatch.cursor[0].opcode_handler, .{ self, jump_dispatch.cursor + 1 });
-            } else {
-                // Not a valid JUMPDEST
-                self.afterComplete(.PUSH_JUMP_POINTER);
-                return Error.InvalidJump;
-            }
-        }
-
-        /// PUSH_JUMPI_INLINE - Fused PUSH+JUMPI with inline destination (≤8 bytes).
-        /// Pushes a destination, pops condition, and conditionally jumps.
-        /// @deprecated Use jumpi_to_static_location for better performance
-        pub fn push_jumpi_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            @branchHint(.likely);
-            self.beforeInstruction(.PUSH_JUMPI_INLINE, cursor);
-            const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
-            const op_data = dispatch_opcode_data.getOpData(.PUSH_JUMPI_INLINE, Dispatch, Dispatch.Item, cursor);
-
-            const dest = op_data.metadata.value;
-
-            {
-                (&self.getEvm().tracer).assert(self.stack.size() >= 1, "JUMPI requires condition on stack");
-            }
-            const condition = self.stack.pop_unsafe();
-
-            if (condition != 0) {
-                @branchHint(.unlikely);
-                // Take the jump - validate destination range
-                if (dest > std.math.maxInt(FrameType.PcType)) {
-                    @branchHint(.unlikely);
-                    self.afterComplete(.PUSH_JUMPI_INLINE);
-                    return Error.InvalidJump;
-                }
-
-                const dest_pc: FrameType.PcType = @intCast(dest);
-
-                // Look up the destination in the jump table
-                const jump_table = self.jump_table;
-                if (jump_table.findJumpTarget(dest_pc)) |jump_dispatch| {
-                    @branchHint(.likely);
-                    // Found valid JUMPDEST - tail call to the jump destination
-                    self.afterInstruction(.PUSH_JUMPI_INLINE, jump_dispatch.cursor[0].opcode_handler, jump_dispatch.cursor + 1);
-                    return @call(FrameType.Dispatch.getTailCallModifier(), jump_dispatch.cursor[0].opcode_handler, .{ self, jump_dispatch.cursor + 1 });
-                } else {
-                    // Not a valid JUMPDEST
-                    self.afterComplete(.PUSH_JUMPI_INLINE);
-                    return Error.InvalidJump;
-                }
-            } else {
-                // Continue to next instruction
-                self.afterInstruction(.PUSH_JUMPI_INLINE, op_data.next_handler, op_data.next_cursor.cursor);
-                return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-            }
-        }
-
-        /// PUSH_JUMPI_POINTER - Fused PUSH+JUMPI with pointer destination (>8 bytes).
-        /// @deprecated Use jumpi_to_static_location for better performance
-        pub fn push_jumpi_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            @branchHint(.likely);
-            self.beforeInstruction(.PUSH_JUMPI_POINTER, cursor);
-            const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
-            const op_data = dispatch_opcode_data.getOpData(.PUSH_JUMPI_POINTER, Dispatch, Dispatch.Item, cursor);
-
-            // Cursor now points to metadata
-            const dest = op_data.metadata.value.*;
-
-            // Pop the condition
-            {
-                (&self.getEvm().tracer).assert(self.stack.size() >= 1, "JUMPI requires condition on stack");
-            } // PUSH_JUMPI requires 1 stack item
-            const condition = self.stack.pop_unsafe();
-
-            if (condition != 0) {
-                @branchHint(.unlikely);
-                // Take the jump - validate destination range
-                if (dest > std.math.maxInt(FrameType.PcType)) {
-                    @branchHint(.unlikely);
-                    self.afterComplete(.PUSH_JUMPI_POINTER);
-                    return Error.InvalidJump;
-                }
-
-                const dest_pc: FrameType.PcType = @intCast(dest);
-
-                // Look up the destination in the jump table
-                const jump_table = self.jump_table;
-                if (jump_table.findJumpTarget(dest_pc)) |jump_dispatch| {
-                    @branchHint(.likely);
-                    // Found valid JUMPDEST - tail call to the jump destination
-                    self.afterInstruction(.PUSH_JUMPI_POINTER, jump_dispatch.cursor[0].opcode_handler, jump_dispatch.cursor + 1);
-                    return @call(FrameType.Dispatch.getTailCallModifier(), jump_dispatch.cursor[0].opcode_handler, .{ self, jump_dispatch.cursor + 1 });
-                } else {
-                    // Not a valid JUMPDEST
-                    self.afterComplete(.PUSH_JUMPI_POINTER);
-                    return Error.InvalidJump;
-                }
-            } else {
-                // Continue to next instruction
-                self.afterInstruction(.PUSH_JUMPI_POINTER, op_data.next_handler, op_data.next_cursor.cursor);
-                return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
-            }
-        }
         /// BACKWARD_LOOP_JUMPI - Optimized backward loop with branch prediction for loops.
-        /// Pattern: condition check with forward exit and backward loop continuation.
-        /// The cursor points to metadata: [0] = handler, [1] = loop_dispatch, [2] = exit_dispatch
-        /// When condition is 0 (continue loop): jump backward (likely path)
-        /// When condition is non-zero (exit loop): jump forward (unlikely path)
-        pub fn backward_loop_jumpi(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            @branchHint(.likely);
-
-            self.beforeInstruction(.BACKWARD_LOOP_JUMPI, cursor);
-
-            // Get the loop and exit dispatch pointers from metadata
-            const loop_dispatch_ptr = @as([*]const Dispatch.Item, @ptrCast(@alignCast(cursor[1].jump_static.dispatch)));
-            const exit_dispatch_ptr = @as([*]const Dispatch.Item, @ptrCast(@alignCast(cursor[2].jump_static.dispatch)));
-
-            {
-                (&self.getEvm().tracer).assert(self.stack.size() >= 1, "BACKWARD_LOOP_JUMPI requires condition on stack");
-            }
-            const condition = self.stack.pop_unsafe();
-
+        /// The cursor points to: [0] = handler, [1] = loop target, [2] = exit target.
+        /// A zero condition continues the loop (the hot path); non-zero exits it.
+        pub fn backward_loop_jumpi(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            N.before(self, .BACKWARD_LOOP_JUMPI, cursor, sp, gas);
+            var s = N.StackView{ .sp = sp };
+            const condition = s.pop_unsafe();
             if (condition == 0) {
-                // Loop continuation - backward jump (this is the HOT path for loops)
-                self.afterInstruction(.BACKWARD_LOOP_JUMPI, loop_dispatch_ptr[0].opcode_handler, loop_dispatch_ptr);
-                return @call(FrameType.Dispatch.getTailCallModifier(), loop_dispatch_ptr[0].opcode_handler, .{ self, loop_dispatch_ptr });
+                @branchHint(.likely);
+                return N.jump(self, .BACKWARD_LOOP_JUMPI, staticTarget(cursor[1]), s.sp, gas);
             }
-
-            // Loop exit - forward jump (COLD path for loops)
-            self.afterInstruction(.BACKWARD_LOOP_JUMPI, exit_dispatch_ptr[0].opcode_handler, exit_dispatch_ptr);
-            return @call(FrameType.Dispatch.getTailCallModifier(), exit_dispatch_ptr[0].opcode_handler, .{ self, exit_dispatch_ptr });
+            return N.jump(self, .BACKWARD_LOOP_JUMPI, staticTarget(cursor[2]), s.sp, gas);
         }
 
         /// INVALID_JUMP_TARGET - where a static jump to a non-JUMPDEST lands. Invalid
         /// targets in unreachable code are legal, so preprocessing points such jumps here
         /// and the error surfaces only when the jump is taken. It maps to no bytecode
         /// instruction: the jump handler already stepped MinimalEvm through the failed JUMP.
-        pub fn invalid_jump_target(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn invalid_jump_target(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
             _ = cursor;
-            self.afterComplete(.INVALID_JUMP_TARGET);
-            return Error.InvalidJump;
+            return N.exit(self, .INVALID_JUMP_TARGET, sp, gas, .invalid_jump);
         }
 
-        /// BLOCK_BEGIN - start of a basic block reached by falling through a non-taken JUMPI.
-        /// It maps to no bytecode instruction. Like JUMPDEST it charges the block's static
-        /// gas and validates the block's stack bounds in one shot, but it charges no gas of its own.
-        /// The cursor points to: [0] = handler, [1] = jump_dest metadata for the block.
-        pub fn block_begin(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.BLOCK_BEGIN, cursor);
-            const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
-            const op_data = dispatch_opcode_data.getOpData(.BLOCK_BEGIN, Dispatch, Dispatch.Item, cursor);
-            const gas_cost = op_data.metadata.gas;
-            const min_stack = op_data.metadata.min_stack;
-            const max_stack = op_data.metadata.max_stack;
-
-            self.gas_remaining -= @as(FrameType.GasType, @intCast(gas_cost));
-            if (self.gas_remaining < 0) {
-                self.afterComplete(.BLOCK_BEGIN);
-                return Error.OutOfGas;
-            }
-
-            const verified_ops = @import("../core/verified_ops.zig");
-            const current_stack_size: u32 = @intCast(self.stack.size());
-            const min_u16: u16 = if (min_stack > 0) @intCast(min_stack) else 0;
-            const max_u16: u16 = if (max_stack > 0) @intCast(max_stack) else 0;
-            switch (verified_ops.blockStackGuardFast(current_stack_size, min_u16, max_u16, @TypeOf(self.stack).stack_capacity)) {
-                .ok => {},
-                .underflow => {
-                    self.afterComplete(.BLOCK_BEGIN);
-                    return Error.StackUnderflow;
-                },
-                .overflow => {
-                    self.afterComplete(.BLOCK_BEGIN);
-                    return Error.StackOverflow;
-                },
-            }
-
-            self.afterInstruction(.BLOCK_BEGIN, op_data.next_handler, op_data.next_cursor.cursor);
-            return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+        /// BLOCK_BEGIN - start of a basic block reached by falling through a non-taken JUMPI
+        /// or a gas-observing instruction. It maps to no bytecode instruction. Like JUMPDEST
+        /// it charges the block's static gas and validates the block's stack bounds in one
+        /// shot, but it charges no gas of its own.
+        pub fn block_begin(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            return jump_handlers.Handlers(FrameType).enterBlock(self, .BLOCK_BEGIN, cursor, sp, gas);
         }
     };
 }

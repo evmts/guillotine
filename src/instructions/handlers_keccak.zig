@@ -28,7 +28,7 @@ pub fn Handlers(FrameType: type) type {
         /// The actual Keccak variant used depends on WordType:
         /// - For standard EVM (u256), uses Keccak-256
         /// - For smaller word types, may use different variants or truncate
-        pub fn keccak(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn keccak(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.KECCAK256, cursor);
             self.validateOpcodeHandler(.KECCAK256, cursor);
             const offset = self.stack.pop_unsafe(); // Top of stack is offset

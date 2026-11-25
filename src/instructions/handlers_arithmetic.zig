@@ -13,85 +13,85 @@ pub fn Handlers(FrameType: type) type {
         pub const WordType = FrameType.WordType;
 
         const dispatch_next = @import("dispatch_next.zig");
+        const handler_abi = @import("../preprocessor/handler_abi.zig");
+        const N = handler_abi.Native(FrameType);
 
         /// ADD opcode (0x01) - Addition with overflow wrapping.
-        pub fn add(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.ADD, cursor);
+        pub fn add(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView{ .sp = sp };
+            N.before(self, .ADD, cursor, s.sp, gas);
 
-            self.stack.binary_op_unsafe(struct {
+            s.binary_op_unsafe(struct {
                 fn op(top: WordType, second: WordType) WordType {
                     return top +% second;
                 }
             }.op);
 
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .ADD);
+            return N.next(self, .ADD, cursor, s.sp, gas);
         }
 
         /// MUL opcode (0x02) - Multiplication with overflow wrapping.
-        pub fn mul(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.MUL, cursor);
+        pub fn mul(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView{ .sp = sp };
+            N.before(self, .MUL, cursor, s.sp, gas);
 
-            self.stack.binary_op_unsafe(struct {
+            s.binary_op_unsafe(struct {
                 fn op(top: WordType, second: WordType) WordType {
                     return top *% second;
                 }
             }.op);
 
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .MUL);
+            return N.next(self, .MUL, cursor, s.sp, gas);
         }
 
         /// SUB opcode (0x03) - Subtraction with underflow wrapping.
-        pub fn sub(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.SUB, cursor);
+        pub fn sub(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView{ .sp = sp };
+            N.before(self, .SUB, cursor, s.sp, gas);
 
-            self.stack.binary_op_unsafe(struct {
+            s.binary_op_unsafe(struct {
                 fn op(top: WordType, second: WordType) WordType {
                     return top -% second; // SUB: µs[0] - µs[1] = top - second
                 }
             }.op);
 
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .SUB);
+            return N.next(self, .SUB, cursor, s.sp, gas);
         }
 
         const from_native = FrameType.UintN.from_native;
 
         /// DIV opcode (0x04) - Integer division. Division by zero returns 0.
-        pub fn div(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.DIV, cursor);
-            
-            // Get values before the operation for logging
-            const divisor = self.stack.stack_ptr[0];  // Top of stack
-            const dividend = self.stack.stack_ptr[1]; // Second on stack
+        pub fn div(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView{ .sp = sp };
+            N.before(self, .DIV, cursor, s.sp, gas);
 
-            self.stack.binary_op_unsafe(struct {
+            s.binary_op_unsafe(struct {
                 fn op(top: WordType, second: WordType) WordType {
                     return from_native(top).wrapping_div(from_native(second)).to_native();
                 }
             }.op);
-            
-            const result = self.stack.stack_ptr[0];  // Result is now at top
-            log.debug("[DIV] 0x{x:0>64} / 0x{x:0>64} = 0x{x:0>64}", .{ dividend, divisor, result });
 
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .DIV);
+            return N.next(self, .DIV, cursor, s.sp, gas);
         }
 
         /// SDIV opcode (0x05) - Signed integer division.
         // Branchless implementation for consistent performance
-        pub fn sdiv(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.SDIV, cursor);
-            const top = self.stack.pop_unsafe();
-            const second = self.stack.peek_unsafe();
+        pub fn sdiv(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView{ .sp = sp };
+            N.before(self, .SDIV, cursor, s.sp, gas);
+            const top = s.pop_unsafe();
+            const second = s.peek_unsafe();
 
             const SIGN_BIT = @as(u256, 1) << 255;
             const MIN_SIGNED = SIGN_BIT;
 
             if (second == 0) {
-                self.stack.set_top_unsafe(0);
-                return dispatch_next.nextInstruction(FrameType, self, cursor, .SDIV);
+                s.set_top_unsafe(0);
+                return N.next(self, .SDIV, cursor, s.sp, gas);
             }
             if (top == MIN_SIGNED and second == std.math.maxInt(u256)) {
-                self.stack.set_top_unsafe(MIN_SIGNED);
-                return dispatch_next.nextInstruction(FrameType, self, cursor, .SDIV);
+                s.set_top_unsafe(MIN_SIGNED);
+                return N.next(self, .SDIV, cursor, s.sp, gas);
             }
 
             // This section implements branchless two's complement arithmetic.
@@ -122,40 +122,42 @@ pub fn Handlers(FrameType: type) type {
 
             const result = (quotient ^ result_mask) -% result_mask;
 
-            self.stack.set_top_unsafe(result);
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .SDIV);
+            s.set_top_unsafe(result);
+            return N.next(self, .SDIV, cursor, s.sp, gas);
         }
 
         /// MOD opcode (0x06) - Modulo operation. Modulo by zero returns 0.
-        pub fn mod(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.MOD, cursor);
+        pub fn mod(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView{ .sp = sp };
+            N.before(self, .MOD, cursor, s.sp, gas);
 
-            self.stack.binary_op_unsafe(struct {
+            s.binary_op_unsafe(struct {
                 fn op(top: WordType, second: WordType) WordType {
                     return from_native(top).wrapping_rem(from_native(second)).to_native();
                 }
             }.op);
 
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .MOD);
+            return N.next(self, .MOD, cursor, s.sp, gas);
         }
 
         /// SMOD opcode (0x07) - Signed modulo operation.
         // Branchless implementation for consistent performance
-        pub fn smod(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.SMOD, cursor);
-            const top = self.stack.pop_unsafe();
-            const second = self.stack.peek_unsafe();
+        pub fn smod(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView{ .sp = sp };
+            N.before(self, .SMOD, cursor, s.sp, gas);
+            const top = s.pop_unsafe();
+            const second = s.peek_unsafe();
 
             const SIGN_BIT = @as(u256, 1) << 255;
             const MIN_SIGNED = SIGN_BIT;
 
             if (second == 0) {
-                self.stack.set_top_unsafe(0);
-                return dispatch_next.nextInstruction(FrameType, self, cursor, .SMOD);
+                s.set_top_unsafe(0);
+                return N.next(self, .SMOD, cursor, s.sp, gas);
             }
             if (top == MIN_SIGNED and second == std.math.maxInt(u256)) { // -1 in two's complement
-                self.stack.set_top_unsafe(0);
-                return dispatch_next.nextInstruction(FrameType, self, cursor, .SMOD);
+                s.set_top_unsafe(0);
+                return N.next(self, .SMOD, cursor, s.sp, gas);
             }
 
             // This section implements branchless two's complement arithmetic.
@@ -177,16 +179,17 @@ pub fn Handlers(FrameType: type) type {
             // Result takes sign of dividend (top_sign)
             const result = (remainder ^ top_mask) -% top_mask;
 
-            self.stack.set_top_unsafe(result);
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .SMOD);
+            s.set_top_unsafe(result);
+            return N.next(self, .SMOD, cursor, s.sp, gas);
         }
 
         /// ADDMOD opcode (0x08) - (a + b) % N. All intermediate calculations are performed with arbitrary precision.
-        pub fn addmod(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.ADDMOD, cursor);
-            const addend1 = self.stack.pop_unsafe(); // Top of stack (a)
-            const addend2 = self.stack.pop_unsafe(); // Second on stack (b)
-            const modulus = self.stack.pop_unsafe(); // Third on stack (N)
+        pub fn addmod(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView{ .sp = sp };
+            N.before(self, .ADDMOD, cursor, s.sp, gas);
+            const addend1 = s.pop_unsafe(); // Top of stack (a)
+            const addend2 = s.pop_unsafe(); // Second on stack (b)
+            const modulus = s.pop_unsafe(); // Third on stack (N)
             var result: WordType = 0;
             if (modulus == 0) {
                 result = 0;
@@ -208,24 +211,25 @@ pub fn Handlers(FrameType: type) type {
                 }
                 result = r;
             }
-            self.stack.push_unsafe(result);
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .ADDMOD);
+            s.push_unsafe(result);
+            return N.next(self, .ADDMOD, cursor, s.sp, gas);
         }
 
         /// MULMOD opcode (0x09) - (a * b) % N. All intermediate calculations are performed with arbitrary precision.
-        pub fn mulmod(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.MULMOD, cursor);
-            const factor1 = self.stack.pop_unsafe(); // Top of stack (a)
-            const factor2 = self.stack.pop_unsafe(); // Second on stack (b)
-            const modulus = self.stack.pop_unsafe(); // Third on stack (N)
+        pub fn mulmod(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView{ .sp = sp };
+            N.before(self, .MULMOD, cursor, s.sp, gas);
+            const factor1 = s.pop_unsafe(); // Top of stack (a)
+            const factor2 = s.pop_unsafe(); // Second on stack (b)
+            const modulus = s.pop_unsafe(); // Third on stack (N)
             var result: WordType = undefined;
             if (modulus == 0) {
                 result = 0;
             } else {
                 result = mulmod_safe(factor1, factor2, modulus);
             }
-            self.stack.push_unsafe(result);
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .MULMOD);
+            s.push_unsafe(result);
+            return N.next(self, .MULMOD, cursor, s.sp, gas);
         }
 
         /// Safe modular multiplication using double-width arithmetic to prevent overflow.
@@ -287,7 +291,7 @@ pub fn Handlers(FrameType: type) type {
         }
 
         /// EXP opcode (0x0a) - Exponential operation.
-        pub fn exp(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn exp(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             // Pop base (top), then exponent (second); compute base^exponent
             self.beforeInstruction(.EXP, cursor);
             const base = self.stack.pop_unsafe(); // Top of stack (base)
@@ -329,10 +333,11 @@ pub fn Handlers(FrameType: type) type {
         }
 
         /// SIGNEXTEND opcode (0x0b) - Sign extend operation.
-        pub fn signextend(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.SIGNEXTEND, cursor);
-            const ext = self.stack.pop_unsafe(); // Extension byte index (top of stack)
-            const value = self.stack.peek_unsafe(); // Value to extend (second element)
+        pub fn signextend(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView{ .sp = sp };
+            N.before(self, .SIGNEXTEND, cursor, s.sp, gas);
+            const ext = s.pop_unsafe(); // Extension byte index (top of stack)
+            const value = s.peek_unsafe(); // Value to extend (second element)
 
             var result: WordType = undefined;
 
@@ -357,9 +362,9 @@ pub fn Handlers(FrameType: type) type {
                 }
             }
 
-            self.stack.set_top_unsafe(result);
+            s.set_top_unsafe(result);
 
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .SIGNEXTEND);
+            return N.next(self, .SIGNEXTEND, cursor, s.sp, gas);
         }
     };
 }

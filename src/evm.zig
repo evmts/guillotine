@@ -14,6 +14,7 @@ const precompiles = @import("precompiles");
 const EvmConfig = @import("evm_config.zig").EvmConfig;
 const TransactionContext = @import("block/transaction_context.zig").TransactionContext;
 const GrowingArenaAllocator = @import("evm_arena_allocator.zig").GrowingArenaAllocator;
+const native_stack = @import("native_stack.zig");
 const call_result_module = @import("frame/call_result.zig");
 const call_params_module = @import("frame/call_params.zig");
 
@@ -29,6 +30,9 @@ pub fn Evm(config: EvmConfig) type {
         }
 
         pub const tracing_enabled = config.tracer_config.enabled;
+
+        /// Pool of frame memory buffers. See `memory/frame_memory_pool.zig`.
+        pub const FrameMemory = @import("memory/frame_memory_pool.zig").FrameMemoryPool(config.memory_limit);
 
         pub const Frame = @import("frame/frame.zig").Frame(config.frame_config(), Self);
         pub const Bytecode = @import("bytecode/bytecode.zig").Bytecode(.{
@@ -139,6 +143,11 @@ pub fn Evm(config: EvmConfig) type {
         // Cache line 5+ - COLD PATH: Large data structures accessed infrequently
         /// Growing arena allocator for per-call temporary allocations with 50% growth strategy
         call_arena: GrowingArenaAllocator,
+        /// Reusable backing buffers for frame memory, one per active call depth.
+        frame_memory: FrameMemory,
+        /// While a call runs on the caller's stack: the address below which a nested
+        /// call must move to a large stack. Zero when no check applies.
+        native_stack_limit: usize = 0,
         /// Contracts marked for self-destruction (cold - only used in old hardforks)
         self_destruct: SelfDestruct,
 
@@ -195,6 +204,7 @@ pub fn Evm(config: EvmConfig) type {
                 .gas_price = effective_gas_price,
                 .origin = origin,
                 .call_arena = arena,
+                .frame_memory = FrameMemory.init(allocator),
                 .self_destruct = SelfDestruct.init(allocator),
                 .touched_addresses = std.AutoHashMap(primitives.Address, void).init(allocator),
                 .touched_storage = std.AutoHashMap(primitives.Address, std.ArrayList(u256)).init(allocator),
@@ -274,6 +284,7 @@ pub fn Evm(config: EvmConfig) type {
                 entry.value_ptr.deinit(self.allocator);
             }
             self.touched_storage.deinit();
+            self.frame_memory.deinit();
             self.call_arena.deinit();
         }
 
@@ -424,6 +435,23 @@ pub fn Evm(config: EvmConfig) type {
         /// not overflow the native stack and crash. There is no concurrency: the calling thread
         /// blocks on join, so the EVM's allocators/state are accessed by only one thread at a time.
         pub fn call(self: *Self, params: CallParams) CallResult {
+            // The interpreter recurses once per EVM call depth. When the calling thread's
+            // stack bounds are known and it has room, run on it directly: spawning a thread
+            // costs far more than a typical transaction. A nested call that would come within
+            // `native_stack_reserve` of the end of the stack moves to a large stack then.
+            if (comptime native_stack.supported) {
+                if (native_stack.lowAddress()) |low| {
+                    const here = @frameAddress();
+                    if (here > low and here - low >= inline_stack_minimum) {
+                        self.native_stack_limit = low + native_stack_reserve;
+                        defer self.native_stack_limit = 0;
+                        return self.callImpl(params);
+                    }
+                }
+            }
+
+            // Stack bounds unknown or too small: run the whole call on a thread with a
+            // large native stack, so a call chain up to the 1024 depth limit cannot overflow.
             const Runner = struct {
                 evm: *Self,
                 params: CallParams,
@@ -433,10 +461,46 @@ pub fn Evm(config: EvmConfig) type {
                 }
             };
             var ctx = Runner{ .evm = self, .params = params };
-            const thread = std.Thread.spawn(.{ .stack_size = 64 * 1024 * 1024 }, Runner.run, .{&ctx}) catch {
+            const thread = std.Thread.spawn(.{ .stack_size = large_stack_size }, Runner.run, .{&ctx}) catch {
                 // If a thread cannot be spawned, fall back to running inline (may crash on very
                 // deep recursion, but preserves behavior when threads are unavailable).
                 return self.callImpl(params);
+            };
+            thread.join();
+            return ctx.result;
+        }
+
+        /// Native stack size for call chains too deep for the caller's stack.
+        const large_stack_size = 64 * 1024 * 1024;
+        /// Stack kept free below a nested call for one frame's own work, including the
+        /// deepest host calls it can make (precompiles, hashing, database access).
+        const native_stack_reserve = 512 * 1024;
+        /// Minimum free stack at `call` for running on the caller's stack at all.
+        const inline_stack_minimum = 2 * native_stack_reserve;
+
+        /// Run a nested call on a thread with a large native stack. The calling thread
+        /// blocks until it finishes, so the EVM is still used by one thread at a time.
+        fn innerCallOnLargeStack(self: *Self, params: CallParams) CallResult {
+            const Runner = struct {
+                evm: *Self,
+                params: CallParams,
+                result: CallResult = undefined,
+                fn run(ctx: *@This()) void {
+                    ctx.result = ctx.evm.inner_call(ctx.params);
+                }
+            };
+            // The large stack fits the deepest possible call chain, so nothing below
+            // this call needs to be checked or moved again.
+            const saved_limit = self.native_stack_limit;
+            self.native_stack_limit = 0;
+            defer self.native_stack_limit = saved_limit;
+
+            var ctx = Runner{ .evm = self, .params = params };
+            const thread = std.Thread.spawn(.{ .stack_size = large_stack_size }, Runner.run, .{&ctx}) catch |err| {
+                // Continuing on the nearly exhausted stack could overflow it. Fail the
+                // nested call instead, like any other resource failure.
+                log.err("Cannot spawn a large-stack thread for a deep call: {s}", .{@errorName(err)});
+                return CallResult.failed(0);
             };
             thread.join();
             return ctx.result;
@@ -856,6 +920,10 @@ pub fn Evm(config: EvmConfig) type {
         /// This handles nested calls and manages depth tracking.
         pub fn inner_call(self: *Self, params: CallParams) CallResult {
             @branchHint(.likely);
+            if (self.native_stack_limit != 0 and @frameAddress() < self.native_stack_limit) {
+                @branchHint(.cold);
+                return self.innerCallOnLargeStack(params);
+            }
             const execution_gas = params.getGas();
 
             // depth is incremented solely by execute_frame (CALL variants) and the create paths;
@@ -1789,7 +1857,7 @@ pub fn Evm(config: EvmConfig) type {
             defer dispatch_schedule.deinit();
 
             // Create jump table
-            const jump_table = Frame.Dispatch.createJumpTable(arena_allocator, dispatch_schedule.items, bytecode) catch |err| {
+            const jump_table = Frame.Dispatch.createJumpTable(arena_allocator, &dispatch_schedule) catch |err| {
                 log.err("createJumpTable failed: {s} (code_len={}, fusion={})", .{ @errorName(err), code.len, config.enable_fusion });
                 return error.AllocationError;
             };

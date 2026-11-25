@@ -13,6 +13,49 @@ pub fn Handlers(FrameType: type) type {
         pub const Dispatch = FrameType.Dispatch;
         pub const WordType = FrameType.WordType;
         const dispatch_next = @import("dispatch_next.zig");
+        const handler_abi = @import("../preprocessor/handler_abi.zig");
+        const N = handler_abi.Native(FrameType);
+
+        // The native handlers below take the common case inline: the accessed range lies
+        // inside the current memory, so there is no expansion and no dynamic gas. Every
+        // other case tail-calls the general handler, which charges expansion gas, grows
+        // memory, and reports errors.
+        const mload_general_handler = handler_abi.wrap(FrameType, mload_general);
+        const mstore_general_handler = handler_abi.wrap(FrameType, mstore_general);
+        const mstore8_general_handler = handler_abi.wrap(FrameType, mstore8_general);
+
+        /// MLOAD opcode (0x51) - Load word from memory.
+        pub fn mload(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            if (self.memory.word_ptr_in_bounds(sp[0])) |word| {
+                @branchHint(.likely);
+                N.before(self, .MLOAD, cursor, sp, gas);
+                sp[0] = @truncate(memory_mod.loadWordBigEndian(word));
+                return N.next(self, .MLOAD, cursor, sp, gas);
+            }
+            return @call(handler_abi.tail_mod, mload_general_handler, .{ self, cursor, sp, gas });
+        }
+
+        /// MSTORE opcode (0x52) - Store word to memory.
+        pub fn mstore(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            if (self.memory.word_ptr_in_bounds(sp[0])) |word| {
+                @branchHint(.likely);
+                N.before(self, .MSTORE, cursor, sp, gas);
+                memory_mod.storeWordBigEndian(word, sp[1]);
+                return N.next(self, .MSTORE, cursor, sp + 2, gas);
+            }
+            return @call(handler_abi.tail_mod, mstore_general_handler, .{ self, cursor, sp, gas });
+        }
+
+        /// MSTORE8 opcode (0x53) - Store byte to memory.
+        pub fn mstore8(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            if (self.memory.byte_ptr_in_bounds(sp[0])) |byte| {
+                @branchHint(.likely);
+                N.before(self, .MSTORE8, cursor, sp, gas);
+                byte.* = @truncate(sp[1]);
+                return N.next(self, .MSTORE8, cursor, sp + 2, gas);
+            }
+            return @call(handler_abi.tail_mod, mstore8_general_handler, .{ self, cursor, sp, gas });
+        }
 
         /// Maximum memory size (24-bit limit)
         const MEMORY_LIMIT: usize = 0xFFFFFF;
@@ -33,7 +76,7 @@ pub fn Handlers(FrameType: type) type {
 
         /// MLOAD opcode (0x51) - Load word from memory.
         /// Pops memory offset from stack and pushes the 32-byte word at that offset.
-        pub fn mload(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn mload_general(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.MLOAD, cursor);
             self.validateOpcodeHandler(.MLOAD, cursor);
             // MLOAD loads a 32-byte word from memory
@@ -88,13 +131,12 @@ pub fn Handlers(FrameType: type) type {
 
         /// MSTORE opcode (0x52) - Store word to memory.
         /// Pops memory offset and value from stack, stores 32 bytes at that offset.
-        pub fn mstore(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn mstore_general(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.MSTORE, cursor);
             // MSTORE stores a 32-byte word to memory
             self.validateOpcodeHandler(.MSTORE, cursor);
             const offset = self.stack.pop_unsafe();
             const value = self.stack.pop_unsafe();
-            log.debug("MSTORE: offset={x}, value={x}", .{ offset, value });
 
             // Check if offset fits in usize
             if (offset > std.math.maxInt(usize)) {
@@ -142,7 +184,7 @@ pub fn Handlers(FrameType: type) type {
 
         /// MSTORE8 opcode (0x53) - Store byte to memory.
         /// Pops memory offset and value from stack, stores the least significant byte at that offset.
-        pub fn mstore8(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn mstore8_general(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.MSTORE8, cursor);
             self.validateOpcodeHandler(.MSTORE8, cursor);
             const offset = self.stack.pop_unsafe();
@@ -194,19 +236,17 @@ pub fn Handlers(FrameType: type) type {
 
         /// MSIZE opcode (0x59) - Get size of active memory.
         /// Pushes the size of active memory in bytes onto the stack.
-        pub fn msize(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.MSIZE, cursor);
-            self.validateOpcodeHandler(.MSIZE, cursor);
-            const size = self.memory.size();
-            self.stack.push_unsafe(@as(WordType, @intCast(size)));
-
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .MSIZE);
+        pub fn msize(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            N.before(self, .MSIZE, cursor, sp, gas);
+            var s = N.StackView{ .sp = sp };
+            s.push_unsafe(@as(WordType, @intCast(self.memory.size())));
+            return N.next(self, .MSIZE, cursor, s.sp, gas);
         }
 
         /// MCOPY opcode (0x5e) - Memory copy operation (EIP-5656).
         /// Copies memory from one location to another.
         /// Stack order per EIP-5656: [dest, src, length] (same as CALLDATACOPY)
-        pub fn mcopy(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn mcopy(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.MCOPY, cursor);
             self.validateOpcodeHandler(.MCOPY, cursor);
             const dest_offset = self.stack.pop_unsafe(); // Top of stack (dest)

@@ -21,6 +21,7 @@ const SelfDestruct = @import("../storage/self_destruct.zig").SelfDestruct;
 const call_params_mod = @import("call_params.zig");
 const call_result_mod = @import("call_result.zig");
 const dispatch_mod = @import("../preprocessor/dispatch.zig");
+const handler_abi = @import("../preprocessor/handler_abi.zig");
 
 /// The core most important datastructure of the entire EVM
 /// Holds the StackFrame state along with an `interpret` method for executing a stack frame
@@ -68,7 +69,7 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
 
         /// Opcode handlers are expected to recursively dispatch the next opcode if they themselves don't error or return
         /// Takes cursor pointer with jump table available through dispatch metadata when needed
-        pub const OpcodeHandler = *const fn (frame: *Self, cursor: [*]const Dispatch.Item) Error!noreturn;
+        pub const OpcodeHandler = *const fn (frame: *Self, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode;
 
         /// The struct in charge of efficiently dispatching opcode handlers and providing them metadata
         pub const Dispatch = dispatch_mod.Preprocessor(Self);
@@ -186,12 +187,15 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
         ///   AllocationError: Failed to allocate stack or memory
         ///   InvalidAmount: Gas value out of range
         pub fn init(allocator: std.mem.Allocator, gas_remaining: GasType, caller: Address, value: WordType, calldata_input: []const u8, evm_ptr: *anyopaque) Error!Self {
-            var stack = Stack.init(allocator, null) catch return Error.AllocationError;
-            errdefer stack.deinit(allocator);
-            var memory = Memory.init(allocator) catch return Error.AllocationError;
-            errdefer memory.deinit(allocator);
             // Resolve the database pointer immediately from the provided EVM pointer
             const evm = @as(*EvmType, @ptrCast(@alignCast(evm_ptr)));
+            var stack = Stack.init(allocator, null) catch return Error.AllocationError;
+            errdefer stack.deinit(allocator);
+            var memory = if (comptime pooled_memory)
+                Memory.init_borrowed(evm.frame_memory.acquire() catch return Error.AllocationError, 0) catch return Error.AllocationError
+            else
+                Memory.init(allocator) catch return Error.AllocationError;
+            errdefer releaseMemory(evm, &memory, allocator);
 
             return Self{
                 .stack = stack,
@@ -212,11 +216,23 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
             };
         }
 
+        /// True when frame memory comes from the EVM's buffer pool instead of `allocator`.
+        const pooled_memory = @hasDecl(EvmType, "FrameMemory") and EvmType.FrameMemory.enabled;
+
+        /// Give the frame's memory back: to the pool when it came from there, otherwise
+        /// (a copied frame, or a target without the pool) to `allocator`.
+        fn releaseMemory(evm: *EvmType, memory: *Memory, allocator: std.mem.Allocator) void {
+            if (comptime pooled_memory) {
+                if (evm.frame_memory.release(memory.buffer_ptr)) return;
+            }
+            memory.deinit(allocator);
+        }
+
         /// Clean up all frame resources.
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
             (&self.getEvm().tracer).debug("Frame.deinit: Starting cleanup", .{});
             self.stack.deinit(allocator);
-            self.memory.deinit(allocator);
+            releaseMemory(self.getEvm(), &self.memory, allocator);
             (&self.getEvm().tracer).debug("Frame.deinit: Cleanup complete", .{});
         }
 
@@ -300,9 +316,10 @@ pub fn Frame(_config: FrameConfig, comptime EvmType: type) type {
                 .cursor = schedule.ptr + start_index,
             };
 
-            try self.dispatch.cursor[0].opcode_handler(self, self.dispatch.cursor);
-
-            (&self.getEvm().tracer).assert(false, "Handlers should never return normally");
+            // The handler chain keeps the stack pointer and gas in registers and writes
+            // them back to the frame before it exits. Every exit, including STOP and
+            // RETURN, is reported to the EVM as an error value.
+            return handler_abi.errorFromExit(Error, handler_abi.enter(Self, self, self.dispatch.cursor));
         }
 
         /// Create a deep copy of the frame.

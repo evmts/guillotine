@@ -76,7 +76,7 @@ test "Jump table should contain JUMPDEST at 0x0f in ERC20 bytecode" {
     log.info("\nDispatch Schedule:\n{s}", .{pretty});
 
     // Create jump table
-    const jump_table = try TestDispatch.createJumpTable(allocator, schedule.items, &bytecode);
+    const jump_table = try TestDispatch.createJumpTable(allocator, &schedule);
     defer allocator.free(jump_table.entries);
 
     log.info("Created jump table with {} entries", .{jump_table.entries.len});

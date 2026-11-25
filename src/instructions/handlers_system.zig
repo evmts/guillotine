@@ -67,7 +67,7 @@ pub fn Handlers(FrameType: type) type {
         /// warm access cost, by fork) is static gas already charged with the basic
         /// block; this charges memory expansion, the cold surcharge, the value-transfer
         /// and new-account costs and the gas forwarded to the callee.
-        fn callFamily(self: *FrameType, cursor: [*]const Dispatch.Item, comptime kind: CallKind) Error!noreturn {
+        fn callFamily(self: *FrameType, cursor: [*]const Dispatch.Item, comptime kind: CallKind) Error![*]const FrameType.Dispatch.Item {
             const opcode: Dispatch.UnifiedOpcode = comptime switch (kind) {
                 .call => .CALL,
                 .callcode => .CALLCODE,
@@ -243,25 +243,25 @@ pub fn Handlers(FrameType: type) type {
 
         /// CALL opcode (0xf1) - Message-call into an account.
         /// Stack: [gas, address, value, input_offset, input_size, output_offset, output_size] → [success]
-        pub fn call(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn call(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             return callFamily(self, cursor, .call);
         }
 
         /// CALLCODE opcode (0xf2) - Message-call with alternative account's code but current context.
         /// Stack: [gas, address, value, input_offset, input_size, output_offset, output_size] → [success]
-        pub fn callcode(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn callcode(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             return callFamily(self, cursor, .callcode);
         }
 
         /// DELEGATECALL opcode (0xf4) - Message-call with alternative account's code, keeping sender and value.
         /// Stack: [gas, address, input_offset, input_size, output_offset, output_size] → [success]
-        pub fn delegatecall(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn delegatecall(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             return callFamily(self, cursor, .delegatecall);
         }
 
         /// STATICCALL opcode (0xfa) - Static message-call into an account.
         /// Stack: [gas, address, input_offset, input_size, output_offset, output_size] → [success]
-        pub fn staticcall(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn staticcall(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             return callFamily(self, cursor, .staticcall);
         }
 
@@ -271,7 +271,7 @@ pub fn Handlers(FrameType: type) type {
         /// EIP-3860 init code word cost (Shanghai+) and, for CREATE2, the hash cost. A
         /// frame that cannot pay it, that runs in a static context, or whose init code
         /// exceeds the EIP-3860 limit halts exceptionally. It does not push 0 and go on.
-        fn createFamily(self: *FrameType, cursor: [*]const Dispatch.Item, comptime is_create2: bool) Error!noreturn {
+        fn createFamily(self: *FrameType, cursor: [*]const Dispatch.Item, comptime is_create2: bool) Error![*]const FrameType.Dispatch.Item {
             const opcode: Dispatch.UnifiedOpcode = comptime if (is_create2) .CREATE2 else .CREATE;
 
             self.beforeInstruction(opcode, cursor);
@@ -372,19 +372,19 @@ pub fn Handlers(FrameType: type) type {
 
         /// CREATE opcode (0xf0) - Create a new account with associated code.
         /// Stack: [value, offset, size] → [address]
-        pub fn create(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn create(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             return createFamily(self, cursor, false);
         }
 
         /// CREATE2 opcode (0xf5) - Create a new account with deterministic address.
         /// Stack: [value, offset, size, salt] → [address]
-        pub fn create2(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn create2(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             return createFamily(self, cursor, true);
         }
 
         /// RETURN opcode (0xf3) - Halt execution returning output data.
         /// Stack: [offset, size] → []
-        pub fn @"return"(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn @"return"(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.RETURN, cursor);
             const dispatch = Dispatch{ .cursor = cursor };
             _ = dispatch;
@@ -448,7 +448,7 @@ pub fn Handlers(FrameType: type) type {
 
         /// REVERT opcode (0xfd) - Halt execution reverting state changes.
         /// Stack: [offset, size] → []
-        pub fn revert(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn revert(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.REVERT, cursor);
             const dispatch = Dispatch{ .cursor = cursor };
             _ = dispatch;
@@ -511,7 +511,7 @@ pub fn Handlers(FrameType: type) type {
         /// SELFDESTRUCT opcode (0xff) - Halt execution and mark account for later deletion.
         /// Stack: [recipient] → []
         /// EIP-214: STATICCALL prevents SELFDESTRUCT via null self_destruct and static host
-        pub fn selfdestruct(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn selfdestruct(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.SELFDESTRUCT, cursor);
             {
                 (&self.getEvm().tracer).assert(self.stack.size() >= 1, "SELFDESTRUCT requires 1 stack item");
@@ -579,7 +579,7 @@ pub fn Handlers(FrameType: type) type {
 
         /// STOP opcode (0x00) - Halt execution.
         /// Stack: [] → []
-        pub fn stop(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn stop(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.STOP, cursor);
 
             // EIP-3529 gas refund is applied at the transaction level in evm.zig,
@@ -591,7 +591,7 @@ pub fn Handlers(FrameType: type) type {
 
         /// AUTH opcode (0xf6) - EIP-3074: Authorize a trusted invoker
         /// Stack: [authority, commitment, sig_v, sig_r, sig_s] → [success]
-        pub fn auth(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn auth(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.AUTH, cursor);
             const dispatch = Dispatch{ .cursor = cursor };
 
@@ -614,7 +614,7 @@ pub fn Handlers(FrameType: type) type {
                 self.stack.push_unsafe(0);
                 const op_data = dispatch.getOpData(.AUTH);
                 self.afterInstruction(.AUTH, op_data.next_handler, op_data.next_cursor.cursor);
-                return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+                return op_data.next_cursor.cursor;
             }
 
             // Create authorization message
@@ -629,12 +629,12 @@ pub fn Handlers(FrameType: type) type {
                 self.stack.push_unsafe(0);
                 const op_data = dispatch.getOpData(.AUTH);
                 self.afterInstruction(.AUTH, op_data.next_handler, op_data.next_cursor.cursor);
-                return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+                return op_data.next_cursor.cursor;
             } orelse {
                 self.stack.push_unsafe(0);
                 const op_data = dispatch.getOpData(.AUTH);
                 self.afterInstruction(.AUTH, op_data.next_handler, op_data.next_cursor.cursor);
-                return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+                return op_data.next_cursor.cursor;
             };
 
             // Encode chain ID (32 bytes, big-endian)
@@ -661,7 +661,7 @@ pub fn Handlers(FrameType: type) type {
                 self.stack.push_unsafe(0);
                 const op_data = dispatch.getOpData(.AUTH);
                 self.afterInstruction(.AUTH, op_data.next_handler, op_data.next_cursor.cursor);
-                return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+                return op_data.next_cursor.cursor;
             };
 
             // Check if recovered address matches authority
@@ -669,7 +669,7 @@ pub fn Handlers(FrameType: type) type {
                 self.stack.push_unsafe(0);
                 const op_data = dispatch.getOpData(.AUTH);
                 self.afterInstruction(.AUTH, op_data.next_handler, op_data.next_cursor.cursor);
-                return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+                return op_data.next_cursor.cursor;
             }
 
             // Store authorized context in frame
@@ -682,12 +682,12 @@ pub fn Handlers(FrameType: type) type {
             self.stack.push_unsafe(1);
             const op_data = dispatch.getOpData(.AUTH);
             self.afterInstruction(.AUTH, op_data.next_handler, op_data.next_cursor.cursor);
-            return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+            return op_data.next_cursor.cursor;
         }
 
         /// AUTHCALL opcode (0xf7) - EIP-3074: Make a call as an authorized address
         /// Stack: [gas, to, value, input_offset, input_size, output_offset, output_size, auth] → [success]
-        pub fn authcall(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+        pub fn authcall(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
             self.beforeInstruction(.AUTHCALL, cursor);
             const dispatch = Dispatch{ .cursor = cursor };
 
@@ -710,7 +710,7 @@ pub fn Handlers(FrameType: type) type {
                 self.stack.push_unsafe(0);
                 const op_data = dispatch.getOpData(.AUTHCALL);
                 self.afterInstruction(.AUTHCALL, op_data.next_handler, op_data.next_cursor.cursor);
-                return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+                return op_data.next_cursor.cursor;
             }
 
             // Convert to address
@@ -721,7 +721,7 @@ pub fn Handlers(FrameType: type) type {
                 self.stack.push_unsafe(0);
                 const op_data = dispatch.getOpData(.AUTHCALL);
                 self.afterInstruction(.AUTHCALL, op_data.next_handler, op_data.next_cursor.cursor);
-                return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+                return op_data.next_cursor.cursor;
             }
             // Apply 63/64 gas forwarding rule (EIP-150)
             const gas_u64_raw = @as(u64, @intCast(gas_param));
@@ -738,7 +738,7 @@ pub fn Handlers(FrameType: type) type {
                 self.stack.push_unsafe(0);
                 const op_data = dispatch.getOpData(.AUTHCALL);
                 self.afterInstruction(.AUTHCALL, op_data.next_handler, op_data.next_cursor.cursor);
-                return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+                return op_data.next_cursor.cursor;
             }
 
             const input_offset_usize = @as(usize, @intCast(input_offset));
@@ -757,7 +757,7 @@ pub fn Handlers(FrameType: type) type {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.AUTHCALL);
                     self.afterInstruction(.AUTHCALL, op_data.next_handler, op_data.next_cursor.cursor);
-                    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+                    return op_data.next_cursor.cursor;
                 }
                 input_mem_end = overflow[0];
             }
@@ -769,7 +769,7 @@ pub fn Handlers(FrameType: type) type {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.AUTHCALL);
                     self.afterInstruction(.AUTHCALL, op_data.next_handler, op_data.next_cursor.cursor);
-                    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+                    return op_data.next_cursor.cursor;
                 }
                 output_mem_end = overflow[0];
             }
@@ -782,7 +782,7 @@ pub fn Handlers(FrameType: type) type {
                 self.stack.push_unsafe(0);
                 const op_data = dispatch.getOpData(.AUTHCALL);
                 self.afterInstruction(.AUTHCALL, op_data.next_handler, op_data.next_cursor.cursor);
-                return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+                return op_data.next_cursor.cursor;
             }
 
             // Calculate and charge memory expansion gas
@@ -803,7 +803,7 @@ pub fn Handlers(FrameType: type) type {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.AUTHCALL);
                     self.afterInstruction(.AUTHCALL, op_data.next_handler, op_data.next_cursor.cursor);
-                    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+                    return op_data.next_cursor.cursor;
                 };
             }
 
@@ -814,7 +814,7 @@ pub fn Handlers(FrameType: type) type {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.AUTHCALL);
                     self.afterInstruction(.AUTHCALL, op_data.next_handler, op_data.next_cursor.cursor);
-                    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+                    return op_data.next_cursor.cursor;
                 };
             }
 
@@ -825,7 +825,7 @@ pub fn Handlers(FrameType: type) type {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.AUTHCALL);
                     self.afterInstruction(.AUTHCALL, op_data.next_handler, op_data.next_cursor.cursor);
-                    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+                    return op_data.next_cursor.cursor;
                 };
             }
 
@@ -852,7 +852,7 @@ pub fn Handlers(FrameType: type) type {
                     self.stack.push_unsafe(0);
                     const op_data = dispatch.getOpData(.AUTHCALL);
                     self.afterInstruction(.AUTHCALL, op_data.next_handler, op_data.next_cursor.cursor);
-                    return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+                    return op_data.next_cursor.cursor;
                 };
             }
 
@@ -873,7 +873,7 @@ pub fn Handlers(FrameType: type) type {
             self.stack.push_unsafe(if (result.success) 1 else 0);
             const op_data = dispatch.getOpData(.AUTHCALL);
             // Use op_data.next_handler and op_data.next_cursor directly
-            return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+            return op_data.next_cursor.cursor;
         }
     };
 }

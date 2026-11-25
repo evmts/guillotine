@@ -47,10 +47,16 @@ pub fn createModules(
     provider_mod.addImport("voltaire", primitives_mod);
 
     // EVM module - unified src module
+    // Opcode handlers are a chain of guaranteed tail calls that never return through
+    // each other, so a frame pointer buys nothing there and costs a push/pop per
+    // instruction. Optimized builds drop it; Debug and ReleaseSafe keep it for traces.
+    const omit_frame_pointer: ?bool = if (optimize == .fast or optimize == .small) true else null;
+
     const evm_mod = b.createModule(.{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
+        .omit_frame_pointer = omit_frame_pointer,
     });
     evm_mod.addImport("voltaire", primitives_mod);
     evm_mod.addImport("crypto", crypto_mod);
@@ -86,6 +92,7 @@ pub fn createModules(
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
+        .omit_frame_pointer = omit_frame_pointer,
     });
     lib_mod.addIncludePath(b.path("lib/ark"));
     lib_mod.addImport("build_options", build_options_mod);

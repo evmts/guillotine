@@ -157,6 +157,10 @@ test {
     // _ = @import("instructions/handlers_system.zig");
     // _ = @import("instructions/handlers_advanced_synthetic.zig");
 
+    _ = @import("preprocessor/handler_abi.zig");
+    _ = @import("memory/frame_memory_pool.zig");
+    _ = @import("native_stack.zig");
+
     // Test bytecode modules
     // _ = @import("bytecode/bytecode_tests.zig");
     // _ = @import("bytecode/bytecode_jump_validation_test.zig");

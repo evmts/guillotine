@@ -11,69 +11,63 @@ pub fn Handlers(FrameType: type) type {
         pub const WordType = FrameType.WordType;
 
         const dispatch_next = @import("dispatch_next.zig");
+        const handler_abi = @import("../preprocessor/handler_abi.zig");
+        const N = handler_abi.Native(FrameType);
         const dispatch_opcode_data = @import("../preprocessor/dispatch_opcode_data.zig");
-
-        /// Validate stack constraints
-        pub inline fn validate_stack(self: *FrameType) void {
-            {
-                (&self.getEvm().tracer).assert(self.stack.size() >= 1, "Arithmetic operation requires at least 1 stack item");
-                (&self.getEvm().tracer).assert(self.stack.size() < @TypeOf(self.stack).stack_capacity, "Arithmetic operation requires stack space");
-            }
-        }
 
         /// PUSH_ADD_INLINE - Fused PUSH+ADD with inline value (≤8 bytes).
         /// Basic-block entry validation guarantees stack.size() >= 1 (proven by BLOCK-SOUND).
-        pub fn push_add_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            @branchHint(.likely);
-            self.beforeInstruction(.PUSH_ADD_INLINE, cursor);
-            validate_stack(self);
+        pub fn push_add_inline(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView{ .sp = sp };
+            N.before(self, .PUSH_ADD_INLINE, cursor, s.sp, gas);
             const op_data = dispatch_opcode_data.getOpData(.PUSH_ADD_INLINE, Dispatch, Dispatch.Item, cursor);
-            self.stack.set_top_unsafe(op_data.metadata.value +% self.stack.peek_unsafe());
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .PUSH_ADD_INLINE);
+            s.set_top_unsafe(op_data.metadata.value +% s.peek_unsafe());
+            return N.next(self, .PUSH_ADD_INLINE, cursor, s.sp, gas);
         }
 
         /// PUSH_ADD_POINTER - Fused PUSH+ADD with pointer value (>8 bytes).
         /// Basic-block entry validation guarantees stack.size() >= 1 (proven by BLOCK-SOUND).
-        pub fn push_add_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.PUSH_ADD_POINTER, cursor);
-            validate_stack(self);
+        pub fn push_add_pointer(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView{ .sp = sp };
+            N.before(self, .PUSH_ADD_POINTER, cursor, s.sp, gas);
             const op_data = dispatch_opcode_data.getOpData(.PUSH_ADD_POINTER, Dispatch, Dispatch.Item, cursor);
-            const top = self.stack.peek_unsafe();
-            self.stack.set_top_unsafe(op_data.metadata.value_ptr.* +% top);
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .PUSH_ADD_POINTER);
+            const top = s.peek_unsafe();
+            s.set_top_unsafe(op_data.metadata.value_ptr.* +% top);
+            return N.next(self, .PUSH_ADD_POINTER, cursor, s.sp, gas);
         }
 
         /// PUSH_MUL_INLINE - Fused PUSH+MUL with inline value (≤8 bytes).
-        pub fn push_mul_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.PUSH_MUL_INLINE, cursor);
-            validate_stack(self);
+        pub fn push_mul_inline(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView{ .sp = sp };
+            N.before(self, .PUSH_MUL_INLINE, cursor, s.sp, gas);
 
             const op_data = dispatch_opcode_data.getOpData(.PUSH_MUL_INLINE, Dispatch, Dispatch.Item, cursor);
-            const top = self.stack.peek_unsafe();
-            self.stack.set_top_unsafe(op_data.metadata.value *% top);
+            const top = s.peek_unsafe();
+            s.set_top_unsafe(op_data.metadata.value *% top);
 
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .PUSH_MUL_INLINE);
+            return N.next(self, .PUSH_MUL_INLINE, cursor, s.sp, gas);
         }
 
         /// PUSH_MUL_POINTER - Fused PUSH+MUL with pointer value (>8 bytes).
-        pub fn push_mul_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.PUSH_MUL_POINTER, cursor);
-            validate_stack(self);
+        pub fn push_mul_pointer(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView{ .sp = sp };
+            N.before(self, .PUSH_MUL_POINTER, cursor, s.sp, gas);
 
             const op_data = dispatch_opcode_data.getOpData(.PUSH_MUL_POINTER, Dispatch, Dispatch.Item, cursor);
-            const top = self.stack.peek_unsafe();
-            self.stack.set_top_unsafe(op_data.metadata.value_ptr.* *% top);
+            const top = s.peek_unsafe();
+            s.set_top_unsafe(op_data.metadata.value_ptr.* *% top);
 
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .PUSH_MUL_POINTER);
+            return N.next(self, .PUSH_MUL_POINTER, cursor, s.sp, gas);
         }
 
         /// PUSH_DIV_INLINE - Fused PUSH+DIV with inline value (≤8 bytes).
-        pub fn push_div_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.PUSH_DIV_INLINE, cursor);
+        pub fn push_div_inline(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView{ .sp = sp };
+            N.before(self, .PUSH_DIV_INLINE, cursor, s.sp, gas);
             const op_data = dispatch_opcode_data.getOpData(.PUSH_DIV_INLINE, Dispatch, Dispatch.Item, cursor);
             const dividend = op_data.metadata.value;
 
-            const divisor = self.stack.peek_unsafe();
+            const divisor = s.peek_unsafe();
 
             const Uint = @import("voltaire").Uint;
             const U256 = Uint(256, 4);
@@ -83,21 +77,19 @@ pub fn Handlers(FrameType: type) type {
             const result_u256 = dividend_u256.wrapping_div(divisor_u256);
             const result = result_u256.to_native();
 
-            self.stack.set_top_unsafe(result);
+            s.set_top_unsafe(result);
 
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .PUSH_DIV_INLINE);
+            return N.next(self, .PUSH_DIV_INLINE, cursor, s.sp, gas);
         }
 
         /// PUSH_DIV_POINTER - Fused PUSH+DIV with pointer value (>8 bytes).
-        pub fn push_div_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.PUSH_DIV_POINTER, cursor);
+        pub fn push_div_pointer(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView{ .sp = sp };
+            N.before(self, .PUSH_DIV_POINTER, cursor, s.sp, gas);
             const op_data = dispatch_opcode_data.getOpData(.PUSH_DIV_POINTER, Dispatch, Dispatch.Item, cursor);
             const dividend = op_data.metadata.value_ptr.*;
 
-            {
-                (&self.getEvm().tracer).assert(self.stack.size() >= 1, "PUSH_DIV_POINTER requires 1 stack item");
-            }
-            const divisor = self.stack.peek_unsafe();
+            const divisor = s.peek_unsafe();
 
             // Convert to U256 for optimized division
             const Uint = @import("voltaire").Uint;
@@ -108,36 +100,32 @@ pub fn Handlers(FrameType: type) type {
             const result_u256 = dividend_u256.wrapping_div(divisor_u256);
             const result = result_u256.to_native();
 
-            self.stack.set_top_unsafe(result);
+            s.set_top_unsafe(result);
 
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .PUSH_DIV_POINTER);
+            return N.next(self, .PUSH_DIV_POINTER, cursor, s.sp, gas);
         }
 
         /// PUSH_SUB_INLINE - Fused PUSH+SUB with inline value (≤8 bytes).
-        pub fn push_sub_inline(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.PUSH_SUB_INLINE, cursor);
+        pub fn push_sub_inline(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView{ .sp = sp };
+            N.before(self, .PUSH_SUB_INLINE, cursor, s.sp, gas);
             const op_data = dispatch_opcode_data.getOpData(.PUSH_SUB_INLINE, Dispatch, Dispatch.Item, cursor);
             const push_value = op_data.metadata.value;
-            {
-                (&self.getEvm().tracer).assert(self.stack.size() >= 1, "PUSH_SUB_INLINE requires 1 stack item");
-            }
-            const top = self.stack.peek_unsafe();
+            const top = s.peek_unsafe();
             const result = push_value -% top;
-            self.stack.set_top_unsafe(result);
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .PUSH_SUB_INLINE);
+            s.set_top_unsafe(result);
+            return N.next(self, .PUSH_SUB_INLINE, cursor, s.sp, gas);
         }
 
         /// PUSH_SUB_POINTER - Fused PUSH+SUB with pointer value (>8 bytes).
-        pub fn push_sub_pointer(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-            self.beforeInstruction(.PUSH_SUB_POINTER, cursor);
+        pub fn push_sub_pointer(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+            var s = N.StackView{ .sp = sp };
+            N.before(self, .PUSH_SUB_POINTER, cursor, s.sp, gas);
             const op_data = dispatch_opcode_data.getOpData(.PUSH_SUB_POINTER, Dispatch, Dispatch.Item, cursor);
-            {
-                (&self.getEvm().tracer).assert(self.stack.size() >= 1, "PUSH_SUB_POINTER requires 1 stack item");
-            }
-            const top = self.stack.peek_unsafe();
+            const top = s.peek_unsafe();
             const result = op_data.metadata.value_ptr.* -% top;
-            self.stack.set_top_unsafe(result);
-            return dispatch_next.nextInstruction(FrameType, self, cursor, .PUSH_SUB_POINTER);
+            s.set_top_unsafe(result);
+            return N.next(self, .PUSH_SUB_POINTER, cursor, s.sp, gas);
         }
     };
 }

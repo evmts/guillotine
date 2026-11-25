@@ -15,12 +15,13 @@ pub fn Handlers(FrameType: type) type {
         pub const Dispatch = FrameType.Dispatch;
         pub const WordType = FrameType.WordType;
         const dispatch_next = @import("dispatch_next.zig");
+        const handler_abi = @import("../preprocessor/handler_abi.zig");
 
         /// Generate a log handler for LOG0-LOG4
         pub fn generateLogHandler(topic_count: u8) FrameType.OpcodeHandler {
             if (topic_count > 4) @compileError("Only LOG0 to LOG4 is supported");
-            return &struct {
-                pub fn logHandler(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            return handler_abi.wrap(FrameType, struct {
+                pub fn logHandler(self: *FrameType, cursor: [*]const Dispatch.Item) Error![*]const FrameType.Dispatch.Item {
                     const dispatch = Dispatch{ .cursor = cursor };
 
                     // Add debug logging for the specific LOG opcode
@@ -165,23 +166,23 @@ pub fn Handlers(FrameType: type) type {
                     switch (topic_count) {
                         0 => {
                             self.afterInstruction(.LOG0, dispatch.getOpData(.LOG0).next_handler, dispatch.getOpData(.LOG0).next_cursor.cursor);
-                            return @call(FrameType.Dispatch.getTailCallModifier(), dispatch.getOpData(.LOG0).next_handler, .{ self, dispatch.getOpData(.LOG0).next_cursor.cursor });
+                            return dispatch.getOpData(.LOG0).next_cursor.cursor;
                         },
                         1 => {
                             self.afterInstruction(.LOG1, dispatch.getOpData(.LOG1).next_handler, dispatch.getOpData(.LOG1).next_cursor.cursor);
-                            return @call(FrameType.Dispatch.getTailCallModifier(), dispatch.getOpData(.LOG1).next_handler, .{ self, dispatch.getOpData(.LOG1).next_cursor.cursor });
+                            return dispatch.getOpData(.LOG1).next_cursor.cursor;
                         },
                         2 => {
                             self.afterInstruction(.LOG2, dispatch.getOpData(.LOG2).next_handler, dispatch.getOpData(.LOG2).next_cursor.cursor);
-                            return @call(FrameType.Dispatch.getTailCallModifier(), dispatch.getOpData(.LOG2).next_handler, .{ self, dispatch.getOpData(.LOG2).next_cursor.cursor });
+                            return dispatch.getOpData(.LOG2).next_cursor.cursor;
                         },
                         3 => {
                             self.afterInstruction(.LOG3, dispatch.getOpData(.LOG3).next_handler, dispatch.getOpData(.LOG3).next_cursor.cursor);
-                            return @call(FrameType.Dispatch.getTailCallModifier(), dispatch.getOpData(.LOG3).next_handler, .{ self, dispatch.getOpData(.LOG3).next_cursor.cursor });
+                            return dispatch.getOpData(.LOG3).next_cursor.cursor;
                         },
                         4 => {
                             self.afterInstruction(.LOG4, dispatch.getOpData(.LOG4).next_handler, dispatch.getOpData(.LOG4).next_cursor.cursor);
-                            return @call(FrameType.Dispatch.getTailCallModifier(), dispatch.getOpData(.LOG4).next_handler, .{ self, dispatch.getOpData(.LOG4).next_cursor.cursor });
+                            return dispatch.getOpData(.LOG4).next_cursor.cursor;
                         },
                         else => {
                             {
@@ -191,7 +192,7 @@ pub fn Handlers(FrameType: type) type {
                         },
                     }
                 }
-            }.logHandler;
+            }.logHandler);
         }
 
         /// LOG0 opcode (0xA0) - Emit log with no topics

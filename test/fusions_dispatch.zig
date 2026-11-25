@@ -67,7 +67,7 @@ test "fusion dispatch: verify jump resolution for ten-thousand-hashes" {
     defer schedule.deinit();
 
     // Build jump table from schedule
-    const jump_table = try TestDispatch.createJumpTable(allocator, schedule.items, bc);
+    const jump_table = try TestDispatch.createJumpTable(allocator, &schedule);
     defer allocator.free(jump_table.entries);
 
     std.log.info("Jump table created with {} entries", .{jump_table.entries.len});
@@ -109,11 +109,7 @@ test "fusion dispatch: simple PUSH+JUMPI resolution" {
     defer schedule.deinit();
 
     // Create jump table
-    const jump_table = try TestDispatch.createJumpTable(
-        allocator,
-        schedule.items,
-        bc,
-    );
+    const jump_table = try TestDispatch.createJumpTable(allocator, &schedule);
     defer allocator.free(jump_table.entries);
 
     std.log.info("Jump table has {} entries", .{jump_table.entries.len});

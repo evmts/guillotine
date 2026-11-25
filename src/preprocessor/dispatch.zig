@@ -10,6 +10,7 @@ const dispatch_jump_table = @import("dispatch_jump_table.zig");
 const dispatch_jump_table_builder = @import("dispatch_jump_table_builder.zig");
 const dispatch_opcode_data = @import("dispatch_opcode_data.zig");
 const dispatch_pretty_print = @import("dispatch_pretty_print.zig");
+const handler_abi = @import("handler_abi.zig");
 
 pub fn Preprocessor(FrameType: type) type {
     return struct {
@@ -34,7 +35,7 @@ pub fn Preprocessor(FrameType: type) type {
 
         const Metadata = dispatch_metadata.DispatchMetadata(FrameType);
 
-        const OpcodeHandler = *const fn (frame: *FrameType, cursor: [*]const Item) FrameType.Error!noreturn;
+        const OpcodeHandler = *const fn (frame: *FrameType, cursor: [*]const Item, sp: [*]FrameType.WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode;
 
         pub const Item = union(enum) {
             opcode_handler: OpcodeHandler,
@@ -633,17 +634,17 @@ pub fn Preprocessor(FrameType: type) type {
                         try schedule_items.append(allocator, .{ .opcode_handler = handler });
                     },
                     .iszero_jumpi => |ij| {
+                        // The target is a constant, so it resolves at build time exactly
+                        // like PUSH+JUMPI: the metadata holds the JUMPDEST's schedule
+                        // cursor, or the invalid-jump item when the target is not a JUMPDEST.
                         const frame_handlers = @import("../frame/frame_handlers.zig");
                         const handler = frame_handlers.getSyntheticHandler(FrameType, @intFromEnum(OpcodeSynthetic.ISZERO_JUMPI));
                         try schedule_items.append(allocator, .{ .opcode_handler = handler });
-                        if (ij.target <= std.math.maxInt(u64)) {
-                            try schedule_items.append(allocator, .{ .push_inline = .{ .value = @intCast(ij.target) } });
-                        } else {
-                            // Allocate u256 value from arena (single deallocation at schedule deinit)
-                            const value_ptr = try arena_allocator.create(FrameType.WordType);
-                            value_ptr.* = ij.target;
-                            try schedule_items.append(allocator, .{ .push_pointer = .{ .value_ptr = value_ptr } });
-                        }
+                        const dest_pc: ?FrameType.PcType = if (ij.target > std.math.maxInt(FrameType.PcType)) null else @intCast(ij.target);
+                        const meta_index = schedule_items.items.len;
+                        const placeholder: *const anyopaque = @as(*const anyopaque, @ptrFromInt(1));
+                        try schedule_items.append(allocator, .{ .jump_static = .{ .dispatch = placeholder } });
+                        try unresolved_jumps.append(allocator, .{ .schedule_index = meta_index, .target_pc = dest_pc });
                     },
                     .dup2_mstore_push => |dmp| {
                         const frame_handlers = @import("../frame/frame_handlers.zig");
@@ -773,8 +774,10 @@ pub fn Preprocessor(FrameType: type) type {
 
             const final_schedule = try schedule_items.toOwnedSlice(allocator);
 
+            errdefer allocator.free(final_schedule);
+
             const jumpdest_array = try jumpdest_entries.toOwnedSlice(allocator);
-            defer allocator.free(jumpdest_array);
+            errdefer allocator.free(jumpdest_array);
             std.sort.block(JumpDestEntry, jumpdest_array, {}, JumpDestEntry.lessThan);
 
             resolveStaticJumpsWithArray(final_schedule, &unresolved_jumps, jumpdest_array, invalid_jump_index, tracer);
@@ -786,6 +789,7 @@ pub fn Preprocessor(FrameType: type) type {
 
             return DispatchSchedule{
                 .items = final_schedule,
+                .jumpdests = jumpdest_array,
                 .allocator = allocator,
                 .push_values_arena = push_values_arena,
             };
@@ -959,78 +963,17 @@ pub fn Preprocessor(FrameType: type) type {
             };
         }
 
+        /// Build the dynamic jump table for a schedule.
+        ///
+        /// The JUMPDEST positions come from the entries recorded while the schedule was
+        /// built. They are never recovered by comparing handler pointers: the optimizer
+        /// may merge handlers with identical machine code (JUMPDEST and BLOCK_BEGIN are
+        /// identical in untraced builds), so a handler address does not identify an opcode.
         pub fn createJumpTable(
             allocator: std.mem.Allocator,
-            schedule: []const Item,
-            bytecode: anytype,
+            schedule: *const DispatchSchedule,
         ) !JumpTable {
-            const log = @import("../log.zig");
-
-            // We need the bytecode to find JUMPDEST PCs
-            const actual_bytecode = if (@typeInfo(@TypeOf(bytecode)) == .error_union)
-                try bytecode
-            else
-                bytecode;
-
-            var jumpdest_entries = ArrayList(JumpDestEntry, null).empty;
-            defer jumpdest_entries.deinit(allocator);
-
-            // Create a mapping of JUMPDEST PCs to their schedule indices
-            // by walking through the schedule and bytecode in parallel
-
-            var bytecode_iter = actual_bytecode.createIterator();
-            var schedule_index: usize = 0;
-
-            // Skip first_block_gas if present
-            if (schedule.len > 0 and schedule[0] == .first_block_gas) {
-                schedule_index = 1;
-            }
-
-            // Get JUMPDEST handler for comparison
-            const frame_handlers = @import("../frame/frame_handlers.zig");
-            const jumpdest_handler = frame_handlers.getOpcodeHandlers(FrameType, &.{})[@intFromEnum(Opcode.JUMPDEST)];
-
-            // Walk through schedule and find all JUMPDEST handlers
-            var jumpdest_pcs = ArrayList(FrameType.PcType, null).empty;
-            defer jumpdest_pcs.deinit(allocator);
-
-            // First, collect all JUMPDEST PCs from bytecode. The PC is read before the
-            // iterator advances, so it is exact for every instruction, including a PUSH
-            // truncated by the end of the code.
-            while (true) {
-                const instr_pc = bytecode_iter.pc;
-                const op_data = bytecode_iter.next() orelse break;
-                if (op_data == .jumpdest) {
-                    try jumpdest_pcs.append(allocator, @intCast(instr_pc));
-                }
-            }
-
-            // Now find each JUMPDEST in the schedule
-            var jumpdest_idx: usize = 0;
-            for (schedule, 0..) |item, index| {
-                if (item == .opcode_handler and item.opcode_handler == jumpdest_handler) {
-                    // This is a JUMPDEST handler
-                    if (jumpdest_idx < jumpdest_pcs.items.len) {
-                        const pc = jumpdest_pcs.items[jumpdest_idx];
-                        try jumpdest_entries.append(allocator, .{
-                            .pc = pc,
-                            .schedule_index = index,
-                        });
-
-                        if (pc == 0x304) {
-                            log.warn("Found PC=0x304 JUMPDEST at schedule[{}] (fixed approach)", .{index});
-                        }
-
-                        jumpdest_idx += 1;
-                    }
-                }
-            }
-
-            const jumpdest_array = try jumpdest_entries.toOwnedSlice(allocator);
-            defer allocator.free(jumpdest_array);
-            std.sort.block(JumpDestEntry, jumpdest_array, {}, JumpDestEntry.lessThan);
-
-            return try createJumpTableFromArray(allocator, schedule, jumpdest_array);
+            return try createJumpTableFromArray(allocator, schedule.items, schedule.jumpdests);
         }
 
         fn createJumpTableFromArray(
@@ -1078,6 +1021,8 @@ pub fn Preprocessor(FrameType: type) type {
 
         pub const DispatchSchedule = struct {
             items: []Item,
+            /// Every JUMPDEST in the code with the schedule index of its handler, sorted by PC.
+            jumpdests: []JumpDestEntry,
             allocator: std.mem.Allocator,
             /// Arena allocator for push pointer values (PUSH9-32)
             /// Uses a single allocation for all u256 values instead of individual heap allocations
@@ -1090,6 +1035,7 @@ pub fn Preprocessor(FrameType: type) type {
             pub fn deinit(self: *DispatchSchedule) void {
                 // Free all u256 values in one operation via arena
                 self.push_values_arena.deinit();
+                self.allocator.free(self.jumpdests);
                 // Free the schedule items array
                 self.allocator.free(self.items);
             }

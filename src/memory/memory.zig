@@ -30,6 +30,25 @@ pub const MemoryError = error{
 ///
 /// Memory configuration controls initial capacity and maximum size limits.
 /// The implementation uses ArrayList for dynamic growth with efficient resizing.
+/// Read a big-endian 256-bit word as four byte-swapped 64-bit limbs.
+/// A generic `std.mem.readInt(u256, ..., .big)` lowers to a long scalar byte shuffle;
+/// this form is four loads and four `bswap`.
+pub inline fn loadWordBigEndian(bytes: *const [WORD_SIZE]u8) u256 {
+    const limb3 = @byteSwap(@as(u64, @bitCast(bytes[0..8].*)));
+    const limb2 = @byteSwap(@as(u64, @bitCast(bytes[8..16].*)));
+    const limb1 = @byteSwap(@as(u64, @bitCast(bytes[16..24].*)));
+    const limb0 = @byteSwap(@as(u64, @bitCast(bytes[24..32].*)));
+    return (@as(u256, limb3) << 192) | (@as(u256, limb2) << 128) | (@as(u256, limb1) << 64) | @as(u256, limb0);
+}
+
+/// Write a 256-bit word big-endian as four byte-swapped 64-bit limbs.
+pub inline fn storeWordBigEndian(bytes: *[WORD_SIZE]u8, value: u256) void {
+    bytes[0..8].* = @bitCast(@byteSwap(@as(u64, @truncate(value >> 192))));
+    bytes[8..16].* = @bitCast(@byteSwap(@as(u64, @truncate(value >> 128))));
+    bytes[16..24].* = @bitCast(@byteSwap(@as(u64, @truncate(value >> 64))));
+    bytes[24..32].* = @bitCast(@byteSwap(@as(u64, @truncate(value))));
+}
+
 pub fn Memory(config: MemoryConfig) type {
     config.validate();
 
@@ -245,8 +264,30 @@ pub fn Memory(config: MemoryConfig) type {
 
         fn u256_to_bytes(value: u256) [WORD_SIZE]u8 {
             var bytes: [WORD_SIZE]u8 = undefined;
-            std.mem.writeInt(u256, &bytes, value, .big);
+            storeWordBigEndian(&bytes, value);
             return bytes;
+        }
+
+        /// Pointer to the 32-byte word at `offset` when it lies entirely inside the
+        /// current memory, so reading or writing it needs no expansion and costs no
+        /// expansion gas. Returns null otherwise; the caller then takes the general path.
+        pub inline fn word_ptr_in_bounds(self: *const Self, offset: u256) ?*[WORD_SIZE]u8 {
+            const items = self.buffer_ptr.*.items;
+            const checkpoint_usize = @as(usize, self.checkpoint);
+            if (items.len < checkpoint_usize + WORD_SIZE) return null;
+            if (offset > items.len - checkpoint_usize - WORD_SIZE) return null;
+            const offset_usize: usize = @intCast(offset);
+            return @ptrCast(items.ptr + checkpoint_usize + offset_usize);
+        }
+
+        /// Pointer to the byte at `offset` when it lies inside the current memory.
+        pub inline fn byte_ptr_in_bounds(self: *const Self, offset: u256) ?*u8 {
+            const items = self.buffer_ptr.*.items;
+            const checkpoint_usize = @as(usize, self.checkpoint);
+            if (items.len <= checkpoint_usize) return null;
+            if (offset >= items.len - checkpoint_usize) return null;
+            const offset_usize: usize = @intCast(offset);
+            return &items.ptr[checkpoint_usize + offset_usize];
         }
 
         pub fn set_u256_evm(self: *Self, allocator: std.mem.Allocator, offset: u32, value: u256) !void {
@@ -293,7 +334,7 @@ pub fn Memory(config: MemoryConfig) type {
                 for (bytes) |byte| result = std.math.shl(u256, result, 8) | byte;
                 return result;
             }
-            return std.mem.readInt(u256, bytes[0..WORD_SIZE], .big);
+            return loadWordBigEndian(bytes[0..WORD_SIZE]);
         }
 
         pub fn get_u256(self: *Self, offset: u32) !u256 {
@@ -370,6 +411,39 @@ pub fn Memory(config: MemoryConfig) type {
             return self.buffer_ptr;
         }
     };
+}
+
+test "word helpers match std big-endian conversion" {
+    var prng = std.Random.DefaultPrng.init(0x5eed);
+    const random = prng.random();
+    var i: usize = 0;
+    while (i < 1000) : (i += 1) {
+        const value = random.int(u256);
+        var expected: [WORD_SIZE]u8 = undefined;
+        std.mem.writeInt(u256, &expected, value, .big);
+        var actual: [WORD_SIZE]u8 = undefined;
+        storeWordBigEndian(&actual, value);
+        try std.testing.expectEqualSlices(u8, &expected, &actual);
+        try std.testing.expectEqual(value, loadWordBigEndian(&expected));
+    }
+}
+
+test "in-bounds pointers cover exactly the current memory" {
+    const allocator = std.testing.allocator;
+    const Mem = Memory(.{ .owned = true });
+    var memory = try Mem.init(allocator);
+    defer memory.deinit(allocator);
+    try std.testing.expect(memory.word_ptr_in_bounds(0) == null);
+    try std.testing.expect(memory.byte_ptr_in_bounds(0) == null);
+    try memory.set_u256_evm(allocator, 32, 0xAABB);
+    try std.testing.expectEqual(@as(usize, 64), memory.size());
+    try std.testing.expectEqual(@as(u256, 0xAABB), loadWordBigEndian(memory.word_ptr_in_bounds(32).?));
+    try std.testing.expect(memory.word_ptr_in_bounds(33) == null);
+    try std.testing.expect(memory.word_ptr_in_bounds(std.math.maxInt(u256)) == null);
+    try std.testing.expect(memory.word_ptr_in_bounds(@as(u256, 1) << 64) == null);
+    try std.testing.expectEqual(@as(u8, 0xBB), memory.byte_ptr_in_bounds(63).?.*);
+    try std.testing.expect(memory.byte_ptr_in_bounds(64) == null);
+    try std.testing.expect(memory.byte_ptr_in_bounds(std.math.maxInt(u256)) == null);
 }
 
 test "Memory owner basic operations" {
