@@ -56,20 +56,23 @@ pub fn Handlers(FrameType: type) type {
                         topics[j] = self.stack.pop_unsafe();
                     }
 
-                    // Check bounds
-                    if (offset > std.math.maxInt(usize) or length > std.math.maxInt(usize)) {
-                        self.afterComplete(unified_opcode);
-                        return Error.OutOfBounds;
-                    }
-
-                    const offset_usize = @as(usize, @intCast(offset));
-                    const length_usize = @as(usize, @intCast(length));
-
-                    // Calculate memory expansion cost if reading data
+                    // A log without data touches no memory, so its offset is never
+                    // inspected. A log with data must fit in addressable memory: a region
+                    // past the 24-bit memory limit can never be paid for. Bounding both
+                    // operands first keeps their sum from wrapping.
+                    var offset_usize: usize = 0;
+                    var length_usize: usize = 0;
                     var memory_expansion_cost: u64 = 0;
-                    if (length_usize > 0) {
+                    if (length != 0) {
+                        const memory_limit = std.math.maxInt(u24);
+                        if (offset > memory_limit or length > memory_limit) {
+                            self.afterComplete(unified_opcode);
+                            return Error.OutOfBounds;
+                        }
+                        offset_usize = @intCast(offset);
+                        length_usize = @intCast(length);
                         const end_offset = offset_usize + length_usize;
-                        if (end_offset > std.math.maxInt(u24)) {
+                        if (end_offset > memory_limit) {
                             self.afterComplete(unified_opcode);
                             return Error.OutOfBounds;
                         }
@@ -153,9 +156,7 @@ pub fn Handlers(FrameType: type) type {
                         .data = data_copy,
                     };
                     evm.logs.append(evm.allocator, log_entry) catch {
-                        // Clean up on failure
-                        if (topics_array.len > 0) evm.allocator.free(topics_array);
-                        if (data_copy.len > 0) evm.allocator.free(data_copy);
+                        // topics_array and data_copy are arena-owned: nothing to free here
                         self.afterComplete(unified_opcode);
                         return Error.AllocationError;
                     };

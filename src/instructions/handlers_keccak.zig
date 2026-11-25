@@ -34,13 +34,6 @@ pub fn Handlers(FrameType: type) type {
             const offset = self.stack.pop_unsafe(); // Top of stack is offset
             const size = self.stack.pop_unsafe(); // Second is size
 
-            // Check bounds
-            if (offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
-                @branchHint(.unlikely);
-                self.afterComplete(.KECCAK256);
-                return Error.OutOfBounds;
-            }
-
             // Handle empty data case
             if (size == 0) {
                 @branchHint(.unlikely);
@@ -72,6 +65,14 @@ pub fn Handlers(FrameType: type) type {
                 };
                 self.stack.push_unsafe(empty_hash);
                 return dispatch_next.nextInstruction(FrameType, self, cursor, .KECCAK256);
+            }
+
+            // Hashing a non-empty region beyond usize could never pay for its memory. This
+            // check follows the empty case because an empty region ignores its offset.
+            if (offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
+                @branchHint(.unlikely);
+                self.afterComplete(.KECCAK256);
+                return Error.OutOfBounds;
             }
 
             const offset_usize = @as(usize, @intCast(offset));

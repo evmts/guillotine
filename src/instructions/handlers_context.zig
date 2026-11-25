@@ -263,26 +263,31 @@ pub fn Handlers(FrameType: type) type {
             const offset = self.stack.pop_unsafe(); // Next
             const length = self.stack.pop_unsafe(); // Next
 
-            // Check for overflow
-            if (dest_offset > std.math.maxInt(usize) or
-                offset > std.math.maxInt(usize) or
-                length > std.math.maxInt(usize))
-            {
-                return Error.OutOfBounds;
-            }
-
-            const dest_offset_usize = @as(usize, @intCast(dest_offset));
-            const offset_usize = @as(usize, @intCast(offset));
-            const length_usize = @as(usize, @intCast(length));
-
-            if (length_usize == 0) {
+            // A zero-length copy touches no memory and charges no dynamic gas, whatever
+            // the offsets are.
+            if (length == 0) {
                 const op_data = dispatch_opcode_data.getOpData(.CODECOPY, Dispatch, Dispatch.Item, cursor);
                 return @call(FrameType.Dispatch.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
             }
 
+            // Memory cannot reach beyond usize: such a copy could never pay for expansion.
+            if (dest_offset > std.math.maxInt(usize) or length > std.math.maxInt(usize)) {
+                self.afterComplete(.CODECOPY);
+                return Error.OutOfBounds;
+            }
+
+            const dest_offset_usize = @as(usize, @intCast(dest_offset));
+            const length_usize = @as(usize, @intCast(length));
+            // Any source offset is legal; bytes past the end of the code read as zero.
+            const offset_usize: usize = std.math.cast(usize, offset) orelse std.math.maxInt(usize);
+
             // Calculate gas cost for memory expansion and copy operation
-            const new_size = dest_offset_usize + length_usize;
+            const new_size = std.math.add(usize, dest_offset_usize, length_usize) catch {
+                self.afterComplete(.CODECOPY);
+                return Error.OutOfBounds;
+            };
             if (new_size > std.math.maxInt(u24)) {
+                self.afterComplete(.CODECOPY);
                 return Error.OutOfBounds;
             }
             const memory_expansion_cost = self.memory.get_expansion_cost(@as(u32, @intCast(new_size)));
@@ -309,7 +314,7 @@ pub fn Handlers(FrameType: type) type {
             // Copy code to memory with proper zero-padding
             var i: usize = 0;
             while (i < length_usize) : (i += 1) {
-                const src_index = offset_usize + i;
+                const src_index = offset_usize +| i;
                 const byte_val = if (src_index < code_data.len) code_data[src_index] else 0;
                 self.memory.set_byte(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(dest_offset_usize + i)), byte_val) catch return Error.OutOfBounds;
             }
@@ -498,18 +503,28 @@ pub fn Handlers(FrameType: type) type {
                 return Error.OutOfGas;
             }
 
-            if (!evm.account_exists(addr)) {
-                // Non-existent account returns 0 per EIP-1052
-                self.stack.set_top_unsafe(0);
-                return dispatch_next.nextInstruction(FrameType, self, cursor, .EXTCODEHASH);
-            }
-
+            const account = self.getDatabase().get_account(addr.bytes) catch |err| switch (err) {
+                else => {
+                    self.afterComplete(.EXTCODEHASH);
+                    return Error.AllocationError;
+                },
+            };
             const code = self.getEvm().get_code(addr) catch |err| switch (err) {
                 else => {
                     self.afterComplete(.EXTCODEHASH);
                     return Error.AllocationError;
                 },
             };
+            // EIP-1052: the hash is 0 for an account that does not exist or is empty in
+            // the EIP-161 sense (no nonce, no balance, no code).
+            const is_empty = if (account) |existing|
+                existing.nonce == 0 and existing.balance == 0 and code.len == 0
+            else
+                true;
+            if (is_empty) {
+                self.stack.set_top_unsafe(0);
+                return dispatch_next.nextInstruction(FrameType, self, cursor, .EXTCODEHASH);
+            }
             if (code.len == 0) {
                 // Existing account with empty code returns keccak256("") constant
                 const empty_hash_u256: u256 = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470;

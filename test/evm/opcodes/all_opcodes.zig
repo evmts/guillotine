@@ -145,4 +145,5 @@ test {
     _ = @import("static_jump_invalid.zig");
     _ = @import("calldatacopy_e2e.zig");
     _ = @import("create_nonce.zig");
+    _ = @import("handler_bounds_regression.zig");
 }
