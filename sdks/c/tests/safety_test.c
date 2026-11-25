@@ -444,14 +444,9 @@ static void test_cleanup_invalidates_handles(void) {
 static void check_chain_id(uint64_t chain_id) {
     BlockInfoFFI info = block(chain_id);
     EvmHandle *evm = guillotine_evm_create(&info);
-    if (evm == NULL) {
-        /* The EVM's CHAINID width is narrower than this id: creation must fail
-         * loudly, never truncate. */
-        CHECK(error_contains("exceeds the supported maximum"));
-        printf("ok: chain id %llu rejected by this EVM build (%s)\n",
-               (unsigned long long)chain_id, guillotine_get_last_error());
-        return;
-    }
+    /* TransactionContext.chain_id is u64: every u64 chain id must be accepted. */
+    CHECK(evm != NULL);
+    if (evm == NULL) return;
     CHECK(guillotine_set_code(evm, TARGET, CHAINID_CODE, sizeof CHAINID_CODE));
     CallParams p = call_to(CALLER_A, TARGET, GUILLOTINE_CALL);
     EvmResult *r = guillotine_call(evm, &p);
@@ -467,6 +462,7 @@ static void test_chain_ids(void) {
     check_chain_id(8453);     /* Base Mainnet */
     check_chain_id(84532);    /* Base Sepolia */
     check_chain_id(11155111); /* Sepolia */
+    check_chain_id(UINT64_MAX);
     /* Ids within u16 must always work. */
     BlockInfoFFI base = block(8453);
     EvmHandle *evm = guillotine_evm_create(&base);

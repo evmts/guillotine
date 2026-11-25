@@ -105,207 +105,85 @@ pub const ProofNodes = struct {
     }
 
     /// Verify a path in the proof
+    /// Verifies `expected_value` (null: absent) under `remaining_path` starting at
+    /// a decoded node. Node items are single-encoded RLP strings: a leaf or
+    /// extension is `[hex_prefix_path, value_or_child_hash]`, a branch is 16 child
+    /// hashes (empty when absent) and a value.
     fn verify_path(self: *const ProofNodes, allocator: Allocator, node_data: primitives.Rlp.Data, remaining_path: []const u8, expected_value: ?[]const u8) !bool {
-        switch (node_data) {
-            .String => {
-                // Empty node or single byte - shouldn't happen at this point
-                if (expected_value != null) return false; // Expected value but reached a non-value node
-                return true; // Assuming empty proof is valid for non-existent keys
-            },
-            .List => |items| {
-                // Determine node type based on item count
-                if (items.len == 0) {
-                    // Empty node
-                    return expected_value == null;
-                } else if (items.len == 2) {
-                    // Either leaf or extension node
-                    switch (items[0]) {
-                        .String => |path_bytes| {
-                            if (path_bytes.len == 0) return ProofError.CorruptedNode;
+        const items = switch (node_data) {
+            // An empty node holds no keys.
+            .String => return expected_value == null,
+            .List => |list| list,
+        };
+        if (items.len == 0) return expected_value == null;
 
-                            // Decode the path
-                            const decoded_path = try trie.decode_path(allocator, path_bytes);
-                            defer allocator.free(decoded_path.nibbles);
+        if (items.len == 2) {
+            const path_bytes = switch (items[0]) {
+                .String => |bytes| bytes,
+                .List => return ProofError.CorruptedNode,
+            };
+            if (path_bytes.len == 0) return ProofError.CorruptedNode;
+            const decoded_path = try trie.decode_path(allocator, path_bytes);
+            defer allocator.free(decoded_path.nibbles);
+            const nibbles = decoded_path.nibbles;
 
-                            if (decoded_path.is_leaf) {
-                                // Leaf node
-                                // Check if paths match
-                                if (!std.mem.eql(u8, decoded_path.nibbles, remaining_path)) return expected_value == null; // Path doesn't match, expect null
+            if (decoded_path.is_leaf) {
+                if (!std.mem.eql(u8, nibbles, remaining_path)) return expected_value == null;
+                const actual = switch (items[1]) {
+                    .String => |bytes| bytes,
+                    .List => return ProofError.CorruptedNode,
+                };
+                const expected = expected_value orelse return false;
+                return std.mem.eql(u8, actual, expected);
+            }
 
-                                // Check value
-                                switch (items[1]) {
-                                    .String => |value| {
-                                        // The value is RLP-encoded, so we need to decode it
-                                        const decoded_value = try primitives.Rlp.decode(allocator, value, false);
-                                        defer decoded_value.data.deinit(allocator);
-
-                                        switch (decoded_value.data) {
-                                            .String => |actual_value| {
-                                                // Found value, compare with expected
-                                                if (expected_value) |expected| {
-                                                    return std.mem.eql(u8, actual_value, expected);
-                                                } else {
-                                                    return false; // Value exists but none expected
-                                                }
-                                            },
-                                            .List => return ProofError.CorruptedNode, // Value should not be a list
-                                        }
-                                    },
-                                    .List => {
-                                        return ProofError.CorruptedNode; // Invalid value format
-                                    },
-                                }
-                            } else {
-                                // Extension node
-                                // Check if extension is a prefix of the path
-                                if (remaining_path.len < decoded_path.nibbles.len) {
-                                    return expected_value == null; // Path too short
-                                }
-
-                                if (!std.mem.eql(u8, decoded_path.nibbles, remaining_path[0..decoded_path.nibbles.len])) {
-                                    return expected_value == null; // Prefix doesn't match
-                                }
-
-                                // Follow the extension - items[1] is RLP-encoded
-                                switch (items[1]) {
-                                    .String => |next_rlp| {
-                                        // Decode the RLP-encoded next reference
-                                        const next_decoded_rlp = try primitives.Rlp.decode(allocator, next_rlp, false);
-                                        defer next_decoded_rlp.data.deinit(allocator);
-
-                                        switch (next_decoded_rlp.data) {
-                                            .String => |next_hash| {
-                                                if (next_hash.len != 32) {
-                                                    return ProofError.CorruptedNode; // Expected 32-byte hash
-                                                }
-
-                                                // Get the hash
-                                                var hash_buf: [32]u8 = undefined;
-                                                @memcpy(&hash_buf, next_hash);
-
-                                                // Get the next node
-                                                const hash_str = try bytes_to_hex_string(allocator, &hash_buf);
-                                                defer allocator.free(hash_str);
-
-                                                const next_node_data = self.nodes.get(hash_str) orelse {
-                                                    return ProofError.MissingNode;
-                                                };
-
-                                                // Verify the next node hash
-                                                var next_hash_buf: [32]u8 = undefined;
-                                                std.crypto.hash.sha3.Keccak256.hash(next_node_data, &next_hash_buf, .{});
-                                                if (!std.mem.eql(u8, &next_hash_buf, &hash_buf)) {
-                                                    return ProofError.InvalidProof;
-                                                }
-
-                                                // Decode the next node
-                                                const next_decoded = try primitives.Rlp.decode(allocator, next_node_data, false);
-                                                defer next_decoded.data.deinit(allocator);
-
-                                                // Continue verification
-                                                return try self.verify_path(allocator, next_decoded.data, remaining_path[decoded_path.nibbles.len..], expected_value);
-                                            },
-                                            .List => return ProofError.CorruptedNode, // Invalid next node format
-                                        }
-                                    },
-                                    .List => return ProofError.CorruptedNode, // Invalid next node format
-                                }
-                            }
-                        },
-                        .List => return ProofError.CorruptedNode, // Invalid path format
-                    }
-                } else if (items.len == 17) {
-                    // Branch node
-                    if (remaining_path.len == 0) {
-                        // End of path, check value at position 16
-                        switch (items[16]) {
-                            .String => |value_rlp| {
-                                // Branch value is RLP-encoded
-                                const value_decoded = try primitives.Rlp.decode(allocator, value_rlp, false);
-                                defer value_decoded.data.deinit(allocator);
-
-                                switch (value_decoded.data) {
-                                    .String => |value| {
-                                        if (value.len == 0) {
-                                            // No value
-                                            return expected_value == null;
-                                        } else {
-                                            // Has value
-                                            if (expected_value) |expected| {
-                                                return std.mem.eql(u8, value, expected);
-                                            } else {
-                                                return false; // Value exists but none expected
-                                            }
-                                        }
-                                    },
-                                    .List => return ProofError.CorruptedNode, // Invalid value format
-                                }
-                            },
-                            .List => return ProofError.CorruptedNode, // Invalid value format
-                        }
-                    } else {
-                        // Get the next nibble
-                        const nibble = remaining_path[0];
-                        if (nibble >= 16) {
-                            return ProofError.InvalidKey; // Nibble value out of range
-                        }
-
-                        // Check the branch at this position
-                        switch (items[nibble]) {
-                            .String => |next_rlp| {
-                                // Branch children are RLP-encoded
-                                const next_decoded = try primitives.Rlp.decode(allocator, next_rlp, false);
-                                defer next_decoded.data.deinit(allocator);
-
-                                switch (next_decoded.data) {
-                                    .String => |next| {
-                                        if (next.len == 0) {
-                                            // No child at this position
-                                            return expected_value == null;
-                                        } else if (next.len == 32) {
-                                            // Child is a hash reference
-                                            var hash_buf: [32]u8 = undefined;
-                                            @memcpy(&hash_buf, next);
-
-                                            // Get the next node
-                                            const hash_str = try bytes_to_hex_string(allocator, &hash_buf);
-                                            defer allocator.free(hash_str);
-
-                                            const next_node_data = self.nodes.get(hash_str) orelse {
-                                                return ProofError.MissingNode;
-                                            };
-
-                                            // Verify the next node hash
-                                            var next_hash_buf: [32]u8 = undefined;
-                                            std.crypto.hash.sha3.Keccak256.hash(next_node_data, &next_hash_buf, .{});
-                                            if (!std.mem.eql(u8, &next_hash_buf, &hash_buf)) {
-                                                return ProofError.InvalidProof;
-                                            }
-
-                                            // Decode the next node
-                                            const next_node_decoded = try primitives.Rlp.decode(allocator, next_node_data, false);
-                                            defer next_node_decoded.data.deinit(allocator);
-
-                                            // Continue verification
-                                            return try self.verify_path(allocator, next_node_decoded.data, remaining_path[1..], expected_value);
-                                        } else {
-                                            // Direct value reference - shouldn't happen in well-formed trie
-                                            return ProofError.CorruptedNode;
-                                        }
-                                    },
-                                    .List => return ProofError.CorruptedNode, // Invalid child format
-                                }
-                            },
-                            .List => return ProofError.CorruptedNode, // Invalid child format
-                        }
-                    }
-                } else {
-                    return ProofError.CorruptedNode; // Invalid node format
-                }
-            },
+            // Extension: its path must prefix the remaining path.
+            if (remaining_path.len < nibbles.len) return expected_value == null;
+            if (!std.mem.eql(u8, nibbles, remaining_path[0..nibbles.len])) return expected_value == null;
+            var next = (try self.resolve_child(allocator, items[1])) orelse return ProofError.CorruptedNode;
+            defer next.data.deinit(allocator);
+            return try self.verify_path(allocator, next.data, remaining_path[nibbles.len..], expected_value);
         }
 
-        return ProofError.CorruptedNode; // Should never reach here
+        if (items.len == 17) {
+            if (remaining_path.len == 0) {
+                const value = switch (items[16]) {
+                    .String => |bytes| bytes,
+                    .List => return ProofError.CorruptedNode,
+                };
+                if (value.len == 0) return expected_value == null;
+                const expected = expected_value orelse return false;
+                return std.mem.eql(u8, value, expected);
+            }
+            const nibble = remaining_path[0];
+            if (nibble >= 16) return ProofError.InvalidKey;
+            var next = (try self.resolve_child(allocator, items[nibble])) orelse return expected_value == null;
+            defer next.data.deinit(allocator);
+            return try self.verify_path(allocator, next.data, remaining_path[1..], expected_value);
+        }
+
+        return ProofError.CorruptedNode;
+    }
+
+    /// Resolves a child reference to its decoded proof node. Returns null for an
+    /// empty reference. The node must be in the proof and hash to the reference.
+    fn resolve_child(self: *const ProofNodes, allocator: Allocator, child: primitives.Rlp.Data) !?primitives.Rlp.Decoded {
+        const reference = switch (child) {
+            .String => |bytes| bytes,
+            .List => return ProofError.CorruptedNode,
+        };
+        if (reference.len == 0) return null;
+        if (reference.len != 32) return ProofError.CorruptedNode;
+
+        const hash_str = try bytes_to_hex_string(allocator, reference);
+        defer allocator.free(hash_str);
+        const node_data = self.nodes.get(hash_str) orelse return ProofError.MissingNode;
+
+        var digest: [32]u8 = undefined;
+        std.crypto.hash.sha3.Keccak256.hash(node_data, &digest, .{});
+        if (!std.mem.eql(u8, &digest, reference)) return ProofError.InvalidProof;
+
+        return try primitives.Rlp.decode(allocator, node_data, false);
     }
 };
 

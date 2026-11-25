@@ -182,14 +182,14 @@ pub fn fuzzJournalOriginalStorageIndex(_: void, input: []const u8) !void {
     defer journal.deinit();
 
     // Independent flat log of (snap_id, addr_idx, slot_idx, original_value)
-    const LogEntry = struct { snap_id: u16, addr_idx: u8, slot_idx: u8, orig: u256 };
+    const LogEntry = struct { snap_id: JournalType.SnapshotIdType, addr_idx: u8, slot_idx: u8, orig: u256 };
     var ref_log = std.ArrayList(LogEntry).empty;
     defer ref_log.deinit(allocator);
 
-    var snaps = std.ArrayList(u16).empty;
+    var snaps = std.ArrayList(JournalType.SnapshotIdType).empty;
     defer snaps.deinit(allocator);
 
-    var current_snap: u16 = 0;
+    var current_snap: JournalType.SnapshotIdType = 0;
 
     var i: usize = 0;
     while (i + 3 <= input.len) : (i += 3) {

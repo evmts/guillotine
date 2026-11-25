@@ -160,6 +160,8 @@ pub const TransactionContext = @import("block/transaction_context.zig").Transact
 pub const AuthorizationProcessor = @import("eips_and_hardforks/authorization_processor.zig").AuthorizationProcessor;
 pub const AuthorizationError = @import("eips_and_hardforks/authorization_processor.zig").AuthorizationError;
 pub const trie = @import("trie/root.zig");
+/// Ethereum state root over a Database (used by Database.get_state_root).
+pub const state_root = @import("storage/state_root.zig");
 // KZG setup from primitives package crypto module
 pub const kzg_setup = @import("crypto").kzg_setup;
 
@@ -177,10 +179,13 @@ pub const verified_ops = @import("core/verified_ops.zig");
 // evm_config.zig, preprocessor/dispatch_test.zig, every other
 // instructions/handlers_*.zig, bytecode/bytecode_tests.zig,
 // bytecode/bytecode_jump_validation_test{,s}.zig, tracer/minimal_frame.zig,
-// tracer/minimal_evm_precompile_test.zig, trie/trie_test.zig and root_c.zig.
+// tracer/minimal_evm_precompile_test.zig and root_c.zig.
 // These compile but fail: tracer/pc_tracker.zig (logs an error),
 // tracer/events/{events,lifecycle}.zig (1 failure each), and
-// trie/{test_simple_update,known_roots_test}.zig (3 failures and 1 crash).
+// trie/{test_simple_update,known_roots_test}.zig (3 failures and 1 crash), and
+// trie/trie.zig (2 failures: Leaf/Extension/Branch `encode` RLP-encode each item
+// twice, and proof.zig/merkle_trie.zig decode that same non-Ethereum format, so
+// the encoders and the proof verifier must be fixed together).
 // Repair a file's tests before importing it here.
 test {
     _ = @import("preprocessor/dispatch.zig");
@@ -191,4 +196,7 @@ test {
     _ = @import("native_stack.zig");
     _ = @import("internal/safety_counter.zig");
     _ = @import("core/verified_ops.zig");
+    _ = @import("trie/hash_builder_complete.zig");
+    _ = @import("trie/known_roots_test.zig");
+    _ = @import("trie/test_simple_update.zig");
 }

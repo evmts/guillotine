@@ -54,9 +54,9 @@ of this ABI and no other C entry point.
       4 CREATE, 5 CREATE2. `guillotine_simulate` accepts CALL only and does
       not commit state. Both `guillotine_call` and `guillotine_simulate` set
       ORIGIN to `caller`.
-- [ ] Pass `chain_id` as the full u64. Creation returns NULL with
-      `exceeds the supported maximum` when the value does not fit the EVM's
-      CHAINID type; surface that error instead of hard-coding a cap.
+- [ ] Pass `chain_id` as the full u64. The EVM's CHAINID type is u64, so
+      every value is accepted and returned unchanged by CHAINID. Never
+      hard-code a smaller cap.
 - [ ] There is no nonce getter. Read nonces through `guillotine_dump_state`.
 
 ## 4. Handles
@@ -122,8 +122,8 @@ of this ABI and no other C entry point.
       invalid config, double destroy, cleanup with live handles, isolated
       state per handle, ORIGIN parity between call and simulate, test-mode and
       tracing handles through unsuffixed functions, no memory growth over
-      repeated calls and invalid bytecode, and chain ids 1, 8453, 84532, and
-      11155111.
+      repeated calls and invalid bytecode, and exact CHAINID round-trips for
+      chain ids 1, 8453, 84532, 11155111, and `UINT64_MAX`.
 - [ ] Add a contract that returns a known 32-byte word, a REVERT with data,
       empty and non-empty buffers, u256 boundaries, and an invalid call type.
 - [ ] Deploy test code at a non-precompile address (for example

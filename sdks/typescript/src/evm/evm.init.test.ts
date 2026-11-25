@@ -104,17 +104,9 @@ describe("GuillotineEvm - Basic Lifecycle", () => {
 				difficulty: maxU64,
 			};
 
-			try {
-				evm = await GuillotineEvm.create(blockInfo);
-			} catch (error) {
-				// A native build whose CHAINID is still u16 must reject u64::MAX
-				// explicitly (never truncate it); every other field stays at its max.
-				expect((error as Error).message).toBe(
-					`Failed to create EVM: chain_id ${maxU64} exceeds the supported maximum 65535`,
-				);
-				evm = await GuillotineEvm.create({ ...blockInfo, chainId: 65_535n });
-			}
-			expect(evm).toBeDefined();
+			// TransactionContext.chain_id is u64, so u64::MAX is accepted as is.
+			evm = await GuillotineEvm.create(blockInfo);
+			expect(evm.isOpen).toBe(true);
 		});
 	});
 

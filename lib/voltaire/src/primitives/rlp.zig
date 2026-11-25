@@ -1056,28 +1056,30 @@ test "RLP recursion depth limit" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    // Test 1: Verify MAX_RLP_DEPTH constant exists and has reasonable value
     try testing.expect(MAX_RLP_DEPTH == 32);
 
-    // Test 2: Create deeply nested list that exceeds MAX_RLP_DEPTH
-    // Each nested list adds one level of depth
-    // We'll create a list with MAX_RLP_DEPTH + 5 levels of nesting
+    // MAX_RLP_DEPTH + 5 nested lists around a string: [[[...["inner"]...]]]
     var current_encoded = try encode(allocator, "inner");
     defer allocator.free(current_encoded);
 
-    // Build nested structure: [[[[["inner"]]]]]
     var depth: u32 = 0;
     while (depth < MAX_RLP_DEPTH + 5) : (depth += 1) {
-        const list = [_][]const u8{current_encoded};
-        const new_encoded = try encode(allocator, list[0..]);
-        if (depth > 0) {
-            allocator.free(current_encoded);
+        // Wrap the previous encoding in one more list level.
+        const len_bytes = try encodeLength(allocator, current_encoded.len);
+        defer allocator.free(len_bytes);
+        const header: usize = if (current_encoded.len < 56) 1 else 1 + len_bytes.len;
+        const next = try allocator.alloc(u8, header + current_encoded.len);
+        if (current_encoded.len < 56) {
+            next[0] = 0xc0 + @as(u8, @intCast(current_encoded.len));
+        } else {
+            next[0] = 0xf7 + @as(u8, @intCast(len_bytes.len));
+            @memcpy(next[1..header], len_bytes);
         }
-        current_encoded = new_encoded;
+        @memcpy(next[header..], current_encoded);
+        allocator.free(current_encoded);
+        current_encoded = next;
     }
-    defer if (MAX_RLP_DEPTH + 5 > 0) allocator.free(current_encoded);
 
-    // Test 3: Decoding should fail with RecursionDepthExceeded
     const result = decode(allocator, current_encoded, false);
     try testing.expectError(RlpError.RecursionDepthExceeded, result);
 }
@@ -1086,27 +1088,30 @@ test "RLP max allowed depth" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    // Create nested list exactly at MAX_RLP_DEPTH - 1 (should succeed)
+    // MAX_RLP_DEPTH - 1 lists put the leaf string at depth MAX_RLP_DEPTH - 1, the deepest allowed.
     var current_encoded = try encode(allocator, "inner");
     defer allocator.free(current_encoded);
 
-    // Build nested structure up to MAX_RLP_DEPTH - 1 levels
     var depth: u32 = 0;
     while (depth < MAX_RLP_DEPTH - 1) : (depth += 1) {
-        const list = [_][]const u8{current_encoded};
-        const new_encoded = try encode(allocator, list[0..]);
-        if (depth > 0) {
-            allocator.free(current_encoded);
+        // Wrap the previous encoding in one more list level.
+        const len_bytes = try encodeLength(allocator, current_encoded.len);
+        defer allocator.free(len_bytes);
+        const header: usize = if (current_encoded.len < 56) 1 else 1 + len_bytes.len;
+        const next = try allocator.alloc(u8, header + current_encoded.len);
+        if (current_encoded.len < 56) {
+            next[0] = 0xc0 + @as(u8, @intCast(current_encoded.len));
+        } else {
+            next[0] = 0xf7 + @as(u8, @intCast(len_bytes.len));
+            @memcpy(next[1..header], len_bytes);
         }
-        current_encoded = new_encoded;
+        @memcpy(next[header..], current_encoded);
+        allocator.free(current_encoded);
+        current_encoded = next;
     }
-    defer if (MAX_RLP_DEPTH - 1 > 0) allocator.free(current_encoded);
 
-    // This should succeed since we're at MAX_RLP_DEPTH - 1
     const decoded = try decode(allocator, current_encoded, false);
     defer decoded.data.deinit(allocator);
-
-    // Verify we got a list
     try testing.expect(decoded.data == .List);
 }
 
@@ -1114,48 +1119,58 @@ test "RLP depth limit edge case" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    // Test with exactly MAX_RLP_DEPTH levels (should succeed)
+    // MAX_RLP_DEPTH lists put the leaf string at depth MAX_RLP_DEPTH, one past the limit.
     var current_encoded = try encode(allocator, "data");
     defer allocator.free(current_encoded);
 
     var depth: u32 = 0;
-    while (depth < MAX_RLP_DEPTH - 1) : (depth += 1) {
-        const list = [_][]const u8{current_encoded};
-        const new_encoded = try encode(allocator, list[0..]);
-        if (depth > 0) {
-            allocator.free(current_encoded);
+    while (depth < MAX_RLP_DEPTH) : (depth += 1) {
+        // Wrap the previous encoding in one more list level.
+        const len_bytes = try encodeLength(allocator, current_encoded.len);
+        defer allocator.free(len_bytes);
+        const header: usize = if (current_encoded.len < 56) 1 else 1 + len_bytes.len;
+        const next = try allocator.alloc(u8, header + current_encoded.len);
+        if (current_encoded.len < 56) {
+            next[0] = 0xc0 + @as(u8, @intCast(current_encoded.len));
+        } else {
+            next[0] = 0xf7 + @as(u8, @intCast(len_bytes.len));
+            @memcpy(next[1..header], len_bytes);
         }
-        current_encoded = new_encoded;
+        @memcpy(next[header..], current_encoded);
+        allocator.free(current_encoded);
+        current_encoded = next;
     }
-    defer if (MAX_RLP_DEPTH - 1 > 0) allocator.free(current_encoded);
 
-    // Decoding at exactly MAX_RLP_DEPTH should succeed
-    const decoded = try decode(allocator, current_encoded, false);
-    defer decoded.data.deinit(allocator);
-    try testing.expect(decoded.data == .List);
+    const result = decode(allocator, current_encoded, false);
+    try testing.expectError(RlpError.RecursionDepthExceeded, result);
 }
 
 test "RLP depth protection against attack" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    // Simulate an attack with 100 levels of nesting
-    const attack_depth: u32 = 100;
+    // 100 nested lists must be rejected, not decoded recursively.
     var current_encoded = try encode(allocator, &[_]u8{});
     defer allocator.free(current_encoded);
 
     var depth: u32 = 0;
-    while (depth < attack_depth) : (depth += 1) {
-        const list = [_][]const u8{current_encoded};
-        const new_encoded = try encode(allocator, list[0..]);
-        if (depth > 0) {
-            allocator.free(current_encoded);
+    while (depth < 100) : (depth += 1) {
+        // Wrap the previous encoding in one more list level.
+        const len_bytes = try encodeLength(allocator, current_encoded.len);
+        defer allocator.free(len_bytes);
+        const header: usize = if (current_encoded.len < 56) 1 else 1 + len_bytes.len;
+        const next = try allocator.alloc(u8, header + current_encoded.len);
+        if (current_encoded.len < 56) {
+            next[0] = 0xc0 + @as(u8, @intCast(current_encoded.len));
+        } else {
+            next[0] = 0xf7 + @as(u8, @intCast(len_bytes.len));
+            @memcpy(next[1..header], len_bytes);
         }
-        current_encoded = new_encoded;
+        @memcpy(next[header..], current_encoded);
+        allocator.free(current_encoded);
+        current_encoded = next;
     }
-    defer if (attack_depth > 0) allocator.free(current_encoded);
 
-    // Should fail with RecursionDepthExceeded
     const result = decode(allocator, current_encoded, false);
     try testing.expectError(RlpError.RecursionDepthExceeded, result);
 }
@@ -1448,42 +1463,35 @@ test "RLP nested list round-trip - two levels" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    // Create [[1, 2], [3, 4]]
-    const list1_item1 = try encode(allocator, 1);
-    defer allocator.free(list1_item1);
-    const list1_item2 = try encode(allocator, 2);
-    defer allocator.free(list1_item2);
-    const list1_items = [_][]const u8{ list1_item1, list1_item2 };
-    const list1 = try encode(allocator, list1_items[0..]);
-    defer allocator.free(list1);
+    // [[1, 2], [3, 4]] = c6 c2 01 02 c2 03 04
+    const values = [_]u64{ 1, 2, 3, 4 };
+    const encoded_ints = try encode(allocator, values[0..2]);
+    defer allocator.free(encoded_ints);
+    try testing.expectEqualSlices(u8, &[_]u8{ 0xc2, 0x01, 0x02 }, encoded_ints);
 
-    const list2_item1 = try encode(allocator, 3);
-    defer allocator.free(list2_item1);
-    const list2_item2 = try encode(allocator, 4);
-    defer allocator.free(list2_item2);
-    const list2_items = [_][]const u8{ list2_item1, list2_item2 };
-    const list2 = try encode(allocator, list2_items[0..]);
-    defer allocator.free(list2);
-
-    const outer_items = [_][]const u8{ list1, list2 };
-    const encoded = try encode(allocator, outer_items[0..]);
-    defer allocator.free(encoded);
-
-    const decoded = try decode(allocator, encoded, false);
+    const encoded = [_]u8{ 0xc6, 0xc2, 0x01, 0x02, 0xc2, 0x03, 0x04 };
+    const decoded = try decode(allocator, &encoded, false);
     defer decoded.data.deinit(allocator);
 
-    switch (decoded.data) {
-        .List => |outer_list| {
-            try testing.expectEqual(@as(usize, 2), outer_list.len);
-            for (outer_list) |inner| {
-                switch (inner) {
-                    .List => |inner_list| {
-                        try testing.expectEqual(@as(usize, 2), inner_list.len);
-                    },
-                    .String => unreachable,
-                }
-            }
-        },
-        .String => unreachable,
+    const outer_list = switch (decoded.data) {
+        .List => |items| items,
+        .String => return error.TestUnexpectedResult,
+    };
+    try testing.expectEqual(@as(usize, 2), outer_list.len);
+    var next_value: u8 = 1;
+    for (outer_list) |inner| {
+        const inner_list = switch (inner) {
+            .List => |items| items,
+            .String => return error.TestUnexpectedResult,
+        };
+        try testing.expectEqual(@as(usize, 2), inner_list.len);
+        for (inner_list) |item| {
+            const bytes = switch (item) {
+                .String => |b| b,
+                .List => return error.TestUnexpectedResult,
+            };
+            try testing.expectEqualSlices(u8, &[_]u8{next_value}, bytes);
+            next_value += 1;
+        }
     }
 }

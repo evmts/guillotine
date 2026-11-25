@@ -302,99 +302,12 @@ fn keccak(bytes: []const u8) [32]u8 {
 }
 
 // ---------------------------------------------------------------------------
-// Merkle Patricia Trie root over fixed 32-byte keys
+// State root: Database.get_state_root (src/storage/state_root.zig)
 // ---------------------------------------------------------------------------
 
-const TrieEntry = struct {
-    key: [32]u8,
-    value: []const u8,
-
-    fn lessThan(_: void, lhs: TrieEntry, rhs: TrieEntry) bool {
-        return std.mem.order(u8, &lhs.key, &rhs.key) == .lt;
-    }
-};
-
-const empty_trie_root = [32]u8{
-    0x56, 0xe8, 0x1f, 0x17, 0x1b, 0xcc, 0x55, 0xa6, 0xff, 0x83, 0x45, 0xe6, 0x92, 0xc0, 0xf8, 0x6e,
-    0x5b, 0x48, 0xe0, 0x1b, 0x99, 0x6c, 0xad, 0xc0, 0x01, 0x62, 0x2f, 0xb5, 0xe3, 0x63, 0xb4, 0x21,
-};
-
-fn nibbleAt(key: *const [32]u8, index: usize) u8 {
-    const byte = key[index / 2];
-    return if (index % 2 == 0) byte >> 4 else byte & 0x0f;
-}
-
-/// Hex-prefix encoding of the nibbles `key[from..to]`.
-fn hexPrefix(a: Allocator, key: *const [32]u8, from: usize, to: usize, leaf: bool) ![]u8 {
-    const count = to - from;
-    const out = try a.alloc(u8, count / 2 + 1);
-    const flag: u8 = if (leaf) 2 else 0;
-    var index = from;
-    if (count % 2 == 1) {
-        out[0] = ((flag | 1) << 4) | nibbleAt(key, index);
-        index += 1;
-    } else {
-        out[0] = flag << 4;
-    }
-    var position: usize = 1;
-    while (index < to) : (index += 2) {
-        out[position] = (nibbleAt(key, index) << 4) | nibbleAt(key, index + 1);
-        position += 1;
-    }
-    return out;
-}
-
-/// RLP encoding of the node that holds `entries`, which share the first
-/// `depth` nibbles and are sorted by key.
-fn trieNode(a: Allocator, entries: []const TrieEntry, depth: usize) Allocator.Error![]u8 {
-    var payload: std.ArrayList(u8) = .empty;
-    const first = &entries[0].key;
-    if (entries.len == 1) {
-        try rlpAppendBytes(a, &payload, try hexPrefix(a, first, depth, 64, true));
-        try rlpAppendBytes(a, &payload, entries[0].value);
-        return rlpWrapList(a, payload.items);
-    }
-    const last = &entries[entries.len - 1].key;
-    var shared: usize = 0;
-    while (depth + shared < 64 and nibbleAt(first, depth + shared) == nibbleAt(last, depth + shared)) shared += 1;
-    if (shared > 0) {
-        try rlpAppendBytes(a, &payload, try hexPrefix(a, first, depth, depth + shared, false));
-        try trieAppendRef(a, &payload, entries, depth + shared);
-        return rlpWrapList(a, payload.items);
-    }
-    var start: usize = 0;
-    var nibble: u8 = 0;
-    while (nibble < 16) : (nibble += 1) {
-        var end = start;
-        while (end < entries.len and nibbleAt(&entries[end].key, depth) == nibble) end += 1;
-        if (end == start) {
-            try payload.append(a, 0x80);
-        } else {
-            try trieAppendRef(a, &payload, entries[start..end], depth + 1);
-        }
-        start = end;
-    }
-    // Keys have equal length, so a branch never carries a value.
-    try payload.append(a, 0x80);
-    return rlpWrapList(a, payload.items);
-}
-
-fn trieAppendRef(a: Allocator, out: *std.ArrayList(u8), entries: []const TrieEntry, depth: usize) Allocator.Error!void {
-    const encoded = try trieNode(a, entries, depth);
-    if (encoded.len < 32) {
-        try out.appendSlice(a, encoded);
-        return;
-    }
-    const digest = keccak(encoded);
-    try rlpAppendBytes(a, out, &digest);
-}
-
-/// Root of the trie holding `entries`. Sorts `entries` in place.
-fn trieRoot(a: Allocator, entries: []TrieEntry) Allocator.Error![32]u8 {
-    if (entries.len == 0) return empty_trie_root;
-    std.mem.sort(TrieEntry, entries, {}, TrieEntry.lessThan);
-    return keccak(try trieNode(a, entries, 0));
-}
+const TrieEntry = evm.state_root.TrieEntry;
+const empty_trie_root = evm.state_root.empty_trie_root;
+const trieRoot = evm.state_root.trieRoot;
 
 // ---------------------------------------------------------------------------
 // Account helpers on top of the Guillotine Database
@@ -431,14 +344,6 @@ fn accountCode(a: Allocator, db: *Database, account: Account) ![]const u8 {
     return db.get_code(account.code_hash);
 }
 
-fn accountCodeHash(account: Account) [32]u8 {
-    if (hasNoCode(account)) {
-        if (account.delegated_address) |target| return keccak(&delegationCode(target.bytes));
-        return emptyCodeHash();
-    }
-    return account.code_hash;
-}
-
 fn accountOrZero(db: *Database, address: [20]u8) !Account {
     return (try db.get_account(address)) orelse Account.zero();
 }
@@ -454,63 +359,6 @@ fn destroyAccount(a: Allocator, db: *Database, address: [20]u8) !void {
     // zero slots are excluded from the storage trie.
     for (keys.items) |key| try db.set_storage(address, key, 0);
     try db.delete_account(address);
-}
-
-/// Exact post-state root: storage tries first, then the account trie.
-fn stateRoot(a: Allocator, db: *Database) ![32]u8 {
-    const OwnedSlot = struct {
-        address: [20]u8,
-        entry: TrieEntry,
-
-        fn lessThan(_: void, lhs: @This(), rhs: @This()) bool {
-            return std.mem.order(u8, &lhs.address, &rhs.address) == .lt;
-        }
-    };
-    var slots: std.ArrayList(OwnedSlot) = .empty;
-    var storage_it = db.storage.iterator();
-    while (storage_it.next()) |entry| {
-        const value = entry.value_ptr.*;
-        if (value == 0) continue;
-        var key_be: [32]u8 = undefined;
-        std.mem.writeInt(u256, &key_be, entry.key_ptr.key, .big);
-        var encoded: std.ArrayList(u8) = .empty;
-        try rlpAppendUint(a, &encoded, value);
-        try slots.append(a, .{
-            .address = entry.key_ptr.address,
-            .entry = .{ .key = keccak(&key_be), .value = encoded.items },
-        });
-    }
-    std.mem.sort(OwnedSlot, slots.items, {}, OwnedSlot.lessThan);
-
-    const Range = struct { start: usize, end: usize };
-    var ranges: std.AutoHashMapUnmanaged([20]u8, Range) = .empty;
-    var start: usize = 0;
-    while (start < slots.items.len) {
-        var end = start + 1;
-        while (end < slots.items.len and std.mem.eql(u8, &slots.items[end].address, &slots.items[start].address)) end += 1;
-        try ranges.put(a, slots.items[start].address, .{ .start = start, .end = end });
-        start = end;
-    }
-
-    var accounts: std.ArrayList(TrieEntry) = .empty;
-    var account_it = db.accounts.iterator();
-    while (account_it.next()) |entry| {
-        const address = entry.key_ptr.*;
-        const account = entry.value_ptr.*;
-        var storage_root = empty_trie_root;
-        if (ranges.get(address)) |range| {
-            const owned = try a.alloc(TrieEntry, range.end - range.start);
-            for (slots.items[range.start..range.end], owned) |slot, *target| target.* = slot.entry;
-            storage_root = try trieRoot(a, owned);
-        }
-        var payload: std.ArrayList(u8) = .empty;
-        try rlpAppendUint(a, &payload, account.nonce);
-        try rlpAppendUint(a, &payload, account.balance);
-        try rlpAppendBytes(a, &payload, &storage_root);
-        try rlpAppendBytes(a, &payload, &accountCodeHash(account));
-        try accounts.append(a, .{ .key = keccak(&address), .value = try rlpWrapList(a, payload.items) });
-    }
-    return trieRoot(a, accounts.items);
 }
 
 // ---------------------------------------------------------------------------
@@ -1580,7 +1428,7 @@ fn runPostFor(
     var executed: ?Executed = null;
     if (validated.exception == null) executed = try applyTx(fork, a, gpa, &db, test_case, tx, validated);
 
-    const root = try stateRoot(a, &db);
+    const root = try db.get_state_root();
     const logs_hash = if (executed) |result| result.logs_hash else try logsHash(a, &[_]evm.Log{});
     const root_matches = std.mem.eql(u8, &root, &post.hash);
     const logs_match = std.mem.eql(u8, &logs_hash, &post.logs);
@@ -2829,7 +2677,7 @@ test "state root of one funded account matches the reference value" {
     try rlpAppendBytes(a, &leaf, account_rlp);
     const expected = keccak(try rlpWrapList(a, leaf.items));
 
-    try std.testing.expectEqualSlices(u8, &expected, &try stateRoot(a, &db));
+    try std.testing.expectEqualSlices(u8, &expected, &try db.get_state_root());
 }
 
 test "trie root does not depend on insertion order and separates branches" {

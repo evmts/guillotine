@@ -10,7 +10,7 @@
 ;; Method  : assert hypotheses and NOT(claim). Expected `unsat`: no
 ;;           counterexample exists over the whole input space.
 ;; Modeled Zig source:
-;; --- src/instructions/handlers_advanced_synthetic.zig:130 (iszero_jumpi)
+;; --- src/instructions/handlers_advanced_synthetic.zig:22 (iszero_jumpi)
 ;;   |         pub fn iszero_jumpi(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
 ;;   |             N.before(self, .ISZERO_JUMPI, cursor, sp, gas);
 ;;   |             var s = N.StackView{ .sp = sp };

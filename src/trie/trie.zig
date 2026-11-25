@@ -161,52 +161,14 @@ pub const BranchNode = struct {
     }
 
     pub fn encode(self: BranchNode, allocator: Allocator) ![]u8 {
-        var encoded_children = std.array_list.AlignedManaged([]u8, null).init(allocator);
-        defer {
-            for (encoded_children.items) |item| {
-                allocator.free(item);
-            }
-            encoded_children.deinit();
+        // 17 RLP strings: 16 children, then the value. Each item is encoded once,
+        // by the list encoder; absent entries are the empty string.
+        var items: [17][]const u8 = undefined;
+        for (&self.children, 0..) |*child, i| {
+            items[i] = if (child.* != null) hash_value_bytes(&child.*.?) else "";
         }
-
-        // Encode each child or an empty string
-        for (self.children) |child| {
-            if (child) |value| {
-                switch (value) {
-                    .Raw => |data| {
-                        const encoded = try primitives.Rlp.encode(allocator, data);
-                        try encoded_children.append(encoded);
-                    },
-                    .Hash => |hash| {
-                        const encoded = try primitives.Rlp.encode(allocator, &hash);
-                        try encoded_children.append(encoded);
-                    },
-                }
-            } else {
-                const empty = try primitives.Rlp.encode(allocator, "");
-                try encoded_children.append(empty);
-            }
-        }
-
-        // Encode value or empty string
-        if (self.value) |value| {
-            switch (value) {
-                .Raw => |data| {
-                    const encoded = try primitives.Rlp.encode(allocator, data);
-                    try encoded_children.append(encoded);
-                },
-                .Hash => |hash| {
-                    const encoded = try primitives.Rlp.encode(allocator, &hash);
-                    try encoded_children.append(encoded);
-                },
-            }
-        } else {
-            const empty = try primitives.Rlp.encode(allocator, "");
-            try encoded_children.append(empty);
-        }
-
-        // Encode the entire node as a list
-        return try primitives.Rlp.encode(allocator, encoded_children.items);
+        items[16] = if (self.value != null) hash_value_bytes(&self.value.?) else "";
+        return try primitives.Rlp.encode(allocator, items[0..]);
     }
 };
 
@@ -229,27 +191,10 @@ pub const ExtensionNode = struct {
     }
 
     pub fn encode(self: ExtensionNode, allocator: Allocator) ![]u8 {
-        var items = std.array_list.AlignedManaged([]u8, null).init(allocator);
-        defer {
-            for (items.items) |item| {
-                allocator.free(item);
-            }
-            items.deinit();
-        }
-
-        // Encode the path
         const encoded_path = try encode_path(allocator, self.nibbles, false);
-        try items.append(encoded_path);
-
-        // Encode the next node
-        const encoded_next = switch (self.next) {
-            .Raw => |data| try primitives.Rlp.encode(allocator, data),
-            .Hash => |hash| try primitives.Rlp.encode(allocator, &hash),
-        };
-        try items.append(encoded_next);
-
-        // Encode as a list
-        return try primitives.Rlp.encode(allocator, items.items);
+        defer allocator.free(encoded_path);
+        const items = [_][]const u8{ encoded_path, hash_value_bytes(&self.next) };
+        return try primitives.Rlp.encode(allocator, items[0..]);
     }
 };
 
@@ -272,27 +217,10 @@ pub const LeafNode = struct {
     }
 
     pub fn encode(self: LeafNode, allocator: Allocator) ![]u8 {
-        var items = std.array_list.AlignedManaged([]u8, null).init(allocator);
-        defer {
-            for (items.items) |item| {
-                allocator.free(item);
-            }
-            items.deinit();
-        }
-
-        // Encode the path
         const encoded_path = try encode_path(allocator, self.nibbles, true);
-        try items.append(encoded_path);
-
-        // Encode the value
-        const encoded_value = switch (self.value) {
-            .Raw => |data| try primitives.Rlp.encode(allocator, data),
-            .Hash => |hash| try primitives.Rlp.encode(allocator, &hash),
-        };
-        try items.append(encoded_value);
-
-        // Encode as a list
-        return try primitives.Rlp.encode(allocator, items.items);
+        defer allocator.free(encoded_path);
+        const items = [_][]const u8{ encoded_path, hash_value_bytes(&self.value) };
+        return try primitives.Rlp.encode(allocator, items[0..]);
     }
 };
 
@@ -360,6 +288,14 @@ pub fn nibbles_to_key(allocator: Allocator, nibbles: []const u8) ![]u8 {
     }
 
     return key;
+}
+
+/// The bytes a node stores for `value`: raw data, or the 32-byte hash.
+fn hash_value_bytes(value: *const HashValue) []const u8 {
+    return switch (value.*) {
+        .Raw => |data| data,
+        .Hash => |*hash| hash,
+    };
 }
 
 /// Encodes a path for either leaf or extension nodes
@@ -1415,13 +1351,13 @@ test "BranchNode - all children populated" {
     defer branch.deinit(allocator);
 
     // Populate all 16 children
-    var i: u4 = 0;
+    var i: usize = 0;
     while (i < 16) : (i += 1) {
         var buf: [10]u8 = undefined;
-        const data = std.fmt.bufPrint(&buf, "child{d}", .{i}) catch unreachable;
+        const data = try std.fmt.bufPrint(&buf, "child{d}", .{i});
         const data_copy = try allocator.dupe(u8, data);
         branch.children[i] = HashValue{ .Raw = data_copy };
-        branch.children_mask.set(i);
+        branch.children_mask.set(@intCast(i));
     }
 
     const encoded = try branch.encode(allocator);

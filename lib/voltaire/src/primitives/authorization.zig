@@ -55,7 +55,7 @@ pub const Authorization = struct {
         try list.appendSlice(chain_id_encoded);
 
         // Encode address
-        const address_encoded = try rlp.encode_bytes(allocator, &self.address.bytes);
+        const address_encoded = try rlp.encodeBytes(allocator, &self.address.bytes);
         defer allocator.free(address_encoded);
         try list.appendSlice(address_encoded);
 
@@ -71,7 +71,7 @@ pub const Authorization = struct {
         if (list.items.len <= 55) {
             try rlp_list.append(@as(u8, @intCast(0xc0 + list.items.len)));
         } else {
-            const len_bytes = try rlp.encode_length(allocator, list.items.len);
+            const len_bytes = try rlp.encodeLength(allocator, list.items.len);
             defer allocator.free(len_bytes);
             try rlp_list.append(@as(u8, @intCast(0xf7 + len_bytes.len)));
             try rlp_list.appendSlice(len_bytes);
@@ -151,7 +151,7 @@ pub fn encodeAuthorizationList(allocator: Allocator, auth_list: AuthorizationLis
         const chain_id_enc = try rlp.encode(allocator, auth.chain_id);
         defer allocator.free(chain_id_enc);
         try auth_fields.appendSlice(chain_id_enc);
-        const addr_enc = try rlp.encode_bytes(allocator, &auth.address.bytes);
+        const addr_enc = try rlp.encodeBytes(allocator, &auth.address.bytes);
         defer allocator.free(addr_enc);
         try auth_fields.appendSlice(addr_enc);
         const nonce_enc = try rlp.encode(allocator, auth.nonce);
@@ -160,10 +160,11 @@ pub fn encodeAuthorizationList(allocator: Allocator, auth_list: AuthorizationLis
         const v_enc = try rlp.encode(allocator, auth.v);
         defer allocator.free(v_enc);
         try auth_fields.appendSlice(v_enc);
-        const r_enc = try rlp.encode_bytes(allocator, &auth.r);
+        // r and s are RLP integers: minimal big-endian, no leading zero bytes.
+        const r_enc = try rlp.encode(allocator, std.mem.readInt(u256, &auth.r, .big));
         defer allocator.free(r_enc);
         try auth_fields.appendSlice(r_enc);
-        const s_enc = try rlp.encode_bytes(allocator, &auth.s);
+        const s_enc = try rlp.encode(allocator, std.mem.readInt(u256, &auth.s, .big));
         defer allocator.free(s_enc);
         try auth_fields.appendSlice(s_enc);
 
@@ -171,7 +172,7 @@ pub fn encodeAuthorizationList(allocator: Allocator, auth_list: AuthorizationLis
         if (auth_fields.items.len <= 55) {
             try list.append(@as(u8, @intCast(0xc0 + auth_fields.items.len)));
         } else {
-            const len_bytes = try rlp.encode_length(allocator, auth_fields.items.len);
+            const len_bytes = try rlp.encodeLength(allocator, auth_fields.items.len);
             defer allocator.free(len_bytes);
             try list.append(@as(u8, @intCast(0xf7 + len_bytes.len)));
             try list.appendSlice(len_bytes);
@@ -181,10 +182,12 @@ pub fn encodeAuthorizationList(allocator: Allocator, auth_list: AuthorizationLis
 
     // Wrap entire list
     var result = std.array_list.AlignedManaged(u8, null).init(allocator);
+    defer result.deinit();
     if (list.items.len <= 55) {
         try result.append(@as(u8, @intCast(0xc0 + list.items.len)));
     } else {
-        const len_bytes = rlp.encode_length(list.items.len);
+        const len_bytes = try rlp.encodeLength(allocator, list.items.len);
+        defer allocator.free(len_bytes);
         try result.append(@as(u8, @intCast(0xf7 + len_bytes.len)));
         try result.appendSlice(len_bytes);
     }
@@ -200,7 +203,7 @@ pub const DelegationDesignation = struct {
 
     pub fn isActive(self: *const DelegationDesignation) bool {
         // Delegation is active if delegated address is not zero
-        return !self.delegated_address.is_zero();
+        return !self.delegated_address.isZero();
     }
 
     pub fn revoke(self: *DelegationDesignation) void {
@@ -250,7 +253,7 @@ test "authorization creation and recovery" {
 
     const private_key: crypto.PrivateKey = @as([32]u8, @splat(0x42));
 
-    const signer_address = try crypto.getAddress(allocator, private_key);
+    const signer_address = (try crypto.unaudited_getPublicKey(private_key)).toAddress();
     const target_address = try Address.fromHex("0x1111111111111111111111111111111111111111");
 
     const auth = try createAuthorization(
@@ -321,6 +324,43 @@ test "authorization list encoding" {
     // Should produce valid RLP
     try testing.expect(encoded.len > 0);
     try testing.expect(encoded[0] >= 0xc0); // RLP list prefix
+}
+
+test "encodeAuthorizationList encodes r and s as minimal RLP integers" {
+    const allocator = testing.allocator;
+
+    var r: [32]u8 = @splat(0x11);
+    r[0] = 0;
+    var s: [32]u8 = @splat(0);
+    s[31] = 1;
+    const auth = Authorization{
+        .chain_id = 1,
+        .address = .{ .bytes = @splat(0x11) },
+        .nonce = 0,
+        .v = 0,
+        .r = r,
+        .s = s,
+    };
+    const auth_list = [_]Authorization{auth};
+
+    const encoded = try encodeAuthorizationList(allocator, &auth_list);
+    defer allocator.free(encoded);
+
+    // [[0x01, 0x94 ++ 20*0x11, 0x80, 0x80, 0x9f ++ 31*0x11, 0x01]]
+    var expected: [61]u8 = undefined;
+    expected[0] = 0xf8;
+    expected[1] = 59;
+    expected[2] = 0xf8;
+    expected[3] = 57;
+    expected[4] = 0x01;
+    expected[5] = 0x94;
+    @memset(expected[6..26], 0x11);
+    expected[26] = 0x80;
+    expected[27] = 0x80;
+    expected[28] = 0x9f;
+    @memset(expected[29..60], 0x11);
+    expected[60] = 0x01;
+    try testing.expectEqualSlices(u8, &expected, encoded);
 }
 
 test "delegation designation" {
@@ -401,7 +441,7 @@ test "authority() recovers correct signer address" {
     const allocator = testing.allocator;
 
     const private_key: crypto.PrivateKey = @as([32]u8, @splat(0x42));
-    const expected_signer = try crypto.getAddress(allocator, private_key);
+    const expected_signer = (try crypto.unaudited_getPublicKey(private_key)).toAddress();
     const target = try Address.fromHex("0x1111111111111111111111111111111111111111");
 
     const auth = try createAuthorization(
@@ -420,7 +460,7 @@ test "authority() recovers correct signer with different nonces" {
     const allocator = testing.allocator;
 
     const private_key: crypto.PrivateKey = @as([32]u8, @splat(0x99));
-    const expected_signer = try crypto.getAddress(allocator, private_key);
+    const expected_signer = (try crypto.unaudited_getPublicKey(private_key)).toAddress();
     const target = try Address.fromHex("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
 
     const nonces = [_]u64{ 0, 1, 100, 999999, std.math.maxInt(u64) };

@@ -455,9 +455,12 @@ test "MerkleTrie - proof after updates" {
     const new_valid = try trie_instance.verify_proof(new_root, &[_]u8{ 0x12, 0x34 }, new_proof, "new_value");
     try testing.expect(new_valid);
 
-    // Old proof should NOT verify against new root
-    const cross_invalid = try trie_instance.verify_proof(new_root, &[_]u8{ 0x12, 0x34 }, old_proof, "old_value");
-    try testing.expect(!cross_invalid);
+    // Old proof must not verify against the new root: its root node does not hash
+    // to new_root, which ProofNodes.verify reports as InvalidRootHash.
+    try testing.expectError(
+        proof_module.ProofError.InvalidRootHash,
+        trie_instance.verify_proof(new_root, &[_]u8{ 0x12, 0x34 }, old_proof, "old_value"),
+    );
 }
 
 test "MerkleTrie - deep trie proof" {

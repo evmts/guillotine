@@ -148,4 +148,7 @@ test {
     _ = @import("handler_bounds_regression.zig");
     _ = @import("fork_rules.zig");
     _ = @import("build_config.zig");
+    _ = @import("r1a_core_regressions_test.zig");
+    _ = @import("r1_integration_regressions.zig");
+    _ = @import("state_root.zig");
 }

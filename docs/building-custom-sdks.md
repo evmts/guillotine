@@ -317,13 +317,14 @@ error. `evm_bytecode_create` sets the last error on failure, and
 
 ## Chain id
 
-`BlockInfoFFI.chain_id` is a `uint64_t`. Creation rejects any value wider
-than the EVM's CHAINID type (`TransactionContext.chain_id` in
-`src/block/transaction_context.zig`) instead of truncating it. The call
-returns NULL and the last error reads
-`chain_id <n> exceeds the supported maximum <max>`. Pass the full 64-bit value
-through your binding and surface this error; do not hard-code a cap.
-`safety_test.c` checks 1, 8453, 84532, and 11155111.
+`BlockInfoFFI.chain_id` is a `uint64_t`, and the EVM's CHAINID type
+(`TransactionContext.chain_id` in `src/block/transaction_context.zig`) is also
+`u64`, so every value is accepted and CHAINID returns it unchanged. Pass the
+full 64-bit value through your binding; do not hard-code a cap. A build that
+narrows `TransactionContext.chain_id` rejects wider values instead of
+truncating them: creation returns NULL and the last error reads
+`chain_id <n> exceeds the supported maximum <max>`. `safety_test.c` requires
+an exact CHAINID round-trip for 1, 8453, 84532, 11155111, and `UINT64_MAX`.
 
 ## Binding templates
 

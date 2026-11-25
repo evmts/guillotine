@@ -24,8 +24,9 @@
   "src/core/verified_ops.zig::signextendRef": "270b4d09a7792729",
   "src/core/verified_ops.zig::smodFromUnsignedRem": "7390fef8ea829fd3",
   "src/instructions/handlers_advanced_synthetic.zig::iszero_jumpi": "5395e52c48816136",
-  "src/instructions/handlers_advanced_synthetic.zig::push_add_dup1": "da49ad4f6d18f950",
-  "src/instructions/handlers_advanced_synthetic.zig::swap1_dup2_add": "98c8e8e94f3a0319",
+  "src/instructions/handlers_advanced_synthetic.zig::push_add_dup1": "560bc94100e4a63c",
+  "src/instructions/handlers_advanced_synthetic.zig::push_add_dup1_inline": "88e20a26db1c2330",
+  "src/instructions/handlers_advanced_synthetic.zig::push_add_dup1_pointer": "c8255e408a28483b",
   "src/instructions/handlers_arithmetic_synthetic.zig::push_add_inline": "35df3f680eb193f7",
   "src/instructions/handlers_arithmetic_synthetic.zig::push_add_pointer": "721ffac5b85ee06e",
   "src/instructions/handlers_arithmetic_synthetic.zig::push_mul_inline": "f973e828c639fba5",
@@ -37,6 +38,5 @@
   "src/instructions/handlers_bitwise_synthetic.zig::push_or_inline": "b625ec0f4cc60a50",
   "src/instructions/handlers_bitwise_synthetic.zig::push_or_pointer": "c8ed0c0f3f5958d6",
   "src/instructions/handlers_bitwise_synthetic.zig::push_xor_inline": "103b84a3c7fcefc2",
-  "src/instructions/handlers_bitwise_synthetic.zig::push_xor_pointer": "fde939fd8a9bbcc9",
-  "src/stack/stack.zig::dup_n_unsafe": "04c8969310a92479"
+  "src/instructions/handlers_bitwise_synthetic.zig::push_xor_pointer": "fde939fd8a9bbcc9"
 }

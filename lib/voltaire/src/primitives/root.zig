@@ -157,3 +157,7 @@ pub const EMPTY_TRIE_ROOT = State.EMPTY_TRIE_ROOT;
 // Enables imports via `@import("root").crypto` within this package
 pub const crypto = @import("crypto");
 
+
+test {
+    _ = @import("authorization.zig");
+}

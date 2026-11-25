@@ -607,7 +607,10 @@ pub fn Evm(config: EvmConfig) type {
         fn callImpl(self: *Self, params: CallParams) CallResult {
             self.tracer.assert(self.depth == 0, "call() should only be called at top level");
             // The arena reports growth to the tracer; `self` is at its final address here.
+            // Clear the pointer on return so a moved or copied Evm never holds a
+            // pointer into its old location between calls.
             self.call_arena.tracer = @as(*anyopaque, @ptrCast(&self.tracer));
+            defer self.call_arena.tracer = null;
 
             // Validate the gas budget before anything narrows it. Frame gas is a
             // `Frame.GasType` and the tracer takes an `i64`; a budget neither can hold

@@ -8,19 +8,25 @@
 ;; Method  : assert hypotheses and NOT(claim). Expected `unsat`: no
 ;;           counterexample exists over the whole input space.
 ;; Modeled Zig source:
-;; --- src/instructions/handlers_advanced_synthetic.zig:393 (push_add_dup1)
-;;   |         pub fn push_add_dup1(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
-;;   |             N.before(self, .PUSH_ADD_DUP1, cursor, sp, gas);
-;;   |             var s = N.StackView{ .sp = sp };
-;;   |             const push_item = cursor[1];
-;;   |             const push_value: WordType = if (push_item == .push_inline)
-;;   |                 push_item.push_inline.value
-;;   |             else
-;;   |                 push_item.push_pointer.value_ptr.*;
+;; --- src/instructions/handlers_advanced_synthetic.zig:52 (push_add_dup1)
+;;   |         inline fn push_add_dup1(s: *N.StackView, push_value: WordType) void {
 ;;   |             const result = s.peek_unsafe() +% push_value;
 ;;   |             s.set_top_unsafe(result);
 ;;   |             s.push_unsafe(result);
-;;   |             return N.next(self, .PUSH_ADD_DUP1, cursor, s.sp, gas);
+;;   |         }
+;; --- src/instructions/handlers_advanced_synthetic.zig:34 (push_add_dup1_inline)
+;;   |         pub fn push_add_dup1_inline(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+;;   |             N.before(self, .PUSH_ADD_DUP1_INLINE, cursor, sp, gas);
+;;   |             var s = N.StackView{ .sp = sp };
+;;   |             push_add_dup1(&s, cursor[1].push_inline.value);
+;;   |             return N.next(self, .PUSH_ADD_DUP1_INLINE, cursor, s.sp, gas);
+;;   |         }
+;; --- src/instructions/handlers_advanced_synthetic.zig:42 (push_add_dup1_pointer)
+;;   |         pub fn push_add_dup1_pointer(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+;;   |             N.before(self, .PUSH_ADD_DUP1_POINTER, cursor, sp, gas);
+;;   |             var s = N.StackView{ .sp = sp };
+;;   |             push_add_dup1(&s, cursor[1].push_pointer.value_ptr.*);
+;;   |             return N.next(self, .PUSH_ADD_DUP1_POINTER, cursor, s.sp, gas);
 ;;   |         }
 ;; ==========================================================================
 (set-info :smt-lib-version 2.6)

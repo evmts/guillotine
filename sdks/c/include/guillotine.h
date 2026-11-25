@@ -167,8 +167,8 @@ typedef struct COpcodeInfo {
 void guillotine_init(void);
 void guillotine_cleanup(void);
 /* config is GUILLOTINE_MAINNET, GUILLOTINE_MAINNET_WITH_TRACER, or
- * GUILLOTINE_TEST_MODE; any other byte returns NULL. A chain_id wider than the
- * EVM's CHAINID type returns NULL instead of being truncated. */
+ * GUILLOTINE_TEST_MODE; any other byte returns NULL. chain_id is u64 end to
+ * end: every value is accepted and CHAINID returns it unchanged. */
 EvmHandle * guillotine_evm_create_with_config(const BlockInfoFFI * block_info_ptr, EvmConfiguration config);
 EvmHandle * guillotine_evm_create(const BlockInfoFFI * block_info_ptr);
 EvmHandle * guillotine_evm_create_mainnet(const BlockInfoFFI * block_info_ptr);

@@ -233,17 +233,21 @@ pub fn fuzzEip7702AuthorizationProcessor(_: void, input: []const u8) !void {
     // Verify EXACT specification outcome!
     if (auth_chain_id != 0 and auth_chain_id != active_chain_id) {
         try std.testing.expectError(evm.AuthorizationError.InvalidChainId, res);
-    } else if (!acct_exists) {
-        try std.testing.expectError(evm.AuthorizationError.AccountNotFound, res);
-    } else if (acct_has_code) {
+    } else if (acct_exists and acct_has_code) {
         try std.testing.expectError(evm.AuthorizationError.NotEOA, res);
-    } else if (auth_nonce != acct_nonce) {
-        try std.testing.expectError(evm.AuthorizationError.NonceMismatch, res);
     } else {
-        try res;
-        // Must have incremented nonce by 1 and set delegation!
-        const updated = (try db.get_account(authority.bytes)).?;
-        try std.testing.expectEqual(acct_nonce + 1, updated.nonce);
+        // EIP-7702: a missing authority is an empty account (nonce 0, no code).
+        const expected_nonce: u64 = if (acct_exists) acct_nonce else 0;
+        if (auth_nonce != expected_nonce) {
+            try std.testing.expectError(evm.AuthorizationError.NonceMismatch, res);
+        } else {
+            try res;
+            // Nonce incremented by 1 and delegation set (cleared for a zero target).
+            const updated = (try db.get_account(authority.bytes)).?;
+            try std.testing.expectEqual(expected_nonce + 1, updated.nonce);
+            const expected_delegate: ?primitives.Address = if (target.isZero()) null else target;
+            try std.testing.expectEqual(expected_delegate, updated.delegated_address);
+        }
     }
 }
 

@@ -940,7 +940,7 @@ def _fused_push_add_dup1(s: ZigStack, v: str) -> None:
 
 
 fusion_theorem(
-    "fusion_push_add_dup1_equiv", "PUSH v; ADD; DUP1", 1, _evm_push_add_dup1, _fused_push_add_dup1, src(ADV_SYN, "push_add_dup1")
+    "fusion_push_add_dup1_equiv", "PUSH v; ADD; DUP1", 1, _evm_push_add_dup1, _fused_push_add_dup1, src(ADV_SYN, "push_add_dup1", "push_add_dup1_inline", "push_add_dup1_pointer")
 )
 
 
