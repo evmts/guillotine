@@ -14,7 +14,7 @@ has a program counter.
 
 ## The traditional shape
 
-A conventional interpreter — including Guillotine's own `MinimalEvm` reference —
+A conventional interpreter, including Guillotine's own `MinimalEvm` reference,
 looks like this:
 
 ```zig
@@ -39,35 +39,52 @@ memory read, a bounds check, a gas check, and stack-depth validation.
 
 ```zig
 // src/frame/frame.zig
-pub const OpcodeHandler = *const fn (frame: *Self, cursor: [*]const Item) Error!noreturn;
+pub const OpcodeHandler = *const fn (frame: *Self, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode;
 ```
 
-Note the return type: `Error!noreturn`. A handler never returns. It tail-calls the
-next handler, so the whole execution of a contract is one stack frame deep.
+Every handler has this signature (`src/preprocessor/handler_abi.zig`). It ends by
+tail-calling the next handler, so a contract's whole execution is one native
+stack frame deep. On LLVM x86_64 and aarch64, `handler_cc` is `preserve_none`:
+the four arguments stay pinned in registers across the handler chain. That
+calling convention cannot return an error union or take a `u256` by value, so a
+handler returns an `ExitCode` and the caller maps it back to an error with
+`errorFromExit`. Other targets use the C calling convention.
+
+`sp` and `gas` are the live stack pointer and gas counter. `frame.stack.stack_ptr`
+and `frame.gas_remaining` are stale while handlers run.
 
 ```zig
-pub fn add(self: *Self, cursor: [*]const Dispatch.Item) Error!noreturn {
-    self.beforeInstruction(.ADD, cursor);
-    self.getTracer().assert(self.stack.size() >= 2, "ADD requires 2 stack items");
+// src/instructions/handlers_arithmetic.zig
+pub fn add(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+    var s = N.StackView{ .sp = sp };
+    N.before(self, .ADD, cursor, s.sp, gas);
 
-    const b = self.stack.pop_unsafe();   // top of stack
-    const a = self.stack.peek_unsafe();  // second item
-    self.stack.set_top_unsafe(a +% b);
+    s.binary_op_unsafe(struct {
+        fn op(top: WordType, second: WordType) WordType {
+            return top +% second;
+        }
+    }.op);
 
-    const op_data = dispatch.getOpData(.ADD);
-    self.afterInstruction(.ADD, op_data.next_handler, op_data.next_cursor.cursor);
-    return @call(Self.getTailCallModifier(), op_data.next_handler, .{ self, op_data.next_cursor.cursor });
+    return N.next(self, .ADD, cursor, s.sp, gas);
 }
 ```
 
+`N` is `handler_abi.Native(FrameType)`. In Debug and ReleaseSafe builds, and
+whenever the tracer is compiled in, `N.before` writes `sp` and `gas` back to the
+frame and calls `frame.beforeInstruction`; otherwise it compiles to nothing.
+`N.next` looks up the next handler and cursor, calls `afterInstruction` under
+the same condition, and tail-calls the next handler. Handlers dominated by host
+work (storage, calls, logs) are written as step functions and adapted with
+`handler_abi.wrap`.
+
 ## The schedule
 
-A schedule is a flat array of `Item`, a tagged union of either a handler pointer
-or metadata for the handler that precedes it:
+A schedule is a flat array of `Item`: a handler pointer, or one word of
+metadata for the handler before it.
 
 ```zig
 // src/preprocessor/dispatch.zig
-pub const Item = union(enum) {
+pub const Item = if (item_tagged) union(enum) {
     opcode_handler: OpcodeHandler,
     jump_dest: Metadata.JumpDestMetadata,
     push_inline: Metadata.PushInlineMetadata,
@@ -75,8 +92,12 @@ pub const Item = union(enum) {
     pc: Metadata.PcMetadata,
     jump_static: Metadata.JumpStaticMetadata,
     first_block_gas: Metadata.FirstBlockMetadata,
-};
+} else extern union { ... same fields ... };
 ```
+
+`item_tagged` is true in Debug and ReleaseSafe builds and whenever the tracer is
+compiled in, so the schedule can be validated item by item. Every other build
+uses the untagged `extern union`, and a comptime check holds it to 8 bytes.
 
 For the bytecode `PUSH1 0x01, PUSH1 0x02, ADD, STOP`:
 
@@ -94,25 +115,28 @@ Index  Item                Payload
 [4]    push_inline         { value: 2 }
 [5]    opcode_handler      → add handler
 [6]    opcode_handler      → stop handler
+[7]    opcode_handler      → stop handler (implicit STOP at end of code)
+[8]    opcode_handler      → INVALID_JUMP_TARGET handler
+[9]    opcode_handler      → stop handler
+[10]   opcode_handler      → stop handler
 ```
 
-### Inline vs pointer pushes
+The builder always appends items 7 to 10: an implicit `STOP` for code that runs
+off its end, the target for static jumps to a non-`JUMPDEST`, and two `STOP`s
+that end every schedule. The example assumes `EvmConfig.enable_fusion = false`.
 
-A `PUSH` of 8 bytes or fewer whose value fits in a `u64` is stored **inline** in
-the schedule as `push_inline`. Anything larger is written into the schedule's
-arena and referenced by `push_pointer`. Either way the push handler never reads
-the original bytecode:
+### Push values
 
-```zig
-if (data.size <= 8 and data.value <= std.math.maxInt(u64)) {
-    const inline_value: u64 = @intCast(data.value);
-    try schedule_items.append(schedule_allocator, .{ .push_inline = .{ .value = inline_value } });
-} else {
-    const value_ptr = try arena_allocator.create(FrameType.WordType);
-    value_ptr.* = data.value;
-    try schedule_items.append(schedule_allocator, .{ .push_pointer = .{ .value_ptr = value_ptr } });
-}
-```
+The schedule stores a `PUSH1`–`PUSH32` value as one to four inline 64-bit limbs
+after the handler, least significant first: one for `PUSH1`–`PUSH8`, two for
+`PUSH9`–`PUSH16`, three for `PUSH17`–`PUSH24`, four for `PUSH25`–`PUSH32`
+(`pushLimbCount` and `processPushOpcode` in `src/preprocessor/dispatch.zig`).
+The push handler rebuilds the word from the schedule and never reads the
+original bytecode.
+
+Fused handlers take one operand item instead. A value that fits in a `u64` is a
+`push_inline` item; a wider value lives in the schedule arena and is reached
+through a `push_pointer` item. See [Synthetic opcodes](/concepts/synthetic-opcodes).
 
 ## Cursor ≠ PC
 
@@ -132,7 +156,7 @@ Consequences you must internalise:
 2. A single synthetic item can stand for several bytecode operations, so schedule
    indices drift further from PCs as you go.
 3. Jump targets stored in `jump_static` are **schedule indices**, resolved at
-   analysis time — a static `JUMP` costs no lookup at runtime.
+   analysis time, so a static `JUMP` costs no lookup at runtime.
 4. `PC` is still implementable because analysis stores the true bytecode offset in
    a `pc` metadata item for exactly the opcodes that need it.
 
@@ -169,10 +193,11 @@ analysed once. Analysis is the expensive part; execution is cheap.
 
 ## What this means for you
 
-- **Writing a handler?** It must call `self.beforeInstruction(opcode, cursor)`
-  first, or the differential tracer desynchronises and tests fail with confusing
+- **Writing a handler?** It must call `N.before(self, opcode, cursor, sp, gas)`
+  first and end with `N.next(...)`, or the differential tracer desynchronises and tests fail with confusing
   state mismatches. See [Tracing](/guides/tracing).
 - **Debugging?** Print the schedule, not the bytecode:
-  `bytecode.pretty_print(allocator)`.
+  `@import("evm").dispatch_pretty_print.pretty_print(...)` or the C export
+  `evm_dispatch_pretty_print`.
 - **Benchmarking?** Make sure the schedule is warm. A cold first call includes
   analysis.

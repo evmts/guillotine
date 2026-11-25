@@ -1,6 +1,6 @@
 ---
 title: Synthetic opcodes
-description: Opcode fusion — collapsing common bytecode patterns into single handlers.
+description: Opcode fusion: collapsing common bytecode patterns into single handlers.
 ---
 
 # Synthetic opcodes
@@ -14,20 +14,20 @@ Original:   PUSH1 0x20, MSTORE      2 handlers + 2 metadata items
 Fused:      PUSH_MSTORE_INLINE      1 handler  + 1 metadata item
 ```
 
-Gas is unchanged — the fused handler charges what the constituent opcodes would
+Gas is unchanged. The fused handler charges what the constituent opcodes would
 have charged, and the basic-block gas header already accounts for them together.
 
 ## The set
 
 Defined in `src/opcodes/opcode_synthetic.zig` as an `enum(u8)` occupying the
-`0xA5`–`0xCD` range (unused by real EVM opcodes). Verified against the source:
+`0xA5`–`0xCF` range (unused by real EVM opcodes). Verified against the source:
 
 ### PUSH + arithmetic
 
 | Synthetic | Value | Fuses |
 | --- | --- | --- |
-| `PUSH_ADD_INLINE` | `0xA5` | `PUSH` (≤8 bytes) + `ADD` |
-| `PUSH_ADD_POINTER` | `0xA6` | `PUSH` (>8 bytes) + `ADD` |
+| `PUSH_ADD_INLINE` | `0xA5` | `PUSH` (value fits in 64 bits) + `ADD` |
+| `PUSH_ADD_POINTER` | `0xA6` | `PUSH` (value wider than 64 bits) + `ADD` |
 | `PUSH_MUL_INLINE` | `0xA7` | `PUSH` + `MUL` |
 | `PUSH_MUL_POINTER` | `0xA8` | `PUSH` + `MUL` |
 | `PUSH_DIV_INLINE` | `0xA9` | `PUSH` + `DIV` |
@@ -58,61 +58,59 @@ Defined in `src/opcodes/opcode_synthetic.zig` as an `enum(u8)` occupying the
 
 | Synthetic | Value | Fuses |
 | --- | --- | --- |
-| `JUMP_TO_STATIC_LOCATION` | `0xBD` | Pre-resolved `JUMP` — no jump-table search |
-| `JUMPI_TO_STATIC_LOCATION` | `0xBE` | Pre-resolved `JUMPI` |
-| `BACKWARD_LOOP_JUMPI` | `0xCD` | `PUSH`+`JUMPI` (exit) … `PUSH`+`JUMP` (loop back) |
+| `JUMP_TO_STATIC_LOCATION` | `0xBD` | `PUSH` + `JUMP` with the target resolved at analysis time |
+| `JUMPI_TO_STATIC_LOCATION` | `0xBE` | `PUSH` + `JUMPI` with the target resolved at analysis time |
 
-### Repetition
-
-| Synthetic | Value | Fuses |
-| --- | --- | --- |
-| `MULTI_PUSH_2` | `0xBF` | Two consecutive `PUSH`es |
-| `MULTI_PUSH_3` | `0xC0` | Three consecutive `PUSH`es |
-| `MULTI_POP_2` | `0xC1` | Two consecutive `POP`s |
-| `MULTI_POP_3` | `0xC2` | Three consecutive `POP`s |
-
-### Solidity idioms
+### Three-opcode patterns
 
 | Synthetic | Value | Fuses |
 | --- | --- | --- |
 | `ISZERO_JUMPI` | `0xC3` | `ISZERO` + `PUSH` + `JUMPI` |
-| `DUP2_MSTORE_PUSH` | `0xC4` | `DUP2` + `MSTORE` + `PUSH` |
-| `DUP3_ADD_MSTORE` | `0xC5` | `DUP3` + `ADD` + `MSTORE` |
-| `SWAP1_DUP2_ADD` | `0xC6` | `SWAP1` + `DUP2` + `ADD` |
-| `PUSH_DUP3_ADD` | `0xC7` | `PUSH` + `DUP3` + `ADD` |
-| `FUNCTION_DISPATCH` | `0xC8` | `PUSH4` + `EQ` + `PUSH` + `JUMPI` — selector routing |
-| `CALLVALUE_CHECK` | `0xC9` | `CALLVALUE` + `DUP1` + `ISZERO` — the non-payable guard |
-| `PUSH0_REVERT` | `0xCA` | `PUSH0` + `PUSH0` + `REVERT` |
-| `PUSH_ADD_DUP1` | `0xCB` | `PUSH` + `ADD` + `DUP1` — loop increment |
-| `MLOAD_SWAP1_DUP2` | `0xCC` | `MLOAD` + `SWAP1` + `DUP2` |
+| `PUSH_ADD_DUP1_INLINE` | `0xCB` | `PUSH` + `ADD` + `DUP1`, push value fits in 64 bits |
+| `PUSH_ADD_DUP1_POINTER` | `0xCC` | `PUSH` + `ADD` + `DUP1`, push value wider than 64 bits |
 
-`FUNCTION_DISPATCH` and `CALLVALUE_CHECK` are the highest-value entries in
-practice: every external function on every Solidity contract begins with them.
+### Block markers
+
+| Synthetic | Value | Purpose |
+| --- | --- | --- |
+| `BLOCK_BEGIN` | `0xCE` | Basic block entered by falling through a non-taken `JUMPI`; charges the block's gas |
+| `INVALID_JUMP_TARGET` | `0xCF` | Target of a static jump whose destination is not a `JUMPDEST` |
+
+The analyzer marks a fusion candidate only at `PUSH` followed by `ADD`, `MUL`,
+`SUB`, `DIV`, `AND`, `OR`, `XOR`, `MLOAD`, `MSTORE`, `MSTORE8`, `JUMP` or
+`JUMPI`, and at `ISZERO` + `PUSH` + `JUMPI`. Thirteen older synthetic opcodes
+that no candidate could reach (`MULTI_PUSH_2/3`, `MULTI_POP_2/3`,
+`DUP2_MSTORE_PUSH`, `DUP3_ADD_MSTORE`, `SWAP1_DUP2_ADD`, `PUSH_DUP3_ADD`,
+`FUNCTION_DISPATCH`, `CALLVALUE_CHECK`, `PUSH0_REVERT`, `MLOAD_SWAP1_DUP2`,
+`BACKWARD_LOOP_JUMPI`) were deleted, so their values are unused.
 
 ## Inline vs pointer
 
-The `_INLINE` / `_POINTER` split mirrors the schedule's push representation. A
-push value of 8 bytes or fewer that fits in a `u64` is embedded in the metadata
-item; larger values live in the schedule arena and are reached through a pointer.
-Two variants exist so the inline path never pays for an indirection.
+A fused handler's operand is one schedule item. When the pushed value fits in a
+`u64`, the item is `push_inline` and holds the value. A wider value lives in the
+schedule arena and the item is `push_pointer` (`handleFusionOperation` in
+`src/preprocessor/dispatch.zig`). Two variants exist so the common path never
+pays for an indirection.
+
+A plain `PUSH1`–`PUSH32` never uses a pointer: the schedule stores its value as
+one to four inline 64-bit limbs, least significant first (`processPushOpcode`).
 
 ## Turning fusion off
 
-Fusion is on by default. It is a comptime flag, so you can compare:
+Fusion is on by default. It is the comptime `EvmConfig.enable_fusion` field, so
+you can compare:
 
 ```zig
 const Fused   = @import("evm").Evm(.{ .enable_fusion = true });
 const Unfused = @import("evm").Evm(.{ .enable_fusion = false });
 ```
 
-Or from the build:
-
-```bash
-zig build -Devm-enable-fusion=false
-```
+`-Devm-enable-fusion=false` sets the same field for the build-configured EVM
+(`DefaultEvm` in `src/root.zig`) and for the `zig build state-tests` runner. CI
+runs the official state tests both ways.
 
 Turning it off is the first thing to try when a contract behaves differently from
-another EVM. If the difference disappears, you have found a fusion bug — please
+another EVM. If the difference disappears, you have found a fusion bug. Please
 file it.
 
 ## Fusion and the differential tracer
@@ -126,15 +124,15 @@ machine the right number of times:
 | --- | --- |
 | A real opcode | 1 |
 | `PUSH_MSTORE_INLINE` | 2 (`PUSH1`, `MSTORE`) |
-| `FUNCTION_DISPATCH` | 4 (`PUSH4`, `EQ`, `PUSH`, `JUMPI`) |
+| `ISZERO_JUMPI` | 3 (`ISZERO`, `PUSH`, `JUMPI`) |
 
-That mapping lives in `executeMinimalEvmForOpcode()` in `src/tracer/tracer.zig`.
+That mapping lives in `getMaxStepsForOpcode()`, called by
+`executeMinimalEvmForOpcode()` in `src/tracer/minimal_evm_sync.zig`.
 A "divergence" that turns out to be an arity mismatch there is a tracer bug, not
-an EVM bug — check the arity before you suspect the handler.
+an EVM bug. Check the arity before you suspect the handler.
 
 ## Testing fusion
 
 ```bash
 zig build test-fusions     # unit + dispatch + differential fusion tests
-zig build test-synthetic   # synthetic opcode handler tests
 ```

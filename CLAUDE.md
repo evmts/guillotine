@@ -17,7 +17,7 @@ Every line of code must be correct. Zero error tolerance.
 - Sensitive data detected (API keys/passwords/tokens): abort, explain, request sanitized prompt
 - Memory safety: plan ownership/deallocation for every allocation
 - Every change must be tested and verified
-- Use SafetyCounter for infinite loop prevention (300M instruction limit)
+- Use SafetyCounter (`src/internal/safety_counter.zig`) for infinite loop prevention: `EvmConfig.loop_quota` caps analysis loops at 1M iterations in Debug and ReleaseSafe. Gas bounds execution; the tracer's instruction counter only logs, it never stops a run
 - **CRITICAL: Crashes are SEVERE SECURITY BUGS** - Any crash (e.g., from `std.debug.assert`) indicates memory unsafety or missing validation. The EVM must ALWAYS return errors gracefully, never crash. Before fixing the bug that triggered the crash, FIRST fix the validation/error handling that allowed the crash to occur.
 
 ### Build Verification
@@ -30,7 +30,7 @@ Follow TDD
 ### Debugging
 
 - Bug not obvious = improve visibility first
-- Use differential tests with revm in test/differential
+- Use the MinimalEvm differential tests in `test/differential` (`zig build test-integration` runs them)
 
 ### Zero Tolerance
 
@@ -155,11 +155,11 @@ Use `zig build test` not `zig test`. Common error: "primitives" package requires
 **Core**: evm.zig, frame.zig, stack.zig, memory.zig, dispatch.zig
 **Handlers**: handlers_*.zig (arithmetic, bitwise, comparison, context, jump, keccak, log, memory, stack, storage, system)
 **Synthetic**: handlers_*_synthetic.zig (fused ops)
-**State**: database.zig, journal.zig, access_list.zig, memory_database.zig
-**External**: precompiles.zig, call_params.zig, call_result.zig
+**State**: database.zig, journal.zig, access_list.zig, memory_database.zig (`src/storage/`)
+**External**: call_params.zig, call_result.zig (`src/frame/`); precompiles live in the vendored `lib/voltaire/src/precompiles/` and are imported as the `precompiles` module
 **Bytecode**: bytecode.zig, bytecode_analyze.zig, bytecode_stats.zig
 **Infrastructure**: tracer.zig, hardfork.zig, eips.zig
-**Tracer**: MinimalEvm.zig (65KB standalone), pc_tracker.zig, MinimalEvm_c.zig (WASM FFI)
+**Tracer**: minimal_evm.zig (MinimalEvm, the reference interpreter), pc_tracker.zig, minimal_evm_sync.zig (Frame/MinimalEvm sync)
 
 ### Import Rules
 
@@ -347,16 +347,10 @@ Handlers organized by type:
 - Cursor-aware dispatch sync
 - Fixed MinimalEvm stack semantics (LIFO)
 
-### WASM Integration
-- C FFI wrapper (MinimalEvm_c.zig)
-- Opaque handle pattern
-- Complete EVM lifecycle in WASM
-
 ### Dispatch Optimization
 - Static jump resolution
 - Dispatch cache
 - Fusion detection
-- 300M instruction safety limit
 
 ### Memory Management
 - Checkpoint system
@@ -433,8 +427,8 @@ Detailed documentation is available in `docs/`:
 
 ## References
 
-- Zig docs: https://ziglang.org/documentation/0.17.1/
-- revm/: Reference Rust implementation
+- Zig docs: https://ziglang.org/documentation/0.17.1/ (CI uses Zig 0.17.1; `build.zig.zon` requires at least 0.17.1)
+- `mini/`: guillotine-mini, the reference interpreter used for differential tests
 - Yellow Paper: Ethereum spec
 - EIPs: Ethereum Improvement Proposals
 
@@ -461,8 +455,8 @@ Required for: creating, commenting, closing, updating issues and all GitHub API 
 ## Build Commands
 
 Toolchain: Zig 0.17.1 (`zig version`), Rust/Cargo for `lib/voltaire` and
-`lib/ark`. Build the Voltaire crypto archive first with
-`node .smithers/build-crypto.mjs` on a fresh clone.
+`lib/ark`. `zig build` compiles Voltaire's Rust crypto archive itself
+(`cargo build --release --locked` into the Zig cache); no separate step.
 
 Usage: `zig build [steps] [options]` (`zig build -l` lists every step)
 
@@ -493,7 +487,9 @@ Options:
   -Dtest-filter=[string]       Filter tests by pattern (e.g., -Dtest-filter='ADD opcode')
   -Devm-hardfork=[string]      Enum tag (FRONTIER .. OSAKA, AMSTERDAM) or EEST name (Cancun); default OSAKA.
                                Invalid names are a compile error. Selects `DefaultEvm` via `getBuildConfig()`.
-  -Devm-disable-gas=[bool]     Disable gas checks (testing only)
-  -Devm-enable-fusion=[bool]   Enable bytecode fusion (default: true)
+  -Devm-disable-gas=[bool]     Disable gas checks (Debug only; any other -Doptimize is a compile error)
+  -Ddisable-balance-checks=[bool]  Disable balance checks (Debug only, same guard)
+  -Devm-enable-fusion=[bool]   Enable bytecode fusion (default: true); `false` also runs state-tests with fusion off
   -Devm-optimize=[string]      fast, small or safe (default: safe); validated, exported as `optimize_strategy`
   -Denable-tracing=[bool]      Build DefaultEvm with the debug tracer
+  -Dstrip=[bool]               Strip debug info from the FFI shared/static libraries (release.yml sets it)

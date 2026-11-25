@@ -206,7 +206,7 @@ pub fn Handlers(FrameType: type) type {
             try frame.consumeGas(access_cost);
 
             // Get the code from the external address
-            const code = if (evm.host) |h| h.getCode(ext_addr) else evm.code.get(ext_addr) orelse &[_]u8{};
+            const code = if (evm.host) |h| h.getCode(ext_addr) else if (evm.accounts.get(ext_addr)) |account| account.code else &[_]u8{};
             try frame.pushStack(code.len);
             frame.pc += 1;
         }
@@ -245,7 +245,7 @@ pub fn Handlers(FrameType: type) type {
             try frame.consumeGas(access_cost + copy_cost + mem_cost);
 
             // Get the code from the external address
-            const code = if (evm.host) |h| h.getCode(ext_addr) else evm.code.get(ext_addr) orelse &[_]u8{};
+            const code = if (evm.host) |h| h.getCode(ext_addr) else if (evm.accounts.get(ext_addr)) |account| account.code else &[_]u8{};
 
             // Copy code to memory
             var i: u32 = 0;
@@ -335,7 +335,7 @@ pub fn Handlers(FrameType: type) type {
             try frame.consumeGas(access_cost);
 
             // Get the code from the external address
-            const code = if (evm.host) |h| h.getCode(ext_addr) else evm.code.get(ext_addr) orelse &[_]u8{};
+            const code = if (evm.host) |h| h.getCode(ext_addr) else if (evm.accounts.get(ext_addr)) |account| account.code else &[_]u8{};
 
             if (code.len == 0) {
                 // Return 0 for empty accounts (no code)

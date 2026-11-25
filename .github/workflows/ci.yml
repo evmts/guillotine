@@ -22,10 +22,14 @@ jobs:
         run: |
           set -euo pipefail
           failed=0
-          while IFS= read -r file; do
-            if ! zig ast-check "$file"; then failed=1; fi
-          done < <(git ls-files 'src/*.zig' 'test/*.zig' 'bench/*.zig' 'specs/*.zig' 'verify/*.zig' '.smithers/*.zig' 'build.zig')
-          exit "$failed"
+          checked=0
+          while IFS= read -r -d '' file; do
+            checked=$((checked + 1))
+            if ! zig ast-check "$file"; then failed=$((failed + 1)); fi
+          done < <(git ls-files -z -- '*.zig')
+          echo "zig ast-check: $checked tracked files, $failed failed"
+          test "$checked" -gt 0
+          test "$failed" -eq 0
 
   build-test:
     strategy:
@@ -37,6 +41,9 @@ jobs:
     env:
       ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.smithers/cache/tools/zig/global
       ZIG_LOCAL_CACHE_DIR: ${{ github.workspace }}/.smithers/cache/tools/zig/local
+      # One Cargo target directory for `cargo test` and the Rust archives that
+      # build.zig links (lib/bn254.zig, lib/foundry.zig). Voltaire's
+      # libcrypto_wrappers.a is built by `zig build` itself into the Zig cache.
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
     steps:
       - uses: actions/checkout@v4
@@ -46,6 +53,32 @@ jobs:
         uses: goto-bus-stop/setup-zig@v2
         with:
           version: 0.17.1
+      - name: Select a macOS SDK that Zig 0.17.1 can link
+        if: runner.os == 'macOS'
+        shell: bash
+        # Some macOS SDKs list libSystem stubs only for arm64e-macos, which Zig
+        # does not use, so native links fail with "undefined symbol: _abort".
+        # Keep the default Xcode while it links; otherwise use the newest one that does.
+        run: |
+          set -euo pipefail
+          probe="$RUNNER_TEMP/zig-sdk-probe"
+          mkdir -p "$probe"
+          printf 'pub fn main() void {}\n' > "$probe/main.zig"
+          for dev in "$(xcode-select -p)" $(printf "%s\n" /Applications/Xcode_*.app | sort -rV | sed 's|$|/Contents/Developer|'); do
+            # Without an SDK, Zig links against its bundled stubs, which proves nothing.
+            if ! sdk="$(DEVELOPER_DIR="$dev" xcrun --sdk macosx --show-sdk-path 2>/dev/null)"; then
+              echo "Skipping $dev: no macOS SDK"
+              continue
+            fi
+            if DEVELOPER_DIR="$dev" zig build-exe "$probe/main.zig" -femit-bin="$probe/main" > "$probe/log" 2>&1 && "$probe/main"; then
+              echo "Zig links against $sdk"
+              echo "DEVELOPER_DIR=$dev" >> "$GITHUB_ENV"
+              exit 0
+            fi
+            echo "Skipping $dev: $(grep -m1 error: "$probe/log" || tail -n1 "$probe/log")"
+          done
+          echo "::error::No installed Xcode has a macOS SDK that Zig 0.17.1 can link against." >&2
+          exit 1
       - name: Record toolchain and architecture
         id: toolchain
         shell: bash
@@ -73,14 +106,11 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-            .smithers/cache/cargo/voltaire
           key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ steps.toolchain.outputs.rust }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml', '**/*.rs') }}
           restore-keys: |
             ${{ runner.os }}-${{ runner.arch }}-cargo-${{ steps.toolchain.outputs.rust }}-
       - name: Foundry Linux archive regression (#815)
         run: node --test .smithers/tests/foundry-link.test.mjs
-      - name: Build Voltaire Rust crypto archive
-        run: node .smithers/build-crypto.mjs
       - name: Rust workspace tests
         run: cargo test --locked
       - name: Build
@@ -94,6 +124,9 @@ jobs:
       - name: MODEXP arithmetic and gas tests
         if: ${{ !cancelled() }}
         run: zig build test-modexp
+      - name: Precompile tests
+        if: ${{ !cancelled() }}
+        run: zig build test-precompiles
       - name: Layer 2 tests
         if: ${{ !cancelled() }}
         run: zig build test-layer2
@@ -120,6 +153,11 @@ jobs:
           bun test
 
   state-tests:
+    name: state-tests (fusion ${{ matrix.fusion && 'on' || 'off' }})
+    strategy:
+      fail-fast: false
+      matrix:
+        fusion: [true, false]
     runs-on: ubuntu-latest
     timeout-minutes: 180
     env:
@@ -127,6 +165,8 @@ jobs:
       ZIG_LOCAL_CACHE_DIR: ${{ github.workspace }}/.smithers/cache/tools/zig/local
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Every case of the pinned release (Frontier through Osaka) must pass.
+      EEST_EXPECTED_CASES: 66652
     steps:
       - uses: actions/checkout@v4
         with:
@@ -140,16 +180,29 @@ jobs:
         with:
           path: .cache/eest-fixtures
           key: eest-fixtures-${{ hashFiles('scripts/fetch-eest-fixtures.sh') }}
-      - name: Fetch official EEST state fixtures
+      - name: Fetch official EEST state fixtures (pinned release and SHA-256)
         run: scripts/fetch-eest-fixtures.sh
-      - name: Build Voltaire Rust crypto archive
-        run: node .smithers/build-crypto.mjs
       - name: Official EEST state tests
-        run: zig build state-tests -Doptimize=ReleaseSafe -- --report=eest-report.json
+        run: >-
+          zig build state-tests -Doptimize=ReleaseSafe
+          -Devm-enable-fusion=${{ matrix.fusion }}
+          -- --report=eest-report-fusion-${{ matrix.fusion }}.json
+      - name: Every pinned case ran and passed
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -I - "eest-report-fusion-${{ matrix.fusion }}.json" "$EEST_EXPECTED_CASES" <<'PY'
+          import json, sys
+          totals = json.load(open(sys.argv[1]))["totals"]
+          expected = int(sys.argv[2])
+          print(f"EEST: {totals['passed']} / {totals['cases']} passed, {totals['failed']} failed")
+          if totals["cases"] != expected or totals["passed"] != expected or totals["failed"] != 0:
+              sys.exit(f"expected {expected} / {expected} passing cases")
+          PY
       - name: Upload EEST report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
-          name: eest-report
-          path: eest-report.json
+          name: eest-report-fusion-${{ matrix.fusion }}
+          path: eest-report-fusion-${{ matrix.fusion }}.json
           if-no-files-found: ignore

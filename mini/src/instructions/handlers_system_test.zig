@@ -1116,11 +1116,11 @@ test "SELFDESTRUCT: balance transfer to beneficiary" {
     try SystemHandlers.selfdestruct(&frame);
 
     // Verify balance transferred
-    const beneficiary_final_balance = evm.balances.get(beneficiary_addr) orelse 0;
+    const beneficiary_final_balance = if (evm.accounts.get(beneficiary_addr)) |account| account.balance else 0;
     try testing.expectEqual(@as(u256, 1500), beneficiary_final_balance);
 
     // Verify contract balance zeroed
-    const contract_final_balance = evm.balances.get(frame.address) orelse 0;
+    const contract_final_balance = if (evm.accounts.get(frame.address)) |account| account.balance else 0;
     try testing.expectEqual(@as(u256, 0), contract_final_balance);
 }
 
@@ -1155,7 +1155,7 @@ test "SELFDESTRUCT: self-destruct to self" {
     try SystemHandlers.selfdestruct(&frame);
 
     // Verify balance is burned when created in same tx and beneficiary is self
-    const final_balance = evm.balances.get(frame.address) orelse 0;
+    const final_balance = if (evm.accounts.get(frame.address)) |account| account.balance else 0;
     try testing.expectEqual(@as(u256, 0), final_balance);
 }
 

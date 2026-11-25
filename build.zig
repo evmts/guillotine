@@ -14,7 +14,8 @@ pub fn build(b: *std.Build) void {
     build_options.addOption(bool, "disable_tailcall_dispatch", b.option(bool, "disable-tailcall-dispatch", "Disable tailcall-based dispatch") orelse false);
     build_options.addOption([]const u8, "hardfork", b.option([]const u8, "evm-hardfork", "EVM hardfork (default: OSAKA)") orelse "OSAKA");
     build_options.addOption(bool, "disable_gas_checks", b.option(bool, "evm-disable-gas", "Disable gas checks for testing") orelse false);
-    build_options.addOption(bool, "enable_fusion", b.option(bool, "evm-enable-fusion", "Enable bytecode fusion") orelse true);
+    const enable_fusion = b.option(bool, "evm-enable-fusion", "Enable bytecode fusion (also selects the state-tests EVM)") orelse true;
+    build_options.addOption(bool, "enable_fusion", enable_fusion);
     build_options.addOption([]const u8, "optimize_strategy", b.option([]const u8, "evm-optimize", "EVM optimization strategy") orelse "safe");
     build_options.addOption(u11, "max_call_depth", b.option(u11, "max-call-depth", "Maximum call depth (default: 1024)") orelse 1024);
     build_options.addOption(u12, "stack_size", b.option(u12, "stack-size", "Maximum stack size (default: 1024)") orelse 1024);
@@ -91,11 +92,14 @@ pub fn build(b: *std.Build) void {
     // Bench runner executables are removed (moved to separate repo)
 
 
-    // Shared library for FFI bindings
+    // Shared library for FFI bindings. Release packaging passes -Dstrip=true:
+    // DWARF is about 80% of a ReleaseFast libguillotine_ffi.
+    const strip_ffi = b.option(bool, "strip", "Strip debug info from the FFI shared and static libraries");
     const shared_lib_mod = b.createModule(.{
         .root_source_file = b.path("src/evm_c_api.zig"),
         .target = target,
         .optimize = optimize,
+        .strip = strip_ffi,
     });
     shared_lib_mod.addImport("evm", modules.evm_mod);
     shared_lib_mod.addImport("voltaire", modules.primitives_mod);
@@ -707,8 +711,26 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    eest_mod.addImport("evm", modules.evm_mod);
+    // The runner instantiates `evm.Evm(.{...})` without `enable_fusion`. With
+    // -Devm-enable-fusion=false it sees specs/evm_fusion_off.zig instead, whose
+    // `Evm` forces fusion off, so one runner covers both dispatch modes.
+    const evm_fusion_off_mod = b.createModule(.{
+        .root_source_file = b.path("specs/evm_fusion_off.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    evm_fusion_off_mod.addImport("evm_base", modules.evm_mod);
+    eest_mod.addImport("evm", if (enable_fusion) modules.evm_mod else evm_fusion_off_mod);
     eest_mod.addImport("crypto", modules.crypto_mod);
+    const evm_fusion_off_tests = b.addTest(.{
+        .name = "evm-fusion-off",
+        .root_module = evm_fusion_off_mod,
+        .use_llvm = true,
+    });
+    if (bn254_lib) |bn254| evm_fusion_off_tests.root_module.linkLibrary(bn254);
+    evm_fusion_off_tests.root_module.link_libc = true;
+    if (target.result.os.tag == .linux) evm_fusion_off_tests.root_module.linkSystemLibrary("unwind", .{});
+    opcode_tests_step.dependOn(&b.addRunArtifact(evm_fusion_off_tests).step);
     const eest_exe = b.addExecutable(.{
         .name = "eest-runner",
         .root_module = eest_mod,

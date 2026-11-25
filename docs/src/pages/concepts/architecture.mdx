@@ -23,7 +23,7 @@ Guillotine is two EVMs and a tracer that keeps them honest.
                     │  src/frame/                  │
                     │  tail-call handler chain     │
                     └──────────────┬───────────────┘
-                                   │ beforeInstruction()
+                                   │ N.before() → beforeInstruction()
                     ┌──────────────▼───────────────┐
                     │  Tracer  src/tracer/         │
                     │  steps MinimalEvm in lockstep│
@@ -36,12 +36,12 @@ Nearly every major type in the tree is a function from a config struct to a type
 
 ```zig
 const Evm = @import("evm").Evm;               // fn (EvmConfig) type
-const Frame = @import("evm").Frame;           // fn (FrameConfig) type
+const Frame = @import("evm").Frame;           // fn (FrameConfig, EvmType) type
 const Bytecode = @import("evm").Bytecode;     // fn (BytecodeConfig) type
 const Stack = @import("evm").Stack;           // fn (StackConfig) type
 const Memory = @import("evm").Memory;         // fn (MemoryConfig) type
 
-const Cancun = Evm(.{});
+const Osaka = Evm(.{}); // default hardfork
 ```
 
 This is the load-bearing idea. Because the hardfork, the stack size, the word
@@ -55,14 +55,14 @@ types to hold:
 
 | Alias | What it is |
 | --- | --- |
-| `MainnetEvm` | `Evm(.{})` — Cancun, gas on, fusion on, tracer off |
-| `MainnetEvmWithTracer` | Cancun with validation, step capture, PC and gas tracking |
-| `TestEvm` | Cancun with tracing on and `disable_gas_checks = true` |
-| `BuildConfiguredEvm` / `DefaultEvm` | Whatever `-Devm-*` build flags selected |
+| `MainnetEvm` | `Evm(.{})`: Osaka, gas on, fusion on, tracer off |
+| `MainnetEvmWithTracer` | Osaka with validation, step capture, PC and gas tracking |
+| `TestEvm` | Cancun with the tracer on, MinimalEvm validation off, and `disable_gas_checks = true` |
+| `BuildConfiguredEvm` / `DefaultEvm` | `Evm(getBuildConfig())`: the `EvmConfig` defaults overridden by `zig build` options such as `-Devm-hardfork`, `-Devm-enable-fusion`, `-Dmax-call-depth` and `-Denable-tracing`. `-Devm-disable-gas` and `-Ddisable-balance-checks` are a compile error outside `-Doptimize=Debug`. |
 
 ## Layers
 
-### `Evm` — the transaction machine (`src/evm.zig`)
+### `Evm`: the transaction machine (`src/evm.zig`)
 
 Owns everything that outlives a single frame: the `Database`, the journal, the
 access list (EIP-2929/2930), the log buffer, the self-destruct set, created
@@ -72,23 +72,23 @@ contracts, the call stack, and the arena used for per-call scratch memory.
 `inner_call(params)` is the re-entrant version that handlers use for `CALL`,
 `DELEGATECALL`, `STATICCALL`, `CALLCODE`, `CREATE`, and `CREATE2`.
 
-### `Bytecode` — the analysis pass (`src/bytecode/`)
+### `Bytecode`: the analysis pass (`src/bytecode/`)
 
 Runs once per contract, then the result is cached. It validates the code,
 computes the jump-destination bitmap, splits the code into basic blocks with
-their static gas cost and stack-height requirements, detects fusable opcode
-sequences, and emits the dispatch schedule.
+their static gas cost and stack-height requirements, and detects fusable opcode
+sequences. `src/preprocessor/dispatch.zig` then emits the dispatch schedule.
 
-### `Frame` — the interpreter (`src/frame/`)
+### `Frame`: the interpreter (`src/frame/`)
 
 Executes a schedule, not bytecode. It holds the stack, the memory, the gas
 counter, and a cursor into the schedule. There is **no program counter** in the
-frame. Handlers live in `handlers_*.zig`, grouped by category:
+frame. Handlers live in `src/instructions/handlers_*.zig`, grouped by category:
 
 | File | Opcodes |
 | --- | --- |
 | `handlers_arithmetic.zig` | `ADD` `MUL` `SUB` `DIV` `SDIV` `MOD` `EXP` `SIGNEXTEND` … |
-| `handlers_bitwise.zig` | `AND` `OR` `XOR` `NOT` `BYTE` `SHL` `SHR` `SAR` |
+| `handlers_bitwise.zig` | `AND` `OR` `XOR` `NOT` `BYTE` `SHL` `SHR` `SAR` `CLZ` |
 | `handlers_comparison.zig` | `LT` `GT` `SLT` `SGT` `EQ` `ISZERO` |
 | `handlers_memory.zig` | `MLOAD` `MSTORE` `MSTORE8` `MSIZE` `MCOPY` |
 | `handlers_storage.zig` | `SLOAD` `SSTORE` `TLOAD` `TSTORE` |
@@ -100,12 +100,13 @@ frame. Handlers live in `handlers_*.zig`, grouped by category:
 | `handlers_stack.zig` | `PUSH*` `POP` `DUP*` `SWAP*` |
 | `handlers_*_synthetic.zig` | Fused sequences |
 
-### `MinimalEvm` — the reference (`src/tracer/minimal_evm.zig`)
+### `MinimalEvm`: the reference (`src/tracer/minimal_evm.zig`)
 
-A single-file, sequential `switch`-loop interpreter. No dispatch schedule, no
-fusion, no tail calls. Its job is to be obviously correct and readable so it can
-serve as the oracle in differential tests, and small enough to ship as a
-standalone WASM bundle (`zig build wasm-minimal-evm`).
+A sequential `switch`-loop interpreter in `minimal_evm.zig`, `minimal_frame.zig`,
+and `minimal_host.zig`. No dispatch schedule, no fusion, no tail calls. Its job
+is to be obviously correct and readable so it can serve as the oracle in
+differential tests. guillotine-mini (`mini/`) is the standalone version with its
+own WASM build (`cd mini && zig build wasm`).
 
 ## State
 
@@ -116,10 +117,10 @@ the base store so snapshots and reverts are cheap.
 
 Around it:
 
-- `journal.zig` — the undo log. Snapshot ids, revert-to-snapshot.
-- `access_list.zig` — warm/cold tracking for EIP-2929 gas.
-- `created_contracts.zig` — EIP-6780 `SELFDESTRUCT` semantics.
-- `self_destruct.zig` — pending destructions for the end of the transaction.
+- `journal.zig`: the undo log. Snapshot ids, revert-to-snapshot.
+- `access_list.zig`: warm/cold tracking for EIP-2929 gas.
+- `created_contracts.zig`: EIP-6780 `SELFDESTRUCT` semantics.
+- `self_destruct.zig`: pending destructions for the end of the transaction.
 
 See [State and journaling](/guides/state).
 
@@ -143,14 +144,16 @@ pub fn push_unsafe(self: *Self, value: WordType) void {
 
 Handlers call the `_unsafe` variants because bytecode analysis already proved the
 stack-height requirements for the whole basic block before the block started
-executing. The `tracer.assert()` calls inside them are development aids that
-compile to nothing when the tracer is disabled. Missing bounds checks in an
-`_unsafe` function are the design, not a defect.
+executing. The assertions inside them are development aids that compile to
+nothing in ReleaseFast and ReleaseSmall (`src/stack/stack.zig`). Missing bounds
+checks in an `_unsafe` function are the design, not a defect.
 
 ## Safety limits
 
-- **300M instruction cap.** `SafetyCounter` bounds total instructions executed so
-  a malicious loop terminates.
+- **Gas bounds execution.** No instruction cap stops a run. The tracer's
+  300,000,000-instruction `SafetyCounter` (`src/tracer/tracer.zig`) only counts:
+  `inc()` saturates at the limit and logs a warning once, and no caller checks
+  `isExceeded()`.
 - **`loop_quota`.** In Debug and ReleaseSafe builds, analysis loops carry a
   1,000,000-iteration quota; `null` (off) in optimised builds.
 - **Depth 1024.** `max_call_depth` defaults to 1024, matching the EVM spec.

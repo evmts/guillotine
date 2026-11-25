@@ -292,9 +292,9 @@ pub const StorageInjector = struct {
         const EvmTypeInfo = @typeInfo(@TypeOf(evm));
         const EvmType = if (EvmTypeInfo == .pointer) @TypeOf(evm.*) else @TypeOf(evm);
 
-        var buffer: std.ArrayList(u8) = .{};
-        defer buffer.deinit(self.allocator);
-        const writer = buffer.writer(self.allocator);
+        var out: std.Io.Writer.Allocating = .init(self.allocator);
+        defer out.deinit();
+        const writer = &out.writer;
 
         // Start JSON object
         try writer.writeAll("{\"storage\":[");
@@ -324,14 +324,14 @@ pub const StorageInjector = struct {
             try writer.writeAll("{\"address\":\"0x");
             // Format address as hex
             for (key.address) |byte| {
-                try std.fmt.format(writer, "{x:0>2}", .{byte});
+                try writer.print("{x:0>2}", .{byte});
             }
             try writer.writeAll("\",\"slot\":\"0x");
-            try std.fmt.format(writer, "{x}", .{key.slot});
+            try writer.print("{x}", .{key.slot});
             try writer.writeAll("\",\"originalValue\":\"0x");
-            try std.fmt.format(writer, "{x}", .{original});
+            try writer.print("{x}", .{original});
             try writer.writeAll("\",\"newValue\":\"0x");
-            try std.fmt.format(writer, "{x}", .{current});
+            try writer.print("{x}", .{current});
             try writer.writeAll("\"}");
         }
 
@@ -344,15 +344,20 @@ pub const StorageInjector = struct {
             if (!first_balance) try writer.writeAll(",");
             first_balance = false;
 
-            const balance = if (evm.balances.get(address.*)) |b| b else 0;
+            // The mini EVM keeps one AccountState per address; test mocks keep
+            // separate balance/nonce/code maps.
+            const balance = if (@hasField(EvmType, "accounts"))
+                (if (evm.accounts.get(address.*)) |account| account.balance else 0)
+            else
+                evm.balances.get(address.*) orelse 0;
 
             // Format: {"address":"0x...","balance":"0x..."}
             try writer.writeAll("{\"address\":\"0x");
             for (address.bytes) |byte| {
-                try std.fmt.format(writer, "{x:0>2}", .{byte});
+                try writer.print("{x:0>2}", .{byte});
             }
             try writer.writeAll("\",\"balance\":\"0x");
-            try std.fmt.format(writer, "{x}", .{balance});
+            try writer.print("{x}", .{balance});
             try writer.writeAll("\"}");
         }
 
@@ -373,10 +378,10 @@ pub const StorageInjector = struct {
             // Format: {"address":"0x...","nonce":"0x..."}
             try writer.writeAll("{\"address\":\"0x");
             for (address.bytes) |byte| {
-                try std.fmt.format(writer, "{x:0>2}", .{byte});
+                try writer.print("{x:0>2}", .{byte});
             }
             try writer.writeAll("\",\"nonce\":\"0x");
-            try std.fmt.format(writer, "{x}", .{nonce});
+            try writer.print("{x}", .{nonce});
             try writer.writeAll("\"}");
         }
 
@@ -389,16 +394,19 @@ pub const StorageInjector = struct {
             if (!first_code) try writer.writeAll(",");
             first_code = false;
 
-            const code = if (evm.code.get(address.*)) |c| c else &[_]u8{};
+            const code = if (@hasField(EvmType, "accounts"))
+                (if (evm.accounts.get(address.*)) |account| account.code else &[_]u8{})
+            else
+                evm.code.get(address.*) orelse &[_]u8{};
 
             // Format: {"address":"0x...","code":"0x..."}
             try writer.writeAll("{\"address\":\"0x");
             for (address.bytes) |byte| {
-                try std.fmt.format(writer, "{x:0>2}", .{byte});
+                try writer.print("{x:0>2}", .{byte});
             }
             try writer.writeAll("\",\"code\":\"0x");
             for (code) |byte| {
-                try std.fmt.format(writer, "{x:0>2}", .{byte});
+                try writer.print("{x:0>2}", .{byte});
             }
             try writer.writeAll("\"}");
         }
@@ -415,7 +423,7 @@ pub const StorageInjector = struct {
 
                 try writer.writeAll("\"0x");
                 for (address.bytes) |byte| {
-                    try std.fmt.format(writer, "{x:0>2}", .{byte});
+                    try writer.print("{x:0>2}", .{byte});
                 }
                 try writer.writeAll("\"");
             }
@@ -423,7 +431,7 @@ pub const StorageInjector = struct {
 
         try writer.writeAll("]}");
 
-        return buffer.toOwnedSlice(self.allocator);
+        return out.toOwnedSlice();
     }
 };
 

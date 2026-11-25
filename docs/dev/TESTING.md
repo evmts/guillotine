@@ -579,7 +579,6 @@ mini/test/
 │   ├── runner.zig          # Test runner infrastructure
 │   ├── test_host.zig       # Mock host implementation
 │   └── assembler.zig       # Bytecode assembly
-└── unit_test_helpers.zig   # Test utilities
 ```
 
 ## Build Options

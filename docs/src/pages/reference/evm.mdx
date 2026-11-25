@@ -1,6 +1,6 @@
 ---
 title: Evm
-description: The Evm type — construction, execution, snapshots, and errors.
+description: The Evm type: construction, execution, snapshots, and errors.
 ---
 
 # `Evm`
@@ -19,9 +19,9 @@ which needs concrete types):
 
 ```zig
 const MainnetEvm = @import("evm").MainnetEvm;                      // Evm(.{})
-const Traced     = @import("evm").MainnetEvmWithTracer;            // + step capture
-const TestEvm    = @import("evm").TestEvm;                         // + disable_gas_checks
-const Default    = @import("evm").DefaultEvm;                      // build-flag configured
+const Traced     = @import("evm").MainnetEvmWithTracer;            // + validation, step capture
+const TestEvm    = @import("evm").TestEvm;                         // Cancun, tracer on (no validation), disable_gas_checks
+const Default    = @import("evm").DefaultEvm;                      // Evm(getBuildConfig()): defaults plus -Devm-* build flags
 ```
 
 ## `init`
@@ -32,7 +32,7 @@ pub fn init(
     database: ?*Database,
     block_info: BlockInfo,
     context: TransactionContext,
-    gas_price: u256,
+    gas_price: ?u256,
     origin: primitives.Address,
 ) !Self
 ```
@@ -43,7 +43,7 @@ pub fn init(
 | `database` | Optional pointer, but passing `null` returns `error.DatabaseRequired`. It is optional only so FFI can pass a null pointer and get an error rather than a crash. |
 | `block_info` | Block-scoped environment. See [`BlockInfo`](#blockinfo). |
 | `context` | Transaction-scoped environment. See [`TransactionContext`](#transactioncontext). |
-| `gas_price` | What `GASPRICE` returns. |
+| `gas_price` | What `GASPRICE` returns. `null` derives the EIP-1559 effective gas price from `block_info.base_fee` and `context.max_fee_per_gas`; if `max_fee_per_gas` is also `null`, `init` returns `error.GasPriceRequired`. |
 | `origin` | What `ORIGIN` returns. |
 
 ```zig
@@ -62,7 +62,7 @@ pub fn deinit(self: *Self) void
 ```
 
 Releases everything `init` allocated. It does **not** free `CallResult`s you are
-holding — those are yours. Always `defer evm.deinit()`.
+holding; those are yours. Always `defer evm.deinit()`.
 
 ## `call`
 
@@ -108,7 +108,7 @@ See [State and journaling](/guides/state).
 
 ## `CallParams`
 
-A tagged union — `src/frame/call_params.zig`. Addresses here are
+A tagged union in `src/frame/call_params.zig`. Addresses here are
 `primitives.Address` (the struct), not raw bytes.
 
 ```zig
@@ -121,6 +121,7 @@ pub const CallParams = union(enum) {
     },
     delegatecall: struct {
         caller: Address, to: Address, input: []const u8, gas: u64,
+        context_address: ?Address = null, // delegating contract; null means caller
     },
     staticcall: struct {
         caller: Address, to: Address, input: []const u8, gas: u64,
@@ -134,7 +135,7 @@ pub const CallParams = union(enum) {
 };
 ```
 
-`delegatecall` and `staticcall` have no `value` field at all — the type makes
+`delegatecall` and `staticcall` have no `value` field at all. The type makes
 EIP-214 and delegatecall semantics unrepresentable-if-wrong rather than
 runtime-checked.
 
@@ -196,19 +197,23 @@ pub fn deinitLogsSlice(logs: []const Log, allocator: std.mem.Allocator) void
 ```
 
 `deinit` unconditionally frees output, logs (and each log's `topics`/`data`), and
-the accessed-address/storage slices. **Not calling it is a leak** — `zig build
+the accessed-address/storage slices. **Not calling it is a leak:** `zig build
 test-*` with `std.testing.allocator` will fail the test with `memory leak
 detected`, which is exactly what you want it to do.
 
 ### Constructors
 
-Useful when implementing a custom precompile or handler:
+Useful when implementing a handler:
 
 ```zig
 pub fn success_with_output(allocator, gas_left, output) !Self
+pub fn success_with_logs(allocator, gas_left, output, logs) !Self
 pub fn success_empty(allocator, gas_left) !Self
+pub fn succeeded_empty(gas_left) Self
 pub fn failure(allocator, gas_left) !Self
 pub fn failure_with_error(allocator, gas_left, error_info) !Self
+pub fn revert_with_data(allocator, gas_left, revert_data) !Self
+pub fn failed(gas_left) Self
 ```
 
 ## `BlockInfo`
@@ -222,7 +227,7 @@ const block_info = BlockInfo{
     .gas_limit = 30_000_000,
     .coinbase = primitives.ZERO_ADDRESS,
     .base_fee = 0,
-    .prev_randao = [_]u8{0} ** 32,
+    .prev_randao = @as([32]u8, @splat(0)),
 };
 ```
 
@@ -260,7 +265,7 @@ pub const Error = error{
 ```
 
 These surface from `init` and from the internals. They are not how `call`
-reports a reverted contract — that is `success == false`.
+reports a reverted contract; that is `success == false`.
 
 ## `Success`
 
@@ -285,9 +290,13 @@ evm.Database       evm.MemoryDatabase   evm.Account
 evm.AccessList     evm.CreatedContracts evm.SelfDestruct
 evm.Opcode         evm.OpcodeData       evm.OpcodeSynthetic
 evm.Hardfork       evm.Eips
-evm.Tracer         evm.TracerConfig     evm.MinimalEvm    evm.JSONRPCTracer
+evm.Tracer         evm.TracerConfig     evm.MinimalEvm
 evm.BlockInfo      evm.CompactBlockInfo evm.TransactionContext
 evm.CallParams     evm.CallResult       evm.Log
 evm.AuthorizationProcessor  evm.AuthorizationError
 evm.precompiles    evm.kzg_setup        evm.log
+evm.layer2         evm.trie             evm.dispatch_pretty_print
 ```
+
+`src/root.zig` also declares `evm.JSONRPCTracer`, but `src/tracer/tracer.zig`
+has no `JSONRPCTracer` declaration, so referencing it fails to compile.

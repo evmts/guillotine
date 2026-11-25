@@ -39,7 +39,11 @@ fn createTestFrame(
     const caller = try Address.fromHex("0x1111111111111111111111111111111111111111");
     const address = try Address.fromHex("0x2222222222222222222222222222222222222222");
     // Set balance for SELFBALANCE tests
-    try evm.balances.put(address, 123456789);
+    {
+        const entry = try evm.accounts.getOrPut(address);
+        if (!entry.found_existing) entry.value_ptr.* = .{};
+        entry.value_ptr.balance = 123456789;
+    }
     return try Frame.init(
         allocator,
         bytecode,
@@ -692,7 +696,11 @@ test "SELFBALANCE: zero balance" {
     defer frame.deinit();
 
     // Override balance to 0
-    try evm.balances.put(frame.address, 0);
+    {
+        const entry = try evm.accounts.getOrPut(frame.address);
+        if (!entry.found_existing) entry.value_ptr.* = .{};
+        entry.value_ptr.balance = 0;
+    }
 
     const BlockHandlers = @import("handlers_block.zig").Handlers(@TypeOf(frame));
     try BlockHandlers.selfbalance(&frame);

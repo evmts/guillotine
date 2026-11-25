@@ -159,11 +159,10 @@ pub fn Handlers(FrameType: type) type {
                         const has_code = h.getCode(call_address).len > 0;
                         const has_nonce = h.getNonce(call_address) > 0;
                         break :blk has_balance or has_code or has_nonce;
+                    } else if (evm.accounts.get(call_address)) |account| {
+                        break :blk account.balance > 0 or account.code.len > 0 or account.nonce > 0;
                     } else {
-                        const has_balance = (evm.balances.get(call_address) orelse 0) > 0;
-                        const has_code = (evm.code.get(call_address) orelse &[_]u8{}).len > 0;
-                        const has_nonce = (evm.nonces.get(call_address) orelse 0) > 0;
-                        break :blk has_balance or has_code or has_nonce;
+                        break :blk false;
                     }
                 };
                 if (!target_exists) {
@@ -815,8 +814,10 @@ pub fn Handlers(FrameType: type) type {
 
             const self_balance = if (evm_ptr.host) |h|
                 h.getBalance(frame.address)
+            else if (evm_ptr.accounts.get(frame.address)) |account|
+                account.balance
             else
-                evm_ptr.balances.get(frame.address) orelse 0;
+                0;
 
             // Check if beneficiary is alive (has code, balance, or nonce)
             // Add new account cost if not alive and we have balance
@@ -827,11 +828,10 @@ pub fn Handlers(FrameType: type) type {
                         const has_code = h.getCode(beneficiary).len > 0;
                         const has_nonce = h.getNonce(beneficiary) > 0;
                         break :blk has_balance or has_code or has_nonce;
+                    } else if (evm_ptr.accounts.get(beneficiary)) |account| {
+                        break :blk account.balance > 0 or account.code.len > 0 or account.nonce > 0;
                     } else {
-                        const has_balance = (evm_ptr.balances.get(beneficiary) orelse 0) > 0;
-                        const has_code = (evm_ptr.code.get(beneficiary) orelse &[_]u8{}).len > 0;
-                        const has_nonce = (evm_ptr.nonces.get(beneficiary) orelse 0) > 0;
-                        break :blk has_balance or has_code or has_nonce;
+                        break :blk false;
                     }
                 };
                 if (!beneficiary_is_alive) {
@@ -862,8 +862,10 @@ pub fn Handlers(FrameType: type) type {
                 // IMPORTANT: Must read beneficiary balance AFTER step 1 to handle sender == recipient case
                 const beneficiary_balance = if (evm_ptr.host) |h|
                     h.getBalance(beneficiary)
+                else if (evm_ptr.accounts.get(beneficiary)) |account|
+                    account.balance
                 else
-                    evm_ptr.balances.get(beneficiary) orelse 0;
+                    0;
                 try evm_ptr.setBalanceWithSnapshot(beneficiary, beneficiary_balance + self_balance);
             } else {
                 // Pre-Cancun: Use old balance transfer logic
@@ -871,8 +873,10 @@ pub fn Handlers(FrameType: type) type {
                 // This ensures correct behavior when beneficiary == originator
                 const beneficiary_balance = if (evm_ptr.host) |h|
                     h.getBalance(beneficiary)
+                else if (evm_ptr.accounts.get(beneficiary)) |account|
+                    account.balance
                 else
-                    evm_ptr.balances.get(beneficiary) orelse 0;
+                    0;
 
                 // First Transfer to beneficiary (Python comment)
                 try evm_ptr.setBalanceWithSnapshot(beneficiary, beneficiary_balance + self_balance);

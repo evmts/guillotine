@@ -12,8 +12,8 @@ can be undone; and an `AccessList` that tracks warm/cold status for EIP-2929 gas
 ## The Database
 
 `Database` (`src/storage/database.zig`) is the state store. It is deliberately
-primitive-free — it speaks in `[20]u8` and `[32]u8`, not in `Address` and `Hash`
-— so the storage layer does not depend on the primitives library.
+primitive-free: it speaks in `[20]u8` and `[32]u8`, not in `Address` and `Hash`,
+so the storage layer does not depend on the primitives library.
 
 ```zig
 const Database = @import("evm").Database;
@@ -34,8 +34,8 @@ const maybe = try db.get_account(address_bytes);
 try db.set_account(address_bytes, Account{
     .balance = 1_000_000_000_000_000_000, // 1 ETH in wei
     .nonce = 0,
-    .code_hash = [_]u8{0} ** 32,
-    .storage_root = [_]u8{0} ** 32,
+    .code_hash = @as([32]u8, @splat(0)),
+    .storage_root = @as([32]u8, @splat(0)),
 });
 
 // Balance shortcut.
@@ -68,7 +68,7 @@ try db.set_account(address_bytes, .{
     .balance = 0,
     .nonce = 0,
     .code_hash = code_hash,
-    .storage_root = [_]u8{0} ** 32,
+    .storage_root = @as([32]u8, @splat(0)),
 });
 
 // Read it back either way:
@@ -76,7 +76,7 @@ const by_hash = try db.get_code(code_hash);
 const by_addr = try db.get_code_by_address(address_bytes);
 ```
 
-`set_code` is idempotent — storing identical code twice returns the same hash
+`set_code` is idempotent: storing identical code twice returns the same hash
 without duplicating the buffer, which matters because otherwise repeated
 deployments would leak.
 
@@ -111,7 +111,7 @@ snapshot on entry to a sub-call, discard it on success, rewind to it on failure.
 Because snapshot ids are integers into an undo log, nesting is cheap and depth
 1024 is not a problem.
 
-`revert_to_snapshot` does not return an error — rewinding an undo log cannot
+`revert_to_snapshot` does not return an error. Rewinding an undo log cannot
 fail, and making it fallible would force meaningless error handling into every
 call site.
 
@@ -121,7 +121,7 @@ call site.
 accounting and EIP-2930 pre-warming. It is why `SLOAD` costs 2100 the first time
 and 100 afterwards.
 
-You rarely touch it directly — handlers consult it — but the addresses and slots
+You rarely touch it directly (handlers consult it), but the addresses and slots
 touched during a call come back on the result:
 
 ```zig
@@ -175,10 +175,11 @@ var result = evm.call(params);
 defer result.deinit(allocator);
 ```
 
-`deinit` unconditionally frees `output`, every log's `topics` and `data`, the log
-slice itself, and the accessed-address and accessed-storage slices. If you only
-want the logs and intend to keep them past the result, use `takeLogs()` and free
-them later with `CallResult.deinitLogsSlice(logs, allocator)`.
+`deinit` frees `output`, every log's `topics` and `data`, the log slice, the
+self-destruct, accessed-address, and accessed-storage slices, the trace, and
+`error_info`. `evm.takeLogs()` (`src/evm.zig`) takes ownership of the
+EVM's accumulated log buffer; free that slice with
+`CallResult.deinitLogsSlice(logs, allocator)`.
 
 ## Per-call arena
 

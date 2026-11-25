@@ -80,6 +80,12 @@ pub fn createModules(
     });
     compilers_mod.addImport("voltaire", primitives_mod);
     compilers_mod.addImport("evm", evm_mod);
+    const foundry_wrapper_c = b.addTranslateC(.{
+        .root_source_file = b.path("lib/foundry-compilers/foundry_wrapper.h"),
+        .target = target,
+        .optimize = optimize,
+    });
+    compilers_mod.addImport("foundry_wrapper_c", foundry_wrapper_c.createModule());
 
     // Link with foundry library if available
     if (foundry_lib) |lib| {

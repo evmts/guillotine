@@ -49,7 +49,6 @@
         "build.zig",
         "build.zig.zon",
         "src",
-        "lib",
         "test",
         "test_runner.zig",
         "interactive_test_runner.zig",

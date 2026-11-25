@@ -33,25 +33,28 @@ const StorageKeyContext = struct {
     }
 };
 
+/// Insertion-ordered set of warm storage slots
+const SlotSet = std.array_hash_map.Custom(StorageKey, void, StorageKeyContext, false);
+
 /// Manages warm/cold access state for EIP-2929
 pub const AccessListManager = struct {
     allocator: Allocator,
     warm_addresses: std.AutoHashMap(Address, void),
-    warm_storage_slots: std.ArrayHashMap(StorageKey, void, StorageKeyContext, false),
+    warm_storage_slots: SlotSet,
 
     /// Initialize empty access list manager
     pub fn init(allocator: Allocator) AccessListManager {
         return .{
             .allocator = allocator,
             .warm_addresses = std.AutoHashMap(Address, void).init(allocator),
-            .warm_storage_slots = std.ArrayHashMap(StorageKey, void, StorageKeyContext, false).init(allocator),
+            .warm_storage_slots = .empty,
         };
     }
 
     /// Clean up resources
     pub fn deinit(self: *AccessListManager) void {
         self.warm_addresses.deinit();
-        self.warm_storage_slots.deinit();
+        self.warm_storage_slots.deinit(self.allocator);
     }
 
     /// Access an address and return gas cost (warm=100, cold=2600)
@@ -68,7 +71,7 @@ pub const AccessListManager = struct {
     /// EIP-2929: First access is cold, subsequent accesses are warm
     pub fn accessStorageSlot(self: *AccessListManager, addr: Address, slot: u256) !u64 {
         const key = StorageKey{ .address = addr.bytes, .slot = slot };
-        const entry = try self.warm_storage_slots.getOrPut(key);
+        const entry = try self.warm_storage_slots.getOrPut(self.allocator, key);
         return if (entry.found_existing)
             gas_constants.WarmStorageReadCost
         else
@@ -85,7 +88,7 @@ pub const AccessListManager = struct {
     /// Pre-warm multiple storage slots (marks them as already accessed)
     pub fn preWarmStorageSlots(self: *AccessListManager, slots: []const StorageKey) !void {
         for (slots) |slot| {
-            _ = try self.warm_storage_slots.getOrPut(slot);
+            _ = try self.warm_storage_slots.getOrPut(self.allocator, slot);
         }
     }
 
@@ -99,7 +102,7 @@ pub const AccessListManager = struct {
             for (entry.storage_keys) |key_hash| {
                 const slot = std.mem.readInt(u256, &key_hash, .big);
                 const key = StorageKey{ .address = entry.address.bytes, .slot = slot };
-                _ = try self.warm_storage_slots.getOrPut(key);
+                _ = try self.warm_storage_slots.getOrPut(self.allocator, key);
             }
         }
     }
@@ -124,18 +127,21 @@ pub const AccessListManager = struct {
     /// Create snapshot for nested call revert handling
     pub fn snapshot(self: *const AccessListManager) !AccessListSnapshot {
         var addr_snapshot = std.AutoHashMap(Address, void).init(self.allocator);
+        errdefer addr_snapshot.deinit();
         var addr_it = self.warm_addresses.iterator();
         while (addr_it.next()) |entry| {
             try addr_snapshot.put(entry.key_ptr.*, {});
         }
 
-        var slot_snapshot = std.ArrayHashMap(StorageKey, void, StorageKeyContext, false).init(self.allocator);
+        var slot_snapshot: SlotSet = .empty;
+        errdefer slot_snapshot.deinit(self.allocator);
         var slot_it = self.warm_storage_slots.iterator();
         while (slot_it.next()) |entry| {
-            _ = try slot_snapshot.put(entry.key_ptr.*, {});
+            try slot_snapshot.put(self.allocator, entry.key_ptr.*, {});
         }
 
         return .{
+            .allocator = self.allocator,
             .addresses = addr_snapshot,
             .slots = slot_snapshot,
         };
@@ -152,18 +158,19 @@ pub const AccessListManager = struct {
         self.warm_storage_slots.clearRetainingCapacity();
         var slot_it = snap.slots.iterator();
         while (slot_it.next()) |entry| {
-            _ = try self.warm_storage_slots.put(entry.key_ptr.*, {});
+            try self.warm_storage_slots.put(self.allocator, entry.key_ptr.*, {});
         }
     }
 };
 
 /// Snapshot of warm sets for nested call revert handling
 pub const AccessListSnapshot = struct {
+    allocator: Allocator,
     addresses: std.AutoHashMap(Address, void),
-    slots: std.ArrayHashMap(StorageKey, void, StorageKeyContext, false),
+    slots: SlotSet,
 
     pub fn deinit(self: *AccessListSnapshot) void {
         self.addresses.deinit();
-        self.slots.deinit();
+        self.slots.deinit(self.allocator);
     }
 };

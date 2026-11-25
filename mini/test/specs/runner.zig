@@ -608,7 +608,7 @@ fn processRlpTransaction(
                                         key = (key << 8) | b;
                                     }
                                     const storage_key = evm_mod.StorageKey{ .address = addr.bytes, .slot = key };
-                                    _ = try evm_instance.access_list_manager.warm_storage_slots.getOrPut(storage_key);
+                                    _ = try evm_instance.access_list_manager.warm_storage_slots.getOrPut(evm_instance.access_list_manager.allocator, storage_key);
                                 }
                             }
                         }

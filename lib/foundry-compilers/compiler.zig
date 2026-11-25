@@ -1,9 +1,7 @@
 const std = @import("std");
 const primitives = @import("voltaire");
 const Abi = primitives.Abi;
-const c = @cImport({
-    @cInclude("foundry_wrapper.h");
-});
+const c = @import("foundry_wrapper_c");
 
 /// Compiler error codes matching the Rust enum
 pub const ErrorCode = enum(i32) {

@@ -24,7 +24,6 @@ Default configuration (see `memory_config.zig`):
 
 - `memory.zig` — Core implementation with SIMD optimizations
 - `memory_config.zig` — Compile-time configuration and validation
-- `memory_c.zig` — C FFI interface for external integration
 - `memory_bench.zig` — Performance benchmarking suite
 
 ## Core API

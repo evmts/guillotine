@@ -3,30 +3,37 @@
 /// including jump destination analysis and bytecode traversal.
 const std = @import("std");
 
+/// Set of valid JUMPDEST positions
+const JumpDestSet = std.array_hash_map.Auto(u32, void);
+
 /// Represents analyzed bytecode with pre-validated jump destinations
 pub const Bytecode = struct {
     /// Raw bytecode bytes
     code: []const u8,
 
+    /// Allocator that owns `valid_jumpdests`
+    allocator: std.mem.Allocator,
+
     /// Pre-analyzed valid JUMPDEST positions
-    valid_jumpdests: std.AutoArrayHashMap(u32, void),
+    valid_jumpdests: JumpDestSet,
 
     /// Initialize bytecode with jump destination analysis
     pub fn init(allocator: std.mem.Allocator, code: []const u8) !Bytecode {
-        var valid_jumpdests = std.AutoArrayHashMap(u32, void).init(allocator);
-        errdefer valid_jumpdests.deinit();
+        var valid_jumpdests: JumpDestSet = .empty;
+        errdefer valid_jumpdests.deinit(allocator);
 
-        try analyzeJumpDests(code, &valid_jumpdests);
+        try analyzeJumpDests(allocator, code, &valid_jumpdests);
 
         return Bytecode{
             .code = code,
+            .allocator = allocator,
             .valid_jumpdests = valid_jumpdests,
         };
     }
 
     /// Clean up resources
     pub fn deinit(self: *Bytecode) void {
-        self.valid_jumpdests.deinit();
+        self.valid_jumpdests.deinit(self.allocator);
     }
 
     /// Check if a position is a valid JUMPDEST
@@ -71,7 +78,7 @@ pub const Bytecode = struct {
 /// Analyze bytecode to identify valid JUMPDEST locations
 /// This must skip over PUSH instruction immediate data to avoid
 /// treating data bytes as instructions
-fn analyzeJumpDests(code: []const u8, valid_jumpdests: *std.AutoArrayHashMap(u32, void)) !void {
+fn analyzeJumpDests(allocator: std.mem.Allocator, code: []const u8, valid_jumpdests: *JumpDestSet) !void {
     var pc: u32 = 0;
 
     while (pc < code.len) {
@@ -79,7 +86,7 @@ fn analyzeJumpDests(code: []const u8, valid_jumpdests: *std.AutoArrayHashMap(u32
 
         // Check if this is a JUMPDEST (0x5b)
         if (opcode == 0x5b) {
-            try valid_jumpdests.put(pc, {});
+            try valid_jumpdests.put(allocator, pc, {});
             pc += 1;
         } else if (opcode >= 0x60 and opcode <= 0x7f) {
             // PUSH1 (0x60) through PUSH32 (0x7f)
@@ -100,10 +107,10 @@ fn analyzeJumpDests(code: []const u8, valid_jumpdests: *std.AutoArrayHashMap(u32
 
 test "analyzeJumpDests: simple JUMPDEST" {
     const code = [_]u8{ 0x5b, 0x00, 0x5b }; // JUMPDEST, STOP, JUMPDEST
-    var valid_jumpdests = std.AutoArrayHashMap(u32, void).init(std.testing.allocator);
-    defer valid_jumpdests.deinit();
+    var valid_jumpdests: JumpDestSet = .empty;
+    defer valid_jumpdests.deinit(std.testing.allocator);
 
-    try analyzeJumpDests(&code, &valid_jumpdests);
+    try analyzeJumpDests(std.testing.allocator, &code, &valid_jumpdests);
 
     try std.testing.expect(valid_jumpdests.contains(0));
     try std.testing.expect(valid_jumpdests.contains(2));
@@ -115,10 +122,10 @@ test "analyzeJumpDests: PUSH data containing JUMPDEST opcode" {
         0x60, 0x5b, // PUSH1 0x5b (pushes JUMPDEST opcode as data)
         0x5b, // JUMPDEST (actual valid jump destination)
     };
-    var valid_jumpdests = std.AutoArrayHashMap(u32, void).init(std.testing.allocator);
-    defer valid_jumpdests.deinit();
+    var valid_jumpdests: JumpDestSet = .empty;
+    defer valid_jumpdests.deinit(std.testing.allocator);
 
-    try analyzeJumpDests(&code, &valid_jumpdests);
+    try analyzeJumpDests(std.testing.allocator, &code, &valid_jumpdests);
 
     // Only position 2 should be valid (the actual JUMPDEST)
     // Position 1 (the 0x5b in PUSH data) should NOT be valid
@@ -136,10 +143,10 @@ test "analyzeJumpDests: PUSH32 with embedded JUMPDEST bytes" {
     }
     code[33] = 0x5b; // Actual JUMPDEST after PUSH32
 
-    var valid_jumpdests = std.AutoArrayHashMap(u32, void).init(std.testing.allocator);
-    defer valid_jumpdests.deinit();
+    var valid_jumpdests: JumpDestSet = .empty;
+    defer valid_jumpdests.deinit(std.testing.allocator);
 
-    try analyzeJumpDests(&code, &valid_jumpdests);
+    try analyzeJumpDests(std.testing.allocator, &code, &valid_jumpdests);
 
     // Only position 33 should be valid
     try std.testing.expect(!valid_jumpdests.contains(0));

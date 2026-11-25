@@ -29,6 +29,17 @@ pub const layer2 = @import("layer2/mod.zig");
 // select the configuration of DefaultEvm. Modules created without these
 // options (for example by external build files) get the EvmConfig defaults.
 const build_options = @import("build_options");
+const builtin = @import("builtin");
+
+// `-Devm-disable-gas` and `-Ddisable-balance-checks` turn off consensus checks.
+// They exist for Debug-mode experiments only; a release artifact built with
+// either one would accept transactions that Ethereum rejects.
+comptime {
+    if (builtin.mode != .debug and buildOption(bool, "disable_gas_checks", false))
+        @compileError("-Devm-disable-gas=true is allowed only with -Doptimize=Debug");
+    if (builtin.mode != .debug and buildOption(bool, "disable_balance_checks", false))
+        @compileError("-Ddisable-balance-checks=true is allowed only with -Doptimize=Debug");
+}
 
 /// Value of `-Devm-optimize`. EvmConfig has no strategy field yet, so the
 /// value is validated and exported for callers that select code by strategy.
@@ -95,7 +106,10 @@ pub const TestEvm = Evm(EvmConfig{
     .eips = .{ .hardfork = @import("eips_and_hardforks/eips.zig").Hardfork.CANCUN },
     .tracer_config = @import("tracer/tracer.zig").TracerConfig{
         .enabled = true,
-        .enable_validation = true,
+        // TestEvm disables gas checks, so the MinimalEvm sidecar (which always
+        // charges gas) diverges by design. Validation would turn that expected
+        // divergence into a tracer panic.
+        .enable_validation = false,
         .enable_pc_tracking = true,
         .enable_gas_tracking = true,
         .enable_debug_logging = false, // Disable debug logging to reduce noise
@@ -172,31 +186,60 @@ pub const dispatch_pretty_print = @import("preprocessor/dispatch_pretty_print.zi
 pub const verified_ops = @import("core/verified_ops.zig");
 
 // Unit tests: every src module whose inline tests compile and pass on Zig 0.17.1.
+// Files whose tests are already reached through another import (for example
+// log.zig, trie/proof.zig, storage/journal_entry.zig) are not listed again.
 //
-// Not imported yet, because their inline tests use pre-0.17 APIs (for example
-// `address.from_hex`, `BlockInfo.base_fee_per_gas`, `AccessList` without a
-// config, `Frame` with one argument) and fail to compile: evm_tests.zig,
-// evm_config.zig, preprocessor/dispatch_test.zig, every other
-// instructions/handlers_*.zig, bytecode/bytecode_tests.zig,
-// bytecode/bytecode_jump_validation_test{,s}.zig, tracer/minimal_frame.zig,
-// tracer/minimal_evm_precompile_test.zig and root_c.zig.
-// These compile but fail: tracer/pc_tracker.zig (logs an error),
-// tracer/events/{events,lifecycle}.zig (1 failure each), and
-// trie/{test_simple_update,known_roots_test}.zig (3 failures and 1 crash), and
-// trie/trie.zig (2 failures: Leaf/Extension/Branch `encode` RLP-encode each item
-// twice, and proof.zig/merkle_trie.zig decode that same non-Ethereum format, so
-// the encoders and the proof verifier must be fixed together).
+// Not imported, measured one file at a time on top of this list (2026-11-25):
+// - Fail to compile because their tests use pre-0.17 or pre-refactor APIs, or
+//   instantiate `Evm` and so compile the handlers' stale inline tests:
+//   evm.zig, evm_tests.zig, evm_config.zig, evm_arena_allocator.zig,
+//   bytecode/{bytecode,bytecode_analyze,bytecode_config,bytecode_stats,bytecode_bench,
+//   bytecode_tests,bytecode_jump_validation_test,bytecode_jump_validation_tests}.zig,
+//   eips_and_hardforks/{authorization_processor,eips,hardfork}.zig,
+//   frame/{call_params,call_result,fork_gas,frame_config}.zig, stack/stack.zig,
+//   storage/{access_list,cache_storage,forked_storage,journal_bench,memory_database,
+//   storage,rpc_client}.zig, tracer/{tracer,minimal_frame,minimal_evm_precompile_test}.zig,
+//   preprocessor/{dispatch_test,dispatch_layout_test}.zig, every instructions/handlers_*.zig
+//   except handlers_advanced_synthetic.zig, trie/{hash_builder_optimized,memory_tests,
+//   serialization_test,benchmarks,performance_validation,stress_tests}.zig, root_c.zig.
+// - Compile but fail: storage/database.zig ("Database state root - account with
+//   storage"), storage/static_wrappers.zig (1), eips_and_hardforks/{beacon_roots,
+//   historical_block_hashes,validator_deposits,validator_withdrawals}.zig (1 each),
+//   trie/iterator_test.zig (3), tracer/minimal_host.zig (run step fails after
+//   all tests pass), tracer/pc_tracker.zig and tracer/events/{events,lifecycle}.zig.
 // Repair a file's tests before importing it here.
 test {
     _ = @import("preprocessor/dispatch.zig");
     _ = @import("preprocessor/handler_abi.zig");
+    _ = @import("preprocessor/dispatch_jump_table.zig");
     _ = @import("instructions/handlers_advanced_synthetic.zig");
     _ = @import("bytecode/bytecode_bench_test.zig");
     _ = @import("memory/frame_memory_pool.zig");
+    _ = @import("memory/memory.zig");
+    _ = @import("memory/memory_config.zig");
     _ = @import("native_stack.zig");
+    _ = @import("stack/stack_config.zig");
+    _ = @import("stack/stack_bench.zig");
     _ = @import("internal/safety_counter.zig");
     _ = @import("core/verified_ops.zig");
+    _ = @import("block/block_info.zig");
+    _ = @import("block/transaction_context.zig");
+    _ = @import("frame/block_info_config.zig");
+    _ = @import("opcodes/opcode.zig");
+    _ = @import("opcodes/opcode_data.zig");
+    _ = @import("opcodes/opcode_synthetic.zig");
+    _ = @import("storage/journal.zig");
+    _ = @import("storage/self_destruct.zig");
+    _ = @import("storage/state_root.zig");
+    _ = @import("storage/access_list_config.zig");
+    _ = @import("storage/created_contracts.zig");
+    _ = @import("storage/database_interface_account.zig");
+    _ = @import("storage/lru_cache.zig");
+    _ = @import("tracer/ring_buffer.zig");
     _ = @import("trie/hash_builder_complete.zig");
     _ = @import("trie/known_roots_test.zig");
     _ = @import("trie/test_simple_update.zig");
+    _ = @import("trie/node_cache.zig");
+    _ = @import("trie/node_type_test.zig");
+    _ = @import("trie/optimized_branch.zig");
 }

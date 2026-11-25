@@ -7,8 +7,8 @@ description: The differential tracer, JSON-RPC traces, and how to debug a diverg
 
 Guillotine ships a tracer that does something unusual: it runs a second,
 independent EVM alongside the fast one and asserts after every instruction that
-they agree. That machine is `MinimalEvm` — a plain switch-loop interpreter in a
-single file.
+they agree. That machine is `MinimalEvm`, a plain switch-loop interpreter in
+`src/tracer/minimal_evm.zig` (with `minimal_frame.zig` and `minimal_host.zig`).
 
 When the fast path and the reference disagree, you get told exactly which
 instruction diverged and how, instead of discovering a wrong state root ten
@@ -17,7 +17,11 @@ thousand instructions later.
 ## Enabling the tracer
 
 The tracer is a comptime config, so a traced EVM is a different type with
-different generated code. Nothing is paid when it is off.
+different generated code. The per-instruction hooks (`beforeInstruction`,
+`afterInstruction`, `afterComplete` in `src/frame/frame.zig`) run in Debug and
+ReleaseSafe builds and in any build whose `tracer_config.enabled` is true
+(`handler_abi.hooksEnabled`). An untraced ReleaseFast or ReleaseSmall build
+compiles them to nothing.
 
 ```zig
 const Evm = @import("evm").Evm;
@@ -53,7 +57,7 @@ const Stepper = Evm(.{
 | --- | --- | --- |
 | `enabled` | `false` | Master switch. Everything below is inert without it. |
 | `enable_validation` | `false` | Runs `MinimalEvm` in lockstep and compares state. The expensive one, and the one that finds bugs. |
-| `enable_step_capture` | `false` | Accumulates a step record per instruction; needed for `toJsonRpcTrace`. Allocates. |
+| `enable_step_capture` | `false` | Accumulates a step record per instruction; fills `CallResult.trace`. Allocates. |
 | `enable_pc_tracking` | `false` | Tracks the real bytecode PC alongside the cursor. |
 | `enable_gas_tracking` | `false` | Per-step gas remaining. |
 | `enable_debug_logging` | `false` | Verbose `log.debug` output per instruction. |
@@ -63,37 +67,41 @@ Two ready-made EVMs already exist in `src/root.zig` if you do not want to
 assemble a config:
 
 ```zig
-const Traced = @import("evm").MainnetEvmWithTracer;  // Cancun + step capture
-const Testing = @import("evm").TestEvm;              // + disable_gas_checks
+const Traced = @import("evm").MainnetEvmWithTracer;  // Osaka + validation, step capture, PC and gas tracking
+const Testing = @import("evm").TestEvm;              // Cancun + PC and gas tracking, disable_gas_checks, no validation
 ```
 
 ## Reading a trace
 
-With `enable_step_capture`, the tracer accumulates steps you can walk directly or
-serialise:
+With the tracer enabled, `call` attaches the captured steps to the result as
+`trace: ?ExecutionTrace` (`src/frame/call_result.zig`):
 
 ```zig
-const tracer = evm.getTracer();
+var result = evm.call(params);
+defer result.deinit(allocator); // also frees the trace
 
-for (tracer.steps.items) |step| {
-    std.log.info("pc={d} op={s} gas={d}", .{ step.pc, @tagName(step.op), step.gas });
+if (result.trace) |trace| {
+    for (trace.steps) |step| {
+        std.log.info("pc={d} op={s} gas={d}", .{ step.pc, step.opcode_name, step.gas });
+    }
 }
-
-const json = try tracer.toJsonRpcTrace(allocator);
-defer allocator.free(json);
 ```
 
-`toJsonRpcTrace` emits the shape `debug_traceTransaction` consumers expect, so
-existing Ethereum tooling can read it.
+The raw tracer records are on `evm.tracer.steps.items` (`Tracer.ExecutionStep`
+in `src/tracer/tracer.zig`). The C ABI's `guillotine_call_tracing` serialises the
+trace as `{"structLogs":[...]}` JSON with `pc`, `op`, `gas`, `gasCost`, `depth`,
+`stack`, and `memSize` per step (`writeTraceJson` in `src/evm_c_api.zig`), the
+shape `debug_traceTransaction` consumers read.
 
 ## How lockstep validation works
 
 Every handler begins with one mandatory line:
 
 ```zig
-pub fn some_opcode(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
-    self.beforeInstruction(.SOME_OPCODE, cursor);
+pub fn some_opcode(self: *FrameType, cursor: [*]const Dispatch.Item, sp: [*]WordType, gas: FrameType.GasType) callconv(handler_abi.handler_cc) handler_abi.ExitCode {
+    N.before(self, .SOME_OPCODE, cursor, sp, gas); // writes sp and gas back, then calls beforeInstruction
     // ... implementation ...
+    return N.next(self, .SOME_OPCODE, cursor, sp, gas);
 }
 ```
 
@@ -101,12 +109,12 @@ pub fn some_opcode(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noret
 opcode and compares stack, memory, gas, and storage.
 
 For a real opcode that is one step. For a synthetic (fused) opcode it is however
-many real opcodes were fused — `PUSH_MSTORE_INLINE` steps the reference twice,
-`FUNCTION_DISPATCH` four times. The mapping lives in
-`executeMinimalEvmForOpcode()` in `src/tracer/tracer.zig`.
+many real opcodes were fused: `PUSH_MSTORE_INLINE` steps the reference twice,
+`ISZERO_JUMPI` three times. The mapping lives in `getMaxStepsForOpcode()`,
+called by `executeMinimalEvmForOpcode()` in `src/tracer/minimal_evm_sync.zig`.
 
 :::warning[The number one cause of confusing test failures]
-A handler that forgets `beforeInstruction()` leaves `MinimalEvm` behind. Every
+A handler that forgets `N.before()` leaves `MinimalEvm` behind. Every
 subsequent comparison fails, and the reported divergence points at an innocent
 instruction far from the real omission. If a differential test starts failing
 after you touched a handler, check that line first.
@@ -114,19 +122,23 @@ after you touched a handler, check that line first.
 
 ## Assertions
 
-Use `tracer.assert()`, never `std.debug.assert()`:
+Use the tracer's `assert()`, never `std.debug.assert()`:
 
 ```zig
-self.getTracer().assert(self.stack.size() >= 2, "ADD requires 2 stack items");
+(&self.getEvm().tracer).assert(self.stack.size() >= 2, "ADD requires 2 stack items");
 ```
 
-Reasons this matters:
+How it behaves:
 
-1. When the tracer is disabled, `assert` compiles to nothing — no production cost.
-2. When it is enabled, the failure carries a message and the tracer's execution
-   context.
-3. A `std.debug.assert` in an EVM is a crash, and a crash on attacker-supplied
-   bytecode is a security bug. The engine must always return an error instead.
+1. On failure, `Tracer.assert` (`src/tracer/tracer.zig`) logs the message and
+   the recent-opcode ring buffer (when the tracer is enabled) and increments
+   `Tracer.failed_checks`. Debug and ReleaseSafe builds then panic; ReleaseFast
+   and ReleaseSmall builds never abort (`aborts_on_failed_check`).
+2. The stack's `_unsafe` operations route their checks through it and skip them
+   entirely in ReleaseFast and ReleaseSmall (`src/stack/stack.zig`).
+3. Assertions are development aids, not validation. A crash on
+   attacker-supplied bytecode is a security bug, so the engine must return an
+   error for bad input before any assertion can fire.
 
 ## Debugging a divergence
 
@@ -148,22 +160,24 @@ const Unfused = Evm(.{ .enable_fusion = false, .tracer_config = TracerConfig.deb
 If the divergence disappears, it is a fusion or fusion-arity problem, not a
 handler problem.
 
-### Print the schedule, not the bytecode
+### Print the analysis and the schedule
 
 ```zig
-const pretty = try bytecode.pretty_print(allocator);
+const pretty = try bytecode.pretty_print(allocator); // Bytecode(config) analysis
 defer allocator.free(pretty);
 std.log.info("{s}", .{pretty});
 ```
 
-Remember that schedule indices are not PCs. See
+For the dispatch schedule itself, use
+`@import("evm").dispatch_pretty_print.pretty_print(allocator, schedule, bytecode, FrameType, ItemType)`
+or the C export `evm_dispatch_pretty_print`. Schedule indices are not PCs. See
 [Dispatch](/concepts/dispatch).
 
-### Compare against revm
+### Compare against the spec fixtures
 
-The `test/differential/` tree compares against revm, the Rust reference
-implementation vendored under `revm/`. That is the authority when Guillotine and
-`MinimalEvm` agree with each other but disagree with the world.
+The `test/differential/` tests compare Guillotine against `MinimalEvm`. When
+the two agree with each other but disagree with the world, run the official
+fixtures: `zig build state-tests` (see `specs/README.md`).
 
 :::
 
@@ -190,12 +204,6 @@ A passing Zig test prints nothing regardless of log level. Silence is success.
 
 ## The standalone tracer EVM
 
-`MinimalEvm` is deliberately self-contained (a single ~65 KB source file) so it
-can be built on its own and shipped to the browser:
-
-```bash
-zig build wasm-minimal-evm
-```
-
-`src/tracer/MinimalEvm_c.zig` is the C FFI wrapper, using an opaque-handle
-pattern so JavaScript can drive a full EVM lifecycle across the WASM boundary.
+`MinimalEvm` is small: `src/tracer/minimal_evm.zig` is about 27 KB, plus
+`minimal_frame.zig` and `minimal_host.zig`. It has no C API of its own. For a
+browser build, use guillotine-mini: `cd mini && zig build wasm`.

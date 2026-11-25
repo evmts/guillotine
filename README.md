@@ -30,17 +30,24 @@ Guillotine is not suitable for production use at this time. Any use of Guillotin
 
 ### 📊 Ethereum Specification Test Results
 
-**Latest Test Run**: 2251 tests executed
-- ✅ **1165 passing** (~52% pass rate)
-- ❌ **1086 failing** (~48% fail rate)
+**Official EEST state tests** (`tests@v21.0.3`, Frontier through Osaka):
+- ✅ **66,652 / 66,652 passing (100.00%)** with fusion on and with fusion off
+- 16,907 Amsterdam cases are skipped because the fork is not implemented yet
 
-Most failures are in ecmul/BN254 elliptic curve tests. Run specs with: `zig build specs`
+Fetch the pinned fixtures with `scripts/fetch-eest-fixtures.sh`, then run
+`zig build state-tests -Doptimize=ReleaseFast` (add `-Devm-enable-fusion=false`
+for the unfused dispatch). CI asserts both counts on every push.
 
-See [specs/README.md](specs/README.md) for detailed instructions on running the test suite.
+**Lean 4 differential fuzzing** against the reference specification in
+`verify/lean`: **116,384 / 116,384** cases match (`zig build test-lean-diff`,
+default seed, 2,000 iterations).
+
+A full spec pass is not production readiness: see the status above.
+See [specs/README.md](specs/README.md) for detailed instructions on running the test suites.
 
 **Current Development Focus**: Our primary goal is achieving 100% Ethereum specification compliance while ensuring complete safety, debuggability, and observability through our tracer system ([`src/tracer/tracer.zig`](src/tracer/tracer.zig)). The tracer provides comprehensive execution monitoring, differential testing against a reference implementation, and detailed error reporting for every opcode.
 
-For an in-depth understanding of Guillotine's design and implementation, see our comprehensive [Architecture Documentation](docs/pages/architecture.mdx). Follow the [issue tracker](https://github.com/evmts/Guillotine/issues) for features planned for Beta.
+For an in-depth understanding of Guillotine's design and implementation, see our comprehensive [Architecture Documentation](docs/src/pages/concepts/architecture.mdx). Follow the [issue tracker](https://github.com/evmts/Guillotine/issues) for features planned for Beta.
 
 **Network Support**: Currently only **Ethereum Mainnet** is supported. Planned for Beta:
 
@@ -77,12 +84,11 @@ For an in-depth understanding of Guillotine's design and implementation, see our
 
 ## 🔨 Building from Source
 
-**Currently Supported**: macOS
-**Planned**: Linux support
+**Currently Supported**: macOS arm64 and Linux x86_64 (built and tested in CI; release prebuilds for both)
 
 ### Prerequisites
 
-- **Zig 0.15.1** (exactly - use [zvm](https://github.com/marler182/zvm) to manage versions)
+- **Zig 0.17.1** (exactly - use [zvm](https://github.com/marler182/zvm) to manage versions)
 - **Rust toolchain** 1.75+ (for cryptographic dependencies)
 - **Git** (with submodule support)
 
@@ -144,6 +150,12 @@ These benchmarks were taken using the [evm-bench](https://github.com/ziyadedher/
 | erc20-transfer          | 6.01 ms  | 6.65 ms    | 8.30 ms  | 17.50 ms |
 | ten-thousand-hashes     | 2.90 ms  | 2.46 ms    | 3.31 ms  | 9.36 ms  |
 | snailtracer             | 27.15 ms | 26.41 ms   | 39.01 ms | 86.02 ms |
+
+The table above is historical (evm-bench with `hyperfine`). The current in-repo
+runner (`zig build bench`, ReleaseFast) measured `contract/snailtracer` at a
+**38.11 ms** median on an AMD EPYC 7443P (Linux x86_64). `revme bench
+snailtracer` measured revm at 47.21 ms on the same host with its own harness, so
+treat the 1.24x ratio as indicative only. See [bench/README.md](bench/README.md).
 
 ---
 

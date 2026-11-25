@@ -6,14 +6,14 @@ description: Verified toolchain prerequisites and build commands for Guillotine.
 # Installation
 
 Guillotine is a Zig library with vendored C and Rust dependencies. There is no
-package to `npm install` for the core engine — you build it, or you consume one
-of the [language bindings](/guides/bindings).
+package to `npm install` for the core engine. Build it from a checkout, or use
+one of the [language bindings](/guides/bindings).
 
 ## Prerequisites
 
 | Requirement | Version used to verify these docs | Why |
 | --- | --- | --- |
-| [Zig](https://ziglang.org/download/) | `0.15.2` | The whole engine. `build.zig.zon` declares `minimum_zig_version = "0.15.1"`. |
+| [Zig](https://ziglang.org/download/) | `0.17.1` | The whole engine. `build.zig.zon` declares `minimum_zig_version = "0.17.1"`. |
 | [Rust / Cargo](https://rustup.rs) | stable | `lib/voltaire` builds a `crypto_wrappers` staticlib (arkworks BN254/BLS12-381 + keccak) that the Zig build links. |
 | A C/C++ toolchain | Apple Clang 17 (Xcode CLT) | `blst`, `c-kzg-4844` and `libc++` linkage. |
 | Python 3 | 3.11+ | Only for `zig build test-mini-full` and some spec-fixture tooling. Not needed for a normal build. |
@@ -22,7 +22,7 @@ Check what you have:
 
 ```bash
 zig version
-# 0.15.2
+# 0.17.1
 
 cargo --version
 # cargo 1.x.y
@@ -32,22 +32,26 @@ cc --version
 
 :::tip
 Zig releases are not backwards compatible at this stage of the language. Pin
-`0.15.x` — [zvm](https://github.com/tristanisham/zvm) or
+`0.17.1`; [zvm](https://github.com/tristanisham/zvm) and
 [asdf](https://github.com/asdf-community/asdf-zig) make that painless. `0.16`
-and `0.14` will not compile this tree.
+and older will not compile this tree.
 :::
 
 ## Platform support
 
-Verified on this machine: **macOS 15 (Darwin 25.2.0), arm64**.
+CI (`.github/workflows/ci.yml`) builds and tests on `macos-latest` (arm64) and
+`ubuntu-latest` (x86_64) with Zig 0.17.1, and `.github/workflows/release.yml`
+ships prebuilt libraries for those two platforms. The results on
+[Project status](/status) were recorded on Linux x86_64.
 
 | Platform | Status |
 | --- | --- |
-| macOS arm64 | Verified — `zig build` succeeds |
-| macOS x86_64 | Expected to work; same code paths, not verified here |
-| Linux x86_64 / arm64 | Supported by the build graph and exercised in CI (`.github/workflows/ci.yml`); not verified on this machine |
-| Windows | `build.zig` forces the `*-pc-windows-gnu` Rust triple so Cargo emits `lib*.a` instead of MSVC `*.lib`. Treat as best-effort. |
-| `wasm32-freestanding` | First-class target: `zig build wasm` and `zig build wasm-minimal-evm`. The Rust crypto crate is rebuilt with `--no-default-features --features portable` (pure-Rust keccak) for WASM. |
+| macOS arm64 | Built and tested in CI; release prebuild |
+| macOS x86_64 | The build graph maps it to `x86_64-apple-darwin`; not in CI |
+| Linux x86_64 | Built and tested in CI; release prebuild |
+| Linux arm64 | The build graph maps it to `aarch64-unknown-linux-gnu`; not in CI |
+| Windows | Best-effort, not in CI. `lib/voltaire/lib/build.zig` builds Voltaire's crate for `*-pc-windows-gnu` so Cargo emits `lib*.a`; the root `build.zig` builds the root Cargo workspace for `x86_64-pc-windows-msvc`. |
+| `wasm32` | No root `zig build` step builds the engine for WASM. Voltaire's Cargo step builds `wasm32-unknown-unknown` with `--no-default-features --features portable` (pure-Rust keccak) when the target is WASM. guillotine-mini builds its own WASM with `cd mini && zig build wasm`. |
 
 ## Clone and build
 
@@ -57,26 +61,14 @@ cd guillotine
 zig build
 ```
 
-Real output from a successful run on macOS arm64 (Zig only prints on failure, so
-a silent exit 0 is the success case):
+A cold build prints the `blst` compile commands and Cargo progress. Exit status
+0 is success; a warm build prints nothing.
 
-```
-$ zig build ; echo "exit=$?"
-+ cc -O2 -fno-builtin -fPIC -Wall -Wextra -Werror -c ./src/server.c
-+ cc -O2 -fno-builtin -fPIC -Wall -Wextra -Werror -c ./build/assembly.S
-+ ar rc libblst.a assembly.o server.o
-+ ranlib libblst.a
-exit=0
-```
-
-The first build is slow — it compiles `blst`, `c-kzg-4844`, the arkworks Rust
+The first build is slow. It compiles `blst`, `c-kzg-4844`, the arkworks Rust
 crate, and the Foundry compiler wrapper. Expect several minutes. Subsequent
 builds hit the Zig and Cargo caches.
 
 ### Build options
-
-`build.zig` exposes the engine's comptime configuration as build flags, so you
-can specialise the binary without writing Zig:
 
 ```bash
 # Release modes
@@ -84,29 +76,35 @@ zig build --release=fast
 zig build --release=small
 zig build --release=safe
 
-# Target a specific hardfork (default: CANCUN)
-zig build -Devm-hardfork=SHANGHAI
-
-# Toggle engine features
-zig build -Devm-enable-fusion=false
-zig build -Devm-disable-gas=true      # testing only
-zig build -Dno_precompiles=true       # minimal build
-zig build -Devm-optimize=small        # fast | small | safe
+# Build-configured EVM options
+zig build -Devm-hardfork=Cancun -Devm-enable-fusion=false
 ```
 
-Accepted hardforks: `FRONTIER`, `HOMESTEAD`, `BYZANTIUM`, `BERLIN`, `LONDON`,
-`SHANGHAI`, `CANCUN`.
+`zig build -h` lists `-Devm-hardfork` (default `OSAKA`), `-Devm-enable-fusion`,
+`-Devm-disable-gas`, `-Ddisable-balance-checks`, `-Denable-tracing`,
+`-Dmax-call-depth`, `-Dstack-size`, `-Dmemory-limit`, and related flags.
+`build.zig` writes them into the `build_options` module, and `getBuildConfig()`
+in `src/root.zig` turns them into the `EvmConfig` of `BuildConfiguredEvm` (also
+exported as `DefaultEvm`). They do not change an `Evm(.{ ... })` you instantiate
+yourself. `-Devm-enable-fusion=false` also switches `zig build state-tests` to
+an EVM with fusion off. `-Devm-disable-gas=true` and
+`-Ddisable-balance-checks=true` are a compile error outside `-Doptimize=Debug`.
+See [Configuring the EVM](/guides/configuration).
 
 ## Running the tests
 
 ```bash
-zig build test              # specs -> integration -> unit
+zig build test              # specs, integration, unit, and lib tests
 zig build test-unit         # src/**/*.zig
 zig build test-integration  # test/**/*.zig
 zig build test-lib          # lib/**/*.zig
-zig build test-opcodes      # per-opcode differential tests vs MinimalEvm
-zig build specs             # Ethereum execution-spec tests
+zig build test-opcodes      # per-opcode tests (the CI gate)
+zig build state-tests       # official EEST state tests (fetch fixtures first)
+zig build specs             # legacy filler specs
 ```
+
+`zig build state-tests` reads fixtures that `scripts/fetch-eest-fixtures.sh`
+downloads (`tests@v21.0.3`, checked against a pinned SHA-256). `specs/README.md` documents both spec suites.
 
 Filter with `-Dtest-filter`:
 
@@ -122,30 +120,25 @@ success, not a hung run.
 
 ## Known build friction
 
-These are real, reproduced on a clean checkout — not hypotheticals.
+These are reproduced on a clean checkout.
 
-**`lib/voltaire` is neither a workspace member nor excluded.** The root
-`Cargo.toml` declares `members = ["lib/foundry-compilers", "lib/ark"]` and
-`exclude = ["bench/evm-bench", "benchmarks"]`. `lib/voltaire/Cargo.toml` has no
-`[workspace]` table of its own, so Cargo refuses to build it:
+**macOS SDK 26.4 and later.** Those SDKs list `libSystem` stubs for
+`arm64e-macos` but not `arm64-macos`. Zig ignores arm64e stubs, so native links
+can fail with `undefined symbol: _abort`. Before building, CI and the release
+workflow link a one-line Zig 0.17.1 program against each installed Xcode and set
+`DEVELOPER_DIR` to the first whose SDK links (`.github/workflows/ci.yml`,
+`.github/workflows/release.yml`). Do the same locally:
+`DEVELOPER_DIR=/Applications/Xcode_<version>.app/Contents/Developer zig build`.
 
-```
-$ cd lib/voltaire && cargo build --release
-error: current package believes it's in a workspace when it's not:
-current:   /…/guillotine/lib/voltaire/Cargo.toml
-workspace: /…/guillotine/Cargo.toml
-```
-
-Until that is fixed upstream, add `"lib/voltaire"` to the root `exclude` array
-(or to `members`) and build the staticlib once:
-
-```bash
-cargo build --release --manifest-path lib/voltaire/Cargo.toml
-ls -l lib/voltaire/target/release/libcrypto_wrappers.a
-```
-
-Without that archive, `zig build test-integration` fails at link time with
-`libcrypto_wrappers.a: file not found`, even though plain `zig build` succeeds.
+**Voltaire's Rust archive is built by `zig build`.** Every step that links the
+`voltaire` or `crypto` modules first runs `cargo build --release --locked` in
+`lib/voltaire` (its own Cargo workspace, excluded from the root one). Cargo gets
+`--target-dir` set to a directory in the Zig cache (`addOutputDirectoryArg` in
+`lib/voltaire/build.zig`), and the build links `libcrypto_wrappers.a` from there.
+No separate Rust step is needed, `lib/voltaire/target/` is not used, and an
+exported `CARGO_TARGET_DIR` does not move the archive. If a build reports
+`libcrypto_wrappers.a: file not found`, check that `cargo` is on `PATH` and read
+the Cargo error above it.
 
 **Cargo profile warning.** Every build prints:
 
@@ -155,5 +148,5 @@ package:   …/lib/foundry-compilers/Cargo.toml
 workspace: …/Cargo.toml
 ```
 
-Harmless — `lib/foundry-compilers` defines `[profile.*]` that only the workspace
-root may set.
+Harmless. `lib/foundry-compilers` defines a `[profile.release]` that only the
+workspace root may set.

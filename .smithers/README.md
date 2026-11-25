@@ -11,8 +11,7 @@ an explicit label or pattern; bare `build --plan` and `test --plan` are invalid.
 
 | Target | Command / behavior |
 | --- | --- |
-| `build-crypto` | `cargo build --release --locked --manifest-path lib/voltaire/Cargo.toml` |
-| `build` | Prepare Voltaire crypto, then `zig build` |
+| `build` | `zig build` (also compiles Voltaire's Rust crypto archive) |
 | `test-unit` | `zig build test-unit` |
 | `test-opcodes` | `zig build test-opcodes` |
 | `test-modexp` | `zig build test-modexp` |
@@ -47,9 +46,10 @@ Build output, engine state and report directories are excluded from source keys.
 Cache paths use absolute URLs derived from PACKAGE.ts because the installed CLI
 does not expand the older `{smthrs:cache-directory}` environment token.
 
-`lib/voltaire/Cargo.toml` declares its own `[workspace]`, so
-`build-crypto.mjs` builds it in place with its lockfile. The Zig build links the
-resulting `lib/voltaire/target/release/libcrypto_wrappers.a`. Foundry's legacy
+`lib/voltaire/Cargo.toml` declares its own `[workspace]`. `lib/voltaire/build.zig`
+runs `cargo build --release --locked` for it with `--target-dir` set to a Zig
+cache output directory and links the resulting `libcrypto_wrappers.a`, so no
+separate crypto step exists. Foundry's legacy
 `rust_build.zig` points at `src/compilers` and is not used by the root build;
 the active integration is `lib/foundry.zig`.
 

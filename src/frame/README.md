@@ -24,7 +24,6 @@ The Frame is designed with clear separation of concerns:
 ### Testing and Integration
 
 - `frame_tests.zig` — Comprehensive test suite covering frame operations
-- `frame_c.zig` — C interface bindings for external integration
 - `frame_bench.zig` — Performance benchmarks for frame operations
 
 ## Key Data Structures
@@ -322,26 +321,6 @@ pub const Error = error{
 - **Pretty Print**: Comprehensive frame state visualization with ANSI colors
 - **Execution Tracing**: Optional zero-cost tracing for debugging and analysis
 - **Cache Statistics**: Performance monitoring of dispatch cache effectiveness
-
-## C API Integration
-
-The frame module provides C bindings for external integration:
-
-```c
-// Error codes
-#define EVM_SUCCESS 0
-#define EVM_ERROR_OUT_OF_GAS -3
-#define EVM_ERROR_INVALID_OPCODE -5
-
-// Frame operations through C API
-typedef struct frame_c_api {
-    int (*init)(/* parameters */);
-    int (*interpret)(/* bytecode */);
-    void (*deinit)(void);
-} FrameAPI;
-```
-
-For detailed C API usage, see `frame_c.zig` for the complete interface.
 
 ## Parent specialization
 

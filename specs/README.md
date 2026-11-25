@@ -169,41 +169,38 @@ A crash or a hang in the EVM costs one case, never the run. Workers run on a
 1 GiB stack because the EVM recurses once per call depth. Debug builds use
 `std.heap.DebugAllocator` and report `leak_check` (`clean` or `leaked`).
 
-### Baseline (2026-11-22)
+### Results (2026-11-25)
 
-`tests@v21.0.3` (sha256 `46bd48fb…04fd24`), 10,693 files, ReleaseFast, 66,652
-cases in 470 s on a MacBook Pro. All 4,370 invalid-transaction cases agree with
-the fixtures, and no root mismatch is unexplained, so the remaining failures
-are EVM behavior, not runner bookkeeping.
+`tests@v21.0.3` (sha256 `46bd48fb…04fd24`, pinned in
+`scripts/fetch-eest-fixtures.sh`), 10,693 files, ReleaseFast: every one of the
+66,652 cases passes with fusion on and with fusion off
+(`-Devm-enable-fusion=false`), with no failures and no crashes. CI runs both
+modes and fails unless the report shows 66,652 / 66,652.
 
-| Fork | Passed | Failed | Total | Pass % |
-| --- | ---: | ---: | ---: | ---: |
-| Frontier | 194 | 619 | 813 | 23.86 |
-| Homestead | 198 | 685 | 883 | 22.42 |
-| TangerineWhistle | 197 | 684 | 881 | 22.36 |
-| SpuriousDragon | 234 | 727 | 961 | 24.35 |
-| Byzantium | 251 | 2,081 | 2,332 | 10.76 |
-| ConstantinopleFix | 262 | 2,263 | 2,525 | 10.38 |
-| Istanbul | 264 | 2,388 | 2,652 | 9.95 |
-| Berlin | 558 | 3,035 | 3,593 | 15.53 |
-| London | 830 | 3,044 | 3,874 | 21.42 |
-| Paris | 830 | 3,059 | 3,889 | 21.34 |
-| Shanghai | 864 | 3,224 | 4,088 | 21.14 |
-| Cancun | 2,202 | 9,376 | 11,578 | 19.02 |
-| Prague | 2,808 | 11,111 | 13,919 | 20.17 |
-| Osaka | 2,808 | 11,856 | 14,664 | 19.15 |
-| **Total** | **12,500** | **54,152** | **66,652** | **18.75** |
+| Fork | Cases | Fusions ON pass | Fusions OFF pass | Fail | Pass % |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Frontier | 813 | 813 | 813 | 0 | 100.00 |
+| Homestead | 883 | 883 | 883 | 0 | 100.00 |
+| TangerineWhistle | 881 | 881 | 881 | 0 | 100.00 |
+| SpuriousDragon | 961 | 961 | 961 | 0 | 100.00 |
+| Byzantium | 2,332 | 2,332 | 2,332 | 0 | 100.00 |
+| ConstantinopleFix | 2,525 | 2,525 | 2,525 | 0 | 100.00 |
+| Istanbul | 2,652 | 2,652 | 2,652 | 0 | 100.00 |
+| Berlin | 3,593 | 3,593 | 3,593 | 0 | 100.00 |
+| London | 3,874 | 3,874 | 3,874 | 0 | 100.00 |
+| Paris | 3,889 | 3,889 | 3,889 | 0 | 100.00 |
+| Shanghai | 4,088 | 4,088 | 4,088 | 0 | 100.00 |
+| Cancun | 11,578 | 11,578 | 11,578 | 0 | 100.00 |
+| Prague | 13,919 | 13,919 | 13,919 | 0 | 100.00 |
+| Osaka | 14,664 | 14,664 | 14,664 | 0 | 100.00 |
+| **Total** | **66,652** | **66,652** | **66,652** | **0** | **100.00** |
 
-| Reason | Cases | First example |
-| --- | ---: | --- |
-| `gas_used_mismatch` | 40,684 | `60015f55` (cold `SSTORE` 0→1) uses 43,205 gas, fixture 43,105 |
-| `status_mismatch` | 13,046 | valid `CALL` contract fails with `StackUnderflow`; `ecpairing` |
-| `crash` | 266 | worker `SIGSEGV`, for example `frontier/opcodes/log/gas.json` |
-| `nonce_mismatch` | 125 | Frontier contract created with nonce 1, fixture 0 |
-| `storage_mismatch` | 29 | `ripemd` precompile result, initcode gas |
-| `balance_mismatch` | 2 | `stRandom2/random_statetest642` |
+16,907 Amsterdam posts are skipped because the fork is not implemented.
 
-16,907 Amsterdam posts are skipped.
+The first baseline (2026-11-22) passed 12,500 of 66,652 (18.75%); the commit
+history records the fixes since then. The last 311 failures closed with
+RETURN/REVERT size-0 handling, the pre-SELFDESTRUCT touch, EXP gas, BLOCKHASH
+served from ancestor hashes, and per-fork opcode gating that also covers fusions.
 
 ### JSON report
 

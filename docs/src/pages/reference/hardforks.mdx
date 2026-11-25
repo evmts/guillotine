@@ -6,8 +6,8 @@ description: The hardfork enum, the EIP set each fork activates, and the precomp
 # Hardforks and EIPs
 
 The hardfork is a comptime parameter. `Eips` (`src/eips_and_hardforks/eips.zig`)
-turns a `Hardfork` into a concrete EIP set, and handlers query that set at
-comptime, so a Berlin build contains no London code.
+turns a `Hardfork` into a concrete EIP set, and `src/evm.zig` queries that set
+through `config.eips`.
 
 ```zig
 const Evm = @import("evm").Evm;
@@ -27,7 +27,7 @@ Declared in `lib/voltaire/src/primitives/hardfork.zig` and re-exported as
 | `HOMESTEAD` | Mar 2016 | `DELEGATECALL` (EIP-7), EIP-2, EIP-8 |
 | `DAO` | Jul 2016 | State-only; no EVM changes |
 | `TANGERINE_WHISTLE` | Oct 2016 | EIP-150 gas repricing for IO-heavy ops |
-| `SPURIOUS_DRAGON` | Nov 2016 | EIP-155/160/161 — replay protection, empty-account removal |
+| `SPURIOUS_DRAGON` | Nov 2016 | EIP-155/160/161: replay protection, empty-account removal |
 | `BYZANTIUM` | Oct 2017 | `REVERT`, `RETURNDATASIZE`, `RETURNDATACOPY`, `STATICCALL`, BN254 precompiles |
 | `CONSTANTINOPLE` | Feb 2019 | `CREATE2`, `SHL`/`SHR`/`SAR`, `EXTCODEHASH`, EIP-1283 |
 | `PETERSBURG` | Feb 2019 | Reverts EIP-1283 (reentrancy risk) |
@@ -41,26 +41,31 @@ Declared in `lib/voltaire/src/primitives/hardfork.zig` and re-exported as
 | `SHANGHAI` | Apr 2023 | `PUSH0` (EIP-3855), EIP-3860 initcode cap, EIP-4895 withdrawals |
 | `CANCUN` | Mar 2024 | `TLOAD`/`TSTORE` (EIP-1153), `MCOPY` (EIP-5656), EIP-4844 blobs, EIP-6780, EIP-4788, EIP-7516 |
 | `PRAGUE` | — | EIP-7702 delegation, EIP-2537 BLS12-381, EIP-2935, EIP-6110, EIP-7002 |
-| `OSAKA` | — | EIP-7883, EIP-7823, EIP-7825, EIP-7934 |
+| `OSAKA` | Dec 2025 | `CLZ` (EIP-7939), `P256VERIFY` (EIP-7951), EIP-7594, EIP-7823, EIP-7825, EIP-7883, EIP-7892, EIP-7918, EIP-7934 |
+| `AMSTERDAM` | — | No scheduled EIPs yet; keeps Osaka's set |
 
-**`CANCUN` is the default.** `build.zig` accepts a subset of these via
-`-Devm-hardfork=`: `FRONTIER`, `HOMESTEAD`, `BYZANTIUM`, `BERLIN`, `LONDON`,
-`SHANGHAI`, `CANCUN`. The remaining variants are reachable from Zig by naming the
-config directly.
+**`OSAKA` is the default** (`Hardfork.DEFAULT`). Select a fork from Zig with
+`.eips = .{ .hardfork = ... }`. `-Devm-hardfork` sets the fork of the
+build-configured EVM (`DefaultEvm` in `src/root.zig`) and accepts enum names
+(`CANCUN`) and EEST fork names (`Cancun`).
 
 ## EIP sets
 
 `Eips.get_active_eips()` returns the exact list per fork. As of Cancun that is:
 
 ```
-2, 7, 8, 100, 140, 145, 150, 152, 155, 160, 161, 196, 197, 198, 211, 214,
-649, 658, 1014, 1052, 1108, 1153, 1283, 1344, 1559, 1884, 2028, 2200, 2565,
-2718, 2929, 2930, 3198, 3529, 3541, 3651, 3675, 3855, 3860, 4345, 4399,
-4788, 4844, 4895, 5133, 5656, 6780, 7516
+2, 7, 8, 100, 140, 145, 150, 152, 155, 160, 161, 170, 196, 197, 198, 211,
+214, 649, 658, 1014, 1052, 1108, 1153, 1283, 1344, 1559, 1884, 2028, 2200,
+2565, 2718, 2929, 2930, 3198, 3529, 3541, 3651, 3675, 3855, 3860, 4345,
+4399, 4788, 4844, 4895, 5133, 5656, 6780, 7516
 ```
 
-Prague adds `2537, 2935, 3074, 6110, 7002, 7702`. Osaka adds `7883, 7823, 7825,
-7934` (and drops 3074).
+Prague adds `2537, 2935, 6110, 7002, 7251, 7623, 7685, 7691, 7702`. Osaka adds
+`7594, 7823, 7825, 7883, 7892, 7918, 7934, 7939, 7951`.
+
+`is_eip_active` is a separate switch and does not match `get_active_eips` for
+every number: it reports `3074` active on Prague only, and returns `false` for
+`7251`, `7594`, `7685`, `7691`, `7892`, `7918`, and `7951`.
 
 Query it at comptime:
 
@@ -76,18 +81,24 @@ comptime {
 
 ### Overriding individual EIPs
 
-`eip_overrides` lets you activate or deactivate one EIP independently of the fork
-— useful for testnets, for L2s that diverge on a single EIP, and for bisecting a
-spec-test failure to a specific EIP:
+`Eips.overrides` activates or deactivates one EIP independently of the fork:
+useful for testnets, for L2s that diverge on a single EIP, and for bisecting a
+spec-test failure to a specific EIP. `is_eip_active` and the `eip_*` helpers
+that call it check overrides first:
 
 ```zig
 const Custom = @import("evm").Evm(.{
-    .eips = eips{ .hardfork = .SHANGHAI },
-    .eip_overrides = &.{
-        .{ .eip = 1153, .enabled = true },   // TLOAD/TSTORE before Cancun
+    .eips = eips{
+        .hardfork = .SHANGHAI,
+        .overrides = &.{
+            .{ .eip = 1153, .enabled = true }, // eip_1153_transient_storage_enabled() == true
+        },
     },
 });
 ```
+
+`EvmConfig.eip_overrides` also exists, but nothing outside
+`src/evm_config.zig` reads it.
 
 ## Precompiles
 
@@ -105,30 +116,31 @@ Addresses are defined in `lib/voltaire/src/precompiles/root.zig`:
 | `0x08` | `ECPAIRING` (BN254) | Byzantium |
 | `0x09` | `BLAKE2F` | Istanbul (EIP-152) |
 | `0x0A` | `POINT_EVALUATION` (KZG) | Cancun (EIP-4844) |
+| `0x0B` | `BLS12_G1ADD` | Prague (EIP-2537) |
+| `0x0C` | `BLS12_G1MSM` | Prague (EIP-2537) |
+| `0x0D` | `BLS12_G2ADD` | Prague (EIP-2537) |
+| `0x0E` | `BLS12_G2MSM` | Prague (EIP-2537) |
+| `0x0F` | `BLS12_PAIRING_CHECK` | Prague (EIP-2537) |
+| `0x10` | `BLS12_MAP_FP_TO_G1` | Prague (EIP-2537) |
+| `0x11` | `BLS12_MAP_FP2_TO_G2` | Prague (EIP-2537) |
+| `0x100` | `P256VERIFY` | Osaka (EIP-7951) |
 
 The BN254 and BLS12-381 implementations come from the vendored arkworks Rust
 crate in `lib/voltaire`; KZG comes from `c-kzg-4844` and `blst`. That is why a
-build needs Cargo and a C compiler, and why dropping precompiles
-(`-Dno_precompiles=true`) is the biggest single lever on binary size.
+build needs Cargo and a C compiler. `EvmConfig.enable_precompiles = false`
+turns the precompile path off.
 
-:::warning[Known weak spot]
-The repository's own README reports that most Ethereum spec-test failures are
-concentrated in the `ecmul`/BN254 tests. If your workload leans on `0x06`–`0x08`,
-verify against another implementation before trusting results. See
-[Project status](/status).
+:::info[Conformance]
+Guillotine passes 66,652 of 66,652 official EEST state-test cases
+(`tests@v21.0.3`, Frontier through Osaka), with fusion on and off, including
+every precompile fixture. Amsterdam is not supported and its 16,907 cases are
+skipped. Guillotine is still alpha; see [Project status](/status).
 :::
 
 ### Replacing a precompile
 
-```zig
-const PrecompileOutput = struct { output: []const u8, gas_used: u64, success: bool };
-
-const Custom = @import("evm").Evm(.{
-    .precompile_overrides = &.{
-        .{ .address = my_address, .execute = &myPrecompile },
-    },
-});
-```
-
-The `execute` signature is
-`fn (allocator: std.mem.Allocator, input: []const u8, gas_limit: u64) anyerror!PrecompileOutput`.
+`EvmConfig.precompile_overrides` adds or replaces precompiles. A call to an
+override's address runs its `execute` function before the fork's standard
+precompiles are consulted, and `call` pre-warms every override address
+(`executePrecompileOverride` in `src/evm.zig`). See
+[Configuring the EVM](/guides/configuration#overriding-an-opcode-or-a-precompile).

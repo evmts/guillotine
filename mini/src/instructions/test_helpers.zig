@@ -270,9 +270,14 @@ pub const TestHelper = struct {
 
     /// Write bytes to memory at offset
     pub fn writeMemory(self: *Self, offset: u32, data: []const u8) !void {
-        for (data, 0..) |byte, i| {
-            try self.frame.memory.put(@intCast(offset + i), byte);
+        const end = @as(usize, offset) + data.len;
+        if (end > self.frame.memory.items.len) {
+            const old_len = self.frame.memory.items.len;
+            try self.frame.memory.ensureTotalCapacity(self.frame.allocator, end);
+            self.frame.memory.items.len = end;
+            @memset(self.frame.memory.items[old_len..end], 0);
         }
+        @memcpy(self.frame.memory.items[offset..end], data);
         // Update memory size if needed
         const new_size = offset + @as(u32, @intCast(data.len));
         if (new_size > self.frame.memory_size) {
@@ -284,7 +289,7 @@ pub const TestHelper = struct {
     pub fn readMemory(self: *Self, offset: u32, length: u32) ![]u8 {
         const result = try self.allocator.alloc(u8, length);
         for (0..length) |i| {
-            result[i] = self.frame.memory.get(@intCast(offset + i)) orelse 0;
+            result[i] = self.frame.readMemory(@intCast(offset + i));
         }
         return result;
     }
@@ -325,28 +330,35 @@ pub const TestHelper = struct {
 
     /// Set balance for an address
     pub fn setBalance(self: *Self, address: Address, balance: u256) !void {
-        try self.evm.balances.put(address, balance);
+        const entry = try self.evm.accounts.getOrPut(address);
+        if (!entry.found_existing) entry.value_ptr.* = .{};
+        entry.value_ptr.balance = balance;
     }
 
     /// Get balance for an address
     pub fn getBalance(self: *Self, address: Address) u256 {
-        return self.evm.balances.get(address) orelse 0;
+        return if (self.evm.accounts.get(address)) |account| account.balance else 0;
     }
 
     /// Set nonce for an address
     pub fn setNonce(self: *Self, address: Address, nonce: u64) !void {
-        try self.evm.nonces.put(address, nonce);
+        const entry = try self.evm.accounts.getOrPut(address);
+        if (!entry.found_existing) entry.value_ptr.* = .{};
+        entry.value_ptr.nonce = nonce;
     }
 
     /// Get nonce for an address
     pub fn getNonce(self: *Self, address: Address) u64 {
-        return self.evm.nonces.get(address) orelse 0;
+        return if (self.evm.accounts.get(address)) |account| account.nonce else 0;
     }
 
     /// Set code for an address
     pub fn setCode(self: *Self, address: Address, code: []const u8) !void {
         const owned_code = try self.allocator.dupe(u8, code);
-        try self.evm.code.put(address, owned_code);
+        errdefer self.allocator.free(owned_code);
+        const entry = try self.evm.accounts.getOrPut(address);
+        if (!entry.found_existing) entry.value_ptr.* = .{};
+        entry.value_ptr.code = owned_code;
     }
 
     // =============================================================================
@@ -403,7 +415,7 @@ pub const TestHelper = struct {
 
     /// Assert memory byte at offset
     pub fn assertMemoryByte(self: *Self, offset: u32, expected: u8) !void {
-        const actual = self.frame.memory.get(offset) orelse 0;
+        const actual = self.frame.readMemory(offset);
         try testing.expectEqual(expected, actual);
     }
 

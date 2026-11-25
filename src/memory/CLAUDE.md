@@ -13,7 +13,6 @@
 ### Core Files
 - `memory.zig` - Main implementation, lazy expansion
 - `memory_config.zig` - Configuration/validation
-- `memory_c.zig` - C FFI interface
 - `memory_bench.zig` - Performance benchmarks
 
 ## Key Operations

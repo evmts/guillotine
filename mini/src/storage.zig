@@ -288,7 +288,7 @@ test "Storage: get returns 0 for empty slot" {
     const allocator = std.testing.allocator;
     var storage = Storage.init(allocator, null, null);
 
-    const addr = primitives.Address{ .bytes = [_]u8{0xab} ** 20 };
+    const addr = primitives.Address{ .bytes = @as([20]u8, @splat(0xab)) };
     const value = try storage.get(addr, 123);
     try std.testing.expectEqual(@as(u256, 0), value);
 }
@@ -297,7 +297,7 @@ test "Storage: set and get persistent storage" {
     const allocator = std.testing.allocator;
     var storage = Storage.init(allocator, null, null);
 
-    const addr = primitives.Address{ .bytes = [_]u8{0xab} ** 20 };
+    const addr = primitives.Address{ .bytes = @as([20]u8, @splat(0xab)) };
     const slot: u256 = 42;
     const value: u256 = 0x1234567890abcdef;
 
@@ -317,7 +317,7 @@ test "Storage: set to zero deletes slot" {
     const allocator = std.testing.allocator;
     var storage = Storage.init(allocator, null, null);
 
-    const addr = primitives.Address{ .bytes = [_]u8{0xab} ** 20 };
+    const addr = primitives.Address{ .bytes = @as([20]u8, @splat(0xab)) };
     const slot: u256 = 42;
 
     // Set non-zero value
@@ -333,7 +333,7 @@ test "Storage: getOriginal returns current for unmodified slots" {
     const allocator = std.testing.allocator;
     var storage = Storage.init(allocator, null, null);
 
-    const addr = primitives.Address{ .bytes = [_]u8{0xab} ** 20 };
+    const addr = primitives.Address{ .bytes = @as([20]u8, @splat(0xab)) };
     const slot: u256 = 42;
 
     // Set initial value
@@ -354,7 +354,7 @@ test "Storage: transient storage get/set" {
     const allocator = std.testing.allocator;
     var storage = Storage.init(allocator, null, null);
 
-    const addr = primitives.Address{ .bytes = [_]u8{0xcd} ** 20 };
+    const addr = primitives.Address{ .bytes = @as([20]u8, @splat(0xcd)) };
     const slot: u256 = 789;
     const value: u256 = 0xdeadbeef;
 
@@ -375,7 +375,7 @@ test "Storage: transient storage set to zero deletes slot" {
     const allocator = std.testing.allocator;
     var storage = Storage.init(allocator, null, null);
 
-    const addr = primitives.Address{ .bytes = [_]u8{0xef} ** 20 };
+    const addr = primitives.Address{ .bytes = @as([20]u8, @splat(0xef)) };
     const slot: u256 = 100;
 
     // Set transient value
@@ -391,8 +391,8 @@ test "Storage: clearTransient removes all transient storage" {
     const allocator = std.testing.allocator;
     var storage = Storage.init(allocator, null, null);
 
-    const addr1 = primitives.Address{ .bytes = [_]u8{0x11} ** 20 };
-    const addr2 = primitives.Address{ .bytes = [_]u8{0x22} ** 20 };
+    const addr1 = primitives.Address{ .bytes = @as([20]u8, @splat(0x11)) };
+    const addr2 = primitives.Address{ .bytes = @as([20]u8, @splat(0x22)) };
 
     // Set multiple transient values
     try storage.setTransient(addr1, 1, 100);
@@ -417,8 +417,8 @@ test "Storage: multiple addresses with same slot" {
     const allocator = std.testing.allocator;
     var storage = Storage.init(allocator, null, null);
 
-    const addr1 = primitives.Address{ .bytes = [_]u8{0xaa} ** 20 };
-    const addr2 = primitives.Address{ .bytes = [_]u8{0xbb} ** 20 };
+    const addr1 = primitives.Address{ .bytes = @as([20]u8, @splat(0xaa)) };
+    const addr2 = primitives.Address{ .bytes = @as([20]u8, @splat(0xbb)) };
     const slot: u256 = 1;
 
     // Set different values for same slot on different addresses

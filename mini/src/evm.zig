@@ -350,8 +350,8 @@ pub fn Evm(comptime config: EvmConfig) type {
             // RLP encoding of [sender (20 bytes), nonce]
             // For simplicity, use a fixed buffer (max size for nonce encoding is small)
             var buffer: [64]u8 = undefined;
-            var fbs = std.io.fixedBufferStream(&buffer);
-            const writer = fbs.writer();
+            var fixed_writer: std.Io.Writer = .fixed(&buffer);
+            const writer = &fixed_writer;
 
             // Calculate nonce encoding length
             const nonce_len: usize = blk: {
@@ -388,7 +388,7 @@ pub fn Evm(comptime config: EvmConfig) type {
                 try writer.writeAll(nonce_bytes[start..]);
             }
 
-            const rlp_data = fbs.getWritten();
+            const rlp_data = fixed_writer.buffered();
 
             // Compute keccak256 hash
             var hash: [32]u8 = undefined;

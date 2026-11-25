@@ -2,7 +2,7 @@
 
 Native, self-contained benchmark runner for the public `src/root.zig` EVM.
 No `evmts/evm-benchmarks` checkout, runtime compiler, zbench, or RPC is needed.
-Run all commands from the repository root with Zig 0.15.1:
+Run all commands from the repository root with Zig 0.17.1:
 
 ```sh
 zig build --build-file bench/build.zig test-bench

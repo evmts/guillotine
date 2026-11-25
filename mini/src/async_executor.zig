@@ -141,9 +141,11 @@ pub fn AsyncExecutor(comptime EvmType: type, comptime CallParams: type, comptime
                         _ = try injector.code_cache.put(data.address, code_copy);
                     }
 
-                    // Also store in EVM's code map
+                    // Also store in the EVM's account state
                     const code_copy2 = try self.evm.arena.allocator().dupe(u8, data.code);
-                    try self.evm.code.put(data.address, code_copy2);
+                    const code_entry = try self.evm.accounts.getOrPut(data.address);
+                    if (!code_entry.found_existing) code_entry.value_ptr.* = .{};
+                    code_entry.value_ptr.code = code_copy2;
 
                     // Clear the request
                     self.async_data_request = .none;
@@ -156,8 +158,10 @@ pub fn AsyncExecutor(comptime EvmType: type, comptime CallParams: type, comptime
                         _ = try injector.nonce_cache.put(data.address, data.nonce);
                     }
 
-                    // Also store in EVM's nonce map
-                    try self.evm.nonces.put(data.address, data.nonce);
+                    // Also store in the EVM's account state
+                    const nonce_entry = try self.evm.accounts.getOrPut(data.address);
+                    if (!nonce_entry.found_existing) nonce_entry.value_ptr.* = .{};
+                    nonce_entry.value_ptr.nonce = data.nonce;
 
                     // Clear the request
                     self.async_data_request = .none;

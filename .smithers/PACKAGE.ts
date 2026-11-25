@@ -20,19 +20,15 @@ const env = {
 const tools = [S.Host.bin("cargo"), S.Host.bin("rustc"), S.Host.bin("cc")]
 const common = { bin: S.Host.bin("zig"), tools, env, sandbox: "none" as const, timeout: "6h" as const }
 
-const crypto = S.Shell.Build({
-  bin: S.Host.bin("node"), tools,
-  args: [".smithers/build-crypto.mjs"],
-  sandbox: "none", timeout: "1h", data: [source],
-  outFiles: ["//lib/voltaire/target/release/libcrypto_wrappers.a"]
-})
-const build = S.Shell.Build({ ...common, args: ["build"], data: [source, crypto], outDirs: ["//zig-out"] })
+// `zig build` compiles Voltaire's Rust archive itself (lib/voltaire/build.zig
+// runs `cargo build --release --locked` into a Zig cache output directory).
+const build = S.Shell.Build({ ...common, args: ["build"], data: [source], outDirs: ["//zig-out"] })
 // Every target runs a step of the root build.zig (Zig 0.17.1).
 const step = (name: string, manual = false) =>
   S.Shell.Test({ ...common, args: ["build", name], data: [source, build], manual })
 const bench = S.Shell.Build({
   ...common, args: ["build", "bench-build", "--prefix", "zig-out/smithers"],
-  data: [source, crypto], outDirs: ["//zig-out/smithers"]
+  data: [source], outDirs: ["//zig-out/smithers"]
 })
 
 export const Package = S.Package({ targets: {
@@ -40,7 +36,6 @@ export const Package = S.Package({ targets: {
   sources: source,
   "factory-write": S.FactoryProjection({ mode: "write" }),
   "factory-check": S.FactoryProjection({ mode: "check" }),
-  "build-crypto": crypto,
   build,
   "test-unit": step("test-unit"),
   "test-opcodes": step("test-opcodes"),

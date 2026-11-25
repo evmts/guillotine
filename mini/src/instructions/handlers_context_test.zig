@@ -172,7 +172,11 @@ test "BALANCE: returns account balance" {
     // Set a balance for the test address
     const test_addr = try Address.fromHex("0x1234567890123456789012345678901234567890");
     const test_balance: u256 = 12345;
-    try evm.balances.put(test_addr, test_balance);
+    {
+        const entry = try evm.accounts.getOrPut(test_addr);
+        if (!entry.found_existing) entry.value_ptr.* = .{};
+        entry.value_ptr.balance = test_balance;
+    }
 
     // Push address on stack
     try frame.pushStack(Address.toU256(test_addr));
@@ -952,7 +956,11 @@ test "EXTCODESIZE: returns external code size" {
     // Set code for an external address
     const ext_addr = try Address.fromHex("0x1234567890123456789012345678901234567890");
     const ext_code = &[_]u8{ 0x60, 0x00, 0x60, 0x00 };
-    try evm.code.put(ext_addr, ext_code);
+    {
+        const entry = try evm.accounts.getOrPut(ext_addr);
+        if (!entry.found_existing) entry.value_ptr.* = .{};
+        entry.value_ptr.code = ext_code;
+    }
 
     try frame.pushStack(Address.toU256(ext_addr));
 
@@ -1088,7 +1096,11 @@ test "EXTCODECOPY: copy external code to memory" {
     // Set code for an external address
     const ext_addr = try Address.fromHex("0x1234567890123456789012345678901234567890");
     const ext_code = &[_]u8{ 0x11, 0x22, 0x33, 0x44, 0x55 };
-    try evm.code.put(ext_addr, ext_code);
+    {
+        const entry = try evm.accounts.getOrPut(ext_addr);
+        if (!entry.found_existing) entry.value_ptr.* = .{};
+        entry.value_ptr.code = ext_code;
+    }
 
     try frame.pushStack(3); // size
     try frame.pushStack(1); // offset in code
@@ -1123,7 +1135,11 @@ test "EXTCODECOPY: zero padding when reading beyond code" {
     // Set code for an external address
     const ext_addr = try Address.fromHex("0x1234567890123456789012345678901234567890");
     const ext_code = &[_]u8{ 0x11, 0x22 };
-    try evm.code.put(ext_addr, ext_code);
+    {
+        const entry = try evm.accounts.getOrPut(ext_addr);
+        if (!entry.found_existing) entry.value_ptr.* = .{};
+        entry.value_ptr.code = ext_code;
+    }
 
     try frame.pushStack(5); // size (beyond code)
     try frame.pushStack(0); // offset in code
@@ -1416,7 +1432,11 @@ test "EXTCODEHASH: returns code hash for non-empty account" {
     // Set code for an external address
     const ext_addr = try Address.fromHex("0x1234567890123456789012345678901234567890");
     const ext_code = &[_]u8{ 0x60, 0x00, 0x60, 0x00 };
-    try evm.code.put(ext_addr, ext_code);
+    {
+        const entry = try evm.accounts.getOrPut(ext_addr);
+        if (!entry.found_existing) entry.value_ptr.* = .{};
+        entry.value_ptr.code = ext_code;
+    }
 
     try frame.pushStack(Address.toU256(ext_addr));
 

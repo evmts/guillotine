@@ -4,7 +4,7 @@ export default defineConfig({
   title: 'Guillotine',
   titleTemplate: '%s · Guillotine',
   description:
-    'Guillotine is an ultrafast Ethereum Virtual Machine written in Zig, with bindings for every language and platform.',
+    'Guillotine is an Ethereum Virtual Machine written in Zig, with a C ABI for embedding it in other languages.',
   rootDir: '.',
   baseUrl: 'https://guillotine.tevm.sh',
   logoUrl: {
@@ -24,7 +24,6 @@ export default defineConfig({
   },
   topNav: [
     { text: 'Docs', link: '/', match: '/' },
-    { text: 'Playground', link: '/playground', match: '/playground' },
     {
       text: 'Ecosystem',
       items: [
@@ -51,7 +50,6 @@ export default defineConfig({
         { text: 'Getting started', link: '/getting-started' },
         { text: 'Project status', link: '/status' },
         { text: 'The stack', link: '/stack' },
-        { text: 'EVM Playground', link: '/playground' },
       ],
     },
     {
@@ -84,7 +82,7 @@ export default defineConfig({
     },
   ],
   editLink: {
-    pattern: 'https://github.com/evmts/guillotine/edit/main/docs/src/pages/:path',
+    link: 'https://github.com/evmts/guillotine/edit/main/docs/src/pages/:path',
     text: 'Edit this page on GitHub',
   },
   socials: [
@@ -134,6 +132,6 @@ export default defineConfig({
   banner: {
     dismissable: true,
     content:
-      '⚠️ Guillotine is in **alpha** — not yet suitable for production use. [Follow progress →](https://github.com/evmts/guillotine/issues)',
+      '⚠️ Guillotine is **alpha** software and not suitable for production use. [Follow progress →](https://github.com/evmts/guillotine/issues)',
   },
 })

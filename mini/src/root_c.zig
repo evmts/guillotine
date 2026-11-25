@@ -81,7 +81,7 @@ const Address = primitives.Address.Address;
 const ZERO_ADDRESS = primitives.ZERO_ADDRESS;
 
 // Global allocator for C interface
-var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+var gpa: std.heap.DebugAllocator(.{}) = .init;
 var allocator = gpa.allocator();
 
 // Opaque handle for EVM instance
@@ -597,7 +597,9 @@ export fn evm_set_balance(
             balance = (balance << 8) | balance_bytes[i];
         }
 
-        ctx.evm.balances.put(address, balance) catch return false;
+        const entry = ctx.evm.accounts.getOrPut(address) catch return false;
+        if (!entry.found_existing) entry.value_ptr.* = .{};
+        entry.value_ptr.balance = balance;
         return true;
     }
     return false;
@@ -619,7 +621,12 @@ export fn evm_set_code(
         const code_slice = if (code_len > 0) code[0..code_len] else &[_]u8{};
         const code_copy = ctx.evm.allocator.alloc(u8, code_slice.len) catch return false;
         @memcpy(code_copy, code_slice);
-        ctx.evm.code.put(address, code_copy) catch return false;
+        const entry = ctx.evm.accounts.getOrPut(address) catch {
+            ctx.evm.allocator.free(code_copy);
+            return false;
+        };
+        if (!entry.found_existing) entry.value_ptr.* = .{};
+        entry.value_ptr.code = code_copy;
         return true;
     }
     return false;
@@ -637,7 +644,9 @@ export fn evm_set_nonce(
         var address: Address = undefined;
         @memcpy(&address.bytes, address_bytes[0..20]);
 
-        ctx.evm.nonces.put(address, nonce) catch return false;
+        const entry = ctx.evm.accounts.getOrPut(address) catch return false;
+        if (!entry.found_existing) entry.value_ptr.* = .{};
+        entry.value_ptr.nonce = nonce;
         return true;
     }
     return false;

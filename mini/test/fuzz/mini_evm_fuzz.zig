@@ -12,8 +12,8 @@ const primitives = @import("primitives");
 const MiniEvm = mini.Evm(.{});
 const Address = primitives.Address;
 
-const CALLER = Address{ .bytes = [_]u8{0} ** 19 ++ [_]u8{0x11} };
-const TARGET = Address{ .bytes = [_]u8{0} ** 19 ++ [_]u8{0x22} };
+const CALLER = Address{ .bytes = @as([19]u8, @splat(0)) ++ [_]u8{0x11} };
+const TARGET = Address{ .bytes = @as([19]u8, @splat(0)) ++ [_]u8{0x22} };
 
 fn executeOnce(
     allocator: std.mem.Allocator,
@@ -25,8 +25,9 @@ fn executeOnce(
     var evm_inst = try MiniEvm.init(allocator, null, hardfork, null, .err);
     defer evm_inst.deinit();
 
-    try evm_inst.setBalance(CALLER, 10_000_000_000);
-    try evm_inst.setCode(TARGET, code);
+    // `call` executes `pending_bytecode` at `to`. With no host and zero value,
+    // `initTransactionState` resets account state, so no balance setup is needed.
+    evm_inst.setBytecode(code);
 
     const res = evm_inst.call(.{
         .call = .{
@@ -85,6 +86,23 @@ const seed_corpus: []const []const u8 = &.{
     &.{ 6, 3, 0x60, 0x11, 0x60, 0x00, 0x5d, 0x60, 0x00, 0x5c, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3 }, // TSTORE/TLOAD
 };
 
+/// Adapts a byte-slice target to `std.testing.fuzz`, which passes a
+/// `*std.testing.Smith`. Corpus replay (`smith.in != null`) hands each seed to
+/// the target unchanged; under `--fuzz` the fuzzer generates the byte slice.
+fn smithBytes(_: void, smith: *std.testing.Smith) anyerror!void {
+    if (smith.in) |input| return fuzzMiniDeterminismAndInvariants({}, input);
+    var buffer: [256]u8 = undefined;
+    const len = smith.slice(&buffer);
+    return fuzzMiniDeterminismAndInvariants({}, buffer[0..len]);
+}
+
 test "fuzz guillotine-mini execution determinism, gas bounds, and multi-hardfork safety" {
-    try std.testing.fuzz({}, fuzzMiniDeterminismAndInvariants, .{ .corpus = seed_corpus });
+    try std.testing.fuzz({}, smithBytes, .{ .corpus = seed_corpus });
+}
+
+test "smithBytes replays every seed through the target" {
+    for (seed_corpus) |seed| {
+        var smith: std.testing.Smith = .{ .in = seed };
+        try smithBytes({}, &smith);
+    }
 }

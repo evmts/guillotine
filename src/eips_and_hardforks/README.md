@@ -12,12 +12,11 @@ This module centralizes protocol evolution: hardfork selection, EIP feature gati
 
 - **`eips.zig`** - Central EIP configuration system with feature flags
 - **`hardfork.zig`** - Hardfork enumeration and version management  
-- **`hardfork_c.zig`** - C-compatible hardfork interface for FFI
 
 ### EIP Modules
 
 - `eips.zig` — feature checks and fork‑aware helpers (e.g., gas rules)
-- `hardfork.zig` and `hardfork_c.zig` — fork enum + C bindings
+- `hardfork.zig` — fork enum
 - `beacon_roots.zig` — EIP‑4788 (Cancun)
 - `historical_block_hashes.zig` — EIP‑2935 (Prague)
 - `validator_deposits.zig` — EIP‑6110 (Prague)

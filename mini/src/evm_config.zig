@@ -64,7 +64,7 @@ pub const EvmConfig = struct {
     /// Loop quota for safety counters to prevent infinite loops
     /// null = disabled (default for optimized builds)
     /// value = maximum iterations before panic (default for debug/safe builds)
-    loop_quota: ?u32 = if (builtin.mode == .Debug or builtin.mode == .ReleaseSafe) 1_000_000 else null,
+    loop_quota: ?u32 = if (builtin.mode == .debug or builtin.mode == .safe) 1_000_000 else null,
 
     /// Enable system contract updates (EIP-4788 beacon roots, EIP-2935 historical block hashes)
     /// When true, these contracts are updated at the start of each transaction

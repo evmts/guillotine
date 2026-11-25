@@ -1,0 +1,221 @@
+name: Release
+
+# Push a `v*` tag to build the C FFI libraries on macOS arm64 and Linux x86_64,
+# publish @tevm/guillotine to npm with both prebuilds, and create a GitHub
+# Release with the C FFI tarballs. `workflow_dispatch` runs every build and
+# check, packs the npm tarball, and publishes nothing.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    name: Check versions
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: build.zig.zon, package.json and the tag agree
+        id: read
+        shell: bash
+        run: |
+          set -euo pipefail
+          zon="$(sed -n 's/^[[:space:]]*\.version = "\([^"]*\)",.*/\1/p' build.zig.zon | head -n 1)"
+          npm_version="$(python3 -I -c 'import json, sys; print(json.load(open(sys.argv[1]))["version"])' sdks/typescript/package.json)"
+          echo "build.zig.zon: $zon, sdks/typescript/package.json: $npm_version"
+          test -n "$zon"
+          if [ "$zon" != "$npm_version" ]; then
+            echo "::error::build.zig.zon ($zon) and sdks/typescript/package.json ($npm_version) disagree" >&2
+            exit 1
+          fi
+          if [[ "$GITHUB_REF" == refs/tags/v* ]] && [ "${GITHUB_REF_NAME#v}" != "$zon" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match version $zon" >&2
+            exit 1
+          fi
+          echo "version=$zon" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build ${{ matrix.platform }}
+    needs: version
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: macos-latest
+            platform: darwin-arm64
+            machine: arm64
+            shared: libguillotine_ffi.dylib
+          - os: ubuntu-latest
+            platform: linux-x64
+            machine: x86_64
+            shared: libguillotine_ffi.so
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install Zig 0.17.1
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.17.1
+      - name: Select a macOS SDK that Zig 0.17.1 can link
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          probe="$RUNNER_TEMP/zig-sdk-probe"
+          mkdir -p "$probe"
+          printf 'pub fn main() void {}\n' > "$probe/main.zig"
+          for dev in "$(xcode-select -p)" $(printf "%s\n" /Applications/Xcode_*.app | sort -rV | sed 's|$|/Contents/Developer|'); do
+            if ! sdk="$(DEVELOPER_DIR="$dev" xcrun --sdk macosx --show-sdk-path 2>/dev/null)"; then
+              echo "Skipping $dev: no macOS SDK"
+              continue
+            fi
+            if DEVELOPER_DIR="$dev" zig build-exe "$probe/main.zig" -femit-bin="$probe/main" > "$probe/log" 2>&1 && "$probe/main"; then
+              echo "Zig links against $sdk"
+              echo "DEVELOPER_DIR=$dev" >> "$GITHUB_ENV"
+              exit 0
+            fi
+            echo "Skipping $dev: $(grep -m1 error: "$probe/log" || tail -n1 "$probe/log")"
+          done
+          echo "::error::No installed Xcode has a macOS SDK that Zig 0.17.1 can link against." >&2
+          exit 1
+      - name: Runner architecture is ${{ matrix.machine }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          zig version
+          cargo --version
+          uname -sm
+          test "$(uname -m)" = "${{ matrix.machine }}"
+      - name: Build FFI libraries (ReleaseFast, debug info stripped)
+        run: zig build shared static -Doptimize=ReleaseFast -Dstrip=true
+      - name: C SDK tests
+        run: make -f sdks/c/Makefile -o build-core test
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+      - name: TypeScript SDK tests against the ${{ matrix.platform }} prebuild
+        working-directory: sdks/typescript
+        shell: bash
+        run: |
+          set -euo pipefail
+          bun install --frozen-lockfile
+          bun scripts/copy-native.ts
+          test -f "prebuilds/${{ matrix.platform }}/${{ matrix.shared }}"
+          bun test
+      - name: Package the C FFI tarball
+        shell: bash
+        run: |
+          set -euo pipefail
+          name="guillotine-ffi-v${VERSION}-${{ matrix.platform }}"
+          mkdir -p "dist/$name/lib" "dist/$name/include"
+          cp "zig-out/lib/${{ matrix.shared }}" zig-out/lib/libguillotine_ffi_static.a "dist/$name/lib/"
+          cp sdks/c/include/guillotine.h "dist/$name/include/"
+          cp LICENSE "dist/$name/"
+          tar -C dist -czf "dist/$name.tar.gz" "$name"
+          echo "FFI_TARBALL=dist/$name.tar.gz" >> "$GITHUB_ENV"
+      - name: Upload npm prebuild
+        uses: actions/upload-artifact@v4
+        with:
+          name: prebuild-${{ matrix.platform }}
+          path: sdks/typescript/prebuilds/${{ matrix.platform }}/${{ matrix.shared }}
+          if-no-files-found: error
+      - name: Upload C FFI tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffi-${{ matrix.platform }}
+          path: ${{ env.FFI_TARBALL }}
+          if-no-files-found: error
+
+  publish:
+    name: Publish
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      # `secrets` is not available in `if:` expressions; read it through env.
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+      IS_TAG: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download npm prebuilds
+        uses: actions/download-artifact@v4
+        with:
+          pattern: prebuild-*
+          path: artifacts/prebuilds
+      - name: Download C FFI tarballs
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ffi-*
+          path: artifacts/ffi
+          merge-multiple: true
+      - name: Combine prebuilds into sdks/typescript/prebuilds
+        shell: bash
+        run: |
+          set -euo pipefail
+          for platform in darwin-arm64 linux-x64; do
+            mkdir -p "sdks/typescript/prebuilds/$platform"
+            cp "artifacts/prebuilds/prebuild-$platform/"* "sdks/typescript/prebuilds/$platform/"
+          done
+          test -f sdks/typescript/prebuilds/darwin-arm64/libguillotine_ffi.dylib
+          test -f sdks/typescript/prebuilds/linux-x64/libguillotine_ffi.so
+          cp sdks/c/include/guillotine.h artifacts/ffi/guillotine.h
+          ls -l sdks/typescript/prebuilds/* artifacts/ffi
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+      - name: Setup Node for npm
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - name: Build, typecheck, test and lint the package
+        working-directory: sdks/typescript
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+          bun run typecheck
+          bun test
+          bun run lint:package
+      - name: Pack (dry run)
+        working-directory: sdks/typescript
+        run: npm pack --dry-run --ignore-scripts
+      # prepublishOnly rebuilds one platform's library with Zig; the steps above
+      # already built, tested and linted the two-platform package.
+      - name: Publish @tevm/guillotine to npm
+        if: env.IS_TAG == 'true' && env.NPM_TOKEN != ''
+        working-directory: sdks/typescript
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --provenance --access public --ignore-scripts
+      - name: NPM_TOKEN is not set
+        if: env.IS_TAG == 'true' && env.NPM_TOKEN == ''
+        run: echo "::warning::NPM_TOKEN secret is not set; skipped npm publish of @tevm/guillotine@${VERSION}"
+      - name: Create GitHub Release
+        if: env.IS_TAG == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "$GITHUB_REF_NAME"
+          --verify-tag
+          --title "Guillotine $GITHUB_REF_NAME"
+          --generate-notes
+          artifacts/ffi/guillotine-ffi-v${VERSION}-darwin-arm64.tar.gz
+          artifacts/ffi/guillotine-ffi-v${VERSION}-linux-x64.tar.gz
+          artifacts/ffi/guillotine.h
