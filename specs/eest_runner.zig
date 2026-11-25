@@ -280,6 +280,21 @@ fn rlpDecode(data: []const u8) !RlpItem {
     return .{ .is_list = is_list, .payload = data[header .. header + len], .size = header + len };
 }
 
+/// State tests carry no ancestor headers. The reference consumers (geth `evm
+/// statetest`, `vmTestBlockHash`) define the hash of block `n` as keccak256 of its
+/// decimal string, so BLOCKHASH(0) from block 1 is keccak256("0").
+/// Returns the 256 hashes before `number`, newest first.
+fn stateTestBlockHashes(a: std.mem.Allocator, number: u64) ![]const [32]u8 {
+    const count: usize = @intCast(@min(number, 256));
+    const hashes = try a.alloc([32]u8, count);
+    var buf: [20]u8 = undefined;
+    for (hashes, 0..) |*hash, i| {
+        const ancestor = number - 1 - @as(u64, @intCast(i));
+        hash.* = keccak(try std.fmt.bufPrint(&buf, "{d}", .{ancestor}));
+    }
+    return hashes;
+}
+
 fn keccak(bytes: []const u8) [32]u8 {
     var out: [32]u8 = undefined;
     Keccak256.hash(bytes, &out, .{});
@@ -1302,6 +1317,7 @@ fn applyTx(
 
     const blob_hashes: []const [32]u8 = template.blob_hashes orelse &.{};
     const prevrandao: [32]u8 = env.random orelse zero_hash;
+    const ancestor_hashes = try stateTestBlockHashes(a, env.number);
     var vm = try Vm.init(
         gpa,
         db,
@@ -1318,6 +1334,7 @@ fn applyTx(
             .prev_randao = prevrandao,
             .blob_base_fee = validated.blob_base_fee,
             .blob_versioned_hashes = blob_hashes,
+            .block_hashes = ancestor_hashes,
         },
         .{
             .gas_limit = validated.gas_limit,
@@ -2917,4 +2934,20 @@ test "suiteOf strips the per-fork directory" {
     try std.testing.expectEqualStrings("prague/eip7702_set_code_tx", suiteOf("for_prague/prague/eip7702_set_code_tx/calls/x.json"));
     try std.testing.expectEqualStrings("shanghai/eip3855_push0", suiteOf("shanghai/eip3855_push0/push0.json"));
     try std.testing.expectEqualStrings("x.json", suiteOf("x.json"));
+}
+
+test "state test block hashes are keccak256 of the decimal block number" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    try std.testing.expectEqual(@as(usize, 0), (try stateTestBlockHashes(a, 0)).len);
+    const one = try stateTestBlockHashes(a, 1);
+    try std.testing.expectEqual(@as(usize, 1), one.len);
+    var expected: [32]u8 = undefined;
+    _ = try std.fmt.hexToBytes(&expected, "044852b2a670ade5407e78fb2863c51de9fcb96542a07186fe3aeda6bb8a116d");
+    try std.testing.expectEqualSlices(u8, &expected, &one[0]);
+    const many = try stateTestBlockHashes(a, 1000);
+    try std.testing.expectEqual(@as(usize, 256), many.len);
+    try std.testing.expectEqualSlices(u8, &keccak("999"), &many[0]);
+    try std.testing.expectEqualSlices(u8, &keccak("744"), &many[255]);
 }

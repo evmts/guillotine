@@ -398,6 +398,14 @@ pub fn Handlers(FrameType: type) type {
             const offset = self.stack.pop_unsafe(); // Top of stack
             const size = self.stack.pop_unsafe(); // Second from top
 
+            // A zero-size range neither touches nor expands memory, so the offset is
+            // ignored (execution-specs `calculate_gas_extend_memory` skips size 0).
+            if (size == 0) {
+                self.output_data = &.{};
+                self.afterComplete(.RETURN);
+                return Error.Return;
+            }
+
             // Bounds checking for memory offset and size
             if (offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
                 return Error.OutOfBounds;
@@ -422,21 +430,16 @@ pub fn Handlers(FrameType: type) type {
             // Ensure memory capacity (memory_end is guaranteed to fit in u24 from check above)
             self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(memory_end))) catch return Error.OutOfBounds;
 
-            // Extract return data from memory and store it in thread-local storage
-            if (size_usize > 0) {
-                const return_data = self.memory.get_slice(@as(u32, @intCast(offset_usize)), @as(u32, @intCast(size_usize))) catch {
-                    return Error.OutOfBounds;
-                };
-                // Allocate and copy output to thread-local storage
-                const new_output = self.getEvm().getCallArenaAllocator().alloc(u8, return_data.len) catch {
-                    return Error.AllocationError;
-                };
-                @memcpy(new_output, return_data);
-                self.output_data = new_output;
-            } else {
-                // Empty return data
-                self.output_data = &.{};
-            }
+            // Copy the output range out of frame memory into the call arena.
+            const return_data = self.memory.get_slice(@as(u32, @intCast(offset_usize)), @as(u32, @intCast(size_usize))) catch {
+                return Error.OutOfBounds;
+            };
+            // Allocate and copy output to thread-local storage
+            const new_output = self.getEvm().getCallArenaAllocator().alloc(u8, return_data.len) catch {
+                return Error.AllocationError;
+            };
+            @memcpy(new_output, return_data);
+            self.output_data = new_output;
 
             // Return indicates successful execution
             self.afterComplete(.RETURN);
@@ -455,6 +458,14 @@ pub fn Handlers(FrameType: type) type {
             const offset = self.stack.pop_unsafe(); // Top of stack
             const size = self.stack.pop_unsafe(); // Second from top
 
+            // A zero-size range neither touches nor expands memory, so the offset is
+            // ignored (execution-specs `calculate_gas_extend_memory` skips size 0).
+            if (size == 0) {
+                self.output_data = &.{};
+                self.afterComplete(.REVERT);
+                return Error.REVERT;
+            }
+
             // Bounds checking for memory offset and size
             if (offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
                 return Error.OutOfBounds;
@@ -479,21 +490,16 @@ pub fn Handlers(FrameType: type) type {
             // Ensure memory capacity (memory_end is guaranteed to fit in u24 from check above)
             self.memory.ensure_capacity(self.getEvm().getCallArenaAllocator(), @as(u32, @intCast(memory_end))) catch return Error.OutOfBounds;
 
-            // Extract revert data from memory and store it in thread-local storage
-            if (size_usize > 0) {
-                const revert_data = self.memory.get_slice(@as(u32, @intCast(offset_usize)), @as(u32, @intCast(size_usize))) catch {
-                    return Error.OutOfBounds;
-                };
-                // Allocate and copy output to thread-local storage
-                const revert_output = self.getEvm().getCallArenaAllocator().alloc(u8, revert_data.len) catch {
-                    return Error.AllocationError;
-                };
-                @memcpy(revert_output, revert_data);
-                self.output_data = revert_output;
-            } else {
-                // Empty revert data
-                self.output_data = &[_]u8{};
-            }
+            // Copy the output range out of frame memory into the call arena.
+            const revert_data = self.memory.get_slice(@as(u32, @intCast(offset_usize)), @as(u32, @intCast(size_usize))) catch {
+                return Error.OutOfBounds;
+            };
+            // Allocate and copy output to thread-local storage
+            const revert_output = self.getEvm().getCallArenaAllocator().alloc(u8, revert_data.len) catch {
+                return Error.AllocationError;
+            };
+            @memcpy(revert_output, revert_data);
+            self.output_data = revert_output;
 
             // Reduce log noise: no verbose REVERT logging
 

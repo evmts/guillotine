@@ -108,6 +108,8 @@ pub const MinimalEvm = struct {
     // Blockchain context
     chain_id: u64,
     block_number: u64,
+    /// Recent ancestor hashes, newest first (see `BlockInfo.block_hashes`).
+    block_hashes: []const [32]u8 = &.{},
     block_timestamp: u64,
     block_difficulty: u256,
     block_prevrandao: u256,
@@ -187,6 +189,7 @@ pub const MinimalEvm = struct {
         self.hardfork = Hardfork.DEFAULT;
         self.chain_id = 1;
         self.block_number = 0;
+        self.block_hashes = &.{};
         self.block_timestamp = 0;
         self.block_difficulty = 0;
         self.block_prevrandao = 0;
@@ -242,6 +245,12 @@ pub const MinimalEvm = struct {
         self.block_gas_limit = block_gas_limit;
         self.block_base_fee = block_base_fee;
         self.blob_base_fee = blob_base_fee;
+    }
+
+    /// Set the recent ancestor hashes BLOCKHASH serves, newest first. The slice is
+    /// borrowed and must outlive execution.
+    pub fn setBlockHashes(self: *Self, block_hashes: []const [32]u8) void {
+        self.block_hashes = block_hashes;
     }
 
     pub fn setTransactionContext(self: *Self, origin: Address, gas_price: u256) void {

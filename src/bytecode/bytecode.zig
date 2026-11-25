@@ -102,7 +102,8 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                 const packed_bits = iterator.bytecode.packed_bitmap[iterator.pc];
 
                 // Handle fusion opcodes first (only if fusions are enabled)
-                if (fusions_enabled and iterator.enable_fusion and packed_bits.is_fusion_candidate) {
+                if (fusions_enabled and iterator.enable_fusion and packed_bits.is_fusion_candidate) fused: {
+                    const fusion_start = iterator.pc;
                     const fusion_data = iterator.bytecode.getFusionData(iterator.pc);
                     // Advance PC properly for fusion opcodes
                     switch (fusion_data) {
@@ -155,6 +156,12 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
                         else => {
                             iterator.pc += 1;
                         },
+                    }
+                    // A fusion must not run an opcode this fork leaves undefined (for
+                    // example PUSH0 before Shanghai); decode such ranges one by one.
+                    if (!iterator.bytecode.opcodesDefined(fusion_start, iterator.pc)) {
+                        iterator.pc = fusion_start;
+                        break :fused;
                     }
                     return fusion_data;
                 }
@@ -639,6 +646,18 @@ pub fn Bytecode(cfg: BytecodeConfig) type {
             if (self.get_unsafe(pc + 2) != 0x81) return null; // DUP2
 
             return OpcodeData{ .mload_swap1_dup2 = .{ .original_length = 3 } };
+        }
+
+        /// True when every instruction starting in `[start, end)` is defined on the
+        /// configured fork.
+        fn opcodesDefined(self: *const Self, start: PcType, end: PcType) bool {
+            const stop = @min(@as(usize, end), self.packed_bitmap.len);
+            var pc: usize = start;
+            while (pc < stop) : (pc += 1) {
+                if (!self.packed_bitmap[pc].is_op_start) continue;
+                if (!fork_gas.isOpcodeDefined(cfg.hardfork, self.runtime_code[pc])) return false;
+            }
+            return true;
         }
 
         /// Get fusion data for a bytecode position marked as fusion candidate

@@ -146,4 +146,5 @@ test {
     _ = @import("calldatacopy_e2e.zig");
     _ = @import("create_nonce.zig");
     _ = @import("handler_bounds_regression.zig");
+    _ = @import("fork_rules.zig");
 }

@@ -9,6 +9,7 @@ const MinimalEvm = minimal_evm_mod.MinimalEvm;
 const MinimalEvmError = MinimalEvm.Error;
 const Hardfork = @import("../eips_and_hardforks/eips.zig").Hardfork;
 const fork_gas = @import("../frame/fork_gas.zig");
+const block_info = @import("../block/block_info.zig");
 
 pub const MinimalFrame = struct {
     const Self = @This();
@@ -466,9 +467,8 @@ pub const MinimalFrame = struct {
                     break :blk @as(u32, bit_position / 8 + 1);
                 };
 
-                // TODO: these constants should be in gas_constants.zig as well
-                // Use modern EIP-160 gas cost (50 gas per byte) for EXP
-                const gas_per_byte: u32 = 50;
+                // EIP-160 raised the per-byte cost from 10 to 50 in Spurious Dragon.
+                const gas_per_byte: u32 = if (evm.hardfork.isBefore(.SPURIOUS_DRAGON)) 10 else 50;
                 // Calculate gas cost based on the number of bytes needed to represent the exponent
                 const gas_cost = GasConstants.GasSlowStep + gas_per_byte * exp_bytes;
                 try self.consumeGas(gas_cost);
@@ -895,14 +895,8 @@ pub const MinimalFrame = struct {
             0x40 => {
                 try self.consumeGas(GasConstants.GasExtStep);
                 const block_number = try self.popStack();
-                // Simple mock: return a hash based on block number
-                const current_block = evm.block_number;
-                if (block_number >= current_block or current_block > block_number + 256) {
-                    try self.pushStack(0);
-                } else {
-                    // Mock hash based on block number
-                    try self.pushStack(block_number * 0x123456789abcdef);
-                }
+                const hash = block_info.recentBlockHash(evm.block_hashes, evm.block_number, block_number);
+                try self.pushStack(if (hash) |bytes| std.mem.readInt(u256, &bytes, .big) else 0);
                 self.pc += 1;
             },
 

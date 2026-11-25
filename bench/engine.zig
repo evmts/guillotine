@@ -6,24 +6,44 @@ const report = @import("report.zig");
 const paths = @import("bench_options");
 
 // The build helper rejects budgets above the Osaka+ transaction cap.
-pub const gas_limit: u64 = paths.gas_limit;
+pub const suite_gas_limit: u64 = paths.gas_limit;
+
+/// Fork name and gas budget of `profile`.
+pub fn hardforkName(comptime profile: workloads.Profile) []const u8 {
+    return switch (profile) {
+        .suite => paths.hardfork,
+        .uncapped => "PRAGUE",
+    };
+}
+
+pub fn gasLimit(comptime profile: workloads.Profile) u64 {
+    return switch (profile) {
+        .suite => suite_gas_limit,
+        .uncapped => workloads.uncapped_gas_limit,
+    };
+}
 pub const instruction_limit: u32 = 300_000_000;
 
 /// Each instantiation uses the real public Guillotine API. Loop dispatch needs
 /// a separately configured module because its selector is a build-time option.
-pub fn Runner(comptime evm: type, comptime fusion: bool) type {
+pub fn Runner(comptime evm: type, comptime fusion: bool, comptime profile: workloads.Profile) type {
     return struct {
         const Self = @This();
-        const hardfork = std.meta.stringToEnum(evm.Hardfork, paths.hardfork) orelse @compileError("unknown benchmark hardfork");
-        const precompile_hardfork = std.meta.stringToEnum(evm.Primitives.Hardfork, paths.hardfork) orelse @compileError("hardfork is absent from Voltaire");
+        const gas_limit = gasLimit(profile);
+        const hardfork = std.meta.stringToEnum(evm.Hardfork, hardforkName(profile)) orelse @compileError("unknown benchmark hardfork");
+        const precompile_hardfork = std.meta.stringToEnum(evm.Primitives.Hardfork, hardforkName(profile)) orelse @compileError("hardfork is absent from Voltaire");
         const Evm = evm.Evm(.{
             .eips = .{ .hardfork = hardfork },
+            // Frame gas must hold the whole budget (see EvmConfig.block_gas_limit).
+            .block_gas_limit = gas_limit,
             .enable_fusion = fusion,
             .loop_quota = instruction_limit,
             .tracer_config = .disabled,
         });
         const SetupEvm = evm.Evm(.{
             .eips = .{ .hardfork = hardfork },
+            // Frame gas must hold the whole budget (see EvmConfig.block_gas_limit).
+            .block_gas_limit = gas_limit,
             .enable_fusion = false,
             .loop_quota = instruction_limit,
             .tracer_config = .disabled,
@@ -182,7 +202,7 @@ pub fn Runner(comptime evm: type, comptime fusion: bool) type {
             }
             // Curve operations must not silently take an infinity/empty-output path.
             switch (workload.source) {
-                .precompile => |address| if (address == 1 or address == 6 or address == 7 or address == 0x12) {
+                .precompile => |address| if (address == 1 or address == 6 or address == 7 or address == 0x10) {
                     var nonzero: u8 = 0;
                     for (result.output) |byte| nonzero |= byte;
                     if (nonzero == 0) return error.UnexpectedInfinity;

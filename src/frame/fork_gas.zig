@@ -139,6 +139,24 @@ pub fn staticGas(hardfork: Hardfork, opcode: u8, berlin_cost: u64) u64 {
     };
 }
 
+/// True when `opcode` is defined on `hardfork`. Opcodes added by a later fork are
+/// undefined before it and halt exceptionally like any other undefined opcode
+/// (execution-specs: each fork's `vm/instructions/__init__.py` op table).
+pub fn isOpcodeDefined(hardfork: Hardfork, opcode: u8) bool {
+    const introduced: Hardfork = switch (opcode) {
+        0xf4 => .HOMESTEAD, // DELEGATECALL (EIP-7)
+        0x3d, 0x3e, 0xfa, 0xfd => .BYZANTIUM, // RETURNDATASIZE, RETURNDATACOPY, STATICCALL, REVERT
+        0x1b, 0x1c, 0x1d, 0x3f, 0xf5 => .CONSTANTINOPLE, // SHL, SHR, SAR, EXTCODEHASH, CREATE2
+        0x46, 0x47 => .ISTANBUL, // CHAINID, SELFBALANCE
+        0x48 => .LONDON, // BASEFEE
+        0x5f => .SHANGHAI, // PUSH0
+        0x49, 0x4a, 0x5c, 0x5d, 0x5e => .CANCUN, // BLOBHASH, BLOBBASEFEE, TLOAD, TSTORE, MCOPY
+        0x1e => .OSAKA, // CLZ (EIP-7939)
+        else => return true,
+    };
+    return hardfork.isAtLeast(introduced);
+}
+
 /// True when the fork distinguishes cold from warm state access (EIP-2929).
 pub fn hasAccessLists(hardfork: Hardfork) bool {
     return hardfork.isAtLeast(.BERLIN);

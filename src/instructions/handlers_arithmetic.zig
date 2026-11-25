@@ -2,6 +2,7 @@ const std = @import("std");
 const FrameConfig = @import("../frame/frame_config.zig").FrameConfig;
 const GasConstants = @import("voltaire").GasConstants;
 const log = @import("../log.zig");
+const eips = @import("../eips_and_hardforks/eips.zig");
 
 /// Arithmetic opcode handlers for the EVM stack frame.
 /// These are generic structs that return static handlers for a given FrameType.
@@ -292,9 +293,10 @@ pub fn Handlers(FrameType: type) type {
             const base = self.stack.pop_unsafe(); // Top of stack (base)
             const exponent = self.stack.peek_unsafe(); // Below top (exponent)
 
-            // EIP-160: EXP costs 10 + 50 * byte_len(exponent).
-            // The 10 gas base is static and already charged with the basic block
-            // (OPCODE_INFO[EXP].gas_cost); the handler charges only the dynamic part.
+            // EXP costs 10 + byte_gas * byte_len(exponent), where byte_gas is 10 before
+            // EIP-160 (Spurious Dragon) and 50 from then on. The 10 gas base is static and
+            // already charged with the basic block (OPCODE_INFO[EXP].gas_cost); the handler
+            // charges only the dynamic part.
             var exp_bytes: u32 = 0;
             if (exponent > 0) {
                 var temp_exp = exponent;
@@ -303,7 +305,7 @@ pub fn Handlers(FrameType: type) type {
                 }
             }
 
-            const exp_byte_gas: u32 = 50;
+            const exp_byte_gas: u32 = comptime @intCast((eips.Eips{ .hardfork = FrameType.config.hardfork }).eip_160_exp_byte_gas_cost());
             const gas_cost = exp_byte_gas * exp_bytes;
             // Use negative gas pattern for single-branch out-of-gas detection
             self.gas_remaining -= @intCast(gas_cost);

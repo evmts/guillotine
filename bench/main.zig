@@ -61,7 +61,7 @@ fn run(io: std.Io, process_args: std.process.Args) !void {
     if (matched == 0) return error.NoMatchingBenchmarks;
     try report.markdown(writer, rows.items);
     try writer.flush();
-    try report.writeJson(io, options.json, .{ .timestamp_unix = std.Io.Timestamp.now(io, .real).toSeconds(), .hardfork = build.hardfork, .gas_limit = engine.gas_limit, .iterations = options.iterations, .warmup = options.warmup, .results = rows.items });
+    try report.writeJson(io, options.json, .{ .timestamp_unix = std.Io.Timestamp.now(io, .real).toSeconds(), .hardfork = build.hardfork, .gas_limit = engine.suite_gas_limit, .iterations = options.iterations, .warmup = options.warmup, .results = rows.items });
     var failed = false;
     var unavailable = false;
     for (rows.items) |row| {
@@ -76,6 +76,12 @@ fn base(workload: workloads.Workload, fusion: bool, loop: bool) report.Row {
     return .{
         .name = workload.name,
         .category = workload.category,
+        .hardfork = switch (workload.profile) {
+            inline else => |profile| engine.hardforkName(profile),
+        },
+        .gas_limit = switch (workload.profile) {
+            inline else => |profile| engine.gasLimit(profile),
+        },
         .mode = if (loop) "loop" else if (fusion) "tailcall+fusions" else "tailcall-no-fusions",
         .enable_fusion = fusion,
         .disable_tailcall_dispatch = loop,
@@ -84,8 +90,14 @@ fn base(workload: workloads.Workload, fusion: bool, loop: bool) report.Row {
 }
 
 fn execute(io: std.Io, comptime implementation: type, comptime fusion: bool, comptime loop: bool, workload: workloads.Workload, options: cli.Options) report.Row {
+    return switch (workload.profile) {
+        inline else => |profile| executeProfile(io, implementation, fusion, loop, profile, workload, options),
+    };
+}
+
+fn executeProfile(io: std.Io, comptime implementation: type, comptime fusion: bool, comptime loop: bool, comptime profile: workloads.Profile, workload: workloads.Workload, options: cli.Options) report.Row {
     var row = base(workload, fusion, loop);
-    const Runner = engine.Runner(implementation, fusion);
+    const Runner = engine.Runner(implementation, fusion, profile);
     if (Runner.available(workload)) |reason| {
         row.status = "unavailable";
         row.reason = reason;

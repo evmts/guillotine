@@ -54,6 +54,10 @@ pub fn BlockInfo(comptime config: BlockInfoConfig) type {
         excess_blob_gas: u64 = 0,
         /// Blob gas consumed by all transactions in this block.
         blob_gas_used: u64 = 0,
+        /// Hashes of the most recent ancestor blocks, newest first:
+        /// `block_hashes[i]` is the hash of block `number - 1 - i`. BLOCKHASH reads
+        /// at most the first 256 entries; numbers without an entry read as zero.
+        block_hashes: []const [32]u8 = &.{},
         /// Beacon block root for EIP-4788 (Dencun)
         /// Contains the parent beacon block root for trust-minimized access to consensus layer
         beacon_root: ?[32]u8 = null,
@@ -89,6 +93,18 @@ pub fn BlockInfo(comptime config: BlockInfoConfig) type {
             return true;
         }
     };
+}
+
+/// BLOCKHASH lookup (Yellow Paper section 9.4.4, execution-specs `block_hash`): the
+/// hash of `requested` if it is one of the 256 blocks before `current`, else null.
+/// `hashes[i]` is the hash of block `current - 1 - i`.
+pub fn recentBlockHash(hashes: []const [32]u8, current: u64, requested: u256) ?[32]u8 {
+    if (requested >= current) return null;
+    const age = current - @as(u64, @intCast(requested));
+    if (age > 256) return null;
+    const index: usize = @intCast(age - 1);
+    if (index >= hashes.len) return null;
+    return hashes[index];
 }
 
 /// Compact BlockInfo type using u64 for efficiency (practical values)

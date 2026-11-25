@@ -96,6 +96,52 @@ fn isSyntheticOpcode(opcode: UnifiedOpcode) bool {
     return @intFromEnum(opcode) > 0xFF;
 }
 
+/// Execute one MinimalEvm instruction in `mf` and, when step capture is on, record
+/// it in `tracer.steps`. The sidecar is the only recorder of top-level steps, so every
+/// bytecode instruction appears exactly once, fused or not.
+fn stepAndRecord(tracer: anytype, evm: *MinimalEvm, mf: anytype) anyerror!void {
+    if (!tracer.config.enable_step_capture or mf.pc >= mf.bytecode.len) return evm.step();
+
+    var step = tracer.captureStep(mf, mf.bytecode[mf.pc]) catch |err| {
+        tracer.debug("Failed to capture step: {any}", .{err});
+        return evm.step();
+    };
+    evm.step() catch |e| {
+        step.error_occurred = true;
+        step.error_msg = @errorName(e);
+        step.gas_after = @intCast(mf.gas_remaining);
+        step.gas_cost = @intCast(@as(i64, step.gas_before) - @as(i64, step.gas_after));
+        step.memory_size_after = mf.memory_size;
+        appendStep(tracer, step);
+        return e;
+    };
+    step.gas_after = @intCast(mf.gas_remaining);
+    step.gas_cost = @intCast(@as(i64, step.gas_before) - @as(i64, step.gas_after));
+    step.memory_size_after = mf.memory_size;
+    if (mf.stack.items.len > 0) {
+        if (tracer.allocator.alloc(u256, mf.stack.items.len)) |stack_after| {
+            for (mf.stack.items, 0..) |val, i| stack_after[mf.stack.items.len - 1 - i] = val; // LIFO order
+            step.stack_after = stack_after;
+        } else |err| {
+            tracer.debug("Failed to copy stack after step: {any}", .{err});
+        }
+    }
+    appendStep(tracer, step);
+}
+
+fn stepCurrentAndRecord(tracer: anytype, evm: *MinimalEvm) anyerror!void {
+    const mf = evm.getCurrentFrame() orelse return evm.step();
+    return stepAndRecord(tracer, evm, mf);
+}
+
+fn appendStep(tracer: anytype, step: anytype) void {
+    tracer.steps.append(tracer.allocator, step) catch |err| {
+        tracer.debug("Failed to append step: {any}", .{err});
+        if (step.stack_before.len > 0) tracer.allocator.free(step.stack_before);
+        if (step.stack_after.len > 0) tracer.allocator.free(step.stack_after);
+    };
+}
+
 pub fn executeMinimalEvmForOpcode(
     tracer: anytype,
     evm: *MinimalEvm,
@@ -114,11 +160,6 @@ pub fn executeMinimalEvmForOpcode(
     if (!isSyntheticOpcode(opcode)) {
         const opcode_value = @intFromEnum(opcode);
         if (evm.getCurrentFrame()) |mf| {
-            // For regular opcodes, captureStep expects u8. Skip step capture for synthetic opcodes.
-            const step_before = if (tracer.config.enable_step_capture and opcode_value <= 0xFF) tracer.captureStep(mf, @intCast(opcode_value)) catch null else null;
-            // Note: We don't free stack_before here because it will be owned by the step
-            // that gets added to tracer.steps, and will be freed in tracer.deinit()
-
             // Special handling: JUMPDEST in Frame pre-charges entire basic-block gas.
             // MinimalEvm's JUMPDEST charges only JumpdestGas, so we reconcile here.
             if (opcode_value == 0x5b) { // JUMPDEST
@@ -133,52 +174,13 @@ pub fn executeMinimalEvmForOpcode(
                 }
             }
 
-            evm.step() catch |e| {
-                if (step_before) |mut_step| {
-                    var step = mut_step;
-                    step.error_occurred = true;
-                    step.error_msg = @errorName(e);
-                    step.gas_after = @intCast(mf.gas_remaining);
-                    step.stack_after = &[_]u256{};
-                    step.memory_size_after = mf.memory_size;
-                    tracer.steps.append(tracer.allocator, step) catch |append_err| {
-                        tracer.debug("Failed to append error step for {s}: {any}", .{ @tagName(opcode), append_err });
-                    };
-                }
-
+            stepAndRecord(tracer, evm, mf) catch |e| {
                 // Don't panic on any errors - just log and continue
                 var actual_opcode: u8 = 0;
                 if (mf.pc < mf.bytecode.len) actual_opcode = mf.bytecode[mf.pc];
                 tracer.debug("Regular opcode {s} failed at PC={d}, bytecode[PC]=0x{x:0>2}: {any}", .{ @tagName(opcode), mf.pc, actual_opcode, e });
                 return;
             };
-            
-
-            if (step_before) |mut_step| {
-                var step = mut_step;
-                step.gas_after = @intCast(mf.gas_remaining);
-                step.gas_cost = @intCast(@as(i64, step.gas_before) - @as(i64, step.gas_after));
-
-                if (mf.stack.items.len > 0) {
-                    if (tracer.allocator.alloc(u256, mf.stack.items.len)) |stack_after| {
-                        for (mf.stack.items, 0..) |val, i| {
-                            stack_after[mf.stack.items.len - 1 - i] = val; // LIFO order
-                        }
-                        step.stack_after = stack_after;
-                    } else |_| {
-                        step.stack_after = &[_]u256{};
-                    }
-                } else {
-                    step.stack_after = &[_]u256{};
-                }
-
-                step.memory_size_after = mf.memory_size;
-                step.error_occurred = false;
-
-                tracer.steps.append(tracer.allocator, step) catch |append_err| {
-                    tracer.debug("Failed to append step for {s}: {any}", .{ @tagName(opcode), append_err });
-                };
-            }
         } else {
             tracer.debug("MinimalEvm has no current frame when trying to execute opcode {s}", .{@tagName(opcode)});
             return;
@@ -203,9 +205,8 @@ pub fn executeMinimalEvmForOpcode(
         // Get current state before step
         _ = evm.getPC(); // Get PC before step for debugging
         
-        // Try to step MinimalEvm
-        
-        evm.step() catch |e| {
+        // Each instruction a fusion covers is one recorded step.
+        stepCurrentAndRecord(tracer, evm) catch |e| {
             // Log the error but don't panic - this is expected for some cases
             last_error = e;
             

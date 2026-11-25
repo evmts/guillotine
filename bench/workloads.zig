@@ -9,10 +9,23 @@ pub const Source = union(enum) {
     p256verify,
 };
 
+/// Fork and gas budget a workload runs under.
+pub const Profile = enum {
+    /// The suite fork (`bench_options.hardfork`) and gas budget.
+    suite,
+    /// Prague with `uncapped_gas_limit`, for workloads that need more gas than one
+    /// Osaka+ transaction may carry (EIP-7825 caps it at 2^24).
+    uncapped,
+};
+
+/// Gas budget of the `uncapped` profile.
+pub const uncapped_gas_limit: u64 = 3_000_000_000;
+
 pub const Workload = struct {
     name: []const u8,
     category: []const u8,
     source: Source,
+    profile: Profile = .suite,
     input: []const u8 = &.{},
     operations: u32 = 1,
     expected: ?u256 = null,
@@ -215,7 +228,11 @@ pub fn build(allocator: std.mem.Allocator) ![]Workload {
         try code.store(0);
         try list.append(allocator, .{ .name = "opcode/JUMP-JUMPI-loop", .category = "opcode", .source = .{ .bytecode = try code.finish(0) }, .operations = repetitions, .expected = 0 });
     }
-    for ([_][]const u8{ "snailtracer", "erc20-mint", "erc20-transfer", "ten-thousand-hashes" }) |name| {
+    // SnailTracer.Benchmark() spends about 2.09 Ggas (mostly warm SLOADs of the scene),
+    // far above the Osaka+ transaction cap, and it is the only entry point that
+    // configures the scene, so it runs under the uncapped profile.
+    try list.append(allocator, .{ .name = "contract/snailtracer", .category = "contract", .source = .{ .fixture = "snailtracer" }, .profile = .uncapped });
+    for ([_][]const u8{ "erc20-mint", "erc20-transfer", "ten-thousand-hashes" }) |name| {
         try list.append(allocator, .{ .name = try std.fmt.allocPrint(allocator, "contract/{s}", .{name}), .category = "contract", .source = .{ .fixture = name } });
     }
     for ([_][]const u8{ "BubbleSort", "Fibonacci", "Factorial", "Keccak-loop", "Uniswap-like-swap" }, 0..) |name, kind| {
@@ -439,4 +456,15 @@ test "ECRECOVER benchmark signature verifies independently with the standard lib
         return;
     }
     return error.MissingEcrecoverBenchmark;
+}
+
+test "only snailtracer needs the uncapped profile, and its budget exceeds the Osaka+ cap" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const suite = try build(arena.allocator());
+    for (suite) |workload| {
+        const expected: Profile = if (std.mem.eql(u8, workload.name, "contract/snailtracer")) .uncapped else .suite;
+        try std.testing.expectEqual(expected, workload.profile);
+    }
+    try std.testing.expect(uncapped_gas_limit > 16_777_216);
 }

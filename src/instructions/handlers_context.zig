@@ -657,9 +657,12 @@ pub fn Handlers(FrameType: type) type {
                 (&self.getEvm().tracer).assert(self.stack.size() >= 1, "BLOCKHASH requires 1 stack item");
             }
             const block_number = self.stack.peek_unsafe();
-            // Cast to u64 - EVM spec says only last 256 blocks are accessible
-            const block_number_u64 = @as(u64, @truncate(block_number));
-            const block_hash_opt = self.getEvm().get_block_hash(block_number_u64);
+            // Block numbers are u64, so a larger operand can never name a recent block.
+            // Truncating it instead would alias 2^64 + n onto block n.
+            const block_hash_opt = if (std.math.cast(u64, block_number)) |requested|
+                self.getEvm().get_block_hash(requested)
+            else
+                null;
 
             // Push hash or zero if not available
             if (block_hash_opt) |hash| {

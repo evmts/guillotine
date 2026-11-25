@@ -115,21 +115,8 @@ pub const Tracer = struct {
     }
 
     pub fn deinit(self: *Tracer) void {
-        for (self.steps.items) |step| {
-            // Only free if allocated (non-empty arrays were allocated, empty ones are static)
-            // We only allocate when stack has items, never for empty stacks  
-            if (step.stack_before.len > 0) {
-                self.allocator.free(step.stack_before);
-            }
-            if (step.stack_after.len > 0) {
-                self.allocator.free(step.stack_after);
-            }
-        }
+        self.clearSteps();
         self.steps.deinit(self.allocator);
-
-        for (self.advanced_steps.items) |step| {
-            if (step.fusion_info) |fusion_desc| self.allocator.free(fusion_desc);
-        }
         self.advanced_steps.deinit(self.allocator);
 
         if (self.minimal_evm) |evm| {
@@ -182,6 +169,7 @@ pub const Tracer = struct {
                 const block_info = evm_instance.get_block_info();
                 evm.setBlockchainContext(evm_instance.get_chain_id(), block_info.number, block_info.timestamp, block_info.difficulty, block_info.difficulty, block_info.coinbase, block_info.gas_limit, block_info.base_fee, block_info.blob_base_fee);
                 evm.setTransactionContext(evm_instance.get_tx_origin(), evm_instance.gas_price);
+                evm.setBlockHashes(block_info.block_hashes);
                 evm.setHardfork(evm_instance.get_hardfork());
                 var caller = primitives.ZERO_ADDRESS;
                 var address = primitives.ZERO_ADDRESS;
@@ -226,6 +214,21 @@ pub const Tracer = struct {
         }
     }
 
+    /// Drop all recorded steps and the stack copies and fusion descriptions they own,
+    /// keeping list capacity for the next transaction.
+    pub fn clearSteps(self: *Tracer) void {
+        for (self.steps.items) |step| {
+            // Empty stacks are static slices; only non-empty copies were allocated.
+            if (step.stack_before.len > 0) self.allocator.free(step.stack_before);
+            if (step.stack_after.len > 0) self.allocator.free(step.stack_after);
+        }
+        self.steps.items.len = 0;
+        for (self.advanced_steps.items) |step| {
+            if (step.fusion_info) |fusion_desc| self.allocator.free(fusion_desc);
+        }
+        self.advanced_steps.items.len = 0;
+    }
+
     /// Called before an instruction executes
     /// This is the main entry point for instruction tracing
     pub fn before_instruction(self: *Tracer, frame: anytype, comptime opcode: UnifiedOpcode, cursor: [*]const @TypeOf(frame.*).Dispatch.Item) void {
@@ -253,8 +256,12 @@ pub const Tracer = struct {
             .is_synthetic = opcode_value > 0xFF,
         });
 
-        // Capture execution steps if enabled
-        if (self.config.enable_step_capture) {
+        // Each instruction is recorded once. The MinimalEvm sidecar records every
+        // top-level bytecode instruction itself (minimal_evm_sync.stepAndRecord), with
+        // fused instructions expanded; the Frame records only what the sidecar does not
+        // mirror (nested frames, or step capture without validation).
+        const sidecar_records = main_evm.depth == 1 and self.minimal_evm != null;
+        if (self.config.enable_step_capture and !sidecar_records) {
             const pc = self.current_pc;
 
             var stack_before: []u256 = &[_]u256{};

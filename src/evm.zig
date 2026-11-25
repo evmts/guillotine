@@ -2,7 +2,8 @@ const std = @import("std");
 const log = @import("log.zig");
 const primitives = @import("voltaire");
 const eips = @import("eips_and_hardforks/eips.zig");
-const BlockInfo = @import("block/block_info.zig").BlockInfo(.{});
+const block_info_mod = @import("block/block_info.zig");
+const BlockInfo = block_info_mod.BlockInfo(.{});
 const Database = @import("storage/database.zig").Database;
 const Account = @import("storage/database_interface_account.zig").Account;
 const SelfDestruct = @import("storage/self_destruct.zig").SelfDestruct;
@@ -471,6 +472,12 @@ pub fn Evm(config: EvmConfig) type {
                 log.err("CallParams validation failed: {s}", .{@errorName(err)});
                 return CallResult.failed(0);
             };
+            // Frame gas is a `Frame.GasType` sized from `config.block_gas_limit`; a budget
+            // it cannot hold would be truncated, so refuse the call instead.
+            if (params.getGas() > std.math.maxInt(Frame.GasType)) {
+                log.warn("Call gas {d} exceeds the configured frame gas capacity {d} (raise EvmConfig.block_gas_limit)", .{ params.getGas(), std.math.maxInt(Frame.GasType) });
+                return CallResult.failed(0);
+            }
 
             defer {
                 self.depth = 0;
@@ -516,8 +523,7 @@ pub fn Evm(config: EvmConfig) type {
                 self.tracer.simple_instruction_count = 0;
                 self.tracer.fused_instruction_count = 0;
                 // Clear steps arrays but keep capacity
-                self.tracer.steps.items.len = 0;
-                self.tracer.advanced_steps.items.len = 0;
+                self.tracer.clearSteps();
             }
 
             // Pre-warm addresses for top-level calls (EIP-2929 & EIP-3651)
@@ -640,7 +646,10 @@ pub fn Evm(config: EvmConfig) type {
             var modified_params = params;
             modified_params.setGas(execution_gas_limit);
 
-            const arena_result = self.inner_call(modified_params);
+            var arena_result = self.inner_call(modified_params);
+            // The trace is allocated with `self.allocator`, not the call arena;
+            // `toOwnedResult` deep-copies it, so the original is freed here.
+            defer if (arena_result.trace) |*trace| trace.deinit();
             if (arena_result.success) {
                 self.finalizeDestructions() catch |err| {
                     log.err("Failed to finalize selfdestructions: {s}", .{@errorName(err)});
@@ -1083,6 +1092,17 @@ pub fn Evm(config: EvmConfig) type {
                     // gas it was given returns to the caller.
                     return CallResult.failed(if (err == error.InsufficientBalance) params.gas else 0);
                 };
+            }
+
+            // Before EIP-161 (Spurious Dragon) every message call creates its target
+            // account if missing (execution-specs frontier `process_message` ->
+            // `touch_account`), precompiles included. The database snapshot reverts the
+            // creation when the call fails.
+            if (comptime !config.eips.hardfork.isAtLeast(.SPURIOUS_DRAGON)) {
+                if ((try self.database.get_account(params.to.bytes)) == null) {
+                    try self.database.set_account(params.to.bytes, Account.zero());
+                    try self.touched_addresses.put(params.to, {});
+                }
             }
 
             const preflight = self.performCallPreflight(params.to, params.input, params.gas, self.is_static_context(), snapshot_id) catch |err| {
@@ -1638,6 +1658,14 @@ pub fn Evm(config: EvmConfig) type {
             return final_result;
         }
 
+        /// The trace of the whole transaction, built when the top-level frame ends. The
+        /// tracer accumulates nested frames' steps, so nested frames build none (their
+        /// results are consumed by the calling handler and would leak a copy).
+        fn topLevelTrace(self: *Self) !?@import("frame/call_result.zig").ExecutionTrace {
+            if (self.depth != 1) return null;
+            return try convertTracerToExecutionTrace(self.allocator, &self.tracer);
+        }
+
         /// Convert tracer data to ExecutionTrace format
         fn convertTracerToExecutionTrace(allocator: std.mem.Allocator, tracer: anytype) !@import("frame/call_result.zig").ExecutionTrace {
             const call_result = @import("frame/call_result.zig");
@@ -1712,10 +1740,9 @@ pub fn Evm(config: EvmConfig) type {
             // EIP-211: a frame starts with an empty return data buffer.
             self.clear_return_data();
 
-            const gas_after_base = gas;
-
-            const max_gas = @as(u64, @intCast(std.math.maxInt(Frame.GasType)));
-            const gas_cast = @as(Frame.GasType, @intCast(@min(gas_after_base, max_gas)));
+            // Top-level calls are checked in `callImpl`, and a nested frame never gets
+            // more gas than its parent holds, so this cast only fails on a broken invariant.
+            const gas_cast = std.math.cast(Frame.GasType, gas) orelse return error.GasExceedsFrameCapacity;
 
             const arena_allocator = self.call_arena.allocator();
             var frame = try Frame.init(arena_allocator, gas_cast, caller, value, input, @as(*anyopaque, @ptrCast(self)));
@@ -1782,7 +1809,7 @@ pub fn Evm(config: EvmConfig) type {
                 error.Return => termination_reason = error.Return,
                 error.SelfDestruct => termination_reason = error.SelfDestruct,
                 error.REVERT => {
-                    execution_trace = try convertTracerToExecutionTrace(self.allocator, &self.tracer);
+                    execution_trace = try self.topLevelTrace();
                     const gas_left: u64 = @intCast(@max(frame.gas_remaining, 0));
                     // Get output from frame
                     const output_data = frame.output_data;
@@ -1804,7 +1831,7 @@ pub fn Evm(config: EvmConfig) type {
                         else => log.err("Frame execution failed with error: {s} (code_len={}, gas={}, depth={})", .{ @errorName(err), code.len, gas, self.depth }),
                     }
                     // Try to get partial trace even on error
-                    execution_trace = convertTracerToExecutionTrace(self.allocator, &self.tracer) catch blk: {
+                    execution_trace = self.topLevelTrace() catch blk: {
                         break :blk @import("frame/call_result.zig").ExecutionTrace{
                             .steps = &[_]@import("frame/call_result.zig").TraceStep{},
                             .allocator = self.allocator,
@@ -1816,7 +1843,7 @@ pub fn Evm(config: EvmConfig) type {
                 },
             };
 
-            execution_trace = try convertTracerToExecutionTrace(self.allocator, &self.tracer);
+            execution_trace = try self.topLevelTrace();
 
             const gas_left: u64 = @intCast(@max(frame.gas_remaining, 0));
             // Get output from frame (set by RETURN/REVERT handlers)
@@ -2297,75 +2324,11 @@ pub fn Evm(config: EvmConfig) type {
         pub fn get_chain_id(self: *Self) u64 {
             return self.block_info.chain_id;
         }
-        /// Get block hash by number
+        /// BLOCKHASH: the hash of one of the 256 blocks before the current block, read
+        /// from `block_info.block_hashes`. EIP-2935 leaves the opcode unchanged, so it
+        /// never reads the history contract.
         pub fn get_block_hash(self: *Self, block_number: u64) ?[32]u8 {
-            const current_block = self.block_info.number;
-
-            // Use EIP-2935 historical block hashes if available
-            // This provides access to older block hashes via system contract
-            const historical_block_hashes = @import("eips_and_hardforks/historical_block_hashes.zig");
-            const hash_opt = historical_block_hashes.HistoricalBlockHashesContract.getBlockHash(
-                self.database,
-                block_number,
-                current_block,
-            ) catch |err| {
-                log.debug("Failed to get block hash from history contract: {}", .{err});
-                // Fall back to standard behavior on error
-
-                // EVM BLOCKHASH rules:
-                // - Return null for current block and future blocks
-                // - Return null for blocks older than 256 blocks
-                // - Return null for block 0 (genesis)
-                if (block_number >= current_block or
-                    current_block > block_number + 256 or
-                    block_number == 0)
-                {
-                    return null;
-                }
-
-                // For testing/simulation purposes, generate a deterministic hash
-                var hash: [32]u8 = undefined;
-                hash[0..8].* = std.mem.toBytes(block_number);
-                hash[8..16].* = std.mem.toBytes(current_block);
-
-                // Fill rest with deterministic pattern based on block number
-                var i: usize = 16;
-                while (i < 32) : (i += 1) {
-                    hash[i] = @as(u8, @truncate(block_number +% i));
-                }
-
-                return hash;
-            };
-
-            if (hash_opt) |hash| {
-                return hash;
-            }
-
-            // If no hash found in storage, fall back to standard behavior
-            // - Return null for current block and future blocks
-            // - Return null for blocks older than 256 blocks
-            // - Return null for block 0 (genesis)
-            if (block_number >= current_block or
-                current_block > block_number + 256 or
-                block_number == 0)
-            {
-                return null;
-            }
-
-            // For testing/simulation purposes, generate a deterministic hash
-            // In a real implementation, this would look up the actual block hash
-            // from the blockchain state or a block hash ring buffer
-            var hash: [32]u8 = undefined;
-            hash[0..8].* = std.mem.toBytes(block_number);
-            hash[8..16].* = std.mem.toBytes(current_block);
-
-            // Fill rest with deterministic pattern based on block number
-            var i: usize = 16;
-            while (i < 32) : (i += 1) {
-                hash[i] = @as(u8, @truncate(block_number +% i));
-            }
-
-            return hash;
+            return block_info_mod.recentBlockHash(self.block_info.block_hashes, self.block_info.number, block_number);
         }
 
         /// Get blob hash for the given index (EIP-4844)

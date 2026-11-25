@@ -1,5 +1,6 @@
 const std = @import("std");
 const opcode_data = @import("../opcodes/opcode_data.zig");
+const fork_gas = @import("fork_gas.zig");
 const Opcode = opcode_data.Opcode;
 const OpcodeSynthetic = @import("../opcodes/opcode_synthetic.zig").OpcodeSynthetic;
 const stack_frame_arithmetic = @import("../instructions/handlers_arithmetic.zig");
@@ -171,6 +172,11 @@ pub fn getOpcodeHandlers(
     // Note: Synthetic opcodes (0xa5-0xbc) are NOT mapped here because they should only be used
     // internally by the dispatch system during optimization. Raw bytecode containing these values
     // should be treated as invalid opcodes and use the default invalid handler.
+
+    // Opcodes a later fork introduces are undefined on this one.
+    for (&h, 0..) |*handler, opcode| {
+        if (!fork_gas.isOpcodeDefined(FrameType.config.hardfork, @intCast(opcode))) handler.* = &invalid;
+    }
 
     // Apply custom overrides
     inline for (overrides) |override| {
