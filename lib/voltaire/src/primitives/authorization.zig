@@ -13,8 +13,6 @@ const Allocator = std.mem.Allocator;
 
 // Authorization error types
 pub const AuthorizationError = error{
-    InvalidChainId,
-    ZeroAddress,
     InvalidSignature,
     OutOfMemory,
 };
@@ -34,7 +32,7 @@ pub const Authorization = struct {
         const r_value = std.mem.readInt(u256, &self.r, .big);
         const s_value = std.mem.readInt(u256, &self.s, .big);
         const signature = crypto.Signature{
-            .v = @intCast(self.v),
+            .v = std.math.cast(u8, self.v) orelse return AuthorizationError.InvalidSignature,
             .r = r_value,
             .s = s_value,
         };
@@ -87,21 +85,13 @@ pub const Authorization = struct {
         return hash.keccak256(data);
     }
 
-    pub fn validate(self: *const Authorization) !void {
-        // Chain ID must be non-zero
-        if (self.chain_id == 0) {
-            return AuthorizationError.InvalidChainId;
-        }
-
-        // Address must not be zero
-        if (self.address.isZero()) {
-            return AuthorizationError.ZeroAddress;
-        }
-
-        // Signature must be valid
+    /// Checks the signature fields. EIP-7702 accepts `chain_id == 0` (valid on every
+    /// chain) and the zero target address (clears the authority's delegation).
+    pub fn validate(self: *const Authorization) AuthorizationError!void {
+        const v = std.math.cast(u8, self.v) orelse return AuthorizationError.InvalidSignature;
         const r_value = std.mem.readInt(u256, &self.r, .big);
         const s_value = std.mem.readInt(u256, &self.s, .big);
-        if (!crypto.isValidSignature(.{ .v = @intCast(self.v), .r = r_value, .s = s_value })) {
+        if (!crypto.isValidSignature(.{ .v = v, .r = r_value, .s = s_value })) {
             return AuthorizationError.InvalidSignature;
         }
     }
@@ -285,14 +275,26 @@ test "authorization validation" {
     // Valid
     try auth.validate();
 
-    // Invalid chain ID
+    // EIP-7702: chain_id 0 authorizes on every chain.
     auth.chain_id = 0;
-    try testing.expectError(AuthorizationError.InvalidChainId, auth.validate());
+    try auth.validate();
     auth.chain_id = 1;
 
-    // Zero address
+    // EIP-7702: the zero target address clears delegation.
     auth.address = Address.ZERO;
-    try testing.expectError(AuthorizationError.ZeroAddress, auth.validate());
+    try auth.validate();
+
+    // A v that does not fit a byte is an invalid signature, not a panic.
+    auth.v = 256;
+    try testing.expectError(AuthorizationError.InvalidSignature, auth.validate());
+    try testing.expectError(AuthorizationError.InvalidSignature, auth.authority());
+    auth.v = std.math.maxInt(u64);
+    try testing.expectError(AuthorizationError.InvalidSignature, auth.validate());
+    auth.v = 27;
+
+    // s above n/2 fails the signature check.
+    auth.s = @as([32]u8, @splat(0xff));
+    try testing.expectError(AuthorizationError.InvalidSignature, auth.validate());
 }
 
 test "authorization list encoding" {
@@ -581,11 +583,11 @@ test "signingHash() handles edge case nonce values" {
     try testing.expect(!std.mem.eql(u8, &hash_zero, &hash_max));
 }
 
-test "validate() rejects zero chain ID" {
+test "validate() accepts zero chain ID (EIP-7702 any-chain authorization)" {
     const allocator = testing.allocator;
     _ = allocator;
 
-    var auth = Authorization{
+    const auth = Authorization{
         .chain_id = 0,
         .address = try Address.fromHex("0x1111111111111111111111111111111111111111"),
         .nonce = 0,
@@ -594,14 +596,14 @@ test "validate() rejects zero chain ID" {
         .s = @as([32]u8, @splat(0x34)),
     };
 
-    try testing.expectError(AuthorizationError.InvalidChainId, auth.validate());
+    try auth.validate();
 }
 
-test "validate() rejects zero address" {
+test "validate() accepts zero target address (EIP-7702 delegation reset)" {
     const allocator = testing.allocator;
     _ = allocator;
 
-    var auth = Authorization{
+    const auth = Authorization{
         .chain_id = 1,
         .address = Address.ZERO,
         .nonce = 0,
@@ -610,7 +612,7 @@ test "validate() rejects zero address" {
         .s = @as([32]u8, @splat(0x34)),
     };
 
-    try testing.expectError(AuthorizationError.ZeroAddress, auth.validate());
+    try auth.validate();
 }
 
 test "validate() rejects signature with r=0" {

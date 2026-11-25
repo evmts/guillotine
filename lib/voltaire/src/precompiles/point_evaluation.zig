@@ -57,8 +57,10 @@ pub fn execute(
         z_ptr,
         y_ptr,
         proof_ptr,
-    ) catch {
-        return error.InvalidInput;
+    ) catch |err| switch (err) {
+        error.TrustedSetupNotLoaded => return error.TrustedSetupNotLoaded,
+        // c-kzg rejects malformed commitments, proofs and field elements.
+        else => return error.InvalidInput,
     };
 
     if (!valid) return error.InvalidInput;
@@ -646,4 +648,28 @@ test "point_evaluation - input components boundaries" {
     // This should fail due to invalid hash, but shouldn't crash
     const result = execute(testing.allocator, &input, GAS);
     try testing.expectError(error.InvalidInput, result);
+}
+
+test "point_evaluation - missing trusted setup is reported distinctly" {
+    const testing = std.testing;
+
+    kzg_setup.deinit(testing.allocator);
+    try testing.expect(!kzg_setup.isInitialized());
+
+    // A well-formed input whose versioned hash matches the commitment.
+    var input = @as([192]u8, @splat(0));
+    input[96] = 0xc0;
+    input[144] = 0xc0;
+    var computed_hash: [32]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(input[96..144], &computed_hash, .{});
+    computed_hash[0] = 0x01;
+    @memcpy(input[0..32], &computed_hash);
+
+    try testing.expectError(error.TrustedSetupNotLoaded, execute(testing.allocator, &input, GAS));
+
+    try kzg_setup.init();
+    defer kzg_setup.deinit(testing.allocator);
+    const result = try execute(testing.allocator, &input, GAS);
+    defer result.deinit(testing.allocator);
+    try testing.expectEqual(GAS, result.gas_used);
 }

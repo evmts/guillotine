@@ -48,7 +48,7 @@ fn benchEcrecoverShortInput(allocator: std.mem.Allocator) void {
 
 // Benchmark: ECRECOVER with invalid signature (returns zero)
 fn benchEcrecoverInvalidSignature(allocator: std.mem.Allocator) void {
-    const invalid_input = [_]u8{0x00} ** 128; // All zeros
+    const invalid_input = @as([128]u8, @splat(0x00)); // All zeros
     const result = ecrecover.execute(allocator, &invalid_input, 1_000_000) catch return;
     defer result.deinit(allocator);
 }

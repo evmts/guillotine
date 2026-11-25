@@ -12,10 +12,10 @@
 //! computing (base^exponent) mod modulus efficiently for large numbers.
 //!
 //! ## Algorithm
-//! Uses square-and-multiply algorithm (binary exponentiation):
-//! - Time complexity: O(log(exponent) * cost_of_multiplication)
-//! - Space complexity: O(size_of_modulus)
-//! - Handles arbitrary-precision integers
+//! Odd moduli use Montgomery multiplication with binary or 4-bit sliding
+//! windows. Even moduli use truncated powering for the power-of-two factor
+//! and the Chinese remainder theorem when there is also an odd factor.
+//! Arithmetic scratch is proportional to the number of significant modulus limbs.
 //!
 //! ## Usage
 //! ```zig
@@ -26,7 +26,7 @@
 //!     const allocator = std.heap.page_allocator;
 //!     const result = try ModExp.modexp(allocator, &.{3}, &.{10}, &.{13});
 //!     defer allocator.free(result);
-//!     try std.testing.expect(result[0] == 3); // 3^10 mod 13 = 3
+//!     // result contains 3 (3^10 mod 13).
 //! }
 //! ```
 //!
@@ -67,129 +67,497 @@ pub const ModExpError = error{
 /// May be vulnerable to timing attacks and other side-channel attacks.
 /// Do not use in production without proper security review.
 ///
-/// @param allocator Memory allocator for big integer operations
+/// @param allocator Scratch allocator for moduli larger than 4096 bits
 /// @param base_bytes Base value as big-endian bytes
 /// @param exp_bytes Exponent value as big-endian bytes
 /// @param mod_bytes Modulus value as big-endian bytes
 /// @param output Output buffer (must be at least mod_bytes.len)
 pub fn unauditedModexp(allocator: std.mem.Allocator, base_bytes: []const u8, exp_bytes: []const u8, mod_bytes: []const u8, output: []u8) ModExpError!void {
-    // Clear output first
     @memset(output, 0);
+    const modulus = trimBytes(mod_bytes);
+    if (modulus.len == 0) return error.DivisionByZero;
+    if (modulus.len == 1 and modulus[0] == 1) return;
 
-    // Check for zero modulus
-    if (mod_bytes.len == 0 or unaudited_isZero(mod_bytes)) {
-        return ModExpError.DivisionByZero;
+    const exponent = trimBytes(exp_bytes);
+    if (exponent.len == 0) {
+        if (output.len != 0) output[output.len - 1] = 1;
+        return;
     }
-
-    // Handle special cases
-    if (exp_bytes.len == 0 or unaudited_isZero(exp_bytes)) {
-        // exp = 0, result = 1 mod modulus. For modulus == 1 this is 0.
-        if (output.len > 0 and !unaudited_isOne(mod_bytes)) output[output.len - 1] = 1;
+    const base = trimBytes(base_bytes);
+    if (base.len == 0) return;
+    if (base.len == 1 and base[0] == 1) {
+        if (output.len != 0) output[output.len - 1] = 1;
         return;
     }
 
-    if (base_bytes.len == 0 or unaudited_isZero(base_bytes)) {
-        // base = 0, result = 0 (already cleared)
-        return;
+    const max_bytes = std.math.maxInt(usize) / 8;
+    if (exponent.len > max_bytes or modulus.len > max_bytes) return error.InvalidLength;
+    const exp_bits = (exponent.len - 1) * 8 + 8 - @clz(exponent[0]);
+    const n = limbCount(modulus.len, 8);
+
+    // Modulus, result, and arithmetic scratch. Base and exponent are read from
+    // the original byte slices, so their lengths do not affect scratch size.
+    var stack: [64 * workspace_limbs]u64 = undefined;
+    const size = std.math.mul(usize, n, workspace_limbs) catch return error.OutOfMemory;
+    const heap = size > stack.len;
+    const storage = if (heap) try allocator.alloc(u64, size) else stack[0..size];
+    defer if (heap) allocator.free(storage);
+
+    const mod = storage[0..n];
+    const result = storage[n..][0..n];
+    const work = storage[2 * n ..];
+    readWords(mod, modulus);
+
+    if (exp_bits == 1) {
+        const normalized = work[0..n];
+        const shift = normalizeModulus(normalized, mod);
+        reduceBase(result, base, mod, normalized, shift);
+    } else if (mod[0] & 1 != 0) {
+        powerOdd(result, base, exponent, exp_bits, mod, work);
+    } else {
+        powerEven(result, base, exponent, exp_bits, mod, work);
     }
-
-    // For simplicity, handle small numbers directly
-    if (base_bytes.len <= 8 and exp_bytes.len <= 8 and mod_bytes.len <= 8) {
-        const base = unaudited_bytesToU64(base_bytes);
-        const exp = unaudited_bytesToU64(exp_bytes);
-        const mod = unaudited_bytesToU64(mod_bytes);
-
-        if (mod == 0) return ModExpError.DivisionByZero;
-
-        var result: u64 = 1;
-        var base_mod = base % mod;
-        var exp_remaining = exp;
-
-        // Square and multiply algorithm
-        while (exp_remaining > 0) {
-            if (exp_remaining & 1 == 1) {
-                result = mulModU64(result, base_mod, mod);
-            }
-            base_mod = mulModU64(base_mod, base_mod, mod);
-            exp_remaining >>= 1;
-        }
-
-        // Write result to output (big-endian)
-        const result_bytes = @min(output.len, 8);
-        var i: usize = 0;
-        while (i < result_bytes) : (i += 1) {
-            const shift: u6 = @intCast((result_bytes - 1 - i) * 8);
-            output[output.len - result_bytes + i] = @intCast((result >> shift) & 0xFF);
-        }
-        return;
-    }
-
-    // For larger numbers, use big integer implementation
-    const Managed = std.math.big.int.Managed;
-
-    // Initialize big integers
-    var base = try Managed.init(allocator);
-    defer base.deinit();
-    var exp = try Managed.init(allocator);
-    defer exp.deinit();
-    var mod = try Managed.init(allocator);
-    defer mod.deinit();
-
-    // Parse inputs from big-endian bytes
-    try readBigEndian(&base, base_bytes);
-    try readBigEndian(&exp, exp_bytes);
-    try readBigEndian(&mod, mod_bytes);
-
-    // Check if modulus is zero
-    var zero = try Managed.init(allocator);
-    defer zero.deinit();
-    try zero.set(0);
-    if (mod.eql(zero)) {
-        return ModExpError.DivisionByZero;
-    }
-
-    // Perform modular exponentiation using square-and-multiply
-    var result = try Managed.init(allocator);
-    defer result.deinit();
-    try result.set(1); // result = 1
-
-    var base_mod = try Managed.init(allocator);
-    defer base_mod.deinit();
-
-    // base_mod = base % mod
-    var quotient = try Managed.init(allocator);
-    defer quotient.deinit();
-    try quotient.divFloor(&base_mod, &base, &mod);
-
-    // Temporary variables for operations
-    var temp = try Managed.init(allocator);
-    defer temp.deinit();
-    var exp_copy = try exp.clone();
-    defer exp_copy.deinit();
-
-    // Square and multiply algorithm
-    while (!exp_copy.eql(zero)) {
-        // Check if exp is odd (exp & 1 == 1)
-        if (exp_copy.isOdd()) {
-            // result = (result * base_mod) % mod
-            try temp.mul(&result, &base_mod);
-            try quotient.divFloor(&result, &temp, &mod);
-        }
-
-        // base_mod = (base_mod * base_mod) % mod
-        try temp.sqr(&base_mod);
-        try quotient.divFloor(&base_mod, &temp, &mod);
-
-        // exp >>= 1
-        try exp_copy.shiftRight(&exp_copy, 1);
-    }
-
-    // Write result to output (big-endian)
-    try writeBigEndian(&result, output);
+    writeWords(output, result);
 }
 
-fn mulModU64(lhs: u64, rhs: u64, modulus: u64) u64 {
-    return @intCast((@as(u128, lhs) * @as(u128, rhs)) % @as(u128, modulus));
+const window_powers = 8;
+const workspace_limbs = 2 + 2 + window_powers;
+
+fn trimBytes(bytes: []const u8) []const u8 {
+    for (bytes, 0..) |byte, i| {
+        if (byte != 0) return bytes[i..];
+    }
+    return bytes[bytes.len..];
+}
+
+fn limbCount(size: usize, comptime unit: usize) usize {
+    return size / unit + @intFromBool(size % unit != 0);
+}
+
+fn readWords(words: []u64, bytes: []const u8) void {
+    @memset(words, 0);
+    var end = bytes.len;
+    for (words) |*word| {
+        if (end == 0) break;
+        const start = end -| 8;
+        word.* = if (end - start == 8)
+            std.mem.readInt(u64, bytes[start..][0..8], .big)
+        else
+            unaudited_bytesToU64(bytes[start..end]);
+        end = start;
+    }
+}
+
+fn writeWords(bytes: []u8, words: []const u64) void {
+    var end = bytes.len;
+    for (words) |word| {
+        if (end == 0) break;
+        if (end >= 8) {
+            end -= 8;
+            std.mem.writeInt(u64, bytes[end..][0..8], word, .big);
+        } else {
+            unaudited_u64ToBytes(word, bytes[0..end]);
+            break;
+        }
+    }
+}
+
+fn lessThan(lhs: []const u64, rhs: []const u64) bool {
+    var i = lhs.len;
+    while (i != 0) {
+        i -= 1;
+        if (lhs[i] != rhs[i]) return lhs[i] < rhs[i];
+    }
+    return false;
+}
+
+inline fn subWord(lhs: u64, rhs: u64, borrow: *u1) u64 {
+    const diff = @subWithOverflow(lhs, rhs);
+    const tail = @subWithOverflow(diff[0], borrow.*);
+    borrow.* = diff[1] | tail[1];
+    return tail[0];
+}
+
+fn subtract(out: []u64, lhs: []const u64, rhs: []const u64) void {
+    var borrow: u1 = 0;
+    for (out, 0..) |*word, i| {
+        const left = if (i < lhs.len) lhs[i] else 0;
+        const right = if (i < rhs.len) rhs[i] else 0;
+        word.* = subWord(left, right, &borrow);
+    }
+}
+
+fn add(out: []u64, rhs: []const u64) void {
+    var carry: u64 = 0;
+    for (out, rhs) |*word, right| {
+        const sum = @as(u128, word.*) + right + carry;
+        word.* = @truncate(sum);
+        carry = @truncate(sum >> 64);
+    }
+}
+
+fn shiftRight(words: []u64, bits: usize) []u64 {
+    const whole = bits / 64;
+    const shift: u6 = @truncate(bits);
+    const result = words[0 .. words.len - whole];
+    if (shift == 0) {
+        if (whole != 0) std.mem.copyForwards(u64, result, words[whole..]);
+    } else {
+        const upper: u6 = @intCast(64 - @as(u7, shift));
+        for (result[0 .. result.len - 1], whole..) |*word, i| {
+            word.* = (words[i] >> shift) | (words[i + 1] << upper);
+        }
+        result[result.len - 1] = words[words.len - 1] >> shift;
+    }
+    var len = result.len;
+    while (len != 0 and result[len - 1] == 0) len -= 1;
+    return result[0..len];
+}
+
+fn normalizeModulus(normalized: []u64, modulus: []const u64) u6 {
+    const shift: u6 = @intCast(@clz(modulus[modulus.len - 1]));
+    var carry: u64 = 0;
+    for (normalized, modulus) |*word, digit| {
+        const wide = @as(u128, digit) << shift;
+        word.* = @as(u64, @truncate(wide)) | carry;
+        carry = @truncate(wide >> 64);
+    }
+    return shift;
+}
+
+// Append a radix-2^64 digit to a normalized remainder. Knuth's quotient
+// estimate from the top two words is corrected using the next divisor word.
+// The remaining estimate can overshoot by one, in which case we add back.
+fn reduceDigit(remainder: []u64, digit: u64, divisor: []const u64, shift: u6) void {
+    const n = divisor.len;
+    const high = remainder[n - 1];
+    std.mem.copyBackwards(u64, remainder[1..], remainder[0 .. n - 1]);
+    const wide = @as(u128, digit) << shift;
+    remainder[0] = @truncate(wide);
+    remainder[1] |= @truncate(wide >> 64);
+
+    const top = divisor[n - 1];
+    if (high == 0 and remainder[n - 1] < top) return;
+    const head = (@as(u128, high) << 64) | remainder[n - 1];
+    var q: u64 = if (high == top) std.math.maxInt(u64) else @intCast(head / top);
+    var r = head - @as(u128, q) * top;
+    while (r <= std.math.maxInt(u64) and
+        @as(u128, q) * divisor[n - 2] > ((r << 64) | remainder[n - 2]))
+    {
+        q -= 1;
+        r += top;
+    }
+
+    var carry: u64 = 0;
+    for (remainder, divisor) |*word, part| {
+        const product = @as(u128, part) * q + carry;
+        const diff = @subWithOverflow(word.*, @as(u64, @truncate(product)));
+        word.* = diff[0];
+        carry = @as(u64, @truncate(product >> 64)) + diff[1];
+    }
+    if (high < carry) add(remainder, divisor);
+}
+
+fn reduceBase(out: []u64, base: []const u8, modulus: []const u64, normalized: []const u64, shift: u6) void {
+    if (limbCount(base.len, 8) <= modulus.len) {
+        readWords(out, base);
+        if (lessThan(out, modulus)) return;
+    }
+
+    @memset(out, 0);
+    var start: usize = 0;
+    var width = (base.len - 1) % 8 + 1;
+    while (start < base.len) : (width = 8) {
+        const digit = unaudited_bytesToU64(base[start..][0..width]);
+        if (modulus.len == 1) {
+            out[0] = @intCast(((@as(u128, out[0]) << 64) | digit) % modulus[0]);
+        } else {
+            reduceDigit(out, digit, normalized, shift);
+        }
+        start += width;
+    }
+    if (modulus.len > 1) _ = shiftRight(out, shift);
+}
+
+fn radixSquared(out: []u64, modulus: []const u64, normalized: []const u64, shift: u6) void {
+    if (modulus.len == 1) {
+        const radix = (@as(u128, 1) << 64) % modulus[0];
+        out[0] = @intCast(radix * radix % modulus[0]);
+        return;
+    }
+
+    // B^(n-1) < m for an odd n-limb modulus greater than one, with B=2^64.
+    // Append n+1 zero digits to reach B^(2n), reducing after each digit.
+    @memset(out, 0);
+    out[out.len - 1] = @as(u64, 1) << shift;
+    for (0..out.len + 1) |_| reduceDigit(out, 0, normalized, shift);
+    _ = shiftRight(out, shift);
+}
+
+fn montInverse(modulus: u64) u64 {
+    // The square of any odd number is 1 modulo 8, so the seed has three
+    // correct bits. Each of the five iterations doubles the precision.
+    var inv = modulus;
+    inline for (0..5) |_| inv *%= 2 -% modulus *% inv;
+    return 0 -% inv;
+}
+
+inline fn mac(lhs: u64, rhs: u64, sum: u64, carry: *u64) u64 {
+    // A full limb product plus two limbs fits exactly in 128 bits.
+    const wide = @as(u128, lhs) * rhs +% sum +% carry.*;
+    carry.* = @truncate(wide >> 64);
+    return @truncate(wide);
+}
+
+inline fn montMulFixed(comptime n: usize, lhs: [n]u64, rhs: [n]u64, modulus: [n]u64, inv: u64) [n]u64 {
+    var acc: [n]u64 = @splat(0);
+    var top: u64 = 0;
+    inline for (rhs) |digit| {
+        var mul_carry: u64 = 0;
+        var red_carry: u64 = 0;
+        const low = mac(lhs[0], digit, acc[0], &mul_carry);
+        const factor = low *% inv;
+        _ = mac(modulus[0], factor, low, &red_carry);
+        inline for (1..n) |j| {
+            const product = mac(lhs[j], digit, acc[j], &mul_carry);
+            acc[j - 1] = mac(modulus[j], factor, product, &red_carry);
+        }
+        const folded = @as(u128, mul_carry) + red_carry + top;
+        acc[n - 1] = @truncate(folded);
+        top = @truncate(folded >> 64);
+    }
+
+    var reduced: [n]u64 = undefined;
+    var borrow: u1 = 0;
+    inline for (0..n) |i| reduced[i] = subWord(acc[i], modulus[i], &borrow);
+    return if (top != 0 or borrow == 0) reduced else acc;
+}
+
+inline fn montMul4(lhs: [4]u64, rhs: [4]u64, modulus: [4]u64, inv: u64) [4]u64 {
+    return montMulFixed(4, lhs, rhs, modulus, inv);
+}
+
+fn montMulN(out: []u64, lhs: []const u64, rhs: []const u64, modulus: []const u64, inv: u64, acc: []u64) void {
+    const n = modulus.len;
+    @memset(acc, 0);
+    var top: u64 = 0;
+    for (rhs) |digit| {
+        var mul_carry: u64 = 0;
+        var red_carry: u64 = 0;
+        const low = mac(lhs[0], digit, acc[0], &mul_carry);
+        const factor = low *% inv;
+        // The factor cancels the low word. Store the remaining words one
+        // position lower and fold the two carry chains and prior top bit.
+        _ = mac(modulus[0], factor, low, &red_carry);
+        for (1..n) |j| {
+            const product = mac(lhs[j], digit, acc[j], &mul_carry);
+            acc[j - 1] = mac(modulus[j], factor, product, &red_carry);
+        }
+        const folded = @as(u128, mul_carry) + red_carry + top;
+        acc[n - 1] = @truncate(folded);
+        top = @truncate(folded >> 64);
+    }
+
+    // Reduced inputs bound the n+1-word result to less than twice the modulus.
+    if (top != 0 or !lessThan(acc, modulus)) {
+        subtract(out, acc, modulus);
+    } else {
+        @memcpy(out, acc);
+    }
+}
+
+const Montgomery = struct {
+    modulus: []const u64,
+    inv: u64,
+    scratch: []u64,
+
+    // Output may alias either input. The accumulator lives in registers for
+    // fixed sizes, and in a separate scratch slice for the general case.
+    fn mul(self: Montgomery, out: []u64, lhs: []const u64, rhs: []const u64) void {
+        switch (self.modulus.len) {
+            1 => out[0..1].* = montMulFixed(1, lhs[0..1].*, rhs[0..1].*, self.modulus[0..1].*, self.inv),
+            4 => out[0..4].* = montMul4(lhs[0..4].*, rhs[0..4].*, self.modulus[0..4].*, self.inv),
+            else => montMulN(out, lhs, rhs, self.modulus, self.inv, self.scratch),
+        }
+    }
+};
+
+fn bitAt(bytes: []const u8, index: usize) bool {
+    const byte = bytes[bytes.len - 1 - index / 8];
+    return (byte >> @as(u3, @truncate(index))) & 1 != 0;
+}
+
+fn oddWindow(exponent: []const u8, end: usize, width: usize) struct { index: usize, len: usize } {
+    const count = @min(end, width);
+    const start = end - count;
+    const byte = exponent.len - 1 - start / 8;
+    var pair: u16 = exponent[byte];
+    if (byte != 0) pair |= @as(u16, exponent[byte - 1]) << 8;
+
+    const mask = (@as(u16, 1) << @as(u3, @intCast(count))) - 1;
+    const value = (pair >> @as(u3, @truncate(start))) & mask;
+    // The leading bit is set. Drop zeros from the low end to make the
+    // window odd and leave those bits for the next iteration.
+    const zeros: u4 = @intCast(@ctz(value));
+    return .{ .index = (value >> zeros) / 2, .len = count - zeros };
+}
+
+fn powerOdd(out: []u64, base: []const u8, exponent: []const u8, exp_bits: usize, modulus: []const u64, work: []u64) void {
+    const n = modulus.len;
+    const mont: Montgomery = .{ .modulus = modulus, .inv = montInverse(modulus[0]), .scratch = work[0..n] };
+    const temp = work[n..][0..n];
+    const powers = work[2 * n ..];
+    const base_mont = powers[0..n];
+
+    const shift = normalizeModulus(temp, modulus);
+    reduceBase(out, base, modulus, temp, shift);
+    radixSquared(base_mont, modulus, temp, shift);
+    mont.mul(base_mont, out, base_mont);
+
+    const width: usize = if (exp_bits >= 16) 4 else 1;
+    if (width == 4) {
+        mont.mul(temp, base_mont, base_mont);
+        for (1..window_powers) |i| {
+            mont.mul(powers[i * n ..][0..n], powers[(i - 1) * n ..][0..n], temp);
+        }
+    }
+
+    const first = oddWindow(exponent, exp_bits, width);
+    @memcpy(out, powers[first.index * n ..][0..n]);
+    var remaining = exp_bits - first.len;
+    while (remaining != 0) {
+        if (!bitAt(exponent, remaining - 1)) {
+            mont.mul(out, out, out);
+            remaining -= 1;
+            continue;
+        }
+        const window = oddWindow(exponent, remaining, width);
+        for (0..window.len) |_| mont.mul(out, out, out);
+        mont.mul(out, out, powers[window.index * n ..][0..n]);
+        remaining -= window.len;
+    }
+
+    @memset(temp, 0);
+    temp[0] = 1;
+    mont.mul(out, out, temp);
+}
+
+fn maskHigh(words: []u64, bits: usize) void {
+    const shift: u6 = @truncate(bits);
+    if (shift != 0) words[words.len - 1] &= (@as(u64, 1) << shift) - 1;
+}
+
+// Only the low out.len words of the product are needed. Output is separate
+// from the inputs so a buffer can be reused across successive multiplies.
+fn multiply(out: []u64, lhs: []const u64, rhs: []const u64) void {
+    @memset(out, 0);
+    for (rhs[0..@min(rhs.len, out.len)], 0..) |digit, i| {
+        const row = out[i..];
+        const width = @min(lhs.len, row.len);
+        var carry: u64 = 0;
+        for (row[0..width], lhs[0..width]) |*word, part| {
+            word.* = mac(part, digit, word.*, &carry);
+        }
+        if (width < row.len) row[width] = carry;
+    }
+}
+
+fn powerOfTwo(out: []u64, base: []const u8, exponent: []const u8, exp_bits: usize, bits: usize, work: []u64) void {
+    @memset(out, 0);
+    var remaining = exp_bits;
+    if (base[base.len - 1] & 1 == 0) {
+        var valuation: usize = 0;
+        while (valuation < bits) {
+            const byte = base[base.len - 1 - valuation / 8];
+            valuation += @ctz(byte);
+            if (byte != 0) break;
+        }
+        // Compare against ceil(bits / valuation) without multiplying or
+        // decoding an exponent that does not fit in usize.
+        if (valuation >= bits or exponent.len > @sizeOf(usize)) return;
+        if (unaudited_bytesToU64(exponent) >= 1 + (bits - 1) / valuation) return;
+    } else {
+        // The unit group modulo 2^bits has exponent 1, 2, or 2^(bits-2).
+        const period_bits = if (bits <= 2) bits - 1 else bits - 2;
+        remaining = @min(remaining, period_bits);
+        while (remaining != 0 and !bitAt(exponent, remaining - 1)) remaining -= 1;
+        if (remaining == 0) {
+            out[0] = 1;
+            return;
+        }
+    }
+
+    const n = out.len;
+    const factor = work[0..n];
+    readWords(factor, base);
+    maskHigh(factor, bits);
+
+    var current = out;
+    var next = work[n..][0..n];
+    @memcpy(current, factor);
+    remaining -= 1;
+    while (remaining != 0) {
+        remaining -= 1;
+        multiply(next, current, current);
+        if (bitAt(exponent, remaining)) {
+            multiply(current, next, factor);
+        } else {
+            std.mem.swap([]u64, &current, &next);
+        }
+        maskHigh(current, bits);
+    }
+    if (current.ptr != out.ptr) @memcpy(out, current);
+}
+
+fn inversePowerOfTwo(inv: []u64, odd: []const u64, bits: usize, product: []u64, next: []u64) void {
+    @memset(inv, 0);
+    inv[0] = 0 -% montInverse(odd[0]);
+    var precision: usize = 64;
+    while (precision < bits) {
+        precision += @min(precision, bits - precision);
+        const n = limbCount(precision, 64);
+        const correction = product[0..n];
+        multiply(correction, inv[0..n], odd);
+        subtract(correction, &.{2}, correction);
+        multiply(next[0..n], inv[0..n], correction);
+        @memcpy(inv[0..n], next[0..n]);
+    }
+    maskHigh(inv, bits);
+}
+
+fn powerEven(out: []u64, base: []const u8, exponent: []const u8, exp_bits: usize, modulus: []u64, work: []u64) void {
+    var bits: usize = 0;
+    for (modulus) |word| {
+        bits += @ctz(word);
+        if (word != 0) break;
+    }
+
+    const odd = shiftRight(modulus, bits);
+    const n = limbCount(bits, 64);
+    @memset(out, 0);
+    if (odd.len == 1 and odd[0] == 1) {
+        powerOfTwo(out[0..n], base, exponent, exp_bits, bits, work);
+        return;
+    }
+
+    const x_odd = out[0..odd.len];
+    powerOdd(x_odd, base, exponent, exp_bits, odd, work);
+
+    const x_even = work[0..n];
+    const inv = work[n..][0..n];
+    const factor = work[2 * n ..][0..n];
+    const next = work[3 * n ..][0..n];
+    powerOfTwo(x_even, base, exponent, exp_bits, bits, work[n..]);
+    inversePowerOfTwo(inv, odd, bits, factor, next);
+
+    // t = (x_even - x_odd) / odd mod 2^bits. The reconstructed value
+    // x_odd + odd*t is below odd*2^bits and fits in the original modulus width.
+    subtract(x_even, x_even, x_odd);
+    multiply(factor, x_even, inv);
+    maskHigh(factor, bits);
+    const product = work[4 * n ..][0..out.len];
+    multiply(product, odd, factor);
+    add(out, product);
 }
 
 /// ⚠️ UNAUDITED - NOT SECURITY AUDITED ⚠️
@@ -1021,4 +1389,186 @@ test "modexp: gas calculation with small inputs" {
     const gas = ModExp.calculateGas(base_len, exp_len, mod_len, &exp_bytes, {});
     // Minimum gas cost
     try std.testing.expectEqual(@as(u64, 200), gas);
+}
+
+fn referenceModexp(base_bytes: []const u8, exponent: []const u8, modulus: []const u8, output: []u8) !void {
+    const Managed = std.math.big.int.Managed;
+    const allocator = std.testing.allocator;
+    var base = try Managed.init(allocator);
+    defer base.deinit();
+    var mod = try Managed.init(allocator);
+    defer mod.deinit();
+    var result = try Managed.initSet(allocator, 1);
+    defer result.deinit();
+    var product = try Managed.init(allocator);
+    defer product.deinit();
+    var quotient = try Managed.init(allocator);
+    defer quotient.deinit();
+
+    try readBigEndian(&base, base_bytes);
+    try readBigEndian(&mod, modulus);
+    for (exponent) |byte| {
+        for (0..8) |bit| {
+            try product.sqr(&result);
+            try quotient.divFloor(&result, &product, &mod);
+            if (byte & (@as(u8, 0x80) >> @as(u3, @intCast(bit))) != 0) {
+                try product.mul(&result, &base);
+                try quotient.divFloor(&result, &product, &mod);
+            }
+        }
+    }
+    try writeBigEndian(&result, output);
+}
+
+test "modexp: BN254 scalar inversion with no scratch allocation" {
+    var modulus: [32]u8 = undefined;
+    var exponent: [32]u8 = undefined;
+    var base: [32]u8 = undefined;
+    var expected: [32]u8 = undefined;
+    _ = try std.fmt.hexToBytes(&modulus, "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001");
+    _ = try std.fmt.hexToBytes(&exponent, "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593efffffff");
+    _ = try std.fmt.hexToBytes(&base, "0000000000000000123456789abcdef0123456789abcdef0123456789abcdef0");
+    _ = try std.fmt.hexToBytes(&expected, "1ebcd54aa646bbcfbc979955f998aa1076248b18d8883ffc27b98f6098239a19");
+    var output: [32]u8 = undefined;
+    try unauditedModexp(std.testing.failing_allocator, &base, &exponent, &modulus, &output);
+    try std.testing.expectEqualSlices(u8, &expected, &output);
+}
+
+test "modexp: wide odd moduli and scratch allocation boundary" {
+    var prng = std.Random.DefaultPrng.init(0x68db90c3);
+    const random = prng.random();
+    var base: [530]u8 = undefined;
+    var modulus: [513]u8 = undefined;
+    var output: [513]u8 = undefined;
+    var expected: [513]u8 = undefined;
+
+    for ([_]usize{ 64, 128, 256, 512, 513 }) |len| {
+        random.bytes(base[0 .. len + 17]);
+        random.bytes(modulus[0..len]);
+        modulus[0] |= 0x80;
+        modulus[len - 1] |= 1;
+        const allocator = if (len <= 512) std.testing.failing_allocator else std.testing.allocator;
+        const exponent = if (len <= 256) &(@as([32]u8, @splat(0xe7))) else &[_]u8{ 1, 0, 1 };
+        try referenceModexp(base[0 .. len + 17], exponent, modulus[0..len], expected[0..len]);
+        try unauditedModexp(allocator, base[0 .. len + 17], exponent, modulus[0..len], output[0..len]);
+        try std.testing.expectEqualSlices(u8, expected[0..len], output[0..len]);
+    }
+    try std.testing.expectError(error.OutOfMemory, unauditedModexp(std.testing.failing_allocator, &base, &.{3}, &modulus, &output));
+
+    // A leading zero byte does not push a 4096-bit modulus into heap scratch.
+    modulus[0] = 0;
+    try referenceModexp(&base, &.{3}, &modulus, &expected);
+    try unauditedModexp(std.testing.failing_allocator, &base, &.{3}, &modulus, &output);
+    try std.testing.expectEqualSlices(u8, &expected, &output);
+}
+
+test "modexp: Montgomery carry and exponent window boundary" {
+    // m = R-1 and base = m-1. The Montgomery accumulator after squaring
+    // is R, so its extra carry bit triggers the final subtraction.
+    const modulus = @as([32]u8, @splat(0xff));
+    const base = (@as([31]u8, @splat(0xff))) ++ [_]u8{0xfe};
+    var output: [32]u8 = undefined;
+    for ([_][]const u8{ &.{2}, &.{ 0x7f, 0xfe }, &.{ 0x80, 0 } }) |exponent| {
+        try unauditedModexp(std.testing.failing_allocator, &base, exponent, &modulus, &output);
+        try std.testing.expect(unaudited_isOne(&output));
+    }
+    try unauditedModexp(std.testing.failing_allocator, &base, &.{ 0x80, 1 }, &modulus, &output);
+    try std.testing.expectEqualSlices(u8, &base, &output);
+}
+
+test "modexp: even modulus valuation, exponent reduction and CRT" {
+    const allocator = std.testing.failing_allocator;
+    const exponent = @as([32]u8, @splat(0xff));
+    var modulus: [64]u8 = undefined;
+    var output: [64]u8 = undefined;
+    var expected: [64]u8 = undefined;
+
+    for ([_]usize{ 1, 2, 3, 63, 64, 65, 100, 127, 128, 129, 255, 256, 257 }) |k| {
+        @memset(&modulus, 0);
+        modulus[modulus.len - 1 - k / 8] = @as(u8, 1) << @as(u3, @truncate(k));
+        for ([_]u8{ 5, 12 }) |base| {
+            try referenceModexp(&.{base}, &exponent, &modulus, &expected);
+            try unauditedModexp(allocator, &.{base}, &exponent, &modulus, &output);
+            try std.testing.expectEqualSlices(u8, &expected, &output);
+        }
+    }
+
+    // v2(12) = 2. Exponent 49 stays below the valuation threshold for 2^100.
+    const pow2 = [_]u8{0x10} ++ (@as([12]u8, @splat(0)));
+    try referenceModexp(&.{12}, &.{49}, &pow2, &expected);
+    try unauditedModexp(allocator, &.{12}, &.{49}, &pow2, &output);
+    try std.testing.expectEqualSlices(u8, &expected, &output);
+    try std.testing.expect(!unaudited_isZero(&output));
+    try unauditedModexp(allocator, &.{12}, &.{50}, &pow2, &output);
+    try std.testing.expect(unaudited_isZero(&output));
+    try unauditedModexp(allocator, &.{5}, &([_]u8{0x80} ++ (@as([31]u8, @splat(0)))), &pow2, &output);
+    try std.testing.expect(unaudited_isOne(&output));
+
+    const mixed = [_]u8{0x30} ++ (@as([12]u8, @splat(0))); // 3 * 2^100
+    _ = try std.fmt.hexToBytes(modulus[0..32], "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001");
+    @memset(modulus[32..], 0); // BN254 scalar modulus times 2^256
+    const wide_base = @as([65]u8, @splat(0xcd));
+    for ([_][]const u8{ &mixed, &modulus }) |mod| {
+        for ([_][]const u8{ &wide_base, &.{12} }) |base| {
+            try referenceModexp(base, &exponent, mod, &expected);
+            try unauditedModexp(allocator, base, &exponent, mod, &output);
+            try std.testing.expectEqualSlices(u8, &expected, &output);
+        }
+    }
+}
+
+test "modexp: deterministic randomized cross-check against std.math.big" {
+    var prng = std.Random.DefaultPrng.init(0x72801810);
+    const random = prng.random();
+    var base: [129]u8 = undefined;
+    var exponent: [40]u8 = undefined;
+    var modulus: [97]u8 = undefined;
+    var output: [97]u8 = undefined;
+    var expected: [97]u8 = undefined;
+
+    for (0..128) |i| {
+        const base_len = random.intRangeAtMost(usize, 1, base.len);
+        const exp_len = random.intRangeAtMost(usize, 1, exponent.len);
+        const mod_len = random.intRangeAtMost(usize, 1, modulus.len);
+        const mod = modulus[0..mod_len];
+        random.bytes(base[0..base_len]);
+        random.bytes(exponent[0..exp_len]);
+        random.bytes(mod);
+        switch (@as(u2, @truncate(i))) {
+            0 => mod[mod_len - 1] |= 3,
+            1 => mod[mod_len - 1] &= 0xfc,
+            2 => {
+                const zero_bytes = random.intRangeLessThan(usize, 0, mod_len);
+                mod[mod_len - 1 - zero_bytes] |= 3;
+                @memset(mod[mod_len - zero_bytes ..], 0);
+            },
+            3 => mod[0] = 0,
+        }
+        if (unaudited_isZero(mod)) mod[mod_len - 1] = 2;
+        try referenceModexp(base[0..base_len], exponent[0..exp_len], mod, expected[0..mod_len]);
+        try unauditedModexp(std.testing.allocator, base[0..base_len], exponent[0..exp_len], mod, output[0..mod_len]);
+        try std.testing.expectEqualSlices(u8, expected[0..mod_len], output[0..mod_len]);
+    }
+}
+
+test "modexp: padded trivial operands retain the modulus width" {
+    const modulus = [_]u8{ 0, 0, 0, 7 };
+    const cases = [_]struct { base: u8, exp: u8, value: u8 }{
+        .{ .base = 0, .exp = 0, .value = 1 },
+        .{ .base = 0, .exp = 5, .value = 0 },
+        .{ .base = 1, .exp = 5, .value = 1 },
+        .{ .base = 10, .exp = 1, .value = 3 },
+    };
+    var buf: [4]u8 = undefined;
+    for (cases) |case| {
+        var allocator = std.heap.FixedBufferAllocator.init(&buf);
+        const result = try ModExp.modexp(allocator.allocator(), &.{ 0, case.base }, &.{ 0, case.exp }, &modulus);
+        defer allocator.allocator().free(result);
+        try std.testing.expectEqualSlices(u8, &.{ 0, 0, 0, case.value }, result);
+    }
+    var output: [4]u8 = undefined;
+    try unauditedModexp(std.testing.failing_allocator, &.{5}, &.{0}, &.{ 0, 0, 0, 1 }, &output);
+    try std.testing.expectEqualSlices(u8, &.{ 0, 0, 0, 0 }, &output);
+    try std.testing.expectError(error.DivisionByZero, unauditedModexp(std.testing.failing_allocator, &.{5}, &.{0}, &.{ 0, 0, 0, 0 }, &output));
+    try std.testing.expectEqualSlices(u8, &.{ 0, 0, 0, 0 }, &output);
 }

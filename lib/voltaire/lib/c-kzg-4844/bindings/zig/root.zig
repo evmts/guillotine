@@ -158,9 +158,9 @@ pub fn loadTrustedSetupFile(file_path: []const u8, precompute: u64) KZGError!voi
 }
 
 /// Frees the loaded trusted setup.
-pub fn freeTrustedSetup() KZGError!void {
+pub fn freeTrustedSetup() error{TrustedSetupNotLoaded}!void {
     if (!loaded) {
-        return KZGError.TrustedSetupNotLoaded;
+        return error.TrustedSetupNotLoaded;
     }
     c.free_trusted_setup(&settings);
     loaded = false;

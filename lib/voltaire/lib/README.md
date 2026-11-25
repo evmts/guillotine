@@ -154,14 +154,11 @@ lib/c-kzg-4844/
 
 **Current Usage**: Primarily for KZG commitments (EIP-4844)
 
-**Note**: `lib/bls_wrapper.zig` contains only stub implementations. Direct BLST operations require using the c-kzg-4844 wrapper or implementing proper BLST bindings.
-
 ### Build System Wrappers
 
 - **`blst.zig`** - Zig build wrapper for BLST library
 - **`c-kzg.zig`** - Zig build wrapper for c-kzg-4844
 - **`bn254.zig`** - Zig build wrapper for ark BN254 (currently returns null)
-- **`bls_wrapper.zig`** - Stub BLS12-381 FFI exports (not implemented)
 - **`build.zig`** - Build configuration for all external libraries
 
 ## Build System Integration
@@ -238,7 +235,6 @@ All external libraries follow strict memory safety protocols:
 
 #### In Progress
 - 🔄 **Pure Zig BLS12-381**: Replace BLST with native Zig implementation
-- 🔄 **BLS Wrapper Implementation**: Complete `lib/bls_wrapper.zig` for direct BLST access
 
 #### Planned
 - 📋 **Unified API**: Consistent interface for C and Zig implementations

@@ -22,7 +22,7 @@ const test_input_g1 = [_]u8{
 const test_input_double = test_input_g1 ++ test_input_g1;
 
 // Point at infinity: (0, 0)
-const test_input_infinity = [_]u8{0x00} ** 64;
+const test_input_infinity = @as([64]u8, @splat(0x00));
 
 // Point 1 + infinity
 const test_input_with_infinity = test_input_g1 ++ test_input_infinity;

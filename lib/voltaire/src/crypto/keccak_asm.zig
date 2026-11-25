@@ -100,7 +100,7 @@ pub fn keccak256_batch(inputs: [][]const u8, outputs: [][32]u8) !void {
     const input_ptrs = try allocator.alloc([*c]const u8, inputs.len);
     defer allocator.free(input_ptrs);
 
-    const input_lens = try allocator.alloc(c_ulong, inputs.len);
+    const input_lens = try allocator.alloc(usize, inputs.len);
     defer allocator.free(input_lens);
 
     const output_ptrs = try allocator.alloc([*c]u8, outputs.len);

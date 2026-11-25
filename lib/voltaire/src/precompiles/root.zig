@@ -17,6 +17,7 @@ pub const modexp = @import("modexp.zig");
 
 test {
     _ = modexp;
+    _ = point_evaluation;
 }
 pub const bn254_add = @import("bn254_add.zig");
 pub const bn254_mul = @import("bn254_mul.zig");

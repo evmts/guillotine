@@ -579,7 +579,7 @@ pub fn Uint(comptime bits: usize, comptime limbs: usize) type {
             if (comptime bits <= 256) {
                 const self_u256 = self.to_u256() orelse unreachable;
                 const shifted = if (shift >= 256) 0 else self_u256 << @intCast(shift);
-                return Self.from_u256(shifted);
+                return Self.from_native(shifted);
             }
 
             // Optimized path for 256-bit numbers (fallback for larger types)
@@ -658,7 +658,7 @@ pub fn Uint(comptime bits: usize, comptime limbs: usize) type {
             if (comptime bits <= 256) {
                 const self_u256 = self.to_u256() orelse unreachable;
                 const shifted = if (shift >= 256) 0 else self_u256 >> @intCast(shift);
-                return Self.from_u256(shifted);
+                return Self.from_native(shifted);
             }
 
             var result = ZERO;
@@ -719,7 +719,7 @@ pub fn Uint(comptime bits: usize, comptime limbs: usize) type {
             if (comptime bits <= 256) {
                 const self_u256 = self.to_u256() orelse unreachable;
                 const rhs_u256 = rhs.to_u256() orelse unreachable;
-                return Self.from_u256(self_u256 & rhs_u256);
+                return Self.from_native(self_u256 & rhs_u256);
             }
 
             var result = ZERO;
@@ -734,7 +734,7 @@ pub fn Uint(comptime bits: usize, comptime limbs: usize) type {
             if (comptime bits <= 256) {
                 const self_u256 = self.to_u256() orelse unreachable;
                 const rhs_u256 = rhs.to_u256() orelse unreachable;
-                return Self.from_u256(self_u256 | rhs_u256);
+                return Self.from_native(self_u256 | rhs_u256);
             }
 
             var result = ZERO;
@@ -749,7 +749,7 @@ pub fn Uint(comptime bits: usize, comptime limbs: usize) type {
             if (comptime bits <= 256) {
                 const self_u256 = self.to_u256() orelse unreachable;
                 const rhs_u256 = rhs.to_u256() orelse unreachable;
-                return Self.from_u256(self_u256 ^ rhs_u256);
+                return Self.from_native(self_u256 ^ rhs_u256);
             }
 
             var result = ZERO;
@@ -795,13 +795,9 @@ pub fn Uint(comptime bits: usize, comptime limbs: usize) type {
                 }
             }
 
-            // Adjust for non-limb-aligned sizes
-            const total_bits = limbs * 64;
-            if (zeros > total_bits - bits) {
-                zeros = @intCast(total_bits - bits);
-            }
-
-            return zeros;
+            // Values are masked to `bits`, so the top `limbs * 64 - bits` bits
+            // of the highest limb are always zero and are not part of the type.
+            return zeros - @as(u32, @intCast(limbs * 64 - bits));
         }
 
         pub fn bit_len(self: Self) usize {
@@ -814,9 +810,8 @@ pub fn Uint(comptime bits: usize, comptime limbs: usize) type {
             return (bit_length + 7) / 8;
         }
 
-        pub fn log2(self: Self) usize {
-            if (self.is_zero()) unreachable; // Use checked_log2 for safety
-            return self.bit_len() - 1;
+        pub fn log2(self: Self) error{LogOfZero}!usize {
+            return self.checked_log2() orelse error.LogOfZero;
         }
 
         pub fn checked_log2(self: Self) ?usize {
@@ -824,22 +819,33 @@ pub fn Uint(comptime bits: usize, comptime limbs: usize) type {
             return self.bit_len() - 1;
         }
 
-        pub fn log10(self: Self) usize {
+        /// Fails with `InvalidLogBase` for types narrower than 4 bits, which cannot hold 10.
+        pub fn log10(self: Self) error{ LogOfZero, InvalidLogBase }!usize {
+            if (comptime bits < 4) return error.InvalidLogBase;
             return self.log(Self.from_u64(10));
         }
 
         pub fn checked_log10(self: Self) ?usize {
-            if (self.is_zero()) return null;
-            return self.log10();
+            if (comptime bits < 4) return null;
+            return self.checked_log(Self.from_u64(10));
         }
 
-        pub fn log(self: Self, base: Self) usize {
-            if (self.is_zero()) unreachable; // Use checked_log for safety
-            if (!base.ge(Self.from_u64(2))) unreachable; // Base must be >= 2
+        /// Floor of the base-`base` logarithm. Fails for zero and for a base below 2
+        /// (including a base of 10 truncated by a type narrower than 4 bits).
+        pub fn log(self: Self, base: Self) error{ LogOfZero, InvalidLogBase }!usize {
+            if (self.is_zero()) return error.LogOfZero;
+            if (base.lt(Self.from_u64(2))) return error.InvalidLogBase;
+            return self.logFloor(base);
+        }
 
-            if (base.eq(Self.from_u64(2))) {
-                return self.log2();
-            }
+        pub fn checked_log(self: Self, base: Self) ?usize {
+            if (self.is_zero() or base.lt(Self.from_u64(2))) return null;
+            return self.logFloor(base);
+        }
+
+        /// Requires self != 0 and base >= 2.
+        fn logFloor(self: Self, base: Self) usize {
+            if (base.eq(Self.from_u64(2))) return self.bit_len() - 1;
 
             var result: usize = 0;
             var n = self;
@@ -848,11 +854,6 @@ pub fn Uint(comptime bits: usize, comptime limbs: usize) type {
                 result += 1;
             }
             return result;
-        }
-
-        pub fn checked_log(self: Self, base: Self) ?usize {
-            if (self.is_zero() or base.lt(Self.from_u64(2))) return null;
-            return self.log(base);
         }
 
         pub fn gcd(self: Self, other: Self) Self {
@@ -1653,8 +1654,13 @@ pub fn Uint(comptime bits: usize, comptime limbs: usize) type {
             return result;
         }
 
-        pub fn root(self: Self, degree: usize) Self {
-            if (degree == 0) unreachable; // Use checked_root for safety
+        /// Integer `degree`-th root, rounded down. A zero degree is undefined.
+        pub fn root(self: Self, degree: usize) error{ZeroRootDegree}!Self {
+            return self.checked_root(degree) orelse error.ZeroRootDegree;
+        }
+
+        pub fn checked_root(self: Self, degree: usize) ?Self {
+            if (degree == 0) return null;
 
             // Handle zero case
             if (self.is_zero()) {
@@ -1767,11 +1773,11 @@ pub fn Uint(comptime bits: usize, comptime limbs: usize) type {
             }
         }
 
-        pub inline fn from_u256(value: u256) Self {
+        /// Converts `value`, failing when it does not fit in `bits`.
+        /// Use `from_native` to truncate instead.
+        pub inline fn from_u256(value: u256) error{Overflow}!Self {
             if (bits == 0) return Self.ZERO;
-            if (bits < 256 and value >= (@as(u256, 1) << bits)) {
-                unreachable; // Value too large for this Uint
-            }
+            if (bits < 256 and value >= (@as(u256, 1) << bits)) return error.Overflow;
 
             var result = Self.ZERO;
             const u256_limbs = 4; // u256 has 4 64-bit limbs
@@ -1826,14 +1832,11 @@ pub fn Uint(comptime bits: usize, comptime limbs: usize) type {
             return result;
         }
 
+        /// Converts to u256. Only types of at most 256 bits always fit;
+        /// wider types must use `to_u256`, which reports overflow.
         pub fn to_native(self: Self) u256 {
-            // For types > 256 bits, high limbs must be zero
             if (comptime bits > 256) {
-                // Check that high limbs are zero
-                var i: usize = 4;
-                while (i < limbs) : (i += 1) {
-                    if (self.limbs[i] != 0) unreachable; // Use to_u256() for safety
-                }
+                @compileError("to_native requires bits <= 256; use to_u256 for wider types");
             }
 
             var result: u256 = 0;
@@ -3121,33 +3124,33 @@ test "log functions" {
     const U64 = Uint(64, 1);
 
     // log2
-    try testing.expectEqual(@as(usize, 0), U64.from_u64(1).log2());
-    try testing.expectEqual(@as(usize, 1), U64.from_u64(2).log2());
-    try testing.expectEqual(@as(usize, 1), U64.from_u64(3).log2());
-    try testing.expectEqual(@as(usize, 2), U64.from_u64(4).log2());
-    try testing.expectEqual(@as(usize, 3), U64.from_u64(8).log2());
-    try testing.expectEqual(@as(usize, 10), U64.from_u64(1024).log2());
+    try testing.expectEqual(@as(usize, 0), try U64.from_u64(1).log2());
+    try testing.expectEqual(@as(usize, 1), try U64.from_u64(2).log2());
+    try testing.expectEqual(@as(usize, 1), try U64.from_u64(3).log2());
+    try testing.expectEqual(@as(usize, 2), try U64.from_u64(4).log2());
+    try testing.expectEqual(@as(usize, 3), try U64.from_u64(8).log2());
+    try testing.expectEqual(@as(usize, 10), try U64.from_u64(1024).log2());
 
     // checked_log2
     try testing.expect(U64.ZERO.checked_log2() == null);
     try testing.expectEqual(@as(?usize, 0), U64.ONE.checked_log2());
 
     // log10
-    try testing.expectEqual(@as(usize, 0), U64.from_u64(1).log10());
-    try testing.expectEqual(@as(usize, 0), U64.from_u64(9).log10());
-    try testing.expectEqual(@as(usize, 1), U64.from_u64(10).log10());
-    try testing.expectEqual(@as(usize, 1), U64.from_u64(99).log10());
-    try testing.expectEqual(@as(usize, 2), U64.from_u64(100).log10());
-    try testing.expectEqual(@as(usize, 2), U64.from_u64(999).log10());
-    try testing.expectEqual(@as(usize, 3), U64.from_u64(1000).log10());
+    try testing.expectEqual(@as(usize, 0), try U64.from_u64(1).log10());
+    try testing.expectEqual(@as(usize, 0), try U64.from_u64(9).log10());
+    try testing.expectEqual(@as(usize, 1), try U64.from_u64(10).log10());
+    try testing.expectEqual(@as(usize, 1), try U64.from_u64(99).log10());
+    try testing.expectEqual(@as(usize, 2), try U64.from_u64(100).log10());
+    try testing.expectEqual(@as(usize, 2), try U64.from_u64(999).log10());
+    try testing.expectEqual(@as(usize, 3), try U64.from_u64(1000).log10());
 
     // general log
-    try testing.expectEqual(@as(usize, 0), U64.from_u64(1).log(U64.from_u64(10)));
-    try testing.expectEqual(@as(usize, 1), U64.from_u64(10).log(U64.from_u64(10)));
-    try testing.expectEqual(@as(usize, 2), U64.from_u64(100).log(U64.from_u64(10)));
+    try testing.expectEqual(@as(usize, 0), try U64.from_u64(1).log(U64.from_u64(10)));
+    try testing.expectEqual(@as(usize, 1), try U64.from_u64(10).log(U64.from_u64(10)));
+    try testing.expectEqual(@as(usize, 2), try U64.from_u64(100).log(U64.from_u64(10)));
 
-    try testing.expectEqual(@as(usize, 2), U64.from_u64(9).log(U64.from_u64(3)));
-    try testing.expectEqual(@as(usize, 3), U64.from_u64(27).log(U64.from_u64(3)));
+    try testing.expectEqual(@as(usize, 2), try U64.from_u64(9).log(U64.from_u64(3)));
+    try testing.expectEqual(@as(usize, 3), try U64.from_u64(27).log(U64.from_u64(3)));
 
     // checked_log
     try testing.expect(U64.ZERO.checked_log(U64.from_u64(10)) == null);
@@ -3270,26 +3273,26 @@ test "root" {
 
     // Test square root
     const a = U256.from_int(16);
-    const sqrt_a = a.root(2);
+    const sqrt_a = try a.root(2);
     try testing.expectEqual(@as(u64, 4), sqrt_a.to_u64().?);
 
     // Test cube root
     const b = U256.from_int(27);
-    const cbrt_b = b.root(3);
+    const cbrt_b = try b.root(3);
     try testing.expectEqual(@as(u64, 3), cbrt_b.to_u64().?);
 
     // Test 4th root
     const c = U256.from_int(625);
-    const root4_c = c.root(4);
+    const root4_c = try c.root(4);
     try testing.expectEqual(@as(u64, 5), root4_c.to_u64().?);
 
     // Test root of 1
     const one = U256.ONE;
-    try testing.expectEqual(U256.ONE, one.root(100));
+    try testing.expectEqual(U256.ONE, try one.root(100));
 
     // Test root of 0
     const zero = U256.ZERO;
-    try testing.expectEqual(U256.ZERO, zero.root(5));
+    try testing.expectEqual(U256.ZERO, try zero.root(5));
 }
 
 test "gcd_extended" {
@@ -3446,17 +3449,17 @@ test "u256 conversions" {
 
     // Test from_u256 for exact size
     const val: u256 = 0x123456789ABCDEF0_123456789ABCDEF0_123456789ABCDEF0_123456789ABCDEF0;
-    const u256_val = U256.from_u256(val);
+    const u256_val = try U256.from_u256(val);
     try testing.expectEqual(val, u256_val.to_u256().?);
 
     // Test from_u256 for smaller size
     const small_val: u256 = 0xFFFF_FFFF_FFFF_FFFF;
-    const u128_val = U128.from_u256(small_val);
+    const u128_val = try U128.from_u256(small_val);
     try testing.expectEqual(@as(u64, 0xFFFF_FFFF_FFFF_FFFF), u128_val.limbs[0]);
     try testing.expectEqual(@as(u64, 0), u128_val.limbs[1]);
 
     // Test from_u256 for larger size
-    const u512_val = U512.from_u256(val);
+    const u512_val = try U512.from_u256(val);
     try testing.expectEqual(val, u512_val.to_u256().?);
 
     // Test to_u256 returns null for values that don't fit
@@ -3475,7 +3478,7 @@ test "u256 conversions" {
     };
 
     for (test_values) |test_val| {
-        const uint_val = U256.from_u256(test_val);
+        const uint_val = try U256.from_u256(test_val);
         try testing.expectEqual(test_val, uint_val.to_u256().?);
     }
 }
@@ -3496,13 +3499,13 @@ test "division edge cases from intx" {
         .{ .numerator = U512.from_int(2), .denominator = U512.from_int(1), .quotient = U512.from_int(2), .remainder = U512.ZERO },
 
         // Power of 2 division
-        .{ .numerator = U512.from_u256(0x10000000000000000), .denominator = U512.from_int(2), .quotient = U512.from_u256(0x8000000000000000), .remainder = U512.ZERO },
+        .{ .numerator = try U512.from_u256(0x10000000000000000), .denominator = U512.from_int(2), .quotient = try U512.from_u256(0x8000000000000000), .remainder = U512.ZERO },
 
         // Equal values
-        .{ .numerator = U512.from_u256(0x8000000000000000), .denominator = U512.from_u256(0x8000000000000000), .quotient = U512.from_int(1), .remainder = U512.ZERO },
+        .{ .numerator = try U512.from_u256(0x8000000000000000), .denominator = try U512.from_u256(0x8000000000000000), .quotient = U512.from_int(1), .remainder = U512.ZERO },
 
         // Numerator smaller than denominator
-        .{ .numerator = U512.from_u256(0x7000000000000000), .denominator = U512.from_u256(0x8000000000000000), .quotient = U512.ZERO, .remainder = U512.from_u256(0x7000000000000000) },
+        .{ .numerator = try U512.from_u256(0x7000000000000000), .denominator = try U512.from_u256(0x8000000000000000), .quotient = U512.ZERO, .remainder = try U512.from_u256(0x7000000000000000) },
 
         // Large division
         .{ .numerator = U512.init(.{ 0x0000000009000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000009000000, 0x0000000000000000, 0x0000001e00000000 }), .denominator = U512.from_int(0xa), .quotient = U512.init(.{ 0xcccccccccccccccc, 0x6666666674cccccc, 0x6666666666666666, 0x6666666666666666, 0x6666666666666666, 0x666666666e666666, 0x0000000000000000, 0x0000000300000000 }), .remainder = U512.from_int(8) },
@@ -3511,7 +3514,7 @@ test "division edge cases from intx" {
         .{ .numerator = U512.init(.{ 0xffffffffffffffee, 0x0000000000000200, 0x0000000001000000, 0x0000000000000000, 0xfffffffffffffffe, 0x0000000000000000, 0x0000000800000010, 0xffffffffffff0000 }), .denominator = U512.init(.{ 0x0000000000000000, 0xffffffff10000000, 0x0000000000000000, 0x0000000000000005, 0xffffffffffffff00, 0xffffffffffffffff, 0xfffffffffffffffb, 0xffffffffffffffff }), .quotient = U512.ZERO, .remainder = U512.init(.{ 0xffffffffffffffee, 0x0000000000000200, 0x0000000001000000, 0x0000000000000000, 0xfffffffffffffffe, 0x0000000000000000, 0x0000000800000010, 0xffffffffffff0000 }) },
 
         // Test case that triggers special reciprocal handling
-        .{ .numerator = U512.from_u256(0x8000000000018002_8000000000000001), .denominator = U512.from_u256(0x8000000000018002_8000000000000000), .quotient = U512.from_int(1), .remainder = U512.from_int(1) },
+        .{ .numerator = try U512.from_u256(0x8000000000018002_8000000000000001), .denominator = try U512.from_u256(0x8000000000018002_8000000000000000), .quotient = U512.from_int(1), .remainder = U512.from_int(1) },
     };
 
     for (test_cases) |tc| {

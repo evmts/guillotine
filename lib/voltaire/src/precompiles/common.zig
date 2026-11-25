@@ -23,5 +23,8 @@ pub const PrecompileError = error{
     StateError,
     MemoryError,
     InvalidOutputSize,
+    /// POINT_EVALUATION ran before the KZG trusted setup was loaded. This is a
+    /// node configuration fault, not a consensus failure of the call.
+    TrustedSetupNotLoaded,
     Unknown,
 } || std.mem.Allocator.Error;

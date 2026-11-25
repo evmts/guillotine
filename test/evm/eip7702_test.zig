@@ -43,9 +43,9 @@ test "EIP-7702: Authorization tuple must have correct structure" {
     try testing.expectEqual(@as(u64, 27), auth.v);
 }
 
-test "EIP-7702: Authorization validation rejects invalid chain_id" {
-    var auth = Authorization{
-        .chain_id = 0, // Invalid: must be non-zero
+test "EIP-7702: Authorization validation accepts chain_id 0 (valid on every chain)" {
+    const auth = Authorization{
+        .chain_id = 0,
         .address = try Address.fromHex("0x1234567890123456789012345678901234567890"),
         .nonce = 0,
         .v = 27,
@@ -53,20 +53,20 @@ test "EIP-7702: Authorization validation rejects invalid chain_id" {
         .s = @as([32]u8, @splat(0x34)),
     };
 
-    try testing.expectError(primitives.Authorization.AuthorizationError.InvalidChainId, auth.validate());
+    try auth.validate();
 }
 
-test "EIP-7702: Authorization validation rejects zero address" {
-    var auth = Authorization{
+test "EIP-7702: Authorization validation accepts the zero address (clears delegation)" {
+    const auth = Authorization{
         .chain_id = 1,
-        .address = Address.ZERO, // Invalid: cannot delegate to zero address
+        .address = Address.ZERO,
         .nonce = 0,
         .v = 27,
         .r = @as([32]u8, @splat(0x12)),
         .s = @as([32]u8, @splat(0x34)),
     };
 
-    try testing.expectError(primitives.Authorization.AuthorizationError.ZeroAddress, auth.validate());
+    try auth.validate();
 }
 
 // ============================================================================

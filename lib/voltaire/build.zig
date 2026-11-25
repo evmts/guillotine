@@ -135,20 +135,41 @@ pub fn build(b: *std.Build) void {
     precompiles_tests.step.dependOn(cargo_build_step);
     precompiles_tests.root_module.link_libc = true;
 
+    // Uint precondition regressions. A separate module that imports `voltaire`
+    // keeps uint.zig's own tests, which do not compile yet, out of this build.
+    const uint_tests = b.addTest(.{
+        .name = "uint-precondition-tests",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/primitives/uint_preconditions_test.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    uint_tests.root_module.addImport("voltaire", primitives_mod);
+    uint_tests.root_module.linkLibrary(c_kzg_lib);
+    uint_tests.root_module.linkLibrary(blst_lib);
+    uint_tests.root_module.addObjectFile(rust_crypto_lib_path);
+    uint_tests.root_module.addIncludePath(b.path("lib"));
+    uint_tests.step.dependOn(cargo_build_step);
+    uint_tests.root_module.link_libc = true;
+
     if (target.result.os.tag == .linux) {
         primitives_tests.root_module.linkSystemLibrary("unwind", .{});
         crypto_tests.root_module.linkSystemLibrary("unwind", .{});
         precompiles_tests.root_module.linkSystemLibrary("unwind", .{});
+        uint_tests.root_module.linkSystemLibrary("unwind", .{});
     }
 
     const run_primitives_tests = b.addRunArtifact(primitives_tests);
     const run_crypto_tests = b.addRunArtifact(crypto_tests);
     const run_precompiles_tests = b.addRunArtifact(precompiles_tests);
+    const run_uint_tests = b.addRunArtifact(uint_tests);
 
     const test_step = b.step("test", "Run all tests (voltaire + crypto + precompiles)");
     test_step.dependOn(&run_primitives_tests.step);
     test_step.dependOn(&run_crypto_tests.step);
     test_step.dependOn(&run_precompiles_tests.step);
+    test_step.dependOn(&run_uint_tests.step);
 
     // TypeScript type-check step (validates TS FFI wrappers compile)
     if (with_tsc) {

@@ -760,9 +760,26 @@ pub const Eips = struct {
         return std.math.cast(u64, parent_total - target_blob_gas_value) orelse std.math.maxInt(u64);
     }
 
+    /// Count zero bytes in 32-byte SIMD chunks, then the scalar tail.
+    fn countZeroBytes(input: []const u8) usize {
+        const Vec = @Vector(32, u8);
+        const zeroes: Vec = @splat(0);
+        var count: usize = 0;
+        var i: usize = 0;
+        while (i + 32 <= input.len) : (i += 32) {
+            const chunk: Vec = input[i..][0..32].*;
+            const mask: u32 = @bitCast(chunk == zeroes);
+            count += @popCount(mask);
+        }
+        while (i < input.len) : (i += 1) {
+            count += @intFromBool(input[i] == 0);
+        }
+        return count;
+    }
+
     /// Count calldata tokens using the byte prices active for this hardfork.
     pub fn tokens_in_calldata(self: Self, input: []const u8) u64 {
-        const zero_bytes_count = std.mem.count(u8, input, "\x00");
+        const zero_bytes_count = countZeroBytes(input);
         const non_zero_bytes_count = input.len - zero_bytes_count;
         return @as(u64, @intCast(zero_bytes_count)) + @as(u64, @intCast(non_zero_bytes_count)) * self.eip_2028_calldata_gas_cost_multiplier();
     }
@@ -1646,6 +1663,21 @@ test "tokens_in_calldata - all non-zeros" {
 test "tokens_in_calldata - mixed data" {
     const input = [_]u8{ 0x00, 0xff, 0x00, 0x12, 0x00, 0x00, 0xab, 0xcd, 0x00, 0xef };
     try std.testing.expectEqual(@as(u64, 25), (Eips{ .hardfork = .ISTANBUL }).tokens_in_calldata(&input));
+}
+
+test "tokens_in_calldata - SIMD chunks and tail match a scalar count" {
+    var prng = std.Random.DefaultPrng.init(0x7a65726f);
+    const random = prng.random();
+    var buf: [200]u8 = undefined;
+    for ([_]usize{ 0, 1, 31, 32, 33, 63, 64, 65, 96, 127, 200 }) |len| {
+        for (0..8) |_| {
+            for (buf[0..len]) |*byte| byte.* = if (random.boolean()) 0 else random.intRangeAtMost(u8, 1, 255);
+            var zeros: u64 = 0;
+            for (buf[0..len]) |byte| zeros += @intFromBool(byte == 0);
+            const expected = zeros + (len - zeros) * 4;
+            try std.testing.expectEqual(expected, (Eips{ .hardfork = .ISTANBUL }).tokens_in_calldata(buf[0..len]));
+        }
+    }
 }
 
 test "tokens_in_calldata - pre vs post Istanbul" {

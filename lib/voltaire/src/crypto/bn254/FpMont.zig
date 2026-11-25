@@ -27,6 +27,14 @@ pub fn init(value: u256) FpMont {
     return a.mul(&FpMont{ .value = curve_parameters.MONTGOMERY_R2_MOD_P });
 }
 
+/// Initialize from a canonical integer encoding.
+/// EIP-196/197 require every coordinate to satisfy `value < p`; unlike `init`,
+/// this never reduces and returns `error.InvalidFieldElement` for `value >= p`.
+pub fn initCanonical(value: u256) error{InvalidFieldElement}!FpMont {
+    if (value >= curve_parameters.FP_MOD) return error.InvalidFieldElement;
+    return FpMont.init(value);
+}
+
 pub fn toStandardRepresentation(self: *const FpMont) u256 {
     return redc(self.value);
 }
@@ -208,6 +216,19 @@ test "FpMont.init with modular reduction" {
     const a = FpMont.init(curve_parameters.FP_MOD + 5);
     const result = a.toStandardRepresentation();
     try std.testing.expect(result == 5);
+}
+
+test "FpMont.initCanonical accepts values below p" {
+    const zero = try FpMont.initCanonical(0);
+    try std.testing.expect(zero.equal(&FpMont.ZERO));
+    const top = try FpMont.initCanonical(curve_parameters.FP_MOD - 1);
+    try std.testing.expectEqual(curve_parameters.FP_MOD - 1, top.toStandardRepresentation());
+}
+
+test "FpMont.initCanonical rejects p and above" {
+    try std.testing.expectError(error.InvalidFieldElement, FpMont.initCanonical(curve_parameters.FP_MOD));
+    try std.testing.expectError(error.InvalidFieldElement, FpMont.initCanonical(curve_parameters.FP_MOD + 1));
+    try std.testing.expectError(error.InvalidFieldElement, FpMont.initCanonical(std.math.maxInt(u256)));
 }
 
 test "FpMont.add basic addition" {

@@ -35,7 +35,7 @@ pub fn loadTrustedSetupFile(trusted_setup_path: []const u8, precompute: u64) KZG
 }
 
 /// Free the trusted setup
-pub fn freeTrustedSetup() KZGError!void {
+pub fn freeTrustedSetup() error{TrustedSetupNotLoaded}!void {
     try ckzg.freeTrustedSetup();
 }
 
@@ -98,8 +98,10 @@ test "c_kzg error handling - file not found" {
 test "c_kzg error handling - operations without trusted setup" {
     const testing = std.testing;
 
-    // Ensure trusted setup is not loaded
-    _ = freeTrustedSetup() catch {};
+    // Ensure trusted setup is not loaded. NotLoaded means it already is.
+    freeTrustedSetup() catch |err| switch (err) {
+        error.TrustedSetupNotLoaded => {},
+    };
 
     var blob = getRandomBlob(42);
 
