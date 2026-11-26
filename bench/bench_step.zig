@@ -69,8 +69,8 @@ pub fn addBenchSteps(b: *std.Build, options: Options) Steps {
     });
     compare_mod.addImport("guillotine", evm);
     const compare_exe = b.addExecutable(.{ .name = "guillotine-compare", .root_module = compare_mod, .use_llvm = true });
-    compare_exe.linkLibC();
-    if (options.target.result.os.tag == .linux) compare_exe.linkSystemLibrary("unwind");
+    compare_exe.root_module.link_libc = true;
+    if (options.target.result.os.tag == .linux) compare_exe.root_module.linkSystemLibrary("unwind", .{});
     const compare_build = b.step("bench-compare-build", "Build the Guillotine cross-EVM comparison runner (ReleaseFast)");
     compare_build.dependOn(&b.addInstallArtifact(compare_exe, .{}).step);
     const tests = b.addTest(.{

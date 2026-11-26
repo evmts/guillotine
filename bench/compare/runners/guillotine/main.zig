@@ -62,19 +62,18 @@ const CliOptions = struct {
     target_ms: u64 = 1500,
 };
 
-pub fn main() void {
-    run() catch |err| {
+pub fn main(init: std.process.Init) void {
+    run(init) catch |err| {
         var buf: [4096]u8 = undefined;
-        var stderr = std.fs.File.stderr().writer(&buf);
-        stderr.interface.print("guillotine-compare: {s}\n", .{@errorName(err)}) catch {};
-        stderr.interface.flush() catch {};
+        var stderr = std.Io.File.stderr().writer(init.io, &buf);
+        stderr.interface.print("guillotine-compare: {s}\n", .{@errorName(err)}) catch std.process.exit(2);
+        stderr.interface.flush() catch std.process.exit(2);
         std.process.exit(1);
     };
 }
 
-fn parseArgs(allocator: std.mem.Allocator) !CliOptions {
-    const args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, args);
+fn parseArgs(init: std.process.Init, allocator: std.mem.Allocator) !CliOptions {
+    const args = try init.minimal.args.toSlice(init.arena.allocator());
     var opts = CliOptions{};
     var i: usize = 1;
     while (i < args.len) : (i += 1) {
@@ -145,10 +144,10 @@ fn parseHexBytes(allocator: std.mem.Allocator, s: []const u8) ![]u8 {
 
 fn parseAddress(s: []const u8) ![20]u8 {
     const h = trimHex(s);
-    var out = [_]u8{0} ** 20;
+    var out = @as([20]u8, @splat(0));
     if (h.len == 0) return out;
     if (h.len > 40) return error.InvalidAddress;
-    var padded = [_]u8{'0'} ** 40;
+    var padded = @as([40]u8, @splat('0'));
     @memcpy(padded[40 - h.len ..], h);
     _ = try std.fmt.hexToBytes(&out, &padded);
     return out;
@@ -156,21 +155,21 @@ fn parseAddress(s: []const u8) ![20]u8 {
 
 fn parseBytes32(s: []const u8) ![32]u8 {
     const h = trimHex(s);
-    var out = [_]u8{0} ** 32;
+    var out = @as([32]u8, @splat(0));
     if (h.len == 0) return out;
     if (h.len > 64) return error.InvalidBytes32;
-    var padded = [_]u8{'0'} ** 64;
+    var padded = @as([64]u8, @splat('0'));
     @memcpy(padded[64 - h.len ..], h);
     _ = try std.fmt.hexToBytes(&out, &padded);
     return out;
 }
 
-fn run() !void {
-    if (builtin.mode != .ReleaseFast) return error.ReleaseFastRequired;
+fn run(init: std.process.Init) !void {
+    if (builtin.mode != .fast) return error.ReleaseFastRequired;
     const allocator = std.heap.smp_allocator;
-    const opts = try parseArgs(allocator);
+    const opts = try parseArgs(init, allocator);
 
-    const file_bytes = try std.fs.cwd().readFileAlloc(allocator, opts.workload_path, 64 * 1024 * 1024);
+    const file_bytes = try std.Io.Dir.cwd().readFileAlloc(init.io, opts.workload_path, allocator, .limited(64 * 1024 * 1024));
     defer allocator.free(file_bytes);
 
     const parsed = try std.json.parseFromSlice(JsonWorkload, allocator, file_bytes, .{
@@ -186,27 +185,27 @@ fn run() !void {
 
     if (std.mem.eql(u8, w.hardfork, "OSAKA")) {
         if (is_jit) {
-            try executeWith(.OSAKA, true, true, w, opts);
+            try executeWith(init.io, .OSAKA, true, true, w, opts);
         } else if (is_nofusion) {
-            try executeWith(.OSAKA, false, false, w, opts);
+            try executeWith(init.io, .OSAKA, false, false, w, opts);
         } else {
-            try executeWith(.OSAKA, true, false, w, opts);
+            try executeWith(init.io, .OSAKA, true, false, w, opts);
         }
     } else if (std.mem.eql(u8, w.hardfork, "PRAGUE")) {
         if (is_jit) {
-            try executeWith(.PRAGUE, true, true, w, opts);
+            try executeWith(init.io, .PRAGUE, true, true, w, opts);
         } else if (is_nofusion) {
-            try executeWith(.PRAGUE, false, false, w, opts);
+            try executeWith(init.io, .PRAGUE, false, false, w, opts);
         } else {
-            try executeWith(.PRAGUE, true, false, w, opts);
+            try executeWith(init.io, .PRAGUE, true, false, w, opts);
         }
     } else if (std.mem.eql(u8, w.hardfork, "CANCUN")) {
         if (is_jit) {
-            try executeWith(.CANCUN, true, true, w, opts);
+            try executeWith(init.io, .CANCUN, true, true, w, opts);
         } else if (is_nofusion) {
-            try executeWith(.CANCUN, false, false, w, opts);
+            try executeWith(init.io, .CANCUN, false, false, w, opts);
         } else {
-            try executeWith(.CANCUN, true, false, w, opts);
+            try executeWith(init.io, .CANCUN, true, false, w, opts);
         }
     } else {
         return error.UnsupportedHardfork;
@@ -214,6 +213,7 @@ fn run() !void {
 }
 
 fn executeWith(
+    io: std.Io,
     comptime hardfork: evm.Hardfork,
     comptime enable_fusion: bool,
     comptime enable_native_jit: bool,
@@ -224,7 +224,6 @@ fn executeWith(
     const EvmType = evm.Evm(.{
         .eips = .{ .hardfork = hardfork },
         .enable_fusion = enable_fusion,
-        .enable_native_jit = enable_native_jit,
         .loop_quota = instruction_limit,
         .tracer_config = .disabled,
     });
@@ -245,7 +244,7 @@ fn executeWith(
         const code = try parseHexBytes(allocator, acc.code);
         defer allocator.free(code);
 
-        var code_hash = [_]u8{0} ** 32;
+        var code_hash = @as([32]u8, @splat(0));
         if (code.len > 0) {
             code_hash = try database.set_code(code);
             if (std.mem.eql(u8, &addr_bytes, &to_bytes)) {
@@ -256,7 +255,7 @@ fn executeWith(
             .balance = balance,
             .nonce = acc.nonce,
             .code_hash = code_hash,
-            .storage_root = [_]u8{0} ** 32,
+            .storage_root = @as([32]u8, @splat(0)),
         });
         for (acc.storage) |kv| {
             if (kv.len != 2) return error.InvalidStorageEntry;
@@ -307,13 +306,13 @@ fn executeWith(
     defer machine.deinit();
 
     // Preflight verification
-    var timer = try std.time.Timer.start();
+    const preflight_start = std.Io.Clock.awake.now(io);
     var preflight = machine.simulate(call_params);
-    const preflight_ns = timer.read();
+    const preflight_ns: u64 = @intCast(@max(0, preflight_start.durationTo(std.Io.Clock.awake.now(io)).toNanoseconds()));
     defer preflight.deinit(allocator);
 
     if (!preflight.success) {
-        try emitFailure(opts, w, preflight.gas_left, tx_gas_limit, preflight.output, "preflight execution reverted or failed");
+        try emitFailure(io, opts, w, preflight.gas_left, tx_gas_limit, preflight.output, "preflight execution reverted or failed");
         return;
     }
     const ref_gas_used = tx_gas_limit - preflight.gas_left;
@@ -323,15 +322,15 @@ fn executeWith(
     var compile_ns_opt: ?u64 = null;
     var jit_compiled: bool = false;
 
-    if (comptime enable_native_jit) {
+    if (comptime enable_native_jit and @hasField(EvmType, "jit_bridge")) {
         if (is_jit_mode) {
             // Trigger hot_threshold=2 compilation and measure compile+run vs steady-state
-            timer.reset();
+            const second_start = std.Io.Clock.awake.now(io);
             var second = machine.simulate(call_params);
-            const second_ns = timer.read();
+            const second_ns: u64 = @intCast(@max(0, second_start.durationTo(std.Io.Clock.awake.now(io)).toNanoseconds()));
             defer second.deinit(allocator);
             if (!second.success or (tx_gas_limit - second.gas_left) != ref_gas_used or !std.mem.eql(u8, second.output, ref_output)) {
-                try emitFailure(opts, w, second.gas_left, tx_gas_limit, second.output, "jit warmup mismatch");
+                try emitFailure(io, opts, w, second.gas_left, tx_gas_limit, second.output, "jit warmup mismatch");
                 return;
             }
             // Check whether JitCache actually compiled a native program
@@ -360,14 +359,14 @@ fn executeWith(
             var res = cold_m.simulate(call_params);
             defer res.deinit(allocator);
             if (!res.success or (tx_gas_limit - res.gas_left) != ref_gas_used or !std.mem.eql(u8, res.output, ref_output)) {
-                try emitFailure(opts, w, res.gas_left, tx_gas_limit, res.output, "cold warmup non-determinism");
+                try emitFailure(io, opts, w, res.gas_left, tx_gas_limit, res.output, "cold warmup non-determinism");
                 return;
             }
         } else {
             var res = machine.simulate(call_params);
             defer res.deinit(allocator);
             if (!res.success or (tx_gas_limit - res.gas_left) != ref_gas_used or !std.mem.eql(u8, res.output, ref_output)) {
-                try emitFailure(opts, w, res.gas_left, tx_gas_limit, res.output, "warm warmup non-determinism");
+                try emitFailure(io, opts, w, res.gas_left, tx_gas_limit, res.output, "warm warmup non-determinism");
                 return;
             }
         }
@@ -388,23 +387,23 @@ fn executeWith(
         if (is_cold) {
             const cold_m = try allocator.create(EvmType);
             defer allocator.destroy(cold_m);
-            timer.reset();
+            const t0 = std.Io.Clock.awake.now(io);
             cold_m.* = try EvmType.init(allocator, database, block, tx_ctx, tx_gas_price, caller);
             var res = cold_m.simulate(call_params);
-            sample_ns = timer.read();
+            sample_ns = @intCast(@max(0, t0.durationTo(std.Io.Clock.awake.now(io)).toNanoseconds()));
             defer cold_m.deinit();
             defer res.deinit(allocator);
             if (!res.success or (tx_gas_limit - res.gas_left) != ref_gas_used or !std.mem.eql(u8, res.output, ref_output)) {
-                try emitFailure(opts, w, res.gas_left, tx_gas_limit, res.output, "cold measurement non-determinism");
+                try emitFailure(io, opts, w, res.gas_left, tx_gas_limit, res.output, "cold measurement non-determinism");
                 return;
             }
         } else {
-            timer.reset();
+            const t0 = std.Io.Clock.awake.now(io);
             var res = machine.simulate(call_params);
-            sample_ns = timer.read();
+            sample_ns = @intCast(@max(0, t0.durationTo(std.Io.Clock.awake.now(io)).toNanoseconds()));
             defer res.deinit(allocator);
             if (!res.success or (tx_gas_limit - res.gas_left) != ref_gas_used or !std.mem.eql(u8, res.output, ref_output)) {
-                try emitFailure(opts, w, res.gas_left, tx_gas_limit, res.output, "warm measurement non-determinism");
+                try emitFailure(io, opts, w, res.gas_left, tx_gas_limit, res.output, "warm measurement non-determinism");
                 return;
             }
         }
@@ -421,12 +420,12 @@ fn executeWith(
         compile_ns_opt = if (cns > med) cns - med else 0;
     }
 
-    try emitSuccess(allocator, opts, w, ref_gas_used, ref_output, budget_warmup, samples.items, compile_ns_opt, jit_compiled);
+    try emitSuccess(io, allocator, opts, w, ref_gas_used, ref_output, budget_warmup, samples.items, compile_ns_opt, jit_compiled);
 }
 
-fn emitFailure(opts: CliOptions, w: JsonWorkload, gas_left: u64, gas_limit: u64, output: []const u8, reason: []const u8) !void {
+fn emitFailure(io: std.Io, opts: CliOptions, w: JsonWorkload, gas_left: u64, gas_limit: u64, output: []const u8, reason: []const u8) !void {
     var buf: [16384]u8 = undefined;
-    var stdout = std.fs.File.stdout().writer(&buf);
+    var stdout = std.Io.File.stdout().writer(io, &buf);
     const out = &stdout.interface;
     try out.print(
         "{{\"engine\":\"{s}\",\"workload\":\"{s}\",\"mode\":\"{s}\",\"status\":\"failed\",\"hardfork\":\"{s}\",\"success\":false,\"gas_used\":{d},\"output_bytes\":{d},\"reason\":\"{s}\"}}\n",
@@ -436,6 +435,7 @@ fn emitFailure(opts: CliOptions, w: JsonWorkload, gas_left: u64, gas_limit: u64,
 }
 
 fn emitSuccess(
+    io: std.Io,
     allocator: std.mem.Allocator,
     opts: CliOptions,
     w: JsonWorkload,
@@ -478,7 +478,7 @@ fn emitSuccess(
     }
 
     var buf: [65536]u8 = undefined;
-    var stdout = std.fs.File.stdout().writer(&buf);
+    var stdout = std.Io.File.stdout().writer(io, &buf);
     const out = &stdout.interface;
     try out.print(
         "{{\"engine\":\"{s}\",\"workload\":\"{s}\",\"mode\":\"{s}\",\"status\":\"ok\",\"hardfork\":\"{s}\",\"success\":true,\"gas_used\":{d},\"output_hex\":\"{s}\",\"jit_compiled\":{},\"compile_ns\":",
